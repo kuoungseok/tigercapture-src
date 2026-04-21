@@ -1,0 +1,36 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+
+# PyInstaller
+build/
+dist/
+*.manifest
+
+# NSIS / installer
+installer_output/
+
+# Portable release folder
+release/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude Code local state
+.claude/
+
+# OS
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Logs / temp
+*.log
+_test_*.py
