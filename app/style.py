@@ -107,6 +107,24 @@ QLabel#AppTitle {
     font-weight: 600;
 }
 
+QPushButton#DonateButton {
+    background-color: transparent;
+    color: #e54646;
+    border: 1px solid #e54646;
+    border-radius: 6px;
+    padding: 5px 12px;
+    font-size: 14px;
+    font-weight: 700;
+}
+QPushButton#DonateButton:hover {
+    background-color: #fff0f0;
+    border-color: #c12828;
+    color: #c12828;
+}
+QPushButton#DonateButton:pressed {
+    background-color: #ffe0e0;
+}
+
 QLabel#CreditFooter {
     color: #3a3a3a;
     font-size: 11px;
@@ -189,5 +207,11 @@ QWidget#PreviewHost {
 QLabel#StatusLabel {
     color: #5a5a5a;
     font-size: 11px;
+}
+
+QLabel#QuickPasteTarget {
+    color: #5a5a5a;
+    font-size: 11px;
+    padding-left: 4px;
 }
 """

@@ -29,9 +29,11 @@ from PySide6.QtWidgets import (
 )
 
 from app.capture import pil_to_qimage
+from app.foreground_tracker import ForegroundInfo
 from app.i18n import tr
 from app.modes import CaptureMode
 from app.paths import open_in_explorer
+from app.quick_paste import copy_file_to_clipboard, paste_into_window
 from app.style import APP_QSS
 
 
@@ -255,6 +257,7 @@ class GifEditorWindow(QWidget):
 
     save_requested = Signal(list, dict)
     save_mp4_requested = Signal(list, dict)
+    send_to_pro_editor_requested = Signal(list, dict)
 
     def __init__(
         self,
@@ -262,12 +265,14 @@ class GifEditorWindow(QWidget):
         fps: int,
         save_dir: Path,
         mode: CaptureMode = CaptureMode.GIF,
+        controller=None,
     ) -> None:
         super().__init__()
         self._frames: list[Image.Image] = list(frames)
         self._fps = int(fps) if fps > 0 else 15
         self._save_dir = save_dir
         self._mode = mode
+        self._controller = controller
         self._playback_timer = QTimer(self)
         self._playback_timer.timeout.connect(self._advance_playback)
         self._is_playing = False
@@ -276,6 +281,9 @@ class GifEditorWindow(QWidget):
         self._last_saved_path: Path | None = None
         self._progress_dialog: QProgressDialog | None = None
         self._thumb_thread: _ThumbnailGenThread | None = None
+        self._quick_paste_target: ForegroundInfo | None = None
+        self._pending_quick_paste: bool = False
+        self._pending_pro_editor: bool = False
 
         self.setObjectName("EditorRoot")
         title_key = "editor.title.video" if mode is CaptureMode.VIDEO else "editor.title.gif"
@@ -326,13 +334,97 @@ class GifEditorWindow(QWidget):
         self.folder_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.folder_btn.clicked.connect(self._on_open_folder)
 
+        if self._mode is CaptureMode.VIDEO:
+            self.pro_editor_btn = QPushButton(tr("editor.btn.pro_editor"))
+            self.pro_editor_btn.setObjectName("ToolButton")
+            self.pro_editor_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            self.pro_editor_btn.clicked.connect(self._on_send_to_pro_editor)
+        else:
+            self.pro_editor_btn = None
+
+        self.quick_paste_btn = QPushButton(tr("editor.btn.quick_paste"))
+        self.quick_paste_btn.setObjectName("ToolButton")
+        self.quick_paste_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.quick_paste_btn.clicked.connect(self._on_quick_paste)
+
+        self.quick_paste_target_label = QLabel(tr("editor.quick_paste.no_target"))
+        self.quick_paste_target_label.setObjectName("QuickPasteTarget")
+
         row.addWidget(self.save_btn)
+        if self.pro_editor_btn is not None:
+            row.addWidget(self.pro_editor_btn)
+        row.addSpacing(8)
+        row.addWidget(self.quick_paste_btn)
+        row.addWidget(self.quick_paste_target_label)
         row.addSpacing(8)
         row.addWidget(self.play_btn)
         row.addWidget(self.delete_btn)
         row.addStretch(1)
         row.addWidget(self.folder_btn)
         return row
+
+    def update_quick_paste_target(self, info: ForegroundInfo | None) -> None:
+        self._quick_paste_target = info
+        if info is None:
+            self.quick_paste_target_label.setText(tr("editor.quick_paste.no_target"))
+            self.quick_paste_btn.setEnabled(False)
+            return
+        self.quick_paste_target_label.setText(
+            tr("editor.quick_paste.target", target=info.short_label)
+        )
+        self.quick_paste_btn.setEnabled(True)
+
+    def _on_quick_paste(self) -> None:
+        if not self._frames:
+            return
+        target = self._quick_paste_target
+        if target is None:
+            QMessageBox.information(
+                self,
+                tr("editor.quick_paste.error_title"),
+                tr("editor.quick_paste.error_no_target"),
+            )
+            return
+        if self._last_saved_path and self._last_saved_path.exists():
+            self._execute_quick_paste(self._last_saved_path)
+            return
+
+        # Not saved yet — auto-save to default path, then paste
+        suffix = ".mp4" if self._mode is CaptureMode.VIDEO else ".gif"
+        default_name = self._suggested_name_mp4() if suffix == ".mp4" else self._suggested_name()
+        out = self._save_dir / default_name
+        options = {
+            "fps": self._get_fps(),
+            "scale": self._get_scale(),
+            "output_path": out,
+        }
+        self._pending_quick_paste = True
+        self._last_saved_path = out
+        if self._mode is CaptureMode.VIDEO:
+            self.save_mp4_requested.emit(self._frames, options)
+        else:
+            self.save_requested.emit(self._frames, options)
+
+    def _execute_quick_paste(self, path: Path) -> None:
+        target = self._quick_paste_target
+        if target is None:
+            return
+        try:
+            copy_file_to_clipboard(path)
+        except Exception as exc:
+            QMessageBox.critical(
+                self,
+                tr("editor.quick_paste.error_title"),
+                str(exc),
+            )
+            return
+        ok = paste_into_window(target.hwnd)
+        if not ok:
+            QMessageBox.information(
+                self,
+                tr("editor.quick_paste.error_title"),
+                tr("editor.quick_paste.error_target_gone"),
+            )
 
     def _build_preview(self) -> QWidget:
         host = QWidget()
@@ -651,9 +743,33 @@ class GifEditorWindow(QWidget):
         stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         return f"gifcam_{stamp}.gif"
 
+    def _on_send_to_pro_editor(self) -> None:
+        if not self._frames:
+            return
+        if self._last_saved_path and self._last_saved_path.exists():
+            self.send_to_pro_editor_requested.emit(self._frames, {"output_path": self._last_saved_path})
+            return
+        out = self._save_dir / self._suggested_name_mp4()
+        options = {
+            "fps": self._get_fps(),
+            "scale": self._get_scale(),
+            "output_path": out,
+        }
+        self._pending_pro_editor = True
+        self._last_saved_path = out
+        self.save_mp4_requested.emit(self._frames, options)
+
     def notify_saved(self, path: Path) -> None:
         self._close_progress()
         self._last_saved_path = path
+        if self._pending_quick_paste:
+            self._pending_quick_paste = False
+            self._execute_quick_paste(path)
+            return
+        if self._pending_pro_editor:
+            self._pending_pro_editor = False
+            self.send_to_pro_editor_requested.emit([], {"output_path": path})
+            return
         QMessageBox.information(
             self,
             tr("editor.dialog.saved_title"),
@@ -666,6 +782,8 @@ class GifEditorWindow(QWidget):
 
     def notify_save_failed(self, message: str) -> None:
         self._close_progress()
+        self._pending_quick_paste = False
+        self._pending_pro_editor = False
         QMessageBox.critical(self, tr("editor.dialog.save_error_title"), message)
 
     def begin_export_progress(self, total_frames: int) -> None:

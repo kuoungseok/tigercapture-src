@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QMessageBox
 from app.capture import capture_region
 from app.countdown_overlay import CountdownOverlay
 from app.exporter import GifExportThread, Mp4ExportThread
+from app.foreground_tracker import ForegroundInfo, ForegroundTracker
 from app.gif_editor_window import GifEditorWindow
 from app.i18n import tr
 from app.main_window import MainWindow
@@ -19,8 +20,10 @@ from app.recorder import FrameRecorder
 from app.recording_bar import RecordingControlBar
 from app.recording_border import RecordingBorderOverlay
 from app.region_selector import RegionSelectorOverlay
+from app.donation_dialog import DonationDialog
 from app.screenshot_window import ScreenshotWindow
 from app.settings_dialog import SettingsDialog
+from app.video_editor_window import VideoEditorWindow
 
 
 DEFAULT_GIF_FPS = 15
@@ -51,8 +54,62 @@ class AppController(QObject):
             CaptureMode.VIDEO: None,
         }
 
+        self._foreground = ForegroundTracker(
+            is_own_window=self._is_own_hwnd, parent=self
+        )
+        self._foreground.changed.connect(self._on_foreground_changed)
+
         self.main_window.new_capture_requested.connect(self._on_new_capture_requested)
         self.main_window.open_settings_requested.connect(self._open_settings_dialog)
+        self.main_window.open_video_editor_requested.connect(
+            self._open_video_editor
+        )
+        self.main_window.open_donation_requested.connect(self._open_donation_dialog)
+
+    def _open_donation_dialog(self) -> None:
+        dlg = DonationDialog(self.main_window)
+        dlg.exec()
+
+    def _open_video_editor(self, source_path: Path | None = None) -> None:
+        editor = VideoEditorWindow(source_path=source_path)
+        editor.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        editor.show()
+        editor.raise_()
+        editor.activateWindow()
+        self._track_result_window(editor)
+
+    def _is_own_hwnd(self, hwnd: int) -> bool:
+        from PySide6.QtWidgets import QApplication
+
+        app = QApplication.instance()
+        if app is None:
+            return False
+        for w in app.topLevelWidgets():
+            try:
+                if int(w.winId()) == hwnd:
+                    return True
+            except Exception:
+                continue
+        return False
+
+    def _on_foreground_changed(self, info: ForegroundInfo | None) -> None:
+        for ed in self._active_editors.values():
+            if ed is not None:
+                try:
+                    ed.update_quick_paste_target(info)
+                except Exception:
+                    pass
+        # Screenshot windows too
+        for w in self._open_result_windows:
+            fn = getattr(w, "update_quick_paste_target", None)
+            if fn:
+                try:
+                    fn(info)
+                except Exception:
+                    pass
+
+    def get_paste_target(self) -> ForegroundInfo | None:
+        return self._foreground.last_other()
 
     def _open_settings_dialog(self) -> None:
         dlg = SettingsDialog(self.main_window)
@@ -262,11 +319,17 @@ class AppController(QObject):
                 pass
             self._active_editors[mode] = None
 
-        editor = GifEditorWindow(frames, fps, default_save_dir(), mode=mode)
+        editor = GifEditorWindow(
+            frames, fps, default_save_dir(), mode=mode, controller=self
+        )
         editor.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        editor.update_quick_paste_target(self._foreground.last_other())
         if mode is CaptureMode.VIDEO:
             editor.save_mp4_requested.connect(
                 lambda fr, opts, w=editor: self._save_mp4(fr, opts, w)
+            )
+            editor.send_to_pro_editor_requested.connect(
+                lambda _fr, opts: self._open_video_editor(opts.get("output_path"))
             )
         else:
             editor.save_requested.connect(

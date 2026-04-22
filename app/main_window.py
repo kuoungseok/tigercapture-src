@@ -28,6 +28,8 @@ class MainWindow(QMainWindow):
     new_capture_requested = Signal(CaptureMode, int, bool)
     open_folder_requested = Signal()
     open_settings_requested = Signal()
+    open_video_editor_requested = Signal()
+    open_donation_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -51,6 +53,7 @@ class MainWindow(QMainWindow):
         root.addWidget(self._build_new_capture_button())
         root.addWidget(self._build_mode_section())
         root.addWidget(self._build_options_section())
+        root.addWidget(self._build_pro_editor_section())
         root.addWidget(self._build_divider())
         root.addWidget(self._build_recent_section(), stretch=1)
         root.addWidget(self._build_credit_footer())
@@ -89,6 +92,13 @@ class MainWindow(QMainWindow):
         self._title_label.setObjectName("AppTitle")
         layout.addWidget(self._title_label)
         layout.addStretch(1)
+
+        self.donate_btn = QPushButton(tr("main.donate.button"))
+        self.donate_btn.setObjectName("DonateButton")
+        self.donate_btn.setToolTip(tr("main.tooltip.donate"))
+        self.donate_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.donate_btn.clicked.connect(self.open_donation_requested.emit)
+        layout.addWidget(self.donate_btn)
 
         self.open_folder_btn = QPushButton("📁")
         self.open_folder_btn.setObjectName("IconButton")
@@ -191,6 +201,25 @@ class MainWindow(QMainWindow):
 
         return container
 
+    def _build_pro_editor_section(self) -> QWidget:
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(8)
+
+        self._pro_editor_section_label = QLabel(tr("main.section.pro_editor"))
+        self._pro_editor_section_label.setObjectName("SectionLabel")
+        layout.addWidget(self._pro_editor_section_label)
+
+        self.pro_editor_btn = QPushButton(tr("main.pro_editor.button"))
+        self.pro_editor_btn.setObjectName("ToolButton")
+        self.pro_editor_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.pro_editor_btn.setMinimumHeight(40)
+        self.pro_editor_btn.clicked.connect(self.open_video_editor_requested.emit)
+        layout.addWidget(self.pro_editor_btn)
+
+        return container
+
     def _build_divider(self) -> QFrame:
         line = QFrame()
         line.setObjectName("Divider")
@@ -220,6 +249,10 @@ class MainWindow(QMainWindow):
         self._credit_label.setText(tr("app.credit"))
         self.open_folder_btn.setToolTip(tr("main.tooltip.open_folder"))
         self.settings_btn.setToolTip(tr("main.tooltip.settings"))
+        self.donate_btn.setToolTip(tr("main.tooltip.donate"))
+        self.donate_btn.setText(tr("main.donate.button"))
+        self._pro_editor_section_label.setText(tr("main.section.pro_editor"))
+        self.pro_editor_btn.setText(tr("main.pro_editor.button"))
         self.new_capture_btn.setText(tr("main.new_capture"))
         self._mode_section_label.setText(tr("main.section.mode"))
         self._recent_section_label.setText(tr("main.section.recent"))
