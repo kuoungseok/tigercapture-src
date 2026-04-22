@@ -1287,7 +1287,11 @@ class VideoEditorWindow(QWidget):
         dlg.show()
 
         thread = VideoExportThread(
-            track.source_path, out, segments, self._subtitle_panel.subtitles()
+            track.source_path,
+            out,
+            segments,
+            self._subtitle_panel.subtitles(),
+            self._strokes,
         )
         thread.progress.connect(
             lambda cur, tot: (dlg.setMaximum(max(1, tot)), dlg.setValue(cur))

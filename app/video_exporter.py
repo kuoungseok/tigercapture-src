@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import os
 import re
 import subprocess
 import sys
+import tempfile
+from collections import defaultdict
 from pathlib import Path
 
 from PySide6.QtCore import QThread, Signal
@@ -122,12 +125,24 @@ def _subtitle_filters(
     return ",".join(parts)
 
 
+def _overlay_enable_expr(t_start: float, t_end: float | None) -> str:
+    if t_end is None or t_end <= t_start:
+        return f"gte(t,{t_start:.3f})"
+    return f"between(t,{t_start:.3f},{t_end:.3f})"
+
+
 def build_filter_graph(
     segments: list[tuple[int, int, float]],
     subtitles: list | None = None,
+    stroke_overlays: list[tuple[int, float, float | None]] | None = None,
 ) -> str:
-    """Build an FFmpeg filter_complex graph (video-only) from segments,
-    optionally burning in subtitles via chained drawtext filters."""
+    """Build an FFmpeg filter_complex graph (video-only) from segments.
+
+    ``stroke_overlays`` is a list of ``(input_index, t_start_out_s,
+    t_end_out_s_or_None)``. ``input_index`` is the FFmpeg ``-i`` index of
+    the stroke PNG (starts at 1 because the source video is [0:v]); each
+    stroke layer gets an overlay filter gated by the provided time range.
+    """
     if not segments:
         return ""
     parts: list[str] = []
@@ -141,19 +156,31 @@ def build_filter_graph(
         )
         concat_labels.append(f"[v{i}]")
 
+    parts.append(
+        "".join(concat_labels)
+        + f"concat=n={len(segments)}:v=1:a=0[cv0]"
+    )
+
+    current = "[cv0]"
+    if stroke_overlays:
+        for i, (input_idx, t_start, t_end) in enumerate(stroke_overlays):
+            label = f"[o{i}]"
+            enable = _overlay_enable_expr(t_start, t_end)
+            parts.append(
+                f"{current}[{input_idx}:v]overlay=enable='{enable}'{label}"
+            )
+            current = label
+
     sub_chain = ""
     if subtitles:
         sub_chain = _subtitle_filters(subtitles, segments)
 
     if sub_chain:
-        concat = (
-            "".join(concat_labels)
-            + f"concat=n={len(segments)}:v=1:a=0[concat_v];"
-            f"[concat_v]{sub_chain}[outv]"
-        )
+        parts.append(f"{current}{sub_chain}[outv]")
     else:
-        concat = "".join(concat_labels) + f"concat=n={len(segments)}:v=1:a=0[outv]"
-    parts.append(concat)
+        # Rename current label to [outv] via null filter
+        parts.append(f"{current}null[outv]")
+
     return ";".join(parts)
 
 
@@ -174,12 +201,78 @@ class VideoExportThread(QThread):
         out_path: Path,
         segments: list[tuple[int, int, float]],
         subtitles: list | None = None,
+        strokes: list | None = None,
     ) -> None:
         super().__init__()
         self._source = Path(source_path)
         self._out = Path(out_path)
         self._segments = list(segments)
         self._subtitles = list(subtitles) if subtitles else []
+        self._strokes = list(strokes) if strokes else []
+        self._temp_pngs: list[str] = []
+
+    def _probe_source_dimensions(self) -> tuple[int, int]:
+        """Return (width, height) of the source video. Falls back to
+        (1920, 1080) if probing fails."""
+        try:
+            import cv2  # type: ignore
+            cap = cv2.VideoCapture(str(self._source))
+            w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+            h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+            cap.release()
+            if w > 0 and h > 0:
+                return w, h
+        except Exception:
+            pass
+        return 1920, 1080
+
+    def _prepare_stroke_overlays(
+        self,
+    ) -> tuple[list[str], list[tuple[int, float, float | None]]]:
+        """Group strokes by (start_ms, end_ms), render each group to a
+        transparent PNG at source resolution, and return (png_paths,
+        overlay_spec) where overlay_spec entries index into the -i list
+        starting at 1 (since the source video is -i 0)."""
+        if not self._strokes:
+            return [], []
+        from app.drawing import render_strokes_to_png
+
+        src_w, src_h = self._probe_source_dimensions()
+        width_scale = max(1.0, src_h / 720.0)
+
+        groups: dict[tuple[int, int | None], list] = defaultdict(list)
+        for stroke in self._strokes:
+            groups[(stroke.start_ms, stroke.end_ms)].append(stroke)
+
+        png_paths: list[str] = []
+        overlay_spec: list[tuple[int, float, float | None]] = []
+        input_idx = 1  # 0 is the source video
+        total_out_s = sum((e - s) / sp for (s, e, sp) in self._segments) / 1000.0
+
+        for (start_ms, end_ms), group_strokes in groups.items():
+            t_start = _map_source_to_output(start_ms, self._segments)
+            if t_start < 0:
+                t_start = 0.0  # clamp strokes that would land in a cut
+            if end_ms is None:
+                t_end = None
+            else:
+                t_end_mapped = _map_source_to_output(end_ms, self._segments)
+                t_end = t_end_mapped if t_end_mapped >= 0 else total_out_s
+            fd, png_path = tempfile.mkstemp(suffix=".png", prefix="gifcam_stroke_")
+            os.close(fd)
+            ok = render_strokes_to_png(
+                group_strokes, src_w, src_h, png_path, width_scale=width_scale
+            )
+            if not ok:
+                try:
+                    os.unlink(png_path)
+                except OSError:
+                    pass
+                continue
+            png_paths.append(png_path)
+            overlay_spec.append((input_idx, t_start, t_end))
+            input_idx += 1
+        return png_paths, overlay_spec
 
     def run(self) -> None:
         try:
@@ -190,16 +283,25 @@ class VideoExportThread(QThread):
                 raise RuntimeError("No segments to render.")
 
             self.stage.emit("Building filter graph")
-            graph = build_filter_graph(self._segments, self._subtitles)
+            stroke_png_paths, stroke_overlays = self._prepare_stroke_overlays()
+            self._temp_pngs = stroke_png_paths
+
+            graph = build_filter_graph(
+                self._segments, self._subtitles, stroke_overlays
+            )
             total_output_ms = int(
                 sum((e - s) / sp for (s, e, sp) in self._segments) + 0.5
             )
             total_output_ms = max(1, total_output_ms)
+            total_output_s = total_output_ms / 1000.0
 
-            cmd = [
-                ffmpeg,
-                "-y",
-                "-i", str(self._source),
+            cmd = [ffmpeg, "-y", "-i", str(self._source)]
+            for png in stroke_png_paths:
+                # Single-frame PNG input. overlay filter's default repeatlast=1
+                # keeps the frame on-screen for the entire main duration without
+                # needing -loop / -t tricks that can cause infinite encoding.
+                cmd.extend(["-i", png])
+            cmd.extend([
                 "-filter_complex", graph,
                 "-map", "[outv]",
                 "-c:v", "libx264",
@@ -207,10 +309,11 @@ class VideoExportThread(QThread):
                 "-crf", "20",
                 "-pix_fmt", "yuv420p",
                 "-an",
+                "-t", f"{total_output_s:.3f}",
                 "-progress", "pipe:2",
                 "-nostats",
                 str(self._out),
-            ]
+            ])
 
             self.stage.emit("FFmpeg encoding")
             proc = subprocess.Popen(
@@ -252,3 +355,10 @@ class VideoExportThread(QThread):
             self.finished_success.emit(self._out, self._out.stat().st_size)
         except Exception as exc:  # noqa: BLE001
             self.finished_error.emit(str(exc))
+        finally:
+            for png in self._temp_pngs:
+                try:
+                    os.unlink(png)
+                except OSError:
+                    pass
+            self._temp_pngs = []

@@ -96,7 +96,7 @@ TRANSLATIONS = {
     "paint.label.width": "Breite",
     "paint.label.opacity": "Deckkraft",
     "paint.label.color": "Farbe",
-    "paint.note": "Zeichnungen sind nur Vorschau (nicht im Export).",
+    "paint.note": "Zeichnungen werden auch in die exportierte MP4 eingebrannt.",
     "main.section.pro_editor": "Profi-Video-Editor",
     "main.pro_editor.button": "🎥  Profi-Video-Editor öffnen",
     "editor.opt.fps": "fps",

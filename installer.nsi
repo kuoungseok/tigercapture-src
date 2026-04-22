@@ -16,7 +16,7 @@ Unicode True
 !define DESCRIPTION     "Screen capture to GIF / MP4"
 !define VERSIONMAJOR    1
 !define VERSIONMINOR    2
-!define VERSIONBUILD    0
+!define VERSIONBUILD    1
 !define VERSIONSTR      "${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}"
 !define HELPURL         "https://github.com/kuoungseok/gifcam"
 !define UPDATEURL       "https://github.com/kuoungseok/gifcam/releases"

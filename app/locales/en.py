@@ -106,7 +106,7 @@ TRANSLATIONS = {
     "paint.label.width": "Width",
     "paint.label.opacity": "Opacity",
     "paint.label.color": "Color",
-    "paint.note": "Drawing overlays are preview-only (not exported).",
+    "paint.note": "Drawing overlays are burned into the exported MP4.",
     "main.section.pro_editor": "Pro video editor",
     "main.pro_editor.button": "🎥  Open pro video editor",
     "editor.opt.fps": "fps",

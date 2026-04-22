@@ -106,7 +106,7 @@ TRANSLATIONS = {
     "paint.label.width": "굵기",
     "paint.label.opacity": "농도",
     "paint.label.color": "색상",
-    "paint.note": "그리기는 현재 프리뷰 전용입니다 (내보내기 미지원).",
+    "paint.note": "그리기는 내보낸 MP4 에도 함께 포함됩니다.",
     "main.section.pro_editor": "프로 동영상 편집기",
     "main.pro_editor.button": "🎥  프로 동영상 편집기 열기",
     "editor.opt.fps": "fps",

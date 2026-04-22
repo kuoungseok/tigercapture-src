@@ -96,7 +96,7 @@ TRANSLATIONS = {
     "paint.label.width": "太さ",
     "paint.label.opacity": "濃度",
     "paint.label.color": "色",
-    "paint.note": "描画はプレビュー専用です (書き出し未対応)。",
+    "paint.note": "描画は書き出した MP4 にも焼き込まれます。",
     "main.section.pro_editor": "プロ動画エディタ",
     "main.pro_editor.button": "🎥  プロ動画エディタを開く",
     "editor.opt.fps": "fps",

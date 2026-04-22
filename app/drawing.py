@@ -6,6 +6,7 @@ from typing import Callable
 from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
+    QImage,
     QMouseEvent,
     QPainter,
     QPaintEvent,
@@ -256,6 +257,45 @@ class DrawingCanvas(QWidget):
                     self.stroke_erased_at.emit(idx)
                     self.update()
                     return
+
+
+def render_strokes_to_png(
+    strokes: list["Stroke"],
+    width: int,
+    height: int,
+    out_path: str,
+    width_scale: float = 1.0,
+) -> bool:
+    """Render a list of strokes to a transparent PNG at the given size.
+
+    Strokes use normalized [0,1] coords in the PaintDialog's video-aligned
+    canvas, so multiplying by (width, height) gives exact video-pixel
+    positions. ``width_scale`` boosts stroke line width so thin lines drawn
+    on the ~700 px dialog canvas stay visible when rendered at 1080 / 4K.
+    Returns True if the PNG was written successfully.
+    """
+    if width <= 0 or height <= 0:
+        return False
+    img = QImage(width, height, QImage.Format.Format_ARGB32)
+    img.fill(0)  # fully transparent
+    painter = QPainter(img)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    try:
+        for stroke in strokes:
+            color = QColor(*stroke.color)
+            color.setAlpha(stroke.opacity)
+            pen = QPen(color, max(1.0, stroke.width_px * width_scale))
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(pen)
+            pts = [QPointF(p[0] * width, p[1] * height) for p in stroke.points]
+            if len(pts) == 1:
+                painter.drawPoint(pts[0])
+            elif len(pts) > 1:
+                painter.drawPolyline(pts)
+    finally:
+        painter.end()
+    return bool(img.save(out_path, "PNG"))
 
 
 # ---------------------------------------------------------------------------
