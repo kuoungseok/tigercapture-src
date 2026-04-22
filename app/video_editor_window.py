@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.drawing import DrawingCanvas, Stroke
 from app.i18n import tr
 from app.project_player import ProjectPlayer
 from app.simple_video_player import PlayerState
@@ -425,6 +426,7 @@ class VideoEditorWindow(QWidget):
         self._current_segment_speed: float = 1.0
         self._extractors: dict[int, ThumbnailExtractor] = {}
         self._px_per_sec: float = DEFAULT_PX_PER_SEC
+        self._strokes: list[Stroke] = []
 
         self.setObjectName("EditorRoot")
         self.setWindowTitle(tr("veditor.title"))
@@ -530,8 +532,19 @@ class VideoEditorWindow(QWidget):
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
         self._preview_label.setText(tr("veditor.no_file"))
+        self._preview_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._preview_label.setToolTip(tr("paint.hint"))
+        self._preview_label.installEventFilter(self)
         self._preview_pixmap: QPixmap | None = None
         host_layout.addWidget(self._preview_label)
+
+        # Drawing canvas — transparent overlay above the preview, below subtitles.
+        # Stays in "off" tool mode so mouse events pass through to preview_label.
+        self._drawing_canvas = DrawingCanvas(
+            get_time_ms=lambda: self._player.position(),
+            get_strokes=lambda: self._strokes,
+            parent=preview_host,
+        )
 
         # Subtitle overlay (child of preview host, positioned at bottom)
         self._subtitle_overlay = QLabel(preview_host)
@@ -550,6 +563,14 @@ class VideoEditorWindow(QWidget):
         self._preview_host = preview_host
 
         root.addWidget(preview_host, stretch=0)
+
+        # --- Paint hint under preview ---
+        self._paint_hint_label = QLabel(tr("paint.hint"))
+        self._paint_hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._paint_hint_label.setStyleSheet(
+            "color: #6a6a6a; font-size: 11px; padding: 2px;"
+        )
+        root.addWidget(self._paint_hint_label)
 
         # --- Transport row ---
         transport = QHBoxLayout()
@@ -977,6 +998,10 @@ class VideoEditorWindow(QWidget):
         self._preview_pixmap = pix
         self._scale_preview_to_fit()
         self._update_subtitle_overlay(self._player.position())
+        # The overlay is a child — bring on top of preview label each frame
+        self._drawing_canvas.raise_()
+        self._subtitle_overlay.raise_()
+        self._drawing_canvas.update()
 
     def _update_subtitle_overlay(self, pos_ms: int) -> None:
         sub = self._subtitle_panel.active_subtitle(pos_ms)
@@ -1020,6 +1045,48 @@ class VideoEditorWindow(QWidget):
     def _on_subtitles_changed(self) -> None:
         self._update_subtitle_overlay(self._player.position())
 
+    # ---------- drawing ----------
+
+    def eventFilter(self, obj, event):
+        if obj is self._preview_label:
+            if event.type() == event.Type.MouseButtonPress:
+                if event.button() == Qt.MouseButton.LeftButton:
+                    self._open_paint_dialog()
+                    return True
+                if event.button() == Qt.MouseButton.RightButton:
+                    self._show_preview_context_menu(event.globalPosition().toPoint())
+                    return True
+        return super().eventFilter(obj, event)
+
+    def _show_preview_context_menu(self, global_pos) -> None:
+        menu = QMenu(self)
+        clear_action = menu.addAction(tr("paint.btn.clear_all"))
+        clear_action.setEnabled(bool(self._strokes))
+        chosen = menu.exec(global_pos)
+        if chosen is clear_action:
+            self._strokes.clear()
+            self._drawing_canvas.update()
+
+    def _open_paint_dialog(self) -> None:
+        if self._preview_pixmap is None or self._preview_pixmap.isNull():
+            return
+        # Pause playback while drawing so the background stays fixed.
+        was_playing = self._player.state() is PlayerState.PLAYING
+        if was_playing:
+            self._player.pause()
+
+        from app.drawing import PaintDialog
+
+        dlg = PaintDialog(
+            background_pixmap=self._preview_pixmap,
+            initial_strokes=self._strokes,
+            time_ms=self._player.position(),
+            parent=self,
+        )
+        if dlg.exec() == dlg.DialogCode.Accepted:
+            self._strokes = dlg.result_strokes()
+            self._drawing_canvas.update()
+
     def _scale_preview_to_fit(self) -> None:
         if self._preview_pixmap is None or self._preview_pixmap.isNull():
             return
@@ -1038,6 +1105,9 @@ class VideoEditorWindow(QWidget):
         self._scale_preview_to_fit()
         if self._subtitle_overlay.isVisible():
             self._reposition_subtitle_overlay()
+        # Keep drawing canvas covering the preview host
+        host = self._preview_host
+        self._drawing_canvas.setGeometry(0, 0, host.width(), host.height())
 
     def _on_position_changed(self, pos: int) -> None:
         # Playhead shows on every track at project time
@@ -1047,6 +1117,8 @@ class VideoEditorWindow(QWidget):
             f"{_format_ms(pos)} / {_format_ms(self._player.duration())}"
         )
         self._update_subtitle_overlay(pos)
+        # Drawings can appear/disappear based on current time
+        self._drawing_canvas.update()
 
         # Report speed at the currently-rendered track
         active_for_render = None

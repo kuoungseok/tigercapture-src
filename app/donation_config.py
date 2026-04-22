@@ -29,11 +29,6 @@ DONATIONS: list[DonationOption] = [
         copy_text="토스뱅크  1001-5567-2524  (고경석)",
         icon="🏦",
     ),
-    DonationOption(
-        key="github_star",
-        url="https://github.com/kuoungseok/gifcam",
-        icon="⭐",
-    ),
 ]
 
 

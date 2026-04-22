@@ -3,7 +3,7 @@
 ; Produces: installer_output\GifCam-Setup-1.0.0.exe
 
 #define MyAppName "GifCam"
-#define MyAppVersion "1.0.0"
+#define MyAppVersion "1.2.0"
 #define MyAppPublisher "KyoungSeok Ko (artmouse)"
 #define MyAppURL "https://github.com/kuoungseok/gifcam"
 #define MyAppExeName "GifCam.exe"
