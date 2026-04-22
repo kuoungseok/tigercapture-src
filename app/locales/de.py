@@ -152,10 +152,7 @@ TRANSLATIONS = {
     "donation.copy": "Kopieren",
     "donation.close": "Schließen",
     "donation.copied": "Kopiert",
-    "donation.github_sponsors": "GitHub Sponsors",
     "donation.github_star": "Stern auf GitHub ⭐",
-    "donation.buymeacoffee": "Buy Me a Coffee",
-    "donation.toss": "Toss (Korea)",
     "donation.paypal": "PayPal",
-    "donation.bank_account": "Banküberweisung",
+    "donation.tossbank": "Toss Bank (KRW-Überweisung)",
 }

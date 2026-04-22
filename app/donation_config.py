@@ -25,9 +25,9 @@ DONATIONS: list[DonationOption] = [
         icon="💰",
     ),
     DonationOption(
-        key="github_sponsors",
-        url="https://github.com/sponsors/kuoungseok",
-        icon="💝",
+        key="tossbank",
+        copy_text="토스뱅크  1001-5567-2524  (고경석)",
+        icon="🏦",
     ),
     DonationOption(
         key="github_star",

@@ -165,10 +165,7 @@ TRANSLATIONS = {
     "donation.copy": "복사",
     "donation.close": "닫기",
     "donation.copied": "복사됨",
-    "donation.github_sponsors": "GitHub Sponsors",
     "donation.github_star": "GitHub ⭐ 별 누르기",
-    "donation.buymeacoffee": "Buy Me a Coffee",
-    "donation.toss": "토스 송금",
     "donation.paypal": "PayPal",
-    "donation.bank_account": "계좌이체",
+    "donation.tossbank": "토스뱅크 (계좌이체)",
 }

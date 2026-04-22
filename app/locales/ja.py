@@ -152,10 +152,7 @@ TRANSLATIONS = {
     "donation.copy": "コピー",
     "donation.close": "閉じる",
     "donation.copied": "コピー済み",
-    "donation.github_sponsors": "GitHub Sponsors",
     "donation.github_star": "GitHub でスターを付ける ⭐",
-    "donation.buymeacoffee": "Buy Me a Coffee",
-    "donation.toss": "Toss (韓国)",
     "donation.paypal": "PayPal",
-    "donation.bank_account": "銀行振込",
+    "donation.tossbank": "Toss Bank (韓国・KRW振込)",
 }
