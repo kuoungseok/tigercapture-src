@@ -1,0 +1,24 @@
+# Python deps for the macOS build of GifCam.
+#
+# Install into a dedicated venv on the Mac:
+#   python3 -m venv .venv
+#   .venv/bin/pip install -r mac/requirements-mac.txt
+
+# Cross-platform core — same as Windows, minus windows-capture.
+PySide6>=6.8.0
+mss>=9.0.2
+Pillow>=10.4.0
+imageio>=2.36.0
+imageio-ffmpeg>=0.5.1
+numpy>=2.1.0
+
+# macOS native bindings
+pyobjc-core>=10.3
+pyobjc-framework-Cocoa>=10.3
+pyobjc-framework-Quartz>=10.3
+pyobjc-framework-CoreMedia>=10.3
+pyobjc-framework-ScreenCaptureKit>=10.3
+
+# Packaging / installer
+pyinstaller>=6.11
+dmgbuild>=1.6

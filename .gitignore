@@ -31,6 +31,9 @@ Thumbs.db
 .DS_Store
 desktop.ini
 
+# Regenerated icons (created by make_icns.py at build time on macOS)
+mac/resources/gifcam.icns
+
 # Logs / temp
 *.log
 _test_*.py

@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>CFBundleName</key>
+    <string>GifCam</string>
+    <key>CFBundleDisplayName</key>
+    <string>GifCam</string>
+    <key>CFBundleIdentifier</key>
+    <string>com.artmouse.gifcam</string>
+    <key>CFBundleVersion</key>
+    <string>1.3.0</string>
+    <key>CFBundleShortVersionString</key>
+    <string>1.3.0</string>
+    <key>CFBundleExecutable</key>
+    <string>GifCam</string>
+    <key>CFBundleIconFile</key>
+    <string>gifcam.icns</string>
+    <key>CFBundlePackageType</key>
+    <string>APPL</string>
+    <key>CFBundleSignature</key>
+    <string>????</string>
+    <key>CFBundleInfoDictionaryVersion</key>
+    <string>6.0</string>
+    <key>LSMinimumSystemVersion</key>
+    <string>12.3</string>
+    <key>LSApplicationCategoryType</key>
+    <string>public.app-category.graphics-design</string>
+    <key>NSHighResolutionCapable</key>
+    <true/>
+    <key>NSPrincipalClass</key>
+    <string>NSApplication</string>
+    <key>NSHumanReadableCopyright</key>
+    <string>© KyoungSeok Ko (artmouse)</string>
+
+    <!-- User-facing prompts for the permissions GifCam needs. -->
+    <key>NSScreenCaptureUsageDescription</key>
+    <string>GifCam needs screen recording permission to capture the selected region as a screenshot, GIF, or video.</string>
+    <key>NSAppleEventsUsageDescription</key>
+    <string>GifCam uses Apple Events to paste captured files into the window you were just using.</string>
+    <key>NSAccessibilityUsageDescription</key>
+    <string>GifCam uses Accessibility to read the frontmost window's title and to simulate ⌘V when pasting captures.</string>
+
+    <!-- No camera / microphone — we explicitly don't request those. -->
+</dict>
+</plist>
