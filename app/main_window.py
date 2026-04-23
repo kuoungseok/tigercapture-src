@@ -30,6 +30,7 @@ class MainWindow(QMainWindow):
     open_settings_requested = Signal()
     open_video_editor_requested = Signal()
     open_donation_requested = Signal()
+    open_gif_file_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
@@ -167,6 +168,14 @@ class MainWindow(QMainWindow):
             if mode is self._current_mode:
                 btn.setChecked(True)
             btn.clicked.connect(lambda _checked, m=mode: self._on_mode_selected(m))
+            if mode is CaptureMode.GIF:
+                # Double-click the GIF mode button to open an existing GIF
+                # directly in the editor (no new recording).
+                btn.setToolTip(
+                    f"{mode_label(mode)}  —  {tr('main.mode.gif.dblclick_hint')}"
+                )
+                btn.installEventFilter(self)
+                self._gif_mode_btn = btn
             self._mode_group.addButton(btn)
             row_layout.addWidget(btn, stretch=1)
             self._mode_buttons.append((mode, btn))
@@ -212,9 +221,9 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._pro_editor_section_label)
 
         self.pro_editor_btn = QPushButton(tr("main.pro_editor.button"))
-        self.pro_editor_btn.setObjectName("ToolButton")
+        self.pro_editor_btn.setObjectName("ProEditorButton")
         self.pro_editor_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.pro_editor_btn.setMinimumHeight(40)
+        self.pro_editor_btn.setMinimumHeight(46)
         self.pro_editor_btn.clicked.connect(self.open_video_editor_requested.emit)
         layout.addWidget(self.pro_editor_btn)
 
@@ -284,6 +293,14 @@ class MainWindow(QMainWindow):
 
     def _on_mode_selected(self, mode: CaptureMode) -> None:
         self._current_mode = mode
+
+    def eventFilter(self, obj, event):
+        # Double-click the GIF mode button → shortcut to open an existing GIF
+        # in the editor, skipping the record flow.
+        if getattr(self, "_gif_mode_btn", None) is obj and event.type() == event.Type.MouseButtonDblClick:
+            self.open_gif_file_requested.emit()
+            return True
+        return super().eventFilter(obj, event)
 
     def _on_new_capture_clicked(self) -> None:
         delay_seconds = int(self.delay_combo.currentData() or 0)

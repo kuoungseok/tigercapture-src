@@ -8,6 +8,10 @@ def main() -> int:
     app.setApplicationName("GifCam")
     app.setOrganizationName("GifCam")
 
+    # Global dark theme — applies to every widget that doesn't set its own.
+    from app.style import APP_QSS
+    app.setStyleSheet(APP_QSS)
+
     from app.i18n import initialize as init_i18n
 
     init_i18n()

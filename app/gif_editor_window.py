@@ -29,21 +29,43 @@ from PySide6.QtWidgets import (
 )
 
 from app.capture import pil_to_qimage
+from app.drawing import (
+    DrawingCanvas,
+    PaintDialog,
+    SpeechBubble,
+    SpeechBubbleItem,
+    Stroke,
+    compose_pil_bubbles,
+    compose_pil_frame_with_overlays,
+)
 from app.foreground_tracker import ForegroundInfo
 from app.i18n import tr
 from app.modes import CaptureMode
 from app.paths import open_in_explorer
 from app.quick_paste import copy_file_to_clipboard, paste_into_window
 from app.style import APP_QSS
+from app.subtitles import SubtitlePanel
 
 
-EDITOR_EXTRA_QSS = """
-QWidget#EditorRoot { background-color: #f3f3f3; }
-QWidget#PreviewHost { background-color: #1e1e1e; border-radius: 4px; }
-QLabel#FrameInfo { color: #3a3a3a; font-size: 12px; font-weight: 600; }
-QLabel#OptionLabel { color: #5a5a5a; font-size: 12px; }
-QLabel#EstLabel { color: #0067c0; font-size: 12px; font-weight: 700; }
-QWidget#TimelineHost { background-color: #ffffff; border: 1px solid #e1e1e1; border-radius: 4px; }
+from app.style import (
+    COLOR_ACCENT_BLUE,
+    COLOR_BG_L1,
+    COLOR_BG_L2,
+    COLOR_BG_L3,
+    COLOR_BORDER_SUBTLE,
+    COLOR_TEXT_PRIMARY,
+    COLOR_TEXT_SECONDARY,
+    COLOR_TEXT_TERTIARY,
+)
+
+
+EDITOR_EXTRA_QSS = f"""
+QWidget#EditorRoot {{ background-color: {COLOR_BG_L3}; }}
+QWidget#PreviewHost {{ background-color: {COLOR_BG_L1}; border-radius: 4px; }}
+QLabel#FrameInfo {{ color: {COLOR_TEXT_SECONDARY}; font-size: 12px; font-weight: 600; }}
+QLabel#OptionLabel {{ color: {COLOR_TEXT_TERTIARY}; font-size: 12px; }}
+QLabel#EstLabel {{ color: {COLOR_ACCENT_BLUE}; font-size: 12px; font-weight: 700; }}
+QWidget#TimelineHost {{ background-color: {COLOR_BG_L2}; border: 1px solid {COLOR_BORDER_SUBTLE}; border-radius: 4px; }}
 """
 
 FPS_CHOICES = [5, 10, 15, 20, 24, 30, 48, 60]
@@ -109,12 +131,16 @@ class FrameTimeline(QWidget):
     selection_changed = Signal(list)
     delete_requested = Signal()
 
+    MIN_THUMB_W = 28
+    MAX_THUMB_W = 260
+
     def __init__(self) -> None:
         super().__init__()
         self._thumbs: list[QPixmap | None] = []
         self._selected: set[int] = set()
         self._current: int = 0
         self._last_clicked: int | None = None
+        self._thumb_w: int = THUMB_W  # per-instance, wheel-zoomable
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
@@ -134,14 +160,31 @@ class FrameTimeline(QWidget):
     def set_thumbnail_at(self, idx: int, pix: QPixmap) -> None:
         if 0 <= idx < len(self._thumbs):
             self._thumbs[idx] = pix
-            x = THUMB_GAP + idx * (THUMB_W + THUMB_GAP)
+            x = THUMB_GAP + idx * (self._thumb_w + THUMB_GAP)
             y = TIMELINE_V_PAD
-            self.update(x - 1, y - 1, THUMB_W + 2, THUMB_H + TIMELINE_V_PAD + 10)
+            self.update(x - 1, y - 1, self._thumb_w + 2, THUMB_H + TIMELINE_V_PAD + 10)
 
     def _resize_to_content(self) -> None:
-        total_w = THUMB_GAP + len(self._thumbs) * (THUMB_W + THUMB_GAP)
+        total_w = THUMB_GAP + len(self._thumbs) * (self._thumb_w + THUMB_GAP)
         self.setMinimumWidth(max(total_w, 0))
         self.resize(max(total_w, 0), self.height())
+
+    def wheelEvent(self, event) -> None:
+        """Mouse wheel over the frame strip zooms thumbnail width (= timeline
+        length). Ctrl or plain wheel both zoom — frame strip is horizontal
+        only so there's no vertical scroll to conflict with."""
+        delta = event.angleDelta().y()
+        if delta == 0:
+            return super().wheelEvent(event)
+        factor = 1.15 if delta > 0 else 1 / 1.15
+        new_w = max(self.MIN_THUMB_W, min(self.MAX_THUMB_W, int(self._thumb_w * factor)))
+        if new_w == self._thumb_w:
+            event.accept()
+            return
+        self._thumb_w = new_w
+        self._resize_to_content()
+        self.update()
+        event.accept()
 
     def remove_indices(self, indices: list[int]) -> None:
         if not indices:
@@ -174,11 +217,11 @@ class FrameTimeline(QWidget):
         x = pos.x() - THUMB_GAP
         if x < 0:
             return None
-        cell = THUMB_W + THUMB_GAP
+        cell = self._thumb_w + THUMB_GAP
         idx = x // cell
         if 0 <= idx < len(self._thumbs):
             xx = idx * cell
-            if xx <= x < xx + THUMB_W:
+            if xx <= x < xx + self._thumb_w:
                 return int(idx)
         return None
 
@@ -187,26 +230,26 @@ class FrameTimeline(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
         for i, pix in enumerate(self._thumbs):
-            x = THUMB_GAP + i * (THUMB_W + THUMB_GAP)
+            x = THUMB_GAP + i * (self._thumb_w + THUMB_GAP)
             y = TIMELINE_V_PAD + 3
             if pix is None:
-                painter.fillRect(x, y, THUMB_W, THUMB_H, QColor(230, 230, 230))
+                painter.fillRect(x, y, self._thumb_w, THUMB_H, QColor(60, 60, 68))
             else:
-                painter.drawPixmap(x, y, THUMB_W, THUMB_H, pix)
+                painter.drawPixmap(x, y, self._thumb_w, THUMB_H, pix)
 
             if i in self._selected:
                 pen = QPen(QColor(0, 103, 192))
                 pen.setWidth(3)
                 painter.setPen(pen)
                 painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.drawRect(x - 1, y - 1, THUMB_W + 2, THUMB_H + 2)
+                painter.drawRect(x - 1, y - 1, self._thumb_w + 2, THUMB_H + 2)
 
             if i == self._current:
                 pen = QPen(QColor(229, 70, 70))
                 pen.setWidth(2)
                 painter.setPen(pen)
-                painter.drawLine(x, y - 4, x + THUMB_W, y - 4)
-                painter.drawLine(x, y + THUMB_H + 3, x + THUMB_W, y + THUMB_H + 3)
+                painter.drawLine(x, y - 4, x + self._thumb_w, y - 4)
+                painter.drawLine(x, y + THUMB_H + 3, x + self._thumb_w, y + THUMB_H + 3)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
@@ -284,6 +327,10 @@ class GifEditorWindow(QWidget):
         self._quick_paste_target: ForegroundInfo | None = None
         self._pending_quick_paste: bool = False
         self._pending_pro_editor: bool = False
+        self._strokes: list[Stroke] = []
+        self._bubbles: list[SpeechBubble] = []
+        self._bubble_items: list[SpeechBubbleItem] = []
+        self._current_frame_pix: QPixmap | None = None
 
         self.setObjectName("EditorRoot")
         title_key = "editor.title.video" if mode is CaptureMode.VIDEO else "editor.title.gif"
@@ -301,9 +348,25 @@ class GifEditorWindow(QWidget):
 
         root.addLayout(self._build_toolbar())
         root.addWidget(self._build_preview(), stretch=1)
+
+        self._paint_hint_label = QLabel(tr("paint.hint"))
+        self._paint_hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._paint_hint_label.setStyleSheet(
+            "color: #6a6a6a; font-size: 11px; padding: 2px;"
+        )
+        root.addWidget(self._paint_hint_label)
+
         root.addWidget(self._build_info_row())
         root.addWidget(self._build_timeline())
         root.addLayout(self._build_options_row())
+
+        self._subtitle_panel = SubtitlePanel(
+            position_provider=lambda: self._current_time_ms()
+        )
+        self._subtitle_panel.subtitles_changed.connect(
+            self._update_subtitle_overlay
+        )
+        root.addWidget(self._subtitle_panel)
 
     def _build_toolbar(self) -> QHBoxLayout:
         row = QHBoxLayout()
@@ -401,9 +464,9 @@ class GifEditorWindow(QWidget):
         self._pending_quick_paste = True
         self._last_saved_path = out
         if self._mode is CaptureMode.VIDEO:
-            self.save_mp4_requested.emit(self._frames, options)
+            self.save_mp4_requested.emit(self._composed_frames(), options)
         else:
-            self.save_requested.emit(self._frames, options)
+            self.save_requested.emit(self._composed_frames(), options)
 
     def _execute_quick_paste(self, path: Path) -> None:
         target = self._quick_paste_target
@@ -435,7 +498,28 @@ class GifEditorWindow(QWidget):
 
         self._preview_label = QLabel("")
         self._preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._preview_label.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._preview_label.setToolTip(tr("paint.hint"))
+        self._preview_label.installEventFilter(self)
         layout.addWidget(self._preview_label, stretch=1)
+
+        # Drawing canvas overlay (click-through, tool=off)
+        self._drawing_canvas = DrawingCanvas(
+            get_time_ms=lambda: self._current_time_ms(),
+            get_strokes=lambda: self._strokes,
+            parent=host,
+        )
+
+        # Subtitle overlay (bottom-centered)
+        self._subtitle_overlay = QLabel(host)
+        self._subtitle_overlay.setStyleSheet(
+            "QLabel { color: white; background-color: rgba(0,0,0,180); "
+            "padding: 6px 14px; border-radius: 4px; "
+            "font-size: 18px; font-weight: 600; }"
+        )
+        self._subtitle_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._subtitle_overlay.setWordWrap(True)
+        self._subtitle_overlay.hide()
         return host
 
     def _build_info_row(self) -> QWidget:
@@ -518,6 +602,10 @@ class GifEditorWindow(QWidget):
         self._refresh_info()
         self._refresh_estimate()
         self._start_thumbnail_generation()
+        # Tell the subtitle panel how long the clip is for time-input clamps.
+        dur_ms = int(len(self._frames) * 1000 / max(1, self._get_fps()))
+        if hasattr(self, "_subtitle_panel"):
+            self._subtitle_panel.set_project_duration(dur_ms)
 
     def _start_thumbnail_generation(self) -> None:
         self._stop_thumbnail_thread()
@@ -562,6 +650,11 @@ class GifEditorWindow(QWidget):
         self._current_pixmap = QPixmap.fromImage(qimg)
         self._scale_preview_to_fit()
         self._refresh_info()
+        self._update_subtitle_overlay()
+        self._drawing_canvas.raise_()
+        self._subtitle_overlay.raise_()
+        self._drawing_canvas.update()
+        self._update_bubble_visibility()
 
     def _scale_preview_to_fit(self) -> None:
         if self._current_pixmap is None:
@@ -574,10 +667,148 @@ class GifEditorWindow(QWidget):
             Qt.TransformationMode.SmoothTransformation,
         )
         self._preview_label.setPixmap(scaled)
+        self._sync_overlay_to_video_rect()
+
+    def _sync_overlay_to_video_rect(self) -> None:
+        """Constrain drawing canvas to the actual pixmap rect inside the
+        preview label so strokes can't spill into the letterbox area."""
+        host = self._preview_host
+        if self._current_pixmap is None or self._current_pixmap.isNull():
+            self._drawing_canvas.setGeometry(
+                0, 0, host.width(), host.height()
+            )
+            return
+        # preview_label is the only thing in preview_host's layout, with
+        # (12,12,12,12) margins. Its geometry in host coords is margin-offset.
+        lg = self._preview_label.geometry()
+        src_w, src_h = self._current_pixmap.width(), self._current_pixmap.height()
+        if lg.width() <= 0 or lg.height() <= 0 or src_w <= 0 or src_h <= 0:
+            return
+        scale = min(lg.width() / src_w, lg.height() / src_h)
+        vw = max(1, int(src_w * scale))
+        vh = max(1, int(src_h * scale))
+        vx = lg.x() + (lg.width() - vw) // 2
+        vy = lg.y() + (lg.height() - vh) // 2
+        self._drawing_canvas.setGeometry(vx, vy, vw, vh)
+        self._reposition_subtitle_overlay()
+
+    def _reposition_subtitle_overlay(self) -> None:
+        host = self._preview_host
+        if not self._subtitle_overlay.isVisible():
+            return
+        self._subtitle_overlay.adjustSize()
+        ov_w = min(int(host.width() * 0.9), max(200, self._subtitle_overlay.width()))
+        ov_h = self._subtitle_overlay.heightForWidth(ov_w)
+        if ov_h <= 0:
+            ov_h = self._subtitle_overlay.height()
+        x = (host.width() - ov_w) // 2
+        y = host.height() - ov_h - 14
+        self._subtitle_overlay.setFixedWidth(ov_w)
+        self._subtitle_overlay.move(max(0, x), max(0, y))
+
+    def _current_time_ms(self) -> int:
+        fps = max(1, self._get_fps())
+        return int(self._current_index * 1000 / fps)
+
+    def _update_subtitle_overlay(self) -> None:
+        sub = self._subtitle_panel.active_subtitle(self._current_time_ms())
+        if sub is None or not sub.text.strip():
+            self._subtitle_overlay.hide()
+            return
+        self._subtitle_overlay.setText(sub.text)
+        if sub.show_box:
+            self._subtitle_overlay.setStyleSheet(
+                "QLabel { color: white; background-color: rgba(0,0,0,180); "
+                "padding: 6px 14px; border-radius: 4px; "
+                "font-size: 18px; font-weight: 600; }"
+            )
+        else:
+            self._subtitle_overlay.setStyleSheet(
+                "QLabel { color: white; background-color: transparent; "
+                "padding: 4px 10px; font-size: 20px; font-weight: 900; }"
+            )
+        self._reposition_subtitle_overlay()
+        self._subtitle_overlay.show()
+
+    def eventFilter(self, obj, event):
+        if obj is self._preview_label and event.type() == event.Type.MouseButtonPress:
+            if event.button() == Qt.MouseButton.LeftButton:
+                self._open_paint_dialog()
+                return True
+            if event.button() == Qt.MouseButton.RightButton:
+                self._show_preview_context_menu(event.globalPosition().toPoint())
+                return True
+        return super().eventFilter(obj, event)
+
+    def _open_paint_dialog(self) -> None:
+        if self._current_pixmap is None or self._current_pixmap.isNull():
+            return
+        was_playing = self._is_playing
+        if was_playing:
+            self._toggle_playback()
+
+        # Hide preview bubble items while dialog owns them
+        for item in list(self._bubble_items):
+            item.deleteLater()
+        self._bubble_items.clear()
+
+        dlg = PaintDialog(
+            background_pixmap=self._current_pixmap,
+            initial_strokes=self._strokes,
+            time_ms=self._current_time_ms(),
+            parent=self,
+            initial_bubbles=self._bubbles,
+        )
+        if dlg.exec() == dlg.DialogCode.Accepted:
+            self._strokes = dlg.result_strokes()
+            self._bubbles = dlg.result_bubbles()
+            self._drawing_canvas.update()
+        for bubble in self._bubbles:
+            self._spawn_bubble_item(bubble)
+        self._update_bubble_visibility()
+
+    # ------------- speech bubbles -------------
+
+    def _spawn_bubble_item(self, bubble: SpeechBubble) -> SpeechBubbleItem:
+        item = SpeechBubbleItem(bubble, self._drawing_canvas)
+        item.sync_to_parent()
+        item.show()
+        item.moved.connect(lambda it=item: it.sync_to_bubble())
+        item.deleted.connect(lambda it=item, b=bubble: self._remove_bubble(b, it))
+        self._bubble_items.append(item)
+        item.raise_()
+        return item
+
+    def _remove_bubble(self, bubble: SpeechBubble, item: SpeechBubbleItem) -> None:
+        if bubble in self._bubbles:
+            self._bubbles.remove(bubble)
+        if item in self._bubble_items:
+            self._bubble_items.remove(item)
+        item.deleteLater()
+
+    def _resync_bubbles_to_preview(self) -> None:
+        for item in self._bubble_items:
+            item.sync_to_parent()
+
+    def _update_bubble_visibility(self) -> None:
+        t = self._current_time_ms()
+        for item in self._bubble_items:
+            item.setVisible(item.bubble.start_ms <= t)
+
+    def _show_preview_context_menu(self, global_pos) -> None:
+        from PySide6.QtWidgets import QMenu
+        menu = QMenu(self)
+        clear_action = menu.addAction(tr("paint.btn.clear_all"))
+        clear_action.setEnabled(bool(self._strokes))
+        chosen = menu.exec(global_pos)
+        if chosen is clear_action:
+            self._strokes.clear()
+            self._drawing_canvas.update()
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)
         self._scale_preview_to_fit()
+        self._resync_bubbles_to_preview()
 
     def _refresh_info(self) -> None:
         n = len(self._frames)
@@ -670,6 +901,32 @@ class GifEditorWindow(QWidget):
         self._stop_thumbnail_thread()
         super().closeEvent(event)
 
+    def _composed_frames(self) -> list[Image.Image]:
+        """Return frames with strokes + subtitles + bubbles burned in."""
+        if (
+            not self._strokes
+            and not self._subtitle_panel.subtitles()
+            and not self._bubbles
+        ):
+            return self._frames
+        fps = max(1, self._get_fps())
+        subs = self._subtitle_panel.subtitles()
+        if self._frames:
+            h = self._frames[0].size[1]
+            width_scale = max(1.0, h / 720.0)
+        else:
+            width_scale = 1.0
+        out = []
+        for i, frame in enumerate(self._frames):
+            t_ms = int(i * 1000 / fps)
+            composed = compose_pil_frame_with_overlays(
+                frame, self._strokes, subs, t_ms, width_scale=width_scale
+            )
+            if self._bubbles:
+                composed = compose_pil_bubbles(composed, self._bubbles, t_ms)
+            out.append(composed)
+        return out
+
     def _on_save(self) -> None:
         if not self._frames:
             QMessageBox.warning(
@@ -697,7 +954,7 @@ class GifEditorWindow(QWidget):
             "output_path": out,
         }
         self._last_saved_path = out
-        self.save_requested.emit(self._frames, options)
+        self.save_requested.emit(self._composed_frames(), options)
 
     def _on_save_mp4(self) -> None:
         if not self._frames:
@@ -725,7 +982,7 @@ class GifEditorWindow(QWidget):
             "output_path": out,
         }
         self._last_saved_path = out
-        self.save_mp4_requested.emit(self._frames, options)
+        self.save_mp4_requested.emit(self._composed_frames(), options)
 
     @staticmethod
     def _suggested_name_mp4() -> str:
@@ -757,7 +1014,7 @@ class GifEditorWindow(QWidget):
         }
         self._pending_pro_editor = True
         self._last_saved_path = out
-        self.save_mp4_requested.emit(self._frames, options)
+        self.save_mp4_requested.emit(self._composed_frames(), options)
 
     def notify_saved(self, path: Path) -> None:
         self._close_progress()
@@ -786,15 +1043,20 @@ class GifEditorWindow(QWidget):
         self._pending_pro_editor = False
         QMessageBox.critical(self, tr("editor.dialog.save_error_title"), message)
 
-    def begin_export_progress(self, total_frames: int) -> None:
+    def begin_export_progress(self, total_frames: int, kind: str = "gif") -> None:
+        # Pick labels based on what is actually being saved so an MP4 export
+        # doesn't show "Saving GIF" in the progress dialog.
+        if kind == "mp4":
+            title = tr("editor.progress.mp4_title")
+            body = tr("editor.progress.mp4_body")
+        else:
+            title = tr("editor.progress.title")
+            body = tr("editor.progress.body")
+        self._progress_kind = kind
         dlg = QProgressDialog(
-            tr("editor.progress.body"),
-            None,
-            0,
-            max(1, total_frames * 3),
-            self,
+            body, None, 0, max(1, total_frames * 3), self,
         )
-        dlg.setWindowTitle(tr("editor.progress.title"))
+        dlg.setWindowTitle(title)
         dlg.setWindowModality(Qt.WindowModality.ApplicationModal)
         dlg.setMinimumDuration(0)
         dlg.setAutoClose(False)
@@ -812,9 +1074,12 @@ class GifEditorWindow(QWidget):
 
     def update_export_stage(self, stage: str) -> None:
         if self._progress_dialog is not None:
-            self._progress_dialog.setLabelText(
-                tr("editor.progress.with_stage", stage=stage)
+            key = (
+                "editor.progress.mp4_with_stage"
+                if getattr(self, "_progress_kind", "gif") == "mp4"
+                else "editor.progress.with_stage"
             )
+            self._progress_dialog.setLabelText(tr(key, stage=stage))
 
     def _close_progress(self) -> None:
         if self._progress_dialog is not None:

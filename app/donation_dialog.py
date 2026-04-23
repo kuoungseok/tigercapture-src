@@ -32,19 +32,19 @@ class DonationDialog(QDialog):
         root.setSpacing(14)
 
         header = QLabel(tr("donation.header"))
-        header.setStyleSheet("font-size: 15px; font-weight: 700; color: #1a1a1a;")
+        header.setStyleSheet("font-size: 15px; font-weight: 700;")
         header.setWordWrap(True)
         root.addWidget(header)
 
         body = QLabel(tr("donation.body"))
-        body.setStyleSheet("color: #5a5a5a; font-size: 12px;")
+        body.setStyleSheet("font-size: 12px;")
         body.setWordWrap(True)
         root.addWidget(body)
 
         items = enabled_donations()
         if not items:
             empty = QLabel(tr("donation.none"))
-            empty.setStyleSheet("color: #9a9a9a; font-size: 12px; padding: 10px 0;")
+            empty.setStyleSheet("font-size: 12px; padding: 10px 0;")
             empty.setWordWrap(True)
             empty.setAlignment(Qt.AlignmentFlag.AlignCenter)
             root.addWidget(empty)
@@ -65,20 +65,20 @@ class DonationDialog(QDialog):
         container = QWidget()
         container.setObjectName("DonationRow")
         container.setStyleSheet(
-            "QWidget#DonationRow { background: #f6f6f6; "
-            "border: 1px solid #e1e1e1; border-radius: 6px; }"
+            "QWidget#DonationRow { background: #0f0f14; "
+            "border: 1px solid #3a3a42; border-radius: 6px; }"
         )
         row = QHBoxLayout(container)
         row.setContentsMargins(12, 8, 12, 8)
         row.setSpacing(10)
 
         name = QLabel(f"{opt.icon}  {tr('donation.' + opt.key)}")
-        name.setStyleSheet("font-size: 13px; color: #1a1a1a; border: none;")
+        name.setStyleSheet("font-size: 13px; border: none;")
 
         if opt.copy_text and not opt.url:
             text_label = QLabel(opt.copy_text)
             text_label.setStyleSheet(
-                "color: #3a3a3a; font-family: Consolas; font-size: 12px; border: none;"
+                "font-family: Consolas; font-size: 12px; border: none;"
             )
             copy_btn = QPushButton(tr("donation.copy"))
             copy_btn.setObjectName("ToolButton")

@@ -65,10 +65,24 @@ class AppController(QObject):
             self._open_video_editor
         )
         self.main_window.open_donation_requested.connect(self._open_donation_dialog)
+        self.main_window.open_gif_file_requested.connect(self._prompt_open_gif_file)
 
     def _open_donation_dialog(self) -> None:
         dlg = DonationDialog(self.main_window)
         dlg.exec()
+
+    def _prompt_open_gif_file(self) -> None:
+        from PySide6.QtWidgets import QFileDialog
+
+        path, _ = QFileDialog.getOpenFileName(
+            self.main_window,
+            tr("main.mode.gif.open_dialog_title"),
+            str(default_save_dir()),
+            tr("main.mode.gif.open_dialog_filter"),
+        )
+        if not path:
+            return
+        self.open_gif_editor_with_file(Path(path))
 
     def _open_video_editor(self, source_path: Path | None = None) -> None:
         editor = VideoEditorWindow(source_path=source_path)
@@ -77,6 +91,44 @@ class AppController(QObject):
         editor.raise_()
         editor.activateWindow()
         self._track_result_window(editor)
+
+    def open_gif_editor_with_file(self, path: Path) -> None:
+        """Load an existing GIF / image sequence into the GIF editor."""
+        from PySide6.QtWidgets import QMessageBox
+
+        try:
+            img = Image.open(str(path))
+            frames: list[Image.Image] = []
+            fps_guess = DEFAULT_GIF_FPS
+            try:
+                n = getattr(img, "n_frames", 1)
+            except Exception:
+                n = 1
+            durations = []
+            for i in range(n):
+                try:
+                    img.seek(i)
+                except EOFError:
+                    break
+                frames.append(img.convert("RGB").copy())
+                d = img.info.get("duration")
+                if d:
+                    durations.append(d)
+            if durations:
+                avg_d = sum(durations) / len(durations)
+                if avg_d > 0:
+                    fps_guess = max(1, min(60, int(round(1000 / avg_d))))
+            if not frames:
+                raise RuntimeError("No frames decoded from file.")
+        except Exception as exc:  # noqa: BLE001
+            QMessageBox.warning(
+                self.main_window,
+                tr("editor.dialog.save_fail_title"),
+                str(exc),
+            )
+            return
+
+        self._open_editor(frames, fps_guess, CaptureMode.GIF)
 
     def _is_own_hwnd(self, hwnd: int) -> bool:
         from PySide6.QtWidgets import QApplication
@@ -356,7 +408,7 @@ class AppController(QObject):
         scale = float(options["scale"])
 
         thread = Mp4ExportThread(frames, out, fps, scale)
-        editor.begin_export_progress(len(frames))
+        editor.begin_export_progress(len(frames), kind="mp4")
 
         thread.progress.connect(editor.update_export_progress)
         thread.stage.connect(editor.update_export_stage)

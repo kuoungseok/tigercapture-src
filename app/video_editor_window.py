@@ -27,7 +27,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.drawing import DrawingCanvas, Stroke
+from app.drawing import (
+    DrawingCanvas,
+    SpeechBubble,
+    SpeechBubbleItem,
+    Stroke,
+    compose_pil_bubbles,
+)
 from app.i18n import tr
 from app.project_player import ProjectPlayer
 from app.simple_video_player import PlayerState
@@ -47,6 +53,207 @@ MIN_PX_PER_SEC = 4.0
 MAX_PX_PER_SEC = 300.0
 MIN_TRACK_WIDTH = 300
 
+FADE_MIME_TYPE = "application/x-gifcam-transition"
+
+
+from app.style import (
+    COLOR_ACCENT_BLUE,
+    COLOR_ACCENT_BLUE_HOVER,
+    COLOR_ACCENT_GREEN,
+    COLOR_ACCENT_ORANGE,
+    COLOR_BG_L1,
+    COLOR_BG_L2,
+    COLOR_BG_L3,
+    COLOR_BG_L4,
+    COLOR_BG_L5,
+    COLOR_BORDER_DEFAULT,
+    COLOR_BORDER_SUBTLE,
+    COLOR_TEXT_DISABLED,
+    COLOR_TEXT_PRIMARY,
+    COLOR_TEXT_SECONDARY,
+    COLOR_TEXT_TERTIARY,
+)
+
+
+VIDEO_EDITOR_EXTRA_QSS = f"""
+QWidget#EditorRoot {{
+    background-color: {COLOR_BG_L3};
+    color: {COLOR_TEXT_SECONDARY};
+}}
+
+QLabel {{
+    color: {COLOR_TEXT_SECONDARY};
+    background: transparent;
+}}
+
+QPushButton#ToolButton {{
+    background-color: {COLOR_BG_L2};
+    color: {COLOR_TEXT_SECONDARY};
+    border: 1px solid {COLOR_BORDER_DEFAULT};
+    border-radius: 6px;
+    padding: 7px 13px;
+    font-weight: 500;
+}}
+QPushButton#ToolButton:hover {{
+    background-color: {COLOR_BG_L5};
+    border-color: #5a5a62;
+    color: {COLOR_TEXT_PRIMARY};
+}}
+QPushButton#ToolButton:pressed {{
+    background-color: #0a0a0e;
+}}
+QPushButton#ToolButton:disabled {{
+    color: {COLOR_TEXT_DISABLED};
+    border-color: {COLOR_BORDER_SUBTLE};
+}}
+QPushButton#ToolButton:checked {{
+    background-color: {COLOR_ACCENT_BLUE};
+    color: {COLOR_TEXT_PRIMARY};
+    border-color: {COLOR_ACCENT_BLUE};
+}}
+
+QPushButton#PrimaryToolButton {{
+    background-color: {COLOR_ACCENT_BLUE};
+    color: {COLOR_TEXT_PRIMARY};
+    border: none;
+    border-radius: 6px;
+    padding: 8px 18px;
+    font-weight: 700;
+}}
+QPushButton#PrimaryToolButton:hover {{
+    background-color: {COLOR_ACCENT_BLUE_HOVER};
+}}
+QPushButton#PrimaryToolButton:pressed {{
+    background-color: #2a6fb4;
+}}
+
+QPushButton#SpeedActive {{
+    background-color: {COLOR_ACCENT_BLUE};
+    color: {COLOR_TEXT_PRIMARY};
+    border: 1px solid {COLOR_ACCENT_BLUE};
+    border-radius: 6px;
+    padding: 5px 11px;
+    font-weight: 700;
+}}
+
+QLabel[sectionHeader="true"] {{
+    color: {COLOR_TEXT_PRIMARY};
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    padding: 8px 12px 8px 16px;
+    background-color: {COLOR_BG_L4};
+    border-left: 4px solid {COLOR_ACCENT_BLUE};
+}}
+QLabel[sectionHeader="true"][accent="preview"] {{
+    border-left: 4px solid {COLOR_ACCENT_BLUE};
+}}
+QLabel[sectionHeader="true"][accent="timeline"] {{
+    border-left: 4px solid {COLOR_ACCENT_ORANGE};
+}}
+QLabel[sectionHeader="true"][accent="subtitles"] {{
+    border-left: 4px solid {COLOR_ACCENT_GREEN};
+}}
+
+QWidget#PreviewHost {{
+    background-color: {COLOR_BG_L1};
+    border: none;
+}}
+
+QWidget#PlayBar {{
+    background-color: {COLOR_BG_L4};
+    border-top: 3px solid {COLOR_BG_L1};
+    border-bottom: 3px solid {COLOR_BG_L1};
+}}
+
+QWidget#ControlsBar {{
+    background-color: {COLOR_BG_L3};
+    border-top: 3px solid {COLOR_BG_L1};
+}}
+
+QLabel#TimeLabel {{
+    color: {COLOR_TEXT_PRIMARY};
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-size: 13px;
+    font-weight: 600;
+}}
+QLabel#SpeedLabel {{
+    color: {COLOR_ACCENT_BLUE};
+    font-family: 'Consolas', 'Monaco', monospace;
+    font-weight: 700;
+}}
+QLabel#ZoomLabel {{
+    color: {COLOR_TEXT_TERTIARY};
+    font-family: 'Consolas', 'Monaco', monospace;
+}}
+
+QPushButton#PlayButton {{
+    background-color: {COLOR_ACCENT_BLUE};
+    color: {COLOR_TEXT_PRIMARY};
+    border: none;
+    border-radius: 19px;
+    font-size: 14px;
+    font-weight: 700;
+}}
+QPushButton#PlayButton:hover {{
+    background-color: {COLOR_ACCENT_BLUE_HOVER};
+}}
+
+QScrollArea {{
+    background: {COLOR_BG_L2};
+    border: none;
+}}
+QScrollBar:horizontal {{
+    background: {COLOR_BG_L2};
+    height: 10px;
+    border: none;
+}}
+QScrollBar::handle:horizontal {{
+    background: {COLOR_BORDER_DEFAULT};
+    border-radius: 5px;
+    min-width: 30px;
+}}
+QScrollBar::handle:horizontal:hover {{
+    background: #5a5a62;
+}}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+    width: 0;
+    background: transparent;
+}}
+QScrollBar:vertical {{
+    background: {COLOR_BG_L2};
+    width: 10px;
+    border: none;
+}}
+QScrollBar::handle:vertical {{
+    background: {COLOR_BORDER_DEFAULT};
+    border-radius: 5px;
+    min-height: 30px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background: #5a5a62;
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+    height: 0;
+    background: transparent;
+}}
+
+QListWidget {{
+    background-color: {COLOR_BG_L2};
+    color: {COLOR_TEXT_SECONDARY};
+    border: 1px solid {COLOR_BORDER_SUBTLE};
+    border-radius: 4px;
+    alternate-background-color: {COLOR_BG_L3};
+}}
+QListWidget::item {{
+    padding: 4px 8px;
+}}
+QListWidget::item:selected {{
+    background-color: {COLOR_ACCENT_BLUE};
+    color: {COLOR_TEXT_PRIMARY};
+}}
+"""
+
 
 @dataclass
 class SpeedSegment:
@@ -65,6 +272,28 @@ class SpeedSegment:
 class CutSegment:
     start_ms: int
     end_ms: int
+    fade_ms: int = 0  # legacy, no longer used by exporter (kept for save compat)
+
+    def contains(self, ms: int) -> bool:
+        return self.start_ms <= ms < self.end_ms
+
+
+@dataclass
+class FadeSegment:
+    """A draggable fade transition placed on the track.
+    ``kind``:
+      - ``both``: fade-out during first half, fade-in during second half
+      - ``in``:   fade-in (black → content) across the whole span
+      - ``out``:  fade-out (content → black) across the whole span
+    Width of the actor = full duration of the effect."""
+
+    start_ms: int
+    end_ms: int
+    kind: str = "both"
+
+    @property
+    def duration_ms(self) -> int:
+        return max(0, self.end_ms - self.start_ms)
 
     def contains(self, ms: int) -> bool:
         return self.start_ms <= ms < self.end_ms
@@ -75,8 +304,10 @@ class VideoTrack:
     id: int
     source_path: Path | None = None
     duration_ms: int = 0
+    offset_ms: int = 0  # where this clip starts on the project timeline
     speed_segments: list[SpeedSegment] = field(default_factory=list)
     cuts: list[CutSegment] = field(default_factory=list)
+    fades: list[FadeSegment] = field(default_factory=list)
     thumbnails: list[QPixmap] = field(default_factory=list)
     selection_start_ms: int = -1
     selection_end_ms: int = -1
@@ -169,6 +400,163 @@ class ThumbnailExtractor(QThread):
             self.finished_extracting.emit(self._track_id)
 
 
+class TimelineRuler(QWidget):
+    """Horizontal time ruler shared by all tracks. Uses the same MARGIN as
+    ``TrackRow`` so tick marks line up exactly with track contents. Scrolls
+    horizontally with the track list (sits at the top of the same scroll
+    viewport).
+
+    Also acts as the scrub zone — click/drag on the ruler to seek the
+    project playhead. Emits ``scrub_requested(project_ms)``.
+    """
+
+    scrub_requested = Signal(int)  # project_ms
+
+    HEIGHT = 30
+    MARGIN = 10  # matches TrackRow.MARGIN
+    BASELINE_DURATION_MS = 30_000  # ruler width when no tracks are loaded
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._px_per_sec: float = DEFAULT_PX_PER_SEC
+        self._duration_ms: int = 0
+        self._playhead_ms: int = 0
+        self._scrubbing: bool = False
+        self.setFixedHeight(self.HEIGHT)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setCursor(Qt.CursorShape.SplitHCursor)
+        self.setToolTip(tr("veditor.ruler.hint"))
+        self._recalc_width()
+
+    def _x_to_project_ms(self, x: int) -> int:
+        if self._px_per_sec <= 0:
+            return 0
+        return max(0, int((x - self.MARGIN) / self._px_per_sec * 1000))
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        self._scrubbing = True
+        self.scrub_requested.emit(self._x_to_project_ms(event.position().toPoint().x()))
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._scrubbing:
+            self.scrub_requested.emit(self._x_to_project_ms(event.position().toPoint().x()))
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._scrubbing = False
+
+    def set_px_per_sec(self, px: float) -> None:
+        self._px_per_sec = max(MIN_PX_PER_SEC, min(MAX_PX_PER_SEC, float(px)))
+        self._recalc_width()
+        self.update()
+
+    def set_project_duration(self, ms: int) -> None:
+        self._duration_ms = max(0, int(ms))
+        self._recalc_width()
+        self.update()
+
+    def set_playhead(self, ms: int) -> None:
+        self._playhead_ms = max(0, int(ms))
+        self.update()
+
+    def desired_width(self) -> int:
+        span_ms = max(self._duration_ms, self.BASELINE_DURATION_MS)
+        return int(span_ms / 1000.0 * self._px_per_sec) + 2 * self.MARGIN
+
+    def _recalc_width(self) -> None:
+        self.setFixedWidth(max(MIN_TRACK_WIDTH, self.desired_width()))
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+        painter.fillRect(self.rect(), QColor(COLOR_BG_L4))
+
+        # Top separator line (matches the spec's .time-ruler border-top)
+        painter.setPen(QColor("#2a2a30"))
+        painter.drawLine(0, 0, self.width(), 0)
+
+        if self._px_per_sec <= 0:
+            return
+        # Paint ticks up to the widget's actual right edge — the ruler now
+        # gets stretched to host width by the editor, so this extends across
+        # the whole viewport at any zoom level.
+        visible_s = max(0.0, (self.width() - 2 * self.MARGIN) / self._px_per_sec)
+        baseline_s = self.BASELINE_DURATION_MS / 1000.0
+        duration_s = self._duration_ms / 1000.0
+        total_s = max(visible_s, baseline_s, duration_s)
+
+        # Pick a "nice" tick interval so major labels don't overlap.
+        target_px = 72  # aim for ~72 px between major labels
+        raw = target_px / self._px_per_sec
+        nice_steps = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600]
+        interval_s = next((n for n in nice_steps if raw <= n), 600)
+        minor_s = interval_s / 5.0
+
+        # Layout: tick marks on top, labels directly below.
+        tick_top = 3
+        tick_bot = tick_top + 4          # minor ticks = 4 px tall
+        major_tick_bot = tick_top + 7    # major ticks = 7 px tall
+        label_baseline = self.HEIGHT - 6
+
+        # Minor ticks
+        painter.setPen(QColor(COLOR_BORDER_DEFAULT))
+        t = 0.0
+        while t <= total_s + 1e-6:
+            x = int(self.MARGIN + t * self._px_per_sec)
+            painter.drawLine(x, tick_top, x, tick_bot)
+            t += minor_s
+
+        # Major ticks
+        painter.setPen(QColor(COLOR_TEXT_TERTIARY))
+        t = 0.0
+        while t <= total_s + 1e-6:
+            x = int(self.MARGIN + t * self._px_per_sec)
+            painter.drawLine(x, tick_top, x, major_tick_bot)
+            t += interval_s
+
+        # Time labels (centered under each major tick)
+        painter.setPen(QColor(COLOR_TEXT_TERTIARY))
+        font = painter.font()
+        font.setPixelSize(10)
+        font.setFamily("Monaco, Consolas, monospace")
+        painter.setFont(font)
+        fm = painter.fontMetrics()
+        t = 0.0
+        while t <= total_s + 1e-6:
+            x = int(self.MARGIN + t * self._px_per_sec)
+            if interval_s >= 1.0:
+                m, s = divmod(int(round(t)), 60)
+                label = f"{m}:{s:02d}"
+            else:
+                label = f"{t:.1f}s"
+            tw = fm.horizontalAdvance(label)
+            painter.drawText(x - tw // 2, label_baseline, label)
+            t += interval_s
+
+        # Playhead — orange with glow + diamond handle
+        px = int(self.MARGIN + self._playhead_ms / 1000.0 * self._px_per_sec)
+        glow = QPen(QColor(216, 90, 48, 90))
+        glow.setWidth(6)
+        painter.setPen(glow)
+        painter.drawLine(px, 0, px, self.HEIGHT)
+        pen = QPen(QColor(COLOR_ACCENT_ORANGE))
+        pen.setWidth(2)
+        painter.setPen(pen)
+        painter.drawLine(px, 0, px, self.HEIGHT)
+        painter.setBrush(QColor(COLOR_ACCENT_ORANGE))
+        painter.setPen(QColor("#ff7a4a"))
+        diamond = [
+            QPoint(px, 2),
+            QPoint(px + 5, 7),
+            QPoint(px, 12),
+            QPoint(px - 5, 7),
+        ]
+        from PySide6.QtGui import QPolygon
+        painter.drawPolygon(QPolygon(diamond))
+
+
 class TrackRow(QWidget):
     """Single horizontal track with label row + timeline row."""
 
@@ -180,35 +568,56 @@ class TrackRow(QWidget):
     MARGIN = 10
     LABEL_H = 18
     TIMELINE_H = TRACK_HEIGHT
+    FADE_EDGE_GRAB_PX = 6  # resize handle hit area in pixels
+
+    offset_changed = Signal(int, int)  # track_id, new_offset_ms
+    fades_changed = Signal(int)  # track_id — fade segments added / resized
 
     def __init__(self, track: VideoTrack) -> None:
         super().__init__()
         self.track = track
         self._is_active: bool = False
-        self._position_ms: int = 0
+        self._position_ms: int = 0  # project time
         self._dragging_selection: bool = False
         self._dragging_playhead: bool = False
+        self._dragging_offset: bool = False
+        self._resizing_fade: FadeSegment | None = None
+        self._resize_side: str = ""  # "left" or "right"
+        self._resize_orig_start: int = 0
+        self._resize_orig_end: int = 0
         self._drag_start_ms: int = 0
+        self._drag_start_x: int = 0
+        self._drag_start_offset_ms: int = 0
         self._px_per_sec: float = DEFAULT_PX_PER_SEC
 
         self.setFixedHeight(self.LABEL_H + self.TIMELINE_H + TRACK_V_PADDING)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        # Transparent background so the parent's stripe pattern shows through
+        # in the label row and around any empty clip.
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
+        self.setAcceptDrops(True)
         self._recalc_width()
 
     def set_px_per_sec(self, px: float) -> None:
         self._px_per_sec = max(MIN_PX_PER_SEC, min(MAX_PX_PER_SEC, float(px)))
         self._recalc_width()
 
-    def _recalc_width(self) -> None:
+    def _preferred_width(self) -> int:
+        """Content-driven width (offset + duration) before any stretching."""
         if self.track.duration_ms <= 0:
-            w = MIN_TRACK_WIDTH
-        else:
-            w = int(self.track.duration_ms / 1000.0 * self._px_per_sec) + 2 * self.MARGIN
-            w = max(MIN_TRACK_WIDTH, w)
-        self.setFixedWidth(w)
+            return MIN_TRACK_WIDTH
+        span_ms = self.track.offset_ms + self.track.duration_ms
+        w = int(span_ms / 1000.0 * self._px_per_sec) + 2 * self.MARGIN
+        return max(MIN_TRACK_WIDTH, w)
+
+    def _recalc_width(self) -> None:
+        # Set the content-driven minimum; the editor will stretch every row
+        # to the widest common width via _update_tracks_host_width.
+        self.setFixedWidth(self._preferred_width())
         self.update()
 
     def set_active(self, active: bool) -> None:
@@ -217,91 +626,121 @@ class TrackRow(QWidget):
             self.update()
 
     def set_position(self, ms: int) -> None:
-        if self._is_active:
-            self._position_ms = ms
-            self.update()
+        self._position_ms = ms
+        self.update()
 
     def _timeline_rect(self) -> QRect:
+        """Rect of the clip body in widget coords (starts at offset)."""
+        offset_px = int(self.track.offset_ms / 1000.0 * self._px_per_sec)
+        duration_px = int(self.track.duration_ms / 1000.0 * self._px_per_sec)
         return QRect(
-            self.MARGIN,
+            self.MARGIN + offset_px,
             self.LABEL_H,
-            max(0, self.width() - 2 * self.MARGIN),
+            max(0, duration_px),
             self.TIMELINE_H,
         )
 
+    def _project_ms_to_x(self, project_ms: int) -> int:
+        """Project-timeline ms → widget x."""
+        return int(self.MARGIN + project_ms / 1000.0 * self._px_per_sec)
+
+    def _x_to_project_ms(self, x: int) -> int:
+        if self._px_per_sec <= 0:
+            return 0
+        return max(0, int((x - self.MARGIN) / self._px_per_sec * 1000))
+
     def _ms_to_x(self, ms: int) -> int:
-        rect = self._timeline_rect()
-        if self.track.duration_ms <= 0:
-            return rect.left()
-        return int(rect.left() + (ms / self.track.duration_ms) * rect.width())
+        """Track-local ms → widget x (accounts for offset)."""
+        return self._project_ms_to_x(self.track.offset_ms + ms)
 
     def _x_to_ms(self, x: int) -> int:
-        rect = self._timeline_rect()
-        if rect.width() <= 0 or self.track.duration_ms <= 0:
+        """Widget x → track-local ms (clamped to duration)."""
+        if self.track.duration_ms <= 0:
             return 0
-        t = (x - rect.left()) / rect.width()
-        return max(0, min(self.track.duration_ms, int(t * self.track.duration_ms)))
+        local = self._x_to_project_ms(x) - self.track.offset_ms
+        return max(0, min(self.track.duration_ms, local))
 
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
         # Active indicator dot + track label
-        label_color = QColor(0, 103, 192) if self._is_active else QColor(110, 110, 110)
+        if self._is_active:
+            label_color = QColor(COLOR_ACCENT_BLUE)
+            status_color = QColor(COLOR_ACCENT_GREEN)
+        else:
+            label_color = QColor(COLOR_TEXT_TERTIARY)
+            status_color = QColor(COLOR_TEXT_DISABLED)
+        painter.setPen(status_color)
+        painter.drawText(
+            QRect(self.MARGIN, 0, 14, self.LABEL_H),
+            Qt.AlignmentFlag.AlignVCenter,
+            "●" if self._is_active else "○",
+        )
         painter.setPen(label_color)
         painter.drawText(
-            QRect(self.MARGIN, 0, self.width() - 2 * self.MARGIN, self.LABEL_H),
+            QRect(self.MARGIN + 16, 0, self.width() - 2 * self.MARGIN - 16, self.LABEL_H),
             Qt.AlignmentFlag.AlignVCenter,
-            ("●  " if self._is_active else "○  ") + self.track.display_name,
+            self.track.display_name,
         )
 
         rect = self._timeline_rect()
 
-        # Track background
-        bg = QColor(245, 245, 245) if not self._is_active else QColor(238, 244, 252)
-        painter.fillRect(rect, bg)
-
-        # Thumbnails — fixed native aspect, centered on their time position.
-        # Longer videos get more thumbnails (decided in extractor).
-        if self.track.thumbnails and self.track.duration_ms > 0:
-            n = len(self.track.thumbnails)
-            # Aspect-preserving width at the track's timeline height
-            track_h = rect.height()
-            for i, pm in enumerate(self.track.thumbnails):
-                if pm is None or pm.isNull():
-                    continue
-                if pm.height() > 0:
-                    tw = max(1, int(round(pm.width() * track_h / pm.height())))
-                else:
-                    tw = 80
-                time_ms = (i + 0.5) * self.track.duration_ms / n
-                center_x = self._ms_to_x(int(time_ms))
-                x = center_x - tw // 2
-                painter.drawPixmap(x, rect.top(), tw, track_h, pm)
-        else:
-            painter.setPen(QColor(140, 140, 140))
+        if self.track.source_path is None:
+            # Empty slot: BRIGHTER diagonal stripes than the host background,
+            # with a dashed border — matches the 3-level hierarchy
+            # (timeline host = darkest, loaded clip = middle, empty = lightest).
+            self._paint_empty_slot_pattern(painter, rect)
+            painter.setPen(QColor("#8a8a92"))
+            font = painter.font()
+            font.setPixelSize(12)
+            painter.setFont(font)
             painter.drawText(
-                rect,
-                Qt.AlignmentFlag.AlignCenter,
-                tr("veditor.track.no_source") if self.track.source_path is None
-                else tr("veditor.track.loading"),
+                rect, Qt.AlignmentFlag.AlignCenter,
+                tr("veditor.track.no_source"),
             )
+        else:
+            # Loaded clip — ~30% darker than the host bg so the filled content
+            # reads as "sunken" against the brighter background.
+            painter.fillRect(rect, QColor("#141418"))
+            pen = QPen(QColor("#262630"))
+            pen.setWidth(1)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(rect.adjusted(0, 0, -1, -1))
+
+            # Thumbnails — fixed native aspect, centered on their time position.
+            if self.track.thumbnails and self.track.duration_ms > 0:
+                n = len(self.track.thumbnails)
+                track_h = rect.height()
+                for i, pm in enumerate(self.track.thumbnails):
+                    if pm is None or pm.isNull():
+                        continue
+                    if pm.height() > 0:
+                        tw = max(1, int(round(pm.width() * track_h / pm.height())))
+                    else:
+                        tw = 80
+                    time_ms = (i + 0.5) * self.track.duration_ms / n
+                    center_x = self._ms_to_x(int(time_ms))
+                    x = center_x - tw // 2
+                    painter.drawPixmap(x, rect.top(), tw, track_h, pm)
+            else:
+                painter.setPen(QColor(COLOR_TEXT_TERTIARY))
+                painter.drawText(
+                    rect, Qt.AlignmentFlag.AlignCenter,
+                    tr("veditor.track.loading"),
+                )
 
         # Speed segments overlay
         for seg in self.track.speed_segments:
             x1 = self._ms_to_x(seg.start_ms)
             x2 = self._ms_to_x(seg.end_ms)
+            seg_w = max(1, x2 - x1)
             color = self._color_for_speed(seg.speed)
-            painter.fillRect(
-                x1, rect.top(), max(1, x2 - x1), rect.height(), color
+            painter.fillRect(x1, rect.top(), seg_w, rect.height(), color)
+            self._draw_speed_label(
+                painter, seg.speed, x1, rect.top(), seg_w, rect.height()
             )
-            if x2 - x1 > 32:
-                painter.setPen(QColor(20, 20, 20))
-                painter.drawText(
-                    QRect(x1, rect.top(), x2 - x1, rect.height()),
-                    Qt.AlignmentFlag.AlignCenter,
-                    f"{seg.speed:g}x",
-                )
 
         # Cut segments (dark overlay)
         for cut in self.track.cuts:
@@ -319,6 +758,10 @@ class TrackRow(QWidget):
                     tr("veditor.cut_label"),
                 )
 
+        # Fade segments — orange gradient "actors", resizable via edge drag.
+        for fade in self.track.fades:
+            self._paint_fade_segment(painter, fade, rect)
+
         # Selection
         sel_start = self.track.selection_start_ms
         sel_end = self.track.selection_end_ms
@@ -327,36 +770,150 @@ class TrackRow(QWidget):
             sx2 = self._ms_to_x(sel_end)
             painter.fillRect(
                 sx1, rect.top(), max(1, sx2 - sx1), rect.height(),
-                QColor(0, 103, 192, 70),
+                QColor(55, 138, 221, 80),
             )
-            pen = QPen(QColor(0, 103, 192))
+            pen = QPen(QColor(COLOR_ACCENT_BLUE))
             pen.setWidth(2)
             painter.setPen(pen)
             painter.drawRect(sx1, rect.top(), max(1, sx2 - sx1), rect.height())
 
         # Active track border
         if self._is_active:
-            pen = QPen(QColor(0, 103, 192))
+            pen = QPen(QColor(COLOR_ACCENT_BLUE))
             pen.setWidth(2)
             painter.setPen(pen)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(rect.adjusted(0, 0, -1, -1))
-            # Playhead
-            pen = QPen(QColor(210, 30, 30))
-            pen.setWidth(2)
-            painter.setPen(pen)
-            px = self._ms_to_x(self._position_ms)
-            painter.drawLine(px, rect.top() - 2, px, rect.bottom() + 2)
+
+        # Playhead — orange, drawn on every track at project time.
+        pen = QPen(QColor(COLOR_ACCENT_ORANGE))
+        pen.setWidth(2)
+        painter.setPen(pen)
+        px = self._project_ms_to_x(self._position_ms)
+        painter.drawLine(
+            px, self.LABEL_H - 2, px, self.LABEL_H + self.TIMELINE_H + 2
+        )
+
+        # Separator between track rows — dark groove against the bright host
+        # stripes so adjacent tracks read as distinct lanes.
+        pen = QPen(QColor("#0f0f14"))
+        pen.setWidth(2)
+        painter.setPen(pen)
+        painter.drawLine(
+            0, self.height() - 1, self.width(), self.height() - 1,
+        )
 
     @staticmethod
     def _color_for_speed(speed: float) -> QColor:
         if speed < 1.0:
             t = min(1.0, (1.0 - speed) / 0.75)
-            return QColor(int(120 + 80 * t), int(180 - 80 * t), 255, 130)
+            return QColor(int(120 + 80 * t), int(180 - 80 * t), 255, 160)
         if speed > 1.0:
             t = min(1.0, (speed - 1.0) / 15.0)
-            return QColor(255, int(180 - 130 * t), int(120 - 100 * t), 130)
+            return QColor(255, int(180 - 130 * t), int(120 - 100 * t), 160)
         return QColor(150, 150, 150, 100)
+
+    def _paint_fade_segment(
+        self, painter: QPainter, fade: FadeSegment, rect: QRect
+    ) -> None:
+        """Draw a FadeSegment as an orange/black gradient. Shape depends on
+        ``fade.kind``: ``in`` = black→content, ``out`` = content→black,
+        ``both`` = content→black→content (two halves). Resize handles on
+        each edge; right-click menu toggles the kind."""
+        from PySide6.QtGui import QLinearGradient, QBrush
+        fx1 = self._ms_to_x(fade.start_ms)
+        fx2 = self._ms_to_x(fade.end_ms)
+        if fx2 - fx1 < 2:
+            return
+
+        painter.save()
+        painter.setClipRect(
+            rect.intersected(QRect(fx1, rect.top(), fx2 - fx1, rect.height()))
+        )
+        if fade.kind == "in":
+            g = QLinearGradient(fx1, 0, fx2, 0)
+            g.setColorAt(0.0, QColor(0, 0, 0, 220))
+            g.setColorAt(1.0, QColor(216, 90, 48, 0))
+            painter.fillRect(fx1, rect.top(), fx2 - fx1, rect.height(), QBrush(g))
+        elif fade.kind == "out":
+            g = QLinearGradient(fx1, 0, fx2, 0)
+            g.setColorAt(0.0, QColor(216, 90, 48, 0))
+            g.setColorAt(1.0, QColor(0, 0, 0, 220))
+            painter.fillRect(fx1, rect.top(), fx2 - fx1, rect.height(), QBrush(g))
+        else:  # both — two-half pattern
+            mid = (fx1 + fx2) // 2
+            g_out = QLinearGradient(fx1, 0, mid, 0)
+            g_out.setColorAt(0.0, QColor(216, 90, 48, 0))
+            g_out.setColorAt(1.0, QColor(0, 0, 0, 220))
+            painter.fillRect(fx1, rect.top(), mid - fx1, rect.height(), QBrush(g_out))
+            g_in = QLinearGradient(mid, 0, fx2, 0)
+            g_in.setColorAt(0.0, QColor(0, 0, 0, 220))
+            g_in.setColorAt(1.0, QColor(216, 90, 48, 0))
+            painter.fillRect(mid, rect.top(), fx2 - mid, rect.height(), QBrush(g_in))
+        painter.restore()
+
+        # Outer frame — orange, solid so the actor reads as one unit.
+        pen = QPen(QColor(COLOR_ACCENT_ORANGE))
+        pen.setWidth(2)
+        painter.setPen(pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(fx1, rect.top(), max(1, fx2 - fx1), rect.height())
+
+        # Edge handles (small vertical bars) to invite resizing.
+        handle_w = 3
+        handle_color = QColor(255, 150, 80)
+        painter.fillRect(fx1 - handle_w // 2, rect.top(), handle_w, rect.height(), handle_color)
+        painter.fillRect(fx2 - handle_w // 2, rect.top(), handle_w, rect.height(), handle_color)
+
+    @staticmethod
+    def _paint_empty_slot_pattern(painter: QPainter, rect: QRect) -> None:
+        """Empty-track rectangle with dashed border. Stripes are already
+        visible through from the parent StripedHost (empty area = background),
+        so we only need the border outline here."""
+        painter.save()
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        border = QPen(QColor("#4a4a52"))
+        border.setStyle(Qt.PenStyle.DashLine)
+        border.setWidth(1)
+        painter.setPen(border)
+        painter.drawRect(rect.adjusted(0, 0, -1, -1))
+        painter.restore()
+
+    @staticmethod
+    def _draw_speed_label(
+        painter: QPainter, speed: float, x: int, y: int, w: int, h: int
+    ) -> None:
+        """Draw a bold ×speed badge clamped inside the segment rect. Picks a
+        font size proportional to the segment box, capped so it never spills
+        outside the track frame."""
+        if w < 14:
+            return
+        label = f"×{speed:g}"
+        # Font size scales with the smaller of segment width / track height,
+        # so very narrow segments get a small readable label instead of an
+        # oversized clipped one.
+        target_h = min(h - 4, int(w * 0.55))
+        font_px = max(11, min(36, target_h))
+        font = painter.font()
+        font.setPixelSize(font_px)
+        font.setBold(True)
+        painter.setFont(font)
+
+        # White text with a dark outline for legibility on any speed color.
+        clip_rect = QRect(x, y, w, h)
+        painter.save()
+        painter.setClipRect(clip_rect)
+        # Shadow / outline via 1px offsets
+        painter.setPen(QColor(0, 0, 0, 220))
+        for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+            painter.drawText(
+                clip_rect.adjusted(dx, dy, dx, dy),
+                Qt.AlignmentFlag.AlignCenter,
+                label,
+            )
+        painter.setPen(QColor(255, 255, 255))
+        painter.drawText(clip_rect, Qt.AlignmentFlag.AlignCenter, label)
+        painter.restore()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
@@ -364,34 +921,110 @@ class TrackRow(QWidget):
         self.clicked.emit(self.track.id)
         if self.track.duration_ms <= 0:
             return
+        pos = event.position().toPoint()
+        x = pos.x()
+        mods = event.modifiers()
         rect = self._timeline_rect()
-        if not rect.contains(event.position().toPoint()):
+
+        # Fade edge resize takes priority over everything else.
+        fade, side = self._fade_edge_at(x, pos.y())
+        if fade is not None:
+            self._resizing_fade = fade
+            self._resize_side = side
+            self._resize_orig_start = fade.start_ms
+            self._resize_orig_end = fade.end_ms
+            self._drag_start_x = x
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
             return
-        ms = self._x_to_ms(event.position().toPoint().x())
-        if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+
+        # Shift+drag inside the clip body = range select.
+        if mods & Qt.KeyboardModifier.ShiftModifier:
+            if not rect.contains(pos):
+                return
+            ms = self._x_to_ms(x)
             self._dragging_selection = True
             self._drag_start_ms = ms
             self.track.selection_start_ms = ms
             self.track.selection_end_ms = ms
             self.update()
-        else:
-            self._dragging_playhead = True
-            self.position_requested.emit(self.track.id, ms)
+            return
+
+        # Drag on the clip body = move the clip on the project timeline
+        # (Premiere/DaVinci style). Scrubbing moved to the timeline ruler.
+        if rect.contains(pos):
+            self._dragging_offset = True
+            self._drag_start_x = x
+            self._drag_start_offset_ms = self.track.offset_ms
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if self.track.duration_ms <= 0:
             return
-        ms = self._x_to_ms(event.position().toPoint().x())
+        pos = event.position().toPoint()
+        x = pos.x()
+
+        # Fade edge resize — active drag
+        if self._resizing_fade is not None:
+            delta_ms = int((x - self._drag_start_x) / self._px_per_sec * 1000)
+            fade = self._resizing_fade
+            if self._resize_side == "left":
+                new_start = max(0, min(
+                    fade.end_ms - 100,
+                    self._resize_orig_start + delta_ms,
+                ))
+                fade.start_ms = new_start
+            else:  # "right"
+                new_end = min(self.track.duration_ms, max(
+                    fade.start_ms + 100,
+                    self._resize_orig_end + delta_ms,
+                ))
+                fade.end_ms = new_end
+            self.update()
+            self.fades_changed.emit(self.track.id)
+            return
+
+        # Idle hover — swap cursor when the pointer is over a fade edge so
+        # the user discovers that edges are resizable.
+        if not (self._dragging_offset or self._dragging_selection
+                or self._dragging_playhead):
+            fade, _side = self._fade_edge_at(x, pos.y())
+            if fade is not None:
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            else:
+                self.setCursor(Qt.CursorShape.OpenHandCursor)
+
+        if self._dragging_offset:
+            delta_px = x - self._drag_start_x
+            delta_ms = int(delta_px / self._px_per_sec * 1000)
+            new_offset = max(0, self._drag_start_offset_ms + delta_ms)
+            if new_offset != self.track.offset_ms:
+                self.track.offset_ms = new_offset
+                self._recalc_width()
+                # Emit live so the project duration/ruler update during drag,
+                # not only on release.
+                self.offset_changed.emit(self.track.id, self.track.offset_ms)
+            return
         if self._dragging_selection:
+            ms = self._x_to_ms(x)
             self.track.selection_start_ms = min(self._drag_start_ms, ms)
             self.track.selection_end_ms = max(self._drag_start_ms, ms)
             self.update()
         elif self._dragging_playhead:
-            self.position_requested.emit(self.track.id, ms)
+            project_ms = self._x_to_project_ms(x)
+            self.position_requested.emit(self.track.id, project_ms)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
             return
+        if self._resizing_fade is not None:
+            self._resizing_fade = None
+            self._resize_side = ""
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+            self.fades_changed.emit(self.track.id)
+        if self._dragging_offset:
+            self._dragging_offset = False
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+            self.offset_changed.emit(self.track.id, self.track.offset_ms)
         if self._dragging_selection:
             self._dragging_selection = False
             if self.track.selection_end_ms - self.track.selection_start_ms < 50:
@@ -406,7 +1039,229 @@ class TrackRow(QWidget):
         self._dragging_playhead = False
 
     def _on_context_menu(self, local_pos: QPoint) -> None:
+        # If the click is on a fade actor, open the fade-type / delete menu
+        # instead of the generic track menu.
+        fade = self._fade_under(local_pos)
+        if fade is not None:
+            self._show_fade_menu(fade, self.mapToGlobal(local_pos))
+            return
         self.context_menu.emit(self.track.id, self.mapToGlobal(local_pos))
+
+    def _fade_under(self, pos: QPoint) -> FadeSegment | None:
+        if pos.y() < self.LABEL_H or pos.y() > self.LABEL_H + self.TIMELINE_H:
+            return None
+        ms = self._x_to_ms(pos.x())
+        for fade in self.track.fades:
+            if fade.contains(ms):
+                return fade
+        return None
+
+    def _show_fade_menu(self, fade: FadeSegment, global_pos) -> None:
+        menu = QMenu(self)
+        act_in = menu.addAction(tr("veditor.fade_menu.in"))
+        act_in.setCheckable(True)
+        act_in.setChecked(fade.kind == "in")
+        act_out = menu.addAction(tr("veditor.fade_menu.out"))
+        act_out.setCheckable(True)
+        act_out.setChecked(fade.kind == "out")
+        act_both = menu.addAction(tr("veditor.fade_menu.both"))
+        act_both.setCheckable(True)
+        act_both.setChecked(fade.kind == "both")
+        menu.addSeparator()
+        act_del = menu.addAction(tr("veditor.fade_menu.delete"))
+        chosen = menu.exec(global_pos)
+        if chosen is act_in:
+            fade.kind = "in"
+        elif chosen is act_out:
+            fade.kind = "out"
+        elif chosen is act_both:
+            fade.kind = "both"
+        elif chosen is act_del:
+            try:
+                self.track.fades.remove(fade)
+            except ValueError:
+                pass
+        else:
+            return
+        self.update()
+        self.fades_changed.emit(self.track.id)
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        # Double-click on a fade segment deletes it.
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mouseDoubleClickEvent(event)
+            return
+        pos = event.position().toPoint()
+        if pos.y() < self.LABEL_H or pos.y() > self.LABEL_H + self.TIMELINE_H:
+            return
+        ms = self._x_to_ms(pos.x())
+        for fade in list(self.track.fades):
+            if fade.contains(ms):
+                self.track.fades.remove(fade)
+                self.update()
+                self.fades_changed.emit(self.track.id)
+                return
+
+    # ---------- fade segment hit-testing / drag-drop ----------
+
+    def _fade_edge_at(self, x: int, y: int) -> tuple[FadeSegment | None, str]:
+        """Return (fade, 'left' / 'right') if the cursor sits on either edge
+        of a placed FadeSegment inside the timeline area."""
+        if y < self.LABEL_H or y > self.LABEL_H + self.TIMELINE_H:
+            return None, ""
+        for fade in self.track.fades:
+            fx1 = self._ms_to_x(fade.start_ms)
+            fx2 = self._ms_to_x(fade.end_ms)
+            if abs(x - fx1) <= self.FADE_EDGE_GRAB_PX:
+                return fade, "left"
+            if abs(x - fx2) <= self.FADE_EDGE_GRAB_PX:
+                return fade, "right"
+        return None, ""
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasFormat(FADE_MIME_TYPE):
+            event.acceptProposedAction()
+
+    def dragMoveEvent(self, event) -> None:
+        if event.mimeData().hasFormat(FADE_MIME_TYPE):
+            event.acceptProposedAction()
+
+    def dropEvent(self, event) -> None:
+        if not event.mimeData().hasFormat(FADE_MIME_TYPE):
+            return
+        try:
+            duration_ms = int(bytes(event.mimeData().data(FADE_MIME_TYPE)).decode("utf-8"))
+        except Exception:
+            duration_ms = FadeCard.DEFAULT_DURATION_MS
+        duration_ms = max(100, duration_ms)
+        if self.track.duration_ms <= 0:
+            return
+        # Drop position → center of the new fade segment in track-local ms.
+        center_ms = self._x_to_ms(event.position().toPoint().x())
+        start = max(0, center_ms - duration_ms // 2)
+        end = min(self.track.duration_ms, start + duration_ms)
+        if end <= start:
+            return
+        self.track.fades.append(FadeSegment(start, end))
+        self.track.fades.sort(key=lambda f: f.start_ms)
+        self.update()
+        self.fades_changed.emit(self.track.id)
+        self.clicked.emit(self.track.id)
+        event.acceptProposedAction()
+
+
+class FadeCard(QWidget):
+    """Draggable "Fade" transition card. Drag-drop onto a track creates a
+    FadeSegment at the drop position; the embedded combo's value sets the
+    new segment's default duration."""
+
+    DEFAULT_DURATION_MS = 400
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("FadeCard")
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setFixedHeight(40)
+        self.setMinimumWidth(120)
+        self.setStyleSheet(
+            f"""
+            QWidget#FadeCard {{
+                background-color: {COLOR_BG_L5};
+                border: 1px solid {COLOR_BORDER_DEFAULT};
+                border-radius: 6px;
+            }}
+            QWidget#FadeCard:hover {{
+                border-color: {COLOR_ACCENT_ORANGE};
+            }}
+            """
+        )
+        row = QHBoxLayout(self)
+        row.setContentsMargins(10, 4, 12, 4)
+        row.setSpacing(8)
+
+        swatch = _FadeSwatch()
+        swatch.setFixedSize(44, 22)
+        row.addWidget(swatch)
+
+        title = QLabel(tr("veditor.fade_card.title"))
+        title.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; font-weight: 700;")
+        row.addWidget(title)
+
+        self.setToolTip(tr("veditor.fade_card.hint"))
+
+    def selected_duration_ms(self) -> int:
+        return self.DEFAULT_DURATION_MS
+
+    def mousePressEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        from PySide6.QtCore import QMimeData
+        from PySide6.QtGui import QDrag
+
+        mime = QMimeData()
+        mime.setData(FADE_MIME_TYPE, str(self.selected_duration_ms()).encode("utf-8"))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        pix = self.grab()
+        drag.setPixmap(pix)
+        drag.setHotSpot(event.position().toPoint())
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        drag.exec(Qt.DropAction.CopyAction)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+
+
+class _FadeSwatch(QWidget):
+    """Mini horizontal fade gradient — doubles as a visual "icon" for the
+    Fade transition card. Black → orange glow → transparent."""
+
+    def paintEvent(self, _event) -> None:
+        from PySide6.QtGui import QLinearGradient, QBrush
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        w, h = self.width(), self.height()
+        # Left half: fade-out (content → black)
+        g1 = QLinearGradient(0, 0, w / 2, 0)
+        g1.setColorAt(0.0, QColor("#4a6a8a"))
+        g1.setColorAt(1.0, QColor("#0a0a0e"))
+        painter.fillRect(0, 0, int(w / 2), h, QBrush(g1))
+        # Right half: fade-in (black → content) with an orange glow join
+        g2 = QLinearGradient(w / 2, 0, w, 0)
+        g2.setColorAt(0.0, QColor("#0a0a0e"))
+        g2.setColorAt(0.5, QColor(216, 90, 48, 180))
+        g2.setColorAt(1.0, QColor("#4a6a8a"))
+        painter.fillRect(int(w / 2), 0, w - int(w / 2), h, QBrush(g2))
+        # Vertical join marker
+        pen = QPen(QColor(COLOR_ACCENT_ORANGE))
+        pen.setWidth(2)
+        painter.setPen(pen)
+        painter.drawLine(int(w / 2), 0, int(w / 2), h)
+
+
+class StripedHost(QWidget):
+    """Scrollable timeline host. Paints a continuous 45° diagonal-stripe
+    pattern as its background so gaps between tracks and empty areas inside
+    tracks all show the same "timeline canvas" look."""
+
+    BG = QColor("#373744")
+    STRIPE = QColor("#454554")
+    STRIPE_WIDTH = 10
+    STRIPE_STEP = 20
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), self.BG)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        pen = QPen(self.STRIPE)
+        pen.setWidth(self.STRIPE_WIDTH)
+        pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+        painter.setPen(pen)
+        h = self.height()
+        x_start = -h
+        x_end = self.width() + h
+        x = x_start - (x_start % self.STRIPE_STEP)
+        while x <= x_end:
+            painter.drawLine(x, 0, x + h, h)
+            x += self.STRIPE_STEP
 
 
 class VideoEditorWindow(QWidget):
@@ -427,10 +1282,13 @@ class VideoEditorWindow(QWidget):
         self._extractors: dict[int, ThumbnailExtractor] = {}
         self._px_per_sec: float = DEFAULT_PX_PER_SEC
         self._strokes: list[Stroke] = []
+        self._bubbles: list[SpeechBubble] = []
+        self._bubble_items: list[SpeechBubbleItem] = []
 
         self.setObjectName("EditorRoot")
         self.setWindowTitle(tr("veditor.title"))
         self.resize(1180, 780)
+        self.setStyleSheet(VIDEO_EDITOR_EXTRA_QSS)
 
         self._player = ProjectPlayer(self)
         self._player.frame_ready.connect(self._on_frame_ready)
@@ -447,6 +1305,17 @@ class VideoEditorWindow(QWidget):
             self._add_empty_track()
 
     # ------------------------- UI --------------------------
+
+    @staticmethod
+    def _make_section_header(title: str, accent: str) -> QLabel:
+        label = QLabel(title.upper())
+        label.setProperty("sectionHeader", "true")
+        label.setProperty("accent", accent)  # preview / timeline / subtitles
+        return label
+
+    def _build_fade_card(self) -> QWidget:
+        self.fade_card = FadeCard()
+        return self.fade_card
 
     def _build_ui(self) -> None:
         root = QVBoxLayout(self)
@@ -484,9 +1353,9 @@ class VideoEditorWindow(QWidget):
         self.zoom_out_btn.clicked.connect(lambda: self._change_zoom(0.6667))
 
         self.zoom_label = QLabel(self._format_zoom())
+        self.zoom_label.setObjectName("ZoomLabel")
         self.zoom_label.setFixedWidth(70)
         self.zoom_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.zoom_label.setStyleSheet("color: #5a5a5a; font-family: Consolas;")
 
         self.zoom_in_btn = QPushButton("+")
         self.zoom_in_btn.setObjectName("ToolButton")
@@ -499,9 +1368,6 @@ class VideoEditorWindow(QWidget):
         self.zoom_fit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.zoom_fit_btn.clicked.connect(self._zoom_fit)
 
-        toolbar.addWidget(self.add_track_btn)
-        toolbar.addWidget(self.del_track_btn)
-        toolbar.addSpacing(10)
         toolbar.addWidget(self.reset_btn)
         toolbar.addStretch(1)
         toolbar.addWidget(self.zoom_out_btn)
@@ -512,12 +1378,12 @@ class VideoEditorWindow(QWidget):
         toolbar.addWidget(self.export_btn)
         root.addLayout(toolbar)
 
-        # --- Preview (QLabel displaying decoded frames from SimpleVideoPlayer) ---
+        # --- Preview section ---
+        root.addWidget(
+            self._make_section_header(tr("veditor.section.preview"), "preview")
+        )
         preview_host = QWidget()
         preview_host.setObjectName("PreviewHost")
-        preview_host.setStyleSheet(
-            "QWidget#PreviewHost { background-color: #0a0a0a; }"
-        )
         preview_host.setFixedHeight(280)
         preview_host.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
@@ -527,7 +1393,7 @@ class VideoEditorWindow(QWidget):
         host_layout.setSpacing(0)
         self._preview_label = QLabel()
         self._preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self._preview_label.setStyleSheet("color: #999;")
+        self._preview_label.setStyleSheet(f"color: {COLOR_TEXT_TERTIARY};")
         self._preview_label.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
@@ -564,43 +1430,72 @@ class VideoEditorWindow(QWidget):
 
         root.addWidget(preview_host, stretch=0)
 
-        # --- Paint hint under preview ---
+        # --- Paint hint ---
         self._paint_hint_label = QLabel(tr("paint.hint"))
         self._paint_hint_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._paint_hint_label.setStyleSheet(
-            "color: #6a6a6a; font-size: 11px; padding: 2px;"
+            f"color: {COLOR_TEXT_TERTIARY}; font-size: 11px; padding: 4px;"
         )
         root.addWidget(self._paint_hint_label)
 
-        # --- Transport row ---
-        transport = QHBoxLayout()
-        transport.setSpacing(8)
+        # --- Play bar ---
+        play_bar = QWidget()
+        play_bar.setObjectName("PlayBar")
+        transport = QHBoxLayout(play_bar)
+        transport.setContentsMargins(14, 10, 14, 10)
+        transport.setSpacing(10)
         self.play_btn = QPushButton("▶")
-        self.play_btn.setObjectName("ToolButton")
-        self.play_btn.setFixedWidth(50)
+        self.play_btn.setObjectName("PlayButton")
+        self.play_btn.setFixedSize(38, 38)
         self.play_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.play_btn.clicked.connect(self._toggle_play)
 
         self.time_label = QLabel("0:00 / 0:00")
-        self.time_label.setStyleSheet("font-family: Consolas, monospace;")
+        self.time_label.setObjectName("TimeLabel")
 
         self.current_speed_label = QLabel(
             tr("veditor.current_speed", speed="1.0")
         )
-        self.current_speed_label.setStyleSheet("color: #0067c0; font-weight: 600;")
+        self.current_speed_label.setObjectName("SpeedLabel")
 
         transport.addWidget(self.play_btn)
         transport.addWidget(self.time_label)
         transport.addStretch(1)
         transport.addWidget(self.current_speed_label)
-        root.addLayout(transport)
+        root.addWidget(play_bar)
 
-        # --- Tracks container (scrollable vertically) ---
-        self._tracks_host = QWidget()
+        # --- Timeline section ---
+        root.addWidget(
+            self._make_section_header(tr("veditor.section.timeline"), "timeline")
+        )
+
+        # --- Track-management bar (sits right above the track view) ---
+        track_bar = QHBoxLayout()
+        track_bar.setContentsMargins(0, 0, 0, 0)
+        track_bar.setSpacing(6)
+        track_bar.addWidget(self.add_track_btn)
+        track_bar.addWidget(self.del_track_btn)
+        track_bar.addSpacing(20)
+
+        # --- Transitions row — visible "Fade" card ---
+        track_bar.addWidget(self._build_fade_card())
+        track_bar.addStretch(1)
+        root.addLayout(track_bar)
+
+        # --- Tracks container (scrollable vertically). Continuous 45deg
+        # stripe background so every gap / empty area reads as "timeline". ---
+        self._tracks_host = StripedHost()
         self._tracks_layout = QVBoxLayout(self._tracks_host)
         self._tracks_layout.setContentsMargins(0, 0, 0, 0)
-        self._tracks_layout.setSpacing(6)
+        self._tracks_layout.setSpacing(0)  # rows handle their own dividers
         self._tracks_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+
+        # Shared project-time ruler at the top of the scroll viewport so it
+        # scrolls horizontally with the tracks.
+        self._timeline_ruler = TimelineRuler()
+        self._timeline_ruler.scrub_requested.connect(self._player.set_position)
+        self._tracks_layout.addWidget(self._timeline_ruler)
+
         self._tracks_layout.addStretch(1)
 
         self._tracks_scroll = QScrollArea()
@@ -609,14 +1504,27 @@ class VideoEditorWindow(QWidget):
         self._tracks_scroll.setFrameShape(QScrollArea.Shape.NoFrame)
         self._tracks_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         self._tracks_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self._tracks_scroll.setStyleSheet("QScrollArea { background: transparent; }")
+        self._tracks_scroll.setMinimumHeight(230)
+        # Keep the scroll viewport transparent so StripedHost's pattern fills
+        # the entire visible area (especially below the last track).
+        self._tracks_scroll.setStyleSheet(
+            "QScrollArea { background: transparent; border: none; }"
+            "QScrollArea > QWidget > QWidget { background: transparent; }"
+        )
+        # Mouse wheel over the timeline zooms its horizontal length.
+        self._tracks_scroll.viewport().installEventFilter(self)
         root.addWidget(self._tracks_scroll, stretch=1)
 
-        # --- Selection / speed buttons row ---
-        sel_row = QHBoxLayout()
+        # --- Selection / speed buttons row (controls bar) ---
+        controls_bar = QWidget()
+        controls_bar.setObjectName("ControlsBar")
+        sel_row = QHBoxLayout(controls_bar)
+        sel_row.setContentsMargins(12, 10, 12, 10)
         sel_row.setSpacing(6)
         self.selection_label = QLabel(tr("veditor.no_selection"))
-        self.selection_label.setStyleSheet("color: #3a3a3a;")
+        self.selection_label.setStyleSheet(
+            f"color: {COLOR_TEXT_TERTIARY}; font-size: 11px;"
+        )
         sel_row.addWidget(self.selection_label)
         sel_row.addStretch(1)
 
@@ -637,9 +1545,12 @@ class VideoEditorWindow(QWidget):
         self.clear_sel_btn.setEnabled(False)
         self.clear_sel_btn.clicked.connect(self._clear_selection_active_track)
         sel_row.addWidget(self.clear_sel_btn)
-        root.addLayout(sel_row)
+        root.addWidget(controls_bar)
 
-        # --- Subtitle panel ---
+        # --- Subtitles section ---
+        root.addWidget(
+            self._make_section_header(tr("veditor.section.subtitles"), "subtitles")
+        )
         self._subtitle_panel = SubtitlePanel(
             position_provider=lambda: self._player.position()
         )
@@ -674,14 +1585,28 @@ class VideoEditorWindow(QWidget):
         row.position_requested.connect(self._on_track_position_requested)
         row.selection_changed.connect(self._on_track_selection_changed)
         row.context_menu.connect(self._on_track_context_menu)
+        row.offset_changed.connect(self._on_track_offset_changed)
+        row.fades_changed.connect(self._on_track_fades_changed)
         self._track_rows[track.id] = row
         self._tracks_layout.insertWidget(self._tracks_layout.count() - 1, row)
         self._update_tracks_host_width()
 
     def _update_tracks_host_width(self) -> None:
-        max_w = MIN_TRACK_WIDTH
+        # Start with baseline (ruler) and each track's own preferred width.
+        max_w = max(MIN_TRACK_WIDTH, self._timeline_ruler.desired_width())
+        # Consider each row's natural duration-driven width.
         for row in self._track_rows.values():
-            max_w = max(max_w, row.width())
+            row_pref = max(MIN_TRACK_WIDTH, row._preferred_width())
+            max_w = max(max_w, row_pref)
+        # Also honor the viewport width so the divider / stripes can extend
+        # the full visible area even when clips are short.
+        vp_w = self._tracks_scroll.viewport().width() if hasattr(self, "_tracks_scroll") else 0
+        max_w = max(max_w, vp_w)
+        # Stretch every row + the ruler to the same width so the bottom
+        # separator runs edge-to-edge regardless of clip length.
+        self._timeline_ruler.setFixedWidth(max_w)
+        for row in self._track_rows.values():
+            row.setFixedWidth(max_w)
         self._tracks_host.setMinimumWidth(max_w)
 
     def _change_zoom(self, factor: float) -> None:
@@ -691,23 +1616,27 @@ class VideoEditorWindow(QWidget):
         self._px_per_sec = new_px
         for row in self._track_rows.values():
             row.set_px_per_sec(new_px)
+        self._timeline_ruler.set_px_per_sec(new_px)
         self.zoom_label.setText(self._format_zoom())
         self._update_tracks_host_width()
 
     def _zoom_fit(self) -> None:
         if not self._tracks:
             return
-        max_dur = max((t.duration_ms for t in self._tracks), default=0)
-        if max_dur <= 0:
+        max_span = max(
+            (t.offset_ms + t.duration_ms for t in self._tracks), default=0
+        )
+        if max_span <= 0:
             return
         viewport_w = self._tracks_scroll.viewport().width()
         if viewport_w <= 50:
             return
-        target_px = (viewport_w - 40) / (max_dur / 1000.0)
+        target_px = (viewport_w - 40) / (max_span / 1000.0)
         target_px = max(MIN_PX_PER_SEC, min(MAX_PX_PER_SEC, target_px))
         self._px_per_sec = target_px
         for row in self._track_rows.values():
             row.set_px_per_sec(target_px)
+        self._timeline_ruler.set_px_per_sec(target_px)
         self.zoom_label.setText(self._format_zoom())
         self._update_tracks_host_width()
 
@@ -813,6 +1742,17 @@ class VideoEditorWindow(QWidget):
         if track_id != self._active_track_id:
             self._set_active_track(track_id)
         self._refresh_selection_row()
+
+    def _on_track_offset_changed(self, track_id: int, _new_offset_ms: int) -> None:
+        # Offset repositions the clip on the project timeline → re-broadcast
+        # duration and make sure the player's cached track list matches.
+        self._refresh_player_tracks()
+        self._update_tracks_host_width()
+
+    def _on_track_fades_changed(self, _track_id: int) -> None:
+        # Nothing to do beyond repaint (done by the row itself) — export path
+        # reads the updated list at save time.
+        pass
 
     def _on_track_context_menu(self, track_id: int, global_pos: QPoint) -> None:
         self._set_active_track(track_id)
@@ -994,14 +1934,40 @@ class VideoEditorWindow(QWidget):
         self.play_btn.setText("⏸" if state is PlayerState.PLAYING else "▶")
 
     def _on_frame_ready(self, qimg: QImage) -> None:
-        pix = QPixmap.fromImage(qimg)
-        self._preview_pixmap = pix
+        # Keep the clean original in _preview_pixmap so PaintDialog sees the
+        # real frame; fade is applied only to the displayed scaled copy
+        # inside _scale_preview_to_fit.
+        self._preview_pixmap = QPixmap.fromImage(qimg)
         self._scale_preview_to_fit()
         self._update_subtitle_overlay(self._player.position())
         # The overlay is a child — bring on top of preview label each frame
         self._drawing_canvas.raise_()
         self._subtitle_overlay.raise_()
         self._drawing_canvas.update()
+
+    def _current_fade_multiplier(self, pos_ms: int) -> float:
+        """1.0 = full brightness, 0.0 = black. Picks whichever fade on the
+        active track contains ``pos_ms`` (project time) and computes its
+        in/out multiplier based on kind."""
+        track = self._active_track()
+        if track is None or not track.fades:
+            return 1.0
+        local = pos_ms - getattr(track, "offset_ms", 0)
+        for fade in track.fades:
+            if not fade.contains(local):
+                continue
+            span = fade.duration_ms
+            if span <= 0:
+                return 1.0
+            t = (local - fade.start_ms) / span  # 0..1 within the fade
+            kind = getattr(fade, "kind", "both")
+            if kind == "in":
+                return t
+            if kind == "out":
+                return 1.0 - t
+            # both: content→black→content
+            return 1.0 - 2.0 * abs(t - 0.5)
+        return 1.0
 
     def _update_subtitle_overlay(self, pos_ms: int) -> None:
         sub = self._subtitle_panel.active_subtitle(pos_ms)
@@ -1048,7 +2014,7 @@ class VideoEditorWindow(QWidget):
     # ---------- drawing ----------
 
     def eventFilter(self, obj, event):
-        if obj is self._preview_label:
+        if obj is getattr(self, "_preview_label", None):
             if event.type() == event.Type.MouseButtonPress:
                 if event.button() == Qt.MouseButton.LeftButton:
                     self._open_paint_dialog()
@@ -1056,6 +2022,21 @@ class VideoEditorWindow(QWidget):
                 if event.button() == Qt.MouseButton.RightButton:
                     self._show_preview_context_menu(event.globalPosition().toPoint())
                     return True
+        # Wheel over the tracks area zooms the timeline (clip length).
+        # Guard: eventFilter may fire during UI build before the scroll area
+        # has been constructed.
+        scroll = getattr(self, "_tracks_scroll", None)
+        if (
+            scroll is not None
+            and obj is scroll.viewport()
+            and event.type() == event.Type.Wheel
+        ):
+            delta = event.angleDelta().y()
+            if delta > 0:
+                self._change_zoom(1.2)
+            elif delta < 0:
+                self._change_zoom(1 / 1.2)
+            return True
         return super().eventFilter(obj, event)
 
     def _show_preview_context_menu(self, global_pos) -> None:
@@ -1077,15 +2058,58 @@ class VideoEditorWindow(QWidget):
 
         from app.drawing import PaintDialog
 
+        # Hide preview bubble items while editing in the dialog; respawn after.
+        for item in list(self._bubble_items):
+            item.deleteLater()
+        self._bubble_items.clear()
+
         dlg = PaintDialog(
             background_pixmap=self._preview_pixmap,
             initial_strokes=self._strokes,
             time_ms=self._player.position(),
             parent=self,
+            initial_bubbles=self._bubbles,
         )
         if dlg.exec() == dlg.DialogCode.Accepted:
             self._strokes = dlg.result_strokes()
+            self._bubbles = dlg.result_bubbles()
             self._drawing_canvas.update()
+        # Respawn passive items so the user sees bubbles on the preview.
+        for bubble in self._bubbles:
+            self._spawn_bubble_item(bubble)
+        self._update_bubble_visibility(self._player.position())
+
+    # ------------- speech bubbles -------------
+
+    def _spawn_bubble_item(self, bubble: SpeechBubble) -> SpeechBubbleItem:
+        # Parent to the drawing canvas (already sized to the video rect), so
+        # normalized coords map to the actual video area, not letterbox.
+        item = SpeechBubbleItem(bubble, self._drawing_canvas)
+        item.sync_to_parent()
+        item.show()
+        item.moved.connect(lambda it=item: it.sync_to_bubble())
+        item.deleted.connect(lambda it=item, b=bubble: self._remove_bubble(b, it))
+        self._bubble_items.append(item)
+        return item
+
+    def _remove_bubble(self, bubble: SpeechBubble, item: SpeechBubbleItem) -> None:
+        try:
+            self._bubbles.remove(bubble)
+        except ValueError:
+            pass
+        try:
+            self._bubble_items.remove(item)
+        except ValueError:
+            pass
+        item.deleteLater()
+
+    def _resync_bubbles_to_preview(self) -> None:
+        for item in self._bubble_items:
+            item.sync_to_parent()
+
+    def _update_bubble_visibility(self, pos_ms: int) -> None:
+        for item in self._bubble_items:
+            item.setVisible(item.bubble.start_ms <= int(pos_ms))
 
     def _scale_preview_to_fit(self) -> None:
         if self._preview_pixmap is None or self._preview_pixmap.isNull():
@@ -1098,43 +2122,91 @@ class VideoEditorWindow(QWidget):
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,
         )
+        # Blend to black by the active fade's multiplier so the preview
+        # matches what the exporter produces.
+        mult = self._current_fade_multiplier(self._player.position())
+        if mult < 0.999:
+            faded = QPixmap(scaled.size())
+            faded.fill(Qt.GlobalColor.black)
+            p = QPainter(faded)
+            p.setOpacity(max(0.0, min(1.0, mult)))
+            p.drawPixmap(0, 0, scaled)
+            p.end()
+            scaled = faded
         self._preview_label.setPixmap(scaled)
+        self._sync_overlay_to_video_rect()
+
+    def _sync_overlay_to_video_rect(self) -> None:
+        """Size the drawing canvas to exactly the video pixmap rect inside the
+        preview label, so strokes can't render in the letterbox area."""
+        host = self._preview_host
+        if self._preview_pixmap is None or self._preview_pixmap.isNull():
+            self._drawing_canvas.setGeometry(0, 0, host.width(), host.height())
+            return
+        # preview_label is laid out inside host via a QVBoxLayout with zero
+        # margins, so label top-left == host top-left in host coords.
+        label_w = self._preview_label.width()
+        label_h = self._preview_label.height()
+        if label_w <= 0 or label_h <= 0:
+            return
+        src_w = self._preview_pixmap.width()
+        src_h = self._preview_pixmap.height()
+        if src_w <= 0 or src_h <= 0:
+            return
+        scale = min(label_w / src_w, label_h / src_h)
+        vw = max(1, int(src_w * scale))
+        vh = max(1, int(src_h * scale))
+        vx = (label_w - vw) // 2
+        vy = (label_h - vh) // 2
+        self._drawing_canvas.setGeometry(vx, vy, vw, vh)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._scale_preview_to_fit()
         if self._subtitle_overlay.isVisible():
             self._reposition_subtitle_overlay()
-        # Keep drawing canvas covering the preview host
-        host = self._preview_host
-        self._drawing_canvas.setGeometry(0, 0, host.width(), host.height())
+        self._sync_overlay_to_video_rect()
+        self._resync_bubbles_to_preview()
+        # Timeline stretches to viewport width too
+        if hasattr(self, "_tracks_scroll"):
+            self._update_tracks_host_width()
 
     def _on_position_changed(self, pos: int) -> None:
         # Playhead shows on every track at project time
         for row in self._track_rows.values():
             row.set_position(pos)
+        self._timeline_ruler.set_playhead(pos)
         self.time_label.setText(
             f"{_format_ms(pos)} / {_format_ms(self._player.duration())}"
         )
         self._update_subtitle_overlay(pos)
+        # Re-apply fade to the preview at the new playhead (player only emits
+        # new frames on seek or advance; a pause during a fade needs refresh).
+        self._scale_preview_to_fit()
         # Drawings can appear/disappear based on current time
         self._drawing_canvas.update()
+        # Bubbles also gate on the current playhead
+        self._update_bubble_visibility(pos)
 
-        # Report speed at the currently-rendered track
+        # Report speed at the currently-rendered track. Translate project time
+        # into each track's local time via its offset so speed/cut ranges align.
         active_for_render = None
         for t in reversed(self._tracks):
             if t.source_path is None:
                 continue
-            if pos >= t.duration_ms:
+            offset = getattr(t, "offset_ms", 0)
+            local = pos - offset
+            if local < 0 or local >= t.duration_ms:
                 continue
-            if any(c.start_ms <= pos < c.end_ms for c in t.cuts):
+            if any(c.start_ms <= local < c.end_ms for c in t.cuts):
                 continue
             active_for_render = t
             break
         if active_for_render is None:
             speed = 1.0
         else:
-            speed = self._speed_at(active_for_render, pos)
+            local_pos = pos - getattr(active_for_render, "offset_ms", 0)
+            speed = self._speed_at(active_for_render, local_pos)
         if speed != self._current_segment_speed:
             self._current_segment_speed = speed
             self.current_speed_label.setText(
@@ -1144,6 +2216,7 @@ class VideoEditorWindow(QWidget):
     def _on_duration_changed(self, dur: int) -> None:
         for row in self._track_rows.values():
             row._recalc_width()
+        self._timeline_ruler.set_project_duration(dur)
         self._update_tracks_host_width()
         self.time_label.setText(f"0:00 / {_format_ms(dur)}")
         self._subtitle_panel.set_project_duration(dur)
@@ -1292,6 +2365,9 @@ class VideoEditorWindow(QWidget):
             segments,
             self._subtitle_panel.subtitles(),
             self._strokes,
+            cuts=track.cuts,
+            fade_segments=track.fades,
+            bubbles=self._bubbles,
         )
         thread.progress.connect(
             lambda cur, tot: (dlg.setMaximum(max(1, tot)), dlg.setValue(cur))

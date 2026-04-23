@@ -88,7 +88,11 @@ class ProjectPlayer(QObject):
 
         self._tracks = list(tracks)
         new_duration = max(
-            (t.duration_ms for t in tracks if t.source_path is not None),
+            (
+                getattr(t, "offset_ms", 0) + t.duration_ms
+                for t in tracks
+                if t.source_path is not None
+            ),
             default=0,
         )
         self._duration_ms = new_duration
@@ -112,18 +116,20 @@ class ProjectPlayer(QObject):
 
     def _active_track_at(self, pos_ms: int):
         """Return topmost track that should render at ``pos_ms``, cascading
-        past cuts / past-end. None if all layers are cut or empty at this
-        time."""
+        past cuts / past-end / before-start. None if all layers are empty at
+        this time. ``pos_ms`` is project timeline time."""
         for t in reversed(self._tracks):
             if t.source_path is None:
                 continue
             if t.id not in self._caps:
                 continue
-            if pos_ms >= t.duration_ms:
+            offset = getattr(t, "offset_ms", 0)
+            local = pos_ms - offset
+            if local < 0 or local >= t.duration_ms:
                 continue
             in_cut = False
             for cut in t.cuts:
-                if cut.start_ms <= pos_ms < cut.end_ms:
+                if cut.start_ms <= local < cut.end_ms:
                     in_cut = True
                     break
             if in_cut:
@@ -133,8 +139,10 @@ class ProjectPlayer(QObject):
 
     @staticmethod
     def _speed_at(track, pos_ms: int) -> float:
+        """``pos_ms`` is project time; speed segments are stored track-local."""
+        local = pos_ms - getattr(track, "offset_ms", 0)
         for seg in track.speed_segments:
-            if seg.start_ms <= pos_ms < seg.end_ms:
+            if seg.start_ms <= local < seg.end_ms:
                 return seg.speed
         return 1.0
 
@@ -219,7 +227,8 @@ class ProjectPlayer(QObject):
         fps = self._fps[track.id]
         if fps <= 0:
             return
-        frame_idx = int(pos_ms / 1000.0 * fps)
+        local_ms = pos_ms - getattr(track, "offset_ms", 0)
+        frame_idx = int(local_ms / 1000.0 * fps)
         # Sequential read optimization: only seek when necessary
         need_seek = (
             force_seek

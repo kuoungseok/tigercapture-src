@@ -41,8 +41,10 @@ class _MONITORINFOEXW(ctypes.Structure):
 def _resolve_wgc_monitor_index(target: QScreen) -> int:
     """Return the 1-based WGC monitor index for the given QScreen.
 
-    Matches by the physical rectangle reported by Windows against each
-    QScreen's ``geometry() * devicePixelRatio``. Falls back to 1 (primary).
+    Matches by the Windows device name (``\\\\.\\DISPLAYn``) rather than
+    physical rectangles, because per-monitor DPI makes the logical→physical
+    rect math unreliable (each screen has its own DPR and logical
+    coordinates don't stack linearly across them). Falls back to 1.
     """
     try:
         enum_proc = ctypes.WINFUNCTYPE(
@@ -52,29 +54,47 @@ def _resolve_wgc_monitor_index(target: QScreen) -> int:
             ctypes.POINTER(_RECT),
             wintypes.LPARAM,
         )
-        monitors: list[tuple[int, _RECT]] = []
+        # Enumerate in the same order WGC uses, record (1-based idx, device_name).
+        monitors: list[tuple[int, str, _RECT]] = []
 
-        def callback(_hmon, _hdc, lprc, _lparam):
+        def callback(_hmon, _hdc, _lprc, _lparam):
             info = _MONITORINFOEXW()
             info.cbSize = ctypes.sizeof(_MONITORINFOEXW)
             if ctypes.windll.user32.GetMonitorInfoW(_hmon, ctypes.byref(info)):
-                monitors.append((len(monitors) + 1, info.rcMonitor))
+                monitors.append(
+                    (len(monitors) + 1, info.szDevice, info.rcMonitor)
+                )
             return True
 
         ctypes.windll.user32.EnumDisplayMonitors(0, 0, enum_proc(callback), 0)
 
-        g = target.geometry()
-        dpr = float(target.devicePixelRatio())
-        target_phys = (
-            int(round(g.x() * dpr)),
-            int(round(g.y() * dpr)),
-            int(round((g.x() + g.width()) * dpr)),
-            int(round((g.y() + g.height()) * dpr)),
-        )
-        for idx, r in monitors:
-            rect = (r.left, r.top, r.right, r.bottom)
-            if all(abs(a - b) <= 4 for a, b in zip(rect, target_phys)):
+        # Primary match: device name == QScreen.name() (e.g. "\\.\DISPLAY2")
+        target_name = target.name()
+        for idx, dev_name, _r in monitors:
+            if dev_name and target_name and dev_name == target_name:
                 return idx
+
+        # Fallback: physical-point match. Take the center of the screen in
+        # logical coords, ask Windows which monitor it belongs to.
+        try:
+            class _POINT(ctypes.Structure):
+                _fields_ = [("x", wintypes.LONG), ("y", wintypes.LONG)]
+
+            g = target.geometry()
+            dpr = float(target.devicePixelRatio())
+            cx = int(round((g.x() + g.width() / 2) * dpr))
+            cy = int(round((g.y() + g.height() / 2) * dpr))
+            hmon = ctypes.windll.user32.MonitorFromPoint(
+                _POINT(cx, cy), 2  # MONITOR_DEFAULTTONEAREST
+            )
+            info = _MONITORINFOEXW()
+            info.cbSize = ctypes.sizeof(_MONITORINFOEXW)
+            if ctypes.windll.user32.GetMonitorInfoW(hmon, ctypes.byref(info)):
+                for idx, dev_name, _r in monitors:
+                    if dev_name == info.szDevice:
+                        return idx
+        except Exception:
+            pass
     except Exception:
         pass
     return 1

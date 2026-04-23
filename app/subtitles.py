@@ -134,7 +134,7 @@ class SubtitlePanel(QWidget):
         header = QHBoxLayout()
         header.setSpacing(6)
         self._title_label = QLabel(tr("subtitle.section.title"))
-        self._title_label.setStyleSheet("font-weight: 700; color: #3a3a3a;")
+        self._title_label.setStyleSheet("font-weight: 600; color: palette(text);")
         header.addWidget(self._title_label)
         header.addStretch(1)
 

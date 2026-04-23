@@ -56,11 +56,11 @@ class SettingsDialog(QDialog):
 
         divider = QFrame()
         divider.setFrameShape(QFrame.Shape.HLine)
-        divider.setStyleSheet("background-color: #e1e1e1; max-height: 1px;")
+        divider.setStyleSheet("background-color: #3a3a42; max-height: 1px;")
         root.addWidget(divider)
 
         shortcuts_label = QLabel(tr("settings.shortcuts"))
-        shortcuts_label.setStyleSheet("font-weight: 600; color: #3a3a3a;")
+        shortcuts_label.setStyleSheet("font-weight: 600;")
         root.addWidget(shortcuts_label)
 
         grid = QGridLayout()
@@ -68,12 +68,11 @@ class SettingsDialog(QDialog):
         grid.setVerticalSpacing(6)
         for row, sc in enumerate(DEFAULT_SHORTCUTS):
             name = QLabel(tr(sc.label_key))
-            name.setStyleSheet("color: #3a3a3a;")
             key = QLabel(sc.key)
             key.setStyleSheet(
-                "color: #1a1a1a; background-color: #f0f0f0; "
-                "border: 1px solid #d0d0d0; border-radius: 4px; "
-                "padding: 2px 8px; font-family: Consolas, monospace;"
+                "color: #ffffff; background-color: #4a4a52; "
+                "border: 1px solid #5a5a62; border-radius: 4px; "
+                "padding: 2px 8px; font-family: Consolas, monospace; font-weight: 600;"
             )
             key.setAlignment(Qt.AlignmentFlag.AlignCenter)
             grid.addWidget(name, row, 0)

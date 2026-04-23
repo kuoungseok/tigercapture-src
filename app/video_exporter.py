@@ -66,6 +66,48 @@ def build_segments(
     return ranges
 
 
+def compute_fade_filter_chain(
+    segments: list[tuple[int, int, float]],
+    fade_segments: list,
+) -> str:
+    """Build a chain of ``fade=t=out`` + ``fade=t=in`` filters for each
+    FadeSegment, mapped from track-local time to output time via the segment
+    list. Returns "" if there are no fades.
+
+    Each fade segment becomes:
+      - fade-out from output time of fade.start_ms, duration = half its length
+      - fade-in from output time of midpoint, duration = the other half
+    """
+    if not fade_segments:
+        return ""
+    filters: list[str] = []
+    for f in fade_segments:
+        dur_ms = max(0, f.end_ms - f.start_ms)
+        if dur_ms <= 0:
+            continue
+        kind = getattr(f, "kind", "both")
+        t_start = _map_source_to_output(f.start_ms, segments)
+        t_end = _map_source_to_output(f.end_ms, segments)
+        if t_start < 0 or t_end < 0:
+            continue
+        if kind == "in":
+            d = max(0.01, t_end - t_start)
+            filters.append(f"fade=t=in:st={t_start:.3f}:d={d:.3f}")
+        elif kind == "out":
+            d = max(0.01, t_end - t_start)
+            filters.append(f"fade=t=out:st={t_start:.3f}:d={d:.3f}")
+        else:  # both
+            mid_ms = f.start_ms + dur_ms // 2
+            t_mid = _map_source_to_output(mid_ms, segments)
+            if t_mid < 0:
+                continue
+            d_out = max(0.01, t_mid - t_start)
+            d_in = max(0.01, t_end - t_mid)
+            filters.append(f"fade=t=out:st={t_start:.3f}:d={d_out:.3f}")
+            filters.append(f"fade=t=in:st={t_mid:.3f}:d={d_in:.3f}")
+    return ",".join(filters)
+
+
 def _escape_drawtext(text: str) -> str:
     """Escape a string for FFmpeg drawtext filter 'text=' value."""
     return (
@@ -135,13 +177,13 @@ def build_filter_graph(
     segments: list[tuple[int, int, float]],
     subtitles: list | None = None,
     stroke_overlays: list[tuple[int, float, float | None]] | None = None,
+    fade_segments: list | None = None,
 ) -> str:
-    """Build an FFmpeg filter_complex graph (video-only) from segments.
+    """Build an FFmpeg filter_complex graph (video-only).
 
-    ``stroke_overlays`` is a list of ``(input_index, t_start_out_s,
-    t_end_out_s_or_None)``. ``input_index`` is the FFmpeg ``-i`` index of
-    the stroke PNG (starts at 1 because the source video is [0:v]); each
-    stroke layer gets an overlay filter gated by the provided time range.
+    ``fade_segments`` is a list of ``FadeSegment``-like objects (anything
+    with ``start_ms`` / ``end_ms``) placed on the track. Each becomes a
+    fade-out then fade-in pair in the concatenated output stream.
     """
     if not segments:
         return ""
@@ -162,6 +204,14 @@ def build_filter_graph(
     )
 
     current = "[cv0]"
+    # Apply fade chain first (before overlays) so strokes / subtitles stay
+    # visible even during fade-to-black.
+    fade_chain = compute_fade_filter_chain(segments, fade_segments or [])
+    if fade_chain:
+        label = "[cvf]"
+        parts.append(f"{current}{fade_chain}{label}")
+        current = label
+
     if stroke_overlays:
         for i, (input_idx, t_start, t_end) in enumerate(stroke_overlays):
             label = f"[o{i}]"
@@ -202,6 +252,9 @@ class VideoExportThread(QThread):
         segments: list[tuple[int, int, float]],
         subtitles: list | None = None,
         strokes: list | None = None,
+        cuts: list | None = None,
+        fade_segments: list | None = None,
+        bubbles: list | None = None,
     ) -> None:
         super().__init__()
         self._source = Path(source_path)
@@ -209,7 +262,11 @@ class VideoExportThread(QThread):
         self._segments = list(segments)
         self._subtitles = list(subtitles) if subtitles else []
         self._strokes = list(strokes) if strokes else []
+        self._cuts = list(cuts) if cuts else []
+        self._fade_segments = list(fade_segments) if fade_segments else []
+        self._bubbles = list(bubbles) if bubbles else []
         self._temp_pngs: list[str] = []
+        self._temp_output: str | None = None
 
     def _probe_source_dimensions(self) -> tuple[int, int]:
         """Return (width, height) of the source video. Falls back to
@@ -232,8 +289,9 @@ class VideoExportThread(QThread):
         """Group strokes by (start_ms, end_ms), render each group to a
         transparent PNG at source resolution, and return (png_paths,
         overlay_spec) where overlay_spec entries index into the -i list
-        starting at 1 (since the source video is -i 0)."""
-        if not self._strokes:
+        starting at 1 (since the source video is -i 0). Also prepares one
+        overlay per speech bubble (time-gated from its start_ms)."""
+        if not self._strokes and not self._bubbles:
             return [], []
         from app.drawing import render_strokes_to_png
 
@@ -272,6 +330,31 @@ class VideoExportThread(QThread):
             png_paths.append(png_path)
             overlay_spec.append((input_idx, t_start, t_end))
             input_idx += 1
+
+        # Speech bubbles — one PNG overlay per bubble, time-gated from its
+        # start_ms onward (no end; stays until end of video).
+        if self._bubbles:
+            from app.drawing import render_bubble_to_png
+            for bubble in self._bubbles:
+                t_start = _map_source_to_output(
+                    int(bubble.start_ms), self._segments
+                )
+                if t_start < 0:
+                    t_start = 0.0
+                fd, png_path = tempfile.mkstemp(
+                    suffix=".png", prefix="gifcam_bubble_"
+                )
+                os.close(fd)
+                ok = render_bubble_to_png(bubble, src_w, src_h, png_path)
+                if not ok:
+                    try:
+                        os.unlink(png_path)
+                    except OSError:
+                        pass
+                    continue
+                png_paths.append(png_path)
+                overlay_spec.append((input_idx, t_start, None))
+                input_idx += 1
         return png_paths, overlay_spec
 
     def run(self) -> None:
@@ -287,7 +370,10 @@ class VideoExportThread(QThread):
             self._temp_pngs = stroke_png_paths
 
             graph = build_filter_graph(
-                self._segments, self._subtitles, stroke_overlays
+                self._segments,
+                self._subtitles,
+                stroke_overlays,
+                fade_segments=self._fade_segments,
             )
             total_output_ms = int(
                 sum((e - s) / sp for (s, e, sp) in self._segments) + 0.5
@@ -295,11 +381,23 @@ class VideoExportThread(QThread):
             total_output_ms = max(1, total_output_ms)
             total_output_s = total_output_ms / 1000.0
 
+            # Always write to a sibling temp file first, then atomically move
+            # over the destination. Handles two real-world cases:
+            #   1. Output == source (user overwriting the clip they're editing)
+            #      — FFmpeg would otherwise read-and-write the same handle.
+            #   2. Destination is locked (open in a player) — temp write
+            #      succeeds; the final replace fails gracefully with a clear
+            #      error instead of a corrupted FFmpeg run.
+            fd, temp_path = tempfile.mkstemp(
+                suffix=self._out.suffix or ".mp4",
+                prefix=f"gifcam_export_{self._out.stem}_",
+                dir=str(self._out.parent),
+            )
+            os.close(fd)
+            self._temp_output = temp_path
+
             cmd = [ffmpeg, "-y", "-i", str(self._source)]
             for png in stroke_png_paths:
-                # Single-frame PNG input. overlay filter's default repeatlast=1
-                # keeps the frame on-screen for the entire main duration without
-                # needing -loop / -t tricks that can cause infinite encoding.
                 cmd.extend(["-i", png])
             cmd.extend([
                 "-filter_complex", graph,
@@ -312,7 +410,7 @@ class VideoExportThread(QThread):
                 "-t", f"{total_output_s:.3f}",
                 "-progress", "pipe:2",
                 "-nostats",
-                str(self._out),
+                temp_path,
             ])
 
             self.stage.emit("FFmpeg encoding")
@@ -349,9 +447,28 @@ class VideoExportThread(QThread):
                 raise RuntimeError(
                     f"FFmpeg exit {rc}: {''.join(err_tail).strip()[-400:]}"
                 )
-            if not self._out.exists() or self._out.stat().st_size == 0:
+            temp_out = Path(self._temp_output)
+            if not temp_out.exists() or temp_out.stat().st_size == 0:
                 raise RuntimeError("Output file not written.")
 
+            # Atomic-replace onto the requested destination. Retry briefly in
+            # case Windows still has the target handle open (media player, etc.).
+            import time
+            last_err: Exception | None = None
+            for attempt in range(6):
+                try:
+                    os.replace(temp_out, self._out)
+                    last_err = None
+                    break
+                except PermissionError as e:
+                    last_err = e
+                    time.sleep(0.3)
+            if last_err is not None:
+                raise RuntimeError(
+                    f"Could not overwrite '{self._out.name}': "
+                    f"another app may be holding the file open. ({last_err})"
+                )
+            self._temp_output = None  # moved, don't unlink in finally
             self.finished_success.emit(self._out, self._out.stat().st_size)
         except Exception as exc:  # noqa: BLE001
             self.finished_error.emit(str(exc))
@@ -362,3 +479,10 @@ class VideoExportThread(QThread):
                 except OSError:
                     pass
             self._temp_pngs = []
+            tp = getattr(self, "_temp_output", None)
+            if tp:
+                try:
+                    os.unlink(tp)
+                except OSError:
+                    pass
+            self._temp_output = None

@@ -3,15 +3,17 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
-from PySide6.QtCore import QPointF, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QImage,
     QMouseEvent,
     QPainter,
+    QPainterPath,
     QPaintEvent,
     QPen,
     QPixmap,
+    QPolygonF,
 )
 from PySide6.QtWidgets import (
     QColorDialog,
@@ -22,11 +24,73 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSlider,
+    QTextEdit,
     QVBoxLayout,
     QWidget,
 )
 
 from app.i18n import tr
+
+
+_PAINT_DIALOG_QSS = """
+QDialog { background-color: #1a1a1c; }
+
+QPushButton#PaintTool {
+    background-color: #2a2a30;
+    color: #ffffff;
+    border: 1px solid #4a4a52;
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-weight: 600;
+}
+QPushButton#PaintTool:hover {
+    background-color: #36363c;
+    border-color: #5a5a62;
+}
+QPushButton#PaintTool:checked {
+    background-color: #378ADD;
+    border-color: #378ADD;
+    color: #ffffff;
+}
+
+QPushButton#BubbleBtn {
+    background-color: #5DCAA5;
+    color: #0a0a0b;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-weight: 700;
+}
+QPushButton#BubbleBtn:hover {
+    background-color: #73d6b3;
+}
+
+QDialogButtonBox QPushButton {
+    min-width: 90px;
+    padding: 8px 18px;
+    border-radius: 6px;
+    font-weight: 700;
+    font-size: 13px;
+}
+QDialogButtonBox QPushButton[text="OK"],
+QDialogButtonBox QPushButton:default {
+    background-color: #378ADD;
+    color: #ffffff;
+    border: none;
+}
+QDialogButtonBox QPushButton:default:hover,
+QDialogButtonBox QPushButton[text="OK"]:hover {
+    background-color: #4a9bee;
+}
+QDialogButtonBox QPushButton:!default {
+    background-color: #2a2a30;
+    color: #ffffff;
+    border: 1px solid #4a4a52;
+}
+QDialogButtonBox QPushButton:!default:hover {
+    background-color: #36363c;
+}
+"""
 
 
 @dataclass
@@ -259,6 +323,89 @@ class DrawingCanvas(QWidget):
                     return
 
 
+def compose_pil_frame_with_overlays(
+    frame,
+    strokes: list["Stroke"],
+    subtitles: list,
+    time_ms: int,
+    width_scale: float = 1.0,
+):
+    """Return a new PIL image with any active strokes + subtitle burned in."""
+    from PIL import Image, ImageDraw, ImageFont
+
+    w, h = frame.size
+    out = frame.convert("RGBA") if frame.mode != "RGBA" else frame.copy()
+
+    active_strokes = [s for s in (strokes or []) if s.is_active(int(time_ms))]
+    if active_strokes:
+        overlay = Image.new("RGBA", (w, h), (0, 0, 0, 0))
+        draw = ImageDraw.Draw(overlay)
+        for s in active_strokes:
+            r, g, b = s.color
+            color = (r, g, b, int(s.opacity))
+            stroke_w = max(1, int(round(s.width_px * width_scale)))
+            pts = [(int(p[0] * w), int(p[1] * h)) for p in s.points]
+            if len(pts) == 1:
+                x, y = pts[0]
+                half = stroke_w // 2
+                draw.ellipse(
+                    [x - half, y - half, x + half, y + half], fill=color
+                )
+            elif len(pts) > 1:
+                draw.line(pts, fill=color, width=stroke_w, joint="curve")
+        out = Image.alpha_composite(out, overlay)
+
+    active_sub = None
+    for sub in (subtitles or []):
+        if sub.contains(int(time_ms)) and sub.text.strip():
+            active_sub = sub
+            break
+    if active_sub is not None:
+        draw = ImageDraw.Draw(out)
+        font_size = max(14, int(h * 0.05))
+        font = None
+        for name in ("malgun.ttf", "arial.ttf", "segoeui.ttf"):
+            try:
+                font = ImageFont.truetype(name, font_size)
+                break
+            except Exception:
+                continue
+        if font is None:
+            font = ImageFont.load_default()
+        text = active_sub.text
+        bbox = draw.multiline_textbbox((0, 0), text, font=font, align="center")
+        tw, th = bbox[2] - bbox[0], bbox[3] - bbox[1]
+        x = (w - tw) // 2
+        y = h - th - max(12, int(h * 0.04))
+        pad_x, pad_y = max(8, int(h * 0.015)), max(4, int(h * 0.008))
+        if active_sub.show_box:
+            draw.rectangle(
+                [x - pad_x, y - pad_y, x + tw + pad_x, y + th + pad_y],
+                fill=(0, 0, 0, 180),
+            )
+            draw.multiline_text(
+                (x, y), text, font=font, fill=(255, 255, 255, 255),
+                align="center",
+            )
+        else:
+            for dx in range(-2, 3):
+                for dy in range(-2, 3):
+                    if dx == 0 and dy == 0:
+                        continue
+                    draw.multiline_text(
+                        (x + dx, y + dy), text, font=font,
+                        fill=(0, 0, 0, 230), align="center",
+                    )
+            draw.multiline_text(
+                (x, y), text, font=font, fill=(255, 255, 255, 255),
+                align="center",
+            )
+
+    if frame.mode != "RGBA":
+        return out.convert(frame.mode)
+    return out
+
+
 def render_strokes_to_png(
     strokes: list["Stroke"],
     width: int,
@@ -334,11 +481,14 @@ class PaintDialog(QDialog):
         initial_strokes: list[Stroke],
         time_ms: int,
         parent: QWidget | None = None,
+        initial_bubbles: list["SpeechBubble"] | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(tr("paint.title"))
         self.setModal(True)
         self._time_ms = int(time_ms)
+        self._bubbles: list[SpeechBubble] = list(initial_bubbles or [])
+        self._bubble_items: list[SpeechBubbleItem] = []
 
         # Make the dialog large (paint-app feel). Cap at screen size.
         if parent is not None:
@@ -360,6 +510,7 @@ class PaintDialog(QDialog):
     # ---------- ui ----------
 
     def _build_ui(self, bg: QPixmap, initial_strokes: list[Stroke]) -> None:
+        self.setStyleSheet(self.styleSheet() + _PAINT_DIALOG_QSS)
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 10, 12, 12)
         root.setSpacing(8)
@@ -386,9 +537,17 @@ class PaintDialog(QDialog):
         self.clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.clear_btn.clicked.connect(self._clear_all)
 
+        # Add-bubble button (lives with the paint tools, distinct accent)
+        self.bubble_btn = QPushButton(tr("bubble.add_button"))
+        self.bubble_btn.setObjectName("BubbleBtn")
+        self.bubble_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.bubble_btn.clicked.connect(self._add_bubble)
+
         toolbar.addWidget(self.pen_btn)
         toolbar.addWidget(self.eraser_btn)
         toolbar.addWidget(self.clear_btn)
+        toolbar.addSpacing(12)
+        toolbar.addWidget(self.bubble_btn)
         toolbar.addSpacing(18)
 
         # Width + opacity sliders
@@ -486,6 +645,14 @@ class PaintDialog(QDialog):
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
         root.addWidget(buttons)
+
+        # Spawn any bubbles the caller passed in (deferred until canvas has
+        # a real size — triggered via the first showEvent).
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        if not self._bubble_items and self._bubbles:
+            self._spawn_initial_bubbles()
 
     def _make_palette_button(self, rgb: tuple[int, int, int]) -> QPushButton:
         btn = QPushButton()
@@ -589,6 +756,427 @@ class PaintDialog(QDialog):
         # Canvas covers the bg area exactly so stroke coords map 1:1 with video
         self.canvas.setGeometry(bx, by, bw, bh)
         self.canvas.raise_()
+        # Re-lay out any speech bubble items so their normalized coords map
+        # onto the current canvas rect.
+        for item in getattr(self, "_bubble_items", []):
+            item.sync_to_parent()
+            item.raise_()
+
+    def _add_bubble(self) -> None:
+        bubble = SpeechBubble(
+            x_norm=0.15, y_norm=0.15,
+            width_norm=0.35, height_norm=0.22,
+            text="",
+            start_ms=self._time_ms,
+            tail="left",
+        )
+        self._bubbles.append(bubble)
+        item = SpeechBubbleItem(bubble, self.canvas)
+        item.sync_to_parent()
+        item.show()
+        item.raise_()
+        item.moved.connect(lambda it=item: it.sync_to_bubble())
+        item.deleted.connect(lambda it=item, b=bubble: self._remove_bubble(b, it))
+        self._bubble_items.append(item)
+
+    def _remove_bubble(self, bubble: "SpeechBubble", item: "SpeechBubbleItem") -> None:
+        if bubble in self._bubbles:
+            self._bubbles.remove(bubble)
+        if item in self._bubble_items:
+            self._bubble_items.remove(item)
+        item.deleteLater()
+
+    def _spawn_initial_bubbles(self) -> None:
+        for bubble in self._bubbles:
+            item = SpeechBubbleItem(bubble, self.canvas)
+            item.sync_to_parent()
+            item.show()
+            item.raise_()
+            item.moved.connect(lambda it=item: it.sync_to_bubble())
+            item.deleted.connect(lambda it=item, b=bubble: self._remove_bubble(b, it))
+            self._bubble_items.append(item)
 
     def result_strokes(self) -> list[Stroke]:
         return self.canvas.embedded_strokes()
+
+    def result_bubbles(self) -> list["SpeechBubble"]:
+        return list(self._bubbles)
+
+
+# ---------------------------------------------------------------------------
+#  Speech bubble
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class SpeechBubble:
+    """A persistent callout placed on the preview. Coords are normalized to
+    the video rect so the bubble scales with preview resize / export."""
+
+    x_norm: float = 0.1
+    y_norm: float = 0.1
+    width_norm: float = 0.35
+    height_norm: float = 0.18
+    text: str = ""
+    start_ms: int = 0
+    tail: str = "left"  # "left" or "right"
+
+
+def _build_bubble_path(rect: QRectF, tail: str, radius: float = 12.0) -> QPainterPath:
+    """Return a QPainterPath for the rounded bubble body + a downward tail
+    attached to the bottom-left or bottom-right corner."""
+    body = QPainterPath()
+    body.addRoundedRect(rect, radius, radius)
+
+    # Tail triangle: ~14 px horizontal base below the bubble, ~16 px tall.
+    tail_w = max(10.0, min(18.0, rect.width() * 0.12))
+    tail_h = max(10.0, min(22.0, rect.height() * 0.45))
+    bottom_y = rect.bottom()
+    if tail == "right":
+        x_attach = rect.right() - rect.width() * 0.28
+    else:
+        x_attach = rect.left() + rect.width() * 0.28
+    poly = QPolygonF([
+        QPointF(x_attach - tail_w / 2, bottom_y - 1),
+        QPointF(x_attach + tail_w / 2, bottom_y - 1),
+        QPointF(x_attach + tail_w / 4, bottom_y + tail_h),
+    ])
+    tail_path = QPainterPath()
+    tail_path.addPolygon(poly)
+    tail_path.closeSubpath()
+    return body.united(tail_path)
+
+
+class SpeechBubbleItem(QWidget):
+    """Interactive, draggable speech bubble placed on the preview. Text is
+    edited in-place via an embedded QTextEdit. Corner buttons toggle tail
+    side and delete the bubble."""
+
+    moved = Signal()          # geometry changed (drag, etc.)
+    deleted = Signal()
+    text_changed = Signal()
+    tail_changed = Signal()
+
+    HANDLE_SIZE = 18
+    RESIZE_GRIP_PX = 16
+    MIN_WIDTH = 80
+    MIN_HEIGHT = 60
+    TAIL_EXTRA_PX = 22       # extra space below body for the tail
+    TEXT_PADDING = 10
+
+    def __init__(self, bubble: SpeechBubble, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.bubble = bubble
+        self._dragging = False
+        self._resizing = False
+        self._drag_offset = QPoint()
+        self._resize_start_size = QPoint()
+        self._resize_start_mouse = QPoint()
+
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setMouseTracking(True)
+
+        # In-place text editor — transparent, sits over the bubble body.
+        self._text = QTextEdit(self)
+        self._text.setFrameShape(QTextEdit.Shape.NoFrame)
+        self._text.setStyleSheet(
+            "QTextEdit { background: transparent; color: #1a1a1a; "
+            "font-size: 14px; font-weight: 600; border: none; }"
+        )
+        self._text.setPlainText(bubble.text)
+        self._text.textChanged.connect(self._on_text_changed)
+
+        # Tail toggle button (L/R) — top-right of the bubble header
+        self._tail_btn = QPushButton("↔", self)
+        self._tail_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._tail_btn.setToolTip(tr("bubble.toggle_tail"))
+        self._tail_btn.setFixedSize(self.HANDLE_SIZE, self.HANDLE_SIZE)
+        self._tail_btn.setStyleSheet(
+            "QPushButton { background: #378ADD; color: white; border: none; "
+            "border-radius: 9px; font-size: 10px; font-weight: 700; }"
+            "QPushButton:hover { background: #4a9bee; }"
+        )
+        self._tail_btn.clicked.connect(self._on_toggle_tail)
+
+        # Delete button — top-left
+        self._del_btn = QPushButton("✕", self)
+        self._del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._del_btn.setToolTip(tr("bubble.delete"))
+        self._del_btn.setFixedSize(self.HANDLE_SIZE, self.HANDLE_SIZE)
+        self._del_btn.setStyleSheet(
+            "QPushButton { background: #c53030; color: white; border: none; "
+            "border-radius: 9px; font-size: 10px; font-weight: 700; }"
+            "QPushButton:hover { background: #e54646; }"
+        )
+        self._del_btn.clicked.connect(self.deleted.emit)
+
+        # Set focus on creation so user can type immediately.
+        self._text.setFocus()
+
+    # ------- layout helpers -------
+
+    def _body_rect(self) -> QRectF:
+        """Bubble body rectangle in local coords (excluding the tail)."""
+        return QRectF(
+            0, 0,
+            self.width(),
+            max(1.0, self.height() - self.TAIL_EXTRA_PX),
+        )
+
+    def resizeEvent(self, _e) -> None:
+        body = self._body_rect()
+        pad = self.TEXT_PADDING
+        self._text.setGeometry(
+            int(body.left() + pad + 4),
+            int(body.top() + pad + self.HANDLE_SIZE + 2),
+            int(max(20, body.width() - 2 * pad - 8)),
+            int(max(20, body.height() - 2 * pad - self.HANDLE_SIZE - 4)),
+        )
+        self._tail_btn.move(int(body.right() - self.HANDLE_SIZE - 4), 4)
+        self._del_btn.move(4, 4)
+
+    def paintEvent(self, _e) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        path = _build_bubble_path(self._body_rect(), self.bubble.tail)
+        painter.setBrush(QColor(255, 255, 255, 235))
+        painter.setPen(QPen(QColor(30, 30, 34), 2))
+        painter.drawPath(path)
+
+        # Resize grip — three diagonal ticks in the bottom-right corner of
+        # the body rect. Always visible so users discover resizing.
+        body = self._body_rect()
+        gx = int(body.right()) - self.RESIZE_GRIP_PX
+        gy = int(body.bottom()) - self.RESIZE_GRIP_PX
+        pen = QPen(QColor(90, 90, 100))
+        pen.setWidth(2)
+        painter.setPen(pen)
+        for step in (4, 8, 12):
+            painter.drawLine(
+                gx + self.RESIZE_GRIP_PX - step, int(body.bottom()) - 2,
+                int(body.right()) - 2, gy + self.RESIZE_GRIP_PX - step,
+            )
+
+    def _grip_rect(self) -> QRectF:
+        body = self._body_rect()
+        return QRectF(
+            body.right() - self.RESIZE_GRIP_PX,
+            body.bottom() - self.RESIZE_GRIP_PX,
+            self.RESIZE_GRIP_PX,
+            self.RESIZE_GRIP_PX,
+        )
+
+    # ------- tail / text -------
+
+    def _on_toggle_tail(self) -> None:
+        self.bubble.tail = "right" if self.bubble.tail == "left" else "left"
+        self.update()
+        self.tail_changed.emit()
+
+    def _on_text_changed(self) -> None:
+        self.bubble.text = self._text.toPlainText()
+        self.text_changed.emit()
+
+    # ------- drag to move -------
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        pos = event.position().toPoint()
+        # Resize grip at bottom-right takes priority
+        if self._grip_rect().contains(pos):
+            self._resizing = True
+            self._resize_start_size = QPoint(self.width(), self.height())
+            self._resize_start_mouse = event.globalPosition().toPoint()
+            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+            return
+        # Clicks over the text editor or corner buttons are handled by those
+        # widgets; only bubble body starts a drag.
+        child = self.childAt(pos)
+        if child in (self._text, self._tail_btn, self._del_btn):
+            return
+        self._dragging = True
+        self._drag_offset = pos
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        pos = event.position().toPoint()
+        if self._resizing:
+            parent = self.parentWidget()
+            dx = event.globalPosition().toPoint().x() - self._resize_start_mouse.x()
+            dy = event.globalPosition().toPoint().y() - self._resize_start_mouse.y()
+            new_w = max(self.MIN_WIDTH, self._resize_start_size.x() + dx)
+            new_h = max(self.MIN_HEIGHT, self._resize_start_size.y() + dy)
+            if parent is not None:
+                new_w = min(new_w, parent.width() - self.x())
+                new_h = min(new_h, parent.height() - self.y())
+            self.resize(new_w, new_h)
+            return
+        if self._dragging:
+            parent = self.parentWidget()
+            if parent is None:
+                return
+            new_global = event.globalPosition().toPoint() - self._drag_offset
+            new_local = parent.mapFromGlobal(new_global)
+            nx = max(0, min(parent.width() - self.width(), new_local.x()))
+            ny = max(0, min(parent.height() - self.height(), new_local.y()))
+            self.move(nx, ny)
+            return
+        # Idle hover — swap cursor when pointer sits on the grip so the user
+        # sees it's resizable.
+        if self._grip_rect().contains(pos):
+            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._resizing:
+            self._resizing = False
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.moved.emit()
+        if self._dragging:
+            self._dragging = False
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.moved.emit()
+
+    def sync_to_parent(self) -> None:
+        """Pull geometry from the stored ``SpeechBubble`` relative to the
+        parent preview area (so the bubble re-lays-out on preview resize)."""
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        pw, ph = parent.width(), parent.height()
+        if pw <= 0 or ph <= 0:
+            return
+        w = max(80, int(self.bubble.width_norm * pw))
+        h = max(60, int(self.bubble.height_norm * ph))
+        x = max(0, min(pw - w, int(self.bubble.x_norm * pw)))
+        y = max(0, min(ph - h, int(self.bubble.y_norm * ph)))
+        self.setGeometry(x, y, w, h)
+
+    def sync_to_bubble(self) -> None:
+        """Write current widget geometry back into the stored bubble (after
+        drag)."""
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        pw, ph = max(1, parent.width()), max(1, parent.height())
+        self.bubble.x_norm = self.x() / pw
+        self.bubble.y_norm = self.y() / ph
+        self.bubble.width_norm = self.width() / pw
+        self.bubble.height_norm = self.height() / ph
+
+
+def render_bubble_to_png(
+    bubble: SpeechBubble, width: int, height: int, out_path: str
+) -> bool:
+    """Render a single speech bubble to a transparent PNG at the given size.
+    Used as an FFmpeg overlay input during MP4 export."""
+    from PIL import Image
+    if width <= 0 or height <= 0:
+        return False
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    canvas = compose_pil_bubbles(canvas, [bubble], int(bubble.start_ms))
+    try:
+        canvas.save(out_path, "PNG")
+        return True
+    except Exception:
+        return False
+
+
+def compose_pil_bubbles(frame, bubbles: list[SpeechBubble], time_ms: int):
+    """Burn any active speech bubbles onto the PIL frame. Returns the same
+    frame (mutated) for chain-friendliness."""
+    from PIL import ImageDraw, ImageFont
+
+    active = [b for b in (bubbles or []) if b.start_ms <= int(time_ms)]
+    if not active:
+        return frame
+    if frame.mode != "RGBA":
+        out = frame.convert("RGBA")
+    else:
+        out = frame.copy()
+    draw = ImageDraw.Draw(out)
+    w, h = out.size
+
+    # Pick a reasonable sans-serif font
+    font = None
+    for name in ("malgun.ttf", "arial.ttf", "segoeui.ttf"):
+        try:
+            font = ImageFont.truetype(name, max(14, int(h * 0.03)))
+            break
+        except Exception:
+            continue
+    if font is None:
+        font = ImageFont.load_default()
+
+    for b in active:
+        bw = max(40, int(b.width_norm * w))
+        bh = max(30, int(b.height_norm * h))
+        bx = max(0, int(b.x_norm * w))
+        by = max(0, int(b.y_norm * h))
+        tail_extra = max(14, int(bh * 0.3))
+        body_h = max(20, bh - tail_extra)
+
+        body_box = [bx, by, bx + bw, by + body_h]
+        radius = max(6, int(min(bw, body_h) * 0.15))
+        draw.rounded_rectangle(
+            body_box, radius, fill=(255, 255, 255, 235), outline=(30, 30, 34), width=2
+        )
+
+        # Tail
+        tail_w = max(10, int(bw * 0.12))
+        if b.tail == "right":
+            x_attach = bx + int(bw * 0.72)
+        else:
+            x_attach = bx + int(bw * 0.28)
+        tail_pts = [
+            (x_attach - tail_w // 2, by + body_h - 1),
+            (x_attach + tail_w // 2, by + body_h - 1),
+            (x_attach + tail_w // 4, by + body_h + tail_extra),
+        ]
+        draw.polygon(tail_pts, fill=(255, 255, 255, 235), outline=(30, 30, 34))
+        # Smooth the seam between body and tail
+        draw.line(
+            [(x_attach - tail_w // 2 + 1, by + body_h - 1),
+             (x_attach + tail_w // 2 - 1, by + body_h - 1)],
+            fill=(255, 255, 255, 235), width=2,
+        )
+
+        # Text — simple left-aligned wrap
+        if b.text.strip():
+            pad = max(6, int(min(bw, body_h) * 0.08))
+            text_box = (bx + pad, by + pad, bx + bw - pad, by + body_h - pad)
+            _draw_wrapped_text(draw, b.text, font, text_box, (20, 20, 24))
+
+    if frame.mode != "RGBA":
+        return out.convert(frame.mode)
+    return out
+
+
+def _draw_wrapped_text(draw, text: str, font, box, fill) -> None:
+    """Word-wrap ``text`` into the bounding box and draw it line by line."""
+    x0, y0, x1, y1 = box
+    max_w = x1 - x0
+    words = text.split()
+    lines: list[str] = []
+    line = ""
+    for word in words:
+        candidate = (line + " " + word).strip()
+        if font.getlength(candidate) <= max_w or not line:
+            line = candidate
+        else:
+            lines.append(line)
+            line = word
+    if line:
+        lines.append(line)
+    # Fall back to splitting on character boundaries for very long strings
+    if not lines and text.strip():
+        lines = [text]
+    line_h = font.size + 4
+    y = y0
+    for ln in lines:
+        if y + line_h > y1:
+            break
+        draw.text((x0, y), ln, font=font, fill=fill)
+        y += line_h
