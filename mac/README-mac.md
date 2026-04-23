@@ -1,5 +1,18 @@
 # GifCam — macOS build
 
+> **Status: UNVERIFIED (experimental)**
+>
+> This port has **not yet been built or run on a real Mac**. Every
+> source file was authored on Windows against Apple's public API
+> docs + PyObjC bindings, and the first real build is still pending.
+> Expect PyObjC selector mismatches, CVPixelBuffer pointer-casting
+> quirks, and multi-monitor coordinate edge cases on first run. File
+> issues with the build log and the exact error — fixes will be made
+> iteratively against real hardware.
+>
+> The **Windows build is unaffected** by this port (overlay
+> architecture, see "Architecture notes" below).
+
 This directory contains everything needed to build and run GifCam on
 macOS. The shared UI code in `../app/` is reused unchanged; only the
 five platform-specific modules (`recorder`, `foreground_tracker`,

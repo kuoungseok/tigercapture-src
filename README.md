@@ -48,6 +48,18 @@ Delete the folder to "uninstall". Captures stay in `~/Videos/GifCam`.
 - Windows 10 1903 or newer (Windows Graphics Capture API)
 - x64 architecture
 
+## macOS port (experimental, unverified)
+
+A macOS port lives in [`mac/`](mac/) and reuses the shared UI code via
+a namespace-package overlay. Five Windows-only modules are replaced
+with ScreenCaptureKit / AppKit / Quartz equivalents via PyObjC. See
+[`mac/README-mac.md`](mac/README-mac.md) for build instructions.
+
+**Important:** the macOS port has **not yet been verified on real
+hardware**. It was authored from Windows against Apple's API docs and
+will likely need iterative fixes on first build. The Windows build is
+unaffected.
+
 ## Development
 
 ### Setup
