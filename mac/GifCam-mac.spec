@@ -29,14 +29,19 @@ a = Analysis(
         'app.locales.en',
         'app.locales.ja',
         'app.locales.de',
-        # ScreenCaptureKit + supporting frameworks
+        # ScreenCaptureKit + supporting frameworks. PyInstaller can't
+        # statically discover pyobjc's dynamic bundle-loading, so each
+        # framework module referenced at runtime must be listed here
+        # or the frozen app fails with ModuleNotFoundError.
         'objc',
         'Foundation',
         'AppKit',
         'Quartz',
         'CoreMedia',
+        'CoreVideo',               # CVPixelBuffer* in recorder.py
+        'CoreGraphics',            # CGEventPost, CGRectMake
+        'ApplicationServices',     # AX* accessibility API
         'ScreenCaptureKit',
-        'HIServices',
     ],
     hookspath=[],
     hooksconfig={},

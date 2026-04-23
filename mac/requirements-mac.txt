@@ -12,11 +12,14 @@ imageio>=2.36.0
 imageio-ffmpeg>=0.5.1
 numpy>=2.1.0
 
-# macOS native bindings
+# macOS native bindings. Each framework module used at runtime needs
+# its own pyobjc-framework package — pyobjc-core alone is not enough.
 pyobjc-core>=10.3
 pyobjc-framework-Cocoa>=10.3
 pyobjc-framework-Quartz>=10.3
 pyobjc-framework-CoreMedia>=10.3
+pyobjc-framework-CoreVideo>=10.3
+pyobjc-framework-ApplicationServices>=10.3
 pyobjc-framework-ScreenCaptureKit>=10.3
 
 # Packaging / installer

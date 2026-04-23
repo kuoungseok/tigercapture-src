@@ -156,17 +156,36 @@ def _display_id_for_qscreen(target: QScreen) -> int | None:
 
 
 def _cvpixelbuffer_to_pil(sample_buffer) -> Image.Image | None:
-    """Zero-copy-ish conversion: CMSampleBuffer → CVPixelBuffer → PIL RGB.
+    """Convert CMSampleBuffer → CVPixelBuffer → PIL RGB.
 
-    For 32BGRA (the format we ask SCStream for), we map the base
-    address via ctypes, build a numpy view, trim the row-padding
-    (``bytesPerRow`` > ``width*4`` on some displays), swap BGR→RGB,
-    and hand the resulting contiguous array to PIL.
+    Two paths, in order of preference:
+
+    1. **Fast path** — lock the pixel buffer, cast its base address to a
+       ctypes buffer, build a numpy view, swap BGRA→RGB in place. ~0.5ms
+       for a 2K frame.
+    2. **Fallback path** — hand the CVPixelBuffer to ``CIImage`` →
+       ``NSBitmapImageRep`` → ``TIFFRepresentation`` → PIL. Safer because
+       Apple owns the pointer arithmetic; 10–50× slower.
+
+    pyobjc's return type for ``CVPixelBufferGetBaseAddress`` has
+    changed across versions: sometimes it's an int (memory address),
+    sometimes an opaque pointer object. The fast path tries ``int()``;
+    if that or any subsequent step raises, we silently fall through to
+    the CIImage route rather than dropping the frame.
     """
     pb = CMSampleBufferGetImageBuffer(sample_buffer)
     if pb is None:
         return None
 
+    img = _cvpb_fast_path(pb)
+    if img is not None:
+        return img
+    return _cvpb_ciimage_path(pb)
+
+
+def _cvpb_fast_path(pb) -> Image.Image | None:
+    """Direct ctypes read of the BGRA plane. Returns None to signal
+    "caller should try the fallback"."""
     locked = False
     try:
         if CVPixelBufferLockBaseAddress(pb, kCVPixelBufferLock_ReadOnly) != 0:
@@ -179,7 +198,7 @@ def _cvpixelbuffer_to_pil(sample_buffer) -> Image.Image | None:
         base = CVPixelBufferGetBaseAddress(pb)
         if base is None:
             return None
-        base_addr = int(base)
+        base_addr = int(base)   # may raise TypeError on some pyobjc builds
         if base_addr == 0:
             return None
 
@@ -187,15 +206,73 @@ def _cvpixelbuffer_to_pil(sample_buffer) -> Image.Image | None:
         buf_type = ctypes.c_ubyte * total
         buf = buf_type.from_address(base_addr)
         arr = np.frombuffer(buf, dtype=np.uint8).reshape(h, bpr // 4, 4)
-        # Trim any row padding then drop alpha and swap to RGB.
         rgb = np.ascontiguousarray(arr[:, :w, [2, 1, 0]])
         return Image.fromarray(rgb, "RGB")
     except Exception as exc:
-        _log(f"pixel buffer convert failed: {exc}")
+        _log(f"fast pixel-buffer path failed ({exc!r}); using CIImage fallback")
         return None
     finally:
         if locked:
             CVPixelBufferUnlockBaseAddress(pb, kCVPixelBufferLock_ReadOnly)
+
+
+def _cvpb_ciimage_path(pb) -> Image.Image | None:
+    """CIImage → NSBitmapImageRep → TIFF → PIL. Slow but robust."""
+    try:
+        from io import BytesIO
+
+        from AppKit import NSBitmapImageRep
+        from Quartz import CIImage
+
+        ci = CIImage.imageWithCVPixelBuffer_(pb)
+        if ci is None:
+            return None
+        rep = NSBitmapImageRep.alloc().initWithCIImage_(ci)
+        if rep is None:
+            return None
+        tiff = rep.TIFFRepresentation()
+        if tiff is None:
+            return None
+        img = Image.open(BytesIO(bytes(tiff)))
+        return img.convert("RGB")
+    except Exception as exc:
+        _log(f"CIImage fallback failed: {exc!r}")
+        return None
+
+
+def _build_content_filter(sc_display, excluded_apps):
+    """Construct an SCContentFilter across pyobjc/SDK versions.
+
+    Tries the 3-arg initializer first (display + excluded apps + excepting
+    windows), then the 2-arg variant (display + excluded windows). Returns
+    None if neither is available.
+    """
+    try:
+        cls = SCContentFilter
+        alloc = cls.alloc()
+        # Preferred: macOS 12.3+ with excluded-apps support
+        sel = getattr(
+            alloc, "initWithDisplay_excludingApplications_exceptingWindows_", None
+        )
+        if sel is not None:
+            f = sel(sc_display, excluded_apps, [])
+            if f is not None:
+                return f
+    except Exception as exc:
+        _log(f"content filter preferred init failed: {exc!r}")
+
+    try:
+        alloc = SCContentFilter.alloc()
+        sel = getattr(alloc, "initWithDisplay_excludingWindows_", None)
+        if sel is not None:
+            f = sel(sc_display, [])
+            if f is not None:
+                _log("using 2-arg SCContentFilter fallback (no app exclusion)")
+                return f
+    except Exception as exc:
+        _log(f"content filter fallback init failed: {exc!r}")
+
+    return None
 
 
 if _HAS_SCK:
@@ -247,6 +324,10 @@ class FrameRecorder(QObject):
         self._stream = None
         self._output_delegate = None
         self._target_screen: QScreen | None = None
+        # When setSourceRect_ isn't available on this macOS version we
+        # capture the full display and crop in Python. Stores pixel
+        # coords (x1, y1, x2, y2) of the region within the full frame.
+        self._software_crop: tuple[int, int, int, int] | None = None
 
         self._tick_timer = QTimer(self)
         self._tick_timer.setTimerType(Qt.TimerType.PreciseTimer)
@@ -333,20 +414,51 @@ class FrameRecorder(QObject):
             except Exception:
                 pass
 
-            sc_filter = (
-                SCContentFilter.alloc().initWithDisplay_excludingApplications_exceptingWindows_(
-                    sc_display, our_apps, []
+            sc_filter = _build_content_filter(sc_display, our_apps)
+            if sc_filter is None:
+                self.error.emit(
+                    "Could not construct SCContentFilter — no known "
+                    "initializer available on this macOS version."
                 )
-            )
+                return
+
+            # Pixel dimensions of the full display (fallback width/height
+            # when setSourceRect_ isn't supported and we crop in software).
+            display_px_w = int(round(float(sc_display.width()) * dpr))
+            display_px_h = int(round(float(sc_display.height()) * dpr))
 
             cfg = SCStreamConfiguration.alloc().init()
-            cfg.setWidth_(out_w)
-            cfg.setHeight_(out_h)
-            cfg.setSourceRect_(CGRectMake(local_x, local_y, local_w, local_h))
-            cfg.setDestinationRect_(CGRectMake(0, 0, out_w, out_h))
             cfg.setPixelFormat_(kCVPixelFormatType_32BGRA)
             cfg.setShowsCursor_(self._include_cursor)
             cfg.setQueueDepth_(5)
+
+            used_source_rect = False
+            if hasattr(cfg, "setSourceRect_"):
+                try:
+                    cfg.setSourceRect_(
+                        CGRectMake(local_x, local_y, local_w, local_h)
+                    )
+                    cfg.setDestinationRect_(CGRectMake(0, 0, out_w, out_h))
+                    cfg.setWidth_(out_w)
+                    cfg.setHeight_(out_h)
+                    used_source_rect = True
+                except Exception as exc:
+                    _log(f"setSourceRect_ raised: {exc!r}; falling back to software crop")
+
+            if not used_source_rect:
+                # Capture the full display, crop in the frame handler.
+                cfg.setWidth_(display_px_w)
+                cfg.setHeight_(display_px_h)
+                x1 = max(0, int(round(local_x * dpr)))
+                y1 = max(0, int(round(local_y * dpr)))
+                x2 = min(display_px_w, x1 + out_w)
+                y2 = min(display_px_h, y1 + out_h)
+                self._software_crop = (x1, y1, x2, y2)
+                _log(
+                    f"software crop mode: full={display_px_w}x{display_px_h} "
+                    f"crop=({x1},{y1})-({x2},{y2})"
+                )
+
             # Ask for ~60fps; QTimer downsamples to target fps.
             try:
                 from CoreMedia import CMTimeMake
@@ -393,8 +505,16 @@ class FrameRecorder(QObject):
         if self._stopped:
             return
         img = _cvpixelbuffer_to_pil(sample_buffer)
-        if img is not None:
-            self._current_frame = img
+        if img is None:
+            return
+        if self._software_crop is not None:
+            x1, y1, x2, y2 = self._software_crop
+            if x2 > x1 and y2 > y1:
+                try:
+                    img = img.crop((x1, y1, x2, y2))
+                except Exception:
+                    return
+        self._current_frame = img
 
     def set_paused(self, paused: bool) -> None:
         if paused == self._paused:

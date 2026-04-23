@@ -22,6 +22,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
 
+# Version string for the .dmg filename + window title. CI overrides
+# this via env var (e.g. from the pushed tag); local builds default to
+# the current Windows release number.
+VERSION="${GIFCAM_VERSION:-1.3.0}"
+
 DO_DMG=0
 DO_CLEAN=0
 for arg in "$@"; do
@@ -76,13 +81,13 @@ codesign --verify --deep --strict --verbose=2 "$APP" || {
 }
 
 if (( DO_DMG )); then
-    echo "[dmg] building GifCam-1.3.0.dmg"
-    DMG_OUT="$REPO_ROOT/dist/GifCam-1.3.0.dmg"
+    DMG_OUT="$REPO_ROOT/dist/GifCam-${VERSION}-mac.dmg"
+    echo "[dmg] building $(basename "$DMG_OUT")"
     rm -f "$DMG_OUT"
     "$PYTHON" -m dmgbuild \
         -s "$REPO_ROOT/mac/dmg_settings.py" \
         -D app="$APP" \
-        "GifCam 1.3.0" \
+        "GifCam ${VERSION}" \
         "$DMG_OUT"
     echo "[dmg] OK: $DMG_OUT"
 fi

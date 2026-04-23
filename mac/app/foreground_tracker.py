@@ -31,11 +31,17 @@ except Exception:  # pragma: no cover — missing pyobjc in dev shell
     _HAS_APPKIT = False
 
 try:
-    # HIServices provides AXUIElement* for window/title inspection.
-    import HIServices  # type: ignore[import-not-found]
+    # Accessibility (AX*) lives in the ApplicationServices framework
+    # (HIServices sub-framework). pyobjc exposes the symbols at the
+    # top level of the ``ApplicationServices`` module.
+    from ApplicationServices import (  # type: ignore[import-not-found]
+        AXUIElementCreateApplication,
+        AXUIElementCopyAttributeValue,
+    )
     _HAS_AX = True
 except Exception:  # pragma: no cover
-    HIServices = None  # type: ignore[assignment]
+    AXUIElementCreateApplication = None  # type: ignore[assignment]
+    AXUIElementCopyAttributeValue = None  # type: ignore[assignment]
     _HAS_AX = False
 
 
@@ -117,15 +123,15 @@ def _frontmost_window_title(pid: int) -> str:
     if not _HAS_AX:
         return ""
     try:
-        app_ref = HIServices.AXUIElementCreateApplication(pid)
+        app_ref = AXUIElementCreateApplication(pid)
         if app_ref is None:
             return ""
-        err, window = HIServices.AXUIElementCopyAttributeValue(
+        err, window = AXUIElementCopyAttributeValue(
             app_ref, "AXFocusedWindow", None
         )
         if err != 0 or window is None:
             return ""
-        err, title = HIServices.AXUIElementCopyAttributeValue(
+        err, title = AXUIElementCopyAttributeValue(
             window, "AXTitle", None
         )
         if err != 0 or title is None:

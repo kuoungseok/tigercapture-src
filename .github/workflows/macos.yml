@@ -1,0 +1,133 @@
+name: macOS build
+
+# Builds the experimental macOS .app + .dmg entirely on GitHub's Apple
+# Silicon runner. The developer never needs a Mac — push a commit or a
+# `v*-mac` tag, wait ~15 min, download the .dmg from the run artifacts
+# or (for tag pushes) from the auto-created GitHub Release.
+#
+# Ad-hoc signed (no Apple Developer ID). Users must right-click → Open
+# on first launch to bypass Gatekeeper.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      # Rebuild only when something that affects the Mac build changes.
+      - 'mac/**'
+      - 'app/**'
+      - 'main.py'
+      - '.github/workflows/macos.yml'
+    tags:
+      - 'v*-mac'
+  workflow_dispatch:
+    # Allow manual triggering from the Actions tab, e.g. to reproduce
+    # a build without pushing anything.
+    inputs:
+      mark_prerelease:
+        description: 'Create a GitHub Release (prerelease) with the .dmg?'
+        required: false
+        type: boolean
+        default: false
+
+concurrency:
+  # Collapse overlapping builds on the same ref — a new push cancels
+  # the previous in-flight build.
+  group: macos-build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write   # needed to create the Release and upload assets
+
+jobs:
+  build:
+    runs-on: macos-14   # Apple Silicon (arm64). arm64-only output.
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Derive version
+        id: version
+        run: |
+          # If this run was triggered by a tag like v1.3.1-mac, strip
+          # the leading 'v' and trailing '-mac' and use that as the
+          # build version. Otherwise fall back to the Windows spec.
+          ref="${GITHUB_REF#refs/tags/}"
+          if [[ "$ref" == v*-mac* ]]; then
+            version="${ref#v}"
+            version="${version%-mac*}"
+          else
+            version="1.3.0"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "derived version: $version"
+
+      - name: Install dependencies
+        run: |
+          python -m venv .venv
+          .venv/bin/pip install --upgrade pip
+          .venv/bin/pip install -r mac/requirements-mac.txt
+
+      - name: Build .app + .dmg
+        env:
+          GIFCAM_VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          chmod +x mac/build.sh
+          ./mac/build.sh --clean --dmg
+
+      - name: Show build artifacts
+        run: |
+          ls -la dist/
+          # Codesign + spctl for diagnostics; non-fatal.
+          codesign --display --verbose=2 dist/GifCam.app || true
+          spctl --assess --type execute --verbose dist/GifCam.app || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: GifCam-mac-${{ steps.version.outputs.version }}
+          path: dist/GifCam-*-mac.dmg
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Create GitHub Release (tag pushes only)
+        if: startsWith(github.ref, 'refs/tags/v') && endsWith(github.ref, '-mac')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/GifCam-*-mac.dmg
+          prerelease: true
+          draft: false
+          name: GifCam ${{ steps.version.outputs.version }} (macOS, experimental)
+          body: |
+            **Experimental macOS build — unverified.**
+
+            This build is produced entirely by GitHub Actions on a macOS runner;
+            it has not been tested on real hardware by the maintainer. Please
+            report issues with the exact error text.
+
+            ## Install
+            1. Download `GifCam-${{ steps.version.outputs.version }}-mac.dmg`
+            2. Double-click to mount, drag **GifCam.app** into `/Applications`
+            3. **First launch**: in Finder, right-click `GifCam.app` → **Open**,
+               then confirm the dialog. macOS remembers the exception.
+
+            ## First-run permissions
+            - **Screen Recording** — required (System Settings → Privacy &
+              Security → Screen Recording). Quit and relaunch after granting.
+            - **Accessibility** — optional (enables window-title labels and
+              ⌘V quick-paste).
+
+            ## Requirements
+            - macOS 12.3 Monterey or newer (ScreenCaptureKit)
+            - Apple Silicon (arm64)
+
+            Build type: ad-hoc signed (no Apple Developer ID).
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
