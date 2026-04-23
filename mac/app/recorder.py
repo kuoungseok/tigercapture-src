@@ -40,7 +40,10 @@ try:
         SCStreamOutputTypeScreen,
     )
     from CoreMedia import CMSampleBufferGetImageBuffer
-    from CoreVideo import (
+    # CoreVideo lives inside pyobjc's Quartz umbrella package — there
+    # is no standalone pyobjc-framework-CoreVideo wheel on PyPI.
+    from Quartz import (
+        CGRectMake,
         CVPixelBufferGetBaseAddress,
         CVPixelBufferGetBytesPerRow,
         CVPixelBufferGetHeight,
@@ -50,7 +53,6 @@ try:
         kCVPixelBufferLock_ReadOnly,
         kCVPixelFormatType_32BGRA,
     )
-    from Quartz import CGRectMake
     from AppKit import NSScreen
 
     _HAS_SCK = True

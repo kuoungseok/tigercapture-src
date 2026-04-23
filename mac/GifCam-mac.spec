@@ -36,10 +36,10 @@ a = Analysis(
         'objc',
         'Foundation',
         'AppKit',
-        'Quartz',
+        'Quartz',                  # also covers CoreVideo, CoreGraphics,
+                                   # CoreImage — they're subframeworks of
+                                   # pyobjc-framework-Quartz, not separate.
         'CoreMedia',
-        'CoreVideo',               # CVPixelBuffer* in recorder.py
-        'CoreGraphics',            # CGEventPost, CGRectMake
         'ApplicationServices',     # AX* accessibility API
         'ScreenCaptureKit',
     ],
