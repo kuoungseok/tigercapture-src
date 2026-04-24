@@ -156,7 +156,11 @@ class ProjectPlayer(QObject):
     # ---------------- playback ----------------
 
     def play(self) -> None:
-        if not self._caps:
+        # Allow playback as long as SOMETHING has duration — an audio-
+        # only project (no video tracks, just AudioTracks via the
+        # editor's ``extra_duration_ms``) still needs ticks so the
+        # AudioMixer receives position_changed and actually plays.
+        if self._duration_ms <= 0:
             return
         self._update_interval()
         self._timer.start()

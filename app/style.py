@@ -37,6 +37,103 @@ QDialog {{
     color: {COLOR_TEXT_SECONDARY};
 }}
 
+/* -----------------------------------------------------------------
+ * Default QPushButton — covers every button that doesn't set its
+ * own objectName / property (i.e. QMessageBox OK/Cancel, QFileDialog
+ * Open/Cancel, QInputDialog, QDialogButtonBox). Without this, Qt
+ * falls back to its platform style which paints a near-white button
+ * against our dark dialog chrome — unreadable on every dialog in
+ * the app. Any QPushButton#Foo defined below still overrides this
+ * because the objectName selector has higher specificity.
+ * ----------------------------------------------------------------- */
+QPushButton {{
+    background-color: #4e4e56;
+    color: {COLOR_TEXT_PRIMARY};
+    border: 1px solid #7a7a84;
+    border-radius: 6px;
+    padding: 7px 18px;
+    min-width: 84px;
+    font-size: 13px;
+    font-weight: 600;
+}}
+QPushButton:hover {{
+    background-color: #5f5f68;
+    border-color: #9a9aa4;
+}}
+QPushButton:pressed {{
+    background-color: #3a3a40;
+}}
+QPushButton:disabled {{
+    background-color: {COLOR_BORDER_SUBTLE};
+    color: {COLOR_TEXT_DISABLED};
+    border-color: {COLOR_BORDER_SUBTLE};
+}}
+/* Primary / default dialog button (Enter-activated) gets the accent
+ * blue so the affirmative action is obvious. Qt marks the default
+ * button automatically in message boxes and QDialogButtonBox. */
+QPushButton:default {{
+    background-color: {COLOR_ACCENT_BLUE};
+    border-color: {COLOR_ACCENT_BLUE};
+    color: {COLOR_TEXT_PRIMARY};
+}}
+QPushButton:default:hover {{
+    background-color: {COLOR_ACCENT_BLUE_HOVER};
+    border-color: {COLOR_ACCENT_BLUE_HOVER};
+}}
+QPushButton:default:pressed {{
+    background-color: #2a6fb4;
+}}
+
+/* Force the same look on descendants of modal dialogs. The generic
+ * QPushButton rule above normally suffices, but widget-level
+ * stylesheets (e.g. VIDEO_EDITOR_EXTRA_QSS on VideoEditorWindow) can
+ * shadow it for message boxes that spawn from those windows. The
+ * descendant selector raises specificity so the rule wins regardless. */
+QMessageBox QPushButton,
+QInputDialog QPushButton,
+QFileDialog QPushButton,
+QDialogButtonBox QPushButton {{
+    background-color: #4e4e56;
+    color: {COLOR_TEXT_PRIMARY};
+    border: 1px solid #7a7a84;
+    border-radius: 6px;
+    padding: 7px 18px;
+    min-width: 88px;
+    font-weight: 600;
+}}
+QMessageBox QPushButton:hover,
+QInputDialog QPushButton:hover,
+QFileDialog QPushButton:hover,
+QDialogButtonBox QPushButton:hover {{
+    background-color: #5f5f68;
+    border-color: #9a9aa4;
+}}
+QMessageBox QPushButton:default,
+QInputDialog QPushButton:default,
+QFileDialog QPushButton:default,
+QDialogButtonBox QPushButton:default {{
+    background-color: {COLOR_ACCENT_BLUE};
+    border-color: {COLOR_ACCENT_BLUE};
+    color: {COLOR_TEXT_PRIMARY};
+}}
+QMessageBox QPushButton:default:hover,
+QInputDialog QPushButton:default:hover,
+QFileDialog QPushButton:default:hover,
+QDialogButtonBox QPushButton:default:hover {{
+    background-color: {COLOR_ACCENT_BLUE_HOVER};
+    border-color: {COLOR_ACCENT_BLUE_HOVER};
+}}
+
+/* Dialog body + labels */
+QMessageBox, QInputDialog, QFileDialog {{
+    background-color: {COLOR_BG_L3};
+    color: {COLOR_TEXT_SECONDARY};
+}}
+QMessageBox QLabel, QInputDialog QLabel {{
+    color: {COLOR_TEXT_PRIMARY};
+    font-size: 13px;
+}}
+
 QLabel {{
     color: {COLOR_TEXT_SECONDARY};
     background: transparent;

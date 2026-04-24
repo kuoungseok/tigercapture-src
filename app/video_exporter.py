@@ -429,13 +429,25 @@ class VideoExportThread(QThread):
                 "-pix_fmt", "yuv420p",
             ])
             if audio_count > 0:
+                # External audio tracks supplant the source video's
+                # audio — the original soundtrack is dropped so the
+                # user's chosen BGM / voiceover isn't layered on top
+                # of the video's own audio.
                 cmd.extend([
                     "-map", "[outa]",
                     "-c:a", "aac",
                     "-b:a", "192k",
                 ])
             else:
-                cmd.append("-an")
+                # No external audio tracks — pass through the source
+                # video's audio when it exists. The ``?`` after ``0:a``
+                # makes the stream optional, so silent source videos
+                # don't fail the mux.
+                cmd.extend([
+                    "-map", "0:a?",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                ])
             cmd.extend([
                 "-t", f"{total_output_s:.3f}",
                 "-progress", "pipe:2",

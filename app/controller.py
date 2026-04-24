@@ -279,12 +279,15 @@ class AppController(QObject):
             self.main_window.show()
             return
 
+        # Show main window FIRST so the result window can land on top
+        # after its own raise/activate. Otherwise Windows puts the
+        # most-recently-shown window (main) above the result.
+        self.main_window.show()
         window = ScreenshotWindow(image, default_save_dir())
         window.show()
         window.raise_()
         window.activateWindow()
         self._track_result_window(window)
-        self.main_window.show()
 
     def _track_result_window(self, window: QObject) -> None:
         self._open_result_windows.append(window)
@@ -356,9 +359,12 @@ class AppController(QObject):
 
         duration_s = total_ms / 1000.0 if total_ms else len(frames) / max(actual_fps, 1)
         _ = duration_s
+        # Same ordering trick as screenshot: main first, then the editor
+        # raises itself on top — so the user lands on the editor, not
+        # the main window.
+        self.main_window.show()
         if mode in (CaptureMode.GIF, CaptureMode.VIDEO):
             self._open_editor(frames, actual_fps, mode)
-        self.main_window.show()
 
     def _open_editor(
         self, frames: list[Image.Image], fps: int, mode: CaptureMode

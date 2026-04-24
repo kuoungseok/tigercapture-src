@@ -1,35 +1,49 @@
-"""Audio tracks for the video editor.
+"""Audio tracks for the video editor (multi-clip model).
 
-Adds a second kind of timeline row alongside the existing video tracks:
-each ``AudioTrack`` loads an mp3/wav/m4a/aac/ogg/flac file and plays as
-background music (or voiceover) during preview and final export.
+Data model:
 
-Design mirrors ``VideoTrack``:
-- ``offset_ms`` places the clip on the project timeline.
-- ``trim_start_ms`` / ``trim_end_ms`` select a sub-region of the source.
-- ``volume`` (0.0–1.0) scales output.
-- ``fade_in_ms`` / ``fade_out_ms`` give a simple ramp at each end.
+- An ``AudioTrack`` is a *lane* on the timeline. It carries track-level
+  state (id, master volume) and owns a list of ``AudioClip`` s laid
+  out on that lane.
+- An ``AudioClip`` is one piece of decoded audio referencing a source
+  file, with its own ``offset_ms`` (where it starts on the project
+  timeline), trim range into the source, fade actors, cut regions,
+  selection state, and cached waveform peaks.
 
-Preview playback is driven by ``AudioMixer`` (below): one ``QMediaPlayer``
-per audio track, each listening to the ``ProjectPlayer``'s state and
-position signals. Mixing at preview time is done by the OS audio engine
-(Windows: MMDevice; macOS: CoreAudio) — no Python-side resampling.
+Splitting a clip (user's "cut selection" flow) produces two clips on
+the same track, not two tracks — this matches DAW / NLE convention
+(Premiere, DaVinci, Audition, Logic, Reaper).
 
-Final export builds an FFmpeg filter_complex with per-track
-``atrim + adelay + volume + afade`` nodes, optionally joined with
-``amix``. See ``build_audio_filter`` below.
+Preview playback (``AudioMixer``):
+- One ``QMediaPlayer`` per clip. Each listens to the ``ProjectPlayer``
+  state and its clip's window, playing only when the project time
+  falls inside its window. The OS audio engine mixes — no Python
+  resampling.
+
+Final export (``build_audio_filter``):
+- Every non-empty clip from every track becomes an FFmpeg ``-i`` input
+  and gets its own ``atrim + adelay + volume + afade`` chain; all
+  results are ``amix`` ed. Track-level volume multiplies into the
+  clip's volume factor.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QObject, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import QObject, QThread, QTimer, QUrl, Signal, Slot
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+
+if TYPE_CHECKING:
+    import numpy as np
 
 
 AUDIO_EXTS = frozenset({".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".mp2", ".wma"})
 VIDEO_EXTS = frozenset({".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".wmv", ".gif"})
+
+# Waveform extraction: ~40 peak buckets per second of source audio.
+WAVEFORM_BUCKETS_PER_SEC = 40
 
 
 def is_audio_path(path: Path | str) -> bool:
@@ -42,17 +56,31 @@ def is_video_path(path: Path | str) -> bool:
     return p.suffix.lower() in VIDEO_EXTS
 
 
+# ============================== data model ==============================
+
+
 @dataclass
-class AudioTrack:
+class AudioClip:
+    """A single audio clip placed on an AudioTrack lane."""
+
     id: int
     source_path: Path | None = None
     duration_ms: int = 0         # natural duration of the source file
     offset_ms: int = 0           # where this clip starts on the project timeline
     trim_start_ms: int = 0       # take source[trim_start_ms : trim_end_ms]
     trim_end_ms: int = 0         # 0 means "use full duration"
-    volume: float = 1.0          # 0.0 (silent) – 1.0 (100%); clamped to 2.0 max
     fade_in_ms: int = 0
     fade_out_ms: int = 0
+    fades: list = field(default_factory=list)   # FadeSegment-like objects
+    cuts: list = field(default_factory=list)    # CutSegment-like objects
+    selection_start_ms: int = -1
+    selection_end_ms: int = -1
+    # Gain factor stacked on top of track.volume (reserved for future
+    # per-clip gain control). Kept at 1.0 for now.
+    gain: float = 1.0
+    # Waveform peaks, shared with split pieces when they come from
+    # the same source. Not in equality; updates asynchronously.
+    waveform: "np.ndarray | None" = field(default=None, compare=False, repr=False)
 
     @property
     def effective_trim_end_ms(self) -> int:
@@ -62,7 +90,6 @@ class AudioTrack:
 
     @property
     def effective_length_ms(self) -> int:
-        """Length this clip occupies on the project timeline (after trim)."""
         return max(0, self.effective_trim_end_ms - self.trim_start_ms)
 
     @property
@@ -72,15 +99,68 @@ class AudioTrack:
         return self.source_path.stem
 
 
+@dataclass
+class AudioTrack:
+    """A timeline lane holding zero or more AudioClips."""
+
+    id: int
+    volume: float = 1.0          # master multiplier, 0.0 – 1.5
+    clips: list[AudioClip] = field(default_factory=list)
+
+    @property
+    def is_loaded(self) -> bool:
+        return any(c.source_path is not None for c in self.clips)
+
+    @property
+    def first_clip(self) -> AudioClip | None:
+        for c in self.clips:
+            if c.source_path is not None:
+                return c
+        return self.clips[0] if self.clips else None
+
+    @property
+    def display_name(self) -> str:
+        """Label for the track header. When the track has clips from
+        different sources, fall back to a "multi-clip" shorthand; with
+        a single source name, show that filename."""
+        names = {c.source_path.stem for c in self.clips if c.source_path is not None}
+        if len(names) == 1:
+            return next(iter(names))
+        if len(names) > 1:
+            return f"{len(self.clips)} clips"
+        return ""
+
+    def extent_ms(self) -> int:
+        """Latest project-ms any clip on this track reaches."""
+        return max(
+            (
+                c.offset_ms + c.effective_length_ms
+                for c in self.clips if c.source_path is not None
+            ),
+            default=0,
+        )
+
+    def clip_at_project_ms(self, project_ms: int) -> AudioClip | None:
+        """Return the first clip whose timeline window contains ``project_ms``."""
+        for c in self.clips:
+            if c.source_path is None:
+                continue
+            if c.offset_ms <= project_ms < c.offset_ms + c.effective_length_ms:
+                return c
+        return None
+
+
 def probe_audio_duration_ms(path: Path) -> int:
-    """Return duration of an audio file in milliseconds, or 0 if probing
-    fails. Uses imageio-ffmpeg's bundled ffprobe alternative — we call
-    ffmpeg with -f null and parse its duration line. Robust but slow;
-    callers should probe once per load and cache the result on the
-    AudioTrack.
+    """Return duration of an audio stream in ms, or 0 if probing fails
+    OR the file contains no audio stream at all.
+
+    Supports both audio files (mp3/wav/etc.) and video files with an
+    audio track (mp4/mov/etc.) — ffmpeg's ``-i`` output always lists
+    ``Stream #...: Audio: ...`` for decodable audio streams, so a
+    simple substring search distinguishes "has audio" from "video-only
+    file" even when the container reports a duration.
     """
     try:
-        # ffmpeg -i input.mp3 2>&1 | grep Duration → "Duration: HH:MM:SS.ms"
         import re
         import subprocess
         import sys
@@ -97,10 +177,12 @@ def probe_audio_duration_ms(path: Path) -> int:
                 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
             ),
         )
-        # ffmpeg writes probing info to stderr even on success (rc=1 when
-        # no output file is given; that's expected).
+        stderr = proc.stderr or ""
+        # Reject files that advertise only video / data / subtitle streams.
+        if "Audio:" not in stderr:
+            return 0
         m = re.search(
-            r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", proc.stderr or ""
+            r"Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)", stderr
         )
         if not m:
             return 0
@@ -110,307 +192,467 @@ def probe_audio_duration_ms(path: Path) -> int:
         return 0
 
 
+class WaveformExtractor(QThread):
+    """Background waveform-peak extractor. Emits ``ready(clip_id, peaks)``
+    on success, ``failed(clip_id, reason)`` on decode failure. Tagged
+    with the AudioClip id so the editor can route results correctly."""
+
+    ready = Signal(int, object)  # clip_id, np.ndarray
+    failed = Signal(int, str)
+
+    def __init__(self, clip_id: int, path: Path) -> None:
+        super().__init__()
+        self._clip_id = clip_id
+        self._path = Path(path)
+
+    def run(self) -> None:
+        import sys
+        try:
+            import subprocess
+
+            import numpy as np
+            from imageio_ffmpeg import get_ffmpeg_exe
+
+            ffmpeg = get_ffmpeg_exe()
+            target_sr = 8000
+            cmd = [
+                ffmpeg,
+                "-nostdin",
+                "-v", "error",
+                "-i", str(self._path),
+                # Explicitly pick the first audio stream. For video
+                # containers (mp4/mov), ``-vn`` alone sometimes leaves
+                # ffmpeg trying to copy subtitle/data streams and fail;
+                # ``-map 0:a:0`` avoids that.
+                "-map", "0:a:0",
+                "-ac", "1",
+                "-ar", str(target_sr),
+                "-f", "s16le",
+                "-acodec", "pcm_s16le",
+                "pipe:1",
+            ]
+            proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                creationflags=(
+                    0x08000000 if sys.platform == "win32" else 0
+                ),
+            )
+            raw, err = proc.communicate()
+            if proc.returncode != 0 or not raw:
+                err_text = (err or b"").decode("utf-8", errors="replace").strip()
+                print(
+                    f"[waveform] ffmpeg failed for {self._path.name}: "
+                    f"rc={proc.returncode} err={err_text[-300:]}",
+                    file=sys.stderr, flush=True,
+                )
+                self.failed.emit(
+                    self._clip_id,
+                    err_text or f"ffmpeg exited {proc.returncode}",
+                )
+                return
+
+            samples = np.frombuffer(raw, dtype=np.int16)
+            if samples.size == 0:
+                self.failed.emit(self._clip_id, "empty decoded stream")
+                return
+
+            samples_per_bucket = max(1, target_sr // WAVEFORM_BUCKETS_PER_SEC)
+            n_buckets = samples.size // samples_per_bucket
+            if n_buckets == 0:
+                self.failed.emit(self._clip_id, "audio too short for peaks")
+                return
+            samples = samples[: n_buckets * samples_per_bucket]
+            buckets = samples.reshape(n_buckets, samples_per_bucket)
+            peaks = (np.abs(buckets).max(axis=1).astype(np.float32)) / 32768.0
+            self.ready.emit(self._clip_id, peaks)
+        except Exception as exc:
+            print(
+                f"[waveform] extractor crashed for {self._path.name}: {exc!r}",
+                file=sys.stderr, flush=True,
+            )
+            try:
+                self.failed.emit(self._clip_id, str(exc))
+            except Exception:
+                pass
+
+
+# ============================== preview mixer ==============================
+
+
 class AudioMixer(QObject):
-    """Synchronizes multiple ``AudioTrack`` playbacks with a ``ProjectPlayer``.
+    """Per-clip ``QMediaPlayer`` synchronization engine.
 
-    Each audio track gets its own ``QMediaPlayer`` + ``QAudioOutput``. The
-    mixer listens to the project player's state / position / duration
-    changes and:
+    One QMediaPlayer per live clip. As the project player moves, we
+    start / stop / seek each clip's player so only the clips whose
+    window contains the current time are audible.
 
-    - **Seek** → for each track, compute the track-local source position
-      and ``setPosition`` on its player. If the project time falls
-      outside the track's [offset, offset+length) window, pause it.
-    - **Play** → start any track whose current window contains the
-      project position; leave others paused.
-    - **Pause / Stop** → pause every track.
-    - **Volume** / fade → applied via QAudioOutput.setVolume using a
-      simple linear ramp computed at each tick.
-
-    The mixer also exposes ``add_track`` / ``remove_track`` /
-    ``update_track`` so the editor can push model changes in. Tracks are
-    identified by their ``id`` field.
+    Volume per clip at time t = track.volume × clip.gain × fade-envelope.
     """
 
     def __init__(self, parent: QObject | None = None) -> None:
         super().__init__(parent)
         self._tracks: dict[int, AudioTrack] = {}
-        self._players: dict[int, QMediaPlayer] = {}
-        self._outputs: dict[int, QAudioOutput] = {}
+        # clip_id → (QMediaPlayer, QAudioOutput, track_id)
+        self._players: dict[int, tuple[QMediaPlayer, QAudioOutput, int]] = {}
         self._project_playing: bool = False
         self._project_position_ms: int = 0
-        # Fade ramp ticks (~33 Hz) — only active while playing.
         self._volume_timer = QTimer(self)
         self._volume_timer.setInterval(30)
         self._volume_timer.timeout.connect(self._apply_volumes)
 
-    # ---------- track lifecycle ----------
+    # ---------- lifecycle ----------
 
     def add_track(self, track: AudioTrack) -> None:
         self._tracks[track.id] = track
-        if track.source_path is not None:
-            self._ensure_player(track)
+        for clip in track.clips:
+            if clip.source_path is not None:
+                self._ensure_player(clip, track.id)
 
     def remove_track(self, track_id: int) -> None:
-        self._tracks.pop(track_id, None)
-        player = self._players.pop(track_id, None)
-        if player is not None:
-            try:
-                player.stop()
-                player.setSource(QUrl())
-            except Exception:
-                pass
-            player.deleteLater()
-        out = self._outputs.pop(track_id, None)
-        if out is not None:
-            out.deleteLater()
+        track = self._tracks.pop(track_id, None)
+        if track is not None:
+            for clip in list(track.clips):
+                self._remove_player(clip.id)
 
     def update_track(self, track: AudioTrack) -> None:
-        """Called when a track's source / offset / trim / volume / fades
-        change. Re-syncs the underlying QMediaPlayer to match."""
+        """Caller invokes after any structural change (clip added,
+        removed, source swapped, trim adjusted). Rebuilds the set of
+        live players to match ``track.clips`` exactly."""
         self._tracks[track.id] = track
-        if track.source_path is None:
-            # Source cleared — tear down player if any.
-            player = self._players.pop(track.id, None)
-            if player is not None:
-                try:
-                    player.stop()
-                    player.setSource(QUrl())
-                except Exception:
-                    pass
-                player.deleteLater()
-            out = self._outputs.pop(track.id, None)
-            if out is not None:
-                out.deleteLater()
-            return
-        self._ensure_player(track)
-        self._sync_to_project_position(track.id)
+        desired_ids = {c.id for c in track.clips if c.source_path is not None}
+        # Drop players for clips that no longer exist / lost their source.
+        for cid, (_p, _o, tid) in list(self._players.items()):
+            if tid == track.id and cid not in desired_ids:
+                self._remove_player(cid)
+        for clip in track.clips:
+            if clip.source_path is None:
+                continue
+            self._ensure_player(clip, track.id)
+        # After structural update, resync positions immediately.
+        for clip in track.clips:
+            if clip.id in self._players:
+                self._sync_clip_to_project(clip.id)
 
-    def _ensure_player(self, track: AudioTrack) -> None:
-        if track.source_path is None:
+    def clear(self) -> None:
+        for cid in list(self._players.keys()):
+            self._remove_player(cid)
+        self._tracks.clear()
+
+    def _ensure_player(self, clip: AudioClip, track_id: int) -> None:
+        if clip.source_path is None:
             return
-        player = self._players.get(track.id)
-        if player is None:
+        existing = self._players.get(clip.id)
+        if existing is None:
             output = QAudioOutput(self)
             player = QMediaPlayer(self)
             player.setAudioOutput(output)
-            self._players[track.id] = player
-            self._outputs[track.id] = output
-        # (Re)set source if changed.
-        current = player.source()
-        new_url = QUrl.fromLocalFile(str(track.source_path))
-        if current != new_url:
+            self._players[clip.id] = (player, output, track_id)
+        player, output, _tid = self._players[clip.id]
+        new_url = QUrl.fromLocalFile(str(clip.source_path))
+        if player.source() != new_url:
             player.setSource(new_url)
 
-    def clear(self) -> None:
-        for tid in list(self._players.keys()):
-            self.remove_track(tid)
-        self._tracks.clear()
+    def _remove_player(self, clip_id: int) -> None:
+        entry = self._players.pop(clip_id, None)
+        if entry is None:
+            return
+        player, output, _tid = entry
+        try:
+            player.stop()
+            player.setSource(QUrl())
+        except Exception:
+            pass
+        player.deleteLater()
+        output.deleteLater()
 
-    # ---------- project player sync ----------
+    # ---------- ProjectPlayer sync ----------
 
     @Slot(object)
     def on_state_changed(self, state) -> None:
-        """Accepts the PlayerState enum from ``ProjectPlayer``."""
         from app.simple_video_player import PlayerState
 
         if state is PlayerState.PLAYING:
             self._project_playing = True
-            self._resume_all()
+            for cid in self._players:
+                self._sync_clip_to_project(cid)
             self._volume_timer.start()
         else:
             self._project_playing = False
-            self._pause_all()
+            for player, _o, _t in self._players.values():
+                try:
+                    player.pause()
+                except Exception:
+                    pass
             self._volume_timer.stop()
 
     @Slot(int)
     def on_position_changed(self, ms: int) -> None:
         self._project_position_ms = max(0, int(ms))
-        # While playing we let each QMediaPlayer run at its own cadence
-        # (saves seek thrash). When paused/scrubbed, ProjectPlayer emits
-        # position_changed after set_position → re-sync every track.
         if not self._project_playing:
-            for tid in self._players:
-                self._sync_to_project_position(tid)
+            for cid in self._players:
+                self._sync_clip_to_project(cid)
 
-    def _resume_all(self) -> None:
-        for tid in self._players:
-            self._sync_to_project_position(tid)
-
-    def _pause_all(self) -> None:
-        for player in self._players.values():
-            try:
-                player.pause()
-            except Exception:
-                pass
-
-    def _sync_to_project_position(self, track_id: int) -> None:
+    def _sync_clip_to_project(self, clip_id: int) -> None:
+        entry = self._players.get(clip_id)
+        if entry is None:
+            return
+        player, _output, track_id = entry
         track = self._tracks.get(track_id)
-        player = self._players.get(track_id)
-        if track is None or player is None:
+        if track is None:
+            return
+        clip = next((c for c in track.clips if c.id == clip_id), None)
+        if clip is None or clip.source_path is None:
             return
         project_ms = self._project_position_ms
-        if not self._is_within_window(track, project_ms):
+        if not self._is_within_window(clip, project_ms):
             try:
                 player.pause()
             except Exception:
                 pass
             return
-        src_ms = track.trim_start_ms + (project_ms - track.offset_ms)
-        src_ms = max(0, min(src_ms, track.effective_trim_end_ms))
+        src_ms = clip.trim_start_ms + (project_ms - clip.offset_ms)
+        src_ms = max(0, min(src_ms, clip.effective_trim_end_ms))
         try:
-            # Qt's setPosition is in ms. Only seek when drift > 80 ms to
-            # avoid fighting the decoder's forward progress.
             if abs(player.position() - src_ms) > 80:
                 player.setPosition(int(src_ms))
-            if self._project_playing and player.playbackState() != QMediaPlayer.PlaybackState.PlayingState:
+            if (
+                self._project_playing
+                and player.playbackState() != QMediaPlayer.PlaybackState.PlayingState
+            ):
                 player.play()
         except Exception:
             pass
 
     @staticmethod
-    def _is_within_window(track: AudioTrack, project_ms: int) -> bool:
-        start = track.offset_ms
-        end = track.offset_ms + track.effective_length_ms
+    def _is_within_window(clip: AudioClip, project_ms: int) -> bool:
+        start = clip.offset_ms
+        end = clip.offset_ms + clip.effective_length_ms
         return start <= project_ms < end
 
     def _apply_volumes(self) -> None:
-        """Per-tick volume update applying base volume + fade ramps."""
-        for tid, track in self._tracks.items():
-            out = self._outputs.get(tid)
-            if out is None:
+        for cid, (_p, output, tid) in self._players.items():
+            track = self._tracks.get(tid)
+            if track is None:
                 continue
-            v = self._volume_at(track, self._project_position_ms)
+            clip = next((c for c in track.clips if c.id == cid), None)
+            if clip is None:
+                continue
+            v = self._volume_at(track, clip, self._project_position_ms)
             try:
-                # QAudioOutput.setVolume expects [0.0, 1.0]. Clamp.
-                out.setVolume(max(0.0, min(1.0, v)))
+                output.setVolume(max(0.0, min(1.0, v)))
             except Exception:
                 pass
 
     @staticmethod
-    def _volume_at(track: AudioTrack, project_ms: int) -> float:
-        if not AudioMixer._is_within_window(track, project_ms):
+    def _volume_at(track: AudioTrack, clip: AudioClip, project_ms: int) -> float:
+        if not AudioMixer._is_within_window(clip, project_ms):
             return 0.0
-        base = max(0.0, track.volume)
-        local_ms = project_ms - track.offset_ms
-        end_ms = track.effective_length_ms
-        # Fade in ramp from 0 → 1 across fade_in_ms
-        if track.fade_in_ms > 0 and local_ms < track.fade_in_ms:
-            base *= local_ms / track.fade_in_ms
-        # Fade out ramp from 1 → 0 across last fade_out_ms
-        if track.fade_out_ms > 0:
-            fo_start = end_ms - track.fade_out_ms
+        base = max(0.0, track.volume) * max(0.0, clip.gain)
+        local_ms = project_ms - clip.offset_ms
+        end_ms = clip.effective_length_ms
+        source_ms = clip.trim_start_ms + local_ms
+
+        # Edge fade-in / fade-out (back-compat).
+        if clip.fade_in_ms > 0 and local_ms < clip.fade_in_ms:
+            base *= local_ms / clip.fade_in_ms
+        if clip.fade_out_ms > 0:
+            fo_start = end_ms - clip.fade_out_ms
             if local_ms > fo_start:
                 remaining = max(0, end_ms - local_ms)
-                base *= remaining / track.fade_out_ms
+                base *= remaining / clip.fade_out_ms
+
+        # Cuts — clip-local ms domain.
+        for cut in clip.cuts:
+            if cut.start_ms <= local_ms < cut.end_ms:
+                return 0.0
+
+        # Drag-drop fade actors (kind = in / out / both).
+        for f in clip.fades:
+            f_start = f.start_ms
+            f_end = f.end_ms
+            if source_ms < f_start or source_ms > f_end or f_end <= f_start:
+                continue
+            kind = getattr(f, "kind", "both")
+            span = f_end - f_start
+            if kind == "in":
+                t = (source_ms - f_start) / span
+                base *= max(0.0, min(1.0, t))
+            elif kind == "out":
+                t = (source_ms - f_start) / span
+                base *= max(0.0, min(1.0, 1.0 - t))
+            else:
+                mid = f_start + span // 2
+                if source_ms < mid:
+                    t = (source_ms - f_start) / max(1, mid - f_start)
+                    base *= max(0.0, min(1.0, 1.0 - t))
+                else:
+                    t = (source_ms - mid) / max(1, f_end - mid)
+                    base *= max(0.0, min(1.0, t))
         return base
 
 
-# =================== FFmpeg filter-graph helpers ===================
+# ============================== export pipeline ==============================
+
+
+def _subtract_cuts(
+    start_ms: int, end_ms: int, cuts: list
+) -> list[tuple[int, int]]:
+    """Return disjoint ranges inside [start_ms, end_ms] with each cut's
+    [start_ms, end_ms) removed. Cuts are clip-local ms (same domain as
+    the range). Empty list means the whole window was cut out."""
+    ranges: list[tuple[int, int]] = [(start_ms, end_ms)]
+    for cut in cuts:
+        try:
+            cs = int(cut.start_ms)
+            ce = int(cut.end_ms)
+        except Exception:
+            continue
+        if ce <= cs:
+            continue
+        new_ranges: list[tuple[int, int]] = []
+        for s, e in ranges:
+            if ce <= s or cs >= e:
+                new_ranges.append((s, e))
+                continue
+            if s < cs:
+                new_ranges.append((s, cs))
+            if e > ce:
+                new_ranges.append((ce, e))
+        ranges = new_ranges
+    return [(s, e) for s, e in ranges if e > s]
 
 
 def build_audio_filter(
-    audio_tracks: list[AudioTrack],
+    tracks: list[AudioTrack],
     video_input_count: int,
     project_duration_ms: int,
 ) -> tuple[str, list[str], int]:
     """Build the audio portion of an FFmpeg filter_complex.
 
-    Parameters
-    ----------
-    audio_tracks:
-        AudioTracks with a valid source_path and positive effective length.
-    video_input_count:
-        How many inputs (``-i``) the video side already consumed. Audio
-        files get appended after those, so the first audio input index
-        is ``video_input_count`` and subsequent tracks increment from
-        there.
-    project_duration_ms:
-        Final project duration on the output timeline. Each audio
-        track's output is capped to this so a long BGM tail doesn't
-        extend the MP4 past the video.
+    Iterates over every loaded clip of every track. Each clip becomes
+    an independent ffmpeg -i input with its own atrim / adelay /
+    volume / fade chain; everything amixes together at the end.
 
-    Returns
-    -------
-    (audio_graph, audio_inputs, audio_input_count)
-        ``audio_graph`` is the semicolon-joined filter chain terminating
-        in ``[outa]`` — empty string if ``audio_tracks`` is empty.
-        ``audio_inputs`` is the list of ``-i <path>`` pairs to append to
-        the ffmpeg command. ``audio_input_count`` is the number of
-        inputs consumed (== number of valid audio tracks).
+    Returns (graph, -i list, number_of_audio_inputs).
     """
-    valid = [
-        t for t in audio_tracks
-        if t.source_path is not None and t.effective_length_ms > 0
-    ]
-    if not valid:
+    clips: list[tuple[AudioTrack, AudioClip]] = []
+    for t in tracks:
+        for c in t.clips:
+            if c.source_path is not None and c.effective_length_ms > 0:
+                clips.append((t, c))
+    if not clips:
         return "", [], 0
 
-    # -i flags to append after the video-side inputs.
     inputs: list[str] = []
-    for t in valid:
-        inputs.extend(["-i", str(t.source_path)])
+    for _t, c in clips:
+        inputs.extend(["-i", str(c.source_path)])
 
     parts: list[str] = []
     amix_labels: list[str] = []
     out_cap_s = max(0.001, project_duration_ms / 1000.0)
 
-    for rel_idx, t in enumerate(valid):
-        input_idx = video_input_count + rel_idx
-        trim_s = t.trim_start_ms / 1000.0
-        trim_end_s = t.effective_trim_end_ms / 1000.0
-        delay_ms = max(0, int(t.offset_ms))
-        vol = max(0.0, min(2.0, float(t.volume)))
-        label_atrim = f"[a{rel_idx}t]"
-        label_adelay = f"[a{rel_idx}d]"
-        label_vol = f"[a{rel_idx}v]"
-        label_final = f"[a{rel_idx}]"
+    for idx, (track, clip) in enumerate(clips):
+        input_idx = video_input_count + idx
+        delay_ms = max(0, int(clip.offset_ms))
+        vol = max(0.0, min(2.0, float(track.volume) * float(clip.gain)))
+        label_final = f"[a{idx}]"
 
-        # 1. Trim source to [trim_start, trim_end].
-        parts.append(
-            f"[{input_idx}:a]atrim={trim_s:.3f}:{trim_end_s:.3f},"
-            f"asetpts=PTS-STARTPTS{label_atrim}"
-        )
+        # Survive cuts: local ranges (clip-local ms, clip.cuts domain) →
+        # source ranges that actually play back.
+        surviving_local = _subtract_cuts(0, clip.effective_length_ms, clip.cuts)
 
-        # 2. Delay to place on project timeline. `adelay=ms|ms` (per
-        #    channel). Use ``all=1`` to apply to every channel.
-        if delay_ms > 0:
+        piece_labels: list[str] = []
+        for pi, (ls, le) in enumerate(surviving_local):
+            src_s = (clip.trim_start_ms + ls) / 1000.0
+            src_e = (clip.trim_start_ms + le) / 1000.0
+            plabel = f"[a{idx}p{pi}]"
             parts.append(
-                f"{label_atrim}adelay={delay_ms}:all=1{label_adelay}"
+                f"[{input_idx}:a]atrim={src_s:.3f}:{src_e:.3f},"
+                f"asetpts=PTS-STARTPTS{plabel}"
             )
-            current = label_adelay
+            piece_labels.append(plabel)
+
+        if not piece_labels:
+            continue
+
+        if len(piece_labels) == 1:
+            current = piece_labels[0]
         else:
-            current = label_atrim
+            concat_label = f"[a{idx}c]"
+            parts.append(
+                "".join(piece_labels)
+                + f"concat=n={len(piece_labels)}:v=0:a=1{concat_label}"
+            )
+            current = concat_label
 
-        # 3. Volume scalar.
+        if delay_ms > 0:
+            dlabel = f"[a{idx}d]"
+            parts.append(f"{current}adelay={delay_ms}:all=1{dlabel}")
+            current = dlabel
+
         if abs(vol - 1.0) > 1e-3:
-            parts.append(f"{current}volume={vol:.3f}{label_vol}")
-            current = label_vol
+            vlabel = f"[a{idx}v]"
+            parts.append(f"{current}volume={vol:.3f}{vlabel}")
+            current = vlabel
 
-        # 4. Fade in / out. FFmpeg afade uses seconds + duration.
-        local_len_ms = t.effective_length_ms
+        local_len_ms = clip.effective_length_ms
         fade_filters: list[str] = []
-        if t.fade_in_ms > 0:
-            fi_s = (t.offset_ms) / 1000.0
-            fi_d = max(0.01, t.fade_in_ms / 1000.0)
+        if clip.fade_in_ms > 0:
+            fi_s = clip.offset_ms / 1000.0
+            fi_d = max(0.01, clip.fade_in_ms / 1000.0)
             fade_filters.append(f"afade=t=in:st={fi_s:.3f}:d={fi_d:.3f}")
-        if t.fade_out_ms > 0:
-            fo_st = (t.offset_ms + local_len_ms - t.fade_out_ms) / 1000.0
-            fo_d = max(0.01, t.fade_out_ms / 1000.0)
+        if clip.fade_out_ms > 0:
+            fo_st = (clip.offset_ms + local_len_ms - clip.fade_out_ms) / 1000.0
+            fo_d = max(0.01, clip.fade_out_ms / 1000.0)
             fade_filters.append(f"afade=t=out:st={fo_st:.3f}:d={fo_d:.3f}")
+
+        for f in clip.fades:
+            try:
+                f_start = int(f.start_ms)
+                f_end = int(f.end_ms)
+                f_kind = getattr(f, "kind", "both")
+            except Exception:
+                continue
+            if f_end <= f_start:
+                continue
+            proj_start = clip.offset_ms + (f_start - clip.trim_start_ms)
+            proj_end = clip.offset_ms + (f_end - clip.trim_start_ms)
+            span = (proj_end - proj_start) / 1000.0
+            if span <= 0:
+                continue
+            if f_kind == "in":
+                fade_filters.append(
+                    f"afade=t=in:st={proj_start / 1000.0:.3f}:d={span:.3f}"
+                )
+            elif f_kind == "out":
+                fade_filters.append(
+                    f"afade=t=out:st={proj_start / 1000.0:.3f}:d={span:.3f}"
+                )
+            else:
+                half = span / 2.0
+                mid_s = proj_start / 1000.0 + half
+                fade_filters.append(
+                    f"afade=t=out:st={proj_start / 1000.0:.3f}:d={half:.3f}"
+                )
+                fade_filters.append(
+                    f"afade=t=in:st={mid_s:.3f}:d={half:.3f}"
+                )
+
         if fade_filters:
             parts.append(f"{current}{','.join(fade_filters)}{label_final}")
         else:
-            # rename current label to the canonical per-track label
             parts.append(f"{current}anull{label_final}")
 
         amix_labels.append(label_final)
 
+    if not amix_labels:
+        return "", [], 0
+
     if len(amix_labels) == 1:
-        # Single track → just alias [outa].
         parts.append(f"{amix_labels[0]}atrim=0:{out_cap_s:.3f}[outa]")
     else:
-        # amix sums the inputs; ``normalize=0`` preserves per-track
-        # volumes rather than scaling down by 1/N. Cap to project length.
         parts.append(
             "".join(amix_labels)
             + f"amix=inputs={len(amix_labels)}:normalize=0:"
@@ -418,4 +660,4 @@ def build_audio_filter(
         )
         parts.append(f"[amixed]atrim=0:{out_cap_s:.3f}[outa]")
 
-    return ";".join(parts), inputs, len(valid)
+    return ";".join(parts), inputs, len(clips)

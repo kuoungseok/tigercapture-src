@@ -1,0 +1,675 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Sound Editor - Jog Knob UI</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+  body {
+    background: #0a0a0b;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Pretendard', sans-serif;
+    padding: 40px 20px;
+    color: #fff;
+    min-height: 100vh;
+  }
+  .container { max-width: 1100px; margin: 0 auto; }
+
+  .editor-window {
+    background: #1a1a1c;
+    border: 1px solid #3a3a3e;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  }
+
+  /* 타이틀바 */
+  .title-bar {
+    background: #2a2a30;
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #3a3a3e;
+  }
+  .title-left { display: flex; align-items: center; gap: 10px; }
+  .title-icon { font-size: 16px; }
+  .title-text { font-size: 13px; font-weight: 600; color: #fff; }
+  .title-sub { font-size: 12px; color: #8a8a92; }
+
+  /* 파일 정보 */
+  .file-info {
+    padding: 14px 20px;
+    background: #1e1e22;
+    border-bottom: 1px solid #2a2a30;
+  }
+  .file-name { font-size: 16px; font-weight: 600; margin-bottom: 8px; }
+  .file-meta { display: flex; gap: 16px; font-size: 11px; color: #8a8a92; font-family: Monaco, monospace; }
+  .file-meta span { display: flex; align-items: center; gap: 4px; }
+
+  /* 파형 디스플레이 */
+  .waveform-section {
+    background: #0f0f14;
+    padding: 16px 20px;
+    border-bottom: 1px solid #2a2a30;
+  }
+  .waveform {
+    background: #000;
+    border: 1px solid #2a2a30;
+    border-radius: 6px;
+    height: 100px;
+    position: relative;
+    overflow: hidden;
+  }
+  .waveform svg { display: block; width: 100%; height: 100%; }
+  .waveform-playhead {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 25%;
+    width: 2px;
+    background: #D85A30;
+    box-shadow: 0 0 6px rgba(216, 90, 48, 0.8);
+  }
+  .waveform-selection {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    left: 15%;
+    width: 30%;
+    background: rgba(55, 138, 221, 0.15);
+    border-left: 1px solid #378ADD;
+    border-right: 1px solid #378ADD;
+  }
+
+  /* 탭 네비게이션 */
+  .tabs {
+    display: flex;
+    background: #2a2a30;
+    border-bottom: 1px solid #3a3a3e;
+    padding: 0 20px;
+  }
+  .tab {
+    padding: 12px 18px;
+    color: #8a8a92;
+    font-size: 12px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    cursor: pointer;
+    border-bottom: 2px solid transparent;
+    transition: all 0.15s;
+  }
+  .tab:hover { color: #c8c8d0; }
+  .tab.active {
+    color: #4a9bee;
+    border-bottom-color: #378ADD;
+  }
+
+  /* 탭 컨텐츠 */
+  .tab-content {
+    padding: 24px 20px;
+    background: #1a1a1c;
+    min-height: 240px;
+  }
+
+  /* 노브 그리드 */
+  .knob-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 20px;
+  }
+
+  /* 조그 노브 */
+  .knob-unit {
+    background: #0f0f14;
+    border: 1px solid #2a2a30;
+    border-radius: 8px;
+    padding: 16px 12px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 10px;
+    position: relative;
+  }
+  .knob-label {
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #8a8a92;
+  }
+  .knob {
+    width: 72px;
+    height: 72px;
+    position: relative;
+    cursor: grab;
+  }
+  .knob:active { cursor: grabbing; }
+  .knob svg { width: 100%; height: 100%; }
+  .knob-value {
+    font-size: 13px;
+    font-weight: 700;
+    font-family: Monaco, monospace;
+    color: #fff;
+    font-variant-numeric: tabular-nums;
+  }
+  .knob-range {
+    font-size: 9px;
+    color: #5a5a62;
+    font-family: Monaco, monospace;
+  }
+
+  /* Tier 뱃지 */
+  .tier-badge {
+    position: absolute;
+    top: 6px;
+    right: 8px;
+    font-size: 9px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-weight: 700;
+    font-family: Monaco, monospace;
+  }
+  .tier-1 { background: rgba(93, 202, 165, 0.15); color: #5DCAA5; border: 1px solid #5DCAA5; }
+  .tier-2 { background: rgba(55, 138, 221, 0.15); color: #378ADD; border: 1px solid #378ADD; }
+  .tier-3 { background: rgba(216, 90, 48, 0.15); color: #D85A30; border: 1px solid #D85A30; }
+
+  /* 액션 버튼 그리드 */
+  .action-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 16px;
+    flex-wrap: wrap;
+  }
+  .action-btn {
+    padding: 8px 14px;
+    background: #2a2a30;
+    border: 1px solid #3a3a3e;
+    color: #c8c8d0;
+    border-radius: 5px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .action-btn:hover { background: #3a3a3e; color: #fff; }
+  .action-btn.active {
+    background: #378ADD;
+    border-color: #4a9bee;
+    color: #fff;
+  }
+  .action-btn.danger { color: #D85A30; }
+  .action-btn.danger:hover { background: rgba(216, 90, 48, 0.15); }
+
+  /* EQ 커브 시각화 */
+  .eq-visualization {
+    background: #000;
+    border: 1px solid #2a2a30;
+    border-radius: 6px;
+    height: 100px;
+    margin-top: 16px;
+    position: relative;
+    overflow: hidden;
+  }
+  .eq-grid {
+    position: absolute;
+    inset: 0;
+    background-image:
+      linear-gradient(rgba(255,255,255,0.03) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(255,255,255,0.03) 1px, transparent 1px);
+    background-size: 40px 20px;
+  }
+  .eq-curve {
+    position: absolute;
+    inset: 0;
+  }
+
+  /* 프리셋 */
+  .preset-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid #2a2a30;
+  }
+  .preset-label {
+    font-size: 11px;
+    color: #8a8a92;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .preset-btn {
+    padding: 5px 11px;
+    background: transparent;
+    border: 1px solid #3a3a3e;
+    color: #c8c8d0;
+    border-radius: 4px;
+    font-size: 11px;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .preset-btn:hover { background: #2a2a30; color: #fff; }
+
+  /* Transport 바 */
+  .transport {
+    background: #0f0f14;
+    padding: 14px 20px;
+    border-top: 1px solid #2a2a30;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .transport-left { display: flex; align-items: center; gap: 8px; }
+  .transport-btn {
+    width: 36px;
+    height: 36px;
+    background: #2a2a30;
+    border: 1px solid #3a3a3e;
+    border-radius: 6px;
+    color: #c8c8d0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s;
+  }
+  .transport-btn:hover { background: #3a3a3e; color: #fff; }
+  .transport-btn.primary {
+    background: #378ADD;
+    border-color: #4a9bee;
+    color: #fff;
+    width: 42px;
+    height: 42px;
+  }
+  .transport-time {
+    font-family: Monaco, monospace;
+    font-size: 13px;
+    font-weight: 700;
+    color: #fff;
+    margin-left: 12px;
+  }
+  .transport-total { color: #8a8a92; font-size: 12px; }
+
+  /* 설명 패널 */
+  .info-panel {
+    background: #141418;
+    border: 1px solid #2a2a30;
+    border-left: 3px solid #378ADD;
+    padding: 16px 20px;
+    border-radius: 4px;
+    margin-top: 30px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: #c8c8d0;
+  }
+  .info-panel h3 { color: #fff; font-size: 14px; margin-bottom: 10px; }
+  .info-panel code {
+    background: #000;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: Monaco, monospace;
+    font-size: 11px;
+    color: #5DCAA5;
+  }
+  .info-panel kbd {
+    background: #3a3a3e;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-family: Monaco, monospace;
+    font-size: 10px;
+    color: #fff;
+    border: 1px solid #4a4a52;
+    box-shadow: 0 1px 0 #000;
+  }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <div class="editor-window">
+
+    <!-- 타이틀바 -->
+    <div class="title-bar">
+      <div class="title-left">
+        <span class="title-icon">🎵</span>
+        <span class="title-text">Sound Editor</span>
+        <span class="title-sub">— audio_ace_step_1_t2a_instrumentals-1</span>
+      </div>
+      <div style="display: flex; gap: 8px; color: #8a8a92;">
+        <span style="cursor: pointer;">−</span>
+        <span style="cursor: pointer;">□</span>
+        <span style="cursor: pointer;">×</span>
+      </div>
+    </div>
+
+    <!-- 파일 정보 -->
+    <div class="file-info">
+      <div class="file-name">audio_ace_step_1_t2a_instrumentals-1.mp3</div>
+      <div class="file-meta">
+        <span>⏱ Length: 29.94s</span>
+        <span>✂ Cuts: 0</span>
+        <span>🌀 Fades: 0</span>
+        <span>📊 Sample: 44.1kHz · 16-bit</span>
+      </div>
+    </div>
+
+    <!-- 파형 -->
+    <div class="waveform-section">
+      <div class="waveform">
+        <svg viewBox="0 0 800 100" preserveAspectRatio="none">
+          <!-- 파형 그리기 -->
+          <g stroke="#c8c8d0" stroke-width="1">
+            <script>/* 파형은 path로 */</script>
+          </g>
+          <path d="M0,50 Q20,30 40,45 T80,40 T120,55 T160,35 T200,50 T240,25 T280,45 T320,30 T360,55 T400,20 T440,50 T480,30 T520,55 T560,25 T600,45 T640,35 T680,50 T720,30 T760,45 T800,50"
+                stroke="#4a9bee" stroke-width="1.5" fill="none" opacity="0.8"/>
+          <path d="M0,50 Q20,70 40,55 T80,60 T120,45 T160,65 T200,50 T240,75 T280,55 T320,70 T360,45 T400,80 T440,50 T480,70 T520,45 T560,75 T600,55 T640,65 T680,50 T720,70 T760,55 T800,50"
+                stroke="#4a9bee" stroke-width="1.5" fill="none" opacity="0.8"/>
+          <!-- 파형 필 -->
+          <rect x="0" y="48" width="800" height="4" fill="#378ADD" opacity="0.3"/>
+        </svg>
+        <div class="waveform-selection"></div>
+        <div class="waveform-playhead"></div>
+      </div>
+    </div>
+
+    <!-- 탭 -->
+    <div class="tabs">
+      <div class="tab active">Basic</div>
+      <div class="tab">EQ</div>
+      <div class="tab">Dynamics</div>
+      <div class="tab">Effects</div>
+      <div class="tab">Advanced</div>
+    </div>
+
+    <!-- 탭 컨텐츠 (Basic) -->
+    <div class="tab-content">
+      <div class="knob-grid">
+
+        <!-- Volume 노브 -->
+        <div class="knob-unit">
+          <span class="tier-badge tier-1">T1</span>
+          <div class="knob-label">Volume</div>
+          <div class="knob">
+            <svg viewBox="0 0 100 100">
+              <!-- 외곽 트랙 -->
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#2a2a30" stroke-width="3"/>
+              <!-- 값 표시 아크 -->
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#4a9bee" stroke-width="3"
+                      stroke-dasharray="198 264" stroke-dashoffset="50"
+                      transform="rotate(-225 50 50)" stroke-linecap="round"/>
+              <!-- 노브 본체 -->
+              <circle cx="50" cy="50" r="30" fill="url(#knobGrad)" stroke="#3a3a3e" stroke-width="1"/>
+              <!-- 인디케이터 라인 -->
+              <line x1="50" y1="28" x2="50" y2="18" stroke="#4a9bee" stroke-width="3" stroke-linecap="round"
+                    transform="rotate(45 50 50)"/>
+              <defs>
+                <radialGradient id="knobGrad" cx="40%" cy="40%">
+                  <stop offset="0%" stop-color="#3a3a42"/>
+                  <stop offset="100%" stop-color="#1c1c22"/>
+                </radialGradient>
+              </defs>
+            </svg>
+          </div>
+          <div class="knob-value">-3.0 dB</div>
+          <div class="knob-range">-∞ ~ +12</div>
+        </div>
+
+        <!-- Pan 노브 -->
+        <div class="knob-unit">
+          <span class="tier-badge tier-1">T1</span>
+          <div class="knob-label">Pan</div>
+          <div class="knob">
+            <svg viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#2a2a30" stroke-width="3"/>
+              <!-- 중앙 기준 아크 -->
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#5DCAA5" stroke-width="3"
+                      stroke-dasharray="0 264" stroke-dashoffset="0"
+                      transform="rotate(-90 50 50)"/>
+              <circle cx="50" cy="50" r="30" fill="url(#knobGrad2)" stroke="#3a3a3e" stroke-width="1"/>
+              <line x1="50" y1="28" x2="50" y2="18" stroke="#5DCAA5" stroke-width="3" stroke-linecap="round"/>
+              <!-- 중앙 마크 -->
+              <line x1="50" y1="5" x2="50" y2="8" stroke="#8a8a92" stroke-width="1"/>
+              <defs>
+                <radialGradient id="knobGrad2" cx="40%" cy="40%">
+                  <stop offset="0%" stop-color="#3a3a42"/>
+                  <stop offset="100%" stop-color="#1c1c22"/>
+                </radialGradient>
+              </defs>
+            </svg>
+          </div>
+          <div class="knob-value">Center</div>
+          <div class="knob-range">L100 ~ R100</div>
+        </div>
+
+        <!-- Fade In 노브 -->
+        <div class="knob-unit">
+          <span class="tier-badge tier-1">T1</span>
+          <div class="knob-label">Fade In</div>
+          <div class="knob">
+            <svg viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#2a2a30" stroke-width="3"/>
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#378ADD" stroke-width="3"
+                      stroke-dasharray="66 264" stroke-dashoffset="0"
+                      transform="rotate(-225 50 50)" stroke-linecap="round"/>
+              <circle cx="50" cy="50" r="30" fill="url(#knobGrad3)" stroke="#3a3a3e" stroke-width="1"/>
+              <line x1="50" y1="28" x2="50" y2="18" stroke="#378ADD" stroke-width="3" stroke-linecap="round"
+                    transform="rotate(-135 50 50)"/>
+              <defs>
+                <radialGradient id="knobGrad3" cx="40%" cy="40%">
+                  <stop offset="0%" stop-color="#3a3a42"/>
+                  <stop offset="100%" stop-color="#1c1c22"/>
+                </radialGradient>
+              </defs>
+            </svg>
+          </div>
+          <div class="knob-value">0.5 s</div>
+          <div class="knob-range">0 ~ 10s</div>
+        </div>
+
+        <!-- Fade Out 노브 -->
+        <div class="knob-unit">
+          <span class="tier-badge tier-1">T1</span>
+          <div class="knob-label">Fade Out</div>
+          <div class="knob">
+            <svg viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#2a2a30" stroke-width="3"/>
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#378ADD" stroke-width="3"
+                      stroke-dasharray="100 264" stroke-dashoffset="0"
+                      transform="rotate(-225 50 50)" stroke-linecap="round"/>
+              <circle cx="50" cy="50" r="30" fill="url(#knobGrad4)" stroke="#3a3a3e" stroke-width="1"/>
+              <line x1="50" y1="28" x2="50" y2="18" stroke="#378ADD" stroke-width="3" stroke-linecap="round"
+                    transform="rotate(-90 50 50)"/>
+              <defs>
+                <radialGradient id="knobGrad4" cx="40%" cy="40%">
+                  <stop offset="0%" stop-color="#3a3a42"/>
+                  <stop offset="100%" stop-color="#1c1c22"/>
+                </radialGradient>
+              </defs>
+            </svg>
+          </div>
+          <div class="knob-value">2.0 s</div>
+          <div class="knob-range">0 ~ 10s</div>
+        </div>
+
+        <!-- Speed 노브 -->
+        <div class="knob-unit">
+          <span class="tier-badge tier-2">T2</span>
+          <div class="knob-label">Speed</div>
+          <div class="knob">
+            <svg viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#2a2a30" stroke-width="3"/>
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#D85A30" stroke-width="3"
+                      stroke-dasharray="132 264" stroke-dashoffset="0"
+                      transform="rotate(-225 50 50)" stroke-linecap="round"/>
+              <circle cx="50" cy="50" r="30" fill="url(#knobGrad5)" stroke="#3a3a3e" stroke-width="1"/>
+              <line x1="50" y1="28" x2="50" y2="18" stroke="#D85A30" stroke-width="3" stroke-linecap="round"
+                    transform="rotate(-45 50 50)"/>
+              <defs>
+                <radialGradient id="knobGrad5" cx="40%" cy="40%">
+                  <stop offset="0%" stop-color="#3a3a42"/>
+                  <stop offset="100%" stop-color="#1c1c22"/>
+                </radialGradient>
+              </defs>
+            </svg>
+          </div>
+          <div class="knob-value">1.0 x</div>
+          <div class="knob-range">0.5 ~ 2.0x</div>
+        </div>
+
+        <!-- Pitch 노브 -->
+        <div class="knob-unit">
+          <span class="tier-badge tier-2">T2</span>
+          <div class="knob-label">Pitch</div>
+          <div class="knob">
+            <svg viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#2a2a30" stroke-width="3"/>
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#D85A30" stroke-width="3"
+                      stroke-dasharray="0 264"
+                      transform="rotate(-90 50 50)"/>
+              <circle cx="50" cy="50" r="30" fill="url(#knobGrad6)" stroke="#3a3a3e" stroke-width="1"/>
+              <line x1="50" y1="28" x2="50" y2="18" stroke="#D85A30" stroke-width="3" stroke-linecap="round"/>
+              <line x1="50" y1="5" x2="50" y2="8" stroke="#8a8a92" stroke-width="1"/>
+              <defs>
+                <radialGradient id="knobGrad6" cx="40%" cy="40%">
+                  <stop offset="0%" stop-color="#3a3a42"/>
+                  <stop offset="100%" stop-color="#1c1c22"/>
+                </radialGradient>
+              </defs>
+            </svg>
+          </div>
+          <div class="knob-value">0 st</div>
+          <div class="knob-range">-12 ~ +12</div>
+        </div>
+
+        <!-- Low Cut 노브 -->
+        <div class="knob-unit">
+          <span class="tier-badge tier-2">T2</span>
+          <div class="knob-label">Low Cut</div>
+          <div class="knob">
+            <svg viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#2a2a30" stroke-width="3"/>
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#378ADD" stroke-width="3"
+                      stroke-dasharray="33 264"
+                      transform="rotate(-225 50 50)" stroke-linecap="round"/>
+              <circle cx="50" cy="50" r="30" fill="url(#knobGrad7)" stroke="#3a3a3e" stroke-width="1"/>
+              <line x1="50" y1="28" x2="50" y2="18" stroke="#378ADD" stroke-width="3" stroke-linecap="round"
+                    transform="rotate(-180 50 50)"/>
+              <defs>
+                <radialGradient id="knobGrad7" cx="40%" cy="40%">
+                  <stop offset="0%" stop-color="#3a3a42"/>
+                  <stop offset="100%" stop-color="#1c1c22"/>
+                </radialGradient>
+              </defs>
+            </svg>
+          </div>
+          <div class="knob-value">80 Hz</div>
+          <div class="knob-range">Off ~ 500Hz</div>
+        </div>
+
+        <!-- Dry/Wet 노브 -->
+        <div class="knob-unit">
+          <span class="tier-badge tier-3">T3</span>
+          <div class="knob-label">Dry / Wet</div>
+          <div class="knob">
+            <svg viewBox="0 0 100 100">
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#2a2a30" stroke-width="3"/>
+              <circle cx="50" cy="50" r="42" fill="none" stroke="#5DCAA5" stroke-width="3"
+                      stroke-dasharray="198 264"
+                      transform="rotate(-225 50 50)" stroke-linecap="round"/>
+              <circle cx="50" cy="50" r="30" fill="url(#knobGrad8)" stroke="#3a3a3e" stroke-width="1"/>
+              <line x1="50" y1="28" x2="50" y2="18" stroke="#5DCAA5" stroke-width="3" stroke-linecap="round"
+                    transform="rotate(45 50 50)"/>
+              <defs>
+                <radialGradient id="knobGrad8" cx="40%" cy="40%">
+                  <stop offset="0%" stop-color="#3a3a42"/>
+                  <stop offset="100%" stop-color="#1c1c22"/>
+                </radialGradient>
+              </defs>
+            </svg>
+          </div>
+          <div class="knob-value">75 %</div>
+          <div class="knob-range">0 ~ 100%</div>
+        </div>
+
+      </div>
+
+      <!-- 액션 버튼 -->
+      <div class="action-row">
+        <button class="action-btn">
+          <svg width="10" height="10" viewBox="0 0 10 10" fill="none"><path d="M2 2L8 8M8 2L2 8" stroke="currentColor" stroke-width="1.5"/></svg>
+          Mute
+        </button>
+        <button class="action-btn active">Solo</button>
+        <button class="action-btn">Normalize</button>
+        <button class="action-btn">Reverse</button>
+        <button class="action-btn">Fade Curve: Linear</button>
+        <button class="action-btn danger">↺ Reset All</button>
+      </div>
+
+      <!-- 프리셋 -->
+      <div class="preset-row">
+        <span class="preset-label">Presets:</span>
+        <button class="preset-btn">Voice Recording</button>
+        <button class="preset-btn">Background Music</button>
+        <button class="preset-btn">Game Audio</button>
+        <button class="preset-btn">Podcast</button>
+        <button class="preset-btn">+ Save Current</button>
+      </div>
+    </div>
+
+    <!-- Transport -->
+    <div class="transport">
+      <div class="transport-left">
+        <button class="transport-btn" title="이전 마커">⏮</button>
+        <button class="transport-btn primary" title="재생/정지">▶</button>
+        <button class="transport-btn" title="다음 마커">⏭</button>
+        <button class="transport-btn" title="루프">🔁</button>
+        <button class="transport-btn" title="마커 추가">📌</button>
+        <span class="transport-time">0:12.35 <span class="transport-total">/ 0:29.94</span></span>
+      </div>
+      <div class="transport-left">
+        <button class="action-btn">Apply</button>
+        <button class="action-btn">Export Audio</button>
+        <button class="action-btn" style="background: #378ADD; border-color: #4a9bee; color: #fff;">Close</button>
+      </div>
+    </div>
+
+  </div>
+
+  <!-- 설명 패널 -->
+  <div class="info-panel">
+    <h3>💡 조그 노브 사용법</h3>
+    <p style="margin-bottom: 10px;">
+      • <strong>클릭 + 위아래 드래그</strong> — 값 조절 (기본)<br>
+      • <strong>마우스 휠 스크롤</strong> — 빠른 조절<br>
+      • <kbd>Shift</kbd> + 드래그 — 정밀 모드 (10배 세밀하게)<br>
+      • <kbd>Ctrl</kbd> + 드래그 — 초정밀 모드 (100배 세밀하게)<br>
+      • <strong>더블클릭</strong> — 기본값 리셋<br>
+      • <strong>우클릭</strong> — 값 직접 입력 메뉴
+    </p>
+    <h3 style="margin-top: 16px;">🎨 노브 색상 의미</h3>
+    <p>
+      • <span style="color: #4a9bee;">파란색</span> — 기본 파라미터 (Volume, Fade)<br>
+      • <span style="color: #5DCAA5;">초록색</span> — 밸런스/믹스 (Pan, Dry/Wet)<br>
+      • <span style="color: #D85A30;">주황색</span> — 시간 기반 (Speed, Pitch) — 원본 변형 있음 주의
+    </p>
+    <h3 style="margin-top: 16px;">🏷️ Tier 뱃지</h3>
+    <p>
+      <span style="color: #5DCAA5;">T1</span> — 필수 (Volume, Pan, Fade, Mute)<br>
+      <span style="color: #378ADD;">T2</span> — 자주 쓰는 편집 (EQ, Compressor, Speed)<br>
+      <span style="color: #D85A30;">T3</span> — 고급/상황별 (Reverb, Ducking, De-esser)
+    </p>
+  </div>
+
+</div>
+
+</body>
+</html>

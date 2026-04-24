@@ -1,9 +1,10 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from PySide6.QtCore import QObject, QPoint, QRect, Qt, QThread, Signal
+from PySide6.QtCore import QObject, QPoint, QRect, Qt, QThread, QUrl, Signal
 from PySide6.QtGui import (
     QAction,
     QColor,
@@ -36,8 +37,10 @@ from PySide6.QtWidgets import (
 from app.audio_tracks import (
     AUDIO_EXTS,
     VIDEO_EXTS,
+    AudioClip,
     AudioMixer,
     AudioTrack,
+    WaveformExtractor,
     is_audio_path,
     is_video_path,
     probe_audio_duration_ms,
@@ -168,6 +171,45 @@ QLabel[sectionHeader="true"][accent="timeline"] {{
 }}
 QLabel[sectionHeader="true"][accent="subtitles"] {{
     border-left: 4px solid {COLOR_ACCENT_GREEN};
+}}
+
+/* Preview section header: custom row that replaces the plain QLabel
+   version so we can embed the pop-out icon button on the right. The
+   container carries the accent bar + bg; the inner title QLabel
+   matches the generic sectionHeader look but without its own bg so
+   everything reads as one strip. */
+QWidget#PreviewSectionHeader {{
+    background-color: {COLOR_BG_L4};
+    border-left: 4px solid {COLOR_ACCENT_BLUE};
+}}
+QLabel#PreviewSectionTitle {{
+    color: {COLOR_TEXT_PRIMARY};
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.5px;
+    padding: 8px 12px 8px 12px;
+    background: transparent;
+}}
+QPushButton#PreviewPopoutIcon {{
+    background-color: transparent;
+    color: {COLOR_TEXT_SECONDARY};
+    border: 1px solid transparent;
+    border-radius: 4px;
+    font-size: 15px;
+    padding: 0;
+}}
+QPushButton#PreviewPopoutIcon:hover {{
+    background-color: {COLOR_BG_L5};
+    color: {COLOR_TEXT_PRIMARY};
+    border-color: {COLOR_BORDER_DEFAULT};
+}}
+QPushButton#PreviewPopoutIcon:pressed {{
+    background-color: {COLOR_BG_L2};
+}}
+QPushButton#PreviewPopoutIcon[popped="true"] {{
+    background-color: {COLOR_ACCENT_BLUE};
+    color: {COLOR_TEXT_PRIMARY};
+    border-color: {COLOR_ACCENT_BLUE};
 }}
 
 QWidget#PreviewHost {{
@@ -587,7 +629,7 @@ class TrackRow(QWidget):
 
     offset_changed = Signal(int, int)  # track_id, new_offset_ms
     fades_changed = Signal(int)  # track_id — fade segments added / resized
-    video_source_dropped = Signal(int, object)  # track_id, Path (dropped file)
+    media_dropped = Signal(int, object)  # track_id, Path — any media file
 
     def __init__(self, track: VideoTrack) -> None:
         super().__init__()
@@ -1139,13 +1181,17 @@ class TrackRow(QWidget):
         if md.hasFormat(FADE_MIME_TYPE):
             event.acceptProposedAction()
             return
-        # Empty video track accepts a dropped video file.
-        if self.track.source_path is None and md.hasUrls():
+        # Accept any media file (video OR audio); the window will route
+        # mismatches to the right track type. Qt does not automatically
+        # propagate drags from a dropAccepting child to its parent —
+        # so we swallow the event here and emit our own signal.
+        if md.hasUrls():
             for u in md.urls():
                 p = Path(u.toLocalFile())
-                if is_video_path(p):
+                if is_video_path(p) or is_audio_path(p):
                     event.acceptProposedAction()
                     return
+        event.ignore()
 
     def dragMoveEvent(self, event) -> None:
         self.dragEnterEvent(event)
@@ -1172,14 +1218,16 @@ class TrackRow(QWidget):
             self.clicked.emit(self.track.id)
             event.acceptProposedAction()
             return
-        # Video file drop onto an empty track.
-        if self.track.source_path is None and md.hasUrls():
+        # Any media file dropped onto this row — let the window route.
+        # Video → fill empty track or add new. Audio → add new audio track.
+        if md.hasUrls():
             for u in md.urls():
                 p = Path(u.toLocalFile())
-                if is_video_path(p):
-                    self.video_source_dropped.emit(self.track.id, p)
+                if is_video_path(p) or is_audio_path(p):
+                    self.media_dropped.emit(self.track.id, p)
                     event.acceptProposedAction()
                     return
+        event.ignore()
 
 
 class FadeCard(QWidget):
@@ -1296,26 +1344,1170 @@ class StripedHost(QWidget):
             x += self.STRIPE_STEP
 
 
-class AudioTrackRow(QWidget):
-    """Timeline row for an ``AudioTrack``.
+class ClipWaveformView(QWidget):
+    """Interactive waveform renderer for a single AudioClip.
 
-    Visually distinct from ``TrackRow``:
-    - Shorter (no thumbnails, no cuts, no per-segment speed)
-    - Teal/purple bar showing the clip extent on the project timeline
-    - Fade-in / fade-out drawn as gradient ramps on the bar edges
-    - Header shows filename + volume slider; drops + right-click menu
-      cover the rest of the interactions
+    Renders the effective trim range stretched across the widget width,
+    with cuts as dark overlays, fade segments as orange gradients,
+    markers as cyan dots, selection as a translucent blue band, and a
+    vertical playhead when driven by the sound editor's player.
 
-    Empty rows (source_path is None) advertise the drop-to-load hint and
-    open a file dialog on click.
+    Inputs:
+    - click (anywhere)   → scrub the playhead (``scrub_requested``)
+    - shift + drag       → build a selection range (``selection_changed``)
+    - double-click       → clear the current selection
+    - right-click on a marker → ``marker_right_clicked``
     """
 
-    clicked = Signal(int)
-    offset_changed = Signal(int, int)  # track_id, new_offset_ms
-    volume_changed = Signal(int, float)  # track_id, volume
-    context_menu = Signal(int, QPoint)  # track_id, global_pos
-    load_source_requested = Signal(int)  # track_id
-    source_dropped = Signal(int, object)  # track_id, Path
+    scrub_requested = Signal(int)                   # source_ms
+    selection_changed = Signal(int, int)            # start_ms, end_ms (source)
+    selection_cleared = Signal()
+    marker_right_clicked = Signal(int, QPoint)      # marker_idx, global_pos
+
+    def __init__(self, clip: "AudioClip", parent=None) -> None:
+        super().__init__(parent)
+        self.clip = clip
+        self.setMinimumHeight(160)
+        self.setStyleSheet(
+            f"background-color: {COLOR_BG_L2}; border-radius: 6px;"
+        )
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        # Playback position in clip-local source ms (i.e. ms from the
+        # start of the source file, not the project timeline). -1 when
+        # nothing is playing.
+        self._playhead_source_ms: int = -1
+        # Selection stored in source-ms (same domain as clip.trim_*).
+        # -1 means "no selection".
+        self._selection_start_ms: int = -1
+        self._selection_end_ms: int = -1
+        # In-progress drag state.
+        self._dragging_selection: bool = False
+        self._drag_start_source_ms: int = 0
+
+    # ---- public API ----
+
+    def refresh(self) -> None:
+        self.update()
+
+    def set_playhead_source_ms(self, source_ms: int) -> None:
+        self._playhead_source_ms = int(source_ms)
+        self.update()
+
+    def clear_playhead(self) -> None:
+        self._playhead_source_ms = -1
+        self.update()
+
+    def selection(self) -> tuple[int, int] | None:
+        if self._selection_start_ms >= 0 and self._selection_end_ms > self._selection_start_ms:
+            return (self._selection_start_ms, self._selection_end_ms)
+        return None
+
+    def set_selection(self, start_ms: int, end_ms: int) -> None:
+        if end_ms > start_ms:
+            self._selection_start_ms = int(start_ms)
+            self._selection_end_ms = int(end_ms)
+            self.selection_changed.emit(self._selection_start_ms, self._selection_end_ms)
+        else:
+            self._selection_start_ms = -1
+            self._selection_end_ms = -1
+            self.selection_cleared.emit()
+        self.update()
+
+    def clear_selection(self) -> None:
+        self.set_selection(0, 0)
+
+    # ---- coordinate helpers ----
+
+    def _content_rect(self) -> QRect:
+        return self.rect().adjusted(8, 8, -8, -8)
+
+    def _x_to_source_ms(self, x: int) -> int:
+        rect = self._content_rect()
+        if rect.width() <= 0:
+            return self.clip.trim_start_ms
+        eff = max(1, self.clip.effective_length_ms)
+        local_ms = (x - rect.left()) / rect.width() * eff
+        return self.clip.trim_start_ms + max(0, min(eff, int(round(local_ms))))
+
+    def _source_ms_to_x(self, source_ms: int) -> int:
+        rect = self._content_rect()
+        eff = max(1, self.clip.effective_length_ms)
+        local_ms = source_ms - self.clip.trim_start_ms
+        return rect.left() + int(round(local_ms / eff * rect.width()))
+
+    # ---- mouse ----
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.RightButton:
+            # Right-click on a marker → notify the window.
+            idx = self._marker_index_at_x(event.position().toPoint().x())
+            if idx is not None:
+                self.marker_right_clicked.emit(idx, event.globalPosition().toPoint())
+                event.accept()
+                return
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mousePressEvent(event)
+            return
+        src_ms = self._x_to_source_ms(event.position().toPoint().x())
+        mods = event.modifiers()
+        if mods & Qt.KeyboardModifier.ShiftModifier:
+            # Start building a selection without seeking.
+            self._dragging_selection = True
+            self._drag_start_source_ms = src_ms
+            self._selection_start_ms = src_ms
+            self._selection_end_ms = src_ms
+            self.update()
+            event.accept()
+            return
+        # Plain click = seek + also start a potential drag-selection if
+        # the user proceeds to drag. We seed the drag anchor but only
+        # commit a selection when the cursor actually moves.
+        self._dragging_selection = True
+        self._drag_start_source_ms = src_ms
+        self._selection_start_ms = -1
+        self._selection_end_ms = -1
+        self.scrub_requested.emit(src_ms)
+        self.update()
+        event.accept()
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if not self._dragging_selection:
+            return
+        src_ms = self._x_to_source_ms(event.position().toPoint().x())
+        if abs(src_ms - self._drag_start_source_ms) < 20:
+            return  # too-small drag — keep as a click
+        start = min(self._drag_start_source_ms, src_ms)
+        end = max(self._drag_start_source_ms, src_ms)
+        self._selection_start_ms = start
+        self._selection_end_ms = end
+        self.selection_changed.emit(start, end)
+        self.update()
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        self._dragging_selection = False
+        # If we only clicked (no drag), leave selection cleared.
+        if (
+            self._selection_start_ms >= 0
+            and self._selection_end_ms == self._selection_start_ms
+        ):
+            self._selection_start_ms = -1
+            self._selection_end_ms = -1
+            self.selection_cleared.emit()
+            self.update()
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clear_selection()
+            event.accept()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    # ---- markers ----
+
+    def _marker_index_at_x(self, x: int) -> int | None:
+        markers = getattr(self.clip, "_se_markers", None) or []
+        for i, m_ms in enumerate(markers):
+            mx = self._source_ms_to_x(int(m_ms))
+            if abs(mx - x) <= 5:
+                return i
+        return None
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = self.rect().adjusted(8, 8, -8, -8)
+        painter.fillRect(self.rect(), QColor(COLOR_BG_L2))
+        painter.setPen(QPen(QColor("#6bb1c9"), 1))
+        painter.drawRect(rect.adjusted(0, 0, -1, -1))
+
+        clip = self.clip
+        eff_len = max(1, clip.effective_length_ms)
+        mid_y = rect.top() + rect.height() // 2
+
+        # --- waveform ---
+        wf = clip.waveform
+        if wf is not None and len(wf) > 0:
+            from app.audio_tracks import WAVEFORM_BUCKETS_PER_SEC
+            painter.setPen(QPen(QColor(255, 255, 255, 220), 1))
+            n = len(wf)
+            trim_start_s = clip.trim_start_ms / 1000.0
+            half_h = (rect.height() - 10) // 2
+            px_per_sec = rect.width() / (eff_len / 1000.0)
+            for col_px in range(rect.left() + 2, rect.right() - 1):
+                local_ms = (col_px - rect.left()) / max(px_per_sec, 0.001) * 1000.0
+                src_s = trim_start_s + local_ms / 1000.0
+                bucket = int(src_s * WAVEFORM_BUCKETS_PER_SEC)
+                if bucket < 0 or bucket >= n:
+                    continue
+                peak = float(wf[bucket]) ** 0.7
+                h = max(1, int(peak * half_h))
+                painter.drawLine(col_px, mid_y - h, col_px, mid_y + h)
+        else:
+            painter.setPen(QColor(COLOR_TEXT_TERTIARY))
+            painter.drawText(
+                rect, Qt.AlignmentFlag.AlignCenter,
+                tr("veditor.sound_editor.waveform_loading"),
+            )
+
+        # --- cuts (clip-local ms → rect.x) ---
+        for cut in clip.cuts:
+            x1 = rect.left() + int(cut.start_ms / eff_len * rect.width())
+            x2 = rect.left() + int(cut.end_ms / eff_len * rect.width())
+            painter.fillRect(
+                x1, rect.top(), max(1, x2 - x1), rect.height(),
+                QColor(30, 30, 30, 200),
+            )
+
+        # --- fade segments (source-ms → clip-local) ---
+        from PySide6.QtGui import QLinearGradient
+        for fade in clip.fades:
+            local_start = fade.start_ms - clip.trim_start_ms
+            local_end = fade.end_ms - clip.trim_start_ms
+            if local_end <= 0 or local_start >= eff_len:
+                continue
+            fx1 = rect.left() + int(max(0, local_start) / eff_len * rect.width())
+            fx2 = rect.left() + int(min(eff_len, local_end) / eff_len * rect.width())
+            kind = getattr(fade, "kind", "both")
+            painter.save()
+            painter.setClipRect(rect)
+            if kind == "in":
+                g = QLinearGradient(fx1, 0, fx2, 0)
+                g.setColorAt(0.0, QColor(0, 0, 0, 180))
+                g.setColorAt(1.0, QColor(216, 90, 48, 0))
+                painter.fillRect(fx1, rect.top(), fx2 - fx1, rect.height(), g)
+            elif kind == "out":
+                g = QLinearGradient(fx1, 0, fx2, 0)
+                g.setColorAt(0.0, QColor(216, 90, 48, 0))
+                g.setColorAt(1.0, QColor(0, 0, 0, 180))
+                painter.fillRect(fx1, rect.top(), fx2 - fx1, rect.height(), g)
+            else:
+                mid = (fx1 + fx2) // 2
+                g1 = QLinearGradient(fx1, 0, mid, 0)
+                g1.setColorAt(0.0, QColor(216, 90, 48, 0))
+                g1.setColorAt(1.0, QColor(0, 0, 0, 180))
+                painter.fillRect(fx1, rect.top(), mid - fx1, rect.height(), g1)
+                g2 = QLinearGradient(mid, 0, fx2, 0)
+                g2.setColorAt(0.0, QColor(0, 0, 0, 180))
+                g2.setColorAt(1.0, QColor(216, 90, 48, 0))
+                painter.fillRect(mid, rect.top(), fx2 - mid, rect.height(), g2)
+            painter.restore()
+            painter.setPen(QPen(QColor(COLOR_ACCENT_ORANGE), 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(fx1, rect.top(), max(1, fx2 - fx1), rect.height())
+
+        # --- selection band (source-ms range) ---
+        if (
+            self._selection_start_ms >= 0
+            and self._selection_end_ms > self._selection_start_ms
+        ):
+            sx1 = self._source_ms_to_x(self._selection_start_ms)
+            sx2 = self._source_ms_to_x(self._selection_end_ms)
+            sel_rect = QRect(sx1, rect.top(), max(1, sx2 - sx1), rect.height())
+            painter.fillRect(sel_rect, QColor(55, 138, 221, 80))
+            pen = QPen(QColor(COLOR_ACCENT_BLUE))
+            pen.setWidth(1)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(sel_rect)
+
+        # --- markers (clip._se_markers, source-ms) ---
+        markers = getattr(clip, "_se_markers", None) or []
+        if markers:
+            painter.setPen(Qt.PenStyle.NoPen)
+            marker_color = QColor("#5DCAA5")
+            for m_ms in markers:
+                if m_ms < clip.trim_start_ms or m_ms > clip.effective_trim_end_ms:
+                    continue
+                mx = self._source_ms_to_x(int(m_ms))
+                # Vertical guide line
+                painter.setPen(QPen(QColor(93, 202, 165, 140), 1, Qt.PenStyle.DashLine))
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawLine(mx, rect.top() + 6, mx, rect.bottom() - 2)
+                # Triangle flag at the top
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(marker_color)
+                from PySide6.QtCore import QPoint as _QP2
+                from PySide6.QtGui import QPolygon as _QPoly2
+                painter.drawPolygon(
+                    _QPoly2([
+                        _QP2(mx - 4, rect.top()),
+                        _QP2(mx + 4, rect.top()),
+                        _QP2(mx, rect.top() + 7),
+                    ])
+                )
+
+        # --- playhead ---
+        if self._playhead_source_ms >= 0:
+            local_ms = self._playhead_source_ms - clip.trim_start_ms
+            if 0 <= local_ms <= eff_len:
+                px = rect.left() + int(local_ms / eff_len * rect.width())
+                pen = QPen(QColor(COLOR_ACCENT_ORANGE))
+                pen.setWidth(2)
+                painter.setPen(pen)
+                painter.drawLine(px, rect.top(), px, rect.bottom())
+                painter.setBrush(QColor(COLOR_ACCENT_ORANGE))
+                painter.setPen(QColor("#ff7a4a"))
+                from PySide6.QtCore import QPoint as _QP
+                from PySide6.QtGui import QPolygon
+                painter.drawPolygon(
+                    QPolygon([
+                        _QP(px, rect.top()),
+                        _QP(px + 5, rect.top() + 6),
+                        _QP(px, rect.top() + 12),
+                        _QP(px - 5, rect.top() + 6),
+                    ])
+                )
+
+
+class SoundEditorWindow(QWidget):
+    """Knob-based per-clip audio editor (Phase 1/2 of SOUND_EDITOR_SPEC).
+
+    Layout:
+        TitleBar
+        FileInfo        — filename + duration + cuts/fades counts
+        Waveform        — full trimmed peaks + playhead + cut/fade markup
+        TabBar          — Basic (live), EQ / Dynamics / Effects / Advanced (placeholders)
+        TabContent
+            Basic       — 6 knobs (Volume, Pan, Fade In, Fade Out, Speed, Pitch)
+                         + action row (Mute, Reverse, Reset All)
+                         + preset row
+        Transport       — ▶/⏸ + time + 🔊 volume + Apply / Close
+
+    The six Basic-tab knob values flow into the clip (fade_in_ms, fade_out_ms)
+    and the track volume slider on the main timeline. Speed / Pitch / Pan are
+    stashed on the clip for later wiring into the FFmpeg export filter.
+    """
+
+    # Preset definitions (Basic tab). Values match the spec.
+    BASIC_PRESETS: dict[str, dict[str, float]] = {
+        "Voice Recording": dict(volume=3, pan=0, fade_in=0.1, fade_out=0.3, speed=1.0, pitch=0),
+        "Background Music": dict(volume=-6, pan=0, fade_in=1.5, fade_out=2.0, speed=1.0, pitch=0),
+        "Game Audio":      dict(volume=0, pan=0, fade_in=0, fade_out=0.2, speed=1.0, pitch=0),
+        "Podcast":         dict(volume=2, pan=0, fade_in=0.5, fade_out=0.5, speed=1.0, pitch=0),
+    }
+
+    def __init__(self, clip: "AudioClip", parent=None) -> None:
+        super().__init__(parent, Qt.WindowType.Window)
+        self.clip = clip
+        name = clip.display_name or "(unnamed)"
+        self.setWindowTitle(tr("veditor.sound_editor.title", name=name))
+        self.resize(900, 680)
+        self.setStyleSheet(self._qss())
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
+
+        root.addWidget(self._build_title_bar(name))
+        root.addWidget(self._build_file_info())
+
+        # Waveform section (reuses the existing ClipWaveformView).
+        wf_wrap = QWidget()
+        wf_wrap.setObjectName("SEWaveformSection")
+        wf_layout = QVBoxLayout(wf_wrap)
+        wf_layout.setContentsMargins(20, 16, 20, 16)
+        self._waveform_view = ClipWaveformView(clip, wf_wrap)
+        self._waveform_view.setMinimumHeight(100)
+        wf_layout.addWidget(self._waveform_view)
+        root.addWidget(wf_wrap)
+
+        root.addWidget(self._build_tab_bar())
+        root.addWidget(self._build_tab_content(), stretch=1)
+        root.addWidget(self._build_transport())
+
+        # ---- Local playback engine ----
+        from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+
+        self._player_output = QAudioOutput(self)
+        self._player = QMediaPlayer(self)
+        self._player.setAudioOutput(self._player_output)
+        if clip.source_path is not None:
+            self._player.setSource(QUrl.fromLocalFile(str(clip.source_path)))
+        self._player.playbackStateChanged.connect(self._on_playback_state)
+        self._player.positionChanged.connect(self._on_player_position)
+        self._player_output.setVolume(0.8)
+        self._transport_volume_slider.setValue(80)
+
+        # Wire waveform-view signals once all referenced slots exist.
+        self._waveform_view.scrub_requested.connect(self._on_waveform_scrub)
+        self._waveform_view.selection_changed.connect(self._on_waveform_selection)
+        self._waveform_view.selection_cleared.connect(self._on_waveform_selection_cleared)
+        self._waveform_view.marker_right_clicked.connect(self._on_marker_right_clicked)
+
+    # -------- QSS --------
+
+    def _qss(self) -> str:
+        return f"""
+            QWidget {{ background-color: {COLOR_BG_L3}; color: {COLOR_TEXT_PRIMARY}; }}
+            QWidget#SETitleBar {{
+                background-color: {COLOR_BG_L4};
+                border-bottom: 1px solid {COLOR_BORDER_DEFAULT};
+            }}
+            QWidget#SEFileInfo {{
+                background-color: #1e1e22;
+                border-bottom: 1px solid {COLOR_BG_L4};
+            }}
+            QWidget#SEWaveformSection {{
+                background-color: #0f0f14;
+                border-bottom: 1px solid {COLOR_BG_L4};
+            }}
+            QWidget#SETabBar {{
+                background-color: {COLOR_BG_L4};
+                border-bottom: 1px solid {COLOR_BORDER_DEFAULT};
+            }}
+            QPushButton#SETab {{
+                background: transparent;
+                color: {COLOR_TEXT_TERTIARY};
+                border: none;
+                border-bottom: 2px solid transparent;
+                padding: 12px 18px;
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 1px;
+            }}
+            QPushButton#SETab:hover {{ color: {COLOR_TEXT_SECONDARY}; }}
+            QPushButton#SETab:checked {{
+                color: {COLOR_ACCENT_BLUE};
+                border-bottom: 2px solid {COLOR_ACCENT_BLUE};
+            }}
+            QWidget#SEContent {{ background-color: {COLOR_BG_L3}; }}
+            QWidget#SETransport {{
+                background-color: {COLOR_BG_L4};
+                border-top: 1px solid {COLOR_BORDER_DEFAULT};
+            }}
+            QPushButton#SEActionBtn {{
+                background-color: {COLOR_BG_L5};
+                color: {COLOR_TEXT_PRIMARY};
+                border: 1px solid {COLOR_BORDER_DEFAULT};
+                border-radius: 5px;
+                padding: 6px 14px;
+                font-size: 11px;
+                font-weight: 600;
+            }}
+            QPushButton#SEActionBtn:hover {{
+                background-color: #44444a;
+                border-color: #6a6a72;
+            }}
+            QPushButton#SEActionBtn:checked {{
+                background-color: {COLOR_ACCENT_BLUE};
+                border-color: {COLOR_ACCENT_BLUE};
+                color: {COLOR_TEXT_PRIMARY};
+            }}
+            QPushButton#SEPresetBtn {{
+                background-color: transparent;
+                color: {COLOR_TEXT_SECONDARY};
+                border: 1px solid {COLOR_BORDER_DEFAULT};
+                border-radius: 4px;
+                padding: 5px 10px;
+                font-size: 11px;
+            }}
+            QPushButton#SEPresetBtn:hover {{
+                background-color: {COLOR_BG_L5};
+                color: {COLOR_TEXT_PRIMARY};
+                border-color: {COLOR_ACCENT_BLUE};
+            }}
+            QPushButton#SEPlayBtn {{
+                background-color: {COLOR_ACCENT_BLUE};
+                color: {COLOR_TEXT_PRIMARY};
+                border: none;
+                border-radius: 18px;
+                font-size: 14px;
+                font-weight: 700;
+            }}
+            QPushButton#SEPlayBtn:hover {{ background-color: {COLOR_ACCENT_BLUE_HOVER}; }}
+            QPushButton#SEClose {{
+                background-color: {COLOR_BG_L5};
+                color: {COLOR_TEXT_PRIMARY};
+                border: 1px solid {COLOR_BORDER_DEFAULT};
+                border-radius: 6px;
+                padding: 6px 16px;
+                font-size: 12px;
+                font-weight: 600;
+            }}
+            QPushButton#SEApply {{
+                background-color: {COLOR_ACCENT_BLUE};
+                color: {COLOR_TEXT_PRIMARY};
+                border: none;
+                border-radius: 6px;
+                padding: 6px 16px;
+                font-size: 12px;
+                font-weight: 700;
+            }}
+        """
+
+    # -------- section builders --------
+
+    def _build_title_bar(self, name: str) -> QWidget:
+        bar = QWidget()
+        bar.setObjectName("SETitleBar")
+        bar.setFixedHeight(44)
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(16, 0, 12, 0)
+        icon = QLabel("🎵")
+        icon.setStyleSheet("font-size: 16px;")
+        title = QLabel(tr("veditor.sound_editor.header"))
+        title.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; font-weight: 600; font-size: 13px;")
+        sub = QLabel(f"— {name}")
+        sub.setStyleSheet(f"color: {COLOR_TEXT_TERTIARY}; font-size: 12px;")
+        lay.addWidget(icon)
+        lay.addWidget(title)
+        lay.addWidget(sub)
+        lay.addStretch(1)
+        return bar
+
+    def _build_file_info(self) -> QWidget:
+        info = QWidget()
+        info.setObjectName("SEFileInfo")
+        lay = QVBoxLayout(info)
+        lay.setContentsMargins(20, 12, 20, 12)
+        lay.setSpacing(6)
+        name = QLabel(self.clip.display_name or "(unnamed)")
+        name.setStyleSheet("font-size: 15px; font-weight: 600;")
+        lay.addWidget(name)
+
+        meta_bits: list[str] = []
+        if self.clip.duration_ms > 0:
+            meta_bits.append(f"⏱ {self.clip.duration_ms / 1000.0:.2f} s")
+        meta_bits.append(f"✂ {len(self.clip.cuts)} cuts")
+        meta_bits.append(f"⫷ {len(self.clip.fades)} fades")
+        if self.clip.source_path is not None:
+            meta_bits.append(f"📁 {self.clip.source_path.name}")
+        meta = QLabel("   ".join(meta_bits))
+        meta.setStyleSheet(
+            f"color: {COLOR_TEXT_TERTIARY}; font-size: 11px; font-family: Consolas, monospace;"
+        )
+        meta.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        lay.addWidget(meta)
+        return info
+
+    def _build_tab_bar(self) -> QWidget:
+        bar = QWidget()
+        bar.setObjectName("SETabBar")
+        bar.setFixedHeight(42)
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(16, 0, 16, 0)
+        lay.setSpacing(0)
+
+        from PySide6.QtWidgets import QButtonGroup
+
+        self._tab_group = QButtonGroup(self)
+        self._tab_group.setExclusive(True)
+        tabs = [
+            ("basic", tr("veditor.sound_editor.tab.basic")),
+            ("eq", tr("veditor.sound_editor.tab.eq")),
+            ("dynamics", tr("veditor.sound_editor.tab.dynamics")),
+            ("effects", tr("veditor.sound_editor.tab.effects")),
+            ("advanced", tr("veditor.sound_editor.tab.advanced")),
+        ]
+        self._tab_buttons: dict[str, QPushButton] = {}
+        for tab_id, tab_label in tabs:
+            btn = QPushButton(tab_label)
+            btn.setObjectName("SETab")
+            btn.setCheckable(True)
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            if tab_id == "basic":
+                btn.setChecked(True)
+            btn.clicked.connect(lambda _c, t=tab_id: self._switch_tab(t))
+            self._tab_group.addButton(btn)
+            self._tab_buttons[tab_id] = btn
+            lay.addWidget(btn)
+        lay.addStretch(1)
+        return bar
+
+    def _build_tab_content(self) -> QWidget:
+        from PySide6.QtWidgets import QStackedWidget
+
+        self._tab_stack = QStackedWidget()
+        self._tab_stack.setObjectName("SEContent")
+        self._tab_stack.addWidget(self._build_basic_tab())  # 0
+        for tab_id in ("eq", "dynamics", "effects", "advanced"):
+            self._tab_stack.addWidget(self._build_placeholder_tab(tab_id))
+        return self._tab_stack
+
+    def _build_basic_tab(self) -> QWidget:
+        from app.knob_widget import (
+            KnobWidget,
+            fmt_db, fmt_pan, fmt_seconds, fmt_semitones, fmt_speed,
+        )
+
+        c = self.clip
+        # Map current clip state into knob starting values.
+        init_vol_db = self._track_volume_to_db(self._get_track_volume())
+        init_pan = 0.0  # Pan isn't stored yet — starts at center.
+        init_fade_in = c.fade_in_ms / 1000.0
+        init_fade_out = c.fade_out_ms / 1000.0
+        init_speed = getattr(c, "_se_speed", 1.0)
+        init_pitch = getattr(c, "_se_pitch", 0.0)
+
+        panel = QWidget()
+        panel.setObjectName("SEBasicTab")
+        root = QVBoxLayout(panel)
+        root.setContentsMargins(20, 18, 20, 18)
+        root.setSpacing(14)
+
+        # --- knob grid ---
+        knob_row = QHBoxLayout()
+        knob_row.setSpacing(12)
+
+        self._knob_volume = KnobWidget(
+            label="Volume", value=init_vol_db, minimum=-60, maximum=12,
+            default=0, unit="dB", color="blue", formatter=fmt_db,
+        )
+        self._knob_pan = KnobWidget(
+            label="Pan", value=init_pan, minimum=-100, maximum=100,
+            default=0, color="green", bipolar=True, formatter=fmt_pan,
+        )
+        self._knob_fade_in = KnobWidget(
+            label="Fade In", value=init_fade_in, minimum=0, maximum=10,
+            default=0, unit=" s", color="blue", formatter=fmt_seconds,
+        )
+        self._knob_fade_out = KnobWidget(
+            label="Fade Out", value=init_fade_out, minimum=0, maximum=10,
+            default=0, unit=" s", color="blue", formatter=fmt_seconds,
+        )
+        self._knob_speed = KnobWidget(
+            label="Speed", value=init_speed, minimum=0.5, maximum=2.0,
+            default=1.0, color="orange", formatter=fmt_speed,
+        )
+        self._knob_pitch = KnobWidget(
+            label="Pitch", value=init_pitch, minimum=-12, maximum=12,
+            default=0, unit=" st", color="orange", formatter=fmt_semitones,
+        )
+
+        # Wire knobs to live state
+        self._knob_volume.valueChanged.connect(self._on_volume_knob)
+        self._knob_pan.valueChanged.connect(self._on_pan_knob)
+        self._knob_fade_in.valueChanged.connect(self._on_fade_in_knob)
+        self._knob_fade_out.valueChanged.connect(self._on_fade_out_knob)
+        self._knob_speed.valueChanged.connect(self._on_speed_knob)
+        self._knob_pitch.valueChanged.connect(self._on_pitch_knob)
+
+        for k in (
+            self._knob_volume, self._knob_pan,
+            self._knob_fade_in, self._knob_fade_out,
+            self._knob_speed, self._knob_pitch,
+        ):
+            knob_row.addWidget(k)
+        knob_row.addStretch(1)
+        root.addLayout(knob_row)
+
+        # --- action buttons ---
+        actions = QHBoxLayout()
+        actions.setSpacing(8)
+        self._btn_mute = QPushButton(tr("veditor.sound_editor.basic.mute"))
+        self._btn_mute.setObjectName("SEActionBtn")
+        self._btn_mute.setCheckable(True)
+        self._btn_mute.toggled.connect(self._on_mute_toggled)
+        self._btn_reverse = QPushButton(tr("veditor.sound_editor.basic.reverse"))
+        self._btn_reverse.setObjectName("SEActionBtn")
+        self._btn_reverse.setCheckable(True)
+        self._btn_reverse.toggled.connect(
+            lambda on: setattr(self.clip, "_se_reverse", on)
+        )
+        self._btn_reset = QPushButton(tr("veditor.sound_editor.basic.reset_all"))
+        self._btn_reset.setObjectName("SEActionBtn")
+        self._btn_reset.clicked.connect(self._reset_basic_to_defaults)
+
+        actions.addWidget(self._btn_mute)
+        actions.addWidget(self._btn_reverse)
+        actions.addSpacing(20)
+        actions.addWidget(self._btn_reset)
+        actions.addStretch(1)
+        root.addLayout(actions)
+
+        # --- presets ---
+        presets_row = QHBoxLayout()
+        presets_row.setSpacing(6)
+        presets_label = QLabel(tr("veditor.sound_editor.basic.presets"))
+        presets_label.setStyleSheet(
+            f"color: {COLOR_TEXT_TERTIARY}; font-size: 10px; "
+            f"font-weight: 700; letter-spacing: 1px;"
+        )
+        presets_row.addWidget(presets_label)
+        for preset_name in self.BASIC_PRESETS.keys():
+            b = QPushButton(preset_name)
+            b.setObjectName("SEPresetBtn")
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(lambda _c, n=preset_name: self._apply_preset(n))
+            presets_row.addWidget(b)
+        presets_row.addStretch(1)
+        root.addLayout(presets_row)
+
+        root.addStretch(1)
+        return panel
+
+    def _build_placeholder_tab(self, tab_id: str) -> QWidget:
+        panel = QWidget()
+        panel.setObjectName("SEContent")
+        lay = QVBoxLayout(panel)
+        lay.setContentsMargins(20, 40, 20, 40)
+        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title = QLabel(
+            tr(f"veditor.sound_editor.tab.{tab_id}")
+        )
+        title.setStyleSheet(f"font-size: 20px; font-weight: 700; color: {COLOR_TEXT_SECONDARY};")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        note = QLabel(tr("veditor.sound_editor.tab.coming_soon"))
+        note.setStyleSheet(f"color: {COLOR_TEXT_TERTIARY}; font-size: 12px; padding: 16px;")
+        note.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lay.addWidget(title)
+        lay.addWidget(note)
+        lay.addStretch(1)
+        return panel
+
+    def _build_transport(self) -> QWidget:
+        bar = QWidget()
+        bar.setObjectName("SETransport")
+        bar.setFixedHeight(58)
+        lay = QHBoxLayout(bar)
+        lay.setContentsMargins(16, 10, 16, 10)
+        lay.setSpacing(8)
+
+        def _mk_icon_btn(symbol: str, tooltip: str, handler) -> QPushButton:
+            b = QPushButton(symbol)
+            b.setObjectName("SEActionBtn")
+            b.setFixedSize(32, 32)
+            b.setToolTip(tooltip)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(handler)
+            return b
+
+        self._prev_marker_btn = _mk_icon_btn(
+            "⏮", tr("veditor.sound_editor.tooltip.prev_marker"),
+            self._go_to_prev_marker,
+        )
+        self._play_btn = QPushButton("▶")
+        self._play_btn.setObjectName("SEPlayBtn")
+        self._play_btn.setFixedSize(36, 36)
+        self._play_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._play_btn.clicked.connect(self._toggle_play)
+        self._next_marker_btn = _mk_icon_btn(
+            "⏭", tr("veditor.sound_editor.tooltip.next_marker"),
+            self._go_to_next_marker,
+        )
+        self._add_marker_btn = _mk_icon_btn(
+            "📌", tr("veditor.sound_editor.tooltip.add_marker"),
+            self._add_marker_at_playhead,
+        )
+        self._loop_btn = _mk_icon_btn(
+            "🔁", tr("veditor.sound_editor.tooltip.loop"),
+            lambda: None,  # replaced below
+        )
+        self._loop_btn.setCheckable(True)
+        # We want toggled state, so replace the clicked handler with
+        # a noop and rely on the checked state directly.
+        self._loop_btn.clicked.disconnect()
+
+        self._position_label = QLabel("0:00 / 0:00")
+        self._position_label.setStyleSheet(
+            f"color: {COLOR_TEXT_PRIMARY}; font-family: Consolas, monospace; font-size: 12px;"
+        )
+
+        vol_icon = QLabel("🔊")
+        vol_icon.setStyleSheet("font-size: 12px;")
+        self._transport_volume_slider = QSlider(Qt.Orientation.Horizontal)
+        self._transport_volume_slider.setRange(0, 100)
+        self._transport_volume_slider.setFixedWidth(100)
+        self._transport_volume_slider.valueChanged.connect(
+            lambda v: self._player_output.setVolume(max(0.0, min(1.0, v / 100.0)))
+        )
+
+        self._apply_btn = QPushButton(tr("veditor.sound_editor.apply"))
+        self._apply_btn.setObjectName("SEApply")
+        self._apply_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._apply_btn.clicked.connect(self._apply_and_close)
+
+        self._close_btn = QPushButton(tr("veditor.sound_editor.close"))
+        self._close_btn.setObjectName("SEClose")
+        self._close_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._close_btn.clicked.connect(self.close)
+
+        lay.addWidget(self._prev_marker_btn)
+        lay.addWidget(self._play_btn)
+        lay.addWidget(self._next_marker_btn)
+        lay.addSpacing(6)
+        lay.addWidget(self._add_marker_btn)
+        lay.addWidget(self._loop_btn)
+        lay.addSpacing(10)
+        lay.addWidget(self._position_label)
+        lay.addStretch(1)
+        lay.addWidget(vol_icon)
+        lay.addWidget(self._transport_volume_slider)
+        lay.addSpacing(14)
+        lay.addWidget(self._close_btn)
+        lay.addWidget(self._apply_btn)
+
+        # --- keyboard shortcuts (scoped to this window) ---
+        from PySide6.QtGui import QKeySequence, QShortcut
+        for key, handler in (
+            ("Space", self._toggle_play),
+            ("M",     self._add_marker_at_playhead),
+            ("L",     lambda: self._loop_btn.setChecked(not self._loop_btn.isChecked())),
+            (",",     self._go_to_prev_marker),
+            (".",     self._go_to_next_marker),
+        ):
+            sc = QShortcut(QKeySequence(key), self)
+            sc.setContext(Qt.ShortcutContext.WindowShortcut)
+            sc.activated.connect(handler)
+
+        return bar
+
+    # -------- state plumbing --------
+
+    def _get_track_volume(self) -> float:
+        """Find the parent AudioTrack's master volume, fall back to 1.0."""
+        parent = self.parent()
+        if parent is not None:
+            tracks = getattr(parent, "_audio_tracks", None) or []
+            for t in tracks:
+                if self.clip in t.clips:
+                    return float(t.volume)
+        return 1.0
+
+    def _set_track_volume(self, vol_linear: float) -> None:
+        parent = self.parent()
+        if parent is None:
+            return
+        tracks = getattr(parent, "_audio_tracks", None) or []
+        for t in tracks:
+            if self.clip in t.clips:
+                t.volume = float(vol_linear)
+                # Update the row's slider + mixer.
+                row = parent._audio_rows.get(t.id)
+                if row is not None:
+                    with _block_signals(row._volume_slider):
+                        row._volume_slider.setValue(int(round(t.volume * 100)))
+                parent._audio_mixer.update_track(t)
+                break
+
+    @staticmethod
+    def _track_volume_to_db(vol_linear: float) -> float:
+        """Convert linear gain (0..1.5) to dB for UI display."""
+        if vol_linear <= 0.0:
+            return -60.0
+        return max(-60.0, 20.0 * math.log10(vol_linear))
+
+    @staticmethod
+    def _db_to_track_volume(db: float) -> float:
+        if db <= -60.0:
+            return 0.0
+        return 10.0 ** (db / 20.0)
+
+    def _switch_tab(self, tab_id: str) -> None:
+        idx = {"basic": 0, "eq": 1, "dynamics": 2, "effects": 3, "advanced": 4}.get(tab_id, 0)
+        self._tab_stack.setCurrentIndex(idx)
+        # Sync checked state (QButtonGroup should handle, but be defensive).
+        for tid, btn in self._tab_buttons.items():
+            btn.setChecked(tid == tab_id)
+
+    # -------- knob handlers --------
+
+    def _on_volume_knob(self, db: float) -> None:
+        # Main timeline + export use the track's linear volume.
+        linear = self._db_to_track_volume(db)
+        self._set_track_volume(linear)
+        # Local preview: drive the editor's own player output so the
+        # user hears the change immediately. The local master (the
+        # transport 🔊 slider) multiplies on top, so we cap at 1.0
+        # here — the slider can still attenuate further.
+        try:
+            self._player_output.setVolume(max(0.0, min(1.0, linear)))
+        except Exception:
+            pass
+
+    def _on_pan_knob(self, pan: float) -> None:
+        # Pan is captured on the clip for FFmpeg export. Qt's
+        # QMediaPlayer / QAudioOutput doesn't expose a built-in
+        # pan, so local preview stays centered — fine for v1.
+        self.clip._se_pan = pan
+
+    def _on_fade_in_knob(self, sec: float) -> None:
+        self.clip.fade_in_ms = int(round(sec * 1000))
+        self._refresh_timeline_row()
+        self._waveform_view.refresh()
+
+    def _on_fade_out_knob(self, sec: float) -> None:
+        self.clip.fade_out_ms = int(round(sec * 1000))
+        self._refresh_timeline_row()
+        self._waveform_view.refresh()
+
+    def _on_speed_knob(self, rate: float) -> None:
+        self.clip._se_speed = rate
+        # QMediaPlayer supports playbackRate natively — let the
+        # local preview respond immediately to the Speed knob.
+        try:
+            self._player.setPlaybackRate(float(rate))
+        except Exception:
+            pass
+
+    def _on_pitch_knob(self, semitones: float) -> None:
+        # Real-time pitch shifting isn't available in QMediaPlayer; the
+        # value is stashed for FFmpeg export (`asetrate` + `atempo` chain).
+        # No audible local preview change for now.
+        self.clip._se_pitch = semitones
+
+    def _on_mute_toggled(self, muted: bool) -> None:
+        # Implement mute as a volume-knob override: record the current
+        # volume, swap to silence, and restore on un-mute.
+        if muted:
+            self._muted_restore_db = self._knob_volume.value()
+            self._knob_volume.setValue(-60.0)
+        else:
+            restore = getattr(self, "_muted_restore_db", 0.0)
+            self._knob_volume.setValue(restore)
+
+    def _reset_basic_to_defaults(self) -> None:
+        self._knob_volume.setValue(0.0)
+        self._knob_pan.setValue(0.0)
+        self._knob_fade_in.setValue(0.0)
+        self._knob_fade_out.setValue(0.0)
+        self._knob_speed.setValue(1.0)
+        self._knob_pitch.setValue(0.0)
+        self._btn_mute.setChecked(False)
+        self._btn_reverse.setChecked(False)
+
+    def _apply_preset(self, name: str) -> None:
+        preset = self.BASIC_PRESETS.get(name)
+        if preset is None:
+            return
+        self._knob_volume.setValue(preset["volume"])
+        self._knob_pan.setValue(preset["pan"])
+        self._knob_fade_in.setValue(preset["fade_in"])
+        self._knob_fade_out.setValue(preset["fade_out"])
+        self._knob_speed.setValue(preset["speed"])
+        self._knob_pitch.setValue(preset["pitch"])
+
+    # -------- transport --------
+
+    def _toggle_play(self) -> None:
+        from PySide6.QtMultimedia import QMediaPlayer
+        if self._player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+            self._player.pause()
+        else:
+            self._player.play()
+
+    def _on_player_position(self, pos_ms: int) -> None:
+        dur = self._player.duration() or self.clip.duration_ms
+        self._position_label.setText(
+            f"{_format_ms(int(pos_ms))} / {_format_ms(int(dur))}"
+        )
+        self._waveform_view.set_playhead_source_ms(int(pos_ms))
+        # Loop handling: if loop is on AND a selection exists, wrap the
+        # playhead back to the selection start whenever it crosses the
+        # selection end. Uses the waveform view's selection as the
+        # single source of truth.
+        if self._loop_btn.isChecked():
+            sel = self._waveform_view.selection()
+            if sel is not None and pos_ms >= sel[1]:
+                try:
+                    self._player.setPosition(int(sel[0]))
+                except Exception:
+                    pass
+
+    def _on_playback_state(self, state) -> None:
+        from PySide6.QtMultimedia import QMediaPlayer
+        if state == QMediaPlayer.PlaybackState.PlayingState:
+            self._play_btn.setText("⏸")
+        else:
+            self._play_btn.setText("▶")
+            if state == QMediaPlayer.PlaybackState.StoppedState:
+                self._waveform_view.clear_playhead()
+
+    # -------- markers + selection + loop --------
+
+    def _markers(self) -> list[int]:
+        if not hasattr(self.clip, "_se_markers") or self.clip._se_markers is None:
+            self.clip._se_markers = []
+        return self.clip._se_markers
+
+    def _add_marker_at_playhead(self) -> None:
+        pos = self._player.position()
+        if pos <= 0:
+            return
+        # Dedup within 50 ms so repeated 'M' presses don't stack.
+        markers = self._markers()
+        for m in markers:
+            if abs(m - pos) < 50:
+                return
+        markers.append(int(pos))
+        markers.sort()
+        self._waveform_view.refresh()
+
+    def _go_to_prev_marker(self) -> None:
+        markers = self._markers()
+        if not markers:
+            return
+        pos = self._player.position()
+        # Previous marker = the latest one strictly before pos (minus a
+        # small epsilon so hitting ⏮ twice in a row actually jumps back).
+        target = None
+        for m in markers:
+            if m < pos - 200:
+                target = m
+        if target is None:
+            target = markers[0]
+        self._player.setPosition(int(target))
+
+    def _go_to_next_marker(self) -> None:
+        markers = self._markers()
+        if not markers:
+            return
+        pos = self._player.position()
+        for m in markers:
+            if m > pos + 50:
+                self._player.setPosition(int(m))
+                return
+
+    def _on_waveform_scrub(self, source_ms: int) -> None:
+        # QMediaPlayer position is source-ms (absolute within the file).
+        try:
+            self._player.setPosition(int(source_ms))
+        except Exception:
+            pass
+
+    def _on_waveform_selection(self, start_ms: int, end_ms: int) -> None:
+        # Park the selection on the clip so the loop logic + future
+        # clip-range effects (e.g. "apply EQ to selection") can read it.
+        self.clip.selection_start_ms = max(0, int(start_ms) - self.clip.trim_start_ms)
+        self.clip.selection_end_ms = max(0, int(end_ms) - self.clip.trim_start_ms)
+
+    def _on_waveform_selection_cleared(self) -> None:
+        self.clip.selection_start_ms = -1
+        self.clip.selection_end_ms = -1
+
+    def _on_marker_right_clicked(self, idx: int, global_pos: QPoint) -> None:
+        markers = self._markers()
+        if idx < 0 or idx >= len(markers):
+            return
+        menu = QMenu(self)
+        act_delete = menu.addAction(tr("veditor.sound_editor.marker.delete"))
+        chosen = menu.exec(global_pos)
+        if chosen is act_delete:
+            del markers[idx]
+            self._waveform_view.refresh()
+
+    def _apply_and_close(self) -> None:
+        # All knob mutations already flow live; "Apply" is effectively
+        # the same as "Close" today. Left as a separate button so the
+        # upcoming effects tabs (which stage changes) have somewhere to
+        # hook into.
+        self._refresh_timeline_row()
+        self.close()
+
+    def _refresh_timeline_row(self) -> None:
+        parent = self.parent()
+        if parent is None:
+            return
+        for t in getattr(parent, "_audio_tracks", None) or []:
+            if self.clip in t.clips:
+                row = parent._audio_rows.get(t.id)
+                if row is not None:
+                    row.update()
+                parent._audio_mixer.update_track(t)
+                break
+
+    def refresh_waveform(self) -> None:
+        self._waveform_view.refresh()
+
+    def closeEvent(self, event) -> None:
+        try:
+            self._player.stop()
+            self._player.setSource(QUrl())
+        except Exception:
+            pass
+        super().closeEvent(event)
+
+
+class PreviewPopoutWindow(QWidget):
+    """Top-level mirror of the preview area. Displays the latest frame
+    coming from ``ProjectPlayer.frame_ready`` scaled to fit. Closing
+    this window simply destroys it — the in-editor preview was never
+    disturbed, so editing keeps working the whole time.
+    """
+
+    closed = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent, Qt.WindowType.Window)
+        self.setWindowTitle(tr("veditor.popout.title"))
+        self.setStyleSheet(
+            f"QWidget {{ background-color: {COLOR_BG_L1}; }}"
+        )
+        self.resize(960, 540)
+        self.setMinimumSize(320, 180)
+        self._label = QLabel(self)
+        self._label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._label.setStyleSheet("background: black;")
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.addWidget(self._label)
+        self._last_image: QImage | None = None
+        self._last_pixmap: QPixmap | None = None
+
+    def update_frame(self, image: QImage) -> None:
+        self._last_image = image
+        self._rescale()
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._rescale()
+
+    def _rescale(self) -> None:
+        if self._last_image is None:
+            return
+        target = self._label.size()
+        if target.width() < 2 or target.height() < 2:
+            return
+        pm = QPixmap.fromImage(self._last_image).scaled(
+            target,
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self._last_pixmap = pm
+        self._label.setPixmap(pm)
+
+    def keyPressEvent(self, event) -> None:
+        # F11 toggles fullscreen on the popout monitor; Esc leaves it.
+        if event.key() == Qt.Key.Key_F11:
+            if self.isFullScreen():
+                self.showNormal()
+            else:
+                self.showFullScreen()
+            return
+        if event.key() == Qt.Key.Key_Escape and self.isFullScreen():
+            self.showNormal()
+            return
+        super().keyPressEvent(event)
+
+    def closeEvent(self, event) -> None:
+        self.closed.emit()
+        super().closeEvent(event)
+
+
+class AudioTrackRow(QWidget):
+    """Multi-clip timeline row for an ``AudioTrack``.
+
+    One row = one AudioTrack. Multiple AudioClips belonging to that
+    track are drawn side-by-side on the bar area; each can be dragged,
+    selected, faded, and split independently.
+
+    The row header shows the track's master volume slider. Per-clip
+    interactions (drag / selection / fade / context menu / double-click
+    for sound editor) target the clip the user actually clicks on.
+    """
+
+    clicked = Signal(int)                 # track_id
+    volume_changed = Signal(int, float)   # track_id, master volume
+    row_context_menu = Signal(int, QPoint)   # track_id, global_pos (clicked on empty area)
+    clip_context_menu = Signal(int, int, QPoint)  # track_id, clip_id, global_pos
+    load_source_requested = Signal(int)   # track_id — empty-row click
+    media_dropped = Signal(int, object)   # track_id, Path — any media for routing
+    track_changed = Signal(int)           # track_id — clips were mutated
+    clip_selection_changed = Signal(int, int, int, int)  # track_id, clip_id, start, end
+    open_editor_requested = Signal(int, int)  # track_id, clip_id
 
     MARGIN = 10
     LABEL_H = 22
@@ -1327,15 +2519,29 @@ class AudioTrackRow(QWidget):
     BAR_COLOR_EMPTY = QColor("#2a2a32")
     BAR_COLOR_ACTIVE = QColor("#4a86a0")
 
+    FADE_EDGE_GRAB_PX = 6
+
     def __init__(self, track: AudioTrack) -> None:
         super().__init__()
         self.track = track
         self._is_active: bool = False
+        self._active_clip_id: int | None = None
         self._position_ms: int = 0
         self._px_per_sec: float = DEFAULT_PX_PER_SEC
+        # Active interaction state. ``_interaction_clip`` points to the
+        # AudioClip the user is currently manipulating (drag / select /
+        # fade-resize); cleared on mouse release.
+        self._interaction_clip: AudioClip | None = None
         self._dragging_offset: bool = False
+        self._dragging_selection: bool = False
         self._drag_start_x: int = 0
+        self._drag_start_local_ms: int = 0
         self._drag_start_offset_ms: int = 0
+        self._resizing_fade: FadeSegment | None = None
+        self._resize_side: str = ""
+        self._resize_orig_start: int = 0
+        self._resize_orig_end: int = 0
+        self._waveform_errors: dict[int, str] = {}  # clip_id → reason
 
         self.setFixedHeight(self.LABEL_H + self.BAR_H + self.PADDING)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -1343,8 +2549,6 @@ class AudioTrackRow(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
         self.setAcceptDrops(True)
 
-        # Header: filename label + volume slider, laid out via geometry
-        # inside paintEvent-less helper widgets.
         self._name_label = QLabel(track.display_name or tr("veditor.audio.track_empty"), self)
         self._name_label.setStyleSheet(
             f"color: {COLOR_TEXT_SECONDARY}; font-weight: 600; font-size: 11px; background: transparent;"
@@ -1361,7 +2565,7 @@ class AudioTrackRow(QWidget):
 
         self._reposition_header()
 
-    # ---- geometry helpers ----
+    # ---- geometry / state helpers ----
 
     def set_px_per_sec(self, px: float) -> None:
         self._px_per_sec = max(MIN_PX_PER_SEC, min(MAX_PX_PER_SEC, float(px)))
@@ -1378,16 +2582,20 @@ class AudioTrackRow(QWidget):
         self.update()
 
     def refresh_from_track(self) -> None:
-        """Call after mutating self.track from outside."""
         self._name_label.setText(self.track.display_name or tr("veditor.audio.track_empty"))
-        # Block the valueChanged signal so programmatic updates don't
-        # feed back into volume_changed.
         with _block_signals(self._volume_slider):
             self._volume_slider.setValue(int(round(self.track.volume * 100)))
         self.update()
 
+    def set_waveform_error(self, clip_id: int, reason: str) -> None:
+        self._waveform_errors[clip_id] = reason or "decode failed"
+        self.update()
+
+    def clear_waveform_error(self, clip_id: int) -> None:
+        self._waveform_errors.pop(clip_id, None)
+
     def _preferred_width(self) -> int:
-        span = self.track.offset_ms + self.track.effective_length_ms
+        span = self.track.extent_ms()
         return int(span / 1000.0 * self._px_per_sec) + 2 * self.MARGIN + 40
 
     def resizeEvent(self, event) -> None:
@@ -1395,7 +2603,6 @@ class AudioTrackRow(QWidget):
         self._reposition_header()
 
     def _reposition_header(self) -> None:
-        # Filename at left, volume slider at right of the header row.
         self._name_label.setGeometry(
             self.MARGIN, 3,
             max(50, self.width() - self._volume_slider.width() - self.MARGIN * 3),
@@ -1408,15 +2615,67 @@ class AudioTrackRow(QWidget):
             self._volume_slider.sizeHint().height(),
         )
 
-    def _ms_to_x(self, ms: int) -> int:
+    def _project_ms_to_x(self, ms: int) -> int:
         return int(self.MARGIN + ms / 1000.0 * self._px_per_sec)
 
-    def _x_to_ms(self, x: int) -> int:
+    def _x_to_project_ms(self, x: int) -> int:
         if self._px_per_sec <= 0:
             return 0
         return max(0, int((x - self.MARGIN) / self._px_per_sec * 1000))
 
-    # ---- user interactions ----
+    # ---- per-clip hit testing ----
+
+    def _clip_bar_rect(self, clip: AudioClip) -> QRect:
+        bar_y = self.LABEL_H
+        x1 = self._project_ms_to_x(clip.offset_ms)
+        x2 = self._project_ms_to_x(clip.offset_ms + clip.effective_length_ms)
+        return QRect(x1, bar_y + 4, max(2, x2 - x1), self.BAR_H - 8)
+
+    def _clip_at_pos(self, pos: QPoint) -> AudioClip | None:
+        if pos.y() < self.LABEL_H or pos.y() > self.LABEL_H + self.BAR_H:
+            return None
+        for clip in self.track.clips:
+            if clip.source_path is None:
+                continue
+            r = self._clip_bar_rect(clip)
+            if r.left() <= pos.x() <= r.right():
+                return clip
+        return None
+
+    def _x_to_clip_local_ms(self, clip: AudioClip, x: int) -> int:
+        project_ms = self._x_to_project_ms(x)
+        local = project_ms - clip.offset_ms
+        return max(0, min(clip.effective_length_ms, local))
+
+    def _clip_local_ms_to_x(self, clip: AudioClip, local_ms: int) -> int:
+        return self._project_ms_to_x(clip.offset_ms + local_ms)
+
+    def _fade_edge_at(self, clip: AudioClip, x: int, y: int):
+        bar_y = self.LABEL_H
+        if y < bar_y or y > bar_y + self.BAR_H:
+            return None, ""
+        for fade in clip.fades:
+            local_start = fade.start_ms - clip.trim_start_ms
+            local_end = fade.end_ms - clip.trim_start_ms
+            fx1 = self._clip_local_ms_to_x(clip, local_start)
+            fx2 = self._clip_local_ms_to_x(clip, local_end)
+            if abs(x - fx1) <= self.FADE_EDGE_GRAB_PX:
+                return fade, "left"
+            if abs(x - fx2) <= self.FADE_EDGE_GRAB_PX:
+                return fade, "right"
+        return None, ""
+
+    def _fade_under(self, clip: AudioClip, pos: QPoint):
+        if pos.y() < self.LABEL_H or pos.y() > self.LABEL_H + self.BAR_H:
+            return None
+        local_ms = self._x_to_clip_local_ms(clip, pos.x())
+        source_ms = clip.trim_start_ms + local_ms
+        for fade in clip.fades:
+            if fade.start_ms <= source_ms < fade.end_ms:
+                return fade
+        return None
+
+    # ---- mouse ----
 
     def _on_volume_slider_changed(self, value: int) -> None:
         vol = max(0.0, min(1.5, value / 100.0))
@@ -1424,49 +2683,174 @@ class AudioTrackRow(QWidget):
         self.volume_changed.emit(self.track.id, vol)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        pos = event.position().toPoint()
+        x = pos.x()
+        y = pos.y()
+        mods = event.modifiers()
+
+        # Right-click dispatches to fade menu / clip menu / row menu.
         if event.button() == Qt.MouseButton.RightButton:
-            self.context_menu.emit(self.track.id, event.globalPosition().toPoint())
+            clip = self._clip_at_pos(pos)
+            if clip is not None:
+                fade = self._fade_under(clip, pos)
+                if fade is not None:
+                    self._show_fade_menu(clip, fade, event.globalPosition().toPoint())
+                    return
+                self.clip_context_menu.emit(
+                    self.track.id, clip.id, event.globalPosition().toPoint()
+                )
+                return
+            self.row_context_menu.emit(self.track.id, event.globalPosition().toPoint())
             return
+
         if event.button() != Qt.MouseButton.LeftButton:
             return
         self.clicked.emit(self.track.id)
-        y = event.position().y()
-        # Clicks in the bar row → start offset drag (or request source
-        # load if the track is empty).
-        if y >= self.LABEL_H:
-            if self.track.source_path is None:
-                self.load_source_requested.emit(self.track.id)
-                return
-            self._dragging_offset = True
-            self._drag_start_x = event.position().toPoint().x()
-            self._drag_start_offset_ms = self.track.offset_ms
-            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        if y < self.LABEL_H:
+            return
+
+        # Empty row → request to load an audio file.
+        if not self.track.is_loaded:
+            self.load_source_requested.emit(self.track.id)
+            return
+
+        clip = self._clip_at_pos(pos)
+        if clip is None:
+            # Clicked on empty bar area between clips → nothing to do.
+            return
+        self._active_clip_id = clip.id
+        self._interaction_clip = clip
+
+        # 1. Fade edge resize takes priority.
+        fade, side = self._fade_edge_at(clip, x, y)
+        if fade is not None:
+            self._resizing_fade = fade
+            self._resize_side = side
+            self._resize_orig_start = fade.start_ms
+            self._resize_orig_end = fade.end_ms
+            self._drag_start_x = x
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+            return
+
+        # 2. Shift+drag = range select on this clip (clip-local ms).
+        if mods & Qt.KeyboardModifier.ShiftModifier:
+            ms = self._x_to_clip_local_ms(clip, x)
+            self._dragging_selection = True
+            self._drag_start_local_ms = ms
+            clip.selection_start_ms = ms
+            clip.selection_end_ms = ms
+            # Clear selection on other clips for sanity.
+            for c in self.track.clips:
+                if c is not clip:
+                    c.selection_start_ms = -1
+                    c.selection_end_ms = -1
+            self.update()
+            self.clip_selection_changed.emit(self.track.id, clip.id, ms, ms)
+            return
+
+        # 3. Else drag the clip on the project timeline.
+        self._dragging_offset = True
+        self._drag_start_x = x
+        self._drag_start_offset_ms = clip.offset_ms
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
-        if not self._dragging_offset:
-            return
-        dx = event.position().toPoint().x() - self._drag_start_x
-        d_ms = int(dx / max(self._px_per_sec, 0.001) * 1000)
-        new_offset = max(0, self._drag_start_offset_ms + d_ms)
-        if new_offset != self.track.offset_ms:
-            self.track.offset_ms = new_offset
-            self.offset_changed.emit(self.track.id, new_offset)
+        pos = event.position().toPoint()
+        x = pos.x()
+        clip = self._interaction_clip
+
+        if self._resizing_fade is not None and clip is not None:
+            delta_ms = int((x - self._drag_start_x) / max(self._px_per_sec, 0.001) * 1000)
+            fade = self._resizing_fade
+            # Fade start/end are in source-ms (absolute within the source
+            # file), so their valid range is [clip.trim_start_ms, clip.effective_trim_end_ms].
+            if self._resize_side == "left":
+                new_start = max(
+                    clip.trim_start_ms,
+                    min(fade.end_ms - 100, self._resize_orig_start + delta_ms),
+                )
+                fade.start_ms = new_start
+            else:
+                new_end = min(
+                    clip.effective_trim_end_ms,
+                    max(fade.start_ms + 100, self._resize_orig_end + delta_ms),
+                )
+                fade.end_ms = new_end
             self.update()
+            self.track_changed.emit(self.track.id)
+            return
+
+        if self._dragging_selection and clip is not None:
+            ms = self._x_to_clip_local_ms(clip, x)
+            start = min(self._drag_start_local_ms, ms)
+            end = max(self._drag_start_local_ms, ms)
+            clip.selection_start_ms = start
+            clip.selection_end_ms = end
+            self.update()
+            self.clip_selection_changed.emit(self.track.id, clip.id, start, end)
+            return
+
+        if self._dragging_offset and clip is not None:
+            dx = x - self._drag_start_x
+            d_ms = int(dx / max(self._px_per_sec, 0.001) * 1000)
+            new_offset = max(0, self._drag_start_offset_ms + d_ms)
+            if new_offset != clip.offset_ms:
+                clip.offset_ms = new_offset
+                self.track_changed.emit(self.track.id)
+                self.update()
+            return
+
+        # Idle hover: cursor hinting.
+        hover_clip = self._clip_at_pos(pos)
+        if hover_clip is not None:
+            fade, _side = self._fade_edge_at(hover_clip, x, pos.y())
+            if fade is not None:
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+                return
+        self.setCursor(Qt.CursorShape.ArrowCursor)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
             return
         self._dragging_offset = False
+        self._dragging_selection = False
+        self._resizing_fade = None
+        self._resize_side = ""
+        self._interaction_clip = None
         self.setCursor(Qt.CursorShape.ArrowCursor)
 
-    # ---- drag & drop (onto this row) ----
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            super().mouseDoubleClickEvent(event)
+            return
+        pos = event.position().toPoint()
+        clip = self._clip_at_pos(pos)
+        if clip is None:
+            return
+        # Double-click on a fade → delete that fade.
+        fade = self._fade_under(clip, pos)
+        if fade is not None:
+            try:
+                clip.fades.remove(fade)
+            except ValueError:
+                return
+            self.update()
+            self.track_changed.emit(self.track.id)
+            return
+        # Else open the sound editor for this clip.
+        self.open_editor_requested.emit(self.track.id, clip.id)
+
+    # ---- drag & drop ----
 
     def dragEnterEvent(self, event: QDragEnterEvent) -> None:
         md = event.mimeData()
+        if md.hasFormat(FADE_MIME_TYPE):
+            event.acceptProposedAction()
+            return
         if md.hasUrls():
             for u in md.urls():
                 p = Path(u.toLocalFile())
-                if is_audio_path(p):
+                if is_audio_path(p) or is_video_path(p):
                     event.acceptProposedAction()
                     return
         event.ignore()
@@ -1476,16 +2860,77 @@ class AudioTrackRow(QWidget):
 
     def dropEvent(self, event: QDropEvent) -> None:
         md = event.mimeData()
+        pos = event.position().toPoint()
+
+        if md.hasFormat(FADE_MIME_TYPE):
+            clip = self._clip_at_pos(pos)
+            if clip is None or clip.source_path is None or clip.effective_length_ms <= 0:
+                event.ignore()
+                return
+            try:
+                dur_ms = int(bytes(md.data(FADE_MIME_TYPE)).decode("utf-8"))
+            except Exception:
+                dur_ms = FadeCard.DEFAULT_DURATION_MS
+            dur_ms = max(100, dur_ms)
+            center_local = self._x_to_clip_local_ms(clip, pos.x())
+            # FadeSegments are stored in source-ms (absolute within
+            # source file) so they survive trim / split correctly.
+            source_center = clip.trim_start_ms + center_local
+            start = max(clip.trim_start_ms, source_center - dur_ms // 2)
+            end = min(clip.effective_trim_end_ms, start + dur_ms)
+            if end <= start:
+                event.ignore()
+                return
+            clip.fades.append(FadeSegment(start, end))
+            clip.fades.sort(key=lambda f: f.start_ms)
+            self.update()
+            self.track_changed.emit(self.track.id)
+            self.clicked.emit(self.track.id)
+            event.acceptProposedAction()
+            return
+
         if not md.hasUrls():
             event.ignore()
             return
         for u in md.urls():
             p = Path(u.toLocalFile())
-            if is_audio_path(p):
-                self.source_dropped.emit(self.track.id, p)
+            if is_audio_path(p) or is_video_path(p):
+                self.media_dropped.emit(self.track.id, p)
                 event.acceptProposedAction()
                 return
         event.ignore()
+
+    # ---- fade menu (per-fade, on right-click) ----
+
+    def _show_fade_menu(self, clip: AudioClip, fade, global_pos) -> None:
+        menu = QMenu(self)
+        act_in = menu.addAction(tr("veditor.fade_menu.in"))
+        act_in.setCheckable(True)
+        act_in.setChecked(getattr(fade, "kind", "both") == "in")
+        act_out = menu.addAction(tr("veditor.fade_menu.out"))
+        act_out.setCheckable(True)
+        act_out.setChecked(getattr(fade, "kind", "both") == "out")
+        act_both = menu.addAction(tr("veditor.fade_menu.both"))
+        act_both.setCheckable(True)
+        act_both.setChecked(getattr(fade, "kind", "both") == "both")
+        menu.addSeparator()
+        act_del = menu.addAction(tr("veditor.fade_menu.delete"))
+        chosen = menu.exec(global_pos)
+        if chosen is act_in:
+            fade.kind = "in"
+        elif chosen is act_out:
+            fade.kind = "out"
+        elif chosen is act_both:
+            fade.kind = "both"
+        elif chosen is act_del:
+            try:
+                clip.fades.remove(fade)
+            except ValueError:
+                pass
+        else:
+            return
+        self.update()
+        self.track_changed.emit(self.track.id)
 
     # ---- paint ----
 
@@ -1493,19 +2938,17 @@ class AudioTrackRow(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        # Header background
+        # Header bg
         if self._is_active:
             painter.fillRect(0, 0, self.width(), self.LABEL_H, QColor(COLOR_BG_L5))
         else:
             painter.fillRect(0, 0, self.width(), self.LABEL_H, QColor(COLOR_BG_L3))
-
-        # Bar area background (stripe canvas shows through otherwise)
+        # Bar area bg
         bar_y = self.LABEL_H
         painter.fillRect(0, bar_y, self.width(), self.BAR_H, QColor(COLOR_BG_L2))
 
         track = self.track
-        if track.source_path is None:
-            # Empty audio track — dashed outline + hint text.
+        if not track.is_loaded:
             painter.setPen(QPen(QColor(COLOR_BORDER_DEFAULT), 1, Qt.PenStyle.DashLine))
             rect = QRect(self.MARGIN, bar_y + 4, self.width() - 2 * self.MARGIN, self.BAR_H - 8)
             painter.drawRect(rect)
@@ -1515,58 +2958,129 @@ class AudioTrackRow(QWidget):
             )
             return
 
-        x_start = self._ms_to_x(track.offset_ms)
-        x_end = self._ms_to_x(track.offset_ms + track.effective_length_ms)
-        bar_rect = QRect(x_start, bar_y + 4, max(2, x_end - x_start), self.BAR_H - 8)
+        # Each clip renders independently.
+        for clip in track.clips:
+            if clip.source_path is None:
+                continue
+            self._paint_clip(painter, clip)
 
-        color = self.BAR_COLOR_ACTIVE if self._is_active else self.BAR_COLOR
+        # Playhead spans the whole row.
+        px = self._project_ms_to_x(self._position_ms)
+        pen = QPen(QColor(COLOR_ACCENT_ORANGE))
+        pen.setWidth(2)
+        painter.setPen(pen)
+        painter.drawLine(px, bar_y, px, bar_y + self.BAR_H)
+
+    def _paint_clip(self, painter: QPainter, clip: AudioClip) -> None:
+        bar_rect = self._clip_bar_rect(clip)
+        is_active_clip = (clip.id == self._active_clip_id)
+        color = self.BAR_COLOR_ACTIVE if is_active_clip else self.BAR_COLOR
         painter.fillRect(bar_rect, color)
         painter.setPen(QPen(self.BAR_BORDER, 1))
         painter.drawRect(bar_rect)
 
-        # Fade-in ramp: darker gradient over the first fade_in_ms.
-        if track.fade_in_ms > 0:
-            fi_px = int(track.fade_in_ms / 1000.0 * self._px_per_sec)
-            fi_px = min(fi_px, bar_rect.width())
-            if fi_px > 2:
-                grad = QLinearGradient(bar_rect.left(), 0, bar_rect.left() + fi_px, 0)
-                grad.setColorAt(0.0, QColor(0, 0, 0, 160))
-                grad.setColorAt(1.0, QColor(0, 0, 0, 0))
-                painter.fillRect(bar_rect.left(), bar_rect.top(), fi_px, bar_rect.height(), grad)
-
-        if track.fade_out_ms > 0:
-            fo_px = int(track.fade_out_ms / 1000.0 * self._px_per_sec)
-            fo_px = min(fo_px, bar_rect.width())
-            if fo_px > 2:
-                grad = QLinearGradient(bar_rect.right() - fo_px, 0, bar_rect.right(), 0)
-                grad.setColorAt(0.0, QColor(0, 0, 0, 0))
-                grad.setColorAt(1.0, QColor(0, 0, 0, 160))
-                painter.fillRect(bar_rect.right() - fo_px, bar_rect.top(), fo_px, bar_rect.height(), grad)
-
-        # Waveform placeholder: horizontal center line
-        painter.setPen(QPen(QColor(255, 255, 255, 80), 1))
+        # Waveform
         mid_y = bar_rect.top() + bar_rect.height() // 2
-        painter.drawLine(bar_rect.left() + 3, mid_y, bar_rect.right() - 3, mid_y)
+        wf = clip.waveform
+        err = self._waveform_errors.get(clip.id)
+        if wf is not None and len(wf) > 0:
+            from app.audio_tracks import WAVEFORM_BUCKETS_PER_SEC
+            painter.setPen(QPen(QColor(255, 255, 255, 210), 1))
+            n = len(wf)
+            trim_start_s = clip.trim_start_ms / 1000.0
+            half_h = (bar_rect.height() - 2) // 2
+            for col_px in range(bar_rect.left() + 2, bar_rect.right() - 1):
+                local_ms = (col_px - bar_rect.left()) / max(self._px_per_sec, 0.001) * 1000.0
+                src_s = trim_start_s + local_ms / 1000.0
+                bucket = int(src_s * WAVEFORM_BUCKETS_PER_SEC)
+                if bucket < 0 or bucket >= n:
+                    continue
+                peak = float(wf[bucket]) ** 0.7
+                h = max(1, int(peak * half_h))
+                painter.drawLine(col_px, mid_y - h, col_px, mid_y + h)
+        elif err:
+            painter.setPen(QPen(QColor(200, 80, 80, 200), 1, Qt.PenStyle.DashLine))
+            painter.drawLine(bar_rect.left() + 3, mid_y, bar_rect.right() - 3, mid_y)
+            painter.setPen(QColor(230, 140, 140, 230))
+            f = painter.font(); f.setPixelSize(10); f.setBold(True); painter.setFont(f)
+            painter.drawText(
+                bar_rect.adjusted(6, 0, -6, 0), Qt.AlignmentFlag.AlignCenter,
+                "⚠ decode failed",
+            )
+        else:
+            painter.setPen(QPen(QColor(255, 255, 255, 80), 1))
+            painter.drawLine(bar_rect.left() + 3, mid_y, bar_rect.right() - 3, mid_y)
 
-        # Filename overlaid on the bar (secondary location; header has the
-        # primary copy in case the bar is too short)
+        # Filename on the bar
         painter.setPen(QColor(255, 255, 255, 230))
-        font = painter.font()
-        font.setPixelSize(10)
-        painter.setFont(font)
+        f = painter.font(); f.setPixelSize(10); f.setBold(False); painter.setFont(f)
         painter.drawText(
             bar_rect.adjusted(6, 0, -6, 0),
             Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
-            track.display_name,
+            clip.display_name,
         )
 
-        # Playhead
-        if 0 <= self._position_ms <= track.offset_ms + track.effective_length_ms + 500:
-            px = self._ms_to_x(self._position_ms)
-            pen = QPen(QColor(COLOR_ACCENT_ORANGE))
-            pen.setWidth(2)
-            painter.setPen(pen)
-            painter.drawLine(px, bar_y, px, bar_y + self.BAR_H)
+        # Cuts — clip-local ms domain, dark overlay.
+        for cut in clip.cuts:
+            cx1 = self._clip_local_ms_to_x(clip, cut.start_ms)
+            cx2 = self._clip_local_ms_to_x(clip, cut.end_ms)
+            cut_rect = QRect(cx1, bar_rect.top(), max(1, cx2 - cx1), bar_rect.height())
+            painter.fillRect(cut_rect, QColor(30, 30, 30, 210))
+            if cut_rect.width() > 24:
+                painter.setPen(QColor(255, 255, 255))
+                painter.drawText(cut_rect, Qt.AlignmentFlag.AlignCenter, tr("veditor.cut_label"))
+
+        # FadeSegment actors — in source-ms domain.
+        for fade in clip.fades:
+            self._paint_fade_segment(painter, clip, fade, bar_rect)
+
+        # Selection (clip-local ms).
+        if clip.selection_start_ms >= 0 and clip.selection_end_ms > clip.selection_start_ms:
+            sx1 = self._clip_local_ms_to_x(clip, clip.selection_start_ms)
+            sx2 = self._clip_local_ms_to_x(clip, clip.selection_end_ms)
+            sel_rect = QRect(sx1, bar_rect.top(), max(1, sx2 - sx1), bar_rect.height())
+            painter.fillRect(sel_rect, QColor(55, 138, 221, 80))
+            pen = QPen(QColor(COLOR_ACCENT_BLUE)); pen.setWidth(2)
+            painter.setPen(pen); painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(sel_rect)
+
+    def _paint_fade_segment(self, painter: QPainter, clip: AudioClip, fade, bar_rect: QRect) -> None:
+        local_start = fade.start_ms - clip.trim_start_ms
+        local_end = fade.end_ms - clip.trim_start_ms
+        fx1 = self._clip_local_ms_to_x(clip, local_start)
+        fx2 = self._clip_local_ms_to_x(clip, local_end)
+        if fx2 <= fx1:
+            return
+        kind = getattr(fade, "kind", "both")
+        painter.save()
+        painter.setClipRect(bar_rect)
+        if kind == "in":
+            g = QLinearGradient(fx1, 0, fx2, 0)
+            g.setColorAt(0.0, QColor(0, 0, 0, 220))
+            g.setColorAt(1.0, QColor(216, 90, 48, 0))
+            painter.fillRect(fx1, bar_rect.top(), fx2 - fx1, bar_rect.height(), g)
+        elif kind == "out":
+            g = QLinearGradient(fx1, 0, fx2, 0)
+            g.setColorAt(0.0, QColor(216, 90, 48, 0))
+            g.setColorAt(1.0, QColor(0, 0, 0, 220))
+            painter.fillRect(fx1, bar_rect.top(), fx2 - fx1, bar_rect.height(), g)
+        else:
+            mid = (fx1 + fx2) // 2
+            g_out = QLinearGradient(fx1, 0, mid, 0)
+            g_out.setColorAt(0.0, QColor(216, 90, 48, 0))
+            g_out.setColorAt(1.0, QColor(0, 0, 0, 220))
+            painter.fillRect(fx1, bar_rect.top(), mid - fx1, bar_rect.height(), g_out)
+            g_in = QLinearGradient(mid, 0, fx2, 0)
+            g_in.setColorAt(0.0, QColor(0, 0, 0, 220))
+            g_in.setColorAt(1.0, QColor(216, 90, 48, 0))
+            painter.fillRect(mid, bar_rect.top(), fx2 - mid, bar_rect.height(), g_in)
+        painter.restore()
+        pen = QPen(QColor(COLOR_ACCENT_ORANGE)); pen.setWidth(2)
+        painter.setPen(pen); painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(fx1, bar_rect.top(), max(1, fx2 - fx1), bar_rect.height())
+        hw = 3; hc = QColor(255, 150, 80)
+        painter.fillRect(fx1 - hw // 2, bar_rect.top(), hw, bar_rect.height(), hc)
+        painter.fillRect(fx2 - hw // 2, bar_rect.top(), hw, bar_rect.height(), hc)
 
 
 class _block_signals:
@@ -1594,6 +3108,8 @@ class VideoEditorWindow(QWidget):
         self._track_rows: dict[int, TrackRow] = {}
         self._audio_tracks: list[AudioTrack] = []
         self._audio_rows: dict[int, AudioTrackRow] = {}
+        self._waveform_extractors: dict[int, WaveformExtractor] = {}
+        self._preview_popout: "PreviewPopoutWindow | None" = None
         self._next_track_id: int = 1
         self._active_track_id: int | None = None
         self._current_segment_speed: float = 1.0
@@ -1701,6 +3217,17 @@ class VideoEditorWindow(QWidget):
         self.zoom_fit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.zoom_fit_btn.clicked.connect(self._zoom_fit)
 
+        # Pop-out icon is shown inside the PREVIEW section header (right
+        # end) rather than here, so that it reads as "this control
+        # belongs to the preview". Created eagerly so _build_preview_header
+        # can reference it, attached there.
+        self.popout_btn = QPushButton("⛶")
+        self.popout_btn.setObjectName("PreviewPopoutIcon")
+        self.popout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.popout_btn.setToolTip(tr("veditor.popout.tooltip"))
+        self.popout_btn.setFixedSize(28, 24)
+        self.popout_btn.clicked.connect(self._toggle_preview_popout)
+
         toolbar.addWidget(self.reset_btn)
         toolbar.addStretch(1)
         toolbar.addWidget(self.zoom_out_btn)
@@ -1712,9 +3239,19 @@ class VideoEditorWindow(QWidget):
         root.addLayout(toolbar)
 
         # --- Preview section ---
-        root.addWidget(
-            self._make_section_header(tr("veditor.section.preview"), "preview")
-        )
+        # Custom header: section label on the left, pop-out icon on the
+        # right. The container itself carries the accent bar + bg so the
+        # row renders as one cohesive strip.
+        preview_header = QWidget()
+        preview_header.setObjectName("PreviewSectionHeader")
+        pheader_layout = QHBoxLayout(preview_header)
+        pheader_layout.setContentsMargins(0, 0, 8, 0)
+        pheader_layout.setSpacing(0)
+        self._preview_section_label = QLabel(tr("veditor.section.preview").upper())
+        self._preview_section_label.setObjectName("PreviewSectionTitle")
+        pheader_layout.addWidget(self._preview_section_label, stretch=1)
+        pheader_layout.addWidget(self.popout_btn)
+        root.addWidget(preview_header)
         preview_host = QWidget()
         preview_host.setObjectName("PreviewHost")
         preview_host.setFixedHeight(280)
@@ -1791,11 +3328,49 @@ class VideoEditorWindow(QWidget):
         )
         self.current_speed_label.setObjectName("SpeedLabel")
 
+        # Mark In / Mark Out / Clear selection — prosumer-editor style
+        # range selection tied to the playhead. Tracks can still be
+        # shift+dragged directly, but the buttons + I/O shortcuts are
+        # the primary path now.
+        self.mark_in_btn = QPushButton(tr("veditor.btn.mark_in"))
+        self.mark_in_btn.setObjectName("ToolButton")
+        self.mark_in_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.mark_in_btn.setToolTip(tr("veditor.mark_in.tooltip"))
+        self.mark_in_btn.clicked.connect(self._mark_in_at_playhead)
+
+        self.mark_out_btn = QPushButton(tr("veditor.btn.mark_out"))
+        self.mark_out_btn.setObjectName("ToolButton")
+        self.mark_out_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.mark_out_btn.setToolTip(tr("veditor.mark_out.tooltip"))
+        self.mark_out_btn.clicked.connect(self._mark_out_at_playhead)
+
+        self.clear_sel_btn = QPushButton(tr("veditor.btn.clear_sel_short"))
+        self.clear_sel_btn.setObjectName("ToolButton")
+        self.clear_sel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_sel_btn.setToolTip(tr("veditor.clear_sel.tooltip"))
+        self.clear_sel_btn.clicked.connect(self._clear_active_selection)
+
         transport.addWidget(self.play_btn)
         transport.addWidget(self.time_label)
+        transport.addSpacing(12)
+        transport.addWidget(self.mark_in_btn)
+        transport.addWidget(self.mark_out_btn)
+        transport.addWidget(self.clear_sel_btn)
         transport.addStretch(1)
         transport.addWidget(self.current_speed_label)
         root.addWidget(play_bar)
+
+        # --- Keyboard shortcuts for selection ---
+        from PySide6.QtGui import QKeySequence, QShortcut
+        self._sc_mark_in = QShortcut(QKeySequence("I"), self)
+        self._sc_mark_in.setContext(Qt.ShortcutContext.WindowShortcut)
+        self._sc_mark_in.activated.connect(self._mark_in_at_playhead)
+        self._sc_mark_out = QShortcut(QKeySequence("O"), self)
+        self._sc_mark_out.setContext(Qt.ShortcutContext.WindowShortcut)
+        self._sc_mark_out.activated.connect(self._mark_out_at_playhead)
+        self._sc_clear_sel = QShortcut(QKeySequence("X"), self)
+        self._sc_clear_sel.setContext(Qt.ShortcutContext.WindowShortcut)
+        self._sc_clear_sel.activated.connect(self._clear_active_selection)
 
         # --- Timeline section ---
         root.addWidget(
@@ -1921,12 +3496,26 @@ class VideoEditorWindow(QWidget):
         row.context_menu.connect(self._on_track_context_menu)
         row.offset_changed.connect(self._on_track_offset_changed)
         row.fades_changed.connect(self._on_track_fades_changed)
-        row.video_source_dropped.connect(self._on_video_source_dropped_on_track)
+        row.media_dropped.connect(self._on_media_dropped_on_video_row)
         self._track_rows[track.id] = row
         self._tracks_layout.insertWidget(self._tracks_layout.count() - 1, row)
         self._update_tracks_host_width()
 
-    # ============== audio tracks ==============
+    # ============== audio tracks (multi-clip model) ==============
+
+    def _next_clip_id(self) -> int:
+        cid = getattr(self, "_next_audio_clip_id", 1)
+        self._next_audio_clip_id = cid + 1
+        return cid
+
+    def _find_audio_track(self, track_id: int) -> AudioTrack | None:
+        return next((a for a in self._audio_tracks if a.id == track_id), None)
+
+    def _find_audio_clip(self, track_id: int, clip_id: int) -> tuple[AudioTrack | None, AudioClip | None]:
+        track = self._find_audio_track(track_id)
+        if track is None:
+            return None, None
+        return track, next((c for c in track.clips if c.id == clip_id), None)
 
     def _add_empty_audio_track(self) -> None:
         tid = self._next_track_id
@@ -1936,36 +3525,101 @@ class VideoEditorWindow(QWidget):
         self._insert_audio_track_widget(track)
 
     def _add_audio_track_with_source(self, path: Path) -> None:
+        duration = probe_audio_duration_ms(path)
+        if duration <= 0:
+            QMessageBox.warning(
+                self,
+                tr("veditor.title"),
+                tr("veditor.audio.error.undecodable", path=str(path)),
+            )
+            return
         tid = self._next_track_id
         self._next_track_id += 1
-        track = AudioTrack(id=tid, source_path=path)
-        track.duration_ms = probe_audio_duration_ms(path)
-        if track.duration_ms > 0 and track.trim_end_ms == 0:
-            track.trim_end_ms = track.duration_ms
+        clip = AudioClip(
+            id=self._next_clip_id(),
+            source_path=path,
+            duration_ms=duration,
+            trim_end_ms=duration,
+        )
+        track = AudioTrack(id=tid, clips=[clip])
         self._audio_tracks.append(track)
         self._insert_audio_track_widget(track)
         self._audio_mixer.add_track(track)
+        self._start_waveform_extraction(clip)
         self._refresh_player_tracks()
 
     def _populate_audio_track(self, track_id: int, path: Path) -> None:
-        """Fill an existing empty AudioTrack with a source file."""
-        track = next(
-            (a for a in self._audio_tracks if a.id == track_id), None
-        )
-        if track is None or track.source_path is not None:
+        """Fill an empty AudioTrack (no clips) with a newly-loaded file."""
+        track = self._find_audio_track(track_id)
+        if track is None or track.is_loaded:
             return
-        track.source_path = path
-        track.duration_ms = probe_audio_duration_ms(path)
-        track.trim_start_ms = 0
-        track.trim_end_ms = track.duration_ms
+        duration = probe_audio_duration_ms(path)
+        if duration <= 0:
+            QMessageBox.warning(
+                self,
+                tr("veditor.title"),
+                tr("veditor.audio.error.undecodable", path=str(path)),
+            )
+            return
+        clip = AudioClip(
+            id=self._next_clip_id(),
+            source_path=path,
+            duration_ms=duration,
+            trim_end_ms=duration,
+        )
+        track.clips.append(clip)
         row = self._audio_rows.get(track_id)
         if row is not None:
             row.refresh_from_track()
-        self._audio_mixer.add_track(track)
+        self._audio_mixer.update_track(track)
+        self._start_waveform_extraction(clip)
         self._refresh_player_tracks()
 
+    def _start_waveform_extraction(self, clip: AudioClip) -> None:
+        if clip.source_path is None:
+            return
+        prev = self._waveform_extractors.pop(clip.id, None)
+        if prev is not None:
+            try:
+                prev.ready.disconnect()
+                prev.failed.disconnect()
+            except Exception:
+                pass
+        ex = WaveformExtractor(clip.id, clip.source_path)
+        ex.ready.connect(self._on_waveform_ready)
+        ex.failed.connect(self._on_waveform_failed)
+        ex.finished.connect(ex.deleteLater)
+        self._waveform_extractors[clip.id] = ex
+        ex.start()
+
+    def _on_waveform_ready(self, cid: int, peaks) -> None:
+        for track in self._audio_tracks:
+            for clip in track.clips:
+                if clip.id == cid:
+                    clip.waveform = peaks
+                    row = self._audio_rows.get(track.id)
+                    if row is not None:
+                        row.clear_waveform_error(cid)
+                        row.update()
+                    # Refresh any open sound editor showing this clip.
+                    for editor in getattr(self, "_sound_editors", []):
+                        if getattr(editor, "clip", None) is clip:
+                            editor.refresh_waveform()
+                    self._waveform_extractors.pop(cid, None)
+                    return
+        self._waveform_extractors.pop(cid, None)
+
+    def _on_waveform_failed(self, cid: int, reason: str) -> None:
+        for track in self._audio_tracks:
+            for clip in track.clips:
+                if clip.id == cid:
+                    row = self._audio_rows.get(track.id)
+                    if row is not None:
+                        row.set_waveform_error(cid, reason)
+                    break
+        self._waveform_extractors.pop(cid, None)
+
     def _populate_video_track(self, track_id: int, path: Path) -> None:
-        """Fill an existing empty VideoTrack with a source file."""
         track = self._find_track(track_id)
         if track is None or track.source_path is not None:
             return
@@ -1980,25 +3634,292 @@ class VideoEditorWindow(QWidget):
         row = AudioTrackRow(track)
         row.set_px_per_sec(self._px_per_sec)
         row.clicked.connect(self._set_active_track)
-        row.offset_changed.connect(self._on_audio_offset_changed)
         row.volume_changed.connect(self._on_audio_volume_changed)
-        row.context_menu.connect(self._on_audio_context_menu)
+        row.row_context_menu.connect(self._on_audio_row_context_menu)
+        row.clip_context_menu.connect(self._on_audio_clip_context_menu)
         row.load_source_requested.connect(self._on_audio_load_source_requested)
-        row.source_dropped.connect(self._populate_audio_track)
+        row.media_dropped.connect(self._on_media_dropped_on_audio_row)
+        row.track_changed.connect(self._on_audio_track_changed)
+        row.clip_selection_changed.connect(self._on_audio_clip_selection_changed)
+        row.open_editor_requested.connect(self._open_sound_editor)
         self._audio_rows[track.id] = row
         self._tracks_layout.insertWidget(self._tracks_layout.count() - 1, row)
         self._update_tracks_host_width()
 
-    def _on_audio_offset_changed(self, _tid: int, _ms: int) -> None:
+    def _on_audio_track_changed(self, tid: int) -> None:
+        """Fires whenever a clip is dragged / resized / fades mutated.
+        Re-sync the mixer and refresh project duration."""
+        track = self._find_audio_track(tid)
+        if track is not None:
+            self._audio_mixer.update_track(track)
+        self._refresh_player_tracks()
+
+    def _on_audio_clip_selection_changed(
+        self, _tid: int, _cid: int, _start: int, _end: int
+    ) -> None:
+        # Row persists the selection on the clip; nothing else needed.
+        pass
+
+    def _split_audio_clip(self, track: AudioTrack, clip: AudioClip) -> None:
+        """Split ``clip`` into two clips on the SAME track at the clip's
+        current selection [sel_start, sel_end] (clip-local ms). Leaves
+        the track intact with two clips that can be moved independently."""
+        sel_start = clip.selection_start_ms
+        sel_end = clip.selection_end_ms
+        if sel_start < 0 or sel_end <= sel_start:
+            return
+
+        a_trim_start = clip.trim_start_ms
+        a_trim_end = clip.trim_start_ms + sel_start
+        b_trim_start = clip.trim_start_ms + sel_end
+        b_trim_end = clip.effective_trim_end_ms
+
+        a_keeps = a_trim_end > a_trim_start
+        b_keeps = b_trim_end > b_trim_start
+        if not a_keeps and not b_keeps:
+            # Entire clip cut out — drop it from the track.
+            try:
+                track.clips.remove(clip)
+            except ValueError:
+                pass
+            self._waveform_extractors.pop(clip.id, None)
+            self._audio_mixer.update_track(track)
+            self._refresh_player_tracks()
+            self._audio_rows[track.id].update()
+            return
+
+        new_clip_b: AudioClip | None = None
+        if b_keeps:
+            new_clip_b = AudioClip(
+                id=self._next_clip_id(),
+                source_path=clip.source_path,
+                duration_ms=clip.duration_ms,
+                # Leave Piece B at the project-timeline position where
+                # its source content used to play — there's now a real
+                # gap where the cut was. User can drag either piece to
+                # close the gap or move them freely.
+                offset_ms=clip.offset_ms + sel_end,
+                trim_start_ms=b_trim_start,
+                trim_end_ms=b_trim_end,
+                fade_in_ms=0,
+                fade_out_ms=clip.fade_out_ms,
+            )
+            new_clip_b.waveform = clip.waveform  # shared source
+            new_clip_b.fades = [
+                FadeSegment(f.start_ms, f.end_ms, getattr(f, "kind", "both"))
+                for f in clip.fades
+                if f.start_ms >= b_trim_start
+            ]
+            new_clip_b.cuts = [
+                CutSegment(
+                    max(0, c.start_ms - sel_end),
+                    max(0, c.end_ms - sel_end),
+                )
+                for c in clip.cuts
+                if c.start_ms >= sel_end
+            ]
+
+        if a_keeps:
+            clip.trim_end_ms = a_trim_end
+            clip.fade_out_ms = 0  # tail fade belongs to piece B now
+            clip.fades = [
+                f for f in clip.fades if f.end_ms <= a_trim_end
+            ]
+            clip.cuts = [
+                c for c in clip.cuts if c.end_ms <= sel_start
+            ]
+            clip.selection_start_ms = -1
+            clip.selection_end_ms = -1
+        else:
+            # Piece A collapsed — remove it from the track.
+            try:
+                track.clips.remove(clip)
+            except ValueError:
+                pass
+
+        if new_clip_b is not None:
+            track.clips.append(new_clip_b)
+            # Keep clips sorted by offset so the render order is stable.
+            track.clips.sort(key=lambda c: c.offset_ms)
+
+        row = self._audio_rows.get(track.id)
+        if row is not None:
+            row.refresh_from_track()
+        self._audio_mixer.update_track(track)
+        self._refresh_player_tracks()
+
+    # ============== selection via Mark In / Mark Out (keyboard I/O) ==============
+
+    def _mark_in_at_playhead(self) -> None:
+        """Set the active track's selection start to where the playhead
+        intersects that track. Works for both video and audio tracks."""
+        self._set_selection_end_at_playhead(in_point=True)
+
+    def _mark_out_at_playhead(self) -> None:
+        self._set_selection_end_at_playhead(in_point=False)
+
+    def _set_selection_end_at_playhead(self, in_point: bool) -> None:
+        project_ms = self._player.position()
+        candidates = self._candidate_tracks_at(project_ms)
+        if not candidates:
+            return
+        changed = False
+        for entry in candidates:
+            kind = entry[0]
+            if kind == "audio":
+                _, track, clip = entry
+                local = max(0, project_ms - clip.offset_ms)
+                local = min(local, max(0, clip.effective_length_ms))
+                if in_point:
+                    clip.selection_start_ms = local
+                    if clip.selection_end_ms < local:
+                        clip.selection_end_ms = local
+                else:
+                    clip.selection_end_ms = local
+                    if (
+                        clip.selection_start_ms < 0
+                        or clip.selection_start_ms > local
+                    ):
+                        clip.selection_start_ms = local
+                row = self._audio_rows.get(track.id)
+                if row is not None:
+                    row.update()
+            else:
+                _, track = entry
+                local = max(0, project_ms - getattr(track, "offset_ms", 0))
+                local = min(local, max(0, track.duration_ms))
+                if in_point:
+                    track.selection_start_ms = local
+                    if track.selection_end_ms < local:
+                        track.selection_end_ms = local
+                else:
+                    track.selection_end_ms = local
+                    if (
+                        track.selection_start_ms < 0
+                        or track.selection_start_ms > local
+                    ):
+                        track.selection_start_ms = local
+                row = self._track_rows.get(track.id)
+                if row is not None:
+                    row.update()
+            changed = True
+        if changed:
+            self._refresh_selection_row()
+
+    def _clear_active_selection(self) -> None:
+        for t in self._tracks:
+            t.selection_start_ms = -1
+            t.selection_end_ms = -1
+        for track in self._audio_tracks:
+            for clip in track.clips:
+                clip.selection_start_ms = -1
+                clip.selection_end_ms = -1
+        for row in self._track_rows.values():
+            row.update()
+        for row in self._audio_rows.values():
+            row.update()
+        self._refresh_selection_row()
+
+    def _candidate_tracks_at(self, project_ms: int) -> list:
+        """Return list of entries whose window contains ``project_ms``.
+        Each entry is either ("video", VideoTrack) or ("audio", track, clip)."""
+        out: list = []
+        active = self._active_track()
+        if active is not None and active.source_path is not None:
+            offset = getattr(active, "offset_ms", 0)
+            if offset <= project_ms <= offset + active.duration_ms:
+                out.append(("video", active))
+        for t in self._tracks:
+            if t is active or t.source_path is None:
+                continue
+            offset = getattr(t, "offset_ms", 0)
+            if offset <= project_ms <= offset + t.duration_ms:
+                out.append(("video", t))
+        for track in self._audio_tracks:
+            for clip in track.clips:
+                if clip.source_path is None:
+                    continue
+                end = clip.offset_ms + clip.effective_length_ms
+                if clip.offset_ms <= project_ms <= end:
+                    out.append(("audio", track, clip))
+        return out
+
+    def _open_sound_editor(self, tid: int, cid: int) -> None:
+        track, clip = self._find_audio_clip(tid, cid)
+        if clip is None or clip.source_path is None:
+            return
+        editor = SoundEditorWindow(clip, self)
+        editor.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        if not hasattr(self, "_sound_editors"):
+            self._sound_editors: list[SoundEditorWindow] = []
+        self._sound_editors.append(editor)
+        editor.destroyed.connect(
+            lambda _obj, e=editor: (
+                self._sound_editors.remove(e) if e in self._sound_editors else None
+            )
+        )
+        editor.show()
+        editor.raise_()
+        editor.activateWindow()
+
+    def _on_media_dropped_on_video_row(self, track_id: int, path: Path) -> None:
+        if is_audio_path(path):
+            self._add_audio_track_with_source(path)
+            return
+        if is_video_path(path):
+            track = self._find_track(track_id)
+            if track is not None and track.source_path is None:
+                self._populate_video_track(track_id, path)
+            else:
+                self._add_track_with_source(path)
+
+    def _on_media_dropped_on_audio_row(self, track_id: int, path: Path) -> None:
+        """Media dropped on an audio row. Audio file → append as a new
+        clip on the same track if loaded, else populate it. Video →
+        spawn a new video track."""
+        if is_video_path(path):
+            self._add_track_with_source(path)
+            return
+        if not is_audio_path(path):
+            return
+        track = self._find_audio_track(track_id)
+        if track is None:
+            self._add_audio_track_with_source(path)
+            return
+        if not track.is_loaded:
+            self._populate_audio_track(track_id, path)
+            return
+        # Loaded track already — append as a new clip at the tail.
+        duration = probe_audio_duration_ms(path)
+        if duration <= 0:
+            QMessageBox.warning(
+                self,
+                tr("veditor.title"),
+                tr("veditor.audio.error.undecodable", path=str(path)),
+            )
+            return
+        tail = track.extent_ms()
+        clip = AudioClip(
+            id=self._next_clip_id(),
+            source_path=path,
+            duration_ms=duration,
+            offset_ms=tail,
+            trim_end_ms=duration,
+        )
+        track.clips.append(clip)
+        row = self._audio_rows.get(track_id)
+        if row is not None:
+            row.refresh_from_track()
+        self._audio_mixer.update_track(track)
+        self._start_waveform_extraction(clip)
         self._refresh_player_tracks()
 
     def _on_audio_volume_changed(self, tid: int, _vol: float) -> None:
-        track = next((a for a in self._audio_tracks if a.id == tid), None)
+        track = self._find_audio_track(tid)
         if track is not None:
             self._audio_mixer.update_track(track)
 
     def _on_audio_load_source_requested(self, tid: int) -> None:
-        """Empty audio track clicked → open a file dialog."""
         from PySide6.QtWidgets import QFileDialog
         path_str, _ = QFileDialog.getOpenFileName(
             self,
@@ -2010,47 +3931,50 @@ class VideoEditorWindow(QWidget):
             return
         self._populate_audio_track(tid, Path(path_str))
 
-    def _on_audio_context_menu(self, tid: int, global_pos: QPoint) -> None:
-        track = next((a for a in self._audio_tracks if a.id == tid), None)
+    def _on_audio_row_context_menu(self, tid: int, global_pos: QPoint) -> None:
+        """Right-click on empty row area — offer row-level actions only."""
+        track = self._find_audio_track(tid)
         if track is None:
             return
         menu = QMenu(self)
-        act_fade_in = QAction(tr("veditor.audio.ctx.set_fade_in"), self)
-        act_fade_out = QAction(tr("veditor.audio.ctx.set_fade_out"), self)
+        act_remove = menu.addAction(tr("veditor.audio.ctx.remove"))
+        chosen = menu.exec(global_pos)
+        if chosen is act_remove:
+            self._delete_audio_track(tid)
+
+    def _on_audio_clip_context_menu(
+        self, tid: int, cid: int, global_pos: QPoint
+    ) -> None:
+        """Right-click on a specific clip — per-clip actions."""
+        track, clip = self._find_audio_clip(tid, cid)
+        if clip is None:
+            return
+        menu = QMenu(self)
+        act_cut_sel = QAction(tr("veditor.menu.cut_selection"), self)
+        act_clear_cuts = QAction(tr("veditor.menu.clear_cuts"), self)
         act_trim = QAction(tr("veditor.audio.ctx.trim"), self)
-        act_clear = QAction(tr("veditor.audio.ctx.clear_source"), self)
-        act_remove = QAction(tr("veditor.audio.ctx.remove"), self)
+        act_delete_clip = QAction(tr("veditor.audio.ctx.delete_clip"), self)
 
-        def _prompt_fade_in():
-            ms, ok = QInputDialog.getInt(
-                self,
-                tr("veditor.audio.ctx.set_fade_in"),
-                tr("veditor.audio.fade_prompt_ms"),
-                track.fade_in_ms, 0, 60_000, 100,
-            )
-            if ok:
-                track.fade_in_ms = int(ms)
-                self._audio_rows[tid].update()
-                self._audio_mixer.update_track(track)
+        def _cut_selection():
+            if (
+                clip.selection_start_ms < 0
+                or clip.selection_end_ms <= clip.selection_start_ms
+            ):
+                return
+            self._split_audio_clip(track, clip)
 
-        def _prompt_fade_out():
-            ms, ok = QInputDialog.getInt(
-                self,
-                tr("veditor.audio.ctx.set_fade_out"),
-                tr("veditor.audio.fade_prompt_ms"),
-                track.fade_out_ms, 0, 60_000, 100,
-            )
-            if ok:
-                track.fade_out_ms = int(ms)
-                self._audio_rows[tid].update()
-                self._audio_mixer.update_track(track)
+        def _clear_cuts():
+            clip.cuts.clear()
+            self._audio_rows[tid].update()
+            self._audio_mixer.update_track(track)
+            self._refresh_player_tracks()
 
         def _prompt_trim():
             start, ok = QInputDialog.getInt(
                 self,
                 tr("veditor.audio.ctx.trim"),
                 tr("veditor.audio.trim_start_prompt"),
-                track.trim_start_ms, 0, max(1, track.duration_ms), 100,
+                clip.trim_start_ms, 0, max(1, clip.duration_ms), 100,
             )
             if not ok:
                 return
@@ -2058,42 +3982,46 @@ class VideoEditorWindow(QWidget):
                 self,
                 tr("veditor.audio.ctx.trim"),
                 tr("veditor.audio.trim_end_prompt"),
-                track.effective_trim_end_ms, start + 1,
-                max(start + 1, track.duration_ms), 100,
+                clip.effective_trim_end_ms, start + 1,
+                max(start + 1, clip.duration_ms), 100,
             )
             if not ok2:
                 return
-            track.trim_start_ms = int(start)
-            track.trim_end_ms = int(end)
+            clip.trim_start_ms = int(start)
+            clip.trim_end_ms = int(end)
             self._audio_rows[tid].update()
             self._audio_mixer.update_track(track)
             self._refresh_player_tracks()
 
-        def _clear_source():
-            track.source_path = None
-            track.duration_ms = 0
-            track.trim_start_ms = 0
-            track.trim_end_ms = 0
-            self._audio_rows[tid].refresh_from_track()
+        def _delete_clip():
+            try:
+                track.clips.remove(clip)
+            except ValueError:
+                return
+            self._waveform_extractors.pop(clip.id, None)
+            row = self._audio_rows.get(tid)
+            if row is not None:
+                row.refresh_from_track()
             self._audio_mixer.update_track(track)
             self._refresh_player_tracks()
 
-        def _remove():
-            self._delete_audio_track(tid)
-
-        act_fade_in.triggered.connect(_prompt_fade_in)
-        act_fade_out.triggered.connect(_prompt_fade_out)
+        act_cut_sel.triggered.connect(_cut_selection)
+        act_clear_cuts.triggered.connect(_clear_cuts)
         act_trim.triggered.connect(_prompt_trim)
-        act_clear.triggered.connect(_clear_source)
-        act_remove.triggered.connect(_remove)
+        act_delete_clip.triggered.connect(_delete_clip)
 
-        if track.source_path is not None:
-            menu.addAction(act_fade_in)
-            menu.addAction(act_fade_out)
-            menu.addAction(act_trim)
-            menu.addSeparator()
-            menu.addAction(act_clear)
-        menu.addAction(act_remove)
+        has_sel = (
+            clip.selection_start_ms >= 0
+            and clip.selection_end_ms > clip.selection_start_ms
+        )
+        act_cut_sel.setEnabled(has_sel)
+        act_clear_cuts.setEnabled(bool(clip.cuts))
+        menu.addAction(act_cut_sel)
+        menu.addAction(act_clear_cuts)
+        menu.addSeparator()
+        menu.addAction(act_trim)
+        menu.addSeparator()
+        menu.addAction(act_delete_clip)
         menu.exec(global_pos)
 
     def _delete_audio_track(self, track_id: int) -> None:
@@ -2101,12 +4029,48 @@ class VideoEditorWindow(QWidget):
         if row is not None:
             self._tracks_layout.removeWidget(row)
             row.deleteLater()
+        track = self._find_audio_track(track_id)
+        if track is not None:
+            for clip in track.clips:
+                self._waveform_extractors.pop(clip.id, None)
         self._audio_tracks = [a for a in self._audio_tracks if a.id != track_id]
         self._audio_mixer.remove_track(track_id)
         self._refresh_player_tracks()
 
-    def _on_video_source_dropped_on_track(self, tid: int, path: Path) -> None:
-        self._populate_video_track(tid, path)
+    def _extract_audio_from_video(self, track: VideoTrack) -> None:
+        """Create a new AudioTrack whose single clip points at the video
+        file itself. FFmpeg / QMediaPlayer both treat a video file as a
+        valid audio source — they decode the audio stream and ignore
+        the video stream — so this is effectively "ripping the BGM" as
+        an editable clip on the audio lane."""
+        if track.source_path is None:
+            return
+        duration = probe_audio_duration_ms(track.source_path)
+        if duration <= 0:
+            QMessageBox.warning(
+                self,
+                tr("veditor.title"),
+                tr("veditor.menu.extract_audio_none"),
+            )
+            return
+        tid = self._next_track_id
+        self._next_track_id += 1
+        clip = AudioClip(
+            id=self._next_clip_id(),
+            source_path=track.source_path,
+            duration_ms=duration,
+            # Align to the video's position on the project timeline so
+            # the extracted audio stays in sync if the user never moves
+            # either track afterwards.
+            offset_ms=getattr(track, "offset_ms", 0),
+            trim_end_ms=duration,
+        )
+        new_track = AudioTrack(id=tid, clips=[clip])
+        self._audio_tracks.append(new_track)
+        self._insert_audio_track_widget(new_track)
+        self._audio_mixer.add_track(new_track)
+        self._start_waveform_extraction(clip)
+        self._refresh_player_tracks()
 
     # ============== drag & drop (window-level) ==============
 
@@ -2200,7 +4164,12 @@ class VideoEditorWindow(QWidget):
         return f"{self._px_per_sec:.0f} px/s"
 
     def _delete_active_track(self) -> None:
-        if self._active_track_id is None or len(self._tracks) <= 1:
+        # Allow deleting the only video track when audio tracks exist —
+        # the project is still non-empty. If nothing remains at all,
+        # the editor just shows the empty-timeline hint.
+        if self._active_track_id is None:
+            return
+        if len(self._tracks) <= 1 and not self._audio_tracks:
             return
         self._delete_track(self._active_track_id)
 
@@ -2236,14 +4205,40 @@ class VideoEditorWindow(QWidget):
         # the timeline ruler) extend to whichever is longer — the last
         # video frame or the last audio sample.
         extra = max(
-            (
-                a.offset_ms + a.effective_length_ms
-                for a in self._audio_tracks
-                if a.source_path is not None
-            ),
+            (track.extent_ms() for track in self._audio_tracks),
             default=0,
         )
         self._player.refresh_tracks(self._tracks, extra_duration_ms=extra)
+        self._update_preview_placeholder()
+
+    def _update_preview_placeholder(self) -> None:
+        """Flip the preview between "video frame", "sound-only" hint, and
+        "no file" hint based on what's loaded. Called after any track
+        list mutation so the preview reflects current project state.
+
+        Avoids ``QLabel.clear()`` — that tears down both text and pixmap
+        which in turn triggers a layout/resize cascade; on some timings
+        that cascade re-enters ``_scale_preview_to_fit`` or the drawing
+        canvas and can confuse Qt's widget lifecycle. Explicit
+        ``setPixmap(QPixmap())`` + ``setText`` is surgical and leaves
+        the widget's size policy alone.
+        """
+        has_video = any(t.source_path is not None for t in self._tracks)
+        has_audio = any(t.is_loaded for t in self._audio_tracks)
+        if has_video:
+            return
+        self._preview_pixmap = None
+        self._preview_label.setPixmap(QPixmap())
+        if has_audio:
+            self._preview_label.setText(tr("veditor.preview.sound_only"))
+            self._preview_label.setStyleSheet(
+                f"color: {COLOR_ACCENT_BLUE}; font-size: 28px; font-weight: 700;"
+            )
+        else:
+            self._preview_label.setText(tr("veditor.no_file"))
+            self._preview_label.setStyleSheet(
+                f"color: {COLOR_TEXT_TERTIARY};"
+            )
 
     def _find_track(self, track_id: int) -> VideoTrack | None:
         for t in self._tracks:
@@ -2349,8 +4344,14 @@ class VideoEditorWindow(QWidget):
         act_clear_sel.setEnabled(has_selection)
 
         menu.addSeparator()
+        act_extract_audio = menu.addAction(tr("veditor.menu.extract_audio"))
+        act_extract_audio.setEnabled(track.source_path is not None)
+
+        menu.addSeparator()
         act_delete = menu.addAction(tr("veditor.menu.delete_track"))
-        act_delete.setEnabled(len(self._tracks) > 1)
+        # Can delete when another video track remains, or when audio
+        # tracks exist (project won't be empty after deletion).
+        act_delete.setEnabled(len(self._tracks) > 1 or bool(self._audio_tracks))
 
         chosen = menu.exec(global_pos)
         if chosen is None:
@@ -2361,6 +4362,8 @@ class VideoEditorWindow(QWidget):
             self._cut_selection_in_track(track_id)
         elif chosen in speed_actions:
             self._apply_speed_to_selection(speed_actions[chosen])
+        elif chosen is act_extract_audio:
+            self._extract_audio_from_video(track)
         elif chosen is act_clear_sel:
             self._clear_selection_active_track()
         elif chosen is act_delete:
@@ -2501,6 +4504,12 @@ class VideoEditorWindow(QWidget):
         self.play_btn.setText("⏸" if state is PlayerState.PLAYING else "▶")
 
     def _on_frame_ready(self, qimg: QImage) -> None:
+        # In audio-only projects the player still ticks (so AudioMixer
+        # stays synced) and emits blank frames. Don't clobber the
+        # "🎵 Sound only" placeholder in that case.
+        has_video = any(t.source_path is not None for t in self._tracks)
+        if not has_video:
+            return
         # Keep the clean original in _preview_pixmap so PaintDialog sees the
         # real frame; fade is applied only to the displayed scaled copy
         # inside _scale_preview_to_fit.
@@ -2511,6 +4520,39 @@ class VideoEditorWindow(QWidget):
         self._drawing_canvas.raise_()
         self._subtitle_overlay.raise_()
         self._drawing_canvas.update()
+        # Mirror the frame to the pop-out window when one is open.
+        if self._preview_popout is not None:
+            try:
+                self._preview_popout.update_frame(qimg)
+            except Exception:
+                pass
+
+    def _toggle_preview_popout(self) -> None:
+        """Open a separate top-level preview window (for multi-monitor
+        full-screen viewing), or close it and return focus here."""
+        if self._preview_popout is not None:
+            self._preview_popout.close()
+            return
+        popout = PreviewPopoutWindow()
+        popout.closed.connect(self._on_preview_popout_closed)
+        popout.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        # Seed the popout with the latest frame if one is cached, so
+        # users don't see a black box until the next tick.
+        if self._preview_pixmap is not None and not self._preview_pixmap.isNull():
+            popout.update_frame(self._preview_pixmap.toImage())
+        popout.show()
+        self._preview_popout = popout
+        self.popout_btn.setProperty("popped", True)
+        self.popout_btn.setToolTip(tr("veditor.popout.tooltip_docked"))
+        self.popout_btn.style().unpolish(self.popout_btn)
+        self.popout_btn.style().polish(self.popout_btn)
+
+    def _on_preview_popout_closed(self) -> None:
+        self._preview_popout = None
+        self.popout_btn.setProperty("popped", False)
+        self.popout_btn.setToolTip(tr("veditor.popout.tooltip"))
+        self.popout_btn.style().unpolish(self.popout_btn)
+        self.popout_btn.style().polish(self.popout_btn)
 
     def _current_fade_multiplier(self, pos_ms: int) -> float:
         """1.0 = full brightness, 0.0 = black. Picks whichever fade on the
@@ -2937,7 +4979,7 @@ class VideoEditorWindow(QWidget):
             cuts=track.cuts,
             fade_segments=track.fades,
             bubbles=self._bubbles,
-            audio_tracks=[a for a in self._audio_tracks if a.source_path is not None],
+            audio_tracks=[t for t in self._audio_tracks if t.is_loaded],
         )
         thread.progress.connect(
             lambda cur, tot: (dlg.setMaximum(max(1, tot)), dlg.setValue(cur))
