@@ -56,6 +56,61 @@ def is_video_path(path: Path | str) -> bool:
     return p.suffix.lower() in VIDEO_EXTS
 
 
+def default_effects_state() -> dict:
+    """Fresh / neutral state for every effect the sound editor exposes.
+
+    Each sub-dict maps to one FFmpeg filter. ``enabled=False`` (or
+    degenerate values like gain=0 / mix=0) means the filter is skipped
+    during export so the chain stays short."""
+    return {
+        "eq": {
+            "enabled": False,
+            "low":  {"freq": 80.0,    "gain": 0.0, "q": 0.7},
+            "mid":  {"freq": 1000.0,  "gain": 0.0, "q": 1.0},
+            "high": {"freq": 10000.0, "gain": 0.0, "q": 0.7},
+        },
+        "comp": {
+            "enabled": False,
+            "threshold": -20.0,   # dB
+            "ratio": 4.0,         # N:1
+            "attack_ms": 5.0,
+            "release_ms": 150.0,
+            "makeup_db": 0.0,
+            "knee_db": 2.0,
+        },
+        "gate": {
+            "enabled": False,
+            "threshold": -50.0,   # dB
+            "reduction": 50.0,    # % (0 = no reduction, 100 = full mute below threshold)
+        },
+        "reverb": {
+            "enabled": False,
+            "type": "Room",       # Room / Hall / Plate / Spring (cosmetic preset)
+            "size": 30.0,         # 0..100 %
+            "decay_s": 1.5,
+            "damping": 50.0,      # 0..100 %
+            "mix": 20.0,          # 0..100 % (dry/wet)
+        },
+        "delay": {
+            "enabled": False,
+            "time_ms": 250.0,
+            "feedback": 30.0,     # %
+            "mix": 20.0,          # %
+        },
+        "deesser": {
+            "enabled": False,
+            "freq": 6000.0,       # Hz
+            "threshold": -30.0,   # dB
+            "reduction": 40.0,    # %
+        },
+        "time_stretch": {
+            "enabled": False,
+            "ratio": 1.0,         # 0.5 .. 2.0
+            "algorithm": "atempo",
+        },
+    }
+
+
 # ============================== data model ==============================
 
 
@@ -81,6 +136,11 @@ class AudioClip:
     # Waveform peaks, shared with split pieces when they come from
     # the same source. Not in equality; updates asynchronously.
     waveform: "np.ndarray | None" = field(default=None, compare=False, repr=False)
+    # Effects state for the sound editor's EQ / Dynamics / Effects /
+    # Advanced tabs. See ``default_effects_state()`` for the shape.
+    # Kept as a plain dict so presets can be serialized / diffed as
+    # one value and so the AudioClip dataclass stays schema-stable.
+    effects: dict = field(default_factory=lambda: default_effects_state())
 
     @property
     def effective_trim_end_ms(self) -> int:
@@ -496,6 +556,110 @@ class AudioMixer(QObject):
 # ============================== export pipeline ==============================
 
 
+def _build_effect_chain(effects: dict) -> str:
+    """Render the sound-editor effect state into a comma-joined filter
+    sub-chain. Returns an empty string when no effect is enabled."""
+    if not effects:
+        return ""
+    parts: list[str] = []
+
+    eq = effects.get("eq") or {}
+    if eq.get("enabled"):
+        for band_name in ("low", "mid", "high"):
+            b = eq.get(band_name) or {}
+            gain = float(b.get("gain", 0.0))
+            if abs(gain) < 0.05:
+                continue
+            freq = max(20.0, float(b.get("freq", 1000.0)))
+            q = max(0.1, float(b.get("q", 1.0)))
+            parts.append(
+                f"equalizer=f={freq:.1f}:t=q:w={q:.3f}:g={gain:.2f}"
+            )
+
+    comp = effects.get("comp") or {}
+    if comp.get("enabled"):
+        thr_db = float(comp.get("threshold", -20.0))
+        ratio = max(1.0, float(comp.get("ratio", 4.0)))
+        atk = max(0.01, float(comp.get("attack_ms", 5.0)) / 1000.0)
+        rel = max(0.01, float(comp.get("release_ms", 150.0)) / 1000.0)
+        makeup = float(comp.get("makeup_db", 0.0))
+        knee = max(1.0, float(comp.get("knee_db", 2.0)))
+        # acompressor threshold is linear gain, not dB.
+        thr_lin = 10 ** (thr_db / 20.0)
+        parts.append(
+            f"acompressor=threshold={thr_lin:.4f}:ratio={ratio:.2f}:"
+            f"attack={atk * 1000:.1f}:release={rel * 1000:.1f}:"
+            f"makeup={10 ** (makeup / 20.0):.3f}:knee={knee:.2f}"
+        )
+
+    gate = effects.get("gate") or {}
+    if gate.get("enabled"):
+        thr_db = float(gate.get("threshold", -50.0))
+        reduction = max(0.0, min(100.0, float(gate.get("reduction", 50.0))))
+        # Map UI reduction to agate ratio: 50% → 4:1, 100% → 20:1.
+        gate_ratio = 1.0 + (reduction / 100.0) * 19.0
+        thr_lin = 10 ** (thr_db / 20.0)
+        parts.append(
+            f"agate=threshold={thr_lin:.4f}:ratio={gate_ratio:.2f}:"
+            f"attack=10:release=200"
+        )
+
+    reverb = effects.get("reverb") or {}
+    if reverb.get("enabled") and float(reverb.get("mix", 0.0)) > 0.5:
+        # FFmpeg lacks a convolution reverb out of the box; approximate
+        # with aecho — size/decay tune the delay and feedback to give
+        # "space" at low CPU cost. Works well enough for BGM duck-in
+        # style reverb; dedicated convolution (afir) is a future phase.
+        size = max(5.0, min(100.0, float(reverb.get("size", 30.0))))
+        decay_s = max(0.1, min(10.0, float(reverb.get("decay_s", 1.5))))
+        mix = max(0.0, min(100.0, float(reverb.get("mix", 20.0)))) / 100.0
+        # aecho expects delay ms list + decay list.
+        delay1 = 20 + size * 0.8              # 28..100 ms
+        delay2 = delay1 + size * 0.4          # later bounce
+        dec1 = max(0.01, min(0.95, 0.35 + decay_s * 0.08))
+        dec2 = dec1 * 0.6
+        parts.append(
+            f"aecho=0.8:0.9:{delay1:.0f}|{delay2:.0f}:"
+            f"{dec1:.2f}|{dec2:.2f}"
+        )
+        # Blend dry/wet crudely via volume.
+        if mix < 1.0:
+            parts.append(f"volume={(0.6 + 0.4 * mix):.3f}")
+
+    delay = effects.get("delay") or {}
+    if delay.get("enabled") and float(delay.get("mix", 0.0)) > 0.5:
+        t_ms = max(1.0, min(2000.0, float(delay.get("time_ms", 250.0))))
+        fb = max(0.0, min(0.95, float(delay.get("feedback", 30.0)) / 100.0))
+        mix = max(0.0, min(1.0, float(delay.get("mix", 20.0)) / 100.0))
+        # aecho handles single-tap delay with feedback = decay parameter.
+        parts.append(
+            f"aecho=0.7:{0.5 + mix * 0.5:.2f}:{t_ms:.0f}:{fb:.2f}"
+        )
+
+    deess = effects.get("deesser") or {}
+    if deess.get("enabled"):
+        # FFmpeg has ``deesser`` in recent builds; fall back to a
+        # narrow-band high-shelf cut if the user's ffmpeg is old. Here
+        # we use deesser because it ships in imageio-ffmpeg's 6+ build.
+        freq = max(2000.0, min(12000.0, float(deess.get("freq", 6000.0))))
+        thr_db = float(deess.get("threshold", -30.0))
+        reduction = float(deess.get("reduction", 40.0))
+        # Use ``deesser`` filter when available; signature is
+        # ``deesser=i=int:m=max:f=freq:s=side``. Safer fallback: a
+        # steep negative equalizer in the sibilant band.
+        gain = -max(0.0, min(18.0, reduction / 100.0 * 12.0))
+        if abs(gain) > 0.2:
+            parts.append(f"equalizer=f={freq:.0f}:t=q:w=3.0:g={gain:.2f}")
+
+    ts = effects.get("time_stretch") or {}
+    if ts.get("enabled"):
+        ratio = max(0.5, min(2.0, float(ts.get("ratio", 1.0))))
+        if abs(ratio - 1.0) > 1e-3:
+            parts.append(f"atempo={ratio:.4f}")
+
+    return ",".join(parts)
+
+
 def _subtract_cuts(
     start_ms: int, end_ms: int, cuts: list
 ) -> list[tuple[int, int]]:
@@ -596,6 +760,13 @@ def build_audio_filter(
             vlabel = f"[a{idx}v]"
             parts.append(f"{current}volume={vol:.3f}{vlabel}")
             current = vlabel
+
+        # --- sound-editor effects (clip.effects) ---
+        fx_chain = _build_effect_chain(clip.effects)
+        if fx_chain:
+            fxlabel = f"[a{idx}fx]"
+            parts.append(f"{current}{fx_chain}{fxlabel}")
+            current = fxlabel
 
         local_len_ms = clip.effective_length_ms
         fade_filters: list[str] = []

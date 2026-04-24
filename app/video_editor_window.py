@@ -1922,9 +1922,11 @@ class SoundEditorWindow(QWidget):
 
         self._tab_stack = QStackedWidget()
         self._tab_stack.setObjectName("SEContent")
-        self._tab_stack.addWidget(self._build_basic_tab())  # 0
-        for tab_id in ("eq", "dynamics", "effects", "advanced"):
-            self._tab_stack.addWidget(self._build_placeholder_tab(tab_id))
+        self._tab_stack.addWidget(self._build_basic_tab())     # 0
+        self._tab_stack.addWidget(self._build_eq_tab())         # 1
+        self._tab_stack.addWidget(self._build_dynamics_tab())   # 2
+        self._tab_stack.addWidget(self._build_effects_tab())    # 3
+        self._tab_stack.addWidget(self._build_advanced_tab())   # 4
         return self._tab_stack
 
     def _build_basic_tab(self) -> QWidget:
@@ -2039,24 +2041,526 @@ class SoundEditorWindow(QWidget):
         root.addStretch(1)
         return panel
 
-    def _build_placeholder_tab(self, tab_id: str) -> QWidget:
+    # ========= EQ tab =========
+
+    EQ_PRESETS: dict[str, dict] = {
+        "Flat":        {"low_g": 0, "mid_g": 0, "high_g": 0},
+        "Vocal Boost": {"low_g": -2, "mid_g": 4, "high_g": 2},
+        "Bass Boost":  {"low_g": 6, "mid_g": 0, "high_g": 0},
+        "Podcast":     {"low_g": -3, "mid_g": 2, "high_g": 3},
+        "Treble Cut":  {"low_g": 0, "mid_g": 0, "high_g": -4},
+    }
+
+    def _build_eq_tab(self) -> QWidget:
+        from app.knob_widget import KnobWidget, fmt_db, fmt_hz
+        eq = self.clip.effects["eq"]
+
         panel = QWidget()
         panel.setObjectName("SEContent")
-        lay = QVBoxLayout(panel)
-        lay.setContentsMargins(20, 40, 20, 40)
-        lay.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        title = QLabel(
-            tr(f"veditor.sound_editor.tab.{tab_id}")
-        )
-        title.setStyleSheet(f"font-size: 20px; font-weight: 700; color: {COLOR_TEXT_SECONDARY};")
-        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        note = QLabel(tr("veditor.sound_editor.tab.coming_soon"))
-        note.setStyleSheet(f"color: {COLOR_TEXT_TERTIARY}; font-size: 12px; padding: 16px;")
-        note.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        lay.addWidget(title)
-        lay.addWidget(note)
-        lay.addStretch(1)
+        root = QVBoxLayout(panel)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(10)
+
+        # Enable toggle at top
+        self._eq_enabled_btn = QPushButton(tr("veditor.sound_editor.fx.enabled"))
+        self._eq_enabled_btn.setObjectName("SEActionBtn")
+        self._eq_enabled_btn.setCheckable(True)
+        self._eq_enabled_btn.setChecked(bool(eq.get("enabled")))
+        self._eq_enabled_btn.toggled.connect(lambda on: self._set_fx("eq", "enabled", on))
+        row_top = QHBoxLayout()
+        row_top.addWidget(self._eq_enabled_btn)
+        row_top.addStretch(1)
+        root.addLayout(row_top)
+
+        # Curve visualization
+        self._eq_curve = _EqCurveView(self.clip)
+        self._eq_curve.setFixedHeight(88)
+        root.addWidget(self._eq_curve)
+
+        # 3 band rows (each with Freq / Gain / Q)
+        def _band_ui(band: str, freq_range: tuple[float, float]) -> QHBoxLayout:
+            band_state = eq[band]
+            row = QHBoxLayout()
+            row.setSpacing(10)
+            lbl = QLabel(band.upper())
+            lbl.setStyleSheet(
+                f"color: {COLOR_TEXT_TERTIARY}; font-size: 11px; "
+                f"font-weight: 700; letter-spacing: 2px; min-width: 50px;"
+            )
+            row.addWidget(lbl)
+
+            k_freq = KnobWidget(
+                label="Freq", value=band_state["freq"],
+                minimum=freq_range[0], maximum=freq_range[1],
+                default=band_state["freq"],
+                color="blue", logarithmic=True, formatter=fmt_hz,
+            )
+            k_gain = KnobWidget(
+                label="Gain", value=band_state["gain"],
+                minimum=-12, maximum=12, default=0,
+                color="green", bipolar=True, formatter=fmt_db,
+            )
+            k_q = KnobWidget(
+                label="Q", value=band_state["q"],
+                minimum=0.1, maximum=10, default=band_state["q"],
+                color="orange",
+                formatter=lambda v: f"{v:.2f}",
+            )
+            k_freq.valueChanged.connect(lambda v, b=band: self._set_fx("eq", (b, "freq"), v))
+            k_gain.valueChanged.connect(lambda v, b=band: self._set_fx("eq", (b, "gain"), v))
+            k_q.valueChanged.connect(lambda v, b=band: self._set_fx("eq", (b, "q"), v))
+            row.addWidget(k_freq)
+            row.addWidget(k_gain)
+            row.addWidget(k_q)
+            row.addStretch(1)
+            return row
+
+        root.addLayout(_band_ui("low", (20, 250)))
+        root.addLayout(_band_ui("mid", (200, 5000)))
+        root.addLayout(_band_ui("high", (2000, 20000)))
+
+        # Presets
+        root.addLayout(self._preset_row(
+            self.EQ_PRESETS.keys(),
+            lambda name: self._apply_eq_preset(name),
+        ))
+        root.addStretch(1)
         return panel
+
+    def _apply_eq_preset(self, name: str) -> None:
+        p = self.EQ_PRESETS.get(name) or {}
+        eq = self.clip.effects["eq"]
+        eq["low"]["gain"]  = p.get("low_g", 0)
+        eq["mid"]["gain"]  = p.get("mid_g", 0)
+        eq["high"]["gain"] = p.get("high_g", 0)
+        eq["enabled"] = True
+        self._eq_enabled_btn.setChecked(True)
+        self._eq_curve.refresh()
+        self._rebuild_tab_ui()
+
+    # ========= Dynamics tab =========
+
+    DYN_PRESETS: dict[str, dict] = {
+        "Voice Gentle": {"thr": -20, "ratio": 3, "atk": 5, "rel": 120, "makeup": 2, "knee": 4},
+        "Voice Strong": {"thr": -24, "ratio": 6, "atk": 2, "rel": 80,  "makeup": 4, "knee": 2},
+        "Podcast":      {"thr": -18, "ratio": 4, "atk": 5, "rel": 150, "makeup": 3, "knee": 3},
+    }
+
+    def _build_dynamics_tab(self) -> QWidget:
+        from app.knob_widget import KnobWidget, fmt_db
+        comp = self.clip.effects["comp"]
+        gate = self.clip.effects["gate"]
+
+        panel = QWidget()
+        panel.setObjectName("SEContent")
+        root = QVBoxLayout(panel)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(14)
+
+        # --- Compressor ---
+        comp_header = self._fx_header(
+            tr("veditor.sound_editor.dyn.compressor"),
+            "comp",
+        )
+        self._comp_enabled_btn = comp_header[1]
+        root.addWidget(comp_header[0])
+
+        comp_row = QHBoxLayout()
+        comp_row.setSpacing(10)
+
+        k_thr = KnobWidget(
+            label="Threshold", value=comp["threshold"], minimum=-60, maximum=0,
+            default=-20, unit=" dB", color="blue", formatter=fmt_db,
+        )
+        k_ratio = KnobWidget(
+            label="Ratio", value=comp["ratio"], minimum=1, maximum=20,
+            default=4, color="orange", formatter=lambda v: f"{v:.1f}:1",
+        )
+        k_atk = KnobWidget(
+            label="Attack", value=comp["attack_ms"], minimum=0.1, maximum=100,
+            default=5, color="green", logarithmic=True, formatter=lambda v: f"{v:.1f} ms",
+        )
+        k_rel = KnobWidget(
+            label="Release", value=comp["release_ms"], minimum=10, maximum=1000,
+            default=150, color="green", logarithmic=True, formatter=lambda v: f"{v:.0f} ms",
+        )
+        k_makeup = KnobWidget(
+            label="Makeup", value=comp["makeup_db"], minimum=0, maximum=24,
+            default=0, unit=" dB", color="blue", formatter=fmt_db,
+        )
+        k_knee = KnobWidget(
+            label="Knee", value=comp["knee_db"], minimum=0, maximum=10,
+            default=2, color="orange", formatter=lambda v: f"{v:.1f} dB",
+        )
+        k_thr.valueChanged.connect(lambda v: self._set_fx("comp", "threshold", v))
+        k_ratio.valueChanged.connect(lambda v: self._set_fx("comp", "ratio", v))
+        k_atk.valueChanged.connect(lambda v: self._set_fx("comp", "attack_ms", v))
+        k_rel.valueChanged.connect(lambda v: self._set_fx("comp", "release_ms", v))
+        k_makeup.valueChanged.connect(lambda v: self._set_fx("comp", "makeup_db", v))
+        k_knee.valueChanged.connect(lambda v: self._set_fx("comp", "knee_db", v))
+        for k in (k_thr, k_ratio, k_atk, k_rel, k_makeup, k_knee):
+            comp_row.addWidget(k)
+        comp_row.addStretch(1)
+        root.addLayout(comp_row)
+
+        # Presets
+        root.addLayout(self._preset_row(
+            self.DYN_PRESETS.keys(),
+            lambda name: self._apply_dyn_preset(name),
+        ))
+
+        # --- Gate ---
+        gate_header = self._fx_header(
+            tr("veditor.sound_editor.dyn.gate"),
+            "gate",
+        )
+        self._gate_enabled_btn = gate_header[1]
+        root.addWidget(gate_header[0])
+
+        gate_row = QHBoxLayout()
+        gate_row.setSpacing(10)
+        k_gthr = KnobWidget(
+            label="Threshold", value=gate["threshold"], minimum=-80, maximum=0,
+            default=-50, unit=" dB", color="blue", formatter=fmt_db,
+        )
+        k_gred = KnobWidget(
+            label="Reduction", value=gate["reduction"], minimum=0, maximum=100,
+            default=50, color="orange", formatter=lambda v: f"{v:.0f} %",
+        )
+        k_gthr.valueChanged.connect(lambda v: self._set_fx("gate", "threshold", v))
+        k_gred.valueChanged.connect(lambda v: self._set_fx("gate", "reduction", v))
+        gate_row.addWidget(k_gthr)
+        gate_row.addWidget(k_gred)
+        gate_row.addStretch(1)
+        root.addLayout(gate_row)
+
+        root.addStretch(1)
+        return panel
+
+    def _apply_dyn_preset(self, name: str) -> None:
+        p = self.DYN_PRESETS.get(name) or {}
+        c = self.clip.effects["comp"]
+        c["threshold"] = p.get("thr", c["threshold"])
+        c["ratio"]     = p.get("ratio", c["ratio"])
+        c["attack_ms"] = p.get("atk", c["attack_ms"])
+        c["release_ms"] = p.get("rel", c["release_ms"])
+        c["makeup_db"] = p.get("makeup", c["makeup_db"])
+        c["knee_db"]   = p.get("knee", c["knee_db"])
+        c["enabled"] = True
+        self._comp_enabled_btn.setChecked(True)
+        self._rebuild_tab_ui()
+
+    # ========= Effects tab =========
+
+    FX_PRESETS: dict[str, dict] = {
+        "Small Room":   {"type": "Room",   "size": 20, "decay": 0.8, "damp": 60, "mix": 20},
+        "Concert Hall": {"type": "Hall",   "size": 80, "decay": 3.0, "damp": 30, "mix": 35},
+        "Plate":        {"type": "Plate",  "size": 50, "decay": 2.0, "damp": 40, "mix": 30},
+        "Spring":       {"type": "Spring", "size": 30, "decay": 1.5, "damp": 50, "mix": 25},
+        "Slap Delay":   {"type": "Room",   "size": 15, "decay": 0.5, "damp": 50, "mix": 15,
+                         "_delay": {"time_ms": 150, "feedback": 0, "mix": 40}},
+    }
+
+    def _build_effects_tab(self) -> QWidget:
+        from app.knob_widget import KnobWidget
+
+        rev = self.clip.effects["reverb"]
+        delay = self.clip.effects["delay"]
+
+        panel = QWidget()
+        panel.setObjectName("SEContent")
+        root = QVBoxLayout(panel)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(14)
+
+        # --- Reverb ---
+        rev_header_row = QHBoxLayout()
+        rev_header = self._fx_header(
+            tr("veditor.sound_editor.fx.reverb"), "reverb"
+        )
+        self._rev_enabled_btn = rev_header[1]
+        rev_header_row.addWidget(rev_header[0])
+
+        # Type dropdown
+        from PySide6.QtWidgets import QComboBox
+        self._rev_type = QComboBox()
+        self._rev_type.addItems(["Room", "Hall", "Plate", "Spring"])
+        self._rev_type.setCurrentText(rev["type"])
+        self._rev_type.currentTextChanged.connect(
+            lambda t: self._set_fx("reverb", "type", t)
+        )
+        rev_header_row.addWidget(self._rev_type)
+        rev_header_row.addStretch(1)
+        root.addLayout(rev_header_row)
+
+        rev_row = QHBoxLayout()
+        rev_row.setSpacing(10)
+        k_size = KnobWidget(
+            label="Size", value=rev["size"], minimum=0, maximum=100,
+            default=30, color="blue", formatter=lambda v: f"{v:.0f} %",
+        )
+        k_decay = KnobWidget(
+            label="Decay", value=rev["decay_s"], minimum=0.1, maximum=10,
+            default=1.5, color="blue", formatter=lambda v: f"{v:.1f} s",
+        )
+        k_damp = KnobWidget(
+            label="Damping", value=rev["damping"], minimum=0, maximum=100,
+            default=50, color="orange", formatter=lambda v: f"{v:.0f} %",
+        )
+        k_mix = KnobWidget(
+            label="Mix", value=rev["mix"], minimum=0, maximum=100,
+            default=20, color="green", formatter=lambda v: f"{v:.0f} %",
+        )
+        k_size.valueChanged.connect(lambda v: self._set_fx("reverb", "size", v))
+        k_decay.valueChanged.connect(lambda v: self._set_fx("reverb", "decay_s", v))
+        k_damp.valueChanged.connect(lambda v: self._set_fx("reverb", "damping", v))
+        k_mix.valueChanged.connect(lambda v: self._set_fx("reverb", "mix", v))
+        for k in (k_size, k_decay, k_damp, k_mix):
+            rev_row.addWidget(k)
+        rev_row.addStretch(1)
+        root.addLayout(rev_row)
+
+        root.addLayout(self._preset_row(
+            self.FX_PRESETS.keys(),
+            lambda name: self._apply_fx_preset(name),
+        ))
+
+        # --- Delay ---
+        delay_header = self._fx_header(
+            tr("veditor.sound_editor.fx.delay"), "delay"
+        )
+        self._delay_enabled_btn = delay_header[1]
+        root.addWidget(delay_header[0])
+
+        delay_row = QHBoxLayout()
+        delay_row.setSpacing(10)
+        k_time = KnobWidget(
+            label="Time", value=delay["time_ms"], minimum=0, maximum=2000,
+            default=250, color="blue", formatter=lambda v: f"{v:.0f} ms",
+        )
+        k_fb = KnobWidget(
+            label="Feedback", value=delay["feedback"], minimum=0, maximum=95,
+            default=30, color="orange", formatter=lambda v: f"{v:.0f} %",
+        )
+        k_dmix = KnobWidget(
+            label="Mix", value=delay["mix"], minimum=0, maximum=100,
+            default=20, color="green", formatter=lambda v: f"{v:.0f} %",
+        )
+        k_time.valueChanged.connect(lambda v: self._set_fx("delay", "time_ms", v))
+        k_fb.valueChanged.connect(lambda v: self._set_fx("delay", "feedback", v))
+        k_dmix.valueChanged.connect(lambda v: self._set_fx("delay", "mix", v))
+        for k in (k_time, k_fb, k_dmix):
+            delay_row.addWidget(k)
+        delay_row.addStretch(1)
+        root.addLayout(delay_row)
+
+        root.addStretch(1)
+        return panel
+
+    def _apply_fx_preset(self, name: str) -> None:
+        p = self.FX_PRESETS.get(name) or {}
+        rev = self.clip.effects["reverb"]
+        rev["type"] = p.get("type", rev["type"])
+        rev["size"] = p.get("size", rev["size"])
+        rev["decay_s"] = p.get("decay", rev["decay_s"])
+        rev["damping"] = p.get("damp", rev["damping"])
+        rev["mix"] = p.get("mix", rev["mix"])
+        rev["enabled"] = True
+        self._rev_enabled_btn.setChecked(True)
+        # Slap Delay also drives the delay section.
+        if "_delay" in p:
+            d = self.clip.effects["delay"]
+            d.update(p["_delay"])
+            d["enabled"] = True
+            self._delay_enabled_btn.setChecked(True)
+        self._rebuild_tab_ui()
+
+    # ========= Advanced tab =========
+
+    def _build_advanced_tab(self) -> QWidget:
+        from app.knob_widget import KnobWidget, fmt_db, fmt_hz, fmt_speed
+        deess = self.clip.effects["deesser"]
+        ts = self.clip.effects["time_stretch"]
+
+        panel = QWidget()
+        panel.setObjectName("SEContent")
+        root = QVBoxLayout(panel)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(14)
+
+        # --- De-esser ---
+        deess_header = self._fx_header(
+            tr("veditor.sound_editor.adv.deesser"), "deesser"
+        )
+        self._deess_enabled_btn = deess_header[1]
+        root.addWidget(deess_header[0])
+
+        deess_row = QHBoxLayout()
+        deess_row.setSpacing(10)
+        k_dfreq = KnobWidget(
+            label="Frequency", value=deess["freq"], minimum=2000, maximum=12000,
+            default=6000, color="blue", logarithmic=True, formatter=fmt_hz,
+        )
+        k_dthr = KnobWidget(
+            label="Threshold", value=deess["threshold"], minimum=-60, maximum=0,
+            default=-30, unit=" dB", color="green", formatter=fmt_db,
+        )
+        k_dred = KnobWidget(
+            label="Reduction", value=deess["reduction"], minimum=0, maximum=100,
+            default=40, color="orange", formatter=lambda v: f"{v:.0f} %",
+        )
+        k_dfreq.valueChanged.connect(lambda v: self._set_fx("deesser", "freq", v))
+        k_dthr.valueChanged.connect(lambda v: self._set_fx("deesser", "threshold", v))
+        k_dred.valueChanged.connect(lambda v: self._set_fx("deesser", "reduction", v))
+        for k in (k_dfreq, k_dthr, k_dred):
+            deess_row.addWidget(k)
+        deess_row.addStretch(1)
+        root.addLayout(deess_row)
+
+        # --- Time Stretch ---
+        ts_header = self._fx_header(
+            tr("veditor.sound_editor.adv.time_stretch"), "time_stretch"
+        )
+        self._ts_enabled_btn = ts_header[1]
+        root.addWidget(ts_header[0])
+
+        ts_row = QHBoxLayout()
+        ts_row.setSpacing(10)
+        k_ratio = KnobWidget(
+            label="Ratio", value=ts["ratio"], minimum=0.5, maximum=2.0,
+            default=1.0, color="orange", formatter=fmt_speed,
+        )
+        k_ratio.valueChanged.connect(lambda v: self._set_fx("time_stretch", "ratio", v))
+        ts_row.addWidget(k_ratio)
+
+        # Algorithm dropdown
+        from PySide6.QtWidgets import QComboBox
+        self._ts_algo = QComboBox()
+        self._ts_algo.addItems(["atempo", "rubberband"])
+        self._ts_algo.setCurrentText(ts.get("algorithm", "atempo"))
+        self._ts_algo.currentTextChanged.connect(
+            lambda t: self._set_fx("time_stretch", "algorithm", t)
+        )
+        algo_label = QLabel(tr("veditor.sound_editor.adv.algorithm"))
+        algo_label.setStyleSheet(f"color: {COLOR_TEXT_TERTIARY}; font-size: 11px;")
+        ts_row.addWidget(algo_label)
+        ts_row.addWidget(self._ts_algo)
+        ts_row.addStretch(1)
+        root.addLayout(ts_row)
+
+        # --- Markers list ---
+        markers_label = QLabel(tr("veditor.sound_editor.adv.markers"))
+        markers_label.setStyleSheet(
+            f"color: {COLOR_TEXT_SECONDARY}; font-size: 11px; "
+            f"font-weight: 700; letter-spacing: 1px; padding-top: 8px;"
+        )
+        root.addWidget(markers_label)
+
+        from PySide6.QtWidgets import QListWidget
+        self._markers_list = QListWidget()
+        self._markers_list.setMaximumHeight(110)
+        self._refresh_markers_list()
+        # Jump to marker on double-click
+        self._markers_list.itemDoubleClicked.connect(self._on_marker_list_dblclick)
+        root.addWidget(self._markers_list)
+
+        root.addStretch(1)
+        return panel
+
+    def _refresh_markers_list(self) -> None:
+        if not hasattr(self, "_markers_list"):
+            return
+        self._markers_list.clear()
+        for i, m_ms in enumerate(self._markers()):
+            from PySide6.QtWidgets import QListWidgetItem
+            it = QListWidgetItem(f"#{i + 1}   {_format_ms(int(m_ms))}")
+            it.setData(Qt.ItemDataRole.UserRole, int(m_ms))
+            self._markers_list.addItem(it)
+
+    def _on_marker_list_dblclick(self, item) -> None:
+        ms = int(item.data(Qt.ItemDataRole.UserRole) or 0)
+        try:
+            self._player.setPosition(ms)
+        except Exception:
+            pass
+
+    # ========= shared helpers =========
+
+    def _fx_header(self, title: str, fx_key: str) -> tuple[QWidget, QPushButton]:
+        """Returns (header_row_widget, enable_toggle_button)."""
+        container = QWidget()
+        row = QHBoxLayout(container)
+        row.setContentsMargins(0, 4, 0, 2)
+        lbl = QLabel(title)
+        lbl.setStyleSheet(
+            f"color: {COLOR_TEXT_PRIMARY}; font-size: 12px; "
+            f"font-weight: 700; letter-spacing: 1px;"
+        )
+        enabled_btn = QPushButton(tr("veditor.sound_editor.fx.enabled"))
+        enabled_btn.setObjectName("SEActionBtn")
+        enabled_btn.setCheckable(True)
+        enabled_btn.setChecked(bool(self.clip.effects[fx_key].get("enabled")))
+        enabled_btn.toggled.connect(lambda on, k=fx_key: self._set_fx(k, "enabled", on))
+        row.addWidget(lbl)
+        row.addStretch(1)
+        row.addWidget(enabled_btn)
+        return container, enabled_btn
+
+    def _preset_row(self, names, callback) -> QHBoxLayout:
+        r = QHBoxLayout()
+        r.setSpacing(6)
+        lbl = QLabel(tr("veditor.sound_editor.basic.presets"))
+        lbl.setStyleSheet(
+            f"color: {COLOR_TEXT_TERTIARY}; font-size: 10px; "
+            f"font-weight: 700; letter-spacing: 1px;"
+        )
+        r.addWidget(lbl)
+        for name in names:
+            b = QPushButton(name)
+            b.setObjectName("SEPresetBtn")
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(lambda _c, n=name: callback(n))
+            r.addWidget(b)
+        r.addStretch(1)
+        return r
+
+    def _set_fx(self, fx_key: str, sub_key, value) -> None:
+        """Write a nested effect-state value. ``sub_key`` may be a
+        string (top-level) or a tuple (band, field) for the 3-band EQ."""
+        fx = self.clip.effects[fx_key]
+        if isinstance(sub_key, tuple):
+            a, b = sub_key
+            fx[a][b] = value
+        else:
+            fx[sub_key] = value
+        # Refresh dependent views.
+        if fx_key == "eq" and hasattr(self, "_eq_curve"):
+            self._eq_curve.refresh()
+        self._refresh_timeline_row()
+
+    def _rebuild_tab_ui(self) -> None:
+        """Preset application changes many knob values at once — the
+        simplest way to keep every widget in sync is to rebuild the
+        affected tab. Called after preset application."""
+        current = self._tab_stack.currentIndex()
+        # Rebuild just the stack panels (preserves title/waveform).
+        # Replace each page with a freshly built one.
+        new_panels = [
+            self._build_basic_tab(),
+            self._build_eq_tab(),
+            self._build_dynamics_tab(),
+            self._build_effects_tab(),
+            self._build_advanced_tab(),
+        ]
+        # Swap in place.
+        for i in range(self._tab_stack.count()):
+            old = self._tab_stack.widget(0)
+            self._tab_stack.removeWidget(old)
+            old.deleteLater()
+        for p in new_panels:
+            self._tab_stack.addWidget(p)
+        self._tab_stack.setCurrentIndex(current)
+
 
     def _build_transport(self) -> QWidget:
         bar = QWidget()
@@ -2335,6 +2839,7 @@ class SoundEditorWindow(QWidget):
         markers.append(int(pos))
         markers.sort()
         self._waveform_view.refresh()
+        self._refresh_markers_list()
 
     def _go_to_prev_marker(self) -> None:
         markers = self._markers()
@@ -2388,6 +2893,7 @@ class SoundEditorWindow(QWidget):
         if chosen is act_delete:
             del markers[idx]
             self._waveform_view.refresh()
+            self._refresh_markers_list()
 
     def _apply_and_close(self) -> None:
         # All knob mutations already flow live; "Apply" is effectively
@@ -2419,6 +2925,108 @@ class SoundEditorWindow(QWidget):
         except Exception:
             pass
         super().closeEvent(event)
+
+
+class _EqCurveView(QWidget):
+    """Simple magnitude-response preview for the 3-band EQ. Computes
+    the summed response of three biquads (low-shelf / peak / high-
+    shelf) on a log frequency grid and paints it as a filled curve.
+    Not meant as a 1:1 match for ffmpeg's ``equalizer`` — it's a
+    visual indicator of shape, same as every DAW does."""
+
+    def __init__(self, clip: "AudioClip", parent=None) -> None:
+        super().__init__(parent)
+        self.clip = clip
+        self.setStyleSheet(
+            f"background-color: #000; border: 1px solid {COLOR_BG_L4}; border-radius: 6px;"
+        )
+
+    def refresh(self) -> None:
+        self.update()
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = self.rect().adjusted(6, 6, -6, -6)
+        if rect.width() < 10 or rect.height() < 10:
+            return
+        eq = self.clip.effects.get("eq") or {}
+
+        # Grid lines at 0 dB center + ±6 dB
+        mid_y = rect.center().y()
+        painter.setPen(QPen(QColor(40, 40, 48), 1))
+        painter.drawLine(rect.left(), mid_y, rect.right(), mid_y)
+        painter.setPen(QPen(QColor(30, 30, 38), 1, Qt.PenStyle.DashLine))
+        painter.drawLine(rect.left(), mid_y - rect.height() // 4, rect.right(), mid_y - rect.height() // 4)
+        painter.drawLine(rect.left(), mid_y + rect.height() // 4, rect.right(), mid_y + rect.height() // 4)
+
+        # Log-frequency axis (20 Hz – 20 kHz)
+        import math
+        f_min, f_max = 20.0, 20000.0
+        log_min, log_max = math.log10(f_min), math.log10(f_max)
+        w = rect.width()
+        h = rect.height()
+
+        # Compute the summed response (dB) across the range.
+        def band_response(freq: float, f0: float, gain_db: float, q: float, kind: str) -> float:
+            """Approximate biquad magnitude at ``freq`` in dB."""
+            if abs(gain_db) < 0.05:
+                return 0.0
+            # Use a Gaussian bell around f0 for peak; slope for shelves.
+            # This is a rough visual approximation, not textbook biquad.
+            if kind == "peak":
+                sigma = f0 / max(q, 0.1) * 0.6
+                dist = freq - f0
+                weight = math.exp(-(dist * dist) / (2 * sigma * sigma + 1e-9))
+                return gain_db * weight
+            if kind == "lowshelf":
+                # Full gain below f0, rolls off above
+                if freq <= f0:
+                    return gain_db
+                roll = math.exp(-(math.log(freq / f0)) ** 2 / 0.5)
+                return gain_db * roll
+            if kind == "highshelf":
+                if freq >= f0:
+                    return gain_db
+                roll = math.exp(-(math.log(f0 / freq)) ** 2 / 0.5)
+                return gain_db * roll
+            return 0.0
+
+        low = eq.get("low") or {"freq": 80, "gain": 0, "q": 0.7}
+        mid = eq.get("mid") or {"freq": 1000, "gain": 0, "q": 1.0}
+        high = eq.get("high") or {"freq": 10000, "gain": 0, "q": 0.7}
+
+        # Sample the response
+        samples = 120
+        points: list[tuple[int, float]] = []
+        for i in range(samples + 1):
+            t = i / samples
+            freq = 10 ** (log_min + t * (log_max - log_min))
+            resp_db = (
+                band_response(freq, low["freq"], low["gain"], low["q"], "lowshelf")
+                + band_response(freq, mid["freq"], mid["gain"], mid["q"], "peak")
+                + band_response(freq, high["freq"], high["gain"], high["q"], "highshelf")
+            )
+            x = rect.left() + int(t * w)
+            # ±12 dB spans ±h/2 ish; clamp.
+            y = mid_y - int((resp_db / 12.0) * (h / 2 - 4))
+            y = max(rect.top(), min(rect.bottom(), y))
+            points.append((x, y))
+
+        # Fill under the curve
+        from PySide6.QtGui import QPainterPath
+        path = QPainterPath()
+        path.moveTo(points[0][0], mid_y)
+        for x, y in points:
+            path.lineTo(x, y)
+        path.lineTo(points[-1][0], mid_y)
+        path.closeSubpath()
+        painter.fillPath(path, QColor(74, 155, 238, 60))
+
+        # Curve line
+        painter.setPen(QPen(QColor("#4a9bee"), 2))
+        for (x1, y1), (x2, y2) in zip(points[:-1], points[1:]):
+            painter.drawLine(x1, y1, x2, y2)
 
 
 class PreviewPopoutWindow(QWidget):
