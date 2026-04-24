@@ -7,8 +7,12 @@ from PySide6.QtCore import QObject, QPoint, QRect, Qt, QThread, Signal
 from PySide6.QtGui import (
     QAction,
     QColor,
+    QDragEnterEvent,
+    QDragMoveEvent,
+    QDropEvent,
     QImage,
     QKeyEvent,
+    QLinearGradient,
     QMouseEvent,
     QPainter,
     QPen,
@@ -17,16 +21,27 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QFileDialog,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QMenu,
     QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSlider,
     QVBoxLayout,
     QWidget,
 )
 
+from app.audio_tracks import (
+    AUDIO_EXTS,
+    VIDEO_EXTS,
+    AudioMixer,
+    AudioTrack,
+    is_audio_path,
+    is_video_path,
+    probe_audio_duration_ms,
+)
 from app.drawing import (
     DrawingCanvas,
     SpeechBubble,
@@ -572,6 +587,7 @@ class TrackRow(QWidget):
 
     offset_changed = Signal(int, int)  # track_id, new_offset_ms
     fades_changed = Signal(int)  # track_id — fade segments added / resized
+    video_source_dropped = Signal(int, object)  # track_id, Path (dropped file)
 
     def __init__(self, track: VideoTrack) -> None:
         super().__init__()
@@ -1119,35 +1135,51 @@ class TrackRow(QWidget):
         return None, ""
 
     def dragEnterEvent(self, event) -> None:
-        if event.mimeData().hasFormat(FADE_MIME_TYPE):
+        md = event.mimeData()
+        if md.hasFormat(FADE_MIME_TYPE):
             event.acceptProposedAction()
+            return
+        # Empty video track accepts a dropped video file.
+        if self.track.source_path is None and md.hasUrls():
+            for u in md.urls():
+                p = Path(u.toLocalFile())
+                if is_video_path(p):
+                    event.acceptProposedAction()
+                    return
 
     def dragMoveEvent(self, event) -> None:
-        if event.mimeData().hasFormat(FADE_MIME_TYPE):
-            event.acceptProposedAction()
+        self.dragEnterEvent(event)
 
     def dropEvent(self, event) -> None:
-        if not event.mimeData().hasFormat(FADE_MIME_TYPE):
+        md = event.mimeData()
+        if md.hasFormat(FADE_MIME_TYPE):
+            try:
+                duration_ms = int(bytes(md.data(FADE_MIME_TYPE)).decode("utf-8"))
+            except Exception:
+                duration_ms = FadeCard.DEFAULT_DURATION_MS
+            duration_ms = max(100, duration_ms)
+            if self.track.duration_ms <= 0:
+                return
+            center_ms = self._x_to_ms(event.position().toPoint().x())
+            start = max(0, center_ms - duration_ms // 2)
+            end = min(self.track.duration_ms, start + duration_ms)
+            if end <= start:
+                return
+            self.track.fades.append(FadeSegment(start, end))
+            self.track.fades.sort(key=lambda f: f.start_ms)
+            self.update()
+            self.fades_changed.emit(self.track.id)
+            self.clicked.emit(self.track.id)
+            event.acceptProposedAction()
             return
-        try:
-            duration_ms = int(bytes(event.mimeData().data(FADE_MIME_TYPE)).decode("utf-8"))
-        except Exception:
-            duration_ms = FadeCard.DEFAULT_DURATION_MS
-        duration_ms = max(100, duration_ms)
-        if self.track.duration_ms <= 0:
-            return
-        # Drop position → center of the new fade segment in track-local ms.
-        center_ms = self._x_to_ms(event.position().toPoint().x())
-        start = max(0, center_ms - duration_ms // 2)
-        end = min(self.track.duration_ms, start + duration_ms)
-        if end <= start:
-            return
-        self.track.fades.append(FadeSegment(start, end))
-        self.track.fades.sort(key=lambda f: f.start_ms)
-        self.update()
-        self.fades_changed.emit(self.track.id)
-        self.clicked.emit(self.track.id)
-        event.acceptProposedAction()
+        # Video file drop onto an empty track.
+        if self.track.source_path is None and md.hasUrls():
+            for u in md.urls():
+                p = Path(u.toLocalFile())
+                if is_video_path(p):
+                    self.video_source_dropped.emit(self.track.id, p)
+                    event.acceptProposedAction()
+                    return
 
 
 class FadeCard(QWidget):
@@ -1264,6 +1296,290 @@ class StripedHost(QWidget):
             x += self.STRIPE_STEP
 
 
+class AudioTrackRow(QWidget):
+    """Timeline row for an ``AudioTrack``.
+
+    Visually distinct from ``TrackRow``:
+    - Shorter (no thumbnails, no cuts, no per-segment speed)
+    - Teal/purple bar showing the clip extent on the project timeline
+    - Fade-in / fade-out drawn as gradient ramps on the bar edges
+    - Header shows filename + volume slider; drops + right-click menu
+      cover the rest of the interactions
+
+    Empty rows (source_path is None) advertise the drop-to-load hint and
+    open a file dialog on click.
+    """
+
+    clicked = Signal(int)
+    offset_changed = Signal(int, int)  # track_id, new_offset_ms
+    volume_changed = Signal(int, float)  # track_id, volume
+    context_menu = Signal(int, QPoint)  # track_id, global_pos
+    load_source_requested = Signal(int)  # track_id
+    source_dropped = Signal(int, object)  # track_id, Path
+
+    MARGIN = 10
+    LABEL_H = 22
+    BAR_H = 48
+    PADDING = 8
+
+    BAR_COLOR = QColor("#3e6a7e")          # teal-ish for audio
+    BAR_BORDER = QColor("#6bb1c9")
+    BAR_COLOR_EMPTY = QColor("#2a2a32")
+    BAR_COLOR_ACTIVE = QColor("#4a86a0")
+
+    def __init__(self, track: AudioTrack) -> None:
+        super().__init__()
+        self.track = track
+        self._is_active: bool = False
+        self._position_ms: int = 0
+        self._px_per_sec: float = DEFAULT_PX_PER_SEC
+        self._dragging_offset: bool = False
+        self._drag_start_x: int = 0
+        self._drag_start_offset_ms: int = 0
+
+        self.setFixedHeight(self.LABEL_H + self.BAR_H + self.PADDING)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setMouseTracking(True)
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setAcceptDrops(True)
+
+        # Header: filename label + volume slider, laid out via geometry
+        # inside paintEvent-less helper widgets.
+        self._name_label = QLabel(track.display_name or tr("veditor.audio.track_empty"), self)
+        self._name_label.setStyleSheet(
+            f"color: {COLOR_TEXT_SECONDARY}; font-weight: 600; font-size: 11px; background: transparent;"
+        )
+        self._name_label.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+
+        self._volume_slider = QSlider(Qt.Orientation.Horizontal, self)
+        self._volume_slider.setMinimum(0)
+        self._volume_slider.setMaximum(150)
+        self._volume_slider.setValue(int(round(track.volume * 100)))
+        self._volume_slider.setFixedWidth(110)
+        self._volume_slider.setToolTip(tr("veditor.audio.volume"))
+        self._volume_slider.valueChanged.connect(self._on_volume_slider_changed)
+
+        self._reposition_header()
+
+    # ---- geometry helpers ----
+
+    def set_px_per_sec(self, px: float) -> None:
+        self._px_per_sec = max(MIN_PX_PER_SEC, min(MAX_PX_PER_SEC, float(px)))
+        self.update()
+
+    def set_active(self, active: bool) -> None:
+        if self._is_active == active:
+            return
+        self._is_active = active
+        self.update()
+
+    def set_position(self, ms: int) -> None:
+        self._position_ms = max(0, int(ms))
+        self.update()
+
+    def refresh_from_track(self) -> None:
+        """Call after mutating self.track from outside."""
+        self._name_label.setText(self.track.display_name or tr("veditor.audio.track_empty"))
+        # Block the valueChanged signal so programmatic updates don't
+        # feed back into volume_changed.
+        with _block_signals(self._volume_slider):
+            self._volume_slider.setValue(int(round(self.track.volume * 100)))
+        self.update()
+
+    def _preferred_width(self) -> int:
+        span = self.track.offset_ms + self.track.effective_length_ms
+        return int(span / 1000.0 * self._px_per_sec) + 2 * self.MARGIN + 40
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._reposition_header()
+
+    def _reposition_header(self) -> None:
+        # Filename at left, volume slider at right of the header row.
+        self._name_label.setGeometry(
+            self.MARGIN, 3,
+            max(50, self.width() - self._volume_slider.width() - self.MARGIN * 3),
+            self.LABEL_H - 4,
+        )
+        self._volume_slider.setGeometry(
+            self.width() - self._volume_slider.width() - self.MARGIN,
+            (self.LABEL_H - self._volume_slider.sizeHint().height()) // 2,
+            self._volume_slider.width(),
+            self._volume_slider.sizeHint().height(),
+        )
+
+    def _ms_to_x(self, ms: int) -> int:
+        return int(self.MARGIN + ms / 1000.0 * self._px_per_sec)
+
+    def _x_to_ms(self, x: int) -> int:
+        if self._px_per_sec <= 0:
+            return 0
+        return max(0, int((x - self.MARGIN) / self._px_per_sec * 1000))
+
+    # ---- user interactions ----
+
+    def _on_volume_slider_changed(self, value: int) -> None:
+        vol = max(0.0, min(1.5, value / 100.0))
+        self.track.volume = vol
+        self.volume_changed.emit(self.track.id, vol)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.RightButton:
+            self.context_menu.emit(self.track.id, event.globalPosition().toPoint())
+            return
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        self.clicked.emit(self.track.id)
+        y = event.position().y()
+        # Clicks in the bar row → start offset drag (or request source
+        # load if the track is empty).
+        if y >= self.LABEL_H:
+            if self.track.source_path is None:
+                self.load_source_requested.emit(self.track.id)
+                return
+            self._dragging_offset = True
+            self._drag_start_x = event.position().toPoint().x()
+            self._drag_start_offset_ms = self.track.offset_ms
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if not self._dragging_offset:
+            return
+        dx = event.position().toPoint().x() - self._drag_start_x
+        d_ms = int(dx / max(self._px_per_sec, 0.001) * 1000)
+        new_offset = max(0, self._drag_start_offset_ms + d_ms)
+        if new_offset != self.track.offset_ms:
+            self.track.offset_ms = new_offset
+            self.offset_changed.emit(self.track.id, new_offset)
+            self.update()
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        self._dragging_offset = False
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    # ---- drag & drop (onto this row) ----
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        md = event.mimeData()
+        if md.hasUrls():
+            for u in md.urls():
+                p = Path(u.toLocalFile())
+                if is_audio_path(p):
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        self.dragEnterEvent(event)
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        md = event.mimeData()
+        if not md.hasUrls():
+            event.ignore()
+            return
+        for u in md.urls():
+            p = Path(u.toLocalFile())
+            if is_audio_path(p):
+                self.source_dropped.emit(self.track.id, p)
+                event.acceptProposedAction()
+                return
+        event.ignore()
+
+    # ---- paint ----
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        # Header background
+        if self._is_active:
+            painter.fillRect(0, 0, self.width(), self.LABEL_H, QColor(COLOR_BG_L5))
+        else:
+            painter.fillRect(0, 0, self.width(), self.LABEL_H, QColor(COLOR_BG_L3))
+
+        # Bar area background (stripe canvas shows through otherwise)
+        bar_y = self.LABEL_H
+        painter.fillRect(0, bar_y, self.width(), self.BAR_H, QColor(COLOR_BG_L2))
+
+        track = self.track
+        if track.source_path is None:
+            # Empty audio track — dashed outline + hint text.
+            painter.setPen(QPen(QColor(COLOR_BORDER_DEFAULT), 1, Qt.PenStyle.DashLine))
+            rect = QRect(self.MARGIN, bar_y + 4, self.width() - 2 * self.MARGIN, self.BAR_H - 8)
+            painter.drawRect(rect)
+            painter.setPen(QColor(COLOR_TEXT_TERTIARY))
+            painter.drawText(
+                rect, Qt.AlignmentFlag.AlignCenter, tr("veditor.audio.drop_hint")
+            )
+            return
+
+        x_start = self._ms_to_x(track.offset_ms)
+        x_end = self._ms_to_x(track.offset_ms + track.effective_length_ms)
+        bar_rect = QRect(x_start, bar_y + 4, max(2, x_end - x_start), self.BAR_H - 8)
+
+        color = self.BAR_COLOR_ACTIVE if self._is_active else self.BAR_COLOR
+        painter.fillRect(bar_rect, color)
+        painter.setPen(QPen(self.BAR_BORDER, 1))
+        painter.drawRect(bar_rect)
+
+        # Fade-in ramp: darker gradient over the first fade_in_ms.
+        if track.fade_in_ms > 0:
+            fi_px = int(track.fade_in_ms / 1000.0 * self._px_per_sec)
+            fi_px = min(fi_px, bar_rect.width())
+            if fi_px > 2:
+                grad = QLinearGradient(bar_rect.left(), 0, bar_rect.left() + fi_px, 0)
+                grad.setColorAt(0.0, QColor(0, 0, 0, 160))
+                grad.setColorAt(1.0, QColor(0, 0, 0, 0))
+                painter.fillRect(bar_rect.left(), bar_rect.top(), fi_px, bar_rect.height(), grad)
+
+        if track.fade_out_ms > 0:
+            fo_px = int(track.fade_out_ms / 1000.0 * self._px_per_sec)
+            fo_px = min(fo_px, bar_rect.width())
+            if fo_px > 2:
+                grad = QLinearGradient(bar_rect.right() - fo_px, 0, bar_rect.right(), 0)
+                grad.setColorAt(0.0, QColor(0, 0, 0, 0))
+                grad.setColorAt(1.0, QColor(0, 0, 0, 160))
+                painter.fillRect(bar_rect.right() - fo_px, bar_rect.top(), fo_px, bar_rect.height(), grad)
+
+        # Waveform placeholder: horizontal center line
+        painter.setPen(QPen(QColor(255, 255, 255, 80), 1))
+        mid_y = bar_rect.top() + bar_rect.height() // 2
+        painter.drawLine(bar_rect.left() + 3, mid_y, bar_rect.right() - 3, mid_y)
+
+        # Filename overlaid on the bar (secondary location; header has the
+        # primary copy in case the bar is too short)
+        painter.setPen(QColor(255, 255, 255, 230))
+        font = painter.font()
+        font.setPixelSize(10)
+        painter.setFont(font)
+        painter.drawText(
+            bar_rect.adjusted(6, 0, -6, 0),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+            track.display_name,
+        )
+
+        # Playhead
+        if 0 <= self._position_ms <= track.offset_ms + track.effective_length_ms + 500:
+            px = self._ms_to_x(self._position_ms)
+            pen = QPen(QColor(COLOR_ACCENT_ORANGE))
+            pen.setWidth(2)
+            painter.setPen(pen)
+            painter.drawLine(px, bar_y, px, bar_y + self.BAR_H)
+
+
+class _block_signals:
+    """Context manager — blocks Qt signals on the given object."""
+    def __init__(self, obj):
+        self._obj = obj
+    def __enter__(self):
+        self._prev = self._obj.blockSignals(True)
+        return self._obj
+    def __exit__(self, *exc):
+        self._obj.blockSignals(self._prev)
+
+
 class VideoEditorWindow(QWidget):
     """Professional video editor with multi-track timeline, per-region speed
     (0.25x ~ 16x), cut regions, thumbnails, and right-click context menus.
@@ -1276,6 +1592,8 @@ class VideoEditorWindow(QWidget):
         super().__init__()
         self._tracks: list[VideoTrack] = []
         self._track_rows: dict[int, TrackRow] = {}
+        self._audio_tracks: list[AudioTrack] = []
+        self._audio_rows: dict[int, AudioTrackRow] = {}
         self._next_track_id: int = 1
         self._active_track_id: int | None = None
         self._current_segment_speed: float = 1.0
@@ -1289,6 +1607,9 @@ class VideoEditorWindow(QWidget):
         self.setWindowTitle(tr("veditor.title"))
         self.resize(1180, 780)
         self.setStyleSheet(VIDEO_EDITOR_EXTRA_QSS)
+        # Accept dropped files anywhere on the editor — drop on a track
+        # row targets that row; drop on empty area creates a new track.
+        self.setAcceptDrops(True)
 
         self._player = ProjectPlayer(self)
         self._player.frame_ready.connect(self._on_frame_ready)
@@ -1296,6 +1617,12 @@ class VideoEditorWindow(QWidget):
         self._player.duration_changed.connect(self._on_duration_changed)
         self._player.state_changed.connect(self._on_playback_state_changed)
         self._player.error_occurred.connect(self._on_player_error)
+
+        # Audio mixer — listens to the project player and keeps each
+        # audio track's QMediaPlayer in sync.
+        self._audio_mixer = AudioMixer(self)
+        self._player.state_changed.connect(self._audio_mixer.on_state_changed)
+        self._player.position_changed.connect(self._audio_mixer.on_position_changed)
 
         self._build_ui()
 
@@ -1335,6 +1662,12 @@ class VideoEditorWindow(QWidget):
         self.del_track_btn.setObjectName("ToolButton")
         self.del_track_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.del_track_btn.clicked.connect(self._delete_active_track)
+
+        self.add_audio_btn = QPushButton(tr("veditor.btn.add_audio"))
+        self.add_audio_btn.setObjectName("ToolButton")
+        self.add_audio_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.add_audio_btn.setToolTip(tr("veditor.audio.add_hint"))
+        self.add_audio_btn.clicked.connect(self._add_empty_audio_track)
 
         self.reset_btn = QPushButton(tr("veditor.btn.reset"))
         self.reset_btn.setObjectName("ToolButton")
@@ -1474,6 +1807,7 @@ class VideoEditorWindow(QWidget):
         track_bar.setContentsMargins(0, 0, 0, 0)
         track_bar.setSpacing(6)
         track_bar.addWidget(self.add_track_btn)
+        track_bar.addWidget(self.add_audio_btn)
         track_bar.addWidget(self.del_track_btn)
         track_bar.addSpacing(20)
 
@@ -1587,15 +1921,233 @@ class VideoEditorWindow(QWidget):
         row.context_menu.connect(self._on_track_context_menu)
         row.offset_changed.connect(self._on_track_offset_changed)
         row.fades_changed.connect(self._on_track_fades_changed)
+        row.video_source_dropped.connect(self._on_video_source_dropped_on_track)
         self._track_rows[track.id] = row
         self._tracks_layout.insertWidget(self._tracks_layout.count() - 1, row)
         self._update_tracks_host_width()
+
+    # ============== audio tracks ==============
+
+    def _add_empty_audio_track(self) -> None:
+        tid = self._next_track_id
+        self._next_track_id += 1
+        track = AudioTrack(id=tid)
+        self._audio_tracks.append(track)
+        self._insert_audio_track_widget(track)
+
+    def _add_audio_track_with_source(self, path: Path) -> None:
+        tid = self._next_track_id
+        self._next_track_id += 1
+        track = AudioTrack(id=tid, source_path=path)
+        track.duration_ms = probe_audio_duration_ms(path)
+        if track.duration_ms > 0 and track.trim_end_ms == 0:
+            track.trim_end_ms = track.duration_ms
+        self._audio_tracks.append(track)
+        self._insert_audio_track_widget(track)
+        self._audio_mixer.add_track(track)
+        self._refresh_player_tracks()
+
+    def _populate_audio_track(self, track_id: int, path: Path) -> None:
+        """Fill an existing empty AudioTrack with a source file."""
+        track = next(
+            (a for a in self._audio_tracks if a.id == track_id), None
+        )
+        if track is None or track.source_path is not None:
+            return
+        track.source_path = path
+        track.duration_ms = probe_audio_duration_ms(path)
+        track.trim_start_ms = 0
+        track.trim_end_ms = track.duration_ms
+        row = self._audio_rows.get(track_id)
+        if row is not None:
+            row.refresh_from_track()
+        self._audio_mixer.add_track(track)
+        self._refresh_player_tracks()
+
+    def _populate_video_track(self, track_id: int, path: Path) -> None:
+        """Fill an existing empty VideoTrack with a source file."""
+        track = self._find_track(track_id)
+        if track is None or track.source_path is not None:
+            return
+        track.source_path = path
+        row = self._track_rows.get(track_id)
+        if row is not None:
+            row.update()
+        self._start_thumbnail_extraction(track)
+        self._refresh_player_tracks()
+
+    def _insert_audio_track_widget(self, track: AudioTrack) -> None:
+        row = AudioTrackRow(track)
+        row.set_px_per_sec(self._px_per_sec)
+        row.clicked.connect(self._set_active_track)
+        row.offset_changed.connect(self._on_audio_offset_changed)
+        row.volume_changed.connect(self._on_audio_volume_changed)
+        row.context_menu.connect(self._on_audio_context_menu)
+        row.load_source_requested.connect(self._on_audio_load_source_requested)
+        row.source_dropped.connect(self._populate_audio_track)
+        self._audio_rows[track.id] = row
+        self._tracks_layout.insertWidget(self._tracks_layout.count() - 1, row)
+        self._update_tracks_host_width()
+
+    def _on_audio_offset_changed(self, _tid: int, _ms: int) -> None:
+        self._refresh_player_tracks()
+
+    def _on_audio_volume_changed(self, tid: int, _vol: float) -> None:
+        track = next((a for a in self._audio_tracks if a.id == tid), None)
+        if track is not None:
+            self._audio_mixer.update_track(track)
+
+    def _on_audio_load_source_requested(self, tid: int) -> None:
+        """Empty audio track clicked → open a file dialog."""
+        from PySide6.QtWidgets import QFileDialog
+        path_str, _ = QFileDialog.getOpenFileName(
+            self,
+            tr("veditor.audio.open_dialog_title"),
+            "",
+            tr("veditor.audio.open_filter"),
+        )
+        if not path_str:
+            return
+        self._populate_audio_track(tid, Path(path_str))
+
+    def _on_audio_context_menu(self, tid: int, global_pos: QPoint) -> None:
+        track = next((a for a in self._audio_tracks if a.id == tid), None)
+        if track is None:
+            return
+        menu = QMenu(self)
+        act_fade_in = QAction(tr("veditor.audio.ctx.set_fade_in"), self)
+        act_fade_out = QAction(tr("veditor.audio.ctx.set_fade_out"), self)
+        act_trim = QAction(tr("veditor.audio.ctx.trim"), self)
+        act_clear = QAction(tr("veditor.audio.ctx.clear_source"), self)
+        act_remove = QAction(tr("veditor.audio.ctx.remove"), self)
+
+        def _prompt_fade_in():
+            ms, ok = QInputDialog.getInt(
+                self,
+                tr("veditor.audio.ctx.set_fade_in"),
+                tr("veditor.audio.fade_prompt_ms"),
+                track.fade_in_ms, 0, 60_000, 100,
+            )
+            if ok:
+                track.fade_in_ms = int(ms)
+                self._audio_rows[tid].update()
+                self._audio_mixer.update_track(track)
+
+        def _prompt_fade_out():
+            ms, ok = QInputDialog.getInt(
+                self,
+                tr("veditor.audio.ctx.set_fade_out"),
+                tr("veditor.audio.fade_prompt_ms"),
+                track.fade_out_ms, 0, 60_000, 100,
+            )
+            if ok:
+                track.fade_out_ms = int(ms)
+                self._audio_rows[tid].update()
+                self._audio_mixer.update_track(track)
+
+        def _prompt_trim():
+            start, ok = QInputDialog.getInt(
+                self,
+                tr("veditor.audio.ctx.trim"),
+                tr("veditor.audio.trim_start_prompt"),
+                track.trim_start_ms, 0, max(1, track.duration_ms), 100,
+            )
+            if not ok:
+                return
+            end, ok2 = QInputDialog.getInt(
+                self,
+                tr("veditor.audio.ctx.trim"),
+                tr("veditor.audio.trim_end_prompt"),
+                track.effective_trim_end_ms, start + 1,
+                max(start + 1, track.duration_ms), 100,
+            )
+            if not ok2:
+                return
+            track.trim_start_ms = int(start)
+            track.trim_end_ms = int(end)
+            self._audio_rows[tid].update()
+            self._audio_mixer.update_track(track)
+            self._refresh_player_tracks()
+
+        def _clear_source():
+            track.source_path = None
+            track.duration_ms = 0
+            track.trim_start_ms = 0
+            track.trim_end_ms = 0
+            self._audio_rows[tid].refresh_from_track()
+            self._audio_mixer.update_track(track)
+            self._refresh_player_tracks()
+
+        def _remove():
+            self._delete_audio_track(tid)
+
+        act_fade_in.triggered.connect(_prompt_fade_in)
+        act_fade_out.triggered.connect(_prompt_fade_out)
+        act_trim.triggered.connect(_prompt_trim)
+        act_clear.triggered.connect(_clear_source)
+        act_remove.triggered.connect(_remove)
+
+        if track.source_path is not None:
+            menu.addAction(act_fade_in)
+            menu.addAction(act_fade_out)
+            menu.addAction(act_trim)
+            menu.addSeparator()
+            menu.addAction(act_clear)
+        menu.addAction(act_remove)
+        menu.exec(global_pos)
+
+    def _delete_audio_track(self, track_id: int) -> None:
+        row = self._audio_rows.pop(track_id, None)
+        if row is not None:
+            self._tracks_layout.removeWidget(row)
+            row.deleteLater()
+        self._audio_tracks = [a for a in self._audio_tracks if a.id != track_id]
+        self._audio_mixer.remove_track(track_id)
+        self._refresh_player_tracks()
+
+    def _on_video_source_dropped_on_track(self, tid: int, path: Path) -> None:
+        self._populate_video_track(tid, path)
+
+    # ============== drag & drop (window-level) ==============
+
+    def dragEnterEvent(self, event: QDragEnterEvent) -> None:
+        md = event.mimeData()
+        if md.hasUrls():
+            for u in md.urls():
+                p = Path(u.toLocalFile())
+                if is_video_path(p) or is_audio_path(p):
+                    event.acceptProposedAction()
+                    return
+        event.ignore()
+
+    def dragMoveEvent(self, event: QDragMoveEvent) -> None:
+        self.dragEnterEvent(event)
+
+    def dropEvent(self, event: QDropEvent) -> None:
+        md = event.mimeData()
+        if not md.hasUrls():
+            event.ignore()
+            return
+        for u in md.urls():
+            p = Path(u.toLocalFile())
+            if is_video_path(p):
+                self._add_track_with_source(p)
+                event.acceptProposedAction()
+                return
+            if is_audio_path(p):
+                self._add_audio_track_with_source(p)
+                event.acceptProposedAction()
+                return
+        event.ignore()
 
     def _update_tracks_host_width(self) -> None:
         # Start with baseline (ruler) and each track's own preferred width.
         max_w = max(MIN_TRACK_WIDTH, self._timeline_ruler.desired_width())
         # Consider each row's natural duration-driven width.
         for row in self._track_rows.values():
+            row_pref = max(MIN_TRACK_WIDTH, row._preferred_width())
+            max_w = max(max_w, row_pref)
+        for row in self._audio_rows.values():
             row_pref = max(MIN_TRACK_WIDTH, row._preferred_width())
             max_w = max(max_w, row_pref)
         # Also honor the viewport width so the divider / stripes can extend
@@ -1607,6 +2159,8 @@ class VideoEditorWindow(QWidget):
         self._timeline_ruler.setFixedWidth(max_w)
         for row in self._track_rows.values():
             row.setFixedWidth(max_w)
+        for row in self._audio_rows.values():
+            row.setFixedWidth(max_w)
         self._tracks_host.setMinimumWidth(max_w)
 
     def _change_zoom(self, factor: float) -> None:
@@ -1615,6 +2169,8 @@ class VideoEditorWindow(QWidget):
             return
         self._px_per_sec = new_px
         for row in self._track_rows.values():
+            row.set_px_per_sec(new_px)
+        for row in self._audio_rows.values():
             row.set_px_per_sec(new_px)
         self._timeline_ruler.set_px_per_sec(new_px)
         self.zoom_label.setText(self._format_zoom())
@@ -1676,7 +2232,18 @@ class VideoEditorWindow(QWidget):
         self._refresh_selection_row()
 
     def _refresh_player_tracks(self) -> None:
-        self._player.refresh_tracks(self._tracks)
+        # Include audio tracks in the project duration so playback (and
+        # the timeline ruler) extend to whichever is longer — the last
+        # video frame or the last audio sample.
+        extra = max(
+            (
+                a.offset_ms + a.effective_length_ms
+                for a in self._audio_tracks
+                if a.source_path is not None
+            ),
+            default=0,
+        )
+        self._player.refresh_tracks(self._tracks, extra_duration_ms=extra)
 
     def _find_track(self, track_id: int) -> VideoTrack | None:
         for t in self._tracks:
@@ -2175,6 +2742,8 @@ class VideoEditorWindow(QWidget):
         # Playhead shows on every track at project time
         for row in self._track_rows.values():
             row.set_position(pos)
+        for row in self._audio_rows.values():
+            row.set_position(pos)
         self._timeline_ruler.set_playhead(pos)
         self.time_label.setText(
             f"{_format_ms(pos)} / {_format_ms(self._player.duration())}"
@@ -2368,6 +2937,7 @@ class VideoEditorWindow(QWidget):
             cuts=track.cuts,
             fade_segments=track.fades,
             bubbles=self._bubbles,
+            audio_tracks=[a for a in self._audio_tracks if a.source_path is not None],
         )
         thread.progress.connect(
             lambda cur, tot: (dlg.setMaximum(max(1, tot)), dlg.setValue(cur))

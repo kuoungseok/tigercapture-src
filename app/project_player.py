@@ -49,10 +49,16 @@ class ProjectPlayer(QObject):
 
     # ---------------- tracks ----------------
 
-    def refresh_tracks(self, tracks: list) -> None:
+    def refresh_tracks(self, tracks: list, extra_duration_ms: int = 0) -> None:
         """Rebuild caps based on the given ordered track list. Preserves caps
         for tracks whose source hasn't changed. Recomputes duration for each
-        track from its video file."""
+        track from its video file.
+
+        ``extra_duration_ms`` lets the caller extend the project timeline
+        beyond what the video tracks alone would produce — used by the
+        editor when audio tracks run past the last video frame, so
+        playback continues (showing blank) until the audio ends.
+        """
         import cv2
 
         new_ids = {t.id for t in tracks}
@@ -95,6 +101,7 @@ class ProjectPlayer(QObject):
             ),
             default=0,
         )
+        new_duration = max(new_duration, int(extra_duration_ms))
         self._duration_ms = new_duration
         self.duration_changed.emit(self._duration_ms)
         # Clamp position

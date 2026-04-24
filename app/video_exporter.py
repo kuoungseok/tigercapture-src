@@ -237,7 +237,9 @@ def build_filter_graph(
 class VideoExportThread(QThread):
     """Runs FFmpeg to render edited video (cuts + speed segments applied).
 
-    Video-only for v1 (audio dropped). H.264 + yuv420p output.
+    Mixes any attached audio tracks into the output via per-track
+    ``atrim + adelay + volume + afade`` filters joined with ``amix``.
+    Falls back to video-only (``-an``) when no audio tracks are given.
     """
 
     progress = Signal(int, int)  # current_ms, total_ms
@@ -255,6 +257,7 @@ class VideoExportThread(QThread):
         cuts: list | None = None,
         fade_segments: list | None = None,
         bubbles: list | None = None,
+        audio_tracks: list | None = None,
     ) -> None:
         super().__init__()
         self._source = Path(source_path)
@@ -265,6 +268,7 @@ class VideoExportThread(QThread):
         self._cuts = list(cuts) if cuts else []
         self._fade_segments = list(fade_segments) if fade_segments else []
         self._bubbles = list(bubbles) if bubbles else []
+        self._audio_tracks = list(audio_tracks) if audio_tracks else []
         self._temp_pngs: list[str] = []
         self._temp_output: str | None = None
 
@@ -381,6 +385,20 @@ class VideoExportThread(QThread):
             total_output_ms = max(1, total_output_ms)
             total_output_s = total_output_ms / 1000.0
 
+            # Build audio mixing chain. Input indices for audio files
+            # start AFTER the video source (-i 0) and every stroke/bubble
+            # overlay PNG (-i 1 .. N).
+            from app.audio_tracks import build_audio_filter
+            video_input_count = 1 + len(stroke_png_paths)
+            audio_graph, audio_inputs, audio_count = build_audio_filter(
+                self._audio_tracks,
+                video_input_count=video_input_count,
+                project_duration_ms=total_output_ms,
+            )
+            if audio_graph:
+                # Append audio portion to the filter_complex graph.
+                graph = f"{graph};{audio_graph}"
+
             # Always write to a sibling temp file first, then atomically move
             # over the destination. Handles two real-world cases:
             #   1. Output == source (user overwriting the clip they're editing)
@@ -399,6 +417,9 @@ class VideoExportThread(QThread):
             cmd = [ffmpeg, "-y", "-i", str(self._source)]
             for png in stroke_png_paths:
                 cmd.extend(["-i", png])
+            # Audio inputs come after video + overlay PNGs so that the
+            # input indices in build_audio_filter line up correctly.
+            cmd.extend(audio_inputs)
             cmd.extend([
                 "-filter_complex", graph,
                 "-map", "[outv]",
@@ -406,7 +427,16 @@ class VideoExportThread(QThread):
                 "-preset", "medium",
                 "-crf", "20",
                 "-pix_fmt", "yuv420p",
-                "-an",
+            ])
+            if audio_count > 0:
+                cmd.extend([
+                    "-map", "[outa]",
+                    "-c:a", "aac",
+                    "-b:a", "192k",
+                ])
+            else:
+                cmd.append("-an")
+            cmd.extend([
                 "-t", f"{total_output_s:.3f}",
                 "-progress", "pipe:2",
                 "-nostats",
