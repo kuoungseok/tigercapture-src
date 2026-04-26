@@ -25,7 +25,7 @@ cd "$REPO_ROOT"
 # Version string for the .dmg filename + window title. CI overrides
 # this via env var (e.g. from the pushed tag); local builds default to
 # the current Windows release number.
-VERSION="${GIFCAM_VERSION:-1.3.0}"
+VERSION="${GIFCAM_VERSION:-1.4.0}"
 
 DO_DMG=0
 DO_CLEAN=0

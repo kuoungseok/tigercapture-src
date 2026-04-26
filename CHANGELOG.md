@@ -1,9 +1,54 @@
 # Changelog
 
-All notable changes since v1.3.0 (the last released Windows build).
 Format: grouped by area, newest work at the top of each section.
 
-## Unreleased
+## v1.4.0 — 2026-04-27
+
+### Pro video editor
+
+- **Kinetic typography** — full 3-pane editor with 80+ animations
+  (Basic / Kinetic / Folding / HOLD), 12 curated presets, multi-layer
+  Eve glitch with RGB split, and animation composition: every IN /
+  HOLD / OUT slot accepts a primary plus a list of "modifier" extras
+  that stack (offsets/rotations add, scale/opacity multiply)
+- **3-wheel color grading** — DaVinci-style Shadows / Midtones /
+  Highlights chromaticity wheels with luma-aware tonal masks; bipolar
+  Brightness / Contrast / Saturation knobs that match the sound editor
+- **8 colour presets** — Cinematic, Vintage, Cool, Warm, Faded, B&W,
+  Punch, Mute (designed looks gated as Pro)
+
+### Sound editor
+
+- **AI Master tab** — one-click fixes for Suno v3/v4, Udio, ACE-Step
+  artefacts, plus a generic and a Custom slot. 6-knob Detailed
+  Mastering (Air, Clarity, Warmth, Width, Punch, Excite)
+- **Dynamics tab** — Compressor (Threshold / Ratio / Attack / Release
+  / Makeup / Knee with Voice Gentle / Voice Strong / Podcast presets)
+  and Noise Gate
+- Audio export: 6 formats (MP3, WAV; FLAC, ALAC, AAC, OGG Pro) with
+  4 quality presets (Low / Standard / High / Studio)
+
+### Export
+
+- Quality dropdown (Low / Standard / High / Best) and Format dropdown
+  (MP4 / WebM / MOV) on the editor toolbar
+- WebM (VP9 + Opus) and MOV (H.264-in-MOV) Pro-tier
+- Save dialog filter and file extension switch with the format
+
+### Tier system
+
+- New `app/tier.py` — single source of truth for Pro/Free gating
+- Pro features: high/best video quality, WebM/MOV containers, lossless
+  audio formats, 48/96 kHz audio, designed colour presets, typography
+  in export
+- Free users see PRO-badged items + an upsell modal on click
+
+### Localization
+
+- Two new locales: 中文 (Chinese), Français (French) — total 6
+  (한국어, English, 日本語, 中文, Français, Deutsch)
+
+## v1.3.x — macOS port (experimental)
 
 ### macOS port
 
