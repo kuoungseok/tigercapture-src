@@ -206,6 +206,24 @@ QPushButton#ProEditorButton:pressed {{
     background-color: #552a97;
 }}
 
+/* Sound editor shortcut — orange accent (matches the AI Master tab)
+   so users recognize it as the audio-mastering entry point. */
+QPushButton#SoundEditorButton {{
+    background-color: #D85A30;
+    color: {COLOR_TEXT_PRIMARY};
+    border: none;
+    border-radius: 8px;
+    padding: 12px 18px;
+    font-size: 14px;
+    font-weight: 700;
+}}
+QPushButton#SoundEditorButton:hover {{
+    background-color: #ff7a4a;
+}}
+QPushButton#SoundEditorButton:pressed {{
+    background-color: #b04722;
+}}
+
 QComboBox {{
     background-color: {COLOR_BG_L2};
     color: {COLOR_TEXT_PRIMARY};

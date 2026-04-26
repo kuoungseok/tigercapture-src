@@ -11,6 +11,7 @@ from PySide6.QtGui import (
     QDragEnterEvent,
     QDragMoveEvent,
     QDropEvent,
+    QFont,
     QImage,
     QKeyEvent,
     QLinearGradient,
@@ -20,6 +21,7 @@ from PySide6.QtGui import (
     QPixmap,
 )
 from PySide6.QtWidgets import (
+    QDialog,
     QFileDialog,
     QHBoxLayout,
     QInputDialog,
@@ -30,6 +32,7 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QSlider,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
@@ -52,6 +55,13 @@ from app.drawing import (
     Stroke,
     compose_pil_bubbles,
 )
+from app.typography import (
+    TEXT_CLIP_MIME,
+    AnimationConfig,
+    TextClip,
+    TextStyle,
+    TextTrack,
+)
 from app.i18n import tr
 from app.project_player import ProjectPlayer
 from app.simple_video_player import PlayerState
@@ -72,6 +82,7 @@ MAX_PX_PER_SEC = 300.0
 MIN_TRACK_WIDTH = 300
 
 FADE_MIME_TYPE = "application/x-gifcam-transition"
+SPEED_MIME_TYPE = "application/x-gifcam-speed"
 
 
 from app.style import (
@@ -356,6 +367,14 @@ class FadeSegment:
         return self.start_ms <= ms < self.end_ms
 
 
+def _new_color_grade():
+    """Lazy-import ColorGrade default factory — keeps the import at
+    module import time deferred so the cycle (color_grading is imported
+    elsewhere) stays clean."""
+    from app.color_grading import ColorGrade
+    return ColorGrade()
+
+
 @dataclass
 class VideoTrack:
     id: int
@@ -368,6 +387,16 @@ class VideoTrack:
     thumbnails: list[QPixmap] = field(default_factory=list)
     selection_start_ms: int = -1
     selection_end_ms: int = -1
+    # Typography actors placed directly on this track's strip. They
+    # overlay the video at their time windows; each actor carries its
+    # own text, style, and (future) animation config. Times are track-
+    # local source ms (the TrackRow paints them in project time via the
+    # offset + speed mapping the row already knows).
+    typography_actors: list = field(default_factory=list)  # list[TextClip]
+    # Per-track color grading (5 sliders + preset metadata). Preview
+    # applies it via numpy on each frame; export injects ``eq +
+    # colorbalance`` into the ffmpeg filter graph after concat.
+    color_grade: "ColorGrade" = field(default_factory=lambda: _new_color_grade())
 
     @property
     def display_name(self) -> str:
@@ -626,10 +655,19 @@ class TrackRow(QWidget):
     LABEL_H = 18
     TIMELINE_H = TRACK_HEIGHT
     FADE_EDGE_GRAB_PX = 6  # resize handle hit area in pixels
+    TYPO_EDGE_GRAB_PX = 8
+    TYPO_CHIP_H = 22             # height of the typography chip strip
+    TYPO_MIN_DURATION_MS = 200
+    SPEED_EDGE_GRAB_PX = 8
+    SPEED_MIN_DURATION_MS = 200
 
     offset_changed = Signal(int, int)  # track_id, new_offset_ms
     fades_changed = Signal(int)  # track_id — fade segments added / resized
+    speed_changed = Signal(int)  # track_id — speed segments added / changed
     media_dropped = Signal(int, object)  # track_id, Path — any media file
+    typography_double_clicked = Signal(int, int)    # track_id, clip_id
+    typography_context_menu = Signal(int, int, object)   # track_id, clip_id, global pos
+    typography_changed = Signal(int)                # track_id — add/move/resize
 
     def __init__(self, track: VideoTrack) -> None:
         super().__init__()
@@ -647,6 +685,27 @@ class TrackRow(QWidget):
         self._drag_start_x: int = 0
         self._drag_start_offset_ms: int = 0
         self._px_per_sec: float = DEFAULT_PX_PER_SEC
+        # Typography-actor drag state
+        self._typo_drag_mode: str | None = None        # "move"/"resize_l"/"resize_r"
+        self._typo_drag_actor_id: int | None = None
+        self._typo_drag_anchor_ms: int = 0
+        self._typo_drag_orig_start_ms: int = 0
+        self._typo_drag_orig_end_ms: int = 0
+        # Hover tracking for edge-handle highlighting
+        self._hover_fade: FadeSegment | None = None
+        self._hover_fade_side: str = ""
+        self._hover_typo_actor_id: int | None = None
+        self._hover_typo_side: str = ""
+        self._hover_speed_seg: SpeedSegment | None = None
+        self._hover_speed_side: str = ""
+        # Speed-segment drag state (resize only — body clicks keep the
+        # existing track-offset-drag behavior so users can still slide
+        # the whole track by grabbing it anywhere).
+        self._speed_drag_mode: str | None = None     # "resize_l" / "resize_r"
+        self._speed_drag_seg: SpeedSegment | None = None
+        self._speed_drag_anchor_ms: int = 0
+        self._speed_drag_orig_start: int = 0
+        self._speed_drag_orig_end: int = 0
 
         self.setFixedHeight(self.LABEL_H + self.TIMELINE_H + TRACK_V_PADDING)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -767,10 +826,16 @@ class TrackRow(QWidget):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(rect.adjusted(0, 0, -1, -1))
 
-            # Thumbnails — fixed native aspect, centered on their time position.
+            # Thumbnails — fixed native aspect, centered on their time
+            # position. Clip to the clip body's rect so the first/last
+            # thumbnails can't spill past the video's actual start/end
+            # (otherwise fade actors placed at the edges appear to have
+            # a visual gap with the video content).
             if self.track.thumbnails and self.track.duration_ms > 0:
                 n = len(self.track.thumbnails)
                 track_h = rect.height()
+                painter.save()
+                painter.setClipRect(rect)
                 for i, pm in enumerate(self.track.thumbnails):
                     if pm is None or pm.isNull():
                         continue
@@ -782,6 +847,7 @@ class TrackRow(QWidget):
                     center_x = self._ms_to_x(int(time_ms))
                     x = center_x - tw // 2
                     painter.drawPixmap(x, rect.top(), tw, track_h, pm)
+                painter.restore()
             else:
                 painter.setPen(QColor(COLOR_TEXT_TERTIARY))
                 painter.drawText(
@@ -798,6 +864,23 @@ class TrackRow(QWidget):
             painter.fillRect(x1, rect.top(), seg_w, rect.height(), color)
             self._draw_speed_label(
                 painter, seg.speed, x1, rect.top(), seg_w, rect.height()
+            )
+            # Edge trim handles (blue — matches the SpeedCard accent).
+            is_hover = self._hover_speed_seg is seg
+            is_drag = self._speed_drag_seg is seg
+            self._paint_edge_handles(
+                painter,
+                rect_top=rect.top(),
+                rect_h=rect.height(),
+                x_left=x1,
+                x_right=x2,
+                left_hot=(is_hover and self._hover_speed_side == "left")
+                    or (is_drag and self._speed_drag_mode == "resize_l"),
+                right_hot=(is_hover and self._hover_speed_side == "right")
+                    or (is_drag and self._speed_drag_mode == "resize_r"),
+                dragging=is_drag,
+                base_color=QColor(120, 180, 240, 220),
+                accent_color=QColor("#4a9bee"),
             )
 
         # Cut segments (dark overlay)
@@ -819,6 +902,11 @@ class TrackRow(QWidget):
         # Fade segments — orange gradient "actors", resizable via edge drag.
         for fade in self.track.fades:
             self._paint_fade_segment(painter, fade, rect)
+
+        # Typography actors — orange→pink gradient chips at the top of the
+        # track strip. Draw AFTER fades so they always read on top.
+        for actor in getattr(self.track, "typography_actors", []):
+            self._paint_typography_actor(painter, actor, rect)
 
         # Selection
         sel_start = self.track.selection_start_ms
@@ -917,11 +1005,68 @@ class TrackRow(QWidget):
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRect(fx1, rect.top(), max(1, fx2 - fx1), rect.height())
 
-        # Edge handles (small vertical bars) to invite resizing.
-        handle_w = 3
-        handle_color = QColor(255, 150, 80)
-        painter.fillRect(fx1 - handle_w // 2, rect.top(), handle_w, rect.height(), handle_color)
-        painter.fillRect(fx2 - handle_w // 2, rect.top(), handle_w, rect.height(), handle_color)
+        # Edge trim handles — always visible (invites resizing), widen +
+        # brighten on hover, light up with accent during active drag.
+        self._paint_edge_handles(
+            painter,
+            rect_top=rect.top(),
+            rect_h=rect.height(),
+            x_left=fx1,
+            x_right=fx2,
+            left_hot=(self._hover_fade is fade and self._hover_fade_side == "left")
+                or (self._resizing_fade is fade and self._resize_side == "left"),
+            right_hot=(self._hover_fade is fade and self._hover_fade_side == "right")
+                or (self._resizing_fade is fade and self._resize_side == "right"),
+            dragging=(self._resizing_fade is fade),
+            base_color=QColor(255, 150, 80),
+            accent_color=QColor("#ff7a4a"),
+        )
+
+    def _paint_edge_handles(
+        self,
+        painter: QPainter,
+        *,
+        rect_top: int,
+        rect_h: int,
+        x_left: int,
+        x_right: int,
+        left_hot: bool,
+        right_hot: bool,
+        dragging: bool,
+        base_color: QColor,
+        accent_color: QColor,
+    ) -> None:
+        """Draw two trim handles at the actor's edges. Each handle
+        widens when hovered (6px) or being dragged (8px), and uses the
+        accent color during drag."""
+        def _one(x: int, hot: bool) -> None:
+            if dragging and hot:
+                w = 8
+                color = accent_color
+            elif hot:
+                w = 6
+                color = QColor(accent_color)
+                color.setAlpha(255)
+            else:
+                w = 4
+                color = QColor(base_color)
+                color.setAlpha(210)
+            painter.fillRect(x - w // 2, rect_top, w, rect_h, color)
+            # Small notch marks top + bottom so the handle reads as a
+            # "grabbable bar" rather than a color stripe.
+            painter.setPen(QPen(QColor(255, 255, 255, 220), 1))
+            notch = max(2, w - 2)
+            painter.drawLine(
+                x - notch // 2, rect_top + 2,
+                x + notch // 2, rect_top + 2,
+            )
+            painter.drawLine(
+                x - notch // 2, rect_top + rect_h - 3,
+                x + notch // 2, rect_top + rect_h - 3,
+            )
+
+        _one(x_left, left_hot)
+        _one(x_right, right_hot)
 
     @staticmethod
     def _paint_empty_slot_pattern(painter: QPainter, rect: QRect) -> None:
@@ -984,6 +1129,27 @@ class TrackRow(QWidget):
         mods = event.modifiers()
         rect = self._timeline_rect()
 
+        # Typography actor interactions take priority over everything
+        # else — they sit at the top of the strip and must be movable
+        # / resizable without triggering the clip body's drag-to-move.
+        typo_actor, typo_zone = self._typography_at(pos)
+        if typo_actor is not None:
+            self._typo_drag_actor_id = typo_actor.id
+            self._typo_drag_anchor_ms = self._x_to_ms(x)
+            self._typo_drag_orig_start_ms = int(typo_actor.start_ms)
+            self._typo_drag_orig_end_ms = int(typo_actor.end_ms)
+            if typo_zone == "left":
+                self._typo_drag_mode = "resize_l"
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            elif typo_zone == "right":
+                self._typo_drag_mode = "resize_r"
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            else:
+                self._typo_drag_mode = "move"
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self.update()
+            return
+
         # Fade edge resize takes priority over everything else.
         fade, side = self._fade_edge_at(x, pos.y())
         if fade is not None:
@@ -992,6 +1158,18 @@ class TrackRow(QWidget):
             self._resize_orig_start = fade.start_ms
             self._resize_orig_end = fade.end_ms
             self._drag_start_x = x
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+            return
+
+        # Speed edge resize (after fades — when a fade and a speed
+        # segment share an edge pixel, fade wins; rare in practice).
+        seg, s_side = self._speed_edge_at(x, pos.y())
+        if seg is not None:
+            self._speed_drag_seg = seg
+            self._speed_drag_mode = "resize_l" if s_side == "left" else "resize_r"
+            self._speed_drag_anchor_ms = self._x_to_ms(x)
+            self._speed_drag_orig_start = int(seg.start_ms)
+            self._speed_drag_orig_end = int(seg.end_ms)
             self.setCursor(Qt.CursorShape.SizeHorCursor)
             return
 
@@ -1021,6 +1199,77 @@ class TrackRow(QWidget):
         pos = event.position().toPoint()
         x = pos.x()
 
+        # Typography drag — active
+        if self._typo_drag_mode is not None and self._typo_drag_actor_id is not None:
+            actor = None
+            for a in self.track.typography_actors:
+                if a.id == self._typo_drag_actor_id:
+                    actor = a
+                    break
+            if actor is None:
+                self._typo_drag_mode = None
+            else:
+                delta_ms = self._x_to_ms(x) - self._typo_drag_anchor_ms
+                if self._typo_drag_mode == "move":
+                    new_start = max(0, self._typo_drag_orig_start_ms + delta_ms)
+                    duration = self._typo_drag_orig_end_ms - self._typo_drag_orig_start_ms
+                    if new_start + duration > self.track.duration_ms:
+                        new_start = max(0, self.track.duration_ms - duration)
+                    actor.start_ms = new_start
+                    actor.end_ms = new_start + duration
+                elif self._typo_drag_mode == "resize_l":
+                    new_start = max(0, self._typo_drag_orig_start_ms + delta_ms)
+                    new_start = min(
+                        new_start, actor.end_ms - self.TYPO_MIN_DURATION_MS
+                    )
+                    actor.start_ms = new_start
+                elif self._typo_drag_mode == "resize_r":
+                    new_end = max(
+                        actor.start_ms + self.TYPO_MIN_DURATION_MS,
+                        self._typo_drag_orig_end_ms + delta_ms,
+                    )
+                    new_end = min(new_end, self.track.duration_ms)
+                    actor.end_ms = new_end
+                self.update()
+                self.typography_changed.emit(self.track.id)
+                return
+
+        # Speed edge resize — active drag
+        if self._speed_drag_mode is not None and self._speed_drag_seg is not None:
+            seg = self._speed_drag_seg
+            mouse_ms = self._x_to_ms(x)
+            delta = mouse_ms - self._speed_drag_anchor_ms
+            # Compute adjacent-segment bounds so we can't cross into
+            # a neighbouring speed segment.
+            neighbours = [s for s in self.track.speed_segments if s is not seg]
+            if self._speed_drag_mode == "resize_l":
+                # Max start = current end - MIN. Min start = closest
+                # left neighbour's end (or 0).
+                left_cap = max(
+                    (s.end_ms for s in neighbours if s.end_ms <= self._speed_drag_orig_start),
+                    default=0,
+                )
+                new_start = max(
+                    left_cap,
+                    min(seg.end_ms - self.SPEED_MIN_DURATION_MS,
+                        self._speed_drag_orig_start + delta),
+                )
+                seg.start_ms = int(new_start)
+            else:  # resize_r
+                right_cap = min(
+                    (s.start_ms for s in neighbours if s.start_ms >= self._speed_drag_orig_end),
+                    default=self.track.duration_ms,
+                )
+                new_end = min(
+                    right_cap,
+                    max(seg.start_ms + self.SPEED_MIN_DURATION_MS,
+                        self._speed_drag_orig_end + delta),
+                )
+                seg.end_ms = int(new_end)
+            self.update()
+            self.speed_changed.emit(self.track.id)
+            return
+
         # Fade edge resize — active drag
         if self._resizing_fade is not None:
             delta_ms = int((x - self._drag_start_x) / self._px_per_sec * 1000)
@@ -1041,15 +1290,64 @@ class TrackRow(QWidget):
             self.fades_changed.emit(self.track.id)
             return
 
-        # Idle hover — swap cursor when the pointer is over a fade edge so
-        # the user discovers that edges are resizable.
+        # Idle hover — swap cursor when the pointer is over a fade edge
+        # or typography actor so the user discovers the affordances.
+        # Also update hover-state fields so paint can thicken the edge
+        # handles on the thing under the cursor.
         if not (self._dragging_offset or self._dragging_selection
                 or self._dragging_playhead):
-            fade, _side = self._fade_edge_at(x, pos.y())
-            if fade is not None:
-                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            typo_actor, typo_zone = self._typography_at(pos)
+
+            prev_typo_id = self._hover_typo_actor_id
+            prev_typo_side = self._hover_typo_side
+            prev_fade = self._hover_fade
+            prev_fade_side = self._hover_fade_side
+            prev_speed = self._hover_speed_seg
+            prev_speed_side = self._hover_speed_side
+
+            if typo_actor is not None:
+                self._hover_typo_actor_id = typo_actor.id
+                self._hover_typo_side = typo_zone if typo_zone in ("left", "right") else ""
+                self._hover_fade = None
+                self._hover_fade_side = ""
+                self._hover_speed_seg = None
+                self._hover_speed_side = ""
+                self.setCursor(
+                    Qt.CursorShape.SizeHorCursor if typo_zone in ("left", "right")
+                    else Qt.CursorShape.OpenHandCursor
+                )
             else:
-                self.setCursor(Qt.CursorShape.OpenHandCursor)
+                self._hover_typo_actor_id = None
+                self._hover_typo_side = ""
+                fade, side = self._fade_edge_at(x, pos.y())
+                if fade is not None:
+                    self._hover_fade = fade
+                    self._hover_fade_side = side
+                    self._hover_speed_seg = None
+                    self._hover_speed_side = ""
+                    self.setCursor(Qt.CursorShape.SizeHorCursor)
+                else:
+                    self._hover_fade = None
+                    self._hover_fade_side = ""
+                    seg, s_side = self._speed_edge_at(x, pos.y())
+                    if seg is not None:
+                        self._hover_speed_seg = seg
+                        self._hover_speed_side = s_side
+                        self.setCursor(Qt.CursorShape.SizeHorCursor)
+                    else:
+                        self._hover_speed_seg = None
+                        self._hover_speed_side = ""
+                        self.setCursor(Qt.CursorShape.OpenHandCursor)
+
+            if (
+                prev_typo_id != self._hover_typo_actor_id
+                or prev_typo_side != self._hover_typo_side
+                or prev_fade is not self._hover_fade
+                or prev_fade_side != self._hover_fade_side
+                or prev_speed is not self._hover_speed_seg
+                or prev_speed_side != self._hover_speed_side
+            ):
+                self.update()
 
         if self._dragging_offset:
             delta_px = x - self._drag_start_x
@@ -1071,9 +1369,62 @@ class TrackRow(QWidget):
             project_ms = self._x_to_project_ms(x)
             self.position_requested.emit(self.track.id, project_ms)
 
+    def leaveEvent(self, _event) -> None:
+        # Clear hover state when the cursor exits the widget, otherwise
+        # the last-hovered handle stays "hot" forever.
+        if (self._hover_fade is not None
+                or self._hover_typo_actor_id is not None
+                or self._hover_speed_seg is not None):
+            self._hover_fade = None
+            self._hover_fade_side = ""
+            self._hover_typo_actor_id = None
+            self._hover_typo_side = ""
+            self._hover_speed_seg = None
+            self._hover_speed_side = ""
+            self.update()
+
+    def wheelEvent(self, event) -> None:
+        """Scroll wheel over a speed segment cycles through preset
+        rates — gives users a quick way to tweak the speed in place
+        without opening the context menu."""
+        pos = event.position().toPoint()
+        seg = self._speed_segment_under(pos)
+        if seg is None:
+            super().wheelEvent(event)
+            return
+        try:
+            idx = SpeedCard.PRESETS.index(
+                min(SpeedCard.PRESETS, key=lambda p: abs(p - seg.speed))
+            )
+        except ValueError:
+            idx = SpeedCard.PRESETS.index(SpeedCard.DEFAULT_SPEED)
+        delta_y = event.angleDelta().y()
+        step = 1 if delta_y > 0 else -1
+        new_idx = max(0, min(len(SpeedCard.PRESETS) - 1, idx + step))
+        seg.speed = float(SpeedCard.PRESETS[new_idx])
+        self.update()
+        self.speed_changed.emit(self.track.id)
+        event.accept()
+
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
             return
+        if self._speed_drag_mode is not None:
+            # Keep segments ordered for subsequent hit-tests / painting.
+            self.track.speed_segments.sort(key=lambda s: s.start_ms)
+            self._speed_drag_mode = None
+            self._speed_drag_seg = None
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+            self.speed_changed.emit(self.track.id)
+            self.update()
+        if self._typo_drag_mode is not None:
+            # Re-sort by start_ms so paint + hit-testing stay consistent.
+            self.track.typography_actors.sort(key=lambda c: c.start_ms)
+            self._typo_drag_mode = None
+            self._typo_drag_actor_id = None
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+            self.typography_changed.emit(self.track.id)
+            self.update()
         if self._resizing_fade is not None:
             self._resizing_fade = None
             self._resize_side = ""
@@ -1097,13 +1448,81 @@ class TrackRow(QWidget):
         self._dragging_playhead = False
 
     def _on_context_menu(self, local_pos: QPoint) -> None:
+        # Typography actors have priority — they sit visually on top
+        # of the timeline strip.
+        typo_actor, _zone = self._typography_at(local_pos)
+        if typo_actor is not None:
+            self.typography_context_menu.emit(
+                self.track.id, typo_actor.id, self.mapToGlobal(local_pos)
+            )
+            return
         # If the click is on a fade actor, open the fade-type / delete menu
         # instead of the generic track menu.
         fade = self._fade_under(local_pos)
         if fade is not None:
             self._show_fade_menu(fade, self.mapToGlobal(local_pos))
             return
+        # Speed segment right-click: rate picker + delete.
+        seg = self._speed_segment_under(local_pos)
+        if seg is not None:
+            self._show_speed_menu(seg, self.mapToGlobal(local_pos))
+            return
         self.context_menu.emit(self.track.id, self.mapToGlobal(local_pos))
+
+    def _speed_segment_under(self, pos: QPoint) -> "SpeedSegment | None":
+        """Return the SpeedSegment under ``pos``, or None."""
+        if pos.y() < self.LABEL_H or pos.y() > self.LABEL_H + self.TIMELINE_H:
+            return None
+        ms = self._x_to_ms(pos.x())
+        for seg in self.track.speed_segments:
+            if seg.start_ms <= ms < seg.end_ms:
+                return seg
+        return None
+
+    def _speed_edge_at(self, x: int, y: int) -> "tuple[SpeedSegment | None, str]":
+        """Return (seg, 'left'/'right') if the cursor is on a speed
+        segment's resize edge, (None, '') otherwise."""
+        if y < self.LABEL_H or y > self.LABEL_H + self.TIMELINE_H:
+            return None, ""
+        for seg in self.track.speed_segments:
+            sx1 = self._ms_to_x(seg.start_ms)
+            sx2 = self._ms_to_x(seg.end_ms)
+            if abs(x - sx1) <= self.SPEED_EDGE_GRAB_PX:
+                return seg, "left"
+            if abs(x - sx2) <= self.SPEED_EDGE_GRAB_PX:
+                return seg, "right"
+        return None, ""
+
+    def _show_speed_menu(self, seg: "SpeedSegment", global_pos) -> None:
+        """Preset rate picker + delete action for a placed SpeedSegment."""
+        menu = QMenu(self)
+        # Header (disabled action showing current speed)
+        hdr = menu.addAction(tr("veditor.speed_menu.current", speed=_format_speed(seg.speed)))
+        hdr.setEnabled(False)
+        menu.addSeparator()
+        preset_actions: list = []
+        for p in SpeedCard.PRESETS:
+            a = menu.addAction(SpeedCard._format_preset(p))
+            a.setCheckable(True)
+            a.setChecked(abs(seg.speed - p) < 1e-3)
+            preset_actions.append((a, p))
+        menu.addSeparator()
+        act_del = menu.addAction(tr("veditor.speed_menu.delete"))
+        chosen = menu.exec(global_pos)
+        if chosen is act_del:
+            try:
+                self.track.speed_segments.remove(seg)
+            except ValueError:
+                pass
+            self.update()
+            self.speed_changed.emit(self.track.id)
+            return
+        for a, p in preset_actions:
+            if chosen is a:
+                seg.speed = float(p)
+                self.update()
+                self.speed_changed.emit(self.track.id)
+                return
 
     def _fade_under(self, pos: QPoint) -> FadeSegment | None:
         if pos.y() < self.LABEL_H or pos.y() > self.LABEL_H + self.TIMELINE_H:
@@ -1145,11 +1564,16 @@ class TrackRow(QWidget):
         self.fades_changed.emit(self.track.id)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
-        # Double-click on a fade segment deletes it.
+        # Double-click on a typography actor opens the editor; on a
+        # fade segment, deletes it.
         if event.button() != Qt.MouseButton.LeftButton:
             super().mouseDoubleClickEvent(event)
             return
         pos = event.position().toPoint()
+        typo_actor, _zone = self._typography_at(pos)
+        if typo_actor is not None:
+            self.typography_double_clicked.emit(self.track.id, typo_actor.id)
+            return
         if pos.y() < self.LABEL_H or pos.y() > self.LABEL_H + self.TIMELINE_H:
             return
         ms = self._x_to_ms(pos.x())
@@ -1159,6 +1583,92 @@ class TrackRow(QWidget):
                 self.update()
                 self.fades_changed.emit(self.track.id)
                 return
+
+    # ---------- typography actor painting + hit-test ----------
+
+    def _typography_actor_rect(self, actor, strip_rect: QRect) -> QRect:
+        """Rect of a typography actor chip in widget coords. Lives as
+        a thin strip at the top of the track's timeline rect."""
+        x1 = self._ms_to_x(int(actor.start_ms))
+        x2 = self._ms_to_x(int(actor.end_ms))
+        w = max(2, x2 - x1)
+        return QRect(x1, strip_rect.top() + 2, w, self.TYPO_CHIP_H)
+
+    def _paint_typography_actor(
+        self, painter: QPainter, actor, strip_rect: QRect
+    ) -> None:
+        from PySide6.QtGui import QLinearGradient, QBrush
+
+        r = self._typography_actor_rect(actor, strip_rect)
+        if r.width() < 2:
+            return
+
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        # Orange → pink gradient (matches the TypographyCard swatch).
+        grad = QLinearGradient(r.left(), 0, r.right(), 0)
+        grad.setColorAt(0.0, QColor(216, 90, 48, 210))
+        grad.setColorAt(1.0, QColor(184, 63, 173, 210))
+        painter.setBrush(QBrush(grad))
+
+        border = QColor("#ff7a4a") if actor.id == self._typo_drag_actor_id else QColor("#D85A30")
+        painter.setPen(QPen(border, 2))
+        painter.drawRoundedRect(r.adjusted(1, 1, -1, -1), 3, 3)
+
+        # "T" badge + preview (leave room for the 4px edge handles so
+        # text doesn't collide with them).
+        painter.setPen(QPen(QColor("#FFFFFF")))
+        f = QFont(painter.font())
+        f.setBold(True)
+        f.setPointSize(9)
+        painter.setFont(f)
+        painter.drawText(r.adjusted(8, 0, -8, 0), Qt.AlignmentFlag.AlignVCenter, "T")
+        preview = actor.display_text()
+        if len(preview) > 18:
+            preview = preview[:18] + "…"
+        f.setBold(False)
+        painter.setFont(f)
+        painter.drawText(
+            r.adjusted(20, 0, -8, 0),
+            Qt.AlignmentFlag.AlignVCenter,
+            preview,
+        )
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+
+        # Edge trim handles — base white for contrast against the
+        # orange/pink chip; accent to #D85A30 on hover / drag.
+        dragging = self._typo_drag_actor_id == actor.id
+        hover = self._hover_typo_actor_id == actor.id
+        self._paint_edge_handles(
+            painter,
+            rect_top=r.top(),
+            rect_h=r.height(),
+            x_left=r.left() + 1,
+            x_right=r.right() - 1,
+            left_hot=(hover and self._hover_typo_side == "left")
+                or (dragging and self._typo_drag_mode == "resize_l"),
+            right_hot=(hover and self._hover_typo_side == "right")
+                or (dragging and self._typo_drag_mode == "resize_r"),
+            dragging=dragging,
+            base_color=QColor(255, 255, 255, 220),
+            accent_color=QColor("#ff7a4a"),
+        )
+
+    def _typography_at(self, pos: QPoint) -> "tuple[object, str]":
+        """Return ``(actor, zone)`` at ``pos``. ``zone`` is
+        ``"left"`` / ``"right"`` (resize grips) or ``"body"``. When
+        nothing matches, ``(None, "")``."""
+        strip = self._timeline_rect()
+        for actor in reversed(getattr(self.track, "typography_actors", [])):
+            r = self._typography_actor_rect(actor, strip)
+            if not r.contains(pos):
+                continue
+            if pos.x() - r.left() <= self.TYPO_EDGE_GRAB_PX:
+                return actor, "left"
+            if r.right() - pos.x() <= self.TYPO_EDGE_GRAB_PX:
+                return actor, "right"
+            return actor, "body"
+        return None, ""
 
     # ---------- fade segment hit-testing / drag-drop ----------
 
@@ -1179,6 +1689,12 @@ class TrackRow(QWidget):
     def dragEnterEvent(self, event) -> None:
         md = event.mimeData()
         if md.hasFormat(FADE_MIME_TYPE):
+            event.acceptProposedAction()
+            return
+        if md.hasFormat(TEXT_CLIP_MIME):
+            event.acceptProposedAction()
+            return
+        if md.hasFormat(SPEED_MIME_TYPE):
             event.acceptProposedAction()
             return
         # Accept any media file (video OR audio); the window will route
@@ -1215,6 +1731,60 @@ class TrackRow(QWidget):
             self.track.fades.sort(key=lambda f: f.start_ms)
             self.update()
             self.fades_changed.emit(self.track.id)
+            self.clicked.emit(self.track.id)
+            event.acceptProposedAction()
+            return
+        # Typography card drop: add a TextClip actor on this track.
+        if md.hasFormat(TEXT_CLIP_MIME):
+            if self.track.duration_ms <= 0:
+                return
+            try:
+                duration_ms = int(bytes(md.data(TEXT_CLIP_MIME)).decode("utf-8"))
+            except Exception:
+                duration_ms = 2000
+            duration_ms = max(self.TYPO_MIN_DURATION_MS, duration_ms)
+            start = self._x_to_ms(event.position().toPoint().x())
+            end = min(self.track.duration_ms, start + duration_ms)
+            if end - start < self.TYPO_MIN_DURATION_MS:
+                start = max(0, end - self.TYPO_MIN_DURATION_MS)
+            if end <= start:
+                return
+            actor = TextClip(start_ms=start, end_ms=end)
+            self.track.typography_actors.append(actor)
+            self.track.typography_actors.sort(key=lambda c: c.start_ms)
+            self.update()
+            self.typography_changed.emit(self.track.id)
+            self.clicked.emit(self.track.id)
+            event.acceptProposedAction()
+            return
+        # Speed card drop: add a SpeedSegment at the selected rate.
+        if md.hasFormat(SPEED_MIME_TYPE):
+            if self.track.duration_ms <= 0:
+                return
+            try:
+                payload = bytes(md.data(SPEED_MIME_TYPE)).decode("utf-8")
+                speed_str, dur_str = payload.split("|", 1)
+                speed = float(speed_str)
+                dur_ms = int(dur_str)
+            except Exception:
+                speed = SpeedCard.DEFAULT_SPEED
+                dur_ms = SpeedCard.DEFAULT_DURATION_MS
+            dur_ms = max(100, dur_ms)
+            center_ms = self._x_to_ms(event.position().toPoint().x())
+            start = max(0, center_ms - dur_ms // 2)
+            end = min(self.track.duration_ms, start + dur_ms)
+            if end <= start:
+                return
+            # Replace any overlapping speed ranges — we can't have two
+            # different speeds on the same source ms.
+            self.track.speed_segments = [
+                seg for seg in self.track.speed_segments
+                if seg.end_ms <= start or seg.start_ms >= end
+            ]
+            self.track.speed_segments.append(SpeedSegment(start, end, speed))
+            self.track.speed_segments.sort(key=lambda s: s.start_ms)
+            self.update()
+            self.speed_changed.emit(self.track.id)
             self.clicked.emit(self.track.id)
             event.acceptProposedAction()
             return
@@ -1315,6 +1885,2953 @@ class _FadeSwatch(QWidget):
         pen.setWidth(2)
         painter.setPen(pen)
         painter.drawLine(int(w / 2), 0, int(w / 2), h)
+
+
+class TypographyCard(QWidget):
+    """Draggable "T" card for spawning a TextClip on the typography lane.
+
+    Structure mirrors ``FadeCard``: a compact pill with a visual swatch
+    and a label, drag starts a QDrag with ``TEXT_CLIP_MIME`` so the
+    receiving lane can distinguish text-clip drops from generic file
+    drops or fade-card drops."""
+
+    DEFAULT_DURATION_MS = 2000     # 2-second clip by default
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("TypographyCard")
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setFixedHeight(40)
+        self.setMinimumWidth(120)
+        self.setStyleSheet(
+            f"""
+            QWidget#TypographyCard {{
+                background-color: {COLOR_BG_L5};
+                border: 1px solid {COLOR_BORDER_DEFAULT};
+                border-radius: 6px;
+            }}
+            QWidget#TypographyCard:hover {{
+                border-color: #D85A30;
+            }}
+            """
+        )
+        row = QHBoxLayout(self)
+        row.setContentsMargins(10, 4, 12, 4)
+        row.setSpacing(8)
+
+        swatch = _TypographySwatch()
+        swatch.setFixedSize(44, 22)
+        row.addWidget(swatch)
+
+        title = QLabel(tr("veditor.typo_card.title"))
+        title.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; font-weight: 700;")
+        row.addWidget(title)
+
+        self.setToolTip(tr("veditor.typo_card.hint"))
+
+    def mousePressEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        from PySide6.QtCore import QMimeData
+        from PySide6.QtGui import QDrag
+
+        mime = QMimeData()
+        mime.setData(
+            TEXT_CLIP_MIME,
+            str(self.DEFAULT_DURATION_MS).encode("utf-8"),
+        )
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.setPixmap(self.grab())
+        drag.setHotSpot(event.position().toPoint())
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        drag.exec(Qt.DropAction.CopyAction)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+
+
+class _TypographySwatch(QWidget):
+    """Orange-to-pink gradient with a bold "T" glyph — visual identity
+    for the TypographyCard. Matches the colour the clip chip paints so
+    users recognize the two as the same affordance."""
+
+    def paintEvent(self, _event) -> None:
+        from PySide6.QtGui import QLinearGradient, QBrush, QFont
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        w, h = self.width(), self.height()
+        grad = QLinearGradient(0, 0, w, 0)
+        grad.setColorAt(0.0, QColor("#D85A30"))
+        grad.setColorAt(1.0, QColor("#B83FAD"))
+        painter.setBrush(QBrush(grad))
+        painter.setPen(QPen(QColor("#D85A30"), 1))
+        painter.drawRoundedRect(0, 0, w - 1, h - 1, 4, 4)
+
+        painter.setPen(QPen(QColor("#FFFFFF")))
+        f = QFont(painter.font())
+        f.setBold(True)
+        f.setPointSize(int(h * 0.55))
+        painter.setFont(f)
+        painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, "T")
+
+
+class SpeedCard(QWidget):
+    """Draggable card for spawning a SpeedSegment on a video track.
+
+    Has a compact speed selector (combo) so the user can pick the rate
+    *before* dragging — matches how other NLEs let you pre-configure
+    the tool before applying. Drop on a TrackRow creates a 2-second
+    segment at the selected speed."""
+
+    DEFAULT_DURATION_MS = 2000
+    PRESETS = [0.25, 0.5, 0.75, 1.5, 2.0, 4.0, 8.0, 16.0]
+    DEFAULT_SPEED = 2.0
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("SpeedCard")
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setFixedHeight(40)
+        self.setMinimumWidth(150)
+        self.setStyleSheet(
+            f"""
+            QWidget#SpeedCard {{
+                background-color: {COLOR_BG_L5};
+                border: 1px solid {COLOR_BORDER_DEFAULT};
+                border-radius: 6px;
+            }}
+            QWidget#SpeedCard:hover {{
+                border-color: #4a9bee;
+            }}
+            """
+        )
+        row = QHBoxLayout(self)
+        row.setContentsMargins(10, 4, 10, 4)
+        row.setSpacing(8)
+
+        swatch = _SpeedSwatch()
+        swatch.setFixedSize(44, 22)
+        row.addWidget(swatch)
+
+        title = QLabel(tr("veditor.speed_card.title"))
+        title.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; font-weight: 700;")
+        row.addWidget(title)
+
+        # Preset selector — don't start a drag when the user clicks
+        # inside the combo, only when they grab the body.
+        from PySide6.QtWidgets import QComboBox
+        self._combo = QComboBox()
+        for p in self.PRESETS:
+            self._combo.addItem(self._format_preset(p), p)
+        self._combo.setCurrentText(self._format_preset(self.DEFAULT_SPEED))
+        self._combo.setFixedWidth(64)
+        self._combo.setStyleSheet(
+            f"QComboBox {{ background-color: {COLOR_BG_L3}; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; padding: 2px 6px; }}"
+        )
+        row.addWidget(self._combo)
+
+        self.setToolTip(tr("veditor.speed_card.hint"))
+
+    @staticmethod
+    def _format_preset(p: float) -> str:
+        # 2.0 → "2x", 0.5 → "0.5x", 1.5 → "1.5x"
+        if abs(p - round(p)) < 1e-3:
+            return f"{int(round(p))}x"
+        return f"{p:g}x"
+
+    def selected_speed(self) -> float:
+        data = self._combo.currentData()
+        if isinstance(data, (int, float)) and data > 0:
+            return float(data)
+        return self.DEFAULT_SPEED
+
+    def mousePressEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        # Don't steal clicks from the combo — if the user clicked on
+        # the combo area, let Qt handle it normally.
+        combo_rect = self._combo.geometry()
+        if combo_rect.contains(event.position().toPoint()):
+            super().mousePressEvent(event)
+            return
+
+        from PySide6.QtCore import QMimeData
+        from PySide6.QtGui import QDrag
+
+        payload = f"{self.selected_speed():.6f}|{self.DEFAULT_DURATION_MS}"
+        mime = QMimeData()
+        mime.setData(SPEED_MIME_TYPE, payload.encode("utf-8"))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.setPixmap(self.grab())
+        drag.setHotSpot(event.position().toPoint())
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        drag.exec(Qt.DropAction.CopyAction)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+
+
+class _SpeedSwatch(QWidget):
+    """Mini visual for the SpeedCard — three forward-chevrons on a
+    blue pad to suggest 'fast forward'."""
+
+    def paintEvent(self, _event) -> None:
+        from PySide6.QtGui import QLinearGradient, QBrush, QFont, QPolygon
+        from PySide6.QtCore import QPoint
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        w, h = self.width(), self.height()
+        grad = QLinearGradient(0, 0, w, 0)
+        grad.setColorAt(0.0, QColor("#4a9bee"))
+        grad.setColorAt(1.0, QColor("#2f6bbf"))
+        painter.setBrush(QBrush(grad))
+        painter.setPen(QPen(QColor("#4a9bee"), 1))
+        painter.drawRoundedRect(0, 0, w - 1, h - 1, 4, 4)
+
+        # Three chevron arrows ">"
+        painter.setPen(QPen(QColor("#FFFFFF"), 2))
+        tri_w = 5
+        cy = h // 2
+        # spacing between chevrons
+        spacing = 7
+        start_x = (w - (3 * spacing - 1)) // 2
+        for i in range(3):
+            x = start_x + i * spacing
+            painter.drawLine(x, cy - tri_w, x + tri_w, cy)
+            painter.drawLine(x + tri_w, cy, x, cy + tri_w)
+
+
+class TextLaneRow(QWidget):
+    """Dedicated timeline lane for text clips.
+
+    Sits between the timeline ruler and the video tracks. Renders all
+    clips from a ``TextTrack`` as rounded chips with the spec's orange
+    → pink gradient, plus an IN / HOLD / OUT timing bar underneath the
+    text preview. Handles drag-drop of the TypographyCard, clip moves
+    (drag body) and resizes (drag left/right edge), context menu, and
+    double-click to open the typography editor."""
+
+    MARGIN = 10                    # matches TimelineRuler.MARGIN
+    ROW_HEIGHT = 58
+    EDGE_GRIP_PX = 8               # left/right edge zone for resize
+    MIN_CLIP_MS = 200              # can't shrink a clip below this
+
+    clip_double_clicked = Signal(int)    # clip_id
+    clip_context_menu = Signal(int, object)   # clip_id, QPoint (global)
+    clips_changed = Signal()             # geometry / list mutation
+
+    def __init__(self, track: "TextTrack") -> None:
+        super().__init__()
+        self.track = track
+        self._px_per_sec: float = DEFAULT_PX_PER_SEC
+        self._duration_ms: int = 0
+
+        # Interaction state
+        self._hover_clip_id: int | None = None
+        self._hover_edge: str | None = None       # "left" / "right" / None
+        self._active_clip_id: int | None = None
+        self._drag_mode: str | None = None        # "move" / "resize_l" / "resize_r"
+        self._drag_anchor_ms: int = 0             # mouse-down project ms
+        self._drag_orig_start_ms: int = 0
+        self._drag_orig_end_ms: int = 0
+
+        self.setFixedHeight(self.ROW_HEIGHT)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        self.setMouseTracking(True)
+        self.setAcceptDrops(True)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.DefaultContextMenu)
+        self.setToolTip(tr("veditor.typo_lane.hint"))
+
+    # ---- scaling / width ----
+
+    def set_px_per_sec(self, px: float) -> None:
+        self._px_per_sec = max(MIN_PX_PER_SEC, min(MAX_PX_PER_SEC, float(px)))
+        self._recalc_width()
+        self.update()
+
+    def set_project_duration(self, ms: int) -> None:
+        self._duration_ms = max(0, int(ms))
+        self._recalc_width()
+        self.update()
+
+    def set_min_width(self, w: int) -> None:
+        self.setMinimumWidth(max(MIN_TRACK_WIDTH, int(w)))
+        self.update()
+
+    def _recalc_width(self) -> None:
+        span_ms = max(self._duration_ms, self.track.extent_ms())
+        w = int(span_ms / 1000.0 * self._px_per_sec) + 2 * self.MARGIN
+        self.setMinimumWidth(max(MIN_TRACK_WIDTH, w))
+
+    # ---- coordinate helpers ----
+
+    def _ms_to_x(self, ms: int) -> int:
+        return int(self.MARGIN + max(0, ms) / 1000.0 * self._px_per_sec)
+
+    def _x_to_ms(self, x: int) -> int:
+        if self._px_per_sec <= 0:
+            return 0
+        return max(0, int((x - self.MARGIN) / self._px_per_sec * 1000))
+
+    def _clip_rect(self, clip: TextClip) -> QRect:
+        x0 = self._ms_to_x(clip.start_ms)
+        x1 = self._ms_to_x(clip.end_ms)
+        return QRect(x0, 6, max(2, x1 - x0), self.ROW_HEIGHT - 12)
+
+    def _hit_clip(self, pos: QPoint) -> tuple[TextClip | None, str]:
+        """Return ``(clip, zone)`` for the clip under ``pos``. ``zone``
+        is ``"left"`` / ``"right"`` (edge grips) or ``"body"``. When no
+        clip matches, ``(None, "")``."""
+        # Walk right-to-left so later (stacked-on-top) clips win.
+        for clip in reversed(self.track.clips):
+            r = self._clip_rect(clip)
+            if not r.contains(pos):
+                continue
+            if pos.x() - r.left() <= self.EDGE_GRIP_PX:
+                return clip, "left"
+            if r.right() - pos.x() <= self.EDGE_GRIP_PX:
+                return clip, "right"
+            return clip, "body"
+        return None, ""
+
+    # ---- painting ----
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        # Background lane strip — transparent over StripedHost's pattern
+        # but with a subtle gradient so the lane reads distinct.
+        bg = self.rect()
+        painter.fillRect(bg, QColor(0, 0, 0, 40))
+
+        # Faint left-edge indicator so users see this is a timeline row.
+        painter.fillRect(0, 0, self.MARGIN, bg.height(), QColor(0, 0, 0, 60))
+
+        # Each clip
+        for clip in self.track.clips:
+            self._paint_clip(painter, clip)
+
+        # Pro-only export badge — Free users see this whenever the
+        # lane has clips, so they understand text is preview-only.
+        from app import tier
+        if (
+            tier.is_locked("export.typography")
+            and len(self.track.clips) > 0
+        ):
+            self._paint_pro_export_badge(painter)
+
+    def _paint_pro_export_badge(self, painter: QPainter) -> None:
+        """Right-aligned chip telling Free users typography is
+        excluded from export. Painted on top of clips so it stays
+        visible even on a busy lane."""
+        text = tr("veditor.typo_lane.pro_export_badge")
+        f = QFont(painter.font())
+        f.setPointSize(9)
+        f.setBold(True)
+        painter.setFont(f)
+        metrics = painter.fontMetrics()
+        pad_x, pad_y = 8, 3
+        text_w = metrics.horizontalAdvance(text)
+        text_h = metrics.height()
+        chip_w = text_w + pad_x * 2
+        chip_h = text_h + pad_y * 2
+        chip_rect = QRect(
+            self.width() - chip_w - 8,
+            (self.height() - chip_h) // 2,
+            chip_w, chip_h,
+        )
+        # Chip body — semi-opaque dark with amber border so it reads
+        # as "warning / locked" rather than "active".
+        painter.setBrush(QColor(20, 20, 28, 220))
+        painter.setPen(QPen(QColor("#D8A030"), 1))
+        painter.drawRoundedRect(chip_rect, 6, 6)
+        painter.setPen(QPen(QColor("#FFD080")))
+        painter.drawText(
+            chip_rect, Qt.AlignmentFlag.AlignCenter, text,
+        )
+
+    def _paint_clip(self, painter: QPainter, clip: TextClip) -> None:
+        from PySide6.QtGui import QLinearGradient, QBrush
+
+        r = self._clip_rect(clip)
+        if r.width() < 2:
+            return
+
+        # Background gradient
+        grad = QLinearGradient(r.left(), 0, r.right(), 0)
+        grad.setColorAt(0.0, QColor(216, 90, 48, 180))    # orange
+        grad.setColorAt(1.0, QColor(184, 63, 173, 180))   # pink
+        painter.setBrush(QBrush(grad))
+
+        # Border — brighter when this clip is the active (drag) target
+        border = QColor("#ff7a4a") if clip.id == self._active_clip_id else QColor("#D85A30")
+        painter.setPen(QPen(border, 2))
+        painter.drawRoundedRect(r.adjusted(1, 1, -1, -1), 4, 4)
+
+        # T-icon badge (small) + text preview
+        painter.setPen(QPen(QColor("#FFFFFF")))
+        f = QFont(painter.font())
+        f.setBold(True)
+        f.setPointSize(10)
+        painter.setFont(f)
+        painter.drawText(
+            r.adjusted(6, 4, -6, -18),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+            "T",
+        )
+
+        f.setBold(False)
+        f.setPointSize(9)
+        painter.setFont(f)
+        preview = clip.display_text()
+        if len(preview) > 22:
+            preview = preview[:22] + "…"
+        painter.drawText(
+            r.adjusted(20, 4, -6, -18),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop,
+            preview,
+        )
+
+        # IN / HOLD / OUT timing bar at the bottom of the chip
+        bar_margin = 5
+        bar_rect = QRect(
+            r.left() + bar_margin,
+            r.bottom() - 8,
+            max(1, r.width() - 2 * bar_margin),
+            4,
+        )
+        total_s = max(0.001, clip.duration_s)
+        in_ratio = max(0.0, min(1.0, clip.animation.in_duration / total_s))
+        out_ratio = max(0.0, min(1.0, clip.animation.out_duration / total_s))
+        if in_ratio + out_ratio > 1.0:
+            # Protect against shorter-than-animation clips.
+            scale = 1.0 / (in_ratio + out_ratio)
+            in_ratio *= scale
+            out_ratio *= scale
+
+        in_w = int(bar_rect.width() * in_ratio)
+        out_w = int(bar_rect.width() * out_ratio)
+        hold_w = max(0, bar_rect.width() - in_w - out_w)
+
+        if in_w > 0:
+            painter.fillRect(
+                QRect(bar_rect.left(), bar_rect.top(), in_w, bar_rect.height()),
+                QColor("#5DCAA5"),
+            )
+        if hold_w > 0:
+            painter.fillRect(
+                QRect(bar_rect.left() + in_w, bar_rect.top(), hold_w, bar_rect.height()),
+                QColor(255, 255, 255, 70),
+            )
+        if out_w > 0:
+            painter.fillRect(
+                QRect(bar_rect.right() - out_w, bar_rect.top(), out_w, bar_rect.height()),
+                QColor("#D85A30"),
+            )
+
+    # ---- mouse interaction ----
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        pos = event.position().toPoint()
+        clip, zone = self._hit_clip(pos)
+        if clip is None:
+            return
+        self._active_clip_id = clip.id
+        self._drag_anchor_ms = self._x_to_ms(pos.x())
+        self._drag_orig_start_ms = int(clip.start_ms)
+        self._drag_orig_end_ms = int(clip.end_ms)
+        if zone == "left":
+            self._drag_mode = "resize_l"
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+        elif zone == "right":
+            self._drag_mode = "resize_r"
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+        else:
+            self._drag_mode = "move"
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        self.update()
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        pos = event.position().toPoint()
+        if self._drag_mode and self._active_clip_id is not None:
+            clip = self.track.find(self._active_clip_id)
+            if clip is None:
+                self._drag_mode = None
+                return
+            delta_ms = self._x_to_ms(pos.x()) - self._drag_anchor_ms
+            if self._drag_mode == "move":
+                new_start = max(0, self._drag_orig_start_ms + delta_ms)
+                duration = self._drag_orig_end_ms - self._drag_orig_start_ms
+                clip.start_ms = new_start
+                clip.end_ms = new_start + duration
+            elif self._drag_mode == "resize_l":
+                new_start = max(0, self._drag_orig_start_ms + delta_ms)
+                new_start = min(new_start, clip.end_ms - self.MIN_CLIP_MS)
+                clip.start_ms = new_start
+            elif self._drag_mode == "resize_r":
+                new_end = max(
+                    clip.start_ms + self.MIN_CLIP_MS,
+                    self._drag_orig_end_ms + delta_ms,
+                )
+                clip.end_ms = new_end
+            self._recalc_width()
+            self.clips_changed.emit()
+            self.update()
+            return
+
+        # Idle hover: cursor feedback
+        _, zone = self._hit_clip(pos)
+        if zone in ("left", "right"):
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+        elif zone == "body":
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        if self._drag_mode is not None:
+            # Sort by start_ms to keep the internal list ordered.
+            self.track.clips.sort(key=lambda c: c.start_ms)
+            self.clips_changed.emit()
+        self._drag_mode = None
+        self._active_clip_id = None
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.update()
+
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        pos = event.position().toPoint()
+        clip, _zone = self._hit_clip(pos)
+        if clip is not None:
+            self.clip_double_clicked.emit(clip.id)
+
+    def contextMenuEvent(self, event) -> None:
+        pos = event.pos()
+        clip, _zone = self._hit_clip(pos)
+        if clip is None:
+            event.ignore()
+            return
+        self.clip_context_menu.emit(clip.id, event.globalPos())
+        event.accept()
+
+    # ---- drag-drop (T-card) ----
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasFormat(TEXT_CLIP_MIME):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if event.mimeData().hasFormat(TEXT_CLIP_MIME):
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        md = event.mimeData()
+        if not md.hasFormat(TEXT_CLIP_MIME):
+            super().dropEvent(event)
+            return
+        try:
+            duration_ms = int(bytes(md.data(TEXT_CLIP_MIME)).decode("utf-8"))
+        except Exception:
+            duration_ms = 2000
+
+        drop_ms = self._x_to_ms(event.position().toPoint().x())
+        clip = TextClip(
+            start_ms=max(0, drop_ms),
+            end_ms=max(0, drop_ms) + max(self.MIN_CLIP_MS, duration_ms),
+        )
+        self.track.add_clip(clip)
+        self._recalc_width()
+        self.clips_changed.emit()
+        self.update()
+        event.acceptProposedAction()
+        # Hand back the id so the caller can immediately open the editor.
+        self.clip_double_clicked.emit(clip.id)
+
+
+class _TextPreviewItem:
+    """Lightweight QGraphicsItem that paints a TextClip preview.
+
+    Implemented via composition with a QGraphicsRectItem so we don't
+    need to subclass QGraphicsItem (which is awkward in PySide6 because
+    the abstract methods make instantiation finicky).
+
+    ``bg_provider`` is a zero-arg callable returning a QPixmap to paint
+    behind the text (the editor uses this to show the video frame at the
+    current playhead). Returning ``None`` falls back to a solid black
+    backdrop."""
+
+    def __init__(self, clip: TextClip, bg_provider=None, time_provider=None):
+        from PySide6.QtWidgets import QGraphicsRectItem
+        self.clip = clip
+        self._bg_provider = bg_provider
+        # ``time_provider`` returns the current playback time (seconds
+        # since the clip's start) used to drive the IN/HOLD/OUT
+        # animation. Returning ``None`` means "show the static
+        # final-state result" (i.e. no animation applied).
+        self._time_provider = time_provider
+
+        self._root = QGraphicsRectItem(0, 0, 1920, 1080)
+        from PySide6.QtGui import QBrush
+        self._root.setBrush(QBrush(QColor("#000")))
+        self._root.setPen(QPen(Qt.PenStyle.NoPen))
+
+        # Custom paint via overriding paint() on the rect item — easiest
+        # cross-version Qt path.
+        original_paint = self._root.paint
+
+        def _paint(painter, option, widget=None):
+            original_paint(painter, option, widget)
+            self._draw_background(painter)
+            self._draw_text(painter)
+
+        self._root.paint = _paint
+
+    def graphics_item(self):
+        return self._root
+
+    def refresh(self):
+        self._root.update()
+
+    def _draw_background(self, painter: QPainter) -> None:
+        if self._bg_provider is None:
+            return
+        try:
+            pm = self._bg_provider()
+        except Exception:
+            return
+        if pm is None or pm.isNull():
+            return
+        scene_w, scene_h = 1920.0, 1080.0
+        pw, ph = pm.width(), pm.height()
+        if pw <= 0 or ph <= 0:
+            return
+        scale = min(scene_w / pw, scene_h / ph)
+        draw_w = pw * scale
+        draw_h = ph * scale
+        ox = (scene_w - draw_w) / 2.0
+        oy = (scene_h - draw_h) / 2.0
+        painter.drawPixmap(int(ox), int(oy), int(draw_w), int(draw_h), pm)
+
+    def _draw_text(self, painter: QPainter) -> None:
+        from PySide6.QtGui import QFontMetrics, QPainterPath
+        from app.typo_animations import (
+            compute_clip_transform, compute_clip_glyph_transforms,
+            compute_clip_layers, TextTransform,
+        )
+        clip = self.clip
+        text = clip.text or "Enter text…"
+        style = clip.style
+
+        scene_w, scene_h = 1920.0, 1080.0
+        cx = float(style.position_x) * scene_w
+        cy = float(style.position_y) * scene_h
+
+        # Resolve play time; ``None`` = paused (steady HOLD state).
+        play_time = None
+        if self._time_provider is not None:
+            play_time = self._time_provider()
+
+        # Multi-layer dispatch (RGB split / glitch animations) — drawn
+        # once per layer with each layer's color + offset.
+        if play_time is not None:
+            layers = compute_clip_layers(clip, float(play_time))
+            if layers is not None:
+                self._draw_text_layers(painter, text, style, cx, cy, layers)
+                return
+
+        # Per-glyph dispatch: if the active animation is per-glyph,
+        # rendering branches into a different path that iterates each
+        # character with its own transform around its own pivot.
+        glyph_xfs = None
+        if play_time is not None:
+            glyph_xfs = compute_clip_glyph_transforms(
+                clip, float(play_time), len(text or "")
+            )
+        if glyph_xfs is not None:
+            self._draw_text_perglyph(painter, text, style, cx, cy, glyph_xfs)
+            return
+
+        # Whole-text fast path.
+        if play_time is not None:
+            xf = compute_clip_transform(clip, float(play_time)) or TextTransform.identity()
+        else:
+            xf = TextTransform.identity()
+
+        # Apply opacity globally for the text drawing block; geometric
+        # transform pivots on the text's center (cx, cy).
+        painter.save()
+        painter.setOpacity(max(0.0, min(1.0, xf.opacity)))
+        painter.translate(cx + xf.offset_x, cy + xf.offset_y)
+        if abs(xf.rotation_deg) > 0.05:
+            painter.rotate(xf.rotation_deg)
+        if abs(xf.scale_x - 1.0) > 1e-3 or abs(xf.scale_y - 1.0) > 1e-3:
+            painter.scale(xf.scale_x, xf.scale_y)
+        painter.translate(-cx, -cy)
+
+        font = QFont(style.font_family, int(style.font_size))
+        font.setWeight(QFont.Weight(int(style.font_weight)))
+        if style.letter_spacing:
+            from PySide6.QtGui import QFont as _QFont
+            font.setLetterSpacing(_QFont.SpacingType.AbsoluteSpacing,
+                                  float(style.letter_spacing))
+        painter.setFont(font)
+        fm = QFontMetrics(font)
+
+        # Multi-line: split on newlines, render line-by-line.
+        lines = text.split("\n") if text else [text]
+        line_h = int(fm.height() * float(style.line_height))
+        total_h = max(line_h, line_h * len(lines))
+
+        # Top-left of the text block
+        widest = max((fm.horizontalAdvance(ln) for ln in lines), default=0)
+        block_x = cx - widest / 2.0
+        block_y = cy - total_h / 2.0
+
+        # Background rect
+        if style.background_color:
+            pad = max(0, int(style.background_padding))
+            radius = max(0, int(style.background_radius))
+            painter.setBrush(QColor(style.background_color))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(
+                int(block_x - pad), int(block_y - pad),
+                int(widest + 2 * pad), int(total_h + 2 * pad),
+                radius, radius,
+            )
+
+        # For each line: shadow → outline → fill
+        for i, ln in enumerate(lines):
+            ln_w = fm.horizontalAdvance(ln)
+            # Honor alignment within the bounding block.
+            if style.alignment == "left":
+                lx = block_x
+            elif style.alignment == "right":
+                lx = block_x + (widest - ln_w)
+            else:
+                lx = block_x + (widest - ln_w) / 2.0
+            ly = block_y + i * line_h + fm.ascent()
+
+            # Shadow
+            if style.shadow_color and (style.shadow_offset_x or style.shadow_offset_y):
+                painter.setPen(QColor(style.shadow_color))
+                painter.drawText(
+                    int(lx + style.shadow_offset_x),
+                    int(ly + style.shadow_offset_y),
+                    ln,
+                )
+
+            # Outline
+            if style.outline_color and style.outline_width and style.outline_width > 0:
+                path = QPainterPath()
+                path.addText(lx, ly, font, ln)
+                pen = QPen(QColor(style.outline_color))
+                pen.setWidth(int(style.outline_width))
+                pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+                painter.setPen(pen)
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.drawPath(path)
+
+            # Fill
+            painter.setPen(QColor(style.color or "#FFFFFF"))
+            painter.drawText(int(lx), int(ly), ln)
+
+        # Close the save() that opened the animation transform block.
+        painter.restore()
+
+    def _draw_text_perglyph(
+        self, painter: QPainter, text: str, style, cx: float, cy: float,
+        glyph_xfs: list,
+    ) -> None:
+        """Render a Folding-style per-glyph animation. Each char gets
+        its own transform around its own pivot. Effects (shadow /
+        outline / fill) are drawn per-character so rotation pivots
+        stay correct."""
+        from PySide6.QtGui import QFontMetrics, QPainterPath
+
+        font = QFont(style.font_family, int(style.font_size))
+        font.setWeight(QFont.Weight(int(style.font_weight)))
+        if style.letter_spacing:
+            font.setLetterSpacing(
+                QFont.SpacingType.AbsoluteSpacing,
+                float(style.letter_spacing),
+            )
+        painter.setFont(font)
+        fm = QFontMetrics(font)
+
+        # Lay out chars by line (multi-line text — newlines split).
+        # Per-glyph animations don't make as much sense for multi-line,
+        # but we still place them sensibly.
+        lines = text.split("\n") if text else [text]
+        line_h = int(fm.height() * float(style.line_height))
+        total_h = max(line_h, line_h * len(lines))
+
+        widest = max((fm.horizontalAdvance(ln) for ln in lines), default=0)
+        block_x = cx - widest / 2.0
+        block_y = cy - total_h / 2.0
+
+        # Background rect (drawn once, behind every glyph)
+        if style.background_color:
+            pad = max(0, int(style.background_padding))
+            radius = max(0, int(style.background_radius))
+            painter.setBrush(QColor(style.background_color))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(
+                int(block_x - pad), int(block_y - pad),
+                int(widest + 2 * pad), int(total_h + 2 * pad),
+                radius, radius,
+            )
+
+        # Walk every char in order, mapping it to the i-th transform.
+        # Newlines bump the cursor to the next line and don't consume
+        # an entry from glyph_xfs (the animation generator received the
+        # full character count including \n; we just skip the visible
+        # render for \n). Keep the indices aligned by iterating with i.
+        char_idx = 0
+        for line_no, ln in enumerate(lines):
+            ln_w = fm.horizontalAdvance(ln)
+            if style.alignment == "left":
+                lx = block_x
+            elif style.alignment == "right":
+                lx = block_x + (widest - ln_w)
+            else:
+                lx = block_x + (widest - ln_w) / 2.0
+            ly = block_y + line_no * line_h + fm.ascent()
+
+            cursor_x = lx
+            for ch in ln:
+                gx = cursor_x
+                gw = fm.horizontalAdvance(ch)
+                if char_idx >= len(glyph_xfs):
+                    xf = glyph_xfs[-1] if glyph_xfs else None
+                else:
+                    xf = glyph_xfs[char_idx]
+                char_idx += 1
+
+                if xf is None or ch.strip() == "":
+                    # Whitespace still advances the cursor but we don't
+                    # bother drawing.
+                    cursor_x += gw
+                    continue
+
+                pivot_px_x = gx + gw * float(xf.pivot_x)
+                # pivot_y: 0=top of glyph (above baseline), 1=bottom.
+                # baseline is at ly; ascent above, descent below.
+                pivot_px_y = (ly - fm.ascent()) + fm.height() * float(xf.pivot_y)
+
+                painter.save()
+                painter.setOpacity(max(0.0, min(1.0, xf.opacity)))
+                painter.translate(
+                    pivot_px_x + xf.offset_x,
+                    pivot_px_y + xf.offset_y,
+                )
+                if abs(xf.rotation_deg) > 0.05:
+                    painter.rotate(xf.rotation_deg)
+                if abs(xf.scale_x - 1.0) > 1e-3 or abs(xf.scale_y - 1.0) > 1e-3:
+                    painter.scale(xf.scale_x, xf.scale_y)
+                painter.translate(-pivot_px_x, -pivot_px_y)
+
+                # Shadow (per char)
+                if style.shadow_color and (style.shadow_offset_x or style.shadow_offset_y):
+                    painter.setPen(QColor(style.shadow_color))
+                    painter.drawText(
+                        int(gx + style.shadow_offset_x),
+                        int(ly + style.shadow_offset_y),
+                        ch,
+                    )
+
+                # Outline
+                if style.outline_color and style.outline_width and style.outline_width > 0:
+                    path = QPainterPath()
+                    path.addText(gx, ly, font, ch)
+                    pen = QPen(QColor(style.outline_color))
+                    pen.setWidth(int(style.outline_width))
+                    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+                    painter.setPen(pen)
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                    painter.drawPath(path)
+
+                # Fill — honor color override if the glyph carries one,
+                # unless the user has locked the clip to a single color.
+                if getattr(self.clip.animation, "mono_color", False):
+                    fill_color = style.color or "#FFFFFF"
+                else:
+                    fill_color = xf.color_override or style.color or "#FFFFFF"
+                painter.setPen(QColor(fill_color))
+                painter.drawText(int(gx), int(ly), ch)
+
+                painter.restore()
+                cursor_x += gw
+            # Skip the implicit \n character index when there are
+            # multiple lines — the global character count we pass to
+            # the animation generator includes \n delimiters.
+            if line_no < len(lines) - 1:
+                char_idx += 1
+
+    def _draw_text_layers(
+        self, painter: QPainter, text: str, style, cx: float, cy: float,
+        layers: list,
+    ) -> None:
+        """Multi-layer rendering — re-draws the entire text once per
+        LayerTransform (different colour + offset). Used by glitch /
+        RGB-split style animations."""
+        from PySide6.QtGui import QFontMetrics, QPainterPath
+
+        font = QFont(style.font_family, int(style.font_size))
+        font.setWeight(QFont.Weight(int(style.font_weight)))
+        if style.letter_spacing:
+            font.setLetterSpacing(
+                QFont.SpacingType.AbsoluteSpacing,
+                float(style.letter_spacing),
+            )
+        painter.setFont(font)
+        fm = QFontMetrics(font)
+
+        lines = text.split("\n") if text else [text]
+        line_h = int(fm.height() * float(style.line_height))
+        total_h = max(line_h, line_h * len(lines))
+        widest = max((fm.horizontalAdvance(ln) for ln in lines), default=0)
+        block_x = cx - widest / 2.0
+        block_y = cy - total_h / 2.0
+
+        # Background rect drawn once (under all layers).
+        if style.background_color:
+            pad = max(0, int(style.background_padding))
+            radius = max(0, int(style.background_radius))
+            painter.setBrush(QColor(style.background_color))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.drawRoundedRect(
+                int(block_x - pad), int(block_y - pad),
+                int(widest + 2 * pad), int(total_h + 2 * pad),
+                radius, radius,
+            )
+
+        # Iterate layers back-to-front. Mono-color flag forces every
+        # layer to honor style.color (effectively collapsing the RGB
+        # split — useful when users want the glitch motion without
+        # the chromatic aberration).
+        mono = bool(getattr(self.clip.animation, "mono_color", False))
+        for layer in layers:
+            painter.save()
+            painter.setOpacity(max(0.0, min(1.0, layer.opacity)))
+            painter.translate(layer.offset_x, layer.offset_y)
+
+            if mono:
+                fill_color = style.color or "#FFFFFF"
+            else:
+                fill_color = layer.color_override or style.color or "#FFFFFF"
+
+            for i, ln in enumerate(lines):
+                ln_w = fm.horizontalAdvance(ln)
+                if style.alignment == "left":
+                    lx = block_x
+                elif style.alignment == "right":
+                    lx = block_x + (widest - ln_w)
+                else:
+                    lx = block_x + (widest - ln_w) / 2.0
+                ly = block_y + i * line_h + fm.ascent()
+
+                # Outline only on the topmost layer (last iteration)
+                # so the chromatic split stays visible underneath.
+                is_top = layer is layers[-1]
+                if is_top and style.outline_color and style.outline_width and style.outline_width > 0:
+                    path = QPainterPath()
+                    path.addText(lx, ly, font, ln)
+                    pen = QPen(QColor(style.outline_color))
+                    pen.setWidth(int(style.outline_width))
+                    pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+                    painter.setPen(pen)
+                    painter.setBrush(Qt.BrushStyle.NoBrush)
+                    painter.drawPath(path)
+
+                painter.setPen(QColor(fill_color))
+                painter.drawText(int(lx), int(ly), ln)
+
+            painter.restore()
+
+
+class _PreviewView(QScrollArea):
+    """Wraps a QGraphicsView; re-fits scene to view on resize."""
+
+    def __init__(self):
+        from PySide6.QtWidgets import QGraphicsView, QGraphicsScene
+        super().__init__()
+        self.setWidgetResizable(True)
+        self.setFrameShape(QScrollArea.Shape.NoFrame)
+
+        self._scene = QGraphicsScene(0, 0, 1920, 1080)
+        from PySide6.QtGui import QBrush
+        self._scene.setBackgroundBrush(QBrush(QColor("#000")))
+        self._gview = QGraphicsView(self._scene)
+        self._gview.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        self._gview.setRenderHint(QPainter.RenderHint.TextAntialiasing, True)
+        self._gview.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+        self._gview.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._gview.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._gview.setStyleSheet("QGraphicsView { background-color: #000; border: none; }")
+        self.setWidget(self._gview)
+
+    def add_item(self, item):
+        self._scene.addItem(item)
+
+    def fit(self):
+        self._gview.fitInView(self._scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.fit()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self.fit()
+
+
+class _FontPickerDelegate:
+    """Item delegate factory for the font list. Each row shows the
+    family name in the default UI font (so users can read the name
+    even when the font itself has no Latin glyphs), plus a sample
+    string rendered IN the actual font."""
+
+    SAMPLE_TEXT = "Aa Bb 한글 漢字 1234"
+    ROW_HEIGHT = 40
+
+    @classmethod
+    def install(cls, list_widget) -> None:
+        """Attach a QStyledItemDelegate on the given QListWidget."""
+        from PySide6.QtCore import QSize
+        from PySide6.QtWidgets import QStyledItemDelegate, QStyle
+
+        class _Delegate(QStyledItemDelegate):
+            def paint(self, painter, option, index):
+                painter.save()
+                family = index.data(Qt.ItemDataRole.DisplayRole) or ""
+                kind = index.data(Qt.ItemDataRole.UserRole) or "font"
+
+                # Background
+                if option.state & QStyle.StateFlag.State_Selected:
+                    painter.fillRect(option.rect, QColor(COLOR_ACCENT_BLUE))
+                    name_color = QColor(COLOR_TEXT_PRIMARY)
+                    sample_color = QColor(COLOR_TEXT_PRIMARY)
+                else:
+                    painter.fillRect(option.rect, QColor(COLOR_BG_L4))
+                    name_color = QColor(COLOR_TEXT_TERTIARY)
+                    sample_color = QColor(COLOR_TEXT_PRIMARY)
+
+                if kind == "header":
+                    # Section header (non-selectable)
+                    f = QFont()
+                    f.setBold(True)
+                    f.setPointSize(8)
+                    painter.setFont(f)
+                    painter.setPen(QColor(COLOR_TEXT_TERTIARY))
+                    painter.drawText(
+                        option.rect.adjusted(10, 0, -8, 0),
+                        Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+                        family,
+                    )
+                    painter.restore()
+                    return
+
+                # Top line: family name in the default UI font (small).
+                name_font = QFont()
+                name_font.setPointSize(8)
+                painter.setFont(name_font)
+                painter.setPen(name_color)
+                painter.drawText(
+                    option.rect.adjusted(10, 3, -8, 0),
+                    Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
+                    family,
+                )
+
+                # Bottom line: sample text rendered in this font.
+                sample_font = QFont(family, 12)
+                painter.setFont(sample_font)
+                painter.setPen(sample_color)
+                painter.drawText(
+                    option.rect.adjusted(10, 16, -8, -3),
+                    Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft,
+                    _FontPickerDelegate.SAMPLE_TEXT,
+                )
+                painter.restore()
+
+            def sizeHint(self, option, index):
+                kind = index.data(Qt.ItemDataRole.UserRole)
+                if kind == "header":
+                    return QSize(200, 22)
+                return QSize(200, _FontPickerDelegate.ROW_HEIGHT)
+
+        delegate = _Delegate(list_widget)
+        list_widget.setItemDelegate(delegate)
+        # Keep a reference so the delegate isn't GC'd when our caller
+        # returns — Qt only takes a weak handle.
+        list_widget._delegate_ref = delegate
+
+
+class _FontPickerButton(QWidget):
+    """Compact font picker: a button that shows the current family
+    rendered in its own typeface, plus a ▾ chevron. Clicking opens a
+    popup frame (anchored below the button) with a search field and
+    the same scrollable list used in the previous implementation.
+    Selection commits the change and closes the popup."""
+
+    font_changed = Signal(str)
+
+    PINNED_FONTS = (
+        "Pretendard",
+        "Noto Sans KR",
+        "Noto Serif KR",
+        "Nanum Myeongjo",
+        "Gaegu",
+        "Noto Sans JP",
+        "Noto Serif JP",
+        "Shippori Mincho",
+        "Arial",
+        "Segoe UI",
+        "Impact",
+    )
+
+    def __init__(self, current_family: str, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._family = current_family
+        self._popup: QWidget | None = None
+        self._list = None
+        self._search = None
+
+        h = QHBoxLayout(self)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(0)
+
+        self._btn = QPushButton()
+        self._btn.setObjectName("FontPickerBtn")
+        self._btn.setMinimumHeight(36)
+        self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn.clicked.connect(self._toggle_popup)
+        h.addWidget(self._btn, 1)
+
+        self._update_btn_label()
+
+    def current_family(self) -> str:
+        return self._family
+
+    def set_family(self, family: str) -> None:
+        if family != self._family:
+            self._family = family
+            self._update_btn_label()
+
+    def _update_btn_label(self) -> None:
+        f = QFont(self._family, 11)
+        self._btn.setFont(f)
+        self._btn.setStyleSheet(
+            f"QPushButton#FontPickerBtn {{ "
+            f"background-color: {COLOR_BG_L4}; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; "
+            f"padding: 6px 10px; text-align: left; }}"
+            f"QPushButton#FontPickerBtn:hover {{ border-color: #6a6a72; }}"
+        )
+        # Right-arrow chevron at the right edge.
+        self._btn.setText(f"{self._family}     ▾")
+
+    # ---- popup ----
+
+    def _toggle_popup(self) -> None:
+        if self._popup is not None and self._popup.isVisible():
+            self._popup.hide()
+            return
+        self._open_popup()
+
+    def _open_popup(self) -> None:
+        from PySide6.QtCore import QTimer
+        if self._popup is None:
+            self._build_popup()
+        # Position the popup just below the button, matching its width
+        # (with a sensible minimum so the list is usable).
+        global_pos = self._btn.mapToGlobal(QPoint(0, self._btn.height() + 2))
+        target_w = max(self._btn.width(), 320)
+        self._popup.resize(target_w, 380)
+        self._popup.move(global_pos)
+        self._search.clear()
+        self._popup.show()
+        self._popup.raise_()
+        self._search.setFocus()
+        QTimer.singleShot(0, self._scroll_to_current)
+
+    def _build_popup(self) -> None:
+        from PySide6.QtWidgets import QFrame, QLineEdit, QListWidget, QListWidgetItem
+        from PySide6.QtGui import QFontDatabase
+
+        # WindowType.Popup makes the frame auto-dismiss on outside
+        # clicks and not steal focus from its parent dialog.
+        self._popup = QFrame(self, Qt.WindowType.Popup)
+        self._popup.setObjectName("FontPickerPopup")
+        self._popup.setStyleSheet(
+            f"QFrame#FontPickerPopup {{ background-color: {COLOR_BG_L3}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; }}"
+        )
+        v = QVBoxLayout(self._popup)
+        v.setContentsMargins(6, 6, 6, 6)
+        v.setSpacing(6)
+
+        self._search = QLineEdit()
+        self._search.setPlaceholderText(tr("veditor.typo_editor.font_search"))
+        self._search.setStyleSheet(
+            f"QLineEdit {{ padding: 4px 8px; font-size: 11px; "
+            f"background-color: {COLOR_BG_L4}; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; }}"
+        )
+        self._search.textChanged.connect(self._filter)
+        v.addWidget(self._search)
+
+        self._list = QListWidget()
+        self._list.setStyleSheet(
+            f"QListWidget {{ background-color: {COLOR_BG_L4}; "
+            f"color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; }}"
+        )
+        _FontPickerDelegate.install(self._list)
+        v.addWidget(self._list, 1)
+
+        # Populate
+        available = set(QFontDatabase.families())
+        used: set[str] = set()
+        pinned = [f for f in self.PINNED_FONTS if f in available]
+        if pinned:
+            hdr = QListWidgetItem(tr("veditor.typo_editor.font_recommended"))
+            hdr.setData(Qt.ItemDataRole.UserRole, "header")
+            hdr.setFlags(Qt.ItemFlag.NoItemFlags)
+            self._list.addItem(hdr)
+            for fam in pinned:
+                used.add(fam)
+                it = QListWidgetItem(fam)
+                self._list.addItem(it)
+                if fam == self._family:
+                    self._list.setCurrentItem(it)
+        all_hdr = QListWidgetItem(tr("veditor.typo_editor.font_all"))
+        all_hdr.setData(Qt.ItemDataRole.UserRole, "header")
+        all_hdr.setFlags(Qt.ItemFlag.NoItemFlags)
+        self._list.addItem(all_hdr)
+        for fam in sorted(available):
+            if fam in used:
+                continue
+            it = QListWidgetItem(fam)
+            self._list.addItem(it)
+            if fam == self._family:
+                self._list.setCurrentItem(it)
+
+        self._list.itemClicked.connect(self._on_item_clicked)
+        self._list.itemActivated.connect(self._on_item_clicked)
+
+    def _on_item_clicked(self, item) -> None:
+        if item is None:
+            return
+        if item.data(Qt.ItemDataRole.UserRole) == "header":
+            return
+        self._family = item.text()
+        self._update_btn_label()
+        if self._popup is not None:
+            self._popup.hide()
+        self.font_changed.emit(self._family)
+
+    def _filter(self, text: str) -> None:
+        needle = text.lower().strip()
+        for i in range(self._list.count()):
+            it = self._list.item(i)
+            kind = it.data(Qt.ItemDataRole.UserRole)
+            if kind == "header":
+                it.setHidden(bool(needle))
+                continue
+            it.setHidden(bool(needle) and needle not in it.text().lower())
+
+    def _scroll_to_current(self) -> None:
+        if self._list is None:
+            return
+        cur = self._list.currentItem()
+        if cur is not None:
+            self._list.scrollToItem(
+                cur, self._list.ScrollHint.PositionAtCenter,
+            )
+
+
+class _ColorWheelWidget(QWidget):
+    """DaVinci-style chromaticity wheel with a draggable indicator.
+
+    Emits ``value_changed(x, y)`` in ``-100..100`` while dragging.
+    Axis convention matches :func:`app.color_grading._wheel_to_rgb_offset`:
+
+        +x → red / orange (warm)        -x → cyan / blue  (cool)
+        +y → magenta                    -y → green
+
+    Visual treatment: smooth 12-stop conical hue ring with a subtle
+    outer glow, a feathered radial centre fade for the neutral zone,
+    two faint guide rings at 50 % and 100 % saturation, a crosshair,
+    and a high-contrast white indicator with an inner colour dot.
+    Bottom label sits directly under the wheel, with the live ``x, y``
+    readout in a small chip just above the label.
+    """
+
+    value_changed = Signal(int, int)
+
+    SIZE = 96               # widget side length (px) — tighter than v1
+    LABEL_H = 16
+    READOUT_H = 13
+    INDICATOR_R = 6
+
+    def __init__(self, label: str = "", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._label = label
+        self._x = 0           # -100..100
+        self._y = 0
+        self._dragging = False
+        # Total height = wheel + readout + label + small gaps.
+        self.setFixedSize(self.SIZE, self.SIZE + self.READOUT_H + self.LABEL_H + 4)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CursorShape.CrossCursor)
+
+    def value(self) -> tuple[int, int]:
+        return self._x, self._y
+
+    def set_value(self, x: int, y: int, *, emit: bool = True) -> None:
+        x = max(-100, min(100, int(x)))
+        y = max(-100, min(100, int(y)))
+        if x == self._x and y == self._y:
+            return
+        self._x = x
+        self._y = y
+        self.update()
+        if emit:
+            self.value_changed.emit(self._x, self._y)
+
+    # ---- geometry helpers ----
+
+    def _wheel_rect(self) -> QRect:
+        # Leave room at the bottom for readout + label.
+        return QRect(3, 3, self.SIZE - 6, self.SIZE - 6)
+
+    def _wheel_center(self) -> QPoint:
+        r = self._wheel_rect()
+        return QPoint(r.left() + r.width() // 2,
+                      r.top() + r.height() // 2)
+
+    def _wheel_radius(self) -> float:
+        r = self._wheel_rect()
+        return min(r.width(), r.height()) / 2.0 - 2.0
+
+    def _value_to_pos(self) -> QPoint:
+        c = self._wheel_center()
+        rad = self._wheel_radius()
+        x = c.x() + self._x / 100.0 * rad
+        y = c.y() + self._y / 100.0 * rad
+        return QPoint(int(x), int(y))
+
+    def _pos_to_value(self, p: QPoint) -> tuple[int, int]:
+        c = self._wheel_center()
+        rad = self._wheel_radius()
+        if rad <= 0:
+            return 0, 0
+        dx = (p.x() - c.x()) / rad
+        dy = (p.y() - c.y()) / rad
+        import math
+        d = math.hypot(dx, dy)
+        if d > 1.0:
+            dx /= d
+            dy /= d
+        x = int(round(max(-1.0, min(1.0, dx)) * 100))
+        y = int(round(max(-1.0, min(1.0, dy)) * 100))
+        return x, y
+
+    # ---- mouse ----
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._dragging = True
+            x, y = self._pos_to_value(event.pos())
+            self.set_value(x, y)
+        elif event.button() == Qt.MouseButton.RightButton:
+            self.set_value(0, 0)
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._dragging:
+            x, y = self._pos_to_value(event.pos())
+            self.set_value(x, y)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._dragging = False
+
+    def mouseDoubleClickEvent(self, _event) -> None:
+        self.set_value(0, 0)
+
+    # ---- painting ----
+
+    def paintEvent(self, _event) -> None:
+        from PySide6.QtGui import QConicalGradient, QRadialGradient
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        wheel = self._wheel_rect()
+        cx = wheel.center().x()
+        cy = wheel.center().y()
+        rad = self._wheel_radius()
+
+        # ---- subtle outer glow (drawn first, behind everything) ----
+        glow = QRadialGradient(QPoint(cx, cy), rad + 6)
+        glow.setColorAt(0.85, QColor(0, 0, 0, 0))
+        glow.setColorAt(1.00, QColor(0, 0, 0, 90))
+        painter.setBrush(glow)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(QPoint(cx, cy), int(rad + 5), int(rad + 5))
+
+        # ---- conical hue ring ----
+        # QConicalGradient progresses counter-clockwise from the 3 o'clock
+        # position. To match the value convention (+x=warm red,
+        # -y=green at the screen top, -x=cyan, +y=magenta at the screen
+        # bottom), place red at t=0, green at t=0.25, cyan at 0.5,
+        # magenta at 0.75.
+        grad = QConicalGradient(QPoint(cx, cy), 0.0)
+        stops = [
+            (0.000, (245,  70,  70)),    # red       — 3 o'clock, +x
+            (0.083, (245, 150,  60)),    # orange
+            (0.166, (235, 210,  60)),    # yellow
+            (0.250, (110, 220,  70)),    # GREEN     — 12 o'clock, -y
+            (0.333, ( 60, 220, 140)),    # green-cyan
+            (0.416, ( 50, 210, 200)),    # cyan-green
+            (0.500, ( 60, 180, 220)),    # CYAN      — 9 o'clock, -x
+            (0.583, ( 80, 140, 235)),    # blue
+            (0.666, (130, 100, 235)),    # blue-violet
+            (0.750, (235,  90, 200)),    # MAGENTA   — 6 o'clock, +y
+            (0.833, (240, 100, 150)),    # pink
+            (0.916, (245,  90, 110)),    # warm pink
+            (1.000, (245,  70,  70)),
+        ]
+        for stop, (r, g, b) in stops:
+            grad.setColorAt(stop, QColor(r, g, b))
+        painter.setBrush(grad)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawEllipse(wheel)
+
+        # ---- feathered radial fade toward neutral grey at centre ----
+        # Two-stop fade gives the wheel that "punched" centre look
+        # without obliterating chromatic information at the edge.
+        radial = QRadialGradient(QPoint(cx, cy), rad)
+        radial.setColorAt(0.00, QColor(232, 232, 234, 245))
+        radial.setColorAt(0.35, QColor(232, 232, 234, 130))
+        radial.setColorAt(0.65, QColor(232, 232, 234, 0))
+        painter.setBrush(radial)
+        painter.drawEllipse(wheel)
+
+        # ---- guide rings at 50% and 100% saturation ----
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor(255, 255, 255, 60), 1))
+        painter.drawEllipse(QPoint(cx, cy), int(rad * 0.5), int(rad * 0.5))
+        # 100% ring (rim) — slightly darker to read as the boundary.
+        painter.setPen(QPen(QColor(0, 0, 0, 130), 1))
+        painter.drawEllipse(wheel)
+
+        # ---- crosshair ----
+        painter.setPen(QPen(QColor(255, 255, 255, 60), 1))
+        painter.drawLine(cx - 4, cy, cx + 4, cy)
+        painter.drawLine(cx, cy - 4, cx, cy + 4)
+
+        # ---- indicator ----
+        # White ring + coloured inner dot. The dot's hue matches the
+        # current (x, y) direction so the user can see "what colour
+        # am I pulling toward". Saturation = distance from centre.
+        ind = self._value_to_pos()
+        # Outer ring (with subtle drop shadow).
+        painter.setPen(QPen(QColor(0, 0, 0, 110), 1))
+        painter.setBrush(QColor(255, 255, 255))
+        painter.drawEllipse(ind, self.INDICATOR_R, self.INDICATOR_R)
+        # Inner coloured dot — sample the wheel colour at this position.
+        inner_color = self._sample_wheel_color()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(inner_color)
+        painter.drawEllipse(ind, self.INDICATOR_R - 3, self.INDICATOR_R - 3)
+
+        # ---- numeric readout ----
+        readout_text = f"{self._x:+d}, {self._y:+d}"
+        painter.setPen(QPen(QColor("#9CA0AC")))
+        f = QFont(painter.font())
+        f.setPointSize(8)
+        painter.setFont(f)
+        painter.drawText(
+            QRect(0, self.SIZE - 3, self.width(), self.READOUT_H),
+            Qt.AlignmentFlag.AlignCenter,
+            readout_text,
+        )
+
+        # ---- bottom label ----
+        painter.setPen(QPen(QColor("#D6D6DC")))
+        f.setPointSize(9)
+        f.setBold(True)
+        painter.setFont(f)
+        painter.drawText(
+            QRect(0, self.SIZE + self.READOUT_H, self.width(), self.LABEL_H),
+            Qt.AlignmentFlag.AlignCenter,
+            self._label,
+        )
+
+    def _sample_wheel_color(self) -> QColor:
+        """Approximate the wheel hue at the current (x, y). Used as the
+        indicator's inner-dot colour so the user gets visual feedback
+        on which way they're pulling. Uses the same 13-stop hue ring
+        the gradient paints, with the screen-Y flip baked into the
+        atan2 → t conversion (Qt's CCW gradient on a Y-down canvas)."""
+        import math
+        if self._x == 0 and self._y == 0:
+            return QColor(220, 220, 220)
+        # Negate the angle: Qt paints the gradient CCW visually, so a
+        # point with screen-Y = +y_data lands further around the wheel
+        # in the "going CW visually" direction. The negation aligns the
+        # sampled colour with the painted gradient.
+        ang = math.atan2(self._y, self._x)
+        t = (-ang / (2 * math.pi)) % 1.0
+        stops = [
+            (0.000, (245,  70,  70)),
+            (0.083, (245, 150,  60)),
+            (0.166, (235, 210,  60)),
+            (0.250, (110, 220,  70)),
+            (0.333, ( 60, 220, 140)),
+            (0.416, ( 50, 210, 200)),
+            (0.500, ( 60, 180, 220)),
+            (0.583, ( 80, 140, 235)),
+            (0.666, (130, 100, 235)),
+            (0.750, (235,  90, 200)),
+            (0.833, (240, 100, 150)),
+            (0.916, (245,  90, 110)),
+            (1.000, (245,  70,  70)),
+        ]
+        for i in range(len(stops) - 1):
+            a, ca = stops[i]
+            b, cb = stops[i + 1]
+            if a <= t <= b:
+                u = (t - a) / max(1e-6, b - a)
+                r = int(ca[0] + (cb[0] - ca[0]) * u)
+                g = int(ca[1] + (cb[1] - ca[1]) * u)
+                bl = int(ca[2] + (cb[2] - ca[2]) * u)
+                # Saturation = distance from centre.
+                d = min(1.0, math.hypot(self._x, self._y) / 100.0)
+                rr = int(220 + (r - 220) * d)
+                gg = int(220 + (g - 220) * d)
+                bb = int(220 + (bl - 220) * d)
+                return QColor(rr, gg, bb)
+        return QColor(220, 220, 220)
+
+
+class _AnimationPickerButton(QWidget):
+    """Compact animation picker — button shows the current animation's
+    name + icon, click opens a popup with category tabs and a 3-column
+    tile grid. Scales for the 50+ presets coming in Phase 4."""
+
+    animation_changed = Signal(str)        # animation id
+
+    CATEGORIES = ("basic", "kinetic", "folding", "hold")     # extended in Phase 4
+
+    def __init__(self, current_id: str, direction: str,
+                 parent: QWidget | None = None,
+                 extras_mode: bool = False) -> None:
+        super().__init__(parent)
+        self._direction = direction        # "in" / "out" / "hold"
+        self._current_id = current_id
+        self._popup: QWidget | None = None
+        # In extras mode the button never reflects the picked animation
+        # — it stays as a "+ Add modifier" trigger and emits the signal
+        # so the parent can append to its extras list.
+        self._extras_mode = bool(extras_mode)
+
+        h = QHBoxLayout(self)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(0)
+
+        self._btn = QPushButton()
+        self._btn.setObjectName("AnimPickerBtn")
+        self._btn.setMinimumHeight(36)
+        self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn.clicked.connect(self._toggle_popup)
+        h.addWidget(self._btn, 1)
+
+        self._update_btn_label()
+
+    def current_id(self) -> str:
+        return self._current_id
+
+    def set_current(self, anim_id: str) -> None:
+        if anim_id != self._current_id:
+            self._current_id = anim_id
+            self._update_btn_label()
+
+    def _update_btn_label(self) -> None:
+        if self._extras_mode:
+            self._btn.setText("  ＋  " + tr("veditor.typo_editor.modifier.add"))
+            self._btn.setMinimumHeight(28)
+            self._btn.setStyleSheet(
+                f"QPushButton#AnimPickerBtn {{ "
+                f"background-color: transparent; color: {COLOR_TEXT_TERTIARY}; "
+                f"border: 1px dashed {COLOR_BORDER_DEFAULT}; border-radius: 4px; "
+                f"padding: 4px 10px; text-align: left; font-size: 11px; }}"
+                f"QPushButton#AnimPickerBtn:hover {{ "
+                f"border-color: #6a6a72; color: {COLOR_TEXT_PRIMARY}; }}"
+            )
+            return
+        from app.typo_animations import get_animation
+        anim = get_animation(self._current_id)
+        name = tr(anim.name_key)
+        self._btn.setText(f" {anim.icon}   {name}     ▾")
+        self._btn.setStyleSheet(
+            f"QPushButton#AnimPickerBtn {{ "
+            f"background-color: {COLOR_BG_L4}; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; "
+            f"padding: 6px 10px; text-align: left; font-size: 12px; }}"
+            f"QPushButton#AnimPickerBtn:hover {{ border-color: #6a6a72; }}"
+        )
+
+    # ---- popup ----
+
+    def _toggle_popup(self) -> None:
+        if self._popup is not None and self._popup.isVisible():
+            self._popup.hide()
+            return
+        self._open_popup()
+
+    def _open_popup(self) -> None:
+        if self._popup is None:
+            self._build_popup()
+        global_pos = self._btn.mapToGlobal(QPoint(0, self._btn.height() + 2))
+        target_w = max(self._btn.width(), 460)
+        self._popup.resize(target_w, 360)
+        self._popup.move(global_pos)
+        self._search.clear()
+        self._popup.show()
+        self._popup.raise_()
+        self._search.setFocus()
+
+    def _build_popup(self) -> None:
+        from PySide6.QtWidgets import (
+            QFrame, QLineEdit, QTabWidget, QScrollArea, QGridLayout,
+        )
+        from app.typo_animations import REGISTRY
+
+        self._popup = QFrame(self, Qt.WindowType.Popup)
+        self._popup.setObjectName("AnimPickerPopup")
+        self._popup.setStyleSheet(
+            f"QFrame#AnimPickerPopup {{ background-color: {COLOR_BG_L3}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; }}"
+        )
+        v = QVBoxLayout(self._popup)
+        v.setContentsMargins(8, 8, 8, 8)
+        v.setSpacing(6)
+
+        self._search = QLineEdit()
+        self._search.setPlaceholderText(tr("veditor.typo_editor.anim_search"))
+        self._search.setStyleSheet(
+            f"QLineEdit {{ padding: 4px 8px; font-size: 11px; "
+            f"background-color: {COLOR_BG_L4}; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; }}"
+        )
+        self._search.textChanged.connect(self._filter)
+        v.addWidget(self._search)
+
+        self._tabs = QTabWidget()
+        self._tabs.setStyleSheet(
+            f"QTabWidget::pane {{ border: 1px solid {COLOR_BORDER_DEFAULT}; "
+            f"border-radius: 4px; top: -1px; }}"
+            f"QTabBar::tab {{ background: {COLOR_BG_L4}; color: {COLOR_TEXT_SECONDARY}; "
+            f"padding: 6px 12px; border: 1px solid {COLOR_BORDER_DEFAULT}; "
+            f"border-bottom: none; border-top-left-radius: 4px; "
+            f"border-top-right-radius: 4px; margin-right: 2px; }}"
+            f"QTabBar::tab:selected {{ background: {COLOR_BG_L3}; color: {COLOR_TEXT_PRIMARY}; }}"
+        )
+        v.addWidget(self._tabs, 1)
+
+        # All-tab + per-category tabs
+        self._tile_buttons: list = []  # references to keep them alive
+        # "All" tab first — flat grid
+        self._add_tab(
+            tr("veditor.typo_editor.anim_cat.all"),
+            [a for a in REGISTRY.values()
+             if a.direction in (self._direction, "any")],
+        )
+        for cat in self.CATEGORIES:
+            anims = [
+                a for a in REGISTRY.values()
+                if a.category == cat
+                and a.direction in (self._direction, "any")
+            ]
+            if anims:
+                self._add_tab(tr(f"veditor.typo_editor.anim_cat.{cat}"), anims)
+
+    def _add_tab(self, label: str, anims: list) -> None:
+        from PySide6.QtWidgets import (
+            QScrollArea, QGridLayout,
+        )
+        page = QWidget()
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        outer.addWidget(scroll)
+
+        grid_host = QWidget()
+        grid = QGridLayout(grid_host)
+        grid.setContentsMargins(8, 8, 8, 8)
+        grid.setSpacing(6)
+        scroll.setWidget(grid_host)
+
+        cols = 3
+        for idx, anim in enumerate(anims):
+            tile = self._make_tile(anim)
+            grid.addWidget(tile, idx // cols, idx % cols)
+            self._tile_buttons.append(tile)
+        # Spacer at bottom
+        grid.setRowStretch(grid.rowCount(), 1)
+
+        self._tabs.addTab(page, label)
+
+    def _make_tile(self, anim) -> QWidget:
+        """One animation tile in the grid: bordered box with icon at
+        top + name at bottom. Click selects + closes the popup."""
+        tile = QPushButton()
+        tile.setProperty("anim_id", anim.id)
+        tile.setProperty("anim_search", f"{tr(anim.name_key)} {anim.id}")
+        tile.setCursor(Qt.CursorShape.PointingHandCursor)
+        tile.setMinimumSize(130, 80)
+        tile.setMaximumHeight(96)
+        is_current = anim.id == self._current_id
+        tile.setStyleSheet(
+            f"QPushButton {{ "
+            f"background-color: {COLOR_BG_L4}; "
+            f"color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 2px solid "
+            f"{COLOR_ACCENT_BLUE if is_current else COLOR_BORDER_DEFAULT}; "
+            f"border-radius: 6px; padding: 6px; }}"
+            f"QPushButton:hover {{ border-color: #6a6a72; "
+            f"background-color: #34343c; }}"
+        )
+        layout = QVBoxLayout(tile)
+        layout.setContentsMargins(4, 4, 4, 4)
+        layout.setSpacing(2)
+        icon = QLabel(anim.icon)
+        icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        icon.setStyleSheet(
+            f"color: {COLOR_TEXT_PRIMARY}; font-size: 28px; background: transparent; "
+            f"border: none;"
+        )
+        layout.addWidget(icon, 1)
+        name = QLabel(tr(anim.name_key))
+        name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        name.setWordWrap(True)
+        name.setStyleSheet(
+            f"color: {COLOR_TEXT_SECONDARY}; font-size: 10px; "
+            f"font-weight: 600; background: transparent; border: none;"
+        )
+        layout.addWidget(name, 0)
+
+        tile.clicked.connect(lambda _c=False, aid=anim.id: self._select(aid))
+        return tile
+
+    def _select(self, anim_id: str) -> None:
+        if not self._extras_mode:
+            self._current_id = anim_id
+            self._update_btn_label()
+        if self._popup is not None:
+            self._popup.hide()
+        self.animation_changed.emit(anim_id)
+
+    def _filter(self, text: str) -> None:
+        """Hide tiles whose name or id doesn't contain ``text``."""
+        needle = text.lower().strip()
+        for tile in self._tile_buttons:
+            haystack = (tile.property("anim_search") or "").lower()
+            tile.setVisible(not needle or needle in haystack)
+
+
+class _PresetPickerButton(QWidget):
+    """Top-of-dialog preset picker. Click → popup with category tabs +
+    tile grid. Selecting a preset emits ``preset_applied(preset_id)``,
+    which the dialog uses to overwrite animation + style fields and
+    rebuild the editor controls."""
+
+    preset_applied = Signal(str)
+
+    CATEGORIES = ("kinetic", "utaite", "korean", "devila")
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._popup: QWidget | None = None
+        self._tile_buttons: list = []
+
+        h = QHBoxLayout(self)
+        h.setContentsMargins(0, 0, 0, 0)
+        h.setSpacing(0)
+
+        self._btn = QPushButton(tr("veditor.typo_editor.preset_btn"))
+        self._btn.setObjectName("PresetPickerBtn")
+        self._btn.setMinimumHeight(34)
+        self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._btn.setStyleSheet(
+            f"QPushButton#PresetPickerBtn {{ "
+            f"background-color: #6a3cb5; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: none; border-radius: 4px; "
+            f"padding: 6px 14px; font-weight: 700; font-size: 12px; }}"
+            f"QPushButton#PresetPickerBtn:hover {{ background-color: #7b4ac9; }}"
+        )
+        self._btn.clicked.connect(self._toggle_popup)
+        h.addWidget(self._btn, 1)
+
+    def _toggle_popup(self) -> None:
+        if self._popup is not None and self._popup.isVisible():
+            self._popup.hide()
+            return
+        self._open_popup()
+
+    def _open_popup(self) -> None:
+        if self._popup is None:
+            self._build_popup()
+        global_pos = self._btn.mapToGlobal(QPoint(0, self._btn.height() + 2))
+        target_w = max(self._btn.width(), 520)
+        self._popup.resize(target_w, 380)
+        self._popup.move(global_pos)
+        self._search.clear()
+        self._popup.show()
+        self._popup.raise_()
+        self._search.setFocus()
+
+    def _build_popup(self) -> None:
+        from PySide6.QtWidgets import (
+            QFrame, QLineEdit, QTabWidget, QScrollArea, QGridLayout,
+        )
+        from app.typo_presets import list_presets
+
+        self._popup = QFrame(self, Qt.WindowType.Popup)
+        self._popup.setObjectName("PresetPickerPopup")
+        self._popup.setStyleSheet(
+            f"QFrame#PresetPickerPopup {{ background-color: {COLOR_BG_L3}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; }}"
+        )
+        v = QVBoxLayout(self._popup)
+        v.setContentsMargins(8, 8, 8, 8)
+        v.setSpacing(6)
+
+        self._search = QLineEdit()
+        self._search.setPlaceholderText(tr("veditor.typo_editor.preset_search"))
+        self._search.setStyleSheet(
+            f"QLineEdit {{ padding: 4px 8px; font-size: 11px; "
+            f"background-color: {COLOR_BG_L4}; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; }}"
+        )
+        self._search.textChanged.connect(self._filter)
+        v.addWidget(self._search)
+
+        self._tabs = QTabWidget()
+        self._tabs.setStyleSheet(
+            f"QTabWidget::pane {{ border: 1px solid {COLOR_BORDER_DEFAULT}; "
+            f"border-radius: 4px; top: -1px; }}"
+            f"QTabBar::tab {{ background: {COLOR_BG_L4}; color: {COLOR_TEXT_SECONDARY}; "
+            f"padding: 6px 12px; border: 1px solid {COLOR_BORDER_DEFAULT}; "
+            f"border-bottom: none; border-top-left-radius: 4px; "
+            f"border-top-right-radius: 4px; margin-right: 2px; }}"
+            f"QTabBar::tab:selected {{ background: {COLOR_BG_L3}; color: {COLOR_TEXT_PRIMARY}; }}"
+        )
+        v.addWidget(self._tabs, 1)
+
+        # All tab + per-category
+        self._add_tab(tr("veditor.typo_editor.preset_cat.all"), list_presets())
+        for cat in self.CATEGORIES:
+            anims = list_presets(cat)
+            if anims:
+                self._add_tab(tr(f"veditor.typo_editor.preset_cat.{cat}"), anims)
+
+    def _add_tab(self, label: str, presets: list) -> None:
+        from PySide6.QtWidgets import QScrollArea, QGridLayout
+
+        page = QWidget()
+        outer = QVBoxLayout(page)
+        outer.setContentsMargins(0, 0, 0, 0)
+        outer.setSpacing(0)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        outer.addWidget(scroll)
+
+        grid_host = QWidget()
+        grid = QGridLayout(grid_host)
+        grid.setContentsMargins(8, 8, 8, 8)
+        grid.setSpacing(6)
+        scroll.setWidget(grid_host)
+
+        cols = 3
+        for idx, preset in enumerate(presets):
+            tile = self._make_tile(preset)
+            grid.addWidget(tile, idx // cols, idx % cols)
+            self._tile_buttons.append(tile)
+        grid.setRowStretch(grid.rowCount(), 1)
+        self._tabs.addTab(page, label)
+
+    def _make_tile(self, preset) -> QWidget:
+        tile = QPushButton()
+        # Search payload: name + reference + id
+        tile.setProperty("preset_id", preset.id)
+        search_blob = f"{tr(preset.name_key)} {preset.reference_artist} {preset.id}"
+        tile.setProperty("preset_search", search_blob)
+        tile.setCursor(Qt.CursorShape.PointingHandCursor)
+        tile.setMinimumSize(150, 92)
+        tile.setMaximumHeight(110)
+        tile.setStyleSheet(
+            f"QPushButton {{ "
+            f"background-color: {COLOR_BG_L4}; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 2px solid {COLOR_BORDER_DEFAULT}; border-radius: 6px; "
+            f"padding: 6px; text-align: left; }}"
+            f"QPushButton:hover {{ border-color: #6a3cb5; "
+            f"background-color: #34343c; }}"
+        )
+
+        layout = QVBoxLayout(tile)
+        layout.setContentsMargins(6, 4, 6, 4)
+        layout.setSpacing(2)
+
+        # Top: icon + name on one line
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(6)
+        icon = QLabel(preset.icon)
+        icon.setStyleSheet("font-size: 22px; background: transparent; border: none;")
+        top.addWidget(icon)
+        name = QLabel(tr(preset.name_key))
+        name.setStyleSheet(
+            f"color: {COLOR_TEXT_PRIMARY}; font-size: 12px; font-weight: 700; "
+            f"background: transparent; border: none;"
+        )
+        name.setWordWrap(True)
+        top.addWidget(name, 1)
+        layout.addLayout(top)
+
+        # Bottom: reference artist (if any)
+        if preset.reference_artist:
+            ref = QLabel(f"— {preset.reference_artist}")
+            ref.setStyleSheet(
+                f"color: {COLOR_TEXT_TERTIARY}; font-size: 10px; "
+                f"background: transparent; border: none;"
+            )
+            layout.addWidget(ref)
+
+        layout.addStretch(1)
+        tile.clicked.connect(lambda _c=False, pid=preset.id: self._select(pid))
+        return tile
+
+    def _select(self, preset_id: str) -> None:
+        if self._popup is not None:
+            self._popup.hide()
+        self.preset_applied.emit(preset_id)
+
+    def _filter(self, text: str) -> None:
+        needle = text.lower().strip()
+        for tile in self._tile_buttons:
+            haystack = (tile.property("preset_search") or "").lower()
+            tile.setVisible(not needle or needle in haystack)
+
+
+class TypographyEditorDialog(QDialog):
+    """Phase 2 typography editor — 3-pane (text / animation placeholder
+    / style) modal with a real-time preview at the top.
+
+    Edits mutate the clip in-place so the underlying preview updates
+    live; Cancel restores from a snapshot taken at open time."""
+
+    WEIGHT_PRESETS = [
+        ("thin", 200),
+        ("regular", 400),
+        ("bold", 700),
+        ("black", 900),
+    ]
+
+    ALIGN_OPTIONS = ("left", "center", "right")
+
+    def __init__(self, clip: TextClip, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._clip = clip
+        self._snapshot = self._snapshot_clip()
+        self._suppress_signals = False
+
+        # Capture the parent editor's current preview frame for the
+        # video-background option. Copy so subsequent player frames
+        # don't mutate it under us.
+        self._video_bg_pixmap: QPixmap | None = None
+        if parent is not None:
+            pm = getattr(parent, "_preview_pixmap", None)
+            if pm is not None and not pm.isNull():
+                self._video_bg_pixmap = QPixmap(pm)
+        self._show_video_bg: bool = self._video_bg_pixmap is not None
+
+        title = clip.text[:30] or "—"
+        self.setWindowTitle(tr("veditor.typo_editor.title", name=title))
+        self.setModal(True)
+        self.resize(1200, 800)
+        self.setStyleSheet(
+            f"QDialog {{ background-color: {COLOR_BG_L3}; color: {COLOR_TEXT_PRIMARY}; }}"
+            f"QLabel {{ color: {COLOR_TEXT_SECONDARY}; }}"
+            f"QGroupBox {{ color: {COLOR_TEXT_PRIMARY}; font-weight: 700; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; "
+            f"margin-top: 10px; padding-top: 10px; }}"
+            f"QGroupBox::title {{ subcontrol-origin: margin; "
+            f"subcontrol-position: top left; left: 10px; padding: 0 4px; }}"
+        )
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 10, 12, 12)
+        root.setSpacing(8)
+
+        # ---- Preview ----
+        self._preview_view = _PreviewView()
+        self._preview_view.setMinimumHeight(280)
+        self._preview_item = _TextPreviewItem(
+            clip,
+            bg_provider=self._current_bg,
+            time_provider=self._current_play_time,
+        )
+        self._preview_view.add_item(self._preview_item.graphics_item())
+        root.addWidget(self._preview_view, stretch=2)
+
+        # Playback state for animation preview.
+        self._play_time_s: float = 0.0
+        self._is_playing: bool = False
+        from PySide6.QtCore import QTimer
+        self._play_timer = QTimer(self)
+        self._play_timer.setInterval(33)         # ~30 fps; smooth enough
+        self._play_timer.timeout.connect(self._on_play_tick)
+
+        # Preview controls row: Play / Reset + Video-background toggle
+        from PySide6.QtWidgets import QCheckBox
+        ctrl_row = QHBoxLayout()
+        ctrl_row.setContentsMargins(0, 0, 0, 0)
+        ctrl_row.setSpacing(6)
+
+        self._play_btn = QPushButton("▶")
+        self._play_btn.setObjectName("ToolButton")
+        self._play_btn.setFixedWidth(40)
+        self._play_btn.setToolTip(tr("veditor.typo_editor.preview_play"))
+        self._play_btn.clicked.connect(self._toggle_preview_play)
+        ctrl_row.addWidget(self._play_btn)
+
+        self._reset_btn = QPushButton("⟲")
+        self._reset_btn.setObjectName("ToolButton")
+        self._reset_btn.setFixedWidth(40)
+        self._reset_btn.setToolTip(tr("veditor.typo_editor.preview_reset"))
+        self._reset_btn.clicked.connect(self._reset_preview)
+        ctrl_row.addWidget(self._reset_btn)
+
+        self._play_label = QLabel(self._format_play_label())
+        self._play_label.setStyleSheet(
+            f"color: {COLOR_TEXT_TERTIARY}; font-size: 10px; "
+            f"font-family: Consolas, monospace;"
+        )
+        ctrl_row.addWidget(self._play_label)
+
+        ctrl_row.addStretch(1)
+
+        self._video_bg_check = QCheckBox(tr("veditor.typo_editor.show_video_bg"))
+        self._video_bg_check.setChecked(self._show_video_bg)
+        self._video_bg_check.setEnabled(self._video_bg_pixmap is not None)
+        if self._video_bg_pixmap is None:
+            self._video_bg_check.setToolTip(
+                tr("veditor.typo_editor.show_video_bg.unavailable")
+            )
+        self._video_bg_check.toggled.connect(self._on_video_bg_toggle)
+        ctrl_row.addWidget(self._video_bg_check)
+
+        root.addLayout(ctrl_row)
+
+        # ---- Preset picker (single full-width purple button) ----
+        self._preset_picker = _PresetPickerButton()
+        self._preset_picker.preset_applied.connect(self._on_preset_picked)
+        root.addWidget(self._preset_picker)
+
+        # ---- 3 panes ----
+        panes = QHBoxLayout()
+        panes.setSpacing(10)
+        panes.addWidget(self._build_text_pane(), stretch=1)
+        panes.addWidget(self._build_animation_pane(), stretch=1)
+        panes.addWidget(self._build_style_pane(), stretch=2)
+        self._panes_layout = panes        # kept for preset-apply rebuild
+        root.addLayout(panes, stretch=3)
+
+        # ---- Buttons ----
+        from PySide6.QtWidgets import QDialogButtonBox
+        bb = QDialogButtonBox()
+        save_btn = bb.addButton(
+            tr("veditor.typo_editor.save_template"),
+            QDialogButtonBox.ButtonRole.ActionRole,
+        )
+        save_btn.setEnabled(False)  # Phase 4: preset system
+        save_btn.setToolTip(tr("veditor.typo_editor.save_template.tooltip"))
+        cancel_btn = bb.addButton(
+            tr("veditor.typo_editor.cancel"),
+            QDialogButtonBox.ButtonRole.RejectRole,
+        )
+        apply_btn = bb.addButton(
+            tr("veditor.typo_editor.apply"),
+            QDialogButtonBox.ButtonRole.AcceptRole,
+        )
+        apply_btn.setDefault(True)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self._on_cancel)
+        root.addWidget(bb)
+
+    # ---- snapshot / cancel ----
+
+    def _snapshot_clip(self) -> dict:
+        import copy
+        return {
+            "text": self._clip.text,
+            "style": copy.deepcopy(self._clip.style),
+            "in_duration": self._clip.animation.in_duration,
+            "out_duration": self._clip.animation.out_duration,
+            "in_animation": self._clip.animation.in_animation,
+            "out_animation": self._clip.animation.out_animation,
+            "hold_animation": getattr(self._clip.animation, "hold_animation", "none"),
+            "in_extras": list(getattr(self._clip.animation, "in_extras", []) or []),
+            "out_extras": list(getattr(self._clip.animation, "out_extras", []) or []),
+            "hold_extras": list(getattr(self._clip.animation, "hold_extras", []) or []),
+            "in_intensity": self._clip.animation.in_intensity,
+            "out_intensity": self._clip.animation.out_intensity,
+            "hold_intensity": getattr(self._clip.animation, "hold_intensity", 100.0),
+            "mono_color": getattr(self._clip.animation, "mono_color", False),
+        }
+
+    def _on_cancel(self) -> None:
+        snap = self._snapshot
+        self._clip.text = snap["text"]
+        self._clip.style = snap["style"]
+        self._clip.animation.in_duration = snap["in_duration"]
+        self._clip.animation.out_duration = snap["out_duration"]
+        self._clip.animation.in_animation = snap["in_animation"]
+        self._clip.animation.out_animation = snap["out_animation"]
+        self._clip.animation.hold_animation = snap["hold_animation"]
+        self._clip.animation.in_extras = list(snap["in_extras"])
+        self._clip.animation.out_extras = list(snap["out_extras"])
+        self._clip.animation.hold_extras = list(snap["hold_extras"])
+        self._clip.animation.in_intensity = snap["in_intensity"]
+        self._clip.animation.out_intensity = snap["out_intensity"]
+        self._clip.animation.hold_intensity = snap["hold_intensity"]
+        self._clip.animation.mono_color = snap["mono_color"]
+        self.reject()
+
+    def closeEvent(self, event) -> None:
+        if hasattr(self, "_play_timer"):
+            self._play_timer.stop()
+        super().closeEvent(event)
+
+    def _refresh_preview(self) -> None:
+        self._preview_item.refresh()
+
+    def _current_bg(self):
+        """Provider used by ``_TextPreviewItem`` — returns the captured
+        video frame when the user wants it shown, else ``None`` for a
+        plain black backdrop."""
+        if self._show_video_bg and self._video_bg_pixmap is not None:
+            return self._video_bg_pixmap
+        return None
+
+    def _on_video_bg_toggle(self, on: bool) -> None:
+        self._show_video_bg = bool(on)
+        self._refresh_preview()
+
+    # ---- preview playback ----
+
+    def _current_play_time(self):
+        """Animation time provider. Returns seconds-since-clip-start
+        when the user is actively playing; ``None`` while paused (so
+        the preview shows the steady HOLD state for editing)."""
+        if self._is_playing:
+            return self._play_time_s
+        # When paused, show the steady "fully on screen" state by
+        # passing a time that lands inside HOLD.
+        return None
+
+    def _toggle_preview_play(self) -> None:
+        if self._is_playing:
+            self._is_playing = False
+            self._play_timer.stop()
+            self._play_btn.setText("▶")
+        else:
+            # Start fresh from 0 if we were paused at end.
+            if self._play_time_s >= self._clip.duration_s - 0.001:
+                self._play_time_s = 0.0
+            self._is_playing = True
+            self._play_timer.start()
+            self._play_btn.setText("⏸")
+        self._refresh_preview()
+        self._update_play_label()
+
+    def _reset_preview(self) -> None:
+        self._play_time_s = 0.0
+        self._refresh_preview()
+        self._update_play_label()
+
+    def _on_play_tick(self) -> None:
+        # Advance and loop. Looping makes it easy to compare animations
+        # without mashing the play button between every change.
+        self._play_time_s += self._play_timer.interval() / 1000.0
+        if self._play_time_s >= self._clip.duration_s:
+            self._play_time_s = 0.0
+        self._refresh_preview()
+        self._update_play_label()
+
+    def _format_play_label(self) -> str:
+        return f"{self._play_time_s:5.2f} / {self._clip.duration_s:5.2f} s"
+
+    def _update_play_label(self) -> None:
+        if hasattr(self, "_play_label"):
+            self._play_label.setText(self._format_play_label())
+
+    # ---- text pane ----
+
+    def _build_text_pane(self) -> QWidget:
+        from PySide6.QtWidgets import QGroupBox, QPlainTextEdit
+
+        box = QGroupBox(tr("veditor.typo_editor.text_pane"))
+        box.setMinimumWidth(220)
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(10, 14, 10, 10)
+        lay.setSpacing(8)
+
+        self._text_edit = QPlainTextEdit()
+        self._text_edit.setPlainText(self._clip.text)
+        self._text_edit.setPlaceholderText(tr("veditor.typo_editor.placeholder"))
+        self._text_edit.setStyleSheet(
+            f"QPlainTextEdit {{ padding: 8px; font-size: 14px; "
+            f"background-color: {COLOR_BG_L4}; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; }}"
+        )
+        self._text_edit.textChanged.connect(self._on_text_changed)
+        lay.addWidget(self._text_edit, stretch=1)
+
+        return box
+
+    def _on_text_changed(self) -> None:
+        if self._suppress_signals:
+            return
+        self._clip.text = self._text_edit.toPlainText()
+        self._refresh_preview()
+
+    # ---- animation pane (placeholder + timing sliders) ----
+
+    def _build_animation_pane(self) -> QWidget:
+        from PySide6.QtWidgets import QGroupBox
+
+        box = QGroupBox(tr("veditor.typo_editor.animation_pane"))
+        box.setMinimumWidth(240)
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(10, 14, 10, 10)
+        lay.setSpacing(10)
+
+        # IN animation picker — visual grid in popup.
+        lay.addWidget(self._labelled(tr("veditor.typo_editor.anim_in")))
+        self._in_picker = _AnimationPickerButton(
+            self._clip.animation.in_animation, direction="in",
+        )
+        self._in_picker.animation_changed.connect(self._on_in_anim_picked)
+        lay.addWidget(self._in_picker)
+        # IN extras chip row + add button
+        self._in_extras_row = self._build_extras_row("in")
+        lay.addWidget(self._in_extras_row)
+
+        # IN duration slider
+        lay.addWidget(self._slider_row(
+            label=tr("veditor.typo_editor.timing.in"),
+            value=int(self._clip.animation.in_duration * 1000),
+            minimum=0, maximum=5000, suffix=" ms", step=50,
+            on_change=self._on_in_changed,
+        ))
+        # IN intensity slider
+        lay.addWidget(self._slider_row(
+            label=tr("veditor.typo_editor.intensity.in"),
+            value=int(self._clip.animation.in_intensity),
+            minimum=0, maximum=200, suffix=" %", step=5,
+            on_change=self._on_in_intensity_changed,
+        ))
+
+        # OUT animation picker
+        lay.addWidget(self._labelled(tr("veditor.typo_editor.anim_out")))
+        self._out_picker = _AnimationPickerButton(
+            self._clip.animation.out_animation, direction="out",
+        )
+        self._out_picker.animation_changed.connect(self._on_out_anim_picked)
+        lay.addWidget(self._out_picker)
+        # OUT extras chip row
+        self._out_extras_row = self._build_extras_row("out")
+        lay.addWidget(self._out_extras_row)
+
+        # OUT duration slider
+        lay.addWidget(self._slider_row(
+            label=tr("veditor.typo_editor.timing.out"),
+            value=int(self._clip.animation.out_duration * 1000),
+            minimum=0, maximum=5000, suffix=" ms", step=50,
+            on_change=self._on_out_changed,
+        ))
+        # OUT intensity slider
+        lay.addWidget(self._slider_row(
+            label=tr("veditor.typo_editor.intensity.out"),
+            value=int(self._clip.animation.out_intensity),
+            minimum=0, maximum=200, suffix=" %", step=5,
+            on_change=self._on_out_intensity_changed,
+        ))
+
+        # HOLD animation picker — loops between IN and OUT.
+        lay.addWidget(self._labelled(tr("veditor.typo_editor.anim_hold")))
+        self._hold_picker = _AnimationPickerButton(
+            getattr(self._clip.animation, "hold_animation", "none"),
+            direction="hold",
+        )
+        self._hold_picker.animation_changed.connect(self._on_hold_anim_picked)
+        lay.addWidget(self._hold_picker)
+        # HOLD extras chip row
+        self._hold_extras_row = self._build_extras_row("hold")
+        lay.addWidget(self._hold_extras_row)
+
+        # HOLD intensity slider
+        lay.addWidget(self._slider_row(
+            label=tr("veditor.typo_editor.intensity.hold"),
+            value=int(getattr(self._clip.animation, "hold_intensity", 100.0)),
+            minimum=0, maximum=200, suffix=" %", step=5,
+            on_change=self._on_hold_intensity_changed,
+        ))
+
+        # Hold derived label (live) — shows the seconds available between IN and OUT.
+        self._hold_label = QLabel("")
+        self._hold_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._hold_label.setStyleSheet(f"color: {COLOR_TEXT_TERTIARY}; font-size: 10px;")
+        self._update_hold_label()
+        lay.addWidget(self._hold_label)
+
+        # Mono-color toggle — disables per-glyph color overrides
+        # (e.g. Angle Break's flash) so the whole clip stays one tone.
+        from PySide6.QtWidgets import QCheckBox
+        self._mono_check = QCheckBox(tr("veditor.typo_editor.mono_color"))
+        self._mono_check.setChecked(bool(getattr(self._clip.animation, "mono_color", False)))
+        self._mono_check.setToolTip(tr("veditor.typo_editor.mono_color.tooltip"))
+        self._mono_check.toggled.connect(self._on_mono_color_toggle)
+        lay.addWidget(self._mono_check)
+
+        lay.addStretch(1)
+        return box
+
+    # ---- extras (composed animations) ----
+
+    def _extras_attr(self, direction: str) -> str:
+        return f"{direction}_extras"
+
+    def _build_extras_row(self, direction: str) -> QWidget:
+        """Wraps the chips + an `[+ Add modifier]` button for one slot.
+        The wrapper widget keeps a hidden ``_AnimationPickerButton`` in
+        ``extras_mode`` so we get the picker popup for free."""
+        wrap = QWidget()
+        lay = QHBoxLayout(wrap)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+
+        # Hidden adder picker: we trigger its popup by clicking the
+        # visible add-button. Adding it to the layout keeps Qt's parent
+        # ownership tidy; visibility is the picker button's responsibility.
+        adder = _AnimationPickerButton(
+            current_id="none", direction=direction, extras_mode=True,
+        )
+        adder.animation_changed.connect(
+            lambda aid, d=direction: self._on_extra_added(d, aid)
+        )
+        setattr(self, f"_{direction}_adder", adder)
+
+        chips_host = QWidget()
+        chips_lay = QHBoxLayout(chips_host)
+        chips_lay.setContentsMargins(0, 0, 0, 0)
+        chips_lay.setSpacing(4)
+        setattr(self, f"_{direction}_chips_lay", chips_lay)
+
+        lay.addWidget(chips_host, 0)
+        lay.addWidget(adder, 1)
+        self._render_extras_chips(direction)
+        return wrap
+
+    def _render_extras_chips(self, direction: str) -> None:
+        """Rebuild the chip widgets for ``direction`` from the current
+        clip state."""
+        chips_lay: QHBoxLayout | None = getattr(self, f"_{direction}_chips_lay", None)
+        if chips_lay is None:
+            return
+        # Clear existing
+        while chips_lay.count():
+            item = chips_lay.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        extras = list(getattr(self._clip.animation, self._extras_attr(direction), []) or [])
+        from app.typo_animations import get_animation
+        for idx, aid in enumerate(extras):
+            anim = get_animation(aid)
+            chip = QPushButton(f" {anim.icon} {tr(anim.name_key)}  ✕")
+            chip.setCursor(Qt.CursorShape.PointingHandCursor)
+            chip.setToolTip(tr("veditor.typo_editor.modifier.remove_tooltip"))
+            chip.setStyleSheet(
+                f"QPushButton {{ background-color: {COLOR_BG_L4}; "
+                f"color: {COLOR_TEXT_PRIMARY}; "
+                f"border: 1px solid {COLOR_BORDER_DEFAULT}; "
+                f"border-radius: 10px; padding: 2px 8px; font-size: 10px; }}"
+                f"QPushButton:hover {{ background-color: #4a3a3a; "
+                f"border-color: #7a4a4a; }}"
+            )
+            chip.clicked.connect(
+                lambda _c=False, d=direction, i=idx: self._on_extra_removed(d, i)
+            )
+            chips_lay.addWidget(chip)
+
+    def _on_extra_added(self, direction: str, anim_id: str) -> None:
+        if not anim_id or anim_id == "none":
+            return
+        attr = self._extras_attr(direction)
+        cur = list(getattr(self._clip.animation, attr, []) or [])
+        cur.append(anim_id)
+        setattr(self._clip.animation, attr, cur)
+        self._render_extras_chips(direction)
+        self._refresh_preview()
+
+    def _on_extra_removed(self, direction: str, index: int) -> None:
+        attr = self._extras_attr(direction)
+        cur = list(getattr(self._clip.animation, attr, []) or [])
+        if 0 <= index < len(cur):
+            del cur[index]
+            setattr(self._clip.animation, attr, cur)
+            self._render_extras_chips(direction)
+            self._refresh_preview()
+
+    # ---- primary picker handlers ----
+
+    def _on_in_anim_picked(self, anim_id: str) -> None:
+        self._clip.animation.in_animation = anim_id
+        self._refresh_preview()
+
+    def _on_out_anim_picked(self, anim_id: str) -> None:
+        self._clip.animation.out_animation = anim_id
+        self._refresh_preview()
+
+    def _on_hold_anim_picked(self, anim_id: str) -> None:
+        self._clip.animation.hold_animation = anim_id
+        self._refresh_preview()
+
+    def _on_preset_picked(self, preset_id: str) -> None:
+        """Apply a preset bundle to the clip and rebuild the editor's
+        controls so users immediately see the new animation + style
+        choices. Animation pane (pickers + sliders) and style pane
+        (font, size, weight, effects, etc.) need a full rebuild — the
+        cheapest way is to discard them and re-add."""
+        from app.typo_presets import get_preset, apply_preset
+        preset = get_preset(preset_id)
+        if preset is None:
+            return
+        apply_preset(self._clip, preset)
+
+        # Rebuild the IN/OUT pickers' visible label by re-syncing them
+        # to the clip's new animation ids.
+        self._in_picker.set_current(self._clip.animation.in_animation)
+        self._out_picker.set_current(self._clip.animation.out_animation)
+        if hasattr(self, "_hold_picker"):
+            self._hold_picker.set_current(
+                getattr(self._clip.animation, "hold_animation", "none"),
+            )
+
+        # The size / weight / color / sliders / effects don't have a
+        # cheap "set value" path that handles every control, so the
+        # safest move is to rebuild the whole 3-pane row. Delegate to a
+        # helper that swaps the panes in place.
+        self._rebuild_panes()
+
+        # Reset the preview clock so the user sees the IN sequence of
+        # the new preset right away.
+        self._play_time_s = 0.0
+        self._refresh_preview()
+        self._update_play_label()
+
+    def _rebuild_panes(self) -> None:
+        """Replace the 3-pane row with freshly-built widgets so every
+        control reflects current clip state. Called after preset apply."""
+        panes_layout = self._panes_layout
+        if panes_layout is None:
+            return
+        # Remove old widgets
+        while panes_layout.count():
+            item = panes_layout.takeAt(0)
+            w = item.widget()
+            if w is not None:
+                w.deleteLater()
+        panes_layout.addWidget(self._build_text_pane(), stretch=1)
+        panes_layout.addWidget(self._build_animation_pane(), stretch=1)
+        panes_layout.addWidget(self._build_style_pane(), stretch=2)
+
+    def _slider_row(self, *, label: str, value: int, minimum: int,
+                    maximum: int, suffix: str, step: int, on_change) -> QWidget:
+        """Inline label + QSlider + value-readout helper."""
+        wrap = QWidget()
+        v = QVBoxLayout(wrap)
+        v.setContentsMargins(0, 0, 0, 0)
+        v.setSpacing(2)
+
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        lbl = QLabel(label)
+        lbl.setStyleSheet(f"color: {COLOR_TEXT_TERTIARY}; font-size: 11px;")
+        readout = QLabel(f"{value}{suffix}")
+        readout.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; font-size: 11px; font-weight: 600;")
+        readout.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        head.addWidget(lbl)
+        head.addStretch(1)
+        head.addWidget(readout)
+        v.addLayout(head)
+
+        sld = QSlider(Qt.Orientation.Horizontal)
+        sld.setRange(minimum, maximum)
+        sld.setSingleStep(step)
+        sld.setPageStep(step * 4)
+        sld.setValue(int(value))
+
+        def _emit(val: int) -> None:
+            readout.setText(f"{val}{suffix}")
+            on_change(val)
+
+        sld.valueChanged.connect(_emit)
+        v.addWidget(sld)
+        return wrap
+
+    def _on_in_changed(self, ms: int) -> None:
+        self._clip.animation.in_duration = max(0.0, ms / 1000.0)
+        self._update_hold_label()
+        self._refresh_preview()
+
+    def _on_out_changed(self, ms: int) -> None:
+        self._clip.animation.out_duration = max(0.0, ms / 1000.0)
+        self._update_hold_label()
+        self._refresh_preview()
+
+    def _on_in_intensity_changed(self, percent: int) -> None:
+        self._clip.animation.in_intensity = max(0.0, min(200.0, float(percent)))
+        self._refresh_preview()
+
+    def _on_out_intensity_changed(self, percent: int) -> None:
+        self._clip.animation.out_intensity = max(0.0, min(200.0, float(percent)))
+        self._refresh_preview()
+
+    def _on_hold_intensity_changed(self, percent: int) -> None:
+        self._clip.animation.hold_intensity = max(0.0, min(200.0, float(percent)))
+        self._refresh_preview()
+
+    def _on_mono_color_toggle(self, on: bool) -> None:
+        self._clip.animation.mono_color = bool(on)
+        self._refresh_preview()
+
+    def _update_hold_label(self) -> None:
+        if not hasattr(self, "_hold_label"):
+            return
+        hold = self._clip.hold_duration_s
+        self._hold_label.setText(
+            tr("veditor.typo_editor.timing.hold", seconds=f"{hold:.2f}")
+        )
+
+    # ---- style pane ----
+
+    # Recommended fonts pinned to the top of the picker. These are the
+    # families the typography spec recommends for Korean / Japanese MV
+    # styles + a few staple Latin display faces. Filtered against the
+    # actual installed set at runtime.
+    PINNED_FONTS = (
+        "Pretendard",
+        "Noto Sans KR",
+        "Noto Serif KR",
+        "Nanum Myeongjo",
+        "Gaegu",
+        "Noto Sans JP",
+        "Noto Serif JP",
+        "Shippori Mincho",
+        "Arial",
+        "Segoe UI",
+        "Impact",
+    )
+
+    def _build_style_pane(self) -> QWidget:
+        from PySide6.QtWidgets import (
+            QGroupBox, QPushButton, QButtonGroup, QSpinBox,
+        )
+
+        box = QGroupBox(tr("veditor.typo_editor.style_pane"))
+        box.setMinimumWidth(300)
+        lay = QVBoxLayout(box)
+        lay.setContentsMargins(10, 14, 10, 10)
+        lay.setSpacing(10)
+
+        s = self._clip.style
+
+        # Font family — compact button + click-to-open popup picker.
+        lay.addWidget(self._labelled(tr("veditor.typo_editor.style.font")))
+        self._font_picker = _FontPickerButton(s.font_family)
+        self._font_picker.font_changed.connect(self._on_font_family_changed)
+        lay.addWidget(self._font_picker)
+
+        # Size
+        lay.addWidget(self._labelled(tr("veditor.typo_editor.style.size")))
+        size_row = QHBoxLayout()
+        self._size_slider = QSlider(Qt.Orientation.Horizontal)
+        self._size_slider.setRange(16, 200)
+        self._size_slider.setValue(int(s.font_size))
+        self._size_spin = QSpinBox()
+        self._size_spin.setRange(16, 200)
+        self._size_spin.setValue(int(s.font_size))
+        self._size_spin.setFixedWidth(64)
+        self._size_slider.valueChanged.connect(self._size_spin.setValue)
+        self._size_spin.valueChanged.connect(self._size_slider.setValue)
+        self._size_spin.valueChanged.connect(self._on_size_changed)
+        size_row.addWidget(self._size_slider, stretch=1)
+        size_row.addWidget(self._size_spin)
+        lay.addLayout(size_row)
+
+        # Weight buttons
+        lay.addWidget(self._labelled(tr("veditor.typo_editor.style.weight")))
+        weight_row = QHBoxLayout()
+        self._weight_group = QButtonGroup(self)
+        self._weight_group.setExclusive(True)
+        for key, weight in self.WEIGHT_PRESETS:
+            btn = QPushButton(tr(f"veditor.typo_editor.weight.{key}"))
+            btn.setObjectName("ToolButton")
+            btn.setCheckable(True)
+            btn.setProperty("weight", weight)
+            if abs(s.font_weight - weight) < 50:
+                btn.setChecked(True)
+            btn.clicked.connect(lambda _c=False, w=weight: self._on_weight_changed(w))
+            self._weight_group.addButton(btn)
+            weight_row.addWidget(btn)
+        lay.addLayout(weight_row)
+
+        # Color + Alignment row
+        ca_row = QHBoxLayout()
+        self._color_btn = QPushButton(tr("veditor.typo_editor.btn.color"))
+        self._color_btn.setObjectName("ToolButton")
+        self._update_color_btn_swatch()
+        self._color_btn.clicked.connect(self._on_color_picked)
+        ca_row.addWidget(self._color_btn, stretch=1)
+
+        # Alignment
+        self._align_group = QButtonGroup(self)
+        self._align_group.setExclusive(True)
+        for key in self.ALIGN_OPTIONS:
+            btn = QPushButton(tr(f"veditor.typo_editor.align.{key}"))
+            btn.setObjectName("ToolButton")
+            btn.setCheckable(True)
+            btn.setProperty("align_key", key)
+            if s.alignment == key:
+                btn.setChecked(True)
+            btn.clicked.connect(lambda _c=False, k=key: self._on_align_changed(k))
+            self._align_group.addButton(btn)
+            ca_row.addWidget(btn)
+        lay.addLayout(ca_row)
+
+        # Position X / Y
+        lay.addWidget(self._slider_row(
+            label=tr("veditor.typo_editor.style.position_x"),
+            value=int(s.position_x * 100),
+            minimum=0, maximum=100, suffix=" %", step=1,
+            on_change=self._on_pos_x_changed,
+        ))
+        lay.addWidget(self._slider_row(
+            label=tr("veditor.typo_editor.style.position_y"),
+            value=int(s.position_y * 100),
+            minimum=0, maximum=100, suffix=" %", step=1,
+            on_change=self._on_pos_y_changed,
+        ))
+
+        # Letter spacing
+        lay.addWidget(self._slider_row(
+            label=tr("veditor.typo_editor.style.letter_spacing"),
+            value=int(s.letter_spacing),
+            minimum=-5, maximum=30, suffix=" px", step=1,
+            on_change=self._on_letter_spacing_changed,
+        ))
+
+        # Effects (outline / shadow / background) — collapsed-style block
+        lay.addWidget(self._build_effects_block())
+
+        lay.addStretch(1)
+        return box
+
+    def _build_effects_block(self) -> QWidget:
+        from PySide6.QtWidgets import QCheckBox, QGroupBox, QPushButton
+
+        s = self._clip.style
+        box = QGroupBox(tr("veditor.typo_editor.effects.section"))
+        v = QVBoxLayout(box)
+        v.setContentsMargins(8, 14, 8, 8)
+        v.setSpacing(6)
+
+        # ---- Outline ----
+        ol_row = QHBoxLayout()
+        self._outline_check = QCheckBox(tr("veditor.typo_editor.effects.outline"))
+        self._outline_check.setChecked(bool(s.outline_color and s.outline_width > 0))
+        self._outline_check.toggled.connect(self._on_outline_toggle)
+        ol_row.addWidget(self._outline_check)
+        self._outline_color_btn = QPushButton(tr("veditor.typo_editor.btn.color"))
+        self._outline_color_btn.setObjectName("ToolButton")
+        self._update_outline_swatch()
+        self._outline_color_btn.clicked.connect(self._on_outline_color)
+        ol_row.addWidget(self._outline_color_btn)
+        v.addLayout(ol_row)
+        v.addWidget(self._slider_row(
+            label=tr("veditor.typo_editor.effects.outline_width"),
+            value=int(s.outline_width or 0),
+            minimum=0, maximum=12, suffix=" px", step=1,
+            on_change=self._on_outline_width,
+        ))
+
+        # ---- Shadow ----
+        sh_row = QHBoxLayout()
+        self._shadow_check = QCheckBox(tr("veditor.typo_editor.effects.shadow"))
+        self._shadow_check.setChecked(bool(s.shadow_color))
+        self._shadow_check.toggled.connect(self._on_shadow_toggle)
+        sh_row.addWidget(self._shadow_check)
+        self._shadow_color_btn = QPushButton(tr("veditor.typo_editor.btn.color"))
+        self._shadow_color_btn.setObjectName("ToolButton")
+        self._update_shadow_swatch()
+        self._shadow_color_btn.clicked.connect(self._on_shadow_color)
+        sh_row.addWidget(self._shadow_color_btn)
+        v.addLayout(sh_row)
+        v.addWidget(self._slider_row(
+            label=tr("veditor.typo_editor.effects.shadow_x"),
+            value=int(s.shadow_offset_x or 0),
+            minimum=-20, maximum=20, suffix=" px", step=1,
+            on_change=self._on_shadow_x,
+        ))
+        v.addWidget(self._slider_row(
+            label=tr("veditor.typo_editor.effects.shadow_y"),
+            value=int(s.shadow_offset_y or 0),
+            minimum=-20, maximum=20, suffix=" px", step=1,
+            on_change=self._on_shadow_y,
+        ))
+
+        # ---- Background ----
+        bg_row = QHBoxLayout()
+        self._bg_check = QCheckBox(tr("veditor.typo_editor.effects.background"))
+        self._bg_check.setChecked(bool(s.background_color))
+        self._bg_check.toggled.connect(self._on_bg_toggle)
+        bg_row.addWidget(self._bg_check)
+        self._bg_color_btn = QPushButton(tr("veditor.typo_editor.btn.color"))
+        self._bg_color_btn.setObjectName("ToolButton")
+        self._update_bg_swatch()
+        self._bg_color_btn.clicked.connect(self._on_bg_color)
+        bg_row.addWidget(self._bg_color_btn)
+        v.addLayout(bg_row)
+        v.addWidget(self._slider_row(
+            label=tr("veditor.typo_editor.effects.bg_padding"),
+            value=int(s.background_padding or 0),
+            minimum=0, maximum=80, suffix=" px", step=2,
+            on_change=self._on_bg_padding,
+        ))
+        v.addWidget(self._slider_row(
+            label=tr("veditor.typo_editor.effects.bg_radius"),
+            value=int(s.background_radius or 0),
+            minimum=0, maximum=80, suffix=" px", step=2,
+            on_change=self._on_bg_radius,
+        ))
+
+        return box
+
+    @staticmethod
+    def _labelled(text: str) -> QLabel:
+        lbl = QLabel(text)
+        lbl.setStyleSheet(f"color: {COLOR_TEXT_TERTIARY}; font-size: 10px; "
+                          f"font-weight: 700; letter-spacing: 0.5px;")
+        return lbl
+
+    # ---- style change handlers ----
+
+    def _on_font_family_changed(self, family: str) -> None:
+        self._clip.style.font_family = family
+        self._refresh_preview()
+
+    def _on_size_changed(self, value: int) -> None:
+        self._clip.style.font_size = int(value)
+        self._refresh_preview()
+
+    def _on_weight_changed(self, weight: int) -> None:
+        self._clip.style.font_weight = int(weight)
+        self._refresh_preview()
+
+    def _on_color_picked(self) -> None:
+        from PySide6.QtWidgets import QColorDialog
+        cur = QColor(self._clip.style.color or "#FFFFFF")
+        chosen = QColorDialog.getColor(cur, self,
+                                       tr("veditor.typo_editor.color_dialog"))
+        if chosen.isValid():
+            self._clip.style.color = chosen.name()
+            self._update_color_btn_swatch()
+            self._refresh_preview()
+
+    def _on_align_changed(self, key: str) -> None:
+        self._clip.style.alignment = key
+        self._refresh_preview()
+
+    def _on_pos_x_changed(self, percent: int) -> None:
+        self._clip.style.position_x = max(0.0, min(1.0, percent / 100.0))
+        self._refresh_preview()
+
+    def _on_pos_y_changed(self, percent: int) -> None:
+        self._clip.style.position_y = max(0.0, min(1.0, percent / 100.0))
+        self._refresh_preview()
+
+    def _on_letter_spacing_changed(self, value: int) -> None:
+        self._clip.style.letter_spacing = int(value)
+        self._refresh_preview()
+
+    # ---- effects ----
+
+    def _on_outline_toggle(self, on: bool) -> None:
+        if on and not self._clip.style.outline_color:
+            self._clip.style.outline_color = "#000000"
+        if on and self._clip.style.outline_width <= 0:
+            self._clip.style.outline_width = 2
+        if not on:
+            self._clip.style.outline_width = 0
+        self._update_outline_swatch()
+        self._refresh_preview()
+
+    def _on_outline_color(self) -> None:
+        from PySide6.QtWidgets import QColorDialog
+        cur = QColor(self._clip.style.outline_color or "#000000")
+        c = QColorDialog.getColor(cur, self, tr("veditor.typo_editor.color_dialog"))
+        if c.isValid():
+            self._clip.style.outline_color = c.name()
+            if not self._outline_check.isChecked():
+                self._outline_check.setChecked(True)
+            self._update_outline_swatch()
+            self._refresh_preview()
+
+    def _on_outline_width(self, w: int) -> None:
+        self._clip.style.outline_width = int(w)
+        if w > 0 and not self._outline_check.isChecked():
+            self._outline_check.setChecked(True)
+        self._refresh_preview()
+
+    def _on_shadow_toggle(self, on: bool) -> None:
+        if on and not self._clip.style.shadow_color:
+            self._clip.style.shadow_color = "#000000"
+        if on and not (self._clip.style.shadow_offset_x or self._clip.style.shadow_offset_y):
+            self._clip.style.shadow_offset_x = 3
+            self._clip.style.shadow_offset_y = 3
+        if not on:
+            self._clip.style.shadow_color = None
+        self._update_shadow_swatch()
+        self._refresh_preview()
+
+    def _on_shadow_color(self) -> None:
+        from PySide6.QtWidgets import QColorDialog
+        cur = QColor(self._clip.style.shadow_color or "#000000")
+        c = QColorDialog.getColor(cur, self, tr("veditor.typo_editor.color_dialog"))
+        if c.isValid():
+            self._clip.style.shadow_color = c.name()
+            if not self._shadow_check.isChecked():
+                self._shadow_check.setChecked(True)
+            self._update_shadow_swatch()
+            self._refresh_preview()
+
+    def _on_shadow_x(self, v: int) -> None:
+        self._clip.style.shadow_offset_x = int(v)
+        self._refresh_preview()
+
+    def _on_shadow_y(self, v: int) -> None:
+        self._clip.style.shadow_offset_y = int(v)
+        self._refresh_preview()
+
+    def _on_bg_toggle(self, on: bool) -> None:
+        if on and not self._clip.style.background_color:
+            self._clip.style.background_color = "#000000"
+        if not on:
+            self._clip.style.background_color = None
+        self._update_bg_swatch()
+        self._refresh_preview()
+
+    def _on_bg_color(self) -> None:
+        from PySide6.QtWidgets import QColorDialog
+        cur = QColor(self._clip.style.background_color or "#000000")
+        c = QColorDialog.getColor(cur, self, tr("veditor.typo_editor.color_dialog"))
+        if c.isValid():
+            self._clip.style.background_color = c.name()
+            if not self._bg_check.isChecked():
+                self._bg_check.setChecked(True)
+            self._update_bg_swatch()
+            self._refresh_preview()
+
+    def _on_bg_padding(self, v: int) -> None:
+        self._clip.style.background_padding = int(v)
+        self._refresh_preview()
+
+    def _on_bg_radius(self, v: int) -> None:
+        self._clip.style.background_radius = int(v)
+        self._refresh_preview()
+
+    # ---- swatch updates ----
+
+    def _swatch_style(self, hex_color: str | None) -> str:
+        c = hex_color or "transparent"
+        return (
+            f"QPushButton {{ background-color: {COLOR_BG_L4}; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; "
+            f"padding: 4px 8px; text-align: left; }}"
+            # We'll prepend a colored square via icon-ish trick below
+        )
+
+    def _set_swatch_button(self, btn, hex_color: str | None, label: str) -> None:
+        c = hex_color or "transparent"
+        if hex_color:
+            btn.setText(f"  {label}  ({hex_color})")
+            # Use a stylesheet block with a left-side colored gutter
+            btn.setStyleSheet(
+                f"QPushButton {{ background-color: {COLOR_BG_L4}; color: {COLOR_TEXT_PRIMARY}; "
+                f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; padding: 4px 8px; "
+                f"border-left: 12px solid {hex_color}; }}"
+                f"QPushButton:hover {{ border-color: #6a6a72; }}"
+            )
+        else:
+            btn.setText(f"  {label}")
+            btn.setStyleSheet(
+                f"QPushButton {{ background-color: {COLOR_BG_L4}; color: {COLOR_TEXT_TERTIARY}; "
+                f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; padding: 4px 8px; }}"
+                f"QPushButton:hover {{ border-color: #6a6a72; }}"
+            )
+
+    def _update_color_btn_swatch(self) -> None:
+        self._set_swatch_button(
+            self._color_btn, self._clip.style.color,
+            tr("veditor.typo_editor.btn.text_color"),
+        )
+
+    def _update_outline_swatch(self) -> None:
+        col = self._clip.style.outline_color if self._clip.style.outline_width else None
+        self._set_swatch_button(
+            self._outline_color_btn, col,
+            tr("veditor.typo_editor.btn.color"),
+        )
+
+    def _update_shadow_swatch(self) -> None:
+        self._set_swatch_button(
+            self._shadow_color_btn, self._clip.style.shadow_color,
+            tr("veditor.typo_editor.btn.color"),
+        )
+
+    def _update_bg_swatch(self) -> None:
+        self._set_swatch_button(
+            self._bg_color_btn, self._clip.style.background_color,
+            tr("veditor.typo_editor.btn.color"),
+        )
 
 
 class StripedHost(QWidget):
@@ -1773,6 +5290,23 @@ class SoundEditorWindow(QWidget):
                 color: {COLOR_ACCENT_BLUE};
                 border-bottom: 2px solid {COLOR_ACCENT_BLUE};
             }}
+            /* AI Master tab uses the orange accent so users can see
+               at a glance which tab drives the post-processing chain. */
+            QPushButton#SETabAI {{
+                background: transparent;
+                color: #D85A30;
+                border: none;
+                border-bottom: 2px solid transparent;
+                padding: 12px 18px;
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 1px;
+            }}
+            QPushButton#SETabAI:hover {{ color: #ff7a4a; }}
+            QPushButton#SETabAI:checked {{
+                color: #ff7a4a;
+                border-bottom: 2px solid #D85A30;
+            }}
             QWidget#SEContent {{ background-color: {COLOR_BG_L3}; }}
             QWidget#SETransport {{
                 background-color: {COLOR_BG_L4};
@@ -1808,6 +5342,27 @@ class SoundEditorWindow(QWidget):
                 background-color: {COLOR_BG_L5};
                 color: {COLOR_TEXT_PRIMARY};
                 border-color: {COLOR_ACCENT_BLUE};
+            }}
+            /* AI Master preset tiles: bigger, 3x2 grid, orange accent. */
+            QPushButton#SEAIPresetBtn {{
+                background-color: rgba(216, 90, 48, 0.08);
+                color: {COLOR_TEXT_SECONDARY};
+                border: 1px solid rgba(216, 90, 48, 0.35);
+                border-radius: 6px;
+                padding: 10px 12px;
+                font-size: 11px;
+                font-weight: 700;
+                letter-spacing: 0.5px;
+            }}
+            QPushButton#SEAIPresetBtn:hover {{
+                background-color: rgba(216, 90, 48, 0.18);
+                color: #ff7a4a;
+                border-color: #D85A30;
+            }}
+            QPushButton#SEAIPresetBtn[selected="true"] {{
+                background-color: rgba(216, 90, 48, 0.25);
+                color: #fff;
+                border-color: #D85A30;
             }}
             QPushButton#SEPlayBtn {{
                 background-color: {COLOR_ACCENT_BLUE};
@@ -1901,11 +5456,20 @@ class SoundEditorWindow(QWidget):
             ("dynamics", tr("veditor.sound_editor.tab.dynamics")),
             ("effects", tr("veditor.sound_editor.tab.effects")),
             ("advanced", tr("veditor.sound_editor.tab.advanced")),
+            ("ai_master", tr("veditor.sound_editor.tab.ai_master")),
         ]
         self._tab_buttons: dict[str, QPushButton] = {}
         for tab_id, tab_label in tabs:
-            btn = QPushButton(tab_label)
-            btn.setObjectName("SETab")
+            # "AI Master" gets an orange accent + "NEW" badge appended
+            # via HTML — QPushButton supports rich text through a
+            # QTextDocument paint path. Simplest trick: append NEW as
+            # a unicode suffix styled via QSS descendant selectors.
+            if tab_id == "ai_master":
+                btn = QPushButton(f"{tab_label}  NEW")
+                btn.setObjectName("SETabAI")
+            else:
+                btn = QPushButton(tab_label)
+                btn.setObjectName("SETab")
             btn.setCheckable(True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             if tab_id == "basic":
@@ -1922,11 +5486,12 @@ class SoundEditorWindow(QWidget):
 
         self._tab_stack = QStackedWidget()
         self._tab_stack.setObjectName("SEContent")
-        self._tab_stack.addWidget(self._build_basic_tab())     # 0
-        self._tab_stack.addWidget(self._build_eq_tab())         # 1
-        self._tab_stack.addWidget(self._build_dynamics_tab())   # 2
-        self._tab_stack.addWidget(self._build_effects_tab())    # 3
-        self._tab_stack.addWidget(self._build_advanced_tab())   # 4
+        self._tab_stack.addWidget(self._build_basic_tab())      # 0
+        self._tab_stack.addWidget(self._build_eq_tab())          # 1
+        self._tab_stack.addWidget(self._build_dynamics_tab())    # 2
+        self._tab_stack.addWidget(self._build_effects_tab())     # 3
+        self._tab_stack.addWidget(self._build_advanced_tab())    # 4
+        self._tab_stack.addWidget(self._build_ai_master_tab())   # 5
         return self._tab_stack
 
     def _build_basic_tab(self) -> QWidget:
@@ -2484,6 +6049,156 @@ class SoundEditorWindow(QWidget):
         except Exception:
             pass
 
+    # ========= AI Master tab =========
+
+    # Per-model tuning for AI-generated music. Values are percentages /
+    # dB matching the AI Master knob ranges. ``width`` is bipolar with
+    # 100 as the neutral center.
+    AI_PRESETS: dict[str, dict] = {
+        "Suno v3":    {"air": 5, "clarity": 60, "warmth": 40, "width": 130, "punch": 50, "excite": 70},
+        "Suno v4":    {"air": 3, "clarity": 50, "warmth": 30, "width": 120, "punch": 40, "excite": 50},
+        "Udio":       {"air": 4, "clarity": 45, "warmth": 35, "width": 110, "punch": 55, "excite": 60},
+        "ACE-Step":   {"air": 6, "clarity": 55, "warmth": 50, "width": 140, "punch": 45, "excite": 75},
+        "Generic AI": {"air": 4, "clarity": 50, "warmth": 40, "width": 120, "punch": 50, "excite": 60},
+        "Custom":     {"air": 0, "clarity": 0,  "warmth": 0,  "width": 100, "punch": 0,  "excite": 0},
+    }
+
+    def _build_ai_master_tab(self) -> QWidget:
+        from app.knob_widget import KnobWidget, fmt_db, fmt_percentage
+        ai = self.clip.effects["ai_master"]
+
+        panel = QWidget()
+        panel.setObjectName("SEContent")
+        root = QVBoxLayout(panel)
+        root.setContentsMargins(20, 16, 20, 16)
+        root.setSpacing(14)
+
+        # --- One-Click Fix (preset buttons) ---
+        preset_header = QLabel(tr("veditor.sound_editor.ai.one_click"))
+        preset_header.setStyleSheet(
+            f"color: {COLOR_TEXT_SECONDARY}; font-size: 11px; "
+            f"font-weight: 700; letter-spacing: 1px;"
+        )
+        root.addWidget(preset_header)
+
+        # 6 preset buttons in a 3x2 grid — gives the AI-model labels
+        # room to breathe without eating the knob row's vertical space.
+        from PySide6.QtWidgets import QGridLayout
+        preset_grid = QGridLayout()
+        preset_grid.setSpacing(6)
+        names = list(self.AI_PRESETS.keys())
+        for idx, name in enumerate(names):
+            b = QPushButton(name)
+            b.setObjectName("SEAIPresetBtn")
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            # Highlight the currently-applied preset.
+            if ai.get("preset") == name:
+                b.setProperty("selected", True)
+            b.clicked.connect(lambda _c, n=name: self._apply_ai_preset(n))
+            preset_grid.addWidget(b, idx // 3, idx % 3)
+        root.addLayout(preset_grid)
+
+        # --- Detailed controls (6 macro knobs) ---
+        ctrl_header = self._fx_header(
+            tr("veditor.sound_editor.ai.detailed"),
+            "ai_master",
+        )
+        self._ai_enabled_btn = ctrl_header[1]
+        root.addWidget(ctrl_header[0])
+
+        knob_row = QHBoxLayout()
+        knob_row.setSpacing(10)
+
+        k_air = KnobWidget(
+            label="Air", value=float(ai["air"]),
+            minimum=0, maximum=8, default=0, unit=" dB",
+            color="green", formatter=fmt_db,
+        )
+        k_clarity = KnobWidget(
+            label="Clarity", value=float(ai["clarity"]),
+            minimum=0, maximum=100, default=0,
+            color="blue", formatter=fmt_percentage,
+        )
+        k_warmth = KnobWidget(
+            label="Warmth", value=float(ai["warmth"]),
+            minimum=0, maximum=100, default=0,
+            color="orange", formatter=fmt_percentage,
+        )
+        k_width = KnobWidget(
+            label="Width", value=float(ai["width"]),
+            minimum=0, maximum=200, default=100,
+            color="green", bipolar=True, formatter=fmt_percentage,
+        )
+        k_punch = KnobWidget(
+            label="Punch", value=float(ai["punch"]),
+            minimum=0, maximum=100, default=0,
+            color="blue", formatter=fmt_percentage,
+        )
+        k_excite = KnobWidget(
+            label="Excite", value=float(ai["excite"]),
+            minimum=0, maximum=100, default=0,
+            color="orange", formatter=fmt_percentage,
+        )
+
+        # Any knob touch implies "user wants custom tuning" — mark the
+        # preset state as Custom so the grid highlight doesn't lie.
+        def _on_knob(field: str, value: float) -> None:
+            self._set_fx("ai_master", field, float(value))
+            if self.clip.effects["ai_master"].get("preset") != "Custom":
+                self._set_fx("ai_master", "preset", "Custom")
+
+        k_air.valueChanged.connect(lambda v: _on_knob("air", v))
+        k_clarity.valueChanged.connect(lambda v: _on_knob("clarity", v))
+        k_warmth.valueChanged.connect(lambda v: _on_knob("warmth", v))
+        k_width.valueChanged.connect(lambda v: _on_knob("width", v))
+        k_punch.valueChanged.connect(lambda v: _on_knob("punch", v))
+        k_excite.valueChanged.connect(lambda v: _on_knob("excite", v))
+
+        for k in (k_air, k_clarity, k_warmth, k_width, k_punch, k_excite):
+            knob_row.addWidget(k)
+        knob_row.addStretch(1)
+        root.addLayout(knob_row)
+
+        # --- Per-knob description strip (mirrors the HTML mock) ---
+        desc_row = QHBoxLayout()
+        desc_row.setSpacing(10)
+        for key in ("air", "clarity", "warmth", "width", "punch", "excite"):
+            lbl = QLabel(tr(f"veditor.sound_editor.ai.desc.{key}"))
+            lbl.setAlignment(Qt.AlignmentFlag.AlignHCenter)
+            lbl.setWordWrap(True)
+            lbl.setFixedWidth(88)
+            lbl.setStyleSheet(
+                f"color: {COLOR_TEXT_TERTIARY}; font-size: 10px;"
+            )
+            desc_row.addWidget(lbl)
+        desc_row.addStretch(1)
+        root.addLayout(desc_row)
+
+        # --- Hint / note ---
+        note = QLabel(tr("veditor.sound_editor.ai.hint"))
+        note.setWordWrap(True)
+        note.setStyleSheet(
+            f"color: {COLOR_TEXT_TERTIARY}; font-size: 10px; "
+            f"padding-top: 6px;"
+        )
+        root.addWidget(note)
+
+        root.addStretch(1)
+        return panel
+
+    def _apply_ai_preset(self, name: str) -> None:
+        p = self.AI_PRESETS.get(name) or {}
+        ai = self.clip.effects["ai_master"]
+        for key in ("air", "clarity", "warmth", "width", "punch", "excite"):
+            if key in p:
+                ai[key] = float(p[key])
+        ai["preset"] = name
+        # Auto-enable unless the user explicitly picked Custom at zero.
+        if name != "Custom":
+            ai["enabled"] = True
+        self._refresh_timeline_row()
+        self._rebuild_tab_ui()
+
     # ========= shared helpers =========
 
     def _fx_header(self, title: str, fx_key: str) -> tuple[QWidget, QPushButton]:
@@ -2551,6 +6266,7 @@ class SoundEditorWindow(QWidget):
             self._build_dynamics_tab(),
             self._build_effects_tab(),
             self._build_advanced_tab(),
+            self._build_ai_master_tab(),
         ]
         # Swap in place.
         for i in range(self._tab_stack.count()):
@@ -2619,6 +6335,39 @@ class SoundEditorWindow(QWidget):
             lambda v: self._player_output.setVolume(max(0.0, min(1.0, v / 100.0)))
         )
 
+        # Audio export quality dropdown — sits left of the export
+        # button. Default = "standard" (44.1 kHz / 192 kbps / 16-bit),
+        # which matches the Free tier ceiling.
+        from app.audio_tracks import DEFAULT_AUDIO_QUALITY_ID
+        self._audio_export_quality_id = DEFAULT_AUDIO_QUALITY_ID
+        self._audio_quality_btn = QToolButton()
+        self._audio_quality_btn.setObjectName("AudioQualityDropdown")
+        self._audio_quality_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._audio_quality_btn.setPopupMode(
+            QToolButton.ToolButtonPopupMode.InstantPopup,
+        )
+        self._audio_quality_btn.setToolTip(tr("veditor.export.quality.tooltip"))
+        self._audio_quality_btn.setMinimumHeight(28)
+        self._audio_quality_btn.setStyleSheet(
+            f"QToolButton#AudioQualityDropdown {{ "
+            f"background-color: {COLOR_BG_L2}; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; "
+            f"padding: 3px 26px 3px 10px; font-size: 11px; }}"
+            f"QToolButton#AudioQualityDropdown:hover {{ "
+            f"background-color: {COLOR_BG_L5}; border-color: #5a5a62; }}"
+            f"QToolButton#AudioQualityDropdown::menu-indicator {{ "
+            f"image: none; subcontrol-origin: padding; "
+            f"subcontrol-position: right center; right: 8px; }}"
+        )
+        self._refresh_audio_quality_btn_label()
+        self._build_audio_quality_menu()
+
+        self._export_btn = QPushButton(tr("veditor.sound_editor.export"))
+        self._export_btn.setObjectName("SEClose")
+        self._export_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._export_btn.setToolTip(tr("veditor.sound_editor.export.tooltip"))
+        self._export_btn.clicked.connect(self._on_export_clicked)
+
         self._apply_btn = QPushButton(tr("veditor.sound_editor.apply"))
         self._apply_btn.setObjectName("SEApply")
         self._apply_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2641,6 +6390,8 @@ class SoundEditorWindow(QWidget):
         lay.addWidget(vol_icon)
         lay.addWidget(self._transport_volume_slider)
         lay.addSpacing(14)
+        lay.addWidget(self._audio_quality_btn)
+        lay.addWidget(self._export_btn)
         lay.addWidget(self._close_btn)
         lay.addWidget(self._apply_btn)
 
@@ -2701,7 +6452,10 @@ class SoundEditorWindow(QWidget):
         return 10.0 ** (db / 20.0)
 
     def _switch_tab(self, tab_id: str) -> None:
-        idx = {"basic": 0, "eq": 1, "dynamics": 2, "effects": 3, "advanced": 4}.get(tab_id, 0)
+        idx = {
+            "basic": 0, "eq": 1, "dynamics": 2, "effects": 3,
+            "advanced": 4, "ai_master": 5,
+        }.get(tab_id, 0)
         self._tab_stack.setCurrentIndex(idx)
         # Sync checked state (QButtonGroup should handle, but be defensive).
         for tid, btn in self._tab_buttons.items():
@@ -2902,6 +6656,172 @@ class SoundEditorWindow(QWidget):
         # hook into.
         self._refresh_timeline_row()
         self.close()
+
+    # ---- audio quality dropdown ----
+
+    def _refresh_audio_quality_btn_label(self) -> None:
+        from app.audio_tracks import get_audio_quality_preset
+        from app import tier
+        q = get_audio_quality_preset(self._audio_export_quality_id)
+        label = tr(q.name_key)
+        if tier.requires_pro(q.feature_id) and not tier.is_locked(q.feature_id):
+            label = f"{label} ★"
+        self._audio_quality_btn.setText(
+            f"{tr('veditor.export.quality.label')}: {label}  ▾"
+        )
+
+    def _build_audio_quality_menu(self) -> None:
+        from app.audio_tracks import AUDIO_QUALITY_PRESETS
+        from app import tier
+        menu = QMenu(self._audio_quality_btn)
+        menu.setObjectName("AudioQualityMenu")
+        menu.setStyleSheet(
+            f"QMenu#AudioQualityMenu {{ "
+            f"background-color: {COLOR_BG_L3}; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; "
+            f"border-radius: 6px; padding: 6px; font-size: 12px; }}"
+            f"QMenu#AudioQualityMenu::item {{ "
+            f"padding: 8px 18px 8px 36px; border-radius: 4px; "
+            f"margin: 1px 0px; }}"
+            f"QMenu#AudioQualityMenu::item:selected {{ "
+            f"background-color: {COLOR_BG_L5}; }}"
+            f"QMenu#AudioQualityMenu::item:checked {{ "
+            f"background-color: {COLOR_ACCENT_BLUE}; "
+            f"color: {COLOR_TEXT_PRIMARY}; font-weight: 600; }}"
+            f"QMenu#AudioQualityMenu::indicator {{ "
+            f"width: 16px; height: 16px; left: 10px; }}"
+        )
+        for q in AUDIO_QUALITY_PRESETS:
+            badge = ""
+            if tier.requires_pro(q.feature_id):
+                badge = "🔒 PRO  " if tier.is_locked(q.feature_id) else "★ PRO  "
+            label = f"{badge}{tr(q.name_key)}  ·  {tr(q.desc_key)}"
+            act = menu.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(q.id == self._audio_export_quality_id)
+            act.triggered.connect(
+                lambda _checked=False, qid=q.id: self._on_audio_quality_picked(qid)
+            )
+        self._audio_quality_btn.setMenu(menu)
+
+    def _on_audio_quality_picked(self, quality_id: str) -> None:
+        from app.audio_tracks import get_audio_quality_preset
+        from app import tier
+        q = get_audio_quality_preset(quality_id)
+        if tier.is_locked(q.feature_id):
+            self._show_audio_upsell(tr(q.name_key))
+            self._build_audio_quality_menu()
+            return
+        self._audio_export_quality_id = quality_id
+        self._refresh_audio_quality_btn_label()
+        self._build_audio_quality_menu()
+
+    def _show_audio_upsell(self, feature_label: str) -> None:
+        """Modal upsell shown when a Free user picks a Pro-only audio
+        format. Mirrors the video editor's upsell — same i18n keys."""
+        from PySide6.QtWidgets import QMessageBox
+        QMessageBox.information(
+            self,
+            tr("upsell.title"),
+            tr("upsell.body", feature=feature_label),
+        )
+
+    def _on_export_clicked(self) -> None:
+        """Render the current clip (trim + cuts + fades + effects) to a
+        standalone audio file. Free tier covers MP3 + WAV; Pro formats
+        appear in the dialog with a "(PRO)" suffix and trigger an
+        upsell when picked by a Free user."""
+        from pathlib import Path
+
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        from app.audio_tracks import CLIP_EXPORT_FORMATS, ClipExporter
+        from app import tier
+
+        if self.clip.source_path is None:
+            return
+
+        # Free formats first (they're the only ones a Free user can
+        # actually pick), Pro formats after — keeps the default useful
+        # without hiding the upsell entirely.
+        order = ["mp3", "wav", "flac", "alac", "aac", "ogg"]
+
+        def _filter_for(key: str) -> str:
+            base = CLIP_EXPORT_FORMATS[key]["filter"]
+            fid = CLIP_EXPORT_FORMATS[key]["feature_id"]
+            if tier.is_locked(fid):
+                return base.replace("(*", "(PRO) (*")
+            return base
+
+        filters = [_filter_for(k) for k in order]
+        all_filters = ";;".join(filters)
+
+        src = Path(self.clip.source_path)
+        # Default filename uses the first Free format (mp3) so save
+        # dialogs land somewhere usable for everyone.
+        default_name = str(src.with_name(f"{src.stem}_edited.mp3"))
+
+        out_path, chosen_filter = QFileDialog.getSaveFileName(
+            self,
+            tr("veditor.sound_editor.export.dialog_title"),
+            default_name,
+            all_filters,
+            filters[0],
+        )
+        if not out_path:
+            return
+
+        format_key = next(
+            (k for k in order if _filter_for(k) == chosen_filter),
+            "mp3",
+        )
+
+        # Pro-gating: if a Free user picked a locked format, show
+        # upsell and abort instead of running the encode.
+        feature_id = CLIP_EXPORT_FORMATS[format_key]["feature_id"]
+        if tier.is_locked(feature_id):
+            label = CLIP_EXPORT_FORMATS[format_key]["label"]
+            self._show_audio_upsell(label)
+            return
+
+        # Make sure the extension on disk matches the chosen format —
+        # users sometimes type a wrong extension in the save dialog.
+        out_path_obj = Path(out_path)
+        expected_ext = CLIP_EXPORT_FORMATS[format_key]["ext"]
+        if out_path_obj.suffix.lower() != expected_ext.lower():
+            out_path_obj = out_path_obj.with_suffix(expected_ext)
+
+        # Disable the button so the user can't spam it. Re-enabled in
+        # the completion/failure slots.
+        self._export_btn.setEnabled(False)
+        self._export_btn.setText(tr("veditor.sound_editor.export.running"))
+
+        self._clip_exporter = ClipExporter(
+            self.clip, str(out_path_obj), format_key, parent=self,
+            quality_id=getattr(self, "_audio_export_quality_id", "standard"),
+        )
+
+        def _on_done(path: str) -> None:
+            self._export_btn.setEnabled(True)
+            self._export_btn.setText(tr("veditor.sound_editor.export"))
+            QMessageBox.information(
+                self,
+                tr("veditor.sound_editor.export.success_title"),
+                tr("veditor.sound_editor.export.success_body", path=path),
+            )
+
+        def _on_failed(reason: str) -> None:
+            self._export_btn.setEnabled(True)
+            self._export_btn.setText(tr("veditor.sound_editor.export"))
+            QMessageBox.warning(
+                self,
+                tr("veditor.sound_editor.export.failed_title"),
+                tr("veditor.sound_editor.export.failed_body", reason=reason),
+            )
+
+        self._clip_exporter.done.connect(_on_done)
+        self._clip_exporter.failed.connect(_on_failed)
+        self._clip_exporter.start()
 
     def _refresh_timeline_row(self) -> None:
         parent = self.parent()
@@ -3146,10 +7066,14 @@ class AudioTrackRow(QWidget):
         self._drag_start_local_ms: int = 0
         self._drag_start_offset_ms: int = 0
         self._resizing_fade: FadeSegment | None = None
+        self._resizing_clip: AudioClip | None = None
         self._resize_side: str = ""
         self._resize_orig_start: int = 0
         self._resize_orig_end: int = 0
         self._waveform_errors: dict[int, str] = {}  # clip_id → reason
+        # Hover tracking for audio-fade edge handles.
+        self._hover_audio_fade_key: tuple | None = None    # (id(clip), id(fade))
+        self._hover_audio_fade_side: str = ""
 
         self.setFixedHeight(self.LABEL_H + self.BAR_H + self.PADDING)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
@@ -3333,6 +7257,7 @@ class AudioTrackRow(QWidget):
         fade, side = self._fade_edge_at(clip, x, y)
         if fade is not None:
             self._resizing_fade = fade
+            self._resizing_clip = clip
             self._resize_side = side
             self._resize_orig_start = fade.start_ms
             self._resize_orig_end = fade.end_ms
@@ -3408,14 +7333,31 @@ class AudioTrackRow(QWidget):
                 self.update()
             return
 
-        # Idle hover: cursor hinting.
+        # Idle hover: cursor hinting + edge-handle hover highlight.
+        prev_key = self._hover_audio_fade_key
+        prev_side = self._hover_audio_fade_side
         hover_clip = self._clip_at_pos(pos)
         if hover_clip is not None:
-            fade, _side = self._fade_edge_at(hover_clip, x, pos.y())
+            fade, side = self._fade_edge_at(hover_clip, x, pos.y())
             if fade is not None:
+                self._hover_audio_fade_key = (id(hover_clip), id(fade))
+                self._hover_audio_fade_side = side
                 self.setCursor(Qt.CursorShape.SizeHorCursor)
+                if (prev_key != self._hover_audio_fade_key
+                        or prev_side != self._hover_audio_fade_side):
+                    self.update()
                 return
+        self._hover_audio_fade_key = None
+        self._hover_audio_fade_side = ""
+        if prev_key is not None:
+            self.update()
         self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def leaveEvent(self, _event) -> None:
+        if self._hover_audio_fade_key is not None:
+            self._hover_audio_fade_key = None
+            self._hover_audio_fade_side = ""
+            self.update()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
@@ -3423,6 +7365,7 @@ class AudioTrackRow(QWidget):
         self._dragging_offset = False
         self._dragging_selection = False
         self._resizing_fade = None
+        self._resizing_clip = None
         self._resize_side = ""
         self._interaction_clip = None
         self.setCursor(Qt.CursorShape.ArrowCursor)
@@ -3686,9 +7629,41 @@ class AudioTrackRow(QWidget):
         pen = QPen(QColor(COLOR_ACCENT_ORANGE)); pen.setWidth(2)
         painter.setPen(pen); painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRect(fx1, bar_rect.top(), max(1, fx2 - fx1), bar_rect.height())
-        hw = 3; hc = QColor(255, 150, 80)
-        painter.fillRect(fx1 - hw // 2, bar_rect.top(), hw, bar_rect.height(), hc)
-        painter.fillRect(fx2 - hw // 2, bar_rect.top(), hw, bar_rect.height(), hc)
+
+        # Edge trim handles (always visible — DAW-style). Hover / drag
+        # detection mirrors TrackRow's scheme.
+        hover_key = (id(clip), id(fade))
+        is_hover = self._hover_audio_fade_key == hover_key
+        is_drag = (
+            self._resizing_fade is fade
+            and self._resizing_clip is clip
+        )
+        left_hot = (is_hover and self._hover_audio_fade_side == "left") \
+            or (is_drag and self._resize_side == "left")
+        right_hot = (is_hover and self._hover_audio_fade_side == "right") \
+            or (is_drag and self._resize_side == "right")
+
+        def _one(x: int, hot: bool) -> None:
+            if is_drag and hot:
+                w = 8; color = QColor("#ff7a4a")
+            elif hot:
+                w = 6; color = QColor("#ff7a4a")
+            else:
+                w = 4; color = QColor(255, 150, 80, 210)
+            painter.fillRect(x - w // 2, bar_rect.top(), w, bar_rect.height(), color)
+            painter.setPen(QPen(QColor(255, 255, 255, 220), 1))
+            n = max(2, w - 2)
+            painter.drawLine(
+                x - n // 2, bar_rect.top() + 2,
+                x + n // 2, bar_rect.top() + 2,
+            )
+            painter.drawLine(
+                x - n // 2, bar_rect.top() + bar_rect.height() - 3,
+                x + n // 2, bar_rect.top() + bar_rect.height() - 3,
+            )
+
+        _one(fx1, left_hot)
+        _one(fx2, right_hot)
 
 
 class _block_signals:
@@ -3726,6 +7701,12 @@ class VideoEditorWindow(QWidget):
         self._strokes: list[Stroke] = []
         self._bubbles: list[SpeechBubble] = []
         self._bubble_items: list[SpeechBubbleItem] = []
+        self._stickers: list = []             # list[Sticker]
+        self._sticker_items: list = []        # list[StickerItem]
+        # Label used to render the currently-active typography actor on
+        # top of the preview. Phase 1 renders statically (no animations
+        # yet). Actors themselves live on each VideoTrack.
+        self._text_preview_label: QLabel | None = None
 
         self.setObjectName("EditorRoot")
         self.setWindowTitle(tr("veditor.title"))
@@ -3803,6 +7784,63 @@ class VideoEditorWindow(QWidget):
         self.export_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.export_btn.clicked.connect(self._on_export)
 
+        # Export quality + format dropdowns sit left of the Export
+        # button. Default: high quality / mp4 — matches the pre-tier
+        # hardcoded values so existing exports stay byte-equivalent.
+        from app.video_exporter import (
+            DEFAULT_FORMAT_ID,
+            DEFAULT_QUALITY_ID,
+            EXPORT_FORMATS,
+            QUALITY_PRESETS,
+            get_export_format,
+            get_quality_preset,
+        )
+        self._export_quality_id = DEFAULT_QUALITY_ID
+        self._export_format_id = DEFAULT_FORMAT_ID
+        self.quality_btn = QToolButton()
+        self.quality_btn.setObjectName("QualityDropdown")
+        self.quality_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.quality_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.quality_btn.setToolTip(tr("veditor.export.quality.tooltip"))
+        self.quality_btn.setMinimumHeight(30)
+        # Inline style so the QToolButton matches the dark dialog theme
+        # (the global ``QPushButton#ToolButton`` rule does not target
+        # QToolButton) and the dropdown arrow gets enough breathing room.
+        self.quality_btn.setStyleSheet(
+            f"QToolButton#QualityDropdown {{ "
+            f"background-color: {COLOR_BG_L2}; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; "
+            f"padding: 4px 28px 4px 12px; font-size: 12px; }}"
+            f"QToolButton#QualityDropdown:hover {{ "
+            f"background-color: {COLOR_BG_L5}; border-color: #5a5a62; }}"
+            f"QToolButton#QualityDropdown::menu-indicator {{ "
+            f"image: none; subcontrol-origin: padding; "
+            f"subcontrol-position: right center; right: 8px; }}"
+        )
+        self._refresh_quality_btn_label()
+        self._build_quality_menu()
+
+        # Format dropdown — sibling of quality_btn, identical styling.
+        self.format_btn = QToolButton()
+        self.format_btn.setObjectName("FormatDropdown")
+        self.format_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.format_btn.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.format_btn.setToolTip(tr("veditor.export.format.tooltip"))
+        self.format_btn.setMinimumHeight(30)
+        self.format_btn.setStyleSheet(
+            f"QToolButton#FormatDropdown {{ "
+            f"background-color: {COLOR_BG_L2}; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; "
+            f"padding: 4px 28px 4px 12px; font-size: 12px; }}"
+            f"QToolButton#FormatDropdown:hover {{ "
+            f"background-color: {COLOR_BG_L5}; border-color: #5a5a62; }}"
+            f"QToolButton#FormatDropdown::menu-indicator {{ "
+            f"image: none; subcontrol-origin: padding; "
+            f"subcontrol-position: right center; right: 8px; }}"
+        )
+        self._refresh_format_btn_label()
+        self._build_format_menu()
+
         self.zoom_out_btn = QPushButton("−")
         self.zoom_out_btn.setObjectName("ToolButton")
         self.zoom_out_btn.setFixedWidth(32)
@@ -3843,6 +7881,8 @@ class VideoEditorWindow(QWidget):
         toolbar.addWidget(self.zoom_in_btn)
         toolbar.addWidget(self.zoom_fit_btn)
         toolbar.addSpacing(10)
+        toolbar.addWidget(self.format_btn)
+        toolbar.addWidget(self.quality_btn)
         toolbar.addWidget(self.export_btn)
         root.addLayout(toolbar)
 
@@ -3994,8 +8034,12 @@ class VideoEditorWindow(QWidget):
         track_bar.addWidget(self.del_track_btn)
         track_bar.addSpacing(20)
 
-        # --- Transitions row — visible "Fade" card ---
+        # --- Transitions row — Fade / Typography / Speed drag cards ---
         track_bar.addWidget(self._build_fade_card())
+        self.typo_card = TypographyCard()
+        track_bar.addWidget(self.typo_card)
+        self.speed_card = SpeedCard()
+        track_bar.addWidget(self.speed_card)
         track_bar.addStretch(1)
         root.addLayout(track_bar)
 
@@ -4032,7 +8076,12 @@ class VideoEditorWindow(QWidget):
         self._tracks_scroll.viewport().installEventFilter(self)
         root.addWidget(self._tracks_scroll, stretch=1)
 
-        # --- Selection / speed buttons row (controls bar) ---
+        # --- Selection / clear-selection row (controls bar) ---
+        # Speed-rate buttons used to live here too, but the SpeedCard
+        # (drag-drop) and right-click context menu cover the same
+        # workflow with less clutter, so the buttons were removed.
+        # ``_speed_buttons`` stays as an empty list so the existing
+        # selection-state update loop is a no-op rather than a bug.
         controls_bar = QWidget()
         controls_bar.setObjectName("ControlsBar")
         sel_row = QHBoxLayout(controls_bar)
@@ -4046,15 +8095,6 @@ class VideoEditorWindow(QWidget):
         sel_row.addStretch(1)
 
         self._speed_buttons: list[QPushButton] = []
-        for speed in SPEED_CHOICES:
-            btn = QPushButton(f"{speed:g}x")
-            btn.setObjectName("ToolButton")
-            btn.setFixedWidth(46)
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setEnabled(False)
-            btn.clicked.connect(lambda _checked, s=speed: self._apply_speed_to_selection(s))
-            sel_row.addWidget(btn)
-            self._speed_buttons.append(btn)
 
         self.clear_sel_btn = QPushButton(tr("veditor.btn.clear_selection"))
         self.clear_sel_btn.setObjectName("ToolButton")
@@ -4063,6 +8103,12 @@ class VideoEditorWindow(QWidget):
         self.clear_sel_btn.clicked.connect(self._clear_selection_active_track)
         sel_row.addWidget(self.clear_sel_btn)
         root.addWidget(controls_bar)
+
+        # --- Color grading section ---
+        root.addWidget(
+            self._make_section_header(tr("veditor.section.color"), "color")
+        )
+        root.addWidget(self._build_color_grading_panel())
 
         # --- Subtitles section ---
         root.addWidget(
@@ -4104,7 +8150,11 @@ class VideoEditorWindow(QWidget):
         row.context_menu.connect(self._on_track_context_menu)
         row.offset_changed.connect(self._on_track_offset_changed)
         row.fades_changed.connect(self._on_track_fades_changed)
+        row.speed_changed.connect(self._on_track_speed_changed)
         row.media_dropped.connect(self._on_media_dropped_on_video_row)
+        row.typography_double_clicked.connect(self._open_typography_editor)
+        row.typography_context_menu.connect(self._show_typography_menu)
+        row.typography_changed.connect(self._on_typography_changed)
         self._track_rows[track.id] = row
         self._tracks_layout.insertWidget(self._tracks_layout.count() - 1, row)
         self._update_tracks_host_width()
@@ -4807,6 +8857,10 @@ class VideoEditorWindow(QWidget):
         for tid, row in self._track_rows.items():
             row.set_active(tid == track_id)
         self._refresh_selection_row()
+        # Color grading is per-track — re-sync the panel so the
+        # sliders/preset reflect whatever the new active track has.
+        if hasattr(self, "_color_sliders"):
+            self._sync_color_panel()
 
     def _refresh_player_tracks(self) -> None:
         # Include audio tracks in the project duration so playback (and
@@ -4923,6 +8977,12 @@ class VideoEditorWindow(QWidget):
         # Nothing to do beyond repaint (done by the row itself) — export path
         # reads the updated list at save time.
         pass
+
+    def _on_track_speed_changed(self, _track_id: int) -> None:
+        # Speed segments affect the player's duration / seek mapping,
+        # so refresh the player's cache. The row has already repainted.
+        self._refresh_player_tracks()
+        self._update_tracks_host_width()
 
     def _on_track_context_menu(self, track_id: int, global_pos: QPoint) -> None:
         self._set_active_track(track_id)
@@ -5275,10 +9335,15 @@ class VideoEditorWindow(QWidget):
 
         from app.drawing import PaintDialog
 
-        # Hide preview bubble items while editing in the dialog; respawn after.
+        # Hide preview bubble / sticker items while editing in the
+        # dialog; respawn after so the dialog owns the interactive
+        # version during the edit.
         for item in list(self._bubble_items):
             item.deleteLater()
         self._bubble_items.clear()
+        for item in list(self._sticker_items):
+            item.deleteLater()
+        self._sticker_items.clear()
 
         dlg = PaintDialog(
             background_pixmap=self._preview_pixmap,
@@ -5286,15 +9351,21 @@ class VideoEditorWindow(QWidget):
             time_ms=self._player.position(),
             parent=self,
             initial_bubbles=self._bubbles,
+            initial_stickers=self._stickers,
         )
         if dlg.exec() == dlg.DialogCode.Accepted:
             self._strokes = dlg.result_strokes()
             self._bubbles = dlg.result_bubbles()
+            self._stickers = dlg.result_stickers()
             self._drawing_canvas.update()
-        # Respawn passive items so the user sees bubbles on the preview.
+        # Respawn passive items so the user sees bubbles / stickers on
+        # the preview.
+        for sticker in self._stickers:
+            self._spawn_sticker_item(sticker)
         for bubble in self._bubbles:
             self._spawn_bubble_item(bubble)
         self._update_bubble_visibility(self._player.position())
+        self._update_sticker_visibility(self._player.position())
 
     # ------------- speech bubbles -------------
 
@@ -5327,6 +9398,216 @@ class VideoEditorWindow(QWidget):
     def _update_bubble_visibility(self, pos_ms: int) -> None:
         for item in self._bubble_items:
             item.setVisible(item.bubble.start_ms <= int(pos_ms))
+
+    # ------------- stickers -------------
+
+    def _spawn_sticker_item(self, sticker):
+        from app.drawing import StickerItem
+        item = StickerItem(sticker, self._drawing_canvas)
+        item.sync_to_parent()
+        item.show()
+        item.moved.connect(lambda it=item: it.sync_to_sticker())
+        item.deleted.connect(lambda it=item, s=sticker: self._remove_sticker(s, it))
+        item.duplicated.connect(lambda s=sticker: self._duplicate_sticker(s))
+        item.raise_requested.connect(lambda s=sticker: self._reorder_sticker(s, +1))
+        item.lower_requested.connect(lambda s=sticker: self._reorder_sticker(s, -1))
+        self._sticker_items.append(item)
+        # Bubbles stay on top of stickers.
+        for b_item in self._bubble_items:
+            b_item.raise_()
+        return item
+
+    def _remove_sticker(self, sticker, item) -> None:
+        try:
+            self._stickers.remove(sticker)
+        except ValueError:
+            pass
+        try:
+            self._sticker_items.remove(item)
+        except ValueError:
+            pass
+        item.deleteLater()
+
+    def _duplicate_sticker(self, sticker) -> None:
+        import copy
+        dup = copy.deepcopy(sticker)
+        dup.x_norm = min(0.95, dup.x_norm + 0.03)
+        dup.y_norm = min(0.95, dup.y_norm + 0.03)
+        current_max = max((s.z_index for s in self._stickers), default=0)
+        dup.z_index = current_max + 1
+        self._stickers.append(dup)
+        self._spawn_sticker_item(dup)
+        self._update_sticker_visibility(self._player.position())
+
+    def _reorder_sticker(self, sticker, direction: int) -> None:
+        if direction > 0:
+            sticker.z_index = max(
+                (s.z_index for s in self._stickers if s is not sticker),
+                default=0,
+            ) + 1
+        else:
+            sticker.z_index = min(
+                (s.z_index for s in self._stickers if s is not sticker),
+                default=0,
+            ) - 1
+        self._sticker_items.sort(key=lambda it: int(it.sticker.z_index))
+        for it in self._sticker_items:
+            it.raise_()
+        for b_item in self._bubble_items:
+            b_item.raise_()
+
+    def _resync_stickers_to_preview(self) -> None:
+        for item in self._sticker_items:
+            item.sync_to_parent()
+
+    def _update_sticker_visibility(self, pos_ms: int) -> None:
+        from app.drawing import _sticker_active
+        t = int(pos_ms)
+        for item in self._sticker_items:
+            item.setVisible(_sticker_active(item.sticker, t))
+
+    # ------------- typography (Phase 1) -------------
+
+    def _ensure_text_preview_label(self) -> QLabel:
+        """Lazily create the QLabel used to render the active text
+        clip on top of the preview. Parented to the drawing canvas so
+        it shares the canvas's coordinate system (which already maps
+        1:1 with the video rect)."""
+        if self._text_preview_label is None:
+            lbl = QLabel(self._drawing_canvas)
+            lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            lbl.setWordWrap(True)
+            lbl.setStyleSheet("background: transparent; color: white;")
+            lbl.hide()
+            self._text_preview_label = lbl
+        return self._text_preview_label
+
+    def _find_typography_actor(self, clip_id: int) -> "tuple[VideoTrack, TextClip] | None":
+        """Locate a typography actor by its id across every video track."""
+        for track in self._tracks:
+            for clip in getattr(track, "typography_actors", []):
+                if clip.id == clip_id:
+                    return track, clip
+        return None
+
+    def _update_text_clip_overlay(self, pos_ms: int) -> None:
+        """Show / hide / restyle the preview text based on active
+        typography actors at ``pos_ms``. Phase 1: static render of the
+        topmost active actor (no animations yet).
+
+        Typography actors live per-VideoTrack in track-local source ms.
+        Active-check: track-local time = project_ms - track.offset_ms,
+        valid when 0 <= local < track.duration_ms and actor.contains(local).
+        """
+        lbl = self._ensure_text_preview_label()
+        project_ms = int(pos_ms)
+
+        active: list[TextClip] = []
+        for track in self._tracks:
+            if track.source_path is None or track.duration_ms <= 0:
+                continue
+            local = project_ms - int(track.offset_ms)
+            if local < 0 or local >= track.duration_ms:
+                continue
+            for clip in getattr(track, "typography_actors", []):
+                if clip.contains(local):
+                    active.append(clip)
+
+        if not active:
+            lbl.hide()
+            return
+
+        # Last registered wins — drawn on top. Future phases may honor
+        # per-actor z-order the way stickers do.
+        clip = active[-1]
+        style = clip.style
+        canvas = self._drawing_canvas
+        cw, ch = canvas.width(), canvas.height()
+        if cw <= 0 or ch <= 0:
+            lbl.hide()
+            return
+
+        font = QFont(style.font_family, int(style.font_size * ch / 1080.0))
+        font.setWeight(QFont.Weight(int(style.font_weight)))
+        lbl.setFont(font)
+        lbl.setStyleSheet(
+            f"background: transparent; color: {style.color};"
+            " font-weight: 700;"
+        )
+        lbl.setText(clip.display_text())
+        lbl.adjustSize()
+
+        lw = min(int(cw * 0.9), max(40, lbl.width()))
+        lh = max(30, lbl.height())
+        cx = int(style.position_x * cw)
+        cy = int(style.position_y * ch)
+        lbl.setGeometry(cx - lw // 2, cy - lh // 2, lw, lh)
+        lbl.show()
+        lbl.raise_()
+
+    def _on_typography_changed(self, track_id: int) -> None:
+        """Called after any drag/resize/drop/add/remove of a typography
+        actor on any video track."""
+        self._update_tracks_host_width()
+        self._update_text_clip_overlay(self._player.position())
+
+    def _open_typography_editor(self, track_id: int, clip_id: int) -> None:
+        """Double-click handler — opens the (Phase 1 stub) editor for
+        the typography actor. Phase 2 replaces this with the full 3-pane
+        modal."""
+        found = self._find_typography_actor(clip_id)
+        if found is None:
+            return
+        _track, clip = found
+        dlg = TypographyEditorDialog(clip, self)
+        if dlg.exec() == dlg.DialogCode.Accepted:
+            row = self._track_rows.get(track_id)
+            if row is not None:
+                row.update()
+            self._update_text_clip_overlay(self._player.position())
+
+    def _show_typography_menu(self, track_id: int, clip_id: int, global_pos) -> None:
+        from PySide6.QtWidgets import QMenu
+
+        found = self._find_typography_actor(clip_id)
+        if found is None:
+            return
+        track, clip = found
+        menu = QMenu(self)
+        a_edit = menu.addAction(tr("veditor.typo_menu.edit"))
+        a_dup = menu.addAction(tr("veditor.typo_menu.duplicate"))
+        menu.addSeparator()
+        a_del = menu.addAction(tr("veditor.typo_menu.delete"))
+
+        chosen = menu.exec(global_pos)
+        if chosen is a_edit:
+            self._open_typography_editor(track_id, clip_id)
+        elif chosen is a_dup:
+            import copy
+            dup = copy.deepcopy(clip)
+            from app.typography import _next_id
+            dup.id = _next_id()
+            # Nudge so the copy shows up after the original.
+            dup.start_ms = clip.end_ms
+            dup.end_ms = dup.start_ms + clip.duration_ms
+            if dup.end_ms > track.duration_ms:
+                dup.end_ms = track.duration_ms
+                dup.start_ms = max(0, dup.end_ms - clip.duration_ms)
+            track.typography_actors.append(dup)
+            track.typography_actors.sort(key=lambda c: c.start_ms)
+            row = self._track_rows.get(track_id)
+            if row is not None:
+                row.update()
+            self._on_typography_changed(track_id)
+        elif chosen is a_del:
+            track.typography_actors = [
+                c for c in track.typography_actors if c.id != clip_id
+            ]
+            row = self._track_rows.get(track_id)
+            if row is not None:
+                row.update()
+            self._on_typography_changed(track_id)
 
     def _scale_preview_to_fit(self) -> None:
         if self._preview_pixmap is None or self._preview_pixmap.isNull():
@@ -5384,6 +9665,10 @@ class VideoEditorWindow(QWidget):
             self._reposition_subtitle_overlay()
         self._sync_overlay_to_video_rect()
         self._resync_bubbles_to_preview()
+        self._resync_stickers_to_preview()
+        # Re-layout the active text clip overlay on canvas resize.
+        if hasattr(self, "_text_track"):
+            self._update_text_clip_overlay(self._player.position())
         # Timeline stretches to viewport width too
         if hasattr(self, "_tracks_scroll"):
             self._update_tracks_host_width()
@@ -5404,8 +9689,10 @@ class VideoEditorWindow(QWidget):
         self._scale_preview_to_fit()
         # Drawings can appear/disappear based on current time
         self._drawing_canvas.update()
-        # Bubbles also gate on the current playhead
+        # Bubbles, stickers, and text clips gate on the current playhead
         self._update_bubble_visibility(pos)
+        self._update_sticker_visibility(pos)
+        self._update_text_clip_overlay(pos)
 
         # Report speed at the currently-rendered track. Translate project time
         # into each track's local time via its offset so speed/cut ranges align.
@@ -5532,6 +9819,385 @@ class VideoEditorWindow(QWidget):
 
     # -------- export --------
 
+    # ---- export quality dropdown ----
+
+    def _refresh_quality_btn_label(self) -> None:
+        from app.video_exporter import get_quality_preset
+        from app import tier
+        q = get_quality_preset(self._export_quality_id)
+        label = tr(q.name_key)
+        if tier.requires_pro(q.feature_id) and not tier.is_locked(q.feature_id):
+            label = f"{label} ★"          # PRO unlocked
+        self.quality_btn.setText(f"{tr('veditor.export.quality.label')}: {label}  ▾")
+
+    def _build_quality_menu(self) -> None:
+        from app.video_exporter import QUALITY_PRESETS
+        from app import tier
+        menu = QMenu(self.quality_btn)
+        menu.setObjectName("QualityMenu")
+        # Override the default menu look with explicit padding, larger
+        # font, and a strong accent for the currently-selected row so
+        # the active quality is obvious at a glance.
+        menu.setStyleSheet(
+            f"QMenu#QualityMenu {{ "
+            f"background-color: {COLOR_BG_L3}; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; "
+            f"border-radius: 6px; padding: 6px; font-size: 12px; }}"
+            f"QMenu#QualityMenu::item {{ "
+            f"padding: 8px 18px 8px 36px; border-radius: 4px; "
+            f"margin: 1px 0px; }}"
+            f"QMenu#QualityMenu::item:selected {{ "
+            f"background-color: {COLOR_BG_L5}; }}"
+            f"QMenu#QualityMenu::item:checked {{ "
+            f"background-color: {COLOR_ACCENT_BLUE}; "
+            f"color: {COLOR_TEXT_PRIMARY}; font-weight: 600; }}"
+            f"QMenu#QualityMenu::indicator {{ "
+            f"width: 16px; height: 16px; left: 10px; }}"
+        )
+        for q in QUALITY_PRESETS:
+            badge = ""
+            if tier.requires_pro(q.feature_id):
+                badge = "🔒 PRO  " if tier.is_locked(q.feature_id) else "★ PRO  "
+            label = f"{badge}{tr(q.name_key)}  ·  {tr(q.desc_key)}"
+            act = menu.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(q.id == self._export_quality_id)
+            act.triggered.connect(
+                lambda _checked=False, qid=q.id: self._on_quality_picked(qid)
+            )
+        self.quality_btn.setMenu(menu)
+
+    def _on_quality_picked(self, quality_id: str) -> None:
+        from app.video_exporter import get_quality_preset
+        from app import tier
+        q = get_quality_preset(quality_id)
+        if tier.is_locked(q.feature_id):
+            self._show_upsell(q.feature_id, tr(q.name_key))
+            # Rebuild the menu so the previous selection's checkmark
+            # is restored (the click toggled it off).
+            self._build_quality_menu()
+            return
+        self._export_quality_id = quality_id
+        self._refresh_quality_btn_label()
+        self._build_quality_menu()
+
+    # ---- export format dropdown ----
+
+    def _refresh_format_btn_label(self) -> None:
+        from app.video_exporter import get_export_format
+        from app import tier
+        f = get_export_format(self._export_format_id)
+        label = tr(f.name_key)
+        if tier.requires_pro(f.feature_id) and not tier.is_locked(f.feature_id):
+            label = f"{label} ★"
+        self.format_btn.setText(f"{tr('veditor.export.format.label')}: {label}  ▾")
+
+    def _build_format_menu(self) -> None:
+        from app.video_exporter import EXPORT_FORMATS
+        from app import tier
+        menu = QMenu(self.format_btn)
+        menu.setObjectName("FormatMenu")
+        menu.setStyleSheet(
+            f"QMenu#FormatMenu {{ "
+            f"background-color: {COLOR_BG_L3}; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; "
+            f"border-radius: 6px; padding: 6px; font-size: 12px; }}"
+            f"QMenu#FormatMenu::item {{ "
+            f"padding: 8px 18px 8px 36px; border-radius: 4px; "
+            f"margin: 1px 0px; }}"
+            f"QMenu#FormatMenu::item:selected {{ "
+            f"background-color: {COLOR_BG_L5}; }}"
+            f"QMenu#FormatMenu::item:checked {{ "
+            f"background-color: {COLOR_ACCENT_BLUE}; "
+            f"color: {COLOR_TEXT_PRIMARY}; font-weight: 600; }}"
+            f"QMenu#FormatMenu::indicator {{ "
+            f"width: 16px; height: 16px; left: 10px; }}"
+        )
+        for f in EXPORT_FORMATS:
+            badge = ""
+            if tier.requires_pro(f.feature_id):
+                badge = "🔒 PRO  " if tier.is_locked(f.feature_id) else "★ PRO  "
+            label = f"{badge}{tr(f.name_key)}  ·  {tr(f.desc_key)}"
+            act = menu.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(f.id == self._export_format_id)
+            act.triggered.connect(
+                lambda _checked=False, fid=f.id: self._on_format_picked(fid)
+            )
+        self.format_btn.setMenu(menu)
+
+    def _on_format_picked(self, format_id: str) -> None:
+        from app.video_exporter import get_export_format
+        from app import tier
+        f = get_export_format(format_id)
+        if tier.is_locked(f.feature_id):
+            self._show_upsell(f.feature_id, tr(f.name_key))
+            self._build_format_menu()
+            return
+        self._export_format_id = format_id
+        self._refresh_format_btn_label()
+        self._build_format_menu()
+
+    def _show_upsell(self, feature_id: str, feature_label: str) -> None:
+        """Generic upsell modal — used whenever a Pro-only control is
+        triggered by a Free user. Title + body i18n keys are shared,
+        but the body interpolates the specific feature label."""
+        QMessageBox.information(
+            self,
+            tr("upsell.title"),
+            tr("upsell.body", feature=feature_label),
+        )
+
+    # ---- color grading panel ----
+
+    def _build_color_grading_panel(self) -> QWidget:
+        """DaVinci-style 3-wheel grading panel.
+
+        Layout:
+        ``[Preset ▾]  ............  [Reset]``
+        ``[Shadows wheel] [Midtones wheel] [Highlights wheel]``
+        ``Brightness slider``
+        ``Contrast   slider``
+        ``Saturation slider``
+        """
+        host = QWidget()
+        host.setObjectName("ColorPanel")
+        outer = QVBoxLayout(host)
+        outer.setContentsMargins(12, 8, 12, 10)
+        outer.setSpacing(8)
+
+        # ---- Top row: preset picker + reset ----
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setSpacing(8)
+
+        self._color_preset_btn = QToolButton()
+        self._color_preset_btn.setObjectName("ColorPresetDropdown")
+        self._color_preset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._color_preset_btn.setPopupMode(
+            QToolButton.ToolButtonPopupMode.InstantPopup,
+        )
+        self._color_preset_btn.setMinimumHeight(28)
+        self._color_preset_btn.setStyleSheet(
+            f"QToolButton#ColorPresetDropdown {{ "
+            f"background-color: {COLOR_BG_L2}; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; "
+            f"padding: 3px 26px 3px 10px; font-size: 11px; }}"
+            f"QToolButton#ColorPresetDropdown:hover {{ "
+            f"background-color: {COLOR_BG_L5}; border-color: #5a5a62; }}"
+            f"QToolButton#ColorPresetDropdown::menu-indicator {{ "
+            f"image: none; subcontrol-origin: padding; "
+            f"subcontrol-position: right center; right: 8px; }}"
+        )
+        head.addWidget(self._color_preset_btn)
+        head.addStretch(1)
+
+        reset_btn = QPushButton(tr("color.reset"))
+        reset_btn.setObjectName("ToolButton")
+        reset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        reset_btn.clicked.connect(self._on_color_reset)
+        head.addWidget(reset_btn)
+
+        outer.addLayout(head)
+
+        # ---- Wheels row: Shadows / Midtones / Highlights ----
+        # Tight spacing + horizontal centring. The wheels are fixed-size
+        # widgets, so leaving stretches on either side keeps them from
+        # smearing across the whole pane width.
+        wheels_row = QHBoxLayout()
+        wheels_row.setContentsMargins(0, 4, 0, 4)
+        wheels_row.setSpacing(4)
+        wheels_row.addStretch(1)
+        self._color_wheels: dict[str, _ColorWheelWidget] = {}
+        wheel_specs = (
+            ("shadows", "color.wheel.shadows"),
+            ("midtones", "color.wheel.midtones"),
+            ("highlights", "color.wheel.highlights"),
+        )
+        for region, label_key in wheel_specs:
+            wheel = _ColorWheelWidget(label=tr(label_key))
+            wheel.value_changed.connect(
+                lambda x, y, r=region: self._on_color_wheel_changed(r, x, y)
+            )
+            wheels_row.addWidget(wheel, 0)
+            self._color_wheels[region] = wheel
+        wheels_row.addStretch(1)
+        outer.addLayout(wheels_row)
+
+        # ---- Knobs: brightness / contrast / saturation ----
+        # Bipolar knobs (centred at 0) match the sound editor's UI
+        # vocabulary, so the editor reads as one consistent surface.
+        # Drag = adjust, double-click = reset to 0, right-click = type
+        # an exact value, mouse wheel = small steps.
+        from app.knob_widget import KnobWidget
+
+        def _signed_pct(v: float) -> str:
+            n = int(round(v))
+            return f"{n:+d}" if n != 0 else "0"
+
+        knobs_row = QHBoxLayout()
+        knobs_row.setContentsMargins(0, 4, 0, 0)
+        knobs_row.setSpacing(6)
+        knobs_row.addStretch(1)
+
+        # Reuse ``self._color_sliders`` as the dict name even though the
+        # values are now KnobWidget instances — _sync_color_panel and
+        # _on_color_slider_changed only call .blockSignals/.setValue/
+        # .value(), all of which the knob exposes too. Keeps the rest
+        # of the panel code unchanged.
+        self._color_sliders: dict = {}
+        self._color_readouts: dict = {}        # unused with knobs
+        knob_specs = (
+            ("brightness", "color.slider.brightness", "blue"),
+            ("contrast",   "color.slider.contrast",   "blue"),
+            ("saturation", "color.slider.saturation", "green"),
+        )
+        for key, label_key, color in knob_specs:
+            knob = KnobWidget(
+                label=tr(label_key),
+                value=0.0,
+                minimum=-100.0,
+                maximum=100.0,
+                default=0.0,
+                color=color,
+                bipolar=True,
+                formatter=_signed_pct,
+            )
+            knob.valueChanged.connect(
+                lambda v, k=key: self._on_color_slider_changed(k, int(round(v)))
+            )
+            knobs_row.addWidget(knob, 0)
+            self._color_sliders[key] = knob
+        knobs_row.addStretch(1)
+        outer.addLayout(knobs_row)
+
+        self._build_color_preset_menu()
+        self._sync_color_panel()
+        return host
+
+    def _active_color_grade(self):
+        """Return the active track's ``ColorGrade``, creating one on the
+        track if missing. Returns ``None`` when no track is active."""
+        track = self._active_track()
+        if track is None:
+            return None
+        if getattr(track, "color_grade", None) is None:
+            from app.color_grading import ColorGrade
+            track.color_grade = ColorGrade()
+        return track.color_grade
+
+    def _sync_color_panel(self) -> None:
+        """Pull current track's grade into wheels + knobs + preset
+        label. Blocks signals so this isn't recorded as a user-driven
+        change. Safe to call before a track exists."""
+        grade = self._active_color_grade()
+        for key, knob in getattr(self, "_color_sliders", {}).items():
+            value = int(getattr(grade, key)) if grade is not None else 0
+            knob.blockSignals(True)
+            knob.setValue(float(value), emit=False)
+            knob.blockSignals(False)
+        for region, wheel in getattr(self, "_color_wheels", {}).items():
+            if grade is not None:
+                x = int(getattr(grade, f"{region}_x"))
+                y = int(getattr(grade, f"{region}_y"))
+            else:
+                x = y = 0
+            wheel.set_value(x, y, emit=False)
+        self._refresh_color_preset_btn_label()
+        self._build_color_preset_menu()
+
+    def _on_color_slider_changed(self, key: str, value: int) -> None:
+        grade = self._active_color_grade()
+        if grade is None:
+            return
+        setattr(grade, key, int(value))
+        # Any manual knob drag detaches the grade from a named preset.
+        if grade.preset_id != "none":
+            grade.preset_id = "custom"
+        self._refresh_color_preset_btn_label()
+        # Re-render the current frame so the preview reflects the change.
+        self._player.set_position(self._player.position())
+
+    def _on_color_wheel_changed(self, region: str, x: int, y: int) -> None:
+        grade = self._active_color_grade()
+        if grade is None:
+            return
+        setattr(grade, f"{region}_x", int(x))
+        setattr(grade, f"{region}_y", int(y))
+        if grade.preset_id != "none":
+            grade.preset_id = "custom"
+        self._refresh_color_preset_btn_label()
+        self._player.set_position(self._player.position())
+
+    def _on_color_reset(self) -> None:
+        grade = self._active_color_grade()
+        if grade is None:
+            return
+        grade.reset()
+        self._sync_color_panel()
+        self._player.set_position(self._player.position())
+
+    def _refresh_color_preset_btn_label(self) -> None:
+        from app.color_grading import get_preset
+        grade = self._active_color_grade()
+        if grade is None:
+            label = tr("color.preset.none")
+        elif grade.preset_id == "custom":
+            label = tr("color.preset.custom")
+        else:
+            label = tr(get_preset(grade.preset_id).name_key)
+        self._color_preset_btn.setText(
+            f"{tr('color.preset.label')}: {label}  ▾"
+        )
+
+    def _build_color_preset_menu(self) -> None:
+        from app.color_grading import COLOR_PRESETS
+        from app import tier
+        menu = QMenu(self._color_preset_btn)
+        menu.setObjectName("ColorPresetMenu")
+        menu.setStyleSheet(
+            f"QMenu#ColorPresetMenu {{ "
+            f"background-color: {COLOR_BG_L3}; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 1px solid {COLOR_BORDER_DEFAULT}; "
+            f"border-radius: 6px; padding: 6px; font-size: 12px; }}"
+            f"QMenu#ColorPresetMenu::item {{ "
+            f"padding: 8px 18px 8px 36px; border-radius: 4px; margin: 1px 0px; }}"
+            f"QMenu#ColorPresetMenu::item:selected {{ "
+            f"background-color: {COLOR_BG_L5}; }}"
+            f"QMenu#ColorPresetMenu::item:checked {{ "
+            f"background-color: {COLOR_ACCENT_BLUE}; "
+            f"color: {COLOR_TEXT_PRIMARY}; font-weight: 600; }}"
+        )
+        grade = self._active_color_grade()
+        current_id = grade.preset_id if grade is not None else "none"
+        for p in COLOR_PRESETS:
+            badge = ""
+            if tier.requires_pro(p.feature_id):
+                badge = "🔒 PRO  " if tier.is_locked(p.feature_id) else "★ PRO  "
+            label = f"{p.icon}  {badge}{tr(p.name_key)}  ·  {tr(p.desc_key)}"
+            act = menu.addAction(label)
+            act.setCheckable(True)
+            act.setChecked(p.id == current_id)
+            act.triggered.connect(
+                lambda _checked=False, pid=p.id: self._on_color_preset_picked(pid)
+            )
+        self._color_preset_btn.setMenu(menu)
+
+    def _on_color_preset_picked(self, preset_id: str) -> None:
+        from app.color_grading import apply_preset, get_preset
+        from app import tier
+        p = get_preset(preset_id)
+        if tier.is_locked(p.feature_id):
+            self._show_upsell(p.feature_id, tr(p.name_key))
+            self._build_color_preset_menu()
+            return
+        grade = self._active_color_grade()
+        if grade is None:
+            return
+        apply_preset(grade, preset_id)
+        self._sync_color_panel()
+        self._player.set_position(self._player.position())
+
     def _on_export(self) -> None:
         track = self._active_track()
         if track is None or track.source_path is None:
@@ -5546,19 +10212,22 @@ class VideoEditorWindow(QWidget):
             )
             return
 
-        default_name = f"{track.source_path.stem}_edited.mp4"
+        from app.video_exporter import get_export_format
+        fmt = get_export_format(getattr(self, "_export_format_id", "mp4"))
+        default_name = f"{track.source_path.stem}_edited{fmt.extension}"
         default_path = track.source_path.parent / default_name
+        filter_str = tr(f"veditor.export.filter.{fmt.id}")
         path, _ = QFileDialog.getSaveFileName(
             self,
             tr("veditor.export.dialog_title"),
             str(default_path),
-            tr("veditor.export.filter"),
+            filter_str,
         )
         if not path:
             return
         out = Path(path)
-        if out.suffix.lower() != ".mp4":
-            out = out.with_suffix(".mp4")
+        if out.suffix.lower() != fmt.extension:
+            out = out.with_suffix(fmt.extension)
 
         from PySide6.QtWidgets import QProgressDialog
 
@@ -5578,6 +10247,34 @@ class VideoEditorWindow(QWidget):
         dlg.setCancelButton(None)
         dlg.show()
 
+        # Typography actors live per-VideoTrack in track-local source
+        # ms. Pass the active track's actors as (start, end, clip)
+        # tuples — they'll be rendered to alpha MOVs and overlaid by
+        # the exporter. (Phase 5b: support actors on inactive tracks
+        # via project-time mapping.)
+        from app import tier
+        all_actors = [
+            (actor.start_ms, actor.end_ms, actor)
+            for actor in getattr(track, "typography_actors", [])
+            if actor.end_ms > actor.start_ms
+        ]
+        if all_actors and tier.is_locked("export.typography"):
+            # Free user has typography placed but it can't ship in the
+            # rendered file. Confirm before stripping so they know why
+            # the output looks different from preview.
+            choice = QMessageBox.warning(
+                self,
+                tr("upsell.title"),
+                tr("export.typography.locked.body", count=len(all_actors)),
+                QMessageBox.StandardButton.Ok | QMessageBox.StandardButton.Cancel,
+                QMessageBox.StandardButton.Ok,
+            )
+            if choice == QMessageBox.StandardButton.Cancel:
+                return
+            text_actors_source: list = []
+        else:
+            text_actors_source = all_actors
+
         thread = VideoExportThread(
             track.source_path,
             out,
@@ -5587,7 +10284,12 @@ class VideoEditorWindow(QWidget):
             cuts=track.cuts,
             fade_segments=track.fades,
             bubbles=self._bubbles,
+            stickers=self._stickers,
             audio_tracks=[t for t in self._audio_tracks if t.is_loaded],
+            text_actors_source=text_actors_source,
+            quality_id=getattr(self, "_export_quality_id", "high"),
+            format_id=getattr(self, "_export_format_id", "mp4"),
+            color_grade=getattr(track, "color_grade", None),
         )
         thread.progress.connect(
             lambda cur, tot: (dlg.setMaximum(max(1, tot)), dlg.setValue(cur))
@@ -5633,6 +10335,13 @@ def _format_ms(ms: int) -> str:
     minutes = total_seconds // 60
     seconds = total_seconds % 60
     return f"{minutes}:{seconds:02d}"
+
+
+def _format_speed(p: float) -> str:
+    """Format a speed factor as '2x' or '0.5x' for UI labels."""
+    if abs(p - round(p)) < 1e-3:
+        return f"{int(round(p))}x"
+    return f"{p:g}x"
 
 
 def _format_size(n: int) -> str:

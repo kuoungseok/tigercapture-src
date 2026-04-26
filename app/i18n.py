@@ -9,6 +9,8 @@ SUPPORTED_LANGUAGES: dict[str, str] = {
     "ko": "한국어",
     "en": "English",
     "ja": "日本語",
+    "zh": "简体中文",
+    "fr": "Français",
     "de": "Deutsch",
 }
 DEFAULT_LANGUAGE = "en"
@@ -24,12 +26,14 @@ _initialized: bool = False
 
 def _load_translations() -> None:
     global _translations
-    from app.locales import de, en, ja, ko
+    from app.locales import de, en, fr, ja, ko, zh
 
     _translations = {
         "ko": ko.TRANSLATIONS,
         "en": en.TRANSLATIONS,
         "ja": ja.TRANSLATIONS,
+        "zh": zh.TRANSLATIONS,
+        "fr": fr.TRANSLATIONS,
         "de": de.TRANSLATIONS,
     }
 

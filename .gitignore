@@ -37,3 +37,8 @@ mac/resources/gifcam.icns
 # Logs / temp
 *.log
 _test_*.py
+
+# Debug captures / scratch zips (not part of the project)
+debugCapture/
+files.zip
+**/files.zip

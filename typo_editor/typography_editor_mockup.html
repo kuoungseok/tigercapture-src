@@ -1,0 +1,936 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>Typography Editor Mockup</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+  body {
+    background: #0a0a0b;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Pretendard', sans-serif;
+    padding: 40px 20px;
+    color: #fff;
+    min-height: 100vh;
+  }
+  .container { max-width: 1300px; margin: 0 auto; }
+
+  /* 타임라인 미니 미리보기 */
+  .timeline-preview {
+    background: #1a1a1c;
+    border: 1px solid #3a3a3e;
+    border-radius: 8px;
+    padding: 16px;
+    margin-bottom: 30px;
+  }
+  .timeline-title { font-size: 12px; color: #8a8a92; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 12px; font-weight: 600; }
+  
+  .timeline-tracks { display: flex; flex-direction: column; gap: 6px; }
+  .track-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    background: #1c1c22;
+    border: 1px solid #2a2a30;
+    border-radius: 6px;
+    padding: 10px 12px;
+    min-height: 56px;
+  }
+  .track-label {
+    font-size: 11px;
+    color: #8a8a92;
+    font-weight: 600;
+    width: 80px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .track-icon {
+    width: 20px;
+    height: 20px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
+    font-weight: 700;
+    font-size: 11px;
+  }
+  .icon-video { background: #378ADD; color: #fff; }
+  .icon-audio { background: #5DCAA5; color: #fff; }
+  .icon-text { background: linear-gradient(135deg, #D85A30, #B83FAD); color: #fff; }
+  
+  .track-content {
+    flex: 1;
+    display: flex;
+    gap: 4px;
+    align-items: center;
+  }
+  
+  /* 비디오 클립 */
+  .video-clip {
+    height: 40px;
+    flex: 1;
+    background: linear-gradient(135deg, #4a5a6a, #6a7a8a);
+    border-radius: 3px;
+    border: 1px solid #378ADD;
+  }
+  
+  /* 텍스트 클립 */
+  .text-clip {
+    height: 40px;
+    background: linear-gradient(135deg, rgba(216, 90, 48, 0.3), rgba(184, 63, 173, 0.3));
+    border: 2px solid #D85A30;
+    border-radius: 4px;
+    padding: 4px 8px;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    position: relative;
+    cursor: pointer;
+    transition: all 0.15s;
+  }
+  .text-clip:hover { 
+    background: linear-gradient(135deg, rgba(216, 90, 48, 0.5), rgba(184, 63, 173, 0.5));
+    border-color: #ff7a4a;
+  }
+  .text-clip.selected {
+    border-color: #ff7a4a;
+    box-shadow: 0 0 0 2px rgba(216, 90, 48, 0.3);
+  }
+  .text-clip-title {
+    font-size: 10px;
+    color: #fff;
+    font-weight: 600;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .text-clip-timing {
+    display: flex;
+    gap: 2px;
+    height: 4px;
+  }
+  .timing-in { flex: 1; background: rgba(93, 202, 165, 0.8); border-radius: 1px; }
+  .timing-hold { flex: 3; background: rgba(255, 255, 255, 0.2); border-radius: 1px; }
+  .timing-out { flex: 1; background: rgba(216, 90, 48, 0.8); border-radius: 1px; }
+  
+  .clip-handle-left, .clip-handle-right {
+    position: absolute;
+    top: 0;
+    bottom: 0;
+    width: 4px;
+    background: rgba(255, 255, 255, 0.3);
+    cursor: ew-resize;
+  }
+  .clip-handle-left { left: 0; border-radius: 3px 0 0 3px; }
+  .clip-handle-right { right: 0; border-radius: 0 3px 3px 0; }
+
+  /* 타이포 에디터 */
+  .editor-window {
+    background: #1a1a1c;
+    border: 1px solid #3a3a3e;
+    border-radius: 10px;
+    overflow: hidden;
+    box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+  }
+  
+  .title-bar {
+    background: #2a2a30;
+    padding: 12px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #3a3a3e;
+  }
+  .title-bar h2 { font-size: 13px; font-weight: 600; }
+  .title-sub { color: #8a8a92; font-size: 12px; margin-left: 8px; }
+
+  /* 프리뷰 영역 */
+  .preview-area {
+    background: #000;
+    padding: 30px;
+    min-height: 240px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+    border-bottom: 1px solid #2a2a30;
+  }
+  .preview-bg {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(135deg, #1a2a4a 0%, #4a2a6a 100%);
+    opacity: 0.3;
+  }
+  .preview-text {
+    font-family: 'Impact', sans-serif;
+    font-size: 72px;
+    font-weight: 900;
+    color: #FFEB3B;
+    text-shadow: 
+      -3px -3px 0 #000,
+      3px -3px 0 #000,
+      -3px 3px 0 #000,
+      3px 3px 0 #000,
+      0 6px 15px rgba(0,0,0,0.5);
+    letter-spacing: 2px;
+    position: relative;
+    z-index: 1;
+    animation: popAnim 2s infinite ease-in-out;
+  }
+  @keyframes popAnim {
+    0% { transform: scale(0.5); opacity: 0; }
+    20% { transform: scale(1.15); opacity: 1; }
+    30% { transform: scale(1); }
+    70% { transform: scale(1); opacity: 1; }
+    100% { transform: scale(0.8); opacity: 0; }
+  }
+  
+  /* 프리뷰 컨트롤 */
+  .preview-controls {
+    background: #0f0f14;
+    padding: 10px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid #2a2a30;
+  }
+  .play-btns { display: flex; gap: 6px; }
+  .play-btn {
+    width: 32px;
+    height: 32px;
+    background: #2a2a30;
+    border: 1px solid #3a3a3e;
+    border-radius: 6px;
+    color: #c8c8d0;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+  }
+  .play-btn:hover { background: #3a3a3e; color: #fff; }
+  .play-btn.primary { background: #378ADD; border-color: #4a9bee; color: #fff; }
+  .time-display {
+    font-family: Monaco, monospace;
+    font-size: 12px;
+    color: #8a8a92;
+  }
+  .time-current { color: #fff; font-weight: 600; }
+
+  /* 3-pane 레이아웃 */
+  .editor-body {
+    display: grid;
+    grid-template-columns: 280px 1fr 280px;
+    min-height: 480px;
+  }
+  
+  .pane {
+    padding: 16px;
+    background: #1a1a1c;
+  }
+  .pane-left { border-right: 1px solid #2a2a30; }
+  .pane-right { border-left: 1px solid #2a2a30; }
+  .pane-center { background: #16161a; }
+  
+  .pane-title {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: #8a8a92;
+    margin-bottom: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .pane-title::before {
+    content: '';
+    width: 3px;
+    height: 12px;
+    background: #D85A30;
+    border-radius: 2px;
+  }
+
+  /* Left: 텍스트 입력 */
+  .text-input-area {
+    width: 100%;
+    min-height: 120px;
+    background: #0f0f14;
+    border: 1px solid #2a2a30;
+    border-radius: 6px;
+    padding: 12px;
+    color: #fff;
+    font-size: 14px;
+    font-family: inherit;
+    resize: vertical;
+    margin-bottom: 16px;
+  }
+  .text-input-area:focus { outline: none; border-color: #D85A30; }
+  
+  .quick-actions {
+    display: flex;
+    gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 16px;
+  }
+  .quick-btn {
+    padding: 5px 10px;
+    background: #1c1c22;
+    border: 1px solid #3a3a3e;
+    color: #c8c8d0;
+    border-radius: 4px;
+    font-size: 10px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .quick-btn:hover { background: #2a2a30; color: #fff; }
+  
+  /* AI 추천 */
+  .ai-suggest {
+    background: linear-gradient(135deg, rgba(216, 90, 48, 0.1), rgba(184, 63, 173, 0.1));
+    border: 1px solid rgba(216, 90, 48, 0.3);
+    border-radius: 6px;
+    padding: 10px;
+    margin-top: 16px;
+  }
+  .ai-suggest-title {
+    font-size: 10px;
+    font-weight: 700;
+    color: #D85A30;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+  }
+  .ai-suggest-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+  .ai-chip {
+    padding: 3px 8px;
+    background: rgba(216, 90, 48, 0.2);
+    border: 1px solid #D85A30;
+    color: #ff7a4a;
+    border-radius: 10px;
+    font-size: 10px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .ai-chip:hover { background: #D85A30; color: #fff; }
+
+  /* Center: 애니메이션 프리셋 */
+  .anim-tabs {
+    display: flex;
+    gap: 2px;
+    margin-bottom: 14px;
+    background: #0f0f14;
+    padding: 3px;
+    border-radius: 6px;
+  }
+  .anim-tab {
+    flex: 1;
+    padding: 6px 8px;
+    background: transparent;
+    border: none;
+    color: #8a8a92;
+    font-size: 10px;
+    font-weight: 700;
+    cursor: pointer;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }
+  .anim-tab.active { background: #D85A30; color: #fff; }
+  
+  .anim-section-title {
+    font-size: 10px;
+    color: #8a8a92;
+    margin: 12px 0 8px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .phase-badge {
+    padding: 1px 6px;
+    border-radius: 8px;
+    font-size: 9px;
+    font-weight: 700;
+  }
+  .phase-in { background: rgba(93, 202, 165, 0.2); color: #5DCAA5; }
+  .phase-hold { background: rgba(74, 155, 238, 0.2); color: #4a9bee; }
+  .phase-out { background: rgba(216, 90, 48, 0.2); color: #D85A30; }
+
+  .anim-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 6px;
+  }
+  .anim-card {
+    background: #1c1c22;
+    border: 1px solid #2a2a30;
+    border-radius: 6px;
+    padding: 8px 4px;
+    cursor: pointer;
+    transition: all 0.15s;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
+    aspect-ratio: 1;
+    justify-content: center;
+  }
+  .anim-card:hover { border-color: #D85A30; background: #2a2a30; }
+  .anim-card.active {
+    background: rgba(216, 90, 48, 0.2);
+    border-color: #D85A30;
+  }
+  .anim-icon { font-size: 20px; }
+  .anim-name { font-size: 9px; color: #c8c8d0; font-weight: 600; text-align: center; }
+  
+  /* Timing 슬라이더 */
+  .timing-section {
+    margin-top: 14px;
+    padding: 12px;
+    background: #0f0f14;
+    border: 1px solid #2a2a30;
+    border-radius: 6px;
+  }
+  .timing-row {
+    display: grid;
+    grid-template-columns: 50px 1fr 50px;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 8px;
+    font-size: 11px;
+  }
+  .timing-row:last-child { margin-bottom: 0; }
+  .timing-label { color: #8a8a92; font-weight: 600; }
+  .timing-slider {
+    height: 4px;
+    background: #2a2a30;
+    border-radius: 2px;
+    position: relative;
+    cursor: pointer;
+  }
+  .timing-fill { height: 100%; border-radius: 2px; }
+  .fill-in { background: #5DCAA5; }
+  .fill-hold { background: #4a9bee; }
+  .fill-out { background: #D85A30; }
+  .timing-value { color: #fff; font-family: Monaco, monospace; font-size: 10px; text-align: right; font-weight: 600; }
+
+  /* Right: 스타일 */
+  .style-group { margin-bottom: 16px; }
+  .style-label {
+    font-size: 10px;
+    color: #8a8a92;
+    font-weight: 600;
+    margin-bottom: 6px;
+    text-transform: uppercase;
+    letter-spacing: 0.8px;
+  }
+  .style-input, .style-select {
+    width: 100%;
+    background: #0f0f14;
+    border: 1px solid #2a2a30;
+    color: #fff;
+    padding: 6px 10px;
+    border-radius: 4px;
+    font-size: 12px;
+    font-family: inherit;
+  }
+  .style-input:focus { outline: none; border-color: #D85A30; }
+  
+  .style-row { display: flex; gap: 6px; }
+  .style-row > * { flex: 1; }
+  
+  .color-picker-wrap {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+  }
+  .color-swatch {
+    width: 32px;
+    height: 32px;
+    border-radius: 4px;
+    border: 2px solid #3a3a3e;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  
+  .weight-btns { display: flex; gap: 2px; }
+  .weight-btn {
+    flex: 1;
+    padding: 6px 4px;
+    background: #1c1c22;
+    border: 1px solid #2a2a30;
+    color: #c8c8d0;
+    font-size: 10px;
+    cursor: pointer;
+    border-radius: 4px;
+    font-weight: 600;
+  }
+  .weight-btn.active { background: #D85A30; border-color: #ff7a4a; color: #fff; }
+  
+  .align-btns { display: flex; gap: 2px; }
+  .align-btn {
+    flex: 1;
+    padding: 8px;
+    background: #1c1c22;
+    border: 1px solid #2a2a30;
+    color: #c8c8d0;
+    cursor: pointer;
+    border-radius: 4px;
+    font-size: 11px;
+  }
+  .align-btn.active { background: #D85A30; border-color: #ff7a4a; color: #fff; }
+
+  /* 하단 액션 */
+  .editor-footer {
+    background: #0f0f14;
+    padding: 12px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-top: 1px solid #2a2a30;
+  }
+  .footer-left { display: flex; gap: 8px; align-items: center; }
+  .footer-btn {
+    padding: 7px 14px;
+    background: #2a2a30;
+    border: 1px solid #3a3a3e;
+    color: #c8c8d0;
+    border-radius: 5px;
+    font-size: 11px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .footer-btn:hover { background: #3a3a3e; color: #fff; }
+  .footer-btn.primary {
+    background: #D85A30;
+    border-color: #ff7a4a;
+    color: #fff;
+  }
+  
+  /* 한국 프리셋 섹션 */
+  .korean-presets {
+    margin-top: 14px;
+    padding: 12px;
+    background: linear-gradient(135deg, rgba(184, 63, 173, 0.1), rgba(216, 90, 48, 0.1));
+    border: 1px solid rgba(184, 63, 173, 0.3);
+    border-radius: 6px;
+  }
+  .korean-preset-title {
+    font-size: 10px;
+    font-weight: 700;
+    color: #B83FAD;
+    margin-bottom: 8px;
+    text-transform: uppercase;
+  }
+  .korean-preset-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4px;
+  }
+  .korean-preset-btn {
+    padding: 6px;
+    background: #1c1c22;
+    border: 1px solid #3a3a3e;
+    color: #c8c8d0;
+    border-radius: 4px;
+    font-size: 10px;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .korean-preset-btn:hover { background: #2a2a30; color: #fff; }
+
+  /* 정보 패널 */
+  .info-panel {
+    background: #141418;
+    border: 1px solid #2a2a30;
+    border-left: 3px solid #D85A30;
+    padding: 18px 22px;
+    border-radius: 6px;
+    margin-top: 30px;
+    font-size: 13px;
+    line-height: 1.7;
+    color: #c8c8d0;
+  }
+  .info-panel h3 { color: #fff; font-size: 14px; margin-bottom: 10px; margin-top: 14px; }
+  .info-panel h3:first-child { margin-top: 0; }
+  .info-panel strong { color: #D85A30; }
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- 타임라인 미니 미리보기 -->
+  <div class="timeline-preview">
+    <div class="timeline-title">Timeline — 텍스트 트랙 추가됨</div>
+    <div class="timeline-tracks">
+      
+      <!-- 비디오 트랙 -->
+      <div class="track-row">
+        <div class="track-label">
+          <div class="track-icon icon-video">V</div>
+          <span>Video</span>
+        </div>
+        <div class="track-content">
+          <div class="video-clip" style="flex: 3;"></div>
+          <div style="flex: 2; background: repeating-linear-gradient(45deg, #2a2a35, #2a2a35 10px, #35353f 10px, #35353f 20px); height: 40px; border-radius: 3px; border: 1px dashed #4a4a52;"></div>
+        </div>
+      </div>
+
+      <!-- 오디오 트랙 -->
+      <div class="track-row">
+        <div class="track-label">
+          <div class="track-icon icon-audio">A</div>
+          <span>Audio</span>
+        </div>
+        <div class="track-content">
+          <div style="flex: 5; height: 40px; background: linear-gradient(135deg, rgba(93, 202, 165, 0.3), rgba(93, 202, 165, 0.5)); border: 1px solid #5DCAA5; border-radius: 3px;"></div>
+        </div>
+      </div>
+
+      <!-- 텍스트 트랙 (하이라이트) -->
+      <div class="track-row">
+        <div class="track-label">
+          <div class="track-icon icon-text">T</div>
+          <span>Text</span>
+        </div>
+        <div class="track-content">
+          <div style="width: 10%; height: 40px;"></div>
+          <div class="text-clip" style="flex: 2;">
+            <div class="clip-handle-left"></div>
+            <div class="text-clip-title">Hello World</div>
+            <div class="text-clip-timing">
+              <div class="timing-in"></div>
+              <div class="timing-hold"></div>
+              <div class="timing-out"></div>
+            </div>
+            <div class="clip-handle-right"></div>
+          </div>
+          <div style="width: 5%; height: 40px;"></div>
+          <div class="text-clip selected" style="flex: 3;">
+            <div class="clip-handle-left"></div>
+            <div class="text-clip-title">대박! 🔥 (이거 선택됨)</div>
+            <div class="text-clip-timing">
+              <div class="timing-in" style="flex: 1;"></div>
+              <div class="timing-hold" style="flex: 4;"></div>
+              <div class="timing-out" style="flex: 1;"></div>
+            </div>
+            <div class="clip-handle-right"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+    <div style="margin-top: 12px; font-size: 11px; color: #8a8a92; text-align: center;">
+      💡 텍스트 클립을 <strong style="color: #D85A30;">더블클릭</strong>하면 아래 타이포 에디터가 열립니다
+    </div>
+  </div>
+
+  <!-- 타이포 에디터 -->
+  <div class="editor-window">
+    
+    <!-- 타이틀바 -->
+    <div class="title-bar">
+      <div>
+        <span style="font-size: 16px;">✒️</span>
+        <strong style="margin-left: 6px;">Typography Editor</strong>
+        <span class="title-sub">— 대박! 🔥</span>
+      </div>
+      <div style="color: #8a8a92;">✕</div>
+    </div>
+
+    <!-- 프리뷰 -->
+    <div class="preview-area">
+      <div class="preview-bg"></div>
+      <div class="preview-text">대박! 🔥</div>
+    </div>
+
+    <!-- 프리뷰 컨트롤 -->
+    <div class="preview-controls">
+      <div class="play-btns">
+        <button class="play-btn primary">▶</button>
+        <button class="play-btn">||</button>
+        <button class="play-btn">↺</button>
+      </div>
+      <div class="time-display">
+        <span class="time-current">0:00.85</span> / 0:03.00
+      </div>
+      <div class="play-btns">
+        <button class="play-btn">🔊</button>
+        <button class="play-btn">⛶</button>
+      </div>
+    </div>
+
+    <!-- 3-pane -->
+    <div class="editor-body">
+      
+      <!-- LEFT: 텍스트 입력 -->
+      <div class="pane pane-left">
+        <div class="pane-title">Text Content</div>
+        <textarea class="text-input-area" placeholder="텍스트를 입력하세요...">대박! 🔥</textarea>
+        
+        <div class="quick-actions">
+          <button class="quick-btn">😀 Emoji</button>
+          <button class="quick-btn">🎲 Random</button>
+          <button class="quick-btn">🔤 Case</button>
+          <button class="quick-btn">⏎ Split Line</button>
+        </div>
+        
+        <!-- AI 추천 -->
+        <div class="ai-suggest">
+          <div class="ai-suggest-title">🤖 AI 애니메이션 추천</div>
+          <div style="font-size: 10px; color: #8a8a92; margin-bottom: 6px;">"!" 감탄사 감지됨</div>
+          <div class="ai-suggest-chips">
+            <div class="ai-chip">Pop ⭐</div>
+            <div class="ai-chip">Shake</div>
+            <div class="ai-chip">Bounce</div>
+          </div>
+        </div>
+
+        <!-- 한국 프리셋 -->
+        <div class="korean-presets">
+          <div class="korean-preset-title">🇰🇷 한국 스타일 프리셋</div>
+          <div class="korean-preset-grid">
+            <button class="korean-preset-btn">예능자막</button>
+            <button class="korean-preset-btn">뉴스자막</button>
+            <button class="korean-preset-btn">드라마자막</button>
+            <button class="korean-preset-btn">Vlog감성</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- CENTER: 애니메이션 -->
+      <div class="pane pane-center">
+        <div class="pane-title">Animation</div>
+        
+        <!-- 카테고리 탭 -->
+        <div class="anim-tabs">
+          <button class="anim-tab">Basic</button>
+          <button class="anim-tab">Text</button>
+          <button class="anim-tab active">Kinetic</button>
+          <button class="anim-tab">Cinema</button>
+          <button class="anim-tab">Trend</button>
+        </div>
+
+        <!-- In Animation -->
+        <div class="anim-section-title">
+          <span>In Animation</span>
+          <span class="phase-badge phase-in">IN 0.5s</span>
+        </div>
+        <div class="anim-grid">
+          <div class="anim-card">
+            <div class="anim-icon">✨</div>
+            <div class="anim-name">Fade</div>
+          </div>
+          <div class="anim-card active">
+            <div class="anim-icon">💥</div>
+            <div class="anim-name">Pop</div>
+          </div>
+          <div class="anim-card">
+            <div class="anim-icon">➡️</div>
+            <div class="anim-name">Slide</div>
+          </div>
+          <div class="anim-card">
+            <div class="anim-icon">🔍</div>
+            <div class="anim-name">Zoom</div>
+          </div>
+        </div>
+
+        <!-- Hold Animation -->
+        <div class="anim-section-title">
+          <span>Hold Animation</span>
+          <span class="phase-badge phase-hold">HOLD 2.0s</span>
+        </div>
+        <div class="anim-grid">
+          <div class="anim-card active">
+            <div class="anim-icon">🎵</div>
+            <div class="anim-name">None</div>
+          </div>
+          <div class="anim-card">
+            <div class="anim-icon">〰️</div>
+            <div class="anim-name">Wave</div>
+          </div>
+          <div class="anim-card">
+            <div class="anim-icon">📳</div>
+            <div class="anim-name">Shake</div>
+          </div>
+          <div class="anim-card">
+            <div class="anim-icon">💫</div>
+            <div class="anim-name">Glitch</div>
+          </div>
+        </div>
+
+        <!-- Out Animation -->
+        <div class="anim-section-title">
+          <span>Out Animation</span>
+          <span class="phase-badge phase-out">OUT 0.5s</span>
+        </div>
+        <div class="anim-grid">
+          <div class="anim-card active">
+            <div class="anim-icon">🌫️</div>
+            <div class="anim-name">Fade</div>
+          </div>
+          <div class="anim-card">
+            <div class="anim-icon">⬅️</div>
+            <div class="anim-name">Slide</div>
+          </div>
+          <div class="anim-card">
+            <div class="anim-icon">🔎</div>
+            <div class="anim-name">Zoom Out</div>
+          </div>
+          <div class="anim-card">
+            <div class="anim-icon">🌀</div>
+            <div class="anim-name">Spin</div>
+          </div>
+        </div>
+
+        <!-- Timing 슬라이더 -->
+        <div class="timing-section">
+          <div style="font-size: 10px; color: #8a8a92; font-weight: 700; margin-bottom: 8px; text-transform: uppercase;">Timing</div>
+          <div class="timing-row">
+            <span class="timing-label">In</span>
+            <div class="timing-slider"><div class="timing-fill fill-in" style="width: 20%;"></div></div>
+            <span class="timing-value">0.5s</span>
+          </div>
+          <div class="timing-row">
+            <span class="timing-label">Hold</span>
+            <div class="timing-slider"><div class="timing-fill fill-hold" style="width: 70%;"></div></div>
+            <span class="timing-value">2.0s</span>
+          </div>
+          <div class="timing-row">
+            <span class="timing-label">Out</span>
+            <div class="timing-slider"><div class="timing-fill fill-out" style="width: 20%;"></div></div>
+            <span class="timing-value">0.5s</span>
+          </div>
+          <div style="display: flex; justify-content: space-between; margin-top: 8px; padding-top: 8px; border-top: 1px solid #2a2a30; font-size: 10px;">
+            <span style="color: #8a8a92;">Total Duration</span>
+            <strong style="color: #fff; font-family: Monaco, monospace;">3.00s</strong>
+          </div>
+        </div>
+      </div>
+
+      <!-- RIGHT: 스타일 -->
+      <div class="pane pane-right">
+        <div class="pane-title">Style</div>
+
+        <div class="style-group">
+          <div class="style-label">Font Family</div>
+          <select class="style-select">
+            <option>Impact</option>
+            <option>Pretendard</option>
+            <option>Noto Sans KR</option>
+            <option>Tmon몬소리 Black</option>
+          </select>
+        </div>
+
+        <div class="style-group">
+          <div class="style-label">Weight</div>
+          <div class="weight-btns">
+            <button class="weight-btn">Thin</button>
+            <button class="weight-btn">Reg</button>
+            <button class="weight-btn">Bold</button>
+            <button class="weight-btn active">Black</button>
+          </div>
+        </div>
+
+        <div class="style-group">
+          <div class="style-label">Size</div>
+          <div class="style-row">
+            <input type="text" class="style-input" value="72" style="flex: 0 0 60px;">
+            <div style="flex: 1; height: 32px; background: #0f0f14; border: 1px solid #2a2a30; border-radius: 4px; position: relative;">
+              <div style="position: absolute; top: 50%; transform: translateY(-50%); left: 0; height: 4px; width: 60%; background: #D85A30; border-radius: 2px; margin: 0 8px;"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="style-group">
+          <div class="style-label">Color</div>
+          <div class="color-picker-wrap">
+            <div class="color-swatch" style="background: #FFEB3B;"></div>
+            <input type="text" class="style-input" value="#FFEB3B">
+          </div>
+        </div>
+
+        <div class="style-group">
+          <div class="style-label">Align</div>
+          <div class="align-btns">
+            <button class="align-btn">⬅</button>
+            <button class="align-btn active">◆</button>
+            <button class="align-btn">➡</button>
+          </div>
+        </div>
+
+        <div class="style-group">
+          <div class="style-label">Outline</div>
+          <div class="style-row">
+            <div class="color-swatch" style="background: #000; width: 24px; height: 24px;"></div>
+            <input type="text" class="style-input" value="4px" style="flex: 1;">
+          </div>
+        </div>
+
+        <div class="style-group">
+          <div class="style-label">Shadow</div>
+          <div class="style-row">
+            <div class="color-swatch" style="background: #000; width: 24px; height: 24px;"></div>
+            <input type="text" class="style-input" value="3px" style="flex: 1;">
+          </div>
+        </div>
+
+        <button class="footer-btn" style="width: 100%; margin-top: 8px;">
+          + More Effects
+        </button>
+      </div>
+
+    </div>
+
+    <!-- 하단 -->
+    <div class="editor-footer">
+      <div class="footer-left">
+        <button class="footer-btn">💾 Save as Template</button>
+        <button class="footer-btn">📂 Load Template</button>
+      </div>
+      <div class="footer-left">
+        <button class="footer-btn">Cancel</button>
+        <button class="footer-btn primary">✓ Apply</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 정보 패널 -->
+  <div class="info-panel">
+    <h3>🎬 주요 기능</h3>
+    <p>
+      • <strong>텍스트 트랙 추가</strong> — 비디오/오디오 트랙과 동일 구조, T 아이콘 드래그로 클립 생성<br>
+      • <strong>클립 길이 = 애니메이션 길이</strong> — 가장자리 드래그로 조절<br>
+      • <strong>더블클릭으로 에디터 오픈</strong> — 3-pane 레이아웃 (Text / Animation / Style)<br>
+      • <strong>In-Hold-Out 3단계</strong> — After Effects 구조 차용<br>
+      • <strong>카테고리별 프리셋</strong> — Basic/Text/Kinetic/Cinema/Trend<br>
+      • <strong>AI 자동 추천</strong> — 텍스트 내용 분석해서 어울리는 애니메이션 제안<br>
+      • <strong>한국 스타일 프리셋</strong> — 예능자막/뉴스자막/드라마/Vlog
+    </p>
+    
+    <h3>🚀 차별화 포인트</h3>
+    <p>
+      • <strong>카테고리 5탭</strong> — 초보자 친화적 (CapCut 방식)<br>
+      • <strong>AI 추천</strong> — 텍스트 분석 기반 (다른 툴엔 없음)<br>
+      • <strong>한국 예능 자막</strong> — 한국 시장 특화 (Vrew, 곰믹스보다 디테일)<br>
+      • <strong>템플릿 저장/공유</strong> — 사용자 자산 축적<br>
+      • <strong>In-Hold-Out 분리</strong> — 자막과 키네틱 타이포그래피 모두 지원
+    </p>
+
+    <h3>🎨 디자인 원칙</h3>
+    <p>
+      • <strong>텍스트 트랙 = 보라/주황 그라데이션</strong> (비디오=파랑, 오디오=초록과 구분)<br>
+      • <strong>In/Hold/Out = 초록/파랑/주황</strong> (단계별 시각화)<br>
+      • <strong>프리뷰는 실제 검정 배경</strong> (영상 위에 얹히는 느낌 재현)<br>
+      • <strong>3-pane</strong> (텍스트 / 애니메이션 / 스타일 명확 분리)
+    </p>
+  </div>
+
+</div>
+
+</body>
+</html>

@@ -64,6 +64,17 @@ QPushButton#BubbleBtn {
 QPushButton#BubbleBtn:hover {
     background-color: #73d6b3;
 }
+QPushButton#StickerBtn {
+    background-color: #D85A30;
+    color: #fff;
+    border: none;
+    border-radius: 6px;
+    padding: 7px 14px;
+    font-weight: 700;
+}
+QPushButton#StickerBtn:hover {
+    background-color: #ff7a4a;
+}
 
 QDialogButtonBox QPushButton {
     min-width: 90px;
@@ -482,6 +493,7 @@ class PaintDialog(QDialog):
         time_ms: int,
         parent: QWidget | None = None,
         initial_bubbles: list["SpeechBubble"] | None = None,
+        initial_stickers: list["Sticker"] | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(tr("paint.title"))
@@ -489,6 +501,8 @@ class PaintDialog(QDialog):
         self._time_ms = int(time_ms)
         self._bubbles: list[SpeechBubble] = list(initial_bubbles or [])
         self._bubble_items: list[SpeechBubbleItem] = []
+        self._stickers: list["Sticker"] = list(initial_stickers or [])
+        self._sticker_items: list["StickerItem"] = []
 
         # Make the dialog large (paint-app feel). Cap at screen size.
         if parent is not None:
@@ -543,11 +557,19 @@ class PaintDialog(QDialog):
         self.bubble_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.bubble_btn.clicked.connect(self._add_bubble)
 
+        # Add-sticker button — PNG stickers / watermarks.
+        self.sticker_btn = QPushButton(tr("sticker.add_button"))
+        self.sticker_btn.setObjectName("StickerBtn")
+        self.sticker_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.sticker_btn.setToolTip(tr("sticker.add_tooltip"))
+        self.sticker_btn.clicked.connect(self._add_sticker)
+
         toolbar.addWidget(self.pen_btn)
         toolbar.addWidget(self.eraser_btn)
         toolbar.addWidget(self.clear_btn)
         toolbar.addSpacing(12)
         toolbar.addWidget(self.bubble_btn)
+        toolbar.addWidget(self.sticker_btn)
         toolbar.addSpacing(18)
 
         # Width + opacity sliders
@@ -653,6 +675,8 @@ class PaintDialog(QDialog):
         super().showEvent(event)
         if not self._bubble_items and self._bubbles:
             self._spawn_initial_bubbles()
+        if not self._sticker_items and self._stickers:
+            self._spawn_initial_stickers()
 
     def _make_palette_button(self, rgb: tuple[int, int, int]) -> QPushButton:
         btn = QPushButton()
@@ -761,6 +785,14 @@ class PaintDialog(QDialog):
         for item in getattr(self, "_bubble_items", []):
             item.sync_to_parent()
             item.raise_()
+        # Same for stickers — stickers live under bubbles so the user can
+        # still edit bubble text over a watermark.
+        for item in getattr(self, "_sticker_items", []):
+            item.sync_to_parent()
+            item.raise_()
+        # Re-raise bubbles on top of stickers.
+        for item in getattr(self, "_bubble_items", []):
+            item.raise_()
 
     def _add_bubble(self) -> None:
         bubble = SpeechBubble(
@@ -801,6 +833,124 @@ class PaintDialog(QDialog):
 
     def result_bubbles(self) -> list["SpeechBubble"]:
         return list(self._bubbles)
+
+    def result_stickers(self) -> list["Sticker"]:
+        return list(self._stickers)
+
+    # ---- sticker management ----
+
+    def _add_sticker(self) -> None:
+        """Prompt for a PNG, add a Sticker at the default position, and
+        spawn an interactive StickerItem on the canvas."""
+        from pathlib import Path
+
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            tr("sticker.pick_title"),
+            str(Path.home()),
+            tr("sticker.pick_filter"),
+        )
+        if not path:
+            return
+        p = Path(path)
+        if not p.exists():
+            return
+
+        # Guess a sensible default size: fit the PNG at up to 25% of the
+        # canvas width, preserving its aspect ratio.
+        pm = QPixmap(str(p))
+        if pm.isNull():
+            QMessageBox.warning(
+                self,
+                tr("sticker.error.title"),
+                tr("sticker.error.decode", name=p.name),
+            )
+            return
+
+        canvas_w = max(1, self.canvas.width())
+        canvas_h = max(1, self.canvas.height())
+        target_w = min(pm.width(), int(canvas_w * 0.25))
+        aspect = pm.height() / max(1, pm.width())
+        target_h = int(target_w * aspect)
+        # Clamp to canvas
+        target_w = min(target_w, canvas_w - 2)
+        target_h = min(target_h, canvas_h - 2)
+        w_norm = max(0.05, target_w / canvas_w)
+        h_norm = max(0.05, target_h / canvas_h)
+
+        sticker = Sticker(
+            png_path=str(p),
+            x_norm=0.15,
+            y_norm=0.15,
+            width_norm=w_norm,
+            height_norm=h_norm,
+            start_ms=self._time_ms,
+            end_ms=-1,
+        )
+        self._stickers.append(sticker)
+        self._spawn_sticker_item(sticker)
+
+    def _spawn_sticker_item(self, sticker: "Sticker") -> "StickerItem":
+        item = StickerItem(sticker, self.canvas)
+        item.sync_to_parent()
+        item.show()
+        item.raise_()
+        # Re-raise bubbles so they sit on top of stickers (stickers =
+        # backdrop, bubbles = foreground captions).
+        for b_item in self._bubble_items:
+            b_item.raise_()
+        item.moved.connect(lambda it=item: it.sync_to_sticker())
+        item.deleted.connect(lambda it=item, s=sticker: self._remove_sticker(s, it))
+        item.duplicated.connect(lambda s=sticker: self._duplicate_sticker(s))
+        item.raise_requested.connect(lambda s=sticker: self._reorder_sticker(s, +1))
+        item.lower_requested.connect(lambda s=sticker: self._reorder_sticker(s, -1))
+        self._sticker_items.append(item)
+        return item
+
+    def _remove_sticker(self, sticker: "Sticker", item: "StickerItem") -> None:
+        if sticker in self._stickers:
+            self._stickers.remove(sticker)
+        if item in self._sticker_items:
+            self._sticker_items.remove(item)
+        item.deleteLater()
+
+    def _spawn_initial_stickers(self) -> None:
+        for sticker in self._stickers:
+            self._spawn_sticker_item(sticker)
+
+    def _duplicate_sticker(self, sticker: "Sticker") -> None:
+        import copy
+        dup = copy.deepcopy(sticker)
+        # Nudge the copy a little so it doesn't sit exactly on top.
+        dup.x_norm = min(0.95, dup.x_norm + 0.03)
+        dup.y_norm = min(0.95, dup.y_norm + 0.03)
+        # Put new stickers on top by default.
+        current_max_z = max((s.z_index for s in self._stickers), default=0)
+        dup.z_index = current_max_z + 1
+        self._stickers.append(dup)
+        self._spawn_sticker_item(dup)
+
+    def _reorder_sticker(self, sticker: "Sticker", direction: int) -> None:
+        """direction > 0 → send to front; < 0 → send to back."""
+        if direction > 0:
+            sticker.z_index = max(
+                (s.z_index for s in self._stickers if s is not sticker),
+                default=0,
+            ) + 1
+        else:
+            sticker.z_index = min(
+                (s.z_index for s in self._stickers if s is not sticker),
+                default=0,
+            ) - 1
+        # Re-stack widgets: highest z_index on top.
+        self._sticker_items.sort(key=lambda it: int(it.sticker.z_index))
+        for it in self._sticker_items:
+            it.raise_()
+        # Bubbles always float above stickers.
+        for b_item in self._bubble_items:
+            b_item.raise_()
 
 
 # ---------------------------------------------------------------------------
@@ -1180,3 +1330,553 @@ def _draw_wrapped_text(draw, text: str, font, box, fill) -> None:
             break
         draw.text((x0, y), ln, font=font, fill=fill)
         y += line_h
+
+
+# ---------------------------------------------------------------------------
+#  PNG sticker / watermark
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class Sticker:
+    """A PNG image stamped onto the preview. Coords are normalized to the
+    video rect. The PNG's own alpha channel is preserved (partial
+    transparency passes through); ``opacity`` multiplies on top of that
+    for global dimming (watermark use case)."""
+
+    png_path: str = ""                 # absolute path to the source PNG
+    x_norm: float = 0.15
+    y_norm: float = 0.15
+    width_norm: float = 0.2            # un-rotated footprint
+    height_norm: float = 0.2
+    opacity: float = 100.0             # 0..100 (%)
+    rotation_deg: float = 0.0          # 0..359
+    start_ms: int = 0                  # when the sticker appears
+    end_ms: int = -1                   # -1 = stays until the end
+    z_index: int = 0                   # lower draws first (bottom)
+
+
+def _sticker_active(sticker: Sticker, time_ms: int) -> bool:
+    """Return True if the sticker is visible at ``time_ms``."""
+    if time_ms < int(sticker.start_ms):
+        return False
+    if sticker.end_ms is not None and int(sticker.end_ms) >= 0:
+        if time_ms >= int(sticker.end_ms):
+            return False
+    return True
+
+
+def _load_sticker_pixmap_cache() -> dict:
+    """Shared QPixmap cache so repeated paints don't reload the PNG from
+    disk. Keyed by ``(path, mtime)`` so edits on disk invalidate."""
+    if not hasattr(_load_sticker_pixmap_cache, "_cache"):
+        _load_sticker_pixmap_cache._cache = {}
+    return _load_sticker_pixmap_cache._cache
+
+
+def get_sticker_pixmap(path: str) -> QPixmap | None:
+    """Load (and cache) the sticker's source PNG as a QPixmap."""
+    from pathlib import Path
+    if not path:
+        return None
+    try:
+        mtime = Path(path).stat().st_mtime
+    except OSError:
+        return None
+    cache = _load_sticker_pixmap_cache()
+    key = (path, mtime)
+    hit = cache.get(key)
+    if hit is not None:
+        return hit
+    pm = QPixmap(path)
+    if pm.isNull():
+        return None
+    cache[key] = pm
+    return pm
+
+
+def compose_pil_stickers(frame, stickers: list[Sticker], time_ms: int):
+    """Burn active PNG stickers onto the PIL frame. Returns the mutated
+    frame (chain-friendly). Supports alpha, rotation, global opacity, and
+    time windows."""
+    from PIL import Image
+
+    active = [s for s in (stickers or []) if _sticker_active(s, int(time_ms))]
+    if not active:
+        return frame
+    # Respect z_index: lower renders first, higher lands on top.
+    active = sorted(active, key=lambda s: int(getattr(s, "z_index", 0)))
+
+    if frame.mode != "RGBA":
+        out = frame.convert("RGBA")
+    else:
+        out = frame.copy()
+    W, H = out.size
+
+    for s in active:
+        src = _open_sticker_pil(s.png_path)
+        if src is None:
+            continue
+        tw = max(1, int(s.width_norm * W))
+        th = max(1, int(s.height_norm * H))
+        tx = int(s.x_norm * W)
+        ty = int(s.y_norm * H)
+
+        # Resize (preserving internal alpha), then apply global opacity,
+        # then rotate. Order matters: rotating *after* resize keeps edges
+        # sharp; opacity *before* rotate lets the rotate's bilinear sampler
+        # mix dimmed pixels (visually identical, computationally cheaper).
+        img = src.resize((tw, th), Image.LANCZOS)
+
+        opacity = max(0.0, min(1.0, float(s.opacity) / 100.0))
+        if opacity < 0.999:
+            alpha = img.getchannel("A").point(lambda v: int(v * opacity))
+            img.putalpha(alpha)
+
+        rot = float(s.rotation_deg) % 360.0
+        if abs(rot) > 0.05:
+            img = img.rotate(-rot, resample=Image.BICUBIC, expand=True)
+
+        # Paste centered on (tx + tw/2, ty + th/2) so rotation pivots on
+        # the sticker's visual center — matches Qt's QPainter.rotate.
+        cx = tx + tw // 2
+        cy = ty + th // 2
+        px = cx - img.size[0] // 2
+        py = cy - img.size[1] // 2
+        out.alpha_composite(img, (px, py))
+
+    if frame.mode != "RGBA":
+        return out.convert(frame.mode)
+    return out
+
+
+def _open_sticker_pil(path: str):
+    """PIL-side loader with a tiny cache. Returns None on decode error."""
+    from pathlib import Path
+    from PIL import Image
+    if not path:
+        return None
+    if not hasattr(_open_sticker_pil, "_cache"):
+        _open_sticker_pil._cache = {}
+    try:
+        mtime = Path(path).stat().st_mtime
+    except OSError:
+        return None
+    key = (path, mtime)
+    hit = _open_sticker_pil._cache.get(key)
+    if hit is not None:
+        return hit
+    try:
+        img = Image.open(path).convert("RGBA")
+    except Exception:
+        return None
+    _open_sticker_pil._cache[key] = img
+    return img
+
+
+def render_sticker_to_png(
+    sticker: Sticker, width: int, height: int, out_path: str
+) -> bool:
+    """Render a single sticker to a transparent PNG at the given frame
+    size. Used by the MP4 exporter as an FFmpeg overlay input."""
+    from PIL import Image
+    if width <= 0 or height <= 0:
+        return False
+    canvas = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    canvas = compose_pil_stickers(canvas, [sticker], int(sticker.start_ms))
+    try:
+        canvas.save(out_path, "PNG")
+        return True
+    except Exception:
+        return False
+
+
+class StickerItem(QWidget):
+    """Interactive, draggable, rotatable PNG sticker placed on the preview.
+
+    Mirrors the SpeechBubbleItem pattern (norm-coord widget living on
+    the DrawingCanvas): drag-to-move, corner-grip resize (aspect-locked
+    by default, Shift unlocks), ✕ delete button, right-click menu for
+    opacity / rotation / time window / z-order / duplicate."""
+
+    moved = Signal()
+    deleted = Signal()
+    duplicated = Signal()         # parent inserts a copy into its list
+    raise_requested = Signal()    # z-order: send to front
+    lower_requested = Signal()    # z-order: send to back
+
+    HANDLE_SIZE = 18
+    GIZMO_VISUAL_PX = 9         # painted square at each handle
+    GIZMO_HIT_PX = 14           # generous hit area
+    MIN_WIDTH = 24
+    MIN_HEIGHT = 24
+    # 8 resize handles. Names encode direction: t=top, b=bottom,
+    # l=left, r=right; corners combine two letters.
+    HANDLES = ("tl", "t", "tr", "l", "r", "bl", "b", "br")
+
+    def __init__(self, sticker: Sticker, parent: QWidget) -> None:
+        super().__init__(parent)
+        self.sticker = sticker
+        self._dragging = False
+        self._resizing = False
+        self._resize_handle: str = ""        # which gizmo is being dragged
+        self._drag_offset = QPoint()
+        self._resize_start_geom = QRect()
+        self._resize_start_mouse = QPoint()
+        self._resize_free_aspect = False
+
+        self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setMouseTracking(True)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._on_context_menu)
+
+        # Delete button — top-right so it doesn't crowd the usual top-left
+        # content area of watermarks.
+        self._del_btn = QPushButton("✕", self)
+        self._del_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._del_btn.setToolTip(tr("sticker.delete"))
+        self._del_btn.setFixedSize(self.HANDLE_SIZE, self.HANDLE_SIZE)
+        self._del_btn.setStyleSheet(
+            "QPushButton { background: #c53030; color: white; border: none; "
+            "border-radius: 9px; font-size: 10px; font-weight: 700; }"
+            "QPushButton:hover { background: #e54646; }"
+        )
+        self._del_btn.clicked.connect(self.deleted.emit)
+
+    # ---- layout ----
+
+    def resizeEvent(self, _e) -> None:
+        self._del_btn.move(self.width() - self.HANDLE_SIZE - 4, 4)
+
+    def paintEvent(self, _e) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+
+        pm = get_sticker_pixmap(self.sticker.png_path)
+        if pm is None or pm.isNull():
+            # Decode failed — paint a placeholder box so the user can
+            # still interact with / delete the sticker.
+            painter.fillRect(self.rect(), QColor(200, 50, 50, 120))
+            painter.setPen(QPen(QColor(255, 255, 255), 1))
+            painter.drawText(
+                self.rect(), Qt.AlignmentFlag.AlignCenter, "PNG error"
+            )
+            self._paint_grip(painter)
+            return
+
+        # Global opacity on top of the PNG's own alpha.
+        opacity = max(0.0, min(1.0, float(self.sticker.opacity) / 100.0))
+        painter.setOpacity(opacity)
+
+        rot = float(self.sticker.rotation_deg) % 360.0
+        if abs(rot) < 0.05:
+            painter.drawPixmap(self.rect(), pm, pm.rect())
+        else:
+            # Rotate around the widget center so scaling keeps the
+            # pivot stable. The widget's own rect doesn't expand with
+            # rotation here (simpler bookkeeping); very steep angles
+            # will clip slightly at the corners in preview. Export is
+            # PIL-based and doesn't clip.
+            cx = self.width() / 2.0
+            cy = self.height() / 2.0
+            painter.translate(cx, cy)
+            painter.rotate(rot)
+            painter.translate(-cx, -cy)
+            painter.drawPixmap(self.rect(), pm, pm.rect())
+
+        painter.resetTransform()
+        painter.setOpacity(1.0)
+        self._paint_gizmos(painter)
+
+    # ---- gizmo geometry ----
+
+    def _gizmo_centers(self) -> dict:
+        """Map handle name → (cx, cy) in widget-local coords."""
+        w, h = self.width(), self.height()
+        return {
+            "tl": (0,        0),
+            "t":  (w // 2,   0),
+            "tr": (w,        0),
+            "l":  (0,        h // 2),
+            "r":  (w,        h // 2),
+            "bl": (0,        h),
+            "b":  (w // 2,   h),
+            "br": (w,        h),
+        }
+
+    def _handle_hit_rect(self, name: str) -> QRect:
+        cx, cy = self._gizmo_centers()[name]
+        s = self.GIZMO_HIT_PX
+        return QRect(cx - s // 2, cy - s // 2, s, s)
+
+    def _handle_visual_rect(self, name: str) -> QRect:
+        cx, cy = self._gizmo_centers()[name]
+        s = self.GIZMO_VISUAL_PX
+        return QRect(cx - s // 2, cy - s // 2, s, s)
+
+    def _handle_at(self, pos: QPoint) -> str:
+        """Return the handle name under ``pos``, or empty string."""
+        for name in self.HANDLES:
+            if self._handle_hit_rect(name).contains(pos):
+                return name
+        return ""
+
+    @staticmethod
+    def _cursor_for_handle(name: str):
+        diag1 = Qt.CursorShape.SizeFDiagCursor   # ↘ ↖ — "tl" + "br"
+        diag2 = Qt.CursorShape.SizeBDiagCursor   # ↗ ↙ — "tr" + "bl"
+        return {
+            "tl": diag1, "br": diag1,
+            "tr": diag2, "bl": diag2,
+            "t": Qt.CursorShape.SizeVerCursor,
+            "b": Qt.CursorShape.SizeVerCursor,
+            "l": Qt.CursorShape.SizeHorCursor,
+            "r": Qt.CursorShape.SizeHorCursor,
+        }.get(name, Qt.CursorShape.ArrowCursor)
+
+    def _paint_gizmos(self, painter: QPainter) -> None:
+        """Draw the 8 resize handles as small red squares with a
+        white border. Visible on top of the sticker so they read as
+        the active selection chrome."""
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        for name in self.HANDLES:
+            r = self._handle_visual_rect(name)
+            # Drop shadow for legibility on light backgrounds.
+            painter.fillRect(r.adjusted(1, 1, 1, 1), QColor(0, 0, 0, 130))
+            painter.fillRect(r, QColor("#E54646"))
+            painter.setPen(QPen(QColor(255, 255, 255), 1.5))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(r)
+
+    # ---- interaction ----
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        pos = event.position().toPoint()
+        # 1. Resize handles take priority over body drag / delete btn.
+        handle = self._handle_at(pos)
+        if handle:
+            self._resizing = True
+            self._resize_handle = handle
+            self._resize_start_geom = QRect(
+                self.x(), self.y(), self.width(), self.height()
+            )
+            self._resize_start_mouse = event.globalPosition().toPoint()
+            # Shift unlocks aspect for corner handles. Edge handles
+            # are always single-axis regardless of modifiers.
+            self._resize_free_aspect = bool(
+                event.modifiers() & Qt.KeyboardModifier.ShiftModifier
+            )
+            self.setCursor(self._cursor_for_handle(handle))
+            return
+        if self.childAt(pos) is self._del_btn:
+            return
+        self._dragging = True
+        self._drag_offset = pos
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        pos = event.position().toPoint()
+        if self._resizing and self._resize_handle:
+            self._apply_resize(event.globalPosition().toPoint())
+            return
+        if self._dragging:
+            parent = self.parentWidget()
+            if parent is None:
+                return
+            new_global = event.globalPosition().toPoint() - self._drag_offset
+            new_local = parent.mapFromGlobal(new_global)
+            nx = max(0, min(parent.width() - self.width(), new_local.x()))
+            ny = max(0, min(parent.height() - self.height(), new_local.y()))
+            self.move(nx, ny)
+            return
+        # Idle hover — pick the cursor for whichever handle is under
+        # the pointer (or default arrow elsewhere).
+        handle = self._handle_at(pos)
+        if handle:
+            self.setCursor(self._cursor_for_handle(handle))
+        else:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+
+    def _apply_resize(self, mouse_global: QPoint) -> None:
+        """Re-position / resize the widget based on the current handle
+        and mouse delta. Handles aspect lock for corners and parent-
+        bounds clamping."""
+        handle = self._resize_handle
+        start = self._resize_start_geom
+        dx = mouse_global.x() - self._resize_start_mouse.x()
+        dy = mouse_global.y() - self._resize_start_mouse.y()
+
+        x, y, w, h = start.x(), start.y(), start.width(), start.height()
+        new_x, new_y, new_w, new_h = x, y, w, h
+
+        if "l" in handle:
+            new_x = x + dx
+            new_w = w - dx
+        elif "r" in handle:
+            new_w = w + dx
+        if "t" in handle:
+            new_y = y + dy
+            new_h = h - dy
+        elif "b" in handle:
+            new_h = h + dy
+
+        # Min-size enforcement (anchor stays on the *opposite* edge).
+        if new_w < self.MIN_WIDTH:
+            if "l" in handle:
+                new_x = (x + w) - self.MIN_WIDTH
+            new_w = self.MIN_WIDTH
+        if new_h < self.MIN_HEIGHT:
+            if "t" in handle:
+                new_y = (y + h) - self.MIN_HEIGHT
+            new_h = self.MIN_HEIGHT
+
+        # Aspect lock for corners (Shift held during press → unlocked).
+        is_corner = handle in ("tl", "tr", "bl", "br")
+        if is_corner and not self._resize_free_aspect and w > 0 and h > 0:
+            aspect = w / h
+            # Pick the dimension with the larger absolute change as
+            # the driver, then derive the other. Matches Photoshop.
+            if abs(new_w - w) >= abs(new_h - h):
+                target_w = new_w
+                target_h = max(self.MIN_HEIGHT, int(round(target_w / aspect)))
+            else:
+                target_h = new_h
+                target_w = max(self.MIN_WIDTH, int(round(target_h * aspect)))
+            if "l" in handle:
+                new_x = (x + w) - target_w
+            if "t" in handle:
+                new_y = (y + h) - target_h
+            new_w = target_w
+            new_h = target_h
+
+        # Parent-bounds clamp.
+        parent = self.parentWidget()
+        if parent is not None:
+            if new_x < 0:
+                new_w += new_x  # shrink width by however much we'd go off-screen
+                new_x = 0
+            if new_y < 0:
+                new_h += new_y
+                new_y = 0
+            if new_x + new_w > parent.width():
+                new_w = parent.width() - new_x
+            if new_y + new_h > parent.height():
+                new_h = parent.height() - new_y
+
+        self.setGeometry(new_x, new_y, max(self.MIN_WIDTH, new_w),
+                         max(self.MIN_HEIGHT, new_h))
+
+    def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._resizing:
+            self._resizing = False
+            self._resize_handle = ""
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.moved.emit()
+        if self._dragging:
+            self._dragging = False
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+            self.moved.emit()
+
+    # ---- geometry ↔ sticker sync ----
+
+    def sync_to_parent(self) -> None:
+        """Pull widget geometry from the stored Sticker."""
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        pw, ph = parent.width(), parent.height()
+        if pw <= 0 or ph <= 0:
+            return
+        w = max(self.MIN_WIDTH, int(self.sticker.width_norm * pw))
+        h = max(self.MIN_HEIGHT, int(self.sticker.height_norm * ph))
+        x = max(0, min(pw - w, int(self.sticker.x_norm * pw)))
+        y = max(0, min(ph - h, int(self.sticker.y_norm * ph)))
+        self.setGeometry(x, y, w, h)
+
+    def sync_to_sticker(self) -> None:
+        """Write current widget geometry back to the stored Sticker."""
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        pw, ph = max(1, parent.width()), max(1, parent.height())
+        self.sticker.x_norm = self.x() / pw
+        self.sticker.y_norm = self.y() / ph
+        self.sticker.width_norm = self.width() / pw
+        self.sticker.height_norm = self.height() / ph
+
+    # ---- right-click menu ----
+
+    def _on_context_menu(self, pos) -> None:
+        from PySide6.QtWidgets import QInputDialog, QMenu
+
+        menu = QMenu(self)
+        a_opacity = menu.addAction(tr("sticker.menu.opacity"))
+        a_rotate = menu.addAction(tr("sticker.menu.rotate"))
+        a_time = menu.addAction(tr("sticker.menu.time_window"))
+        menu.addSeparator()
+        a_dup = menu.addAction(tr("sticker.menu.duplicate"))
+        a_front = menu.addAction(tr("sticker.menu.to_front"))
+        a_back = menu.addAction(tr("sticker.menu.to_back"))
+        menu.addSeparator()
+        a_del = menu.addAction(tr("sticker.menu.delete"))
+
+        chosen = menu.exec(self.mapToGlobal(pos))
+        if chosen is a_opacity:
+            v, ok = QInputDialog.getInt(
+                self, tr("sticker.dialog.opacity_title"),
+                tr("sticker.dialog.opacity_label"),
+                int(self.sticker.opacity), 0, 100, 5,
+            )
+            if ok:
+                self.sticker.opacity = float(v)
+                self.update()
+                self.moved.emit()
+        elif chosen is a_rotate:
+            v, ok = QInputDialog.getInt(
+                self, tr("sticker.dialog.rotate_title"),
+                tr("sticker.dialog.rotate_label"),
+                int(self.sticker.rotation_deg), 0, 359, 5,
+            )
+            if ok:
+                self.sticker.rotation_deg = float(v)
+                self.update()
+                self.moved.emit()
+        elif chosen is a_time:
+            self._prompt_time_window()
+        elif chosen is a_dup:
+            self.duplicated.emit()
+        elif chosen is a_front:
+            self.raise_requested.emit()
+        elif chosen is a_back:
+            self.lower_requested.emit()
+        elif chosen is a_del:
+            self.deleted.emit()
+
+    def _prompt_time_window(self) -> None:
+        from PySide6.QtWidgets import QInputDialog
+
+        # Start (ms)
+        start_v, ok = QInputDialog.getInt(
+            self, tr("sticker.dialog.time_start_title"),
+            tr("sticker.dialog.time_start_label"),
+            int(self.sticker.start_ms), 0, 24 * 60 * 60 * 1000, 100,
+        )
+        if not ok:
+            return
+        # End (ms) — -1 means "until end"; display as 0 for the dialog
+        # then convert.
+        current_end = self.sticker.end_ms
+        dialog_end = 0 if current_end is None or current_end < 0 else int(current_end)
+        end_v, ok = QInputDialog.getInt(
+            self, tr("sticker.dialog.time_end_title"),
+            tr("sticker.dialog.time_end_label"),
+            dialog_end, 0, 24 * 60 * 60 * 1000, 100,
+        )
+        if not ok:
+            return
+        self.sticker.start_ms = int(start_v)
+        self.sticker.end_ms = -1 if end_v <= start_v else int(end_v)
+        self.moved.emit()

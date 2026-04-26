@@ -28,15 +28,22 @@ class MainWindow(QMainWindow):
     new_capture_requested = Signal(CaptureMode, int, bool)
     open_folder_requested = Signal()
     open_settings_requested = Signal()
-    open_video_editor_requested = Signal()
+    # Each "open editor" signal carries a Path (the dropped file)
+    # when the editor should preload one, or None when the entry
+    # point was the button / shortcut and the controller picks the
+    # file itself.
+    open_video_editor_requested = Signal(object)
+    open_gif_file_requested = Signal(object)
+    open_sound_editor_requested = Signal(object)
     open_donation_requested = Signal()
-    open_gif_file_requested = Signal()
 
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(tr("app.name"))
-        self.resize(520, 520)
+        self.resize(520, 540)
         self.setStyleSheet(APP_QSS)
+        # Drop audio files anywhere on the main window → open Sound Editor.
+        self.setAcceptDrops(True)
 
         self._current_mode: CaptureMode = CaptureMode.SCREENSHOT
 
@@ -224,8 +231,23 @@ class MainWindow(QMainWindow):
         self.pro_editor_btn.setObjectName("ProEditorButton")
         self.pro_editor_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.pro_editor_btn.setMinimumHeight(46)
-        self.pro_editor_btn.clicked.connect(self.open_video_editor_requested.emit)
+        self.pro_editor_btn.clicked.connect(
+            lambda: self.open_video_editor_requested.emit(None)
+        )
         layout.addWidget(self.pro_editor_btn)
+
+        # Sound Editor: standalone entry point to the per-clip sound
+        # editor (EQ / Dynamics / AI Master / Export to FLAC-ALAC-MP3-
+        # WAV). Lives next to the video editor so users discover it.
+        self.sound_editor_btn = QPushButton(tr("main.sound_editor.button"))
+        self.sound_editor_btn.setObjectName("SoundEditorButton")
+        self.sound_editor_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.sound_editor_btn.setMinimumHeight(46)
+        self.sound_editor_btn.setToolTip(tr("main.sound_editor.tooltip"))
+        self.sound_editor_btn.clicked.connect(
+            lambda: self.open_sound_editor_requested.emit(None)
+        )
+        layout.addWidget(self.sound_editor_btn)
 
         return container
 
@@ -262,6 +284,8 @@ class MainWindow(QMainWindow):
         self.donate_btn.setText(tr("main.donate.button"))
         self._pro_editor_section_label.setText(tr("main.section.pro_editor"))
         self.pro_editor_btn.setText(tr("main.pro_editor.button"))
+        self.sound_editor_btn.setText(tr("main.sound_editor.button"))
+        self.sound_editor_btn.setToolTip(tr("main.sound_editor.tooltip"))
         self.new_capture_btn.setText(tr("main.new_capture"))
         self._mode_section_label.setText(tr("main.section.mode"))
         self._recent_section_label.setText(tr("main.section.recent"))
@@ -298,9 +322,62 @@ class MainWindow(QMainWindow):
         # Double-click the GIF mode button → shortcut to open an existing GIF
         # in the editor, skipping the record flow.
         if getattr(self, "_gif_mode_btn", None) is obj and event.type() == event.Type.MouseButtonDblClick:
-            self.open_gif_file_requested.emit()
+            self.open_gif_file_requested.emit(None)
             return True
         return super().eventFilter(obj, event)
+
+    # ---- drag-and-drop: route by file type ----
+    _AUDIO_DROP_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".mp2", ".wma"}
+    _VIDEO_DROP_EXTS = {".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".wmv"}
+    _GIF_DROP_EXTS = {".gif"}
+
+    def _classify_drop(self, urls) -> "tuple[str, Path] | None":
+        """Return ``(kind, path)`` for the first routable file among the
+        dropped URLs. ``kind`` is one of ``"audio" / "video" / "gif"``.
+        Returns ``None`` when nothing matches a supported extension."""
+        from pathlib import Path
+        for u in urls:
+            if not u.isLocalFile():
+                continue
+            p = Path(u.toLocalFile())
+            ext = p.suffix.lower()
+            if ext in self._GIF_DROP_EXTS:
+                return ("gif", p)
+            if ext in self._VIDEO_DROP_EXTS:
+                return ("video", p)
+            if ext in self._AUDIO_DROP_EXTS:
+                return ("audio", p)
+        return None
+
+    def dragEnterEvent(self, event) -> None:
+        md = event.mimeData()
+        if md.hasUrls() and self._classify_drop(md.urls()) is not None:
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        md = event.mimeData()
+        if md.hasUrls() and self._classify_drop(md.urls()) is not None:
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        md = event.mimeData()
+        if md.hasUrls():
+            routed = self._classify_drop(md.urls())
+            if routed is not None:
+                kind, path = routed
+                if kind == "audio":
+                    self.open_sound_editor_requested.emit(path)
+                elif kind == "video":
+                    self.open_video_editor_requested.emit(path)
+                elif kind == "gif":
+                    self.open_gif_file_requested.emit(path)
+                event.acceptProposedAction()
+                return
+        super().dropEvent(event)
 
     def _on_new_capture_clicked(self) -> None:
         delay_seconds = int(self.delay_combo.currentData() or 0)

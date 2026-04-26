@@ -64,25 +64,41 @@ class AppController(QObject):
         self.main_window.open_video_editor_requested.connect(
             self._open_video_editor
         )
+        self.main_window.open_sound_editor_requested.connect(
+            self._open_sound_editor
+        )
         self.main_window.open_donation_requested.connect(self._open_donation_dialog)
         self.main_window.open_gif_file_requested.connect(self._prompt_open_gif_file)
+
+        # Keeps references to live WaveformExtractors launched from the
+        # standalone Sound Editor flow. Keyed by clip id.
+        self._standalone_waveform_extractors: dict[int, object] = {}
+        # Keeps references to live standalone Sound Editor windows so
+        # Qt doesn't GC them the moment this method returns.
+        self._standalone_sound_editors: list[object] = []
 
     def _open_donation_dialog(self) -> None:
         dlg = DonationDialog(self.main_window)
         dlg.exec()
 
-    def _prompt_open_gif_file(self) -> None:
-        from PySide6.QtWidgets import QFileDialog
+    def _prompt_open_gif_file(self, source_path: Path | None = None) -> None:
+        """Open a GIF in the editor. When called with no ``source_path``
+        (button / double-click), a file picker is shown; when called
+        with a Path (from the main-window drop router), the GIF loads
+        directly."""
+        if source_path is None:
+            from PySide6.QtWidgets import QFileDialog
 
-        path, _ = QFileDialog.getOpenFileName(
-            self.main_window,
-            tr("main.mode.gif.open_dialog_title"),
-            str(default_save_dir()),
-            tr("main.mode.gif.open_dialog_filter"),
-        )
-        if not path:
-            return
-        self.open_gif_editor_with_file(Path(path))
+            path, _ = QFileDialog.getOpenFileName(
+                self.main_window,
+                tr("main.mode.gif.open_dialog_title"),
+                str(default_save_dir()),
+                tr("main.mode.gif.open_dialog_filter"),
+            )
+            if not path:
+                return
+            source_path = Path(path)
+        self.open_gif_editor_with_file(source_path)
 
     def _open_video_editor(self, source_path: Path | None = None) -> None:
         editor = VideoEditorWindow(source_path=source_path)
@@ -91,6 +107,99 @@ class AppController(QObject):
         editor.raise_()
         editor.activateWindow()
         self._track_result_window(editor)
+
+    def _open_sound_editor(self, source_path: Path | None = None) -> None:
+        """Launch the Sound Editor standalone (no video editor parent).
+
+        Called two ways: the main-window button (``source_path=None``,
+        we show a picker) and drag-and-drop of an audio file
+        (``source_path`` set). The editor receives an unparented
+        ``AudioClip`` and falls back to its default track-volume-less
+        behavior thanks to the ``parent() is None`` guards it already
+        has for the tracks lookup."""
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        from app.audio_tracks import (
+            AUDIO_EXTS,
+            AudioClip,
+            WaveformExtractor,
+            probe_audio_duration_ms,
+        )
+        from app.video_editor_window import SoundEditorWindow
+
+        if source_path is None:
+            filter_exts = " ".join(f"*{e}" for e in sorted(AUDIO_EXTS))
+            picked, _ = QFileDialog.getOpenFileName(
+                self.main_window,
+                tr("main.sound_editor.pick_title"),
+                str(default_save_dir()),
+                tr("main.sound_editor.pick_filter", exts=filter_exts),
+            )
+            if not picked:
+                return
+            source_path = Path(picked)
+
+        duration_ms = probe_audio_duration_ms(source_path)
+        if duration_ms <= 0:
+            QMessageBox.warning(
+                self.main_window,
+                tr("main.sound_editor.decode_failed_title"),
+                tr(
+                    "main.sound_editor.decode_failed_body",
+                    name=source_path.name,
+                ),
+            )
+            return
+
+        # Unique clip id: milliseconds since epoch. Safe because the
+        # standalone flow never mingles with video-editor clips.
+        import time as _time
+        clip_id = int(_time.time() * 1000) & 0x7FFFFFFF
+
+        clip = AudioClip(
+            id=clip_id,
+            source_path=source_path,
+            duration_ms=duration_ms,
+            trim_start_ms=0,
+            trim_end_ms=duration_ms,
+        )
+
+        editor = SoundEditorWindow(clip, parent=None)
+        editor.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        editor.show()
+        editor.raise_()
+        editor.activateWindow()
+
+        self._standalone_sound_editors.append(editor)
+
+        def _on_closed(_event=None, ed=editor) -> None:
+            try:
+                self._standalone_sound_editors.remove(ed)
+            except ValueError:
+                pass
+
+        editor.destroyed.connect(lambda _obj=None, ed=editor: _on_closed(ed=ed))
+
+        # Kick off the waveform extraction so the editor eventually
+        # shows the peak view instead of the "loading…" placeholder.
+        def _on_ready(cid: int, peaks) -> None:
+            if cid == clip.id:
+                clip.waveform = peaks
+                try:
+                    editor.refresh_waveform()
+                except Exception:
+                    pass
+            self._standalone_waveform_extractors.pop(cid, None)
+
+        def _on_failed(cid: int, _reason: str) -> None:
+            self._standalone_waveform_extractors.pop(cid, None)
+
+        ex = WaveformExtractor(clip.id, clip.source_path)
+        ex.ready.connect(_on_ready)
+        ex.failed.connect(_on_failed)
+        ex.finished.connect(ex.deleteLater)
+        self._standalone_waveform_extractors[clip.id] = ex
+        ex.start()
 
     def open_gif_editor_with_file(self, path: Path) -> None:
         """Load an existing GIF / image sequence into the GIF editor."""

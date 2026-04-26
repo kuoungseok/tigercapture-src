@@ -108,6 +108,19 @@ def default_effects_state() -> dict:
             "ratio": 1.0,         # 0.5 .. 2.0
             "algorithm": "atempo",
         },
+        "ai_master": {
+            # Macro-knob post-processing for AI-generated music (Suno /
+            # Udio / ACE-Step etc.). Each knob maps to multiple FFmpeg
+            # filters under the hood; see ``_build_effect_chain``.
+            "enabled": False,
+            "preset": "Custom",
+            "air":     0.0,    # 0..8 dB   high-shelf at 10 kHz
+            "clarity": 0.0,    # 0..100 %  mud cut + presence boost
+            "warmth":  0.0,    # 0..100 %  low-shelf + soft saturation
+            "width":   100.0,  # 0..200 %  stereo width (100 = neutral)
+            "punch":   0.0,    # 0..100 %  low-band compression
+            "excite":  0.0,    # 0..100 %  HF harmonic generation
+        },
     }
 
 
@@ -657,6 +670,72 @@ def _build_effect_chain(effects: dict) -> str:
         if abs(ratio - 1.0) > 1e-3:
             parts.append(f"atempo={ratio:.4f}")
 
+    ai = effects.get("ai_master") or {}
+    if ai.get("enabled"):
+        # --- Air: high-shelf at 10 kHz (0..+8 dB) ---
+        air = max(0.0, min(8.0, float(ai.get("air", 0.0))))
+        if air > 0.05:
+            parts.append(f"treble=g={air:.2f}:f=10000")
+
+        # --- Clarity: mud cut @ 300 Hz + presence boost @ 3 kHz ---
+        clarity = max(0.0, min(100.0, float(ai.get("clarity", 0.0))))
+        if clarity > 0.5:
+            mud_db = -(clarity / 100.0) * 4.0     # 0..-4 dB
+            pres_db = (clarity / 100.0) * 3.0     # 0..+3 dB
+            parts.append(f"equalizer=f=300:t=q:w=1.2:g={mud_db:.2f}")
+            parts.append(f"equalizer=f=3000:t=q:w=0.8:g={pres_db:.2f}")
+
+        # --- Warmth: low-shelf @ 150 Hz + light soft-sat ---
+        warmth = max(0.0, min(100.0, float(ai.get("warmth", 0.0))))
+        if warmth > 0.5:
+            w_db = (warmth / 100.0) * 2.0         # 0..+2 dB
+            parts.append(f"bass=g={w_db:.2f}:f=150")
+            # Soft-saturation approximation via ``asoftclip`` when the
+            # knob is driven hard enough to matter. Available in ffmpeg
+            # 5+ (imageio-ffmpeg ships 6+). Threshold scaled so the
+            # saturation is subtle; full-scale is analog-ish tube sat.
+            if warmth > 20.0:
+                # param drives knee; keep it gentle.
+                p = 0.3 + (warmth / 100.0) * 0.4
+                parts.append(f"asoftclip=type=tanh:param={p:.2f}")
+
+        # --- Width: stereo expansion / narrowing (100 % = neutral) ---
+        width = float(ai.get("width", 100.0))
+        if abs(width - 100.0) > 0.5:
+            # extrastereo m=0 → mono, 1 → neutral, ~2.5 → very wide.
+            m = max(0.0, min(2.5, width / 100.0))
+            parts.append(f"extrastereo=m={m:.3f}:c=0")
+
+        # --- Punch: broad-band compression with fast attack ---
+        punch = max(0.0, min(100.0, float(ai.get("punch", 0.0))))
+        if punch > 0.5:
+            # Threshold lowers + ratio rises as knob moves up.
+            thr_db = -18.0 - (punch / 100.0) * 6.0           # -18..-24 dB
+            ratio = 2.5 + (punch / 100.0) * 2.5              # 2.5..5.0
+            thr_lin = 10 ** (thr_db / 20.0)
+            makeup_db = (punch / 100.0) * 3.0                # 0..+3 dB
+            parts.append(
+                f"acompressor=threshold={thr_lin:.4f}:"
+                f"ratio={ratio:.2f}:attack=3:release=80:"
+                f"makeup={10 ** (makeup_db / 20.0):.3f}:knee=2"
+            )
+
+        # --- Excite: HF harmonic generation ---
+        # Narrow high-band saturation approximation: drive a high shelf
+        # + soft-clip, which synthesizes the 2nd / 3rd harmonics the
+        # spec asks for. Not a true split-band exciter, but audibly
+        # close for the "restore air lost to MP3 codec" use case.
+        excite = max(0.0, min(100.0, float(ai.get("excite", 0.0))))
+        if excite > 0.5:
+            # Boost 8 kHz region moderately ...
+            e_db = (excite / 100.0) * 5.0                    # 0..+5 dB
+            parts.append(f"equalizer=f=8000:t=q:w=1.2:g={e_db:.2f}")
+            # ... then run a gentle soft-clip so peaks generate
+            # harmonics instead of just getting louder.
+            if excite > 15.0:
+                p = 0.4 + (excite / 100.0) * 0.5
+                parts.append(f"asoftclip=type=tanh:param={p:.2f}")
+
     return ",".join(parts)
 
 
@@ -832,3 +911,336 @@ def build_audio_filter(
         parts.append(f"[amixed]atrim=0:{out_cap_s:.3f}[outa]")
 
     return ";".join(parts), inputs, len(clips)
+
+
+# ==================== single-clip audio export ====================
+
+
+def build_single_clip_filter(clip: "AudioClip") -> tuple[str, int]:
+    """Build a filter_complex for exporting one clip as a standalone
+    audio file. Returns ``(filter_complex, output_length_ms)``. The
+    filter expects the source at ``[0:a]`` and emits the final stream
+    at ``[out]``.
+
+    The output timeline starts at 0 (offset is dropped — the Sound
+    Editor exports the clip in isolation, not the project timeline).
+    Cuts compress the duration; fade positions are mapped into post-
+    cut coordinates so they land on the right content.
+    """
+    surviving = _subtract_cuts(0, clip.effective_length_ms, clip.cuts)
+    if not surviving:
+        # Entire clip cut out — emit a tiny silence so ffmpeg has
+        # something to encode. Users shouldn't really hit this.
+        return "anullsrc=r=44100:cl=stereo:d=0.01[out]", 10
+
+    total_out_ms = sum(le - ls for ls, le in surviving)
+
+    def local_to_out(local_ms: int) -> int:
+        """Map clip-local ms (pre-cut space) into post-cut output ms."""
+        out = 0
+        for ls, le in surviving:
+            if local_ms <= ls:
+                return out
+            if local_ms < le:
+                return out + (local_ms - ls)
+            out += (le - ls)
+        return out  # past the end
+
+    parts: list[str] = []
+    piece_labels: list[str] = []
+    for pi, (ls, le) in enumerate(surviving):
+        src_s = (clip.trim_start_ms + ls) / 1000.0
+        src_e = (clip.trim_start_ms + le) / 1000.0
+        plabel = f"[p{pi}]"
+        parts.append(
+            f"[0:a]atrim={src_s:.3f}:{src_e:.3f},"
+            f"asetpts=PTS-STARTPTS{plabel}"
+        )
+        piece_labels.append(plabel)
+
+    if len(piece_labels) == 1:
+        current = piece_labels[0]
+    else:
+        current = "[trimmed]"
+        parts.append(
+            "".join(piece_labels)
+            + f"concat=n={len(piece_labels)}:v=0:a=1{current}"
+        )
+
+    # Per-clip gain. Track volume is intentionally NOT applied here
+    # — Sound Editor is clip-scoped; exporting should match what the
+    # user authored in the editor, not a project mix.
+    vol = max(0.0, min(2.0, float(clip.gain)))
+    if abs(vol - 1.0) > 1e-3:
+        nxt = "[vol]"
+        parts.append(f"{current}volume={vol:.3f}{nxt}")
+        current = nxt
+
+    fx = _build_effect_chain(clip.effects)
+    if fx:
+        nxt = "[fx]"
+        parts.append(f"{current}{fx}{nxt}")
+        current = nxt
+
+    fade_filters: list[str] = []
+    if clip.fade_in_ms > 0:
+        fi_d = max(0.01, clip.fade_in_ms / 1000.0)
+        fade_filters.append(f"afade=t=in:st=0.000:d={fi_d:.3f}")
+    if clip.fade_out_ms > 0 and total_out_ms > 0:
+        fo_st = max(0, total_out_ms - clip.fade_out_ms) / 1000.0
+        fo_d = max(0.01, clip.fade_out_ms / 1000.0)
+        fade_filters.append(f"afade=t=out:st={fo_st:.3f}:d={fo_d:.3f}")
+
+    for f in clip.fades:
+        try:
+            f_start = int(f.start_ms)
+            f_end = int(f.end_ms)
+            f_kind = getattr(f, "kind", "both")
+        except Exception:
+            continue
+        if f_end <= f_start:
+            continue
+        out_start = local_to_out(f_start - clip.trim_start_ms)
+        out_end = local_to_out(f_end - clip.trim_start_ms)
+        span = (out_end - out_start) / 1000.0
+        if span <= 0:
+            continue
+        st = out_start / 1000.0
+        if f_kind == "in":
+            fade_filters.append(f"afade=t=in:st={st:.3f}:d={span:.3f}")
+        elif f_kind == "out":
+            fade_filters.append(f"afade=t=out:st={st:.3f}:d={span:.3f}")
+        else:
+            half = span / 2.0
+            mid = st + half
+            fade_filters.append(f"afade=t=out:st={st:.3f}:d={half:.3f}")
+            fade_filters.append(f"afade=t=in:st={mid:.3f}:d={half:.3f}")
+
+    if fade_filters:
+        parts.append(f"{current}{','.join(fade_filters)}[out]")
+    else:
+        parts.append(f"{current}anull[out]")
+
+    return ";".join(parts), total_out_ms
+
+
+# Format key → metadata used by the export UI. ``codec`` is a callable
+# ``(AudioQualityPreset) -> list[str]`` because real codec args depend
+# on the user-selected sample rate / bitrate / bit depth.
+CLIP_EXPORT_FORMATS: dict[str, dict] = {
+    "mp3": {
+        "ext": ".mp3",
+        "codec": lambda q: [
+            "-c:a", "libmp3lame", "-b:a", q.mp3_bitrate,
+            "-ar", str(q.sample_rate),
+        ],
+        "label": "MP3",
+        "filter": "MP3 (*.mp3)",
+        "feature_id": "export.audio.mp3",
+    },
+    "wav": {
+        "ext": ".wav",
+        "codec": lambda q: [
+            "-c:a", "pcm_s24le" if q.pcm_bits >= 24 else "pcm_s16le",
+            "-ar", str(q.sample_rate),
+        ],
+        "label": "WAV (lossless PCM)",
+        "filter": "WAV (*.wav)",
+        "feature_id": "export.audio.wav",
+    },
+    "flac": {
+        "ext": ".flac",
+        "codec": lambda q: [
+            "-c:a", "flac",
+            "-compression_level", str(q.flac_compression),
+            "-ar", str(q.sample_rate),
+            "-sample_fmt", "s32" if q.pcm_bits >= 24 else "s16",
+        ],
+        "label": "FLAC (lossless)",
+        "filter": "FLAC (*.flac)",
+        "feature_id": "export.audio.flac",
+    },
+    "alac": {
+        "ext": ".m4a",
+        "codec": lambda q: [
+            "-c:a", "alac",
+            "-ar", str(q.sample_rate),
+            "-sample_fmt", "s32p" if q.pcm_bits >= 24 else "s16p",
+        ],
+        "label": "ALAC (Apple Lossless)",
+        "filter": "ALAC (*.m4a)",
+        "feature_id": "export.audio.alac",
+    },
+    "aac": {
+        "ext": ".aac",
+        "codec": lambda q: [
+            "-c:a", "aac", "-b:a", q.aac_bitrate,
+            "-ar", str(q.sample_rate),
+        ],
+        "label": "AAC",
+        "filter": "AAC (*.aac)",
+        "feature_id": "export.audio.aac",
+    },
+    "ogg": {
+        "ext": ".ogg",
+        "codec": lambda q: [
+            "-c:a", "libvorbis", "-q:a", str(q.ogg_quality),
+            "-ar", str(q.sample_rate),
+        ],
+        "label": "OGG Vorbis",
+        "filter": "OGG (*.ogg)",
+        "feature_id": "export.audio.ogg",
+    },
+}
+
+
+# ---------------------------------------------------------------------------
+#  Audio quality presets
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class AudioQualityPreset:
+    """One row in the audio export quality dropdown.
+
+    All knobs are codec-agnostic — :data:`CLIP_EXPORT_FORMATS` codec
+    builders read what they need (sample rate everywhere, bit depth
+    for lossless PCM/FLAC/ALAC, lossy bitrate for MP3/AAC, q for OGG)."""
+
+    id: str
+    name_key: str
+    desc_key: str
+    feature_id: str            # tier-gating key
+    sample_rate: int           # Hz, 22050 / 44100 / 48000 / 96000
+    mp3_bitrate: str           # libmp3lame -b:a (e.g. "192k")
+    aac_bitrate: str           # aac        -b:a
+    ogg_quality: int           # libvorbis  -q:a, 0..10
+    pcm_bits: int              # 16 or 24, applies to WAV/FLAC/ALAC
+    flac_compression: int      # 0..12 (8 = strong default)
+
+
+AUDIO_QUALITY_PRESETS: list[AudioQualityPreset] = [
+    AudioQualityPreset(
+        id="low",
+        name_key="export.audio_quality.low",
+        desc_key="export.audio_quality.low.desc",
+        feature_id="export.audio_quality.low",
+        sample_rate=22050,
+        mp3_bitrate="96k", aac_bitrate="96k", ogg_quality=3,
+        pcm_bits=16, flac_compression=5,
+    ),
+    AudioQualityPreset(
+        id="standard",
+        name_key="export.audio_quality.standard",
+        desc_key="export.audio_quality.standard.desc",
+        feature_id="export.audio_quality.standard",
+        sample_rate=44100,
+        mp3_bitrate="192k", aac_bitrate="192k", ogg_quality=5,
+        pcm_bits=16, flac_compression=8,
+    ),
+    AudioQualityPreset(
+        id="high",
+        name_key="export.audio_quality.high",
+        desc_key="export.audio_quality.high.desc",
+        feature_id="export.audio_quality.high",
+        sample_rate=48000,
+        mp3_bitrate="320k", aac_bitrate="320k", ogg_quality=8,
+        pcm_bits=24, flac_compression=8,
+    ),
+    AudioQualityPreset(
+        id="studio",
+        name_key="export.audio_quality.studio",
+        desc_key="export.audio_quality.studio.desc",
+        feature_id="export.audio_quality.studio",
+        sample_rate=96000,
+        mp3_bitrate="320k", aac_bitrate="320k", ogg_quality=10,
+        pcm_bits=24, flac_compression=12,
+    ),
+]
+
+
+DEFAULT_AUDIO_QUALITY_ID = "standard"
+
+
+def get_audio_quality_preset(quality_id: str) -> AudioQualityPreset:
+    for q in AUDIO_QUALITY_PRESETS:
+        if q.id == quality_id:
+            return q
+    return get_audio_quality_preset(DEFAULT_AUDIO_QUALITY_ID)
+
+
+class ClipExporter(QThread):
+    """Renders one AudioClip to a standalone audio file using FFmpeg.
+
+    Emits ``done(out_path)`` on success, ``failed(reason)`` on error.
+    The thread is short-lived (one subprocess call) — safe to start
+    and forget."""
+
+    done = Signal(str)
+    failed = Signal(str)
+
+    def __init__(
+        self,
+        clip: "AudioClip",
+        out_path: "Path | str",
+        format_key: str,
+        parent: QObject | None = None,
+        quality_id: str = DEFAULT_AUDIO_QUALITY_ID,
+    ) -> None:
+        super().__init__(parent)
+        self.clip = clip
+        self.out_path = str(out_path)
+        self.format_key = format_key
+        self.quality_id = quality_id
+
+    def run(self) -> None:
+        try:
+            import subprocess
+            import sys
+
+            from imageio_ffmpeg import get_ffmpeg_exe
+
+            fmt = CLIP_EXPORT_FORMATS.get(self.format_key)
+            if fmt is None:
+                self.failed.emit(f"Unknown export format: {self.format_key}")
+                return
+            if self.clip.source_path is None:
+                self.failed.emit("Clip has no source file")
+                return
+
+            filter_graph, out_ms = build_single_clip_filter(self.clip)
+            if out_ms <= 0:
+                self.failed.emit("Nothing to export (all content cut out)")
+                return
+
+            quality = get_audio_quality_preset(self.quality_id)
+            codec_args = fmt["codec"](quality)
+            cmd = [
+                get_ffmpeg_exe(),
+                "-hide_banner",
+                "-loglevel", "error",
+                "-y",                                  # overwrite
+                "-i", str(self.clip.source_path),
+                "-filter_complex", filter_graph,
+                "-map", "[out]",
+                "-vn",                                  # no video
+                *codec_args,
+                self.out_path,
+            ]
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                errors="replace",
+                creationflags=(
+                    0x08000000 if sys.platform == "win32" else 0
+                ),
+            )
+            if proc.returncode != 0:
+                # ffmpeg error output can be huge; keep the tail.
+                err = (proc.stderr or proc.stdout or "")[-1500:]
+                self.failed.emit(err or f"ffmpeg exited {proc.returncode}")
+                return
+            self.done.emit(self.out_path)
+        except Exception as e:
+            self.failed.emit(str(e))

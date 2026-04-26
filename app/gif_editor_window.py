@@ -34,9 +34,13 @@ from app.drawing import (
     PaintDialog,
     SpeechBubble,
     SpeechBubbleItem,
+    Sticker,
+    StickerItem,
     Stroke,
+    _sticker_active,
     compose_pil_bubbles,
     compose_pil_frame_with_overlays,
+    compose_pil_stickers,
 )
 from app.foreground_tracker import ForegroundInfo
 from app.i18n import tr
@@ -330,6 +334,8 @@ class GifEditorWindow(QWidget):
         self._strokes: list[Stroke] = []
         self._bubbles: list[SpeechBubble] = []
         self._bubble_items: list[SpeechBubbleItem] = []
+        self._stickers: list[Sticker] = []
+        self._sticker_items: list[StickerItem] = []
         self._current_frame_pix: QPixmap | None = None
 
         self.setObjectName("EditorRoot")
@@ -747,10 +753,13 @@ class GifEditorWindow(QWidget):
         if was_playing:
             self._toggle_playback()
 
-        # Hide preview bubble items while dialog owns them
+        # Hide preview bubble / sticker items while the dialog owns them
         for item in list(self._bubble_items):
             item.deleteLater()
         self._bubble_items.clear()
+        for item in list(self._sticker_items):
+            item.deleteLater()
+        self._sticker_items.clear()
 
         dlg = PaintDialog(
             background_pixmap=self._current_pixmap,
@@ -758,14 +767,19 @@ class GifEditorWindow(QWidget):
             time_ms=self._current_time_ms(),
             parent=self,
             initial_bubbles=self._bubbles,
+            initial_stickers=self._stickers,
         )
         if dlg.exec() == dlg.DialogCode.Accepted:
             self._strokes = dlg.result_strokes()
             self._bubbles = dlg.result_bubbles()
+            self._stickers = dlg.result_stickers()
             self._drawing_canvas.update()
+        for sticker in self._stickers:
+            self._spawn_sticker_item(sticker)
         for bubble in self._bubbles:
             self._spawn_bubble_item(bubble)
         self._update_bubble_visibility()
+        self._update_sticker_visibility()
 
     # ------------- speech bubbles -------------
 
@@ -795,6 +809,67 @@ class GifEditorWindow(QWidget):
         for item in self._bubble_items:
             item.setVisible(item.bubble.start_ms <= t)
 
+    # ------------- stickers -------------
+
+    def _spawn_sticker_item(self, sticker: Sticker) -> StickerItem:
+        item = StickerItem(sticker, self._drawing_canvas)
+        item.sync_to_parent()
+        item.show()
+        item.moved.connect(lambda it=item: it.sync_to_sticker())
+        item.deleted.connect(lambda it=item, s=sticker: self._remove_sticker(s, it))
+        item.duplicated.connect(lambda s=sticker: self._duplicate_sticker(s))
+        item.raise_requested.connect(lambda s=sticker: self._reorder_sticker(s, +1))
+        item.lower_requested.connect(lambda s=sticker: self._reorder_sticker(s, -1))
+        self._sticker_items.append(item)
+        # Bubbles stay on top of stickers.
+        for b_item in self._bubble_items:
+            b_item.raise_()
+        return item
+
+    def _remove_sticker(self, sticker: Sticker, item: StickerItem) -> None:
+        if sticker in self._stickers:
+            self._stickers.remove(sticker)
+        if item in self._sticker_items:
+            self._sticker_items.remove(item)
+        item.deleteLater()
+
+    def _duplicate_sticker(self, sticker: Sticker) -> None:
+        import copy
+        dup = copy.deepcopy(sticker)
+        dup.x_norm = min(0.95, dup.x_norm + 0.03)
+        dup.y_norm = min(0.95, dup.y_norm + 0.03)
+        current_max = max((s.z_index for s in self._stickers), default=0)
+        dup.z_index = current_max + 1
+        self._stickers.append(dup)
+        self._spawn_sticker_item(dup)
+        self._update_sticker_visibility()
+
+    def _reorder_sticker(self, sticker: Sticker, direction: int) -> None:
+        if direction > 0:
+            sticker.z_index = max(
+                (s.z_index for s in self._stickers if s is not sticker),
+                default=0,
+            ) + 1
+        else:
+            sticker.z_index = min(
+                (s.z_index for s in self._stickers if s is not sticker),
+                default=0,
+            ) - 1
+        self._sticker_items.sort(key=lambda it: int(it.sticker.z_index))
+        for it in self._sticker_items:
+            it.raise_()
+        for b_item in self._bubble_items:
+            b_item.raise_()
+
+    def _resync_stickers_to_preview(self) -> None:
+        for item in self._sticker_items:
+            item.sync_to_parent()
+
+    def _update_sticker_visibility(self) -> None:
+        t = self._current_time_ms()
+        for item in self._sticker_items:
+            item.setVisible(_sticker_active(item.sticker, t))
+
     def _show_preview_context_menu(self, global_pos) -> None:
         from PySide6.QtWidgets import QMenu
         menu = QMenu(self)
@@ -809,6 +884,7 @@ class GifEditorWindow(QWidget):
         super().resizeEvent(event)
         self._scale_preview_to_fit()
         self._resync_bubbles_to_preview()
+        self._resync_stickers_to_preview()
 
     def _refresh_info(self) -> None:
         n = len(self._frames)
@@ -902,11 +978,13 @@ class GifEditorWindow(QWidget):
         super().closeEvent(event)
 
     def _composed_frames(self) -> list[Image.Image]:
-        """Return frames with strokes + subtitles + bubbles burned in."""
+        """Return frames with strokes + subtitles + bubbles + stickers
+        burned in."""
         if (
             not self._strokes
             and not self._subtitle_panel.subtitles()
             and not self._bubbles
+            and not self._stickers
         ):
             return self._frames
         fps = max(1, self._get_fps())
@@ -922,6 +1000,9 @@ class GifEditorWindow(QWidget):
             composed = compose_pil_frame_with_overlays(
                 frame, self._strokes, subs, t_ms, width_scale=width_scale
             )
+            # Stickers go beneath bubbles so captions stay legible.
+            if self._stickers:
+                composed = compose_pil_stickers(composed, self._stickers, t_ms)
             if self._bubbles:
                 composed = compose_pil_bubbles(composed, self._bubbles, t_ms)
             out.append(composed)

@@ -255,6 +255,15 @@ class ProjectPlayer(QObject):
         self._last_rendered_frame_idx = frame_idx
         h, w = bgr.shape[:2]
         rgb = np.ascontiguousarray(bgr[:, :, ::-1])
+
+        # Per-track color grading — applied in numpy on the RGB array
+        # so slider drags feel real-time. Identity grades short-circuit
+        # to avoid the float32 round trip.
+        grade = getattr(track, "color_grade", None)
+        if grade is not None and not grade.is_identity():
+            from app.color_grading import apply_to_rgb
+            rgb = apply_to_rgb(rgb, grade)
+
         qimg = QImage(
             rgb.data, w, h, rgb.strides[0], QImage.Format.Format_RGB888
         ).copy()
