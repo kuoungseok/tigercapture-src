@@ -1,7 +1,7 @@
 VSVersionInfo(
   ffi=FixedFileInfo(
-    filevers=(1, 5, 0, 0),
-    prodvers=(1, 5, 0, 0),
+    filevers=(1, 0, 0, 0),
+    prodvers=(1, 0, 0, 0),
     mask=0x3f,
     flags=0x0,
     OS=0x40004,
@@ -16,12 +16,12 @@ VSVersionInfo(
         [
           StringStruct(u'CompanyName', u'Bitdam'),
           StringStruct(u'FileDescription', u'Bitdam — Screen capture to GIF/MP4'),
-          StringStruct(u'FileVersion', u'1.5.0'),
+          StringStruct(u'FileVersion', u'1.0.0'),
           StringStruct(u'InternalName', u'Bitdam'),
           StringStruct(u'LegalCopyright', u'© KyoungSeok Ko (artmouse)'),
           StringStruct(u'OriginalFilename', u'Bitdam.exe'),
           StringStruct(u'ProductName', u'Bitdam'),
-          StringStruct(u'ProductVersion', u'1.5.0')
+          StringStruct(u'ProductVersion', u'1.0.0')
         ])
     ]),
     VarFileInfo([VarStruct(u'Translation', [1033, 1200])])

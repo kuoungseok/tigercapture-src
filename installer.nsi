@@ -15,7 +15,7 @@ Unicode True
 !define COMPANYNAME     "KyoungSeok Ko (artmouse)"
 !define DESCRIPTION     "Screen capture to GIF / MP4"
 !define VERSIONMAJOR    1
-!define VERSIONMINOR    5
+!define VERSIONMINOR    0
 !define VERSIONBUILD    0
 !define VERSIONSTR      "${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}"
 !define HELPURL         "https://github.com/kuoungseok/bitdam"
