@@ -1,4 +1,4 @@
-"""Generate resources/gifcam.ico from scratch using Pillow.
+"""Generate resources/bitdam.ico from scratch using Pillow.
 
 Creates a simple rounded red square with "GC" text at multiple sizes and packs
 them into a multi-resolution .ico file.
@@ -11,7 +11,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 SIZES = [16, 24, 32, 48, 64, 128, 256]
-OUT = Path(__file__).parent / "resources" / "gifcam.ico"
+OUT = Path(__file__).parent / "resources" / "bitdam.ico"
 
 
 def _make_image(size: int) -> Image.Image:

@@ -32,7 +32,7 @@ Thumbs.db
 desktop.ini
 
 # Regenerated icons (created by make_icns.py at build time on macOS)
-mac/resources/gifcam.icns
+mac/resources/bitdam.icns
 
 # Logs / temp
 *.log

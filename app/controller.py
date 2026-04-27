@@ -551,8 +551,13 @@ class AppController(QObject):
         out: Path = options["output_path"]
         fps = int(options["fps"])
         scale = float(options["scale"])
+        # New compression knobs — fall back to historical defaults so any
+        # caller that doesn't know about them keeps shipping 256 colours
+        # with the gifsicle --lossy=60 post-pass Bitdam has used since 1.0.
+        max_colors = int(options.get("max_colors", 256))
+        lossy = int(options.get("lossy", 60))
 
-        thread = GifExportThread(frames, out, fps, scale)
+        thread = GifExportThread(frames, out, fps, scale, max_colors, lossy)
         editor.begin_export_progress(len(frames))
 
         thread.progress.connect(editor.update_export_progress)

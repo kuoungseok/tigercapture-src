@@ -15,8 +15,8 @@ SUPPORTED_LANGUAGES: dict[str, str] = {
 }
 DEFAULT_LANGUAGE = "en"
 
-_SETTINGS_ORG = "GifCam"
-_SETTINGS_APP = "GifCam"
+_SETTINGS_ORG = "Bitdam"
+_SETTINGS_APP = "Bitdam"
 _LANGUAGE_KEY = "language"
 
 _translations: dict[str, dict[str, str]] = {}

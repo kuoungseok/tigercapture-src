@@ -128,7 +128,7 @@ class TextClip:
     """A single placed text clip on the typography lane.
 
     Timing is expressed in *milliseconds* to stay consistent with the
-    rest of GifCam's timeline (video tracks, fade segments, etc.). The
+    rest of Bitdam's timeline (video tracks, fade segments, etc.). The
     spec uses seconds; we translate on the fly in the UI.
     """
 
@@ -208,4 +208,4 @@ class TextTrack:
 #  target so we can distinguish T-card drops from generic file drops).
 # ---------------------------------------------------------------------------
 
-TEXT_CLIP_MIME = "application/x-gifcam-text-clip"
+TEXT_CLIP_MIME = "application/x-bitdam-text-clip"

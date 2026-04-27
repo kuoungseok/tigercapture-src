@@ -544,7 +544,7 @@ class VideoExportThread(QThread):
             else:
                 t_end_mapped = _map_source_to_output(end_ms, self._segments)
                 t_end = t_end_mapped if t_end_mapped >= 0 else total_out_s
-            fd, png_path = tempfile.mkstemp(suffix=".png", prefix="gifcam_stroke_")
+            fd, png_path = tempfile.mkstemp(suffix=".png", prefix="bitdam_stroke_")
             os.close(fd)
             ok = render_strokes_to_png(
                 group_strokes, src_w, src_h, png_path, width_scale=width_scale
@@ -570,7 +570,7 @@ class VideoExportThread(QThread):
                 if t_start < 0:
                     t_start = 0.0
                 fd, png_path = tempfile.mkstemp(
-                    suffix=".png", prefix="gifcam_bubble_"
+                    suffix=".png", prefix="bitdam_bubble_"
                 )
                 os.close(fd)
                 ok = render_bubble_to_png(bubble, src_w, src_h, png_path)
@@ -607,7 +607,7 @@ class VideoExportThread(QThread):
                     )
                     t_end = t_end_mapped if t_end_mapped >= 0 else total_out_s
                 fd, png_path = tempfile.mkstemp(
-                    suffix=".png", prefix="gifcam_sticker_"
+                    suffix=".png", prefix="bitdam_sticker_"
                 )
                 os.close(fd)
                 ok = render_sticker_to_png(sticker, src_w, src_h, png_path)
@@ -652,7 +652,7 @@ class VideoExportThread(QThread):
                 continue
 
             fd, mov_path = tempfile.mkstemp(
-                suffix=".mov", prefix="gifcam_typo_",
+                suffix=".mov", prefix="bitdam_typo_",
             )
             os.close(fd)
             ok = render_clip_to_mov(clip, Path(mov_path), src_w, src_h, fps=fps)
@@ -725,7 +725,7 @@ class VideoExportThread(QThread):
             #      error instead of a corrupted FFmpeg run.
             fd, temp_path = tempfile.mkstemp(
                 suffix=self._out.suffix or ".mp4",
-                prefix=f"gifcam_export_{self._out.stem}_",
+                prefix=f"bitdam_export_{self._out.stem}_",
                 dir=str(self._out.parent),
             )
             os.close(fd)

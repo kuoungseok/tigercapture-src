@@ -1,17 +1,17 @@
-"""dmgbuild settings for GifCam.
+"""dmgbuild settings for Bitdam.
 
 Produces a drag-to-Applications DMG whose background is a simple dark
 canvas matching the app's chrome. Invoked from mac/build.sh as:
 
-    dmgbuild -s mac/dmg_settings.py -D app=/path/to/GifCam.app \\
-        "GifCam 1.3.0" dist/GifCam-1.3.0.dmg
+    dmgbuild -s mac/dmg_settings.py -D app=/path/to/Bitdam.app \\
+        "Bitdam 1.3.0" dist/Bitdam-1.3.0.dmg
 """
 from __future__ import annotations
 
 import os.path
 
 # ``defines`` comes from ``-D app=...`` on the dmgbuild command line.
-application = defines.get("app", "dist/GifCam.app")  # type: ignore[name-defined]  # noqa: F821
+application = defines.get("app", "dist/Bitdam.app")  # type: ignore[name-defined]  # noqa: F821
 appname = os.path.basename(application)
 
 # --- disk image ---------------------------------------------------------

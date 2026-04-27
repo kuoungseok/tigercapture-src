@@ -11,7 +11,7 @@ Reusable component with the three input modes the spec calls for:
 Other features
 --------------
 - Color variants (``'blue'``, ``'green'``, ``'orange'``) matching the
-  GifCam accent palette; any hex string works too.
+  Bitdam accent palette; any hex string works too.
 - Bipolar mode (Pan-style): centered at 12 o'clock with the value arc
   growing toward either side.
 - Logarithmic scale for frequency-like parameters.

@@ -1,4 +1,4 @@
-# Python deps for the macOS build of GifCam.
+# Python deps for the macOS build of Bitdam.
 #
 # Install into a dedicated venv on the Mac:
 #   python3 -m venv .venv

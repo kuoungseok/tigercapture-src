@@ -74,6 +74,50 @@ QWidget#TimelineHost {{ background-color: {COLOR_BG_L2}; border: 1px solid {COLO
 
 FPS_CHOICES = [5, 10, 15, 20, 24, 30, 48, 60]
 SCALE_CHOICES = [(100, 1.0), (75, 0.75), (50, 0.5), (25, 0.25)]
+
+# Palette caps for GIF export. 256 is the format ceiling and matches
+# pre-1.4 behaviour; 64 is a sweet spot for screen-recording GIFs.
+COLOR_CHOICES = [256, 128, 64, 32, 16]
+# gifsicle --lossy levels. 0 means lossless (still applies -O3).
+# 60 is the value Bitdam shipped with through 1.3.
+LOSSY_CHOICES = [
+    (0,   "editor.opt.lossy.off"),
+    (30,  "editor.opt.lossy.light"),
+    (60,  "editor.opt.lossy.medium"),
+    (80,  "editor.opt.lossy.strong"),
+    (120, "editor.opt.lossy.aggressive"),
+]
+
+
+# File-size estimate correction factors. The legacy 0.45 byte/pixel
+# heuristic in :meth:`GifEditorWindow._refresh_estimate` was anchored to
+# the historical defaults (256 colours, gifsicle --lossy=60). These
+# tables rescale the estimate when the user picks different settings.
+# Numbers come from sampling typical screen-capture GIFs across the
+# combinations and aren't analytically exact — good enough for "is this
+# going to be 800 KB or 4 MB" decisions.
+_COLOR_SIZE_FACTORS = {
+    256: 1.00,
+    128: 0.85,
+    64:  0.65,
+    32:  0.50,
+    16:  0.35,
+}
+_LOSSY_SIZE_FACTORS = {
+    0:   1.65,    # lossless — bigger than the lossy=60 baseline
+    30:  1.30,
+    60:  1.00,    # baseline (legacy default)
+    80:  0.75,
+    120: 0.50,
+}
+
+
+def _color_size_factor(max_colors: int) -> float:
+    return _COLOR_SIZE_FACTORS.get(int(max_colors), 1.0)
+
+
+def _lossy_size_factor(lossy: int) -> float:
+    return _LOSSY_SIZE_FACTORS.get(int(lossy), 1.0)
 THUMB_W = 96
 THUMB_H = 54
 THUMB_GAP = 4
@@ -465,6 +509,8 @@ class GifEditorWindow(QWidget):
         options = {
             "fps": self._get_fps(),
             "scale": self._get_scale(),
+            "max_colors": self._get_max_colors(),
+            "lossy": self._get_lossy(),
             "output_path": out,
         }
         self._pending_quick_paste = True
@@ -579,6 +625,24 @@ class GifEditorWindow(QWidget):
         self._set_combo_value(self.scale_combo, 1.0)
         self.scale_combo.currentIndexChanged.connect(self._refresh_estimate)
 
+        # Palette cap (compression option 1)
+        colors_label = QLabel(tr("editor.opt.colors"))
+        colors_label.setObjectName("OptionLabel")
+        self.colors_combo = QComboBox()
+        for c in COLOR_CHOICES:
+            self.colors_combo.addItem(str(c), userData=c)
+        self._set_combo_value(self.colors_combo, 256)
+        self.colors_combo.currentIndexChanged.connect(self._refresh_estimate)
+
+        # gifsicle --lossy level (compression option 2)
+        lossy_label = QLabel(tr("editor.opt.lossy"))
+        lossy_label.setObjectName("OptionLabel")
+        self.lossy_combo = QComboBox()
+        for level, key in LOSSY_CHOICES:
+            self.lossy_combo.addItem(tr(key), userData=level)
+        self._set_combo_value(self.lossy_combo, 60)
+        self.lossy_combo.currentIndexChanged.connect(self._refresh_estimate)
+
         self.estimate_label = QLabel(tr("editor.info.estimate_empty"))
         self.estimate_label.setObjectName("EstLabel")
 
@@ -587,6 +651,12 @@ class GifEditorWindow(QWidget):
         row.addSpacing(16)
         row.addWidget(scale_label)
         row.addWidget(self.scale_combo)
+        row.addSpacing(16)
+        row.addWidget(colors_label)
+        row.addWidget(self.colors_combo)
+        row.addSpacing(16)
+        row.addWidget(lossy_label)
+        row.addWidget(self.lossy_combo)
         row.addStretch(1)
         row.addWidget(self.estimate_label)
         return row
@@ -909,8 +979,14 @@ class GifEditorWindow(QWidget):
         ratio = self._get_scale()
         scaled_w = int(w * ratio)
         scaled_h = int(h * ratio)
+        # The 0.45 byte/pixel constant was calibrated against pre-1.4
+        # output (256 colours + gifsicle --lossy=60). Apply correction
+        # factors when the user picks a different palette cap or lossy
+        # level so the estimate tracks real file size.
         per_frame_bytes = (scaled_w * scaled_h) * 0.45
         total = per_frame_bytes * n
+        total *= _color_size_factor(self._get_max_colors())
+        total *= _lossy_size_factor(self._get_lossy())
         self.estimate_label.setText(
             tr("editor.info.estimate", size=self._format_size(int(total)))
         )
@@ -928,6 +1004,22 @@ class GifEditorWindow(QWidget):
 
     def _get_scale(self) -> float:
         return float(self.scale_combo.currentData() or 1.0)
+
+    def _get_max_colors(self) -> int:
+        # Defensive — if combo wasn't built (older window paths), keep
+        # the historical 256-colour default.
+        combo = getattr(self, "colors_combo", None)
+        if combo is None:
+            return 256
+        return int(combo.currentData() or 256)
+
+    def _get_lossy(self) -> int:
+        combo = getattr(self, "lossy_combo", None)
+        if combo is None:
+            return 60
+        # currentData() can be 0 (lossless) — must use ``is None`` check.
+        data = combo.currentData()
+        return 60 if data is None else int(data)
 
     def _on_selection_changed(self, indices: list[int]) -> None:
         self.delete_btn.setEnabled(bool(indices))
@@ -1032,6 +1124,8 @@ class GifEditorWindow(QWidget):
         options = {
             "fps": self._get_fps(),
             "scale": self._get_scale(),
+            "max_colors": self._get_max_colors(),
+            "lossy": self._get_lossy(),
             "output_path": out,
         }
         self._last_saved_path = out
@@ -1060,6 +1154,8 @@ class GifEditorWindow(QWidget):
         options = {
             "fps": self._get_fps(),
             "scale": self._get_scale(),
+            "max_colors": self._get_max_colors(),
+            "lossy": self._get_lossy(),
             "output_path": out,
         }
         self._last_saved_path = out
@@ -1068,7 +1164,7 @@ class GifEditorWindow(QWidget):
     @staticmethod
     def _suggested_name_mp4() -> str:
         stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        return f"gifcam_{stamp}.mp4"
+        return f"bitdam_{stamp}.mp4"
 
     def _on_open_folder(self) -> None:
         if self._last_saved_path and self._last_saved_path.exists():
@@ -1079,7 +1175,7 @@ class GifEditorWindow(QWidget):
     @staticmethod
     def _suggested_name() -> str:
         stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        return f"gifcam_{stamp}.gif"
+        return f"bitdam_{stamp}.gif"
 
     def _on_send_to_pro_editor(self) -> None:
         if not self._frames:
@@ -1091,6 +1187,8 @@ class GifEditorWindow(QWidget):
         options = {
             "fps": self._get_fps(),
             "scale": self._get_scale(),
+            "max_colors": self._get_max_colors(),
+            "lossy": self._get_lossy(),
             "output_path": out,
         }
         self._pending_pro_editor = True

@@ -1,4 +1,4 @@
-"""Generate mac/resources/gifcam.icns from the same Pillow art used for
+"""Generate mac/resources/bitdam.icns from the same Pillow art used for
 the Windows .ico.
 
 macOS .icns expects a specific set of sizes (with @2x variants). We
@@ -21,7 +21,7 @@ from PIL import Image, ImageDraw, ImageFont
 
 
 HERE = Path(__file__).parent
-OUT = HERE / "resources" / "gifcam.icns"
+OUT = HERE / "resources" / "bitdam.icns"
 
 # (size, scale) → filename pattern required by iconutil
 ICONSET_ENTRIES = [
@@ -110,7 +110,7 @@ def main() -> int:
     OUT.parent.mkdir(parents=True, exist_ok=True)
 
     with tempfile.TemporaryDirectory() as tmp:
-        iconset = Path(tmp) / "gifcam.iconset"
+        iconset = Path(tmp) / "bitdam.iconset"
         iconset.mkdir()
 
         for base, scale in ICONSET_ENTRIES:

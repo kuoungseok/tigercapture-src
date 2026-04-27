@@ -12,7 +12,7 @@ Without Accessibility permission, ``title`` falls back to empty and
 
 Identifying "our own" windows: on Windows the controller passes HWNDs.
 On macOS we don't have a sensible cross-boundary window handle, so we
-treat "frontmost app == GifCam itself" as own-window by comparing the
+treat "frontmost app == Bitdam itself" as own-window by comparing the
 frontmost app's bundle identifier / PID against the current process.
 The controller's ``is_own_window`` callable is accepted but ignored.
 """

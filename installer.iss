@@ -1,12 +1,12 @@
-; Inno Setup script for GifCam
+; Inno Setup script for Bitdam
 ; Build: iscc installer.iss
-; Produces: installer_output\GifCam-Setup-1.0.0.exe
+; Produces: installer_output\Bitdam-Setup-1.0.0.exe
 
-#define MyAppName "GifCam"
+#define MyAppName "Bitdam"
 #define MyAppVersion "1.3.0"
 #define MyAppPublisher "KyoungSeok Ko (artmouse)"
-#define MyAppURL "https://github.com/kuoungseok/gifcam"
-#define MyAppExeName "GifCam.exe"
+#define MyAppURL "https://github.com/kuoungseok/bitdam"
+#define MyAppExeName "Bitdam.exe"
 #define MyAppId "{8F63A81E-3138-4DA9-B6C7-93FCD1CAA378}"
 
 [Setup]
@@ -32,7 +32,7 @@ ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
 UninstallDisplayIcon={app}\{#MyAppExeName}
 UninstallDisplayName={#MyAppName}
-SetupIconFile=resources\gifcam.ico
+SetupIconFile=resources\bitdam.ico
 AllowNoIcons=yes
 CloseApplications=yes
 RestartApplications=no
@@ -47,7 +47,7 @@ Name: "german"; MessagesFile: "compiler:Languages\German.isl"
 Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; GroupDescription: "{cm:AdditionalIcons}"; Flags: unchecked
 
 [Files]
-Source: "dist\GifCam\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "dist\Bitdam\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"

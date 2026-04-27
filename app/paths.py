@@ -7,7 +7,7 @@ from pathlib import Path
 
 
 def default_save_dir() -> Path:
-    base = Path.home() / "Videos" / "GifCam"
+    base = Path.home() / "Videos" / "Bitdam"
     base.mkdir(parents=True, exist_ok=True)
     return base
 

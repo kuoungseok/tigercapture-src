@@ -81,8 +81,8 @@ MIN_PX_PER_SEC = 4.0
 MAX_PX_PER_SEC = 300.0
 MIN_TRACK_WIDTH = 300
 
-FADE_MIME_TYPE = "application/x-gifcam-transition"
-SPEED_MIME_TYPE = "application/x-gifcam-speed"
+FADE_MIME_TYPE = "application/x-bitdam-transition"
+SPEED_MIME_TYPE = "application/x-bitdam-speed"
 
 
 from app.style import (

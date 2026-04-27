@@ -9,7 +9,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('app/locales/*.py', 'app/locales'),
-        ('resources/gifcam.ico', 'resources'),
+        ('resources/bitdam.ico', 'resources'),
     ],
     hiddenimports=[
         'app.locales.ko',
@@ -38,7 +38,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='GifCam',
+    name='Bitdam',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -49,7 +49,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='resources/gifcam.ico',
+    icon='resources/bitdam.ico',
     version='version_info.txt',
 )
 
@@ -60,5 +60,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name='GifCam',
+    name='Bitdam',
 )

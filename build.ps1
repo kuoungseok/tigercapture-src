@@ -1,7 +1,7 @@
-# GifCam build script
+# Bitdam build script
 # Usage:
-#   .\build.ps1              # PyInstaller only (dist\GifCam)
-#   .\build.ps1 -NSIS        # PyInstaller + NSIS (installer_output\GifCam-Setup-*.exe)
+#   .\build.ps1              # PyInstaller only (dist\Bitdam)
+#   .\build.ps1 -NSIS        # PyInstaller + NSIS (installer_output\Bitdam-Setup-*.exe)
 #   .\build.ps1 -Installer   # alias for -NSIS
 #   .\build.ps1 -InnoSetup   # PyInstaller + Inno Setup
 #   .\build.ps1 -Clean       # clean build artifacts first
@@ -33,16 +33,16 @@ if ($Clean) {
 }
 
 # 1. Regenerate icon (fast, idempotent)
-Write-Host "[icon] regenerating resources\gifcam.ico" -ForegroundColor Cyan
+Write-Host "[icon] regenerating resources\bitdam.ico" -ForegroundColor Cyan
 & $python (Join-Path $root "make_icon.py")
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 # 2. PyInstaller build
-Write-Host "[pyinstaller] building dist\GifCam..." -ForegroundColor Cyan
-& $python -m PyInstaller --noconfirm (Join-Path $root "GifCam.spec")
+Write-Host "[pyinstaller] building dist\Bitdam..." -ForegroundColor Cyan
+& $python -m PyInstaller --noconfirm (Join-Path $root "Bitdam.spec")
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
-$exePath = Join-Path $root "dist\GifCam\GifCam.exe"
+$exePath = Join-Path $root "dist\Bitdam\Bitdam.exe"
 if (-not (Test-Path $exePath)) {
     Write-Error "Build failed: $exePath missing."
     exit 1
@@ -72,7 +72,7 @@ if ($NSIS) {
     Write-Host "[nsis] building installer via $makensis" -ForegroundColor Cyan
     & $makensis (Join-Path $root "installer.nsi")
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    Write-Host "[nsis] OK: installer_output\GifCam-Setup-*.exe" -ForegroundColor Green
+    Write-Host "[nsis] OK: installer_output\Bitdam-Setup-*.exe" -ForegroundColor Green
 }
 
 # 3b. Inno Setup installer (alternative)
@@ -98,7 +98,7 @@ if ($InnoSetup) {
     Write-Host "[iscc] building installer via $iscc" -ForegroundColor Cyan
     & $iscc (Join-Path $root "installer.iss")
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    Write-Host "[iscc] OK: installer_output\GifCam-Setup-*.exe" -ForegroundColor Green
+    Write-Host "[iscc] OK: installer_output\Bitdam-Setup-*.exe" -ForegroundColor Green
 }
 
 Write-Host "Done." -ForegroundColor Green

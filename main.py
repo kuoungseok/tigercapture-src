@@ -8,11 +8,11 @@ from pathlib import Path
 from PySide6.QtWidgets import QApplication
 
 
-# Mirror stderr to ``logs/gifcam.log`` next to main.py so each run
+# Mirror stderr to ``logs/bitdam.log`` next to main.py so each run
 # leaves a readable trail (timestamps + stderr lines + tracebacks). The
 # file is truncated on launch so "latest run" is always at the top.
 LOG_DIR = Path(__file__).resolve().parent / "logs"
-LOG_FILE = LOG_DIR / "gifcam.log"
+LOG_FILE = LOG_DIR / "bitdam.log"
 
 
 class _TeeStream(io.TextIOBase):
@@ -47,11 +47,11 @@ class _TeeStream(io.TextIOBase):
 def _install_logging() -> None:
     """Set up a persistent-file stderr mirror + faulthandler + Python
     excepthook. Crashes that weren't making it into the background-task
-    wrapper now land in ``logs/gifcam.log`` reliably."""
+    wrapper now land in ``logs/bitdam.log`` reliably."""
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_fh = open(LOG_FILE, "w", encoding="utf-8", errors="replace", buffering=1)
     log_fh.write(
-        f"=== GifCam session started {datetime.datetime.now().isoformat()} ===\n"
+        f"=== Bitdam session started {datetime.datetime.now().isoformat()} ===\n"
     )
     log_fh.flush()
     sys.stderr = _TeeStream(sys.stderr, log_fh)
@@ -76,8 +76,8 @@ def _install_logging() -> None:
 def main() -> int:
     _install_logging()
     app = QApplication(sys.argv)
-    app.setApplicationName("GifCam")
-    app.setOrganizationName("GifCam")
+    app.setApplicationName("Bitdam")
+    app.setOrganizationName("Bitdam")
 
     # Global dark theme — applies to every widget that doesn't set its own.
     from app.style import APP_QSS

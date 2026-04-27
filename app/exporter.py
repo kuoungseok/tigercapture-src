@@ -70,12 +70,21 @@ class GifExportThread(QThread):
         out_path: Path,
         fps: int,
         scale: float = 1.0,
+        max_colors: int = 256,
+        lossy: int = 60,
     ) -> None:
         super().__init__()
         self._frames = frames
         self._out = Path(out_path)
         self._fps = max(1, int(fps))
         self._scale = float(scale)
+        # GIF palette size — clamped to a 2..256 range; standard GIF
+        # frames cap at 256 colours per palette anyway.
+        self._max_colors = max(2, min(256, int(max_colors)))
+        # gifsicle --lossy level. 0 disables lossy entirely (still runs
+        # ``-O3`` lossless optimisation when gifsicle is present).
+        # Typical useful range is 30..120.
+        self._lossy = max(0, int(lossy))
 
     def run(self) -> None:
         try:
@@ -127,7 +136,7 @@ class GifExportThread(QThread):
         self, frames: list[Image.Image], gifski_path: Path, total_steps: int
     ) -> None:
         n = len(frames)
-        with tempfile.TemporaryDirectory(prefix="gifcam_") as td:
+        with tempfile.TemporaryDirectory(prefix="bitdam_") as td:
             td_path = Path(td)
             for i, f in enumerate(frames):
                 f.save(td_path / f"frame_{i:05d}.png", "PNG")
@@ -160,7 +169,7 @@ class GifExportThread(QThread):
         paletted: list[Image.Image] = []
         for i, f in enumerate(frames):
             q = f.quantize(
-                colors=256,
+                colors=self._max_colors,
                 method=Image.Quantize.MEDIANCUT,
                 dither=Image.Dither.FLOYDSTEINBERG,
             )
@@ -180,19 +189,17 @@ class GifExportThread(QThread):
             self.progress.emit(n * 2 + i + 1, total_steps)
 
     def _post_optimize_gifsicle(self, gifsicle_path: Path) -> None:
+        cmd = [str(gifsicle_path), "-O3"]
+        if self._lossy > 0:
+            cmd.append(f"--lossy={self._lossy}")
+        # gifski produces a 256-colour GIF regardless of intent — apply
+        # the palette cap here so the user-chosen colour count holds for
+        # both encoder paths.
+        if self._max_colors < 256:
+            cmd.append(f"--colors={self._max_colors}")
+        cmd.extend(["-o", str(self._out), str(self._out)])
         try:
-            subprocess.run(
-                [
-                    str(gifsicle_path),
-                    "-O3",
-                    "--lossy=60",
-                    "-o", str(self._out),
-                    str(self._out),
-                ],
-                check=False,
-                capture_output=True,
-                timeout=120,
-            )
+            subprocess.run(cmd, check=False, capture_output=True, timeout=120)
         except Exception:
             pass
 

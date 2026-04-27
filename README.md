@@ -1,4 +1,4 @@
-# GifCam
+# Bitdam
 
 A Windows screen-capture studio — record a region as a screenshot, GIF,
 or MP4, then jump into a full editor with **kinetic typography**,
@@ -13,7 +13,7 @@ deep **sound editor** with AI mastering presets and dynamics.
 
 ## What it does
 
-GifCam started as a HoneyCam-style GIF / video screen-capture tool. It
+Bitdam started as a HoneyCam-style GIF / video screen-capture tool. It
 has since grown into a single-window editing studio for short-form video
 content — with the recorder feeding straight into a pro-grade timeline.
 
@@ -122,17 +122,17 @@ works; flipping a single flag activates the gating below:
 
 ### Option 1 — Installer (recommended)
 
-Download `GifCam-Setup-<version>.exe` from the
-[Releases page](https://github.com/kuoungseok/gifcam/releases) and run
+Download `Bitdam-Setup-<version>.exe` from the
+[Releases page](https://github.com/kuoungseok/bitdam/releases) and run
 it. No administrator rights required; installs to
-`%LOCALAPPDATA%\GifCam` and registers under **Settings → Apps →
+`%LOCALAPPDATA%\Bitdam` and registers under **Settings → Apps →
 Installed apps** for clean uninstall.
 
 ### Option 2 — Portable
 
-Download `GifCam-<version>-portable.zip`, unzip anywhere, run
-`GifCam.exe`. Delete the folder to "uninstall". Captures stay in
-`~/Videos/GifCam`.
+Download `Bitdam-<version>-portable.zip`, unzip anywhere, run
+`Bitdam.exe`. Delete the folder to "uninstall". Captures stay in
+`~/Videos/Bitdam`.
 
 ## System requirements
 
@@ -147,7 +147,7 @@ with ScreenCaptureKit / AppKit / Quartz equivalents via PyObjC.
 
 GitHub Actions automatically builds an ad-hoc-signed `.app` and
 `.dmg` on every push to `main` — see the
-[Actions tab](https://github.com/kuoungseok/gifcam/actions) for the
+[Actions tab](https://github.com/kuoungseok/bitdam/actions) for the
 latest build artifacts. Tagging a commit `v*-mac*` (e.g. `v1.4.0-mac`)
 publishes the .dmg as a GitHub Release.
 
@@ -181,7 +181,7 @@ python main.py
 ### Build
 
 ```powershell
-.\build.ps1              # PyInstaller only  -> dist\GifCam\
+.\build.ps1              # PyInstaller only  -> dist\Bitdam\
 .\build.ps1 -NSIS        # + NSIS installer  -> installer_output\
 .\build.ps1 -Clean       # clean build artifacts first
 ```
