@@ -8,6 +8,7 @@ Build:
     pyinstaller --noconfirm mac/Bitdam-mac.spec
 """
 from pathlib import Path
+from PyInstaller.utils.hooks import copy_metadata
 
 project_root = Path(SPECPATH).resolve().parent  # = repo root
 
@@ -23,12 +24,20 @@ a = Analysis(
         # `app` package can find them exactly as on Windows.
         (str(project_root / 'app' / 'locales' / '*.py'), 'app/locales'),
         (str(project_root / 'resources' / 'bitdam.ico'), 'resources'),
-    ],
+    ] + copy_metadata('imageio_ffmpeg'),
     hiddenimports=[
         'app.locales.ko',
         'app.locales.en',
         'app.locales.ja',
         'app.locales.de',
+        'app.locales.fr',
+        'app.locales.zh',
+        'app.color_grading',
+        'app.tier',
+        'app.typography',
+        'app.typo_animations',
+        'app.typo_presets',
+        'app.typo_render',
         # ScreenCaptureKit + supporting frameworks. PyInstaller can't
         # statically discover pyobjc's dynamic bundle-loading, so each
         # framework module referenced at runtime must be listed here
