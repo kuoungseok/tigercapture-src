@@ -132,10 +132,6 @@ class RecentStrip(QScrollArea):
         self._layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
         self.setWidget(self._container)
 
-        self._empty_label = QLabel(tr("main.recent.empty"))
-        self._empty_label.setObjectName("RecentEmpty")
-        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
     def refresh(self, save_dir: Path) -> None:
         while self._layout.count():
             item = self._layout.takeAt(0)
@@ -145,7 +141,14 @@ class RecentStrip(QScrollArea):
 
         entries = list_recent(save_dir)
         if not entries:
-            self._layout.addWidget(self._empty_label)
+            # Build a fresh empty label every refresh — keeping a
+            # long-lived ``self._empty_label`` would crash here on
+            # the second refresh because the clear loop above already
+            # marked the previous instance for ``deleteLater``.
+            empty_label = QLabel(tr("main.recent.empty"))
+            empty_label.setObjectName("RecentEmpty")
+            empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            self._layout.addWidget(empty_label)
             return
 
         for capture in entries:
