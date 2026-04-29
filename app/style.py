@@ -1,20 +1,40 @@
 # --- Dark-mode palette (shared across all editor + main windows) ---
-COLOR_BG_L5 = "#36363c"  # title / toolbars (brightest — interactive controls)
-COLOR_BG_L4 = "#2a2a30"  # play bars, section header backgrounds
-COLOR_BG_L3 = "#1c1c22"  # generic window body, controls bar
-COLOR_BG_L2 = "#0f0f14"  # timeline area, deep panels
+# Material Dark elevation tones — neutral greys, no blue cast. Each
+# tier corresponds to a notional surface elevation, matching how
+# Material Dark layers cards above the base. Keeping the palette
+# strictly grey (instead of the previous slightly blue-tinted greys)
+# makes the single brand accent read more cleanly.
+COLOR_BG_L5 = "#2E2E2E"  # interactive controls / toolbars (08dp)
+COLOR_BG_L4 = "#242424"  # play bars, section header backgrounds (03dp)
+COLOR_BG_L3 = "#1E1E1E"  # generic window body, controls bar (01dp)
+COLOR_BG_L2 = "#121212"  # timeline area, deep panels (00dp)
 COLOR_BG_L1 = "#000000"  # video preview matte
-COLOR_ACCENT_BLUE = "#378ADD"
-COLOR_ACCENT_BLUE_HOVER = "#4a9bee"
-COLOR_ACCENT_ORANGE = "#D85A30"
-COLOR_ACCENT_GREEN = "#5DCAA5"
+
+# Single brand accent — TigerCapture orange. The whole UI funnels
+# through these three values for primary actions, selection, and
+# focus rings. The legacy "BLUE / GREEN / ORANGE" aliases below all
+# resolve here so existing callers keep working but every accent on
+# screen reads as one coherent brand colour.
+COLOR_ACCENT = "#D85A30"
+COLOR_ACCENT_HOVER = "#ff7a4a"
+COLOR_ACCENT_PRESSED = "#b04722"
+COLOR_ACCENT_DISABLED = "#6a3a26"
+
+# Legacy aliases — every multi-accent name maps to the same orange
+# so the old multi-colour palette collapses into one. Red is kept
+# distinct because destructive / donate UI universally uses red.
+COLOR_ACCENT_BLUE = COLOR_ACCENT
+COLOR_ACCENT_BLUE_HOVER = COLOR_ACCENT_HOVER
+COLOR_ACCENT_ORANGE = COLOR_ACCENT
+COLOR_ACCENT_GREEN = COLOR_ACCENT
 COLOR_ACCENT_RED = "#e54646"
+
 COLOR_TEXT_PRIMARY = "#ffffff"
-COLOR_TEXT_SECONDARY = "#c8c8d0"
-COLOR_TEXT_TERTIARY = "#8a8a92"
-COLOR_TEXT_DISABLED = "#5a5a62"
-COLOR_BORDER_DEFAULT = "#4a4a52"
-COLOR_BORDER_SUBTLE = "#3a3a42"
+COLOR_TEXT_SECONDARY = "#c8c8c8"
+COLOR_TEXT_TERTIARY = "#8a8a8a"
+COLOR_TEXT_DISABLED = "#5a5a5a"
+COLOR_BORDER_DEFAULT = "#3a3a3a"
+COLOR_BORDER_SUBTLE = "#2a2a2a"
 
 
 APP_QSS = f"""
@@ -68,20 +88,20 @@ QPushButton:disabled {{
     color: {COLOR_TEXT_DISABLED};
     border-color: {COLOR_BORDER_SUBTLE};
 }}
-/* Primary / default dialog button (Enter-activated) gets the accent
- * blue so the affirmative action is obvious. Qt marks the default
- * button automatically in message boxes and QDialogButtonBox. */
+/* Default dialog button — emphasis comes from a brighter neutral
+ * surface, not a hue. Same grey family as the rest of the chrome,
+ * just one elevation step up. Keeps the surface monochromatic. */
 QPushButton:default {{
-    background-color: {COLOR_ACCENT_BLUE};
-    border-color: {COLOR_ACCENT_BLUE};
+    background-color: #4a4a4a;
+    border: 1px solid #5a5a5a;
     color: {COLOR_TEXT_PRIMARY};
 }}
 QPushButton:default:hover {{
-    background-color: {COLOR_ACCENT_BLUE_HOVER};
-    border-color: {COLOR_ACCENT_BLUE_HOVER};
+    background-color: #5a5a5a;
+    border-color: #6a6a6a;
 }}
 QPushButton:default:pressed {{
-    background-color: #2a6fb4;
+    background-color: #3a3a3a;
 }}
 
 /* Force the same look on descendants of modal dialogs. The generic
@@ -112,16 +132,16 @@ QMessageBox QPushButton:default,
 QInputDialog QPushButton:default,
 QFileDialog QPushButton:default,
 QDialogButtonBox QPushButton:default {{
-    background-color: {COLOR_ACCENT_BLUE};
-    border-color: {COLOR_ACCENT_BLUE};
+    background-color: #4a4a4a;
+    border: 1px solid #5a5a5a;
     color: {COLOR_TEXT_PRIMARY};
 }}
 QMessageBox QPushButton:default:hover,
 QInputDialog QPushButton:default:hover,
 QFileDialog QPushButton:default:hover,
 QDialogButtonBox QPushButton:default:hover {{
-    background-color: {COLOR_ACCENT_BLUE_HOVER};
-    border-color: {COLOR_ACCENT_BLUE_HOVER};
+    background-color: #5a5a5a;
+    border-color: #6a6a6a;
 }}
 
 /* Dialog body + labels */
@@ -149,19 +169,20 @@ QLabel#SectionLabel {{
 }}
 
 QPushButton#NewCaptureButton {{
-    background-color: {COLOR_ACCENT_BLUE};
+    background-color: #5a5a5a;
     color: {COLOR_TEXT_PRIMARY};
-    border: none;
+    border: 1px solid #6a6a6a;
     border-radius: 8px;
     padding: 14px 24px;
     font-size: 15px;
     font-weight: 700;
 }}
 QPushButton#NewCaptureButton:hover {{
-    background-color: {COLOR_ACCENT_BLUE_HOVER};
+    background-color: #6a6a6a;
+    border-color: #7a7a7a;
 }}
 QPushButton#NewCaptureButton:pressed {{
-    background-color: #2a6fb4;
+    background-color: #4a4a4a;
 }}
 QPushButton#NewCaptureButton:disabled {{
     background-color: {COLOR_BORDER_DEFAULT};
@@ -170,7 +191,7 @@ QPushButton#NewCaptureButton:disabled {{
 
 QPushButton[modeButton="true"] {{
     background-color: {COLOR_BG_L5};
-    color: {COLOR_TEXT_PRIMARY};
+    color: {COLOR_TEXT_SECONDARY};
     border: 1px solid {COLOR_BORDER_DEFAULT};
     border-radius: 8px;
     padding: 10px 14px;
@@ -178,50 +199,40 @@ QPushButton[modeButton="true"] {{
     font-weight: 600;
 }}
 QPushButton[modeButton="true"]:hover {{
-    background-color: #44444a;
-    border-color: #6a6a72;
+    background-color: #383838;
+    border-color: #4a4a4a;
+    color: {COLOR_TEXT_PRIMARY};
 }}
+/* Selected state — same grey family, brighter. White label, brighter
+ * border. No hue accent: the elevation step is the affordance. */
 QPushButton[modeButton="true"]:checked {{
-    background-color: {COLOR_ACCENT_BLUE};
-    border-color: {COLOR_ACCENT_BLUE};
+    background-color: #4a4a4a;
+    border: 1px solid #6a6a6a;
     color: {COLOR_TEXT_PRIMARY};
     font-weight: 700;
 }}
 
-/* Pro video editor shortcut — distinct violet accent so it reads as the
-   "power-user" entry point, separate from the blue primary actions. */
-QPushButton#ProEditorButton {{
-    background-color: #6a3cb5;
-    color: {COLOR_TEXT_PRIMARY};
-    border: none;
-    border-radius: 8px;
-    padding: 12px 18px;
-    font-size: 14px;
-    font-weight: 700;
-}}
-QPushButton#ProEditorButton:hover {{
-    background-color: #7b4ac9;
-}}
-QPushButton#ProEditorButton:pressed {{
-    background-color: #552a97;
-}}
-
-/* Sound editor shortcut — orange accent (matches the AI Master tab)
-   so users recognize it as the audio-mastering entry point. */
+/* Pro video editor + Sound editor shortcuts — neutral surface,
+ * elevation-step brighter than the surrounding chrome to read as
+ * interactive. White label. Distinguished by icon, not hue. */
+QPushButton#ProEditorButton,
 QPushButton#SoundEditorButton {{
-    background-color: #D85A30;
+    background-color: #3a3a3a;
     color: {COLOR_TEXT_PRIMARY};
-    border: none;
+    border: 1px solid #4a4a4a;
     border-radius: 8px;
     padding: 12px 18px;
     font-size: 14px;
     font-weight: 700;
 }}
+QPushButton#ProEditorButton:hover,
 QPushButton#SoundEditorButton:hover {{
-    background-color: #ff7a4a;
+    background-color: #4a4a4a;
+    border-color: #5a5a5a;
 }}
+QPushButton#ProEditorButton:pressed,
 QPushButton#SoundEditorButton:pressed {{
-    background-color: #b04722;
+    background-color: #2e2e2e;
 }}
 
 QComboBox {{
@@ -244,7 +255,7 @@ QComboBox QAbstractItemView {{
     background-color: {COLOR_BG_L3};
     color: {COLOR_TEXT_PRIMARY};
     border: 1px solid {COLOR_BORDER_DEFAULT};
-    selection-background-color: {COLOR_ACCENT_BLUE};
+    selection-background-color: #4a4a4a;
     selection-color: {COLOR_TEXT_PRIMARY};
 }}
 
@@ -261,8 +272,8 @@ QCheckBox::indicator {{
     background: {COLOR_BG_L2};
 }}
 QCheckBox::indicator:checked {{
-    background: {COLOR_ACCENT_BLUE};
-    border-color: {COLOR_ACCENT_BLUE};
+    background: #6a6a6a;
+    border-color: #8a8a8a;
 }}
 
 QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox {{
@@ -271,12 +282,12 @@ QLineEdit, QTextEdit, QPlainTextEdit, QSpinBox, QDoubleSpinBox {{
     border: 1px solid {COLOR_BORDER_DEFAULT};
     border-radius: 6px;
     padding: 6px 10px;
-    selection-background-color: {COLOR_ACCENT_BLUE};
+    selection-background-color: #4a4a4a;
     selection-color: {COLOR_TEXT_PRIMARY};
 }}
 QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus,
 QSpinBox:focus, QDoubleSpinBox:focus {{
-    border-color: {COLOR_ACCENT_BLUE};
+    border-color: #7a7a7a;
 }}
 
 QFrame#Divider {{
@@ -356,7 +367,7 @@ QWidget#RecentCard {{
     border-radius: 6px;
 }}
 QWidget#RecentCard:hover {{
-    border-color: {COLOR_ACCENT_BLUE};
+    border-color: #6a6a6a;
 }}
 QLabel#RecentThumb {{
     background-color: {COLOR_BG_L3};
@@ -400,25 +411,26 @@ QPushButton#ToolButton:disabled {{
     border-color: {COLOR_BORDER_SUBTLE};
 }}
 QPushButton#ToolButton:checked {{
-    background-color: {COLOR_ACCENT_BLUE};
+    background-color: #4a4a4a;
     color: {COLOR_TEXT_PRIMARY};
-    border-color: {COLOR_ACCENT_BLUE};
+    border-color: #6a6a6a;
 }}
 
 QPushButton#PrimaryToolButton {{
-    background-color: {COLOR_ACCENT_BLUE};
+    background-color: #4a4a4a;
     color: {COLOR_TEXT_PRIMARY};
-    border: none;
+    border: 1px solid #5a5a5a;
     border-radius: 6px;
     padding: 8px 18px;
     font-size: 12px;
     font-weight: 700;
 }}
 QPushButton#PrimaryToolButton:hover {{
-    background-color: {COLOR_ACCENT_BLUE_HOVER};
+    background-color: #5a5a5a;
+    border-color: #6a6a6a;
 }}
 QPushButton#PrimaryToolButton:pressed {{
-    background-color: #2a6fb4;
+    background-color: #3a3a3a;
 }}
 
 QWidget#PreviewHost {{
@@ -483,7 +495,7 @@ QListWidget::item {{
     padding: 4px 8px;
 }}
 QListWidget::item:selected {{
-    background-color: {COLOR_ACCENT_BLUE};
+    background-color: #4a4a4a;
     color: {COLOR_TEXT_PRIMARY};
 }}
 
@@ -496,7 +508,7 @@ QMenu::item {{
     padding: 6px 20px;
 }}
 QMenu::item:selected {{
-    background-color: {COLOR_ACCENT_BLUE};
+    background-color: #4a4a4a;
     color: {COLOR_TEXT_PRIMARY};
 }}
 QMenu::separator {{

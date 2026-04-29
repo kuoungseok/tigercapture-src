@@ -553,7 +553,7 @@ class AppController(QObject):
         scale = float(options["scale"])
         # New compression knobs — fall back to historical defaults so any
         # caller that doesn't know about them keeps shipping 256 colours
-        # with the gifsicle --lossy=60 post-pass Bitdam has used since 1.0.
+        # with the gifsicle --lossy=60 post-pass TigerCapture has used since 1.0.
         max_colors = int(options.get("max_colors", 256))
         lossy = int(options.get("lossy", 60))
 

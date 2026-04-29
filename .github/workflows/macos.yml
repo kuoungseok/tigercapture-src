@@ -77,7 +77,7 @@ jobs:
 
       - name: Build .app + .dmg
         env:
-          BITDAM_VERSION: ${{ steps.version.outputs.version }}
+          TIGERCAPTURE_VERSION: ${{ steps.version.outputs.version }}
         run: |
           chmod +x mac/build.sh
           ./mac/build.sh --clean --dmg
@@ -86,14 +86,14 @@ jobs:
         run: |
           ls -la dist/
           # Codesign + spctl for diagnostics; non-fatal.
-          codesign --display --verbose=2 dist/Bitdam.app || true
-          spctl --assess --type execute --verbose dist/Bitdam.app || true
+          codesign --display --verbose=2 dist/TigerCapture.app || true
+          spctl --assess --type execute --verbose dist/TigerCapture.app || true
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
         with:
-          name: Bitdam-mac-${{ steps.version.outputs.version }}
-          path: dist/Bitdam-*-mac.dmg
+          name: TigerCapture-mac-${{ steps.version.outputs.version }}
+          path: dist/TigerCapture-*-mac.dmg
           if-no-files-found: error
           retention-days: 30
 
@@ -103,10 +103,10 @@ jobs:
           (github.event_name == 'workflow_dispatch' && inputs.publish_release == true)
         uses: softprops/action-gh-release@v2
         with:
-          files: dist/Bitdam-*-mac.dmg
+          files: dist/TigerCapture-*-mac.dmg
           prerelease: true
           draft: false
-          name: Bitdam ${{ steps.version.outputs.version }} (macOS, experimental)
+          name: TigerCapture ${{ steps.version.outputs.version }} (macOS, experimental)
           body: |
             **Experimental macOS build — unverified.**
 
@@ -115,9 +115,9 @@ jobs:
             report issues with the exact error text.
 
             ## Install
-            1. Download `Bitdam-${{ steps.version.outputs.version }}-mac.dmg`
-            2. Double-click to mount, drag **Bitdam.app** into `/Applications`
-            3. **First launch**: in Finder, right-click `Bitdam.app` → **Open**,
+            1. Download `TigerCapture-${{ steps.version.outputs.version }}-mac.dmg`
+            2. Double-click to mount, drag **TigerCapture.app** into `/Applications`
+            3. **First launch**: in Finder, right-click `TigerCapture.app` → **Open**,
                then confirm the dialog. macOS remembers the exception.
 
             ## First-run permissions

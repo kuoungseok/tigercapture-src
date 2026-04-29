@@ -136,7 +136,7 @@ class GifExportThread(QThread):
         self, frames: list[Image.Image], gifski_path: Path, total_steps: int
     ) -> None:
         n = len(frames)
-        with tempfile.TemporaryDirectory(prefix="bitdam_") as td:
+        with tempfile.TemporaryDirectory(prefix="tigercapture_") as td:
             td_path = Path(td)
             for i, f in enumerate(frames):
                 f.save(td_path / f"frame_{i:05d}.png", "PNG")

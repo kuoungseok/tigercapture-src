@@ -1,9 +1,9 @@
-; NSIS installer script for Bitdam
+; NSIS installer script for TigerCapture
 ; Build:   makensis.exe installer.nsi
-; Output:  installer_output\Bitdam-Setup-1.0.0.exe
+; Output:  installer_output\TigerCapture-Setup-1.0.0.exe
 ;
 ; User-level install (no admin required):
-;   - files to %LOCALAPPDATA%\Bitdam
+;   - files to %LOCALAPPDATA%\TigerCapture
 ;   - registry to HKCU so Windows "Apps & Features" shows it
 ;     without elevation
 ;
@@ -11,16 +11,16 @@
 
 Unicode True
 
-!define APPNAME         "Bitdam"
+!define APPNAME         "TigerCapture"
 !define COMPANYNAME     "KyoungSeok Ko (artmouse)"
 !define DESCRIPTION     "Screen capture to GIF / MP4"
 !define VERSIONMAJOR    1
 !define VERSIONMINOR    0
 !define VERSIONBUILD    0
 !define VERSIONSTR      "${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}"
-!define HELPURL         "https://github.com/kuoungseok/bitdam"
-!define UPDATEURL       "https://github.com/kuoungseok/bitdam/releases"
-!define ABOUTURL        "https://github.com/kuoungseok/bitdam"
+!define HELPURL         "https://github.com/kuoungseok/tigercapture"
+!define UPDATEURL       "https://github.com/kuoungseok/tigercapture/releases"
+!define ABOUTURL        "https://github.com/kuoungseok/tigercapture"
 !define INSTALLSIZE     352000         ; KB, rough; Windows shows this
 !define UNINSTKEY       "Software\Microsoft\Windows\CurrentVersion\Uninstall\${APPNAME}"
 
@@ -30,8 +30,8 @@ InstallDirRegKey        HKCU "Software\${APPNAME}" "InstallLocation"
 Name                    "${APPNAME}"
 OutFile                 "installer_output\${APPNAME}-Setup-${VERSIONSTR}.exe"
 BrandingText            "${COMPANYNAME}"
-Icon                    "resources\bitdam.ico"
-UninstallIcon           "resources\bitdam.ico"
+Icon                    "resources\tigercapture.ico"
+UninstallIcon           "resources\tigercapture.ico"
 VIProductVersion        "${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}.0"
 VIAddVersionKey         "ProductName"       "${APPNAME}"
 VIAddVersionKey         "FileDescription"   "${DESCRIPTION}"
@@ -43,10 +43,10 @@ VIAddVersionKey         "LegalCopyright"    "(C) ${COMPANYNAME}"
 !include "MUI2.nsh"
 !include "LogicLib.nsh"
 
-!define MUI_ICON        "resources\bitdam.ico"
-!define MUI_UNICON      "resources\bitdam.ico"
+!define MUI_ICON        "resources\tigercapture.ico"
+!define MUI_UNICON      "resources\tigercapture.ico"
 !define MUI_ABORTWARNING
-!define MUI_FINISHPAGE_RUN "$INSTDIR\Bitdam.exe"
+!define MUI_FINISHPAGE_RUN "$INSTDIR\TigerCapture.exe"
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
@@ -71,16 +71,16 @@ FunctionEnd
 Section "Install"
     SetOutPath "$INSTDIR"
 
-    ; Copy packaged app tree (must match PyInstaller's dist\Bitdam output)
-    File /r "dist\Bitdam\*.*"
+    ; Copy packaged app tree (must match PyInstaller's dist\TigerCapture output)
+    File /r "dist\TigerCapture\*.*"
 
     ; Start Menu
     CreateDirectory "$SMPROGRAMS\${APPNAME}"
-    CreateShortCut  "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk"       "$INSTDIR\Bitdam.exe" "" "$INSTDIR\Bitdam.exe"
+    CreateShortCut  "$SMPROGRAMS\${APPNAME}\${APPNAME}.lnk"       "$INSTDIR\TigerCapture.exe" "" "$INSTDIR\TigerCapture.exe"
     CreateShortCut  "$SMPROGRAMS\${APPNAME}\Uninstall ${APPNAME}.lnk" "$INSTDIR\uninstall.exe" "" "$INSTDIR\uninstall.exe"
 
     ; Desktop shortcut
-    CreateShortCut  "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\Bitdam.exe" "" "$INSTDIR\Bitdam.exe"
+    CreateShortCut  "$DESKTOP\${APPNAME}.lnk" "$INSTDIR\TigerCapture.exe" "" "$INSTDIR\TigerCapture.exe"
 
     ; Uninstaller
     WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -92,7 +92,7 @@ Section "Install"
     ; Apps & Features entry (HKCU avoids admin elevation)
     WriteRegStr   HKCU "${UNINSTKEY}" "DisplayName"          "${APPNAME}"
     WriteRegStr   HKCU "${UNINSTKEY}" "DisplayVersion"       "${VERSIONSTR}"
-    WriteRegStr   HKCU "${UNINSTKEY}" "DisplayIcon"          "$\"$INSTDIR\Bitdam.exe$\""
+    WriteRegStr   HKCU "${UNINSTKEY}" "DisplayIcon"          "$\"$INSTDIR\TigerCapture.exe$\""
     WriteRegStr   HKCU "${UNINSTKEY}" "Publisher"            "${COMPANYNAME}"
     WriteRegStr   HKCU "${UNINSTKEY}" "InstallLocation"      "$\"$INSTDIR$\""
     WriteRegStr   HKCU "${UNINSTKEY}" "UninstallString"      "$\"$INSTDIR\uninstall.exe$\""
@@ -114,13 +114,13 @@ Section "Uninstall"
     RMDir  "$SMPROGRAMS\${APPNAME}"
     Delete "$DESKTOP\${APPNAME}.lnk"
 
-    ; Remove install tree (keeps user data in %USERPROFILE%\Videos\Bitdam)
+    ; Remove install tree (keeps user data in %USERPROFILE%\Videos\TigerCapture)
     RMDir /r "$INSTDIR"
 
     ; Clean registry
     DeleteRegKey HKCU "${UNINSTKEY}"
     DeleteRegKey HKCU "Software\${APPNAME}"
-    ; Keep user language preference at HKCU\Software\Bitdam\Bitdam so future
+    ; Keep user language preference at HKCU\Software\TigerCapture\TigerCapture so future
     ; install reuses it; remove explicitly if user wants a clean slate:
-    ; DeleteRegKey HKCU "Software\Bitdam"
+    ; DeleteRegKey HKCU "Software\TigerCapture"
 SectionEnd

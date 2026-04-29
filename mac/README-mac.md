@@ -1,4 +1,4 @@
-# Bitdam — macOS build
+# TigerCapture — macOS build
 
 > **Status: UNVERIFIED (experimental)**
 >
@@ -13,7 +13,7 @@
 > The **Windows build is unaffected** by this port (overlay
 > architecture, see "Architecture notes" below).
 
-This directory contains everything needed to build and run Bitdam on
+This directory contains everything needed to build and run TigerCapture on
 macOS. The shared UI code in `../app/` is reused unchanged; only the
 five platform-specific modules (`recorder`, `foreground_tracker`,
 `quick_paste`, `cursor_overlay`, `paths`) are overlaid here.
@@ -28,7 +28,7 @@ five platform-specific modules (`recorder`, `foreground_tracker`,
 
 ## Suggested workflow (edit on PC, build on Mac)
 
-Bitdam's UI code lives in `app/` and is edited on a PC. Use VS Code's
+TigerCapture's UI code lives in `app/` and is edited on a PC. Use VS Code's
 **Remote-SSH** extension to connect to the Mac — all file I/O, Python,
 and `./mac/build.sh` run on the Mac, but the editor UI is on the PC.
 
@@ -39,7 +39,7 @@ On the Mac:
 On the PC (VS Code):
 1. Install the **Remote - SSH** extension
 2. `Ctrl+Shift+P` → `Remote-SSH: Connect to Host...` → `user@hostname.local`
-3. `File → Open Folder` → `/Users/you/Projects/Bitdam`
+3. `File → Open Folder` → `/Users/you/Projects/TigerCapture`
 
 For live UI testing, keep the Mac awake alongside the PC, or use
 **System Settings → Sharing → Screen Sharing** to drive the Mac
@@ -48,7 +48,7 @@ desktop from the PC.
 ## First-time setup (on the Mac)
 
 ```bash
-cd /path/to/Bitdam
+cd /path/to/TigerCapture
 python3 -m venv .venv
 .venv/bin/pip install -r mac/requirements-mac.txt
 ```
@@ -63,24 +63,24 @@ First launch will trigger two permission prompts:
 
 1. **Screen & System Audio Recording** — required. Grant via
    *System Settings → Privacy & Security → Screen Recording*. You'll
-   need to quit and relaunch Bitdam for the permission to take effect.
+   need to quit and relaunch TigerCapture for the permission to take effect.
 2. **Accessibility** — optional. Enables reading the frontmost
    window's title (for quick-paste labels) and simulating ⌘V when
-   pasting a capture back into the previous app. Without it, Bitdam
+   pasting a capture back into the previous app. Without it, TigerCapture
    still records and exports; only the quick-paste polish is lost.
 
 ## Build
 
 ```bash
-./mac/build.sh            # -> dist/Bitdam.app
-./mac/build.sh --dmg      # -> dist/Bitdam.app + dist/Bitdam-1.3.0.dmg
+./mac/build.sh            # -> dist/TigerCapture.app
+./mac/build.sh --dmg      # -> dist/TigerCapture.app + dist/TigerCapture-1.3.0.dmg
 ./mac/build.sh --clean --dmg
 ```
 
 The script:
-1. Regenerates `mac/resources/bitdam.icns` from the same Pillow art
+1. Regenerates `mac/resources/tigercapture.icns` from the same Pillow art
    used for the Windows `.ico`
-2. Runs PyInstaller with `mac/Bitdam-mac.spec`
+2. Runs PyInstaller with `mac/TigerCapture-mac.spec`
 3. Ad-hoc signs the bundle via `codesign --sign -`
 4. (with `--dmg`) builds a drag-to-Applications DMG via `dmgbuild`
 
@@ -89,12 +89,12 @@ The script:
 Without Apple notarization, a different user's Mac will show this on
 first launch:
 
-> `"Bitdam.app" cannot be opened because Apple cannot check it for
+> `"TigerCapture.app" cannot be opened because Apple cannot check it for
 > malicious software.`
 
 The supported workaround (no Terminal needed):
 
-1. In Finder, **right-click** `Bitdam.app` → **Open**
+1. In Finder, **right-click** `TigerCapture.app` → **Open**
 2. Confirm in the dialog that appears
 
 macOS remembers the exception, so subsequent launches work normally
@@ -125,25 +125,25 @@ If you enroll in the Apple Developer Program ($99/year):
    `codesign --sign "Developer ID Application: Your Name (TEAMID)"`
 3. Submit for notarization via:
    ```bash
-   xcrun notarytool submit dist/Bitdam-1.3.0.dmg \
+   xcrun notarytool submit dist/TigerCapture-1.3.0.dmg \
        --apple-id your@id.com --team-id TEAMID --wait
-   xcrun stapler staple dist/Bitdam-1.3.0.dmg
+   xcrun stapler staple dist/TigerCapture-1.3.0.dmg
    ```
 4. The Gatekeeper warning disappears for all users.
 
 Keep the build script parameterized by an env var like
-`BITDAM_SIGNING_IDENTITY` so development builds stay ad-hoc.
+`TIGERCAPTURE_SIGNING_IDENTITY` so development builds stay ad-hoc.
 
 ## Troubleshooting
 
 - **Black or empty frames**: Screen Recording permission missing.
   System Settings → Privacy & Security → Screen Recording, tick
-  Bitdam, then quit+relaunch.
+  TigerCapture, then quit+relaunch.
 - **"SCShareableContent returned nil"**: same as above, but the
   prompt was dismissed. Toggle the permission off and on again to
-  reissue it, or add Bitdam manually.
+  reissue it, or add TigerCapture manually.
 - **Quick-paste does nothing**: Accessibility permission missing.
-  System Settings → Privacy & Security → Accessibility, tick Bitdam.
+  System Settings → Privacy & Security → Accessibility, tick TigerCapture.
 - **`ModuleNotFoundError: ScreenCaptureKit`**: the pyobjc SCK module
   needs pyobjc 10.3+. Upgrade with
   `.venv/bin/pip install -U pyobjc-framework-ScreenCaptureKit`.

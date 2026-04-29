@@ -5,7 +5,7 @@ Layout assumption: run from the repository root, so `main.py` refers
 to `mac/main.py` and data paths are relative to the repo root.
 
 Build:
-    pyinstaller --noconfirm mac/Bitdam-mac.spec
+    pyinstaller --noconfirm mac/TigerCapture-mac.spec
 """
 from pathlib import Path
 from PyInstaller.utils.hooks import copy_metadata
@@ -23,7 +23,7 @@ a = Analysis(
         # Shared locales and resources ride along so the overlaid
         # `app` package can find them exactly as on Windows.
         (str(project_root / 'app' / 'locales' / '*.py'), 'app/locales'),
-        (str(project_root / 'resources' / 'bitdam.ico'), 'resources'),
+        (str(project_root / 'resources' / 'tigercapture.ico'), 'resources'),
     ] + copy_metadata('imageio_ffmpeg'),
     hiddenimports=[
         'app.locales.ko',
@@ -73,7 +73,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='Bitdam',
+    name='TigerCapture',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -93,13 +93,13 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name='Bitdam',
+    name='TigerCapture',
 )
 
 app = BUNDLE(
     coll,
-    name='Bitdam.app',
-    icon=str(project_root / 'mac' / 'resources' / 'bitdam.icns'),
-    bundle_identifier='com.artmouse.bitdam',
+    name='TigerCapture.app',
+    icon=str(project_root / 'mac' / 'resources' / 'tigercapture.icns'),
+    bundle_identifier='com.artmouse.tigercapture',
     info_plist=str(project_root / 'mac' / 'Info.plist'),
 )

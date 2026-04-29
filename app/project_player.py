@@ -256,6 +256,33 @@ class ProjectPlayer(QObject):
         h, w = bgr.shape[:2]
         rgb = np.ascontiguousarray(bgr[:, :, ::-1])
 
+        # Zoom actor — applied BEFORE colour grading so the grade
+        # operates on the cropped+rescaled pixels the user actually
+        # sees. The look is identical either way at full strength but
+        # this order gives smoother shadow/midtone masks during ramps.
+        try:
+            from app.video_editor_window import find_active_zoom, zoom_window_at
+            zactor = find_active_zoom(track, local_ms)
+        except Exception:
+            zactor = None
+        if zactor is not None:
+            window = zoom_window_at(zactor, local_ms, w, h)
+            if window is not None:
+                cx, cy, cw, ch = window
+                # Crop integer-aligned region then resize back to full
+                # frame using OpenCV (cv2.resize is faster than PIL for
+                # this size). Use INTER_LINEAR — INTER_CUBIC's halo on
+                # high-contrast edges is more annoying than useful here.
+                cx_i = max(0, int(round(cx)))
+                cy_i = max(0, int(round(cy)))
+                cw_i = max(1, int(round(cw)))
+                ch_i = max(1, int(round(ch)))
+                cx_i = min(cx_i, w - cw_i)
+                cy_i = min(cy_i, h - ch_i)
+                cropped = rgb[cy_i:cy_i + ch_i, cx_i:cx_i + cw_i]
+                rgb = cv2.resize(cropped, (w, h), interpolation=cv2.INTER_LINEAR)
+                rgb = np.ascontiguousarray(rgb)
+
         # Per-track color grading — applied in numpy on the RGB array
         # so slider drags feel real-time. Identity grades short-circuit
         # to avoid the float32 round trip.

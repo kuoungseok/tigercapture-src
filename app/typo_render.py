@@ -369,7 +369,7 @@ def render_clip_to_mov(
         return False
     total_frames = max(1, int(round(duration_s * fps)))
 
-    tmp_dir = tempfile.mkdtemp(prefix="bitdam_typo_")
+    tmp_dir = tempfile.mkdtemp(prefix="tigercapture_typo_")
     try:
         for n in range(total_frames):
             t = n / fps

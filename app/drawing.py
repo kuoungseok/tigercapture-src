@@ -48,32 +48,34 @@ QPushButton#PaintTool:hover {
     border-color: #5a5a62;
 }
 QPushButton#PaintTool:checked {
-    background-color: #378ADD;
-    border-color: #378ADD;
+    background-color: #4a4a4a;
+    border-color: #6a6a6a;
     color: #ffffff;
 }
 
 QPushButton#BubbleBtn {
-    background-color: #5DCAA5;
-    color: #0a0a0b;
-    border: none;
+    background-color: #4a4a4a;
+    color: #ffffff;
+    border: 1px solid #5a5a5a;
     border-radius: 6px;
     padding: 7px 14px;
     font-weight: 700;
 }
 QPushButton#BubbleBtn:hover {
-    background-color: #73d6b3;
+    background-color: #5a5a5a;
+    border-color: #6a6a6a;
 }
 QPushButton#StickerBtn {
-    background-color: #D85A30;
-    color: #fff;
-    border: none;
+    background-color: #4a4a4a;
+    color: #ffffff;
+    border: 1px solid #5a5a5a;
     border-radius: 6px;
     padding: 7px 14px;
     font-weight: 700;
 }
 QPushButton#StickerBtn:hover {
-    background-color: #ff7a4a;
+    background-color: #5a5a5a;
+    border-color: #6a6a6a;
 }
 
 QDialogButtonBox QPushButton {
@@ -85,13 +87,14 @@ QDialogButtonBox QPushButton {
 }
 QDialogButtonBox QPushButton[text="OK"],
 QDialogButtonBox QPushButton:default {
-    background-color: #378ADD;
+    background-color: #4a4a4a;
     color: #ffffff;
-    border: none;
+    border: 1px solid #5a5a5a;
 }
 QDialogButtonBox QPushButton:default:hover,
 QDialogButtonBox QPushButton[text="OK"]:hover {
-    background-color: #4a9bee;
+    background-color: #5a5a5a;
+    border-color: #6a6a6a;
 }
 QDialogButtonBox QPushButton:!default {
     background-color: #2a2a30;
@@ -1042,9 +1045,10 @@ class SpeechBubbleItem(QWidget):
         self._tail_btn.setToolTip(tr("bubble.toggle_tail"))
         self._tail_btn.setFixedSize(self.HANDLE_SIZE, self.HANDLE_SIZE)
         self._tail_btn.setStyleSheet(
-            "QPushButton { background: #378ADD; color: white; border: none; "
+            "QPushButton { background: #4a4a4a; color: white; "
+            "border: 1px solid #5a5a5a; "
             "border-radius: 9px; font-size: 10px; font-weight: 700; }"
-            "QPushButton:hover { background: #4a9bee; }"
+            "QPushButton:hover { background: #5a5a5a; border-color: #6a6a6a; }"
         )
         self._tail_btn.clicked.connect(self._on_toggle_tail)
 

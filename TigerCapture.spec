@@ -16,7 +16,7 @@ a = Analysis(
     binaries=[],
     datas=[
         ('app/locales/*.py', 'app/locales'),
-        ('resources/bitdam.ico', 'resources'),
+        ('resources/tigercapture.ico', 'resources'),
     ] + extra_datas,
     hiddenimports=[
         # Locales are loaded dynamically from a string lookup, so each
@@ -58,7 +58,7 @@ exe = EXE(
     a.scripts,
     [],
     exclude_binaries=True,
-    name='Bitdam',
+    name='TigerCapture',
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
@@ -69,7 +69,7 @@ exe = EXE(
     target_arch=None,
     codesign_identity=None,
     entitlements_file=None,
-    icon='resources/bitdam.ico',
+    icon='resources/tigercapture.ico',
     version='version_info.txt',
 )
 
@@ -80,5 +80,5 @@ coll = COLLECT(
     strip=False,
     upx=False,
     upx_exclude=[],
-    name='Bitdam',
+    name='TigerCapture',
 )

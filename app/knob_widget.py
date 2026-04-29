@@ -11,7 +11,7 @@ Reusable component with the three input modes the spec calls for:
 Other features
 --------------
 - Color variants (``'blue'``, ``'green'``, ``'orange'``) matching the
-  Bitdam accent palette; any hex string works too.
+  TigerCapture accent palette; any hex string works too.
 - Bipolar mode (Pan-style): centered at 12 o'clock with the value arc
   growing toward either side.
 - Logarithmic scale for frequency-like parameters.
@@ -50,11 +50,15 @@ KNOB_MAX_ANGLE = 135.0
 KNOB_ANGLE_SPAN = KNOB_MAX_ANGLE - KNOB_MIN_ANGLE  # 270°
 
 
+# All semantic knob colours collapse to brand orange so the editor
+# surface reads as a single accent. The "blue / green / orange / red"
+# names are kept as call-site identifiers — callers don't need to
+# change — but every name resolves to an orange-family hue.
 _COLOR_NAMES = {
-    "blue": QColor("#4a9bee"),
-    "green": QColor("#5DCAA5"),
+    "blue": QColor("#ff7a4a"),     # legacy "blue knob" → orange-light
+    "green": QColor("#D85A30"),    # legacy "green knob" → brand orange
     "orange": QColor("#D85A30"),
-    "red": QColor("#e54646"),
+    "red": QColor("#e54646"),      # destructive only
 }
 
 
@@ -66,7 +70,7 @@ def _resolve_color(c) -> QColor:
         if named is not None:
             return named
         return QColor(c)
-    return QColor("#4a9bee")
+    return QColor("#D85A30")
 
 
 class KnobWidget(QWidget):

@@ -15,8 +15,8 @@ SUPPORTED_LANGUAGES: dict[str, str] = {
 }
 DEFAULT_LANGUAGE = "en"
 
-_SETTINGS_ORG = "Bitdam"
-_SETTINGS_APP = "Bitdam"
+_SETTINGS_ORG = "TigerCapture"
+_SETTINGS_APP = "TigerCapture"
 _LANGUAGE_KEY = "language"
 
 _translations: dict[str, dict[str, str]] = {}

@@ -1,4 +1,4 @@
-"""macOS entry point for Bitdam.
+"""macOS entry point for TigerCapture.
 
 Prepends the `mac/` directory to sys.path so that `import app` resolves
 to `mac/app/` — which then falls through to the shared `app/` at the
@@ -26,8 +26,8 @@ def main() -> int:
     from PySide6.QtWidgets import QApplication
 
     app = QApplication(sys.argv)
-    app.setApplicationName("Bitdam")
-    app.setOrganizationName("Bitdam")
+    app.setApplicationName("TigerCapture")
+    app.setOrganizationName("TigerCapture")
 
     # Shared dark QSS.
     from app.style import APP_QSS
@@ -52,6 +52,6 @@ def main() -> int:
 if __name__ == "__main__":
     # When launched from a PyInstaller .app bundle, stdout/stderr go to
     # /dev/null by default. Redirect to Console.app via os.fdopen(2).
-    if os.environ.get("BITDAM_LOG_TO_STDERR"):
+    if os.environ.get("TIGERCAPTURE_LOG_TO_STDERR"):
         sys.stderr = os.fdopen(2, "w", buffering=1)
     sys.exit(main())

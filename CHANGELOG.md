@@ -65,7 +65,7 @@ Format: grouped by area, newest work at the top of each section.
   for Remote-SSH workflow and Gatekeeper workaround.
 - GitHub Actions `.github/workflows/macos.yml` — Apple Silicon runner
   auto-builds on every `main` push and publishes a prerelease
-  GitHub Release (`Bitdam-<ver>-mac.dmg`) for every `v*-mac*` tag.
+  GitHub Release (`TigerCapture-<ver>-mac.dmg`) for every `v*-mac*` tag.
 - Landing README adds an **experimental, unverified** macOS section
   pointing at the prerelease build and the `mac/` sources.
 
@@ -170,11 +170,11 @@ Format: grouped by area, newest work at the top of each section.
 - **Capture-result z-order**: main window is re-shown *before*
   `ScreenshotWindow` / GIF / Video editor windows so the editor
   actually lands on top after its own raise/activate, instead of
-  being buried behind the main Bitdam window.
+  being buried behind the main TigerCapture window.
 
 ### Diagnostics
 
-- `logs/bitdam.log` — every session mirrors stderr to this file with
+- `logs/tigercapture.log` — every session mirrors stderr to this file with
   a timestamp header. `faulthandler` writes native-crash tracebacks
   there too, and a `sys.excepthook` records unhandled Python
   exceptions. Makes post-mortem on background-run sessions tractable.

@@ -13,13 +13,13 @@ from pathlib import Path
 
 
 def default_save_dir() -> Path:
-    """Save captures under ~/Movies/Bitdam on macOS.
+    """Save captures under ~/Movies/TigerCapture on macOS.
 
     ``~/Videos`` is the Windows convention; ``~/Movies`` is the standard
     user media folder on macOS (it's the one Finder shows in the
     sidebar).
     """
-    base = Path.home() / "Movies" / "Bitdam"
+    base = Path.home() / "Movies" / "TigerCapture"
     base.mkdir(parents=True, exist_ok=True)
     return base
 

@@ -7,8 +7,25 @@ from pathlib import Path
 
 
 def default_save_dir() -> Path:
-    base = Path.home() / "Videos" / "Bitdam"
-    base.mkdir(parents=True, exist_ok=True)
+    """Captures live in ``~/Videos/TigerCapture``. Pre-rename users have
+    their captures in ``~/Videos/Bitdam`` (the previous brand name); on
+    first launch after the rename we move that folder over so no
+    captures are orphaned. The migration runs once — once the new
+    folder exists, the legacy name is no longer consulted."""
+    base = Path.home() / "Videos" / "TigerCapture"
+    if not base.exists():
+        legacy = Path.home() / "Videos" / "Bitdam"
+        if legacy.exists() and legacy.is_dir():
+            try:
+                legacy.rename(base)
+            except OSError:
+                # Fall back to creating the new folder; user can move
+                # files manually if the rename failed (e.g. cross-drive).
+                base.mkdir(parents=True, exist_ok=True)
+        else:
+            base.mkdir(parents=True, exist_ok=True)
+    else:
+        base.mkdir(parents=True, exist_ok=True)
     return base
 
 

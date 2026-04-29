@@ -23,6 +23,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import (
     QDialog,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -81,8 +82,9 @@ MIN_PX_PER_SEC = 4.0
 MAX_PX_PER_SEC = 300.0
 MIN_TRACK_WIDTH = 300
 
-FADE_MIME_TYPE = "application/x-bitdam-transition"
-SPEED_MIME_TYPE = "application/x-bitdam-speed"
+FADE_MIME_TYPE = "application/x-tigercapture-transition"
+SPEED_MIME_TYPE = "application/x-tigercapture-speed"
+ZOOM_MIME_TYPE = "application/x-tigercapture-zoom"
 
 
 from app.style import (
@@ -90,6 +92,8 @@ from app.style import (
     COLOR_ACCENT_BLUE_HOVER,
     COLOR_ACCENT_GREEN,
     COLOR_ACCENT_ORANGE,
+    COLOR_ACCENT_HOVER,
+    COLOR_ACCENT_PRESSED,
     COLOR_BG_L1,
     COLOR_BG_L2,
     COLOR_BG_L3,
@@ -153,7 +157,7 @@ QPushButton#PrimaryToolButton:hover {{
     background-color: {COLOR_ACCENT_BLUE_HOVER};
 }}
 QPushButton#PrimaryToolButton:pressed {{
-    background-color: #2a6fb4;
+    background-color: {COLOR_ACCENT_PRESSED};
 }}
 
 QPushButton#SpeedActive {{
@@ -367,6 +371,255 @@ class FadeSegment:
         return self.start_ms <= ms < self.end_ms
 
 
+@dataclass
+class ZoomActor:
+    """A draggable zoom-in actor placed on the video track.
+
+    Workflow:
+      1. User drops a Zoom card onto a track → actor created at drop time
+         with default duration and unset target rectangle.
+      2. User clicks the actor → modal dialog: pick the target rectangle
+         on a still frame from the source video, plus zoom-in / zoom-out
+         time sliders.
+      3. Across the actor's window, the visible frame is animated:
+
+            t ∈ [start, start + zoom_in_ms]              ramp 1.0× → max
+            t ∈ [start + zoom_in_ms, end - zoom_out_ms]  hold at max
+            t ∈ [end - zoom_out_ms, end]                 ramp max → 1.0×
+
+         Where max scale is computed automatically from the target rect's
+         ratio to the full frame, and the crop window centre interpolates
+         from frame centre to target rect centre with a cubic-in-out
+         easing.
+
+    ``target_*`` are in source-video pixel coordinates. ``target_w == 0``
+    means the user hasn't picked a rectangle yet — preview/export treat
+    the actor as a no-op until they do.
+
+    Times are stored in track-local source ms, like TextClip / Fade /
+    Speed actors.
+    """
+
+    id: int
+    start_ms: int
+    end_ms: int
+    target_x: int = 0
+    target_y: int = 0
+    target_w: int = 0       # 0 means "no rectangle picked yet"
+    target_h: int = 0
+    zoom_in_ms: int = 500
+    zoom_out_ms: int = 500
+
+    @property
+    def duration_ms(self) -> int:
+        return max(0, self.end_ms - self.start_ms)
+
+    def contains(self, ms: int) -> bool:
+        return self.start_ms <= ms < self.end_ms
+
+    def is_configured(self) -> bool:
+        return self.target_w > 0 and self.target_h > 0
+
+
+def _zoom_ease(t: float) -> float:
+    """Cubic-in-out easing 0..1. Smooth at both ends, fast in the middle."""
+    t = max(0.0, min(1.0, t))
+    if t < 0.5:
+        return 4.0 * t * t * t
+    p = -2.0 * t + 2.0
+    return 1.0 - (p * p * p) / 2.0
+
+
+def zoom_window_at(actor: ZoomActor, source_ms: int,
+                   frame_w: int, frame_h: int) -> tuple[float, float, float, float] | None:
+    """Compute the crop window ``(cx, cy, cw, ch)`` (top-left + size, in
+    source-frame pixels) that should be cropped + scaled to fill the
+    output for ``actor`` at the given ``source_ms``.
+
+    Returns ``None`` when the actor isn't active at this time, or when
+    the actor's target rectangle hasn't been picked yet.
+
+    Phases:
+        outside actor                    → None
+        within actor, ramp-in            → ease 1.0× → max
+        within actor, hold               → max (full target rect)
+        within actor, ramp-out           → ease max → 1.0×
+    """
+    if not actor.is_configured():
+        return None
+    if not actor.contains(source_ms):
+        return None
+    span = actor.duration_ms
+    if span <= 0:
+        return None
+    # Clamp ramp durations so they always fit inside the actor window.
+    ri = min(actor.zoom_in_ms, span)
+    ro = min(actor.zoom_out_ms, span - ri)
+    t_in = source_ms - actor.start_ms
+    if t_in < ri and ri > 0:
+        progress = _zoom_ease(t_in / ri)
+    elif t_in > span - ro and ro > 0:
+        progress = _zoom_ease((span - t_in) / ro)
+    else:
+        progress = 1.0
+    # Interpolate crop window: full frame at progress=0, target at progress=1.
+    tw = float(actor.target_w)
+    th = float(actor.target_h)
+    cw = frame_w + (tw - frame_w) * progress
+    ch = frame_h + (th - frame_h) * progress
+    target_cx = actor.target_x + tw / 2.0
+    target_cy = actor.target_y + th / 2.0
+    ccx = frame_w / 2.0 + (target_cx - frame_w / 2.0) * progress
+    ccy = frame_h / 2.0 + (target_cy - frame_h / 2.0) * progress
+    cx = ccx - cw / 2.0
+    cy = ccy - ch / 2.0
+    # Clamp inside frame bounds.
+    cx = max(0.0, min(float(frame_w) - cw, cx))
+    cy = max(0.0, min(float(frame_h) - ch, cy))
+    return cx, cy, cw, ch
+
+
+def find_active_zoom(track: VideoTrack, source_ms: int) -> ZoomActor | None:
+    """Return the first zoom actor whose window contains ``source_ms``,
+    or ``None``. Multiple zoom actors aren't expected to overlap; if
+    they do, the earliest one wins."""
+    for z in getattr(track, "zoom_actors", []):
+        if z.contains(source_ms):
+            return z
+    return None
+
+
+def build_zoom_ffmpeg_filter(
+    actors: list[ZoomActor],
+    segments: list[tuple[int, int, float]],
+    frame_w: int,
+    frame_h: int,
+) -> str | None:
+    """Build a single ``crop=...,scale=W:H`` ffmpeg filter expression
+    that handles every supplied zoom actor with time-varying parameters.
+
+    The crop window stays full-frame outside any actor's output-time
+    window; inside, it ramps in cubic-in-out from full frame to the
+    actor's target rect, holds, then ramps back out. Multiple actors
+    are stacked as nested ``if(between(t, s, e), ...)`` branches.
+
+    ``segments`` is the same list build_filter_graph receives; it
+    drives the source-ms → output-second time mapping so the actor
+    fires at the right point even after cuts / speed changes upstream.
+
+    Returns ``None`` when the list is empty or every actor lacks a
+    target rectangle (so the caller can skip insertion).
+    """
+    if not actors or frame_w <= 0 or frame_h <= 0:
+        return None
+
+    # Filter to configured actors mapped through the segment timeline.
+    plans: list[tuple[float, float, float, float, ZoomActor]] = []
+    for a in actors:
+        if not a.is_configured():
+            continue
+        out_start = _map_source_to_output_seconds(a.start_ms, segments)
+        out_end = _map_source_to_output_seconds(a.end_ms, segments)
+        if out_end <= out_start:
+            continue
+        # Ramp durations also need to be re-expressed in output seconds.
+        # We assume no speed change happens inside the actor's window
+        # (rare in practice — users place zooms on plain footage).
+        span_src = max(1, a.duration_ms)
+        ramp_in = (out_end - out_start) * (a.zoom_in_ms / span_src)
+        ramp_out = (out_end - out_start) * (a.zoom_out_ms / span_src)
+        plans.append((out_start, out_end, ramp_in, ramp_out, a))
+    if not plans:
+        return None
+
+    iw = float(frame_w)
+    ih = float(frame_h)
+
+    # Cubic-in-out easing as an ffmpeg expression in variable ``u``
+    # (0..1 progress within a ramp). u<0.5 → 4u³ ; u≥0.5 → 1 - (-2u+2)³/2
+    def ease_expr(u: str) -> str:
+        return (
+            f"if(lt({u},0.5),"
+            f"4*pow({u},3),"
+            f"1-pow(-2*{u}+2,3)/2)"
+        )
+
+    def progress_expr(out_start: float, out_end: float,
+                      ramp_in: float, ramp_out: float) -> str:
+        """Returns an expression that evaluates to the actor's progress
+        (0..1) at ffmpeg time ``t``, or 0 when t is outside the actor."""
+        s = f"{out_start:.6f}"
+        e = f"{out_end:.6f}"
+        ri = max(ramp_in, 1e-6)
+        ro = max(ramp_out, 1e-6)
+        # u_in is in-ramp progress, u_out is out-ramp progress (both 0..1).
+        u_in = f"((t-{s})/{ri:.6f})"
+        u_out = f"(({e}-t)/{ro:.6f})"
+        return (
+            f"if(lt(t,{s}),0,"
+            f"if(lt(t,{s}+{ri:.6f}),{ease_expr(u_in)},"
+            f"if(lt(t,{e}-{ro:.6f}),1,"
+            f"if(lt(t,{e}),{ease_expr(u_out)},0))))"
+        )
+
+    # Build per-component (cw, ch, cx, cy) expressions — nested ifs
+    # walk through every actor's window, falling back to full frame.
+    def crop_param(component: str) -> str:
+        # component: 'cw', 'ch', 'cx', 'cy'
+        # Walk plans from last to first so the outermost if() lets the
+        # earliest actor fire first (overlap edge case).
+        expr = (
+            "iw" if component == "cw"
+            else "ih" if component == "ch"
+            else "0"
+        )
+        for out_start, out_end, ramp_in, ramp_out, a in reversed(plans):
+            p = progress_expr(out_start, out_end, ramp_in, ramp_out)
+            tw = float(a.target_w)
+            th = float(a.target_h)
+            tcx = a.target_x + tw / 2.0
+            tcy = a.target_y + th / 2.0
+            if component == "cw":
+                inner = f"({iw}+({tw}-{iw})*{p})"
+            elif component == "ch":
+                inner = f"({ih}+({th}-{ih})*{p})"
+            elif component == "cx":
+                # cx = (iw/2 + (tcx - iw/2)*p) - cw/2
+                cw = f"({iw}+({tw}-{iw})*{p})"
+                ccx = f"({iw / 2.0}+({tcx}-{iw / 2.0})*{p})"
+                inner = f"({ccx}-{cw}/2)"
+            else:  # 'cy'
+                ch = f"({ih}+({th}-{ih})*{p})"
+                ccy = f"({ih / 2.0}+({tcy}-{ih / 2.0})*{p})"
+                inner = f"({ccy}-{ch}/2)"
+            expr = f"if(between(t,{out_start:.6f},{out_end:.6f}),{inner},{expr})"
+        return expr
+
+    cw = crop_param("cw")
+    ch = crop_param("ch")
+    cx = crop_param("cx")
+    cy = crop_param("cy")
+    return (
+        f"crop=w='{cw}':h='{ch}':x='{cx}':y='{cy}',"
+        f"scale={frame_w}:{frame_h}"
+    )
+
+
+def _map_source_to_output_seconds(source_ms: int,
+                                   segments: list[tuple[int, int, float]]) -> float:
+    """Convert a source-ms timestamp to output seconds, walking the
+    same segment list build_filter_graph uses (cuts removed, speed
+    applied). Returns -1 when ``source_ms`` falls inside a cut."""
+    out_ms = 0.0
+    for s_ms, e_ms, speed in segments:
+        if source_ms < s_ms:
+            return -1.0
+        if source_ms < e_ms:
+            return (out_ms + (source_ms - s_ms) / max(0.001, speed)) / 1000.0
+        out_ms += (e_ms - s_ms) / max(0.001, speed)
+    return out_ms / 1000.0
+
+
 def _new_color_grade():
     """Lazy-import ColorGrade default factory — keeps the import at
     module import time deferred so the cycle (color_grading is imported
@@ -397,6 +650,8 @@ class VideoTrack:
     # applies it via numpy on each frame; export injects ``eq +
     # colorbalance`` into the ffmpeg filter graph after concat.
     color_grade: "ColorGrade" = field(default_factory=lambda: _new_color_grade())
+    # Zoom-in actors (multiple per track allowed; should not overlap).
+    zoom_actors: list[ZoomActor] = field(default_factory=list)
 
     @property
     def display_name(self) -> str:
@@ -657,6 +912,9 @@ class TrackRow(QWidget):
     FADE_EDGE_GRAB_PX = 6  # resize handle hit area in pixels
     TYPO_EDGE_GRAB_PX = 8
     TYPO_CHIP_H = 22             # height of the typography chip strip
+    ZOOM_CHIP_H = 18             # height of the zoom actor strip
+    ZOOM_EDGE_GRAB_PX = 8        # left/right edge zone for resize on zoom actor
+    ZOOM_MIN_DURATION_MS = 200   # can't shrink below this
     TYPO_MIN_DURATION_MS = 200
     SPEED_EDGE_GRAB_PX = 8
     SPEED_MIN_DURATION_MS = 200
@@ -668,6 +926,9 @@ class TrackRow(QWidget):
     typography_double_clicked = Signal(int, int)    # track_id, clip_id
     typography_context_menu = Signal(int, int, object)   # track_id, clip_id, global pos
     typography_changed = Signal(int)                # track_id — add/move/resize
+    zoom_double_clicked = Signal(int, int)          # track_id, zoom_actor_id
+    zoom_context_menu = Signal(int, int, object)    # track_id, zoom_actor_id, global pos
+    zoom_changed = Signal(int)                      # track_id — add/move/resize
 
     def __init__(self, track: VideoTrack) -> None:
         super().__init__()
@@ -691,6 +952,15 @@ class TrackRow(QWidget):
         self._typo_drag_anchor_ms: int = 0
         self._typo_drag_orig_start_ms: int = 0
         self._typo_drag_orig_end_ms: int = 0
+        # Zoom-actor drag state — modes:
+        #   "move", "resize_l", "resize_r", "fade_in", "fade_out"
+        self._zoom_drag_mode: str | None = None
+        self._zoom_drag_actor_id: int | None = None
+        self._zoom_drag_anchor_ms: int = 0
+        self._zoom_drag_orig_start_ms: int = 0
+        self._zoom_drag_orig_end_ms: int = 0
+        self._zoom_drag_orig_in_ms: int = 0
+        self._zoom_drag_orig_out_ms: int = 0
         # Hover tracking for edge-handle highlighting
         self._hover_fade: FadeSegment | None = None
         self._hover_fade_side: str = ""
@@ -879,8 +1149,8 @@ class TrackRow(QWidget):
                 right_hot=(is_hover and self._hover_speed_side == "right")
                     or (is_drag and self._speed_drag_mode == "resize_r"),
                 dragging=is_drag,
-                base_color=QColor(120, 180, 240, 220),
-                accent_color=QColor("#4a9bee"),
+                base_color=QColor(216, 90, 48, 220),
+                accent_color=QColor("#ff7a4a"),
             )
 
         # Cut segments (dark overlay)
@@ -907,6 +1177,11 @@ class TrackRow(QWidget):
         # track strip. Draw AFTER fades so they always read on top.
         for actor in getattr(self.track, "typography_actors", []):
             self._paint_typography_actor(painter, actor, rect)
+
+        # Zoom actors — blue tinted strip with a 🔍 marker. Drawn last so
+        # they read on top of fades and speed but below selection / cuts.
+        for zactor in getattr(self.track, "zoom_actors", []):
+            self._paint_zoom_actor(painter, zactor, rect)
 
         # Selection
         sel_start = self.track.selection_start_ms
@@ -1129,6 +1404,34 @@ class TrackRow(QWidget):
         mods = event.modifiers()
         rect = self._timeline_rect()
 
+        # Zoom actor — drag (move / resize / fade-in / fade-out) takes
+        # priority; the modal opens on double-click only.
+        zactor, zoom_zone = self._zoom_at(pos)
+        if zactor is not None:
+            self._zoom_drag_actor_id = zactor.id
+            self._zoom_drag_anchor_ms = self._x_to_ms(x)
+            self._zoom_drag_orig_start_ms = int(zactor.start_ms)
+            self._zoom_drag_orig_end_ms = int(zactor.end_ms)
+            self._zoom_drag_orig_in_ms = int(zactor.zoom_in_ms)
+            self._zoom_drag_orig_out_ms = int(zactor.zoom_out_ms)
+            if zoom_zone == "left":
+                self._zoom_drag_mode = "resize_l"
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            elif zoom_zone == "right":
+                self._zoom_drag_mode = "resize_r"
+                self.setCursor(Qt.CursorShape.SizeHorCursor)
+            elif zoom_zone == "fade_in":
+                self._zoom_drag_mode = "fade_in"
+                self.setCursor(Qt.CursorShape.SplitHCursor)
+            elif zoom_zone == "fade_out":
+                self._zoom_drag_mode = "fade_out"
+                self.setCursor(Qt.CursorShape.SplitHCursor)
+            else:
+                self._zoom_drag_mode = "move"
+                self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            self.update()
+            return
+
         # Typography actor interactions take priority over everything
         # else — they sit at the top of the strip and must be movable
         # / resizable without triggering the clip body's drag-to-move.
@@ -1232,6 +1535,66 @@ class TrackRow(QWidget):
                     actor.end_ms = new_end
                 self.update()
                 self.typography_changed.emit(self.track.id)
+                return
+
+        # Zoom actor drag (move / resize_l / resize_r) — same shape as
+        # typography above; just operates on track.zoom_actors.
+        if self._zoom_drag_mode is not None and self._zoom_drag_actor_id is not None:
+            zactor = None
+            for z in self.track.zoom_actors:
+                if z.id == self._zoom_drag_actor_id:
+                    zactor = z
+                    break
+            if zactor is None:
+                self._zoom_drag_mode = None
+            else:
+                delta_ms = self._x_to_ms(x) - self._zoom_drag_anchor_ms
+                if self._zoom_drag_mode == "move":
+                    new_start = max(0, self._zoom_drag_orig_start_ms + delta_ms)
+                    duration = self._zoom_drag_orig_end_ms - self._zoom_drag_orig_start_ms
+                    if new_start + duration > self.track.duration_ms:
+                        new_start = max(0, self.track.duration_ms - duration)
+                    zactor.start_ms = new_start
+                    zactor.end_ms = new_start + duration
+                elif self._zoom_drag_mode == "resize_l":
+                    new_start = max(0, self._zoom_drag_orig_start_ms + delta_ms)
+                    new_start = min(
+                        new_start, zactor.end_ms - self.ZOOM_MIN_DURATION_MS
+                    )
+                    zactor.start_ms = new_start
+                elif self._zoom_drag_mode == "resize_r":
+                    new_end = max(
+                        zactor.start_ms + self.ZOOM_MIN_DURATION_MS,
+                        self._zoom_drag_orig_end_ms + delta_ms,
+                    )
+                    new_end = min(new_end, self.track.duration_ms)
+                    zactor.end_ms = new_end
+                elif self._zoom_drag_mode == "fade_in":
+                    # Drag the inner-left handle: zoom_in_ms is the
+                    # distance from start to where the cursor sits.
+                    new_in = self._x_to_ms(x) - zactor.start_ms
+                    new_in = max(0, new_in)
+                    span = max(0, zactor.end_ms - zactor.start_ms)
+                    new_in = min(new_in, max(0, span - zactor.zoom_out_ms))
+                    zactor.zoom_in_ms = new_in
+                elif self._zoom_drag_mode == "fade_out":
+                    # Drag the inner-right handle: zoom_out_ms is the
+                    # distance from end back to where the cursor sits.
+                    new_out = zactor.end_ms - self._x_to_ms(x)
+                    new_out = max(0, new_out)
+                    span = max(0, zactor.end_ms - zactor.start_ms)
+                    new_out = min(new_out, max(0, span - zactor.zoom_in_ms))
+                    zactor.zoom_out_ms = new_out
+                # Outer-resize modes can shrink the span; clamp ramps
+                # so they always fit inside the new window.
+                if self._zoom_drag_mode in ("resize_l", "resize_r", "move"):
+                    span = max(0, zactor.end_ms - zactor.start_ms)
+                    zactor.zoom_in_ms = min(zactor.zoom_in_ms, span)
+                    zactor.zoom_out_ms = min(
+                        zactor.zoom_out_ms, max(0, span - zactor.zoom_in_ms)
+                    )
+                self.update()
+                self.zoom_changed.emit(self.track.id)
                 return
 
         # Speed edge resize — active drag
@@ -1425,6 +1788,13 @@ class TrackRow(QWidget):
             self.setCursor(Qt.CursorShape.OpenHandCursor)
             self.typography_changed.emit(self.track.id)
             self.update()
+        if self._zoom_drag_mode is not None:
+            self.track.zoom_actors.sort(key=lambda z: z.start_ms)
+            self._zoom_drag_mode = None
+            self._zoom_drag_actor_id = None
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+            self.zoom_changed.emit(self.track.id)
+            self.update()
         if self._resizing_fade is not None:
             self._resizing_fade = None
             self._resize_side = ""
@@ -1448,6 +1818,13 @@ class TrackRow(QWidget):
         self._dragging_playhead = False
 
     def _on_context_menu(self, local_pos: QPoint) -> None:
+        # Zoom actor right-click: edit / delete menu.
+        zactor, _zone = self._zoom_at(local_pos)
+        if zactor is not None:
+            self.zoom_context_menu.emit(
+                self.track.id, zactor.id, self.mapToGlobal(local_pos)
+            )
+            return
         # Typography actors have priority — they sit visually on top
         # of the timeline strip.
         typo_actor, _zone = self._typography_at(local_pos)
@@ -1564,12 +1941,16 @@ class TrackRow(QWidget):
         self.fades_changed.emit(self.track.id)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
-        # Double-click on a typography actor opens the editor; on a
-        # fade segment, deletes it.
+        # Double-click on a typography / zoom actor opens its editor;
+        # on a fade segment, deletes it.
         if event.button() != Qt.MouseButton.LeftButton:
             super().mouseDoubleClickEvent(event)
             return
         pos = event.position().toPoint()
+        zactor, _z = self._zoom_at(pos)
+        if zactor is not None:
+            self.zoom_double_clicked.emit(self.track.id, zactor.id)
+            return
         typo_actor, _zone = self._typography_at(pos)
         if typo_actor is not None:
             self.typography_double_clicked.emit(self.track.id, typo_actor.id)
@@ -1593,6 +1974,110 @@ class TrackRow(QWidget):
         x2 = self._ms_to_x(int(actor.end_ms))
         w = max(2, x2 - x1)
         return QRect(x1, strip_rect.top() + 2, w, self.TYPO_CHIP_H)
+
+    def _zoom_actor_rect(self, zactor: ZoomActor, strip_rect: QRect) -> QRect:
+        """Rect of a zoom actor chip in widget coords. Sits at the
+        BOTTOM of the timeline strip so it doesn't fight with typography
+        at the top."""
+        x1 = self._ms_to_x(int(zactor.start_ms))
+        x2 = self._ms_to_x(int(zactor.end_ms))
+        w = max(2, x2 - x1)
+        top = strip_rect.bottom() - self.ZOOM_CHIP_H - 2
+        return QRect(x1, top, w, self.ZOOM_CHIP_H)
+
+    def _paint_zoom_actor(
+        self, painter: QPainter, zactor: ZoomActor, strip_rect: QRect
+    ) -> None:
+        from PySide6.QtGui import QLinearGradient, QBrush, QPolygonF
+        from PySide6.QtCore import QPointF
+
+        r = self._zoom_actor_rect(zactor, strip_rect)
+        if r.width() < 2:
+            return
+
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        # Body — gradient that visually conveys the fade-in / hold /
+        # fade-out shape: edges fade from a darker to a fuller blue,
+        # so the trapezoid intent reads even before the user touches
+        # the inner handles.
+        in_x = self._ms_to_x(zactor.start_ms + zactor.zoom_in_ms)
+        out_x = self._ms_to_x(zactor.end_ms - zactor.zoom_out_ms)
+        # Clamp handles inside the actor rect so paint stays correct
+        # even at min span / drag transitions.
+        in_x = max(r.left() + 1, min(r.right() - 1, in_x))
+        out_x = max(in_x, min(r.right() - 1, out_x))
+
+        # Background fill — light blue band.
+        painter.setBrush(QBrush(QColor(74, 155, 238, 80)))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(r.adjusted(1, 1, -1, -1), 3, 3)
+
+        # Trapezoid: dim outside the in/out handles to visualise the
+        # ramp ↔ hold zones (held centre is brightest).
+        held_rect = QRect(int(in_x), r.top() + 1,
+                          max(1, int(out_x) - int(in_x)), r.height() - 2)
+        painter.setBrush(QBrush(QColor(74, 155, 238, 200)))
+        painter.drawRect(held_rect)
+        # Diagonal triangles for the in / out ramps so the user sees
+        # the linear-time mapping.
+        if in_x > r.left() + 1:
+            ramp = QPolygonF([
+                QPointF(r.left() + 1, r.bottom() - 1),
+                QPointF(in_x, r.top() + 1),
+                QPointF(in_x, r.bottom() - 1),
+            ])
+            painter.setBrush(QBrush(QColor(74, 155, 238, 160)))
+            painter.drawPolygon(ramp)
+        if out_x < r.right() - 1:
+            ramp = QPolygonF([
+                QPointF(out_x, r.top() + 1),
+                QPointF(r.right() - 1, r.bottom() - 1),
+                QPointF(out_x, r.bottom() - 1),
+            ])
+            painter.setBrush(QBrush(QColor(255, 122, 74, 160)))
+            painter.drawPolygon(ramp)
+
+        # Outer border. Dashed when target rect not picked yet.
+        border_color = QColor("#ff7a4a")
+        pen = QPen(border_color, 2)
+        if not zactor.is_configured():
+            pen.setStyle(Qt.PenStyle.DashLine)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(pen)
+        painter.drawRoundedRect(r.adjusted(1, 1, -1, -1), 3, 3)
+
+        # Inner fade handles — tall white pins (drawn last so they
+        # render on top of the gradient + ramp polys).
+        for hx in (in_x, out_x):
+            painter.setPen(QPen(QColor(0, 0, 0, 180), 1))
+            painter.setBrush(QBrush(QColor(255, 255, 255)))
+            handle_w = 4
+            handle_h = r.height() - 4
+            painter.drawRoundedRect(
+                int(hx) - handle_w // 2, r.top() + 2,
+                handle_w, handle_h, 1, 1,
+            )
+
+        # Marker + label.
+        painter.setPen(QPen(QColor("#FFFFFF")))
+        f = QFont(painter.font())
+        f.setBold(True)
+        f.setPointSize(8)
+        painter.setFont(f)
+        painter.drawText(
+            r.adjusted(6, 0, -6, 0),
+            Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+            "🔍",
+        )
+        if not zactor.is_configured():
+            painter.drawText(
+                r.adjusted(6, 0, -6, 0),
+                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignRight,
+                tr("veditor.zoom_actor.unconfigured"),
+            )
+
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
 
     def _paint_typography_actor(
         self, painter: QPainter, actor, strip_rect: QRect
@@ -1654,6 +2139,38 @@ class TrackRow(QWidget):
             accent_color=QColor("#ff7a4a"),
         )
 
+    def _zoom_at(self, pos: QPoint) -> "tuple[ZoomActor | None, str]":
+        """Hit-test the zoom-actor strip. Returns ``(actor, zone)``:
+
+            "left"      outer left edge — resize total length
+            "fade_in"   inner handle at start + zoom_in_ms — fade-in time
+            "body"      anywhere else inside — drag to move
+            "fade_out"  inner handle at end - zoom_out_ms — fade-out time
+            "right"     outer right edge — resize total length
+
+        ``(None, "")`` when the point isn't on any zoom actor."""
+        rect = self._timeline_rect()
+        handle_grab = 6
+        for zactor in getattr(self.track, "zoom_actors", []):
+            r = self._zoom_actor_rect(zactor, rect)
+            if not r.contains(pos):
+                continue
+            x = pos.x()
+            # Outer resize edges — change start_ms / end_ms.
+            if x - r.left() <= self.ZOOM_EDGE_GRAB_PX:
+                return zactor, "left"
+            if r.right() - x <= self.ZOOM_EDGE_GRAB_PX:
+                return zactor, "right"
+            # Inner fade-time handles.
+            in_x = self._ms_to_x(zactor.start_ms + zactor.zoom_in_ms)
+            out_x = self._ms_to_x(zactor.end_ms - zactor.zoom_out_ms)
+            if abs(x - in_x) <= handle_grab:
+                return zactor, "fade_in"
+            if abs(x - out_x) <= handle_grab:
+                return zactor, "fade_out"
+            return zactor, "body"
+        return None, ""
+
     def _typography_at(self, pos: QPoint) -> "tuple[object, str]":
         """Return ``(actor, zone)`` at ``pos``. ``zone`` is
         ``"left"`` / ``"right"`` (resize grips) or ``"body"``. When
@@ -1695,6 +2212,9 @@ class TrackRow(QWidget):
             event.acceptProposedAction()
             return
         if md.hasFormat(SPEED_MIME_TYPE):
+            event.acceptProposedAction()
+            return
+        if md.hasFormat(ZOOM_MIME_TYPE):
             event.acceptProposedAction()
             return
         # Accept any media file (video OR audio); the window will route
@@ -1786,6 +2306,39 @@ class TrackRow(QWidget):
             self.update()
             self.speed_changed.emit(self.track.id)
             self.clicked.emit(self.track.id)
+            event.acceptProposedAction()
+            return
+        # Zoom card drop: add a ZoomActor at the drop position with default
+        # duration. Target rect is unset until the user clicks → modal.
+        if md.hasFormat(ZOOM_MIME_TYPE):
+            if self.track.duration_ms <= 0:
+                return
+            try:
+                dur_ms = int(bytes(md.data(ZOOM_MIME_TYPE)).decode("utf-8"))
+            except Exception:
+                dur_ms = ZoomCard.DEFAULT_DURATION_MS
+            dur_ms = max(500, dur_ms)
+            center_ms = self._x_to_ms(event.position().toPoint().x())
+            start = max(0, center_ms - dur_ms // 2)
+            end = min(self.track.duration_ms, start + dur_ms)
+            if end <= start:
+                return
+            new_id = max(
+                (z.id for z in self.track.zoom_actors), default=0
+            ) + 1
+            ramp = max(100, (end - start) // 4)
+            actor = ZoomActor(
+                id=new_id, start_ms=start, end_ms=end,
+                zoom_in_ms=ramp, zoom_out_ms=ramp,
+            )
+            self.track.zoom_actors.append(actor)
+            self.track.zoom_actors.sort(key=lambda z: z.start_ms)
+            self.update()
+            self.zoom_changed.emit(self.track.id)
+            self.clicked.emit(self.track.id)
+            # The actor renders with a dashed outline + "no region" label
+            # until the user double-clicks it to open the picker — drop
+            # itself shouldn't auto-pop the modal.
             event.acceptProposedAction()
             return
         # Any media file dropped onto this row — let the window route.
@@ -1885,6 +2438,63 @@ class _FadeSwatch(QWidget):
         pen.setWidth(2)
         painter.setPen(pen)
         painter.drawLine(int(w / 2), 0, int(w / 2), h)
+
+
+class ZoomCard(QWidget):
+    """Draggable "Zoom" card. Drop on a track to spawn a ZoomActor at the
+    drop position; the actor's target rectangle starts unset and the user
+    picks it via the modal that opens on click."""
+
+    DEFAULT_DURATION_MS = 2000
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("ZoomCard")
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setFixedHeight(40)
+        self.setMinimumWidth(120)
+        self.setStyleSheet(
+            f"""
+            QWidget#ZoomCard {{
+                background-color: {COLOR_BG_L5};
+                border: 1px solid {COLOR_BORDER_DEFAULT};
+                border-radius: 6px;
+            }}
+            QWidget#ZoomCard:hover {{
+                border-color: {COLOR_ACCENT_BLUE};
+            }}
+            """
+        )
+        row = QHBoxLayout(self)
+        row.setContentsMargins(10, 4, 12, 4)
+        row.setSpacing(8)
+
+        icon = QLabel("🔍")
+        icon.setStyleSheet("font-size: 16px;")
+        row.addWidget(icon)
+
+        title = QLabel(tr("veditor.zoom_card.title"))
+        title.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; font-weight: 700;")
+        row.addWidget(title)
+
+        self.setToolTip(tr("veditor.zoom_card.hint"))
+
+    def mousePressEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        from PySide6.QtCore import QMimeData
+        from PySide6.QtGui import QDrag
+
+        mime = QMimeData()
+        mime.setData(ZOOM_MIME_TYPE, str(self.DEFAULT_DURATION_MS).encode("utf-8"))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        pix = self.grab()
+        drag.setPixmap(pix)
+        drag.setHotSpot(event.position().toPoint())
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        drag.exec(Qt.DropAction.CopyAction)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
 
 
 class TypographyCard(QWidget):
@@ -2000,7 +2610,7 @@ class SpeedCard(QWidget):
                 border-radius: 6px;
             }}
             QWidget#SpeedCard:hover {{
-                border-color: #4a9bee;
+                border-color: {COLOR_ACCENT_HOVER};
             }}
             """
         )
@@ -2081,10 +2691,10 @@ class _SpeedSwatch(QWidget):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         w, h = self.width(), self.height()
         grad = QLinearGradient(0, 0, w, 0)
-        grad.setColorAt(0.0, QColor("#4a9bee"))
-        grad.setColorAt(1.0, QColor("#2f6bbf"))
+        grad.setColorAt(0.0, QColor("#ff7a4a"))
+        grad.setColorAt(1.0, QColor("#b04722"))
         painter.setBrush(QBrush(grad))
-        painter.setPen(QPen(QColor("#4a9bee"), 1))
+        painter.setPen(QPen(QColor("#ff7a4a"), 1))
         painter.drawRoundedRect(0, 0, w - 1, h - 1, 4, 4)
 
         # Three chevron arrows ">"
@@ -2316,7 +2926,7 @@ class TextLaneRow(QWidget):
         if in_w > 0:
             painter.fillRect(
                 QRect(bar_rect.left(), bar_rect.top(), in_w, bar_rect.height()),
-                QColor("#5DCAA5"),
+                QColor("#ff7a4a"),
             )
         if hold_w > 0:
             painter.fillRect(
@@ -2326,7 +2936,7 @@ class TextLaneRow(QWidget):
         if out_w > 0:
             painter.fillRect(
                 QRect(bar_rect.right() - out_w, bar_rect.top(), out_w, bar_rect.height()),
-                QColor("#D85A30"),
+                QColor("#b04722"),
             )
 
     # ---- mouse interaction ----
@@ -3157,6 +3767,291 @@ class _FontPickerButton(QWidget):
             )
 
 
+class ScopesPanel(QWidget):
+    """DaVinci-style scopes panel — dropdown of Histogram / Parade /
+    Waveform / Vectorscope. Subscribes to the player's frame_ready
+    signal and re-renders the active scope from the latest frame."""
+
+    SCOPE_W = 360
+    SCOPE_H = 220
+
+    def __init__(self, player, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._player = player
+        self._latest_rgb = None
+        self._kind = "histogram"
+        self.setFixedHeight(self.SCOPE_H + 38)
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(8, 6, 8, 6)
+        outer.setSpacing(4)
+
+        head = QHBoxLayout()
+        head.setContentsMargins(0, 0, 0, 0)
+        head.setSpacing(8)
+        title = QLabel(tr("veditor.scopes.title"))
+        title.setStyleSheet(
+            f"color: {COLOR_TEXT_TERTIARY}; font-size: 11px; font-weight: 600;"
+        )
+        head.addWidget(title)
+        head.addStretch(1)
+        from PySide6.QtWidgets import QComboBox
+        self._kind_combo = QComboBox()
+        for kid, key in (
+            ("histogram",   "veditor.scopes.histogram"),
+            ("parade",      "veditor.scopes.parade"),
+            ("waveform",    "veditor.scopes.waveform"),
+            ("vectorscope", "veditor.scopes.vectorscope"),
+        ):
+            self._kind_combo.addItem(tr(key), userData=kid)
+        self._kind_combo.currentIndexChanged.connect(self._on_kind_changed)
+        head.addWidget(self._kind_combo)
+        outer.addLayout(head)
+
+        self._image_label = QLabel()
+        self._image_label.setFixedSize(self.SCOPE_W, self.SCOPE_H)
+        self._image_label.setStyleSheet(
+            f"background-color: #0a0a0e; border: 1px solid {COLOR_BORDER_DEFAULT};"
+        )
+        outer.addWidget(self._image_label, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        # Player frame stream → recompute current scope.
+        self._player.frame_ready.connect(self._on_frame_ready)
+
+    def _on_kind_changed(self) -> None:
+        self._kind = self._kind_combo.currentData() or "histogram"
+        # Re-render with the cached frame, if any.
+        if self._latest_rgb is not None:
+            self._render_now()
+
+    def _on_frame_ready(self, qimg) -> None:
+        """Cache the RGB array from the player and refresh the scope.
+        We pull pixel bytes via QImage's bits() — fast enough at 1080p
+        for the modest scope canvas."""
+        try:
+            import numpy as np
+            # Force RGB888 layout so bits() is plain RGB bytes.
+            img = qimg.convertToFormat(qimg.Format.Format_RGB888)
+            w, h = img.width(), img.height()
+            ptr = img.constBits()
+            arr = np.frombuffer(ptr, dtype=np.uint8, count=w * h * 3)
+            arr = arr.reshape((h, w, 3))
+            self._latest_rgb = arr.copy()      # decouple from Qt buffer
+            self._render_now()
+        except Exception:
+            pass
+
+    def _render_now(self) -> None:
+        if self._latest_rgb is None:
+            return
+        from app.color_scopes import render_scope
+        out = render_scope(self._kind, self._latest_rgb,
+                           self.SCOPE_W, self.SCOPE_H)
+        h, w = out.shape[:2]
+        from PySide6.QtGui import QImage as _QI, QPixmap as _QP
+        qimg = _QI(out.data, w, h, w * 3, _QI.Format.Format_RGB888).copy()
+        self._image_label.setPixmap(_QP.fromImage(qimg))
+
+
+class _HueCurveWidget(QWidget):
+    """DaVinci-style Hue-vs-Hue curve editor.
+
+    X axis: input hue 0..360° (background painted as a rainbow strip).
+    Y axis: hue rotation -180..+180° (centre line = no change).
+
+    Default control points cover the six primary hues (R/Y/G/C/B/M)
+    with delta = 0; users drag a point up/down to rotate that hue.
+    Double-click adds a point, right-click on a point removes it.
+    Emits ``points_changed(list)`` whenever the curve mutates.
+    """
+
+    points_changed = Signal(list)
+
+    DEFAULT_HUES = [0.0, 60.0, 120.0, 180.0, 240.0, 300.0]
+    HANDLE_R = 4
+    GRAB_PX = 9
+    HEIGHT = 108
+    MAX_WIDTH = 480
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setMinimumHeight(self.HEIGHT)
+        self.setMaximumHeight(self.HEIGHT)
+        self.setMinimumWidth(280)
+        self.setMaximumWidth(self.MAX_WIDTH)
+        self.setMouseTracking(True)
+        # Each point is (input_hue 0..360, delta_hue -180..180).
+        self._points: list[list[float]] = [
+            [h, 0.0] for h in self.DEFAULT_HUES
+        ]
+        self._dragging_idx: int | None = None
+        self._selected_idx: int | None = None
+
+    # ---- public ----
+
+    def points(self) -> list[tuple[float, float]]:
+        return [(p[0], p[1]) for p in self._points]
+
+    def set_points(self, pts: list[tuple[float, float]]) -> None:
+        if pts:
+            self._points = [[float(h), float(d)] for h, d in pts]
+        else:
+            self._points = [[h, 0.0] for h in self.DEFAULT_HUES]
+        self._points.sort(key=lambda p: p[0])
+        self.update()
+
+    def reset(self) -> None:
+        self._points = [[h, 0.0] for h in self.DEFAULT_HUES]
+        self._dragging_idx = None
+        self._selected_idx = None
+        self.update()
+        self.points_changed.emit(self.points())
+
+    # ---- coords ----
+
+    def _hue_to_x(self, h: float) -> float:
+        w = self.width() - 12
+        return 6 + (h / 360.0) * w
+
+    def _x_to_hue(self, x: float) -> float:
+        w = self.width() - 12
+        return max(0.0, min(360.0, (x - 6) / w * 360.0))
+
+    def _delta_to_y(self, d: float) -> float:
+        h = self.height() - 12
+        # delta=0 → centre; +180 → top; -180 → bottom
+        return 6 + h * (1.0 - (d + 180.0) / 360.0)
+
+    def _y_to_delta(self, y: float) -> float:
+        h = self.height() - 12
+        return max(-180.0, min(180.0,
+                               (1.0 - (y - 6) / h) * 360.0 - 180.0))
+
+    def _point_at(self, pos) -> int | None:
+        from math import hypot
+        for i, (hue, dlt) in enumerate(self._points):
+            x = self._hue_to_x(hue)
+            y = self._delta_to_y(dlt)
+            if hypot(pos.x() - x, pos.y() - y) <= self.GRAB_PX:
+                return i
+        return None
+
+    # ---- mouse ----
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            idx = self._point_at(event.position().toPoint())
+            if idx is not None:
+                self._dragging_idx = idx
+                self._selected_idx = idx
+                self.update()
+            else:
+                # Click on empty space inside the curve area = add point.
+                p = event.position().toPoint()
+                hue = self._x_to_hue(p.x())
+                dlt = self._y_to_delta(p.y())
+                self._points.append([hue, dlt])
+                self._points.sort(key=lambda q: q[0])
+                self._dragging_idx = next(
+                    (i for i, q in enumerate(self._points)
+                     if abs(q[0] - hue) < 1e-3 and abs(q[1] - dlt) < 1e-3),
+                    None,
+                )
+                self._selected_idx = self._dragging_idx
+                self.update()
+                self.points_changed.emit(self.points())
+        elif event.button() == Qt.MouseButton.RightButton:
+            idx = self._point_at(event.position().toPoint())
+            # Don't allow deleting all six default points; require ≥2.
+            if idx is not None and len(self._points) > 2:
+                del self._points[idx]
+                self._dragging_idx = None
+                self._selected_idx = None
+                self.update()
+                self.points_changed.emit(self.points())
+
+    def mouseMoveEvent(self, event) -> None:
+        if self._dragging_idx is None:
+            return
+        p = event.position().toPoint()
+        hue = self._x_to_hue(p.x())
+        dlt = self._y_to_delta(p.y())
+        self._points[self._dragging_idx][0] = hue
+        self._points[self._dragging_idx][1] = dlt
+        # Re-sort + track index.
+        sel = self._points[self._dragging_idx]
+        self._points.sort(key=lambda q: q[0])
+        self._dragging_idx = self._points.index(sel)
+        self._selected_idx = self._dragging_idx
+        self.update()
+        self.points_changed.emit(self.points())
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._dragging_idx = None
+
+    # ---- paint ----
+
+    def paintEvent(self, _event) -> None:
+        from PySide6.QtGui import QLinearGradient, QBrush
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        # Background: hue rainbow gradient covering the X axis.
+        grad = QLinearGradient(6, 0, self.width() - 6, 0)
+        for stop, rgb in (
+            (0.000, (255, 70,  70)),
+            (0.166, (235, 210, 60)),
+            (0.333, (110, 220, 70)),
+            (0.500, (60,  180, 220)),
+            (0.666, (130, 100, 235)),
+            (0.833, (235, 90,  200)),
+            (1.000, (255, 70,  70)),
+        ):
+            grad.setColorAt(stop, QColor(*rgb, 110))
+        painter.setBrush(QBrush(grad))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(self.rect().adjusted(2, 2, -2, -2), 4, 4)
+
+        # Centre baseline (delta = 0)
+        cy = self._delta_to_y(0.0)
+        painter.setPen(QPen(QColor(255, 255, 255, 80), 1, Qt.PenStyle.DashLine))
+        painter.drawLine(6, int(cy), self.width() - 6, int(cy))
+
+        # Curve — connect points in order, with wrap from last to first.
+        if len(self._points) >= 2:
+            pen = QPen(QColor(255, 255, 255), 2)
+            painter.setPen(pen)
+            n = len(self._points)
+            for i in range(n):
+                a = self._points[i]
+                b = self._points[(i + 1) % n]
+                ax = self._hue_to_x(a[0])
+                ay = self._delta_to_y(a[1])
+                bx = self._hue_to_x(b[0])
+                by = self._delta_to_y(b[1])
+                # Wrap: don't draw a segment that crosses the seam if
+                # the next point's hue is smaller (wraps around 360).
+                if b[0] < a[0]:
+                    continue
+                painter.drawLine(int(ax), int(ay), int(bx), int(by))
+
+        # Control points
+        for i, (hue, dlt) in enumerate(self._points):
+            x = self._hue_to_x(hue)
+            y = self._delta_to_y(dlt)
+            r = self.HANDLE_R + (1 if i == self._selected_idx else 0)
+            painter.setPen(QPen(QColor(0, 0, 0, 200), 1))
+            fill = QColor(255, 255, 255) if i == self._selected_idx else QColor(220, 220, 220)
+            painter.setBrush(fill)
+            painter.drawEllipse(int(x) - r, int(y) - r, r * 2, r * 2)
+
+        # Outer border
+        painter.setPen(QPen(QColor(0, 0, 0, 140), 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(self.rect().adjusted(1, 1, -1, -1), 4, 4)
+
+
 class _ColorWheelWidget(QWidget):
     """DaVinci-style chromaticity wheel with a draggable indicator.
 
@@ -3176,10 +4071,10 @@ class _ColorWheelWidget(QWidget):
 
     value_changed = Signal(int, int)
 
-    SIZE = 96               # widget side length (px) — tighter than v1
+    SIZE = 132              # widget side length (px) — DaVinci-leaning size
     LABEL_H = 16
     READOUT_H = 13
-    INDICATOR_R = 6
+    INDICATOR_R = 7
 
     def __init__(self, label: str = "", parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -3677,10 +4572,11 @@ class _PresetPickerButton(QWidget):
         self._btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._btn.setStyleSheet(
             f"QPushButton#PresetPickerBtn {{ "
-            f"background-color: #6a3cb5; color: {COLOR_TEXT_PRIMARY}; "
-            f"border: none; border-radius: 4px; "
+            f"background-color: #4a4a4a; color: {COLOR_TEXT_PRIMARY}; "
+            f"border: 1px solid #5a5a5a; border-radius: 4px; "
             f"padding: 6px 14px; font-weight: 700; font-size: 12px; }}"
-            f"QPushButton#PresetPickerBtn:hover {{ background-color: #7b4ac9; }}"
+            f"QPushButton#PresetPickerBtn:hover {{ "
+            f"background-color: #5a5a5a; border-color: #6a6a6a; }}"
         )
         self._btn.clicked.connect(self._toggle_popup)
         h.addWidget(self._btn, 1)
@@ -3789,7 +4685,7 @@ class _PresetPickerButton(QWidget):
             f"background-color: {COLOR_BG_L4}; color: {COLOR_TEXT_PRIMARY}; "
             f"border: 2px solid {COLOR_BORDER_DEFAULT}; border-radius: 6px; "
             f"padding: 6px; text-align: left; }}"
-            f"QPushButton:hover {{ border-color: #6a3cb5; "
+            f"QPushButton:hover {{ border-color: #D85A30; "
             f"background-color: #34343c; }}"
         )
 
@@ -3836,6 +4732,235 @@ class _PresetPickerButton(QWidget):
         for tile in self._tile_buttons:
             haystack = (tile.property("preset_search") or "").lower()
             tile.setVisible(not needle or needle in haystack)
+
+
+class _ZoomRegionPicker(QWidget):
+    """Custom widget for the zoom-target rectangle picker.
+
+    Shows a still frame from the source video and lets the user drag a
+    rectangle on it. Emits ``rect_changed(x, y, w, h)`` in source-frame
+    pixel coordinates as the user drags.
+    """
+
+    rect_changed = Signal(int, int, int, int)
+
+    def __init__(self, frame: QImage, parent=None) -> None:
+        super().__init__(parent)
+        self._frame = frame
+        self._frame_w = frame.width()
+        self._frame_h = frame.height()
+        # Rectangle in source-frame px; (0,0,0,0) = unset.
+        self._rect_src: QRect = QRect()
+        self._dragging = False
+        self._drag_start_widget: QPoint = QPoint()
+        self.setMinimumSize(640, 360)
+        self.setCursor(Qt.CursorShape.CrossCursor)
+
+    def set_initial_rect(self, x: int, y: int, w: int, h: int) -> None:
+        if w > 0 and h > 0:
+            self._rect_src = QRect(x, y, w, h)
+            self.update()
+
+    def current_rect(self) -> QRect:
+        return QRect(self._rect_src)
+
+    # ---- coordinate transforms ----
+
+    def _display_rect(self) -> QRect:
+        """The widget rect the source frame is painted into, preserving
+        aspect. The picker rectangle is drawn relative to this."""
+        if self._frame_w <= 0 or self._frame_h <= 0:
+            return self.rect()
+        wr = self.rect()
+        scale = min(wr.width() / self._frame_w, wr.height() / self._frame_h)
+        dw = int(self._frame_w * scale)
+        dh = int(self._frame_h * scale)
+        dx = (wr.width() - dw) // 2
+        dy = (wr.height() - dh) // 2
+        return QRect(dx, dy, dw, dh)
+
+    def _widget_to_src(self, p: QPoint) -> QPoint:
+        d = self._display_rect()
+        if d.width() <= 0 or d.height() <= 0:
+            return QPoint(0, 0)
+        sx = (p.x() - d.left()) * self._frame_w // d.width()
+        sy = (p.y() - d.top()) * self._frame_h // d.height()
+        sx = max(0, min(self._frame_w - 1, sx))
+        sy = max(0, min(self._frame_h - 1, sy))
+        return QPoint(sx, sy)
+
+    def _src_to_widget_rect(self, src: QRect) -> QRect:
+        d = self._display_rect()
+        if d.width() <= 0 or self._frame_w <= 0:
+            return QRect()
+        x = d.left() + src.x() * d.width() // self._frame_w
+        y = d.top() + src.y() * d.height() // self._frame_h
+        w = src.width() * d.width() // self._frame_w
+        h = src.height() * d.height() // self._frame_h
+        return QRect(x, y, w, h)
+
+    # ---- mouse ----
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        self._dragging = True
+        self._drag_start_widget = event.position().toPoint()
+        # Reset the rect — start a fresh drag.
+        sp = self._widget_to_src(self._drag_start_widget)
+        self._rect_src = QRect(sp.x(), sp.y(), 0, 0)
+        self.update()
+
+    def mouseMoveEvent(self, event) -> None:
+        if not self._dragging:
+            return
+        end_widget = event.position().toPoint()
+        sp_start = self._widget_to_src(self._drag_start_widget)
+        sp_end = self._widget_to_src(end_widget)
+        x = min(sp_start.x(), sp_end.x())
+        y = min(sp_start.y(), sp_end.y())
+        w = abs(sp_end.x() - sp_start.x())
+        h = abs(sp_end.y() - sp_start.y())
+        self._rect_src = QRect(x, y, w, h)
+        self.update()
+        self.rect_changed.emit(x, y, w, h)
+
+    def mouseReleaseEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._dragging = False
+
+    # ---- paint ----
+
+    def paintEvent(self, _event) -> None:
+        from PySide6.QtGui import QPainter as _QP, QPixmap as _QPM
+        painter = _QP(self)
+        painter.fillRect(self.rect(), QColor("#0a0a0e"))
+
+        d = self._display_rect()
+        if not self._frame.isNull() and d.width() > 0:
+            painter.drawImage(d, self._frame)
+
+        # Dim everything outside the chosen rect.
+        if self._rect_src.width() > 0 and self._rect_src.height() > 0:
+            wr = self._src_to_widget_rect(self._rect_src)
+            # Dim mask
+            painter.fillRect(self.rect(), QColor(0, 0, 0, 120))
+            # Punch out the picked rect (re-draw the original clip there)
+            painter.setCompositionMode(_QP.CompositionMode.CompositionMode_Source)
+            if not self._frame.isNull():
+                # Compute the source crop in the original image
+                sx = self._rect_src.x() * d.width() // self._frame_w
+                sy = self._rect_src.y() * d.height() // self._frame_h
+                sw = self._rect_src.width() * d.width() // self._frame_w
+                sh = self._rect_src.height() * d.height() // self._frame_h
+                src_view = QRect(self._rect_src)
+                target_view = wr
+                painter.drawImage(target_view, self._frame, src_view)
+            painter.setCompositionMode(_QP.CompositionMode.CompositionMode_SourceOver)
+            # Highlight border
+            pen = QPen(QColor(COLOR_ACCENT_BLUE), 2)
+            painter.setPen(pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(wr)
+            # Centre marker
+            cx = wr.left() + wr.width() // 2
+            cy = wr.top() + wr.height() // 2
+            painter.setPen(QPen(QColor(COLOR_ACCENT_BLUE), 1))
+            painter.drawLine(cx - 6, cy, cx + 6, cy)
+            painter.drawLine(cx, cy - 6, cx, cy + 6)
+
+
+class ZoomActorDialog(QDialog):
+    """Modal: pick the zoom target rectangle on a still frame from the
+    source video, plus zoom-in / zoom-out duration sliders. Mutates the
+    actor in-place on Apply."""
+
+    def __init__(self, track: VideoTrack, zactor: ZoomActor,
+                 player, parent=None) -> None:
+        super().__init__(parent)
+        self.track = track
+        self.zactor = zactor
+        self._player = player
+        self.setWindowTitle(tr("veditor.zoom_dialog.title"))
+        self.setMinimumSize(820, 620)
+
+        # Snapshot a frame from the source at the actor's start time.
+        frame = self._capture_source_frame(zactor.start_ms)
+
+        v = QVBoxLayout(self)
+        v.setContentsMargins(12, 12, 12, 12)
+        v.setSpacing(8)
+
+        hint = QLabel(tr("veditor.zoom_dialog.hint"))
+        hint.setStyleSheet(f"color: {COLOR_TEXT_TERTIARY}; font-size: 12px;")
+        v.addWidget(hint)
+
+        self._picker = _ZoomRegionPicker(frame)
+        self._picker.set_initial_rect(
+            zactor.target_x, zactor.target_y, zactor.target_w, zactor.target_h
+        )
+        v.addWidget(self._picker, 1)
+
+        # Fade times (zoom_in_ms / zoom_out_ms) are edited directly on
+        # the timeline via the inner handles on the actor block — same
+        # pattern as Fade actors. The dialog only handles the target
+        # rectangle, which can't sensibly live on a 1-D timeline.
+
+        # Apply / Cancel
+        from PySide6.QtWidgets import QDialogButtonBox
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Apply
+            | QDialogButtonBox.StandardButton.Cancel,
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Apply).clicked.connect(
+            self._on_apply
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).clicked.connect(
+            self.reject
+        )
+        v.addWidget(buttons)
+
+    def _capture_source_frame(self, source_ms: int) -> QImage:
+        """Read one frame from the track's source video at ``source_ms``.
+        Falls back to a blank frame if reading fails."""
+        path = self.track.source_path
+        if path is None:
+            return QImage(640, 360, QImage.Format.Format_RGB888)
+        try:
+            import cv2
+            import numpy as np
+            cap = cv2.VideoCapture(str(path))
+            try:
+                fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+                idx = int(source_ms / 1000.0 * fps)
+                cap.set(cv2.CAP_PROP_POS_FRAMES, idx)
+                ok, bgr = cap.read()
+                if not ok or bgr is None:
+                    raise RuntimeError("frame read failed")
+                rgb = np.ascontiguousarray(bgr[:, :, ::-1])
+                h, w = rgb.shape[:2]
+                return QImage(rgb.data, w, h, rgb.strides[0],
+                              QImage.Format.Format_RGB888).copy()
+            finally:
+                cap.release()
+        except Exception:
+            return QImage(640, 360, QImage.Format.Format_RGB888)
+
+    def _on_apply(self) -> None:
+        rect = self._picker.current_rect()
+        if rect.width() <= 0 or rect.height() <= 0:
+            from PySide6.QtWidgets import QMessageBox
+            QMessageBox.warning(
+                self,
+                tr("veditor.zoom_dialog.title"),
+                tr("veditor.zoom_dialog.no_rect"),
+            )
+            return
+        self.zactor.target_x = int(rect.x())
+        self.zactor.target_y = int(rect.y())
+        self.zactor.target_w = int(rect.width())
+        self.zactor.target_h = int(rect.height())
+        self.accept()
 
 
 class TypographyEditorDialog(QDialog):
@@ -5134,7 +6259,7 @@ class ClipWaveformView(QWidget):
         markers = getattr(clip, "_se_markers", None) or []
         if markers:
             painter.setPen(Qt.PenStyle.NoPen)
-            marker_color = QColor("#5DCAA5")
+            marker_color = QColor("#ff7a4a")
             for m_ms in markers:
                 if m_ms < clip.trim_start_ms or m_ms > clip.effective_trim_end_ms:
                     continue
@@ -6941,10 +8066,10 @@ class _EqCurveView(QWidget):
             path.lineTo(x, y)
         path.lineTo(points[-1][0], mid_y)
         path.closeSubpath()
-        painter.fillPath(path, QColor(74, 155, 238, 60))
+        painter.fillPath(path, QColor(255, 122, 74, 60))
 
         # Curve line
-        painter.setPen(QPen(QColor("#4a9bee"), 2))
+        painter.setPen(QPen(QColor("#ff7a4a"), 2))
         for (x1, y1), (x2, y2) in zip(points[:-1], points[1:]):
             painter.drawLine(x1, y1, x2, y2)
 
@@ -7009,6 +8134,43 @@ class PreviewPopoutWindow(QWidget):
             self.showNormal()
             return
         super().keyPressEvent(event)
+
+    def closeEvent(self, event) -> None:
+        self.closed.emit()
+        super().closeEvent(event)
+
+
+class ColorPopoutWindow(QWidget):
+    """Floating window that hosts the color-grading panel + scopes
+    while the user has the section "popped out" of the editor.
+
+    The widget tree is *moved* (reparented) into this window — there's
+    only one canonical color panel in the app, so sliders/wheels keep
+    their values across pop-out / pop-in transitions and the rest of
+    the editor's signals don't need to be re-wired.
+
+    Closing the window emits ``closed``; the editor re-installs the
+    panel into its own layout in response.
+    """
+
+    closed = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent, Qt.WindowType.Window)
+        self.setWindowTitle(tr("veditor.color_popout.title"))
+        self.setStyleSheet(
+            f"QWidget {{ background-color: {COLOR_BG_L3}; }}"
+        )
+        self.resize(960, 480)
+        self.setMinimumSize(720, 400)
+        self._layout = QHBoxLayout(self)
+        self._layout.setContentsMargins(8, 8, 8, 8)
+        self._layout.setSpacing(0)
+
+    def install(self, host: QWidget) -> None:
+        """Reparent ``host`` into this window so the user can edit
+        from the floating surface."""
+        self._layout.addWidget(host)
 
     def closeEvent(self, event) -> None:
         self.closed.emit()
@@ -8034,10 +9196,12 @@ class VideoEditorWindow(QWidget):
         track_bar.addWidget(self.del_track_btn)
         track_bar.addSpacing(20)
 
-        # --- Transitions row — Fade / Typography / Speed drag cards ---
+        # --- Transitions row — Fade / Typography / Zoom / Speed cards ---
         track_bar.addWidget(self._build_fade_card())
         self.typo_card = TypographyCard()
         track_bar.addWidget(self.typo_card)
+        self.zoom_card = ZoomCard()
+        track_bar.addWidget(self.zoom_card)
         self.speed_card = SpeedCard()
         track_bar.addWidget(self.speed_card)
         track_bar.addStretch(1)
@@ -8104,11 +9268,49 @@ class VideoEditorWindow(QWidget):
         sel_row.addWidget(self.clear_sel_btn)
         root.addWidget(controls_bar)
 
-        # --- Color grading section ---
-        root.addWidget(
-            self._make_section_header(tr("veditor.section.color"), "color")
+        # --- Color grading section (panel + scopes, popout-capable) ---
+        # Custom header with a ⛶ pop-out button on the right, so the
+        # user can detach the whole color surface into a floating
+        # window (DaVinci-style docking, single-window app version).
+        color_header = QWidget()
+        color_header.setObjectName("ColorSectionHeader")
+        chh = QHBoxLayout(color_header)
+        chh.setContentsMargins(0, 0, 8, 0)
+        chh.setSpacing(0)
+        chh.addWidget(
+            self._make_section_header(tr("veditor.section.color"), "color"),
+            stretch=1,
         )
-        root.addWidget(self._build_color_grading_panel())
+        self.color_popout_btn = QPushButton("⛶")
+        self.color_popout_btn.setObjectName("PreviewPopoutIcon")
+        self.color_popout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.color_popout_btn.setToolTip(tr("veditor.color_popout.tooltip"))
+        self.color_popout_btn.setFixedSize(28, 24)
+        self.color_popout_btn.clicked.connect(self._toggle_color_popout)
+        chh.addWidget(self.color_popout_btn)
+        root.addWidget(color_header)
+
+        # The host widget is the single canonical container for the
+        # color panel + scopes. We move (reparent) it between the
+        # editor's root layout and the popout window — same widget
+        # tree, no state duplication.
+        # The colour grading panel embeds the scopes panel internally
+        # (as a sibling column to the wheels) so the histogram and the
+        # wheels naturally align on the same row. The host widget is
+        # the canonical container we reparent between the editor and
+        # the popout window — same widget tree, no state duplication.
+        self._color_row_host = QWidget()
+        color_row = QHBoxLayout(self._color_row_host)
+        color_row.setContentsMargins(0, 0, 0, 0)
+        color_row.setSpacing(0)
+        color_row.addWidget(self._build_color_grading_panel(), 1)
+        root.addWidget(self._color_row_host)
+        # Remember where to put the host back after a popout closes.
+        self._color_root_layout = root
+        self._color_root_index = root.count() - 1
+        self._color_popout: "ColorPopoutWindow | None" = None
+        # Placeholder shown in-place while the host is in the popout.
+        self._color_placeholder: QLabel | None = None
 
         # --- Subtitles section ---
         root.addWidget(
@@ -8155,6 +9357,9 @@ class VideoEditorWindow(QWidget):
         row.typography_double_clicked.connect(self._open_typography_editor)
         row.typography_context_menu.connect(self._show_typography_menu)
         row.typography_changed.connect(self._on_typography_changed)
+        row.zoom_double_clicked.connect(self._open_zoom_editor)
+        row.zoom_context_menu.connect(self._show_zoom_menu)
+        row.zoom_changed.connect(self._on_track_zoom_changed)
         self._track_rows[track.id] = row
         self._tracks_layout.insertWidget(self._tracks_layout.count() - 1, row)
         self._update_tracks_host_width()
@@ -9609,6 +10814,119 @@ class VideoEditorWindow(QWidget):
                 row.update()
             self._on_typography_changed(track_id)
 
+    # ---- zoom actor handlers ----
+
+    def _find_zoom_actor(self, track_id: int, zactor_id: int) -> "tuple[VideoTrack, ZoomActor] | None":
+        for t in self._tracks:
+            if t.id != track_id:
+                continue
+            for z in t.zoom_actors:
+                if z.id == zactor_id:
+                    return t, z
+        return None
+
+    def _on_track_zoom_changed(self, track_id: int) -> None:
+        """Called after any drag/resize/drop/add/remove of a zoom actor
+        on any video track. Triggers a preview repaint at the current
+        position so the new zoom (or its absence) shows immediately."""
+        self._update_tracks_host_width()
+        self._player.set_position(self._player.position())
+
+    # ---- color section pop-out ----
+
+    def _toggle_color_popout(self) -> None:
+        """Detach / re-attach the color section. Same widget tree
+        moves between the editor root layout and a floating window
+        — sliders/wheels keep their state across the transition."""
+        if self._color_popout is not None and self._color_popout.isVisible():
+            self._color_popout.close()
+            return
+        self._color_popout = ColorPopoutWindow(self)
+        self._color_popout.closed.connect(self._on_color_popout_closed)
+        # Replace in-editor host with a placeholder so the rest of
+        # the editor's layout doesn't collapse upward.
+        self._color_root_layout.removeWidget(self._color_row_host)
+        self._color_placeholder = QLabel(tr("veditor.color_popout.placeholder"))
+        self._color_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._color_placeholder.setMinimumHeight(80)
+        self._color_placeholder.setStyleSheet(
+            f"color: {COLOR_TEXT_TERTIARY}; font-style: italic; "
+            f"background-color: {COLOR_BG_L2}; "
+            f"border: 1px dashed {COLOR_BORDER_DEFAULT}; border-radius: 4px;"
+        )
+        self._color_root_layout.insertWidget(
+            self._color_root_index, self._color_placeholder,
+        )
+        # Move the host into the popout and show it.
+        self._color_popout.install(self._color_row_host)
+        self._color_popout.show()
+        self._color_popout.raise_()
+        self._color_popout.activateWindow()
+
+    def _on_color_popout_closed(self) -> None:
+        """Pop-out window closing → restore the host into the editor."""
+        if self._color_placeholder is not None:
+            idx = self._color_root_layout.indexOf(self._color_placeholder)
+            self._color_root_layout.removeWidget(self._color_placeholder)
+            self._color_placeholder.deleteLater()
+            self._color_placeholder = None
+        else:
+            idx = self._color_root_index
+        # Reparent back to the editor.
+        self._color_row_host.setParent(self.parent_widget_for_color())
+        self._color_root_layout.insertWidget(
+            max(0, idx), self._color_row_host,
+        )
+        self._color_row_host.show()
+        if self._color_popout is not None:
+            self._color_popout.deleteLater()
+            self._color_popout = None
+
+    def parent_widget_for_color(self) -> QWidget:
+        """The widget that owns the color row when not popped out.
+        Returns ``self`` so reparenting happens to the editor
+        window itself; Qt's layout system then re-installs it under
+        the right parent on the next insertWidget call."""
+        return self
+
+    def _open_zoom_editor(self, track_id: int, zactor_id: int) -> None:
+        """Click handler — opens the modal region picker + duration sliders
+        for a zoom actor. Updates the actor in place on Apply."""
+        found = self._find_zoom_actor(track_id, zactor_id)
+        if found is None:
+            return
+        track, zactor = found
+        dlg = ZoomActorDialog(track, zactor, self._player, self)
+        if dlg.exec() == dlg.DialogCode.Accepted:
+            row = self._track_rows.get(track_id)
+            if row is not None:
+                row.update()
+            self._on_track_zoom_changed(track_id)
+
+    def _show_zoom_menu(self, track_id: int, zactor_id: int, global_pos) -> None:
+        from PySide6.QtWidgets import QMenu
+
+        found = self._find_zoom_actor(track_id, zactor_id)
+        if found is None:
+            return
+        track, zactor = found
+        menu = QMenu(self)
+        a_edit = menu.addAction(tr("veditor.zoom_menu.edit"))
+        menu.addSeparator()
+        a_del = menu.addAction(tr("veditor.zoom_menu.delete"))
+
+        chosen = menu.exec(global_pos)
+        if chosen is a_edit:
+            self._open_zoom_editor(track_id, zactor_id)
+        elif chosen is a_del:
+            track.zoom_actors = [
+                z for z in track.zoom_actors if z.id != zactor_id
+            ]
+            row = self._track_rows.get(track_id)
+            if row is not None:
+                row.update()
+            self._on_track_zoom_changed(track_id)
+
     def _scale_preview_to_fit(self) -> None:
         if self._preview_pixmap is None or self._preview_pixmap.isNull():
             return
@@ -9964,7 +11282,29 @@ class VideoEditorWindow(QWidget):
         host.setObjectName("ColorPanel")
         outer = QVBoxLayout(host)
         outer.setContentsMargins(12, 8, 12, 10)
-        outer.setSpacing(8)
+        # Manual spacing — each section explicitly inserts its own gap
+        # via _gap()/_divider(). Auto-spacing would compound with
+        # explicit spacers and visually run sections together.
+        outer.setSpacing(0)
+
+        SECTION_GAP = 10
+
+        def _build_divider() -> QFrame:
+            line = QFrame()
+            line.setFrameShape(QFrame.Shape.HLine)
+            line.setFrameShadow(QFrame.Shadow.Plain)
+            line.setLineWidth(1)
+            line.setFixedHeight(1)
+            line.setStyleSheet(
+                f"background-color: {COLOR_BORDER_DEFAULT}; "
+                f"border: none;"
+            )
+            return line
+
+        def _add_outer_divider() -> None:
+            outer.addSpacing(SECTION_GAP)
+            outer.addWidget(_build_divider())
+            outer.addSpacing(SECTION_GAP)
 
         # ---- Top row: preset picker + reset ----
         head = QHBoxLayout()
@@ -9999,20 +11339,40 @@ class VideoEditorWindow(QWidget):
         head.addWidget(reset_btn)
 
         outer.addLayout(head)
+        _add_outer_divider()
 
-        # ---- Wheels row: Shadows / Midtones / Highlights ----
-        # Tight spacing + horizontal centring. The wheels are fixed-size
-        # widgets, so leaving stretches on either side keeps them from
-        # smearing across the whole pane width.
+        # ---- Body row: [wheels + knobs + hue curve] | [scopes] ----
+        # Splitting the body horizontally here is what aligns the
+        # histogram canvas with the wheel row — both columns start at
+        # the same Y. The popout window reparents the entire host
+        # widget so this structure follows it across pop-out / dock.
+        body = QHBoxLayout()
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(12)
+
+        left_col_host = QWidget()
+        left_col = QVBoxLayout(left_col_host)
+        left_col.setContentsMargins(0, 0, 0, 0)
+        left_col.setSpacing(0)
+
+        def _add_left_divider() -> None:
+            left_col.addSpacing(SECTION_GAP)
+            left_col.addWidget(_build_divider())
+            left_col.addSpacing(SECTION_GAP)
+
+        # ---- Wheels row: Shadows / Midtones / Highlights / Offset ----
+        # The wheels are fixed-size widgets — stretches on either side
+        # keep them from smearing across the column width.
         wheels_row = QHBoxLayout()
-        wheels_row.setContentsMargins(0, 4, 0, 4)
-        wheels_row.setSpacing(4)
+        wheels_row.setContentsMargins(0, 0, 0, 0)
+        wheels_row.setSpacing(12)
         wheels_row.addStretch(1)
         self._color_wheels: dict[str, _ColorWheelWidget] = {}
         wheel_specs = (
             ("shadows", "color.wheel.shadows"),
             ("midtones", "color.wheel.midtones"),
             ("highlights", "color.wheel.highlights"),
+            ("offset", "color.wheel.offset"),
         )
         for region, label_key in wheel_specs:
             wheel = _ColorWheelWidget(label=tr(label_key))
@@ -10022,7 +11382,8 @@ class VideoEditorWindow(QWidget):
             wheels_row.addWidget(wheel, 0)
             self._color_wheels[region] = wheel
         wheels_row.addStretch(1)
-        outer.addLayout(wheels_row)
+        left_col.addLayout(wheels_row)
+        _add_left_divider()
 
         # ---- Knobs: brightness / contrast / saturation ----
         # Bipolar knobs (centred at 0) match the sound editor's UI
@@ -10036,8 +11397,8 @@ class VideoEditorWindow(QWidget):
             return f"{n:+d}" if n != 0 else "0"
 
         knobs_row = QHBoxLayout()
-        knobs_row.setContentsMargins(0, 4, 0, 0)
-        knobs_row.setSpacing(6)
+        knobs_row.setContentsMargins(0, 0, 0, 0)
+        knobs_row.setSpacing(8)
         knobs_row.addStretch(1)
 
         # Reuse ``self._color_sliders`` as the dict name even though the
@@ -10069,7 +11430,32 @@ class VideoEditorWindow(QWidget):
             knobs_row.addWidget(knob, 0)
             self._color_sliders[key] = knob
         knobs_row.addStretch(1)
-        outer.addLayout(knobs_row)
+        left_col.addLayout(knobs_row)
+        _add_left_divider()
+
+        # ---- Hue vs Hue curve ----
+        hue_label = QLabel(tr("color.curves.hue_vs_hue"))
+        hue_label.setStyleSheet(
+            f"color: {COLOR_TEXT_TERTIARY}; font-size: 11px; "
+            f"font-weight: 600;"
+        )
+        left_col.addWidget(hue_label)
+        left_col.addSpacing(4)
+        self._hue_curve = _HueCurveWidget()
+        self._hue_curve.points_changed.connect(self._on_hue_curve_changed)
+        left_col.addWidget(self._hue_curve)
+        left_col.addStretch(1)
+
+        body.addWidget(left_col_host, 1)
+
+        # ---- Right column: Scopes (Histogram / Parade / Waveform / Vector) ----
+        # The scopes panel is a sibling of the wheels' column, so its
+        # top edge naturally aligns with the wheels' top edge.
+        self._scopes_panel = ScopesPanel(self._player)
+        body.addWidget(self._scopes_panel, 0,
+                       Qt.AlignmentFlag.AlignTop)
+
+        outer.addLayout(body)
 
         self._build_color_preset_menu()
         self._sync_color_panel()
@@ -10103,6 +11489,13 @@ class VideoEditorWindow(QWidget):
             else:
                 x = y = 0
             wheel.set_value(x, y, emit=False)
+        if hasattr(self, "_hue_curve"):
+            pts = list(grade.hue_vs_hue) if grade is not None else []
+            # Block signal so set_points doesn't bounce back through
+            # _on_hue_curve_changed and dirty the preset id.
+            self._hue_curve.blockSignals(True)
+            self._hue_curve.set_points(pts)
+            self._hue_curve.blockSignals(False)
         self._refresh_color_preset_btn_label()
         self._build_color_preset_menu()
 
@@ -10124,6 +11517,16 @@ class VideoEditorWindow(QWidget):
             return
         setattr(grade, f"{region}_x", int(x))
         setattr(grade, f"{region}_y", int(y))
+        if grade.preset_id != "none":
+            grade.preset_id = "custom"
+        self._refresh_color_preset_btn_label()
+        self._player.set_position(self._player.position())
+
+    def _on_hue_curve_changed(self, points) -> None:
+        grade = self._active_color_grade()
+        if grade is None:
+            return
+        grade.hue_vs_hue = list(points)
         if grade.preset_id != "none":
             grade.preset_id = "custom"
         self._refresh_color_preset_btn_label()
@@ -10290,6 +11693,7 @@ class VideoEditorWindow(QWidget):
             quality_id=getattr(self, "_export_quality_id", "high"),
             format_id=getattr(self, "_export_format_id", "mp4"),
             color_grade=getattr(track, "color_grade", None),
+            zoom_actors=list(getattr(track, "zoom_actors", []) or []),
         )
         thread.progress.connect(
             lambda cur, tot: (dlg.setMaximum(max(1, tot)), dlg.setValue(cur))

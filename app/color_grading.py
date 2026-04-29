@@ -65,15 +65,43 @@ class ColorGrade:
     # Highlights wheel
     highlights_x: int = 0
     highlights_y: int = 0
+    # Offset wheel — uniform RGB shift across every tonal region
+    # (DaVinci's "Offset" / "Master"). Useful for fixing a global
+    # colour cast without touching the lift/gamma/gain curve.
+    offset_x: int = 0
+    offset_y: int = 0
+
+    # Per-wheel luma sliders — DaVinci's "Lift / Gamma / Gain / Offset"
+    # vertical bars sitting next to each colour wheel. They lift or
+    # press the brightness inside the wheel's tonal region only, so
+    # users can darken shadows without touching highlights, etc.
+    # Range -100..100, 0 = no change.
+    shadows_l: int = 0
+    midtones_l: int = 0
+    highlights_l: int = 0
+    offset_l: int = 0
+
+    # Hue vs Hue curve — list of (input_hue 0..360, hue_delta
+    # -180..+180) control points. Empty list means identity (no
+    # rotation). The renderer interpolates linearly between adjacent
+    # control points around the wrap-around hue circle.
+    hue_vs_hue: list[tuple[float, float]] = field(default_factory=list)
 
     preset_id: str = "none"      # last-applied preset (or "custom")
 
     def is_identity(self) -> bool:
+        # Hue-vs-hue identity = no control points OR every point has
+        # delta == 0. Treat both as no-op.
+        hue_active = any(abs(d) > 0.5 for _, d in self.hue_vs_hue)
         return (
             self.brightness == 0 and self.contrast == 0 and self.saturation == 0
             and self.shadows_x == 0 and self.shadows_y == 0
             and self.midtones_x == 0 and self.midtones_y == 0
             and self.highlights_x == 0 and self.highlights_y == 0
+            and self.offset_x == 0 and self.offset_y == 0
+            and self.shadows_l == 0 and self.midtones_l == 0
+            and self.highlights_l == 0 and self.offset_l == 0
+            and not hue_active
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -83,6 +111,10 @@ class ColorGrade:
             "shadows_x": self.shadows_x, "shadows_y": self.shadows_y,
             "midtones_x": self.midtones_x, "midtones_y": self.midtones_y,
             "highlights_x": self.highlights_x, "highlights_y": self.highlights_y,
+            "offset_x": self.offset_x, "offset_y": self.offset_y,
+            "shadows_l": self.shadows_l, "midtones_l": self.midtones_l,
+            "highlights_l": self.highlights_l, "offset_l": self.offset_l,
+            "hue_vs_hue": list(self.hue_vs_hue),
             "preset_id": self.preset_id,
         }
 
@@ -96,6 +128,13 @@ class ColorGrade:
         self.midtones_y = 0
         self.highlights_x = 0
         self.highlights_y = 0
+        self.offset_x = 0
+        self.offset_y = 0
+        self.shadows_l = 0
+        self.midtones_l = 0
+        self.highlights_l = 0
+        self.offset_l = 0
+        self.hue_vs_hue = []
         self.preset_id = "none"
 
 
@@ -218,6 +257,11 @@ def apply_preset(grade: ColorGrade, preset_id: str) -> None:
     grade.midtones_y = p.midtones_y
     grade.highlights_x = p.highlights_x
     grade.highlights_y = p.highlights_y
+    # Presets pre-1.4 didn't ship Offset values; default them to 0
+    # explicitly so re-applying a preset clears any custom Offset the
+    # user dialed in.
+    grade.offset_x = getattr(p, "offset_x", 0)
+    grade.offset_y = getattr(p, "offset_y", 0)
     grade.preset_id = p.id
 
 
@@ -268,6 +312,13 @@ def apply_to_rgb(rgb, grade: ColorGrade):
     if grade.brightness != 0:
         f = f + grade.brightness / 100.0
 
+    # ---- Offset (uniform RGB shift across the whole image) ----
+    if grade.offset_x != 0 or grade.offset_y != 0:
+        odR, odG, odB = _wheel_to_rgb_offset(grade.offset_x, grade.offset_y)
+        f[..., 0] = f[..., 0] + odR
+        f[..., 1] = f[..., 1] + odG
+        f[..., 2] = f[..., 2] + odB
+
     # ---- 3-way wheel shifts (S / M / H) ----
     has_wheels = (
         grade.shadows_x != 0 or grade.shadows_y != 0
@@ -312,8 +363,89 @@ def apply_to_rgb(rgb, grade: ColorGrade):
         f[..., 1] = lum + (f[..., 1] - lum) * s
         f[..., 2] = lum + (f[..., 2] - lum) * s
 
+    # ---- Hue vs Hue curve (rotate specific hues) ----
+    # Run AFTER the offsets/wheels/sat so the curve operates on the
+    # already-graded image — picking the colour the user sees.
+    if any(abs(d) > 0.5 for _, d in grade.hue_vs_hue):
+        f = _apply_hue_vs_hue(f, grade.hue_vs_hue)
+
     np.clip(f, 0.0, 1.0, out=f)
     return (f * 255.0 + 0.5).astype(np.uint8)
+
+
+def _apply_hue_vs_hue(f, points: list[tuple[float, float]]):
+    """Rotate hues per the Hue-vs-Hue curve. ``f`` is a float32 RGB
+    array in [0, 1]; ``points`` is a list of (input_hue 0..360,
+    delta_hue -180..+180) control points. Linear interpolation
+    around the wrap-around hue circle; if ``points`` is empty the
+    function leaves ``f`` untouched."""
+    import numpy as np
+    if not points:
+        return f
+    # Convert RGB → HSV (vectorised — same algo Pillow uses).
+    r = f[..., 0]; g = f[..., 1]; b = f[..., 2]
+    cmax = np.maximum(np.maximum(r, g), b)
+    cmin = np.minimum(np.minimum(r, g), b)
+    delta = cmax - cmin
+    # Hue (0..360)
+    h = np.zeros_like(cmax)
+    mask = delta > 1e-6
+    rmask = mask & (cmax == r)
+    gmask = mask & (cmax == g) & ~rmask
+    bmask = mask & (cmax == b) & ~rmask & ~gmask
+    h[rmask] = ((g[rmask] - b[rmask]) / delta[rmask]) % 6.0
+    h[gmask] = (b[gmask] - r[gmask]) / delta[gmask] + 2.0
+    h[bmask] = (r[bmask] - g[bmask]) / delta[bmask] + 4.0
+    h = h * 60.0   # 0..360
+    s = np.where(cmax > 0, delta / np.maximum(cmax, 1e-6), 0.0)
+    v = cmax
+
+    # Build a 360-bin lookup of hue deltas. Sort points + add wrap.
+    pts = sorted(points, key=lambda p: p[0])
+    if len(pts) == 1:
+        delta_arr = np.full(360, pts[0][1], dtype=np.float32)
+    else:
+        # Wrap: append (first.x + 360, first.y) for circular interp.
+        ext = pts + [(pts[0][0] + 360.0, pts[0][1])]
+        xs = np.array([p[0] for p in ext], dtype=np.float32)
+        ys = np.array([p[1] for p in ext], dtype=np.float32)
+        # Sample at 0..359 with wrap-aware linear interp.
+        sample = np.arange(360, dtype=np.float32)
+        # If sample < pts[0].x, shift it up by 360 so it falls into
+        # the [pts[-1].x, pts[0].x+360] segment.
+        sample_shifted = np.where(sample < pts[0][0], sample + 360.0, sample)
+        delta_arr = np.interp(sample_shifted, xs, ys).astype(np.float32)
+
+    # Apply per-pixel hue delta via lookup.
+    h_idx = np.clip(h.astype(np.int32), 0, 359)
+    h_new = (h + delta_arr[h_idx]) % 360.0
+
+    # HSV → RGB (vectorised).
+    h6 = h_new / 60.0
+    i = np.floor(h6).astype(np.int32) % 6
+    fpart = h6 - np.floor(h6)
+    p = v * (1.0 - s)
+    q = v * (1.0 - s * fpart)
+    t = v * (1.0 - s * (1.0 - fpart))
+    out = np.empty_like(f)
+    # Stack by sector i.
+    for sector in range(6):
+        m = (i == sector)
+        if not np.any(m):
+            continue
+        if sector == 0:
+            out[..., 0][m] = v[m]; out[..., 1][m] = t[m]; out[..., 2][m] = p[m]
+        elif sector == 1:
+            out[..., 0][m] = q[m]; out[..., 1][m] = v[m]; out[..., 2][m] = p[m]
+        elif sector == 2:
+            out[..., 0][m] = p[m]; out[..., 1][m] = v[m]; out[..., 2][m] = t[m]
+        elif sector == 3:
+            out[..., 0][m] = p[m]; out[..., 1][m] = q[m]; out[..., 2][m] = v[m]
+        elif sector == 4:
+            out[..., 0][m] = t[m]; out[..., 1][m] = p[m]; out[..., 2][m] = v[m]
+        else:
+            out[..., 0][m] = v[m]; out[..., 1][m] = p[m]; out[..., 2][m] = q[m]
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -364,11 +496,20 @@ def to_ffmpeg_filters(grade: ColorGrade) -> str | None:
         grade.shadows_x != 0 or grade.shadows_y != 0
         or grade.midtones_x != 0 or grade.midtones_y != 0
         or grade.highlights_x != 0 or grade.highlights_y != 0
+        or grade.offset_x != 0 or grade.offset_y != 0
     )
     if has_wheels:
         rs, gs, bs = _wheel_to_colorbalance(grade.shadows_x, grade.shadows_y)
         rm, gm, bm = _wheel_to_colorbalance(grade.midtones_x, grade.midtones_y)
         rh, gh, bh = _wheel_to_colorbalance(grade.highlights_x, grade.highlights_y)
+        # Offset is a uniform shift — ffmpeg's colorbalance has no
+        # global slot, so we add it into every tonal region. Visually
+        # equivalent because the per-region masks sum to 1 across the
+        # tonal range.
+        ox, oy, oz = _wheel_to_colorbalance(grade.offset_x, grade.offset_y)
+        rs += ox; gs += oy; bs += oz
+        rm += ox; gm += oy; bm += oz
+        rh += ox; gh += oy; bh += oz
         parts.append(
             "colorbalance="
             f"rs={rs:.4f}:gs={gs:.4f}:bs={bs:.4f}:"

@@ -79,7 +79,7 @@ SCALE_CHOICES = [(100, 1.0), (75, 0.75), (50, 0.5), (25, 0.25)]
 # pre-1.4 behaviour; 64 is a sweet spot for screen-recording GIFs.
 COLOR_CHOICES = [256, 128, 64, 32, 16]
 # gifsicle --lossy levels. 0 means lossless (still applies -O3).
-# 60 is the value Bitdam shipped with through 1.3.
+# 60 is the value TigerCapture shipped with through 1.3.
 LOSSY_CHOICES = [
     (0,   "editor.opt.lossy.off"),
     (30,  "editor.opt.lossy.light"),
@@ -1164,7 +1164,7 @@ class GifEditorWindow(QWidget):
     @staticmethod
     def _suggested_name_mp4() -> str:
         stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        return f"bitdam_{stamp}.mp4"
+        return f"tigercapture_{stamp}.mp4"
 
     def _on_open_folder(self) -> None:
         if self._last_saved_path and self._last_saved_path.exists():
@@ -1175,7 +1175,7 @@ class GifEditorWindow(QWidget):
     @staticmethod
     def _suggested_name() -> str:
         stamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        return f"bitdam_{stamp}.gif"
+        return f"tigercapture_{stamp}.gif"
 
     def _on_send_to_pro_editor(self) -> None:
         if not self._frames:

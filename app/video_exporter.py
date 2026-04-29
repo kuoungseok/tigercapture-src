@@ -343,6 +343,8 @@ def build_filter_graph(
     fade_segments: list | None = None,
     typo_overlays: list[tuple[int, float, float]] | None = None,
     color_grade=None,
+    zoom_actors: list | None = None,
+    zoom_frame_size: tuple[int, int] | None = None,
 ) -> str:
     """Build an FFmpeg filter_complex graph (video-only).
 
@@ -379,6 +381,19 @@ def build_filter_graph(
     )
 
     current = "[cv0]"
+
+    # Zoom actors — Ken-Burns crop+scale chain, time-varying. Inserted
+    # before colour grading so the grade operates on the cropped pixels
+    # the user actually sees (matches preview's order in
+    # project_player._render_frame_at).
+    if zoom_actors and zoom_frame_size is not None:
+        from app.video_editor_window import build_zoom_ffmpeg_filter
+        zw, zh = zoom_frame_size
+        z_expr = build_zoom_ffmpeg_filter(zoom_actors, segments, zw, zh)
+        if z_expr:
+            label = "[cvz]"
+            parts.append(f"{current}{z_expr}{label}")
+            current = label
 
     # Color grading — applied to the concatenated stream before any
     # overlay so strokes/typo/subs remain at their authored colors.
@@ -472,6 +487,7 @@ class VideoExportThread(QThread):
         quality_id: str = DEFAULT_QUALITY_ID,
         format_id: str = DEFAULT_FORMAT_ID,
         color_grade=None,
+        zoom_actors: list | None = None,
     ) -> None:
         super().__init__()
         self._source = Path(source_path)
@@ -488,6 +504,7 @@ class VideoExportThread(QThread):
         self._quality = get_quality_preset(quality_id)
         self._format = get_export_format(format_id)
         self._color_grade = color_grade        # ColorGrade or None
+        self._zoom_actors = list(zoom_actors) if zoom_actors else []
         self._temp_pngs: list[str] = []
         self._temp_movs: list[str] = []
         self._temp_output: str | None = None
@@ -544,7 +561,7 @@ class VideoExportThread(QThread):
             else:
                 t_end_mapped = _map_source_to_output(end_ms, self._segments)
                 t_end = t_end_mapped if t_end_mapped >= 0 else total_out_s
-            fd, png_path = tempfile.mkstemp(suffix=".png", prefix="bitdam_stroke_")
+            fd, png_path = tempfile.mkstemp(suffix=".png", prefix="tigercapture_stroke_")
             os.close(fd)
             ok = render_strokes_to_png(
                 group_strokes, src_w, src_h, png_path, width_scale=width_scale
@@ -570,7 +587,7 @@ class VideoExportThread(QThread):
                 if t_start < 0:
                     t_start = 0.0
                 fd, png_path = tempfile.mkstemp(
-                    suffix=".png", prefix="bitdam_bubble_"
+                    suffix=".png", prefix="tigercapture_bubble_"
                 )
                 os.close(fd)
                 ok = render_bubble_to_png(bubble, src_w, src_h, png_path)
@@ -607,7 +624,7 @@ class VideoExportThread(QThread):
                     )
                     t_end = t_end_mapped if t_end_mapped >= 0 else total_out_s
                 fd, png_path = tempfile.mkstemp(
-                    suffix=".png", prefix="bitdam_sticker_"
+                    suffix=".png", prefix="tigercapture_sticker_"
                 )
                 os.close(fd)
                 ok = render_sticker_to_png(sticker, src_w, src_h, png_path)
@@ -652,7 +669,7 @@ class VideoExportThread(QThread):
                 continue
 
             fd, mov_path = tempfile.mkstemp(
-                suffix=".mov", prefix="bitdam_typo_",
+                suffix=".mov", prefix="tigercapture_typo_",
             )
             os.close(fd)
             ok = render_clip_to_mov(clip, Path(mov_path), src_w, src_h, fps=fps)
@@ -695,6 +712,8 @@ class VideoExportThread(QThread):
                 fade_segments=self._fade_segments,
                 typo_overlays=typo_overlays,
                 color_grade=self._color_grade,
+                zoom_actors=self._zoom_actors,
+                zoom_frame_size=(src_w, src_h),
             )
             total_output_ms = int(
                 sum((e - s) / sp for (s, e, sp) in self._segments) + 0.5
@@ -725,7 +744,7 @@ class VideoExportThread(QThread):
             #      error instead of a corrupted FFmpeg run.
             fd, temp_path = tempfile.mkstemp(
                 suffix=self._out.suffix or ".mp4",
-                prefix=f"bitdam_export_{self._out.stem}_",
+                prefix=f"tigercapture_export_{self._out.stem}_",
                 dir=str(self._out.parent),
             )
             os.close(fd)

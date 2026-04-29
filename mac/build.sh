@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# Bitdam macOS build script.
+# TigerCapture macOS build script.
 #
 # Usage (from repo root):
-#   ./mac/build.sh                  # build Bitdam.app only
-#   ./mac/build.sh --dmg            # also build Bitdam-<ver>.dmg
+#   ./mac/build.sh                  # build TigerCapture.app only
+#   ./mac/build.sh --dmg            # also build TigerCapture-<ver>.dmg
 #   ./mac/build.sh --clean          # remove dist/ and build/ first
 #   ./mac/build.sh --clean --dmg    # combine
 #
@@ -25,7 +25,7 @@ cd "$REPO_ROOT"
 # Version string for the .dmg filename + window title. CI overrides
 # this via env var (e.g. from the pushed tag); local builds default to
 # the current Windows release number.
-VERSION="${BITDAM_VERSION:-1.4.0}"
+VERSION="${TIGERCAPTURE_VERSION:-1.4.0}"
 
 DO_DMG=0
 DO_CLEAN=0
@@ -51,13 +51,13 @@ if (( DO_CLEAN )); then
     rm -rf "$REPO_ROOT/dist" "$REPO_ROOT/build"
 fi
 
-echo "[icns] regenerating mac/resources/bitdam.icns"
+echo "[icns] regenerating mac/resources/tigercapture.icns"
 "$PYTHON" "$REPO_ROOT/mac/make_icns.py"
 
-echo "[pyinstaller] building Bitdam.app"
-"$PYTHON" -m PyInstaller --noconfirm "$REPO_ROOT/mac/Bitdam-mac.spec"
+echo "[pyinstaller] building TigerCapture.app"
+"$PYTHON" -m PyInstaller --noconfirm "$REPO_ROOT/mac/TigerCapture-mac.spec"
 
-APP="$REPO_ROOT/dist/Bitdam.app"
+APP="$REPO_ROOT/dist/TigerCapture.app"
 if [[ ! -d "$APP" ]]; then
     echo "error: $APP was not produced by PyInstaller" >&2
     exit 1
@@ -81,13 +81,13 @@ codesign --verify --deep --strict --verbose=2 "$APP" || {
 }
 
 if (( DO_DMG )); then
-    DMG_OUT="$REPO_ROOT/dist/Bitdam-${VERSION}-mac.dmg"
+    DMG_OUT="$REPO_ROOT/dist/TigerCapture-${VERSION}-mac.dmg"
     echo "[dmg] building $(basename "$DMG_OUT")"
     rm -f "$DMG_OUT"
     "$PYTHON" -m dmgbuild \
         -s "$REPO_ROOT/mac/dmg_settings.py" \
         -D app="$APP" \
-        "Bitdam ${VERSION}" \
+        "TigerCapture ${VERSION}" \
         "$DMG_OUT"
     echo "[dmg] OK: $DMG_OUT"
 fi
