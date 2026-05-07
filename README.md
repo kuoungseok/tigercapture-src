@@ -98,14 +98,14 @@ Multi-track timeline with a professional editing workflow:
 
 ## Installation
 
-Download the latest release from [Releases](../../releases) and extract `TigerCapture-vX.X.X-windows.zip`. Run `TigerCapture.exe` — no installation required.
+Download the latest release from [Releases](https://github.com/kuoungseok/tigercapture/releases) and extract `TigerCapture-vX.X.X-windows.zip`. Run `TigerCapture.exe` — no installation required.
 
 ---
 
 ## Building from source
 
 ```bash
-git clone https://github.com/kuoungseok/tigercapture
+git clone https://github.com/kuoungseok/tigercapture.git
 cd tigercapture
 python -m venv .venv
 .venv\Scripts\activate
