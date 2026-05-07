@@ -4,7 +4,6 @@ from PySide6.QtWidgets import (
     QButtonGroup,
     QCheckBox,
     QComboBox,
-    QFrame,
     QHBoxLayout,
     QLabel,
     QMainWindow,
@@ -18,8 +17,6 @@ from app.modes import MODE_ICONS, CaptureMode, mode_label
 from app.paths import default_save_dir, open_in_explorer
 from app.shortcuts import DEFAULT_SHORTCUTS
 from app.style import APP_QSS
-from app.widgets.recent_strip import RecentStrip
-
 
 DELAY_SECONDS = [0, 3, 5, 10]
 
@@ -40,7 +37,11 @@ class MainWindow(QMainWindow):
     def __init__(self) -> None:
         super().__init__()
         self.setWindowTitle(tr("app.name"))
-        self.resize(520, 540)
+        # Compact capture-tool look (ShareX / ScreenToGif vibe). The
+        # Pro Editor section + drop-area features mean we still need
+        # decent width, but height stays tight since everything not
+        # capture-related is collapsed by default.
+        self.resize(380, 300)
         self.setStyleSheet(APP_QSS)
         # Drop audio files anywhere on the main window → open Sound Editor.
         self.setAcceptDrops(True)
@@ -54,16 +55,15 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(central)
 
         root = QVBoxLayout(central)
-        root.setContentsMargins(24, 20, 24, 24)
-        root.setSpacing(16)
+        root.setContentsMargins(14, 12, 14, 14)
+        root.setSpacing(10)
 
         root.addWidget(self._build_top_bar())
         root.addWidget(self._build_new_capture_button())
         root.addWidget(self._build_mode_section())
         root.addWidget(self._build_options_section())
         root.addWidget(self._build_pro_editor_section())
-        root.addWidget(self._build_divider())
-        root.addWidget(self._build_recent_section(), stretch=1)
+        root.addStretch(1)
         root.addWidget(self._build_credit_footer())
 
         self._install_shortcuts()
@@ -141,7 +141,7 @@ class MainWindow(QMainWindow):
         self.new_capture_btn = QPushButton(tr("main.new_capture"))
         self.new_capture_btn.setObjectName("NewCaptureButton")
         self.new_capture_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.new_capture_btn.setMinimumHeight(48)
+        self.new_capture_btn.setMinimumHeight(38)
         self.new_capture_btn.clicked.connect(self._on_new_capture_clicked)
 
         layout.addWidget(self.new_capture_btn, stretch=1)
@@ -151,7 +151,7 @@ class MainWindow(QMainWindow):
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(4)
 
         self._mode_section_label = QLabel(tr("main.section.mode"))
         self._mode_section_label.setObjectName("SectionLabel")
@@ -160,7 +160,7 @@ class MainWindow(QMainWindow):
         buttons_row = QWidget()
         row_layout = QHBoxLayout(buttons_row)
         row_layout.setContentsMargins(0, 0, 0, 0)
-        row_layout.setSpacing(8)
+        row_layout.setSpacing(6)
 
         self._mode_group = QButtonGroup(self)
         self._mode_group.setExclusive(True)
@@ -171,7 +171,7 @@ class MainWindow(QMainWindow):
             btn.setCheckable(True)
             btn.setProperty("modeButton", True)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setMinimumHeight(40)
+            btn.setMinimumHeight(32)
             if mode is self._current_mode:
                 btn.setChecked(True)
             btn.clicked.connect(lambda _checked, m=mode: self._on_mode_selected(m))
@@ -194,7 +194,7 @@ class MainWindow(QMainWindow):
         container = QWidget()
         layout = QHBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(16)
+        layout.setSpacing(10)
 
         self.delay_combo = QComboBox()
         for seconds in DELAY_SECONDS:
@@ -218,23 +218,49 @@ class MainWindow(QMainWindow):
         return container
 
     def _build_pro_editor_section(self) -> QWidget:
+        """Collapsible Pro Editor section. Starts collapsed so the
+        first dialog stays focused on capture-related controls.
+        Click the toggle header to expand the Media Editor + Sound
+        Editor buttons. Power users still have one click to the
+        editors after the first expansion (the toggle state isn't
+        persisted yet — that's a settings follow-up)."""
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
+        layout.setSpacing(4)
 
-        self._pro_editor_section_label = QLabel(tr("main.section.pro_editor"))
-        self._pro_editor_section_label.setObjectName("SectionLabel")
-        layout.addWidget(self._pro_editor_section_label)
+        self._pro_editor_section_label = tr("main.section.pro_editor")
+        self._pro_editor_toggle = QPushButton(
+            f"▶  {self._pro_editor_section_label}"
+        )
+        self._pro_editor_toggle.setObjectName("CollapsibleHeader")
+        self._pro_editor_toggle.setCheckable(True)
+        self._pro_editor_toggle.setChecked(False)
+        self._pro_editor_toggle.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._pro_editor_toggle.setStyleSheet(
+            "QPushButton#CollapsibleHeader { "
+            "  text-align: left; padding: 6px 8px; "
+            "  background: transparent; border: none; "
+            "  color: #b0b0b0; font-size: 12px; font-weight: 600; "
+            "  letter-spacing: 0.5px; }"
+            "QPushButton#CollapsibleHeader:hover { color: #ffffff; }"
+        )
+        self._pro_editor_toggle.toggled.connect(self._on_pro_editor_toggled)
+        layout.addWidget(self._pro_editor_toggle)
+
+        self._pro_editor_content = QWidget()
+        pe_layout = QVBoxLayout(self._pro_editor_content)
+        pe_layout.setContentsMargins(0, 0, 0, 0)
+        pe_layout.setSpacing(6)
 
         self.pro_editor_btn = QPushButton(tr("main.pro_editor.button"))
         self.pro_editor_btn.setObjectName("ProEditorButton")
         self.pro_editor_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.pro_editor_btn.setMinimumHeight(46)
+        self.pro_editor_btn.setMinimumHeight(34)
         self.pro_editor_btn.clicked.connect(
             lambda: self.open_video_editor_requested.emit(None)
         )
-        layout.addWidget(self.pro_editor_btn)
+        pe_layout.addWidget(self.pro_editor_btn)
 
         # Sound Editor: standalone entry point to the per-clip sound
         # editor (EQ / Dynamics / AI Master / Export to FLAC-ALAC-MP3-
@@ -242,36 +268,23 @@ class MainWindow(QMainWindow):
         self.sound_editor_btn = QPushButton(tr("main.sound_editor.button"))
         self.sound_editor_btn.setObjectName("SoundEditorButton")
         self.sound_editor_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.sound_editor_btn.setMinimumHeight(46)
+        self.sound_editor_btn.setMinimumHeight(34)
         self.sound_editor_btn.setToolTip(tr("main.sound_editor.tooltip"))
         self.sound_editor_btn.clicked.connect(
             lambda: self.open_sound_editor_requested.emit(None)
         )
-        layout.addWidget(self.sound_editor_btn)
+        pe_layout.addWidget(self.sound_editor_btn)
 
+        self._pro_editor_content.hide()  # start collapsed
+        layout.addWidget(self._pro_editor_content)
         return container
 
-    def _build_divider(self) -> QFrame:
-        line = QFrame()
-        line.setObjectName("Divider")
-        line.setFrameShape(QFrame.Shape.HLine)
-        return line
-
-    def _build_recent_section(self) -> QWidget:
-        container = QWidget()
-        layout = QVBoxLayout(container)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(8)
-
-        self._recent_section_label = QLabel(tr("main.section.recent"))
-        self._recent_section_label.setObjectName("SectionLabel")
-        layout.addWidget(self._recent_section_label)
-
-        self.recent_strip = RecentStrip()
-        self.recent_strip.item_activated.connect(self._on_recent_activated)
-        layout.addWidget(self.recent_strip)
-
-        return container
+    def _on_pro_editor_toggled(self, checked: bool) -> None:
+        self._pro_editor_content.setVisible(checked)
+        arrow = "▼" if checked else "▶"
+        self._pro_editor_toggle.setText(
+            f"{arrow}  {self._pro_editor_section_label}"
+        )
 
     def retranslate(self) -> None:
         """Reapply all translated strings without recreating the window."""
@@ -282,13 +295,16 @@ class MainWindow(QMainWindow):
         self.settings_btn.setToolTip(tr("main.tooltip.settings"))
         self.donate_btn.setToolTip(tr("main.tooltip.donate"))
         self.donate_btn.setText(tr("main.donate.button"))
-        self._pro_editor_section_label.setText(tr("main.section.pro_editor"))
+        self._pro_editor_section_label = tr("main.section.pro_editor")
+        arrow = "▼" if self._pro_editor_toggle.isChecked() else "▶"
+        self._pro_editor_toggle.setText(
+            f"{arrow}  {self._pro_editor_section_label}"
+        )
         self.pro_editor_btn.setText(tr("main.pro_editor.button"))
         self.sound_editor_btn.setText(tr("main.sound_editor.button"))
         self.sound_editor_btn.setToolTip(tr("main.sound_editor.tooltip"))
         self.new_capture_btn.setText(tr("main.new_capture"))
         self._mode_section_label.setText(tr("main.section.mode"))
-        self._recent_section_label.setText(tr("main.section.recent"))
         self._timer_label.setText(tr("main.option.timer"))
         self.cursor_check.setText(tr("main.option.include_cursor"))
 
@@ -303,17 +319,10 @@ class MainWindow(QMainWindow):
             )
             self.delay_combo.setItemText(i, label)
 
-        self.refresh_recent()
-
-    def _on_recent_activated(self, path) -> None:
-        open_in_explorer(path)
-
     def refresh_recent(self) -> None:
-        self.recent_strip.refresh(default_save_dir())
-
-    def showEvent(self, event) -> None:
-        super().showEvent(event)
-        self.refresh_recent()
+        # Recent Captures strip was removed — kept as a no-op so any
+        # external caller (controller) doesn't break.
+        return
 
     def _on_mode_selected(self, mode: CaptureMode) -> None:
         self._current_mode = mode

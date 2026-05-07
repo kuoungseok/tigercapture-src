@@ -103,9 +103,45 @@ class ExportFormat:
     audio_bitrate: str       # "192k", "128k"
     feature_id: str          # tier-gating key
 
-    def build_video_args(self, q: QualityPreset) -> list[str]:
+    def build_video_args(
+        self, q: QualityPreset, *, hdr_passthrough: bool = False,
+    ) -> list[str]:
         """ffmpeg ``-c:v ...`` segment for this format paired with the
-        given quality preset."""
+        given quality preset.
+
+        ``hdr_passthrough=True`` switches to libx265 + 10-bit + BT.2020
+        PQ metadata so an HDR source survives encoding intact. The
+        existing libx264 / libvpx-vp9 8-bit path is the default and
+        kept byte-equivalent. The ``mov``/``mp4`` containers happily
+        carry HEVC; ``.webm`` doesn't, so this branch ignores the
+        format codec choice and forces libx265 (the export dialog
+        offers passthrough only for HEVC-friendly containers).
+        """
+        if hdr_passthrough:
+            # ``-tag:v hvc1`` is what Apple Quicktime / iOS need to
+            # play HEVC out of an .mp4 / .mov container; any other
+            # tag (e.g. hev1) won't open on macOS Preview.
+            # ``hdr-opt=1:repeat-headers=1`` makes every IDR carry
+            # the colorimetry so any cut later still plays as HDR.
+            x265_params = (
+                "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:"
+                "hdr-opt=1:repeat-headers=1"
+            )
+            return [
+                "-c:v", "libx265",
+                "-preset", q.ffmpeg_preset,
+                "-crf", str(q.crf),
+                "-pix_fmt", "yuv420p10le",
+                "-tag:v", "hvc1",
+                "-x265-params", x265_params,
+                # Container-level colour metadata so a player that
+                # doesn't parse x265-params (e.g. some browsers) still
+                # honours HDR.
+                "-color_primaries", "bt2020",
+                "-color_trc", "smpte2084",
+                "-colorspace", "bt2020nc",
+                "-color_range", "tv",
+            ]
         if self.video_codec == "libx264":
             return [
                 "-c:v", "libx264",
@@ -188,6 +224,11 @@ def build_segments(
     Returns a list of ``(start_ms, end_ms, speed)`` tuples in play-order,
     with cuts removed and speed segments applied. The resulting total
     output length (real time) = sum of (end-start)/speed for each piece.
+
+    Phase 1.5e: this is the legacy entry point. New code should call
+    ``build_segments_from_clips`` so user-driven splits + clip drags
+    show up in the export. Kept here so callers that haven't migrated
+    yet keep working.
     """
     if duration_ms <= 0:
         return []
@@ -227,6 +268,65 @@ def build_segments(
     ranges = [(s, e, sp) for (s, e, sp) in ranges if e > s]
     ranges.sort(key=lambda r: r[0])
     return ranges
+
+
+def build_segments_from_clips(
+    clips: list,
+    speed_segments: list,
+) -> list[tuple[int, int, float]]:
+    """Phase 1.5e: derive the export-time segment list from a track's
+    ``clips`` field (Phase 1.5d's stored ``list[VideoClip]``).
+
+    Walks ``clips`` in their *project-time* order (i.e. sorted by
+    ``timeline_in_ms``) and emits ``(source_in_ms, source_out_ms, 1.0)``
+    for each. Then folds in ``speed_segments`` the same way the legacy
+    ``build_segments`` did, so existing speed UX keeps working.
+
+    Source-time gaps (from cuts within a clip's source) are already
+    encoded by each clip's ``[source_in_ms, source_out_ms)`` window —
+    no separate cuts list needed. Project-time gaps between clips
+    (from a user dragging halves apart after a split) are *not* emitted
+    as black-frame holes; the legacy concat-back-to-back behaviour is
+    preserved. A future Phase 1.5f could synthesise blank ranges to
+    bake project gaps into the output, but DaVinci-style "compact
+    export" is the more common expectation.
+
+    Returns segments in ``source-ms`` (not project-ms) so the existing
+    ``build_filter_graph`` / ``[0:v]trim=...`` path keeps working with
+    the single source video at index 0.
+    """
+    if not clips:
+        return []
+    ranges: list[tuple[int, int, float]] = []
+    # Sort clips by project-time so the output plays them in user-
+    # arranged order. Sorting source-ms would be wrong if the user
+    # rearranged clips (Phase 1.5d Step B drag).
+    sorted_clips = sorted(clips, key=lambda c: c.timeline_in_ms)
+    for clip in sorted_clips:
+        s = int(clip.source_in_ms)
+        e = int(clip.effective_source_out_ms)
+        if e > s:
+            ranges.append((s, e, 1.0))
+
+    # Speed segments still apply per source-ms (single-source today).
+    # Phase 1.5e doesn't ship per-clip speed yet; speed is treated as
+    # a global track-level property and folded in here.
+    for seg in speed_segments or []:
+        new_ranges: list[tuple[int, int, float]] = []
+        for s, e, sp in ranges:
+            if e <= seg.start_ms or s >= seg.end_ms:
+                new_ranges.append((s, e, sp))
+                continue
+            if s < seg.start_ms:
+                new_ranges.append((s, seg.start_ms, sp))
+            ovl_s = max(s, seg.start_ms)
+            ovl_e = min(e, seg.end_ms)
+            new_ranges.append((ovl_s, ovl_e, seg.speed))
+            if e > seg.end_ms:
+                new_ranges.append((seg.end_ms, e, sp))
+        ranges = new_ranges
+
+    return [(s, e, sp) for (s, e, sp) in ranges if e > s]
 
 
 def compute_fade_filter_chain(
@@ -345,6 +445,8 @@ def build_filter_graph(
     color_grade=None,
     zoom_actors: list | None = None,
     zoom_frame_size: tuple[int, int] | None = None,
+    hdr_info=None,
+    hdr_passthrough: bool = False,
 ) -> str:
     """Build an FFmpeg filter_complex graph (video-only).
 
@@ -361,6 +463,14 @@ def build_filter_graph(
     When provided (and non-identity), an ``eq + colorbalance`` filter is
     inserted right after the source concat so the grade applies under
     every overlay (strokes, typography, subtitles all stay un-graded).
+
+    HDR Phase 2: ``hdr_info`` (``app.hdr_probe.HDRInfo`` or None). When
+    the source is HDR (PQ/HLG), a ``zscale + tonemap=hable`` chain is
+    inserted right after concat so the exported file matches what the
+    user sees in the preview (Phase 1 already tone-maps the preview).
+    Phase 2b will add a real HDR10 / HLG passthrough path; until then
+    SDR output is the sane default for the existing libx264 / yuv420p
+    encoder targets.
     """
     if not segments:
         return ""
@@ -381,6 +491,29 @@ def build_filter_graph(
     )
 
     current = "[cv0]"
+
+    # HDR Phase 2: tonemap PQ/HLG → Rec.709 SDR before any other
+    # filter, UNLESS Phase 2b passthrough is on. ``yuv420p`` at the
+    # tail keeps the chain encoder-ready for libx264 / libvpx-vp9 /
+    # libaom-av1 without needing extra ``-pix_fmt`` flags downstream.
+    is_hdr_source = hdr_info is not None and getattr(hdr_info, "is_hdr", False)
+    if is_hdr_source and not hdr_passthrough:
+        tonemap = (
+            "zscale=t=linear:npl=100,format=gbrpf32le,"
+            "zscale=p=bt709,tonemap=hable,"
+            "zscale=t=bt709:m=bt709:r=tv,format=yuv420p"
+        )
+        label = "[cvtm]"
+        parts.append(f"{current}{tonemap}{label}")
+        current = label
+    elif is_hdr_source and hdr_passthrough:
+        # HDR Phase 2b: force the chain to 10-bit BT.2020 PQ output
+        # so the encoder gets the bit depth + colorimetry it expects.
+        # Most ffmpeg builds decode HDR sources as ``yuv420p10le``
+        # natively, but a ``format=`` filter pins it explicitly.
+        label = "[cvhdr]"
+        parts.append(f"{current}format=yuv420p10le{label}")
+        current = label
 
     # Zoom actors — Ken-Burns crop+scale chain, time-varying. Inserted
     # before colour grading so the grade operates on the cropped pixels
@@ -488,6 +621,11 @@ class VideoExportThread(QThread):
         format_id: str = DEFAULT_FORMAT_ID,
         color_grade=None,
         zoom_actors: list | None = None,
+        hdr_info=None,
+        hdr_passthrough: bool = False,
+        target_width: "int | None" = None,
+        target_height: "int | None" = None,
+        target_fps: "float | None" = None,
     ) -> None:
         super().__init__()
         self._source = Path(source_path)
@@ -505,6 +643,22 @@ class VideoExportThread(QThread):
         self._format = get_export_format(format_id)
         self._color_grade = color_grade        # ColorGrade or None
         self._zoom_actors = list(zoom_actors) if zoom_actors else []
+        # HDR Phase 2: when set, ``build_filter_graph`` prepends a
+        # tonemap chain to convert PQ/HLG → SDR Rec.709. Same operator
+        # the preview uses (Phase 1) so what the user sees IS what
+        # they get in the exported file.
+        self._hdr_info = hdr_info
+        # HDR Phase 2b: ``True`` overrides the SDR tonemap and routes
+        # the chain to a 10-bit libx265 + bt2020 PQ encoder so HDR
+        # survives intact. Editor sets this from the export-time
+        # "HDR passthrough" dialog when the source is HDR.
+        self._hdr_passthrough = bool(hdr_passthrough) and (
+            hdr_info is not None and getattr(hdr_info, "is_hdr", False)
+        )
+        # Resolution / FPS presets — None means "use source value".
+        self._target_width: int | None = int(target_width) if target_width else None
+        self._target_height: int | None = int(target_height) if target_height else None
+        self._target_fps: float | None = float(target_fps) if target_fps else None
         self._temp_pngs: list[str] = []
         self._temp_movs: list[str] = []
         self._temp_output: str | None = None
@@ -714,6 +868,8 @@ class VideoExportThread(QThread):
                 color_grade=self._color_grade,
                 zoom_actors=self._zoom_actors,
                 zoom_frame_size=(src_w, src_h),
+                hdr_info=self._hdr_info,
+                hdr_passthrough=self._hdr_passthrough,
             )
             total_output_ms = int(
                 sum((e - s) / sp for (s, e, sp) in self._segments) + 0.5
@@ -762,7 +918,9 @@ class VideoExportThread(QThread):
                 "-filter_complex", graph,
                 "-map", "[outv]",
             ])
-            cmd.extend(self._format.build_video_args(self._quality))
+            cmd.extend(self._format.build_video_args(
+                self._quality, hdr_passthrough=self._hdr_passthrough,
+            ))
             if audio_count > 0:
                 # External audio tracks supplant the source video's
                 # audio — the original soundtrack is dropped so the
@@ -777,6 +935,17 @@ class VideoExportThread(QThread):
                 # don't fail the mux.
                 cmd.extend(["-map", "0:a?"])
                 cmd.extend(self._format.build_audio_args())
+            # Resolution preset: scale + letterbox/pillarbox padding.
+            if self._target_width and self._target_height:
+                tw, th = self._target_width, self._target_height
+                scale_filter = (
+                    f"scale={tw}:{th}:force_original_aspect_ratio=decrease,"
+                    f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2"
+                )
+                cmd.extend(["-vf", scale_filter])
+            # FPS preset.
+            if self._target_fps:
+                cmd.extend(["-r", f"{self._target_fps:.3f}"])
             cmd.extend([
                 "-t", f"{total_output_s:.3f}",
                 "-progress", "pipe:2",

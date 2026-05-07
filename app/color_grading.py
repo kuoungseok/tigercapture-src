@@ -118,6 +118,30 @@ class ColorGrade:
             "preset_id": self.preset_id,
         }
 
+    @classmethod
+    def from_dict(cls, d: dict[str, Any]) -> "ColorGrade":
+        """Round-trip restore from to_dict — used for per-node grade
+        persistence in node_graph_view_data."""
+        g = cls()
+        for k in (
+            "brightness", "contrast", "saturation",
+            "shadows_x", "shadows_y", "midtones_x", "midtones_y",
+            "highlights_x", "highlights_y", "offset_x", "offset_y",
+            "shadows_l", "midtones_l", "highlights_l", "offset_l",
+        ):
+            if k in d:
+                setattr(g, k, int(d[k]))
+        if "hue_vs_hue" in d:
+            try:
+                g.hue_vs_hue = [
+                    (float(h), float(v)) for h, v in d["hue_vs_hue"]
+                ]
+            except Exception:
+                g.hue_vs_hue = []
+        if "preset_id" in d:
+            g.preset_id = str(d["preset_id"])
+        return g
+
     def reset(self) -> None:
         self.brightness = 0
         self.contrast = 0
@@ -319,14 +343,18 @@ def apply_to_rgb(rgb, grade: ColorGrade):
         f[..., 1] = f[..., 1] + odG
         f[..., 2] = f[..., 2] + odB
 
-    # ---- 3-way wheel shifts (S / M / H) ----
+    # ---- 3-way wheel shifts (S / M / H) + per-region luma sliders ----
     has_wheels = (
         grade.shadows_x != 0 or grade.shadows_y != 0
         or grade.midtones_x != 0 or grade.midtones_y != 0
         or grade.highlights_x != 0 or grade.highlights_y != 0
     )
-    if has_wheels:
-        # Rec. 709 luma — used both for the saturation centre and for
+    has_luma = (
+        grade.shadows_l != 0 or grade.midtones_l != 0
+        or grade.highlights_l != 0
+    )
+    if has_wheels or has_luma:
+        # Rec. 709 luma — used for both the saturation centre and
         # the per-pixel region masks below.
         lum = (0.2126 * f[..., 0]
                + 0.7152 * f[..., 1]
@@ -337,7 +365,7 @@ def apply_to_rgb(rgb, grade: ColorGrade):
         s_mask = np.clip(1.0 - 2.0 * lum, 0.0, 1.0)
         h_mask = np.clip(2.0 * lum - 1.0, 0.0, 1.0)
         m_mask = 1.0 - s_mask - h_mask
-        # Apply each wheel — broadcast (H, W, 1) mask × (3,) offset.
+        # Chromaticity offsets — wheel ``(x, y)`` → RGB triplet.
         for mask, (wx, wy) in (
             (s_mask, (grade.shadows_x, grade.shadows_y)),
             (m_mask, (grade.midtones_x, grade.midtones_y)),
@@ -350,6 +378,29 @@ def apply_to_rgb(rgb, grade: ColorGrade):
             f[..., 0] = f[..., 0] + dR * mask3[..., 0]
             f[..., 1] = f[..., 1] + dG * mask3[..., 0]
             f[..., 2] = f[..., 2] + dB * mask3[..., 0]
+        # Per-region luma — DaVinci's "lift / gamma / gain" knobs.
+        # ``LUMA_AMP`` caps full-strength (±100) at ±0.30 in 0..1
+        # space so the slider remains useful at full extent without
+        # clipping the image immediately.
+        LUMA_AMP = 0.30
+        for mask, lv in (
+            (s_mask, grade.shadows_l),
+            (m_mask, grade.midtones_l),
+            (h_mask, grade.highlights_l),
+        ):
+            if lv == 0:
+                continue
+            shift = (lv / 100.0) * LUMA_AMP
+            f[..., 0] = f[..., 0] + shift * mask
+            f[..., 1] = f[..., 1] + shift * mask
+            f[..., 2] = f[..., 2] + shift * mask
+
+    # ---- Offset luma (uniform brightness shift) ----
+    if grade.offset_l != 0:
+        # Same amplitude scale as the per-region sliders, but
+        # uniformly applied — the offset luma equivalent of the
+        # offset wheel for chroma.
+        f = f + (grade.offset_l / 100.0) * 0.30
 
     # ---- saturation (toward luminance) ----
     if grade.saturation != 0:

@@ -170,6 +170,17 @@ class DrawingCanvas(QWidget):
         self._pen_opacity: int = 255
         self._pen_width: float = 4.0
         self._current_points: list[QPointF] = []  # while drawing (widget px)
+        # Phase E — node-mask polygon editor hook. The editor sets
+        # this to a callable when it wants to capture clicks for a
+        # Power Window polygon. Returns True if the click was
+        # consumed; False lets the regular pen/eraser path run.
+        self._click_hook: Callable[[float, float, str], bool] | None = None
+        # Stage 1 rotoscope — rectangle drag for GrabCut. When set,
+        # mousePress starts a rect, mouseMove updates it, mouseRelease
+        # emits final ``(nx, ny, nw, nh)`` to the hook.
+        self._rect_hook: Callable[[float, float, float, float], None] | None = None
+        self._rect_drag_start: QPointF | None = None
+        self._rect_drag_current: QPointF | None = None
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -230,6 +241,49 @@ class DrawingCanvas(QWidget):
             else:
                 painter.drawPolyline(self._current_points)
 
+        # Stage 1 rotoscope — dashed Tiger Orange rectangle while
+        # the user is dragging out a GrabCut bounding box.
+        if (self._rect_hook is not None
+                and self._rect_drag_start is not None
+                and self._rect_drag_current is not None):
+            painter.save()
+            from PySide6.QtCore import QRectF
+            x1 = self._rect_drag_start.x()
+            y1 = self._rect_drag_start.y()
+            x2 = self._rect_drag_current.x()
+            y2 = self._rect_drag_current.y()
+            rect = QRectF(min(x1, x2), min(y1, y2),
+                          abs(x2 - x1), abs(y2 - y1))
+            pen = QPen(QColor("#D85A30"), 2)
+            pen.setStyle(Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+            painter.setBrush(QColor(216, 90, 48, 40))
+            painter.drawRect(rect)
+            painter.restore()
+
+        # Phase E — Power Window polygon overlay. The editor stashes
+        # the active mask on this widget while in polygon-edit mode.
+        pw = getattr(self, "_power_window_preview", None)
+        if pw is not None and pw.points:
+            painter.save()
+            pts = [QPointF(x * w, y * h) for x, y in pw.points]
+            # Tiger Orange polygon line + small handles per point.
+            from PySide6.QtGui import QPolygonF
+            outline_pen = QPen(QColor("#D85A30"), 2)
+            outline_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            outline_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            painter.setPen(outline_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            if len(pts) >= 3:
+                painter.drawPolygon(QPolygonF(pts))
+            elif len(pts) == 2:
+                painter.drawLine(pts[0], pts[1])
+            for p in pts:
+                painter.setBrush(QColor("#ffffff"))
+                painter.setPen(QPen(QColor("#D85A30"), 2))
+                painter.drawEllipse(p, 4, 4)
+            painter.restore()
+
     @staticmethod
     def _paint_stroke(painter: QPainter, stroke: Stroke, w: int, h: int) -> None:
         color = QColor(*stroke.color)
@@ -250,13 +304,71 @@ class DrawingCanvas(QWidget):
         if event.button() != Qt.MouseButton.LeftButton:
             return
         pos = event.position()
+        # Stage 1 rotoscope — rectangle drag for GrabCut takes
+        # precedence over polygon / pen / eraser.
+        if self._rect_hook is not None:
+            self._rect_drag_start = QPointF(pos)
+            self._rect_drag_current = QPointF(pos)
+            self.update()
+            return
+        # Phase E — Power Window polygon editor takes precedence over
+        # pen/eraser when the editor has installed a click hook.
+        if self._click_hook is not None:
+            w = max(1, self.width())
+            h = max(1, self.height())
+            try:
+                consumed = self._click_hook(pos.x() / w, pos.y() / h, "click")
+            except Exception:
+                consumed = False
+            if consumed:
+                self.update()
+                return
         if self._tool == "pen":
             self._current_points = [QPointF(pos)]
             self.update()
         elif self._tool == "eraser":
             self._try_erase_at(pos.x(), pos.y())
 
+    def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if (event.button() == Qt.MouseButton.LeftButton
+                and self._click_hook is not None):
+            pos = event.position()
+            w = max(1, self.width())
+            h = max(1, self.height())
+            try:
+                self._click_hook(pos.x() / w, pos.y() / h, "double")
+            except Exception:
+                pass
+            self.update()
+            return
+        super().mouseDoubleClickEvent(event)
+
+    def set_click_hook(self, hook):
+        """Install / remove the Power Window polygon click hook.
+        ``hook`` is ``Callable[[float, float, str], bool]`` — first
+        two args are normalised [0,1] coordinates, third is "click"
+        or "double". Returns True if the click is consumed."""
+        self._click_hook = hook
+        self.update()
+
+    def set_rect_hook(self, hook):
+        """Install / remove the rotoscope rectangle hook.
+        ``hook`` is ``Callable[[float, float, float, float], None]``
+        — receives ``(nx, ny, nw, nh)`` in normalised [0,1] coords
+        on mouse release. While the hook is active, drag-on-preview
+        starts a rectangle instead of a pen stroke."""
+        self._rect_hook = hook
+        self._rect_drag_start = None
+        self._rect_drag_current = None
+        self.update()
+
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        # Rectangle drag — keep updating the current corner while
+        # the mouse is held.
+        if self._rect_hook is not None and self._rect_drag_start is not None:
+            self._rect_drag_current = QPointF(event.position())
+            self.update()
+            return
         if self._tool != "pen" or not self._current_points:
             return
         pos = event.position()
@@ -268,6 +380,26 @@ class DrawingCanvas(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
+            return
+        # Rectangle drag finished — emit normalised rect to the hook.
+        if (self._rect_hook is not None
+                and self._rect_drag_start is not None
+                and self._rect_drag_current is not None):
+            w = max(1, self.width())
+            h = max(1, self.height())
+            x1, y1 = self._rect_drag_start.x(), self._rect_drag_start.y()
+            x2, y2 = self._rect_drag_current.x(), self._rect_drag_current.y()
+            nx1, ny1 = min(x1, x2) / w, min(y1, y2) / h
+            nx2, ny2 = max(x1, x2) / w, max(y1, y2) / h
+            nw, nh = nx2 - nx1, ny2 - ny1
+            try:
+                if nw > 0.005 and nh > 0.005:
+                    self._rect_hook(nx1, ny1, nw, nh)
+            except Exception:
+                pass
+            self._rect_drag_start = None
+            self._rect_drag_current = None
+            self.update()
             return
         if self._tool != "pen" or not self._current_points:
             return

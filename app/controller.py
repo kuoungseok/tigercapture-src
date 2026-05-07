@@ -425,7 +425,13 @@ class AppController(QObject):
 
         recorder = FrameRecorder(rect, fps, include_cursor=include_cursor)
         recorder.frame_captured.connect(bar.update_progress)
+        # Legacy signal — still wired for the macOS recorder which
+        # buffers a frame list. Windows recorder emits the streamed
+        # signal below instead.
         recorder.finished_recording.connect(self._on_recording_finished)
+        recorder.finished_recording_streamed.connect(
+            self._on_recording_finished_streamed,
+        )
         recorder.error.connect(self._on_recording_error)
         self._recorder = recorder
         recorder.start()
@@ -441,6 +447,106 @@ class AppController(QObject):
     def _cancel_recording(self) -> None:
         self._recording_cancelled = True
         self._stop_recording()
+
+    def _on_recording_finished_streamed(
+        self, temp_mp4: str, actual_fps: int, total_ms: int,
+    ) -> None:
+        """Streaming recorder result: ffmpeg already encoded every
+        frame to ``temp_mp4`` while the capture was running.
+
+        For VIDEO mode we now skip the decode-back path entirely —
+        move the temp .mp4 to the user's save directory and route
+        straight into the Pro video editor (which is file-source
+        based, no frame-list memory peak). GIF mode still decodes
+        back because the GIF editor consumes a frame list.
+        """
+        mode = self._recording_mode
+        cancelled = self._recording_cancelled
+        if cancelled or not temp_mp4:
+            # Recording cancelled or encoder produced nothing —
+            # delete the temp file (if any) and fall through to the
+            # legacy handler with an empty frame list so all the
+            # cleanup (recorder dispose, control bar close, main
+            # window show) happens in one place.
+            if temp_mp4:
+                try:
+                    Path(temp_mp4).unlink()
+                except OSError:
+                    pass
+            self._on_recording_finished([], actual_fps, total_ms)
+            return
+
+        if mode is CaptureMode.VIDEO:
+            saved = self._move_temp_capture_to_save_dir(Path(temp_mp4))
+            if saved is not None:
+                # Tear down recorder UI then open the Pro editor with
+                # the freshly captured file as the initial source.
+                self._teardown_recording_ui()
+                self._recording_mode = None
+                self._recording_cancelled = False
+                self.main_window.show()
+                self._open_video_editor(saved)
+                return
+            # Fallback: move failed, drop through to decode-back
+            # path so the user still gets *some* editor.
+
+        # GIF mode (or VIDEO fallback) — decode the temp .mp4 back
+        # into a PIL frame list.
+        frames: list[Image.Image] = []
+        try:
+            import imageio.v2 as imageio
+            reader = imageio.get_reader(temp_mp4)
+            for arr in reader:
+                frames.append(Image.fromarray(arr))
+            reader.close()
+        except Exception as exc:
+            print(
+                f"[controller] decode of streaming temp mp4 failed: {exc}",
+                file=__import__("sys").stderr, flush=True,
+            )
+        try:
+            Path(temp_mp4).unlink()
+        except OSError:
+            pass
+        self._on_recording_finished(frames, actual_fps, total_ms)
+
+    def _teardown_recording_ui(self) -> None:
+        """Shared cleanup the Pro-editor route uses without going
+        through ``_on_recording_finished``."""
+        if self._recorder is not None:
+            self._recorder.deleteLater()
+            self._recorder = None
+        if self._border_overlay is not None:
+            self._border_overlay.close()
+            self._border_overlay = None
+        if self._control_bar is not None:
+            self._control_bar.close()
+            self._control_bar.deleteLater()
+            self._control_bar = None
+
+    def _move_temp_capture_to_save_dir(self, temp_path: Path) -> Path | None:
+        """Move the streaming temp .mp4 into the default save dir
+        with a timestamped name so it survives the OS temp cleanup
+        and the user can find it again. Returns the new path on
+        success, ``None`` on failure (caller falls back to decode)."""
+        import datetime
+        import shutil
+        save_dir = default_save_dir()
+        ts = datetime.datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        target = save_dir / f"tigercapture-{ts}.mp4"
+        n = 1
+        while target.exists():
+            target = save_dir / f"tigercapture-{ts}-{n}.mp4"
+            n += 1
+        try:
+            shutil.move(str(temp_path), str(target))
+            return target
+        except Exception as exc:
+            print(
+                f"[controller] move of streaming temp mp4 to save dir failed: {exc}",
+                file=__import__("sys").stderr, flush=True,
+            )
+            return None
 
     def _on_recording_finished(
         self, frames: list[Image.Image], actual_fps: int, total_ms: int

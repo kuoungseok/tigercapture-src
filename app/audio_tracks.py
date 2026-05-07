@@ -146,9 +146,18 @@ class AudioClip:
     # Gain factor stacked on top of track.volume (reserved for future
     # per-clip gain control). Kept at 1.0 for now.
     gain: float = 1.0
+    # Volume envelope — list of (time_norm [0,1], volume [0,2]) tuples.
+    # Empty = flat at gain (no automation). Each point maps a normalised
+    # position within the clip to a volume multiplier; values are
+    # linearly interpolated between points.  Exported as an ffmpeg
+    # ``volume`` filter expression.
+    volume_points: list = field(default_factory=list)
     # Waveform peaks, shared with split pieces when they come from
     # the same source. Not in equality; updates asynchronously.
     waveform: "np.ndarray | None" = field(default=None, compare=False, repr=False)
+    # Spectrum bins (64 log-spaced, 20 Hz – 20 kHz). Computed by
+    # SpectrumExtractor in the background alongside waveform extraction.
+    spectrum_bins: "np.ndarray | None" = field(default=None, compare=False, repr=False)
     # Effects state for the sound editor's EQ / Dynamics / Effects /
     # Advanced tabs. See ``default_effects_state()`` for the shape.
     # Kept as a plain dict so presets can be serialized / diffed as
@@ -179,6 +188,8 @@ class AudioTrack:
     id: int
     volume: float = 1.0          # master multiplier, 0.0 – 1.5
     clips: list[AudioClip] = field(default_factory=list)
+    pan: float = 0.0             # stereo pan, -1.0 (L) to +1.0 (R)
+    label: str = ""              # user-visible strip label (empty = auto)
 
     @property
     def is_loaded(self) -> bool:
@@ -245,6 +256,7 @@ def probe_audio_duration_ms(path: Path) -> int:
             [ffmpeg, "-i", str(path)],
             capture_output=True,
             text=True,
+            encoding="utf-8",
             errors="replace",
             creationflags=(
                 0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
@@ -288,17 +300,17 @@ class WaveformExtractor(QThread):
 
             ffmpeg = get_ffmpeg_exe()
             target_sr = 8000
+            # Extract stereo (2 channels).  Emits a shape-(2, N) array
+            # where row 0 = left peaks, row 1 = right peaks.  Mono
+            # sources produce identical rows.  Downstream code checks
+            # for the 2-D shape to decide whether to draw stereo.
             cmd = [
                 ffmpeg,
                 "-nostdin",
                 "-v", "error",
                 "-i", str(self._path),
-                # Explicitly pick the first audio stream. For video
-                # containers (mp4/mov), ``-vn`` alone sometimes leaves
-                # ffmpeg trying to copy subtitle/data streams and fail;
-                # ``-map 0:a:0`` avoids that.
                 "-map", "0:a:0",
-                "-ac", "1",
+                "-ac", "2",          # always 2 ch — mono sources duplicate
                 "-ar", str(target_sr),
                 "-f", "s16le",
                 "-acodec", "pcm_s16le",
@@ -326,20 +338,28 @@ class WaveformExtractor(QThread):
                 )
                 return
 
+            # Interleaved stereo: [L0,R0, L1,R1, ...]
             samples = np.frombuffer(raw, dtype=np.int16)
-            if samples.size == 0:
+            if samples.size < 2:
                 self.failed.emit(self._clip_id, "empty decoded stream")
                 return
 
+            # Separate channels
+            left  = samples[0::2].astype(np.float32)
+            right = samples[1::2].astype(np.float32)
+            n_ch_samples = min(len(left), len(right))
             samples_per_bucket = max(1, target_sr // WAVEFORM_BUCKETS_PER_SEC)
-            n_buckets = samples.size // samples_per_bucket
+            n_buckets = n_ch_samples // samples_per_bucket
             if n_buckets == 0:
                 self.failed.emit(self._clip_id, "audio too short for peaks")
                 return
-            samples = samples[: n_buckets * samples_per_bucket]
-            buckets = samples.reshape(n_buckets, samples_per_bucket)
-            peaks = (np.abs(buckets).max(axis=1).astype(np.float32)) / 32768.0
-            self.ready.emit(self._clip_id, peaks)
+            left  = left [:n_buckets * samples_per_bucket]
+            right = right[:n_buckets * samples_per_bucket]
+            l_peaks = np.abs(left .reshape(n_buckets, samples_per_bucket)).max(axis=1) / 32768.0
+            r_peaks = np.abs(right.reshape(n_buckets, samples_per_bucket)).max(axis=1) / 32768.0
+            # Shape (2, N): row 0 = L, row 1 = R
+            stereo_peaks = np.stack([l_peaks, r_peaks]).astype(np.float32)
+            self.ready.emit(self._clip_id, stereo_peaks)
         except Exception as exc:
             print(
                 f"[waveform] extractor crashed for {self._path.name}: {exc!r}",
@@ -513,6 +533,10 @@ class AudioMixer(QObject):
             if clip is None:
                 continue
             v = self._volume_at(track, clip, self._project_position_ms)
+            # NOTE: Qt QAudioOutput has no per-channel stereo pan API.
+            # Pan is applied correctly via the ffmpeg ``apan`` filter during
+            # export (see build_audio_filter). During preview we only apply
+            # volume; panning is a preview-only limitation of the Qt backend.
             try:
                 output.setVolume(max(0.0, min(1.0, v)))
             except Exception:
@@ -835,10 +859,67 @@ def build_audio_filter(
             parts.append(f"{current}adelay={delay_ms}:all=1{dlabel}")
             current = dlabel
 
+        # Master volume (track × gain)
         if abs(vol - 1.0) > 1e-3:
             vlabel = f"[a{idx}v]"
             parts.append(f"{current}volume={vol:.3f}{vlabel}")
             current = vlabel
+
+        # Stereo pan — apan filter maps mono/stereo → stereo with L/R gain.
+        # pan=0 → left=1, right=1 (centre); pan=-1 → full left; pan=+1 → full right.
+        # Formula: left_gain  = max(0, 1 - pan)
+        #          right_gain = max(0, 1 + pan)
+        track_pan = float(getattr(track, "pan", 0.0))
+        if abs(track_pan) > 0.005:
+            pan_l = max(0.0, 1.0 - track_pan)
+            pan_r = max(0.0, 1.0 + track_pan)
+            panlabel = f"[a{idx}pan]"
+            parts.append(
+                f"{current}apan=stereo"
+                f"|c0=c0*{pan_l:.4f}+c1*{pan_l:.4f}"
+                f"|c1=c0*{pan_r:.4f}+c1*{pan_r:.4f}"
+                f"{panlabel}"
+            )
+            current = panlabel
+
+        # Volume envelope — converts the clip's volume_points list
+        # to an ffmpeg ``volume`` filter with a linear ramp expression
+        # so the rendered audio follows the rubberband automation.
+        env_pts = getattr(clip, "volume_points", None) or []
+        if env_pts:
+            clip_dur_s = clip.effective_length_ms / 1000.0
+            # Build a piecewise-linear expression:
+            #   t = relative seconds within the concatenated clip
+            # ffmpeg ``volume`` expression evaluates ``t`` in seconds.
+            # We map [0,1] norm → [0, clip_dur_s].
+            # Expression: if(lt(t,t0),v0, if(lt(t,t1), v0+(v1-v0)*(t-t0)/(t1-t0), ...
+            def _ramp_expr(pts, dur):
+                if not pts:
+                    return None
+                sorted_pts = sorted(pts, key=lambda p: p[0])
+                # Add sentinels so the expression covers full duration
+                def _v(p): return max(0.0, min(2.0, float(p[1])))
+                def _ts(p): return max(0.0, min(1.0, float(p[0]))) * dur
+                all_pts = [(0.0, _v(sorted_pts[0]))] if sorted_pts[0][0] > 0 else []
+                all_pts += [(_ts(p), _v(p)) for p in sorted_pts]
+                if sorted_pts[-1][0] < 1.0:
+                    all_pts.append((dur, _v(sorted_pts[-1])))
+                if len(all_pts) < 2:
+                    return f"{all_pts[0][1]:.3f}" if all_pts else None
+                # Build nested if() chain right-to-left
+                expr = f"{all_pts[-1][1]:.3f}"
+                for i in range(len(all_pts) - 2, -1, -1):
+                    t0, v0 = all_pts[i]
+                    t1, v1 = all_pts[i + 1]
+                    slope = (v1 - v0) / max(1e-6, t1 - t0)
+                    seg = f"{v0:.3f}+{slope:.6f}*(t-{t0:.3f})"
+                    expr = f"if(lt(t\\,{t1:.3f}),{seg},{expr})"
+                return expr
+            env_expr = _ramp_expr(env_pts, clip_dur_s)
+            if env_expr:
+                elabel = f"[a{idx}e]"
+                parts.append(f"{current}volume='{env_expr}'{elabel}")
+                current = elabel
 
         # --- sound-editor effects (clip.effects) ---
         fx_chain = _build_effect_chain(clip.effects)
@@ -1231,6 +1312,7 @@ class ClipExporter(QThread):
                 cmd,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
                 errors="replace",
                 creationflags=(
                     0x08000000 if sys.platform == "win32" else 0
