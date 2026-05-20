@@ -74,9 +74,12 @@ a = Analysis(
     runtime_hooks=[],
     excludes=[
         'tkinter',
-        'unittest',
         'test',
-        'pydoc',
+        # NOTE: ``pydoc`` and ``unittest`` are NOT excluded — pyqtgraph
+        # (used for the audio-mixer scopes) lazy-imports ``pydoc`` on
+        # ``import pyqtgraph``, and parts of its plotting code reach
+        # for ``unittest.mock``. Removing either causes Setup-1.4.0
+        # builds to fail at startup with "No module named 'pydoc'".
     ],
     noarchive=False,
     optimize=0,

@@ -2,6 +2,17 @@
 
 Format: grouped by area, newest work at the top of each section.
 
+## v1.4.1 — 2026-05-20
+
+### Fixes
+
+- **Startup crash on installed builds** — Setup-1.4.0.exe failed on
+  launch with ``Unhandled exception: No module named 'pydoc'``. The
+  PyInstaller spec excluded ``pydoc`` and ``unittest`` to shave a few
+  MB off the bundle, but ``pyqtgraph`` (the audio-mixer scope) lazy-
+  imports both modules. Removed those entries from ``excludes``;
+  installer runs cleanly.
+
 ## v1.4.0 — 2026-04-27
 
 ### Pro video editor
