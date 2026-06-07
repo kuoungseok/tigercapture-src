@@ -3,7 +3,7 @@
 ; Produces: installer_output\TigerCapture-Setup-1.0.0.exe
 
 #define MyAppName "TigerCapture"
-#define MyAppVersion "1.3.0"
+#define MyAppVersion "1.4.2"
 #define MyAppPublisher "KyoungSeok Ko (artmouse)"
 #define MyAppURL "https://github.com/kuoungseok/tigercapture"
 #define MyAppExeName "TigerCapture.exe"

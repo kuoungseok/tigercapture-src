@@ -1,6 +1,6 @@
 ; NSIS installer script for TigerCapture
 ; Build:   makensis.exe installer.nsi
-; Output:  installer_output\TigerCapture-Setup-1.0.0.exe
+; Output:  installer_output\TigerCapture-Setup-<version>.exe
 ;
 ; User-level install (no admin required):
 ;   - files to %LOCALAPPDATA%\TigerCapture
@@ -15,8 +15,8 @@ Unicode True
 !define COMPANYNAME     "KyoungSeok Ko (artmouse)"
 !define DESCRIPTION     "Screen capture to GIF / MP4"
 !define VERSIONMAJOR    1
-!define VERSIONMINOR    0
-!define VERSIONBUILD    0
+!define VERSIONMINOR    4
+!define VERSIONBUILD    2
 !define VERSIONSTR      "${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}"
 !define HELPURL         "https://github.com/kuoungseok/tigercapture"
 !define UPDATEURL       "https://github.com/kuoungseok/tigercapture/releases"
