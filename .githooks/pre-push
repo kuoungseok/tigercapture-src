@@ -1,0 +1,74 @@
+#!/bin/sh
+#
+# Guard TigerCapture's split remote model:
+# - source / tigercapture-src: private source repository
+# - origin / tigercapture: public distribution repository
+#
+# Only distribution-safe refs may be pushed to origin.
+
+remote_name="$1"
+remote_url="$2"
+
+if [ "$TIGERCAPTURE_ALLOW_DISTRIBUTION_SOURCE_PUSH" = "1" ]; then
+  echo "warning: bypassing TigerCapture distribution remote guard" >&2
+  exit 0
+fi
+
+is_distribution_remote=0
+if [ "$remote_name" = "origin" ]; then
+  is_distribution_remote=1
+fi
+
+case "$remote_url" in
+  *github.com/kuoungseok/tigercapture.git*|*github.com:kuoungseok/tigercapture.git*)
+    is_distribution_remote=1
+    ;;
+esac
+
+if [ "$is_distribution_remote" != "1" ]; then
+  exit 0
+fi
+
+zero_oid="0000000000000000000000000000000000000000"
+blocked=0
+
+has_source_tree_markers() {
+  commit="$1"
+  names="$(git ls-tree --name-only "$commit" 2>/dev/null || true)"
+  printf '%s\n' "$names" | grep -Eq '^(app|tools|main\.py|TigerCapture\.spec|requirements\.txt)$'
+}
+
+while read local_ref local_oid remote_ref remote_oid
+do
+  # Allow deletes so accidental public refs can be cleaned up.
+  if [ "$local_oid" = "$zero_oid" ]; then
+    continue
+  fi
+
+  commit="$(git rev-parse "$local_oid^{commit}" 2>/dev/null || true)"
+  if [ -z "$commit" ]; then
+    echo "blocked push to distribution remote '$remote_name': cannot resolve $local_ref" >&2
+    blocked=1
+    continue
+  fi
+
+  case "$remote_ref" in
+    refs/heads/release|refs/tags/*)
+      if has_source_tree_markers "$commit"; then
+        echo "blocked push to distribution remote '$remote_name': $remote_ref contains source tree markers" >&2
+        blocked=1
+      fi
+      ;;
+    *)
+      echo "blocked push to distribution remote '$remote_name': $remote_ref is not distribution-safe" >&2
+      echo "use 'source' for source branches and WIP work; use origin/release only for sanitized distribution updates" >&2
+      blocked=1
+      ;;
+  esac
+done
+
+if [ "$blocked" = "1" ]; then
+  exit 1
+fi
+
+exit 0

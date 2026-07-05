@@ -22,6 +22,17 @@ distribution.
 - If source content is accidentally pushed to `origin`, stop and report it
   immediately. Do not continue by changing repository visibility or creating
   more public-facing refs.
+- Local Git must use the repository hook path `.githooks` and default pushes
+  should go to `source`:
+
+  ```powershell
+  git config core.hooksPath .githooks
+  git config remote.pushDefault source
+  ```
+
+  The tracked `.githooks/pre-push` guard blocks source branches, WIP branches,
+  source tags, and source-tree refs from being pushed to `origin`. Do not bypass
+  this guard except for an explicitly requested emergency cleanup.
 
 ## Main Editor Boundary
 
