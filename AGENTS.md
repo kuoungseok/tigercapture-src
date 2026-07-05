@@ -2,6 +2,27 @@
 
 These rules are for AI coding agents working in this repository.
 
+## Git Remote Boundary
+
+This repository uses separate remotes for private source and public
+distribution.
+
+- `source` / `kuoungseok/tigercapture-src` is the private source repository.
+  Push source branches, feature branches, WIP checkpoints, source tags, and
+  source PR work only to `source` unless the user explicitly says otherwise.
+- `origin` / `kuoungseok/tigercapture` is the public distribution repository.
+  Do not push full source, source checkpoints, feature branches, or source PRs
+  to `origin`.
+- `origin` should contain only distribution-safe branches, tags, docs, release
+  metadata, installers, or packaged artifacts. Use the dedicated `release`
+  branch or a sanitized release/export workflow for distribution updates.
+- Never make `origin` public, create public release tags, or publish release
+  artifacts until verifying that no source commits, source branches, source
+  tags, or accidental PR refs would be exposed.
+- If source content is accidentally pushed to `origin`, stop and report it
+  immediately. Do not continue by changing repository visibility or creating
+  more public-facing refs.
+
 ## Main Editor Boundary
 
 `app/video_editor_window.py` is a compatibility facade. Do not add new feature
