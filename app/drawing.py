@@ -181,6 +181,16 @@ class DrawingCanvas(QWidget):
         self._rect_hook: Callable[[float, float, float, float], None] | None = None
         self._rect_drag_start: QPointF | None = None
         self._rect_drag_current: QPointF | None = None
+        # Color Page direct Power Window editor. The editor owns the grade; this
+        # canvas only mirrors the current normalized window and reports drags.
+        self._color_window_payload: dict | None = None
+        self._color_window_change_hook: Callable[[dict, bool], None] | None = None
+        self._color_window_drag_handle: str | None = None
+        self._color_window_drag_start: QPointF | None = None
+        self._color_window_drag_origin: dict | None = None
+        self._extra_paint_hook: Callable[[QPainter, int, int], None] | None = None
+        self._interaction_hook: Callable[[str, float, float, QMouseEvent], bool] | None = None
+        self._interaction_active = False
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -195,9 +205,7 @@ class DrawingCanvas(QWidget):
         if tool not in ("off", "pen", "eraser"):
             tool = "off"
         self._tool = tool
-        self.setAttribute(
-            Qt.WidgetAttribute.WA_TransparentForMouseEvents, tool == "off"
-        )
+        self._refresh_mouse_transparency()
         cursor = (
             Qt.CursorShape.CrossCursor
             if tool in ("pen", "eraser")
@@ -214,6 +222,16 @@ class DrawingCanvas(QWidget):
 
     def set_pen_width(self, width: float) -> None:
         self._pen_width = max(1.0, min(80.0, float(width)))
+
+    def set_extra_paint_hook(self, hook: Callable[[QPainter, int, int], None] | None) -> None:
+        self._extra_paint_hook = hook
+        self.update()
+
+    def set_interaction_hook(self, hook: Callable[[str, float, float, QMouseEvent], bool] | None) -> None:
+        self._interaction_hook = hook
+        self._interaction_active = False
+        self._refresh_mouse_transparency()
+        self.update()
 
     # ------------- paint -------------
 
@@ -284,6 +302,13 @@ class DrawingCanvas(QWidget):
                 painter.drawEllipse(p, 4, 4)
             painter.restore()
 
+        self._paint_color_power_window(painter, w, h)
+        if self._extra_paint_hook is not None:
+            try:
+                self._extra_paint_hook(painter, w, h)
+            except Exception:
+                pass
+
     @staticmethod
     def _paint_stroke(painter: QPainter, stroke: Stroke, w: int, h: int) -> None:
         color = QColor(*stroke.color)
@@ -323,6 +348,26 @@ class DrawingCanvas(QWidget):
             if consumed:
                 self.update()
                 return
+        if self._interaction_hook is not None:
+            w = max(1, self.width())
+            h = max(1, self.height())
+            try:
+                consumed = bool(self._interaction_hook("press", pos.x() / w, pos.y() / h, event))
+            except Exception:
+                consumed = False
+            self._interaction_active = consumed
+            if consumed:
+                self.update()
+                return
+        if self._color_window_payload is not None:
+            handle = self._color_window_hit_test(pos)
+            if handle is not None:
+                self._color_window_drag_handle = handle
+                self._color_window_drag_start = QPointF(pos)
+                self._color_window_drag_origin = dict(self._color_window_payload)
+                self._set_color_window_cursor(handle)
+                self.update()
+            return
         if self._tool == "pen":
             self._current_points = [QPointF(pos)]
             self.update()
@@ -330,6 +375,18 @@ class DrawingCanvas(QWidget):
             self._try_erase_at(pos.x(), pos.y())
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if (event.button() == Qt.MouseButton.LeftButton
+                and self._interaction_hook is not None):
+            pos = event.position()
+            w = max(1, self.width())
+            h = max(1, self.height())
+            try:
+                consumed = bool(self._interaction_hook("double", pos.x() / w, pos.y() / h, event))
+            except Exception:
+                consumed = False
+            if consumed:
+                self.update()
+                return
         if (event.button() == Qt.MouseButton.LeftButton
                 and self._click_hook is not None):
             pos = event.position()
@@ -349,6 +406,7 @@ class DrawingCanvas(QWidget):
         two args are normalised [0,1] coordinates, third is "click"
         or "double". Returns True if the click is consumed."""
         self._click_hook = hook
+        self._refresh_mouse_transparency()
         self.update()
 
     def set_rect_hook(self, hook):
@@ -360,15 +418,51 @@ class DrawingCanvas(QWidget):
         self._rect_hook = hook
         self._rect_drag_start = None
         self._rect_drag_current = None
+        self._refresh_mouse_transparency()
+        self.update()
+
+    def set_color_power_window_editor(self, window, hook=None, active: bool = False) -> None:
+        """Enable direct Color Page power-window editing on the preview."""
+        if self._color_window_drag_handle is not None:
+            return
+        if not active or window is None:
+            self._color_window_payload = None
+            self._color_window_change_hook = None
+        else:
+            try:
+                from app.color_workflow import normalize_tracking_window
+
+                self._color_window_payload = normalize_tracking_window(window).to_dict()
+                self._color_window_change_hook = hook
+            except Exception:
+                self._color_window_payload = dict(window) if isinstance(window, dict) else None
+                self._color_window_change_hook = hook
+        self._refresh_mouse_transparency()
         self.update()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._color_window_drag_handle is not None:
+            self._update_color_window_drag(event.position(), commit=False)
+            return
         # Rectangle drag — keep updating the current corner while
         # the mouse is held.
         if self._rect_hook is not None and self._rect_drag_start is not None:
             self._rect_drag_current = QPointF(event.position())
             self.update()
             return
+        if self._color_window_payload is not None:
+            self._set_color_window_cursor(self._color_window_hit_test(event.position()))
+            return
+        if self._interaction_hook is not None:
+            w = max(1, self.width())
+            h = max(1, self.height())
+            try:
+                consumed = bool(self._interaction_hook("move", event.position().x() / w, event.position().y() / h, event))
+            except Exception:
+                consumed = False
+            if consumed or self._interaction_active:
+                self.update()
+                return
         if self._tool != "pen" or not self._current_points:
             return
         pos = event.position()
@@ -380,6 +474,14 @@ class DrawingCanvas(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
+            return
+        if self._color_window_drag_handle is not None:
+            self._update_color_window_drag(event.position(), commit=True)
+            self._color_window_drag_handle = None
+            self._color_window_drag_start = None
+            self._color_window_drag_origin = None
+            self._set_color_window_cursor(self._color_window_hit_test(event.position()))
+            self.update()
             return
         # Rectangle drag finished — emit normalised rect to the hook.
         if (self._rect_hook is not None
@@ -399,6 +501,16 @@ class DrawingCanvas(QWidget):
                 pass
             self._rect_drag_start = None
             self._rect_drag_current = None
+            self.update()
+            return
+        if self._interaction_hook is not None and self._interaction_active:
+            w = max(1, self.width())
+            h = max(1, self.height())
+            try:
+                self._interaction_hook("release", event.position().x() / w, event.position().y() / h, event)
+            except Exception:
+                pass
+            self._interaction_active = False
             self.update()
             return
         if self._tool != "pen" or not self._current_points:
@@ -467,6 +579,173 @@ class DrawingCanvas(QWidget):
                     self.stroke_erased_at.emit(idx)
                     self.update()
                     return
+
+    def _refresh_mouse_transparency(self) -> None:
+        wants_mouse = (
+            self._tool != "off"
+            or self._click_hook is not None
+            or self._rect_hook is not None
+            or self._color_window_payload is not None
+            or self._interaction_hook is not None
+        )
+        self.setAttribute(
+            Qt.WidgetAttribute.WA_TransparentForMouseEvents,
+            not wants_mouse,
+        )
+
+    def _paint_color_power_window(self, painter: QPainter, w: int, h: int) -> None:
+        payload = self._color_window_payload
+        if not payload:
+            return
+        try:
+            from app.color_workflow import normalize_tracking_window
+
+            win = normalize_tracking_window(payload)
+        except Exception:
+            return
+        rect = QRectF(
+            (win.x - win.w * 0.5) * w,
+            (win.y - win.h * 0.5) * h,
+            win.w * w,
+            win.h * h,
+        )
+        if rect.width() <= 1 or rect.height() <= 1:
+            return
+        painter.save()
+        painter.setBrush(QColor(216, 90, 48, 34))
+        pen = QPen(QColor("#E96B3C"), 2)
+        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        painter.setPen(pen)
+        if win.shape.startswith("rect"):
+            painter.drawRect(rect)
+        else:
+            painter.drawEllipse(rect)
+        if win.feather > 0.001:
+            feather_px = max(3.0, min(w, h) * win.feather * 0.16)
+            feather_rect = rect.adjusted(-feather_px, -feather_px, feather_px, feather_px)
+            fpen = QPen(QColor(233, 107, 60, 135), 1)
+            fpen.setStyle(Qt.PenStyle.DashLine)
+            painter.setPen(fpen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            if win.shape.startswith("rect"):
+                painter.drawRect(feather_rect)
+            else:
+                painter.drawEllipse(feather_rect)
+        painter.setPen(QPen(QColor("#0C0D10"), 1))
+        painter.setBrush(QColor("#FFFFFF"))
+        for _name, point in self._color_window_handle_points(rect).items():
+            painter.drawRect(QRectF(point.x() - 4, point.y() - 4, 8, 8))
+        painter.setPen(QPen(QColor("#FFFFFF"), 1))
+        cx, cy = rect.center().x(), rect.center().y()
+        painter.drawLine(QPointF(cx - 6, cy), QPointF(cx + 6, cy))
+        painter.drawLine(QPointF(cx, cy - 6), QPointF(cx, cy + 6))
+        painter.restore()
+
+    @staticmethod
+    def _color_window_handle_points(rect: QRectF) -> dict[str, QPointF]:
+        cx = rect.center().x()
+        cy = rect.center().y()
+        return {
+            "top_left": rect.topLeft(),
+            "top": QPointF(cx, rect.top()),
+            "top_right": rect.topRight(),
+            "right": QPointF(rect.right(), cy),
+            "bottom_right": rect.bottomRight(),
+            "bottom": QPointF(cx, rect.bottom()),
+            "bottom_left": rect.bottomLeft(),
+            "left": QPointF(rect.left(), cy),
+        }
+
+    def _color_window_rect(self) -> QRectF | None:
+        payload = self._color_window_payload
+        if not payload:
+            return None
+        try:
+            from app.color_workflow import normalize_tracking_window
+
+            win = normalize_tracking_window(payload)
+        except Exception:
+            return None
+        w = max(1, self.width())
+        h = max(1, self.height())
+        return QRectF(
+            (win.x - win.w * 0.5) * w,
+            (win.y - win.h * 0.5) * h,
+            win.w * w,
+            win.h * h,
+        )
+
+    def _color_window_hit_test(self, pos: QPointF) -> str | None:
+        rect = self._color_window_rect()
+        if rect is None:
+            return None
+        threshold = 12.0
+        best_name = None
+        best_dist = threshold * threshold
+        for name, point in self._color_window_handle_points(rect).items():
+            dx = point.x() - pos.x()
+            dy = point.y() - pos.y()
+            dist = dx * dx + dy * dy
+            if dist <= best_dist:
+                best_name = name
+                best_dist = dist
+        if best_name is not None:
+            return best_name
+        payload = self._color_window_payload or {}
+        shape = str(payload.get("shape", "ellipse")).lower()
+        if shape.startswith("rect"):
+            return "move" if rect.contains(pos) else None
+        rx = max(1.0, rect.width() * 0.5)
+        ry = max(1.0, rect.height() * 0.5)
+        cx = rect.center().x()
+        cy = rect.center().y()
+        inside = ((pos.x() - cx) / rx) ** 2 + ((pos.y() - cy) / ry) ** 2 <= 1.0
+        return "move" if inside else None
+
+    def _set_color_window_cursor(self, handle: str | None) -> None:
+        if handle is None:
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        elif handle == "move":
+            self.setCursor(Qt.CursorShape.SizeAllCursor)
+        elif handle in {"left", "right"}:
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+        elif handle in {"top", "bottom"}:
+            self.setCursor(Qt.CursorShape.SizeVerCursor)
+        elif handle in {"top_left", "bottom_right"}:
+            self.setCursor(Qt.CursorShape.SizeFDiagCursor)
+        else:
+            self.setCursor(Qt.CursorShape.SizeBDiagCursor)
+
+    def _update_color_window_drag(self, pos: QPointF, *, commit: bool) -> None:
+        if (
+            self._color_window_drag_handle is None
+            or self._color_window_drag_start is None
+            or self._color_window_drag_origin is None
+        ):
+            return
+        w = max(1, self.width())
+        h = max(1, self.height())
+        dx = (pos.x() - self._color_window_drag_start.x()) / w
+        dy = (pos.y() - self._color_window_drag_start.y()) / h
+        try:
+            from app.color_workflow import edit_tracking_window
+
+            win = edit_tracking_window(
+                self._color_window_drag_origin,
+                self._color_window_drag_handle,
+                dx,
+                dy,
+            )
+            self._color_window_payload = win.to_dict()
+        except Exception:
+            return
+        hook = self._color_window_change_hook
+        if hook is not None:
+            try:
+                hook(dict(self._color_window_payload), bool(commit))
+            except Exception:
+                pass
+        self.update()
 
 
 def compose_pil_frame_with_overlays(

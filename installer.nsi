@@ -14,9 +14,16 @@ Unicode True
 !define APPNAME         "TigerCapture"
 !define COMPANYNAME     "KyoungSeok Ko (artmouse)"
 !define DESCRIPTION     "Screen capture to GIF / MP4"
-!define VERSIONMAJOR    1
-!define VERSIONMINOR    4
-!define VERSIONBUILD    2
+; Version can be overridden on command line: makensis /DVERSIONMAJOR=1 /DVERSIONMINOR=3 /DVERSIONBUILD=0
+!ifndef VERSIONMAJOR
+  !define VERSIONMAJOR    1
+!endif
+!ifndef VERSIONMINOR
+  !define VERSIONMINOR    4
+!endif
+!ifndef VERSIONBUILD
+  !define VERSIONBUILD    2
+!endif
 !define VERSIONSTR      "${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}"
 !define HELPURL         "https://github.com/kuoungseok/tigercapture"
 !define UPDATEURL       "https://github.com/kuoungseok/tigercapture/releases"

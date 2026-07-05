@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from PySide6.QtCore import QRect, Qt, Signal
 from PySide6.QtGui import (
@@ -27,6 +27,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.i18n import tr
+from app.icons import app_icon, icon_size
 
 
 @dataclass
@@ -35,6 +36,7 @@ class Subtitle:
     end_ms: int
     text: str
     show_box: bool = True
+    style: dict = field(default_factory=dict)
 
     def contains(self, pos_ms: int) -> bool:
         return self.start_ms <= pos_ms < self.end_ms
@@ -128,7 +130,7 @@ class SubtitlePanel(QWidget):
     """
 
     subtitles_changed = Signal()
-    # Bubbled by the panel header's ⛶ button; the editor connects this
+    # Bubbled by the panel header's pop-out button; the editor connects this
     # to its toggle handler so the panel can detach into a floating
     # window (same dock pattern as colour grading / timeline).
     popout_requested = Signal()
@@ -177,8 +179,10 @@ class SubtitlePanel(QWidget):
         header.addWidget(self.edit_btn)
         header.addWidget(self.del_btn)
 
-        self.popout_btn = QPushButton("⛶")
+        self.popout_btn = QPushButton("")
         self.popout_btn.setObjectName("PreviewPopoutIcon")
+        self.popout_btn.setIcon(app_icon("popout", size=16))
+        self.popout_btn.setIconSize(icon_size(16))
         self.popout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.popout_btn.setToolTip(tr("subtitle.popout.tooltip"))
         self.popout_btn.setFixedSize(28, 24)
@@ -291,7 +295,7 @@ class SubtitleLaneRow(QWidget):
 
     LABEL_H = 14                          # matches TrackRow header strip
     LANE_H = 26
-    MARGIN = 10                           # matches TrackRow.MARGIN
+    MARGIN = 180                          # matches TrackRow.MARGIN
     EDGE_GRAB_PX = 6
     MIN_DURATION_MS = 200
 
@@ -325,6 +329,7 @@ class SubtitleLaneRow(QWidget):
         self.setMouseTracking(True)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setVisible(bool(self._layer.items()))
 
         # Layer change → repaint. The chain returned by
         # ``TimelineRuler.set_subtitle_layer`` already wraps any prior
@@ -332,6 +337,7 @@ class SubtitleLaneRow(QWidget):
         prior = layer.on_change
 
         def _composite():
+            self.setVisible(bool(self._layer.items()))
             self.update()
             if prior is not None:
                 try:
@@ -403,15 +409,30 @@ class SubtitleLaneRow(QWidget):
     def paintEvent(self, _event) -> None:
         p = QPainter(self)
         p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        # Lane label.
+
+        label_col = QRect(0, 0, self.MARGIN, self.height())
+        p.fillRect(label_col, QColor("#151515"))
+        p.setPen(QColor("#2B2B2B"))
+        p.drawLine(self.MARGIN - 1, 0, self.MARGIN - 1, self.height())
         p.save()
         label_font = QFont(p.font())
         label_font.setPixelSize(10)
+        label_font.setBold(True)
         p.setFont(label_font)
-        p.setPen(QColor("#8a8a92"))
+        p.setPen(QColor("#CFCFCF"))
+        label_y = self.LABEL_H + max(0, (self.LANE_H - 16) // 2)
         p.drawText(
-            QRect(self.MARGIN, 0, self.width() - 2 * self.MARGIN, self.LABEL_H),
-            Qt.AlignmentFlag.AlignVCenter,
+            QRect(12, label_y, 26, 16),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            "S1",
+        )
+        label_font.setPixelSize(9)
+        label_font.setBold(False)
+        p.setFont(label_font)
+        p.setPen(QColor("#858585"))
+        p.drawText(
+            QRect(56, label_y, self.MARGIN - 70, 16),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
             tr("subtitle.lane.label"),
         )
         p.restore()
@@ -422,7 +443,7 @@ class SubtitleLaneRow(QWidget):
             max(0, self.width() - 2 * self.MARGIN), self.LANE_H,
         )
         # 80% brightness stripe — same as empty video track
-        from app.video_editor_window import StripedHost
+        from app.timeline_striped_host import StripedHost
         StripedHost._draw_stripes(p, lane_rect, StripedHost.BG_80, StripedHost.STRIPE_80)
         # Subtitle rectangles.
         f = QFont(p.font())

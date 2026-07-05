@@ -1,0 +1,12 @@
+{
+  "known_failures": [
+    {
+      "id": "fixture-test-spine-missing-atlas",
+      "area": "compatibility",
+      "kind": "spine",
+      "path_suffix": "resources/test_spine/sample.skel.json",
+      "issue_codes": ["spine_atlas_missing"],
+      "reason": "Synthetic parser fixture intentionally has no atlas; keep it quarantined from real corpus regressions."
+    }
+  ]
+}

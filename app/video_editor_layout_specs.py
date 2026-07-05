@@ -1,0 +1,80 @@
+from __future__ import annotations
+
+from app.style import editor_scrollbar_qss
+
+
+TOP_WORK_MIN_HEIGHT = 390
+TOP_WORK_MAX_HEIGHT = 580
+MAIN_DOCK_MIN_HEIGHT = 410
+MAIN_DOCK_MAX_HEIGHT = 600
+LEFT_DOCK_MIN_WIDTH = 180
+WORKBENCH_SLOT_MIN_WIDTH = 390
+VIEWER_COLUMN_MIN_WIDTH = 320
+VIEWER_TOP_STRETCH = 6
+WORKBENCH_TOP_STRETCH = 5
+
+
+def main_dock_splitter_qss() -> str:
+    return (
+        "QSplitter#MainDockSplitter::handle{background:rgba(214,220,235,8);}"
+        "QSplitter#MainDockSplitter::handle:horizontal{width:1px;margin:0;}"
+        "QSplitter#MainDockSplitter::handle:hover{background:rgba(214,220,235,38);}"
+    )
+
+
+def thin_scroll_area_qss(scope: str, *, child_background: str = "transparent") -> str:
+    return (
+        f"{scope}{{background:transparent;border:none;}}"
+        f"{scope} > QWidget > QWidget{{background:{child_background};}}"
+        + editor_scrollbar_qss(scope)
+    )
+
+
+def left_dock_scroll_qss() -> str:
+    return (
+        thin_scroll_area_qss("QScrollArea#LeftDockScroll", child_background="#141414")
+        + "QScrollArea#LeftDockScroll QScrollBar:vertical{"
+        "width:2px;margin:8px 0 8px 0;background:transparent;border:none;"
+        "}"
+        "QScrollArea#LeftDockScroll QScrollBar:vertical:hover{"
+        "width:7px;margin:8px 0 8px 0;"
+        "}"
+        "QScrollArea#LeftDockScroll QScrollBar::handle:vertical{"
+        "background:rgba(214,220,235,22);border-radius:1px;min-height:34px;"
+        "}"
+        "QScrollArea#LeftDockScroll QScrollBar::handle:vertical:hover{"
+        "background:rgba(214,220,235,96);border-radius:4px;"
+        "}"
+        "QScrollArea#LeftDockScroll QScrollBar::add-line:vertical,"
+        "QScrollArea#LeftDockScroll QScrollBar::sub-line:vertical{height:0;background:transparent;}"
+    )
+
+
+def right_dock_scroll_qss() -> str:
+    return (
+        thin_scroll_area_qss("QScrollArea#RightDockScroll")
+        + "QScrollArea#RightDockScroll QScrollBar:vertical{"
+        "background:transparent;width:4px;margin:6px 0 6px 1px;"
+        "}"
+        "QScrollArea#RightDockScroll QScrollBar:vertical:hover{width:8px;margin:6px 0;}"
+        "QScrollArea#RightDockScroll QScrollBar::handle:vertical{"
+        "background:rgba(214,220,235,34);border-radius:2px;min-height:30px;"
+        "}"
+        "QScrollArea#RightDockScroll QScrollBar::handle:vertical:hover{"
+        "background:rgba(214,220,235,112);border-radius:4px;"
+        "}"
+        "QScrollArea#RightDockScroll QScrollBar::add-line:vertical,"
+        "QScrollArea#RightDockScroll QScrollBar::sub-line:vertical{height:0;}"
+    )
+
+
+def horizontal_tool_scroll_qss(scope: str) -> str:
+    return (
+        f"{scope}{{background:transparent;border:none;}}"
+        f"{scope} > QWidget > QWidget{{background:transparent;}}"
+        "QScrollBar:horizontal{background:transparent;height:7px;margin:0 14px 0 14px;}"
+        "QScrollBar::handle:horizontal{background:rgba(255,255,255,42);border-radius:3px;min-width:42px;}"
+        "QScrollBar::handle:horizontal:hover{background:rgba(255,255,255,82);}"
+        "QScrollBar::add-line:horizontal,QScrollBar::sub-line:horizontal{width:0;}"
+        + editor_scrollbar_qss(scope)
+    )

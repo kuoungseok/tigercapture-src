@@ -11,6 +11,9 @@ build/
 dist/
 *.manifest
 
+# Rust native helpers
+native/**/target/
+
 # NSIS / installer
 installer_output/
 
@@ -35,6 +38,8 @@ desktop.ini
 mac/resources/tigercapture.icns
 
 # Logs / temp
+logs/
+.pytest_cache/
 *.log
 _test_*.py
 
@@ -43,3 +48,8 @@ debugCapture/
 files.zip
 **/files.zip
 _r100/
+_live2d_compat_corpus/
+local_resources/
+external/tools/vseeface/
+external/assets/vtuber/
+resources/live2d_samples/CubismWebSamples/

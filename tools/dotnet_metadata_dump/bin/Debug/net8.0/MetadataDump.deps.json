@@ -1,0 +1,23 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v8.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v8.0": {
+      "MetadataDump/1.0.0": {
+        "runtime": {
+          "MetadataDump.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "MetadataDump/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

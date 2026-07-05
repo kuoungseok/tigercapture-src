@@ -77,12 +77,38 @@ class ParallelMixerItem(QGraphicsItem):
     def itemChange(self, change, value):
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
             for port in self.all_ports():
-                for conn in port.connections:
+                for conn in list(port.connections):
                     conn.update_endpoints()
         return super().itemChange(change, value)
 
+    # Selection glow draws 3 px outside the diamond — boundingRect
+    # must cover that or Qt leaves smudges on move. paint() uses
+    # ``self.SIZE`` directly (not boundingRect) so widening this is
+    # safe.
+    _BB_MARGIN = 4
+
     def boundingRect(self) -> QRectF:
-        return QRectF(0, 0, self.SIZE, self.SIZE)
+        m = self._BB_MARGIN
+        return QRectF(-m, -m, self.SIZE + 2 * m, self.SIZE + 2 * m)
+
+    _shape_cache = None
+
+    def shape(self):  # noqa: N802
+        # Cache the diamond path — built once per class, reused for
+        # every hit test (mouse-move heavy path).
+        cls = type(self)
+        if cls._shape_cache is None:
+            from PySide6.QtGui import QPainterPath
+            s = self.SIZE
+            cx, cy = s / 2, s / 2
+            p = QPainterPath()
+            p.moveTo(cx, 0)
+            p.lineTo(s, cy)
+            p.lineTo(cx, s)
+            p.lineTo(0, cy)
+            p.closeSubpath()
+            cls._shape_cache = p
+        return cls._shape_cache
 
     def paint(self, painter: QPainter, option, widget=None) -> None:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -99,7 +125,7 @@ class ParallelMixerItem(QGraphicsItem):
 
         # Selection glow
         if self.isSelected():
-            glow = QColor("#D85A30")
+            glow = QColor("#FF8057")
             glow.setAlpha(80)
             big = QPainterPath()
             big.moveTo(cx, -3)
@@ -118,7 +144,7 @@ class ParallelMixerItem(QGraphicsItem):
             body = QColor("#6B47B8")          # DaVinci-ish purple
         painter.setBrush(QBrush(body))
         if self.isSelected():
-            painter.setPen(QPen(QColor("#D85A30"), 2))
+            painter.setPen(QPen(QColor("#FF8057"), 2))
         elif self._hovered:
             painter.setPen(QPen(QColor("#A06BD0"), 1))
         else:

@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "events": [
+    {"t_ms": 260, "x_norm": 0.50, "y_norm": 0.18, "kind": "click"},
+    {"t_ms": 1040, "x_norm": 0.55, "y_norm": 0.38, "kind": "drag"},
+    {"t_ms": 1540, "x_norm": 0.58, "y_norm": 0.50, "kind": "release"},
+    {"t_ms": 2940, "x_norm": 0.46, "y_norm": 0.68, "kind": "hotkey", "label": "Shift + F1"},
+    {"t_ms": 4100, "x_norm": 0.42, "y_norm": 0.82, "kind": "click"}
+  ]
+}

@@ -1,0 +1,6 @@
+# Optional MMD runtime dependencies.
+#
+# The app still falls back to the deterministic spring backend when pybullet is
+# unavailable. Install this file when validating or shipping the PyBullet MMD
+# physics backend.
+pybullet>=3.2.7

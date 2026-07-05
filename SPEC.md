@@ -1,0 +1,4481 @@
+﻿# TigerCapture Feature Spec for AI Agents
+
+Last updated: 2026-07-05
+
+This file is an AI-readable map of features discovered while working with the
+user. Keep it current when behavior changes, especially for features that span
+the editor UI, preview renderer, project save/load, and export.
+
+## AI Navigation Map
+
+Start here when changing a feature:
+
+- App entry / main shell: `main.py`, `app/main_window.py`, `app/controller.py`.
+- Capture flow: `app/capture.py`, `app/region_selector.py`,
+  `app/recent_captures.py`.
+- Main video editor integration shell: `app/video_editor_window.py`.
+  This file is now a compatibility facade and must not receive new feature
+  logic, UI classes, dialogs, long QSS blocks, workflow methods, media handlers,
+  or timeline behavior. Keep it to imports/re-exports, `__all__`, and tiny
+  compatibility helpers. Add editor features in focused modules and wire them
+  through `app/video_editor_window_delegates.py`, the relevant workflow
+  controller, or `app/video_editor_window_initializer.py`.
+  `tests/test_editor_architecture_rules.py` enforces this boundary.
+  Current UI renewal work is already split across
+  focused helpers:
+  `app/video_editor_command_bar.py`,
+  `app/video_editor_timeline_palette.py`,
+  `app/video_editor_layout_specs.py`,
+  `app/video_editor_ai_command_dock.py`,
+  `app/video_editor_preset_browser_style.py`,
+  `app/video_editor_preset_browser_widgets.py`,
+  `app/video_editor_preset_cards.py`,
+  `app/video_editor_popouts.py`,
+  `app/video_editor_screenstudio_dialogs.py`, and
+  `app/video_editor_audio_style.py`. Keep new bounded UI surfaces in focused
+  modules instead of regrowing `video_editor_window.py`.
+- Editor menu/item UX: `docs/SPEC_EDITOR_MENU_ITEM_SYSTEM.md`. The editor
+  should stay item-first: keep the default chrome minimal, expose creation
+  materials as draggable items, and keep feature controls in contextual docks
+  instead of scattering permanent text buttons across the top bar.
+- Timeline data model: `app/timeline_model.py`, plus legacy dataclasses still
+  defined in `app/video_editor_window.py`.
+- Preview renderer: `app/project_player.py`.
+- Video export: `app/video_exporter.py`.
+- Project save/load: `app/project_io.py`.
+- Comparison templates and before/after preview planning:
+  `docs/SPEC_COMPARISON_TEMPLATES.md`.
+- Media pool: `app/media_pool.py`.
+- Workbench / node graph: `app/workbench_panel.py`, `app/workbench/node_graph/*`.
+- Masks and rotoscope: `app/node_mask.py`, `app/mask_editor_window.py`,
+  `app/node_mask_dialogs.py`.
+- Sound Editor and audio timeline: `app/audio_tracks.py`,
+  `app/audio_separation.py`, `app/audio_mixer_panel.py`,
+  `app/sound_editor_panel.py::SoundEditorPanel`,
+  `app/sound_editor_panel.py::SoundEditorDockWindow`, and legacy advanced-lab
+  `app/video_editor_window.py::SoundEditorWindow`.
+- Typography and subtitles: `app/typography.py`, `app/typo_animations.py`,
+  `app/typo_render.py`, `app/subtitles.py`,
+  `app/video_editor_window.py::TypographyEditorDialog`.
+- Live2D: `app/live2d/*`.
+- Spine and NIKKE: `app/spine_editor/*`.
+- AR/PBR 3D compositor and real-time model preview:
+  `docs/SPEC_AR_PBR_COMPOSITOR.md`, `app/ar_pbr/*`, `app/depth/*`,
+  `app/camera_solve/*`, `tools/qa_ar_pbr_gpu_preview.py`,
+  `tools/qa_ar_pbr_attachment_stability.py`, `tools/ar_pbr_scene_smoke.py`,
+  `tests/test_ar_pbr_*.py`.
+- General video processing: `app/video_filters.py`, `app/chroma_key.py`,
+  `app/background_removal.py`, `app/video_stabilizer.py`,
+  `app/video_decoder.py`.
+- Loading/performance acceleration:
+  `app/loading_performance.py`, `app/preview_acceleration.py`,
+  `app/preview_engine_status.py`, `tools/qa_loading_performance.py`,
+  `debugCapture/loading_performance.jsonl`.
+- Professional color workflow helpers:
+  `app/color_grading.py`, `app/color_scopes.py`, `app/color_workflow.py`,
+  `app/color_management.py`, `app/color_ocio.py`.
+- Professional audio workflow helpers:
+  `app/audio_tracks.py`, `app/audio_workflow.py`, `app/audio_accuracy.py`,
+  `app/audio_separation.py`.
+- Shared UX status/empty/progress/failure copy:
+  `app/ux_feedback.py`.
+- Undo/history helpers: `app/history.py`.
+- Export parity, UI QA, localization QA, and performance profiling:
+  `docs/SPEC_EXPORT_PARITY_AND_QA.md`, `tools/verify_export_parity.py`,
+  `tools/qa_project_audit.py`, `tools/qa_ui_layout.py`,
+  `tools/qa_localization_audit.py`, `tools/qa_color_audio_accuracy.py`.
+- Live2D/Spine corpus render QA:
+  `tools/actor_compat_matrix.py`, `tools/actor_render_qa.py`,
+  `tools/test_spine_resources.py`, `tools/test_live2d_resources.py`.
+- Render queue, media relink, and editor presets:
+  `app/render_queue.py`, `app/render_queue_panel.py`,
+  `app/batch_export_dialog.py`,
+  `app/media_relink.py`, `tools/relink_project_media.py`,
+  `app/preset_library.py`, `tools/list_editor_presets.py`.
+- Commercial expansion package:
+  `app/commercial_expansion.py`, `tools/qa_commercial_expansion.py`.
+- Public release positioning guardrails:
+  `docs/RELEASE_POSITIONING.md`, `tools/qa_public_positioning.py`.
+- CapCut-style creator workflow:
+  `app/capcut_workflow.py`, `app/capcut_apply.py`,
+  `tools/qa_capcut_creator_workflow.py`,
+  `app/preset_library.py::CAPCUT_CREATOR_WORKFLOW_PRESETS`.
+- CapCut parity gap tracking:
+  `app/capcut_parity.py`, `tools/qa_capcut_parity_next.py`,
+  `debugCapture/capcut_parity_next_qa.json`.
+- CapCut publish review/provider contracts:
+  `app/capcut_publish.py`, `tools/qa_capcut_publish_review.py`,
+  `debugCapture/capcut_publish_review_qa.json`.
+- CapCut quick-result recommendation/quality gate:
+  `app/capcut_quick_result.py`, `tools/qa_capcut_quick_result.py`,
+  `debugCapture/capcut_quick_result_qa.json`.
+- CapCut captions/voice workflow:
+  `app/capcut_voice.py`, `tools/qa_capcut_voice_workflow.py`,
+  `debugCapture/capcut_voice_workflow_qa.json`.
+- CapCut local collaboration handoff:
+  `app/capcut_collaboration.py`, `tools/qa_capcut_collab_handoff.py`,
+  `debugCapture/capcut_collab_handoff_qa.json`.
+- CapCut cloud/share handoff contract:
+  `app/capcut_cloud_handoff.py`, `tools/qa_capcut_cloud_handoff.py`,
+  `debugCapture/capcut_cloud_handoff_qa.json`.
+- CapCut prompt-to-edit fallback:
+  `app/capcut_prompt_edit.py`, `tools/qa_capcut_prompt_edit.py`,
+  `debugCapture/capcut_prompt_edit_qa.json`.
+- Creator asset-pack catalog:
+  `app/creator_asset_packs.py`, `tools/qa_creator_asset_packs.py`,
+  `debugCapture/creator_asset_packs_qa.json`.
+- Review/demo automation sample resources:
+  `docs/SPEC_REVIEW_AUTOMATION.md`, `app/review_automation/*`,
+  `tools/prepare_review_sample_resources.py`,
+  `tools/review_automation_launcher.py`,
+  `tools/generate_review_assets.py`, `tools/build_review_site.py`,
+  `tools/build_review_deck.py`, `tools/qa_review_automation.py`,
+  `../ReviewAutomationWorkspace/samples/manifest.json`,
+  `../ReviewAutomationWorkspace/qa/review_sample_resources_qa.json`,
+  `../ReviewAutomationWorkspace/outputs/review_report.json`,
+  `../ReviewAutomationWorkspace/outputs/site/index.html`,
+  `../ReviewAutomationWorkspace/outputs/site/features/*.html`,
+  `../ReviewAutomationWorkspace/qa/review_automation_qa.json`,
+  `../ReviewAutomationWorkspace/outputs/TigerCapture_Review_Automation.pptx`,
+  `../ReviewAutomationWorkspace/outputs/TigerCapture_Review_Automation_detailed.pptx`,
+  `../ReviewAutomationWorkspace/outputs/TigerCapture_Review_Automation_evidence_full.pptx`.
+  The review automation workspace is developer-only and can be moved with
+  `TIGERCAPTURE_REVIEW_ROOT`.
+- Studio-wide Python Action System implementation:
+  `app/actions/*`, `docs/SPEC_PYTHON_ACTION_SYSTEM.md`. The registered action
+  layer now backs AI, MCP/local-LLM handoff, QA, review automation, and
+  developer tools through validated action specs. It wraps editor/model
+  capabilities through `EditorAdapter` instead of exposing arbitrary Python or
+  private editor methods directly. The current default registry exposes 241
+  unique action IDs, including timeline/NLE actions, node graph actions,
+  VTuber Performance Source actions, Live2D Performance Source retargeting,
+  and MMD actor/QA actions.
+- Local-first ML backend:
+  `app/local_ml.py`, `tools/qa_local_ml_backend.py`.
+- AI Script / One-Click Editing foundation:
+  `docs/SPEC_AI_TEXT_EDITING.md`, `app/ai_edit_plan.py`,
+  `app/ai_text_editing.py`, `tools/qa_ai_text_editing.py`,
+  `app/descript_lite_readiness.py`, `tools/qa_descript_lite_readiness.py`,
+  `app/descript_lite_implementation_plan.py`,
+  `tools/qa_descript_lite_implementation_plan.py`,
+  `app/transcript_reflow.py`, `app/transcript_timeline_ops.py`,
+  `app/transcript_selection_actions.py`, `app/transcript_edit_surface.py`,
+  `app/transcription_providers.py`, `app/transcript_cleanup.py`,
+  `app/transcription_settings.py`, `app/transcription_runtime_setup.py`,
+  `app/retake_detection.py`,
+  `app/speech_enhance.py`, `app/ai_voice_replacement.py`,
+  `tools/qa_descript_lite_p1_services.py`,
+  `tools/qa_descript_lite_p2_transcription.py`,
+  `tools/configure_local_whisper_model.py`,
+  `tools/qa_transcription_runtime_setup.py`,
+  `tools/qa_descript_lite_p3_cleanup.py`,
+  `tools/qa_speech_enhance.py`,
+  `tools/qa_ai_voice_replacement.py`,
+  `debugCapture/ai_text_editing_qa.json`,
+  `debugCapture/descript_lite_readiness_qa.json`,
+  `debugCapture/descript_lite_implementation_plan_qa.json`,
+  `debugCapture/descript_lite_p1_services_qa.json`,
+  `debugCapture/descript_lite_p2_transcription_qa.json`,
+  `debugCapture/transcription_settings_configure_qa.json`,
+  `debugCapture/transcription_runtime_setup_qa.json`,
+  `debugCapture/descript_lite_p3_cleanup_qa.json`,
+  `debugCapture/speech_enhance_qa.json`,
+  `debugCapture/ai_voice_replacement_qa.json`.
+- Native worker protocol and migration strategy:
+  `docs/SPEC_NATIVE_WORKER.md`, `app/native_worker.py`,
+  `native/tigercapture_worker/src/main.rs`.
+
+## Quick Answers
+
+- NIKKE character assets are Spine assets, not Live2D and not "spline".
+- Arbitrary object tracking is implemented through tracked `BitmapMask` masks:
+  the user draws/selects any region, and OpenCV CSRT tracks that region by bbox.
+  `app.tracking_cache_worker.ObjectTrackingCacheWorker` can pre-warm those
+  tracker bbox caches in the background for the active node chain.
+- The Color page Rotoscope menu and the node graph mask context menu expose
+  "Track selected region"; it opens `MaskEditorWindow` with `Track object`
+  enabled. Track rows show tracked-mask cache/failure/correction status and
+  approximate failed-frame ticks.
+- Masked effects are not blur-only in preview. The preview node chain applies
+  masks to blur nodes, effect nodes, and color-grading nodes.
+- The export path now has a preview-effect raw pre-render fallback for active
+  `track.node_item_chain` data. When node graph blur/effect/color/mask work
+  cannot be represented by FFmpeg, export bakes those frames through Python
+  before applying the normal FFmpeg overlays/audio.
+- Spine and Live2D actor tracks are baked into final video as transparent MOV
+  overlays. Live2D must be added both to the overlay spec and to the FFmpeg
+  input list.
+- AR/PBR 3D object compositing is now a first-class tracked feature. The
+  formal renderer contract is `docs/SPEC_AR_PBR_COMPOSITOR.md`. ProjectPlayer
+  owns preview integration, Project I/O owns AR/PBR track persistence, Media
+  Pool recognizes FBX/GLB/3D assets, and VideoExporter owns final bake hooks.
+  Current behavior is hybrid: the main GL preview receives `ar_pbr_items`
+  metadata from `ProjectPlayer` and draws shaded mesh triangles directly in
+  `OpenGLPreviewWidget`; export now uses the same GPU-preview packet contract
+  through `app.ar_pbr.export_packet_renderer` before falling back to
+  `software_pbr` only when packet rendering cannot draw a track. The GPU
+  packet path includes lightweight contact-shadow and screen-reflection catcher
+  packets (`shadow_vertices`, `reflection_vertices`) and sorts mesh triangles
+  back-to-front for more stable overlap. Export rasterizes those packets onto a
+  transparent overlay with configurable packet SSAA
+  (`TIGERCAPTURE_AR_PBR_PACKET_SSAA`, default `2`) before compositing back over
+  the source frame, so edge smoothing does not resample the original video. It
+  also shares `app.ar_pbr.texture_plan` with the model-view loader so material
+  texture readiness is diagnosed consistently; when a base texture map is
+  available, the preview packet path applies its cached average color as a
+  lightweight fallback tint and also emits UV texture-triangle packets plus GL
+  preview `pbr_triangles` containing projected position, UV, normal, tangent,
+  bitangent, base color, material roughness/metallic/reflectance values,
+  roughness/metallic/specular/normal/occlusion map paths, packed-channel
+  selectors for glTF metallic-roughness/AO textures, and HDRI lighting metadata.
+  `OpenGLPreviewWidget` draws those PBR triangles with a model-view-style
+  material-map/HDRI fragment shader over the same contact-shadow/reflection
+  packet fallback. Textured/PBR triangles keep their live depth texture so the
+  GL fragment shader can discard occluded pixels instead of the packet builder
+  coarse-culling the whole triangle. Headless
+  export samples the UV texture triangles with affine UV mapping before
+  encoding, so textured materials are no longer represented only as a flat
+  material color in final MP4 output. It also mirrors AO map darkening and
+  item-depth texture masking for packet export. Video-depth occlusion is now a
+  shared contract across synthetic/software, packet PBR, GL preview, and the
+  worker-safe full GPU helper: tracks must set `occlusion=true`, depth frames
+  are normalized through `app.ar_pbr.depth_occlusion`, and successful paths
+  report `pbr_depth_occlusion_applied` plus `pbr_depth_occluded_pixels`. The
+  full GPU service bridge serializes the current `depth_frame` as a temporary
+  float32 `.npy` payload and the helper applies an overlay alpha depth matte
+  before compositing; this prevents export from losing video-depth occlusion,
+  but it remains an overlay-matte approximation rather than a native
+  model-depth buffer compare inside the helper renderer. It
+  also resolves road-plane/scene anchor placement before creating packets, so
+  QImage fallback, GL preview, and export agree on where a model should stick to
+  the video. Worker-safe export-side model-view GPU rendering now exists through
+  the helper process below; remaining renderer work is quality depth: real
+  shadow-map passes, physically richer reflections, IBL prefilter tuning,
+  batching, and camera/lens solve fidelity.
+  `app.ar_pbr.full_gpu_export_service` defines and invokes the worker-safe
+  helper-process path for that full-GPU route.
+  `tools/ar_pbr_full_gpu_export_service.py` is the default helper; it accepts
+  `--probe` and `--request <json>`, renders model-view PBR/texture/HDRI output
+  in a separate Qt/OpenGL process, returns an RGBA frame path plus diagnostics,
+  and lets `VideoExportThread` stay free of Qt/OpenGL context creation.
+  On Windows the helper forces desktop OpenGL for the service process because
+  Qt's ANGLE/software defaults can leave the PyOpenGL model-view path with an
+  invalid `QOpenGLWidget` context. The helper window is created offscreen and
+  fixed to the export tile size instead of using `WA_DontShowOnScreen`, which
+  keeps the worker process hidden while preserving a valid native GL surface.
+  `tools/qa_ar_pbr_full_gpu_export_service.py` writes
+  `debugCapture/ar_pbr_full_gpu_export_service_qa.json`; when probe succeeds,
+  `product_gap_push` can count full model-view GPU export as claim-ready for
+  the AR/PBR renderer-quality gate.
+- GPU preview metadata is explicitly collision-tested: one `gpu_frame_ready`
+  payload can carry color grade data, shader clip effects, Spine direct overlay
+  items, and AR/PBR overlay items together, and `VideoEditorWindow` dispatches
+  them separately to `OpenGLPreviewWidget` without dropping the grade or overlay
+  contracts.
+- GPU preview pixel visibility is also covered by
+  `tools/qa_gpu_preview_pixel_collision.py`. The QA renders an actual
+  `OpenGLPreviewWidget` framebuffer with color grade uniforms, shader clip
+  effect uniforms, and AR/PBR mesh/shadow/reflection packets, then checks the
+  captured pixels and stores `debugCapture/gpu_preview_pixel_collision.png`.
+  It also exercises a real Spine sample through the direct GL overlay path and
+  a real Live2D sample through the CPU/prerender-to-GPU-display path, storing
+  actor screenshots and changed-pixel counts. This catches GL framebuffer,
+  shader, AR/PBR overlay, Spine overlay, and Live2D display regressions in the
+  combined preview surface; full editor-window interaction screenshots remain
+  covered by the broader visual regression suite.
+- GPU preview/export parity is summarized by
+  `tools/qa_gpu_export_parity_matrix.py` and
+  `debugCapture/gpu_export_parity_matrix_qa.json`. This QA runs the GL pixel
+  collision report, final editor export-bake smoke, and synthetic export parity
+  smoke into one matrix for color grade, shader effects/chroma, typography
+  export pixels, Spine/Live2D actor preview/export evidence, transitions, and
+  masked node graph export. It also runs `tools/qa_ar_pbr_export_bake.py` to
+  prove AR/PBR object tracks are baked into final MP4 output through the
+  preview-packet export renderer (`mode=gpu_packet_export`). That report checks
+  mesh, shadow, and reflection packet triangles, packet SSAA, final-pixel
+  differences, AR-colored pixels, catcher darkening, texture-plan readiness,
+  GL-preview model-view-style material-map PBR readiness, export UV texture
+  sampling, headless PBR material-map/AO sampling, and live/item PBR depth-mask diagnostics
+  on the encoded MP4. The matrix now reaches `release_ready=true` when all
+  listed rows pass; real shadow maps, physically richer reflection passes,
+  prefiltered IBL tuning, and deeper camera/lens solve remain renderer-quality
+  work rather than an export-missing gap.
+  Current latest recorded matrix requires `live2d_actor.preview=true`; Live2D
+  export evidence without real preview coverage remains a release blocker.
+  `render_clip_tracks`
+  exports force the preview-parity base-frame path so nested/multi-source
+  transition renders are not accidentally routed through a plain FFmpeg graph.
+- AR/PBR attachment stability is covered by
+  `tools/qa_ar_pbr_attachment_stability.py`. It drives the headless GPU packet
+  path across several road-plane anchor positions, verifies model center drift,
+  shadow/reflection packet generation, and coarse fallback depth-occlusion diagnostics,
+  and writes `debugCapture/ar_pbr_attachment_stability_qa.json`. Scene-anchor
+  tracking also estimates simple image-space affine motion. The first frame
+  stores a main template plus several nearby probe templates; runtime matching
+  combines their relative motion to update `placement.image_point`,
+  `transform.scale`, and `transform.rotation.z`. This is a practical 2D
+  roll/zoom tracking layer for attached props, not a full SLAM/camera-track
+  solution. Runtime diagnostics expose `camera_motion_hint` / `slam_assist`
+  with `mode=template_depth_plane_slam_assist`, confidence, translation, scale,
+  roll, and an explicit `not_full_slam` limit. QA Dashboard exposes it as
+  `AR/PBR Attachment Stability`.
+- AR/PBR 3D object editing uses a standard transform-gizmo interaction on the
+  editor preview canvas and preview pop-out. The selected object draws red X,
+  green Y, and blue Z handles, per-axis rotation rings, axis scale cubes, a
+  center screen-plane move handle, and a white uniform-scale handle. Dragging
+  updates `placement.image_point`, `transform.position.z`, `transform.rotation`
+  or `transform.scale` depending on the selected handle. Current axes are
+  screen-oriented with a blue diagonal depth handle; camera/world/local axis
+  modes remain tied to the future full camera solve.
+- The AR/PBR 3D model preview has an `HDR Environment` preset dropdown. Presets
+  are discovered from `debugCapture/ar_pbr_resources/manifest.json`, resolved
+  by `app.ar_pbr.hdri_presets`, and loaded into the OpenGL preview without
+  reimporting the mesh. The bundled local Poly Haven CC0 1K HDRI set covers
+  street, studio, indoor, forest, sunset, night-street, and glossy studio
+  lighting. Track lighting persists the selection as `hdri_id` and `hdri_path`
+  so project reloads and future export parity work can use the same IBL
+  environment.
+- Loading and first-use performance are measured persistently. Live2D/Spine
+  actor stages, decoder backend selection/opening, AR/PBR preview import,
+  vertex buffer, HDRI, and texture-plan stages append JSONL rows to
+  `debugCapture/loading_performance.jsonl` through `app.loading_performance`.
+  `app.preview_acceleration.configure_preview_acceleration_defaults()` is
+  called at startup and defaults the editor to decoder auto-selection,
+  frame-server auto mode, larger frame cache, Spine GL zero-readback preview,
+  and AR/PBR GPU preview unless the user overrides env vars. Editor startup
+  schedules background parser/importer/Live2D runtime prewarm, media-pool 3D
+  imports prewarm persistent AR/PBR descriptors, and repeated 3D preview/model
+  view windows are reused. Run
+  `.\.venv\Scripts\python.exe tools\qa_loading_performance.py` to see the
+  active policy and recent slow stages.
+- `app/foreground_tracker.py` tracks the active Windows foreground window for
+  quick-paste behavior. It is not visual face/object tracking.
+- The Sound Editor is clip-scoped. It edits one `AudioClip` at a time, while
+  timeline playback/export use `AudioTrack` lanes and FFmpeg filter graphs.
+- Vocal/music separation lives in the Sound Editor AI Master tab. It writes two
+  WAV stems and, when opened from the video editor, adds them as new audio
+  tracks.
+- The next commercial expansion layer is centralized in
+  `app/commercial_expansion.py`. It tracks ten product surfaces: beta feedback
+  bundle export, preview frame-server/hardware-decode UX, preview/export
+  parity lock, AI one-click edit planning, preset marketplace health,
+  audio postproduction depth, color-node workflow depth, project snapshots,
+  plugin manifests, and release productization. `tools/qa_commercial_expansion.py`
+  writes `debugCapture/commercial_expansion_qa.json`, and QA Dashboard plus the
+  productization loop include it as a first-class report.
+- The ordered 3,4,5,1,2,6 product-gap push is centralized in
+  `app/product_gap_push.py`. `tools/qa_product_gap_push.py` writes
+  `debugCapture/product_gap_push_qa.json` and covers, in the user-requested
+  order: AI editing quality, interaction-ready screen-recording corpus,
+  CapCut-style local template/asset scale, GPU preview/export parity, AR/PBR
+  renderer quality, and release trust. The report distinguishes
+  `implementation_ready` from `claim_ready` so missing evidence cannot be
+  accidentally marketed as finished; the current refreshed report is 98/100
+  with all six areas claim-ready. The AI area exercises the
+  selected provider path with `use_provider=True`, reusing a cached
+  provider-exercised `debugCapture/ai_edit_corpus_quality_qa.json` when present
+  and running live provider QA only when that evidence is missing; if
+  Claude/Codex/Qwen/local LLM falls back to the deterministic planner, the
+  selected provider state is included in the report. The real-recording area
+  also includes sidecar-intake
+  evidence so missing cursor/click/drag/hotkey/auto-zoom proof points directly
+  to fillable `.cursor.template.json` files instead of a vague corpus warning.
+- CapCut-style creator features are centralized in `app/capcut_workflow.py`.
+  They are deterministic product plans, not a bundled ML model: auto-caption
+  styling, long-video-to-Shorts candidate picking, smart media search indexing,
+  subject-aware vertical reframe keyframes, easy keyframe graphs, voice cleanup
+  routing, background-removal route selection, social export settings, and
+  one-click recommendations. `tools/qa_capcut_creator_workflow.py` writes
+  `debugCapture/capcut_creator_workflow_qa.json`; QA Dashboard and the
+  productization loop expose it.
+- CapCut parity tracking is centralized in `app/capcut_parity.py`. It compares
+  TigerCapture's current creator workflow against practical CapCut gaps:
+  template ecosystem scale, one-click AI agent depth, captions/voice/TTS
+  workflow, social publish handoff, cloud/mobile/collaboration, stock music/SFX,
+  and beginner default-result flow. `tools/qa_capcut_parity_next.py` writes
+  `debugCapture/capcut_parity_next_qa.json`, and QA Dashboard exposes it as a
+  gap tracker. A passing report means the tracker is honest and runnable; it
+  does not claim full CapCut parity.
+- CapCut mobile/template parity can now be scoped to local-first work with
+  cloud excluded. `app/capcut_mobile_templates.py` defines 108 mobile vertical
+  template contracts across TikTok/Reels/Shorts, twelve creator categories,
+  three hook styles, safe caption/action zones, cover-frame metadata, and
+  deterministic recommendations. It also defines 216 local trend-template
+  packs across six trend families, A/B storyboard contracts, and a 12-scenario
+  deterministic creator-corpus quality report. `build_capcut_parity_next_report(
+  exclude_cloud=True)` removes the cloud/mobile-sync area and scores
+  `mobile_template_scale` instead, while `tools/qa_capcut_parity_next.py
+  --exclude-cloud` writes the same no-cloud QA report. This is the intended way
+  to discuss CapCut progress when cloud sync is deliberately out of scope.
+  The no-cloud report now clears the local template, mobile safe-zone,
+  beginner default-result, captions/voice cleanup, stock/SFX starter-pack, and
+  publish-handoff areas, and it exposes trend pack count, trend families,
+  storyboard count, and creator-corpus score. The remaining local gap is the
+  true generative one-click creator agent, which must stay separate from
+  deterministic fallback planning.
+- CapCut publish review lives in `app/capcut_publish.py`. It turns the creator
+  publish package into review cards for copy, thumbnail frame, platform
+  variants, checklist rows, and provider contracts. Built-in providers cover
+  local manifest, clipboard copy, TikTok/Shorts/Reels manual upload handoff,
+  X/TikTok/Instagram browser quick-upload handoff, plus unconfigured
+  TikTok/Instagram/X direct API upload slots and an unconfigured share-link
+  provider slot. No network upload is performed by default; quick upload opens
+  the platform handoff with copy/export metadata ready, while direct API upload
+  remains disabled until platform OAuth/app-review providers are configured.
+  `capcut_write_quick_upload_package()` writes a local browser-upload package
+  with `publish_manifest.json`, `quick_uploads.json`, `upload_links.json`,
+  provider contracts, title/description/hashtag text files, per-platform post
+  text files for TikTok/Instagram/X, `package_index.json`, and `README.txt`.
+  `tools/qa_capcut_publish_review.py` writes
+  `debugCapture/capcut_publish_review_qa.json`, verifies the package writer,
+  and QA Dashboard exposes it.
+- CapCut quick-result recommendations live in `app/capcut_quick_result.py`.
+  They inspect a creator bundle and choose the first useful template, explain
+  what will happen, score one-click quality across hook/caption/pacing/format/
+  delivery/safety, expose a beginner default path, and report visible feedback
+  evidence for template badges, timeline markers, caption rows, render jobs,
+  and review cards. They feed a Quick Result card into Creator Assist.
+  `tools/qa_capcut_quick_result.py` writes
+  `debugCapture/capcut_quick_result_qa.json`; the CapCut parity report uses
+  this score and default-path evidence for the AI one-click and beginner
+  default-result gaps.
+- CapCut captions/voice workflow lives in `app/capcut_voice.py`. It combines
+  transcript/SRT caption rows, caption beat styling, voice cleanup/loudness/
+  stem-separation operations, and explicit TTS/custom voice/translation
+  provider slots into one reviewable local-first model. Optional cloud/custom
+  voice providers stay unconfigured by default and are shown with setup
+  messages instead of being used silently. The workflow reports ready cards,
+  enabled actions, manifest operations, and no-cloud-default evidence so local
+  caption/cleanup readiness is not confused with finished TTS/custom voice.
+  `tools/qa_capcut_voice_workflow.py`
+  writes `debugCapture/capcut_voice_workflow_qa.json`; Creator Assist gets a
+  Voice Workflow card, and the CapCut parity tracker uses its score for the
+  captions/voice gap.
+- CapCut local collaboration handoff lives in `app/capcut_collaboration.py`.
+  It builds a local-first review package contract with project snapshot,
+  review notes, media relink manifest, manual archive readiness, and explicit
+  optional workspace/mobile/cloud-comment provider slots. No network upload or
+  cloud sync is performed by default. `tools/qa_capcut_collab_handoff.py`
+  writes `debugCapture/capcut_collab_handoff_qa.json`; Creator Assist gets a
+  Collab Handoff card, and the CapCut parity tracker uses the score for the
+  cloud/mobile/collaboration gap while still keeping full cloud/mobile parity
+  marked incomplete.
+- CapCut cloud/share handoff lives in `app/capcut_cloud_handoff.py`. It defines
+  provider contracts for local sync folders, Google Drive, OneDrive, Dropbox,
+  WebDAV, S3-compatible storage, and custom share providers. It does not upload
+  files, store tokens, or call provider APIs. Instead it validates the package
+  inventory, relink manifest, private-link default, conflict policy, explicit
+  user-consent gate, no-token manifest rule, and configured-provider dry-run
+  readiness. `capcut_write_cloud_ready_package()` can write a local sync-folder
+  package containing `manifest.json`, `cloud_handoff_plan.json`,
+  `review_notes.json`, `relink_manifest.json`, `provider_contracts.json`,
+  `package_index.json`, and `README.txt` without copying original media by
+  default. `tools/qa_capcut_cloud_handoff.py` writes
+  `debugCapture/capcut_cloud_handoff_qa.json` and verifies the local package
+  writer; QA Dashboard and CapCut parity consume it as progress on the
+  cloud/mobile/collaboration gap, not as full cloud sync.
+- CapCut prompt-to-edit lives in `app/capcut_prompt_edit.py`. It maps creator
+  prompts to review-first operations such as captions, subject reframe, cursor
+  polish, voice cleanup, asset recommendations, short exports, thumbnail
+  candidates, publish handoff, and local collab handoff. `tools/qa_capcut_prompt_edit.py`
+  writes `debugCapture/capcut_prompt_edit_qa.json`; Creator Assist gets a Prompt
+  Edit card, QA Dashboard can run the benchmark, and CapCut parity uses the
+  benchmark score. This is not a claim that a generative Descript/CapCut AI
+  agent is complete; it is the local contract that remains useful when no LLM is
+  configured.
+- Creator asset packs are modeled in `app/creator_asset_packs.py`. The
+  local-first catalog now covers 100 generated sticker, background, SFX, and
+  short-loop metadata entries with explicit license IDs, search, external JSON
+  pack loading, intent coverage, synthetic preview storyboards, ready
+  collection shelves, and a local recommendation board with drag payloads. This
+  improves the CapCut-style asset ecosystem path without pretending to ship a
+  licensed stock media marketplace or trend feed. `tools/qa_creator_asset_packs.py`
+  writes `debugCapture/creator_asset_packs_qa.json`, and CapCut parity uses the
+  asset count, intent coverage, collection-shelf, recommendation, and storyboard
+  evidence for template/stock gaps.
+- Local ML is routed through `app/local_ml.py`. It never calls a cloud API and
+  never auto-downloads models. After the launcher flicker fix, this path is
+  enabled by default and can be disabled for diagnostics with
+  `TIGERCAPTURE_LOCAL_ML_DISABLED=1` or `TIGERCAPTURE_LOCAL_ML_ENABLED=0`.
+  `local_ml_backend_status()` reports optional local capabilities
+  (OpenCV/Pillow visual analysis, local Whisper, SAM, Demucs, ONNX Runtime,
+  Ultralytics). `local_ml_analyze_media()` samples local images/videos for
+  foreground subject detections, scene ranges, and tags.
+- AI Script / One-Click Editing has crossed into MVP product behavior, but is
+  not a Descript-lite or Descript-class natural-language editor yet. The video editor now has a
+  bottom `AI Command` dock that is visible by default, right-dock
+  `ScriptEditPanel`, SRT/VTT/local-Whisper transcript input, deterministic
+  Korean/English prompt routing, `EditPlan`
+  validation, preview markers, safe subtitle/marker/auto-zoom materialization,
+  and a separate reviewed-cut apply path that can materialize reviewed
+  video/audio ripple cuts. `app.descript_lite_readiness` preserves the current
+  product priority ladder: text-based timeline editing, transcription quality,
+  one-click cleanup, Studio Sound-grade audio, AI voice/replacement, AI
+  co-editor UX, and collaboration/cloud. Priorities 1-3 must be claim-ready
+  before any Descript-lite positioning, and priorities 1-5 must be claim-ready
+  before a $149+ Descript-style AI value defense. New Descript-lite work should
+  not add feature logic to `app/video_editor_window.py`; the implementation plan
+  keeps work in services, providers, panels, and action surfaces first, with
+  `VideoEditorWindow` reserved for final thin adapter calls. The first P1
+  service layer now lives in `app.transcript_reflow`,
+  `app.transcript_timeline_ops`, `app.transcript_selection_actions`, and
+  `app.transcript_edit_surface`, with the surface owned by
+  `ScriptEditPanelModel` and QA in `tools/qa_descript_lite_p1_services.py`.
+  P2 editable-script generation now has a local-first provider contract in
+  `app.transcription_providers` and cleanup/glossary support in
+  `app.transcript_cleanup`; runtime claim readiness still depends on a saved
+  local word-timestamp ASR model path or auto-discovered Systran
+  faster-whisper Hugging Face cache snapshot in `app.transcription_settings`
+  being verified by `tools/qa_descript_lite_p2_transcription.py`;
+  missing-model guidance is emitted by `tools/configure_local_whisper_model.py`
+  and `tools/qa_transcription_runtime_setup.py`.
+  One-click cleanup also includes `app.retake_detection` for repeated takes and
+  false-start/mistake candidates, with QA in
+  `tools/qa_descript_lite_p3_cleanup.py`. P4/P5 now include
+  `app.speech_enhance` local before/after speech cleanup QA and
+  `app.ai_voice_replacement` reviewed sentence replacement plus consent gating,
+  verified by `tools/qa_speech_enhance.py` and
+  `tools/qa_ai_voice_replacement.py`. See
+  `docs/SPEC_AI_TEXT_EDITING.md`,
+  `docs/SPEC_LOCAL_AI_PROVIDERS.md`, `app/ai_script_edit_panel.py`, `app/ai_edit_plan.py`,
+  `app/ai_text_editing.py`, `app/ai_edit_apply.py`, and
+  `tools/qa_ai_script_edit_integration.py`. Claude direct generation is now the
+  automatic ready-state path when configured; rule-based fallback remains the
+  safe failure path. The planned default
+  free model profile is `qwen_local` (`Qwen3 1.7B GGUF`, official `Q8_0`
+  first-use llama.cpp path) with first-use install status, while `local_llm`,
+  `codex_mcp`, and `claude_mcp` remain switchable
+  readiness/provider surfaces unless explicitly configured.
+  `local_ml_capcut_project_summary()` turns that analysis into the summary
+  shape consumed by CapCut planners, and
+  `capcut_creator_bundle_from_local_media()` returns a ready apply bundle
+  through the local-only analysis route. `tools/qa_local_ml_backend.py` writes
+  `debugCapture/local_ml_backend_qa.json`; QA Dashboard and the productization
+  loop expose it as a first-class report.
+- `app.capcut_workflow.capcut_creator_apply_bundle()` is the handoff payload
+  for a one-button CapCut-style apply command. It returns
+  `project_settings_patch`, `workflow_preset_ids`, `subtitle_rows`,
+  `caption_beat_plan`, `hook_score_plan`, `timeline_markers`,
+  `render_queue_jobs[*].create_kwargs`, `smart_media_index`, search chips,
+  an explainable `edit_recipe`, multi-platform `publish_variants`, and
+  a `publish_package`. `subtitle_rows` are compatible with
+  `app.subtitles.Subtitle` plus sidecar styling fields; `create_kwargs` can be
+  passed to `app.render_queue.RenderQueueJob.create()`. The publish package
+  contains CapCut-style title suggestions, hashtags, thumbnail-frame choices,
+  caption/reframe/export checklist rows, and hook/caption beat metadata so the
+  editor can show a creator delivery card without re-analyzing the project.
+- `capcut_creator_edit_recipe()` explains the one-click recommendation as
+  reviewable trim/caption/reframe/audio/effect/delivery steps with reasons,
+  confidence, missing inputs, and review points. `capcut_multi_platform_publish_plan()`
+  creates Shorts/TikTok/Reels variants with per-platform export settings,
+  title, hashtags, thumbnail frame, checklist status, and a recommended
+  platform. The QA report surfaces `edit_recipe_steps` and `publish_variants`,
+  and QA Dashboard includes those counts in the CapCut row.
+  `capcut_caption_short_quality_model()` is the focused caption/shorts quality
+  gate for this path: it checks styled caption rows, readable line length,
+  monotonic subtitle timing, caption beat metadata, ranked short candidates,
+  vertical caption safe areas, and publish-package readiness. Product-polish QA
+  consumes that score so CapCut-style work is judged by usable output, not only
+  by whether helper functions exist.
+- `capcut_creator_review_panel_model()` is the Qt-ready data contract for a
+  CapCut Creator panel. It groups the apply bundle into hero, recipe, short
+  candidate, caption beat, hook ranking, publish variant, and smart-media
+  cards, plus primary actions such as apply plan, preview best short, queue
+  render jobs, copy publish copy, and open matching templates.
+  `capcut_quick_create_button_model()` adds the editor-side quick-create
+  contract: analyze current project/media, apply captions/short markers/output
+  settings, queue social exports, and prepare publish copy without routing the
+  user through the launcher or a template-first flow.
+  `capcut_publish_handoff_plan()` builds copy/export handoff payloads for
+  title, description, hashtags, thumbnail jump, and short-export queueing.
+  Apply bundles and project sidecars preserve both models; QA reports
+  `review_panel_cards`, `review_panel_ready`, `quick_create_ready`,
+  `quick_create_steps`, `publish_handoff_actions`, and
+  `publish_handoff_ready`.
+- The user-facing CapCut workflow is intentionally editor-side, not
+  launcher/template-first. `app.creator_assist_panel.CreatorAssistPanel` lives
+  in the right dock and the main command bar opens it as "Creator Assist". It
+  analyzes the current Media Pool, Workbench-backed project settings, subtitles,
+  and timeline, then lets the user apply captions, short-range markers, social
+  export defaults, render-queue handoff, and publish copy without hiding the
+  normal TigerCapture media-pool/workbench/timeline identity. The panel is
+  lazy-loaded only when opened so launcher-to-editor startup does not eagerly
+  construct CapCut review widgets.
+- CapCut parity is intentionally tracked as a gap, not a claim. The current
+  strongest local-first surfaces are Creator Assist, safe apply bundles,
+  quick-result recommendations, preset search, publish review/provider handoff,
+  local creator asset packs, render-queue handoff, and local ML hooks. The
+  largest CapCut gaps remain large template/asset volume, generative one-click
+  breadth, TTS/custom voice, direct social/cloud/mobile workflows, and licensed
+  stock music/SFX marketplace scale.
+- CapCut-style extensions have explicit feature gates in
+  `app/capcut_features.py`. After the launcher flicker fix, they are enabled
+  by default. Disable everything with `TIGERCAPTURE_CAPCUT_DISABLED=1` or
+  disable/override one route at a time with
+  `TIGERCAPTURE_CAPCUT_LOCAL_ML_ENABLED=0`,
+  `TIGERCAPTURE_CAPCUT_CREATOR_ASSIST_ENABLED=0`,
+  `TIGERCAPTURE_CAPCUT_APPLY_BUNDLE_ENABLED=0`,
+  `TIGERCAPTURE_CAPCUT_TEMPLATE_AUTO_APPLY_ENABLED=0`, or
+  `TIGERCAPTURE_CAPCUT_QA_ENABLED=0`. Disabled routes avoid creating their
+  UI/panel work and report the feature-gate reason instead of loading panels or
+  ML paths.
+- Creator Assist supports partial apply toggles for subtitles, short markers,
+  export/reframe settings, and render-queue staging. Applying timeline/project
+  changes records one undo savepoint, while render jobs are added directly to
+  `RenderQueueStore`/`RenderQueuePanel` instead of opening the batch-export
+  folder dialog. During analysis, the editor merges local-only visual detections
+  from `app.local_ml.local_ml_capcut_project_summary()` when a current media file
+  is available, so subject-aware reframe can use OpenCV/Pillow detections without
+  cloud APIs or model downloads. The panel also exposes a `鍮좊Ⅸ ?쒖옉` button that
+  selects all apply options, analyzes when needed, applies the bundle, stages
+  render jobs, and copies publish text if available. The panel reports busy
+  state and the last result counts for subtitles, short markers, settings, and
+  queued jobs so quick-create does not feel like a silent black box.
+- `app.capcut_apply.capcut_apply_bundle_to_project()` now applies that bundle
+  to a project document without Qt: it merges project settings/export defaults,
+  appends styled subtitles, adds visual timeline markers plus
+  `capcut_short_ranges`, stages `render_queue_jobs`, writes the
+  `capcut_creator_package` sidecar including hook/caption/package/recipe/
+  variants/review-panel/handoff, preserves manual subtitles/markers, and
+  deduplicates repeated applies. The CapCut QA report includes
+  `apply_simulation` plus applied subtitle/render-job/package counts.
+- `app.capcut_apply.capcut_render_queue_jobs_from_payload()` and
+  `capcut_add_render_jobs_to_store()` turn staged CapCut short-export payloads
+  into real `RenderQueueJob` entries with duplicate protection. The CapCut QA
+  report now also checks `materialized_render_queue_jobs`.
+- Project subtitle save/load preserves `show_box` and `style` metadata. This
+  matters for CapCut caption presets because `caption-capcut-word-pop` and
+  related style sidecars must survive a `.tgp` round trip.
+- CapCut-like built-in presets live in
+  `app.preset_library.CAPCUT_CREATOR_WORKFLOW_PRESETS`: word-pop/karaoke auto
+  captions, hook question title, social CTA burst, subject reframe motion, feed
+  swipe transition, background cutout effect, voice enhance audio, and
+  templates for auto-caption shorts, long-to-shorts, subject reframe, smart
+  search edits, and social publishing. Korean search aliases include `罹≪뻔`,
+  `?먮룞?먮쭑`, `諛곌꼍?쒓굅`, and `?몃줈蹂??.
+- The editor UI now follows a professional shell direction: app command bar,
+  left media/assets rail, center viewer, right contextual inspector, and bottom
+  timeline. Shared theme tokens live in `app/style.py`; editor-specific panel
+  chrome is layered through object names in `app/video_editor_window.py`.
+- UI font fallback is explicit: `app/font_fallback.py` chooses Pretendard/Noto
+  Sans/Malgun/Segoe-family fonts at application startup, while `app/style.py`
+  keeps the same CJK-aware stack in QSS so Korean labels remain readable.
+- Shared UX micro-feedback lives in `app/ux_feedback.py`. Media Pool
+  empty/no-match/drop feedback, Color Page scope/color-management status, and
+  Audio Mixer empty states use the same `UXState` tone model so hover,
+  selection, drag, progress, and failure states stay consistent across panels.
+- The main editor keeps Media Pool and Workbench as primary surfaces, but
+  secondary left/right dock sections are collapsible by default: Effect
+  Presets, Title Presets, Transitions, Workflow Presets, Render Queue, Audio,
+  and Subtitles are discoverable headers until opened. This preserves the
+  existing media pool and node/workbench workflows while reducing first-screen
+  clutter.
+- Primary surfaces can still leave the main frame when the edit needs more
+  room: Preview, Timeline, Color, Subtitles, and both side dock columns use
+  reparented pop-out windows, so each surface keeps its live state and docks
+  back into the original layout when the floating window closes. The Media Pool
+  pop-out detaches the whole left column including Effect Presets, Title
+  Presets, Transitions, and Workflow Presets; the Workbench pop-out detaches the
+  whole right column including Workbench, Creator Assist, Script Edit, Render
+  Queue, Audio, PIP, and Subtitles.
+- The top command bar is intentionally compact: low-frequency project,
+  recovery, relink, health, actor, queue, reset, and audio-scope commands are
+  grouped behind `Project`, `Actors`, and `More` menus. Export settings and the
+  primary Export button remain visible because they affect final delivery.
+- The global Qt chrome is also part of the Screen Studio direction. `main.py`
+  forces Qt's `Fusion` style, and `app/style.py::APP_QSS` now applies a late
+  studio-wide override for generic Qt widgets: dialogs, message boxes, file
+  dialogs, buttons, tool buttons, inputs, spin boxes, combo boxes, tabs, menus,
+  list/tree/table views, headers, scrollbars, progress bars, toolbars, status
+  bars, tooltips, and splitters. New secondary tools should lean on these
+  global rules before adding local QSS.
+- Local QSS-heavy tools must append `app.style.studio_chrome_qss(...)` so they
+  keep the same CJK-safe font stack, rounded glass controls, purple/coral
+  accents, menus, sliders, and scrollbars. This currently covers the new
+  project dialog, mask editor, Live2D editor, Spine editor/scanner/timeline
+  panels, actor-lane context menus, and Workbench node graph/popout chrome.
+- Screen-recording-inspired timeline visuals live in `app/studio_theme.py`:
+  media clips use amber alpha-blended blocks, zoom/actions use violet blocks,
+  blade cuts use yellow scissors markers, and the playhead is violet. Shared
+  code-native editor icons live in `app/icons.py`; command menus, timeline
+  edit tools, Export, Marker, and Zoom cards consume that icon helper. Blade
+  cuts and Zoom drops emit short painter-native timeline bursts for immediate
+  edit feedback.
+- The second Screen Studio UI pass deliberately reduces visible control noise:
+  top-bar zoom/proxy secondary actions move behind `More`, track add/delete
+  lives behind a `Tracks` command menu, effect cards are shorter chip-like
+  drag sources, side panels use rounder glass-like surfaces, and timeline
+  diagonal stripes are low-contrast background texture rather than the dominant
+  visual layer.
+- The third Screen Studio UI pass adds product-feel details without removing
+  Media Pool or Workbench: preview frames render inside a padded rounded canvas
+  with shadow/border chrome, timeline media clips get stronger amber highlights
+  and film-strip labels, core icon buttons pulse briefly on press, Media Pool
+  grid cells stay compact, and collapsible asset/side sections have regression
+  coverage so Show/Hide cannot collapse the entire section header again.
+- Timeline clip thumbnails are decorative texture, not the only duration cue.
+  `TrackRow` paints a muted per-track color block first, keeps the blurred
+  thumbnail inset and semi-transparent, then redraws a full-width top rail,
+  left/right caps, and a compact duration chip so clip length remains legible
+  even when thumbnails are soft or dark.
+- Preview transport now treats Play as a clip audition when possible. The
+  editor resolves the selected video clip first, then the clip under the
+  playhead, calls `ProjectPlayer.play_until(end_ms, return_to_ms=...)`, and
+  restores the original playhead after the clip end. Real preview frames also
+  clear the empty-project placeholder so the "Start your edit" card cannot
+  remain behind video/GL playback after media is on the timeline. Placeholder
+  mode now also hides stale GL preview surfaces and resets cached RGB/frame
+  size state, while GPU-frame delivery clears the QLabel backing pixmap after
+  the GL update so a small letterboxed GL frame cannot reveal the old card
+  underneath.
+- The timeline palette area is a dense Screen Studio-inspired wallpaper strip,
+  not separate text toolbars. Edit commands and draggable creative presets sit
+  in one shared rounded `TimelinePaletteBar`; Fade, Typography, Zoom, Speed,
+  Spine, and Live2D are colorful swatch tiles from `app/effect_cards.py`.
+  Avoid reintroducing wide status chips or separate row chrome into this area.
+- The current Screen Studio direction for timeline tools is square,
+  icon-first palette tiles. Select/Blade/Ripple/Roll/Slip/Slide, Trim, Nest,
+  Split, Scopes, and Mixer use `QToolButton#ToolTile` in
+  `app/video_editor_window.py`, with labels visually hidden until hover.
+  Drag/drop cards in `app/effect_cards.py` are also square swatch tiles; their
+  labels are empty by default and populated only on hover. Preserve this
+  icon-first behavior when adding new timeline tools.
+- The edit-tool tiles and drag/drop effect tiles now live inside one rounded
+  `QWidget#TimelinePaletteBar` parent as a single compact row.
+  `QWidget#TimelineToolBar` and `QWidget#TimelineEffectsBar` are only inner
+  transparent groups. Keep future palette additions inside that shared parent
+  so the timeline area keeps the Screen Studio wallpaper-palette composition.
+- The current palette refinement uses 40 px icon-first tool tiles and 32 px
+  painted swatches, with hover/checked states changing borders rather than
+  replacing the tile artwork. This preserves the wallpaper-thumbnail feel.
+  The selection/status row under the palette is intentionally icon-only and
+  low-height; do not reintroduce persistent instruction text in that strip.
+- Creative-layer workflow is now tracked as a product claim gate, not only as
+  scattered UI affordances. The Python Action surface includes
+  `transition.apply`, `transition.clear`, `clip.set_filter`,
+  `clip.set_color_grade`, node graph actions, typography actions, actor
+  actions, and `creative_layer.readiness`. The QA artifact
+  `debugCapture/creative_layer_readiness_qa.json` reports effects,
+  transitions, typography, node graph productization, Live2D/Spine workflow,
+  AR/PBR 3D compositing, and template ecosystem depth. The safe positioning is
+  "creator-grade creative layer foundations"; this is not yet a full
+  Fusion/After Effects/Marmoset/CapCut creative-suite replacement.
+- Screen Studio competitiveness is now treated as a functional editing path,
+  not only a visual theme. The top command bar exposes an icon-only Auto
+  Polish action and the Command Palette indexes it under Screen Studio / auto
+  zoom / cursor polish. Auto Polish reads `*.cursor.json` sidecars when
+  available, generates real per-clip `ZoomActor` windows, stores cursor polish
+  and background/padding/shadow intent in `screenstudio_polish`, and seeks the
+  preview to the first generated zoom. `ProjectPlayer` applies clip-level zoom
+  before track-level zoom so the generated polish is visible immediately;
+  export and render-queue jobs include clip zoom actors for single-source
+  tracks to keep preview/export parity. New recordings written by
+  `FrameRecorder` save cursor movement/click metadata beside the MP4 as
+  `<video>.mp4.cursor.json`; the captured video plate intentionally excludes
+  the OS cursor so the editor can re-render it with smoothing, click rings,
+  scaling, and static-cursor hiding. The preview and export CPU paths both use
+  `app/screenstudio_polish.py` to draw cursor FX and, when Auto Polish enables
+  project-level `screenstudio_polish`, the same wallpaper-gradient padding and
+  shadow frame style is baked into render-queue/export output.
+- Auto Polish is now user-tunable, not only a one-shot command. The top toolbar
+  opens `ScreenStudioPolishDialog`, which edits the project-level
+  `screenstudio_polish` payload live. The panel exposes Screen Studio-style
+  presets (`Clean Tutorial`, `Product Demo`, `Cursor Focus`, `Shorts Vertical`,
+  `Soft Wallpaper`) plus cursor scale, smoothing, static-cursor hide, click-ring
+  duration/color, wallpaper palette, padding, shadow, vertical handling, auto
+  zoom scale, and zoom duration. Slider changes refresh the current preview
+  immediately without requiring Apply; the Generate button uses the current
+  panel values when creating per-clip `ZoomActor`s. Background palettes are
+  cached in `screenstudio_polish.py` so repeated preview/export frames do not
+  regenerate the same gradient.
+- Screen Studio polish now treats interaction metadata as product data, not a
+  decorative afterthought. Cursor sidecars distinguish click, drag, release,
+  key, and hotkey events; preview/export can render click rings, release
+  feedback, drag trails, key badges, static-cursor hiding, wallpaper padding,
+  rounded screen corners, and edge-safe auto zoom crops from the same shared
+  `screenstudio_polish` compositor. `screenstudio_polish_parity_report()` is
+  the lightweight QA hook for checking deterministic preview/export compositor
+  parity without launching the full editor or ffmpeg.
+  The frame compositor no longer depends only on pre-filled
+  `clip.cursor_events`: `screenstudio_fx_enabled()` and `apply_cursor_fx_rgb()`
+  detect and lazy-load `<video>.cursor.json` sidecars from `owner.source_path`,
+  so Media Pool AP status, preview frames, and export prerender decisions stay
+  aligned even after project reload or alternate clip creation paths. Preview
+  owner resolution and `VideoEditorWindow._snapshot_clip_effects_for_export()`
+  also fall back from clip-level `cursor_events` / `screenstudio_polish` to
+  track-level metadata, so cursor/click animation remains visible when metadata
+  was attached to the track.
+  `FrameRecorder` records hotkey labels only for tutorial-safe chords and
+  function/navigation keys, intentionally ignoring plain text-entry letters and
+  numbers unless a modifier key is part of the chord. This keeps hotkey callouts
+  useful for tutorial videos without turning sidecars into text logs.
+  Cursor motion uses a Screen Studio-style click settle: `click_hold_ms` holds
+  the pointer briefly on click/release/hotkey events before interpolating toward
+  the next sidecar sample, so click rings feel anchored instead of sliding away
+  immediately. The Auto Polish dialog exposes this as `Click hold`.
+  `screenstudio_interaction_report()` summarizes capture readiness from a real
+  sidecar by counting click/drag/release/hotkey events, generated auto-zoom
+  windows, hotkey labels, and compositor parity warnings; the micro-interaction
+  QA report includes that readiness summary.
+  Auto Zoom candidate inference uses raw cursor samples to detect long
+  stationary "dwell" moments as soft zoom targets, and same-position
+  click/release pairs are collapsed so default recordings do not produce
+  redundant jumpy zoom windows. Candidate scheduling prefers fewer clean zooms
+  over stacked motion: if a late candidate cannot be shifted before/after
+  existing windows without overlap, it is dropped. Long recordings use
+  `screenstudio_zoom_timing_profile()` to expand the Auto Zoom budget and space
+  zoom windows across the capture instead of clustering every emphasis near the
+  opening seconds; `screenstudio_interaction_report()` exposes the same
+  `zoom_timing_profile` for QA and UI diagnostics.
+  Cursor polish also supports loop-back: when enabled, the cursor eases back
+  toward the first visible cursor position near the end of the source range,
+  making tutorial clips easier to loop without an abrupt pointer jump. Auto
+  Polish QA reports `cursor_loop_ready` and `cursor_loop_return_ms`.
+  Media Pool video thumbnails use an `AP` badge when a cursor sidecar is found;
+  clicking that badge focuses the matching timeline clip when present and opens
+  the Auto Polish panel. Metadata/tooltips show readiness, click/drag/hotkey
+  counts, hotkey labels, and candidate zoom-window count. The Auto Polish dialog
+  shows the same readiness summary for the current selected clips, updating when
+  polish settings change or when Generate Zoom Windows is run. It also lists the
+  per-clip auto-zoom candidates before generation; each candidate can be toggled
+  off or directly edited by start/end time and crop rectangle. The preview draws
+  temporary zoom-candidate boxes while the Auto Polish panel is open; selecting a
+  candidate seeks to its frame, and the preview box can be dragged or resized by
+  edge/corner handles to update the same crop override fields. Generation
+  stores/applies those disabled `target_index:point_index` keys plus per-candidate
+  overrides. Auto Polish zoom actors carry preset-specific motion metadata:
+  `zoom_easing` (`smooth_pop`, `cinematic`, `snappy`, or `linear`),
+  `zoom_motion_blur`, and `zoom_focus_bias`. Preview and CPU prerender export
+  both use the shared `zoom_window_at()` / `zoom_motion_blur_amount()` helpers,
+  while the FFmpeg crop filter path uses the same easing expression when it is
+  not prerendering. Generated clips show an `AP` status badge on the timeline.
+  `tools/qa_screenstudio_auto_polish.py` validates the fixed cursor/click/drag/
+  hotkey fixture corpus in `qa_corpus/screenstudio_auto_polish`, checks preview/
+  export visual parity, and materializes small real MP4 samples with matching
+  cursor sidecars under `debugCapture` for end-to-end QA. QA Dashboard exposes
+  that report as "Screen Studio Auto Polish".
+  `tools/qa_screenstudio_naturalness.py` is the higher-level product-feel
+  guardrail for this path. It scores zoom-candidate framing, overlap-free zoom
+  windows, long-recording zoom rhythm, cursor loop-back, preview/export parity,
+  and starter export intents; QA Dashboard exposes it as "Screen Studio
+  Naturalness". The `long_walkthrough` fixture checks that a 90-second screen
+  recording receives enough rhythmic zoom emphasis across the whole timeline.
+  The report summary includes `long_samples`, `long_rhythm_ok`, and
+  `long_coverage_ok`, so long-recording coverage is tracked separately from
+  short demo clips.
+  `tools/qa_screenstudio_visual_polish.py` renders before/after contact sheets
+  and now also measures isolated cursor-focus deltas, so the QA path catches
+  cases where wallpaper framing changes but click/drag/hotkey cursor animation
+  is too faint to read in the actual video frame.
+  `tools/qa_visual_baseline_audit.py` now treats Screen Studio GUI-flow and
+  export-handoff reports as baseline inputs too: a healthy visual baseline must
+  have approved screenshots, a passing visual regression report, passing
+  Screen Studio GUI-flow, passing export handoff, and default export readiness.
+  It also requires `screenstudio_default_beauty_ready`, which comes from the
+  export-handoff report's default result beauty score.
+  `screenstudio_default_export_settings()` provides delivery intent metadata
+  for Screen Studio-style starters: web demo, product demo, social vertical,
+  and editor roundtrip. The editor applies those computed format/quality/FPS
+  defaults when creating a new project instead of overwriting them with the
+  timeline FPS immediately afterward. The Export button tooltip and final
+  checklist expose the same delivery intent, format, quality, resolution, FPS,
+  and Auto Polish readiness so Screen Studio-style projects communicate whether
+  they are ready before the user starts rendering. A directly opened empty
+  editor also seeds the Screen Studio web-demo defaults (`MP4/high`,
+  `1920x1080`, `60fps`) before UI construction, so first-run export state is
+  explicit instead of falling back to an ambiguous original-resolution preset.
+  Those defaults also describe post-export handoff: MP4 web/product/social
+  deliveries are clipboard/local-share ready, editor-roundtrip exports are
+  local-package ready, and `share_link_ready` only becomes true when a share
+  provider is configured. `screenstudio_share_provider_config()` normalizes
+  the local/workspace/custom-template providers, while
+  `screenstudio_build_share_link()` produces a deterministic share handoff URL
+  for configured providers without requiring cloud upload from the core app.
+  Successful single exports copy the output path to the clipboard when
+  `copy_path` is present in `post_export_actions`; local-share actions also
+  write `<output>.share.json` beside the exported video with intent, format,
+  quality, resolution, destination, share provider, share URL, and handoff
+  metadata.
+  `tools/qa_screenstudio_export_handoff.py` validates web, social, product,
+  editor-roundtrip, and configured share-link scenarios, validates the shared
+  export-completion summary, and checks the default record/edit/export path for
+  delivery defaults, frame styling, cursor FX, local-share handoff, and
+  auto-zoom coverage. Successful single exports use that same completion model
+  for a concise dialog with Reveal Output and Copy Path actions. QA Dashboard
+  exposes it as "Screen Studio Export Handoff". Render Queue completion uses
+  the same model: `app.render_queue_panel.RenderQueuePanel._on_success()`
+  writes local-share manifests for eligible jobs, appends the Screen Studio
+  completion summary to job diagnostics, and the diagnostics detail view lists
+  completion status, manifest path, and Reveal/Copy/share actions.
+  `app.render_queue.render_queue_product_diagnostics()` also includes the
+  completion payload for completed jobs, so render history and Health/QA
+  surfaces describe export handoff consistently.
+  `screenstudio_simple_mode_profile()` is the shared product policy for the
+  focused Screen Studio-style workspace: primary surfaces are record/import,
+  preview, Auto Polish, trim, and export, while Media Pool, Workbench, node
+  graph, actor lanes, Color, Audio, and Render Queue are classified as advanced
+  drawer surfaces for simple-mode projects. `screenstudio_default_result_beauty_score()`
+  is the default-result gate for "import/record then Export": it scores
+  delivery defaults, wallpaper/frame styling, cursor FX, Auto Zoom, handoff,
+  simple-mode policy, motion defaults, vertical-safe metadata, audio defaults,
+  and golden-video coverage. The editor export badge appends this score, and
+  `tools/qa_screenstudio_export_handoff.py` writes `default_beauty_ready` plus
+  `default_beauty_score`. `screenstudio_audio_defaults()` supplies the default
+  voice-normalization, noise-cleanup, dialogue-cleanup, and loudness intent for
+  screen-recording starters. `screenstudio_default_golden_video_probe()` is the
+  first golden short-video gate: it renders representative frames and verifies
+  wallpaper/frame styling, cursor/click pixels, Auto Zoom planning, and
+  preview/export compositor parity. The current synthetic default
+  record/edit/export QA passes at 100/100.
+  `app.screenstudio_parity` owns the explicit remaining-parity contract:
+  `screenstudio_simple_mode_project_patch()` seeds true simple-mode project
+  settings with polish/audio/transcript/export defaults and an advanced drawer
+  surface map; `screenstudio_cursor_renderer_quality_report()` checks the
+  product-grade cursor requirements; `screenstudio_transcript_subtitle_plan()`
+  turns transcript segments into Subtitle-compatible styled rows, while
+  `screenstudio_parse_srt_text()` and `screenstudio_subtitle_rows_from_srt_text()`
+  power the editor SRT import path with the same Screen Studio caption presets.
+  The remaining near-100% parity work is now expressed as first-class report
+  functions instead of loose TODO prose:
+  `screenstudio_first_run_empty_project_report()` locks the no-template-first
+  empty-project path; `screenstudio_motion_tuning_report()` scores cursor/zoom
+  smoothing, click settle, drag/dwell tracking, motion blur, crop breathing
+  room, and overlap resolution; `screenstudio_manual_zoom_viewer_affordance_report()`
+  defines viewer drag handles, keyboard nudge UI, duration/easing popover, live
+  drag feedback, and undo commit; `screenstudio_vertical_social_export_plan()`
+  defines safe-area/social-preview/thumbnail/contact-sheet readiness;
+  `screenstudio_export_handoff_polish_report()` checks GIF/WebM preset parity,
+  4K60 validation, share manifest readiness, and rich post-export card fields;
+  `screenstudio_audio_subtitle_timing_report()` compares loudness/dialogue
+  defaults with styled subtitle timing; `screenstudio_golden_short_video_baseline_plan()`
+  defines golden short-video samples; `screenstudio_real_project_corpus_run_report()`
+  defines before/after artifact paths for the 20-50 real recording corpus; and
+  `screenstudio_advanced_strengths_separation_report()` keeps Live2D/Spine,
+  node graph, Color, Audio, and general editor tools accessible without making
+  them compete visually with the simple Screen Studio path.
+  `screenstudio_recording_corpus_plan()` reports fixture count, real recording
+  roots, 20/50 corpus targets, and missing capture slots without treating
+  synthetic fixtures as external user recordings; `screenstudio_register_real_recording()`
+  stores large user recordings by reference in
+  `qa_corpus/screenstudio_real_recordings/manifest.json` so they can join corpus
+  QA without being copied into the repo. If no slot id is supplied, the next
+  empty `screenstudio-real-XX` slot is assigned automatically.
+  `screenstudio_register_real_recordings_from_roots()` and
+  `tools/register_screenstudio_real_recording.py --scan-root <folder>` batch
+  register real local videos while ignoring tiny/non-video files. Video imports
+  in both Simple and Full editor modes quietly register valid video paths as
+  real-corpus candidates, so ordinary editing sessions help populate the Screen
+  Studio parity corpus. Batch registration reports the same
+  `missing_for_minimum` count used by corpus QA, so intake progress cannot show
+  a stale minimum gap after 20+ recordings are already registered. Registration
+  now records adjacent cursor sidecar status (`<video>.mp4.cursor.json` or
+  `<video>.cursor.json`) in the manifest, and
+  `tools/register_screenstudio_real_recording.py --scan-root <folder>` with
+  `--require-sidecar` only admits recordings that already have cursor metadata.
+  This keeps the "50 video files exist" gate separate from the stricter "20+
+  interaction-ready cursor sidecars exist" gate.
+  `screenstudio_real_recording_corpus_report()`
+  is the deeper corpus verifier: it validates file existence/size/type, probes
+  video frame metadata through OpenCV when available, checks cursor sidecar
+  readiness through the same interaction report used by Auto Zoom, summarizes
+  click/drag/hotkey counts, auto-zoom window count, per-recording interaction
+  readiness, duplicate slot IDs, and progress toward the 20/50 real-recording
+  target. `tools/qa_screenstudio_real_recording_corpus.py` writes
+  `debugCapture/screenstudio_real_recording_corpus_qa.json`, and QA Dashboard
+  exposes it as "Screen Studio Real Corpus". `tools/qa_screenstudio_parity_gap.py`
+  writes `debugCapture/screenstudio_parity_gap_qa.json`, and QA Dashboard shows
+  it as "Screen Studio Parity Gap". The empty editor startup and New Project
+  flow merge `screenstudio_simple_mode_project_patch()` for Screen Recording,
+  Vertical Shorts, and Product Demo starters, so those projects carry
+  `screenstudio_simple_mode_ui`, audio defaults, transcript defaults, and
+  export defaults immediately instead of only reporting the policy in QA. In
+  editor UI, the main toolbar exposes an iPhone Control Center-style
+  `?쇰컲 / ?ы뵆` workspace switch so the user can see and change the active
+  mode directly. Simple Mode keeps the left Media Pool and right Workbench
+  visible because they are core TigerCapture surfaces. The `Panels` toolbar
+  toggle only collapses secondary preset/render/audio/subtitle panels, never
+  the Media Pool or Workbench.
+- The next Screen Studio productization pass turns remaining real-world polish
+  into actionable app/QA artifacts. `screenstudio_real_recording_intake_board()`
+  lists uncovered 20-slot real recording targets, shows per-slot capture
+  requirements, and points to `tools/register_screenstudio_real_recording.py`,
+  which registers large local recordings by manifest reference.
+  `screenstudio_real_recording_slot_board()` is the per-slot readiness board:
+  each required recording target reports `empty`, `invalid`, `needs_sidecar`,
+  `needs_clicks`, `needs_drag_hotkey`, `needs_auto_zoom`, or `ready`, plus the
+  register command, interaction quality score, missing interaction requirements,
+  and click/drag/hotkey/auto-zoom counts. `interaction_ready` now requires all
+  four practical interaction signals, not just clicks plus auto zoom.
+  `screenstudio_real_recording_corpus_report()` also exposes
+  `replacement_claim_ready`, `replacement_claim_blockers`,
+  `sidecar_needed_for_replacement`, and
+  `interaction_needed_for_replacement`, so Screen Studio replacement wording is
+  blocked by explicit corpus math rather than a vague recurring advisory.
+  `build_final_product_readiness_report()` now has a dedicated
+  `screenstudio_interaction_corpus` release area and treats this as a hard
+  release blocker: a project can no longer report `release_ready=true` while
+  cursor sidecar, click, drag, hotkey, auto-zoom, or interaction-ready counts
+  are below the real-world target. The top-level report also exposes
+  `screenstudio_replacement_claim_ready` so marketing copy can distinguish
+  "release candidate" from "safe to call a Screen Studio replacement".
+  `app.screenstudio_sidecar_intake` adds a safe intake bridge for this gap:
+  `tools/prepare_screenstudio_sidecar_intake.py --write-templates` creates
+  per-recording `.cursor.template.json` checklists that name the expected
+  `<video>.cursor.json` target and required click/drag/hotkey/auto-zoom
+  evidence. These templates deliberately contain no counted events and are not
+  accepted as corpus readiness until real interaction metadata is captured.
+  QA Dashboard exposes `debugCapture/screenstudio_sidecar_intake_qa.json` as
+  "Screen Studio Sidecar Intake", and final readiness points to the same tool
+  whenever the replacement corpus is blocked by missing sidecars.
+  `app.screenstudio_sidecar_capture` and
+  `tools/record_screenstudio_cursor_sidecar.py` provide the next step after
+  intake: they write counted `<video>.cursor.json` files from a filled
+  `.cursor.template.json` via `--from-template`, from a reviewed event JSON
+  file, or from a short Windows live cursor capture, then can register the video
+  with `--register --require-sidecar` semantics. Empty templates are rejected by
+  default, so checklist files cannot accidentally become QA evidence. A generated sidecar only
+  reports `counts_for_qa=true` when click/release, drag, hotkey, and auto-zoom
+  readiness pass through the same `screenstudio_interaction_report()` gate.
+  Sidecar intake templates and rows include a concrete
+  `sidecar_capture_command` so a QA operator can move from checklist to counted
+  sidecar without hand-editing paths. For batches,
+  `tools/promote_screenstudio_sidecar_templates.py --register` scans a template
+  directory, skips empty templates, promotes filled ones, and registers only
+  sidecars that pass the same readiness gate by default.
+  Smart Cursor FX extends the same sidecar path with `hit_role`, `hit_label`,
+  `cursor_style`, and `animation` fields. TigerCapture recordings now try to
+  classify the Qt widget under the cursor while recording, so timeline tools
+  such as Blade/Split are saved as `blade_tool` and render as an animated
+  `scissors` cursor with a `snip` click motion. The preview/export cursor
+  renderer consumes those fields directly and supports pointer, hand/grab,
+  scissors, I-beam, zoom, trim/slide, magic-AI, and color-picker cursor shapes.
+  This keeps role-aware cursor changes renderable in final video instead of
+  being only an OS cursor change.
+  `screenstudio_adaptive_motion_tuning_patch()` derives conservative
+  cursor/zoom tuning from current corpus readiness without pretending missing
+  samples are available. `screenstudio_manual_zoom_viewer_command_model()`
+  defines direct viewer handles, keyboard nudge behavior, tooltips, and status
+  feedback for manual zoom editing. `screenstudio_export_result_parity_matrix()`
+  locks MP4/WebM/GIF/4K60/vertical preview-export feature parity for
+  wallpaper frame, cursor FX, click animation, zoom, subtitles, audio, effects,
+  and color. `screenstudio_regression_hardening_plan()` keeps the known
+  launcher, Live2D, Spine, Color, node graph, and timeline risks attached to
+  concrete QA commands. `tools/qa_screenstudio_productization_next.py` writes
+  `debugCapture/screenstudio_productization_next_qa.json`, and QA Dashboard
+  exposes it as "Screen Studio Productization".
+  `tools/qa_screenstudio_render_result_smoke.py` creates a tiny real MP4 smoke
+  render and verifies file size, frame count, frame changes, FPS, and cursor
+  highlight pixels. QA Dashboard exposes it as "Screen Studio Render Smoke" so
+  preview/export polish is checked against an actual output artifact, not only
+  static data contracts.
+  `tools/qa_real_project_product_flow.py` scans real/local `.tgp` projects,
+  verifies one-click preset plans are template-first and map to export-baked
+  targets, and runs the same render-smoke artifact path. QA Dashboard exposes
+  it as "Real Project Product Flow".
+- Final product readiness is tracked separately from individual feature QA.
+  `app.final_product_readiness.build_final_product_readiness_report()` and
+  `tools/qa_final_product_readiness.py` aggregate release-facing areas:
+  practical edit flow, real project corpus, Screen Studio interaction evidence,
+  preview/GPU performance, preview scrub/seek claims, AI edit claim quality,
+  Color/Audio accuracy, professional runtime parity, timeline polish, preset/
+  template quality, crash recovery/project repair, and release packaging. The
+  professional runtime parity area pulls in `Professional Runtime Next` and
+  `Professional Pipeline Next`, so Resolve/Fairlight/Fusion-style payloads must
+  exercise concrete frame, graph, local-ML, audio stress, and deliver checks
+  before the final report can turn release-ready. The report distinguishes `ok`
+  (the report/contract can be built) from `release_ready` (all areas score at
+  least 90), so missing real recordings, smart-AI corpus evidence, scrub/seek
+  coverage, or performance samples are not hidden behind a green implementation
+  check. Top-level `commercial_claims_ready`,
+  `screenstudio_replacement_claim_ready`, `preview_scrub_claim_ready`, and
+  `smart_ai_edit_claim_ready` keep product-release status separate from
+  competitor/AI marketing claims. QA Dashboard lists this as "Final Product
+  Readiness" and can run it directly. The latest strict local evidence on
+  2026-07-05 is `debugCapture/final_product_readiness_qa.json` at 99/100 with
+  `release_ready=false`: practical edit flow, real project corpus, Screen
+  Studio interaction corpus, preview/GPU performance, current-corpus scrub
+  readiness, Color/Audio accuracy, professional runtime parity, timeline
+  polish, presets, crash recovery, packaging, and Claude direct smart-edit
+  corpus evidence are ready. Commercial broadcast evidence remains the release
+  blocker. The real
+  recording manifest loader accepts UTF-8 BOM manifests so existing registered
+  videos are no longer dropped from the corpus, and the new automation-generated
+  local corpus path can provide 20/20 MP4 sidecars with click/drag/hotkey/zoom
+  evidence for repeatable product QA. That corpus is explicitly tagged as
+  generated evidence, not a human user recording study.
+- The active 1~6 release-gap closure pass has its own smaller, claim-oriented
+  audit surface. `app.release_gap_closure.build_release_gap_closure_report()`
+  and `tools/qa_release_gap_closure.py` aggregate exactly six current product
+  priorities: generative AI one-click editing, Screen Studio real-recording
+  interaction corpus, preview scrub/seek responsiveness, Live2D/Spine
+  real-model compatibility, release productization/public positioning, and
+  UI/UX polish. The report returns `ok=true` when the audit can be built and
+  `release_ready=true` only when all six areas are actually ready. It is
+  intentionally stricter about claims than ordinary implementation checks:
+  safe AI Script Edit MVP can pass while `smart_edit_claim_ready` remains
+  false, and real recording files can exist while Screen Studio replacement
+  wording remains blocked until cursor sidecars and interaction evidence pass.
+  As of the current 2026-07-05 evidence run, `smart_edit_claim_ready=true`
+  because Claude direct provider generation succeeded on 20/20 corpus cases
+  without fallback.
+  Use `tools/qa_release_gap_closure.py --strict` as the compact release gate
+  when preparing public builds or marketing copy.
+- The same remaining evidence can be pushed through a generated collection
+  sprint without faking readiness. `app.release_evidence_sprint` and
+  `tools/prepare_release_evidence_sprint.py` create a local sprint folder with
+  a Screen Studio sidecar capture PowerShell script, AI real-case registration
+  script, broadcast platform evidence registration script, safe sidecar
+  templates, AI corpus templates, and a short playbook.
+  The generated scripts are collection aids only: they do not write counted
+  cursor sidecars unless the user performs real replay/cursor/hotkey actions,
+  they do not register AI corpus cases until filled templates contain real
+  transcripts, natural-language prompts, expected intents, and expected
+  operations, and they do not register broadcast platform evidence until the
+  operator supplies redacted RTMP/Discord evidence. The cursor recorder now
+  defaults to the Windows virtual screen
+  when no `--screen-rect` is supplied and can opt into modifier-hotkey capture
+  with `--capture-hotkeys`, which keeps the real Screen Studio interaction
+  corpus from getting stuck on missing hotkey evidence. A separate automation
+  corpus builder, `tools/build_automated_release_evidence_corpus.py`, can create
+  local synthetic MP4 recordings plus `.cursor.json` sidecars and AI transcript
+  cases for repeatable QA; it registers every item with
+  `evidence_provenance=automation_generated` /
+  `counts_as_human_user_evidence=false` so product copy cannot treat it as
+  customer evidence. The sprint report also
+  writes a `progress` block with overall percent, Screen Studio
+  interaction-ready counts, cursor-sidecar counts, AI real-case counts,
+  broadcast platform evidence counts, and explicit blockers.
+  `progress.screenstudio.requirements` breaks the Screen
+  Studio proof into cursor sidecar, click animation, drag tracking, hotkey
+  overlay, and auto-zoom window rows, each with ready/target/needed counts and
+  an action. This is the release-facing guard against claiming Screen
+  Studio-style automatic zoom and smooth cursor animation from ordinary video
+  files alone. Progress is based on interaction-ready evidence, not just
+  generated templates or sidecar filenames. The current 2026-07-05 sprint has
+  templates/scripts prepared for 20 Screen Studio sidecars, 20 AI real cases,
+  and 2 broadcast platform checks. The automation-generated local corpus now
+  gives the release QA artifacts 20/20 Screen Studio interaction-ready sidecars
+  and 20/20 AI real-case rows, while the operator sprint remains the path for
+  human-reviewed sidecars/transcripts and redacted platform proof.
+  `release_evidence_next_items()` also builds the sprint `work_queue`: concrete
+  next tasks for the first blocked recordings, AI templates, and RTMP/Discord
+  platform checks, including the missing proof requirements, target
+  `.cursor.json` or template path, and the safest command/action to run. The
+  work queue is not evidence; it is the operator checklist for collecting
+  evidence without guessing.
+- `app.release_evidence_automation.build_release_evidence_automation_report()`
+  and `tools/qa_release_evidence_automation.py` automate the part that is safe
+  to automate after evidence exists: bulk-promote filled Screen Studio sidecar
+  templates, bulk-register filled AI real-case templates, rerun broadcast
+  platform/readiness QA, and refresh Final Product Readiness. The generated
+  `debugCapture/release_evidence_automation/promote_filled_release_evidence.ps1`
+  script intentionally calls only validated promotion/registration tools. Empty
+  sidecar templates, placeholder AI prompts, and absent platform receipts remain
+  blockers rather than being converted into counted evidence. The same report
+  now also surfaces
+  `debugCapture/release_evidence_automation/automated_release_evidence_corpus.json`
+  when present, including its provenance and `counts_as_human_user_evidence`
+  flag.
+  `release_evidence_next_screenstudio_capture_target()` turns the first blocked
+  Screen Studio work item into a one-slot PowerShell capture script
+  (`record_next_screenstudio_sidecar.ps1`). The script opens the target video,
+  waits for the operator, then calls `tools/record_screenstudio_cursor_sidecar.py`
+  with `--capture-hotkeys --register` and the correct slot id, duration, and
+  frame size. This is the preferred incremental capture UX because it collects
+  exactly one real sidecar and then sends the user back to `Refresh Evidence
+  Status`; it still never fabricates cursor events.
+- QA Dashboard exposes the same release evidence sprint as an in-app action:
+  selecting `Release Evidence Sprint` and pressing `Evidence Actions` prepares
+  missing scripts if needed, then can open the cursor sidecar capture script,
+  AI real-case registration script, broadcast platform evidence registration
+  script, sprint playbook, or evidence folder. The same action dialog can rerun
+  the Screen Studio real-corpus QA, AI corpus QA, and release gap gate after
+  evidence has been collected. The cursor, AI, and broadcast scripts open in a
+  visible terminal because they require real user replay, filled
+  transcripts/prompts, redacted platform evidence, and post-run QA
+  verification. The dashboard
+  summary and Evidence Actions dialog show the same progress numbers so users
+  can see whether they need more cursor interactions, AI real cases, or just
+  follow-up QA. They now also show the per-proof Screen Studio requirement rows
+  and the first evidence work-queue items, so a blocked state points at a
+  specific recording/action instead of a vague advisory. The same dialog also
+  exposes `Record Next Slot`, which writes/opens the one-slot capture script
+  for the first blocked recording, `Register Next AI Case`, which prompts for
+  one real transcript path, natural-language edit request, and review
+  confirmation before filling/registering that single AI case, and
+  `Refresh Evidence Status`, which
+  reruns the Screen Studio real-corpus QA, AI corpus QA, broadcast platform
+  E2E QA, broadcast release-readiness QA, evidence sprint generator, release
+  gap gate, and final product-readiness gate in that order so every sales-facing
+  gate reads fresh source evidence.
+- Screen Studio-style manual zoom editing has a shared policy/helper path:
+  `screenstudio_manual_zoom_edit_policy()` defines snap thresholds, minimum
+  durations, handle sizes, nudge steps, and supported edit modes, while
+  `screenstudio_apply_manual_zoom_edit()` applies move, edge resize, ramp
+  handle, and target-rectangle edits with consistent clamping. Timeline zoom
+  actor drags now use this policy instead of local ad hoc math, so move/resize
+  handles snap to playhead/marker/edge targets and ramps stay inside the zoom
+  span. `tools/qa_screenstudio_manual_zoom.py` verifies this path and QA
+  Dashboard exposes it as "Screen Studio Manual Zoom". Edge target rectangles
+  and oversized target rectangles are part of the QA contract so manual zoom
+  edits do not crop at frame boundaries.
+- The startup launcher should remain a compact action-picking surface, not a
+  template-first page. The first visible choice set is the editor-entry deck:
+  Record, Tiger Studio / Media Pool, and the Sound Editor utility action.
+  Templates and recent work are deliberately absent from the launcher first
+  screen because they made startup feel busy and hid TigerCapture's Media Pool /
+  Workbench identity. The launcher hero is short, capture mode/delay/cursor
+  options live in one thin settings bar, and the Normal/Simple workspace switch
+  is an iOS-style draggable toggle. The selected workspace mode persists to
+  `runtime_data_dir()/launcher_state.json`, can be overridden with
+  `TIGERCAPTURE_LAUNCHER_WORKSPACE_MODE`, and is ignored during pytest so tests
+  do not pollute user state. If the launcher state file is malformed, it is
+  backed up as `launcher_state.broken-*.json` and repaired to standard mode.
+  The launcher body is inside a scroll area so short windows do not clip
+  editor/capture controls.
+- Left-dock preset libraries must stay scroll-safe. Effect, Title,
+  Transition, and Workflow preset sections use painted square vector tiles in
+  an adaptive `_PresetScrollGrid`; names are tooltip/hover information, not
+  always-visible card text. The whole left dock is wrapped in
+  `QScrollArea#LeftDockScroll`, so opening multiple preset sections must not
+  hide lower section headers or stretch the dock beyond the viewport.
+  Those sections are wrapped by `_PresetBrowser`: search stays above the
+  scrollable grid, category chips filter large packs, top/bottom scroll
+  shadows show hidden content, hover previews show name/metadata/details, and
+  drag operations use a custom compact ghost instead of raw widget screenshots.
+  `_PresetBrowser` also persists favorites and recent presets in a small JSON
+  state file, adds pack-level filtering, and keeps hover previews animated so
+  large commercial-style preset packs feel browsable rather than static.
+  Hover previews must be contextual, not a shared decorative animation:
+  effect previews reflect filter/keying payloads, title previews reflect text
+  placement/animation, transition previews reflect the transition type, and
+  workflow previews reflect template/caption/sticker/motion payloads.
+  When a preview frame is available, preset hover previews use that frame as
+  the sample: effects show an A/B original-vs-applied preview, chroma key
+  previews composite against a checker background, titles overlay on the
+  current frame, and transitions blend the current frame with a generated
+  second source. Preview popovers include small QA badges, payload detail
+  lines, and an intensity slider for effect/title/transition previews. Preset
+  mini playback is payload-specific: transitions animate cross/wipe samples,
+  motion presets show zoom/focus framing, title/caption presets slide text
+  pills, stickers pop in, and templates also render a compact timeline plan
+  strip so users can see how the one-click sequence will land before applying
+  it. `Preview Apply` and A/B preset preview cache keys include the current
+  preview-render version so visual polish changes invalidate old PNG swatches;
+  effect previews draw payload-specific blur/denoise, sharpen, vignette,
+  glitch, LUT, and key-matte hints instead of sharing one generic animation.
+  Hovering effect and transition preset cards shows a viewer-frame overlay
+  first, so the browsed FX/transition is visible even when no target clip is
+  selected; when a selected/active target clip exists, the same hover also
+  starts a delayed live preview on that clip. Leaving the card or starting a
+  drag restores the original clip state without registering an undo step.
+  Applying effect, transition, title, sticker, caption, or motion presets
+  focuses the main preview on the affected timeline range and keeps a
+  short-lived viewer overlay visible, so applied presets are not hidden simply
+  because the playhead was outside their active frame range.
+  Timeline video clips expose applied preset/effect state as compact badges:
+  `FX` for clip filters, `Key` for chroma/alpha keying, `TR` for outgoing
+  transitions, `T` for overlapping title/caption/sticker actors, `Mot` for
+  overlapping motion/zoom actors, `Nest` for nested/compound clips, and `Off`
+  when a clip FX stack is temporarily disabled but preserved. Clicking a badge
+  selects the clip and routes the Workbench/preview to the relevant FX,
+  transition, title, or motion context without starting a clip drag. The
+  Workbench FX tab mirrors this with a selected-clip stack summary and safe
+  Edit Clip FX, Disable/Enable Clip FX, Clear Clip FX, and Clear Transition
+  actions. Disabled clip FX are saved on `VideoClip.disabled_video_filters`,
+  `disabled_chroma_key`, and `disabled_bg_removal`, and are persisted through
+  project save/load. Effect presets also preserve `preset_meta` inside
+  `VideoFilterParams`, so the timeline can paint clip-length FX strips with
+  human-readable preset labels. The same strip source now includes Screen
+  Studio auto zoom, overlapping title/caption actors, overlapping motion/zoom
+  actors, and nested/compound context, so the hover tooltip and painted strip
+  describe the same active clip elements. Transition presets preserve
+  `VideoClip.transition_preset_meta` through drag/drop, click apply, keyboard
+  insert, context-menu insert, and project save/load, so transition strips can
+  show names such as `Soft Zoom Bridge` instead of only raw transition types.
+  These strips sit inside the clip body while the small badges remain clickable
+  status shortcuts; narrow clips compact strip text to the tag and expose the
+  full applied FX/transition/color list through a hover tooltip. Together they
+  make applied effects/transitions look like editable timeline regions instead
+  of invisible payloads.
+  Hovering title, template, caption, sticker, motion, audio, or color preset
+  cards starts a model-safe preview overlay on the viewer instead of mutating
+  timeline data, so undo/redo remains clean while users browse creative packs.
+  The left-dock `_PresetBrowser` includes a compact inspector panel that
+  updates from hovered cards with target/cost/QA badges, payload hints, pack,
+  category, and tag details. Static preset preview swatches are cached under
+  `default_save_dir()/.cache/preset_previews` so reopening large preset
+  libraries does not repeatedly repaint the same synthetic thumbnails. The
+  Preset Preview Cache manager can also warm current-frame contextual previews:
+  if a viewer frame exists, `_render_contextual_preset_preview()` stores
+  sample-specific thumbnails keyed by preset payload plus a small frame digest,
+  so A/B effect/title/transition previews can be reused on the active shot.
+  Preset search supports natural Korean/user-language aliases through
+  `PRESET_SEARCH_ALIASES` in `app.preset_library` and
+  `_PRESET_NATURAL_QUERY_ALIASES` in `app.video_editor_window`: searches such
+  as `?쇱툩`, `寃뚯엫`, `????좊챸`, `?덉?`, `?ㅽ뙆??, and `?쇱씠釉?D` map to
+  the English preset tags and rank stronger matches first.
+  Preset browsers show a compact wallpaper-palette style pack row in addition
+  to the pack combo and category chips, so users can switch packs through
+  square color swatches.
+  The Effects Presets action row exposes Template Composer, preset preview
+  cache management, and Visual QA viewer entry points alongside save/import/
+  export, pack management, QA, and one-click plan actions.
+- The play/transport bar is also icon-first. Mark In, Mark Out, range clear,
+  and Marker must not show text by default; their names live in tooltips.
+  The former separate Clear/Edit/Color action strip is merged into the play
+  bar so the timeline controls do not stack into multiple horizontal chrome
+  bands. Speed is a compact `1.0x` chip, not the full localized
+  `Current speed` sentence.
+- The jog/shuttle widget keeps the existing jog/shuttle interaction contract
+  but uses a compact, colorful Screen Studio-style knob rendering in the main
+  editor instead of the earlier large metallic broadcast-deck circle.
+- Shared `KnobWidget` controls render as soft glass tiles with a lively
+  colored value arc, not as flat gray code-drawn circles. This affects color
+  master knobs and audio-style knobs that use the shared widget.
+- The embedded Color dock above the timeline is not the full Color Page. It is
+  a compact Screen Studio-style palette strip with four small color-wheel
+  swatches, compact LUT strength, and three primary grade knobs; it must avoid
+  large numeric spinboxes or tall wheel grids that collide at normal editor
+  heights.
+- Edit/Color tab switches are preview-safe UI transitions. They must not
+  mutate NodeGraph selection, and during the short transition guard they keep
+  the last good preview frame when an unexpected tiny blank frame arrives while
+  a renderable clip is active.
+- The same preview transition guard is available to actor-editor focus and
+  mask-edit refresh paths, so Live2D/Spine placement and node-mask edits do not
+  leave the main viewer stuck on a transient blank frame.
+- Offscreen UI layout QA must capture both the normal editor and the expanded
+  compact Color dock. The color-dock capture checks compact height, palette
+  card count, and absence of numeric spinboxes.
+- Slider controls across the main editor, Workbench, Audio Mixer, Color page,
+  Live2D editor, Spine editor, and node parameter widgets use the same quiet
+  Screen Studio-style language: dark 3 px rail, single purple fill, compact
+  round purple thumb. Avoid cyan/orange slider fills unless the control itself
+  is explicitly color-domain data.
+- The editor icon strategy is code-native by default. `app/icons.py` provides
+  vector icons for project menus, media/video/audio/actor filters, grid/list
+  views, pop-out, delete, marker, mark-in/out, scopes, mixer, proxy/layers,
+  color, fit, nest, play/pause/reset, previous/next, loop, and timeline edit
+  tools. Main editor buttons, Sound Editor transport buttons, Typography preview
+  transport buttons, and Media Pool buttons use code-native icons instead of
+  font-dependent symbol glyphs, which keeps the UI stable across Korean/CJK
+  font fallback.
+- The Color/Color Grade icon must read as color grading, not a generic paint
+  palette. `app.icons.app_icon("grading")` and the `color`/`palette` aliases
+  draw a small color wheel plus curve/scope stroke, and the main Edit/Color page
+  switcher uses that grading icon for the Color page.
+- Timeline row play/status marks are painter-native shapes in
+  `VideoTrackRow.paintEvent()`, not text glyphs. Keep future row-watermark and
+  transport symbols in painter/icon code so offscreen QA, Windows fonts, and
+  localized UI stacks do not change their appearance.
+- The same font-independent rule now covers the high-traffic editor chrome:
+  project buttons, actor buttons, audio scopes/mixer toggles, Edit/Color page
+  buttons, PiP keyframe buttons, clip context-menu actions, Workbench mask
+  action buttons, Live2D drag preview badges, and audio-track watermarks use
+  `app.icons.app_icon()` or direct painter shapes instead of emoji/symbol text.
+- Timeline edit tools use micro-interaction feedback. Mouse presses and
+  keyboard mode changes pulse the active icon, blade cuts emit a short
+  timeline burst at the cut point, timeline drops show a compact insertion
+  guide for non-transition assets, and transient status is shown through a
+  rounded toast banner rather than raw tooltips.
+- Preset state is managed directly on timeline clips. Applied FX/Key/TR/Color/
+  Title/Motion/Nested badges are clickable focus targets, and right-clicking a
+  badge opens a focused badge menu for edit/focus, enable/disable FX, clear FX,
+  or clear transition depending on the badge type. Dragging an effect preset
+  over a valid clip shows the apply chip; hovering over empty timeline space
+  shows a blocked chip that explains the preset must be dropped on a clip.
+  `app.preset_feedback` centralizes the user-facing model for preset apply
+  chips, badge labels, drop-blocked reasons, duration/time formatting, and
+  Media Pool/Workbench discoverability cards. Successful apply events now carry
+  this feedback model in UX telemetry.
+  It also exposes `preset_timeline_strip_rows()`, `preset_preview_ab_model()`,
+  and `timeline_interaction_feedback_model()` so timeline badges/strips,
+  current-frame A/B preset previews, snap/drop/undo chips, QA reports, and
+  future editor widgets use the same product-facing copy and timing data.
+  `tools/qa_creator_polish_coverage.py` now gates this area together with
+  payload-specific preset previews, Screen Studio defaults, CapCut quick-create
+  flow, and long-project stability hooks.
+- The main Select/Blade/Ripple/Roll/Slip/Slide timeline tool buttons use
+  `_AnimatedTimelineToolButton`, a painter-native animated icon tile. The
+  Select tool draws its cursor directly with hover/checked lift, glow, sparkle,
+  and trail motion; neighboring edit tools keep the same square palette but add
+  subtle icon motion so the toolbar feels closer to Screen Studio instead of a
+  static Qt button row.
+- The icon pass also covers the launch window, clip-effects tabs, Mask Editor
+  zoom controls, Subtitle pop-out, Workbench node-graph toolbar/context menus,
+  and the immediately visible Live2D/Spine editor controls. Those surfaces
+  should continue using `app.icons.app_icon()`/`QIcon`/`QPixmap` rather than
+  embedding emoji or transport glyphs in button text.
+- Empty editor states are part of the product surface. The Preview panel draws
+  a native rounded canvas/card for empty and audio-only projects instead of
+  showing raw label text, and the Workbench hides property rows until a real
+  clip/track is selected so the right dock reads as intentional rather than
+  disabled form controls.
+  Preview left-click is reserved for the paint/bubble/sticker canvas once any
+  renderable video/actor frame exists. Import/open-media dialogs may appear only
+  when the preview is genuinely empty; GPU-preview-only frames must be promoted
+  to a paint `QPixmap` instead of being mistaken for an empty preview.
+  Detached preview mirrors both the QImage and GPU RGB paths, and Live2D/Spine
+  actor-only frames are treated as renderable content instead of being filtered
+  out as "no video" placeholders.
+  The OpenGL preview widget is intentionally lazy-created on the first real
+  frame. Startup WinEventHook tracing showed that eager `QOpenGLWidget`
+  construction creates transient Qt/NVIDIA helper windows
+  (`NVOpenGLPbuffer`, `__wglDummyWindowFodder`, and a hidden 2x2 Qt window)
+  during launcher-to-editor startup; an empty editor must not instantiate that
+  path.
+  Startup menu buttons follow the same rule: export, color, proxy, project,
+  actor, and secondary command menus are built only on user press. Eager
+  `QMenu` construction creates `Qt6110QWindowPopupDropShadowSaveBits` native
+  popup/drop-shadow windows on Windows, which looks like many tiny flashing
+  windows even when the menu is never shown.
+  Current launcher-to-editor flicker diagnosis must be evidence-based, not
+  inferred from process names alone. Official platform docs say
+  `CREATE_NO_WINDOW` applies to console applications, Python exposes that flag
+  through `subprocess.Popen(..., creationflags=...)`, Qt starts Windows child
+  processes through `CreateProcess`, and Qt popup menus are native top-level
+  widgets. Therefore startup QA distinguishes actual user-visible console
+  windows from hidden Qt popup/drop-shadow/helper windows.
+  The product-flow check is:
+  `tools/trace_visible_windows.py --duration 10 --log-path debugCapture/startup_trace_logs/visible_window_trace_no_internal.jsonl -- .venv/Scripts/python.exe tools/trace_launcher_open.py --no-internal-trace`, followed by
+  `tools/analyze_visible_windows.py debugCapture/startup_trace_logs/visible_window_trace_no_internal.jsonl`.
+  The current passing baseline is `Visible console-like rows: 0` and no
+  DWM Ghost rows in the product path. The internal `StartupFlickerTracer` is
+  intentionally low-frequency and app-focused because aggressive all-process
+  polling can itself create UI stalls and false DWM Ghost artifacts while
+  Codex/Git/PowerShell helpers are active.
+  The launcher delay selector uses segmented buttons instead of `QComboBox` so
+  opening the editor does not pre-create a combo popup/native menu surface.
+  The editor's former `startup_yield` hook no longer calls
+  `QApplication.processEvents()` by default. Trace evidence showed that pumping
+  events while the editor tree was half-built let parentless `QLabel`,
+  `QPushButton`, and `QWidget#SelectionBar` objects become short-lived native
+  `Qt6110QWindowIcon` windows titled "TigerCapture". The hook now only logs
+  phases unless `TIGERCAPTURE_STARTUP_YIELD=1` is set, re-parents hidden
+  orphan widgets at each bootstrap phase, and hidden toolbar placeholders such
+  as the dormant Spine buttons have explicit parents.
+  Windows/Qt startup widgets must be parented at construction time, not only
+  after later `layout.addWidget(...)` calls. `WorkbenchPanel`, Workbench row
+  widgets, the color/timeline splitter surface, Media Pool, preset browsers,
+  toolbar controls, timeline palette controls, and collapsible section headers
+  now pass explicit parents while being built. `cleanup_hidden_qt_orphan_windows`
+  also handles hidden custom `QWidget` subclasses, but that cleanup is a safety
+  net rather than the main strategy. The latest product-path trace
+  `debugCapture/startup_trace_logs/visible_window_trace_parented_no_internal.jsonl`
+  and internal diagnostic trace
+  `debugCapture/startup_trace_logs/visible_window_trace_mediapool_parented.jsonl`
+  show `Visible console-like rows: 0`; during the measured startup interval the
+  only visible TigerCapture Python windows are the normal launcher and the real
+  video editor. Hidden `Qt6110QWindowPopupDropShadowSaveBits` rows are native Qt
+  helper surfaces, and DWM Ghost rows that appear after the diagnostic harness
+  calls `os._exit()` are treated as teardown artifacts, not launcher startup
+  flicker. User real-run confirmation on 2026-06-22: the launcher-to-editor
+  flashing-window issue is fixed in practice. Startup crash-report notices are
+  only shown for actionable, non-stale crash payloads; malformed or stale
+  `crash_report_latest.json` files stay available in diagnostics but do not
+  interrupt the launcher/editor entry path.
+  Media Pool video tiles support hover scrub previews, and the Workbench keeps
+  the existing Clip/FX/Mask/Audio/Meta contract while using icon-first tabs,
+  compact swatches, and card-like empty states to match the Screen
+  Studio-style palette direction.
+- UI layout QA mirrors app startup font/theme setup. `tools/qa_ui_layout.py`
+  creates a QApplication, applies `app.font_fallback.apply_ui_font()` and
+  `app.style.APP_QSS`, then initializes i18n before instantiating
+  `VideoEditorWindow`, so captured screenshots reflect the real app shell
+  instead of Qt's offscreen defaults.
+- The video editor command bar includes a compact globe language menu backed by
+  `app.i18n.SUPPORTED_LANGUAGES`. Selecting a language calls `set_language()`
+  and `save_language()`, then immediately refreshes the window title, primary
+  toolbar labels/tooltips, preview/timeline/color/media/effects section labels,
+  export dropdown text, and localized effect-preset guidance in the current
+  editor session.
+- Media Pool filtering is first-class UI. `app/media_pool.py` stores each item
+  kind (`V`, `A`, `S`) on the `QListWidgetItem` and applies search/type filters
+  without changing the registered media order.
+- Media Pool also supports Grid/List presentation and Name/Type/Duration sort
+  modes. Sorting reorders only the visible pool widget items; registered media
+  paths and drag payloads remain path-based. Empty bins, filtered-out results,
+  supported drag imports, and unsupported drops are reported through the shared
+  UX feedback state instead of ad hoc label text.
+  Long-project smart bins include Proxy Missing, Proxy Stale, and Duplicate
+  Name filters so proxy debt and filename collisions can be found without
+  leaving the Media Pool.
+- New Project Dialog exposes starter template choices such as Blank, Screen
+  Recording Demo, Vertical Shorts, Gameplay Highlight, Product Demo, and
+  Live2D/Spine Actor. The selected starter id/label is preserved on
+  `ProjectSettings` so one-click preset packs can route the first timeline
+  setup.
+- Sound Editor remains clip-scoped, but the normal video-editor surface is now
+  the renewed Workbench audio panel from `app/sound_editor_panel.py`.
+  Waveform and compact spectrum/level evidence sit in the panel, and the
+  frequently used Basic/EQ/Dynamics/FX/AI controls are shown as compact
+  icon-tab graph controls rather than the old full lab layout.
+- The right Workbench/Inspector dock has a larger default share than the first
+  UI pass: the main splitter defaults to `[248, 880, 360]` with right-dock
+  stretch `2`, and the Workbench section gets more vertical stretch than PiP or
+  subtitles. `WorkbenchPanel` is now backed by a real `QStackedWidget` with
+  `Clip`, `FX`, `Mask`, `Audio`, and `Meta` pages. Clip/audio rows move between
+  the Clip and Audio pages; the node graph lives on FX; blur/mask controls live
+  on Mask; Meta shows a compact selection summary.
+- The main editor right dock includes an Audio Workspace bridge. It finds the
+  selected audio clip, the clip under the playhead, the first loaded audio clip,
+  or a selected Media Pool audio source, then routes it into the Workbench
+  `SoundEditorPanel`. Timeline sound-editor launches use
+  `SoundEditorDockWindow`, a lightweight shell around the same renewed panel.
+  The legacy `SoundEditorWindow` remains the explicit Advanced Lab for heavier
+  waveform/spectrum/marker/stem/export workflows. Mixer and Scopes toggles stay
+  mirrored so audio editing is discoverable without double-clicking the
+  timeline.
+- Spine and Live2D standalone editors share the darker professional palette,
+  thicker splitter handles, and bordered asset lists/tree panels so they read
+  as part of the same tool family.
+- Project files are `.tgp` JSON. They intentionally do not store generated
+  caches like thumbnails, waveform peaks, OpenGL state, or preview pre-render
+  frame caches. Tracked mask bbox caches are project data because they represent
+  user-correctable tracking state.
+- There are two important render worlds: interactive preview
+  (`ProjectPlayer`) and final export (`VideoExportThread`). Never assume a
+  feature works in export just because it appears in preview.
+- Real-project QA is scriptable. Use `tools/qa_project_audit.py --project
+  path\to\edit.tgp --synthetic` to audit missing assets, feature coverage,
+  media-probe timings, Live2D/Spine actor asset summaries, and synthetic export
+  parity together. Add `--preview-samples <N>` to sample actual ProjectPlayer
+  preview renders and include native/GPU bottleneck hints in the same report.
+  Preview sampling now adds clip and actor active positions, so low sample
+  counts still hit Live2D/Spine clips instead of only the start/end frames.
+  QA reports also include `export_risks` for CPU fallback, actor baking,
+  high-resolution decode/proxy, and nested timeline risk, and actor asset QA
+  follows Spine atlas texture references plus Live2D model3 moc, texture,
+  motion, and expression references.
+  QA reports include `preview_engine` status from
+  `app.preview_engine_status.preview_engine_status()`.
+- Live2D/Spine model-corpus QA has a combined entry point:
+  `tools/actor_render_qa.py <roots...> --parse-spine --limit N --summary-only`.
+  It runs the fast dependency compatibility matrix first, then reuses the
+  actual Spine and Live2D render-test paths to produce one JSON report with
+  compatibility summary, render status counts, raw/unextracted Live2D bundle
+  counts, top render failures, and promoted `compatibility_risk` stress
+  summaries for high-risk rig/atlas/mesh/motion samples. Use
+  `--render-top-risks --top-risk-limit N` to render the riskiest passing
+  compatibility rows even when they are not in the normal render limit.
+  Use `--animation-sweep --sweep-samples N` to sample multiple animation times
+  per rendered actor and record blank-frame and bbox motion diagnostics.
+  Use `--golden-dir path` to compare first nonblank render images against
+  golden baselines, `--update-golden` to create or refresh those baselines, and
+  `--known-failures qa_corpus/actor_known_failures.json` to quarantine expected
+  compatibility/render failures without hiding them from the report.
+  Use `--no-render` for dependency-only runs,
+  or `--no-spine-render` / `--no-live2d-render` to isolate one actor family.
+  `--baseline previous_actor_render_qa.json` compares the current run with a
+  saved report and adds `baseline_comparison` with regressions, improvements,
+  missing current models, and newly discovered models; any newly broken
+  previously-passing compatibility/render row makes the combined report fail.
+- Operational Live2D/Spine corpus regression QA is manifest-driven:
+  `tools/actor_corpus_regression.py --manifest qa_corpus/actor_corpus_manifest.json`.
+  It wraps compatibility, top-risk rendering, animation sweep, golden-image
+  comparison, baseline comparison, and known-failure quarantine into one
+  repeatable command. It writes both a full report and compact
+  `debugCapture/actor_corpus_status.json`, which Health/professional readiness
+  can surface without loading every raw model row. The GitHub workflow
+  `.github/workflows/actor-corpus-qa.yml` runs the safe no-render preflight
+  weekly and on manual dispatch; full render/golden runs are intended for the
+  local workstation with GPU/Live2D runtime available.
+  `qa_corpus/actor_corpus_manifest.json` also supports `optional_roots`; any
+  existing external roots are added to the scan so real model folders can be
+  kept outside the repo. Use `tools/run_actor_full_qa.ps1` for a local full
+  render/golden run, and `tools/actor_golden_manager.py` to inspect golden
+  baseline coverage or promote `_actual` renders into accepted baselines.
+  The compact status artifact now includes per-model rows; Media Pool actor
+  items read it through `app.actor_qa_status` and stamp `QA`, `RISK`, `Q`, or
+  `FAIL` badges on actor thumbnails/tooltips. The Media Pool metadata panel
+  expands the same status into readable per-model pass/fail, stress/risk,
+  render status, golden baseline state, broken dependency, missing atlas/MOC/
+  motion, known-failure, and recommendation lines. `ActorQABrowserDialog`
+  provides the same per-model status as a full browser from the Actors menu and
+  Command Palette, and shows baseline-vs-actual image previews when the report
+  row references golden/render artifacts.
+- Live2D and Spine editor loading is user-visible and cancellable. Timeline
+  double-click opens the editor first, suppresses sample autoload for linked
+  clips, and defers the heavy native/model load until the window is visible.
+  Both editors show an indeterminate progress bar, cancel button, timeout
+  handling, load-step log, retry/open-location/sample recovery buttons, and
+  keep the progress state active until the first rendered frame is actually
+  visible. Actor timeline clips show transient `LOAD`/`OK`/`ERR`/`TIME`/`STOP`
+  badges through `app.actor_loading_status`.
+  Live2D additionally mirrors progress in a large viewport loading panel, so
+  the expensive first native/GL initialization does not look like a frozen
+  window while the bottom control bar is out of focus.
+- Live2D actor assignment is automatic: selecting/loading a model writes the
+  model path to the linked timeline clip, the auto-selected idle motion writes
+  its motion group/index, and closing the editor applies the current model and
+  motion once more. The old explicit Apply flow is no longer the primary UX.
+  Opening or adjusting a Live2D/Spine actor clip focuses the main preview
+  playhead inside that clip when necessary, so position/scale edits are visible
+  without manually scrubbing to the actor range.
+- Spine software fallback rendering clips only the visible portion of oversized
+  or partly off-frame textures/triangles before compositing. This keeps scaled
+  NIKKE-style background plates and large meshes visible in preview/export
+  instead of dropping the whole attachment when it crosses a frame boundary.
+- Spine GL editor and preview render passes explicitly clear stale scissor
+  state before drawing actors, so Qt/update-region state cannot crop actors to
+  an old repaint rectangle. The Spine editor defaults to a work view that keeps
+  the actual final-frame placement but zooms the editor camera out when needed;
+  a final-frame toggle shows the exact output crop when users need delivery
+  framing.
+- Missing media/model paths can be relinked without opening the UI:
+  `tools/relink_project_media.py project.tgp <search-root...>` writes a
+  `.relinked.tgp` copy by matching filenames under the supplied roots.
+  `tools/relink_project_media.py --health project.tgp <search-root...>` is a
+  non-writing long-project preflight that reports missing rows, multi-root
+  relink conflicts, repeated references, duplicate filename collisions, and
+  sibling proxy state for video sources.
+  The main editor `Health` toolbar action runs the same media/proxy audit on
+  the current in-memory session without forcing a save. It shows a read-only
+  table of status, file, proxy state, reference count, candidate count, path,
+  and a detail pane with recommended action; rows with missing/relink-conflict
+  status can jump directly to the Relink browser. The Health dialog also
+  attaches `professional_readiness` for the current in-memory session, showing
+  readiness score, high/medium issue counts, section scores, and top actions
+  for long-project stability, GPU preview/export consistency, timeline edit
+  integrity, color workflow depth, audio mix readiness, and preset/template
+  ecosystem readiness. It also attaches an advisory
+  `resolve_post_pipeline_parity` matrix that compares TigerCapture against
+  Resolve/Fairlight/Fusion-class post production depth without failing ordinary
+  export readiness. That matrix groups Color, Audio/Fairlight, VFX/Fusion,
+  Performance, Post Pipeline, and Hardware ecosystem features, marking each as
+  `supported`, `partial`, or `missing`. Tracked features include 32-bit/YRGB
+  wide-gamut processing, HDR wheels and ST.2084/HLG tone mapping, HDR10+/
+  Dolby Vision metadata, ACES/OCIO, RAW controls, Log/HDR wheels, advanced
+  curves/warper, serial/parallel/layer/shared node grading, secondary grading,
+  beauty/object repair, restoration FX, gallery/shot-match/scopes, Fairlight
+  DAW scale, FlexBus routing, realtime EQ/dynamics, sample-accurate editing,
+  ADR, elastic retime, take layers, Foley/SFX libraries, broadcast loudness,
+  immersive audio, voice/music AI, plugin hosting, Fusion 2D/3D compositing,
+  FBX/Alembic import, trackers, keying/roto, paint/repair/particles, spline/
+  expression/macro workflows, GPU/native FX parity, local-ML/neural features,
+  10-bit/120fps/4K+ delivery, proxy/render cache, remote rendering,
+  professional ingest/A-V sync/metadata/multicam/collaboration/deliver flows,
+  and DeckLink/color-panel/Fairlight-console hardware. Media Health expands
+  this advisory into category scores, supported/partial/missing counts,
+  supported highlights, and a ranked `implementation_backlog`/`top_actions`
+  list so the next Color, Audio, VFX, performance, post-pipeline, and hardware
+  work can be pulled directly from the product report. The advisory also emits
+  `professional_depth_cards` for `resolve_color_depth`,
+  `fairlight_audio_depth`, and `fusion_vfx_depth`; each card records the
+  current maturity level, why the app is not yet at 100% parity, TigerCapture's
+  product-fit strategy, implementation phases, daily-use checks, blocking
+  counts, and QA gates for Color corpus, audio delivery, and compositor graph
+  validation. The daily-use checks map directly to feature IDs such as
+  float/ACES color, RAW/HDR delivery, node-secondary grading, realtime mixer
+  routing, ADR, Fusion graph cache, tracking/roto/keying, and paint/particle/
+  macro work. This keeps the comparison
+  honest: RAW/HDR/ACES, Fairlight DAW scale, and Fusion 2D/3D compositing are
+  tracked as productized/validated stages rather than implied complete support.
+  Health detail text and the QA Dashboard now surface those depth cards beside
+  the numeric parity score, so users can see the practical next Color/Fairlight/
+  Fusion action without opening raw JSON. Color workflow helpers also provide a
+  deterministic synthetic color-bar/luma-ramp sample and `scope_accuracy_report()`
+  for basic waveform/parade/vectorscope QA gates. Audio workflow helpers expose
+  `audio_delivery_qa_gate()` to combine loudness target checks with Fairlight-
+  style bus/send validation. VFX/post-pipeline helpers expose a small
+  `VFXNodeGraph`/`VFXNodeSpec` model plus `build_mini_vfx_node_graph()` so
+  keyer, B-spline roto, clean plate, planar tracking, merge, title, and output
+  nodes can share one preview/export-locked payload before a full Fusion-style
+  compositor UI exists. The Color Page caches and exposes the scope accuracy QA
+  gate in the scopes status tooltip, the Audio Mixer `Loudness` report now
+  includes routing/bus validation alongside LUFS/true-peak checks, and Mask
+  Editor stores both `vfx_repair_plan` and `vfx_node_graph` payloads so repair
+  masks can be inspected as a small compositor graph instead of an opaque mask.
+  Professional Readiness now embeds the Color scope QA report inside
+  `color_workflow_depth`, Health detail text surfaces that report, and export/
+  Render Queue preflight diagnostics append an `Audio Delivery QA` line covering
+  loudness target, true peak, route count, and bus validation. Mask Editor also
+  includes a `VFX Graph` inspector button that displays the mini compositor JSON
+  before committing the mask. The in-memory Health serializer collects
+  `vfx_repair_plan` and `vfx_node_graph` payloads from active clips and
+  Workbench node chains, so masks authored in the editor are counted by
+  Professional Readiness and export diagnostics without requiring a save/reload
+  cycle. `vfx_node_graph_qa_report()` validates those mini compositor graphs for
+  missing output nodes, unresolved input links, node counts, kind counts, and
+  required media/output coverage. Health detail text, QA Dashboard project rows,
+  and export diagnostics now include compact `Color Scope QA` and `VFX Graph QA`
+  lines beside the readiness score. `app.workbench_panel.WorkbenchPanel`
+  exposes `vfx_node_graph_qa_payload()` and `vfx_node_graph_summary_text()` so
+  the FX tab can display mini VFX graph status directly from selected
+  `track.node_item_chain` payloads. The same panel also uses
+  `vfx_node_graph_overview_for_track()` to draw a compact read-only VFX strip
+  with Media/Keyer/Roto/Clean/Track/Merge/Out pills below the FX summary, so a
+  mask/repair graph is visible before opening deeper diagnostics. Tracks with a
+  VFX payload also reveal an `Inspect VFX` action backed by
+  `vfx_node_graph_detail_text_for_track()`, which opens QA gates, warnings,
+  output/cache policy, and node input/parameter details from the Workbench.
+  Mini graph pills are implemented as clickable buttons and derive review
+  state from graph validation warnings if the payload did not persist warning
+  text.
+  `app.render_queue_panel` parses persisted
+  preflight diagnostics with `render_preflight_cards_from_text()` and shows
+  clickable readiness/Color/Audio/VFX/export-parity cards above the selected
+  job log. Each card uses `render_preflight_card_detail_text()` for a focused
+  detail dialog with copy support, so users can inspect one failing gate without
+  scanning the full render log. `render_preflight_card_action_specs()` maps
+  those cards to contextual resolution routes: Health/Health Center,
+  QA Dashboard, Color Page, Audio Mixer, Preset QA, or Deliver Presets.
+  Health Center also shows
+  Professional Readiness as a dedicated row when opened from an editor session,
+  so users do not need to dig through the media table to see long-project and
+  Resolve/Fairlight/Fusion parity status. Timeline readiness
+  also tracks professional Color/Audio parity signals: project LUT/HDR/OCIO
+  intent, grade-local LUTs, qualifier cleanup, tracked power windows, audio
+  effect graphs, clip/track automation, bus routing, and loudness/dialogue
+  readiness are counted so Health, export preflight, and real-project QA report
+  the same delivery risks.
+  The first implementation tranche for this parity matrix is Qt-free and lives
+  in workflow helpers rather than modal UI: `app.color_workflow` adds
+  `AdvancedColorToolset`, `HDRZoneControl`, `LogWheelSet`, `HueCurveSet`,
+  `ColorWarperPoint`, and frame helpers for HDR zone tone, log-wheel offsets,
+  Hue vs Hue/Sat/Luma, and color-warper transforms, plus
+  `advanced_color_product_capabilities()`. `app.audio_workflow` adds
+  `AudioRoutingMatrix`, `AudioSendSpec`, `build_default_routing_matrix()`,
+  `loudness_delivery_report()`, and `fairlight_product_capabilities()` for
+  Fairlight-style routing, sends, realtime mix metadata, sample-accurate
+  readiness, and loudness delivery checks. `app.post_pipeline_workflow` adds
+  roto spline, clean-plate, planar-tracker, proxy/render-cache, ingest clone
+  checksum, and Deliver-page job matrix models, with
+  `post_pipeline_product_capabilities()` feeding VFX, performance, and
+  post-pipeline readiness. `professional_readiness` deep-merges these built-in
+  capabilities with project-supplied `product_capabilities`, so Health/QA shows
+  implemented helper coverage by default while explicit project capability
+  metadata can still override or extend it. `ColorGrade` also persists an
+  `advanced_color_toolset` payload and bakes the implemented HDR-zone,
+  log-wheel, Hue vs Hue/Sat/Luma, and Color Warper transforms through
+  `apply_to_rgb()`, which is the shared preview/export RGB path. Color presets
+  can now write these payloads with `apply_color_preset_to_grade()`, and
+  Professional Readiness counts advanced color payloads plus project-level
+  `audio_routing_matrix`, `vfx_repair_plans`, `proxy_render_cache`,
+  `deliver_jobs`, and `ingest_clone_manifest` entries so Health/QA reflects the
+  actual project workflow payloads, not only hard-coded product capability
+  claims. `app.professional_workflow_payloads` is the shared UI/QA bridge for
+  those payloads: it can non-destructively enrich a project document with
+  Fairlight-style audio routing, proxy/render-cache policy, filtered
+  Deliver-page job specs, and checksum ingest manifests. The Audio Mixer panel
+  exposes matching routing/loudness payload helpers and displays a compact
+  routing summary so this workflow can be surfaced before a full Fairlight-style
+  mixer UI lands. The Color Page exposes an `Advanced Color` control block that
+  writes HDR-zone, log-wheel, Hue/Sat, and Color Warper values directly into the
+  shared `advanced_color_toolset` grade payload. Render Queue exposes a Deliver
+  preset matrix for web/social/UHD/roundtrip jobs. Media Pool can produce
+  selected/all ingest checksum manifests and shows proxy/checksum metadata for
+  selected clips. Mask Editor can export a VFX repair payload with B-spline
+  roto, clean-plate bounds, per-point feather values, and planar tracker intent.
+  Presets expose `preset_preview_storyboard()` metadata so cards, overlays, and
+  QA can describe before/after preview cues and bake targets without requiring a
+  full render. The next polish layer is also connected to the same payloads:
+  Color Page shows an Advanced Color before/after split preview, Hue/Sat mini
+  curve, Color Warper mini grid, bypass/solo/reset controls, and a scroll-safe
+  qualifier side panel; Audio Mixer exposes routing and loudness dialogs over
+  the same Fairlight-style payloads; Render Queue can summarize Deliver presets
+  for QA/status surfaces; Media Pool can generate a scoped media-health report
+  covering proxy missing/stale state, duplicate filenames, and relink candidates;
+  and Mask Editor shows a clean-plate/planar-tracker repair summary while the
+  user edits masks.
+  The next Resolve/Fairlight/Fusion parity tranche adds explicit professional
+  workflow sidecars, still without claiming that TigerCapture is a full
+  Resolve/Fairlight/Fusion replacement. `app.color_workflow` now exposes
+  `build_professional_color_pipeline_payload()` and
+  `professional_color_pipeline_report()` for a 32-bit scene-linear/YRGB
+  pipeline contract, non-destructive RAW controls, HDR10+/Dolby Vision
+  metadata, serial/parallel/layer/shared node render order, and restoration FX
+  payloads. `app.audio_workflow.fairlight_engine_report()` models a realtime
+  mixer graph with latency compensation, bus/send routing, ADR cues, elastic
+  retime, and SFX library metadata. `app.post_pipeline_workflow` adds
+  `professional_post_pipeline_report()`, a richer 2D/3D compositor graph, and a
+  professional Deliver codec matrix for ProRes, DNxHR, EXR, and DPX. The shared
+  bridge `app.professional_workflow_payloads.attach_professional_workflow_payloads()`
+  can attach these sidecars to a project document as `color_pipeline_payload`,
+  `fairlight_engine_payload`, `professional_deliver_jobs`, and `vfx_node_graphs`;
+  Professional Readiness consumes those fields before falling back to advisory
+  built-in capabilities. `tools/qa_professional_pipeline_next.py` writes
+  `debugCapture/professional_pipeline_next_qa.json`, and QA Dashboard exposes
+  the same report as `Professional Pipeline Next` so the product can track this
+  deeper pipeline work separately from ordinary export health.
+  The follow-up tranche connects the remaining advisory gaps into the same
+  report: the Color payload now carries an `advanced_color_toolset`,
+  tracked/cleaned secondary `color_workflow`, and `beauty_repair` payload for
+  face refinement, skin retouching, object removal, and patch replacement.
+  `app.post_pipeline_workflow.local_ml_readiness_report()` registers local-only
+  object/face/reframe/retime/upscale/auto-color feature slots; no cloud provider
+  is assumed. `fairlight_mixer_stress_report()` validates a 2,000-track virtual
+  routing/stress contract, while `collaboration_readiness_report()` and
+  `studio_hardware_readiness_report()` add bin/timeline/clip locks, shared
+  markers, conflict/handoff hooks, color-panel mappings, Fairlight/audio-I/O
+  registry rows, and DeckLink-style monitoring/calibration rows. These are
+  readiness contracts and payloads: they remove blind spots from Health/QA and
+  define the integration surface for future UI/native-engine work, but they do
+  not by themselves make TigerCapture a full Resolve/Fairlight/Fusion engine.
+  `app.professional_runtime` is the next validation layer after those
+  contracts. It creates a deterministic RGB frame and runs the professional
+  Color payload through `apply_advanced_color_toolset()` plus a tracked
+  secondary `apply_color_node_workflow()` pass, comparing preview/export hashes
+  and scope data. It also verifies 32-bit scene-linear/YRGB color precision,
+  HDR metadata and scope-accuracy checks, topologically orders the Fusion-style
+  VFX graph, records render/cache-boundary nodes, verifies spline/expression/
+  modifier/macro plus deep-pixel/volumetric graph branches, writes a synthetic
+  local-ML probe image through `local_ml_analyze_media()`, and runs a
+  Fairlight-style 7.1 routing sample with ADR, elastic retime, SFX library,
+  latency compensation, and 2,000-track stress metadata. `tools/qa_professional_runtime_next.py` writes
+  `debugCapture/professional_runtime_next_qa.json`; QA Dashboard exposes it as
+  `Professional Runtime Next`, and Final Product Readiness/Productization Loop
+  now treat it as the professional runtime parity gate alongside
+  `Professional Pipeline Next`. This still does not replace a native Resolve/
+  Fairlight/Fusion engine, but it prevents the professional feature contracts
+  from staying as metadata-only promises.
+  The timeline readiness section
+  separates large same-lane overlaps from one-frame micro-overlaps, and reports
+  micro gaps/overlaps as `auto_fixable_edge_count` so Health cleanup guidance
+  does not overstate small accidental edit-edge mistakes as major overlap
+  failures. It also attaches `timeline_edge_cleanup` counts so accidental one-frame same-lane
+  gaps/overlaps are visible during routine project health checks. When unlocked
+  tracks have auto-fixable timeline edges, Health enables `Clean Timeline
+  Edges` and routes it through the same undo-safe cleanup path as the track
+  context menu. The Health detail pane previews the affected track, clip-id
+  pair, duration, time span, and whether each edge is auto-fixable or manual.
+  After a cleanup changes the timeline, Health rebuilds the report and reopens
+  with fresh media/proxy/readiness/timeline-edge diagnostics.
+  The main editor also has a `Relink...` toolbar action. It opens a
+  missing-media browser for the current project file, or a chosen `.tgp` when
+  no project is open. Users can add multiple search roots, scan all missing
+  media/model paths, choose a replacement per missing file when several
+  same-name candidates exist, and see conflict/unresolved/duplicate-selection
+  warnings plus stale/missing proxy warnings before writing a non-destructive
+  `.relinked.tgp` copy. The repaired copy can be opened immediately before
+  `load_project()` skips missing video/audio tracks.
+- Batch Export is backed by `app.render_queue.RenderQueueStore`, persisted at
+  `~/Videos/TigerCapture/.cache/render_queue.json`. The main editor exposes a
+  right-dock `Render Queue` panel through `app.render_queue_panel`. Marker
+  ranges are queued as background jobs, run sequentially while the editor stays
+  usable, and remain visible as history with status, progress, output path, and
+  encoder diagnostics. The panel supports pause-after-current, resume, cancel
+  current/pending jobs, retry failed jobs, clear completed jobs, refresh, and
+  reveal selected output folders. Export cancellation calls
+  `VideoExportThread.cancel()` so active FFmpeg subprocesses are terminated and
+  temporary outputs are cleaned. Render failures are normalized through
+  `app.render_diagnostics`: FFmpeg tails are classified as output-lock,
+  disk-space, missing-media, unsupported-media, encoder, filter-graph,
+  actor-bake, memory, empty-output, canceled, or unknown failures, with
+  concrete recovery actions persisted into queue diagnostics and shown in
+  single-export failure dialogs. The Render Queue panel has a selected-job
+  diagnostics detail pane plus a copy-diagnostics command, so users can inspect
+  and share the full failure report without reading truncated table cells.
+  `render_queue_product_diagnostics()` adds a product-facing summary, suggested
+  next actions, and preset/template export-parity hints; the panel also exposes
+  a `View Log` dialog and `Render Failure Assistant` for the selected job. Both
+  log dialogs can save the full text to disk for bug reports or long-running
+  render diagnosis. The
+  assistant can open Relink, run preset application QA, copy diagnostics, or
+  queue a short retry range from the selected failed
+  runtime job, using the failed job's last progress percentage to choose a
+  5-second range around the likely failure point and writing to a suffixed
+  output filename. Long queue histories can be narrowed with status filters
+  and text search across job names, outputs, sources, and diagnostics; old
+  terminal history can be pruned while pending/running work is preserved. The
+  older modal `BatchExportDialog` remains as a compatibility fallback and
+  stores the same failure diagnostics.
+- Editor presets are centralized in `app.preset_library`: built-ins cover
+  effect, title, transition, color, audio, template, caption style, sticker,
+  and motion presets. Extra JSON preset files can be listed/searched with
+  `tools/list_editor_presets.py` using `--kind`, `--query`, `--tag`, or
+  `--summary`. Effect presets are visible in the left dock as clickable and
+  draggable cards: clicking applies the effect to the selected clip or the clip
+  under the playhead on the active track, while dragging applies the same
+  clip-level effect payload to the clip under the drop cursor. During that drag,
+  the target clip is painted with an FX outline and preset label so the valid
+  drop area is explicit; a successful drop leaves the normal FX badge/burst
+  feedback on the clip. Effect-preset click/drag tooltips, drop labels, and
+  no-target warnings are routed through the six-language `app.i18n` tables
+  instead of hard-coded mixed-language literals. If no compatible video clip
+  exists, the status line tells the user to select a clip or drag the card onto
+  one. Title presets from the library extend the existing
+  title-card panel through the same timeline drop path.
+  Template/caption/sticker/motion presets are visible
+  in the left-dock Workflow Presets panel as compact library cards; clicking a
+  card applies it to the current target and dragging it to a track applies it at
+  the drop time. Dropped workflow cards prioritize the drop track/time over any
+  previously selected clip, and template entry `at_ms` values are treated as
+  offsets from the click/drop target time. Template presets expand into ordered
+  effect/title/transition/audio/color/motion/caption/sticker actions through
+  `template_sequence()`. The launcher deliberately shows no recent-work or
+  recommended-template cards on the first screen; broader template browsing
+  stays inside the editor so startup remains simple and the Media Pool /
+  Workbench identity is not hidden. Inside the editor,
+  the top toolbar exposes a focused Templates browser that filters the workflow
+  library to `kind="template"` while the left Workflow Presets panel still
+  keeps template/caption/sticker/motion drag workflows together. When a
+  template launch payload is supplied, the editor
+  keeps that pending template and applies it after the first compatible media
+  drop/import. Template application surfaces an A/B wallpaper-palette preview, a
+  preview-toast summary of applied step counts, and timeline badges for applied
+  clip state (`FX`, `Key`, `TR`, `COL`, `T`, `Mot`, `Nest`) plus audio-chain
+  state (`AUD`) so users can see which presets have landed without opening
+  every clip.
+  User presets live under `default_save_dir()/preset_packs`: the editor can
+  save the selected clip's current effect/chroma payload as a user effect
+  preset, import JSON preset packs into that directory, and export all
+  non-bundled user presets as a portable JSON pack. `load_editor_presets()`
+  automatically loads those user packs in addition to bundled presets.
+  Template Composer creates user template presets by sequencing existing
+  effect/title/transition/audio/color/caption/sticker/motion presets with
+  millisecond offsets, per-step duration metadata, target hints
+  (`auto`, `selected_clip`, `active_track`, `audio`, `color`), and conditional
+  gates (`always`, `if_video`, `if_audio`, `if_vertical`, `if_shortform`). It
+  can preview the composed template overlay before saving and writes through
+  the same user preset pack.
+  The Effects Presets panel exposes pack management, preset QA, and one-click
+  auto-plan actions. Pack management lists enabled/disabled user JSON packs,
+  can enable/disable imported packs by renaming them outside the loader glob,
+  can delete non-primary packs, and can repair damaged packs after writing a
+  timestamped backup. `inspect_preset_pack()` reports invalid rows, duplicate
+  ids, built-in id conflicts, cross-pack conflicts, and missing template child
+  references; `repair_user_preset_pack()` normalizes rows and removes broken
+  template references. `preset_pack_marketplace_report()` summarizes installed
+  user packs as a library/marketplace dashboard with enabled/disabled counts,
+  issue-pack counts, kind/tag coverage, per-pack score/coverage labels,
+  per-pack recommendations, and next actions for the Pack Manager UI. Health
+  also embeds this marketplace summary as `preset_pack_marketplace`, so preset
+  pack issues are visible beside media/proxy/readiness issues. Preset QA opens the ecosystem report in an
+  in-editor dialog. The auto-plan action builds a project summary from media names,
+  media counts, file types, probed video orientation, audio/video presence, and
+  timeline/media duration, runs `one_click_preset_plan()`, and applies
+  compatible presets to the active target.
+  `search_presets()`, `preset_library_summary()`, and
+  `preset_ecosystem_report()` provide library diagnostics, kind-count targets,
+  topic coverage, one-click plan coverage, template child-preset reference
+  checks, and normalized tag/name/description search, so punctuation differences
+  such as `b-roll` versus `b roll` still match. The ecosystem report is also
+  attached to `professional_readiness` as `preset_template_ecosystem`, allowing
+  Health, export preflight, and real-project QA to flag weak or broken preset
+  packs before users rely on one-click templates. The expanded built-ins include utility
+  cleanup, UI capture, esports/gameplay, music-video, blue/green-screen,
+  chapter, speaker, score-callout, Live2D nameplate, dialogue cleanup,
+  loudness, color qualifier/window, one-click short-form templates, caption
+  styles, stickers, and motion presets. A larger social/creator pack adds
+  vertical short-form hooks, tutorial step packs, product-demo polish,
+  streamer/reaction templates, creator voice chains, CTA/callout stickers, and
+  product/social color starters. A production template pack adds news brief,
+  hotkey tutorial, ranking/listicle, anime/actor reaction, food/product gloss,
+  documentary clarity, noisy-room dialogue, keycap/ranking stickers, and
+  editorial caption styles. A content expansion pack adds B-roll/cutaway,
+  podcast chapter, product-review verdict, and patch-note update templates,
+  with matching titles, transitions, effects, captions, stickers, motion, and
+  audio chains wired into `one_click_preset_plan()`. A Screen Studio/CapCut
+  style pack adds cursor-pop transitions, wallpaper-palette hooks, glass
+  callouts, compact caption styles, cursor stickers, UI tutorial motion, and
+  one-click short-form/product templates. A micro-interaction pack adds cursor
+  spotlight wipes, glass panel pushes, hotkey chips, click rings, UI-focus
+  motion, and hotkey/cursor templates. A Screen Studio template pack adds
+  cursor tutorial chapters, clean product launch, shorts hook/caption burst,
+  gaming highlight, and corporate demo sequences wired into
+  `one_click_preset_plan()`. A Screen Studio delivery template pack adds
+  `template-screenstudio-record-edit-export`,
+  `template-screenstudio-click-to-cut`,
+  `template-screenstudio-wallpaper-demo`,
+  `template-screenstudio-product-walkthrough`, and
+  `template-screenstudio-short-export`, composed from existing effect/title/
+  sticker/motion/caption/color/transition presets so they work through the
+  same preview, drag/drop, one-click planning, and template-reference QA paths.
+  `CREATOR_EFFECT_TRANSITION_EXPANSION_PRESETS` adds 10 extra effect presets
+  and 10 extra transition presets focused on everyday editing gaps: readable
+  screen text, cursor focus, webcam cleanup, product UI polish, light glitch,
+  anime/Live2D/Spine overlays, dark gameplay recovery, document capture,
+  social pop, low-light denoise, click flashes, panel slides, soft zooms,
+  clean wipes, chapter fades, and beat cuts. These presets only use supported
+  `video_filters` and `transition_out_*` payloads, so they remain compatible
+  with click apply, drag/drop, transition payload generation, preview overlays,
+  export pre-render, search, summary counts, and preset ecosystem QA.
+  Actor workflow presets now
+  include `actor-live2d-placeholder`, `actor-spine-placeholder`,
+  `template-live2d-actor-spotlight`, and `template-spine-actor-action`; these
+  create Live2D/Spine actor placeholders through the workflow preset path and
+  are included in preset ecosystem QA and one-click planning.
+- `Ctrl+Shift+P` and the top-bar search icon open the Command Palette. It
+  searches imported media, editor presets, and preset commands in one dialog.
+  Activating media filters the Media Pool to that item; activating a preset
+  applies it through the same editor-preset workflow path; command rows open
+  preset QA, pack management, cache management, Template Composer, Visual QA
+  viewer, import/export, or one-click auto-plan. The palette persists its own
+  favorite and recent rows separately from the preset browser state. The
+  selected row detail panel shows command descriptions, media paths, or preset
+  target diagnostics via `_preset_apply_failure_reason()`, so incompatible
+  presets explain whether they need a video clip, audio clip, color grade, or
+  matching template condition before the user activates them. Preset rows also
+  expose `Preview Apply` and `Fix Target`: preview opens
+  `_open_preset_application_preview()`, which renders a looping A/B
+  current-frame mini playback for the selected preset plus each
+  template/application step as
+  apply/blocked/skipped; fix calls `_run_preset_fix_action()` to select the
+  first compatible video clip, add obvious missing video/audio lanes, prepare a
+  color target, or create Live2D/Spine actor tracks when that is safe. Command
+  Palette search uses natural-language alias groups and match scoring so exact
+  topic matches rank above weaker substring hits.
+- Actor workflow presets use the Media Pool as a model resolver. If a compatible
+  `.model3.json` Live2D model or Spine `.json`/`.skel`/`.atlas` candidate is
+  already imported, the preset creates the actor clip with that model path;
+  otherwise it falls back to a placeholder clip that can be edited later.
+- Preset Pack Manager presents each pack as a small marketplace card with score,
+  coverage, tags, and issue state. `Inspect` shows duplicate ids, built-in id
+  conflicts, cross-pack conflicts, and missing child presets; `Resolve Issues`
+  repairs invalid rows, duplicate rows, and broken template child references,
+  while surfacing id conflicts as manual rename/disable decisions.
+- Timeline drop guides are duration-aware. Dragging media, titles, effects,
+  speed/zoom/fade actors, or editor templates paints a translucent rounded
+  block estimating the insertion span instead of only a vertical line. Template
+  and workflow drags also paint small colored internal segments for their
+  ordered child actions plus a small duration/type summary pill, making
+  multi-step drops readable before release.
+- The in-editor Visual QA viewer browses `debugCapture` layout/visual
+  regression report folders, shows the captured PNG preview, and displays the
+  compact report payload. `Approve Baseline` can promote the selected/current
+  capture into the product baseline. The current productized baseline path is
+  `debugCapture/visual_baseline/baseline.json`, with approved PNGs archived in
+  `debugCapture/visual_baseline/approved/` and a `baseline_manifest.json` with
+  approval time and source path, giving the UI a controlled baseline update
+  path without hiding the CLI QA files.
+- The in-editor QA Dashboard (`app.qa_dashboard.QADashboardDialog`) summarizes
+  recent product QA reports: preset application/corpus parity, Color/Audio
+  accuracy, timeline fuzzer results, timeline pixel-alignment QA,
+  screenshot-based timeline visual-alignment QA, long-project stress QA,
+  Live2D/Spine actor-lane workflow QA, Node Graph scene/widget fuzzer QA,
+  actor corpus status, actor mass-compat smoke QA, actor render QA, latest
+  visual regression/baseline audit reports, micro-interaction QA, and the
+  latest crash report. It shows available/missing report state, pass/fail
+  summary, update time, detail lines, and opens the selected report folder.
+  Safe reports can be run from the dashboard: fixture generation,
+  preset application QA, Color/Audio accuracy, long-project stress, timeline
+  fuzzer, timeline alignment, timeline visual alignment, actor-lane workflow
+  with real samples, Node Graph scene/widget fuzzers, visual regression,
+  visual-baseline audit, micro-interactions, actor mass-compat smoke, and
+  dependency-only actor corpus status when the manifest is present. `Run Fast
+  QA` executes the safe command set, `qa_dashboard_history.json` stores recent
+  pass/fail trend points, and visual baselines can be approved through
+  `tools/qa_visual_baseline_manager.py`. The dashboard also paints a compact
+  pass/fail/missing trend strip and shows thumbnails for visual-regression
+  rows, so QA state is readable without opening each JSON file.
+  The dashboard also includes "Product Polish Next", backed by
+  `tools/qa_product_polish_next.py` and `app.product_polish`. That report is
+  the current 10-item next-work gate: preset timeline visibility,
+  preset/template result previews, Screen Studio real-corpus zoom/cursor
+  readiness, CapCut caption/shorts quality, timeline feel feedback, Media Pool
+  discoverability, export parity expansion, crash recovery productization, UI
+  visual consistency, and QA Dashboard productization. It separates
+  implementation readiness from real-world sample readiness; a passing local
+  report can still show that the Screen Studio real recording corpus needs
+  20-50 actual recordings.
+- A consolidated productization loop is available through
+  `tools/qa_productization_loop.py`, QA Dashboard, and Command Palette. It
+  summarizes fifteen commercial-polish areas: UI visual QA, commercial
+  expansion, CapCut creator workflow, preset preview realism, preset pack
+  management, QA Dashboard coverage, Render Queue UX, Media Pool long-project
+  state, Color/Audio accuracy, Screen Studio parity gap, Live2D/Spine actor
+  compatibility/loading/overnight QA, crash recovery/project repair, and
+  starter templates. With
+  `--run-fast-qa` it now bootstraps the QA corpus, runs real-sample
+  Color/Audio checks, Screen Studio parity-gap QA, long-project stress,
+  micro-interactions, actor
+  mass-compat, visual regression/baseline audit, timeline fuzz/alignment, actor
+  lane workflow, Node Graph fuzzers, and preset application QA. The latest
+  local productization run is expected to report score 100/100 when the
+  generated corpus and approved visual baseline are present.
+- Main-editor layout QA is scriptable. Use `tools/qa_ui_layout.py` for
+  1366x768, 1920x1080, and full-wide captures; use `--onscreen` when doing a
+  real-monitor pass.
+- Preset/template application QA is scriptable through
+  `tools/qa_preset_application_corpus.py`. It summarizes real `.tgp`/JSON
+  project files, derives media/topic flags, runs `one_click_preset_plan()`,
+  includes `preset_ecosystem_report()` and `preset_pack_marketplace_report()`,
+  checks preview/export baking parity for every planned preset kind, and writes
+  an optional JSON report so real project corpora can catch weak one-click
+  template routing. With no explicit project arguments the script can
+  auto-discover up to five project-like files from
+  `qa_corpus/preset_application_samples`, `qa_corpus`, or supplied
+  `--discover-root` directories via `discover_project_files()`. Health exposes
+  direct buttons for Preset Pack Manager, preset ecosystem QA, and preset
+  application corpus QA; the in-app corpus run writes
+  `debugCapture/preset_application_corpus_ui.json`. Product QA sample planning
+  is tracked in `qa_corpus/product_qa_corpus_manifest.json`, grouping
+  screen-recording UI demos, short-form templates, tracking masks, actor
+  models, long-project stability, and Color/Audio accuracy corpora.
+- The persistent local QA corpus is generated by `tools/build_qa_corpus.py`.
+  It now writes six `.tgp` fixtures: timeline/audio basics, masks/filters/
+  tracking, nested multitrack, Live2D/Spine actors, audio-heavy mixed layout,
+  and `06_long_project_stress.tgp`. The generator also writes a readable
+  `.tigercapture_recovery/01_timeline_audio_basic~autosave.tgp` recovery
+  candidate and default `qa_corpus/color_audio_samples` media for real
+  Color/Audio diagnostics.
+- Long-project/recovery smoke QA is scriptable through
+  `tools/qa_long_project_stress.py`. It verifies at least 5 minutes of project
+  duration, 100+ video clips, 120+ audio clips, nested sequence coverage, proxy
+  state, no missing media/model paths, and an `open_safe` recovery candidate.
+- UI micro-interaction QA is scriptable through
+  `tools/qa_micro_interactions.py`. It verifies required code-native icons,
+  wallpaper-palette card rollover labels, the timeline burst painter, blade
+  tool entry points, and global hover/pressed styling.
+- Visual regression uses `tools/qa_visual_regression.py`; approved captures are
+  stored by `tools/qa_visual_baseline_manager.py`, and baseline coverage is
+  audited by `tools/qa_visual_baseline_audit.py`. Screenshot hashes are still
+  recorded, but tiny offscreen-render pixel jitter can be tolerated through
+  image diff thresholds so real layout changes remain blocking while harmless
+  capture noise does not.
+- Live2D/Spine mass-compat smoke QA is scriptable through
+  `tools/qa_actor_mass_compat.py`. It checks that actor corpus status exists,
+  coverage targets are met, stress-tier models are represented, known-failure
+  quarantine is present, and actor golden baselines remain seeded.
+- Timeline interaction stress QA is scriptable through
+  `tools/qa_timeline_fuzzer.py`. It randomly exercises select-era edit model
+  operations such as blade, linked clip move, ripple/roll, slip/slide, nested
+  clip markers, actor lanes, and undo snapshots, then writes
+  `debugCapture/timeline_fuzzer_qa.json` for the QA Dashboard.
+- Timeline row pixel alignment is scriptable through
+  `tools/qa_timeline_alignment.py`. It verifies that TimelineRuler, video
+  TrackRow, Live2DActorLaneRow, and SpineActorLaneRow share the same 10 px
+  timing origin and writes `debugCapture/timeline_alignment_qa.json`.
+- Live2D/Spine actor-lane interaction QA is scriptable through
+  `tools/qa_actor_lane_workflow.py`. It creates empty actor clips, sends real
+  Qt double-click events, verifies the emitted clip signal and hit-test result,
+  and writes `debugCapture/actor_lane_workflow_qa.json`. Pass
+  `--include-samples` to also load the first installed Live2D `.model3.json`
+  and Spine sample skeleton, validating real asset assignment without running
+  the slower render corpus.
+- Node Graph interaction fuzzing is scriptable through
+  `tools/qa_node_graph_fuzzer.py`. It exercises QGraphicsScene add/connect/
+  reject/delete/move/save/load operations and writes
+  `debugCapture/node_graph_fuzzer_qa.json`.
+- Timeline visual alignment QA is scriptable through
+  `tools/qa_timeline_visual_alignment.py`. It captures
+  `debugCapture/timeline_visual_alignment_qa/timeline_visual_alignment.png`
+  and verifies ruler/video/Live2D/Spine playhead x positions in the generated
+  report.
+- Timeline drag feedback QA is scriptable through
+  `tools/qa_timeline_drag_feedback.py`. It drives real Qt mouse press/move
+  gestures against `TrackRow`, captures snap and blocked drag-in-progress
+  screenshots, verifies feedback text plus snap/blocked color pixels, writes
+  `debugCapture/timeline_drag_feedback_qa/timeline_drag_feedback_report.json`,
+  and is exposed in QA Dashboard as `Timeline Drag Feedback`.
+- Timeline edit-mode mouse QA is scriptable through
+  `tools/qa_timeline_edit_gestures.py`. It drives real `TrackRow`
+  press/move/release gestures for trim, ripple, roll, slip, and slide; verifies
+  exactly one `drag_committed` pulse per gesture; checks the final clip/source
+  timing changes; captures per-mode screenshots; writes
+  `debugCapture/timeline_edit_gestures_qa/timeline_edit_gestures_report.json`;
+  and is exposed in QA Dashboard as `Timeline Edit Gestures`.
+- Timeline hover-affordance QA is scriptable through
+  `tools/qa_timeline_hover_affordance.py`. It drives real `TrackRow`
+  mouse-move events over clip body, gap edge trim, shared-edge roll, slip, and
+  slide targets; verifies hover chip text, native tooltip synchronization after
+  repeated hover moves, cursor shape, and screenshots; writes
+  `debugCapture/timeline_hover_affordance_qa/timeline_hover_affordance_report.json`;
+  and is exposed in QA Dashboard as `Timeline Hover Affordance`.
+- Timeline preset-visibility QA is scriptable through
+  `tools/qa_timeline_preset_visibility.py`. It verifies that applied clip FX,
+  keying, transitions, color grades, and title overlaps produce timeline-visible
+  strip entries on wide clips and compact color markers on short clips, captures
+  `debugCapture/timeline_preset_visibility_qa/timeline_preset_visibility.png`,
+  writes `debugCapture/timeline_preset_visibility_qa/timeline_preset_visibility_report.json`,
+  is exposed in QA Dashboard as `Timeline Preset Visibility`, and runs as part
+  of the productization loop alongside drag-feedback/edit-gesture/hover QA.
+- Node Graph widget fuzzing is scriptable through
+  `tools/qa_node_graph_ui_fuzzer.py`. It drives `NodeGraphWidget` add/select/
+  bypass/delete/fit/save-reload/set-track flows and writes
+  `debugCapture/node_graph_ui_fuzzer_qa.json`.
+- Crash breadcrumbs are captured by `app/crash_reporter.py`. `main.py` installs
+  it at startup; it appends recent actions to the per-user runtime log folder
+  (`runtime_log_dir()/recent_actions.jsonl`), writes
+  `runtime_log_dir()/crash_report_latest.json` for unhandled Python exceptions,
+  and can call the editor's emergency autosave hook before the report is
+  written. Runtime logs intentionally stay outside the source checkout to avoid
+  editor/Git watchers spawning status helpers during normal app use.
+  `app.crash_report_dialog.CrashReportDialog` opens the latest report in-app,
+  can open the emergency autosave, copy details, open the log folder, and export
+  a repro bundle through `export_repro_bundle()`.
+  `crash_report_user_summary()` translates exception, autosave, actor context,
+  and recent action counts into a friendly headline plus recommended actions
+  before the raw traceback is shown. The video editor startup path
+  shows this crash dialog for unseen crash reports before the normal
+  last-project resume prompt.
+- `app.health_center_dialog.HealthCenterDialog` is the product-facing
+  diagnostic hub. It summarizes crash status, QA failures, render queue
+  failures/cancellations, current project media/proxy issues, and actor QA
+  risk rows with direct buttons back into QA Dashboard and Crash Report.
+- Localization QA is strict-clean across `en`, `ko`, `ja`, `zh`, `fr`, and
+  `de`: all locale tables carry the reference keys and pass placeholder and
+  mojibake checks via `tools/qa_localization_audit.py --strict`.
+  The video editor language switcher depends on the same tables and has direct
+  regression coverage for its language-changed and export-tooltip keys.
+- Native worker calls now support JSON-lines progress events, file contracts,
+  and cancel-token errors through `NativeWorkerClient.request_with_events()`.
+- Preview chroma key now moves the heavy hue-distance/key-mask/soft-alpha work
+  into OpenCV native C++ operations with cached LUTs in `app/chroma_key.py`.
+  Spill/background compositing uses alpha==0/255 fast paths and only blends
+  soft-edge pixels, so green-screen frames avoid full-frame float32 blending.
+- Clip video filters avoid avoidable full-frame float work where possible:
+  sharpen uses OpenCV saturation directly, chromatic aberration reuses channel
+  buffers instead of stacking a new RGB frame, and vignette uses a cached
+  uint16 multiplier mask.
+- Preview-only video filters use a downsampled fast path by default
+  (`TIGERCAPTURE_FILTER_PREVIEW_SCALE`, default `0.375`). Final export still
+  uses full-resolution `VideoFilterParams.apply()`.
+- Preview decoding is wrapped in a small LRU `FrameCacheDecoder` after prefetch
+  so repeated scrubs to the same frame return from memory instead of touching
+  the codec. `PrefetchDecoder` keeps indexed frames in its ahead buffer, so a
+  near-future seek can reuse already-decoded frames instead of discarding the
+  buffer and seeking the codec again. Disable the outer LRU with
+  `TIGERCAPTURE_DISABLE_FRAME_CACHE=1`.
+- Spine preview rendering now defaults to the GL/native renderer path with
+  prewarm, cached layout/bounds calculations, a larger animated-frame cache,
+  ProjectPlayer-level overlay cache, and 24fps preview-time quantization via
+  `TIGERCAPTURE_SPINE_PREVIEW_FPS`. Set that env var to `0` to disable
+  quantization. Set
+  `TIGERCAPTURE_SPINE_PREVIEW_RENDERER=software` or `cpu` only for debugging.
+- High-resolution proxy management is visible in the editor toolbar. `Proxy`
+  toggles fresh 540p proxy playback, `Proxy...` can generate/refresh/delete the
+  selected source proxy, and the status pill reports Original/Building/Ready/
+  Stale/Active. Media Pool thumbnails also show `P` / `STALE` proxy badges.
+  `Health` audits all current media/model references and highlights missing
+  files, relink conflicts, duplicate names, and missing/stale proxies before
+  the user discovers the problem during preview or export.
+
+## App Shell, Capture, and Media Intake
+
+Core files:
+
+- `app/main_window.py`: title/main window, editor launcher buttons, drag/drop
+  entry points.
+- `app/controller.py`: connects main window actions to capture, video editor,
+  standalone Sound Editor, and recent-project flows.
+- `app/capture.py`: screenshot/GIF/MP4 capture implementation.
+- `app/region_selector.py`: screen-region selection UI.
+- `app/recent_captures.py`: recent capture file tracking.
+- `app/media_pool.py`: media pool grid/list, drag source, file import, and
+  optional YouTube URL import UI.
+- `app/youtube_import.py`: optional `yt-dlp` based YouTube-to-MP4 downloader
+  used by Media Pool when the dependency is installed.
+- `app/new_project_dialog.py`: project aspect ratio, resolution, FPS setup.
+
+Behavior notes:
+
+- Screen capture supports screenshot, GIF, and MP4.
+- Windows Graphics Capture is used for GPU-composited windows where possible.
+- MP4 capture streams through FFmpeg.
+- Media files can enter through the media pool, drag/drop, editor context
+  menus, or standalone Sound Editor launch.
+- Media Pool can import a single YouTube URL as MP4 when `yt-dlp` is available:
+  the header/context-menu command asks for a URL, validates it is a YouTube
+  host, downloads into `YouTube Imports`, shows progress, and automatically
+  registers/selects the resulting MP4. This is a user-rights workflow: the UI
+  warns that only owned or permitted videos should be imported. If `yt-dlp` is
+  not importable from the running app Python, the importer also probes
+  `yt-dlp.exe`, the project `.venv` executable, and `.venv`'s `python -m yt_dlp`
+  before showing the install hint, so launcher/editor interpreter mismatches do
+  not falsely disable the feature. The import flow also lets the user choose
+  Auto, 8K/4320p, 4K/2160p, 1440p, 1080p, 720p, 480p, or 360p; fixed choices are
+  treated as maximum-height caps so `yt-dlp` still picks the best available
+  format at or below that quality.
+- `app/controller.py::_open_sound_editor()` creates an unparented
+  `AudioClip`; timeline-bound sound editing is opened from
+  `VideoEditorWindow._open_sound_editor()`.
+
+## Timeline and Editor Data Model
+
+Core files:
+
+- `app/video_editor_window.py`: main UI, rows, dialogs, timeline commands, and
+  some legacy timeline dataclasses.
+- `app/timeline_model.py`: modern `VideoClip`, `VideoTrack`, speed/zoom helper
+  model, drag constraints, legacy view builder.
+- `app/history.py`: undo/redo snapshot helpers for video/audio/subtitle state.
+
+Video timeline:
+
+- `VideoTrack` owns clip lists, cuts, fades, speed segments, zoom actors, PIP,
+  typography actors, node graph, and color state.
+- Newer clip-level behavior should prefer `timeline_model.VideoClip` /
+  `timeline_model.VideoTrack` where possible, but the editor still has legacy
+  compatibility fields in `app/video_editor_window.py`.
+- `TrackRow` paints and edits timeline clips, trims, cuts, fades, speed, zoom,
+  typography markers, context menus, and drag/drop behavior.
+- Timeline selection supports additive/toggle selection with Shift or Ctrl.
+  Dragging a selected clip moves the same-row selected clip group together,
+  snaps group edges to project start/playhead/markers/other clip edges, and
+  rejects overlaps with clips outside the group.
+- Timeline tool modes are explicit UI state: Select, Blade, Ripple, Roll, Slip,
+  and Slide. `B` switches to Blade tool, `V` to Select, `R/N/Y/U` to
+  Ripple/Roll/Slip/Slide. `C`, `Ctrl+K`, and `Ctrl+\` still blade at the
+  playhead. `Esc` is a context reset for timeline editing: when a non-Select
+  tool is active it returns to Select first, and when already in Select it
+  clears the current clip selection without clearing time-range selections or
+  global markers. `Ctrl+A` selects all video timeline clips in track order,
+  leaving linked-audio behavior to the existing linked clip move/nudge
+  preflight. `Ctrl+D` duplicates selected video clips after their selected
+  group, preserves intra-selection spacing, skips over occupied clip windows on
+  the same lane, selects the new duplicates, and clears copied
+  `linked_audio_id` / compound-group metadata so duplicated clips do not
+  accidentally share links with the originals. Locked tracks block duplication.
+  `Ctrl+C` stores selected video timeline clips in an internal timeline
+  clipboard; `Ctrl+V` pastes them at the current playhead, preserves
+  cross-track relative offsets, shifts the whole paste group later when any
+  target lane would collide, selects the pasted clips, clears copied
+  linked-audio/compound metadata, and blocks locked target tracks. `Ctrl+X`
+  copies the current video clip selection to the same internal clipboard and
+  then ripple-deletes the originals; locked selected tracks block the cut
+  before the clipboard is changed. Delete/Backspace ripple delete also respects
+  locked tracks. Blade edits respect locked tracks too: playhead blade skips
+  locked lanes and reports when a locked lane was skipped, while track-specific
+  blade clicks are blocked on locked lanes.
+- Slip mode drags the clip's source in/out window while keeping its timeline
+  position and duration fixed. Slide mode performs a true adjacent-clip slide
+  edit when the selected clip has touching previous and next clips: the selected
+  clip keeps its duration/source window, while the previous clip's out trim and
+  next clip's in trim absorb the movement. If those adjacent clips are missing,
+  the row falls back to ordinary select/move behavior.
+- Ordinary clip trims are clamped against adjacent clips so a normal trim does
+  not silently overlap the previous/next clip. Ripple/roll edits remain the
+  structure-changing edit tools.
+- Precision trim is available from the timeline toolbar and `Ctrl+Alt+T`.
+  `Alt+Left/Right` nudges selected clips by one frame; `Shift+Alt+Left/Right`
+  nudges by one second; `Ctrl+Alt+Left/Right` nudges by ten frames. Successful
+  keyboard nudges show a short status banner with clip count, frame/ms amount,
+  and linked-audio count. Empty nudge attempts prompt the user to select clips.
+  The timeline status chip keeps this shortcut detail in a tooltip so the
+  toolbar does not stretch on narrow/full-mode layouts.
+- Plain `Up/Down` jumps the playhead to the previous/next edit point. Edit
+  points include video clip in/out edges, audio clip offsets/ends, timeline
+  markers, and Spine/Live2D actor clip start/end times. If the playhead is
+  already on an edit point, the shortcut skips to the neighboring point instead
+  of staying put.
+- Timeline zoom is available from the toolbar buttons, mouse wheel over the
+  timeline, and keyboard shortcuts: `Ctrl+=` zooms in, `Ctrl+-` zooms out, and
+  `Ctrl+0` fits the timeline to the visible width. Keyboard zoom operations
+  share the same clamped zoom path as the buttons and show a short status
+  banner.
+- Keyboard timeline navigation keeps the playhead visible without stealing view
+  during ordinary playback: edit-point jumps, Left/Right/Home/End seeks, and
+  keyboard zoom adjust the horizontal scroll only when the playhead is outside
+  the current timeline viewport margin.
+- Keyboard seek bounds use the full project duration reported by
+  `ProjectPlayer`, not only the active video track duration. This lets
+  `Right`/`End` reach audio-only tails and Spine/Live2D actor-only extents.
+- `J/K/L` transport shortcuts mirror a commercial NLE deck workflow within the
+  current player limits: `L` cycles forward shuttle speeds
+  `1x/2x/4x/8x/16x/32x`, `K` pauses and resets shuttle speed, and `J` performs
+  repeatable reverse jog steps because true reverse playback is not implemented
+  in `ProjectPlayer` yet. The physical jog/shuttle widget now also treats a
+  center/zero shuttle speed as pause.
+- NLE positioning is intentionally conservative. Tiger Studio has a core
+  nonlinear editing workflow/action surface: track targeting, In/Out markers,
+  Source/Record monitor action state, 3-point insert/overwrite, lift/extract/
+  range delete, clipboard insert/overwrite, gap close, frame nudge, snapping,
+  marker/edit-point navigation, linked-clip movement, and Python Action / AI /
+  MCP automation. `timeline.professional_nle_readiness` and
+  `tools/qa_nle_readiness.py` keep this claim honest. It should not yet be
+  marketed or documented as a full Premiere/Resolve-class NLE replacement. The
+  evidence-free baseline remains 47/100; the synthetic NLE contract corpus
+  raises the current QA score to 80/100 by proving registered actions,
+  Source/Record workbench state, project-bin workbench metadata,
+  long-project stress evidence, proxy/bin/relink metadata, and multicam
+  group/switch plan/export handoff contracts. This is still not real
+  long-footage proof, so the safe claim is
+- Correct intended wording: "core NLE workflow/action surface" rather than
+  "Premiere/Resolve-grade NLE".
+- Real long-project NLE evidence is now explicitly separated from generated
+  fixtures. `tools/register_nle_real_project.py` registers real `.tgp`/JSON
+  projects, `tools/qa_nle_real_project_corpus.py` writes
+  `debugCapture/nle_real_project_corpus_qa.json`, and `nle.real_corpus.status`
+  exposes the same state to Python Action/MCP callers. The full-NLE claim gate
+  stays blocked unless at least three real projects meet aggregate duration,
+  clip-count, and no-missing-media thresholds.
+- Multicam and project-bin NLE contracts now include richer UI-ready state:
+  `timeline.multicam.sync_plan`, `timeline.multicam.angle_bins`,
+  `timeline.multicam.switcher_workbench`, and `project_bin.batch_plan` expose
+  sync offsets, angle bins, coverage/gap diagnostics, angle tiles, active
+  angle, relink/proxy/conform review operations, and export handoff readiness
+  while still avoiding a full Premiere/Resolve live-switcher or conform claim.
+- Source/Record 3-point editing now has an explicit review payload through
+  `source_record.edit_decision_preview`, so insert/overwrite UI can show the
+  source range, record range, target tracks, warnings, and safe-to-apply state
+  before calling timeline mutation actions.
+- Source/Record 3-point editing also exposes `source_record.patch_matrix`, a
+  read-only UI contract for video/audio patch rows and insert/overwrite command
+  cards before timeline mutation.
+- Timeline undo/edge-case evidence is now bridged into NLE readiness:
+  `timeline.nle_fuzzer.status` normalizes `tools/qa_timeline_fuzzer.py`
+  reports, requiring blade/move/ripple/roll/slip/slide/undo coverage, linked
+  audio, actor-lane coverage, and zero failures before the undo QA row is
+  treated as stronger evidence.
+- Undo/edge-case evidence also exposes `timeline.undo_health`, a UI-ready
+  operation coverage matrix with risk cards, blockers, and rerun/failure-report
+  command state for QA Dashboard or health panels.
+- Proxy/media management now exposes `project_bin.proxy_plan`, a read-only
+  proxy policy and regeneration queue contract for usable proxies, stale/missing
+  proxies, background-safe refresh candidates, and long-project proxy readiness.
+- Proxy/media management also exposes `project_bin.proxy_health`, a read-only
+  product health board for proxy state cards, safe background regeneration
+  enablement, stale/missing/offline review signals, and long-project proxy
+  readiness evidence.
+- Project-bin conform now exposes `project_bin.conform_report`, a read-only
+  timeline-to-Media-Pool matching report for path matches, name-only matches,
+  ambiguous names, offline matches, and missing clip sources before relink or
+  batch apply operations.
+  "core NLE workflow/action surface" rather than "Premiere/Resolve湲?NLE".
+- Remaining NLE gaps are explicit: source-monitor / record-monitor style
+  3-point editing backend now exists but the dedicated UI is still shallow;
+  dedicated live multicam switcher UI, deeper proxy/media management, conform,
+  relink, metadata editing, and visual project-bin workflows need more depth;
+  undo/redo and edge-case behavior require continuous regression QA; and
+  long-duration / large-project real-world validation needs more evidence
+  before strong "full NLE" claims are safe.
+- Comma/period provide precise preview stepping: `,` moves back one project
+  frame, `.` moves forward one project frame, and holding `Shift` steps ten
+  frames. Frame stepping uses the current project FPS, pauses/reset shuttle
+  transport first, clamps to project bounds, and keeps the playhead visible.
+- Video clips can link to audio clips by `linked_audio_id`; video clip moves,
+  group drags, and keyboard nudges move the linked audio clip by the same delta.
+  Keyboard nudge uses `timeline_model.plan_linked_timeline_move()` to validate
+  video lane collisions, linked-audio lane collisions, missing links, duplicate
+  audio IDs, shared linked-audio references, stale selected clip IDs, locked
+  video tracks, and project-start bounds before mutating either lane. Mouse
+  clip drags use the same strict preflight through
+  `TrackRow.set_clip_drag_validator()`, so a blocked locked-track,
+  linked-audio, or cross-track move does not first move the video lane and then
+  fail to sync the companion lane.
+- Mouse-dragging a selected video clip can move selected clips on other video
+  tracks by the same incremental delta. Each target track rejects movement that
+  would overlap non-selected clips on that track.
+- Timeline clip drag feedback is now explicit instead of described only as
+  "polish": `timeline_model.apply_drag_constraints_detail()` returns
+  `DragConstraintResult` with the final position plus snap target, snap edge,
+  snap source, collision, and clamp fields. `TrackRow` paints that result as a
+  localized live chip plus a translucent destination ghost near the affected
+  timeline point while dragging. Same-row group drags use the same chip and
+  ghost path. Linked/cross-track moves that fail preflight paint a red blocked
+  ghost instead of silently refusing the drag. The editor-owned drag validator
+  can return a structured blocked result (`ok`, `reason`, `message`, `details`);
+  `TrackRow` turns reasons such as `timeline_start`, `video_collision`,
+  `audio_collision`, `missing_linked_audio`, and `locked_track` into localized
+  "Cannot move: reason" chips and appends a `timeline.drag.blocked` row to
+  `ux_events.jsonl`. Idle hover chips label trim, roll, transition
+  insertion/resizing, fades, speed zones, and typography/actor edges so the
+  cursor affordance is discoverable without reading the toolbar. Preset
+  applications store the focused target time so the affected row flashes a
+  timeline burst and the status banner includes an `@ time` suffix. Drag
+  releases and preset apply/failure outcomes append structured diagnostics to
+  `ux_events.jsonl` in the runtime log directory. The chip/ghost paint path has
+  a short pop/easing pass so feedback appears as a UI motion cue rather than a
+  static debug label.
+- Compound grouping still uses `VideoClip.compound_group_id` and
+  `compound_group_name` for lightweight grouped selection/movement.
+- Nested sequence parents use `VideoClip.nested_sequence_id`,
+  `nested_sequence_name`, `nested_child_clips`, `nested_child_tracks`, and
+  `nested_audio_tracks`, plus `nested_spine_actor_tracks` and
+  `nested_live2d_actor_tracks` for actor lanes. `nested_child_tracks` is the
+  true internal multi-track video form; `nested_audio_tracks` stores internal
+  audio lanes. Child video clip times, actor clip times, and nested audio
+  `AudioClip.offset_ms` values are relative to the parent sequence.
+- `Nest` can fold a multi-track selection into one parent clip on the active
+  selected track. Selected clips are removed from their original tracks and
+  copied into internal child lanes in source track order.
+- The clip context menu has `Edit nested sequence...` for the dedicated
+  internal multi-track editor. It shows a compact timeline canvas for nested
+  video/audio/Spine/Live2D lane movement and edge trimming, mouse-wheel zoom,
+  Shift+wheel horizontal scrolling, and a playhead line, plus tables for
+  precise video/audio millisecond values. `Expand nested sequence` puts child
+  video clips, nested audio lanes, and nested actor lanes back onto the main
+  timeline for direct editing.
+- `ProjectPlayer` keeps nested parents as active clips and renders their
+  internal lanes as opaque replacement video layers. Because the current nested
+  stack does not alpha-composite child video tracks, preview walks child tracks
+  top-down and decodes only the first active visible layer; hidden lower child
+  tracks are skipped. `timeline_model.expanded_timeline_clips()` remains
+  available for source discovery and compatibility paths.
+- `ProjectPlayer.refresh_tracks()` must sync a single-source track's decoder
+  metadata (`fps`, `total_frames`, `duration_ms`) before building the clip
+  view. A track left at `duration_ms == 0` produces no synthesized clip, which
+  makes timeline thumbnails and preview appear blank.
+- Timeline drag gestures emit a single history savepoint on mouse release;
+  live mouse-move updates should not flood undo/redo. `HistoryStack.push()`
+  also ignores duplicate snapshots at the current cursor so no-op commits do
+  not consume undo depth. Undo/redo snapshots reconcile the video/audio track
+  collections themselves, so track add, delete, and ordering edits can be
+  restored instead of only restoring fields on tracks that still exist. Clip
+  selection is snapshotted too and restored only for clips that still exist, so
+  selection borders and follow-up delete/nudge actions stay aligned after undo.
+  `HistoryStack.undo_label()` and `redo_label()` expose the exact pending edit
+  label so the editor status banner can say what was restored rather than only
+  showing a generic Undo/Redo notice.
+- Commercial trim-mode polish lives in pure helpers in `app.timeline_model`:
+  `slip_clip_source_window()`, `roll_edit_adjacent()`,
+  `slide_clip_between_neighbors()`, `detect_timeline_edge_issues()`,
+  `cleanup_timeline_micro_edges()`, and `plan_linked_timeline_move()`. They
+  clamp edits to source bounds, require valid adjacency where the edit mode
+  needs it, preserve outer timeline spans for roll/slide, validate linked
+  audio/video movement, can run strict selection validation for UI gestures,
+  detect one-frame-ish same-lane gaps/overlaps, clean tiny accidental gaps by
+  rippling following clips, clean tiny accidental overlaps by trimming the
+  outgoing clip, and never mutate their input clip list. UI tool modes should
+  call these helpers instead of duplicating edge-case math in mouse handlers.
+  Track row context menus expose `Clean 1-frame gaps/overlaps` when the current
+  lane has auto-fixable edges; the editor applies the cleanup to existing clip
+  objects so thumbnail/effect payloads remain attached, then registers one undo
+  savepoint and refreshes preview. The same action is available from Health as
+  `Clean Timeline Edges` for whole-project cleanup across unlocked video lanes,
+  with a count-aware button label and issue preview before execution. When
+  cleanup ripples a video clip that has `linked_audio_id`, the linked audio clip
+  moves by the same delta; cleanup is blocked before mutation if the linked
+  audio is missing, duplicated, shared, would move before project start, or
+  would overlap another audio clip.
+- Timeline thumbnails are generated as `QImage` objects in worker threads and
+  converted to `QPixmap` only on the UI thread. Thumbnail handlers ignore stale
+  extractor signals when a newer extraction job has replaced an older one.
+- Timeline thumbnails are persisted under
+  `~/Videos/TigerCapture/.cache/timeline_thumbs`, keyed by source path, mtime,
+  size, thumbnail height, and cache version.
+- When the Rust worker is available, `ThumbnailExtractor` first asks
+  `app.native_worker.native_generate_timeline_thumbnails()` to fill the
+  persistent thumbnail cache via FFmpeg, then emits cached `QImage` frames.
+  OpenCV extraction remains the fallback.
+- Multi-source clip thumbnails are stored per clip. Painting clips the thumbnail
+  draw region to each clip rect so thumbnails cannot bleed into neighboring
+  clips.
+
+Audio timeline:
+
+- `AudioTrack` and `AudioClip` live in `app/audio_tracks.py`.
+- Audio rows are inserted by `VideoEditorWindow._insert_audio_track_widget()`.
+- Waveform and spectrum caches are regenerated; they are not project state.
+
+State-change rule:
+
+- After changing timeline structure, refresh the relevant row, then call the
+  player/audio refresh methods used by neighboring code. Many bugs here are
+  stale UI/player state rather than bad data.
+
+## Project Save/Load
+
+Core file: `app/project_io.py`.
+
+Format:
+
+- `.tgp` is plain JSON.
+- `FORMAT_VERSION` is currently `1.1`.
+- Paths are serialized as absolute strings where possible.
+- The last project path is stored with Qt `QSettings` by
+  `remember_last_project()` / `load_last_project_path()`.
+- The main editor toolbar has a `Recovery` action. It ranks autosave/recovery
+  candidates through `tools.repair_project`, opens a table-based recovery
+  browser with health level, score, missing count, schema-change count, modified
+  time, path, reason, recommended action, missing-by-kind counts, missing path
+  previews, schema repair previews, actor asset failure previews, and suggested
+  next steps, autosaves the current session, then opens the selected readable
+  recovery project through the normal loader.
+- Recovery reports now include product-facing guidance: each candidate receives
+  a health level, score, recommended action, reason, missing path preview,
+  missing-by-kind summary, schema change preview, actor failure preview, and
+  suggested actions. `repair_project_doc()` also returns `repair_guidance` with
+  missing-media, actor-asset, schema-change counts, and suggested next steps.
+
+Saved:
+
+- Video tracks, clip layout, cuts, fades, speed, zoom actors, typography actors,
+  clip filters, chroma key, stabilization, background removal, node graph view
+  data, per-clip node graph color state, masks, nested sequence child
+  video/audio/Spine/Live2D tracks, audio tracks, subtitles, markers, timeline
+  zoom, playhead, preview-only comparison mode/label visibility,
+  project color-management settings, Spine actor tracks, Live2D actor tracks.
+- Undo/redo snapshots mirror the important saved edit state: video/audio tracks,
+  subtitles, active track, timeline markers, timeline zoom, playhead, Spine
+  actor tracks, and Live2D actor tracks. Snapshot restore recreates deleted
+  video/audio tracks, removes tracks created after the snapshot, reorders rows,
+  and refreshes audio mixer/player bindings. This keeps track-level edits,
+  actor-lane moves, and marker edits from becoming one-way changes inside a
+  session.
+
+Regenerated on load:
+
+- Thumbnails, waveform peaks, spectrum bins, OpenGL state, player caches.
+
+Important caveat:
+
+- The `project_io.py` header says node-level `ColorGrade` is not persisted, but
+  newer node graph serialization may save some grade-like state through graph
+  data. `app/color_workflow.py` presets return color-node workflow payloads for
+  graph/UI attachment, but full UI persistence still depends on the active node
+  graph serialization path. Verify current `project_io.py` and
+  `app/workbench/node_graph/scene.py` before changing color persistence.
+
+## Preview and Export Pipeline
+
+Preview:
+
+- `ProjectPlayer` in `app/project_player.py` renders interactive frames.
+- It composites video, subtitles, drawings/stickers/bubbles, typography actors,
+  Spine actors, Live2D actors, node graph effects, masks, and color processing.
+- It uses `track.node_item_chain` when available, falling back to older
+  `color_grade_chain` / `node_mask_chain` paths.
+- `ProjectPlayer.gpu_frame_ready` is the primary main-preview path and carries
+  the final RGB ndarray to `OpenGLPreviewWidget`. `ProjectPlayer.frame_ready`
+  is the legacy CPU `QImage` path for popout/scopes/fallback consumers.
+  `VideoEditorWindow` keeps `TIGERCAPTURE_PREVIEW_QIMAGE=auto` by default:
+  QImage stays enabled until the GL preview has accepted a frame, then turns
+  off unless a CPU-image consumer such as preview popout is active. Force with
+  `TIGERCAPTURE_PREVIEW_QIMAGE=1` or disable with `=0`. Mask/tracking tools
+  read from the latest GPU RGB cache first and fall back to `_preview_pixmap`.
+- The viewer toolbar exposes a `Compare` popup for the current MVP comparison
+  path. It can turn comparison off, show Original-only, or show Split/Wipe
+  before-after preview with canvas `Original` / `After` labels. The label
+  visibility can be disabled without disabling the comparison.
+- The viewer `Fit` button must work in both CPU pixmap and GL preview modes.
+  In GL mode it uses `_preview_gl_frame_size` to resync preview geometry and
+  overlay placement even when `_preview_pixmap` is empty.
+
+Export:
+
+- `VideoEditorWindow._on_export()` creates `VideoExportThread`.
+- Single export now runs a professional-readiness preflight from the current
+  in-memory session before starting the encoder. The completion/failure dialog
+  appends the same compact readiness diagnostics used by Health, so long-project
+  stability, GPU preview/export, timeline, color, audio, and preset/template
+  ecosystem risks are visible in the export result. A final checklist dialog
+  summarizes queued jobs, actor clips, Color/Audio QA status, and readiness
+  details before single or batch export starts.
+  Preview/export readiness includes shader-vs-CPU feature parity, project and
+  grade LUT bake samples, HDR/OCIO/display-transform metadata samples, audio
+  effect graph samples, clip/track automation envelope samples, and bus-routing
+  mixdown checks.
+- `app/video_exporter.py` builds FFmpeg segment/filter graphs and runs the
+  subprocess.
+- `VideoExportThread` receives project settings and appends project
+  color-management FFmpeg metadata (`-colorspace`, `-color_primaries`,
+  `-color_trc`) on non-HDR-passthrough exports. HDR passthrough keeps the
+  existing HEVC 10-bit BT.2020 PQ path and does not duplicate metadata.
+- Active project input/creative/output LUT slots are appended to the final
+  video filter graph with FFmpeg `lut3d`; strengths below 100% use a split and
+  blend branch so LUT intensity is baked into exports instead of remaining a
+  preview-only setting.
+- Render diagnostics can compare a parsed ffprobe video stream against
+  `validate_export_color_consistency()` via
+  `compare_ffprobe_color_metadata()`, flagging missing or mismatched
+  colorspace, primaries, and transfer tags.
+- Export completion runs post-render color metadata QA through
+  `probe_export_color_metadata()`. It prefers `ffprobe` when available and
+  falls back to parsing `ffmpeg -i` stream metadata when only the bundled
+  imageio-ffmpeg binary exists. Single exports append the result to the
+  completion dialog; dockable Render Queue jobs persist the same result in the
+  diagnostics column/history.
+- LTX-style SDR-to-HDR upmapping is represented as a separate job-node/workflow
+  foundation rather than mixed into ordinary export. `app/sdr_hdr_upmap.py`
+  builds a deterministic SDR video -> HDR-capable float EXR frame sequence
+  command with a scene-linear target contract and exposes LTX/ComfyUI provider
+  hooks via environment configuration.
+  `tools/convert_sdr_to_hdr_exr.py` can dry-run or execute the EXR conversion,
+  and `tools/qa_sdr_hdr_upmap.py` validates that the pipeline produces an EXR
+  float command, preset gallery, review model, and an honest claim label. The
+  module exposes `sdr_hdr_upmap_preset_gallery()` and
+  `sdr_hdr_upmap_review_model()` so UI adapters can show Soft HDR / Social HDR /
+  Cinematic Probe / EXR Archive presets and slider controls instead of raw
+  FFmpeg settings. The Workbench node graph exposes this as an `SDR -> HDR EXR`
+  job node with peak-nits, exposure, highlight, saturation, and max-frame
+  controls. In the main Workbench inspector the node
+  also exposes a `Create EXR Frames...` action that asks for an output folder
+  and runs the hidden FFmpeg EXR job against the selected video track. This is
+  not a bundled LTX 2.3 HDR model claim; when no external provider is configured
+  it uses the deterministic local inverse-tone-map fallback.
+- LTX-style Storyboard / Shot Card planning is represented as a local-first
+  pre-timeline planning layer. `app/ltx_storyboard.py` converts a creator prompt
+  plus project/media metadata into `StoryboardPlan` and `ShotCard` objects with
+  shot type, source media query, camera angle, camera motion, transition hint,
+  actor/audio/color intent, style bible, and optional provider hook state. It
+  converts those cards into validated review-first `EditPlan` operations
+  (`create_short_candidate`, `add_marker`, `add_auto_zoom`, `add_callout`,
+  `apply_preset`, `set_reframe`, `add_render_queue_job`) without mutating the
+  timeline directly. `tools/build_ltx_storyboard.py` writes a standalone report
+  and `tools/qa_ltx_storyboard.py` verifies shot-card metadata, safe EditPlan
+  validation, apply payload markers/sidecars, retake variations, template
+  recommendations, provider-contract presence, and the honest claim label
+  `ltx_inspired_local_shot_cards_not_ltx_cloud_parity`.
+  `tools/qa_ltx_storyboard_corpus.py` runs multiple screen-tutorial,
+  gameplay, product-demo, dialogue, and Korean storyboard prompts as a
+  local corpus. Creator Assist / CapCut workflow bundles expose this as
+  `ltx_storyboard`, `ltx_storyboard_apply_payload`,
+  `ltx_storyboard_effect_materialization`,
+  `ltx_storyboard_variations`, and
+  `ltx_storyboard_template_recommendations`; the review panel shows a
+  `Shot cards` card with zoom/callout/retake/template counts. The effect
+  materialization payload contains normalized review-first zoom windows,
+  callout labels, template links, and effect rows so editor UI can stage actual
+  visual effects without re-parsing shot-card prose. Creator Assist applies the
+  zoom windows as clip zoom actors and mirrors them to timeline-visible zoom
+  chips; callouts become real typography actors on the video track, with LTX
+  source metadata so re-applying replaces only the staged storyboard effects.
+  Template links are mapped to existing workflow template presets where a safe
+  local alias exists, staged once per target clip/start time, and recorded in
+  project settings to prevent duplicate stacks.
+  Project settings record
+  `ltx_storyboard_ready`, `ltx_storyboard_shots`,
+  `ltx_storyboard_zoom_windows`, `ltx_storyboard_callouts`,
+  `ltx_storyboard_variations`, and
+  `ltx_storyboard_template_recommendations`.
+- Export formats: MP4, WebM, MOV.
+- Quality presets and format registry live in `app/video_exporter.py`.
+- Audio tracks are mixed through the FFmpeg audio graph from
+  `app/audio_tracks.py`.
+- Spine actors are pre-rendered to transparent overlays by export.
+- Live2D actors are pre-rendered on the main thread before export because of
+  OpenGL/runtime constraints.
+- Final baking of Spine and Live2D overlays was verified with a synthetic
+  export smoke test: a fake Spine clip and a pre-rendered Live2D MOV produced
+  visible pixels in the final MP4 output.
+- Batch export uses `app/batch_export_dialog.py`.
+- Render Queue jobs created from the editor can persist professional-readiness
+  preflight diagnostics. The queue keeps that preflight attached while the job
+  moves through pending, running, stage updates, and completion diagnostics.
+- Multi-source or multi-track nested sequence export uses the raw pre-render
+  base path. `VideoEditorWindow._on_export()` switches to project-time
+  segments and passes `render_clip_tracks` to `VideoExportThread`, which decodes
+  and composites nested/internal lanes before piping RGB frames into FFmpeg.
+- Nested sequence audio is persisted as nested `AudioClip` lanes. During
+  nested/multi-source export, ordinary audio tracks and nested audio clips are
+  remapped from project time to compact output time before being mixed through
+  `app/audio_tracks.py`.
+- Nested audio preview is handled through a hidden synthetic `AudioMixer` track
+  that mirrors nested `AudioClip` lanes into project time whenever player
+  tracks are refreshed.
+
+Parity notes:
+
+- Active-track node graph blur/effect/color/mask chains are exported through
+  a raw pre-render fallback in `VideoExportThread`.
+- Clip-level CPU effects are also routed through that raw pre-render fallback:
+  stabilization, video filters, chroma key, and background removal params are
+  applied before the normal FFmpeg overlay/audio stage.
+- Nested child video clips also apply their clip-level stabilizer, filters,
+  chroma key, background removal, per-clip color node state, and clip-attached
+  typography actors in preview and raw export.
+- Nested child video clips support internal fade segments and the common
+  `fade_black`, `fade_white`, and `dissolve` transition-out types in preview
+  and raw export.
+- Nested Spine/Live2D actor lanes are first-class nested sequence data and are
+  composited into the nested raw base in preview/export. Top-level actor tracks
+  still use their existing overlay paths.
+- This fallback is slower than the FFmpeg-only path and is used only when the
+  node chain, clip effect snapshots, or nested/multi-source clip tracks require
+  preview-parity baking.
+- Background removal export calls the same `BackgroundRemovalParams.apply()`
+  path as preview. Actual AI model quality still depends on installed
+  MediaPipe/rembg/runtime behavior and should be profiled with real footage.
+
+## Video Effects, Filters, and Background Tools
+
+Core files:
+
+- `app/video_filters.py`: filter parameter model and RGB application.
+- `app/chroma_key.py`: HSV chroma key and spill suppression.
+- `app/background_removal.py`: MediaPipe/rembg/fallback background removal.
+- `app/video_stabilizer.py`: Lucas-Kanade optical-flow style stabilization.
+- `app/video_decoder.py`: decoding helpers and FFmpeg/OpenCV frame access.
+
+Behavior notes:
+
+- Some processing is preview-time CPU work; some is exported through FFmpeg.
+- Chroma key returns RGB plus alpha-like mask semantics.
+- Background removal prefers MediaPipe selfie segmentation, then rembg, then a
+  simple fallback.
+- Stabilization is optical-flow based and can be expensive. Preview uses
+  `FrameStabilizer.apply_preview()`: motion is estimated on a low-resolution
+  grayscale buffer controlled by `TIGERCAPTURE_STABILIZER_PREVIEW_SCALE`
+  (default `0.5`, clamped `0.25..1.0`), then the affine warp/crop is applied to
+  the full preview frame. Export still uses full-quality
+  `FrameStabilizer.apply()`, so preview speedups do not change final render
+  quality.
+- Proxy generation is triggered for high-resolution media from
+  `VideoEditorWindow._start_proxy_generation()`.
+
+## Text, Typography, Subtitles, and Overlays
+
+Core files:
+
+- `app/subtitles.py`: subtitle model, edit dialog, subtitle panel.
+- `app/typography.py`: text clip/track data model.
+- `app/typo_animations.py`: animation preset and timing logic.
+- `app/typo_render.py`: text/typography rendering helpers.
+- `app/video_editor_window.py::TypographyEditorDialog`: modal typography
+  editor.
+- `app/drawing.py`: drawing canvas, stickers, bubbles, overlay composition.
+
+Behavior notes:
+
+- Subtitles are timeline-lane items and are saved in `.tgp`.
+- Typography supports IN / HOLD / OUT style animation stacking.
+- Typography actors exist both as video-track-local actors and separate text
+  track/editor UI concepts; check call sites before moving state.
+- Speech bubbles, stickers, and freehand strokes are composed as overlays in
+  preview/export paths.
+
+## Node Graph, Masks, and Object Tracking
+
+Core files:
+
+- `app/node_mask.py`: mask data model and evaluation.
+- `app/mask_editor_window.py`: large-canvas mask editor.
+- `app/workbench/node_graph/widget.py`: node right-click mask menu.
+- `app/workbench/node_graph/scene.py`: node graph save/load, including masks.
+- `app/workbench/node_graph/items/node_item.py`: base color/serial node item.
+- `app/workbench/node_graph/items/blur_node_item.py`: blur/bokeh node.
+- `app/workbench/node_graph/items/effect_node_item.py`: generic effect node.
+- `app/effect_node_params.py`: effect-node parameter models.
+- `app/blur_params.py`: blur parameter model and masked blur composition.
+- `app/project_player.py`: preview render pipeline.
+- `app/video_editor_window.py`: node mask requests and preview refresh.
+- `app/workbench_panel.py`: blur-node mask controls.
+
+Node graph behavior:
+
+- Node graph UI, connections, serialization, and scene restore live under
+  `app/workbench/node_graph/`.
+- Node graph scenes are dynamic and must use `QGraphicsScene.NoIndex`, not a
+  BSP index, because connection paths change geometry while users drag ports
+  and nodes. Temporary drag connections must be discarded before node deletion
+  or scene reload, and `ConnectionItem.prepareGeometryChange()` must run before
+  changing temporary endpoint coordinates.
+- Color nodes are base `NodeItem` instances with `color_grade`.
+- `app/color_workflow.py` holds Qt-free professional color concepts used by
+  future Color-page UI and QA: RGB/master curves, HSV qualifiers, tracked
+  power-window masks, masked node application, and numeric scope diagnostics.
+  Qualifiers persist HSL range, softness, clean black, clean white, denoise
+  radius, and invert controls so key cleanup can match commercial color-page
+  behavior. Tracking windows persist normalized shape/feather/opacity plus
+  tracker status metadata for later correction UI.
+- `app/color_management.py` is the Qt-free project color-management model:
+  Rec.709, sRGB, Rec.2020 HDR PQ/HLG, P3-D65, ACEScg/ACEScct intent,
+  optional OCIO config path, input/creative/output LUT slots, FFmpeg color
+  metadata generation, pipeline summaries, and project/export consistency
+  validation. It also compares parsed ffprobe video stream color metadata
+  against the expected project output metadata for render diagnostics.
+- `app/color_ocio.py` is the optional PyOpenColorIO bridge. It builds an OCIO
+  transform plan from project color settings, applies RGB transforms only when
+  PyOpenColorIO and a valid config are available, and otherwise returns the
+  original frame with explicit diagnostics.
+- `app/color_scopes.py` includes `scope_quality_diagnostics()` for color-page
+  badges and QA: luma IRE percentiles, HDR nits estimate, channel clipping,
+  saturation/gamut risk, skin-tone angle, and warning strings.
+- `tools/qa_color_audio_accuracy.py` is the repeatable synthetic accuracy QA
+  entry point for scopes, color-management metadata/LUT graph expectations,
+  loudness, true peak, stereo correlation, and dialogue-cleanup preset
+  clamping. It also accepts `--video-sample` and `--audio-sample` paths for
+  real media diagnostics without changing the deterministic reference checks.
+  `--sample-root` or the default `qa_corpus/color_audio_samples` folder can
+  auto-discover video/image and audio samples for ongoing scopes/LUT/OCIO,
+  loudness, and dialogue-cleanup corpus validation. It writes
+  `debugCapture/color_audio_accuracy_qa.json`. Latest Color/Audio QA status is
+  appended to export and Render Queue preflight diagnostics as a compact badge
+  with OK/FAIL, check count, failure count, and real sample count.
+- `ColorPageWindow` exposes a compact project color-management strip above the
+  scopes/wheels area. It edits input, working, output, transfer, view transform,
+  HDR flag, project LUT slots, and creative LUT intensity directly against
+  `_project_settings["color_management"]`. The creative LUT slot also syncs to
+  the existing global preview LUT path so the viewer reflects the selected look.
+  Color-management validation and scope warnings are displayed through shared
+  UX tone states so valid, warning, and failure states are visually distinct.
+- The Color Page chrome is intentionally less programmatic than the underlying
+  data model: the top bar uses a palette ribbon and `Color Grade` title, the
+  pipeline bar groups input/look/output controls, color wheels sit in rounded
+  glass cards, scope displays have rounded black monitor surfaces, and
+  qualifier/window controls use compact pill rows with color-domain gradient
+  sliders.
+- The timeline `Color` page switch defaults to the embedded in-editor color
+  dock instead of opening the detached `ColorPageWindow`. This keeps the main
+  preview visible while grading and prevents the power-window overlay from
+  feeling like a second stacked preview. Detached Color Page behavior remains
+  available to explicit callers, and Color Page grade changes rebuild the live
+  node chain before refreshing preview.
+- `ColorPageWindow` also exposes a right-side Qualifier / Window panel. It
+  edits HSL qualifier enable/invert, hue center/width, saturation/value ranges,
+  softness, clean black/white, denoise radius, power-window shape, normalized
+  center/size, feather, opacity, and tracking intent. Changes are written into
+  `ColorGrade.color_workflow` so the existing preview/export CPU path can apply
+  the same masked grade and curves. The panel also shows compact scope warning
+  text from `scope_quality_diagnostics()` while frames are pushed to the page.
+- When the Color Page is open and the active grade's power window is enabled,
+  the main preview `DrawingCanvas` shows a direct editable overlay on the video
+  rect: users can move the center or drag side/corner handles for ellipse and
+  rectangle windows. The overlay writes normalized window coordinates back to
+  `ColorGrade.color_workflow`, throttles live preview refresh to roughly 30fps
+  while dragging, and records one undo step on mouse release.
+- `ColorGrade.color_workflow` persists color workflow payloads from the
+  professional color preset menu. `apply_to_rgb()` applies the workflow's
+  qualifier/window mask and curves on the CPU path so preview/export can see
+  the result before shader support exists.
+- `ColorGrade` also carries grade-local input/creative/output LUT slots.
+  `apply_to_rgb()` applies those LUT slots through the existing cube-LUT
+  renderer, and `apply_grade_stack()` applies clip/group/timeline grade layers
+  in explicit order. `suggest_shot_match_grade()` provides a deterministic
+  exposure/contrast/saturation adjustment for future auto color-match UI.
+- Blur nodes have `NODE_KIND = "blur"` and use `BlurParams`.
+- Effect nodes use `EffectNodeItem` plus parameter classes from
+  `app/effect_node_params.py`.
+- Scene serialization stores node positions, graph topology, masks, blur params,
+  effect params, and node view metadata.
+- The default editor color node is not decorative: when a track is first bound
+  to the node graph, `NodeGraphWidget.set_track()` must create `Node 1` as an
+  active `IN -> Node 1 -> OUT` chain. Older or damaged `node_graph_view_data`
+  snapshots with serial nodes but no output connection are repaired by
+  `NodeGraphScene.ensure_default_chain()` when opened so color controls affect
+  the visible preview immediately.
+- `VideoEditorWindow._rebuild_active_chain()` decides what the main preview
+  should render through. The current behavior is "full IN -> OUT chain" for
+  visible preview, with selected-node binding still used by the Color panel.
+- `VideoEditorWindow._commit_color_preview_edit()` is the common commit point
+  for color dock, Color Page, LUT, and preset changes. It clears stale preview
+  caches, rebuilds/repairs the active node chain when necessary, and refreshes
+  the current frame without requiring a playhead seek.
+- The compact Color dock shows an active target badge so users can see whether
+  the edit is routed to a color node or a track fallback grade.
+- The compact Color dock and viewer `Compare` popup expose preview-only
+  `Before`/`Original`, `Split`, and `Wipe` comparison controls. They set
+  `track.preview_color_compare_mode`; projects persist that preview state plus
+  `track.preview_compare_labels_enabled`, but export still treats it as
+  preview-only until the planned `comparison_view` project model exists.
+  `ProjectPlayer` uses `_apply_node_chain_preview_compare()` to skip active
+  ColorGrade nodes for Before, or composite before/after halves for Split/Wipe,
+  while keeping non-color node effects visible. See
+  `docs/SPEC_COMPARISON_TEMPLATES.md` for the export-safe long-term design.
+
+Mask types in `app/node_mask.py`:
+
+- `PowerWindow`: polygon mask.
+- `HSLQualifier`: color-range mask.
+- `MagicMask`: MediaPipe/OpenCV semantic masks for lips, face, eyes, person.
+- `MaskTracker`: wrapper for older tracker workflows.
+- `BitmapMask`: baked pixel mask from GrabCut/SAM/manual drawing; can track.
+
+Tracked object masks:
+
+- `BitmapMask.track_object=True` enables OpenCV CSRT tracking.
+- `BitmapMask.init_frame` stores the source frame where the region was selected.
+- Runtime bbox cache is stored in `_track_cache` as `frame_idx -> (x, y, w, h)`.
+- Persisted bbox cache is stored in `tracking_cache_bboxes` as normalized bbox
+  values and restored into `_track_cache` on demand.
+- Failed frames are tracked in `_failed_frames` and persisted as
+  `tracking_failed_frames`.
+- Correction keyframes are persisted in `correction_bboxes` and serialized by
+  `to_dict()` / `from_dict()`.
+- `reset_tracking_cache(clear_corrections=False)` clears runtime and persisted
+  tracking cache state; correction keyframes are kept unless requested.
+- `add_correction_from_mask(mask_uint8, frame_idx)` stores a manual correction.
+- `tracking_status()` reports cache/correction/failure counts for UI.
+- `tracking_status_text()` formats the same state for editor labels/tooltips.
+
+Mask editor UI:
+
+- `MaskEditorWindow.open_for_node(..., frame_idx=...)` opens the editor for the
+  current preview frame.
+- Tools: polygon, rectangle GrabCut, click SAM/Auto, foreground brush, and
+  background brush.
+- GrabCut rectangles are post-refined in `app.node_mask.grabcut_from_rect()`
+  to reduce loose rectangular spill on low-contrast scenes; `Clean`, `Shrink`,
+  and `Expand` provide quick manual cleanup after auto segmentation.
+- Mask edit undo/redo stores both bitmap mask data and polygon points. The
+  overlay preview applies current softness/invert settings so the user sees the
+  committed feather/invert behavior before pressing OK.
+- The Color page Rotoscope dropdown and node graph right-click Add Mask menu
+  both include "Track selected region". It routes to
+  `VideoEditorWindow._on_node_mask_request(..., "track_region")`, opens the
+  mask editor in rectangle mode, and pre-checks `Track object`.
+- `Track object` makes the committed `BitmapMask` follow the selected region.
+- `Reset track` clears cache/failure state while keeping correction keyframes.
+- `Add correction` records the current drawn/selected mask as a drift correction
+  at the current frame.
+- `Clear keys` clears both correction keyframes and cached tracking state.
+- Existing tracked `BitmapMask` settings are restored when editing.
+- `TrackRow._paint_tracking_status_overlay()` reads active tracked
+  `BitmapMask` instances from `track.node_item_chain` and paints cache,
+  failure, and correction counts on the timeline without starting tracking
+  work from paint. Failed-frame ticks are approximate 30fps source-frame
+  markers for quick visual diagnosis.
+
+Preview render behavior:
+
+- `VideoEditorWindow._rebuild_active_chain()` builds `track.node_item_chain`.
+- `ProjectPlayer` evaluates `track.node_item_chain` every frame.
+- Export pre-render parity uses the same node/effect application helper:
+  preview calls `_apply_node_effect_player()` and `VideoExportThread`
+  `_apply_node_chain_cpu()` delegates to that helper for `node_item_chain`.
+  Regression tests must keep these two paths byte-equivalent for basic color
+  node grades.
+- `_apply_node_effect_player()` applies masks to:
+  - blur nodes via `BlurParams.apply_with_mask()`
+  - effect nodes via `effect_params.apply()` plus masked compositing
+  - color nodes via masked `apply_to_rgb()`
+- `evaluate_node_masks()` unions enabled masks.
+
+Export behavior:
+
+- `VideoEditorWindow._snapshot_node_item_chain_for_export()` clones live graph
+  items into worker-safe snapshots before `VideoExportThread` starts.
+- `VideoExportThread._node_chain_needs_prerender()` detects active node graph
+  work. If needed, input 0 becomes a raw RGB `pipe:0` stream.
+- `_write_prerendered_base_frames()` decodes source frames, applies CPU zoom,
+  then runs the same `_apply_node_effect_player()` helper used by preview.
+- This path covers active color, blur, effect, and mask nodes, including
+  tracked `BitmapMask` evaluation by source frame index.
+- `VideoEditorWindow._snapshot_clip_effects_for_export()` clones per-clip
+  `VideoFilterParams`, `ChromaKeyParams`, `BackgroundRemovalParams`, and
+  `StabilizerParams` into segment-aligned snapshots.
+- During raw pre-render, `VideoExportThread` applies clip effects in preview
+  order: stabilizer, zoom, node/legacy color, video filters, chroma key, then
+  background removal.
+- If raw pre-render is used and no external audio tracks are present, export
+  adds the original source file as a separate optional audio input so source
+  audio is not lost.
+- Actor overlays are handled separately: Spine actors are passed as
+  `spine_actor_tracks`, and Live2D actors are pre-rendered before export.
+  Both are baked into the final FFmpeg output as alpha MOV overlays.
+- Developer smoke verification lives in `tools/verify_export_parity.py`. It
+  covers synthetic export parity, tracked masked-node export, FFmpeg audio
+  separation fallback, and tracked `BitmapMask` serialization.
+
+## Live2D
+
+Core files:
+
+- `app/live2d/actor_track.py`: Live2D timeline data model and offscreen render.
+- `app/live2d/actor_lane_row.py`: Live2D actor lane UI.
+- `app/live2d/live2d_viewer.py`: in-process Live2D editor/viewer.
+- `app/live2d/compat.py`: model path normalization and support checks.
+- `app/actor_mocap.py`: offline video/webcam-motion helpers that convert
+  detected face motion into Live2D actor keyframes and preserve richer
+  parameter retarget payloads.
+- `app/live2d_motion_storyboard.py`: reads a model's `.motion3.json` entries
+  and rebuilds one Live2D actor clip into multiple video-cut-aligned clips so
+  authored model motions are used directly instead of only transform mocap.
+- `app/project_player.py`: Live2D preview compositing.
+- `app/video_exporter.py`: Live2D pre-render for video export.
+- `app/project_io.py`: project save/load for `live2d_actor_tracks`.
+
+Behavior notes:
+
+- Live2D clips live on separate actor tracks, not normal video clips.
+- Drag/click actions can add Live2D actor clips to the timeline.
+- Double-clicking a Live2D clip opens the editor bound to that clip.
+- Live2D-only preview playback, including detached preview windows, is expected
+  to animate through the same actor-only render path used by export fallback.
+- Right-clicking a Live2D actor clip exposes the same actor workflow actions
+  users expect from the global Actors menu: video motion mapping and automatic
+  authored-motion storyboard, alongside diagnostics/probe/prerender/quarantine
+  utilities.
+- Live2D and Spine actor lanes use the same 10 px `TimelineRuler` / video-track
+  time origin for clip rectangles, drop placement, hit-testing, and playhead
+  painting. Actor lane labels may use a wider visual background, but that visual
+  label area must never become the timeline coordinate origin.
+- Live2D editor construction, including its bottom transport/background swatch
+  bar, is covered by regression QA because actor double-click opens this window
+  directly from the timeline.
+- Export supports Live2D as an overlay on a video-backed project, and also has
+  a Live2D-only file-output fallback: if there is no active video source but
+  Live2D actor clips exist, export pre-renders those actors and composites them
+  over a neutral dark 1920x1080 (or selected export-resolution) background into
+  MP4/MOV/WebM.
+- Live2D rendering has OpenGL constraints, so export pre-renders Live2D actors on
+  the main thread before starting `VideoExportThread`.
+- `VideoExportThread.run()` must include each Live2D pre-rendered MOV in the
+  FFmpeg `-i` list after typography and Spine MOVs. Overlay specs alone are not
+  enough.
+- Offline video-to-Live2D mocap is now an MVP actor workflow, not a livestream
+  feature: the editor command `Apply Video Motion to Live2D` asks for a local
+  video file, uses OpenCV Haar face detection, writes renderable `pos_x`,
+  `pos_y`, and `scale` keyframes to the selected/current Live2D clip, and saves
+  the source/backend/payload/parameter-keyframe metadata on the clip. The
+  renderer now evaluates arbitrary Live2D parameter tracks after the authored
+  motion update and before draw, so face/gesture payloads can layer on top of a
+  selected `.motion3.json` motion instead of only moving/scaling the actor. The
+  baseline OpenCV path emits `ParamAngleX`, `ParamAngleY`, and
+  `ParamBodyAngleX`. When the optional local MediaPipe FaceMesh dependency is
+  available, the analyzer enriches the same payload with landmark-derived
+  `ParamAngleZ`, `ParamEyeBallX`, `ParamEyeBallY`, `ParamMouthOpenY`,
+  `ParamMouthForm`, `ParamEyeLOpen`, and `ParamEyeROpen`, so a source performer
+  can turn the head one way while the eyes look another way and mouth-open
+  values continue to drive talking animation. Future hand/gesture detectors
+  should write the same `parameter_keyframes` payload shape for hand and
+  expression controls. The default retarget profile is `talking_head_stabilized`: face
+  center and face-size tracks pass through deadzone + low-pass smoothing, and
+  scale is capped to a subtle range so upper-body speech footage does not make
+  the actor look like a camera is dollying forward/backward. Body retargeting is
+  deliberately much weaker than face-angle retargeting in this profile; talking
+  head footage should keep the character planted and use only subtle
+  `ParamBodyAngleX` correction. The mocap payload also classifies framing as
+  `face_closeup`, `upper_body`, `full_body`, or the face-only fallback
+  `full_body_or_wide`. When OpenCV HOG person boxes are available, upper-body
+  footage is identified as a cropped person box or large face-to-body ratio and
+  uses a damped transform profile; full-body footage is identified by a person
+  box reaching the lower frame with a small face-to-body ratio and keeps normal
+  actor translation/zoom. `face_closeup` still locks actor `pos_x`, `pos_y`,
+  `scale`, and body-angle transform output so only face parameters move. If the
+  person detector fails, the classifier falls back to conservative face-box
+  thresholds so speech videos remain planted instead of drifting. If MediaPipe
+  is not installed, mouth/eye detail capability is reported as unavailable and
+  the clip still receives the OpenCV transform/head fallback. The analyzer now
+  also exposes an operator-facing mocap summary: face close-ups are reported as
+  transform-locked, upper-body shots as damped, and full-body shots as
+  translation/zoom-enabled, with the driven Live2D channels listed so users can
+  tell whether the clip is using head angle, eye gaze, mouth, eye-open, and/or
+  actor transform keys.
+  Because the transform keyframes and parameter tracks are ordinary
+  `Live2DActorClip` state, preview and final export bake them through the
+  existing Live2D actor pre-render path. After a successful video-mocap apply,
+  the editor automatically attempts the same authored-motion storyboard pass
+  used by `Auto Storyboard Live2D Motions`; if the model has usable
+  `.motion3.json` clips, the single mocap actor is rebuilt into cut-aligned
+  motion clips while preserving transform and parameter retargeting. If no
+  motions are available, the mocap transform/parameter result remains in place
+  without interrupting the user. Real-time webcam driving, hand/body gesture
+  detection, production-grade MediaPipe QA, and YouTube/RTMP output remain
+  separate future stages. The current output target is a normal video file.
+- Live2D can also consume the shared VTuber Performance Source timeline
+  contract. The bridge is `app.live2d.performance_source_bridge` with schema
+  `tigerstudio.live2d.performance_source_bridge.v1`, and the registered Python
+  Action is `actor.live2d.apply_performance_source`. It resolves the active
+  input-only Performance Source clip at timeline time, applies mocap parameter
+  keyframes when available, maps VTuber source-framing payloads such as
+  `tigerstudio.vtuber.source_framing_control.v1` into conservative Live2D
+  `pos_x`, `pos_y`, and `scale` keyframes, and stores the original framing
+  payload on the Live2D actor clip for roundtrip and diagnostics. Program
+  Output must still skip Performance Source video; it is tracking input only.
+  The public subject types are `face_only`, `upper_body`, `full_body`, and
+  `unknown`: face-only locks actor transform, upper-body damps movement and
+  zoom, full-body permits the wider transform range, and unknown uses
+  conservative limits when subject guidance exists. The bridge also expands
+  canonical Cubism parameter tracks into common aliases via
+  `tigerstudio.live2d.parameter_aliases.v1` so models using alternate ids can
+  still receive head, body, breath, eye, mouth, and blink control tracks when
+  the renderer exposes matching parameters. The current production-tuning pass
+  applies separate smoothing for head yaw/pitch/roll, gaze, mouth shape/open,
+  and eye-open inputs, adds aggregate `ParamEyeOpen` / `ParamEyeBlink` tracks,
+  and emits subtle `ParamBreath`, `ParamBodyAngleY`, and `ParamBodyAngleZ`
+  tracks so supported models avoid the "only zooms/scales" look. Basic
+  face-box-only footage still reports mouth/eye detail as unavailable; those
+  richer tracks are only marked as detail when the source payload actually
+  contains gaze, mouth, or eye-open measurements.
+- The user entry points keep the original Live2D workflow intact. Dragging a
+  Live2D item to the timeline creates a Live2D actor track/clip, and
+  double-clicking that clip still opens the Live2D viewer for model, authored
+  motion, scale, and placement. VTuber Studio is an avatar-agnostic
+  operator/status window, not a replacement editor and not a Live2D-only
+  feature: it is opened from the toolbar, Actor menu, Command Palette, or
+  selected-actor Workbench card, and shows Program Output, Source Tracking,
+  Avatar Mapping, and Studio Controls for VRM/VSeeFace, Live2D, and future
+  avatar targets. The selected Live2D Workbench card exposes `Live2D Viewer`,
+  `Map Source`, and `VTuber Studio` actions so users can distinguish
+  model/motion editing from input-only Performance Source retargeting.
+- VTuber Studio uses a shared `Avatar Target` model instead of separate
+  Live2D/VRM studio windows. `Avatar Target` can be `VRM / VSeeFace Bridge`, a
+  Live2D actor clip, or a future avatar type. The registered Action System
+  surface for this shared studio is `vtuber.studio.open`,
+  `vtuber.avatar_target.summary`, `vtuber.avatar_target.select`,
+  `vtuber.vrm.bridge_status`, and `vtuber.vrm.pose_stream_preview`. VRM /
+  VSeeFace targets display avatar path/name, bridge state, capture status,
+  current Performance Source, and pose-stream readiness inside the same Studio
+  UI. Their route is `Performance Source -> OpenSeeFace -> VMC/pose stream ->
+  VRM / VSeeFace Bridge`; they do not use Live2D direct key baking.
+  `actor.live2d.apply_performance_source` remains the Live2D-only baking action
+  for writing mapping keys to a Live2D actor clip.
+- VRM avatars are first-class Media Pool assets, not normal video clips. `.vrm`
+  import creates a `VRM Avatar` / `Avatar Target` item with a `VRM` badge.
+  Double-clicking it selects `Avatar Target = VRM / VSeeFace Bridge` and opens
+  the shared VTuber Studio; the context menu also exposes `Use as Avatar
+  Target`, `Open VTuber Studio`, and `Set as VRM / VSeeFace Bridge Avatar`.
+  Selection persists `project_settings["vseeface_bridge"]["avatar_vrm"]` and
+  `project_settings["vtuber_studio"]["avatar_target_id"] =
+  "vrm:vseeface_bridge"`. The VRM file itself is never rendered directly as
+  Program Output, and direct `.vrm` drops are routed away from AR/PBR preview
+  placement into the same Avatar Target flow.
+- The canonical shared VTuber Studio/Broadcast contract is
+  `docs/SPEC_VTUBER_STUDIO_BROADCAST.md`. It records the post-split module
+  ownership (`VTuberBroadcastStudioWindow` and detached popout UI in
+  `app/video_editor_popouts.py`, evidence UI copy/payload helpers in
+  `app/broadcast_evidence_ui.py`), the rule that Performance Source media is
+  tracking input only, the Program Output/Live Target boundary, session-only
+  stream-key handling, and the Broadcast Evidence gate that keeps
+  `commercial_ready=false` until real private RTMP and Discord/window-share
+  evidence are registered.
+- Live2D authored-motion use is separate from transform mocap. The editor
+  command `Auto Storyboard Live2D Motions` uses the selected Live2D clip's
+  model as the source, reads all available `.motion3.json` motions, then splits
+  that Live2D actor into timeline clips aligned to the active video track's
+  cut/clip ranges. If there are fewer video ranges than motions, long ranges are
+  subdivided so more authored motions can be used at least once; if there are
+  more ranges than motions, the motion palette cycles. Transform keyframes and
+  Live2D parameter keyframes are sliced into each generated segment, preserving
+  mocap retargeting across authored motion changes. This is the current
+  practical answer to "change motions by video cut" because `Live2DActorClip`
+  still has one `motion_group`/`motion_idx` at a time.
+
+## MMD
+
+Tiger Studio includes an MMD actor path for PMX/PMD models and VMD motions. The
+MMD renderer uses the editor `OpenGLPreviewWidget` path and is Toon-only; the
+older Marmoset option has been removed. PMX/PMD files appear in the Media Pool
+as MMD actors. VMD files are hidden from the general Media Pool and managed
+inside the MMD Actor Editor motion library.
+
+Implemented scope:
+
+- PMX/PMD model loading and VMD motion loading.
+- IK, morph, append/inherit, SDEF CPU deformation path, and GPU skinning for
+  non-SDEF models.
+- CPU fallback for SDEF models, with explicit `sdef_cpu_skinning_required`
+  diagnostics.
+- MMD actor drag/drop, visible timeline rows, double-click editor entry, motion
+  apply, lighting, bloom, physics, and material setting persistence.
+- ProjectPlayer/export MMD alpha pre-render plus FFmpeg overlay path.
+- Local MMD QA corpus manifest, text diagnostics runner, visual OpenGL contact
+  sheet runner, editor video-composite/export smoke QA runner, multi-actor
+  timeline/export smoke QA runner, segment trim/speed export timing QA runner,
+  MMD actor action workflow QA runner, and ownerless automation actions for
+  MCP/QA execution.
+- Toon ramp, backface outline, self-shadow, contact shadow, MMD-only bloom,
+  hemisphere ambient, skin highlight clamp/warm tint/wrap diffuse, eye/lip/
+  stocking/metal/emissive/transparent material branches.
+- ZZZ-style face detail, eye/brow/lash/mouth outline suppression, hair/
+  accessory outline suppression, transparent front/internal hair ordering, and
+  alpha-gradient handling.
+- Lightweight spring physics and optional PyBullet physics. PyBullet creates
+  PMX sphere/box/capsule collision bodies, applies MMD Y-axis capsule-frame
+  correction, group/mask filters, static anchors, body-local point constraints,
+  joint-local linear/angular limit and spring approximations, and secondary
+  bone rotation hints from rigid-body orientation feedback.
+- PyBullet solver tuning is explicit: deterministic overlapping pairs,
+  model-scaled solver iterations, fixed timestep, contact/joint/friction ERP,
+  and PMX spring/mass-based max-force diagnostics.
+
+Current focused MMD test suite is `tests/test_mmd_schema.py`,
+`tests/test_mmd_pmx.py`, and `tests/test_mmd_editor_integration.py`; latest
+handoff state records `80 passed`. The local MMD QA corpus lives at
+`local_resources/mmd/qa_corpus_manifest.json`; `tools/mmd_qa_corpus.py` runs
+the reusable `app.mmd.qa_corpus.run_mmd_qa_manifest` text diagnostics, and
+`tools/mmd_qa_visual_corpus.py` renders offscreen OpenGL PNGs plus
+`debugCapture/mmd_player/qa_corpus_visual/mmd_qa_visual_contact_sheet.png`.
+`tools/qa_mmd_editor_composite.py` builds a synthetic video timeline, renders
+MMD preview RGBA, pre-renders the MMD alpha MOV, exports an MP4 overlay, and
+checks that MMD pixels affect the actor region without contaminating the rest
+of the video. `tools/qa_mmd_multi_actor_timeline.py` adds two MMD actor tracks
+with staggered start/end ranges and a motion offset, then samples
+none/single/overlap/single/none frames through preview, alpha pre-render, and
+final MP4 export. `tools/qa_mmd_segment_timing.py` verifies that MMD alpha
+pre-render and final MP4 export keep actor timing aligned across trimmed source
+starts, skipped source gaps, and 2x speed segments. `tools/qa_mmd_render_queue_wiring.py`
+verifies that the batch/render-queue export factory forwards trimmed/speed
+segments, MMD tracks, and the MMD pre-rendered alpha overlay into
+`VideoExportThread`. `tools/qa_mmd_render_queue_export.py` runs that factory
+with the real exporter, writes baseline/MMD MP4 outputs, and checks two
+simultaneous MMD actor regions against a preview overlay sample.
+`tools/qa_mmd_long_project_export.py` runs a 10s synthetic source through the
+real render-queue factory, preserves five trimmed/speed segments, uses two
+simultaneous MMD actors, and samples the final MP4 against preview overlays.
+`tools/qa_mmd_actor_workflow.py`
+verifies the action-level user flow: add an actor, add an external VMD to the
+actor motion library, apply the motion, persist physics/render/material
+settings, move/trim/duplicate, and delete with destructive confirmation. The
+registered ownerless, non-mutating QA actions are `mmd.qa.run`,
+`mmd.qa.visual_run`, `mmd.qa.composite_run`, `mmd.qa.timeline_run`,
+`mmd.qa.segment_run`, `mmd.qa.render_queue_run`,
+`mmd.qa.render_queue_export_run`, `mmd.qa.long_project_run`, and
+`mmd.qa.workflow_run`. Material diagnostics include
+missing texture row/path details through
+`missing_texture_rows` and `missing_texture_paths`. Latest
+PyBullet smoke capture is
+`debugCapture/mmd_player/regression/cantarella_wavefile_pybullet.png` with the
+matching JSON diagnostics. The smoke profile reports `backend=pybullet`,
+`bodies=415`, `shapes=415`, `spheres=3`, `boxes=223`, `capsules=189`,
+`capsule_axis_fixes=189`, `constraints=574`, `joint_frame_constraints=574`,
+`solver_iterations=56`, `constraint_force_avg=44.41`,
+`constraint_force_max=260.0`, `orientation_feedback=378`, and
+`profile_ok=true`.
+
+Current release posture:
+
+- Do not expand MMD scope speculatively. Local synthetic QA covers preview,
+  video composite, multi-actor timing, segment timing, render queue export,
+  and long-project export. Further MMD work should only open for native
+  MMD/Bullet reference captures or a concrete failing user asset/project.
+- SDEF visual validation is covered by the external local-bundle
+  `tda_onepiece_sdef_validation` PMX at `E:/ClaudeCodeApp/mmd`. It reports
+  4,602 SDEF vertices and renders through the expected CPU fallback path.
+- Per-model collision, constraint, material, or motion exceptions should be
+  added only when a real broken model requires them.
+
+See `docs/mmd_player_handoff.md` and `docs/MMD_TODO.md` for the active handoff
+and MMD backlog.
+
+## Spine and NIKKE
+
+Core files:
+
+- `app/spine_editor/spine_json_parser.py`: Spine JSON and binary `.skel` parser.
+- `app/spine_editor/spine_data.py`: skeleton, bones, slots, skins, animations.
+- `app/spine_editor/spine_gl_renderer.py`: interactive OpenGL Spine viewport.
+- `app/spine_editor/spine_offscreen_gl_renderer.py`: timeline/export renderer.
+- `app/spine_editor/editor_window.py`: Spine editor window and model loading.
+- `app/spine_editor/actor_track.py`: Spine actor track/clip data model.
+- `app/spine_editor/actor_lane_row.py`: Spine actor lane UI.
+- `app/project_player.py`: Spine preview compositing.
+- `app/video_exporter.py`: Spine actor pre-render overlays.
+- `app/project_io.py`: project save/load for `spine_actor_tracks`.
+
+Behavior notes:
+
+- NIKKE uses Spine-formatted assets. Treat NIKKE problems as Spine parser,
+  atlas, mesh, blend, slot-order, or animation issues.
+- `tools/actor_compat_matrix.py` is the fast local model-corpus preflight for
+  Live2D/Spine compatibility. It scans roots for Spine `.skel`/JSON and
+  Live2D `.model3.json`, checks atlas/model dependencies, reports missing
+  assets, and can optionally run the Spine parser before slower render QA.
+  Reports include per-row severity, issue codes, dependency counts, missing
+  dependency kinds, family grouping, recommendations, issue-count summaries,
+  and top failures. Reports also classify passing-but-risky stress samples with
+  `feature_flags`, `risk_codes`, `risk_severity`, `risk_score`, and
+  `stress_tier`. Spine risk coverage includes 4.2+ assets, binary version
+  unknowns, weighted/linked mesh, clipping, constraints, multi-page atlas,
+  multi-skin rigs, high bone/slot counts, events, and static/no-animation
+  assets. Live2D risk coverage includes many texture pages, large motion sets,
+  non-ASCII runtime paths, physics, pose, display info, user data, expressions,
+  and hit areas. Summary output aggregates `risk_counts`, `feature_counts`,
+  `stress_tiers`, and `top_risks` so hundreds of models can be triaged by risk
+  class instead of only pass/fail. The stress threshold is calibrated so
+  NIKKE-style Spine rigs with weighted mesh + constraints + multi-page atlas
+  coverage enter `stress` even when each individual dependency passes.
+  `--known-failures` accepts the same
+  quarantine JSON used by render QA; matching failed rows become
+  `quarantined` instead of counted as hard failures while still appearing with
+  the attached `known_failure` reason. `--summary-only` keeps large corpus runs readable, and
+  `--limit` now short-circuits discovery instead of scanning the full corpus
+  first.
+- `tools/actor_render_qa.py` is the combined large-corpus render QA entry
+  point. It runs `actor_compat_matrix` first, then reuses
+  `tools/test_spine_resources.py` for Spine render/nonblank validation and
+  `tools/test_live2d_resources.py` for per-model Live2D child-process render
+  checks. Live2D render QA is UTF-8 safe for non-ASCII model paths and records
+  alpha-bbox nonblank status. It must render the normalized ASCII-safe runtime
+  model path, not the original source path, because non-ASCII/Unity-style
+  source packages can pass dependency QA but fail or render blank when handed
+  directly to the Live2D runtime. The combined report separates compatibility
+  failures from render failures so missing assets, blank actor output, Live2D
+  crashes, and raw Unity/bundle inputs are triaged independently with
+  recommendations. Its summary promotes compatibility stress metrics under
+  `compatibility_risk`, carrying risk counts, feature counts, stress tiers, and
+  top-risk models into the combined render report. `--render-top-risks` adds
+  the highest-risk passing compatibility rows to the render set, and
+  `--animation-sweep` records per-animation sample counts, blank frames, bbox
+  bounds, center-jump diagnostics, Spine skin/slot attachment summaries, and
+  Spine mix-and-match skin-combination samples from the render helpers.
+  Live2D motion and expression variants are actually rendered through
+  `Live2DActorClip.expression_id`; physics, pose, display-info, user-data, and
+  hit-area references are recorded as metadata coverage until those runtime
+  controls become first-class clip fields.
+  `--golden-dir` enables first-nonblank image regression checks, with
+  `--update-golden` used only when intentionally accepting new baselines.
+  `--known-failures` quarantines expected compatibility/render failures; the
+  default local allowlist is `qa_corpus/actor_known_failures.json`.
+  Render summaries include `failure_categories` and per-result `quality`
+  taxonomy, so base-frame blank output, runtime crashes, timeouts,
+  animation-sweep blanks, and golden mismatches are separated instead of
+  collapsing into generic failure rows.
+  With `--baseline`, it also reports compatibility and render
+  regressions against a previous corpus run so large Live2D/Spine packs can be
+  re-tested without manually comparing JSON files.
+- `tools/test_live2d_resources.py` marks child-process JSON with a
+  `__TIGERCAPTURE_LIVE2D_RESULT__` sentinel. The Live2D native runtime can
+  write long motion-load logs without a newline, so QA parsers must find the
+  result JSON even when it appears in the middle of a native log line. Per-model
+  child-process timeouts are reported as `timeout` rows with stdout/stderr tails
+  instead of aborting the full corpus run.
+- In the Live2D compatibility matrix, MOC and texture references are render
+  required. Missing expressions, physics, display info, user data, or motions
+  stay visible in `missing_dependencies` and issue summaries, but are warnings
+  rather than base-render failures because a model can still render nonblank
+  without them.
+- `spine_json_parser.py` includes a NIKKE raw-hash header fallback for some
+  binary `.skel` exports.
+- The editor, compatibility matrix, and render QA prefer JSON when a same-stem
+  JSON export exists beside binary `.skel`, because JSON is easier to inspect,
+  usually more complete, and can keep QA useful for Spine 4.2 binary samples
+  that the current binary parser does not support yet.
+- The installed local actor corpus was last validated without limits on
+  2026-06-16: 199 total models passed compatibility and render QA, including
+  160 Spine models and 39 Live2D models.
+- The stress/known-failure compatibility path was validated on 2026-06-17:
+  200 local actor resources scanned, 199 passed, 1 synthetic missing-atlas
+  parser fixture quarantined, and 0 hard compatibility failures. A top-risk
+  render-sweep smoke run rendered the highest-risk Spine sample and recorded
+  animation-sweep diagnostics in the saved report.
+- The actor corpus was recalibrated and fully golden-seeded on 2026-06-17:
+  200 local actor resources scanned, stress-tier coverage rose to 10 models,
+  no coverage issues remained, and 40 top-risk Live2D/Spine render baselines
+  were created under `qa_corpus/actor_golden`.
+- Live2D/Spine editor loading is productized as a staged operation, not a
+  blocking black box. `app.actor_compat_repair` performs non-destructive path
+  repair and dependency diagnostics; `app.actor_loading_cache` records queued,
+  file_check, repair, compat, parse, textures, first_frame, ready/error/timeout
+  stages with progress percentages; `app.actor_process_probe` and
+  `tools/actor_isolated_probe.py` run one-frame child-process probes; and
+  `app.actor_prerender_cache` can save short PNG preview sequences for faster
+  future diagnostics. The Live2D and Spine editors write these records while
+  showing determinate progress/cancel/retry UI, and `app.actor_loading_manager`
+  exposes the cache and loading QA from the Command Palette. Crash reports now
+  include `actor_context`, and `tools/qa_actor_overnight.py` plans or runs
+  large isolated actor render sweeps for long compatibility sessions.
+- Actor loading diagnostics are wired into editing surfaces. `ProjectPlayer`
+  checks exact-size prerender cache frames for safe default-transform
+  Live2D/Spine clips before using live render fallback; actor timeline context
+  menus can show recent loading status, run isolated probes, generate prerender
+  cache, quarantine known failures, and open source folders; and the startup
+  crash dialog displays actor context when the latest crash happened around
+  Live2D/Spine open/load/drop breadcrumbs. Screen Studio-style preset coverage
+  now includes cursor scissor/zoom/drag animated-icon stickers, wallpaper
+  palette effects, and blade/palette template packs.
+- Actor compatibility repair now has a user-facing guidance report:
+  `app.actor_compat_repair.actor_repair_guidance_report()` maps missing atlas
+  pages, missing Live2D model files, unsupported formats, optional MediaPipe
+  status, corpus status rows, issue codes, and risk codes into actionable
+  repair steps plus release-claim blockers. This keeps Live2D/Spine positioned
+  as a strong differentiator with corpus QA, not as a promise that every
+  Unity/game-exported rig will load.
+- Spine actor clips are composited in preview by `ProjectPlayer` and exported by
+  pre-rendering transparent overlays.
+- Spine export uses `_prepare_spine_actor_overlays()` to bake each clip to a
+  ProRes 4444 alpha MOV, then includes that MOV as an FFmpeg overlay input.
+
+## Sound Editor and Audio Tracks
+
+Core files:
+
+- `app/audio_tracks.py`: audio data model, waveform extraction, preview mixer,
+  FFmpeg audio export filters, single-clip export.
+- `app/audio_workflow.py`: dialogue-cleanup presets, loudness targets, bus
+  specs, clip-gain helpers, and one-click audio plan helpers.
+- `app/audio_accuracy.py`: Qt-free reference diagnostics for approximate
+  integrated LUFS, true peak, stereo correlation, and audio warning checks.
+- `app/audio_separation.py`: vocal/instrumental source separation worker.
+- `app/sound_editor_panel.py`: renewed compact Sound Editor surface for the
+  Workbench audio state and detached timeline-editor shell. It owns
+  `SoundEditStateStore`, `SoundEditorPanel`, and `SoundEditorDockWindow`.
+- `app/video_editor_window.py`: `SoundEditorWindow`, `ClipWaveformView`,
+  `SpectrumView`, timeline audio rows, audio track insertion, and the legacy
+  Advanced Lab entry point.
+- `app/audio_mixer_panel.py`: mixer strip UI with volume, pan, VU, scopes.
+- `app/project_io.py`: project save/load for audio tracks and clips.
+- `app/controller.py`: standalone Sound Editor launch path.
+
+Data model:
+
+- `AudioTrack` is a timeline lane. It owns clips and carries track-level volume,
+  pan, label, `bus_id`, and normalized `automation_points`.
+- `AudioClip` references a source file and stores offset, trim range, cuts,
+  fades, selection, waveform/spectrum cache, gain, and sound-editor effects.
+- Splitting an audio clip creates multiple `AudioClip` objects on the same
+  `AudioTrack`; it does not create new tracks.
+
+Preview and export:
+
+- Preview playback uses `AudioMixer`, with one `QMediaPlayer` per live clip.
+- Qt preview supports timing and volume but not true per-channel pan; pan is
+  applied in FFmpeg export via `apan`.
+- Track automation is exported as a frame-evaluated FFmpeg `volume` expression.
+- Waveforms are extracted asynchronously by `WaveformExtractor`, using FFmpeg
+  through `QProcess`.
+- Waveform and spectrum analysis results are cached by `(path, mtime, size)`
+  through helpers in `app/audio_tracks.py`; duplicate in-flight jobs for the
+  same source file are joined by `VideoEditorWindow`.
+- Single-clip Sound Editor export uses `ClipExporter` and
+  `build_single_clip_filter()`.
+- Timeline video export passes loaded `AudioTrack` lanes into
+  `VideoExportThread`, which builds a larger FFmpeg audio mix.
+- Audio Mixer LUFS display and Color/Audio accuracy QA share
+  `audio_accuracy.integrated_lufs_approx()` so the UI meter and scripted
+  diagnostics do not drift by using different reference math.
+
+Sound Editor UI:
+
+- The default in-editor Sound Editor surface is the renewed embedded
+  `SoundEditorPanel` inside the Workbench Audio tab. It is also wrapped by
+  `SoundEditorDockWindow` when a timeline audio clip opens a detached editor.
+- The renewed panel has no Load workflow. Its target is either the selected
+  Media Pool audio source or the selected Timeline audio clip.
+- `SoundEditStateStore` keeps Media Pool audio edits separate from Timeline
+  clip edits by keying Media Pool state by resolved source path. Timeline clips
+  continue to carry their edit data directly on `AudioClip`.
+- The compact panel uses waveform and spectrum/level strips, icon tabs, chain
+  chips, shared `StudioSlider` controls, and interactive EQ/Dynamics/FX/
+  AI Master mini graphs.
+- EQ/Dynamics/FX/AI graph handles are functional edit controls. Dragging them
+  updates the matching slider and real `AudioClip.effects` state; double-click
+  resets handles to their defaults.
+- EQ/Dynamics/Effects/Advanced/AI Master, dialogue cleanup, and loudness state
+  are stored in `AudioClip.effects`.
+- AI Master is macro mastering for AI-generated music and renders via FFmpeg
+  filters on export.
+- The legacy `SoundEditorWindow` remains available as an Advanced Lab and as
+  the standalone Sound Editor launch path. It owns the heavier waveform/
+  spectrum/marker/stem-separation/export workflow and should not be treated as
+  the normal compact Workbench surface.
+- The AI Master tab also exposes professional audio presets from
+  `app.preset_library` for dialogue cleanup, loudness delivery, and music
+  mastering. Applying one mutates `AudioClip.effects` and, when the clip is
+  timeline-bound, labels/routes the owning `AudioTrack` to a dialogue or music
+  bus.
+- Audio Mixer uses the shared UX empty-state copy when no tracks are loaded,
+  and names its mixer header by actual track count so empty/progress/failure
+  polish is visible before playback starts.
+- Dialogue cleanup renders through stable FFmpeg filters: high-pass,
+  `afftdn`, hum notch EQ, presence/air EQ, light tail control, de-essing, and
+  `dynaudnorm`. Loudness targets render through `loudnorm`.
+
+Vocal/music separation:
+
+- UI entry: legacy Advanced Lab / `SoundEditorWindow` AI Master tab,
+  "Vocal / Music Separation" section. The compact Workbench panel links to the
+  Advanced Lab for this heavier workflow instead of embedding source separation
+  directly.
+- Worker: `AudioSeparationWorker` in `app/audio_separation.py`.
+- `planned_separation_method(prefer_demucs=True)` reports whether a run will
+  try Demucs or the FFmpeg mid/side fallback.
+- `validate_audio_source()` rejects missing, non-file, or empty sources before
+  starting expensive separation work.
+- The UI exposes an `Auto` / `Fast fallback` backend selector. Auto uses Demucs
+  when installed; Fast fallback forces FFmpeg mid/side.
+- `AudioSeparationWorker.cancel()` terminates the active Demucs/FFmpeg
+  subprocess and emits `cancelled`.
+- High-quality path: if the current Python environment has `demucs`, the worker
+  runs `python -m demucs --two-stems=vocals`.
+- Fallback path: FFmpeg mid/side extraction. This is fast and local but
+  approximate; it works best when vocals are centered in a stereo mix.
+- Outputs: `<source>_vocals.wav` and `<source>_instrumental.wav` under a
+  `<source>_stems` folder in the user-selected output root.
+- When `SoundEditorWindow` has a video-editor parent, separated stems are added
+  as two new `AudioTrack` lanes. The new clips copy the original clip's
+  timeline offset, trim, cuts, and fades, but start with neutral effects.
+- Standalone Sound Editor mode has no timeline parent, so it only writes files
+  and shows their paths.
+
+## Performance Hotspots
+
+- `app/perf_monitor.py` provides opt-in slow-call logging. Set
+  `TIGERCAPTURE_PERF=1` and optionally `TIGERCAPTURE_PERF_SLOW_MS=<ms>` to log
+  slow preview tick/seek/refresh renders from `ProjectPlayer`.
+- `ProjectPlayer._render_frame_at()` also logs stage timings when performance
+  logging is enabled. Use `TIGERCAPTURE_PERF_STAGE_MS=<ms>` to change the
+  per-stage threshold. Stage labels include decode, frame_blend, stabilizer,
+  zoom, node_effect, legacy_mask_grade, video_filters, chroma_key,
+  background_removal, transition, PIP, Spine, Live2D, final_grade, emit_gpu,
+  and qimage. The qimage stage is skipped in the auto GPU-preview path when no
+  CPU-image consumer is active.
+- `app/media_pool.py` caches duration probes and first-frame thumbnails by
+  `(path, mtime, size)` so repeated media-pool loads do not repeatedly decode
+  the same first frame.
+- `app/audio_tracks.py` caches waveform and spectrum analysis results by
+  `(path, mtime, size)`; `VideoEditorWindow` joins duplicate in-flight jobs.
+- `app/video_decoder.py::open_decoder()` wraps full decoder implementations in
+  `PrefetchDecoder` for background preview reads. Lightweight test or alternate
+  decoder stubs that do not expose the full decoder interface are returned
+  directly. Existing fresh sibling proxies at `proxies/<stem>_proxy.mp4` are
+  used automatically for preview decode unless
+  `TIGERCAPTURE_DISABLE_AUTO_PROXY=1` is set. `TIGERCAPTURE_PREVIEW_HEIGHT`
+  can override the preview-buffer downscale height; otherwise 4K sources use a
+  540p preview buffer and other sources default to 720p. Prefetch buffers store
+  frame indices with frames, allowing small seeks into the hot buffer. Explicit
+  seeks to the next sequential OpenCV frame skip the expensive
+  `CAP_PROP_POS_FRAMES` call.
+  `TIGERCAPTURE_PREFETCH_FRAMES` and
+  `TIGERCAPTURE_PREFETCH_READ_TIMEOUT` tune the internal preview frame-server
+  buffer and main-thread wait budget without changing project files.
+  `TIGERCAPTURE_PREFETCH_FORWARD_SEEK_WINDOW` and
+  `TIGERCAPTURE_CV2_FORWARD_SEEK_WINDOW` can opt into satisfying small forward
+  seeks by continuing sequential decode instead of repositioning; both default
+  to `0` because local QA on the current 720p corpus showed discarding 10-40
+  frames was slower than OpenCV random seek. OpenCV
+  FFMPEG decode can attempt hardware acceleration as open parameters when
+  `TIGERCAPTURE_ENABLE_HW_DECODE=1` is set; this is opt-in because local QA
+  showed OpenCV HW decode can report active acceleration while being slower
+  than software decode. Set `TIGERCAPTURE_DISABLE_HW_DECODE=1` to force
+  software decode or `TIGERCAPTURE_HW_DEVICE=<index>` to request a specific
+  device when OpenCV exposes `CAP_PROP_HW_DEVICE`. A process-level FFmpeg RGB
+  pipe frame server is available with `TIGERCAPTURE_PREVIEW_FRAME_SERVER=1`;
+  keep it opt-in because local random-seek QA on the 720p corpus was slower
+  than OpenCV prefetch/cache. Set `TIGERCAPTURE_PREVIEW_DECODER_AUTO=1` or
+  `TIGERCAPTURE_PREVIEW_FRAME_SERVER=auto` to benchmark OpenCV vs the FFmpeg
+  frame server for each source/proxy/preview-height tuple. The result is cached
+  under `~/Videos/TigerCapture/.cache/decoder_choices.json`, and the auto path
+  only chooses the FFmpeg frame server when it beats OpenCV by the configured
+  margin (`TIGERCAPTURE_PREVIEW_DECODER_AUTO_MARGIN`, default `0.85`). When the
+  frame-server or auto path is opened without an explicit preview height, it now
+  receives the same monitoring-scale hint used by preview decode (720p by
+  default, overridden by `TIGERCAPTURE_PREVIEW_HEIGHT`) before benchmarking or
+  spawning FFmpeg, so opt-in comparisons do not accidentally decode full-source
+  frames. `ProjectPlayer` also passes an explicit per-project
+  `preview_decode_height` / `preview.preview_height` style setting through to
+  the decoder factory when present; absent that setting, the decoder keeps its
+  source-aware 4K/720p defaults.
+- Preview playback is mostly Python/NumPy/OpenCV plus some OpenGL paths. Heavy
+  masks, full-res previews, Live2D, and Spine overlays can make playback slow.
+- Spine actor preview renders use the GL/offscreen renderer when available and
+  the half-resolution software fast-mesh path as fallback
+  (`TIGERCAPTURE_SPINE_PREVIEW_SCALE`, default `0.5`). Actor tracks prewarm up
+  to 8 actor clip renderers when attached to the player. Per-clip preview
+  layout is cached, animated-frame cache size defaults to 72
+  (`TIGERCAPTURE_SPINE_PREVIEW_CACHE_LIMIT`), animated preview time is cached
+  at 24fps by default (`TIGERCAPTURE_SPINE_PREVIEW_FPS`, `0` disables it), and
+  composited Spine overlay images/RGBA arrays are cached in `ProjectPlayer`
+  (`TIGERCAPTURE_SPINE_OVERLAY_CACHE_LIMIT`). Complex Spine rigs use a lower
+  adaptive overlay cache/readback cadence by default:
+  `TIGERCAPTURE_SPINE_COMPLEX_THRESHOLD=900` and
+  `TIGERCAPTURE_SPINE_COMPLEX_PREVIEW_FPS=12`. This reduces repeated FBO
+  readbacks for single complex actor clips without changing full-quality
+  export. CPU fallback Spine preview now uses
+  `TIGERCAPTURE_SPINE_PLAYBACK_PREVIEW_SCALE` (default `0.375`) for animated
+  playback, then lowers further to `TIGERCAPTURE_SPINE_COMPLEX_PREVIEW_SCALE`
+  (default `0.25`) when a complex Spine rig is active or when strict CPU
+  compositor fallback is forced. Paused/editor frames keep the normal preview scale so
+  placement and scale adjustments stay readable. Export keeps using the
+  full-quality actor render path. The GL viewport/offscreen path batches consecutive meshes sharing
+  the same atlas texture before issuing `glDrawArrays`, reducing draw-call
+  churn for complex rigs. An experimental direct RGBA ndarray compositor is
+  available with
+  `TIGERCAPTURE_SPINE_ARRAY_COMPOSITOR=1`; local QA showed its blend kernel is
+  faster but the current FBO readback path can still make it slower overall, so
+  the default remains the previously measured PIL compositor. A shared
+  `SpineOverlayGLCompositor` is now attempted by default for preview overlays:
+  it can draw multiple active Spine clips into one offscreen FBO and read back
+  once, then falls back to the older per-clip renderer if unavailable. For the
+  main editor GL preview, `TIGERCAPTURE_SPINE_ZERO_READBACK=1` is now the
+  default: when QImage/final-CPU consumers are inactive, `ProjectPlayer` sends Spine
+  `preview_render_state` metadata with `gpu_frame_ready` and
+  `OpenGLPreviewWidget` draws the actor meshes directly into the letterboxed
+  preview viewport. This skips CPU overlay pixels and FBO readback for that
+  frame. `TIGERCAPTURE_SPINE_DIRECT_WITH_LIVE2D=1` is also default, allowing
+  Spine direct-GL preview even when top-level Live2D is active; set it to `0`
+  for strict CPU-composited actor layer-order debugging. If the direct Spine
+  shader/context path fails, the preview widget
+  emits a failure signal and `VideoEditorWindow` disables the direct path,
+  refreshes the frame, and falls back to CPU compositing. Export keeps the
+  full-quality Spine render path. Direct overlay states are cached by quantized
+  preview time, output size, and clip signature, so repeated paints for the same
+  frame do not rebuild Spine actor state.
+- AR/PBR preview/export uses a hybrid renderer. CPU `software_pbr` still
+  projects imported FBX/GLB descriptor triangles, applies material
+  color/roughness/metallic/reflectance controls, depth occlusion, shadow
+  catcher, and reflection catcher masks for QImage fallback consumers and as a
+  final export fallback. For the main OpenGL editor preview, AR/PBR GPU preview
+  is enabled by default unless `TIGERCAPTURE_AR_PBR_GPU_PREVIEW=0`, `cpu`, or
+  `software` is set. When QImage/final-CPU consumers are inactive,
+  `ProjectPlayer` builds
+  `ar_pbr_items` via `app.ar_pbr.gpu_preview.build_gpu_preview_items()` and
+  sends them through `gpu_frame_ready`; `OpenGLPreviewWidget` draws
+  `shadow_vertices`, `reflection_vertices`, then mesh `vertices` directly over
+  the letterboxed video texture. When geometry has UVs and resolved material
+  maps, the same packet also carries `pbr_triangles` with projected
+  position, UV, normal, tangent, bitangent, base color, material
+  roughness/metallic/reflectance values, base/roughness/metallic/specular/
+  normal/occlusion map metadata, packed channel selectors, live depth texture
+  metadata, and HDRI lighting metadata; the GL preview draws those with a
+  model-view-style material-map PBR fragment shader over the color-packet
+  fallback. Export now
+  uses the same GPU-preview packet
+  builder through `app.ar_pbr.export_packet_renderer` as the deterministic
+  fallback (`TIGERCAPTURE_AR_PBR_EXPORT_RENDERER=packet`; set `software` for
+  the old compositor fallback). Export defaults to the worker-safe full GPU
+  helper first and falls back to packet PBR on helper failure. The GPU packet
+  builder resolves road-plane, plane,
+  screen-plane, and scene-anchor placement before projection, matching fallback
+  attachment semantics. The packet path currently uses shaded color triangles,
+  GL model-view-style material-map PBR triangles, screen-space mesh silhouette
+  contact shadows, mirrored mesh reflection catchers, and lightweight fallback
+  catcher layers rather than the full model-view PBR renderer.
+  `app.ar_pbr.texture_plan` is shared by the model-view loader and the packet
+  path; it reports `ready`, `missing`, `referenced`, or `none` texture-map
+  states and supplies cached base-map average colors for fallback packet tint.
+  The packet builder also emits per-triangle UV/base texture packets when
+  geometry UVs exist; headless export samples those packets with affine texture
+  mapping, then consumes `pbr_triangles` with a headless PBR rasterizer that
+  samples base, roughness, metallic, specular, normal, and occlusion maps. When an HDRI is
+  available, export samples the environment by normal and reflection direction
+  for diffuse/specular IBL instead of using only a flat average color, builds
+  cached downsampled HDRI prefilter levels, and samples roughness-selected mip
+  levels for specular IBL. The export diagnostics expose
+  `pbr_hdri_directional_sampling`, `pbr_hdri_sampled_pixels`,
+  `pbr_prefiltered_ibl`, `pbr_prefiltered_ibl_level_count`, and
+  `pbr_prefiltered_ibl_pixels`. When a depth frame is available and the track
+  enables occlusion, export applies a per-pixel alpha depth mask using the
+  packet's object-depth hint; if export has no global depth source, it can use
+  the packet's live depth texture payload. The same normalized video-depth
+  occlusion helper is used by synthetic/software fallback and packet PBR export,
+  and `OpenGLPreviewWidget` keeps the live depth texture fragment-discard path.
+  Full GPU helper export now receives the bridge-provided depth frame as a
+  temporary float32 `.npy` payload and applies an overlay alpha depth matte
+  before compositing the model-view render over the source frame. The supported
+  controls are `occlusion_tolerance` / `depth_occlusion_tolerance` and
+  `occlusion_softness` / `depth_occlusion_softness`; diagnostics include
+  `depth_frame_available`, `pbr_depth_occlusion_applied`, and
+  `pbr_depth_occluded_pixels`. This closes the previous full-GPU-service
+  export gap, but native helper-side per-fragment object-depth comparison is
+  still future quality work. Export uses
+  overlay-only packet SSAA
+  (`TIGERCAPTURE_AR_PBR_PACKET_SSAA`, default `2`) so AR/PBR edges are smoothed
+  without softening the source video frame. `tools/qa_ar_pbr_gpu_preview.py` is
+  the headless
+  contract QA:
+  it imports the real `debugCapture/ar_pbr_external_assets/es_fbx/es.fbx` when
+  available, otherwise a generated FBX smoke scene, and fails unless mesh,
+  shadow, and reflection GPU packets are produced, including mesh-aware
+  contact-shadow and layered depth-fade screen-reflection catcher packets.
+  Remaining performance/product parity work is real shadow-map passes,
+  physically richer reflections, GPU/model-view cubemap prefilter parity, and
+  real-asset export quality with the full GPU model-view renderer.
+  `TIGERCAPTURE_AR_PBR_EXPORT_RENDERER=gpu`
+  and `offscreen_gpu` are recognized as explicit full-GPU requests; export first
+  invokes the full model-view GPU helper. On success export records
+  `mode=full_model_view_gpu_export_service`, `fallback=false`, and
+  `worker_safe=true`. On failure it records
+  `mode=offscreen_gpu_requested_packet_fallback` and uses the shared PBR packet
+  renderer rather than silently ignoring the request. The fallback diagnostics
+  include the service attempt, command environment variable,
+  configuration/availability state, and service blockers so export logs
+  distinguish "helper failed" from ordinary packet renderer failures.
+- `tools/qa_ar_pbr_export_bake.py` is the encoded-output QA for the same
+  contract. It verifies the packet export renderer reports
+  `mode=gpu_packet_export`, renders at least one mesh/shadow/reflection packet,
+  keeps packet SSAA enabled, changes final MP4 pixels, produces AR/PBR-colored
+  overlay pixels, leaves catcher darkening in the encoded result, resolves at
+  least one material texture map, reports GL-preview model-view-style material
+  map PBR packet readiness, confirms at least one texture triangle and one PBR
+  material-map triangle were sampled during export, and records
+  `renderer_quality=preview_packet_pbr_material_maps`, HDRI directional
+  sampling, roughness IBL prefilter sampling, and PBR depth-mask diagnostics.
+- `tools/qa_ar_pbr_attachment_stability.py` is the product-level "does the 3D
+  model stick to the video?" QA. It verifies road-plane anchor center drift,
+  per-frame placement application, shadow/reflection catcher packets, and
+  coarse fallback depth-occlusion skip counts through the same GPU preview
+  packet path.
+  It also checks the scene-anchor multi-probe video tracker can follow a
+  shifted, scaled, and rotated asymmetric patch and apply the measured
+  scale/roll to the AR/PBR track transform. Runtime diagnostics expose the
+  `template_depth_plane_slam_assist` payload for UI/QA confidence display
+  without claiming full SLAM. QA Dashboard exposes the report as
+  `AR/PBR Attachment Stability`.
+- The editor preview and preview pop-out expose a standard 3D transform gizmo
+  for selected AR/PBR tracks. X/Y/Z handles use red/green/blue color coding for
+  constrained move, axis scale, and per-axis rotation rings; the center moves
+  in screen plane and the white diagonal handle performs uniform scale. This is
+  an editor UX layer over the existing `transform` and `placement` payloads,
+  not a replacement for the renderer or scene-anchor solver.
+- The AR/PBR model preview window exposes an `HDR Environment` dropdown. It is
+  backed by `debugCapture/ar_pbr_resources/manifest.json` and
+  `app.ar_pbr.hdri_presets`, currently with eight local Poly Haven CC0 1K HDRIs.
+  Selecting a preset reloads only the GL HDRI texture and updates estimated key
+  light azimuth/elevation; it does not reimport the FBX/GLB mesh. Normalized
+  track lighting preserves `hdri_id` and `hdri_path`.
+- Combined GPU metadata is now a first-class regression target. The automated
+  preview tests verify that color grade data, shader clip effects, Spine
+  overlay packets, and AR/PBR overlay packets can share the same GL preview
+  frame payload and still reach their separate `OpenGLPreviewWidget` consumers.
+- `tools/qa_gpu_preview_pixel_collision.py` is the visible-framebuffer QA for
+  the same surface. It captures a real `OpenGLPreviewWidget` framebuffer and
+  verifies that shader changes plus AR/PBR mesh/shadow/reflection overlay
+  pixels are present. It additionally verifies a real Spine sample on the
+  direct GL overlay path and a real Live2D sample on the rendered-frame upload
+  path. The report is tracked by the QA Dashboard under `GPU Preview Pixel
+  Collision`.
+- `tools/qa_editor_e2e_smoke.py` is the full Video Editor smoke gate for
+  user-visible combinations that unit tests miss. It opens the real editor,
+  imports a QA MP4 through Media Pool + timeline, verifies that the startup
+  preview placeholder is removed, preview RGB is nonblank, side docks do not
+  overlap the viewer, the preview pop-out receives frames, Media Pool and
+  Workbench pop-outs restore their child panels, and bounded clip-audition
+  playback returns to the original playhead. It then loads the actor QA
+  project and verifies video, restored Media Pool state, Spine and Live2D
+  actor lanes, shared timeline-ruler alignment, and nonblank preview together.
+  QA Dashboard exposes this as `Editor E2E Smoke` and previews its contact
+  sheet/screenshots.
+- `tools/qa_editor_export_bake.py` is the final-file smoke gate for editor
+  render parity. It exports a baseline QA clip and a processed clip through
+  `VideoExportThread`, exercising text overlays, clip-level filters, zoom
+  actors, and color grading. It then reads both encoded MP4s back through
+  OpenCV, saves baseline/processed stills, and fails if the processed output is
+  unreadable, visually unchanged, or missing the overlay/effect pixel evidence.
+  QA Dashboard exposes this as `Editor Export Bake` and previews the processed
+  output still.
+- Chroma-key preview uses the OpenCV native HSV/LUT/mask path plus a
+  preview-only downsample/upsample fast path controlled by
+  `TIGERCAPTURE_CHROMA_PREVIEW_SCALE` (default `0.375`). Export still calls the
+  full-resolution `apply()` path for parity. When clip-level video filters and
+  chroma key are both enabled, `app.preview_effects.apply_filter_chroma_preview_batch()`
+  runs both effects through one shared downsample/upsample pass; disable with
+  `TIGERCAPTURE_DISABLE_FILTER_CHROMA_BATCH=1` for debugging. The main GL
+  preview also has a shader-backed clip-effect path enabled by
+  `TIGERCAPTURE_SHADER_CLIP_FX=1` (default). When QImage/final-CPU consumers
+  are inactive, no background-removal/PIP/Live2D/transition ordering issue is
+  present, and active Spine actors can use the direct GL overlay path,
+  `ProjectPlayer` sends `clip_effects` metadata with `gpu_frame_ready` instead
+  of running CPU preview filters/chroma. `OpenGLPreviewWidget` applies
+  preview-safe `sharpen`, `vignette`, `chroma_aberration`, and HSV chroma key
+  uniforms before color grade and before direct Spine mesh drawing. Temporal or
+  random effects (`denoise`, `glitch`) and all QImage/popup/color-page fallback
+  frames stay on the CPU path for preview/export parity.
+- Clip-level video filters cache vignette masks by frame shape and parameters
+  so repeated preview frames do not rebuild the same radial mask.
+- `tools/qa_preview_perf.py` now produces an automated preview-performance
+  report with media probe, timeline thumbnail, sampled `ProjectPlayer` render,
+  optional 1080p/4K fixture measurements, and `native_gpu_candidates` hints
+  derived from repeated slow preview stages. Run with `--clean --include-hires
+  --render-samples 8` for the broader baseline. The report also records
+  `preview_engine` capability/configuration state so perf numbers can be tied
+  to the active decoder/frame-server/native-worker/Spine mode. Final Product
+  Readiness requires actual sampled `preview_render` rows before the Preview/
+  GPU area can score ready; media-probe/thumbnail-only or `--skip-render`
+  reports are treated as attention states. The sampler now labels perf rows by
+  context (`refresh`, `seek`, `playback_warmup`, `playback`), emits
+  `playback_frame_summary`, and includes `stage_summary_by_context`. The gate
+  reads nested `preview_render[].stage_summary` rows directly on old reports,
+  and on current reports it uses `stage_summary_by_context["playback"]` plus
+  `playback_frame_summary` for release-blocking Preview/GPU decisions. Slow
+  refresh and random-seek decode samples remain visible as advisory polish debt,
+  so startup/scrub issues are not hidden but no longer block steady playback
+  release readiness. The release gate now prefers the
+  canonical `debugCapture/preview_perf_report.json` artifact before falling back
+  to experimental `preview_perf_report_*.json` files, so one-off decoder/scale
+  experiments do not accidentally redefine product readiness. Supplying
+  `--baseline <previous-report.json>` attaches `baseline_comparison`, comparing
+  batch media probe, timeline thumbnail, preview-frame, and per-stage timings
+  with absolute/relative thresholds. Blocking regressions make the report fail
+  and retain native/GPU migration advice for stage-level slowdowns. Warm-up
+  `preview.refresh.render` spikes, p95-only stage spikes without a sustained
+  average regression, and stage regressions from changed preview sample plans
+  are retained under `advisory_regressions` so QA still shows the signal without
+  treating non-comparable measurements as release blockers. Preview perf QA now
+  defaults to the main editor's GPU-only preview consumer
+  (`TIGERCAPTURE_QA_PREVIEW_MODE=gpu`), disabling the legacy QImage signal so
+  shader clip effects and Spine zero-readback paths are measured. Set
+  `TIGERCAPTURE_QA_PREVIEW_MODE=qimage` to intentionally measure the CPU/QImage
+  fallback path.
+- `app.preview_scrub_readiness.build_preview_scrub_readiness_report()` turns
+  the preview performance artifact into a user-feel gate for timeline scrubbing.
+  It separates `current_corpus_scrub_ready` from `release_scrub_claim_ready`,
+  scores each project on seek average/p95/max, playback average/p95, slow seek
+  stages, and coverage across basic video, mask/filter/tracking, nested
+  timeline, actor-heavy, audio-heavy, long project, and 4K. The CLI entry point
+  `tools/qa_preview_scrub_readiness.py` writes
+  `debugCapture/preview_scrub_readiness_qa.json`. A project can be ready on the
+  current corpus while still blocking the stronger "4K/long/actor-heavy
+  scrubbing is always smooth" claim if a required coverage class is missing.
+  Pass `--auto-hires` to have the tool run `qa_preview_perf` with generated
+  1080p/4K fixtures and fresh 540p sibling proxies when 4K coverage is absent,
+  then rebuild the scrub report from that higher-coverage performance artifact.
+  Final Product Readiness reads this artifact as `preview_scrub_claims`, so a
+  release report can no longer score cleanly while the stronger smooth-scrub
+  claim is missing required coverage. The 2026-07-05 strict clean-cache run is
+  claim-ready for the current corpus: score 92/100,
+  `release_scrub_claim_ready=true`, 8/8 projects ready, 0 blocked projects, and
+  full basic/mask/nested/actor/audio/long/4K coverage. Keep universal
+  no-latency claims blocked outside the measured corpus.
+- `tools/qa_project_audit.py --preview-samples <N>` reuses the same preview
+  render sampler for real user projects, keeping missing-asset audit, media
+  probing, actor-asset checks, synthetic export parity, preview render timings,
+  and native/GPU migration hints in one read-only report. Supplying
+  `--baseline <previous-project-qa.json>` adds `baseline_comparison`, flagging
+  projects that became unhealthy, missing media/model increases, actor asset
+  failure increases, export-risk increases, synthetic parity regressions, and
+  delegated preview-performance regressions. Each project report also includes
+  `professional_readiness` from `app.professional_readiness`, scoring
+  long-project stability, GPU preview/export consistency, timeline edit
+  integrity, color workflow depth, audio mix readiness, and preset/template
+  ecosystem readiness. The same report carries the advisory
+  `resolve_post_pipeline_parity` matrix so project corpus QA can summarize
+  Resolve/Fairlight/Fusion-class Color, Audio, VFX, performance, post-pipeline,
+  and hardware ecosystem gaps separately from project export readiness. The
+  manifest-level `professional_readiness_summary` aggregates ordinary readiness
+  scores plus `resolve_parity.avg_score`, `resolve_parity.min_score`, and
+  per-category minimum scores. QA Dashboard includes
+  `debugCapture/project_qa_report.json` as "Project QA / Professional
+  Readiness" and shows each audited project's readiness and advisory Resolve
+  parity score with compact category scores. The readiness report
+  carries the same Color/Audio parity feature counts used by Health/export:
+  project LUT/HDR/OCIO intent, grade-local LUTs, secondary grade masks,
+  loudness/dialogue cleanup, automation, and routed bus mixdown. Manifest
+  reports include `professional_readiness_summary`.
+- 2026-06-14 local baseline: tracked mask/filter project is dominated by
+  `preview.stage.chroma_key` and `preview.stage.video_filters`; actor project is
+  dominated by `preview.stage.spine_overlay`; 1080p/4K baseline fixtures are
+  dominated by `preview.stage.decode`.
+- 2026-06-14 after preview optimization pass: mask/filter/tracking project
+  improved from 115.95 ms average to about 93-112 ms depending on run, with
+  `preview.stage.video_filters` reduced by the vignette cache but
+  `preview.stage.chroma_key` still the main Python hotspot. Live2D/Spine actor
+  project improved from 117.93 ms average / 373.24 ms max to 69.93 ms average /
+  114.26 ms max after half-resolution Spine preview, GL-preview bypass, and
+  renderer prewarm.
+- 2026-06-14 after the second preview/cache pass
+  (`debugCapture/preview_perf_report_after_all_remaining_v2.json`):
+  mask/filter/tracking project measured 40.34 ms average, with decode now the
+  largest stage; Live2D/Spine actor project measured 62.60 ms average, with
+  `preview.stage.spine_overlay` still the main hotspot at 36.26 ms average /
+  82.22 ms p95. `native_gpu_candidates` in the report names the next measured
+  migration targets.
+- 2026-06-15 after GPU/native-facing preview pass
+  (`debugCapture/preview_perf_report_after_gpu_native_v1.json`): chroma-key
+  preview in the mask/filter/tracking project dropped to 4.31 ms average while
+  total preview averaged 35.54 ms. Decode remains the largest stage there at
+  22.29 ms average. The actor QA project averaged 67.13 ms; Spine overlay
+  remained the top hotspot at 38.51 ms average / 88.11 ms p95, indicating that
+  the next Spine step is a true GPU actor compositor/readback reduction rather
+  than another Python cache.
+- 2026-06-15 after the follow-up preview-speed pass
+  (`debugCapture/preview_perf_report_after_gpu_native_v4.json`): filter/chroma
+  preview defaults moved to 0.375 scale, OpenCV sequential next-frame seeks now
+  avoid redundant `CAP_PROP_POS_FRAMES`, prefetch defaults moved to 24 frames /
+  80 ms wait budget, and Spine preview time is quantized at 24fps by default.
+  The mask/filter/tracking project measured 37.46 ms average, with decode
+  25.50 ms, video filters 5.73 ms, and chroma key 4.44 ms. The actor project
+  measured 68.64 ms average, with Spine overlay still the dominant hotspot at
+  43.01 ms average / 98.46 ms p95. The remaining high-value step is still a
+  full GL actor compositor/FBO-readback reduction plus a process-level decode
+  frame server for projects without fresh proxies.
+- 2026-06-15 after the "big three" implementation pass
+  (`debugCapture/preview_perf_report_after_all_big_three_v1.json`): a shared
+  Spine overlay GL compositor was added, FFmpeg pipe frame-server decode was
+  added behind `TIGERCAPTURE_PREVIEW_FRAME_SERVER=1`, and filter+chroma preview
+  can batch into one downsample/upsample pass. The mask/filter/tracking project
+  improved to 32.46 ms average, with the combined
+  `preview.stage.filter_chroma_batch` at 8.24 ms average and decode still
+  23.46 ms. The actor project measured 74.07 ms average; Spine overlay remained
+  43.05 ms average / 100.68 ms p95 on the single-Spine-clip sample, so the next
+  Spine win requires deeper FBO readback elimination for single/complex rigs.
+  Opt-in FFmpeg frame-server QA
+  (`debugCapture/preview_perf_report_after_frame_server_optin_v1.json`) worked
+  functionally but was slower on this random-seek corpus, so it remains a
+  comparison path rather than the default.
+- 2026-06-17 actor preview QA calibration
+  (`debugCapture/preview_perf_report_after_spine_state_cache_v3.json`):
+  baseline comparison now separates blocking regressions from advisory warm-up,
+  p95-only, and changed-sample-plan signals. The run passed with zero blocking
+  regressions; the actor project improved from 74.07 ms average / 129.31 ms p95
+  to 54.94 ms average / 77.80 ms p95. `preview.stage.spine_overlay` is still the
+  largest actor hotspot at 48.62 ms average / 72.96 ms p95. The opt-in array
+  compositor trial passed but did not improve enough to become the default.
+  A later product-gate pass added a separate animated Spine playback scale
+  (`spine_playback_preview_scale=0.375`) and lowered animated complex/overlap
+  Spine fallback scale from 0.375 to 0.25 while keeping paused preview at the
+  normal scale; current `qa_preview_perf.py` reports include both scale values
+  in `preview_engine` so this tradeoff is visible.
+- 2026-06-23 stabilizer preview fast path
+  (`debugCapture/preview_perf_report.json`): `ProjectPlayer` now calls
+  `FrameStabilizer.apply_preview()` for main and nested preview clips while
+  export keeps `apply()`. On the current QA corpus, `02_masks_filters_tracking`
+  playback improved from the previous 20.39 ms average / 28.94 ms p95 to
+  14.83 ms average / 18.47 ms p95, and `preview.stage.stabilizer` dropped from
+  12.62 ms average / 13.34 ms p95 to 6.16 ms average / 7.72 ms p95. The report
+  has zero `native_gpu_candidates`; remaining slow entries are warm-up/seek
+  advisory decode/refresh costs, not steady playback blockers.
+- 2026-06-23 refresh/seek advisory cleanup
+  (`debugCapture/preview_perf_report.json`): `ProjectPlayer` no longer imports
+  the heavy `app.video_editor_window` module during preview zoom rendering; it
+  imports zoom helpers from `app.timeline_model` instead. The same-position
+  seek path also re-emits the last completed preview frame when the playhead,
+  clip, frame, and cache generation match, avoiding repeated decoder reads from
+  duplicate UI position updates. On the current QA corpus, the first project
+  setup path dropped to 92.27 ms and `preview.refresh.render` to 42.82 ms. The
+  mask/filter/tracking project keeps steady playback at 14.92 ms average /
+  18.14 ms p95 with zero `native_gpu_candidates`; remaining seek rows are
+  random-access decoder advisory costs.
+- 2026-06-23 preview warm-up/seek advisory tightening; refreshed 2026-07-05
+  (`debugCapture/preview_perf_report.json`): `ProjectPlayer.refresh_tracks()`
+  now accepts `render_immediately=False` so QA/batch setup can rebuild decoder
+  state without also charging the first visible preview render to refresh.
+  Preview perf QA now applies the same acceleration defaults as app startup
+  before measuring preview frames, so clean-cache performance evidence reflects
+  the shipped runtime path. The current report samples 8 projects, has zero
+  `preview.refresh.render` rows and zero `native_gpu_candidates`, and leaves
+  only advisory random seek/decode costs; the scrub gate is claim-ready even
+  though hotspots remain visible for polish.
+- `PrefetchDecoder` now defaults
+  `TIGERCAPTURE_PREFETCH_FORWARD_SEEK_WINDOW` to 12 frames. Near-future forward
+  scrubs can reuse already-prefetched frames by default while still allowing
+  the window to be tuned or disabled through the environment.
+- Windowed editor dragging uses a runtime move guard. `VideoEditorWindow.moveEvent`
+  starts a short settle timer; while active it stops the decorative blade/
+  selection marching-ants timer, suspends animated timeline tool buttons,
+  preset hover/live-preview timers, preset preview swatches, and the audio
+  mixer VU decay timer, then calls `ProjectPlayer.set_window_move_guard(True)`.
+  The player switches its playback timer to coarse timing with a minimum 100 ms
+  interval, then restores precise timing and the previous interval when the OS
+  window move settles. Begin/end UX telemetry records how many surfaces were
+  suspended and the move-guard duration, so future titlebar-drag reports can be
+  checked from logs rather than guessed. This keeps native titlebar dragging
+  from competing with preview/decorative repaint loops.
+- `tools/qa_window_move_guard.py` is the product QA for that behavior. It writes
+  `debugCapture/window_move_guard_qa.json`, verifies `ProjectPlayer` timer
+  relaxation/restoration, individual timeline/preset/audio animation suspension,
+  and a real offscreen `VideoEditorWindow` guard pass. Final product readiness
+  consumes this artifact in the `timeline_polish` area, alongside fuzzer,
+  alignment, and visual-alignment QA.
+- Python should remain the UI/orchestration layer for now. The long-term
+  performance path is not a full rewrite first; move hot preview/render/cache
+  stages to FFmpeg/OpenGL/native C++ or Rust helpers where profiling proves
+  Python overhead or CPU copies are dominant.
+- Static `BitmapMask` evaluation caches the resized/softened float mask.
+- Tracked `BitmapMask` does not cache final masks because each frame can move,
+  but it caches tracker bboxes to avoid repeated random-seek tracker work.
+- `VideoEditorWindow._prewarm_tracking_caches_for_track()` starts
+  `ObjectTrackingCacheWorker` for active tracked `BitmapMask` masks so preview
+  playback can reuse bbox cache entries instead of discovering them one frame at
+  a time.
+- `ProjectPlayer` owns a small generation-based preview pre-render cache for
+  safe CPU node-effect frames. `PreviewPrerenderWorker` fills this cache for
+  near-future frames when the active node chain contains no color-grade node
+  whose order relative to overlays could change the result.
+- Live2D editor startup can be slow because model discovery/loading and OpenGL
+  initialization are expensive; prefer lazy loading and cache checks.
+- Sound Editor waveform extraction is already asynchronous; source separation is
+  a background `QThread`, but Demucs can still run for a long time and may
+  download/load model weights if the local environment has no cached model.
+
+## Development Strategy
+
+- Short term: keep the PySide/Python application as the product shell. Stabilize
+  timeline UX, save/load, preview/export parity, and undo/redo before attempting
+  a UI rewrite.
+- Performance work must start with measurement. Use `TIGERCAPTURE_PERF=1` on
+  real 1080p/4K projects, then move only proven hot paths out of Python.
+- Preferred native direction is Rust for cross-platform helper cores. Use Rust
+  first for cache/indexing/render-worker style modules where the UI contract can
+  be cleanly expressed as files, JSON, or frame buffers.
+- C++ remains appropriate only where an SDK or UI/runtime binding strongly
+  favors it, such as low-level Qt/OpenGL/Live2D integration.
+- The safest migration boundary is process-first: build Rust helpers as CLI or
+  JSON-lines worker processes before binding them with `pyo3`. This keeps crash
+  isolation, packaging, and rollback simpler while the product is still moving.
+- Candidate Rust modules, in order: media indexing/probing, timeline thumbnail
+  cache generation, waveform/spectrum generation, OpenCV/object-tracking cache,
+  preview pre-render workers, and eventually a GPU-backed preview compositor.
+- Do not rewrite the full UI until the Python version has stable editing
+  semantics and the native core APIs are proven by tests/golden media fixtures.
+
+Native worker implementation:
+
+- Rust source lives in `native/tigercapture_worker`. It is a JSON-lines
+  subprocess worker and currently implements `capabilities`, `shutdown`,
+  `media_probe`, `batch_media_probe`, `timeline_thumbnails`,
+  `timeline_drag_constraints`, `timeline_gaps`, `timeline_trim_plan`,
+  `audio_waveform`, and `audio_spectrum`.
+- `timeline_drag_constraints` is the first native timeline-core planner. The
+  `clip.move_snapped` Python Action asks the Rust worker for snap/collision/
+  clamp resolution when available and falls back to Python
+  `apply_drag_constraints_detail` when the worker is missing, outdated, or
+  rejects the request.
+- `timeline_gaps` is the second native timeline-core planner. The shared
+  `_track_gaps` helper asks the Rust worker for gap detection when available,
+  so `timeline.gaps`, `timeline.close_gap`, and `timeline.close_all_gaps` get
+  native gap rows while preserving Python fallback.
+- `timeline_trim_plan` is the third native timeline-core planner. It computes
+  video-only ripple/precision trim windows and following-clip shifts for
+  `clip.ripple_trim`, `timeline.precision_trim`, and
+  `timeline.trim_to_playhead`. Python keeps validation, linked-audio movement,
+  undo transactions, and final project mutation, so missing or outdated workers
+  still fall back to the established Python edit policy.
+- Python integration lives in `app/native_worker.py`. Discovery checks
+  `TIGERCAPTURE_NATIVE_WORKER`, then local debug/release worker paths, then a
+  bundled native path.
+- The worker is optional. If it is missing or rejects the protocol, Python paths
+  keep running and `get_native_worker_capabilities()` returns `None`.
+- `app.media_pool`, `probe_video_duration_ms()`, `_probe_video_dimensions()`,
+  `probe_audio_duration_ms()`, `ThumbnailExtractor`, `WaveformExtractor`, and
+  `SpectrumExtractor` prefer the native worker where available and fall back to
+  the previous Python/OpenCV/FFmpeg paths when needed.
+- The first stable protocol is `json-lines-v1`: one JSON request per stdin line,
+  one JSON response per stdout line. Every request has `id`, `method`, and
+  `params`; every response has `id`, `ok`, and either `result` or `error`.
+
+AI Script Edit MVP integration:
+
+- `app.ai_script_edit_panel.ScriptEditPanel` is available from the video
+  editor toolbar and right dock as a reviewable transcript-edit planning panel.
+- The toolbar AI button opens a compact bottom `AI Command` dock in the main
+  frame editor instead of forcing the right Workbench/Inspector open. The dock
+  has a visible `AI` badge, one-line prompt input, `Plan`, `Review`, pop-out,
+  and hide controls. It is hidden until requested, can detach to a parented
+  floating `QDialog`, and can re-dock without rebuilding the Script Edit model.
+  `Plan` generates the same safe `EditPlan` pipeline as Script Edit; if project
+  subtitles exist they become the transcript source, otherwise plain edit
+  prompts stay command-only review requests until a provider returns concrete
+  operations. Provider
+  connection/status questions such as "Claude connected?" are answered in chat
+  only and must not seed a transcript, subtitle row, or Review plan.
+- The AI Command dock keeps a compact chat transcript (`??` / provider label),
+  but the primary action label must be provider-specific rather than a generic
+  message-send button: Claude shows `Plan 생성` when direct generation is ready
+  and `Claude CLI ?닿린` only for terminal handoff/setup, local LLM shows
+  `濡쒖뺄 LLM ?ㅽ뻾`, Qwen shows `臾대즺 AI ?ㅽ뻾`, and rule-based mode shows
+  `洹쒖튃 Plan ?앹꽦`.
+- Provider interaction copy is centralized in
+  `app.ai_providers.provider_interaction_model()`. AI Command and Script Edit
+  share the same provider run label, setup label, placeholder, and status
+  summary. Claude is a direct `EditPlan` surface when CLI/MCP readiness is
+  complete, with terminal handoff kept as setup/diagnostic fallback; local LLM
+  is shown as setup-or-run depending on command readiness, and Review
+  remains a validated `EditPlan` inspection/apply surface rather than an
+  in-app Claude chat or subtitle-only panel.
+- Provider runtime state is also centralized through
+  `app.ai_providers.provider_user_state()`. UI surfaces can now show the
+  selected provider, the effective generation provider, whether rule-based
+  fallback is active, whether the action opens a terminal, and the next action
+  the user should take. This prevents ambiguous labels such as "connected" from
+  implying that Claude/Qwen/Codex directly generated the current Plan when the
+  app actually used the safe rule-based planner.
+- The bottom AI Command `Review` button opens a centered `AI ?몄쭛 寃?? dialog
+  seeded with the current prompt/plan instead of unexpectedly expanding the
+  cramped right Workbench Script Edit section. The underlying Script Edit widget
+  owns its own dark, high-contrast styling so it remains readable in docks,
+  pop-outs, and review dialogs.
+- AI Command Review no longer converts a plain prompt into temporary SRT/subtitle
+  content. It uses real project subtitles/transcripts only when they exist; if
+  no transcript context is present, the baseline is a command-only review plan
+  and provider output is the only source of concrete operations. The Review
+  button also regenerates when the prompt differs from the last plan, preventing
+  stale subtitle plans from being shown for a new command.
+- Review-mode `ScriptEditPanel` clears stale transcript widgets for command-only
+  prompts, labels the dialog as AI task review rather than subtitle entry, and
+  explicitly states when no timeline operation has been produced yet.
+- Script Edit now checks provider connection/status prompts before importing
+  transcript text. Questions such as "?대줈???곌껐?먯뼱?" create a
+  `prompt_only_edit_request` status plan with zero operations and
+  `transcript_required=false`, so the prompt is not inserted into subtitles or
+  treated as edit text.
+- The panel imports pasted SRT/VTT transcript text, transcript files, or a local
+  speech-recognition result from `app.local_ml.local_ml_transcribe_media()`.
+  Local transcription never downloads models or calls a cloud API; when a local
+  faster-whisper model is missing, the panel shows an actionable non-fatal
+  status and keeps the manual transcript path available.
+- The panel shows segment rows, generates deterministic `EditPlan` objects
+  through `app.ai_text_editing`, resolves Korean/English editing prompts to
+  local recipes, and exposes checked review-card/operation ids for selected
+  apply.
+- AI planning now has a pre-MCP contract layer. `app.ai_edit_plan` emits
+  `schema_version: 1` and `provider` on every `EditPlan`; old missing-version
+  payloads are treated as v1, while unsupported future versions are rejected.
+- `app.ai_providers` registers the safe provider ids `rule_based`,
+  `qwen_local`, `local_llm`, `codex_mcp`, `claude_mcp`, and `manual_json`.
+  `qwen_local` is the default free local AI profile described in
+  `docs/SPEC_LOCAL_AI_PROVIDERS.md`; source builds must report setup/readiness
+  without committing model weights. The AI Command dock exposes a setup action:
+  Qwen opens a first-use progress dialog with console output, can install/start
+  the local llama.cpp path, saves the endpoint/model path, and selects the
+  provider after connection. When an OpenAI-compatible Qwen endpoint is
+  available, `generate_selected_provider_plan()` sends the prompt, transcript
+  summary, and deterministic baseline plan to Qwen, accepts only validated
+  `EditPlan` JSON, and falls back to the deterministic plan on invalid output.
+  The Qwen first-use runner now prefers `llama-server.exe`; if the local
+  Hugging Face cache already contains the GGUF blob it starts from `-m <cache>`
+  rather than forcing a fresh `-hf` download. Real 2026-06-28 smoke runs loaded
+  `Qwen3-1.7B-Q8_0.gguf` on `127.0.0.1:8080` and produced validated plans in
+  `debugCapture/qwen_local_editplan_smoke.json` and
+  `debugCapture/qwen_local_editplan_smoke_repaired.json`.
+  Saved Qwen endpoints are treated as retryable configuration, not proof that
+  the local server is currently alive; a failed direct request is remembered and
+  the UI shows `?뺤씤 ?꾩슂` until a valid response clears that state.
+  Claude is direct-first when ready: selecting Claude runs validated in-app
+  `EditPlan` generation without any hidden environment setup. The terminal
+  handoff remains available for setup/diagnostics/manual agent work: it opens a
+  visible PowerShell Claude Code terminal in the Tiger Studio workspace, writes
+  `TIGER_STUDIO_CLAUDE_START.md`, passes that Markdown brief as Claude's initial
+  prompt, copies it to the clipboard as a fallback, runs/prints the
+  `tiger-studio` MCP registration step, and tells the user to check `/mcp`. The
+  older in-app progress/log dialog remains available for MCP registration and
+  status checks.
+  `generate_selected_provider_plan()` validates Claude-produced `EditPlan` JSON
+  automatically when Claude is selected, the MCP bridge is registered, and
+  Claude Code CLI is available. Leaving `TIGERCAPTURE_CLAUDE_DIRECT_EXECUTOR`
+  unset is the normal auto-direct behavior. The direct Claude executor sends compact EditPlan
+  context through stdin rather than a long command-line argument, defaults to
+  `TIGERCAPTURE_CLAUDE_MODEL` or `haiku` with low effort for responsive
+  edit-planning calls, and accepts only validated `EditPlan` JSON before Review.
+  Real English and Korean smoke reports live at
+  `debugCapture/claude_direct_editplan_smoke.json` and
+  `debugCapture/claude_direct_editplan_ko_smoke.json`.
+  Setting `TIGERCAPTURE_CLAUDE_DIRECT_EXECUTOR=0` disables automatic in-app
+  Claude plan generation for diagnostics or terminal-only workflows, causing
+  `effective_generation_provider` to remain `rule_based`. The AI Command dock
+  posts an explicit Tiger Studio chat/status message before opening the terminal
+  handoff so users understand when they are leaving the direct Review flow. The
+  default interactive Claude UX no longer pretends that the app itself is an
+  unrestricted Claude chat surface. Codex has the same Review-first
+  executor path when
+  `TIGERCAPTURE_CODEX_EXECUTOR_COMMAND` is explicitly configured: the command
+  receives the JSON prompt payload through stdin or `{payload_json}`, and stdout
+  is accepted only after validated `EditPlan` parsing. Codex MCP/terminal
+  bridge instructions remain available for handoff-only workflows. This registry
+  reports readiness and validates provider/manual JSON; it does not let external
+  agents mutate projects directly without the app's safety boundary.
+- `local_llm` is no longer status-only: when
+  `TIGERCAPTURE_LOCAL_LLM_COMMAND` points to an available command, the app sends
+  a JSON prompt payload through stdin and accepts either raw `EditPlan` JSON or
+  an OpenAI-compatible wrapper from stdout after validation. The bottom AI
+  Command chat therefore works for configured local models the same way it does
+  for Claude/Qwen, while still falling back to deterministic rules on timeout or
+  invalid output. The same command can also be stored through the in-app local
+  LLM setup dialog; the environment variable remains the highest-priority
+  override, but users no longer need to edit shell variables for the common
+  local-runner setup path. Both the bottom AI Command dock and the Script Edit
+  provider setup button expose this command-entry flow and refresh provider
+  readiness immediately after saving. When Script Edit is hosted inside the
+  video editor, provider setup is delegated to the owning editor so Qwen uses
+  the full first-use install/connect dialog, Claude setup can open the terminal
+  handoff while ready-state generation is automatic, and local LLM uses the
+  shared command-entry setup rather than a detached instruction-only message.
+- The dedicated AI Review dialog is not the full Script Edit entry form. It
+  reuses `ScriptEditPanel` in review mode, hiding prompt, transcript import,
+  segment, and manual-plan controls so the user only sees the generated Plan
+  summary, warnings, review cards, operations, and the selected/all/cut apply
+  buttons. This keeps Review visually separate from subtitle/transcript editing.
+- `app.ai_project_snapshot.build_project_snapshot_from_editor()` builds the
+  read-only JSON state an agent may inspect: timeline tracks/clips, media pool,
+  subtitles, markers, selected clips, locks, current position, and a stable
+  snapshot hash.
+- `app.ai_plan_validation.validate_edit_plan_for_snapshot()` is the gate between
+  AI output and editor mutation. It performs dry-run counts, time-range checks,
+  selected-operation checks, destructive-operation review warnings, and locked
+  track blocking for explicit cut materialization.
+- `app.ai_action_log.append_ai_action_log()` writes JSONL audit events under
+  `debugCapture/ai_action_log.jsonl`, redacting token/secret/password/api-key
+  fields. Script Edit generation, validation, review-safe apply, and
+  materialized cuts log through this path.
+- `app.ai_edit_corpus_quality.build_ai_edit_corpus_quality_report()` is the
+  quality gate for claiming intelligent AI editing. It scores Korean, English,
+  tutorial, short-form, product-demo, and long-form corpus cases for prompt
+  intent, required operation coverage, review-card validity, transcript
+  coverage, and provider evidence. Built-in fixtures can pass
+  `safe_mvp_ready`, but `smart_edit_claim_ready` stays false until a wired
+  LLM/agent provider is exercised on a real user corpus. The CLI entry point is
+  `tools/qa_ai_edit_corpus_quality.py`, which writes
+  `debugCapture/ai_edit_corpus_quality_qa.json`. Long-running local/agent
+  providers can be exercised with `--use-provider --provider-timeout 240
+  --provider-retries 1` so transient timeouts are measured separately from
+  real fallback behavior. Final Product Readiness reads
+  this artifact as `ai_edit_claim_quality`, so rule-based success can still be
+  reported as a safe MVP without accidentally enabling smart-AI marketing copy.
+  The current provider-exercised report runs `claude_mcp` through the direct
+  Claude CLI executor with automatic direct generation; it reports
+  20/20 direct successes, 0 fallbacks, score 99/100, and
+  `smart_edit_claim_ready=true`. That proves the smart-edit gate for the local
+  automation-generated corpus, not universal human editing quality.
+- `app.ai_edit_corpus_intake.build_ai_edit_corpus_intake_report()` turns the
+  missing real-corpus work into concrete collection slots. It can write
+  `.template.json` files under `qa_corpus/ai_editing_corpus/intake_templates`
+  for Korean, English, tutorial, short-form, product, and long-form cases, but
+  those files deliberately set `counts_for_ai_claim: false` and are not loaded
+  as manifest cases until a real transcript, natural-language prompt, expected
+  operations, and provider review evidence are filled in. The CLI
+  `tools/prepare_ai_edit_corpus_intake.py --write-templates` writes
+  `debugCapture/ai_edit_corpus_intake_qa.json`, QA Dashboard exposes it as
+  "AI Edit Corpus Intake", and Final Product Readiness includes the template
+  count while keeping `smart_ai_edit_claim_ready` false until real cases and a
+  direct provider run pass.
+- `app.ai_edit_corpus_registration.register_ai_edit_corpus_case()` and
+  `tools/register_ai_edit_corpus_case.py` are the safe promotion path from
+  intake template to counted real corpus case. They require a real transcript
+  file, natural-language prompt, language/scenario, expected intent, and
+  required operations; by default the transcript is copied under
+  `qa_corpus/ai_editing_corpus/transcripts/` and the manifest case is marked
+  `fixture=false`. Placeholder prompts, missing transcripts, and too-few
+  transcript segments are rejected before the manifest is written. The CLI also
+  supports `--from-template <filled.template.json>`, so a reviewer can fill
+  `manifest_case.prompt` and `manifest_case.transcript_path` in the generated
+  template, then promote it without retyping every field. AI corpus intake
+  templates and rows include a `registration_command` that points to this CLI so
+  real cases are promoted through validation instead of manual manifest edits.
+  `tools/register_ai_edit_corpus_templates.py` provides the batch path: it scans
+  a template directory, skips placeholder templates, validates filled templates,
+  and registers only real cases with transcript and natural-language prompt.
+- Direct AI provider output is repaired only at the Review metadata boundary:
+  `validate_provider_plan_json()` now fills missing operation ids with the same
+  `make_operation_id()` rule used by core plans, adds missing review-card ids or
+  titles, and reconnects empty review-card `operation_ids` before running the
+  normal strict `EditPlan` validator. Unknown keys, bad operation types,
+  forbidden payload fields, unsafe params, and invalid time ranges still fail.
+- `app.automation_commands.AutomationCommandRegistry` is the internal command
+  boundary for future MCP exposure. It registers only named safe commands:
+  `get_app_status`, `get_ai_provider_status`, `get_project_snapshot`,
+  `get_timeline_summary`, `get_selected_clip`, `get_media_pool_summary`,
+  `get_transcript_summary`, `validate_edit_plan`, `generate_edit_plan`,
+  `preview_generated_plan`, `preview_edit_plan`, `apply_edit_plan`,
+  `apply_reviewed_cuts`, and `add_marker`. The registry explicitly forbids
+  arbitrary Python/shell execution by construction; external MCP tools should
+  call these commands instead of touching editor internals.
+- This command registry is intentionally narrower than the studio-wide Python
+  Action System. `app.actions.build_default_action_registry()` is now the
+  broader registered action surface, while `app.automation_commands` remains
+  the compatibility bridge for EditPlan, marker, and reviewed-cut workflows.
+  The Action System routes through `app.actions.editor_adapter.EditorAdapter`
+  and currently exposes validated actions for media intake, timeline/NLE
+  editing, clips, tracks, transitions, audio, color, node graphs, typography,
+  Live2D/Spine actor data, VTuber Performance Source, UI focus, detachable
+  popout window open/geometry/capture/close control, review scenarios, capture
+  evidence, viewer comparison controls (`ui.viewer.compare.set`), viewer fit
+  (`ui.viewer.fit`), and QA without exposing arbitrary Python or private editor
+  methods to external clients. External MCP/Codex/Claude
+  adapters that need broad editor control should wrap the registered action
+  schema/preview/execute sequence instead of calling editor internals.
+- `generate_edit_plan` lets external agents create deterministic Script Edit
+  plans from SRT/WebVTT transcript text, existing project subtitles, an optional
+  Korean/English prompt, style preset, and silence intervals. It returns the
+  `EditPlan`, document summary, review preview, payload counts, and validation
+  result without mutating the timeline. `preview_generated_plan` provides the
+  same review-card/operation preview for already generated plan JSON.
+- `VideoEditorWindow.automation_command_specs()` and
+  `VideoEditorWindow.automation_execute_command()` expose that registry from a
+  running editor instance. `preview_edit_plan` can paint non-destructive preview
+  markers, `apply_edit_plan` can apply safe payload sections only, and
+  `apply_reviewed_cuts` is the separate destructive path that reuses the same
+  validation gate and locked-track checks.
+- `app.automation_bridge.AutomationBridge` is the JSON-lines protocol layer that
+  Codex/Claude MCP adapters should wrap. Supported methods are
+  `automation.ping`, `automation.schema`, `automation.list_commands`, and
+  `automation.execute`; requests are size-limited, schema-described, and routed
+  only to registered automation commands. The bridge reports that arbitrary
+  Python and arbitrary shell execution are unavailable by design.
+- `app.automation_mcp.AutomationMCPServer` is the minimal stdio JSON-RPC MCP
+  wrapper over that bridge. It handles `initialize`, `tools/list`, `tools/call`,
+  `ping`, empty `resources/list`, and empty `prompts/list`. Exposed tool names
+  are `tigercapture_ping`, `tigercapture_schema`,
+  `tigercapture_list_commands`, and `tigercapture_execute_command`; the execute
+  tool forwards only registered automation commands and preserves dry-run
+  semantics.
+- `VideoEditorWindow.automation_bridge_handle()` exposes the same bridge against
+  a running editor instance, and `VideoEditorWindow.automation_mcp_handle()`
+  exposes the same MCP method handler against live editor state.
+  `tools/automation_bridge_cli.py` can smoke-test the bridge without a GUI
+  owner, `tools/automation_mcp_server.py --stdio` is the standalone MCP server
+  command, `tools/qa_automation_bridge.py` writes
+  `debugCapture/automation_bridge_qa.json`, and
+  `tools/qa_automation_mcp.py` writes `debugCapture/automation_mcp_qa.json`.
+- `app.ai_providers.provider_snapshot()` now includes `automation_mcp` metadata:
+  the default server command, tool names, and the explicit
+  `registered_commands_only` flag. The Script Edit provider tooltip surfaces the
+  same information for human inspection.
+- `app.ai_edit_apply.build_ai_script_apply_payload()` converts validated plans
+  to safe editor payloads. Subtitles and markers can be materialized by the
+  editor; destructive text/range cuts are still review-only during normal
+  apply, but the panel has a separate explicit "而??ㅼ젣 ?곸슜" path. That path
+  calls `app.ai_edit_apply.apply_ai_script_cut_intents_to_tracks()` and performs
+  global ripple deletes across video and audio tracks after splitting at the
+  reviewed cut boundaries.
+- Generating or previewing a Script Edit plan now paints temporary timeline
+  markers for AI cut ranges, short candidates, and auto-zoom suggestions. Actual
+  cut materialization replaces those temporary markers with applied-cut markers.
+- `add_auto_zoom` sidecars from Script Edit recipes are connected to the
+  existing Screen Studio Polish engine, so applying a tutorial/product/shorts
+  plan can generate the same cursor/click-based zoom actors used by the Auto
+  Polish panel when cursor metadata is available.
+- `tools/qa_ai_script_edit_integration.py` writes the current MVP QA artifact
+  at `debugCapture/ai_script_edit_integration_qa.json`.
+- `tools/qa_automation_commands.py` writes the command-registry QA artifact at
+  `debugCapture/automation_commands_qa.json`.
+
+## When Updating This Spec
+
+- Add the user-visible behavior, not just implementation details.
+- Add exact file/function/class names so an AI can jump directly to code.
+- If preview and export differ, document the difference explicitly.
+- Keep TODO work in `TODO.md`; keep this file focused on current behavior and
+  architecture.
+## Repository Maintainability and Packaging Guardrails
+
+- `app/video_editor_window.py` and the action layer are intentionally treated as
+  high-risk integration modules. New work should prefer presenter/view-model
+  helpers and action namespace helpers instead of adding more unrelated logic to
+  the largest files.
+- Public Python Action IDs must remain stable while registration is split by
+  namespace. MCP/AI automation should keep using registered actions rather than
+  private editor methods.
+- The first action namespace split is active: Source/Record, Project Bin,
+  Multicam, NLE readiness, real corpus, timeline fuzzer, and undo-health action
+  registration lives in `app/actions/nle_namespace.py`. New NLE actions should
+  be added there instead of growing `app/actions/registry.py`.
+- The VSeeFace bridge action namespace split is active:
+  `app/actions/vtuber_namespace.py` owns VSeeFace input-source, bridge status,
+  launch/probe, sidecar install/settings, executable/avatar/capture/framing,
+  tracking-input selection, shared VTuber Studio, Avatar Target, VRM
+  pose-stream preview, Performance Source, and Program Output contract
+  registrations. Public VTuber action IDs remain unchanged; new VTuber/VSeeFace
+  actions should be added there instead of the central registry.
+- The broadcast action namespace split is active:
+  `app/actions/broadcast_namespace.py` owns Live Target, live-output
+  troubleshooting, broadcast release readiness, platform evidence, and
+  virtual-camera/OBS bridge registrations. Public broadcast action IDs remain
+  unchanged; new broadcast actions should be added there instead of the central
+  registry.
+- The actor action namespace split is active:
+  `app/actions/actor_namespace.py` owns Live2D/Spine actor add, transform,
+  keyframe, and Live2D Performance Source retargeting registrations. Public
+  actor action IDs remain unchanged; new actor track control actions should be
+  added there instead of the central registry.
+- The evidence/review action namespace split is active:
+  `app/actions/evidence_namespace.py` owns UI focus, screenshot, GIF capture,
+  and review scenario registrations. Public UI/capture/review action IDs remain
+  unchanged; new review-evidence actions should be added there instead of the
+  central registry.
+- The creative action namespace split is active:
+  `app/actions/creative_namespace.py` owns creative readiness, preset catalog,
+  clip filter/color-grade, transition, node graph, and typography
+  registrations. Public creative/node/text/transition action IDs remain
+  unchanged; new creative-layer actions should be added there instead of the
+  central registry.
+- The audio action namespace split is active:
+  `app/actions/audio_namespace.py` owns video-audio extraction, audio clip
+  split/trim/delete/gain, and audio track mix registrations.
+- The track/selection action namespace split is active:
+  `app/actions/track_selection_namespace.py` owns track reorder/state/lock/mute/
+  rename/select, clip selection, timeline select-all, and selection set/clear/
+  range registrations.
+- Media/track basics, marker, and timeline core action namespaces are active:
+  `app/actions/media_track_namespace.py` owns media import, import-to-timeline,
+  and base track add/remove, `app/actions/marker_namespace.py` owns marker
+  actions, and `app/actions/timeline_core_namespace.py` owns transport, In/Out,
+  edit-point navigation, bounded playback, zoom, snap, gap, and history actions.
+- Clip edit and selection movement action namespaces are active:
+  `app/actions/clip_edit_namespace.py` owns split, trim, range delete,
+  lift/extract, clipboard insert/overwrite, 3-point edit, linked move,
+  slip/roll/slide, speed, and fade actions; `app/actions/selection_movement_namespace.py`
+  owns selection move/nudge, frame nudge, align, distribute, snap, and
+  ripple-delete actions.
+- Read-only status and Source/Record monitor action namespaces are active:
+  `app/actions/readonly_namespace.py` owns app/project/media/timeline/
+  selection summaries, and `app/actions/source_record_monitor_namespace.py`
+  owns Source monitor and Record monitor state/load/In/Out/clear actions.
+- The central `app/actions/registry.py` is now a thin action execution and
+  namespace registration orchestrator; new domain actions should be added to
+  focused namespace helpers rather than directly into the registry.
+- The public `EditorAdapter` action implementation has been split into domain
+  mixins: `app/actions/editor_adapter_timeline.py`,
+  `app/actions/editor_adapter_editing.py`, `app/actions/editor_adapter_vtuber.py`,
+  and `app/actions/editor_adapter_nle.py`. The private helper layer is also
+  split into `app/actions/editor_adapter_core_helpers.py`,
+  `app/actions/editor_adapter_timeline_helpers.py`, and
+  `app/actions/editor_adapter_object_helpers.py`. The remaining
+  `app/actions/editor_adapter.py` owns only snapshot/status/app-summary behavior.
+- Root `.gitattributes`, `.editorconfig`, `ruff.toml`, and `pyproject.toml`
+  define baseline line-ending, editor, lint, and type-tool expectations so
+  Windows LF/CRLF churn does not dominate review diffs.
+- PyInstaller packaging must include runtime resources, not only code modules.
+  Windows and macOS specs bundle locales, the application icon,
+  `resources/luts/*.cube`, native helper binaries when present, and
+  imageio-ffmpeg metadata. `tools/qa_packaging_resources.py` verifies this
+  contract.
+- The first `app/video_editor_window.py` UI extraction is active:
+  detached preview/dock popouts and the shared VTuber Studio surface live in
+  `app/video_editor_popouts.py`; Screen Studio Auto Polish lives in
+  `app/video_editor_screenstudio_dialogs.py`. New popout/studio/dialog code
+  should extend those modules instead of regrowing `video_editor_window.py`.

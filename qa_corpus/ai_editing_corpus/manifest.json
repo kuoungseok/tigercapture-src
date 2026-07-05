@@ -1,0 +1,430 @@
+{
+  "version": 1,
+  "min_real_cases": 20,
+  "cases": [
+    {
+      "id": "ai-edit-auto-01",
+      "label": "Automation-generated AI edit case 01",
+      "language": "ko",
+      "scenario": "tutorial",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-01.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_01.mp4",
+      "prompt": "Clean this Korean tutorial, remove filler words, add captions, cursor zoom suggestions, and chapter markers",
+      "expected_intent": "clean_tutorial",
+      "required_operations": [
+        "delete_time_range",
+        "create_subtitles",
+        "add_auto_zoom",
+        "add_chapter_markers"
+      ],
+      "min_segments": 4,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.043274+00:00"
+    },
+    {
+      "id": "ai-edit-auto-02",
+      "label": "Automation-generated AI edit case 02",
+      "language": "en",
+      "scenario": "tutorial",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-02.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_02.mp4",
+      "prompt": "Clean this tutorial, remove filler words, add captions and cursor zoom suggestions with chapter markers",
+      "expected_intent": "clean_tutorial",
+      "required_operations": [
+        "delete_time_range",
+        "create_subtitles",
+        "add_auto_zoom",
+        "add_chapter_markers"
+      ],
+      "min_segments": 4,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.056500+00:00"
+    },
+    {
+      "id": "ai-edit-auto-03",
+      "label": "Automation-generated AI edit case 03",
+      "language": "ko",
+      "scenario": "shortform",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-03.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_03.mp4",
+      "prompt": "Make this screen recording into a vertical short with captions, reframe, and render queue handoff",
+      "expected_intent": "shorts",
+      "required_operations": [
+        "create_short_candidate",
+        "set_reframe",
+        "create_subtitles",
+        "add_render_queue_job"
+      ],
+      "min_segments": 3,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.075597+00:00"
+    },
+    {
+      "id": "ai-edit-auto-04",
+      "label": "Automation-generated AI edit case 04",
+      "language": "en",
+      "scenario": "product",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-04.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_04.mp4",
+      "prompt": "Turn this into a clean product launch demo with callouts, captions, product zooms, and render handoff",
+      "expected_intent": "product_demo",
+      "required_operations": [
+        "apply_preset",
+        "add_callout",
+        "add_auto_zoom",
+        "create_subtitles"
+      ],
+      "min_segments": 3,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.094229+00:00"
+    },
+    {
+      "id": "ai-edit-auto-05",
+      "label": "Automation-generated AI edit case 05",
+      "language": "ko",
+      "scenario": "long_tutorial",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-05.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_05.mp4",
+      "prompt": "Clean this long Korean tutorial, remove filler words, add captions, cursor zoom suggestions, and chapters",
+      "expected_intent": "clean_tutorial",
+      "required_operations": [
+        "delete_time_range",
+        "create_subtitles",
+        "add_chapter_markers",
+        "add_auto_zoom"
+      ],
+      "min_segments": 10,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.113374+00:00",
+      "min_duration_ms": 600000
+    },
+    {
+      "id": "ai-edit-auto-06",
+      "label": "Automation-generated AI edit case 06",
+      "language": "ko",
+      "scenario": "tutorial",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-06.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_06.mp4",
+      "prompt": "Clean this Korean tutorial, remove filler words, add captions, cursor zoom suggestions, and chapter markers",
+      "expected_intent": "clean_tutorial",
+      "required_operations": [
+        "delete_time_range",
+        "create_subtitles",
+        "add_auto_zoom",
+        "add_chapter_markers"
+      ],
+      "min_segments": 4,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.150222+00:00"
+    },
+    {
+      "id": "ai-edit-auto-07",
+      "label": "Automation-generated AI edit case 07",
+      "language": "en",
+      "scenario": "tutorial",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-07.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_07.mp4",
+      "prompt": "Clean this tutorial, remove filler words, add captions and cursor zoom suggestions with chapter markers",
+      "expected_intent": "clean_tutorial",
+      "required_operations": [
+        "delete_time_range",
+        "create_subtitles",
+        "add_auto_zoom",
+        "add_chapter_markers"
+      ],
+      "min_segments": 4,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.162327+00:00"
+    },
+    {
+      "id": "ai-edit-auto-08",
+      "label": "Automation-generated AI edit case 08",
+      "language": "ko",
+      "scenario": "shortform",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-08.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_08.mp4",
+      "prompt": "Make this screen recording into a vertical short with captions, reframe, and render queue handoff",
+      "expected_intent": "shorts",
+      "required_operations": [
+        "create_short_candidate",
+        "set_reframe",
+        "create_subtitles",
+        "add_render_queue_job"
+      ],
+      "min_segments": 3,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.181143+00:00"
+    },
+    {
+      "id": "ai-edit-auto-09",
+      "label": "Automation-generated AI edit case 09",
+      "language": "en",
+      "scenario": "product",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-09.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_09.mp4",
+      "prompt": "Turn this into a clean product launch demo with callouts, captions, product zooms, and render handoff",
+      "expected_intent": "product_demo",
+      "required_operations": [
+        "apply_preset",
+        "add_callout",
+        "add_auto_zoom",
+        "create_subtitles"
+      ],
+      "min_segments": 3,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.199629+00:00"
+    },
+    {
+      "id": "ai-edit-auto-10",
+      "label": "Automation-generated AI edit case 10",
+      "language": "ko",
+      "scenario": "long_tutorial",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-10.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_10.mp4",
+      "prompt": "Clean this long Korean tutorial, remove filler words, add captions, cursor zoom suggestions, and chapters",
+      "expected_intent": "clean_tutorial",
+      "required_operations": [
+        "delete_time_range",
+        "create_subtitles",
+        "add_chapter_markers",
+        "add_auto_zoom"
+      ],
+      "min_segments": 10,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.212084+00:00",
+      "min_duration_ms": 600000
+    },
+    {
+      "id": "ai-edit-auto-11",
+      "label": "Automation-generated AI edit case 11",
+      "language": "ko",
+      "scenario": "tutorial",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-11.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_11.mp4",
+      "prompt": "Clean this Korean tutorial, remove filler words, add captions, cursor zoom suggestions, and chapter markers",
+      "expected_intent": "clean_tutorial",
+      "required_operations": [
+        "delete_time_range",
+        "create_subtitles",
+        "add_auto_zoom",
+        "add_chapter_markers"
+      ],
+      "min_segments": 4,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.223403+00:00"
+    },
+    {
+      "id": "ai-edit-auto-12",
+      "label": "Automation-generated AI edit case 12",
+      "language": "en",
+      "scenario": "tutorial",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-12.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_12.mp4",
+      "prompt": "Clean this tutorial, remove filler words, add captions and cursor zoom suggestions with chapter markers",
+      "expected_intent": "clean_tutorial",
+      "required_operations": [
+        "delete_time_range",
+        "create_subtitles",
+        "add_auto_zoom",
+        "add_chapter_markers"
+      ],
+      "min_segments": 4,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.234816+00:00"
+    },
+    {
+      "id": "ai-edit-auto-13",
+      "label": "Automation-generated AI edit case 13",
+      "language": "ko",
+      "scenario": "shortform",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-13.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_13.mp4",
+      "prompt": "Make this screen recording into a vertical short with captions, reframe, and render queue handoff",
+      "expected_intent": "shorts",
+      "required_operations": [
+        "create_short_candidate",
+        "set_reframe",
+        "create_subtitles",
+        "add_render_queue_job"
+      ],
+      "min_segments": 3,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.252049+00:00"
+    },
+    {
+      "id": "ai-edit-auto-14",
+      "label": "Automation-generated AI edit case 14",
+      "language": "en",
+      "scenario": "product",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-14.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_14.mp4",
+      "prompt": "Turn this into a clean product launch demo with callouts, captions, product zooms, and render handoff",
+      "expected_intent": "product_demo",
+      "required_operations": [
+        "apply_preset",
+        "add_callout",
+        "add_auto_zoom",
+        "create_subtitles"
+      ],
+      "min_segments": 3,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.269534+00:00"
+    },
+    {
+      "id": "ai-edit-auto-15",
+      "label": "Automation-generated AI edit case 15",
+      "language": "ko",
+      "scenario": "long_tutorial",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-15.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_15.mp4",
+      "prompt": "Clean this long Korean tutorial, remove filler words, add captions, cursor zoom suggestions, and chapters",
+      "expected_intent": "clean_tutorial",
+      "required_operations": [
+        "delete_time_range",
+        "create_subtitles",
+        "add_chapter_markers",
+        "add_auto_zoom"
+      ],
+      "min_segments": 10,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.281279+00:00",
+      "min_duration_ms": 600000
+    },
+    {
+      "id": "ai-edit-auto-16",
+      "label": "Automation-generated AI edit case 16",
+      "language": "ko",
+      "scenario": "tutorial",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-16.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_16.mp4",
+      "prompt": "Clean this Korean tutorial, remove filler words, add captions, cursor zoom suggestions, and chapter markers",
+      "expected_intent": "clean_tutorial",
+      "required_operations": [
+        "delete_time_range",
+        "create_subtitles",
+        "add_auto_zoom",
+        "add_chapter_markers"
+      ],
+      "min_segments": 4,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.293083+00:00"
+    },
+    {
+      "id": "ai-edit-auto-17",
+      "label": "Automation-generated AI edit case 17",
+      "language": "en",
+      "scenario": "tutorial",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-17.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_17.mp4",
+      "prompt": "Clean this tutorial, remove filler words, add captions and cursor zoom suggestions with chapter markers",
+      "expected_intent": "clean_tutorial",
+      "required_operations": [
+        "delete_time_range",
+        "create_subtitles",
+        "add_auto_zoom",
+        "add_chapter_markers"
+      ],
+      "min_segments": 4,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.304714+00:00"
+    },
+    {
+      "id": "ai-edit-auto-18",
+      "label": "Automation-generated AI edit case 18",
+      "language": "ko",
+      "scenario": "shortform",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-18.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_18.mp4",
+      "prompt": "Make this screen recording into a vertical short with captions, reframe, and render queue handoff",
+      "expected_intent": "shorts",
+      "required_operations": [
+        "create_short_candidate",
+        "set_reframe",
+        "create_subtitles",
+        "add_render_queue_job"
+      ],
+      "min_segments": 3,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.323477+00:00"
+    },
+    {
+      "id": "ai-edit-auto-19",
+      "label": "Automation-generated AI edit case 19",
+      "language": "en",
+      "scenario": "product",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-19.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_19.mp4",
+      "prompt": "Turn this into a clean product launch demo with callouts, captions, product zooms, and render handoff",
+      "expected_intent": "product_demo",
+      "required_operations": [
+        "apply_preset",
+        "add_callout",
+        "add_auto_zoom",
+        "create_subtitles"
+      ],
+      "min_segments": 3,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.341361+00:00"
+    },
+    {
+      "id": "ai-edit-auto-20",
+      "label": "Automation-generated AI edit case 20",
+      "language": "ko",
+      "scenario": "long_tutorial",
+      "fixture": false,
+      "source_format": "srt",
+      "transcript_path": "transcripts/ai-edit-auto-20.srt",
+      "source_media_path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\release_evidence_automation\\screenstudio_generated_corpus\\screenstudio_auto_interaction_20.mp4",
+      "prompt": "Clean this long Korean tutorial, remove filler words, add captions, cursor zoom suggestions, and chapters",
+      "expected_intent": "clean_tutorial",
+      "required_operations": [
+        "delete_time_range",
+        "create_subtitles",
+        "add_chapter_markers",
+        "add_auto_zoom"
+      ],
+      "min_segments": 10,
+      "notes": "Automated local transcript proof; not a human user corpus case.",
+      "registered_at": "2026-07-04T16:22:00.353257+00:00",
+      "min_duration_ms": 600000
+    }
+  ]
+}

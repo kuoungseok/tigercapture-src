@@ -1,0 +1,15 @@
+1
+00:00:00,800 --> 00:00:02,700
+오늘은 TigerCapture의 자동 줌과 커서 강조를 보여드릴게요.
+
+2
+00:00:03,000 --> 00:00:04,800
+Um this part becomes a clean tutorial cut.
+
+3
+00:00:05,200 --> 00:00:07,000
+이제 자막과 쇼츠 후보를 함께 만들 수 있습니다.
+
+4
+00:00:07,400 --> 00:00:09,200
+The review page uses these assets as stable evidence.

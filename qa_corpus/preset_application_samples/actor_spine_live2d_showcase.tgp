@@ -1,0 +1,58 @@
+{
+  "project_settings": {
+    "width": 1920,
+    "height": 1080,
+    "fps": 30,
+    "color_space": "sRGB"
+  },
+  "duration_ms": 30000,
+  "media": [
+    "samples/anime_reaction_plate.mp4",
+    "samples/spine/nikke_actor.skel",
+    "samples/spine/nikke_actor.atlas",
+    "samples/live2d/avatar.model3.json"
+  ],
+  "video_tracks": [
+    {
+      "id": 1,
+      "clips": [
+        {
+          "id": 1,
+          "source_path": "samples/anime_reaction_plate.mp4",
+          "timeline_in_ms": 0,
+          "timeline_out_ms": 30000
+        }
+      ]
+    }
+  ],
+  "spine_actor_tracks": [
+    {
+      "id": 10,
+      "clips": [
+        {
+          "id": 1,
+          "skel_path": "samples/spine/nikke_actor.skel",
+          "atlas_path": "samples/spine/nikke_actor.atlas",
+          "start_ms": 1000,
+          "duration_ms": 6000,
+          "anim_name": "idle"
+        }
+      ]
+    }
+  ],
+  "live2d_actor_tracks": [
+    {
+      "id": 11,
+      "clips": [
+        {
+          "id": 1,
+          "model_path": "samples/live2d/avatar.model3.json",
+          "start_ms": 9000,
+          "duration_ms": 6000,
+          "anim_name": "Idle"
+        }
+      ]
+    }
+  ],
+  "notes": "Actor overlay sample for Spine, Live2D, anime, reaction, and export-bake QA."
+}

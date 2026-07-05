@@ -1,0 +1,15 @@
+E:\ClaudeCodeApp\GifCam\tools\dotnet_metadata_dump\bin\Debug\net8.0\MetadataDump.exe
+E:\ClaudeCodeApp\GifCam\tools\dotnet_metadata_dump\bin\Debug\net8.0\MetadataDump.deps.json
+E:\ClaudeCodeApp\GifCam\tools\dotnet_metadata_dump\bin\Debug\net8.0\MetadataDump.runtimeconfig.json
+E:\ClaudeCodeApp\GifCam\tools\dotnet_metadata_dump\bin\Debug\net8.0\MetadataDump.dll
+E:\ClaudeCodeApp\GifCam\tools\dotnet_metadata_dump\bin\Debug\net8.0\MetadataDump.pdb
+E:\ClaudeCodeApp\GifCam\tools\dotnet_metadata_dump\obj\Debug\net8.0\MetadataDump.GeneratedMSBuildEditorConfig.editorconfig
+E:\ClaudeCodeApp\GifCam\tools\dotnet_metadata_dump\obj\Debug\net8.0\MetadataDump.AssemblyInfoInputs.cache
+E:\ClaudeCodeApp\GifCam\tools\dotnet_metadata_dump\obj\Debug\net8.0\MetadataDump.AssemblyInfo.cs
+E:\ClaudeCodeApp\GifCam\tools\dotnet_metadata_dump\obj\Debug\net8.0\MetadataDump.csproj.CoreCompileInputs.cache
+E:\ClaudeCodeApp\GifCam\tools\dotnet_metadata_dump\obj\Debug\net8.0\MetadataDump.sourcelink.json
+E:\ClaudeCodeApp\GifCam\tools\dotnet_metadata_dump\obj\Debug\net8.0\MetadataDump.dll
+E:\ClaudeCodeApp\GifCam\tools\dotnet_metadata_dump\obj\Debug\net8.0\refint\MetadataDump.dll
+E:\ClaudeCodeApp\GifCam\tools\dotnet_metadata_dump\obj\Debug\net8.0\MetadataDump.pdb
+E:\ClaudeCodeApp\GifCam\tools\dotnet_metadata_dump\obj\Debug\net8.0\MetadataDump.genruntimeconfig.cache
+E:\ClaudeCodeApp\GifCam\tools\dotnet_metadata_dump\obj\Debug\net8.0\ref\MetadataDump.dll

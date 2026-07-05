@@ -87,12 +87,46 @@ class ColorGrade:
     # control points around the wrap-around hue circle.
     hue_vs_hue: list[tuple[float, float]] = field(default_factory=list)
 
+    # Optional professional node workflow payload from app.color_workflow:
+    # qualifier/window/curves/opacity. Renderers that do not understand it
+    # safely ignore the field; project/node serialization can still preserve it.
+    color_workflow: dict[str, Any] = field(default_factory=dict)
+
+    # Optional advanced Resolve-style toolset payload from app.color_workflow:
+    # HDR zones, log wheels, Hue vs Hue/Sat/Luma, Color Warper, gallery/shot
+    # match metadata. Preview/export apply the implemented RGB transforms and
+    # preserve the rest for UI/QA.
+    advanced_color_toolset: dict[str, Any] = field(default_factory=dict)
+
+    # Grade-local LUT slots. Project-level color management owns the global
+    # input/creative/output LUT intent; these slots let clip/node grades carry
+    # a matching payload for preview/export parity and preset workflows.
+    input_lut_path: str = ""
+    input_lut_strength: float = 1.0
+    creative_lut_path: str = ""
+    creative_lut_strength: float = 1.0
+    output_lut_path: str = ""
+    output_lut_strength: float = 1.0
+
     preset_id: str = "none"      # last-applied preset (or "custom")
 
     def is_identity(self) -> bool:
         # Hue-vs-hue identity = no control points OR every point has
         # delta == 0. Treat both as no-op.
         hue_active = any(abs(d) > 0.5 for _, d in self.hue_vs_hue)
+        workflow_active = bool(
+            self.color_workflow
+            and bool(self.color_workflow.get("enabled", True))
+        )
+        advanced_active = bool(
+            self.advanced_color_toolset
+            and bool(self.advanced_color_toolset.get("enabled", True))
+        )
+        lut_active = (
+            (bool(self.input_lut_path) and self.input_lut_strength > 0.0)
+            or (bool(self.creative_lut_path) and self.creative_lut_strength > 0.0)
+            or (bool(self.output_lut_path) and self.output_lut_strength > 0.0)
+        )
         return (
             self.brightness == 0 and self.contrast == 0 and self.saturation == 0
             and self.shadows_x == 0 and self.shadows_y == 0
@@ -102,6 +136,9 @@ class ColorGrade:
             and self.shadows_l == 0 and self.midtones_l == 0
             and self.highlights_l == 0 and self.offset_l == 0
             and not hue_active
+            and not workflow_active
+            and not advanced_active
+            and not lut_active
         )
 
     def to_dict(self) -> dict[str, Any]:
@@ -115,6 +152,14 @@ class ColorGrade:
             "shadows_l": self.shadows_l, "midtones_l": self.midtones_l,
             "highlights_l": self.highlights_l, "offset_l": self.offset_l,
             "hue_vs_hue": list(self.hue_vs_hue),
+            "color_workflow": dict(self.color_workflow or {}),
+            "advanced_color_toolset": dict(self.advanced_color_toolset or {}),
+            "input_lut_path": self.input_lut_path,
+            "input_lut_strength": float(self.input_lut_strength),
+            "creative_lut_path": self.creative_lut_path,
+            "creative_lut_strength": float(self.creative_lut_strength),
+            "output_lut_path": self.output_lut_path,
+            "output_lut_strength": float(self.output_lut_strength),
             "preset_id": self.preset_id,
         }
 
@@ -140,6 +185,19 @@ class ColorGrade:
                 g.hue_vs_hue = []
         if "preset_id" in d:
             g.preset_id = str(d["preset_id"])
+        if isinstance(d.get("color_workflow"), dict):
+            g.color_workflow = dict(d["color_workflow"])
+        if isinstance(d.get("advanced_color_toolset"), dict):
+            g.advanced_color_toolset = dict(d["advanced_color_toolset"])
+        for k in ("input_lut_path", "creative_lut_path", "output_lut_path"):
+            if k in d:
+                setattr(g, k, str(d.get(k) or ""))
+        for k in ("input_lut_strength", "creative_lut_strength", "output_lut_strength"):
+            if k in d:
+                try:
+                    setattr(g, k, max(0.0, min(1.0, float(d[k]))))
+                except Exception:
+                    pass
         return g
 
     def reset(self) -> None:
@@ -159,6 +217,14 @@ class ColorGrade:
         self.highlights_l = 0
         self.offset_l = 0
         self.hue_vs_hue = []
+        self.color_workflow = {}
+        self.advanced_color_toolset = {}
+        self.input_lut_path = ""
+        self.input_lut_strength = 1.0
+        self.creative_lut_path = ""
+        self.creative_lut_strength = 1.0
+        self.output_lut_path = ""
+        self.output_lut_strength = 1.0
         self.preset_id = "none"
 
 
@@ -327,7 +393,15 @@ def apply_to_rgb(rgb, grade: ColorGrade):
         return rgb
     import numpy as np
 
-    f = rgb.astype(np.float32) / 255.0
+    base_rgb = rgb
+    if getattr(grade, "input_lut_path", "") and getattr(grade, "input_lut_strength", 1.0) > 0.0:
+        base_rgb = _apply_lut_slot(
+            base_rgb,
+            str(getattr(grade, "input_lut_path", "")),
+            float(getattr(grade, "input_lut_strength", 1.0)),
+        )
+
+    f = base_rgb.astype(np.float32) / 255.0
 
     # ---- contrast (around 0.5 grey) + brightness ----
     if grade.contrast != 0:
@@ -421,7 +495,113 @@ def apply_to_rgb(rgb, grade: ColorGrade):
         f = _apply_hue_vs_hue(f, grade.hue_vs_hue)
 
     np.clip(f, 0.0, 1.0, out=f)
-    return (f * 255.0 + 0.5).astype(np.uint8)
+    out = (f * 255.0 + 0.5).astype(np.uint8)
+
+    if getattr(grade, "creative_lut_path", "") and getattr(grade, "creative_lut_strength", 1.0) > 0.0:
+        out = _apply_lut_slot(
+            out,
+            str(getattr(grade, "creative_lut_path", "")),
+            float(getattr(grade, "creative_lut_strength", 1.0)),
+        )
+
+    workflow = getattr(grade, "color_workflow", None) or {}
+    if isinstance(workflow, dict) and workflow.get("enabled", True):
+        try:
+            from app.color_workflow import ColorNodeWorkflow, apply_curves, combined_node_mask
+
+            node = ColorNodeWorkflow.from_dict(workflow)
+            curved = apply_curves(out, node.curves)
+            mask = combined_node_mask(base_rgb, node)
+            if mask.shape == out.shape[:2]:
+                if np.all(mask >= 0.999):
+                    out = curved
+                else:
+                    mf = mask[..., None]
+                    out = np.clip(
+                        mf * curved.astype(np.float32)
+                        + (1.0 - mf) * base_rgb.astype(np.float32),
+                        0,
+                        255,
+                    ).astype(np.uint8)
+        except Exception:
+            pass
+    advanced = getattr(grade, "advanced_color_toolset", None) or {}
+    if isinstance(advanced, dict) and advanced.get("enabled", True):
+        try:
+            from app.color_workflow import apply_advanced_color_toolset
+
+            out = apply_advanced_color_toolset(out, advanced)
+        except Exception:
+            pass
+    if getattr(grade, "output_lut_path", "") and getattr(grade, "output_lut_strength", 1.0) > 0.0:
+        out = _apply_lut_slot(
+            out,
+            str(getattr(grade, "output_lut_path", "")),
+            float(getattr(grade, "output_lut_strength", 1.0)),
+        )
+    return out
+
+
+def _apply_lut_slot(rgb, path: str, strength: float):
+    if not path or strength <= 0.0:
+        return rgb
+    try:
+        from app.effect_node_params import LUTParams
+
+        return LUTParams(path=path, strength=max(0.0, min(1.0, float(strength)))).apply(rgb)
+    except Exception:
+        return rgb
+
+
+def apply_grade_stack(rgb, grades: list[ColorGrade | dict[str, Any] | None]):
+    """Apply clip/group/timeline grades in order.
+
+    The hierarchy is intentionally explicit: callers pass `[clip, group,
+    timeline]` or any subset.  This keeps the color-page stack predictable and
+    lets export QA verify the same order as preview.
+    """
+    out = rgb
+    for raw in grades or []:
+        if raw is None:
+            continue
+        grade = ColorGrade.from_dict(raw) if isinstance(raw, dict) else raw
+        if isinstance(grade, ColorGrade):
+            out = apply_to_rgb(out, grade)
+    return out
+
+
+def suggest_shot_match_grade(reference_rgb, target_rgb) -> ColorGrade:
+    """Return a conservative grade that nudges target statistics to reference.
+
+    This is not a full color-match engine, but it provides a deterministic core
+    for a future UI button: exposure, contrast, and saturation are estimated
+    from Rec.709 luma and chroma spread, then clamped to slider-safe ranges.
+    """
+    import numpy as np
+
+    ref = reference_rgb.astype(np.float32) / 255.0
+    tgt = target_rgb.astype(np.float32) / 255.0
+
+    def stats(arr):
+        luma = 0.2126 * arr[..., 0] + 0.7152 * arr[..., 1] + 0.0722 * arr[..., 2]
+        sat = arr.max(axis=2) - arr.min(axis=2)
+        return float(luma.mean()), float(luma.std()), float(sat.mean())
+
+    ref_mean, ref_std, ref_sat = stats(ref)
+    tgt_mean, tgt_std, tgt_sat = stats(tgt)
+    brightness = int(round((ref_mean - tgt_mean) * 100.0))
+    contrast = 0
+    if tgt_std > 1e-4:
+        contrast = int(round(((ref_std / tgt_std) - 1.0) * 100.0))
+    saturation = 0
+    if tgt_sat > 1e-4:
+        saturation = int(round(((ref_sat / tgt_sat) - 1.0) * 100.0))
+    return ColorGrade(
+        brightness=max(-50, min(50, brightness)),
+        contrast=max(-50, min(50, contrast)),
+        saturation=max(-50, min(50, saturation)),
+        preset_id="shot_match",
+    )
 
 
 def _apply_hue_vs_hue(f, points: list[tuple[float, float]]):

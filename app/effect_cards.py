@@ -17,7 +17,7 @@ mutation.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QMimeData, QPoint, Qt
+from PySide6.QtCore import QMimeData, QPoint, QRectF, Qt
 from PySide6.QtGui import (
     QBrush,
     QColor,
@@ -25,17 +25,19 @@ from PySide6.QtGui import (
     QFont,
     QLinearGradient,
     QPainter,
+    QPainterPath,
     QPen,
     QPolygon,
 )
 from PySide6.QtWidgets import (
     QComboBox,
-    QHBoxLayout,
     QLabel,
+    QVBoxLayout,
     QWidget,
 )
 
 from app.i18n import tr
+from app.icons import app_icon, icon_size
 from app.style import (
     COLOR_ACCENT_BLUE,
     COLOR_ACCENT_HOVER,
@@ -51,9 +53,177 @@ from app.typography import TEXT_CLIP_MIME
 # MIME type identifiers for the per-card drag payloads. Kept here
 # (not in video_editor_window) so card consumers can import them
 # without dragging the editor module along.
-FADE_MIME_TYPE = "application/x-tigercapture-transition"
-SPEED_MIME_TYPE = "application/x-tigercapture-speed"
-ZOOM_MIME_TYPE = "application/x-tigercapture-zoom"
+FADE_MIME_TYPE   = "application/x-tigercapture-transition"
+SPEED_MIME_TYPE  = "application/x-tigercapture-speed"
+ZOOM_MIME_TYPE   = "application/x-tigercapture-zoom"
+LIVE2D_MIME_TYPE = "application/x-live2d-actor-new"
+SPINE_MIME_TYPE  = "application/x-spine-actor-new"
+
+
+_CARD_TEXT = "#F4F5F7"
+_CARD_BG_0 = "#3A3D43"
+_CARD_BG_1 = "#24272D"
+_CARD_BORDER = "#51555E"
+_PALETTE_TILE_SIZE = 32
+_PALETTE_SWATCH_SIZE = 26
+
+
+def _effect_card_qss(object_name: str, hover_color: str) -> str:
+    return f"""
+        QWidget#{object_name} {{
+            background: transparent;
+            border: 1px solid transparent;
+            border-radius: 8px;
+        }}
+        QWidget#{object_name}:hover {{
+            background-color: rgba(255, 255, 255, 8);
+            border-color: rgba(230, 232, 238, 150);
+        }}
+        QWidget#{object_name} QLabel {{
+            background: transparent;
+            color: #111421;
+        }}
+        QWidget#{object_name}:hover QLabel {{
+            color: {_CARD_TEXT};
+        }}
+    """
+
+
+def _style_effect_title(label: QLabel) -> None:
+    label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    font = QFont(label.font())
+    font.setBold(True)
+    font.setPointSize(10)
+    label.setFont(font)
+    label.setStyleSheet("")
+
+
+def _square_card_layout(card: QWidget) -> QVBoxLayout:
+    row = QVBoxLayout(card)
+    row.setContentsMargins(2, 2, 2, 2)
+    row.setSpacing(0)
+    row.setAlignment(Qt.AlignmentFlag.AlignCenter)
+    return row
+
+
+class _EffectTile(QWidget):
+    """Square icon tile whose text label appears only while hovered."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._hover_labels: list[tuple[QLabel, str]] = []
+        self.setMouseTracking(True)
+
+    def _register_hover_label(self, label: QLabel, text: str) -> None:
+        label.setFixedHeight(0)
+        label.setMaximumHeight(0)
+        label.setText("")
+        self._hover_labels.append((label, text))
+
+    def enterEvent(self, event) -> None:
+        for label, text in self._hover_labels:
+            label.setText(text)
+        try:
+            super().enterEvent(event)
+        except TypeError:
+            pass
+
+    def leaveEvent(self, event) -> None:
+        for label, _text in self._hover_labels:
+            label.setText("")
+        try:
+            super().leaveEvent(event)
+        except TypeError:
+            pass
+
+
+class _PaletteSwatch(QWidget):
+    """Small wallpaper-style color swatch used by timeline palette cards."""
+
+    def __init__(
+        self,
+        stops: tuple[tuple[str, str], ...],
+        *,
+        icon_name: str | None = None,
+        glyph: str | None = None,
+    ) -> None:
+        super().__init__()
+        self._stops = stops
+        self._icon_name = icon_name
+        self._glyph = glyph
+
+    @staticmethod
+    def _alpha(hex_color: str, alpha: int) -> QColor:
+        color = QColor(hex_color)
+        color.setAlpha(max(0, min(255, int(alpha))))
+        return color
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        w, h = self.width(), self.height()
+        radius = 7
+        rect = self.rect().adjusted(0, 0, -1, -1)
+        base = QLinearGradient(0, 0, w, h)
+        base.setColorAt(0.0, QColor("#4A4D54"))
+        base.setColorAt(0.48, QColor("#343840"))
+        base.setColorAt(1.0, QColor("#24272D"))
+        painter.setPen(QPen(QColor(255, 255, 255, 76), 1))
+        painter.setBrush(QBrush(base))
+        painter.drawRoundedRect(rect, radius, radius)
+
+        clip = QPainterPath()
+        clip.addRoundedRect(QRectF(rect), radius, radius)
+        painter.save()
+        painter.setClipPath(clip)
+        if self._stops:
+            main_a, main_b = self._stops[0]
+            accent = QLinearGradient(0, 0, w, h)
+            accent.setColorAt(0.0, self._alpha(main_a, 84))
+            accent.setColorAt(1.0, self._alpha(main_b, 36))
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(accent))
+            painter.drawPolygon(QPolygon([
+                QPoint(max(0, w - 12), 0),
+                QPoint(w, 0),
+                QPoint(w, max(10, h - 4)),
+                QPoint(max(4, w - 22), h),
+            ]))
+            if len(self._stops) > 1:
+                lower_a, lower_b = self._stops[1]
+                bottom = QLinearGradient(0, h - 4, w, h - 4)
+                bottom.setColorAt(0.0, self._alpha(lower_a, 120))
+                bottom.setColorAt(1.0, self._alpha(lower_b, 80))
+                painter.setBrush(QBrush(bottom))
+                painter.drawRoundedRect(2, h - 5, max(1, w - 4), 3, 1, 1)
+            if len(self._stops) > 2:
+                edge_a, edge_b = self._stops[2]
+                edge = QLinearGradient(0, 0, 0, h)
+                edge.setColorAt(0.0, self._alpha(edge_a, 80))
+                edge.setColorAt(1.0, self._alpha(edge_b, 30))
+                painter.setBrush(QBrush(edge))
+                painter.drawRoundedRect(1, 4, 2, max(1, h - 8), 1, 1)
+        painter.restore()
+
+        shade = QLinearGradient(0, 0, 0, h)
+        shade.setColorAt(0.0, QColor(255, 255, 255, 38))
+        shade.setColorAt(0.38, QColor(255, 255, 255, 7))
+        shade.setColorAt(1.0, QColor(0, 0, 0, 74))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(shade))
+        painter.drawRoundedRect(rect.adjusted(1, 1, -1, -1), radius - 1, radius - 1)
+
+        if self._glyph:
+            painter.setPen(QPen(QColor("#F1F3F7"), 1))
+            font = QFont(painter.font())
+            font.setBold(True)
+            font.setPointSize(max(8, int(h * 0.48)))
+            painter.setFont(font)
+            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter, self._glyph)
+        elif self._icon_name:
+            pix = app_icon(self._icon_name, size=16, color="#F1F3F7").pixmap(icon_size(16))
+            painter.setOpacity(0.96)
+            painter.drawPixmap((w - pix.width()) // 2, (h - pix.height()) // 2, pix)
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +231,7 @@ ZOOM_MIME_TYPE = "application/x-tigercapture-zoom"
 # ---------------------------------------------------------------------------
 
 
-class FadeCard(QWidget):
+class FadeCard(_EffectTile):
     """Draggable "Fade" transition card. Drag-drop onto a track creates a
     FadeSegment at the drop position; the embedded combo's value sets the
     new segment's default duration."""
@@ -72,31 +242,25 @@ class FadeCard(QWidget):
         super().__init__()
         self.setObjectName("FadeCard")
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-        self.setFixedHeight(40)
-        self.setMinimumWidth(120)
-        self.setStyleSheet(
-            f"""
-            QWidget#FadeCard {{
-                background-color: {COLOR_BG_L5};
-                border: 1px solid {COLOR_BORDER_DEFAULT};
-                border-radius: 6px;
-            }}
-            QWidget#FadeCard:hover {{
-                border-color: {COLOR_ACCENT_ORANGE};
-            }}
-            """
+        self.setFixedSize(_PALETTE_TILE_SIZE, _PALETTE_TILE_SIZE)
+        self.setStyleSheet(_effect_card_qss("FadeCard", "#FF8A5E"))
+        row = _square_card_layout(self)
+
+        swatch = _PaletteSwatch(
+            (
+                ("#7DC9FF", "#2B456F"),
+                ("#10131F", "#05060A"),
+                ("#FF885E", "#82334B"),
+            ),
+            icon_name="fade",
         )
-        row = QHBoxLayout(self)
-        row.setContentsMargins(10, 4, 12, 4)
-        row.setSpacing(8)
+        swatch.setFixedSize(_PALETTE_SWATCH_SIZE, _PALETTE_SWATCH_SIZE)
+        row.addWidget(swatch, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        swatch = _FadeSwatch()
-        swatch.setFixedSize(44, 22)
-        row.addWidget(swatch)
-
-        title = QLabel(tr("veditor.fade_card.title"))
-        title.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; font-weight: 700;")
-        row.addWidget(title)
+        title = QLabel("Fade")
+        _style_effect_title(title)
+        self._register_hover_label(title, "Fade")
+        row.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.setToolTip(tr("veditor.fade_card.hint"))
 
@@ -149,7 +313,7 @@ class _FadeSwatch(QWidget):
 # ---------------------------------------------------------------------------
 
 
-class ZoomCard(QWidget):
+class ZoomCard(_EffectTile):
     """Draggable "Zoom" card. Drop on a track to spawn a ZoomActor at the
     drop position; the actor's target rectangle starts unset and the user
     picks it via the modal that opens on click."""
@@ -160,31 +324,25 @@ class ZoomCard(QWidget):
         super().__init__()
         self.setObjectName("ZoomCard")
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-        self.setFixedHeight(40)
-        self.setMinimumWidth(120)
-        self.setStyleSheet(
-            f"""
-            QWidget#ZoomCard {{
-                background-color: {COLOR_BG_L5};
-                border: 1px solid {COLOR_BORDER_DEFAULT};
-                border-radius: 6px;
-            }}
-            QWidget#ZoomCard:hover {{
-                border-color: {COLOR_ACCENT_BLUE};
-            }}
-            """
+        self.setFixedSize(_PALETTE_TILE_SIZE, _PALETTE_TILE_SIZE)
+        self.setStyleSheet(_effect_card_qss("ZoomCard", "#A99CFF"))
+        row = _square_card_layout(self)
+
+        swatch = _PaletteSwatch(
+            (
+                ("#8F7CFF", "#4432B8"),
+                ("#4EC8FF", "#225EAB"),
+                ("#FFD266", "#D8686E"),
+            ),
+            icon_name="zoom",
         )
-        row = QHBoxLayout(self)
-        row.setContentsMargins(10, 4, 12, 4)
-        row.setSpacing(8)
+        swatch.setFixedSize(_PALETTE_SWATCH_SIZE, _PALETTE_SWATCH_SIZE)
+        row.addWidget(swatch, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        icon = QLabel("🔍")
-        icon.setStyleSheet("font-size: 16px;")
-        row.addWidget(icon)
-
-        title = QLabel(tr("veditor.zoom_card.title"))
-        title.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; font-weight: 700;")
-        row.addWidget(title)
+        title = QLabel("Zoom")
+        _style_effect_title(title)
+        self._register_hover_label(title, "Zoom")
+        row.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.setToolTip(tr("veditor.zoom_card.hint"))
 
@@ -208,7 +366,7 @@ class ZoomCard(QWidget):
 # ---------------------------------------------------------------------------
 
 
-class TypographyCard(QWidget):
+class TypographyCard(_EffectTile):
     """Draggable "T" card for spawning a TextClip on the typography lane.
 
     Structure mirrors ``FadeCard``: a compact pill with a visual swatch
@@ -222,31 +380,25 @@ class TypographyCard(QWidget):
         super().__init__()
         self.setObjectName("TypographyCard")
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-        self.setFixedHeight(40)
-        self.setMinimumWidth(120)
-        self.setStyleSheet(
-            f"""
-            QWidget#TypographyCard {{
-                background-color: {COLOR_BG_L5};
-                border: 1px solid {COLOR_BORDER_DEFAULT};
-                border-radius: 6px;
-            }}
-            QWidget#TypographyCard:hover {{
-                border-color: #D85A30;
-            }}
-            """
+        self.setFixedSize(_PALETTE_TILE_SIZE, _PALETTE_TILE_SIZE)
+        self.setStyleSheet(_effect_card_qss("TypographyCard", "#FF78B8"))
+        row = _square_card_layout(self)
+
+        swatch = _PaletteSwatch(
+            (
+                ("#FF7A4A", "#C94438"),
+                ("#F455A8", "#8B4CF0"),
+                ("#FFE083", "#F16B69"),
+            ),
+            glyph="T",
         )
-        row = QHBoxLayout(self)
-        row.setContentsMargins(10, 4, 12, 4)
-        row.setSpacing(8)
+        swatch.setFixedSize(_PALETTE_SWATCH_SIZE, _PALETTE_SWATCH_SIZE)
+        row.addWidget(swatch, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        swatch = _TypographySwatch()
-        swatch.setFixedSize(44, 22)
-        row.addWidget(swatch)
-
-        title = QLabel(tr("veditor.typo_card.title"))
-        title.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; font-weight: 700;")
-        row.addWidget(title)
+        title = QLabel("Text")
+        _style_effect_title(title)
+        self._register_hover_label(title, "Text")
+        row.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
 
         self.setToolTip(tr("veditor.typo_card.hint"))
 
@@ -296,7 +448,7 @@ class _TypographySwatch(QWidget):
 # ---------------------------------------------------------------------------
 
 
-class SpeedCard(QWidget):
+class SpeedCard(_EffectTile):
     """Draggable card for spawning a SpeedSegment on a video track.
 
     Has a compact speed selector (combo) so the user can pick the rate
@@ -329,40 +481,47 @@ class SpeedCard(QWidget):
     # Speed-only list used by TrackRow wheel and right-click menu (legacy API).
     PRESETS = [e[0] for e in PRESET_ENTRIES]
     DEFAULT_SPEED = 2.0
+    # Normalize visible combo labels. The legacy literal block above may contain
+    # mojibake in older worktrees; these are the labels used at runtime.
+    PRESET_ENTRIES = [
+        (0.25, True,  "linear", "0.25x Smooth"),
+        (0.50, True,  "linear", "0.5x Smooth"),
+        (0.75, False, "linear", "0.75x"),
+        (1.50, False, "linear", "1.5x"),
+        (2.0,  False, "linear", "2x Fast"),
+        (4.0,  False, "linear", "4x Fast"),
+        (8.0,  False, "linear", "8x"),
+        (16.0, False, "linear", "16x"),
+    ]
+    PRESETS = [e[0] for e in PRESET_ENTRIES]
 
     def __init__(self) -> None:
         super().__init__()
         self.setObjectName("SpeedCard")
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-        self.setFixedHeight(40)
-        self.setMinimumWidth(150)
-        self.setStyleSheet(
-            f"""
-            QWidget#SpeedCard {{
-                background-color: {COLOR_BG_L5};
-                border: 1px solid {COLOR_BORDER_DEFAULT};
-                border-radius: 6px;
-            }}
-            QWidget#SpeedCard:hover {{
-                border-color: {COLOR_ACCENT_HOVER};
-            }}
-            """
+        self.setFixedSize(_PALETTE_TILE_SIZE, _PALETTE_TILE_SIZE)
+        self.setStyleSheet(_effect_card_qss("SpeedCard", "#FF9A5E"))
+        row = _square_card_layout(self)
+
+        swatch = _PaletteSwatch(
+            (
+                ("#FF995D", "#D14836"),
+                ("#FFD45D", "#FF7A45"),
+                ("#8C6BFF", "#415AE8"),
+            ),
+            icon_name="chevrons",
         )
-        row = QHBoxLayout(self)
-        row.setContentsMargins(10, 4, 10, 4)
-        row.setSpacing(8)
+        swatch.setFixedSize(_PALETTE_SWATCH_SIZE, _PALETTE_SWATCH_SIZE)
+        row.addWidget(swatch, alignment=Qt.AlignmentFlag.AlignCenter)
 
-        swatch = _SpeedSwatch()
-        swatch.setFixedSize(44, 22)
-        row.addWidget(swatch)
-
-        title = QLabel(tr("veditor.speed_card.title"))
-        title.setStyleSheet(f"color: {COLOR_TEXT_PRIMARY}; font-weight: 700;")
-        row.addWidget(title)
+        title = QLabel("Speed")
+        _style_effect_title(title)
+        self._register_hover_label(title, "Speed")
+        row.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
 
         # Preset selector — don't start a drag when the user clicks
         # inside the combo, only when they grab the body.
-        self._combo = QComboBox()
+        self._combo = QComboBox(self)
         for speed, fb, bm, label in self.PRESET_ENTRIES:
             # Store (speed, frame_blend, blend_mode) as tuple user-data
             self._combo.addItem(label, (speed, fb, bm))
@@ -372,12 +531,16 @@ class SpeedCard(QWidget):
             self.PRESET_ENTRIES[0][3],
         )
         self._combo.setCurrentText(default_label)
-        self._combo.setFixedWidth(90)
+        self._combo.setFixedWidth(78)
         self._combo.setStyleSheet(
-            f"QComboBox {{ background-color: {COLOR_BG_L3}; color: {COLOR_TEXT_PRIMARY}; "
-            f"border: 1px solid {COLOR_BORDER_DEFAULT}; border-radius: 4px; padding: 2px 6px; }}"
+            "QComboBox { background-color: #111421; color: #F8F4EA; "
+            "border: 1px solid #3A4158; border-radius: 9px; padding: 3px 16px 3px 7px; "
+            "font-size: 11px; font-weight: 700; }"
+            "QComboBox:hover { border-color: #FF9A5E; background-color: #181C2A; }"
+            "QComboBox::drop-down { border: none; width: 15px; }"
+            "QComboBox::down-arrow { image: none; border: none; }"
         )
-        row.addWidget(self._combo)
+        self._combo.hide()
 
         self.setToolTip(tr("veditor.speed_card.hint"))
 
@@ -414,7 +577,7 @@ class SpeedCard(QWidget):
         # Don't steal clicks from the combo — if the user clicked on
         # the combo area, let Qt handle it normally.
         combo_rect = self._combo.geometry()
-        if combo_rect.contains(event.position().toPoint()):
+        if self._combo.isVisible() and combo_rect.contains(event.position().toPoint()):
             super().mousePressEvent(event)
             return
 
@@ -459,3 +622,195 @@ class _SpeedSwatch(QWidget):
             x = start_x + i * spacing
             painter.drawLine(x, cy - tri_w, x + tri_w, cy)
             painter.drawLine(x + tri_w, cy, x, cy + tri_w)
+
+
+# ---------------------------------------------------------------------------
+#  Live2D
+# ---------------------------------------------------------------------------
+
+
+class Live2DCard(_EffectTile):
+    """Draggable Live2D actor card.
+
+    Drag onto the timeline to create an empty Live2D actor clip at the drop
+    position. Double-click to open the Live2D editor.
+    """
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("Live2DCard")
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setFixedSize(_PALETTE_TILE_SIZE, _PALETTE_TILE_SIZE)
+        self.setStyleSheet(_effect_card_qss("Live2DCard", "#8F98A5"))
+        row = _square_card_layout(self)
+
+        swatch = _PaletteSwatch(
+            (
+                ("#4A4E55", "#272B31"),
+                ("#8F98A5", "#59616B"),
+            ),
+            icon_name="live2d",
+        )
+        swatch.setFixedSize(_PALETTE_SWATCH_SIZE, _PALETTE_SWATCH_SIZE)
+        row.addWidget(swatch, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        title = QLabel("Live2D")
+        _style_effect_title(title)
+        self._register_hover_label(title, "Live2D")
+        row.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.setToolTip(
+            "드래그: 타임라인에 Live2D 액터 추가\n"
+            "더블클릭: Live2D 에디터 열기"
+        )
+
+        self.setToolTip(
+            "Drag to the timeline to add a Live2D actor.\n"
+            "Double-click to open the Live2D editor."
+        )
+
+    def mousePressEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        self._drag_start = event.position().toPoint()
+
+    def mouseMoveEvent(self, event):
+        if not (event.buttons() & Qt.MouseButton.LeftButton):
+            return
+        if not hasattr(self, "_drag_start"):
+            return
+        if (event.position().toPoint() - self._drag_start).manhattanLength() < 8:
+            return
+        from PySide6.QtCore import QByteArray
+        mime = QMimeData()
+        mime.setData(LIVE2D_MIME_TYPE, QByteArray(b"1"))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.setPixmap(self.grab())
+        drag.setHotSpot(self._drag_start)
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        drag.exec(Qt.DropAction.CopyAction)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            # Signal via parent chain — VideoEditorWindow catches this
+            w = self.window()
+            if hasattr(w, "_open_live2d_viewer"):
+                w._open_live2d_viewer()
+
+
+class _Live2DSwatch(QWidget):
+    """Purple-blue gradient swatch with a ribbon/bow icon."""
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        w, h = self.width(), self.height()
+        grad = QLinearGradient(0, 0, w, h)
+        grad.setColorAt(0.0, QColor("#7040c0"))
+        grad.setColorAt(1.0, QColor("#4060d0"))
+        painter.setBrush(QBrush(grad))
+        painter.setPen(QPen(QColor("#7040c0"), 1))
+        painter.drawRoundedRect(0, 0, w - 1, h - 1, 4, 4)
+        # Bow/ribbon shape  — two overlapping ellipses
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(255, 255, 255, 200))
+        cx, cy = w // 2, h // 2
+        r = min(w, h) // 4
+        painter.drawEllipse(cx - r * 2, cy - r, r * 2, r * 2)
+        painter.drawEllipse(cx, cy - r, r * 2, r * 2)
+        painter.drawEllipse(cx - r // 2, cy - r // 2, r, r)
+
+
+# ---------------------------------------------------------------------------
+#  Spine
+# ---------------------------------------------------------------------------
+
+
+class SpineCard(_EffectTile):
+    """Draggable Spine actor card."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.setObjectName("SpineCard")
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+        self.setFixedSize(_PALETTE_TILE_SIZE, _PALETTE_TILE_SIZE)
+        self.setStyleSheet(_effect_card_qss("SpineCard", "#8F98A5"))
+        row = _square_card_layout(self)
+
+        swatch = _PaletteSwatch(
+            (
+                ("#4A4E55", "#272B31"),
+                ("#8F98A5", "#59616B"),
+            ),
+            icon_name="spine",
+        )
+        swatch.setFixedSize(_PALETTE_SWATCH_SIZE, _PALETTE_SWATCH_SIZE)
+        row.addWidget(swatch, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        title = QLabel("Spine")
+        _style_effect_title(title)
+        self._register_hover_label(title, "Spine")
+        row.addWidget(title, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        self.setToolTip(
+            "Drag to the timeline to add a Spine actor.\n"
+            "Double-click to open the Spine editor."
+        )
+
+    def mousePressEvent(self, event):
+        if event.button() != Qt.MouseButton.LeftButton:
+            return
+        self._drag_start = event.position().toPoint()
+
+    def mouseMoveEvent(self, event):
+        if not (event.buttons() & Qt.MouseButton.LeftButton):
+            return
+        if not hasattr(self, "_drag_start"):
+            return
+        if (event.position().toPoint() - self._drag_start).manhattanLength() < 8:
+            return
+        from PySide6.QtCore import QByteArray
+        mime = QMimeData()
+        mime.setData(SPINE_MIME_TYPE, QByteArray(b"1"))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.setPixmap(self.grab())
+        drag.setHotSpot(self._drag_start)
+        self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        drag.exec(Qt.DropAction.CopyAction)
+        self.setCursor(Qt.CursorShape.OpenHandCursor)
+
+    def mouseDoubleClickEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            w = self.window()
+            if hasattr(w, "_open_spine_editor"):
+                w._open_spine_editor()
+
+
+class _SpineSwatch(QWidget):
+    """Small orange actor-rig icon for the Spine card."""
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        w, h = self.width(), self.height()
+        grad = QLinearGradient(0, 0, w, h)
+        grad.setColorAt(0.0, QColor("#D85A30"))
+        grad.setColorAt(1.0, QColor("#6e4a92"))
+        painter.setBrush(QBrush(grad))
+        painter.setPen(QPen(QColor("#D85A30"), 1))
+        painter.drawRoundedRect(0, 0, w - 1, h - 1, 4, 4)
+
+        painter.setPen(QPen(QColor(255, 255, 255, 220), 2))
+        cx = w // 2
+        head_y = max(5, h // 4)
+        body_y = h // 2 + 1
+        foot_y = h - 4
+        painter.drawEllipse(cx - 3, head_y - 3, 6, 6)
+        painter.drawLine(cx, head_y + 3, cx, body_y)
+        painter.drawLine(cx, body_y, cx - 8, body_y - 2)
+        painter.drawLine(cx, body_y, cx + 8, body_y - 2)
+        painter.drawLine(cx, body_y, cx - 6, foot_y)
+        painter.drawLine(cx, body_y, cx + 6, foot_y)

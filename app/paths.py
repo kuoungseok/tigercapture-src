@@ -5,6 +5,35 @@ import subprocess
 import sys
 from pathlib import Path
 
+from app.subprocess_utils import hidden_subprocess_kwargs
+
+
+def runtime_data_dir() -> Path:
+    """Per-user runtime data outside the source checkout.
+
+    Keeping logs and crash breadcrumbs out of the repository avoids editor
+    integrations such as Codex/Git watchers spawning status helpers whenever
+    the app starts or writes diagnostic breadcrumbs.
+    """
+    override = os.environ.get("TIGERCAPTURE_DATA_DIR")
+    if override:
+        base = Path(override)
+    elif sys.platform == "win32":
+        base = Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local") / "TigerCapture"
+    elif sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support" / "TigerCapture"
+    else:
+        base = Path(os.environ.get("XDG_DATA_HOME") or Path.home() / ".local" / "share") / "tigercapture"
+    base.mkdir(parents=True, exist_ok=True)
+    return base
+
+
+def runtime_log_dir() -> Path:
+    override = os.environ.get("TIGERCAPTURE_LOG_DIR")
+    path = Path(override) if override else runtime_data_dir() / "logs"
+    path.mkdir(parents=True, exist_ok=True)
+    return path
+
 
 def default_save_dir() -> Path:
     """Captures live in ``~/Videos/TigerCapture``. Pre-rename users have
@@ -53,6 +82,7 @@ def _reveal_file(file_path: Path) -> None:
             subprocess.run(
                 ["explorer", f"/select,{file_path}"],
                 check=False,
+                **hidden_subprocess_kwargs(),
             )
             return
         except Exception:

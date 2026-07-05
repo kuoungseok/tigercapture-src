@@ -12,6 +12,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from app.i18n import tr
+from app.style import studio_chrome_qss
 
 
 class NodeGraphPopoutWindow(QWidget):
@@ -23,7 +24,7 @@ class NodeGraphPopoutWindow(QWidget):
         self.setWindowTitle(tr("workbench.node_graph_popout.title"))
         # Match the workbench dock so the panel feels at home in
         # either context.
-        self.setStyleSheet("QWidget { background-color: #1E1E1E; }")
+        self.setStyleSheet(studio_chrome_qss("QWidget { background-color: #0B0D16; }"))
         # Roughly DaVinci Color Page proportions — wide enough for a
         # 6-node serial chain at default zoom.
         self.resize(900, 560)

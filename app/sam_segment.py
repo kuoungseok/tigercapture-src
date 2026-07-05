@@ -29,6 +29,15 @@ _sam_predictor = None
 _sam_attempt_failed = False
 
 
+def _local_ml_sealed() -> bool:
+    try:
+        from app.local_ml import local_ml_temporarily_disabled
+
+        return bool(local_ml_temporarily_disabled())
+    except Exception:
+        return True
+
+
 def _candidate_checkpoint_paths() -> list[Path]:
     """Where to look for the SAM checkpoint. The first existing path
     wins. Order: ``<cwd>/models/``, ``<exe>/models/``, then the
@@ -55,6 +64,8 @@ def is_sam_available() -> bool:
     only when both the ``segment_anything`` module and a usable
     checkpoint are reachable. Side-effect free — no model load."""
     global _sam_attempt_failed
+    if _local_ml_sealed():
+        return False
     if _sam_attempt_failed:
         return False
     try:
@@ -68,6 +79,8 @@ def _get_predictor():
     """Return a singleton ``SamPredictor`` or None when the model
     can't be loaded. The result is cached at module level."""
     global _sam_predictor, _sam_attempt_failed
+    if _local_ml_sealed():
+        return None
     if _sam_predictor is not None:
         return _sam_predictor
     if _sam_attempt_failed:

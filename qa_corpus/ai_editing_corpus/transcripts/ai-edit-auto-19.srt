@@ -1,0 +1,11 @@
+1
+00:00:00,000 --> 00:00:02,600
+The product dashboard loads project 19 and shows the faster review queue.
+
+2
+00:00:03,100 --> 00:00:06,400
+Here is the export panel with the launch preset and the approval step.
+
+3
+00:00:07,100 --> 00:00:10,400
+The final clip needs a clear callout, captions, product zooms, and render handoff.

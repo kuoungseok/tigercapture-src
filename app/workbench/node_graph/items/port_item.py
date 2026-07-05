@@ -14,11 +14,13 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QPainter, QPen
 from PySide6.QtWidgets import QGraphicsItem, QMenu
 
+from app.icons import app_icon
+
 
 class PortItem(QGraphicsItem):
 
-    RADIUS = 6
-    HOVER_HALO = 4   # extra paintable margin so the hover glow doesn't clip
+    RADIUS = 2.4
+    HOVER_HALO = 3   # extra paintable margin so the hover glow doesn't clip
 
     def __init__(
         self, port_id: str, port_type: str, is_input: bool, parent=None,
@@ -40,13 +42,13 @@ class PortItem(QGraphicsItem):
     def paint(self, painter: QPainter, option, widget=None) -> None:
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         if self.port_type == "rgb":
-            color = QColor("#5DCAA5")
+            color = QColor("#8E7A45")
         else:
-            color = QColor("#4A9BEE")
+            color = QColor("#5E7C9B")
 
         if self._hovered:
-            glow = QColor("#D85A30")
-            glow.setAlpha(150)
+            glow = QColor("#AFC4DE")
+            glow.setAlpha(58)
             painter.setBrush(QBrush(glow))
             painter.setPen(Qt.PenStyle.NoPen)
             painter.drawEllipse(
@@ -56,7 +58,7 @@ class PortItem(QGraphicsItem):
             )
             scale = 1.5
             painter.setBrush(QBrush(color))
-            painter.setPen(QPen(color.darker(150), 2))
+            painter.setPen(QPen(QColor(255, 255, 255, 52), 0.7))
             painter.drawEllipse(
                 QPointF(0, 0),
                 self.RADIUS * scale,
@@ -64,11 +66,11 @@ class PortItem(QGraphicsItem):
             )
         else:
             painter.setBrush(QBrush(color))
-            painter.setPen(QPen(color.darker(150), 2))
+            painter.setPen(QPen(QColor(255, 255, 255, 48), 0.7))
             painter.drawEllipse(QPointF(0, 0), self.RADIUS, self.RADIUS)
             if self.connections:
                 # Inner dot — "this port is wired up" feedback.
-                painter.setBrush(QColor("#000000"))
+                painter.setBrush(QColor("#111315"))
                 painter.setPen(Qt.PenStyle.NoPen)
                 painter.drawEllipse(QPointF(0, 0), 2, 2)
 
@@ -97,8 +99,8 @@ class PortItem(QGraphicsItem):
             return
         menu = QMenu()
         n = len(self.connections)
-        label = f"✂ 연결 해제 ({n}개)" if n > 1 else "✂ 연결 해제"
-        act = menu.addAction(label)
+        label = f"Disconnect ({n})" if n > 1 else "Disconnect"
+        act = menu.addAction(app_icon("scissors", size=16), label)
         chosen = menu.exec(event.screenPos().toPoint())
         if chosen is act:
             scene = self.scene()

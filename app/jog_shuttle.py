@@ -147,6 +147,73 @@ class JogShuttleWidget(QWidget):
         # already draw a darker panel beneath.
         p.fillRect(rect, Qt.GlobalColor.transparent)
 
+        s = min(rect.width(), rect.height())
+        outer_radius = s * 0.46
+        inner_radius = s * 0.30
+        hub_radius = s * 0.17
+
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(0, 0, 0, 90))
+        p.drawEllipse(QPointF(cx + 1.0, cy + 2.0), outer_radius, outer_radius)
+
+        outer_path = QPainterPath()
+        outer_path.addEllipse(QPointF(cx, cy), outer_radius, outer_radius)
+        inner_cut = QPainterPath()
+        inner_cut.addEllipse(QPointF(cx, cy), inner_radius, inner_radius)
+        ring = outer_path.subtracted(inner_cut)
+
+        ring_grad = QConicalGradient(cx, cy, 80.0)
+        ring_grad.setColorAt(0.00, QColor("#FF8458"))
+        ring_grad.setColorAt(0.20, QColor("#FF5DA8"))
+        ring_grad.setColorAt(0.44, QColor("#745EFF"))
+        ring_grad.setColorAt(0.68, QColor("#25C7F2"))
+        ring_grad.setColorAt(0.86, QColor("#FFE36D"))
+        ring_grad.setColorAt(1.00, QColor("#FF8458"))
+        p.setBrush(QBrush(ring_grad))
+        p.setPen(QPen(QColor(255, 255, 255, 76), 1))
+        p.drawPath(ring)
+
+        highlight = QRadialGradient(cx - s * 0.18, cy - s * 0.24, s * 0.46)
+        highlight.setColorAt(0.0, QColor(255, 255, 255, 92))
+        highlight.setColorAt(1.0, QColor(255, 255, 255, 0))
+        p.setBrush(QBrush(highlight))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.drawPath(ring)
+
+        shuttle_a = math.radians(90.0 - self._shuttle_deg)
+        bead_r = max(2.6, s * 0.075)
+        bead_x = cx + math.cos(shuttle_a) * (outer_radius - bead_r * 0.9)
+        bead_y = cy - math.sin(shuttle_a) * (outer_radius - bead_r * 0.9)
+        p.setBrush(QColor("#FFFFFF"))
+        p.setPen(QPen(QColor(0, 0, 0, 90), 1))
+        p.drawEllipse(QPointF(bead_x, bead_y), bead_r, bead_r)
+
+        hub_rect = QRectF(cx - inner_radius, cy - inner_radius, inner_radius * 2, inner_radius * 2)
+        hub_grad = QRadialGradient(cx - s * 0.10, cy - s * 0.12, inner_radius * 1.5)
+        hub_grad.setColorAt(0.0, QColor("#34384E"))
+        hub_grad.setColorAt(0.58, QColor("#171B2B"))
+        hub_grad.setColorAt(1.0, QColor("#0A0D16"))
+        p.setBrush(QBrush(hub_grad))
+        p.setPen(QPen(QColor("#6D72A4"), 1))
+        p.drawEllipse(hub_rect)
+
+        jog_a = math.radians(90.0 - self._jog_deg)
+        p.setPen(QPen(QColor("#FFB45E"), max(2.0, s * 0.045)))
+        p.drawLine(
+            QPointF(cx, cy),
+            QPointF(
+                cx + math.cos(jog_a) * (inner_radius * 0.62),
+                cy - math.sin(jog_a) * (inner_radius * 0.62),
+            ),
+        )
+
+        dot_color = QColor("#FF5DA8") if abs(self.shuttle_speed()) > 0.01 else QColor("#8E7CFF")
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(dot_color)
+        p.drawEllipse(QPointF(cx, cy), hub_radius, hub_radius)
+        p.end()
+        return
+
         outer_r = min(cx, cy) * self._OUTER_R_RATIO * 2.0  # diameter
         inner_r = min(cx, cy) * self._INNER_R_RATIO * 2.0
         hub_r = min(cx, cy) * self._HUB_R_RATIO * 2.0

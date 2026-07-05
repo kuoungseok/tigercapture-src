@@ -635,6 +635,9 @@ class BitmapMask:
     # (we just translate / scale it to match the new bbox).
     track_object: bool = False
     init_frame: int = 0
+    correction_bboxes: dict[int, tuple[float, float, float, float]] = field(default_factory=dict)
+    tracking_cache_bboxes: dict[int, tuple[float, float, float, float]] = field(default_factory=dict)
+    tracking_failed_frames: set[int] = field(default_factory=set)
 
     KIND = KIND_BITMAP
 
@@ -644,6 +647,9 @@ class BitmapMask:
     _last_frame_idx: int = -1
     _last_bbox: tuple[float, float, float, float] | None = None
     _base_bbox: tuple[float, float, float, float] | None = None
+    _track_cache: Any = None          # frame_idx -> pixel bbox (x, y, w, h)
+    _failed_frames: Any = None        # set[int]
+    _tracking_message: str = ""
     # Result cache — BitmapMask is static (same mask for every frame
     # when track_object=False). Resize + softness are deterministic
     # for a given output (h, w), so cache to avoid re-doing the same
@@ -705,7 +711,7 @@ class BitmapMask:
             self._cache_hw = (h, w)
         return result
 
-    def _track_and_warp(self, rgb, mask_uint8, frame_idx: int):
+    def _track_and_warp_legacy_unused(self, rgb, mask_uint8, frame_idx: int):
         """Run the bbox tracker; warp ``mask_uint8`` so the masked
         region matches the tracker's current position. Returns the
         warped uint8 mask. Falls back to the original mask on any
@@ -775,6 +781,258 @@ class BitmapMask:
         )
         return warped
 
+    def _track_and_warp(self, rgb, mask_uint8, frame_idx: int):
+        """Track the selected region and warp the mask to a cached bbox."""
+        import cv2
+        h, w = mask_uint8.shape[:2]
+        self._ensure_tracking_state()
+        if self._base_bbox is None:
+            self._base_bbox = self._bbox_from_mask(mask_uint8)
+        if self._base_bbox is None:
+            self._tracking_message = "empty mask"
+            return mask_uint8
+
+        corrected = self._correction_bbox_for_frame(frame_idx, w, h)
+        if corrected is not None:
+            self._cache_track_bbox(frame_idx, corrected)
+            if int(frame_idx) in self.correction_bboxes:
+                self._init_tracker(cv2, rgb, corrected, frame_idx)
+                self._tracking_message = "correction keyframe"
+            else:
+                self._tracking_message = "interpolated correction"
+            return self._warp_mask_to_bbox(mask_uint8, corrected)
+
+        cached = self._track_cache.get(int(frame_idx))
+        if cached is not None:
+            self._tracking_message = "cached"
+            return self._warp_mask_to_bbox(mask_uint8, cached)
+
+        base_bbox = self._base_bbox
+        if self._tracker is None:
+            nearest = self._nearest_cached_bbox(frame_idx)
+            init_bbox = nearest if nearest is not None else base_bbox
+            if not self._init_tracker(cv2, rgb, init_bbox, frame_idx):
+                self._tracking_message = "tracker unavailable"
+                return self._warp_mask_to_bbox(mask_uint8, init_bbox)
+            self._cache_track_bbox(frame_idx, init_bbox)
+            self._tracking_message = "tracker initialized"
+            return self._warp_mask_to_bbox(mask_uint8, init_bbox)
+
+        gap = int(frame_idx) - int(self._last_frame_idx)
+        if gap == 0 and self._last_bbox is not None:
+            self._tracking_message = "cached current"
+            return self._warp_mask_to_bbox(mask_uint8, self._last_bbox)
+        if gap < 0 or gap > 5:
+            nearest = self._nearest_cached_bbox(frame_idx)
+            if nearest is not None:
+                self._tracking_message = "nearest cached"
+                return self._warp_mask_to_bbox(mask_uint8, nearest)
+            self._tracking_message = "seek without cache"
+            return self._warp_mask_to_bbox(mask_uint8, base_bbox)
+
+        try:
+            ok, box = self._tracker.update(rgb)
+        except Exception:
+            ok = False
+            box = None
+        if ok and box is not None:
+            cur = (float(box[0]), float(box[1]), float(box[2]), float(box[3]))
+            self._last_bbox = cur
+            self._last_frame_idx = int(frame_idx)
+            self._cache_track_bbox(frame_idx, cur)
+            self._tracking_message = "tracked"
+            return self._warp_mask_to_bbox(mask_uint8, cur)
+
+        self._failed_frames.add(int(frame_idx))
+        self.tracking_failed_frames.add(int(frame_idx))
+        self._last_frame_idx = int(frame_idx)
+        self._tracking_message = "tracking failed"
+        fallback = self._last_bbox or self._nearest_cached_bbox(frame_idx) or base_bbox
+        return self._warp_mask_to_bbox(mask_uint8, fallback)
+
+    def _ensure_tracking_state(self) -> None:
+        if self._track_cache is None:
+            self._track_cache = {}
+            if self.tracking_cache_bboxes:
+                bw = int(self.base_width) if self.base_width > 0 else 1
+                bh = int(self.base_height) if self.base_height > 0 else 1
+                for frame_idx, bbox in self.tracking_cache_bboxes.items():
+                    try:
+                        self._track_cache[int(frame_idx)] = self._bbox_from_norm(bbox, bw, bh)
+                    except Exception:
+                        pass
+        if self._failed_frames is None:
+            self._failed_frames = set(int(v) for v in self.tracking_failed_frames)
+
+    @staticmethod
+    def _bbox_from_mask(mask_uint8):
+        ys, xs = np.where(mask_uint8 > 127)
+        if xs.size == 0:
+            return None
+        bx, by = int(xs.min()), int(ys.min())
+        bw = int(xs.max() - bx + 1)
+        bh = int(ys.max() - by + 1)
+        return (float(bx), float(by), float(bw), float(bh))
+
+    @staticmethod
+    def _bbox_to_norm(bbox, w: int, h: int):
+        bx, by, bw, bh = bbox
+        return (
+            float(bx) / max(1, w),
+            float(by) / max(1, h),
+            float(bw) / max(1, w),
+            float(bh) / max(1, h),
+        )
+
+    @staticmethod
+    def _bbox_from_norm(bbox, w: int, h: int):
+        bx, by, bw, bh = bbox
+        return (
+            float(bx) * max(1, w),
+            float(by) * max(1, h),
+            max(1.0, float(bw) * max(1, w)),
+            max(1.0, float(bh) * max(1, h)),
+        )
+
+    def _cache_track_bbox(self, frame_idx: int, bbox) -> None:
+        self._ensure_tracking_state()
+        frame_key = int(frame_idx)
+        box = tuple(float(v) for v in bbox)
+        self._track_cache[frame_key] = box
+        bw = int(self.base_width) if self.base_width > 0 else 1
+        bh = int(self.base_height) if self.base_height > 0 else 1
+        self.tracking_cache_bboxes[frame_key] = self._bbox_to_norm(box, bw, bh)
+        limit = 2400
+        if len(self._track_cache) > limit:
+            keys = sorted(self._track_cache)
+            for k in keys[: max(0, len(keys) - limit)]:
+                self._track_cache.pop(k, None)
+                self.tracking_cache_bboxes.pop(k, None)
+
+    def _nearest_cached_bbox(self, frame_idx: int):
+        self._ensure_tracking_state()
+        if not self._track_cache:
+            return None
+        target = int(frame_idx)
+        key = min(self._track_cache, key=lambda k: abs(k - target))
+        return self._track_cache.get(key)
+
+    def _correction_bbox_for_frame(self, frame_idx: int, w: int, h: int):
+        if not self.correction_bboxes:
+            return None
+        f = int(frame_idx)
+        if f in self.correction_bboxes:
+            return self._bbox_from_norm(self.correction_bboxes[f], w, h)
+        keys = sorted(int(k) for k in self.correction_bboxes)
+        prev_keys = [k for k in keys if k < f]
+        next_keys = [k for k in keys if k > f]
+        if not prev_keys or not next_keys:
+            return None
+        a, b = prev_keys[-1], next_keys[0]
+        if b <= a:
+            return None
+        t = (f - a) / float(b - a)
+        ba = self.correction_bboxes[a]
+        bb = self.correction_bboxes[b]
+        interp = tuple(float(ba[i]) + (float(bb[i]) - float(ba[i])) * t for i in range(4))
+        return self._bbox_from_norm(interp, w, h)
+
+    def _init_tracker(self, cv2, rgb, bbox, frame_idx: int) -> bool:
+        try:
+            if hasattr(cv2, "TrackerCSRT_create"):
+                tracker = cv2.TrackerCSRT_create()
+            elif hasattr(cv2, "legacy"):
+                tracker = cv2.legacy.TrackerCSRT_create()
+            else:
+                return False
+            x, y, bw, bh = bbox
+            init_bbox = (
+                int(round(x)),
+                int(round(y)),
+                max(1, int(round(bw))),
+                max(1, int(round(bh))),
+            )
+            tracker.init(rgb, init_bbox)
+        except Exception:
+            self._tracker = None
+            return False
+        self._tracker = tracker
+        self._last_bbox = tuple(float(v) for v in bbox)
+        self._last_frame_idx = int(frame_idx)
+        return True
+
+    def _warp_mask_to_bbox(self, mask_uint8, bbox):
+        import cv2
+        h, w = mask_uint8.shape[:2]
+        if self._base_bbox is None:
+            return mask_uint8
+        bx, by, bw, bh = bbox
+        obx, oby, obw, obh = self._base_bbox
+        if obw <= 0 or obh <= 0:
+            return mask_uint8
+        sx = bw / obw
+        sy = bh / obh
+        tx = bx - obx * sx
+        ty = by - oby * sy
+        M = np.array([[sx, 0.0, tx], [0.0, sy, ty]], dtype=np.float32)
+        return cv2.warpAffine(
+            mask_uint8, M, (w, h),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=0,
+        )
+
+    def reset_tracking_cache(self, clear_corrections: bool = False) -> None:
+        self._tracker = None
+        self._last_frame_idx = -1
+        self._last_bbox = None
+        self._track_cache = {}
+        self._failed_frames = set()
+        self.tracking_cache_bboxes.clear()
+        self.tracking_failed_frames.clear()
+        self._tracking_message = "reset"
+        if clear_corrections:
+            self.correction_bboxes.clear()
+
+    def add_correction_from_mask(self, mask_uint8, frame_idx: int) -> bool:
+        bbox = self._bbox_from_mask(mask_uint8)
+        if bbox is None:
+            return False
+        h, w = mask_uint8.shape[:2]
+        self.correction_bboxes[int(frame_idx)] = self._bbox_to_norm(bbox, w, h)
+        self.reset_tracking_cache(clear_corrections=False)
+        self._tracking_message = f"correction added at frame {int(frame_idx)}"
+        return True
+
+    def tracking_status(self) -> dict:
+        self._ensure_tracking_state()
+        return {
+            "enabled": bool(self.track_object),
+            "init_frame": int(self.init_frame),
+            "cached_frames": len(self._track_cache),
+            "corrections": len(self.correction_bboxes),
+            "failed_frames": len(self._failed_frames),
+            "failed_frame_numbers": sorted(int(v) for v in self._failed_frames)[:12],
+            "message": self._tracking_message,
+        }
+
+    def tracking_status_text(self) -> str:
+        info = self.tracking_status()
+        if not info["enabled"]:
+            return "Tracking off"
+        msg = f" | {info['message']}" if info.get("message") else ""
+        failed = ""
+        failed_nums = info.get("failed_frame_numbers") or []
+        if failed_nums:
+            failed = f" ({','.join(str(v) for v in failed_nums[:6])})"
+        return (
+            f"Tracking from frame {info['init_frame']} | "
+            f"cache {info['cached_frames']} | "
+            f"corrections {info['corrections']} | "
+            f"failures {info['failed_frames']}{failed}"
+            f"{msg}"
+        )
+
     def set_from_array(self, mask_uint8) -> None:
         """Encode a uint8 H×W mask into ``encoded_png`` and stash
         the source size so re-evaluation can resize cleanly."""
@@ -791,6 +1049,8 @@ class BitmapMask:
         self.base_height = int(h)
         self.base_width = int(w)
         self._decoded = mask_uint8
+        self._base_bbox = self._bbox_from_mask(mask_uint8)
+        self.reset_tracking_cache(clear_corrections=False)
 
     def to_dict(self) -> dict:
         return {
@@ -803,6 +1063,17 @@ class BitmapMask:
             "enabled": bool(self.enabled),
             "track_object": bool(self.track_object),
             "init_frame": int(self.init_frame),
+            "correction_bboxes": {
+                str(int(k)): [float(v) for v in box]
+                for k, box in sorted(self.correction_bboxes.items())
+            },
+            "tracking_cache_bboxes": {
+                str(int(k)): [float(v) for v in box]
+                for k, box in sorted(self.tracking_cache_bboxes.items())
+            },
+            "tracking_failed_frames": [
+                int(v) for v in sorted(self.tracking_failed_frames)
+            ],
         }
 
     @classmethod
@@ -816,6 +1087,19 @@ class BitmapMask:
             enabled=bool(d.get("enabled", True)),
             track_object=bool(d.get("track_object", False)),
             init_frame=int(d.get("init_frame", 0)),
+            correction_bboxes={
+                int(k): tuple(float(v) for v in box)
+                for k, box in (d.get("correction_bboxes") or {}).items()
+                if box is not None and len(box) == 4
+            },
+            tracking_cache_bboxes={
+                int(k): tuple(float(v) for v in box)
+                for k, box in (d.get("tracking_cache_bboxes") or {}).items()
+                if box is not None and len(box) == 4
+            },
+            tracking_failed_frames=set(
+                int(v) for v in (d.get("tracking_failed_frames") or [])
+            ),
         )
 
 
@@ -824,7 +1108,230 @@ class BitmapMask:
 # ---------------------------------------------------------------------------
 
 
-def grabcut_from_rect(rgb, rect_normalised, iterations: int = 4):
+def _rect_pixels(rect_normalised, width: int, height: int) -> tuple[int, int, int, int]:
+    nx, ny, nw, nh = rect_normalised
+    x = max(0, min(int(round(float(nx) * width)), width - 1))
+    y = max(0, min(int(round(float(ny) * height)), height - 1))
+    rw = max(1, min(int(round(float(nw) * width)), width - x))
+    rh = max(1, min(int(round(float(nh) * height)), height - y))
+    return x, y, rw, rh
+
+
+def _mask_bbox(mask_uint8) -> tuple[int, int, int, int] | None:
+    ys, xs = np.where(mask_uint8 > 127)
+    if xs.size == 0 or ys.size == 0:
+        return None
+    x0, x1 = int(xs.min()), int(xs.max())
+    y0, y1 = int(ys.min()), int(ys.max())
+    return x0, y0, x1 - x0 + 1, y1 - y0 + 1
+
+
+def _fill_mask_holes(cv2, mask_uint8):
+    padded = cv2.copyMakeBorder(
+        mask_uint8, 1, 1, 1, 1, cv2.BORDER_CONSTANT, value=0,
+    )
+    h, w = padded.shape[:2]
+    flood = padded.copy()
+    flood_mask = np.zeros((h + 2, w + 2), dtype=np.uint8)
+    cv2.floodFill(flood, flood_mask, (0, 0), 255)
+    holes = cv2.bitwise_not(flood)
+    filled = cv2.bitwise_or(padded, holes)
+    return filled[1:-1, 1:-1]
+
+
+def _clean_binary_mask(cv2, mask_uint8, *, keep_largest: bool = True):
+    out = np.where(mask_uint8 > 127, 255, 0).astype(np.uint8)
+    if out.size == 0:
+        return out
+    h, w = out.shape[:2]
+    k = max(3, int(round(min(w, h) * 0.006)) | 1)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+    out = cv2.morphologyEx(out, cv2.MORPH_OPEN, kernel)
+    out = cv2.morphologyEx(out, cv2.MORPH_CLOSE, kernel)
+    out = _fill_mask_holes(cv2, out)
+    if not keep_largest:
+        return out
+    num, labels, stats, _ = cv2.connectedComponentsWithStats((out > 0).astype(np.uint8), 8)
+    if num <= 1:
+        return out
+    min_area = max(8, int(h * w * 0.00015))
+    best = None
+    best_area = 0
+    for idx in range(1, num):
+        area = int(stats[idx, cv2.CC_STAT_AREA])
+        if area >= min_area and area > best_area:
+            best = idx
+            best_area = area
+    if best is None:
+        return out
+    return np.where(labels == best, 255, 0).astype(np.uint8)
+
+
+def _component_seed_from_rect(cv2, rgb, rect_normalised, raw_mask=None, seed_point=None):
+    h, w = rgb.shape[:2]
+    x, y, rw, rh = _rect_pixels(rect_normalised, w, h)
+    crop = rgb[y:y + rh, x:x + rw]
+    if crop.size == 0 or rw < 8 or rh < 8:
+        return None
+    gray = cv2.cvtColor(crop, cv2.COLOR_RGB2GRAY).astype(np.float32)
+    gx = cv2.Sobel(gray, cv2.CV_32F, 1, 0, ksize=3)
+    gy = cv2.Sobel(gray, cv2.CV_32F, 0, 1, ksize=3)
+    mag = cv2.magnitude(gx, gy)
+    if float(mag.max()) > 0:
+        mag = mag / float(mag.max())
+    dark = (float(np.percentile(gray, 90)) - gray)
+    dark = dark - float(dark.min())
+    if float(dark.max()) > 0:
+        dark = dark / float(dark.max())
+    sal = 0.62 * mag + 0.38 * dark
+    yy, xx = np.mgrid[0:rh, 0:rw]
+    border_dist = np.minimum.reduce([xx, yy, rw - 1 - xx, rh - 1 - yy]).astype(np.float32)
+    border_weight = np.clip(border_dist / max(1.0, min(rw, rh) * 0.12), 0.0, 1.0)
+    sal *= 0.35 + 0.65 * border_weight
+    if raw_mask is not None:
+        raw_crop = raw_mask[y:y + rh, x:x + rw] > 0
+        sal *= np.where(raw_crop, 1.0, 0.45)
+    threshold = max(float(np.percentile(sal, 91)), float(sal.mean() + sal.std() * 0.35))
+    cand = np.where(sal >= threshold, 255, 0).astype(np.uint8)
+    kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (3, 3))
+    cand = cv2.morphologyEx(cand, cv2.MORPH_CLOSE, kernel)
+    cand = cv2.dilate(cand, kernel, iterations=1)
+    num, labels, stats, centroids = cv2.connectedComponentsWithStats(cand, 8)
+    if num <= 1:
+        return None
+    if seed_point is not None:
+        sx = int(round(max(0.0, min(1.0, float(seed_point[0]))) * (w - 1))) - x
+        sy = int(round(max(0.0, min(1.0, float(seed_point[1]))) * (h - 1))) - y
+    else:
+        sx, sy = rw * 0.5, rh * 0.5
+    best_idx = None
+    best_score = -1.0
+    max_area = rw * rh * 0.38
+    min_area = max(8, int(rw * rh * 0.001))
+    for idx in range(1, num):
+        area = int(stats[idx, cv2.CC_STAT_AREA])
+        if area < min_area or area > max_area:
+            continue
+        cx, cy = centroids[idx]
+        dx = (float(cx) - float(sx)) / max(1.0, rw)
+        dy = (float(cy) - float(sy)) / max(1.0, rh)
+        proximity = 1.0 / (1.0 + 7.5 * (dx * dx + dy * dy))
+        comp = labels == idx
+        score = float(sal[comp].mean()) * (area ** 0.45) * proximity
+        if score > best_score:
+            best_score = score
+            best_idx = idx
+    if best_idx is None:
+        return None
+    sx0 = int(stats[best_idx, cv2.CC_STAT_LEFT])
+    sy0 = int(stats[best_idx, cv2.CC_STAT_TOP])
+    sw = int(stats[best_idx, cv2.CC_STAT_WIDTH])
+    sh = int(stats[best_idx, cv2.CC_STAT_HEIGHT])
+    pad = max(4, int(max(sw, sh) * 0.40))
+    x0 = max(x, x + sx0 - pad)
+    y0 = max(y, y + sy0 - pad)
+    x1 = min(x + rw, x + sx0 + sw + pad)
+    y1 = min(y + rh, y + sy0 + sh + pad)
+    seed_mask = np.zeros((h, w), dtype=np.uint8)
+    seed_mask[y + sy0:y + sy0 + sh, x + sx0:x + sx0 + sw] = np.where(
+        labels[sy0:sy0 + sh, sx0:sx0 + sw] == best_idx, 255, 0
+    ).astype(np.uint8)
+    seed_mask = cv2.dilate(seed_mask, kernel, iterations=2)
+    return (x0, y0, max(1, x1 - x0), max(1, y1 - y0), seed_mask)
+
+
+def _grabcut_quality(mask_uint8, rect_normalised) -> dict:
+    h, w = mask_uint8.shape[:2]
+    x, y, rw, rh = _rect_pixels(rect_normalised, w, h)
+    rect_area = max(1, rw * rh)
+    selected = int(np.count_nonzero(mask_uint8[y:y + rh, x:x + rw] > 127))
+    bbox = _mask_bbox(mask_uint8)
+    coverage = selected / rect_area
+    touches = 0
+    if bbox is not None:
+        bx, by, bw, bh = bbox
+        touches += int(bx <= x + 1)
+        touches += int(by <= y + 1)
+        touches += int(bx + bw >= x + rw - 1)
+        touches += int(by + bh >= y + rh - 1)
+    quality = "wide_spill" if coverage > 0.34 or touches >= 2 else "ok"
+    if selected <= 0:
+        quality = "empty"
+    return {
+        "coverage": float(coverage),
+        "bbox": bbox,
+        "touches_rect_edges": int(touches),
+        "quality": quality,
+    }
+
+
+def refine_grabcut_mask(rgb, mask_uint8, rect_normalised, *, seed_point=None, iterations: int = 2):
+    """Clean and, when needed, re-seed an over-wide GrabCut mask."""
+    try:
+        import cv2
+    except ImportError:
+        return mask_uint8, {"quality": "cv2_unavailable", "refined": False}
+    h, w = rgb.shape[:2]
+    x, y, rw, rh = _rect_pixels(rect_normalised, w, h)
+    raw = np.where(mask_uint8 > 127, 255, 0).astype(np.uint8)
+    raw[:y, :] = 0
+    raw[y + rh:, :] = 0
+    raw[:, :x] = 0
+    raw[:, x + rw:] = 0
+    quality = _grabcut_quality(raw, rect_normalised)
+    cleaned = _clean_binary_mask(cv2, raw)
+    refined = False
+    if quality.get("quality") in {"wide_spill", "empty"}:
+        seed = _component_seed_from_rect(cv2, rgb, rect_normalised, raw_mask=raw, seed_point=seed_point)
+        if seed is not None:
+            sx, sy, sw, sh, seed_mask = seed
+            gc_mask = np.full((h, w), cv2.GC_BGD, dtype=np.uint8)
+            gc_mask[y:y + rh, x:x + rw] = cv2.GC_PR_BGD
+            gc_mask[sy:sy + sh, sx:sx + sw] = cv2.GC_PR_FGD
+            gc_mask[seed_mask > 0] = cv2.GC_FGD
+            bgd = np.zeros((1, 65), dtype=np.float64)
+            fgd = np.zeros((1, 65), dtype=np.float64)
+            bgr = cv2.cvtColor(rgb, cv2.COLOR_RGB2BGR)
+            try:
+                cv2.grabCut(
+                    bgr, gc_mask, None, bgd, fgd, max(1, int(iterations)),
+                    cv2.GC_INIT_WITH_MASK,
+                )
+                candidate = np.where((gc_mask == 1) | (gc_mask == 3), 255, 0).astype(np.uint8)
+                candidate[:y, :] = 0
+                candidate[y + rh:, :] = 0
+                candidate[:, :x] = 0
+                candidate[:, x + rw:] = 0
+                candidate = _clean_binary_mask(cv2, candidate)
+                cand_quality = _grabcut_quality(candidate, rect_normalised)
+                if np.count_nonzero(candidate) > 0 and cand_quality["coverage"] <= max(0.30, quality["coverage"] * 0.90):
+                    cleaned = candidate
+                    quality = cand_quality
+                    quality["quality"] = "seed_refined"
+                    refined = True
+            except Exception:
+                pass
+    quality["refined"] = bool(refined)
+    if quality.get("quality") == "wide_spill":
+        quality["suggestion"] = "Loose rectangle: click the object center or use Clean/Shrink."
+    elif quality.get("quality") == "empty":
+        quality["suggestion"] = "No object found: draw a tighter rectangle or click the object."
+    elif refined:
+        quality["suggestion"] = "Auto-refined from a high-contrast object seed."
+    else:
+        quality["suggestion"] = "Mask ready. Use Clean/Shrink/Expand if needed."
+    return cleaned, quality
+
+
+def grabcut_from_rect(
+    rgb,
+    rect_normalised,
+    iterations: int = 4,
+    *,
+    refine: bool = True,
+    seed_point=None,
+    return_info: bool = False,
+):
     """Run cv2.grabCut on ``rgb`` with the given normalised rectangle
     ``(x, y, w, h)`` (each in [0, 1]). Returns a uint8 H×W mask
     (255 = subject, 0 = background) ready to feed
@@ -838,11 +1345,7 @@ def grabcut_from_rect(rgb, rect_normalised, iterations: int = 4):
     except ImportError:
         return None
     h, w = rgb.shape[:2]
-    nx, ny, nw, nh = rect_normalised
-    x = max(0, min(int(round(nx * w)), w - 1))
-    y = max(0, min(int(round(ny * h)), h - 1))
-    rw = max(1, min(int(round(nw * w)), w - x))
-    rh = max(1, min(int(round(nh * h)), h - y))
+    x, y, rw, rh = _rect_pixels(rect_normalised, w, h)
     mask = np.zeros((h, w), dtype=np.uint8)
     bgd = np.zeros((1, 65), dtype=np.float64)
     fgd = np.zeros((1, 65), dtype=np.float64)
@@ -854,6 +1357,17 @@ def grabcut_from_rect(rgb, rect_normalised, iterations: int = 4):
         return None
     # Foreground = both definite (1) and probable (3).
     out = np.where((mask == 1) | (mask == 3), 255, 0).astype(np.uint8)
+    info = {"quality": "raw", "refined": False}
+    if refine:
+        out, info = refine_grabcut_mask(
+            rgb,
+            out,
+            rect_normalised,
+            seed_point=seed_point,
+            iterations=max(1, iterations // 2),
+        )
+    if return_info:
+        return out, info
     return out
 
 

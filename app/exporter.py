@@ -10,6 +10,7 @@ from PIL import Image
 from PySide6.QtCore import QThread, Signal
 
 from app.i18n import tr
+from app.subprocess_utils import hidden_subprocess_kwargs
 
 
 APP_ROOT = Path(__file__).resolve().parent.parent
@@ -149,7 +150,12 @@ class GifExportThread(QThread):
                 "-o", str(self._out),
                 *[str(p) for p in pngs],
             ]
-            proc = subprocess.run(cmd, capture_output=True, text=True)
+            proc = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                **hidden_subprocess_kwargs(),
+            )
             if proc.returncode != 0:
                 raise RuntimeError(
                     tr(
@@ -199,7 +205,13 @@ class GifExportThread(QThread):
             cmd.append(f"--colors={self._max_colors}")
         cmd.extend(["-o", str(self._out), str(self._out)])
         try:
-            subprocess.run(cmd, check=False, capture_output=True, timeout=120)
+            subprocess.run(
+                cmd,
+                check=False,
+                capture_output=True,
+                timeout=120,
+                **hidden_subprocess_kwargs(),
+            )
         except Exception:
             pass
 

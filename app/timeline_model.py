@@ -1,7 +1,7 @@
 """Timeline data model — Phase 1.
 
 Single source of truth for the editor's clip / track / timeline
-dataclasses. The legacy ``VideoTrack`` in ``video_editor_window.py``
+dataclasses. The legacy ``VideoTrack`` in ``video_track_legacy.py``
 held one source per track plus a ``cuts`` list and an inline
 ``color_grade``; this module defines the new clip-list model that
 mirrors how ``AudioTrack`` already works:
@@ -18,7 +18,7 @@ move all reduce to plain field updates without dragging a global
 Phase 2 — for now it just wraps a ``ColorGrade`` so existing callers
 keep working.
 
-The legacy renderer still uses ``video_editor_window.VideoTrack``;
+The legacy renderer still uses ``video_track_legacy.VideoTrack``;
 this module exists alongside it. ``migrate_legacy_video_track`` builds
 a new-style ``VideoTrack`` from a legacy one. Phase 1.5 will rewire
 ``TrackRow`` / ``_compose_frame_at`` to consume the new model; until
@@ -28,9 +28,10 @@ Pure-Python only: no Qt imports, so this can be unit-tested headless.
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+import math
+from dataclasses import dataclass, field, replace
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any, Iterable, Optional
 
 
 # ---------------------------------------------------------------------------
@@ -184,6 +185,8 @@ class ZoomActor:
     target_h: int = 0
     zoom_in_ms: int = 500
     zoom_out_ms: int = 500
+    easing: str = "smooth_pop"
+    motion_blur: float = 0.0
 
     @property
     def duration_ms(self) -> int:
@@ -201,13 +204,57 @@ class ZoomActor:
 # ---------------------------------------------------------------------------
 
 
-def _zoom_ease(t: float) -> float:
-    """Cubic-in-out easing 0..1. Smooth at both ends, fast in the middle."""
+def zoom_ease_value(t: float, easing: str = "smooth_pop") -> float:
+    """Return a Screen Studio-style zoom progress value.
+
+    ``smooth_pop`` intentionally overshoots by a hair during the ramp, which
+    makes generated Auto Polish zooms feel less mechanical without changing
+    the hold/end points.  Legacy callers can use ``cubic`` for the previous
+    strict cubic-in-out curve.
+    """
     t = max(0.0, min(1.0, t))
+    easing = str(easing or "smooth_pop").strip().lower()
+    if easing in {"linear", "none"}:
+        return t
+    if easing in {"snappy", "ease_out"}:
+        return max(0.0, min(1.0, 1.0 - (1.0 - t) ** 3))
+    if easing in {"cinematic", "smoother", "smootherstep"}:
+        return t * t * t * (t * (t * 6.0 - 15.0) + 10.0)
     if t < 0.5:
-        return 4.0 * t * t * t
-    p = -2.0 * t + 2.0
-    return 1.0 - (p * p * p) / 2.0
+        base = 4.0 * t * t * t
+    else:
+        p = -2.0 * t + 2.0
+        base = 1.0 - (p * p * p) / 2.0
+    if easing in {"smooth_pop", "screenstudio", "pop"}:
+        base += 0.018 * (math.sin(math.pi * t) ** 2)
+        return max(0.0, min(1.025, base))
+    return max(0.0, min(1.0, base))
+
+
+def _zoom_ease(t: float) -> float:
+    """Backward-compatible cubic-in-out easing 0..1."""
+    return zoom_ease_value(t, "cubic")
+
+
+def zoom_motion_blur_amount(actor: ZoomActor, source_ms: int) -> float:
+    """Return 0..1 blur strength for zoom transition frames."""
+    strength = max(0.0, min(1.0, float(getattr(actor, "motion_blur", 0.0) or 0.0)))
+    if strength <= 0.0 or not actor.contains(source_ms):
+        return 0.0
+    span = actor.duration_ms
+    if span <= 0:
+        return 0.0
+    ri = min(actor.zoom_in_ms, span)
+    ro = min(actor.zoom_out_ms, span - ri)
+    t_in = source_ms - actor.start_ms
+    ramp_t = None
+    if t_in < ri and ri > 0:
+        ramp_t = t_in / ri
+    elif t_in > span - ro and ro > 0:
+        ramp_t = (span - t_in) / ro
+    if ramp_t is None:
+        return 0.0
+    return strength * (math.sin(math.pi * max(0.0, min(1.0, ramp_t))) ** 0.7)
 
 
 def zoom_window_at(
@@ -230,15 +277,17 @@ def zoom_window_at(
     ro = min(actor.zoom_out_ms, span - ri)
     t_in = source_ms - actor.start_ms
     if t_in < ri and ri > 0:
-        progress = _zoom_ease(t_in / ri)
+        progress = zoom_ease_value(t_in / ri, getattr(actor, "easing", "smooth_pop"))
     elif t_in > span - ro and ro > 0:
-        progress = _zoom_ease((span - t_in) / ro)
+        progress = zoom_ease_value((span - t_in) / ro, getattr(actor, "easing", "smooth_pop"))
     else:
         progress = 1.0
     tw = float(actor.target_w)
     th = float(actor.target_h)
     cw = frame_w + (tw - frame_w) * progress
     ch = frame_h + (th - frame_h) * progress
+    cw = max(2.0, min(float(frame_w), cw))
+    ch = max(2.0, min(float(frame_h), ch))
     target_cx = actor.target_x + tw / 2.0
     target_cy = actor.target_y + th / 2.0
     ccx = frame_w / 2.0 + (target_cx - frame_w / 2.0) * progress
@@ -314,26 +363,37 @@ def build_zoom_ffmpeg_filter(
     iw = float(frame_w)
     ih = float(frame_h)
 
-    def ease_expr(u: str) -> str:
-        return (
+    def ease_expr(u: str, easing: str) -> str:
+        kind = str(easing or "smooth_pop").strip().lower()
+        if kind in {"linear", "none"}:
+            return u
+        if kind in {"snappy", "ease_out"}:
+            return f"(1-pow(1-{u},3))"
+        if kind in {"cinematic", "smoother", "smootherstep"}:
+            return f"(pow({u},3)*({u}*({u}*6-15)+10))"
+        cubic = (
             f"if(lt({u},0.5),"
             f"4*pow({u},3),"
             f"1-pow(-2*{u}+2,3)/2)"
         )
+        if kind in {"smooth_pop", "screenstudio", "pop"}:
+            return f"min(1.025,({cubic}+0.018*pow(sin(3.14159265*{u}),2)))"
+        return cubic
 
     def progress_expr(out_start: float, out_end: float,
-                      ramp_in: float, ramp_out: float) -> str:
+                      ramp_in: float, ramp_out: float, actor: ZoomActor) -> str:
         s = f"{out_start:.6f}"
         e = f"{out_end:.6f}"
         ri = max(ramp_in, 1e-6)
         ro = max(ramp_out, 1e-6)
         u_in = f"((t-{s})/{ri:.6f})"
         u_out = f"(({e}-t)/{ro:.6f})"
+        easing = getattr(actor, "easing", "smooth_pop")
         return (
             f"if(lt(t,{s}),0,"
-            f"if(lt(t,{s}+{ri:.6f}),{ease_expr(u_in)},"
+            f"if(lt(t,{s}+{ri:.6f}),{ease_expr(u_in, easing)},"
             f"if(lt(t,{e}-{ro:.6f}),1,"
-            f"if(lt(t,{e}),{ease_expr(u_out)},0))))"
+            f"if(lt(t,{e}),{ease_expr(u_out, easing)},0))))"
         )
 
     def crop_param(component: str) -> str:
@@ -343,7 +403,7 @@ def build_zoom_ffmpeg_filter(
             else "0"
         )
         for out_start, out_end, ramp_in, ramp_out, a in reversed(plans):
-            p = progress_expr(out_start, out_end, ramp_in, ramp_out)
+            p = progress_expr(out_start, out_end, ramp_in, ramp_out, a)
             tw = float(a.target_w)
             th = float(a.target_h)
             tcx = a.target_x + tw / 2.0
@@ -456,6 +516,7 @@ class VideoClip:
     # transition_out_type: "" (none), "dissolve", "fade_black", "fade_white"
     transition_out_type: str = ""
     transition_out_ms: int = 500
+    transition_preset_meta: dict = field(default_factory=dict)
     # Optional clip-level filter effects (sharpen, vignette, denoise, etc.)
     video_filters: "Optional[Any]" = None  # VideoFilterParams | None
     # Optional chroma key (green/blue screen) params.
@@ -464,14 +525,91 @@ class VideoClip:
     stabilizer: "Optional[Any]" = None   # StabilizerParams | None
     # Optional AI background removal params.
     bg_removal: "Optional[Any]" = None   # BackgroundRemovalParams | None
+    # Screen Studio-style screen-recording polish. ``cursor_events`` is
+    # optional capture metadata; ``screenstudio_polish`` stores generated
+    # auto-zoom actor ids plus cursor/background style settings.
+    cursor_events: list[dict] = field(default_factory=list)
+    screenstudio_polish: dict = field(default_factory=dict)
+    # Temporarily disabled clip-level FX. These preserve the exact params
+    # behind an Inspector "Disable Clip FX" action without deleting the stack.
+    disabled_video_filters: "Optional[Any]" = None
+    disabled_chroma_key: "Optional[Any]" = None
+    disabled_bg_removal: "Optional[Any]" = None
     # ID of a linked AudioClip on an audio track; when set, moving this
     # video clip also moves the linked audio clip by the same delta.
     linked_audio_id: Optional[int] = None
+    # Lightweight nested/compound timeline MVP. Clips with the same
+    # non-null group id select and move together while remaining as normal
+    # clips for preview/export.
+    compound_group_id: Optional[int] = None
+    compound_group_name: str = ""
+    # True nested sequence parent support. A parent clip has no direct
+    # source_path; it owns child clips whose timeline_in_ms values are
+    # relative to the parent clip start.
+    nested_sequence_id: Optional[int] = None
+    nested_sequence_name: str = ""
+    nested_child_clips: list["VideoClip"] = field(default_factory=list)
+    nested_child_tracks: list[list["VideoClip"]] = field(default_factory=list)
+    nested_audio_tracks: list[list[Any]] = field(default_factory=list)
+    nested_spine_actor_tracks: list[Any] = field(default_factory=list)
+    nested_live2d_actor_tracks: list[Any] = field(default_factory=list)
 
     # ---- derived ----
 
+    def nested_tracks(self) -> list[list["VideoClip"]]:
+        if self.nested_child_tracks:
+            return [list(track) for track in self.nested_child_tracks]
+        if self.nested_child_clips:
+            return [list(self.nested_child_clips)]
+        return []
+
+    @property
+    def is_nested_sequence(self) -> bool:
+        return bool(
+            self.nested_tracks()
+            or self.nested_audio_tracks
+            or self.nested_spine_actor_tracks
+            or self.nested_live2d_actor_tracks
+        )
+
+    @property
+    def nested_duration_ms(self) -> int:
+        tracks = self.nested_tracks()
+        video_end = max(
+            (int(c.timeline_out_ms) for track in tracks for c in track),
+            default=0,
+        )
+        audio_end = max(
+            (
+                int(getattr(c, "offset_ms", 0))
+                + int(getattr(c, "effective_length_ms", 0))
+                for track in (self.nested_audio_tracks or [])
+                for c in track
+            ),
+            default=0,
+        )
+        spine_end = max(
+            (
+                int(getattr(c, "end_ms", 0))
+                for track in (self.nested_spine_actor_tracks or [])
+                for c in getattr(track, "clips", []) or []
+            ),
+            default=0,
+        )
+        live2d_end = max(
+            (
+                int(getattr(c, "end_ms", 0))
+                for track in (self.nested_live2d_actor_tracks or [])
+                for c in getattr(track, "clips", []) or []
+            ),
+            default=0,
+        )
+        return max(video_end, audio_end, spine_end, live2d_end)
+
     @property
     def effective_source_out_ms(self) -> int:
+        if self.is_nested_sequence:
+            return self.nested_duration_ms
         if self.source_out_ms > 0:
             return min(self.source_out_ms, self.source_duration_ms)
         return self.source_duration_ms
@@ -488,6 +626,8 @@ class VideoClip:
 
     @property
     def display_name(self) -> str:
+        if self.is_nested_sequence:
+            return self.nested_sequence_name or self.compound_group_name or "Nested sequence"
         if self.source_path is None:
             return ""
         return self.source_path.name
@@ -498,6 +638,48 @@ class VideoClip:
     def timeline_to_source_ms(self, t_ms: int) -> int:
         """Map a project-timeline ms onto the underlying source file."""
         return self.source_in_ms + (t_ms - self.timeline_in_ms)
+
+
+def expanded_timeline_clips(clips: list[VideoClip]) -> list[VideoClip]:
+    """Flatten nested sequence parents into renderable child clips.
+
+    Child clips inside a nested parent store times relative to the parent.
+    This returns shallow copies with project-timeline positions so preview,
+    export segment building, and decoder setup can keep using the normal
+    flat clip-list contract.
+    """
+    out: list[VideoClip] = []
+    for clip in clips or []:
+        tracks = clip.nested_tracks() if hasattr(clip, "nested_tracks") else []
+        if not tracks:
+            out.append(clip)
+            continue
+        parent_start = int(getattr(clip, "timeline_in_ms", 0) or 0)
+        for child_track in tracks:
+            for child in expanded_timeline_clips(child_track):
+                out.append(
+                    replace(
+                        child,
+                        timeline_in_ms=parent_start + int(child.timeline_in_ms),
+                        compound_group_id=getattr(clip, "compound_group_id", None),
+                        compound_group_name=getattr(clip, "compound_group_name", ""),
+                    )
+                )
+    out.sort(key=lambda c: int(c.timeline_in_ms))
+    return out
+
+
+def renderable_source_clips(clips: list[VideoClip]) -> list[VideoClip]:
+    """Return concrete source-backed clips reachable from nested parents."""
+    out: list[VideoClip] = []
+    for clip in clips or []:
+        tracks = clip.nested_tracks() if hasattr(clip, "nested_tracks") else []
+        if tracks:
+            for child_track in tracks:
+                out.extend(renderable_source_clips(child_track))
+        elif getattr(clip, "source_path", None) is not None:
+            out.append(clip)
+    return out
 
 
 @dataclass
@@ -521,6 +703,8 @@ class VideoTrack:
     pip_opacity: float = 1.0  # opacity 0-1
     pip_keyframes: list = field(default_factory=list)
     # Each keyframe dict: {"ms": int, "x": float, "y": float, "scale": float, "opacity": float}
+    cursor_events: list[dict] = field(default_factory=list)
+    screenstudio_polish: dict = field(default_factory=dict)
 
     # ---- derived ----
 
@@ -537,6 +721,9 @@ class VideoTrack:
 
     @property
     def display_name(self) -> str:
+        custom = str(getattr(self, "label", "") or getattr(self, "name", "") or "")
+        if custom:
+            return custom
         names = {c.source_path.stem for c in self.clips if c.source_path is not None}
         if not names:
             return ""
@@ -674,6 +861,8 @@ def _split_clip_right(
         ],
         fades=right_fades,
         zoom_actors=right_zoom,
+        cursor_events=list(getattr(clip, "cursor_events", []) or []),
+        screenstudio_polish=dict(getattr(clip, "screenstudio_polish", {}) or {}),
         typography_actors=right_typo,
         node_graph=_copy.deepcopy(clip.node_graph),
         selection_start_ms=-1,
@@ -893,9 +1082,648 @@ def ripple_delete_clips(clips: list, target_clip_ids: set) -> list:
     return remaining
 
 
+def detect_timeline_edge_issues(
+    clips: list[VideoClip],
+    *,
+    frame_ms: int = 33,
+) -> list[dict[str, int | str]]:
+    """Return adjacent same-lane gap/overlap diagnostics.
+
+    A one-frame positive gap or overlap is usually accidental in NLE work.  The
+    helper labels those as micro issues while still reporting larger gaps and
+    overlaps without assuming they should be changed.
+    """
+    frame_ms = max(1, int(frame_ms))
+    rows: list[dict[str, int | str]] = []
+    ordered = sorted(list(clips or []), key=lambda c: (int(c.timeline_in_ms), int(c.id)))
+    for left, right in zip(ordered, ordered[1:]):
+        left_end = int(left.timeline_out_ms)
+        right_start = int(right.timeline_in_ms)
+        gap = right_start - left_end
+        if gap == 0:
+            continue
+        if gap > 0:
+            rows.append({
+                "kind": "micro_gap" if gap <= frame_ms else "gap",
+                "left_clip_id": int(left.id),
+                "right_clip_id": int(right.id),
+                "start_ms": left_end,
+                "end_ms": right_start,
+                "duration_ms": int(gap),
+                "auto_fixable": int(gap <= frame_ms),
+            })
+        else:
+            overlap = -gap
+            rows.append({
+                "kind": "micro_overlap" if overlap <= frame_ms else "overlap",
+                "left_clip_id": int(left.id),
+                "right_clip_id": int(right.id),
+                "start_ms": right_start,
+                "end_ms": left_end,
+                "duration_ms": int(overlap),
+                "auto_fixable": int(overlap <= frame_ms),
+            })
+    return rows
+
+
+def cleanup_timeline_micro_edges(
+    clips: list[VideoClip],
+    *,
+    frame_ms: int = 33,
+    close_gaps: bool = True,
+    trim_overlaps: bool = True,
+) -> tuple[list[VideoClip], list[dict[str, int | str]]]:
+    """Return a cleaned clip list plus actions for one-frame edit mistakes.
+
+    Tiny gaps ripple the right-hand clip and following clips left. Tiny overlaps
+    trim the left clip's out edge. Larger edge differences are left alone so an
+    intentional pause or overlap is not silently destroyed. The input list and
+    clip objects are never mutated.
+    """
+    frame_ms = max(1, int(frame_ms))
+    out = _copy_clip_list(sorted(list(clips or []), key=lambda c: (int(c.timeline_in_ms), int(c.id))))
+    actions: list[dict[str, int | str]] = []
+    idx = 0
+    while idx < len(out) - 1:
+        left = out[idx]
+        right = out[idx + 1]
+        left_end = int(left.timeline_out_ms)
+        right_start = int(right.timeline_in_ms)
+        gap = right_start - left_end
+        if close_gaps and 0 < gap <= frame_ms:
+            for later in out[idx + 1:]:
+                later.timeline_in_ms = max(0, int(later.timeline_in_ms) - gap)
+            actions.append({
+                "kind": "close_micro_gap",
+                "left_clip_id": int(left.id),
+                "right_clip_id": int(right.id),
+                "duration_ms": int(gap),
+                "delta_ms": int(-gap),
+            })
+            idx += 1
+            continue
+        if trim_overlaps and -frame_ms <= gap < 0:
+            overlap = -gap
+            current_out = int(left.effective_source_out_ms)
+            new_out = max(int(left.source_in_ms) + 1, current_out - overlap)
+            actual = current_out - new_out
+            if actual > 0:
+                left.source_out_ms = int(new_out)
+                actions.append({
+                    "kind": "trim_micro_overlap",
+                    "left_clip_id": int(left.id),
+                    "right_clip_id": int(right.id),
+                    "duration_ms": int(actual),
+                    "delta_ms": int(-actual),
+                })
+        idx += 1
+    out.sort(key=lambda c: (int(c.timeline_in_ms), int(c.id)))
+    return out, actions
+
+
+def slip_clip_source_window(clip: VideoClip, delta_ms: int) -> VideoClip:
+    """Return a copy of ``clip`` with its source window slipped.
+
+    Slip editing keeps the clip fixed on the project timeline while changing
+    which source frames play inside that fixed window. The source window is
+    clamped to the available media duration, and the input clip is not mutated.
+    """
+    import copy as _copy
+
+    out = _copy.deepcopy(clip)
+    if out.is_nested_sequence:
+        return out
+    duration = int(out.effective_length_ms)
+    source_duration = int(out.source_duration_ms or out.effective_source_out_ms)
+    if duration <= 0 or source_duration <= 0 or duration >= source_duration:
+        return out
+    max_in = max(0, source_duration - duration)
+    new_in = max(0, min(max_in, int(out.source_in_ms) + int(delta_ms)))
+    out.source_in_ms = new_in
+    out.source_out_ms = new_in + duration
+    return out
+
+
+def _copy_clip_list(clips: list[VideoClip]) -> list[VideoClip]:
+    import copy as _copy
+
+    return [_copy.deepcopy(c) for c in clips]
+
+
+def _find_clip_index_by_id(clips: list[VideoClip], clip_id: int) -> int:
+    for idx, clip in enumerate(clips):
+        if int(clip.id) == int(clip_id):
+            return idx
+    raise ValueError(f"clip id {clip_id} not found")
+
+
+def _clamp_delta(delta_ms: int, lower: int, upper: int) -> int:
+    if lower > upper:
+        return 0
+    return max(lower, min(upper, int(delta_ms)))
+
+
+def roll_edit_adjacent(
+    clips: list[VideoClip],
+    left_clip_id: int,
+    right_clip_id: int,
+    delta_ms: int,
+) -> list[VideoClip]:
+    """Roll the edit point between two adjacent clips.
+
+    The outgoing clip's out-point and incoming clip's in-point both move by
+    ``delta_ms``. Overall timeline duration remains unchanged. If the requested
+    delta would invert either clip or run past source bounds, it is clamped to
+    the closest valid edit. The input list and clips are left untouched.
+    """
+    out = _copy_clip_list(clips)
+    left_idx = _find_clip_index_by_id(out, left_clip_id)
+    right_idx = _find_clip_index_by_id(out, right_clip_id)
+    left = out[left_idx]
+    right = out[right_idx]
+    if int(left.timeline_out_ms) != int(right.timeline_in_ms):
+        raise ValueError("roll edit requires adjacent clips with no gap")
+
+    boundary = int(left.timeline_out_ms)
+    left_out = int(left.effective_source_out_ms)
+    right_in = int(right.source_in_ms)
+    right_out = int(right.effective_source_out_ms)
+    left_source_limit = int(left.source_duration_ms or left_out)
+
+    lower = max(
+        int(left.source_in_ms) + 1 - left_out,
+        -right_in,
+        int(left.timeline_in_ms) + 1 - boundary,
+    )
+    upper = min(
+        left_source_limit - left_out,
+        right_out - 1 - right_in,
+        int(right.timeline_out_ms) - 1 - boundary,
+    )
+    applied = _clamp_delta(delta_ms, lower, upper)
+    if applied == 0:
+        return sorted(out, key=lambda c: int(c.timeline_in_ms))
+
+    left.source_out_ms = left_out + applied
+    right.source_in_ms = right_in + applied
+    right.timeline_in_ms = int(right.timeline_in_ms) + applied
+    return sorted(out, key=lambda c: int(c.timeline_in_ms))
+
+
+def slide_clip_between_neighbors(
+    clips: list[VideoClip],
+    clip_id: int,
+    delta_ms: int,
+) -> list[VideoClip]:
+    """Slide a clip between its adjacent neighbours.
+
+    Slide editing moves the selected clip on the timeline while trimming the
+    previous and next clips so the three-clip block keeps the same outer span.
+    It is valid only for a contiguous ``prev | selected | next`` block. The
+    selected clip's source window is unchanged; only its timeline position
+    moves. The input list and clips are not mutated.
+    """
+    out = _copy_clip_list(sorted(clips, key=lambda c: int(c.timeline_in_ms)))
+    idx = _find_clip_index_by_id(out, clip_id)
+    if idx <= 0 or idx >= len(out) - 1:
+        raise ValueError("slide edit requires previous and next clips")
+    prev_clip = out[idx - 1]
+    clip = out[idx]
+    next_clip = out[idx + 1]
+    if (
+        int(prev_clip.timeline_out_ms) != int(clip.timeline_in_ms)
+        or int(clip.timeline_out_ms) != int(next_clip.timeline_in_ms)
+    ):
+        raise ValueError("slide edit requires a contiguous three-clip block")
+
+    prev_out = int(prev_clip.effective_source_out_ms)
+    next_in = int(next_clip.source_in_ms)
+    next_out = int(next_clip.effective_source_out_ms)
+    prev_source_limit = int(prev_clip.source_duration_ms or prev_out)
+    clip_len = int(clip.effective_length_ms)
+
+    lower = max(
+        -int(clip.timeline_in_ms),
+        int(prev_clip.source_in_ms) + 1 - prev_out,
+        -next_in,
+        int(prev_clip.timeline_in_ms) + 1 - int(clip.timeline_in_ms),
+    )
+    upper = min(
+        prev_source_limit - prev_out,
+        next_out - 1 - next_in,
+        int(next_clip.timeline_out_ms) - clip_len - 1 - int(clip.timeline_in_ms),
+    )
+    applied = _clamp_delta(delta_ms, lower, upper)
+    if applied == 0:
+        return sorted(out, key=lambda c: int(c.timeline_in_ms))
+
+    prev_clip.source_out_ms = prev_out + applied
+    clip.timeline_in_ms = int(clip.timeline_in_ms) + applied
+    next_clip.source_in_ms = next_in + applied
+    next_clip.timeline_in_ms = int(next_clip.timeline_in_ms) + applied
+    return sorted(out, key=lambda c: int(c.timeline_in_ms))
+
+
+@dataclass
+class LinkedTimelineMovePlan:
+    """Validated move plan for video clips plus their linked audio clips."""
+
+    video_starts: dict[tuple[int, int], int] = field(default_factory=dict)
+    audio_offsets: dict[tuple[int, int], int] = field(default_factory=dict)
+    blocked_reason: str = ""
+    details: dict[str, Any] = field(default_factory=dict)
+
+    @property
+    def ok(self) -> bool:
+        return self.blocked_reason == ""
+
+
+def _blocked_linked_move(reason: str, **details: Any) -> LinkedTimelineMovePlan:
+    return LinkedTimelineMovePlan(
+        blocked_reason=reason,
+        details={key: value for key, value in details.items() if value is not None},
+    )
+
+
+def _time_windows_overlap(a_start: int, a_end: int, b_start: int, b_end: int) -> bool:
+    return not (int(a_end) <= int(b_start) or int(b_end) <= int(a_start))
+
+
+def plan_linked_timeline_move(
+    video_tracks: Iterable[Any],
+    audio_tracks: Iterable[Any],
+    selected_video_keys: Iterable[tuple[int, int]],
+    delta_ms: int,
+    *,
+    strict_links: bool = True,
+    strict_selection: bool = False,
+) -> LinkedTimelineMovePlan:
+    """Return a validated move plan for selected video clips and linked audio.
+
+    ``selected_video_keys`` contains ``(video_track_id, video_clip_id)`` pairs.
+    The function validates three commercial-editor invariants before the UI
+    mutates anything:
+
+    - selected video clips cannot move before project start;
+    - selected video clips cannot overlap unselected clips on their own lane;
+    - linked audio clips move by the same delta and cannot overlap unselected
+      audio clips on their audio lane.
+
+    The input tracks and clips are not mutated.
+    """
+    delta = int(delta_ms)
+    if delta == 0:
+        return LinkedTimelineMovePlan()
+
+    selected = {
+        (int(track_id), int(clip_id))
+        for track_id, clip_id in (selected_video_keys or [])
+    }
+    if not selected:
+        return LinkedTimelineMovePlan()
+
+    video_lanes: dict[int, list[Any]] = {}
+    selected_clips: list[tuple[int, Any]] = []
+    found_selected: set[tuple[int, int]] = set()
+    for track in video_tracks or []:
+        try:
+            track_id = int(getattr(track, "id"))
+        except Exception:
+            continue
+        clips = list(getattr(track, "clips", []) or [])
+        video_lanes[track_id] = clips
+        for clip in clips:
+            try:
+                clip_id = int(getattr(clip, "id"))
+            except Exception:
+                continue
+            if (track_id, clip_id) in selected:
+                found_selected.add((track_id, clip_id))
+                if bool(getattr(track, "locked", False)):
+                    return _blocked_linked_move(
+                        "locked_track",
+                        kind="video",
+                        track_id=track_id,
+                        clip_id=clip_id,
+                        delta_ms=delta,
+                    )
+                selected_clips.append((track_id, clip))
+
+    if strict_selection and found_selected != selected:
+        missing = sorted(selected - found_selected)
+        missing_track_id = missing[0][0] if missing else None
+        missing_clip_id = missing[0][1] if missing else None
+        return _blocked_linked_move(
+            "missing_video_clip",
+            kind="video",
+            track_id=missing_track_id,
+            clip_id=missing_clip_id,
+            missing_selection=missing,
+            delta_ms=delta,
+        )
+
+    if not selected_clips:
+        return LinkedTimelineMovePlan()
+
+    audio_lanes: dict[int, list[Any]] = {}
+    audio_by_id: dict[int, list[tuple[int, Any]]] = {}
+    for track in audio_tracks or []:
+        try:
+            track_id = int(getattr(track, "id"))
+        except Exception:
+            continue
+        clips = list(getattr(track, "clips", []) or [])
+        audio_lanes[track_id] = clips
+        for clip in clips:
+            try:
+                clip_id = int(getattr(clip, "id"))
+            except Exception:
+                continue
+            audio_by_id.setdefault(clip_id, []).append((track_id, clip))
+
+    plan = LinkedTimelineMovePlan()
+    moved_audio: set[tuple[int, int]] = set()
+
+    for track_id, clip in selected_clips:
+        clip_id = int(getattr(clip, "id"))
+        new_start = int(getattr(clip, "timeline_in_ms", 0)) + delta
+        if new_start < 0:
+            return _blocked_linked_move(
+                "timeline_start",
+                kind="video",
+                track_id=track_id,
+                clip_id=clip_id,
+                attempted_start_ms=new_start,
+                delta_ms=delta,
+            )
+        plan.video_starts[(track_id, clip_id)] = new_start
+
+        linked_audio_id = getattr(clip, "linked_audio_id", None)
+        if linked_audio_id is None:
+            continue
+        try:
+            linked_audio_id = int(linked_audio_id)
+        except Exception:
+            if strict_links:
+                return _blocked_linked_move(
+                    "missing_linked_audio",
+                    kind="audio",
+                    video_track_id=track_id,
+                    video_clip_id=clip_id,
+                    linked_audio_id=str(getattr(clip, "linked_audio_id", "")),
+                )
+            continue
+        matches = audio_by_id.get(linked_audio_id, [])
+        if not matches:
+            if strict_links:
+                return _blocked_linked_move(
+                    "missing_linked_audio",
+                    kind="audio",
+                    video_track_id=track_id,
+                    video_clip_id=clip_id,
+                    linked_audio_id=linked_audio_id,
+                )
+            continue
+        if len(matches) > 1:
+            return _blocked_linked_move(
+                "duplicate_linked_audio",
+                kind="audio",
+                video_track_id=track_id,
+                video_clip_id=clip_id,
+                linked_audio_id=linked_audio_id,
+                candidate_tracks=[int(tid) for tid, _clip in matches],
+            )
+        audio_track_id, audio_clip = matches[0]
+        audio_key = (int(audio_track_id), int(linked_audio_id))
+        if audio_key in moved_audio:
+            return _blocked_linked_move(
+                "shared_linked_audio",
+                kind="audio",
+                video_track_id=track_id,
+                video_clip_id=clip_id,
+                linked_audio_id=linked_audio_id,
+                track_id=audio_track_id,
+                clip_id=linked_audio_id,
+            )
+        moved_audio.add(audio_key)
+        new_offset = int(getattr(audio_clip, "offset_ms", 0)) + delta
+        if new_offset < 0:
+            return _blocked_linked_move(
+                "timeline_start",
+                kind="audio",
+                track_id=audio_track_id,
+                clip_id=linked_audio_id,
+                attempted_start_ms=new_offset,
+                delta_ms=delta,
+            )
+        plan.audio_offsets[audio_key] = new_offset
+
+    # Validate video collisions lane-by-lane. Selected clips move together, so
+    # only unselected clips on the same lane can newly block the operation.
+    for track_id, clips in video_lanes.items():
+        selected_ids = {
+            clip_id for tid, clip_id in plan.video_starts
+            if int(tid) == int(track_id)
+        }
+        if not selected_ids:
+            continue
+        for clip in clips:
+            clip_id = int(getattr(clip, "id", -1))
+            if clip_id not in selected_ids:
+                continue
+            start = int(plan.video_starts[(track_id, clip_id)])
+            end = start + int(getattr(clip, "effective_length_ms", 0) or 0)
+            for other in clips:
+                other_id = int(getattr(other, "id", -1))
+                if other_id in selected_ids:
+                    continue
+                other_start = int(getattr(other, "timeline_in_ms", 0))
+                other_end = int(getattr(other, "timeline_out_ms", other_start))
+                if _time_windows_overlap(start, end, other_start, other_end):
+                    return _blocked_linked_move(
+                        "video_collision",
+                        kind="video",
+                        track_id=track_id,
+                        clip_id=clip_id,
+                        other_clip_id=other_id,
+                        attempted_start_ms=start,
+                        attempted_end_ms=end,
+                        other_start_ms=other_start,
+                        other_end_ms=other_end,
+                        delta_ms=delta,
+                    )
+
+    # Validate linked audio collisions on each audio lane.
+    for track_id, clips in audio_lanes.items():
+        moved_ids = {
+            clip_id for tid, clip_id in plan.audio_offsets
+            if int(tid) == int(track_id)
+        }
+        if not moved_ids:
+            continue
+        for clip in clips:
+            clip_id = int(getattr(clip, "id", -1))
+            if clip_id not in moved_ids:
+                continue
+            start = int(plan.audio_offsets[(track_id, clip_id)])
+            end = start + int(getattr(clip, "effective_length_ms", 0) or 0)
+            for other in clips:
+                other_id = int(getattr(other, "id", -1))
+                if other_id in moved_ids:
+                    continue
+                other_start = int(getattr(other, "offset_ms", 0))
+                other_end = other_start + int(getattr(other, "effective_length_ms", 0) or 0)
+                if _time_windows_overlap(start, end, other_start, other_end):
+                    return _blocked_linked_move(
+                        "audio_collision",
+                        kind="audio",
+                        track_id=track_id,
+                        clip_id=clip_id,
+                        other_clip_id=other_id,
+                        attempted_start_ms=start,
+                        attempted_end_ms=end,
+                        other_start_ms=other_start,
+                        other_end_ms=other_end,
+                        delta_ms=delta,
+                    )
+
+    plan.details.update({
+        "delta_ms": delta,
+        "selected_video_count": len(selected_clips),
+        "linked_audio_count": len(plan.audio_offsets),
+    })
+    return plan
+
+
 # ---------------------------------------------------------------------------
 #  Phase 1.5d post-work: drag constraints (snap + collision)
 # ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class DragConstraintResult:
+    """Explains how a clip drag was resolved.
+
+    ``apply_drag_constraints`` intentionally stays as the old integer-returning
+    API.  The editor uses this richer result so the timeline can show why a drag
+    jumped, snapped, or clamped instead of leaving the user guessing.
+    """
+
+    timeline_in_ms: int
+    requested_timeline_in_ms: int
+    snapped: bool = False
+    snap_target_ms: Optional[int] = None
+    snap_edge: str = ""
+    snap_source: str = ""
+    collided: bool = False
+    clamped: bool = False
+    clamp_target_ms: Optional[int] = None
+
+
+def apply_drag_constraints_detail(
+    clips: list,
+    dragged_clip,
+    desired_timeline_in_ms: int,
+    *,
+    snap_ms: int = 200,
+    extra_snap_targets: list[int] | tuple[int, ...] | None = None,
+) -> DragConstraintResult:
+    """Detailed form of :func:`apply_drag_constraints`.
+
+    The returned metadata is deliberately UI-neutral: no Qt objects, no pixels,
+    only project-time values and reasons.  That keeps the drag policy testable
+    while giving the editor enough information to paint snap/collision feedback.
+    """
+    requested = max(0, int(desired_timeline_in_ms))
+    desired = requested
+    length = int(getattr(dragged_clip, "effective_length_ms", 0) or 0)
+    others = [c for c in clips if c is not dragged_clip]
+
+    cur_in = int(getattr(dragged_clip, "timeline_in_ms", 0))
+    cur_out = cur_in + length
+    blocked = {cur_in, cur_out}
+    edge_targets: list[tuple[int, str]] = []
+    if 0 not in blocked:
+        edge_targets.append((0, "project start"))
+    for target in extra_snap_targets or ():
+        try:
+            target_ms = int(target)
+        except Exception:
+            continue
+        if target_ms >= 0 and target_ms not in blocked:
+            edge_targets.append((target_ms, "marker/playhead"))
+    for o in others:
+        ti = int(o.timeline_in_ms)
+        to = int(o.timeline_out_ms)
+        if ti not in blocked:
+            edge_targets.append((ti, "clip edge"))
+        if to not in blocked:
+            edge_targets.append((to, "clip edge"))
+
+    best_delta = int(snap_ms) + 1
+    best_pos: int | None = None
+    best_target: int | None = None
+    best_edge = ""
+    best_source = ""
+    desired_out = desired + length
+    for target_ms, source in edge_targets:
+        d_in = abs(int(target_ms) - desired)
+        if d_in < best_delta:
+            best_delta = d_in
+            best_pos = int(target_ms)
+            best_target = int(target_ms)
+            best_edge = "in"
+            best_source = source
+        d_out = abs(int(target_ms) - desired_out)
+        if d_out < best_delta:
+            best_delta = d_out
+            best_pos = max(0, int(target_ms) - length)
+            best_target = int(target_ms)
+            best_edge = "out"
+            best_source = source
+
+    snapped = best_pos is not None and best_delta <= int(snap_ms)
+    if snapped:
+        desired = int(best_pos)
+
+    def _collides(pos: int) -> bool:
+        end = pos + length
+        return any(
+            not (o.timeline_out_ms <= pos or end <= o.timeline_in_ms)
+            for o in others
+        )
+
+    collided = _collides(desired)
+    clamped = False
+    clamp_target: int | None = None
+    if collided:
+        candidates: list[int] = []
+        for o in others:
+            left = max(0, int(o.timeline_in_ms) - length)
+            right = int(o.timeline_out_ms)
+            for cand in (left, right):
+                if not _collides(cand):
+                    candidates.append(cand)
+        if candidates:
+            clamp_target = int(min(candidates, key=lambda c: abs(c - desired)))
+            clamped = clamp_target != desired
+            desired = clamp_target
+        else:
+            clamp_target = int(getattr(dragged_clip, "timeline_in_ms", 0))
+            clamped = clamp_target != desired
+            desired = clamp_target
+
+    return DragConstraintResult(
+        timeline_in_ms=max(0, int(desired)),
+        requested_timeline_in_ms=requested,
+        snapped=bool(snapped),
+        snap_target_ms=best_target if snapped else None,
+        snap_edge=best_edge if snapped else "",
+        snap_source=best_source if snapped else "",
+        collided=bool(collided),
+        clamped=bool(clamped),
+        clamp_target_ms=clamp_target,
+    )
 
 
 def apply_drag_constraints(
@@ -904,12 +1732,14 @@ def apply_drag_constraints(
     desired_timeline_in_ms: int,
     *,
     snap_ms: int = 200,
+    extra_snap_targets: list[int] | tuple[int, ...] | None = None,
 ) -> int:
     """Final ``timeline_in_ms`` for ``dragged_clip`` after applying:
 
     1. **Snap** — if ``desired_timeline_in_ms`` (or the dragged
        clip's resulting *out* edge) is within ``snap_ms`` of another
-       clip's start/end, or of project ms 0, snap exactly to that
+       clip's start/end, project ms 0, or an explicit external target
+       such as the playhead/marker positions, snap exactly to that
        value. Snap targets are evaluated nearest-first; the closest
        wins.
 
@@ -931,84 +1761,13 @@ def apply_drag_constraints(
     default 40 px/sec zoom, which feels sticky-but-not-glued in
     manual testing.
     """
-    desired = max(0, int(desired_timeline_in_ms))
-    length = int(getattr(dragged_clip, "effective_length_ms", 0) or 0)
-    others = [c for c in clips if c is not dragged_clip]
-
-    # 1. SNAP — collect candidate target ms for both edges of the
-    # dragged clip and pick the closest one within tolerance.
-    # IMPORTANT: exclude targets that match the dragged clip's
-    # *current* edges. Otherwise a clip that was just split-out
-    # (sharing a boundary with its neighbour) immediately snaps back
-    # to that shared edge on every micro-drag, making it feel
-    # immovable. Users escape this by dragging >snap_ms in one
-    # gesture, but the perception of "stuck" is worse than the
-    # convenience of the snap.
-    cur_in = int(getattr(dragged_clip, "timeline_in_ms", 0))
-    cur_out = cur_in + length
-    blocked = {cur_in, cur_out}
-    edge_targets: list[int] = []
-    if 0 not in blocked:
-        edge_targets.append(0)  # project start
-    for o in others:
-        ti = int(o.timeline_in_ms)
-        to = int(o.timeline_out_ms)
-        if ti not in blocked:
-            edge_targets.append(ti)
-        if to not in blocked:
-            edge_targets.append(to)
-
-    desired_out = desired + length
-    best_delta = snap_ms + 1
-    best_pos: int | None = None
-    for t in edge_targets:
-        # Snap if either edge of the dragged clip lands close to a
-        # target. We try the *in* edge first (mouse follows the in
-        # edge for left-anchored drags), then the *out* edge.
-        d_in = abs(t - desired)
-        if d_in < best_delta:
-            best_delta = d_in
-            best_pos = t
-        d_out = abs(t - desired_out)
-        if d_out < best_delta:
-            best_delta = d_out
-            # If the OUT edge snaps to ``t``, the IN edge moves to
-            # ``t - length`` (clamped at 0).
-            best_pos = max(0, t - length)
-    if best_pos is not None:
-        desired = best_pos
-        desired_out = desired + length
-
-    # 2. COLLISION — find any clip whose timeline window overlaps the
-    # candidate position and clamp away.
-    def _collides(pos: int) -> bool:
-        end = pos + length
-        return any(
-            not (o.timeline_out_ms <= pos or end <= o.timeline_in_ms)
-            for o in others
-        )
-
-    if _collides(desired):
-        # Walk the obstacle list; for each overlapping clip, compute
-        # the clamp positions on either side and pick the closer one
-        # to ``desired``.
-        candidates: list[int] = []
-        for o in others:
-            # Park the dragged clip flush LEFT of o (out-edge meets o.in)
-            left = max(0, int(o.timeline_in_ms) - length)
-            # Park flush RIGHT of o (in-edge meets o.out)
-            right = int(o.timeline_out_ms)
-            for cand in (left, right):
-                if not _collides(cand):
-                    candidates.append(cand)
-        if candidates:
-            # Pick the candidate closest to the user's desired position.
-            desired = min(candidates, key=lambda c: abs(c - desired))
-        else:
-            # Nowhere fits — keep the dragged clip's current position.
-            desired = int(dragged_clip.timeline_in_ms)
-
-    return max(0, desired)
+    return apply_drag_constraints_detail(
+        clips,
+        dragged_clip,
+        desired_timeline_in_ms,
+        snap_ms=snap_ms,
+        extra_snap_targets=extra_snap_targets,
+    ).timeline_in_ms
 
 
 # ---------------------------------------------------------------------------
@@ -1018,7 +1777,7 @@ def apply_drag_constraints(
 
 def migrate_legacy_video_track(legacy) -> VideoTrack:
     """Build a new ``VideoTrack`` from a legacy
-    ``video_editor_window.VideoTrack`` (single ``source_path`` +
+    ``video_track_legacy.VideoTrack`` (single ``source_path`` +
     ``cuts`` list).
 
     A legacy track with N cut segments produces (N + 1) clips spanning

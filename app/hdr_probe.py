@@ -23,9 +23,10 @@ from __future__ import annotations
 
 import re
 import subprocess
-import sys
 from dataclasses import dataclass
 from pathlib import Path
+
+from app.subprocess_utils import hidden_subprocess_kwargs
 
 
 # Transfer characteristics that indicate HDR content. Matched against
@@ -109,9 +110,7 @@ def probe_hdr(path: Path | str) -> HDRInfo:
             encoding="utf-8",
             errors="replace",
             timeout=_FFMPEG_PROBE_TIMEOUT_S,
-            creationflags=(
-                subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-            ),
+            **hidden_subprocess_kwargs(),
         )
     except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
         return HDRInfo(is_hdr=False)

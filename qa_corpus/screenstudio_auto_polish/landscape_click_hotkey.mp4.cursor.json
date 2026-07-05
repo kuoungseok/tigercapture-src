@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "events": [
+    {"t_ms": 340, "x_norm": 0.18, "y_norm": 0.22, "kind": "click"},
+    {"t_ms": 760, "x_norm": 0.42, "y_norm": 0.44, "kind": "drag"},
+    {"t_ms": 1320, "x_norm": 0.62, "y_norm": 0.54, "kind": "release"},
+    {"t_ms": 2480, "x_norm": 0.72, "y_norm": 0.28, "kind": "hotkey", "label": "Ctrl + S"}
+  ]
+}

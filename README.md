@@ -1,76 +1,133 @@
 # TigerCapture
 
-A Windows screen-capture studio and professional video editor — record a region as a screenshot, GIF, or MP4, then jump into a full editor with **DaVinci-style color grading**, **AI-powered masking**, **node graph effects**, **kinetic typography**, **subtitles**, and a deep **sound editor**.
+**TigerCapture is a local-first Windows creator studio for polished screen recordings, reviewable AI editing, actor overlays, AR/PBR compositing, and alpha VTuber/Broadcast workflows.**
+
+TigerCapture records screenshots, GIFs, and MP4 screen captures, then opens them in a full editor with Screen Studio-style polish, CapCut-style creator assistance, professional color/audio foundations, node-based effects, subtitles, render queue delivery, Live2D/Spine/MMD actor tracks, AR/PBR 3D object compositing, and VTuber/Broadcast Program Output foundations.
+
+Korean: TigerCapture는 화면 녹화, 자동 줌/커서 연출, 로컬 AI 쇼츠 제작 보조, Live2D/Spine 캐릭터 합성을 한 번에 처리하는 Windows 크리에이터 편집기입니다.
 
 **Made by** [artmouse (KyoungSeok Ko)](https://github.com/kuoungseok)
 
 ---
 
-## What's new in v1.4.0
+## Current Product Focus
 
-- **DaVinci-style Color Page** — 4-wheel color grading panel with luma arc, hue ring, and interactive luminance dial; opens above the timeline when a Color node is selected
-- **Node Graph** — non-destructive effects chain (Color → Blur → Out), with per-node thumbnails, parallel mixer, and Bezier connections
-- **AI Masking** — SAM (Segment Anything) click-to-mask, GrabCut rotoscope, CSRT object tracker, Power Window, Qualifier
-- **Performance** — background PrefetchDecoder thread (near-zero read latency), 720p preview downscale, DXVA2 hardware decode hint
-- **New Project dialog** — choose aspect ratio (16:9 / 9:16 Shorts / 1:1 / 4:3 / 21:9), resolution, and FPS upfront
-- **Video filters** — sharpen, vignette, denoise, chromatic aberration, glitch
-- **Chroma key** — green/blue screen removal with spill suppression
-- **Video stabilization** — LK optical flow
-- **AI Background Removal** — MediaPipe selfie segmentation / rembg
-- **Speed Ramp** — Bezier easing between speed segments
-- **Batch export** — marker-based segment export queue
-- **Audio Mixer** — VU meters, per-track pan (export), LUFS metering
-- **Project save/load** — `.tgp` JSON format preserves full session state
-- **UI Polish** — Segoe UI Variable font, consistent section headers, DaVinci-inspired dark theme
+TigerCapture is designed for creators who need more than a recorder, but do not want a heavy broadcast/post-production suite for every screen video.
+
+| Focus | What it means |
+|---|---|
+| **Polished screen recordings** | Record or import a screen video, apply Auto Polish, add cursor/click/hotkey emphasis, trim, and export. |
+| **Reviewable AI editing** | Use Creator Assist and Script Edit to plan captions, cleanup edits, short ranges, vertical reframes, render jobs, publish copy, and platform variants before safe apply. |
+| **Local-first workflow** | Local OpenCV/Pillow analysis is enabled by default; optional Whisper, SAM, Demucs, ONNX Runtime, and Ultralytics are detected locally. No cloud API is required by the core workflow and models are not auto-downloaded. |
+| **Actor and VTuber overlays** | Add Live2D, Spine/NIKKE, MMD, and VRM/VSeeFace-oriented actor workflows as timeline tracks or Program Output sources, then preview and bake supported outputs. |
+| **AR/PBR compositing** | Place 3D object tracks with material, HDR environment, shadow/reflection, and preview/export parity diagnostics without claiming to replace a full 3D DCC or game engine. |
+| **Creator-grade post tools** | Color management, LUTs, advanced color payloads, audio routing/loudness helpers, masks, rotoscope, keying, and render diagnostics are exposed without hiding the fast screen-recording path. |
+| **Measured performance path** | Preview/cache bottlenecks are profiled first, then moved selectively into OpenCV, OpenGL, FFmpeg, proxy, or the optional Rust worker path. |
 
 ---
 
-## Features
+## Highlights
 
-### Screen Capture
-- **Three capture modes** — Screenshot, GIF, MP4
-- Windows Graphics Capture (WGC) for GPU-composited windows
-- MP4 streaming encode via ffmpeg pipe
-- Cursor overlay, countdown, recording border indicator
+### Screen Recording and Auto Polish
 
-### Pro Video Editor
+- Screenshot, GIF, and MP4 capture modes.
+- Windows Graphics Capture support for GPU-composited windows.
+- Clean screen video plates with separate cursor sidecar metadata.
+- Auto Polish for cursor smoothing, scaling, static-cursor hiding, click rings, release feedback, drag trails, hotkey badges, wallpaper padding, rounded screen corners, and shadow framing.
+- Auto Zoom generation from cursor samples, clicks, dwell points, and long-recording rhythm.
+- Editable zoom candidates with crop overrides, easing styles, motion blur intent, and timeline `ZoomActor` output.
+- Simple Mode for the record/import -> polish -> trim -> export workflow while keeping Media Pool and Workbench available.
+- Screen Studio-style export handoff with readiness summaries and local share manifests.
 
-Multi-track timeline with a professional editing workflow:
+### Creator Assist
+
+- Right-dock Creator Assist panel inside the main editor.
+- Bottom `AI Command` dock for prompt-first edit planning, with a full Script Edit
+  review panel when the user wants to inspect and selectively apply operations.
+- Local media analysis for subject detection, scene ranges, tags, and smart media summaries.
+- Auto-caption styling and Subtitle-compatible caption rows.
+- Long-video-to-Shorts candidate planning.
+- Subject-aware vertical reframe keyframes.
+- Hook score plan, caption beat plan, title suggestions, hashtags, thumbnail-frame choices, and publish checklist rows.
+- Multi-platform publish variants for Shorts, TikTok, and Reels style outputs.
+- Partial apply toggles for subtitles, short markers, export/reframe settings, and render-queue staging.
+- Render Queue handoff without opening the batch-export folder dialog.
+- Safe AI edit-plan boundary: deterministic local rule planning by default,
+  optional local/agent provider readiness, validation before mutation, and
+  registered-command automation/MCP surfaces instead of arbitrary code execution.
+
+### Timeline and Editing
 
 | Feature | Details |
 |---|---|
-| **Timeline editing** | Cut (B/C), Ripple trim, Roll edit, Speed segments, Fades, Markers |
-| **Color grading** | 4-wheel (Lift/Gamma/Gain/Offset) + luma arc + node graph chain |
-| **Node graph** | Color nodes, Blur nodes, Parallel mixer, Per-node masks |
-| **AI masking** | SAM click-to-mask, Power Window, HSL Qualifier, Face/Body tracker |
-| **Effects** | Blur (bokeh/hexagon/gaussian), Sharpen, Vignette, Chroma key, Stabilizer |
-| **PIP** | Picture-in-Picture with keyframe animation |
-| **Typography** | 80+ kinetic animations, speech bubbles, stickers |
-| **Subtitles** | Timeline lane with AI auto-captions (Whisper) |
-| **Export** | MP4 / WebM / MOV, 4K/1080p/720p/9:16/1:1, HDR10 passthrough |
+| **Timeline editing** | Cut, split, duplicate, ripple/roll/slip/slide style operations, fades, markers, speed segments, and zoom actors. |
+| **Media Pool** | Import, thumbnailing, proxy/health state, relink support, actor QA badges, preset/template browsing. |
+| **Workbench** | Node graph effects, masks, clip FX stack, metadata, and contextual inspector workflows. |
+| **Presets/Templates** | Effect, title, transition, caption, sticker, motion, color, audio, actor, Screen Studio-style, and CapCut-style workflow presets. |
+| **Render Queue** | Persistent queue, retry/cancel/history, diagnostics, render failure assistant, delivery presets, and export readiness checks. |
+| **Project format** | `.tgp` project save/load with timeline, subtitles, markers, project settings, actor tracks, and workflow sidecars. |
 
-### DaVinci-style Color Grading
+### Actor, VTuber, and AR/PBR Tracks
 
-- **4 color wheels** — Lift (Shadows), Gamma (Midtones), Gain (Highlights), Offset
-- **Luma arc** — drag the outer ring on each wheel to adjust luminosity
-- **Node graph** — non-destructive chain evaluated per-frame
-- **Scopes** — Waveform, Vectorscope, Parade, Histogram (in color page)
-- **Color page** — full-screen DaVinci-style layout (🎨 button)
-- **LUT support** — .cube file loading with strength slider
-- **8 presets** — Cinematic, Vintage, Cool, Warm, Faded, B&W, Punch, Mute
+- Live2D and Spine clips live on dedicated actor tracks instead of normal video clips.
+- Drag/click actions can add actor clips to the timeline.
+- Double-clicking an actor clip opens the bound actor editor.
+- Spine/NIKKE support covers JSON and binary `.skel` parsing, atlas dependencies, weighted/linked mesh risks, clipping, constraints, multi-page atlases, skins, slots, and animation sweeps.
+- Live2D support covers `.model3.json`, moc/texture dependency checks, non-ASCII runtime path handling, expressions, motions, physics/pose/display metadata, and render QA.
+- MMD support covers PMX/PMD actor tracks, VMD motion workflow, toon preview/export paths, and local corpus QA; it does not claim native MMD/Bullet parity or universal PMX compatibility.
+- AR/PBR object workflows cover GLB/FBX-style intake, material/environment payloads, GPU/packet/software preview-export paths, and HDR/shadow/reflection diagnostics.
+- VTuber/Broadcast workflows expose Program Output recording/RTMP foundations, an optional OBS bridge, and VRM/VSeeFace bridge diagnostics as alpha/beta capabilities.
+- Actor overlays are baked into final videos as transparent overlays.
+- Local corpus QA validates actor sample sets and top-risk golden baselines on the development workstation, but public copy must stay tied to current QA evidence.
 
-### Sound Editor
+### Color, Audio, and VFX/Post Foundations
 
-- **AI Master** — one-click presets for Suno v3/v4, Udio, ACE-Step AI music
-- **Dynamics** — EQ, Compressor, Gate, De-esser, Reverb, Delay
-- **Audio mixer** — Per-track volume/pan, VU meters, LUFS display
-- **Waveform visualization** — stereo waveform + spectrum per clip
+TigerCapture is not a full Resolve/Fairlight/Fusion replacement, but it now tracks partial professional post-production coverage through Health and Professional Readiness diagnostics.
 
-### Kinetic Typography
+| Area | Current capability |
+|---|---|
+| **Color management** | Rec.709, sRGB, Rec.2020 HDR PQ/HLG, P3-D65, ACEScg/ACEScct intent, optional OCIO config path, input/creative/output LUT slots, FFmpeg color metadata, and export consistency checks. |
+| **Advanced color** | HDR-zone controls, log-wheel offsets, Hue vs Hue/Sat/Luma curves, Color Warper payloads, qualifier/window masks, grade-local LUTs, and preview/export RGB bake path. |
+| **Scopes and QA** | Waveform, vectorscope, parade, histogram, luma IRE, HDR nits estimate, clipping, gamut risk, skin-tone diagnostics, and ffprobe color metadata comparison. |
+| **Audio workflow** | Timeline audio lanes, Sound Editor, AI Master presets, vocal/music separation with Demucs or FFmpeg mid/side fallback, LUFS display, true-peak/stereo warnings, routing payloads, sends, and loudness delivery checks. |
+| **Masks/VFX repair** | SAM click-to-mask, GrabCut, arbitrary-region CSRT tracking, HSL qualifier, power windows, B-spline roto payloads, clean-plate bounds, planar-tracker intent, chroma key, stabilization, and background removal. |
+| **Professional readiness** | Health and export preflight report long-project stability, GPU preview/export consistency, timeline integrity, color workflow depth, audio mix readiness, preset/template health, and Resolve/Fairlight/Fusion parity gaps. |
 
-- 80+ kinetic animations (Basic / Kinetic / Folding / HOLD)
-- IN × HOLD × OUT × modifier stacking
-- 12 curated presets for J-MV / K-pop aesthetics
+### Export and QA
+
+- MP4, WebM, and MOV export paths.
+- 1080p, 4K, vertical, square, and roundtrip-style delivery presets.
+- HDR10 passthrough path for supported exports.
+- Raw pre-render fallback for preview-only effects that cannot be expressed safely in FFmpeg.
+- Preview/export parity coverage for node graphs, masks, tracked masks, clip effects, nested sequences, typography, Spine, Live2D, chroma key, background removal, stabilizer, audio tracks, and color metadata.
+- Color/Audio accuracy QA for LUT metadata, scopes, LUFS, true peak, stereo correlation, and dialogue cleanup.
+- Actor compatibility/render QA for Live2D and Spine resources.
+- Crash recovery, autosave, relink, startup trace, and product QA dashboard support.
+
+### Performance, Health, and Native Worker
+
+- Health Center summarizes crash status, QA failures, render queue failures/cancellations, current project media/proxy issues, and actor QA risk rows.
+- Project QA / Professional Readiness reports long-project stability, GPU preview/export consistency, timeline integrity, color workflow depth, audio mix readiness, preset/template health, and advisory Resolve/Fairlight/Fusion parity scores.
+- High-resolution proxy management is visible in the editor toolbar, with Original/Building/Ready/Stale/Active states and Media Pool proxy badges.
+- Preview performance uses measured fast paths: OpenCV-native chroma key operations, optimized video filters, frame-cache decoding, GL/native Spine rendering, preview downsample paths, and optional FFmpeg frame-server comparison.
+- Current preview evidence is split intentionally: `debugCapture/preview_perf_report.json` supports measured steady playback/performance work, and `debugCapture/preview_scrub_readiness_qa.json` now supports current-corpus scrub readiness under strict clean-cache measurement. Universal no-latency claims across every codec, machine, and project remain out of scope.
+- The optional Rust worker in `native/tigercapture_worker` uses a JSON-lines protocol and can handle media probing, timeline thumbnails, audio waveform, and audio spectrum generation.
+- Python/OpenCV/FFmpeg paths remain the fallback when the native worker is missing, incompatible, or disabled.
+
+---
+
+## Competitive Position
+
+TigerCapture is not trying to replace every professional editor. Its strongest position is the intersection of polished screen recording, local creator assistance, and actor overlays.
+
+| Compared with | TigerCapture position |
+|---|---|
+| **Screen Studio** | Similar polish direction, but Windows-first and deeper timeline/actor/local workflow. Screen Studio remains simpler and more product-finished. |
+| **CapCut** | Creator Assist covers captions, Shorts planning, vertical reframe, publish packages, and render handoff. CapCut still wins on huge social/template/AI ecosystem scale. |
+| **Camtasia** | Strong overlap for tutorials and product demos. TigerCapture adds local ML planning and Live2D/Spine overlays; Camtasia still has mature education/business trust. |
+| **Descript** | TigerCapture is stronger visually and on actor/screen workflows. Descript still dominates text-based editing and magic-feeling AI; TigerCapture's current AI position is reviewable, local/safe planning. |
+| **OBS** | OBS is stronger for live streaming and scene production. TigerCapture is stronger after recording: polish, edit, export, and compositing. |
+| **Premiere/Resolve** | TigerCapture has partial professional post foundations, but Premiere and Resolve remain far deeper for full NLE, color, audio, VFX, collaboration, and hardware ecosystems. |
 
 ---
 
@@ -78,44 +135,55 @@ Multi-track timeline with a professional editing workflow:
 
 | Layer | Technology |
 |---|---|
-| UI | PySide6 (Qt 6), OpenGL preview |
-| Video decode | cv2 + PrefetchDecoder thread, ffmpeg HDR tonemap |
-| Color grading | CPU numpy pipeline + OpenGL shader passthrough |
-| AI masking | SAM (facebook/segment-anything), MediaPipe, OpenCV |
-| Audio | Qt QMediaPlayer + ffmpeg filter graph |
-| Export | ffmpeg subprocess with concat demuxer |
-| Packaging | PyInstaller |
+| UI | PySide6 / Qt 6, Fusion style, OpenGL preview |
+| Capture | Windows Graphics Capture, ffmpeg pipe encoding |
+| Preview | OpenCV, NumPy, PySide6, OpenGL paths, prefetch/proxy/frame-server options |
+| Export | FFmpeg subprocess, raw pre-render fallback for parity-sensitive effects |
+| Color | CPU RGB pipeline, LUTs, optional PyOpenColorIO bridge, FFmpeg color metadata |
+| Audio | Qt playback, FFmpeg audio graph, LUFS/true-peak helpers, Demucs optional |
+| Local ML | OpenCV/Pillow baseline analysis, optional Whisper/SAM/Demucs/ONNX/Ultralytics |
+| Actors | In-app Live2D runtime path, Spine parser/renderers, OpenGL/software fallback |
+| Native worker | Optional Rust JSON-lines subprocess for probing, thumbnails, waveform, and spectrum generation |
+| Packaging | PyInstaller, Windows installer scripts |
 
 ---
 
 ## Requirements
 
-- Windows 10 / 11 (64-bit)
-- NVIDIA GPU recommended (DXVA2 hardware decode)
-- Python 3.11+ (for source build)
+- Windows 10 / 11, 64-bit.
+- Python 3.11+ when running from source.
+- FFmpeg available through the packaged app or development environment.
+- GPU recommended for smoother preview, OpenGL actor rendering, and larger projects.
+- Optional local tools/models for advanced AI workflows: Whisper, SAM, Demucs, ONNX Runtime, Ultralytics, MediaPipe/rembg depending on feature use.
 
 ---
 
 ## Installation
 
-Download the latest release from [Releases](https://github.com/kuoungseok/tigercapture/releases) and extract `TigerCapture-vX.X.X-windows.zip`. Run `TigerCapture.exe` — no installation required.
+Download the latest public Windows build from [Releases](https://github.com/kuoungseok/tigercapture/releases), then run the packaged executable or installer.
+
+Source code is private. Public release pages should provide binaries/installers and documentation, not source archives.
 
 ---
 
-## Building from source
+## Development Notes
 
-```bash
-git clone https://github.com/kuoungseok/tigercapture.git
-cd tigercapture
-python -m venv .venv
-.venv\Scripts\activate
-pip install -r requirements.txt
-python main.py                          # run from source
-pyinstaller TigerCapture.spec --clean   # build exe
-```
+The source tree is private. Public users should install TigerCapture from the released Windows installer or packaged executable.
+
+For private development builds, the project can be run with the local Python environment and helper batch files in the repository root.
+
+Studio-wide AI/MCP automation is planned around a registered Python Action
+System, not arbitrary Python execution. The design target and action catalog are
+tracked in `docs/SPEC_PYTHON_ACTION_SYSTEM.md`.
+
+---
+
+## Building
+
+Private release builds use PyInstaller plus the Windows installer scripts in this repository, including the optional native worker when available. Release builds should be validated with project QA, professional readiness, export parity, actor corpus, Screen Studio polish, and color/audio checks before publishing.
 
 ---
 
 ## License
 
-All rights reserved. Source code is private. Binaries are provided for personal use.
+All rights reserved. Source code is private. Binaries are provided for personal use unless a separate license says otherwise.

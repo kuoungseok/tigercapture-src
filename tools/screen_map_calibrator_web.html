@@ -1,0 +1,776 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TigerCapture Screen Map Calibrator</title>
+  <style>
+    :root {
+      color-scheme: dark;
+      --bg: #0c1015;
+      --panel: #121821;
+      --panel-2: #171f2a;
+      --line: #2c3847;
+      --text: #e7edf6;
+      --muted: #8d99aa;
+      --cyan: #28e7ff;
+      --green: #5bffcb;
+      --amber: #ffc36a;
+      --danger: #ff6d65;
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      height: 100vh;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font: 13px/1.45 "Inter", "Segoe UI", Arial, sans-serif;
+    }
+
+    .app {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 360px;
+      height: 100vh;
+    }
+
+    .stage {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--line);
+    }
+
+    .topbar {
+      height: 48px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 0 14px;
+      border-bottom: 1px solid var(--line);
+      background: linear-gradient(180deg, #121821, #0f141b);
+    }
+
+    .title {
+      font-weight: 650;
+      letter-spacing: 0.02em;
+      margin-right: auto;
+    }
+
+    button, select, input {
+      font: inherit;
+      color: var(--text);
+    }
+
+    button {
+      border: 1px solid #344355;
+      background: linear-gradient(180deg, #202a36, #141b24);
+      border-radius: 9px;
+      padding: 8px 11px;
+      cursor: pointer;
+    }
+
+    button:hover { border-color: #52657c; background: #222d3a; }
+    button.primary { border-color: #3d918e; background: linear-gradient(180deg, #24635f, #173f40); }
+    button.danger { border-color: #7c3b3b; background: linear-gradient(180deg, #4c2326, #2b1719); }
+
+    .canvas-wrap {
+      flex: 1;
+      overflow: auto;
+      position: relative;
+      background:
+        radial-gradient(circle at 50% 30%, rgba(255,255,255,.04), transparent 36%),
+        #07090c;
+    }
+
+    canvas {
+      display: block;
+      margin: 28px;
+      image-rendering: auto;
+      box-shadow: 0 18px 70px rgba(0, 0, 0, .45);
+      border: 1px solid rgba(255, 255, 255, .08);
+    }
+
+    .side {
+      min-width: 0;
+      background: var(--panel);
+      overflow: auto;
+      padding: 14px;
+    }
+
+    .section {
+      border: 1px solid var(--line);
+      background: linear-gradient(180deg, rgba(255,255,255,.025), rgba(0,0,0,.05));
+      border-radius: 10px;
+      padding: 12px;
+      margin-bottom: 12px;
+    }
+
+    .section h2 {
+      margin: 0 0 10px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: .08em;
+      color: #dfe7f2;
+    }
+
+    .regions {
+      display: grid;
+      gap: 6px;
+    }
+
+    .region {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      border: 1px solid #293545;
+      border-radius: 8px;
+      background: #0d1219;
+      padding: 8px 10px;
+      cursor: pointer;
+    }
+
+    .region.active {
+      border-color: var(--cyan);
+      box-shadow: 0 0 0 1px rgba(40,231,255,.18) inset;
+    }
+
+    .chip {
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      display: inline-block;
+      margin-right: 8px;
+      box-shadow: 0 0 12px currentColor;
+      vertical-align: -1px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    label {
+      display: grid;
+      gap: 4px;
+      color: var(--muted);
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: .05em;
+    }
+
+    input[type="number"], input[type="text"] {
+      width: 100%;
+      border: 1px solid #344355;
+      background: #0d1219;
+      border-radius: 8px;
+      padding: 8px 9px;
+      outline: none;
+    }
+
+    input[type="number"]:focus, input[type="text"]:focus {
+      border-color: var(--cyan);
+      box-shadow: 0 0 0 2px rgba(40,231,255,.12);
+    }
+
+    input[type="range"] { width: 100%; }
+
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .row > button { flex: 1; min-width: 72px; }
+
+    .path {
+      color: #9faabc;
+      word-break: break-all;
+      font-size: 11px;
+      background: #0b1017;
+      border: 1px solid #263241;
+      border-radius: 8px;
+      padding: 8px;
+    }
+
+    .status {
+      min-height: 22px;
+      color: #b6c3d2;
+      font-size: 12px;
+    }
+
+    .help {
+      color: #8996a8;
+      font-size: 12px;
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <main class="stage">
+      <div class="topbar">
+        <div class="title">TigerCapture Screen Map Calibrator</div>
+        <button id="fitBtn">Fit</button>
+        <button id="actualBtn">100%</button>
+        <button id="panBtn">Pan</button>
+        <button id="saveBtn" class="primary">Save JSON</button>
+      </div>
+      <div class="canvas-wrap" id="canvasWrap">
+        <canvas id="canvas"></canvas>
+      </div>
+    </main>
+
+    <aside class="side">
+      <div class="section">
+        <h2>Regions</h2>
+        <div id="regions" class="regions"></div>
+      </div>
+
+      <div class="section">
+        <h2>Selected Rect</h2>
+        <div class="grid">
+          <label>x <input id="xInput" type="number" step="1"></label>
+          <label>y <input id="yInput" type="number" step="1"></label>
+          <label>width <input id="wInput" type="number" min="1" step="1"></label>
+          <label>height <input id="hInput" type="number" min="1" step="1"></label>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Nudge</h2>
+        <div class="row">
+          <button data-nudge="-1,0">Left</button>
+          <button data-nudge="1,0">Right</button>
+          <button data-nudge="0,-1">Up</button>
+          <button data-nudge="0,1">Down</button>
+        </div>
+        <div class="row" style="margin-top:8px">
+          <button data-size="-1,0">W-</button>
+          <button data-size="1,0">W+</button>
+          <button data-size="0,-1">H-</button>
+          <button data-size="0,1">H+</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Preview</h2>
+        <label>Zoom <input id="zoomInput" type="range" min="25" max="500" value="100"></label>
+        <label>Overlay opacity <input id="opacityInput" type="range" min="0" max="100" value="22"></label>
+        <div class="row" style="margin-top:10px">
+          <button id="toggleFillBtn">Fill Preview</button>
+          <button id="exportBtn">Export PNG</button>
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Files</h2>
+        <div class="help">Template</div>
+        <div id="templatePath" class="path"></div>
+        <div class="help" style="margin-top:8px">Screen map</div>
+        <div id="mapPath" class="path"></div>
+      </div>
+
+      <div class="section">
+        <h2>Keys</h2>
+        <div class="help">
+          Drag selected region. Toggle Pan or hold Space to move the zoomed view.
+          Middle mouse drag also pans. Arrow keys move 1px. Shift+arrow moves 10px.
+          Drag corners or edges to resize. Save writes the local JSON file.
+        </div>
+      </div>
+
+      <div id="status" class="status"></div>
+    </aside>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("canvas");
+    const ctx = canvas.getContext("2d");
+    const wrap = document.getElementById("canvasWrap");
+    const regionsEl = document.getElementById("regions");
+    const statusEl = document.getElementById("status");
+
+    const inputs = {
+      x: document.getElementById("xInput"),
+      y: document.getElementById("yInput"),
+      width: document.getElementById("wInput"),
+      height: document.getElementById("hInput"),
+      zoom: document.getElementById("zoomInput"),
+      opacity: document.getElementById("opacityInput"),
+    };
+
+    let image = new Image();
+    let state = null;
+    let selectedId = null;
+    let zoom = 1;
+    let fillPreview = false;
+    let panMode = false;
+    let spaceDown = false;
+    let panning = null;
+    let dragging = null;
+    let lastPointer = null;
+
+    const colors = {
+      left_monitor: "#46d8ff",
+      center_monitor: "#2fffd8",
+      right_monitor: "#a6ff65",
+      laptop_screen: "#b78cff",
+      ipad_screen: "#ffbd5e",
+    };
+
+    function setStatus(message) {
+      statusEl.textContent = message;
+      if (message) setTimeout(() => {
+        if (statusEl.textContent === message) statusEl.textContent = "";
+      }, 4500);
+    }
+
+    async function loadState() {
+      if (window.__SCREEN_MAP_STANDALONE__) {
+        state = window.__SCREEN_MAP_STANDALONE__.state;
+        selectedId = state.screen_regions[0]?.id || null;
+        document.getElementById("templatePath").textContent = state.template_path || state.template || "(embedded template)";
+        document.getElementById("mapPath").textContent = state.screen_map_path || "(download-only standalone)";
+        image = new Image();
+        image.onload = () => {
+          fitToView();
+          renderRegions();
+          syncInputs();
+          draw();
+        };
+        image.src = window.__SCREEN_MAP_STANDALONE__.image_data_url;
+        return;
+      }
+      const response = await fetch("/api/state");
+      state = await response.json();
+      selectedId = state.screen_regions[0]?.id || null;
+      document.getElementById("templatePath").textContent = state.template_path;
+      document.getElementById("mapPath").textContent = state.screen_map_path;
+      image = new Image();
+      image.onload = () => {
+        fitToView();
+        renderRegions();
+        syncInputs();
+        draw();
+      };
+      image.src = "/image?cache=" + Date.now();
+    }
+
+    function selectedRegion() {
+      return state?.screen_regions.find(r => r.id === selectedId) || null;
+    }
+
+    function rectOf(region) {
+      return region.rect || { x: 0, y: 0, width: 1, height: 1 };
+    }
+
+    function renderRegions() {
+      regionsEl.innerHTML = "";
+      for (const region of state.screen_regions) {
+        const item = document.createElement("div");
+        item.className = "region" + (region.id === selectedId ? " active" : "");
+        item.innerHTML = `<span><span class="chip" style="color:${colors[region.id] || "#28e7ff"}; background: currentColor"></span>${region.id}</span><span>${rectOf(region).width}x${rectOf(region).height}</span>`;
+        item.onclick = () => {
+          selectedId = region.id;
+          renderRegions();
+          syncInputs();
+          draw();
+        };
+        regionsEl.appendChild(item);
+      }
+    }
+
+    function syncInputs() {
+      const region = selectedRegion();
+      if (!region) return;
+      const rect = rectOf(region);
+      inputs.x.value = Math.round(rect.x);
+      inputs.y.value = Math.round(rect.y);
+      inputs.width.value = Math.round(rect.width);
+      inputs.height.value = Math.round(rect.height);
+    }
+
+    function applyInputs() {
+      const region = selectedRegion();
+      if (!region) return;
+      region.rect = {
+        x: Number(inputs.x.value),
+        y: Number(inputs.y.value),
+        width: Math.max(1, Number(inputs.width.value)),
+        height: Math.max(1, Number(inputs.height.value)),
+      };
+      renderRegions();
+      draw();
+    }
+
+    function setCanvasScale(value) {
+      zoom = value / 100;
+      canvas.width = Math.round(image.naturalWidth * zoom);
+      canvas.height = Math.round(image.naturalHeight * zoom);
+      inputs.zoom.value = value;
+      draw();
+    }
+
+    function fitToView() {
+      const pad = 80;
+      const zx = Math.max(0.1, (wrap.clientWidth - pad) / image.naturalWidth);
+      const zy = Math.max(0.1, (wrap.clientHeight - pad) / image.naturalHeight);
+      setCanvasScale(Math.floor(Math.min(zx, zy) * 100));
+    }
+
+    function imageToCanvas(rect) {
+      return {
+        x: rect.x * zoom,
+        y: rect.y * zoom,
+        width: rect.width * zoom,
+        height: rect.height * zoom,
+      };
+    }
+
+    function canvasToImagePoint(event) {
+      const bounds = canvas.getBoundingClientRect();
+      return {
+        x: (event.clientX - bounds.left) / zoom,
+        y: (event.clientY - bounds.top) / zoom,
+      };
+    }
+
+    function draw() {
+      if (!state || !image.naturalWidth) return;
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+      const opacity = Number(inputs.opacity.value) / 100;
+      for (const region of state.screen_regions) {
+        const rect = imageToCanvas(rectOf(region));
+        const color = colors[region.id] || "#28e7ff";
+        ctx.save();
+        ctx.lineWidth = region.id === selectedId ? 3 : 2;
+        ctx.strokeStyle = region.id === selectedId ? "#ffffff" : color;
+        ctx.fillStyle = fillPreview ? "rgba(2, 8, 14, 0.82)" : hexToRgba(color, opacity);
+        ctx.fillRect(rect.x, rect.y, rect.width, rect.height);
+        ctx.strokeRect(rect.x, rect.y, rect.width, rect.height);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1;
+        ctx.strokeRect(rect.x + 2, rect.y + 2, rect.width - 4, rect.height - 4);
+        ctx.fillStyle = color;
+        ctx.font = `${Math.max(12, 14 * zoom)}px Segoe UI, Arial`;
+        ctx.shadowColor = "#001018";
+        ctx.shadowBlur = 4;
+        ctx.fillText(region.id, rect.x + 10, rect.y + 22);
+        if (region.id === selectedId) drawHandles(rect);
+        ctx.restore();
+      }
+    }
+
+    function updateCanvasCursor() {
+      if (panning) {
+        canvas.style.cursor = "grabbing";
+      } else if (panMode || spaceDown) {
+        canvas.style.cursor = "grab";
+      } else {
+        canvas.style.cursor = "default";
+      }
+    }
+
+    function drawHandles(rect) {
+      const size = 8;
+      ctx.fillStyle = "#ffffff";
+      for (const p of handlePoints(rect)) {
+        ctx.fillRect(p.x - size / 2, p.y - size / 2, size, size);
+      }
+    }
+
+    function handlePoints(rect) {
+      const x1 = rect.x, x2 = rect.x + rect.width, xm = rect.x + rect.width / 2;
+      const y1 = rect.y, y2 = rect.y + rect.height, ym = rect.y + rect.height / 2;
+      return [
+        { name: "nw", x: x1, y: y1 }, { name: "n", x: xm, y: y1 }, { name: "ne", x: x2, y: y1 },
+        { name: "w", x: x1, y: ym }, { name: "e", x: x2, y: ym },
+        { name: "sw", x: x1, y: y2 }, { name: "s", x: xm, y: y2 }, { name: "se", x: x2, y: y2 },
+      ];
+    }
+
+    function hitTest(point) {
+      const region = selectedRegion();
+      if (!region) return null;
+      const rect = rectOf(region);
+      const cRect = imageToCanvas(rect);
+      const cp = { x: point.x * zoom, y: point.y * zoom };
+      for (const h of handlePoints(cRect)) {
+        if (Math.abs(cp.x - h.x) <= 8 && Math.abs(cp.y - h.y) <= 8) return { type: "resize", handle: h.name };
+      }
+      if (point.x >= rect.x && point.x <= rect.x + rect.width && point.y >= rect.y && point.y <= rect.y + rect.height) {
+        return { type: "move" };
+      }
+      for (const candidate of [...state.screen_regions].reverse()) {
+        const r = rectOf(candidate);
+        if (point.x >= r.x && point.x <= r.x + r.width && point.y >= r.y && point.y <= r.y + r.height) {
+          selectedId = candidate.id;
+          renderRegions();
+          syncInputs();
+          return { type: "move" };
+        }
+      }
+      return null;
+    }
+
+    function updateDrag(point) {
+      const region = selectedRegion();
+      if (!region || !dragging || !lastPointer) return;
+      const dx = point.x - lastPointer.x;
+      const dy = point.y - lastPointer.y;
+      const r = rectOf(region);
+      if (dragging.type === "move") {
+        r.x += dx;
+        r.y += dy;
+      } else {
+        resizeRect(r, dragging.handle, dx, dy);
+      }
+      region.rect = normalizeRect(r);
+      lastPointer = point;
+      syncInputs();
+      renderRegions();
+      draw();
+    }
+
+    function resizeRect(r, handle, dx, dy) {
+      if (handle.includes("w")) { r.x += dx; r.width -= dx; }
+      if (handle.includes("e")) { r.width += dx; }
+      if (handle.includes("n")) { r.y += dy; r.height -= dy; }
+      if (handle.includes("s")) { r.height += dy; }
+    }
+
+    function normalizeRect(r) {
+      if (r.width < 1) { r.x += r.width - 1; r.width = 1; }
+      if (r.height < 1) { r.y += r.height - 1; r.height = 1; }
+      return {
+        x: Math.round(r.x),
+        y: Math.round(r.y),
+        width: Math.round(r.width),
+        height: Math.round(r.height),
+      };
+    }
+
+    function nudge(dx, dy) {
+      const region = selectedRegion();
+      if (!region) return;
+      const r = rectOf(region);
+      r.x += dx; r.y += dy;
+      region.rect = normalizeRect(r);
+      syncInputs(); renderRegions(); draw();
+    }
+
+    function resizeSelected(dw, dh) {
+      const region = selectedRegion();
+      if (!region) return;
+      const r = rectOf(region);
+      r.width += dw; r.height += dh;
+      region.rect = normalizeRect(r);
+      syncInputs(); renderRegions(); draw();
+    }
+
+    function hexToRgba(hex, alpha) {
+      const v = hex.replace("#", "");
+      const r = parseInt(v.slice(0, 2), 16);
+      const g = parseInt(v.slice(2, 4), 16);
+      const b = parseInt(v.slice(4, 6), 16);
+      return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    async function save() {
+      if (window.__SCREEN_MAP_STANDALONE__) {
+        const payload = buildScreenMapPayload();
+        const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+        const link = document.createElement("a");
+        link.href = URL.createObjectURL(blob);
+        link.download = (state.template || "template").replace(/\.[^.]+$/, "") + ".screen-map.json";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setStatus("Standalone mode: downloaded JSON. Replace the local screen-map with it.");
+        return;
+      }
+      const payload = {
+        screen_regions: state.screen_regions,
+      };
+      const response = await fetch("/api/save", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Save failed");
+      setStatus("Saved: " + result.path);
+    }
+
+    async function exportPreview() {
+      const data_url = canvas.toDataURL("image/png");
+      if (window.__SCREEN_MAP_STANDALONE__) {
+        const link = document.createElement("a");
+        link.href = data_url;
+        link.download = (state.template || "template").replace(/\.[^.]+$/, "") + "_calibration_preview.png";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        setStatus("Standalone mode: downloaded preview PNG.");
+        return;
+      }
+      const response = await fetch("/api/export-preview", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ data_url }),
+      });
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || "Export failed");
+      setStatus("Exported: " + result.path);
+    }
+
+    function buildScreenMapPayload() {
+      const regions = state.screen_regions.map(region => ({
+        id: region.id,
+        rect: {
+          x: Math.round(rectOf(region).x),
+          y: Math.round(rectOf(region).y),
+          width: Math.round(rectOf(region).width),
+          height: Math.round(rectOf(region).height),
+        },
+        fit: region.fit || "cover",
+        mapping: region.mapping || "rect",
+        notes: region.notes || "",
+      }));
+      return {
+        schema: "tiger.review.template.screen_map.calibrated.v1",
+        template: state.template,
+        image_size: state.image_size,
+        screen_regions: regions,
+        regions: Object.fromEntries(regions.map(region => [region.id, {
+          rect: region.rect,
+          fit: region.fit,
+          mapping: region.mapping,
+          notes: region.notes,
+        }])),
+        rules: [
+          "Generated by standalone screen_map_calibrator_web.html.",
+          "Replace only declared screen regions with real TigerCapture captures.",
+          "Do not distort template hardware.",
+        ],
+      };
+    }
+
+    canvas.addEventListener("pointerdown", event => {
+      canvas.setPointerCapture(event.pointerId);
+      if (panMode || spaceDown || event.button === 1) {
+        panning = {
+          x: event.clientX,
+          y: event.clientY,
+          scrollLeft: wrap.scrollLeft,
+          scrollTop: wrap.scrollTop,
+        };
+        updateCanvasCursor();
+        event.preventDefault();
+        return;
+      }
+      const point = canvasToImagePoint(event);
+      dragging = hitTest(point);
+      lastPointer = point;
+      draw();
+    });
+
+    canvas.addEventListener("pointermove", event => {
+      if (panning) {
+        wrap.scrollLeft = panning.scrollLeft - (event.clientX - panning.x);
+        wrap.scrollTop = panning.scrollTop - (event.clientY - panning.y);
+        event.preventDefault();
+        return;
+      }
+      if (!dragging) return;
+      updateDrag(canvasToImagePoint(event));
+    });
+
+    canvas.addEventListener("pointerup", () => {
+      panning = null;
+      dragging = null;
+      lastPointer = null;
+      updateCanvasCursor();
+    });
+
+    canvas.addEventListener("pointercancel", () => {
+      panning = null;
+      dragging = null;
+      lastPointer = null;
+      updateCanvasCursor();
+    });
+
+    for (const input of [inputs.x, inputs.y, inputs.width, inputs.height]) {
+      input.addEventListener("input", applyInputs);
+    }
+    inputs.zoom.addEventListener("input", () => setCanvasScale(Number(inputs.zoom.value)));
+    inputs.opacity.addEventListener("input", draw);
+    document.getElementById("fitBtn").onclick = fitToView;
+    document.getElementById("actualBtn").onclick = () => setCanvasScale(100);
+    document.getElementById("panBtn").onclick = () => {
+      panMode = !panMode;
+      document.getElementById("panBtn").classList.toggle("primary", panMode);
+      updateCanvasCursor();
+    };
+    document.getElementById("saveBtn").onclick = () => save().catch(e => setStatus(e.message));
+    document.getElementById("exportBtn").onclick = () => exportPreview().catch(e => setStatus(e.message));
+    document.getElementById("toggleFillBtn").onclick = () => {
+      fillPreview = !fillPreview;
+      document.getElementById("toggleFillBtn").classList.toggle("primary", fillPreview);
+      draw();
+    };
+
+    document.querySelectorAll("[data-nudge]").forEach(button => {
+      button.onclick = () => {
+        const [dx, dy] = button.dataset.nudge.split(",").map(Number);
+        nudge(dx, dy);
+      };
+    });
+    document.querySelectorAll("[data-size]").forEach(button => {
+      button.onclick = () => {
+        const [dw, dh] = button.dataset.size.split(",").map(Number);
+        resizeSelected(dw, dh);
+      };
+    });
+
+    window.addEventListener("keydown", event => {
+      if (event.code === "Space" && !event.repeat) {
+        spaceDown = true;
+        updateCanvasCursor();
+        event.preventDefault();
+        return;
+      }
+      if (!selectedRegion()) return;
+      const step = event.shiftKey ? 10 : 1;
+      if (event.key === "ArrowLeft") { nudge(-step, 0); event.preventDefault(); }
+      if (event.key === "ArrowRight") { nudge(step, 0); event.preventDefault(); }
+      if (event.key === "ArrowUp") { nudge(0, -step); event.preventDefault(); }
+      if (event.key === "ArrowDown") { nudge(0, step); event.preventDefault(); }
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+        save().catch(e => setStatus(e.message));
+        event.preventDefault();
+      }
+    });
+
+    window.addEventListener("keyup", event => {
+      if (event.code === "Space") {
+        spaceDown = false;
+        panning = null;
+        updateCanvasCursor();
+        event.preventDefault();
+      }
+    });
+
+    loadState().catch(error => {
+      console.error(error);
+      setStatus(error.message || String(error));
+    });
+  </script>
+</body>
+</html>
