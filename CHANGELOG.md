@@ -143,6 +143,15 @@ Format: grouped by area, newest work at the top of each section.
   guards, while preserving legitimate large dark video frames outside the
   explicit recovery window.
 
+## v1.4.2 - 2026-06-07
+
+### Fixes
+
+- **Reissued installer release** - Publishes the startup-crash hotfix from
+  v1.4.1 under a clean tag so GitHub source/tag downloads point at the same
+  fixed PyInstaller spec as the installer asset. This avoids the old
+  ``pydoc`` / ``unittest`` exclusion mismatch.
+
 ## v1.4.1 — 2026-05-20
 
 ### Fixes

@@ -19,10 +19,10 @@ Unicode True
   !define VERSIONMAJOR    1
 !endif
 !ifndef VERSIONMINOR
-  !define VERSIONMINOR    3
+  !define VERSIONMINOR    4
 !endif
 !ifndef VERSIONBUILD
-  !define VERSIONBUILD    0
+  !define VERSIONBUILD    2
 !endif
 !define VERSIONSTR      "${VERSIONMAJOR}.${VERSIONMINOR}.${VERSIONBUILD}"
 !define HELPURL         "https://github.com/kuoungseok/tigercapture"
