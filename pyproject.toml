@@ -1,0 +1,20 @@
+[tool.black]
+line-length = 120
+target-version = ["py313"]
+
+[tool.isort]
+profile = "black"
+line_length = 120
+
+[tool.pyright]
+pythonVersion = "3.13"
+exclude = [
+  ".venv",
+  ".tmp",
+  "build",
+  "dist",
+  "debugCapture",
+  "local_resources",
+  "resources/live2d_samples",
+  "resources/spine_samples",
+]

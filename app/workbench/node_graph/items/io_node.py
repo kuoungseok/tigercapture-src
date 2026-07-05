@@ -4,13 +4,17 @@ Phase 2A: visual placeholder (no ports).
 Phase 2B: single port — IN exposes RGB OUT, OUT exposes RGB IN.
           Real connections can flow through them.
 
-These nodes can't be deleted or moved (the user wouldn't expect
-"the source" or "the final output" to drift around).
+These nodes can't be deleted (the context menu has no delete entry
+for IO nodes), but they CAN be dragged — keeping them anchored
+turned out to make inserting effect nodes between them painful,
+since the user had to slot new nodes into a tight pre-set gap.
+Position is persisted as part of the scene snapshot so a moved
+IN / OUT survives a session reload.
 """
 from __future__ import annotations
 
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPen
+from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPen
 from PySide6.QtWidgets import QGraphicsItem
 
 from app.workbench.node_graph.items.port_item import PortItem
@@ -27,10 +31,10 @@ class IONodeItem(QGraphicsItem):
         self.kind = kind                      # "IN" or "OUT"
         self.thumbnail = None                  # live source/output preview
         self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.GraphicsItemFlag.ItemIsMovable, True)
         self.setFlag(
             QGraphicsItem.GraphicsItemFlag.ItemSendsGeometryChanges, True,
         )
-        # Movable=False — anchored.
         self.setAcceptHoverEvents(True)
         self._hovered = False
 
@@ -62,7 +66,7 @@ class IONodeItem(QGraphicsItem):
     def itemChange(self, change, value):
         if change == QGraphicsItem.GraphicsItemChange.ItemPositionHasChanged:
             for port in self.all_ports():
-                for conn in port.connections:
+                for conn in list(port.connections):
                     conn.update_endpoints()
         return super().itemChange(change, value)
 
@@ -73,18 +77,32 @@ class IONodeItem(QGraphicsItem):
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         rect = self.boundingRect()
         radius = S["node_border_radius"]
+        shadow = QColor("#000000")
+        shadow.setAlpha(38)
+        painter.setBrush(QBrush(shadow))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawRoundedRect(
+            rect.adjusted(0.0, 1.0, 0.0, 1.8),
+            radius + 1,
+            radius + 1,
+        )
         if self.isSelected():
             border_color = QColor(C["node_border_selected"])
-            border_w = 2
+            border_w = 1.2
         elif self._hovered:
-            border_color = QColor("#a04020")
+            border_color = QColor("#626970")
             border_w = 1
         else:
             border_color = QColor(C["io_node_border"])
             border_w = 1
-        painter.setBrush(QColor(C["io_node_bg"]))
+        fill = QLinearGradient(0, 0, 0, rect.height())
+        fill.setColorAt(0.0, QColor(C["io_node_bg"]).lighter(101))
+        fill.setColorAt(1.0, QColor(C["io_node_bg"]).darker(101))
+        painter.setBrush(QBrush(fill))
         painter.setPen(QPen(border_color, border_w))
         painter.drawRoundedRect(rect, radius, radius)
+        painter.setPen(QPen(QColor(255, 255, 255, 7), 1))
+        painter.drawLine(6, 1, int(rect.width()) - 7, 1)
 
         # Thumbnail strip — small live preview centred above the
         # label. Falls back to the label-only layout when no frame
@@ -107,7 +125,7 @@ class IONodeItem(QGraphicsItem):
         painter.setPen(QColor(C["node_label_color"]))
         f = QFont(painter.font())
         f.setBold(True)
-        f.setPointSize(11)
+        f.setPointSize(7)
         painter.setFont(f)
         painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, self.kind)
 

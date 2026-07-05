@@ -1,6 +1,6 @@
 ; Inno Setup script for TigerCapture
 ; Build: iscc installer.iss
-; Produces: installer_output\TigerCapture-Setup-1.0.0.exe
+; Produces: installer_output\TigerCapture-Setup-<version>.exe
 
 #define MyAppName "TigerCapture"
 #define MyAppVersion "1.3.0"

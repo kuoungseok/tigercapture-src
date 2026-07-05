@@ -5,12 +5,14 @@
 #   .\build.ps1 -Installer   # alias for -NSIS
 #   .\build.ps1 -InnoSetup   # PyInstaller + Inno Setup
 #   .\build.ps1 -Clean       # clean build artifacts first
+#   .\build.ps1 -Version 1.3.0 -NSIS   # explicit version override
 
 param(
     [switch]$Installer,
     [switch]$NSIS,
     [switch]$InnoSetup,
-    [switch]$Clean
+    [switch]$Clean,
+    [string]$Version = ""
 )
 
 if ($Installer) { $NSIS = $true }
@@ -19,6 +21,24 @@ $ErrorActionPreference = 'Stop'
 
 $root = $PSScriptRoot
 $python = Join-Path $root ".venv\Scripts\python.exe"
+
+# Parse version from version_info.txt if not supplied explicitly
+if (-not $Version) {
+    $viPath = Join-Path $root "version_info.txt"
+    if (Test-Path $viPath) {
+        $match = Select-String -Path $viPath -Pattern "filevers=\((\d+),\s*(\d+),\s*(\d+)" | Select-Object -First 1
+        if ($match) {
+            $g = $match.Matches[0].Groups
+            $Version = "$($g[1].Value).$($g[2].Value).$($g[3].Value)"
+        }
+    }
+}
+if (-not $Version) { $Version = "1.3.0" }
+$vParts = $Version.Split('.')
+$vMajor = if ($vParts.Count -gt 0) { $vParts[0] } else { "1" }
+$vMinor = if ($vParts.Count -gt 1) { $vParts[1] } else { "0" }
+$vBuild = if ($vParts.Count -gt 2) { $vParts[2] } else { "0" }
+Write-Host "[version] $Version" -ForegroundColor Cyan
 
 if (-not (Test-Path $python)) {
     Write-Error "venv not found at $python. Run `py -3.13 -m venv .venv` and install requirements first."
@@ -42,7 +62,31 @@ if (-not (Test-Path $icoPath)) {
     exit 1
 }
 
-# 2. PyInstaller build
+# 2. Native worker build. The PyInstaller spec picks this binary up from
+#    native\tigercapture_worker\target\release and places it under
+#    bundled\native in the frozen app.
+$cargo = Get-Command cargo.exe -ErrorAction Ignore
+$workerDir = Join-Path $root "native\tigercapture_worker"
+$workerExe = Join-Path $workerDir "target\release\tigercapture-worker.exe"
+if ($cargo -and (Test-Path $workerDir)) {
+    Write-Host "[cargo] building native worker..." -ForegroundColor Cyan
+    Push-Location $workerDir
+    try {
+        & $cargo.Source build --release
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    } finally {
+        Pop-Location
+    }
+    if (-not (Test-Path $workerExe)) {
+        Write-Error "Native worker build finished but $workerExe is missing."
+        exit 1
+    }
+    Write-Host "[cargo] OK: $workerExe" -ForegroundColor Green
+} else {
+    Write-Warning "cargo.exe not found; building without bundled native worker."
+}
+
+# 3. PyInstaller build
 Write-Host "[pyinstaller] building dist\TigerCapture..." -ForegroundColor Cyan
 & $python -m PyInstaller --noconfirm (Join-Path $root "TigerCapture.spec")
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
@@ -54,7 +98,7 @@ if (-not (Test-Path $exePath)) {
 }
 Write-Host "[pyinstaller] OK: $exePath" -ForegroundColor Green
 
-# 3a. NSIS installer (preferred)
+# 4a. NSIS installer (preferred)
 if ($NSIS) {
     $makensis = $null
     $candidates = @(
@@ -74,13 +118,13 @@ if ($NSIS) {
     }
 
     New-Item -ItemType Directory -Force (Join-Path $root "installer_output") | Out-Null
-    Write-Host "[nsis] building installer via $makensis" -ForegroundColor Cyan
-    & $makensis (Join-Path $root "installer.nsi")
+    Write-Host "[nsis] building installer via $makensis (v$Version)" -ForegroundColor Cyan
+    & $makensis "/DVERSIONMAJOR=$vMajor" "/DVERSIONMINOR=$vMinor" "/DVERSIONBUILD=$vBuild" (Join-Path $root "installer.nsi")
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    Write-Host "[nsis] OK: installer_output\TigerCapture-Setup-*.exe" -ForegroundColor Green
+    Write-Host "[nsis] OK: installer_output\TigerCapture-Setup-$Version.exe" -ForegroundColor Green
 }
 
-# 3b. Inno Setup installer (alternative)
+# 4b. Inno Setup installer (alternative)
 if ($InnoSetup) {
     $iscc = $null
     $candidates = @(

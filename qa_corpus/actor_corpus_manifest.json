@@ -1,0 +1,33 @@
+{
+  "version": 1,
+  "roots": [
+    "resources/spine_samples",
+    "resources/live2d_samples",
+    "resources/test_spine"
+  ],
+  "optional_roots": [
+    "E:/ActorCorpus/Spine",
+    "E:/ActorCorpus/Live2D"
+  ],
+  "known_failures": "qa_corpus/actor_known_failures.json",
+  "golden_dir": "qa_corpus/actor_golden",
+  "parse_spine": true,
+  "render": true,
+  "render_top_risks": true,
+  "top_risk_limit": 20,
+  "animation_sweep": true,
+  "sweep_samples": 5,
+  "golden_threshold": 2.0,
+  "coverage_targets": {
+    "enforce": false,
+    "min_total": 50,
+    "min_spine": 10,
+    "min_live2d": 5,
+    "min_stress": 5,
+    "required_risk_codes": [
+      "spine_weighted_mesh",
+      "spine_constraints",
+      "live2d_many_motions"
+    ]
+  }
+}

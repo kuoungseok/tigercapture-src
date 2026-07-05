@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "kind": "tigercapture_review_sample_resources",
+  "created_at": "2026-06-27T11:53:35.979169+00:00",
+  "created_by": "review_sample_resources",
+  "sample_root": "qa_corpus/review_demos",
+  "media_root": "qa_corpus/review_demos/media",
+  "resources": [
+    {
+      "id": "overview_screen_demo",
+      "kind": "video",
+      "path": "qa_corpus/review_demos/media/overview_screen_demo.mp4",
+      "role": "overview",
+      "title": "Editor overview sample video",
+      "required": true,
+      "tags": [
+        "overview",
+        "screen-recording",
+        "video"
+      ],
+      "sidecars": [],
+      "metadata": {
+        "duration_ms": 6000,
+        "frame_size": [
+          1280,
+          720
+        ],
+        "fps": 30
+      }
+    },
+    {
+      "id": "screenstudio_cursor_demo",
+      "kind": "video",
+      "path": "qa_corpus/review_demos/media/screenstudio_cursor_demo.mp4",
+      "role": "screenstudio_auto_polish",
+      "title": "Auto Polish cursor/click/hotkey demo video",
+      "required": true,
+      "tags": [
+        "screenstudio",
+        "cursor",
+        "auto-polish",
+        "video"
+      ],
+      "sidecars": [
+        "qa_corpus/review_demos/media/screenstudio_cursor_demo.mp4.cursor.json"
+      ],
+      "metadata": {
+        "duration_ms": 7200,
+        "frame_size": [
+          1280,
+          720
+        ],
+        "fps": 30,
+        "requires_cursor_sidecar": true
+      }
+    },
+    {
+      "id": "dialogue_cleanup_demo",
+      "kind": "audio",
+      "path": "qa_corpus/review_demos/media/dialogue_cleanup_demo.wav",
+      "role": "audio_voice",
+      "title": "Dialogue cleanup demo audio",
+      "required": true,
+      "tags": [
+        "audio",
+        "dialogue",
+        "voice-cleanup"
+      ],
+      "sidecars": [],
+      "metadata": {
+        "duration_ms": 7000,
+        "sample_rate": 48000
+      }
+    },
+    {
+      "id": "ai_script_transcript_demo",
+      "kind": "transcript",
+      "path": "qa_corpus/review_demos/media/ai_script_transcript_demo.srt",
+      "role": "ai_script_edit",
+      "title": "AI Script Edit transcript",
+      "required": true,
+      "tags": [
+        "ai",
+        "transcript",
+        "script-edit",
+        "captions"
+      ],
+      "sidecars": [],
+      "metadata": {
+        "language": "ko-en",
+        "segments": 4
+      }
+    },
+    {
+      "id": "review_overview_poster",
+      "kind": "image",
+      "path": "qa_corpus/review_demos/media/review_overview_poster.png",
+      "role": "html_deck",
+      "title": "Review automation poster image",
+      "required": true,
+      "tags": [
+        "poster",
+        "html",
+        "deck"
+      ],
+      "sidecars": [],
+      "metadata": {
+        "frame_size": [
+          1280,
+          720
+        ]
+      }
+    }
+  ],
+  "notes": [
+    "Generated media is intentionally local and reproducible.",
+    "Do not commit large generated media unless release policy changes.",
+    "Review automation should use this manifest instead of hard-coded media paths."
+  ]
+}

@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import os
 import subprocess
-import sys
 import tempfile
 from pathlib import Path
 
@@ -31,6 +30,8 @@ from PySide6.QtGui import (
     QPainterPath,
     QPen,
 )
+
+from app.subprocess_utils import hidden_subprocess_kwargs
 
 
 def _draw_text_whole(
@@ -391,7 +392,7 @@ def render_clip_to_mov(
         proc = subprocess.run(
             cmd,
             capture_output=True, text=True, errors="replace",
-            creationflags=(0x08000000 if sys.platform == "win32" else 0),
+            **hidden_subprocess_kwargs(),
         )
         return proc.returncode == 0
     finally:

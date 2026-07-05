@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "events": [
+    {"t_ms": 800, "x_norm": 0.24, "y_norm": 0.66, "kind": "hotkey", "label": "Ctrl + K"},
+    {"t_ms": 1960, "x_norm": 0.48, "y_norm": 0.44, "kind": "click"},
+    {"t_ms": 3120, "x_norm": 0.58, "y_norm": 0.42, "kind": "release"},
+    {"t_ms": 4840, "x_norm": 0.76, "y_norm": 0.32, "kind": "hotkey", "label": "Ctrl + Shift + P"},
+    {"t_ms": 6520, "x_norm": 0.64, "y_norm": 0.70, "kind": "click"}
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "events": [
+    {"t_ms": 1000, "x_norm": 0.16, "y_norm": 0.28, "kind": "click"},
+    {"t_ms": 2400, "x_norm": 0.20, "y_norm": 0.30, "kind": "release"},
+    {"t_ms": 4500, "x_norm": 0.24, "y_norm": 0.34, "kind": "click"},
+    {"t_ms": 18000, "x_norm": 0.62, "y_norm": 0.42, "kind": "hotkey", "label": "Ctrl + K"},
+    {"t_ms": 32000, "x_norm": 0.74, "y_norm": 0.50, "kind": "click"},
+    {"t_ms": 48000, "x_norm": 0.42, "y_norm": 0.60, "kind": "drag"},
+    {"t_ms": 65000, "x_norm": 0.35, "y_norm": 0.52, "kind": "release"},
+    {"t_ms": 82000, "x_norm": 0.68, "y_norm": 0.34, "kind": "click"}
+  ]
+}

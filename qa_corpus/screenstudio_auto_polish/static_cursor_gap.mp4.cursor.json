@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "events": [
+    {"t_ms": 0, "x_norm": 0.20, "y_norm": 0.24, "kind": "move"},
+    {"t_ms": 1800, "x_norm": 0.20, "y_norm": 0.24, "kind": "click"},
+    {"t_ms": 3600, "x_norm": 0.76, "y_norm": 0.44, "kind": "release"},
+    {"t_ms": 6900, "x_norm": 0.82, "y_norm": 0.70, "kind": "hotkey", "label": "F5"}
+  ]
+}

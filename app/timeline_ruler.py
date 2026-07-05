@@ -12,14 +12,17 @@ the shared ``MARGIN`` constant.
 """
 from __future__ import annotations
 
-from PySide6.QtCore import QPoint, Qt, Signal
-from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QPolygon
+from PySide6.QtCore import QPoint, QRect, Qt, Signal
+from PySide6.QtGui import QColor, QFont, QMouseEvent, QPainter, QPen, QPolygon
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
 from app.i18n import tr
+from app.studio_theme import (
+    STUDIO_CUT,
+    STUDIO_RULER_BG,
+    paint_studio_playhead,
+)
 from app.style import (
-    COLOR_ACCENT_ORANGE,
-    COLOR_BG_L4,
     COLOR_BORDER_DEFAULT,
     COLOR_TEXT_TERTIARY,
 )
@@ -27,7 +30,7 @@ from app.style import (
 
 # Shared with TrackRow — defaults are duplicated here so the ruler
 # can be imported without pulling in video_editor_window.py.
-DEFAULT_PX_PER_SEC = 40.0
+DEFAULT_PX_PER_SEC = 52.0
 MIN_PX_PER_SEC = 4.0
 MAX_PX_PER_SEC = 300.0
 MIN_TRACK_WIDTH = 300
@@ -46,8 +49,8 @@ class TimelineRuler(QWidget):
     scrub_requested = Signal(int)   # project_ms
     marker_delete_requested = Signal(int)  # index into markers list
 
-    HEIGHT = 30
-    MARGIN = 10  # matches TrackRow.MARGIN
+    HEIGHT = 26
+    MARGIN = 180  # matches TrackRow.MARGIN
     BASELINE_DURATION_MS = 30_000  # ruler width when no tracks are loaded
 
     def __init__(self) -> None:
@@ -167,10 +170,24 @@ class TimelineRuler(QWidget):
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
-        painter.fillRect(self.rect(), QColor(COLOR_BG_L4))
+        painter.fillRect(self.rect(), QColor(STUDIO_RULER_BG))
+        painter.fillRect(0, 0, self.MARGIN - 1, self.HEIGHT, QColor("#151515"))
+        painter.setPen(QColor("#2B2B2B"))
+        painter.drawLine(self.MARGIN - 1, 0, self.MARGIN - 1, self.HEIGHT)
+        header_font = painter.font()
+        header_font.setPixelSize(12)
+        header_font.setBold(False)
+        header_font.setWeight(QFont.Weight.DemiBold)
+        header_font.setFamily("Segoe UI Variable")
+        painter.setFont(header_font)
+        painter.setPen(QColor("#C9CDD3"))
+        painter.drawText(
+            QRect(12, 0, self.MARGIN - 24, self.HEIGHT),
+            Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+            "Timeline",
+        )
 
-        # Top separator line (matches the spec's .time-ruler border-top)
-        painter.setPen(QColor("#2a2a30"))
+        painter.setPen(QColor("#272727"))
         painter.drawLine(0, 0, self.width(), 0)
 
         if self._px_per_sec <= 0:
@@ -184,7 +201,7 @@ class TimelineRuler(QWidget):
         total_s = max(visible_s, baseline_s, duration_s)
 
         # Pick a "nice" tick interval so major labels don't overlap.
-        target_px = 72  # aim for ~72 px between major labels
+        target_px = 76
         raw = target_px / self._px_per_sec
         nice_steps = [0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600]
         interval_s = next((n for n in nice_steps if raw <= n), 600)
@@ -192,12 +209,12 @@ class TimelineRuler(QWidget):
 
         # Layout: tick marks on top, labels directly below.
         tick_top = 3
-        tick_bot = tick_top + 4          # minor ticks = 4 px tall
-        major_tick_bot = tick_top + 7    # major ticks = 7 px tall
+        tick_bot = tick_top + 3
+        major_tick_bot = tick_top + 6
         label_baseline = self.HEIGHT - 6
 
         # Minor ticks
-        painter.setPen(QColor(COLOR_BORDER_DEFAULT))
+        painter.setPen(QColor("#343434"))
         t = 0.0
         while t <= total_s + 1e-6:
             x = int(self.MARGIN + t * self._px_per_sec)
@@ -205,7 +222,7 @@ class TimelineRuler(QWidget):
             t += minor_s
 
         # Major ticks
-        painter.setPen(QColor(COLOR_TEXT_TERTIARY))
+        painter.setPen(QColor("#55585E"))
         t = 0.0
         while t <= total_s + 1e-6:
             x = int(self.MARGIN + t * self._px_per_sec)
@@ -213,10 +230,11 @@ class TimelineRuler(QWidget):
             t += interval_s
 
         # Time labels (centered under each major tick)
-        painter.setPen(QColor(COLOR_TEXT_TERTIARY))
+        painter.setPen(QColor("#9A9EA6"))
         font = painter.font()
-        font.setPixelSize(10)
-        font.setFamily("Monaco, Consolas, monospace")
+        font.setPixelSize(9)
+        font.setBold(False)
+        font.setFamily("Segoe UI Variable")
         painter.setFont(font)
         fm = painter.fontMetrics()
         t = 0.0
@@ -241,7 +259,7 @@ class TimelineRuler(QWidget):
             if x_out > x_in:
                 painter.fillRect(
                     x_in, 0, x_out - x_in, self.HEIGHT,
-                    QColor(216, 90, 48, 40),
+                    QColor(91, 75, 255, 34),
                 )
         for ms, kind in (
             (self._global_in_ms, "in"),
@@ -250,10 +268,10 @@ class TimelineRuler(QWidget):
             if ms < 0:
                 continue
             x = int(self.MARGIN + ms / 1000.0 * self._px_per_sec)
-            painter.setPen(QPen(QColor(COLOR_ACCENT_ORANGE), 2))
+            painter.setPen(QPen(QColor(STUDIO_CUT), 2))
             painter.drawLine(x, 0, x, self.HEIGHT)
             # Small flag triangle on the appropriate side.
-            painter.setBrush(QColor(COLOR_ACCENT_ORANGE))
+            painter.setBrush(QColor(STUDIO_CUT))
             painter.setPen(Qt.PenStyle.NoPen)
             if kind == "in":
                 flag = QPolygon([
@@ -308,20 +326,5 @@ class TimelineRuler(QWidget):
 
         # Playhead — orange with glow + diamond handle
         px = int(self.MARGIN + self._playhead_ms / 1000.0 * self._px_per_sec)
-        glow = QPen(QColor(216, 90, 48, 90))
-        glow.setWidth(6)
-        painter.setPen(glow)
-        painter.drawLine(px, 0, px, self.HEIGHT)
-        pen = QPen(QColor(COLOR_ACCENT_ORANGE))
-        pen.setWidth(2)
-        painter.setPen(pen)
-        painter.drawLine(px, 0, px, self.HEIGHT)
-        painter.setBrush(QColor(COLOR_ACCENT_ORANGE))
-        painter.setPen(QColor("#ff7a4a"))
-        diamond = [
-            QPoint(px, 2),
-            QPoint(px + 5, 7),
-            QPoint(px, 12),
-            QPoint(px - 5, 7),
-        ]
-        painter.drawPolygon(QPolygon(diamond))
+        paint_studio_playhead(painter, px, 0, self.HEIGHT, handle_top=2)
+        return

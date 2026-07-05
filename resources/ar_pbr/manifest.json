@@ -1,0 +1,88 @@
+{
+  "schema": "tigerstudio.ar_pbr.resources.v1",
+  "source": "Poly Haven",
+  "license": "CC0",
+  "hdri": [
+    {
+      "id": "wide_street_01",
+      "label": "Wide Street",
+      "path": "resources/ar_pbr/hdri/wide_street_01_1k.hdr",
+      "source_url": "https://polyhaven.com/a/wide_street_01",
+      "download_url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/wide_street_01_1k.hdr",
+      "license": "CC0",
+      "purpose": "default outdoor street IBL"
+    },
+    {
+      "id": "studio_small_09",
+      "label": "Studio Small 09",
+      "path": "resources/ar_pbr/hdri/studio_small_09_1k.hdr",
+      "source_url": "https://polyhaven.com/a/studio_small_09",
+      "download_url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/studio_small_09_1k.hdr",
+      "license": "CC0",
+      "purpose": "neutral product studio IBL"
+    },
+    {
+      "id": "wooden_studio_17",
+      "label": "Wooden Studio 17",
+      "path": "resources/ar_pbr/hdri/wooden_studio_17_1k.hdr",
+      "source_url": "https://polyhaven.com/a/wooden_studio_17",
+      "download_url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/wooden_studio_17_1k.hdr",
+      "license": "CC0",
+      "purpose": "warm studio IBL for product materials"
+    },
+    {
+      "id": "abandoned_parking",
+      "label": "Abandoned Parking",
+      "path": "resources/ar_pbr/hdri/abandoned_parking_1k.hdr",
+      "source_url": "https://polyhaven.com/a/abandoned_parking",
+      "download_url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/abandoned_parking_1k.hdr",
+      "license": "CC0",
+      "purpose": "urban interior/exterior IBL"
+    },
+    {
+      "id": "cayley_interior",
+      "label": "Cayley Interior",
+      "path": "resources/ar_pbr/hdri/cayley_interior_1k.hdr",
+      "source_url": "https://polyhaven.com/a/cayley_interior",
+      "download_url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/cayley_interior_1k.hdr",
+      "license": "CC0",
+      "purpose": "soft indoor IBL"
+    },
+    {
+      "id": "autumn_forest_01",
+      "label": "Autumn Forest 01",
+      "path": "resources/ar_pbr/hdri/autumn_forest_01_1k.hdr",
+      "source_url": "https://polyhaven.com/a/autumn_forest_01",
+      "download_url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/autumn_forest_01_1k.hdr",
+      "license": "CC0",
+      "purpose": "warm natural IBL"
+    },
+    {
+      "id": "belfast_sunset",
+      "label": "Belfast Sunset",
+      "path": "resources/ar_pbr/hdri/belfast_sunset_1k.hdr",
+      "source_url": "https://polyhaven.com/a/belfast_sunset",
+      "download_url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/belfast_sunset_1k.hdr",
+      "license": "CC0",
+      "purpose": "low sun exterior IBL"
+    },
+    {
+      "id": "cobblestone_street_night",
+      "label": "Cobblestone Street Night",
+      "path": "resources/ar_pbr/hdri/cobblestone_street_night_1k.hdr",
+      "source_url": "https://polyhaven.com/a/cobblestone_street_night",
+      "download_url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/cobblestone_street_night_1k.hdr",
+      "license": "CC0",
+      "purpose": "night street IBL"
+    },
+    {
+      "id": "brown_photostudio_03",
+      "label": "Brown Photostudio 03",
+      "path": "resources/ar_pbr/hdri/brown_photostudio_03_1k.hdr",
+      "source_url": "https://polyhaven.com/a/brown_photostudio_03",
+      "download_url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/brown_photostudio_03_1k.hdr",
+      "license": "CC0",
+      "purpose": "glossy studio IBL"
+    }
+  ]
+}

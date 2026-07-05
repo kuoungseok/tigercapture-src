@@ -21,6 +21,8 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import QGraphicsItem, QMenu
 
+from app.icons import app_icon
+
 
 class ConnectionItem(QGraphicsItem):
 
@@ -74,31 +76,37 @@ class ConnectionItem(QGraphicsItem):
             return
 
         if self.source.port_type == "rgb":
-            base = QColor("#5DCAA5")
+            base = QColor("#7C735F")
         else:
-            base = QColor("#4A9BEE")
+            base = QColor("#617789")
+        base.setAlpha(205)
 
         if self.isSelected():
-            # Tiger Orange selection glow + line.
-            glow = QColor("#D85A30")
-            glow.setAlpha(60)
-            painter.setPen(QPen(glow, 8))
+            glow = QColor("#AEB7C4")
+            glow.setAlpha(24)
+            painter.setPen(QPen(glow, 3.0))
             painter.drawPath(path)
-            color = QColor("#D85A30")
-            width = 3.0
+            color = QColor("#D7DCE4")
+            width = 1.45
         else:
             color = base
-            width = 2.0
+            width = 1.15
+
+        shadow = QColor("#000000")
+        shadow.setAlpha(36)
+        painter.setPen(QPen(shadow, width + 0.8))
+        painter.drawPath(path)
 
         pen = QPen(color, width)
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         if self.source.port_type == "key":
             pen.setStyle(Qt.PenStyle.DashLine)
         painter.setPen(pen)
         painter.drawPath(path)
 
     def update_temp_target(self, scene_pos: QPointF) -> None:
-        self._temp_target_pos = scene_pos
         self.prepareGeometryChange()
+        self._temp_target_pos = scene_pos
         self.update()
 
     def update_endpoints(self) -> None:
@@ -109,7 +117,7 @@ class ConnectionItem(QGraphicsItem):
     def contextMenuEvent(self, event) -> None:
         """Right-click on a connection → disconnect menu."""
         menu = QMenu()
-        act = menu.addAction("✂ 연결 해제")
+        act = menu.addAction(app_icon("scissors", size=16), "Disconnect")
         chosen = menu.exec(event.screenPos().toPoint())
         if chosen is act:
             scene = self.scene()

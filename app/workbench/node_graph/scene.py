@@ -30,6 +30,14 @@ from app.workbench.node_graph.theme import (
 )
 
 
+def _record_node_action(event: str, **data) -> None:
+    try:
+        from app.crash_reporter import record_action
+        record_action(f"node_graph.{event}", **data)
+    except Exception:
+        pass
+
+
 class NodeGraphScene(QGraphicsScene):
 
     selection_changed_label = Signal(str)
@@ -40,7 +48,10 @@ class NodeGraphScene(QGraphicsScene):
         size = S["canvas_size"]
         self.setSceneRect(-size / 2, -size / 2, size, size)
         self.setBackgroundBrush(QColor(C["canvas_bg"]))
-        self.setItemIndexMethod(QGraphicsScene.ItemIndexMethod.BspTreeIndex)
+        # This graph is highly dynamic: connection paths resize while users
+        # drag ports/nodes and items are often removed during the same gesture.
+        # NoIndex is more stable for that workload than Qt's BSP scene index.
+        self.setItemIndexMethod(QGraphicsScene.ItemIndexMethod.NoIndex)
 
         self._build_io_anchors()
         self._next_id_counter: int = 1
@@ -52,16 +63,19 @@ class NodeGraphScene(QGraphicsScene):
 
     def _build_io_anchors(self) -> None:
         self._in_node = IONodeItem("IN")
-        self._in_node.setPos(-400, -S["io_height"] / 2)
+        self._in_node.setPos(-360, -S["io_height"] / 2)
         self.addItem(self._in_node)
         self._out_node = IONodeItem("OUT")
-        self._out_node.setPos(300, -S["io_height"] / 2)
+        self._out_node.setPos(320, -S["io_height"] / 2)
         self.addItem(self._out_node)
 
     # ---- node creation ----
 
     def add_serial_node(
-        self, label: str = "Serial", pos: QPointF | None = None,
+        self,
+        label: str = "Serial",
+        pos: QPointF | None = None,
+        auto_connect: bool = False,
     ) -> NodeItem:
         nid = self._generate_node_id()
         if pos is None:
@@ -70,6 +84,9 @@ class NodeGraphScene(QGraphicsScene):
         node.setPos(pos)
         self.addItem(node)
         self._serial_nodes.append(node)
+        if auto_connect:
+            self._auto_insert_node(node)
+        _record_node_action("add_node", kind="serial", node_id=nid)
         self.graph_mutated.emit()
         return node
 
@@ -89,6 +106,29 @@ class NodeGraphScene(QGraphicsScene):
         self._serial_nodes.append(node)
         if auto_connect:
             self._auto_insert_node(node)
+        _record_node_action("add_node", kind="blur", node_id=nid)
+        self.graph_mutated.emit()
+        return node
+
+    def add_effect_node(
+        self, effect_kind: str, label: str = "",
+        pos: "QPointF | None" = None,
+        auto_connect: bool = True,
+    ):
+        """Add an EffectNodeItem of the given kind (curves, glow, etc.)."""
+        from app.workbench.node_graph.items.effect_node_item import EffectNodeItem
+        from app.effect_node_params import _KIND_META
+        meta = _KIND_META.get(effect_kind, (label or effect_kind, "#607D8B", None))
+        nid = self._generate_node_id(prefix="E")
+        if pos is None:
+            pos = self._next_position()
+        node = EffectNodeItem(effect_kind=effect_kind, node_id=nid, label=label or meta[0])
+        node.setPos(pos)
+        self.addItem(node)
+        self._serial_nodes.append(node)
+        if auto_connect:
+            self._auto_insert_node(node)
+        _record_node_action("add_node", kind=effect_kind, node_id=nid)
         self.graph_mutated.emit()
         return node
 
@@ -105,6 +145,8 @@ class NodeGraphScene(QGraphicsScene):
                 existing_conn = out_in_port.connections[0]
                 prev_out_port = existing_conn.source
                 self.remove_connection(existing_conn)
+            else:
+                prev_out_port = getattr(self._in_node, "rgb_out", None)
             if prev_out_port is not None and new_in_port is not None:
                 self._wire(prev_out_port, new_in_port)
             if new_out_port is not None:
@@ -122,11 +164,46 @@ class NodeGraphScene(QGraphicsScene):
         node.setPos(pos)
         self.addItem(node)
         self._serial_nodes.append(node)
+        _record_node_action("add_node", kind="parallel", node_id=nid)
         self.graph_mutated.emit()
         return node
 
     def node_count(self) -> int:
         return len(self._serial_nodes)
+
+    def ensure_default_chain(self) -> bool:
+        """Repair old/fresh graphs where serial nodes exist but OUT is unwired."""
+        try:
+            out_in_port = getattr(self._out_node, "rgb_in", None)
+            in_out_port = getattr(self._in_node, "rgb_out", None)
+            if out_in_port is None or in_out_port is None:
+                return False
+            if getattr(out_in_port, "connections", None):
+                return False
+            nodes = [
+                n for n in list(self._serial_nodes)
+                if getattr(n, "rgb_in", None) is not None
+                and getattr(n, "rgb_out", None) is not None
+            ]
+            if not nodes:
+                return False
+            prev_out = in_out_port
+            changed = False
+            for node in nodes:
+                node_in = getattr(node, "rgb_in", None)
+                node_out = getattr(node, "rgb_out", None)
+                if node_in is None or node_out is None:
+                    continue
+                if not getattr(node_in, "connections", None):
+                    self._wire(prev_out, node_in)
+                    changed = True
+                prev_out = node_out
+            if not getattr(out_in_port, "connections", None):
+                self._wire(prev_out, out_in_port)
+                changed = True
+            return changed
+        except Exception:
+            return False
 
     def _generate_node_id(self, prefix: str = "N") -> str:
         nid = f"{prefix}{self._next_id_counter}"
@@ -135,32 +212,76 @@ class NodeGraphScene(QGraphicsScene):
 
     def _next_position(self) -> QPointF:
         if not self._serial_nodes:
-            base_x = self._in_node.scenePos().x() + S["io_width"] + 60
+            base_x = self._in_node.scenePos().x() + S["io_width"] + 54
             return QPointF(base_x, -S["node_height"] / 2)
         rightmost = max(self._serial_nodes, key=lambda n: n.scenePos().x())
         offset_y = 12 if (len(self._serial_nodes) % 2 == 0) else -12
         return QPointF(
-            rightmost.scenePos().x() + S["node_width"] + 40,
+            rightmost.scenePos().x() + S["node_width"] + 34,
             rightmost.scenePos().y() + offset_y,
         )
 
     # ---- connection drag ----
 
+    def _discard_dragging_connection(self) -> None:
+        conn = self._dragging_connection
+        if conn is None:
+            return
+        self._dragging_connection = None
+        try:
+            conn.detach()
+        except Exception:
+            pass
+        try:
+            if conn.scene() is self:
+                self.removeItem(conn)
+        except RuntimeError:
+            pass
+
     def start_connection_drag(self, source_port: PortItem, mouse_pos: QPointF) -> None:
-        self._dragging_connection = ConnectionItem(source_port)
-        self._dragging_connection.update_temp_target(mouse_pos)
-        self.addItem(self._dragging_connection)
+        self._discard_dragging_connection()
+        try:
+            if source_port.scene() is not self:
+                return
+        except RuntimeError:
+            return
+        conn = ConnectionItem(source_port)
+        conn.update_temp_target(mouse_pos)
+        self._dragging_connection = conn
+        self.addItem(conn)
+        _record_node_action(
+            "connection_drag_start",
+            source_node=_node_identity(source_port.parentItem()),
+            source_port=source_port.port_id,
+        )
 
     def update_connection_drag(self, mouse_pos: QPointF) -> None:
-        if self._dragging_connection is not None:
-            self._dragging_connection.update_temp_target(mouse_pos)
+        conn = self._dragging_connection
+        if conn is None:
+            return
+        try:
+            if conn.scene() is not self or conn.source.scene() is not self:
+                self._discard_dragging_connection()
+                return
+            conn.update_temp_target(mouse_pos)
+        except RuntimeError:
+            self._discard_dragging_connection()
 
     def end_connection_drag(self, target_port: Optional[PortItem]) -> None:
-        if self._dragging_connection is None:
+        conn = self._dragging_connection
+        if conn is None:
             return
-        source = self._dragging_connection.source
+        self._dragging_connection = None
+        source = conn.source
+        try:
+            source_ok = source.scene() is self
+            target_ok = target_port is not None and target_port.scene() is self
+        except RuntimeError:
+            self._discard_dragging_connection()
+            return
         if (
-            target_port is not None
+            source_ok
+            and target_ok
             and source.is_compatible_with(target_port)
             and not self._would_create_cycle(source, target_port)
         ):
@@ -168,15 +289,32 @@ class NodeGraphScene(QGraphicsScene):
             # — input ports take exactly one source.
             for existing in list(target_port.connections):
                 self.remove_connection(existing)
-            self._dragging_connection.target = target_port
-            target_port.connections.append(self._dragging_connection)
-            source.connections.append(self._dragging_connection)
-            self._connections.append(self._dragging_connection)
-            self._dragging_connection.update_endpoints()
+            conn.target = target_port
+            target_port.connections.append(conn)
+            source.connections.append(conn)
+            self._connections.append(conn)
+            conn.update_endpoints()
+            _record_node_action(
+                "connection_created",
+                source_node=_node_identity(source.parentItem()),
+                source_port=source.port_id,
+                target_node=_node_identity(target_port.parentItem()),
+                target_port=target_port.port_id,
+            )
             self.graph_mutated.emit()
         else:
-            self.removeItem(self._dragging_connection)
-        self._dragging_connection = None
+            _record_node_action(
+                "connection_rejected",
+                source_node=_node_identity(source.parentItem()),
+                source_port=source.port_id,
+                target_node=_node_identity(target_port.parentItem()) if target_port is not None else "",
+                target_port=getattr(target_port, "port_id", ""),
+            )
+            try:
+                if conn.scene() is self:
+                    self.removeItem(conn)
+            except RuntimeError:
+                pass
 
     def _would_create_cycle(
         self, source_port: PortItem, target_port: PortItem,
@@ -197,24 +335,41 @@ class NodeGraphScene(QGraphicsScene):
             for port in getattr(node, "all_ports", lambda: [])():
                 if not port.is_input:
                     continue
-                for conn in port.connections:
-                    upstream = conn.source.parentItem()
+                for conn in list(port.connections):
+                    try:
+                        upstream = conn.source.parentItem()
+                    except RuntimeError:
+                        continue
                     frontier.append(upstream)
         return False
 
     # ---- delete ----
 
     def remove_connection(self, conn: ConnectionItem) -> None:
+        if conn is self._dragging_connection:
+            self._dragging_connection = None
         if conn in self._connections:
             self._connections.remove(conn)
         conn.detach()
-        self.removeItem(conn)
+        try:
+            if conn.scene() is self:
+                self.removeItem(conn)
+        except RuntimeError:
+            pass
+        _record_node_action("connection_removed")
         self.graph_mutated.emit()
 
     def delete_selected(self) -> None:
+        self._discard_dragging_connection()
         items = list(self.selectedItems())
         if not items:
             return
+        _record_node_action(
+            "delete_selected",
+            items=len(items),
+            nodes=sum(1 for it in items if isinstance(it, NodeItem)),
+            connections=sum(1 for it in items if isinstance(it, ConnectionItem)),
+        )
         # Connections first.
         for it in items:
             if isinstance(it, ConnectionItem):
@@ -271,6 +426,9 @@ class NodeGraphScene(QGraphicsScene):
             if bp is not None:
                 entry["blur_params"] = bp.to_dict()
                 entry["blur_invert_mask"] = bool(getattr(n, "blur_invert_mask", True))
+            ep = getattr(n, "effect_params", None)
+            if ep is not None:
+                entry["effect_params"] = ep.to_dict()
             nodes_data.append(entry)
         conns_data: list[dict] = []
         for c in self._connections:
@@ -286,11 +444,26 @@ class NodeGraphScene(QGraphicsScene):
             "nodes": nodes_data,
             "connections": conns_data,
             "next_id": self._next_id_counter,
+            # IN / OUT are not user-created so they don't live in
+            # ``nodes_data``, but the user may have dragged them — save
+            # their positions separately so they survive a reload.
+            "io_positions": {
+                "IN":  [float(self._in_node.scenePos().x()),
+                        float(self._in_node.scenePos().y())],
+                "OUT": [float(self._out_node.scenePos().x()),
+                        float(self._out_node.scenePos().y())],
+            },
         }
 
     def load_from_data(self, data: dict) -> None:
         """Restore from a previous ``to_data`` snapshot. Clears any
         existing user-added nodes (IN / OUT stay)."""
+        _record_node_action(
+            "load_from_data",
+            nodes=len(data.get("nodes", []) or []),
+            connections=len(data.get("connections", []) or []),
+        )
+        self._discard_dragging_connection()
         # Wipe current nodes + connections (but keep IN / OUT).
         for c in list(self._connections):
             self.remove_connection(c)
@@ -299,6 +472,23 @@ class NodeGraphScene(QGraphicsScene):
         self._serial_nodes.clear()
         self._connections.clear()
         self._next_id_counter = int(data.get("next_id", 1))
+
+        # Restore IN / OUT positions if the snapshot has them. Older
+        # snapshots predate this field — fall back to the defaults set
+        # in __init__.
+        io_pos = data.get("io_positions") or {}
+        if "IN" in io_pos:
+            try:
+                ix, iy = io_pos["IN"]
+                self._in_node.setPos(float(ix), float(iy))
+            except Exception:
+                pass
+        if "OUT" in io_pos:
+            try:
+                ox, oy = io_pos["OUT"]
+                self._out_node.setPos(float(ox), float(oy))
+            except Exception:
+                pass
 
         # Recreate nodes.
         id_map: dict[str, NodeItem | IONodeItem] = {
@@ -325,6 +515,20 @@ class NodeGraphScene(QGraphicsScene):
                     except Exception:
                         pass
                 node.blur_invert_mask = bool(nd.get("blur_invert_mask", True))
+            elif _is_registered_effect_kind(kind):
+                from app.workbench.node_graph.items.effect_node_item import EffectNodeItem
+                from app.effect_node_params import params_from_dict
+                node = EffectNodeItem(effect_kind=kind, node_id=nd["id"],
+                                      label=nd.get("label", ""))
+                node.setPos(pos)
+                self.addItem(node)
+                self._serial_nodes.append(node)
+                ep_data = nd.get("effect_params")
+                if ep_data:
+                    try:
+                        node.effect_params = params_from_dict(ep_data)
+                    except Exception:
+                        pass
             else:
                 node = NodeItem(node_id=nd["id"], label=nd.get("label", "Serial"))
                 node.setPos(pos)
@@ -373,33 +577,20 @@ class NodeGraphScene(QGraphicsScene):
 
     # ---- DaVinci chain evaluation ----
 
-    def evaluate_chain_to(self, target) -> list:
-        """Walk the connected RGB IN→target path and collect each
-        upstream node's ColorGrade in IN→target order.
+    def evaluate_chain_nodes_to(self, target) -> list:
+        """Walk the connected RGB IN→target path and return the upstream
+        node items in IN→target order. ``target`` itself is excluded
+        when it's the OUT IO node (OUT only exists to terminate the
+        chain), and excluded when ``target is _in_node`` (no upstream).
+        Otherwise ``target`` is included so a per-node thumbnail can
+        show the cumulative result "up to and including this node".
 
-        Returns a list of ``ColorGrade`` instances ready to apply in
-        sequence. The target node's own grade is included at the end
-        — that's the point of the per-node thumbnail (it shows the
-        cumulative result *up to and including* this node).
-
-        For the OUT IO node, returns the chain leading to OUT, which
-        is the full project pipeline.
-
-        Bypassed nodes contribute identity (skipped).
-
-        For now this assumes a linear Serial chain with a single
-        rgb_in / rgb_out path. Parallel mixers and disconnected nodes
-        return their own grade only — proper Parallel-mixing is
-        Phase E follow-up.
+        Bypassed nodes ARE returned — callers (specifically
+        ``_apply_node_effect_player``) skip them themselves, which
+        keeps the bypass semantics in one place.
         """
         if target is None:
             return []
-        from app.workbench.node_graph.items.node_item import NodeItem
-        from app.workbench.node_graph.items.parallel_mixer import (
-            ParallelMixerItem,
-        )
-
-        # Walk back from target via its rgb_in connection.
         chain_nodes: list = []
         cur = target
         seen: set[int] = set()
@@ -407,20 +598,32 @@ class NodeGraphScene(QGraphicsScene):
             if cur is None or id(cur) in seen:
                 break
             seen.add(id(cur))
-            # IN node — terminate. Anything before this is the source.
             if isinstance(cur, IONodeItem) and cur.kind == "IN":
                 break
-            chain_nodes.append(cur)
-            # Walk back through rgb_in port.
+            # Drop the OUT IO node itself — it has no effect, it's
+            # purely a terminator.
+            if not (isinstance(cur, IONodeItem) and cur.kind == "OUT"):
+                chain_nodes.append(cur)
             in_port = getattr(cur, "rgb_in", None)
             if in_port is None or not in_port.connections:
                 break
             up_conn = in_port.connections[0]
             cur = up_conn.source.parentItem()
+        chain_nodes.reverse()
+        return chain_nodes
 
-        chain_nodes.reverse()  # IN→target order
+    def evaluate_chain_to(self, target) -> list:
+        """Legacy: returns ``ColorGrade`` instances only (for callers
+        that haven't been migrated to the full effect-aware
+        ``evaluate_chain_nodes_to`` + ``_apply_node_effect_player``).
+        New code should prefer the nodes-based variant — it also
+        applies effect_params and blur, not just colour grading."""
+        from app.workbench.node_graph.items.node_item import NodeItem
+        from app.workbench.node_graph.items.parallel_mixer import (
+            ParallelMixerItem,
+        )
         grades: list = []
-        for n in chain_nodes:
+        for n in self.evaluate_chain_nodes_to(target):
             if not isinstance(n, (NodeItem, ParallelMixerItem)):
                 continue
             if getattr(n, "bypassed", False):
@@ -436,3 +639,12 @@ def _node_identity(node) -> str:
     if isinstance(node, IONodeItem):
         return node.kind
     return getattr(node, "node_id", "?")
+
+
+def _is_registered_effect_kind(kind: str) -> bool:
+    try:
+        from app.effect_node_params import _KIND_TO_CLASS
+
+        return str(kind) in _KIND_TO_CLASS
+    except Exception:
+        return False

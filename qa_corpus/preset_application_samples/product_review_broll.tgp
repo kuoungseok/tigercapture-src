@@ -1,0 +1,46 @@
+{
+  "project_settings": {
+    "width": 3840,
+    "height": 2160,
+    "fps": 30,
+    "color_space": "Rec.709"
+  },
+  "duration_ms": 120000,
+  "media": [
+    "samples/product_demo_4k.mp4",
+    "samples/broll_cutaway.mov",
+    "samples/review_voice.wav"
+  ],
+  "video_tracks": [
+    {
+      "id": 1,
+      "clips": [
+        {
+          "id": 1,
+          "source_path": "samples/product_demo_4k.mp4",
+          "timeline_in_ms": 0,
+          "timeline_out_ms": 80000
+        },
+        {
+          "id": 2,
+          "source_path": "samples/broll_cutaway.mov",
+          "timeline_in_ms": 82000,
+          "timeline_out_ms": 120000
+        }
+      ]
+    }
+  ],
+  "audio_tracks": [
+    {
+      "id": 2,
+      "clips": [
+        {
+          "id": 1,
+          "source_path": "samples/review_voice.wav",
+          "duration_ms": 120000
+        }
+      ]
+    }
+  ],
+  "notes": "Long product review with B-roll and voice for proxy, template, and audio preset QA."
+}

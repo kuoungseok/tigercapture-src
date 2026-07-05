@@ -1,0 +1,125 @@
+{
+  "skeleton": { "name": "sample", "width": 200, "height": 400, "spine": "4.1.0" },
+  "bones": [
+    { "name": "root" },
+    { "name": "hip", "parent": "root", "y": 100 },
+    { "name": "spine", "parent": "hip", "y": 60, "rotation": 90, "length": 80 },
+    { "name": "chest", "parent": "spine", "x": 80, "length": 50 },
+    { "name": "neck", "parent": "chest", "x": 50, "length": 30 },
+    { "name": "head", "parent": "neck", "x": 30, "length": 60 },
+    { "name": "shoulder_L", "parent": "chest", "x": 20, "y": 40, "rotation": 180, "length": 50 },
+    { "name": "arm_L", "parent": "shoulder_L", "x": 50, "length": 45 },
+    { "name": "hand_L", "parent": "arm_L", "x": 45, "length": 20 },
+    { "name": "shoulder_R", "parent": "chest", "x": 20, "y": -40, "length": 50 },
+    { "name": "arm_R", "parent": "shoulder_R", "x": 50, "length": 45 },
+    { "name": "hand_R", "parent": "arm_R", "x": 45, "length": 20 },
+    { "name": "thigh_L", "parent": "hip", "y": 25, "rotation": 270, "length": 70 },
+    { "name": "shin_L", "parent": "thigh_L", "x": 70, "length": 65 },
+    { "name": "foot_L", "parent": "shin_L", "x": 65, "length": 28, "rotation": 20 },
+    { "name": "thigh_R", "parent": "hip", "y": -25, "rotation": 270, "length": 70 },
+    { "name": "shin_R", "parent": "thigh_R", "x": 70, "length": 65 },
+    { "name": "foot_R", "parent": "shin_R", "x": 65, "length": 28, "rotation": 20 }
+  ],
+  "slots": [
+    { "name": "body",  "bone": "chest",  "attachment": "body"  },
+    { "name": "head",  "bone": "head",   "attachment": "head"  },
+    { "name": "arm_L", "bone": "arm_L",  "attachment": "arm_L" },
+    { "name": "arm_R", "bone": "arm_R",  "attachment": "arm_R" },
+    { "name": "leg_L", "bone": "shin_L", "attachment": "leg_L" },
+    { "name": "leg_R", "bone": "shin_R", "attachment": "leg_R" }
+  ],
+  "animations": {
+    "idle": {
+      "bones": {
+        "hip": {
+          "rotate": [
+            { "time": 0,   "value": 0 },
+            { "time": 0.5, "value": 3 },
+            { "time": 1.0, "value": 0 }
+          ]
+        },
+        "head": {
+          "rotate": [
+            { "time": 0,    "value": 0  },
+            { "time": 0.75, "value": 5  },
+            { "time": 1.5,  "value": -5 },
+            { "time": 2.0,  "value": 0  }
+          ]
+        },
+        "spine": {
+          "rotate": [
+            { "time": 0,   "value": 0 },
+            { "time": 1.0, "value": 3 },
+            { "time": 2.0, "value": 0 }
+          ]
+        }
+      }
+    },
+    "walk": {
+      "bones": {
+        "thigh_L": {
+          "rotate": [
+            { "time": 0,    "value": 0   },
+            { "time": 0.25, "value": 30  },
+            { "time": 0.5,  "value": 0   },
+            { "time": 0.75, "value": -25 },
+            { "time": 1.0,  "value": 0   }
+          ]
+        },
+        "thigh_R": {
+          "rotate": [
+            { "time": 0,    "value": 0   },
+            { "time": 0.25, "value": -25 },
+            { "time": 0.5,  "value": 0   },
+            { "time": 0.75, "value": 30  },
+            { "time": 1.0,  "value": 0   }
+          ]
+        },
+        "arm_L": {
+          "rotate": [
+            { "time": 0,    "value": 0   },
+            { "time": 0.25, "value": -20 },
+            { "time": 0.75, "value": 20  },
+            { "time": 1.0,  "value": 0   }
+          ]
+        },
+        "arm_R": {
+          "rotate": [
+            { "time": 0,    "value": 0   },
+            { "time": 0.25, "value": 20  },
+            { "time": 0.75, "value": -20 },
+            { "time": 1.0,  "value": 0   }
+          ]
+        }
+      }
+    },
+    "jump": {
+      "bones": {
+        "hip": {
+          "translateY": [
+            { "time": 0,   "value": 0  },
+            { "time": 0.3, "value": 80 },
+            { "time": 0.7, "value": 80 },
+            { "time": 1.0, "value": 0  }
+          ]
+        },
+        "thigh_L": {
+          "rotate": [
+            { "time": 0,   "value": 0   },
+            { "time": 0.3, "value": -60 },
+            { "time": 0.7, "value": -60 },
+            { "time": 1.0, "value": 0   }
+          ]
+        },
+        "thigh_R": {
+          "rotate": [
+            { "time": 0,   "value": 0   },
+            { "time": 0.3, "value": -60 },
+            { "time": 0.7, "value": -60 },
+            { "time": 1.0, "value": 0   }
+          ]
+        }
+      }
+    }
+  }
+}

@@ -11,6 +11,13 @@ from pathlib import Path
 from PyInstaller.utils.hooks import copy_metadata
 
 project_root = Path(SPECPATH).resolve().parent  # = repo root
+worker_release = (
+    project_root / 'native' / 'tigercapture_worker' / 'target' / 'release' /
+    'tigercapture-worker'
+)
+native_binaries = []
+if worker_release.exists():
+    native_binaries.append((str(worker_release), 'bundled/native'))
 
 a = Analysis(
     [str(project_root / 'mac' / 'main.py')],
@@ -18,12 +25,13 @@ a = Analysis(
         str(project_root),
         str(project_root / 'mac'),
     ],
-    binaries=[],
+    binaries=native_binaries,
     datas=[
         # Shared locales and resources ride along so the overlaid
         # `app` package can find them exactly as on Windows.
         (str(project_root / 'app' / 'locales' / '*.py'), 'app/locales'),
         (str(project_root / 'resources' / 'tigercapture.ico'), 'resources'),
+        (str(project_root / 'resources' / 'luts' / '*.cube'), 'resources/luts'),
     ] + copy_metadata('imageio_ffmpeg'),
     hiddenimports=[
         'app.locales.ko',

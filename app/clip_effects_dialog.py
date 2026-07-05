@@ -9,6 +9,8 @@ from PySide6.QtWidgets import (
     QSlider, QSpinBox, QTabWidget, QVBoxLayout, QWidget,
 )
 
+from app.icons import app_icon
+
 
 def _slider(lo: int, hi: int, val: int, step: int = 1) -> QSlider:
     s = QSlider(Qt.Orientation.Horizontal)
@@ -110,7 +112,7 @@ class _ChromaTab(QWidget):
         self._bg.addItems(["검정", "흰색", "녹색"])
         form.addRow("배경색:", self._bg)
 
-        lbl = QLabel("💡 그린스크린: Hue=60  블루스크린: Hue=120")
+        lbl = QLabel("Tip: 그린스크린 Hue=60 / 블루스크린 Hue=120")
         lbl.setStyleSheet("color:#888; font-size:10px;")
         form.addRow(lbl)
 
@@ -153,7 +155,7 @@ class _StabTab(QWidget):
         self._crop.valueChanged.connect(self._emit)
         form.addRow("크롭 비율(%):", self._crop)
 
-        lbl = QLabel("⚠ 안정화는 순차 재생 시 적용됩니다 (탐색 시 리셋)")
+        lbl = QLabel("Warning: 안정화는 순차 재생 시 적용됩니다 (탐색 시 리셋)")
         lbl.setStyleSheet("color:#f90; font-size:10px;")
         lbl.setWordWrap(True)
         form.addRow(lbl)
@@ -209,7 +211,7 @@ class _BgRemovalTab(QWidget):
         self._feather.valueChanged.connect(self._emit)
         form.addRow("가장자리 부드럽게:", self._feather)
 
-        lbl = QLabel("💡 rembg 사용 시 pip install rembg 필요")
+        lbl = QLabel("Tip: rembg 사용 시 pip install rembg 필요")
         lbl.setStyleSheet("color:#888; font-size:10px;")
         form.addRow(lbl)
 
@@ -251,22 +253,22 @@ class ClipEffectsDialog(QDialog):
         # Video Filters tab
         self._filters_tab = _FiltersTab(clip.video_filters)
         self._filters_tab.changed.connect(self._on_changed)
-        tabs.addTab(self._filters_tab, "🎨 필터")
+        tabs.addTab(self._filters_tab, app_icon("color", size=16), "필터")
 
         # Chroma Key tab
         self._chroma_tab = _ChromaTab(clip.chroma_key)
         self._chroma_tab.changed.connect(self._on_changed)
-        tabs.addTab(self._chroma_tab, "🟩 크로마키")
+        tabs.addTab(self._chroma_tab, app_icon("target", size=16), "크로마키")
 
         # Stabilizer tab
         self._stab_tab = _StabTab(clip.stabilizer)
         self._stab_tab.changed.connect(self._on_changed)
-        tabs.addTab(self._stab_tab, "📷 안정화")
+        tabs.addTab(self._stab_tab, app_icon("fit", size=16), "안정화")
 
         # Background Removal tab
         self._bg_tab = _BgRemovalTab(clip.bg_removal)
         self._bg_tab.changed.connect(self._on_changed)
-        tabs.addTab(self._bg_tab, "🤖 배경 제거")
+        tabs.addTab(self._bg_tab, app_icon("person", size=16), "배경 제거")
 
         # Close button
         btns = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)

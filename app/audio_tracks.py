@@ -28,11 +28,13 @@ Final export (``build_audio_filter``):
 """
 from __future__ import annotations
 
+import sys
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from PySide6.QtCore import QObject, QThread, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import QObject, QProcess, QThread, QTimer, QUrl, Signal, Slot
 from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
 
 if TYPE_CHECKING:
@@ -44,6 +46,106 @@ VIDEO_EXTS = frozenset({".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".wmv",
 
 # Waveform extraction: ~40 peak buckets per second of source audio.
 WAVEFORM_BUCKETS_PER_SEC = 40
+_AUDIO_CACHE_LIMIT = 32
+_WAVEFORM_CACHE: "OrderedDict[tuple[str, int, int], object]" = OrderedDict()
+_SPECTRUM_CACHE: "OrderedDict[tuple[str, int, int], object]" = OrderedDict()
+
+
+def audio_file_cache_key(path: Path | str) -> tuple[str, int, int]:
+    p = Path(path)
+    try:
+        st = p.stat()
+        return str(p.resolve()), int(st.st_mtime_ns), int(st.st_size)
+    except Exception:
+        return str(p), 0, 0
+
+
+def _audio_cache_get(cache: OrderedDict, key):
+    if key not in cache:
+        return None
+    value = cache.pop(key)
+    cache[key] = value
+    return value
+
+
+def _audio_cache_put(cache: OrderedDict, key, value) -> None:
+    cache[key] = value
+    while len(cache) > _AUDIO_CACHE_LIMIT:
+        cache.popitem(last=False)
+
+
+def get_cached_waveform(path: Path | str):
+    value = _audio_cache_get(_WAVEFORM_CACHE, audio_file_cache_key(path))
+    return value.copy() if hasattr(value, "copy") else value
+
+
+def store_cached_waveform(path: Path | str, peaks) -> None:
+    value = peaks.copy() if hasattr(peaks, "copy") else peaks
+    _audio_cache_put(_WAVEFORM_CACHE, audio_file_cache_key(path), value)
+
+
+def get_cached_spectrum(path: Path | str):
+    value = _audio_cache_get(_SPECTRUM_CACHE, audio_file_cache_key(path))
+    return value.copy() if hasattr(value, "copy") else value
+
+
+def store_cached_spectrum(path: Path | str, bins) -> None:
+    value = bins.copy() if hasattr(bins, "copy") else bins
+    _audio_cache_put(_SPECTRUM_CACHE, audio_file_cache_key(path), value)
+
+
+def _qmedia_safe_path(path: Path | str) -> str:
+    """Return a path string safe to hand to QMediaPlayer.setSource on
+    Windows. Qt 6.11's FFmpeg backend reliably aborts (``QThread:
+    Destroyed while thread '' is still running`` followed by exit
+    code 9) when handed a file path containing CJK characters from
+    languages other than the host's locale — e.g. a Japanese mp3 on
+    Korean Windows. The Win32 short (8.3) path is plain ASCII and
+    sidesteps the crash. On non-Windows hosts, or if the file has no
+    short alias, fall back to the original path."""
+    p_str = str(path)
+    if sys.platform != "win32":
+        return p_str
+    # Cheap path: stay on the long path when it's already pure ASCII.
+    try:
+        p_str.encode("ascii")
+        return p_str
+    except UnicodeEncodeError:
+        pass
+    try:
+        import ctypes
+        from ctypes import wintypes
+        GetShortPathNameW = ctypes.windll.kernel32.GetShortPathNameW
+        GetShortPathNameW.argtypes = [
+            wintypes.LPCWSTR, wintypes.LPWSTR, wintypes.DWORD,
+        ]
+        GetShortPathNameW.restype = wintypes.DWORD
+        buf = ctypes.create_unicode_buffer(32768)  # MAX_PATH-aware
+        n = GetShortPathNameW(p_str, buf, len(buf))
+        if 0 < n < len(buf) and buf.value:
+            return buf.value
+    except Exception:
+        pass
+    return p_str
+
+
+def _safe_log_stderr(msg: str) -> None:
+    """Write a log line to stderr without crashing on encoding
+    mismatches. Korean Windows defaults sys.stderr to cp949, which
+    can't represent Japanese / other CJK characters in user-supplied
+    paths — a plain ``print(...)`` would raise UnicodeEncodeError and
+    propagate through the surrounding Qt event handler, leaving the
+    QMediaPlayer / QThread setup in a half-initialised state that
+    aborts the process. Encoding with ``errors='replace'`` guarantees
+    no exception escapes."""
+    try:
+        import sys as _sys
+        enc = getattr(_sys.stderr, "encoding", None) or "utf-8"
+        safe = (msg + "\n").encode(enc, errors="replace").decode(enc, errors="replace")
+        _sys.stderr.write(safe)
+        _sys.stderr.flush()
+    except Exception:
+        pass
 
 
 def is_audio_path(path: Path | str) -> bool:
@@ -102,6 +204,26 @@ def default_effects_state() -> dict:
             "freq": 6000.0,       # Hz
             "threshold": -30.0,   # dB
             "reduction": 40.0,    # %
+        },
+        "dialogue_cleanup": {
+            "enabled": False,
+            "strength": 0.0,       # 0..1 macro amount
+            "noise_reduction": 0.0, # afftdn noise reduction dB
+            "highpass_hz": 80.0,
+            "hum_remove": False,
+            "presence_db": 0.0,
+            "air_db": 0.0,
+            "de_reverb": 0.0,      # 0..1 tail-control macro
+            "mouth_click": False,
+            "plosive": False,
+            "auto_level": False,
+        },
+        "loudness": {
+            "enabled": False,
+            "target_i": -14.0,     # integrated LUFS
+            "true_peak": -1.0,     # dBTP
+            "lra": 11.0,
+            "target_id": "shortform",
         },
         "time_stretch": {
             "enabled": False,
@@ -190,6 +312,8 @@ class AudioTrack:
     clips: list[AudioClip] = field(default_factory=list)
     pan: float = 0.0             # stereo pan, -1.0 (L) to +1.0 (R)
     label: str = ""              # user-visible strip label (empty = auto)
+    bus_id: str = "master"       # dialogue / music / sfx / master
+    automation_points: list = field(default_factory=list)
 
     @property
     def is_loaded(self) -> bool:
@@ -207,6 +331,8 @@ class AudioTrack:
         """Label for the track header. When the track has clips from
         different sources, fall back to a "multi-clip" shorthand; with
         a single source name, show that filename."""
+        if self.label:
+            return self.label
         names = {c.source_path.stem for c in self.clips if c.source_path is not None}
         if len(names) == 1:
             return next(iter(names))
@@ -245,11 +371,20 @@ def probe_audio_duration_ms(path: Path) -> int:
     file" even when the container reports a duration.
     """
     try:
+        from imageio_ffmpeg import get_ffmpeg_exe
+
+        from app.native_worker import native_media_probe
+
+        probe = native_media_probe(path, ffmpeg_path=get_ffmpeg_exe())
+        if probe is not None and probe.has_audio and probe.duration_ms > 0:
+            return int(probe.duration_ms)
+    except Exception:
+        pass
+    try:
         import re
         import subprocess
-        import sys
-
         from imageio_ffmpeg import get_ffmpeg_exe
+        from app.subprocess_utils import hidden_subprocess_kwargs
 
         ffmpeg = get_ffmpeg_exe()
         proc = subprocess.run(
@@ -258,9 +393,7 @@ def probe_audio_duration_ms(path: Path) -> int:
             text=True,
             encoding="utf-8",
             errors="replace",
-            creationflags=(
-                0x08000000 if sys.platform == "win32" else 0  # CREATE_NO_WINDOW
-            ),
+            **hidden_subprocess_kwargs(),
         )
         stderr = proc.stderr or ""
         # Reject files that advertise only video / data / subtitle streams.
@@ -277,98 +410,234 @@ def probe_audio_duration_ms(path: Path) -> int:
         return 0
 
 
-class WaveformExtractor(QThread):
-    """Background waveform-peak extractor. Emits ``ready(clip_id, peaks)``
-    on success, ``failed(clip_id, reason)`` on decode failure. Tagged
-    with the AudioClip id so the editor can route results correctly."""
+class _NativeWaveformThread(QThread):
+    ready = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, path: Path) -> None:
+        super().__init__()
+        self._path = Path(path)
+
+    def run(self) -> None:
+        try:
+            from imageio_ffmpeg import get_ffmpeg_exe
+            from app.subprocess_utils import hidden_subprocess_kwargs
+
+            from app.native_worker import native_audio_waveform
+
+            peaks = native_audio_waveform(
+                self._path,
+                ffmpeg_path=get_ffmpeg_exe(),
+                sample_rate=8000,
+                buckets_per_sec=WAVEFORM_BUCKETS_PER_SEC,
+            )
+            if peaks is None:
+                self.failed.emit("native waveform unavailable")
+                return
+            store_cached_waveform(self._path, peaks)
+            self.ready.emit(peaks)
+        except Exception as exc:
+            self.failed.emit(str(exc) or repr(exc))
+
+
+class WaveformExtractor(QObject):
+    """Background waveform-peak extractor (QProcess-based).
+
+    Emits ``ready(clip_id, peaks)`` on success and
+    ``failed(clip_id, reason)`` on decode failure. ``finished()`` fires
+    after either of those so callers can still use the
+    ``finished.connect(deleteLater)`` cleanup idiom that the old
+    QThread-based version supported.
+
+    Why not QThread anymore: running ffmpeg in a ``QThread`` whose
+    ``run()`` blocks on ``subprocess.Popen.communicate()`` reliably
+    aborted Qt 6.11 on Windows with ``QThread: Destroyed while thread
+    '' is still running`` when the sound editor opened — apparently
+    a race between the Python QThread destruction path and Qt's
+    media multimedia init. ``QProcess`` runs entirely on the main
+    thread's event loop (asynchronous IO via Qt's I/O notifiers), so
+    there's no Python QThread to misbehave.
+    """
 
     ready = Signal(int, object)  # clip_id, np.ndarray
     failed = Signal(int, str)
+    finished = Signal()          # mimics QThread.finished for ``deleteLater`` callers
 
     def __init__(self, clip_id: int, path: Path) -> None:
         super().__init__()
         self._clip_id = clip_id
         self._path = Path(path)
+        self._proc: QProcess | None = None
+        self._native_thread: _NativeWaveformThread | None = None
+        self._done: bool = False
 
-    def run(self) -> None:
-        import sys
-        try:
-            import subprocess
+    # ---- QThread-compat surface ----
 
-            import numpy as np
-            from imageio_ffmpeg import get_ffmpeg_exe
+    def isRunning(self) -> bool:  # noqa: N802 (Qt naming)
+        return (
+            self._proc is not None
+            and self._proc.state() != QProcess.ProcessState.NotRunning
+        ) or (
+            self._native_thread is not None and self._native_thread.isRunning()
+        )
 
-            ffmpeg = get_ffmpeg_exe()
-            target_sr = 8000
-            # Extract stereo (2 channels).  Emits a shape-(2, N) array
-            # where row 0 = left peaks, row 1 = right peaks.  Mono
-            # sources produce identical rows.  Downstream code checks
-            # for the 2-D shape to decide whether to draw stereo.
-            cmd = [
-                ffmpeg,
-                "-nostdin",
-                "-v", "error",
-                "-i", str(self._path),
-                "-map", "0:a:0",
-                "-ac", "2",          # always 2 ch — mono sources duplicate
-                "-ar", str(target_sr),
-                "-f", "s16le",
-                "-acodec", "pcm_s16le",
-                "pipe:1",
-            ]
-            proc = subprocess.Popen(
-                cmd,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                creationflags=(
-                    0x08000000 if sys.platform == "win32" else 0
-                ),
-            )
-            raw, err = proc.communicate()
-            if proc.returncode != 0 or not raw:
-                err_text = (err or b"").decode("utf-8", errors="replace").strip()
-                print(
-                    f"[waveform] ffmpeg failed for {self._path.name}: "
-                    f"rc={proc.returncode} err={err_text[-300:]}",
-                    file=sys.stderr, flush=True,
-                )
-                self.failed.emit(
-                    self._clip_id,
-                    err_text or f"ffmpeg exited {proc.returncode}",
-                )
-                return
-
-            # Interleaved stereo: [L0,R0, L1,R1, ...]
-            samples = np.frombuffer(raw, dtype=np.int16)
-            if samples.size < 2:
-                self.failed.emit(self._clip_id, "empty decoded stream")
-                return
-
-            # Separate channels
-            left  = samples[0::2].astype(np.float32)
-            right = samples[1::2].astype(np.float32)
-            n_ch_samples = min(len(left), len(right))
-            samples_per_bucket = max(1, target_sr // WAVEFORM_BUCKETS_PER_SEC)
-            n_buckets = n_ch_samples // samples_per_bucket
-            if n_buckets == 0:
-                self.failed.emit(self._clip_id, "audio too short for peaks")
-                return
-            left  = left [:n_buckets * samples_per_bucket]
-            right = right[:n_buckets * samples_per_bucket]
-            l_peaks = np.abs(left .reshape(n_buckets, samples_per_bucket)).max(axis=1) / 32768.0
-            r_peaks = np.abs(right.reshape(n_buckets, samples_per_bucket)).max(axis=1) / 32768.0
-            # Shape (2, N): row 0 = L, row 1 = R
-            stereo_peaks = np.stack([l_peaks, r_peaks]).astype(np.float32)
-            self.ready.emit(self._clip_id, stereo_peaks)
-        except Exception as exc:
-            print(
-                f"[waveform] extractor crashed for {self._path.name}: {exc!r}",
-                file=sys.stderr, flush=True,
-            )
+    def quit(self) -> None:
+        """Best-effort: terminate the underlying ffmpeg process. Maps
+        the old QThread.quit() callers — close-by-name shutdown."""
+        if self._proc is not None and self.isRunning():
             try:
-                self.failed.emit(self._clip_id, str(exc))
+                self._proc.terminate()
             except Exception:
                 pass
+        if self._native_thread is not None and self._native_thread.isRunning():
+            self._native_thread.requestInterruption()
+
+    def wait(self, ms: int = 0) -> bool:  # noqa: N802
+        ok = True
+        if self._proc is not None:
+            ok = bool(self._proc.waitForFinished(int(ms)))
+        if self._native_thread is not None:
+            ok = bool(self._native_thread.wait(int(ms))) and ok
+        return ok
+
+    def terminate(self) -> None:
+        if self._proc is not None and self.isRunning():
+            try:
+                self._proc.kill()
+            except Exception:
+                pass
+        if self._native_thread is not None and self._native_thread.isRunning():
+            self._native_thread.requestInterruption()
+
+    # ---- main entry ----
+
+    def start(self) -> None:
+        try:
+            from app.native_worker import discover_native_worker_command
+
+            if discover_native_worker_command() is not None:
+                thread = _NativeWaveformThread(self._path)
+                self._native_thread = thread
+                thread.ready.connect(self._on_native_ready)
+                thread.failed.connect(self._on_native_failed)
+                thread.finished.connect(lambda _t=thread: self._clear_native_thread(_t))
+                thread.finished.connect(thread.deleteLater)
+                thread.start()
+                return
+        except Exception:
+            pass
+        self._start_ffmpeg_process()
+
+    def _start_ffmpeg_process(self) -> None:
+        from imageio_ffmpeg import get_ffmpeg_exe
+        from app.subprocess_utils import configure_hidden_qprocess
+
+        ffmpeg = get_ffmpeg_exe()
+        target_sr = 8000
+        args = [
+            "-nostdin",
+            "-v", "error",
+            "-i", str(self._path),
+            "-map", "0:a:0",
+            "-ac", "2",          # always 2 ch — mono sources duplicate
+            "-ar", str(target_sr),
+            "-f", "s16le",
+            "-acodec", "pcm_s16le",
+            "pipe:1",
+        ]
+        self._target_sr = target_sr
+
+        self._proc = QProcess(self)
+        self._proc.setProcessChannelMode(QProcess.ProcessChannelMode.SeparateChannels)
+        configure_hidden_qprocess(self._proc)
+        self._proc.errorOccurred.connect(self._on_error)
+        self._proc.finished.connect(self._on_finished)
+        self._proc.start(ffmpeg, args)
+
+    @Slot(object)
+    def _on_native_ready(self, peaks) -> None:
+        if self._done:
+            return
+        self._done = True
+        try:
+            self.ready.emit(self._clip_id, peaks)
+        finally:
+            self.finished.emit()
+
+    @Slot(str)
+    def _on_native_failed(self, _reason: str) -> None:
+        if self._done:
+            return
+        self._start_ffmpeg_process()
+
+    def _clear_native_thread(self, thread: _NativeWaveformThread) -> None:
+        if self._native_thread is thread:
+            self._native_thread = None
+
+    # ---- callbacks ----
+
+    @Slot()
+    def _on_error(self, _err) -> None:
+        if self._done or self._proc is None:
+            return
+        self._done = True
+        msg = self._proc.errorString()
+        _safe_log_stderr(f"[waveform] QProcess error for {self._path.name}: {msg}")
+        try:
+            self.failed.emit(self._clip_id, msg or "ffmpeg failed to start")
+        finally:
+            self.finished.emit()
+
+    @Slot(int, "QProcess::ExitStatus")
+    def _on_finished(self, exit_code: int, _status) -> None:
+        if self._done:
+            return
+        self._done = True
+        try:
+            self._handle_result(exit_code)
+        finally:
+            self.finished.emit()
+
+    def _handle_result(self, exit_code: int) -> None:
+        import numpy as np
+        try:
+            err_bytes = bytes(self._proc.readAllStandardError())
+            raw = bytes(self._proc.readAllStandardOutput())
+        except Exception as exc:
+            self.failed.emit(self._clip_id, f"read pipes failed: {exc!r}")
+            return
+        if exit_code != 0 or not raw:
+            err_text = err_bytes.decode("utf-8", errors="replace").strip()
+            _safe_log_stderr(
+                f"[waveform] ffmpeg failed for {self._path.name}: "
+                f"rc={exit_code} err={err_text[-300:]}"
+            )
+            self.failed.emit(
+                self._clip_id,
+                err_text or f"ffmpeg exited {exit_code}",
+            )
+            return
+
+        samples = np.frombuffer(raw, dtype=np.int16)
+        if samples.size < 2:
+            self.failed.emit(self._clip_id, "empty decoded stream")
+            return
+
+        left = samples[0::2].astype(np.float32)
+        right = samples[1::2].astype(np.float32)
+        n_ch_samples = min(len(left), len(right))
+        samples_per_bucket = max(1, self._target_sr // WAVEFORM_BUCKETS_PER_SEC)
+        n_buckets = n_ch_samples // samples_per_bucket
+        if n_buckets == 0:
+            self.failed.emit(self._clip_id, "audio too short for peaks")
+            return
+        left = left[:n_buckets * samples_per_bucket]
+        right = right[:n_buckets * samples_per_bucket]
+        l_peaks = np.abs(left.reshape(n_buckets, samples_per_bucket)).max(axis=1) / 32768.0
+        r_peaks = np.abs(right.reshape(n_buckets, samples_per_bucket)).max(axis=1) / 32768.0
+        stereo_peaks = np.stack([l_peaks, r_peaks]).astype(np.float32)
+        store_cached_waveform(self._path, stereo_peaks)
+        self.ready.emit(self._clip_id, stereo_peaks)
 
 
 # ============================== preview mixer ==============================
@@ -434,6 +703,16 @@ class AudioMixer(QObject):
         self._tracks.clear()
 
     def _ensure_player(self, clip: AudioClip, track_id: int) -> None:
+        """Create (but do not yet source-load) a preview player for
+        ``clip``. The actual ``setSource`` is deferred to
+        ``_ensure_source_loaded`` so we don't kick Qt's FFmpeg demuxer
+        thread to life at the same instant the WaveformExtractor /
+        SpectrumExtractor / SoundEditor are spinning up — that
+        concurrent-init race trips Qt 6.11 on Windows and aborts the
+        process with ``QThread: Destroyed while thread '' is still
+        running``. Loading on first ``_sync_clip_to_project`` means
+        the source is opened only once the user actually starts
+        playback, well after the extractor threads have settled."""
         if clip.source_path is None:
             return
         existing = self._players.get(clip.id)
@@ -442,8 +721,12 @@ class AudioMixer(QObject):
             player = QMediaPlayer(self)
             player.setAudioOutput(output)
             self._players[clip.id] = (player, output, track_id)
-        player, output, _tid = self._players[clip.id]
-        new_url = QUrl.fromLocalFile(str(clip.source_path))
+
+    def _ensure_source_loaded(self, player: QMediaPlayer, clip: AudioClip) -> None:
+        if clip.source_path is None:
+            return
+        safe_path = _qmedia_safe_path(clip.source_path)
+        new_url = QUrl.fromLocalFile(safe_path)
         if player.source() != new_url:
             player.setSource(new_url)
 
@@ -505,6 +788,11 @@ class AudioMixer(QObject):
             except Exception:
                 pass
             return
+        # Load the source now — the user just put the playhead inside
+        # this clip's window, so we know preview is imminent. By this
+        # point any drop-time extractor threads are settled, so Qt's
+        # FFmpeg backend can safely spin up its demuxer.
+        self._ensure_source_loaded(player, clip)
         src_ms = clip.trim_start_ms + (project_ms - clip.offset_ms)
         src_ms = max(0, min(src_ms, clip.effective_trim_end_ms))
         try:
@@ -591,6 +879,78 @@ class AudioMixer(QObject):
 
 
 # ============================== export pipeline ==============================
+
+
+def _chain_atempo(ratio: float) -> str:
+    """Express ``atempo=ratio`` as a comma-joined chain, since ffmpeg's
+    ``atempo`` only accepts 0.5..2.0 per stage. A value of 4× becomes
+    ``atempo=2.0,atempo=2.0``; 0.25× becomes ``atempo=0.5,atempo=0.5``.
+    Returns "" when the requested ratio is effectively 1×."""
+    if abs(ratio - 1.0) < 1e-3 or ratio <= 0:
+        return ""
+    parts: list[str] = []
+    r = ratio
+    while r > 2.0:
+        parts.append("atempo=2.0")
+        r /= 2.0
+    while r < 0.5:
+        parts.append("atempo=0.5")
+        r /= 0.5
+    if abs(r - 1.0) > 1e-3:
+        parts.append(f"atempo={r:.4f}")
+    return ",".join(parts)
+
+
+def _build_basic_tab_chain(clip: "AudioClip", *, include_clip_pan: bool = False) -> str:
+    """Render the per-clip Basic-tab transforms (``_se_pitch`` /
+    ``_se_speed`` / ``_se_reverse``) into an ffmpeg sub-chain.
+
+    Pitch shift uses the classic sample-rate trick: ``asetrate``
+    scales playback frequency, ``aresample=44100`` brings the sample
+    rate back to a fixed target, and ``atempo=1/ratio`` restores the
+    original duration. Layering Speed on top is just an additional
+    ``atempo`` multiplier. Reverse goes last because it's buffered.
+    All parameters live on the AudioClip via getattr so a clip
+    that's never been opened in the Sound Editor sees this as a no-op.
+    """
+    pitch_st = float(getattr(clip, "_se_pitch", 0.0) or 0.0)
+    speed = float(getattr(clip, "_se_speed", 1.0) or 1.0)
+    reverse = bool(getattr(clip, "_se_reverse", False))
+    pan = float(getattr(clip, "_se_pan", 0.0) or 0.0)
+
+    parts: list[str] = []
+
+    if abs(pitch_st) > 0.05:
+        pitch_ratio = 2 ** (pitch_st / 12.0)  # 1 semitone = 2^(1/12)
+        # Force the source to 44100 Hz first so asetrate's literal
+        # 44100 is correct regardless of the input sample rate.
+        parts.append("aresample=44100")
+        parts.append(f"asetrate=44100*{pitch_ratio:.6f}")
+        parts.append("aresample=44100")
+        # Tempo correction: restore original duration after the pitch
+        # shift, then layer the Speed knob on top.
+        total_atempo = (1.0 / pitch_ratio) * speed
+    else:
+        total_atempo = speed
+
+    atempo_chain = _chain_atempo(total_atempo)
+    if atempo_chain:
+        parts.append(atempo_chain)
+
+    if reverse:
+        parts.append("areverse")
+
+    if include_clip_pan and abs(pan) > 0.005:
+        pan = max(-1.0, min(1.0, pan))
+        pan_l = max(0.0, 1.0 - pan)
+        pan_r = max(0.0, 1.0 + pan)
+        parts.append(
+            "apan=stereo"
+            f"|c0=c0*{pan_l:.4f}+c1*{pan_l:.4f}"
+            f"|c1=c0*{pan_r:.4f}+c1*{pan_r:.4f}"
+        )
+
+    return ",".join(parts)
 
 
 def _build_effect_chain(effects: dict) -> str:
@@ -688,6 +1048,48 @@ def _build_effect_chain(effects: dict) -> str:
         if abs(gain) > 0.2:
             parts.append(f"equalizer=f={freq:.0f}:t=q:w=3.0:g={gain:.2f}")
 
+    dialogue = effects.get("dialogue_cleanup") or {}
+    if dialogue.get("enabled"):
+        highpass_hz = max(20.0, min(400.0, float(dialogue.get("highpass_hz", 80.0))))
+        parts.append(f"highpass=f={highpass_hz:.1f}")
+
+        nr = max(0.0, min(30.0, float(dialogue.get("noise_reduction", 0.0))))
+        if nr > 0.25:
+            parts.append(f"afftdn=nr={nr:.2f}")
+
+        if dialogue.get("hum_remove"):
+            parts.append("equalizer=f=60:t=q:w=18.0:g=-18.00")
+            parts.append("equalizer=f=120:t=q:w=18.0:g=-10.00")
+
+        if dialogue.get("plosive"):
+            parts.append("equalizer=f=120:t=q:w=1.2:g=-3.00")
+
+        if dialogue.get("mouth_click"):
+            parts.append("equalizer=f=3500:t=q:w=5.0:g=-3.00")
+
+        presence_db = max(-6.0, min(6.0, float(dialogue.get("presence_db", 0.0))))
+        if abs(presence_db) > 0.05:
+            parts.append(f"equalizer=f=3000:t=q:w=1.0:g={presence_db:.2f}")
+
+        air_db = max(-6.0, min(6.0, float(dialogue.get("air_db", 0.0))))
+        if abs(air_db) > 0.05:
+            parts.append(f"treble=g={air_db:.2f}:f=10000")
+
+        de_reverb = max(0.0, min(1.0, float(dialogue.get("de_reverb", 0.0))))
+        if de_reverb > 0.05:
+            # Lightweight tail control. This is not convolution dereverb, but it
+            # gives the product a stable export path for the dialogue-cleanup UI.
+            thr_db = -45.0 + de_reverb * 10.0
+            thr_lin = 10 ** (thr_db / 20.0)
+            ratio = 1.5 + de_reverb * 3.5
+            parts.append(
+                f"agate=threshold={thr_lin:.4f}:ratio={ratio:.2f}:"
+                f"attack=8:release={180.0 - de_reverb * 90.0:.1f}"
+            )
+
+        if dialogue.get("auto_level"):
+            parts.append("dynaudnorm=f=150:g=15:p=0.90")
+
     ts = effects.get("time_stretch") or {}
     if ts.get("enabled"):
         ratio = max(0.5, min(2.0, float(ts.get("ratio", 1.0))))
@@ -760,6 +1162,16 @@ def _build_effect_chain(effects: dict) -> str:
                 p = 0.4 + (excite / 100.0) * 0.5
                 parts.append(f"asoftclip=type=tanh:param={p:.2f}")
 
+    loudness = effects.get("loudness") or {}
+    if loudness.get("enabled"):
+        target_i = max(-36.0, min(-5.0, float(loudness.get("target_i", -14.0))))
+        true_peak = max(-9.0, min(0.0, float(loudness.get("true_peak", -1.0))))
+        lra = max(1.0, min(20.0, float(loudness.get("lra", 11.0))))
+        parts.append(
+            f"loudnorm=I={target_i:.2f}:TP={true_peak:.2f}:"
+            f"LRA={lra:.2f}:linear=true"
+        )
+
     return ",".join(parts)
 
 
@@ -789,6 +1201,38 @@ def _subtract_cuts(
                 new_ranges.append((ce, e))
         ranges = new_ranges
     return [(s, e) for s, e in ranges if e > s]
+
+
+def _volume_ramp_expr(points, dur_s: float) -> str | None:
+    """Build an FFmpeg volume expression from normalized automation points."""
+    if not points:
+        return None
+    try:
+        sorted_pts = sorted(points, key=lambda p: p[0])
+    except Exception:
+        return None
+
+    def _v(p):
+        return max(0.0, min(2.0, float(p[1])))
+
+    def _ts(p):
+        return max(0.0, min(1.0, float(p[0]))) * max(0.001, float(dur_s))
+
+    all_pts = [(0.0, _v(sorted_pts[0]))] if float(sorted_pts[0][0]) > 0 else []
+    all_pts += [(_ts(p), _v(p)) for p in sorted_pts]
+    if float(sorted_pts[-1][0]) < 1.0:
+        all_pts.append((max(0.001, float(dur_s)), _v(sorted_pts[-1])))
+    if len(all_pts) < 2:
+        return f"{all_pts[0][1]:.3f}" if all_pts else None
+
+    expr = f"{all_pts[-1][1]:.3f}"
+    for i in range(len(all_pts) - 2, -1, -1):
+        t0, v0 = all_pts[i]
+        t1, v1 = all_pts[i + 1]
+        slope = (v1 - v0) / max(1e-6, t1 - t0)
+        seg = f"{v0:.3f}+{slope:.6f}*(t-{t0:.3f})"
+        expr = f"if(lt(t\\,{t1:.3f}),{seg},{expr})"
+    return expr
 
 
 def build_audio_filter(
@@ -882,6 +1326,14 @@ def build_audio_filter(
             )
             current = panlabel
 
+        track_env = getattr(track, "automation_points", None) or []
+        if track_env:
+            track_expr = _volume_ramp_expr(track_env, out_cap_s)
+            if track_expr:
+                tlabel = f"[a{idx}ta]"
+                parts.append(f"{current}volume='{track_expr}':eval=frame{tlabel}")
+                current = tlabel
+
         # Volume envelope — converts the clip's volume_points list
         # to an ffmpeg ``volume`` filter with a linear ramp expression
         # so the rendered audio follows the rubberband automation.
@@ -915,10 +1367,10 @@ def build_audio_filter(
                     seg = f"{v0:.3f}+{slope:.6f}*(t-{t0:.3f})"
                     expr = f"if(lt(t\\,{t1:.3f}),{seg},{expr})"
                 return expr
-            env_expr = _ramp_expr(env_pts, clip_dur_s)
+            env_expr = _volume_ramp_expr(env_pts, clip_dur_s)
             if env_expr:
                 elabel = f"[a{idx}e]"
-                parts.append(f"{current}volume='{env_expr}'{elabel}")
+                parts.append(f"{current}volume='{env_expr}':eval=frame{elabel}")
                 current = elabel
 
         # --- sound-editor effects (clip.effects) ---
@@ -927,6 +1379,18 @@ def build_audio_filter(
             fxlabel = f"[a{idx}fx]"
             parts.append(f"{current}{fx_chain}{fxlabel}")
             current = fxlabel
+
+        # --- Basic tab: pitch / speed / reverse ---
+        # _se_pitch / _se_speed / _se_reverse live on the clip itself
+        # (not in clip.effects) because the sound-editor Basic tab
+        # treats them as per-clip transforms, not togglable effects.
+        # Order matters: pitch first (sample-rate trick + atempo to
+        # restore duration), speed next (more atempo), then reverse.
+        se_chain = _build_basic_tab_chain(clip)
+        if se_chain:
+            blabel = f"[a{idx}se]"
+            parts.append(f"{current}{se_chain}{blabel}")
+            current = blabel
 
         local_len_ms = clip.effective_length_ms
         fade_filters: list[str] = []
@@ -1061,6 +1525,14 @@ def build_single_clip_filter(clip: "AudioClip") -> tuple[str, int]:
     if fx:
         nxt = "[fx]"
         parts.append(f"{current}{fx}{nxt}")
+        current = nxt
+
+    # Same Basic-tab transforms as the project-export path — pitch /
+    # speed / reverse only land in the rendered file via this chain.
+    se = _build_basic_tab_chain(clip, include_clip_pan=True)
+    if se:
+        nxt = "[se]"
+        parts.append(f"{current}{se}{nxt}")
         current = nxt
 
     fade_filters: list[str] = []
@@ -1314,9 +1786,7 @@ class ClipExporter(QThread):
                 text=True,
                 encoding="utf-8",
                 errors="replace",
-                creationflags=(
-                    0x08000000 if sys.platform == "win32" else 0
-                ),
+                **hidden_subprocess_kwargs(),
             )
             if proc.returncode != 0:
                 # ffmpeg error output can be huge; keep the tail.

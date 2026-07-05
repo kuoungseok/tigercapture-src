@@ -1,11 +1,12 @@
 from __future__ import annotations
 
+import time
 from pathlib import Path
 
 from PIL import Image
 from PySide6.QtCore import QObject, QRect, Qt, QTimer
 from PySide6.QtGui import QGuiApplication
-from PySide6.QtWidgets import QMessageBox
+from PySide6.QtWidgets import QApplication, QMessageBox
 
 from app.capture import capture_region
 from app.countdown_overlay import CountdownOverlay
@@ -40,6 +41,8 @@ class AppController(QObject):
         self._pending_mode: CaptureMode | None = None
         self._pending_include_cursor: bool = True
         self._open_result_windows: list[QObject] = []
+        self._video_editor_opening: bool = False
+        self._last_video_editor_open_at: float = 0.0
 
         self._recorder: FrameRecorder | None = None
         self._border_overlay: RecordingBorderOverlay | None = None
@@ -63,6 +66,12 @@ class AppController(QObject):
         self.main_window.open_settings_requested.connect(self._open_settings_dialog)
         self.main_window.open_video_editor_requested.connect(
             self._open_video_editor
+        )
+        self.main_window.open_project_requested.connect(
+            self._open_project_from_startup
+        )
+        self.main_window.open_template_requested.connect(
+            self._open_template_from_startup
         )
         self.main_window.open_sound_editor_requested.connect(
             self._open_sound_editor
@@ -100,13 +109,228 @@ class AppController(QObject):
             source_path = Path(path)
         self.open_gif_editor_with_file(source_path)
 
-    def _open_video_editor(self, source_path: Path | None = None) -> None:
-        editor = VideoEditorWindow(source_path=source_path)
+    @staticmethod
+    def _parse_video_editor_payload(payload: object) -> tuple[Path | None, str]:
+        """Normalize launcher/editor-open payloads.
+
+        Older call sites still emit a plain Path/None.  The launcher now
+        emits a small dict so it can carry the chosen workspace mode too.
+        """
+        source: object = payload
+        mode = "standard"
+        if isinstance(payload, dict):
+            source = payload.get("source_path")
+            mode = str(payload.get("workspace_mode") or payload.get("mode") or "standard")
+        source_path = Path(source) if source not in (None, "") else None
+        mode = mode.lower().strip()
+        if mode not in {"standard", "full", "simple"}:
+            mode = "standard"
+        if mode == "full":
+            mode = "standard"
+        return source_path, mode
+
+    @staticmethod
+    def _apply_video_editor_workspace_mode(editor, workspace_mode: str) -> None:
+        try:
+            if workspace_mode == "simple" and hasattr(editor, "_on_workspace_mode_selected"):
+                editor._on_workspace_mode_selected(workspace_mode == "simple")
+            elif (
+                workspace_mode == "standard"
+                and hasattr(editor, "_screenstudio_simple_mode_enabled")
+                and editor._screenstudio_simple_mode_enabled()
+                and hasattr(editor, "_on_workspace_mode_selected")
+            ):
+                editor._on_workspace_mode_selected(False)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _note_startup_crash_report(editor) -> bool:
+        """Keep crash reports discoverable without blocking startup."""
+        try:
+            from app.crash_reporter import has_unseen_crash_report, mark_crash_report_seen
+
+            if not has_unseen_crash_report():
+                return False
+            if hasattr(editor, "_flash_status"):
+                editor._flash_status("최근 크래시 리포트가 있습니다. Recovery/Health에서 확인할 수 있습니다.")
+            mark_crash_report_seen()
+            return True
+        except Exception:
+            return False
+
+    def _open_video_editor(self, source_path: object = None) -> None:
+        source_path, workspace_mode = self._parse_video_editor_payload(source_path)
+        now = time.monotonic()
+        opening = bool(getattr(self, "_video_editor_opening", False))
+        last_open_at = float(getattr(self, "_last_video_editor_open_at", 0.0) or 0.0)
+        if opening or (now - last_open_at) < 1.25:
+            try:
+                from app.startup_trace import log_startup_trace
+
+                log_startup_trace(
+                    "controller.open_video_editor.ignored_duplicate",
+                    source_path=str(source_path) if source_path is not None else None,
+                    workspace_mode=workspace_mode,
+                    opening=opening,
+                )
+            except Exception:
+                pass
+            self._clear_launcher_busy_later()
+            return
+        self._video_editor_opening = True
+        self._last_video_editor_open_at = now
+        try:
+            from app.startup_trace import log_startup_trace
+
+            log_startup_trace(
+                "controller.open_video_editor.begin",
+                source_path=str(source_path) if source_path is not None else None,
+                workspace_mode=workspace_mode,
+            )
+        except Exception:
+            pass
+        try:
+            app = QApplication.instance()
+            if app is not None:
+                app.processEvents()
+            editor = VideoEditorWindow(source_path=source_path)
+        finally:
+            self._video_editor_opening = False
+        try:
+            from app.startup_trace import log_startup_trace
+
+            log_startup_trace(
+                "controller.open_video_editor.editor_constructed",
+                source_path=str(source_path) if source_path is not None else None,
+                workspace_mode=workspace_mode,
+            )
+        except Exception:
+            pass
+        editor.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self._apply_video_editor_workspace_mode(editor, workspace_mode)
+        try:
+            from app.startup_trace import log_startup_trace
+
+            log_startup_trace(
+                "controller.open_video_editor.workspace_applied",
+                workspace_mode=workspace_mode,
+            )
+        except Exception:
+            pass
+        editor.show()
+        editor.raise_()
+        editor.activateWindow()
+        try:
+            from app.startup_trace import log_startup_trace
+
+            log_startup_trace(
+                "controller.open_video_editor.shown",
+                source_path=str(source_path) if source_path is not None else None,
+                workspace_mode=workspace_mode,
+            )
+        except Exception:
+            pass
+        try:
+            from app.startup_trace import cleanup_hidden_qt_orphan_windows
+
+            cleanup_hidden_qt_orphan_windows(editor, "controller.open_video_editor.shown")
+            QTimer.singleShot(
+                250,
+                lambda editor=editor: cleanup_hidden_qt_orphan_windows(
+                    editor,
+                    "controller.open_video_editor.post_show_250ms",
+                ),
+            )
+        except Exception:
+            pass
+        self._track_result_window(editor)
+
+        # Pure launcher → editor entry should be quiet and deterministic:
+        # open the full editor shell only.  Project resume/open is now an
+        # explicit user action; auto-resuming here made startup feel like
+        # a chain of unrelated windows and could kick off media probes.
+        if source_path is None:
+            self._note_startup_crash_report(editor)
+        self._clear_launcher_busy_later()
+
+    def _open_project_from_startup(self, source_path: Path) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        from app.project_io import load_project, remember_last_project
+
+        editor = VideoEditorWindow(source_path=None)
         editor.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         editor.show()
         editor.raise_()
         editor.activateWindow()
         self._track_result_window(editor)
+        try:
+            load_project(editor, source_path)
+            editor._project_path = Path(source_path)
+            remember_last_project(editor._project_path)
+            if hasattr(editor, "_refresh_window_title"):
+                editor._refresh_window_title()
+            if hasattr(editor, "_flash_status"):
+                editor._flash_status(f"Opened project: {Path(source_path).name}")
+        except Exception as exc:
+            QMessageBox.warning(
+                self.main_window,
+                "프로젝트 열기 실패",
+                f"{source_path}\n\n{exc}",
+            )
+            editor.close()
+        self.main_window.refresh_recent()
+        self._clear_launcher_busy_later()
+
+    def _open_template_from_startup(self, payload: object) -> None:
+        data = payload if isinstance(payload, dict) else {}
+        editor = VideoEditorWindow(source_path=None)
+        editor.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        editor.show()
+        editor.raise_()
+        editor.activateWindow()
+        self._track_result_window(editor)
+        try:
+            editor.show_startup_template_hint(
+                str(data.get("id", "") or ""),
+                str(data.get("name", "") or "Template"),
+            )
+        except Exception:
+            pass
+        self._clear_launcher_busy_later()
+
+    def _clear_launcher_busy_later(self) -> None:
+        QTimer.singleShot(350, self.main_window.clear_startup_busy)
+
+    def _maybe_offer_resume_last_project(self, editor) -> None:
+        from PySide6.QtWidgets import QMessageBox
+        from app.project_io import load_last_project_path, load_project, remember_last_project
+
+        self._note_startup_crash_report(editor)
+
+        last = load_last_project_path()
+        if last is None:
+            return
+        reply = QMessageBox.question(
+            editor,
+            "이전 프로젝트 이어서?",
+            f"전에 작업하던 프로젝트가 있습니다:\n\n{last.name}\n\n이어서 작업하시겠습니까?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        try:
+            load_project(editor, last)
+            editor._project_path = last
+            remember_last_project(last)
+            if hasattr(editor, "_refresh_window_title"):
+                editor._refresh_window_title()
+        except Exception as exc:
+            QMessageBox.warning(
+                editor, "프로젝트 열기 실패",
+                f"{last}\n\n{exc}",
+            )
 
     def _open_sound_editor(self, source_path: Path | None = None) -> None:
         """Launch the Sound Editor standalone (no video editor parent).
@@ -136,6 +360,7 @@ class AppController(QObject):
                 tr("main.sound_editor.pick_filter", exts=filter_exts),
             )
             if not picked:
+                self._clear_launcher_busy_later()
                 return
             source_path = Path(picked)
 
@@ -149,6 +374,7 @@ class AppController(QObject):
                     name=source_path.name,
                 ),
             )
+            self._clear_launcher_busy_later()
             return
 
         # Unique clip id: milliseconds since epoch. Safe because the
@@ -164,6 +390,16 @@ class AppController(QObject):
             trim_end_ms=duration_ms,
         )
 
+        # Drag-drop another mp3 onto the title screen = "switch to this
+        # file". Close any open standalone editor first so we don't
+        # end up with two QMediaPlayer demuxer threads racing on Qt's
+        # FFmpeg backend.
+        for existing in list(self._standalone_sound_editors):
+            try:
+                existing.close()
+            except Exception:
+                pass
+
         editor = SoundEditorWindow(clip, parent=None)
         editor.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         editor.show()
@@ -177,6 +413,9 @@ class AppController(QObject):
                 self._standalone_sound_editors.remove(ed)
             except ValueError:
                 pass
+            # The matching WaveformExtractor cleans itself up via its
+            # finished → deleteLater chain plus ``_on_ready /
+            # _on_failed`` slots popping it from the dict.
 
         editor.destroyed.connect(lambda _obj=None, ed=editor: _on_closed(ed=ed))
 
@@ -194,12 +433,25 @@ class AppController(QObject):
         def _on_failed(cid: int, _reason: str) -> None:
             self._standalone_waveform_extractors.pop(cid, None)
 
+        from app.audio_tracks import get_cached_waveform
+
+        cached = get_cached_waveform(clip.source_path)
+        if cached is not None:
+            clip.waveform = cached
+            try:
+                editor.refresh_waveform()
+            except Exception:
+                pass
+            self._clear_launcher_busy_later()
+            return
+
         ex = WaveformExtractor(clip.id, clip.source_path)
         ex.ready.connect(_on_ready)
         ex.failed.connect(_on_failed)
         ex.finished.connect(ex.deleteLater)
         self._standalone_waveform_extractors[clip.id] = ex
         ex.start()
+        self._clear_launcher_busy_later()
 
     def open_gif_editor_with_file(self, path: Path) -> None:
         """Load an existing GIF / image sequence into the GIF editor."""
@@ -235,9 +487,11 @@ class AppController(QObject):
                 tr("editor.dialog.save_fail_title"),
                 str(exc),
             )
+            self._clear_launcher_busy_later()
             return
 
         self._open_editor(frames, fps_guess, CaptureMode.GIF)
+        self._clear_launcher_busy_later()
 
     def _is_own_hwnd(self, hwnd: int) -> bool:
         from PySide6.QtWidgets import QApplication
@@ -491,24 +745,9 @@ class AppController(QObject):
             # path so the user still gets *some* editor.
 
         # GIF mode (or VIDEO fallback) — decode the temp .mp4 back
-        # into a PIL frame list.
-        frames: list[Image.Image] = []
-        try:
-            import imageio.v2 as imageio
-            reader = imageio.get_reader(temp_mp4)
-            for arr in reader:
-                frames.append(Image.fromarray(arr))
-            reader.close()
-        except Exception as exc:
-            print(
-                f"[controller] decode of streaming temp mp4 failed: {exc}",
-                file=__import__("sys").stderr, flush=True,
-            )
-        try:
-            Path(temp_mp4).unlink()
-        except OSError:
-            pass
-        self._on_recording_finished(frames, actual_fps, total_ms)
+        # into a PIL frame list. Run in a background thread so the UI
+        # stays responsive during long recordings.
+        self._decode_gif_async(temp_mp4, actual_fps, total_ms)
 
     def _teardown_recording_ui(self) -> None:
         """Shared cleanup the Pro-editor route uses without going
@@ -523,6 +762,58 @@ class AppController(QObject):
             self._control_bar.close()
             self._control_bar.deleteLater()
             self._control_bar = None
+
+    def _decode_gif_async(self, temp_mp4: str, actual_fps: int, total_ms: int) -> None:
+        """Decode temp MP4 → PIL frames in background thread."""
+        from PySide6.QtCore import QThread, Signal as _Signal
+        from PySide6.QtWidgets import QProgressDialog, QApplication
+
+        class _Worker(QThread):
+            done = _Signal(list)
+            progress = _Signal(int)
+
+            def __init__(self, path):
+                super().__init__()
+                self._path = path
+
+            def run(self):
+                frames = []
+                try:
+                    import imageio.v2 as _ii
+                    reader = _ii.get_reader(self._path)
+                    meta = reader.get_meta_data()
+                    total = meta.get("nframes", 0)
+                    for i, arr in enumerate(reader):
+                        frames.append(Image.fromarray(arr))
+                        if total > 0:
+                            self.progress.emit(int(i * 100 / total))
+                    reader.close()
+                except Exception as e:
+                    import sys
+                    print(f"[decode] {e}", file=sys.stderr)
+                try:
+                    Path(self._path).unlink()
+                except OSError:
+                    pass
+                self.done.emit(frames)
+
+        dlg = QProgressDialog("GIF 디코딩 중...", None, 0, 100,
+                              self.main_window)
+        dlg.setWindowTitle("처리 중")
+        dlg.setWindowModality(Qt.WindowModality.WindowModal)
+        dlg.setMinimumDuration(300)
+        dlg.setValue(0)
+
+        worker = _Worker(temp_mp4)
+        worker.progress.connect(dlg.setValue)
+
+        def _on_done(frames):
+            dlg.close()
+            worker.deleteLater()
+            self._on_recording_finished(frames, actual_fps, total_ms)
+
+        worker.done.connect(_on_done)
+        worker.start()
 
     def _move_temp_capture_to_save_dir(self, temp_path: Path) -> Path | None:
         """Move the streaming temp .mp4 into the default save dir
@@ -540,6 +831,15 @@ class AppController(QObject):
             n += 1
         try:
             shutil.move(str(temp_path), str(target))
+            sidecar = Path(str(temp_path) + ".cursor.json")
+            if sidecar.is_file():
+                try:
+                    shutil.move(str(sidecar), str(Path(str(target) + ".cursor.json")))
+                except Exception as exc:
+                    print(
+                        f"[controller] cursor sidecar move failed: {exc}",
+                        file=__import__("sys").stderr, flush=True,
+                    )
             return target
         except Exception as exc:
             print(

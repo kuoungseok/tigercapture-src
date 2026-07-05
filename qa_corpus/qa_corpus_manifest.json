@@ -1,0 +1,30 @@
+{
+  "generated_at": "2026-06-19T00:17:15.901751+00:00",
+  "assets_dir": "E:\\ClaudeCodeApp\\GifCam\\qa_corpus\\assets",
+  "projects": [
+    "E:\\ClaudeCodeApp\\GifCam\\qa_corpus\\projects\\01_timeline_audio_basic.tgp",
+    "E:\\ClaudeCodeApp\\GifCam\\qa_corpus\\projects\\02_masks_filters_tracking.tgp",
+    "E:\\ClaudeCodeApp\\GifCam\\qa_corpus\\projects\\03_nested_multitrack.tgp",
+    "E:\\ClaudeCodeApp\\GifCam\\qa_corpus\\projects\\04_actors_live2d_spine.tgp",
+    "E:\\ClaudeCodeApp\\GifCam\\qa_corpus\\projects\\05_audio_heavy_mixed.tgp",
+    "E:\\ClaudeCodeApp\\GifCam\\qa_corpus\\projects\\06_long_project_stress.tgp"
+  ],
+  "recovery_candidates": [
+    "E:\\ClaudeCodeApp\\GifCam\\qa_corpus\\projects\\.tigercapture_recovery\\01_timeline_audio_basic~autosave.tgp"
+  ],
+  "color_audio_samples": {
+    "root": "E:\\ClaudeCodeApp\\GifCam\\qa_corpus\\color_audio_samples",
+    "video": [
+      "E:\\ClaudeCodeApp\\GifCam\\qa_corpus\\color_audio_samples\\rec709_smpte_scope_sample.mp4",
+      "E:\\ClaudeCodeApp\\GifCam\\qa_corpus\\color_audio_samples\\motion_waveform_sample.mp4"
+    ],
+    "audio": [
+      "E:\\ClaudeCodeApp\\GifCam\\qa_corpus\\color_audio_samples\\tone_loudness_reference.wav",
+      "E:\\ClaudeCodeApp\\GifCam\\qa_corpus\\color_audio_samples\\dialogue_noise_cleanup_reference.wav"
+    ]
+  },
+  "screenstudio_auto_polish_samples": {
+    "manifest": "E:\\ClaudeCodeApp\\GifCam\\qa_corpus\\screenstudio_auto_polish\\manifest.json",
+    "root": "E:\\ClaudeCodeApp\\GifCam\\qa_corpus\\screenstudio_auto_polish"
+  }
+}

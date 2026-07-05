@@ -5,14 +5,19 @@ import sys
 import traceback
 from pathlib import Path
 
+sys.dont_write_bytecode = True
+
+from PySide6.QtCore import QCoreApplication
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QApplication
 
 
-# Mirror stderr to ``logs/tigercapture.log`` next to main.py so each run
-# leaves a readable trail (timestamps + stderr lines + tracebacks). The
-# file is truncated on launch so "latest run" is always at the top.
-LOG_DIR = Path(__file__).resolve().parent / "logs"
+# Mirror stderr to the per-user runtime log directory so each run leaves a
+# readable trail without dirtying the source checkout. The file is truncated on
+# launch so "latest run" is always at the top.
+from app.paths import runtime_log_dir
+
+LOG_DIR = runtime_log_dir()
 LOG_FILE = LOG_DIR / "tigercapture.log"
 
 
@@ -48,7 +53,7 @@ class _TeeStream(io.TextIOBase):
 def _install_logging() -> None:
     """Set up a persistent-file stderr mirror + faulthandler + Python
     excepthook. Crashes that weren't making it into the background-task
-    wrapper now land in ``logs/tigercapture.log`` reliably."""
+    wrapper now land in the runtime ``tigercapture.log`` reliably."""
     LOG_DIR.mkdir(parents=True, exist_ok=True)
     log_fh = open(LOG_FILE, "w", encoding="utf-8", errors="replace", buffering=1)
     log_fh.write(
@@ -71,14 +76,35 @@ def _install_logging() -> None:
         traceback.print_exception(exc_type, exc_value, tb, file=sys.stderr)
         print("=" * 60, file=sys.stderr, flush=True)
 
-    sys.excepthook = _on_unhandled
+    from app.crash_reporter import install_crash_reporter, record_action
+
+    install_crash_reporter(LOG_DIR, prior_excepthook=_on_unhandled)
+    record_action("app.session_start", log_file=str(LOG_FILE))
+    try:
+        from app.startup_trace import install_subprocess_trace
+
+        install_subprocess_trace()
+    except Exception:
+        pass
 
 
 def main() -> int:
     _install_logging()
+    try:
+        from app.preview_acceleration import configure_preview_acceleration_defaults
+
+        configure_preview_acceleration_defaults()
+    except Exception:
+        pass
+    QCoreApplication.setApplicationName("TigerCapture")
+    QCoreApplication.setOrganizationName("TigerCapture")
     app = QApplication(sys.argv)
+    app.setStyle("Fusion")
     app.setApplicationName("TigerCapture")
     app.setOrganizationName("TigerCapture")
+
+    from app.font_fallback import apply_ui_font
+    apply_ui_font(app)
 
     # Window/taskbar icon when running from source (PyInstaller builds
     # also pick this up via the spec's ``icon=`` field).

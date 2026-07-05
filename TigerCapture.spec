@@ -3,6 +3,14 @@ from pathlib import Path
 from PyInstaller.utils.hooks import copy_metadata
 
 project_root = Path(".").resolve()
+worker_exe_name = "tigercapture-worker.exe"
+worker_release = (
+    project_root / "native" / "tigercapture_worker" / "target" / "release" /
+    worker_exe_name
+)
+native_binaries = []
+if worker_release.exists():
+    native_binaries.append((str(worker_release), "bundled/native"))
 
 # imageio_ffmpeg ships ffmpeg.exe as a wheel; modern imageio.v2.get_writer
 # probes the dist's metadata at runtime, so the .dist-info directory has
@@ -13,10 +21,11 @@ extra_datas = copy_metadata('imageio_ffmpeg')
 a = Analysis(
     ['main.py'],
     pathex=[str(project_root)],
-    binaries=[],
+    binaries=native_binaries,
     datas=[
         ('app/locales/*.py', 'app/locales'),
         ('resources/tigercapture.ico', 'resources'),
+        ('resources/luts/*.cube', 'resources/luts'),
     ] + extra_datas,
     hiddenimports=[
         # Locales are loaded dynamically from a string lookup, so each
@@ -56,7 +65,6 @@ a = Analysis(
         'app.subtitles',
         'app.pg_scopes',
         'app.color_scopes',
-        'app.hue_curve_widget',
         # Node graph
         'app.workbench.node_graph',
         'app.workbench.node_graph.scene',

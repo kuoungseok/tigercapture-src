@@ -1,0 +1,11 @@
+1
+00:00:00,000 --> 00:00:02,400
+The first three seconds show the result before the workflow for short 18.
+
+2
+00:00:02,800 --> 00:00:06,900
+The middle beat shows the mistake, the fix, and the strong visual comparison.
+
+3
+00:00:07,600 --> 00:00:11,800
+The ending should become a vertical short with captions and render review.

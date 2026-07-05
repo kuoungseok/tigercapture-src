@@ -30,7 +30,7 @@ DEFAULT_OUT_H = 200
 
 # Background colour shared across scopes — near-black with a faint blue
 # tint so it reads as "monitor" rather than "void".
-_BG = (10, 10, 14)
+_BG = (10, 10, 10)
 
 
 def _new_canvas(out_w: int, out_h: int) -> np.ndarray:
@@ -290,3 +290,80 @@ def render_scope(kind: ScopeKind, rgb: np.ndarray,
     if kind == "vectorscope":
         return compute_vectorscope(rgb, out_w, out_h)
     return _new_canvas(out_w, out_h)
+
+
+def scope_quality_diagnostics(rgb: np.ndarray, color_management: dict | None = None) -> dict:
+    """Return numeric scope warnings for UI badges and export QA.
+
+    This is intentionally compact: values map directly to what a colorist checks
+    first in commercial scopes: luma range, clipping, chroma intensity, HDR
+    peak estimate, and whether the frame is flirting with gamut/legal limits.
+    """
+    arr = rgb.astype(np.float32)
+    if arr.size == 0:
+        return {
+            "ok": True,
+            "warnings": [],
+            "luma_ire_p01": 0.0,
+            "luma_ire_p50": 0.0,
+            "luma_ire_p99": 0.0,
+            "channel_clip_ratio": 0.0,
+            "saturation_mean": 0.0,
+            "saturation_p95": 0.0,
+        }
+    f = np.clip(arr / 255.0, 0.0, 1.0)
+    luma = 0.2126 * f[..., 0] + 0.7152 * f[..., 1] + 0.0722 * f[..., 2]
+    saturation = f.max(axis=2) - f.min(axis=2)
+    channel_clip = np.mean((rgb <= 0) | (rgb >= 255))
+    luma_ire = luma * 100.0
+    warnings: list[str] = []
+    p01 = float(np.percentile(luma_ire, 1))
+    p50 = float(np.percentile(luma_ire, 50))
+    p99 = float(np.percentile(luma_ire, 99))
+    sat_mean = float(np.mean(saturation))
+    sat_p95 = float(np.percentile(saturation, 95))
+    if p01 <= 0.5:
+        warnings.append("shadow clipping")
+    if p99 >= 99.5:
+        warnings.append("highlight clipping")
+    if float(channel_clip) > 0.01:
+        warnings.append("channel clipping")
+    if sat_p95 > 0.92:
+        warnings.append("high saturation / gamut risk")
+
+    hdr = False
+    if color_management:
+        try:
+            from app.color_management import ColorManagementSettings
+
+            hdr = ColorManagementSettings.from_dict(color_management).is_hdr()
+        except Exception:
+            hdr = False
+    nits_p99 = float(p99 / 100.0 * (1000.0 if hdr else 100.0))
+    if hdr and nits_p99 > 900.0:
+        warnings.append("HDR peak near 1000 nits")
+
+    # YCbCr angle near the vectorscope skin-tone line. Useful as a QA hint,
+    # not as an automatic grade.
+    R, G, B = f[..., 0], f[..., 1], f[..., 2]
+    Y = 0.299 * R + 0.587 * G + 0.114 * B
+    cb = (B - Y) * 0.564
+    cr = (R - Y) * 0.713
+    chroma_mask = saturation > 0.08
+    if np.any(chroma_mask):
+        skin_angle = float(np.degrees(np.arctan2(cr[chroma_mask].mean(), cb[chroma_mask].mean())))
+    else:
+        skin_angle = 0.0
+
+    return {
+        "ok": not warnings,
+        "warnings": warnings,
+        "luma_ire_p01": p01,
+        "luma_ire_p50": p50,
+        "luma_ire_p99": p99,
+        "nits_p99": nits_p99,
+        "channel_clip_ratio": float(channel_clip),
+        "saturation_mean": sat_mean,
+        "saturation_p95": sat_p95,
+        "skin_tone_angle_deg": skin_angle,
+    }

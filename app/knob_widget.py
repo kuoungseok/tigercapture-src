@@ -31,16 +31,17 @@ from __future__ import annotations
 import math
 from typing import Callable
 
-from PySide6.QtCore import Qt, QRect, Signal
+from PySide6.QtCore import QPoint, QRect, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
+    QLinearGradient,
     QMouseEvent,
     QPainter,
     QPen,
     QRadialGradient,
     QWheelEvent,
 )
-from PySide6.QtWidgets import QInputDialog, QWidget
+from PySide6.QtWidgets import QInputDialog, QLayout, QSizePolicy, QWidget
 
 
 # Knob angular range: 12 o'clock is 0°, positive angles rotate clockwise.
@@ -50,15 +51,13 @@ KNOB_MAX_ANGLE = 135.0
 KNOB_ANGLE_SPAN = KNOB_MAX_ANGLE - KNOB_MIN_ANGLE  # 270°
 
 
-# All semantic knob colours collapse to brand orange so the editor
-# surface reads as a single accent. The "blue / green / orange / red"
-# names are kept as call-site identifiers — callers don't need to
-# change — but every name resolves to an orange-family hue.
+# Semantic knob colours are intentionally muted so dense editor panels
+# read like the reference UI: dark chrome first, functional colour second.
 _COLOR_NAMES = {
-    "blue": QColor("#ff7a4a"),     # legacy "blue knob" → orange-light
-    "green": QColor("#D85A30"),    # legacy "green knob" → brand orange
-    "orange": QColor("#D85A30"),
-    "red": QColor("#e54646"),      # destructive only
+    "blue": QColor("#8E98A8"),
+    "green": QColor("#87A495"),
+    "orange": QColor("#A89584"),
+    "red": QColor("#B66A6A"),      # destructive only
 }
 
 
@@ -118,11 +117,22 @@ class KnobWidget(QWidget):
         self._drag_start_y: float = 0.0
         self._drag_start_value: float = 0.0
         self._dragging: bool = False
+        self._drag_moved: bool = False
+
+        # Wheel events fire one editingFinished per notch — collapse a
+        # burst of wheel ticks into a single trailing emit so heavy
+        # slots (waveform refresh, EQ recompute) only run once when the
+        # user stops scrolling.
+        self._wheel_emit_timer = QTimer(self)
+        self._wheel_emit_timer.setSingleShot(True)
+        self._wheel_emit_timer.setInterval(120)
+        self._wheel_emit_timer.timeout.connect(
+            lambda: self.editingFinished.emit(self._value)
+        )
 
         self.setFixedSize(self.CELL_WIDTH, self.CELL_HEIGHT)
         self.setFocusPolicy(Qt.FocusPolicy.ClickFocus)
         self.setCursor(Qt.CursorShape.OpenHandCursor)
-        self.setMouseTracking(True)
         self.setToolTip(self._tooltip_text())
 
     # -------- public API --------
@@ -191,10 +201,14 @@ class KnobWidget(QWidget):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        # Background cell (dark panel with subtle border)
-        painter.fillRect(self.rect(), QColor("#0f0f14"))
-        painter.setPen(QPen(QColor("#2a2a30"), 1))
-        painter.drawRoundedRect(self.rect().adjusted(0, 0, -1, -1), 8, 8)
+        # Background cell: soft glass tile, not a flat debugging box.
+        tile = self.rect().adjusted(1, 1, -1, -1)
+        bg = QLinearGradient(tile.topLeft(), tile.bottomRight())
+        bg.setColorAt(0.0, QColor(255, 255, 255, 20))
+        bg.setColorAt(1.0, QColor(255, 255, 255, 7))
+        painter.setPen(QPen(QColor(126, 141, 198, 44), 1))
+        painter.setBrush(bg)
+        painter.drawRoundedRect(tile, 15, 15)
 
         # Knob center
         cx = self.width() / 2.0
@@ -203,9 +217,9 @@ class KnobWidget(QWidget):
         r_body = self.KNOB_SIZE / 2.0 - 12.0
 
         # --- outer track: 270° grey arc from 7:30 CW to 4:30 ---
-        track_pen = QPen(QColor("#2a2a30"))
-        track_pen.setWidth(3)
-        track_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+        track_pen = QPen(QColor(255, 255, 255, 36))
+        track_pen.setWidth(5)
+        track_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(track_pen)
         painter.setBrush(Qt.BrushStyle.NoBrush)
         # Qt arc: 0° = 3 o'clock, positive = CCW. Our 12 o'clock = Qt's 90°.
@@ -231,7 +245,7 @@ class KnobWidget(QWidget):
             span_deg = cur_angle - KNOB_MIN_ANGLE
         if span_deg > 0:
             arc_pen = QPen(self._color)
-            arc_pen.setWidth(3)
+            arc_pen.setWidth(5)
             arc_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
             painter.setPen(arc_pen)
             painter.drawArc(
@@ -242,14 +256,21 @@ class KnobWidget(QWidget):
             )
 
         # --- knob body: radial gradient ---
-        grad = QRadialGradient(cx, cy - r_body * 0.4, r_body * 1.8)
-        grad.setColorAt(0.0, QColor("#3a3a3e"))
-        grad.setColorAt(1.0, QColor("#16161a"))
+        grad = QRadialGradient(cx - r_body * 0.25, cy - r_body * 0.45, r_body * 1.9)
+        grad.setColorAt(0.0, QColor("#4B5165"))
+        grad.setColorAt(0.45, QColor("#252A3A"))
+        grad.setColorAt(1.0, QColor("#10131E"))
         painter.setBrush(grad)
-        painter.setPen(QPen(QColor("#3a3a3e"), 1))
+        painter.setPen(QPen(QColor(255, 255, 255, 54), 1))
         painter.drawEllipse(
             int(cx - r_body), int(cy - r_body),
             int(r_body * 2), int(r_body * 2),
+        )
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(255, 255, 255, 38))
+        painter.drawEllipse(
+            int(cx - r_body * 0.46), int(cy - r_body * 0.60),
+            int(r_body * 0.54), int(r_body * 0.28),
         )
 
         # --- indicator line: from just-inside-body to the rim ---
@@ -261,7 +282,7 @@ class KnobWidget(QWidget):
         root_x = cx + dx * (r_body - 12)
         root_y = cy + dy * (r_body - 12)
         ind_pen = QPen(self._color)
-        ind_pen.setWidth(3)
+        ind_pen.setWidth(4)
         ind_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         painter.setPen(ind_pen)
         painter.drawLine(int(root_x), int(root_y), int(tip_x), int(tip_y))
@@ -269,7 +290,7 @@ class KnobWidget(QWidget):
         # Bipolar: small center dot at 12 o'clock, inside the track.
         if self._bipolar:
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QColor(200, 200, 210))
+            painter.setBrush(QColor("#E8EAF4"))
             dot_r = 1.5
             painter.drawEllipse(
                 int(cx - dot_r), int(cy - r_ring - dot_r),
@@ -278,7 +299,7 @@ class KnobWidget(QWidget):
 
         # --- label (uppercase, tertiary grey) ---
         label_rect = QRect(0, int(cy + r_ring + 4), self.width(), 12)
-        painter.setPen(QColor("#8a8a92"))
+        painter.setPen(QColor("#A7ADC2"))
         f = painter.font()
         f.setPixelSize(9)
         f.setBold(True)
@@ -290,6 +311,10 @@ class KnobWidget(QWidget):
 
         # --- formatted value (accent color) ---
         val_rect = QRect(0, int(cy + r_ring + 18), self.width(), 16)
+        value_bg = QRect(14, int(cy + r_ring + 17), self.width() - 28, 18)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(255, 255, 255, 16))
+        painter.drawRoundedRect(value_bg, 8, 8)
         painter.setPen(self._color)
         f2 = painter.font()
         f2.setPixelSize(11)
@@ -302,6 +327,7 @@ class KnobWidget(QWidget):
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self._dragging = True
+            self._drag_moved = False
             self._drag_start_y = event.position().y()
             self._drag_start_value = self._value
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
@@ -314,41 +340,45 @@ class KnobWidget(QWidget):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        # Only drag while the left button is actually held — if Qt
+        # missed the release (focus stolen, popup, etc.) we cancel
+        # rather than tracking hover-only motion.
         if not self._dragging:
             return
+        if not (event.buttons() & Qt.MouseButton.LeftButton):
+            self._dragging = False
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+            return
         dy = self._drag_start_y - event.position().y()
-        sensitivity = self._sensitivity(event.modifiers())
-        delta = dy * sensitivity
-        if self._log:
-            # In log scale we accelerate on wider ranges so the drag
-            # still feels like "100 px covers the full sweep".
-            lo = max(self._min, 1e-9)
-            hi = max(self._max, lo * 1.0001)
-            start_norm = (
-                (math.log(max(self._drag_start_value, lo)) - math.log(lo))
-                / (math.log(hi) - math.log(lo))
-            )
-            new_norm = max(0.0, min(1.0, start_norm + dy / 100.0
-                                    * (0.1 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1.0)
-                                    * (0.1 if event.modifiers() & Qt.KeyboardModifier.ControlModifier else 1.0)))
-            new_value = math.exp(
-                math.log(lo) + new_norm * (math.log(hi) - math.log(lo))
-            )
-        else:
-            new_value = self._drag_start_value + delta
+        if abs(dy) >= 1.0:
+            self._drag_moved = True
+        new_value = self._value_from_drag_delta(dy, event.modifiers())
         self.setValue(new_value)
+        event.accept()
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if self._dragging and event.button() == Qt.MouseButton.LeftButton:
             self._dragging = False
             self.setCursor(Qt.CursorShape.OpenHandCursor)
-            self.editingFinished.emit(self._value)
+            # Only commit when the drag actually moved the value. A
+            # bare click (no drag) and the first press of a
+            # double-click both leave _drag_moved=False — skipping the
+            # emit prevents a "blip" before mouseDoubleClickEvent
+            # resets to the default value.
+            if self._drag_moved:
+                self.editingFinished.emit(self._value)
             event.accept()
             return
         super().mouseReleaseEvent(event)
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
+            # The press that started this double-click flipped on
+            # _dragging; clear it so the trailing release doesn't
+            # re-emit after we reset.
+            self._dragging = False
+            self._drag_moved = False
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
             self.setValue(self._default)
             self.editingFinished.emit(self._value)
             event.accept()
@@ -356,11 +386,10 @@ class KnobWidget(QWidget):
         super().mouseDoubleClickEvent(event)
 
     def wheelEvent(self, event: QWheelEvent) -> None:
-        step = (self._max - self._min) / 100.0
-        if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
-            step *= 0.1
-        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            step *= 0.1
+        # Use the same modifier semantics as drag so wheel and drag
+        # feel symmetric (Shift = 10×, Ctrl = 100×, both = 1000×).
+        mods = event.modifiers()
+        step_scale = self._precision_scale(mods)
         direction = 1.0 if event.angleDelta().y() > 0 else -1.0
         if self._log:
             lo = max(self._min, 1e-9)
@@ -369,25 +398,51 @@ class KnobWidget(QWidget):
                 (math.log(max(self._value, lo)) - math.log(lo))
                 / (math.log(hi) - math.log(lo))
             )
-            new_norm = max(0.0, min(1.0, cur_norm + direction * 0.01
-                * (0.1 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1.0)
-                * (0.1 if event.modifiers() & Qt.KeyboardModifier.ControlModifier else 1.0)))
+            new_norm = max(0.0, min(1.0, cur_norm + direction * 0.01 * step_scale))
             new_val = math.exp(
                 math.log(lo) + new_norm * (math.log(hi) - math.log(lo))
             )
         else:
+            step = (self._max - self._min) / 100.0 * step_scale
             new_val = self._value + direction * step
         self.setValue(new_val)
-        self.editingFinished.emit(self._value)
+        # Coalesce rapid wheel notches: one trailing editingFinished
+        # after the user stops scrolling, not one per notch.
+        self._wheel_emit_timer.start()
         event.accept()
 
-    def _sensitivity(self, modifiers) -> float:
-        base = (self._max - self._min) / 100.0
+    def _precision_scale(self, modifiers) -> float:
+        """Common modifier-to-precision map for drag + wheel.
+        No modifier = 1×, Shift = 0.1×, Ctrl = 0.01×, Shift+Ctrl = 0.001×.
+        """
+        scale = 1.0
         if modifiers & Qt.KeyboardModifier.ShiftModifier:
-            base *= 0.1
+            scale *= 0.1
         if modifiers & Qt.KeyboardModifier.ControlModifier:
-            base *= 0.1
-        return base
+            scale *= 0.01
+        return scale
+
+    def _sensitivity(self, modifiers) -> float:
+        return (self._max - self._min) / 100.0 * self._precision_scale(modifiers)
+
+    def _value_from_drag_delta(self, dy: float, modifiers) -> float:
+        """Compute the new value for a vertical drag of ``dy`` pixels.
+        Shared between linear + log paths so modifier behavior matches.
+        """
+        if self._log:
+            lo = max(self._min, 1e-9)
+            hi = max(self._max, lo * 1.0001)
+            start_norm = (
+                (math.log(max(self._drag_start_value, lo)) - math.log(lo))
+                / (math.log(hi) - math.log(lo))
+            )
+            new_norm = max(
+                0.0, min(1.0, start_norm + (dy / 100.0) * self._precision_scale(modifiers))
+            )
+            return math.exp(
+                math.log(lo) + new_norm * (math.log(hi) - math.log(lo))
+            )
+        return self._drag_start_value + dy * self._sensitivity(modifiers)
 
     def _prompt_direct_input(self) -> None:
         unit = f" ({self._unit})" if self._unit else ""
@@ -406,6 +461,115 @@ class KnobWidget(QWidget):
 
 
 # ================= Built-in value formatters =================
+
+
+class FlowLayout(QLayout):
+    """A QHBoxLayout that wraps to a new row when it runs out of width.
+
+    Mirrors Qt's official ``Flow Layout`` example (Qt docs / examples
+    repo) so knob rows stay on a single line whenever the parent has
+    room, and fold gracefully onto a second row when the sound-editor
+    window is squeezed narrow — no horizontal scrollbar, no clipped
+    knobs.
+    """
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        margin: int = 0,
+        h_spacing: int = 8,
+        v_spacing: int = 8,
+    ) -> None:
+        super().__init__(parent)
+        if parent is not None:
+            self.setContentsMargins(margin, margin, margin, margin)
+        self._h_space = h_spacing
+        self._v_space = v_spacing
+        self._items: list = []
+
+    def __del__(self) -> None:  # type: ignore[override]
+        while self._items:
+            self._items.pop()
+
+    # ---- QLayout overrides ----
+
+    def addItem(self, item) -> None:  # noqa: N802 (Qt naming)
+        self._items.append(item)
+
+    def horizontalSpacing(self) -> int:  # noqa: N802
+        return self._h_space
+
+    def verticalSpacing(self) -> int:  # noqa: N802
+        return self._v_space
+
+    def count(self) -> int:
+        return len(self._items)
+
+    def itemAt(self, index):  # noqa: N802
+        return self._items[index] if 0 <= index < len(self._items) else None
+
+    def takeAt(self, index):  # noqa: N802
+        if 0 <= index < len(self._items):
+            return self._items.pop(index)
+        return None
+
+    def expandingDirections(self):  # noqa: N802
+        return Qt.Orientation(0)
+
+    def hasHeightForWidth(self) -> bool:  # noqa: N802
+        return True
+
+    def heightForWidth(self, width: int) -> int:  # noqa: N802
+        return self._do_layout(QRect(0, 0, width, 0), test_only=True)
+
+    def setGeometry(self, rect: QRect) -> None:  # noqa: N802
+        super().setGeometry(rect)
+        self._do_layout(rect, test_only=False)
+
+    def sizeHint(self) -> QSize:  # noqa: N802
+        return self.minimumSize()
+
+    def minimumSize(self) -> QSize:  # noqa: N802
+        size = QSize()
+        for item in self._items:
+            size = size.expandedTo(item.minimumSize())
+        m = self.contentsMargins()
+        size += QSize(m.left() + m.right(), m.top() + m.bottom())
+        return size
+
+    def _do_layout(self, rect: QRect, *, test_only: bool) -> int:
+        m = self.contentsMargins()
+        effective = rect.adjusted(m.left(), m.top(), -m.right(), -m.bottom())
+        x = effective.x()
+        y = effective.y()
+        line_height = 0
+        for item in self._items:
+            w = item.widget()
+            space_x = self._h_space
+            space_y = self._v_space
+            if w is not None:
+                style = w.style()
+                space_x = max(space_x, style.layoutSpacing(
+                    QSizePolicy.ControlType.PushButton,
+                    QSizePolicy.ControlType.PushButton,
+                    Qt.Orientation.Horizontal,
+                ))
+                space_y = max(space_y, style.layoutSpacing(
+                    QSizePolicy.ControlType.PushButton,
+                    QSizePolicy.ControlType.PushButton,
+                    Qt.Orientation.Vertical,
+                ))
+            next_x = x + item.sizeHint().width() + space_x
+            if next_x - space_x > effective.right() and line_height > 0:
+                x = effective.x()
+                y = y + line_height + space_y
+                next_x = x + item.sizeHint().width() + space_x
+                line_height = 0
+            if not test_only:
+                item.setGeometry(QRect(QPoint(x, y), item.sizeHint()))
+            x = next_x
+            line_height = max(line_height, item.sizeHint().height())
+        return y + line_height - rect.y() + m.bottom()
 
 
 def fmt_db(v: float) -> str:

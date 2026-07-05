@@ -2,6 +2,147 @@
 
 Format: grouped by area, newest work at the top of each section.
 
+## Unreleased
+
+### Changed
+
+- **Resolve/Fairlight/Fusion parity tracking** — Professional Readiness now
+  includes an advisory `resolve_post_pipeline_parity` matrix covering advanced
+  Color, Fairlight-style audio, Fusion/VFX, large-project performance,
+  professional post pipeline, and hardware ecosystem gaps. The section maps
+  supported/partial/missing capabilities such as HDR/ACES, RAW controls, node
+  grading, Fairlight routing/loudness, Fusion tracking/keying/3D tools, proxy
+  cache, render queue, collaboration, and DeckLink/control-surface readiness
+  without unfairly failing ordinary export-readiness scores.
+- **Resolve parity is visible and actionable** — Media Health now expands the
+  advisory matrix into category scores, supported/partial/missing counts,
+  supported highlights, and the next implementation actions. Health Center has
+  a dedicated Professional Readiness row, and QA Dashboard now tracks
+  `debugCapture/project_qa_report.json` with readiness and Resolve parity
+  summaries from real-project QA.
+- **First Resolve-class workflow tranche** — Added Qt-free workflow models and
+  helpers for advanced Color, Fairlight-style Audio, VFX repair, performance
+  cache policy, ingest clone manifests, and Deliver-page job matrices. Color now
+  has 32-bit/YRGB capability metadata plus HDR zone tone, log wheel, Hue vs
+  Hue/Sat/Luma, and Color Warper frame helpers. Audio now has routing-matrix,
+  send, and loudness-delivery report helpers. VFX/Post now has roto spline,
+  clean-plate, planar-tracker payloads, proxy/render-cache policy, checksum
+  ingest manifests, and web/social/UHD/roundtrip delivery specs. Professional
+  Readiness merges these built-in capabilities into the Resolve/Fairlight/
+  Fusion parity matrix automatically.
+- **Advanced Color bake path** — `ColorGrade` now persists
+  `advanced_color_toolset` payloads and applies implemented HDR-zone, log-wheel,
+  Hue curve, and Color Warper transforms through the same `apply_to_rgb()` path
+  used by preview and export. Three Resolve-style color presets seed those
+  payloads, preset application writes them onto grades, and Professional
+  Readiness/GPU parity diagnostics now count advanced color, project-level audio
+  routing, VFX repair plans, proxy/render cache, ingest clone manifests, and
+  Deliver-page jobs instead of treating them as invisible metadata.
+- **Professional workflow payload builder** — Added a shared project payload
+  builder for Audio Mixer, Media Pool, Render Queue, Health, and QA. It can
+  attach Fairlight-style audio routing, proxy/render-cache policy, filtered
+  Deliver-page jobs, and checksum ingest manifests without mutating the live
+  project document. Audio Mixer also exposes routing/loudness payload helpers
+  and shows a compact routing summary for the current tracks.
+- **Professional workflow UI hooks** — The full Color Page now exposes a small
+  Advanced Color section for HDR shadow/highlight, log-wheel nudges, skin
+  saturation, and Color Warper hue shift, writing the same
+  `advanced_color_toolset` payload used by preview/export. Render Queue has a
+  Deliver Presets matrix and JSON copy action, Media Pool exposes selected/all
+  ingest manifests plus proxy/checksum metadata, Mask Editor exports
+  B-spline/clean-plate/planar-tracker repair payloads, QA Dashboard surfaces
+  Resolve parity top actions, and presets can report semantic A/B preview
+  storyboards with bake targets.
+- **Professional workflow polish layer** — Advanced Color now has a split
+  before/after preview, Hue/Sat mini curve, Color Warper mini grid,
+  bypass/solo/reset controls, and a scroll-safe qualifier panel. Audio Mixer
+  exposes Routing/Loudness dialogs over its Fairlight-style payloads, Render
+  Queue can summarize Deliver presets for QA/status surfaces, Media Pool can
+  generate scoped proxy/relink health reports, and Mask Editor shows a
+  clean-plate/planar-tracker repair summary while editing.
+- **CapCut/local ML gates reopened** — CapCut-style creator features and
+  local-only ML are enabled by default again after the launcher flicker fix.
+  They still remain controllable with diagnostic off switches such as
+  `TIGERCAPTURE_CAPCUT_DISABLED=1` and `TIGERCAPTURE_LOCAL_ML_DISABLED=1`.
+
+### UX
+
+- **Launcher workspace switch** — Replaced the visible Full/Simple button pair
+  with a draggable iOS-style Normal/Simple slide toggle, persist the user's
+  chosen workspace mode, widened the launcher, wrapped the launcher body in a
+  scroll area, and shortened the cursor option label so the startup screen no
+  longer clips its editor/capture controls.
+- **Launcher state and QA cleanup** — Corrupt launcher workspace state is now
+  backed up and repaired to the normal editor mode, startup crash reports ignore
+  malformed/stale payloads, Screen Studio GUI-flow QA now enforces the
+  no-template-first launcher, and real-recording corpus reports expose
+  click/drag/hotkey/auto-zoom readiness instead of only counting files.
+- **Screen Studio parity contracts closed** — Added reportable contracts for
+  first-run/empty-project focus, real-recording motion tuning, viewer-based
+  manual zoom handles, vertical/social export, GIF/WebM/4K60 handoff polish,
+  audio/subtitle timing, golden short-video baselines, real-project corpus
+  artifacts, and separation of advanced TigerCapture tools from the simple path.
+- **Screen Studio productization workbench** — Added an actionable real
+  recording intake board, manifest-based recording registration CLI, adaptive
+  cursor/zoom tuning patch, manual-zoom viewer command model, preview/export
+  parity matrix, and regression hardening plan. QA Dashboard now exposes the
+  combined Screen Studio Productization report.
+- **Effect Presets are now clickable** — Left-dock effect preset cards now
+  apply to the selected/current video clip on click while preserving drag-to-clip
+  behavior for precise targeting, with clearer target feedback when no clip is
+  available.
+- **Effect preset drop targeting is visible** — Dragging an Effect Preset over
+  the timeline now highlights the exact target clip with a bright FX outline and
+  preset label, then shows the normal FX badge/burst after the drop so users can
+  see where the preset landed.
+- **Applied preset regions are visible** — Effect presets now preserve their
+  preset metadata on `VideoFilterParams`, and timeline clips paint
+  human-readable FX/KEY/AI/TR/COL strips inside the clip body in addition to the
+  compact clickable badges. This makes applied effects and transitions read like
+  editable regions rather than hidden clip properties.
+- **Transition preset identity is preserved** — Transition drag/drop, click
+  apply, keyboard insert, and context-menu insert now write
+  `transition_preset_meta` onto clips, project save/load round-trips it, and
+  timeline strips/tooltips prefer the real preset name while compacting to the
+  tag on narrow clips.
+- **Final product-readiness gate** — Added a consolidated eight-area release
+  gate covering practical editing flow, real project corpus, preview/GPU
+  performance, Color/Audio accuracy, timeline polish, preset/template quality,
+  crash recovery/project repair, and packaging. The new
+  `tools/qa_final_product_readiness.py` report is visible and runnable from QA
+  Dashboard as `Final Product Readiness`, with `release_ready` kept separate
+  from report-generation success so corpus/performance gaps stay visible.
+- **Effect preset guidance is localized** — The new click/drag tooltips,
+  timeline drop label, missing-preset warning, and no-target status text now use
+  the existing six-language i18n tables instead of mixed Korean/English literals.
+- **Video editor language switcher** — Added a compact globe menu to the video
+  editor command bar. Picking a language saves it through the existing i18n
+  settings path and immediately refreshes the main editor chrome, section
+  headers, export controls, and localized effect-preset guidance.
+- **Effect/transition preset expansion** — Added a Creator Effect/Transition
+  Expansion pack with 10 practical clip effects and 10 drag-ready transitions
+  for screen recordings, cursor tutorials, product demos, shorts, gameplay, and
+  Live2D/Spine overlays. The new presets use the existing clip-filter and
+  transition payloads, so they work through search, drag/drop, click apply, and
+  preset QA instead of being static browser cards.
+
+### Fixes
+
+- **Launcher to video editor flicker** — Fixed the Windows/Qt startup path
+  where parentless widgets could briefly appear as small native TigerCapture
+  windows while the editor tree was being assembled. Workbench, color/timeline,
+  toolbar, preset browser, collapsible section, and Media Pool widgets now get
+  explicit parents at construction time. Verified by visible-window traces with
+  `Visible console-like rows: 0` and confirmed in a real user run on 2026-06-22.
+- **Screen Studio cursor metadata fallback** — Preview and export effect
+  snapshots now fall back from clip-level cursor/polish metadata to track-level
+  metadata, so click/cursor animation still appears when metadata was attached
+  to the track rather than the clip.
+- **Color tab black-frame recovery** — Color/Edit tab switches and Color Page
+  grade refreshes keep the last good preview frame during short transition
+  guards, while preserving legitimate large dark video frames outside the
+  explicit recovery window.
+
 ## v1.4.1 — 2026-05-20
 
 ### Fixes

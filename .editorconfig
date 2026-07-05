@@ -1,0 +1,19 @@
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 4
+
+[*.{bat,cmd,ps1,sln,vcxproj,vcxproj.filters}]
+end_of_line = crlf
+
+[*.{md,yml,yaml,json,toml,iss,nsi,spec}]
+indent_size = 2
+
+[*.{png,jpg,jpeg,gif,ico,icns,mp4,mov,wav,m4a,zip,fbx,glb,gltf,vrm,moc3,skel,spine}]
+insert_final_newline = false
+trim_trailing_whitespace = false

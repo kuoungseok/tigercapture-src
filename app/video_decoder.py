@@ -35,15 +35,18 @@ produced.
 from __future__ import annotations
 
 import os
+import json
 import subprocess
 import sys
 import threading
 import time
-from collections import deque
+from collections import OrderedDict, deque
 from pathlib import Path
 from typing import Optional
 
 import numpy as np
+
+from app.subprocess_utils import hidden_subprocess_kwargs
 
 
 class VideoDecoder:
@@ -76,6 +79,44 @@ class VideoDecoder:
 # ---------------------------------------------------------------------------
 
 
+def _cv2_hw_decode_params(cv2_module) -> list[int]:
+    """Return OpenCV FFMPEG open params for hardware decode when available."""
+    disabled = os.environ.get("TIGERCAPTURE_DISABLE_HW_DECODE", "").strip().lower()
+    if disabled in {"1", "true", "yes", "on"}:
+        return []
+    enabled = os.environ.get("TIGERCAPTURE_ENABLE_HW_DECODE", "").strip().lower()
+    if enabled not in {"1", "true", "yes", "on"}:
+        return []
+    prop = getattr(cv2_module, "CAP_PROP_HW_ACCELERATION", None)
+    accel = getattr(cv2_module, "VIDEO_ACCELERATION_ANY", None)
+    if prop is None or accel is None:
+        return []
+    params = [int(prop), int(accel)]
+    raw_device = os.environ.get("TIGERCAPTURE_HW_DEVICE", "").strip()
+    device_prop = getattr(cv2_module, "CAP_PROP_HW_DEVICE", None)
+    if raw_device and device_prop is not None:
+        try:
+            params.extend([int(device_prop), int(raw_device)])
+        except Exception:
+            pass
+    return params
+
+
+def _cv2_forward_seek_window() -> int:
+    """Maximum forward frame gap to satisfy by reading instead of seeking.
+
+    For inter-frame codecs, a small forward ``CAP_PROP_POS_FRAMES`` seek can be
+    slower than decoding and discarding the intervening frames. Timeline scrub
+    and QA samples often jump 10-40 frames forward, so keep this conservative
+    and configurable.
+    """
+    raw = os.environ.get("TIGERCAPTURE_CV2_FORWARD_SEEK_WINDOW", "0").strip()
+    try:
+        return max(0, min(240, int(raw)))
+    except Exception:
+        return 0
+
+
 class CV2Decoder(VideoDecoder):
     """Wraps ``cv2.VideoCapture``. Same semantics as the legacy
     direct calls in ProjectPlayer — just behind the abstract API."""
@@ -88,16 +129,29 @@ class CV2Decoder(VideoDecoder):
 
     def open(self) -> bool:
         import cv2
+        cap = None
+        params = _cv2_hw_decode_params(cv2)
+        if params:
+            try:
+                cap_hw = cv2.VideoCapture(str(self._path), cv2.CAP_FFMPEG, params)
+            except Exception:
+                cap_hw = None
+            if cap_hw is not None and cap_hw.isOpened():
+                cap = cap_hw
+            elif cap_hw is not None:
+                cap_hw.release()
         # Attempt hardware-accelerated decode first (DXVA2/NVDEC/VideoToolbox/VAAPI).
-        cap_hw = cv2.VideoCapture(str(self._path), cv2.CAP_FFMPEG)
-        try:
-            cap_hw.set(cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_ANY)
-        except Exception:
-            pass
-        if cap_hw.isOpened():
-            cap = cap_hw
-        else:
-            cap_hw.release()
+        if cap is None:
+            cap_hw = cv2.VideoCapture(str(self._path), cv2.CAP_FFMPEG)
+            try:
+                cap_hw.set(cv2.CAP_PROP_HW_ACCELERATION, cv2.VIDEO_ACCELERATION_ANY)
+            except Exception:
+                pass
+            if cap_hw.isOpened():
+                cap = cap_hw
+            else:
+                cap_hw.release()
+        if cap is None:
             # HW-accelerated open failed — retry with plain software decode.
             cap = cv2.VideoCapture(str(self._path))
             if not cap.isOpened():
@@ -128,7 +182,19 @@ class CV2Decoder(VideoDecoder):
         target = self._next_seek if self._next_seek is not None else self._last_read_idx + 1
         # Skip the seek if we're already at the right place — ``cv2``
         # ``set(POS_FRAMES, ...)`` is expensive on long files.
-        if target != self._last_read_idx + 1 or self._next_seek is not None:
+        expected_next = self._last_read_idx + 1
+        if target > expected_next:
+            gap = target - expected_next
+            if gap <= _cv2_forward_seek_window():
+                for _ in range(gap):
+                    ret, _discard = self._cap.read()
+                    if not ret:
+                        self._next_seek = None
+                        return None
+                    self._last_read_idx += 1
+            else:
+                self._cap.set(cv2.CAP_PROP_POS_FRAMES, target)
+        elif target != expected_next:
             self._cap.set(cv2.CAP_PROP_POS_FRAMES, target)
         ret, bgr = self._cap.read()
         if not ret or bgr is None:
@@ -272,13 +338,136 @@ class FFmpegToneMapDecoder(VideoDecoder):
                 stderr=subprocess.DEVNULL,
                 stdin=subprocess.DEVNULL,
                 bufsize=0,
-                creationflags=(
-                    subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-                ),
+                **hidden_subprocess_kwargs(),
             )
             # If we restarted at a non-zero seek, the next ``read_rgb``
             # call should NOT seek again — it just consumes from the
             # fresh pipe.
+            self._last_read_idx = at_frame - 1
+        except Exception:
+            self._proc = None
+
+
+class FFmpegFrameServerDecoder(VideoDecoder):
+    """Process-level RGB preview frame server backed by an FFmpeg pipe."""
+
+    def __init__(
+        self,
+        path: Path | str,
+        *,
+        output_height: int | None = None,
+        fallback_fps: float = 30.0,
+    ) -> None:
+        self._path = Path(path)
+        self._proc: Optional[subprocess.Popen] = None
+        self._next_seek: Optional[int] = None
+        self._last_read_idx: int = -2
+        self._fallback_fps = float(fallback_fps)
+        self._requested_height = output_height
+        self._source_frame_size: tuple[int, int] = (0, 0)
+
+    def open(self) -> bool:
+        if not _probe_video_dimensions(self._path, self):
+            return False
+        self._source_frame_size = self.frame_size
+        self.frame_size = self._resolve_output_size()
+        self._spawn(at_frame=0)
+        return self._proc is not None
+
+    def seek_to_frame(self, idx: int) -> None:
+        self._next_seek = max(0, int(idx))
+
+    def read_rgb(self) -> Optional[np.ndarray]:
+        if self._next_seek is not None and self._next_seek != self._last_read_idx + 1:
+            self._spawn(at_frame=int(self._next_seek))
+        target = self._next_seek if self._next_seek is not None else self._last_read_idx + 1
+        self._next_seek = None
+        if self._proc is None or self._proc.stdout is None:
+            return None
+        w, h = self.frame_size
+        if w <= 0 or h <= 0:
+            return None
+        bytes_per_frame = w * h * 3
+        try:
+            buf = self._proc.stdout.read(bytes_per_frame)
+        except Exception:
+            return None
+        if not buf or len(buf) < bytes_per_frame:
+            return None
+        self._last_read_idx = target
+        return np.frombuffer(buf, dtype=np.uint8).reshape((h, w, 3)).copy()
+
+    def release(self) -> None:
+        proc = self._proc
+        self._proc = None
+        if proc is None:
+            return
+        try:
+            if proc.stdout is not None:
+                proc.stdout.close()
+        except Exception:
+            pass
+        try:
+            proc.terminate()
+            proc.wait(timeout=2)
+        except Exception:
+            try:
+                proc.kill()
+            except Exception:
+                pass
+
+    def _resolve_output_size(self) -> tuple[int, int]:
+        src_w, src_h = self._source_frame_size
+        src_w = int(src_w or 0)
+        src_h = int(src_h or 0)
+        if src_w <= 0 or src_h <= 0:
+            return (0, 0)
+        if self._requested_height is None:
+            target_h = 540 if src_h >= 2160 else 720
+        else:
+            target_h = int(self._requested_height)
+        if target_h <= 0 or src_h <= target_h:
+            return (src_w, src_h)
+        scale = target_h / float(src_h)
+        target_w = max(2, int(round(src_w * scale)))
+        if target_w % 2:
+            target_w += 1
+        return (target_w, max(1, target_h))
+
+    def _spawn(self, *, at_frame: int) -> None:
+        self.release()
+        try:
+            from imageio_ffmpeg import get_ffmpeg_exe
+            ffmpeg = get_ffmpeg_exe()
+        except Exception:
+            return
+        seek_seconds = max(0.0, at_frame / max(self.fps, self._fallback_fps))
+        src_w, src_h = self._source_frame_size
+        out_w, out_h = self.frame_size
+        vf = "format=rgb24"
+        if src_h > 0 and out_h > 0 and out_h < src_h:
+            vf = f"scale={out_w}:{out_h}:flags=bilinear,format=rgb24"
+        cmd = [
+            ffmpeg,
+            "-hide_banner",
+            "-loglevel", "error",
+            "-ss", f"{seek_seconds:.3f}",
+            "-i", str(self._path),
+            "-vf", vf,
+            "-pix_fmt", "rgb24",
+            "-f", "rawvideo",
+            "-an",
+            "-",
+        ]
+        try:
+            self._proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                stdin=subprocess.DEVNULL,
+                bufsize=0,
+                **hidden_subprocess_kwargs(),
+            )
             self._last_read_idx = at_frame - 1
         except Exception:
             self._proc = None
@@ -304,9 +493,7 @@ def _probe_video_dimensions(path: Path, decoder: FFmpegToneMapDecoder) -> bool:
             encoding="utf-8",
             errors="replace",
             timeout=10,
-            creationflags=(
-                subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
-            ),
+            **hidden_subprocess_kwargs(),
         )
     except Exception:
         return False
@@ -351,8 +538,8 @@ class PrefetchDecoder(VideoDecoder):
     the _seek_to / _stopped flags.
     """
 
-    BUFFER_SIZE: int = 12       # frames ahead to keep ready
-    READ_TIMEOUT: float = 0.060 # main-thread read_rgb() ceiling (seconds)
+    BUFFER_SIZE: int = 24       # frames ahead to keep ready
+    READ_TIMEOUT: float = 0.080 # main-thread read_rgb() ceiling (seconds)
 
     def __init__(self, inner: VideoDecoder, preview_height: int = 0) -> None:
         self._inner = inner
@@ -360,14 +547,38 @@ class PrefetchDecoder(VideoDecoder):
         self.total_frames = inner.total_frames
         self.frame_size = inner.frame_size
         self._preview_height = max(0, int(preview_height))
+        try:
+            self._buffer_size = max(2, min(90, int(os.environ.get("TIGERCAPTURE_PREFETCH_FRAMES", str(self.BUFFER_SIZE)))))
+        except Exception:
+            self._buffer_size = self.BUFFER_SIZE
+        try:
+            self._read_timeout = max(0.005, min(0.250, float(os.environ.get("TIGERCAPTURE_PREFETCH_READ_TIMEOUT", str(self.READ_TIMEOUT)))))
+        except Exception:
+            self._read_timeout = self.READ_TIMEOUT
+        try:
+            self._forward_seek_window = max(
+                0,
+                min(240, int(os.environ.get("TIGERCAPTURE_PREFETCH_FORWARD_SEEK_WINDOW", "12"))),
+            )
+        except Exception:
+            self._forward_seek_window = 0
+        try:
+            self._release_join_timeout = max(
+                0.0,
+                min(5.0, float(os.environ.get("TIGERCAPTURE_PREFETCH_RELEASE_JOIN_TIMEOUT", "0.5"))),
+            )
+        except Exception:
+            self._release_join_timeout = 0.5
 
-        self._buf: deque = deque()
+        self._buf: deque[tuple[int, np.ndarray]] = deque()
         self._cond = threading.Condition()
+        self._release_lock = threading.Lock()
         self._next_bg: int = 0           # next frame the bg thread will decode
         self._next_fg: int = 0           # next frame the main thread expects
         self._seek_to: Optional[int] = 0 # initial seek to frame 0
         self._eof: bool = False
         self._stopped: bool = False
+        self._inner_released: bool = False
 
         self._thread = threading.Thread(
             target=self._run, daemon=True,
@@ -382,6 +593,24 @@ class PrefetchDecoder(VideoDecoder):
         with self._cond:
             if idx == self._next_fg and self._seek_to is None and not self._eof:
                 return  # sequential advance — bg thread is already ahead
+            while self._buf and self._buf[0][0] < idx:
+                self._buf.popleft()
+            if self._buf and self._buf[0][0] == idx:
+                self._eof = False
+                self._next_fg = idx
+                self._seek_to = None
+                self._cond.notify_all()
+                return
+            if (
+                self._forward_seek_window > 0
+                and self._seek_to is None
+                and not self._eof
+                and idx >= self._next_bg
+                and (idx - self._next_bg) <= self._forward_seek_window
+            ):
+                self._next_fg = idx
+                self._cond.notify_all()
+                return
             self._buf.clear()
             self._eof = False
             self._next_fg = idx
@@ -389,14 +618,19 @@ class PrefetchDecoder(VideoDecoder):
             self._cond.notify_all()
 
     def read_rgb(self) -> Optional[np.ndarray]:
-        deadline = time.monotonic() + self.READ_TIMEOUT
+        deadline = time.monotonic() + self._read_timeout
         with self._cond:
             while True:
                 if self._buf:
-                    rgb = self._buf.popleft()
-                    self._next_fg += 1
-                    self._cond.notify_all()
-                    return rgb
+                    frame_idx, rgb = self._buf[0]
+                    if frame_idx < self._next_fg:
+                        self._buf.popleft()
+                        continue
+                    if frame_idx == self._next_fg:
+                        self._buf.popleft()
+                        self._next_fg += 1
+                        self._cond.notify_all()
+                        return rgb
                 if self._stopped or self._eof:
                     return None
                 remaining = deadline - time.monotonic()
@@ -407,11 +641,24 @@ class PrefetchDecoder(VideoDecoder):
     def release(self) -> None:
         with self._cond:
             self._stopped = True
+            self._buf.clear()
             self._cond.notify_all()
-        # Short timeout then release the inner decoder so any blocking
-        # read_rgb() call in the bg thread returns None quickly.
-        self._thread.join(timeout=0.5)
-        self._inner.release()
+        if self._thread is threading.current_thread():
+            self._release_inner_once()
+            return
+        self._thread.join(timeout=self._release_join_timeout)
+        if not self._thread.is_alive():
+            self._release_inner_once()
+
+    def _release_inner_once(self) -> None:
+        with self._release_lock:
+            if self._inner_released:
+                return
+            self._inner_released = True
+        try:
+            self._inner.release()
+        except Exception:
+            pass
 
     # ── background decode loop ────────────────────────────────────────────────
 
@@ -423,10 +670,11 @@ class PrefetchDecoder(VideoDecoder):
                 while (
                     not self._stopped
                     and self._seek_to is None
-                    and (len(self._buf) >= self.BUFFER_SIZE or self._eof)
+                    and (len(self._buf) >= self._buffer_size or self._eof)
                 ):
                     self._cond.wait(timeout=0.1)
                 if self._stopped:
+                    self._release_inner_once()
                     return
                 if self._seek_to is not None:
                     need_seek = self._seek_to
@@ -439,7 +687,14 @@ class PrefetchDecoder(VideoDecoder):
                 self._inner.seek_to_frame(need_seek)
 
             # Phase 3: decode (expensive — GIL released inside cv2/ffmpeg).
-            rgb = self._inner.read_rgb()
+            try:
+                rgb = self._inner.read_rgb()
+            except Exception:
+                with self._cond:
+                    self._eof = True
+                    self._cond.notify_all()
+                self._release_inner_once()
+                return
 
             # Phase 4: optional preview downscale (outside lock).
             if rgb is not None and self._preview_height > 0:
@@ -459,6 +714,7 @@ class PrefetchDecoder(VideoDecoder):
             # Phase 5: commit result to buffer.
             with self._cond:
                 if self._stopped:
+                    self._release_inner_once()
                     return
                 if self._seek_to is not None:
                     pass  # new seek arrived while we were decoding — discard stale frame
@@ -466,9 +722,60 @@ class PrefetchDecoder(VideoDecoder):
                     self._eof = True
                     self._cond.notify_all()
                 else:
-                    self._buf.append(rgb)
+                    self._buf.append((self._next_bg, rgb))
                     self._next_bg += 1
                     self._cond.notify_all()
+
+
+class FrameCacheDecoder(VideoDecoder):
+    """Small LRU cache for preview scrubbing and repeated frame requests."""
+
+    def __init__(self, inner: VideoDecoder, limit: int = 24) -> None:
+        self._inner = inner
+        self.fps = inner.fps
+        self.total_frames = inner.total_frames
+        self.frame_size = inner.frame_size
+        self._limit = max(0, int(limit))
+        self._cache: "OrderedDict[int, np.ndarray]" = OrderedDict()
+        self._next_seek: Optional[int] = 0
+        self._last_read_idx: int = -1
+        self._inner_aligned: bool = False
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+    def open(self) -> bool:
+        return True
+
+    def seek_to_frame(self, idx: int) -> None:
+        self._next_seek = max(0, int(idx))
+
+    def read_rgb(self) -> Optional[np.ndarray]:
+        target = self._next_seek if self._next_seek is not None else self._last_read_idx + 1
+        self._next_seek = None
+        cached = self._cache.get(target)
+        if cached is not None:
+            self._cache.move_to_end(target)
+            self._last_read_idx = target
+            self._inner_aligned = False
+            return cached.copy()
+        if not self._inner_aligned or target != self._last_read_idx + 1:
+            self._inner.seek_to_frame(target)
+        rgb = self._inner.read_rgb()
+        if rgb is None:
+            return None
+        self._last_read_idx = target
+        self._inner_aligned = True
+        if self._limit > 0:
+            self._cache[target] = np.ascontiguousarray(rgb).copy()
+            self._cache.move_to_end(target)
+            while len(self._cache) > self._limit:
+                self._cache.popitem(last=False)
+        return rgb
+
+    def release(self) -> None:
+        self._cache.clear()
+        self._inner.release()
 
 
 # ---------------------------------------------------------------------------
@@ -476,10 +783,317 @@ class PrefetchDecoder(VideoDecoder):
 # ---------------------------------------------------------------------------
 
 
+_DECODER_CHOICE_CACHE: dict[str, dict] | None = None
+
+
+def _preview_decoder_auto_enabled() -> bool:
+    mode = os.environ.get("TIGERCAPTURE_PREVIEW_DECODER_AUTO", "").strip().lower()
+    frame_server = os.environ.get("TIGERCAPTURE_PREVIEW_FRAME_SERVER", "").strip().lower()
+    return mode in {"1", "true", "yes", "on", "auto"} or frame_server == "auto"
+
+
+def _decoder_choice_cache_path() -> Path | None:
+    raw = os.environ.get("TIGERCAPTURE_DECODER_CHOICE_CACHE", "").strip()
+    if raw:
+        return Path(raw)
+    try:
+        return Path.home() / "Videos" / "TigerCapture" / ".cache" / "decoder_choices.json"
+    except Exception:
+        return None
+
+
+def _load_decoder_choice_cache() -> dict[str, dict]:
+    global _DECODER_CHOICE_CACHE
+    if _DECODER_CHOICE_CACHE is not None:
+        return _DECODER_CHOICE_CACHE
+    path = _decoder_choice_cache_path()
+    if path is None or not path.exists():
+        _DECODER_CHOICE_CACHE = {}
+        return _DECODER_CHOICE_CACHE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        _DECODER_CHOICE_CACHE = data if isinstance(data, dict) else {}
+    except Exception:
+        _DECODER_CHOICE_CACHE = {}
+    return _DECODER_CHOICE_CACHE
+
+
+def _save_decoder_choice_cache() -> None:
+    cache = _load_decoder_choice_cache()
+    path = _decoder_choice_cache_path()
+    if path is None:
+        return
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(cache, ensure_ascii=False, indent=2), encoding="utf-8")
+    except Exception:
+        pass
+
+
+def _decoder_choice_cache_key(path: Path, preview_height: int | None) -> str | None:
+    try:
+        stat = path.stat()
+        resolved = str(path.resolve()).lower()
+        margin = os.environ.get("TIGERCAPTURE_PREVIEW_DECODER_AUTO_MARGIN", "0.85").strip()
+        bench_frames = os.environ.get("TIGERCAPTURE_PREVIEW_DECODER_BENCH_FRAMES", "3").strip()
+        return "|".join([
+            "auto-v1",
+            resolved,
+            str(int(stat.st_size)),
+            str(int(stat.st_mtime_ns)),
+            str(preview_height if preview_height is not None else "auto"),
+            str(margin or "0.85"),
+            str(bench_frames or "3"),
+            sys.platform,
+        ])
+    except Exception:
+        return None
+
+
+def _decoder_auto_log(message: str) -> None:
+    enabled = os.environ.get("TIGERCAPTURE_DECODER_AUTO_LOG", "").strip().lower()
+    if enabled in {"1", "true", "yes", "on"}:
+        print(f"[decoder-auto] {message}", file=sys.stderr, flush=True)
+
+
+def _decoder_benchmark_frames(decoder: VideoDecoder) -> list[int]:
+    total = max(0, int(getattr(decoder, "total_frames", 0) or 0))
+    fps = max(1.0, float(getattr(decoder, "fps", 30.0) or 30.0))
+    if total <= 1:
+        frames = [0]
+    else:
+        frames = [
+            0,
+            min(total - 1, max(1, int(round(fps)))),
+            min(total - 1, max(1, total // 2)),
+        ]
+    try:
+        limit = max(1, min(6, int(os.environ.get("TIGERCAPTURE_PREVIEW_DECODER_BENCH_FRAMES", "3"))))
+    except Exception:
+        limit = 3
+    unique: list[int] = []
+    for idx in frames:
+        idx = int(max(0, idx))
+        if idx not in unique:
+            unique.append(idx)
+        if len(unique) >= limit:
+            break
+    return unique or [0]
+
+
+def _benchmark_decoder_candidate(decoder: VideoDecoder) -> dict[str, object]:
+    opened = False
+    open_start = time.perf_counter()
+    try:
+        opened = bool(decoder.open())
+    except Exception as exc:
+        return {"ok": False, "error": type(exc).__name__, "open_ms": 0.0}
+    open_ms = (time.perf_counter() - open_start) * 1000.0
+    if not opened:
+        try:
+            decoder.release()
+        except Exception:
+            pass
+        return {"ok": False, "error": "open_failed", "open_ms": round(open_ms, 2)}
+
+    frames = _decoder_benchmark_frames(decoder)
+    read_rows: list[float] = []
+    try:
+        for frame_idx in frames:
+            start = time.perf_counter()
+            decoder.seek_to_frame(frame_idx)
+            rgb = decoder.read_rgb()
+            elapsed_ms = (time.perf_counter() - start) * 1000.0
+            if rgb is None:
+                return {
+                    "ok": False,
+                    "error": "read_failed",
+                    "open_ms": round(open_ms, 2),
+                    "frames": frames,
+                }
+            read_rows.append(elapsed_ms)
+    except Exception as exc:
+        return {
+            "ok": False,
+            "error": type(exc).__name__,
+            "open_ms": round(open_ms, 2),
+            "frames": frames,
+        }
+    finally:
+        try:
+            decoder.release()
+        except Exception:
+            pass
+
+    avg_read_ms = sum(read_rows) / max(1, len(read_rows))
+    total_ms = open_ms + sum(read_rows)
+    return {
+        "ok": True,
+        "open_ms": round(open_ms, 2),
+        "avg_read_ms": round(avg_read_ms, 2),
+        "total_ms": round(total_ms, 2),
+        "frames": frames,
+    }
+
+
+def _choose_preview_decoder_backend(
+    path: Path,
+    preview_height: int | None,
+) -> str:
+    """Return the fastest safe preview decoder backend for this source.
+
+    The benchmark intentionally has a conservative bias: OpenCV remains the
+    default unless the FFmpeg frame server wins by a meaningful margin. Local QA
+    showed the frame server can be slower on random seeks, so auto mode should
+    only switch when this exact source proves it.
+    """
+    key = _decoder_choice_cache_key(path, preview_height)
+    cache = _load_decoder_choice_cache()
+    if key:
+        cached = cache.get(key)
+        if isinstance(cached, dict):
+            backend = str(cached.get("backend") or "")
+            if backend in {"cv2", "ffmpeg_frame_server"}:
+                return backend
+
+    cv = _benchmark_decoder_candidate(CV2Decoder(path))
+    fs = _benchmark_decoder_candidate(
+        FFmpegFrameServerDecoder(path, output_height=preview_height)
+    )
+
+    backend = "cv2"
+    cv_ok = bool(cv.get("ok"))
+    fs_ok = bool(fs.get("ok"))
+    if not cv_ok and fs_ok:
+        backend = "ffmpeg_frame_server"
+    elif cv_ok and fs_ok:
+        cv_score = float(cv.get("total_ms", 999999.0) or 999999.0)
+        fs_score = float(fs.get("total_ms", 999999.0) or 999999.0)
+        try:
+            margin = float(os.environ.get("TIGERCAPTURE_PREVIEW_DECODER_AUTO_MARGIN", "0.85"))
+        except Exception:
+            margin = 0.85
+        margin = max(0.50, min(0.98, margin))
+        if fs_score < cv_score * margin:
+            backend = "ffmpeg_frame_server"
+
+    if key:
+        cache[key] = {
+            "backend": backend,
+            "created_at": int(time.time()),
+            "cv2": cv,
+            "ffmpeg_frame_server": fs,
+        }
+        _save_decoder_choice_cache()
+    _decoder_auto_log(f"{path.name}: {backend} cv2={cv} ffmpeg={fs}")
+    try:
+        from app.loading_performance import record_loading_event
+
+        record_loading_event(
+            "decoder.auto",
+            "benchmark",
+            path=path,
+            status="ready",
+            detail=f"selected={backend}",
+            metadata={
+                "backend": backend,
+                "preview_height": preview_height,
+                "cv2": cv,
+                "ffmpeg_frame_server": fs,
+            },
+        )
+    except Exception:
+        pass
+    return backend
+
+
+def _wrap_for_preview_prefetch(
+    decoder: VideoDecoder,
+    preview_height: int,
+) -> VideoDecoder:
+    required = ("fps", "total_frames", "frame_size", "seek_to_frame", "read_rgb")
+    if not all(hasattr(decoder, name) for name in required):
+        return decoder
+    wrapped: VideoDecoder = PrefetchDecoder(decoder, preview_height=preview_height)
+    disabled = os.environ.get("TIGERCAPTURE_DISABLE_FRAME_CACHE", "").strip().lower()
+    if disabled in {"1", "true", "yes"}:
+        return wrapped
+    try:
+        limit = int(os.environ.get("TIGERCAPTURE_FRAME_CACHE_LIMIT", "24"))
+    except Exception:
+        limit = 24
+    return FrameCacheDecoder(wrapped, limit=limit)
+
+
+def _preview_height_from_env() -> int | None:
+    raw = os.environ.get("TIGERCAPTURE_PREVIEW_HEIGHT", "").strip()
+    if not raw:
+        return None
+    try:
+        value = int(raw)
+    except Exception:
+        return None
+    if value <= 0:
+        return 0
+    return max(240, min(2160, value))
+
+
+def _frame_server_preview_height_hint(requested: int | None) -> int | None:
+    """Return the scale height to hand to FFmpeg frame-server candidates.
+
+    The OpenCV path can inspect the source after opening and then choose a
+    source-aware preview height. The FFmpeg frame server needs its output size
+    before it is benchmarked/opened, otherwise opt-in/auto runs may decode full
+    source frames and make the comparison unfairly expensive.
+    """
+    if requested is not None:
+        return max(0, int(requested))
+    env_height = _preview_height_from_env()
+    if env_height is not None:
+        return env_height
+    return 720
+
+
+def _resolve_preview_height(decoder: VideoDecoder, requested: int | None) -> int:
+    """Choose the frame height used by the preview prefetch buffer."""
+    if requested is not None:
+        return max(0, int(requested))
+    env_height = _preview_height_from_env()
+    if env_height is not None:
+        return env_height
+    _w, h = getattr(decoder, "frame_size", (0, 0)) or (0, 0)
+    if int(h or 0) >= 2160:
+        return 540
+    return 720
+
+
+def _preview_frame_server_enabled() -> bool:
+    mode = os.environ.get("TIGERCAPTURE_PREVIEW_FRAME_SERVER", "").strip().lower()
+    return mode in {"1", "true", "yes", "on", "ffmpeg"}
+
+
+def _existing_preview_proxy(path: Path) -> Path | None:
+    """Return a fresh sibling proxy path for preview decode, if available."""
+    disabled = os.environ.get("TIGERCAPTURE_DISABLE_AUTO_PROXY", "").strip()
+    if disabled in {"1", "true", "TRUE"}:
+        return None
+    if path.stem.endswith("_proxy"):
+        return None
+    proxy = path.parent / "proxies" / f"{path.stem}_proxy.mp4"
+    try:
+        if not proxy.is_file():
+            return None
+        if proxy.stat().st_mtime_ns < path.stat().st_mtime_ns:
+            return None
+        return proxy
+    except Exception:
+        return None
+
+
 def open_decoder(
     path: Path | str,
     hdr_info=None,
-    preview_height: int = 720,
+    preview_height: int | None = None,
 ) -> Optional[VideoDecoder]:
     """Pick a decoder based on ``hdr_info`` and wrap it in
     ``PrefetchDecoder`` for background frame prefetch.
@@ -487,15 +1101,85 @@ def open_decoder(
     ``preview_height``: frames taller than this are downscaled in the
     bg thread before entering the buffer. Pass 0 to disable scaling.
     """
+    decode_path = Path(path)
+    original_path = decode_path
+    open_started = time.perf_counter()
+
+    def _record_open(backend: str, status: str = "ready", **metadata) -> None:
+        try:
+            from app.loading_performance import record_loading_event
+
+            record_loading_event(
+                "decoder.open",
+                status,
+                path=original_path,
+                status=status,
+                elapsed_ms=(time.perf_counter() - open_started) * 1000.0,
+                detail=backend,
+                metadata={
+                    "backend": backend,
+                    "decode_path": str(decode_path),
+                    **metadata,
+                },
+            )
+        except Exception:
+            pass
+
+    proxy_path = _existing_preview_proxy(decode_path)
+    if proxy_path is not None:
+        decode_path = proxy_path
+        hdr_info = None
     is_hdr = bool(getattr(hdr_info, "is_hdr", False))
     if is_hdr:
-        d = FFmpegToneMapDecoder(path)
+        d = FFmpegToneMapDecoder(decode_path)
         if d.open():
-            return PrefetchDecoder(d, preview_height=preview_height)
+            preview_height = _resolve_preview_height(d, preview_height)
+            _record_open(
+                "ffmpeg_tonemap",
+                proxy=bool(proxy_path),
+                preview_height=preview_height,
+                hdr=True,
+            )
+            return _wrap_for_preview_prefetch(d, preview_height=preview_height)
         # ffmpeg path failed — fall back to cv2 (preview will look
         # washed-out but the file at least loads).
         d.release()
-    cv = CV2Decoder(path)
+    frame_server_preview_height = _frame_server_preview_height_hint(preview_height)
+    if _preview_decoder_auto_enabled():
+        backend = _choose_preview_decoder_backend(decode_path, frame_server_preview_height)
+        if backend == "ffmpeg_frame_server":
+            fs = FFmpegFrameServerDecoder(decode_path, output_height=frame_server_preview_height)
+            if fs.open():
+                _record_open(
+                    "ffmpeg_frame_server",
+                    proxy=bool(proxy_path),
+                    preview_height=frame_server_preview_height,
+                    hdr=False,
+                    auto=True,
+                )
+                return _wrap_for_preview_prefetch(fs, preview_height=0)
+            fs.release()
+    if _preview_frame_server_enabled():
+        fs = FFmpegFrameServerDecoder(decode_path, output_height=frame_server_preview_height)
+        if fs.open():
+            _record_open(
+                "ffmpeg_frame_server",
+                proxy=bool(proxy_path),
+                preview_height=frame_server_preview_height,
+                hdr=False,
+                forced_frame_server=True,
+            )
+            return _wrap_for_preview_prefetch(fs, preview_height=0)
+        fs.release()
+    cv = CV2Decoder(decode_path)
     if cv.open():
-        return PrefetchDecoder(cv, preview_height=preview_height)
+        preview_height = _resolve_preview_height(cv, preview_height)
+        _record_open(
+            "cv2",
+            proxy=bool(proxy_path),
+            preview_height=preview_height,
+            hdr=False,
+        )
+        return _wrap_for_preview_prefetch(cv, preview_height=preview_height)
+    _record_open("open_failed", status="error", proxy=bool(proxy_path))
     return None
