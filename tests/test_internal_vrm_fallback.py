@@ -1,4 +1,5 @@
 import numpy as np
+from types import SimpleNamespace
 
 
 def test_internal_vrm_fallback_missing_assets_returns_transparent_frame(tmp_path):
@@ -35,6 +36,67 @@ def test_internal_vrm_fallback_quality_policy_marks_full_gpu_hd_as_broadcast_can
     assert quality["broadcast_ready"] is True
     assert quality["claim_blockers"] == []
     assert quality["frame_budget_ms"] == 1000.0 / 30.0
+
+
+def test_internal_vrm_fallback_defaults_do_not_require_debugcapture_descriptor_or_motion(tmp_path, monkeypatch):
+    from PIL import Image
+
+    import app.vtuber.internal_vrm_fallback as fallback
+
+    vrm = tmp_path / "avatar.vrm"
+    vrm.write_bytes(b"glTF")
+    calls = {}
+    frame = SimpleNamespace(
+        time_ms=0,
+        yaw_deg=0.0,
+        pitch_deg=0.0,
+        roll_deg=0.0,
+        shoulder_roll_deg=0.0,
+        mouth_open=0.0,
+        blink_l=0.0,
+        blink_r=0.0,
+    )
+
+    class FakeRenderModule:
+        @staticmethod
+        def _apply_face_morphs(base_descriptor, morph_targets, selected_frame):
+            assert selected_frame is frame
+            return dict(base_descriptor)
+
+    def fake_load_runtime(vrm_path, descriptor_path, motion_csv, upper_body_mode):
+        calls["vrm_path"] = vrm_path
+        calls["descriptor_path"] = descriptor_path
+        calls["motion_csv"] = motion_csv
+        calls["upper_body_mode"] = upper_body_mode
+        return {
+            "module": FakeRenderModule,
+            "frames": (frame,),
+            "base_descriptor": {"id": "fake_vrm"},
+            "morph_targets": {},
+            "descriptor_source": "vrm_import",
+            "motion_source": "idle_internal_motion",
+        }
+
+    def fake_render_descriptor_frame(module, *, width, height, **_kwargs):
+        return Image.new("RGBA", (width, height), (10, 20, 30, 255)), {"ok": True}
+
+    monkeypatch.setattr(fallback, "_load_cached_runtime", fake_load_runtime)
+    monkeypatch.setattr(fallback, "_render_descriptor_frame", fake_render_descriptor_frame)
+
+    image, diagnostics = fallback.render_internal_vrm_fallback_frame(
+        {"id": "internal_vrm_fallback", "settings": {"avatar_vrm": str(vrm)}},
+        width=16,
+        height=9,
+    )
+
+    assert image.size == (16, 9)
+    assert diagnostics["ok"] is True
+    assert diagnostics["descriptor"] == ""
+    assert diagnostics["motion_csv"] == ""
+    assert diagnostics["descriptor_source"] == "vrm_import"
+    assert diagnostics["motion_source"] == "idle_internal_motion"
+    assert calls["descriptor_path"] == ""
+    assert calls["motion_csv"] == ""
 
 
 def test_internal_vrm_fallback_composite_suppresses_black_vseeface_source():

@@ -4,6 +4,28 @@ This note is a compact handoff for the review automation and multi-monitor
 capture work. It records the intended VTuber Studio story in a form that future
 threads can read without reconstructing the older discussion.
 
+## Read This First
+
+2026-07-07 update: assume VSeeFace is absent unless the user explicitly asks for
+sidecar installation or repair. The correct TigerCapture story is still:
+Trump/person video as `Performance Source`, Milica VRM as `Avatar Target`, and
+internal VRM fallback as the default Program Output path when VSeeFace is
+missing, black, degraded, or unregistered.
+
+Do not treat `debugCapture` as a durable asset location. It is disposable
+scratch space and may be deleted. Any `debugCapture` path below is historical
+proof output or a regenerable diagnostic, not a required dependency.
+
+Durable local references:
+
+```text
+Trump Performance Source:
+C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\trump_oval_office_live_GnzWEo_HfE0.mp4
+
+Milica VRM Avatar Target:
+external\assets\vtuber\booth_milica\Milica1.3free\Milica_v1.3.vrm
+```
+
 ## User Intent
 
 - AR/PBR review evidence should use a bicycle model.
@@ -48,12 +70,19 @@ The main historical documents are:
 - `docs/SPEC_BROADCAST_SCENE.md`
   - states that Performance Source must not leak into Program Output.
 
-## Existing Assets And Proof Files
+## Durable Assets And Historical Proof Files
 
-Found local evidence paths:
+Durable assets currently known:
 
 ```text
-debugCapture/trump_face_source.mp4
+C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\trump_oval_office_live_GnzWEo_HfE0.mp4
+external/assets/vtuber/booth_milica/Milica1.3free/Milica_v1.3.vrm
+```
+
+Historical proof files were previously generated at:
+
+```text
+debugCapture/<generated Trump source copy>.mp4
 debugCapture/openseeface_trump_to_vseeface_39540_data.csv
 debugCapture/milica_vrm_trump_actual_mapping_preview.png
 debugCapture/milica_vrm_trump_actual_mapping_preview.json
@@ -61,8 +90,9 @@ debugCapture/milica_vrm_source_framing_bust_up_head_desk_occluded.png
 debugCapture/milica_vrm_source_framing_bust_up_head_desk_occluded.json
 debugCapture/internal_vrm_fallback_program_output.png
 debugCapture/vtuber_broadcast_studio_ui_trump.png
-debugCapture/vtuber_assets/booth_milica/Milica1.3free/Milica_v1.3.vrm
 ```
+
+These files may be absent. Recreate them from durable inputs when needed.
 
 The current search did not find a bicycle model asset. Existing AR/PBR debug
 evidence includes motorcycle outputs, but the review scenario should not
@@ -175,7 +205,7 @@ broadcast.live_target.select
 Plan-only source framing:
 
 ```powershell
-.\.venv\Scripts\python.exe tools\vtuber_source_framing_plan.py --video debugCapture\trump_face_source.mp4 --preset bust_up --slots neutral,head,mouth --out debugCapture\vtuber_source_framing_plan_trump.json
+.\.venv\Scripts\python.exe tools\vtuber_source_framing_plan.py --video "C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\trump_oval_office_live_GnzWEo_HfE0.mp4" --preset bust_up --slots neutral,head,mouth --out debugCapture\vtuber_source_framing_plan_trump.json
 ```
 
 Milica VRM with Trump OpenSeeFace motion:

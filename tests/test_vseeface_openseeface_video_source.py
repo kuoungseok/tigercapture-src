@@ -3,6 +3,14 @@ from pathlib import Path
 import pytest
 
 
+def test_default_facetracker_uses_external_sidecar_location():
+    from app.vtuber.openseeface_video_source import DEFAULT_FACETRACKER
+
+    normalized = DEFAULT_FACETRACKER.as_posix()
+    assert "/external/tools/vseeface/VSeeFace/" in normalized
+    assert normalized.endswith("/VSeeFace_Data/StreamingAssets/Binary/facetracker.exe")
+
+
 def test_build_facetracker_command_uses_raw_rgb_and_endpoint():
     from app.vtuber.openseeface_video_source import build_facetracker_command
 

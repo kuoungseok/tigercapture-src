@@ -5,6 +5,11 @@ Last updated: 2026-07-03
 This is the first file a new Codex, Claude, or other coding agent should read
 before touching TigerCapture review automation.
 
+Before acting, also read `../AGENT_START_HERE.md`. It is the repository-wide
+handoff index for current assumptions such as `debugCapture` being disposable,
+durable asset locations, `video_editor_window.py` boundaries, and the current
+VTuber/VSeeFace fallback stance.
+
 ## One-Sentence Mission
 
 Review automation creates product-catalog presentation assets that explain what
@@ -32,15 +37,19 @@ It is not code review, QA status reporting, or a release dashboard.
 
 Read these before planning or editing:
 
-1. `README.md`
-2. `PURPOSE_RULES.md`
-3. `CATALOG_PPT_STYLE.md`
-4. `PRESENTATION_SCENARIO.md`
-5. `PRODUCT_CATALOG_PT_SCENARIO.md`
-6. `COMPARISON_TEMPLATE_RULES.md`
-7. `MULTI_MONITOR_RULES.md`
-8. `TEMPLATE_ASSET_MANIFEST.md`
-9. `REVIEW_AUTOMATION_TODO.md`
+1. `../AGENT_START_HERE.md`
+2. `README.md`
+3. `PURPOSE_RULES.md`
+4. `CATALOG_PPT_STYLE.md`
+5. `PRESENTATION_SCENARIO.md`
+6. `FULL_PRODUCT_CATALOG_MANIFEST.md`
+7. `FULL_PRODUCT_CATALOG_PAGE_PLAN.md`
+8. `FULL_PRODUCT_CATALOG_TALK_TRACK.md`
+9. `PRODUCT_CATALOG_PT_SCENARIO.md`
+10. `COMPARISON_TEMPLATE_RULES.md`
+11. `MULTI_MONITOR_RULES.md`
+12. `TEMPLATE_ASSET_MANIFEST.md`
+13. `REVIEW_AUTOMATION_TODO.md`
 
 Expanded references:
 
@@ -58,10 +67,24 @@ Expanded references:
 - Do not use AI-generated editor scenes as proof of features.
 - Do not attach or insert decorative/new generated images outside the already
   selected laptop and multi-monitor templates. Product-facing imagery must be
-  either the fixed approved templates or real TigerCapture editor captures.
+  either the fixed approved templates or real TigerCapture editor captures,
+  except for the approved final `Specification Index` bonsai object documented
+  in `PURPOSE_RULES.md` and `FULL_PRODUCT_CATALOG_MANIFEST.md`.
+- Final PPT generation must not use old screenshots from historical capture
+  roots such as `fresh_first_slide_capture`, `actual_3d_viewer_capture`, or
+  `debugCapture`. Those folders are debug/history only. Use the current
+  approved recapture batch under
+  `E:\ClaudeCodeApp\ReviewAutomationWorkspace\tmp\fresh_review_recapture`, or
+  stop and recapture the feature.
 - Prefer multi-track editor states for screenshots. A catalog capture should
   usually show more than one lane, such as video + audio, video + effect,
   video + typography, video + actor, or video + node/grade/keyframe lanes.
+- Timeline captures must match the current editor timeline reference:
+  `E:\ClaudeCodeApp\ReviewAutomationWorkspace\source_assets\references\current_editor_timeline_reference_2026-07-06.png`.
+  Current means horizontal ruler, red playhead triangles, continuous clip
+  thumbnail strip, subtle dark rows, simple left track labels, and modern
+  Viewer controls such as Compare/Fit/zoom. Old blocky V1/A1 tabs, synthetic
+  colored strips, or obsolete thumbnail systems are stale evidence.
 - Add natural edit texture to some screenshots: a mid-clip cut, adjacent clip
   boundary, marker, or transition can make the project feel real. Do not apply
   this to every screenshot, because repeated identical cut/transition layouts
@@ -81,6 +104,19 @@ Expanded references:
   `E:\ClaudeCodeApp\ReviewAutomationWorkspace\source_assets\templates`.
 - Do not delete generated output broadly. If asked to remove PPTs, filter by
   exact extension with `Where-Object { $_.Extension -in '.ppt', '.pptx' }`.
+- The full product catalog is a locked 21-slide scenario defined in
+  `FULL_PRODUCT_CATALOG_MANIFEST.md`. Do not add, remove, split, merge, or
+  reorder those slides unless the user changes that manifest first.
+- Slide 21 is the final `Specification Index` page. It uses dense micro-spec
+  text and the approved green bonsai cutout only as a closing-page object. The
+  bonsai is not feature evidence. Reject visible white halos, checkerboard
+  remnants, background strips, or a large pasted-object drop shadow.
+- Each full-catalog page's screen composition, template, capture source,
+  action/capture method, and rejection criteria are defined in
+  `FULL_PRODUCT_CATALOG_PAGE_PLAN.md`.
+- The Korean presenter narration for the locked 21-slide deck is defined in
+  `FULL_PRODUCT_CATALOG_TALK_TRACK.md`. Use it as speaker-note guidance, not as
+  visible slide body text.
 
 ## Source And Output Boundaries
 
@@ -141,9 +177,23 @@ Before generation:
 3. Clear review/PPT generation caches so stale screenshots, old slide PNGs, and
    previous deck asset crops cannot leak into the new catalog. Never delete
    source templates, source media, or rule documents while doing this.
-4. Verify sample media and template assets exist.
-5. Verify feature-specific captures can be real.
-6. Ask no extra questions if the requested mode is clear; otherwise choose the
+4. Reject historical capture roots in final PPT sources:
+   `fresh_first_slide_capture`, `actual_3d_viewer_capture`, and `debugCapture`.
+   If one appears in a slide source path, replace it with a current recapture
+   path or stop the build.
+5. Verify sample media and template assets exist.
+6. Verify feature-specific captures can be real.
+7. Stop instead of generating PPTX if strict captures are missing or invalid.
+   Do not put repeated `RECAPTURE REQUIRED`, `PENDING`, blank, black, or generic
+   placeholder screens into laptop, iPad, monitor, or feature evidence frames.
+8. Laptop and monitor screens must use full editor/window captures. Cropped
+   detail panels, media-pool-only crops, timeline strips, and contact sheets
+   belong only in detail frames such as the iPad.
+9. iPad/detail frames must explain the selected feature, not repeat the whole
+   editor. For Color Grading, the iPad must show only color controls such as
+   wheels, curves, scopes, tone controls, or sliders. It must not include the
+   video viewer, media pool, or timeline.
+10. Ask no extra questions if the requested mode is clear; otherwise choose the
    safest catalog mode.
 
 After generation:
@@ -170,6 +220,8 @@ Every feature page needs a screenshot that visibly matches the feature:
 - General: prefer visible multi-track timelines instead of a single lonely clip.
 - General: some, but not all, timeline screenshots should show a natural mid-
   timeline cut or transition.
+- General: timeline visuals must match the current editor reference, not older
+  review-generated track art.
 - Cut/edit: zoomed timeline, selected clip, cut marker or edit boundary.
 - Color: real footage plus grading controls, scopes, or before/after.
 - Node graph: connected nodes plus selected node parameters.
@@ -179,15 +231,21 @@ Every feature page needs a screenshot that visibly matches the feature:
   `Original | After`, `Color Off | Color On`, `Effect Off | Effect On`, or
   `Node Off | Node On` labels. Do not use generic PIP or fake split-screen
   graphics as product evidence.
-- Typography: text on canvas plus text clip/keyframes/controls.
+- Typography: large on-canvas title text, at least one secondary text layer,
+  visible text clips/keyframes/controls, and readable multilingual samples when
+  the page claims localization. A single tiny caption line is not valid
+  typography evidence.
 - Transitions/effects: applied effect or transition on real media.
 - Live2D/actor: actor visible, actor lane/keyframes, actor controls.
 - 3D/AR/PBR: use a real approved GLTF/GLB asset from `E:\ClaudeCodeApp\3d`,
-  with the model visible and placement/material/lighting controls shown. Do not
-  use the old motorcycle debug asset for catalog evidence. Do not repeat the
-  Poly Haven camera model on every 3D page; prefer `Nexus_RX` or `Police_car`
-  when they render cleanly, and reserve the camera model for camera-specific
-  pages or fallback.
+  with the model visible and placement/material/lighting controls shown. For
+  laptop/iPad AR/PBR pages, lock the editor video viewer and the iPad/detail
+  viewer to the same named 3D asset and preset. If the iPad shows the plaster
+  statue/bust, the editor video viewer must also show that same plaster
+  statue/bust composited into the edit and scaled up through actions or saved
+  view state. Do not use the old motorcycle debug asset for catalog evidence.
+  Do not repeat the Poly Haven camera model on every 3D page; reserve the
+  camera model for camera-specific pages or fallback.
 - VTuber: Program Output separated from Performance Source/tracking input.
 - Multi-monitor: real captures mapped into real template screen regions.
 

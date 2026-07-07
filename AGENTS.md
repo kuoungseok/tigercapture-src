@@ -2,6 +2,14 @@
 
 These rules are for AI coding agents working in this repository.
 
+## Agent Handoff Entry Point
+
+When a user mentions a previous session, handoff, review automation, UI renewal,
+VTuber Studio, VSeeFace, Program Output, or missing context, read
+`docs/AGENT_START_HERE.md` before searching randomly through the repository.
+That file is the durable index for active handoff docs, current assumptions, and
+known traps from recent sessions.
+
 ## Git Remote Boundary
 
 This repository uses separate remotes for private source and public
@@ -33,6 +41,54 @@ distribution.
   The tracked `.githooks/pre-push` guard blocks source branches, WIP branches,
   source tags, and source-tree refs from being pushed to `origin`. Do not bypass
   this guard except for an explicitly requested emergency cleanup.
+
+## Debug Capture Boundary
+
+`debugCapture` is disposable scratch space. The user may delete it at any time
+when it grows large, so never put important or non-regenerable files there.
+
+Allowed in `debugCapture`:
+
+- temporary logs, probe reports, screenshots, thumbnails, and QA captures
+- generated diagnostics that can be recreated from source assets and code
+- short-lived intermediate files used by local tests or manual verification
+
+Not allowed in `debugCapture`:
+
+- external tools, SDKs, or installed applications
+- source media, purchased/downloaded asset originals, models, avatars, or
+  reference assets that are needed later
+- project state, manifests, caches, or configuration files that the app must
+  rely on after cleanup
+
+Use `external/tools` for external applications and SDKs, `external/assets` for
+local third-party assets, and tracked docs/resources for durable project data.
+If existing code still points at `debugCapture` for important dependencies,
+move the dependency to the proper durable location and leave only regenerated
+reports or screenshots in `debugCapture`.
+
+## VTuber / VSeeFace Fallback Boundary
+
+Assume VSeeFace is absent unless the user explicitly asks to install, launch, or
+repair the external sidecar. VSeeFace is optional; it must not be required for
+normal project open, preview, export, or VTuber Studio Program Output.
+
+For VRM/VSeeFace-style workflows, start from this default:
+
+- `Performance Source` is tracking input only.
+- `Program Output` is the final broadcast/recorded picture.
+- If VSeeFace is missing, black, degraded, or unregistered, use the internal VRM
+  fallback path for Program Output.
+- Do not spend a session chasing VSeeFace registration, virtual camera setup, or
+  remote-window capture unless the user specifically asks for that sidecar
+  work.
+- Stable avatar assets belong under `external/assets/vtuber`; proof images,
+  probe reports, screenshots, and generated motion/debug files may live in
+  `debugCapture` only because they can be regenerated.
+
+The current VTuber handoff index is `docs/WORKFLOW_VTUBER_BROADCAST_CONTEXT.md`.
+The Trump-source mapping note is
+`docs/VTUBER_TRUMP_SOURCE_MAPPING_CONTEXT.md`.
 
 ## Main Editor Boundary
 
@@ -71,6 +127,26 @@ If no suitable module exists, create a new focused module named after the
 feature area. Wire it into the editor through `video_editor_window_delegates.py`,
 the relevant controller/workflow module, or the initializer. Keep the facade
 small.
+
+## AR/PBR Depth Preview Rules
+
+Many agents only read this file or `SPEC.md`, so keep the core AR/PBR depth
+contract here instead of relying only on `docs/SPEC_AR_PBR_COMPOSITOR.md`.
+
+- The main viewer `Depth` toggle is diagnostic and user-controlled. It must stay
+  off by default.
+- Normal video playback must not estimate depth unless an active AR/PBR track
+  explicitly needs depth for occlusion, scene/plane anchoring, or the user has
+  enabled the Depth viewer toggle.
+- Live depth estimation without a cache is allowed only as an intentional
+  diagnostic/placement cost. Do not make it part of the baseline playback path.
+- Depth-map-only viewing must not change export/composite output.
+- Use `ProjectPlayer.set_ar_pbr_depth_view_mode(...)` or Python Actions
+  `ar_pbr.preview.depth_view.get/set` for the viewer mode. Do not create
+  parallel private toggles.
+- Video-depth occlusion must use the shared normalization/effect-mask helpers in
+  `app.ar_pbr.depth_occlusion` and viewer conversion in
+  `app.ar_pbr.depth_view`.
 
 ## Refactor Guard
 

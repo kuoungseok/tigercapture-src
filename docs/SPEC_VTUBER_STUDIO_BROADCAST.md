@@ -6,6 +6,17 @@ This is the canonical product contract for the shared VTuber Studio, Avatar
 Target routing, Performance Source handling, Live2D/VRM broadcast output, and
 Broadcast Evidence release gate.
 
+## Agent Read First
+
+As of 2026-07-07, VSeeFace is optional and should be assumed absent unless the
+user explicitly asks for sidecar installation, launch, or repair. The shared
+VTuber Studio must still produce Program Output through TigerCapture's internal
+VRM fallback when VSeeFace is missing, black, degraded, or unregistered.
+
+Stable avatar/source assets belong under `external/assets` or the user's media
+folders. `debugCapture` is disposable diagnostics only and must not be required
+for normal Studio operation.
+
 ## Core Rule
 
 Tiger Studio has one shared VTuber Studio surface. Do not create separate

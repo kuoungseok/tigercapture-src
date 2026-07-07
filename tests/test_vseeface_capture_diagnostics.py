@@ -110,6 +110,25 @@ def test_capture_backend_reports_admin_install_when_vseeface_camera_is_bundled_o
     assert decision["next_action"] == "run_vseeface_camera_install_bat_as_admin"
 
 
+def test_capture_backend_repairs_stale_virtual_camera_registration():
+    from app.vtuber.vseeface_capture_diagnostics import BACKEND_NEEDS_INSTALL, choose_capture_backend
+
+    decision = choose_capture_backend({
+        "spout2": {"sender_available": True, "receiver_available": False},
+        "virtual_camera": {
+            "registered": True,
+            "registration_usable": False,
+            "registration_stale": True,
+            "requires_admin_registration": True,
+        },
+    })
+
+    assert decision["preferred_backend"] == "virtual_camera"
+    assert decision["status"] == BACKEND_NEEDS_INSTALL
+    assert decision["reason"] == "vseeface_camera_registered_to_stale_path"
+    assert decision["next_action"] == "rerun_vseeface_camera_install_bat_as_admin"
+
+
 def test_capture_backend_prefers_spout_when_sender_and_receiver_exist():
     from app.vtuber.vseeface_capture_diagnostics import BACKEND_NEEDS_CONFIGURATION, choose_capture_backend
 

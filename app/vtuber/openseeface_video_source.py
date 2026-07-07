@@ -16,7 +16,8 @@ import time
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_FACETRACKER = (
     ROOT
-    / "debugCapture"
+    / "external"
+    / "tools"
     / "vseeface"
     / "VSeeFace"
     / "VSeeFace_Data"

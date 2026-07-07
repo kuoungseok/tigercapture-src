@@ -33,8 +33,9 @@ def render_internal_vrm_fallback_frame(
 ) -> tuple[Any, dict[str, Any]]:
     """Render one transparent RGBA avatar frame for `internal_vrm_fallback`.
 
-    The current production path uses cached VRM descriptor data plus
-    OpenSeeFace motion rows.  It intentionally does not call or require
+    The current production path can reuse generated descriptor/motion artifacts,
+    but it must also build from the durable VRM asset and neutral motion when
+    `debugCapture` has been cleaned. It intentionally does not call or require
     VSeeFace, a virtual camera, OBS, or Qt.
     """
     from PIL import Image
@@ -42,8 +43,10 @@ def render_internal_vrm_fallback_frame(
     source_data = dict(source or {})
     settings = dict(source_data.get("settings") if isinstance(source_data.get("settings"), Mapping) else source_data)
     vrm_path = _resolve_path(settings.get("avatar_vrm") or settings.get("vrm") or DEFAULT_VRM)
-    descriptor_path = _resolve_path(settings.get("descriptor_path") or settings.get("descriptor") or DEFAULT_DESCRIPTOR)
-    motion_csv = _resolve_path(settings.get("motion_csv") or settings.get("openseeface_csv") or DEFAULT_MOTION_CSV)
+    descriptor_value = settings.get("descriptor_path") or settings.get("descriptor")
+    motion_value = settings.get("motion_csv") or settings.get("openseeface_csv")
+    descriptor_path = _resolve_path(descriptor_value) if descriptor_value else _optional_existing_path(DEFAULT_DESCRIPTOR)
+    motion_csv = _resolve_path(motion_value) if motion_value else _optional_existing_path(DEFAULT_MOTION_CSV)
     width = max(1, int(width))
     height = max(1, int(height))
     quality = internal_vrm_fallback_quality_policy(width=width, height=height, renderer=str(renderer or "software-zbuffer"), settings=settings)
@@ -57,15 +60,18 @@ def render_internal_vrm_fallback_frame(
         "requires_vseeface": False,
         "requires_virtual_camera": False,
         "vrm": str(vrm_path),
-        "descriptor": str(descriptor_path),
-        "motion_csv": str(motion_csv),
+        "descriptor": str(descriptor_path) if descriptor_path else "",
+        "motion_csv": str(motion_csv) if motion_csv else "",
         "time_ms": int(time_ms),
         "size": [width, height],
         "quality": quality,
         "warnings": list(quality.get("warnings") or []),
         "errors": [],
     }
-    missing = [str(path) for path in (vrm_path, descriptor_path, motion_csv) if not path.exists()]
+    missing = [str(vrm_path)] if not vrm_path.exists() else []
+    for value, path in ((descriptor_value, descriptor_path), (motion_value, motion_csv)):
+        if value and (path is None or not path.exists()):
+            missing.append(str(_resolve_path(value)))
     if missing:
         diagnostics["errors"].append("missing_internal_vrm_fallback_asset")
         diagnostics["missing_assets"] = missing
@@ -74,8 +80,8 @@ def render_internal_vrm_fallback_frame(
     try:
         runtime = _load_cached_runtime(
             str(vrm_path.resolve()),
-            str(descriptor_path.resolve()),
-            str(motion_csv.resolve()),
+            str(descriptor_path.resolve()) if descriptor_path else "",
+            str(motion_csv.resolve()) if motion_csv else "",
             str(settings.get("upper_body_mode") or "seated"),
         )
         module = runtime["module"]
@@ -96,7 +102,9 @@ def render_internal_vrm_fallback_frame(
         diagnostics.update(
             {
                 "ok": bool(render_diag.get("ok", False)),
-                "pose_source": "openseeface_motion_csv",
+                "descriptor_source": str(runtime.get("descriptor_source") or "unknown"),
+                "motion_source": str(runtime.get("motion_source") or "unknown"),
+                "pose_source": str(runtime.get("motion_source") or "openseeface_motion_csv"),
                 "selected_motion_time_ms": int(frame.time_ms),
                 "selected_motion": {
                     "yaw_deg": float(getattr(frame, "yaw_deg", 0.0)),
@@ -155,8 +163,8 @@ def internal_vrm_fallback_quality_policy(
         "frame_budget_ms": 1000.0 / target_fps,
         "cache_enabled": True,
         "runtime_cache_max_entries": 4,
-        "mesh_material_stability_check": "descriptor_cached",
-        "motion_cache": "openseeface_csv_cached",
+        "mesh_material_stability_check": "descriptor_cached_or_generated",
+        "motion_cache": "openseeface_csv_or_idle",
         "warnings": warnings,
         "claim_blockers": claim_blockers,
     }
@@ -187,10 +195,18 @@ def _load_cached_runtime(
 
     module = importlib.import_module("tools.render_milica_vrm_trump_mapping")
     vrm = Path(vrm_path)
-    frames = tuple(module.load_openseeface_motion_csv(motion_csv))
+    csv_path = Path(motion_csv) if str(motion_csv or "").strip() else None
+    frames = tuple(module.load_openseeface_motion_csv(csv_path)) if csv_path and csv_path.is_file() else ()
+    motion_source = "openseeface_motion_csv" if frames else "idle_internal_motion"
     if not frames:
-        raise ValueError(f"No OpenSeeFace frames loaded: {motion_csv}")
-    descriptor = module._load_descriptor(Path(descriptor_path))
+        frames = _idle_motion_frames()
+    descriptor_file = Path(descriptor_path) if str(descriptor_path or "").strip() else None
+    if descriptor_file and descriptor_file.is_file():
+        descriptor = module._load_descriptor(descriptor_file)
+        descriptor_source = "descriptor_file"
+    else:
+        descriptor = _load_descriptor_from_vrm(vrm)
+        descriptor_source = "vrm_import"
     morph_targets = module._load_vrm_morph_targets(vrm)
     texture_paths = module._expected_texture_paths(vrm)
     base_descriptor = module._attach_vrm_textures(descriptor, texture_paths)
@@ -204,7 +220,27 @@ def _load_cached_runtime(
         "frames": frames,
         "morph_targets": morph_targets,
         "base_descriptor": base_descriptor,
+        "descriptor_source": descriptor_source,
+        "motion_source": motion_source,
     }
+
+
+def _load_descriptor_from_vrm(vrm: Path) -> dict[str, Any]:
+    from app.ar_pbr.importer import import_asset
+
+    descriptor, diagnostics = import_asset(
+        vrm,
+        settings={"max_triangles_per_geometry": 12000},
+    )
+    if not isinstance(descriptor, dict) or not descriptor.get("geometries"):
+        raise ValueError(f"Internal VRM fallback descriptor import failed: {diagnostics}")
+    return descriptor
+
+
+def _idle_motion_frames() -> tuple[Any, ...]:
+    from app.vtuber.video_face_driver import idle_motion_frame
+
+    return tuple(idle_motion_frame(time_ms) for time_ms in (0, 500, 1000, 1500))
 
 
 def _render_descriptor_frame(
@@ -349,3 +385,8 @@ def _resolve_path(value: Any) -> Path:
     if path.is_absolute():
         return path
     return ROOT / path
+
+
+def _optional_existing_path(value: Any) -> Path | None:
+    path = _resolve_path(value)
+    return path if path.exists() else None

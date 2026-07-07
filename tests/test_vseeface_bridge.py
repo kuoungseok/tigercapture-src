@@ -492,9 +492,13 @@ def test_vseeface_bridge_status_reports_degraded_for_black_capture(tmp_path):
     assert status["scene_diagnostics"]["degraded_frame_sources"] == ["vseeface"]
 
 
-def test_vseeface_bridge_status_reports_blocked_when_exe_is_missing(tmp_path):
+def test_vseeface_bridge_status_reports_blocked_when_exe_is_missing(tmp_path, monkeypatch):
     from app.vtuber.vseeface_bridge import VSeeFaceBridgeConfig, build_vseeface_bridge_status
 
+    monkeypatch.setattr(
+        "app.vtuber.vseeface_bridge.default_vseeface_install_dir",
+        lambda root=None: tmp_path / "absent_sidecar",
+    )
     vrm = _write_vrm(tmp_path / "milica.vrm", profile="VRM0")
     status = build_vseeface_bridge_status(VSeeFaceBridgeConfig(vseeface_exe=str(tmp_path / "missing.exe"), avatar_vrm=str(vrm)))
 

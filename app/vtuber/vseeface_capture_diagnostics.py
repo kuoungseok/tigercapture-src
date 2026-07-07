@@ -129,6 +129,22 @@ def inspect_capture_backends(root: str | Path | None = None) -> dict[str, Any]:
         unity_capture_dir / "VSeeFaceCamera64bit.dll",
     ]
     virtual_camera_registered = _registry_contains_any(("VSeeFaceCamera", "Unity Capture"))
+    virtual_camera_registration_paths = _registry_inproc_server_paths(virtual_camera_registered)
+    virtual_camera_registration_paths_exist = [
+        str(path) for path in virtual_camera_registration_paths if Path(path).is_file()
+    ]
+    current_capture_dlls = {str(path.resolve()).casefold() for path in virtual_camera_dlls}
+    current_registration_matches = [
+        str(path)
+        for path in virtual_camera_registration_paths
+        if str(Path(path).resolve()).casefold() in current_capture_dlls
+    ]
+    registration_has_stale_paths = bool(virtual_camera_registration_paths) and (
+        len(virtual_camera_registration_paths_exist) < len(virtual_camera_registration_paths)
+        or len(current_registration_matches) < len(virtual_camera_registration_paths)
+    )
+    registration_stale = bool(virtual_camera_registration_paths) and not bool(current_registration_matches)
+    registration_usable = bool(virtual_camera_registered) and not registration_stale
     obs_installed = (obs_root / "bin" / "64bit" / "obs64.exe").is_file()
     obs_virtual_camera_bundle = any(obs_data_plugins.glob("**/obs-virtualcam-module64.dll")) if obs_data_plugins.is_dir() else False
     payload = {
@@ -145,8 +161,14 @@ def inspect_capture_backends(root: str | Path | None = None) -> dict[str, Any]:
             "install_script": str(unity_capture_dir / "Install.bat"),
             "bundle_available": all(path.is_file() for path in virtual_camera_dlls),
             "registered": bool(virtual_camera_registered),
+            "registration_usable": registration_usable,
+            "registration_stale": registration_stale,
+            "registration_has_stale_paths": registration_has_stale_paths,
+            "registration_paths": [str(path) for path in virtual_camera_registration_paths],
+            "registration_paths_exist": virtual_camera_registration_paths_exist,
+            "registration_matches_current_install": current_registration_matches,
             "registration_matches": virtual_camera_registered,
-            "requires_admin_registration": all(path.is_file() for path in virtual_camera_dlls) and not bool(virtual_camera_registered),
+            "requires_admin_registration": all(path.is_file() for path in virtual_camera_dlls) and not registration_usable,
         },
         "obs": {
             "installed": obs_installed,
@@ -176,7 +198,15 @@ def choose_capture_backend(preflight: Mapping[str, Any], *, window_capture_ok: b
             "reason": "spout_sender_and_receiver_available",
             "next_action": "enable_spout2_in_vseeface_and_capture_sender",
         }
-    if bool(virtual_camera.get("registered")):
+    if bool(virtual_camera.get("registration_stale")):
+        return {
+            "preferred_backend": "virtual_camera",
+            "status": BACKEND_NEEDS_INSTALL,
+            "reason": "vseeface_camera_registered_to_stale_path",
+            "next_action": "rerun_vseeface_camera_install_bat_as_admin",
+        }
+    registration_usable = bool(virtual_camera.get("registration_usable", virtual_camera.get("registered")))
+    if registration_usable:
         return {
             "preferred_backend": "virtual_camera",
             "status": BACKEND_NEEDS_CONFIGURATION,
@@ -244,6 +274,20 @@ def _registry_contains_any(needles: tuple[str, ...]) -> list[str]:
         except OSError:
             continue
     return sorted(set(matches))
+
+
+def _registry_inproc_server_paths(matches: list[str]) -> list[str]:
+    paths: list[str] = []
+    for row in matches:
+        path_text, sep, value = str(row or "").rpartition("=")
+        if not sep:
+            continue
+        if "inprocserver32" not in path_text.casefold():
+            continue
+        value = value.strip().strip('"')
+        if value:
+            paths.append(value)
+    return sorted(set(paths))
 
 
 def _scan_registry_key(winreg, key, path: str, needles: tuple[str, ...], matches: list[str], *, depth: int) -> None:

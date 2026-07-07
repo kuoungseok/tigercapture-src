@@ -5,6 +5,11 @@
 This handoff is for the next Codex thread that will continue the main editor UI
 renewal while the current thread returns to review automation.
 
+Before using this handoff, read `docs/AGENT_START_HERE.md`. It contains the
+global current-session assumptions, including the `debugCapture` boundary,
+`video_editor_window.py` boundary, and VTuber/VSeeFace fallback rules that can
+affect UI evidence work.
+
 The split is intentional:
 
 - Current thread owner: review automation, PPT/HTML/catalog generation, evidence
@@ -35,12 +40,13 @@ capture path.
 
 Read these first in this order:
 
-1. `docs/SPEC_UI_RENEWAL.md`
-2. `docs/UI_RENEWAL_EVIDENCE_INDEX.md`
-3. `TODO.md`, especially the `Main editor UI renewal return gate` section
-4. `docs/SPEC_PYTHON_ACTION_SYSTEM.md` if adding or changing action-driven UI
+1. `docs/AGENT_START_HERE.md`
+2. `docs/SPEC_UI_RENEWAL.md`
+3. `docs/UI_RENEWAL_EVIDENCE_INDEX.md`
+4. `TODO.md`, especially the `Main editor UI renewal return gate` section
+5. `docs/SPEC_PYTHON_ACTION_SYSTEM.md` if adding or changing action-driven UI
    captures
-5. `app/spine_editor/SPINE_WORK_IN_PROGRESS.md` before touching Spine/NIKKE
+6. `app/spine_editor/SPINE_WORK_IN_PROGRESS.md` before touching Spine/NIKKE
    visual claims
 
 ## Current Design Direction

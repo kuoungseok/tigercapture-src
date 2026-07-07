@@ -10,6 +10,36 @@ Target, session-only stream keys, and Broadcast Evidence gate is
 thread-specific context and use the spec file as the stable implementation
 contract.
 
+## Read This First
+
+2026-07-07 operating assumption: VSeeFace is absent unless the user explicitly
+asks to install, launch, repair, or verify the external sidecar. Do not start a
+new session by chasing VSeeFace registration or virtual-camera capture. The
+default TigerCapture product path is the shared VTuber Studio using the internal
+VRM fallback for Program Output when VSeeFace is missing, black, degraded, or
+unregistered.
+
+Durable local inputs belong outside `debugCapture`:
+
+```text
+Trump Performance Source:
+C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\trump_oval_office_live_GnzWEo_HfE0.mp4
+
+Milica VRM Avatar Target:
+external\assets\vtuber\booth_milica\Milica1.3free\Milica_v1.3.vrm
+
+Optional VSeeFace sidecar root:
+external\tools\vseeface
+```
+
+`debugCapture` paths in this document are historical proof outputs or
+regenerable diagnostics. They are not source-of-truth assets and may be missing.
+`app/vtuber/internal_vrm_fallback.py` can reuse generated descriptor/motion
+artifacts when present, but its default path must remain usable after
+`debugCapture` is cleaned by importing the durable VRM and using internal idle
+motion. Remaining implementation debt is first-frame performance, not durable
+asset discovery.
+
 ## Current Boundary
 
 The VTuber broadcast work is a shared bridge/workflow tranche with a thin
@@ -68,11 +98,11 @@ Target-specific branches:
   Studio, select an `Avatar Target`, and inspect Program Output / Source
   Tracking / Avatar Mapping / Live Target state without duplicating windows.
 
-## VSeeFace Dependency UI
+## Optional VSeeFace Dependency UI
 
-TigerCapture depends on VSeeFace only as an external sidecar. The bridge UI
-therefore needs a visible dependency/setup card before capture or Program Output
-work:
+TigerCapture does not require VSeeFace for Program Output. VSeeFace is only an
+external sidecar option. The bridge UI therefore needs a visible
+dependency/setup card before VSeeFace-specific capture work:
 
 1. Detect whether a configured `VSeeFace.exe` exists.
 2. If a default sidecar install exists, ask the user to select/connect it.
@@ -125,7 +155,7 @@ tools/render_vseeface_broadcast_scene_summary.py --capture-report debugCapture\v
 ```
 
 The 2026-07-01 local run starts the VSeeFace sidecar and generates face tracking
-rows from `debugCapture\trump_face_source.mp4`, but VSeeFace's client area and
+rows from a Trump source video, but VSeeFace's client area and
 `VSeeFaceCamera` output are still black in this remote/GPU environment. The
 bridge should treat that as `degraded`, suppress the black source from Program
 Output, and prefer `Use internal VRM fallback` for Program Output. VSeeFace
@@ -133,8 +163,9 @@ repair/registration remains available as a secondary action because VSeeFace is
 an optional sidecar, not the required output engine.
 
 The internal fallback frame path is `app/vtuber/internal_vrm_fallback.py`. It
-uses cached VRM descriptor data plus OpenSeeFace motion rows to render a
-transparent avatar frame without VSeeFace, OBS, virtual camera, or Qt. The
+must render a transparent avatar frame without VSeeFace, OBS, virtual camera, or
+Qt. If temporary descriptor or motion artifacts are needed, they must be
+generated from durable inputs instead of assumed to exist in `debugCapture`. The
 standalone Program Output proof tool is:
 
 ```text

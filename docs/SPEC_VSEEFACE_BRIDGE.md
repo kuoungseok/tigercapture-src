@@ -5,6 +5,29 @@ It remains an external sidecar application. TigerCapture only owns a bridge
 contract for process planning, source capture metadata, VRM compatibility
 preflight, and BroadcastScene integration.
 
+## Agent Read First
+
+2026-07-07 default: assume VSeeFace is not installed or not usable unless the
+user explicitly asks to work on the external sidecar. The VSeeFace bridge is an
+optional integration path, not the required VTuber Program Output engine.
+
+When VSeeFace is missing, black, degraded, unregistered, or not launched,
+TigerCapture must continue through the internal VRM fallback path whenever a
+durable VRM avatar is available. Do not block normal project open, preview,
+export, or VTuber Studio Program Output on VSeeFace.
+
+Durable locations:
+
+```text
+external/tools/vseeface
+external/assets/vtuber
+```
+
+`debugCapture` is disposable scratch space for generated reports, screenshots,
+probe outputs, and temporary proof artifacts. Any command in this spec that
+writes to `debugCapture` must be understood as regenerable diagnostics, not as a
+durable dependency.
+
 ## Non-Goals
 
 - Do not embed VSeeFace into TigerCapture.
@@ -869,13 +892,13 @@ This keeps re-analysis, preset changes, and reset-to-auto predictable.
 Fast plan-only command:
 
 ```powershell
-.\.venv\Scripts\python.exe tools\vtuber_source_framing_plan.py --video debugCapture\trump_face_source.mp4 --preset bust_up --slots neutral,head,mouth --out debugCapture\vtuber_source_framing_plan_trump.json
+.\.venv\Scripts\python.exe tools\vtuber_source_framing_plan.py --video "C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\trump_oval_office_live_GnzWEo_HfE0.mp4" --preset bust_up --slots neutral,head,mouth --out debugCapture\vtuber_source_framing_plan_trump.json
 ```
 
 Plan-only command with manual placement:
 
 ```powershell
-.\.venv\Scripts\python.exe tools\vtuber_source_framing_plan.py --video debugCapture\trump_face_source.mp4 --preset bust_up --slots head --user-pan-x 0.12 --user-pan-y -0.08 --user-zoom-scale 1.05 --user-lower-occlusion-y-delta -0.03 --out debugCapture\vtuber_source_framing_plan_trump_user_offset.json
+.\.venv\Scripts\python.exe tools\vtuber_source_framing_plan.py --video "C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\trump_oval_office_live_GnzWEo_HfE0.mp4" --preset bust_up --slots head --user-pan-x 0.12 --user-pan-y -0.08 --user-zoom-scale 1.05 --user-lower-occlusion-y-delta -0.03 --out debugCapture\vtuber_source_framing_plan_trump_user_offset.json
 ```
 
 Renderer-facing `model_view` example:
@@ -903,7 +926,7 @@ position or from a stronger source-video segmentation result. `half_body` and
 Local Trump-video proof command:
 
 ```powershell
-.\.venv\Scripts\python.exe tools\render_milica_vrm_source_framing_preview.py --video debugCapture\trump_face_source.mp4 --slot head --preset bust_up --render-size 1440 --out debugCapture\milica_vrm_source_framing_bust_up_selected_subject.png --json-out debugCapture\milica_vrm_source_framing_bust_up_selected_subject.json
+.\.venv\Scripts\python.exe tools\render_milica_vrm_source_framing_preview.py --video "C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\trump_oval_office_live_GnzWEo_HfE0.mp4" --slot head --preset bust_up --render-size 1440 --out debugCapture\milica_vrm_source_framing_bust_up_selected_subject.png --json-out debugCapture\milica_vrm_source_framing_bust_up_selected_subject.json
 ```
 
 Current local result on 2026-06-30:
@@ -1508,7 +1531,7 @@ UDP packets to VSeeFace's `[OpenSeeFace tracking]` input port.
 For videos where the face is small in frame, pass a normalized crop:
 
 ```powershell
-.\.venv\Scripts\python.exe tools\vseeface_openseeface_video_source.py --video debugCapture\trump_face_source.mp4 --port 39540 --duration-seconds 3 --fps 12 --try-hard --detection-threshold 0.2 --crop "0.32,0.05,0.36,0.75"
+.\.venv\Scripts\python.exe tools\vseeface_openseeface_video_source.py --video "C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\trump_oval_office_live_GnzWEo_HfE0.mp4" --port 39540 --duration-seconds 3 --fps 12 --try-hard --detection-threshold 0.2 --crop "0.32,0.05,0.36,0.75"
 ```
 
 Local cropped Trump-video probe result:
@@ -1541,15 +1564,15 @@ Recommended quality path:
 .\.venv\Scripts\python.exe tools\vseeface_video_driver.py --video C:\path\face.mp4 --backend auto --calibrate-seconds 0.8 --smoothing 0.35 --send
 ```
 
-MediaPipe Tasks model path used by the local test setup:
+MediaPipe Tasks model path used by durable local setups:
 
 ```text
-E:\ClaudeCodeApp\GifCam\debugCapture\mediapipe\face_landmarker.task
+E:\ClaudeCodeApp\GifCam\resources\mediapipe\face_landmarker.task
 ```
 
 `--backend auto` searches for `face_landmarker.task` next to the input video,
-then in `resources/mediapipe`, `debugCapture/vtuber_assets/mediapipe`, and
-`debugCapture/mediapipe`.
+then in `resources/mediapipe`. Older `debugCapture` model locations were
+temporary diagnostics and must not be treated as durable dependencies.
 
 VSeeFace setup for live send:
 
@@ -1603,7 +1626,7 @@ Current extended graphics probe findings:
 Current local Trump-video test:
 
 ```powershell
-.\.venv\Scripts\python.exe tools\vseeface_video_driver.py --video "C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\LIVE： President Trump signs executive orders in Oval Office [GnzWEo_HfE0].mp4" --backend auto --duration-seconds 5 --fps 15 --send
+.\.venv\Scripts\python.exe tools\vseeface_video_driver.py --video "C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\trump_oval_office_live_GnzWEo_HfE0.mp4" --backend auto --duration-seconds 5 --fps 15 --send
 ```
 
 Observed sender result:
@@ -1620,7 +1643,7 @@ receiver port is manually changed to `39540`. For default VSeeFace receiver
 settings, use:
 
 ```powershell
-.\.venv\Scripts\python.exe tools\vseeface_video_driver.py --video "C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\LIVE： President Trump signs executive orders in Oval Office [GnzWEo_HfE0].mp4" --backend auto --duration-seconds 5 --fps 15 --port 39539 --send
+.\.venv\Scripts\python.exe tools\vseeface_video_driver.py --video "C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\trump_oval_office_live_GnzWEo_HfE0.mp4" --backend auto --duration-seconds 5 --fps 15 --port 39539 --send
 ```
 
 Observed loopback result:

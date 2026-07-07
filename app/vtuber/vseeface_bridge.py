@@ -2067,7 +2067,7 @@ def _install_setup_step_state(install: Mapping[str, Any]) -> str:
     state = str(install.get("state") or "")
     if state in {"installed", "installed_default"}:
         return "done"
-    if state == "zip_available":
+    if state in {"missing", "zip_available"}:
         return "current"
     return "blocked"
 
