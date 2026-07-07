@@ -3185,6 +3185,12 @@ Behavior notes:
   VRM / VSeeFace Bridge`; they do not use Live2D direct key baking.
   `actor.live2d.apply_performance_source` remains the Live2D-only baking action
   for writing mapping keys to a Live2D actor clip.
+- Studio and VRM rendering use the VTuber VRM/MToon renderer boundary
+  (`app/vtuber/vrm_renderer.py`, `renderer_family=vtuber_vrm`,
+  `render_profile=vrm_mtoon`). `.vrm` Program Output, Avatar Mapping, and
+  internal VRM fallback must not route through AR/PBR preview, Marmoset PBR,
+  `full-gpu`, or old debug proof images; those aliases are rewritten to
+  `vrm_mtoon_software` until a real VRM GPU renderer exists.
 - VRM avatars are first-class Media Pool assets, not normal video clips. `.vrm`
   import creates a `VRM Avatar` / `Avatar Target` item with a `VRM` badge.
   Double-clicking it selects `Avatar Target = VRM / VSeeFace Bridge` and opens

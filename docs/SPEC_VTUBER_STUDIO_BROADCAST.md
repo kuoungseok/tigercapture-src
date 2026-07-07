@@ -17,6 +17,14 @@ Stable avatar/source assets belong under `external/assets` or the user's media
 folders. `debugCapture` is disposable diagnostics only and must not be required
 for normal Studio operation.
 
+Studio/VRM rendering must use the VTuber VRM/MToon renderer boundary:
+`app/vtuber/vrm_renderer.py`, renderer family `vtuber_vrm`, render profile
+`vrm_mtoon`. `.vrm` Program Output, Avatar Mapping, and internal VRM fallback
+must not be routed through AR/PBR preview, Marmoset PBR, `full-gpu`, or old
+debug proof images. Until a true VRM GPU renderer exists, GPU/PBR-looking
+aliases are rewritten to `vrm_mtoon_software` and cannot be used for broadcast
+quality claims.
+
 ## Core Rule
 
 Tiger Studio has one shared VTuber Studio surface. Do not create separate
@@ -107,10 +115,14 @@ Live Target output path.
   - exposes the `avatar_target` contract;
   - marks VRM and Live2D targets as `program_output=true`;
   - marks VRM and Live2D targets as `live_target_output=true`;
+  - exposes VRM targets with `renderer_family=vtuber_vrm`,
+    `render_profile=vrm_mtoon`, and `pbr_renderer=false`;
   - keeps `performance_source_direct_output=false`.
 - `app/video_editor_popouts.py`
   - owns `VTuberBroadcastStudioWindow`;
   - owns the Avatar Target selector;
+  - shows VRM Avatar Mapping through the Studio mapping monitor instead of
+    reusing arbitrary avatar preview PNGs from old renderer/debug proof output;
   - owns Live Target controls;
   - owns the Broadcast Evidence card;
   - exposes Refresh Evidence, Register RTMP, and Register Discord controls.

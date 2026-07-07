@@ -53,6 +53,10 @@ Default behavior for VRM/VSeeFace-style work:
 - `Performance Source` is face/body tracking input only.
 - `Program Output` is the final recorded or streamed picture.
 - The raw Trump/person source video must not be used as Program Output.
+- Studio and VRM rendering must use the VTuber VRM/MToon renderer boundary
+  (`app/vtuber/vrm_renderer.py`, renderer family `vtuber_vrm`). Do not route
+  `.vrm`, Avatar Mapping, or internal VRM Program Output through AR/PBR,
+  Marmoset PBR, `full-gpu`, or old debug proof images.
 - VSeeFace missing, black, degraded, unregistered, or not installed is a
   degraded sidecar state, not a blocker for Program Output when internal VRM
   fallback assets are available.
@@ -73,11 +77,12 @@ external\tools\vseeface
 ```
 
 Current fallback note: `app/vtuber/internal_vrm_fallback.py` no longer requires
-generated `debugCapture` descriptor or motion files for its default path. It can
-reuse them when present, but falls back to durable VRM import plus internal idle
-motion when `debugCapture` has been cleaned. Remaining debt is first-frame
-performance: runtime VRM descriptor generation/rendering can be slow and needs a
-dedicated optimization pass before making strong preview-performance claims.
+generated `debugCapture` descriptor or motion files for its default path. It
+loads the durable `.vrm` through the VTuber VRM/MToon renderer boundary and uses
+internal idle motion when `debugCapture` has been cleaned. Remaining debt is
+first-frame performance: runtime VRM descriptor generation/rendering can be slow
+and needs a dedicated optimization pass before making strong preview-performance
+claims.
 
 ## Evidence Discipline
 

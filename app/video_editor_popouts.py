@@ -9,7 +9,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QThread, QSize, Qt, Signal
-from PySide6.QtGui import QImage, QPixmap
+from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -622,8 +622,8 @@ class VTuberBroadcastStudioWindow(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent, Qt.WindowType.Window)
         self.setWindowTitle("VTuber Studio - Tiger Studio")
-        self.resize(980, 680)
-        self.setMinimumSize(620, 420)
+        self.resize(1180, 860)
+        self.setMinimumSize(900, 640)
         self.setStyleSheet(
             "QWidget{background:#0C0F18;color:#EEF0F8;}"
             "QLabel#StudioTitle{font-size:18px;font-weight:900;color:#FFFFFF;}"
@@ -631,6 +631,7 @@ class VTuberBroadcastStudioWindow(QWidget):
             "QFrame#StudioCard{background:#121725;border:1px solid #2E3757;border-radius:14px;}"
             "QLabel#StudioCardTitle{font-size:12px;font-weight:900;color:#FFFFFF;}"
             "QLabel#StudioCardBody{font-size:11px;color:#C6CCE0;}"
+            "QLabel#StudioPreview{background:#070A11;border:1px solid #263149;border-radius:10px;color:#7F8AA5;}"
             "QLabel#StudioTargetLabel{font-size:11px;font-weight:900;color:#FFFFFF;}"
             "QLabel#StudioTargetStatus{font-size:11px;color:#AEB6CC;}"
             "QComboBox#StudioTargetCombo{background:#151B2B;color:#EEF0F8;border:1px solid #3C4770;border-radius:8px;padding:6px 10px;}"
@@ -641,6 +642,7 @@ class VTuberBroadcastStudioWindow(QWidget):
         )
         self._editor_ref = None
         self._target_options: list[dict[str, object]] = []
+        self._preview_cache: dict[str, QPixmap] = {}
         self._updating_target_combo = False
         self._updating_live_target = False
         root = QVBoxLayout(self)
@@ -679,6 +681,7 @@ class VTuberBroadcastStudioWindow(QWidget):
 
         self._live_card = QFrame(self)
         self._live_card.setObjectName("StudioCard")
+        self._live_card.setMaximumHeight(210)
         live_lay = QGridLayout(self._live_card)
         live_lay.setContentsMargins(14, 12, 14, 12)
         live_lay.setSpacing(8)
@@ -774,6 +777,7 @@ class VTuberBroadcastStudioWindow(QWidget):
             "Broadcast Evidence",
             "Local Program Output checks can run automatically. Private RTMP and Discord/window-share evidence must be registered after real checks.",
         )
+        self._evidence_card.setMaximumHeight(136)
         evidence_actions = QHBoxLayout()
         evidence_actions.setContentsMargins(0, 0, 0, 0)
         evidence_actions.setSpacing(8)
@@ -802,23 +806,48 @@ class VTuberBroadcastStudioWindow(QWidget):
             "Program Output",
             "Uses capture, normal media/image, or green chroma fallback. Performance Source video is never direct output.",
         )
+        self._program_card.setMinimumHeight(410)
+        self._program_preview = self._make_preview_label("Program Output preview", QSize(900, 360))
+        self._program_preview.setMinimumHeight(320)
+        self._insert_card_preview(self._program_card, self._program_preview, stretch=4)
+        self._program_body.setMaximumHeight(44)
+        self._program_body.hide()
         self._source_card, self._source_body = self._make_card(
             "Source Tracking",
             "Shows the active Performance Source frame for face/body tracking.",
         )
+        self._source_card.setMinimumHeight(230)
+        self._source_preview = self._make_preview_label("Source Tracking preview", QSize(480, 220))
+        self._source_preview.setMinimumHeight(160)
+        self._insert_card_preview(self._source_card, self._source_preview, stretch=3)
+        self._source_body.setMaximumHeight(54)
+        self._source_body.hide()
         self._mapping_card, self._mapping_body = self._make_card(
             "Avatar Mapping",
             "Shows how tracking drives the selected avatar: VRM/VSeeFace, Live2D, face, eyes, mouth, framing, and movement limits.",
         )
+        self._mapping_card.setMinimumHeight(230)
+        self._mapping_preview = self._make_preview_label("Avatar Mapping preview", QSize(480, 220))
+        self._mapping_preview.setMinimumHeight(160)
+        self._insert_card_preview(self._mapping_card, self._mapping_preview, stretch=3)
+        self._mapping_body.setMaximumHeight(54)
+        self._mapping_body.hide()
         self._controls_card, self._controls_body = self._make_card(
             "Studio Controls",
             "Choose an avatar target, add a Performance Source track at the same time, then map or monitor the result.",
         )
+        self._controls_card.setMaximumHeight(82)
+        self._controls_body.setMaximumHeight(56)
         grid.addWidget(self._program_card, 0, 0, 1, 2)
         grid.addWidget(self._source_card, 1, 0)
         grid.addWidget(self._mapping_card, 1, 1)
         grid.addWidget(self._controls_card, 2, 0, 1, 2)
-        root.addLayout(grid, stretch=1)
+        grid.setRowStretch(0, 5)
+        grid.setRowStretch(1, 3)
+        grid.setRowStretch(2, 1)
+        grid.setColumnStretch(0, 1)
+        grid.setColumnStretch(1, 1)
+        root.insertLayout(3, grid, stretch=5)
 
         actions = QHBoxLayout()
         actions.addStretch(1)
@@ -846,6 +875,20 @@ class VTuberBroadcastStudioWindow(QWidget):
         lay.addWidget(title_label)
         lay.addWidget(body_label, stretch=1)
         return card, body_label
+
+    def _make_preview_label(self, placeholder: str, preferred_size: QSize) -> QLabel:
+        label = QLabel(placeholder, self)
+        label.setObjectName("StudioPreview")
+        label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        label.setMinimumHeight(max(120, int(preferred_size.height() * 0.55)))
+        label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        label.setProperty("studio_preview_size", preferred_size)
+        return label
+
+    def _insert_card_preview(self, card: QFrame, preview: QLabel, *, stretch: int) -> None:
+        layout = card.layout()
+        if isinstance(layout, QVBoxLayout):
+            layout.insertWidget(1, preview, stretch=max(1, int(stretch)))
 
     def update_from_editor(self, editor) -> None:
         self._editor_ref = editor
@@ -882,6 +925,7 @@ class VTuberBroadcastStudioWindow(QWidget):
             self._mapping_body.setText("Select or configure a VRM/VSeeFace, Live2D, or other avatar target to inspect mapping.")
             self._controls_body.setText("The studio window is a status surface; editing remains on the timeline.")
             self._populate_live_targets(editor)
+            self._clear_visual_previews()
             return
 
         background = dict(layout.get("program", {}).get("background") or {})
@@ -945,7 +989,291 @@ class VTuberBroadcastStudioWindow(QWidget):
             "3. Select a VRM/VSeeFace avatar or Live2D actor target.\n"
             "4. Live2D clips can bake mapping keys here; VRM/VSeeFace follows the bridge pose stream."
         )
+        self._update_visual_previews(editor, layout, avatar=avatar, pos_ms=pos_ms)
         self._update_broadcast_evidence_status()
+
+    def _clear_visual_previews(self) -> None:
+        for label, text in (
+            (self._program_preview, "Program Output preview unavailable"),
+            (self._source_preview, "Source Tracking preview unavailable"),
+            (self._mapping_preview, "Avatar Mapping preview unavailable"),
+        ):
+            label.clear()
+            label.setText(text)
+
+    def _update_visual_previews(self, editor, layout: dict[str, object], *, avatar: dict[str, object], pos_ms: int) -> None:
+        preview = self._studio_preview_settings(editor)
+        performance = dict(layout.get("performance_source") if isinstance(layout.get("performance_source"), dict) else {})
+        program = dict(layout.get("program") if isinstance(layout.get("program"), dict) else {})
+        source_path = str(preview.get("source_media_path") or performance.get("source_path") or "")
+
+        source_pixmap = self._pixmap_from_path(str(preview.get("source_preview_image") or ""))
+        if source_pixmap.isNull() and source_path:
+            source_pixmap = self._pixmap_from_video(source_path, time_ms=pos_ms)
+
+        avatar_pixmap = QPixmap()
+        if str(avatar.get("kind") or "") != "vrm":
+            avatar_pixmap = self._pixmap_from_path(str(preview.get("avatar_preview_image") or ""))
+        if avatar_pixmap.isNull():
+            avatar_pixmap = self._avatar_mapping_pixmap(layout, avatar=avatar, performance=performance)
+
+        program_pixmap = self._pixmap_from_path(str(preview.get("program_preview_image") or ""))
+        if program_pixmap.isNull():
+            program_pixmap = self._program_output_pixmap_from_editor(editor)
+
+        self._set_preview_pixmap(
+            self._program_preview,
+            program_pixmap,
+            "Program Output preview unavailable",
+        )
+        self._set_preview_pixmap(
+            self._source_preview,
+            source_pixmap,
+            "No Source Tracking frame",
+        )
+        self._set_preview_pixmap(
+            self._mapping_preview,
+            avatar_pixmap,
+            "No Avatar Mapping preview",
+        )
+
+    def _studio_preview_settings(self, editor) -> dict[str, object]:
+        settings = getattr(editor, "_project_settings", {}) or {}
+        if not isinstance(settings, dict):
+            return {}
+        studio = settings.get("vtuber_studio")
+        if not isinstance(studio, dict):
+            return {}
+        preview = studio.get("preview")
+        if isinstance(preview, dict):
+            return dict(preview)
+        return {
+            "program_preview_image": studio.get("program_preview_image", ""),
+            "source_preview_image": studio.get("source_preview_image", ""),
+            "source_media_path": studio.get("source_media_path", ""),
+            "avatar_preview_image": studio.get("avatar_preview_image", ""),
+        }
+
+    def _set_preview_pixmap(self, label: QLabel, pixmap: QPixmap, fallback_text: str) -> None:
+        if pixmap.isNull():
+            label.clear()
+            label.setText(fallback_text)
+            return
+        size = label.property("studio_preview_size")
+        if not isinstance(size, QSize):
+            size = QSize(480, 180)
+        current_size = label.size()
+        if current_size.width() > 24 and current_size.height() > 24:
+            size = current_size
+        label.setText("")
+        label.setPixmap(pixmap.scaled(size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+
+    def _avatar_mapping_pixmap(
+        self,
+        layout: dict[str, object],
+        *,
+        avatar: dict[str, object],
+        performance: dict[str, object],
+    ) -> QPixmap:
+        size = self._mapping_preview.property("studio_preview_size")
+        if not isinstance(size, QSize):
+            size = QSize(480, 180)
+        width = max(240, int(size.width()))
+        height = max(140, int(size.height()))
+        pixmap = QPixmap(width, height)
+        pixmap.fill(QColor("#070A11"))
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        try:
+            panel = QColor("#0F1522")
+            teal = QColor("#72D6B4")
+            blue = QColor("#6FA9D8")
+            skin = QColor("#F0D5BD")
+            hair = QColor("#263548")
+            cloth = QColor("#D8DCEF")
+            ink = QColor("#0A0D13")
+            warning = QColor("#D7B86E")
+
+            painter.fillRect(0, 0, width, height, panel)
+            active = bool(performance.get("active"))
+            fallback = dict((dict(layout.get("program") or {}).get("fallback") or {}))
+            accent = teal if active else warning
+            if bool(fallback.get("active")):
+                accent = QColor("#8DB7FF")
+
+            painter.setPen(QPen(QColor("#263149"), 1))
+            painter.setBrush(QBrush(QColor("#111827")))
+            margin_x = int(width * 0.11)
+            margin_y = int(height * 0.08)
+            painter.drawRoundedRect(margin_x, margin_y, width - margin_x * 2, height - margin_y * 2, 20, 20)
+
+            center_x = int(width * 0.50)
+            head_r = max(24, int(height * 0.18))
+            head_y = int(height * 0.35)
+            body_top = head_y + head_r + 4
+            painter.setPen(QPen(QColor("#A8D8FF"), 2))
+            painter.setBrush(QBrush(hair))
+            painter.drawEllipse(center_x - head_r - 3, head_y - head_r - 4, head_r * 2 + 6, head_r * 2 + 10)
+            painter.setBrush(QBrush(skin))
+            painter.drawEllipse(center_x - head_r, head_y - head_r, head_r * 2, head_r * 2)
+            painter.setPen(QPen(ink, 2))
+            eye_y = head_y - 3
+            painter.drawLine(center_x - 10, eye_y, center_x - 4, eye_y)
+            painter.drawLine(center_x + 4, eye_y, center_x + 10, eye_y)
+            painter.setPen(QPen(QColor("#B25F6C"), 2))
+            painter.drawArc(center_x - 7, head_y + 7, 14, 8, 0, -180 * 16)
+
+            painter.setPen(QPen(QColor("#C6D8F4"), 2))
+            painter.setBrush(QBrush(cloth))
+            painter.drawRoundedRect(center_x - int(width * 0.09), body_top, int(width * 0.18), int(height * 0.34), 20, 20)
+            painter.setPen(QPen(QColor("#A8B4CC"), 4))
+            shoulder_y = body_top + 16
+            painter.drawLine(center_x - int(width * 0.14), shoulder_y + 8, center_x - int(width * 0.06), shoulder_y + 34)
+            painter.drawLine(center_x + int(width * 0.06), shoulder_y + 34, center_x + int(width * 0.14), shoulder_y + 8)
+
+            painter.setPen(QPen(accent, 2))
+            painter.drawEllipse(center_x - head_r - 8, head_y - head_r - 8, (head_r + 8) * 2, (head_r + 8) * 2)
+            painter.setBrush(QBrush(accent))
+            dot_r = max(3, int(height * 0.025))
+            for x, y in (
+                (center_x - 12, eye_y),
+                (center_x + 12, eye_y),
+                (center_x, head_y + 11),
+                (center_x - int(width * 0.12), shoulder_y + 8),
+                (center_x + int(width * 0.12), shoulder_y + 8),
+            ):
+                painter.drawEllipse(int(x - dot_r), int(y - dot_r), dot_r * 2, dot_r * 2)
+            painter.setPen(QPen(blue, 2))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawArc(center_x - head_r - 16, head_y - head_r - 16, (head_r + 16) * 2, (head_r + 16) * 2, 35 * 16, 75 * 16)
+            painter.drawArc(center_x - head_r - 16, head_y - head_r - 16, (head_r + 16) * 2, (head_r + 16) * 2, 215 * 16, 75 * 16)
+        finally:
+            painter.end()
+        return pixmap
+
+    def update_program_output_frame(self, frame) -> None:
+        pixmap = self._pixmap_from_frame(frame)
+        self._set_preview_pixmap(
+            self._program_preview,
+            pixmap,
+            "Program Output preview unavailable",
+        )
+
+    def _pixmap_from_frame(self, frame) -> QPixmap:
+        if isinstance(frame, QPixmap):
+            return frame
+        if isinstance(frame, QImage):
+            return QPixmap.fromImage(frame)
+        image = self._qimage_from_rgb_array(frame)
+        if image is not None and not image.isNull():
+            return QPixmap.fromImage(image)
+        return QPixmap()
+
+    def _pixmap_from_path(self, path_value: str | Path) -> QPixmap:
+        path = self._resolve_preview_path(path_value)
+        if path is None:
+            return QPixmap()
+        key = f"image:{path}"
+        cached = self._preview_cache.get(key)
+        if cached is not None:
+            return cached
+        pixmap = QPixmap(str(path))
+        if not pixmap.isNull():
+            self._preview_cache[key] = pixmap
+        return pixmap
+
+    def _pixmap_from_video(self, path_value: str | Path, *, time_ms: int) -> QPixmap:
+        path = self._resolve_preview_path(path_value)
+        if path is None:
+            return QPixmap()
+        key = f"video:{path}:{max(0, int(time_ms)) // 1000}"
+        cached = self._preview_cache.get(key)
+        if cached is not None:
+            return cached
+        try:
+            import cv2  # type: ignore
+
+            cap = cv2.VideoCapture(str(path))
+            if not cap.isOpened():
+                return self._pixmap_from_video_imageio(path, time_ms=time_ms, cache_key=key)
+            try:
+                if int(time_ms) > 0:
+                    cap.set(cv2.CAP_PROP_POS_MSEC, float(time_ms))
+                ok, frame = cap.read()
+                if not ok and int(time_ms) > 0:
+                    cap.set(cv2.CAP_PROP_POS_MSEC, 0.0)
+                    ok, frame = cap.read()
+                if not ok or frame is None:
+                    return QPixmap()
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                height, width = rgb.shape[:2]
+                image = QImage(rgb.data, int(width), int(height), int(width) * 3, QImage.Format.Format_RGB888).copy()
+                pixmap = QPixmap.fromImage(image)
+                if not pixmap.isNull():
+                    self._preview_cache[key] = pixmap
+                return pixmap
+            finally:
+                cap.release()
+        except Exception:
+            return self._pixmap_from_video_imageio(path, time_ms=time_ms, cache_key=key)
+
+    def _pixmap_from_video_imageio(self, path: Path, *, time_ms: int, cache_key: str) -> QPixmap:
+        try:
+            import imageio.v3 as iio
+
+            # imageio/ffmpeg handles Unicode paths on Windows more reliably
+            # than OpenCV's VideoCapture in some locales.
+            index = max(0, int(round((max(0, int(time_ms)) / 1000.0) * 24.0)))
+            frame = iio.imread(path, index=index)
+            image = self._qimage_from_rgb_array(frame)
+            if image is None or image.isNull():
+                return QPixmap()
+            pixmap = QPixmap.fromImage(image)
+            if not pixmap.isNull():
+                self._preview_cache[cache_key] = pixmap
+            return pixmap
+        except Exception:
+            return QPixmap()
+
+    def _program_output_pixmap_from_editor(self, editor) -> QPixmap:
+        for attr in ("_program_output_pixmap", "_latest_program_output_pixmap"):
+            pixmap = getattr(editor, attr, None)
+            if isinstance(pixmap, QPixmap) and not pixmap.isNull():
+                return pixmap
+        for attr in ("_latest_program_output_qimage",):
+            image = getattr(editor, attr, None)
+            if isinstance(image, QImage) and not image.isNull():
+                return QPixmap.fromImage(image)
+        rgb = getattr(editor, "_latest_program_output_rgb", None)
+        if rgb is not None:
+            image = self._qimage_from_rgb_array(rgb)
+            if image is not None and not image.isNull():
+                return QPixmap.fromImage(image)
+        return QPixmap()
+
+    def _qimage_from_rgb_array(self, rgb) -> QImage | None:
+        try:
+            import numpy as np
+
+            arr = np.asarray(rgb)
+            if arr.ndim != 3 or arr.shape[2] < 3:
+                return None
+            if arr.dtype != np.uint8:
+                arr = np.clip(arr, 0, 255).astype(np.uint8)
+            arr = np.ascontiguousarray(arr[:, :, :3])
+            height, width = arr.shape[:2]
+            return QImage(arr.data, int(width), int(height), int(arr.strides[0]), QImage.Format.Format_RGB888).copy()
+        except Exception:
+            return None
+
+    def _resolve_preview_path(self, path_value: str | Path) -> Path | None:
+        raw = str(path_value or "").strip()
+        if not raw:
+            return None
+        path = Path(raw)
+        if not path.is_absolute():
+            path = Path(__file__).resolve().parents[1] / path
+        return path if path.is_file() else None
 
     def _avatar_target_summary_from_editor(self, editor) -> dict[str, object]:
         try:

@@ -13,13 +13,23 @@ from typing import Any, Mapping
 import numpy as np
 
 from app.broadcast_scene import composite_broadcast_frame
+from app.vtuber.vrm_renderer import (
+    VRM_RENDER_PROFILE,
+    VRM_RENDERER_FAMILY,
+    VRM_RENDERER_GPU,
+    VRM_RENDERER_SOFTWARE,
+    load_vrm_avatar_descriptor,
+    make_vrm_render_track,
+    normalize_vrm_renderer,
+    vrm_renderer_contract,
+    vrm_renderer_warnings,
+)
 
 
 INTERNAL_VRM_FALLBACK_RENDER_SCHEMA = "tigerstudio.vtuber.internal_vrm_fallback_render.v1"
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_VRM = ROOT / "external" / "assets" / "vtuber" / "booth_milica" / "Milica1.3free" / "Milica_v1.3.vrm"
-DEFAULT_DESCRIPTOR = ROOT / "debugCapture" / "ar_pbr_asset_cache" / "asset_1fca2c885db2f56c.json"
 DEFAULT_MOTION_CSV = ROOT / "debugCapture" / "openseeface_trump_to_vseeface_39540_data.csv"
 
 
@@ -29,7 +39,7 @@ def render_internal_vrm_fallback_frame(
     time_ms: int = 0,
     width: int = 1280,
     height: int = 720,
-    renderer: str = "software-zbuffer",
+    renderer: str = VRM_RENDERER_SOFTWARE,
 ) -> tuple[Any, dict[str, Any]]:
     """Render one transparent RGBA avatar frame for `internal_vrm_fallback`.
 
@@ -45,17 +55,25 @@ def render_internal_vrm_fallback_frame(
     vrm_path = _resolve_path(settings.get("avatar_vrm") or settings.get("vrm") or DEFAULT_VRM)
     descriptor_value = settings.get("descriptor_path") or settings.get("descriptor")
     motion_value = settings.get("motion_csv") or settings.get("openseeface_csv")
-    descriptor_path = _resolve_path(descriptor_value) if descriptor_value else _optional_existing_path(DEFAULT_DESCRIPTOR)
+    descriptor_path = _resolve_path(descriptor_value) if descriptor_value else None
     motion_csv = _resolve_path(motion_value) if motion_value else _optional_existing_path(DEFAULT_MOTION_CSV)
     width = max(1, int(width))
     height = max(1, int(height))
-    quality = internal_vrm_fallback_quality_policy(width=width, height=height, renderer=str(renderer or "software-zbuffer"), settings=settings)
+    renderer_id = normalize_vrm_renderer(renderer)
+    renderer_contract = vrm_renderer_contract(renderer)
+    quality = internal_vrm_fallback_quality_policy(width=width, height=height, renderer=renderer_id, settings=settings)
 
     diagnostics: dict[str, Any] = {
         "schema": INTERNAL_VRM_FALLBACK_RENDER_SCHEMA,
         "ok": False,
         "source_id": str(source_data.get("id") or "internal_vrm_fallback"),
-        "renderer": str(renderer or "software-zbuffer"),
+        "renderer": renderer_id,
+        "requested_renderer": str(renderer or ""),
+        "renderer_family": VRM_RENDERER_FAMILY,
+        "render_profile": VRM_RENDER_PROFILE,
+        "renderer_contract": renderer_contract,
+        "pbr_renderer": False,
+        "ar_pbr_preview": False,
         "program_output": True,
         "requires_vseeface": False,
         "requires_virtual_camera": False,
@@ -65,7 +83,7 @@ def render_internal_vrm_fallback_frame(
         "time_ms": int(time_ms),
         "size": [width, height],
         "quality": quality,
-        "warnings": list(quality.get("warnings") or []),
+        "warnings": [*vrm_renderer_warnings(renderer), *list(quality.get("warnings") or [])],
         "errors": [],
     }
     missing = [str(vrm_path)] if not vrm_path.exists() else []
@@ -95,7 +113,7 @@ def render_internal_vrm_fallback_frame(
             time_ms=int(frame.time_ms),
             width=width,
             height=height,
-            renderer=str(renderer or "software-zbuffer"),
+            renderer=renderer_id,
             settings=settings,
         )
         image, fit_diag = _autofit_avatar_rgba(image, settings=settings)
@@ -131,29 +149,33 @@ def internal_vrm_fallback_quality_policy(
     *,
     width: int,
     height: int,
-    renderer: str = "software-zbuffer",
+    renderer: str = VRM_RENDERER_SOFTWARE,
     settings: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     data = dict(settings or {})
-    render_key = str(renderer or "software-zbuffer").strip().casefold()
+    render_key = normalize_vrm_renderer(renderer)
     width = max(1, int(width))
     height = max(1, int(height))
     target_fps = max(1.0, float(data.get("target_fps", data.get("fps", 30.0)) or 30.0))
     pixel_count = int(width * height)
-    warnings: list[str] = []
+    warnings: list[str] = list(vrm_renderer_warnings(renderer))
     claim_blockers: list[str] = []
     if pixel_count < 1280 * 720:
         warnings.append("internal_vrm_fallback_resolution_below_720p")
         claim_blockers.append("render_resolution_below_720p")
-    if render_key != "full-gpu":
+    if render_key != VRM_RENDERER_GPU:
         warnings.append("internal_vrm_fallback_software_preview_renderer")
-        claim_blockers.append("full_gpu_renderer_not_selected")
+        claim_blockers.append("vrm_mtoon_gpu_renderer_not_selected")
     if target_fps < 24.0:
         warnings.append("internal_vrm_fallback_target_fps_below_24")
         claim_blockers.append("target_fps_below_24")
     return {
         "schema": "tigerstudio.vtuber.internal_vrm_fallback_quality.v1",
         "renderer": render_key,
+        "renderer_family": VRM_RENDERER_FAMILY,
+        "render_profile": VRM_RENDER_PROFILE,
+        "pbr_renderer": False,
+        "ar_pbr_preview": False,
         "profile": "broadcast_candidate" if not claim_blockers else "preview_safe",
         "broadcast_ready": not claim_blockers,
         "width": width,
@@ -226,12 +248,7 @@ def _load_cached_runtime(
 
 
 def _load_descriptor_from_vrm(vrm: Path) -> dict[str, Any]:
-    from app.ar_pbr.importer import import_asset
-
-    descriptor, diagnostics = import_asset(
-        vrm,
-        settings={"max_triangles_per_geometry": 12000},
-    )
+    descriptor, diagnostics = load_vrm_avatar_descriptor(vrm)
     if not isinstance(descriptor, dict) or not descriptor.get("geometries"):
         raise ValueError(f"Internal VRM fallback descriptor import failed: {diagnostics}")
     return descriptor
@@ -259,22 +276,19 @@ def _render_descriptor_frame(
     base = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     camera = settings.get("camera") if isinstance(settings.get("camera"), Mapping) else {}
     placement = settings.get("placement") if isinstance(settings.get("placement"), Mapping) else {}
-    track = {
-        "id": "internal_vrm_fallback",
-        "type": "ar_pbr_object",
-        "asset_path": str(asset_path),
-        "start_ms": 0,
-        "end_ms": 60_000,
-        "transform": {
+    track = make_vrm_render_track(
+        track_id="internal_vrm_fallback",
+        asset_path=asset_path,
+        start_ms=0,
+        end_ms=60_000,
+        transform={
             "position": list(placement.get("position") or [0.0, -1.42, 0.0]),
             "rotation": list(placement.get("rotation") or [0.0, 180.0, 0.0]),
             "scale": list(placement.get("scale") or [5.10, 5.10, 5.10]),
         },
-        "animation": {"auto_play": True, "loop": False, "speed": 1.0, "clip": "trump_openseeface_pose"},
-        "shadow_catcher": True,
-        "reflection_catcher": False,
-        "occlusion": False,
-        "render": {
+        animation={"auto_play": True, "loop": False, "speed": 1.0, "clip": "trump_openseeface_pose"},
+        render={
+            "renderer": renderer,
             "lighting": {
                 "light_azimuth": 28.0,
                 "light_elevation": 42.0,
@@ -284,10 +298,14 @@ def _render_descriptor_frame(
                 "hdri_id": "studio_small_09",
             }
         },
-    }
+    )
     render_settings = {
         "camera_z": float(camera.get("camera_z", 3.05) if isinstance(camera, Mapping) else 3.05),
         "preserve_scene_layout": True,
+        "renderer_family": VRM_RENDERER_FAMILY,
+        "render_profile": VRM_RENDER_PROFILE,
+        "pbr_renderer": False,
+        "ar_pbr_preview": False,
     }
     focal = float(placement.get("focal") or camera.get("focal_length_px") or max(width, height) * 0.92)
     intrinsics = {
@@ -296,7 +314,8 @@ def _render_descriptor_frame(
         "cx": width * float(placement.get("center_x", 0.50) or 0.50),
         "cy": height * float(placement.get("center_y", 0.46) or 0.46),
     }
-    if str(renderer or "").casefold() == "full-gpu":
+    renderer_id = normalize_vrm_renderer(renderer)
+    if renderer_id == VRM_RENDERER_GPU:
         return module._render_full_gpu_panel(
             base,
             descriptor=descriptor,

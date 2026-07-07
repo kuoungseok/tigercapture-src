@@ -33,6 +33,14 @@ def test_vtuber_broadcast_studio_layout_exposes_program_and_studio_regions():
     assert layout["avatar_target"]["kind"] == "vrm_vseeface_bridge"
     assert layout["avatar_target"]["mapping_mode"] == "pose_stream"
     assert layout["avatar_target"]["live_target_output"] is True
+    assert layout["avatar_target"]["renderer_family"] == "vtuber_vrm"
+    assert layout["avatar_target"]["render_profile"] == "vrm_mtoon"
+    assert layout["avatar_target"]["pbr_renderer"] is False
+    assert layout["program"]["renderer_family"] == "vtuber_vrm"
+    assert layout["program"]["render_profile"] == "vrm_mtoon"
+    assert layout["program"]["pbr_renderer"] is False
+    assert layout["program"]["ar_pbr_preview"] is False
+    assert next(region for region in layout["regions"] if region["id"] == "avatar_mapping")["renderer_family"] == "vtuber_vrm"
     assert layout["live_target"]["target_id"] == "record_file"
     assert layout["live_target"]["label"] == "Local MP4"
     assert layout["live_target"]["performance_source_direct_output"] is False
@@ -44,6 +52,9 @@ def test_vtuber_broadcast_studio_layout_exposes_program_and_studio_regions():
     assert layout["diagnostics"]["automatic_framing_preserved"] is True
     assert layout["diagnostics"]["final_framing_available"] is True
     assert layout["diagnostics"]["performance_source_excluded_from_program"] is True
+    assert layout["diagnostics"]["vrm_renderer_family"] == "vtuber_vrm"
+    assert layout["diagnostics"]["vrm_render_profile"] == "vrm_mtoon"
+    assert layout["diagnostics"]["ar_pbr_renderer_for_vrm"] is False
 
 
 def test_vtuber_broadcast_studio_controls_keep_user_offset_values():
@@ -118,6 +129,10 @@ def test_vtuber_broadcast_studio_marks_internal_vrm_fallback_renderer():
     )
 
     assert layout["program"]["renderer"] == "internal_vrm_fallback"
+    assert layout["program"]["renderer_family"] == "vtuber_vrm"
+    assert layout["program"]["render_profile"] == "vrm_mtoon"
+    assert layout["program"]["pbr_renderer"] is False
+    assert layout["program"]["ar_pbr_preview"] is False
     assert layout["program"]["fallback"]["active"] is True
     assert layout["program"]["fallback"]["source_id"] == "internal_vrm_fallback"
     assert "internal_vrm_fallback" in layout["regions"][0]["sources"]

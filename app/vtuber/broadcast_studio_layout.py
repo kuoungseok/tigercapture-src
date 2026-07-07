@@ -8,6 +8,10 @@ from app.vtuber.performance_source import (
     PERFORMANCE_SOURCE_LABEL,
     program_output_contract,
 )
+from app.vtuber.vrm_renderer import (
+    VRM_RENDER_PROFILE,
+    VRM_RENDERER_FAMILY,
+)
 
 
 VTUBER_BROADCAST_STUDIO_SCHEMA = "tigerstudio.vtuber.broadcast_studio_layout.v1"
@@ -39,6 +43,7 @@ def build_vtuber_broadcast_studio_layout(
     target = _live_target_summary(live_target)
     avatar = _avatar_target_summary(avatar_target, avatar_name)
     performance_source_name = str(performance.get("clip_label") or source_name or PERFORMANCE_SOURCE_LABEL)
+    avatar_renderer = _avatar_renderer_summary(avatar, bridge)
     return {
         "schema": VTUBER_BROADCAST_STUDIO_SCHEMA,
         "mode": "broadcast_studio",
@@ -53,7 +58,7 @@ def build_vtuber_broadcast_studio_layout(
                 "title": "Program Output",
                 "role": "broadcast_output",
                 "layout": "top",
-                "sources": ["program_background", "internal_vrm_fallback" if bridge["fallback"]["active"] else "avatar_composite", "lower_occlusion"],
+                "sources": ["program_background", avatar_renderer["source_id"], "lower_occlusion"],
             },
             {
                 "id": "source_tracking",
@@ -69,6 +74,8 @@ def build_vtuber_broadcast_studio_layout(
                 "role": "mapping_monitor",
                 "layout": "bottom_center",
                 "overlays": ["desk_line", "final_framing", "pose_state"],
+                "renderer_family": avatar_renderer["family"],
+                "render_profile": avatar_renderer["render_profile"],
             },
             {
                 "id": "controls",
@@ -94,11 +101,18 @@ def build_vtuber_broadcast_studio_layout(
                 "name": avatar["name"],
                 "program_output": avatar["program_output"],
                 "live_target_output": avatar["live_target_output"],
+                "renderer_family": avatar["renderer_family"],
+                "render_profile": avatar["render_profile"],
+                "pbr_renderer": avatar["pbr_renderer"],
             },
             "model_view": final_view,
             "lower_occlusion_y": final_view.get("lower_occlusion_y"),
             "safe_output": True,
-            "renderer": "internal_vrm_fallback" if bridge["fallback"]["active"] else "avatar_composite",
+            "renderer": avatar_renderer["renderer"],
+            "renderer_family": avatar_renderer["family"],
+            "render_profile": avatar_renderer["render_profile"],
+            "pbr_renderer": False,
+            "ar_pbr_preview": False,
             "fallback": bridge["fallback"],
         },
         "performance_source": {
@@ -137,6 +151,9 @@ def build_vtuber_broadcast_studio_layout(
             "avatar_target_live_target_output": avatar["live_target_output"],
             "live2d_live_target_supported": avatar["kind"] == "live2d_actor_clip",
             "vrm_live_target_supported": avatar["kind"] == "vrm_vseeface_bridge",
+            "vrm_renderer_family": avatar_renderer["family"],
+            "vrm_render_profile": avatar_renderer["render_profile"],
+            "ar_pbr_renderer_for_vrm": False,
         },
     }
 
@@ -178,6 +195,32 @@ def _avatar_target_summary(target: Mapping[str, Any] | None, avatar_name: str) -
         "mapping_mode": mapping_mode,
         "direct_key_baking": bool(data.get("direct_key_baking", kind == "live2d_actor_clip")),
         "pose_stream": bool(data.get("pose_stream", kind == "vrm_vseeface_bridge")),
+        "renderer_family": VRM_RENDERER_FAMILY if kind == "vrm_vseeface_bridge" else str(data.get("renderer_family") or ""),
+        "render_profile": VRM_RENDER_PROFILE if kind == "vrm_vseeface_bridge" else str(data.get("render_profile") or ""),
+        "pbr_renderer": False,
+    }
+
+
+def _avatar_renderer_summary(avatar: Mapping[str, Any], bridge: Mapping[str, Any]) -> dict[str, str]:
+    if avatar.get("kind") == "vrm_vseeface_bridge":
+        if dict(bridge.get("fallback") or {}).get("active"):
+            return {
+                "renderer": "internal_vrm_fallback",
+                "source_id": "internal_vrm_fallback",
+                "family": VRM_RENDERER_FAMILY,
+                "render_profile": VRM_RENDER_PROFILE,
+            }
+        return {
+            "renderer": "vrm_mtoon_bridge",
+            "source_id": "vrm_mtoon_avatar",
+            "family": VRM_RENDERER_FAMILY,
+            "render_profile": VRM_RENDER_PROFILE,
+        }
+    return {
+        "renderer": "live2d_actor" if avatar.get("kind") == "live2d_actor_clip" else "avatar_composite",
+        "source_id": "avatar_composite",
+        "family": str(avatar.get("renderer_family") or ""),
+        "render_profile": str(avatar.get("render_profile") or ""),
     }
 
 

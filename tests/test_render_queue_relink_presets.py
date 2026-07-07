@@ -3207,6 +3207,82 @@ def test_vtuber_studio_reports_vrm_target_without_live2d_exclusivity():
     win.deleteLater()
 
 
+def test_vtuber_studio_shows_visual_preview_paths(tmp_path):
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtGui import QColor, QImage
+    from PySide6.QtWidgets import QApplication
+
+    from app.video_editor_window import VTuberBroadcastStudioWindow
+
+    QApplication.instance() or QApplication([])
+    program = tmp_path / "program.png"
+    source = tmp_path / "source.png"
+    avatar = tmp_path / "avatar.png"
+    for path, color in (
+        (program, QColor("#285F3D")),
+        (source, QColor("#5A6EA8")),
+        (avatar, QColor("#7A5A8B")),
+    ):
+        image = QImage(64, 36, QImage.Format.Format_RGB32)
+        image.fill(color)
+        assert image.save(str(path))
+
+    class _Player:
+        def position(self):
+            return 0
+
+    class _Editor:
+        _player = _Player()
+        _tracks = []
+        _project_settings = {
+            "vseeface_bridge": {"avatar_vrm": "E:/avatars/Milica.vrm"},
+            "vtuber_studio": {
+                "preview": {
+                    "program_preview_image": str(program),
+                    "source_preview_image": str(source),
+                    "avatar_preview_image": str(avatar),
+                }
+            },
+        }
+
+        def _selected_live2d_clip_for_mapping(self):
+            return None
+
+    win = VTuberBroadcastStudioWindow()
+    win.update_from_editor(_Editor())
+
+    assert win._program_preview.pixmap() is not None
+    assert not win._program_preview.pixmap().isNull()
+    assert win._source_preview.pixmap() is not None
+    assert not win._source_preview.pixmap().isNull()
+    assert win._mapping_preview.pixmap() is not None
+    assert not win._mapping_preview.pixmap().isNull()
+    win.deleteLater()
+
+
+def test_broadcast_frame_feeds_open_vtuber_studio_without_session():
+    import numpy as np
+
+    from app.video_editor_broadcast_workflow import _feed_broadcast_output_frame
+
+    class _Studio:
+        def __init__(self):
+            self.frame = None
+
+        def update_program_output_frame(self, frame):
+            self.frame = frame
+
+    studio = _Studio()
+    owner = SimpleNamespace(_vtuber_studio_window=studio, _broadcast_output_session=None)
+    frame = np.zeros((9, 16, 3), dtype=np.uint8)
+    frame[:, :] = [10, 80, 120]
+
+    _feed_broadcast_output_frame(owner, frame)
+
+    assert owner._latest_program_output_rgb is frame
+    assert studio.frame is frame
+
+
 def test_vtuber_studio_avatar_target_selector_keeps_single_window_for_vrm_and_live2d():
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication

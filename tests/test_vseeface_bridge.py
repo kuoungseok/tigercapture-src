@@ -255,10 +255,20 @@ def test_vseeface_internal_fallback_source_exposes_renderer_quality(tmp_path):
     )
 
     fallback = next(source for source in scene["sources"] if source["type"] == "internal_vrm")
+    renderer = fallback["settings"]["renderer"]
+    assert renderer["family"] == "vtuber_vrm"
+    assert renderer["renderer"] == "vrm_mtoon_software"
+    assert renderer["render_profile"] == "vrm_mtoon"
+    assert renderer["pbr_renderer"] is False
+    assert renderer["ar_pbr_preview"] is False
     quality = fallback["settings"]["renderer"]["quality"]
-    assert quality["renderer"] == "software-zbuffer"
+    assert quality["renderer"] == "vrm_mtoon_software"
+    assert quality["renderer_family"] == "vtuber_vrm"
+    assert quality["render_profile"] == "vrm_mtoon"
+    assert quality["pbr_renderer"] is False
+    assert quality["ar_pbr_preview"] is False
     assert quality["broadcast_ready"] is False
-    assert "full_gpu_renderer_not_selected" in quality["claim_blockers"]
+    assert "vrm_mtoon_gpu_renderer_not_selected" in quality["claim_blockers"]
 
 
 def test_vseeface_bridge_status_reports_virtual_camera_registration_required(tmp_path):

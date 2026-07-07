@@ -293,6 +293,13 @@ def _stop_broadcast_live_target(self, *, notify: bool = True) -> dict[str, objec
 
 
 def _feed_broadcast_output_frame(self, rgb) -> None:
+    try:
+        self._latest_program_output_rgb = rgb
+        studio = getattr(self, "_vtuber_studio_window", None)
+        if studio is not None and hasattr(studio, "update_program_output_frame"):
+            studio.update_program_output_frame(rgb)
+    except Exception:
+        pass
     session = getattr(self, "_broadcast_output_session", None)
     if session is None:
         return

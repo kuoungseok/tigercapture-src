@@ -34,11 +34,10 @@ external\tools\vseeface
 
 `debugCapture` paths in this document are historical proof outputs or
 regenerable diagnostics. They are not source-of-truth assets and may be missing.
-`app/vtuber/internal_vrm_fallback.py` can reuse generated descriptor/motion
-artifacts when present, but its default path must remain usable after
-`debugCapture` is cleaned by importing the durable VRM and using internal idle
-motion. Remaining implementation debt is first-frame performance, not durable
-asset discovery.
+`app/vtuber/internal_vrm_fallback.py` must remain usable after `debugCapture` is
+cleaned by importing the durable VRM through the VTuber VRM/MToon renderer
+boundary and using internal idle motion. Remaining implementation debt is
+first-frame performance, not durable asset discovery.
 
 ## Current Boundary
 
@@ -62,6 +61,13 @@ controls for recording or streaming. Do not treat RTMP/Discord/Live Target as
 unrelated when they are part of the Studio's final output stage. Still do not
 drift into Live2D-specific renderer tuning, AR/PBR road placement, Marmoset PBR,
 or main editor UI renewal from this thread.
+
+Hard renderer boundary: Studio and VRM output must use the VTuber VRM/MToon
+renderer family (`vtuber_vrm`, `vrm_mtoon_software` until a true VRM GPU
+renderer exists). Do not route Avatar Mapping, `.vrm` Program Output, or
+internal fallback through AR/PBR, Marmoset PBR, `full-gpu`, or debug proof
+images. AR/PBR helpers may only be treated as hidden mesh parsing utilities
+behind `app/vtuber/vrm_renderer.py`, never as the exposed VRM renderer.
 
 The operator flow is always:
 
@@ -164,9 +170,8 @@ an optional sidecar, not the required output engine.
 
 The internal fallback frame path is `app/vtuber/internal_vrm_fallback.py`. It
 must render a transparent avatar frame without VSeeFace, OBS, virtual camera, or
-Qt. If temporary descriptor or motion artifacts are needed, they must be
-generated from durable inputs instead of assumed to exist in `debugCapture`. The
-standalone Program Output proof tool is:
+Qt. It must not rely on temporary AR/PBR descriptor cache files or old
+`debugCapture` proof PNGs. The standalone Program Output proof tool is:
 
 ```text
 tools/render_internal_vrm_fallback_program_output.py --capture-report debugCapture\vseeface_post_install_with_video_report.json --out debugCapture\internal_vrm_fallback_program_output.png
