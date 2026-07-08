@@ -154,7 +154,8 @@ def _apply_node_chain_preview_compare(
 
     ``before`` keeps non-color node effects but skips active ColorGrade nodes.
     ``split`` composites the color-skipped result on the left and the normal
-    result on the right. Export never calls this path.
+    result on the right without baking a colored separator into the frame.
+    Export never calls this path.
     """
     compare_mode = str(mode or "").casefold()
     if compare_mode not in {"before", "split"} or node_item_chain is None:
@@ -183,7 +184,6 @@ def _apply_node_chain_preview_compare(
         split_x = max(1, min(w - 2, w // 2))
         mixed = after.copy()
         mixed[:, :split_x] = before[:, :split_x]
-        mixed[:, split_x:split_x + 2] = np.array([255, 128, 87], dtype=np.uint8)
         return mixed
     except Exception:
         return after

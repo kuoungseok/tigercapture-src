@@ -21,20 +21,37 @@ def test_source_framing_plan_selects_requested_slots():
     assert plan["selected_frames"][1]["framing"]["model_view"]["auto_fit"] is False
 
 
-def test_source_framing_plan_matches_upper_body_source_visibility():
+def test_source_framing_plan_matches_chest_up_source_visibility():
     from app.vtuber.source_framing_plan import build_source_framing_plan
 
     plan = build_source_framing_plan(_frames(), (640, 360), preset="bust_up", slots="neutral")
 
-    assert plan["preset"] == "half_body"
+    assert plan["preset"] == "bust_up"
     assert plan["requested_preset"] == "bust_up"
-    assert plan["source_exposure"]["source_exposure"] == "upper_body"
+    assert plan["source_exposure"]["source_exposure"] == "chest_up"
     assert plan["visibility_policy"]["ai_rule"] == "match_source_person_exposure_to_vrm_visibility"
+    assert plan["visibility_policy"]["minimum_framing_preset"] == "bust_up"
+    assert plan["visibility_policy"]["selected_framing_preset"] == "bust_up"
+    assert plan["visibility_policy"]["upgraded_from_requested"] is False
+    assert plan["selected_frames"][0]["framing"]["preset"] == "bust_up"
+    assert plan["selected_frames"][0]["visibility_policy"]["selected_avatar_visibility"] == "head_to_mid_chest"
+
+
+def test_source_framing_plan_keeps_true_upper_body_wide_enough():
+    from app.vtuber.source_framing_plan import build_source_framing_plan
+
+    plan = build_source_framing_plan(
+        _frames(),
+        (640, 360),
+        preset="bust_up",
+        slots="neutral",
+        source_exposure="upper_body",
+    )
+
+    assert plan["preset"] == "half_body"
+    assert plan["source_exposure"]["source_exposure"] == "upper_body"
     assert plan["visibility_policy"]["minimum_framing_preset"] == "half_body"
     assert plan["visibility_policy"]["selected_framing_preset"] == "half_body"
-    assert plan["visibility_policy"]["upgraded_from_requested"] is True
-    assert plan["selected_frames"][0]["framing"]["preset"] == "half_body"
-    assert plan["selected_frames"][0]["visibility_policy"]["selected_avatar_visibility"] == "head_to_waist"
 
 
 def test_source_framing_plan_reports_empty_motion_frames():

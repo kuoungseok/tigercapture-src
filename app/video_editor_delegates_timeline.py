@@ -108,6 +108,8 @@ _BINDINGS = (
     ('_timeline_clip_bounds_for_review', 'app.video_editor_timeline_view_workflow', '_timeline_clip_bounds_for_review', True),
     ('_selected_timeline_review_center_ms', 'app.video_editor_timeline_view_workflow', '_selected_timeline_review_center_ms', False),
     ('_apply_timeline_review_framing', 'app.video_editor_timeline_view_workflow', '_apply_timeline_review_framing', False),
+    ('_refresh_nle_role_filter_bar', 'app.video_editor_nle_role_workflow', 'refresh_nle_role_filter_bar', False),
+    ('_set_nle_role_lane_focus_from_ui', 'app.video_editor_nle_role_workflow', 'set_nle_role_lane_focus_from_ui', False),
     ('_timeline_scroll_for_visible_playhead', 'app.video_editor_timeline_view_workflow', '_timeline_scroll_for_visible_playhead', True),
     ('_ensure_playhead_visible', 'app.video_editor_timeline_view_workflow', '_ensure_playhead_visible', False),
     ('_move_track', 'app.video_editor_timeline_view_workflow', '_move_track', False),

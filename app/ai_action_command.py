@@ -50,6 +50,10 @@ def build_ai_action_command_plan(
     compact = text.replace(" ", "")
     warnings: list[str] = []
 
+    music_plan = _build_music_lab_action_plan(raw_prompt, text, compact, snapshot)
+    if music_plan is not None:
+        return music_plan
+
     if _requests_import_to_timeline(text, compact):
         media = _first_media(snapshot, prefer_video=not _mentions_audio(text, compact))
         if media is None:
@@ -1192,6 +1196,404 @@ def _requests_source_monitor_load(text: str, compact: str) -> bool:
             "put media in source monitor",
         ),
     )
+
+
+def _build_music_lab_action_plan(
+    raw_prompt: str,
+    text: str,
+    compact: str,
+    snapshot: Mapping[str, Any],
+) -> AIActionCommandPlan | None:
+    edit_plan = _build_music_lab_edit_action_plan(raw_prompt, text, compact, snapshot)
+    if edit_plan is not None:
+        return edit_plan
+    if not _requests_music_generation(text, compact):
+        return None
+    genre, mood = _music_genre_mood_from_prompt(text, compact)
+    params: dict[str, Any] = {
+        "prompt": raw_prompt,
+        "duration_ms": _music_duration_ms_from_prompt(text, compact),
+        "genre": genre,
+        "mood": mood,
+        "include_fx": True,
+        "at_ms": _music_insert_time_ms(text, compact, snapshot),
+        "auto_balance": True,
+        "update_existing": True,
+    }
+    bpm = _music_bpm_from_prompt(text)
+    if bpm is not None:
+        params["bpm"] = bpm
+    key = _music_key_from_prompt(text)
+    if key:
+        params["key"] = key
+    if _contains_any(text, ("single track", "one track", "mix only", "mixed track")) or _contains_any(
+        compact,
+        ("\ud55c\ud2b8\ub799", "\ud558\ub098\uc758\ud2b8\ub799", "\ubbf9\uc2a4\ub9cc"),
+    ):
+        params["create_mix"] = True
+    return AIActionCommandPlan(
+        raw_prompt,
+        "Create a Music Lab arrangement, render draft/starter or configured production audio, place it on the timeline, and balance the mixer.",
+        ({"action": "music.compose_to_timeline", "params": params},),
+        confidence=0.86,
+    )
+
+
+def _build_music_lab_edit_action_plan(
+    raw_prompt: str,
+    text: str,
+    compact: str,
+    snapshot: Mapping[str, Any],
+) -> AIActionCommandPlan | None:
+    composition = _latest_music_composition_row(snapshot)
+    if composition is None:
+        return None
+    composition_id = str(composition.get("id") or "").strip()
+    if not composition_id:
+        return None
+    if _requests_music_midi_export(text, compact):
+        return AIActionCommandPlan(
+            raw_prompt,
+            "Export the latest Music Lab composition as a MIDI file.",
+            ({"action": "music.export_midi", "params": {"composition_id": composition_id}},),
+            confidence=0.84,
+        )
+    role_steps = _music_role_mute_steps(text, compact, snapshot)
+    if role_steps:
+        return AIActionCommandPlan(
+            raw_prompt,
+            "Update Music Lab stem mute states on the timeline.",
+            tuple(role_steps),
+            confidence=0.80,
+        )
+    if not _mentions_existing_music_edit(text, compact, snapshot):
+        return None
+    section_name = _music_section_name_from_prompt(text, compact, snapshot)
+    intensity = _music_intensity_from_prompt(text, compact)
+    params: dict[str, Any] = {"composition_id": composition_id, "section_name": section_name}
+    if intensity is not None:
+        params["intensity"] = intensity
+    genre, mood = _music_genre_mood_from_prompt(text, compact)
+    if mood:
+        params["mood"] = mood
+    steps = (
+        {"action": "music.regenerate_section", "params": params},
+        {
+            "action": "music.render_to_timeline",
+            "params": {"composition_id": composition_id, "update_existing": True},
+        },
+        {"action": "music.mixer.auto_balance", "params": {"composition_id": composition_id}},
+    )
+    return AIActionCommandPlan(
+        raw_prompt,
+        "Regenerate a Music Lab section, update existing draft/starter or configured production audio, and rebalance the mixer.",
+        steps,
+        confidence=0.82,
+    )
+
+
+def _latest_music_composition_row(snapshot: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    rows = [row for row in list(snapshot.get("music_compositions") or []) if isinstance(row, Mapping)]
+    if rows:
+        return rows[-1]
+    ids = [
+        str(track.get("music_composition_id") or "").strip()
+        for track in list(snapshot.get("audio_tracks") or [])
+        if isinstance(track, Mapping) and str(track.get("music_composition_id") or "").strip()
+    ]
+    if ids:
+        return {"id": ids[-1]}
+    return None
+
+
+def _music_lab_selection_row(snapshot: Mapping[str, Any]) -> Mapping[str, Any]:
+    row = snapshot.get("music_lab_selection")
+    return row if isinstance(row, Mapping) else {}
+
+
+def _uses_music_lab_selection(text: str, compact: str) -> bool:
+    return _contains_any(
+        text,
+        (
+            "selected",
+            "selection",
+            "current",
+            "current section",
+            "current block",
+            "current track",
+            "this section",
+            "this block",
+            "this track",
+            "chosen",
+        ),
+    ) or _contains_any(
+        compact,
+        (
+            "\uc120\ud0dd",
+            "\ud604\uc7ac",
+            "\uc774\uac70",
+            "\uc774\uad6c\uac04",
+            "\uc774\ubd80\ubd84",
+            "\uc774\ube14\ub85d",
+            "\uc774\ud2b8\ub799",
+        ),
+    )
+
+
+def _music_selected_section_name(snapshot: Mapping[str, Any]) -> str:
+    selection = _music_lab_selection_row(snapshot)
+    return str(selection.get("section_name") or "").strip().lower()
+
+
+def _music_selected_role(snapshot: Mapping[str, Any]) -> str:
+    selection = _music_lab_selection_row(snapshot)
+    role = str(selection.get("role") or "").strip().lower()
+    if role == "pad":
+        return "chords"
+    return role
+
+
+def _requests_music_midi_export(text: str, compact: str) -> bool:
+    return (
+        _contains_any(text, ("export midi", "midi export", "save midi", "write midi"))
+        or ("midi" in text and _contains_any(text, ("export", "save", "render")))
+        or ("midi" in compact and _contains_any(compact, ("\ub0b4\ubcf4\ub0b4", "\uc800\uc7a5", "\ucd94\ucd9c")))
+    )
+
+
+def _mentions_existing_music_edit(text: str, compact: str, snapshot: Mapping[str, Any] | None = None) -> bool:
+    music_subject = _contains_any(text, ("music", "bgm", "soundtrack", "song", "section")) or _contains_any(
+        compact,
+        ("\uc74c\uc545", "\ube0c\uae08", "\uc791\uace1", "\uad6c\uac04", "\uc139\uc158"),
+    )
+    selection_subject = bool(snapshot and _music_lab_selection_row(snapshot)) and _uses_music_lab_selection(text, compact)
+    edit_word = _contains_any(
+        text,
+        (
+            "stronger",
+            "weaker",
+            "softer",
+            "more intense",
+            "less intense",
+            "regenerate",
+            "change",
+            "update",
+            "modify",
+            "make the main",
+            "make main",
+        ),
+    ) or _contains_any(
+        compact,
+        (
+            "\uac15\ud558",
+            "\uc138\uac8c",
+            "\uc57d\ud558",
+            "\uc904\uc5ec",
+            "\ubc14\uafd4",
+            "\uc218\uc815",
+            "\uac31\uc2e0",
+            "\uc7ac\uc0dd\uc131",
+            "\ud0a4\uc6cc",
+        ),
+    )
+    section_word = _contains_any(text, ("intro", "build", "main", "chorus", "outro")) or _contains_any(
+        compact,
+        ("\uc778\ud2b8\ub85c", "\ube4c\ub4dc", "\uba54\uc778", "\ud6c4\ub834", "\uc544\uc6c3\ud2b8\ub85c"),
+    )
+    return (music_subject or selection_subject) and (edit_word or section_word)
+
+
+def _music_section_name_from_prompt(text: str, compact: str, snapshot: Mapping[str, Any] | None = None) -> str:
+    if _contains_any(text, ("intro",)) or "\uc778\ud2b8\ub85c" in compact:
+        return "intro"
+    if _contains_any(text, ("build", "rise")) or "\ube4c\ub4dc" in compact:
+        return "build"
+    if _contains_any(text, ("outro", "ending")) or _contains_any(compact, ("\uc544\uc6c3\ud2b8\ub85c", "\uc5d4\ub529")):
+        return "outro"
+    if snapshot and _uses_music_lab_selection(text, compact):
+        selected = _music_selected_section_name(snapshot)
+        if selected:
+            return selected
+    return "main"
+
+
+def _music_intensity_from_prompt(text: str, compact: str) -> float | None:
+    if _contains_any(text, ("weaker", "softer", "less intense", "calmer")) or _contains_any(
+        compact,
+        ("\uc57d\ud558", "\uc904\uc5ec", "\uc794\uc794", "\ub354\uc791"),
+    ):
+        return 0.42
+    if _contains_any(text, ("stronger", "more intense", "powerful", "bigger", "epic")) or _contains_any(
+        compact,
+        ("\uac15\ud558", "\uc138\uac8c", "\uc6c5\uc7a5", "\ud0a4\uc6cc", "\ub354\ud06c"),
+    ):
+        return 0.95
+    return None
+
+
+def _music_role_mute_steps(text: str, compact: str, snapshot: Mapping[str, Any]) -> list[dict[str, Any]]:
+    remove_word = _contains_any(text, ("remove", "without", "mute", "drop", "no ")) or _contains_any(
+        compact,
+        ("\ube7c", "\uc5c6", "\uc81c\uac70", "\ubba4\ud2b8", "\ub044"),
+    )
+    only_word = _contains_any(text, ("only", "solo")) or "\ub9cc" in compact
+    role_aliases = {
+        "drums": ("drums", "drum", "\ub4dc\ub7fc"),
+        "bass": ("bass", "\ubca0\uc774\uc2a4"),
+        "chords": ("pad", "pads", "chords", "\ud328\ub4dc", "\ucf54\ub4dc"),
+        "melody": ("melody", "lead", "\uba5c\ub85c\ub514", "\ub9ac\ub4dc"),
+        "fx": ("fx", "impact", "\uc774\ud399\ud2b8", "\ud6a8\uacfc"),
+    }
+    mentioned = {
+        role
+        for role, aliases in role_aliases.items()
+        if any(str(alias).lower() in text or str(alias).lower() in compact for alias in aliases)
+    }
+    if not mentioned and (remove_word or only_word) and _uses_music_lab_selection(text, compact):
+        selected_role = _music_selected_role(snapshot)
+        if selected_role:
+            mentioned = {selected_role}
+    if not mentioned:
+        return []
+    tracks = [
+        track
+        for track in list(snapshot.get("audio_tracks") or [])
+        if isinstance(track, Mapping) and str(track.get("music_role") or "").strip().lower()
+    ]
+    if not tracks:
+        return []
+    steps: list[dict[str, Any]] = []
+    if only_word:
+        keep = set(mentioned)
+        if "chords" in keep:
+            keep.add("pad")
+        for track in tracks:
+            role = str(track.get("music_role") or "").strip().lower()
+            steps.append(
+                {
+                    "action": "audio.track.mute",
+                    "params": {"track_id": int(track.get("id") or 0), "muted": role not in keep},
+                }
+            )
+        return [step for step in steps if int(step["params"].get("track_id") or 0) > 0]
+    if remove_word:
+        for track in tracks:
+            role = str(track.get("music_role") or "").strip().lower()
+            if role in mentioned:
+                steps.append(
+                    {
+                        "action": "audio.track.mute",
+                        "params": {"track_id": int(track.get("id") or 0), "muted": True},
+                    }
+                )
+        return [step for step in steps if int(step["params"].get("track_id") or 0) > 0]
+    return []
+
+
+def _requests_music_generation(text: str, compact: str) -> bool:
+    has_subject = _contains_any(
+        text,
+        (
+            "background music",
+            "bgm",
+            "music bed",
+            "soundtrack",
+            "theme music",
+            "compose music",
+            "make music",
+            "create music",
+            "generate music",
+            "song",
+        ),
+    ) or _contains_any(
+        compact,
+        (
+            "\uc74c\uc545",
+            "\ubc30\uacbd\uc74c\uc545",
+            "\ubc30\uacbd\uc74c",
+            "\ube0c\uae08",
+            "\uc791\uace1",
+            "\uc0ac\uc6b4\ub4dc\ud2b8\ub799",
+            "\ud14c\ub9c8\uace1",
+        ),
+    )
+    has_action = _contains_any(
+        text,
+        ("make", "create", "generate", "compose", "write", "add", "insert", "place"),
+    ) or _contains_any(
+        compact,
+        (
+            "\ub9cc\ub4e4",
+            "\uc0dd\uc131",
+            "\uc791\uace1",
+            "\ucd94\uac00",
+            "\ub123\uc5b4",
+            "\uae54\uc544",
+            "\ubc30\uce58",
+        ),
+    )
+    return has_subject and has_action
+
+
+def _music_duration_ms_from_prompt(text: str, compact: str) -> int:
+    for pattern, scale in (
+        (r"(\d+(?:\.\d+)?)\s*(?:seconds?|secs?|sec|s|\ucd08)", 1000.0),
+        (r"(\d+(?:\.\d+)?)\s*(?:minutes?|mins?|min|\ubd84)", 60000.0),
+    ):
+        match = re.search(pattern, text)
+        if match:
+            return max(4000, min(180000, int(round(float(match.group(1)) * scale))))
+    match = re.search(r"(\d+(?:\.\d+)?)\s*\ucd08", compact)
+    if match:
+        return max(4000, min(180000, int(round(float(match.group(1)) * 1000.0))))
+    return 30000
+
+
+def _music_bpm_from_prompt(text: str) -> int | None:
+    match = re.search(r"\b(\d{2,3})\s*bpm\b", text)
+    if not match:
+        return None
+    return max(48, min(180, int(match.group(1))))
+
+
+def _music_key_from_prompt(text: str) -> str:
+    match = re.search(r"\b([A-G](?:#|b)?)(?:\s*(major|minor|maj|min|m))?\b", text, flags=re.IGNORECASE)
+    if not match:
+        return ""
+    if not match.group(2):
+        return ""
+    root = match.group(1).capitalize()
+    mode = str(match.group(2) or "").lower()
+    if mode in {"m", "min"}:
+        mode = "minor"
+    if mode == "maj":
+        mode = "major"
+    return f"{root} {mode}".strip()
+
+
+def _music_genre_mood_from_prompt(text: str, compact: str) -> tuple[str, str]:
+    if _contains_any(text, ("lofi", "lo-fi", "chill")) or _contains_any(compact, ("\ub85c\ud30c\uc774", "\uc794\uc794")):
+        return "lofi", "chill"
+    if _contains_any(text, ("tech demo", "techno", "edm", "electronic")) or "\ud14c\ud06c\ub370\ubaa8" in compact:
+        return "electronic", "confident"
+    if _contains_any(text, ("cinematic", "trailer", "epic")) or _contains_any(compact, ("\uc2dc\ub124\ub9c8\ud2f1", "\uc6c5\uc7a5")):
+        return "cinematic", "epic"
+    if _contains_any(text, ("corporate", "tutorial", "explain")) or _contains_any(compact, ("\uc124\uba85", "\ud29c\ud1a0\ub9ac\uc5bc")):
+        return "corporate electronic", "clear"
+    if _contains_any(text, ("happy", "bright", "uplifting")) or _contains_any(compact, ("\ubc1d", "\uc2e0\ub098", "\ud65c\uae30")):
+        return "pop electronic", "bright"
+    if _contains_any(text, ("dark", "tense")) or _contains_any(compact, ("\uc5b4\ub450", "\uae34\uc7a5")):
+        return "cinematic electronic", "tense"
+    return "cinematic electronic", "confident"
+
+
+def _music_insert_time_ms(text: str, compact: str, snapshot: Mapping[str, Any]) -> int:
+    if _contains_any(text, ("here", "current position", "playhead")) or _contains_any(
+        compact,
+        ("\uc5ec\uae30", "\ud604\uc7ac", "\uc9c0\uae08", "\ud50c\ub808\uc774\ud5e4\ub4dc"),
+    ):
+        return _current_position_ms(snapshot)
+    return 0
 
 
 def _requests_add_track(text: str, compact: str) -> bool:

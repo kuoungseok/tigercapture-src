@@ -176,6 +176,86 @@ def test_ai_action_command_routes_sound_editor_actions(tmp_path):
     assert korean_cleanup.steps[0]["action"] == "audio.sound_editor.apply_effects"
 
 
+def test_ai_action_command_routes_music_generation_to_music_lab(tmp_path):
+    snapshot = _snapshot(tmp_path)
+
+    korean = build_ai_action_command_plan(
+        "\ud14c\ud06c\ub370\ubaa8\uc6a9 30\ucd08 \ubc30\uacbd\uc74c\uc545 \ub9cc\ub4e4\uc5b4\uc918",
+        snapshot,
+    )
+    english = build_ai_action_command_plan("make a 12s lofi bgm at the playhead", snapshot)
+
+    assert korean is not None
+    assert korean.steps[0]["action"] == "music.compose_to_timeline"
+    assert korean.steps[0]["params"]["duration_ms"] == 30000
+    assert korean.steps[0]["params"]["genre"] == "electronic"
+    assert korean.steps[0]["params"]["at_ms"] == 0
+    assert korean.steps[0]["params"]["auto_balance"] is True
+    assert english is not None
+    assert english.steps[0]["action"] == "music.compose_to_timeline"
+    assert english.steps[0]["params"]["duration_ms"] == 12000
+    assert english.steps[0]["params"]["genre"] == "lofi"
+    assert english.steps[0]["params"]["at_ms"] == 2000
+    assert english.steps[0]["params"]["update_existing"] is True
+
+
+def test_ai_action_command_routes_music_lab_edit_commands(tmp_path):
+    snapshot = _snapshot(tmp_path)
+    snapshot["music_compositions"] = [
+        {
+            "id": "music_demo",
+            "prompt": "tech demo BGM",
+            "genre": "electronic",
+            "mood": "confident",
+            "duration_ms": 30000,
+        }
+    ]
+    snapshot["audio_tracks"] = [
+        {"id": 11, "music_composition_id": "music_demo", "music_role": "drums", "clips": []},
+        {"id": 12, "music_composition_id": "music_demo", "music_role": "bass", "clips": []},
+        {"id": 13, "music_composition_id": "music_demo", "music_role": "chords", "clips": []},
+    ]
+    snapshot["music_lab_selection"] = {
+        "composition_id": "music_demo",
+        "role": "bass",
+        "section_name": "build",
+        "section_duration_ms": 8000,
+        "note_count": 12,
+    }
+
+    stronger = build_ai_action_command_plan("make the main music section stronger", snapshot)
+    selected_stronger = build_ai_action_command_plan("make the selected music section stronger", snapshot)
+    remove_drums = build_ai_action_command_plan("remove drums from the music", snapshot)
+    mute_selected = build_ai_action_command_plan("mute selected music track", snapshot)
+    pad_only = build_ai_action_command_plan("pad only for the music", snapshot)
+    midi = build_ai_action_command_plan("export midi", snapshot)
+
+    assert stronger is not None
+    assert [step["action"] for step in stronger.steps] == [
+        "music.regenerate_section",
+        "music.render_to_timeline",
+        "music.mixer.auto_balance",
+    ]
+    assert stronger.steps[0]["params"]["composition_id"] == "music_demo"
+    assert stronger.steps[0]["params"]["section_name"] == "main"
+    assert stronger.steps[0]["params"]["intensity"] == 0.95
+    assert stronger.steps[1]["params"]["update_existing"] is True
+    assert selected_stronger is not None
+    assert selected_stronger.steps[0]["action"] == "music.regenerate_section"
+    assert selected_stronger.steps[0]["params"]["section_name"] == "build"
+    assert remove_drums is not None
+    assert remove_drums.steps[0]["action"] == "audio.track.mute"
+    assert remove_drums.steps[0]["params"] == {"track_id": 11, "muted": True}
+    assert mute_selected is not None
+    assert mute_selected.steps[0]["action"] == "audio.track.mute"
+    assert mute_selected.steps[0]["params"] == {"track_id": 12, "muted": True}
+    assert pad_only is not None
+    assert [step["params"]["muted"] for step in pad_only.steps] == [True, True, False]
+    assert midi is not None
+    assert midi.steps[0]["action"] == "music.export_midi"
+    assert midi.steps[0]["params"]["composition_id"] == "music_demo"
+
+
 def test_ai_action_command_routes_selection_group_move_actions(tmp_path):
     snapshot = _snapshot(tmp_path)
 

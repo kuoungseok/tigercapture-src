@@ -73,10 +73,11 @@ exposed VRM renderer.
 
 Hard visibility boundary: source-person exposure must match VRM visibility via
 `match_source_person_exposure_to_vrm_visibility`. `face_only` may use `bust_up`,
-`upper_body` must use at least `half_body`, and `full_body` must use
-`full_body`. Source framing plans expose `source_exposure` and
+`chest_up` / `bust_up` must use `bust_up` / head-to-mid-chest, `upper_body`
+must use at least `half_body`, and `full_body` must use `full_body`.
+Source framing plans expose `source_exposure` and
 `visibility_policy`; review automation should reject head-only/face-only VRM
-evidence when the source is upper-body or full-body.
+evidence when the source is chest-up, upper-body, or full-body.
 
 The operator flow is always:
 

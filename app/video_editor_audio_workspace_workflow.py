@@ -342,6 +342,111 @@ def _on_workbench_sound_editor_mixer_track_changed(self, track) -> None:
     self._refresh_audio_workspace_panel()
 
 
+def _on_workbench_music_lab_action_requested(self, action_id: str, params) -> None:
+    from app.video_editor_automation_facade import _ensure_python_action_registry
+
+    action = str(action_id or "").strip()
+    if not action:
+        return
+    registry = _ensure_python_action_registry(self)
+    action_params = dict(params or {})
+    result = registry.execute(action, action_params).to_dict()
+    panel = getattr(self, "_workbench_panel", None)
+    if not result.get("ok"):
+        message = str(result.get("error") or "Music Lab action failed")
+        if panel is not None and hasattr(panel, "refresh_music_lab_status"):
+            panel.refresh_music_lab_status(message)
+        QMessageBox.warning(self, "Music Lab", message)
+        return
+
+    payload = result.get("result") if isinstance(result.get("result"), dict) else {}
+    summary = payload.get("summary") if isinstance(payload.get("summary"), dict) else {}
+    composition_id = str(
+        payload.get("composition_id")
+        or summary.get("id")
+        or action_params.get("composition_id")
+        or ""
+    )
+    followups: list[dict] = []
+    if action in {"music.regenerate_section", "music.section.set"} and composition_id:
+        render_params = {"composition_id": composition_id, "update_existing": True}
+        if action_params.get("backend"):
+            render_params["backend"] = action_params.get("backend")
+        if action_params.get("soundfont_path"):
+            render_params["soundfont_path"] = action_params.get("soundfont_path")
+        render = registry.execute(
+            "music.render_to_timeline",
+            render_params,
+        ).to_dict()
+        balance = registry.execute(
+            "music.mixer.auto_balance",
+            {"composition_id": composition_id},
+        ).to_dict()
+        followups.extend([render, balance])
+        if not render.get("ok"):
+            message = str(render.get("error") or "Music Lab timeline update failed")
+            if panel is not None and hasattr(panel, "refresh_music_lab_status"):
+                panel.refresh_music_lab_status(message)
+            QMessageBox.warning(self, "Music Lab", message)
+            return
+    composition = payload.get("composition") if isinstance(payload.get("composition"), dict) else None
+    if composition is not None:
+        preview_payload = payload.get("preview") if isinstance(payload.get("preview"), dict) else payload
+        if isinstance(preview_payload, dict):
+            preview_mix_path = str(preview_payload.get("preview_mix_path") or "")
+            if preview_mix_path:
+                composition["preview_mix_path"] = preview_mix_path
+            stems = preview_payload.get("stems")
+            if isinstance(stems, dict) and stems:
+                composition["rendered_stems"] = dict(stems)
+    if composition is None and composition_id:
+        state = registry.execute("music.state", {"composition_id": composition_id}).to_dict()
+        followups.append(state)
+        state_payload = state.get("result") if isinstance(state.get("result"), dict) else {}
+        composition = state_payload.get("composition") if isinstance(state_payload.get("composition"), dict) else None
+    if composition is not None and panel is not None and hasattr(panel, "set_music_lab_composition"):
+        panel.set_music_lab_composition(composition)
+
+    if action == "music.export_midi":
+        message = f"MIDI exported: {payload.get('path', '')}"
+    elif action == "music.render.preview":
+        message = f"Preview rendered: {payload.get('preview_mix_path', '')}"
+    elif action == "music.render_to_timeline":
+        message = (
+            f"Music updated: {int(payload.get('updated_count') or 0)} updated, "
+            f"{int(payload.get('added_count') or 0)} added"
+        )
+    elif action in {"music.regenerate_section", "music.section.set"}:
+        render_payload = {}
+        for followup in followups:
+            if followup.get("action") == "music.render_to_timeline":
+                render_payload = followup.get("result") if isinstance(followup.get("result"), dict) else {}
+        message = (
+            f"Music edited: {int(render_payload.get('updated_count') or 0)} updated, "
+            f"{int(render_payload.get('added_count') or 0)} added"
+        )
+    else:
+        timeline = payload.get("timeline") if isinstance(payload.get("timeline"), dict) else {}
+        message = (
+            f"Music generated: {int(timeline.get('updated_count') or 0)} updated, "
+            f"{int(timeline.get('added_count') or 0)} added"
+        )
+    if panel is not None and hasattr(panel, "refresh_music_lab_status"):
+        panel.refresh_music_lab_status(message)
+    try:
+        self._refresh_player_tracks()
+        self._refresh_audio_workspace_panel()
+    except Exception:
+        pass
+
+
+def _on_workbench_music_lab_selection_changed(self, selection) -> None:
+    if isinstance(selection, dict):
+        self._music_lab_selection = dict(selection)
+    else:
+        self._music_lab_selection = {}
+
+
 def _on_audio_scopes_toggled(self, checked: bool) -> None:
     """Show/hide the scopes column inside AudioMixerPanel."""
     if not hasattr(self, "_audio_mixer_panel"):

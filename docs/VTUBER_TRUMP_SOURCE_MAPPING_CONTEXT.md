@@ -114,13 +114,19 @@ Avatar Target
 Avatar Mapping
   Pose, mouth, blink, head rotation, bust-up/upper-body framing,
   desk/occlusion line, and user offset controls derived from the Trump
-  Performance Source. Because the Trump Performance Source shows an upper-body
-  person frame, Avatar Mapping and Program Output must show at least the
-  avatar's head, neck, shoulders, and upper torso. A face-only or head-only VRM
-  meta thumbnail is invalid evidence.
+  Performance Source. Because the current Trump Performance Source is a
+  seated chest-up talk frame, Avatar Mapping and Program Output must use
+  `bust_up` / head-to-mid-chest VRM framing: head, neck, shoulders, and upper
+  torso visible, but not a widened waist/full-body view. A face-only or
+  head-only VRM meta thumbnail is invalid evidence.
   Machine-readable rule: `match_source_person_exposure_to_vrm_visibility`.
-  For this Trump source, `source_exposure=upper_body` means the selected VRM
-  framing must be `half_body` or wider.
+  For this Trump source, `source_exposure=chest_up` means the selected VRM
+  framing must be `bust_up` with `selected_avatar_visibility=head_to_mid_chest`.
+  Program Output must also trim transparent avatar padding before fitting,
+  scale the visible avatar large enough to read, and anchor the lower visible
+  edge to the Program Output bottom safe line. A tiny avatar or one that appears
+  to float above the video violates the mapping rule even if the preset label is
+  `bust_up`.
 
 Program Output
   The actual composited broadcast output. It may use internal VRM fallback if
@@ -239,10 +245,11 @@ Internal VRM fallback Program Output proof:
 - Do not use an AI-generated avatar mapping image as if it came from the editor.
 - Do not show the Trump Performance Source as Program Output.
 - Do not use the Milica VRM meta thumbnail as product evidence when it crops to
-  a face-only view. The Trump source is upper-body, so the avatar evidence must
-  be `half_body` / upper-body or wider. The framing-plan JSON should include
-  `source_exposure=upper_body` and a `visibility_policy` whose selected preset
-  is `half_body` or `full_body`.
+  a face-only view. The current Trump source is chest-up seated talk footage, so
+  the avatar evidence must be `bust_up` / head-to-mid-chest: head, neck,
+  shoulders, and upper torso visible, but not widened to waist/full-body. The
+  framing-plan JSON should include `source_exposure=chest_up` and a
+  `visibility_policy` whose selected preset is `bust_up`.
 - Do not claim VSeeFace capture is working if the actual capture backend is
   black/degraded; show internal VRM fallback honestly.
 - Do not substitute motorcycle for the requested AR/PBR bicycle model.

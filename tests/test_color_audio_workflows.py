@@ -942,7 +942,116 @@ def test_color_preview_compare_before_and_split_are_preview_only():
     assert split is not None
     np.testing.assert_array_equal(split[:, :2], rgb[:, :2])
     assert not np.array_equal(split[:, 2:], rgb[:, 2:])
+    assert not np.any(np.all(split == np.array([255, 128, 87], dtype=np.uint8), axis=-1))
     assert not np.array_equal(after, rgb)
+
+
+def test_color_workbench_selection_does_not_force_split_compare():
+    from app.video_editor_window import VideoEditorWindow
+
+    class _Widget:
+        def __init__(self):
+            self.visible = True
+
+        def show(self):
+            self.visible = True
+
+        def hide(self):
+            self.visible = False
+
+        def setVisible(self, visible):
+            self.visible = bool(visible)
+
+        def setMinimumHeight(self, _value):
+            pass
+
+        def setMaximumHeight(self, _value):
+            pass
+
+        def updateGeometry(self):
+            pass
+
+    class _Stack:
+        def __init__(self):
+            self.current = None
+
+        def setCurrentWidget(self, widget):
+            self.current = widget
+
+    track = SimpleNamespace()
+    color_page = _Widget()
+    edit_page = _Widget()
+    editor = SimpleNamespace(
+        _color_popout=None,
+        _color_header_widget=_Widget(),
+        _color_row_host=_Widget(),
+        _workbench_stack=_Stack(),
+        _color_workbench_panel=color_page,
+        _workbench_panel=edit_page,
+        _set_color_reference_workspace_ratio=lambda _active: None,
+        _active_track=lambda: track,
+    )
+
+    VideoEditorWindow._update_color_dock_visibility(
+        editor,
+        SimpleNamespace(color_grade=object()),
+    )
+
+    assert editor._workbench_stack.current is color_page
+    assert not hasattr(track, "preview_color_compare_mode")
+
+
+def test_color_split_compare_overlay_uses_white_before_after_labels():
+    import os
+
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from app.video_editor_window import VideoEditorWindow
+
+    QApplication.instance() or QApplication([])
+
+    class _Painter:
+        def __init__(self):
+            self.lines = []
+            self.texts = []
+            self.pens = []
+
+        def save(self):
+            pass
+
+        def restore(self):
+            pass
+
+        def setRenderHint(self, *_args):
+            pass
+
+        def setPen(self, pen):
+            self.pens.append(pen)
+
+        def setBrush(self, *_args):
+            pass
+
+        def setFont(self, *_args):
+            pass
+
+        def drawLine(self, *args):
+            self.lines.append(args)
+
+        def drawRoundedRect(self, *_args):
+            pass
+
+        def drawText(self, _rect, _flags, text):
+            self.texts.append(text)
+
+    track = SimpleNamespace(preview_color_compare_mode="split")
+    editor = SimpleNamespace(_active_track=lambda: track)
+    painter = _Painter()
+
+    VideoEditorWindow._paint_comparison_canvas_overlay(editor, painter, 320, 180)
+
+    assert painter.lines == [(160, 10, 160, 170)]
+    assert painter.texts == ["Before", "After"]
 
 
 def test_color_compare_mode_sets_runtime_track_flag_only():
@@ -997,6 +1106,56 @@ def test_color_tab_switch_does_not_force_node_graph_selection():
 
     assert "clearSelection" not in source
     assert "setSelected" not in source
+
+
+def test_color_workspace_ratio_keeps_viewer_visible():
+    from app.video_editor_layout_specs import (
+        VIEWER_TOP_STRETCH,
+        WORKBENCH_SLOT_MIN_WIDTH,
+        WORKBENCH_TOP_STRETCH,
+    )
+    from app.video_editor_window import VideoEditorWindow
+
+    class _Widget:
+        def __init__(self):
+            self.minimum_width = None
+            self.updated = False
+
+        def setMinimumWidth(self, value):
+            self.minimum_width = int(value)
+
+        def updateGeometry(self):
+            self.updated = True
+
+    class _Layout:
+        def __init__(self, viewer, workbench):
+            self._items = [viewer, workbench]
+            self.stretches = {}
+
+        def indexOf(self, widget):
+            return self._items.index(widget) if widget in self._items else -1
+
+        def setStretch(self, index, value):
+            self.stretches[int(index)] = int(value)
+
+    viewer = _Widget()
+    workbench = _Widget()
+    top = _Widget()
+    layout = _Layout(viewer, workbench)
+    editor = SimpleNamespace(
+        _top_work_layout=layout,
+        _viewer_column=viewer,
+        _top_workbench_slot=workbench,
+        _top_work_area=top,
+    )
+
+    VideoEditorWindow._set_color_reference_workspace_ratio(editor, True)
+
+    assert workbench.minimum_width == WORKBENCH_SLOT_MIN_WIDTH
+    assert layout.stretches[0] == VIEWER_TOP_STRETCH
+    assert layout.stretches[1] == WORKBENCH_TOP_STRETCH
+    assert viewer.updated is True
+    assert workbench.updated is True
 
 
 def test_color_tab_preview_guard_restores_last_good_frame():

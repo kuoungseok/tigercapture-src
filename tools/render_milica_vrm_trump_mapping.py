@@ -25,19 +25,20 @@ from app.ar_pbr.software_renderer import _project, _transform_vertices  # noqa: 
 from app.ar_pbr.animation import animated_vertices_for_geometry  # noqa: E402
 from app.ar_pbr.export_packet_renderer import render_offscreen_gpu_export_frame  # noqa: E402
 from app.vtuber.openseeface_motion import load_openseeface_motion_csv, summarize_openseeface_motion  # noqa: E402
+from app.vtuber.vrm_renderer import load_vrm_avatar_descriptor  # noqa: E402
 
 
 DEFAULT_VRM = ROOT / "external" / "assets" / "vtuber" / "booth_milica" / "Milica1.3free" / "Milica_v1.3.vrm"
-DEFAULT_DESCRIPTOR = ROOT / "debugCapture" / "ar_pbr_asset_cache" / "asset_1fca2c885db2f56c.json"
-DEFAULT_CSV = ROOT / "debugCapture" / "openseeface_trump_to_vseeface_39540_data.csv"
+DEFAULT_DESCRIPTOR = ""
+DEFAULT_CSV = ""
 DEFAULT_OUT = ROOT / "debugCapture" / "milica_vrm_trump_actual_mapping_preview.png"
 
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Render Milica VRM with OpenSeeFace Trump motion.")
     parser.add_argument("--vrm", default=str(DEFAULT_VRM))
-    parser.add_argument("--descriptor", default=str(DEFAULT_DESCRIPTOR))
-    parser.add_argument("--csv", default=str(DEFAULT_CSV))
+    parser.add_argument("--descriptor", default=str(DEFAULT_DESCRIPTOR), help="Optional prebuilt descriptor JSON. If omitted, the durable VRM is imported directly.")
+    parser.add_argument("--csv", default=str(DEFAULT_CSV), help="Required OpenSeeFace motion CSV generated from an explicit source video.")
     parser.add_argument("--out", default=str(DEFAULT_OUT))
     parser.add_argument("--json-out", default="")
     parser.add_argument("--view", choices=("full", "closeup"), default="full")
@@ -47,10 +48,11 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     vrm_path = Path(args.vrm)
-    descriptor = _load_descriptor(Path(args.descriptor))
-    frames = load_openseeface_motion_csv(args.csv)
+    descriptor = _load_descriptor_or_vrm(_optional_arg_path(args.descriptor), vrm_path)
+    csv_path = _required_csv_path(args.csv)
+    frames = load_openseeface_motion_csv(csv_path)
     if not frames:
-        raise SystemExit(f"No OpenSeeFace frames loaded: {args.csv}")
+        raise SystemExit(f"No OpenSeeFace frames loaded: {csv_path}")
 
     morph_targets = _load_vrm_morph_targets(vrm_path)
     texture_paths = _expected_texture_paths(vrm_path)
@@ -104,7 +106,7 @@ def main(argv: list[str] | None = None) -> int:
         "schema": "tigerstudio.vtuber.milica_trump_actual_mapping_preview.v1",
         "ok": True,
         "vrm": str(vrm_path),
-        "csv": str(Path(args.csv)),
+        "csv": str(csv_path),
         "frame_count": len(frames),
         "view": args.view,
         "upper_body_mode": args.upper_body_mode,
@@ -128,6 +130,33 @@ def _load_descriptor(path: Path) -> dict[str, Any]:
     if not isinstance(descriptor, dict):
         raise ValueError(f"Invalid descriptor cache: {path}")
     return descriptor
+
+
+def _load_descriptor_or_vrm(descriptor_path: Path | None, vrm_path: Path) -> dict[str, Any]:
+    if descriptor_path is not None:
+        if not descriptor_path.is_file():
+            raise FileNotFoundError(f"Descriptor JSON does not exist: {descriptor_path}")
+        return _load_descriptor(descriptor_path)
+    descriptor, diagnostics = load_vrm_avatar_descriptor(vrm_path)
+    geometries = descriptor.get("geometries")
+    if not isinstance(geometries, list) or not geometries:
+        raise RuntimeError(f"Could not import VRM descriptor from durable asset: {vrm_path} ({diagnostics})")
+    return descriptor
+
+
+def _optional_arg_path(value: Any) -> Path | None:
+    text = str(value or "").strip()
+    return Path(text) if text else None
+
+
+def _required_csv_path(value: Any) -> Path:
+    text = str(value or "").strip()
+    if not text:
+        raise SystemExit("--csv is required. Generate or select an OpenSeeFace CSV explicitly; debugCapture is not a durable default input.")
+    path = Path(text)
+    if not path.is_file():
+        raise SystemExit(f"--csv does not exist: {path}")
+    return path
 
 
 def _expected_texture_paths(vrm_path: Path) -> dict[str, str]:

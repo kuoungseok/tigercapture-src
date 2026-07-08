@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from PySide6.QtCore import QRect, Qt
-from PySide6.QtGui import QColor, QFont, QFontMetrics, QPen
+from PySide6.QtGui import QColor, QFont, QFontMetrics, QPainter, QPen
 from PySide6.QtWidgets import QMessageBox
 
 from app.ar_pbr import editor_bridge as _ar_pbr_editor_bridge
@@ -425,7 +425,7 @@ def _paint_comparison_canvas_overlay(self, painter: QPainter, canvas_w: int, can
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     if mode == "split":
         split_x = w // 2
-        painter.setPen(QPen(QColor(232, 238, 246, 168), 1.2))
+        painter.setPen(QPen(QColor(255, 255, 255, 210), 1.35))
         painter.drawLine(split_x, 10, split_x, h - 10)
 
     labels_enabled = bool(getattr(track, "preview_compare_labels_enabled", True))
@@ -442,14 +442,14 @@ def _paint_comparison_canvas_overlay(self, painter: QPainter, canvas_w: int, can
             painter.setPen(QPen(QColor(255, 255, 255, 46), 1))
             painter.setBrush(QColor(7, 9, 13, 205))
             painter.drawRoundedRect(rect, 6, 6)
-            painter.setPen(QColor(238, 242, 248))
+            painter.setPen(QColor(255, 255, 255))
             painter.drawText(rect, Qt.AlignmentFlag.AlignCenter, text)
 
         if mode == "split":
-            _badge("Original", 12, 12)
+            _badge("Before", 12, 12)
             _badge("After", w // 2 + 12, 12)
         else:
-            _badge("Original", 12, 12)
+            _badge("Before", 12, 12)
     painter.restore()
 
 

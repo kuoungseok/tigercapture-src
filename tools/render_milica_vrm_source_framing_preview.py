@@ -36,8 +36,10 @@ from tools.render_milica_vrm_trump_mapping import (  # noqa: E402
     _attach_pose_animation,
     _attach_vrm_textures,
     _expected_texture_paths,
-    _load_descriptor,
+    _load_descriptor_or_vrm,
     _load_vrm_morph_targets,
+    _optional_arg_path,
+    _required_csv_path,
     _selected_frame_indices,
 )
 
@@ -72,8 +74,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     vrm_path = Path(args.vrm)
-    csv_path = Path(args.csv)
-    descriptor = _load_descriptor(Path(args.descriptor))
+    csv_path = _required_csv_path(args.csv)
+    descriptor = _load_descriptor_or_vrm(_optional_arg_path(args.descriptor), vrm_path)
     frames = load_openseeface_motion_csv(csv_path)
     if not frames:
         raise SystemExit(f"No OpenSeeFace frames loaded: {csv_path}")

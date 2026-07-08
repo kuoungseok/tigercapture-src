@@ -2,6 +2,20 @@
 
 ## Remaining Product Gaps
 
+- [x] 2026-07-08 Music Lab arranger handoff: Workbench Sound Editor `Music Lab`
+  now displays real composition sections/tracks/clips instead of a static
+  mockup, supports selected-block regenerate/section resize controls, exposes
+  `music_lab_selection` to AI snapshots, routes selected-section/selected-track
+  AI commands to structured actions, previews/stops the generated mix inside the
+  embedded Video Editor Lab, and upgrades the local preview renderer to
+  `tigerstudio.local_synth.v5` so Lab playback uses smoother WAV stems instead
+  of cheap external-MIDI/8-bit-like audition tone.
+  - [x] 2026-07-08 next quality step: Music Lab rendering is now
+    SoundFont-ready. Durable `.sf2/.sf3/.sfz` assets belong in
+    `external/assets/music/soundfonts`, optional FluidSynth belongs in
+    `external/tools/fluidsynth` or PATH, and `music.render.backends` reports
+    readiness/fallback state for AI and review automation.
+
 - [ ] Main editor UI renewal return gate:
   `docs/SPEC_UI_RENEWAL.md` is the persistent handoff anchor. Keep current work
   focused on main editor UI renewal until the live editor screenshots are stable;
@@ -542,6 +556,37 @@
         Verified with `tests/test_sound_editor_panel.py`, `py_compile`, and an
         isolated Sound Editor dock visual probe at
         `debugCapture/ui_renewal_sound_editor_master_vu_round_2/dock_sound_editor_master_vu_action.png`.
+      - [x] 2026-07-08 Sound Editor mixer beauty polish:
+        refined the mini Mixer beyond the Cubase reference with track-type
+        accent rails, richer segmented green/amber/red meters, and low-saturation
+        violet/amber metal fader and pan caps while keeping the compact
+        Workbench footprint. Verified with `tests/test_sound_editor_panel.py`,
+        `py_compile`, and an isolated Sound Editor dock visual probe at
+        `debugCapture/ui_renewal_sound_editor_mixer_beauty_round_1/dock_sound_editor_mixer_beauty_action.png`.
+      - [x] 2026-07-08 AI Composer / Music Lab foundation:
+        documented the MIDI-first composition plan in
+        `docs/SPEC_AI_COMPOSER_MUSIC_LAB.md`, then implemented deterministic
+        composition, arrangement, MIDI clip/chord/note editing, WAV preview
+        stem rendering, timeline insertion, and mixer auto-balance actions.
+        Local AI can now run `music.compose`, `music.render.preview`,
+        `music.render_to_timeline`, `music.mixer.auto_balance`, `music.state`,
+        and the `midi.clip.*` commands against real `AudioTrack` rows instead
+        of only describing music generation.
+      - [x] 2026-07-08 Music Lab persistence and prompt routing:
+        added `.tgp` save/load support for `music_compositions[]` and
+        music-generated audio track/clip composition-role links, added
+        `music.compose_to_timeline` as the one-shot compose/render/insert/mix
+        action, and routed clear prompts like "make a 30s BGM" to Music Lab
+        instead of Sound Editor mastering.
+      - [x] 2026-07-08 Music Lab UI/update/MIDI/edit-routing pass:
+        added a compact Workbench Sound Editor `Music Lab` tab with prompt,
+        genre/mood, duration, BPM, key, stem/mix mode, generate/update, and
+        MIDI export controls; added `music.render_to_timeline(update_existing)`
+        so regenerated stems replace matching Music Lab tracks instead of
+        stacking duplicates; added `music.export_midi`; improved the local
+        preview synth render with softer bass/pad/lead tone shaping and stereo
+        polish; and expanded AI command routing for existing music edits such
+        as stronger sections, drum removal, pad-only music, and MIDI export.
     - [x] Actor / Live2D / Spine / 3D pass:
       - [x] Restyle Actor Library.
       - [x] Show Live2D actor, actor lane, keyframes, transform controls, and

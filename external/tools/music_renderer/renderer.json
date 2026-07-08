@@ -1,0 +1,10 @@
+{
+  "name": "TigerCapture AI music production renderer",
+  "executable": ".venv/Scripts/python.exe",
+  "args": [
+    "tools/music_production_renderer.py"
+  ],
+  "supports_stems": false,
+  "engine": "ai_provider_or_lmms_fallback",
+  "notes": "Routes Music Lab composition JSON to a configured AI music provider such as ACE-Step API, then falls back to the local LMMS bridge when AI generation is unavailable."
+}

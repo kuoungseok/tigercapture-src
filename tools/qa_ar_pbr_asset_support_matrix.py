@@ -12,44 +12,9 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+from app.ar_pbr.sample_assets import ar_pbr_support_matrix_samples
 
-DEFAULT_CANDIDATES: tuple[dict[str, Any], ...] = (
-    {
-        "id": "static_fbx_es_scooter",
-        "path": "debugCapture/ar_pbr_external_assets/es_fbx/es.fbx",
-        "expected_levels": ["limited"],
-        "expected_features": ["fbx_source"],
-        "required": False,
-    },
-    {
-        "id": "skeletal_gltf_xbot_walk",
-        "path": "debugCapture/ar_pbr_selected_resources/threejs_xbot.glb",
-        "expected_levels": ["ready"],
-        "expected_features": ["gltf_source", "skeletal_mesh", "animation_clips"],
-        "required": False,
-    },
-    {
-        "id": "skeletal_gltf_soldier",
-        "path": "debugCapture/ar_pbr_selected_resources/Soldier.glb",
-        "expected_levels": ["ready"],
-        "expected_features": ["gltf_source", "skeletal_mesh", "animation_clips"],
-        "required": False,
-    },
-    {
-        "id": "compressed_gltf_modelviewer_soldier",
-        "path": "debugCapture/ar_pbr_selected_resources/modelviewer_soldier.glb",
-        "expected_levels": ["unsupported", "placeholder"],
-        "expected_issues": ["unsupported_required_compression"],
-        "required": False,
-    },
-    {
-        "id": "compressed_gltf_ferrari",
-        "path": "debugCapture/ar_pbr_selected_resources/ferrari.glb",
-        "expected_levels": ["unsupported", "placeholder"],
-        "expected_issues": ["unsupported_required_compression"],
-        "required": False,
-    },
-)
+DEFAULT_CANDIDATES: tuple[dict[str, Any], ...] = ar_pbr_support_matrix_samples()
 
 
 def run_asset_support_matrix(

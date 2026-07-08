@@ -214,6 +214,9 @@ class ActionRegistry:
         from app.actions.audio_namespace import register_audio_actions
 
         register_audio_actions(self)
+        from app.actions.music_namespace import register_music_actions
+
+        register_music_actions(self)
         from app.actions.track_selection_namespace import register_track_selection_actions
 
         register_track_selection_actions(self)

@@ -114,6 +114,14 @@ Expanded references:
   Shadow mode is locked to `pot_contact_only`: only a subtle contact shadow
   under the pot base is allowed. Left subtitle/body text must wrap inside the
   left text column and never overlap the central micro-spec columns.
+- Slide 22 visible spec groups come from
+  `docs/review_automation/spec_index_groups.json`, not from improvised slide
+  copy. Before regenerating the catalog, update that source from the latest
+  `SPEC.md`, `TODO.md`, and relevant `docs/SPEC_*.md` changes. It must cover
+  current axes such as PPT Maker / `.tgppt`, Music Lab, Sound Editor, Local AI,
+  Python Action, MCP, VTuber Studio, AR/PBR, depth-aware compositing, PPTX, and
+  MP4, while excluding MRQ, Unreal Bridge, Marmoset, QA readiness numbers, and
+  pass/fail status language.
 - Slide 4 is `PPT Maker / Timeline-Native Presentation Studio`. It must use
   actual `.tgppt` / `app.pptgen` evidence and must not be folded into AI,
   export, or generic editor overview pages.
@@ -291,10 +299,16 @@ Every feature page needs a screenshot that visibly matches the feature:
   Studio` work screen. If the page uses an iPad/detail frame, that iPad must
   contain Program Output only; never put Source Tracking, Avatar Mapping, the
   full workspace, or a generic editor crop in the iPad.
-  When the source is the Trump upper-body Performance Source, the avatar shown
-  in Program Output / Avatar Mapping must also be upper-body or wider: head,
-  neck, shoulders, and upper torso visible. Face-only VRM meta thumbnails are
+  When the source is the Trump chest-up seated Performance Source, the avatar
+  shown in Program Output / Avatar Mapping must use `bust_up` /
+  head-to-mid-chest framing: head, neck, shoulders, and upper torso visible,
+  but not a widened waist/full-body view. Face-only VRM meta thumbnails are
   invalid.
+  The Program Output avatar must also be visually large and grounded: trim
+  transparent VRM padding before fitting, keep the visible avatar large enough
+  to read in the catalog frame, and anchor the lower visible edge to the Program
+  Output bottom safe line. Tiny or floating avatars are invalid even when the
+  metadata says `bust_up`.
   Product-catalog VTuber captures must use the VTuber VRM GPU renderer
   `vrm_mtoon_gpu`. Software VRM fallback renders, dotted/point-cloud avatar
   output, meta thumbnails, AR/PBR, Marmoset PBR, and generic full-gpu debug

@@ -1,17 +1,16 @@
-from pathlib import Path
-
 import pytest
 
 from app.ar_pbr.importer import import_asset
+from app.ar_pbr.sample_assets import default_ar_pbr_binary_fbx_asset
 from tools.ar_pbr_gpu_window import build_vertex_buffer
 
 
-LOCAL_ES_FBX = Path("debugCapture/ar_pbr_external_assets/es_fbx/es.fbx")
+DURABLE_BINARY_FBX = default_ar_pbr_binary_fbx_asset()
 
 
-@pytest.mark.skipif(not LOCAL_ES_FBX.exists(), reason="local es.fbx asset not present")
-def test_local_binary_es_fbx_imports_preview_geometry():
-    descriptor, diagnostics = import_asset(LOCAL_ES_FBX)
+@pytest.mark.skipif(not DURABLE_BINARY_FBX.exists(), reason="durable AR/PBR binary FBX sample not present")
+def test_durable_binary_fbx_imports_preview_geometry():
+    descriptor, diagnostics = import_asset(DURABLE_BINARY_FBX)
 
     assert diagnostics["imported"] is True
     assert diagnostics["backend"] == "internal_binary_fbx"
@@ -22,10 +21,10 @@ def test_local_binary_es_fbx_imports_preview_geometry():
     assert descriptor["geometries"][0]["triangles"]
 
 
-@pytest.mark.skipif(not LOCAL_ES_FBX.exists(), reason="local es.fbx asset not present")
-def test_local_binary_es_fbx_builds_smooth_gpu_preview_buffer():
+@pytest.mark.skipif(not DURABLE_BINARY_FBX.exists(), reason="durable AR/PBR binary FBX sample not present")
+def test_durable_binary_fbx_builds_smooth_gpu_preview_buffer():
     descriptor, diagnostics = import_asset(
-        LOCAL_ES_FBX,
+        DURABLE_BINARY_FBX,
         settings={"max_triangles_per_geometry": 200000},
     )
 
@@ -41,10 +40,10 @@ def test_local_binary_es_fbx_builds_smooth_gpu_preview_buffer():
     assert mesh_diag["skipped_triangle_count"] >= 0
 
 
-@pytest.mark.skipif(not LOCAL_ES_FBX.exists(), reason="local es.fbx asset not present")
-def test_local_binary_es_fbx_imports_uvs_and_normals():
+@pytest.mark.skipif(not DURABLE_BINARY_FBX.exists(), reason="durable AR/PBR binary FBX sample not present")
+def test_durable_binary_fbx_imports_uvs_and_normals():
     descriptor, diagnostics = import_asset(
-        LOCAL_ES_FBX,
+        DURABLE_BINARY_FBX,
         settings={"max_triangles_per_geometry": 5000},
     )
 

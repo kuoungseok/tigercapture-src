@@ -699,9 +699,16 @@ capture.screenshot
 - Lower-left: Source Tracking, showing Trump/source input as tracking evidence.
 - Lower-right or center detail: Avatar Mapping, showing the Milica VRM target
   and mapping controls.
-- Trump source mapping is upper-body evidence. The avatar shown in Program
-  Output and Avatar Mapping must include head, neck, shoulders, and upper torso.
-  A face-only/head-only Milica VRM meta thumbnail is invalid.
+- Trump source mapping is chest-up seated talk evidence. The avatar shown in
+  Program Output and Avatar Mapping must use `bust_up` / head-to-mid-chest
+  framing: head, neck, shoulders, and upper torso visible, but not a widened
+  waist/full-body view. A face-only/head-only Milica VRM meta thumbnail is
+  invalid.
+- The Program Output avatar must be readable and bottom-anchored. Trim
+  transparent avatar padding before scaling, keep the visible avatar large
+  enough for the laptop/iPad frame, and align the lower visible edge to the
+  Program Output bottom safe line. Do not accept tiny or floating avatar
+  evidence.
 - Renderer rule: Program Output and Avatar Mapping product evidence must use
   `vtuber_vrm / vrm_mtoon` through the VTuber VRM GPU backend
   `vrm_mtoon_gpu`. Internal fallback is allowed only when it is GPU-backed.
@@ -960,10 +967,14 @@ E:\ClaudeCodeApp\ReviewAutomationWorkspace\tmp\catalog_spec_closing\spec_closing
 **Build method:**
 
 - Read the latest spec/docs before generation.
-- Compose a dense but clean spec index with major feature groups:
-  Capture/Media, Timeline Editing, Effects/Transitions, Typography, Color,
-  Node Graph, Audio Workbench, Actors, VTuber Studio, AR/PBR/3D, AI Action, and
-  Delivery.
+- Compose a dense but clean spec index from
+  `docs/review_automation/spec_index_groups.json`. Do not recreate the list in
+  slide code or free-form prompt copy.
+- Keep the spec-index source in sync with the current `SPEC.md`, `TODO.md`, and
+  relevant `docs/SPEC_*.md` files before deck generation. Current required axes
+  include Capture/Media, Timeline Editing, Effects/Nodes, Typography, Color,
+  Audio/Sound Editor, Music Lab, Actors, VTuber Studio, AR/PBR/3D,
+  AI/Python Action/MCP, PPT Maker / `.tgppt`, and delivery/export.
 - Keep QA/status language out of the visible page.
 - Place the bonsai on the right with only a subtle contact shadow under the pot
   base.
@@ -973,8 +984,13 @@ E:\ClaudeCodeApp\ReviewAutomationWorkspace\tmp\catalog_spec_closing\spec_closing
 **Reject if:**
 
 - It shows raw report/status/QA content.
+- It omits current major spec axes such as PPT Maker / `.tgppt`, Music Lab,
+  Sound Editor, Local AI, Python Action, MCP, VTuber Studio, AR/PBR,
+  depth-aware compositing, PPTX, or MP4.
 - The spec text reads like an implementation checklist instead of product
   capability categories.
+- The page mentions MRQ, Unreal Bridge, Marmoset, QA readiness numbers, or
+  pass/fail status language.
 - The tree has a visible white fringe, checkerboard leftovers, or a large
   pasted-object shadow.
 - The left subtitle/body copy overlaps the micro-spec columns.

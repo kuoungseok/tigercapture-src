@@ -295,9 +295,15 @@ Show VRM/VTuber Studio as its own page.
   the lower-right/center detail region, and Studio Controls nearby.
 - If using Trump source mapping context, make it clear that source/tracking is
   separate from final avatar/program output.
-- Trump source mapping is upper-body evidence. Avatar Mapping and Program Output
-  must show at least the avatar's head, neck, shoulders, and upper torso. A
+- Trump source mapping is chest-up seated talk evidence. Avatar Mapping and
+  Program Output must use `bust_up` / head-to-mid-chest framing: head, neck,
+  shoulders, and upper torso visible, but not widened to waist/full-body. A
   face-only/head-only Milica VRM meta thumbnail is invalid for this page.
+- The Program Output avatar must be visually large and grounded. The capture
+  contract must prove transparent padding was trimmed before fitting, the
+  visible avatar is large enough to read, and the lower visible edge is anchored
+  to the Program Output bottom safe line. Tiny/floating avatar evidence is a
+  blocking failure.
 - Motion/performance source: Trump source footage or mapping context.
 - Avatar target: Milica VRM model:
 
@@ -401,6 +407,12 @@ Visual rules:
   restrained footer, generous negative space.
 - Left side: title plus dense micro-spec text. The text may be small and
   catalog-like; it should feel like a specification index, not a QA report.
+- Visible spec groups must come from
+  `docs/review_automation/spec_index_groups.json`. Update that source from the
+  current `SPEC.md`, `TODO.md`, and relevant `docs/SPEC_*.md` files before deck
+  generation so the final page includes newly added product surfaces such as
+  PPT Maker / `.tgppt`, Music Lab, Sound Editor, Local AI, Python Action, MCP,
+  VTuber Studio, AR/PBR, depth-aware compositing, PPTX, and MP4.
 - Right side: approved blue-pot bonsai cutout.
 - The bonsai is a closing-page visual object only. It is not feature
   evidence and must not replace any real editor screenshot on feature pages.
@@ -410,6 +422,9 @@ Visual rules:
   must not overlap the micro-spec columns.
 - Reject visible white halos, checkerboard remnants, or background strips
   around the cutout.
+- Reject MRQ, Unreal Bridge, Marmoset, QA readiness numbers, pass/fail status
+  language, or improvised spec categories not backed by the current product
+  scenario.
 - Approved source/cutout paths:
 
 ```text

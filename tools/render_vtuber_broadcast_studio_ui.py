@@ -19,7 +19,7 @@ from app.vtuber.broadcast_studio_layout import build_vtuber_broadcast_studio_lay
 
 DEFAULT_REPORT = ROOT / "debugCapture" / "milica_vrm_source_framing_bust_up_head_desk_occluded.json"
 DEFAULT_AVATAR = ROOT / "debugCapture" / "milica_vrm_source_framing_bust_up_head_desk_occluded.png"
-DEFAULT_VIDEO = ROOT / "debugCapture" / "trump_face_source.mp4"
+DEFAULT_VIDEO = ""
 DEFAULT_BRIDGE_STATUS = ROOT / "debugCapture" / "vseeface_bridge_status_internal_fallback.json"
 DEFAULT_OUT = ROOT / "debugCapture" / "vtuber_broadcast_studio_ui_trump.png"
 
@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Render a standalone VTuber broadcast studio UI screenshot.")
     parser.add_argument("--report", default=str(DEFAULT_REPORT))
     parser.add_argument("--avatar", default=str(DEFAULT_AVATAR))
-    parser.add_argument("--video", default=str(DEFAULT_VIDEO))
+    parser.add_argument("--video", default=str(DEFAULT_VIDEO), help="Optional explicit Performance Source video for the Source Tracking panel.")
     parser.add_argument("--bridge-status", default=str(DEFAULT_BRIDGE_STATUS))
     parser.add_argument("--out", default=str(DEFAULT_OUT))
     parser.add_argument("--width", type=int, default=1600)
@@ -50,8 +50,14 @@ def main(argv: list[str] | None = None) -> int:
     report = json.loads(Path(args.report).read_text(encoding="utf-8"))
     bridge_status = _read_json_optional(Path(args.bridge_status)) if args.bridge_status else {}
     avatar = Image.open(args.avatar).convert("RGBA")
-    source = _read_source_frame(Path(args.video), int((report.get("frame") or {}).get("time_ms") or 0))
-    layout = _build_layout(report, Path(args.video).name, Path(args.video), bridge_status=bridge_status)
+    video_path = Path(args.video) if str(args.video or "").strip() else None
+    source = _read_source_frame(video_path, int((report.get("frame") or {}).get("time_ms") or 0))
+    layout = _build_layout(
+        report,
+        video_path.name if video_path else "Performance Source",
+        video_path or Path(""),
+        bridge_status=bridge_status,
+    )
     image = render_studio_ui(layout, report, source, avatar, size=(int(args.width), int(args.height)))
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -271,7 +277,12 @@ def _read_json_optional(path: Path) -> dict[str, Any]:
         return {}
 
 
-def _read_source_frame(video_path: Path, time_ms: int) -> Image.Image:
+def _read_source_frame(video_path: Path | None, time_ms: int) -> Image.Image:
+    if video_path is None or not video_path.is_file():
+        image = Image.new("RGB", (1280, 720), (45, 48, 52))
+        draw = ImageDraw.Draw(image, "RGBA")
+        draw.text((48, 48), "Performance Source video not selected", fill=(210, 216, 224))
+        return image
     try:
         import cv2  # type: ignore
     except Exception:

@@ -29,7 +29,6 @@ INTERNAL_VRM_FALLBACK_RENDER_SCHEMA = "tigerstudio.vtuber.internal_vrm_fallback_
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_VRM = ROOT / "external" / "assets" / "vtuber" / "booth_milica" / "Milica1.3free" / "Milica_v1.3.vrm"
-DEFAULT_MOTION_CSV = ROOT / "debugCapture" / "openseeface_trump_to_vseeface_39540_data.csv"
 
 
 def render_internal_vrm_fallback_frame(
@@ -55,7 +54,7 @@ def render_internal_vrm_fallback_frame(
     descriptor_value = settings.get("descriptor_path") or settings.get("descriptor")
     motion_value = settings.get("motion_csv") or settings.get("openseeface_csv")
     descriptor_path = _resolve_path(descriptor_value) if descriptor_value else None
-    motion_csv = _resolve_path(motion_value) if motion_value else _optional_existing_path(DEFAULT_MOTION_CSV)
+    motion_csv = _resolve_path(motion_value) if motion_value else None
     width = max(1, int(width))
     height = max(1, int(height))
     renderer_id = normalize_vrm_renderer(renderer)
@@ -477,8 +476,3 @@ def _resolve_path(value: Any) -> Path:
     if path.is_absolute():
         return path
     return ROOT / path
-
-
-def _optional_existing_path(value: Any) -> Path | None:
-    path = _resolve_path(value)
-    return path if path.exists() else None

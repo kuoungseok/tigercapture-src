@@ -180,18 +180,23 @@ def _restore_real_ar_pbr_viewer_frame(
 
 
 def _default_asset() -> Path:
+    from app.ar_pbr.sample_assets import (
+        DEFAULT_AR_PBR_FBX_SAMPLE,
+        DEFAULT_AR_PBR_FLOOR_GLTF_SAMPLE,
+        DEFAULT_AR_PBR_GLTF_SAMPLE,
+        default_ar_pbr_preview_asset,
+    )
+
     candidates = [
-        ROOT / "debugCapture" / "ar_pbr_selected_resources" / "babylon_car.glb",
-        ROOT / "debugCapture" / "ar_pbr_selected_resources" / "modelviewer_horse.glb",
-        ROOT / "debugCapture" / "ar_pbr_selected_resources" / "ferrari.glb",
+        default_ar_pbr_preview_asset(),
+        DEFAULT_AR_PBR_GLTF_SAMPLE,
+        DEFAULT_AR_PBR_FBX_SAMPLE,
+        DEFAULT_AR_PBR_FLOOR_GLTF_SAMPLE,
     ]
     for candidate in candidates:
         if candidate.exists():
             return candidate
-    found = sorted((ROOT / "debugCapture").rglob("*.glb"))
-    if found:
-        return found[0]
-    raise FileNotFoundError("no GLB sample found under debugCapture")
+    raise FileNotFoundError("no durable AR/PBR sample asset found under sample_assets")
 
 
 def run_ar_pbr_workspace_qa(

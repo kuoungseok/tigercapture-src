@@ -173,6 +173,55 @@ def test_sound_editor_panel_embeds_reference_05_jog_shuttle(tmp_path: Path) -> N
     assert getattr(clip, "_se_jog_playing") is True
 
 
+def test_sound_editor_music_lab_shows_arrangement_view(tmp_path: Path) -> None:
+    app = _app()
+    from app.music_composer import compose_music
+
+    audio_path = tmp_path / "music_lab.wav"
+    audio_path.write_bytes(b"music")
+    clip = AudioClip(id=84, source_path=audio_path, duration_ms=30000, trim_end_ms=30000)
+    composition = compose_music(
+        prompt="tech demo music",
+        duration_ms=30000,
+        genre="electronic",
+        mood="confident",
+        key="C minor",
+        bpm=124,
+    ).to_dict()
+    panel = SoundEditorPanel()
+    panel.resize(760, 720)
+    panel.show()
+    music_events = []
+    panel.music_lab_action_requested.connect(lambda action, params: music_events.append((action, params)))
+    panel.set_clip(clip, context_label="Timeline Audio", context_key="timeline:1:84")
+    panel._set_tab("music")
+    panel.set_music_composition(composition)
+    panel._music_arrangement.set_selection(role="chords", section_name="build")
+    app.processEvents()
+
+    arranger = panel.findChild(QWidget, "SoundMusicArrangementView")
+    assert arranger is not None
+    assert arranger.isVisible()
+    assert not arranger.grab().isNull()
+    assert not panel.findChild(QWidget, "SoundJogShuttle05").isVisible()
+    payload = panel._music_selection_payload()
+    assert payload["composition_id"] == composition["id"]
+    assert payload["role"] == "chords"
+    assert payload["section_name"] == "build"
+    assert payload["section_duration_ms"] > 0
+    assert payload["note_count"] > 0
+    assert payload["chord_progression"]
+    assert "Selected: Pad / build" in panel._music_selection_label.text()
+    assert "Chords:" in panel._music_note_hint.text()
+    assert panel._music_preview_btn.text() == "Preview"
+
+    panel._request_music_preview()
+
+    assert music_events[-1][0] == "music.render.preview"
+    assert music_events[-1][1]["composition_id"] == composition["id"]
+    assert music_events[-1][1]["backend"] == "auto"
+
+
 def test_sound_editor_panel_expands_advanced_lab_inline(tmp_path: Path) -> None:
     app = _app()
     audio_path = tmp_path / "advanced.wav"

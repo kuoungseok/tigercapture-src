@@ -63,6 +63,12 @@ Not allowed in `debugCapture`:
 
 Use `external/tools` for external applications and SDKs, `external/assets` for
 local third-party assets, and tracked docs/resources for durable project data.
+AR/PBR QA and preview tool defaults must use durable samples under
+`sample_assets` or `external/assets`, not `debugCapture`.
+Default source media, motion CSVs, descriptors, models, avatars, and imported
+assets must never point at `debugCapture`; run
+`.\.venv\Scripts\python.exe -m pytest tests\test_debug_capture_boundary.py -q`
+after changing asset/tool defaults.
 If existing code still points at `debugCapture` for important dependencies,
 move the dependency to the proper durable location and leave only regenerated
 reports or screenshots in `debugCapture`.
@@ -156,6 +162,14 @@ person scope instead of showing an arbitrary VRM thumbnail:
 - `face_only` / `face_closeup` source: VRM may use `bust_up`, but must still
   show head, neck, and shoulders; never use a face-only meta thumbnail as
   Program Output evidence.
+- `chest_up` / `bust_up` / head-and-shoulders source: VRM must use `bust_up`
+  / head-to-mid-chest framing. Do not widen this to `half_body` for normal
+  talking-head or seated desk footage where the source is visible only to the
+  chest.
+  Product evidence must trim transparent avatar padding before fitting, keep
+  the visible avatar large enough to read, and anchor the lower visible edge to
+  the Program Output bottom safe line. Tiny or floating avatars are invalid
+  even when the metadata says `bust_up`.
 - `upper_body` source: VRM must use at least `half_body` / head-to-waist
   framing. If a caller asks for `bust_up`, upgrade it unless the user explicitly
   overrides with an allow-narrower flag.
@@ -172,6 +186,12 @@ Run the architecture guard after editor-facing changes:
 
 ```powershell
 .\.venv\Scripts\python.exe -m pytest tests\test_editor_architecture_rules.py -q
+```
+
+Run the debug-capture boundary guard after changing tool or asset defaults:
+
+```powershell
+.\.venv\Scripts\python.exe -m pytest tests\test_debug_capture_boundary.py -q
 ```
 
 If the guard fails because a real feature was added to `video_editor_window.py`,

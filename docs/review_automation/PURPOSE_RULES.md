@@ -109,10 +109,16 @@ Hard rules:
   `VTuber Studio - Tiger Studio` work screen. If an iPad/detail frame is used,
   it must show Program Output only, not Source Tracking, Avatar Mapping, a
   duplicated workspace, or a generic editor crop.
-- If the VRM/VTuber page uses the Trump Performance Source, the avatar evidence
-  must be upper-body or wider: head, neck, shoulders, and upper torso must be
-  visible in Program Output / Avatar Mapping. A face-only VRM meta thumbnail is
-  invalid.
+- If the VRM/VTuber page uses the Trump Performance Source, treat it as
+  chest-up seated talk footage. Avatar evidence must use `bust_up` /
+  head-to-mid-chest framing: head, neck, shoulders, and upper torso visible,
+  but not widened to waist/full-body. A face-only VRM meta thumbnail is invalid.
+- Trump-source VTuber Program Output must make the VRM readable and grounded:
+  trim transparent avatar padding before scaling, keep the visible avatar large
+  enough for catalog use, and anchor the lower visible edge to the output's
+  bottom safe line. Tiny avatars, centered transparent canvases, or avatars that
+  visually float above the video are invalid even when the `bust_up` label is
+  present.
 - VRM/VTuber product evidence must use the VTuber VRM GPU renderer
   `vrm_mtoon_gpu`. Software VRM fallback output is allowed only as diagnostic
   proof, not as product-catalog evidence, because it can produce dotted or
@@ -152,6 +158,14 @@ checkerboard remnants, or background strips around the cutout are invalid.
 The build-side shadow mode is locked as `pot_contact_only`, and left-side
 subtitle/body copy must wrap inside the left text area without overlapping the
 micro-spec columns.
+The visible micro-spec groups must come from
+`docs/review_automation/spec_index_groups.json` and be refreshed from the latest
+`SPEC.md`, `TODO.md`, and relevant `docs/SPEC_*.md` files before catalog
+generation. The final page must stay product-catalog oriented: include current
+surfaces such as PPT Maker / `.tgppt`, Music Lab, Sound Editor, Local AI,
+Python Action, MCP, VTuber Studio, AR/PBR, depth-aware compositing, PPTX, and
+MP4, but exclude MRQ, Unreal Bridge, Marmoset, QA readiness numbers, and
+pass/fail status wording.
 
 ## Current Timeline Visual Contract
 

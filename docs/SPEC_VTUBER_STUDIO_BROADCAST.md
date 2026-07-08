@@ -31,10 +31,16 @@ point-like contact previews. Renderer contracts expose
 
 Source-person visibility must drive avatar visibility through
 `match_source_person_exposure_to_vrm_visibility`: `face_only` -> `bust_up`,
-`upper_body` -> at least `half_body`, and `full_body` -> `full_body`.
+`chest_up` / `bust_up` -> `bust_up` / head-to-mid-chest, `upper_body` ->
+at least `half_body`, and `full_body` -> `full_body`.
+Product evidence must also trim transparent avatar padding before fitting,
+scale the visible avatar large enough to read, and anchor the lower visible
+edge to the Program Output bottom safe line. A tiny or floating avatar is
+invalid even when the preset label is `bust_up`.
 Studio evidence, Program Output, and review automation must read
 `source_exposure` plus `visibility_policy` from source-framing plans and reject
-face-only/head-only VRM evidence for upper-body or full-body sources.
+face-only/head-only VRM evidence for chest-up, upper-body, or full-body
+sources.
 
 ## Core Rule
 

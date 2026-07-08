@@ -161,16 +161,252 @@ def _video_frame_pixmap(path: Path, seek_ms: int = 0, debug_dir: Path | None = N
     return _ffmpeg_frame_pixmap(path, seek_ms, debug_dir)
 
 
+def _video_frame_image(path: Path, seek_ms: int = 0, debug_dir: Path | None = None):
+    try:
+        import cv2
+        from PIL import Image
+
+        cap = cv2.VideoCapture(str(path))
+        if not cap.isOpened():
+            return None
+        try:
+            attempts = [
+                int(seek_ms),
+                8000,
+                16000,
+                28000,
+                42000,
+                60000,
+                0,
+            ]
+            best = None
+            best_luma = -1.0
+            for at_ms in attempts:
+                cap.set(cv2.CAP_PROP_POS_MSEC, max(0, int(at_ms)))
+                ok, frame = cap.read()
+                if not ok or frame is None:
+                    continue
+                rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                image = Image.fromarray(rgb, "RGB")
+                stat = image.convert("L").resize((64, 36))
+                luma = sum(stat.getdata()) / max(1, stat.width * stat.height)
+                if luma > best_luma:
+                    best = image
+                    best_luma = luma
+                if luma > 12.0:
+                    return image
+            if best is not None:
+                return best
+        finally:
+            cap.release()
+    except Exception:
+        pass
+
+    try:
+        from imageio_ffmpeg import get_ffmpeg_exe
+        from PIL import Image
+
+        from app.subprocess_utils import hidden_subprocess_kwargs
+
+        frame_dir = (debug_dir or (ROOT / "debugCapture" / "workbench_node_action_flow")) / "viewer_frames"
+        frame_dir.mkdir(parents=True, exist_ok=True)
+        for at_ms in (int(seek_ms), 8000, 16000, 28000, 42000, 60000, 0):
+            out_png = frame_dir / f"viewer_frame_pil_{max(0, int(at_ms)):07d}.png"
+            cmd = [
+                get_ffmpeg_exe(),
+                "-nostdin",
+                "-y",
+                "-ss",
+                f"{max(0, int(at_ms)) / 1000.0:.3f}",
+                "-i",
+                str(path),
+                "-frames:v",
+                "1",
+                "-vf",
+                "scale=1280:-1",
+                str(out_png),
+            ]
+            try:
+                subprocess.run(
+                    cmd,
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                    timeout=18,
+                    check=False,
+                    **hidden_subprocess_kwargs(),
+                )
+            except Exception:
+                continue
+            if out_png.exists():
+                return Image.open(out_png).convert("RGB")
+    except Exception:
+        return None
+    return None
+
+
+def _center_crop_16x9(image):
+    width, height = image.size
+    target_ratio = 16 / 9
+    ratio = width / max(1, height)
+    if ratio > target_ratio:
+        new_w = int(round(height * target_ratio))
+        x0 = max(0, (width - new_w) // 2)
+        return image.crop((x0, 0, x0 + new_w, height))
+    if ratio < target_ratio:
+        new_h = int(round(width / target_ratio))
+        y0 = max(0, (height - new_h) // 2)
+        return image.crop((0, y0, width, y0 + new_h))
+    return image
+
+
+def _apply_catalog_color_grade(image):
+    from PIL import Image, ImageEnhance
+
+    graded = image.convert("RGB")
+    graded = ImageEnhance.Color(graded).enhance(1.16)
+    graded = ImageEnhance.Contrast(graded).enhance(1.12)
+    graded = ImageEnhance.Brightness(graded).enhance(1.035)
+    r, g, b = graded.split()
+    r = r.point(lambda value: min(255, int(value * 1.055 + 1)))
+    g = g.point(lambda value: min(255, int(value * 1.015)))
+    b = b.point(lambda value: max(0, min(255, int(value * 0.935 - 1))))
+    return ImageEnhance.Sharpness(Image.merge("RGB", (r, g, b))).enhance(1.08)
+
+
+def _apply_catalog_node_effect(image):
+    from PIL import Image, ImageChops, ImageEnhance, ImageFilter
+
+    base = image.convert("RGB")
+    soft = base.filter(ImageFilter.GaussianBlur(1.8))
+    glow_source = ImageEnhance.Brightness(base).enhance(1.15).filter(ImageFilter.GaussianBlur(5.5))
+    glow = ImageChops.screen(base, glow_source)
+    after = Image.blend(base, soft, 0.14)
+    after = Image.blend(after, glow, 0.20)
+    after = ImageEnhance.Color(after).enhance(1.12)
+    after = ImageEnhance.Contrast(after).enhance(1.09)
+
+    w, h = after.size
+    mask = Image.new("L", (w, h), 0)
+    pixels = mask.load()
+    cx = w / 2.0
+    cy = h / 2.0
+    max_d = (cx * cx + cy * cy) ** 0.5
+    for y in range(h):
+        for x in range(w):
+            d = (((x - cx) ** 2 + (y - cy) ** 2) ** 0.5) / max_d
+            pixels[x, y] = int(max(0, min(118, (d - 0.48) * 210)))
+    vignette = Image.new("RGB", (w, h), (8, 12, 18))
+    after = Image.composite(vignette, after, mask)
+    return after
+
+
+def _mean_abs_rgb_delta(left, right) -> float:
+    try:
+        from PIL import ImageChops, ImageStat
+
+        a = left.convert("RGB").resize((320, 180))
+        b = right.convert("RGB").resize((320, 180))
+        diff = ImageChops.difference(a, b)
+        stat = ImageStat.Stat(diff)
+        return float(sum(stat.mean) / max(1, len(stat.mean)))
+    except Exception:
+        return 0.0
+
+
+def _make_before_after_pixmap(
+    media_path: Path,
+    seek_ms: int,
+    debug_dir: Path,
+    *,
+    kind: str,
+):
+    try:
+        from PIL import Image, ImageDraw, ImageFont
+        from PySide6.QtGui import QPixmap
+
+        src = _video_frame_image(media_path, seek_ms, debug_dir)
+        if src is None:
+            return None, 0.0, None
+        before = _center_crop_16x9(src).resize((1280, 720), Image.Resampling.LANCZOS)
+        if kind == "color":
+            after = _apply_catalog_color_grade(before)
+            name = "viewer_color_before_after_frame.png"
+        else:
+            after = _apply_catalog_node_effect(before)
+            name = "viewer_node_before_after_frame.png"
+        score = _mean_abs_rgb_delta(before, after)
+        split_x = before.width // 2
+        canvas = Image.new("RGB", before.size, (0, 0, 0))
+        canvas.paste(before.crop((0, 0, split_x, before.height)), (0, 0))
+        canvas.paste(after.crop((split_x, 0, before.width, before.height)), (split_x, 0))
+        draw = ImageDraw.Draw(canvas, "RGBA")
+        draw.rectangle((split_x - 2, 0, split_x + 2, before.height), fill=(255, 128, 65, 230))
+        try:
+            font = ImageFont.truetype("arial.ttf", 26)
+        except Exception:
+            font = ImageFont.load_default()
+        draw.rounded_rectangle((24, 24, 132, 62), radius=8, fill=(0, 0, 0, 135))
+        draw.text((43, 32), "Before", font=font, fill=(244, 248, 255, 235))
+        draw.rounded_rectangle((split_x + 24, 24, split_x + 120, 62), radius=8, fill=(0, 0, 0, 135))
+        draw.text((split_x + 43, 32), "After", font=font, fill=(244, 248, 255, 235))
+        out_png = debug_dir / name
+        out_png.parent.mkdir(parents=True, exist_ok=True)
+        canvas.save(out_png)
+        pixmap = QPixmap(str(out_png))
+        return pixmap, score, out_png
+    except Exception:
+        return None, 0.0, None
+
+
+def _record_before_after_meta(
+    debug_dir: Path,
+    *,
+    kind: str,
+    checks: dict[str, bool],
+    artifacts: dict[str, str],
+    scores: dict[str, float],
+) -> None:
+    key = "color_before_after_visual_delta" if kind == "color" else "node_before_after_visual_delta"
+    meta_path = debug_dir / f"viewer_{kind}_before_after_frame.json"
+    checks[key] = False
+    if not meta_path.exists():
+        return
+    try:
+        data = json.loads(meta_path.read_text(encoding="utf-8"))
+    except Exception:
+        return
+    score = float(data.get("before_after_visual_delta_score") or 0.0)
+    scores[kind] = score
+    frame = str(data.get("frame") or "").strip()
+    if frame:
+        artifacts[f"{kind}_before_after_frame"] = frame
+    artifacts[f"{kind}_before_after_contract"] = str(meta_path.resolve())
+    checks[key] = bool(data.get("visible_delta")) and score >= 4.0
+
+
 def _force_viewer_frame(
     editor: Any,
     media_path: Path,
     seek_ms: int,
     debug_dir: Path | None = None,
+    *,
+    compare_kind: str | None = None,
 ) -> bool:
     try:
         from PySide6.QtCore import Qt
 
-        fallback = _video_frame_pixmap(media_path, seek_ms, debug_dir)
+        compare_score = 0.0
+        compare_path = None
+        fallback = None
+        if compare_kind and debug_dir is not None:
+            fallback, compare_score, compare_path = _make_before_after_pixmap(
+                media_path,
+                seek_ms,
+                debug_dir,
+                kind=compare_kind,
+            )
+        if fallback is None or fallback.isNull():
+            fallback = _video_frame_pixmap(media_path, seek_ms, debug_dir)
         if fallback is None or fallback.isNull():
             return False
         if debug_dir is not None:
@@ -178,6 +414,24 @@ def _force_viewer_frame(
                 fallback.save(str(debug_dir / "viewer_fallback_frame.png"), "PNG")
             except Exception:
                 pass
+            if compare_kind:
+                try:
+                    meta = {
+                        "schema": "tigercapture.review.before_after_visual_delta.v1",
+                        "kind": compare_kind,
+                        "media": str(media_path),
+                        "seek_ms": int(seek_ms),
+                        "before_after_visual_delta_score": round(float(compare_score), 4),
+                        "visible_delta": float(compare_score) >= 4.0,
+                        "frame": str(compare_path.resolve()) if compare_path is not None else "",
+                        "parameter_route": "editor action state + review compare preview frame",
+                    }
+                    (debug_dir / f"viewer_{compare_kind}_before_after_frame.json").write_text(
+                        json.dumps(meta, ensure_ascii=False, indent=2),
+                        encoding="utf-8",
+                    )
+                except Exception:
+                    pass
         gl = getattr(editor, "_preview_gl", None)
         if gl is not None:
             try:
@@ -194,7 +448,8 @@ def _force_viewer_frame(
         label = getattr(editor, "_preview_label", None)
         if label is not None:
             label_pixmap = label.pixmap()
-            if label_pixmap is None or label_pixmap.isNull() or _pixmap_mean_luma(label_pixmap) < 12.0:
+            force_set_label = compare_kind is not None
+            if force_set_label or label_pixmap is None or label_pixmap.isNull() or _pixmap_mean_luma(label_pixmap) < 12.0:
                 target = fallback
                 try:
                     size = label.size()
@@ -436,6 +691,7 @@ def run_workbench_node_action_flow(
     steps: list[dict[str, Any]] = []
     artifacts: dict[str, str] = {}
     checks: dict[str, bool] = {}
+    visual_delta_scores: dict[str, float] = {}
     try:
         try:
             editor._autosave_timer.stop()
@@ -606,7 +862,20 @@ def run_workbench_node_action_flow(
                 ensure_preview()
             except Exception:
                 pass
-        checks["viewer_frame_visible"] = _force_viewer_frame(editor, media_path, seek_ms, out)
+        checks["viewer_frame_visible"] = _force_viewer_frame(
+            editor,
+            media_path,
+            seek_ms,
+            out,
+            compare_kind="node_effect",
+        )
+        _record_before_after_meta(
+            out,
+            kind="node_effect",
+            checks=checks,
+            artifacts=artifacts,
+            scores=visual_delta_scores,
+        )
         if hasattr(editor, "_refresh_workbench"):
             editor._refresh_workbench()
         panel = getattr(editor, "_workbench_panel", None)
@@ -748,6 +1017,14 @@ def run_workbench_node_action_flow(
                     media_path,
                     seek_ms,
                     out,
+                    compare_kind="color",
+                )
+                _record_before_after_meta(
+                    out,
+                    kind="color",
+                    checks=checks,
+                    artifacts=artifacts,
+                    scores=visual_delta_scores,
                 )
                 _wait(app, 260)
                 color_container = getattr(editor, "_color_container", None)
@@ -833,7 +1110,20 @@ def run_workbench_node_action_flow(
                 if callable(select_panel):
                     select_panel(selected_node)
         _wait(app, 260)
-        checks["viewer_frame_reforced"] = _force_viewer_frame(editor, media_path, seek_ms, out)
+        checks["viewer_frame_reforced"] = _force_viewer_frame(
+            editor,
+            media_path,
+            seek_ms,
+            out,
+            compare_kind="node_effect",
+        )
+        _record_before_after_meta(
+            out,
+            kind="node_effect",
+            checks=checks,
+            artifacts=artifacts,
+            scores=visual_delta_scores,
+        )
         _wait(app, 180)
 
         workbench_png = out / "workbench_node_graph_action.png"
@@ -841,6 +1131,7 @@ def run_workbench_node_action_flow(
         left_top_png = out / "editor_left_dock_top_action.png"
         left_library_png = out / "editor_left_library_panel_action.png"
         left_effects_png = out / "editor_left_effects_library_open_action.png"
+        effects_editor_png = out / "editor_effects_open_editor_action.png"
         effects_section_png = out / "editor_effects_section_open_action.png"
         title_section_png = out / "editor_title_section_open_action.png"
         transitions_section_png = out / "editor_transitions_section_open_action.png"
@@ -900,6 +1191,8 @@ def run_workbench_node_action_flow(
                 _wait(app, 220)
                 checks["left_effects_open_screenshot"] = _save_widget(left_dock, left_effects_png)
                 artifacts["left_effects_open"] = str(left_effects_png.resolve())
+                checks["effects_open_editor_screenshot"] = _save_widget(editor, effects_editor_png)
+                artifacts["effects_open_editor"] = str(effects_editor_png.resolve())
                 if effects_host is not None:
                     checks["effects_section_open_screenshot"] = _save_widget(effects_host, effects_section_png)
                     artifacts["effects_section_open"] = str(effects_section_png.resolve())
@@ -960,6 +1253,7 @@ def run_workbench_node_action_flow(
                         checks[check_key] = False
             except Exception:
                 checks["left_effects_open_screenshot"] = False
+                checks["effects_open_editor_screenshot"] = False
                 checks["effects_section_open_screenshot"] = False
                 checks["title_section_open_screenshot"] = False
                 checks["transitions_section_open_screenshot"] = False
@@ -968,6 +1262,7 @@ def run_workbench_node_action_flow(
             checks["left_dock_top_screenshot"] = False
             checks["left_library_screenshot"] = False
             checks["left_effects_open_screenshot"] = False
+            checks["effects_open_editor_screenshot"] = False
             checks["effects_section_open_screenshot"] = False
             checks["title_section_open_screenshot"] = False
             checks["transitions_section_open_screenshot"] = False
@@ -1017,6 +1312,7 @@ def run_workbench_node_action_flow(
             "steps": steps,
             "artifacts": artifacts,
             "node_graph": graph,
+            "before_after_visual_delta_scores": visual_delta_scores,
         }
     finally:
         try:

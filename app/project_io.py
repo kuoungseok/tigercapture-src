@@ -302,7 +302,7 @@ def _video_clip_to_dict(c) -> dict:
 
 def _audio_clip_to_dict(c) -> dict:
     fades_data = [_fade_to_dict(f) for f in getattr(c, "fades", [])]
-    return {
+    row = {
         "id": int(c.id),
         "source_path": _p(c.source_path),
         "duration_ms": int(getattr(c, "duration_ms", 0)),
@@ -316,6 +316,11 @@ def _audio_clip_to_dict(c) -> dict:
         "effects": dict(getattr(c, "effects", {}) or {}),
         "gain": float(getattr(c, "gain", 1.0)),
     }
+    if getattr(c, "music_composition_id", ""):
+        row["music_composition_id"] = str(getattr(c, "music_composition_id", "") or "")
+    if getattr(c, "music_role", ""):
+        row["music_role"] = str(getattr(c, "music_role", "") or "")
+    return row
 
 
 def _audio_clip_from_dict(cd: dict):
@@ -348,6 +353,10 @@ def _audio_clip_from_dict(cd: dict):
     clip.volume_points = list(cd.get("volume_points", []) or [])
     clip.effects = dict(cd.get("effects", {}) or default_effects_state())
     clip.gain = float(cd.get("gain", 1.0))
+    if cd.get("music_composition_id"):
+        clip.music_composition_id = str(cd.get("music_composition_id") or "")
+    if cd.get("music_role"):
+        clip.music_role = str(cd.get("music_role") or "")
     if clip.duration_ms <= 0:
         try:
             from app.audio_tracks import probe_audio_duration_ms
@@ -507,11 +516,30 @@ def save_project(editor, path: str | Path) -> None:
             "automation_lanes": dict(getattr(atrack, "automation_lanes", None) or {}),
             "clips": [_audio_clip_to_dict(c) for c in (atrack.clips or [])],
         }
+        if getattr(atrack, "music_composition_id", ""):
+            at["music_composition_id"] = str(getattr(atrack, "music_composition_id", "") or "")
+        if getattr(atrack, "music_role", ""):
+            at["music_role"] = str(getattr(atrack, "music_role", "") or "")
         doc["audio_tracks"].append(at)
     try:
         doc["audio_mixer_snapshots"] = list(getattr(editor, "_audio_mixer_snapshots", None) or [])
     except Exception:
         doc["audio_mixer_snapshots"] = []
+    try:
+        music_store = getattr(editor, "_music_compositions", None) or {}
+        if isinstance(music_store, dict):
+            values = list(music_store.values())
+        else:
+            values = list(music_store)
+        rows = []
+        for composition in values:
+            if hasattr(composition, "to_dict"):
+                rows.append(composition.to_dict())
+            elif isinstance(composition, dict):
+                rows.append(dict(composition))
+        doc["music_compositions"] = rows
+    except Exception:
+        doc["music_compositions"] = []
 
     # ---- Subtitles ----
     try:
@@ -702,6 +730,21 @@ def load_project(editor, path: str | Path) -> None:
         editor._audio_mixer_snapshots = list(doc.get("audio_mixer_snapshots", []) or [])
     except Exception:
         editor._audio_mixer_snapshots = []
+    try:
+        from app.music_composer import composition_from_dict
+
+        music_rows = doc.get("music_compositions") or []
+        if isinstance(music_rows, dict):
+            music_rows = list(music_rows.values())
+        editor._music_compositions = {}
+        for row in music_rows:
+            if not isinstance(row, dict):
+                continue
+            composition = composition_from_dict(row)
+            if composition.id:
+                editor._music_compositions[composition.id] = composition
+    except Exception:
+        editor._music_compositions = {}
 
     # 4. Restore subtitles.
     _load_subtitles(editor, doc.get("subtitles", []))
@@ -1045,6 +1088,7 @@ def _clear_editor(editor) -> None:
     else:
         editor._next_audio_track_id = 1
     editor._audio_mixer_snapshots = []
+    editor._music_compositions = {}
 
     # Clear subtitles.
     try:
@@ -1540,6 +1584,10 @@ def _load_audio_track(editor, at_data: dict) -> None:
     new_track.automation_write = bool(at_data.get("automation_write", False))
     new_track.automation_points = list(at_data.get("automation_points", []) or [])
     new_track.automation_lanes = dict(at_data.get("automation_lanes", {}) or {})
+    if at_data.get("music_composition_id"):
+        new_track.music_composition_id = str(at_data.get("music_composition_id") or "")
+    if at_data.get("music_role"):
+        new_track.music_role = str(at_data.get("music_role") or "")
 
     for cd in at_data.get("clips", []):
         clip = _audio_clip_from_dict(cd)

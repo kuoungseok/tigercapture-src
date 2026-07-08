@@ -16,9 +16,10 @@ from PySide6.QtWidgets import QApplication
 
 from app.actions import build_default_action_registry
 from app.ar_pbr.preview_window import ArPbrAssetPreviewWindow
+from app.ar_pbr.sample_assets import default_ar_pbr_preview_asset
 
 
-DEFAULT_ASSET = ROOT / "debugCapture" / "ar_pbr_external_assets" / "es_fbx" / "es.fbx"
+DEFAULT_ASSET = default_ar_pbr_preview_asset()
 
 
 def _coerce_setting_value(raw: str) -> object:

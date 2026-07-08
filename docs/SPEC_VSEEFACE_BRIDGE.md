@@ -823,6 +823,10 @@ Source-person visibility contract for AI/review automation:
 - `face_only` / `face_closeup` source may use `bust_up`, but evidence still
   must show head, neck, and shoulders; do not use a face-only VRM meta thumbnail
   as Program Output or Avatar Mapping proof.
+- `chest_up` / `bust_up` / head-and-shoulders source must use `bust_up` /
+  head-to-mid-chest VRM framing. This is the correct match for seated talking
+  footage where the source person is visible only to the chest; do not widen it
+  to `half_body`.
 - `upper_body` source must use at least `half_body` / head-to-waist VRM
   framing. If a caller requests `bust_up`, the source-framing plan upgrades it
   unless explicitly allowed to be narrower.

@@ -85,6 +85,12 @@ def build_right_dock_sections(self) -> None:
     self._workbench_panel.advanced_sound_lab_requested.connect(
         self._open_advanced_sound_lab,
     )
+    self._workbench_panel.music_lab_action_requested.connect(
+        self._on_workbench_music_lab_action_requested,
+    )
+    self._workbench_panel.music_lab_selection_changed.connect(
+        self._on_workbench_music_lab_selection_changed,
+    )
     self._workbench_panel.mmd_physics_rotation_hint_scale_changed.connect(
         self._on_workbench_mmd_rotation_hint_changed,
     )

@@ -11,7 +11,7 @@ from app.vtuber.video_face_driver import FaceMotionFrame
 SOURCE_FRAMING_SCHEMA = "tigerstudio.vtuber.source_framing.v1"
 SOURCE_TO_VRM_VISIBILITY_POLICY_SCHEMA = "tigerstudio.vtuber.source_to_vrm_visibility_policy.v1"
 SOURCE_EXPOSURE_SCHEMA = "tigerstudio.vtuber.source_exposure_classification.v1"
-SOURCE_EXPOSURE_TYPES = frozenset({"face_only", "upper_body", "full_body", "unknown"})
+SOURCE_EXPOSURE_TYPES = frozenset({"face_only", "chest_up", "upper_body", "full_body", "unknown"})
 PRESET_ORDER = {"bust_up": 0, "half_body": 1, "full_body": 2}
 PRESET_VISIBILITY = {
     "bust_up": "head_to_mid_chest",
@@ -131,8 +131,12 @@ def normalize_source_exposure_type(value: Any = "", payload: Mapping[str, Any] |
         "talking_head": "face_only",
         "head": "face_only",
         "head_only": "face_only",
-        "bust": "upper_body",
-        "bust_up": "upper_body",
+        "bust": "chest_up",
+        "bust_up": "chest_up",
+        "chest": "chest_up",
+        "chest_up": "chest_up",
+        "mid_chest": "chest_up",
+        "head_and_shoulders": "chest_up",
         "upper": "upper_body",
         "upper_body": "upper_body",
         "half": "upper_body",
@@ -168,6 +172,7 @@ def vrm_visibility_policy_for_source_exposure(
     exposure = normalize_source_exposure_type(source_exposure)
     minimum = {
         "face_only": "bust_up",
+        "chest_up": "bust_up",
         "upper_body": "half_body",
         "full_body": "full_body",
         "unknown": "bust_up",
@@ -209,6 +214,10 @@ def normalize_vrm_framing_preset(value: Any) -> str:
         "source_exposure": "",
         "bust": "bust_up",
         "bustup": "bust_up",
+        "chest": "bust_up",
+        "chest_up": "bust_up",
+        "mid_chest": "bust_up",
+        "head_and_shoulders": "bust_up",
         "close": "bust_up",
         "close_up": "bust_up",
         "face": "bust_up",
@@ -278,8 +287,8 @@ def classify_source_exposure_for_framing(
         confidence = _clamp(0.54 + subject_coverage * 0.25 + max(0.0, med_subject_h - 0.36) * 0.35, 0.54, 0.92)
         method = "face_subject_bbox_heuristic"
     elif med_h >= 0.17 or med_w >= 0.14 or med_area >= 0.030:
-        profile = "upper_body"
-        exposure = "upper_body"
+        profile = "chest_up"
+        exposure = "chest_up"
         confidence = _clamp((med_h - 0.13) / 0.18 + 0.45, 0.45, 0.90)
         method = "face_bbox_heuristic"
     else:
@@ -500,6 +509,8 @@ def _visibility_policy_reason(
         return "full_body_source_keeps_vrm_head_to_toe"
     if exposure == "upper_body":
         return "upper_body_source_keeps_vrm_head_to_waist_or_wider"
+    if exposure == "chest_up":
+        return "chest_up_source_keeps_vrm_head_to_mid_chest"
     if exposure == "face_only":
         return "face_only_source_allows_bust_up_but_not_head_only_thumbnail"
     return f"unknown_source_exposure_uses_conservative_{selected}_framing"

@@ -336,9 +336,10 @@ from app.ar_pbr.shadow import (
     normalize_shadow_settings,
     shadow_filter_diagnostics as build_shadow_filter_diagnostics,
 )
+from app.ar_pbr.sample_assets import default_ar_pbr_preview_asset
 
 
-DEFAULT_EXTERNAL_ASSET = ROOT / "debugCapture" / "ar_pbr_external_assets" / "es_fbx" / "es.fbx"
+DEFAULT_EXTERNAL_ASSET = default_ar_pbr_preview_asset()
 try:
     from app.ar_pbr.hdri_presets import default_hdri_path
 

@@ -12,7 +12,7 @@ def test_load_avatar_visual_rejects_face_thumbnail_when_product_render_fails(mon
 
     monkeypatch.setattr(capture, "_render_avatar", fail_render)
 
-    with pytest.raises(RuntimeError, match="upper-body avatar render"):
+    with pytest.raises(RuntimeError, match="chest-up/bust-up avatar render"):
         capture._load_avatar_visual(Path("Milica_v1.3.vrm"))
 
 
@@ -39,10 +39,10 @@ def test_debug_face_thumbnail_fallback_is_marked_invalid(monkeypatch):
     assert contract["review_product_evidence"] is False
     assert contract["visual_source"] == "vrm_meta_thumbnail_texture"
     assert contract["visible_parts"] == []
-    assert contract["framing_contract"] == "violates_upper_body_rule_face_thumbnail_only"
+    assert contract["framing_contract"] == "violates_chest_up_rule_face_thumbnail_only"
 
 
-def test_upper_body_render_contract_records_required_visible_parts(monkeypatch):
+def test_chest_up_render_contract_records_required_visible_parts(monkeypatch):
     def fake_render(_path, *, time_ms):
         assert time_ms == 12000
         return Image.new("RGBA", (32, 64), (255, 255, 255, 255)), {
@@ -53,6 +53,12 @@ def test_upper_body_render_contract_records_required_visible_parts(monkeypatch):
             "requested_renderer": "vrm_mtoon_gpu",
             "pbr_renderer": False,
             "ar_pbr_preview": False,
+            "fit": {
+                "crop_mode": "bust_up",
+                "original_bbox": [0, 0, 100, 200],
+                "source_bbox_size": [100, 76],
+                "output_size": [220, 560],
+            },
         }
 
     monkeypatch.setattr(capture, "_render_avatar", fake_render)
@@ -61,6 +67,10 @@ def test_upper_body_render_contract_records_required_visible_parts(monkeypatch):
     contract = capture._avatar_evidence_contract(diagnostics)
 
     assert contract["review_product_evidence"] is True
+    assert contract["source_mapping_subject"] == "trump_chest_up_performance_source"
+    assert contract["source_exposure"] == "chest_up"
+    assert contract["framing_preset"] == "bust_up"
+    assert contract["selected_avatar_visibility"] == "head_to_mid_chest"
     assert contract["minimum_visible_parts"] == ["head", "neck", "shoulders", "upper_torso"]
     assert contract["visible_parts"] == ["head", "neck", "shoulders", "upper_torso"]
     assert contract["renderer_family"] == "vtuber_vrm"
@@ -68,6 +78,8 @@ def test_upper_body_render_contract_records_required_visible_parts(monkeypatch):
     assert contract["renderer_backend"] == "vrm_mtoon_gpu"
     assert contract["gpu_renderer_required"] is True
     assert contract["gpu_renderer_used"] is True
+    assert contract["fit_crop_mode"] == "bust_up"
+    assert contract["fit_crop_height_ratio"] == 0.38
 
 
 def test_upper_body_render_rejects_software_renderer(monkeypatch):

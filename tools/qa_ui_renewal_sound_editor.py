@@ -18,6 +18,8 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+SOUND_EDITOR_CURRENT_UI_CONTRACT_VERSION = 2
+
 try:
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")
@@ -668,6 +670,7 @@ def run_sound_editor_capture(
         checks["workbench_screenshot"] = _save_widget(workbench_widget, workbench_png)
         checks["editor_screenshot"] = _save_widget(editor, editor_png)
         checks["workbench_screenshot_nonblank"] = _image_nonblank(workbench_png)
+        checks["editor_screenshot_nonblank"] = _image_nonblank(editor_png)
         artifacts["workbench_sound_editor"] = str(workbench_png.resolve())
         artifacts["editor_sound_editor"] = str(editor_png.resolve())
 
@@ -713,6 +716,14 @@ def run_sound_editor_capture(
 
     report = {
         "scenario": "ui_renewal_sound_editor",
+        "sound_editor_ui_contract_version": SOUND_EDITOR_CURRENT_UI_CONTRACT_VERSION,
+        "current_ui_evidence_tags": [
+            "current_sound_editor_ui",
+            "reference_05_jog_shuttle",
+            "inline_advanced_sound_lab",
+            "sound_editor_mixer",
+            "colored_audio_graphs",
+        ],
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "language": active_language,
         "steps": steps,

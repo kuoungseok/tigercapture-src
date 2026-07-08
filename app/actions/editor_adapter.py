@@ -18,6 +18,7 @@ from app.actions.editor_adapter_ui import UiAdapterMixin
 from app.actions.editor_adapter_vtuber import VtuberBroadcastAdapterMixin
 from app.actions.editor_adapter_object_helpers import ObjectHelperMixin
 from app.actions.editor_adapter_mmd import MmdAdapterMixin
+from app.actions.editor_adapter_music import MusicAdapterMixin
 from app.actions.editor_adapter_ar_pbr import ArPbrAdapterMixin
 from app.actions.editor_adapter_ppt import PptAdapterMixin
 
@@ -29,6 +30,7 @@ class EditorAdapter(
     MmdAdapterMixin,
     ArPbrAdapterMixin,
     PptAdapterMixin,
+    MusicAdapterMixin,
     NleAdapterMixin,
     UiAdapterMixin,
     CoreHelperMixin,

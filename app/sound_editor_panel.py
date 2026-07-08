@@ -13,7 +13,7 @@ import zlib
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
+from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QBrush, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import (
     QFileDialog,
@@ -21,11 +21,13 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
     QMessageBox,
     QPushButton,
     QScrollArea,
     QSizePolicy,
     QSlider,
+    QSpinBox,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -192,6 +194,341 @@ class _ValueSlider(QWidget):
             self.value_changed.emit(float(value))
 
 
+class _MusicLabArrangementView(QWidget):
+    """Compact multitrack arranger preview for Music Lab."""
+
+    selection_changed = Signal(object)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("SoundMusicArrangementView")
+        self.setMinimumHeight(275)
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._duration_s = 30
+        self._mode = "stems"
+        self._key = "auto key"
+        self._genre = "electronic"
+        self._mood = "confident"
+        self._composition: dict[str, Any] | None = None
+        self._selection: dict[str, Any] = {"role": "drums", "section_name": "main"}
+        self._block_rects: list[tuple[QRectF, str, str]] = []
+        self._muted_roles: set[str] = set()
+        self._solo_roles: set[str] = set()
+
+    def set_arrangement(
+        self,
+        *,
+        duration_s: int,
+        mode: str,
+        key: str,
+        genre: str,
+        mood: str,
+    ) -> None:
+        self._duration_s = max(4, min(180, int(duration_s or 30)))
+        self._mode = str(mode or "stems")
+        self._key = str(key or "auto key")
+        self._genre = str(genre or "")
+        self._mood = str(mood or "")
+        self.update()
+
+    def set_composition(self, composition: dict[str, Any] | None) -> None:
+        self._composition = dict(composition or {}) if isinstance(composition, dict) else None
+        if self._composition:
+            self._duration_s = max(4, int(round(float(self._composition.get("duration_ms") or 30000) / 1000.0)))
+            self._key = str(self._composition.get("key") or self._key)
+            self._genre = str(self._composition.get("genre") or self._genre)
+            self._mood = str(self._composition.get("mood") or self._mood)
+        valid_sections = [row[0] for row in self._sections()]
+        valid_roles = ["chords" if row[0].lower() == "pad" else row[0].lower() for row in self._tracks()]
+        if self._selection.get("section_name") not in valid_sections:
+            self._selection["section_name"] = valid_sections[0] if valid_sections else "main"
+        if self._selection.get("role") not in valid_roles:
+            self._selection["role"] = valid_roles[0] if valid_roles else "drums"
+        self.update()
+
+    def composition(self) -> dict[str, Any] | None:
+        return dict(self._composition or {}) if self._composition else None
+
+    def selection(self) -> dict[str, Any]:
+        row = dict(self._selection)
+        if self._composition:
+            row["composition_id"] = str(self._composition.get("id") or "")
+        row["muted_roles"] = sorted(self._muted_roles)
+        row["solo_roles"] = sorted(self._solo_roles)
+        return row
+
+    def set_selection(self, *, role: str = "", section_name: str = "") -> None:
+        if role:
+            self._selection["role"] = str(role).strip().lower()
+        if section_name:
+            self._selection["section_name"] = str(section_name).strip().lower()
+        self.update()
+        self.selection_changed.emit(self.selection())
+
+    def set_role_muted(self, role: str, muted: bool) -> None:
+        role_text = str(role or "").strip().lower()
+        if not role_text:
+            return
+        if muted:
+            self._muted_roles.add(role_text)
+        else:
+            self._muted_roles.discard(role_text)
+        self.update()
+        self.selection_changed.emit(self.selection())
+
+    def set_role_solo(self, role: str, solo: bool) -> None:
+        role_text = str(role or "").strip().lower()
+        if not role_text:
+            return
+        if solo:
+            self._solo_roles.add(role_text)
+        else:
+            self._solo_roles.discard(role_text)
+        self.update()
+        self.selection_changed.emit(self.selection())
+
+    def _sections(self) -> list[tuple[str, float, QColor]]:
+        composition = self._composition or {}
+        section_rows = [row for row in list(composition.get("sections") or []) if isinstance(row, dict)]
+        if section_rows:
+            total = sum(max(1.0, float(row.get("duration_ms") or 0)) for row in section_rows)
+            colors = {
+                "intro": QColor(175, 145, 92, 210),
+                "build": QColor(190, 162, 78, 220),
+                "main": QColor(214, 177, 58, 230),
+                "outro": QColor(138, 151, 177, 210),
+            }
+            return [
+                (
+                    str(row.get("name") or f"section {idx + 1}").lower(),
+                    max(1.0, float(row.get("duration_ms") or 0)) / max(1.0, total),
+                    colors.get(str(row.get("name") or "").lower(), QColor(138, 151, 177, 210)),
+                )
+                for idx, row in enumerate(section_rows)
+            ]
+        if self._duration_s <= 16:
+            rows = (("intro", 0.25), ("main", 0.55), ("outro", 0.20))
+        else:
+            rows = (("intro", 0.18), ("build", 0.27), ("main", 0.38), ("outro", 0.17))
+        colors = {
+            "intro": QColor(175, 145, 92, 210),
+            "build": QColor(190, 162, 78, 220),
+            "main": QColor(214, 177, 58, 230),
+            "outro": QColor(138, 151, 177, 210),
+        }
+        return [(name, ratio, colors[name]) for name, ratio in rows]
+
+    def _tracks(self) -> list[tuple[str, QColor, int]]:
+        mode = self._mode.lower()
+        base_tracks = [
+            ("Drums", QColor(216, 176, 49), 0),
+            ("Bass", QColor(81, 122, 221), 1),
+            ("Pad", QColor(48, 190, 189), 2),
+            ("Melody", QColor(44, 160, 208), 3),
+            ("FX", QColor(114, 151, 221), 4),
+        ]
+        composition = self._composition or {}
+        comp_tracks = [row for row in list(composition.get("tracks") or []) if isinstance(row, dict)]
+        if comp_tracks:
+            palette = {
+                "drums": (QColor(216, 176, 49), 0),
+                "bass": (QColor(81, 122, 221), 1),
+                "chords": (QColor(48, 190, 189), 2),
+                "pad": (QColor(48, 190, 189), 2),
+                "melody": (QColor(44, 160, 208), 3),
+                "fx": (QColor(114, 151, 221), 4),
+                "mix": (QColor(118, 196, 143), 5),
+            }
+            tracks = []
+            for row in comp_tracks:
+                role = str(row.get("role") or row.get("id") or "").strip().lower()
+                color, index = palette.get(role, (QColor(138, 151, 177), 5))
+                label = "Pad" if role == "chords" else (role.title() or "Track")
+                tracks.append((label, color, index))
+        else:
+            tracks = base_tracks
+        if mode == "drums + bass":
+            return [row for row in tracks if row[0].lower() in {"drums", "bass"}]
+        if mode == "pad only":
+            return [row for row in tracks if row[0].lower() in {"pad", "chords"}] or [base_tracks[2]]
+        if mode == "mix only":
+            return [("Mix", QColor(118, 196, 143), 5)]
+        return tracks
+
+    def _track_data(self, role_label: str) -> dict[str, Any]:
+        role = "chords" if role_label.lower() == "pad" else role_label.lower()
+        for row in list((self._composition or {}).get("tracks") or []):
+            if isinstance(row, dict) and str(row.get("role") or row.get("id") or "").lower() == role:
+                return row
+        return {}
+
+    def paintEvent(self, _event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rect = self.rect().adjusted(1, 1, -1, -1)
+        painter.fillRect(rect, QColor("#0C0E10"))
+        painter.setPen(QPen(QColor(178, 186, 202, 28), 1))
+        painter.drawRoundedRect(QRectF(rect), 6, 6)
+
+        left_w = 94
+        top_h = 28
+        bottom_pad = 12
+        lane_gap = 4
+        lanes = self._tracks()
+        lane_h = max(24, int((rect.height() - top_h - bottom_pad - lane_gap * (len(lanes) - 1)) / max(1, len(lanes))))
+        grid_x = rect.left() + left_w
+        grid_w = max(1, rect.width() - left_w - 7)
+        grid_y = rect.top() + top_h
+        grid_h = lane_h * len(lanes) + lane_gap * max(0, len(lanes) - 1)
+
+        painter.fillRect(QRectF(grid_x, grid_y, grid_w, grid_h), QColor(18, 21, 24, 220))
+        painter.fillRect(QRectF(rect.left() + 5, grid_y, left_w - 8, grid_h), QColor(14, 16, 18, 235))
+
+        title_font = painter.font()
+        title_font.setPixelSize(9)
+        title_font.setBold(True)
+        painter.setFont(title_font)
+        painter.setPen(QColor("#C8CED8"))
+        painter.drawText(rect.left() + 8, rect.top() + 18, "Music Lab Arrange")
+
+        info_font = painter.font()
+        info_font.setPixelSize(8)
+        info_font.setBold(False)
+        painter.setFont(info_font)
+        painter.setPen(QColor("#7F8793"))
+        painter.drawText(grid_x + 4, rect.top() + 18, f"{self._duration_s}s  |  {self._genre}  |  {self._mood}  |  {self._key}")
+
+        bars = max(8, min(48, int(round(self._duration_s / 2))))
+        for i in range(bars + 1):
+            x = grid_x + grid_w * i / bars
+            alpha = 62 if i % 4 == 0 else 30
+            painter.setPen(QPen(QColor(178, 186, 202, alpha), 1))
+            painter.drawLine(int(x), grid_y, int(x), grid_y + grid_h)
+            if i % 4 == 0:
+                painter.setPen(QColor("#6D7581"))
+                painter.drawText(int(x) + 3, rect.top() + 18, str(i + 1))
+
+        y = grid_y
+        self._block_rects = []
+        for track_index, (name, color, role_index) in enumerate(lanes):
+            lane_rect = QRectF(grid_x, y, grid_w, lane_h)
+            label_rect = QRectF(rect.left() + 7, y, left_w - 12, lane_h)
+            role_name = "chords" if name.lower() == "pad" else name.lower()
+            muted = role_name in self._muted_roles
+            soloed = role_name in self._solo_roles
+            painter.fillRect(label_rect, QColor(16, 18, 20, 170 if muted else 230))
+            painter.setPen(QPen(QColor(178, 186, 202, 26), 1))
+            painter.drawRect(label_rect)
+            painter.setPen(QColor("#F1E8C8") if soloed else QColor("#7E8793") if muted else QColor("#DDE2EA"))
+            suffix = " S" if soloed else " M" if muted else ""
+            painter.drawText(label_rect.adjusted(8, 0, -4, 0), Qt.AlignmentFlag.AlignVCenter, f"{name}{suffix}")
+            painter.fillRect(lane_rect, QColor(13, 15, 17, 230))
+            painter.setPen(QPen(QColor(178, 186, 202, 18), 1))
+            painter.drawRect(lane_rect)
+            self._paint_track_blocks(painter, lane_rect, color, role_index, track_index, role_name, muted=muted)
+            y += lane_h + lane_gap
+        painter.end()
+
+    def _paint_track_blocks(
+        self,
+        painter: QPainter,
+        lane_rect: QRectF,
+        color: QColor,
+        role_index: int,
+        track_index: int,
+        role_name: str,
+        *,
+        muted: bool = False,
+    ) -> None:
+        start_ratio = 0.0
+        track_data = self._track_data(role_name)
+        clips = [row for row in list(track_data.get("clips") or []) if isinstance(row, dict)]
+        for section_index, (section, ratio, section_color) in enumerate(self._sections()):
+            block_x = lane_rect.left() + lane_rect.width() * start_ratio
+            block_w = max(12.0, lane_rect.width() * ratio - 3.0)
+            if clips:
+                active = any(str(clip.get("section_name") or "").lower() == section for clip in clips)
+            else:
+                active = not (section == "intro" and role_index in {3, 4}) and not (section == "outro" and role_index == 0)
+            if active:
+                block_h = lane_rect.height() - 9
+                block_y = lane_rect.top() + 4
+                block_rect = QRectF(block_x + 2, block_y, block_w, block_h)
+                self._block_rects.append((QRectF(block_rect), role_name, section))
+                mixed = QColor(
+                    int(color.red() * 0.70 + section_color.red() * 0.30),
+                    int(color.green() * 0.70 + section_color.green() * 0.30),
+                    int(color.blue() * 0.70 + section_color.blue() * 0.30),
+                    118 if muted else 220,
+                )
+                gradient = QLinearGradient(block_x, block_y, block_x, block_y + block_h)
+                gradient.setColorAt(0.0, mixed.lighter(118))
+                gradient.setColorAt(1.0, mixed.darker(132))
+                path = QPainterPath()
+                path.addRoundedRect(block_rect, 3, 3)
+                painter.fillPath(path, QBrush(gradient))
+                selected = self._selection.get("role") == role_name and self._selection.get("section_name") == section
+                painter.setPen(QPen(QColor("#F3E8C5") if selected else mixed.lighter(130), 2 if selected else 1))
+                painter.drawPath(path)
+                note_count = 0
+                if clips:
+                    for clip in clips:
+                        if str(clip.get("section_name") or "").lower() == section:
+                            note_count += len(list(clip.get("notes") or []))
+                self._paint_note_pattern(painter, QRectF(block_x + 6, block_y + 5, block_w - 10, block_h - 10), role_index, section_index, note_count=note_count)
+            start_ratio += ratio
+
+    def _paint_note_pattern(self, painter: QPainter, rect: QRectF, role_index: int, section_index: int, *, note_count: int = 0) -> None:
+        if rect.width() <= 4 or rect.height() <= 4:
+            return
+        painter.setPen(QPen(QColor(6, 10, 13, 125), 1))
+        if role_index == 0:
+            steps = max(3, min(36, note_count or int(rect.width() // 13)))
+            for i in range(steps):
+                x = rect.left() + i * rect.width() / steps
+                h = rect.height() * (0.45 + 0.35 * ((i + section_index) % 3 == 0))
+                painter.drawLine(int(x), int(rect.bottom()), int(x), int(rect.bottom() - h))
+        elif role_index == 1:
+            y = rect.center().y()
+            painter.drawLine(int(rect.left()), int(y), int(rect.right()), int(y))
+            for i in range(4):
+                x = rect.left() + i * rect.width() / 4
+                painter.drawLine(int(x), int(y), int(x + rect.width() / 7), int(y - rect.height() * 0.18))
+        elif role_index in {2, 5}:
+            for offset in (0.25, 0.50, 0.75):
+                y = rect.top() + rect.height() * offset
+                painter.drawLine(int(rect.left()), int(y), int(rect.right()), int(y))
+        elif role_index == 3:
+            points = []
+            for i in range(7):
+                x = rect.left() + i * rect.width() / 6
+                y = rect.bottom() - rect.height() * (0.20 + 0.55 * ((i + section_index) % 4) / 3)
+                points.append((x, y))
+            for a, b in zip(points, points[1:]):
+                painter.drawLine(int(a[0]), int(a[1]), int(b[0]), int(b[1]))
+        else:
+            painter.drawEllipse(QRectF(rect.left(), rect.top(), rect.height() * 0.75, rect.height() * 0.75))
+            painter.drawLine(int(rect.left()), int(rect.center().y()), int(rect.right()), int(rect.center().y()))
+
+    def mousePressEvent(self, event) -> None:  # pragma: no cover - exercised by widget tests
+        pos = event.position() if hasattr(event, "position") else event.pos()
+        for rect, role, section in reversed(self._block_rects):
+            if rect.contains(pos):
+                self.set_selection(role=role, section_name=section)
+                return
+        super().mousePressEvent(event)
+
+    def wheelEvent(self, event) -> None:  # pragma: no cover - UI convenience
+        selection = self.selection()
+        role = str(selection.get("role") or "")
+        if role:
+            if event.angleDelta().y() < 0:
+                self.set_role_muted(role, role not in self._muted_roles)
+            else:
+                self.set_role_solo(role, role not in self._solo_roles)
+        event.accept()
+
+
 class _SoundMacroJogBank(QWidget):
     """Compact legacy-style knob bank for Basic and AI Master macro state."""
 
@@ -352,6 +689,8 @@ class SoundEditorPanel(QWidget):
     changed = Signal()
     mixer_track_changed = Signal(object)
     target_changed = Signal(str)
+    music_lab_action_requested = Signal(str, object)
+    music_lab_selection_changed = Signal(object)
     # Kept for compatibility with older editor wiring. The renewed panel handles
     # Advanced Lab inline, so the Workbench path no longer emits this signal.
     advanced_lab_requested = Signal(object, object)
@@ -369,6 +708,11 @@ class SoundEditorPanel(QWidget):
         self._mixer_master_strip: _SoundMixerMasterStrip | None = None
         self._chain_labels: dict[str, QLabel] = {}
         self._ai_preset_buttons: dict[str, QPushButton] = {}
+        self._music_composition: dict[str, Any] | None = None
+        self._music_selection: dict[str, Any] = {"role": "drums", "section_name": "main"}
+        self._music_preview_player: Any = None
+        self._music_preview_output: Any = None
+        self._music_preview_loaded_path = ""
         self._ui_lock = False
         self._advanced_expanded = False
         self.setObjectName("EmbeddedSoundEditor")
@@ -435,6 +779,7 @@ class SoundEditorPanel(QWidget):
             ("dyn", "Dynamics", "mixer"),
             ("fx", "FX", "effects"),
             ("ai", "AI Master", "spark"),
+            ("music", "Music Lab", "audio"),
         ):
             button = QPushButton("", tabs)
             button.setObjectName("SoundTab")
@@ -463,6 +808,7 @@ class SoundEditorPanel(QWidget):
             ("dyn", "Dyn"),
             ("fx", "FX"),
             ("ai", "AI"),
+            ("music", "Music"),
         ):
             chip = QLabel(label, chain)
             chip.setObjectName("SoundChip")
@@ -493,6 +839,7 @@ class SoundEditorPanel(QWidget):
         self._stack.addWidget(self._scroll_page(self._build_dynamics_page()))
         self._stack.addWidget(self._scroll_page(self._build_fx_page()))
         self._stack.addWidget(self._scroll_page(self._build_ai_page()))
+        self._stack.addWidget(self._scroll_page(self._build_music_lab_page()))
         workspace_layout.addWidget(self._stack, 2)
         root.addWidget(self._workspace, 1)
         self._set_tab("basic")
@@ -604,6 +951,13 @@ class SoundEditorPanel(QWidget):
             "border-radius:5px; padding:2px 7px; font-size:9px; min-height:18px;"
             "}"
             "QComboBox#SoundCombo:hover { background:rgba(255,255,255,11); border-color:rgba(220,225,238,62); }"
+            "QLineEdit#SoundLineEdit, QSpinBox#SoundSpinBox {"
+            "background:rgba(255,255,255,5); color:#D7DAE7; border:1px solid rgba(178,186,202,24);"
+            "border-radius:5px; padding:3px 7px; font-size:9px; min-height:18px;"
+            "}"
+            "QLineEdit#SoundLineEdit:hover, QSpinBox#SoundSpinBox:hover {"
+            "background:rgba(255,255,255,10); border-color:rgba(220,225,238,62);"
+            "}"
             "QWidget#SoundJogShuttle05 { background:transparent; border:none; }"
             "QPushButton#SoundJogButton {"
             "background:rgba(255,255,255,5); color:#D7DAE7; border:1px solid rgba(178,186,202,24);"
@@ -647,22 +1001,24 @@ class SoundEditorPanel(QWidget):
             "QPushButton#SoundMixerToggle[kind=\"read\"]:checked { background:rgba(110,132,145,28); color:#D9E2E8; border-color:rgba(132,158,174,95); }"
             "QPushButton#SoundMixerToggle[kind=\"write\"]:checked { background:rgba(164,99,94,34); color:#F1D6D2; border-color:rgba(164,99,94,118); }"
             "QPushButton#SoundMixerType {"
-            "background:rgba(118,145,123,18); color:#C8D4CB; border:1px solid rgba(118,145,123,70);"
+            "background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(167,154,198,32), stop:1 rgba(72,66,92,36));"
+            "color:#D6D1E5; border:1px solid rgba(167,154,198,80);"
             "border-radius:4px; font-size:8px; font-weight:800; padding:0px;"
             "}"
-            "QPushButton#SoundMixerType:hover { background:rgba(118,145,123,28); color:#EEF4EF; }"
+            "QPushButton#SoundMixerType:hover { background:rgba(167,154,198,42); color:#F1EDF8; }"
             "QPushButton#SoundMixerInsert {"
             "background:rgba(255,255,255,4); color:#69727D; border:1px solid rgba(178,186,202,20);"
             "border-radius:3px; font-size:8px; font-weight:760; padding:0px;"
             "}"
             "QPushButton#SoundMixerInsert:checked {"
-            "background:rgba(143,158,169,24); color:#DDE3E8; border-color:rgba(172,184,194,92);"
+            "background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(156,139,196,38), stop:1 rgba(80,94,88,34));"
+            "color:#E3DFEE; border-color:rgba(178,166,214,96);"
             "}"
             "QPushButton#SoundMixerInsert:hover, QPushButton#SoundMixerSend:hover {"
             "background:rgba(255,255,255,10); color:#E5EAF0; border-color:rgba(220,225,238,58);"
             "}"
             "QPushButton#SoundMixerSend {"
-            "background:rgba(255,255,255,4); color:#85909B; border:1px solid rgba(178,186,202,20);"
+            "background:rgba(255,255,255,4); color:#98A1AD; border:1px solid rgba(178,186,202,24);"
             "border-radius:4px; font-size:8px; font-weight:700; padding:0px;"
             "}"
             "QLabel#SoundMixerSnapshot {"
@@ -1311,12 +1667,515 @@ class SoundEditorPanel(QWidget):
         layout.addStretch(1)
         return page
 
+    def _build_music_lab_page(self) -> QWidget:
+        page = QWidget(self)
+        page.setObjectName("SoundMusicLabPage")
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(6, 5, 6, 7)
+        layout.setSpacing(6)
+
+        card, card_layout = self._card("Music Lab")
+        self._music_prompt = QLineEdit(page)
+        self._music_prompt.setObjectName("SoundLineEdit")
+        self._music_prompt.setPlaceholderText("Describe the BGM or score")
+        self._music_prompt.setText("30s cinematic tech demo BGM")
+        self._music_prompt.setMinimumHeight(24)
+        self._music_prompt.setAccessibleName("Music Lab prompt")
+        card_layout.addWidget(self._music_prompt)
+
+        row = QWidget(page)
+        row_layout = QHBoxLayout(row)
+        row_layout.setContentsMargins(0, 0, 0, 0)
+        row_layout.setSpacing(5)
+        self._music_genre = self._combo(
+            ["cinematic electronic", "electronic", "lofi", "corporate electronic", "pop electronic"],
+            lambda _text: self._refresh_music_arrangement(),
+        )
+        self._music_genre.setAccessibleName("Music Lab genre")
+        self._music_mood = self._combo(
+            ["confident", "epic", "chill", "clear", "bright", "tense"],
+            lambda _text: self._refresh_music_arrangement(),
+        )
+        self._music_mood.setAccessibleName("Music Lab mood")
+        self._music_duration = QSpinBox(page)
+        self._music_duration.setObjectName("SoundSpinBox")
+        self._music_duration.setRange(4, 180)
+        self._music_duration.setValue(30)
+        self._music_duration.setSuffix(" s")
+        self._music_duration.setAccessibleName("Music Lab duration")
+        self._music_duration.valueChanged.connect(lambda _value: self._refresh_music_arrangement())
+        self._music_bpm = QSpinBox(page)
+        self._music_bpm.setObjectName("SoundSpinBox")
+        self._music_bpm.setRange(0, 180)
+        self._music_bpm.setValue(0)
+        self._music_bpm.setSpecialValueText("Auto BPM")
+        self._music_bpm.setAccessibleName("Music Lab BPM")
+        row_layout.addWidget(self._music_genre, 2)
+        row_layout.addWidget(self._music_mood, 1)
+        row_layout.addWidget(self._music_duration, 0)
+        row_layout.addWidget(self._music_bpm, 0)
+        card_layout.addWidget(row)
+
+        roles_row = QWidget(page)
+        roles_layout = QHBoxLayout(roles_row)
+        roles_layout.setContentsMargins(0, 0, 0, 0)
+        roles_layout.setSpacing(5)
+        self._music_roles = self._combo(["stems", "mix only", "drums + bass", "pad only"], lambda _text: None)
+        self._music_roles.currentTextChanged.connect(lambda _text: self._refresh_music_arrangement())
+        self._music_roles.setAccessibleName("Music Lab render roles")
+        self._music_key = self._combo(["auto key", "C minor", "D minor", "C major", "F major", "A minor"], lambda _text: None)
+        self._music_key.currentTextChanged.connect(lambda _text: self._refresh_music_arrangement())
+        self._music_key.setAccessibleName("Music Lab key")
+        self._music_render_backend = self._combo(["auto renderer", "production", "soundfont", "studio EDM", "local v5"], lambda _text: None)
+        self._music_render_backend.setAccessibleName("Music Lab render backend")
+        roles_layout.addWidget(self._music_roles, 1)
+        roles_layout.addWidget(self._music_key, 1)
+        roles_layout.addWidget(self._music_render_backend, 0)
+        card_layout.addWidget(roles_row)
+
+        self._music_arrangement = _MusicLabArrangementView(page)
+        self._music_arrangement.selection_changed.connect(self._on_music_arrangement_selected)
+        card_layout.addWidget(self._music_arrangement, 1)
+
+        edit_row = QWidget(page)
+        edit_layout = QHBoxLayout(edit_row)
+        edit_layout.setContentsMargins(0, 0, 0, 0)
+        edit_layout.setSpacing(5)
+        self._music_selection_label = QLabel("Selected: Drums / main", edit_row)
+        self._music_selection_label.setObjectName("SoundSubtitle")
+        self._music_regen_btn = QPushButton("Regenerate Selection", edit_row)
+        self._music_regen_btn.setObjectName("SoundPresetButton")
+        self._music_regen_btn.clicked.connect(self._request_music_regenerate_selection)
+        self._music_shorter_btn = QPushButton("- Section", edit_row)
+        self._music_shorter_btn.setObjectName("SoundPresetButton")
+        self._music_shorter_btn.clicked.connect(lambda: self._request_music_section_resize(0.82))
+        self._music_longer_btn = QPushButton("+ Section", edit_row)
+        self._music_longer_btn.setObjectName("SoundPresetButton")
+        self._music_longer_btn.clicked.connect(lambda: self._request_music_section_resize(1.18))
+        for button in (self._music_regen_btn, self._music_shorter_btn, self._music_longer_btn):
+            button.setMinimumHeight(23)
+        edit_layout.addWidget(self._music_selection_label, 1)
+        edit_layout.addWidget(self._music_regen_btn, 0)
+        edit_layout.addWidget(self._music_shorter_btn, 0)
+        edit_layout.addWidget(self._music_longer_btn, 0)
+        card_layout.addWidget(edit_row)
+
+        self._music_note_hint = QLabel("Notes: pattern preview follows generated MIDI clips.", page)
+        self._music_note_hint.setObjectName("SoundSubtitle")
+        self._music_note_hint.setWordWrap(True)
+        card_layout.addWidget(self._music_note_hint)
+
+        actions = QWidget(page)
+        actions_layout = QHBoxLayout(actions)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setSpacing(5)
+        generate = QPushButton("Generate", actions)
+        generate.setObjectName("SoundPresetButton")
+        generate.setAccessibleName("Generate Music Lab music to timeline")
+        generate.setToolTip("Generate or update Music Lab stems on the timeline")
+        generate.clicked.connect(self._request_music_generate)
+        update = QPushButton("Update", actions)
+        update.setObjectName("SoundPresetButton")
+        update.setAccessibleName("Update Music Lab timeline render")
+        update.setToolTip("Re-render the latest Music Lab composition into existing timeline tracks")
+        update.clicked.connect(self._request_music_update)
+        preview = QPushButton("Preview", actions)
+        preview.setObjectName("SoundPresetButton")
+        preview.setAccessibleName("Play Music Lab preview mix")
+        preview.setToolTip("Play the generated preview mix inside Music Lab")
+        preview.clicked.connect(self._request_music_preview)
+        stop = QPushButton("Stop", actions)
+        stop.setObjectName("SoundPresetButton")
+        stop.setAccessibleName("Stop Music Lab preview")
+        stop.setToolTip("Stop Music Lab preview playback")
+        stop.clicked.connect(self._stop_music_preview)
+        export = QPushButton("MIDI", actions)
+        export.setObjectName("SoundPresetButton")
+        export.setAccessibleName("Export Music Lab MIDI")
+        export.setToolTip("Export the latest Music Lab composition as a MIDI file")
+        export.clicked.connect(self._request_music_export_midi)
+        self._music_generate_btn = generate
+        self._music_preview_btn = preview
+        self._music_stop_btn = stop
+        self._music_update_btn = update
+        self._music_export_btn = export
+        for button in (generate, preview, stop, update, export):
+            button.setMinimumHeight(24)
+            actions_layout.addWidget(button, 1)
+        card_layout.addWidget(actions)
+
+        self._music_status = QLabel("MIDI-first composition, timeline stems, and AI-action control.", page)
+        self._music_status.setObjectName("SoundSubtitle")
+        self._music_status.setWordWrap(True)
+        card_layout.addWidget(self._music_status)
+        layout.addWidget(card)
+        layout.addStretch(1)
+        self._refresh_music_arrangement()
+        return page
+
+    def open_music_lab(self) -> None:
+        self._set_tab("music")
+
+    def set_music_composition(self, composition: dict[str, Any] | None) -> None:
+        self._music_composition = dict(composition or {}) if isinstance(composition, dict) else None
+        arranger = getattr(self, "_music_arrangement", None)
+        if arranger is not None:
+            arranger.set_composition(self._music_composition)
+            self._music_selection = arranger.selection()
+        self._sync_music_controls_from_composition()
+        self._refresh_music_arrangement()
+        self._update_music_selection_ui()
+        self._refresh_music_preview_controls()
+
+    def _sync_music_controls_from_composition(self) -> None:
+        composition = self._music_composition or {}
+        if not composition:
+            return
+        self._music_prompt.setText(str(composition.get("prompt") or self._music_prompt.text()))
+        self._set_combo_text(self._music_genre, composition.get("genre") or self._music_genre.currentText())
+        self._set_combo_text(self._music_mood, composition.get("mood") or self._music_mood.currentText())
+        self._set_combo_text(self._music_key, composition.get("key") or self._music_key.currentText())
+        try:
+            self._music_duration.blockSignals(True)
+            self._music_duration.setValue(max(4, min(180, int(round(float(composition.get("duration_ms") or 30000) / 1000.0)))))
+        finally:
+            self._music_duration.blockSignals(False)
+        try:
+            self._music_bpm.setValue(max(0, min(180, int(composition.get("bpm") or 0))))
+        except Exception:
+            pass
+        render_backend = composition.get("render_backend")
+        backend = str(render_backend.get("backend") or "") if isinstance(render_backend, dict) else ""
+        if backend == "fluidsynth_soundfont":
+            self._set_combo_text(self._music_render_backend, "soundfont")
+        elif backend == "studio_edm":
+            self._set_combo_text(self._music_render_backend, "studio EDM")
+        elif backend == "local_synth":
+            self._set_combo_text(self._music_render_backend, "local v5")
+        elif backend == "production_external":
+            self._set_combo_text(self._music_render_backend, "production")
+
+    def _on_music_arrangement_selected(self, selection) -> None:
+        self._music_selection = dict(selection or {})
+        self._update_music_selection_ui()
+        self.music_lab_selection_changed.emit(self._music_selection_payload())
+
+    def _music_selection_payload(self) -> dict[str, Any]:
+        payload = dict(self._music_selection or {})
+        composition = self._music_composition or {}
+        if composition:
+            payload["composition_id"] = str(composition.get("id") or payload.get("composition_id") or "")
+        section = self._selected_section_row()
+        payload["section_start_ms"] = int(section.get("start_ms") or 0) if section else 0
+        payload["section_duration_ms"] = self._selected_section_duration_ms()
+        payload["chord_progression"] = self._selected_chord_progression()
+        payload["note_count"] = self._selected_note_count()
+        payload["note_preview"] = self._selected_note_preview()
+        return payload
+
+    def _update_music_selection_ui(self) -> None:
+        selection = self._music_selection_payload()
+        role_text = str(selection.get("role") or "track")
+        role = "Pad" if role_text.lower() == "chords" else role_text.title()
+        section = str(selection.get("section_name") or "section")
+        duration = int(selection.get("section_duration_ms") or 0)
+        notes = int(selection.get("note_count") or 0)
+        chords = [str(chord) for chord in list(selection.get("chord_progression") or []) if str(chord).strip()]
+        note_preview = [str(note) for note in list(selection.get("note_preview") or []) if str(note).strip()]
+        if hasattr(self, "_music_selection_label"):
+            self._music_selection_label.setText(f"Selected: {role} / {section}  |  {duration / 1000.0:.1f}s")
+        if hasattr(self, "_music_note_hint"):
+            chord_text = " - ".join(chords[:4]) if chords else "auto chords"
+            preview_text = ", ".join(note_preview[:6]) if note_preview else "no MIDI notes yet"
+            self._music_note_hint.setText(
+                f"Chords: {chord_text}  |  Notes: {notes} ({preview_text}). "
+                "Regenerate or resize the selection, then Update refreshes timeline stems."
+            )
+
+    def _selected_section_row(self) -> dict[str, Any]:
+        section_name = str((self._music_selection or {}).get("section_name") or "").lower()
+        for row in list((self._music_composition or {}).get("sections") or []):
+            if isinstance(row, dict) and str(row.get("name") or "").lower() == section_name:
+                return row
+        return {}
+
+    def _selected_section_duration_ms(self) -> int:
+        row = self._selected_section_row()
+        if row:
+            try:
+                return max(1, int(row.get("duration_ms") or 0))
+            except Exception:
+                return 0
+        return 0
+
+    def _selected_chord_progression(self) -> list[str]:
+        row = self._selected_section_row()
+        return [str(chord) for chord in list(row.get("chord_progression") or []) if str(chord).strip()]
+
+    def _selected_note_count(self) -> int:
+        selection = self._music_selection or {}
+        role = str(selection.get("role") or "").lower()
+        if role == "pad":
+            role = "chords"
+        section_name = str(selection.get("section_name") or "").lower()
+        total = 0
+        for track in list((self._music_composition or {}).get("tracks") or []):
+            if not isinstance(track, dict):
+                continue
+            track_role = str(track.get("role") or track.get("id") or "").lower()
+            if role and track_role != role:
+                continue
+            for clip in list(track.get("clips") or []):
+                if isinstance(clip, dict) and str(clip.get("section_name") or "").lower() == section_name:
+                    total += len(list(clip.get("notes") or []))
+        return total
+
+    def _selected_note_preview(self) -> list[str]:
+        selection = self._music_selection or {}
+        role = str(selection.get("role") or "").lower()
+        if role == "pad":
+            role = "chords"
+        section_name = str(selection.get("section_name") or "").lower()
+        preview: list[str] = []
+        for track in list((self._music_composition or {}).get("tracks") or []):
+            if not isinstance(track, dict):
+                continue
+            track_role = str(track.get("role") or track.get("id") or "").lower()
+            if role and track_role != role:
+                continue
+            for clip in list(track.get("clips") or []):
+                if not isinstance(clip, dict) or str(clip.get("section_name") or "").lower() != section_name:
+                    continue
+                for note in list(clip.get("notes") or [])[:8]:
+                    if isinstance(note, dict):
+                        preview.append(str(note.get("pitch") or "?"))
+                if preview:
+                    return preview
+        return preview
+
+    def _refresh_music_arrangement(self) -> None:
+        arranger = getattr(self, "_music_arrangement", None)
+        if arranger is None:
+            return
+        try:
+            arranger.set_arrangement(
+                duration_s=int(self._music_duration.value()),
+                mode=self._music_roles.currentText(),
+                key=self._music_key.currentText(),
+                genre=self._music_genre.currentText(),
+                mood=self._music_mood.currentText(),
+            )
+            if self._music_composition:
+                arranger.set_composition(self._music_composition)
+        except Exception:
+            pass
+
+    def _music_roles_param(self) -> tuple[list[str] | None, bool]:
+        value = str(getattr(self, "_music_roles", None).currentText() if hasattr(self, "_music_roles") else "").strip().lower()
+        if value == "mix only":
+            return None, True
+        if value == "drums + bass":
+            return ["drums", "bass"], False
+        if value == "pad only":
+            return ["chords"], False
+        return None, False
+
+    def _music_compose_params(self) -> dict[str, Any]:
+        roles, create_mix = self._music_roles_param()
+        params: dict[str, Any] = {
+            "prompt": self._music_prompt.text().strip() or "AI background music",
+            "duration_ms": int(self._music_duration.value()) * 1000,
+            "genre": self._music_genre.currentText(),
+            "mood": self._music_mood.currentText(),
+            "include_fx": True,
+            "at_ms": 0,
+            "auto_balance": True,
+            "update_existing": True,
+            "create_mix": create_mix,
+        }
+        params.update(self._music_backend_params())
+        if roles:
+            params["roles"] = roles
+        bpm = int(self._music_bpm.value())
+        if bpm > 0:
+            params["bpm"] = bpm
+        key = self._music_key.currentText()
+        if key and key != "auto key":
+            params["key"] = key
+        return params
+
+    def _music_backend_params(self) -> dict[str, Any]:
+        value = str(
+            getattr(self, "_music_render_backend", None).currentText()
+            if hasattr(self, "_music_render_backend")
+            else ""
+        ).strip().lower()
+        if value == "soundfont":
+            return {"backend": "soundfont"}
+        if value == "production":
+            return {"backend": "production"}
+        if value == "studio edm":
+            return {"backend": "studio_edm"}
+        if value == "local v5":
+            return {"backend": "local_synth"}
+        return {"backend": "auto"}
+
+    def _request_music_generate(self) -> None:
+        self._music_status.setText("Generating Music Lab stems...")
+        self.music_lab_action_requested.emit("music.compose_to_timeline", self._music_compose_params())
+
+    def _request_music_update(self) -> None:
+        roles, create_mix = self._music_roles_param()
+        params: dict[str, Any] = {
+            "at_ms": 0,
+            "create_mix": create_mix,
+            "update_existing": True,
+        }
+        params.update(self._music_backend_params())
+        composition_id = str(self._music_selection_payload().get("composition_id") or "")
+        if composition_id:
+            params["composition_id"] = composition_id
+        if roles:
+            params["roles"] = roles
+        self._music_status.setText("Updating existing Music Lab timeline tracks...")
+        self.music_lab_action_requested.emit("music.render_to_timeline", params)
+
+    def _request_music_export_midi(self) -> None:
+        self._music_status.setText("Exporting Music Lab MIDI...")
+        composition_id = str(self._music_selection_payload().get("composition_id") or "")
+        params = {"composition_id": composition_id} if composition_id else {}
+        self.music_lab_action_requested.emit("music.export_midi", params)
+
+    def _music_preview_mix_path(self) -> Path | None:
+        path_text = str((self._music_composition or {}).get("preview_mix_path") or "").strip()
+        if not path_text:
+            return None
+        path = Path(path_text)
+        return path if path.exists() else None
+
+    def _refresh_music_preview_controls(self) -> None:
+        path = self._music_preview_mix_path()
+        enabled = path is not None
+        if hasattr(self, "_music_preview_btn"):
+            self._music_preview_btn.setProperty("has_preview", enabled)
+            self._music_preview_btn.setToolTip(
+                f"Play preview mix: {path.name}" if enabled else "Render or generate music before preview playback"
+            )
+        if hasattr(self, "_music_stop_btn"):
+            self._music_stop_btn.setEnabled(True)
+        if enabled and hasattr(self, "_music_status"):
+            engine = str((self._music_composition or {}).get("render_engine") or "rendered preview")
+            render_backend = (self._music_composition or {}).get("render_backend")
+            quality = ""
+            warning = ""
+            if isinstance(render_backend, dict):
+                quality = str(render_backend.get("quality_tier") or "")
+                warning = str(render_backend.get("quality_warning") or "")
+            suffix = f" | Quality: {quality}" if quality else ""
+            if warning:
+                suffix += f" | {warning}"
+            self._music_status.setText(f"Preview ready: {path.name} | Renderer: {engine}{suffix}")
+
+    def _ensure_music_preview_player(self) -> bool:
+        if self._music_preview_player is not None:
+            return True
+        try:
+            from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+        except Exception as exc:
+            self._music_status.setText(f"Music preview playback is unavailable: {exc}")
+            return False
+        self._music_preview_output = QAudioOutput(self)
+        self._music_preview_output.setVolume(0.85)
+        self._music_preview_player = QMediaPlayer(self)
+        self._music_preview_player.setAudioOutput(self._music_preview_output)
+        self._music_preview_player.playbackStateChanged.connect(self._on_music_preview_state_changed)
+        return True
+
+    def _request_music_preview(self) -> None:
+        path = self._music_preview_mix_path()
+        if path is None:
+            composition_id = str(self._music_selection_payload().get("composition_id") or "")
+            if composition_id:
+                self._music_status.setText("Rendering Music Lab preview mix...")
+                params = {"composition_id": composition_id, "render_stems": False}
+                params.update(self._music_backend_params())
+                self.music_lab_action_requested.emit("music.render.preview", params)
+            else:
+                self._music_status.setText("Generate music first, then preview it here in Music Lab.")
+            return
+        if not self._ensure_music_preview_player() or self._music_preview_player is None:
+            return
+        resolved = str(path.resolve())
+        if self._music_preview_loaded_path != resolved:
+            self._music_preview_player.setSource(QUrl.fromLocalFile(resolved))
+            self._music_preview_loaded_path = resolved
+        try:
+            from PySide6.QtMultimedia import QMediaPlayer
+            if self._music_preview_player.playbackState() == QMediaPlayer.PlaybackState.PlayingState:
+                self._music_preview_player.pause()
+                self._music_status.setText(f"Paused Music Lab preview: {path.name}")
+                return
+        except Exception:
+            pass
+        self._music_preview_player.play()
+        self._music_status.setText(f"Playing Music Lab preview: {path.name}")
+
+    def _stop_music_preview(self) -> None:
+        player = self._music_preview_player
+        if player is not None:
+            try:
+                player.stop()
+            except Exception:
+                pass
+        self._music_status.setText("Music Lab preview stopped.")
+
+    def _on_music_preview_state_changed(self, state) -> None:
+        try:
+            from PySide6.QtMultimedia import QMediaPlayer
+            playing = state == QMediaPlayer.PlaybackState.PlayingState
+        except Exception:
+            playing = False
+        if hasattr(self, "_music_preview_btn"):
+            self._music_preview_btn.setText("Pause" if playing else "Preview")
+
+    def _request_music_regenerate_selection(self) -> None:
+        payload = self._music_selection_payload()
+        composition_id = str(payload.get("composition_id") or "")
+        section_name = str(payload.get("section_name") or "main")
+        if not composition_id:
+            self._music_status.setText("Generate music first, then regenerate a selected block.")
+            return
+        self._music_status.setText(f"Regenerating {section_name}...")
+        params = {"composition_id": composition_id, "section_name": section_name, "intensity": 0.95}
+        params.update(self._music_backend_params())
+        self.music_lab_action_requested.emit(
+            "music.regenerate_section",
+            params,
+        )
+
+    def _request_music_section_resize(self, ratio: float) -> None:
+        payload = self._music_selection_payload()
+        composition_id = str(payload.get("composition_id") or "")
+        section_name = str(payload.get("section_name") or "main")
+        current = int(payload.get("section_duration_ms") or 0)
+        if not composition_id or current <= 0:
+            self._music_status.setText("Generate music first, then resize a selected section.")
+            return
+        duration = max(1000, int(round(current * float(ratio or 1.0))))
+        self._music_status.setText(f"Resizing {section_name} to {duration / 1000.0:.1f}s...")
+        params = {"composition_id": composition_id, "section_name": section_name, "duration_ms": duration}
+        params.update(self._music_backend_params())
+        self.music_lab_action_requested.emit(
+            "music.section.set",
+            params,
+        )
+
     def _set_tab(self, tab_id: str) -> None:
-        order = {"basic": 0, "mixer": 1, "eq": 2, "dyn": 3, "fx": 4, "ai": 5}
+        order = {"basic": 0, "mixer": 1, "eq": 2, "dyn": 3, "fx": 4, "ai": 5, "music": 6}
         self._stack.setCurrentIndex(order.get(tab_id, 0))
         for key, button in self._tab_buttons.items():
             button.setChecked(key == tab_id)
-        self._set_mixer_tab_compact_mode(tab_id == "mixer")
+        self._set_mixer_tab_compact_mode(tab_id in {"mixer", "music"})
 
     def _set_mixer_tab_compact_mode(self, compact: bool) -> None:
         for widget in (self._jog_shuttle, self._waveform_strip, self._spectrum_strip):

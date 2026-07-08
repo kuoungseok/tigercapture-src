@@ -34,9 +34,10 @@ from PySide6.QtWidgets import (
 from app.ar_pbr.compositor import composite_preview_frame
 from app.ar_pbr.importer import import_asset
 from app.ar_pbr.sample_scene import write_pbr_fbx_scene
+from app.ar_pbr.sample_assets import default_ar_pbr_preview_asset
 
 
-DEFAULT_EXTERNAL_ASSET = ROOT / "debugCapture" / "ar_pbr_external_assets" / "es_fbx" / "es.fbx"
+DEFAULT_EXTERNAL_ASSET = default_ar_pbr_preview_asset()
 DEFAULT_OUTPUT_DIR = ROOT / "debugCapture" / "ar_pbr_standalone_window"
 DEFAULT_MAX_TRIANGLES_PER_GEOMETRY = 48000
 

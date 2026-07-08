@@ -208,7 +208,7 @@ def _show_viewer_compare_menu(self) -> None:
     before_act.setChecked(mode == "before")
     before_act.triggered.connect(lambda _checked=False: self._set_viewer_compare_mode("before"))
     menu.addSeparator()
-    label_act = menu.addAction("Show Original | After labels")
+    label_act = menu.addAction("Show Before | After labels")
     label_act.setCheckable(True)
     label_act.setChecked(labels_enabled)
     label_act.triggered.connect(lambda checked=False: self._set_viewer_compare_labels_enabled(bool(checked)))
@@ -244,7 +244,7 @@ def _set_viewer_compare_mode(self, mode: str) -> None:
     except Exception:
         pass
     try:
-        label = "Comparison off" if not wanted else "Comparison: Original | After"
+        label = "Comparison off" if not wanted else "Comparison: Before | After"
         self._flash_status(label)
     except Exception:
         pass
@@ -273,10 +273,10 @@ def _sync_viewer_compare_button(self) -> None:
     mode = str(getattr(track, "preview_color_compare_mode", "") or "").casefold()
     if mode == "split":
         text = "Split"
-        tip = "Comparison Templates: Original | After split"
+        tip = "Comparison Templates: Before | After split"
     elif mode == "before":
-        text = "Original"
-        tip = "Comparison Templates: Original preview"
+        text = "Before"
+        tip = "Comparison Templates: Before preview"
     else:
         text = "Compare"
         tip = "Comparison Templates"

@@ -29,6 +29,7 @@ def test_spec_closing_page_uses_locked_blue_pot_contract(tmp_path):
     assert catalog.PAGES[-1].key == "closing"
     assert catalog.SPEC_CLOSING_BONSAI.name == "bonsai_blue_pot_cutout_v1.png"
     assert catalog.SPEC_CLOSING_SHADOW_MODE == "pot_contact_only"
+    assert catalog.SPEC_INDEX_SOURCE.name == "spec_index_groups.json"
 
     out_path = tmp_path / "spec_closing.png"
     catalog._make_spec_closing_slide(catalog.PAGES[-1], "en", 22, 22, out_path)
@@ -36,6 +37,38 @@ def test_spec_closing_page_uses_locked_blue_pot_contract(tmp_path):
     assert out_path.exists()
     with Image.open(out_path) as img:
         assert img.size == (catalog.SLIDE_W, catalog.SLIDE_H)
+
+
+def test_spec_index_source_covers_current_major_product_axes():
+    groups = catalog._spec_index_groups("en")
+    flattened = "\n".join([heading for heading, _ in groups] + [item for _, items in groups for item in items])
+
+    assert len(groups) >= 12
+    for term in [
+        "PPT Maker",
+        ".tgppt",
+        "Music Lab",
+        "Sound Editor",
+        "Python Action",
+        "MCP",
+        "Local AI",
+        "VTuber Studio",
+        "AR/PBR",
+        "Depth-aware",
+        "PPTX",
+        "MP4",
+    ]:
+        assert term in flattened
+
+
+def test_spec_index_source_excludes_removed_or_report_terms():
+    data = catalog._load_spec_index_payload()
+    catalog._validate_spec_index_payload(data)
+    groups = catalog._spec_index_groups("en")
+    flattened = "\n".join([heading for heading, _ in groups] + [item for _, items in groups for item in items]).lower()
+
+    for forbidden in ["mrq", "unreal bridge", "marmoset", "qa readiness", "release_ready", "pass/fail"]:
+        assert forbidden not in flattened
 
 
 def _color_page_spec() -> catalog.PageSpec:
@@ -90,6 +123,14 @@ def _write_vtuber_contract(
     gpu_renderer_used: bool = True,
     ar_pbr: bool = False,
     pbr: bool = False,
+    source_exposure: str = "chest_up",
+    framing_preset: str = "bust_up",
+    selected_avatar_visibility: str = "head_to_mid_chest",
+    fit_crop_mode: str = "bust_up",
+    fit_crop_height_ratio: float | None = 0.38,
+    program_avatar_height_ratio: float | None = 0.48,
+    program_avatar_bottom_gap_ratio: float | None = 0.014,
+    program_avatar_grounded: bool = True,
     inputs: dict[str, str] | None = None,
     catalog_outputs: dict[str, str] | None = None,
     catalog_output_sha256: dict[str, str] | None = None,
@@ -101,11 +142,21 @@ def _write_vtuber_contract(
                 "inputs": inputs or {},
                 "avatar_evidence": {
                     "schema": "tigercapture.review_vtuber.avatar_evidence_contract.v1",
-                    "source_mapping_subject": "trump_upper_body_performance_source",
+                    "source_mapping_subject": "trump_chest_up_performance_source",
+                    "source_exposure": source_exposure,
+                    "framing_preset": framing_preset,
+                    "selected_avatar_visibility": selected_avatar_visibility,
+                    "visibility_policy": {
+                        "ai_rule": "match_source_person_exposure_to_vrm_visibility",
+                        "source_exposure": source_exposure,
+                        "minimum_framing_preset": "bust_up",
+                        "selected_framing_preset": framing_preset,
+                        "selected_avatar_visibility": selected_avatar_visibility,
+                    },
                     "minimum_visible_parts": ["head", "neck", "shoulders", "upper_torso"],
                     "visible_parts": visible if visible is not None else ["head", "neck", "shoulders", "upper_torso"],
                     "review_product_evidence": product,
-                    "framing_contract": "trump_upper_body_source_requires_half_body_vrm",
+                    "framing_contract": "trump_chest_up_source_requires_bust_up_vrm",
                     "visual_source": visual_source,
                     "renderer": renderer,
                     "renderer_backend": renderer,
@@ -113,6 +164,12 @@ def _write_vtuber_contract(
                     "render_profile": render_profile,
                     "gpu_renderer_required": True,
                     "gpu_renderer_used": gpu_renderer_used,
+                    "fit_crop_mode": fit_crop_mode,
+                    "fit_crop_height_ratio": fit_crop_height_ratio,
+                    "program_avatar_height_ratio": program_avatar_height_ratio,
+                    "program_avatar_bottom_gap_ratio": program_avatar_bottom_gap_ratio,
+                    "program_avatar_grounded": program_avatar_grounded,
+                    "program_avatar_fit_rule": "trim_alpha_then_large_bottom_anchor",
                     "ar_pbr_used": ar_pbr,
                     "pbr_used": pbr,
                 },
@@ -211,6 +268,49 @@ def test_vtuber_contract_rejects_software_vrm_renderer(tmp_path):
 
     assert not ok
     assert "GPU renderer" in reason
+
+
+def test_vtuber_contract_rejects_trump_half_body_framing(tmp_path):
+    path = _write_vtuber_contract(
+        tmp_path / "vtuber_capture_contract.json",
+        source_exposure="upper_body",
+        framing_preset="half_body",
+        selected_avatar_visibility="head_to_waist",
+        fit_crop_mode="half_body",
+        fit_crop_height_ratio=0.82,
+    )
+
+    ok, reason = catalog._vtuber_capture_contract_is_ready(path)
+
+    assert not ok
+    assert "chest-up" in reason or "bust_up" in reason
+
+
+def test_vtuber_contract_rejects_trump_bust_label_with_wide_crop(tmp_path):
+    path = _write_vtuber_contract(
+        tmp_path / "vtuber_capture_contract.json",
+        fit_crop_mode="bust_up",
+        fit_crop_height_ratio=0.68,
+    )
+
+    ok, reason = catalog._vtuber_capture_contract_is_ready(path)
+
+    assert not ok
+    assert "actual bust_up crop" in reason
+
+
+def test_vtuber_contract_rejects_trump_small_or_floating_program_avatar(tmp_path):
+    path = _write_vtuber_contract(
+        tmp_path / "vtuber_capture_contract.json",
+        program_avatar_height_ratio=0.25,
+        program_avatar_bottom_gap_ratio=0.11,
+        program_avatar_grounded=False,
+    )
+
+    ok, reason = catalog._vtuber_capture_contract_is_ready(path)
+
+    assert not ok
+    assert "large and bottom-anchored" in reason
 
 
 def _vtuber_required_inputs() -> dict[str, str]:
@@ -415,6 +515,78 @@ def test_multi_monitor_right_accepts_node_dominant_audio_contract(tmp_path):
     assert ok, reason
 
 
+def _write_audio_report(path: Path) -> Path:
+    required: set[str] = set()
+    for name in ("sound_editor", "sound_workbench", "sound_graphs"):
+        required.update(catalog._audio_contract_required_checks(name))
+    path.write_text(
+        json.dumps(
+            {
+                "scenario": "ui_renewal_sound_editor",
+                "sound_editor_ui_contract_version": catalog.SOUND_EDITOR_CURRENT_UI_CONTRACT_VERSION,
+                "checks": {key: True for key in sorted(required)},
+            },
+            ensure_ascii=False,
+            indent=2,
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_sound_editor_contract_rejects_stale_audio_capture(tmp_path):
+    image_path = _write_image(tmp_path / "editor_sound_editor_action.png", (1480, 920))
+    report_path = _write_audio_report(tmp_path / "sound_editor_qa.json")
+    _write_semantic_sidecar(
+        image_path,
+        asset_name="sound_editor",
+        contract="sound_editor_current_ui_v1",
+        tags=[
+            "sound_editor",
+            "current_sound_editor_ui",
+            "real_tigercapture_capture",
+            "audio_waveform",
+            "sound_jog_shuttle",
+            "audio_mixer",
+            "workbench_sound_editor",
+        ],
+        current_sound_editor_ui=True,
+        source_report=str(report_path),
+    )
+
+    ok, reason = catalog._semantic_capture_contract_is_ready("sound_editor", image_path)
+
+    assert not ok
+    assert "stale" in reason.lower()
+
+
+def test_sound_editor_contract_accepts_current_workbench_audio_ui(tmp_path):
+    image_path = _write_image(tmp_path / "editor_sound_editor_action.png", (1480, 920))
+    report_path = _write_audio_report(tmp_path / "sound_editor_qa.json")
+    _write_semantic_sidecar(
+        image_path,
+        asset_name="sound_editor",
+        contract="sound_editor_current_ui_v1",
+        tags=[
+            "sound_editor",
+            "current_sound_editor_ui",
+            "real_tigercapture_capture",
+            "audio_waveform",
+            "sound_jog_shuttle",
+            "audio_mixer",
+            "workbench_sound_editor",
+        ],
+        sound_editor_ui_contract_version=catalog.SOUND_EDITOR_CURRENT_UI_CONTRACT_VERSION,
+        current_sound_editor_ui=True,
+        source_report=str(report_path),
+        legacy_sound_editor_window_only=False,
+    )
+
+    ok, reason = catalog._semantic_capture_contract_is_ready("sound_editor", image_path)
+
+    assert ok, reason
+
+
 def test_compare_capture_contract_requires_non_neutral_sidecar(tmp_path):
     image_path = _write_image(tmp_path / "editor_color_before_after_action.png", (1480, 920))
 
@@ -459,7 +631,9 @@ def test_compare_capture_contract_accepts_visible_non_neutral_delta_with_actions
                     "viewer_frame_visible": True,
                     "color_dock_viewer_reforced": True,
                     "viewer_compare_split": True,
+                    "color_before_after_visual_delta": True,
                 },
+                "before_after_visual_delta_scores": {"color": 8.5},
                 "steps": [
                     {"action": "media.import_to_timeline", "ok": True},
                     {"action": "clip.set_color_grade", "ok": True},
@@ -492,6 +666,142 @@ def test_compare_capture_contract_accepts_visible_non_neutral_delta_with_actions
     assert ok, reason
 
 
+def test_compare_capture_contract_accepts_required_checks_when_nonessential_report_check_fails(tmp_path):
+    image_path = _write_image(tmp_path / "editor_color_before_after_action.png", (1480, 920))
+    source_report = tmp_path / "color_capture_report.json"
+    source_report.write_text(
+        json.dumps(
+            {
+                "ok": False,
+                "checks": {
+                    "viewer_frame_visible": True,
+                    "color_dock_viewer_reforced": True,
+                    "viewer_compare_split": True,
+                    "color_before_after_visual_delta": True,
+                    "ai_command_open_screenshot": False,
+                },
+                "before_after_visual_delta_scores": {"color": 8.5},
+                "steps": [
+                    {"action": "clip.set_color_grade", "ok": True},
+                    {"action": "ui.viewer.compare.set", "ok": True},
+                    {"action": "capture.screenshot", "ok": True},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    catalog._contract_path_for_capture(image_path).write_text(
+        json.dumps(
+            {
+                "schema": "tigercapture.review.compare_capture_contract.v1",
+                "viewer_compare_mode": "split",
+                "visible_delta": True,
+                "neutral_identity": False,
+                "source_report": str(source_report),
+                "changed_params": {
+                    "temperature": {"before": 0.0, "after": 2.1, "neutral": 0.0},
+                    "contrast": {"before": 1.0, "after": 1.18, "neutral": 1.0},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ok, reason = catalog._compare_capture_contract_is_ready("color_before_after_editor", image_path)
+
+    assert ok, reason
+
+
+def test_compare_capture_contract_rejects_missing_visual_delta_score(tmp_path):
+    image_path = _write_image(tmp_path / "editor_color_before_after_action.png", (1480, 920))
+    source_report = tmp_path / "color_capture_report.json"
+    source_report.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "checks": {
+                    "viewer_frame_visible": True,
+                    "color_dock_viewer_reforced": True,
+                    "viewer_compare_split": True,
+                    "color_before_after_visual_delta": True,
+                },
+                "steps": [
+                    {"action": "clip.set_color_grade", "ok": True},
+                    {"action": "ui.viewer.compare.set", "ok": True},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    catalog._contract_path_for_capture(image_path).write_text(
+        json.dumps(
+            {
+                "schema": "tigercapture.review.compare_capture_contract.v1",
+                "viewer_compare_mode": "split",
+                "visible_delta": True,
+                "neutral_identity": False,
+                "source_report": str(source_report),
+                "changed_params": {
+                    "temperature": {"before": 0.0, "after": 2.1, "neutral": 0.0},
+                    "contrast": {"before": 1.0, "after": 1.18, "neutral": 1.0},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ok, reason = catalog._compare_capture_contract_is_ready("color_before_after_editor", image_path)
+
+    assert not ok
+    assert "visual-delta score" in reason
+
+
+def test_compare_capture_contract_rejects_low_visual_delta_score(tmp_path):
+    image_path = _write_image(tmp_path / "editor_color_before_after_action.png", (1480, 920))
+    source_report = tmp_path / "color_capture_report.json"
+    source_report.write_text(
+        json.dumps(
+            {
+                "ok": True,
+                "checks": {
+                    "viewer_frame_visible": True,
+                    "color_dock_viewer_reforced": True,
+                    "viewer_compare_split": True,
+                    "color_before_after_visual_delta": True,
+                },
+                "before_after_visual_delta_scores": {"color": 0.7},
+                "steps": [
+                    {"action": "clip.set_color_grade", "ok": True},
+                    {"action": "ui.viewer.compare.set", "ok": True},
+                ],
+            }
+        ),
+        encoding="utf-8",
+    )
+    catalog._contract_path_for_capture(image_path).write_text(
+        json.dumps(
+            {
+                "schema": "tigercapture.review.compare_capture_contract.v1",
+                "viewer_compare_mode": "split",
+                "visible_delta": True,
+                "neutral_identity": False,
+                "source_report": str(source_report),
+                "before_after_visual_delta_score": 0.7,
+                "changed_params": {
+                    "temperature": {"before": 0.0, "after": 2.1, "neutral": 0.0},
+                    "contrast": {"before": 1.0, "after": 1.18, "neutral": 1.0},
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+
+    ok, reason = catalog._compare_capture_contract_is_ready("color_before_after_editor", image_path)
+
+    assert not ok
+    assert "insufficient visual delta" in reason
+
+
 def test_color_compare_contract_rejects_failed_viewer_checks(tmp_path):
     image_path = _write_image(tmp_path / "editor_color_before_after_action.png", (1480, 920))
     source_report = tmp_path / "color_capture_report.json"
@@ -503,7 +813,9 @@ def test_color_compare_contract_rejects_failed_viewer_checks(tmp_path):
                     "viewer_frame_visible": True,
                     "color_dock_viewer_reforced": False,
                     "viewer_compare_split": True,
+                    "color_before_after_visual_delta": True,
                 },
+                "before_after_visual_delta_scores": {"color": 8.5},
                 "steps": [
                     {"action": "clip.set_color_grade", "ok": True},
                     {"action": "ui.viewer.compare.set", "ok": True},
@@ -538,7 +850,21 @@ def test_node_compare_contract_rejects_missing_compare_action(tmp_path):
     image_path = _write_image(tmp_path / "editor_node_before_after_action.png", (1480, 920))
     source_report = tmp_path / "node_capture_report.json"
     source_report.write_text(
-        json.dumps({"ok": True, "steps": [{"action": "node.graph.set", "ok": True}]}),
+        json.dumps(
+            {
+                "ok": True,
+                "checks": {
+                    "node_graph_action_ok": True,
+                    "viewer_frame_visible": True,
+                    "viewer_compare_split": True,
+                    "workbench_screenshot": True,
+                    "visible_node_count": True,
+                    "node_before_after_visual_delta": True,
+                },
+                "before_after_visual_delta_scores": {"node_effect": 8.5},
+                "steps": [{"action": "node.graph.set", "ok": True}],
+            }
+        ),
         encoding="utf-8",
     )
     catalog._contract_path_for_capture(image_path).write_text(

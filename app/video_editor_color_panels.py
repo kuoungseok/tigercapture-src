@@ -931,7 +931,7 @@ def _build_color_reference_workbench_panel(self) -> QWidget:
     root = QVBoxLayout(host)
     root.setContentsMargins(7, 6, 7, 7)
     root.setSpacing(5)
-    root.setSizeConstraint(QVBoxLayout.SizeConstraint.SetMinimumSize)
+    root.setSizeConstraint(QVBoxLayout.SizeConstraint.SetNoConstraint)
 
     title_row = QHBoxLayout()
     title_row.setContentsMargins(0, 0, 0, 0)
@@ -1004,11 +1004,11 @@ def _build_color_reference_workbench_panel(self) -> QWidget:
 
     wheel_card = QFrame(host)
     wheel_card.setObjectName("ColorWheelDeck")
-    wheel_card.setMinimumHeight(244)
-    wheel_card.setMaximumHeight(270)
+    wheel_card.setMinimumHeight(206)
+    wheel_card.setMaximumHeight(230)
     wheel_layout = QVBoxLayout(wheel_card)
     wheel_layout.setContentsMargins(10, 7, 10, 8)
-    wheel_layout.setSpacing(6)
+    wheel_layout.setSpacing(5)
     wheel_header = QHBoxLayout()
     wheel_header.setContentsMargins(0, 0, 0, 0)
     wheel_header.setSpacing(7)
@@ -1039,8 +1039,8 @@ def _build_color_reference_workbench_panel(self) -> QWidget:
     wheel_header.addWidget(wheel_more)
     wheel_layout.addLayout(wheel_header)
     wheels = QHBoxLayout()
-    wheels.setContentsMargins(6, 0, 6, 0)
-    wheels.setSpacing(18)
+    wheels.setContentsMargins(2, 0, 2, 0)
+    wheels.setSpacing(8)
     for region, label in (
         ("shadows", "Lift"),
         ("midtones", "Gamma"),
@@ -1048,6 +1048,8 @@ def _build_color_reference_workbench_panel(self) -> QWidget:
         ("offset", "Offset"),
     ):
         cell_widget = QWidget(wheel_card)
+        cell_widget.setMinimumWidth(0)
+        cell_widget.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         cell = QVBoxLayout(cell_widget)
         cell.setContentsMargins(0, 0, 0, 0)
         cell.setSpacing(7)
@@ -1072,7 +1074,7 @@ def _build_color_reference_workbench_panel(self) -> QWidget:
         top.addWidget(rst)
         cell.addLayout(top)
         wheel = _Wheel(cell_widget)
-        wheel.setFixedSize(110, 110)
+        wheel.setFixedSize(78, 78)
         wheel.value_changed.connect(
             lambda x, y, r=region: self._on_color_wheel_changed(r, x, y),
         )
@@ -1083,6 +1085,7 @@ def _build_color_reference_workbench_panel(self) -> QWidget:
         self._color_wheels[region] = wheel
         val = QLabel("0.00   |   0.00   |   0.00", cell_widget)
         val.setObjectName("ColorWheelValue")
+        val.setFixedWidth(78)
         val.setFixedHeight(22)
         val.setAlignment(Qt.AlignmentFlag.AlignCenter)
         cell.addWidget(val)
@@ -1324,6 +1327,8 @@ def _build_color_reference_workbench_panel(self) -> QWidget:
     self._sync_color_panel()
     scroll = QScrollArea(self._workbench_section_host if hasattr(self, "_workbench_section_host") else None)
     scroll.setObjectName("ReferenceColorWorkbenchScroll")
+    scroll.setMinimumWidth(0)
+    scroll.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Expanding)
     scroll.setWidgetResizable(True)
     scroll.setFrameShape(QScrollArea.Shape.NoFrame)
     scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -1803,19 +1808,6 @@ def _update_color_dock_visibility(self, selected_node=None) -> None:
         if is_color_node:
             color_page.show()
             stack.setCurrentWidget(color_page)
-            try:
-                track = self._active_track()
-                if track is not None and not getattr(track, "preview_color_compare_mode", ""):
-                    setattr(track, "preview_color_compare_mode", "split")
-                    self._sync_color_compare_buttons()
-                    player = getattr(self, "_player", None)
-                    if player is not None:
-                        try:
-                            player.refresh_current_frame()
-                        except Exception:
-                            pass
-            except Exception:
-                pass
         else:
             stack.setCurrentWidget(edit_page)
             color_page.hide()
@@ -1993,9 +1985,12 @@ def _set_color_reference_workspace_ratio(self, active: bool) -> None:
     if viewer_idx < 0 or workbench_idx < 0:
         return
     if active:
-        layout.setStretch(viewer_idx, max(3, VIEWER_TOP_STRETCH - 2))
-        layout.setStretch(workbench_idx, max(8, WORKBENCH_TOP_STRETCH + 4))
-        workbench.setMinimumWidth(max(620, WORKBENCH_SLOT_MIN_WIDTH))
+        # Color grading must not make the Workbench claim a wider minimum than
+        # the normal editor layout. The color panel is scrollable/compact; the
+        # viewer remains the primary surface and must stay visible.
+        layout.setStretch(viewer_idx, VIEWER_TOP_STRETCH)
+        layout.setStretch(workbench_idx, WORKBENCH_TOP_STRETCH)
+        workbench.setMinimumWidth(WORKBENCH_SLOT_MIN_WIDTH)
     else:
         layout.setStretch(viewer_idx, VIEWER_TOP_STRETCH)
         layout.setStretch(workbench_idx, WORKBENCH_TOP_STRETCH)

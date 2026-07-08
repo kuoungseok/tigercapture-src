@@ -6,6 +6,15 @@ This file is an AI-readable map of features discovered while working with the
 user. Keep it current when behavior changes, especially for features that span
 the editor UI, preview renderer, project save/load, and export.
 
+## Repository Scratch Boundary
+
+`debugCapture` is disposable QA scratch space. It may contain regenerated
+reports, screenshots, proof frames, thumbnails, logs, and temporary caches, but
+it must not be used as the default location for source media, OpenSeeFace CSVs,
+descriptors, models, avatars, external tools, SDKs, or project state. Durable
+sample inputs belong under `sample_assets` or `external/assets`; asset/tool
+default changes should pass `tests/test_debug_capture_boundary.py`.
+
 ## AI Navigation Map
 
 Start here when changing a feature:
@@ -273,10 +282,10 @@ Start here when changing a feature:
   layer now backs AI, MCP/local-LLM handoff, QA, review automation, and
   developer tools through validated action specs. It wraps editor/model
   capabilities through `EditorAdapter` instead of exposing arbitrary Python or
-  private editor methods directly. The current default registry exposes 335
+  private editor methods directly. The current default registry exposes 402
   unique action IDs, including timeline/NLE actions, node graph actions,
   VTuber Performance Source actions, Live2D Performance Source retargeting,
-  and MMD actor/QA actions.
+  MMD actor/QA actions, and Music Lab / MIDI composition actions.
   Action registration is intentionally split by namespace; AR/PBR preview/
   depth/surface actions live behind `app/actions/ar_pbr_preview_namespace.py`,
   AR/PBR gizmo actions behind `app/actions/ar_pbr_gizmo_namespace.py`, and
@@ -313,6 +322,59 @@ Start here when changing a feature:
   `debugCapture/descript_lite_p3_cleanup_qa.json`,
   `debugCapture/speech_enhance_qa.json`,
   `debugCapture/ai_voice_replacement_qa.json`.
+- AI Composer / Music Lab foundation:
+  `docs/SPEC_AI_COMPOSER_MUSIC_LAB.md`, `app/music_composer.py`,
+  `app/actions/music_namespace.py`, `app/actions/editor_adapter_music.py`, and
+  `tests/test_music_composer_actions.py`. The first implementation is
+  MIDI-first and deterministic: `music.compose` creates structured sections,
+  tracks, clips, and notes; `music.render.preview` renders a local WAV preview
+  mix and can skip per-role stem WAVs with `render_stems=false`; and
+  `music.render_to_timeline` places rendered stems on real `AudioTrack` rows for
+  the existing Sound Editor mixer/export/action stack. `update_existing=true`
+  refreshes matching Music Lab composition/role tracks in place, and
+  `music.export_midi` writes a standard MIDI file. `music.compose_to_timeline`
+  is the natural-language entry action, clear music edit prompts route to
+  regenerate/mute/export actions, and the Workbench Sound Editor now includes a
+  compact `Music Lab` tab for prompt-to-timeline, update, and MIDI export.
+  Non-orchestral Music Lab generation now uses a 9-channel default baseline:
+  drums, bass, bass pulse, pad/chords, arp, lead, answer lead, counter melody,
+  and FX. Melodic EDM/NCS-style prompts use the same 9-channel layout with
+  EDM-tuned labels and layer balances rather than the old four-track sketch.
+  Music Lab chord progressions are key-aware, and long EDM/NCS prompts use
+  intro/build/drop/breakdown/drop2 section plans with alternate breakdown and
+  second-drop progressions to avoid a single repeated loop.
+  Music Lab render quality is now explicit. `tigerstudio.local_synth.v5` and
+  `tigerstudio.studio_edm.v1` are `draft_sketch`; `fluidsynth.soundfont.v1` is
+  `starter_preview`; and only a configured external production renderer can be
+  reported as `production_candidate`. The built-in renderers are useful for
+  timing, arrangement, MIDI export, and workflow validation, but must not be
+  claimed as modern release-quality music. `backend=production` requires a
+  renderer under `external/tools/music_renderer` or
+  `TIGERCAPTURE_MUSIC_PRODUCTION_RENDERER_EXE`; if missing, it fails loudly
+  instead of silently producing draft/starter audio.
+  The current production bridge is `tools/music_production_renderer.py`,
+  configured by `external/tools/music_renderer/renderer.json`, and routes Music
+  Lab composition JSON to configured AI providers such as ACE-Step API before
+  falling back to `tools/lmms_music_renderer.py` and
+  `external/tools/lmms/app/lmms.exe`. Stable Audio 3.0 is also wired through
+  that same production bridge as provider `stable_audio_3`: the default
+  implementation calls the public `stabilityai/stable-audio-3` Hugging Face
+  Space with `gradio_client`, uses the `small-music` variant by default, and
+  writes the returned 44.1 kHz stereo WAV to the normal renderer output path.
+  It stays disabled in `external/tools/music_renderer/provider.json` by
+  default because prompts/audio requests leave the local machine; when the user
+  explicitly chooses it, set `TIGERCAPTURE_MUSIC_AI_PROVIDER=stable_audio_3` or
+  enable the `stable_audio_3` provider in that config. Explicit Stable Audio
+  selection must override the disabled default instead of silently falling back
+  to LMMS, while `auto` should keep local/offline fallbacks unless the provider
+  is intentionally enabled.
+  Orchestral/symphonic/trailer-score prompts now expand to 128 deterministic
+  internal composition tracks: strings divisi, woodwinds, brass, timpani,
+  orchestral percussion, cymbal/FX, choir, and hybrid pads. Each orchestral
+  track keeps a unique role id so Music Lab can render or export true separated
+  parts instead of a four-track sketch.
+  `.tgp` project save/load persists `music_compositions[]` plus music
+  composition/role metadata on generated audio tracks and clips.
 - Native worker protocol and migration strategy:
   `docs/SPEC_NATIVE_WORKER.md`, `app/native_worker.py`,
   `native/tigercapture_worker/src/main.rs`.
@@ -4201,10 +4263,12 @@ Vocal/music separation:
   without softening the source video frame. `tools/qa_ar_pbr_gpu_preview.py` is
   the headless
   contract QA:
-  it imports the real `debugCapture/ar_pbr_external_assets/es_fbx/es.fbx` when
-  available, otherwise a generated FBX smoke scene, and fails unless mesh,
-  shadow, and reflection GPU packets are produced, including mesh-aware
-  contact-shadow and layered depth-fade screen-reflection catcher packets.
+  it imports durable PolyHaven PBR samples from
+  `sample_assets/pbr_blender_scenes/polyhaven` rather than disposable
+  `debugCapture` assets, falling back only to a generated FBX smoke scene when
+  the durable sample set is unavailable, and fails unless mesh, shadow, and
+  reflection GPU packets are produced, including mesh-aware contact-shadow and
+  layered depth-fade screen-reflection catcher packets.
   Remaining performance/product parity work is real shadow-map passes,
   physically richer reflections, GPU/model-view cubemap prefilter parity, and
   real-asset export quality with the full GPU model-view renderer.

@@ -51,5 +51,10 @@ _r100/
 _live2d_compat_corpus/
 local_resources/
 external/tools/vseeface/
+external/tools/lmms/
+external/tools/fluidsynth/
 external/assets/vtuber/
+external/assets/music/soundfonts/*.sf2
+external/assets/music/soundfonts/*.sf3
+external/assets/music/soundfonts/*.sfz
 resources/live2d_samples/CubismWebSamples/

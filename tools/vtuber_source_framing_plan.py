@@ -14,7 +14,7 @@ if str(ROOT) not in sys.path:
 from app.vtuber.openseeface_motion import load_openseeface_frame_size_csv, load_openseeface_motion_csv  # noqa: E402
 from app.vtuber.source_framing_plan import build_source_framing_plan  # noqa: E402
 from tools.render_milica_vrm_source_framing_preview import _parse_frame_size  # noqa: E402
-from tools.render_milica_vrm_trump_mapping import DEFAULT_CSV  # noqa: E402
+from tools.render_milica_vrm_trump_mapping import DEFAULT_CSV, _required_csv_path  # noqa: E402
 
 
 DEFAULT_OUT = ROOT / "debugCapture" / "vtuber_source_framing_plan.json"
@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--user-lower-occlusion-y-delta", type=float, default=0.0)
     args = parser.parse_args(argv)
 
-    csv_path = Path(args.csv)
+    csv_path = _required_csv_path(args.csv)
     frames = load_openseeface_motion_csv(csv_path)
     if not frames:
         raise SystemExit(f"No OpenSeeFace frames loaded: {csv_path}")

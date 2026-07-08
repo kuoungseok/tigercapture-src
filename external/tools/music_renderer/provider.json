@@ -1,0 +1,38 @@
+{
+  "preferred_provider": "auto",
+  "strict": false,
+  "keep_lmms_project": false,
+  "providers": {
+    "acestep_api": {
+      "enabled": true,
+      "base_url": "http://127.0.0.1:8001",
+      "model": "acestep-v15-turbo",
+      "thinking": true,
+      "audio_format": "wav",
+      "batch_size": 1,
+      "inference_steps": 8,
+      "timeout_sec": 900,
+      "poll_interval_sec": 3,
+      "health_timeout_sec": 1
+    },
+    "stable_audio_3": {
+      "enabled": false,
+      "mode": "huggingface_space",
+      "space": "stabilityai/stable-audio-3",
+      "variant_key": "small-music",
+      "steps": 8,
+      "cfg_scale": 1,
+      "sampler_type": "pingpong",
+      "seed": 0,
+      "min_duration_s": 8,
+      "max_duration_s": 120,
+      "prompt_suffix": "no vocals, no glitches, no ticking, polished modern stereo production",
+      "notes": "Optional external Stable Audio 3.0 Hugging Face Space provider. Enable intentionally because prompts/audio are sent to the public Space."
+    },
+    "musicgen": {
+      "enabled": false,
+      "mode": "reserved",
+      "notes": "Reserved for AudioCraft/MusicGen experiments. Check model license and GPU availability before enabling."
+    }
+  }
+}

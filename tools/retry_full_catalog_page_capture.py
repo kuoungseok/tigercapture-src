@@ -237,6 +237,37 @@ def _action_names_from_report(path: Path | None) -> list[str]:
     return names
 
 
+def _compare_score_from_report(asset_name: str, path: Path | None) -> tuple[float | None, str]:
+    if path is None or not path.exists():
+        return None, ""
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return None, ""
+    score_keys = {
+        "color_before_after_editor": ("color",),
+        "node_before_after_editor": ("node_effect", "node"),
+        "node_graph_actual": ("node_effect", "node"),
+        "node_effect_before_after_editor": ("node_effect", "node"),
+    }.get(asset_name, ())
+    scores = data.get("before_after_visual_delta_scores")
+    artifacts = data.get("artifacts") if isinstance(data.get("artifacts"), dict) else {}
+    if isinstance(scores, dict):
+        for key in score_keys:
+            try:
+                score = float(scores[key])
+            except Exception:
+                continue
+            frame = str(artifacts.get(f"{key}_before_after_frame") or "")
+            return score, frame
+    for key in ("before_after_visual_delta_score", "visible_delta_score", "visual_delta_score"):
+        try:
+            return float(data[key]), ""
+        except Exception:
+            continue
+    return None, ""
+
+
 def _report_required_checks_ok(path: Path | None, required: tuple[str, ...]) -> bool:
     if path is None or not path.exists():
         return False
@@ -244,10 +275,54 @@ def _report_required_checks_ok(path: Path | None, required: tuple[str, ...]) -> 
         data = json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return False
-    if data.get("ok") is False:
-        return False
     checks = data.get("checks") if isinstance(data.get("checks"), dict) else {}
     return all(bool(checks.get(key)) for key in required)
+
+
+def _audio_report_is_current(report_path: Path) -> bool:
+    if not report_path.exists():
+        return False
+    try:
+        data = json.loads(report_path.read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    try:
+        version = int(data.get("sound_editor_ui_contract_version") or 0)
+    except Exception:
+        version = 0
+    if version < catalog.SOUND_EDITOR_CURRENT_UI_CONTRACT_VERSION:
+        return False
+    for name in ("sound_editor", "sound_workbench", "sound_graphs"):
+        if not _report_required_checks_ok(report_path, catalog._audio_contract_required_checks(name)):  # noqa: SLF001
+            return False
+    return True
+
+
+def _semantic_capture_ready(asset_name: str) -> bool:
+    path = _asset(asset_name)
+    if not _image_ok(path):
+        return False
+    ok, _reason = catalog._semantic_capture_contract_is_ready(asset_name, path)  # noqa: SLF001
+    if not ok:
+        return False
+    ok, _reason = catalog._semantic_capture_visual_is_ready(asset_name, path)  # noqa: SLF001
+    return bool(ok)
+
+
+def _audio_capture_contract_fields(report_path: Path) -> dict[str, object]:
+    actions = _action_names_from_report(report_path)
+    return {
+        "sound_editor_ui_contract_version": catalog.SOUND_EDITOR_CURRENT_UI_CONTRACT_VERSION,
+        "current_sound_editor_ui": True,
+        "real_tigercapture_capture": True,
+        "source_report": str(report_path.resolve()),
+        "executed_actions": sorted(set(actions)),
+        "required_report_checks": {
+            name: list(catalog._audio_contract_required_checks(name))  # noqa: SLF001
+            for name in ("sound_editor", "sound_workbench", "sound_graphs")
+        },
+        "legacy_sound_editor_window_only": False,
+    }
 
 
 def _write_compare_contract(
@@ -262,6 +337,7 @@ def _write_compare_contract(
 ) -> str:
     actions = list(executed_actions or [])
     actions.extend(_action_names_from_report(source_report))
+    visual_delta_score, visual_delta_frame = _compare_score_from_report(asset_name, source_report)
     data = {
         "schema": "tigercapture.product_catalog.before_after_capture_contract.v1",
         "asset_name": asset_name,
@@ -280,12 +356,31 @@ def _write_compare_contract(
         "executed_actions": sorted(set(actions)),
         "compare_action_executed": "ui.viewer.compare.set" in set(actions),
     }
+    if visual_delta_score is not None:
+        data["before_after_visual_delta_score"] = round(float(visual_delta_score), 4)
+    if visual_delta_frame:
+        data["before_after_visual_delta_frame"] = visual_delta_frame
     if source_report is not None:
         data["source_report"] = str(source_report.resolve())
     target = _contract_path(image_path)
     if target.exists():
         ok, _reason = catalog._compare_capture_contract_is_ready(asset_name, image_path)
         if ok:
+            try:
+                existing = json.loads(target.read_text(encoding="utf-8"))
+            except Exception:
+                existing = {}
+            needs_score_refresh = (
+                visual_delta_score is not None
+                and "before_after_visual_delta_score" not in existing
+            )
+            needs_frame_refresh = (
+                bool(visual_delta_frame)
+                and "before_after_visual_delta_frame" not in existing
+            )
+            if not needs_score_refresh and not needs_frame_refresh:
+                return f"kept existing compare contract {target}"
+        if ok and not (needs_score_refresh or needs_frame_refresh):
             return f"kept existing compare contract {target}"
     target.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
     return f"wrote compare contract {target}"
@@ -614,65 +709,16 @@ def recipe_ppt_maker(ctx: RetryContext) -> None:
 def recipe_node_effects(ctx: RetryContext) -> None:
     out = FRESH / "node_effect_library_new"
     media = _pick_media("South Korea", "Tokyo", "Lamborghini")
-    editor_src = out / "editor_workbench_node_graph_action.png"
-    if not _image_ok(editor_src):
-        rc = ctx.run(
-            [
-                _py(),
-                str(ROOT / "tools" / "qa_workbench_node_action_flow.py"),
-                "--media",
-                str(media),
-                "--out-dir",
-                str(out),
-                "--language",
-                "en",
-            ]
-        )
-        if rc != 0 and not _image_ok(editor_src):
-            raise RuntimeError("qa_workbench_node_action_flow.py failed before producing node effect captures")
-    if not ctx.dry_run:
-        if editor_src.exists():
-            ctx.log(_copy_or_crop(editor_src, _asset("node_effect_before_after_editor")))
-            ctx.log(
-                _copy_or_crop(
-                    editor_src,
-                    _asset("node_effect_library_detail"),
-                    crop=(0.0, 0.0, 0.42, 1.0),
-                    min_size=(360, 260),
-                )
-            )
-    compare_contract = _contract_path(_asset("node_effect_before_after_editor"))
-    if compare_contract.exists() and not ctx.dry_run:
-        compare_contract.unlink()
-    _write_compare_contract(
-        "node_effect_before_after_editor",
-        _asset("node_effect_before_after_editor"),
-        producer="retry_full_catalog_page_capture.node_effects_recipe",
-        changed_params={
-            "blur_radius": {"before": 0.0, "after": 10.0},
-            "glow_intensity": {"before": 0.0, "after": 0.42},
-            "vignette_amount": {"before": 0.0, "after": 0.22},
-        },
-        source_report=out / "workbench_node_action_flow.json",
-    )
-    _write_semantic_contract(
-        "node_effect_library_detail",
-        _asset("node_effect_library_detail"),
-        producer="retry_full_catalog_page_capture.node_effects_recipe",
-        source_paths=[editor_src],
-        extra_tags=["node_effect_library", "effect_node_controls", "before_after_node_result"],
-    )
-
-
-def recipe_color_compare(ctx: RetryContext) -> None:
-    out = FRESH / "node_color_tokyo"
-    media = _pick_media("South Korea", "Tokyo", "Lamborghini")
+    editor_src = out / "editor_effects_open_editor_action.png"
+    graph_src = out / "workbench_node_graph_action.png"
     report_path = out / "workbench_node_action_flow.json"
-    editor_src = out / "editor_color_dock_action.png"
     required_checks = (
+        "node_graph_action_ok",
         "viewer_frame_visible",
-        "color_dock_viewer_reforced",
         "viewer_compare_split",
+        "workbench_screenshot",
+        "visible_node_count",
+        "node_before_after_visual_delta",
     )
     if not _image_ok(editor_src) or not _report_required_checks_ok(report_path, required_checks):
         rc = ctx.run(
@@ -687,7 +733,71 @@ def recipe_color_compare(ctx: RetryContext) -> None:
                 "en",
             ]
         )
-        if rc != 0:
+        if rc != 0 and (
+            not _image_ok(editor_src)
+            or not _report_required_checks_ok(report_path, required_checks)
+        ):
+            raise RuntimeError("qa_workbench_node_action_flow.py failed before producing node effect captures")
+    if not _image_ok(editor_src):
+        raise RuntimeError(f"Node effects full editor capture is missing: {editor_src}")
+    if not ctx.dry_run:
+        if editor_src.exists():
+            ctx.log(_copy_or_crop(editor_src, _asset("node_effect_before_after_editor")))
+        if graph_src.exists():
+            ctx.log(_copy_or_crop(graph_src, _asset("node_effect_library_detail")))
+        else:
+            raise RuntimeError(f"Node effects detail workbench capture is missing: {graph_src}")
+    compare_contract = _contract_path(_asset("node_effect_before_after_editor"))
+    if compare_contract.exists() and not ctx.dry_run:
+        compare_contract.unlink()
+    _write_compare_contract(
+        "node_effect_before_after_editor",
+        _asset("node_effect_before_after_editor"),
+        producer="retry_full_catalog_page_capture.node_effects_recipe",
+        changed_params={
+            "blur_radius": {"before": 0.0, "after": 10.0},
+            "glow_intensity": {"before": 0.0, "after": 0.42},
+            "vignette_amount": {"before": 0.0, "after": 0.22},
+        },
+        source_report=report_path,
+    )
+    _write_semantic_contract(
+        "node_effect_library_detail",
+        _asset("node_effect_library_detail"),
+        producer="retry_full_catalog_page_capture.node_effects_recipe",
+        source_paths=[graph_src],
+        extra_tags=["node_effect_library", "effect_node_controls", "before_after_node_result"],
+    )
+
+
+def recipe_color_compare(ctx: RetryContext) -> None:
+    out = FRESH / "node_color_tokyo"
+    media = _pick_media("South Korea", "Tokyo", "Lamborghini")
+    report_path = out / "workbench_node_action_flow.json"
+    editor_src = out / "editor_color_dock_action.png"
+    required_checks = (
+        "viewer_frame_visible",
+        "color_dock_viewer_reforced",
+        "viewer_compare_split",
+        "color_before_after_visual_delta",
+    )
+    if not _image_ok(editor_src) or not _report_required_checks_ok(report_path, required_checks):
+        rc = ctx.run(
+            [
+                _py(),
+                str(ROOT / "tools" / "qa_workbench_node_action_flow.py"),
+                "--media",
+                str(media),
+                "--out-dir",
+                str(out),
+                "--language",
+                "en",
+            ]
+        )
+        if rc != 0 and (
+            not _image_ok(editor_src)
+            or not _report_required_checks_ok(report_path, required_checks)
+        ):
             raise RuntimeError("qa_workbench_node_action_flow.py failed; refusing to reuse stale color compare captures")
     if not _report_required_checks_ok(report_path, required_checks):
         raise RuntimeError(
@@ -731,7 +841,15 @@ def recipe_node_compare(ctx: RetryContext) -> None:
     report_path = out / "workbench_node_action_flow.json"
     editor_src = out / "editor_workbench_node_graph_action.png"
     graph_src = out / "workbench_node_graph_action.png"
-    if not _image_ok(editor_src) or not report_path.exists():
+    required_checks = (
+        "node_graph_action_ok",
+        "viewer_frame_visible",
+        "viewer_compare_split",
+        "workbench_screenshot",
+        "visible_node_count",
+        "node_before_after_visual_delta",
+    )
+    if not _image_ok(editor_src) or not _report_required_checks_ok(report_path, required_checks):
         rc = ctx.run(
             [
                 _py(),
@@ -744,8 +862,15 @@ def recipe_node_compare(ctx: RetryContext) -> None:
                 "en",
             ]
         )
-        if rc != 0 and not _image_ok(editor_src):
+        if rc != 0 and (
+            not _image_ok(editor_src)
+            or not _report_required_checks_ok(report_path, required_checks)
+        ):
             raise RuntimeError("qa_workbench_node_action_flow.py failed before producing node compare captures")
+    if not _report_required_checks_ok(report_path, required_checks):
+        raise RuntimeError(
+            "Node compare report did not prove visible split before/after node effect output."
+        )
     if not ctx.dry_run:
         if editor_src.exists():
             ctx.log(_copy_or_crop(editor_src, _asset("node_before_after_editor")))
@@ -787,8 +912,86 @@ def recipe_node_compare(ctx: RetryContext) -> None:
 def recipe_audio(ctx: RetryContext) -> None:
     out = FRESH / "audio_workbench"
     media = _pick_media("South Korea", "Tokyo", "Lamborghini")
-    if not _image_ok(_asset("sound_editor")):
-        _run_script(ctx, "qa_ui_renewal_sound_editor.py", "--media", str(media), "--out-dir", str(out), "--language", "en")
+    report_path = out / "sound_editor_qa.json"
+    capture_ready = (
+        _audio_report_is_current(report_path)
+        and all(_semantic_capture_ready(name) for name in ("sound_editor", "sound_workbench", "sound_graphs"))
+    )
+    if not capture_ready:
+        rc = ctx.run(
+            [
+                _py(),
+                str(ROOT / "tools" / "qa_ui_renewal_sound_editor.py"),
+                "--media",
+                str(media),
+                "--out-dir",
+                str(out),
+                "--language",
+                "en",
+            ]
+        )
+        if rc != 0 and not _audio_report_is_current(report_path):
+            raise RuntimeError("qa_ui_renewal_sound_editor.py failed before producing current Sound Editor captures")
+    if not _audio_report_is_current(report_path):
+        raise RuntimeError("Sound Editor report did not prove the renewed audio UI capture contract.")
+    if ctx.dry_run:
+        return
+
+    fields = _audio_capture_contract_fields(report_path)
+    _write_semantic_contract(
+        "sound_editor",
+        _asset("sound_editor"),
+        producer="retry_full_catalog_page_capture.audio_recipe",
+        source_paths=[out / "editor_sound_editor_action.png", out / "dock_sound_editor_action.png"],
+        extra_tags=[
+            "sound_editor_full_editor",
+            "workbench_sound_editor",
+            "dock_sound_editor",
+            "sound_jog_shuttle",
+            "audio_waveform",
+            "audio_mixer",
+            "mixer_channel_strips",
+            "real_tigercapture_capture",
+            "current_sound_editor_ui",
+        ],
+        extra_fields=fields,
+    )
+    _write_semantic_contract(
+        "sound_workbench",
+        _asset("sound_workbench"),
+        producer="retry_full_catalog_page_capture.audio_recipe",
+        source_paths=[out / "workbench_sound_editor_action.png", out / "workbench_sound_editor_advanced_lab_action.png"],
+        extra_tags=[
+            "workbench_sound_editor",
+            "inline_advanced_lab",
+            "sound_jog_shuttle",
+            "spectrum_strip",
+            "audio_graph_tabs",
+            "ai_master_macros",
+            "current_sound_editor_ui",
+        ],
+        extra_fields=fields,
+    )
+    _write_semantic_contract(
+        "sound_graphs",
+        _asset("sound_graphs"),
+        producer="retry_full_catalog_page_capture.audio_recipe",
+        source_paths=[
+            out / "sound_editor_graph_eq.png",
+            out / "sound_editor_graph_dyn.png",
+            out / "sound_editor_graph_fx.png",
+            out / "sound_editor_graph_ai.png",
+        ],
+        extra_tags=[
+            "eq_curve",
+            "dynamics_curve",
+            "fx_curve",
+            "ai_master_graph",
+            "audio_colored_graphs",
+            "current_sound_editor_ui",
+        ],
+        extra_fields=fields,
+    )
 
 
 def recipe_export(ctx: RetryContext) -> None:

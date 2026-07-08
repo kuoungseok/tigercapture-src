@@ -133,6 +133,8 @@ def _audio_tracks(editor: Any) -> list[dict[str, Any]]:
                     "trim_start_ms": _int(getattr(clip, "trim_start_ms", 0)),
                     "trim_end_ms": _int(getattr(clip, "trim_end_ms", 0)),
                     "volume_db": float(getattr(clip, "volume_db", 0.0) or 0.0),
+                    "music_composition_id": str(getattr(clip, "music_composition_id", "") or ""),
+                    "music_role": str(getattr(clip, "music_role", "") or ""),
                 }
             )
         rows.append(
@@ -147,6 +149,8 @@ def _audio_tracks(editor: Any) -> list[dict[str, Any]]:
                 "label": str(getattr(track, "label", "") or ""),
                 "bus_id": str(getattr(track, "bus_id", "master") or "master"),
                 "track_type": str(getattr(track, "track_type", "") or ""),
+                "music_composition_id": str(getattr(track, "music_composition_id", "") or ""),
+                "music_role": str(getattr(track, "music_role", "") or ""),
                 "insert_slots": list(getattr(track, "insert_slots", []) or []),
                 "sends": dict(getattr(track, "sends", {}) or {}),
                 "automation_read": _bool(getattr(track, "automation_read", True)),
@@ -155,6 +159,50 @@ def _audio_tracks(editor: Any) -> list[dict[str, Any]]:
                 "clips": clips,
             }
         )
+    return rows
+
+
+def _music_compositions(editor: Any) -> list[dict[str, Any]]:
+    store = getattr(editor, "_music_compositions", None)
+    if not isinstance(store, dict):
+        return []
+    rows: list[dict[str, Any]] = []
+    for value in store.values():
+        try:
+            from app.music_composer import composition_from_dict, summary
+
+            composition = composition_from_dict(dict(value)) if isinstance(value, dict) else value
+            if hasattr(composition, "to_dict"):
+                row = dict(summary(composition))
+                row["sections"] = [
+                    {
+                        "name": str(getattr(section, "name", "") or ""),
+                        "start_ms": _int(getattr(section, "start_ms", 0)),
+                        "duration_ms": _int(getattr(section, "duration_ms", 0)),
+                        "intensity": float(getattr(section, "intensity", 0.0) or 0.0),
+                    }
+                    for section in list(getattr(composition, "sections", []) or [])
+                ]
+                rows.append(row)
+                continue
+        except Exception:
+            pass
+        if isinstance(value, dict):
+            rows.append(
+                {
+                    "id": str(value.get("id") or ""),
+                    "prompt": str(value.get("prompt") or ""),
+                    "genre": str(value.get("genre") or ""),
+                    "mood": str(value.get("mood") or ""),
+                    "bpm": _int(value.get("bpm", 0)),
+                    "key": str(value.get("key") or ""),
+                    "duration_ms": _int(value.get("duration_ms", 0)),
+                    "section_count": len(list(value.get("sections") or [])),
+                    "track_count": len(list(value.get("tracks") or [])),
+                    "rendered": bool(value.get("rendered_stems")),
+                    "preview_mix_path": str(value.get("preview_mix_path") or ""),
+                }
+            )
     return rows
 
 
@@ -203,6 +251,25 @@ def _media_pool_items(editor: Any, limit: int) -> list[dict[str, Any]]:
     return rows
 
 
+def _music_lab_selection(editor: Any) -> dict[str, Any]:
+    selection = getattr(editor, "_music_lab_selection", None)
+    if not isinstance(selection, dict):
+        return {}
+    row = {
+        "composition_id": str(selection.get("composition_id") or ""),
+        "role": str(selection.get("role") or ""),
+        "section_name": str(selection.get("section_name") or ""),
+        "section_start_ms": _int(selection.get("section_start_ms"), 0),
+        "section_duration_ms": _int(selection.get("section_duration_ms"), 0),
+        "note_count": _int(selection.get("note_count"), 0),
+        "chord_progression": [
+            str(chord) for chord in list(selection.get("chord_progression") or []) if str(chord).strip()
+        ],
+        "note_preview": [str(note) for note in list(selection.get("note_preview") or []) if str(note).strip()],
+    }
+    return row if row["composition_id"] or row["role"] or row["section_name"] else {}
+
+
 def _selected_clips(editor: Any) -> list[dict[str, Any]]:
     rows: list[dict[str, Any]] = []
     for raw in list(getattr(editor, "_selected_clips", []) or []):
@@ -246,6 +313,7 @@ def project_duration_ms(snapshot: dict[str, Any]) -> int:
 def build_project_snapshot_from_editor(editor: Any, *, media_limit: int = 200) -> dict[str, Any]:
     video_tracks = _video_tracks(editor)
     audio_tracks = _audio_tracks(editor)
+    music_compositions = _music_compositions(editor)
     subtitles = _subtitles(editor)
     markers = [dict(row) for row in list(getattr(editor, "_timeline_markers", []) or []) if isinstance(row, dict)]
     snapshot: dict[str, Any] = {
@@ -255,6 +323,8 @@ def build_project_snapshot_from_editor(editor: Any, *, media_limit: int = 200) -
         "current_position_ms": _current_position_ms(editor),
         "video_tracks": video_tracks,
         "audio_tracks": audio_tracks,
+        "music_compositions": music_compositions,
+        "music_lab_selection": _music_lab_selection(editor),
         "subtitles": subtitles,
         "markers": markers,
         "media_pool": _media_pool_items(editor, media_limit),
@@ -278,6 +348,7 @@ def build_project_snapshot_from_editor(editor: Any, *, media_limit: int = 200) -
         "audio_track_count": len(audio_tracks),
         "video_clip_count": sum(len(row.get("clips") or []) for row in video_tracks),
         "audio_clip_count": sum(len(row.get("clips") or []) for row in audio_tracks),
+        "music_composition_count": len(music_compositions),
         "subtitle_count": len(subtitles),
         "marker_count": len(markers),
         "media_pool_count": len(snapshot["media_pool"]),
@@ -296,6 +367,8 @@ def minimal_project_snapshot(duration_ms: int = 0) -> dict[str, Any]:
         "duration_ms": max(0, _int(duration_ms)),
         "video_tracks": [],
         "audio_tracks": [],
+        "music_compositions": [],
+        "music_lab_selection": {},
         "subtitles": [],
         "markers": [],
         "media_pool": [],

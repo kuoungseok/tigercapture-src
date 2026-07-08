@@ -35,6 +35,13 @@ of it. It is intentionally not a broad refactor request.
   contract is `docs/SPEC_VTUBER_STUDIO_BROADCAST.md`.
 - New package resources must have a QA check, not only a PyInstaller spec edit.
 - Large refactors must preserve current action IDs and project file schema.
+- AR/PBR preview and QA sample defaults must not depend on `debugCapture`.
+  Durable sample assets live under `sample_assets` or `external/assets`; generated
+  `debugCapture` scenes are allowed only as temporary fallback outputs.
+- Source media, OpenSeeFace CSVs, descriptors, models, avatars, and other
+  required input defaults must not point at `debugCapture`. Use explicit CLI
+  arguments, `sample_assets`, or `external/assets`; keep `debugCapture` for
+  regenerated reports, proof images, logs, and temporary cache output.
 
 ## Recommended Split Order
 
@@ -207,3 +214,9 @@ of it. It is intentionally not a broad refactor request.
   line-ending and tooling expectations.
 - `tools/qa_packaging_resources.py` verifies PyInstaller resource contracts for
   locales, icon, LUT files, and imageio-ffmpeg metadata.
+- `app/ar_pbr/sample_assets.py` centralizes durable AR/PBR sample paths used by
+  AR/PBR preview tools and QA so disposable `debugCapture` cleanup does not
+  break default model inspection or packet-preview tests.
+- `tests/test_debug_capture_boundary.py` guards the disposable scratch-space
+  boundary by failing when app/tool defaults use `debugCapture` as a required
+  source-media, motion-CSV, descriptor, model, avatar, or imported-asset input.

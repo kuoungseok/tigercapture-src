@@ -110,10 +110,21 @@ def _avatar_evidence_contract(diagnostics: dict[str, Any]) -> dict[str, Any]:
     requested_renderer = str(diagnostics.get("requested_renderer") or "")
     quality = diagnostics.get("quality") if isinstance(diagnostics.get("quality"), dict) else {}
     render = diagnostics.get("render") if isinstance(diagnostics.get("render"), dict) else {}
+    fit = diagnostics.get("fit") if isinstance(diagnostics.get("fit"), dict) else {}
+    program_placement = (
+        diagnostics.get("program_output_placement")
+        if isinstance(diagnostics.get("program_output_placement"), dict)
+        else {}
+    )
     gpu_renderer_used = renderer == "vrm_mtoon_gpu" or requested_renderer == "vrm_mtoon_gpu"
+    visibility_policy = diagnostics.get("visibility_policy") if isinstance(diagnostics.get("visibility_policy"), dict) else {}
     return {
         "schema": "tigercapture.review_vtuber.avatar_evidence_contract.v1",
-        "source_mapping_subject": "trump_upper_body_performance_source",
+        "source_mapping_subject": "trump_chest_up_performance_source",
+        "source_exposure": str(diagnostics.get("source_exposure") or ""),
+        "framing_preset": str(diagnostics.get("framing_preset") or ""),
+        "visibility_policy": dict(visibility_policy),
+        "selected_avatar_visibility": str(visibility_policy.get("selected_avatar_visibility") or ""),
         "minimum_visible_parts": ["head", "neck", "shoulders", "upper_torso"],
         "visible_parts": visible_parts,
         "review_product_evidence": bool(diagnostics.get("review_product_evidence")),
@@ -129,9 +140,43 @@ def _avatar_evidence_contract(diagnostics: dict[str, Any]) -> dict[str, Any]:
         "quality_profile": str(quality.get("profile") or ""),
         "claim_blockers": list(quality.get("claim_blockers") or []),
         "render_mode": str(render.get("mode") or render.get("renderer") or ""),
+        "fit_crop_mode": str(fit.get("crop_mode") or ""),
+        "fit_crop_height_ratio": _fit_crop_height_ratio(fit),
+        "fit_original_bbox": list(fit.get("original_bbox") or []),
+        "fit_source_bbox_size": list(fit.get("source_bbox_size") or []),
+        "fit_output_size": list(fit.get("output_size") or []),
+        "program_avatar_height_ratio": _optional_float(program_placement.get("program_avatar_height_ratio")),
+        "program_avatar_bottom_gap_ratio": _optional_float(program_placement.get("program_avatar_bottom_gap_ratio")),
+        "program_avatar_grounded": bool(program_placement.get("program_avatar_grounded")),
+        "program_avatar_fit_rule": str(program_placement.get("program_avatar_fit_rule") or ""),
+        "program_avatar_size": list(program_placement.get("program_avatar_size") or []),
         "ar_pbr_used": bool(diagnostics.get("ar_pbr_preview")),
         "pbr_used": bool(diagnostics.get("pbr_renderer")),
     }
+
+
+def _optional_float(value: Any) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _fit_crop_height_ratio(fit: dict[str, Any]) -> float | None:
+    original_bbox = fit.get("original_bbox")
+    source_bbox_size = fit.get("source_bbox_size")
+    if not isinstance(original_bbox, (list, tuple)) or not isinstance(source_bbox_size, (list, tuple)):
+        return None
+    if len(original_bbox) < 4 or len(source_bbox_size) < 2:
+        return None
+    try:
+        original_h = float(original_bbox[3]) - float(original_bbox[1])
+        crop_h = float(source_bbox_size[1])
+    except (TypeError, ValueError):
+        return None
+    if original_h <= 0.0 or crop_h <= 0.0:
+        return None
+    return round(crop_h / original_h, 4)
 
 
 def _assert_vtuber_gpu_renderer(diagnostics: dict[str, Any]) -> None:
@@ -244,14 +289,51 @@ def _contain_rgba(source: Image.Image, size: tuple[int, int]) -> Image.Image:
     return out
 
 
-def _make_program_output_frame(background_video: Path, avatar_rgba: Image.Image, *, time_ms: int) -> Image.Image:
+def _alpha_bbox(image: Image.Image, *, threshold: int = 8) -> tuple[int, int, int, int] | None:
+    alpha = image.convert("RGBA").getchannel("A")
+    return alpha.point(lambda value: 255 if value > threshold else 0).getbbox()
+
+
+def _trim_alpha_rgba(source: Image.Image) -> Image.Image:
+    img = source.convert("RGBA")
+    bbox = _alpha_bbox(img)
+    return img.crop(bbox) if bbox else img
+
+
+def _fit_trimmed_rgba(source: Image.Image, size: tuple[int, int]) -> Image.Image:
+    img = _trim_alpha_rgba(source)
+    if img.width <= 0 or img.height <= 0:
+        return img
+    scale = min(float(size[0]) / float(img.width), float(size[1]) / float(img.height))
+    scale = max(0.05, min(4.0, scale))
+    new_size = (max(1, int(round(img.width * scale))), max(1, int(round(img.height * scale))))
+    return img.resize(new_size, Image.Resampling.LANCZOS)
+
+
+def _make_program_output_frame(
+    background_video: Path,
+    avatar_rgba: Image.Image,
+    *,
+    time_ms: int,
+) -> tuple[Image.Image, dict[str, Any]]:
     bg = _video_frame(background_video, time_ms=time_ms).convert("RGBA")
     bg = bg.resize((1280, 720), Image.Resampling.LANCZOS)
-    avatar = _contain_rgba(avatar_rgba, (330, 520))
-    x = bg.width - avatar.width - 90
-    y = bg.height - avatar.height - 24
+    avatar = _fit_trimmed_rgba(avatar_rgba, (430, 610))
+    bottom_gap_px = 10
+    x = bg.width - avatar.width - 84
+    y = bg.height - avatar.height - bottom_gap_px
     bg.alpha_composite(avatar, (x, y))
-    return bg
+    placement = {
+        "program_avatar_box": [int(x), int(y), int(x + avatar.width), int(y + avatar.height)],
+        "program_avatar_size": [int(avatar.width), int(avatar.height)],
+        "program_avatar_height_ratio": round(float(avatar.height) / float(bg.height), 4),
+        "program_avatar_bottom_gap_px": int(bottom_gap_px),
+        "program_avatar_bottom_gap_ratio": round(float(bottom_gap_px) / float(bg.height), 4),
+        "program_avatar_grounded": bottom_gap_px <= 18,
+        "program_avatar_trimmed_before_fit": True,
+        "program_avatar_fit_rule": "trim_alpha_then_large_bottom_anchor",
+    }
+    return bg, placement
 
 
 def _make_mapping_monitor_frame(avatar_rgba: Image.Image, *, vrm_name: str, renderer_family: str, render_profile: str) -> Image.Image:
@@ -277,8 +359,8 @@ def _make_mapping_monitor_frame(avatar_rgba: Image.Image, *, vrm_name: str, rend
     for y in range(130, 366, 58):
         draw.line((66, y, 414, y), fill=(29, 40, 62, 180), width=1)
 
-    avatar = _contain_rgba(avatar_rgba, (330, 270))
-    canvas.alpha_composite(avatar, (74, 104))
+    avatar = _fit_trimmed_rgba(avatar_rgba, (250, 210))
+    canvas.alpha_composite(avatar, (248 - avatar.width // 2, 362 - avatar.height))
 
     guide = (114, 214, 180, 210)
     accent = (141, 183, 255, 210)
@@ -415,11 +497,12 @@ def _load_avatar_visual(
 
         diagnostics = dict(diagnostics)
         diagnostics["review_product_evidence"] = True
-        diagnostics["framing_contract"] = "trump_upper_body_source_requires_half_body_vrm"
-        diagnostics["source_exposure"] = "upper_body"
+        diagnostics["framing_contract"] = "trump_chest_up_source_requires_bust_up_vrm"
+        diagnostics["source_exposure"] = "chest_up"
+        diagnostics["framing_preset"] = "bust_up"
         diagnostics["visibility_policy"] = vrm_visibility_policy_for_source_exposure(
-            "upper_body",
-            requested_preset="half_body",
+            "chest_up",
+            requested_preset="bust_up",
             confidence=1.0,
             method="review_vtuber_capture_contract",
         )
@@ -433,8 +516,8 @@ def _load_avatar_visual(
 
     if not allow_face_thumbnail_fallback:
         raise RuntimeError(
-            "VTuber review capture requires an upper-body avatar render that matches "
-            "the Trump upper-body Performance Source. The real vtuber_vrm / "
+            "VTuber review capture requires a chest-up/bust-up avatar render that matches "
+            "the Trump chest-up Performance Source. The real vtuber_vrm / "
             "vrm_mtoon render path failed, and the VRM meta thumbnail is face-only "
             "so it cannot be used as product-catalog evidence. Render error(s): "
             + " | ".join(render_errors)
@@ -443,7 +526,7 @@ def _load_avatar_visual(
     image, diagnostics = _load_vrm_meta_thumbnail(vrm_path)
     diagnostics = dict(diagnostics)
     diagnostics["review_product_evidence"] = False
-    diagnostics["framing_contract"] = "violates_upper_body_rule_face_thumbnail_only"
+    diagnostics["framing_contract"] = "violates_chest_up_rule_face_thumbnail_only"
     diagnostics["render_errors"] = render_errors
     diagnostics["warnings"] = [
         "face_thumbnail_fallback_is_not_valid_product_catalog_vtuber_evidence",
@@ -460,15 +543,15 @@ def _render_avatar(vrm_path: Path, *, time_ms: int) -> tuple[Image.Image, dict[s
             "avatar_vrm": str(vrm_path),
             "target_fps": 30.0,
             "contact_preview_triangle_cap": 0,
-            "source_exposure": "upper_body",
-            "framing_preset": "half_body",
+            "source_exposure": "chest_up",
+            "framing_preset": "bust_up",
             "upper_body_mode": "seated",
             "placement": {
-                "framing": "half_body",
-                "crop_mode": "half_body",
-                "half_body_crop_ratio": 0.86,
-                "target_width_ratio": 0.58,
-                "target_height_ratio": 0.94,
+                "framing": "bust_up",
+                "crop_mode": "bust_up",
+                "bust_crop_ratio": 0.38,
+                "target_width_ratio": 0.48,
+                "target_height_ratio": 0.86,
                 "output_center_x": 0.55,
                 "output_bottom_y": 0.99,
             },
@@ -700,7 +783,12 @@ def capture(args: argparse.Namespace) -> dict[str, Any]:
         f"source={avatar_diag.get('visual_source')}, renderer={avatar_diag.get('renderer')}, "
         f"ar_pbr={avatar_diag.get('ar_pbr_preview')}, pbr={avatar_diag.get('pbr_renderer')}",
     )
-    program_frame = _make_program_output_frame(program_background, avatar_rgba, time_ms=int(args.program_time_ms))
+    program_frame, program_avatar_placement = _make_program_output_frame(
+        program_background,
+        avatar_rgba,
+        time_ms=int(args.program_time_ms),
+    )
+    avatar_diag["program_output_placement"] = program_avatar_placement
     mapping_frame = _make_mapping_monitor_frame(
         avatar_rgba,
         vrm_name=vrm_path.name,
@@ -825,7 +913,16 @@ def capture(args: argparse.Namespace) -> dict[str, Any]:
             "pbr_used": bool(avatar_diag.get("pbr_renderer")),
             "review_product_evidence": bool(avatar_diag.get("review_product_evidence")),
             "framing_contract": avatar_diag.get("framing_contract"),
+            "source_exposure": avatar_diag.get("source_exposure"),
+            "framing_preset": avatar_diag.get("framing_preset"),
+            "visibility_policy": dict(avatar_diag.get("visibility_policy") or {})
+            if isinstance(avatar_diag.get("visibility_policy"), dict)
+            else {},
             "visible_parts": list(avatar_diag.get("visible_parts") or []),
+            "program_avatar_placement": dict(program_avatar_placement),
+            "program_avatar_height_ratio": program_avatar_placement.get("program_avatar_height_ratio"),
+            "program_avatar_bottom_gap_ratio": program_avatar_placement.get("program_avatar_bottom_gap_ratio"),
+            "program_avatar_grounded": program_avatar_placement.get("program_avatar_grounded"),
         },
         "avatar_evidence": avatar_evidence,
         "outputs": {key: str(path) for key, path in outputs.items()},

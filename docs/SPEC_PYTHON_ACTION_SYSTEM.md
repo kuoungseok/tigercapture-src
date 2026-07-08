@@ -1113,6 +1113,58 @@ to inspect volume, pan, mute, solo, bus, clip count, and audible state. Track
 mute/solo is persisted in project files, participates in undo snapshots, drives
 the timeline mixer UI, and is honored by preview volume and FFmpeg export.
 
+### Music Lab / AI Composer
+
+Current registered Music Lab action surface, verified against `ActionRegistry`
+on 2026-07-08:
+
+- `music.compose`
+- `music.arrange.create`
+- `music.section.set`
+- `music.track.create`
+- `music.track.set_instrument`
+- `midi.clip.create`
+- `midi.clip.write_notes`
+- `midi.clip.write_chords`
+- `midi.clip.quantize`
+- `music.render.preview`
+- `music.render.backends`
+- `music.export_midi`
+- `music.render_to_timeline`
+- `music.compose_to_timeline`
+- `music.regenerate_section`
+- `music.mixer.auto_balance`
+- `music.state`
+
+The first Music Lab implementation is MIDI-first and local/deterministic.
+`music.compose` creates a structured composition with BPM, key, sections,
+instrument roles, MIDI clips, and note events. `music.render.preview` renders
+WAV preview stems and a mix without relying on external cloud music generation,
+and `music.render_to_timeline` places those rendered stems on real timeline
+`AudioTrack` rows so the existing Sound Editor mixer, export, and AI automation
+can operate on them. When `update_existing=true`, matching composition/role
+tracks are refreshed in place instead of creating duplicate music lanes.
+`music.export_midi` writes the current composition as a standard `.mid` file.
+`music.compose_to_timeline` wraps the common compose/render/insert/balance route
+as one action for natural-language command routing. The AI command router also
+maps clear edit requests such as stronger sections, drum removal, pad-only
+music, and MIDI export to structured actions. Project save/load persists
+`music_compositions[]` plus music composition/role metadata on generated audio
+tracks and clips. The product plan and future provider boundary live in
+`docs/SPEC_AI_COMPOSER_MUSIC_LAB.md`.
+
+`music.render.preview`, `music.render_to_timeline`, and
+`music.compose_to_timeline` accept
+`backend=auto|production|local_synth|studio_edm|soundfont` and optional
+`soundfont_path`. `music.render.backends` reports production renderer
+readiness, quality tiers, FluidSynth readiness, and durable SoundFont/SFZ
+assets. Built-in renderers are not modern release-quality music:
+`local_synth` and `studio_edm` are `draft_sketch`, `soundfont` is
+`starter_preview`, and only a configured external production renderer may be
+reported as `production_candidate`. If `backend=production` is requested
+without that renderer, the action must fail loudly rather than silently
+returning draft/starter audio.
+
 ### Color, VFX, Masks, and Nodes
 
 - `color.set_management`

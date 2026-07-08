@@ -10,7 +10,10 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
-DEFAULT_ASSET = ROOT / "debugCapture" / "ar_pbr_external_assets" / "es_fbx" / "es.fbx"
+
+from app.ar_pbr.sample_assets import default_ar_pbr_preview_asset
+
+DEFAULT_ASSET = default_ar_pbr_preview_asset()
 DEFAULT_OUT = ROOT / "debugCapture" / "ar_pbr_gpu_preview_qa.json"
 
 
@@ -107,6 +110,7 @@ def run_qa(asset: Path | None = None, *, width: int = 640, height: int = 360) ->
             "shadow_vertex_float_count": shadow_vertex_float_count,
             "reflection_vertex_float_count": reflection_vertex_float_count,
             "uses_real_asset": source == DEFAULT_ASSET.resolve() if DEFAULT_ASSET.exists() else False,
+            "uses_durable_sample_asset": source == DEFAULT_ASSET.resolve() if DEFAULT_ASSET.exists() else False,
             "fallback_scene": "gpu_preview_qa_scene.fbx" in source.name,
         },
     }

@@ -687,9 +687,12 @@ Headless GPU packet QA can be run without opening a Qt window:
   --out debugCapture\ar_pbr_gpu_preview_qa.json
 ```
 
-The default QA uses `debugCapture/ar_pbr_external_assets/es_fbx/es.fbx` when it
-exists and falls back to a generated FBX smoke scene otherwise. The report now
-checks mesh triangles, GPU contact-shadow packets, and GPU reflection packets.
+The default QA uses durable PolyHaven PBR samples under
+`sample_assets/pbr_blender_scenes/polyhaven` instead of `debugCapture`.
+`debugCapture` is scratch-only; generated FBX smoke scenes are still allowed as
+temporary fallback output, but required QA/tool sample assets must live under
+`sample_assets` or `external/assets`. The report checks mesh triangles, GPU
+contact-shadow packets, and GPU reflection packets.
 
 ## Editor Transform Gizmo
 

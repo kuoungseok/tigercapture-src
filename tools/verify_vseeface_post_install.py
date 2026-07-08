@@ -33,7 +33,7 @@ STATUS_CAPTURE_BLACK = "virtual_camera_black_frame"
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description="Verify VSeeFaceCamera after admin registration.")
-    parser.add_argument("--video", default=str(ROOT / "debugCapture" / "trump_face_source.mp4"))
+    parser.add_argument("--video", default="", help="Explicit source video for OpenSeeFace send test. Required unless --skip-video-send is used.")
     parser.add_argument("--avatar-vrm", default=str(default_milica_vrm(ROOT)))
     parser.add_argument("--vseeface-exe", default=str(default_vseeface_exe(ROOT)))
     parser.add_argument("--port", type=int, default=39540)
@@ -47,9 +47,12 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out-dir", default=str(ROOT / "debugCapture" / "vseeface_post_install"))
     parser.add_argument("--out", default=str(ROOT / "debugCapture" / "vseeface_post_install_report.json"))
     args = parser.parse_args(argv)
+    video_path = Path(args.video) if str(args.video or "").strip() else None
+    if not args.skip_video_send and video_path is None:
+        parser.error("--video is required unless --skip-video-send is used")
 
     report = run_post_install_verification(
-        video=Path(args.video),
+        video=video_path,
         avatar_vrm=Path(args.avatar_vrm),
         vseeface_exe=Path(args.vseeface_exe),
         port=int(args.port),
@@ -71,7 +74,7 @@ def main(argv: list[str] | None = None) -> int:
 
 def run_post_install_verification(
     *,
-    video: Path,
+    video: Path | None,
     avatar_vrm: Path,
     vseeface_exe: Path,
     port: int,
@@ -113,7 +116,7 @@ def run_post_install_verification(
     if launch_vseeface:
         report["vseeface_process"] = _launch_vseeface(vseeface_exe, wait_seconds)
 
-    if not skip_video_send:
+    if not skip_video_send and video is not None:
         report["video_source"] = run_video_source(
             video=video,
             port=port,

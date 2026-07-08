@@ -1,0 +1,170 @@
+{
+  "schema": "tigercapture.review.spec_index.v1",
+  "last_reviewed_spec_date": "2026-07-08",
+  "source_docs": [
+    "SPEC.md",
+    "TODO.md",
+    "docs/SPEC_USER_PPT_GENERATOR.md",
+    "docs/SPEC_AI_COMPOSER_MUSIC_LAB.md",
+    "docs/SPEC_PYTHON_ACTION_SYSTEM.md",
+    "docs/SPEC_LOCAL_AI_PROVIDERS.md",
+    "docs/SPEC_VTUBER_STUDIO_BROADCAST.md",
+    "docs/SPEC_AR_PBR_COMPOSITOR.md"
+  ],
+  "forbidden_visible_terms": [
+    "MRQ",
+    "Unreal Bridge",
+    "Marmoset",
+    "QA readiness",
+    "release_ready",
+    "pass/fail"
+  ],
+  "required_visible_terms_en": [
+    "PPT Maker",
+    ".tgppt",
+    "Music Lab",
+    "Sound Editor",
+    "Python Action",
+    "MCP",
+    "Local AI",
+    "VTuber Studio",
+    "AR/PBR",
+    "Depth-aware",
+    "PPTX",
+    "MP4"
+  ],
+  "groups": [
+    {
+      "key": "capture_media",
+      "en": {
+        "heading": "Capture / Media",
+        "items": ["Screen recording", "YouTube Imports", "Media pool", "Proxy thumbnails"]
+      },
+      "ko": {
+        "heading": "캡처 / 미디어",
+        "items": ["화면 녹화", "YouTube Imports", "미디어 풀", "프록시 썸네일"]
+      }
+    },
+    {
+      "key": "timeline_editing",
+      "en": {
+        "heading": "Timeline Editing",
+        "items": ["Current timeline UI", "Cut / split / trim", "Multi-track lanes", "Keyframes / motion"]
+      },
+      "ko": {
+        "heading": "타임라인 편집",
+        "items": ["현재 타임라인 UI", "컷 / 분할 / 트림", "멀티 트랙 레인", "키프레임 / 모션"]
+      }
+    },
+    {
+      "key": "effects_nodes",
+      "en": {
+        "heading": "Effects / Nodes",
+        "items": ["Drag-first effects", "Node graph", "Masks / roto", "Before / after"]
+      },
+      "ko": {
+        "heading": "이펙트 / 노드",
+        "items": ["드래그 우선 이펙트", "노드 그래프", "마스크 / 로토", "비포 / 애프터"]
+      }
+    },
+    {
+      "key": "typography_motion",
+      "en": {
+        "heading": "Typography",
+        "items": ["Title presets", "Animated type", "Subtitle tools", "Text timing"]
+      },
+      "ko": {
+        "heading": "타이포그래피",
+        "items": ["타이틀 프리셋", "애니메이션 텍스트", "자막 도구", "텍스트 타이밍"]
+      }
+    },
+    {
+      "key": "color_scopes",
+      "en": {
+        "heading": "Color / Scopes",
+        "items": ["Color grading", "Compare viewer", "Scopes / LUTs", "OCIO path"]
+      },
+      "ko": {
+        "heading": "컬러 / 스코프",
+        "items": ["컬러 그레이딩", "비교 뷰어", "스코프 / LUT", "OCIO 경로"]
+      }
+    },
+    {
+      "key": "audio_sound",
+      "en": {
+        "heading": "Audio / Sound",
+        "items": ["Sound Editor", "EQ / Dynamics / FX", "Mixer / VU / spectrum", "Audio extraction"]
+      },
+      "ko": {
+        "heading": "오디오 / 사운드",
+        "items": ["사운드 에디터", "EQ / Dynamics / FX", "믹서 / VU / 스펙트럼", "영상 음원 추출"]
+      }
+    },
+    {
+      "key": "music_lab",
+      "en": {
+        "heading": "Music Lab",
+        "items": ["Prompt composition", "MIDI notes", "WAV stems", "Timeline render"]
+      },
+      "ko": {
+        "heading": "Music Lab",
+        "items": ["프롬프트 작곡", "MIDI 노트", "WAV 스템", "타임라인 렌더"]
+      }
+    },
+    {
+      "key": "actors_character",
+      "en": {
+        "heading": "Actors",
+        "items": ["Live2D actors", "Spine / NIKKE", "MMD motion", "Actor lanes"]
+      },
+      "ko": {
+        "heading": "액터",
+        "items": ["Live2D 액터", "Spine / NIKKE", "MMD 모션", "액터 레인"]
+      }
+    },
+    {
+      "key": "vtuber_studio",
+      "en": {
+        "heading": "VTuber Studio",
+        "items": ["Program Output", "Source Tracking", "VRM / MToon GPU", "Internal fallback"]
+      },
+      "ko": {
+        "heading": "VTuber Studio",
+        "items": ["Program Output", "Source Tracking", "VRM / MToon GPU", "내부 fallback"]
+      }
+    },
+    {
+      "key": "ar_pbr_3d",
+      "en": {
+        "heading": "AR/PBR 3D",
+        "items": ["AR/PBR actors", "Depth-aware", "Occlusion / shadows", "Realtime lighting"]
+      },
+      "ko": {
+        "heading": "AR/PBR 3D",
+        "items": ["AR/PBR 액터", "Depth-aware", "오클루전 / 그림자", "실시간 조명"]
+      }
+    },
+    {
+      "key": "ai_actions",
+      "en": {
+        "heading": "AI / Actions",
+        "items": ["Local AI", "Claude / Codex", "Python Action", "MCP bridge"]
+      },
+      "ko": {
+        "heading": "AI / 액션",
+        "items": ["로컬 AI", "Claude / Codex", "Python Action", "MCP 브리지"]
+      }
+    },
+    {
+      "key": "ppt_delivery",
+      "en": {
+        "heading": "PPT / Delivery",
+        "items": ["PPT Maker", ".tgppt projects", "PPTX / PDF / MP4", "Render queue"]
+      },
+      "ko": {
+        "heading": "PPT / 전달",
+        "items": ["PPT Maker", ".tgppt 프로젝트", "PPTX / PDF / MP4", "렌더 큐"]
+      }
+    }
+  ]
+}

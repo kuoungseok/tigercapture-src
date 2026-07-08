@@ -79,9 +79,14 @@ def test_source_exposure_policy_matches_vrm_visibility():
     )
     from app.vtuber.video_face_driver import FaceMotionFrame
 
+    chest = vrm_visibility_policy_for_source_exposure("chest_up", requested_preset="bust_up")
     upper = vrm_visibility_policy_for_source_exposure("upper_body", requested_preset="bust_up")
     full = vrm_visibility_policy_for_source_exposure("full_body", requested_preset="half_body")
 
+    assert chest["ai_rule"] == "match_source_person_exposure_to_vrm_visibility"
+    assert chest["minimum_framing_preset"] == "bust_up"
+    assert chest["selected_framing_preset"] == "bust_up"
+    assert chest["selected_avatar_visibility"] == "head_to_mid_chest"
     assert upper["ai_rule"] == "match_source_person_exposure_to_vrm_visibility"
     assert upper["minimum_framing_preset"] == "half_body"
     assert upper["selected_framing_preset"] == "half_body"

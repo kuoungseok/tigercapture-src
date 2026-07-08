@@ -41,6 +41,14 @@ def _mixer_type_code(track_type: str) -> str:
         "ambience": "AMB",
     }.get(str(track_type or "").lower(), "AUD")
 
+def _mixer_type_color(track_type: str, *, alpha: int = 190) -> QColor:
+    return {
+        "dialogue": QColor(148, 126, 196, alpha),
+        "music": QColor(128, 154, 126, alpha),
+        "sfx": QColor(162, 123, 116, alpha),
+        "ambience": QColor(114, 145, 160, alpha),
+    }.get(str(track_type or "").lower(), QColor(142, 150, 158, alpha))
+
 def _mixer_next_type(track_type: str) -> str:
     order = ["dialogue", "music", "sfx", "ambience"]
     current = str(track_type or "").lower()
@@ -94,7 +102,7 @@ class _SoundMixerMeter(QWidget):
         self._r = 0.0
         self._peak = 0.0
         self._clipped = False
-        self.setFixedSize(18, 84)
+        self.setFixedSize(22, 88)
 
     def set_levels(self, left: float, right: float, *, peak: float | None = None, clipped: bool = False) -> None:
         self._l = max(0.0, min(1.0, float(left or 0.0)))
@@ -116,19 +124,29 @@ class _SoundMixerMeter(QWidget):
         for index, level in enumerate((self._l, self._r)):
             x = meter_r.left() + index * (bar_w + 2)
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(255, 255, 255, 13))
-            p.drawRoundedRect(QRectF(x, meter_r.top(), bar_w, meter_r.height()), 1.8, 1.8)
+            channel = QRectF(x, meter_r.top(), bar_w, meter_r.height())
+            slot_grad = QLinearGradient(channel.topLeft(), channel.topRight())
+            slot_grad.setColorAt(0.0, QColor(255, 255, 255, 11))
+            slot_grad.setColorAt(0.42, QColor(0, 0, 0, 130))
+            slot_grad.setColorAt(1.0, QColor(255, 255, 255, 7))
+            p.setBrush(QBrush(slot_grad))
+            p.drawRoundedRect(channel, 1.8, 1.8)
             fill_h = meter_r.height() * level
             fill = QRectF(x, meter_r.bottom() - fill_h, bar_w, fill_h)
             grad = QLinearGradient(fill.topLeft(), fill.bottomLeft())
-            grad.setColorAt(0.0, QColor(164, 99, 94, 210))
-            grad.setColorAt(0.42, QColor(164, 150, 105, 205))
-            grad.setColorAt(1.0, QColor(118, 145, 123, 220))
+            grad.setColorAt(0.0, QColor(181, 88, 78, 220))
+            grad.setColorAt(0.28, QColor(185, 157, 92, 218))
+            grad.setColorAt(0.62, QColor(101, 160, 117, 226))
+            grad.setColorAt(1.0, QColor(95, 175, 130, 235))
             p.setBrush(QBrush(grad))
             p.drawRoundedRect(fill, 1.8, 1.8)
+            p.setPen(QPen(QColor(7, 9, 10, 72), 0.7))
+            for row in range(1, 10):
+                y = meter_r.bottom() - meter_r.height() * row / 10.0
+                p.drawLine(QPointF(channel.left() + 0.7, y), QPointF(channel.right() - 0.7, y))
         if self._peak > 0:
             y = meter_r.bottom() - meter_r.height() * self._peak
-            p.setPen(QPen(QColor(226, 219, 178, 150), 0.8))
+            p.setPen(QPen(QColor(238, 221, 166, 180), 0.9))
             p.drawLine(QPointF(meter_r.left() - 0.5, y), QPointF(meter_r.right() + 0.5, y))
         p.end()
 
@@ -227,9 +245,14 @@ class _SoundMixerPanSlider(QSlider):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(Qt.Orientation.Horizontal, parent)
         self.setObjectName("SoundMixerPanSlider")
+        self._accent = QColor(148, 126, 196, 170)
         self.setRange(-100, 100)
         self.setFixedSize(66, 22)
         self.setMouseTracking(True)
+
+    def set_accent_color(self, color: QColor) -> None:
+        self._accent = QColor(color)
+        self.update()
 
     def _ratio(self) -> float:
         span = max(1, self.maximum() - self.minimum())
@@ -305,12 +328,13 @@ class _SoundMixerPanSlider(QSlider):
         p.setBrush(QColor(0, 0, 0, 150))
         p.drawRoundedRect(handle.translated(0, 1.2).adjusted(-1.0, 0, 1.0, 0.8), 3.8, 3.8)
         hgrad = QLinearGradient(handle.topLeft(), handle.bottomLeft())
-        hgrad.setColorAt(0.0, QColor(213, 219, 224, 232))
-        hgrad.setColorAt(0.18, QColor(159, 168, 175, 236))
-        hgrad.setColorAt(0.58, QColor(98, 108, 116, 242))
-        hgrad.setColorAt(1.0, QColor(55, 62, 69, 238))
+        accent = QColor(self._accent)
+        hgrad.setColorAt(0.0, QColor(222, 226, 231, 232))
+        hgrad.setColorAt(0.20, QColor(accent.red() + 28 if accent.red() < 220 else 232, accent.green() + 24 if accent.green() < 220 else 232, accent.blue() + 26 if accent.blue() < 220 else 232, 222))
+        hgrad.setColorAt(0.60, QColor(accent.red(), accent.green(), accent.blue(), 206))
+        hgrad.setColorAt(1.0, QColor(52, 58, 68, 240))
         p.setBrush(QBrush(hgrad))
-        p.setPen(QPen(QColor(224, 230, 236, 116), 0.75))
+        p.setPen(QPen(QColor(236, 231, 242, 124), 0.75))
         p.drawRoundedRect(handle, 3.8, 3.8)
         p.setPen(QPen(QColor(255, 255, 255, 56), 0.65))
         p.drawLine(QPointF(handle.left() + 2.2, handle.top() + 2.0), QPointF(handle.right() - 2.2, handle.top() + 2.0))
@@ -324,10 +348,15 @@ class _SoundMixerFader(QSlider):
     def __init__(self, parent: QWidget | None = None, *, master: bool = False) -> None:
         super().__init__(Qt.Orientation.Vertical, parent)
         self._master = bool(master)
+        self._accent = QColor(151, 143, 104, 170) if self._master else QColor(148, 126, 196, 178)
         self.setObjectName("SoundMixerFader")
         self.setRange(0, 150)
         self.setFixedSize(32, 94)
         self.setMouseTracking(True)
+
+    def set_accent_color(self, color: QColor) -> None:
+        self._accent = QColor(color)
+        self.update()
 
     def _rail_rect(self) -> QRectF:
         return QRectF(self.rect()).adjusted(0.0, 13.0, 0.0, -13.0)
@@ -404,11 +433,11 @@ class _SoundMixerFader(QSlider):
         if fill.height() > 1.0:
             grad = QLinearGradient(fill.topLeft(), fill.bottomLeft())
             if self._master:
-                grad.setColorAt(0.0, QColor(144, 151, 118, 150))
-                grad.setColorAt(1.0, QColor(96, 128, 112, 198))
+                grad.setColorAt(0.0, QColor(174, 160, 107, 166))
+                grad.setColorAt(1.0, QColor(108, 136, 112, 210))
             else:
-                grad.setColorAt(0.0, QColor(133, 148, 158, 158))
-                grad.setColorAt(1.0, QColor(92, 123, 112, 196))
+                grad.setColorAt(0.0, QColor(151, 131, 189, 164))
+                grad.setColorAt(1.0, QColor(94, 140, 117, 208))
             p.setBrush(QBrush(grad))
             p.setPen(Qt.PenStyle.NoPen)
             p.drawRoundedRect(fill, 2.3, 2.3)
@@ -418,10 +447,11 @@ class _SoundMixerFader(QSlider):
         p.setBrush(QColor(0, 0, 0, 168))
         p.drawRoundedRect(handle.translated(0, 1.7).adjusted(-1.0, 0, 1.0, 0.8), 4.0, 4.0)
         hgrad = QLinearGradient(handle.topLeft(), handle.bottomLeft())
-        hgrad.setColorAt(0.0, QColor(220, 225, 229, 232))
-        hgrad.setColorAt(0.16, QColor(171, 180, 187, 238))
-        hgrad.setColorAt(0.48, QColor(112, 123, 132, 244))
-        hgrad.setColorAt(1.0, QColor(60, 68, 77, 240))
+        accent = QColor(self._accent)
+        hgrad.setColorAt(0.0, QColor(226, 230, 234, 235))
+        hgrad.setColorAt(0.18, QColor(min(255, accent.red() + 48), min(255, accent.green() + 46), min(255, accent.blue() + 44), 226))
+        hgrad.setColorAt(0.52, QColor(accent.red(), accent.green(), accent.blue(), 222))
+        hgrad.setColorAt(1.0, QColor(54, 61, 74, 242))
         if not self.isEnabled():
             hgrad.setColorAt(0.0, QColor(176, 184, 190, 176))
             hgrad.setColorAt(0.48, QColor(108, 118, 126, 184))
@@ -434,7 +464,7 @@ class _SoundMixerFader(QSlider):
         p.setPen(QPen(QColor(13, 16, 19, 82), 0.8))
         p.drawLine(QPointF(handle.left() + 4.0, handle.center().y()), QPointF(handle.right() - 4.0, handle.center().y()))
         led = QRectF(handle.right() - 5.4, handle.top() + 4.0, 2.2, 6.0)
-        led_color = QColor(111, 151, 127, 145 if self.isEnabled() else 72)
+        led_color = QColor(accent.red(), accent.green(), accent.blue(), 155 if self.isEnabled() else 72)
         if self._master:
             led_color = QColor(151, 143, 104, 130 if self.isEnabled() else 64)
         p.setPen(Qt.PenStyle.NoPen)
@@ -454,9 +484,10 @@ class _SoundMixerStrip(QWidget):
         self._track: Any = None
         self._track_id = -1
         self._suppress = False
+        self._accent = QColor(148, 126, 196, 170)
         self.setObjectName("SoundMixerStrip")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setFixedWidth(82)
+        self.setFixedWidth(86)
         self.setFixedHeight(286)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         root = QVBoxLayout(self)
@@ -574,6 +605,25 @@ class _SoundMixerStrip(QWidget):
         self._name.setFixedHeight(14)
         root.addWidget(self._name)
 
+    def paintEvent(self, event) -> None:  # pragma: no cover - visual QA
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        root = QRectF(self.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
+        accent = QColor(self._accent)
+        p.setPen(Qt.PenStyle.NoPen)
+        glow = QLinearGradient(root.left(), root.top(), root.right(), root.top())
+        glow.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 88))
+        glow.setColorAt(0.26, QColor(accent.red(), accent.green(), accent.blue(), 32))
+        glow.setColorAt(1.0, QColor(255, 255, 255, 0))
+        p.setBrush(QBrush(glow))
+        p.drawRoundedRect(QRectF(root.left() + 2.0, root.top() + 2.0, root.width() - 4.0, 16.0), 4.0, 4.0)
+        p.setBrush(QColor(accent.red(), accent.green(), accent.blue(), 135))
+        p.drawRoundedRect(QRectF(root.left() + 3.0, root.top() + 4.0, 2.2, root.height() - 8.0), 1.1, 1.1)
+        p.setPen(QPen(QColor(255, 255, 255, 18), 0.7))
+        p.drawLine(QPointF(root.left() + 8.0, root.top() + 1.5), QPointF(root.right() - 8.0, root.top() + 1.5))
+        p.end()
+
     @property
     def track_id(self) -> int:
         return self._track_id
@@ -586,6 +636,9 @@ class _SoundMixerStrip(QWidget):
         self._title.setToolTip(name)
         bus = str(getattr(track, "bus_id", "master") or "master")
         track_type = _mixer_track_type(track)
+        self._accent = _mixer_type_color(track_type, alpha=178)
+        self._pan.set_accent_color(_mixer_type_color(track_type, alpha=178))
+        self._fader.set_accent_color(_mixer_type_color(track_type, alpha=188))
         self._name.setText(_compact_mixer_label(name, 9))
         self._name.setToolTip(f"{name} / {track_type} / {bus}")
         self.setProperty("active", bool(active))
@@ -727,6 +780,7 @@ class _SoundMixerMasterStrip(QWidget):
         self._meter = _SoundMixerMeter(body)
         body_layout.addWidget(self._meter)
         self._fader = _SoundMixerFader(body, master=True)
+        self._fader.set_accent_color(QColor(174, 151, 104, 178))
         self._fader.setValue(100)
         self._fader.setEnabled(False)
         body_layout.addWidget(self._fader)
@@ -744,6 +798,25 @@ class _SoundMixerMasterStrip(QWidget):
         self._name.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._name.setFixedHeight(34)
         root.addWidget(self._name)
+
+    def paintEvent(self, event) -> None:  # pragma: no cover - visual QA
+        super().paintEvent(event)
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        root = QRectF(self.rect()).adjusted(1.0, 1.0, -1.0, -1.0)
+        accent = QColor(174, 151, 104)
+        glow = QLinearGradient(root.left(), root.top(), root.right(), root.top())
+        glow.setColorAt(0.0, QColor(accent.red(), accent.green(), accent.blue(), 78))
+        glow.setColorAt(0.34, QColor(118, 145, 123, 30))
+        glow.setColorAt(1.0, QColor(255, 255, 255, 0))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(glow))
+        p.drawRoundedRect(QRectF(root.left() + 2.0, root.top() + 2.0, root.width() - 4.0, 18.0), 4.0, 4.0)
+        p.setBrush(QColor(174, 151, 104, 122))
+        p.drawRoundedRect(QRectF(root.left() + 3.0, root.top() + 4.0, 2.2, root.height() - 8.0), 1.1, 1.1)
+        p.setPen(QPen(QColor(255, 255, 255, 22), 0.7))
+        p.drawLine(QPointF(root.left() + 9.0, root.top() + 1.5), QPointF(root.right() - 9.0, root.top() + 1.5))
+        p.end()
 
     def set_tracks(self, tracks: list[Any] | tuple[Any, ...]) -> None:
         track_rows = list(tracks or [])

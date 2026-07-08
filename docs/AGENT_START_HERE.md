@@ -64,10 +64,16 @@ Default behavior for VRM/VSeeFace-style work:
 - Source-person visibility must drive VRM visibility. The code rule is
   `match_source_person_exposure_to_vrm_visibility` in
   `app/vtuber/source_framing.py`: `face_only` maps to `bust_up`,
-  `upper_body` maps to at least `half_body`, and `full_body` maps to
-  `full_body`. Source framing plans expose `source_exposure` and
+  `chest_up` / `bust_up` maps to `bust_up` / head-to-mid-chest, `upper_body`
+  maps to at least `half_body`, and `full_body` maps to `full_body`.
+  Product evidence must also trim transparent avatar padding before fitting,
+  scale the visible avatar large enough to read, and anchor its lower visible
+  edge to the Program Output bottom safe line. Tiny/floating avatars are not
+  valid product evidence.
+  Source framing plans expose `source_exposure` and
   `visibility_policy` for AI/review automation; do not show a head-only or
-  face-only VRM thumbnail when the source person is upper-body or full-body.
+  face-only VRM thumbnail when the source person is chest-up, upper-body, or
+  full-body.
 - VSeeFace missing, black, degraded, unregistered, or not installed is a
   degraded sidecar state, not a blocker for Program Output when internal VRM
   fallback assets are available.

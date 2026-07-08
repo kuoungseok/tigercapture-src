@@ -783,6 +783,8 @@ Already started:
   `debugCapture/ui_renewal_sound_editor_cubase_round_1/dock_sound_editor_mixer_action.png`.
   Latest isolated Master VU visual probe:
   `debugCapture/ui_renewal_sound_editor_master_vu_round_2/dock_sound_editor_master_vu_action.png`.
+  Latest mixer visual polish probe:
+  `debugCapture/ui_renewal_sound_editor_mixer_beauty_round_1/dock_sound_editor_mixer_beauty_action.png`.
 - Color grading nodes now switch the Workbench stack to a right-side
   `Color Grading` inspector instead of opening the old wide bottom wheel dock.
   The default editor surface now reads as Viewer left, color controls right,

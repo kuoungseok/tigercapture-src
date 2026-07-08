@@ -46,6 +46,7 @@ AR_PBR_MATCHED_EDITOR_CAPTURE = (
 )
 SPEC_CLOSING_BONSAI = TMP / "catalog_spec_closing" / "bonsai_blue_pot_cutout_v1.png"
 SPEC_CLOSING_SHADOW_MODE = "pot_contact_only"
+SPEC_INDEX_SOURCE = ROOT / "docs" / "review_automation" / "spec_index_groups.json"
 AR_PBR_SAME_ASSET_RULE = (
     "AR/PBR same-asset rule: capture the approved plaster statue/bust loaded "
     "into the editor video viewer, scaled large enough to read, before building "
@@ -74,6 +75,8 @@ COMPARE_EVIDENCE_RULE = (
     "capture must also write a sidecar contract proving non-neutral parameter "
     "changes and a visible delta; original/neutral-looking output is invalid."
 )
+COMPARE_MIN_VISUAL_DELTA_SCORE = 4.0
+SOUND_EDITOR_CURRENT_UI_CONTRACT_VERSION = 2
 COLOR_IPAD_DETAIL_RULE = (
     "Color iPad detail lock: capture only the color-control detail surface "
     "(wheels, curves, scopes, tone controls, and sliders). The iPad source must "
@@ -202,7 +205,36 @@ COMPARE_SOURCE_REPORT_REQUIRED_CHECKS: dict[str, tuple[str, ...]] = {
         "viewer_frame_visible",
         "color_dock_viewer_reforced",
         "viewer_compare_split",
+        "color_before_after_visual_delta",
     ),
+    "node_before_after_editor": (
+        "node_graph_action_ok",
+        "viewer_frame_visible",
+        "viewer_compare_split",
+        "workbench_screenshot",
+        "visible_node_count",
+        "node_before_after_visual_delta",
+    ),
+    "node_graph_actual": (
+        "node_graph_action_ok",
+        "viewer_frame_visible",
+        "workbench_screenshot",
+        "visible_node_count",
+        "node_before_after_visual_delta",
+    ),
+    "node_effect_before_after_editor": (
+        "node_graph_action_ok",
+        "viewer_frame_visible",
+        "workbench_screenshot",
+        "visible_node_count",
+        "node_before_after_visual_delta",
+    ),
+}
+COMPARE_REPORT_DELTA_SCORE_KEYS: dict[str, tuple[str, ...]] = {
+    "color_before_after_editor": ("color",),
+    "node_before_after_editor": ("node_effect", "node"),
+    "node_graph_actual": ("node_effect", "node"),
+    "node_effect_before_after_editor": ("node_effect", "node"),
 }
 COMPARE_ACTION_KEYS = (
     "executed_actions",
@@ -274,6 +306,43 @@ SEMANTIC_CAPTURE_CONTRACTS: dict[str, dict[str, object]] = {
         "contains_any": ("node_effect_library", "effect_node_controls", "before_after_node_result"),
         "forbidden": ("timeline_only", "generic_editor_crop"),
     },
+    "sound_editor": {
+        "contract": "sound_editor_current_ui_v1",
+        "contains_all": (
+            "sound_editor",
+            "current_sound_editor_ui",
+            "real_tigercapture_capture",
+            "audio_waveform",
+            "sound_jog_shuttle",
+            "audio_mixer",
+        ),
+        "contains_any": ("workbench_sound_editor", "dock_sound_editor", "inline_advanced_lab"),
+        "forbidden": ("stale_audio_capture", "legacy_sound_editor_window_only", "generic_editor_crop"),
+    },
+    "sound_workbench": {
+        "contract": "sound_workbench_current_ui_v1",
+        "contains_all": (
+            "workbench_sound_editor",
+            "current_sound_editor_ui",
+            "sound_jog_shuttle",
+            "spectrum_strip",
+            "inline_advanced_lab",
+        ),
+        "contains_any": ("audio_graph_tabs", "ai_master_macros", "mixer_channel_strips"),
+        "forbidden": ("stale_audio_capture", "legacy_sound_editor_window_only", "generic_editor_crop"),
+    },
+    "sound_graphs": {
+        "contract": "sound_graphs_current_ui_v1",
+        "contains_all": (
+            "current_sound_editor_ui",
+            "eq_curve",
+            "dynamics_curve",
+            "fx_curve",
+            "ai_master_graph",
+            "audio_colored_graphs",
+        ),
+        "forbidden": ("stale_audio_capture", "legacy_sound_editor_window_only", "timeline_only"),
+    },
     "live2d_composite_editor": {
         "contract": "live2d_composite_editor_v1",
         "contains_all": ("live2d_actor", "actor_lane"),
@@ -303,9 +372,79 @@ DETAIL_SEMANTIC_ASSETS = {
     "ppt_maker_detail",
     "node_graph_actual",
     "node_effect_library_detail",
+    "sound_workbench",
+    "sound_graphs",
     "live2d_actor_detail",
     "mmd_character_detail",
 }
+
+
+def _load_spec_index_payload() -> dict[str, object]:
+    if not SPEC_INDEX_SOURCE.exists():
+        raise RuntimeError(f"Missing specification index source: {SPEC_INDEX_SOURCE}")
+    data = json.loads(SPEC_INDEX_SOURCE.read_text(encoding="utf-8"))
+    if data.get("schema") != "tigercapture.review.spec_index.v1":
+        raise RuntimeError(f"Invalid specification index schema in {SPEC_INDEX_SOURCE}")
+    groups = data.get("groups")
+    if not isinstance(groups, list) or not groups:
+        raise RuntimeError(f"Specification index source has no groups: {SPEC_INDEX_SOURCE}")
+    return data
+
+
+def _validate_spec_index_payload(data: dict[str, object]) -> None:
+    groups = data.get("groups")
+    if not isinstance(groups, list):
+        raise RuntimeError("Specification index groups must be a list")
+
+    visible_en: list[str] = []
+    for group in groups:
+        if not isinstance(group, dict):
+            raise RuntimeError("Specification index group must be an object")
+        localized = group.get("en")
+        if not isinstance(localized, dict):
+            raise RuntimeError(f"Specification index group missing English copy: {group.get('key')}")
+        heading = localized.get("heading")
+        items = localized.get("items")
+        if not isinstance(heading, str) or not heading.strip():
+            raise RuntimeError(f"Specification index group has no heading: {group.get('key')}")
+        if not isinstance(items, list) or not all(isinstance(item, str) and item.strip() for item in items):
+            raise RuntimeError(f"Specification index group has invalid items: {group.get('key')}")
+        visible_en.append(heading)
+        visible_en.extend(items)
+
+    haystack = "\n".join(visible_en).lower()
+    forbidden = data.get("forbidden_visible_terms", [])
+    if isinstance(forbidden, list):
+        hits = [str(term) for term in forbidden if str(term).lower() in haystack]
+        if hits:
+            raise RuntimeError(f"Forbidden terms in specification index source: {', '.join(hits)}")
+
+    required = data.get("required_visible_terms_en", [])
+    if isinstance(required, list):
+        missing = [str(term) for term in required if str(term).lower() not in haystack]
+        if missing:
+            raise RuntimeError(f"Specification index source missing current spec terms: {', '.join(missing)}")
+
+
+def _spec_index_groups(lang: str) -> list[tuple[str, list[str]]]:
+    data = _load_spec_index_payload()
+    _validate_spec_index_payload(data)
+    selected_lang = "ko" if lang == "ko" else "en"
+    groups: list[tuple[str, list[str]]] = []
+    for group in data["groups"]:  # type: ignore[index]
+        if not isinstance(group, dict):
+            continue
+        localized = group.get(selected_lang) or group.get("en")
+        if not isinstance(localized, dict):
+            continue
+        heading = str(localized.get("heading", "")).strip()
+        raw_items = localized.get("items", [])
+        items = [str(item).strip() for item in raw_items if str(item).strip()] if isinstance(raw_items, list) else []
+        if heading and items:
+            groups.append((heading, items))
+    if len(groups) < 10:
+        raise RuntimeError("Specification index must remain dense enough for the full catalog closing page")
+    return groups
 
 
 def _contract_path_for_capture(path: Path) -> Path:
@@ -359,6 +498,8 @@ def _resolve_contract_sidecar_path(contract_path: Path, value: object) -> Path |
 def _compare_action_evidence(
     data: dict[str, object],
     contract_path: Path,
+    *,
+    asset_name: str = "",
 ) -> tuple[bool, str, list[str]]:
     names: list[str] = []
     for key in COMPARE_ACTION_KEYS:
@@ -380,7 +521,11 @@ def _compare_action_evidence(
         except Exception as exc:
             return False, f"Could not read compare source_report {source_report_path}: {exc}", names
         if report.get("ok") is False:
-            return False, f"Compare source_report is not successful: {source_report_path}", names
+            required = COMPARE_SOURCE_REPORT_REQUIRED_CHECKS.get(asset_name, ())
+            checks = report.get("checks") if isinstance(report.get("checks"), dict) else {}
+            missing_or_false = [key for key in required if not bool(checks.get(key))]
+            if missing_or_false:
+                return False, f"Compare source_report is not successful: {source_report_path}", names
         for key in COMPARE_ACTION_KEYS:
             names.extend(_action_names_from_value(report.get(key)))
     elif not any(data.get(key) for key in COMPARE_ACTION_KEYS) and not bool(
@@ -421,7 +566,51 @@ def _compare_source_report_checks_are_ready(
             f"Before/after contract for {name} has failed capture checks in source_report: "
             + ", ".join(missing_or_false),
         )
+    if any("before_after_visual_delta" in key for key in required):
+        score = _compare_source_report_delta_score(name, report)
+        if score is None:
+            return (
+                False,
+                f"Before/after contract for {name} has no numeric visual-delta score in source_report.",
+            )
+        if score < COMPARE_MIN_VISUAL_DELTA_SCORE:
+            return (
+                False,
+                f"Before/after contract for {name} has insufficient visual delta: "
+                f"{score:.2f} < {COMPARE_MIN_VISUAL_DELTA_SCORE:.2f}",
+            )
     return True, "compare source_report checks ok"
+
+
+def _compare_source_report_delta_score(name: str, report: dict[str, object]) -> float | None:
+    scores = report.get("before_after_visual_delta_scores")
+    if isinstance(scores, dict):
+        for key in COMPARE_REPORT_DELTA_SCORE_KEYS.get(name, ()):
+            try:
+                return float(scores[key])
+            except Exception:
+                continue
+    for key in (
+        "before_after_visual_delta_score",
+        "visible_delta_score",
+        "visual_delta_score",
+    ):
+        try:
+            return float(report[key])
+        except Exception:
+            continue
+    checks = report.get("checks")
+    if isinstance(checks, dict):
+        for key in (
+            "before_after_visual_delta_score",
+            "visible_delta_score",
+            "visual_delta_score",
+        ):
+            try:
+                return float(checks[key])
+            except Exception:
+                continue
+    return None
 
 
 def _contains_action(actions: list[str], *needles: str) -> bool:
@@ -453,6 +642,23 @@ def _compare_capture_contract_is_ready(name: str, image_path: Path) -> tuple[boo
         return False, f"Before/after contract for {name} says the result is neutral/original-like."
     if not bool(data.get("visible_delta")):
         return False, f"Before/after contract for {name} does not confirm a visible image delta."
+    for score_key in (
+        "before_after_visual_delta_score",
+        "visible_delta_score",
+        "visual_delta_score",
+    ):
+        if score_key in data:
+            try:
+                score = float(data.get(score_key) or 0.0)
+            except Exception:
+                return False, f"Before/after contract for {name} has a non-numeric visual-delta score."
+            if score < COMPARE_MIN_VISUAL_DELTA_SCORE:
+                return (
+                    False,
+                    f"Before/after contract for {name} has insufficient visual delta: "
+                    f"{score:.2f} < {COMPARE_MIN_VISUAL_DELTA_SCORE:.2f}",
+                )
+            break
 
     changed = data.get("changed_params") or data.get("parameters_changed") or data.get("applied_params")
     if isinstance(changed, dict):
@@ -474,7 +680,7 @@ def _compare_capture_contract_is_ready(name: str, image_path: Path) -> tuple[boo
             f"Before/after contract for {name} used unknown preset values but "
             "does not record an internet/reference source."
         )
-    ok, reason, actions = _compare_action_evidence(data, contract_path)
+    ok, reason, actions = _compare_action_evidence(data, contract_path, asset_name=name)
     if not ok:
         return False, reason
     ok, reason = _compare_source_report_checks_are_ready(name, data, contract_path)
@@ -676,6 +882,91 @@ def _overview_contract_is_ready(name: str, data: dict[str, object], tags: set[st
     return True, "multi-monitor overview contract ok"
 
 
+def _audio_contract_required_checks(name: str) -> tuple[str, ...]:
+    common = (
+        "media_imported",
+        "audio_extracted",
+        "audio_gain_set",
+        "waveform_ready",
+        "sound_editor_panel_visible",
+        "spectrum_strip_visible",
+        "reference_05_jog_shuttle_action",
+        "reference_05_jog_shuttle_visible",
+        "reference_05_jog_shuttle_action_state",
+    )
+    if name == "sound_graphs":
+        return common + (
+            "graph_eq_capture_nonblank",
+            "graph_dyn_capture_nonblank",
+            "graph_fx_capture_nonblank",
+            "graph_ai_capture_nonblank",
+            "graph_graph_contact_sheet_nonblank",
+        )
+    if name == "sound_workbench":
+        return common + (
+            "advanced_sound_lab_inline_visible",
+            "advanced_sound_lab_no_legacy_window",
+            "advanced_sound_lab_keeps_jog_visible",
+            "advanced_sound_lab_keeps_graph_stack_visible",
+            "advanced_sound_lab_keeps_graph_tabs_visible",
+            "advanced_sound_lab_keeps_spectrum_visible",
+            "workbench_screenshot_nonblank",
+        )
+    if name == "sound_editor":
+        return common + (
+            "editor_screenshot_nonblank",
+            "dock_screenshot_nonblank",
+            "mixer_mixer_tab_channel_strips_visible",
+            "mixer_mixer_tab_master_stereo_vu_visible",
+            "mixer_mixer_state_has_cubase_features",
+        )
+    return common
+
+
+def _audio_contract_is_ready(name: str, data: dict[str, object]) -> tuple[bool, str]:
+    if name not in {"sound_editor", "sound_workbench", "sound_graphs"}:
+        return True, "not an audio contract"
+    try:
+        version = int(data.get("sound_editor_ui_contract_version") or 0)
+    except Exception:
+        version = 0
+    if version < SOUND_EDITOR_CURRENT_UI_CONTRACT_VERSION:
+        return (
+            False,
+            "Sound Editor evidence is stale. Recapture with the current Workbench "
+            f"Sound Editor UI contract v{SOUND_EDITOR_CURRENT_UI_CONTRACT_VERSION}.",
+        )
+    if data.get("current_sound_editor_ui") is not True:
+        return False, "Sound Editor contract must set current_sound_editor_ui=true."
+    source_report = Path(str(data.get("source_report") or ""))
+    if not source_report.exists():
+        return False, f"Sound Editor source report is missing: {source_report}"
+    try:
+        report = json.loads(source_report.read_text(encoding="utf-8"))
+    except Exception as exc:
+        return False, f"Could not read Sound Editor source report: {exc}"
+    try:
+        report_version = int(report.get("sound_editor_ui_contract_version") or 0)
+    except Exception:
+        report_version = 0
+    if report_version < SOUND_EDITOR_CURRENT_UI_CONTRACT_VERSION:
+        return (
+            False,
+            "Sound Editor source report predates the current renewed UI contract.",
+        )
+    checks = report.get("checks") if isinstance(report.get("checks"), dict) else {}
+    missing = [key for key in _audio_contract_required_checks(name) if not bool(checks.get(key))]
+    if missing:
+        return (
+            False,
+            "Sound Editor source report is missing current UI proof checks: "
+            + ", ".join(missing),
+        )
+    if bool(data.get("legacy_sound_editor_window_only")):
+        return False, "Sound Editor page cannot use the legacy full sound editor window as the only evidence."
+    return True, "current Sound Editor contract ok"
+
+
 def _semantic_capture_contract_is_ready(name: str, image_path: Path) -> tuple[bool, str]:
     rules = SEMANTIC_CAPTURE_CONTRACTS.get(name)
     if not rules:
@@ -724,6 +1015,9 @@ def _semantic_capture_contract_is_ready(name: str, image_path: Path) -> tuple[bo
     if bool(data.get("substituted_from_other_feature")):
         return False, f"Semantic contract for {name} admits cross-feature substitution."
     ok, reason = _overview_contract_is_ready(name, data, tags)
+    if not ok:
+        return False, reason
+    ok, reason = _audio_contract_is_ready(name, data)
     if not ok:
         return False, reason
     if name in {"live2d_composite_editor", "mmd_composite_editor"} and not bool(
@@ -1277,11 +1571,57 @@ def _vtuber_capture_contract_is_ready(path: Path | None = None) -> tuple[bool, s
         or required_state.get("renderer")
         or ""
     )
+    source_subject = str(evidence.get("source_mapping_subject") or "")
+    inputs = data.get("inputs") if isinstance(data.get("inputs"), dict) else {}
+    is_trump_source = "trump" in source_subject.casefold() or any(
+        "trump" in str(value).casefold() for value in inputs.values()
+    )
+    visibility_policy = evidence.get("visibility_policy")
+    if not isinstance(visibility_policy, dict):
+        visibility_policy = required_state.get("visibility_policy") if isinstance(required_state.get("visibility_policy"), dict) else {}
+    source_exposure = str(
+        evidence.get("source_exposure")
+        or required_state.get("source_exposure")
+        or visibility_policy.get("source_exposure")
+        or ""
+    )
+    framing_preset = str(
+        evidence.get("framing_preset")
+        or required_state.get("framing_preset")
+        or visibility_policy.get("selected_framing_preset")
+        or ""
+    )
+    selected_visibility = str(
+        evidence.get("selected_avatar_visibility")
+        or visibility_policy.get("selected_avatar_visibility")
+        or ""
+    )
+    fit_crop_mode = str(
+        evidence.get("fit_crop_mode")
+        or required_state.get("fit_crop_mode")
+        or ""
+    )
+    fit_crop_height_ratio = _to_float(
+        evidence.get("fit_crop_height_ratio")
+        or required_state.get("fit_crop_height_ratio")
+    )
+    program_avatar_height_ratio = _to_float(
+        evidence.get("program_avatar_height_ratio")
+        or required_state.get("program_avatar_height_ratio")
+    )
+    program_avatar_bottom_gap_ratio = _to_float(
+        evidence.get("program_avatar_bottom_gap_ratio")
+        or required_state.get("program_avatar_bottom_gap_ratio")
+    )
+    program_avatar_grounded = bool(
+        evidence.get("program_avatar_grounded")
+        or required_state.get("program_avatar_grounded")
+    )
 
     if visual_source == "vrm_meta_thumbnail_texture":
-        return False, "VTuber evidence uses the VRM meta thumbnail; face-only thumbnails are invalid for Trump upper-body source."
+        return False, "VTuber evidence uses the VRM meta thumbnail; face-only thumbnails are invalid for Trump chest-up source."
     if not bool(evidence.get("review_product_evidence")):
-        return False, "VTuber avatar evidence is not marked as product-valid upper-body evidence."
+        return False, "VTuber avatar evidence is not marked as product-valid chest-up/bust-up evidence."
     missing = sorted(required - visible)
     if missing:
         return False, "VTuber avatar evidence is missing visible parts: " + ", ".join(missing)
@@ -1298,7 +1638,39 @@ def _vtuber_capture_contract_is_ready(path: Path | None = None) -> tuple[bool, s
         return False, "VTuber evidence reports a software renderer/source; product catalog requires GPU VRM output."
     if bool(evidence.get("ar_pbr_used")) or bool(evidence.get("pbr_used")):
         return False, "VTuber evidence must not use AR/PBR, Marmoset PBR, or full-gpu renderer paths."
-    return True, "VTuber upper-body evidence contract ready"
+    if is_trump_source:
+        if source_exposure not in {"chest_up", "bust_up"}:
+            return (
+                False,
+                "Trump VTuber source is a chest-up talk frame; catalog evidence must record "
+                f"source_exposure='chest_up', not {source_exposure!r}.",
+            )
+        if framing_preset != "bust_up" or selected_visibility != "head_to_mid_chest":
+            return (
+                False,
+                "Trump VTuber Program Output/Avatar Mapping must use bust_up/head_to_mid_chest framing "
+                f"to match the chest-up source. framing={framing_preset!r}, visibility={selected_visibility!r}",
+            )
+        if fit_crop_mode != "bust_up" or fit_crop_height_ratio is None or fit_crop_height_ratio > 0.48:
+            return (
+                False,
+                "Trump VTuber Program Output/Avatar Mapping must prove an actual bust_up crop, not only label it. "
+                f"crop_mode={fit_crop_mode!r}, crop_height_ratio={fit_crop_height_ratio!r}",
+            )
+        if (
+            program_avatar_height_ratio is None
+            or program_avatar_height_ratio < 0.42
+            or program_avatar_bottom_gap_ratio is None
+            or program_avatar_bottom_gap_ratio > 0.04
+            or not program_avatar_grounded
+        ):
+            return (
+                False,
+                "Trump VTuber Program Output avatar must be large and bottom-anchored, not tiny or floating. "
+                f"height_ratio={program_avatar_height_ratio!r}, "
+                f"bottom_gap_ratio={program_avatar_bottom_gap_ratio!r}, grounded={program_avatar_grounded!r}",
+            )
+    return True, "VTuber chest-up evidence contract ready"
 
 
 def _contract_string_values(value: object) -> list[str]:
@@ -1596,6 +1968,29 @@ def _ipad_detail_contract_is_ready(spec: "PageSpec", path: Path) -> tuple[bool, 
     contract = spec.ipad_contract
     if not contract:
         return True, "no iPad detail contract"
+    if contract == "node_effect_controls_only":
+        try:
+            with Image.open(path) as img:
+                width, height = img.size
+        except Exception as exc:
+            return False, f"Could not inspect Node Effects iPad/detail source image: {exc}"
+        full_w, full_h = DETAIL_IPAD_FULL_EDITOR_MIN_SIZE
+        if width >= full_w and height >= full_h:
+            return (
+                False,
+                "Node Effects iPad/detail source looks like a full editor capture "
+                f"({width}x{height}). Use the focused node graph/effect controls workbench crop, "
+                "not the full editor, media pool, viewer, or timeline.",
+            )
+        if width < 480 or height < 360:
+            return (
+                False,
+                f"Node Effects iPad/detail source is too small to explain the node controls: {width}x{height}",
+            )
+        ok, reason = _semantic_capture_contract_is_ready("node_effect_library_detail", path)
+        if not ok:
+            return False, reason
+        return True, f"{contract} ok: {width}x{height}"
     if contract != "color_controls_only":
         return False, f"Unknown iPad detail contract: {contract}"
 
@@ -1753,9 +2148,8 @@ def _make_spec_closing_slide(spec: "PageSpec", lang: str, page: int, total: int,
     base = Image.new("RGBA", (SLIDE_W, SLIDE_H), "#f8f7f4")
     draw = ImageDraw.Draw(base, "RGBA")
     mono = _font(16, mono=True)
+    section_font = _font(16, lang=lang, mono=(lang != "ko"))
     title_font = _font(56, lang=lang)
-    body_font = _font(13, lang=lang)
-    small_font = _font(11, lang=lang)
     section = "SPECIFICATION INDEX" if lang == "en" else "스펙 인덱스"
     title = "Specification\nIndex" if lang == "en" else "스펙\n인덱스"
     subtitle = (
@@ -1764,7 +2158,7 @@ def _make_spec_closing_slide(spec: "PageSpec", lang: str, page: int, total: int,
         else "캡처, 편집, 액터, 3D, AI, 오디오, 컬러, 전달까지 한 화면에서 이어지는 스튜디오 구성."
     )
     draw.line((115, 108, 272, 108), fill=(108, 108, 104, 255), width=1)
-    draw.text((115, 128), section, fill=(86, 87, 84, 255), font=mono)
+    draw.text((115, 128), section, fill=(86, 87, 84, 255), font=section_font)
     draw.text((115, 348), title, fill=(29, 30, 31, 255), font=title_font, spacing=8)
     subtitle_font = _font(18, lang=lang)
     subtitle_y = 518
@@ -1803,39 +2197,24 @@ def _make_spec_closing_slide(spec: "PageSpec", lang: str, page: int, total: int,
             base.alpha_composite(shadow, (shadow_x - 16, shadow_y - 6))
         base.paste(bonsai, (bx, by), bonsai)
 
-    if lang == "ko":
-        groups = [
-            ("캡처 / 미디어", ["화면 녹화", "YouTube Imports", "미디어 풀", "프록시/썸네일", "다중 포맷"]),
-            ("편집 코어", ["타임라인", "컷/분할", "멀티 트랙", "트랜지션", "키프레임"]),
-            ("피니싱", ["컬러 그레이딩", "노드 이펙트", "마스크", "비포/애프터", "렌더 큐"]),
-            ("캐릭터", ["Live2D", "Spine", "VRM VTuber", "MMD", "액터 트랙"]),
-            ("3D / 합성", ["AR/PBR", "Depth-aware", "오클루전", "Shadow Catch", "실시간 조명"]),
-            ("AI / 자동화", ["로컬 AI", "Claude", "Python Action", "MCP", "시나리오 실행"]),
-            ("오디오", ["사운드 에디터", "EQ", "Dynamics", "FX Curves", "레벨 그래프"]),
-            ("제품 기반", ["다국어 UI", "도킹 창", "멀티 모니터", "카탈로그 캡처", "확장 워크플로"]),
-        ]
-    else:
-        groups = [
-            ("Capture / Media", ["Screen recording", "YouTube Imports", "Media Pool", "Proxy/thumbnailing", "Multi-format"]),
-            ("Editing Core", ["Timeline", "Cut / split", "Multi-track", "Transitions", "Keyframes"]),
-            ("Finishing", ["Color grading", "Node effects", "Masks", "Before / after", "Render queue"]),
-            ("Actors", ["Live2D", "Spine", "VRM VTuber", "MMD", "Actor lanes"]),
-            ("3D / Composite", ["AR/PBR", "Depth-aware", "Occlusion", "Shadow catch", "Realtime lighting"]),
-            ("AI / Automation", ["Local AI", "Claude", "Python Action", "MCP", "Scenario runs"]),
-            ("Audio", ["Sound editor", "EQ", "Dynamics", "FX curves", "Level graphs"]),
-            ("Product Surface", ["Multilingual UI", "Dockable windows", "Multi-monitor", "Catalog capture", "Extensible workflows"]),
-        ]
-    col_x = [610, 790, 970]
-    y0 = 170
-    row_h = 160
+    groups = _spec_index_groups(lang)
+    heading_font = _font(12, lang=lang)
+    item_font = _font(10, lang=lang)
+    col_x = [600, 775, 950]
+    col_w = 158
+    y0 = 150
+    row_h = 136
     for idx, (heading, items) in enumerate(groups):
         x = col_x[idx % 3]
         y = y0 + (idx // 3) * row_h
-        draw.text((x, y), heading, fill=(30, 31, 32, 255), font=body_font)
-        yy = y + 25
+        draw.text((x, y), heading, fill=(30, 31, 32, 255), font=heading_font)
+        yy = y + 23
         for item in items:
-            draw.text((x, yy), f"- {item}", fill=(82, 84, 82, 255), font=small_font)
-            yy += 19
+            wrapped = _wrap_text(item, col_w - 14, item_font)[:2]
+            for line_index, line in enumerate(wrapped):
+                prefix = "- " if line_index == 0 else "  "
+                draw.text((x, yy), f"{prefix}{line}", fill=(82, 84, 82, 255), font=item_font)
+                yy += 16
     base.save(out_path)
 
 
@@ -2044,6 +2423,7 @@ PAGES = [
         laptop_frame=None,
         ipad_name="node_effect_library_detail",
         ipad_contain=True,
+        ipad_contract="node_effect_controls_only",
     ),
     PageSpec(
         "audio_workbench",

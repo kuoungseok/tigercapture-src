@@ -280,6 +280,8 @@ class WorkbenchPanel(QWidget):
     sound_editor_changed = Signal()
     sound_editor_mixer_track_changed = Signal(object)
     advanced_sound_lab_requested = Signal(object, object)
+    music_lab_action_requested = Signal(str, object)
+    music_lab_selection_changed = Signal(object)
     # Phase 2 NodeGraph integration: emitted when the user clicks one
     # of the node rows. Editor wires this to scroll/expand the
     # corresponding panel (currently only "color" → Color section).
@@ -775,6 +777,12 @@ class WorkbenchPanel(QWidget):
         self._sound_editor_panel.mixer_track_changed.connect(self._on_sound_editor_mixer_track_changed)
         self._sound_editor_panel.advanced_lab_requested.connect(
             self.advanced_sound_lab_requested.emit
+        )
+        self._sound_editor_panel.music_lab_action_requested.connect(
+            self.music_lab_action_requested.emit
+        )
+        self._sound_editor_panel.music_lab_selection_changed.connect(
+            self.music_lab_selection_changed.emit
         )
         self._sound_editor_panel.hide()
         self._tab_layouts["audio"].insertWidget(2, self._sound_editor_panel, stretch=1)
@@ -2372,6 +2380,19 @@ class WorkbenchPanel(QWidget):
 
     def _on_sound_editor_mixer_track_changed(self, track) -> None:
         self.sound_editor_mixer_track_changed.emit(track)
+
+    def refresh_music_lab_status(self, text: str) -> None:
+        panel = getattr(self, "_sound_editor_panel", None)
+        label = getattr(panel, "_music_status", None) if panel is not None else None
+        if label is not None and hasattr(label, "setText"):
+            label.setText(str(text or ""))
+
+    def set_music_lab_composition(self, composition: dict | None) -> None:
+        panel = getattr(self, "_sound_editor_panel", None)
+        if panel is not None and hasattr(panel, "set_music_composition"):
+            panel.set_music_composition(composition)
+            if hasattr(panel, "open_music_lab"):
+                panel.open_music_lab()
 
     def _audio_tracks_for_sound_editor(self, selected_track) -> list:
         seen: set[int] = set()
