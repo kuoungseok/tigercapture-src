@@ -1843,14 +1843,14 @@ class EditingAdapterMixin:
         changed: dict[str, Any] = {}
         allowed = {
             "video": ("locked", "muted", "pip_enabled", "pip_x", "pip_y", "pip_scale", "pip_opacity"),
-            "audio": ("locked", "muted", "volume", "pan", "label", "bus_id"),
+            "audio": ("locked", "muted", "solo", "volume", "pan", "label", "bus_id", "track_type"),
         }[kind_text]
         for key in allowed:
             if key not in params:
                 continue
             old[key] = getattr(track, key, None)
             value = params[key]
-            if key in {"locked", "muted", "pip_enabled"}:
+            if key in {"locked", "muted", "solo", "pip_enabled"}:
                 value = _bool(value)
             elif key in {"volume", "pan", "pip_x", "pip_y", "pip_scale", "pip_opacity"}:
                 value = _float(value, _float(old[key], 0.0))
@@ -1860,7 +1860,7 @@ class EditingAdapterMixin:
                     value = max(-1.0, min(1.0, value))
                 elif key == "pip_opacity":
                     value = max(0.0, min(1.0, value))
-            elif key in {"label", "bus_id"}:
+            elif key in {"label", "bus_id", "track_type"}:
                 value = str(value or "")
             setattr(track, key, value)
             changed[key] = value
@@ -2237,6 +2237,369 @@ class EditingAdapterMixin:
         if pan is not None:
             params["pan"] = pan
         return self.set_track_state(kind="audio", track_id=track_id, **params)
+
+    def set_audio_track_volume(self, *, track_id: int, volume: float) -> dict[str, Any]:
+        return self.set_track_state(kind="audio", track_id=track_id, volume=volume)
+
+    def set_audio_track_pan(self, *, track_id: int, pan: float) -> dict[str, Any]:
+        return self.set_track_state(kind="audio", track_id=track_id, pan=pan)
+
+    def set_audio_track_mute(self, *, track_id: int, muted: bool = True) -> dict[str, Any]:
+        return self.set_track_mute(kind="audio", track_id=track_id, muted=muted)
+
+    def set_audio_track_solo(self, *, track_id: int, solo: bool = True) -> dict[str, Any]:
+        return self.set_track_state(kind="audio", track_id=track_id, solo=solo)
+
+    def _normalize_audio_track_type(self, value: Any) -> str:
+        text = str(value or "").strip().lower().replace("-", "_").replace(" ", "_")
+        aliases = {
+            "dialog": "dialogue",
+            "voice": "dialogue",
+            "vox": "dialogue",
+            "music_stem": "music",
+            "bgm": "music",
+            "fx": "sfx",
+            "sound_fx": "sfx",
+            "amb": "ambience",
+            "ambient": "ambience",
+            "atmo": "ambience",
+        }
+        text = aliases.get(text, text)
+        return text if text in {"dialogue", "music", "sfx", "ambience"} else text[:24]
+
+    def _normalize_insert_slots(self, slots: Any) -> list[dict[str, Any]]:
+        from app.audio_tracks import default_track_insert_slots
+
+        defaults = {str(row["id"]): dict(row) for row in default_track_insert_slots()}
+        rows: list[dict[str, Any]] = []
+        for row in list(slots or []):
+            if not isinstance(row, Mapping):
+                continue
+            sid = str(row.get("id") or row.get("slot") or "").strip().lower()
+            if not sid:
+                continue
+            base = dict(defaults.get(sid, {"id": sid, "label": sid.upper(), "enabled": False, "bypassed": False}))
+            base["enabled"] = _bool(row.get("enabled"), bool(base.get("enabled")))
+            base["bypassed"] = _bool(row.get("bypassed"), bool(base.get("bypassed")))
+            base["label"] = str(row.get("label") or base.get("label") or sid.upper())[:6]
+            rows.append(base)
+        seen = {str(row.get("id")) for row in rows}
+        for sid, row in defaults.items():
+            if sid not in seen:
+                rows.append(dict(row))
+        return rows
+
+    def _normalize_sends(self, sends: Any) -> dict[str, float]:
+        from app.audio_tracks import default_track_sends
+
+        values = default_track_sends()
+        if isinstance(sends, Mapping):
+            for key, value in sends.items():
+                sid = str(key or "").strip().lower()
+                if not sid:
+                    continue
+                values[sid] = max(0.0, min(1.0, _float(value, 0.0)))
+        return values
+
+    def set_audio_track_type(self, *, track_id: int, track_type: str) -> dict[str, Any]:
+        value = self._normalize_audio_track_type(track_type)
+        return self.set_track_state(kind="audio", track_id=track_id, track_type=value)
+
+    def set_audio_track_insert(
+        self,
+        *,
+        track_id: int,
+        slot: str,
+        enabled: bool | None = None,
+        bypassed: bool | None = None,
+    ) -> dict[str, Any]:
+        track = self._audio_track(track_id)
+        slots = self._normalize_insert_slots(getattr(track, "insert_slots", None))
+        target = str(slot or "").strip().lower()
+        if target in {"dynamics", "dynamic"}:
+            target = "dyn"
+        if target not in {str(row.get("id")) for row in slots}:
+            slots.append({"id": target, "label": target.upper()[:6], "enabled": False, "bypassed": False})
+        old = copy.deepcopy(slots)
+        for row in slots:
+            if str(row.get("id")) != target:
+                continue
+            if enabled is not None:
+                row["enabled"] = _bool(enabled)
+            if bypassed is not None:
+                row["bypassed"] = _bool(bypassed)
+            if enabled is None and bypassed is None:
+                row["enabled"] = not bool(row.get("enabled"))
+        track.insert_slots = slots
+        self._update_audio_track(track)
+        self._after_timeline_mutation("Action set audio track insert")
+        return {"track_id": _int(track_id), "slot": target, "old": old, "new": slots}
+
+    def set_audio_track_send_level(self, *, track_id: int, send_id: str, level: float) -> dict[str, Any]:
+        track = self._audio_track(track_id)
+        sends = self._normalize_sends(getattr(track, "sends", None))
+        sid = str(send_id or "").strip().lower()
+        if sid in {"rev", "verb"}:
+            sid = "reverb"
+        if sid in {"dly"}:
+            sid = "delay"
+        old = dict(sends)
+        sends[sid] = max(0.0, min(1.0, _float(level, 0.0)))
+        track.sends = sends
+        self._update_audio_track(track)
+        self._after_timeline_mutation("Action set audio send level")
+        return {"track_id": _int(track_id), "send_id": sid, "old": old, "new": dict(sends)}
+
+    def route_audio_track_to_bus(self, *, track_id: int, bus_id: str) -> dict[str, Any]:
+        return self.set_track_state(kind="audio", track_id=track_id, bus_id=str(bus_id or "master").strip() or "master")
+
+    def _audio_track_meter_row(self, track: Any, index: int, *, solo_active: bool) -> dict[str, Any]:
+        volume = max(0.0, min(1.5, _float(getattr(track, "volume", 1.0), 1.0)))
+        pan = max(-1.0, min(1.0, _float(getattr(track, "pan", 0.0), 0.0)))
+        audible = not bool(getattr(track, "muted", False)) and (not solo_active or bool(getattr(track, "solo", False)))
+        level = 0.0 if not audible else min(1.0, max(0.03, volume * 0.62))
+        left = min(1.0, level * (1.0 - max(0.0, pan) * 0.35))
+        right = min(1.0, level * (1.0 + min(0.0, pan) * 0.35))
+        peak = min(1.0, max(left, right) + (0.12 if volume > 0.82 else 0.06))
+        clipped = bool(volume >= 1.18 and audible)
+        return {
+            "track_id": _int(getattr(track, "id", index + 1), index + 1),
+            "level_l": round(left, 4),
+            "level_r": round(right, 4),
+            "peak_hold": round(peak, 4),
+            "clip_led": clipped,
+            "audible": audible,
+        }
+
+    def audio_track_meter_state(self, *, track_id: int | None = None) -> dict[str, Any]:
+        owner = self._require_owner()
+        tracks = list(getattr(owner, "_audio_tracks", []) or [])
+        solo_active = any(bool(getattr(track, "solo", False)) for track in tracks)
+        rows = [
+            self._audio_track_meter_row(track, index, solo_active=solo_active)
+            for index, track in enumerate(tracks)
+            if track_id is None or _int(getattr(track, "id", -1), -1) == _int(track_id)
+        ]
+        return {
+            "schema": "tigerstudio.audio.meter.v1",
+            "track_count": len(rows),
+            "tracks": rows,
+        }
+
+    def audio_automation_state(self, *, track_id: int | None = None) -> dict[str, Any]:
+        owner = self._require_owner()
+        tracks = list(getattr(owner, "_audio_tracks", []) or [])
+        rows: list[dict[str, Any]] = []
+        for index, track in enumerate(tracks):
+            tid = _int(getattr(track, "id", index + 1), index + 1)
+            if track_id is not None and tid != _int(track_id):
+                continue
+            lanes = dict(getattr(track, "automation_lanes", {}) or {})
+            if getattr(track, "automation_points", None):
+                lanes.setdefault("volume", list(getattr(track, "automation_points", []) or []))
+            rows.append(
+                {
+                    "track_id": tid,
+                    "read": bool(getattr(track, "automation_read", True)),
+                    "write": bool(getattr(track, "automation_write", False)),
+                    "lanes": lanes,
+                    "point_count": sum(len(list(points or [])) for points in lanes.values()),
+                }
+            )
+        return {"schema": "tigerstudio.audio.automation.v1", "tracks": rows, "track_count": len(rows)}
+
+    def write_audio_automation(
+        self,
+        *,
+        track_id: int,
+        parameter: str = "volume",
+        time_ms: int | None = None,
+        value: float | None = None,
+        read: bool | None = None,
+        write: bool | None = None,
+    ) -> dict[str, Any]:
+        track = self._audio_track(track_id)
+        old = {
+            "automation_read": bool(getattr(track, "automation_read", True)),
+            "automation_write": bool(getattr(track, "automation_write", False)),
+            "automation_points": copy.deepcopy(list(getattr(track, "automation_points", []) or [])),
+            "automation_lanes": copy.deepcopy(dict(getattr(track, "automation_lanes", {}) or {})),
+        }
+        if read is not None:
+            track.automation_read = _bool(read, True)
+        if write is not None:
+            track.automation_write = _bool(write, False)
+        else:
+            track.automation_write = True
+        parameter_id = str(parameter or "volume").strip().lower()
+        if value is not None:
+            extent = max(1, _int(getattr(track, "extent_ms", lambda: 1)()))
+            norm = max(0.0, min(1.0, _float(time_ms, 0.0) / float(extent)))
+            point = [round(norm, 6), _float(value, 1.0)]
+            lanes = dict(getattr(track, "automation_lanes", {}) or {})
+            lane = list(lanes.get(parameter_id, []) or [])
+            lane.append(point)
+            lane.sort(key=lambda row: _float(row[0], 0.0))
+            lanes[parameter_id] = lane
+            track.automation_lanes = lanes
+            if parameter_id == "volume":
+                track.automation_points = lane
+        self._update_audio_track(track)
+        self._after_timeline_mutation("Action write audio automation")
+        return {"track_id": _int(track_id), "parameter": parameter_id, "old": old, "new": self.audio_automation_state(track_id=track_id)["tracks"][0]}
+
+    def clear_audio_automation(self, *, track_id: int, parameter: str | None = None) -> dict[str, Any]:
+        track = self._audio_track(track_id)
+        old = self.audio_automation_state(track_id=track_id)
+        parameter_id = str(parameter or "").strip().lower()
+        if parameter_id:
+            lanes = dict(getattr(track, "automation_lanes", {}) or {})
+            lanes.pop(parameter_id, None)
+            track.automation_lanes = lanes
+            if parameter_id == "volume":
+                track.automation_points = []
+        else:
+            track.automation_lanes = {}
+            track.automation_points = []
+            track.automation_write = False
+        self._update_audio_track(track)
+        self._after_timeline_mutation("Action clear audio automation")
+        return {"track_id": _int(track_id), "parameter": parameter_id or "all", "old": old, "new": self.audio_automation_state(track_id=track_id)}
+
+    def _audio_mixer_snapshot_rows(self) -> list[dict[str, Any]]:
+        rows: list[dict[str, Any]] = []
+        for index, track in enumerate(list(getattr(self._require_owner(), "_audio_tracks", []) or [])):
+            rows.append(
+                {
+                    "track_id": _int(getattr(track, "id", index + 1), index + 1),
+                    "volume": _float(getattr(track, "volume", 1.0), 1.0),
+                    "pan": _float(getattr(track, "pan", 0.0), 0.0),
+                    "muted": bool(getattr(track, "muted", False)),
+                    "solo": bool(getattr(track, "solo", False)),
+                    "bus_id": str(getattr(track, "bus_id", "master") or "master"),
+                    "track_type": str(getattr(track, "track_type", "") or ""),
+                    "insert_slots": copy.deepcopy(list(getattr(track, "insert_slots", []) or [])),
+                    "sends": copy.deepcopy(dict(getattr(track, "sends", {}) or {})),
+                    "automation_read": bool(getattr(track, "automation_read", True)),
+                    "automation_write": bool(getattr(track, "automation_write", False)),
+                }
+            )
+        return rows
+
+    def _audio_mixer_snapshots(self) -> list[dict[str, Any]]:
+        owner = self._require_owner()
+        snapshots = getattr(owner, "_audio_mixer_snapshots", None)
+        if not isinstance(snapshots, list):
+            snapshots = []
+            owner._audio_mixer_snapshots = snapshots
+        return snapshots
+
+    def save_audio_mixer_snapshot(self, *, snapshot_id: str | None = None, name: str | None = None) -> dict[str, Any]:
+        snapshots = self._audio_mixer_snapshots()
+        sid = str(snapshot_id or "").strip() or f"mix_{len(snapshots) + 1}"
+        row = {
+            "id": sid,
+            "name": str(name or sid),
+            "schema": "tigerstudio.audio.mixer.snapshot.v1",
+            "tracks": self._audio_mixer_snapshot_rows(),
+        }
+        before = len(snapshots)
+        snapshots[:] = [snap for snap in snapshots if str(snap.get("id")) != sid]
+        snapshots.append(row)
+        self._after_timeline_mutation("Action save audio mixer snapshot")
+        return {"snapshot": row, "snapshot_count_before": before, "snapshot_count": len(snapshots)}
+
+    def _find_audio_mixer_snapshot(self, snapshot_id: str) -> dict[str, Any]:
+        sid = str(snapshot_id or "").strip()
+        for row in self._audio_mixer_snapshots():
+            if str(row.get("id")) == sid:
+                return row
+        raise ValueError(f"audio mixer snapshot not found: {sid}")
+
+    def apply_audio_mixer_snapshot(self, *, snapshot_id: str) -> dict[str, Any]:
+        snapshot = self._find_audio_mixer_snapshot(snapshot_id)
+        tracks_by_id = {
+            _int(getattr(track, "id", -1), -1): track
+            for track in list(getattr(self._require_owner(), "_audio_tracks", []) or [])
+        }
+        applied: list[int] = []
+        for row in list(snapshot.get("tracks") or []):
+            track = tracks_by_id.get(_int(row.get("track_id"), -1))
+            if track is None:
+                continue
+            for key in ("volume", "pan", "muted", "solo", "bus_id", "track_type", "insert_slots", "sends", "automation_read", "automation_write"):
+                if key in row:
+                    setattr(track, key, copy.deepcopy(row[key]))
+            self._update_audio_track(track)
+            applied.append(_int(getattr(track, "id", 0)))
+        self._after_timeline_mutation("Action apply audio mixer snapshot")
+        return {"snapshot_id": str(snapshot_id), "applied_track_ids": applied, "applied_count": len(applied)}
+
+    def compare_audio_mixer_snapshot(self, *, snapshot_id: str) -> dict[str, Any]:
+        snapshot = self._find_audio_mixer_snapshot(snapshot_id)
+        current = {row["track_id"]: row for row in self._audio_mixer_snapshot_rows()}
+        deltas: list[dict[str, Any]] = []
+        for row in list(snapshot.get("tracks") or []):
+            tid = _int(row.get("track_id"), -1)
+            now = current.get(tid)
+            if now is None:
+                deltas.append({"track_id": tid, "status": "missing_current"})
+                continue
+            changes: dict[str, dict[str, Any]] = {}
+            for key in ("volume", "pan", "muted", "solo", "bus_id", "track_type", "insert_slots", "sends", "automation_read", "automation_write"):
+                if now.get(key) != row.get(key):
+                    changes[key] = {"snapshot": row.get(key), "current": now.get(key)}
+            if changes:
+                deltas.append({"track_id": tid, "changes": changes})
+        return {"snapshot_id": str(snapshot_id), "delta_count": len(deltas), "deltas": deltas}
+
+    def audio_mixer_state(self) -> dict[str, Any]:
+        owner = self._require_owner()
+        tracks = list(getattr(owner, "_audio_tracks", []) or [])
+        panel = getattr(owner, "_audio_mixer_panel", None)
+        payload = getattr(panel, "mixer_state_payload", None)
+        if callable(payload):
+            try:
+                row = dict(payload(tracks) or {})
+                row["snapshot_count"] = len(list(getattr(owner, "_audio_mixer_snapshots", []) or []))
+                return row
+            except Exception:
+                pass
+        solo_active = any(bool(getattr(track, "solo", False)) for track in tracks)
+        rows: list[dict[str, Any]] = []
+        for index, track in enumerate(tracks):
+            meter = self._audio_track_meter_row(track, index, solo_active=solo_active)
+            rows.append(
+                {
+                    "id": _int(getattr(track, "id", index + 1), index + 1),
+                    "index": index,
+                    "label": str(getattr(track, "display_name", "") or getattr(track, "label", "") or f"Audio {index + 1}"),
+                    "volume": _float(getattr(track, "volume", 1.0), 1.0),
+                    "pan": _float(getattr(track, "pan", 0.0), 0.0),
+                    "muted": bool(getattr(track, "muted", False)),
+                    "solo": bool(getattr(track, "solo", False)),
+                    "audible": not bool(getattr(track, "muted", False)) and (not solo_active or bool(getattr(track, "solo", False))),
+                    "bus_id": str(getattr(track, "bus_id", "master") or "master"),
+                    "track_type": str(getattr(track, "track_type", "") or ""),
+                    "insert_slots": self._normalize_insert_slots(getattr(track, "insert_slots", None)),
+                    "sends": self._normalize_sends(getattr(track, "sends", None)),
+                    "automation": {
+                        "read": bool(getattr(track, "automation_read", True)),
+                        "write": bool(getattr(track, "automation_write", False)),
+                        "point_count": len(list(getattr(track, "automation_points", []) or [])),
+                    },
+                    "meter": meter,
+                    "clip_count": len(list(getattr(track, "clips", []) or [])),
+                    "loaded": bool(getattr(track, "is_loaded", False)),
+                }
+            )
+        return {
+            "schema": "tigerstudio.audio.mixer.v1",
+            "track_count": len(rows),
+            "solo_active": solo_active,
+            "snapshot_count": len(list(getattr(owner, "_audio_mixer_snapshots", []) or [])),
+            "tracks": rows,
+        }
 
     def sound_editor_jog_shuttle_state(self, *, track_id: int, clip_id: int) -> dict[str, Any]:
         track, clip = self._audio_track_and_clip(track_id, clip_id)

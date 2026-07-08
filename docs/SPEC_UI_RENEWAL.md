@@ -744,9 +744,40 @@ Already started:
   applying those edits to the real extracted Timeline audio clip state, not to
   a generated mock image.
   Latest verified output:
-  `debugCapture/ui_renewal_sound_editor_full_feature_round_1/sound_editor_qa.json`
+  `debugCapture/ui_renewal_sound_editor_cubase_round_1/sound_editor_qa.json`,
+  `debugCapture/ui_renewal_sound_editor_cubase_round_1/sound_editor_graphs_contact_sheet.png`,
   and
-  `debugCapture/ui_renewal_sound_editor_full_feature_round_1/sound_editor_graphs_contact_sheet.png`.
+  `debugCapture/ui_renewal_sound_editor_cubase_round_1/dock_sound_editor_mixer_action.png`.
+- The Sound Editor jog shuttle visual direction is now a low-saturation
+  brushed-metal dial with no long center notch. The dial body now comes from
+  the permanent project resource
+  `resources/ui/sound_editor/jog_dial_metal_sparse_base.png`, while the active
+  sparse eight-slot LED set is still painted by the editor so jog state and
+  playback animation remain live. Latest verification:
+  `debugCapture/sound_jog_resource_texture_clipped_20260708/sound_editor_qa.json`.
+- The Workbench Sound Editor now has a `Mixer` tab with compact audio channel
+  strips for track-level mixing. Each strip exposes a vertical fader, level
+  meter with peak/clip indication, pan slider, Mute, Solo, automation R/W,
+  insert slots, send levels, and a track type badge in the renewed
+  low-saturation audio theme.
+  The Sound Editor mixer pan and fader controls are custom-painted local
+  widgets, not stylesheet `QSlider` chrome: pan uses a small graphite center
+  rail, and the vertical fader uses a recessed channel strip rail with a quiet
+  metal cap and low-saturation live fill. The timeline Audio Mixer panel
+  mirrors Mute/Solo, detached Sound Editor docks inherit the full mixer track
+  context, stale widgets are hidden before mixer rebuilds, and automation can
+  emit `tigerstudio.audio.mixer.v1`, `tigerstudio.audio.meter.v1`, and
+  `tigerstudio.audio.automation.v1` state. Mixer snapshots are persisted with
+  project/history snapshots so local AI can compare and restore mix states.
+  AI-facing actions:
+  `audio.track.set_volume`, `audio.track.set_pan`, `audio.track.mute`,
+  `audio.track.solo`, `audio.track.set_type`, `audio.track.insert.set`,
+  `audio.track.send.set_level`, `audio.track.route_to_bus`,
+  `audio.track.meter.state`, `audio.automation.state`,
+  `audio.automation.write`, `audio.automation.clear`,
+  `audio.mixer.snapshot.save`, `audio.mixer.snapshot.compare`,
+  `audio.mixer.snapshot.apply`, and `audio.mixer.state`. Latest QA screenshot:
+  `debugCapture/ui_renewal_sound_editor_cubase_round_1/dock_sound_editor_mixer_action.png`.
 - Color grading nodes now switch the Workbench stack to a right-side
   `Color Grading` inspector instead of opening the old wide bottom wheel dock.
   The default editor surface now reads as Viewer left, color controls right,
@@ -767,8 +798,11 @@ Already started:
   is bound to real `color_grade` state, not a fake catalog overlay.
 - The right-side `Color Grading` workbench now places larger color wheels beside
   a compact Scopes card. The scope widget samples the current preview pixmap for
-  its mini waveform/vectorscope marks, so catalog/review captures remain based
-  on the live editor state.
+  larger live-preview `Luma / Levels`, `Histogram`, `RGB Parade`, and `Vectorscope`
+  graphs through `app.color_scopes.render_scope`, so catalog/review captures
+  remain based on the live editor state instead of decorative marks. The
+  Scopes card can also open a detached `Color Scopes` dock while keeping the
+  Workbench copy visible.
 - Timeline drag palette cards in `app/effect_cards.py` now use the same compact
   neutral tile language with thin color-coded folds/strips for meaning. Fade
   uses a code-native icon, and the Speed card's visible preset labels are clean

@@ -112,6 +112,212 @@ def register_audio_actions(registry: Any) -> None:
         dry_summary="audio track mix would change",
     )
     registry.register_adapter_action(
+        "audio.track.set_volume",
+        "Set one audio track volume fader.",
+        "audio",
+        "set_audio_track_volume",
+        params_schema=schema_object(
+            {"track_id": {"type": "integer"}, "volume": {"type": "number", "minimum": 0, "maximum": 1.5}},
+            required=("track_id", "volume"),
+        ),
+        required=("track_id", "volume"),
+        undo_label="Set audio track volume",
+        dry_summary="audio track volume would change",
+    )
+    registry.register_adapter_action(
+        "audio.track.set_pan",
+        "Set one audio track pan value.",
+        "audio",
+        "set_audio_track_pan",
+        params_schema=schema_object(
+            {"track_id": {"type": "integer"}, "pan": {"type": "number", "minimum": -1, "maximum": 1}},
+            required=("track_id", "pan"),
+        ),
+        required=("track_id", "pan"),
+        undo_label="Set audio track pan",
+        dry_summary="audio track pan would change",
+    )
+    registry.register_adapter_action(
+        "audio.track.mute",
+        "Mute or unmute one audio track without changing its fader value.",
+        "audio",
+        "set_audio_track_mute",
+        params_schema=schema_object(
+            {"track_id": {"type": "integer"}, "muted": {"type": "boolean"}},
+            required=("track_id", "muted"),
+        ),
+        required=("track_id", "muted"),
+        undo_label="Set audio track mute",
+        dry_summary="audio track mute state would change",
+    )
+    registry.register_adapter_action(
+        "audio.track.solo",
+        "Solo or unsolo one audio track.",
+        "audio",
+        "set_audio_track_solo",
+        params_schema=schema_object(
+            {"track_id": {"type": "integer"}, "solo": {"type": "boolean"}},
+            required=("track_id", "solo"),
+        ),
+        required=("track_id", "solo"),
+        undo_label="Set audio track solo",
+        dry_summary="audio track solo state would change",
+    )
+    registry.register_adapter_action(
+        "audio.track.set_type",
+        "Set one audio track role/type badge such as dialogue, music, sfx, or ambience.",
+        "audio",
+        "set_audio_track_type",
+        params_schema=schema_object(
+            {"track_id": {"type": "integer"}, "track_type": {"type": "string"}},
+            required=("track_id", "track_type"),
+        ),
+        required=("track_id", "track_type"),
+        undo_label="Set audio track type",
+        dry_summary="audio track type badge would change",
+    )
+    registry.register_adapter_action(
+        "audio.track.insert.set",
+        "Set one audio track insert slot state for EQ, dynamics, or FX.",
+        "audio",
+        "set_audio_track_insert",
+        params_schema=schema_object(
+            {
+                "track_id": {"type": "integer"},
+                "slot": {"type": "string"},
+                "enabled": {"type": "boolean"},
+                "bypassed": {"type": "boolean"},
+            },
+            required=("track_id", "slot"),
+        ),
+        required=("track_id", "slot"),
+        undo_label="Set audio track insert",
+        dry_summary="audio track insert slot would change",
+    )
+    registry.register_adapter_action(
+        "audio.track.send.set_level",
+        "Set one audio track send level.",
+        "audio",
+        "set_audio_track_send_level",
+        params_schema=schema_object(
+            {
+                "track_id": {"type": "integer"},
+                "send_id": {"type": "string"},
+                "level": {"type": "number", "minimum": 0, "maximum": 1},
+            },
+            required=("track_id", "send_id", "level"),
+        ),
+        required=("track_id", "send_id", "level"),
+        undo_label="Set audio send level",
+        dry_summary="audio track send level would change",
+    )
+    registry.register_adapter_action(
+        "audio.track.route_to_bus",
+        "Route one audio track to a mixer bus.",
+        "audio",
+        "route_audio_track_to_bus",
+        params_schema=schema_object(
+            {"track_id": {"type": "integer"}, "bus_id": {"type": "string"}},
+            required=("track_id", "bus_id"),
+        ),
+        required=("track_id", "bus_id"),
+        undo_label="Route audio track",
+        dry_summary="audio track bus route would change",
+    )
+    registry.register_adapter_action(
+        "audio.track.meter.state",
+        "Read deterministic audio track meter, peak hold, and clip LED state.",
+        "audio",
+        "audio_track_meter_state",
+        params_schema=schema_object({"track_id": {"type": "integer"}}),
+        mutating=False,
+        changed=False,
+        dry_summary="audio track meter state would be read",
+    )
+    registry.register_adapter_action(
+        "audio.automation.state",
+        "Read audio mixer automation read/write state and lane points.",
+        "audio",
+        "audio_automation_state",
+        params_schema=schema_object({"track_id": {"type": "integer"}}),
+        mutating=False,
+        changed=False,
+        dry_summary="audio automation state would be read",
+    )
+    registry.register_adapter_action(
+        "audio.automation.write",
+        "Write or update one audio automation point and enable write/read state.",
+        "audio",
+        "write_audio_automation",
+        params_schema=schema_object(
+            {
+                "track_id": {"type": "integer"},
+                "parameter": {"type": "string"},
+                "time_ms": {"type": "integer", "minimum": 0},
+                "value": {"type": "number"},
+                "read": {"type": "boolean"},
+                "write": {"type": "boolean"},
+            },
+            required=("track_id",),
+        ),
+        required=("track_id",),
+        undo_label="Write audio automation",
+        dry_summary="audio automation would change",
+    )
+    registry.register_adapter_action(
+        "audio.automation.clear",
+        "Clear audio automation points for one track.",
+        "audio",
+        "clear_audio_automation",
+        params_schema=schema_object(
+            {"track_id": {"type": "integer"}, "parameter": {"type": "string"}},
+            required=("track_id",),
+        ),
+        required=("track_id",),
+        undo_label="Clear audio automation",
+        dry_summary="audio automation would be cleared",
+    )
+    registry.register_adapter_action(
+        "audio.mixer.snapshot.save",
+        "Save the current audio mixer state as a restorable snapshot.",
+        "audio",
+        "save_audio_mixer_snapshot",
+        params_schema=schema_object({"snapshot_id": {"type": "string"}, "name": {"type": "string"}}),
+        undo_label="Save audio mixer snapshot",
+        dry_summary="audio mixer snapshot would be saved",
+    )
+    registry.register_adapter_action(
+        "audio.mixer.snapshot.apply",
+        "Apply a saved audio mixer snapshot.",
+        "audio",
+        "apply_audio_mixer_snapshot",
+        params_schema=schema_object({"snapshot_id": {"type": "string"}}, required=("snapshot_id",)),
+        required=("snapshot_id",),
+        undo_label="Apply audio mixer snapshot",
+        dry_summary="audio mixer snapshot would be applied",
+    )
+    registry.register_adapter_action(
+        "audio.mixer.snapshot.compare",
+        "Compare the current audio mixer state against a saved snapshot.",
+        "audio",
+        "compare_audio_mixer_snapshot",
+        params_schema=schema_object({"snapshot_id": {"type": "string"}}, required=("snapshot_id",)),
+        required=("snapshot_id",),
+        mutating=False,
+        changed=False,
+        dry_summary="audio mixer snapshot would be compared",
+    )
+    registry.register_adapter_action(
+        "audio.mixer.state",
+        "Read the current audio mixer state for local AI planning.",
+        "audio",
+        "audio_mixer_state",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="audio mixer state would be read",
+    )
+    registry.register_adapter_action(
         "audio.sound_editor.jog_shuttle.state",
         "Read the Workbench Sound Editor jog shuttle state for an audio clip.",
         "audio",

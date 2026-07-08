@@ -1,6 +1,6 @@
 # Current-Spec Presentation Scenario
 
-Last updated: 2026-07-03
+Last updated: 2026-07-08
 
 Canonical review automation rule hub:
 
@@ -242,20 +242,32 @@ The deck should feel like a studio tour, not a feature checklist.
 ### 13. Sound Editor And Audio Tracks
 
 - Message: audio editing is moving into a dedicated dock/workbench.
-- Visual: Sound Editor with waveform/spectrum/EQ or levels; timeline audio lane
-  visible if possible.
+- Visual: Sound Editor with waveform/spectrum/EQ or Mixer levels; timeline audio
+  lane visible if possible.
 - Capture recipe:
-  `audio.extract_from_video -> audio.clip.set_gain -> audio.track.set_mix ->
-  open sound editor -> capture`.
-- Current gap: registered Sound Editor effect actions are limited; some capture
-  wiring may still be needed.
+  `audio.extract_from_video -> audio.clip.set_gain ->
+  audio.track.set_volume / audio.track.set_pan / audio.track.mute /
+  audio.track.solo -> audio.track.set_type -> audio.track.insert.set ->
+  audio.track.send.set_level -> audio.track.route_to_bus ->
+  audio.automation.write -> audio.track.meter.state ->
+  audio.mixer.snapshot.save -> audio.mixer.state -> open sound editor Mixer ->
+  capture`.
+- Current status: the renewed Sound Editor QA imports real video, creates three
+  audio tracks, verifies `tigerstudio.audio.mixer.v1`, and captures the detached
+  Mixer dock with renewed custom pan/fader controls, peak/clip indication,
+  insert/send controls, automation R/W, track type badges, and snapshot-backed
+  action state at
+  `debugCapture/ui_renewal_sound_editor_cubase_round_1/dock_sound_editor_mixer_action.png`.
 
 ### 14. Typography And Subtitles
 
-- Message: text/title layers are timeline objects with keyframes and style.
-- Visual: preview text over real video, text clip/keyframes, title controls.
+- Message: text/title layers are timeline objects with presets, multilingual
+  font fallback, keyframes, and style controls.
+- Visual: a large title on the preview, secondary/body text, text clips or lanes
+  on the timeline, keyframes, and title/typography controls. Tiny subtitle-only
+  captures are not enough for this page.
 - Capture recipe:
-  `text.add -> text.set_keyframes -> capture`.
+  `text.add large title -> text.add subtitle/body -> text.set_keyframes -> focus text controls -> capture`.
 
 ### 15. Transitions And Effects
 
@@ -414,7 +426,7 @@ good enough:
 | Color | wheels/sliders/scopes visible with real footage. |
 | Node | connected graph plus selected node controls. |
 | Audio | waveform/spectrum/mixer/Sound Editor visible. |
-| Typography | text on canvas plus keyframes/controls. |
+| Typography | large title/body text on canvas plus text lanes, keyframes, and controls. |
 | Live2D | actor visible plus actor lane/controls. |
 | Spine | only known-good renderer evidence; otherwise appendix blocked state. |
 | AR/PBR | Poly Haven camera scene from `E:\ClaudeCodeApp\3d\polyhaven_pbr_camera_scene`; do not use motorcycle debug evidence. |

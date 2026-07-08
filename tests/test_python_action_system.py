@@ -133,10 +133,45 @@ def test_action_registry_exposes_safe_initial_specs():
         "timeline.summary",
         "timeline.nle_status",
         "timeline.professional_nle_readiness",
+        "timeline.nle_target_gap",
         "timeline.nle_evidence",
         "nle.real_corpus.status",
+        "nle.real_corpus.discover",
+        "nle.real_corpus.intake_board",
+        "nle.real_corpus.collection_kit",
+        "nle.real_corpus.gate_board",
+        "nle.real_corpus.workbench",
+        "nle.real_corpus.validation_plan",
+        "nle.real_corpus.validation_packet",
+        "nle.real_corpus.validation_preflight",
+        "nle.real_corpus.validation_report",
+        "nle.real_corpus.validation_evidence.register",
         "timeline.nle_fuzzer.status",
+        "timeline.core_action_coverage",
+        "timeline.nle_core_safety_matrix",
         "timeline.undo_health",
+        "timeline.undo_review_board",
+        "timeline.undo_recovery_playbook",
+        "timeline.undo_stability_dashboard",
+        "timeline.undo_long_session_plan",
+        "timeline.magnetic_storyline.status",
+        "timeline.magnetic_storyline.apply",
+        "timeline.magnetic_storyline.drag_preview",
+        "timeline.storyline_gesture_polish_board",
+        "timeline.connected_clips.status",
+        "timeline.connected_clips.connect",
+        "timeline.connected_clips.anchor_overlay",
+        "timeline.role_colors.status",
+        "timeline.role_lanes.status",
+        "timeline.role_lanes.focus",
+        "timeline.role_lanes.filter_model",
+        "timeline.clip_role.set",
+        "timeline.auditions.status",
+        "timeline.audition.compare",
+        "timeline.audition.add_take",
+        "timeline.audition.switch_take",
+        "timeline.audition.rename_take",
+        "timeline.audition.remove_take",
         "timeline.multicam.summary",
         "timeline.multicam.create_group",
         "timeline.multicam.sync_plan",
@@ -144,6 +179,11 @@ def test_action_registry_exposes_safe_initial_specs():
         "timeline.multicam.angle_bins",
         "timeline.multicam.set_active_angle",
         "timeline.multicam.switcher_workbench",
+        "timeline.multicam.tile_board",
+        "timeline.multicam.review_board",
+        "timeline.multicam.sync_quality_board",
+        "timeline.multicam.waveform_sync_board",
+        "timeline.multicam.export_parity_board",
         "timeline.multicam.export_handoff",
         "creative_layer.readiness",
         "timeline.edit_points",
@@ -161,6 +201,10 @@ def test_action_registry_exposes_safe_initial_specs():
         "source_record.workbench",
         "source_record.edit_decision_preview",
         "source_record.patch_matrix",
+        "source_record.monitor_layout",
+        "source_record.apply_board",
+        "source_record.keyboard_overlay",
+        "source_record.usability_board",
         "timeline.set_in",
         "timeline.set_out",
         "timeline.clear_in_out",
@@ -183,8 +227,17 @@ def test_action_registry_exposes_safe_initial_specs():
         "project_bin.workbench",
         "project_bin.batch_plan",
         "project_bin.conform_report",
+        "project_bin.review_board",
+        "project_bin.offline_browser",
+        "project_bin.relink_candidate_board",
+        "project_bin.proxy_regeneration_board",
+        "project_bin.proxy_conflict_board",
+        "project_bin.proxy_apply_review_board",
+        "project_bin.conform_apply_review_board",
+        "project_bin.search_filter_model",
         "project_bin.proxy_plan",
         "project_bin.proxy_health",
+        "timeline.multicam.live_switch_dashboard",
         "vtuber.vseeface_input_sources",
         "vtuber.vseeface_bridge_status",
         "vtuber.vseeface_action_preview",
@@ -215,6 +268,9 @@ def test_action_registry_exposes_safe_initial_specs():
         "broadcast.live_target.troubleshoot",
         "broadcast.release_readiness",
         "broadcast.platform_evidence_checklist",
+        "broadcast.youtube_evidence_quickstart",
+        "broadcast.evidence_readiness.refresh",
+        "broadcast.platform_evidence.preflight",
         "broadcast.platform_evidence.register",
         "broadcast.virtual_camera.plan",
         "broadcast.virtual_camera.obs_bridge_plan",
@@ -268,6 +324,23 @@ def test_action_registry_exposes_safe_initial_specs():
         "selection.snap_to_nearest",
         "selection.ripple_delete",
         "audio.extract_from_video",
+        "audio.track.set_mix",
+        "audio.track.set_volume",
+        "audio.track.set_pan",
+        "audio.track.mute",
+        "audio.track.solo",
+        "audio.track.set_type",
+        "audio.track.insert.set",
+        "audio.track.send.set_level",
+        "audio.track.route_to_bus",
+        "audio.track.meter.state",
+        "audio.automation.state",
+        "audio.automation.write",
+        "audio.automation.clear",
+        "audio.mixer.snapshot.save",
+        "audio.mixer.snapshot.apply",
+        "audio.mixer.snapshot.compare",
+        "audio.mixer.state",
         "audio.sound_editor.jog_shuttle.state",
         "audio.sound_editor.jog_shuttle.set",
         "audio.sound_editor.advanced_lab.state",
@@ -287,6 +360,9 @@ def test_action_registry_exposes_safe_initial_specs():
         "transition.clear",
         "render.queue.stage",
         "ui.focus_surface",
+        "nle.real_corpus.discover",
+        "nle.real_corpus.intake_board",
+        "nle.real_corpus.register",
     } <= ids
     assert all("." in row["id"] for row in specs)
     assert all("params_schema" in row for row in specs)
@@ -306,10 +382,26 @@ def test_action_registry_read_only_actions_are_json_ready(tmp_path):
     timeline = registry.execute("timeline.summary").to_dict()
     nle = registry.execute("timeline.nle_status").to_dict()
     readiness = registry.execute("timeline.professional_nle_readiness").to_dict()
+    target_gap = registry.execute("timeline.nle_target_gap", {"target_score": 95}).to_dict()
     evidence = registry.execute("timeline.nle_evidence").to_dict()
     real_corpus = registry.execute("nle.real_corpus.status", {"manifest_path": str(tmp_path / "missing_manifest.json")}).to_dict()
+    real_corpus_board = registry.execute("nle.real_corpus.intake_board", {"search_roots": [str(tmp_path)], "manifest_path": str(tmp_path / "missing_manifest.json")}).to_dict()
+    real_corpus_kit = registry.execute("nle.real_corpus.collection_kit", {"search_roots": [str(tmp_path)], "manifest_path": str(tmp_path / "missing_manifest.json")}).to_dict()
+    real_corpus_gate = registry.execute("nle.real_corpus.gate_board", {"search_roots": [str(tmp_path)], "manifest_path": str(tmp_path / "missing_manifest.json")}).to_dict()
+    real_corpus_workbench = registry.execute("nle.real_corpus.workbench", {"search_roots": [str(tmp_path)], "manifest_path": str(tmp_path / "missing_manifest.json")}).to_dict()
+    real_corpus_validation = registry.execute("nle.real_corpus.validation_plan", {"manifest_path": str(tmp_path / "missing_manifest.json")}).to_dict()
+    real_corpus_packet = registry.execute("nle.real_corpus.validation_packet", {"manifest_path": str(tmp_path / "missing_manifest.json")}).to_dict()
+    real_corpus_preflight = registry.execute("nle.real_corpus.validation_preflight", {"manifest_path": str(tmp_path / "missing_manifest.json")}).to_dict()
+    real_corpus_validation_report = registry.execute("nle.real_corpus.validation_report", {"manifest_path": str(tmp_path / "missing_manifest.json")}).to_dict()
     fuzzer = registry.execute("timeline.nle_fuzzer.status", {"report_path": str(tmp_path / "missing_fuzzer.json")}).to_dict()
+    core_coverage = registry.execute("timeline.core_action_coverage").to_dict()
+    core_safety = registry.execute("timeline.nle_core_safety_matrix").to_dict()
     undo_health = registry.execute("timeline.undo_health", {"report_path": str(tmp_path / "missing_fuzzer.json")}).to_dict()
+    undo_review = registry.execute("timeline.undo_review_board", {"report_path": str(tmp_path / "missing_fuzzer.json")}).to_dict()
+    undo_recovery = registry.execute("timeline.undo_recovery_playbook", {"report_path": str(tmp_path / "missing_fuzzer.json")}).to_dict()
+    undo_dashboard = registry.execute("timeline.undo_stability_dashboard", {"report_path": str(tmp_path / "missing_fuzzer.json")}).to_dict()
+    undo_long_session = registry.execute("timeline.undo_long_session_plan").to_dict()
+    storyline_gesture = registry.execute("timeline.storyline_gesture_polish_board").to_dict()
     creative = registry.execute("creative_layer.readiness").to_dict()
     selected = registry.execute("selected.clip").to_dict()
     presets = registry.execute("preset.catalog", {"limit": 5}).to_dict()
@@ -327,23 +419,540 @@ def test_action_registry_read_only_actions_are_json_ready(tmp_path):
     assert readiness["ok"] is True
     assert readiness["result"]["professional_nle_claim_ok"] is False
     assert "source_record_monitor_3_point" in {row["id"] for row in readiness["result"]["rows"]}
+    assert target_gap["ok"] is True
+    assert target_gap["result"]["schema"] == "tigerstudio.nle.target_gap.v1"
+    assert target_gap["result"]["target_score"] == 95
+    assert target_gap["result"]["professional_claim_blocked"] is True
     assert evidence["ok"] is True
     assert evidence["result"]["schema"] == "tigerstudio.nle_evidence.v1"
     assert real_corpus["ok"] is True
     assert real_corpus["result"]["schema"] == "tigerstudio.nle.real_project_corpus.v1"
     assert real_corpus["result"]["claim_ready"] is False
+    assert real_corpus_board["ok"] is True
+    assert real_corpus_board["result"]["schema"] == "tigerstudio.nle.real_project_corpus.intake_board.v1"
+    assert real_corpus_board["result"]["commands"]["discover_enabled"] is True
+    assert real_corpus_kit["ok"] is True
+    assert real_corpus_kit["result"]["schema"] == "tigerstudio.nle.real_project_corpus.collection_kit.v1"
+    assert real_corpus_kit["result"]["readiness"]["collection_kit_ready"] is True
+    assert real_corpus_kit["result"]["readiness"]["requires_user_projects"] is True
+    assert real_corpus_kit["result"]["commands"]["open_validation_plan_enabled"] is True
+    assert real_corpus_kit["result"]["commands"]["open_validation_report_enabled"] is True
+    assert "register_validation_evidence" in {row["id"] for row in real_corpus_kit["result"]["steps"]}
+    assert real_corpus_gate["ok"] is True
+    assert real_corpus_gate["result"]["schema"] == "tigerstudio.nle.real_project_corpus.gate_board.v1"
+    assert real_corpus_gate["result"]["professional_nle_claim_blocked"] is True
+    assert real_corpus_workbench["ok"] is True
+    assert real_corpus_workbench["result"]["schema"] == "tigerstudio.nle.real_project_corpus.workbench.v1"
+    assert real_corpus_workbench["result"]["primary_step"]["id"] == "find_projects"
+    assert real_corpus_validation["ok"] is True
+    assert real_corpus_validation["result"]["schema"] == "tigerstudio.nle.real_project_corpus.validation_plan.v1"
+    assert real_corpus_validation["result"]["readiness"]["validation_plan_ready"] is True
+    assert real_corpus_packet["ok"] is True
+    assert real_corpus_packet["result"]["schema"] == "tigerstudio.nle.real_project_corpus.validation_packet.v1"
+    assert real_corpus_packet["result"]["ready"] is False
+    assert real_corpus_preflight["ok"] is True
+    assert real_corpus_preflight["result"]["schema"] == "tigerstudio.nle.real_project_corpus.validation_preflight.v1"
+    assert real_corpus_preflight["result"]["ready"] is False
+    assert real_corpus_validation_report["ok"] is True
+    assert real_corpus_validation_report["result"]["schema"] == "tigerstudio.nle.real_project_corpus.validation_report.v1"
+    assert real_corpus_validation_report["result"]["commands"]["register_validation_evidence_enabled"] is True
     assert fuzzer["ok"] is True
     assert fuzzer["result"]["schema"] == "tigerstudio.nle.timeline_stress.v1"
     assert fuzzer["result"]["claim_ready"] is False
+    assert core_coverage["ok"] is True
+    assert core_coverage["result"]["kind"] == "core_nle_action_coverage"
+    assert core_coverage["result"]["readiness"]["core_action_coverage_ready"] is True
+    assert core_safety["ok"] is True
+    assert core_safety["result"]["kind"] == "core_safety_matrix"
+    assert core_safety["result"]["readiness"]["core_safety_matrix_ready"] is True
     assert undo_health["ok"] is True
     assert undo_health["result"]["kind"] == "nle_undo_health_matrix"
     assert undo_health["result"]["ready"] is False
+    assert undo_review["ok"] is True
+    assert undo_review["result"]["kind"] == "nle_undo_review_board"
+    assert {row["id"] for row in undo_review["result"]["sections"]} >= {"operations", "risks", "blockers"}
+    assert undo_recovery["ok"] is True
+    assert undo_recovery["result"]["kind"] == "nle_undo_recovery_playbook"
+    assert undo_recovery["result"]["readiness"]["recovery_playbook_ready"] is True
+    assert undo_dashboard["ok"] is True
+    assert undo_dashboard["result"]["kind"] == "nle_undo_stability_dashboard"
+    assert undo_dashboard["result"]["readiness"]["stability_dashboard_ready"] is True
+    assert {row["id"] for row in undo_dashboard["result"]["sections"]} >= {"risk_cards", "operations", "recovery_steps"}
+    assert undo_long_session["ok"] is True
+    assert undo_long_session["result"]["kind"] == "undo_long_session_plan"
+    assert undo_long_session["result"]["readiness"]["undo_long_session_plan_ready"] is True
+    assert storyline_gesture["ok"] is True
+    assert storyline_gesture["result"]["kind"] == "storyline_gesture_polish_board"
+    assert storyline_gesture["result"]["readiness"]["storyline_gesture_polish_ready"] is True
     assert creative["ok"] is True
     assert creative["result"]["full_creative_suite_claim_ok"] is False
     assert "transition_workflow" in {row["id"] for row in creative["result"]["rows"]}
     assert selected["result"]["selected"]["id"] == 10
     assert presets["result"]["returned"] <= 5
     assert presets["result"]["total"] >= presets["result"]["returned"]
+
+
+def test_nle_real_corpus_register_action_previews_and_writes_manifest(tmp_path):
+    from app.actions import build_default_action_registry
+
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    video = media_dir / "source.mp4"
+    audio = media_dir / "source.wav"
+    video.write_bytes(b"video")
+    audio.write_bytes(b"audio")
+    project = tmp_path / "user_project_action.tgp"
+    project.write_text(
+        json.dumps(
+            {
+                "name": "User Project Action",
+                "duration_ms": 600_000,
+                "media_pool": [
+                    {"id": "v", "path": str(video), "kind": "video", "proxy_state": "ready"},
+                    {"id": "a", "path": str(audio), "kind": "audio", "proxy_state": "ready"},
+                ],
+                "video_tracks": [{
+                    "id": 1,
+                    "clips": [
+                        {
+                            "id": f"v{index}",
+                            "source_path": str(video),
+                            "timeline_in_ms": index * 20_000,
+                            "duration_ms": 20_000,
+                        }
+                        for index in range(30)
+                    ],
+                }],
+                "audio_tracks": [{
+                    "id": 2,
+                    "clips": [
+                        {
+                            "id": f"a{index}",
+                            "source_path": str(audio),
+                            "timeline_in_ms": index * 75_000,
+                            "duration_ms": 75_000,
+                        }
+                        for index in range(8)
+                    ],
+                }],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    manifest = tmp_path / "manifest.json"
+    registry = build_default_action_registry(_ActionOwner())
+
+    preview = registry.execute(
+        "nle.real_corpus.register",
+        {"project_path": str(project), "manifest_path": str(manifest), "label": "Action Corpus"},
+        dry_run=True,
+    ).to_dict()
+    assert preview["ok"] is True
+    assert preview["dry_run"] is True
+    assert preview["changed"] is False
+    assert preview["result"]["would_register"] is True
+
+    registered = registry.execute(
+        "nle.real_corpus.register",
+        {"project_path": str(project), "manifest_path": str(manifest), "label": "Action Corpus"},
+    ).to_dict()
+
+    assert registered["ok"] is True
+    assert registered["changed"] is True
+    assert registered["result"]["ok"] is True
+    assert manifest.exists()
+    payload = json.loads(manifest.read_text(encoding="utf-8"))
+    assert payload["projects"][0]["label"] == "Action Corpus"
+    checks = [
+        {"id": "open_reopen", "status": "pass"},
+        {"id": "scrub_sampling", "status": "pass"},
+        {"id": "proxy_relink_health", "status": "pass"},
+        {"id": "undo_recovery", "status": "pass"},
+        {"id": "short_export", "status": "pass"},
+    ]
+    validation_preview = registry.execute(
+        "nle.real_corpus.validation_evidence.register",
+        {"project_path": str(project), "manifest_path": str(manifest), "checks": checks},
+        dry_run=True,
+    ).to_dict()
+    assert validation_preview["ok"] is True
+    assert validation_preview["dry_run"] is True
+    assert validation_preview["changed"] is False
+    assert validation_preview["result"]["would_write"]["summary"]["all_required_passed"] is True
+
+    validation_registered = registry.execute(
+        "nle.real_corpus.validation_evidence.register",
+        {"project_path": str(project), "manifest_path": str(manifest), "checks": checks, "operator": "qa"},
+    ).to_dict()
+    validation_report = registry.execute(
+        "nle.real_corpus.validation_report",
+        {"manifest_path": str(manifest)},
+    ).to_dict()
+
+    assert validation_registered["ok"] is True
+    assert validation_registered["changed"] is True
+    assert validation_registered["result"]["validation_evidence"]["status"] == "passed"
+    assert validation_report["ok"] is True
+    assert validation_report["result"]["summary"]["validation_ready_count"] == 1
+
+
+def test_nle_real_corpus_discover_action_finds_project_candidates(tmp_path):
+    from app.actions import build_default_action_registry
+
+    media_dir = tmp_path / "media"
+    media_dir.mkdir()
+    video = media_dir / "source.mp4"
+    audio = media_dir / "source.wav"
+    video.write_bytes(b"video")
+    audio.write_bytes(b"audio")
+    project = tmp_path / "user_project_discover_action.tgp"
+    project.write_text(
+        json.dumps(
+            {
+                "name": "User Project Discover Action",
+                "duration_ms": 600_000,
+                "media_pool": [
+                    {"id": "v", "path": str(video), "kind": "video", "proxy_state": "ready"},
+                    {"id": "a", "path": str(audio), "kind": "audio", "proxy_state": "ready"},
+                ],
+                "video_tracks": [{
+                    "id": 1,
+                    "clips": [
+                        {
+                            "id": f"v{index}",
+                            "source_path": str(video),
+                            "timeline_in_ms": index * 20_000,
+                            "duration_ms": 20_000,
+                        }
+                        for index in range(30)
+                    ],
+                }],
+                "audio_tracks": [{
+                    "id": 2,
+                    "clips": [
+                        {
+                            "id": f"a{index}",
+                            "source_path": str(audio),
+                            "timeline_in_ms": index * 75_000,
+                            "duration_ms": 75_000,
+                        }
+                        for index in range(8)
+                    ],
+                }],
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    registry = build_default_action_registry(_ActionOwner())
+
+    discovery = registry.execute(
+        "nle.real_corpus.discover",
+        {
+            "search_roots": [str(tmp_path)],
+            "manifest_path": str(tmp_path / "manifest.json"),
+            "max_results": 5,
+        },
+    ).to_dict()
+
+    assert discovery["ok"] is True
+    assert discovery["result"]["schema"] == "tigerstudio.nle.real_project_corpus.discovery.v1"
+    assert discovery["result"]["candidate_count"] == 1
+    assert discovery["result"]["candidates"][0]["would_register"] is True
+
+    board = registry.execute(
+        "nle.real_corpus.intake_board",
+        {
+            "search_roots": [str(tmp_path)],
+            "manifest_path": str(tmp_path / "manifest.json"),
+            "max_results": 5,
+        },
+    ).to_dict()
+
+    assert board["ok"] is True
+    assert board["result"]["registerable_count"] == 1
+    assert {section["id"] for section in board["result"]["sections"]} >= {
+        "claim_gate",
+        "registerable_projects",
+        "rejected_candidates",
+        "registered_projects",
+    }
+    registerable = next(section for section in board["result"]["sections"] if section["id"] == "registerable_projects")
+    assert registerable["rows"][0]["primary_action"]["id"] == "nle.real_corpus.register"
+
+    gate = registry.execute(
+        "nle.real_corpus.gate_board",
+        {
+            "search_roots": [str(tmp_path)],
+            "manifest_path": str(tmp_path / "manifest.json"),
+            "max_results": 5,
+        },
+    ).to_dict()
+
+    assert gate["ok"] is True
+    assert gate["result"]["schema"] == "tigerstudio.nle.real_project_corpus.gate_board.v1"
+    assert gate["result"]["professional_nle_claim_blocked"] is True
+    assert {section["id"] for section in gate["result"]["sections"]} >= {
+        "claim_gate",
+        "blocked_requirements",
+        "registerable_projects",
+        "workflow",
+    }
+    workbench = registry.execute(
+        "nle.real_corpus.workbench",
+        {
+            "search_roots": [str(tmp_path)],
+            "manifest_path": str(tmp_path / "manifest.json"),
+            "max_results": 5,
+        },
+    ).to_dict()
+
+    assert workbench["ok"] is True
+    assert workbench["result"]["schema"] == "tigerstudio.nle.real_project_corpus.workbench.v1"
+    assert workbench["result"]["primary_step"]["id"] == "register_candidates"
+
+    registered = registry.execute(
+        "nle.real_corpus.register",
+        {"project_path": str(project), "manifest_path": str(tmp_path / "manifest.json")},
+    ).to_dict()
+    packet = registry.execute(
+        "nle.real_corpus.validation_packet",
+        {"project_path": str(project), "manifest_path": str(tmp_path / "manifest.json")},
+    ).to_dict()
+    preflight = registry.execute(
+        "nle.real_corpus.validation_preflight",
+        {"project_path": str(project), "manifest_path": str(tmp_path / "manifest.json")},
+    ).to_dict()
+
+    assert registered["ok"] is True
+    assert packet["ok"] is True
+    assert packet["result"]["schema"] == "tigerstudio.nle.real_project_corpus.validation_packet.v1"
+    assert packet["result"]["action_template"]["id"] == "nle.real_corpus.validation_evidence.register"
+    assert packet["result"]["readiness"]["validation_packet_ready"] is True
+    assert preflight["ok"] is True
+    assert preflight["result"]["schema"] == "tigerstudio.nle.real_project_corpus.validation_preflight.v1"
+    assert preflight["result"]["readiness"]["machine_preflight_passed"] is True
+    assert {row["status"] for row in preflight["result"]["suggested_validation_checks"]} == {"pending"}
+
+
+def test_magnetic_storyline_action_closes_gaps_and_moves_linked_audio():
+    from app.actions import build_default_action_registry
+    from app.audio_tracks import AudioClip, AudioTrack
+    from app.timeline_model import VideoClip, VideoTrack
+
+    owner = _ActionOwner()
+    owner._tracks = [
+        VideoTrack(
+            id=1,
+            clips=[
+                VideoClip(id=10, source_path="a.mp4", source_duration_ms=1000, timeline_in_ms=0, source_in_ms=0, source_out_ms=1000),
+                VideoClip(id=11, source_path="b.mp4", source_duration_ms=1000, timeline_in_ms=1800, source_in_ms=0, source_out_ms=1000, linked_audio_id=21),
+                VideoClip(id=12, source_path="c.mp4", source_duration_ms=1000, timeline_in_ms=3400, source_in_ms=0, source_out_ms=1000),
+            ],
+        )
+    ]
+    owner._audio_tracks = [AudioTrack(id=2, clips=[AudioClip(id=21, duration_ms=1000, offset_ms=1800)])]
+    registry = build_default_action_registry(owner)
+
+    dry = registry.execute("timeline.magnetic_storyline.apply", {"track_id": 1}, dry_run=True).to_dict()
+    assert dry["ok"] is True
+    assert dry["changed"] is False
+    assert dry["result"]["plan"]["move_count"] == 2
+    assert [clip.timeline_in_ms for clip in owner._tracks[0].clips] == [0, 1800, 3400]
+
+    result = registry.execute("timeline.magnetic_storyline.apply", {"track_id": 1}).to_dict()
+    status = registry.execute("timeline.magnetic_storyline.status", {"track_id": 1}).to_dict()
+
+    assert result["ok"] is True
+    assert result["changed"] is True
+    assert [clip.timeline_in_ms for clip in owner._tracks[0].clips] == [0, 1000, 2000]
+    assert owner._audio_tracks[0].clips[0].offset_ms == 1000
+    assert result["result"]["moved_linked_audio"][0]["audio_clip_id"] == 21
+    assert status["result"]["gap_count"] == 0
+
+
+def test_connected_clip_and_role_color_actions_mutate_timeline_metadata():
+    from app.actions import build_default_action_registry
+    from app.timeline_model import VideoClip, VideoTrack
+
+    owner = _ActionOwner()
+    owner._tracks = [
+        VideoTrack(
+            id=1,
+            clips=[
+                VideoClip(id=10, source_path="primary.mp4", source_duration_ms=4000, timeline_in_ms=0, source_in_ms=0, source_out_ms=4000),
+            ],
+        ),
+        VideoTrack(
+            id=2,
+            clips=[
+                VideoClip(id=20, source_path="broll.mp4", source_duration_ms=1000, timeline_in_ms=1200, source_in_ms=0, source_out_ms=1000),
+            ],
+        ),
+    ]
+    registry = build_default_action_registry(owner)
+
+    dry = registry.execute(
+        "timeline.connected_clips.connect",
+        {"child_track_id": 2, "child_clip_id": 20, "role": "b-roll"},
+        dry_run=True,
+    ).to_dict()
+    assert dry["ok"] is True
+    assert dry["changed"] is False
+    assert owner._tracks[1].clips[0].connected_parent_clip_id is None
+
+    connected = registry.execute(
+        "timeline.connected_clips.connect",
+        {"child_track_id": 2, "child_clip_id": 20, "role": "b-roll"},
+    ).to_dict()
+    assert connected["ok"] is True
+    assert connected["changed"] is True
+    child = owner._tracks[1].clips[0]
+    assert child.connected_parent_track_id == 1
+    assert child.connected_parent_clip_id == 10
+    assert child.connected_offset_ms == 1200
+    assert child.clip_role == "b_roll"
+
+    role = registry.execute(
+        "timeline.clip_role.set",
+        {"track_id": 2, "clip_id": 20, "role": "overlay", "role_color": "#123456"},
+    ).to_dict()
+    status = registry.execute("timeline.connected_clips.status").to_dict()
+    colors = registry.execute("timeline.role_colors.status").to_dict()
+
+    assert role["ok"] is True
+    assert child.clip_role == "overlay"
+    assert child.role_color == "#123456"
+    assert status["result"]["connected_count"] == 1
+    assert status["result"]["issue_count"] == 0
+    assert colors["result"]["role_counts"]["overlay"] == 1
+
+
+def test_role_lane_actions_group_and_focus_roles():
+    from app.actions import build_default_action_registry
+    from app.timeline_model import VideoClip, VideoTrack
+
+    class _Row:
+        def __init__(self) -> None:
+            self.focused_role = None
+
+        def set_focused_clip_role(self, role: str) -> None:
+            self.focused_role = role
+
+    owner = _ActionOwner()
+    owner._tracks = [
+        VideoTrack(
+            id=1,
+            clips=[
+                VideoClip(id=10, source_path="primary.mp4", source_duration_ms=2000, timeline_in_ms=0, source_in_ms=0, source_out_ms=2000),
+                VideoClip(id=11, source_path="overlay.mp4", source_duration_ms=1000, timeline_in_ms=400, source_in_ms=0, source_out_ms=1000),
+            ],
+        )
+    ]
+    owner._tracks[0].clips[1].clip_role = "overlay"
+    owner._track_rows = {1: _Row()}
+    registry = build_default_action_registry(owner)
+
+    status = registry.execute("timeline.role_lanes.status").to_dict()
+    dry = registry.execute("timeline.role_lanes.focus", {"role": "overlay"}, dry_run=True).to_dict()
+    focused = registry.execute("timeline.role_lanes.focus", {"role": "overlay"}).to_dict()
+    after = registry.execute("timeline.role_lanes.status").to_dict()
+
+    assert status["ok"] is True
+    assert {row["role"] for row in status["result"]["lanes"]} >= {"primary", "overlay"}
+    assert dry["changed"] is False
+    assert getattr(owner, "_nle_role_lane_focus", "") == "overlay"
+    assert owner._track_rows[1].focused_role == "overlay"
+    assert focused["ok"] is True
+    assert focused["changed"] is True
+    assert after["result"]["focused_role"] == "overlay"
+
+
+def test_audition_actions_add_and_switch_active_take():
+    from app.actions import build_default_action_registry
+    from app.timeline_model import VideoClip, VideoTrack
+
+    owner = _ActionOwner()
+    owner._tracks = [
+        VideoTrack(
+            id=1,
+            clips=[
+                VideoClip(id=10, source_path="host.mp4", source_duration_ms=4000, timeline_in_ms=0, source_in_ms=0, source_out_ms=4000),
+            ],
+        )
+    ]
+    registry = build_default_action_registry(owner)
+
+    dry = registry.execute(
+        "timeline.audition.add_take",
+        {
+            "host_track_id": 1,
+            "host_clip_id": 10,
+            "take_id": "take_alt",
+            "label": "Alt",
+            "source_path": "alt.mp4",
+            "source_duration_ms": 1200,
+            "source_in_ms": 100,
+            "source_out_ms": 1100,
+        },
+        dry_run=True,
+    ).to_dict()
+    assert dry["ok"] is True
+    assert dry["changed"] is False
+    assert owner._tracks[0].clips[0].audition_takes == []
+
+    added = registry.execute(
+        "timeline.audition.add_take",
+        {
+            "host_track_id": 1,
+            "host_clip_id": 10,
+            "take_id": "take_alt",
+            "label": "Alt",
+            "source_path": "alt.mp4",
+            "source_duration_ms": 1200,
+            "source_in_ms": 100,
+            "source_out_ms": 1100,
+        },
+    ).to_dict()
+    host = owner._tracks[0].clips[0]
+    assert added["ok"] is True
+    assert added["changed"] is True
+    assert host.audition_group_id == 10
+    assert host.audition_active_take_id == "take_original"
+    assert {row["id"] for row in host.audition_takes} == {"take_original", "take_alt"}
+    assert str(host.source_path) == "host.mp4"
+
+    switched = registry.execute(
+        "timeline.audition.switch_take",
+        {"track_id": 1, "clip_id": 10, "take_id": "take_alt"},
+    ).to_dict()
+    status = registry.execute("timeline.auditions.status").to_dict()
+    compare = registry.execute("timeline.audition.compare", {"track_id": 1, "clip_id": 10}).to_dict()
+    renamed = registry.execute(
+        "timeline.audition.rename_take",
+        {"track_id": 1, "clip_id": 10, "take_id": "take_alt", "label": "Better Alt"},
+    ).to_dict()
+    removed = registry.execute(
+        "timeline.audition.remove_take",
+        {"track_id": 1, "clip_id": 10, "take_id": "take_original"},
+    ).to_dict()
+
+    assert switched["ok"] is True
+    assert switched["changed"] is True
+    assert host.audition_active_take_id == "take_alt"
+    assert str(host.source_path) == "alt.mp4"
+    assert host.source_in_ms == 100
+    assert host.source_out_ms == 1100
+    assert status["result"]["audition_count"] == 1
+    assert status["result"]["take_count"] == 2
+    assert compare["result"]["schema"] == "tigerstudio.nle.audition_compare.v1"
+    assert compare["result"]["take_count"] == 2
+    assert renamed["ok"] is True
+    assert removed["ok"] is True
+    assert host.audition_active_take_id == "take_alt"
+    assert {row["id"] for row in host.audition_takes} == {"take_alt"}
+    assert host.audition_takes[0]["label"] == "Better Alt"
 
 
 def test_ui_focus_surface_action_is_safe_without_live_docks():
@@ -919,6 +1528,96 @@ def test_broadcast_platform_evidence_checklist_action_reports_next_manual_step(t
     assert result["result"]["sale_ready"] is False
 
 
+def test_broadcast_youtube_evidence_quickstart_action_explains_required_checks(tmp_path):
+    import json
+
+    from app.actions import build_default_action_registry
+    from app.broadcast_platform_e2e import build_broadcast_platform_e2e_report
+
+    report = build_broadcast_platform_e2e_report(
+        tmp_path,
+        record_smoke_runner=lambda _root: {"ok": True, "bytes": 4096, "frames_written": 12},
+        live2d_record_smoke_runner=lambda _root: {"ok": True, "bytes": 4096, "frames_written": 12},
+    )
+    artifact = tmp_path / "debugCapture" / "broadcast_platform_e2e_qa.json"
+    artifact.parent.mkdir()
+    artifact.write_text(json.dumps(report), encoding="utf-8")
+    registry = build_default_action_registry()
+
+    result = registry.execute("broadcast.youtube_evidence_quickstart", {"root": str(tmp_path)}).to_dict()
+
+    assert result["ok"] is True
+    assert result["result"]["schema"] == "tigerstudio.broadcast.youtube_evidence_quickstart.v1"
+    assert result["result"]["live_target_id"] == "youtube_live"
+    assert result["result"]["next_required_check_id"] == "private_rtmp_ingest"
+    assert [row["check_id"] for row in result["result"]["required_evidence"]] == [
+        "private_rtmp_ingest",
+        "youtube_unlisted_viewer_playback",
+    ]
+    assert result["result"]["optional_evidence"][0]["required_for_sale"] is False
+    assert "stream keys" in result["result"]["do_not_include"]
+    assert "YouTube watch/preview URLs" in result["result"]["do_not_include"]
+
+
+def test_broadcast_evidence_readiness_refresh_action_writes_artifacts(tmp_path):
+    import json
+
+    from app.actions import build_default_action_registry
+    from app.broadcast_platform_e2e import build_broadcast_platform_e2e_report
+
+    report = build_broadcast_platform_e2e_report(
+        tmp_path,
+        record_smoke_runner=lambda _root: {"ok": True, "bytes": 4096, "frames_written": 12},
+        live2d_record_smoke_runner=lambda _root: {"ok": True, "bytes": 4096, "frames_written": 12},
+    )
+    artifact = tmp_path / "debugCapture" / "broadcast_platform_e2e_qa.json"
+    artifact.parent.mkdir()
+    artifact.write_text(json.dumps(report), encoding="utf-8")
+    registry = build_default_action_registry()
+
+    result = registry.execute("broadcast.evidence_readiness.refresh", {"root": str(tmp_path)}).to_dict()
+
+    assert result["ok"] is True
+    assert result["changed"] is False
+    assert result["result"]["schema"] == "tigerstudio.broadcast.evidence_readiness_refresh.v1"
+    assert result["result"]["broadcast_commercial_ready"] is False
+    assert result["result"]["final_release_ready"] is False
+    assert (tmp_path / "debugCapture" / "broadcast_release_readiness_qa.json").exists()
+    assert (tmp_path / "debugCapture" / "final_product_readiness_qa.json").exists()
+
+
+def test_broadcast_platform_evidence_preflight_action_blocks_private_urls():
+    from app.actions import build_default_action_registry
+
+    registry = build_default_action_registry()
+    blocked = registry.execute(
+        "broadcast.platform_evidence.preflight",
+        {
+            "check_id": "youtube_unlisted_viewer_playback",
+            "platform": "YouTube",
+            "notes": "Preview worked: https://www.youtube.com/watch?v=PRIVATE",
+            "confirm_redacted": True,
+        },
+    ).to_dict()
+    clean = registry.execute(
+        "broadcast.platform_evidence.preflight",
+        {
+            "check_id": "youtube_unlisted_viewer_playback",
+            "platform": "YouTube",
+            "notes": "Private YouTube preview played Program Output; URL, account, and chat redacted.",
+            "confirm_redacted": True,
+        },
+    ).to_dict()
+
+    assert blocked["ok"] is True
+    assert blocked["changed"] is False
+    assert blocked["result"]["schema"] == "tigerstudio.broadcast.platform_evidence_preflight.v1"
+    assert blocked["result"]["can_register"] is False
+    assert "Remove YouTube watch/preview links" in blocked["result"]["warning"]
+    assert clean["result"]["can_register"] is True
+    assert clean["result"]["warning"] == ""
+
+
 def test_broadcast_platform_evidence_register_action_requires_redaction_and_updates_report(tmp_path):
     import json
 
@@ -976,7 +1675,7 @@ def test_broadcast_platform_evidence_register_action_requires_redaction_and_upda
     assert registered["result"]["registered"] is True
     assert registered["result"]["check_id"] == "private_rtmp_ingest"
     assert checklist["result"]["summary"]["passed"] == 4
-    assert checklist["result"]["operator_focus"]["id"] == "discord_window_share"
+    assert checklist["result"]["operator_focus"]["id"] == "youtube_unlisted_viewer_playback"
 
 
 def test_vseeface_capture_backend_action_persists_capture_settings():
@@ -2026,6 +2725,10 @@ def test_source_record_workbench_returns_ui_ready_state():
     workbench = registry.execute("source_record.workbench").to_dict()
     preview = registry.execute("source_record.edit_decision_preview", {"mode": "insert"}).to_dict()
     patch_matrix = registry.execute("source_record.patch_matrix").to_dict()
+    layout = registry.execute("source_record.monitor_layout").to_dict()
+    apply_board = registry.execute("source_record.apply_board").to_dict()
+    keyboard_overlay = registry.execute("source_record.keyboard_overlay").to_dict()
+    usability = registry.execute("source_record.usability_board").to_dict()
 
     assert workbench["ok"] is True
     result = workbench["result"]
@@ -2045,6 +2748,28 @@ def test_source_record_workbench_returns_ui_ready_state():
     assert patch_matrix["result"]["kind"] == "source_record_patch_matrix"
     assert patch_matrix["result"]["ready"] is True
     assert patch_matrix["result"]["commands"]["show_patch_matrix_enabled"] is True
+    assert layout["ok"] is True
+    assert layout["result"]["kind"] == "source_record_monitor_layout"
+    assert layout["result"]["ready"] is True
+    assert len(layout["result"]["layout"]["panes"]) == 2
+    assert layout["result"]["commands"]["insert_enabled"] is True
+    assert apply_board["ok"] is True
+    assert apply_board["result"]["kind"] == "source_record_apply_board"
+    assert apply_board["result"]["ready"] is True
+    assert apply_board["result"]["recommended_action"] == "insert"
+    assert {row["id"] for row in apply_board["result"]["decisions"]} == {"insert", "overwrite"}
+    overwrite = next(row for row in apply_board["result"]["decisions"] if row["id"] == "overwrite")
+    assert overwrite["requires_confirmation"] is True
+    assert overwrite["action_id"] == "timeline.three_point_overwrite"
+    assert keyboard_overlay["ok"] is True
+    assert keyboard_overlay["result"]["kind"] == "source_record_keyboard_overlay"
+    assert keyboard_overlay["result"]["readiness"]["keyboard_overlay_ready"] is True
+    assert keyboard_overlay["result"]["readiness"]["jkl_transport_visible"] is True
+    assert keyboard_overlay["result"]["commands"]["jkl_transport_enabled"] is True
+    assert usability["ok"] is True
+    assert usability["result"]["kind"] == "source_record_usability_board"
+    assert usability["result"]["readiness"]["source_record_usability_ready"] is True
+    assert usability["result"]["readiness"]["review_before_apply_visible"] is True
 
 
 def test_project_bin_workbench_returns_proxy_relink_state():
@@ -2061,8 +2786,19 @@ def test_project_bin_workbench_returns_proxy_relink_state():
     workbench = registry.execute("project_bin.workbench").to_dict()
     batch = registry.execute("project_bin.batch_plan").to_dict()
     conform = registry.execute("project_bin.conform_report").to_dict()
+    review_board = registry.execute("project_bin.review_board").to_dict()
+    offline_browser = registry.execute("project_bin.offline_browser").to_dict()
+    relink_candidates = registry.execute("project_bin.relink_candidate_board").to_dict()
     proxy = registry.execute("project_bin.proxy_plan").to_dict()
     proxy_health = registry.execute("project_bin.proxy_health").to_dict()
+    proxy_regen = registry.execute("project_bin.proxy_regeneration_board").to_dict()
+    proxy_conflicts = registry.execute("project_bin.proxy_conflict_board").to_dict()
+    proxy_apply = registry.execute("project_bin.proxy_apply_review_board").to_dict()
+    conform_apply = registry.execute("project_bin.conform_apply_review_board").to_dict()
+    search_filter = registry.execute(
+        "project_bin.search_filter_model",
+        {"query": "source", "kind": "video"},
+    ).to_dict()
 
     assert workbench["ok"] is True
     result = workbench["result"]
@@ -2080,6 +2816,18 @@ def test_project_bin_workbench_returns_proxy_relink_state():
     assert conform["result"]["kind"] == "project_bin_conform_report"
     assert conform["result"]["ready"] is True
     assert conform["result"]["summary"]["timeline_clip_count"] >= 1
+    assert review_board["ok"] is True
+    assert review_board["result"]["kind"] == "project_bin_review_board"
+    assert review_board["result"]["ready"] is True
+    assert {row["id"] for row in review_board["result"]["sections"]} >= {"bins", "proxy", "conform", "batch"}
+    assert offline_browser["ok"] is True
+    assert offline_browser["result"]["kind"] == "project_bin_offline_browser"
+    assert offline_browser["result"]["ready"] is True
+    assert {row["id"] for row in offline_browser["result"]["sections"]} >= {"offline_media", "missing_clips", "ambiguous", "name_only"}
+    assert relink_candidates["ok"] is True
+    assert relink_candidates["result"]["kind"] == "project_bin_relink_candidate_board"
+    assert relink_candidates["result"]["ready"] is True
+    assert {row["id"] for row in relink_candidates["result"]["sections"]} >= {"safe", "name_only", "ambiguous", "missing", "offline"}
     assert proxy["ok"] is True
     assert proxy["result"]["kind"] == "project_bin_proxy_plan"
     assert proxy["result"]["ready"] is True
@@ -2089,6 +2837,29 @@ def test_project_bin_workbench_returns_proxy_relink_state():
     assert proxy_health["result"]["ready"] is True
     assert "state_cards" in proxy_health["result"]
     assert "background_regenerate_safe_enabled" in proxy_health["result"]["commands"]
+    assert proxy_regen["ok"] is True
+    assert proxy_regen["result"]["kind"] == "project_bin_proxy_regeneration_board"
+    assert proxy_regen["result"]["ready"] is True
+    assert "start_safe_background_jobs_enabled" in proxy_regen["result"]["commands"]
+    assert proxy_conflicts["ok"] is True
+    assert proxy_conflicts["result"]["kind"] == "project_bin_proxy_conflict_board"
+    assert proxy_conflicts["result"]["ready"] is True
+    assert "safe_background_jobs" in {row["id"] for row in proxy_conflicts["result"]["sections"]}
+    assert "start_safe_background_jobs_enabled" in proxy_conflicts["result"]["commands"]
+    assert proxy_apply["ok"] is True
+    assert proxy_apply["result"]["kind"] == "proxy_apply_review_board"
+    assert proxy_apply["result"]["readiness"]["proxy_apply_review_ready"] is True
+    assert proxy_apply["result"]["readiness"]["stale_proxy_warning_ready"] is True
+    assert conform_apply["ok"] is True
+    assert conform_apply["result"]["kind"] == "conform_apply_review_board"
+    assert conform_apply["result"]["readiness"]["conform_apply_review_ready"] is True
+    assert conform_apply["result"]["readiness"]["batch_apply_review_required"] is True
+    assert search_filter["ok"] is True
+    assert search_filter["result"]["kind"] == "project_bin_search_filter_model"
+    assert search_filter["result"]["readiness"]["search_filter_model_ready"] is True
+    assert search_filter["result"]["readiness"]["metadata_columns_ready"] is True
+    assert search_filter["result"]["commands"]["filter_enabled"] is True
+    assert search_filter["result"]["summary"]["matched_count"] >= 1
 
 
 def test_multicam_actions_build_group_switch_plan_and_export_handoff():
@@ -2112,6 +2883,7 @@ def test_multicam_actions_build_group_switch_plan_and_export_handoff():
                     )
                 )
             setattr(clips[-1], "camera_id", f"cam_{track_idx + 1}")
+            setattr(clips[-1], "waveform_sync_peak_ms", track_idx * 120)
             clip_id += 1
         owner._tracks.append(VideoTrack(id=track_idx + 1, clips=clips))
 
@@ -2141,6 +2913,30 @@ def test_multicam_actions_build_group_switch_plan_and_export_handoff():
         "timeline.multicam.switcher_workbench",
         {"group_id": "mc_scene_1", "strategy": "round_robin"},
     ).to_dict()
+    tile_board = registry.execute(
+        "timeline.multicam.tile_board",
+        {"group_id": "mc_scene_1", "strategy": "round_robin"},
+    ).to_dict()
+    review_board = registry.execute(
+        "timeline.multicam.review_board",
+        {"group_id": "mc_scene_1", "strategy": "round_robin"},
+    ).to_dict()
+    live_dashboard = registry.execute(
+        "timeline.multicam.live_switch_dashboard",
+        {"group_id": "mc_scene_1", "strategy": "round_robin"},
+    ).to_dict()
+    sync_quality = registry.execute(
+        "timeline.multicam.sync_quality_board",
+        {"group_id": "mc_scene_1", "strategy": "hybrid"},
+    ).to_dict()
+    waveform_sync = registry.execute(
+        "timeline.multicam.waveform_sync_board",
+        {"group_id": "mc_scene_1", "strategy": "waveform"},
+    ).to_dict()
+    export_parity = registry.execute(
+        "timeline.multicam.export_parity_board",
+        {"group_id": "mc_scene_1"},
+    ).to_dict()
     handoff = registry.execute("timeline.multicam.export_handoff", {"group_id": "mc_scene_1"}).to_dict()
 
     assert summary["ok"] is True
@@ -2165,6 +2961,33 @@ def test_multicam_actions_build_group_switch_plan_and_export_handoff():
     assert workbench["result"]["ready"] is True
     assert len(workbench["result"]["angle_tiles"]) == 3
     assert workbench["result"]["commands"]["live_switch_enabled"] is True
+    assert tile_board["ok"] is True
+    assert tile_board["result"]["kind"] == "multicam_switcher_tile_board"
+    assert tile_board["result"]["ready"] is True
+    assert tile_board["result"]["grid"]["tile_count"] == 3
+    assert tile_board["result"]["commands"]["keyboard_switch_enabled"] is True
+    assert review_board["ok"] is True
+    assert review_board["result"]["kind"] == "multicam_switch_review_board"
+    assert review_board["result"]["ready"] is True
+    assert {section["id"] for section in review_board["result"]["sections"]} >= {"angles", "coverage", "switches"}
+    assert review_board["result"]["commands"]["export_handoff_enabled"] is True
+    assert live_dashboard["ok"] is True
+    assert live_dashboard["result"]["kind"] == "multicam_live_switch_dashboard"
+    assert live_dashboard["result"]["readiness"]["live_switch_dashboard_ready"] is True
+    assert {section["id"] for section in live_dashboard["result"]["sections"]} >= {"tiles", "switch_decisions", "sync_quality", "waveform"}
+    assert sync_quality["ok"] is True
+    assert sync_quality["result"]["kind"] == "multicam_sync_quality_board"
+    assert sync_quality["result"]["readiness"]["sync_quality_board_ready"] is True
+    assert sync_quality["result"]["readiness"]["has_confidence_rows"] is True
+    assert sync_quality["result"]["summary"]["angle_count"] == 3
+    assert waveform_sync["ok"] is True
+    assert waveform_sync["result"]["kind"] == "multicam_waveform_sync_board"
+    assert waveform_sync["result"]["readiness"]["waveform_sync_board_ready"] is True
+    assert waveform_sync["result"]["summary"]["waveform_ready_count"] == 3
+    assert export_parity["ok"] is True
+    assert export_parity["result"]["kind"] == "multicam_export_parity_board"
+    assert export_parity["result"]["readiness"]["multicam_export_parity_board_ready"] is True
+    assert export_parity["result"]["summary"]["angle_count"] == 3
     assert handoff["ok"] is True
     assert handoff["result"]["ready"] is True
     assert handoff["result"]["decision_count"] >= 1
@@ -3363,11 +4186,57 @@ def test_extended_audio_actions_and_track_reorder():
     right_clip_id = split["result"]["right_clip_id"]
     gain = registry.execute("audio.clip.set_gain", {"track_id": 2, "clip_id": right_clip_id, "gain": 0.6}).to_dict()
     mix = registry.execute("audio.track.set_mix", {"track_id": 2, "volume": 0.8, "pan": -0.25}).to_dict()
+    volume = registry.execute("audio.track.set_volume", {"track_id": 2, "volume": 0.72}).to_dict()
+    pan = registry.execute("audio.track.set_pan", {"track_id": 2, "pan": 0.35}).to_dict()
+    muted = registry.execute("audio.track.mute", {"track_id": 2, "muted": True}).to_dict()
+    solo = registry.execute("audio.track.solo", {"track_id": 2, "solo": True}).to_dict()
+    track_type = registry.execute("audio.track.set_type", {"track_id": 2, "track_type": "dialogue"}).to_dict()
+    insert = registry.execute("audio.track.insert.set", {"track_id": 2, "slot": "eq", "enabled": True}).to_dict()
+    send = registry.execute("audio.track.send.set_level", {"track_id": 2, "send_id": "reverb", "level": 0.25}).to_dict()
+    bus = registry.execute("audio.track.route_to_bus", {"track_id": 2, "bus_id": "dialogue"}).to_dict()
+    automation = registry.execute(
+        "audio.automation.write",
+        {"track_id": 2, "parameter": "volume", "time_ms": 1500, "value": 0.7, "read": True, "write": True},
+    ).to_dict()
+    meter = registry.execute("audio.track.meter.state", {"track_id": 2}).to_dict()
+    automation_state = registry.execute("audio.automation.state", {"track_id": 2}).to_dict()
+    snapshot = registry.execute("audio.mixer.snapshot.save", {"snapshot_id": "mix_a", "name": "Mix A"}).to_dict()
+    changed_volume = registry.execute("audio.track.set_volume", {"track_id": 2, "volume": 0.4}).to_dict()
+    snapshot_compare = registry.execute("audio.mixer.snapshot.compare", {"snapshot_id": "mix_a"}).to_dict()
+    snapshot_apply = registry.execute("audio.mixer.snapshot.apply", {"snapshot_id": "mix_a"}).to_dict()
+    state = registry.execute("audio.mixer.state").to_dict()
     assert split["ok"] is True
     assert len(owner._audio_tracks[0].clips) == 2
     assert gain["result"]["gain"] == 0.6
     assert mix["result"]["new"]["volume"] == 0.8
-    assert owner._audio_tracks[0].pan == -0.25
+    assert volume["result"]["new"]["volume"] == 0.72
+    assert pan["result"]["new"]["pan"] == 0.35
+    assert muted["result"]["new"]["muted"] is True
+    assert solo["result"]["new"]["solo"] is True
+    assert track_type["result"]["new"]["track_type"] == "dialogue"
+    assert insert["ok"] is True
+    assert send["result"]["new"]["reverb"] == 0.25
+    assert bus["result"]["new"]["bus_id"] == "dialogue"
+    assert automation["result"]["new"]["write"] is True
+    assert automation_state["result"]["tracks"][0]["point_count"] == 1
+    assert meter["result"]["schema"] == "tigerstudio.audio.meter.v1"
+    assert snapshot["result"]["snapshot"]["id"] == "mix_a"
+    assert changed_volume["result"]["new"]["volume"] == 0.4
+    assert snapshot_compare["result"]["delta_count"] >= 1
+    assert snapshot_apply["result"]["applied_count"] == 1
+    assert owner._audio_tracks[0].pan == 0.35
+    assert owner._audio_tracks[0].volume == 0.72
+    assert owner._audio_tracks[0].track_type == "dialogue"
+    assert owner._audio_tracks[0].insert_slots[0]["enabled"] is True
+    assert owner._audio_tracks[0].sends["reverb"] == 0.25
+    assert owner._audio_tracks[0].automation_write is True
+    assert state["result"]["schema"] == "tigerstudio.audio.mixer.v1"
+    assert state["result"]["tracks"][0]["muted"] is True
+    assert state["result"]["tracks"][0]["solo"] is True
+    assert state["result"]["tracks"][0]["track_type"] == "dialogue"
+    assert state["result"]["tracks"][0]["automation"]["point_count"] == 1
+    assert state["result"]["tracks"][0]["meter"]["clip_led"] is False
+    assert state["result"]["snapshot_count"] == 1
 
     blocked_delete = registry.execute("audio.clip.delete", {"track_id": 2, "clip_id": right_clip_id}).to_dict()
     deleted = registry.execute(

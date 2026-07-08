@@ -450,7 +450,12 @@ class AudioScopesPanel(QWidget):
 
         _buckets_400ms = int(0.4 * WAVEFORM_BUCKETS_PER_SEC)   # ??16
 
+        solo_active = any(bool(getattr(track, "solo", False)) for track in audio_tracks)
         for track in audio_tracks:
+            if bool(getattr(track, "muted", False)):
+                continue
+            if solo_active and not bool(getattr(track, "solo", False)):
+                continue
             vol = getattr(track, "volume", 1.0)
             for clip in getattr(track, "clips", []):
                 if getattr(clip, "source_path", None) is None:
@@ -557,6 +562,8 @@ class _ChannelStrip(QWidget):
 
     fader_changed = Signal(float)   # new volume 0.0??.5
     pan_changed = Signal(float)     # new pan -1.0..+1.0
+    mute_changed = Signal(bool)
+    solo_changed = Signal(bool)
 
     _STRIP_BG = AUDIO_PANEL
     _BORDER = AUDIO_BORDER
@@ -571,6 +578,7 @@ class _ChannelStrip(QWidget):
         self._is_master = is_master
         self._track_index = track_index
         self._muted = False
+        self._solo = False
 
         self.setFixedWidth(68)
         self.setStyleSheet(
@@ -654,10 +662,15 @@ class _ChannelStrip(QWidget):
         self._vol_label.setFixedHeight(13)
         layout.addWidget(self._vol_label)
 
-        # Mute button
+        # Mute / solo buttons
+        button_row = QWidget()
+        button_row.setStyleSheet("background: transparent;")
+        button_layout = QHBoxLayout(button_row)
+        button_layout.setContentsMargins(0, 0, 0, 0)
+        button_layout.setSpacing(2)
         self._mute_btn = QPushButton("M")
         self._mute_btn.setCheckable(True)
-        self._mute_btn.setFixedHeight(18)
+        self._mute_btn.setFixedSize(30, 18)
         self._mute_btn.setStyleSheet(
             f"QPushButton {{ background: rgba(255,255,255,7); color: {AUDIO_TEXT_DIM}; border: 1px solid {AUDIO_BORDER};"
             " border-radius: 4px; font-size: 10px; font-weight: 620; }"
@@ -665,7 +678,21 @@ class _ChannelStrip(QWidget):
             f"QPushButton:hover {{ color: {AUDIO_TEXT}; border-color:{AUDIO_BORDER_HI}; }}"
         )
         self._mute_btn.toggled.connect(self._on_mute_toggled)
-        layout.addWidget(self._mute_btn)
+        button_layout.addWidget(self._mute_btn)
+        self._solo_btn = QPushButton("S")
+        self._solo_btn.setCheckable(True)
+        self._solo_btn.setFixedSize(30, 18)
+        self._solo_btn.setStyleSheet(
+            f"QPushButton {{ background: rgba(255,255,255,7); color: {AUDIO_TEXT_DIM}; border: 1px solid {AUDIO_BORDER};"
+            " border-radius: 4px; font-size: 10px; font-weight: 620; }"
+            f"QPushButton:checked {{ background: #3B3826; color: {AUDIO_TEXT}; border-color: {AUDIO_AMBER}; }}"
+            f"QPushButton:hover {{ color: {AUDIO_TEXT}; border-color:{AUDIO_BORDER_HI}; }}"
+        )
+        self._solo_btn.toggled.connect(self._on_solo_toggled)
+        if is_master:
+            self._solo_btn.setEnabled(False)
+        button_layout.addWidget(self._solo_btn)
+        layout.addWidget(button_row)
 
         # Color indicator at bottom
         color = self._TRACK_COLORS[track_index % len(self._TRACK_COLORS)] if not is_master else AUDIO_TEXT_DIM
@@ -685,7 +712,7 @@ class _ChannelStrip(QWidget):
         """Set fader without firing fader_changed (for external sync)."""
         with _block_signals(self._fader):
             self._fader.setValue(int(round(volume * 100)))
-        self._vol_label.setText(f"{volume:.2f}")
+        self._update_volume_label()
 
     def set_pan(self, pan: float) -> None:
         """Set pan dial without firing pan_changed (for external sync)."""
@@ -693,8 +720,22 @@ class _ChannelStrip(QWidget):
             with _block_signals(self._pan_dial):
                 self._pan_dial.setValue(int(round(pan * 100)))
 
+    def set_muted(self, muted: bool) -> None:
+        self._muted = bool(muted)
+        with _block_signals(self._mute_btn):
+            self._mute_btn.setChecked(self._muted)
+        self._update_volume_label()
+
+    def set_solo(self, solo: bool) -> None:
+        self._solo = bool(solo)
+        with _block_signals(self._solo_btn):
+            self._solo_btn.setChecked(self._solo)
+
     def set_levels(self, l: float, r: float) -> None:
         self._vu.set_levels(l, r)
+
+    def levels(self) -> tuple[float, float]:
+        return float(getattr(self._vu, "_l", 0.0)), float(getattr(self._vu, "_r", 0.0))
 
     def pan_value(self) -> int:
         return self._pan_dial.value() if self._pan_dial else 0
@@ -703,11 +744,12 @@ class _ChannelStrip(QWidget):
 
     def _on_fader_changed(self, value: int) -> None:
         vol = value / 100.0
-        if self._muted:
-            self._vol_label.setText(f"{vol:.2f} [M]")
-        else:
-            self._vol_label.setText(f"{vol:.2f}")
-            self.fader_changed.emit(vol)
+        self._update_volume_label()
+        self.fader_changed.emit(vol)
+
+    def _update_volume_label(self) -> None:
+        vol = self._fader.value() / 100.0
+        self._vol_label.setText(f"{vol:.2f} [M]" if self._muted else f"{vol:.2f}")
 
     def _on_pan_changed(self, value: int) -> None:
         pan = value / 100.0
@@ -716,11 +758,13 @@ class _ChannelStrip(QWidget):
         self.pan_changed.emit(pan)
 
     def _on_mute_toggled(self, muted: bool) -> None:
-        self._muted = muted
-        if muted:
-            self.fader_changed.emit(0.0)
-        else:
-            self.fader_changed.emit(self._fader.value() / 100.0)
+        self._muted = bool(muted)
+        self._update_volume_label()
+        self.mute_changed.emit(bool(muted))
+
+    def _on_solo_toggled(self, solo: bool) -> None:
+        self._solo = bool(solo)
+        self.solo_changed.emit(bool(solo))
 
 
 class AudioMixerPanel(QWidget):
@@ -861,6 +905,8 @@ class AudioMixerPanel(QWidget):
         self._volume_callback = None
         # Callback set by the editor: (track_id, pan) ??None
         self._pan_callback = None
+        self._mute_callback = None
+        self._solo_callback = None
         self._window_move_suspended = False
         self._window_move_vu_was_active = True
 
@@ -918,6 +964,12 @@ class AudioMixerPanel(QWidget):
     def set_pan_callback(self, cb) -> None:
         """Register callback(track_id, pan) called when a pan dial moves."""
         self._pan_callback = cb
+
+    def set_mute_callback(self, cb) -> None:
+        self._mute_callback = cb
+
+    def set_solo_callback(self, cb) -> None:
+        self._solo_callback = cb
 
     # ------------------------------------------------------------------
     # Scopes column visibility
@@ -1057,6 +1109,8 @@ class AudioMixerPanel(QWidget):
             strip = _ChannelStrip(name, track_index=i)
             strip.set_volume(track.volume)
             strip.set_pan(getattr(track, "pan", 0.0))
+            strip.set_muted(bool(getattr(track, "muted", False)))
+            strip.set_solo(bool(getattr(track, "solo", False)))
             tid = track.id
 
             def _make_vol_cb(track_id):
@@ -1071,8 +1125,22 @@ class AudioMixerPanel(QWidget):
                         self._pan_callback(track_id, pan)
                 return _cb
 
+            def _make_mute_cb(track_id):
+                def _cb(muted):
+                    if self._mute_callback:
+                        self._mute_callback(track_id, bool(muted))
+                return _cb
+
+            def _make_solo_cb(track_id):
+                def _cb(solo):
+                    if self._solo_callback:
+                        self._solo_callback(track_id, bool(solo))
+                return _cb
+
             strip.fader_changed.connect(_make_vol_cb(tid))
             strip.pan_changed.connect(_make_pan_cb(tid))
+            strip.mute_changed.connect(_make_mute_cb(tid))
+            strip.solo_changed.connect(_make_solo_cb(tid))
             self._track_strips[tid] = strip
             # Insert before the stretch+master at the end
             insert_pos = self._strips_layout.count() - 2  # before stretch + master
@@ -1091,6 +1159,94 @@ class AudioMixerPanel(QWidget):
         if strip is not None:
             strip.set_pan(pan)
 
+    def sync_track_mute(self, track_id: int, muted: bool) -> None:
+        strip = self._track_strips.get(track_id)
+        if strip is not None:
+            strip.set_muted(bool(muted))
+
+    def sync_track_solo(self, track_id: int, solo: bool) -> None:
+        strip = self._track_strips.get(track_id)
+        if strip is not None:
+            strip.set_solo(bool(solo))
+
+    def mixer_state_payload(self, audio_tracks: list | None = None) -> dict:
+        from app.audio_tracks import default_track_insert_slots, default_track_sends
+
+        def _insert_slots(track: object) -> list[dict]:
+            slots = getattr(track, "insert_slots", None)
+            if not isinstance(slots, list):
+                slots = default_track_insert_slots()
+            return [dict(row) for row in slots if isinstance(row, dict)]
+
+        def _sends(track: object) -> dict[str, float]:
+            sends = default_track_sends()
+            raw = getattr(track, "sends", None)
+            if isinstance(raw, dict):
+                for key, value in raw.items():
+                    try:
+                        sends[str(key)] = max(0.0, min(1.0, float(value)))
+                    except Exception:
+                        continue
+            return sends
+
+        tracks = list(audio_tracks or [])
+        solo_active = any(bool(getattr(track, "solo", False)) for track in tracks)
+        rows: list[dict] = []
+        for index, track in enumerate(tracks):
+            tid = int(getattr(track, "id", index + 1))
+            strip = self._track_strips.get(tid)
+            l_peak, r_peak = strip.levels() if strip is not None else (0.0, 0.0)
+            peak_hold = min(1.0, max(float(l_peak or 0.0), float(r_peak or 0.0)) + 0.06)
+            clipped = bool(float(getattr(track, "volume", 1.0) or 0.0) >= 1.18)
+            lanes = getattr(track, "automation_lanes", None)
+            if not isinstance(lanes, dict):
+                lanes = {}
+            point_count = sum(len(list(points or [])) for points in lanes.values())
+            if getattr(track, "automation_points", None):
+                point_count = max(point_count, len(list(getattr(track, "automation_points", []) or [])))
+            rows.append(
+                {
+                    "id": tid,
+                    "index": index,
+                    "label": str(getattr(track, "display_name", "") or getattr(track, "label", "") or f"Audio {index + 1}"),
+                    "volume": float(getattr(track, "volume", 1.0) or 0.0),
+                    "pan": float(getattr(track, "pan", 0.0) or 0.0),
+                    "muted": bool(getattr(track, "muted", False)),
+                    "solo": bool(getattr(track, "solo", False)),
+                    "audible": not bool(getattr(track, "muted", False)) and (not solo_active or bool(getattr(track, "solo", False))),
+                    "bus_id": str(getattr(track, "bus_id", "master") or "master"),
+                    "track_type": str(getattr(track, "track_type", "") or ""),
+                    "insert_slots": _insert_slots(track),
+                    "sends": _sends(track),
+                    "automation": {
+                        "read": bool(getattr(track, "automation_read", True)),
+                        "write": bool(getattr(track, "automation_write", False)),
+                        "point_count": point_count,
+                    },
+                    "meter": {
+                        "track_id": tid,
+                        "level_l": float(l_peak or 0.0),
+                        "level_r": float(r_peak or 0.0),
+                        "peak_hold": peak_hold,
+                        "clip_led": clipped,
+                        "audible": not bool(getattr(track, "muted", False)) and (not solo_active or bool(getattr(track, "solo", False))),
+                    },
+                    "clip_count": len(list(getattr(track, "clips", []) or [])),
+                    "loaded": bool(getattr(track, "is_loaded", False)),
+                    "level_l": l_peak,
+                    "level_r": r_peak,
+                }
+            )
+        master_l, master_r = self._master_strip.levels()
+        return {
+            "schema": "tigerstudio.audio.mixer.v1",
+            "track_count": len(rows),
+            "solo_active": solo_active,
+            "snapshot_count": len(list(getattr(self, "_audio_mixer_snapshots", []) or [])),
+            "tracks": rows,
+            "master": {"level_l": master_l, "level_r": master_r},
+        }
+
     def update_levels(self, pos_ms: int, audio_tracks: list) -> None:
         """Sample waveform peaks and update VU meters."""
         try:
@@ -1100,11 +1256,17 @@ class AudioMixerPanel(QWidget):
             return
 
         master_l = master_r = 0.0
+        solo_active = any(bool(getattr(track, "solo", False)) for track in audio_tracks)
 
         for track in audio_tracks:
             strip = self._track_strips.get(track.id)
             l_peak = r_peak = 0.0
+            track_audible = not bool(getattr(track, "muted", False)) and (
+                not solo_active or bool(getattr(track, "solo", False))
+            )
             for clip in track.clips:
+                if not track_audible:
+                    continue
                 if clip.source_path is None:
                     continue
                 local_ms = pos_ms - clip.offset_ms

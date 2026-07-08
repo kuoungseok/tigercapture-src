@@ -258,7 +258,23 @@ def _video_clip_to_dict(c) -> dict:
         "disabled_bg_removal": _effect_param_to_dict(getattr(c, "disabled_bg_removal", None)),
         "linked_audio_id": getattr(c, "linked_audio_id", None),
         "compound_group_id": getattr(c, "compound_group_id", None),
+        "timecode_ms": getattr(c, "timecode_ms", None),
+        "waveform_sync_peak_ms": getattr(c, "waveform_sync_peak_ms", None),
+        "audio_sync_offset_ms": getattr(c, "audio_sync_offset_ms", None),
         "compound_group_name": str(getattr(c, "compound_group_name", "") or ""),
+        "connected_parent_track_id": getattr(c, "connected_parent_track_id", None),
+        "connected_parent_clip_id": getattr(c, "connected_parent_clip_id", None),
+        "connected_offset_ms": int(getattr(c, "connected_offset_ms", 0) or 0),
+        "clip_role": str(getattr(c, "clip_role", "") or ""),
+        "role_color": str(getattr(c, "role_color", "") or ""),
+        "audition_group_id": getattr(c, "audition_group_id", None),
+        "audition_name": str(getattr(c, "audition_name", "") or ""),
+        "audition_active_take_id": str(getattr(c, "audition_active_take_id", "") or ""),
+        "audition_takes": [
+            dict(take)
+            for take in (getattr(c, "audition_takes", None) or [])
+            if isinstance(take, dict)
+        ],
         "nested_sequence_id": getattr(c, "nested_sequence_id", None),
         "nested_sequence_name": str(getattr(c, "nested_sequence_name", "") or ""),
         "nested_child_clips": [
@@ -478,12 +494,24 @@ def save_project(editor, path: str | Path) -> None:
             "display_name": str(getattr(atrack, "display_name", "") or ""),
             "volume": float(getattr(atrack, "volume", 1.0)),
             "pan": float(getattr(atrack, "pan", 0.0)),
+            "muted": bool(getattr(atrack, "muted", False)),
+            "solo": bool(getattr(atrack, "solo", False)),
             "label": str(getattr(atrack, "label", "") or ""),
             "bus_id": str(getattr(atrack, "bus_id", "master") or "master"),
+            "track_type": str(getattr(atrack, "track_type", "") or ""),
+            "insert_slots": list(getattr(atrack, "insert_slots", None) or []),
+            "sends": dict(getattr(atrack, "sends", None) or {}),
+            "automation_read": bool(getattr(atrack, "automation_read", True)),
+            "automation_write": bool(getattr(atrack, "automation_write", False)),
             "automation_points": list(getattr(atrack, "automation_points", None) or []),
+            "automation_lanes": dict(getattr(atrack, "automation_lanes", None) or {}),
             "clips": [_audio_clip_to_dict(c) for c in (atrack.clips or [])],
         }
         doc["audio_tracks"].append(at)
+    try:
+        doc["audio_mixer_snapshots"] = list(getattr(editor, "_audio_mixer_snapshots", None) or [])
+    except Exception:
+        doc["audio_mixer_snapshots"] = []
 
     # ---- Subtitles ----
     try:
@@ -670,6 +698,10 @@ def load_project(editor, path: str | Path) -> None:
     # 3. Restore audio tracks.
     for at_data in doc.get("audio_tracks", []):
         _load_audio_track(editor, at_data)
+    try:
+        editor._audio_mixer_snapshots = list(doc.get("audio_mixer_snapshots", []) or [])
+    except Exception:
+        editor._audio_mixer_snapshots = []
 
     # 4. Restore subtitles.
     _load_subtitles(editor, doc.get("subtitles", []))
@@ -1012,6 +1044,7 @@ def _clear_editor(editor) -> None:
         editor._next_audio_track_id = 1
     else:
         editor._next_audio_track_id = 1
+    editor._audio_mixer_snapshots = []
 
     # Clear subtitles.
     try:
@@ -1284,6 +1317,14 @@ def _video_clip_from_dict(cd: dict, fallback_src_path: Path | None):
         cd.get("disabled_bg_removal", None),
     )
 
+    for attr in ("timecode_ms", "waveform_sync_peak_ms", "audio_sync_offset_ms"):
+        value = cd.get(attr, None)
+        if value is not None:
+            try:
+                setattr(clip, attr, int(value))
+            except Exception:
+                setattr(clip, attr, None)
+
     linked_aid = cd.get("linked_audio_id", None)
     if linked_aid is not None:
         clip.linked_audio_id = int(linked_aid)
@@ -1291,6 +1332,25 @@ def _video_clip_from_dict(cd: dict, fallback_src_path: Path | None):
     if group_id is not None:
         clip.compound_group_id = int(group_id)
         clip.compound_group_name = str(cd.get("compound_group_name", "") or "")
+    parent_tid = cd.get("connected_parent_track_id", None)
+    if parent_tid is not None:
+        clip.connected_parent_track_id = int(parent_tid)
+    parent_cid = cd.get("connected_parent_clip_id", None)
+    if parent_cid is not None:
+        clip.connected_parent_clip_id = int(parent_cid)
+    clip.connected_offset_ms = int(cd.get("connected_offset_ms", 0) or 0)
+    clip.clip_role = str(cd.get("clip_role", "") or "")
+    clip.role_color = str(cd.get("role_color", "") or "")
+    audition_id = cd.get("audition_group_id", None)
+    if audition_id is not None:
+        clip.audition_group_id = int(audition_id)
+    clip.audition_name = str(cd.get("audition_name", "") or "")
+    clip.audition_active_take_id = str(cd.get("audition_active_take_id", "") or "")
+    clip.audition_takes = [
+        dict(take)
+        for take in (cd.get("audition_takes", []) or [])
+        if isinstance(take, dict)
+    ]
 
     nested_id = cd.get("nested_sequence_id", None)
     if nested_id is not None:
@@ -1462,16 +1522,24 @@ def _load_video_track(editor, vt_data: dict, src_path: Path | None) -> None:
 # ---------------------------------------------------------------------------
 
 def _load_audio_track(editor, at_data: dict) -> None:
-    from app.audio_tracks import AudioTrack
+    from app.audio_tracks import AudioTrack, default_track_insert_slots, default_track_sends
 
     tid = int(at_data.get("id", getattr(editor, "_next_audio_track_id", 1)))
     new_track = AudioTrack(id=tid)
     # display_name is a read-only property on AudioTrack — skip
     new_track.volume = float(at_data.get("volume", 1.0))
     new_track.pan = float(at_data.get("pan", 0.0))
+    new_track.muted = bool(at_data.get("muted", False))
+    new_track.solo = bool(at_data.get("solo", False))
     new_track.label = str(at_data.get("label", "") or "")
     new_track.bus_id = str(at_data.get("bus_id", "master") or "master")
+    new_track.track_type = str(at_data.get("track_type", "") or "")
+    new_track.insert_slots = list(at_data.get("insert_slots", []) or default_track_insert_slots())
+    new_track.sends = dict(at_data.get("sends", {}) or default_track_sends())
+    new_track.automation_read = bool(at_data.get("automation_read", True))
+    new_track.automation_write = bool(at_data.get("automation_write", False))
     new_track.automation_points = list(at_data.get("automation_points", []) or [])
+    new_track.automation_lanes = dict(at_data.get("automation_lanes", {}) or {})
 
     for cd in at_data.get("clips", []):
         clip = _audio_clip_from_dict(cd)

@@ -242,9 +242,17 @@ def apply_video_track_state(track, snap: dict) -> None:
 _AUDIO_TRACK_FIELDS = (
     "volume",
     "pan",
+    "muted",
+    "solo",
     "label",
     "bus_id",
+    "track_type",
+    "insert_slots",
+    "sends",
+    "automation_read",
+    "automation_write",
     "automation_points",
+    "automation_lanes",
     "clips",
 )
 
@@ -292,6 +300,7 @@ def capture_editor_snapshot(editor) -> dict:
         "subtitles": subtitles,
         "active_track_id": getattr(editor, "_active_track_id", None),
         "timeline_markers": _history_copy(getattr(editor, "_timeline_markers", [])),
+        "audio_mixer_snapshots": _history_copy(getattr(editor, "_audio_mixer_snapshots", [])),
         "spine_actor_tracks": _history_copy(getattr(editor, "_spine_actor_tracks", [])),
         "live2d_actor_tracks": _history_copy(getattr(editor, "_live2d_actor_tracks", [])),
         "ar_pbr_tracks": _history_copy(getattr(editor, "_ar_pbr_tracks", [])),
@@ -334,6 +343,8 @@ def apply_editor_snapshot(editor, snap: dict) -> None:
         live = audio_by_id.get(snap_track["id"])
         if live is not None:
             apply_audio_track_state(live, snap_track)
+    if "audio_mixer_snapshots" in snap:
+        editor._audio_mixer_snapshots = _history_copy(snap.get("audio_mixer_snapshots", []))
     # Subtitles — wholesale replace.
     panel = getattr(editor, "_subtitle_panel", None)
     if panel is not None and hasattr(panel, "layer"):

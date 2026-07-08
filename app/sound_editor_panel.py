@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QBrush, QLinearGradient, QPainter, QPen, QRadialGradient
+from PySide6.QtGui import QColor, QBrush, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import (
     QFileDialog,
     QComboBox,
@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSlider,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -42,6 +43,10 @@ from app.studio_slider import StudioSlider
 from app.style import FONT_FAMILY, editor_scrollbar_qss
 
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_SOUND_JOG_DIAL_TEXTURE = _PROJECT_ROOT / "resources" / "ui" / "sound_editor" / "jog_dial_metal_sparse_base.png"
+
+
 def _fmt_ms(ms: int | float | None) -> str:
     try:
         value = max(0, int(ms or 0))
@@ -49,6 +54,90 @@ def _fmt_ms(ms: int | float | None) -> str:
         value = 0
     s = value // 1000
     return f"{s // 60}:{s % 60:02d}"
+
+
+def _compact_mixer_label(text: str, max_chars: int = 9) -> str:
+    value = " ".join(str(text or "").replace("_", " ").split())
+    if not value:
+        return "Audio"
+    if len(value) <= max_chars:
+        return value
+    return value[: max(1, max_chars - 1)].rstrip() + "..."
+
+
+def _mixer_track_type(track: Any) -> str:
+    value = str(getattr(track, "track_type", "") or "").strip().lower()
+    if value:
+        return value
+    bus = str(getattr(track, "bus_id", "") or "").strip().lower()
+    if bus in {"dialogue", "music", "sfx", "ambience"}:
+        return bus
+    label = str(getattr(track, "label", "") or getattr(track, "display_name", "") or "").lower()
+    if any(key in label for key in ("voice", "dialog", "vocal", "extract")):
+        return "dialogue"
+    if any(key in label for key in ("music", "bgm", "stem")):
+        return "music"
+    if any(key in label for key in ("sfx", "fx", "effect")):
+        return "sfx"
+    return "dialogue"
+
+
+def _mixer_type_code(track_type: str) -> str:
+    return {
+        "dialogue": "DIA",
+        "music": "MUS",
+        "sfx": "SFX",
+        "ambience": "AMB",
+    }.get(str(track_type or "").lower(), "AUD")
+
+
+def _mixer_next_type(track_type: str) -> str:
+    order = ["dialogue", "music", "sfx", "ambience"]
+    current = str(track_type or "").lower()
+    try:
+        return order[(order.index(current) + 1) % len(order)]
+    except ValueError:
+        return order[0]
+
+
+def _mixer_insert_slots(track: Any) -> list[dict[str, Any]]:
+    defaults = [
+        {"id": "eq", "label": "EQ", "enabled": False, "bypassed": False},
+        {"id": "dyn", "label": "DYN", "enabled": False, "bypassed": False},
+        {"id": "fx", "label": "FX", "enabled": False, "bypassed": False},
+    ]
+    by_id = {row["id"]: dict(row) for row in defaults}
+    for row in list(getattr(track, "insert_slots", None) or []):
+        if not isinstance(row, dict):
+            continue
+        sid = str(row.get("id") or row.get("slot") or "").strip().lower()
+        if sid in {"dynamics", "dynamic"}:
+            sid = "dyn"
+        if not sid:
+            continue
+        base = dict(by_id.get(sid, {"id": sid, "label": sid.upper(), "enabled": False, "bypassed": False}))
+        base["enabled"] = bool(row.get("enabled", base.get("enabled", False)))
+        base["bypassed"] = bool(row.get("bypassed", base.get("bypassed", False)))
+        base["label"] = str(row.get("label") or base.get("label") or sid.upper())
+        by_id[sid] = base
+    return [by_id["eq"], by_id["dyn"], by_id["fx"]]
+
+
+def _mixer_sends(track: Any) -> dict[str, float]:
+    sends = {"reverb": 0.0, "delay": 0.0}
+    raw = getattr(track, "sends", None) or {}
+    if isinstance(raw, dict):
+        for key, value in raw.items():
+            sid = str(key or "").strip().lower()
+            if sid in {"rev", "verb"}:
+                sid = "reverb"
+            if sid == "dly":
+                sid = "delay"
+            try:
+                sends[sid] = max(0.0, min(1.0, float(value or 0.0)))
+            except Exception:
+                sends[sid] = 0.0
+    return sends
 
 
 def _compact_path_label(path: Path | str | None, *, max_chars: int = 34) -> str:
@@ -143,7 +232,7 @@ class _ValueSlider(QWidget):
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
-        root.setSpacing(3)
+        root.setSpacing(5)
         row = QHBoxLayout()
         row.setContentsMargins(0, 0, 0, 0)
         self._label = QLabel(label, self)
@@ -798,6 +887,11 @@ class _SoundJogShuttle05(QWidget):
         self._level = 0.0
         self._playing = False
         self._dial_pressed = False
+        self._slot_anim_tick = 0
+        self._slot_anim_timer = QTimer(self)
+        self._slot_anim_timer.setInterval(90)
+        self._slot_anim_timer.timeout.connect(self._tick_slot_animation)
+        self._dial_texture = QPixmap(str(_SOUND_JOG_DIAL_TEXTURE)) if _SOUND_JOG_DIAL_TEXTURE.is_file() else QPixmap()
         self.setObjectName("SoundJogShuttle05")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMinimumHeight(126)
@@ -837,6 +931,10 @@ class _SoundJogShuttle05(QWidget):
         self._position_ms = max(0, min(self._duration_ms, int(getattr(clip, "_se_jog_ms", 0) or 0))) if clip is not None else 0
         self._playing = bool(getattr(clip, "_se_jog_playing", False)) if clip is not None else False
         self._level = self._derive_level(clip)
+        if self._playing:
+            self._slot_anim_timer.start()
+        else:
+            self._slot_anim_timer.stop()
         self.update()
 
     def _derive_level(self, clip: AudioClip | None) -> float:
@@ -991,6 +1089,7 @@ class _SoundJogShuttle05(QWidget):
         if value == self._position_ms:
             return
         self._position_ms = value
+        self._slot_anim_tick = (self._slot_anim_tick + 2) % 10000
         if self._clip is not None:
             setattr(self._clip, "_se_jog_ms", value)
         self.update()
@@ -1004,8 +1103,16 @@ class _SoundJogShuttle05(QWidget):
         self._playing = playing
         if self._clip is not None:
             setattr(self._clip, "_se_jog_playing", playing)
+        if playing:
+            self._slot_anim_timer.start()
+        else:
+            self._slot_anim_timer.stop()
         self.update()
         self.playing_changed.emit(playing)
+
+    def _tick_slot_animation(self) -> None:
+        self._slot_anim_tick = (self._slot_anim_tick + 1) % 10000
+        self.update()
 
     def _step(self, delta_ms: int) -> None:
         self._set_position_ms(self._position_ms + int(delta_ms))
@@ -1092,6 +1199,134 @@ class _SoundJogShuttle05(QWidget):
         p.setPen(QColor(24, 27, 29, 230) if active else QColor(206, 214, 225, 145))
         p.drawText(rect, Qt.AlignmentFlag.AlignCenter, label)
 
+    def _draw_slotted_jog_dial(self, p: QPainter, dial: QRectF) -> None:
+        center = dial.center()
+        radius = dial.width() * 0.5
+
+        metal = dial.adjusted(radius * 0.13, radius * 0.13, -radius * 0.13, -radius * 0.13)
+        texture_used = not self._dial_texture.isNull()
+        if texture_used:
+            texture_rect = dial.adjusted(-radius * 0.20, -radius * 0.20, radius * 0.20, radius * 0.20)
+            source = QRectF(self._dial_texture.rect()).adjusted(115.0, 115.0, -115.0, -115.0)
+            p.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+            p.save()
+            clip = QPainterPath()
+            clip.addEllipse(texture_rect.adjusted(1.0, 1.0, -1.0, -1.0))
+            p.setClipPath(clip)
+            p.drawPixmap(texture_rect, self._dial_texture, source)
+            p.restore()
+        else:
+            p.setPen(QPen(QColor(5, 7, 9, 220), 1.0))
+            p.setBrush(QColor(8, 10, 13, 235))
+            p.drawEllipse(dial.adjusted(-8.0, -8.0, 8.0, 8.0))
+
+            outer = dial.adjusted(radius * 0.02, radius * 0.02, -radius * 0.02, -radius * 0.02)
+            outer_grad = QRadialGradient(center, radius)
+            outer_grad.setColorAt(0.0, QColor(44, 48, 50, 222))
+            outer_grad.setColorAt(0.58, QColor(28, 31, 33, 240))
+            outer_grad.setColorAt(0.84, QColor(10, 12, 14, 250))
+            outer_grad.setColorAt(1.0, QColor(4, 5, 6, 255))
+            p.setPen(QPen(QColor(225, 230, 236, 34), 1.0))
+            p.setBrush(QBrush(outer_grad))
+            p.drawEllipse(outer)
+
+            metal_grad = QRadialGradient(
+                QPointF(center.x() - radius * 0.14, center.y() - radius * 0.18),
+                radius * 0.90,
+            )
+            metal_grad.setColorAt(0.0, QColor(178, 181, 174, 220))
+            metal_grad.setColorAt(0.25, QColor(108, 112, 110, 232))
+            metal_grad.setColorAt(0.54, QColor(57, 62, 62, 242))
+            metal_grad.setColorAt(0.78, QColor(88, 91, 86, 232))
+            metal_grad.setColorAt(1.0, QColor(18, 20, 21, 252))
+            p.setPen(QPen(QColor(240, 244, 245, 28), 0.8))
+            p.setBrush(QBrush(metal_grad))
+            p.drawEllipse(metal)
+
+            for i in range(80):
+                angle = math.radians(i * 360.0 / 80.0)
+                p.setPen(QPen(QColor(245, 247, 242, 4 if i % 5 else 7), 0.22))
+                start = QPointF(
+                    center.x() + math.cos(angle) * radius * 0.18,
+                    center.y() + math.sin(angle) * radius * 0.18,
+                )
+                end = QPointF(
+                    center.x() + math.cos(angle) * radius * 0.69,
+                    center.y() + math.sin(angle) * radius * 0.69,
+                )
+                p.drawLine(start, end)
+
+            for scale, alpha in ((0.28, 10), (0.48, 12), (0.69, 15)):
+                p.setPen(QPen(QColor(255, 255, 255, alpha), 0.45))
+                inset = radius * (1.0 - scale)
+                p.drawEllipse(dial.adjusted(inset, inset, -inset, -inset))
+
+        slot_count = 8
+        active_index = int(round(self._normalized_position() * slot_count)) % slot_count
+        if self._playing:
+            active_index = (active_index + self._slot_anim_tick // 4) % slot_count
+        slot_radius = radius * 0.82
+        slot_w = max(1.35, radius * 0.022)
+        slot_h = max(3.4, radius * 0.052)
+
+        for i in range(slot_count):
+            angle_deg = -90.0 + i * 360.0 / slot_count
+            angle = math.radians(angle_deg)
+            slot_center = QPointF(
+                center.x() + math.cos(angle) * slot_radius,
+                center.y() + math.sin(angle) * slot_radius,
+            )
+            trail = (active_index - i) % slot_count
+            intensity = 0.0
+            if trail <= 2:
+                intensity = 1.0 - trail / 3.0
+
+            p.save()
+            p.translate(slot_center)
+            p.rotate(angle_deg + 90.0)
+            slot = QRectF(-slot_w * 0.5, -slot_h * 0.5, slot_w, slot_h)
+            if intensity > 0.0:
+                glow = QColor(92, 196, 158, int(52 + 104 * intensity))
+                if trail == 0:
+                    glow = QColor(232, 198, 122, int(80 + 128 * intensity))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(glow)
+                p.drawRoundedRect(slot.adjusted(-2.0, -1.8, 2.0, 1.8), slot_w * 0.80, slot_w * 0.80)
+
+            p.setPen(QPen(QColor(0, 0, 0, 118), 0.45))
+            if intensity > 0.0:
+                if trail == 0:
+                    fill = QColor(246, 213, 135, int(190 + 54 * intensity))
+                else:
+                    fill = QColor(105, 218, 172, int(150 + 70 * intensity))
+            else:
+                fill = QColor(5, 6, 7, 132)
+            p.setBrush(fill)
+            p.drawRoundedRect(slot, slot_w * 0.45, slot_w * 0.45)
+            if intensity > 0.0:
+                p.setPen(QPen(QColor(255, 250, 214, int(86 + 80 * intensity)), 0.35))
+                p.drawLine(QPointF(0.0, slot.top() + 1.2), QPointF(0.0, slot.bottom() - 1.2))
+            p.restore()
+
+        if not texture_used:
+            cap = QRectF(center.x() - radius * 0.11, center.y() - radius * 0.11, radius * 0.22, radius * 0.22)
+            cap_grad = QRadialGradient(cap.center(), cap.width() * 0.58)
+            cap_grad.setColorAt(0.0, QColor(168, 170, 164, 36))
+            cap_grad.setColorAt(0.54, QColor(78, 82, 80, 64))
+            cap_grad.setColorAt(1.0, QColor(18, 20, 21, 118))
+            p.setPen(QPen(QColor(240, 244, 245, 18), 0.55))
+            p.setBrush(QBrush(cap_grad))
+            p.drawEllipse(cap)
+        if self._playing:
+            p.setPen(QPen(QColor(104, 144, 128, 108), 0.9))
+            p.setBrush(Qt.BrushStyle.NoBrush)
+            active_ring = (
+                dial.adjusted(radius * 0.23, radius * 0.23, -radius * 0.23, -radius * 0.23)
+                if texture_used
+                else metal.adjusted(radius * 0.08, radius * 0.08, -radius * 0.08, -radius * 0.08)
+            )
+            p.drawEllipse(active_ring)
+
     def paintEvent(self, event) -> None:  # pragma: no cover - visual QA
         super().paintEvent(event)
         p = QPainter(self)
@@ -1152,57 +1387,7 @@ class _SoundJogShuttle05(QWidget):
             p.setBrush(color)
             p.drawRoundedRect(QRectF(rail_left, y, rail_w * (0.72 - row * 0.16), 3.4), 1.7, 1.7)
 
-        dial = self._dial_rect()
-        center = dial.center()
-        radius = dial.width() * 0.5
-        p.setPen(QPen(QColor(8, 10, 12, 205), 1.0))
-        p.setBrush(QColor(9, 12, 15, 232))
-        p.drawEllipse(dial.adjusted(-8.0, -8.0, 8.0, 8.0))
-        ring_values = self._ring_values(48)
-        for i, value in enumerate(ring_values):
-            angle = math.radians(-134 + i * 268 / max(1, len(ring_values) - 1))
-            length = 3.5 + max(0.0, min(1.0, value)) * 5.8
-            outer = QPointF(center.x() + math.cos(angle) * (radius + 1.0), center.y() + math.sin(angle) * (radius + 1.0))
-            inner = QPointF(center.x() + math.cos(angle) * (radius + 1.0 - length), center.y() + math.sin(angle) * (radius + 1.0 - length))
-            if i < len(ring_values) * 0.52:
-                color = QColor(118, 145, 123, 54 + int(78 * value))
-            else:
-                color = QColor(90, 139, 154, 50 + int(72 * value))
-            if i % 6 == 0:
-                color = QColor(164, 150, 105, 110)
-            p.setPen(QPen(color, 1.0))
-            p.drawLine(inner, outer)
-
-        rim = dial.adjusted(radius * 0.10, radius * 0.10, -radius * 0.10, -radius * 0.10)
-        rim_grad = QRadialGradient(rim.center(), rim.width() * 0.62)
-        rim_grad.setColorAt(0.0, QColor(48, 54, 60, 220))
-        rim_grad.setColorAt(0.72, QColor(22, 27, 32, 240))
-        rim_grad.setColorAt(1.0, QColor(7, 9, 12, 248))
-        p.setPen(QPen(QColor(104, 118, 128, 108), 1.0))
-        p.setBrush(rim_grad)
-        p.drawEllipse(rim)
-
-        knob = dial.adjusted(radius * 0.30, radius * 0.30, -radius * 0.30, -radius * 0.30)
-        knob_grad = QRadialGradient(knob.center(), knob.width() * 0.55)
-        knob_grad.setColorAt(0.0, QColor(45, 50, 56, 238))
-        knob_grad.setColorAt(0.66, QColor(24, 29, 34, 246))
-        knob_grad.setColorAt(1.0, QColor(8, 9, 11, 250))
-        p.setPen(QPen(QColor(220, 225, 238, 34), 1.0))
-        p.setBrush(knob_grad)
-        p.drawEllipse(knob)
-        dimple = QRectF(knob.center().x() - knob.width() * 0.14, knob.top() + knob.height() * 0.18, knob.width() * 0.28, knob.width() * 0.28)
-        p.setPen(QPen(QColor(8, 10, 12, 170), 0.8))
-        p.setBrush(QColor(24, 28, 32, 205))
-        p.drawEllipse(dimple)
-
-        pos_angle = math.radians(-134 + self._normalized_position() * 268)
-        indicator_outer = QPointF(center.x() + math.cos(pos_angle) * (radius + 2.0), center.y() + math.sin(pos_angle) * (radius + 2.0))
-        indicator_inner = QPointF(center.x() + math.cos(pos_angle) * (radius * 0.64), center.y() + math.sin(pos_angle) * (radius * 0.64))
-        p.setPen(QPen(QColor(164, 150, 105, 208), 1.8))
-        p.drawLine(indicator_inner, indicator_outer)
-        if self._playing:
-            p.setPen(QPen(QColor(118, 145, 123, 178), 1.2))
-            p.drawEllipse(knob.adjusted(5.0, 5.0, -5.0, -5.0))
+        self._draw_slotted_jog_dial(p, self._dial_rect())
 
         meter = self._meter_rect()
         p.setPen(QPen(QColor(178, 186, 202, 32), 1.0))
@@ -1591,6 +1776,600 @@ class _SoundMacroJogBank(QWidget):
         p.end()
 
 
+class _SoundMixerMeter(QWidget):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._l = 0.0
+        self._r = 0.0
+        self._peak = 0.0
+        self._clipped = False
+        self.setFixedSize(18, 84)
+
+    def set_levels(self, left: float, right: float, *, peak: float | None = None, clipped: bool = False) -> None:
+        self._l = max(0.0, min(1.0, float(left or 0.0)))
+        self._r = max(0.0, min(1.0, float(right or 0.0)))
+        self._peak = max(self._l, self._r) if peak is None else max(0.0, min(1.0, float(peak or 0.0)))
+        self._clipped = bool(clipped)
+        self.update()
+
+    def paintEvent(self, event) -> None:  # pragma: no cover - visual QA
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        r = self.rect().adjusted(2, 3, -2, -3)
+        bar_w = max(3, int((r.width() - 2) / 2))
+        clip_led = QRectF(r.left(), r.top(), r.width(), 3.0)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(164, 99, 94, 230) if self._clipped else QColor(164, 99, 94, 42))
+        p.drawRoundedRect(clip_led, 1.5, 1.5)
+        meter_r = r.adjusted(0, 5, 0, 0)
+        for index, level in enumerate((self._l, self._r)):
+            x = meter_r.left() + index * (bar_w + 2)
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(255, 255, 255, 13))
+            p.drawRoundedRect(QRectF(x, meter_r.top(), bar_w, meter_r.height()), 1.8, 1.8)
+            fill_h = meter_r.height() * level
+            fill = QRectF(x, meter_r.bottom() - fill_h, bar_w, fill_h)
+            grad = QLinearGradient(fill.topLeft(), fill.bottomLeft())
+            grad.setColorAt(0.0, QColor(164, 99, 94, 210))
+            grad.setColorAt(0.42, QColor(164, 150, 105, 205))
+            grad.setColorAt(1.0, QColor(118, 145, 123, 220))
+            p.setBrush(QBrush(grad))
+            p.drawRoundedRect(fill, 1.8, 1.8)
+        if self._peak > 0:
+            y = meter_r.bottom() - meter_r.height() * self._peak
+            p.setPen(QPen(QColor(226, 219, 178, 150), 0.8))
+            p.drawLine(QPointF(meter_r.left() - 0.5, y), QPointF(meter_r.right() + 0.5, y))
+        p.end()
+
+
+class _SoundMixerPanSlider(QSlider):
+    """Compact pan rail for mixer strips, drawn in the renewed audio theme."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(Qt.Orientation.Horizontal, parent)
+        self.setObjectName("SoundMixerPanSlider")
+        self.setRange(-100, 100)
+        self.setFixedSize(66, 22)
+        self.setMouseTracking(True)
+
+    def _ratio(self) -> float:
+        span = max(1, self.maximum() - self.minimum())
+        return max(0.0, min(1.0, (self.value() - self.minimum()) / span))
+
+    def _set_from_x(self, x: float) -> None:
+        rail = self.rect().adjusted(8, 0, -8, 0)
+        left = float(rail.left())
+        width = max(1.0, float(rail.width()))
+        ratio = max(0.0, min(1.0, (float(x) - left) / width))
+        value = self.minimum() + ratio * (self.maximum() - self.minimum())
+        self.setValue(int(round(value)))
+
+    def mousePressEvent(self, event) -> None:  # pragma: no cover - UI interaction
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.setSliderDown(True)
+            self._set_from_x(event.position().x())
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # pragma: no cover - UI interaction
+        if self.isSliderDown():
+            self._set_from_x(event.position().x())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # pragma: no cover - UI interaction
+        self.setSliderDown(False)
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event) -> None:  # pragma: no cover - visual QA
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        root = QRectF(self.rect()).adjusted(6.5, 2.0, -6.5, -2.0)
+        cy = root.center().y()
+        rail_left = root.left()
+        rail_right = root.right()
+        rail_w = max(1.0, rail_right - rail_left)
+        center_x = rail_left + rail_w * 0.5
+        handle_x = rail_left + rail_w * self._ratio()
+
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(0, 0, 0, 126))
+        p.drawRoundedRect(QRectF(rail_left - 1.0, cy - 3.2, rail_w + 2.0, 6.4), 3.2, 3.2)
+        slot_grad = QLinearGradient(rail_left, cy - 2.0, rail_left, cy + 2.0)
+        slot_grad.setColorAt(0.0, QColor(255, 255, 255, 22))
+        slot_grad.setColorAt(0.48, QColor(18, 21, 24, 185))
+        slot_grad.setColorAt(1.0, QColor(255, 255, 255, 8))
+        p.setBrush(QBrush(slot_grad))
+        p.drawRoundedRect(QRectF(rail_left, cy - 2.0, rail_w, 4.0), 2.0, 2.0)
+
+        fill_left = min(center_x, handle_x)
+        fill_w = abs(handle_x - center_x)
+        if fill_w >= 1.0:
+            fill = QRectF(fill_left, cy - 1.25, fill_w, 2.5)
+            grad = QLinearGradient(fill.left(), cy, fill.right(), cy)
+            if handle_x < center_x:
+                grad.setColorAt(0.0, QColor(83, 110, 102, 185))
+                grad.setColorAt(1.0, QColor(155, 164, 171, 128))
+            else:
+                grad.setColorAt(0.0, QColor(155, 164, 171, 128))
+                grad.setColorAt(1.0, QColor(138, 146, 114, 185))
+            p.setBrush(QBrush(grad))
+            p.drawRoundedRect(fill, 1.25, 1.25)
+
+        p.setPen(QPen(QColor(218, 225, 232, 62), 0.75))
+        p.drawLine(QPointF(center_x, cy - 4.8), QPointF(center_x, cy + 4.8))
+
+        handle = QRectF(handle_x - 4.6, cy - 6.0, 9.2, 12.0)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(0, 0, 0, 150))
+        p.drawRoundedRect(handle.translated(0, 1.2).adjusted(-1.0, 0, 1.0, 0.8), 3.8, 3.8)
+        hgrad = QLinearGradient(handle.topLeft(), handle.bottomLeft())
+        hgrad.setColorAt(0.0, QColor(213, 219, 224, 232))
+        hgrad.setColorAt(0.18, QColor(159, 168, 175, 236))
+        hgrad.setColorAt(0.58, QColor(98, 108, 116, 242))
+        hgrad.setColorAt(1.0, QColor(55, 62, 69, 238))
+        p.setBrush(QBrush(hgrad))
+        p.setPen(QPen(QColor(224, 230, 236, 116), 0.75))
+        p.drawRoundedRect(handle, 3.8, 3.8)
+        p.setPen(QPen(QColor(255, 255, 255, 56), 0.65))
+        p.drawLine(QPointF(handle.left() + 2.2, handle.top() + 2.0), QPointF(handle.right() - 2.2, handle.top() + 2.0))
+        p.setPen(QPen(QColor(13, 16, 19, 74), 0.7))
+        p.drawLine(QPointF(handle.center().x(), handle.top() + 3.0), QPointF(handle.center().x(), handle.bottom() - 3.0))
+        p.end()
+
+
+class _SoundMixerFader(QSlider):
+    """Vertical mixer fader with a quiet metal cap and recessed rail."""
+
+    def __init__(self, parent: QWidget | None = None, *, master: bool = False) -> None:
+        super().__init__(Qt.Orientation.Vertical, parent)
+        self._master = bool(master)
+        self.setObjectName("SoundMixerFader")
+        self.setRange(0, 150)
+        self.setFixedSize(32, 94)
+        self.setMouseTracking(True)
+
+    def _rail_rect(self) -> QRectF:
+        return QRectF(self.rect()).adjusted(0.0, 13.0, 0.0, -13.0)
+
+    def _ratio(self) -> float:
+        span = max(1, self.maximum() - self.minimum())
+        return max(0.0, min(1.0, (self.value() - self.minimum()) / span))
+
+    def _set_from_y(self, y: float) -> None:
+        rail = self._rail_rect()
+        top = float(rail.top())
+        height = max(1.0, float(rail.height()))
+        ratio = max(0.0, min(1.0, (float(rail.bottom()) - float(y)) / height))
+        value = self.minimum() + ratio * (self.maximum() - self.minimum())
+        self.setValue(int(round(value)))
+
+    def mousePressEvent(self, event) -> None:  # pragma: no cover - UI interaction
+        if event.button() == Qt.MouseButton.LeftButton and self.isEnabled():
+            self.setSliderDown(True)
+            self._set_from_y(event.position().y())
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # pragma: no cover - UI interaction
+        if self.isSliderDown() and self.isEnabled():
+            self._set_from_y(event.position().y())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # pragma: no cover - UI interaction
+        self.setSliderDown(False)
+        super().mouseReleaseEvent(event)
+
+    def paintEvent(self, event) -> None:  # pragma: no cover - visual QA
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        root = QRectF(self.rect()).adjusted(0.0, 5.0, 0.0, -5.0)
+        cx = root.center().x()
+        rail = self._rail_rect()
+        rail_top = rail.top()
+        rail_bottom = rail.bottom()
+        rail_h = max(1.0, rail_bottom - rail_top)
+        handle_y = rail_bottom - rail_h * self._ratio()
+
+        panel = QRectF(cx - 9.0, root.top(), 18.0, root.height())
+        p.setPen(Qt.PenStyle.NoPen)
+        panel_grad = QLinearGradient(panel.topLeft(), panel.topRight())
+        panel_grad.setColorAt(0.0, QColor(255, 255, 255, 6))
+        panel_grad.setColorAt(0.35, QColor(0, 0, 0, 92))
+        panel_grad.setColorAt(0.66, QColor(0, 0, 0, 118))
+        panel_grad.setColorAt(1.0, QColor(255, 255, 255, 8))
+        p.setBrush(QBrush(panel_grad))
+        p.drawRoundedRect(panel, 4.0, 4.0)
+
+        slot = QRectF(cx - 3.9, root.top() + 2.0, 7.8, root.height() - 4.0)
+        p.setBrush(QColor(0, 0, 0, 156))
+        p.drawRoundedRect(slot.adjusted(-1.0, 0.0, 1.0, 0.0), 3.6, 3.6)
+        slot_grad = QLinearGradient(slot.topLeft(), slot.topRight())
+        slot_grad.setColorAt(0.0, QColor(255, 255, 255, 16))
+        slot_grad.setColorAt(0.38, QColor(12, 14, 16, 205))
+        slot_grad.setColorAt(1.0, QColor(255, 255, 255, 8))
+        p.setBrush(QBrush(slot_grad))
+        p.drawRoundedRect(slot, 3.2, 3.2)
+
+        for i in range(7):
+            y = rail_top + rail_h * i / 6.0
+            p.setPen(QPen(QColor(188, 198, 206, 22), 0.65))
+            p.drawLine(QPointF(cx - 13.0, y), QPointF(cx - 10.4, y))
+            p.drawLine(QPointF(cx + 10.4, y), QPointF(cx + 13.0, y))
+
+        fill = QRectF(cx - 2.3, handle_y, 4.6, max(1.0, rail_bottom - handle_y + 9.0))
+        if fill.height() > 1.0:
+            grad = QLinearGradient(fill.topLeft(), fill.bottomLeft())
+            if self._master:
+                grad.setColorAt(0.0, QColor(144, 151, 118, 150))
+                grad.setColorAt(1.0, QColor(96, 128, 112, 198))
+            else:
+                grad.setColorAt(0.0, QColor(133, 148, 158, 158))
+                grad.setColorAt(1.0, QColor(92, 123, 112, 196))
+            p.setBrush(QBrush(grad))
+            p.setPen(Qt.PenStyle.NoPen)
+            p.drawRoundedRect(fill, 2.3, 2.3)
+
+        handle = QRectF(cx - 12.0, handle_y - 7.0, 24.0, 14.0)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(0, 0, 0, 168))
+        p.drawRoundedRect(handle.translated(0, 1.7).adjusted(-1.0, 0, 1.0, 0.8), 4.0, 4.0)
+        hgrad = QLinearGradient(handle.topLeft(), handle.bottomLeft())
+        hgrad.setColorAt(0.0, QColor(220, 225, 229, 232))
+        hgrad.setColorAt(0.16, QColor(171, 180, 187, 238))
+        hgrad.setColorAt(0.48, QColor(112, 123, 132, 244))
+        hgrad.setColorAt(1.0, QColor(60, 68, 77, 240))
+        if not self.isEnabled():
+            hgrad.setColorAt(0.0, QColor(176, 184, 190, 176))
+            hgrad.setColorAt(0.48, QColor(108, 118, 126, 184))
+            hgrad.setColorAt(1.0, QColor(68, 75, 82, 178))
+        p.setBrush(QBrush(hgrad))
+        p.setPen(QPen(QColor(232, 237, 242, 112), 0.8))
+        p.drawRoundedRect(handle, 3.8, 3.8)
+        p.setPen(QPen(QColor(255, 255, 255, 60), 0.7))
+        p.drawLine(QPointF(handle.left() + 4.0, handle.top() + 2.2), QPointF(handle.right() - 4.0, handle.top() + 2.2))
+        p.setPen(QPen(QColor(13, 16, 19, 82), 0.8))
+        p.drawLine(QPointF(handle.left() + 4.0, handle.center().y()), QPointF(handle.right() - 4.0, handle.center().y()))
+        led = QRectF(handle.right() - 5.4, handle.top() + 4.0, 2.2, 6.0)
+        led_color = QColor(111, 151, 127, 145 if self.isEnabled() else 72)
+        if self._master:
+            led_color = QColor(151, 143, 104, 130 if self.isEnabled() else 64)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(led_color)
+        p.drawRoundedRect(led, 1.1, 1.1)
+        p.end()
+
+
+class _SoundMixerStrip(QWidget):
+    volume_changed = Signal(int, float)
+    pan_changed = Signal(int, float)
+    mute_changed = Signal(int, bool)
+    solo_changed = Signal(int, bool)
+    meta_changed = Signal(int, object)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._track: Any = None
+        self._track_id = -1
+        self._suppress = False
+        self.setObjectName("SoundMixerStrip")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setFixedWidth(82)
+        self.setFixedHeight(286)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(6, 6, 6, 6)
+        root.setSpacing(4)
+
+        title_row = QWidget(self)
+        title_row.setStyleSheet("background: transparent;")
+        title_layout = QHBoxLayout(title_row)
+        title_layout.setContentsMargins(0, 0, 0, 0)
+        title_layout.setSpacing(3)
+        self._title = QLabel("A1", title_row)
+        self._title.setObjectName("SoundMixerTitle")
+        self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._title.setFixedHeight(16)
+        title_layout.addWidget(self._title, 1)
+        self._type = QPushButton("DIA", title_row)
+        self._type.setObjectName("SoundMixerType")
+        self._type.setFixedSize(28, 16)
+        self._type.clicked.connect(self._on_type_clicked)
+        title_layout.addWidget(self._type, 0)
+        root.addWidget(title_row)
+
+        self._pan = _SoundMixerPanSlider(self)
+        self._pan.valueChanged.connect(self._on_pan_changed)
+        root.addWidget(self._pan, alignment=Qt.AlignmentFlag.AlignCenter)
+
+        inserts = QWidget(self)
+        inserts.setStyleSheet("background: transparent;")
+        inserts_layout = QHBoxLayout(inserts)
+        inserts_layout.setContentsMargins(0, 0, 0, 0)
+        inserts_layout.setSpacing(2)
+        self._insert_buttons: dict[str, QPushButton] = {}
+        for slot_id, label in (("eq", "EQ"), ("dyn", "DY"), ("fx", "FX")):
+            button = QPushButton(label, inserts)
+            button.setObjectName("SoundMixerInsert")
+            button.setCheckable(True)
+            button.setFixedSize(22, 15)
+            button.toggled.connect(lambda checked, sid=slot_id: self._on_insert_toggled(sid, checked))
+            self._insert_buttons[slot_id] = button
+            inserts_layout.addWidget(button)
+        root.addWidget(inserts)
+
+        body = QWidget(self)
+        body.setStyleSheet("background: transparent;")
+        body_layout = QHBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(6)
+        self._meter = _SoundMixerMeter(body)
+        body_layout.addWidget(self._meter)
+        self._fader = _SoundMixerFader(body)
+        self._fader.valueChanged.connect(self._on_volume_changed)
+        body_layout.addWidget(self._fader)
+        root.addWidget(body)
+
+        self._value = QLabel("1.00", self)
+        self._value.setObjectName("SoundMixerValue")
+        self._value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._value.setFixedHeight(12)
+        root.addWidget(self._value)
+
+        buttons = QWidget(self)
+        buttons.setStyleSheet("background: transparent;")
+        buttons_layout = QHBoxLayout(buttons)
+        buttons_layout.setContentsMargins(0, 0, 0, 0)
+        buttons_layout.setSpacing(2)
+        self._mute = QPushButton("M", buttons)
+        self._mute.setObjectName("SoundMixerToggle")
+        self._mute.setProperty("kind", "mute")
+        self._mute.setCheckable(True)
+        self._mute.setFixedSize(16, 17)
+        self._mute.toggled.connect(self._on_mute_changed)
+        buttons_layout.addWidget(self._mute)
+        self._solo = QPushButton("S", buttons)
+        self._solo.setObjectName("SoundMixerToggle")
+        self._solo.setProperty("kind", "solo")
+        self._solo.setCheckable(True)
+        self._solo.setFixedSize(16, 17)
+        self._solo.toggled.connect(self._on_solo_changed)
+        buttons_layout.addWidget(self._solo)
+        self._auto_read = QPushButton("R", buttons)
+        self._auto_read.setObjectName("SoundMixerToggle")
+        self._auto_read.setProperty("kind", "read")
+        self._auto_read.setCheckable(True)
+        self._auto_read.setFixedSize(16, 17)
+        self._auto_read.toggled.connect(self._on_automation_changed)
+        buttons_layout.addWidget(self._auto_read)
+        self._auto_write = QPushButton("W", buttons)
+        self._auto_write.setObjectName("SoundMixerToggle")
+        self._auto_write.setProperty("kind", "write")
+        self._auto_write.setCheckable(True)
+        self._auto_write.setFixedSize(16, 17)
+        self._auto_write.toggled.connect(self._on_automation_changed)
+        buttons_layout.addWidget(self._auto_write)
+        root.addWidget(buttons)
+
+        sends = QWidget(self)
+        sends.setStyleSheet("background: transparent;")
+        sends_layout = QHBoxLayout(sends)
+        sends_layout.setContentsMargins(0, 0, 0, 0)
+        sends_layout.setSpacing(3)
+        self._send_buttons: dict[str, QPushButton] = {}
+        for send_id, label in (("reverb", "RV"), ("delay", "DL")):
+            button = QPushButton(f"{label} 0", sends)
+            button.setObjectName("SoundMixerSend")
+            button.setFixedSize(33, 16)
+            button.clicked.connect(lambda _checked=False, sid=send_id: self._on_send_clicked(sid))
+            self._send_buttons[send_id] = button
+            sends_layout.addWidget(button)
+        root.addWidget(sends)
+
+        self._name = QLabel("", self)
+        self._name.setObjectName("SoundMixerName")
+        self._name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._name.setFixedHeight(14)
+        root.addWidget(self._name)
+
+    @property
+    def track_id(self) -> int:
+        return self._track_id
+
+    def set_track(self, track: Any, index: int, *, active: bool = False, solo_active: bool = False) -> None:
+        self._track = track
+        self._track_id = int(getattr(track, "id", index + 1))
+        name = str(getattr(track, "display_name", "") or getattr(track, "label", "") or f"Audio {index + 1}")
+        self._title.setText(f"A{index + 1}")
+        self._title.setToolTip(name)
+        bus = str(getattr(track, "bus_id", "master") or "master")
+        track_type = _mixer_track_type(track)
+        self._name.setText(_compact_mixer_label(name, 9))
+        self._name.setToolTip(f"{name} / {track_type} / {bus}")
+        self.setProperty("active", bool(active))
+        self.style().unpolish(self)
+        self.style().polish(self)
+        self._suppress = True
+        try:
+            volume = max(0.0, min(1.5, float(getattr(track, "volume", 1.0) or 0.0)))
+            pan = max(-1.0, min(1.0, float(getattr(track, "pan", 0.0) or 0.0)))
+            self._fader.setValue(int(round(volume * 100)))
+            self._pan.setValue(int(round(pan * 100)))
+            self._mute.setChecked(bool(getattr(track, "muted", False)))
+            self._solo.setChecked(bool(getattr(track, "solo", False)))
+            self._auto_read.setChecked(bool(getattr(track, "automation_read", True)))
+            self._auto_write.setChecked(bool(getattr(track, "automation_write", False)))
+            self._type.setText(_mixer_type_code(track_type))
+            self._type.setToolTip(f"Track type: {track_type}")
+            for row in _mixer_insert_slots(track):
+                slot_id = str(row.get("id") or "")
+                button = self._insert_buttons.get(slot_id)
+                if button is None:
+                    continue
+                button.setChecked(bool(row.get("enabled")) and not bool(row.get("bypassed")))
+                button.setToolTip(f"Insert {str(row.get('label') or slot_id).upper()}")
+            sends = _mixer_sends(track)
+            for send_id, button in self._send_buttons.items():
+                value = sends.get(send_id, 0.0)
+                prefix = "RV" if send_id == "reverb" else "DL"
+                button.setText(f"{prefix} {int(round(value * 9))}")
+                button.setToolTip(f"{send_id.title()} send {value:.2f}")
+            self._value.setText(f"{volume:.2f}")
+            audible = not bool(getattr(track, "muted", False)) and (
+                not solo_active or bool(getattr(track, "solo", False))
+            )
+            level = 0.0 if not audible else min(0.96, max(0.06, volume * 0.54))
+            level_l = level * (1.0 - max(0.0, pan) * 0.35)
+            level_r = level * (1.0 + min(0.0, pan) * 0.35)
+            peak = min(1.0, max(level_l, level_r) + (0.13 if volume > 0.82 else 0.06))
+            self._meter.set_levels(level_l, level_r, peak=peak, clipped=volume >= 1.18 and audible)
+        finally:
+            self._suppress = False
+
+    def _on_volume_changed(self, value: int) -> None:
+        volume = value / 100.0
+        self._value.setText(f"{volume:.2f}")
+        if not self._suppress:
+            self.volume_changed.emit(self._track_id, volume)
+
+    def _on_pan_changed(self, value: int) -> None:
+        if not self._suppress:
+            self.pan_changed.emit(self._track_id, value / 100.0)
+
+    def _on_mute_changed(self, muted: bool) -> None:
+        if not self._suppress:
+            self.mute_changed.emit(self._track_id, bool(muted))
+
+    def _on_solo_changed(self, solo: bool) -> None:
+        if not self._suppress:
+            self.solo_changed.emit(self._track_id, bool(solo))
+
+    def _on_insert_toggled(self, slot_id: str, checked: bool) -> None:
+        if not self._suppress:
+            self.meta_changed.emit(self._track_id, {"kind": "insert", "slot": slot_id, "enabled": bool(checked), "bypassed": False})
+
+    def _on_send_clicked(self, send_id: str) -> None:
+        if self._suppress or self._track is None:
+            return
+        sends = _mixer_sends(self._track)
+        current = sends.get(send_id, 0.0)
+        next_value = 0.0 if current >= 0.95 else min(1.0, current + 0.25)
+        self.meta_changed.emit(self._track_id, {"kind": "send", "send_id": send_id, "level": next_value})
+
+    def _on_automation_changed(self, _checked: bool) -> None:
+        if not self._suppress:
+            self.meta_changed.emit(
+                self._track_id,
+                {
+                    "kind": "automation",
+                    "read": self._auto_read.isChecked(),
+                    "write": self._auto_write.isChecked(),
+                },
+            )
+
+    def _on_type_clicked(self) -> None:
+        if self._suppress or self._track is None:
+            return
+        self.meta_changed.emit(self._track_id, {"kind": "type", "track_type": _mixer_next_type(_mixer_track_type(self._track))})
+
+
+class _SoundMixerMasterStrip(QWidget):
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("SoundMixerMasterStrip")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setFixedWidth(86)
+        self.setFixedHeight(286)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(6, 6, 6, 6)
+        root.setSpacing(3)
+
+        title = QLabel("MASTER", self)
+        title.setObjectName("SoundMixerTitle")
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        title.setFixedHeight(14)
+        root.addWidget(title)
+
+        bus = QLabel("mix bus", self)
+        bus.setObjectName("SoundMixerName")
+        bus.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        bus.setFixedHeight(18)
+        root.addWidget(bus)
+
+        snap = QWidget(self)
+        snap.setStyleSheet("background: transparent;")
+        snap_layout = QHBoxLayout(snap)
+        snap_layout.setContentsMargins(0, 0, 0, 0)
+        snap_layout.setSpacing(3)
+        self._snapshot_a = QLabel("S1", snap)
+        self._snapshot_a.setObjectName("SoundMixerSnapshot")
+        self._snapshot_a.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._snapshot_a.setFixedSize(29, 16)
+        snap_layout.addWidget(self._snapshot_a)
+        self._snapshot_b = QLabel("A/B", snap)
+        self._snapshot_b.setObjectName("SoundMixerSnapshot")
+        self._snapshot_b.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._snapshot_b.setFixedSize(32, 16)
+        snap_layout.addWidget(self._snapshot_b)
+        root.addWidget(snap)
+
+        body = QWidget(self)
+        body.setStyleSheet("background: transparent;")
+        body_layout = QHBoxLayout(body)
+        body_layout.setContentsMargins(0, 0, 0, 0)
+        body_layout.setSpacing(6)
+        self._meter = _SoundMixerMeter(body)
+        body_layout.addWidget(self._meter)
+        self._fader = _SoundMixerFader(body, master=True)
+        self._fader.setValue(100)
+        self._fader.setEnabled(False)
+        body_layout.addWidget(self._fader)
+        root.addWidget(body)
+
+        self._value = QLabel("0.00", self)
+        self._value.setObjectName("SoundMixerValue")
+        self._value.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._value.setFixedHeight(12)
+        root.addWidget(self._value)
+
+        self._name = QLabel("master", self)
+        self._name.setObjectName("SoundMixerName")
+        self._name.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._name.setFixedHeight(34)
+        root.addWidget(self._name)
+
+    def set_tracks(self, tracks: list[Any] | tuple[Any, ...]) -> None:
+        track_rows = list(tracks or [])
+        solo_active = any(bool(getattr(track, "solo", False)) for track in track_rows)
+        audible: list[Any] = [
+            track for track in track_rows
+            if not bool(getattr(track, "muted", False))
+            and (not solo_active or bool(getattr(track, "solo", False)))
+        ]
+        level_l = 0.0
+        level_r = 0.0
+        for track in audible:
+            volume = max(0.0, min(1.5, float(getattr(track, "volume", 1.0) or 0.0)))
+            pan = max(-1.0, min(1.0, float(getattr(track, "pan", 0.0) or 0.0)))
+            base = min(0.96, max(0.04, volume * 0.46))
+            level_l += base * (1.0 - max(0.0, pan) * 0.35)
+            level_r += base * (1.0 + min(0.0, pan) * 0.35)
+        level_l = min(0.98, level_l)
+        level_r = min(0.98, level_r)
+        peak_hold = min(1.0, max(level_l, level_r) + (0.12 if audible else 0.0))
+        clipped = any(max(0.0, min(1.5, float(getattr(track, "volume", 1.0) or 0.0))) >= 1.18 for track in audible)
+        self._meter.set_levels(level_l, level_r, peak=peak_hold, clipped=clipped)
+        peak = max(level_l, level_r)
+        self._value.setText(f"{peak:.2f}")
+        self._name.setText(f"{len(audible)}/{len(track_rows)} live")
+
+
 class SoundEditorPanel(QWidget):
     """Compact sound editor embedded in the Workbench Audio tab."""
 
@@ -1632,6 +2411,7 @@ class SoundEditorPanel(QWidget):
     }
 
     changed = Signal()
+    mixer_track_changed = Signal(object)
     target_changed = Signal(str)
     # Kept for compatibility with older editor wiring. The renewed panel handles
     # Advanced Lab inline, so the Workbench path no longer emits this signal.
@@ -1644,6 +2424,10 @@ class SoundEditorPanel(QWidget):
         self._context_key = ""
         self._exporter: ClipExporter | None = None
         self._tab_buttons: dict[str, QPushButton] = {}
+        self._mixer_tracks: list[Any] = []
+        self._mixer_active_track_id: int | None = None
+        self._mixer_strips: dict[int, _SoundMixerStrip] = {}
+        self._mixer_master_strip: _SoundMixerMasterStrip | None = None
         self._chain_labels: dict[str, QLabel] = {}
         self._ai_preset_buttons: dict[str, QPushButton] = {}
         self._ui_lock = False
@@ -1707,6 +2491,7 @@ class SoundEditorPanel(QWidget):
         tabs_layout.setSpacing(3)
         for tab_id, label, icon in (
             ("basic", "Basic", "audio"),
+            ("mixer", "Mixer", "mixer"),
             ("eq", "EQ", "sliders"),
             ("dyn", "Dynamics", "mixer"),
             ("fx", "FX", "effects"),
@@ -1734,6 +2519,7 @@ class SoundEditorPanel(QWidget):
         chain_layout.setSpacing(4)
         for key, label in (
             ("basic", "Basic"),
+            ("mixer", "Mix"),
             ("eq", "EQ"),
             ("dyn", "Dyn"),
             ("fx", "FX"),
@@ -1763,6 +2549,7 @@ class SoundEditorPanel(QWidget):
         self._stack = QStackedWidget(self)
         self._stack.setObjectName("SoundStack")
         self._stack.addWidget(self._scroll_page(self._build_basic_page()))
+        self._stack.addWidget(self._scroll_page(self._build_mixer_page()))
         self._stack.addWidget(self._scroll_page(self._build_eq_page()))
         self._stack.addWidget(self._scroll_page(self._build_dynamics_page()))
         self._stack.addWidget(self._scroll_page(self._build_fx_page()))
@@ -1788,6 +2575,7 @@ class SoundEditorPanel(QWidget):
             self._title.setText("Sound Editor")
             self._subtitle.setText("Select an audio source")
             self._jog_shuttle.set_clip(None)
+            self.set_mixer_tracks([], active_track_id=None)
             if hasattr(self, "_macro_jog_bank"):
                 self._macro_jog_bank.set_source(None, None)
             self._waveform_strip.set_clip(None)
@@ -1808,6 +2596,8 @@ class SoundEditorPanel(QWidget):
         self._jog_shuttle.set_clip(clip)
         if hasattr(self, "_macro_jog_bank"):
             self._macro_jog_bank.set_source(clip, track)
+        if track is not None:
+            self.set_mixer_tracks([track], active_track_id=getattr(track, "id", None))
         self._waveform_strip.set_clip(clip)
         self._spectrum_strip.set_clip(clip)
         self._sync_from_clip()
@@ -1824,6 +2614,23 @@ class SoundEditorPanel(QWidget):
             self._macro_jog_bank.set_source(self._clip, self._track)
         self._waveform_strip.refresh()
         self._spectrum_strip.refresh()
+
+    def set_mixer_tracks(self, tracks: list[Any] | tuple[Any, ...], *, active_track_id: Any = None) -> None:
+        unique: list[Any] = []
+        seen: set[int] = set()
+        for track in list(tracks or []):
+            key = id(track)
+            if key in seen:
+                continue
+            seen.add(key)
+            unique.append(track)
+        self._mixer_tracks = unique
+        try:
+            self._mixer_active_track_id = int(active_track_id) if active_track_id is not None else None
+        except Exception:
+            self._mixer_active_track_id = None
+        self._refresh_mixer_tracks()
+        self._refresh_chain()
 
     def _qss(self) -> str:
         return (
@@ -1879,6 +2686,50 @@ class SoundEditorPanel(QWidget):
             "}"
             "QStackedWidget#SoundStack { background:#101112; border:none; }"
             "QFrame#SoundCard { background:transparent; border:none; border-top:1px solid rgba(178,186,202,16); border-radius:0px; }"
+            "QWidget#SoundMixerStrip {"
+            "background:rgba(255,255,255,4); border:1px solid rgba(178,186,202,20); border-radius:6px;"
+            "}"
+            "QWidget#SoundMixerMasterStrip {"
+            "background:rgba(118,145,123,7); border:1px solid rgba(178,186,202,24); border-radius:6px;"
+            "}"
+            "QWidget#SoundMixerStrip[active=\"true\"] {"
+            "background:rgba(178,186,202,9); border-color:rgba(220,225,238,54);"
+            "}"
+            "QLabel#SoundMixerTitle { color:#DDE2EA; font-size:10px; font-weight:680; background:transparent; }"
+            "QLabel#SoundMixerValue { color:#C8CED8; font-size:9px; font-family:Consolas, monospace; background:transparent; }"
+            "QLabel#SoundMixerName { color:#7E8793; font-size:8px; font-weight:620; background:transparent; }"
+            "QPushButton#SoundMixerToggle {"
+            "background:rgba(255,255,255,5); color:#8F98A5; border:1px solid rgba(178,186,202,24);"
+            "border-radius:4px; font-size:9px; font-weight:700; padding:0px;"
+            "}"
+            "QPushButton#SoundMixerToggle:hover { background:rgba(255,255,255,10); color:#E7EAF0; border-color:rgba(220,225,238,64); }"
+            "QPushButton#SoundMixerToggle[kind=\"mute\"]:checked { background:rgba(164,99,94,30); color:#F0D6D3; border-color:rgba(164,99,94,120); }"
+            "QPushButton#SoundMixerToggle[kind=\"solo\"]:checked { background:rgba(164,150,105,30); color:#F1E8C8; border-color:rgba(164,150,105,120); }"
+            "QPushButton#SoundMixerToggle[kind=\"read\"]:checked { background:rgba(110,132,145,28); color:#D9E2E8; border-color:rgba(132,158,174,95); }"
+            "QPushButton#SoundMixerToggle[kind=\"write\"]:checked { background:rgba(164,99,94,34); color:#F1D6D2; border-color:rgba(164,99,94,118); }"
+            "QPushButton#SoundMixerType {"
+            "background:rgba(118,145,123,18); color:#C8D4CB; border:1px solid rgba(118,145,123,70);"
+            "border-radius:4px; font-size:8px; font-weight:800; padding:0px;"
+            "}"
+            "QPushButton#SoundMixerType:hover { background:rgba(118,145,123,28); color:#EEF4EF; }"
+            "QPushButton#SoundMixerInsert {"
+            "background:rgba(255,255,255,4); color:#69727D; border:1px solid rgba(178,186,202,20);"
+            "border-radius:3px; font-size:8px; font-weight:760; padding:0px;"
+            "}"
+            "QPushButton#SoundMixerInsert:checked {"
+            "background:rgba(143,158,169,24); color:#DDE3E8; border-color:rgba(172,184,194,92);"
+            "}"
+            "QPushButton#SoundMixerInsert:hover, QPushButton#SoundMixerSend:hover {"
+            "background:rgba(255,255,255,10); color:#E5EAF0; border-color:rgba(220,225,238,58);"
+            "}"
+            "QPushButton#SoundMixerSend {"
+            "background:rgba(255,255,255,4); color:#85909B; border:1px solid rgba(178,186,202,20);"
+            "border-radius:4px; font-size:8px; font-weight:700; padding:0px;"
+            "}"
+            "QLabel#SoundMixerSnapshot {"
+            "background:rgba(255,255,255,4); color:#7D8792; border:1px solid rgba(178,186,202,18);"
+            "border-radius:4px; font-size:8px; font-weight:740;"
+            "}"
             "QFrame#SoundAdvancedLab {"
             "background:rgba(255,255,255,4); border:1px solid rgba(178,186,202,22); border-radius:6px;"
             "}"
@@ -1887,9 +2738,10 @@ class SoundEditorPanel(QWidget):
             "QLabel#SoundCardTitle { color:#DDE2EA; font-size:9px; font-weight:650; background:transparent; }"
             "QLabel#SoundFieldLabel { color:#A3ABB7; font-size:9px; font-weight:560; background:transparent; }"
             "QLabel#SoundFieldValue { color:#DDE2EA; font-size:9px; background:transparent; }"
-            "QScrollArea#SoundScroll, QScrollArea#SoundAdvancedLabScroll { background:transparent; border:none; }"
+            "QScrollArea#SoundScroll, QScrollArea#SoundAdvancedLabScroll, QScrollArea#SoundMixerScroll { background:transparent; border:none; }"
             "QScrollArea#SoundScroll > QWidget > QWidget { background:transparent; }"
             "QScrollArea#SoundAdvancedLabScroll > QWidget > QWidget { background:transparent; }"
+            "QScrollArea#SoundMixerScroll > QWidget > QWidget { background:transparent; }"
             + editor_scrollbar_qss("QWidget#EmbeddedSoundEditor")
         )
 
@@ -2246,6 +3098,160 @@ class SoundEditorPanel(QWidget):
         layout.addStretch(1)
         return page
 
+    def _build_mixer_page(self) -> QWidget:
+        page = QWidget(self)
+        page.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        layout = QVBoxLayout(page)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(5)
+        card, card_layout = self._card("Mixer")
+        card.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._mixer_scroll = QScrollArea(card)
+        self._mixer_scroll.setObjectName("SoundMixerScroll")
+        self._mixer_scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self._mixer_scroll.setWidgetResizable(True)
+        self._mixer_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._mixer_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._mixer_scroll.setMinimumHeight(292)
+        self._mixer_host = QWidget(self._mixer_scroll)
+        self._mixer_host.setStyleSheet("background: transparent;")
+        self._mixer_layout = QHBoxLayout(self._mixer_host)
+        self._mixer_layout.setContentsMargins(0, 0, 0, 0)
+        self._mixer_layout.setSpacing(5)
+        self._mixer_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop)
+        self._mixer_scroll.setWidget(self._mixer_host)
+        card_layout.addWidget(self._mixer_scroll, 1)
+        layout.addWidget(card, 1)
+        self._refresh_mixer_tracks()
+        return page
+
+    def _refresh_mixer_tracks(self) -> None:
+        layout = getattr(self, "_mixer_layout", None)
+        if layout is None:
+            return
+        while layout.count():
+            item = layout.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.hide()
+                widget.setParent(None)
+                widget.deleteLater()
+        self._mixer_strips.clear()
+        self._mixer_master_strip = None
+        solo_active = any(bool(getattr(track, "solo", False)) for track in self._mixer_tracks)
+        for index, track in enumerate(self._mixer_tracks):
+            strip = _SoundMixerStrip(self._mixer_host)
+            strip.set_track(
+                track,
+                index,
+                active=getattr(track, "id", None) == self._mixer_active_track_id,
+                solo_active=solo_active,
+            )
+            strip.volume_changed.connect(self._set_mixer_track_volume)
+            strip.pan_changed.connect(self._set_mixer_track_pan)
+            strip.mute_changed.connect(self._set_mixer_track_mute)
+            strip.solo_changed.connect(self._set_mixer_track_solo)
+            strip.meta_changed.connect(self._set_mixer_track_meta)
+            self._mixer_strips[strip.track_id] = strip
+            layout.addWidget(strip)
+        if self._mixer_tracks:
+            self._mixer_master_strip = _SoundMixerMasterStrip(self._mixer_host)
+            self._mixer_master_strip.set_tracks(self._mixer_tracks)
+            layout.addWidget(self._mixer_master_strip)
+        layout.addStretch(1)
+
+    def _mixer_track_by_id(self, track_id: int) -> Any | None:
+        target = int(track_id)
+        for track in self._mixer_tracks:
+            try:
+                if int(getattr(track, "id", -1)) == target:
+                    return track
+            except Exception:
+                continue
+        return None
+
+    def _refresh_mixer_strip_states(self) -> None:
+        solo_active = any(bool(getattr(track, "solo", False)) for track in self._mixer_tracks)
+        for index, track in enumerate(self._mixer_tracks):
+            try:
+                tid = int(getattr(track, "id", index + 1))
+            except Exception:
+                continue
+            strip = self._mixer_strips.get(tid)
+            if strip is not None:
+                strip.set_track(
+                    track,
+                    index,
+                    active=tid == self._mixer_active_track_id,
+                    solo_active=solo_active,
+                )
+        if self._mixer_master_strip is not None:
+            self._mixer_master_strip.set_tracks(self._mixer_tracks)
+
+    def _emit_mixer_track_changed(self, track: Any) -> None:
+        self._refresh_mixer_strip_states()
+        self._refresh_chain()
+        self.mixer_track_changed.emit(track)
+        self.changed.emit()
+
+    def _set_mixer_track_volume(self, track_id: int, volume: float) -> None:
+        track = self._mixer_track_by_id(track_id)
+        if track is None:
+            return
+        track.volume = max(0.0, min(1.5, float(volume or 0.0)))
+        self._emit_mixer_track_changed(track)
+
+    def _set_mixer_track_pan(self, track_id: int, pan: float) -> None:
+        track = self._mixer_track_by_id(track_id)
+        if track is None:
+            return
+        track.pan = max(-1.0, min(1.0, float(pan or 0.0)))
+        self._emit_mixer_track_changed(track)
+
+    def _set_mixer_track_mute(self, track_id: int, muted: bool) -> None:
+        track = self._mixer_track_by_id(track_id)
+        if track is None:
+            return
+        track.muted = bool(muted)
+        self._emit_mixer_track_changed(track)
+
+    def _set_mixer_track_solo(self, track_id: int, solo: bool) -> None:
+        track = self._mixer_track_by_id(track_id)
+        if track is None:
+            return
+        track.solo = bool(solo)
+        self._emit_mixer_track_changed(track)
+
+    def _set_mixer_track_meta(self, track_id: int, payload: object) -> None:
+        track = self._mixer_track_by_id(track_id)
+        if track is None or not isinstance(payload, dict):
+            return
+        kind = str(payload.get("kind") or "").strip().lower()
+        if kind == "insert":
+            slot = str(payload.get("slot") or "").strip().lower()
+            slots = _mixer_insert_slots(track)
+            for row in slots:
+                if str(row.get("id")) == slot:
+                    row["enabled"] = bool(payload.get("enabled"))
+                    row["bypassed"] = bool(payload.get("bypassed", False))
+            track.insert_slots = slots
+        elif kind == "send":
+            sends = _mixer_sends(track)
+            sid = str(payload.get("send_id") or "").strip().lower()
+            try:
+                sends[sid] = max(0.0, min(1.0, float(payload.get("level") or 0.0)))
+            except Exception:
+                sends[sid] = 0.0
+            track.sends = sends
+        elif kind == "automation":
+            track.automation_read = bool(payload.get("read", True))
+            track.automation_write = bool(payload.get("write", False))
+        elif kind == "type":
+            track.track_type = str(payload.get("track_type") or "dialogue")
+        else:
+            return
+        self._emit_mixer_track_changed(track)
+
     def _build_dynamics_page(self) -> QWidget:
         page = QWidget(self)
         layout = QVBoxLayout(page)
@@ -2367,10 +3373,15 @@ class SoundEditorPanel(QWidget):
         return page
 
     def _set_tab(self, tab_id: str) -> None:
-        order = {"basic": 0, "eq": 1, "dyn": 2, "fx": 3, "ai": 4}
+        order = {"basic": 0, "mixer": 1, "eq": 2, "dyn": 3, "fx": 4, "ai": 5}
         self._stack.setCurrentIndex(order.get(tab_id, 0))
         for key, button in self._tab_buttons.items():
             button.setChecked(key == tab_id)
+        self._set_mixer_tab_compact_mode(tab_id == "mixer")
+
+    def _set_mixer_tab_compact_mode(self, compact: bool) -> None:
+        for widget in (self._jog_shuttle, self._waveform_strip, self._spectrum_strip):
+            widget.setVisible(not compact)
 
     def _sync_from_clip(self) -> None:
         clip = self._clip
@@ -2716,6 +3727,13 @@ class SoundEditorPanel(QWidget):
             )
             active["fx"] = any(bool((effects.get(key) or {}).get("enabled")) for key in ("reverb", "delay", "deesser"))
             active["ai"] = bool((effects.get("ai_master") or {}).get("enabled")) or self._fx_has_audible_change("ai_master", effects.get("ai_master") or {})
+        active["mixer"] = any(
+            abs(float(getattr(track, "volume", 1.0) or 0.0) - 1.0) > 0.001
+            or abs(float(getattr(track, "pan", 0.0) or 0.0)) > 0.001
+            or bool(getattr(track, "muted", False))
+            or bool(getattr(track, "solo", False))
+            for track in self._mixer_tracks
+        )
         for key, label in self._chain_labels.items():
             label.setProperty("active", bool(active.get(key)))
             label.style().unpolish(label)
@@ -2831,7 +3849,14 @@ class SoundEditorDockWindow(QWidget):
 
     changed = Signal()
 
-    def __init__(self, clip: AudioClip, *, track: Any = None, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        clip: AudioClip,
+        *,
+        track: Any = None,
+        mixer_tracks: list[Any] | tuple[Any, ...] | None = None,
+        parent: QWidget | None = None,
+    ) -> None:
         super().__init__(parent, Qt.WindowType.Window)
         self._clip = clip
         self._track = track
@@ -2861,6 +3886,8 @@ class SoundEditorDockWindow(QWidget):
             context_label="Timeline Audio" if track is not None else "Media Pool Audio",
             context_key=context_key,
         )
+        if mixer_tracks is not None:
+            self._panel.set_mixer_tracks(mixer_tracks, active_track_id=getattr(track, "id", None))
 
     def current_clip(self) -> AudioClip:
         return self._clip

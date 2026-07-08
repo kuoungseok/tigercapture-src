@@ -44,6 +44,10 @@ if TYPE_CHECKING:
 AUDIO_EXTS = frozenset({".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".mp2", ".wma"})
 VIDEO_EXTS = frozenset({".mp4", ".mov", ".mkv", ".webm", ".avi", ".m4v", ".wmv", ".gif"})
 
+AUDIO_TRACK_TYPES = ("dialogue", "music", "sfx", "ambience")
+AUDIO_TRACK_INSERT_IDS = ("eq", "dyn", "fx")
+AUDIO_TRACK_SEND_IDS = ("reverb", "delay")
+
 # Waveform extraction: ~40 peak buckets per second of source audio.
 WAVEFORM_BUCKETS_PER_SEC = 40
 _AUDIO_CACHE_LIMIT = 32
@@ -246,6 +250,18 @@ def default_effects_state() -> dict:
     }
 
 
+def default_track_insert_slots() -> list[dict[str, object]]:
+    return [
+        {"id": "eq", "label": "EQ", "enabled": False, "bypassed": False},
+        {"id": "dyn", "label": "DYN", "enabled": False, "bypassed": False},
+        {"id": "fx", "label": "FX", "enabled": False, "bypassed": False},
+    ]
+
+
+def default_track_sends() -> dict[str, float]:
+    return {"reverb": 0.0, "delay": 0.0}
+
+
 # ============================== data model ==============================
 
 
@@ -311,9 +327,17 @@ class AudioTrack:
     volume: float = 1.0          # master multiplier, 0.0 – 1.5
     clips: list[AudioClip] = field(default_factory=list)
     pan: float = 0.0             # stereo pan, -1.0 (L) to +1.0 (R)
+    muted: bool = False
+    solo: bool = False
     label: str = ""              # user-visible strip label (empty = auto)
     bus_id: str = "master"       # dialogue / music / sfx / master
+    track_type: str = ""         # dialogue / music / sfx / ambience
+    insert_slots: list = field(default_factory=default_track_insert_slots)
+    sends: dict = field(default_factory=default_track_sends)
+    automation_read: bool = True
+    automation_write: bool = False
     automation_points: list = field(default_factory=list)
+    automation_lanes: dict = field(default_factory=dict)
 
     @property
     def is_loaded(self) -> bool:
@@ -696,6 +720,7 @@ class AudioMixer(QObject):
         for clip in track.clips:
             if clip.id in self._players:
                 self._sync_clip_to_project(clip.id)
+        self._apply_volumes()
 
     def clear(self) -> None:
         for cid in list(self._players.keys()):
@@ -813,6 +838,7 @@ class AudioMixer(QObject):
         return start <= project_ms < end
 
     def _apply_volumes(self) -> None:
+        solo_active = any(bool(getattr(track, "solo", False)) for track in self._tracks.values())
         for cid, (_p, output, tid) in self._players.items():
             track = self._tracks.get(tid)
             if track is None:
@@ -820,7 +846,10 @@ class AudioMixer(QObject):
             clip = next((c for c in track.clips if c.id == cid), None)
             if clip is None:
                 continue
-            v = self._volume_at(track, clip, self._project_position_ms)
+            if bool(getattr(track, "muted", False)) or (solo_active and not bool(getattr(track, "solo", False))):
+                v = 0.0
+            else:
+                v = self._volume_at(track, clip, self._project_position_ms)
             # NOTE: Qt QAudioOutput has no per-channel stereo pan API.
             # Pan is applied correctly via the ffmpeg ``apan`` filter during
             # export (see build_audio_filter). During preview we only apply
@@ -1248,8 +1277,13 @@ def build_audio_filter(
 
     Returns (graph, -i list, number_of_audio_inputs).
     """
+    solo_active = any(bool(getattr(t, "solo", False)) for t in tracks)
     clips: list[tuple[AudioTrack, AudioClip]] = []
     for t in tracks:
+        if bool(getattr(t, "muted", False)):
+            continue
+        if solo_active and not bool(getattr(t, "solo", False)):
+            continue
         for c in t.clips:
             if c.source_path is not None and c.effective_length_ms > 0:
                 clips.append((t, c))

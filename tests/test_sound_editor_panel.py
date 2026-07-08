@@ -75,6 +75,31 @@ def test_sound_editor_dock_window_uses_renewed_panel_without_load_button(tmp_pat
     assert "Load" not in window.windowTitle()
 
 
+def test_sound_editor_dock_window_keeps_full_mixer_context(tmp_path: Path) -> None:
+    _app()
+    from types import SimpleNamespace
+
+    audio_path = tmp_path / "dock_mixer.wav"
+    audio_path.write_bytes(b"dock")
+    clip = AudioClip(id=71, source_path=audio_path, duration_ms=3000, trim_end_ms=3000)
+    track_a = SimpleNamespace(id=2, label="Voice", bus_id="dialogue", volume=0.86, pan=-0.08, muted=False, solo=False, clips=[clip])
+    track_b = SimpleNamespace(id=3, label="Music", bus_id="music", volume=0.62, pan=-0.3, muted=True, solo=False, clips=[])
+
+    window = SoundEditorDockWindow(clip, track=track_a, mixer_tracks=[track_a, track_b])
+    panel = window.findChild(SoundEditorPanel)
+    assert panel is not None
+
+    panel._set_tab("mixer")
+
+    assert len(panel._mixer_strips) == 2
+    assert panel._mixer_strips[2].property("active") is True
+    assert panel._mixer_strips[3]._mute.isChecked() is True
+    assert panel._mixer_strips[3]._name.text().startswith("Music")
+    masters = [child for child in panel.findChildren(QWidget, "SoundMixerMasterStrip") if not child.isHidden()]
+    assert len(masters) == 1
+    assert panel._mixer_strips[2]._title.text() == "A1"
+
+
 def test_sound_editor_panel_refreshes_waveform_strip(tmp_path: Path) -> None:
     _app()
     import numpy as np
@@ -371,3 +396,47 @@ def test_sound_editor_panel_exposes_legacy_detail_controls(tmp_path: Path) -> No
     assert clip.effects["eq"]["mid"]["gain"] == 4.0
     assert clip.effects["comp"]["ratio"] == 6.0
     assert clip.effects["delay"]["mix"] == 40.0
+
+
+def test_sound_editor_mixer_tab_edits_track_strips(tmp_path: Path) -> None:
+    _app()
+    from types import SimpleNamespace
+
+    audio_path = tmp_path / "mixer.wav"
+    audio_path.write_bytes(b"mixer")
+    clip = AudioClip(id=15, source_path=audio_path, duration_ms=2400, trim_end_ms=2400)
+    track_a = SimpleNamespace(id=3, label="Voice", bus_id="dialogue", volume=1.0, pan=0.0, muted=False, solo=False, clips=[clip])
+    track_b = SimpleNamespace(id=4, label="Music", bus_id="music", volume=0.8, pan=0.0, muted=False, solo=False, clips=[])
+    panel = SoundEditorPanel()
+    changed = []
+    panel.mixer_track_changed.connect(lambda track: changed.append(track.id))
+
+    panel.set_clip(clip, track=track_a, context_label="Timeline Audio", context_key="timeline:3:15")
+    panel.set_mixer_tracks([track_a, track_b], active_track_id=track_a.id)
+    panel._set_tab("mixer")
+    strip = panel._mixer_strips[4]
+
+    strip._fader.setValue(62)
+    strip._pan.setValue(-30)
+    strip._mute.setChecked(True)
+    strip._solo.setChecked(True)
+    strip._insert_buttons["eq"].setChecked(True)
+    strip._send_buttons["reverb"].click()
+    strip._auto_write.setChecked(True)
+    strip._type.click()
+
+    assert panel._tab_buttons["mixer"].isChecked()
+    assert track_b.volume == 0.62
+    assert track_b.pan == -0.3
+    assert track_b.muted is True
+    assert track_b.solo is True
+    assert track_b.insert_slots[0]["id"] == "eq"
+    assert track_b.insert_slots[0]["enabled"] is True
+    assert track_b.sends["reverb"] == 0.25
+    assert track_b.automation_read is True
+    assert track_b.automation_write is True
+    assert track_b.track_type == "sfx"
+    assert panel._mixer_strips[4]._name.text().startswith("Music")
+    masters = [child for child in panel.findChildren(QWidget, "SoundMixerMasterStrip") if not child.isHidden()]
+    assert len(masters) == 1
+    assert changed[-1] == 4

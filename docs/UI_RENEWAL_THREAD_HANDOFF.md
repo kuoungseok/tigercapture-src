@@ -87,7 +87,10 @@ areas:
 - Workbench node graph styling
 - effect/transition evidence contact sheet
 - Color Grading right Workbench with renewed wheels and `StudioSlider`
-- Sound Editor embedded Workbench, detached shell, graph/contact-sheet evidence
+- Sound Editor embedded Workbench, detached shell, graph/contact-sheet evidence,
+  reference-05 jog resource, and mini Mixer tab with renewed custom
+  pan/fader controls plus AI-action-backed volume/pan/mute/solo, track type,
+  insert/send, automation R/W, peak/clip meter, and mixer snapshots
 - Live2D actor Workbench and opt-in Live2D Viewer styling
 - AR/PBR object Workbench evidence
 - Render Queue panel evidence
@@ -157,7 +160,9 @@ Key examples:
 - Color:
   `debugCapture/ui_renewal_standard_slider_round_1/editor_color_dock_action.png`
 - Sound:
-  `debugCapture/ui_renewal_sound_editor_full_feature_round_1/sound_editor_graphs_contact_sheet.png`
+  `debugCapture/ui_renewal_sound_editor_cubase_round_1/dock_sound_editor_mixer_action.png`
+  plus graph contact sheet
+  `debugCapture/ui_renewal_sound_editor_cubase_round_1/sound_editor_graphs_contact_sheet.png`
 - Typography:
   `debugCapture/ui_renewal_typography_workspace_round_5/editor_typography_action.png`
 - Effects/transitions:

@@ -200,6 +200,75 @@ def _capture_sound_graph_tabs(app: Any, sound_panel: Any, out: Path) -> dict[str
     }
 
 
+def _capture_sound_mixer_tab(
+    app: Any,
+    *,
+    registry: Any,
+    editor: Any,
+    sound_panel: Any,
+    workbench_widget: Any,
+    out: Path,
+) -> dict[str, Any]:
+    from PySide6.QtWidgets import QWidget
+
+    checks: dict[str, bool] = {}
+    artifacts: dict[str, str] = {}
+    steps: list[dict[str, Any]] = []
+    try:
+        sound_panel._set_tab("mixer")
+        _wait(app, 180)
+    except Exception:
+        pass
+
+    mixer_state = registry.execute("audio.mixer.state").to_dict()
+    steps.append({"action": "audio.mixer.state", **mixer_state})
+    payload = mixer_state.get("result") or {}
+    tracks = list(payload.get("tracks") or [])
+    checks["mixer_state_action"] = bool(
+        mixer_state.get("ok")
+        and payload.get("schema") == "tigerstudio.audio.mixer.v1"
+        and int(payload.get("track_count") or 0) >= 2
+    )
+    checks["mixer_state_has_mute_solo"] = bool(
+        any(bool(row.get("muted")) for row in tracks)
+        and any(bool(row.get("solo")) for row in tracks)
+    )
+    checks["mixer_state_has_cubase_features"] = bool(
+        any(
+            row.get("track_type") is not None
+            and isinstance(row.get("insert_slots"), list)
+            and isinstance(row.get("sends"), dict)
+            and isinstance(row.get("automation"), dict)
+            and isinstance(row.get("meter"), dict)
+            for row in tracks
+        )
+    )
+    strips = [
+        child for child in sound_panel.findChildren(QWidget)
+        if child.objectName() == "SoundMixerStrip"
+    ]
+    checks["mixer_tab_channel_strips_visible"] = len([row for row in strips if row.isVisible()]) >= 2
+
+    embedded_png = out / "sound_editor_mixer_tab_action.png"
+    workbench_png = out / "workbench_sound_editor_mixer_action.png"
+    editor_png = out / "editor_sound_editor_mixer_action.png"
+    checks["mixer_tab_screenshot"] = _save_widget(sound_panel, embedded_png)
+    checks["mixer_tab_screenshot_nonblank"] = _image_nonblank(embedded_png)
+    checks["workbench_mixer_screenshot"] = _save_widget(workbench_widget, workbench_png)
+    checks["workbench_mixer_screenshot_nonblank"] = _image_nonblank(workbench_png)
+    checks["editor_mixer_screenshot"] = _save_widget(editor, editor_png)
+    checks["editor_mixer_screenshot_nonblank"] = _image_nonblank(editor_png)
+    artifacts["sound_editor_mixer_tab"] = str(embedded_png.resolve())
+    artifacts["workbench_sound_editor_mixer"] = str(workbench_png.resolve())
+    artifacts["editor_sound_editor_mixer"] = str(editor_png.resolve())
+    return {
+        "checks": checks,
+        "artifacts": artifacts,
+        "steps": steps,
+        "mixer_state": payload,
+    }
+
+
 def run_sound_editor_capture(
     *,
     media: str | Path | None = None,
@@ -283,6 +352,133 @@ def run_sound_editor_capture(
         steps.append({"action": "audio.clip.set_gain", **gain})
         checks["audio_gain_set"] = bool(gain.get("ok"))
 
+        mixer_track_ids = [audio_track_id] if audio_track_id else []
+        mixer_duration_ms = max(1200, min(7000, duration_ms or 5000))
+        for label, at_ms in (("Music Stem", 500), ("SFX Stem", 1300)):
+            imported_audio = registry.execute(
+                "media.import_to_timeline",
+                {
+                    "path": str(media_path),
+                    "kind": "audio",
+                    "name": label,
+                    "at_ms": at_ms,
+                    "duration_ms": mixer_duration_ms,
+                },
+            ).to_dict()
+            steps.append({"action": "media.import_to_timeline", **imported_audio})
+            imported_track_id = int((imported_audio.get("result") or {}).get("track_id") or 0)
+            if imported_audio.get("ok") and imported_track_id:
+                mixer_track_ids.append(imported_track_id)
+
+        mixer_actions = [
+            ("audio.track.set_volume", {"track_id": audio_track_id, "volume": 1.2}),
+            ("audio.track.set_pan", {"track_id": audio_track_id, "pan": -0.08}),
+            ("audio.track.set_type", {"track_id": audio_track_id, "track_type": "dialogue"}),
+            ("audio.track.insert.set", {"track_id": audio_track_id, "slot": "eq", "enabled": True}),
+            ("audio.track.insert.set", {"track_id": audio_track_id, "slot": "dyn", "enabled": True}),
+            ("audio.track.send.set_level", {"track_id": audio_track_id, "send_id": "reverb", "level": 0.28}),
+            ("audio.track.route_to_bus", {"track_id": audio_track_id, "bus_id": "dialogue"}),
+            (
+                "audio.automation.write",
+                {
+                    "track_id": audio_track_id,
+                    "parameter": "volume",
+                    "time_ms": 900,
+                    "value": 0.84,
+                    "read": True,
+                    "write": True,
+                },
+            ),
+        ]
+        if len(mixer_track_ids) >= 2:
+            mixer_actions.extend(
+                [
+                    ("audio.track.set_volume", {"track_id": mixer_track_ids[1], "volume": 0.62}),
+                    ("audio.track.set_pan", {"track_id": mixer_track_ids[1], "pan": -0.30}),
+                    ("audio.track.mute", {"track_id": mixer_track_ids[1], "muted": True}),
+                    ("audio.track.set_type", {"track_id": mixer_track_ids[1], "track_type": "music"}),
+                    ("audio.track.insert.set", {"track_id": mixer_track_ids[1], "slot": "fx", "enabled": True}),
+                    ("audio.track.send.set_level", {"track_id": mixer_track_ids[1], "send_id": "delay", "level": 0.35}),
+                    ("audio.track.route_to_bus", {"track_id": mixer_track_ids[1], "bus_id": "music"}),
+                ]
+            )
+        if len(mixer_track_ids) >= 3:
+            mixer_actions.extend(
+                [
+                    ("audio.track.set_volume", {"track_id": mixer_track_ids[2], "volume": 0.92}),
+                    ("audio.track.set_pan", {"track_id": mixer_track_ids[2], "pan": 0.24}),
+                    ("audio.track.solo", {"track_id": mixer_track_ids[2], "solo": True}),
+                    ("audio.track.set_type", {"track_id": mixer_track_ids[2], "track_type": "sfx"}),
+                    ("audio.track.insert.set", {"track_id": mixer_track_ids[2], "slot": "dyn", "enabled": True}),
+                    ("audio.track.send.set_level", {"track_id": mixer_track_ids[2], "send_id": "reverb", "level": 0.18}),
+                    ("audio.track.route_to_bus", {"track_id": mixer_track_ids[2], "bus_id": "sfx"}),
+                    (
+                        "audio.automation.write",
+                        {
+                            "track_id": mixer_track_ids[2],
+                            "parameter": "pan",
+                            "time_ms": 2100,
+                            "value": 0.24,
+                            "read": True,
+                            "write": True,
+                        },
+                    ),
+                ]
+            )
+        mixer_action_results: list[bool] = []
+        mixer_cubase_results: dict[str, bool] = {
+            "track_type": False,
+            "insert": False,
+            "send": False,
+            "bus": False,
+            "automation": False,
+            "meter": False,
+            "snapshot": False,
+        }
+        for action_id, params in mixer_actions:
+            action_result = registry.execute(action_id, params).to_dict()
+            steps.append({"action": action_id, **action_result})
+            mixer_action_results.append(bool(action_result.get("ok")))
+            if action_id == "audio.track.set_type":
+                mixer_cubase_results["track_type"] = mixer_cubase_results["track_type"] or bool(action_result.get("ok"))
+            elif action_id == "audio.track.insert.set":
+                mixer_cubase_results["insert"] = mixer_cubase_results["insert"] or bool(action_result.get("ok"))
+            elif action_id == "audio.track.send.set_level":
+                mixer_cubase_results["send"] = mixer_cubase_results["send"] or bool(action_result.get("ok"))
+            elif action_id == "audio.track.route_to_bus":
+                mixer_cubase_results["bus"] = mixer_cubase_results["bus"] or bool(action_result.get("ok"))
+            elif action_id == "audio.automation.write":
+                mixer_cubase_results["automation"] = mixer_cubase_results["automation"] or bool(action_result.get("ok"))
+        for action_id, params in (
+            ("audio.track.meter.state", {"track_id": audio_track_id}),
+            ("audio.automation.state", {"track_id": audio_track_id}),
+            ("audio.mixer.snapshot.save", {"snapshot_id": "qa_mix_a", "name": "QA Mix A"}),
+            ("audio.track.set_volume", {"track_id": audio_track_id, "volume": 0.74}),
+            ("audio.mixer.snapshot.compare", {"snapshot_id": "qa_mix_a"}),
+            ("audio.mixer.snapshot.apply", {"snapshot_id": "qa_mix_a"}),
+        ):
+            action_result = registry.execute(action_id, params).to_dict()
+            steps.append({"action": action_id, **action_result})
+            mixer_action_results.append(bool(action_result.get("ok")))
+            if action_id == "audio.track.meter.state":
+                payload = action_result.get("result") or {}
+                mixer_cubase_results["meter"] = bool(
+                    action_result.get("ok")
+                    and payload.get("schema") == "tigerstudio.audio.meter.v1"
+                    and int(payload.get("track_count") or 0) >= 1
+                )
+            elif action_id == "audio.mixer.snapshot.apply":
+                payload = action_result.get("result") or {}
+                mixer_cubase_results["snapshot"] = bool(action_result.get("ok") and int(payload.get("applied_count") or 0) >= 1)
+        checks["mixer_track_imports"] = len(set(mixer_track_ids)) >= 3
+        checks["mixer_track_actions"] = bool(mixer_action_results and all(mixer_action_results))
+        checks["mixer_cubase_track_type_actions"] = mixer_cubase_results["track_type"]
+        checks["mixer_cubase_insert_actions"] = mixer_cubase_results["insert"]
+        checks["mixer_cubase_send_bus_actions"] = bool(mixer_cubase_results["send"] and mixer_cubase_results["bus"])
+        checks["mixer_cubase_automation_actions"] = mixer_cubase_results["automation"]
+        checks["mixer_cubase_meter_state_action"] = mixer_cubase_results["meter"]
+        checks["mixer_cubase_snapshot_actions"] = mixer_cubase_results["snapshot"]
+
         audio_track, audio_clip = _audio_clip_by_id(editor, audio_track_id, audio_clip_id)
         checks["audio_clip_found"] = bool(audio_track is not None and audio_clip is not None)
         if audio_clip is not None:
@@ -354,6 +550,18 @@ def run_sound_editor_capture(
             checks.update({f"graph_{key}": value for key, value in (graph_report.get("checks") or {}).items()})
             artifacts.update({f"graph_{key}": value for key, value in (graph_report.get("captures") or {}).items()})
             artifacts["sound_editor_graphs_contact_sheet"] = str(graph_report.get("contact_sheet") or "")
+            mixer_report = _capture_sound_mixer_tab(
+                app,
+                registry=registry,
+                editor=editor,
+                sound_panel=embedded,
+                workbench_widget=getattr(editor, "_workbench_section_host", None) or panel or embedded,
+                out=out,
+            )
+            checks.update({f"mixer_{key}": value for key, value in (mixer_report.get("checks") or {}).items()})
+            artifacts.update(mixer_report.get("artifacts") or {})
+            steps.extend(mixer_report.get("steps") or [])
+            metrics["mixer_state"] = mixer_report.get("mixer_state") or {}
             getattr(embedded, "_set_tab")("eq")
             advanced_button = next(
                 (
@@ -472,6 +680,13 @@ def run_sound_editor_capture(
                 checks["dock_screenshot"] = _save_widget(dock_window, dock_png)
                 checks["dock_screenshot_nonblank"] = _image_nonblank(dock_png)
                 artifacts["dock_sound_editor"] = str(dock_png.resolve())
+                if embedded_dock is not None:
+                    getattr(embedded_dock, "_set_tab")("mixer")
+                    _wait(app, 160)
+                    dock_mixer_png = out / "dock_sound_editor_mixer_action.png"
+                    checks["dock_mixer_screenshot"] = _save_widget(dock_window, dock_mixer_png)
+                    checks["dock_mixer_screenshot_nonblank"] = _image_nonblank(dock_mixer_png)
+                    artifacts["dock_sound_editor_mixer"] = str(dock_mixer_png.resolve())
 
         waveform = getattr(audio_clip, "waveform", None) if audio_clip is not None else None
         checks["waveform_ready_or_pending_allowed"] = bool(waveform is None or getattr(waveform, "size", 0) >= 0)
@@ -479,6 +694,7 @@ def run_sound_editor_capture(
         checks["sound_editor_panel_visible"] = bool(embedded is not None and embedded.isVisible())
         metrics["audio_track_id"] = audio_track_id
         metrics["audio_clip_id"] = audio_clip_id
+        metrics["mixer_track_ids"] = sorted({int(row) for row in locals().get("mixer_track_ids", []) if int(row or 0) > 0})
         metrics["waveform_size"] = int(getattr(waveform, "size", 0) or 0) if waveform is not None else 0
     finally:
         try:

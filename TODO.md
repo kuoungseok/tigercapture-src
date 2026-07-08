@@ -25,6 +25,13 @@
     clip/node color grades, and the right-side color workbench includes larger
     wheels plus preview-pixmap-based mini scopes. Verified with
     `debugCapture/ui_renewal_color_scope_row_round`.
+  - [x] 2026-07-07 Color grading scope recovery: the right-side Workbench
+    `Scopes` card now uses the existing `app.color_scopes.render_scope`
+    renderer for live-preview `Luma / Levels`, `Histogram`, `RGB Parade`, and
+    `Vectorscope` graphs instead of the old tiny decorative marks. The scope
+    area was enlarged to read as a useful monitoring surface rather than a
+    narrow status strip, and it can be popped out as a detached `Color Scopes`
+    dock without removing the Workbench copy.
   - [x] 2026-07-02 Color grading density decision: keep the compact Timeline
     `Grade Layer` rail instead of adding taller dedicated grade rows. The
     current rail already shows real clip/node color-grade state without harming
@@ -475,6 +482,58 @@
         `tests/test_python_action_system.py`, `tests/test_sound_editor_panel.py`,
         and real-media QA at
         `debugCapture/ui_renewal_sound_editor_action_system_round_1/sound_editor_qa.json`.
+      - [x] 2026-07-08 Sound Editor slotted jog dial pass:
+        replaced the jog-shuttle face with a brushed-metal dial that removes the
+        long center notch. The metal body is now a permanent resource at
+        `resources/ui/sound_editor/jog_dial_metal_sparse_base.png`, while the
+        sparse, small LED slot indicators near the outer edge are still painted
+        by the editor so jog position/playing state can animate with brighter
+        illumination. Verified with
+        `tests/test_sound_editor_panel.py::test_sound_editor_panel_embeds_reference_05_jog_shuttle`,
+        `tests/test_editor_architecture_rules.py`,
+        `tools/qa_packaging_resources.py`, and real-media QA at
+        `debugCapture/sound_jog_resource_texture_clipped_20260708/sound_editor_qa.json`.
+      - [x] 2026-07-08 Sound Editor mini mixer pass:
+        added a `Mixer` tab to the renewed Workbench Sound Editor and extended
+        the timeline Audio Mixer strips with Mute/Solo state. Track volume, pan,
+        mute, and solo are now real `AudioTrack` state, saved/loaded with
+        projects, reflected in undo snapshots and AI snapshots, honored by
+        preview/export, and available to local AI through
+        `audio.track.set_volume`, `audio.track.set_pan`, `audio.track.mute`,
+        `audio.track.solo`, and `audio.mixer.state`. Detached Sound Editor
+        docks now receive the full mixer track context instead of only the
+        selected clip track. Mixer rebuild now hides old strip widgets before
+        deferred deletion, preventing stale Master/track labels from overlaying
+        the first channel during fast refreshes. Latest real-editor QA:
+        `debugCapture/ui_renewal_sound_editor_mixer_slider_round_4/sound_editor_qa.json`
+        and
+        `debugCapture/ui_renewal_sound_editor_mixer_slider_round_4/dock_sound_editor_mixer_action.png`.
+      - [x] 2026-07-08 Sound Editor mixer slider renewal:
+        replaced the mini Mixer tab's stylesheet/default slider feel with
+        Sound Editor-local custom pan/fader controls. Pan now uses a compact
+        graphite center rail, while channel and Master faders use recessed
+        mixer-strip rails, low-saturation live fill, and metal-cap handles with
+        fixed strip height so detached docks do not stretch the controls.
+        Verified with real-media QA at
+        `debugCapture/ui_renewal_sound_editor_mixer_slider_round_4/sound_editor_qa.json`
+        and
+        `debugCapture/ui_renewal_sound_editor_mixer_slider_round_4/dock_sound_editor_mixer_action.png`.
+      - [x] 2026-07-08 Cubase-inspired Sound Editor mixer controls:
+        extended the mini Mixer with the six requested DAW-style essentials:
+        peak/clip indication, insert slots, send levels/bus routing,
+        automation Read/Write, mixer snapshots, and track type strips. These
+        are real `AudioTrack` state, saved/loaded with projects, included in
+        undo/history and AI snapshots, and exposed through
+        `audio.track.set_type`, `audio.track.insert.set`,
+        `audio.track.send.set_level`, `audio.track.route_to_bus`,
+        `audio.track.meter.state`, `audio.automation.state`,
+        `audio.automation.write`, `audio.automation.clear`,
+        `audio.mixer.snapshot.save`, `audio.mixer.snapshot.compare`,
+        `audio.mixer.snapshot.apply`, and `audio.mixer.state`. Verified with
+        unit tests plus real-media QA at
+        `debugCapture/ui_renewal_sound_editor_cubase_round_1/sound_editor_qa.json`
+        and
+        `debugCapture/ui_renewal_sound_editor_cubase_round_1/dock_sound_editor_mixer_action.png`.
     - [x] Actor / Live2D / Spine / 3D pass:
       - [x] Restyle Actor Library.
       - [x] Show Live2D actor, actor lane, keyframes, transform controls, and
@@ -750,6 +809,18 @@
         small_visual_artifacts=0, flat_visual_artifacts=0; only
         `ai_script_edit` remains honestly blocked until the real AI edit corpus
         reaches the required 20 reviewed cases.
+      - [x] 2026-07-08 Cubase-style Sound Mixer review automation refresh:
+        regenerated detailed review assets at
+        `E:\ClaudeCodeApp\ReviewAutomationWorkspace\outputs\mixer_cubase_round_1_detailed`,
+        including `TigerCapture_Review_Automation_detailed.pptx` and
+        `site\index.html`. `feature_color_audio_vfx_editor_surface.png` is
+        byte-identical to
+        `debugCapture/ui_renewal_sound_editor_cubase_round_1/dock_sound_editor_mixer_action.png`,
+        and `tools/qa_review_automation.py` passes at
+        `E:\ClaudeCodeApp\ReviewAutomationWorkspace\qa\mixer_cubase_round_1_detailed_review_qa.json`.
+        The evidence graph now records the Cubase-inspired mixer action surface:
+        track type, insert slots, send/bus routing, automation R/W, meter state,
+        mixer snapshots, and `audio.mixer.state`.
       - [x] 2026-07-02 UI renewal thread handoff written:
         `docs/UI_RENEWAL_THREAD_HANDOFF.md` defines the new-thread boundary,
         required reading order, real-evidence rules, refactoring modules,
@@ -891,6 +962,123 @@
   NLE readiness gate distinguishes generated long-project stress fixtures from
   real user projects and keeps the full-NLE claim blocker until the real corpus
   meets project-count, duration, clip-count, and no-missing-media thresholds.
+- [x] 2026-07-07 NLE real corpus intake action: `nle.real_corpus.register`
+  dry-runs project metrics, registers the current saved project or an explicit
+  `project_path`, and writes the same manifest as the CLI tool so AI/MCP can
+  guide corpus intake without requiring manual command-line use.
+- [x] 2026-07-08 NLE real corpus discovery: `tools/discover_nle_real_projects.py`
+  and `nle.real_corpus.discover` scan bounded project roots for `.tgp`/JSON
+  candidates, flag generated fixtures/missing media/short projects/already
+  registered projects, and report the remaining real-corpus thresholds that keep
+  the professional NLE claim blocked.
+- [x] 2026-07-08 NLE real corpus intake board: `nle.real_corpus.intake_board`
+  exposes a UI-ready board with claim thresholds, registerable candidates,
+  rejected/incomplete projects, registered corpus entries, and safe register
+  actions. This makes real-project collection actionable without allowing
+  generated fixtures to clear the professional-NLE claim gate.
+- [x] 2026-07-08 NLE real corpus collection kit:
+  `nle.real_corpus.collection_kit` gives UI/AI a guided checklist from scan to
+  registration to real-corpus QA/readiness rerun, while keeping generated
+  fixtures blocked from professional-NLE claim evidence.
+- [x] 2026-07-08 NLE real corpus validation plan:
+  `nle.real_corpus.validation_plan` turns registered real projects into
+  per-project open/reopen, scrub sampling, proxy/relink, undo/recovery, short
+  export, and nested/proxy edge-case QA steps. This makes the remaining real
+  corpus blocker operational without clearing it artificially.
+- [x] 2026-07-08 NLE UI-ready review surfaces: add
+  `source_record.monitor_layout`, `timeline.multicam.tile_board`,
+  `project_bin.review_board`, and `timeline.undo_review_board` so Source/Record,
+  multicam, project-bin/proxy/conform, and undo/fuzzer evidence can be rendered
+  as product panels instead of raw action payloads. NLE readiness is now 86/100,
+  still blocked from professional-NLE claims by missing real long-project corpus.
+- [x] 2026-07-08 NLE apply/review boards: add `source_record.apply_board` for
+  reviewed 3-point insert/overwrite decisions with destructive-confirm hints,
+  and `timeline.multicam.review_board` for angle tiles, coverage diagnostics,
+  switch decisions, and bake/export readiness. This raises implementation
+  readiness while keeping the real-project corpus blocker intact.
+- [x] 2026-07-08 NLE project-bin polish: add `project_bin.offline_browser` for
+  offline/missing media, ambiguous/name-only matches, and relink queue review;
+  add `project_bin.proxy_regeneration_board` for safe background proxy jobs,
+  blocked offline items, and preview proxy policy. These strengthen proxy/
+  conform readiness while keeping real long-project validation separate.
+- [x] 2026-07-08 NLE undo recovery playbook: add
+  `timeline.undo_recovery_playbook` so undo/fuzzer failures have UI-ready rerun,
+  triage, autosave/reopen, and reproduction-step commands instead of only a
+  raw health matrix. NLE readiness is now expected to move to 87/100 while the
+  real long-project corpus blocker remains.
+- [x] 2026-07-08 NLE interaction polish contracts: add
+  `source_record.keyboard_overlay`, `timeline.multicam.sync_quality_board`, and
+  `project_bin.search_filter_model` so Source/Record shortcut hints, multicam
+  sync confidence, and project-bin search/filter/metadata columns are
+  action-backed UI models. NLE readiness can rise to about 88/100, but the full
+  professional-NLE claim remains blocked by missing real long-project corpus.
+- [x] 2026-07-08 NLE multicam waveform sync board: add
+  `timeline.multicam.waveform_sync_board` so cached waveform/transient metadata
+  can drive UI-ready multicam offset review without running heavy media analysis
+  on the baseline preview path. This improves the multicam contract while real
+  footage parity QA remains required.
+- [x] 2026-07-08 NLE multicam live switch dashboard: add
+  `timeline.multicam.live_switch_dashboard` so angle tiles, switch decisions,
+  sync-quality rows, waveform readiness, and bake/export commands are available
+  as one UI-ready board without claiming Premiere/Resolve live-switcher parity.
+- [x] 2026-07-08 NLE real corpus validation evidence: add
+  `nle.real_corpus.validation_report` and
+  `nle.real_corpus.validation_evidence.register` so registered real projects can
+  store redacted open/reopen, scrub, proxy/relink, undo/recovery, short-export,
+  and nested/proxy edge-case evidence. This makes the remaining
+  `real_world_long_project_corpus` blocker operational instead of merely a
+  metric threshold, without allowing synthetic fixtures to clear the claim gate.
+- [x] 2026-07-08 NLE real corpus strict QA gate: official
+  `tools/qa_nle_real_project_corpus.py` now requires validation evidence by
+  default, while `--metric-only` is diagnostic only. NLE readiness no longer
+  treats a shallow `claim_ready=true` corpus payload as real-world evidence
+  unless the validation-ready count also satisfies the project threshold.
+- [x] 2026-07-08 NLE real corpus validation CLI: add
+  `tools/register_nle_real_project_validation.py` and expose copy-ready
+  `validation.cli_examples` from `nle.real_corpus.collection_kit`, so operators
+  can mark required real-project validation checks from UI/AI guidance without
+  hand-writing manifest JSON.
+- [x] 2026-07-08 NLE real corpus claim gate board: add
+  `nle.real_corpus.gate_board` as the single UI/AI/MCP payload for current real
+  corpus status, blocked thresholds, registerable/rejected projects,
+  validation-missing projects, validation-ready projects, and rerun commands.
+  This makes the remaining `real_world_long_project_corpus` blocker visible and
+  actionable, but still keeps professional-NLE claims blocked until real
+  projects and validation evidence pass.
+- [x] 2026-07-08 NLE real corpus validation packet: add
+  `nle.real_corpus.validation_packet` so each registered project can expose a
+  focused operator checklist, redaction rules, required/optional checks,
+  reviewed action template, and CLI template for validation evidence
+  registration. This shortens the path from "registered project" to "real
+  validation evidence" without fabricating pass results.
+- [x] 2026-07-08 NLE real corpus validation preflight: add
+  `nle.real_corpus.validation_preflight` so registered projects can separate
+  machine prerequisites from human/operator checks before evidence is recorded.
+  The preflight exposes missing media, duration/clip count, scrub sample, and
+  short export blockers, but leaves every evidence check `pending` until a real
+  operator review is registered.
+- [x] 2026-07-08 NLE real corpus preflight QA CLI: add
+  `tools/qa_nle_real_project_preflight.py` to write per-project machine
+  preflight status to `debugCapture/nle_real_project_preflight_qa.json` for
+  local QA, MCP, and other agent threads before operator evidence is recorded.
+- [x] 2026-07-08 NLE real corpus preflight gate integration: strict corpus QA
+  now carries `preflight_ready_count` / `preflight_blocked_count`, exposes
+  project-level `preflight_blockers`, and keeps `validation_preflight` as a
+  claim blocker before operator evidence can be trusted.
+- [x] 2026-07-08 NLE real corpus workbench action: add
+  `nle.real_corpus.workbench` as the single UI/MCP board for discovery,
+  registerable candidates, preflight status, operator evidence, claim blockers,
+  primary next action, QA commands, and action sequence toward the 95+ real
+  evidence gate.
+- [x] 2026-07-08 NLE target-score gap board: add `timeline.nle_target_gap` so
+  UI/AI/MCP can answer "what remains before 95/100?" from the current readiness
+  report. It shows per-row score gaps and keeps `real_world_long_project_corpus`
+  as a hard blocker instead of allowing synthetic implementation evidence to
+  masquerade as a professional NLE claim.
+- [x] 2026-07-08 NLE 95-score unlock guard: scoring can now exceed 95 only when
+  strict `real_project_corpus` evidence is attached. Synthetic/action contract
+  evidence remains capped at the current implementation score, so the 95 target
+  is reachable with real projects but cannot be faked by generated fixtures.
 - [x] 2026-06-30 VTuber Live2D preview parity: main preview and popout preview must both
   evaluate Live2D animation plus Performance Source mapping results.
 - [x] 2026-07-01 VTuber tracking input health contract: VSeeFace bridge input
@@ -3168,6 +3356,16 @@
 - [x] Add NLE undo health matrix: `timeline.undo_health` exposes operation
   coverage rows, undo-depth/failure/linked-audio/actor-lane risk cards, and
   rerun/failure-report command state for QA Dashboard or health panels.
+- [x] Add NLE core action coverage matrix: `timeline.core_action_coverage`
+  groups edit, clipboard/insert, Source/Record, Project Bin, storyline,
+  multicam, and undo/recovery actions so readiness is not based on raw action
+  count alone.
+- [x] Add NLE undo recovery playbook: `timeline.undo_recovery_playbook`
+  exposes rerun, triage, undo/redo replay, autosave/reopen verification, and
+  reproduction-step commands for destructive edit failure recovery.
+- [x] Add NLE undo stability dashboard: `timeline.undo_stability_dashboard`
+  combines fuzzer status, operation coverage, risk cards, blockers, and
+  recovery commands into one UI-ready QA surface.
 - [x] Add NLE proxy management plan: `project_bin.proxy_plan` exposes usable
   proxies, stale/missing regeneration queues, preview proxy policy, and
   long-project proxy readiness evidence for NLE scoring.
@@ -3175,9 +3373,94 @@
   product-facing proxy state cards, safe background regeneration enablement,
   stale/missing/offline review signals, and stronger proxy/media-management
   evidence for NLE scoring.
+- [x] Add NLE proxy conflict board: `project_bin.proxy_conflict_board`
+  separates safe background proxy jobs from offline blockers, duplicate media
+  paths, and review-only conflicts so long-project proxy refresh can be shown
+  without accidentally implying every stale proxy is safe to regenerate.
 - [x] Add NLE conform report: `project_bin.conform_report` checks timeline clip
   source paths against Media Pool rows, reports path/name/ambiguous/missing
   matches, and exposes relink/offline review commands for NLE scoring.
+- [x] Add NLE relink candidate board: `project_bin.relink_candidate_board`
+  exposes file-by-file safe path matches, name-only review, ambiguous choices,
+  offline matches, and missing sources for Media Pool/project-bin workflows.
+- [x] Add Final Cut-style magnetic storyline foundation:
+  `timeline.magnetic_storyline.status/apply` detects gaps/overlaps, closes
+  primary-storyline gaps while preserving clip order, and moves linked audio by
+  the same delta. This is the competitive fast-editing foundation, not full FCP
+  interaction parity yet.
+- [x] Add Final Cut-style connected clip and role-color foundation:
+  `timeline.connected_clips.status/connect`, `timeline.role_colors.status`, and
+  `timeline.clip_role.set` persist connected-parent offsets plus clip role/color
+  metadata, expose the state to AI/MCP, and add a minimal timeline strip/badge.
+- [x] Add role-aware lane view-model and timeline cue:
+  `timeline.role_lanes.status/focus` groups clips by role and stores focused
+  role state; timeline clips with role/connection/audition metadata draw a
+  role-color rail, connected diamond, and audition take dots.
+- [x] Refactor magnetic storyline, connected clip, and role-lane action logic:
+  editor adapter methods now live in
+  `app/actions/editor_adapter_nle_storyline.py` and public action registration
+  lives in `app/actions/nle_storyline_namespace.py`, keeping public action IDs
+  stable.
+- [x] Add Final Cut-style audition/take foundation:
+  `timeline.auditions.status`, `timeline.audition.add_take`, and
+  `timeline.audition.switch_take` store candidate takes on a host clip and swap
+  the active take into normal preview/export-facing clip source fields.
+- [x] Add audition picker/take-management action contract:
+  `timeline.audition.compare`, `timeline.audition.rename_take`, and
+  `timeline.audition.remove_take` expose a UI-ready take comparison model,
+  rename candidate takes, and safely remove takes while preserving one active
+  take.
+- [x] Wire the `AUD` timeline badge to a compact audition picker dialog:
+  `app/video_editor_nle_audition_workflow.py` opens from the timeline badge,
+  lists takes, marks the active take, and drives switch/rename/remove through
+  the registered Python Actions.
+- [x] Refactor the audition adapter/action surface out of the broad NLE files:
+  editor mutation methods now live in
+  `app/actions/editor_adapter_nle_auditions.py` and public action registration
+  lives in `app/actions/nle_auditions_namespace.py`, keeping action IDs stable.
+- [x] Add Final Cut-style visual feedback contracts:
+  `app/nle_visual_feedback.py` exposes connected-clip anchor overlay rows,
+  role-lane filter visible/hidden clip sets, and non-mutating magnetic drag
+  preview placement/push/snap feedback through
+  `timeline.connected_clips.anchor_overlay`,
+  `timeline.role_lanes.filter_model`, and
+  `timeline.magnetic_storyline.drag_preview`.
+- [x] Refactor Final Cut-style visual feedback out of the broad NLE files:
+  adapter methods live in `app/actions/editor_adapter_nle_visual.py` and public
+  action registration lives in `app/actions/nle_visual_namespace.py`, while
+  `app/video_editor_window.py` remains a compatibility facade.
+- [x] Wire first Final Cut-style visual feedback into the Qt timeline:
+  `app/timeline_nle_visual_overlay.py` owns reusable clip-anchor and
+  drag-preview paint helpers; `app/timeline_track_row_paint.py` now draws
+  stronger connected-clip anchor cues plus compact move/snap/blocked drag
+  guides without adding logic to `app/video_editor_window.py`.
+- [x] Wire role-lane focus into live timeline rows:
+  `timeline.role_lanes.focus` now propagates to `TrackRow.set_focused_clip_role`
+  and non-matching clip roles are dimmed by
+  `app/timeline_nle_visual_overlay.py`, so the action-layer role focus has an
+  immediate timeline effect.
+- [x] Add compact Final Cut-style role filter bar:
+  `app/video_editor_nle_role_panel.py` renders `timeline.role_lanes.filter_model`
+  as an in-timeline role strip, and
+  `app/video_editor_nle_role_workflow.py` routes clicks through
+  `timeline.role_lanes.focus` so UI state, row dimming, and Python Actions stay
+  aligned.
+- [x] Add cross-row connected clip overlay:
+  `app/timeline_connected_anchor_overlay_widget.py` paints parent/child anchor
+  curves over the timeline viewport, refreshing on scroll and role/storyline
+  mutations without adding feature logic to `app/video_editor_window.py`.
+- [x] Improve visual audition picker:
+  `app/nle_audition_visuals.py` builds a card model for take comparison, and
+  `app/video_editor_nle_audition_workflow.py` now shows a compact card strip
+  above the detailed take table while still applying changes through registered
+  Python Actions.
+- [x] Improve magnetic drag visual language:
+  `app/timeline_nle_visual_overlay.py` now emits field-line/hatch metadata for
+  snap, push, move, and blocked drag previews, and
+  `app/timeline_track_row_paint.py` consumes those cue values directly.
+- [ ] Deepen Final Cut-style UI parity: tune magnetic drag timing against real
+  editor gestures and add real-project usability QA before any full Final Cut
+  replacement claim.
 - [x] Add NLE multicam angle bins: `timeline.multicam.angle_bins` exposes
   UI-ready angle coverage, gap diagnostics, sync readiness, and switcher/export
   command enablement so multicam panels can show real bin health instead of only
@@ -4263,8 +4546,11 @@ To reach near-100% Screen Studio parity:
   Output contract registration now live in `app/actions/vtuber_namespace.py`.
 - [x] Split broadcast action registration without changing public action IDs:
   Live Target, troubleshooting, broadcast readiness, platform evidence, and
-  virtual-camera/OBS bridge registration now live in
-  `app/actions/broadcast_namespace.py`.
+  virtual-camera/OBS bridge registration stay behind
+  `app/actions/broadcast_namespace.py`. Focused schemas now live in
+  `app/actions/broadcast_live_target_namespace.py`,
+  `app/actions/broadcast_evidence_namespace.py`, and
+  `app/actions/broadcast_virtual_camera_namespace.py`.
 - [x] Split actor action registration without changing public action IDs:
   Live2D/Spine actor add, transform, keyframes, and Live2D Performance Source
   retargeting registration now live in `app/actions/actor_namespace.py`.
@@ -4309,14 +4595,37 @@ To reach near-100% Screen Studio parity:
   `app/actions/readonly_namespace.py`; Source monitor and Record monitor
   state/load/In/Out/clear actions live in
   `app/actions/source_record_monitor_namespace.py`.
+- [x] Split AR/PBR action registration without changing public action IDs:
+  preview diagnostics/view/settings/depth/surface actions now live in
+  `app/actions/ar_pbr_preview_namespace.py`; viewport transform gizmo actions
+  live in `app/actions/ar_pbr_gizmo_namespace.py`; the legacy
+  `app/actions/ar_pbr_namespace.py` remains a thin facade.
 - [x] Split public `EditorAdapter` action implementations by domain while
   preserving public action IDs and Python Action behavior:
-  `app/actions/editor_adapter_nle.py` owns NLE/project-bin/multicam workbench
-  methods, `app/actions/editor_adapter_vtuber.py` owns VTuber/broadcast/
+  `app/actions/editor_adapter_nle.py` is now a facade that composes focused
+  mixins; `app/actions/editor_adapter_nle_source_record.py` owns Source/Record
+  methods, `app/actions/editor_adapter_nle_project_bin.py` owns project-bin
+  methods, `app/actions/editor_adapter_nle_readiness.py` owns NLE
+  readiness/evidence/real-project corpus methods,
+  `app/actions/editor_adapter_nle_multicam.py` owns multicam methods,
+  `app/actions/editor_adapter_nle_storyline.py` owns magnetic
+  storyline/connected clip/role-lane methods,
+  `app/actions/editor_adapter_nle_auditions.py` owns audition/take methods,
+  `app/actions/editor_adapter_nle_visual.py` owns Final Cut-style visual
+  feedback contracts,
+  `app/actions/editor_adapter_vtuber.py` owns VTuber/broadcast/
   VSeeFace/Performance Source methods, `app/actions/editor_adapter_timeline.py`
   owns timeline/media/source-monitor/marker/selection public methods, and
   `app/actions/editor_adapter_editing.py` owns clip edit, linked edit, audio,
   creative, actor, capture, and review public methods.
+- [x] Split AR/PBR `EditorAdapter` implementation into focused mixins:
+  shared preview/window/track helpers live in
+  `app/actions/editor_adapter_ar_pbr_base.py`; main-preview diagnostics and
+  depth-view actions live in `app/actions/editor_adapter_ar_pbr_depth.py`;
+  preview camera actions live in `app/actions/editor_adapter_ar_pbr_preview.py`;
+  lighting/material/surface actions live in
+  `app/actions/editor_adapter_ar_pbr_settings.py`; viewport-gizmo actions live
+  in `app/actions/editor_adapter_ar_pbr_gizmo.py`.
 - [x] Split the remaining `app/actions/editor_adapter.py` shared helper layer:
   capture/owner/media/UI helpers now live in
   `app/actions/editor_adapter_core_helpers.py`; timeline clip lookup,
