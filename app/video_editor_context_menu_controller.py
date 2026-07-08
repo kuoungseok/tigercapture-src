@@ -292,6 +292,12 @@ def build_clip_badge_menu_model(
             "Open nested sequence",
         )
         rows[0]["label_key"] = "veditor.clip_badge.menu.open_nested"
+    elif action == "audition":
+        rows[0]["label"] = "Open audition takes"
+        rows[0]["label_key"] = "veditor.clip_badge.menu.open_audition"
+    elif action == "connected":
+        rows[0]["label"] = "Focus connected parent"
+        rows[0]["label_key"] = "veditor.clip_badge.menu.focus_connected"
     return rows
 
 

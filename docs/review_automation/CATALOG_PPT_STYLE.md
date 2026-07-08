@@ -58,6 +58,17 @@ Suggested 16:9 sizes:
 Korean/Japanese catalog pages should use a CJK-safe font and enough line height.
 Do not cram translations into the same density as English.
 
+Product typography feature pages:
+
+- The editor screenshot should make typography the subject, not just add a
+  small caption over video.
+- Use a large on-canvas headline, a secondary line, and one or more smaller
+  text layers so the viewer immediately understands titles/body/captions.
+- When showing multilingual capability, include Korean, English, and Japanese
+  samples at readable scale with CJK-safe fallback.
+- Keep catalog page body copy restrained; the large text belongs inside the
+  captured editor canvas or highlighted tablet/laptop screen.
+
 ## Page Composition
 
 Use:

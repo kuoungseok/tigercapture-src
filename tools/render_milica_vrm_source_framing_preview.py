@@ -22,7 +22,11 @@ from app.vtuber.openseeface_motion import (  # noqa: E402
     summarize_openseeface_motion,
 )
 from app.vtuber.source_framing_control import apply_framing_user_offset  # noqa: E402
-from app.vtuber.source_framing import solve_source_framing_sequence  # noqa: E402
+from app.vtuber.source_framing import (  # noqa: E402
+    classify_source_exposure_for_framing,
+    solve_source_framing_sequence,
+    vrm_visibility_policy_for_source_exposure,
+)
 from app.vtuber.source_subject import detect_subject_boxes_for_motion_frames  # noqa: E402
 from tools.render_milica_vrm_trump_mapping import (  # noqa: E402
     DEFAULT_CSV,
@@ -49,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--out", default=str(DEFAULT_OUT))
     parser.add_argument("--json-out", default="")
     parser.add_argument("--slot", choices=("neutral", "head", "mouth", "blink"), default="head")
-    parser.add_argument("--preset", choices=("bust_up", "half_body", "full_body"), default="bust_up")
+    parser.add_argument("--preset", choices=("auto", "bust_up", "half_body", "full_body"), default="auto")
     parser.add_argument("--video", default="", help="Optional source video used to detect real subject boxes.")
     parser.add_argument("--source-frame-size", default="", help="Optional WIDTHxHEIGHT override.")
     parser.add_argument("--render-size", type=int, default=1440)
@@ -79,12 +83,20 @@ def main(argv: list[str] | None = None) -> int:
     subject_result = None
     subject_boxes = None
     subject_sources = None
+    initial_source_exposure = classify_source_exposure_for_framing(frames, frame_size)
+    initial_visibility_policy = vrm_visibility_policy_for_source_exposure(
+        initial_source_exposure.get("source_exposure") or "unknown",
+        requested_preset=args.preset,
+        confidence=float(initial_source_exposure.get("confidence", 0.0) or 0.0),
+        method=str(initial_source_exposure.get("method") or ""),
+    )
+    detect_preset = str(initial_visibility_policy["selected_framing_preset"])
     if str(args.video or "").strip():
         subject_result = detect_subject_boxes_for_motion_frames(
             Path(args.video),
             frames,
             source_frame_size=frame_size,
-            preset=args.preset,
+            preset=detect_preset,
             detect_every=max(1, int(args.subject_detect_every)),
             detect_indices=[frame_index] if args.subject_detect_scope == "selected" else None,
         )
@@ -92,10 +104,18 @@ def main(argv: list[str] | None = None) -> int:
         subject_sources = tuple(item.source for item in subject_result.frames)
         frames = _apply_subject_shoulder_roll(frames, subject_result)
         frame = frames[frame_index]
+    source_exposure = classify_source_exposure_for_framing(frames, frame_size, subject_boxes=subject_boxes)
+    visibility_policy = vrm_visibility_policy_for_source_exposure(
+        source_exposure.get("source_exposure") or "unknown",
+        requested_preset=args.preset,
+        confidence=float(source_exposure.get("confidence", 0.0) or 0.0),
+        method=str(source_exposure.get("method") or ""),
+    )
+    resolved_preset = str(visibility_policy["selected_framing_preset"])
     framing = solve_source_framing_sequence(
         frames,
         frame_size,
-        preset=args.preset,
+        preset=resolved_preset,
         smoothing=float(args.smoothing),
         subject_boxes=subject_boxes,
         subject_sources=subject_sources,
@@ -173,8 +193,12 @@ def main(argv: list[str] | None = None) -> int:
         "csv": str(csv_path),
         "source_frame_size": list(frame_size),
         "slot": args.slot,
+        "preset": resolved_preset,
+        "requested_preset": args.preset,
         "frame_index": frame_index,
         "frame": frame.to_dict(),
+        "source_exposure": source_exposure,
+        "visibility_policy": visibility_policy,
         "framing": solution.to_dict(),
         "framing_control": framing_control,
         "source_subject": subject_result.to_dict() if subject_result is not None else None,

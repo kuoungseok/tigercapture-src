@@ -295,7 +295,9 @@ def run_ar_pbr_workspace_qa(
                     lighting["ibl_exposure"] = 2.15
                     lighting["direct_strength"] = 1.35
                     lighting["shadow_strength"] = 0.38
-            editor._set_ar_pbr_track_uniform_scale(placed, 0.62)
+            # Product-catalog captures should show the 3D asset clearly in the
+            # video viewer, not as a tiny proof-of-placement marker.
+            editor._set_ar_pbr_track_uniform_scale(placed, 1.05)
             editor._set_ar_pbr_track_rotation_value(placed, 0, -8.0)
             editor._set_ar_pbr_track_rotation_value(placed, 1, 34.0)
             editor._set_ar_pbr_track_rotation_value(placed, 2, 5.0)

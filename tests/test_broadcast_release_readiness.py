@@ -13,7 +13,9 @@ def test_broadcast_release_readiness_is_alpha_ready_but_blocks_sale_without_e2e(
     assert areas["obs_free_video_call"]["score"] == 100
     assert areas["capture_backends"]["score"] >= 90
     assert areas["real_platform_evidence"]["sale_blocking"] is True
-    assert any("YouTube" in action or "Twitch" in action for action in report["next_actions"])
+    assert any("Register RTMP" in action for action in report["next_actions"])
+    assert "Commercial broadcast claims are blocked" in areas["real_platform_evidence"]["summary"]
+    assert areas["real_platform_evidence"]["evidence"]["operator_focus"]["id"] == "private_rtmp_ingest"
 
 
 def test_broadcast_release_readiness_accepts_real_platform_evidence(tmp_path):
@@ -25,7 +27,15 @@ def test_broadcast_release_readiness_accepts_real_platform_evidence(tmp_path):
             {
                 "ok": True,
                 "real_platform_evidence": True,
-                "summary": {"passed": 4, "required": 4},
+                "summary": {"passed": 5, "required": 5},
+                "checks": [
+                    {"id": "record_file_local", "kind": "local_runtime", "ok": True, "required_for_sale": True},
+                    {"id": "live2d_record_file_local", "kind": "local_runtime", "ok": True, "required_for_sale": True},
+                    {"id": "capture_composite_local", "kind": "local_runtime", "ok": True, "required_for_sale": True},
+                    {"id": "private_rtmp_ingest", "kind": "real_platform", "ok": True, "required_for_sale": True},
+                    {"id": "youtube_unlisted_viewer_playback", "kind": "real_platform", "ok": True, "required_for_sale": True},
+                    {"id": "discord_window_share", "kind": "manual_platform", "ok": False, "required_for_sale": False},
+                ],
             }
         ),
         encoding="utf-8",

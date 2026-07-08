@@ -448,6 +448,8 @@ def _materials(
             if "MToon" in shader:
                 row["shader_model"] = "vrm_mtoon"
                 row["mtoon"] = True
+                row["unlit"] = True
+                _copy_vrm_mtoon_metadata(row, vrm_material)
             texture_properties = (
                 vrm_material.get("textureProperties")
                 if isinstance(vrm_material.get("textureProperties"), Mapping)
@@ -536,6 +538,53 @@ def _materials(
         ) or ("roughnessFactor" in pbr or "metallicFactor" in pbr) and "mtoon" not in str(row.get("shader_model") or row.get("source_shader") or "").casefold()
         out.append(row)
     return out
+
+
+def _copy_vrm_mtoon_metadata(row: dict[str, Any], vrm_material: Mapping[str, Any]) -> None:
+    """Expose VRM0 MToon state needed by preview/export render ordering.
+
+    VRM0 stores critical material state outside ordinary glTF PBR fields. If we
+    collapse it to a generic unlit material, alpha-cutout avatars can render as
+    missing body parts because the renderer loses renderQueue, ZWrite, culling,
+    and cutoff decisions.
+    """
+    float_props = (
+        vrm_material.get("floatProperties")
+        if isinstance(vrm_material.get("floatProperties"), Mapping)
+        else {}
+    )
+
+    def _float_prop(name: str, default: float | None = None) -> float | None:
+        try:
+            return float(float_props.get(name))
+        except Exception:
+            return default
+
+    try:
+        row["mtoon_render_queue"] = int(vrm_material.get("renderQueue"))
+        row["render_queue"] = int(vrm_material.get("renderQueue"))
+    except Exception:
+        pass
+    cutoff = _float_prop("_Cutoff")
+    if cutoff is not None:
+        row["alpha_cutoff"] = max(0.0, min(1.0, float(cutoff)))
+    cull = _float_prop("_CullMode")
+    if cull is not None:
+        row["mtoon_cull_mode"] = int(round(float(cull)))
+        # Unity/VRM: 0=Off, 1=Front, 2=Back.
+        row["double_sided"] = int(round(float(cull))) == 0
+    zwrite = _float_prop("_ZWrite")
+    if zwrite is not None:
+        row["mtoon_zwrite"] = int(round(float(zwrite)))
+        row["depth_write"] = bool(int(round(float(zwrite))))
+    src_blend = _float_prop("_SrcBlend")
+    dst_blend = _float_prop("_DstBlend")
+    if src_blend is not None:
+        row["mtoon_src_blend"] = int(round(float(src_blend)))
+    if dst_blend is not None:
+        row["mtoon_dst_blend"] = int(round(float(dst_blend)))
+    if int(row.get("mtoon_zwrite", 1) or 1) == 0:
+        row["alpha_mode"] = "BLEND"
 
 
 def _texture_uv_info(texture_ref: Any) -> tuple[int, dict[str, Any] | None]:

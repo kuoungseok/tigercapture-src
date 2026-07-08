@@ -40,7 +40,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     parser.add_argument("--time-ms", type=int, default=0)
-    parser.add_argument("--renderer", choices=("software-zbuffer", "full-gpu"), default="software-zbuffer")
+    parser.add_argument("--renderer", choices=("vrm-mtoon-gpu", "full-gpu"), default="vrm-mtoon-gpu")
     args = parser.parse_args(argv)
 
     width = max(1, int(args.width))

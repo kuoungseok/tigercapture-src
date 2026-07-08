@@ -320,6 +320,7 @@ def _insert_track_widget(self, track: VideoTrack) -> None:
         [self._player.position()] + [int(m["ms"]) for m in self._timeline_markers]
     )
     row.set_edit_tool_mode(getattr(self, "_timeline_tool_mode", "select"))
+    row.set_focused_clip_role(str(getattr(self, "_nle_role_lane_focus", "") or ""))
     self._track_rows[track.id] = row
     # Insert video track BEFORE any audio track rows so video always
     # sits above audio in the timeline (DaVinci / Premiere convention).
@@ -370,6 +371,13 @@ def _refresh_video_row_lane_indices(self) -> None:
         else:
             video_index += 1
             row.set_lane_index(video_index)
+    refresh_roles = getattr(self, "_refresh_nle_role_filter_bar", None)
+    if callable(refresh_roles):
+        refresh_roles()
+    anchor_overlay = getattr(self, "_connected_anchor_overlay", None)
+    refresh_anchor_overlay = getattr(anchor_overlay, "refresh", None)
+    if callable(refresh_anchor_overlay):
+        refresh_anchor_overlay()
 
 
 def _add_audio_track_with_source(self, path: Path, *, open_editor: bool = False) -> None:
@@ -792,4 +800,3 @@ def _extract_audio_from_video(self, track: VideoTrack) -> None:
     self._audio_mixer.add_track(new_track)
     self._start_waveform_extraction(clip)
     self._refresh_player_tracks()
-

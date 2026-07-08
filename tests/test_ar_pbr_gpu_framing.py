@@ -109,6 +109,7 @@ def test_gpu_shadow_shaders_use_configurable_pcf_pcss_filter():
     assert "apply_bevel_normal" in FRAG_SHADER
     assert "uniform float u_material_layer_blend" in FRAG_SHADER
     assert "uniform vec3 u_material_layer_color" in FRAG_SHADER
+    assert "uniform int u_base_alpha_to_opacity" in FRAG_SHADER
     assert "apply_material_layer" in FRAG_SHADER
     assert "uniform float u_surface_override_strength" in FRAG_SHADER
     assert "uniform float u_surface_roughness" in FRAG_SHADER
@@ -268,6 +269,49 @@ def test_gpu_shadow_shaders_use_configurable_pcf_pcss_filter():
     assert surface["roughness"] == 0.29
     assert surface["metallic"] == 0.21
     assert surface["reflectance"] == 0.47
+
+
+def test_gltf_blend_pbr_materials_keep_depth_write_by_default():
+    material = {
+        "name": "Outside",
+        "alpha_mode": "BLEND",
+        "base_texture_source": "gltf_pbr_base_color_texture",
+        "pbr_available": True,
+    }
+
+    assert gpu_window._material_depth_write(material) is True
+    assert gpu_window._material_alpha_bucket(material) == 0
+
+
+def test_explicit_transparent_depth_policy_is_preserved():
+    explicit_depth_off = {"alpha_mode": "BLEND", "depth_write": False}
+    explicit_mtoon_off = {"alpha_mode": "BLEND", "mtoon_zwrite": 0}
+
+    assert gpu_window._material_depth_write(explicit_depth_off) is False
+    assert gpu_window._material_alpha_bucket(explicit_depth_off) == 1
+    assert gpu_window._material_depth_write(explicit_mtoon_off) is False
+
+
+def test_base_texture_alpha_only_drives_opacity_for_explicit_alpha_surfaces():
+    body_maps = {
+        "alpha_mode": "BLEND",
+        "base": "Outside_BaseColor.png",
+        "depth_write": "true",
+    }
+    decal_maps = {
+        "alpha_mode": "BLEND",
+        "base": "Decals_BaseColor.png",
+        "depth_write": "true",
+    }
+    opacity_maps = {
+        "alpha_mode": "BLEND",
+        "base": "Glass_BaseColor.png",
+        "opacity": "Glass_Opacity.png",
+    }
+
+    assert gpu_window._base_alpha_to_opacity("Outside", body_maps) is False
+    assert gpu_window._base_alpha_to_opacity("Decals", decal_maps) is True
+    assert gpu_window._base_alpha_to_opacity("Glass", opacity_maps) is True
 
 
 def test_gpu_vertex_buffer_respects_geometry_material_id_over_node_connections():

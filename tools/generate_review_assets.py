@@ -12,6 +12,12 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
+
 from app.review_automation.dev_gate import require_review_automation_dev
 from app.review_automation.paths import DEFAULT_REVIEW_ROOT, DEFAULT_REVIEW_VIDEO_SOURCE_DIR, review_paths
 

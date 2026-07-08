@@ -33,6 +33,22 @@ def main() -> int:
         help="Call the currently selected configured AI provider. Default only scores deterministic baseline plans.",
     )
     parser.add_argument(
+        "--provider",
+        default="",
+        help="Temporarily select a provider for this QA run, for example qwen_local, claude_mcp, local_llm, or rule_based.",
+    )
+    parser.add_argument(
+        "--auto-start-qwen",
+        action="store_true",
+        help="Start the configured Qwen local server if its OpenAI-compatible endpoint is not responding.",
+    )
+    parser.add_argument(
+        "--qwen-start-timeout",
+        type=int,
+        default=25,
+        help="Seconds to wait for --auto-start-qwen before continuing with the provider QA.",
+    )
+    parser.add_argument(
         "--provider-timeout",
         type=int,
         default=0,
@@ -46,15 +62,27 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    env = dict(os.environ)
+    if args.provider:
+        env["TIGERCAPTURE_AI_PROVIDER"] = str(args.provider).strip()
+    qwen_auto_start: dict | None = None
+    if args.auto_start_qwen:
+        env["TIGERCAPTURE_AI_PROVIDER"] = "qwen_local"
+        from app.ai_qwen_server import ensure_qwen_server
+
+        qwen_auto_start = ensure_qwen_server(env=env, wait_seconds=max(1, int(args.qwen_start_timeout or 1))).to_dict()
+
     from app.ai_edit_corpus_quality import build_ai_edit_corpus_quality_report
 
     report = build_ai_edit_corpus_quality_report(
         manifest_path=args.manifest or None,
         use_provider=bool(args.use_provider),
-        env=os.environ,
+        env=env,
         provider_timeout_seconds=int(args.provider_timeout or 0) or None,
         provider_retries=max(0, int(args.provider_retries or 0)),
     )
+    if qwen_auto_start is not None:
+        report.setdefault("provider", {})["qwen_auto_start"] = qwen_auto_start
     out_path = Path(args.out)
     if not out_path.is_absolute():
         out_path = ROOT / out_path

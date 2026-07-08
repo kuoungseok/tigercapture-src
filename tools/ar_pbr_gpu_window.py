@@ -55,8 +55,10 @@ from app.ar_pbr.hdr import HdrImage, image_stats, load_radiance_hdr
 from app.ar_pbr.render_profile import (
     PROFILE_AUTHORED,
     PROFILE_MARMOSET_PBR,
+    PROFILE_VRM_MTOON,
     inspect_asset_render_profiles_from_descriptor,
     marmoset_pbr_available,
+    vrm_mtoon_available,
 )
 from app.ar_pbr.catcher import (
     DEFAULT_CONTACT_REFLECTION_FALLOFF,
@@ -345,6 +347,9 @@ except Exception:
     DEFAULT_HDRI = ROOT / "resources" / "ar_pbr" / "hdri" / "wide_street_01_1k.hdr"
 DEFAULT_FRAME_FIT_PADDING = 0.06
 FRAME_FIT_FOV_DEG = 45.0
+VRM_MTOON_UNLIT_EXPOSURE_SCALE = 1.0
+VRM_MTOON_UNLIT_CONTRAST = 1.0
+VRM_MTOON_UNLIT_GAMMA = 1.35
 
 
 VERT_SHADER = """
@@ -421,8 +426,12 @@ uniform int u_has_occlusion_map;
 uniform int u_has_emissive_map;
 uniform int u_has_opacity_map;
 uniform int u_has_height_map;
+uniform int u_base_alpha_to_opacity;
 uniform int u_has_shadow_map;
 uniform float u_ibl_exposure;
+uniform float u_unlit_exposure_scale;
+uniform float u_unlit_contrast;
+uniform float u_unlit_output_gamma;
 uniform float u_ibl_rotation;
 uniform float u_max_lod;
 uniform float u_prefilter_level_count;
@@ -590,12 +599,16 @@ vec3 tonemap_agx(vec3 x) {
     return clamp(x * x * (vec3(3.0) - 2.0 * x), 0.0, 1.0);
 }
 
-vec3 apply_output_transform(vec3 rgb) {
+vec3 apply_output_transform_gamma(vec3 rgb, float gamma) {
     vec3 x = max(rgb, vec3(0.0)) * exp2(u_tone_exposure) * max(u_tone_white_balance, vec3(0.0001));
     vec3 mapped = u_tone_mapping_mode == 1
         ? tonemap_agx(x)
         : (u_tone_mapping_mode == 2 ? tonemap_reinhard(x) : tonemap_aces(x));
-    return pow(clamp(mapped, 0.0, 1.0), vec3(1.0 / max(u_tone_gamma, 0.1)));
+    return pow(clamp(mapped, 0.0, 1.0), vec3(1.0 / max(gamma, 0.1)));
+}
+
+vec3 apply_output_transform(vec3 rgb) {
+    return apply_output_transform_gamma(rgb, u_tone_gamma);
 }
 
 float hybrid_sample_gain() {
@@ -952,7 +965,7 @@ void main() {
         n = -n;
     }
     bool unlit = v_material.z < -0.5;
-    vec2 material_uv = unlit ? vec2(v_uv.x, 1.0 - v_uv.y) : v_uv;
+    vec2 material_uv = v_uv;
     material_uv = apply_parallax_uv(material_uv, v, v_tangent, v_bitangent, n, v_world_pos);
     if (u_has_normal_map == 1) {
         vec3 tn = sample_material_rgba(u_normal_map, material_uv, v_world_pos, n).rgb * 2.0 - 1.0;
@@ -973,7 +986,9 @@ void main() {
     if (u_has_base_map == 1) {
         vec4 base_sample = sample_material_rgba(u_base_map, material_uv, v_world_pos, n);
         albedo = srgb_to_linear(base_sample.rgb);
-        out_alpha *= clamp(base_sample.a, 0.0, 1.0);
+        if (u_base_alpha_to_opacity == 1) {
+            out_alpha *= clamp(base_sample.a, 0.0, 1.0);
+        }
     }
     if (u_has_opacity_map == 1) {
         out_alpha *= clamp(sample_material_rgba(u_opacity_map, material_uv, v_world_pos, n).r, 0.0, 1.0);
@@ -982,7 +997,8 @@ void main() {
         discard;
     }
     if (unlit) {
-        vec3 rgb = apply_output_transform(albedo * max(u_ibl_exposure, 0.65));
+        vec3 rgb = apply_output_transform_gamma(albedo * max(u_unlit_exposure_scale, 0.0), u_unlit_output_gamma);
+        rgb = clamp((rgb - vec3(0.5)) * max(u_unlit_contrast, 0.0) + vec3(0.5), 0.0, 1.0);
         frag_color = vec4(rgb, out_alpha);
         return;
     }
@@ -2324,6 +2340,85 @@ def _material_for_geometry(descriptor: Mapping[str, Any], geometry: Mapping[str,
     return material if isinstance(material, Mapping) else {}
 
 
+def _material_render_queue(material: Mapping[str, Any]) -> int:
+    for key in ("mtoon_render_queue", "render_queue"):
+        try:
+            return int(float(material.get(key)))
+        except Exception:
+            continue
+    alpha_mode = str(material.get("alpha_mode") or "").strip().upper()
+    return 3000 if alpha_mode == "BLEND" else 2450 if alpha_mode == "MASK" else 2000
+
+
+def _material_depth_write(material: Mapping[str, Any]) -> bool:
+    if material.get("depth_write") is not None:
+        return _metadata_bool(material.get("depth_write"), default=True)
+    try:
+        return int(float(material.get("mtoon_zwrite"))) != 0
+    except Exception:
+        pass
+    return True
+
+
+def _material_alpha_bucket(material: Mapping[str, Any]) -> int:
+    return 1 if not _material_depth_write(material) else 0
+
+
+def _metadata_bool(raw: Any, *, default: bool = False) -> bool:
+    if isinstance(raw, bool):
+        return raw
+    if raw is None:
+        return default
+    text = str(raw).strip().casefold()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    try:
+        return bool(int(float(text)))
+    except Exception:
+        return default
+
+
+def _base_alpha_to_opacity(material_name: str, maps: Mapping[str, Any] | None) -> bool:
+    """Return whether a base-color alpha channel should drive transparency.
+
+    Some third-party glTF exports mark regular PBR body materials as BLEND and
+    leave packed or noisy alpha in the base-color PNG. Treating that alpha as
+    opacity makes the whole mesh see-through. Keep alpha for explicit opacity
+    surfaces, alpha-mask materials, MToon ZWrite-off materials, and decal-like
+    layers; otherwise render depth-writing PBR base maps as opaque color maps.
+    """
+
+    data = maps or {}
+    if data.get("base_alpha_to_opacity") is not None:
+        return _metadata_bool(data.get("base_alpha_to_opacity"), default=False)
+    if data.get("opacity"):
+        return True
+    alpha_mode = str(data.get("alpha_mode") or "").strip().upper()
+    if alpha_mode == "MASK":
+        return True
+    if data.get("depth_write") is not None and not _metadata_bool(data.get("depth_write"), default=True):
+        return True
+    try:
+        if int(float(data.get("mtoon_zwrite"))) == 0:
+            return True
+    except Exception:
+        pass
+    lowered = str(material_name or "").casefold()
+    if any(token in lowered for token in ("decal", "sticker", "label")):
+        return True
+    return False
+
+
+def _geometry_render_sort_key(descriptor: Mapping[str, Any], geometry: Mapping[str, Any]) -> tuple[int, int]:
+    material = _material_for_geometry(descriptor, geometry)
+    return (
+        _material_alpha_bucket(material),
+        _material_render_queue(material),
+    )
+
+
 def _color_for_geometry(descriptor: Mapping[str, Any], geometry: Mapping[str, Any]) -> tuple[float, float, float, float]:
     material = _material_for_geometry(descriptor, geometry)
     raw = material.get("base_color") if isinstance(material, Mapping) else None
@@ -2354,17 +2449,29 @@ def _material_has_pbr_data(material: Mapping[str, Any]) -> bool:
 def _requested_render_profile(track: Mapping[str, Any] | None) -> str:
     render = track.get("render") if isinstance(track, Mapping) and isinstance(track.get("render"), Mapping) else {}
     value = str(render.get("render_profile") or render.get("ar_pbr_render_profile") or "").strip().casefold()
-    return value if value in {PROFILE_AUTHORED, PROFILE_MARMOSET_PBR} else PROFILE_AUTHORED
+    return value if value in {PROFILE_AUTHORED, PROFILE_MARMOSET_PBR, PROFILE_VRM_MTOON} else PROFILE_AUTHORED
 
 
 def _active_render_profile(descriptor: Mapping[str, Any], track: Mapping[str, Any] | None) -> tuple[str, dict[str, Any], str]:
     profiles = inspect_asset_render_profiles_from_descriptor(descriptor)
     requested = _requested_render_profile(track)
+    if requested == PROFILE_VRM_MTOON:
+        if vrm_mtoon_available(profiles):
+            return PROFILE_VRM_MTOON, profiles, ""
+        return PROFILE_AUTHORED, profiles, "vrm_mtoon_requested_without_mtoon_materials"
     if requested == PROFILE_MARMOSET_PBR:
         if marmoset_pbr_available(profiles):
             return PROFILE_MARMOSET_PBR, profiles, ""
         return PROFILE_AUTHORED, profiles, "marmoset_pbr_requested_without_pbr_data"
+    if requested == PROFILE_AUTHORED and vrm_mtoon_available(profiles):
+        return PROFILE_VRM_MTOON, profiles, ""
     return PROFILE_AUTHORED, profiles, ""
+
+
+def _mtoon_color_policy_for_profile(render_profile: str, ibl_exposure: float) -> tuple[float, float, float]:
+    if str(render_profile or "").strip().casefold() == PROFILE_VRM_MTOON:
+        return VRM_MTOON_UNLIT_EXPOSURE_SCALE, VRM_MTOON_UNLIT_CONTRAST, VRM_MTOON_UNLIT_GAMMA
+    return max(float(ibl_exposure), 0.65), 1.0, DEFAULT_TONE_GAMMA
 
 
 def _pbr_for_geometry(
@@ -2563,9 +2670,8 @@ def build_vertex_buffer(
     animation_clip_count = len(descriptor.get("animation_clips") or []) if isinstance(descriptor, Mapping) else 0
     flip_uv_v_for_texture_upload = _preview_uv_v_flip_enabled(descriptor)
     vertex_start = 0
-    for geometry in descriptor.get("geometries", []) or []:
-        if not isinstance(geometry, Mapping):
-            continue
+    geometries = [item for item in descriptor.get("geometries", []) or [] if isinstance(item, Mapping)]
+    for geometry in sorted(geometries, key=lambda item: _geometry_render_sort_key(descriptor, item)):
         verts = geometry.get("vertices")
         tris = geometry.get("triangles")
         if not isinstance(verts, list) or not isinstance(tris, list):
@@ -2618,6 +2724,8 @@ def build_vertex_buffer(
         pbr = _pbr_for_geometry(descriptor, geometry, render_profile=render_profile)
         material = _material_for_geometry(descriptor, geometry)
         material_name = str(material.get("name") or "")
+        material_alpha_mode = str(material.get("alpha_mode") or "").strip().upper()
+        material_depth_write = _material_depth_write(material)
         material_uv_set = _material_uv_set(material)
         geometry_count += 1
         points = ((vertices_np[triangles_np] - center) / max_size).astype(np.float32)
@@ -2652,6 +2760,10 @@ def build_vertex_buffer(
             "has_uvs": bool(np.any(uvs != 0.0)),
             "uv_set": int(material_uv_set),
             "uv_v_flipped_for_texture_upload": bool(flip_uv_v_for_texture_upload),
+            "alpha_mode": material_alpha_mode,
+            "depth_write": bool(material_depth_write),
+            "render_queue": int(_material_render_queue(material)),
+            "shader_model": str(material.get("shader_model") or material.get("source_shader") or ""),
         })
         vertex_start += chunk_vertex_count
         triangle_count += int(len(triangles_np))
@@ -2681,6 +2793,15 @@ def build_vertex_buffer(
         "skeletal_animation_applied": bool(animated_geometry_count > 0 and skeletal_geometry_count > 0),
         "render_profile": render_profile,
         "render_profiles": render_profiles,
+        "mtoon_color_policy": (
+            {
+                "unlit_exposure_scale": VRM_MTOON_UNLIT_EXPOSURE_SCALE,
+                "unlit_contrast": VRM_MTOON_UNLIT_CONTRAST,
+                "unlit_gamma": VRM_MTOON_UNLIT_GAMMA,
+            }
+            if render_profile == PROFILE_VRM_MTOON
+            else {}
+        ),
         "warnings": [render_profile_warning] if render_profile_warning else [],
         "normalized_bounds": {"min": min_xyz, "max": max_xyz},
         "uv_v_flipped_for_texture_upload": bool(flip_uv_v_for_texture_upload),
@@ -3042,6 +3163,17 @@ class GpuMeshWidget(QOpenGLWidget):
             "gl_prefilter_texture": bool(self.ibl_prefilter_texture),
             "gl_brdf_lut_texture": bool(self.ibl_brdf_lut_texture),
             "gl_prefilter_level_count": int(self.ibl_prefilter_level_count or 0),
+        }
+
+    def unlit_color_controls(self) -> dict[str, float]:
+        scale, contrast, gamma = _mtoon_color_policy_for_profile(
+            str(self.mesh_diag.get("render_profile") or PROFILE_AUTHORED),
+            float(self.state.ibl_exposure),
+        )
+        return {
+            "unlit_exposure_scale": float(scale),
+            "unlit_contrast": float(contrast),
+            "unlit_output_gamma": float(gamma),
         }
 
     def fit_current_view(self) -> dict[str, Any]:
@@ -3666,6 +3798,19 @@ class GpuMeshWidget(QOpenGLWidget):
         )
         GL.glUniform3f(GL.glGetUniformLocation(self.program, "u_camera_pos"), 0.0, 0.0, float(self.state.camera_z))
         GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_ibl_exposure"), float(self.state.ibl_exposure))
+        unlit_controls = self.unlit_color_controls()
+        GL.glUniform1f(
+            GL.glGetUniformLocation(self.program, "u_unlit_exposure_scale"),
+            float(unlit_controls["unlit_exposure_scale"]),
+        )
+        GL.glUniform1f(
+            GL.glGetUniformLocation(self.program, "u_unlit_contrast"),
+            float(unlit_controls["unlit_contrast"]),
+        )
+        GL.glUniform1f(
+            GL.glGetUniformLocation(self.program, "u_unlit_output_gamma"),
+            float(unlit_controls["unlit_output_gamma"]),
+        )
         GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_ibl_rotation"), float(self.state.ibl_rotation))
         GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_max_lod"), float(self.hdri_max_lod))
         GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_direct_intensity"), float(self.state.direct_intensity))
@@ -3826,12 +3971,18 @@ class GpuMeshWidget(QOpenGLWidget):
         GL.glBindVertexArray(self.vao)
         for draw_range in self.draw_ranges:
             material_name = str(draw_range.get("material_name") or "")
+            depth_write = bool(draw_range.get("depth_write", True))
+            if not depth_write:
+                GL.glDepthMask(False)
+            else:
+                GL.glDepthMask(True)
             self._bind_material_textures(material_name)
             GL.glDrawArrays(
                 GL.GL_TRIANGLES,
                 int(draw_range.get("start", 0) or 0),
                 int(draw_range.get("count", len(self.vertices)) or 0),
             )
+        GL.glDepthMask(True)
         GL.glBindVertexArray(0)
         if self.hdri_texture:
             GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
@@ -3885,6 +4036,10 @@ class GpuMeshWidget(QOpenGLWidget):
             float(emissive[0]),
             float(emissive[1]),
             float(emissive[2]),
+        )
+        GL.glUniform1i(
+            GL.glGetUniformLocation(self.program, "u_base_alpha_to_opacity"),
+            1 if _base_alpha_to_opacity(material_name, maps) else 0,
         )
         for map_name, unit in texture_units.items():
             sampler_name, flag_name = uniform_names[map_name]
@@ -4267,6 +4422,7 @@ class GpuWindow(QMainWindow):
             "lens_flare_rendering": lens_flare_diagnostics(self.state),
             "triplanar_rendering": triplanar_diagnostics(self.state),
             "frame_fit": getattr(self.gl_widget, "last_fit_diag", {}),
+            "unlit_color": self.gl_widget.unlit_color_controls() if hasattr(self, "gl_widget") else {},
             "import": self.import_diag,
             "mesh": self.mesh_diag,
             "hdri": self.hdri_diag,

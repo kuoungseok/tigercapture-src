@@ -2686,6 +2686,34 @@ def test_gpu_packet_export_pbr_adds_depth_edge_glow(tmp_path):
     assert int(out_glow[:, :, :3].sum()) > int(out_base[:, :, :3].sum())
 
 
+def test_depth_effect_masks_are_reusable_for_non_glow_effects():
+    from app.ar_pbr.depth_occlusion import build_depth_effect_masks
+
+    alpha = np.ones((16, 16), dtype=np.float32)
+    depth = np.ones((16, 16), dtype=np.float32)
+    depth[:, :8] = 0.0
+
+    masks, diag = build_depth_effect_masks(
+        alpha,
+        depth,
+        object_depth=0.5,
+        settings={
+            "occlusion_tolerance": 0.02,
+            "occlusion_softness": 0.01,
+            "depth_edge_glow_radius_px": 4.0,
+        },
+    )
+
+    assert diag["schema"] == "tigerstudio.ar_pbr.depth_effect_masks.v1"
+    assert diag["visible_pixels"] > 0
+    assert diag["hidden_pixels"] > 0
+    assert diag["edge_pixels"] > 0
+    assert masks["visible_mask"].shape == (16, 16)
+    assert masks["hidden_mask"].shape == (16, 16)
+    assert masks["edge_mask"].shape == (16, 16)
+    assert float(masks["edge_mask"].max()) <= 1.0
+
+
 def test_gpu_packet_export_uses_item_live_depth_texture_when_global_depth_missing(tmp_path):
     from PIL import Image
     from app.ar_pbr.gpu_preview import build_gpu_preview_items

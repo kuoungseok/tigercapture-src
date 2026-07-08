@@ -543,6 +543,24 @@ class VideoClip:
     # clips for preview/export.
     compound_group_id: Optional[int] = None
     compound_group_name: str = ""
+    # Final Cut-style connected clip metadata. The child clip keeps a stable
+    # offset from its parent clip, while remaining a normal timeline clip for
+    # preview/export compatibility.
+    connected_parent_track_id: Optional[int] = None
+    connected_parent_clip_id: Optional[int] = None
+    connected_offset_ms: int = 0
+    clip_role: str = ""
+    role_color: str = ""
+    audition_group_id: Optional[int] = None
+    audition_name: str = ""
+    audition_active_take_id: str = ""
+    audition_takes: list[dict] = field(default_factory=list)
+    # Optional NLE sync metadata used by multicam/timecode/waveform review
+    # contracts. These are metadata only; waveform extraction itself stays in
+    # media/proxy jobs so baseline preview does not pay that cost.
+    timecode_ms: Optional[int] = None
+    waveform_sync_peak_ms: Optional[int] = None
+    audio_sync_offset_ms: Optional[int] = None
     # True nested sequence parent support. A parent clip has no direct
     # source_path; it owns child clips whose timeline_in_ms values are
     # relative to the parent clip start.

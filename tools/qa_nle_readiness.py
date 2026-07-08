@@ -14,6 +14,22 @@ if str(ROOT) not in sys.path:
 from app.nle_readiness import build_nle_readiness_report, format_nle_readiness_summary
 
 
+def _real_corpus_claim_ready(report: dict[str, Any] | None) -> bool:
+    report = report if isinstance(report, dict) else {}
+    summary = report.get("summary") if isinstance(report.get("summary"), dict) else {}
+    thresholds = report.get("thresholds") if isinstance(report.get("thresholds"), dict) else {}
+    require_validation = bool(thresholds.get("require_validation_evidence", True))
+    min_projects = int(thresholds.get("min_projects") or 3)
+    validation_ready = (
+        not require_validation
+        or (
+            int(summary.get("validation_ready_count") or 0) >= max(1, min_projects)
+            and int(summary.get("validation_failed_required_check_count") or 0) == 0
+        )
+    )
+    return bool((report.get("claim_ready") or report.get("real_world_corpus")) and validation_ready)
+
+
 def run_nle_readiness_qa(
     *,
     snapshot: dict[str, Any] | None = None,
@@ -83,7 +99,7 @@ def run_nle_readiness_qa(
         snapshot = dict(snapshot)
         previous_evidence = snapshot.get("nle_evidence") if isinstance(snapshot.get("nle_evidence"), dict) else {}
         evidence_level = str(previous_evidence.get("evidence_level") or "project_snapshot")
-        if isinstance(real_project_corpus_report, dict) and bool(real_project_corpus_report.get("claim_ready")):
+        if isinstance(real_project_corpus_report, dict) and _real_corpus_claim_ready(real_project_corpus_report):
             evidence_level = "real_project_corpus"
         snapshot["nle_evidence"] = build_nle_evidence_report(
             snapshot,

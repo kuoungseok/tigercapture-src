@@ -66,6 +66,8 @@
   "launch_command_template": [
     "E:\\ClaudeCodeApp\\GifCam\\.venv\\Scripts\\python.exe",
     "E:\\ClaudeCodeApp\\GifCam\\tools\\ar_pbr_preview_window.py",
+    "--settings-json",
+    "E:\\ClaudeCodeApp\\GifCam\\docs\\review_automation\\presets\\ar_pbr_aks_tactical_upgrade.json",
     "--asset",
     "E:\\ClaudeCodeApp\\3d\\AKS_Tactical_Upgrade-587e3f02\\gltf\\converted\\akriflefbx_gltf_extracted\\scene.gltf",
     "--width",

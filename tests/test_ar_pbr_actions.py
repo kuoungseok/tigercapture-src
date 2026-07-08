@@ -182,6 +182,8 @@ def test_ar_pbr_gizmo_actions_are_registered_for_automation() -> None:
         "ar_pbr.preview.view.set",
         "ar_pbr.preview.settings.get",
         "ar_pbr.preview.settings.set",
+        "ar_pbr.preview.depth_view.get",
+        "ar_pbr.preview.depth_view.set",
         "ar_pbr.preview.surface.get",
         "ar_pbr.preview.surface.set",
         "ar_pbr.gizmo.state",
@@ -190,7 +192,9 @@ def test_ar_pbr_gizmo_actions_are_registered_for_automation() -> None:
     } <= action_ids
     settings_schema = action_specs["ar_pbr.preview.settings.set"]["params_schema"]["properties"]
     view_schema = action_specs["ar_pbr.preview.view.set"]["params_schema"]["properties"]
+    depth_schema = action_specs["ar_pbr.preview.depth_view.set"]["params_schema"]["properties"]
     assert {"pan_x", "pan_y", "pan_z"} <= set(view_schema)
+    assert {"mode", "refresh"} <= set(depth_schema)
     assert {
         "ambient_occlusion_mode",
         "ao_strength",
@@ -242,6 +246,35 @@ def test_ar_pbr_preview_diagnostics_action_reports_packet_and_vbo_state() -> Non
     assert payload["packet_cache_id"] == "packet_001"
     assert payload["gl"]["vbo"]["ar_pbr_vbo_cache_hits"] == 4
     assert payload["gl"]["items"][0]["diagnostics"]["ar_pbr_vbo_cache_hit_rate"] == 0.8
+
+
+def test_ar_pbr_preview_depth_view_actions_toggle_main_viewer_mode() -> None:
+    from app.actions import build_default_action_registry
+
+    owner = _Owner()
+    registry = build_default_action_registry(owner)
+
+    initial = registry.execute("ar_pbr.preview.depth_view.get").to_dict()
+    assert initial["ok"] is True
+    assert initial["result"]["mode"] == "off"
+    assert initial["result"]["enabled"] is False
+
+    changed = registry.execute(
+        "ar_pbr.preview.depth_view.set",
+        {"mode": "heat", "refresh": False},
+    ).to_dict()
+    assert changed["ok"] is True
+    assert changed["result"]["before"] == "off"
+    assert changed["result"]["mode"] == "heat"
+    assert changed["result"]["enabled"] is True
+    assert owner._player._ar_pbr_depth_view_mode_value == "heat"
+
+    disabled = registry.execute(
+        "ar_pbr.preview.depth_view.set",
+        {"mode": "off", "refresh": False},
+    ).to_dict()
+    assert disabled["ok"] is True
+    assert disabled["result"]["mode"] == "off"
 
 
 def test_ar_pbr_gizmo_actions_show_and_hide_viewport_gizmo() -> None:

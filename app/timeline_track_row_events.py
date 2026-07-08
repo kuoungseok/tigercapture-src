@@ -101,6 +101,8 @@ def mousePressEvent(self, event: QMouseEvent) -> None:
         else:
             self._typo_drag_mode = "move"
             self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        self._drag_start_x = x
+        self._drag_start_y = pos.y()
         # Notify editor that this actor is selected (for Delete key)
         self.typography_actor_selected.emit(self.track.id, typo_actor.id)
         self.update()
@@ -250,6 +252,7 @@ def mousePressEvent(self, event: QMouseEvent) -> None:
                 return
             self._dragging_offset = True
             self._drag_start_x = x
+            self._drag_start_y = pos.y()
             self._drag_clip_id = int(hit_clip.id)
             self._drag_start_clip_in_ms = int(hit_clip.timeline_in_ms)
             self._drag_start_offset_ms = self.track.offset_ms
@@ -276,6 +279,10 @@ def mouseMoveEvent(self, event: QMouseEvent) -> None:
         return
     pos = event.position().toPoint()
     x = pos.x()
+    outside_row = not self.rect().adjusted(0, -12, 0, 12).contains(pos)
+    vertical_delta = abs(pos.y() - int(getattr(self, "_drag_start_y", pos.y()) or 0))
+    horizontal_delta = abs(x - int(getattr(self, "_drag_start_x", x) or 0))
+    wants_external_ppt_drag = outside_row and vertical_delta >= 28 and vertical_delta > max(12, horizontal_delta * 0.45)
 
     # Typography drag ??active
     if self._typo_drag_mode is not None and self._typo_drag_actor_id is not None:
@@ -287,6 +294,15 @@ def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if actor is None:
             self._typo_drag_mode = None
         else:
+            if self._typo_drag_mode == "move" and wants_external_ppt_drag:
+                actor.start_ms = int(self._typo_drag_orig_start_ms)
+                actor.end_ms = int(self._typo_drag_orig_end_ms)
+                self._typo_drag_mode = None
+                self._typo_drag_actor_id = None
+                self.setCursor(Qt.CursorShape.OpenHandCursor)
+                self.update()
+                self._start_ppt_typography_drag(actor)
+                return
             delta_ms = self._x_to_ms(x) - self._typo_drag_anchor_ms
             if self._typo_drag_mode == "move":
                 new_start = max(0, self._typo_drag_orig_start_ms + delta_ms)
@@ -734,6 +750,19 @@ def mouseMoveEvent(self, event: QMouseEvent) -> None:
             self.update()
 
     if self._dragging_offset:
+        if self._drag_clip_id is not None and wants_external_ppt_drag:
+            clip = self._find_clip_by_id(self._drag_clip_id)
+            self._restore_clip_drag_origin()
+            self._dragging_offset = False
+            self._drag_clip_id = None
+            self._drag_group_clip_starts = {}
+            self._drag_last_cross_track_delta_ms = 0
+            self._drag_snap_x = None
+            self._clear_drag_feedback()
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+            if clip is not None:
+                self._start_ppt_timeline_clip_drag(clip)
+            return
         delta_px = x - self._drag_start_x
         delta_ms = int(delta_px / self._px_per_sec * 1000)
         new_clip_in = max(0, self._drag_start_clip_in_ms + delta_ms)
@@ -1269,4 +1298,3 @@ def dropEvent(self, event) -> None:
             event.acceptProposedAction()
             return
     event.ignore()
-

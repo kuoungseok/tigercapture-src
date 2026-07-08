@@ -2,12 +2,22 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from statistics import median
 from typing import Any, Iterable, Mapping, Sequence
 
 from app.vtuber.video_face_driver import FaceMotionFrame
 
 
 SOURCE_FRAMING_SCHEMA = "tigerstudio.vtuber.source_framing.v1"
+SOURCE_TO_VRM_VISIBILITY_POLICY_SCHEMA = "tigerstudio.vtuber.source_to_vrm_visibility_policy.v1"
+SOURCE_EXPOSURE_SCHEMA = "tigerstudio.vtuber.source_exposure_classification.v1"
+SOURCE_EXPOSURE_TYPES = frozenset({"face_only", "upper_body", "full_body", "unknown"})
+PRESET_ORDER = {"bust_up": 0, "half_body": 1, "full_body": 2}
+PRESET_VISIBILITY = {
+    "bust_up": "head_to_mid_chest",
+    "half_body": "head_to_waist",
+    "full_body": "head_to_toe",
+}
 
 
 @dataclass(frozen=True)
@@ -96,8 +106,205 @@ PRESETS: dict[str, SourceFramingPreset] = {
 }
 
 
+def normalize_source_exposure_type(value: Any = "", payload: Mapping[str, Any] | None = None) -> str:
+    """Normalize detector/AI labels into the public source exposure contract."""
+    text = str(value or "").strip().casefold().replace("-", "_").replace(" ", "_")
+    if not text and isinstance(payload, Mapping):
+        for key in (
+            "source_exposure",
+            "source_exposure_type",
+            "subject_type",
+            "shot_profile",
+            "profile",
+            "framing",
+            "framing_preset",
+        ):
+            if payload.get(key):
+                text = str(payload.get(key) or "").strip().casefold().replace("-", "_").replace(" ", "_")
+                break
+    aliases = {
+        "face": "face_only",
+        "face_only": "face_only",
+        "face_closeup": "face_only",
+        "closeup": "face_only",
+        "close_up": "face_only",
+        "talking_head": "face_only",
+        "head": "face_only",
+        "head_only": "face_only",
+        "bust": "upper_body",
+        "bust_up": "upper_body",
+        "upper": "upper_body",
+        "upper_body": "upper_body",
+        "half": "upper_body",
+        "half_body": "upper_body",
+        "seated": "upper_body",
+        "torso": "upper_body",
+        "waist": "upper_body",
+        "waist_up": "upper_body",
+        "full": "full_body",
+        "fullbody": "full_body",
+        "full_body": "full_body",
+        "standing": "full_body",
+        "whole_body": "full_body",
+        "body": "full_body",
+        "unknown": "unknown",
+        "full_body_or_wide": "unknown",
+        "wide": "unknown",
+        "wide_shot": "unknown",
+        "none": "unknown",
+    }
+    return aliases.get(text, text if text in SOURCE_EXPOSURE_TYPES else "unknown")
+
+
+def vrm_visibility_policy_for_source_exposure(
+    source_exposure: Any = "",
+    *,
+    requested_preset: str = "auto",
+    allow_narrower: bool = False,
+    confidence: float = 0.0,
+    method: str = "",
+) -> dict[str, Any]:
+    """Return the minimum VRM framing needed to match the source person exposure."""
+    exposure = normalize_source_exposure_type(source_exposure)
+    minimum = {
+        "face_only": "bust_up",
+        "upper_body": "half_body",
+        "full_body": "full_body",
+        "unknown": "bust_up",
+    }.get(exposure, "bust_up")
+    requested = normalize_vrm_framing_preset(requested_preset)
+    selected = requested if requested else minimum
+    upgraded = False
+    if not selected or PRESET_ORDER.get(selected, 0) < PRESET_ORDER.get(minimum, 0):
+        selected = minimum
+        upgraded = True
+    if allow_narrower and requested:
+        selected = requested
+        upgraded = False
+    return {
+        "schema": SOURCE_TO_VRM_VISIBILITY_POLICY_SCHEMA,
+        "ai_rule": "match_source_person_exposure_to_vrm_visibility",
+        "source_exposure": exposure,
+        "source_exposure_confidence": round(float(confidence or 0.0), 4),
+        "source_exposure_method": str(method or ""),
+        "requested_framing_preset": requested or "auto",
+        "minimum_framing_preset": minimum,
+        "selected_framing_preset": selected,
+        "upgraded_from_requested": bool(upgraded),
+        "allow_narrower_than_source": bool(allow_narrower),
+        "minimum_avatar_visibility": PRESET_VISIBILITY.get(minimum, "head_to_mid_chest"),
+        "selected_avatar_visibility": PRESET_VISIBILITY.get(selected, "head_to_mid_chest"),
+        "lower_occlusion_policy": "disabled_or_low" if selected == "full_body" else ("waist_line" if selected == "half_body" else "desk_or_chest_line"),
+        "reason": _visibility_policy_reason(exposure, minimum, selected, requested or "auto", upgraded),
+    }
+
+
+def normalize_vrm_framing_preset(value: Any) -> str:
+    text = str(value or "").strip().casefold().replace("-", "_").replace(" ", "_")
+    aliases = {
+        "auto": "",
+        "match_source": "",
+        "match_source_visibility": "",
+        "source": "",
+        "source_exposure": "",
+        "bust": "bust_up",
+        "bustup": "bust_up",
+        "close": "bust_up",
+        "close_up": "bust_up",
+        "face": "bust_up",
+        "face_only": "bust_up",
+        "head": "bust_up",
+        "head_only": "bust_up",
+        "upper": "half_body",
+        "upper_body": "half_body",
+        "half": "half_body",
+        "waist": "half_body",
+        "waist_up": "half_body",
+        "full": "full_body",
+        "fullbody": "full_body",
+        "standing": "full_body",
+    }
+    text = aliases.get(text, text)
+    return text if text in PRESETS else ""
+
+
+def classify_source_exposure_for_framing(
+    frames: Sequence[FaceMotionFrame] | Iterable[FaceMotionFrame],
+    frame_size: tuple[int, int],
+    *,
+    subject_boxes: Sequence[tuple[int, int, int, int] | None] | None = None,
+) -> dict[str, Any]:
+    """Classify how much of the source person is visible for VRM framing."""
+    data = tuple(frames)
+    width, height = max(1, int(frame_size[0])), max(1, int(frame_size[1]))
+    face_rows: list[tuple[float, float, float]] = []
+    subject_rows: list[tuple[float, float, float]] = []
+    for index, frame in enumerate(data):
+        if not frame.face_box:
+            continue
+        _x, _y, w, h = [float(v) for v in frame.face_box]
+        face_w = _clamp(w / float(width), 0.001, 1.0)
+        face_h = _clamp(h / float(height), 0.001, 1.0)
+        face_rows.append((face_w, face_h, face_w * face_h))
+        box = subject_boxes[index] if subject_boxes is not None and index < len(subject_boxes) else None
+        if not box:
+            continue
+        sx, sy, sw, sh = [float(v) for v in box]
+        subject_h = _clamp(sh / float(height), 0.001, 1.0)
+        subject_bottom = _clamp((sy + sh) / float(height), 0.0, 1.0)
+        subject_rows.append((subject_h, subject_bottom, face_h / max(0.001, subject_h)))
+    if not face_rows:
+        return _source_exposure_result("unknown", 0.0, "face_box_missing", width, height)
+    med_w = float(median(row[0] for row in face_rows))
+    med_h = float(median(row[1] for row in face_rows))
+    med_area = float(median(row[2] for row in face_rows))
+    subject_coverage = len(subject_rows) / max(1, len(face_rows))
+    med_subject_h = float(median(row[0] for row in subject_rows)) if subject_rows else 0.0
+    med_subject_bottom = float(median(row[1] for row in subject_rows)) if subject_rows else 0.0
+    face_to_subject_h = float(median(row[2] for row in subject_rows)) if subject_rows else 0.0
+    if med_h >= 0.30 or med_w >= 0.24 or med_area >= 0.070:
+        profile = "face_closeup"
+        exposure = "face_only"
+        confidence = _clamp((med_h - 0.24) / 0.18 + 0.55, 0.55, 0.98)
+        method = "face_bbox_heuristic"
+    elif subject_coverage >= 0.25 and med_subject_h >= 0.50 and med_subject_bottom >= 0.82 and face_to_subject_h <= 0.24:
+        profile = "full_body"
+        exposure = "full_body"
+        confidence = _clamp(0.58 + subject_coverage * 0.25 + (med_subject_bottom - 0.82) * 0.60, 0.58, 0.94)
+        method = "face_subject_bbox_heuristic"
+    elif subject_coverage >= 0.25 and (med_subject_h >= 0.36 or med_subject_bottom < 0.82 or face_to_subject_h > 0.24):
+        profile = "upper_body"
+        exposure = "upper_body"
+        confidence = _clamp(0.54 + subject_coverage * 0.25 + max(0.0, med_subject_h - 0.36) * 0.35, 0.54, 0.92)
+        method = "face_subject_bbox_heuristic"
+    elif med_h >= 0.17 or med_w >= 0.14 or med_area >= 0.030:
+        profile = "upper_body"
+        exposure = "upper_body"
+        confidence = _clamp((med_h - 0.13) / 0.18 + 0.45, 0.45, 0.90)
+        method = "face_bbox_heuristic"
+    else:
+        profile = "full_body_or_wide"
+        exposure = "unknown"
+        confidence = _clamp((0.19 - med_h) / 0.16 + 0.42, 0.42, 0.88)
+        method = "face_bbox_heuristic"
+    result = _source_exposure_result(exposure, confidence, method, width, height)
+    result.update(
+        {
+            "raw_profile": profile,
+            "face_width": round(med_w, 5),
+            "face_height": round(med_h, 5),
+            "face_area": round(med_area, 5),
+            "subject_coverage": round(subject_coverage, 4),
+            "subject_height": round(med_subject_h, 5),
+            "subject_bottom": round(med_subject_bottom, 5),
+            "face_to_subject_height_ratio": round(face_to_subject_h, 5),
+        }
+    )
+    return result
+
+
 def preset_for_name(name: str | None) -> SourceFramingPreset:
-    key = str(name or "bust_up").strip().casefold()
+    key = normalize_vrm_framing_preset(name) or "bust_up"
     return PRESETS.get(key, PRESETS["bust_up"])
 
 
@@ -268,6 +475,34 @@ def _resolve_subject_box(
         source = str(subject_source or "").strip() or "provided"
         return _clip_box(subject_box, width, height), source
     return estimate_upper_body_box_from_face_box(frame_size, face_box, preset=preset), "estimated_from_face"
+
+
+def _source_exposure_result(exposure: str, confidence: float, method: str, width: int, height: int) -> dict[str, Any]:
+    return {
+        "schema": SOURCE_EXPOSURE_SCHEMA,
+        "source_exposure": normalize_source_exposure_type(exposure),
+        "confidence": round(float(confidence or 0.0), 4),
+        "method": str(method or ""),
+        "frame_size": [int(width), int(height)],
+    }
+
+
+def _visibility_policy_reason(
+    exposure: str,
+    minimum: str,
+    selected: str,
+    requested: str,
+    upgraded: bool,
+) -> str:
+    if upgraded:
+        return f"{exposure}_source_requires_at_least_{minimum}; requested_{requested}_was_too_narrow"
+    if exposure == "full_body":
+        return "full_body_source_keeps_vrm_head_to_toe"
+    if exposure == "upper_body":
+        return "upper_body_source_keeps_vrm_head_to_waist_or_wider"
+    if exposure == "face_only":
+        return "face_only_source_allows_bust_up_but_not_head_only_thumbnail"
+    return f"unknown_source_exposure_uses_conservative_{selected}_framing"
 
 
 def _clip_box(box: tuple[int, int, int, int], width: int, height: int) -> tuple[int, int, int, int]:

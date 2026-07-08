@@ -97,6 +97,29 @@ def test_clip_badge_model_and_dispatch_use_owner_fx_and_transition_helpers():
     assert clip.transition_out_type == ""
 
 
+def test_clip_badge_model_routes_audition_and_connected_badges_to_focus_handler():
+    calls: list[tuple[str, object]] = []
+    clip = SimpleNamespace(id=42, audition_takes=[{"id": "take_a"}], connected_parent_clip_id=7)
+    track = SimpleNamespace(id=3)
+    owner = SimpleNamespace(
+        _on_clip_badge_action_requested=lambda tid, cid, action: calls.append(("focus", (tid, cid, action))),
+    )
+
+    audition_rows = ctx.build_clip_badge_menu_model(clip, "audition", translator=_tr)
+    connected_rows = ctx.build_clip_badge_menu_model(clip, "connected", translator=_tr)
+
+    assert audition_rows[0]["id"] == "focus"
+    assert audition_rows[0]["label"] == "Open audition takes"
+    assert connected_rows[0]["id"] == "focus"
+    assert connected_rows[0]["label"] == "Focus connected parent"
+    assert ctx.dispatch_clip_badge_menu_action(owner, track, clip, "audition", "focus", translator=_tr) is True
+    assert ctx.dispatch_clip_badge_menu_action(owner, track, clip, "connected", "focus", translator=_tr) is True
+    assert calls == [
+        ("focus", (3, 42, "audition")),
+        ("focus", (3, 42, "connected")),
+    ]
+
+
 def test_video_clip_model_covers_nested_fx_transition_and_dispatch_commands():
     calls: list[tuple[str, object]] = []
     track = SimpleNamespace(id=7, source_path=None)

@@ -45,6 +45,22 @@ def _parse_setting_pairs(pairs: list[str] | None) -> dict[str, object]:
     return settings
 
 
+def _load_scene_settings_json(path: str | Path | None) -> dict[str, object]:
+    raw = str(path or "").strip()
+    if not raw:
+        return {}
+    source = Path(raw).expanduser()
+    if not source.is_absolute():
+        source = (ROOT / source).resolve()
+    data = json.loads(source.read_text(encoding="utf-8"))
+    if not isinstance(data, dict):
+        raise SystemExit(f"--settings-json must contain an object: {source}")
+    settings = data.get("scene_settings") if isinstance(data.get("scene_settings"), dict) else data
+    if not isinstance(settings, dict):
+        raise SystemExit(f"--settings-json scene_settings must contain an object: {source}")
+    return dict(settings)
+
+
 class _ActionOwner:
     def __init__(self, window: ArPbrAssetPreviewWindow) -> None:
         self._ar_pbr_preview_windows = [window]
@@ -71,6 +87,7 @@ def main() -> int:
     parser.add_argument("--screenshot", default="")
     parser.add_argument("--screenshot-delay-ms", type=int, default=1600)
     parser.add_argument("--view-state-out", default="", help="Write current view and scene settings JSON on exit.")
+    parser.add_argument("--settings-json", default="", help="Load scene settings JSON, or a preset JSON containing scene_settings.")
     parser.add_argument("--width", type=int, default=1440)
     parser.add_argument("--height", type=int, default=1000)
     parser.add_argument("--zoom", type=float, default=None)
@@ -92,7 +109,8 @@ def main() -> int:
         help="Apply a scene-lighting setting (repeatable), e.g. --set tone_exposure=0.4 --set render_profile=marmoset_pbr",
     )
     args = parser.parse_args()
-    scene_settings = _parse_setting_pairs(args.settings)
+    scene_settings = _load_scene_settings_json(args.settings_json)
+    scene_settings.update(_parse_setting_pairs(args.settings))
 
     _configure_gl()
     app = QApplication(sys.argv)

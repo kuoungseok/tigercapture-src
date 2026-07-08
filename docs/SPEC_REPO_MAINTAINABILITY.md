@@ -58,8 +58,13 @@ of it. It is intentionally not a broad refactor request.
      `app/actions/actor_namespace.py` while preserving public action IDs.
 5. Move broadcast/live-output actions into a separate namespace helper.
    - Status: Live Target, troubleshooting, broadcast release readiness, manual
-     platform evidence, and virtual-camera/OBS bridge registration now live in
-     `app/actions/broadcast_namespace.py` while preserving public action IDs.
+     platform evidence, and virtual-camera/OBS bridge registration stay behind
+     the `app/actions/broadcast_namespace.py` facade while preserving public
+     action IDs. Live Target schemas live in
+     `app/actions/broadcast_live_target_namespace.py`; platform evidence and
+     readiness schemas live in `app/actions/broadcast_evidence_namespace.py`;
+     virtual-camera/OBS bridge schemas live in
+     `app/actions/broadcast_virtual_camera_namespace.py`.
 6. Move evidence/review capture actions into a separate namespace helper.
    - Status: UI focus, screenshot, GIF capture, and review scenario registration
      now live in `app/actions/evidence_namespace.py` while preserving public
@@ -101,9 +106,35 @@ of it. It is intentionally not a broad refactor request.
       registry is now reduced to about 200 lines of registration orchestration
       and execution safety.
 13. Move AR/PBR/3D actions into a separate namespace helper.
+    - Status: preview camera, depth-view, lighting/material/surface, and
+      viewport-gizmo registration now lives behind the
+      `app/actions/ar_pbr_namespace.py` facade. Preview/depth/surface schemas
+      live in `app/actions/ar_pbr_preview_namespace.py`; gizmo schemas live in
+      `app/actions/ar_pbr_gizmo_namespace.py`.
 14. Split `app/actions/editor_adapter.py` by domain facade.
-    - Status: adapter split is active. NLE/project-bin/multicam adapter
-      methods live in `app/actions/editor_adapter_nle.py`; VTuber, broadcast,
+    - Status: adapter split is active. `app/actions/editor_adapter_nle.py` is a
+      facade that composes focused mixins. Source/Record methods live in
+      `app/actions/editor_adapter_nle_source_record.py`; project-bin methods
+      live in `app/actions/editor_adapter_nle_project_bin.py`; NLE readiness,
+      evidence, and real-project corpus methods live in
+      `app/actions/editor_adapter_nle_readiness.py`; multicam methods live in
+      `app/actions/editor_adapter_nle_multicam.py`; magnetic storyline,
+      connected clip, and role-lane methods live in
+      `app/actions/editor_adapter_nle_storyline.py`; Final Cut-style
+      audition/take methods live in
+      `app/actions/editor_adapter_nle_auditions.py`; Final Cut-style visual
+      feedback methods live in `app/actions/editor_adapter_nle_visual.py`;
+      timeline visual paint helpers live in `app/timeline_nle_visual_overlay.py`
+      and are consumed by `app/timeline_track_row_paint.py` rather than being
+      added to `app/video_editor_window.py`; role-focus propagation stays in
+      `app/actions/editor_adapter_nle_storyline.py`, `TrackRow`'s small
+      `set_focused_clip_role(...)` setter, and the compact timeline UI glue in
+      `app/video_editor_nle_role_panel.py` /
+      `app/video_editor_nle_role_workflow.py`; cross-row connected-clip
+      viewport drawing lives in `app/timeline_connected_anchor_overlay_widget.py`;
+      audition card models live in `app/nle_audition_visuals.py` and the
+      Qt picker remains in `app/video_editor_nle_audition_workflow.py`;
+      VTuber, broadcast,
       VSeeFace, Performance Source, and Avatar Target adapter methods live in
       `app/actions/editor_adapter_vtuber.py`; timeline/media/source-monitor/
       marker/selection public methods live in `app/actions/editor_adapter_timeline.py`;
@@ -116,10 +147,56 @@ of it. It is intentionally not a broad refactor request.
       and editor refresh helpers live in
       `app/actions/editor_adapter_object_helpers.py`. The remaining
       `editor_adapter.py` file is reduced to snapshot/status methods.
+    - Status: AR/PBR adapter split is active. `app/actions/editor_adapter_ar_pbr.py`
+      is a facade that composes focused mixins. Shared preview/window/track
+      helpers live in `app/actions/editor_adapter_ar_pbr_base.py`; main-preview
+      diagnostics and depth-view actions live in
+      `app/actions/editor_adapter_ar_pbr_depth.py`; preview camera actions live
+      in `app/actions/editor_adapter_ar_pbr_preview.py`; lighting/material/
+      surface actions live in `app/actions/editor_adapter_ar_pbr_settings.py`;
+      viewport-gizmo actions live in `app/actions/editor_adapter_ar_pbr_gizmo.py`.
 15. Extract `video_editor_window.py` UI construction into presenter modules.
    - Status: first UI extraction is active. Detached preview/dock popouts and
      the shared VTuber Studio surface live in `app/video_editor_popouts.py`.
      Screen Studio Auto Polish lives in `app/video_editor_screenstudio_dialogs.py`.
+   - Status: compatibility delegate installation is split by domain. The
+     facade `app/video_editor_window_delegates.py` now delegates legacy method
+     binding to `app/video_editor_delegates_core.py`,
+     `app/video_editor_delegates_timeline.py`,
+     `app/video_editor_delegates_media_preview_export.py`,
+     `app/video_editor_delegates_audio_color.py`,
+     `app/video_editor_delegates_creative.py`,
+     `app/video_editor_delegates_actor.py`,
+     `app/video_editor_delegates_ar_pbr.py`,
+     `app/video_editor_delegates_ai.py`, and
+     `app/video_editor_delegates_ppt.py`.
+   - Status: editing action adapter methods are split behind the existing
+     `EditingAdapterMixin` facade into clip/timeline, audio, creative/actor,
+     and review/capture slices. Public action IDs and the adapter import path
+     are unchanged.
+   - Status: AR/PBR GPU preview packet helper code is split into
+     `app/ar_pbr/gpu_preview_math.py` and
+     `app/ar_pbr/gpu_preview_geometry.py`; the main packet builder remains the
+     compatibility entry point. AR/PBR packet export texture, UDIM,
+     triplanar, HDRI, IBL, and depth sampling helpers now live in
+     `app/ar_pbr/export_packet_sampling.py` while
+     PBR triangle rasterization now lives in
+     `app/ar_pbr/export_packet_pbr.py`. `app/ar_pbr/export_packet_renderer.py`
+     keeps the public rasterization/export entry points and compatibility
+     cache/private helper symbols.
+   - Status: timeline lane-header painting, Workbench VFX graph summaries,
+     Workbench evidence/card widgets, Media Pool media-kind helpers, and Media
+     Pool thumbnail/badge/proxy/performance-source decoration helpers now live
+     in focused helper modules:
+     `app/timeline_track_row_lane_paint.py`,
+     `app/workbench_vfx_graph.py`, `app/workbench_cards.py`,
+     `app/media_pool_kinds.py`, and `app/media_pool_thumbnails.py`.
+   - Status: Sound Editor panel logic is separated from reusable audio UI
+     widgets. The compact panel/dock shell remains in
+     `app/sound_editor_panel.py`; waveform/spectrum/graph/jog-shuttle widgets
+     live in `app/sound_editor_visual_widgets.py`; mixer strips, meters,
+     faders, pan sliders, and mixer helper functions live in
+     `app/sound_editor_mixer_widgets.py`.
    - Remaining targets: top bar command groups, media/workbench docks,
      preview/transport, timeline palette, right inspector, AI command dock,
      preset browser panels, and audio/editor panels.

@@ -87,6 +87,7 @@ def init_editor_state(self) -> None:
     self._proxy_mode = False
     self._proxy_dir = None
     self._proxy_threads = {}
+    self._ppt_generator_window = None
 
 
 def init_editor_timers(self) -> None:

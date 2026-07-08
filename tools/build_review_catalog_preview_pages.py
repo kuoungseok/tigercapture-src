@@ -12,6 +12,12 @@ WORKSPACE = ROOT.parent / "ReviewAutomationWorkspace"
 TEMPLATES = WORKSPACE / "source_assets" / "templates"
 TMP = WORKSPACE / "tmp"
 OUT = TMP / "catalog_deck_build" / "preview_pages"
+FRESH_CAPTURE_ROOT = TMP / "fresh_review_recapture"
+FORBIDDEN_FINAL_CAPTURE_MARKERS = (
+    "fresh_first_slide_capture",
+    "actual_3d_viewer_capture",
+    "debugcapture",
+)
 
 
 def _font(size: int, *, mono: bool = False) -> ImageFont.ImageFont:
@@ -116,12 +122,22 @@ def _draw_catalog_text(base: Image.Image, title: str, body: str, *, section: str
     draw.text((115, 607), "/  01  /  02  /  03", fill=(36, 37, 38, 255), font=pager_font)
 
 
+def _reject_historical_capture_source(path: Path) -> None:
+    normalized = str(path).replace("\\", "/").lower()
+    if any(marker in normalized for marker in FORBIDDEN_FINAL_CAPTURE_MARKERS):
+        raise RuntimeError(
+            f"Forbidden historical screenshot source for catalog preview: {path}. "
+            f"Use current captures under {FRESH_CAPTURE_ROOT}."
+        )
+
+
 def _load(path: Path) -> Image.Image:
+    _reject_historical_capture_source(path)
     return Image.open(path).convert("RGBA")
 
 
 def _lamborghini_editor() -> Image.Image:
-    editor = _load(TMP / "fresh_review_recapture" / "catalog_multimedia_lamborghini" / "editor_catalog_multimedia_lamborghini.png")
+    editor = _load(FRESH_CAPTURE_ROOT / "catalog_multimedia_lamborghini" / "editor_catalog_multimedia_lamborghini.png")
     frame = _load(TMP / "catalog_pretty_frames" / "lamborghini_driving_0126.png")
     # GPU viewer grabs can be black; replace only the actual viewer content with
     # a real frame from the same imported Lamborghini source.
@@ -130,14 +146,14 @@ def _lamborghini_editor() -> Image.Image:
 
 
 def _node_editor() -> Image.Image:
-    editor = _load(TMP / "fresh_review_recapture" / "node_color_tokyo" / "editor_workbench_node_graph_action.png")
+    editor = _load(FRESH_CAPTURE_ROOT / "node_color_tokyo" / "editor_workbench_node_graph_action.png")
     frame = _load(TMP / "catalog_pretty_frames" / "tokyo_tower_aerial_0223.png")
     _rounded_paste(editor, frame, (206, 126, 890, 503), radius=10)
     return editor
 
 
 def _ai_editor() -> Image.Image:
-    editor = _load(TMP / "fresh_first_slide_capture" / "center_ai" / "editor_ai_command_open_action.png")
+    editor = _load(FRESH_CAPTURE_ROOT / "ai_workflow" / "editor_workbench_node_graph_action.png")
     frame = _load(TMP / "catalog_pretty_frames" / "taichung_night_hero_0115.png")
     _rounded_paste(editor, frame, (206, 126, 890, 503), radius=10)
     return editor
@@ -146,34 +162,34 @@ def _ai_editor() -> Image.Image:
 def _best_ar_pbr_asset_capture() -> tuple[Image.Image, str]:
     candidates = (
         (
-            TMP / "actual_3d_viewer_capture" / "nexus_rx_preview_action_zoom.png",
+            FRESH_CAPTURE_ROOT / "ar_pbr_nexus_rx" / "nexus_rx_preview_action_zoom.png",
             "Nexus RX Preview",
         ),
         (
-            TMP / "actual_3d_viewer_capture" / "alternates" / "angle_sweep" / "nexus_p10_y35.png",
+            FRESH_CAPTURE_ROOT / "ar_pbr_nexus_rx" / "alternates" / "angle_sweep" / "nexus_p10_y35.png",
             "Nexus RX GLTF",
         ),
         (
-            TMP / "actual_3d_viewer_capture" / "alternates" / "police_sweep" / "police_p10_y35.png",
+            FRESH_CAPTURE_ROOT / "ar_pbr_police" / "alternates" / "police_sweep" / "police_p10_y35.png",
             "Police Car GLTF",
         ),
         (
-            TMP / "actual_3d_viewer_capture" / "polyhaven_camera_3d_viewer_no_cubemap_actual.png",
+            FRESH_CAPTURE_ROOT / "ar_pbr_camera" / "polyhaven_camera_3d_viewer_no_cubemap_actual.png",
             "3D Camera Scene",
         ),
     )
     for path, label in candidates:
         if path.exists():
             return _load(path), label
-    return _load(TMP / "actual_3d_viewer_capture" / "polyhaven_camera_3d_viewer_no_cubemap_actual.png"), "3D Camera Scene"
+    return _load(FRESH_CAPTURE_ROOT / "ar_pbr_camera" / "polyhaven_camera_3d_viewer_no_cubemap_actual.png"), "3D Camera Scene"
 
 
 def _make_left_monitor_screen(path: Path) -> None:
     screen = Image.new("RGB", (1440, 1000), "#0d1117")
     draw = ImageDraw.Draw(screen, "RGBA")
     ar_asset, ar_label = _best_ar_pbr_asset_capture()
-    live2d = _load(TMP / "fresh_review_recapture" / "live2d_simple_bg" / "live2d_viewer_action.png")
-    mmd = _load(TMP / "fresh_first_slide_capture" / "left_mmd" / "mmd_player_cantarella_fresh.png")
+    live2d = _load(FRESH_CAPTURE_ROOT / "live2d_simple_bg" / "live2d_viewer_action.png")
+    mmd = _load(FRESH_CAPTURE_ROOT / "mmd_character_motion" / "mmd_player_cantarella_action.png")
     _rounded_paste(screen, ar_asset, (28, 34, 850, 966), radius=18)
     _rounded_paste(screen, live2d, (880, 34, 1410, 490), radius=18)
     _rounded_paste(screen, mmd, (880, 520, 1410, 966), radius=18)
@@ -186,9 +202,9 @@ def _make_left_monitor_screen(path: Path) -> None:
 def _make_right_monitor_screen(path: Path) -> None:
     screen = Image.new("RGB", (1440, 1000), "#0d1117")
     draw = ImageDraw.Draw(screen, "RGBA")
-    node = _load(TMP / "fresh_review_recapture" / "node_color_tokyo" / "workbench_node_graph_action.png")
-    sound = _load(TMP / "fresh_first_slide_capture" / "right_sound" / "sound_editor_graphs_contact_sheet.png")
-    mixer = _load(TMP / "fresh_review_recapture" / "node_color_tokyo" / "editor_audio_mixer_action.png")
+    node = _load(FRESH_CAPTURE_ROOT / "node_color_tokyo" / "workbench_node_graph_action.png")
+    sound = _load(FRESH_CAPTURE_ROOT / "audio_workbench" / "sound_editor_graphs_contact_sheet.png")
+    mixer = _load(FRESH_CAPTURE_ROOT / "node_color_tokyo" / "editor_audio_mixer_action.png")
     _rounded_paste(screen, node, (24, 32, 1416, 570), radius=18)
     _rounded_paste(screen, sound, (24, 594, 782, 966), radius=18)
     _rounded_paste(screen, mixer, (806, 594, 1416, 966), radius=18)
@@ -268,7 +284,7 @@ def build_preview_pages() -> list[Path]:
         title="Node Graph\nComposition",
         body="Connect blur, glow, grade, mask, and LUT nodes while the timeline keeps the edit readable.",
         laptop=node,
-        ipad=_load(TMP / "fresh_review_recapture" / "node_color_tokyo" / "workbench_node_graph_action.png"),
+        ipad=_load(FRESH_CAPTURE_ROOT / "node_color_tokyo" / "workbench_node_graph_action.png"),
     )
     outputs.append(p)
 

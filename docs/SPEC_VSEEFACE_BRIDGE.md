@@ -817,6 +817,20 @@ Supported framing presets:
 - `half_body`: head to waist for reaction/gameplay scenes.
 - `full_body`: head to toe, used for model checks or dancing, not normal talk.
 
+Source-person visibility contract for AI/review automation:
+
+- Rule id: `match_source_person_exposure_to_vrm_visibility`.
+- `face_only` / `face_closeup` source may use `bust_up`, but evidence still
+  must show head, neck, and shoulders; do not use a face-only VRM meta thumbnail
+  as Program Output or Avatar Mapping proof.
+- `upper_body` source must use at least `half_body` / head-to-waist VRM
+  framing. If a caller requests `bust_up`, the source-framing plan upgrades it
+  unless explicitly allowed to be narrower.
+- `full_body` source must use `full_body` / head-to-toe VRM framing.
+- `build_source_framing_plan(...)` exposes machine-readable `source_exposure`
+  and `visibility_policy` fields so Claude/local AI/review sections can explain
+  exactly why a VRM shot is bust-up, half-body, or full-body.
+
 Default `bust_up` guidance for VSeeFace setup:
 
 ```json
@@ -861,6 +875,9 @@ Contract:
   `tigerstudio.vtuber.source_subject.v1`.
 - `solve_source_framing_sequence(...)` returns per-frame
   `tigerstudio.vtuber.source_framing.v1` camera guidance.
+- `app.vtuber.source_framing.vrm_visibility_policy_for_source_exposure(...)`
+  maps source exposure to the minimum VRM framing preset and records the
+  selected preset in `visibility_policy`.
 - The UI should consume only `framing.model_view`, `framing.track_rotation`,
   and user-facing preset names. Raw detector frames stay in diagnostics/QA.
 - If OpenCV or the source video is unavailable, the detector falls back to an
@@ -892,13 +909,13 @@ This keeps re-analysis, preset changes, and reset-to-auto predictable.
 Fast plan-only command:
 
 ```powershell
-.\.venv\Scripts\python.exe tools\vtuber_source_framing_plan.py --video "C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\trump_oval_office_live_GnzWEo_HfE0.mp4" --preset bust_up --slots neutral,head,mouth --out debugCapture\vtuber_source_framing_plan_trump.json
+.\.venv\Scripts\python.exe tools\vtuber_source_framing_plan.py --video "C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\trump_oval_office_live_GnzWEo_HfE0.mp4" --preset auto --slots neutral,head,mouth --out debugCapture\vtuber_source_framing_plan_trump.json
 ```
 
 Plan-only command with manual placement:
 
 ```powershell
-.\.venv\Scripts\python.exe tools\vtuber_source_framing_plan.py --video "C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\trump_oval_office_live_GnzWEo_HfE0.mp4" --preset bust_up --slots head --user-pan-x 0.12 --user-pan-y -0.08 --user-zoom-scale 1.05 --user-lower-occlusion-y-delta -0.03 --out debugCapture\vtuber_source_framing_plan_trump_user_offset.json
+.\.venv\Scripts\python.exe tools\vtuber_source_framing_plan.py --video "C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\trump_oval_office_live_GnzWEo_HfE0.mp4" --preset auto --slots head --user-pan-x 0.12 --user-pan-y -0.08 --user-zoom-scale 1.05 --user-lower-occlusion-y-delta -0.03 --out debugCapture\vtuber_source_framing_plan_trump_user_offset.json
 ```
 
 Renderer-facing `model_view` example:
@@ -926,7 +943,7 @@ position or from a stronger source-video segmentation result. `half_body` and
 Local Trump-video proof command:
 
 ```powershell
-.\.venv\Scripts\python.exe tools\render_milica_vrm_source_framing_preview.py --video "C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\trump_oval_office_live_GnzWEo_HfE0.mp4" --slot head --preset bust_up --render-size 1440 --out debugCapture\milica_vrm_source_framing_bust_up_selected_subject.png --json-out debugCapture\milica_vrm_source_framing_bust_up_selected_subject.json
+.\.venv\Scripts\python.exe tools\render_milica_vrm_source_framing_preview.py --video "C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\trump_oval_office_live_GnzWEo_HfE0.mp4" --slot head --preset auto --render-size 1440 --out debugCapture\milica_vrm_source_framing_auto_selected_subject.png --json-out debugCapture\milica_vrm_source_framing_auto_selected_subject.json
 ```
 
 Current local result on 2026-06-30:
@@ -1790,6 +1807,7 @@ vtuber.vrm.pose_stream_preview
 broadcast.live_target.summary
 broadcast.live_target.select
 broadcast.platform_evidence_checklist
+broadcast.platform_evidence.preflight
 broadcast.platform_evidence.register
 ```
 

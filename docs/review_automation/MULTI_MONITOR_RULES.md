@@ -155,6 +155,23 @@ Video Preview Viewer rule:
 - If a left/right monitor slot contains the main timeline video preview or a
   large imported-video frame, reject the multi-monitor image and regenerate it.
 
+Machine-enforced semantic contract rule:
+
+- The first-page monitor payloads must have `.capture-contract.json` sidecars
+  written by the real multi-monitor capture step. Do not auto-stamp these
+  contracts from an existing image.
+- Each sidecar must identify `monitor_role` as `left`, `center`, or `right` and
+  include `real_tigercapture_capture` or an equivalent real UI/action capture
+  flag.
+- `overview_center_editor` must prove: Lamborghini media, main video preview,
+  long timeline, multi-track timeline, and secondary AI command/chat. It must
+  reject macro eye/face/body close-up footage.
+- `overview_left_workspace` must prove: Live2D viewer, AR/PBR or real 3D
+  viewer, MMD/VRM/VTuber or avatar-mapping support, asset/preset support, and a
+  hidden/neutral AR/PBR background. It must not include the main video preview.
+- `overview_right_workspace` must prove: node graph is dominant and audio/sound
+  workbench evidence is present. It must not include the main video preview.
+
 ## Window Placement Rule
 
 The first serious multi-monitor catalog image must use this composition unless

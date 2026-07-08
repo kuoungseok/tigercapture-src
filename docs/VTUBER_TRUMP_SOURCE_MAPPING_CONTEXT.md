@@ -112,8 +112,15 @@ Avatar Target
   Milica VRM selected as `VRM / VSeeFace Bridge`.
 
 Avatar Mapping
-  Pose, mouth, blink, head rotation, bust-up framing, desk/occlusion line, and
-  user offset controls derived from the Trump Performance Source.
+  Pose, mouth, blink, head rotation, bust-up/upper-body framing,
+  desk/occlusion line, and user offset controls derived from the Trump
+  Performance Source. Because the Trump Performance Source shows an upper-body
+  person frame, Avatar Mapping and Program Output must show at least the
+  avatar's head, neck, shoulders, and upper torso. A face-only or head-only VRM
+  meta thumbnail is invalid evidence.
+  Machine-readable rule: `match_source_person_exposure_to_vrm_visibility`.
+  For this Trump source, `source_exposure=upper_body` means the selected VRM
+  framing must be `half_body` or wider.
 
 Program Output
   The actual composited broadcast output. It may use internal VRM fallback if
@@ -205,7 +212,7 @@ broadcast.live_target.select
 Plan-only source framing:
 
 ```powershell
-.\.venv\Scripts\python.exe tools\vtuber_source_framing_plan.py --video "C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\trump_oval_office_live_GnzWEo_HfE0.mp4" --preset bust_up --slots neutral,head,mouth --out debugCapture\vtuber_source_framing_plan_trump.json
+.\.venv\Scripts\python.exe tools\vtuber_source_framing_plan.py --video "C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\trump_oval_office_live_GnzWEo_HfE0.mp4" --preset auto --slots neutral,head,mouth --out debugCapture\vtuber_source_framing_plan_trump.json
 ```
 
 Milica VRM with Trump OpenSeeFace motion:
@@ -231,6 +238,11 @@ Internal VRM fallback Program Output proof:
 - Do not show fake VTuber UI evidence in catalog/review pages.
 - Do not use an AI-generated avatar mapping image as if it came from the editor.
 - Do not show the Trump Performance Source as Program Output.
+- Do not use the Milica VRM meta thumbnail as product evidence when it crops to
+  a face-only view. The Trump source is upper-body, so the avatar evidence must
+  be `half_body` / upper-body or wider. The framing-plan JSON should include
+  `source_exposure=upper_body` and a `visibility_policy` whose selected preset
+  is `half_body` or `full_body`.
 - Do not claim VSeeFace capture is working if the actual capture backend is
   black/degraded; show internal VRM fallback honestly.
 - Do not substitute motorcycle for the requested AR/PBR bicycle model.

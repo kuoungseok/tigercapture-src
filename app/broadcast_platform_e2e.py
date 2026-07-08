@@ -12,6 +12,7 @@ import numpy as np
 BROADCAST_PLATFORM_E2E_SCHEMA = "tigerstudio.broadcast.platform_e2e.v1"
 BROADCAST_PLATFORM_EVIDENCE_SCHEMA = "tigerstudio.broadcast.platform_evidence_register.v1"
 BROADCAST_PLATFORM_CHECKLIST_SCHEMA = "tigerstudio.broadcast.platform_evidence_checklist.v1"
+BROADCAST_YOUTUBE_QUICKSTART_SCHEMA = "tigerstudio.broadcast.youtube_evidence_quickstart.v1"
 
 RecordSmokeRunner = Callable[[Path], dict[str, Any]]
 
@@ -87,15 +88,22 @@ def build_broadcast_platform_e2e_report(
                 "Run YouTube, Twitch, or Custom RTMP with redacted stream key evidence.",
             ),
             _manual_check(
+                "youtube_unlisted_viewer_playback",
+                "YouTube private/unlisted viewer playback test",
+                "Open the private/unlisted YouTube watch or preview page and verify Program Output playback.",
+            ),
+            _manual_check(
                 "discord_window_share",
                 "Discord/video-call Program Output window-share test",
                 "Join a test call and verify only Program Output is shared, not Performance Source.",
+                required_for_sale=False,
             ),
         ]
     )
-    passed = len([row for row in checks if row.get("ok")])
-    required = len(checks)
-    real_platform_evidence = all(row.get("ok") for row in checks) and any(row.get("kind") == "real_platform" for row in checks)
+    required_checks = [row for row in checks if row.get("required_for_sale", True)]
+    passed = len([row for row in required_checks if row.get("ok")])
+    required = len(required_checks)
+    real_platform_evidence = all(row.get("ok") for row in required_checks) and any(row.get("kind") == "real_platform" for row in required_checks)
     return {
         "schema": BROADCAST_PLATFORM_E2E_SCHEMA,
         "ok": all(row.get("ok") for row in checks if row.get("kind") == "local_runtime"),
@@ -105,7 +113,7 @@ def build_broadcast_platform_e2e_report(
             "required": required,
             "pending": required - passed,
             "local_runtime_passed": len([row for row in checks if row.get("kind") == "local_runtime" and row.get("ok")]),
-            "manual_platform_pending": len([row for row in checks if row.get("kind") == "manual_platform" and not row.get("ok")]),
+            "manual_platform_pending": len([row for row in required_checks if row.get("kind") == "manual_platform" and not row.get("ok")]),
         },
         "checks": checks,
         "generated_at": time.time(),
@@ -121,6 +129,7 @@ def register_manual_platform_evidence(
     notes: str = "",
     confirm_redacted: bool = False,
     artifact_path: str | Path = "debugCapture/broadcast_platform_e2e_qa.json",
+    refresh_readiness: bool = True,
 ) -> dict[str, Any]:
     """Mark a manual platform check complete after the operator supplies evidence."""
     if not confirm_redacted:
@@ -139,6 +148,7 @@ def register_manual_platform_evidence(
         report = _load_report(path)
     else:
         report = build_broadcast_platform_e2e_report(root_path, run_record_smoke=False)
+    report = _ensure_current_manual_checks(report)
     checks = list(report.get("checks") or [])
     target_id = str(check_id or "").strip()
     updated = False
@@ -160,12 +170,26 @@ def register_manual_platform_evidence(
     _refresh_summary(report)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(report, ensure_ascii=False, indent=2, default=str), encoding="utf-8")
+    readiness_refresh: dict[str, Any] = {"ok": False, "skipped": True}
+    if refresh_readiness:
+        try:
+            from app.broadcast_evidence_refresh import refresh_broadcast_evidence_readiness_artifacts
+
+            readiness_refresh = refresh_broadcast_evidence_readiness_artifacts(root_path)
+        except Exception as exc:
+            readiness_refresh = {
+                "ok": False,
+                "error": f"{type(exc).__name__}: {exc}",
+                "broadcast_artifact": str(root_path / "debugCapture" / "broadcast_release_readiness_qa.json"),
+                "final_artifact": str(root_path / "debugCapture" / "final_product_readiness_qa.json"),
+            }
     return {
         "schema": BROADCAST_PLATFORM_EVIDENCE_SCHEMA,
         "artifact": str(path),
         "check_id": target_id,
         "registered": True,
         "report": report,
+        "readiness_refresh": readiness_refresh,
     }
 
 
@@ -219,6 +243,7 @@ def build_broadcast_platform_evidence_checklist(
     path = root_path / Path(artifact_path)
     artifact_present = path.exists()
     report = _load_report(path) if artifact_present else build_broadcast_platform_e2e_report(root_path, run_record_smoke=False)
+    report = _ensure_current_manual_checks(report)
     checks = [dict(row) for row in list(report.get("checks") or []) if isinstance(row, Mapping)]
     items = [_checklist_item(row) for row in checks]
     required_items = [row for row in items if row.get("required_for_sale")]
@@ -229,6 +254,8 @@ def build_broadcast_platform_evidence_checklist(
     required = len(required_items)
     operator_focus = manual_pending[0] if manual_pending else (local_pending[0] if local_pending else None)
     sale_ready = bool(report.get("real_platform_evidence") and required > 0 and passed >= required)
+    next_actions = [_checklist_action(row) for row in pending_required]
+    youtube_flow = _youtube_only_flow(items, operator_focus=operator_focus or {})
     return {
         "schema": BROADCAST_PLATFORM_CHECKLIST_SCHEMA,
         "artifact": str(path),
@@ -244,13 +271,149 @@ def build_broadcast_platform_evidence_checklist(
             "local_runtime_passed": len([row for row in items if row.get("kind") == "local_runtime" and row.get("ok")]),
             "local_runtime_required": len([row for row in items if row.get("kind") == "local_runtime"]),
             "manual_platform_pending": len(manual_pending),
-            "manual_platform_required": len([row for row in items if row.get("kind") in {"manual_platform", "real_platform"}]),
+            "manual_platform_required": len([row for row in items if row.get("kind") in {"manual_platform", "real_platform"} and row.get("required_for_sale")]),
         },
         "items": items,
         "pending_required": pending_required,
         "operator_focus": operator_focus or {},
-        "actions": [str(row.get("action") or row.get("label") or row.get("id")) for row in pending_required],
+        "youtube_only_flow": youtube_flow,
+        "actions": next_actions,
+        "operator_summary": _checklist_operator_summary(
+            sale_ready=sale_ready,
+            passed=passed,
+            required=required,
+            manual_pending=manual_pending,
+            local_pending=local_pending,
+        ),
         "status_text": _checklist_status_text(passed=passed, required=required, manual_pending=manual_pending, local_pending=local_pending),
+    }
+
+
+def build_youtube_broadcast_evidence_quickstart(
+    root: str | Path = ".",
+    *,
+    artifact_path: str | Path = "debugCapture/broadcast_platform_e2e_qa.json",
+) -> dict[str, Any]:
+    """Return a YouTube-only operator plan for commercial broadcast evidence."""
+    checklist = build_broadcast_platform_evidence_checklist(root, artifact_path=artifact_path)
+    youtube_flow = dict(checklist.get("youtube_only_flow") if isinstance(checklist.get("youtube_only_flow"), Mapping) else {})
+    next_required = dict(youtube_flow.get("next_required_check") if isinstance(youtube_flow.get("next_required_check"), Mapping) else {})
+    return {
+        "schema": BROADCAST_YOUTUBE_QUICKSTART_SCHEMA,
+        "available": True,
+        "complete": bool(youtube_flow.get("complete")),
+        "sale_ready": bool(checklist.get("sale_ready") or checklist.get("commercial_ready")),
+        "status_text": str(checklist.get("status_text") or ""),
+        "next_required_check_id": str(next_required.get("id") or ""),
+        "next_required_cta": str(next_required.get("primary_cta") or ""),
+        "youtube_studio_url": "https://studio.youtube.com",
+        "live_target_id": "youtube_live",
+        "required_evidence": [
+            {
+                "check_id": "private_rtmp_ingest",
+                "label": "Register RTMP",
+                "button": "Register RTMP",
+                "proof": "Redacted note/screenshot/log that YouTube received the private/unlisted RTMP ingest.",
+            },
+            {
+                "check_id": "youtube_unlisted_viewer_playback",
+                "label": "Register YouTube View",
+                "button": "Register YouTube View",
+                "proof": "Redacted note/screenshot/log that the YouTube preview/watch page plays Program Output.",
+            },
+        ],
+        "operator_steps": list(youtube_flow.get("operator_steps") or []),
+        "safe_evidence": str(youtube_flow.get("safe_evidence") or _default_safe_registration_hint("youtube_unlisted_viewer_playback")),
+        "do_not_include": [
+            "stream keys",
+            "YouTube watch/preview URLs",
+            "signed/private URLs",
+            "account identifiers",
+            "analytics",
+            "private chat",
+            "raw Performance Source frames",
+        ],
+        "optional_evidence": [
+            {
+                "check_id": "discord_window_share",
+                "label": "Optional video-call/window-share evidence",
+                "required_for_sale": False,
+            }
+        ],
+    }
+
+
+def _ensure_current_manual_checks(report: Mapping[str, Any]) -> dict[str, Any]:
+    """Keep older evidence artifacts compatible with current manual check slots."""
+    merged = dict(report or {})
+    checks = [dict(row) for row in list(merged.get("checks") or []) if isinstance(row, Mapping)]
+    existing = {str(row.get("id") or "") for row in checks}
+    current_manual = [
+        _manual_check(
+            "private_rtmp_ingest",
+            "Private/unlisted RTMP ingest test",
+            "Run YouTube, Twitch, or Custom RTMP with redacted stream key evidence.",
+        ),
+        _manual_check(
+            "youtube_unlisted_viewer_playback",
+            "YouTube private/unlisted viewer playback test",
+            "Open the private/unlisted YouTube watch or preview page and verify Program Output playback.",
+        ),
+        _manual_check(
+            "discord_window_share",
+            "Discord/video-call Program Output window-share test",
+            "Join a test call and verify only Program Output is shared, not Performance Source.",
+            required_for_sale=False,
+        ),
+    ]
+    changed = False
+    for row in current_manual:
+        if str(row.get("id") or "") in existing:
+            continue
+        checks.append(row)
+        changed = True
+    if changed:
+        merged["checks"] = checks
+        _refresh_summary(merged)
+    return merged
+
+
+def _youtube_only_flow(items: list[dict[str, Any]], *, operator_focus: Mapping[str, Any]) -> dict[str, Any]:
+    by_id = {str(row.get("id") or ""): row for row in items}
+    required_ids = ["private_rtmp_ingest", "youtube_unlisted_viewer_playback"]
+    required = [dict(by_id.get(check_id) or {}) for check_id in required_ids]
+    ready_ids = [str(row.get("id") or "") for row in required if row.get("ok")]
+    pending = [row for row in required if not row.get("ok")]
+    next_required = pending[0] if pending else {}
+    focus_id = str(operator_focus.get("id") or "")
+    if focus_id in required_ids and operator_focus:
+        next_required = dict(operator_focus)
+    return {
+        "schema": "tigerstudio.broadcast.youtube_only_evidence_flow.v1",
+        "available": True,
+        "label": "YouTube-only broadcast evidence",
+        "summary": (
+            "A YouTube account is enough: complete RTMP ingest evidence, then verify "
+            "the private/unlisted YouTube viewer or preview page."
+        ),
+        "required_check_ids": required_ids,
+        "optional_check_ids": ["discord_window_share"],
+        "ready_check_ids": ready_ids,
+        "pending_check_ids": [str(row.get("id") or "") for row in pending],
+        "complete": len(pending) == 0 and len(ready_ids) == len(required_ids),
+        "next_required_check": next_required,
+        "operator_steps": [
+            "Create or open a private/unlisted YouTube live event.",
+            "Use Tiger Studio's YouTube/RTMP Live Target and keep the stream key session-only.",
+            "Register redacted RTMP ingest evidence with Register RTMP.",
+            "Open the same YouTube preview/watch page and verify Program Output playback.",
+            "Register redacted viewer/playback evidence with Register YouTube View.",
+        ],
+        "safe_evidence": (
+            "Use redacted notes, screenshots, or logs. Never include stream keys, "
+            "YouTube watch/preview URLs, signed/private URLs, account IDs, analytics, "
+            "chat, or raw Performance Source frames."
+        ),
     }
 
 
@@ -266,6 +429,9 @@ def _checklist_item(row: Mapping[str, Any]) -> dict[str, Any]:
         "ok": ok,
         "required_for_sale": bool(row.get("required_for_sale")),
         "action": str(row.get("action") or ""),
+        "primary_cta": str(row.get("primary_cta") or _default_primary_cta(str(row.get("id") or ""))),
+        "why_required": str(row.get("why_required") or _default_why_required(str(row.get("id") or ""))),
+        "safe_registration_hint": str(row.get("safe_registration_hint") or _default_safe_registration_hint(str(row.get("id") or ""))),
         "operator_steps": [str(step) for step in list(row.get("operator_steps") or []) if str(step)],
         "registration": dict(row.get("registration") if isinstance(row.get("registration"), Mapping) else {}),
         "evidence_summary": _evidence_summary(evidence),
@@ -297,11 +463,44 @@ def _checklist_status_text(
     if required <= 0:
         return "Broadcast evidence is not initialized."
     if passed >= required:
-        return f"Broadcast sale evidence complete: {passed}/{required} checks passed."
+        return f"Broadcast sale evidence complete: {passed}/{required} checks passed. Commercial broadcast claim is now unblocked."
     pending_labels = [str(row.get("label") or row.get("id")) for row in manual_pending + local_pending]
     if pending_labels:
-        return f"Broadcast sale evidence: {passed}/{required} passed. Pending: {', '.join(pending_labels[:3])}."
+        return f"Broadcast sale evidence: {passed}/{required} passed. Next required: {pending_labels[0]}."
     return f"Broadcast sale evidence: {passed}/{required} passed."
+
+
+def _checklist_action(row: Mapping[str, Any]) -> str:
+    cta = str(row.get("primary_cta") or _default_primary_cta(str(row.get("id") or ""))).strip()
+    label = str(row.get("label") or row.get("id") or "evidence check").strip()
+    if cta:
+        return cta
+    return f"Complete and register: {label}."
+
+
+def _checklist_operator_summary(
+    *,
+    sale_ready: bool,
+    passed: int,
+    required: int,
+    manual_pending: list[dict[str, Any]],
+    local_pending: list[dict[str, Any]],
+) -> str:
+    if sale_ready:
+        return "Broadcast commercial evidence is complete. Program Output broadcast/window-share claims can be evaluated from the registered artifact."
+    if manual_pending:
+        focus = manual_pending[0]
+        return (
+            f"Commercial broadcast claims are blocked by real-platform evidence. "
+            f"Next: {focus.get('primary_cta') or focus.get('label') or focus.get('id')}"
+        )
+    if local_pending:
+        focus = local_pending[0]
+        return (
+            f"Commercial broadcast claims are blocked by local runtime evidence. "
+            f"Next: {focus.get('label') or focus.get('id')}"
+        )
+    return f"Broadcast evidence is incomplete: {passed}/{required} checks passed."
 
 
 def run_record_file_smoke(root: str | Path = ".") -> dict[str, Any]:
@@ -435,15 +634,23 @@ def _run_synthetic_capture_composite_smoke() -> dict[str, Any]:
     }
 
 
-def _manual_check(check_id: str, label: str, action: str) -> dict[str, Any]:
-    platform_hint = "Discord" if check_id == "discord_window_share" else "YouTube/Twitch/Custom RTMP"
+def _manual_check(check_id: str, label: str, action: str, *, required_for_sale: bool = True) -> dict[str, Any]:
+    if check_id == "discord_window_share":
+        platform_hint = "Discord/Google Meet/Zoom"
+    elif check_id == "youtube_unlisted_viewer_playback":
+        platform_hint = "YouTube"
+    else:
+        platform_hint = "YouTube/Twitch/Custom RTMP"
     return {
         "id": check_id,
         "label": label,
         "kind": "manual_platform",
         "ok": False,
-        "required_for_sale": True,
+        "required_for_sale": bool(required_for_sale),
         "action": action,
+        "primary_cta": _default_primary_cta(check_id),
+        "why_required": _default_why_required(check_id),
+        "safe_registration_hint": _default_safe_registration_hint(check_id),
         "operator_steps": _manual_operator_steps(check_id),
         "registration": {
             "tool": "tools/register_broadcast_platform_evidence.py",
@@ -458,6 +665,14 @@ def _manual_check(check_id: str, label: str, action: str) -> dict[str, Any]:
 
 
 def _manual_operator_steps(check_id: str) -> list[str]:
+    if check_id == "youtube_unlisted_viewer_playback":
+        return [
+            "Open YouTube Studio for the same private/unlisted live event.",
+            "Start the Tiger Studio YouTube/RTMP Live Target and wait for YouTube to show preview/playback.",
+            "Open the private/unlisted watch or preview page and confirm Program Output is playing.",
+            "Confirm raw Performance Source/tracking input is not visible in the public-facing picture.",
+            "Register redacted notes or a redacted screenshot/log path with the evidence tool.",
+        ]
     if check_id == "discord_window_share":
         return [
             "Open the shared VTuber Studio and choose Discord / Video Call Output.",
@@ -481,18 +696,61 @@ def _manual_operator_steps(check_id: str) -> list[str]:
     ]
 
 
+def _default_primary_cta(check_id: str) -> str:
+    if check_id == "private_rtmp_ingest":
+        return "Run a private/unlisted RTMP ingest test, then click Register RTMP in VTuber Studio."
+    if check_id == "youtube_unlisted_viewer_playback":
+        return "Open the private/unlisted YouTube viewer or preview page, then click Register YouTube View."
+    if check_id == "discord_window_share":
+        return "Optional: share only the Program Output window in a private video-call test, then register the result."
+    if check_id == "record_file_local":
+        return "Run the local Program Output MP4 smoke check."
+    if check_id == "live2d_record_file_local":
+        return "Run the Live2D Program Output MP4 smoke check."
+    if check_id == "capture_composite_local":
+        return "Run the capture/composite Program Output smoke check."
+    return "Complete this broadcast evidence check."
+
+
+def _default_why_required(check_id: str) -> str:
+    if check_id == "private_rtmp_ingest":
+        return "This proves Program Output can reach a real RTMP service without exposing stream keys or raw Performance Source video."
+    if check_id == "youtube_unlisted_viewer_playback":
+        return "This proves a real YouTube viewer/preview page receives the final Program Output picture, not the raw Performance Source."
+    if check_id == "discord_window_share":
+        return "This optional evidence proves the user can share the final Program Output window in a call while keeping Performance Source private."
+    if check_id == "record_file_local":
+        return "This proves the local recording path can encode Program Output to MP4."
+    if check_id == "live2d_record_file_local":
+        return "This proves Live2D Program Output can be recorded through the same output path."
+    if check_id == "capture_composite_local":
+        return "This proves capture sources can be resolved and composited into Program Output."
+    return "This check is required before commercial broadcast claims."
+
+
+def _default_safe_registration_hint(check_id: str) -> str:
+    if check_id == "private_rtmp_ingest":
+        return "Allowed evidence: redacted screenshot/log/notes showing ingest success. Never include stream keys, signed URLs, tokens, account IDs, or private chat."
+    if check_id == "youtube_unlisted_viewer_playback":
+        return "Allowed evidence: redacted screenshot/log/notes showing YouTube preview or watch-page playback. Never include stream keys, YouTube watch/preview URLs, signed/private URLs, account IDs, analytics, or chat."
+    if check_id == "discord_window_share":
+        return "Allowed evidence: redacted screenshot/notes showing Program Output shared. Never include private user names, chat content, or the Performance Source frame."
+    return "Register only redacted evidence. Do not include tokens, passwords, stream keys, signed URLs, or private account data."
+
+
 def _refresh_summary(report: dict[str, Any]) -> None:
     checks = [row for row in report.get("checks", []) if isinstance(row, Mapping)]
-    passed = len([row for row in checks if row.get("ok")])
-    required = len(checks)
+    required_checks = [row for row in checks if row.get("required_for_sale", True)]
+    passed = len([row for row in required_checks if row.get("ok")])
+    required = len(required_checks)
     report["ok"] = all(row.get("ok") for row in checks if row.get("kind") == "local_runtime")
-    report["real_platform_evidence"] = all(row.get("ok") for row in checks) and any(row.get("kind") == "real_platform" for row in checks)
+    report["real_platform_evidence"] = all(row.get("ok") for row in required_checks) and any(row.get("kind") == "real_platform" for row in required_checks)
     report["summary"] = {
         "passed": passed,
         "required": required,
         "pending": required - passed,
         "local_runtime_passed": len([row for row in checks if row.get("kind") == "local_runtime" and row.get("ok")]),
-        "manual_platform_pending": len([row for row in checks if row.get("kind") == "manual_platform" and not row.get("ok")]),
+        "manual_platform_pending": len([row for row in required_checks if row.get("kind") == "manual_platform" and not row.get("ok")]),
     }
 
 
@@ -502,12 +760,29 @@ def _validate_evidence_payload(evidence: Mapping[str, Any]) -> None:
     if not str(evidence.get("evidence_path") or evidence.get("notes") or "").strip():
         raise ValueError("evidence_path or notes is required")
     forbidden = {"stream_key", "key", "password", "secret", "token"}
+    forbidden_fragments = (
+        "stream_key",
+        "password=",
+        "token=",
+        "access_token",
+        "secret=",
+        "key=",
+        "rtmp://live.twitch.tv/app/",
+        "rtmps://live-api-s.facebook.com:",
+        "rtmp://a.rtmp.youtube.com/live2/",
+        "rtmps://a.rtmps.youtube.com/live2/",
+        "youtube.com/watch",
+        "youtu.be/",
+        "youtube.com/live/",
+        "studio.youtube.com/video/",
+        "studio.youtube.com/live",
+    )
     for key, value in evidence.items():
         key_text = str(key).lower()
         if key_text in forbidden:
             raise ValueError(f"secret-like evidence field is not allowed: {key}")
         value_text = str(value).lower()
-        if "stream_key" in value_text or "password=" in value_text or "token=" in value_text:
+        if any(fragment in value_text for fragment in forbidden_fragments):
             raise ValueError("evidence appears to contain an unredacted secret")
 
 

@@ -15,8 +15,10 @@ from typing import Any, Mapping
 from app.ar_pbr.render_profile import (
     PROFILE_AUTHORED,
     PROFILE_MARMOSET_PBR,
+    PROFILE_VRM_MTOON,
     inspect_asset_render_profiles_from_descriptor,
     marmoset_pbr_available,
+    vrm_mtoon_available,
 )
 from app.ar_pbr.ambient_occlusion import normalize_ambient_occlusion_settings
 from app.ar_pbr.anisotropy import normalize_anisotropic_material_settings
@@ -48,486 +50,79 @@ from app.ar_pbr.surface import normalize_surface_settings
 from app.ar_pbr.triplanar import normalize_triplanar_settings
 from app.ar_pbr.transmission import normalize_transmission_settings
 from app.ar_pbr import gpu_material_packets
+from app.ar_pbr.gpu_preview_math import (
+    _active_render_profile,
+    _depth_texture_payload,
+    _extend_ndc_vertex,
+    _float,
+    _lighting_hdri_path,
+    _max_triangles,
+    _ndc_from_projected,
+    _normalize3,
+    _projected_bounds,
+    _sample_triangle_rows,
+    _shade_tuple_to_floats,
+    _track_is_pending,
+    _triangle_offscreen,
+)
+from app.ar_pbr.gpu_preview_geometry import (
+    _contact_shadow_vertices,
+    _convex_hull_2d,
+    _ellipse_vertices,
+    _mesh_contact_shadow_vertices,
+    _mesh_reflection_catcher_vertices,
+    _polygon_fan_vertices,
+    _rect_vertices,
+    _reflection_catcher_vertices,
+)
 
 
 PBR_VERTEX_STRIDE_FLOATS = gpu_material_packets.PBR_VERTEX_STRIDE_FLOATS
 PBR_TRIANGLE_FLOATS = gpu_material_packets.PBR_TRIANGLE_FLOATS
 
 
-def _float(value: Any, default: float = 0.0) -> float:
-    try:
-        return float(value)
-    except Exception:
-        return float(default)
 
 
-def _max_triangles(settings: Mapping[str, Any]) -> int:
-    for key in ("gpu_triangle_limit", "max_gpu_triangles", "max_triangles"):
-        try:
-            value = int(settings.get(key, 0) or 0)
-            if value > 0:
-                return max(64, min(240_000, value))
-        except Exception:
-            pass
-    return 120_000
 
 
-def _sample_triangle_rows(triangles: list[Any], budget: int) -> list[tuple[int, Any]]:
-    if budget <= 0:
-        return []
-    if len(triangles) <= budget:
-        return list(enumerate(triangles))
-    step = len(triangles) / float(max(1, budget))
-    rows: list[tuple[int, Any]] = []
-    seen: set[int] = set()
-    for sample_index in range(int(budget)):
-        triangle_index = min(len(triangles) - 1, int(sample_index * step))
-        if triangle_index in seen:
-            continue
-        seen.add(triangle_index)
-        rows.append((triangle_index, triangles[triangle_index]))
-    return rows
 
 
-def _ndc_from_projected(point: tuple[float, float, float], width: int, height: int) -> tuple[float, float]:
-    return (
-        max(-4.0, min(4.0, (float(point[0]) / max(1.0, float(width))) * 2.0 - 1.0)),
-        max(-4.0, min(4.0, 1.0 - (float(point[1]) / max(1.0, float(height))) * 2.0)),
-    )
 
 
-def _triangle_offscreen(points: list[tuple[float, float, float]], width: int, height: int) -> bool:
-    xs = [p[0] for p in points]
-    ys = [p[1] for p in points]
-    return max(xs) < -2 or min(xs) > width + 2 or max(ys) < -2 or min(ys) > height + 2
 
 
-def _shade_tuple_to_floats(color: tuple[int, int, int, int]) -> tuple[float, float, float, float]:
-    return (
-        max(0.0, min(1.0, float(color[0]) / 255.0)),
-        max(0.0, min(1.0, float(color[1]) / 255.0)),
-        max(0.0, min(1.0, float(color[2]) / 255.0)),
-        max(0.0, min(1.0, float(color[3]) / 255.0)),
-    )
 
 
-def _extend_ndc_vertex(
-    out: list[float],
-    point: tuple[float, float, float],
-    width: int,
-    height: int,
-    rgba: tuple[float, float, float, float],
-) -> None:
-    x, y = _ndc_from_projected(point, width, height)
-    out.extend((x, y, rgba[0], rgba[1], rgba[2], rgba[3]))
 
 
-def _normalize3(value: Any, fallback: tuple[float, float, float]) -> tuple[float, float, float]:
-    try:
-        x = float(value[0])
-        y = float(value[1])
-        z = float(value[2])
-    except Exception:
-        return fallback
-    length = math.sqrt(x * x + y * y + z * z)
-    if length <= 1e-8:
-        return fallback
-    return (x / length, y / length, z / length)
 
 
-def _requested_render_profile(track: Mapping[str, Any], settings: Mapping[str, Any]) -> str:
-    render = track.get("render") if isinstance(track.get("render"), Mapping) else {}
-    for source in (render, settings):
-        for key in ("render_profile", "ar_pbr_render_profile", "vrm_render_profile"):
-            value = str(source.get(key) or "").strip().casefold()
-            if value:
-                return value
-    return PROFILE_AUTHORED
 
 
-def _active_render_profile(
-    track: Mapping[str, Any],
-    settings: Mapping[str, Any],
-    descriptor: Mapping[str, Any],
-) -> tuple[str, dict[str, Any], str]:
-    profiles = inspect_asset_render_profiles_from_descriptor(descriptor)
-    requested = _requested_render_profile(track, settings)
-    if requested == PROFILE_MARMOSET_PBR:
-        if marmoset_pbr_available(profiles):
-            return PROFILE_MARMOSET_PBR, profiles, ""
-        return PROFILE_AUTHORED, profiles, "marmoset_pbr_requested_without_pbr_data"
-    return PROFILE_AUTHORED, profiles, ""
 
 
-def _lighting_hdri_path(lighting: Mapping[str, Any]) -> str:
-    raw = str(lighting.get("hdri_path") or "").strip()
-    if raw:
-        path = Path(raw)
-        if not path.is_absolute():
-            try:
-                path = Path(__file__).resolve().parents[2] / path
-            except Exception:
-                path = Path(raw)
-        return str(path)
-    try:
-        from app.ar_pbr.hdri_presets import resolve_hdri_preset
-
-        preset = resolve_hdri_preset(str(lighting.get("hdri_id") or ""))
-        if preset is not None:
-            return str(preset.path)
-    except Exception:
-        pass
-    return ""
 
 
-def _projected_bounds(points: list[tuple[float, float, float]]) -> tuple[float, float, float, float] | None:
-    visible = [(float(x), float(y)) for x, y, _z in points if math.isfinite(float(x)) and math.isfinite(float(y))]
-    if not visible:
-        return None
-    xs = [p[0] for p in visible]
-    ys = [p[1] for p in visible]
-    return min(xs), min(ys), max(xs), max(ys)
 
 
-def _depth_texture_payload(depth: Any, width: int, height: int):
-    if depth is None:
-        return None
-    try:
-        import numpy as np
-        from PIL import Image
-
-        arr = np.asarray(depth, dtype=np.float32)
-        if arr.ndim != 2 or arr.size <= 0:
-            return None
-        arr = np.nan_to_num(arr, nan=1.0, posinf=1.0, neginf=0.0)
-        if float(np.max(arr)) > 1.5:
-            arr = arr / 255.0
-        arr = np.clip(arr, 0.0, 1.0)
-        max_dim = 640
-        h, w = int(arr.shape[0]), int(arr.shape[1])
-        if max(w, h) > max_dim:
-            scale = float(max_dim) / float(max(w, h))
-            target = (max(1, int(round(w * scale))), max(1, int(round(h * scale))))
-            image = Image.fromarray(np.round(arr * 255.0).astype(np.uint8), mode="L")
-            image = image.resize(target, Image.Resampling.BILINEAR)
-            return np.ascontiguousarray(np.asarray(image, dtype=np.uint8))
-        return np.ascontiguousarray(np.round(arr * 255.0).astype(np.uint8))
-    except Exception:
-        return None
 
 
-def _ellipse_vertices(
-    *,
-    center_x: float,
-    center_y: float,
-    radius_x: float,
-    radius_y: float,
-    width: int,
-    height: int,
-    rgba: tuple[float, float, float, float],
-    segments: int = 20,
-) -> list[float]:
-    if radius_x <= 0.5 or radius_y <= 0.5:
-        return []
-    out: list[float] = []
-    center = (center_x, center_y, 0.0)
-    segments = max(8, min(40, int(segments)))
-    for idx in range(segments):
-        a0 = (idx / segments) * math.tau
-        a1 = ((idx + 1) / segments) * math.tau
-        p0 = center
-        p1 = (center_x + math.cos(a0) * radius_x, center_y + math.sin(a0) * radius_y, 0.0)
-        p2 = (center_x + math.cos(a1) * radius_x, center_y + math.sin(a1) * radius_y, 0.0)
-        for point in (p0, p1, p2):
-            _extend_ndc_vertex(out, point, width, height, rgba)
-    return out
 
 
-def _rect_vertices(
-    *,
-    x0: float,
-    y0: float,
-    x1: float,
-    y1: float,
-    width: int,
-    height: int,
-    rgba: tuple[float, float, float, float],
-) -> list[float]:
-    if x1 <= x0 + 0.5 or y1 <= y0 + 0.5:
-        return []
-    out: list[float] = []
-    points = [
-        (x0, y0, 0.0),
-        (x1, y0, 0.0),
-        (x1, y1, 0.0),
-        (x0, y0, 0.0),
-        (x1, y1, 0.0),
-        (x0, y1, 0.0),
-    ]
-    for point in points:
-        _extend_ndc_vertex(out, point, width, height, rgba)
-    return out
 
 
-def _convex_hull_2d(points: list[tuple[float, float]]) -> list[tuple[float, float]]:
-    clean = sorted({(round(float(x), 3), round(float(y), 3)) for x, y in points})
-    if len(clean) <= 2:
-        return clean
-
-    def cross(o, a, b):
-        return (a[0] - o[0]) * (b[1] - o[1]) - (a[1] - o[1]) * (b[0] - o[0])
-
-    lower: list[tuple[float, float]] = []
-    for point in clean:
-        while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0:
-            lower.pop()
-        lower.append(point)
-    upper: list[tuple[float, float]] = []
-    for point in reversed(clean):
-        while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0:
-            upper.pop()
-        upper.append(point)
-    return lower[:-1] + upper[:-1]
 
 
-def _polygon_fan_vertices(
-    points: list[tuple[float, float]],
-    *,
-    width: int,
-    height: int,
-    rgba: tuple[float, float, float, float],
-) -> list[float]:
-    if len(points) < 3 or rgba[3] <= 0.001:
-        return []
-    cx = sum(float(p[0]) for p in points) / len(points)
-    cy = sum(float(p[1]) for p in points) / len(points)
-    out: list[float] = []
-    for idx, point in enumerate(points):
-        next_point = points[(idx + 1) % len(points)]
-        for px, py in ((cx, cy), point, next_point):
-            _extend_ndc_vertex(out, (px, py, 0.0), width, height, rgba)
-    return out
 
 
-def _mesh_contact_shadow_vertices(
-    projected: list[tuple[float, float, float]],
-    *,
-    x0: float,
-    y0: float,
-    y1: float,
-    span_x: float,
-    span_y: float,
-    width: int,
-    height: int,
-    light_dir: tuple[float, float, float],
-    alpha: float,
-    softness: float = 0.55,
-    matte_alpha: float = 0.0,
-) -> list[float]:
-    soft = max(0.0, min(1.0, float(softness)))
-    matte = max(0.0, min(1.0, float(matte_alpha)))
-    if len(projected) < 3 or (alpha <= 0.001 and matte <= 0.001):
-        return []
-    base_y = min(float(height) - 1.0, y1 + max(1.0, span_y * 0.035))
-    light_x = max(-1.0, min(1.0, float(light_dir[0])))
-    light_y = max(0.05, min(1.0, abs(float(light_dir[1]))))
-    candidates: list[tuple[float, float]] = []
-    lower_cutoff = y0 + span_y * 0.35
-    for px, py, _pz in projected:
-        if py < lower_cutoff:
-            continue
-        fall = max(0.0, y1 - float(py))
-        sx = float(px) - light_x * (fall * 0.20 + span_x * 0.035)
-        sy = base_y + fall * (0.035 + light_y * 0.030)
-        candidates.append((
-            max(-width * 0.25, min(width * 1.25, sx)),
-            max(0.0, min(height - 1.0, sy)),
-        ))
-    if len(candidates) < 3:
-        return []
-    hull = _convex_hull_2d(candidates)
-    if len(hull) < 3:
-        return []
-    out = _polygon_fan_vertices(
-        hull,
-        width=width,
-        height=height,
-        rgba=(0.0, 0.0, 0.0, min(0.26, max(alpha * (0.50 - soft * 0.12), matte * 0.10))),
-    )
-    center_x = sum(x for x, _y in hull) / len(hull)
-    center_y = sum(y for _x, y in hull) / len(hull)
-    for radius_scale, y_scale, alpha_scale, segments in (
-        (0.26 + soft * 0.12, 0.045 + soft * 0.030, 0.42, 24),
-        (0.42 + soft * 0.24, 0.075 + soft * 0.055, 0.22, 32),
-    ):
-        out.extend(_ellipse_vertices(
-            center_x=center_x,
-            center_y=center_y,
-            radius_x=max(2.0, span_x * radius_scale),
-            radius_y=max(1.5, span_y * y_scale),
-            width=width,
-            height=height,
-            rgba=(0.0, 0.0, 0.0, min(0.18, max(alpha * alpha_scale, matte * 0.05))),
-            segments=segments,
-        ))
-    return out
 
 
-def _contact_shadow_vertices(
-    *,
-    x0: float,
-    y1: float,
-    span_x: float,
-    span_y: float,
-    width: int,
-    height: int,
-    light_dir: tuple[float, float, float],
-    alpha: float,
-    softness: float = 0.55,
-    matte_alpha: float = 0.0,
-) -> list[float]:
-    soft = max(0.0, min(1.0, float(softness)))
-    matte = max(0.0, min(1.0, float(matte_alpha)))
-    if alpha <= 0.001 and matte <= 0.001:
-        return []
-    # This is still a packet catcher, not a real shadow map. Layering several
-    # ellipses gives the GL preview/export path a softer contact-shadow falloff
-    # without adding a new renderer surface.
-    offset_x = max(-span_x * 0.18, min(span_x * 0.18, -float(light_dir[0]) * span_x * 0.12))
-    offset_y = max(0.0, min(span_y * 0.12, abs(float(light_dir[1])) * span_y * 0.045))
-    center_x = x0 + span_x * 0.5 + offset_x
-    center_y = min(float(height) - 1.0, y1 + span_y * 0.035 + offset_y)
-    layers = (
-        (0.24 + soft * 0.10, 0.038 + soft * 0.028, min(0.30, max(alpha * 0.86, matte * 0.08)), 18),
-        (0.42 + soft * 0.18, 0.075 + soft * 0.060, min(0.18, max(alpha * 0.42, matte * 0.05)), 26),
-        (0.62 + soft * 0.32, 0.120 + soft * 0.115, min(0.10, max(alpha * 0.18, matte * 0.03)), 34),
-    )
-    out: list[float] = []
-    for rx, ry, layer_alpha, segments in layers:
-        out.extend(_ellipse_vertices(
-            center_x=center_x,
-            center_y=center_y,
-            radius_x=max(2.0, span_x * rx),
-            radius_y=max(1.5, span_y * ry),
-            width=width,
-            height=height,
-            rgba=(0.0, 0.0, 0.0, layer_alpha),
-            segments=segments,
-        ))
-    return out
 
 
-def _mesh_reflection_catcher_vertices(
-    projected: list[tuple[float, float, float]],
-    *,
-    y1: float,
-    span_y: float,
-    width: int,
-    height: int,
-    rgba: tuple[float, float, float, float],
-    roughness: float = 0.45,
-    opacity: float = 0.35,
-    softness: float = 0.45,
-    matte_alpha: float = 0.0,
-    contact_strength: float = 0.32,
-) -> list[float]:
-    if len(projected) < 3 or (rgba[3] <= 0.001 and matte_alpha <= 0.001):
-        return []
-    rough = max(0.04, min(1.0, float(roughness)))
-    soft = max(0.0, min(1.0, float(softness)))
-    opacity = max(0.0, min(1.0, float(opacity)))
-    matte = max(0.0, min(1.0, float(matte_alpha)))
-    contact = max(0.0, min(1.0, float(contact_strength)))
-    out: list[float] = []
-    layers = (
-        (0.20 + rough * 0.08, 0.00, 0.68 + contact * 0.22),
-        (0.34 + rough * 0.16 + soft * 0.06, span_y * (0.018 + soft * 0.020), 0.34),
-        (0.50 + rough * 0.26 + soft * 0.12, span_y * (0.048 + soft * 0.050), 0.15),
-    )
-    for mirror_scale, y_offset, alpha_scale in layers:
-        mirrored: list[tuple[float, float]] = []
-        for px, py, _pz in projected:
-            dy = max(0.0, y1 - float(py))
-            if dy > span_y * 0.88:
-                continue
-            mx = max(0.0, min(width - 1.0, float(px)))
-            my = max(0.0, min(height - 1.0, y1 + y_offset + dy * mirror_scale))
-            mirrored.append((mx, my))
-        hull = _convex_hull_2d(mirrored)
-        if len(hull) < 3:
-            continue
-        out.extend(_polygon_fan_vertices(
-            hull,
-            width=width,
-            height=height,
-            rgba=(
-                rgba[0] * (1.0 - rough * 0.20),
-                rgba[1] * (1.0 - rough * 0.20),
-                rgba[2] * (1.0 - rough * 0.20),
-                min(0.20, max(rgba[3] * opacity * alpha_scale, matte * 0.035)),
-            ),
-        ))
-    return out
 
 
-def _reflection_catcher_vertices(
-    *,
-    x0: float,
-    y1: float,
-    span_x: float,
-    span_y: float,
-    width: int,
-    height: int,
-    rgba: tuple[float, float, float, float],
-    roughness: float = 0.45,
-    opacity: float = 0.35,
-    softness: float = 0.45,
-    matte_alpha: float = 0.0,
-    contact_strength: float = 0.32,
-    contact_falloff: float = 0.58,
-) -> list[float]:
-    if rgba[3] <= 0.001 and matte_alpha <= 0.001:
-        return []
-    rough = max(0.02, min(1.0, float(roughness)))
-    soft = max(0.0, min(1.0, float(softness)))
-    opacity = max(0.0, min(1.0, float(opacity)))
-    matte = max(0.0, min(1.0, float(matte_alpha)))
-    contact = max(0.0, min(1.0, float(contact_strength)))
-    falloff = max(0.05, min(1.0, float(contact_falloff)))
-    reach = 0.20 + rough * 0.24 + soft * 0.14
-    out: list[float] = []
-    out.extend(_rect_vertices(
-        x0=max(0.0, x0 + span_x * 0.08),
-        y0=max(0.0, y1),
-        x1=min(float(width) - 1.0, x0 + span_x * 0.92),
-        y1=min(float(height) - 1.0, y1 + span_y * (0.10 + falloff * 0.10)),
-        width=width,
-        height=height,
-        rgba=(rgba[0], rgba[1], rgba[2], min(0.18, max(rgba[3] * opacity * (0.48 + contact * 0.42), matte * 0.035))),
-    ))
-    out.extend(_rect_vertices(
-        x0=max(0.0, x0 + span_x * 0.18),
-        y0=max(0.0, y1 + span_y * (0.10 + falloff * 0.06)),
-        x1=min(float(width) - 1.0, x0 + span_x * 0.82),
-        y1=min(float(height) - 1.0, y1 + span_y * (0.18 + reach * 0.36)),
-        width=width,
-        height=height,
-        rgba=(rgba[0] * 0.75, rgba[1] * 0.75, rgba[2] * 0.75, min(0.10, max(rgba[3] * opacity * 0.26, matte * 0.025))),
-    ))
-    out.extend(_rect_vertices(
-        x0=max(0.0, x0 + span_x * 0.28),
-        y0=max(0.0, y1 + span_y * (0.20 + reach * 0.20)),
-        x1=min(float(width) - 1.0, x0 + span_x * 0.72),
-        y1=min(float(height) - 1.0, y1 + span_y * (0.28 + reach * 0.56)),
-        width=width,
-        height=height,
-        rgba=(rgba[0] * 0.52, rgba[1] * 0.52, rgba[2] * 0.52, min(0.055, max(rgba[3] * opacity * 0.12, matte * 0.018))),
-    ))
-    return out
 
 
-def _track_is_pending(descriptor: Mapping[str, Any]) -> bool:
-    return str(descriptor.get("import_state") or "").casefold() in {"loading", "pending", "error"}
 
 
 def build_gpu_preview_items(
@@ -738,6 +333,7 @@ def build_gpu_preview_items(
         pbr_triangles: list[dict[str, Any]] = []
         pbr_roughness_values: list[float] = []
         marmoset_pbr_triangle_count = 0
+        vrm_mtoon_triangle_count = 0
 
         for geometry in geometries:
             if remaining <= 0:
@@ -758,8 +354,11 @@ def build_gpu_preview_items(
             texture_maps = gpu_material_packets.material_texture_maps(texture_plan, material)
             force_marmoset_pbr = render_profile == PROFILE_MARMOSET_PBR and gpu_material_packets.material_has_pbr_data(material)
             is_unlit_material = gpu_material_packets.material_unlit(material) and not force_marmoset_pbr
+            is_mtoon_material = render_profile == PROFILE_VRM_MTOON and is_unlit_material
             if is_unlit_material:
                 texture_maps = {**texture_maps, "unlit": "1"}
+            if is_mtoon_material:
+                texture_maps = {**texture_maps, "vrm_mtoon": "1"}
             geometry_uvs = gpu_material_packets.geometry_uvs_for_material(geometry, material)
             uv_transform = gpu_material_packets.material_uv_transform(material)
             triangles = geometry.get("triangles") or []
@@ -862,6 +461,8 @@ def build_gpu_preview_items(
                     pbr_roughness_values.append(float(material_packet["pbr_roughness"]))
                 if bool(material_packet.get("marmoset_pbr_triangle")):
                     marmoset_pbr_triangle_count += 1
+                if is_mtoon_material and pbr_triangle is not None:
+                    vrm_mtoon_triangle_count += 1
                 track_triangles += 1
                 total_triangles += 1
                 diagnostics["visible_triangle_count"] += 1
@@ -976,6 +577,7 @@ def build_gpu_preview_items(
                 "render_profile": render_profile,
                 "render_profiles": render_profiles,
                 "marmoset_pbr_triangle_count": marmoset_pbr_triangle_count,
+                "vrm_mtoon_triangle_count": vrm_mtoon_triangle_count,
                 "texture_triangles": [
                     {
                         "z": float(row.get("z", 0.0)),
@@ -1355,6 +957,15 @@ def build_gpu_preview_items(
     if marmoset_pbr_triangle_count > 0:
         diagnostics["gpu_renderer"]["render_profile"] = PROFILE_MARMOSET_PBR
         diagnostics["gpu_renderer"]["marmoset_pbr"] = "enabled_for_pbr_materials"
+    vrm_mtoon_triangle_count = sum(
+        int(item.get("vrm_mtoon_triangle_count", 0) or 0)
+        for item in items
+        if isinstance(item, Mapping)
+    )
+    diagnostics["vrm_mtoon_triangle_count"] = int(vrm_mtoon_triangle_count)
+    if vrm_mtoon_triangle_count > 0:
+        diagnostics["gpu_renderer"]["render_profile"] = PROFILE_VRM_MTOON
+        diagnostics["gpu_renderer"]["vrm_mtoon"] = "enabled_for_vrm_mtoon_materials"
     if texture_triangle_count > 0:
         diagnostics["gpu_renderer"]["texture_maps"] = "packet_uv_texture_ready"
         diagnostics["gpu_renderer"]["texture_sampling"] = "export_affine_uv_sampling_preview_average_tint"

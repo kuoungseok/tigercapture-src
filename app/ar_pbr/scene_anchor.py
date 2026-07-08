@@ -511,13 +511,15 @@ def promote_track_to_scene_anchor(
     from app.camera_solve.cache import store_camera_solution
     from app.camera_solve.solver import solve_road_plane_from_points
     from app.depth.cache import depth_source_id, store_depth_frame
-    from app.depth.estimator import estimate_depth_from_luma
+    from app.depth.estimator import estimate_depth
+    from app.depth.providers import select_depth_provider_id
 
     out = deepcopy(dict(track))
     width, height = _frame_size(frame)
     image_point = _track_image_point(out)
-    depth_id = depth_source_id(source_id or str(out.get("asset_path") or "preview"), backend="synthetic_luma")
-    depth, depth_diag = estimate_depth_from_luma(
+    provider_id = select_depth_provider_id()
+    depth_id = depth_source_id(source_id or str(out.get("asset_path") or "preview"), backend=provider_id)
+    depth, depth_diag = estimate_depth(
         frame,
         source_id=depth_id,
         time_ms=int(time_ms),
@@ -547,7 +549,14 @@ def promote_track_to_scene_anchor(
 
     if store_caches:
         try:
-            store_depth_frame(depth_id, int(time_ms), depth, diagnostics=depth_diag)
+            store_depth_frame(
+                depth_id,
+                int(time_ms),
+                depth,
+                diagnostics=depth_diag,
+                source_path=source_id or str(out.get("asset_path") or "preview"),
+                provider_id=provider_id,
+            )
         except Exception as exc:
             diagnostics["warnings"].append(f"depth cache unavailable: {type(exc).__name__}")
         try:
@@ -593,7 +602,7 @@ def update_scene_anchor_for_frame(
 ) -> tuple[dict[str, Any], Any, dict[str, Any] | None, dict[str, Any]]:
     """Return a runtime track copy whose anchor follows the current frame."""
     from app.camera_solve.solver import solve_road_plane_from_points
-    from app.depth.estimator import estimate_depth_from_luma
+    from app.depth.estimator import estimate_depth
 
     out = deepcopy(dict(track))
     placement = dict(out.get("placement") if isinstance(out.get("placement"), Mapping) else {})
@@ -606,7 +615,7 @@ def update_scene_anchor_for_frame(
     if tracked_point is None:
         tracked_point = previous_point
     depth_id = str(out.get("depth_source_id") or f"runtime_depth_{out.get('id', 'track')}")
-    depth, depth_diag = estimate_depth_from_luma(frame, source_id=depth_id, time_ms=int(time_ms))
+    depth, depth_diag = estimate_depth(frame, source_id=depth_id, time_ms=int(time_ms))
     points = road_plane_sample_points(tracked_point, (width, height))
     solution, plane_diag = solve_road_plane_from_points(
         points,

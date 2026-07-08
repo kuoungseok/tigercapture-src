@@ -146,8 +146,42 @@ def test_video_editor_tracks_host_accepts_media_pool_video_drop(tmp_path):
     assert VideoEditorWindow.eventFilter(editor, host, drag) is True
     assert drag.accepted is True
 
+    move = _FakeTimelineDropEvent(QEvent.Type.DragMove, mime)
+    assert VideoEditorWindow.eventFilter(editor, host, move) is True
+    assert move.accepted is True
+
     drop = _FakeTimelineDropEvent(QEvent.Type.Drop, mime)
     assert VideoEditorWindow.eventFilter(editor, host, drop) is True
+    assert drop.accepted is True
+    assert added == [video]
+
+
+def test_video_editor_tracks_viewport_accepts_media_pool_video_drop(tmp_path):
+    from PySide6.QtCore import QEvent, QMimeData, QUrl
+
+    from app.video_editor_window import VideoEditorWindow
+
+    video = tmp_path / "viewport_pool_clip.mp4"
+    video.write_bytes(b"not-a-real-video")
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(video))])
+
+    editor = VideoEditorWindow.__new__(VideoEditorWindow)
+    viewport = object()
+    editor._tracks_host = object()
+    editor._tracks_scroll = SimpleNamespace(viewport=lambda: viewport)
+    editor._performance_source_paths_from_mime = lambda _mime: []
+    editor._mmd_paths_from_mime = lambda _mime: []
+    added: list[Path] = []
+    editor._add_track_with_source = lambda path: added.append(Path(path))
+    editor._add_audio_track_with_source = lambda path, *, open_editor=False: None
+
+    move = _FakeTimelineDropEvent(QEvent.Type.DragMove, mime)
+    assert VideoEditorWindow.eventFilter(editor, viewport, move) is True
+    assert move.accepted is True
+
+    drop = _FakeTimelineDropEvent(QEvent.Type.Drop, mime)
+    assert VideoEditorWindow.eventFilter(editor, viewport, drop) is True
     assert drop.accepted is True
     assert added == [video]
 

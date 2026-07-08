@@ -158,6 +158,96 @@ Initial synthetic QA may use a deterministic luminance and vertical-gradient
 depth estimator. Production quality requires a video-consistent model such as
 Video Depth Anything or an ONNX equivalent, loaded only when available.
 
+### Depth Quality Gap And Response Plan
+
+Current implementation status:
+
+- `app.depth.providers` owns the registered depth-provider layer. Implemented
+  provider ids are `synthetic_luma_depth`, `onnx_monocular_depth`, and
+  `external_depth_sequence`, and `video_temporal_depth`.
+- `app.depth.estimator.estimate_depth_from_luma` is retained as a compatibility
+  wrapper for the deterministic QA fallback. It blends a vertical near/far
+  gradient with luma so renderer paths can be tested without model downloads.
+- `onnx_monocular_depth` is enabled only when `onnxruntime` is installed and
+  `TIGERCAPTURE_DEPTH_ONNX_MODEL_PATH` points at a local ONNX model. TigerCapture
+  does not silently download depth models.
+- `app.depth.jobs.generate_depth_cache_for_frames` can generate clip/keyframe
+  depth caches with manifest metadata.
+- `app.depth.cache` stores frame `.npy` files plus a manifest with provider,
+  source path, source mtime, frame count, stale-cache status, and nearest-frame
+  lookup support.
+- `app.depth.refinement` and `app.depth.temporal` provide lightweight
+  compositor-oriented edge cleanup and temporal stabilization hooks.
+- `ProjectPlayer` and `VideoExporter` already pass depth frames into AR/PBR
+  preview/export when `depth_source_id`, scene-anchor depth, or runtime depth is
+  available. Cached depth is loaded first, including nearby cached frames for
+  scrub/export continuity. If no cached source exists, they fall back through
+  `app.depth.estimator.estimate_depth(...)`.
+- `app.ar_pbr.depth_occlusion` can apply normalized 0..1 depth matte
+  occlusion, tolerance, softness, and optional edge-glow diagnostics.
+- The worker-safe full GPU helper currently applies video-depth as an overlay
+  alpha matte after model-view rendering; this is useful but not the final
+  native model-depth-buffer compare path.
+
+Product implication:
+
+- TigerCapture must not claim high-quality photo/video depth generation while
+  the runtime depth backend is `synthetic_luma_depth`.
+- The current fallback is sufficient for QA, simple road-plane smoke tests, and
+  proof that preview/export consume depth, but it cannot produce the
+  foreground/person-aware depth maps shown in high-quality monocular depth
+  examples.
+
+Production response plan:
+
+1. DONE: Registered depth-provider layer under `app/depth/`:
+   - provider ids: `synthetic_luma_depth`, `onnx_monocular_depth`,
+     `external_depth_sequence`, `video_temporal_depth`.
+   - common result: normalized float32 depth, provider diagnostics, and provider
+     status.
+   - no silent model downloads.
+2. DONE: ONNX-first local backend contract:
+   - `onnx_monocular_depth` runs local ONNX models through `onnxruntime` when a
+     model path is configured.
+   - if unavailable, the selector returns the deterministic fallback and reports
+     provider availability.
+3. DONE: Depth cache job for clips/keyframes:
+   - generate frame depth `.npy` files.
+   - store a manifest with provider, version, frame count, source path, source
+     mtime, diagnostics, and stale-cache detection.
+   - preview/export can read exact or nearby cached depth frames.
+   - CLI/manual QA entry point:
+     `python tools/generate_depth_cache.py clip.mp4 --interval-ms 200 --max-frames 60`.
+4. PARTIAL: Edge/refinement passes before AR/PBR occlusion:
+   - lightweight RGB-aware blur and optional mask foreground bias exists.
+   - remaining work: SAM/object-mask integration and manual brush correction UI.
+5. PARTIAL: Video temporal stabilization:
+   - lightweight temporal smoothing with scene-cut reset exists.
+   - remaining work: optical-flow-guided propagation and Video Depth Anything or
+     equivalent high-quality backend.
+6. TODO: Add calibration controls:
+   - floor/road plane hints, horizon/vanishing lines, known-height scale, camera
+     FOV/focal estimate, and depth range remap.
+   - save these as clip-sidecar depth calibration data so export matches
+     preview.
+7. TODO: Upgrade full GPU helper occlusion:
+   - expose/capture rendered model depth from the helper.
+   - compare video depth against rendered object depth per fragment/pixel,
+     rather than only applying an overlay alpha matte.
+
+Acceptance criteria for "AR/PBR depth is production-usable":
+
+- Diagnostics show a real provider such as `onnx_monocular_depth` or
+  `video_temporal_depth`, not `synthetic_luma_depth`.
+- Cached depth has a manifest, frame count, provider version, and stale-cache
+  detection.
+- A human foreground can hide a 3D model with stable edges in preview and
+  export.
+- A 10-30 second handheld video does not flicker frame-to-frame after temporal
+  stabilization.
+- The user can manually fix wrong foreground/background regions without leaving
+  TigerCapture.
+
 ## Camera Solve Contract
 
 A camera solution should include:
@@ -252,8 +342,11 @@ style PBR material data.
 
 Render-profile policy:
 
-- `authored` is the default profile. It preserves source shader intent,
-  including VRM/MToon anime materials.
+- `authored` preserves source shader intent for ordinary assets.
+- `vrm_mtoon` is the default profile for imported VRM assets with VRM0/MToon
+  material metadata. It keeps the avatar on the toon path, carries MToon
+  renderQueue/ZWrite/culling/cutoff metadata into preview/export diagnostics,
+  and prevents VRM avatars from silently falling into the generic PBR route.
 - `marmoset_pbr` is an optional profile in the existing AR/PBR 3D pipeline, not
   a VTuber bridge feature. It is exposed only when the imported resource has
   explicit glTF PBR data such as base-color, metallic/roughness, normal,
@@ -263,7 +356,8 @@ Render-profile policy:
   assets away from their authored toon look.
 - The descriptor field is `render_profiles` with schema
   `tigerstudio.ar_pbr.render_profiles.v1`; AR/PBR tracks can request the option
-  with `track["render"]["render_profile"] == "marmoset_pbr"`.
+  with `track["render"]["render_profile"] == "vrm_mtoon"` or
+  `track["render"]["render_profile"] == "marmoset_pbr"`.
 
 ## Asset Import Contract
 
@@ -518,6 +612,23 @@ Current implemented behavior as of 2026-07-03:
 - `app.ar_pbr.depth_occlusion` owns depth normalization, tolerance/softness
   parsing, and alpha-mask application. Depth inputs are normalized to a 0..1
   convention where lower values are closer to the camera.
+- `app.ar_pbr.depth_occlusion.build_depth_effect_masks(...)` is the reusable
+  depth-mask extraction point for effects. It returns visible, hidden,
+  transition, scene-depth-edge, object-boundary, and final edge masks so glow,
+  contact effects, depth-aware outlines, and future node effects do not each
+  reimplement depth math.
+- `app.ar_pbr.depth_view.depth_frame_to_rgb(...)` is the viewer-only depth map
+  display path. The main ProjectPlayer preview can be switched to
+  depth-map-only via `ProjectPlayer.set_ar_pbr_depth_view_mode(...)` or Python
+  Actions `ar_pbr.preview.depth_view.get/set`. Default display is grayscale
+  with near camera = white; `heat` and `inverted_grayscale` are debug options.
+  This mode is diagnostic only and must not change export/composite output.
+- Depth-map-only preview is user-controlled and must stay off by default. Normal
+  playback must not estimate depth unless an active AR/PBR track explicitly
+  needs depth for occlusion, scene/plane anchoring, or the user has enabled the
+  Depth viewer toggle. If no depth cache is available, live depth estimation may
+  be slower and should be treated as an intentional diagnostic/placement cost,
+  not part of the baseline video playback path.
 - Optional depth-boundary glow is configured through
   `depth_edge_glow_enabled`, `depth_edge_glow_strength`,
   `depth_edge_glow_radius_px`, and `depth_edge_glow_color`. This is a visible

@@ -16,12 +16,14 @@ REQUIRED_SPEC_TOKENS = {
         "app/locales/*.py",
         "resources/tigercapture.ico",
         "resources/luts/*.cube",
+        "resources/ui/sound_editor/*.png",
         "copy_metadata('imageio_ffmpeg')",
     ],
     "mac/TigerCapture-mac.spec": [
         "app' / 'locales' / '*.py",
         "resources' / 'tigercapture.ico",
         "resources' / 'luts' / '*.cube",
+        "resources' / 'ui' / 'sound_editor' / '*.png",
         "copy_metadata('imageio_ffmpeg')",
     ],
 }
@@ -33,6 +35,7 @@ REQUIRED_FILES = [
     "resources/luts/muted_film.cube",
     "resources/luts/film_warm.cube",
     "resources/luts/cool_blue.cube",
+    "resources/ui/sound_editor/jog_dial_metal_sparse_base.png",
 ]
 
 

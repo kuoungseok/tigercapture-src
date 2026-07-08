@@ -66,6 +66,8 @@
   "launch_command_template": [
     "E:\\ClaudeCodeApp\\GifCam\\.venv\\Scripts\\python.exe",
     "E:\\ClaudeCodeApp\\GifCam\\tools\\ar_pbr_preview_window.py",
+    "--settings-json",
+    "E:\\ClaudeCodeApp\\GifCam\\docs\\review_automation\\presets\\ar_pbr_somewhat_recognizable.json",
     "--asset",
     "E:\\ClaudeCodeApp\\3d\\Somewhat_Recognizable-668ed982\\gltf\\converted\\somewhat_recognizable_gl_extracted\\scene.gltf",
     "--width",

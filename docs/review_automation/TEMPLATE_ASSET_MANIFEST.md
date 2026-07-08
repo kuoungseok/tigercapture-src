@@ -220,6 +220,16 @@ E:\ClaudeCodeApp\GifCam\resources\ar_pbr\hdri
 Catalog rule:
 
 - AR/PBR screenshots should use a visually readable approved GLTF/GLB asset.
+- For laptop/iPad AR/PBR composite pages, the laptop video viewer and the
+  iPad/detail AR/PBR viewer must show the same named asset and preset. If the
+  iPad shows `Somewhat_Recognizable`, the laptop video viewer must show
+  `Somewhat_Recognizable` composited into the edit, not `Camera_01`, Nexus,
+  a vehicle, or any placeholder.
+- Load the asset into the editor AR/PBR track or composite layer, select it,
+  and scale/pan it through actions or saved view state until it is clearly
+  readable in the video viewer before taking the editor screenshot.
+- Do not fake this by pasting a standalone 3D viewer into the editor viewer.
+  Use a real editor capture, or mark the page pending.
 - Do not use the camera scene on every AR/PBR page. Use the camera model for
   camera-specific pages or as a fallback when the other approved GLTF assets
   fail to render cleanly.
@@ -254,6 +264,11 @@ Catalog rule:
   slide. If the template does not fit, change the slide layout around the
   template instead of distorting the template.
 - Screen contents inserted into frames must be real TigerCapture captures.
+- Final PPT screen contents must come from the current approved recapture batch.
+  Do not use historical screenshot roots such as `fresh_first_slide_capture`,
+  `actual_3d_viewer_capture`, or `debugCapture` as product-catalog slide
+  sources. If those paths appear in a PPT builder asset map, the build should
+  fail until the feature is recaptured into `fresh_review_recapture`.
 - Editor captures placed inside laptop or monitor frames should preferably show
   a multi-track timeline: source video plus audio/effect/color/text/actor/node
   lanes where relevant.

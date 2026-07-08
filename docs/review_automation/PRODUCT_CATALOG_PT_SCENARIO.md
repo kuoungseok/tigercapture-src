@@ -2,6 +2,18 @@
 
 Last updated: 2026-07-03
 
+## Current Full Catalog Override
+
+The current approved full product-catalog scenario is locked to 21 slides in:
+
+```text
+docs/review_automation/FULL_PRODUCT_CATALOG_MANIFEST.md
+```
+
+For full product-catalog PPT generation, that manifest overrides the older
+expanded outline below. Do not use the older 32-slide outline as the full deck
+contract unless the user explicitly revives it.
+
 이 문서는 최신 `SPEC.md`와 `docs/review_automation/` 규칙을 읽은 뒤 작성한
 제품 카탈로그 PT 시나리오 초안이다.
 
@@ -338,15 +350,18 @@ capture.screenshot
 
 시각:
 
-- Viewer 위에 텍스트.
-- 타임라인에 텍스트/타이포그래피 구간.
-- opacity/position/keyframe 컨트롤.
+- Viewer 위에 큰 히어로 타이틀이 보여야 한다. 작은 자막 한 줄만 보이면 실패로 본다.
+- 타이포그래피 프리셋, 제목 레이어, 본문/서브타이틀 레이어가 함께 보이면 좋다.
+- 타임라인에는 최소 2개 이상의 텍스트/타이포그래피 구간과 키프레임 마커가 보여야 한다.
+- opacity/position/scale/keyframe 컨트롤이 보이도록 Inspector 또는 타이틀 컨트롤을 함께 캡처한다.
+- 다국어 장점도 함께 보여줄 경우 한국어/영어/일본어 샘플을 크게 배치하고, 글자 깨짐이 있으면 캡처 실패로 본다.
 
 캡처 액션 후보:
 
 ```text
 text.add
 text.set_keyframes
+ui.focus_surface(title/text controls)
 capture.screenshot
 ```
 

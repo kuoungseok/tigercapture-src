@@ -25,7 +25,10 @@ def test_product_gap_push_separates_implementation_from_claim_ready() -> None:
     assert isinstance(report["implementation_ready"], bool)
     assert isinstance(report["claim_ready"], bool)
     assert isinstance(report["next_actions"], (list, tuple))
-    assert areas["ai_editing_quality"]["evidence"]["provider"]["use_provider"] is True
+    assert "provider" in areas["ai_editing_quality"]["evidence"]
+    assert isinstance(areas["ai_editing_quality"]["evidence"]["provider"].get("use_provider"), bool)
+    if not areas["ai_editing_quality"]["evidence"]["smart_edit_claim_ready"]:
+        assert "provider_not_exercised_on_corpus" in areas["ai_editing_quality"]["blockers"]
     assert "descript_lite_readiness" in areas["ai_editing_quality"]["evidence"]
     assert areas["ai_editing_quality"]["evidence"]["descript_lite_readiness"]["descript_lite_claim_ready"] is True
     assert "sidecar_intake_summary" in areas["real_recording_corpus"]["evidence"]

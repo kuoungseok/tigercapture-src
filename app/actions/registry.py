@@ -235,6 +235,9 @@ class ActionRegistry:
         from app.actions.ui_namespace import register_ui_actions
 
         register_ui_actions(self)
+        from app.actions.ppt_namespace import register_ppt_actions
+
+        register_ppt_actions(self)
         from app.actions.evidence_namespace import register_evidence_actions
 
         register_evidence_actions(self)

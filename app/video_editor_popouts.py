@@ -8,8 +8,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QThread, QSize, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QImage, QPainter, QPen, QPixmap
+from PySide6.QtCore import QThread, QSize, Qt, QUrl, Signal
+from PySide6.QtGui import QBrush, QColor, QDesktopServices, QImage, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSpinBox,
     QVBoxLayout,
@@ -30,8 +31,10 @@ from PySide6.QtWidgets import (
 
 from app.drawing import DrawingCanvas
 from app.broadcast_evidence_ui import (
+    broadcast_evidence_registration_warning,
     broadcast_evidence_register_defaults,
     broadcast_evidence_status_lines,
+    broadcast_evidence_wizard_summary,
     build_broadcast_evidence_registration_payload,
 )
 from app.i18n import tr
@@ -775,24 +778,32 @@ class VTuberBroadcastStudioWindow(QWidget):
 
         self._evidence_card, self._evidence_body = self._make_card(
             "Broadcast Evidence",
-            "Local Program Output checks can run automatically. Private RTMP and Discord/window-share evidence must be registered after real checks.",
+            "Local Program Output checks can run automatically. Private RTMP and YouTube viewer evidence must be registered after real checks.",
         )
-        self._evidence_card.setMaximumHeight(136)
+        self._evidence_card.setMaximumHeight(210)
         evidence_actions = QHBoxLayout()
         evidence_actions.setContentsMargins(0, 0, 0, 0)
         evidence_actions.setSpacing(8)
+        self._evidence_guide_btn = QPushButton("Guide", self._evidence_card)
+        self._evidence_guide_btn.setObjectName("StudioAction")
+        self._evidence_guide_btn.clicked.connect(self._open_broadcast_evidence_wizard_dialog)
+        self._evidence_youtube_studio_btn = QPushButton("YouTube Studio", self._evidence_card)
+        self._evidence_youtube_studio_btn.setObjectName("StudioAction")
+        self._evidence_youtube_studio_btn.clicked.connect(self._open_youtube_studio_url)
         self._evidence_refresh_btn = QPushButton("Refresh Evidence", self._evidence_card)
         self._evidence_refresh_btn.setObjectName("StudioAction")
         self._evidence_refresh_btn.clicked.connect(self._update_broadcast_evidence_status)
         self._evidence_register_rtmp_btn = QPushButton("Register RTMP", self._evidence_card)
         self._evidence_register_rtmp_btn.setObjectName("StudioAction")
         self._evidence_register_rtmp_btn.clicked.connect(lambda: self._open_broadcast_evidence_register_dialog("private_rtmp_ingest"))
-        self._evidence_register_discord_btn = QPushButton("Register Discord", self._evidence_card)
-        self._evidence_register_discord_btn.setObjectName("StudioAction")
-        self._evidence_register_discord_btn.clicked.connect(lambda: self._open_broadcast_evidence_register_dialog("discord_window_share"))
+        self._evidence_register_youtube_view_btn = QPushButton("Register YouTube View", self._evidence_card)
+        self._evidence_register_youtube_view_btn.setObjectName("StudioAction")
+        self._evidence_register_youtube_view_btn.clicked.connect(lambda: self._open_broadcast_evidence_register_dialog("youtube_unlisted_viewer_playback"))
+        evidence_actions.addWidget(self._evidence_guide_btn)
+        evidence_actions.addWidget(self._evidence_youtube_studio_btn)
         evidence_actions.addWidget(self._evidence_refresh_btn)
         evidence_actions.addWidget(self._evidence_register_rtmp_btn)
-        evidence_actions.addWidget(self._evidence_register_discord_btn)
+        evidence_actions.addWidget(self._evidence_register_youtube_view_btn)
         evidence_actions.addStretch(1)
         evidence_layout = self._evidence_card.layout()
         if evidence_layout is not None:
@@ -1704,6 +1715,138 @@ class VTuberBroadcastStudioWindow(QWidget):
         except Exception as exc:
             self._evidence_body.setText(f"Broadcast evidence checklist unavailable: {exc}")
 
+    def _open_broadcast_evidence_wizard_dialog(self) -> None:
+        try:
+            from app.broadcast_platform_e2e import build_broadcast_platform_evidence_checklist
+
+            checklist = build_broadcast_platform_evidence_checklist(".")
+            summary = broadcast_evidence_wizard_summary(checklist)
+        except Exception as exc:
+            QMessageBox.warning(self, "Broadcast Evidence Guide", f"Broadcast evidence checklist unavailable: {exc}")
+            return
+
+        dialog = QDialog(self)
+        dialog.setWindowTitle("Broadcast Evidence Guide")
+        dialog.resize(720, 620)
+        layout = QVBoxLayout(dialog)
+        layout.setContentsMargins(14, 14, 14, 14)
+        layout.setSpacing(10)
+
+        title = QLabel("Broadcast Evidence Guide", dialog)
+        title.setObjectName("StudioTitle")
+        layout.addWidget(title)
+
+        status = QLabel(
+            str(summary.get("operator_summary") or summary.get("status_text") or "Follow the steps below to unlock commercial broadcast claims."),
+            dialog,
+        )
+        status.setObjectName("StudioCardBody")
+        status.setWordWrap(True)
+        layout.addWidget(status)
+
+        youtube_flow = summary.get("youtube_only_flow") if isinstance(summary.get("youtube_only_flow"), dict) else {}
+        if youtube_flow:
+            youtube_title = "YouTube-only path is complete." if youtube_flow.get("complete") else "YouTube-only path is available."
+            next_required = youtube_flow.get("next_required_check") if isinstance(youtube_flow.get("next_required_check"), dict) else {}
+            youtube_parts = [
+                youtube_title,
+                str(youtube_flow.get("summary") or "A YouTube account is enough for the required broadcast evidence."),
+            ]
+            next_cta = str(next_required.get("primary_cta") or "").strip()
+            if next_cta:
+                youtube_parts.append(f"Next: {next_cta}")
+            youtube_hint = QLabel(" ".join(part for part in youtube_parts if part), dialog)
+            youtube_hint.setObjectName("StudioTargetStatus")
+            youtube_hint.setWordWrap(True)
+            layout.addWidget(youtube_hint)
+
+        progress = QLabel(
+            f"Progress: {int(summary.get('passed') or 0)}/{int(summary.get('required') or 0)} checks passed.",
+            dialog,
+        )
+        progress.setObjectName("StudioTargetStatus")
+        layout.addWidget(progress)
+
+        scroll = QScrollArea(dialog)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        holder = QWidget(scroll)
+        holder_lay = QVBoxLayout(holder)
+        holder_lay.setContentsMargins(0, 0, 0, 0)
+        holder_lay.setSpacing(8)
+        for step in list(summary.get("steps") or []):
+            if not isinstance(step, dict):
+                continue
+            holder_lay.addWidget(self._make_broadcast_evidence_step_widget(step, holder))
+        holder_lay.addStretch(1)
+        scroll.setWidget(holder)
+        layout.addWidget(scroll, stretch=1)
+
+        actions = QHBoxLayout()
+        actions.setContentsMargins(0, 0, 0, 0)
+        actions.setSpacing(8)
+        refresh_btn = QPushButton("Refresh", dialog)
+        refresh_btn.setObjectName("StudioAction")
+        refresh_btn.clicked.connect(lambda: (dialog.accept(), self._update_broadcast_evidence_status()))
+        rtmp_btn = QPushButton("Register RTMP", dialog)
+        rtmp_btn.setObjectName("StudioAction")
+        rtmp_btn.clicked.connect(lambda: (dialog.accept(), self._open_broadcast_evidence_register_dialog("private_rtmp_ingest")))
+        youtube_view_btn = QPushButton("Register YouTube View", dialog)
+        youtube_view_btn.setObjectName("StudioAction")
+        youtube_view_btn.clicked.connect(lambda: (dialog.accept(), self._open_broadcast_evidence_register_dialog("youtube_unlisted_viewer_playback")))
+        youtube_studio_btn = QPushButton("Open YouTube Studio", dialog)
+        youtube_studio_btn.setObjectName("StudioAction")
+        youtube_studio_btn.clicked.connect(self._open_youtube_studio_url)
+        close_btn = QPushButton("Close", dialog)
+        close_btn.setObjectName("StudioAction")
+        close_btn.clicked.connect(dialog.reject)
+        actions.addWidget(refresh_btn)
+        actions.addStretch(1)
+        actions.addWidget(youtube_studio_btn)
+        actions.addWidget(rtmp_btn)
+        actions.addWidget(youtube_view_btn)
+        actions.addWidget(close_btn)
+        layout.addLayout(actions)
+        dialog.exec()
+
+    def _open_youtube_studio_url(self) -> None:
+        QDesktopServices.openUrl(QUrl("https://studio.youtube.com"))
+
+    def _make_broadcast_evidence_step_widget(self, step: dict[str, object], parent: QWidget) -> QFrame:
+        frame = QFrame(parent)
+        frame.setObjectName("StudioCard")
+        lay = QVBoxLayout(frame)
+        lay.setContentsMargins(12, 10, 12, 10)
+        lay.setSpacing(5)
+        status = "Done" if step.get("ok") else "Pending"
+        title = QLabel(f"{int(step.get('index') or 0)}. {step.get('label') or step.get('id')}  [{status}]", frame)
+        title.setObjectName("StudioCardTitle")
+        title.setWordWrap(True)
+        lay.addWidget(title)
+        cta = QLabel(str(step.get("primary_cta") or ""), frame)
+        cta.setObjectName("StudioCardBody")
+        cta.setWordWrap(True)
+        lay.addWidget(cta)
+        why = str(step.get("why_required") or "").strip()
+        if why:
+            why_label = QLabel(f"Why: {why}", frame)
+            why_label.setObjectName("StudioTargetStatus")
+            why_label.setWordWrap(True)
+            lay.addWidget(why_label)
+        hint = str(step.get("safe_registration_hint") or "").strip()
+        if hint:
+            hint_label = QLabel(f"Safe evidence: {hint}", frame)
+            hint_label.setObjectName("StudioTargetStatus")
+            hint_label.setWordWrap(True)
+            lay.addWidget(hint_label)
+        steps = [str(item) for item in list(step.get("operator_steps") or []) if str(item).strip()]
+        if steps:
+            guide = QLabel("Steps: " + "  |  ".join(steps[:4]), frame)
+            guide.setObjectName("StudioTargetStatus")
+            guide.setWordWrap(True)
+            lay.addWidget(guide)
+        return frame
+
     def _open_broadcast_evidence_register_dialog(self, check_id: str) -> None:
         check_id = str(check_id or "").strip()
         defaults = broadcast_evidence_register_defaults(check_id)
@@ -1733,12 +1876,20 @@ class VTuberBroadcastStudioWindow(QWidget):
         layout.addWidget(evidence_label)
         layout.addWidget(evidence_edit)
 
+        notes_row = QHBoxLayout()
         notes_label = QLabel("Redacted notes", dialog)
         notes_label.setObjectName("StudioTargetLabel")
+        safe_template_btn = QPushButton("Use Safe Template", dialog)
+        safe_template_btn.setObjectName("StudioAction")
+        notes_row.addWidget(notes_label)
+        notes_row.addStretch(1)
+        notes_row.addWidget(safe_template_btn)
         notes_edit = QPlainTextEdit(dialog)
         notes_edit.setPlaceholderText(str(defaults.get("notes_placeholder") or ""))
         notes_edit.setMinimumHeight(88)
-        layout.addWidget(notes_label)
+        safe_template = str(defaults.get("safe_note_template") or "").strip()
+        safe_template_btn.clicked.connect(lambda: notes_edit.setPlainText(safe_template))
+        layout.addLayout(notes_row)
         layout.addWidget(notes_edit)
 
         from PySide6.QtWidgets import QCheckBox
@@ -1763,13 +1914,30 @@ class VTuberBroadcastStudioWindow(QWidget):
             notes=notes_edit.toPlainText(),
             confirm_redacted=bool(confirm.isChecked()),
         )
+        warning = broadcast_evidence_registration_warning(payload)
+        if warning:
+            QMessageBox.warning(self, "Broadcast evidence", warning)
+            self._evidence_body.setText(f"Evidence registration needs attention: {warning}")
+            return
         try:
             result = self._register_broadcast_evidence_payload(payload)
         except Exception as exc:
             QMessageBox.warning(self, "Broadcast evidence", str(exc))
             self._evidence_body.setText(f"Evidence registration failed: {exc}")
             return
-        QMessageBox.information(self, "Broadcast evidence", f"Evidence registered: {result.get('check_id') or check_id}")
+        refresh = result.get("readiness_refresh") if isinstance(result.get("readiness_refresh"), dict) else {}
+        if refresh.get("ok"):
+            if refresh.get("final_release_ready"):
+                message = "Evidence registered. Final release readiness is now unblocked."
+            elif refresh.get("broadcast_commercial_ready"):
+                message = "Evidence registered. Broadcast commercial readiness is now complete; final readiness still has another blocker."
+            else:
+                next_actions = [str(item) for item in list(refresh.get("final_next_actions") or refresh.get("broadcast_next_actions") or []) if str(item)]
+                suffix = f"\nNext: {next_actions[0]}" if next_actions else ""
+                message = f"Evidence registered. Readiness was refreshed, but more evidence is still required.{suffix}"
+        else:
+            message = f"Evidence registered: {result.get('check_id') or check_id}\nReadiness refresh did not complete automatically."
+        QMessageBox.information(self, "Broadcast evidence", message)
 
     def _register_broadcast_evidence_payload(self, payload: dict[str, object]) -> dict[str, object]:
         data = dict(payload or {})

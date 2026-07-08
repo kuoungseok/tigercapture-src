@@ -198,9 +198,12 @@ Before using a comparison screenshot in a deck:
 2. Verify the comparison state is actually visible.
 3. Verify the labels match the slide claim.
 4. Verify the feature effect is visually noticeable.
-5. If the difference is too subtle, use `Zoom Detail Compare` or recapture a
+5. Verify grade/filter/node values are non-neutral. If useful values are not
+   already known, research a real preset/source and record it in the
+   `.capture-contract.json` sidecar.
+6. If the difference is too subtle, use `Zoom Detail Compare` or recapture a
    stronger example.
-6. If the comparison shows only a generic split but no clear feature outcome,
+7. If the comparison shows only a generic split but no clear feature outcome,
    reject it.
 
 ## Recommended Catalog Placement
@@ -259,4 +262,3 @@ A comparison page is catalog-ready only when all of these are true:
 - slide copy matches the screenshot,
 - no QA metrics or raw debug details,
 - no fake generated editor UI.
-

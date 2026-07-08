@@ -47,6 +47,13 @@ def build_right_dock_sections(self) -> None:
         self._workbench_header_widget,
     )
     wh_layout.addWidget(self._workbench_header_title, stretch=1)
+    self.workbench_ppt_btn = QPushButton("PPT", self._workbench_header_widget)
+    self.workbench_ppt_btn.setObjectName("WorkbenchPptEntryButton")
+    self.workbench_ppt_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    self.workbench_ppt_btn.setToolTip("Open PPT Editor")
+    self.workbench_ppt_btn.setFixedSize(32, 13)
+    self.workbench_ppt_btn.clicked.connect(lambda: self._open_ppt_generator())
+    wh_layout.addWidget(self.workbench_ppt_btn)
     self.workbench_popout_btn = QPushButton("", self._workbench_header_widget)
     self.workbench_popout_btn.setObjectName("PreviewPopoutIcon")
     self.workbench_popout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -71,6 +78,9 @@ def build_right_dock_sections(self) -> None:
     )
     self._workbench_panel.sound_editor_changed.connect(
         self._on_workbench_sound_editor_changed,
+    )
+    self._workbench_panel.sound_editor_mixer_track_changed.connect(
+        self._on_workbench_sound_editor_mixer_track_changed,
     )
     self._workbench_panel.advanced_sound_lab_requested.connect(
         self._open_advanced_sound_lab,
@@ -463,4 +473,3 @@ def build_right_dock_sections(self) -> None:
     self._refresh_audio_workspace_panel()
     self._update_timeline_status()
     self._yield_startup_ui("final_refresh")
-

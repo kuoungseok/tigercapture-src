@@ -102,7 +102,7 @@ def track_lighting_settings(track: dict) -> dict:
         lighting = render.get("lighting") if isinstance(render, dict) else {}
         out = normalize_lighting_settings(lighting)
         profile = str(render.get("render_profile") or "authored").strip().casefold() if isinstance(render, dict) else "authored"
-        out["render_profile"] = profile if profile in {"authored", "marmoset_pbr"} else "authored"
+        out["render_profile"] = profile if profile in {"authored", "vrm_mtoon", "marmoset_pbr"} else "authored"
         return out
     except Exception:
         return dict(DEFAULT_LIGHTING_SETTINGS)
@@ -119,7 +119,7 @@ def apply_lighting_settings_to_track(track: dict, settings: dict) -> None:
     if isinstance(render, dict):
         render["lighting"] = lighting
         profile = str((settings or {}).get("render_profile") or render.get("render_profile") or "authored").strip().casefold()
-        render["render_profile"] = profile if profile in {"authored", "marmoset_pbr"} else "authored"
+        render["render_profile"] = profile if profile in {"authored", "vrm_mtoon", "marmoset_pbr"} else "authored"
         render.setdefault("shadow_quality", "preview")
         render.setdefault("reflection_quality", "preview")
     try:

@@ -419,8 +419,12 @@ def run_action_review_scenario(
         audio_result = imported_audio.get("result") if isinstance(imported_audio.get("result"), Mapping) else {}
         audio_track_id = _as_int(audio_result.get("track_id"), 1)
         audio_clip_id = _as_int(audio_result.get("clip_id"), 1)
-        run("audio.track.set_mix", {"track_id": audio_track_id, "volume": 0.82, "pan": -0.05})
+        run("audio.track.set_volume", {"track_id": audio_track_id, "volume": 0.82})
+        run("audio.track.set_pan", {"track_id": audio_track_id, "pan": -0.05})
+        run("audio.track.mute", {"track_id": audio_track_id, "muted": False})
+        run("audio.track.solo", {"track_id": audio_track_id, "solo": False})
         run("audio.clip.set_gain", {"track_id": audio_track_id, "clip_id": audio_clip_id, "gain": 1.18})
+        run("audio.mixer.state", {})
         run("selection.set", {"kind": "audio", "track_id": audio_track_id, "clip_id": audio_clip_id})
 
     timeline_result = registry.execute("timeline.summary").to_dict()

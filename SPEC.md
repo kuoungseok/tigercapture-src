@@ -1,6 +1,6 @@
 ﻿# TigerCapture Feature Spec for AI Agents
 
-Last updated: 2026-07-05
+Last updated: 2026-07-08
 
 This file is an AI-readable map of features discovered while working with the
 user. Keep it current when behavior changes, especially for features that span
@@ -63,7 +63,12 @@ Start here when changing a feature:
   `docs/SPEC_AR_PBR_COMPOSITOR.md`, `app/ar_pbr/*`, `app/depth/*`,
   `app/camera_solve/*`, `tools/qa_ar_pbr_gpu_preview.py`,
   `tools/qa_ar_pbr_attachment_stability.py`, `tools/ar_pbr_scene_smoke.py`,
-  `tests/test_ar_pbr_*.py`.
+  `tests/test_ar_pbr_*.py`. Critical quick rule: the main viewer `Depth`
+  toggle is diagnostic, off by default, and must not affect export/composite
+  output. Normal playback must not run live depth estimation unless AR/PBR
+  occlusion, scene/plane anchoring, or explicit depth-map viewing is active.
+  Use `ProjectPlayer.set_ar_pbr_depth_view_mode(...)` or Actions
+  `ar_pbr.preview.depth_view.get/set`; do not add parallel private toggles.
 - General video processing: `app/video_filters.py`, `app/chroma_key.py`,
   `app/background_removal.py`, `app/video_stabilizer.py`,
   `app/video_decoder.py`.
@@ -141,15 +146,142 @@ Start here when changing a feature:
   `../ReviewAutomationWorkspace/outputs/TigerCapture_Review_Automation_evidence_full.pptx`.
   The review automation workspace is developer-only and can be moved with
   `TIGERCAPTURE_REVIEW_ROOT`.
+- User PPT generator and timeline-native presentation authoring:
+  `docs/SPEC_USER_PPT_GENERATOR.md`, `app/pptgen/*`,
+  `app/video_editor_ppt_workflow.py`, `app/actions/ppt_namespace.py`,
+  `app/actions/editor_adapter_ppt.py`, `tools/pptgen.py`,
+  `tools/qa_ppt_animation_compat.py`, and `tests/test_pptgen_*.py`.
+  This feature is separate from review automation. It creates user decks from
+  templates, media-pool/timeline/typography/3D assets, current timeline stills,
+  document tools, and AI-editable `ppt.*` actions. The current animation MVP
+  stores simple element effects (`appear`, `fade_in`, `fade_out`, `move`,
+  `scale`), previews them on the PPT canvas/timeline, exports PowerPoint-
+  compatible `.pptx` files through `app/pptgen/writer_python_pptx.py`
+  (`python-pptx` plus targeted timing OOXML patches), and has a compatibility
+  QA generator:
+  `python tools/qa_ppt_animation_compat.py --out-dir debugCapture/ppt_animation_compat`.
+  Project automation now covers `.tgppt` create/open/save/save-as plus
+  editable deck creation from prompts and the current editor timeline through
+  `ppt.project.*`, `ppt.deck.from_prompt`, and `ppt.deck.from_timeline`.
+  PDF export is implemented in `app/pptgen/pdf_export.py` and is available
+  from the PPT editor, `tools/pptgen.py --export-sample --export-pdf`, and the
+  `ppt.timeline.export_pdf` action. The backend contract is `auto`
+  (LibreOffice first, PowerPoint COM on Windows second), `libreoffice`, or
+  `powerpoint_com`.
+  MP4 presentation video export is implemented in `app/pptgen/video_export.py`
+  using the shared Qt-free animation runtime in
+  `app/pptgen/animation_runtime.py`; the same playhead-aware renderer now drives
+  PPT canvas preview and H.264 MP4 frame generation through bundled FFmpeg. It
+  is available from the PPT editor, `tools/pptgen.py --export-sample
+  --export-video`, and the `ppt.timeline.export_video` action. Optional
+  narration/soundtrack mux is supported through explicit `audio_path`, deck
+  metadata (`narration_audio_path`, `audio_path`, or `soundtrack_path`), and
+  CLI `--video-audio`; FFmpeg encodes it as AAC, pads short audio, and trims
+  long audio to the video duration. In the PPT editor, MP4 export runs through
+  `app/pptgen/ui/video_export_worker.py` on a background `QThread` with
+  progress and cancellation. CLI/action exports remain synchronous from the
+  caller's perspective. Current limits:
+  render-queue integration for unattended batch jobs and narration
+  recording/editing/loudness UI remain pending.
+  Slide transitions are MVP-level: `cut` and the `fade` family
+  (`dissolve`/`crossfade` aliases) render in MP4 without changing total deck
+  duration; richer wipes, directional moves, zooms, and PowerPoint-native
+  transition parity remain pending.
+  Document-edit basics now include selected-element copy/paste/duplicate,
+  front/back layer order, and slide-bound alignment controls in the PPT editor,
+  with automation coverage through `ppt.element.duplicate`,
+  `ppt.element.z_order`, and `ppt.element.align`.
+  PPTX import MVP is implemented in `app/pptgen/import_pptx.py` and available
+  through the PPT editor `Import` command plus `ppt.deck.import_pptx`; it
+  imports text boxes, tables, pictures, and simple shapes as editable deck
+  elements and extracts pictures into deck assets. It is best-effort and does
+  not yet preserve masters, SmartArt, charts, embedded media, animations, or
+  complex theme inheritance.
+  PPT media/3D actors (`video_actor`, `ar_pbr_actor`, `vrm_actor`, `mmd_actor`,
+  `audio_actor`, `media_actor`) now share a poster fallback contract:
+  `poster_path`, `thumbnail_path`, `preview_path`, or `render_path` metadata is
+  used by canvas/PNG/MP4 preview and `writer_python_pptx.py`; missing posters
+  export as styled actor cards instead of blank content. `app/pptgen/actor_posters.py`
+  generates cached posters on actor insertion and export: video actors try a
+  source-frame still first, while 3D/MMD/audio/media actors receive
+  deterministic fallback card posters. Automation can refresh this cache through
+  `ppt.deck.actor_posters.generate`.
+  Export-readiness validation is exposed through `ppt.deck.validate` and
+  returns `tigercapture.ppt.validation.v1` with error/warning/info counts plus
+  per-issue slide/element ids for AI repair loops.
+  Current-deck export actions `ppt.deck.export_pptx`, `ppt.deck.export_pdf`,
+  and `ppt.deck.export_video` operate on the open PPT editor deck and run actor
+  poster preflight before writing. Timeline export actions remain separate and
+  derive a draft deck from the main editor timeline.
+  Slide-level automation now covers add, duplicate, remove, move, update, and
+  focused layout/duration/notes setters through `ppt.slide.*` actions, backed by
+  Qt-free helpers in `app/pptgen/editing.py`.
+  PPT edit safety is implemented with Qt-free deck snapshots in
+  `app/pptgen/history.py` and recovery writes in `app/pptgen/autosave.py`.
+  The PPT editor exposes Undo/Redo command buttons, standard shortcuts, dirty
+  title markers, and timed `.autosave.tgppt` recovery copies. Automation can
+  inspect and drive the same safety surface through `ppt.deck.history`,
+  `ppt.deck.undo`, `ppt.deck.redo`, and `ppt.deck.autosave`. Recovery copies
+  can be listed and opened through the editor `Recovery` command and Actions
+  `ppt.deck.recovery.list/open`; opening a recovery copy loads it as an unsaved
+  dirty deck to protect the autosave file from accidental overwrite. Dirty decks
+  prompt Save/Discard/Cancel before destructive deck replacement or close.
+  Successful Save deletes the relevant `.autosave.tgppt` copy, and
+  `ppt.deck.recovery.delete` refuses to delete non-recovery files.
+  The PPT workspace media pool is implemented through `app/pptgen/assets.py`
+  and `app/pptgen/ui/media_panel.py`, stores deck-local asset records in
+  `DeckSpec.assets`, supports file add/drag/insert/remove in the PPT editor,
+  and exposes `ppt.media_pool.list/add/insert/remove` actions.
+  Chart elements now export through `writer_python_pptx.py` as native
+  PowerPoint chart parts plus embedded workbook data, while the editor canvas
+  and PNG path keep using TigerCapture's vector chart preview. The native chart
+  export was host-smoked through PowerPoint COM at
+  `debugCapture/pptgen_chart_export/native_chart.pptx` and
+  `debugCapture/pptgen_chart_export/native_chart.pdf`.
+  The selected-slide animation timing lane is implemented in
+  `app/pptgen/animation_lanes.py` and `app/pptgen/ui/animation_lane.py`;
+  clicking a lane selects that element and moves the local slide playhead,
+  dragging a lane moves its start time, and dragging either edge trims start or
+  duration within the slide bounds. On-click animations carry
+  `AnimationSpec.click_index`; the inspector exposes `Click #`, lanes show
+  `#n` badges with automatic sequence numbers for legacy click animations, and
+  animation export order follows click sequence. Automation can inspect rows
+  through `ppt.animation_lanes.list`. The click sequence path was host-smoked at
+  `debugCapture/ppt_animation_click_sequence/manifest.json`.
+  The QA output includes `.pptx`, `.tgppt`, PNG previews, a contact sheet, and
+  `manifest.json` with OOXML static checks plus manual PowerPoint/LibreOffice
+  verification steps. The broader export pipeline smoke runner is
+  `tools/qa_ppt_export_pipeline.py`; it writes `.pptx`, slide PNGs, a contact
+  sheet, optional PDF, optional MP4, and a `tigercapture.ppt.export_qa.v1`
+  manifest for regression review. Product-readiness QA now lives in
+  `app/pptgen/product_readiness.py` and `tools/qa_ppt_product_readiness.py`;
+  it builds five real authoring scenarios (templates, document/chart tools,
+  prompt decks, media/3D actors, and animation timeline), verifies project
+  save/load, validation, PPTX, PNG/contact-sheet output, optional MP4 output,
+  and writes a `tigercapture.ppt.product_readiness.v1` manifest.
+  Release-acceptance QA now covers the first four productization gates through
+  `app/pptgen/release_acceptance.py` and
+  `tools/qa_ppt_release_acceptance.py`: Office compatibility static inspection
+  plus optional LibreOffice/PowerPoint COM host conversion, editor workflow
+  MIME/drop simulation on the real `SlideCanvas`, long-session save/autosave/
+  undo/redo stability, and PNG-vs-MP4 first-frame parity. The current host run
+  at `debugCapture/ppt_release_acceptance/manifest.json` passed all four gates;
+  LibreOffice was not installed, PowerPoint COM conversion passed, and parity
+  mean absolute difference was below the configured threshold.
 - Studio-wide Python Action System implementation:
   `app/actions/*`, `docs/SPEC_PYTHON_ACTION_SYSTEM.md`. The registered action
   layer now backs AI, MCP/local-LLM handoff, QA, review automation, and
   developer tools through validated action specs. It wraps editor/model
   capabilities through `EditorAdapter` instead of exposing arbitrary Python or
-  private editor methods directly. The current default registry exposes 241
+  private editor methods directly. The current default registry exposes 335
   unique action IDs, including timeline/NLE actions, node graph actions,
   VTuber Performance Source actions, Live2D Performance Source retargeting,
   and MMD actor/QA actions.
+  Action registration is intentionally split by namespace; AR/PBR preview/
+  depth/surface actions live behind `app/actions/ar_pbr_preview_namespace.py`,
+  AR/PBR gizmo actions behind `app/actions/ar_pbr_gizmo_namespace.py`, and
+  legacy callers continue through the `app/actions/ar_pbr_namespace.py`
+  facade.
 - Local-first ML backend:
   `app/local_ml.py`, `tools/qa_local_ml_backend.py`.
 - AI Script / One-Click Editing foundation:
@@ -241,6 +373,14 @@ Start here when changing a feature:
   worker-safe full GPU helper: tracks must set `occlusion=true`, depth frames
   are normalized through `app.ar_pbr.depth_occlusion`, and successful paths
   report `pbr_depth_occlusion_applied` plus `pbr_depth_occluded_pixels`. The
+  main viewer also has a user-controlled depth-map-only diagnostic mode through
+  the `Depth` preview toggle, `ProjectPlayer.set_ar_pbr_depth_view_mode(...)`,
+  and Python Actions `ar_pbr.preview.depth_view.get/set`. This mode is off by
+  default and must not change export output. Normal playback must not estimate
+  depth unless an active AR/PBR track explicitly needs depth for occlusion,
+  scene/plane anchoring, or the user has enabled the Depth viewer toggle. If no
+  depth cache is available, live depth estimation is an intentional diagnostic
+  or placement cost, not part of the baseline video playback path. The
   full GPU service bridge serializes the current `depth_frame` as a temporary
   float32 `.npy` payload and the helper applies an overlay alpha depth matte
   before compositing; this prevents export from losing video-depth occlusion,
@@ -327,6 +467,12 @@ Start here when changing a feature:
   or `transform.scale` depending on the selected handle. Current axes are
   screen-oriented with a blue diagonal depth handle; camera/world/local axis
   modes remain tied to the future full camera solve.
+  The Python Action adapter is split into focused AR/PBR modules:
+  `app/actions/editor_adapter_ar_pbr_depth.py` owns diagnostics and depth-map
+  viewer actions, `app/actions/editor_adapter_ar_pbr_preview.py` owns preview
+  camera framing, `app/actions/editor_adapter_ar_pbr_settings.py` owns lighting/
+  material/surface controls, and `app/actions/editor_adapter_ar_pbr_gizmo.py`
+  owns viewport gizmo state/show/hide.
 - The AR/PBR 3D model preview has an `HDR Environment` preset dropdown. Presets
   are discovered from `debugCapture/ar_pbr_resources/manifest.json`, resolved
   by `app.ar_pbr.hdri_presets`, and loaded into the OpenGL preview without
@@ -371,12 +517,14 @@ Start here when changing a feature:
   renderer quality, and release trust. The report distinguishes
   `implementation_ready` from `claim_ready` so missing evidence cannot be
   accidentally marketed as finished; the current refreshed report is 98/100
-  with all six areas claim-ready. The AI area exercises the
-  selected provider path with `use_provider=True`, reusing a cached
-  provider-exercised `debugCapture/ai_edit_corpus_quality_qa.json` when present
-  and running live provider QA only when that evidence is missing; if
-  Claude/Codex/Qwen/local LLM falls back to the deterministic planner, the
-  selected provider state is included in the report. The real-recording area
+  with all six areas claim-ready. The AI area uses the selected provider
+  evidence path, reusing the latest usable
+  `debugCapture/ai_edit_corpus_quality_qa.json` when it contains provider
+  evidence and running live provider QA only when that evidence is missing. This
+  keeps a recent executor failure or success from being hidden by an unrelated
+  live retry. If Claude/Codex/Qwen/local LLM falls back to the deterministic
+  planner, the selected provider state is included in the report. The
+  real-recording area
   also includes sidecar-intake
   evidence so missing cursor/click/drag/hotkey/auto-zoom proof points directly
   to fillable `.cursor.template.json` files instead of a vague corpus warning.
@@ -501,8 +649,9 @@ Start here when changing a feature:
   (OpenCV/Pillow visual analysis, local Whisper, SAM, Demucs, ONNX Runtime,
   Ultralytics). `local_ml_analyze_media()` samples local images/videos for
   foreground subject detections, scene ranges, and tags.
-- AI Script / One-Click Editing has crossed into MVP product behavior, but is
-  not a Descript-lite or Descript-class natural-language editor yet. The video editor now has a
+- AI Script / One-Click Editing has crossed into reviewed Descript-lite product
+  behavior, but it is still not a full Descript-class natural-language editor.
+  The video editor now has a
   bottom `AI Command` dock that is visible by default, right-dock
   `ScriptEditPanel`, SRT/VTT/local-Whisper transcript input, deterministic
   Korean/English prompt routing, `EditPlan`
@@ -539,13 +688,18 @@ Start here when changing a feature:
   `docs/SPEC_AI_TEXT_EDITING.md`,
   `docs/SPEC_LOCAL_AI_PROVIDERS.md`, `app/ai_script_edit_panel.py`, `app/ai_edit_plan.py`,
   `app/ai_text_editing.py`, `app/ai_edit_apply.py`, and
-  `tools/qa_ai_script_edit_integration.py`. Claude direct generation is now the
-  automatic ready-state path when configured; rule-based fallback remains the
-  safe failure path. The planned default
-  free model profile is `qwen_local` (`Qwen3 1.7B GGUF`, official `Q8_0`
-  first-use llama.cpp path) with first-use install status, while `local_llm`,
-  `codex_mcp`, and `claude_mcp` remain switchable
-  readiness/provider surfaces unless explicitly configured.
+  `tools/qa_ai_script_edit_integration.py`. Smart-edit claim readiness is based
+  on direct provider evidence, not on rule-based fallback. Historical evidence
+  includes Claude direct/MCP executor corpus runs with 20/20 direct successes;
+  the current default-free local evidence comes from `qwen_local` direct
+  provider runs with the same 20/20 direct-success shape. Claude/Codex/local
+  command providers remain switchable executor surfaces when configured.
+  Rule-based fallback remains the safe failure path, but fallback evidence alone
+  must not enable smart-AI marketing copy. The default free model profile is
+  `qwen_local` (`Qwen3 1.7B GGUF`, official `Q8_0` first-use llama.cpp path)
+  with first-use install/status UI, while `local_llm`, `codex_mcp`, and
+  `claude_mcp` remain switchable readiness/provider surfaces unless explicitly
+  configured.
   `local_ml_capcut_project_summary()` turns that analysis into the summary
   shape consumed by CapCut planners, and
   `capcut_creator_bundle_from_local_media()` returns a ready apply bundle
@@ -1091,13 +1245,16 @@ Start here when changing a feature:
   `smart_ai_edit_claim_ready` keep product-release status separate from
   competitor/AI marketing claims. QA Dashboard lists this as "Final Product
   Readiness" and can run it directly. The latest strict local evidence on
-  2026-07-05 is `debugCapture/final_product_readiness_qa.json` at 99/100 with
+  2026-07-07 is `debugCapture/final_product_readiness_qa.json` at 99/100 with
   `release_ready=false`: practical edit flow, real project corpus, Screen
   Studio interaction corpus, preview/GPU performance, current-corpus scrub
   readiness, Color/Audio accuracy, professional runtime parity, timeline
-  polish, presets, crash recovery, packaging, and Claude direct smart-edit
-  corpus evidence are ready. Commercial broadcast evidence remains the release
-  blocker. The real
+  polish, presets, crash recovery, packaging, and direct smart-edit corpus
+  evidence are ready. The current local artifact uses Qwen local direct
+  evidence; previous Claude direct evidence also passed the same 20/20 corpus
+  gate. Commercial broadcast evidence is the remaining release blocker, so
+  `commercial_claims_ready=false` even though
+  `smart_ai_edit_claim_ready=true`. The real
   recording manifest loader accepts UTF-8 BOM manifests so existing registered
   videos are no longer dropped from the corpus, and the new automation-generated
   local corpus path can provide 20/20 MP4 sidecars with click/drag/hotkey/zoom
@@ -1115,9 +1272,11 @@ Start here when changing a feature:
   safe AI Script Edit MVP can pass while `smart_edit_claim_ready` remains
   false, and real recording files can exist while Screen Studio replacement
   wording remains blocked until cursor sidecars and interaction evidence pass.
-  As of the current 2026-07-05 evidence run, `smart_edit_claim_ready=true`
-  because Claude direct provider generation succeeded on 20/20 corpus cases
-  without fallback.
+  As of the current 2026-07-07 evidence run, `smart_edit_claim_ready=true`
+  because `qwen_local` provider generation succeeded on 20/20 corpus cases
+  without fallback. Earlier Claude direct provider runs also succeeded on
+  20/20 corpus cases without fallback; Qwen is documented here as the latest
+  local-default evidence path, not as the only provider that has ever passed.
   Use `tools/qa_release_gap_closure.py --strict` as the compact release gate
   when preparing public builds or marketing copy.
 - The same remaining evidence can be pushed through a generated collection
@@ -1131,7 +1290,7 @@ Start here when changing a feature:
   they do not register AI corpus cases until filled templates contain real
   transcripts, natural-language prompts, expected intents, and expected
   operations, and they do not register broadcast platform evidence until the
-  operator supplies redacted RTMP/Discord evidence. The cursor recorder now
+  operator supplies redacted RTMP and YouTube viewer evidence. The cursor recorder now
   defaults to the Windows virtual screen
   when no `--screen-rect` is supplied and can opt into modifier-hotkey capture
   with `--capture-hotkeys`, which keeps the real Screen Studio interaction
@@ -1158,7 +1317,7 @@ Start here when changing a feature:
   and 20/20 AI real-case rows, while the operator sprint remains the path for
   human-reviewed sidecars/transcripts and redacted platform proof.
   `release_evidence_next_items()` also builds the sprint `work_queue`: concrete
-  next tasks for the first blocked recordings, AI templates, and RTMP/Discord
+  next tasks for the first blocked recordings, AI templates, and RTMP/YouTube
   platform checks, including the missing proof requirements, target
   `.cursor.json` or template path, and the safest command/action to run. The
   work queue is not evidence; it is the operator checklist for collecting
@@ -2377,26 +2536,238 @@ Video timeline:
   MCP automation. `timeline.professional_nle_readiness` and
   `tools/qa_nle_readiness.py` keep this claim honest. It should not yet be
   marketed or documented as a full Premiere/Resolve-class NLE replacement. The
-  evidence-free baseline remains 47/100; the synthetic NLE contract corpus
-  raises the current QA score to 80/100 by proving registered actions,
-  Source/Record workbench state, project-bin workbench metadata,
-  long-project stress evidence, proxy/bin/relink metadata, and multicam
-  group/switch plan/export handoff contracts. This is still not real
-  long-footage proof, so the safe claim is
+  evidence-free baseline remains conservative at about 49/100; the synthetic NLE contract corpus
+  raises the current QA score to about 91/100 by proving registered actions,
+  Source/Record workbench state and monitor layout, project-bin workbench and
+  review-board metadata, long-project stress evidence, undo review-board
+  evidence, proxy/bin/relink/search metadata, and multicam group/switch plan/
+  tile-board/sync-quality/export handoff contracts. The 91/100 implementation
+  score also includes UI-ready safety/polish boards for core NLE action safety,
+  Source/Record usability, proxy/conform reviewed apply flows, multicam export
+  parity, undo long-session rehearsal, and Final Cut-style gesture polish. This is still not real
+  long-footage proof, so the safe claim is still "core NLE workflow/action
+  surface" rather than "Premiere/Resolve-grade professional NLE".
 - Correct intended wording: "core NLE workflow/action surface" rather than
   "Premiere/Resolve-grade NLE".
 - Real long-project NLE evidence is now explicitly separated from generated
-  fixtures. `tools/register_nle_real_project.py` registers real `.tgp`/JSON
-  projects, `tools/qa_nle_real_project_corpus.py` writes
+  fixtures. `tools/discover_nle_real_projects.py` and
+  `nle.real_corpus.discover` find project-like `.tgp`/JSON candidates and
+  explain whether each one can be registered. `tools/register_nle_real_project.py`
+  registers real projects, `tools/qa_nle_real_project_corpus.py` writes
   `debugCapture/nle_real_project_corpus_qa.json`, and `nle.real_corpus.status`
   exposes the same state to Python Action/MCP callers. The full-NLE claim gate
   stays blocked unless at least three real projects meet aggregate duration,
   clip-count, and no-missing-media thresholds.
+- `nle.real_corpus.intake_board` turns the same conservative gate into a
+  product-facing intake surface. It groups threshold gaps, registerable
+  candidates, rejected candidates, and registered projects so the editor/AI can
+  guide users toward real long-project validation without treating generated
+  stress fixtures as release evidence. This improves the corpus collection
+  workflow, but it still does not clear the `real_world_long_project_corpus`
+  professional-claim blocker until the real corpus itself passes.
+- `nle.real_corpus.collection_kit` wraps discovery, intake, registration, real
+  corpus QA, and NLE readiness rerun steps into one UI/AI-ready guide. It exists
+  specifically to make the remaining long-project blocker actionable without
+  pretending generated projects are release evidence.
+- `nle.real_corpus.gate_board` is the combined claim-gate board for UI, local
+  AI, and MCP callers. It merges current corpus status, blocked thresholds,
+  registerable/rejected candidates, validation-missing projects, validation-ready
+  projects, and rerun commands into one product-facing payload. The board is
+  evidence visibility only: `professional_nle_claim_blocked=true` remains until
+  the real corpus and validation evidence satisfy the strict gate.
+- `nle.real_corpus.workbench` is the single UI/MCP entry point for the same
+  workflow. It combines discovery, registerable candidates, machine preflight,
+  operator-evidence status, claim blockers, cards, primary next action, QA
+  commands, and an action sequence so the app can show one coherent "get me to
+  NLE evidence" panel instead of scattering status across separate actions.
+- `nle.real_corpus.validation_plan` is the follow-up surface for registered
+  real projects. It breaks each project into open/reopen, scrub sampling,
+  proxy/relink health, undo/recovery rehearsal, representative short export,
+  and nested/proxy edge-case checks. This improves operator QA clarity, but the
+  professional-NLE blocker still remains until the real corpus itself passes.
+- `nle.real_corpus.validation_packet` is the project-specific operator packet
+  for the same real-project gate. It auto-selects a registered project that
+  still needs evidence when no project is specified, shows required/optional
+  checks, redaction rules, manual steps, a reviewed action template, and a CLI
+  template for `tools/register_nle_real_project_validation.py`. It is a form
+  and checklist, not proof; the operator must run the checks and register real
+  results before readiness can pass.
+- `nle.real_corpus.validation_preflight` sits between the packet and evidence
+  registration. It runs machine-checkable prerequisites for the selected real
+  project (file exists, parse succeeds, no missing media, duration/clip counts,
+  scrub sample plan, and short export range), then exposes operator checks as
+  `ready_for_operator` or `blocked`. It never marks evidence as passed; its
+  action template keeps every required validation check `pending` until a human
+  records the actual result. `tools/qa_nle_real_project_preflight.py` writes
+  the same machine-preflight status for every registered project into
+  `debugCapture/nle_real_project_preflight_qa.json`. The strict real-corpus QA
+  summary now also reports `preflight_ready_count` and blocks
+  `validation_preflight` when registered projects are not machine-ready for
+  operator evidence.
+- `nle.real_corpus.validation_report` and
+  `nle.real_corpus.validation_evidence.register` add the missing execution
+  evidence layer for real NLE projects. A registered project can now store
+  redacted per-check evidence for open/reopen, scrub sampling, proxy/relink
+  health, undo/recovery, representative short export, and nested/proxy edge
+  cases. The report summarizes validation-ready projects separately from the
+  metric-only corpus gate, so product UI/AI can see whether real projects were
+  actually exercised instead of merely registered. This still does not allow a
+  full professional-NLE claim without enough real projects and passed evidence.
+- Official NLE real-corpus QA now requires validation evidence by default.
+  `tools/qa_nle_real_project_corpus.py` writes a claim-ready report only when
+  the metric thresholds and the required per-project validation evidence both
+  pass. The `--metric-only` switch exists for diagnostics, but metric-only
+  reports must not clear release or marketing claim gates.
+- Operator validation evidence can be written either through the Python Action
+  `nle.real_corpus.validation_evidence.register` or the CLI
+  `tools/register_nle_real_project_validation.py`. The CLI supports
+  `--all-passed` for the required checks and repeatable `--check id=status`
+  entries for partial/failure evidence. `nle.real_corpus.collection_kit` also
+  exposes `validation.cli_examples` so UI/AI surfaces can show copy-ready
+  operator commands for each registered real project.
+- NLE readiness scoring now distinguishes implemented Final Cut-style UI polish
+  from the current sample timeline's gap state. Role filter panel, cross-row
+  connected-anchor overlay, audition card model, and magnetic drag visual
+  language are explicit evidence flags in `app/nle_evidence.py`, and
+  `app/nle_readiness.py` reflects them in the Final Cut-style storyline row.
+  This can raise implementation readiness, but it still does not clear the
+  `real_world_long_project_corpus` professional-claim blocker.
+- `timeline.nle_target_gap` returns the UI/AI/MCP answer to "how far are we
+  from 95?" without changing scores. It analyzes the current
+  `timeline.professional_nle_readiness` rows, reports per-row score gaps, keeps
+  `real_world_long_project_corpus` as a hard blocker, and lists the real-corpus
+  project/duration/video/audio/validation evidence still required before any
+  professional NLE claim is safe. `tools/qa_nle_target_gap.py` writes the same
+  board to `debugCapture/nle_target_gap_qa.json` for dashboards and handoffs.
+- NLE readiness scoring rules are split into `app/nle_readiness_scoring.py`.
+  `app/nle_readiness.py` remains the report assembler, while row score ladders
+  live in reusable helpers. The report also exposes `score_breakdown` so UI,
+  local AI, and MCP callers can read per-row score/status without reparsing the
+  long row list.
+- NLE score ceilings now have a real-world unlock: when
+  `evidence_level=real_project_corpus` and the strict real-project corpus gate
+  passes, implemented NLE rows can score 95-96 and the aggregate can exceed
+  95/100. Without that corpus, synthetic/action evidence remains capped around
+  the current 91/100 and `real_world_long_project_corpus` stays blocked.
+- NLE UI-ready evidence now includes `source_record.monitor_layout`,
+  `source_record.apply_board`, `source_record.keyboard_overlay`,
+  `source_record.usability_board`, `timeline.nle_core_safety_matrix`,
+  `timeline.multicam.tile_board`, `timeline.multicam.review_board`,
+  `timeline.multicam.sync_quality_board`, `timeline.multicam.waveform_sync_board`,
+  `timeline.multicam.export_parity_board`,
+  `project_bin.review_board`,
+  `project_bin.search_filter_model`, `project_bin.offline_browser`,
+  `project_bin.proxy_regeneration_board`, and
+  `project_bin.proxy_apply_review_board`,
+  `project_bin.conform_apply_review_board`,
+  `timeline.undo_review_board` / `timeline.undo_recovery_playbook` /
+  `timeline.undo_long_session_plan`, and
+  `timeline.storyline_gesture_polish_board`. These are UI-neutral view models for drawing a
+  Source/Record two-monitor panel plus reviewed insert/overwrite apply cards
+  and J/K/L shortcut overlay, a multicam angle grid plus switch/bake review
+  board and sync-confidence board, project-bin/proxy/conform review board,
+  search/filter/metadata columns, an offline/missing media browser, a reviewed proxy regeneration
+  queue, and undo/fuzzer risk plus failure-recovery boards. They improve implementation readiness but
+  still do not replace real long-project corpus validation.
+- `nle.real_corpus.register` is the product/API companion to the CLI tool. It
+  can dry-run project metrics before writing the manifest, registers either the
+  current saved project or an explicit `project_path`, rejects generated
+  fixtures unless `allow_generated=true`, and lets AI/MCP surface corpus intake
+  without exposing arbitrary filesystem or Python execution.
+- Final Cut Pro positioning is handled as a different win condition, not as a
+  one-for-one clone. Tiger Studio now exposes a named
+  `timeline.magnetic_storyline.status/apply` workflow. It detects timeline
+  gaps/overlaps, plans Final Cut-style primary-storyline gap closure, applies
+  gap-closing moves while preserving clip order, and moves linked audio clips by
+  the same delta. `app/nle_magnetic_storyline.py` owns the pure plan/status
+  contract and `app/actions/editor_adapter_nle.py` applies it through the
+  Python Action surface.
+- Final Cut-style connected clip and role-color foundations are now explicit:
+  `app/nle_connected_clips.py` owns pure connected-clip status, role palette,
+  and action-contract evidence; `timeline.connected_clips.status`,
+  `timeline.connected_clips.connect`, `timeline.role_colors.status`, and
+  `timeline.clip_role.set` expose the surface to AI/MCP. `VideoClip` persists
+  `connected_parent_track_id`, `connected_parent_clip_id`,
+  `connected_offset_ms`, `clip_role`, and `role_color`, and project snapshots
+  include the same fields for readiness/review automation. Timeline rows show a
+  small connected/role strip, but this is still a metadata/action foundation,
+  not a full Final Cut role-lane, audition, or visual magnetic interaction
+  replacement. The safe competitive wording is: "Final Cut-style fast
+  storyline/connected-clip foundations plus Tiger-only actors/PPT/AI/3D
+  compositing on Windows," not "full Final Cut replacement."
+- Role-aware lane contracts are available for UI renewal and AI review:
+  `app/nle_role_lanes.py` groups timeline clips by inferred role, counts
+  connected clips and audition clips per role, and exposes a `focused_role`
+  state through `timeline.role_lanes.status` and `timeline.role_lanes.focus`.
+  `app/video_editor_nle_role_panel.py` and
+  `app/video_editor_nle_role_workflow.py` now expose that view-model as a
+  compact timeline role filter bar. Timeline rows draw a small role-color rail
+  on clips with explicit role, connected-clip, or audition metadata, plus a
+  connected diamond and audition take dots when relevant. This is visual
+  feedback and a view-model foundation; it is not yet a full Final Cut
+  role-lane workspace because cross-row anchors, deep audition visuals, and
+  real editor gesture QA are still incomplete.
+  The editor mutation adapter now lives in
+  `app/actions/editor_adapter_nle_storyline.py`, and public action registration
+  lives in `app/actions/nle_storyline_namespace.py`.
+- Final Cut-style timeline visual feedback contracts are now separated from
+  Qt drawing code. `app/nle_visual_feedback.py` builds connected-clip anchor
+  overlay descriptors, role-lane filter models, and magnetic drag-preview
+  placements. Python Actions expose them as
+  `timeline.connected_clips.anchor_overlay`,
+  `timeline.role_lanes.filter_model`, and
+  `timeline.magnetic_storyline.drag_preview`; adapter methods live in
+  `app/actions/editor_adapter_nle_visual.py` and registration lives in
+  `app/actions/nle_visual_namespace.py`. This gives UI renewal and AI/MCP a
+  stable contract for anchor lines, dimmed/visible role clips, snap/push/collision
+  drag feedback, and non-mutating drag previews without adding logic back to
+  `app/video_editor_window.py`. The first Qt timeline integration now lives in
+  `app/timeline_nle_visual_overlay.py` and is called from
+  `app/timeline_track_row_paint.py`: connected clips draw a stronger in-clip
+  anchor cue, and active drag preview rectangles draw compact move/snap/blocked
+  guide marks. `timeline.role_lanes.focus` now also propagates to live
+  `TrackRow` instances through `set_focused_clip_role(...)`, so non-matching
+  roles are dimmed in the timeline while the selected outline remains visible.
+  The timeline role filter bar calls the same registered action instead of
+  using a private editor path, so UI and MCP/action state stay aligned.
+  `app/timeline_connected_anchor_overlay_widget.py` adds a transparent
+  viewport overlay for cross-row connected-clip curves when parent and child
+  clips are both visible. Magnetic drag cue painting now uses richer
+  `field_lines` / `hatch` metadata from `app/timeline_nle_visual_overlay.py`,
+  so snap, push, move, and blocked previews read differently during drag. This
+  is still not a full Final Cut UI clone until real gesture tuning and editor
+  usability QA are completed.
+- Final Cut-style audition/take foundations are implemented as host-clip
+  metadata rather than hidden stacked timeline lanes. `app/nle_auditions.py`
+  owns the pure status and action-contract helpers,
+  `app/actions/editor_adapter_nle_auditions.py` owns the editor adapter
+  mutation surface, and `app/actions/nle_auditions_namespace.py` owns the
+  public Python Action registrations. `VideoClip` persists
+  `audition_group_id`, `audition_name`, `audition_active_take_id`, and
+  `audition_takes`; project IO saves/loads them; project snapshots expose the
+  active take and take count. Python Actions `timeline.auditions.status`,
+  `timeline.audition.compare`, `timeline.audition.add_take`,
+  `timeline.audition.switch_take`, `timeline.audition.rename_take`, and
+  `timeline.audition.remove_take` let AI/MCP build a UI-ready audition picker,
+  add candidate takes, switch the active take, rename takes, and remove non-last
+  takes safely. Switching copies the selected take's source fields onto the host
+  clip, so existing preview/export paths see only the active take. Timeline rows
+  show a minimal `AUD` strip/badge; clicking or context-opening that badge now
+  routes to `app/video_editor_nle_audition_workflow.py`, a compact audition
+  picker dialog that lists takes, marks the active take, and shows a card-style
+  comparison strip backed by `app/nle_audition_visuals.py`. It calls the same
+  Actions for switch/rename/remove. This is now a usable audition
+  data/action/UI foundation, not the full Final Cut polished visual audition
+  interaction.
 - Multicam and project-bin NLE contracts now include richer UI-ready state:
   `timeline.multicam.sync_plan`, `timeline.multicam.angle_bins`,
-  `timeline.multicam.switcher_workbench`, and `project_bin.batch_plan` expose
+  `timeline.multicam.switcher_workbench`, `timeline.multicam.sync_quality_board`,
+  `timeline.multicam.waveform_sync_board`,
+  `timeline.multicam.live_switch_dashboard`,
+  `project_bin.batch_plan`, and `project_bin.search_filter_model` expose
   sync offsets, angle bins, coverage/gap diagnostics, angle tiles, active
-  angle, relink/proxy/conform review operations, and export handoff readiness
+  angle, sync confidence, relink/proxy/conform review operations, bin search,
+  metadata columns, and export handoff readiness
   while still avoiding a full Premiere/Resolve live-switcher or conform claim.
 - Source/Record 3-point editing now has an explicit review payload through
   `source_record.edit_decision_preview`, so insert/overwrite UI can show the
@@ -2405,14 +2776,28 @@ Video timeline:
 - Source/Record 3-point editing also exposes `source_record.patch_matrix`, a
   read-only UI contract for video/audio patch rows and insert/overwrite command
   cards before timeline mutation.
+- Source/Record 3-point editing also exposes `source_record.keyboard_overlay`,
+  a read-only J/K/L, mark-in/out, source patching, and insert/overwrite shortcut
+  overlay so the two-monitor UI can show commercial-NLE keyboard affordances
+  without binding directly to private editor methods.
 - Timeline undo/edge-case evidence is now bridged into NLE readiness:
   `timeline.nle_fuzzer.status` normalizes `tools/qa_timeline_fuzzer.py`
   reports, requiring blade/move/ripple/roll/slip/slide/undo coverage, linked
   audio, actor-lane coverage, and zero failures before the undo QA row is
   treated as stronger evidence.
+- Core NLE action coverage is exposed as `timeline.core_action_coverage`, a
+  grouped matrix for edit, clipboard/insert, Source/Record, Project Bin,
+  storyline, multicam, and undo/recovery action surfaces.
 - Undo/edge-case evidence also exposes `timeline.undo_health`, a UI-ready
   operation coverage matrix with risk cards, blockers, and rerun/failure-report
   command state for QA Dashboard or health panels.
+- Undo/edge-case recovery is exposed as `timeline.undo_recovery_playbook`, a
+  UI-ready rerun/triage/reproduction-step playbook that lets the editor,
+  QA Dashboard, or MCP caller show what to do after destructive edit failures
+  without exposing private editor methods.
+- Undo/edge-case stability is also exposed as
+  `timeline.undo_stability_dashboard`, a UI-ready combined board for fuzzer
+  status, operation coverage, risk cards, blockers, and recovery commands.
 - Proxy/media management now exposes `project_bin.proxy_plan`, a read-only
   proxy policy and regeneration queue contract for usable proxies, stale/missing
   proxies, background-safe refresh candidates, and long-project proxy readiness.
@@ -2420,10 +2805,17 @@ Video timeline:
   product health board for proxy state cards, safe background regeneration
   enablement, stale/missing/offline review signals, and long-project proxy
   readiness evidence.
+- Proxy conflict handling exposes `project_bin.proxy_conflict_board`, a
+  read-only board that separates safe background proxy jobs from offline
+  blockers, duplicate media paths, and review-only conflicts so the editor can
+  start only safe proxy work without hiding relink problems.
 - Project-bin conform now exposes `project_bin.conform_report`, a read-only
   timeline-to-Media-Pool matching report for path matches, name-only matches,
   ambiguous names, offline matches, and missing clip sources before relink or
   batch apply operations.
+- Project-bin relink now exposes `project_bin.relink_candidate_board`, a
+  file-by-file candidate board for safe path matches, name-only review,
+  ambiguous choices, offline matches, and missing sources.
   "core NLE workflow/action surface" rather than "Premiere/Resolve湲?NLE".
 - Remaining NLE gaps are explicit: source-monitor / record-monitor style
   3-point editing backend now exists but the dedicated UI is still shallow;
@@ -3150,7 +3542,14 @@ Behavior notes:
   The public subject types are `face_only`, `upper_body`, `full_body`, and
   `unknown`: face-only locks actor transform, upper-body damps movement and
   zoom, full-body permits the wider transform range, and unknown uses
-  conservative limits when subject guidance exists. The bridge also expands
+  conservative limits when subject guidance exists. VRM source-video visibility
+  uses the same public subject vocabulary through
+  `tigerstudio.vtuber.source_to_vrm_visibility_policy.v1`: `face_only` maps to
+  `bust_up`, `upper_body` maps to at least `half_body`, and `full_body` maps to
+  `full_body`. Source-framing plans expose `source_exposure` and
+  `visibility_policy` with rule id
+  `match_source_person_exposure_to_vrm_visibility`, so AI/review automation can
+  explain and enforce the selected VRM framing. The bridge also expands
   canonical Cubism parameter tracks into common aliases via
   `tigerstudio.live2d.parameter_aliases.v1` so models using alternate ids can
   still receive head, body, breath, eye, mouth, and blink control tracks when
@@ -3189,8 +3588,15 @@ Behavior notes:
   (`app/vtuber/vrm_renderer.py`, `renderer_family=vtuber_vrm`,
   `render_profile=vrm_mtoon`). `.vrm` Program Output, Avatar Mapping, and
   internal VRM fallback must not route through AR/PBR preview, Marmoset PBR,
-  `full-gpu`, or old debug proof images; those aliases are rewritten to
-  `vrm_mtoon_software` until a real VRM GPU renderer exists.
+  or old debug proof images. The exposed backend is `vrm_mtoon_gpu`; `auto`,
+  `mtoon`, `vrm_mtoon`, PBR-looking aliases, and legacy
+  `vrm_mtoon_software` requests are rewritten to `vrm_mtoon_gpu`. The legacy
+  software VRM renderer is disabled for product/UI/AI-selected routes because
+  it can display dense VRM meshes as broken point-like contact previews.
+  `vrm_renderer_contract()` and `make_vrm_render_track()` expose
+  `software_renderer_available=false`, `legacy_software_renderer_disabled=true`,
+  `requested_renderer`, `renderer_rewritten`, and rewrite warnings so AI/action
+  surfaces can explain why a requested software/PBR renderer was not used.
 - VRM avatars are first-class Media Pool assets, not normal video clips. `.vrm`
   import creates a `VRM Avatar` / `Avatar Target` item with a `VRM` badge.
   Double-clicking it selects `Avatar Target = VRM / VSeeFace Bridge` and opens
@@ -3208,8 +3614,56 @@ Behavior notes:
   `app/broadcast_evidence_ui.py`), the rule that Performance Source media is
   tracking input only, the Program Output/Live Target boundary, session-only
   stream-key handling, and the Broadcast Evidence gate that keeps
-  `commercial_ready=false` until real private RTMP and Discord/window-share
-  evidence are registered.
+  `commercial_ready=false` until real private RTMP ingest and YouTube
+  private/unlisted viewer playback evidence are registered. Discord/window-share
+  remains an optional extra evidence slot, not a required release blocker. The
+  operator-facing checklist is generated by
+  `app.broadcast_platform_e2e.build_broadcast_platform_evidence_checklist()`.
+  It now exposes `primary_cta`, `why_required`, and `safe_registration_hint`
+  for each pending evidence row so VTuber Studio and release QA say the same
+  thing: run a private/unlisted RTMP ingest test, then click `Register RTMP`;
+  open the private/unlisted YouTube viewer or preview page, then click
+  `Register YouTube View`. VTuber Studio also exposes a `Guide` button
+  that opens a step-by-step Broadcast Evidence wizard using
+  `app.broadcast_evidence_ui.broadcast_evidence_wizard_summary()`: local MP4,
+  Live2D MP4, capture/composite, private RTMP, YouTube viewer playback, and
+  optional Discord/window-share checks
+  are shown in order with Done/Pending state, rationale, safe-evidence hints,
+  and direct Register RTMP/Register YouTube View actions. The Studio evidence
+  card and guide expose an `Open YouTube Studio`/`YouTube Studio` button that
+  opens `https://studio.youtube.com`; it does not store stream keys or account
+  data. The guide header shows the YouTube-only path summary and the next
+  required CTA before the full step list. The checklist also exposes
+  `youtube_only_flow` with required checks
+  `private_rtmp_ingest` and `youtube_unlisted_viewer_playback`, plus optional
+  `discord_window_share`, so UI/AI/MCP surfaces can explain that a YouTube
+  account alone is sufficient for the current commercial broadcast evidence
+  gate. Python Actions/MCP also expose
+  `broadcast.youtube_evidence_quickstart`, a read-only operator plan containing
+  the YouTube Studio URL, the `youtube_live` target id, the two required
+  evidence registrations, safe-evidence rules, and the next required CTA.
+  `register_manual_platform_evidence()`
+  rejects unredacted secret-like fields and common RTMP ingest URLs containing
+  stream keys/tokens. After a valid registration it refreshes
+  `debugCapture/broadcast_release_readiness_qa.json` and
+  `debugCapture/final_product_readiness_qa.json` through
+  `app.broadcast_evidence_refresh.refresh_broadcast_evidence_readiness_artifacts()`
+  and returns a `readiness_refresh` summary so the UI can say whether the
+  broadcast commercial gate or final release gate is now unblocked. Python
+  Actions/MCP can run the same refresh explicitly through
+  `broadcast.evidence_readiness.refresh`; evidence registration itself remains
+  `broadcast.platform_evidence.register`. Automation can call
+  `broadcast.platform_evidence.preflight` first to validate the proposed
+  redacted note/path without mutating the evidence artifact. Redacted
+  notes/screenshots/log paths
+  are allowed; stream keys, YouTube watch/preview URLs, signed URLs, tokens,
+  account names, private chat, and raw Performance Source frames are not
+  allowed evidence. The registration validator rejects common YouTube viewer
+  URLs (`youtube.com/watch`, `youtu.be`, `youtube.com/live`) and YouTube Studio
+  preview/live URLs so users register only redacted proof, not private share
+  links. VTuber Studio registration dialogs and
+  `tools/register_broadcast_platform_evidence.py` use the same preflight
+  warning text before calling the backend validator.
 - Live2D authored-motion use is separate from transform mocap. The editor
   command `Auto Storyboard Live2D Motions` uses the selected Live2D clip's
   model as the source, reads all available `.motion3.json` motions, then splits
@@ -3470,7 +3924,8 @@ Core files:
 - `app/audio_separation.py`: vocal/instrumental source separation worker.
 - `app/sound_editor_panel.py`: renewed compact Sound Editor surface for the
   Workbench audio state and detached timeline-editor shell. It owns
-  `SoundEditStateStore`, `SoundEditorPanel`, and `SoundEditorDockWindow`.
+  `SoundEditStateStore`, `SoundEditorPanel`, `SoundEditorDockWindow`, and the
+  Workbench Sound Editor Mixer tab channel strips.
 - `app/video_editor_window.py`: `SoundEditorWindow`, `ClipWaveformView`,
   `SpectrumView`, timeline audio rows, audio track insertion, and the legacy
   Advanced Lab entry point.
@@ -3481,7 +3936,7 @@ Core files:
 Data model:
 
 - `AudioTrack` is a timeline lane. It owns clips and carries track-level volume,
-  pan, label, `bus_id`, and normalized `automation_points`.
+  pan, mute, solo, label, `bus_id`, and normalized `automation_points`.
 - `AudioClip` references a source file and stores offset, trim range, cuts,
   fades, selection, waveform/spectrum cache, gain, and sound-editor effects.
 - Splitting an audio clip creates multiple `AudioClip` objects on the same
@@ -3492,6 +3947,9 @@ Preview and export:
 - Preview playback uses `AudioMixer`, with one `QMediaPlayer` per live clip.
 - Qt preview supports timing and volume but not true per-channel pan; pan is
   applied in FFmpeg export via `apan`.
+- Track mute/solo are real mix state. They affect preview volume, FFmpeg export
+  filtering, project save/load, undo snapshots, AI snapshots, and the timeline
+  Audio Mixer UI.
 - Track automation is exported as a frame-evaluated FFmpeg `volume` expression.
 - Waveforms are extracted asynchronously by `WaveformExtractor`, using FFmpeg
   through `QProcess`.
@@ -3721,6 +4179,14 @@ Vocal/music separation:
   the packet's live depth texture payload. The same normalized video-depth
   occlusion helper is used by synthetic/software fallback and packet PBR export,
   and `OpenGLPreviewWidget` keeps the live depth texture fragment-discard path.
+  The main viewer can also show depth-map-only diagnostics through the `Depth`
+  preview toggle or Python Actions `ar_pbr.preview.depth_view.get/set`; default
+  display is grayscale with near camera = white. The toggle is user-controlled,
+  off by default, and must not affect export/composite output. Normal playback
+  should not run live depth estimation unless AR/PBR occlusion, scene/plane
+  anchoring, or explicit depth-map viewing is active; cache misses during depth
+  viewing are accepted as diagnostic/placement cost, not baseline playback
+  overhead.
   Full GPU helper export now receives the bridge-provided depth frame as a
   temporary float32 `.npy` payload and applies an overlay alpha depth matte
   before compositing the model-view render over the source frame. The supported
@@ -4185,13 +4651,22 @@ AI Script Edit MVP integration:
   `EditPlan` JSON, and falls back to the deterministic plan on invalid output.
   The Qwen first-use runner now prefers `llama-server.exe`; if the local
   Hugging Face cache already contains the GGUF blob it starts from `-m <cache>`
-  rather than forcing a fresh `-hf` download. Real 2026-06-28 smoke runs loaded
+  rather than forcing a fresh `-hf` download. Headless/QA startup is centralized
+  in `app.ai_qwen_server`: it checks the OpenAI-compatible `/v1/models`
+  endpoint, can start the configured llama.cpp runner without a console window,
+  and returns structured startup/readiness diagnostics. `tools/qa_ai_edit_corpus_quality.py`
+  can use this path with `--provider qwen_local --auto-start-qwen` before
+  exercising the provider corpus. Real 2026-06-28 smoke runs loaded
   `Qwen3-1.7B-Q8_0.gguf` on `127.0.0.1:8080` and produced validated plans in
   `debugCapture/qwen_local_editplan_smoke.json` and
-  `debugCapture/qwen_local_editplan_smoke_repaired.json`.
+  `debugCapture/qwen_local_editplan_smoke_repaired.json`. The 2026-07-07 local
+  provider corpus run used `qwen_local` directly against
+  `http://127.0.0.1:8080/v1` and produced 20/20 direct `EditPlan` successes
+  with zero deterministic fallbacks.
   Saved Qwen endpoints are treated as retryable configuration, not proof that
   the local server is currently alive; a failed direct request is remembered and
-  the UI shows `?뺤씤 ?꾩슂` until a valid response clears that state.
+  the UI shows an action-oriented reconnect/attention state until a valid
+  response clears that state.
   Claude is direct-first when ready: selecting Claude runs validated in-app
   `EditPlan` generation without any hidden environment setup. The terminal
   handoff remains available for setup/diagnostics/manual agent work: it opens a
@@ -4210,7 +4685,10 @@ AI Script Edit MVP integration:
   edit-planning calls, and accepts only validated `EditPlan` JSON before Review.
   Real English and Korean smoke reports live at
   `debugCapture/claude_direct_editplan_smoke.json` and
-  `debugCapture/claude_direct_editplan_ko_smoke.json`.
+  `debugCapture/claude_direct_editplan_ko_smoke.json`. Claude direct provider
+  corpus evidence has also passed the 20/20 direct-success smart-edit gate in
+  earlier release runs; that evidence remains valid provider support even
+  though the current default-free path is Qwen local.
   Setting `TIGERCAPTURE_CLAUDE_DIRECT_EXECUTOR=0` disables automatic in-app
   Claude plan generation for diagnostics or terminal-only workflows, causing
   `effective_generation_provider` to remain `rule_based`. The AI Command dock
@@ -4267,16 +4745,20 @@ AI Script Edit MVP integration:
   LLM/agent provider is exercised on a real user corpus. The CLI entry point is
   `tools/qa_ai_edit_corpus_quality.py`, which writes
   `debugCapture/ai_edit_corpus_quality_qa.json`. Long-running local/agent
-  providers can be exercised with `--use-provider --provider-timeout 240
-  --provider-retries 1` so transient timeouts are measured separately from
+  providers can be exercised with `--use-provider --provider <id>
+  --provider-timeout 240 --provider-retries 1`; Qwen can additionally be
+  started from the same QA command with `--provider qwen_local
+  --auto-start-qwen`. This keeps transient timeouts measured separately from
   real fallback behavior. Final Product Readiness reads
   this artifact as `ai_edit_claim_quality`, so rule-based success can still be
   reported as a safe MVP without accidentally enabling smart-AI marketing copy.
-  The current provider-exercised report runs `claude_mcp` through the direct
-  Claude CLI executor with automatic direct generation; it reports
-  20/20 direct successes, 0 fallbacks, score 99/100, and
-  `smart_edit_claim_ready=true`. That proves the smart-edit gate for the local
-  automation-generated corpus, not universal human editing quality.
+  The current provider-exercised report runs `qwen_local` through the local
+  OpenAI-compatible Qwen endpoint; it reports 20/20 direct successes, 0
+  fallbacks, score 99/100, and `smart_edit_claim_ready=true`. Earlier Claude
+  direct provider reports also passed 20/20 direct successes with 0 fallbacks,
+  so Claude should be treated as a validated optional provider path rather than
+  a failed or unproven path. These reports prove the smart-edit gate for the
+  local automation-generated corpus, not universal human editing quality.
 - `app.ai_edit_corpus_intake.build_ai_edit_corpus_intake_report()` turns the
   missing real-corpus work into concrete collection slots. It can write
   `.template.json` files under `qa_corpus/ai_editing_corpus/intake_templates`
@@ -4406,10 +4888,20 @@ AI Script Edit MVP integration:
 - Public Python Action IDs must remain stable while registration is split by
   namespace. MCP/AI automation should keep using registered actions rather than
   private editor methods.
-- The first action namespace split is active: Source/Record, Project Bin,
-  Multicam, NLE readiness, real corpus, timeline fuzzer, and undo-health action
-  registration lives in `app/actions/nle_namespace.py`. New NLE actions should
-  be added there instead of growing `app/actions/registry.py`.
+- The first action namespace split is active:
+  `app/actions/nle_namespace.py` is now a thin compatibility/orchestration
+  module. Source/Record action registration lives in
+  `app/actions/nle_source_record_namespace.py`; Project Bin action registration
+  lives in `app/actions/nle_project_bin_namespace.py`; NLE
+  readiness, real corpus, timeline fuzzer, and undo-health action registration
+  lives in `app/actions/nle_readiness_namespace.py`; multicam action
+  registration lives in `app/actions/nle_multicam_namespace.py`; magnetic
+  storyline, connected clip, and role-lane action registration lives in
+  `app/actions/nle_storyline_namespace.py`; Final Cut-style audition/take action
+  registration lives in
+  `app/actions/nle_auditions_namespace.py`; Final Cut-style visual feedback
+  registration lives in `app/actions/nle_visual_namespace.py`. New NLE actions should be added to
+  the focused namespace module instead of growing `app/actions/registry.py`.
 - The VSeeFace bridge action namespace split is active:
   `app/actions/vtuber_namespace.py` owns VSeeFace input-source, bridge status,
   launch/probe, sidecar install/settings, executable/avatar/capture/framing,
@@ -4418,11 +4910,14 @@ AI Script Edit MVP integration:
   registrations. Public VTuber action IDs remain unchanged; new VTuber/VSeeFace
   actions should be added there instead of the central registry.
 - The broadcast action namespace split is active:
-  `app/actions/broadcast_namespace.py` owns Live Target, live-output
-  troubleshooting, broadcast release readiness, platform evidence, and
-  virtual-camera/OBS bridge registrations. Public broadcast action IDs remain
-  unchanged; new broadcast actions should be added there instead of the central
-  registry.
+  `app/actions/broadcast_namespace.py` is now a facade for focused broadcast
+  registration modules. Live Target and troubleshooting schemas live in
+  `app/actions/broadcast_live_target_namespace.py`; broadcast release readiness
+  and platform evidence schemas live in
+  `app/actions/broadcast_evidence_namespace.py`; virtual-camera/OBS bridge
+  schemas live in `app/actions/broadcast_virtual_camera_namespace.py`. Public
+  broadcast action IDs remain unchanged; new broadcast actions should be added
+  to the focused module instead of the central registry.
 - The actor action namespace split is active:
   `app/actions/actor_namespace.py` owns Live2D/Spine actor add, transform,
   keyframe, and Live2D Performance Source retargeting registrations. Public

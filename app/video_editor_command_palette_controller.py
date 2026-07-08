@@ -240,6 +240,8 @@ def _compact_command_bar(self, toolbar: QHBoxLayout) -> None:
     create_entries = (
         ("Command Palette", self._open_command_palette),
         ("Template Browser", self._open_template_browser),
+        ("PPT Generator", self._open_ppt_generator),
+        ("PPT From Timeline", lambda: self._open_ppt_generator(import_timeline=True)),
         ("Creator Assist", self._open_creator_assist_panel),
         ("AI Command Dock", self._toggle_ai_command_dock),
         ("Auto Polish", self._open_screenstudio_polish_panel),
@@ -458,6 +460,8 @@ def _open_command_palette(self) -> None:
         {"kind": "command", "label": "Run preset QA report", "search": "qa preset report check", "command": self._show_preset_qa_report, "icon": "scope", "shortcut": "QA", "detail": "Audit preset count, topic coverage, and broken template references."},
         {"kind": "command", "label": "Open Project Health", "search": "health readiness media proxy relink color audio preset", "command": self._show_media_health, "icon": "scope", "shortcut": "Health", "detail": "Open the project health and professional readiness dashboard."},
         {"kind": "command", "label": "Open Templates", "search": "template browser drawer workflow one click screen studio preset", "command": self._open_template_browser, "icon": "spark", "shortcut": "Templates", "detail": "Open a focused browser for one-click template presets."},
+        {"kind": "command", "label": "Open PPT Generator", "search": "ppt powerpoint presentation deck slide generator document", "command": self._open_ppt_generator, "icon": "layers", "shortcut": "PPT", "detail": "Open the user presentation studio for slide editing and PPTX export."},
+        {"kind": "command", "label": "Create PPT from timeline", "search": "ppt powerpoint presentation deck slide generator timeline clips export", "command": lambda: self._open_ppt_generator(import_timeline=True), "icon": "layers", "shortcut": "PPT", "detail": "Open the PPT generator with the current editor timeline converted into slide drafts."},
         {"kind": "command", "label": "Open Auto Polish panel", "search": "screen studio auto polish panel cursor click smoothing hide static background padding shadow vertical", "command": self._open_screenstudio_polish_panel, "icon": "spark", "shortcut": "Polish", "detail": "Tune Screen Studio-style cursor, click, wallpaper, shadow, and auto-zoom settings."},
         {"kind": "command", "label": "Generate Auto Polish zooms", "search": "screen studio auto polish automatic zoom cursor click metadata", "command": self._apply_screenstudio_auto_polish, "icon": "zoom", "shortcut": "Zoom", "detail": "Generate renderable zoom windows from cursor/click metadata or smart fallback points."},
         {"kind": "command", "label": "Apply one-click preset plan", "search": "auto ai template one click preset", "command": self._apply_auto_preset_plan, "icon": "spark", "shortcut": "Auto", "detail": "Analyze current media/timeline and apply compatible template/effect/audio/color presets."},

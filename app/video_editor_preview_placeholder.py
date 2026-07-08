@@ -11,16 +11,39 @@ from app.icons import app_icon, icon_size
 from app.style import COLOR_TEXT_TERTIARY
 
 
-def _empty_preview_pixmap():
+def _blank_preview_backing_pixmap(self) -> QPixmap:
+        """Opaque backing used behind the GL preview.
+
+        The OpenGL preview widget only covers the fitted video rectangle.  If
+        the backing QLabel is merely cleared to a null pixmap, some Windows/Qt
+        repaint paths can leave the old "Start your edit" card visible around
+        a newly-loaded frame.  Paint a neutral dark backing instead so content
+        transitions always erase stale placeholder pixels.
+        """
+        label = getattr(self, "_preview_label", None)
+        try:
+            w = max(1, int(label.width()))
+            h = max(1, int(label.height()))
+        except Exception:
+            w, h = 1, 1
+        pixmap_factory = None
         try:
             import app.video_editor_window as video_editor_window
 
             pixmap_factory = getattr(video_editor_window, "QPixmap", None)
-            if pixmap_factory is not None:
-                return pixmap_factory()
+        except Exception:
+            pixmap_factory = None
+        try:
+            pm = pixmap_factory(w, h) if pixmap_factory is not None else QPixmap(w, h)
+        except TypeError:
+            pm = pixmap_factory() if pixmap_factory is not None else QPixmap()
+        except Exception:
+            pm = QPixmap(w, h)
+        try:
+            pm.fill(QColor("#07080F"))
         except Exception:
             pass
-        return QPixmap()
+        return pm
 
 
 def _draw_preview_placeholder(self, kind: str = "empty") -> QPixmap:
@@ -147,9 +170,9 @@ def _clear_preview_placeholder(self) -> None:
             self._preview_placeholder_kind = "content"
         try:
             self._preview_label.setText("")
-            self._preview_label.setPixmap(_empty_preview_pixmap())
+            self._preview_label.setPixmap(_blank_preview_backing_pixmap(self))
             self._preview_label.setStyleSheet(
-                f"background-color: transparent; color: {COLOR_TEXT_TERTIARY};"
+                f"background-color: #07080F; color: {COLOR_TEXT_TERTIARY};"
             )
             self._preview_label.update()
             # The GL preview only covers the fitted video rect. Force the

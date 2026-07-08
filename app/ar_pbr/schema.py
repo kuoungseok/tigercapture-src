@@ -834,7 +834,7 @@ def normalize_render_settings(value: Any) -> dict[str, Any]:
     data = _as_mapping(value)
     out = deepcopy(DEFAULT_RENDER)
     profile = str(data.get("render_profile") or data.get("ar_pbr_render_profile") or DEFAULT_RENDER["render_profile"]).strip().casefold()
-    out["render_profile"] = profile if profile in {"authored", "marmoset_pbr"} else DEFAULT_RENDER["render_profile"]
+    out["render_profile"] = profile if profile in {"authored", "vrm_mtoon", "marmoset_pbr"} else DEFAULT_RENDER["render_profile"]
     if data.get("shadow_quality"):
         out["shadow_quality"] = str(data.get("shadow_quality"))
     if data.get("reflection_quality"):

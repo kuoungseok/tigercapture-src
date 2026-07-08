@@ -25,7 +25,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--csv", default=str(DEFAULT_CSV))
     parser.add_argument("--video", default="")
     parser.add_argument("--out", default=str(DEFAULT_OUT))
-    parser.add_argument("--preset", choices=("bust_up", "half_body", "full_body"), default="bust_up")
+    parser.add_argument("--preset", choices=("auto", "bust_up", "half_body", "full_body"), default="auto")
     parser.add_argument("--slots", default="neutral,head,mouth")
     parser.add_argument("--source-frame-size", default="")
     parser.add_argument("--smoothing", type=float, default=0.35)

@@ -28,19 +28,38 @@ def _ensure_text_preview_label(self) -> QLabel:
         lbl.setStyleSheet("background: transparent; color: white;")
         lbl.hide()
         self._text_preview_label = lbl
+    labels = list(getattr(self, "_text_preview_labels", []) or [])
+    if not labels:
+        labels = [self._text_preview_label]
+        self._text_preview_labels = labels
     return self._text_preview_label
+
+
+def _ensure_text_preview_labels(self, count: int) -> list[QLabel]:
+    first = _ensure_text_preview_label(self)
+    labels = list(getattr(self, "_text_preview_labels", []) or [first])
+    while len(labels) < max(1, int(count)):
+        lbl = QLabel(self._drawing_canvas)
+        lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
+        lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        lbl.setWordWrap(True)
+        lbl.setStyleSheet("background: transparent; color: white;")
+        lbl.hide()
+        labels.append(lbl)
+    self._text_preview_labels = labels
+    return labels
 
 
 def _update_text_clip_overlay(self, pos_ms: int) -> None:
     """Show / hide / restyle the preview text based on active
-    typography actors at ``pos_ms``. Phase 1: static render of the
-    topmost active actor (no animations yet).
+    typography actors at ``pos_ms``. This lightweight live overlay mirrors the
+    current active text stack so catalog/review captures and editor preview do
+    not collapse multiple title layers into a single caption.
 
     Typography actors live per-VideoTrack in track-local source ms.
     Active-check: track-local time = project_ms - track.offset_ms,
     valid when 0 <= local < track.duration_ms and actor.contains(local).
     """
-    lbl = self._ensure_text_preview_label()
     project_ms = int(pos_ms)
 
     active: list[TextClip] = []
@@ -64,37 +83,58 @@ def _update_text_clip_overlay(self, pos_ms: int) -> None:
             if clip.contains(local):
                 active.append(clip)
 
+    labels = _ensure_text_preview_labels(self, len(active) if active else 1)
+
     if not active:
-        lbl.hide()
+        for lbl in labels:
+            lbl.hide()
         return
 
-    # Last registered wins ??drawn on top. Future phases may honor
-    # per-actor z-order the way stickers do.
-    clip = active[-1]
-    style = clip.style
     canvas = self._drawing_canvas
     cw, ch = canvas.width(), canvas.height()
     if cw <= 0 or ch <= 0:
-        lbl.hide()
+        for lbl in labels:
+            lbl.hide()
         return
 
-    font = QFont(style.font_family, int(style.font_size * ch / 1080.0))
-    font.setWeight(QFont.Weight(int(style.font_weight)))
-    lbl.setFont(font)
-    lbl.setStyleSheet(
-        f"background: transparent; color: {style.color};"
-        " font-weight: 700;"
-    )
-    lbl.setText(clip.display_text())
-    lbl.adjustSize()
+    for idx, clip in enumerate(active):
+        lbl = labels[idx]
+        style = clip.style
+        font = QFont(style.font_family, max(8, int(style.font_size * ch / 1080.0)))
+        font.setWeight(QFont.Weight(int(style.font_weight)))
+        if getattr(style, "letter_spacing", 0):
+            font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, float(style.letter_spacing))
+        lbl.setFont(font)
+        if style.alignment == "left":
+            lbl.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        elif style.alignment == "right":
+            lbl.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        else:
+            lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        css = [
+            f"background: {style.background_color or 'transparent'};",
+            f"color: {style.color or '#FFFFFF'};",
+            f"font-weight: {int(style.font_weight)};",
+        ]
+        if style.background_radius:
+            css.append(f"border-radius: {max(0, int(style.background_radius))}px;")
+        if style.background_padding:
+            pad = max(0, int(style.background_padding))
+            css.append(f"padding: {pad}px;")
+        lbl.setStyleSheet(" ".join(css))
+        lbl.setText(clip.display_text())
+        lbl.adjustSize()
 
-    lw = min(int(cw * 0.9), max(40, lbl.width()))
-    lh = max(30, lbl.height())
-    cx = int(style.position_x * cw)
-    cy = int(style.position_y * ch)
-    lbl.setGeometry(cx - lw // 2, cy - lh // 2, lw, lh)
-    lbl.show()
-    lbl.raise_()
+        lw = min(int(cw * 0.92), max(int(cw * 0.24), lbl.width()))
+        lh = max(28, lbl.height())
+        cx = int(style.position_x * cw)
+        cy = int(style.position_y * ch)
+        lbl.setGeometry(cx - lw // 2, cy - lh // 2, lw, lh)
+        lbl.show()
+        lbl.raise_()
+
+    for lbl in labels[len(active):]:
+        lbl.hide()
 
 
 def _on_typography_actor_selected(self, track_id: int, actor_id: int) -> None:
@@ -188,4 +228,3 @@ def _show_typography_menu(self, track_id: int, clip_id: int, global_pos) -> None
         if row is not None:
             row.update()
         self._on_typography_changed(track_id)
-

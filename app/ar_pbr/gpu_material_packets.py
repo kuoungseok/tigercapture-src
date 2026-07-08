@@ -99,7 +99,21 @@ def material_texture_maps(
             value = str(maps.get(f"{key}_{suffix}") or "")
             if value:
                 out[f"{key}_{suffix}"] = value
-    for key in ("alpha_mode", "alpha_cutoff", "emissive_factor", "uv_v_flip"):
+    for key in (
+        "alpha_mode",
+        "alpha_cutoff",
+        "emissive_factor",
+        "uv_v_flip",
+        "shader_model",
+        "source_shader",
+        "render_queue",
+        "mtoon_render_queue",
+        "mtoon_cull_mode",
+        "mtoon_zwrite",
+        "mtoon_src_blend",
+        "mtoon_dst_blend",
+        "depth_write",
+    ):
         value = str(maps.get(key) or "")
         if value:
             out[key] = value

@@ -67,6 +67,8 @@
   "launch_command_template": [
     "E:\\ClaudeCodeApp\\GifCam\\.venv\\Scripts\\python.exe",
     "E:\\ClaudeCodeApp\\GifCam\\tools\\ar_pbr_preview_window.py",
+    "--settings-json",
+    "E:\\ClaudeCodeApp\\GifCam\\docs\\review_automation\\presets\\ar_pbr_space_station_modules.json",
     "--asset",
     "E:\\ClaudeCodeApp\\3d\\Space_Station_Modules-431ca84e\\gltf\\converted\\space_station_modules_gl_extracted\\scene.gltf",
     "--width",

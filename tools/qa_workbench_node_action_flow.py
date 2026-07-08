@@ -585,6 +585,15 @@ def run_workbench_node_action_flow(
         steps.append({"action": "node.graph.set", **graph_set})
         checks["node_graph_action_ok"] = bool(graph_set.get("ok"))
 
+        compare = registry.execute(
+            "ui.viewer.compare.set",
+            {"track_id": track_id, "mode": "split", "labels_enabled": True},
+        ).to_dict()
+        steps.append({"action": "ui.viewer.compare.set", **compare})
+        checks["viewer_compare_split"] = bool(
+            compare.get("ok") and str((compare.get("result") or {}).get("mode") or "").lower() == "split"
+        )
+
         _wait(app, 220)
         seek_ms = 900
         if duration_ms > 0:
@@ -802,8 +811,15 @@ def run_workbench_node_action_flow(
                         int(v) for v in list(color_splitter.sizes())
                     ]
                 color_dock_png = out / "editor_color_dock_action.png"
-                checks["color_dock_screenshot"] = _save_widget(editor, color_dock_png)
-                artifacts["color_dock"] = str(color_dock_png.resolve())
+                if checks.get("color_dock_viewer_reforced"):
+                    checks["color_dock_screenshot"] = _save_widget(editor, color_dock_png)
+                    artifacts["color_dock"] = str(color_dock_png.resolve())
+                else:
+                    checks["color_dock_screenshot"] = False
+                    try:
+                        color_dock_png.unlink(missing_ok=True)
+                    except Exception:
+                        pass
 
             selected_node = None
             for node in list(getattr(graph_widget.scene, "_serial_nodes", []) or []):

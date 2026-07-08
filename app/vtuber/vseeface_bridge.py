@@ -1651,12 +1651,12 @@ def _build_internal_vrm_fallback_source(
     camera = standard_vtuber_camera_settings(capture.framing_preset)
     try:
         from app.vtuber.internal_vrm_fallback import internal_vrm_fallback_quality_policy
-        from app.vtuber.vrm_renderer import VRM_RENDERER_SOFTWARE
+        from app.vtuber.vrm_renderer import VRM_RENDERER_GPU
 
         quality = internal_vrm_fallback_quality_policy(
             width=max(1, int(width)),
             height=max(1, int(height)),
-            renderer=VRM_RENDERER_SOFTWARE,
+            renderer=VRM_RENDERER_GPU,
             settings={"fps": capture.fps},
         )
     except Exception:
@@ -1691,7 +1691,7 @@ def _build_internal_vrm_fallback_source(
             "renderer": {
                 "type": "internal_vrm",
                 "family": "vtuber_vrm",
-                "renderer": "vrm_mtoon_software",
+                "renderer": "vrm_mtoon_gpu",
                 "render_profile": "vrm_mtoon",
                 "pbr_renderer": False,
                 "ar_pbr_preview": False,

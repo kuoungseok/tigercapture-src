@@ -1439,6 +1439,30 @@ QWidget#WorkbenchHeader QPushButton#PreviewPopoutIcon {{
     max-height: 13px;
 }}
 
+QWidget#WorkbenchHeader QPushButton#WorkbenchPptEntryButton {{
+    background-color: #242424;
+    color: #C8C8C8;
+    border: 1px solid #333333;
+    border-radius: 4px;
+    padding: 0px 4px;
+    min-width: 32px;
+    min-height: 13px;
+    max-width: 32px;
+    max-height: 13px;
+    font-size: 8px;
+    font-weight: 700;
+}}
+
+QWidget#WorkbenchHeader QPushButton#WorkbenchPptEntryButton:hover {{
+    background-color: #2E2E2E;
+    color: #FFFFFF;
+    border-color: #D85A30;
+}}
+
+QWidget#WorkbenchHeader QPushButton#WorkbenchPptEntryButton:pressed {{
+    background-color: #121212;
+}}
+
 QWidget#ActorLibrarySectionHost,
 QWidget#EffectsLibrarySectionHost,
 QWidget#TitlePresetsSectionHost,
@@ -1703,6 +1727,18 @@ QPushButton#ViewerDropdownButton:hover {{
     color: #F1F4FA;
     background-color: #111722;
     border-color: #3A465B;
+}}
+
+QPushButton#ViewerDropdownButton:checked,
+QPushButton#ViewerDropdownButton[active="true"] {{
+    color: #FFFFFF;
+    background-color: qlineargradient(
+        x1:0, y1:0, x2:1, y2:1,
+        stop:0 #29D3FF,
+        stop:0.52 #7B61FF,
+        stop:1 #FF6B8D
+    );
+    border-color: #9AB4FF;
 }}
 
 QWidget#TimelinePaletteBar QWidget#TimelineToolBar,

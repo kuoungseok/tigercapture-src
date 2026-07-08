@@ -30,6 +30,7 @@ from app.icons import app_icon, icon_size
 from app.studio_slider import StudioSlider
 from app.ar_pbr.ambient_occlusion import (
     DEFAULT_AMBIENT_OCCLUSION_MODE,
+    DEFAULT_AO_ACTIVE_STRENGTH,
     DEFAULT_AO_DISTANCE,
     DEFAULT_AO_RADIUS,
     DEFAULT_AO_STRENGTH,
@@ -65,8 +66,10 @@ from app.ar_pbr.asset_support import asset_support_status_text
 from app.ar_pbr.render_profile import (
     PROFILE_AUTHORED,
     PROFILE_MARMOSET_PBR,
+    PROFILE_VRM_MTOON,
     inspect_asset_render_profiles_from_descriptor,
     marmoset_pbr_available,
+    vrm_mtoon_available,
 )
 from app.ar_pbr.shadow import DEFAULT_SHADOW_STRENGTH
 from app.ar_pbr.surface import (
@@ -86,11 +89,18 @@ def _support_status_text(report: dict[str, Any] | None) -> str:
 
 def _render_profile_combo_rows(render_profiles: dict[str, Any] | None) -> list[dict[str, Any]]:
     profiles = render_profiles if isinstance(render_profiles, dict) else {}
-    rows = [{
+    rows = []
+    if vrm_mtoon_available(profiles):
+        rows.append({
+            "id": PROFILE_VRM_MTOON,
+            "label": "VRM MToon",
+            "enabled": True,
+        })
+    rows.append({
         "id": PROFILE_AUTHORED,
         "label": "Authored material",
         "enabled": True,
-    }]
+    })
     if marmoset_pbr_available(profiles):
         rows.append({
             "id": PROFILE_MARMOSET_PBR,
@@ -340,7 +350,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._render_profiles: dict[str, Any] = {}
         self._initial_lighting = dict(initial_lighting or {})
         self._render_profile = str(self._initial_lighting.get("render_profile") or PROFILE_AUTHORED).strip().casefold()
-        if self._render_profile not in {PROFILE_AUTHORED, PROFILE_MARMOSET_PBR}:
+        if self._render_profile not in {PROFILE_AUTHORED, PROFILE_MARMOSET_PBR, PROFILE_VRM_MTOON}:
             self._render_profile = PROFILE_AUTHORED
         self._hdri_presets: list[HdriPreset] = hdri_presets()
         initial_hdri_key = str(self._initial_lighting.get("hdri_id") or self._initial_lighting.get("hdri_path") or "")
@@ -728,7 +738,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         rows = _render_profile_combo_rows(self._render_profiles)
         available_ids = {str(row.get("id") or "") for row in rows}
         if self._render_profile not in available_ids:
-            self._render_profile = PROFILE_AUTHORED
+            self._render_profile = str(rows[0].get("id") or PROFILE_AUTHORED) if rows else PROFILE_AUTHORED
         self._render_profile_combo.blockSignals(True)
         try:
             self._render_profile_combo.clear()
@@ -962,7 +972,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
                     self._sync_hdri_combo_to_selected()
             if settings.get("render_profile"):
                 requested = str(settings.get("render_profile") or PROFILE_AUTHORED).strip().casefold()
-                if requested in {PROFILE_AUTHORED, PROFILE_MARMOSET_PBR}:
+                if requested in {PROFILE_AUTHORED, PROFILE_MARMOSET_PBR, PROFILE_VRM_MTOON}:
                     self._render_profile = requested
                     self._sync_render_profile_combo()
             if "show_environment_background" in settings:
@@ -1049,6 +1059,8 @@ class ArPbrAssetPreviewWindow(QMainWindow):
                 self._state.ambient_occlusion_mode = self._normalize_ao_mode(settings["ambient_occlusion_mode"])
                 if self._state.ambient_occlusion_mode == "off":
                     self._state.ao_strength = 0.0
+                elif "ao_strength" not in settings and float(getattr(self._state, "ao_strength", 0.0) or 0.0) <= 1.0e-6:
+                    self._state.ao_strength = DEFAULT_AO_ACTIVE_STRENGTH
             if "ao_strength" in settings:
                 self._state.ao_strength = max(0.0, min(2.0, float(settings["ao_strength"])))
                 if self._state.ao_strength > 1.0e-6 and str(getattr(self._state, "ambient_occlusion_mode", "off")) == "off":
@@ -1129,7 +1141,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         if index < 0:
             return
         profile = str(self._render_profile_combo.itemData(index) or PROFILE_AUTHORED)
-        if profile not in {PROFILE_AUTHORED, PROFILE_MARMOSET_PBR}:
+        if profile not in {PROFILE_AUTHORED, PROFILE_MARMOSET_PBR, PROFILE_VRM_MTOON}:
             profile = PROFILE_AUTHORED
         if profile == self._render_profile:
             return
@@ -1269,6 +1281,9 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         if self._state.ambient_occlusion_mode == "off":
             self._state.ao_strength = 0.0
             self._ao_strength.set_value(0.0)
+        elif float(getattr(self._state, "ao_strength", 0.0) or 0.0) <= 1.0e-6:
+            self._state.ao_strength = DEFAULT_AO_ACTIVE_STRENGTH
+            self._ao_strength.set_value(DEFAULT_AO_ACTIVE_STRENGTH)
         self._update()
         self._emit_lighting_changed()
 

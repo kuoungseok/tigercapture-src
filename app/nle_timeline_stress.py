@@ -158,3 +158,241 @@ def build_nle_undo_health_matrix(
             "show_operation_matrix_enabled": bool(operation_rows),
         },
     }
+
+
+def build_nle_undo_review_board(
+    stress_report: dict[str, Any] | None = None,
+    *,
+    report_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Return a product-facing undo/edge-case QA review board."""
+
+    matrix = build_nle_undo_health_matrix(stress_report, report_path=report_path)
+    operation_rows = [dict(row) for row in list(matrix.get("operation_rows") or []) if isinstance(row, dict)]
+    risk_cards = [dict(row) for row in list(matrix.get("risk_cards") or []) if isinstance(row, dict)]
+    blocking_risks = [row for row in risk_cards if not bool(row.get("ok"))]
+    return {
+        "schema": NLE_TIMELINE_STRESS_SCHEMA,
+        "kind": "nle_undo_review_board",
+        "ready": bool(matrix.get("ready")),
+        "path": str(matrix.get("path") or ""),
+        "summary": dict(matrix.get("summary") or {}),
+        "sections": [
+            {
+                "id": "operations",
+                "title": "Operation Coverage",
+                "tone": "ok" if all(bool(row.get("covered")) for row in operation_rows) else "blocking",
+                "rows": operation_rows,
+            },
+            {
+                "id": "risks",
+                "title": "Undo / Edge-case Risks",
+                "tone": "ok" if not blocking_risks else "blocking",
+                "rows": risk_cards,
+            },
+            {
+                "id": "blockers",
+                "title": "Blockers",
+                "tone": "ok" if not list(matrix.get("blockers") or []) else "blocking",
+                "rows": [{"id": str(row), "label": str(row)} for row in list(matrix.get("blockers") or [])],
+            },
+        ],
+        "commands": {
+            "rerun_400_iteration_fuzzer_enabled": bool((matrix.get("commands") or {}).get("rerun_400_iteration_fuzzer_enabled")),
+            "open_failure_report_enabled": bool((matrix.get("commands") or {}).get("open_failure_report_enabled")),
+            "show_operation_matrix_enabled": bool((matrix.get("commands") or {}).get("show_operation_matrix_enabled")),
+        },
+        "readiness": {
+            "review_board_ready": bool(operation_rows and risk_cards),
+            "ready_for_claim_evidence": bool(matrix.get("ready")),
+            "has_blockers": bool(list(matrix.get("blockers") or [])),
+        },
+    }
+
+
+def build_nle_undo_recovery_playbook(
+    stress_report: dict[str, Any] | None = None,
+    *,
+    report_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Return a UI-ready undo failure recovery and rerun playbook."""
+
+    matrix = build_nle_undo_health_matrix(stress_report, report_path=report_path)
+    summary = matrix.get("summary") if isinstance(matrix.get("summary"), dict) else {}
+    blockers = [str(row) for row in list(matrix.get("blockers") or []) if str(row or "").strip()]
+    risk_cards = [dict(row) for row in list(matrix.get("risk_cards") or []) if isinstance(row, dict)]
+    operation_rows = [dict(row) for row in list(matrix.get("operation_rows") or []) if isinstance(row, dict)]
+    missing_operations = [row for row in operation_rows if not bool(row.get("covered"))]
+    steps = [
+        {
+            "id": "capture_state",
+            "label": "Capture current timeline state",
+            "required": True,
+            "status": "ready",
+            "notes": "Save project snapshot and selected clip ids before destructive edit replay.",
+        },
+        {
+            "id": "rerun_fuzzer",
+            "label": "Rerun timeline fuzzer",
+            "required": True,
+            "status": "ready" if bool((matrix.get("commands") or {}).get("rerun_400_iteration_fuzzer_enabled")) else "blocked",
+            "iterations": 400,
+        },
+        {
+            "id": "inspect_failures",
+            "label": "Inspect failures and operation gaps",
+            "required": bool(blockers or missing_operations),
+            "status": "needs_review" if blockers or missing_operations else "ready",
+            "blockers": blockers,
+        },
+        {
+            "id": "undo_replay",
+            "label": "Replay undo/redo sequence",
+            "required": True,
+            "status": "ready" if _int(summary.get("undo_depth"), 0) >= 10 else "needs_more_depth",
+            "undo_depth": _int(summary.get("undo_depth"), 0),
+        },
+        {
+            "id": "recovery_check",
+            "label": "Verify recovery/autosave fallback",
+            "required": True,
+            "status": "ready",
+            "notes": "Confirm project can reopen after interrupted destructive timeline operations.",
+        },
+    ]
+    scenarios = [
+        {
+            "id": "destructive_edit_confirm",
+            "label": "Destructive edits require confirmation",
+            "covered": True,
+        },
+        {
+            "id": "linked_audio_integrity",
+            "label": "Linked audio moves/trims with video",
+            "covered": any(row.get("id") == "linked_audio" and bool(row.get("ok")) for row in risk_cards),
+        },
+        {
+            "id": "actor_lane_integrity",
+            "label": "Actor lanes survive timeline mutation",
+            "covered": any(row.get("id") == "actor_lanes" and bool(row.get("ok")) for row in risk_cards),
+        },
+        {
+            "id": "operation_coverage",
+            "label": "Core edit operations covered",
+            "covered": not missing_operations,
+            "missing": [str(row.get("operation") or "") for row in missing_operations],
+        },
+        {
+            "id": "zero_failure_run",
+            "label": "Latest run has zero failures",
+            "covered": any(row.get("id") == "zero_failures" and bool(row.get("ok")) for row in risk_cards),
+        },
+    ]
+    ready = bool(steps and scenarios and operation_rows)
+    return {
+        "schema": NLE_TIMELINE_STRESS_SCHEMA,
+        "kind": "nle_undo_recovery_playbook",
+        "ready": ready,
+        "path": str(matrix.get("path") or ""),
+        "summary": {
+            "iterations": _int(summary.get("iterations"), 0),
+            "failures": _int(summary.get("failures"), 0),
+            "undo_depth": _int(summary.get("undo_depth"), 0),
+            "blocker_count": len(blockers),
+            "missing_operation_count": len(missing_operations),
+        },
+        "steps": steps,
+        "scenarios": scenarios,
+        "blockers": blockers,
+        "commands": {
+            "rerun_400_iteration_fuzzer_enabled": bool((matrix.get("commands") or {}).get("rerun_400_iteration_fuzzer_enabled")),
+            "open_failure_report_enabled": bool((matrix.get("commands") or {}).get("open_failure_report_enabled")),
+            "open_recovery_folder_enabled": True,
+            "copy_reproduction_steps_enabled": True,
+        },
+        "readiness": {
+            "recovery_playbook_ready": ready,
+            "ready_for_claim_evidence": bool(matrix.get("ready")),
+            "requires_failure_triage": bool(blockers),
+        },
+    }
+
+
+def build_nle_undo_stability_dashboard(
+    stress_report: dict[str, Any] | None = None,
+    *,
+    report_path: str | Path | None = None,
+) -> dict[str, Any]:
+    """Return one dashboard for undo fuzzer health, review, and recovery state."""
+
+    matrix = build_nle_undo_health_matrix(stress_report, report_path=report_path)
+    review = build_nle_undo_review_board(stress_report, report_path=report_path)
+    recovery = build_nle_undo_recovery_playbook(stress_report, report_path=report_path)
+    summary = matrix.get("summary") if isinstance(matrix.get("summary"), dict) else {}
+    risk_cards = [dict(row) for row in list(matrix.get("risk_cards") or []) if isinstance(row, dict)]
+    operation_rows = [dict(row) for row in list(matrix.get("operation_rows") or []) if isinstance(row, dict)]
+    blockers = [str(row) for row in list(matrix.get("blockers") or []) if str(row or "").strip()]
+    passing_risks = sum(1 for row in risk_cards if bool(row.get("ok")))
+    covered_operations = sum(1 for row in operation_rows if bool(row.get("covered")))
+    return {
+        "schema": NLE_TIMELINE_STRESS_SCHEMA,
+        "kind": "nle_undo_stability_dashboard",
+        "ready": bool(review.get("ready") or (review.get("readiness") or {}).get("review_board_ready")),
+        "path": str(matrix.get("path") or ""),
+        "summary": {
+            "iterations": _int(summary.get("iterations"), 0),
+            "failures": _int(summary.get("failures"), 0),
+            "undo_depth": _int(summary.get("undo_depth"), 0),
+            "covered_operation_count": covered_operations,
+            "operation_count": len(operation_rows),
+            "passing_risk_count": passing_risks,
+            "risk_count": len(risk_cards),
+            "blocker_count": len(blockers),
+        },
+        "cards": [
+            {
+                "id": "fuzzer",
+                "label": "Timeline fuzzer",
+                "tone": "ok" if bool(matrix.get("ready")) else "warning",
+                "value": _int(summary.get("iterations"), 0),
+                "caption": "iterations",
+            },
+            {
+                "id": "undo_depth",
+                "label": "Undo depth",
+                "tone": "ok" if _int(summary.get("undo_depth"), 0) >= 10 else "warning",
+                "value": _int(summary.get("undo_depth"), 0),
+            },
+            {
+                "id": "failures",
+                "label": "Failures",
+                "tone": "ok" if _int(summary.get("failures"), 0) == 0 else "blocking",
+                "value": _int(summary.get("failures"), 0),
+            },
+            {
+                "id": "coverage",
+                "label": "Operation coverage",
+                "tone": "ok" if operation_rows and covered_operations == len(operation_rows) else "warning",
+                "value": f"{covered_operations}/{len(operation_rows)}",
+            },
+        ],
+        "sections": [
+            {"id": "risk_cards", "title": "Risk Cards", "rows": risk_cards},
+            {"id": "operations", "title": "Operation Coverage", "rows": operation_rows},
+            {"id": "recovery_steps", "title": "Recovery Steps", "rows": list(recovery.get("steps") or [])},
+            {"id": "blockers", "title": "Blockers", "rows": [{"id": row, "label": row} for row in blockers]},
+        ],
+        "commands": {
+            "open_undo_review_board_enabled": bool((review.get("readiness") or {}).get("review_board_ready")),
+            "open_recovery_playbook_enabled": bool((recovery.get("readiness") or {}).get("recovery_playbook_ready")),
+            "rerun_400_iteration_fuzzer_enabled": bool((matrix.get("commands") or {}).get("rerun_400_iteration_fuzzer_enabled")),
+            "open_failure_report_enabled": bool((matrix.get("commands") or {}).get("open_failure_report_enabled")),
+        },
+        "readiness": {
+            "stability_dashboard_ready": True,
+            "review_board_ready": bool((review.get("readiness") or {}).get("review_board_ready")),
+            "recovery_playbook_ready": bool((recovery.get("readiness") or {}).get("recovery_playbook_ready")),
+            "claim_evidence_ready": bool(matrix.get("ready")),
+            "requires_failure_triage": bool(blockers),
+        },
+    }

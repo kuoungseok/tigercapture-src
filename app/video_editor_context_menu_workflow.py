@@ -128,6 +128,19 @@ def _on_clip_badge_action_requested(self, track_id: int, clip_id: int, action: s
         return
     self._select_workflow_video_clip(track, clip)
     action = str(action or "inspect").casefold()
+    if action == "audition":
+        opener = getattr(self, "_open_nle_audition_picker", None)
+        if callable(opener):
+            opener(track, clip)
+            self._flash_status("Audition takes opened")
+        return
+    if action == "connected":
+        focus_parent = getattr(self, "_focus_connected_parent_clip", None)
+        if callable(focus_parent) and focus_parent(track, clip):
+            self._flash_status("Connected parent clip focused")
+        else:
+            self._flash_status("Connected parent clip is not available")
+        return
     panel = getattr(self, "_workbench_panel", None)
     if panel is not None and hasattr(panel, "_set_inspector_tab"):
         try:

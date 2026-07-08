@@ -20,10 +20,21 @@ for normal Studio operation.
 Studio/VRM rendering must use the VTuber VRM/MToon renderer boundary:
 `app/vtuber/vrm_renderer.py`, renderer family `vtuber_vrm`, render profile
 `vrm_mtoon`. `.vrm` Program Output, Avatar Mapping, and internal VRM fallback
-must not be routed through AR/PBR preview, Marmoset PBR, `full-gpu`, or old
-debug proof images. Until a true VRM GPU renderer exists, GPU/PBR-looking
-aliases are rewritten to `vrm_mtoon_software` and cannot be used for broadcast
-quality claims.
+must not be routed through AR/PBR preview, Marmoset PBR, or old debug proof
+images. The exposed backend is `vrm_mtoon_gpu`; `auto`, `mtoon`,
+`vrm_mtoon`, PBR-looking aliases, and legacy `vrm_mtoon_software` requests are
+rewritten to `vrm_mtoon_gpu`. The legacy software VRM renderer is disabled for
+product/UI/AI-selected routes because it can display dense VRM meshes as broken
+point-like contact previews. Renderer contracts expose
+`software_renderer_available=false`, `legacy_software_renderer_disabled=true`,
+`requested_renderer`, `renderer_rewritten`, and rewrite warnings.
+
+Source-person visibility must drive avatar visibility through
+`match_source_person_exposure_to_vrm_visibility`: `face_only` -> `bust_up`,
+`upper_body` -> at least `half_body`, and `full_body` -> `full_body`.
+Studio evidence, Program Output, and review automation must read
+`source_exposure` plus `visibility_policy` from source-framing plans and reject
+face-only/head-only VRM evidence for upper-body or full-body sources.
 
 ## Core Rule
 
@@ -57,7 +68,7 @@ project files.
 - Broadcast Evidence UI-neutral copy and payload helpers live in
   `app/broadcast_evidence_ui.py`.
   - status-line text
-  - RTMP/Discord registration dialog defaults
+- RTMP/YouTube viewer registration dialog defaults
   - registration payload normalization
 - Screen Studio Auto Polish dialog code lives in
   `app/video_editor_screenstudio_dialogs.py`.
@@ -125,14 +136,16 @@ Live Target output path.
     reusing arbitrary avatar preview PNGs from old renderer/debug proof output;
   - owns Live Target controls;
   - owns the Broadcast Evidence card;
-  - exposes Refresh Evidence, Register RTMP, and Register Discord controls.
+  - exposes Refresh Evidence, Register RTMP, and Register YouTube View controls.
 - `app/broadcast_evidence_ui.py`
   - owns product copy/defaults/payload helpers for evidence UI.
 - `app/broadcast_platform_e2e.py`
   - checks Local Program Output MP4;
   - checks Live2D Program Output MP4;
   - checks capture/composite output;
-  - reserves manual slots for private RTMP ingest and Discord/window-share;
+  - reserves required manual slots for private RTMP ingest and YouTube
+    private/unlisted viewer playback, with Discord/window-share as optional
+    evidence;
   - exposes `build_broadcast_platform_evidence_checklist()`.
 - `app/broadcast_release_readiness.py`
   - separates alpha-ready from commercial/sale-ready;
@@ -149,6 +162,8 @@ vtuber.vrm.pose_stream_preview
 broadcast.live_target.summary
 broadcast.live_target.select
 broadcast.platform_evidence_checklist
+broadcast.evidence_readiness.refresh
+broadcast.platform_evidence.preflight
 broadcast.platform_evidence.register
 broadcast.release_readiness
 actor.live2d.apply_performance_source
@@ -166,17 +181,23 @@ Commercial/sale readiness still requires two real redacted platform evidence
 items:
 
 - `private_rtmp_ingest`
+- `youtube_unlisted_viewer_playback`
+
+Optional claim-specific evidence:
+
 - `discord_window_share`
 
 Evidence can be registered from:
 
 - VTuber Studio `Register RTMP`
-- VTuber Studio `Register Discord`
+- VTuber Studio `Register YouTube View`
 - Python Action `broadcast.platform_evidence.register`
 
 Registration must require `confirm_redacted=true`. Notes and paths must reject
-token/password/stream-key-like secrets. The UI must not show raw JSON/debug
-dumps as the operator-facing evidence screen.
+token/password/stream-key-like secrets and direct YouTube watch/preview URLs
+such as `youtube.com/watch`, `youtu.be`, `youtube.com/live`, and YouTube Studio
+live/preview URLs. The UI must not show raw JSON/debug dumps as the
+operator-facing evidence screen.
 
 After registration, the evidence artifact is:
 
@@ -200,8 +221,10 @@ broadcast.release_readiness
 
 - Alpha/local functionality can be ready when automated local Program Output
   checks pass.
-- Commercial/sale-ready must remain blocked until redacted private RTMP and
-  Discord/window-share evidence are registered.
+- Commercial/sale-ready must remain blocked until redacted private RTMP ingest
+  and YouTube private/unlisted viewer playback evidence are registered.
+  Discord/window-share evidence is optional unless that specific claim is being
+  marketed.
 - Do not claim `commercial_ready=true` based only on local MP4 smoke tests.
 
 Known current artifacts:
@@ -232,7 +255,7 @@ debugCapture/broadcast_release_readiness_qa.json
 
 1. Run a real private RTMP ingest test.
 2. Register redacted RTMP evidence.
-3. Run a real Discord/window-share test.
-4. Register redacted Discord evidence.
+3. Open the real private/unlisted YouTube viewer or preview page.
+4. Register redacted YouTube viewer evidence.
 5. Rerun broadcast release readiness and confirm whether
    `commercial_ready=true`.

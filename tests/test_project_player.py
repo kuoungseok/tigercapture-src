@@ -876,7 +876,7 @@ def test_video_editor_clear_preview_placeholder_repaints_backing_label(monkeypat
     assert fake._preview_placeholder_kind == "content"
     assert fake._preview_label.text == ""
     assert fake._preview_label.pixmap == "empty-pixmap"
-    assert "transparent" in fake._preview_label.stylesheet
+    assert "#07080F" in fake._preview_label.stylesheet
     assert fake._preview_label.updated is True
     assert fake._preview_label.repainted is True
 

@@ -712,7 +712,9 @@ def test_vrm0_import_uses_internal_gltf_avatar_path(tmp_path):
     assert descriptor["support"]["format_family"] == "vrm"
     assert descriptor["support"]["asset_kind"] == "humanoid_avatar"
     assert "vrm_avatar" in descriptor["support"]["feature_flags"]
-    assert asset_support_status_text(descriptor["support"]) == "Ready: VRM avatar"
+    assert "vrm_mtoon_materials" in descriptor["support"]["feature_flags"]
+    assert descriptor["support"]["render_path"] == "full_gpu_vrm_mtoon_cpu_baked_skeletal"
+    assert asset_support_status_text(descriptor["support"]) == "Ready: VRM MToon"
 
 
 def test_vrm0_import_reads_mtoon_texture_properties(tmp_path):
@@ -735,7 +737,9 @@ def test_vrm0_import_reads_mtoon_texture_properties(tmp_path):
     assert material["normal_texture_source"] == "vrm0_mtoon_bump_map"
     assert material["pbr_available"] is False
     assert descriptor["render_profiles"]["source_style"] == "vrm_mtoon"
-    assert descriptor["render_profiles"]["available_profiles"] == ["authored"]
+    assert descriptor["render_profiles"]["default_profile"] == "vrm_mtoon"
+    assert descriptor["render_profiles"]["available_profiles"] == ["vrm_mtoon", "authored"]
+    assert descriptor["render_profiles"]["profiles"]["vrm_mtoon"]["available"] is True
     assert descriptor["render_profiles"]["profiles"]["marmoset_pbr"]["available"] is False
     assert Path(material["base_texture"]).exists()
     assert Path(material["normal_texture"]).exists()

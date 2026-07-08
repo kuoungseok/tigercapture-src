@@ -20,11 +20,13 @@ from app.i18n import tr
 from app.icons import app_icon, icon_size
 from app.studio_slider import StudioSlider
 from app.style import COLOR_TEXT_TERTIARY, editor_scrollbar_qss
+from app.timeline_connected_anchor_overlay_widget import ConnectedAnchorOverlay
 from app.timeline_cursor import _timeline_tool_cursor
 from app.timeline_ruler import TimelineRuler
 from app.timeline_striped_host import StripedHost
 from app.video_editor_audio_widgets import AudioMixerPanel
 from app.video_editor_layout_specs import horizontal_tool_scroll_qss
+from app.video_editor_nle_role_panel import RoleLaneFilterBar, role_lane_filter_bar_qss
 from app.video_editor_timeline_palette import configure_timeline_tile
 from app.video_editor_window_widgets import _AnimatedTimelineToolButton
 
@@ -300,11 +302,20 @@ def build_timeline_area(self):
         + editor_scrollbar_qss("QScrollArea#TimelineScroll")
     )
     # Mouse wheel over the timeline zooms its horizontal length.
+    self._tracks_scroll.viewport().setAcceptDrops(True)
     self._tracks_scroll.viewport().installEventFilter(self)
     self._tracks_scroll.horizontalScrollBar().valueChanged.connect(
         lambda _value: [
             row.update() for row in getattr(self, "_track_rows", {}).values()
         ]
+    )
+    self._connected_anchor_overlay = ConnectedAnchorOverlay(self._tracks_scroll.viewport())
+    self._connected_anchor_overlay.set_owner(self)
+    self._tracks_scroll.horizontalScrollBar().valueChanged.connect(
+        lambda _value: self._connected_anchor_overlay.refresh()
+    )
+    self._tracks_scroll.verticalScrollBar().valueChanged.connect(
+        lambda _value: self._connected_anchor_overlay.refresh()
     )
 
     # Wrap the timeline in a section host so we can detach the
@@ -346,6 +357,11 @@ def build_timeline_area(self):
     th_layout.addWidget(self.timeline_popout_btn)
     ts_layout.addWidget(timeline_header)
     ts_layout.addWidget(self._timeline_palette_scroll)
+    self._nle_role_filter_bar = RoleLaneFilterBar(self._timeline_section_host)
+    self._nle_role_filter_bar.setStyleSheet(role_lane_filter_bar_qss())
+    self._nle_role_filter_bar.roleSelected.connect(self._set_nle_role_lane_focus_from_ui)
+    ts_layout.addWidget(self._nle_role_filter_bar)
+    self._refresh_nle_role_filter_bar()
     ts_layout.addWidget(self._tracks_scroll, stretch=1)
 
     # --- Audio Mixer panel (includes built-in scopes column on the right) ---
@@ -353,6 +369,8 @@ def build_timeline_area(self):
     self._audio_mixer_panel.setVisible(False)
     self._audio_mixer_panel.set_volume_callback(self._on_mixer_fader_changed)
     self._audio_mixer_panel.set_pan_callback(self._on_mixer_pan_changed)
+    self._audio_mixer_panel.set_mute_callback(self._on_mixer_mute_changed)
+    self._audio_mixer_panel.set_solo_callback(self._on_mixer_solo_changed)
     self._audio_mixer_panel.visibility_changed.connect(
         self._on_audio_mixer_visibility_changed,
     )
@@ -411,4 +429,3 @@ def build_timeline_area(self):
 
     sel_row.addSpacing(6)
     return controls_bar, sel_row
-

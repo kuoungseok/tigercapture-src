@@ -1079,6 +1079,19 @@
   strict `real_project_corpus` evidence is attached. Synthetic/action contract
   evidence remains capped at the current implementation score, so the 95 target
   is reachable with real projects but cannot be faked by generated fixtures.
+- [x] 2026-07-08 NLE implementation score over 90: add UI-ready polish boards
+  and action contracts for `timeline.nle_core_safety_matrix`,
+  `source_record.usability_board`, `timeline.multicam.export_parity_board`,
+  `project_bin.proxy_apply_review_board`,
+  `project_bin.conform_apply_review_board`, `timeline.undo_long_session_plan`,
+  and `timeline.storyline_gesture_polish_board`. `tools/qa_nle_readiness.py`
+  now reports 91/100 from synthetic/action evidence while still blocking full
+  professional-NLE claims on `real_world_long_project_corpus`.
+- [x] 2026-07-08 NLE readiness scoring refactor: move row score ladders into
+  `app/nle_readiness_scoring.py` and add `score_breakdown` to the readiness
+  report so UI/AI/MCP surfaces can read per-row score/status without duplicating
+  the report parser. Current score remains 91/100; the real-corpus blocker is
+  unchanged.
 - [x] 2026-06-30 VTuber Live2D preview parity: main preview and popout preview must both
   evaluate Live2D animation plus Performance Source mapping results.
 - [x] 2026-07-01 VTuber tracking input health contract: VSeeFace bridge input

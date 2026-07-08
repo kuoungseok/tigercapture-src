@@ -36,15 +36,16 @@ def test_internal_vrm_fallback_quality_policy_rewrites_pbr_aliases_to_vrm_render
 
     quality = internal_vrm_fallback_quality_policy(width=1920, height=1080, renderer="full-gpu", settings={"fps": 30})
 
-    assert quality["renderer"] == "vrm_mtoon_software"
+    assert quality["renderer"] == "vrm_mtoon_gpu"
     assert quality["renderer_family"] == "vtuber_vrm"
     assert quality["render_profile"] == "vrm_mtoon"
     assert quality["pbr_renderer"] is False
     assert quality["ar_pbr_preview"] is False
-    assert quality["profile"] == "preview_safe"
-    assert quality["broadcast_ready"] is False
+    assert quality["profile"] == "broadcast_candidate"
+    assert quality["broadcast_ready"] is True
     assert "pbr_renderer_alias_rewritten_for_vrm:full-gpu" in quality["warnings"]
-    assert "vrm_mtoon_gpu_renderer_not_selected" in quality["claim_blockers"]
+    assert "vrm_mtoon_gpu_renderer_not_selected" not in quality["claim_blockers"]
+    assert quality["software_renderer_disabled"] is True
     assert quality["frame_budget_ms"] == 1000.0 / 30.0
 
 
@@ -88,7 +89,7 @@ def test_internal_vrm_fallback_defaults_do_not_require_debugcapture_descriptor_o
         }
 
     def fake_render_descriptor_frame(module, *, width, height, renderer, **_kwargs):
-        assert renderer == "vrm_mtoon_software"
+        assert renderer == "vrm_mtoon_gpu"
         return Image.new("RGBA", (width, height), (10, 20, 30, 255)), {"ok": True}
 
     monkeypatch.setattr(fallback, "_load_cached_runtime", fake_load_runtime)
@@ -106,7 +107,7 @@ def test_internal_vrm_fallback_defaults_do_not_require_debugcapture_descriptor_o
     assert diagnostics["motion_csv"] == ""
     assert diagnostics["descriptor_source"] == "vrm_import"
     assert diagnostics["motion_source"] == "idle_internal_motion"
-    assert diagnostics["renderer"] == "vrm_mtoon_software"
+    assert diagnostics["renderer"] == "vrm_mtoon_gpu"
     assert diagnostics["renderer_family"] == "vtuber_vrm"
     assert diagnostics["render_profile"] == "vrm_mtoon"
     assert diagnostics["pbr_renderer"] is False
@@ -122,15 +123,22 @@ def test_vrm_renderer_contract_blocks_pbr_and_ar_pbr_aliases():
         vrm_renderer_contract,
     )
 
-    assert normalize_vrm_renderer("marmoset_pbr") == "vrm_mtoon_software"
-    assert normalize_vrm_renderer("full_gpu") == "vrm_mtoon_software"
+    assert normalize_vrm_renderer("marmoset_pbr") == "vrm_mtoon_gpu"
+    assert normalize_vrm_renderer("full_gpu") == "vrm_mtoon_gpu"
+    assert normalize_vrm_renderer("vrm_mtoon_software") == "vrm_mtoon_gpu"
+    assert normalize_vrm_renderer("vrm_mtoon_gpu") == "vrm_mtoon_gpu"
     contract = vrm_renderer_contract("ar_pbr")
 
     assert contract["family"] == "vtuber_vrm"
-    assert contract["renderer"] == "vrm_mtoon_software"
+    assert contract["renderer"] == "vrm_mtoon_gpu"
+    assert contract["requested_renderer"] == "ar_pbr"
     assert contract["render_profile"] == "vrm_mtoon"
     assert contract["pbr_renderer"] is False
     assert contract["ar_pbr_preview"] is False
+    assert contract["software_renderer_available"] is False
+    assert contract["legacy_software_renderer_disabled"] is True
+    assert contract["renderer_rewritten"] is True
+    assert "pbr_renderer_alias_rewritten_for_vrm:ar_pbr" in contract["warnings"]
 
     track = make_vrm_render_track(
         track_id="avatar",
@@ -142,9 +150,24 @@ def test_vrm_renderer_contract_blocks_pbr_and_ar_pbr_aliases():
     assert track["type"] == "vrm_avatar"
     assert track["renderer_family"] == "vtuber_vrm"
     assert track["render_profile"] == "vrm_mtoon"
-    assert track["render"]["renderer"] == "vrm_mtoon_software"
+    assert track["render"]["renderer"] == "vrm_mtoon_gpu"
+    assert track["render"]["requested_renderer"] == "software_pbr"
     assert track["render"]["pbr_enabled"] is False
     assert track["render"]["ar_pbr_preview"] is False
+    assert track["render"]["software_renderer_available"] is False
+    assert track["render"]["legacy_software_renderer_disabled"] is True
+    assert track["render"]["renderer_rewritten"] is True
+    assert "pbr_renderer_alias_rewritten_for_vrm:software_pbr" in track["render"]["warnings"]
+
+
+def test_internal_vrm_fallback_crop_mode_preserves_upper_body_scope():
+    from app.vtuber.internal_vrm_fallback import _crop_mode_for_framing
+
+    assert _crop_mode_for_framing("upper_body") == "half_body"
+    assert _crop_mode_for_framing("half_body") == "half_body"
+    assert _crop_mode_for_framing("waist_up") == "half_body"
+    assert _crop_mode_for_framing("full_body") == "full_body"
+    assert _crop_mode_for_framing("bust_up") == "bust_up"
 
 
 def test_internal_vrm_fallback_composite_suppresses_black_vseeface_source():

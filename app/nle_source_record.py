@@ -297,6 +297,300 @@ def build_source_record_patch_matrix(
     }
 
 
+def build_source_record_monitor_layout(
+    *,
+    source_monitor: Mapping[str, Any] | None = None,
+    record_monitor: Mapping[str, Any] | None = None,
+    track_targets: Mapping[str, Any] | None = None,
+    playhead_ms: int = 0,
+    edit_points: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Return a product-facing Source/Record visual layout contract.
+
+    The workbench and patch matrix are the raw state.  This view model is the
+    piece a Qt panel, popout, or AI review card can render without rediscovering
+    how the two monitors, patching buttons, edit cards, and keyboard hints fit
+    together.
+    """
+
+    workbench = build_source_record_workbench(
+        source_monitor=source_monitor,
+        record_monitor=record_monitor,
+        track_targets=track_targets,
+        playhead_ms=playhead_ms,
+        edit_points=edit_points,
+    )
+    patch = build_source_record_patch_matrix(
+        source_monitor=source_monitor,
+        record_monitor=record_monitor,
+        track_targets=track_targets,
+        playhead_ms=playhead_ms,
+        edit_points=edit_points,
+    )
+    insert = build_source_record_edit_decision_preview(
+        source_monitor=source_monitor,
+        record_monitor=record_monitor,
+        track_targets=track_targets,
+        playhead_ms=playhead_ms,
+        mode="insert",
+    )
+    overwrite = build_source_record_edit_decision_preview(
+        source_monitor=source_monitor,
+        record_monitor=record_monitor,
+        track_targets=track_targets,
+        playhead_ms=playhead_ms,
+        mode="overwrite",
+    )
+    source = workbench.get("source") if isinstance(workbench.get("source"), Mapping) else {}
+    record = workbench.get("record") if isinstance(workbench.get("record"), Mapping) else {}
+    return {
+        "schema": SOURCE_RECORD_SCHEMA,
+        "kind": "source_record_monitor_layout",
+        "ready": bool(workbench.get("readiness", {}).get("three_point_ready")),
+        "layout": {
+            "panes": [
+                {
+                    "id": "source",
+                    "title": "Source",
+                    "loaded": bool(source.get("loaded")),
+                    "time_range": {
+                        "in_ms": _int(source.get("in_ms"), 0),
+                        "out_ms": _int(source.get("out_ms"), 0),
+                        "duration_ms": _int(source.get("range_ms"), 0),
+                        "label": str(source.get("range_label") or ""),
+                    },
+                    "badges": ["SRC", str(source.get("kind") or "video").upper()],
+                },
+                {
+                    "id": "record",
+                    "title": "Record",
+                    "loaded": True,
+                    "time_range": {
+                        "in_ms": _int(record.get("in_ms"), 0),
+                        "out_ms": _int(record.get("out_ms"), 0),
+                        "duration_ms": _int(record.get("range_ms"), 0),
+                        "label": str(record.get("range_label") or ""),
+                    },
+                    "badges": ["REC"],
+                },
+            ],
+            "patch_rows": list(patch.get("rows") or []),
+            "edit_cards": [
+                {
+                    "id": "insert",
+                    "label": "Insert",
+                    "enabled": bool((insert.get("ui") or {}).get("primary_label")),
+                    "safe_to_apply": bool(insert.get("safe_to_apply")),
+                    "duration_ms": _int((insert.get("decision") or {}).get("duration_ms"), 0),
+                    "warnings": list(insert.get("warnings") or []),
+                },
+                {
+                    "id": "overwrite",
+                    "label": "Overwrite",
+                    "enabled": bool((overwrite.get("ui") or {}).get("primary_label")),
+                    "safe_to_apply": bool(overwrite.get("safe_to_apply")),
+                    "duration_ms": _int((overwrite.get("decision") or {}).get("duration_ms"), 0),
+                    "warnings": list(overwrite.get("warnings") or []),
+                },
+            ],
+        },
+        "transport_hints": {
+            "jkl_transport": True,
+            "mark_in": "I",
+            "mark_out": "O",
+            "insert": ",",
+            "overwrite": ".",
+        },
+        "warnings": sorted(set(list(patch.get("warnings") or []) + list(insert.get("warnings") or []) + list(overwrite.get("warnings") or []))),
+        "commands": {
+            "mark_source_in_enabled": bool((workbench.get("commands") or {}).get("mark_source_in_enabled")),
+            "mark_source_out_enabled": bool((workbench.get("commands") or {}).get("mark_source_out_enabled")),
+            "mark_record_in_enabled": bool((workbench.get("commands") or {}).get("mark_record_in_enabled")),
+            "mark_record_out_enabled": bool((workbench.get("commands") or {}).get("mark_record_out_enabled")),
+            "insert_enabled": bool((workbench.get("commands") or {}).get("insert_enabled")),
+            "overwrite_enabled": bool((workbench.get("commands") or {}).get("overwrite_enabled")),
+        },
+    }
+
+
+def build_source_record_apply_board(
+    *,
+    source_monitor: Mapping[str, Any] | None = None,
+    record_monitor: Mapping[str, Any] | None = None,
+    track_targets: Mapping[str, Any] | None = None,
+    playhead_ms: int = 0,
+    edit_points: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Return a review/apply board for 3-point edit decisions.
+
+    The board keeps insert/overwrite destructive intent explicit: the UI can
+    show both outcomes, warnings, target patching, and the exact action payload
+    before a user or AI applies anything to the timeline.
+    """
+
+    layout = build_source_record_monitor_layout(
+        source_monitor=source_monitor,
+        record_monitor=record_monitor,
+        track_targets=track_targets,
+        playhead_ms=playhead_ms,
+        edit_points=edit_points,
+    )
+    patch = build_source_record_patch_matrix(
+        source_monitor=source_monitor,
+        record_monitor=record_monitor,
+        track_targets=track_targets,
+        playhead_ms=playhead_ms,
+        edit_points=edit_points,
+    )
+    previews = {
+        mode: build_source_record_edit_decision_preview(
+            source_monitor=source_monitor,
+            record_monitor=record_monitor,
+            track_targets=track_targets,
+            playhead_ms=playhead_ms,
+            mode=mode,
+        )
+        for mode in ("insert", "overwrite")
+    }
+    decisions: list[dict[str, Any]] = []
+    for mode, preview in previews.items():
+        decision = preview.get("decision") if isinstance(preview.get("decision"), Mapping) else {}
+        warnings = list(preview.get("warnings") or [])
+        action_id = "timeline.three_point_insert" if mode == "insert" else "timeline.three_point_overwrite"
+        decisions.append(
+            {
+                "id": mode,
+                "label": "Insert" if mode == "insert" else "Overwrite",
+                "action_id": action_id,
+                "safe_to_apply": bool(preview.get("safe_to_apply")),
+                "destructive": mode == "overwrite",
+                "requires_confirmation": mode == "overwrite",
+                "duration_ms": _int(decision.get("duration_ms"), 0),
+                "source_range": {
+                    "in_ms": _int(decision.get("source_in_ms"), 0),
+                    "out_ms": _int(decision.get("source_out_ms"), 0),
+                },
+                "record_range": {
+                    "in_ms": _int(decision.get("record_in_ms"), 0),
+                    "out_ms": _int(decision.get("record_out_ms"), 0),
+                },
+                "targets": {
+                    "video": list(decision.get("video_targets") or []),
+                    "audio": list(decision.get("audio_targets") or []),
+                },
+                "warnings": warnings,
+                "action_params": {
+                    "target_track_id": (list(decision.get("video_targets") or []) or [None])[0],
+                    "target_audio_track_id": (list(decision.get("audio_targets") or []) or [None])[0],
+                },
+            }
+        )
+    recommended = next((row for row in decisions if row["id"] == "insert" and row["safe_to_apply"]), decisions[0])
+    warnings = sorted(
+        {
+            str(warning)
+            for row in decisions
+            for warning in list(row.get("warnings") or [])
+            if str(warning or "").strip()
+        }
+        | {str(warning) for warning in list(patch.get("warnings") or []) if str(warning or "").strip()}
+    )
+    return {
+        "schema": SOURCE_RECORD_SCHEMA,
+        "kind": "source_record_apply_board",
+        "ready": any(bool(row.get("safe_to_apply")) for row in decisions),
+        "review_required": True,
+        "layout_ready": bool(layout.get("ready")),
+        "patch_matrix_ready": bool(patch.get("ready")),
+        "recommended_action": recommended["id"],
+        "decisions": decisions,
+        "warnings": warnings,
+        "sections": [
+            {
+                "id": "monitors",
+                "title": "Source / Record",
+                "rows": list((layout.get("layout") or {}).get("panes") or []),
+            },
+            {
+                "id": "patching",
+                "title": "Patch targets",
+                "rows": list(patch.get("rows") or []),
+            },
+            {
+                "id": "apply",
+                "title": "Review actions",
+                "rows": decisions,
+            },
+        ],
+        "commands": {
+            "preview_insert_enabled": True,
+            "preview_overwrite_enabled": True,
+            "apply_insert_enabled": bool(previews["insert"].get("safe_to_apply")),
+            "apply_overwrite_enabled": bool(previews["overwrite"].get("safe_to_apply")),
+            "overwrite_requires_confirm_destructive": True,
+        },
+    }
+
+
+def build_source_record_keyboard_overlay(
+    *,
+    source_monitor: Mapping[str, Any] | None = None,
+    record_monitor: Mapping[str, Any] | None = None,
+    track_targets: Mapping[str, Any] | None = None,
+    playhead_ms: int = 0,
+    edit_points: Sequence[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Return keyboard/transport hints for a Source/Record monitor panel."""
+
+    layout = build_source_record_monitor_layout(
+        source_monitor=source_monitor,
+        record_monitor=record_monitor,
+        track_targets=track_targets,
+        playhead_ms=playhead_ms,
+        edit_points=edit_points,
+    )
+    commands = layout.get("commands") if isinstance(layout.get("commands"), Mapping) else {}
+    command_rows = [
+        {"id": "jog_back", "label": "Jog back", "key": "J", "enabled": True, "group": "transport"},
+        {"id": "play_pause", "label": "Play / pause", "key": "K", "enabled": True, "group": "transport"},
+        {"id": "jog_forward", "label": "Jog forward", "key": "L", "enabled": True, "group": "transport"},
+        {"id": "source_in", "label": "Source In", "key": "I", "enabled": bool(commands.get("mark_source_in_enabled")), "group": "source"},
+        {"id": "source_out", "label": "Source Out", "key": "O", "enabled": bool(commands.get("mark_source_out_enabled")), "group": "source"},
+        {"id": "record_in", "label": "Record In", "key": "Shift+I", "enabled": bool(commands.get("mark_record_in_enabled")), "group": "record"},
+        {"id": "record_out", "label": "Record Out", "key": "Shift+O", "enabled": bool(commands.get("mark_record_out_enabled")), "group": "record"},
+        {"id": "insert", "label": "Insert", "key": ",", "enabled": bool(commands.get("insert_enabled")), "group": "edit"},
+        {"id": "overwrite", "label": "Overwrite", "key": ".", "enabled": bool(commands.get("overwrite_enabled")), "group": "edit"},
+        {"id": "next_edit", "label": "Next edit", "key": "Down", "enabled": True, "group": "navigation"},
+        {"id": "previous_edit", "label": "Previous edit", "key": "Up", "enabled": True, "group": "navigation"},
+    ]
+    groups: dict[str, list[dict[str, Any]]] = {}
+    for row in command_rows:
+        groups.setdefault(str(row.get("group") or "misc"), []).append(dict(row))
+    return {
+        "schema": SOURCE_RECORD_SCHEMA,
+        "kind": "source_record_keyboard_overlay",
+        "ready": True,
+        "layout_ready": bool(layout.get("ready")),
+        "command_count": len(command_rows),
+        "enabled_count": sum(1 for row in command_rows if bool(row.get("enabled"))),
+        "groups": [
+            {"id": key, "title": key.replace("_", " ").title(), "rows": rows}
+            for key, rows in groups.items()
+        ],
+        "commands": {
+            "show_keyboard_overlay_enabled": True,
+            "jkl_transport_enabled": True,
+            "mark_shortcuts_enabled": True,
+            "apply_shortcuts_enabled": bool(commands.get("insert_enabled") or commands.get("overwrite_enabled")),
+        },
+        "readiness": {
+            "keyboard_overlay_ready": True,
+            "jkl_transport_visible": True,
+            "mark_shortcuts_visible": True,
+        },
+    }
+
+
 def source_record_contract_evidence(
     *,
     action_ids: Sequence[str] | None = None,
@@ -315,6 +609,9 @@ def source_record_contract_evidence(
         "timeline.three_point_overwrite",
         "source_record.edit_decision_preview",
         "source_record.patch_matrix",
+        "source_record.monitor_layout",
+        "source_record.apply_board",
+        "source_record.keyboard_overlay",
     }
     return {
         "ok": required <= actions,
@@ -322,4 +619,7 @@ def source_record_contract_evidence(
         "available_actions": sorted(required & actions),
         "edit_decision_preview_ready": "source_record.edit_decision_preview" in actions,
         "patch_matrix_ready": "source_record.patch_matrix" in actions,
+        "monitor_layout_ready": "source_record.monitor_layout" in actions,
+        "apply_board_ready": "source_record.apply_board" in actions,
+        "keyboard_overlay_ready": "source_record.keyboard_overlay" in actions,
     }

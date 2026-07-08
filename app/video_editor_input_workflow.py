@@ -15,6 +15,29 @@ from app.live2d.actor_lane_row import Live2DActorLaneRow
 from app.spine_editor.actor_lane_row import SpineActorLaneRow
 
 
+def _is_tracks_drop_surface(self, obj) -> bool:
+    if obj is getattr(self, "_tracks_host", None):
+        return True
+    scroll = getattr(self, "_tracks_scroll", None)
+    if scroll is None:
+        return False
+    try:
+        return obj is scroll.viewport()
+    except Exception:
+        return False
+
+
+def _tracks_drop_accepts_mime(self, mime) -> bool:
+    return bool(
+        Live2DActorLaneRow._accepts(mime)
+        or SpineActorLaneRow._accepts(mime)
+        or self._performance_source_paths_from_mime(mime)
+        or self._mmd_paths_from_mime(mime)
+        or self._ar_pbr_paths_from_mime(mime)
+        or self._timeline_media_paths_from_mime(mime)
+    )
+
+
 def dragEnterEvent(self, event) -> None:
     md = event.mimeData()
     if self._vrm_avatar_paths_from_mime(md):
@@ -38,16 +61,9 @@ def dragMoveEvent(self, event) -> None:
 
 def eventFilter(self, obj, event):
     # Live2D / Spine actor drag-and-drop onto the tracks host
-    if obj is getattr(self, "_tracks_host", None):
-        if event.type() == QEvent.Type.DragEnter:
-            if (
-                Live2DActorLaneRow._accepts(event.mimeData())
-                or SpineActorLaneRow._accepts(event.mimeData())
-                or bool(self._performance_source_paths_from_mime(event.mimeData()))
-                or bool(self._mmd_paths_from_mime(event.mimeData()))
-                or bool(self._ar_pbr_paths_from_mime(event.mimeData()))
-                or bool(self._timeline_media_paths_from_mime(event.mimeData()))
-            ):
+    if _is_tracks_drop_surface(self, obj):
+        if event.type() in (QEvent.Type.DragEnter, QEvent.Type.DragMove):
+            if _tracks_drop_accepts_mime(self, event.mimeData()):
                 event.acceptProposedAction()
                 return True
         elif event.type() == QEvent.Type.Drop:

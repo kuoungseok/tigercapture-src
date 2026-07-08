@@ -2,8 +2,15 @@ import numpy as np
 
 from app.camera_solve.cache import load_camera_solution, store_camera_solution
 from app.camera_solve.solver import solve_road_plane_from_points
-from app.depth.cache import depth_cache_diagnostics, depth_source_id, load_depth_frame, store_depth_frame
-from app.depth.estimator import depth_backend_status, estimate_depth_from_luma
+from app.depth.cache import (
+    depth_cache_diagnostics,
+    depth_source_id,
+    load_depth_frame,
+    load_depth_manifest,
+    store_depth_frame,
+)
+from app.depth.estimator import depth_backend_status, estimate_depth, estimate_depth_from_luma
+from app.depth.jobs import generate_depth_cache_for_frames
 
 
 def test_synthetic_depth_estimator_returns_normalized_depth():
@@ -24,13 +31,77 @@ def test_depth_cache_roundtrip(tmp_path):
     source_id = depth_source_id("street.mp4", backend="synthetic")
     depth = np.linspace(0, 1, 12, dtype=np.float32).reshape(3, 4)
 
-    payload = store_depth_frame(source_id, 120, depth, root=tmp_path)
+    payload = store_depth_frame(
+        source_id,
+        120,
+        depth,
+        diagnostics={"provider_id": "synthetic_luma_depth"},
+        source_path="street.mp4",
+        root=tmp_path,
+    )
     loaded = load_depth_frame(source_id, 120, root=tmp_path)
+    nearest = load_depth_frame(source_id, 150, root=tmp_path, allow_nearest_ms=40)
     report = depth_cache_diagnostics(source_id, root=tmp_path)
+    manifest = load_depth_manifest(source_id, root=tmp_path)
 
     assert payload["ok"] is True
     np.testing.assert_allclose(loaded, depth)
+    np.testing.assert_allclose(nearest, depth)
     assert report["frame_count"] == 1
+    assert report["provider_id"] == "synthetic_luma_depth"
+    assert manifest["frame_count"] == 1
+    assert manifest["frames"][0]["time_ms"] == 120
+
+
+def test_depth_provider_auto_falls_back_to_synthetic(monkeypatch):
+    monkeypatch.setenv("TIGERCAPTURE_DEPTH_PROVIDER", "onnx_monocular_depth")
+    monkeypatch.delenv("TIGERCAPTURE_DEPTH_ONNX_MODEL_PATH", raising=False)
+    frame = np.zeros((6, 6, 3), dtype=np.uint8)
+
+    depth, diag = estimate_depth(frame, source_id="depth_auto", time_ms=10)
+    status = depth_backend_status()
+
+    assert depth.shape == (6, 6)
+    assert diag["provider_id"] == "synthetic_luma_depth"
+    assert "onnx_monocular_depth" in status["capabilities"]
+    assert "video_temporal_depth" in status["capabilities"]
+
+
+def test_generate_depth_cache_for_frames_manifest(tmp_path):
+    frame_a = np.zeros((8, 10, 3), dtype=np.uint8)
+    frame_b = np.ones((8, 10, 3), dtype=np.uint8) * 96
+
+    manifest = generate_depth_cache_for_frames(
+        "clip.mp4",
+        [(0, frame_a), (40, frame_b)],
+        provider="synthetic_luma_depth",
+        root=tmp_path,
+    )
+
+    assert manifest["ok"] is True
+    assert manifest["provider_id"] == "synthetic_luma_depth"
+    assert manifest["frame_count"] == 2
+    loaded = load_depth_frame(manifest["depth_source_id"], 40, root=tmp_path)
+    assert loaded.shape == (8, 10)
+
+
+def test_video_temporal_depth_provider_wraps_base_provider():
+    frame_a = np.zeros((8, 8, 3), dtype=np.uint8)
+    frame_b = np.ones((8, 8, 3), dtype=np.uint8) * 64
+    previous, _ = estimate_depth(frame_a, provider="synthetic_luma_depth", source_id="depth_temporal", time_ms=0)
+
+    depth, diag = estimate_depth(
+        frame_b,
+        provider="video_temporal_depth",
+        source_id="depth_temporal",
+        time_ms=40,
+        options={"previous_depth": previous, "previous_frame": frame_a},
+    )
+
+    assert depth.shape == (8, 8)
+    assert diag["provider_id"] == "video_temporal_depth"
+    assert diag["base_provider_id"] == "synthetic_luma_depth"
+    assert diag["temporal"]["ok"] is True
 
 
 def test_road_plane_solver_from_depth_points():
@@ -67,4 +138,3 @@ def test_camera_solution_cache_roundtrip(tmp_path):
 
     assert payload["ok"] is True
     assert loaded == solution
-

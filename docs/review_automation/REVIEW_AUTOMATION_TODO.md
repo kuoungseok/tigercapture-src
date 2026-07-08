@@ -49,6 +49,11 @@ Last updated: 2026-07-08
 - [x] P0: Add pixel-level semantic visual gates so black screens, nearly blank
   panels, and thin meaningless PPT/timeline fragments fail even when a sidecar
   contract exists.
+- [x] P0: Add a color-grading laptop Viewer guard. The Color Grading page now
+  validates the actual Viewer sub-region, not the wider workbench area, and its
+  compare contract must point to a successful source report proving
+  `viewer_frame_visible`, `color_dock_viewer_reforced`, and
+  `viewer_compare_split`. A black Viewer with active color controls is invalid.
 - [x] P0: Add bounded adaptive recapture before full-catalog build via
   `tools/retry_full_catalog_page_capture.py`. When strict preflight fails, this
   runner may only rerun same-feature capture scripts or create focused crops
@@ -122,7 +127,11 @@ Last updated: 2026-07-08
 - [ ] Add/verify `.capture-contract.json` sidecars for color/effect/node
   before-after captures. They must record compare mode, non-neutral
   changed_params, visible_delta=true, and preset reference/source when the
-  values came from research instead of an implemented preset.
+  values came from research instead of an implemented preset. The full-catalog
+  build now also blocks these captures unless the sidecar links a successful
+  source_report or embeds an action log proving `ui.viewer.compare.set` plus
+  the relevant feature action (`clip.set_color_grade` for color, node graph/set
+  actions for node pages).
 - [ ] Add/verify VTuber Studio product capture through `vrm_mtoon_gpu`. Block
   `vrm_mtoon_software`, dotted/point-cloud avatar output, meta thumbnails, and
   AR/PBR/PBR renderer substitutions.

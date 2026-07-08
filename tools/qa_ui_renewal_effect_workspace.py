@@ -230,6 +230,15 @@ def run_effect_workspace_capture(
         steps.append({"action": "node.graph.set", **graph})
         checks["node_graph"] = bool(graph.get("ok") and (graph.get("result") or {}).get("node_count", 0) >= 2)
 
+        compare = registry.execute(
+            "ui.viewer.compare.set",
+            {"track_id": track_id, "mode": "split", "labels_enabled": True},
+        ).to_dict()
+        steps.append({"action": "ui.viewer.compare.set", **compare})
+        checks["viewer_compare_split"] = bool(
+            compare.get("ok") and str((compare.get("result") or {}).get("mode") or "").lower() == "split"
+        )
+
         selected = registry.execute(
             "selection.set",
             {"kind": "video", "track_id": track_id, "clip_id": edit_clip_id},

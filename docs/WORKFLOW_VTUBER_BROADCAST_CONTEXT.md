@@ -63,11 +63,20 @@ drift into Live2D-specific renderer tuning, AR/PBR road placement, Marmoset PBR,
 or main editor UI renewal from this thread.
 
 Hard renderer boundary: Studio and VRM output must use the VTuber VRM/MToon
-renderer family (`vtuber_vrm`, `vrm_mtoon_software` until a true VRM GPU
-renderer exists). Do not route Avatar Mapping, `.vrm` Program Output, or
-internal fallback through AR/PBR, Marmoset PBR, `full-gpu`, or debug proof
-images. AR/PBR helpers may only be treated as hidden mesh parsing utilities
-behind `app/vtuber/vrm_renderer.py`, never as the exposed VRM renderer.
+renderer family (`vtuber_vrm`, `vrm_mtoon_gpu`). Do not route Avatar Mapping,
+`.vrm` Program Output, or internal fallback through AR/PBR, Marmoset PBR, or
+debug proof images. Legacy software renderer requests are disabled and
+rewritten to `vrm_mtoon_gpu` because the software VRM path can show dense
+avatars as broken point-like previews. AR/PBR helpers may only be treated as
+hidden mesh parsing utilities behind `app/vtuber/vrm_renderer.py`, never as the
+exposed VRM renderer.
+
+Hard visibility boundary: source-person exposure must match VRM visibility via
+`match_source_person_exposure_to_vrm_visibility`. `face_only` may use `bust_up`,
+`upper_body` must use at least `half_body`, and `full_body` must use
+`full_body`. Source framing plans expose `source_exposure` and
+`visibility_policy`; review automation should reject head-only/face-only VRM
+evidence when the source is upper-body or full-body.
 
 The operator flow is always:
 
@@ -208,6 +217,7 @@ vtuber.avatar_target.select
 broadcast.live_target.summary
 broadcast.live_target.select
 broadcast.platform_evidence_checklist
+broadcast.platform_evidence.preflight
 broadcast.platform_evidence.register
 vtuber.vrm.bridge_status
 vtuber.vrm.pose_stream_preview

@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 AR_PBR_RENDER_PROFILE_SCHEMA = "tigerstudio.ar_pbr.render_profiles.v1"
 PROFILE_AUTHORED = "authored"
+PROFILE_VRM_MTOON = "vrm_mtoon"
 PROFILE_MARMOSET_PBR = "marmoset_pbr"
 
 
@@ -62,6 +63,12 @@ def marmoset_pbr_available(render_profiles: Mapping[str, Any] | None) -> bool:
     return bool(isinstance(pbr, Mapping) and pbr.get("available"))
 
 
+def vrm_mtoon_available(render_profiles: Mapping[str, Any] | None) -> bool:
+    profiles = render_profiles if isinstance(render_profiles, Mapping) else {}
+    toon = (profiles.get("profiles") or {}).get(PROFILE_VRM_MTOON) if isinstance(profiles.get("profiles"), Mapping) else {}
+    return bool(isinstance(toon, Mapping) and toon.get("available"))
+
+
 def _profile_payload(
     *,
     source_style: str,
@@ -69,21 +76,34 @@ def _profile_payload(
     pbr_reason: str,
 ) -> dict[str, Any]:
     pbr_available = bool(pbr_materials)
+    mtoon_available = source_style == PROFILE_VRM_MTOON
+    default_profile = PROFILE_VRM_MTOON if mtoon_available else PROFILE_AUTHORED
     available_profiles = [PROFILE_AUTHORED]
+    if mtoon_available:
+        available_profiles.insert(0, PROFILE_VRM_MTOON)
     if pbr_available:
         available_profiles.append(PROFILE_MARMOSET_PBR)
     return {
         "schema": AR_PBR_RENDER_PROFILE_SCHEMA,
-        "default_profile": PROFILE_AUTHORED,
-        "active_profile": PROFILE_AUTHORED,
+        "default_profile": default_profile,
+        "active_profile": default_profile,
         "source_style": source_style,
         "available_profiles": available_profiles,
         "profiles": {
+            PROFILE_VRM_MTOON: {
+                "id": PROFILE_VRM_MTOON,
+                "label": "VRM MToon",
+                "available": mtoon_available,
+                "default": mtoon_available,
+                "style": "vrm_mtoon",
+                "preserves_source_shader": True,
+                "requires_mtoon_materials": True,
+            },
             PROFILE_AUTHORED: {
                 "id": PROFILE_AUTHORED,
                 "label": "Authored material",
                 "available": True,
-                "default": True,
+                "default": not mtoon_available,
                 "style": source_style,
                 "preserves_source_shader": True,
             },

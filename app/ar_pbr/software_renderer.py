@@ -953,6 +953,7 @@ def render_software_pbr_frame(
             material = _material(track, descriptor, geometry)
             base_color = _base_color(material)
             average_texture_color = material_base_texture_color(texture_plan, material, alpha=base_color[3])
+            color = average_texture_color or base_color
             if is_decimated and bool(settings.get("preview_point_splats", False)):
                 preview_points = geometry.get("preview_points") or []
                 if isinstance(preview_points, list) and preview_points:

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from PySide6.QtCore import QPoint, QPointF, QRect, Qt, QTimer
+from PySide6.QtCore import QPointF, QRect, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import (
     QDoubleSpinBox,
@@ -23,7 +23,7 @@ from PySide6.QtWidgets import (
 
 from app.i18n import tr
 from app.icons import app_icon, icon_size
-from app.video_editor_popouts import ColorPopoutWindow
+from app.video_editor_popouts import ColorPopoutWindow, SectionPopoutWindow
 from app.style import (
     COLOR_BG_L2,
     COLOR_BORDER_DEFAULT,
@@ -57,6 +57,8 @@ __all__ = [
     "parent_widget_for_color",
     "_on_color_page_closed",
     "_disable_color_power_window_overlay",
+    "_toggle_color_scopes_popout",
+    "_on_color_scopes_popout_closed",
     "_load_lut_file",
     "_on_lut_strength_changed",
     "_on_color_slider_changed",
@@ -688,12 +690,17 @@ def _build_color_reference_workbench_panel(self) -> QWidget:
     class _MiniColorScopes(QWidget):
         """Compact scopes drawn from the current preview pixmap."""
 
-        def __init__(self, editor, parent: QWidget | None = None) -> None:
+        def __init__(self, editor, parent: QWidget | None = None, *, detached: bool = False) -> None:
             super().__init__(parent)
             self._editor = editor
-            self.setMinimumHeight(68)
-            self.setMaximumHeight(72)
-            self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            self._detached = bool(detached)
+            if self._detached:
+                self.setMinimumHeight(520)
+                self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            else:
+                self.setMinimumHeight(354)
+                self.setMaximumHeight(396)
+                self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
 
         def _sample_image(self):
             pm = getattr(self._editor, "_preview_pixmap", None)
@@ -701,30 +708,90 @@ def _build_color_reference_workbench_panel(self) -> QWidget:
                 return None
             try:
                 return pm.toImage().convertToFormat(QImage.Format.Format_RGB32).scaled(
-                    104,
-                    58,
+                    512 if self._detached else 384,
+                    288 if self._detached else 216,
                     Qt.AspectRatioMode.IgnoreAspectRatio,
                     Qt.TransformationMode.SmoothTransformation,
                 )
             except Exception:
                 return None
 
+        def _image_to_rgb(self, image: QImage):
+            try:
+                import numpy as np
+
+                img = image.convertToFormat(QImage.Format.Format_RGB888)
+                width = int(img.width())
+                height = int(img.height())
+                ptr = img.constBits()
+                data = np.frombuffer(ptr, dtype=np.uint8, count=height * img.bytesPerLine())
+                data = data.reshape((height, img.bytesPerLine()))
+                return data[:, : width * 3].reshape((height, width, 3)).copy()
+            except Exception:
+                return None
+
+        def _scope_image(self, rgb, kind: str, width: int, height: int) -> QImage | None:
+            try:
+                from app.color_scopes import render_scope
+
+                arr = render_scope(kind, rgb, max(8, int(width)), max(8, int(height)))
+                qimg = QImage(
+                    arr.data,
+                    int(arr.shape[1]),
+                    int(arr.shape[0]),
+                    int(arr.strides[0]),
+                    QImage.Format.Format_RGB888,
+                )
+                return qimg.copy()
+            except Exception:
+                return None
+
         def paintEvent(self, event) -> None:  # pragma: no cover - visual QA
             p = QPainter(self)
             p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            p.fillRect(self.rect(), QColor("#101010"))
+            p.fillRect(self.rect(), QColor("#0D1116"))
             r = self.rect().adjusted(7, 6, -7, -7)
             gap = 6
-            wave = QRect(r.left(), r.top(), int(r.width() * 0.52) - gap, r.height())
-            vector = QRect(wave.right() + gap, r.top(), r.right() - wave.right() - gap, r.height())
+            col_w = max(18, (r.width() - gap) // 2)
+            row_h = max(18, (r.height() - gap) // 2)
+            panels = (
+                (QRect(r.left(), r.top(), col_w, row_h), "Luma / Levels", "waveform"),
+                (QRect(r.left() + col_w + gap, r.top(), r.width() - col_w - gap, row_h), "Histogram", "histogram"),
+                (QRect(r.left(), r.top() + row_h + gap, col_w, r.height() - row_h - gap), "RGB Parade", "parade"),
+                (
+                    QRect(r.left() + col_w + gap, r.top() + row_h + gap, r.width() - col_w - gap, r.height() - row_h - gap),
+                    "Vectorscope",
+                    "vectorscope",
+                ),
+            )
 
-            def _frame(rect: QRect, title: str) -> None:
-                p.setPen(QPen(QColor(255, 255, 255, 16), 1))
-                p.setBrush(QColor(10, 10, 10, 120))
+            img = self._sample_image()
+            rgb = self._image_to_rgb(img) if img is not None else None
+
+            def _frame(rect: QRect, title: str, kind: str) -> None:
+                p.setPen(QPen(QColor(160, 176, 195, 34), 1))
+                p.setBrush(QColor(8, 10, 12, 150))
                 p.drawRoundedRect(rect, 5, 5)
-                p.setPen(QColor(185, 192, 200, 106))
+                plot = rect.adjusted(5, 14, -5, -5)
+                if rgb is not None and plot.width() > 2 and plot.height() > 2:
+                    scope = self._scope_image(rgb, kind, plot.width(), plot.height())
+                    if scope is not None:
+                        p.drawImage(plot, scope)
+                else:
+                    p.setPen(QPen(QColor(128, 139, 152, 70), 1))
+                    if kind == "vectorscope":
+                        radius = max(5, min(plot.width(), plot.height()) // 3)
+                        p.drawEllipse(plot.center(), radius, radius)
+                        p.drawLine(plot.center().x() - radius, plot.center().y(), plot.center().x() + radius, plot.center().y())
+                    elif kind == "histogram":
+                        for idx in range(5):
+                            x = plot.left() + int(plot.width() * idx / 4)
+                            p.drawLine(x, plot.bottom(), x, plot.top() + int(plot.height() * (idx % 3 + 1) / 4))
+                    else:
+                        p.drawLine(plot.left(), plot.center().y(), plot.right(), plot.center().y())
+                p.setPen(QColor(190, 198, 210, 126))
                 font = QFont(p.font())
-                font.setPixelSize(7)
+                font.setPixelSize(8)
                 font.setBold(False)
                 p.setFont(font)
                 p.drawText(
@@ -733,62 +800,10 @@ def _build_color_reference_workbench_panel(self) -> QWidget:
                     title,
                 )
 
-            _frame(wave, "Luma Waveform")
-            _frame(vector, "Vectorscope")
+            for rect, title, kind in panels:
+                _frame(rect, title, kind)
 
-            img = self._sample_image()
-            if img is None:
-                p.setPen(QColor(130, 136, 144, 64))
-                p.drawLine(wave.left() + 8, wave.center().y(), wave.right() - 8, wave.center().y())
-                p.drawEllipse(vector.center(), max(8, vector.width() // 4), max(8, vector.height() // 4))
-                return
-
-            p.setClipRect(wave.adjusted(5, 14, -5, -5))
-            plot = wave.adjusted(6, 15, -6, -6)
-            p.setPen(QPen(QColor(255, 255, 255, 10), 1))
-            for i in range(1, 4):
-                y = plot.top() + int(plot.height() * i / 4)
-                p.drawLine(plot.left(), y, plot.right(), y)
-            for channel, color in ((0, "#C78680"), (1, "#8EAA94"), (2, "#899CC2")):
-                line_color = QColor(color)
-                line_color.setAlpha(74)
-                p.setPen(QPen(line_color, 1))
-                last = None
-                for sx in range(0, img.width(), 2):
-                    acc = 0
-                    count = 0
-                    for sy in range(0, img.height(), 4):
-                        c = QColor(img.pixel(sx, sy))
-                        acc += (c.red(), c.green(), c.blue())[channel]
-                        count += 1
-                    val = acc / max(1, count)
-                    x = plot.left() + int(plot.width() * sx / max(1, img.width() - 1))
-                    y = plot.bottom() - int(plot.height() * val / 255.0)
-                    pt = QPoint(x, y)
-                    if last is not None:
-                        p.drawLine(last, pt)
-                    last = pt
-            p.setClipping(False)
-
-            vp = vector.adjusted(6, 15, -6, -6)
-            center = vp.center()
-            radius = max(8, min(vp.width(), vp.height()) // 2 - 3)
-            p.setPen(QPen(QColor(255, 255, 255, 13), 1))
-            p.drawEllipse(center, radius, radius)
-            p.drawLine(center.x() - radius, center.y(), center.x() + radius, center.y())
-            p.drawLine(center.x(), center.y() - radius, center.x(), center.y() + radius)
-            for sx in range(0, img.width(), 5):
-                for sy in range(0, img.height(), 5):
-                    c = QColor(img.pixel(sx, sy))
-                    rg = (c.red() - c.green()) / 255.0
-                    by = (c.blue() - (c.red() + c.green()) * 0.5) / 255.0
-                    x = center.x() + int(rg * radius * 0.9)
-                    y = center.y() - int(by * radius * 0.9)
-                    dot = QColor(c)
-                    dot.setAlpha(42)
-                    p.setPen(QPen(dot, 1))
-                    p.drawPoint(x, y)
-
+    self._color_scope_widget_cls = _MiniColorScopes
     self._color_wheels = {}
     self._color_lumas = {}
     self._color_readouts = {}
@@ -1216,17 +1231,30 @@ def _build_color_reference_workbench_panel(self) -> QWidget:
 
     scopes_card = QFrame(host)
     scopes_card.setObjectName("ColorSideCard")
-    scopes_card.setMinimumHeight(42)
-    scopes_card.setMaximumHeight(48)
+    scopes_card.setMinimumHeight(456)
+    scopes_card.setMaximumHeight(516)
     scopes_layout = QVBoxLayout(scopes_card)
     scopes_layout.setContentsMargins(8, 6, 8, 7)
     scopes_layout.setSpacing(5)
+    scopes_head = QHBoxLayout()
+    scopes_head.setContentsMargins(0, 0, 0, 0)
+    scopes_head.setSpacing(5)
     scopes_title = QLabel("Scopes", scopes_card)
     scopes_title.setObjectName("ColorSideSection")
-    scopes_layout.addWidget(scopes_title)
+    scopes_head.addWidget(scopes_title, 1)
+    scopes_popout = QPushButton("", scopes_card)
+    scopes_popout.setObjectName("ColorSideButton")
+    scopes_popout.setFixedSize(24, 22)
+    scopes_popout.setIcon(app_icon("popout", size=12, color="#D7DAE7"))
+    scopes_popout.setIconSize(icon_size(12))
+    scopes_popout.setToolTip("Pop out color scopes")
+    scopes_popout.clicked.connect(self._toggle_color_scopes_popout)
+    scopes_head.addWidget(scopes_popout, 0)
+    self._color_scope_popout_btn = scopes_popout
+    scopes_layout.addLayout(scopes_head)
     self._color_scope_preview = _MiniColorScopes(self, scopes_card)
-    self._color_scope_preview.setMinimumHeight(20)
-    self._color_scope_preview.setMaximumHeight(24)
+    self._color_scope_preview.setMinimumHeight(354)
+    self._color_scope_preview.setMaximumHeight(396)
     scopes_layout.addWidget(self._color_scope_preview)
     root.addWidget(scopes_card)
 
@@ -2336,6 +2364,105 @@ def _on_color_popout_closed(self) -> None:
         self._color_popout = None
 
 
+def _toggle_color_scopes_popout(self) -> None:
+    """Open a detached live scopes dock without removing the Workbench copy."""
+    popout = getattr(self, "_color_scopes_popout", None)
+    if popout is not None and popout.isVisible():
+        popout.close()
+        return
+
+    scope_cls = getattr(self, "_color_scope_widget_cls", None)
+    if scope_cls is None:
+        return
+
+    popout = SectionPopoutWindow(
+        "Color Scopes",
+        width=980,
+        height=720,
+        min_width=560,
+        min_height=420,
+        parent=self,
+    )
+    self._color_scopes_popout = popout
+    popout.closed.connect(self._on_color_scopes_popout_closed)
+
+    host = QWidget(popout)
+    host.setObjectName("DetachedColorScopesDock")
+    host.setStyleSheet(
+        """
+        QWidget#DetachedColorScopesDock {
+            background:#0D1116;
+            border:1px solid rgba(152,166,183,42);
+            border-radius:8px;
+        }
+        QLabel#DetachedColorScopesTitle {
+            color:#E4E9F1;
+            font-size:12px;
+            font-weight:650;
+            background:transparent;
+        }
+        QPushButton#DetachedColorScopesButton {
+            background:#171717;
+            color:#D9DEE7;
+            border:1px solid #303030;
+            border-radius:6px;
+            padding:3px 8px;
+        }
+        QPushButton#DetachedColorScopesButton:hover {
+            background:#202020;
+            border-color:#515151;
+        }
+        """
+    )
+    layout = QVBoxLayout(host)
+    layout.setContentsMargins(10, 8, 10, 10)
+    layout.setSpacing(8)
+    header = QHBoxLayout()
+    header.setContentsMargins(0, 0, 0, 0)
+    header.setSpacing(6)
+    title = QLabel("Color Scopes", host)
+    title.setObjectName("DetachedColorScopesTitle")
+    header.addWidget(title, 1)
+    dock_btn = QPushButton("", host)
+    dock_btn.setObjectName("DetachedColorScopesButton")
+    dock_btn.setFixedSize(28, 24)
+    dock_btn.setIcon(app_icon("popout", size=12, color="#D7DAE7"))
+    dock_btn.setIconSize(icon_size(12))
+    dock_btn.setToolTip("Dock scopes back into the Workbench")
+    dock_btn.clicked.connect(popout.close)
+    header.addWidget(dock_btn, 0)
+    layout.addLayout(header)
+
+    scope_widget = scope_cls(self, host, detached=True)
+    layout.addWidget(scope_widget, 1)
+    popout.install(host)
+
+    timer = QTimer(popout)
+    timer.setInterval(250)
+    timer.timeout.connect(scope_widget.update)
+    timer.start()
+    popout._scope_widget = scope_widget
+    popout._scope_update_timer = timer
+
+    popout.show()
+    popout.raise_()
+    popout.activateWindow()
+
+
+def _on_color_scopes_popout_closed(self) -> None:
+    popout = getattr(self, "_color_scopes_popout", None)
+    if popout is None:
+        return
+    timer = getattr(popout, "_scope_update_timer", None)
+    if timer is not None:
+        try:
+            timer.stop()
+        except Exception:
+            pass
+    popout.deleteLater()
+    self._color_scopes_popout = None
+
+
 def _show_color_dock_page(self) -> None:
     """Reveal the embedded color dock and bind it to a color node."""
     self._close_color_page()
@@ -2671,4 +2798,3 @@ def _build_color_preset_menu(self) -> None:
                 lambda _checked=False, p=preset: self._on_professional_color_preset_picked(p)
             )
     self._color_preset_btn.setMenu(menu)
-

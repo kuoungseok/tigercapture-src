@@ -48,12 +48,12 @@ TOPIC_KO: dict[str, dict[str, Any]] = {
         ],
     },
     "multilingual_localization": {
-        "title": "다국어 UI와 로컬라이제이션 QA",
-        "category": "제품 기반",
+        "title": "타이포그래피, 타이틀, 다국어 텍스트",
+        "category": "타이포그래피",
         "bullets": [
-            "한국어, 영어, 일본어, 중국어 간체, 프랑스어, 독일어 런타임 전환을 다룹니다.",
-            "locale 테이블은 누락 키, placeholder 불일치, 깨진 문자 위험을 검사합니다.",
-            "리뷰 HTML, PNG, PPT 출력은 CJK 폰트 폴백을 사용해 증거 화면의 가독성을 지킵니다.",
+            "큰 타이틀, 캡션, 본문 텍스트를 스타일 프리셋과 키프레임이 있는 타임라인 레이어로 다룹니다.",
+            "카탈로그 화면에서도 읽히도록 한국어, 영어, 일본어 샘플을 크게 배치합니다.",
+            "타이틀 프리셋, opacity/position/scale 키, CJK 폰트 폴백으로 내보내기 가능한 타이포그래피를 보여줍니다.",
         ],
     },
     "ai_script_edit": {

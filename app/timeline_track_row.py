@@ -6,10 +6,11 @@ import time
 from datetime import datetime
 from pathlib import Path
 
-from PySide6.QtCore import QMimeData, QPoint, QRect, Qt, QTimer, Signal
+from PySide6.QtCore import QMimeData, QPoint, QRect, Qt, QTimer, QUrl, Signal
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QDrag,
     QFont,
     QFontMetrics,
     QLinearGradient,
@@ -68,6 +69,13 @@ from app.timeline_drop_payloads import (
     title_preset_from_mime as _drop_title_preset_from_mime,
     transition_payload_from_mime as _drop_transition_payload_from_mime,
     zoom_duration_from_mime as _drop_zoom_duration_from_mime,
+)
+from app.pptgen.drag_payloads import (
+    PPT_TIMELINE_CLIP_MIME,
+    PPT_TYPOGRAPHY_MIME,
+    set_json_payload,
+    timeline_clip_drag_payload,
+    typography_drag_payload,
 )
 from app.timeline_model import FadeSegment, SpeedSegment, ZoomActor
 from app.timeline_striped_host import StripedHost
@@ -211,6 +219,7 @@ class TrackRow(QWidget):
         self._resize_orig_end: int = 0
         self._drag_start_ms: int = 0
         self._drag_start_x: int = 0
+        self._drag_start_y: int = 0
         self._drag_start_offset_ms: int = 0
         # Phase 1.5d Step B: which clip the user grabbed and where it
         # started ??populated by ``mousePressEvent`` and consumed in
@@ -227,6 +236,7 @@ class TrackRow(QWidget):
         self._drag_block_reason: str = ""
         self._drag_block_detail: str = ""
         self._drag_feedback_started_at: float = 0.0
+        self._external_ppt_drag_active: bool = False
         self._drag_preview_start_ms: int | None = None
         self._drag_preview_end_ms: int | None = None
         self._drag_preview_tone: str = ""
@@ -272,6 +282,7 @@ class TrackRow(QWidget):
         # marker list or playhead changes.
         self._extra_snap_targets: list[int] = []
         self._edit_tool_mode: str = "select"
+        self._focused_clip_role: str = ""
         self._slip_drag_clip = None
         self._slip_drag_anchor_ms: int = 0
         self._slip_drag_orig_src_in: int = 0
@@ -349,6 +360,77 @@ class TrackRow(QWidget):
     def set_clip_drag_validator(self, validator) -> None:
         """Install an editor-owned preflight callback for clip drag deltas."""
         self._clip_drag_validator = validator
+
+    def _ppt_drag_pixmap(self, title: str, detail: str, color: str = "#D85A30") -> QPixmap:
+        pm = QPixmap(178, 34)
+        pm.fill(QColor("#15161B"))
+        painter = QPainter(pm)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(QPen(QColor(color), 1))
+        painter.drawRoundedRect(pm.rect().adjusted(0, 0, -1, -1), 5, 5)
+        painter.setPen(QColor("#FFFFFF"))
+        font = QFont()
+        font.setBold(True)
+        font.setPointSize(8)
+        painter.setFont(font)
+        painter.drawText(10, 5, 158, 13, int(Qt.AlignmentFlag.AlignLeft), str(title or "PPT"))
+        font.setBold(False)
+        font.setPointSize(7)
+        painter.setFont(font)
+        painter.setPen(QColor("#C8C8C8"))
+        painter.drawText(10, 18, 158, 12, int(Qt.AlignmentFlag.AlignLeft), str(detail or "Drop on slide"))
+        painter.end()
+        return pm
+
+    def _start_ppt_timeline_clip_drag(self, clip) -> bool:
+        payload = timeline_clip_drag_payload(self.track, clip)
+        md = QMimeData()
+        set_json_payload(md, PPT_TIMELINE_CLIP_MIME, payload)
+        source_path = str(payload.get("source_path") or "").strip()
+        if source_path:
+            md.setUrls([QUrl.fromLocalFile(source_path)])
+        drag = QDrag(self)
+        drag.setMimeData(md)
+        label = str(payload.get("label") or "Timeline clip")
+        pm = self._ppt_drag_pixmap("PPT Clip", label)
+        drag.setPixmap(pm)
+        drag.setHotSpot(pm.rect().center())
+        self._external_ppt_drag_active = True
+        try:
+            drag.exec(Qt.DropAction.CopyAction)
+        finally:
+            self._external_ppt_drag_active = False
+        return True
+
+    def _start_ppt_typography_drag(self, actor) -> bool:
+        payload = typography_drag_payload(self.track, actor)
+        md = QMimeData()
+        set_json_payload(md, PPT_TYPOGRAPHY_MIME, payload)
+        md.setData(TEXT_CLIP_MIME, str(int(payload.get("duration_ms") or 2000)).encode("utf-8"))
+        drag = QDrag(self)
+        drag.setMimeData(md)
+        label = str(payload.get("text") or "Typography")
+        pm = self._ppt_drag_pixmap("PPT Typography", label, "#D85A30")
+        drag.setPixmap(pm)
+        drag.setHotSpot(pm.rect().center())
+        self._external_ppt_drag_active = True
+        try:
+            drag.exec(Qt.DropAction.CopyAction)
+        finally:
+            self._external_ppt_drag_active = False
+        return True
+
+    def _restore_clip_drag_origin(self) -> None:
+        if not self._drag_group_clip_starts:
+            return
+        for clip in getattr(self.track, "clips", []):
+            cid = int(getattr(clip, "id", -1))
+            if cid in self._drag_group_clip_starts:
+                clip.timeline_in_ms = int(self._drag_group_clip_starts[cid])
+        if len(getattr(self.track, "clips", []) or []) <= 1 and self._drag_clip_id in self._drag_group_clip_starts:
+            self.track.offset_ms = int(self._drag_group_clip_starts[int(self._drag_clip_id)])
+        self._recalc_width()
+        self.update()
 
     @staticmethod
     def _format_drag_time(ms: int | float | None) -> str:
@@ -586,6 +668,21 @@ class TrackRow(QWidget):
         """Extra project-ms snap targets (playhead + markers) injected by
         the editor so clip drags also snap to these positions."""
         self._extra_snap_targets = list(targets)
+
+    def set_focused_clip_role(self, role: str) -> None:
+        """Set the role lane currently emphasized by the editor."""
+        text = str(role or "").strip()
+        if text:
+            try:
+                from app.nle_connected_clips import normalize_clip_role
+
+                text = normalize_clip_role(text, fallback="primary")
+            except Exception:
+                text = text.casefold().replace("-", "_").replace(" ", "_")
+        if text == self._focused_clip_role:
+            return
+        self._focused_clip_role = text
+        self.update()
 
     def set_edit_tool_mode(self, mode: str) -> None:
         self._edit_tool_mode = str(mode or "select")
@@ -1081,6 +1178,17 @@ class TrackRow(QWidget):
 
     def _clip_status_badges(self, clip) -> list[tuple[str, str, str]]:
         badges: list[tuple[str, str, str]] = []
+        try:
+            from app.nle_connected_clips import infer_clip_role, role_color_for
+        except Exception:
+            infer_clip_role = None
+            role_color_for = None
+        if getattr(clip, "connected_parent_clip_id", None) is not None:
+            role = infer_clip_role(self.track, clip) if callable(infer_clip_role) else "b_roll"
+            color = role_color_for(role, getattr(clip, "role_color", "")) if callable(role_color_for) else "#5EA2FF"
+            badges.append(("Conn", color, "#4D5568"))
+        if getattr(clip, "audition_takes", None):
+            badges.append(("Aud", "#F6A72A", "#6F5B45"))
         if self._effect_param_active(getattr(clip, "video_filters", None)):
             badges.append(("FX", "#77736D", "#565B66"))
         if self._effect_param_active(getattr(clip, "chroma_key", None)):
@@ -1149,6 +1257,26 @@ class TrackRow(QWidget):
     def _clip_effect_strip_entries(self, clip) -> list[tuple[str, str, str, str]]:
         """Timeline-visible effect/title/transition strips for a clip."""
         entries: list[tuple[str, str, str, str]] = []
+        try:
+            from app.nle_connected_clips import ROLE_LABELS, infer_clip_role, role_color_for
+        except Exception:
+            ROLE_LABELS = {}
+            infer_clip_role = None
+            role_color_for = None
+        explicit_role = str(getattr(clip, "clip_role", "") or "").strip()
+        if explicit_role or getattr(clip, "connected_parent_clip_id", None) is not None:
+            role = infer_clip_role(self.track, clip) if callable(infer_clip_role) else (explicit_role or "b_roll")
+            color = role_color_for(role, getattr(clip, "role_color", "")) if callable(role_color_for) else "#5EA2FF"
+            label = str(ROLE_LABELS.get(role, role)).replace("_", " ").title()
+            tag = "CONN" if getattr(clip, "connected_parent_clip_id", None) is not None else "ROLE"
+            entries.append((tag, label, color, "#4D5568"))
+        audition_takes = list(getattr(clip, "audition_takes", []) or [])
+        if audition_takes:
+            active = str(getattr(clip, "audition_active_take_id", "") or "")
+            label = f"{len(audition_takes)} takes"
+            if active:
+                label = f"{active} / {label}"
+            entries.append(("AUD", label[:32], "#F6A72A", "#6F5B45"))
         vf = getattr(clip, "video_filters", None)
         if self._effect_param_active(vf):
             entries.append(("FX", self._effect_param_label(vf, "Video FX"), "#77736D", "#565B66"))
@@ -1225,9 +1353,104 @@ class TrackRow(QWidget):
         lines.append(tr("veditor.timeline.applied_elements_hint"))
         return "\n".join(lines)
 
+    def _paint_clip_nle_role_chrome(self, painter: QPainter, clip, clip_rect: QRect) -> None:
+        """Draw lightweight Final Cut-style role/connection/audition cues."""
+        if clip_rect.width() < 18 or clip_rect.height() < 20:
+            return
+        audition_takes = list(getattr(clip, "audition_takes", []) or [])
+        connected = getattr(clip, "connected_parent_clip_id", None) is not None
+        explicit_role = str(getattr(clip, "clip_role", "") or "").strip()
+        if not (audition_takes or connected or explicit_role):
+            return
+        try:
+            from app.nle_connected_clips import infer_clip_role, role_color_for
+        except Exception:
+            infer_clip_role = None
+            role_color_for = None
+
+        role = infer_clip_role(self.track, clip) if callable(infer_clip_role) else (explicit_role or "primary")
+        color_text = role_color_for(role, getattr(clip, "role_color", "")) if callable(role_color_for) else "#F6A72A"
+        accent = QColor(color_text)
+        if not accent.isValid():
+            accent = QColor("#F6A72A")
+
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        rail = QRect(
+            clip_rect.left() + 6,
+            clip_rect.top() + 7,
+            max(1, clip_rect.width() - 12),
+            4,
+        )
+        rail_a = QColor(accent)
+        rail_b = QColor(accent)
+        rail_a.setAlpha(210)
+        rail_b.setAlpha(54)
+        grad = QLinearGradient(rail.topLeft(), rail.topRight())
+        grad.setColorAt(0.0, rail_a)
+        grad.setColorAt(0.72, rail_b)
+        grad.setColorAt(1.0, QColor(rail_b.red(), rail_b.green(), rail_b.blue(), 0))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(grad))
+        painter.drawRoundedRect(rail, 2, 2)
+
+        if connected and clip_rect.width() >= 34:
+            x = rail.left() + min(max(12, rail.width() // 5), max(12, rail.width() - 12))
+            y = rail.bottom() + 8
+            stem = QColor(accent)
+            stem.setAlpha(168)
+            painter.setPen(QPen(stem, 1))
+            painter.drawLine(x, rail.bottom(), x, y - 5)
+            d = 5
+            diamond = QPolygon([
+                QPoint(x, y - d),
+                QPoint(x + d, y),
+                QPoint(x, y + d),
+                QPoint(x - d, y),
+            ])
+            fill = QColor(accent)
+            fill.setAlpha(210)
+            painter.setBrush(fill)
+            painter.setPen(QPen(QColor(255, 255, 255, 78), 1))
+            painter.drawPolygon(diamond)
+
+        if audition_takes and clip_rect.width() >= 52:
+            dot_count = min(5, len(audition_takes))
+            dot = 4
+            gap = 3
+            total = dot_count * dot + max(0, dot_count - 1) * gap
+            x = clip_rect.right() - total - 9
+            y = clip_rect.top() + 17
+            active = str(getattr(clip, "audition_active_take_id", "") or "")
+            for idx, take in enumerate(audition_takes[:dot_count]):
+                take_id = str((take or {}).get("id") or "")
+                r = QRect(x + idx * (dot + gap), y, dot, dot)
+                active_dot = bool(active and take_id == active)
+                fill = QColor(accent if active_dot else QColor(220, 225, 235))
+                fill.setAlpha(230 if active_dot else 94)
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(fill)
+                painter.drawRoundedRect(r, dot // 2, dot // 2)
+            if len(audition_takes) > dot_count and clip_rect.width() >= 88:
+                font = QFont(painter.font())
+                font.setPixelSize(7)
+                font.setBold(True)
+                painter.setFont(font)
+                painter.setPen(QColor(232, 235, 242, 156))
+                painter.drawText(
+                    QRect(x + total + 3, y - 5, 22, 12),
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                    f"+{len(audition_takes) - dot_count}",
+                )
+        painter.restore()
+
     @staticmethod
     def _clip_status_badge_action(label: str) -> str:
         text = str(label or "").casefold()
+        if text == "conn":
+            return "connected"
+        if text == "aud":
+            return "audition"
         if text in {"fx", "key", "ai", "off"}:
             return "fx"
         if text == "tr":

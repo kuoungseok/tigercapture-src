@@ -563,7 +563,7 @@
       "path": "E:\\ClaudeCodeApp\\GifCam\\qa_corpus\\assets\\qa_smpte_720p.mp4",
       "size_bytes": 10168,
       "slot_id": "",
-      "registered_at": "2026-07-03T08:18:12.019646+00:00",
+      "registered_at": "2026-07-08T06:15:27.859847+00:00",
       "valid_candidate": false,
       "sidecar_ready": false,
       "cursor_event_count": 0,
@@ -641,9 +641,9 @@
     },
     {
       "path": "E:\\ClaudeCodeApp\\ReviewAutomationWorkspace\\samples\\media\\overview_screen_demo.mp4",
-      "size_bytes": 1295701,
-      "slot_id": "screenstudio-real-55",
-      "registered_at": "2026-07-03T08:17:53.795690+00:00",
+      "size_bytes": 1624256,
+      "slot_id": "screenstudio-real-72",
+      "registered_at": "2026-07-08T06:15:01.987849+00:00",
       "valid_candidate": true,
       "sidecar_ready": false,
       "cursor_event_count": 0,
@@ -652,7 +652,7 @@
         "missing_cursor_sidecar"
       ],
       "auto_zoom_count": 0,
-      "reason": "media pool import",
+      "reason": "track import",
       "starter_template_id": "screen-recording-demo"
     },
     {
@@ -1347,7 +1347,7 @@
       "path": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\Lamborghini Revuelto – From Now On [sitXeGjm4Mc].mp4",
       "size_bytes": 15042898,
       "slot_id": "screenstudio-real-72",
-      "registered_at": "2026-07-05T03:03:02.653063+00:00",
+      "registered_at": "2026-07-08T04:51:00.909645+00:00",
       "valid_candidate": true,
       "sidecar_ready": false,
       "cursor_event_count": 0,
@@ -1356,14 +1356,14 @@
         "missing_cursor_sidecar"
       ],
       "auto_zoom_count": 0,
-      "reason": "track import",
+      "reason": "media pool import",
       "starter_template_id": "screen-recording-demo"
     },
     {
       "path": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\South Korea 4K Drone Video ｜ Seoul, Busan, Songdo Cinematic Aerials [AA-sv3ilNBE].mp4",
       "size_bytes": 731561402,
       "slot_id": "screenstudio-real-72",
-      "registered_at": "2026-07-05T02:39:19.947044+00:00",
+      "registered_at": "2026-07-08T06:13:02.009591+00:00",
       "valid_candidate": true,
       "sidecar_ready": false,
       "cursor_event_count": 0,
@@ -1379,7 +1379,7 @@
       "path": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\【4K HDR】東京空撮 Tokyo Night View 2025｜Helicopter Aerial Twilight Skyline Japan [Ui4UpsZH4Jw].mp4",
       "size_bytes": 123398073,
       "slot_id": "screenstudio-real-72",
-      "registered_at": "2026-07-05T02:41:48.331328+00:00",
+      "registered_at": "2026-07-08T04:59:56.280560+00:00",
       "valid_candidate": true,
       "sidecar_ready": false,
       "cursor_event_count": 0,
@@ -1411,7 +1411,7 @@
       "path": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\SAMSUNG QD-OLED 4K 120FPS Demo ｜ UNREAL 1 Billion Colors 🌈 HDR Test (AI TV) [rjwPj0dD9wQ].mp4",
       "size_bytes": 175533114,
       "slot_id": "screenstudio-real-72",
-      "registered_at": "2026-07-05T02:39:21.282476+00:00",
+      "registered_at": "2026-07-07T14:50:43.243832+00:00",
       "valid_candidate": true,
       "sidecar_ready": false,
       "cursor_event_count": 0,
@@ -1428,6 +1428,54 @@
       "size_bytes": 3217977,
       "slot_id": "screenstudio-real-71",
       "registered_at": "2026-07-05T02:41:54.578545+00:00",
+      "valid_candidate": true,
+      "sidecar_ready": false,
+      "cursor_event_count": 0,
+      "cursor_counts": {},
+      "cursor_sidecar_warnings": [
+        "missing_cursor_sidecar"
+      ],
+      "auto_zoom_count": 0,
+      "reason": "media pool import",
+      "starter_template_id": "screen-recording-demo"
+    },
+    {
+      "path": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\LIVE： President Trump signs executive orders in Oval Office [GnzWEo_HfE0].mp4",
+      "size_bytes": 183839151,
+      "slot_id": "screenstudio-real-72",
+      "registered_at": "2026-07-06T09:36:02.338727+00:00",
+      "valid_candidate": true,
+      "sidecar_ready": false,
+      "cursor_event_count": 0,
+      "cursor_counts": {},
+      "cursor_sidecar_warnings": [
+        "missing_cursor_sidecar"
+      ],
+      "auto_zoom_count": 0,
+      "reason": "track import",
+      "starter_template_id": "screen-recording-demo"
+    },
+    {
+      "path": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\trump_oval_office_live_GnzWEo_HfE0.mp4",
+      "size_bytes": 183839151,
+      "slot_id": "screenstudio-real-72",
+      "registered_at": "2026-07-07T05:34:27.254305+00:00",
+      "valid_candidate": true,
+      "sidecar_ready": false,
+      "cursor_event_count": 0,
+      "cursor_counts": {},
+      "cursor_sidecar_warnings": [
+        "missing_cursor_sidecar"
+      ],
+      "auto_zoom_count": 0,
+      "reason": "media pool import",
+      "starter_template_id": "screen-recording-demo"
+    },
+    {
+      "path": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\Inside Fallingwater： Frank Lloyd Wright's Architectural Genius in Pennsylvania ｜ House Tour [q8dcnh-4I6g].mp4",
+      "size_bytes": 84592325,
+      "slot_id": "screenstudio-real-72",
+      "registered_at": "2026-07-07T14:51:54.754893+00:00",
       "valid_candidate": true,
       "sidecar_ready": false,
       "cursor_event_count": 0,

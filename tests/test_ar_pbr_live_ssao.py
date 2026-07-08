@@ -74,6 +74,21 @@ def test_packet_ambient_occlusion_lookup_matches_live_and_export_payloads() -> N
     assert flat_lighting["specular"] is True
 
 
+def test_screen_ao_mode_without_strength_uses_visible_default() -> None:
+    from app.ar_pbr.ambient_occlusion import DEFAULT_AO_ACTIVE_STRENGTH, normalize_ambient_occlusion_settings
+
+    mode_only = normalize_ambient_occlusion_settings({"ambient_occlusion_mode": "screen"})
+    explicit_zero = normalize_ambient_occlusion_settings(
+        {"ambient_occlusion_mode": "screen", "ao_strength": 0.0}
+    )
+
+    assert mode_only["enabled"] is True
+    assert mode_only["mode"] == "screen"
+    assert mode_only["strength"] == DEFAULT_AO_ACTIVE_STRENGTH
+    assert explicit_zero["enabled"] is False
+    assert explicit_zero["strength"] == 0.0
+
+
 def test_gpu_preview_packet_ssao_bakes_into_export_rasterizer(tmp_path) -> None:
     import numpy as np
     from PIL import Image

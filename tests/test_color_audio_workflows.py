@@ -61,6 +61,21 @@ def test_scope_accuracy_report_uses_synthetic_chart_gates():
     assert "waveform luma span >= 0.80" in report["qa_gates"]
 
 
+def test_color_scope_renderers_produce_workbench_graphs():
+    from app.color_scopes import render_scope
+    from app.color_workflow import build_scope_accuracy_sample
+
+    sample = build_scope_accuracy_sample(96, 54)
+
+    for kind in ("waveform", "histogram", "parade", "vectorscope"):
+        graph = render_scope(kind, sample, 80, 40)
+
+        assert graph.shape == (40, 80, 3)
+        assert graph.dtype == np.uint8
+        assert int(graph.max()) > 20
+        assert int(graph.mean()) > 5
+
+
 def test_color_grade_advanced_toolset_roundtrip_and_apply_to_rgb():
     from app.color_grading import ColorGrade, apply_to_rgb
 

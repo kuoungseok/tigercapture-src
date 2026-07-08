@@ -29,6 +29,15 @@ from app.studio_theme import (
 )
 from app.style import COLOR_ACCENT_ORANGE
 from app.timeline_striped_host import StripedHost
+from app.timeline_track_row_lane_paint import paint_timeline_lane_header
+from app.timeline_nle_visual_overlay import (
+    build_clip_anchor_cue,
+    build_drag_preview_visual_cue,
+    build_role_focus_cue,
+    paint_clip_anchor_cue,
+    paint_drag_preview_guides,
+    paint_role_focus_dim,
+)
 
 
 def _timeline_thumb_blend_width(tile_w: int, thumb_h: int) -> int:
@@ -175,63 +184,7 @@ def paintEvent(self, event) -> None:
     is_perf_track = self._is_performance_source_track()
     clip_fill, clip_hi, clip_edge = self._track_palette_for_role()
 
-    painter.save()
-    lane_rect = QRect(0, 0, self.MARGIN, self.LABEL_H + self.TIMELINE_H)
-    body_rect = QRect(0, self.LABEL_H, self.MARGIN, self.TIMELINE_H)
-    lane_grad = QLinearGradient(lane_rect.topLeft(), lane_rect.bottomLeft())
-    lane_grad.setColorAt(0.0, QColor("#171819"))
-    lane_grad.setColorAt(1.0, QColor("#101111"))
-    body_grad = QLinearGradient(body_rect.topLeft(), body_rect.bottomLeft())
-    body_grad.setColorAt(0.0, QColor("#161717"))
-    body_grad.setColorAt(1.0, QColor("#111111"))
-    painter.fillRect(lane_rect, lane_grad)
-    painter.fillRect(body_rect, body_grad)
-    painter.setPen(QColor(255, 255, 255, 14))
-    painter.drawLine(0, body_rect.top(), self.MARGIN - 1, body_rect.top())
-    painter.setPen(QColor("#242424"))
-    painter.drawLine(self.MARGIN - 1, 0, self.MARGIN - 1, lane_rect.bottom())
-    painter.drawLine(0, body_rect.bottom(), self.MARGIN - 1, body_rect.bottom())
-    accent = QColor("#C7CBD0" if self._is_active else "#6D7074")
-    if is_perf_track:
-        accent = QColor("#B4B8CC" if self._is_active else "#85899A")
-    accent.setAlpha(82 if self._is_active else 22)
-    painter.fillRect(0, body_rect.top() + 8, 2, max(12, body_rect.height() - 16), accent)
-    tab_rect = QRect(14, body_rect.top() + 5, 86, max(18, body_rect.height() - 10))
-    tab_grad = QLinearGradient(tab_rect.topLeft(), tab_rect.bottomLeft())
-    tab_grad.setColorAt(0.0, QColor(255, 255, 255, 7 if self._is_active else 4))
-    tab_grad.setColorAt(1.0, QColor(0, 0, 0, 10))
-    painter.setPen(QPen(QColor(255, 255, 255, 15 if self._is_active else 8), 1))
-    painter.setBrush(QBrush(tab_grad))
-    painter.drawRoundedRect(tab_rect, 3, 3)
-    painter.setPen(QPen(QColor(0, 0, 0, 38), 1))
-    painter.drawLine(tab_rect.right(), tab_rect.top() + 5, tab_rect.right(), tab_rect.bottom() - 5)
-    label_color = QColor("#D8DADD") if self._is_active else QColor("#9A9A9A")
-    lane_font = painter.font()
-    lane_font.setFamily("Segoe UI Variable")
-    lane_font.setPixelSize(12)
-    lane_font.setWeight(QFont.Weight.Medium)
-    painter.setFont(lane_font)
-    painter.setPen(label_color)
-    lane_index = max(1, int(getattr(self, "_lane_index", 1) or 1))
-    lane_code = f"PS{lane_index}" if is_perf_track else f"V{lane_index}"
-    lane_role = "Perf Source" if is_perf_track else "Video"
-    label_y = body_rect.top() + max(0, (body_rect.height() - 16) // 2)
-    painter.drawText(
-        QRect(tab_rect.left(), label_y, tab_rect.width(), 16),
-        Qt.AlignmentFlag.AlignCenter,
-        lane_code,
-    )
-    lane_font.setFamily("Segoe UI Variable")
-    lane_font.setPixelSize(10)
-    lane_font.setWeight(QFont.Weight.Normal)
-    painter.setFont(lane_font)
-    painter.setPen(QColor("#7E7E7E"))
-    painter.drawText(
-        QRect(112, label_y, self.MARGIN - 126, 16),
-        Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-        lane_role,
-    )
-    painter.restore()
+    paint_timeline_lane_header(self, painter, is_perf_track=is_perf_track)
 
     rect = self._timeline_rect()
     # Multi-source tracks (source_path=None, clips=[??) must fall
@@ -551,6 +504,12 @@ def paintEvent(self, event) -> None:
                 fill=clip_fill,
                 highlight=clip_hi,
                 edge=clip_edge,
+            )
+            self._paint_clip_nle_role_chrome(painter, clip, clip_rect)
+            paint_clip_anchor_cue(
+                painter,
+                clip_rect,
+                build_clip_anchor_cue(self.track, clip, selected=selected),
             )
             dur_ms = max(
                 0,
@@ -927,6 +886,15 @@ def paintEvent(self, event) -> None:
         self._paint_color_grade_layer(painter, clip, cr)
         self._paint_clip_effect_strips(painter, clip, cr)
         self._paint_clip_status_badges(painter, clip, cr)
+        paint_role_focus_dim(
+            painter,
+            cr,
+            build_role_focus_cue(
+                self.track,
+                clip,
+                getattr(self, "_focused_clip_role", ""),
+            ),
+        )
 
     self._paint_tracking_status_overlay(painter, rect)
 
@@ -972,15 +940,20 @@ def paintEvent(self, event) -> None:
             max(10, self.TIMELINE_H - 10),
         )
         tone = str(getattr(self, "_drag_preview_tone", "") or "move")
-        if tone == "blocked":
-            fill = QColor(255, 80, 110, 42)
-            pen = QPen(QColor(255, 104, 126, 235), 2, Qt.PenStyle.DashLine)
-        elif tone == "snap":
-            fill = QColor(112, 104, 255, 46)
-            pen = QPen(QColor(126, 219, 255, 230), 2, Qt.PenStyle.DashLine)
-        else:
-            fill = QColor(255, 255, 255, 28)
-            pen = QPen(QColor(230, 235, 255, 170), 1, Qt.PenStyle.DashLine)
+        preview_cue = build_drag_preview_visual_cue(tone)
+        fill = QColor(str(preview_cue.get("fill") or "#FFFFFF"))
+        if not fill.isValid():
+            fill = QColor("#FFFFFF")
+        fill.setAlpha(max(0, min(255, int(preview_cue.get("alpha") or 30))))
+        edge = QColor(str(preview_cue.get("accent") or "#E6EBFF"))
+        if not edge.isValid():
+            edge = QColor("#E6EBFF")
+        edge.setAlpha(max(0, min(255, int(preview_cue.get("edge_alpha") or 170))))
+        pen = QPen(
+            edge,
+            2 if str(preview_cue.get("tone") or "") in {"blocked", "snap", "push"} else 1,
+            Qt.PenStyle.DashLine,
+        )
         age = time.monotonic() - float(getattr(self, "_drag_preview_started_at", 0.0) or 0.0)
         pop = max(0.0, 1.0 - min(1.0, age / 0.16))
         if pop > 0:
@@ -989,6 +962,7 @@ def paintEvent(self, event) -> None:
         painter.setBrush(fill)
         painter.setPen(pen)
         painter.drawRoundedRect(ghost, 7, 7)
+        paint_drag_preview_guides(painter, ghost, preview_cue, pop=pop)
         painter.restore()
 
     if self._drag_feedback_text:

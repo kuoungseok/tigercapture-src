@@ -48,7 +48,23 @@ def _clear_selected_clip_transition(self) -> None:
     if not str(getattr(clip, "transition_out_type", "") or ""):
         self._flash_status(tr("veditor.clip_badge.status.no_transition_clear"))
         return
-    self._clear_clip_transition(track, clip)
+    clear_fn = getattr(self, "_clear_clip_transition", None)
+    if callable(clear_fn):
+        clear_fn(track, clip)
+        return
+    clip.transition_out_type = ""
+    clip.transition_out_ms = 0
+    try:
+        row = getattr(self, "_track_rows", {}).get(getattr(track, "id", None))
+        if row is not None:
+            row.update()
+    except Exception:
+        pass
+    self._refresh_player_tracks()
+    self._refresh_preview_soft(track)
+    self._refresh_workbench()
+    self._register_change("clear clip transition")
+    self._flash_status(tr("veditor.clip_badge.status.transition_cleared"))
 
 
 def _split_audio_clip(self, track: AudioTrack, clip: AudioClip) -> None:
@@ -1632,4 +1648,3 @@ def _apply_transition_to_selected(self, ttype: str, ms: int) -> None:
                 break
     if any_change:
         self._register_change("Ctrl+T transition")
-

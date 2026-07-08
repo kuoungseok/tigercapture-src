@@ -928,7 +928,7 @@ def _vtuber_broadcast_readiness(root: Path) -> dict[str, Any]:
     score = 100 if commercial_ready else (85 if alpha_ready else min(65, raw_score))
     actions = list(report.get("next_actions") or [])
     if not actions and not commercial_ready:
-        actions.append("Attach redacted RTMP and Discord/video-call platform evidence.")
+        actions.append("Attach redacted RTMP ingest and YouTube private/unlisted viewer playback evidence.")
     summary = (
         f"broadcast score={raw_score}/100, alpha={'ready' if alpha_ready else 'blocked'}, "
         f"commercial={'ready' if commercial_ready else 'blocked'}."

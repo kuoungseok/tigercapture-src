@@ -148,6 +148,24 @@ contract here instead of relying only on `docs/SPEC_AR_PBR_COMPOSITOR.md`.
   `app.ar_pbr.depth_occlusion` and viewer conversion in
   `app.ar_pbr.depth_view`.
 
+## VTuber Source Visibility Rules
+
+When mapping a source person capture/video to a VRM avatar, match the visible
+person scope instead of showing an arbitrary VRM thumbnail:
+
+- `face_only` / `face_closeup` source: VRM may use `bust_up`, but must still
+  show head, neck, and shoulders; never use a face-only meta thumbnail as
+  Program Output evidence.
+- `upper_body` source: VRM must use at least `half_body` / head-to-waist
+  framing. If a caller asks for `bust_up`, upgrade it unless the user explicitly
+  overrides with an allow-narrower flag.
+- `full_body` source: VRM must use `full_body` / head-to-toe framing.
+- The machine-readable rule is
+  `match_source_person_exposure_to_vrm_visibility` from
+  `app/vtuber/source_framing.py`. Source framing plans must expose
+  `source_exposure` and `visibility_policy` so review automation and local AI
+  can explain the chosen VRM framing.
+
 ## Refactor Guard
 
 Run the architecture guard after editor-facing changes:

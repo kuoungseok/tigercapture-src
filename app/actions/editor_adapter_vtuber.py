@@ -893,6 +893,72 @@ class VtuberBroadcastAdapterMixin:
 
         return build_broadcast_platform_evidence_checklist(root or ".")
 
+    def broadcast_youtube_evidence_quickstart(
+        self,
+        *,
+        root: str = "",
+        artifact_path: str = "debugCapture/broadcast_platform_e2e_qa.json",
+    ) -> dict[str, Any]:
+        """Return the YouTube-only operator path for broadcast evidence."""
+        from app.broadcast_platform_e2e import build_youtube_broadcast_evidence_quickstart
+
+        return build_youtube_broadcast_evidence_quickstart(
+            root or ".",
+            artifact_path=artifact_path or "debugCapture/broadcast_platform_e2e_qa.json",
+        )
+
+    def refresh_broadcast_evidence_readiness(
+        self,
+        *,
+        root: str = "",
+        broadcast_out: str = "debugCapture/broadcast_release_readiness_qa.json",
+        final_out: str = "debugCapture/final_product_readiness_qa.json",
+    ) -> dict[str, Any]:
+        """Refresh broadcast/final readiness artifacts after evidence changes."""
+        from app.broadcast_evidence_refresh import refresh_broadcast_evidence_readiness_artifacts
+
+        return refresh_broadcast_evidence_readiness_artifacts(
+            root or ".",
+            broadcast_out=broadcast_out or "debugCapture/broadcast_release_readiness_qa.json",
+            final_out=final_out or "debugCapture/final_product_readiness_qa.json",
+        )
+
+    def preflight_broadcast_platform_evidence(
+        self,
+        *,
+        check_id: str,
+        platform: str,
+        evidence_path: str = "",
+        notes: str = "",
+        confirm_redacted: bool = False,
+    ) -> dict[str, Any]:
+        """Validate manual broadcast evidence text without registering it."""
+        from app.broadcast_evidence_ui import (
+            broadcast_evidence_register_defaults,
+            broadcast_evidence_registration_warning,
+            build_broadcast_evidence_registration_payload,
+        )
+
+        payload = build_broadcast_evidence_registration_payload(
+            check_id=check_id,
+            platform=platform,
+            evidence_path=evidence_path,
+            notes=notes,
+            confirm_redacted=bool(confirm_redacted),
+        )
+        warning = broadcast_evidence_registration_warning(payload)
+        defaults = broadcast_evidence_register_defaults(str(check_id or ""))
+        return {
+            "schema": "tigerstudio.broadcast.platform_evidence_preflight.v1",
+            "check_id": str(payload.get("check_id") or ""),
+            "platform": str(payload.get("platform") or ""),
+            "can_register": not bool(warning),
+            "warning": warning,
+            "safe_evidence_required": True,
+            "description": str(defaults.get("description") or ""),
+            "confirm_label": str(defaults.get("confirm_label") or ""),
+        }
+
     def register_broadcast_platform_evidence(
         self,
         *,

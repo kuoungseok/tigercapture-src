@@ -43,7 +43,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--view", choices=("full", "closeup"), default="full")
     parser.add_argument("--upper-body-mode", choices=("seated", "none"), default="seated")
     parser.add_argument("--single-slot", choices=("neutral", "head", "mouth", "blink"), default="")
-    parser.add_argument("--renderer", choices=("full-gpu", "software-zbuffer"), default="full-gpu")
+    parser.add_argument("--renderer", choices=("vrm-mtoon-gpu", "full-gpu"), default="vrm-mtoon-gpu")
     args = parser.parse_args(argv)
 
     vrm_path = Path(args.vrm)
@@ -439,7 +439,8 @@ def _render_panel(
         },
     }
     settings = {"camera_z": 3.05, "preserve_scene_layout": True}
-    if str(renderer or "").casefold() == "full-gpu":
+    renderer_key = str(renderer or "").strip().casefold().replace("_", "-")
+    if renderer_key in {"full-gpu", "vrm-mtoon-gpu", "vrm-gpu", "gpu"}:
         image, diagnostics = _render_full_gpu_panel(
             base,
             descriptor=descriptor,

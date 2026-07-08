@@ -45,12 +45,15 @@ def classify_asset_support(
     feature_flags: list[str] = []
 
     is_vrm = _is_vrm_asset(asset, ext)
+    is_mtoon = _is_mtoon_asset(asset, materials)
 
     if ext in {".gltf", ".glb", ".vrm"}:
         feature_flags.append("gltf_source")
         if is_vrm:
             feature_flags.append("vrm_source")
             feature_flags.append("vrm_avatar")
+            if is_mtoon:
+                feature_flags.append("vrm_mtoon_materials")
     elif ext == ".fbx":
         feature_flags.append("fbx_source")
     elif ext:
@@ -128,6 +131,7 @@ def classify_asset_support(
         skeletal_count=skeletal_count,
         animation_count=animation_count,
         fallback=fallback,
+        is_mtoon=is_mtoon,
     )
     summary = _summary(
         support_level=support_level,
@@ -188,7 +192,7 @@ def asset_support_status_text(report: Mapping[str, Any] | None) -> str:
     if level == READY:
         flags = {str(item) for item in report.get("feature_flags") or []}
         if "vrm_avatar" in flags or "humanoid" in kind:
-            return "Ready: VRM avatar"
+            return "Ready: VRM MToon" if "vrm_mtoon_materials" in flags else "Ready: VRM avatar"
         if "skeletal" in kind:
             return "Ready: skeletal PBR"
         if "animated" in kind:
@@ -399,9 +403,14 @@ def _render_path(
     skeletal_count: int,
     animation_count: int,
     fallback: bool,
+    is_mtoon: bool = False,
 ) -> str:
     if fallback or support_level in {PLACEHOLDER, UNSUPPORTED}:
         return "unsupported_placeholder"
+    if is_mtoon and skeletal_count > 0:
+        return "full_gpu_vrm_mtoon_cpu_baked_skeletal"
+    if is_mtoon:
+        return "full_gpu_vrm_mtoon"
     if skeletal_count > 0:
         return "full_gpu_pbr_cpu_baked_skeletal"
     if animation_count > 0:
@@ -425,6 +434,17 @@ def _is_vrm_asset(asset: Mapping[str, Any], ext: str) -> bool:
         return True
     vrm = asset.get("vrm")
     return isinstance(vrm, Mapping) and bool(vrm)
+
+
+def _is_mtoon_asset(asset: Mapping[str, Any], materials: list[Mapping[str, Any]]) -> bool:
+    profiles = asset.get("render_profiles") if isinstance(asset.get("render_profiles"), Mapping) else {}
+    if str(profiles.get("source_style") or "").casefold() == "vrm_mtoon":
+        return True
+    for material in materials:
+        shader = str(material.get("shader_model") or material.get("source_shader") or "").casefold()
+        if "mtoon" in shader:
+            return True
+    return False
 
 
 def _dedupe(values: list[str]) -> list[str]:

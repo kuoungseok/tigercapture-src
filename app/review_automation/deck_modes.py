@@ -62,14 +62,14 @@ TOPICS: tuple[DeckTopic, ...] = (
     ),
     DeckTopic(
         id="multilingual_localization",
-        title="Multilingual UI And Localization QA",
-        category="Product Foundation",
+        title="Typography, Titles, And Multilingual Text",
+        category="Typography",
         bullets=(
-            "Runtime language switching covers Korean, English, Japanese, Simplified Chinese, French, and German.",
-            "Locale tables are audited for missing keys, placeholder mismatches, and mojibake/tofu-risk tokens.",
-            "CJK-safe font fallback is used for review HTML, PNG, and PPT outputs so captured proof remains readable.",
+            "Large title layers, captions, and body text are timeline objects with style presets and keyframes.",
+            "On-canvas text should be readable at catalog scale, including Korean, English, and Japanese samples.",
+            "Title presets, opacity/position/scale keys, and CJK-safe font fallback make typography export-ready.",
         ),
-        qa_keywords=("localization", "locale", "i18n", "language"),
+        qa_keywords=("typography", "text", "title", "localization", "locale", "i18n", "language"),
     ),
     DeckTopic(
         id="ai_script_edit",

@@ -53,6 +53,31 @@ def _on_mixer_pan_changed(self, track_id: int, pan: float) -> None:
     self._audio_mixer.update_track(track)
 
 
+def _on_mixer_mute_changed(self, track_id: int, muted: bool) -> None:
+    track = self._find_audio_track(track_id)
+    if track is None:
+        return
+    track.muted = bool(muted)
+    self._audio_mixer.update_track(track)
+    if hasattr(self, "_audio_mixer_panel"):
+        self._audio_mixer_panel.sync_track_mute(track_id, track.muted)
+    self._refresh_player_tracks()
+
+
+def _on_mixer_solo_changed(self, track_id: int, solo: bool) -> None:
+    track = self._find_audio_track(track_id)
+    if track is None:
+        return
+    track.solo = bool(solo)
+    self._audio_mixer.update_track(track)
+    if hasattr(self, "_audio_mixer_panel"):
+        self._audio_mixer_panel.sync_track_solo(track_id, track.solo)
+        pos = self._player.position() if hasattr(self, "_player") else 0
+        self._audio_mixer_panel.update_levels(pos, self._audio_tracks)
+        self._audio_mixer_panel.update_scopes(pos, self._audio_tracks)
+    self._refresh_player_tracks()
+
+
 def _populate_audio_track(self, track_id: int, path: Path) -> None:
     """Fill an empty AudioTrack (no clips) with a newly-loaded file."""
     track = self._find_audio_track(track_id)
@@ -119,7 +144,12 @@ def _open_sound_editor(self, tid: int, cid: int) -> None:
     track, clip = self._find_audio_clip(tid, cid)
     if clip is None or clip.source_path is None:
         return
-    editor = SoundEditorDockWindow(clip, track=track, parent=self)
+    editor = SoundEditorDockWindow(
+        clip,
+        track=track,
+        mixer_tracks=list(getattr(self, "_audio_tracks", []) or []),
+        parent=self,
+    )
     editor.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
     if not hasattr(self, "_sound_editors"):
         self._sound_editors: list[QWidget] = []
@@ -287,6 +317,31 @@ def _on_workbench_sound_editor_changed(self) -> None:
             store.touch(store.media_key(source))
 
 
+def _on_workbench_sound_editor_mixer_track_changed(self, track) -> None:
+    if track is None:
+        return
+    tid = getattr(track, "id", None)
+    row = self._audio_rows.get(tid)
+    if row is not None:
+        row.refresh_from_track()
+        row.update()
+    try:
+        self._audio_mixer.update_track(track)
+    except Exception:
+        pass
+    panel = getattr(self, "_audio_mixer_panel", None)
+    if panel is not None:
+        panel.sync_track_volume(tid, getattr(track, "volume", 1.0))
+        panel.sync_track_pan(tid, getattr(track, "pan", 0.0))
+        panel.sync_track_mute(tid, bool(getattr(track, "muted", False)))
+        panel.sync_track_solo(tid, bool(getattr(track, "solo", False)))
+        pos = self._player.position() if hasattr(self, "_player") else 0
+        panel.update_levels(pos, self._audio_tracks)
+        panel.update_scopes(pos, self._audio_tracks)
+    self._refresh_player_tracks()
+    self._refresh_audio_workspace_panel()
+
+
 def _on_audio_scopes_toggled(self, checked: bool) -> None:
     """Show/hide the scopes column inside AudioMixerPanel."""
     if not hasattr(self, "_audio_mixer_panel"):
@@ -336,4 +391,3 @@ def _on_mixer_fader_changed(self, track_id: int, volume: float) -> None:
         with _block_signals(row._volume_slider):
             row._volume_slider.setValue(int(round(track.volume * 100)))
     self._audio_mixer.update_track(track)
-

@@ -1,6 +1,6 @@
 # Presentation Scenario Rules
 
-Last updated: 2026-07-03
+Last updated: 2026-07-07
 
 This file defines the review automation story shape. It is a compact scenario
 contract; the expanded current-spec scenario remains in:
@@ -47,6 +47,10 @@ PPT screenshots, source notes, media-pool reference items, or overview pages.
 ## Deck Modes
 
 - `summary`: short product-catalog introduction.
+- `full-product-catalog`: locked 22-slide product catalog. Use
+  `FULL_PRODUCT_CATALOG_MANIFEST.md` as the slide-count, title, ordering, and
+  consolidation contract. Do not add, remove, split, merge, or reorder slides
+  unless that manifest is edited first.
 - `detailed`: main feature-by-feature catalog deck with real editor evidence.
 - `evidence-full`: internal appendix only. This mode may show QA/evidence rows,
   but those pages must not leak back into product-facing catalog modes.
@@ -61,6 +65,27 @@ The deck should feel like a studio tour:
    compose node/3D/VTuber workflows.
 4. Each feature is shown through a real automated editor state.
 5. The final output is a product catalog, not a QA report.
+
+For the current full catalog, the exact approved scenario is the 22-slide
+manifest in:
+
+```text
+docs/review_automation/FULL_PRODUCT_CATALOG_MANIFEST.md
+```
+
+The page-by-page visual production plan for that full catalog is:
+
+```text
+docs/review_automation/FULL_PRODUCT_CATALOG_PAGE_PLAN.md
+```
+
+That manifest supersedes older expanded scenario outlines when building the
+full product-catalog deck.
+
+Current full-catalog slide 4 is `PPT Maker / Timeline-Native Presentation
+Studio`. It must show real `.tgppt` / `app.pptgen` evidence and should explain
+PPTX export, PNG snapshots/contact sheets, validation, timeline-native page
+elements, and `ppt.*` action control.
 
 ## Feature Page Rule
 
@@ -84,7 +109,9 @@ A feature page is valid only when the screenshot matches the feature:
 - Color grading: real footage, grading controls, before/after or scopes.
 - Node graph: connected nodes and selected node parameters.
 - Audio: waveform, mixer, spectrum/EQ/dynamics, or sound editor.
-- Typography: visible text on canvas plus keyframes/controls.
+- Typography: large on-canvas title text, secondary text/body layer, text
+  clips/keyframes/controls, and readable multilingual samples when relevant.
+  Do not use a single tiny caption as typography evidence.
 - Transition/effects: effect or transition applied to a real clip.
 - Live2D/actor: actor visible, actor lane/keyframes, actor controls.
 - 3D/AR/PBR: use a real approved GLTF/GLB asset from `E:\ClaudeCodeApp\3d`,

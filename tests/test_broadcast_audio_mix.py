@@ -77,6 +77,34 @@ def test_project_audio_bus_mixdown_uses_export_audio_filter(tmp_path):
     assert plan.command[-1].endswith("bus.wav")
 
 
+def test_project_audio_bus_mixdown_respects_track_mute_and_solo(tmp_path):
+    from app.audio_tracks import AudioClip, AudioTrack
+    from app.broadcast_audio_mix import build_project_audio_bus_mixdown_plan
+
+    muted_clip = AudioClip(id=1, source_path=Path("muted.wav"), duration_ms=1000, trim_end_ms=1000)
+    solo_clip = AudioClip(id=2, source_path=Path("solo.wav"), duration_ms=1000, trim_end_ms=1000)
+    quiet_clip = AudioClip(id=3, source_path=Path("quiet.wav"), duration_ms=1000, trim_end_ms=1000)
+    tracks = [
+        AudioTrack(id=1, volume=1.0, clips=[muted_clip], muted=True),
+        AudioTrack(id=2, volume=0.7, clips=[solo_clip], solo=True),
+        AudioTrack(id=3, volume=0.9, clips=[quiet_clip]),
+    ]
+
+    plan = build_project_audio_bus_mixdown_plan(
+        tracks,
+        tmp_path / "solo.wav",
+        duration_ms=1200,
+        ffmpeg_exe="ffmpeg-test",
+    )
+
+    assert plan.audio_input_count == 1
+    assert ["-i", "solo.wav"] == plan.command[2:4]
+    assert "muted.wav" not in plan.command
+    assert "quiet.wav" not in plan.command
+    graph = plan.command[plan.command.index("-filter_complex") + 1]
+    assert "volume=0.700" in graph
+
+
 def test_project_audio_bus_mixdown_falls_back_to_silence(tmp_path):
     from app.broadcast_audio_mix import build_project_audio_bus_mixdown_plan
 

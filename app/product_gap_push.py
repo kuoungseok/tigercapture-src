@@ -128,13 +128,16 @@ def _ai_area(root: Path) -> ProductGapArea:
 
     cached_report = _load_json(root, "debugCapture/ai_edit_corpus_quality_qa.json")
     cached_provider = dict(cached_report.get("provider") or {})
-    cached_provider_exercised = bool(
+    cached_usable = bool(
         cached_report.get("ok")
-        and cached_provider.get("use_provider") is True
-        and cached_provider.get("exercised_on_corpus")
+        and isinstance(cached_report.get("summary"), dict)
+        and isinstance(cached_report.get("provider"), dict)
     )
-    report = cached_report if cached_provider_exercised else _call(build)
-    report_source = "cached_provider_qa" if cached_provider_exercised else "live_provider_qa"
+    # Product-gap positioning should reflect the latest explicit QA artifact.
+    # Re-running a provider probe here can hang the readiness suite and can also
+    # hide a recent executor failure behind stale live retries.
+    report = cached_report if cached_usable else _call(build)
+    report_source = "cached_current_qa" if cached_usable else "live_provider_qa"
     summary = dict(report.get("summary") or {})
     provider = dict(report.get("provider") or {})
     selected_provider_state: dict[str, Any] = {}
@@ -166,7 +169,14 @@ def _ai_area(root: Path) -> ProductGapArea:
         actions.extend(blockers)
     if not bool(descript_lite.get("descript_lite_claim_ready")):
         actions.extend(list(descript_lite.get("next_actions") or [])[:2])
-    actions.append("Run tools/qa_ai_edit_corpus_quality.py --use-provider after Claude/Codex/local LLM direct generation is configured.")
+    if claim_ready:
+        actions.append(
+            "Refresh tools/qa_ai_edit_corpus_quality.py --use-provider --provider qwen_local or Claude direct after changing AI provider/runtime settings."
+        )
+    else:
+        actions.append(
+            "Run tools/qa_ai_edit_corpus_quality.py --use-provider --provider qwen_local --auto-start-qwen, or rerun with Claude direct, before claiming smart AI editing."
+        )
     return ProductGapArea(
         id="ai_editing_quality",
         label="3. AI editing quality",

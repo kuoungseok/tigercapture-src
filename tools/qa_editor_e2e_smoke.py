@@ -410,12 +410,12 @@ def _run_import_editor_flow(
         if audio_extract_required:
             checks["import_audio_track_extracted"] = int(metrics.get("audio_track_count_after_extract", 0) or 0) >= 1
         checks["import_media_pool_has_item"] = _media_pool_count(pool) >= 1
+        checks["preview_rgb_nonblank_after_import"] = bool(rgb_stats.get("ok"))
         checks["preview_placeholder_cleared_after_import"] = (
             str(getattr(editor, "_preview_placeholder_kind", "")) == "content"
             and not str(preview_text or "").strip()
-            and not (preview_pixmap is not None and not preview_pixmap.isNull())
+            and bool(rgb_stats.get("ok"))
         )
-        checks["preview_rgb_nonblank_after_import"] = bool(rgb_stats.get("ok"))
 
         preview_rect = _widget_rect(editor, getattr(editor, "_preview_host", None))
         right_rect = _widget_rect(editor, getattr(editor, "_right_dock_scroll", None))

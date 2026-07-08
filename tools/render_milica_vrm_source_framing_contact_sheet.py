@@ -20,7 +20,11 @@ from app.vtuber.openseeface_motion import (  # noqa: E402
     load_openseeface_motion_csv,
     summarize_openseeface_motion,
 )
-from app.vtuber.source_framing import solve_source_framing_sequence  # noqa: E402
+from app.vtuber.source_framing import (  # noqa: E402
+    classify_source_exposure_for_framing,
+    solve_source_framing_sequence,
+    vrm_visibility_policy_for_source_exposure,
+)
 from app.vtuber.source_subject import detect_subject_boxes_for_motion_frames  # noqa: E402
 from tools.render_milica_vrm_source_framing_preview import _background, _parse_frame_size  # noqa: E402
 from tools.render_milica_vrm_source_framing_preview import _apply_lower_occlusion_preview  # noqa: E402
@@ -49,7 +53,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--video", default="")
     parser.add_argument("--out", default=str(DEFAULT_OUT))
     parser.add_argument("--json-out", default="")
-    parser.add_argument("--preset", choices=("bust_up", "half_body", "full_body"), default="bust_up")
+    parser.add_argument("--preset", choices=("auto", "bust_up", "half_body", "full_body"), default="auto")
     parser.add_argument("--slots", default="neutral,head,mouth")
     parser.add_argument("--source-frame-size", default="")
     parser.add_argument("--panel-size", type=int, default=640)
@@ -70,20 +74,36 @@ def main(argv: list[str] | None = None) -> int:
     subject_result = None
     subject_boxes = None
     subject_sources = None
+    initial_source_exposure = classify_source_exposure_for_framing(frames, frame_size)
+    initial_visibility_policy = vrm_visibility_policy_for_source_exposure(
+        initial_source_exposure.get("source_exposure") or "unknown",
+        requested_preset=args.preset,
+        confidence=float(initial_source_exposure.get("confidence", 0.0) or 0.0),
+        method=str(initial_source_exposure.get("method") or ""),
+    )
+    detect_preset = str(initial_visibility_policy["selected_framing_preset"])
     if str(args.video or "").strip():
         subject_result = detect_subject_boxes_for_motion_frames(
             Path(args.video),
             frames,
             source_frame_size=frame_size,
-            preset=args.preset,
+            preset=detect_preset,
             detect_indices=selected,
         )
         subject_boxes = subject_result.subject_boxes
         subject_sources = tuple(item.source for item in subject_result.frames)
+    source_exposure = classify_source_exposure_for_framing(frames, frame_size, subject_boxes=subject_boxes)
+    visibility_policy = vrm_visibility_policy_for_source_exposure(
+        source_exposure.get("source_exposure") or "unknown",
+        requested_preset=args.preset,
+        confidence=float(source_exposure.get("confidence", 0.0) or 0.0),
+        method=str(source_exposure.get("method") or ""),
+    )
+    resolved_preset = str(visibility_policy["selected_framing_preset"])
     framing = solve_source_framing_sequence(
         frames,
         frame_size,
-        preset=args.preset,
+        preset=resolved_preset,
         smoothing=float(args.smoothing),
         subject_boxes=subject_boxes,
         subject_sources=subject_sources,
@@ -118,6 +138,7 @@ def main(argv: list[str] | None = None) -> int:
                 "roll_deg": float(frame.roll_deg),
                 "mouth_open": float(frame.mouth_open),
                 "blink": float(max(frame.blink_l, frame.blink_r)),
+                "visibility_policy": visibility_policy,
                 "framing": solution.to_dict(),
                 "renderer": {
                     "ok": diagnostics.get("ok"),
@@ -128,7 +149,7 @@ def main(argv: list[str] | None = None) -> int:
             }
         )
 
-    image = _compose_contact_sheet(panels, reports, preset=args.preset, video=Path(args.video).name if args.video else "")
+    image = _compose_contact_sheet(panels, reports, preset=resolved_preset, video=Path(args.video).name if args.video else "")
     out = Path(args.out)
     out.parent.mkdir(parents=True, exist_ok=True)
     image.save(out)
@@ -138,8 +159,11 @@ def main(argv: list[str] | None = None) -> int:
         "vrm": str(vrm_path),
         "csv": str(csv_path),
         "video": str(args.video or ""),
-        "preset": args.preset,
+        "preset": resolved_preset,
+        "requested_preset": args.preset,
         "source_frame_size": list(frame_size),
+        "source_exposure": source_exposure,
+        "visibility_policy": visibility_policy,
         "openseeface": summarize_openseeface_motion(frames),
         "source_subject": subject_result.to_dict() if subject_result is not None else None,
         "selected_frames": reports,

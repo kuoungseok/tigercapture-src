@@ -17,7 +17,6 @@ from app.vtuber.vrm_renderer import (
     VRM_RENDER_PROFILE,
     VRM_RENDERER_FAMILY,
     VRM_RENDERER_GPU,
-    VRM_RENDERER_SOFTWARE,
     load_vrm_avatar_descriptor,
     make_vrm_render_track,
     normalize_vrm_renderer,
@@ -39,7 +38,7 @@ def render_internal_vrm_fallback_frame(
     time_ms: int = 0,
     width: int = 1280,
     height: int = 720,
-    renderer: str = VRM_RENDERER_SOFTWARE,
+    renderer: str = VRM_RENDERER_GPU,
 ) -> tuple[Any, dict[str, Any]]:
     """Render one transparent RGBA avatar frame for `internal_vrm_fallback`.
 
@@ -106,6 +105,12 @@ def render_internal_vrm_fallback_frame(
         frames = runtime["frames"]
         frame = _select_motion_frame(frames, int(time_ms))
         descriptor = module._apply_face_morphs(runtime["base_descriptor"], runtime["morph_targets"], frame)
+        preview_cap = int(settings.get("contact_preview_triangle_cap", 0) or 0)
+        if preview_cap > 0:
+            descriptor = _limit_descriptor_triangles_for_contact_preview(
+                descriptor,
+                max_triangles_per_geometry=preview_cap,
+            )
         image, render_diag = _render_descriptor_frame(
             module,
             descriptor=descriptor,
@@ -145,11 +150,64 @@ def render_internal_vrm_fallback_frame(
         return Image.new("RGBA", (width, height), (0, 0, 0, 0)), diagnostics
 
 
+def _limit_descriptor_triangles_for_contact_preview(
+    descriptor: dict[str, Any],
+    *,
+    max_triangles_per_geometry: int = 420,
+) -> dict[str, Any]:
+    """Legacy helper for non-product contact previews.
+
+    Product/UI/AI-selected VRM routes use `vrm_mtoon_gpu`. This helper remains
+    only for old diagnostics that explicitly manipulate descriptor density.
+    """
+    out = dict(descriptor)
+    geometries: list[Any] = []
+    cap = max(1, int(max_triangles_per_geometry or 420))
+    total = 0
+    source_total = 0
+    for geometry in descriptor.get("geometries", []) or []:
+        if not isinstance(geometry, dict):
+            geometries.append(geometry)
+            continue
+        row = dict(geometry)
+        triangles = row.get("triangles")
+        if isinstance(triangles, list):
+            source_total += int(len(triangles))
+            if len(triangles) > cap:
+                row["source_triangle_count"] = int(len(triangles))
+                row["triangles"] = _sample_rows_evenly(triangles, cap)
+                row["triangle_count"] = int(len(row["triangles"]))
+            total += int(len(row.get("triangles") or []))
+        geometries.append(row)
+    out["geometries"] = geometries
+    out["contact_preview_triangle_count"] = int(total)
+    out["contact_preview_source_triangle_count"] = int(source_total)
+    out["contact_preview_triangle_cap"] = int(cap)
+    return out
+
+
+def _sample_rows_evenly(rows: list[Any], target_count: int) -> list[Any]:
+    if target_count <= 0 or len(rows) <= target_count:
+        return list(rows)
+    if target_count == 1:
+        return [rows[len(rows) // 2]]
+    last = len(rows) - 1
+    out: list[Any] = []
+    seen: set[int] = set()
+    for i in range(target_count):
+        idx = round(i * last / (target_count - 1))
+        if idx in seen:
+            continue
+        out.append(rows[idx])
+        seen.add(idx)
+    return out
+
+
 def internal_vrm_fallback_quality_policy(
     *,
     width: int,
     height: int,
-    renderer: str = VRM_RENDERER_SOFTWARE,
+    renderer: str = VRM_RENDERER_GPU,
     settings: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     data = dict(settings or {})
@@ -176,6 +234,8 @@ def internal_vrm_fallback_quality_policy(
         "render_profile": VRM_RENDER_PROFILE,
         "pbr_renderer": False,
         "ar_pbr_preview": False,
+        "software_renderer_available": False,
+        "software_renderer_disabled": True,
         "profile": "broadcast_candidate" if not claim_blockers else "preview_safe",
         "broadcast_ready": not claim_blockers,
         "width": width,
@@ -365,9 +425,13 @@ def _autofit_avatar_rgba(image: Any, *, settings: Mapping[str, Any]) -> tuple[An
         or camera.get("framing_preset")
         or "bust_up"
     ).casefold()
-    crop_mode = str(placement.get("crop_mode") or ("full_body" if "full" in framing else "bust_up")).casefold()
-    if crop_mode in {"bust", "bust_up", "upper_body", "seated"}:
+    crop_mode = str(placement.get("crop_mode") or _crop_mode_for_framing(framing)).casefold()
+    if crop_mode in {"bust", "bust_up", "face_only", "head_and_shoulders"}:
         crop_ratio = max(0.35, min(1.0, float(placement.get("bust_crop_ratio", 0.58) or 0.58)))
+        y1 = min(y1, y0 + max(1, int(round(bbox_h * crop_ratio))))
+        bbox_h = max(1, y1 - y0)
+    elif crop_mode in {"half", "half_body", "upper", "upper_body", "seated", "torso", "waist", "waist_up"}:
+        crop_ratio = max(0.50, min(1.0, float(placement.get("half_body_crop_ratio", 0.82) or 0.82)))
         y1 = min(y1, y0 + max(1, int(round(bbox_h * crop_ratio))))
         bbox_h = max(1, y1 - y0)
     target_width = int(rgba.width * float(placement.get("target_width_ratio", 0.46) or 0.46))
@@ -397,6 +461,15 @@ def _autofit_avatar_rgba(image: Any, *, settings: Mapping[str, Any]) -> tuple[An
         }
     )
     return out, diagnostics
+
+
+def _crop_mode_for_framing(framing: str) -> str:
+    text = str(framing or "").strip().casefold().replace("-", "_").replace(" ", "_")
+    if any(token in text for token in ("full_body", "fullbody", "head_to_toe", "standing")) or text == "full":
+        return "full_body"
+    if any(token in text for token in ("half_body", "upper_body", "waist", "torso", "seated")) or text in {"half", "upper"}:
+        return "half_body"
+    return "bust_up"
 
 
 def _resolve_path(value: Any) -> Path:

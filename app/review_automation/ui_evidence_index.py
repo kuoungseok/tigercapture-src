@@ -32,7 +32,7 @@ TOPIC_TO_FEATURE_AREA: dict[str, str] = {
     "ai_script_edit": "Cut / edit point",
     "timeline_editing": "Node graph",
     "actors": "Live2D actor",
-    "color_audio_vfx": "Effects / transitions",
+    "color_audio_vfx": "Audio mixer / extracted audio",
     "export_parity": "Render queue / export",
     "ar_pbr_3d": "AR/PBR / 3D object",
     "performance_health": "Main editor shell / media pool / timeline",

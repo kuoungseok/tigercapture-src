@@ -255,36 +255,53 @@ def _studio_ui_contract_area() -> dict[str, Any]:
 
 def _real_platform_evidence_area(root: Path) -> dict[str, Any]:
     artifact = _load_json(root / "debugCapture" / "broadcast_platform_e2e_qa.json")
-    summary = artifact.get("summary") if isinstance(artifact.get("summary"), Mapping) else {}
+    checklist: dict[str, Any] = {}
+    try:
+        from app.broadcast_platform_e2e import build_broadcast_platform_evidence_checklist
+
+        checklist = build_broadcast_platform_evidence_checklist(root)
+    except Exception:
+        checklist = {}
+    summary = checklist.get("summary") if isinstance(checklist.get("summary"), Mapping) else (
+        artifact.get("summary") if isinstance(artifact.get("summary"), Mapping) else {}
+    )
     passed = int(summary.get("passed", 0) or 0)
     required = int(summary.get("required", 4) or 4)
-    real_evidence = bool(artifact.get("real_platform_evidence"))
-    ready = bool(artifact.get("ok") and real_evidence and passed >= required)
+    real_evidence = bool(checklist.get("real_platform_evidence", artifact.get("real_platform_evidence")))
+    ready = bool(checklist.get("sale_ready") or checklist.get("commercial_ready"))
     score = 100 if ready else 78 if artifact else 72
     actions = []
     if not ready:
+        checklist_actions = [str(action) for action in list(checklist.get("actions") or []) if str(action).strip()]
         pending = [
             row
             for row in artifact.get("checks", [])
             if isinstance(row, Mapping) and row.get("required_for_sale") and not row.get("ok")
         ] if artifact else []
-        if pending:
-            actions.extend(str(row.get("action") or row.get("label") or row.get("id")) for row in pending)
+        if checklist_actions:
+            actions.extend(checklist_actions)
+        elif pending:
+            actions.extend(str(row.get("primary_cta") or row.get("action") or row.get("label") or row.get("id")) for row in pending)
         else:
             actions.extend(
                 [
-                    "Run a real Record-to-file smoke and attach output metadata to debugCapture/broadcast_platform_e2e_qa.json.",
-                    "Run at least one private YouTube/Twitch/Custom RTMP unlisted ingest test with redacted keys.",
-                    "Run one Discord/video-call Program Output window-share test and attach screenshot/metadata.",
+                    "Run tools/qa_broadcast_platform_e2e.py --allow-pending-platform to generate local Program Output evidence.",
+                    "Run a private/unlisted RTMP ingest test, then click Register RTMP in VTuber Studio.",
+                    "Open the private/unlisted YouTube viewer or preview page, then click Register YouTube View.",
                 ]
             )
     return _area(
         "real_platform_evidence",
         score=score,
         summary=(
-            f"real platform evidence passed {passed}/{required}."
-            if artifact
-            else "No real broadcast platform evidence artifact is attached yet."
+            str(
+                checklist.get("operator_summary")
+                or (
+                    f"real platform evidence passed {passed}/{required}."
+                    if artifact
+                    else "No real broadcast platform evidence artifact is attached yet."
+                )
+            )
         ),
         actions=actions,
         evidence={
@@ -293,6 +310,8 @@ def _real_platform_evidence_area(root: Path) -> dict[str, Any]:
             "real_platform_evidence": real_evidence,
             "passed": passed,
             "required": required,
+            "checklist_status": str(checklist.get("status_text") or ""),
+            "operator_focus": dict(checklist.get("operator_focus") or {}) if isinstance(checklist.get("operator_focus"), Mapping) else {},
         },
         sale_blocking=not ready,
         alpha_blocking=False,

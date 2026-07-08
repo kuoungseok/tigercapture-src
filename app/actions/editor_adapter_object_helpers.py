@@ -83,6 +83,29 @@ class ObjectHelperMixin:
         update = getattr(mixer, "update_track", None)
         if callable(update):
             update(track)
+        tid = getattr(track, "id", None)
+        panel = getattr(self.owner, "_audio_mixer_panel", None)
+        if panel is not None:
+            for name, value in (
+                ("sync_track_volume", getattr(track, "volume", 1.0)),
+                ("sync_track_pan", getattr(track, "pan", 0.0)),
+                ("sync_track_mute", bool(getattr(track, "muted", False))),
+                ("sync_track_solo", bool(getattr(track, "solo", False))),
+            ):
+                method = getattr(panel, name, None)
+                if callable(method):
+                    try:
+                        method(tid, value)
+                    except Exception:
+                        pass
+        rows = getattr(self.owner, "_audio_rows", None)
+        row = rows.get(tid) if isinstance(rows, dict) else None
+        refresh = getattr(row, "refresh_from_track", None)
+        if callable(refresh):
+            try:
+                refresh()
+            except Exception:
+                pass
 
     def _sync_actor_tracks(self, kind: str) -> None:
         owner = self._require_owner()

@@ -56,7 +56,18 @@ Default behavior for VRM/VSeeFace-style work:
 - Studio and VRM rendering must use the VTuber VRM/MToon renderer boundary
   (`app/vtuber/vrm_renderer.py`, renderer family `vtuber_vrm`). Do not route
   `.vrm`, Avatar Mapping, or internal VRM Program Output through AR/PBR,
-  Marmoset PBR, `full-gpu`, or old debug proof images.
+  Marmoset PBR, generic AR/PBR `full-gpu` debug proof images, or old debug proof
+  images. Product-catalog VTuber evidence must request and prove the exposed
+  VTuber backend `vrm_mtoon_gpu`. Legacy `vrm_mtoon_software` /
+  `software-zbuffer` output is diagnostic only and must be rejected for product
+  screenshots because it can produce point-like broken avatar output.
+- Source-person visibility must drive VRM visibility. The code rule is
+  `match_source_person_exposure_to_vrm_visibility` in
+  `app/vtuber/source_framing.py`: `face_only` maps to `bust_up`,
+  `upper_body` maps to at least `half_body`, and `full_body` maps to
+  `full_body`. Source framing plans expose `source_exposure` and
+  `visibility_policy` for AI/review automation; do not show a head-only or
+  face-only VRM thumbnail when the source person is upper-body or full-body.
 - VSeeFace missing, black, degraded, unregistered, or not installed is a
   degraded sidecar state, not a blocker for Program Output when internal VRM
   fallback assets are available.

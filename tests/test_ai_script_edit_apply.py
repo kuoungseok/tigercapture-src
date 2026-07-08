@@ -325,6 +325,66 @@ def test_qwen_saved_config_and_provider_setup_instructions(monkeypatch, tmp_path
     )
 
 
+def test_qwen_headless_server_helpers(monkeypatch):
+    from app.ai_qwen_server import ensure_qwen_server, qwen_models_url, split_runner_command
+
+    assert qwen_models_url("http://127.0.0.1:8080/v1") == "http://127.0.0.1:8080/v1/models"
+    assert split_runner_command('llama-server -hf Qwen/Qwen3-1.7B-GGUF:Q8_0')[:2] == ["llama-server", "-hf"]
+    assert split_runner_command('"C:\\Tools\\llama.exe" serve -hf Qwen/Qwen3-1.7B-GGUF:Q8_0')[:2] == [
+        "C:\\Tools\\llama.exe",
+        "serve",
+    ]
+
+    class FakeResponse:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self, _limit):
+            return b'{"data":[]}'
+
+    def alive(_url, timeout=0):
+        return FakeResponse()
+
+    started = []
+
+    def fake_popen(*args, **kwargs):
+        started.append((args, kwargs))
+
+        class FakeProcess:
+            pid = 321
+
+        return FakeProcess()
+
+    already = ensure_qwen_server(endpoint="http://127.0.0.1:8080/v1", command="fake", opener=alive, popen=fake_popen)
+    assert already.ok is True
+    assert already.already_running is True
+    assert not started
+
+    attempts = {"count": 0}
+
+    def becomes_alive(_url, timeout=0):
+        attempts["count"] += 1
+        if attempts["count"] < 2:
+            raise OSError("not ready")
+        return FakeResponse()
+
+    launched = ensure_qwen_server(
+        endpoint="http://127.0.0.1:8080/v1",
+        command="fake-qwen --serve",
+        wait_seconds=1,
+        poll_seconds=0.1,
+        opener=becomes_alive,
+        popen=fake_popen,
+    )
+    assert launched.ok is True
+    assert launched.process_started is True
+    assert launched.pid == 321
+    assert started
+
+
 def test_qwen_executor_generates_validated_plan(monkeypatch):
     import app.ai_providers as providers
     from app.ai_script_edit_panel import ScriptEditPanelModel

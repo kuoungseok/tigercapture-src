@@ -415,12 +415,12 @@ def feature_editor_surface_specs() -> tuple[dict[str, Any], ...]:
         },
         {
             "id": "multilingual_localization",
-            "title": "Multilingual UI And Localization QA",
-            "subtitle": "runtime locale switch with CJK-safe output",
-            "chips": ("KO", "EN", "JP", "ZH", "FR", "DE"),
-            "panel_title": "Language QA",
-            "panel_rows": ("languages: 6", "missing keys: 0", "mojibake: 0"),
-            "lanes": ("source clip", "localized UI", "caption text", "font fallback"),
+            "title": "Typography, Titles, And Multilingual Text",
+            "subtitle": "large animated titles with CJK-safe output",
+            "chips": ("Kinetic title", "Captions", "CJK", "Presets", "Keyframes", "Safe fonts"),
+            "panel_title": "Typography Stack",
+            "panel_rows": ("title layers: 4", "large headline: yes", "CJK-safe: yes"),
+            "lanes": ("source video", "hero title", "subtitle/body", "locale text", "opacity keys"),
             "accent": (185, 255, 102),
         },
         {

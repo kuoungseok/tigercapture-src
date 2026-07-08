@@ -244,6 +244,14 @@ def build_preview_transport_area(self, main_col, root) -> None:
     self.viewer_fit_btn.setToolTip("Fit frame to viewer")
     self.viewer_fit_btn.clicked.connect(lambda _checked=False: self._scale_preview_to_fit())
 
+    self.viewer_depth_btn = QPushButton("Depth")
+    self.viewer_depth_btn.setObjectName("ViewerDropdownButton")
+    self.viewer_depth_btn.setCheckable(True)
+    self.viewer_depth_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    self.viewer_depth_btn.setFixedSize(52, 20)
+    self.viewer_depth_btn.setToolTip("Show AR/PBR depth map only")
+    self.viewer_depth_btn.clicked.connect(self._toggle_ar_pbr_depth_view)
+
     # Mark In / Mark Out / Clear selection ??prosumer-editor style
     # range selection tied to the playhead. Tracks can still be
     # shift+dragged directly, but the buttons + I/O shortcuts are
@@ -325,6 +333,7 @@ def build_preview_transport_area(self, main_col, root) -> None:
     transport.addSpacing(4)
     transport.addWidget(self.viewer_compare_btn)
     transport.addWidget(self.viewer_fit_btn)
+    transport.addWidget(self.viewer_depth_btn)
     transport.addWidget(self.current_speed_label)
     play_bar.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     self._play_bar_scroll = QScrollArea(self._viewer_column)

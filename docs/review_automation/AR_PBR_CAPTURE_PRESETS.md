@@ -1,6 +1,6 @@
 # AR/PBR Capture Presets
 
-Last updated: 2026-07-05
+Last updated: 2026-07-06
 
 This file records stable AR/PBR capture presets for product-catalog review
 automation. Presets here are source rules, not generated debug evidence.
@@ -31,13 +31,14 @@ Rules:
   with `ar_pbr.preview.view.get` or the review-only
   `review.ar_pbr.preview.view.get`, then update the JSON preset.
 - If the preview is launched as a separate standalone process, include
+  `--settings-json <preset>` so AO/GI/tone values are not lost. Also include
   `--view-state-out <path>` and close the window after manual adjustment. The
   saved JSON contains `view` and `scene_settings` for preset updates.
 
 Current launch pattern:
 
 ```text
-E:\ClaudeCodeApp\GifCam\.venv\Scripts\python.exe E:\ClaudeCodeApp\GifCam\tools\ar_pbr_preview_window.py --asset E:\ClaudeCodeApp\3d\Nexus_RX-19491522\gltf\converted\nexus_rx_gltf_extracted\scene.gltf --width 1440 --height 1000 --hide-background --pitch 10 --yaw 35 --zoom-factor 1.55 --pan-x 0 --pan-y 0 --pan-z 0 --set render_profile=authored --set hdri_id=wide_street_01 --set ibl_exposure=1.1 --set ibl_rotation=0 --set light_azimuth=45 --set light_elevation=45 --set direct_strength=0.42 --set show_environment_background=false
+E:\ClaudeCodeApp\GifCam\.venv\Scripts\python.exe E:\ClaudeCodeApp\GifCam\tools\ar_pbr_preview_window.py --settings-json E:\ClaudeCodeApp\GifCam\docs\review_automation\presets\ar_pbr_nexus_rx_car.json --asset E:\ClaudeCodeApp\3d\Nexus_RX-19491522\gltf\converted\nexus_rx_gltf_extracted\scene.gltf --width 1440 --height 1000 --hide-background --pitch 10 --yaw 35 --zoom-factor 1.55 --pan-x 0 --pan-y 0 --pan-z 0 --set render_profile=authored --set hdri_id=wide_street_01 --set ibl_exposure=1.1 --set ibl_rotation=0 --set light_azimuth=45 --set light_elevation=45 --set direct_strength=0.42 --set show_environment_background=false
 ```
 
 ## Space Station Modules Catalog Preset
@@ -67,7 +68,7 @@ Rules:
 Current launch pattern:
 
 ```text
-E:\ClaudeCodeApp\GifCam\.venv\Scripts\python.exe E:\ClaudeCodeApp\GifCam\tools\ar_pbr_preview_window.py --asset E:\ClaudeCodeApp\3d\Space_Station_Modules-431ca84e\gltf\converted\space_station_modules_gl_extracted\scene.gltf --width 1440 --height 1000 --hide-background --pitch 10 --yaw 35 --zoom-factor 1.25 --pan-x 0 --pan-y 0 --pan-z 0 --set render_profile=authored --set hdri_id=wide_street_01 --set ibl_exposure=1.1 --set ibl_rotation=0 --set light_azimuth=45 --set light_elevation=45 --set direct_strength=0.42 --set show_environment_background=false
+E:\ClaudeCodeApp\GifCam\.venv\Scripts\python.exe E:\ClaudeCodeApp\GifCam\tools\ar_pbr_preview_window.py --settings-json E:\ClaudeCodeApp\GifCam\docs\review_automation\presets\ar_pbr_space_station_modules.json --asset E:\ClaudeCodeApp\3d\Space_Station_Modules-431ca84e\gltf\converted\space_station_modules_gl_extracted\scene.gltf --width 1440 --height 1000 --hide-background --pitch 10 --yaw 35 --zoom-factor 1.25 --pan-x 0 --pan-y 0 --pan-z 0 --set render_profile=authored --set hdri_id=wide_street_01 --set ibl_exposure=1.1 --set ibl_rotation=0 --set light_azimuth=45 --set light_elevation=45 --set direct_strength=0.42 --set show_environment_background=false
 ```
 
 ## Somewhat Recognizable Catalog Preset
@@ -85,6 +86,11 @@ Rules:
 
 - Use the real GLTF asset at
   `E:\ClaudeCodeApp\3d\Somewhat_Recognizable-668ed982\gltf\converted\somewhat_recognizable_gl_extracted\scene.gltf`.
+- When this preset is used on the AR/PBR 3D Composite catalog page, it must be
+  used in both places: the standalone iPad/detail AR/PBR viewer and the
+  laptop/monitor editor video viewer. The laptop editor capture must show this
+  same asset loaded into the AR/PBR track or composite layer, scaled large
+  enough to read in the video viewer.
 - Hide the environment/cubemap background for catalog screenshots.
 - Replay the saved view and lighting from the preset JSON; do not refit it from
   scratch when generating catalog evidence.

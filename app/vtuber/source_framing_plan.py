@@ -6,7 +6,12 @@ from pathlib import Path
 from typing import Any, Iterable, Mapping, Sequence
 
 from app.vtuber.source_framing_control import apply_framing_user_offset
-from app.vtuber.source_framing import solve_source_framing_sequence
+from app.vtuber.source_framing import (
+    classify_source_exposure_for_framing,
+    normalize_source_exposure_type,
+    solve_source_framing_sequence,
+    vrm_visibility_policy_for_source_exposure,
+)
 from app.vtuber.source_subject import detect_subject_boxes_for_motion_frames
 from app.vtuber.video_face_driver import FaceMotionFrame
 
@@ -20,44 +25,72 @@ def build_source_framing_plan(
     frames: Sequence[FaceMotionFrame] | Iterable[FaceMotionFrame],
     frame_size: tuple[int, int],
     *,
-    preset: str = "bust_up",
+    preset: str = "auto",
     video_path: str | Path | None = None,
     slots: Sequence[str] | str = DEFAULT_SOURCE_FRAMING_SLOTS,
     smoothing: float = 0.35,
     subject_detect_every: int = 3,
     subject_detect_scope: str = "selected",
+    source_exposure: str = "",
+    match_source_visibility: bool = True,
+    allow_narrower_than_source: bool = False,
     user_offset: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Return camera/framing guidance without invoking the renderer.
 
     The result is suitable for UI preview setup, export planning, and QA logs.
     It intentionally keeps full detector frames in diagnostics while exposing a
-    compact `selected_frames` list for normal UI consumers.
+    compact `selected_frames` list for normal UI consumers. `preset="auto"`
+    means source-person exposure decides the minimum VRM visibility.
     """
     data = tuple(frames)
     normalized_slots = normalize_source_framing_slots(slots)
     width, height = max(1, int(frame_size[0])), max(1, int(frame_size[1]))
+    requested_preset = str(preset or "auto").strip().casefold().replace("-", "_")
     diagnostics: dict[str, Any] = {
         "frame_size": [width, height],
-        "preset": str(preset or "bust_up"),
+        "requested_preset": requested_preset or "auto",
         "slots": list(normalized_slots),
         "errors": [],
         "warnings": [],
     }
     if not data:
+        exposure = _resolve_explicit_source_exposure(source_exposure)
+        visibility_policy = vrm_visibility_policy_for_source_exposure(
+            exposure or "unknown",
+            requested_preset=requested_preset or "auto",
+            allow_narrower=allow_narrower_than_source or not match_source_visibility,
+            method="explicit" if exposure else "motion_frames_empty",
+        )
         diagnostics["errors"].append("motion_frames_empty")
         return {
             "schema": SOURCE_FRAMING_PLAN_SCHEMA,
             "ok": False,
-            "preset": str(preset or "bust_up"),
+            "preset": visibility_policy["selected_framing_preset"],
+            "requested_preset": requested_preset or "auto",
             "frame_count": 0,
             "selected_indices": [],
             "selected_frames": [],
             "source_subject": None,
+            "source_exposure": {"source_exposure": exposure or "unknown", "method": "motion_frames_empty"},
+            "visibility_policy": visibility_policy,
             "diagnostics": diagnostics,
         }
 
     selected = select_source_framing_indices(data, normalized_slots)
+    exposure = _initial_source_exposure(
+        data,
+        (width, height),
+        explicit_source_exposure=source_exposure,
+    )
+    visibility_policy = vrm_visibility_policy_for_source_exposure(
+        exposure.get("source_exposure") or "unknown",
+        requested_preset=requested_preset or "auto",
+        allow_narrower=allow_narrower_than_source or not match_source_visibility,
+        confidence=float(exposure.get("confidence", 0.0) or 0.0),
+        method=str(exposure.get("method") or ""),
+    )
+    resolved_preset = str(visibility_policy["selected_framing_preset"])
     source_subject = None
     subject_boxes = None
     subject_sources = None
@@ -68,18 +101,32 @@ def build_source_framing_plan(
             Path(video_path),
             data,
             source_frame_size=(width, height),
-            preset=str(preset or "bust_up"),
+            preset=resolved_preset,
             detect_every=max(1, int(subject_detect_every)),
             detect_indices=detect_indices,
         )
         subject_boxes = source_subject.subject_boxes
         subject_sources = tuple(frame.source for frame in source_subject.frames)
         data = _apply_source_subject_shoulder_roll(data, source_subject)
+        exposure = _resolved_source_exposure(
+            data,
+            (width, height),
+            subject_boxes=subject_boxes,
+            explicit_source_exposure=source_exposure,
+        )
+        visibility_policy = vrm_visibility_policy_for_source_exposure(
+            exposure.get("source_exposure") or "unknown",
+            requested_preset=requested_preset or "auto",
+            allow_narrower=allow_narrower_than_source or not match_source_visibility,
+            confidence=float(exposure.get("confidence", 0.0) or 0.0),
+            method=str(exposure.get("method") or ""),
+        )
+        resolved_preset = str(visibility_policy["selected_framing_preset"])
 
     solved = solve_source_framing_sequence(
         data,
         (width, height),
-        preset=str(preset or "bust_up"),
+        preset=resolved_preset,
         smoothing=float(smoothing),
         subject_boxes=subject_boxes,
         subject_sources=subject_sources,
@@ -106,6 +153,7 @@ def build_source_framing_plan(
                 "framing": solution.to_dict(),
                 "framing_control": controlled,
                 "final_framing": controlled["final"],
+                "visibility_policy": dict(visibility_policy),
             }
         )
 
@@ -116,11 +164,14 @@ def build_source_framing_plan(
     return {
         "schema": SOURCE_FRAMING_PLAN_SCHEMA,
         "ok": True,
-        "preset": str(preset or "bust_up"),
+        "preset": resolved_preset,
+        "requested_preset": requested_preset or "auto",
         "frame_count": len(data),
         "selected_indices": [int(index) for index in selected],
         "selected_frames": selected_frames,
         "source_subject": _source_subject_summary(source_subject),
+        "source_exposure": exposure,
+        "visibility_policy": visibility_policy,
         "diagnostics": diagnostics,
     }
 
@@ -166,6 +217,48 @@ def _source_subject_summary(source_subject: Any) -> dict[str, Any] | None:
         "warnings": list(diagnostics.get("warnings") or []),
         "errors": list(diagnostics.get("errors") or []),
     }
+
+
+def _resolve_explicit_source_exposure(value: str) -> str:
+    text = str(value or "").strip()
+    return normalize_source_exposure_type(text) if text else ""
+
+
+def _initial_source_exposure(
+    frames: tuple[FaceMotionFrame, ...],
+    frame_size: tuple[int, int],
+    *,
+    explicit_source_exposure: str = "",
+) -> dict[str, Any]:
+    exposure = _resolve_explicit_source_exposure(explicit_source_exposure)
+    if exposure:
+        return {
+            "schema": "tigerstudio.vtuber.source_exposure_classification.v1",
+            "source_exposure": exposure,
+            "confidence": 1.0,
+            "method": "explicit_source_exposure",
+            "frame_size": [int(frame_size[0]), int(frame_size[1])],
+        }
+    return classify_source_exposure_for_framing(frames, frame_size)
+
+
+def _resolved_source_exposure(
+    frames: tuple[FaceMotionFrame, ...],
+    frame_size: tuple[int, int],
+    *,
+    subject_boxes: Sequence[tuple[int, int, int, int] | None] | None,
+    explicit_source_exposure: str = "",
+) -> dict[str, Any]:
+    exposure = _resolve_explicit_source_exposure(explicit_source_exposure)
+    if exposure:
+        return {
+            "schema": "tigerstudio.vtuber.source_exposure_classification.v1",
+            "source_exposure": exposure,
+            "confidence": 1.0,
+            "method": "explicit_source_exposure",
+            "frame_size": [int(frame_size[0]), int(frame_size[1])],
+        }
+    return classify_source_exposure_for_framing(frames, frame_size, subject_boxes=subject_boxes)
 
 
 def _apply_source_subject_shoulder_roll(

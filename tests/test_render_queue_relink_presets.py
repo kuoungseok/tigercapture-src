@@ -3086,11 +3086,12 @@ def test_workbench_fx_summary_lists_selected_clip_stack():
     assert "FX: video filter preset" in text
     assert "Key: chroma/alpha preset" in text
     assert "TR: Dissolve 450ms" in text
-    assert "T: 1" in text
+    assert "TXT:" in text
     assert "Mot: 1" in text
     assert panel._fx_edit_clip_btn.isEnabled()
     assert panel._fx_toggle_clip_btn.isEnabled()
-    assert panel._fx_toggle_clip_btn.text() == "Disable Clip FX"
+    assert panel._fx_toggle_clip_btn.text() == ""
+    assert panel._fx_toggle_clip_btn.accessibleName() == "Disable clip FX"
     assert panel._fx_clear_clip_btn.isEnabled()
     assert panel._fx_clear_transition_btn.isEnabled()
 
@@ -3129,7 +3130,8 @@ def test_workbench_fx_summary_reports_disabled_clip_fx():
     panel.set_video_track(track, selected_clip=clip)
 
     assert "Disabled: FX stored" in panel._fx_summary_body.text()
-    assert panel._fx_toggle_clip_btn.text() == "Enable Clip FX"
+    assert panel._fx_toggle_clip_btn.text() == ""
+    assert panel._fx_toggle_clip_btn.accessibleName() == "Enable clip FX"
     assert panel._fx_toggle_clip_btn.isEnabled()
     assert panel._fx_clear_clip_btn.isEnabled()
     panel.deleteLater()
@@ -3353,9 +3355,9 @@ def test_vtuber_studio_registers_redacted_broadcast_evidence_payload(tmp_path):
     result = win._register_broadcast_evidence_payload(
         {
             "root": str(tmp_path),
-            "check_id": "discord_window_share",
-            "platform": "Discord",
-            "notes": "Program Output window shared; Performance Source not visible.",
+            "check_id": "youtube_unlisted_viewer_playback",
+            "platform": "YouTube",
+            "notes": "Private YouTube preview played Program Output; stream key, URL, account and chat redacted.",
             "confirm_redacted": True,
         }
     )
@@ -3363,11 +3365,13 @@ def test_vtuber_studio_registers_redacted_broadcast_evidence_payload(tmp_path):
     checks = {row["id"]: row for row in updated["checks"]}
 
     assert hasattr(win, "_evidence_register_rtmp_btn")
-    assert hasattr(win, "_evidence_register_discord_btn")
+    assert hasattr(win, "_evidence_register_youtube_view_btn")
+    assert hasattr(win, "_evidence_guide_btn")
+    assert hasattr(win, "_evidence_youtube_studio_btn")
     assert result["registered"] is True
-    assert checks["discord_window_share"]["kind"] == "real_platform"
-    assert checks["discord_window_share"]["ok"] is True
-    assert checks["discord_window_share"]["evidence"]["redacted"] is True
+    assert checks["youtube_unlisted_viewer_playback"]["kind"] == "real_platform"
+    assert checks["youtube_unlisted_viewer_playback"]["ok"] is True
+    assert checks["youtube_unlisted_viewer_playback"]["evidence"]["redacted"] is True
     win.deleteLater()
 
 

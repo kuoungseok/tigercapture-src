@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 DEFAULT_AMBIENT_OCCLUSION_MODE = "off"
 DEFAULT_AO_STRENGTH = 0.0
+DEFAULT_AO_ACTIVE_STRENGTH = 0.65
 DEFAULT_AO_RADIUS = 3.0
 DEFAULT_AO_DISTANCE = 0.45
 DEFAULT_AO_COLOR = [0.0, 0.0, 0.0]
@@ -95,22 +96,29 @@ def normalize_ambient_occlusion_settings(value: Any) -> dict[str, Any]:
     if mode not in {"off", "screen", "ray_traced"}:
         mode = DEFAULT_AMBIENT_OCCLUSION_MODE
 
+    enabled_raw = _first_value(
+        _nested(data, "enabled", "ao_enabled", "ambient_occlusion_enabled"),
+        data.get("ao_enabled"),
+        data.get("ambient_occlusion_enabled"),
+    )
+    strength_raw = _first_value(
+        _nested(data, "strength", "ao_strength", "ambient_occlusion_strength", "occlusion_strength"),
+        data.get("ao_strength"),
+        data.get("ambient_occlusion_strength"),
+    )
+    strength_default = (
+        DEFAULT_AO_ACTIVE_STRENGTH
+        if strength_raw is None and (mode != "off" or _bool_value(enabled_raw, False))
+        else DEFAULT_AO_STRENGTH
+    )
     strength = _float_value(
-        _first_value(
-            _nested(data, "strength", "ao_strength", "ambient_occlusion_strength", "occlusion_strength"),
-            data.get("ao_strength"),
-            data.get("ambient_occlusion_strength"),
-        ),
-        DEFAULT_AO_STRENGTH,
+        strength_raw,
+        strength_default,
         0.0,
         2.0,
     )
     enabled = _bool_value(
-        _first_value(
-            _nested(data, "enabled", "ao_enabled", "ambient_occlusion_enabled"),
-            data.get("ao_enabled"),
-            data.get("ambient_occlusion_enabled"),
-        ),
+        enabled_raw,
         mode != "off" or strength > 0.0,
     )
     if enabled and mode == "off":

@@ -86,6 +86,52 @@ def test_ai_edit_corpus_quality_tool_writes_report(tmp_path, monkeypatch):
     assert report["smart_edit_claim_ready"] is False
 
 
+def test_ai_edit_corpus_quality_tool_can_auto_start_qwen(tmp_path, monkeypatch):
+    from tools import qa_ai_edit_corpus_quality
+
+    out = tmp_path / "ai_edit_corpus_quality_qa.json"
+    calls = []
+
+    class FakeEnsure:
+        def to_dict(self):
+            return {
+                "ok": True,
+                "endpoint": "http://127.0.0.1:8080/v1",
+                "models_url": "http://127.0.0.1:8080/v1/models",
+                "already_running": False,
+                "process_started": True,
+                "command": "fake-qwen",
+                "pid": 123,
+                "error": "",
+                "waited_seconds": 0.1,
+            }
+
+    def fake_ensure(**kwargs):
+        calls.append(kwargs)
+        return FakeEnsure()
+
+    monkeypatch.setattr("app.ai_qwen_server.ensure_qwen_server", fake_ensure)
+    monkeypatch.setattr(
+        "sys.argv",
+        [
+            "qa_ai_edit_corpus_quality.py",
+            "--out",
+            str(out),
+            "--provider",
+            "qwen_local",
+            "--auto-start-qwen",
+        ],
+    )
+
+    assert qa_ai_edit_corpus_quality.main() == 0
+    report = json.loads(out.read_text(encoding="utf-8"))
+
+    assert calls
+    assert calls[0]["env"]["TIGERCAPTURE_AI_PROVIDER"] == "qwen_local"
+    assert report["provider"]["selected"] == "qwen_local"
+    assert report["provider"]["qwen_auto_start"]["process_started"] is True
+
+
 def test_ai_edit_corpus_provider_result_uses_current_result_contract(monkeypatch):
     import app.ai_providers as providers
     from app.ai_edit_corpus_quality import build_ai_edit_corpus_quality_report

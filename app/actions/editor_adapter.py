@@ -19,6 +19,7 @@ from app.actions.editor_adapter_vtuber import VtuberBroadcastAdapterMixin
 from app.actions.editor_adapter_object_helpers import ObjectHelperMixin
 from app.actions.editor_adapter_mmd import MmdAdapterMixin
 from app.actions.editor_adapter_ar_pbr import ArPbrAdapterMixin
+from app.actions.editor_adapter_ppt import PptAdapterMixin
 
 
 class EditorAdapter(
@@ -27,6 +28,7 @@ class EditorAdapter(
     VtuberBroadcastAdapterMixin,
     MmdAdapterMixin,
     ArPbrAdapterMixin,
+    PptAdapterMixin,
     NleAdapterMixin,
     UiAdapterMixin,
     CoreHelperMixin,

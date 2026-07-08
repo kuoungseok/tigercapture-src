@@ -38,6 +38,15 @@ MATERIAL_TEXTURE_METADATA: tuple[str, ...] = (
     "alpha_cutoff",
     "emissive_factor",
     "uv_v_flip",
+    "shader_model",
+    "source_shader",
+    "render_queue",
+    "mtoon_render_queue",
+    "mtoon_cull_mode",
+    "mtoon_zwrite",
+    "mtoon_src_blend",
+    "mtoon_dst_blend",
+    "depth_write",
 )
 TEXTURE_MAP_METADATA: tuple[str, ...] = (
     "wrap_s",

@@ -1289,7 +1289,7 @@ class VideoExportThread(QThread):
             try:
                 from app.depth.cache import load_depth_frame
 
-                depth = load_depth_frame(source_id, int(project_ms))
+                depth = load_depth_frame(source_id, int(project_ms), allow_nearest_ms=80)
                 if depth is not None:
                     return depth
             except Exception:
@@ -1297,9 +1297,9 @@ class VideoExportThread(QThread):
         if not any(self._ar_pbr_track_wants_depth(track) for track in active_tracks):
             return None
         try:
-            from app.depth.estimator import estimate_depth_from_luma
+            from app.depth.estimator import estimate_depth
 
-            depth, _diag = estimate_depth_from_luma(
+            depth, _diag = estimate_depth(
                 rgb,
                 source_id="export_runtime",
                 time_ms=int(project_ms),

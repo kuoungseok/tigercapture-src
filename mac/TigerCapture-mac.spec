@@ -32,6 +32,7 @@ a = Analysis(
         (str(project_root / 'app' / 'locales' / '*.py'), 'app/locales'),
         (str(project_root / 'resources' / 'tigercapture.ico'), 'resources'),
         (str(project_root / 'resources' / 'luts' / '*.cube'), 'resources/luts'),
+        (str(project_root / 'resources' / 'ui' / 'sound_editor' / '*.png'), 'resources/ui/sound_editor'),
     ] + copy_metadata('imageio_ffmpeg'),
     hiddenimports=[
         'app.locales.ko',

@@ -1,6 +1,6 @@
 # Agent Start Here: Review Automation
 
-Last updated: 2026-07-03
+Last updated: 2026-07-08
 
 This is the first file a new Codex, Claude, or other coding agent should read
 before touching TigerCapture review automation.
@@ -104,17 +104,34 @@ Expanded references:
   `E:\ClaudeCodeApp\ReviewAutomationWorkspace\source_assets\templates`.
 - Do not delete generated output broadly. If asked to remove PPTs, filter by
   exact extension with `Where-Object { $_.Extension -in '.ppt', '.pptx' }`.
-- The full product catalog is a locked 21-slide scenario defined in
+- The full product catalog is a locked 22-slide scenario defined in
   `FULL_PRODUCT_CATALOG_MANIFEST.md`. Do not add, remove, split, merge, or
   reorder those slides unless the user changes that manifest first.
-- Slide 21 is the final `Specification Index` page. It uses dense micro-spec
-  text and the approved green bonsai cutout only as a closing-page object. The
+- Slide 22 is the final `Specification Index` page. It uses dense micro-spec
+  text and the approved blue-pot bonsai cutout only as a closing-page object. The
   bonsai is not feature evidence. Reject visible white halos, checkerboard
   remnants, background strips, or a large pasted-object drop shadow.
+  Shadow mode is locked to `pot_contact_only`: only a subtle contact shadow
+  under the pot base is allowed. Left subtitle/body text must wrap inside the
+  left text column and never overlap the central micro-spec columns.
+- Slide 4 is `PPT Maker / Timeline-Native Presentation Studio`. It must use
+  actual `.tgppt` / `app.pptgen` evidence and must not be folded into AI,
+  export, or generic editor overview pages.
+- MMD catalog evidence must never use the first frame. Use a middle/active
+  motion frame so the character reads as animated, not a static thumbnail. The
+  semantic capture contract must explicitly include `first_frame_used=false`,
+  `capture_frame_position=mid_motion` or equivalent middle-frame proof, and
+  `mmd_motion_active=true`.
+- Color grading, effects, and node pages must not use neutral/original-looking
+  before/after captures. The capture must actually change numeric grade,
+  filter, or node parameters through the editor/action surface, write the
+  compare sidecar contract, and visibly differ from the original. If the agent
+  does not know suitable preset values, it must research real preset values and
+  record that source in the capture contract before building the deck.
 - Each full-catalog page's screen composition, template, capture source,
   action/capture method, and rejection criteria are defined in
   `FULL_PRODUCT_CATALOG_PAGE_PLAN.md`.
-- The Korean presenter narration for the locked 21-slide deck is defined in
+- The Korean presenter narration for the locked 22-slide deck is defined in
   `FULL_PRODUCT_CATALOG_TALK_TRACK.md`. Use it as speaker-note guidance, not as
   visible slide body text.
 
@@ -193,7 +210,30 @@ Before generation:
    editor. For Color Grading, the iPad must show only color controls such as
    wheels, curves, scopes, tone controls, or sliders. It must not include the
    video viewer, media pool, or timeline.
-10. Ask no extra questions if the requested mode is clear; otherwise choose the
+10. iPad/detail frames are optional. If there is no feature-specific detail
+   worth showing, use the laptop-only template. Never duplicate the laptop
+   screen into the iPad just to fill the device frame.
+11. Cross-feature screenshot substitution is forbidden. Live2D evidence must
+   not fill an MMD page, node/color captures must not fill typography or
+   transition details, and generic editor crops must not fill an iPad/detail
+   frame.
+12. Full-catalog generation must block if a page's semantic capture contract is
+   missing. Image existence and nonblack pixels are not enough when the page
+   claims a specific feature.
+13. The reverse is also true: a semantic contract is not enough if the image is
+   black, blank, nearly empty, or just a thin meaningless PPT/timeline fragment.
+   The build must inspect the pixels and block these outputs instead of placing
+   them in a laptop, monitor, or iPad frame.
+14. After rendering slide PNGs, run final visual QA on the rendered slides
+   before exporting PPTX. This QA must inspect the actual laptop, iPad, and
+   multi-monitor screen regions in the finished catalog slide, reject blank or
+   flat mapped screens, reject duplicated evidence screens, and reject iPad
+   detail frames that visually duplicate the laptop screen.
+15. After exporting PPTX, validate the file as a PPTX package: ZIP integrity,
+   required Office entries, slide XML parseability, embedded media count, and
+   successful `python-pptx` reopen. Do not deliver a deck that may trigger a
+   PowerPoint repair warning.
+16. Ask no extra questions if the requested mode is clear; otherwise choose the
    safest catalog mode.
 
 After generation:
@@ -247,6 +287,18 @@ Every feature page needs a screenshot that visibly matches the feature:
   Do not repeat the Poly Haven camera model on every 3D page; reserve the
   camera model for camera-specific pages or fallback.
 - VTuber: Program Output separated from Performance Source/tracking input.
+  The main laptop/monitor frame must be the full actual `VTuber Studio - Tiger
+  Studio` work screen. If the page uses an iPad/detail frame, that iPad must
+  contain Program Output only; never put Source Tracking, Avatar Mapping, the
+  full workspace, or a generic editor crop in the iPad.
+  When the source is the Trump upper-body Performance Source, the avatar shown
+  in Program Output / Avatar Mapping must also be upper-body or wider: head,
+  neck, shoulders, and upper torso visible. Face-only VRM meta thumbnails are
+  invalid.
+  Product-catalog VTuber captures must use the VTuber VRM GPU renderer
+  `vrm_mtoon_gpu`. Software VRM fallback renders, dotted/point-cloud avatar
+  output, meta thumbnails, AR/PBR, Marmoset PBR, and generic full-gpu debug
+  proof PNGs are invalid for this page.
 - Multi-monitor: real captures mapped into real template screen regions.
 
 If the feature is not actually visible, the page is not ready.

@@ -146,6 +146,13 @@ def _on_frame_ready(self, qimg: QImage) -> None:
             except Exception:
                 pass
     self._preview_pixmap = QPixmap.fromImage(qimg)
+    try:
+        self._latest_program_output_qimage = qimg.copy()
+        studio = getattr(self, "_vtuber_studio_window", None)
+        if studio is not None and hasattr(studio, "update_program_output_frame"):
+            studio.update_program_output_frame(qimg)
+    except Exception:
+        pass
     if self._preview_tab_guard_active():
         self._restore_preview_if_tab_switch_blank()
     else:

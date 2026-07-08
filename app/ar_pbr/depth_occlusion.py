@@ -222,6 +222,170 @@ def apply_depth_occlusion_to_alpha(
     }
 
 
+def _shift_zero(arr: Any, dx: int, dy: int):
+    import numpy as np
+
+    src = np.asarray(arr, dtype=np.float32)
+    out = np.zeros_like(src)
+    h, w = src.shape[:2]
+    if h <= 0 or w <= 0:
+        return out
+    src_x0 = max(0, -int(dx))
+    src_x1 = min(w, w - int(dx)) if int(dx) >= 0 else w
+    dst_x0 = max(0, int(dx))
+    dst_x1 = min(w, w + int(dx)) if int(dx) < 0 else w
+    src_y0 = max(0, -int(dy))
+    src_y1 = min(h, h - int(dy)) if int(dy) >= 0 else h
+    dst_y0 = max(0, int(dy))
+    dst_y1 = min(h, h + int(dy)) if int(dy) < 0 else h
+    if src_x1 <= src_x0 or src_y1 <= src_y0 or dst_x1 <= dst_x0 or dst_y1 <= dst_y0:
+        return out
+    out[dst_y0:dst_y1, dst_x0:dst_x1] = src[src_y0:src_y1, src_x0:src_x1]
+    return out
+
+
+def _shift_edge(arr: Any, dx: int, dy: int):
+    import numpy as np
+
+    src = np.asarray(arr, dtype=np.float32)
+    h, w = src.shape[:2]
+    pad = max(1, abs(int(dx)), abs(int(dy)))
+    padded = np.pad(src, ((pad, pad), (pad, pad)), mode="edge")
+    y0 = pad - int(dy)
+    x0 = pad - int(dx)
+    return padded[y0:y0 + h, x0:x0 + w]
+
+
+def _box_blur_mask(mask: Any, radius: int):
+    import numpy as np
+
+    src = np.asarray(mask, dtype=np.float32)
+    r = max(0, int(radius))
+    if r <= 0:
+        return src
+    acc = src.copy()
+    count = 1.0
+    for offset in range(1, r + 1):
+        for dx, dy in ((offset, 0), (-offset, 0), (0, offset), (0, -offset)):
+            acc += _shift_zero(src, dx, dy)
+            count += 1.0
+    return np.clip(acc / max(1.0, count), 0.0, 1.0)
+
+
+def build_depth_effect_masks(
+    alpha: Any,
+    depth_patch: Any,
+    *,
+    object_depth: float,
+    settings: Mapping[str, Any] | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Build reusable depth masks for occlusion, glow, and future effects.
+
+    The returned masks are display-space float32 arrays in the same size as the
+    object alpha patch. They intentionally separate raw depth logic from the
+    visible glow color pass so other effects can consume the same information.
+    """
+    import numpy as np
+
+    alpha_arr = np.asarray(alpha, dtype=np.float32)
+    if alpha_arr.ndim == 3:
+        alpha_arr = alpha_arr[:, :, 0]
+    depth = np.asarray(depth_patch, dtype=np.float32)
+    if depth.ndim == 3:
+        depth = depth[:, :, 0]
+    if alpha_arr.shape != depth.shape:
+        raise ValueError("alpha and depth_patch must have matching 2D shapes")
+    if alpha_arr.size <= 0:
+        raise ValueError("empty depth effect mask")
+    if float(np.nanmax(alpha_arr)) > 1.5:
+        alpha_arr = alpha_arr / 255.0
+    alpha_arr = np.clip(np.nan_to_num(alpha_arr, nan=0.0, posinf=1.0, neginf=0.0), 0.0, 1.0)
+    depth = np.clip(np.nan_to_num(depth, nan=1.0, posinf=1.0, neginf=0.0), 0.0, 1.0)
+
+    tolerance = depth_occlusion_tolerance(settings)
+    softness = max(depth_occlusion_softness(settings), 0.002)
+    radius = max(
+        1,
+        int(round(_setting_float(
+            settings,
+            ("depth_effect_radius_px", "depth_edge_glow_radius_px", "depth_occlusion_glow_radius_px"),
+            DEFAULT_DEPTH_EDGE_GLOW_RADIUS_PX,
+        ))),
+    )
+    blur_radius = max(
+        0,
+        min(
+            4,
+            int(round(_setting_float(
+                settings,
+                ("depth_effect_blur_px", "depth_edge_glow_blur_px"),
+                min(2.0, max(0.0, float(radius) * 0.28)),
+            ))),
+        ),
+    )
+    scene_edge_strength = max(
+        0.0,
+        min(
+            1.0,
+            _setting_float(
+                settings,
+                ("depth_effect_scene_edge_strength", "depth_edge_glow_scene_edge_strength"),
+                0.55,
+            ),
+        ),
+    )
+
+    visibility = depth_visibility(
+        depth,
+        object_depth=float(object_depth),
+        tolerance=tolerance,
+        softness=softness,
+    ).astype(np.float32)
+    visibility = np.clip(visibility, 0.0, 1.0)
+    visible_mask = alpha_arr * visibility
+    hidden_mask = alpha_arr * (1.0 - visibility)
+
+    neighbor_hidden = np.zeros_like(hidden_mask)
+    depth_edge = np.zeros_like(hidden_mask)
+    for offset in range(1, radius + 1):
+        weight = 1.0 - (float(offset - 1) / max(1.0, float(radius)))
+        for dx, dy in ((offset, 0), (-offset, 0), (0, offset), (0, -offset)):
+            neighbor_hidden = np.maximum(neighbor_hidden, _shift_zero(hidden_mask, dx, dy) * weight)
+            shifted_depth = _shift_edge(depth, dx, dy)
+            depth_edge = np.maximum(depth_edge, np.abs(depth - shifted_depth) * weight)
+
+    transition_mask = np.clip(visibility * (1.0 - visibility) * 4.0, 0.0, 1.0) * alpha_arr
+    scene_depth_edge = np.clip(depth_edge * visible_mask * scene_edge_strength, 0.0, 1.0)
+    object_boundary = np.clip(neighbor_hidden * visible_mask, 0.0, 1.0)
+    edge_mask = np.clip(object_boundary + transition_mask + scene_depth_edge, 0.0, 1.0)
+    if blur_radius > 0:
+        edge_mask = np.clip(edge_mask * 0.72 + _box_blur_mask(edge_mask, blur_radius) * 0.28, 0.0, 1.0)
+    edge_mask = np.where(edge_mask > 0.012, edge_mask, 0.0).astype(np.float32)
+
+    masks = {
+        "visible_mask": visible_mask.astype(np.float32),
+        "hidden_mask": hidden_mask.astype(np.float32),
+        "transition_mask": transition_mask.astype(np.float32),
+        "scene_depth_edge": scene_depth_edge.astype(np.float32),
+        "object_boundary": object_boundary.astype(np.float32),
+        "edge_mask": edge_mask,
+    }
+    diagnostics = {
+        "schema": "tigerstudio.ar_pbr.depth_effect_masks.v1",
+        "ok": True,
+        "object_depth": max(0.0, min(1.0, float(object_depth))),
+        "tolerance": tolerance,
+        "softness": softness,
+        "radius_px": float(radius),
+        "blur_px": float(blur_radius),
+        "visible_pixels": int((visible_mask > 0.001).sum()),
+        "hidden_pixels": int((hidden_mask > 0.001).sum()),
+        "edge_pixels": int((edge_mask > 0.001).sum()),
+        "scene_edge_strength": float(scene_edge_strength),
+    }
+    return masks, diagnostics
+
+
 def apply_depth_edge_glow_to_rgb(
     rgb: Any,
     alpha: Any,
@@ -238,58 +402,23 @@ def apply_depth_edge_glow_to_rgb(
     out = np.asarray(rgb, dtype=np.float32)
     if out.ndim != 3 or out.shape[2] < 3:
         return rgb, {"enabled": True, "applied": False, "changed_pixels": 0, "reason": "invalid_rgb"}
-    alpha_arr = np.asarray(alpha, dtype=np.float32)
-    if alpha_arr.shape != out.shape[:2]:
-        return rgb, {"enabled": True, "applied": False, "changed_pixels": 0, "reason": "invalid_alpha"}
-    depth = np.asarray(depth_patch, dtype=np.float32)
-    if depth.ndim == 3:
-        depth = depth[:, :, 0]
-    if depth.shape != out.shape[:2]:
-        return rgb, {"enabled": True, "applied": False, "changed_pixels": 0, "reason": "invalid_depth"}
-
-    tolerance = depth_occlusion_tolerance(settings)
-    softness = max(depth_occlusion_softness(settings), 0.002)
-    visibility = depth_visibility(
-        depth,
-        object_depth=float(object_depth),
-        tolerance=tolerance,
-        softness=softness,
-    ).astype(np.float32)
-    active = (alpha_arr > 0.001).astype(np.float32)
-    visible = active * np.clip(visibility, 0.0, 1.0)
-    hidden = active * (1.0 - np.clip(visibility, 0.0, 1.0))
-    neighbor_hidden = hidden.copy()
-    depth_edge = np.zeros_like(hidden)
-    radius = max(1, int(round(float(cfg["radius_px"]))))
-    for offset in range(1, radius + 1):
-        weight = 1.0 - (float(offset - 1) / max(1.0, float(radius)))
-        shifted = np.zeros_like(hidden)
-        shifted[:, offset:] = hidden[:, :-offset]
-        neighbor_hidden = np.maximum(neighbor_hidden, shifted * weight)
-        depth_shift = np.zeros_like(depth)
-        depth_shift[:, offset:] = depth[:, :-offset]
-        depth_edge = np.maximum(depth_edge, np.abs(depth - depth_shift) * weight)
-        shifted = np.zeros_like(hidden)
-        shifted[:, :-offset] = hidden[:, offset:]
-        neighbor_hidden = np.maximum(neighbor_hidden, shifted * weight)
-        depth_shift = np.zeros_like(depth)
-        depth_shift[:, :-offset] = depth[:, offset:]
-        depth_edge = np.maximum(depth_edge, np.abs(depth - depth_shift) * weight)
-        shifted = np.zeros_like(hidden)
-        shifted[offset:, :] = hidden[:-offset, :]
-        neighbor_hidden = np.maximum(neighbor_hidden, shifted * weight)
-        depth_shift = np.zeros_like(depth)
-        depth_shift[offset:, :] = depth[:-offset, :]
-        depth_edge = np.maximum(depth_edge, np.abs(depth - depth_shift) * weight)
-        shifted = np.zeros_like(hidden)
-        shifted[:-offset, :] = hidden[offset:, :]
-        neighbor_hidden = np.maximum(neighbor_hidden, shifted * weight)
-        depth_shift = np.zeros_like(depth)
-        depth_shift[:-offset, :] = depth[offset:, :]
-        depth_edge = np.maximum(depth_edge, np.abs(depth - depth_shift) * weight)
-    transition = np.clip(visibility * (1.0 - visibility) * 4.0, 0.0, 1.0) * active
-    scene_edge = np.clip(depth_edge * visible, 0.0, 1.0)
-    edge = np.clip((neighbor_hidden * visible) + transition + scene_edge, 0.0, 1.0)
+    try:
+        masks, mask_diag = build_depth_effect_masks(
+            alpha,
+            depth_patch,
+            object_depth=object_depth,
+            settings=settings,
+        )
+    except Exception as exc:
+        return rgb, {
+            "enabled": True,
+            "applied": False,
+            "changed_pixels": 0,
+            "reason": f"mask_build_failed:{type(exc).__name__}",
+        }
+    edge = masks["edge_mask"]
+    if edge.shape != out.shape[:2]:
+        return rgb, {"enabled": True, "applied": False, "changed_pixels": 0, "reason": "invalid_mask_shape"}
     glow = edge[:, :, None] * np.asarray(cfg["color"], dtype=np.float32)[None, None, :3] * float(cfg["strength"])
     changed = int((edge > 0.01).sum())
     if changed <= 0:
@@ -298,15 +427,19 @@ def apply_depth_edge_glow_to_rgb(
             "applied": False,
             "changed_pixels": 0,
             "object_depth": max(0.0, min(1.0, float(object_depth))),
-            "tolerance": tolerance,
+            "tolerance": float(mask_diag.get("tolerance", 0.0) or 0.0),
             "radius_px": float(cfg["radius_px"]),
+            "rendering": cfg,
+            "masks": mask_diag,
         }
     return np.clip(out[:, :, :3] + glow, 0.0, 1.0), {
         "enabled": True,
         "applied": True,
         "changed_pixels": changed,
         "object_depth": max(0.0, min(1.0, float(object_depth))),
-        "tolerance": tolerance,
+        "tolerance": float(mask_diag.get("tolerance", 0.0) or 0.0),
         "radius_px": float(cfg["radius_px"]),
         "strength": float(cfg["strength"]),
+        "rendering": cfg,
+        "masks": mask_diag,
     }

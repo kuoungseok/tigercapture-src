@@ -72,6 +72,33 @@ def test_source_framing_exposes_lower_occlusion_guidance():
     assert full.model_view["lower_occlusion_y"] == 1.0
 
 
+def test_source_exposure_policy_matches_vrm_visibility():
+    from app.vtuber.source_framing import (
+        classify_source_exposure_for_framing,
+        vrm_visibility_policy_for_source_exposure,
+    )
+    from app.vtuber.video_face_driver import FaceMotionFrame
+
+    upper = vrm_visibility_policy_for_source_exposure("upper_body", requested_preset="bust_up")
+    full = vrm_visibility_policy_for_source_exposure("full_body", requested_preset="half_body")
+
+    assert upper["ai_rule"] == "match_source_person_exposure_to_vrm_visibility"
+    assert upper["minimum_framing_preset"] == "half_body"
+    assert upper["selected_framing_preset"] == "half_body"
+    assert upper["upgraded_from_requested"] is True
+    assert full["minimum_framing_preset"] == "full_body"
+    assert full["selected_framing_preset"] == "full_body"
+
+    exposure = classify_source_exposure_for_framing(
+        [FaceMotionFrame(face_box=(280, 70, 52, 40))],
+        (640, 360),
+        subject_boxes=[(220, 12, 180, 340)],
+    )
+
+    assert exposure["source_exposure"] == "full_body"
+    assert exposure["raw_profile"] == "full_body"
+
+
 def test_estimated_upper_body_box_is_clipped_to_frame():
     from app.vtuber.source_framing import estimate_upper_body_box_from_face_box
 

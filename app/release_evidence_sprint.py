@@ -35,13 +35,20 @@ SCREENSTUDIO_REQUIREMENT_ACTIONS = {
 
 BROADCAST_PLATFORM_CHECK_LABELS = {
     "private_rtmp_ingest": "Private/unlisted RTMP ingest",
-    "discord_window_share": "Discord/video-call Program Output share",
+    "youtube_unlisted_viewer_playback": "YouTube private/unlisted viewer playback",
+    "discord_window_share": "Optional video-call Program Output share",
+}
+
+REQUIRED_BROADCAST_PLATFORM_CHECK_IDS = {
+    "private_rtmp_ingest",
+    "youtube_unlisted_viewer_playback",
 }
 
 
 BROADCAST_PLATFORM_CHECK_ACTIONS = {
     "private_rtmp_ingest": "Run YouTube, Twitch, or Custom RTMP and attach redacted ingest evidence.",
-    "discord_window_share": "Join a test call and verify only Program Output is shared.",
+    "youtube_unlisted_viewer_playback": "Open the private/unlisted YouTube viewer or preview page and attach redacted playback evidence.",
+    "discord_window_share": "Optional: join a test call and verify only Program Output is shared.",
 }
 
 
@@ -263,7 +270,12 @@ def _write_broadcast_script(*, root: Path, out_dir: Path, rows: list[dict[str, A
     for idx, row in enumerate(pending, start=1):
         check_id = str(row.get("check_id") or "")
         label = str(row.get("label") or BROADCAST_PLATFORM_CHECK_LABELS.get(check_id, check_id))
-        default_platform = "Discord" if check_id == "discord_window_share" else "YouTube/Twitch/Custom RTMP"
+        if check_id == "discord_window_share":
+            default_platform = "Discord/Google Meet/Zoom"
+        elif check_id == "youtube_unlisted_viewer_playback":
+            default_platform = "YouTube"
+        else:
+            default_platform = "YouTube/Twitch/Custom RTMP"
         lines.extend(
             [
                 f"Write-Host '[{idx}/{total}] Register broadcast evidence: {label}'",
@@ -328,7 +340,8 @@ def _write_playbook(
         "",
         f"- Pending platform checks: {len(broadcast_pending)}",
         f"- Registration script: `{broadcast_script.name}`",
-        "- Run a private/unlisted RTMP ingest and a Discord/video-call Program Output share.",
+        "- Run a private/unlisted RTMP ingest and verify the private/unlisted YouTube viewer or preview page plays Program Output.",
+        "- Optional: also register a video-call/window-share check if you want to claim that path.",
         "- Register only redacted evidence; never paste stream keys, passwords, or tokens.",
         "- Re-run `tools/qa_broadcast_platform_e2e.py` and `tools/qa_broadcast_release_readiness.py` after registration.",
         "",
@@ -811,7 +824,7 @@ def build_release_evidence_sprint(
             "Run tools/prepare_release_evidence_sprint.py --write-files to create scripts and templates.",
             "Run debugCapture/release_evidence_sprint/record_screenstudio_sidecars.ps1 and perform real cursor actions.",
             "Fill AI templates with real transcripts/prompts, then run register_ai_real_cases.ps1.",
-            "Run debugCapture/release_evidence_sprint/register_broadcast_platform_evidence.ps1 after private RTMP and Discord checks.",
+            "Run debugCapture/release_evidence_sprint/register_broadcast_platform_evidence.ps1 after private RTMP and YouTube viewer checks.",
             "Run tools/qa_release_gap_closure.py --strict after evidence is collected.",
         ],
     }
@@ -856,7 +869,7 @@ def release_evidence_progress(report: Mapping[str, Any]) -> dict[str, Any]:
     ai_ready = 0 if ai_deferred else max(_safe_int(ai.get("ready_real_cases"), 0), _safe_int(summary.get("ai_real_cases"), 0))
     ai_needed = max(0, ai_target - ai_ready)
     broadcast_target = max(
-        len(BROADCAST_PLATFORM_CHECK_LABELS),
+        len(REQUIRED_BROADCAST_PLATFORM_CHECK_IDS),
         _safe_int(broadcast.get("target"), 0),
     )
     broadcast_ready = max(
@@ -967,7 +980,7 @@ def release_evidence_action_targets(
             "kind": "powershell",
             "path": broadcast_script,
             "requires_user": True,
-            "note": "Attach redacted RTMP/Discord platform evidence; never include stream keys or tokens.",
+            "note": "Attach redacted RTMP and YouTube viewer platform evidence; never include stream keys or tokens.",
         },
         "playbook": {
             "label": "Open sprint playbook",

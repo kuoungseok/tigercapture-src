@@ -290,6 +290,78 @@ def _sync_viewer_compare_button(self) -> None:
         pass
 
 
+def _sync_ar_pbr_depth_view_button(self) -> None:
+    button = getattr(self, "viewer_depth_btn", None)
+    if button is None:
+        return
+    player = getattr(self, "_player", None)
+    mode = "off"
+    getter = getattr(player, "ar_pbr_depth_view_mode", None) if player is not None else None
+    if callable(getter):
+        try:
+            mode = str(getter() or "off")
+        except Exception:
+            mode = "off"
+    try:
+        button.blockSignals(True)
+        button.setChecked(mode != "off")
+        button.setToolTip(
+            "Show AR/PBR depth map only"
+            if mode == "off"
+            else f"Depth map view enabled ({mode}); click to return to normal preview"
+        )
+        button.setProperty("active", mode != "off")
+        button.style().unpolish(button)
+        button.style().polish(button)
+    except Exception:
+        pass
+    finally:
+        try:
+            button.blockSignals(False)
+        except Exception:
+            pass
+
+
+def _toggle_ar_pbr_depth_view(self, checked: bool = False) -> None:
+    player = getattr(self, "_player", None)
+    if player is None:
+        return
+    mode = "grayscale" if bool(checked) else "off"
+    setter = getattr(player, "set_ar_pbr_depth_view_mode", None)
+    if callable(setter):
+        try:
+            mode = str(setter(mode) or mode)
+        except Exception:
+            mode = "off"
+    else:
+        try:
+            setattr(player, "_ar_pbr_depth_view_mode_value", mode)
+            setattr(player, "_last_preview_frame_cache", None)
+        except Exception:
+            pass
+    try:
+        clear = getattr(player, "clear_preview_prerender_cache", None)
+        if callable(clear):
+            clear()
+    except Exception:
+        pass
+    try:
+        refresh = getattr(player, "refresh_current_frame", None)
+        if callable(refresh):
+            refresh()
+    except Exception:
+        pass
+    self._sync_ar_pbr_depth_view_button()
+    try:
+        self._drawing_canvas.update()
+    except Exception:
+        pass
+    try:
+        self._flash_status("Depth map view on" if mode != "off" else "Depth map view off")
+    except Exception:
+        pass
+
+
 def _apply_jkl_transport(self, command: str) -> bool:
     is_text_focus = getattr(self, "_is_text_focus", None)
     if callable(is_text_focus) and is_text_focus():
@@ -459,4 +531,3 @@ def _timeline_frame_ms(settings: dict | None = None) -> int:
 def _bounded_seek_position(current_ms: int, delta_ms: int, project_duration_ms: int) -> int:
     duration = max(0, int(project_duration_ms))
     return max(0, min(duration, int(current_ms) + int(delta_ms)))
-

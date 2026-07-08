@@ -127,12 +127,18 @@ def main() -> int:
         if report_path is not None:
             app.processEvents()
             diagnostics = dict((window.latest_render_item() or {}).get("diagnostics") or {})
+            capture_time_ms = int(time_ms if time_ms is not None else window.time_slider.value())
             payload = {
                 "ok": True,
                 "screenshot": str(out),
                 "profile_id": str(args.profile or ""),
                 "model": str(model_path or ""),
                 "motion": str(motion_path or ""),
+                "first_frame_used": capture_time_ms <= 0,
+                "capture_time_ms": capture_time_ms,
+                "capture_frame_position": "first_frame" if capture_time_ms <= 0 else "mid_motion",
+                "motion_frame_policy": "middle_frame_required" if capture_time_ms > 0 else "invalid_first_frame",
+                "mmd_motion_active": bool(motion_path and capture_time_ms > 0),
                 "diagnostics": diagnostics,
             }
             qa_report = None

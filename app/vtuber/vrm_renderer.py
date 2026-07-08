@@ -17,18 +17,13 @@ VRM_RENDERER_GPU = "vrm_mtoon_gpu"
 VRM_TRACK_TYPE = "vrm_avatar"
 VRM_SOURCE_TYPE = "internal_vrm"
 
-_SOFTWARE_ALIASES = {
+_DEFAULT_GPU_ALIASES = {
     "",
     "auto",
-    "software",
-    "software_zbuffer",
-    "software-zbuffer",
-    "zbuffer",
     "mtoon",
     "vrm",
     "vrm_mtoon",
     "vrm-mtoon",
-    VRM_RENDERER_SOFTWARE,
 }
 _GPU_ALIASES = {
     "vrm_gpu",
@@ -36,6 +31,16 @@ _GPU_ALIASES = {
     "vrm_mtoon_gpu",
     "vrm-mtoon-gpu",
     VRM_RENDERER_GPU,
+}
+_DISABLED_SOFTWARE_ALIASES = {
+    "software",
+    "software_zbuffer",
+    "software-zbuffer",
+    "zbuffer",
+    "software_mtoon",
+    "mtoon_software",
+    "vrm_software",
+    VRM_RENDERER_SOFTWARE,
 }
 _PBR_ALIASES = {
     "ar_pbr",
@@ -54,37 +59,42 @@ _PBR_ALIASES = {
 def normalize_vrm_renderer(renderer: Any) -> str:
     """Return the only renderer id allowed to drive VRM Studio output."""
     key = str(renderer or "").strip().casefold().replace(" ", "_")
-    # Until a true VRM/MToon GPU renderer exists, GPU-looking aliases must not
-    # route into the general AR/PBR full-GPU path.
-    if key in _GPU_ALIASES:
-        return VRM_RENDERER_SOFTWARE
-    if key in _SOFTWARE_ALIASES or key in _PBR_ALIASES:
-        return VRM_RENDERER_SOFTWARE
-    return VRM_RENDERER_SOFTWARE
+    if key in _GPU_ALIASES or key in _DEFAULT_GPU_ALIASES:
+        return VRM_RENDERER_GPU
+    if key in _DISABLED_SOFTWARE_ALIASES or key in _PBR_ALIASES:
+        return VRM_RENDERER_GPU
+    return VRM_RENDERER_GPU
 
 
 def vrm_renderer_warnings(renderer: Any) -> list[str]:
     key = str(renderer or "").strip().casefold().replace(" ", "_")
-    if key in _GPU_ALIASES:
-        return [f"vrm_gpu_renderer_not_available_yet:{key}"]
+    if key in _GPU_ALIASES or key in _DEFAULT_GPU_ALIASES:
+        return []
+    if key in _DISABLED_SOFTWARE_ALIASES:
+        return [f"vrm_software_renderer_disabled_rewritten_to_gpu:{key}"]
     if key in _PBR_ALIASES:
         return [f"pbr_renderer_alias_rewritten_for_vrm:{key}"]
-    if key and key not in _SOFTWARE_ALIASES and key not in _GPU_ALIASES:
+    if key and key not in _DEFAULT_GPU_ALIASES and key not in _GPU_ALIASES:
         return [f"unknown_vrm_renderer_rewritten:{key}"]
     return []
 
 
 def vrm_renderer_contract(renderer: Any = None) -> dict[str, Any]:
     normalized = normalize_vrm_renderer(renderer)
+    warnings = vrm_renderer_warnings(renderer)
     return {
         "family": VRM_RENDERER_FAMILY,
         "renderer": normalized,
+        "requested_renderer": str(renderer or ""),
         "render_profile": VRM_RENDER_PROFILE,
         "track_type": VRM_TRACK_TYPE,
         "source_type": VRM_SOURCE_TYPE,
         "pbr_renderer": False,
         "ar_pbr_preview": False,
-        "warnings": vrm_renderer_warnings(renderer),
+        "software_renderer_available": False,
+        "legacy_software_renderer_disabled": True,
+        "renderer_rewritten": bool(warnings),
+        "warnings": warnings,
     }
 
 
@@ -99,14 +109,21 @@ def make_vrm_render_track(
     end_ms: int = 60_000,
 ) -> dict[str, Any]:
     render_map = dict(render or {})
-    renderer = normalize_vrm_renderer(render_map.get("renderer"))
+    requested_renderer = render_map.get("renderer")
+    renderer = normalize_vrm_renderer(requested_renderer)
+    warnings = vrm_renderer_warnings(requested_renderer)
     render_map.update(
         {
             "renderer": renderer,
+            "requested_renderer": str(requested_renderer or ""),
             "renderer_family": VRM_RENDERER_FAMILY,
             "render_profile": VRM_RENDER_PROFILE,
             "pbr_enabled": False,
             "ar_pbr_preview": False,
+            "software_renderer_available": False,
+            "legacy_software_renderer_disabled": True,
+            "renderer_rewritten": bool(warnings),
+            "warnings": warnings,
         }
     )
     return {

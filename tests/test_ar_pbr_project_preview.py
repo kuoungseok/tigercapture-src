@@ -1347,6 +1347,39 @@ def test_project_player_defers_ar_pbr_to_gpu_metadata_when_qimage_enabled(tmp_pa
     assert player._ar_pbr_last_diagnostics["mode"] == "gpu_preview"
 
 
+def test_project_player_depth_view_mode_shows_depth_map_without_compositing(tmp_path, monkeypatch):
+    monkeypatch.delenv("TIGERCAPTURE_AR_PBR_PREVIEW_RENDERER", raising=False)
+    asset = tmp_path / "depth_view.glb"
+    asset.write_bytes(b"placeholder")
+    track = create_preview_ar_track(
+        asset,
+        track_id="ar_pbr_depth_view_001",
+        start_ms=0,
+        duration_ms=1000,
+        image_point=(0.5, 0.5),
+        scale=1.0,
+    )
+    track["occlusion"] = False
+    player = ProjectPlayer()
+    player._state = PlayerState.STOPPED
+    player.set_ar_pbr_tracks([track])
+    player.set_ar_pbr_depth_view_mode("depth_map")
+    base = np.zeros((24, 32, 3), dtype=np.uint8)
+    base[:, :, 0] = np.linspace(0, 255, 32, dtype=np.uint8)[None, :]
+    base[:, :, 1] = np.linspace(255, 0, 24, dtype=np.uint8)[:, None]
+
+    out, meta = player._apply_or_defer_ar_pbr_overlay(base, 10)
+
+    assert meta is None
+    assert out.shape == base.shape
+    assert out.dtype == np.uint8
+    assert not np.array_equal(out, base)
+    diagnostics = player._ar_pbr_last_diagnostics
+    assert diagnostics["preview_renderer_selected"] == "depth_map_only"
+    assert diagnostics["depth_view"]["mode"] == "grayscale"
+    assert diagnostics["depth_view"]["near_is_white"] is True
+
+
 def test_project_player_auto_paused_uses_full_gpu_before_packet(tmp_path, monkeypatch):
     monkeypatch.delenv("TIGERCAPTURE_AR_PBR_PREVIEW_RENDERER", raising=False)
     asset = tmp_path / "tinted_triangle.glb"

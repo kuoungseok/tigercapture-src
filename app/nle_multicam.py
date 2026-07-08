@@ -36,6 +36,13 @@ def _clip_end(clip: Mapping[str, Any]) -> int:
     return _clip_start(clip) + max(0, _int(clip.get("duration_ms"), 0))
 
 
+def _has_sync_value(row: Mapping[str, Any], key: str) -> bool:
+    if key not in row:
+        return False
+    value = row.get(key)
+    return value is not None and str(value).strip() != ""
+
+
 def _angle_id(track: Mapping[str, Any], clip: Mapping[str, Any], index: int) -> str:
     raw = (
         clip.get("camera_id")
@@ -401,20 +408,38 @@ def build_multicam_sync_plan(
         first = angle_clips[0] if angle_clips else {}
         timeline_anchor = _int(first.get("timeline_in_ms"), 0)
         timecode_keys = ("timecode_ms", "source_timecode_ms", "capture_start_ms", "recorded_start_ms")
-        has_timecode = any(key in first and str(first.get(key) or "") != "" for key in timecode_keys)
-        timecode_anchor = next((_int(first.get(key), 0) for key in timecode_keys if key in first and str(first.get(key) or "") != ""), timeline_anchor)
+        has_timecode = any(_has_sync_value(first, key) for key in timecode_keys)
+        timecode_anchor = next((_int(first.get(key), 0) for key in timecode_keys if _has_sync_value(first, key)), timeline_anchor)
+        waveform_keys = (
+            "waveform_sync_peak_ms",
+            "waveform_peak_ms",
+            "audio_waveform_peak_ms",
+            "transient_peak_ms",
+            "audio_fingerprint_anchor_ms",
+        )
+        has_waveform = any(_has_sync_value(first, key) for key in waveform_keys)
+        waveform_anchor = next(
+            (_int(first.get(key), 0) for key in waveform_keys if _has_sync_value(first, key)),
+            timeline_anchor,
+        )
         audio_marker_keys = ("audio_sync_offset_ms", "sync_offset_ms", "slate_offset_ms", "clap_offset_ms")
-        has_audio_marker = any(key in first and str(first.get(key) or "") != "" for key in audio_marker_keys)
-        audio_anchor = timeline_anchor + next((_int(first.get(key), 0) for key in audio_marker_keys if key in first and str(first.get(key) or "") != ""), 0)
+        has_audio_marker = any(_has_sync_value(first, key) for key in audio_marker_keys)
+        audio_anchor = timeline_anchor + next((_int(first.get(key), 0) for key in audio_marker_keys if _has_sync_value(first, key)), 0)
         if normalized_strategy in {"timecode", "tc"} and has_timecode:
             anchor = timecode_anchor
             method = "timecode"
+        elif normalized_strategy in {"waveform", "audio_waveform", "fingerprint"} and has_waveform:
+            anchor = waveform_anchor
+            method = "waveform"
         elif normalized_strategy in {"audio", "audio_marker", "slate", "clap"} and has_audio_marker:
             anchor = audio_anchor
             method = "audio_marker"
         elif normalized_strategy == "hybrid" and has_timecode:
             anchor = timecode_anchor
             method = "timecode"
+        elif normalized_strategy == "hybrid" and has_waveform:
+            anchor = waveform_anchor
+            method = "waveform"
         elif normalized_strategy == "hybrid" and has_audio_marker:
             anchor = audio_anchor
             method = "audio_marker"
@@ -428,9 +453,11 @@ def build_multicam_sync_plan(
                 "track_ids": sorted({_int(row.get("track_id"), 0) for row in angle_clips if _int(row.get("track_id"), 0) > 0}),
                 "timeline_anchor_ms": timeline_anchor,
                 "timecode_anchor_ms": timecode_anchor if has_timecode else None,
+                "waveform_anchor_ms": waveform_anchor if has_waveform else None,
                 "audio_anchor_ms": audio_anchor if has_audio_marker else None,
                 "chosen_anchor_ms": anchor,
                 "sync_method": method,
+                "waveform_available": has_waveform,
             }
         )
     reference = min((_int(row.get("chosen_anchor_ms"), 0) for row in rows), default=0)
@@ -443,7 +470,7 @@ def build_multicam_sync_plan(
     if len(rows) < 2:
         warnings.append("at least two angles are required")
     if methods == ["timeline"]:
-        warnings.append("no timecode/audio-marker metadata found; using current timeline placement")
+        warnings.append("no timecode/waveform/audio-marker metadata found; using current timeline placement")
     return {
         "schema": MULTICAM_SCHEMA,
         "kind": "multicam_sync_plan",
@@ -456,6 +483,74 @@ def build_multicam_sync_plan(
         "angle_sync": rows,
         "warnings": warnings,
         "ready": bool(len(rows) >= 2),
+    }
+
+
+def build_multicam_waveform_sync_board(
+    snapshot: Mapping[str, Any] | None,
+    *,
+    group_id: str = "",
+    strategy: str = "waveform",
+) -> dict[str, Any]:
+    """Return a UI-ready waveform/fingerprint sync review board.
+
+    This consumes already extracted waveform/transient metadata. It does not run
+    heavy media analysis on the UI path, so real waveform extraction can remain
+    a background media/proxy job.
+    """
+
+    sync = build_multicam_sync_plan(snapshot, group_id=group_id, strategy=strategy)
+    rows: list[dict[str, Any]] = []
+    missing = 0
+    for index, row in enumerate(list(sync.get("angle_sync") or [])):
+        if not isinstance(row, Mapping):
+            continue
+        method = str(row.get("sync_method") or "timeline")
+        waveform_available = bool(row.get("waveform_available"))
+        if not waveform_available:
+            missing += 1
+        confidence = 0.9 if method == "waveform" else (0.72 if waveform_available else 0.48)
+        rows.append(
+            {
+                "angle_id": str(row.get("angle_id") or ""),
+                "index": index,
+                "waveform_available": waveform_available,
+                "waveform_anchor_ms": row.get("waveform_anchor_ms"),
+                "chosen_anchor_ms": _int(row.get("chosen_anchor_ms"), 0),
+                "offset_ms": _int(row.get("offset_ms"), 0),
+                "needs_move": bool(row.get("needs_move")),
+                "sync_method": method,
+                "confidence": round(confidence, 3),
+                "tone": "ok" if method == "waveform" else "warning",
+                "recommended_action": "accept" if method == "waveform" else "extract_waveform",
+            }
+        )
+    ready = bool(rows and len(rows) >= 2 and missing == 0)
+    return {
+        "schema": MULTICAM_SCHEMA,
+        "kind": "multicam_waveform_sync_board",
+        "ready": ready,
+        "group_id": str(sync.get("group_id") or group_id or ""),
+        "strategy": str(sync.get("strategy") or strategy),
+        "summary": {
+            "angle_count": len(rows),
+            "waveform_ready_count": sum(1 for row in rows if bool(row.get("waveform_available"))),
+            "missing_waveform_count": missing,
+            "average_confidence": round(sum(float(row.get("confidence") or 0.0) for row in rows) / len(rows), 3) if rows else 0.0,
+        },
+        "rows": rows,
+        "warnings": ["waveform_metadata_missing"] if missing else [],
+        "commands": {
+            "accept_offsets_enabled": ready,
+            "extract_waveforms_enabled": missing > 0,
+            "open_sync_quality_enabled": True,
+            "fallback_timeline_sync_enabled": True,
+        },
+        "readiness": {
+            "waveform_sync_board_ready": ready,
+            "has_waveform_rows": bool(rows),
+            "requires_waveform_extraction": missing > 0,
+        },
     }
 
 
@@ -567,6 +662,340 @@ def build_multicam_switcher_workbench(
     }
 
 
+def build_multicam_switcher_tile_board(
+    snapshot: Mapping[str, Any] | None,
+    *,
+    group_id: str = "",
+    switches: Sequence[Mapping[str, Any]] | None = None,
+    playhead_ms: int = 0,
+    strategy: str = "round_robin",
+) -> dict[str, Any]:
+    """Return a visual multicam switcher board contract.
+
+    This stays UI-neutral but gives the editor enough information to render a
+    Premiere/Final Cut-like angle grid: active tile, armed state, sync badges,
+    keyboard numbers, and export/bake readiness.
+    """
+
+    workbench = build_multicam_switcher_workbench(
+        snapshot,
+        group_id=group_id,
+        switches=switches,
+        playhead_ms=playhead_ms,
+        strategy=strategy,
+    )
+    tiles = [dict(row) for row in list(workbench.get("angle_tiles") or []) if isinstance(row, Mapping)]
+    tile_count = len(tiles)
+    columns = 1 if tile_count <= 1 else (2 if tile_count <= 4 else 3)
+    board_tiles: list[dict[str, Any]] = []
+    for index, tile in enumerate(tiles):
+        board_tiles.append(
+            {
+                "angle_id": str(tile.get("angle_id") or ""),
+                "name": str(tile.get("name") or tile.get("angle_id") or f"Angle {index + 1}"),
+                "row": index // columns,
+                "column": index % columns,
+                "hotkey": str(index + 1),
+                "active": bool(tile.get("active")),
+                "armed": bool(tile.get("armed")),
+                "health": str(tile.get("health") or "unknown"),
+                "sync_badge": str(tile.get("sync_method") or "timeline"),
+                "sync_offset_ms": _int(tile.get("sync_offset_ms"), 0),
+                "track_ids": list(tile.get("track_ids") or []),
+                "clip_count": _int(tile.get("clip_count"), 0),
+                "style": {
+                    "accent": "#ff6a3d" if bool(tile.get("active")) else ("#7c5cff" if bool(tile.get("armed")) else "#2b3144"),
+                    "dimmed": not bool(tile.get("armed")),
+                    "show_safe_border": bool(tile.get("active")),
+                },
+            }
+        )
+    return {
+        "schema": MULTICAM_SCHEMA,
+        "kind": "multicam_switcher_tile_board",
+        "ready": bool(tile_count >= 2 and workbench.get("ready")),
+        "group_id": str(workbench.get("group_id") or group_id or ""),
+        "playhead_ms": _int(workbench.get("playhead_ms"), playhead_ms),
+        "active_angle_id": str(workbench.get("active_angle_id") or ""),
+        "grid": {
+            "columns": columns,
+            "rows": (tile_count + columns - 1) // columns if columns else 0,
+            "tile_count": tile_count,
+        },
+        "tiles": board_tiles,
+        "footer": {
+            "switch_count": _int((workbench.get("switch_plan_summary") or {}).get("switch_count"), 0),
+            "export_decision_count": _int((workbench.get("export_handoff_summary") or {}).get("decision_count"), 0),
+            "ready_for_export_handoff": bool((workbench.get("export_handoff_summary") or {}).get("ready")),
+        },
+        "commands": {
+            "set_active_angle_enabled": tile_count >= 2,
+            "keyboard_switch_enabled": tile_count >= 2,
+            "bake_enabled": bool((workbench.get("commands") or {}).get("bake_enabled")),
+            "export_handoff_enabled": bool((workbench.get("commands") or {}).get("export_handoff_enabled")),
+        },
+    }
+
+
+def build_multicam_switch_review_board(
+    snapshot: Mapping[str, Any] | None,
+    *,
+    group_id: str = "",
+    switches: Sequence[Mapping[str, Any]] | None = None,
+    playhead_ms: int = 0,
+    strategy: str = "round_robin",
+) -> dict[str, Any]:
+    """Return a UI-ready multicam switch review and bake board."""
+
+    snapshot = snapshot if isinstance(snapshot, Mapping) else {}
+    tile_board = build_multicam_switcher_tile_board(
+        snapshot,
+        group_id=group_id,
+        switches=switches,
+        playhead_ms=playhead_ms,
+        strategy=strategy,
+    )
+    bins = build_multicam_angle_bins(snapshot, group_id=group_id)
+    plan = build_multicam_switch_plan(snapshot, group_id=group_id, strategy=strategy)
+    handoff = build_multicam_export_handoff(snapshot, group_id=group_id, switches=switches)
+    segments = [dict(row) for row in list(plan.get("segments") or []) if isinstance(row, Mapping)]
+    decisions = [dict(row) for row in list(handoff.get("decisions") or []) if isinstance(row, Mapping)]
+    review_rows: list[dict[str, Any]] = []
+    for index, row in enumerate(decisions or segments):
+        start = _int(row.get("timeline_in_ms"), 0)
+        end = _int(row.get("timeline_out_ms"), start)
+        review_rows.append(
+            {
+                "index": index,
+                "angle_id": str(row.get("angle_id") or ""),
+                "track_id": _int(row.get("track_id"), 0),
+                "clip_id": _int(row.get("clip_id"), 0),
+                "timeline_in_ms": start,
+                "timeline_out_ms": end,
+                "duration_ms": max(0, end - start),
+                "source_path": str(row.get("source_path") or ""),
+                "active_at_playhead": start <= _int(playhead_ms, 0) < end,
+            }
+        )
+    warnings: list[str] = []
+    if not bool(tile_board.get("ready")):
+        warnings.append("tile_board_not_ready")
+    if not bool(bins.get("ready")):
+        warnings.append("angle_coverage_incomplete")
+    if not bool(handoff.get("ready")):
+        warnings.append("export_handoff_empty")
+    if _int((bins.get("summary") or {}).get("angles_with_gaps"), 0) > 0:
+        warnings.append("angle_gaps_present")
+    return {
+        "schema": MULTICAM_SCHEMA,
+        "kind": "multicam_switch_review_board",
+        "ready": bool(tile_board.get("ready") and handoff.get("ready")),
+        "group_id": str(tile_board.get("group_id") or plan.get("group_id") or group_id or ""),
+        "playhead_ms": max(0, _int(playhead_ms, 0)),
+        "active_angle_id": str(tile_board.get("active_angle_id") or ""),
+        "summary": {
+            "angle_count": _int(tile_board.get("grid", {}).get("tile_count"), 0) if isinstance(tile_board.get("grid"), Mapping) else 0,
+            "switch_count": len(review_rows),
+            "export_decision_count": _int(handoff.get("decision_count"), len(decisions)),
+            "angles_with_gaps": _int((bins.get("summary") or {}).get("angles_with_gaps"), 0),
+            "strategy": str(plan.get("strategy") or strategy),
+        },
+        "sections": [
+            {
+                "id": "angles",
+                "title": "Angle tiles",
+                "rows": list(tile_board.get("tiles") or []),
+            },
+            {
+                "id": "coverage",
+                "title": "Coverage",
+                "rows": list(bins.get("angle_bins") or []),
+            },
+            {
+                "id": "switches",
+                "title": "Switch decisions",
+                "rows": review_rows,
+            },
+        ],
+        "warnings": warnings,
+        "commands": {
+            "keyboard_switch_enabled": bool((tile_board.get("commands") or {}).get("keyboard_switch_enabled")),
+            "set_active_angle_enabled": bool((tile_board.get("commands") or {}).get("set_active_angle_enabled")),
+            "bake_enabled": bool((tile_board.get("commands") or {}).get("bake_enabled")) and bool(handoff.get("ready")),
+            "export_handoff_enabled": bool((tile_board.get("commands") or {}).get("export_handoff_enabled")) and bool(handoff.get("ready")),
+        },
+    }
+
+
+def build_multicam_live_switch_dashboard(
+    snapshot: Mapping[str, Any] | None,
+    *,
+    group_id: str = "",
+    switches: Sequence[Mapping[str, Any]] | None = None,
+    playhead_ms: int = 0,
+    strategy: str = "round_robin",
+) -> dict[str, Any]:
+    """Return one dashboard for multicam live switching and bake/export review."""
+
+    tile_board = build_multicam_switcher_tile_board(
+        snapshot,
+        group_id=group_id,
+        switches=switches,
+        playhead_ms=playhead_ms,
+        strategy=strategy,
+    )
+    review = build_multicam_switch_review_board(
+        snapshot,
+        group_id=group_id,
+        switches=switches,
+        playhead_ms=playhead_ms,
+        strategy=strategy,
+    )
+    sync_quality = build_multicam_sync_quality_board(snapshot, group_id=group_id)
+    waveform = build_multicam_waveform_sync_board(snapshot, group_id=group_id)
+    tiles = [dict(row) for row in list(tile_board.get("tiles") or []) if isinstance(row, Mapping)]
+    decisions: list[dict[str, Any]] = []
+    for section in list(review.get("sections") or []):
+        if isinstance(section, Mapping) and str(section.get("id") or "") == "switches":
+            decisions = [dict(row) for row in list(section.get("rows") or []) if isinstance(row, Mapping)]
+            break
+    ready = bool(tile_board.get("ready") and review.get("ready") and sync_quality.get("ready"))
+    return {
+        "schema": MULTICAM_SCHEMA,
+        "kind": "multicam_live_switch_dashboard",
+        "ready": ready,
+        "group_id": str(tile_board.get("group_id") or review.get("group_id") or group_id or ""),
+        "playhead_ms": max(0, _int(playhead_ms, 0)),
+        "active_angle_id": str(tile_board.get("active_angle_id") or review.get("active_angle_id") or ""),
+        "summary": {
+            "angle_count": len(tiles),
+            "switch_count": len(decisions),
+            "sync_row_count": _int((sync_quality.get("summary") or {}).get("angle_count"), 0),
+            "waveform_ready_count": _int((waveform.get("summary") or {}).get("waveform_ready_count"), 0),
+            "warning_count": len(list(review.get("warnings") or [])) + len(list(waveform.get("warnings") or [])),
+        },
+        "cards": [
+            {"id": "angles", "label": "Angles", "value": len(tiles), "tone": "ok" if len(tiles) >= 2 else "warning"},
+            {"id": "active", "label": "Active angle", "value": str(tile_board.get("active_angle_id") or ""), "tone": "ok"},
+            {"id": "switches", "label": "Switches", "value": len(decisions), "tone": "ok" if decisions else "warning"},
+            {
+                "id": "sync",
+                "label": "Sync",
+                "value": float((sync_quality.get("summary") or {}).get("average_confidence") or 0.0),
+                "tone": "ok" if bool(sync_quality.get("ready")) else "warning",
+            },
+        ],
+        "sections": [
+            {"id": "tiles", "title": "Live Angle Tiles", "rows": tiles},
+            {"id": "switch_decisions", "title": "Switch Decisions", "rows": decisions},
+            {"id": "sync_quality", "title": "Sync Quality", "rows": list(sync_quality.get("rows") or [])},
+            {"id": "waveform", "title": "Waveform Sync", "rows": list(waveform.get("rows") or [])},
+        ],
+        "commands": {
+            "keyboard_switch_enabled": bool((tile_board.get("commands") or {}).get("keyboard_switch_enabled")),
+            "set_active_angle_enabled": bool((tile_board.get("commands") or {}).get("set_active_angle_enabled")),
+            "open_sync_quality_enabled": True,
+            "open_waveform_sync_enabled": True,
+            "bake_enabled": bool((review.get("commands") or {}).get("bake_enabled")),
+            "export_handoff_enabled": bool((review.get("commands") or {}).get("export_handoff_enabled")),
+        },
+        "readiness": {
+            "live_switch_dashboard_ready": ready,
+            "tile_board_ready": bool(tile_board.get("ready")),
+            "review_board_ready": bool(review.get("ready")),
+            "sync_quality_board_ready": bool(sync_quality.get("ready")),
+            "waveform_sync_board_ready": bool((waveform.get("readiness") or {}).get("waveform_sync_board_ready")),
+        },
+    }
+
+
+def build_multicam_sync_quality_board(
+    snapshot: Mapping[str, Any] | None,
+    *,
+    group_id: str = "",
+    strategy: str = "hybrid",
+) -> dict[str, Any]:
+    """Return a UI-ready sync confidence board for multicam angle setup."""
+
+    sync = build_multicam_sync_plan(snapshot, group_id=group_id, strategy=strategy)
+    bins = build_multicam_angle_bins(snapshot, group_id=group_id)
+    bin_by_angle = {
+        str(row.get("angle_id") or ""): row
+        for row in list(bins.get("angle_bins") or [])
+        if isinstance(row, Mapping)
+    }
+    rows: list[dict[str, Any]] = []
+    for index, row in enumerate(list(sync.get("angle_sync") or [])):
+        if not isinstance(row, Mapping):
+            continue
+        angle_id = str(row.get("angle_id") or "")
+        method = str(row.get("sync_method") or "timeline")
+        coverage = bin_by_angle.get(angle_id, {})
+        gap_count = _int(coverage.get("gap_count"), 0)
+        if method == "timecode":
+            confidence = 0.95
+            tone = "ok"
+        elif method == "waveform":
+            confidence = 0.88
+            tone = "ok"
+        elif method == "audio_marker":
+            confidence = 0.82
+            tone = "ok"
+        else:
+            confidence = 0.62
+            tone = "warning"
+        if gap_count:
+            confidence = max(0.2, confidence - min(0.25, gap_count * 0.05))
+            tone = "warning"
+        rows.append(
+            {
+                "angle_id": angle_id,
+                "index": index,
+                "sync_method": method,
+                "offset_ms": _int(row.get("offset_ms"), 0),
+                "needs_move": bool(row.get("needs_move")),
+                "clip_count": _int(row.get("clip_count"), 0),
+                "coverage_ratio": coverage.get("coverage_ratio", 0.0),
+                "gap_count": gap_count,
+                "confidence": round(confidence, 3),
+                "tone": tone,
+                "recommended_action": "accept" if confidence >= 0.8 else "review",
+            }
+        )
+    warnings = list(sync.get("warnings") or [])
+    if any(str(row.get("tone")) == "warning" for row in rows):
+        warnings.append("sync_quality_needs_review")
+    ready = bool(rows and len(rows) >= 2)
+    return {
+        "schema": MULTICAM_SCHEMA,
+        "kind": "multicam_sync_quality_board",
+        "ready": ready,
+        "group_id": str(sync.get("group_id") or group_id or ""),
+        "strategy": str(sync.get("strategy") or strategy),
+        "summary": {
+            "angle_count": len(rows),
+            "sync_methods": list(sync.get("sync_methods") or []),
+            "max_abs_offset_ms": _int(sync.get("max_abs_offset_ms"), 0),
+            "average_confidence": round(sum(float(row.get("confidence") or 0.0) for row in rows) / len(rows), 3) if rows else 0.0,
+            "review_count": sum(1 for row in rows if str(row.get("recommended_action")) == "review"),
+        },
+        "rows": rows,
+        "warnings": sorted({str(row) for row in warnings if str(row or "").strip()}),
+        "commands": {
+            "accept_offsets_enabled": ready,
+            "open_angle_bins_enabled": True,
+            "review_low_confidence_enabled": any(str(row.get("recommended_action")) == "review" for row in rows),
+            "prefer_timecode_enabled": "timecode" in set(sync.get("sync_methods") or []),
+            "prefer_audio_marker_enabled": "audio_marker" in set(sync.get("sync_methods") or []),
+        },
+        "readiness": {
+            "sync_quality_board_ready": ready,
+            "has_confidence_rows": bool(rows),
+            "requires_manual_review": any(str(row.get("recommended_action")) == "review" for row in rows),
+        },
+    }
+
+
 def multicam_contract_evidence(
     snapshot: Mapping[str, Any] | None,
     *,
@@ -582,6 +1011,11 @@ def multicam_contract_evidence(
         "timeline.multicam.set_active_angle",
         "timeline.multicam.angle_bins",
         "timeline.multicam.export_handoff",
+        "timeline.multicam.tile_board",
+        "timeline.multicam.review_board",
+        "timeline.multicam.live_switch_dashboard",
+        "timeline.multicam.sync_quality_board",
+        "timeline.multicam.waveform_sync_board",
     }
     groups = build_multicam_groups(snapshot)
     angle_bins = build_multicam_angle_bins(snapshot)
@@ -589,6 +1023,11 @@ def multicam_contract_evidence(
     plan = build_multicam_switch_plan(snapshot)
     handoff = build_multicam_export_handoff(snapshot)
     workbench = build_multicam_switcher_workbench(snapshot)
+    tile_board = build_multicam_switcher_tile_board(snapshot)
+    review_board = build_multicam_switch_review_board(snapshot)
+    live_dashboard = build_multicam_live_switch_dashboard(snapshot)
+    sync_quality = build_multicam_sync_quality_board(snapshot)
+    waveform_sync = build_multicam_waveform_sync_board(snapshot)
     angle_count = _int(groups.get("angle_count"), 0)
     switch_count = _int(plan.get("switch_count"), 0)
     ok = (
@@ -612,6 +1051,14 @@ def multicam_contract_evidence(
         "sync_plan_ready": bool(sync.get("ready")),
         "sync_methods": list(sync.get("sync_methods") or []),
         "switcher_workbench_ready": bool(workbench.get("ready")),
+        "switcher_tile_board_ready": bool(tile_board.get("ready")) and "timeline.multicam.tile_board" in actions,
+        "switch_review_board_ready": bool(review_board.get("ready")) and "timeline.multicam.review_board" in actions,
+        "live_switch_dashboard_ready": bool((live_dashboard.get("readiness") or {}).get("live_switch_dashboard_ready"))
+        and "timeline.multicam.live_switch_dashboard" in actions,
+        "sync_quality_board_ready": bool((sync_quality.get("readiness") or {}).get("sync_quality_board_ready"))
+        and "timeline.multicam.sync_quality_board" in actions,
+        "waveform_sync_board_ready": bool((waveform_sync.get("readiness") or {}).get("waveform_sync_board_ready"))
+        and "timeline.multicam.waveform_sync_board" in actions,
         "export_handoff_ready": bool(handoff.get("ready")),
         "group_count": _int(groups.get("group_count"), 0),
     }

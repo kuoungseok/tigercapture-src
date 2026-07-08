@@ -151,13 +151,21 @@ NLE positioning:
   `source_record.edit_decision_preview` provides the reviewed insert/overwrite
   decision payload before timeline mutation. `source_record.patch_matrix`
   exposes video/audio patch rows and insert/overwrite command cards for a
-  dedicated Source/Record UI.
+  dedicated Source/Record UI. `source_record.keyboard_overlay` exposes J/K/L
+  transport, mark-in/out, patching, insert/overwrite, and navigation shortcut
+  hints for the same two-monitor UI. `source_record.usability_board` combines
+  those pieces into a UI-ready checklist for a two-monitor Source/Record panel
+  without mutating the timeline.
 - Multicam foundations now exist in the action layer:
   `timeline.multicam.summary`, `timeline.multicam.create_group`,
   `timeline.multicam.switch_plan`, `timeline.multicam.angle_bins`,
-  `timeline.multicam.set_active_angle`, and
-  `timeline.multicam.export_handoff`. This is a group/switch/export-handoff
-  contract, not a full live multicam switcher UI.
+  `timeline.multicam.set_active_angle`, `timeline.multicam.sync_quality_board`,
+  `timeline.multicam.waveform_sync_board`, and
+  `timeline.multicam.live_switch_dashboard`, and
+  `timeline.multicam.export_parity_board` / `timeline.multicam.export_handoff`.
+  This is a group/switch/export-handoff
+  contract with live dashboard, sync-confidence, and cached waveform/transient
+  review state, not a full Premiere/Resolve live multicam switcher UI.
 - Product-facing NLE workbench state now exists in the action layer:
   `source_record.workbench` summarizes Source/Record monitor command
   enablement, patching, and edit navigation; `project_bin.workbench` summarizes
@@ -165,15 +173,51 @@ NLE positioning:
   `project_bin.batch_plan` adds a read-only relink/proxy/conform review plan;
   `project_bin.conform_report` checks timeline clip source paths against Media
   Pool rows for path/name/ambiguous/missing matches;
+  `project_bin.relink_candidate_board` exposes file-by-file relink choices for
+  exact, name-only, ambiguous, missing, and offline sources;
   `project_bin.proxy_plan` exposes preview proxy policy, usable proxies, and
   regeneration queues; `project_bin.proxy_health` exposes product-facing proxy
   health cards, safe background regeneration state, and stale/missing/offline
-  review signals.
+  review signals; `project_bin.offline_browser` exposes offline/missing media
+  and relink review state; `project_bin.proxy_regeneration_board` exposes
+  reviewed proxy job batches for long-project workflows;
+  `project_bin.proxy_conflict_board` separates safe background proxy jobs from
+  offline blockers, duplicate media paths, and review-only proxy conflicts;
+  `project_bin.search_filter_model` exposes product-bin search/filter chips,
+  metadata columns, and filtered media rows. `project_bin.proxy_apply_review_board`
+  and `project_bin.conform_apply_review_board` expose the reviewed apply layer
+  for proxy regeneration and conform/relink batches, so UI can show what will
+  change before jobs run.
+- Final Cut-style visual timeline feedback now exists in the action layer:
+  `timeline.connected_clips.anchor_overlay` returns anchor-line descriptors for
+  connected clips, `timeline.role_lanes.filter_model` returns visible/hidden
+  role-filter clip sets, and `timeline.magnetic_storyline.drag_preview` returns
+  a non-mutating snap/push/collision preview for magnetic drags. The adapter
+  lives in `app/actions/editor_adapter_nle_visual.py`, registration lives in
+  `app/actions/nle_visual_namespace.py`, and pure contracts live in
+  `app/nle_visual_feedback.py`. The first Qt timeline paint integration is
+  separate from the action layer: `app/timeline_nle_visual_overlay.py` converts
+  cue metadata into reusable connected-anchor and drag-preview drawing helpers
+  consumed by `app/timeline_track_row_paint.py`. `timeline.role_lanes.focus`
+  is still a normal registered action, but the adapter now pushes the focused
+  role into live `TrackRow.set_focused_clip_role(...)` instances so the timeline
+  dims non-matching clip roles immediately. The compact role filter bar in
+  `app/video_editor_nle_role_panel.py` consumes the same filter model and routes
+  user clicks back through `timeline.role_lanes.focus`, keeping the UI surface
+  aligned with MCP/Python Action state. Cross-row connected-clip curves are
+  painted by `app/timeline_connected_anchor_overlay_widget.py` from the
+  `timeline.connected_clips.anchor_overlay` contract, so the visual overlay
+  remains an action-backed view instead of a private timeline-only rule.
+- Audition/take UI also has an action-backed visual model:
+  `app/nle_audition_visuals.py` converts `timeline.audition.compare` results
+  into compact take cards, and `app/video_editor_nle_audition_workflow.py`
+  uses those cards while applying switch/rename/remove through the registered
+  `timeline.audition.*` actions.
 - Multicam workbench actions now include `timeline.multicam.sync_plan`,
   `timeline.multicam.angle_bins`, and `timeline.multicam.switcher_workbench`,
   giving the future switcher UI angle bins, coverage/gap diagnostics, angle
-  tiles, active-angle state, sync offsets, and export handoff readiness without
-  claiming a full live switcher.
+  tiles, active-angle state, sync offsets, sync quality confidence, and export
+  handoff readiness without claiming a full live switcher.
 - `timeline.professional_nle_readiness` and `tools/qa_nle_readiness.py` keep a
   conservative claim gate. The current report can pass QA while still returning
   `professional_nle_claim_ok=false`, because the product is not yet a full
@@ -181,15 +225,68 @@ NLE positioning:
 - `timeline.nle_fuzzer.status` exposes `tools/qa_timeline_fuzzer.py` output as
   undo/edge-case readiness evidence, including required edit operations,
   failures, undo depth, linked audio, and actor-lane coverage.
+- `timeline.core_action_coverage` exposes a grouped coverage matrix for core
+  NLE edit, clipboard/insert, Source/Record, Project Bin, storyline, multicam,
+  and undo/recovery actions.
+- `timeline.nle_core_safety_matrix` exposes the safety layer that must stay
+  visible for NLE claims: dry-run preview, destructive confirmation, undo
+  recovery, and real-corpus claim gates.
 - `timeline.undo_health` exposes the same fuzzer evidence as UI-ready
   operation coverage rows, risk cards, blockers, and rerun/failure-report
   command enablement for undo/edge-case QA panels.
+- `timeline.undo_recovery_playbook` exposes a UI-ready recovery plan for undo
+  and destructive-edit failures: rerun fuzzer, inspect gaps, replay undo/redo,
+  verify autosave/reopen, and copy reproduction steps.
+- `timeline.undo_stability_dashboard` combines fuzzer status, undo health,
+  review-board rows, and recovery steps into one UI-ready QA dashboard for
+  coverage cards, blocker rows, and rerun/recovery commands.
+- `timeline.undo_long_session_plan` turns undo/recovery checks into a
+  repeatable long-session rehearsal plan that still requires real project
+  execution before clearing professional-NLE claim gates.
+- `timeline.storyline_gesture_polish_board` exposes Final Cut-style gesture
+  polish readiness for anchor overlays, role filters, magnetic drag preview,
+  audition cards, and role focus. It is evidence for implementation depth, not
+  a replacement for real editor gesture QA.
 - Real long-project corpus evidence is tracked separately from generated QA
-  fixtures through `tools/register_nle_real_project.py`,
+  fixtures through `tools/discover_nle_real_projects.py`,
+  `tools/register_nle_real_project.py`,
   `tools/qa_nle_real_project_corpus.py`, and the read-only
-  `nle.real_corpus.status` action. Synthetic stress evidence can improve
-  implementation confidence, but it must not clear the real-world corpus claim
-  gate.
+  `nle.real_corpus.status` / `nle.real_corpus.discover` /
+  `nle.real_corpus.intake_board` / `nle.real_corpus.collection_kit` /
+  `nle.real_corpus.gate_board` / `nle.real_corpus.workbench` /
+  `nle.real_corpus.validation_plan` /
+  `nle.real_corpus.validation_packet` /
+  `nle.real_corpus.validation_preflight` /
+  `nle.real_corpus.validation_report`
+  actions. `nle.real_corpus.gate_board` is the combined product board for claim
+  blockers, candidate registration, validation gaps, validation-ready projects,
+  and rerun commands; it does not clear the professional claim gate by itself.
+  `nle.real_corpus.workbench` wraps discovery, preflight, validation, cards,
+  primary next action, QA commands, and action sequence into one UI-ready
+  payload.
+  `nle.real_corpus.validation_packet` is the project-specific operator packet
+  with required/optional checks, redaction rules, manual steps, and reviewed
+  action/CLI templates. `nle.real_corpus.validation_preflight` performs only
+  machine prerequisite checks and leaves required evidence rows pending until an
+  operator records actual results; the CLI companion is
+  `tools/qa_nle_real_project_preflight.py`. Redacted operator evidence for registered projects is written
+  through `nle.real_corpus.validation_evidence.register`, covering open/reopen,
+  scrub sampling, proxy/relink health, undo/recovery, representative short
+  export, and nested/proxy edge-case checks. Synthetic stress evidence can
+  improve implementation confidence, but it must not clear the real-world
+  corpus claim gate.
+- The official real-corpus QA path requires validation evidence by default.
+  `tools/qa_nle_real_project_corpus.py --metric-only` is diagnostic only; AI,
+  MCP, release readiness, and marketing copy must use the stricter default that
+  requires registered validation evidence.
+- `timeline.nle_target_gap` computes a target-score board from the current NLE
+  readiness report. It is read-only and exists to explain why 95/100 cannot be
+  treated as safe professional-NLE parity while `real_world_long_project_corpus`
+  remains blocked.
+- `nle.real_corpus.collection_kit` includes `validation.cli_examples` for the
+  companion `tools/register_nle_real_project_validation.py` CLI, so product UI
+  and local agents can show copy-ready validation registration commands without
+  inventing command syntax.
 - Remaining honest gaps before claiming full NLE parity:
   dedicated source-monitor / record-monitor UI is still shallow; live multicam
   switcher UI, deeper proxy/media management, conform, relink, metadata editing,
@@ -207,6 +304,12 @@ Registered actions:
 - `project_bin.conform_report`
 - `project_bin.proxy_plan`
 - `project_bin.proxy_health`
+- `project_bin.review_board`
+- `project_bin.offline_browser`
+- `project_bin.relink_candidate_board`
+- `project_bin.proxy_regeneration_board`
+- `project_bin.proxy_conflict_board`
+- `project_bin.search_filter_model`
 - `timeline.summary`
 - `timeline.nle_status`
 - `preset.catalog`
@@ -274,9 +377,41 @@ Registered actions:
 - `timeline.three_point_insert`
 - `timeline.three_point_overwrite`
 - `timeline.professional_nle_readiness`
+- `timeline.nle_target_gap`
 - `nle.real_corpus.status`
+- `nle.real_corpus.discover`
+- `nle.real_corpus.intake_board`
+- `nle.real_corpus.collection_kit`
+- `nle.real_corpus.gate_board`
+- `nle.real_corpus.workbench`
+- `nle.real_corpus.validation_plan`
+- `nle.real_corpus.validation_packet`
+- `nle.real_corpus.validation_preflight`
+- `nle.real_corpus.validation_report`
+- `nle.real_corpus.validation_evidence.register`
 - `timeline.nle_fuzzer.status`
+- `timeline.core_action_coverage`
 - `timeline.undo_health`
+- `timeline.undo_review_board`
+- `timeline.undo_recovery_playbook`
+- `timeline.undo_stability_dashboard`
+- `timeline.magnetic_storyline.status`
+- `timeline.magnetic_storyline.apply`
+- `timeline.magnetic_storyline.drag_preview`
+- `timeline.connected_clips.status`
+- `timeline.connected_clips.connect`
+- `timeline.connected_clips.anchor_overlay`
+- `timeline.role_colors.status`
+- `timeline.role_lanes.status`
+- `timeline.role_lanes.focus`
+- `timeline.role_lanes.filter_model`
+- `timeline.clip_role.set`
+- `timeline.auditions.status`
+- `timeline.audition.compare`
+- `timeline.audition.add_take`
+- `timeline.audition.switch_take`
+- `timeline.audition.rename_take`
+- `timeline.audition.remove_take`
 - `timeline.multicam.summary`
 - `timeline.multicam.create_group`
 - `timeline.multicam.sync_plan`
@@ -284,6 +419,10 @@ Registered actions:
 - `timeline.multicam.angle_bins`
 - `timeline.multicam.set_active_angle`
 - `timeline.multicam.switcher_workbench`
+- `timeline.multicam.tile_board`
+- `timeline.multicam.review_board`
+- `timeline.multicam.sync_quality_board`
+- `timeline.multicam.waveform_sync_board`
 - `timeline.multicam.export_handoff`
 - `source_monitor.state`
 - `source_monitor.load_media`
@@ -293,6 +432,9 @@ Registered actions:
 - `source_record.workbench`
 - `source_record.edit_decision_preview`
 - `source_record.patch_matrix`
+- `source_record.monitor_layout`
+- `source_record.apply_board`
+- `source_record.keyboard_overlay`
 - `record_monitor.state`
 - `record_monitor.set_in`
 - `record_monitor.set_out`
@@ -363,11 +505,16 @@ Registered actions:
 - `audio.clip.trim`
 - `audio.clip.delete`
 - `audio.clip.set_gain`
+- `audio.track.set_mix`
+- `audio.track.set_volume`
+- `audio.track.set_pan`
+- `audio.track.mute`
+- `audio.track.solo`
+- `audio.mixer.state`
 - `audio.sound_editor.jog_shuttle.state`
 - `audio.sound_editor.jog_shuttle.set`
 - `audio.sound_editor.advanced_lab.state`
 - `audio.sound_editor.advanced_lab.set`
-- `audio.track.set_mix`
 - `clip.set_filter`
 - `clip.set_color_grade`
 - `transition.apply`
@@ -751,6 +898,11 @@ settings.*
 - `project_bin.conform_report`
 - `project_bin.proxy_plan`
 - `project_bin.proxy_health`
+- `project_bin.review_board`
+- `project_bin.offline_browser`
+- `project_bin.relink_candidate_board`
+- `project_bin.proxy_regeneration_board`
+- `project_bin.proxy_conflict_board`
 - `media.relink.plan`
 - `media.relink.apply`
 
@@ -801,9 +953,24 @@ settings.*
 - `timeline.three_point_insert`
 - `timeline.three_point_overwrite`
 - `timeline.professional_nle_readiness`
+- `timeline.nle_target_gap`
 - `nle.real_corpus.status`
+- `nle.real_corpus.discover`
+- `nle.real_corpus.intake_board`
+- `nle.real_corpus.collection_kit`
+- `nle.real_corpus.gate_board`
+- `nle.real_corpus.workbench`
+- `nle.real_corpus.validation_plan`
+- `nle.real_corpus.validation_packet`
+- `nle.real_corpus.validation_preflight`
+- `nle.real_corpus.validation_report`
+- `nle.real_corpus.validation_evidence.register`
 - `timeline.nle_fuzzer.status`
+- `timeline.core_action_coverage`
 - `timeline.undo_health`
+- `timeline.undo_review_board`
+- `timeline.undo_recovery_playbook`
+- `timeline.undo_stability_dashboard`
 - `timeline.multicam.summary`
 - `timeline.multicam.create_group`
 - `timeline.multicam.sync_plan`
@@ -811,6 +978,10 @@ settings.*
 - `timeline.multicam.angle_bins`
 - `timeline.multicam.set_active_angle`
 - `timeline.multicam.switcher_workbench`
+- `timeline.multicam.tile_board`
+- `timeline.multicam.review_board`
+- `timeline.multicam.sync_quality_board`
+- `timeline.multicam.waveform_sync_board`
 - `timeline.multicam.export_handoff`
 - `source_monitor.state`
 - `source_monitor.load_media`
@@ -820,6 +991,9 @@ settings.*
 - `source_record.workbench`
 - `source_record.edit_decision_preview`
 - `source_record.patch_matrix`
+- `source_record.monitor_layout`
+- `source_record.apply_board`
+- `source_record.keyboard_overlay`
 - `record_monitor.state`
 - `record_monitor.set_in`
 - `record_monitor.set_out`
@@ -915,6 +1089,11 @@ Current registered audio action surface, verified against `ActionRegistry` on
 - `audio.separate_stems`
 - `audio.export_clip`
 - `audio.track.set_mix`
+- `audio.track.set_volume`
+- `audio.track.set_pan`
+- `audio.track.mute`
+- `audio.track.solo`
+- `audio.mixer.state`
 
 The renewed Sound Editor UI mutates `AudioClip.effects` through
 `SoundEditorPanel` / `SoundEditorDockWindow`. The action layer can now focus the
@@ -925,6 +1104,14 @@ for Basic/EQ/Dynamics/FX/Advanced state, `audio.sound_editor.apply_ai_preset`
 for AI Master presets, `audio.loudness_report` for waveform-cache diagnostics,
 `audio.separate_stems` for vocals/instrumental separation, and `audio.export_clip`
 for edited clip export planning or rendering.
+
+2026-07-08 mixer automation update: the Workbench Sound Editor also exposes a
+Mixer tab backed by real `AudioTrack` state. Local AI and review automation can
+use `audio.track.set_volume`, `audio.track.set_pan`, `audio.track.mute`,
+`audio.track.solo`, and read `audio.mixer.state` (`tigerstudio.audio.mixer.v1`)
+to inspect volume, pan, mute, solo, bus, clip count, and audible state. Track
+mute/solo is persisted in project files, participates in undo snapshots, drives
+the timeline mixer UI, and is honored by preview volume and FFmpeg export.
 
 ### Color, VFX, Masks, and Nodes
 

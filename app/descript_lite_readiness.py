@@ -189,8 +189,17 @@ def _area_text_based_timeline(root: Path) -> ReadinessArea:
             ReadinessCheck(
                 "undo_redo_cut_apply",
                 "Text-driven destructive edits are one undoable timeline operation",
-                _file_contains(root, "app/video_editor_window.py", ("_apply_ai_script_edit_cuts", "_register_change(\"AI Script Edit ripple cuts\")")),
-                "Video editor cut materialization path records an undo entry.",
+                _file_contains(
+                    root,
+                    "app/video_editor_ai_workflow.py",
+                    ("def _apply_ai_script_edit_cuts", "_register_change(\"AI Script Edit ripple cuts\")"),
+                )
+                and _file_contains(
+                    root,
+                    "app/video_editor_history_workflow.py",
+                    ("capture_editor_snapshot", "self._history.push"),
+                ),
+                "Focused AI workflow materializes reviewed cuts and records one editor history snapshot.",
             ),
             ReadinessCheck(
                 "panel_owned_transcript_editor",
@@ -367,7 +376,7 @@ def build_descript_lite_readiness_report(root: str | Path = ".") -> dict[str, An
         },
         "next_actions": next_actions,
         "positioning": {
-            "safe_now": "AI Script Edit MVP with reviewed apply and Claude-backed smart-edit corpus evidence.",
+            "safe_now": "AI Script Edit MVP with reviewed apply, transcript-driven cuts, cleanup, and local corpus evidence.",
             "descript_lite_gate": "Do not claim Descript-lite until priorities 1-3 are claim_ready.",
             "price_defense_gate": "Do not use $149+ Descript-style value defense until priorities 1-5 are claim_ready.",
         },

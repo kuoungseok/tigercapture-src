@@ -26,6 +26,7 @@ a = Analysis(
         ('app/locales/*.py', 'app/locales'),
         ('resources/tigercapture.ico', 'resources'),
         ('resources/luts/*.cube', 'resources/luts'),
+        ('resources/ui/sound_editor/*.png', 'resources/ui/sound_editor'),
     ] + extra_datas,
     hiddenimports=[
         # Locales are loaded dynamically from a string lookup, so each

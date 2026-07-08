@@ -414,12 +414,13 @@ def _ar_pbr_camera_solution_for_tracks(self, width: int, height: int, active: li
     return self._default_ar_pbr_camera_solution(width, height)
 
 def _ar_pbr_depth_frame_for_tracks(self, rgb: np.ndarray, pos_ms: int, active: list[dict]):
+    depth_view_enabled = self._ar_pbr_depth_view_mode() != "off"
     wants_occlusion = any(
         bool(track.get("occlusion"))
         for track in active
         if isinstance(track, dict)
     )
-    if self._state is PlayerState.PLAYING and not wants_occlusion:
+    if self._state is PlayerState.PLAYING and not wants_occlusion and not depth_view_enabled:
         return None
     for track in active:
         source_id = str(track.get("depth_source_id") or "") if isinstance(track, dict) else ""
@@ -428,12 +429,12 @@ def _ar_pbr_depth_frame_for_tracks(self, rgb: np.ndarray, pos_ms: int, active: l
         try:
             from app.depth.cache import load_depth_frame
 
-            depth = load_depth_frame(source_id, int(pos_ms))
+            depth = load_depth_frame(source_id, int(pos_ms), allow_nearest_ms=80)
             if depth is not None:
                 return depth
         except Exception:
             pass
-    wants_depth = any(
+    wants_depth = depth_view_enabled or any(
         bool(track.get("occlusion"))
         or str(((track.get("placement") or {}) if isinstance(track, dict) else {}).get("mode") or "").casefold()
         in {"road_plane_anchor", "plane_anchor", "screen_plane", "scene_anchor"}
@@ -442,12 +443,12 @@ def _ar_pbr_depth_frame_for_tracks(self, rgb: np.ndarray, pos_ms: int, active: l
     )
     if not wants_depth:
         return None
-    if self._state is PlayerState.PLAYING and not self._ar_pbr_realtime_depth_enabled():
+    if self._state is PlayerState.PLAYING and not self._ar_pbr_realtime_depth_enabled() and not depth_view_enabled:
         return None
     try:
-        from app.depth.estimator import estimate_depth_from_luma
+        from app.depth.estimator import estimate_depth
 
-        depth, _diag = estimate_depth_from_luma(rgb, source_id="preview_runtime", time_ms=int(pos_ms))
+        depth, _diag = estimate_depth(rgb, source_id="preview_runtime", time_ms=int(pos_ms))
         return depth
     except Exception:
         return None
@@ -467,6 +468,30 @@ def _ar_pbr_preview_renderer_mode() -> str:
         return preview_renderer_mode_from_env()
     except Exception:
         return "auto"
+
+def _ar_pbr_depth_view_mode(self) -> str:
+    from app.ar_pbr.depth_view import normalize_depth_view_mode
+
+    value = getattr(self, "_ar_pbr_depth_view_mode_value", None)
+    if value is None:
+        try:
+            import os
+
+            value = os.environ.get("TIGERCAPTURE_AR_PBR_DEPTH_VIEW", "")
+        except Exception:
+            value = ""
+    return normalize_depth_view_mode(value)
+
+def set_ar_pbr_depth_view_mode(self, mode: str = "off") -> str:
+    from app.ar_pbr.depth_view import normalize_depth_view_mode
+
+    canonical = normalize_depth_view_mode(mode)
+    self._ar_pbr_depth_view_mode_value = canonical
+    self._last_preview_frame_cache = None
+    return canonical
+
+def ar_pbr_depth_view_mode(self) -> str:
+    return self._ar_pbr_depth_view_mode()
 
 def _ar_pbr_should_use_full_gpu_preview(self) -> bool:
     from app.ar_pbr.preview_pipeline import should_use_full_gpu_preview
@@ -532,6 +557,47 @@ def _ar_pbr_preview_context(self, rgb: np.ndarray, pos_ms: int) -> dict | None:
             "errors": [f"{type(exc).__name__}: {exc}"],
         }
         return None
+
+def _ar_pbr_depth_view_frame(self, rgb: np.ndarray, context: Mapping, pos_ms: int) -> np.ndarray | None:
+    mode = self._ar_pbr_depth_view_mode()
+    if mode == "off":
+        return None
+    try:
+        from app.ar_pbr.depth_view import depth_frame_to_rgb
+
+        depth_rgb, diagnostics = depth_frame_to_rgb(
+            context.get("depth_frame"),
+            int(context.get("width") or rgb.shape[1]),
+            int(context.get("height") or rgb.shape[0]),
+            mode=mode,
+        )
+        merged = {
+            "ok": bool(diagnostics.get("ok")),
+            "mode": "depth_view",
+            "preview_renderer_selected": "depth_map_only",
+            "depth_view": diagnostics,
+            "active_track_count": len(list(context.get("active_tracks") or [])),
+        }
+        runtime_diags = list(context.get("runtime_diagnostics") or [])
+        if runtime_diags:
+            merged["runtime_scene_anchor"] = runtime_diags
+        if depth_rgb is None:
+            merged["fallback"] = True
+            merged["errors"] = [str(diagnostics.get("reason") or "depth frame unavailable")]
+            self._ar_pbr_last_diagnostics = merged
+            return rgb
+        merged["fallback"] = False
+        self._ar_pbr_last_diagnostics = merged
+        return depth_rgb
+    except Exception as exc:
+        self._ar_pbr_last_diagnostics = {
+            "ok": False,
+            "fallback": True,
+            "mode": "depth_view",
+            "preview_renderer_selected": "depth_map_only",
+            "errors": [f"{type(exc).__name__}: {exc}"],
+        }
+        return rgb
 
 def _ar_pbr_software_settings(self, active_tracks: list[dict], renderer: str = "software_pbr") -> dict:
     descriptors = self._ar_pbr_asset_descriptors(active_tracks)
@@ -633,6 +699,9 @@ def _apply_or_defer_ar_pbr_overlay(self, rgb: np.ndarray, pos_ms: int) -> tuple[
     context = self._ar_pbr_preview_context(rgb, pos_ms)
     if context is None:
         return rgb, None
+    depth_view_rgb = self._ar_pbr_depth_view_frame(rgb, context, pos_ms)
+    if depth_view_rgb is not None:
+        return depth_view_rgb, None
     active_runtime = list(context.get("active_tracks") or [])
     preview_renderer = self._ar_pbr_preview_renderer_mode()
     if preview_renderer == "off":
@@ -761,4 +830,3 @@ def _apply_or_defer_ar_pbr_overlay(self, rgb: np.ndarray, pos_ms: int) -> tuple[
         context=context,
         renderer=fallback_renderer,
     ), None
-

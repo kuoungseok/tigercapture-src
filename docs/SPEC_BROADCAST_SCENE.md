@@ -117,10 +117,13 @@ Implemented:
   `tools/qa_broadcast_platform_e2e.py`. The tool can generate local
   Record-to-file FFmpeg evidence, Live2D Program Output Record-to-file
   evidence, and capture/composite evidence automatically, while RTMP ingest and
-  Discord/video-call checks remain explicit manual platform evidence slots.
+  YouTube private/unlisted viewer playback remain explicit required manual
+  platform evidence slots. Discord/video-call checks are optional evidence for
+  that specific output claim.
   Redacted manual evidence can be registered with
   `tools/register_broadcast_platform_evidence.py --check-id private_rtmp_ingest`
-  or `--check-id discord_window_share --confirm-redacted`.
+  or `--check-id youtube_unlisted_viewer_playback --confirm-redacted`. Optional
+  video-call evidence can still use `--check-id discord_window_share`.
 - Operator-facing broadcast evidence checklist through
   `app.broadcast_platform_e2e.build_broadcast_platform_evidence_checklist`,
   the `broadcast.platform_evidence_checklist` Python Action, and the shared
@@ -135,11 +138,15 @@ Implemented:
 - Redacted evidence registration through
   `broadcast.platform_evidence.register`, which wraps
   `register_manual_platform_evidence` and requires `confirm_redacted=true`.
-  The action rejects secret-like notes/paths and should only be used after a
-  real private RTMP or Discord/window-share check has been completed. The
+  Automation can call read-only `broadcast.platform_evidence.preflight` before
+  registration to get the same warning that VTuber Studio and the CLI show.
+  The action rejects secret-like notes/paths and direct YouTube watch/preview
+  URLs (`youtube.com/watch`, `youtu.be`, `youtube.com/live`, and YouTube Studio
+  live/preview URLs). It should only be used after real private RTMP and
+  YouTube viewer playback checks have been completed. The
   shared `VTuberBroadcastStudioWindow` exposes this as Register RTMP/Register
-  Discord buttons that open a redaction-confirming form instead of showing raw
-  JSON or asking users to run a command manually.
+  YouTube View buttons that open a redaction-confirming form instead of showing
+  raw JSON or asking users to run a command manually.
 - VTuber Studio `Live Target` controls that can start/stop the session and feed
   `ProjectPlayer.gpu_frame_ready` RGB frames into the output session.
 - Live audio input routing for FFmpeg sessions:
