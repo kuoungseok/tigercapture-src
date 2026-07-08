@@ -52,6 +52,7 @@ def _color_page_spec() -> catalog.PageSpec:
 
 
 def _write_image(path: Path, size: tuple[int, int]) -> Path:
+    path.parent.mkdir(parents=True, exist_ok=True)
     Image.new("RGB", size, (20, 24, 28)).save(path)
     return path
 
@@ -89,11 +90,15 @@ def _write_vtuber_contract(
     gpu_renderer_used: bool = True,
     ar_pbr: bool = False,
     pbr: bool = False,
+    inputs: dict[str, str] | None = None,
+    catalog_outputs: dict[str, str] | None = None,
+    catalog_output_sha256: dict[str, str] | None = None,
 ) -> Path:
     path.write_text(
         json.dumps(
             {
                 "schema": "tigercapture.review_vtuber_studio_capture.v1",
+                "inputs": inputs or {},
                 "avatar_evidence": {
                     "schema": "tigercapture.review_vtuber.avatar_evidence_contract.v1",
                     "source_mapping_subject": "trump_upper_body_performance_source",
@@ -111,6 +116,8 @@ def _write_vtuber_contract(
                     "ar_pbr_used": ar_pbr,
                     "pbr_used": pbr,
                 },
+                "catalog_outputs": catalog_outputs or {},
+                "catalog_output_sha256": catalog_output_sha256 or {},
             }
         ),
         encoding="utf-8",
@@ -204,6 +211,89 @@ def test_vtuber_contract_rejects_software_vrm_renderer(tmp_path):
 
     assert not ok
     assert "GPU renderer" in reason
+
+
+def _vtuber_required_inputs() -> dict[str, str]:
+    return {
+        "trump_performance_source": r"C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\trump_oval_office_live_GnzWEo_HfE0.mp4",
+        "program_output_background": r"C:\Users\artmouse\Videos\TigerCapture\YouTube Imports\South Korea 4K Drone Video ｜ Seoul, Busan, Songdo Cinematic Aerials [AA-sv3ilNBE].mp4",
+        "vrm_avatar_target": r"E:\ClaudeCodeApp\GifCam\external\assets\vtuber\booth_milica\Milica1.3free\Milica_v1.3.vrm",
+    }
+
+
+def test_vtuber_asset_contract_accepts_bound_program_output(tmp_path):
+    image_path = _write_image(tmp_path / "vtuber_program_output_action.png", (820, 460))
+    contract_path = _write_vtuber_contract(
+        tmp_path / "vtuber_capture_contract.json",
+        inputs=_vtuber_required_inputs(),
+        catalog_outputs={"vtuber_studio_program_output": str(image_path)},
+        catalog_output_sha256={"vtuber_studio_program_output": catalog._image_sha256(image_path)},
+    )
+
+    ok, reason = catalog._vtuber_asset_contract_is_ready(
+        "vtuber_studio_program_output",
+        image_path,
+        contract_path=contract_path,
+    )
+
+    assert ok, reason
+
+
+def test_vtuber_asset_contract_rejects_unbound_substitution(tmp_path):
+    contract_image = _write_image(tmp_path / "vtuber_program_output_action.png", (820, 460))
+    slide_image = _write_image(tmp_path / "other_program_output_action.png", (820, 460))
+    contract_path = _write_vtuber_contract(
+        tmp_path / "vtuber_capture_contract.json",
+        inputs=_vtuber_required_inputs(),
+        catalog_outputs={"vtuber_studio_program_output": str(contract_image)},
+        catalog_output_sha256={"vtuber_studio_program_output": catalog._image_sha256(contract_image)},
+    )
+
+    ok, reason = catalog._vtuber_asset_contract_is_ready(
+        "vtuber_studio_program_output",
+        slide_image,
+        contract_path=contract_path,
+    )
+
+    assert not ok
+    assert "not the slide source" in reason
+
+
+def test_vtuber_asset_contract_rejects_ar_pbr_camera_contamination(tmp_path):
+    image_path = _write_image(tmp_path / "polyhaven_pbr_camera_scene" / "Camera_01_1k.png", (820, 460))
+    contract_path = _write_vtuber_contract(
+        tmp_path / "vtuber_capture_contract.json",
+        inputs=_vtuber_required_inputs(),
+        catalog_outputs={"vtuber_studio_program_output": str(image_path)},
+        catalog_output_sha256={"vtuber_studio_program_output": catalog._image_sha256(image_path)},
+    )
+
+    ok, reason = catalog._vtuber_asset_contract_is_ready(
+        "vtuber_studio_program_output",
+        image_path,
+        contract_path=contract_path,
+    )
+
+    assert not ok
+    assert "forbidden non-VTuber" in reason
+
+
+def test_vtuber_asset_contract_rejects_missing_hash_binding(tmp_path):
+    image_path = _write_image(tmp_path / "vtuber_program_output_action.png", (820, 460))
+    contract_path = _write_vtuber_contract(
+        tmp_path / "vtuber_capture_contract.json",
+        inputs=_vtuber_required_inputs(),
+        catalog_outputs={"vtuber_studio_program_output": str(image_path)},
+    )
+
+    ok, reason = catalog._vtuber_asset_contract_is_ready(
+        "vtuber_studio_program_output",
+        image_path,
+        contract_path=contract_path,
+    )
+
+    assert not ok
+    assert "catalog_output_sha256" in reason
 
 
 def test_multi_monitor_center_rejects_weak_autostamped_contract(tmp_path):
