@@ -97,6 +97,7 @@ def test_sound_editor_dock_window_keeps_full_mixer_context(tmp_path: Path) -> No
     assert panel._mixer_strips[3]._name.text().startswith("Music")
     masters = [child for child in panel.findChildren(QWidget, "SoundMixerMasterStrip") if not child.isHidden()]
     assert len(masters) == 1
+    assert masters[0].findChild(QWidget, "SoundMixerStereoVu") is not None
     assert panel._mixer_strips[2]._title.text() == "A1"
 
 
@@ -439,4 +440,7 @@ def test_sound_editor_mixer_tab_edits_track_strips(tmp_path: Path) -> None:
     assert panel._mixer_strips[4]._name.text().startswith("Music")
     masters = [child for child in panel.findChildren(QWidget, "SoundMixerMasterStrip") if not child.isHidden()]
     assert len(masters) == 1
+    vu = masters[0].findChild(QWidget, "SoundMixerStereoVu")
+    assert vu is not None
+    assert not vu.grab().isNull()
     assert changed[-1] == 4

@@ -248,6 +248,11 @@ def _capture_sound_mixer_tab(
         if child.objectName() == "SoundMixerStrip"
     ]
     checks["mixer_tab_channel_strips_visible"] = len([row for row in strips if row.isVisible()]) >= 2
+    vu_meters = [
+        child for child in sound_panel.findChildren(QWidget)
+        if child.objectName() == "SoundMixerStereoVu"
+    ]
+    checks["mixer_tab_master_stereo_vu_visible"] = bool(any(row.isVisible() for row in vu_meters))
 
     embedded_png = out / "sound_editor_mixer_tab_action.png"
     workbench_png = out / "workbench_sound_editor_mixer_action.png"

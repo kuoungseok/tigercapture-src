@@ -759,7 +759,10 @@ Already started:
   strips for track-level mixing. Each strip exposes a vertical fader, level
   meter with peak/clip indication, pan slider, Mute, Solo, automation R/W,
   insert slots, send levels, and a track type badge in the renewed
-  low-saturation audio theme.
+  low-saturation audio theme. The Master strip also includes a compact
+  SuperVision-inspired stereo L/R VU meter with subdued oxblood panels, amber
+  needles, and clipped-state indication while retaining the existing vertical
+  master meter/fader.
   The Sound Editor mixer pan and fader controls are custom-painted local
   widgets, not stylesheet `QSlider` chrome: pan uses a small graphite center
   rail, and the vertical fader uses a recessed channel strip rail with a quiet
@@ -778,6 +781,8 @@ Already started:
   `audio.mixer.snapshot.save`, `audio.mixer.snapshot.compare`,
   `audio.mixer.snapshot.apply`, and `audio.mixer.state`. Latest QA screenshot:
   `debugCapture/ui_renewal_sound_editor_cubase_round_1/dock_sound_editor_mixer_action.png`.
+  Latest isolated Master VU visual probe:
+  `debugCapture/ui_renewal_sound_editor_master_vu_round_2/dock_sound_editor_master_vu_action.png`.
 - Color grading nodes now switch the Workbench stack to a right-side
   `Color Grading` inspector instead of opening the old wide bottom wheel dock.
   The default editor surface now reads as Viewer left, color controls right,

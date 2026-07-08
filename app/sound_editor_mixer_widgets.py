@@ -1,6 +1,7 @@
 """Mixer strip widgets and helpers for the renewed sound editor."""
 from __future__ import annotations
 
+import math
 from typing import Any
 
 from PySide6.QtCore import QPointF, QRectF, Qt, Signal
@@ -129,6 +130,95 @@ class _SoundMixerMeter(QWidget):
             y = meter_r.bottom() - meter_r.height() * self._peak
             p.setPen(QPen(QColor(226, 219, 178, 150), 0.8))
             p.drawLine(QPointF(meter_r.left() - 0.5, y), QPointF(meter_r.right() + 0.5, y))
+        p.end()
+
+class _SoundMixerStereoVu(QWidget):
+    """Compact analog-style L/R bus meter for the Sound Editor master strip."""
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setObjectName("SoundMixerStereoVu")
+        self._l = 0.0
+        self._r = 0.0
+        self._clipped = False
+        self.setFixedSize(130, 72)
+
+    def set_levels(self, left: float, right: float, *, clipped: bool = False) -> None:
+        self._l = max(0.0, min(1.0, float(left or 0.0)))
+        self._r = max(0.0, min(1.0, float(right or 0.0)))
+        self._clipped = bool(clipped)
+        self.update()
+
+    def _draw_meter(self, p: QPainter, rect: QRectF, label: str, level: float) -> None:
+        panel = rect.adjusted(1.0, 1.0, -1.0, -1.0)
+        p.setPen(QPen(QColor(0, 0, 0, 158), 0.7))
+        grad = QLinearGradient(panel.topLeft(), panel.bottomLeft())
+        grad.setColorAt(0.0, QColor(119, 43, 41, 225))
+        grad.setColorAt(0.48, QColor(93, 35, 36, 235))
+        grad.setColorAt(1.0, QColor(35, 21, 23, 245))
+        p.setBrush(QBrush(grad))
+        p.drawRoundedRect(panel, 5.5, 5.5)
+
+        glass = QLinearGradient(panel.topLeft(), panel.bottomLeft())
+        glass.setColorAt(0.0, QColor(255, 235, 216, 35))
+        glass.setColorAt(0.45, QColor(255, 255, 255, 5))
+        glass.setColorAt(1.0, QColor(0, 0, 0, 40))
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QBrush(glass))
+        p.drawRoundedRect(panel.adjusted(1.0, 1.0, -1.0, -1.0), 4.8, 4.8)
+
+        center = QPointF(panel.center().x(), panel.bottom() - 7.0)
+        radius = min(panel.width() * 0.58, panel.height() * 0.68)
+        for i in range(7):
+            ratio = i / 6.0
+            angle = math.radians(204.0 - ratio * 128.0)
+            inner = QPointF(center.x() + math.cos(angle) * radius * 0.78, center.y() - math.sin(angle) * radius * 0.78)
+            outer = QPointF(center.x() + math.cos(angle) * radius * 0.94, center.y() - math.sin(angle) * radius * 0.94)
+            color = QColor(229, 190, 133, 120 if i < 5 else 170)
+            if i >= 5:
+                color = QColor(221, 137, 114, 175)
+            p.setPen(QPen(color, 0.7))
+            p.drawLine(inner, outer)
+
+        p.setPen(QPen(QColor(245, 206, 144, 105), 0.6))
+        for i, text in enumerate(("-20", "0", "+3")):
+            ratio = i / 2.0
+            angle = math.radians(204.0 - ratio * 128.0)
+            pos = QPointF(center.x() + math.cos(angle) * radius * 0.59, center.y() - math.sin(angle) * radius * 0.59)
+            p.drawText(QRectF(pos.x() - 8.0, pos.y() - 4.0, 16.0, 8.0), Qt.AlignmentFlag.AlignCenter, text)
+
+        needle_angle = math.radians(204.0 - max(0.0, min(1.0, level)) * 128.0)
+        needle_end = QPointF(
+            center.x() + math.cos(needle_angle) * radius * 0.82,
+            center.y() - math.sin(needle_angle) * radius * 0.82,
+        )
+        p.setPen(QPen(QColor(239, 207, 150, 210), 1.1))
+        p.drawLine(center, needle_end)
+        p.setPen(Qt.PenStyle.NoPen)
+        p.setBrush(QColor(12, 10, 11, 205))
+        p.drawEllipse(center, 2.2, 2.2)
+
+        p.setPen(QPen(QColor(247, 221, 190, 168), 0.8))
+        p.drawText(panel.adjusted(0, 7, 0, 0), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignTop, label)
+        db = -20.0 + level * 24.0
+        db_text = f"{db:+.1f}"
+        p.setPen(QPen(QColor(238, 187, 151, 165), 0.7))
+        p.drawText(panel.adjusted(0, 0, 0, -4), Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom, db_text)
+
+    def paintEvent(self, event) -> None:  # pragma: no cover - visual QA
+        p = QPainter(self)
+        p.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        root = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
+        p.setPen(QPen(QColor(178, 186, 202, 24), 0.8))
+        p.setBrush(QColor(255, 255, 255, 4))
+        p.drawRoundedRect(root, 6.0, 6.0)
+        half = (root.width() - 4.0) / 2.0
+        self._draw_meter(p, QRectF(root.left() + 2.0, root.top() + 2.0, half, root.height() - 4.0), "L", self._l)
+        self._draw_meter(p, QRectF(root.left() + 2.0 + half + 2.0, root.top() + 2.0, half, root.height() - 4.0), "R", self._r)
+        if self._clipped:
+            p.setPen(Qt.PenStyle.NoPen)
+            p.setBrush(QColor(198, 98, 88, 205))
+            p.drawRoundedRect(QRectF(root.right() - 13.0, root.top() + 4.0, 8.0, 3.0), 1.5, 1.5)
         p.end()
 
 class _SoundMixerPanSlider(QSlider):
@@ -589,12 +679,12 @@ class _SoundMixerMasterStrip(QWidget):
         super().__init__(parent)
         self.setObjectName("SoundMixerMasterStrip")
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
-        self.setFixedWidth(86)
+        self.setFixedWidth(146)
         self.setFixedHeight(286)
         self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
-        root.setSpacing(3)
+        root.setSpacing(2)
 
         title = QLabel("MASTER", self)
         title.setObjectName("SoundMixerTitle")
@@ -607,6 +697,9 @@ class _SoundMixerMasterStrip(QWidget):
         bus.setAlignment(Qt.AlignmentFlag.AlignCenter)
         bus.setFixedHeight(18)
         root.addWidget(bus)
+
+        self._vu = _SoundMixerStereoVu(self)
+        root.addWidget(self._vu, 0, Qt.AlignmentFlag.AlignHCenter)
 
         snap = QWidget(self)
         snap.setStyleSheet("background: transparent;")
@@ -630,12 +723,14 @@ class _SoundMixerMasterStrip(QWidget):
         body_layout = QHBoxLayout(body)
         body_layout.setContentsMargins(0, 0, 0, 0)
         body_layout.setSpacing(6)
+        body_layout.addStretch(1)
         self._meter = _SoundMixerMeter(body)
         body_layout.addWidget(self._meter)
         self._fader = _SoundMixerFader(body, master=True)
         self._fader.setValue(100)
         self._fader.setEnabled(False)
         body_layout.addWidget(self._fader)
+        body_layout.addStretch(1)
         root.addWidget(body)
 
         self._value = QLabel("0.00", self)
@@ -671,6 +766,7 @@ class _SoundMixerMasterStrip(QWidget):
         peak_hold = min(1.0, max(level_l, level_r) + (0.12 if audible else 0.0))
         clipped = any(max(0.0, min(1.5, float(getattr(track, "volume", 1.0) or 0.0))) >= 1.18 for track in audible)
         self._meter.set_levels(level_l, level_r, peak=peak_hold, clipped=clipped)
+        self._vu.set_levels(level_l, level_r, clipped=clipped)
         peak = max(level_l, level_r)
         self._value.setText(f"{peak:.2f}")
         self._name.setText(f"{len(audible)}/{len(track_rows)} live")

@@ -5,6 +5,31 @@ from app.video_editor_delegate_binding import bind_imported_delegate_methods
 
 from app.ar_pbr import editor_window_workflow as _ar_pbr_window_workflow
 
+
+def _window_toggle_ar_pbr_depth_view(self, checked: bool = False) -> None:
+    player = getattr(self, "_player", None)
+    mode = "grayscale" if bool(checked) else "off"
+    setter = getattr(player, "set_ar_pbr_depth_view_mode", None)
+    if callable(setter):
+        mode = setter(mode)
+    elif player is not None:
+        setattr(player, "_ar_pbr_depth_view_mode_value", mode)
+        try:
+            setattr(player, "_last_preview_frame_cache", None)
+        except Exception:
+            pass
+    button = getattr(self, "viewer_depth_btn", None)
+    if button is not None:
+        try:
+            button.blockSignals(True)
+            button.setChecked(str(mode) != "off")
+        finally:
+            button.blockSignals(False)
+    refresh = getattr(self, "_refresh_preview_qimage_mode", None)
+    if callable(refresh):
+        refresh()
+
+
 _BINDINGS = (
     ('_sync_ar_pbr_tracks_to_player', 'app.ar_pbr.editor_bridge', 'sync_tracks_to_player', False),
     ('_set_ar_pbr_track_center_norm', 'app.ar_pbr.editor_bridge', 'set_track_center_norm', True),
@@ -86,3 +111,4 @@ def install_ar_pbr_delegates(VideoEditorWindow) -> None:
     bind_imported_delegate_methods(VideoEditorWindow, _BINDINGS)
     for name in _WINDOW_WORKFLOW_NAMES:
         setattr(VideoEditorWindow, name, getattr(_ar_pbr_window_workflow, name))
+    VideoEditorWindow._toggle_ar_pbr_depth_view = _window_toggle_ar_pbr_depth_view

@@ -534,6 +534,14 @@
         `debugCapture/ui_renewal_sound_editor_cubase_round_1/sound_editor_qa.json`
         and
         `debugCapture/ui_renewal_sound_editor_cubase_round_1/dock_sound_editor_mixer_action.png`.
+      - [x] 2026-07-08 Master stereo VU follow-up:
+        added a SuperVision-inspired L/R analog VU meter to the Sound Editor
+        Mixer Master strip. It uses subdued oxblood panels and amber needles
+        so it fits the renewed low-saturation theme, while the existing
+        vertical master meter/fader remains for precise level-strip evidence.
+        Verified with `tests/test_sound_editor_panel.py`, `py_compile`, and an
+        isolated Sound Editor dock visual probe at
+        `debugCapture/ui_renewal_sound_editor_master_vu_round_2/dock_sound_editor_master_vu_action.png`.
     - [x] Actor / Live2D / Spine / 3D pass:
       - [x] Restyle Actor Library.
       - [x] Show Live2D actor, actor lane, keyframes, transform controls, and
