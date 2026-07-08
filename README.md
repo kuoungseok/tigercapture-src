@@ -120,14 +120,28 @@ TigerCapture is not a full Resolve/Fairlight/Fusion replacement, but it now trac
 
 TigerCapture is not trying to replace every professional editor. Its strongest position is the intersection of polished screen recording, local creator assistance, and actor overlays.
 
+Current local QA snapshot as of 2026-07-08:
+
+- Final Product Readiness: 99/100, with release still blocked by real broadcast
+  platform evidence.
+- Screen Studio-style interaction polish: claim-ready for the measured local
+  interaction corpus.
+- Descript-lite Readiness: 88/100, claim-ready for scoped AI script-edit value.
+- NLE Readiness: 91/100, but not a Premiere/Resolve-class professional NLE
+  until the real long-project corpus gate clears.
+- CapCut Parity Next: 89.38/100, with cloud/mobile/collaboration still the
+  largest gap.
+- Broadcast Readiness: 95/100 alpha-ready, not commercial broadcast-ready.
+
 | Compared with | TigerCapture position |
 |---|---|
-| **Screen Studio** | Similar polish direction, but Windows-first and deeper timeline/actor/local workflow. Screen Studio remains simpler and more product-finished. |
-| **CapCut** | Creator Assist covers captions, Shorts planning, vertical reframe, publish packages, and render handoff. CapCut still wins on huge social/template/AI ecosystem scale. |
+| **Screen Studio** | Screen Studio-style recording polish is now the closest competitive claim: cursor sidecars, click/drag/hotkey metadata, Auto Polish, zoom planning, and export handoff are evidence-backed for the measured corpus. Screen Studio remains simpler and more product-finished. |
+| **CapCut** | Creator Assist covers captions, Shorts planning, vertical reframe, publish packages, render handoff, mobile-safe templates, and local asset packs. CapCut still wins on mobile/cloud collaboration, huge social/template scale, and trend ecosystem depth. |
 | **Camtasia** | Strong overlap for tutorials and product demos. TigerCapture adds local ML planning and Live2D/Spine overlays; Camtasia still has mature education/business trust. |
-| **Descript** | TigerCapture is stronger visually and on actor/screen workflows. Descript still dominates text-based editing and magic-feeling AI; TigerCapture's current AI position is reviewable, local/safe planning. |
-| **OBS** | OBS is stronger for live streaming and scene production. TigerCapture is stronger after recording: polish, edit, export, and compositing. |
-| **Premiere/Resolve** | TigerCapture has partial professional post foundations, but Premiere and Resolve remain far deeper for full NLE, color, audio, VFX, collaboration, and hardware ecosystems. |
+| **Descript** | Descript-lite positioning is now evidence-backed for transcript planning, reviewed safe apply, cleanup, speech-enhance contracts, and sentence-level voice replacement contracts. Descript still wins on hosted collaboration, provider-direct coediting, share links, comments, version history, and team workspaces. |
+| **OBS** | Program Output recording/RTMP foundations and an optional OBS bridge exist, but OBS is still stronger for live streaming, scenes, plugins, and production broadcast ecosystems. |
+| **Premiere / Resolve / Final Cut Pro** | TigerCapture now has a stronger NLE foundation with Source/Record, 3-point edit, Final Cut-style storyline, multicam, proxy, conform, and project-bin action surfaces. It is still not a Premiere/Resolve/Final Cut-class professional NLE until real long-project evidence clears. |
+| **PowerPoint / presentation tools** | TigerCapture can author timeline-native decks and export PPTX, PDF, or MP4 presentation videos. It should not be positioned as a full PowerPoint replacement or enterprise presentation collaboration tool. |
 
 ---
 
