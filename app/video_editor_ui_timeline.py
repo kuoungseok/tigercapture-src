@@ -348,7 +348,7 @@ def build_timeline_area(self):
     self.timeline_popout_btn.setToolTip(
         tr("veditor.timeline_popout.tooltip"),
     )
-    self.timeline_popout_btn.setFixedSize(28, 24)
+    self.timeline_popout_btn.setFixedSize(28, 36)
     self.timeline_popout_btn.setText("")
     self.timeline_popout_btn.setIcon(app_icon("popout", size=16))
     self.timeline_popout_btn.setIconSize(icon_size(16))

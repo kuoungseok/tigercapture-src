@@ -946,6 +946,27 @@ def test_color_preview_compare_before_and_split_are_preview_only():
     assert not np.array_equal(after, rgb)
 
 
+def test_color_split_compare_preserves_encoded_letterbox_matte():
+    from app.color_grading import ColorGrade
+    from app.project_player import _apply_node_chain_preview_compare
+    from app.workbench.node_graph.items.node_item import NodeItem
+
+    rgb = np.full((8, 10, 3), 5, dtype=np.uint8)
+    rgb[2:6, 2:8] = np.array([80, 92, 104], dtype=np.uint8)
+    node = NodeItem("N1", "Node 1")
+    node.color_grade = ColorGrade(brightness=45, contrast=15, saturation=20)
+
+    split = _apply_node_chain_preview_compare(rgb.copy(), [(node, [])], 0, "split")
+
+    assert split is not None
+    np.testing.assert_array_equal(split[:2], rgb[:2])
+    np.testing.assert_array_equal(split[6:], rgb[6:])
+    np.testing.assert_array_equal(split[:, :2], rgb[:, :2])
+    np.testing.assert_array_equal(split[:, 8:], rgb[:, 8:])
+    np.testing.assert_array_equal(split[2:6, 2:5], rgb[2:6, 2:5])
+    assert not np.array_equal(split[2:6, 5:8], rgb[2:6, 5:8])
+
+
 def test_color_workbench_selection_does_not_force_split_compare():
     from app.video_editor_window import VideoEditorWindow
 

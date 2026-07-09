@@ -6,9 +6,16 @@ from PySide6.QtCore import QPoint
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import QDialog, QFileDialog, QInputDialog, QMessageBox, QMenu
 
-from app.i18n import tr
+from app.i18n import current_language, tr
 from app.icons import app_icon
 from app.video_editor_nested_sequence import NestedSequenceEditorDialog
+
+
+def _context_menu_text(ko: str, en: str) -> str:
+    try:
+        return ko if current_language() == "ko" else en
+    except Exception:
+        return en
 
 
 def _on_audio_load_source_requested(self, tid: int) -> None:
@@ -222,7 +229,10 @@ def _on_video_clip_context_menu(self, track_id: int, clip_id: int, global_pos: "
         return
     self._select_workflow_video_clip(track, clip)
     menu = QMenu(self)
-    fx_act = menu.addAction(app_icon("color", size=16), "?대┰ ?댄럺??..")
+    fx_act = menu.addAction(
+        app_icon("color", size=16),
+        _context_menu_text("클립 효과...", "Clip effects..."),
+    )
     focus_fx_act = menu.addAction("FX stack in Workbench")
     has_active_fx = self._clip_has_active_fx(clip)
     has_disabled_fx = self._clip_has_disabled_fx(clip)
@@ -245,8 +255,14 @@ def _on_video_clip_context_menu(self, track_id: int, clip_id: int, global_pos: "
         or getattr(track, "source_path", None) is not None
     )
     menu.addSeparator()
-    split_act = menu.addAction(app_icon("scissors", size=16), "?ш린??遺꾪븷")
-    del_act = menu.addAction(app_icon("trash", size=16), "??젣")
+    split_act = menu.addAction(
+        app_icon("scissors", size=16),
+        _context_menu_text("여기서 분할", "Split here"),
+    )
+    del_act = menu.addAction(
+        app_icon("trash", size=16),
+        _context_menu_text("삭제", "Delete"),
+    )
     chosen = menu.exec(global_pos)
     if chosen is fx_act:
         self._open_clip_effects(track, clip)
@@ -365,13 +381,18 @@ def _on_track_context_menu(self, track_id: int, global_pos: QPoint) -> None:
         [track],
         getattr(self, "_project_settings", None),
     )
-    act_clean_edges = menu.addAction("Clean 1-frame gaps/overlaps")
+    act_clean_edges = menu.addAction(
+        _context_menu_text("1프레임 빈틈/겹침 정리", "Clean 1-frame gaps/overlaps")
+    )
     act_clean_edges.setEnabled(
         int(edge_summary.get("auto_fixable_count", 0) or 0) > 0
         and not bool(getattr(track, "locked", False))
     )
     act_clean_edges.setToolTip(
-        "Close one-frame gaps and trim one-frame overlaps on this track."
+        _context_menu_text(
+            "이 트랙의 1프레임 빈틈을 닫고 1프레임 겹침을 다듬습니다.",
+            "Close one-frame gaps and trim one-frame overlaps on this track.",
+        )
     )
 
     menu.addSeparator()
@@ -397,15 +418,22 @@ def _on_track_context_menu(self, track_id: int, global_pos: QPoint) -> None:
         if _link_clip is not None and self._audio_tracks:
             menu.addSeparator()
             is_linked = getattr(_link_clip, "linked_audio_id", None) is not None
-            link_label = "?ㅻ뵒??留곹겕 ?댁젣" if is_linked else "?ㅻ뵒??留곹겕"
+            link_label = _context_menu_text(
+                "오디오 연결 해제" if is_linked else "오디오 연결",
+                "Unlink audio" if is_linked else "Link audio",
+            )
             act_audio_link = menu.addAction(link_label)
 
     menu.addSeparator()
     # Track reorder
     idx = self._tracks.index(track) if track in self._tracks else -1
-    act_move_up = menu.addAction("?꾨줈 ?대룞 (?덉씠???щ━湲?")
+    act_move_up = menu.addAction(
+        _context_menu_text("위로 이동 (레이어 올리기)", "Move up (raise layer)")
+    )
     act_move_up.setEnabled(idx > 0)
-    act_move_down = menu.addAction("?꾨옒濡??대룞 (?덉씠???대━湲?")
+    act_move_down = menu.addAction(
+        _context_menu_text("아래로 이동 (레이어 내리기)", "Move down (lower layer)")
+    )
     act_move_down.setEnabled(0 <= idx < len(self._tracks) - 1)
 
     menu.addSeparator()

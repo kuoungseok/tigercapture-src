@@ -98,6 +98,36 @@ if (-not (Test-Path $exePath)) {
 }
 Write-Host "[pyinstaller] OK: $exePath" -ForegroundColor Green
 
+# 3b. Root launcher
+# PyInstaller uses an onedir layout, so copying dist\TigerCapture\TigerCapture.exe
+# to the repository root would break its _internal lookup. Build a tiny native
+# launcher instead: it starts .venv\Scripts\pythonw.exe main.py in a source
+# checkout, then falls back to the frozen app when no source venv is present.
+$launcherSource = Join-Path $root "tools\windows_launcher\TigerCaptureLauncher.cs"
+$launcherExe = Join-Path $root "TigerCapture.exe"
+if (Test-Path $launcherSource) {
+    $csc = $null
+    $cscCandidates = @(
+        "$env:WINDIR\Microsoft.NET\Framework64\v4.0.30319\csc.exe",
+        "$env:WINDIR\Microsoft.NET\Framework\v4.0.30319\csc.exe"
+    )
+    foreach ($candidate in $cscCandidates) {
+        if (Test-Path $candidate) { $csc = $candidate; break }
+    }
+    if (-not $csc) {
+        $foundCsc = Get-Command csc.exe -ErrorAction Ignore
+        if ($foundCsc) { $csc = $foundCsc.Source }
+    }
+    if ($csc) {
+        Write-Host "[launcher] building root TigerCapture.exe..." -ForegroundColor Cyan
+        & $csc /nologo /target:winexe /optimize+ /platform:anycpu "/win32icon:$icoPath" /reference:System.Windows.Forms.dll "/out:$launcherExe" "$launcherSource"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Write-Host "[launcher] OK: $launcherExe" -ForegroundColor Green
+    } else {
+        Write-Warning "csc.exe not found; root TigerCapture.exe launcher was not rebuilt."
+    }
+}
+
 # 4a. NSIS installer (preferred)
 if ($NSIS) {
     $makensis = $null

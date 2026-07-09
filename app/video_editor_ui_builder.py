@@ -19,7 +19,6 @@ def _sync_video_editor_window_globals() -> None:
 
 
 def build_video_editor_ui(self) -> None:
-    _sync_video_editor_window_globals()
     from app.video_editor_ui_shell import build_editor_shell
 
     main_col, root = build_editor_shell(self)
@@ -50,4 +49,3 @@ def build_video_editor_ui(self) -> None:
 
     build_right_dock_sections(self)
 # ------------------- track management --------------------
-

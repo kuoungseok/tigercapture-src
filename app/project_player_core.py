@@ -144,6 +144,49 @@ def _is_preview_color_grade_node(node_item) -> bool:
     return grade is not None and not grade.is_identity()
 
 
+def _preview_compare_content_bounds(rgb: np.ndarray) -> tuple[int, int, int, int]:
+    """Return the non-letterbox content bounds for preview comparison.
+
+    The compare renderer is preview-only. If the source frame contains encoded
+    letterbox/pillarbox matte, grading the whole right half makes the matte
+    look like it changed too. Detect only very dark, low-variance edge strips
+    and keep them outside the Before/After replacement area.
+    """
+    try:
+        arr = np.asarray(rgb)
+        h, w = arr.shape[:2]
+    except Exception:
+        return 0, 0, 0, 0
+    if h <= 2 or w <= 2:
+        return 0, max(0, h), 0, max(0, w)
+
+    def _dark_uniform_row(idx: int) -> bool:
+        row = arr[int(idx)]
+        return float(row.mean()) <= 34.0 and float(row.std()) <= 8.0
+
+    def _dark_uniform_col(idx: int) -> bool:
+        col = arr[:, int(idx)]
+        return float(col.mean()) <= 34.0 and float(col.std()) <= 8.0
+
+    max_y_scan = max(1, int(round(h * 0.35)))
+    max_x_scan = max(1, int(round(w * 0.35)))
+    top = 0
+    while top < max_y_scan and _dark_uniform_row(top):
+        top += 1
+    bottom = h
+    while bottom > h - max_y_scan and bottom > top + 2 and _dark_uniform_row(bottom - 1):
+        bottom -= 1
+    left = 0
+    while left < max_x_scan and _dark_uniform_col(left):
+        left += 1
+    right = w
+    while right > w - max_x_scan and right > left + 2 and _dark_uniform_col(right - 1):
+        right -= 1
+    if bottom - top < max(2, h // 8) or right - left < max(2, w // 8):
+        return 0, h, 0, w
+    return top, bottom, left, right
+
+
 def _apply_node_chain_preview_compare(
     rgb: np.ndarray,
     node_item_chain: list | None,
@@ -181,9 +224,11 @@ def _apply_node_chain_preview_compare(
         h, w = after.shape[:2]
         if h <= 0 or w <= 2:
             return after
-        split_x = max(1, min(w - 2, w // 2))
-        mixed = after.copy()
-        mixed[:, :split_x] = before[:, :split_x]
+        y0, y1, x0, x1 = _preview_compare_content_bounds(before)
+        split_x = max(x0 + 1, min(x1 - 1, (x0 + x1) // 2))
+        mixed = before.copy()
+        if y1 > y0 and x1 > split_x:
+            mixed[y0:y1, split_x:x1] = after[y0:y1, split_x:x1]
         return mixed
     except Exception:
         return after
@@ -1382,6 +1427,7 @@ ProjectPlayer._ar_pbr_apply_cached_runtime_anchor = staticmethod(_project_player
 ProjectPlayer._ar_pbr_runtime_tracks_for_frame = _project_player_ar_pbr_workflow._ar_pbr_runtime_tracks_for_frame
 ProjectPlayer._ar_pbr_camera_solution_for_tracks = _project_player_ar_pbr_workflow._ar_pbr_camera_solution_for_tracks
 ProjectPlayer._ar_pbr_depth_frame_for_tracks = _project_player_ar_pbr_workflow._ar_pbr_depth_frame_for_tracks
+ProjectPlayer._ar_pbr_depth_view_context_for_frame = _project_player_ar_pbr_workflow._ar_pbr_depth_view_context_for_frame
 ProjectPlayer._ar_pbr_gpu_preview_enabled = staticmethod(_project_player_ar_pbr_workflow._ar_pbr_gpu_preview_enabled)
 ProjectPlayer._ar_pbr_preview_renderer_mode = staticmethod(_project_player_ar_pbr_workflow._ar_pbr_preview_renderer_mode)
 ProjectPlayer._ar_pbr_should_use_full_gpu_preview = _project_player_ar_pbr_workflow._ar_pbr_should_use_full_gpu_preview

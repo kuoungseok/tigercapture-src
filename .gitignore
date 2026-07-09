@@ -10,6 +10,7 @@ __pycache__/
 build/
 dist/
 *.manifest
+/TigerCapture.exe
 
 # Rust native helpers
 native/**/target/

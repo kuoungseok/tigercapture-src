@@ -114,7 +114,18 @@ def _refresh_command_bar_responsive(self) -> None:
         widget = getattr(self, attr, None)
         if widget is not None:
             widget.setVisible(False if catalog_grouped else not tight)
-    for attr in ("language_btn", "proxy_btn", "proxy_manage_btn"):
+    language_btn = getattr(self, "language_btn", None)
+    if language_btn is not None:
+        language_btn.setVisible(True)
+        if catalog_grouped:
+            apply_catalog_command_button_size(language_btn, left_rail=left_rail)
+        else:
+            language_btn.setFixedSize(42, 40)
+            try:
+                language_btn.setIconSize(icon_size(18))
+            except Exception:
+                pass
+    for attr in ("proxy_btn", "proxy_manage_btn"):
         widget = getattr(self, attr, None)
         if widget is not None:
             widget.setVisible(False if catalog_grouped else not tiny)
@@ -381,7 +392,6 @@ def _compact_command_bar(self, toolbar: QHBoxLayout) -> None:
         self.relink_project_btn,
         self.media_health_btn,
         self.command_palette_btn,
-        self.language_btn,
         self.template_browser_btn,
         self.creator_assist_btn,
         self.script_edit_btn,

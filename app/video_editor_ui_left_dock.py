@@ -1,16 +1,11 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QLabel, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
 
 from app.i18n import tr
 from app.media_pool import MediaPool
+from app.video_editor_lazy_panel import LazyPanelHost
 from app.video_editor_actor_library import ActorLibraryPanel
-from app.video_editor_preset_cards import (
-    EffectsPresetPanel,
-    TitlePresetsPanel,
-    TransitionsPanel,
-    WorkflowPresetPanel,
-)
 
 
 def build_left_dock_sections(self) -> None:
@@ -23,6 +18,11 @@ def build_left_dock_sections(self) -> None:
     # top ??bottom.
     self._media_pool_section_host = QWidget(self._left_dock_host)
     self._media_pool_section_host.setObjectName("MediaPoolSectionHost")
+    self._media_pool_section_host.setMinimumHeight(440)
+    self._media_pool_section_host.setSizePolicy(
+        QSizePolicy.Policy.Expanding,
+        QSizePolicy.Policy.Expanding,
+    )
     self._media_pool_section_host.setStyleSheet(
         "QWidget#MediaPoolSectionHost{background:#151515;border:none;border-radius:0px;}"
     )
@@ -30,6 +30,11 @@ def build_left_dock_sections(self) -> None:
     mph.setContentsMargins(0, 0, 0, 0)
     mph.setSpacing(6)
     self._media_pool = MediaPool(self._media_pool_section_host)
+    self._media_pool.setMinimumHeight(390)
+    self._media_pool.setSizePolicy(
+        QSizePolicy.Policy.Expanding,
+        QSizePolicy.Policy.Expanding,
+    )
     self._media_pool.popout_requested.connect(self._toggle_media_pool_popout)
     self._media_pool.auto_polish_requested.connect(self._open_auto_polish_for_media_path)
     self._media_pool.item_added.connect(self._on_media_pool_item_added)
@@ -46,7 +51,7 @@ def build_left_dock_sections(self) -> None:
     )
     self._media_pool_header.setStyleSheet(
         "QWidget#MediaPoolCollapsibleSectionHeader{"
-        "background:transparent;border:none;border-radius:0px;min-height:24px;max-height:24px;"
+        "background:transparent;border:none;border-radius:0px;min-height:36px;max-height:36px;"
         "}"
         "QWidget#MediaPoolCollapsibleSectionHeader QLabel[sectionHeader=\"true\"]{"
         "background:transparent;border:none;color:#DDE1E8;"
@@ -55,7 +60,7 @@ def build_left_dock_sections(self) -> None:
         "}"
         "QWidget#MediaPoolCollapsibleSectionHeader QPushButton#SectionDisclosure{"
         "background:transparent;border:none;border-radius:5px;padding:0px;"
-        "min-width:18px;max-width:18px;min-height:18px;max-height:18px;"
+        "min-width:18px;max-width:18px;min-height:27px;max-height:27px;"
         "}"
         "QWidget#MediaPoolCollapsibleSectionHeader QPushButton#SectionDisclosure:hover{"
         "background:rgba(255,255,255,9);border:none;"
@@ -63,9 +68,9 @@ def build_left_dock_sections(self) -> None:
     )
     self._localized_collapsible_headers["media_pool"] = self._media_pool_header
     mph.addWidget(self._media_pool_header)
-    mph.addWidget(self._media_pool)
+    mph.addWidget(self._media_pool, stretch=1)
     self._left_dock_layout.addWidget(
-        self._media_pool_section_host, stretch=3,
+        self._media_pool_section_host, stretch=12,
     )
     self._yield_startup_ui("media_pool")
 
@@ -74,6 +79,10 @@ def build_left_dock_sections(self) -> None:
     # exposing every actor command as a permanent top-bar button.
     self._actor_library_section_host = QWidget(self._left_dock_host)
     self._actor_library_section_host.setObjectName("ActorLibrarySectionHost")
+    self._actor_library_section_host.setSizePolicy(
+        QSizePolicy.Policy.Expanding,
+        QSizePolicy.Policy.Fixed,
+    )
     alh = QVBoxLayout(self._actor_library_section_host)
     alh.setContentsMargins(0, 0, 0, 0)
     alh.setSpacing(6)
@@ -97,59 +106,117 @@ def build_left_dock_sections(self) -> None:
     # effect presets from app.preset_library.
     self._effects_library_section_host = QWidget(self._left_dock_host)
     self._effects_library_section_host.setObjectName("EffectsLibrarySectionHost")
+    self._effects_library_section_host.setSizePolicy(
+        QSizePolicy.Policy.Expanding,
+        QSizePolicy.Policy.Fixed,
+    )
     elh = QVBoxLayout(self._effects_library_section_host)
     elh.setContentsMargins(0, 0, 0, 0)
     elh.setSpacing(6)
-    self._effects_preset_panel = EffectsPresetPanel(
-        preview_provider=self._preset_preview_frame,
-        live_preview_callback=self._begin_preset_live_preview,
-        live_preview_clear_callback=self._clear_preset_live_preview,
-        save_current_callback=self._save_selected_effect_preset,
-        import_pack_callback=self._import_preset_pack,
-        export_pack_callback=self._export_user_preset_pack,
-        manage_pack_callback=self._manage_preset_packs,
-        qa_callback=self._show_preset_qa_report,
-        auto_template_callback=self._apply_auto_preset_plan,
-        template_composer_callback=self._open_template_composer,
-        cache_callback=self._manage_preset_preview_cache,
-        visual_qa_callback=self._open_visual_qa_viewer,
-        parent=self._effects_library_section_host,
+
+    def _build_effects_preset_panel(parent: QWidget) -> QWidget:
+        from app.video_editor_preset_cards import EffectsPresetPanel
+
+        panel = EffectsPresetPanel(
+            preview_provider=self._preset_preview_frame,
+            live_preview_callback=self._begin_preset_live_preview,
+            live_preview_clear_callback=self._clear_preset_live_preview,
+            save_current_callback=self._save_selected_effect_preset,
+            import_pack_callback=self._import_preset_pack,
+            export_pack_callback=self._export_user_preset_pack,
+            manage_pack_callback=self._manage_preset_packs,
+            qa_callback=self._show_preset_qa_report,
+            auto_template_callback=self._apply_auto_preset_plan,
+            template_composer_callback=self._open_template_composer,
+            cache_callback=self._manage_preset_preview_cache,
+            visual_qa_callback=self._open_visual_qa_viewer,
+            parent=parent,
+        )
+        panel.preset_activated.connect(self._apply_effect_preset_from_left_panel)
+        self._effects_preset_panel = panel
+        return panel
+
+    effects_preset_host = LazyPanelHost(
+        _build_effects_preset_panel,
+        self._effects_library_section_host,
     )
-    self._effects_preset_panel.preset_activated.connect(self._apply_effect_preset_from_left_panel)
+    self._effects_preset_panel = effects_preset_host
+
+    def _ensure_effects_preset_panel() -> list[QWidget]:
+        try:
+            effects_preset_host.ensure_panel()
+        except Exception as exc:
+            try:
+                self._flash_status(f"Effects library load failed: {exc}")
+            except Exception:
+                pass
+        return [effects_preset_host]
+
+    self._ensure_effects_preset_panel = lambda: effects_preset_host.ensure_panel()
     self._effects_library_header = self._make_collapsible_section_header(
         tr("veditor.section.effects"),
         "timeline",
-        [self._effects_preset_panel],
+        [effects_preset_host],
         start_open=False,
+        on_open=_ensure_effects_preset_panel,
         popout_callback=self._toggle_effects_library_popout,
     )
     self._localized_collapsible_headers["effects"] = self._effects_library_header
     elh.addWidget(self._effects_library_header)
-    elh.addWidget(self._effects_preset_panel)
+    elh.addWidget(effects_preset_host)
     self._left_dock_layout.addWidget(self._effects_library_section_host)
     self._effects_popout_btn = None
 
     # --- Title Presets section ??drag-to-timeline typography presets.
     self._title_presets_section_host = QWidget(self._left_dock_host)
     self._title_presets_section_host.setObjectName("TitlePresetsSectionHost")
+    self._title_presets_section_host.setSizePolicy(
+        QSizePolicy.Policy.Expanding,
+        QSizePolicy.Policy.Fixed,
+    )
     tpsh = QVBoxLayout(self._title_presets_section_host)
     tpsh.setContentsMargins(0, 0, 0, 0)
     tpsh.setSpacing(6)
-    self._title_presets_panel = TitlePresetsPanel(
-        preview_provider=self._preset_preview_frame,
-        live_preview_callback=self._begin_preset_live_preview,
-        live_preview_clear_callback=self._clear_preset_live_preview,
-        parent=self._title_presets_section_host,
+
+    def _build_title_presets_panel(parent: QWidget) -> QWidget:
+        from app.video_editor_preset_cards import TitlePresetsPanel
+
+        panel = TitlePresetsPanel(
+            preview_provider=self._preset_preview_frame,
+            live_preview_callback=self._begin_preset_live_preview,
+            live_preview_clear_callback=self._clear_preset_live_preview,
+            parent=parent,
+        )
+        self._title_presets_panel = panel
+        return panel
+
+    title_presets_host = LazyPanelHost(
+        _build_title_presets_panel,
+        self._title_presets_section_host,
     )
+    self._title_presets_panel = title_presets_host
+
+    def _ensure_title_presets_panel() -> list[QWidget]:
+        try:
+            title_presets_host.ensure_panel()
+        except Exception as exc:
+            try:
+                self._flash_status(f"Title presets load failed: {exc}")
+            except Exception:
+                pass
+        return [title_presets_host]
+
+    self._ensure_title_presets_panel = lambda: title_presets_host.ensure_panel()
     self._title_presets_header = self._make_collapsible_section_header(
         tr("veditor.section.title_presets"),
         "timeline",
-        [self._title_presets_panel],
+        [title_presets_host],
         start_open=False,
+        on_open=_ensure_title_presets_panel,
         popout_callback=self._toggle_title_presets_popout,
     )
     tpsh.addWidget(self._title_presets_header)
-    tpsh.addWidget(self._title_presets_panel)
+    tpsh.addWidget(title_presets_host)
     self._left_dock_layout.addWidget(self._title_presets_section_host)
 
     # --- Transitions section ??DaVinci-style clip-boundary transitions.
@@ -157,49 +224,107 @@ def build_left_dock_sections(self) -> None:
     # clip.transition_out_type / clip.transition_out_ms.
     self._transitions_section_host = QWidget(self._left_dock_host)
     self._transitions_section_host.setObjectName("TransitionsSectionHost")
+    self._transitions_section_host.setSizePolicy(
+        QSizePolicy.Policy.Expanding,
+        QSizePolicy.Policy.Fixed,
+    )
     tsh = QVBoxLayout(self._transitions_section_host)
     tsh.setContentsMargins(0, 0, 0, 0)
     tsh.setSpacing(6)
-    self._transitions_panel = TransitionsPanel(
-        preview_provider=self._preset_preview_frame,
-        live_preview_callback=self._begin_preset_live_preview,
-        live_preview_clear_callback=self._clear_preset_live_preview,
-        parent=self._transitions_section_host,
+
+    def _build_transitions_panel(parent: QWidget) -> QWidget:
+        from app.video_editor_preset_cards import TransitionsPanel
+
+        panel = TransitionsPanel(
+            preview_provider=self._preset_preview_frame,
+            live_preview_callback=self._begin_preset_live_preview,
+            live_preview_clear_callback=self._clear_preset_live_preview,
+            parent=parent,
+        )
+        self._transitions_panel = panel
+        return panel
+
+    transitions_host = LazyPanelHost(
+        _build_transitions_panel,
+        self._transitions_section_host,
     )
+    self._transitions_panel = transitions_host
+
+    def _ensure_transitions_panel() -> list[QWidget]:
+        try:
+            transitions_host.ensure_panel()
+        except Exception as exc:
+            try:
+                self._flash_status(f"Transitions load failed: {exc}")
+            except Exception:
+                pass
+        return [transitions_host]
+
+    self._ensure_transitions_panel = lambda: transitions_host.ensure_panel()
     self._transitions_header = self._make_collapsible_section_header(
         tr("veditor.section.transitions"),
         "timeline",
-        [self._transitions_panel],
+        [transitions_host],
         start_open=False,
+        on_open=_ensure_transitions_panel,
         popout_callback=self._toggle_transitions_popout,
     )
     tsh.addWidget(self._transitions_header)
-    tsh.addWidget(self._transitions_panel)
+    tsh.addWidget(transitions_host)
     self._left_dock_layout.addWidget(self._transitions_section_host)
 
     # --- Workflow Presets section: one-click template/caption/sticker/motion
     # packs from the same preset library used by automation and CLI QA.
     self._workflow_presets_section_host = QWidget(self._left_dock_host)
     self._workflow_presets_section_host.setObjectName("WorkflowPresetsSectionHost")
+    self._workflow_presets_section_host.setSizePolicy(
+        QSizePolicy.Policy.Expanding,
+        QSizePolicy.Policy.Fixed,
+    )
     wpsh = QVBoxLayout(self._workflow_presets_section_host)
     wpsh.setContentsMargins(0, 0, 0, 0)
     wpsh.setSpacing(6)
-    self._workflow_presets_panel = WorkflowPresetPanel(
-        preview_provider=self._preset_preview_frame,
-        live_preview_callback=self._begin_preset_live_preview,
-        live_preview_clear_callback=self._clear_preset_live_preview,
-        parent=self._workflow_presets_section_host,
+
+    def _build_workflow_presets_panel(parent: QWidget) -> QWidget:
+        from app.video_editor_preset_cards import WorkflowPresetPanel
+
+        panel = WorkflowPresetPanel(
+            preview_provider=self._preset_preview_frame,
+            live_preview_callback=self._begin_preset_live_preview,
+            live_preview_clear_callback=self._clear_preset_live_preview,
+            parent=parent,
+        )
+        panel.preset_activated.connect(self._apply_workflow_preset)
+        self._workflow_presets_panel = panel
+        return panel
+
+    workflow_presets_host = LazyPanelHost(
+        _build_workflow_presets_panel,
+        self._workflow_presets_section_host,
     )
-    self._workflow_presets_panel.preset_activated.connect(self._apply_workflow_preset)
+    self._workflow_presets_panel = workflow_presets_host
+
+    def _ensure_workflow_presets_panel() -> list[QWidget]:
+        try:
+            workflow_presets_host.ensure_panel()
+        except Exception as exc:
+            try:
+                self._flash_status(f"Workflow presets load failed: {exc}")
+            except Exception:
+                pass
+        return [workflow_presets_host]
+
+    self._ensure_workflow_presets_panel = lambda: workflow_presets_host.ensure_panel()
     self._workflow_presets_header = self._make_collapsible_section_header(
         tr("veditor.section.workflow_presets"),
         "timeline",
-        [self._workflow_presets_panel],
+        [workflow_presets_host],
         start_open=False,
+        on_open=_ensure_workflow_presets_panel,
         popout_callback=self._toggle_workflow_presets_popout,
     )
     wpsh.addWidget(self._workflow_presets_header)
-    wpsh.addWidget(self._workflow_presets_panel)
+    wpsh.addWidget(workflow_presets_host)
     self._left_dock_layout.addWidget(self._workflow_presets_section_host)
     self._yield_startup_ui("preset_sections")
 
@@ -220,4 +345,3 @@ def build_left_dock_sections(self) -> None:
     self._effects_library_popout = None
     self._effects_library_placeholder = None
     self._media_pool_placeholder: QLabel | None = None
-

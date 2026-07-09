@@ -988,7 +988,7 @@ def on_media_pool_selection_changed(owner: Any, path: Path | str) -> AudioClip |
     store = getattr(owner, "_sound_edit_state_store", None)
     if store is None:
         try:
-            from app.sound_editor_panel import SoundEditStateStore
+            from app.sound_edit_state_store import SoundEditStateStore
 
             store = SoundEditStateStore()
             owner._sound_edit_state_store = store

@@ -62,9 +62,9 @@ def build_editor_shell(self):
     root.setSpacing(10)
     self._main_dock_splitter.addWidget(main_col)
 
-    # Workbench overflow stack. It is intentionally not a third splitter
-    # column: secondary panels sit below the Workbench and scroll there,
-    # so the Viewer/Workbench pair can keep the catalog-reference ratio.
+    # Unified Workbench stack. The main Workbench and its secondary
+    # sections live in this single scroll area so wheel scrolling moves
+    # the node/inspector area and the lower tools as one surface.
     self._right_dock_scroll = QScrollArea(main_col)
     self._right_dock_scroll.setObjectName("RightDockScroll")
     self._right_dock_scroll.setWidgetResizable(True)
@@ -73,7 +73,7 @@ def build_editor_shell(self):
     self._right_dock_scroll.setFrameShape(QFrame.Shape.NoFrame)
     self._right_dock_scroll.setMinimumWidth(0)
     self._right_dock_scroll.setMinimumHeight(48)
-    self._right_dock_scroll.setMaximumHeight(108)
+    self._right_dock_scroll.setMaximumHeight(16777215)
     self._right_dock_scroll.setStyleSheet(right_dock_scroll_qss())
     self._right_dock_host = QWidget(self._right_dock_scroll)
     self._right_dock_host.setObjectName("RightDockColumn")

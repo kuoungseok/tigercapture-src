@@ -7,27 +7,9 @@ from app.ar_pbr import editor_window_workflow as _ar_pbr_window_workflow
 
 
 def _window_toggle_ar_pbr_depth_view(self, checked: bool = False) -> None:
-    player = getattr(self, "_player", None)
-    mode = "grayscale" if bool(checked) else "off"
-    setter = getattr(player, "set_ar_pbr_depth_view_mode", None)
-    if callable(setter):
-        mode = setter(mode)
-    elif player is not None:
-        setattr(player, "_ar_pbr_depth_view_mode_value", mode)
-        try:
-            setattr(player, "_last_preview_frame_cache", None)
-        except Exception:
-            pass
-    button = getattr(self, "viewer_depth_btn", None)
-    if button is not None:
-        try:
-            button.blockSignals(True)
-            button.setChecked(str(mode) != "off")
-        finally:
-            button.blockSignals(False)
-    refresh = getattr(self, "_refresh_preview_qimage_mode", None)
-    if callable(refresh):
-        refresh()
+    from app.video_editor_transport_workflow import _toggle_ar_pbr_depth_view
+
+    _toggle_ar_pbr_depth_view(self, checked)
 
 
 _BINDINGS = (

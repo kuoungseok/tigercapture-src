@@ -35,16 +35,17 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSlider,
     QStackedWidget,
+    QToolButton,
     QVBoxLayout,
     QWidget,
 )
 
-from app.i18n import tr
+from app.i18n import current_language, tr
 from app.icons import app_icon, icon_size
-from app.sound_editor_panel import SoundEditorPanel
 from app.studio_slider import StudioSlider
 from app.style import FONT_FAMILY, editor_scrollbar_qss
 from app.video_editor_actor_evidence import ArPbrEvidenceCard, Live2DActorEvidenceCard
+from app.workbench_scroll import forward_wheel_to_scroll_area
 from app.workbench_vfx_graph import (
     vfx_node_graph_detail_text_for_track,
     vfx_node_graph_overview_for_track,
@@ -58,6 +59,74 @@ from app.workbench_cards import (
     _NodeRow,
     _TypographyEvidenceCard,
 )
+
+
+_INSPECTOR_TAB_SIZE = (62, 48)
+_INSPECTOR_TAB_COMPACT_SIZE = (17, 21)
+_INSPECTOR_TAB_IDS = ("clip", "fx", "mask", "audio", "meta")
+_INSPECTOR_TAB_ICONS = {
+    "clip": "video",
+    "fx": "sliders",
+    "mask": "scope",
+    "audio": "audio",
+    "meta": "list",
+}
+_INSPECTOR_TAB_LABELS_EN = {
+    "clip": "Clip",
+    "fx": "Effects",
+    "mask": "Mask",
+    "audio": "Audio",
+    "meta": "Info",
+}
+_INSPECTOR_TAB_LABELS_KO = {
+    "clip": "\ud074\ub9bd",
+    "fx": "\ud6a8\uacfc",
+    "mask": "\ub9c8\uc2a4\ud06c",
+    "audio": "\uc624\ub514\uc624",
+    "meta": "\uc815\ubcf4",
+}
+_INSPECTOR_TAB_TOOLTIPS_EN = {
+    "clip": "Basic clip or track properties",
+    "fx": "Effects, color, and VFX stack",
+    "mask": "Mask and rotoscope controls",
+    "audio": "Audio clip and mixer controls",
+    "meta": "Source and diagnostic information",
+}
+_INSPECTOR_TAB_TOOLTIPS_KO = {
+    "clip": "\uae30\ubcf8 \uc18d\uc131: \uc774\ub984, \uc704\uce58, \uae38\uc774, \ud398\uc774\ub4dc",
+    "fx": "\ud544\ud130, \uc0c9\ubcf4\uc815, VFX \uc2a4\ud0dd",
+    "mask": "\ub9c8\uc2a4\ud06c / \ub85c\ud1a0\uc2a4\ucf54\ud504 \uc81c\uc5b4",
+    "audio": "\uc624\ub514\uc624 \ud074\ub9bd\uacfc \ubbf9\uc11c \uc81c\uc5b4",
+    "meta": "\uc18c\uc2a4 / \uc9c4\ub2e8 \uc815\ubcf4",
+}
+
+
+def _inspector_tab_copy(tab_id: str) -> tuple[str, str]:
+    if current_language() == "ko":
+        label = _INSPECTOR_TAB_LABELS_KO.get(tab_id, tab_id)
+        tooltip = _INSPECTOR_TAB_TOOLTIPS_KO.get(tab_id, label)
+    else:
+        label = _INSPECTOR_TAB_LABELS_EN.get(tab_id, tab_id.title())
+        tooltip = _INSPECTOR_TAB_TOOLTIPS_EN.get(tab_id, label)
+    return label, tooltip
+
+
+def _inspector_tabs_caption() -> str:
+    if current_language() == "ko":
+        return "\uc18d\uc131 \ubcf4\uae30"
+    return "Properties"
+
+
+def _inspector_tabs_caption_tooltip() -> str:
+    if current_language() == "ko":
+        return "\uc120\ud0dd\ud55c \ud074\ub9bd/\ud2b8\ub799\uc758 \uc18d\uc131 \uc885\ub958\ub97c \ubc14\uafb9\ub2c8\ub2e4."
+    return "Switch which selected-item properties are shown."
+
+
+def _fx_back_button_copy() -> tuple[str, str]:
+    if current_language() == "ko":
+        return "\u2190 \uae30\ubcf8 \uc18d\uc131", "\uc774\ub984, \uae38\uc774, \ud398\uc774\ub4dc \ub4f1 \uae30\ubcf8 \uc18d\uc131\uc73c\ub85c \ub3cc\uc544\uac11\ub2c8\ub2e4."
+    return "\u2190 Properties", "Return to basic clip and track properties."
 
 
 def _format_ms(ms: int) -> str:
@@ -286,6 +355,7 @@ class WorkbenchPanel(QWidget):
     # of the node rows. Editor wires this to scroll/expand the
     # corresponding panel (currently only "color" → Color section).
     node_focused = Signal(str)
+    node_graph_ready = Signal(object)
 
     # Slider ranges — picked to cover practical use without ceding
     # screen real-estate to extreme values.
@@ -321,32 +391,50 @@ class WorkbenchPanel(QWidget):
             "border:1px solid rgba(178,186,202,18); border-radius:6px;"
             "}"
             "QWidget#InspectorTabs {"
-            "background:transparent; border:none; border-radius:0px;"
+            "background:#0D1016; border-top:1px solid rgba(178,186,202,16);"
+            "border-bottom:1px solid rgba(178,186,202,16); border-radius:0px;"
             "}"
             "QWidget#InspectorTabs[fxMode='true'] {"
             "background:#101112; border:none; border-bottom:1px solid #202225;"
             "}"
+            "QLabel#InspectorTabsCaption {"
+            "color:#C8D0DD; background:transparent; border:none;"
+            "font-size:11px; font-weight:700; padding:0px 4px 0px 2px;"
+            "}"
+            "QWidget#FxBackBar {"
+            "background:#0D1016; border:none; border-bottom:1px solid rgba(178,186,202,18);"
+            "}"
+            "QPushButton#FxBackButton {"
+            "background:#15181C; color:#DCE3EF; border:1px solid rgba(178,186,202,34);"
+            "border-radius:6px; padding:0px 10px; font-size:11px; font-weight:750;"
+            "min-height:30px;"
+            "}"
+            "QPushButton#FxBackButton:hover {"
+            "background:#20252B; color:#FFFFFF; border-color:rgba(238,242,250,96);"
+            "}"
             "QWidget#InspectorPaletteStrip {"
             "background:transparent; border:none; border-radius:0px;"
             "}"
-            "QPushButton#InspectorTab {"
-            "background:#15181C; color:#9EA4AD; border:1px solid rgba(178,186,202,20);"
-            "border-radius:5px; padding:0px; font-size:1px; font-weight:600;"
-            "min-width:21px; min-height:17px;"
+            "QPushButton#InspectorTab, QToolButton#InspectorTab {"
+            "background:#15181C; color:#C7CDD7; border:1px solid rgba(178,186,202,28);"
+            "border-radius:6px; padding:2px 4px; font-size:9px; font-weight:700;"
+            "min-width:58px; min-height:46px;"
             "}"
-            "QPushButton#InspectorTab:hover { background:#20252B; color:#FFFFFF; border-color:rgba(220,225,238,74); }"
-            "QPushButton#InspectorTab:checked {"
-            "background:#252A31;"
-            "color:#FFFFFF; border-color:rgba(238,242,250,92);"
+            "QPushButton#InspectorTab:hover, QToolButton#InspectorTab:hover {"
+            "background:#20252B; color:#FFFFFF; border-color:rgba(220,225,238,74);"
             "}"
-            "QPushButton#InspectorTab[fxMode='true'] {"
+            "QPushButton#InspectorTab:checked, QToolButton#InspectorTab:checked {"
+            "background:#263140;"
+            "color:#FFFFFF; border-color:rgba(238,242,250,110);"
+            "}"
+            "QPushButton#InspectorTab[fxMode='true'], QToolButton#InspectorTab[fxMode='true'] {"
             "background:transparent; color:#8E949C; border:1px solid transparent;"
-            "border-radius:3px; min-width:16px; min-height:14px;"
+            "border-radius:3px; min-width:16px; min-height:21px;"
             "}"
-            "QPushButton#InspectorTab[fxMode='true']:hover {"
+            "QPushButton#InspectorTab[fxMode='true']:hover, QToolButton#InspectorTab[fxMode='true']:hover {"
             "background:#20252B; color:#ECEFF4; border-color:rgba(220,225,238,54);"
             "}"
-            "QPushButton#InspectorTab[fxMode='true']:checked {"
+            "QPushButton#InspectorTab[fxMode='true']:checked, QToolButton#InspectorTab[fxMode='true']:checked {"
             "background:#1B1E23; color:#FFFFFF; border-color:rgba(238,242,250,78);"
             "}"
             "QFrame#InspectorSwatch {"
@@ -364,7 +452,7 @@ class WorkbenchPanel(QWidget):
             "QPushButton#FxSummaryButton {"
             "background:rgba(255,255,255,6); color:#DCE1EA;"
             "border:1px solid rgba(178,186,202,24); border-radius:5px; padding:0px;"
-            "min-width:23px; min-height:20px;"
+            "min-width:23px; min-height:30px;"
             "}"
             "QPushButton#FxSummaryButton:hover {"
             "background:rgba(255,255,255,12); border-color:rgba(220,225,238,68); color:#FFFFFF;"
@@ -476,12 +564,12 @@ class WorkbenchPanel(QWidget):
 
         self._title = QLabel(tr("workbench.empty.title"), self)
         self._title.setStyleSheet(
-            "color: #F2F0EA; font-weight: 680; font-size: 11px;"
+            "color: #F2F0EA; font-weight: 700; font-size: 12px;"
         )
 
         self._subtitle = QLabel(tr("workbench.empty.subtitle"), self)
         self._subtitle.setStyleSheet(
-            "color: #8F95A8; font-size: 10px;"
+            "color: #A6AFC0; font-size: 11px; padding: 0px 6px 2px 6px;"
         )
         self._subtitle.setWordWrap(True)
 
@@ -511,7 +599,7 @@ class WorkbenchPanel(QWidget):
 
         self._title_row = QWidget(self)
         self._title_row.setObjectName("InspectorTitleRow")
-        self._title_row.setFixedHeight(17)
+        self._title_row.setFixedHeight(24)
         title_row_layout = QHBoxLayout(self._title_row)
         title_row_layout.setContentsMargins(5, 0, 8, 0)
         title_row_layout.setSpacing(8)
@@ -524,35 +612,32 @@ class WorkbenchPanel(QWidget):
         self._inspector_tab = "clip"
         self._inspector_tabs = QWidget(self)
         self._inspector_tabs.setObjectName("InspectorTabs")
+        self._inspector_tabs.setFixedHeight(58)
         tabs_layout = QHBoxLayout(self._inspector_tabs)
-        tabs_layout.setContentsMargins(5, 1, 5, 0)
-        tabs_layout.setSpacing(2)
+        tabs_layout.setContentsMargins(6, 5, 6, 5)
+        tabs_layout.setSpacing(5)
         tabs_layout.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        self._inspector_tabs_caption = QLabel(_inspector_tabs_caption(), self._inspector_tabs)
+        self._inspector_tabs_caption.setObjectName("InspectorTabsCaption")
+        self._inspector_tabs_caption.setToolTip(_inspector_tabs_caption_tooltip())
+        tabs_layout.addWidget(self._inspector_tabs_caption)
         self._inspector_tab_group = QButtonGroup(self)
         self._inspector_tab_group.setExclusive(True)
-        self._inspector_tab_buttons: dict[str, QPushButton] = {}
-        for tab_id, label in (
-            ("clip", "Clip"),
-            ("fx", "FX"),
-            ("mask", "Mask"),
-            ("audio", "Audio"),
-            ("meta", "Meta"),
-        ):
-            btn = QPushButton("", self._inspector_tabs)
+        self._inspector_tab_buttons: dict[str, QToolButton] = {}
+        for tab_id in _INSPECTOR_TAB_IDS:
+            label, tooltip = _inspector_tab_copy(tab_id)
+            btn = QToolButton(self._inspector_tabs)
+            btn.setText(label)
             btn.setObjectName("InspectorTab")
             btn.setCheckable(True)
+            btn.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.setToolTip(label)
+            btn.setToolTip(tooltip)
             btn.setAccessibleName(label)
-            btn.setFixedSize(24, 18)
-            btn.setIcon(app_icon({
-                "clip": "video",
-                "fx": "sliders",
-                "mask": "scope",
-                "audio": "audio",
-                "meta": "list",
-            }.get(tab_id, "list"), size=15))
-            btn.setIconSize(icon_size(13))
+            btn.setAccessibleDescription(tooltip)
+            btn.setFixedSize(*_INSPECTOR_TAB_SIZE)
+            btn.setIcon(app_icon(_INSPECTOR_TAB_ICONS.get(tab_id, "list"), size=15))
+            btn.setIconSize(icon_size(16))
             btn.clicked.connect(lambda _checked=False, t=tab_id: self._set_inspector_tab(t))
             if tab_id == "clip":
                 btn.setChecked(True)
@@ -561,6 +646,25 @@ class WorkbenchPanel(QWidget):
             tabs_layout.addWidget(btn)
         tabs_layout.addStretch(1)
         root.addWidget(self._inspector_tabs)
+
+        self._fx_back_bar = QWidget(self)
+        self._fx_back_bar.setObjectName("FxBackBar")
+        self._fx_back_bar.setFixedHeight(40)
+        fx_back_layout = QHBoxLayout(self._fx_back_bar)
+        fx_back_layout.setContentsMargins(6, 4, 6, 4)
+        fx_back_layout.setSpacing(6)
+        back_text, back_tip = _fx_back_button_copy()
+        self._fx_back_btn = QPushButton(back_text, self._fx_back_bar)
+        self._fx_back_btn.setObjectName("FxBackButton")
+        self._fx_back_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._fx_back_btn.setToolTip(back_tip)
+        self._fx_back_btn.setAccessibleName(back_text)
+        self._fx_back_btn.setAccessibleDescription(back_tip)
+        self._fx_back_btn.clicked.connect(lambda _checked=False: self._set_inspector_tab("clip"))
+        fx_back_layout.addWidget(self._fx_back_btn, 0, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        fx_back_layout.addStretch(1)
+        self._fx_back_bar.hide()
+        root.addWidget(self._fx_back_bar)
 
         self._tab_stack = QStackedWidget(self)
         self._tab_stack.setObjectName("InspectorStack")
@@ -697,7 +801,7 @@ class WorkbenchPanel(QWidget):
             button.setText("")
             button.setIcon(app_icon(icon_name, size=13, color="#D7DAE7"))
             button.setIconSize(icon_size(12))
-            button.setFixedSize(24, 21)
+            button.setFixedSize(24, 32)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setToolTip(tooltip)
             button.setAccessibleName(tooltip)
@@ -772,20 +876,6 @@ class WorkbenchPanel(QWidget):
         self._audio_evidence_card = _AudioEvidenceCard(self._tab_pages["audio"])
         self._audio_evidence_card.hide()
         self._tab_layouts["audio"].insertWidget(1, self._audio_evidence_card)
-        self._sound_editor_panel = SoundEditorPanel(self._tab_pages["audio"])
-        self._sound_editor_panel.changed.connect(self._on_sound_editor_changed)
-        self._sound_editor_panel.mixer_track_changed.connect(self._on_sound_editor_mixer_track_changed)
-        self._sound_editor_panel.advanced_lab_requested.connect(
-            self.advanced_sound_lab_requested.emit
-        )
-        self._sound_editor_panel.music_lab_action_requested.connect(
-            self.music_lab_action_requested.emit
-        )
-        self._sound_editor_panel.music_lab_selection_changed.connect(
-            self.music_lab_selection_changed.emit
-        )
-        self._sound_editor_panel.hide()
-        self._tab_layouts["audio"].insertWidget(2, self._sound_editor_panel, stretch=1)
 
         self._typography_evidence_card = _TypographyEvidenceCard(self._tab_pages["fx"])
         self._typography_evidence_card.hide()
@@ -826,7 +916,7 @@ class WorkbenchPanel(QWidget):
             button.setText("")
             button.setIcon(app_icon(icon_name, size=13, color="#D7DAE7"))
             button.setIconSize(icon_size(12))
-            button.setFixedSize(24, 21)
+            button.setFixedSize(24, 32)
             button.setCursor(Qt.CursorShape.PointingHandCursor)
             button.setToolTip(tooltip)
             button.setAccessibleName(tooltip)
@@ -864,19 +954,9 @@ class WorkbenchPanel(QWidget):
         # vertical real estate (``stretch=1``). Section header + pop-out
         # popout button live INSIDE the NodeGraphWidget so the panel
         # stays self-contained when reparented to the popout window.
-        from app.workbench.node_graph.widget import NodeGraphWidget
-        self._node_graph_widget = NodeGraphWidget(self._tab_pages["fx"])
-        self._node_graph_widget.popout_requested.connect(
-            self._toggle_node_graph_popout,
-        )
-        self._node_graph_widget.node_selection_changed.connect(
-            self._on_node_graph_selection_changed,
-        )
         # Hidden until the user selects a video track — audio clips
         # don't carry a node graph yet (Phase 2D+).
-        self._node_graph_widget.hide()
         fx_layout = self._tab_layouts["fx"]
-        fx_layout.insertWidget(1, self._node_graph_widget, stretch=1)
         for idx in range(fx_layout.count() - 1, -1, -1):
             item = fx_layout.itemAt(idx)
             if item is not None and item.spacerItem() is not None:
@@ -888,6 +968,43 @@ class WorkbenchPanel(QWidget):
         self._node_graph_root_layout = fx_layout
         self._node_graph_popout = None
         self._node_graph_placeholder = None
+
+    def _ensure_sound_editor_panel(self):
+        panel = getattr(self, "_sound_editor_panel", None)
+        if panel is not None:
+            return panel
+        from app.sound_editor_panel import SoundEditorPanel
+
+        panel = SoundEditorPanel(self._tab_pages["audio"])
+        panel.changed.connect(self._on_sound_editor_changed)
+        panel.mixer_track_changed.connect(self._on_sound_editor_mixer_track_changed)
+        panel.advanced_lab_requested.connect(self.advanced_sound_lab_requested.emit)
+        panel.music_lab_action_requested.connect(self.music_lab_action_requested.emit)
+        panel.music_lab_selection_changed.connect(self.music_lab_selection_changed.emit)
+        panel.hide()
+        self._tab_layouts["audio"].insertWidget(2, panel, stretch=1)
+        self._sound_editor_panel = panel
+        return panel
+
+    def _ensure_node_graph_widget(self):
+        widget = getattr(self, "_node_graph_widget", None)
+        if widget is not None:
+            return widget
+        from app.workbench.node_graph.widget import NodeGraphWidget
+
+        widget = NodeGraphWidget(self._tab_pages["fx"])
+        widget.popout_requested.connect(self._toggle_node_graph_popout)
+        widget.node_selection_changed.connect(self._on_node_graph_selection_changed)
+        widget.hide()
+        self._node_graph_root_layout.insertWidget(1, widget, stretch=1)
+        self._node_graph_widget = widget
+        self.node_graph_ready.emit(widget)
+        return widget
+
+    def _hide_node_graph_widget(self) -> None:
+        widget = getattr(self, "_node_graph_widget", None)
+        if widget is not None:
+            widget.hide()
 
     # ---- public API ----
 
@@ -1108,7 +1225,10 @@ class WorkbenchPanel(QWidget):
         if effect_node is None:
             self._effect_section.hide()
             self._effect_node_ref = None
-            if hasattr(self, "_fx_empty_label") and not self._node_graph_widget.isVisible():
+            node_graph = getattr(self, "_node_graph_widget", None)
+            if hasattr(self, "_fx_empty_label") and (
+                node_graph is None or not node_graph.isVisible()
+            ):
                 self._fx_empty_label.show()
             return
         self._effect_node_ref = effect_node
@@ -1481,15 +1601,17 @@ class WorkbenchPanel(QWidget):
         NodeGraph so every node renders a DaVinci-style live
         thumbnail. Throttling lives in the editor — this call is
         just a scale + setattr per node."""
-        if hasattr(self, "_node_graph_widget"):
-            self._node_graph_widget.set_source_pixmap(pix)
+        widget = getattr(self, "_node_graph_widget", None)
+        if widget is not None:
+            widget.set_source_pixmap(pix)
 
     def selected_node(self):
         """Return the currently-selected NodeItem (or None) so the
         editor can route the Color panel to that node's grade."""
-        if not hasattr(self, "_node_graph_widget"):
+        widget = getattr(self, "_node_graph_widget", None)
+        if widget is None:
             return None
-        items = self._node_graph_widget.scene.selectedItems()
+        items = widget.scene.selectedItems()
         from app.workbench.node_graph.items.node_item import NodeItem
         for it in items:
             if isinstance(it, NodeItem):
@@ -1500,9 +1622,10 @@ class WorkbenchPanel(QWidget):
         """Return the first Serial node (the default Node 1) so the
         editor has a sensible grade target before the user clicks
         anything. None when the graph is empty."""
-        if not hasattr(self, "_node_graph_widget"):
+        widget = getattr(self, "_node_graph_widget", None)
+        if widget is None:
             return None
-        nodes = self._node_graph_widget.scene._serial_nodes
+        nodes = widget.scene._serial_nodes
         from app.workbench.node_graph.items.node_item import NodeItem
         for n in nodes:
             if isinstance(n, NodeItem):
@@ -1547,15 +1670,48 @@ class WorkbenchPanel(QWidget):
         if hasattr(self, "_inspector_tabs"):
             self._inspector_tabs.setProperty("fxMode", bool(is_fx))
             self._inspector_tabs.setVisible(not is_fx)
-            self._inspector_tabs.setFixedHeight(0 if is_fx else 22)
+            self._inspector_tabs.setFixedHeight(0 if is_fx else 58)
             self._inspector_tabs.style().unpolish(self._inspector_tabs)
             self._inspector_tabs.style().polish(self._inspector_tabs)
-        for button in self._inspector_tab_buttons.values():
+        if hasattr(self, "_inspector_tabs_caption"):
+            self._inspector_tabs_caption.setVisible(not is_fx)
+        if hasattr(self, "_fx_back_bar"):
+            self._fx_back_bar.setVisible(is_fx)
+        for tab_id, button in self._inspector_tab_buttons.items():
             button.setProperty("fxMode", bool(is_fx))
-            button.setFixedSize(17 if is_fx else 24, 14 if is_fx else 18)
-            button.setIconSize(icon_size(10 if is_fx else 12))
+            if is_fx:
+                button.setText("")
+                button.setFixedSize(*_INSPECTOR_TAB_COMPACT_SIZE)
+                button.setIconSize(icon_size(10))
+            else:
+                label, tooltip = _inspector_tab_copy(tab_id)
+                button.setText(label)
+                button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+                button.setToolTip(tooltip)
+                button.setAccessibleName(label)
+                button.setAccessibleDescription(tooltip)
+                button.setFixedSize(*_INSPECTOR_TAB_SIZE)
+                button.setIconSize(icon_size(16))
             button.style().unpolish(button)
             button.style().polish(button)
+
+    def _refresh_inspector_tab_copy(self) -> None:
+        if hasattr(self, "_inspector_tabs_caption"):
+            self._inspector_tabs_caption.setText(_inspector_tabs_caption())
+            self._inspector_tabs_caption.setToolTip(_inspector_tabs_caption_tooltip())
+        if hasattr(self, "_fx_back_btn"):
+            back_text, back_tip = _fx_back_button_copy()
+            self._fx_back_btn.setText(back_text)
+            self._fx_back_btn.setToolTip(back_tip)
+            self._fx_back_btn.setAccessibleName(back_text)
+            self._fx_back_btn.setAccessibleDescription(back_tip)
+        for tab_id, button in getattr(self, "_inspector_tab_buttons", {}).items():
+            label, tooltip = _inspector_tab_copy(tab_id)
+            if self._inspector_tab != "fx":
+                button.setText(label)
+            button.setToolTip(tooltip)
+            button.setAccessibleName(label)
+            button.setAccessibleDescription(tooltip)
 
     def _move_rows_to_tab(self, tab: str) -> None:
         target = self._tab_layouts.get(tab)
@@ -1867,7 +2023,7 @@ class WorkbenchPanel(QWidget):
             self._mmd_editor_host.hide()
         if hasattr(self, "_ar_pbr_evidence_card"):
             self._ar_pbr_evidence_card.hide()
-        self._node_graph_widget.hide()
+        self._hide_node_graph_widget()
         if hasattr(self, "_fx_summary_host"):
             self._fx_summary_host.hide()
         self._set_vfx_graph_strip(None)
@@ -1878,6 +2034,11 @@ class WorkbenchPanel(QWidget):
         self._set_tab_empty_visible("fx", True, "Select a video track to edit its effect graph.")
         self._set_tab_empty_visible("mask", True, "Select a mask-capable node to edit tracking and masks.")
         self._set_tab_empty_visible("meta", True, "Selection metadata appears here.")
+
+    def wheelEvent(self, event) -> None:
+        if forward_wheel_to_scroll_area(self, event):
+            return
+        super().wheelEvent(event)
 
     def set_live2d_clip(self, track, clip) -> None:
         if clip is None:
@@ -1946,7 +2107,7 @@ class WorkbenchPanel(QWidget):
             self._mmd_editor_host.hide()
         if hasattr(self, "_ar_pbr_evidence_card"):
             self._ar_pbr_evidence_card.hide()
-        self._node_graph_widget.hide()
+        self._hide_node_graph_widget()
         if hasattr(self, "_fx_summary_host"):
             self._fx_summary_host.hide()
         self._set_vfx_graph_strip(None)
@@ -2019,7 +2180,7 @@ class WorkbenchPanel(QWidget):
             self._mmd_editor_host.show()
         if hasattr(self, "_ar_pbr_evidence_card"):
             self._ar_pbr_evidence_card.hide()
-        self._node_graph_widget.hide()
+        self._hide_node_graph_widget()
         if hasattr(self, "_fx_summary_host"):
             self._fx_summary_host.hide()
         self._set_vfx_graph_strip(None)
@@ -2089,7 +2250,7 @@ class WorkbenchPanel(QWidget):
         if hasattr(self, "_ar_pbr_evidence_card"):
             self._ar_pbr_evidence_card.set_track(track)
             self._ar_pbr_evidence_card.show()
-        self._node_graph_widget.hide()
+        self._hide_node_graph_widget()
         if hasattr(self, "_fx_summary_host"):
             self._fx_summary_host.hide()
         self._set_vfx_graph_strip(None)
@@ -2203,9 +2364,11 @@ class WorkbenchPanel(QWidget):
             self._typography_evidence_card.setVisible(has_typography_actor)
         # NodeGraph is primary for node/effect work. Hide the empty default graph
         # when this selection is really a typography workspace.
-        self._node_graph_widget.set_track(track)
         show_node_graph = bool(vfx_summary != "VFX graph: none" or not has_typography_actor)
-        self._node_graph_widget.setVisible(show_node_graph)
+        node_graph = self._ensure_node_graph_widget() if show_node_graph else getattr(self, "_node_graph_widget", None)
+        if node_graph is not None:
+            node_graph.set_track(track)
+            node_graph.setVisible(show_node_graph)
         self._set_tab_empty_visible("fx", False)
         if has_selected_clip_fx or has_typography_actor or vfx_summary != "VFX graph: none":
             self._set_inspector_tab("fx")
@@ -2268,18 +2431,18 @@ class WorkbenchPanel(QWidget):
         self._hide_mmd_physics_rows()
         if hasattr(self, "_audio_evidence_card"):
             self._audio_evidence_card.hide()
-        if hasattr(self, "_sound_editor_panel"):
-            self._sound_editor_panel.set_clip(
-                clip,
-                track=track,
-                context_label="Timeline Audio",
-                context_key=f"timeline:{getattr(track, 'id', 'none')}:{getattr(clip, 'id', 'none')}",
-            )
-            self._sound_editor_panel.set_mixer_tracks(
-                self._audio_tracks_for_sound_editor(track),
-                active_track_id=getattr(track, "id", None),
-            )
-            self._sound_editor_panel.show()
+        sound_panel = self._ensure_sound_editor_panel()
+        sound_panel.set_clip(
+            clip,
+            track=track,
+            context_label="Timeline Audio",
+            context_key=f"timeline:{getattr(track, 'id', 'none')}:{getattr(clip, 'id', 'none')}",
+        )
+        sound_panel.set_mixer_tracks(
+            self._audio_tracks_for_sound_editor(track),
+            active_track_id=getattr(track, "id", None),
+        )
+        sound_panel.show()
         self._set_tab_empty_visible("audio", False)
         self._set_tab_empty_visible("clip", True, "Select a video clip or track to edit clip properties.")
         self._set_tab_empty_visible("fx", True, "Audio clips do not carry video effect graphs yet.")
@@ -2295,7 +2458,7 @@ class WorkbenchPanel(QWidget):
         if hasattr(self, "_ar_pbr_evidence_card"):
             self._ar_pbr_evidence_card.hide()
         # Audio clips don't carry a NodeGraph yet — hide the section.
-        self._node_graph_widget.hide()
+        self._hide_node_graph_widget()
         if hasattr(self, "_fx_summary_host"):
             self._fx_summary_host.hide()
         if hasattr(self, "_fx_empty_label"):
@@ -2337,14 +2500,14 @@ class WorkbenchPanel(QWidget):
         self._rows_host.hide()
         if hasattr(self, "_audio_evidence_card"):
             self._audio_evidence_card.hide()
-        if hasattr(self, "_sound_editor_panel"):
-            self._sound_editor_panel.set_clip(
-                clip,
-                track=None,
-                context_label="Media Pool Audio",
-                context_key=f"media:{src}",
-            )
-            self._sound_editor_panel.show()
+        sound_panel = self._ensure_sound_editor_panel()
+        sound_panel.set_clip(
+            clip,
+            track=None,
+            context_label="Media Pool Audio",
+            context_key=f"media:{src}",
+        )
+        sound_panel.show()
         if hasattr(self, "_live2d_mapping_host"):
             self._live2d_mapping_host.hide()
         if hasattr(self, "_live2d_evidence_card"):
@@ -2353,7 +2516,7 @@ class WorkbenchPanel(QWidget):
             self._mmd_editor_host.hide()
         if hasattr(self, "_ar_pbr_evidence_card"):
             self._ar_pbr_evidence_card.hide()
-        self._node_graph_widget.hide()
+        self._hide_node_graph_widget()
         if hasattr(self, "_fx_summary_host"):
             self._fx_summary_host.hide()
         self._set_tab_empty_visible("audio", False)
@@ -2456,6 +2619,7 @@ class WorkbenchPanel(QWidget):
     def retranslate(self) -> None:
         self._title.setText(tr("workbench.empty.title"))
         self._subtitle.setText(tr("workbench.empty.subtitle"))
+        self._refresh_inspector_tab_copy()
         self._row_name.set_label(tr("workbench.row.name"))
         self._row_source.set_label(tr("workbench.row.source"))
         self._row_duration.set_label(tr("workbench.row.duration"))
@@ -2464,7 +2628,9 @@ class WorkbenchPanel(QWidget):
         self._row_fade_out.set_label(tr("workbench.row.fade_out"))
         self._row_volume.set_label(tr("workbench.row.volume"))
         self._row_speed.set_label(tr("workbench.row.speed"))
-        self._node_graph_widget.retranslate()
+        node_graph = getattr(self, "_node_graph_widget", None)
+        if node_graph is not None:
+            node_graph.retranslate()
 
     # ---- NodeGraph popout (Phase 2A) ----
 
@@ -2482,6 +2648,7 @@ class WorkbenchPanel(QWidget):
         ):
             self._node_graph_popout.close()
             return
+        node_graph = self._ensure_node_graph_widget()
         from app.workbench.node_graph.popout import NodeGraphPopoutWindow
         self._node_graph_popout = NodeGraphPopoutWindow(self)
         self._node_graph_popout.closed.connect(
@@ -2490,9 +2657,9 @@ class WorkbenchPanel(QWidget):
         # Reparent the widget into the popout. Save the index so we
         # can re-insert at the same spot when the window closes.
         self._node_graph_popout_index = self._node_graph_root_layout.indexOf(
-            self._node_graph_widget,
+            node_graph,
         )
-        self._node_graph_root_layout.removeWidget(self._node_graph_widget)
+        self._node_graph_root_layout.removeWidget(node_graph)
         # Drop a placeholder so the dock layout doesn't collapse.
         self._node_graph_placeholder = QLabel(
             tr("workbench.node_graph_popout.placeholder"),
@@ -2513,7 +2680,7 @@ class WorkbenchPanel(QWidget):
             self._node_graph_placeholder,
             stretch=1,
         )
-        self._node_graph_popout.install(self._node_graph_widget)
+        self._node_graph_popout.install(node_graph)
         self._node_graph_popout.show()
         self._node_graph_popout.raise_()
         self._node_graph_popout.activateWindow()
@@ -2530,17 +2697,20 @@ class WorkbenchPanel(QWidget):
             self._node_graph_placeholder = None
         else:
             idx = self._node_graph_popout_index
-        self._node_graph_widget.setParent(self)
+        node_graph = getattr(self, "_node_graph_widget", None)
+        if node_graph is None:
+            return
+        node_graph.setParent(self)
         self._node_graph_root_layout.insertWidget(
-            max(0, idx), self._node_graph_widget, stretch=1,
+            max(0, idx), node_graph, stretch=1,
         )
         # Only reveal if a video track is currently selected — keeps
         # the panel hidden after re-dock when the user switched to an
         # audio clip while the popout was open.
         if self._target is not None and self._target[0] == "video":
-            self._node_graph_widget.show()
+            node_graph.show()
         else:
-            self._node_graph_widget.hide()
+            self._hide_node_graph_widget()
         if self._node_graph_popout is not None:
             self._node_graph_popout.deleteLater()
             self._node_graph_popout = None

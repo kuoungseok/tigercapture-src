@@ -305,7 +305,7 @@ def build_color_workspace(self, main_col, root, controls_bar, sel_row) -> None:
         [self._ai_command_dock],
         start_open=False,
     )
-    self._ai_command_header.setFixedHeight(20)
+    self._ai_command_header.setFixedHeight(36)
     ai_command_layout.addWidget(self._ai_command_header)
     ai_command_layout.addWidget(self._ai_command_dock, stretch=0)
     self._right_dock_layout.addWidget(self._ai_command_section_host, stretch=0)
@@ -314,4 +314,3 @@ def build_color_workspace(self, main_col, root, controls_bar, sel_row) -> None:
     self._ai_command_popout: QDialog | None = None
     self._ai_command_placeholder: QLabel | None = None
     self._ai_command_hide_after_restore = False
-

@@ -24,11 +24,20 @@ from app.region_selector import RegionSelectorOverlay
 from app.donation_dialog import DonationDialog
 from app.screenshot_window import ScreenshotWindow
 from app.settings_dialog import SettingsDialog
-from app.video_editor_window import VideoEditorWindow
 
 
 DEFAULT_GIF_FPS = 15
 DEFAULT_VIDEO_FPS = 30
+VideoEditorWindow = None
+
+
+def _video_editor_window_class():
+    patched_cls = globals().get("VideoEditorWindow")
+    if patched_cls is not None:
+        return patched_cls
+    from app.video_editor_window_core import VideoEditorWindow
+
+    return VideoEditorWindow
 
 
 class AppController(QObject):
@@ -194,6 +203,7 @@ class AppController(QObject):
             app = QApplication.instance()
             if app is not None:
                 app.processEvents()
+            VideoEditorWindow = _video_editor_window_class()
             editor = VideoEditorWindow(source_path=source_path)
         finally:
             self._video_editor_opening = False
@@ -258,6 +268,7 @@ class AppController(QObject):
         from PySide6.QtWidgets import QMessageBox
         from app.project_io import load_project, remember_last_project
 
+        VideoEditorWindow = _video_editor_window_class()
         editor = VideoEditorWindow(source_path=None)
         editor.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         editor.show()
@@ -284,6 +295,7 @@ class AppController(QObject):
 
     def _open_template_from_startup(self, payload: object) -> None:
         data = payload if isinstance(payload, dict) else {}
+        VideoEditorWindow = _video_editor_window_class()
         editor = VideoEditorWindow(source_path=None)
         editor.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         editor.show()

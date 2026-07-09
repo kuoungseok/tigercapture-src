@@ -1380,6 +1380,32 @@ def test_project_player_depth_view_mode_shows_depth_map_without_compositing(tmp_
     assert diagnostics["depth_view"]["near_is_white"] is True
 
 
+def test_project_player_depth_view_mode_works_without_ar_pbr_tracks(monkeypatch):
+    import app.depth.estimator as estimator
+
+    def fake_estimate(frame, *, source_id="", time_ms=0, **_kwargs):
+        h, w = frame.shape[:2]
+        depth = np.linspace(0.0, 1.0, w, dtype=np.float32)[None, :].repeat(h, axis=0)
+        return depth, {"provider": "fake", "source_id": source_id, "time_ms": time_ms}
+
+    monkeypatch.setattr(estimator, "estimate_depth", fake_estimate)
+    player = ProjectPlayer()
+    player._state = PlayerState.PAUSED
+    player.set_ar_pbr_depth_view_mode("depth_map")
+    base = np.zeros((18, 24, 3), dtype=np.uint8)
+
+    out, meta = player._apply_or_defer_ar_pbr_overlay(base, 33)
+
+    assert meta is None
+    assert out.shape == base.shape
+    assert out.dtype == np.uint8
+    assert not np.array_equal(out, base)
+    diagnostics = player._ar_pbr_last_diagnostics
+    assert diagnostics["preview_renderer_selected"] == "depth_map_only"
+    assert diagnostics["active_track_count"] == 0
+    assert diagnostics["depth_view"]["mode"] == "grayscale"
+
+
 def test_project_player_auto_paused_uses_full_gpu_before_packet(tmp_path, monkeypatch):
     monkeypatch.delenv("TIGERCAPTURE_AR_PBR_PREVIEW_RENDERER", raising=False)
     asset = tmp_path / "tinted_triangle.glb"

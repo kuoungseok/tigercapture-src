@@ -2,8 +2,15 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QSizePolicy, QWidget
+from PySide6.QtCore import QPoint, QTimer, Qt
+from PySide6.QtWidgets import (
+    QHBoxLayout,
+    QLabel,
+    QPushButton,
+    QScrollArea,
+    QSizePolicy,
+    QWidget,
+)
 
 from app.icons import app_icon, icon_size
 
@@ -12,6 +19,9 @@ _COLLAPSIBLE_HEADER_NAMES = {
     "CollapsibleSectionHeader",
     "MediaPoolCollapsibleSectionHeader",
 }
+
+_SECTION_HEADER_HEIGHT = 36
+_SECTION_ICON_BUTTON_HEIGHT = 27
 
 
 def make_section_header(title: str, accent: str, parent: QWidget | None = None) -> QLabel:
@@ -35,7 +45,7 @@ def make_header_popout_button(
     popout_btn.setObjectName("PreviewPopoutIcon")
     popout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
     popout_btn.setToolTip(f"Pop out {title}")
-    popout_btn.setFixedSize(button_size, button_size)
+    popout_btn.setFixedSize(button_size, max(button_size, int(round(button_size * 1.5))))
     popout_btn.setText("")
     popout_btn.setIcon(app_icon("popout", size=icon_px))
     popout_btn.setIconSize(icon_size(icon_px))
@@ -64,7 +74,7 @@ def make_collapsible_section_header(
         else "CollapsibleSectionHeader"
     )
     row.setProperty("accent", accent)
-    row.setFixedHeight(24)
+    row.setFixedHeight(_SECTION_HEADER_HEIGHT)
     row.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
     layout = QHBoxLayout(row)
     layout.setContentsMargins(0, 0, 5, 0)
@@ -87,7 +97,7 @@ def make_collapsible_section_header(
     toggle.setCheckable(True)
     toggle.setCursor(Qt.CursorShape.PointingHandCursor)
     toggle.setToolTip(f"Show or hide {title}")
-    toggle.setFixedSize(18, 18)
+    toggle.setFixedSize(18, _SECTION_ICON_BUTTON_HEIGHT)
     toggle.setIcon(app_icon("chevron-down", size=10))
     toggle.setIconSize(icon_size(10))
     layout.addWidget(toggle)
@@ -111,8 +121,10 @@ def make_collapsible_section_header(
             _set_host_height(
                 host,
                 opened,
-                default_min_height=max(34, row.height() + 2),
+                default_min_height=max(42, row.height() + 2),
             )
+            if opened:
+                _ensure_host_visible_in_scroll(host)
         row.updateGeometry()
 
     toggle.toggled.connect(_apply)
@@ -125,8 +137,8 @@ def set_collapsible_host_open(host: QWidget | None, opened: bool) -> None:
     if host is None:
         return
     host.setVisible(True)
-    _set_host_height(host, opened, default_min_height=36 if not opened else 220)
-    for btn in host.findChildren(QPushButton, "SectionDisclosure"):
+    _set_host_height(host, opened, default_min_height=42 if not opened else 220)
+    for btn in _header_disclosure_buttons(host):
         try:
             btn.blockSignals(True)
             btn.setChecked(bool(opened))
@@ -151,6 +163,8 @@ def set_collapsible_host_open(host: QWidget | None, opened: bool) -> None:
                 widget.setVisible(True)
             else:
                 widget.setVisible(bool(opened))
+    if opened:
+        _ensure_host_visible_in_scroll(host)
 
 
 def _set_host_height(host: QWidget, opened: bool, *, default_min_height: int) -> None:
@@ -189,3 +203,47 @@ def _set_header_collapsed_state(header: QWidget, opened: bool) -> None:
     header.style().unpolish(header)
     header.style().polish(header)
     header.updateGeometry()
+
+
+def _header_disclosure_buttons(host: QWidget) -> list[QPushButton]:
+    buttons: list[QPushButton] = []
+    layout = host.layout()
+    if layout is None:
+        return buttons
+    for idx in range(layout.count()):
+        item = layout.itemAt(idx)
+        widget = item.widget() if item is not None else None
+        if widget is None or widget.objectName() not in _COLLAPSIBLE_HEADER_NAMES:
+            continue
+        for child in widget.findChildren(
+            QPushButton,
+            "SectionDisclosure",
+            Qt.FindChildOption.FindDirectChildrenOnly,
+        ):
+            buttons.append(child)
+    return buttons
+
+
+def _ensure_host_visible_in_scroll(host: QWidget) -> None:
+    def _apply() -> None:
+        node = host.parentWidget()
+        while node is not None:
+            if isinstance(node, QScrollArea):
+                try:
+                    scroll_widget = node.widget()
+                    bar = node.verticalScrollBar()
+                    if scroll_widget is not None and bar is not None:
+                        y = host.mapTo(scroll_widget, QPoint(0, 0)).y()
+                        target = max(bar.minimum(), min(bar.maximum(), y - 8))
+                        bar.setValue(target)
+                    else:
+                        node.ensureWidgetVisible(host, 0, 12)
+                except Exception:
+                    pass
+                return
+            try:
+                node = node.parentWidget()
+            except Exception:
+                return
+
+    QTimer.singleShot(0, _apply)

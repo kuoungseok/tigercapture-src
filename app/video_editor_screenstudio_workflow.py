@@ -14,6 +14,7 @@ from app.typography import TextClip
 from app.video_editor_media_proxy import _probe_video_dimensions
 from app.video_editor_screenstudio_dialogs import ScreenStudioPolishDialog as _ScreenStudioPolishDialog
 from app import video_editor_export_workflow as _export_workflow
+from app.video_editor_workbench_section_scroll import make_workbench_section_scroll_area
 
 
 class _WindowModuleProxy:
@@ -1663,12 +1664,20 @@ def _ensure_creator_assist_panel(self) -> list[QWidget]:
         return []
     panel = getattr(self, "_creator_assist_panel", None)
     if panel is not None:
-        return [panel]
+        wrapper = getattr(self, "_creator_assist_scroll_area", None)
+        return [wrapper or panel]
     try:
         from app.creator_assist_panel import CreatorAssistPanel
 
         host = getattr(self, "_creator_assist_section_host", None)
         panel = CreatorAssistPanel(host)
+        panel.setMinimumHeight(max(440, panel.sizeHint().height()))
+        wrapper = make_workbench_section_scroll_area(
+            host,
+            panel,
+            object_name="CreatorAssistScrollArea",
+            min_content_height=440,
+        )
         panel.analyze_requested.connect(self._analyze_creator_assist)
         panel.apply_requested.connect(self._apply_creator_assist_bundle)
         panel.preview_short_requested.connect(self._preview_creator_assist_short)
@@ -1676,6 +1685,7 @@ def _ensure_creator_assist_panel(self) -> list[QWidget]:
         panel.copy_publish_requested.connect(self._copy_creator_assist_publish_text)
         panel.quick_create_requested.connect(self._apply_creator_assist_quick_create)
         self._creator_assist_panel = panel
+        self._creator_assist_scroll_area = wrapper
         try:
             panel.set_bundle(dict(getattr(self, "_creator_assist_bundle", {}) or {}))
         except Exception:
@@ -1684,14 +1694,15 @@ def _ensure_creator_assist_panel(self) -> list[QWidget]:
         placeholder = getattr(self, "_creator_assist_placeholder", None)
         layout = host.layout() if host is not None else None
         if layout is not None and placeholder is not None:
-            layout.replaceWidget(placeholder, panel)
+            layout.replaceWidget(placeholder, wrapper)
             placeholder.hide()
             placeholder.setParent(None)
             placeholder.deleteLater()
         elif layout is not None:
-            layout.addWidget(panel, stretch=1)
+            layout.addWidget(wrapper, stretch=1)
         panel.setVisible(True)
-        return [panel]
+        wrapper.setVisible(True)
+        return [wrapper]
     except Exception as exc:
         try:
             self._flash_status(f"Creator Assist load failed: {exc}")
@@ -2383,4 +2394,3 @@ def _paint_screenstudio_candidate_overlay(
             ):
                 painter.drawRoundedRect(QRect(int(px) - handle // 2, int(py) - handle // 2, handle, handle), 3, 3)
     painter.restore()
-

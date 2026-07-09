@@ -96,8 +96,8 @@ class NodeGraphWidget(QWidget):
         super().__init__(parent)
         self.setStyleSheet(studio_chrome_qss(
             "QWidget{background:#0F1011;color:#E5E7EB;}"
-            "QPushButton#ToolButton{min-width:18px;min-height:16px;padding:0px;}"
-            "QToolButton#ToolButton{min-width:18px;min-height:16px;padding:0px;}"
+            "QPushButton#ToolButton{min-width:18px;min-height:24px;padding:0px;}"
+            "QToolButton#ToolButton{min-width:18px;min-height:24px;padding:0px;}"
         ))
         # Phase 2D: tracked so save_to_track / load_from_track stay
         # bound to the right object.
@@ -128,7 +128,7 @@ class NodeGraphWidget(QWidget):
         self._popout_btn.setIcon(app_icon("popout", size=11))
         self._popout_btn.setIconSize(icon_size(11))
         self._popout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._popout_btn.setFixedSize(18, 16)
+        self._popout_btn.setFixedSize(18, 24)
         self._popout_btn.setToolTip(tr("workbench.node_graph.popout.tooltip"))
         self._popout_btn.clicked.connect(self.popout_requested.emit)
         header_lay.addWidget(self._popout_btn)
@@ -138,7 +138,7 @@ class NodeGraphWidget(QWidget):
         # Toolbar
         toolbar = QWidget()
         toolbar.setObjectName("NodeGraphToolbar")
-        toolbar.setFixedHeight(23)
+        toolbar.setFixedHeight(35)
         toolbar.setStyleSheet(f"""
         QWidget#NodeGraphToolbar {{
             background-color: #101112;
@@ -200,7 +200,7 @@ class NodeGraphWidget(QWidget):
         def _tool_group() -> tuple[QFrame, QHBoxLayout]:
             frame = QFrame(toolbar)
             frame.setObjectName("NodeGraphToolGroup")
-            frame.setFixedHeight(19)
+            frame.setFixedHeight(29)
             lay = QHBoxLayout(frame)
             lay.setContentsMargins(2, 1, 2, 1)
             lay.setSpacing(1)
@@ -210,7 +210,7 @@ class NodeGraphWidget(QWidget):
             button.setText("")
             button.setIcon(app_icon(icon_name, size=11))
             button.setIconSize(icon_size(11))
-            button.setFixedSize(18, 16)
+            button.setFixedSize(18, 24)
             button.setToolTip(tooltip)
             button.setAccessibleName(tooltip.split("(")[0].strip())
 
@@ -263,7 +263,7 @@ class NodeGraphWidget(QWidget):
         eff_btn.setText("")
         eff_btn.setIcon(app_icon("effects", size=11))
         eff_btn.setIconSize(icon_size(11))
-        eff_btn.setFixedSize(18, 16)
+        eff_btn.setFixedSize(18, 24)
         eff_btn.setToolTip("Add effect node")
         eff_btn.setAccessibleName("Add effect node")
         eff_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -302,7 +302,7 @@ class NodeGraphWidget(QWidget):
         preset_btn.setText("")
         preset_btn.setIcon(app_icon("workflow", size=11))
         preset_btn.setIconSize(icon_size(11))
-        preset_btn.setFixedSize(18, 16)
+        preset_btn.setFixedSize(18, 24)
         preset_btn.setToolTip("Add node workflow preset")
         preset_btn.setAccessibleName("Add node workflow preset")
         preset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -347,6 +347,7 @@ class NodeGraphWidget(QWidget):
         self.scene = NodeGraphScene(self)
         self.view = NodeGraphView(self.scene, self)
         self.view.setMinimumHeight(150)
+        self.view.setToolTip("Wheel scrolls Workbench tools. Ctrl + wheel zooms the node graph.")
         self.view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.view.customContextMenuRequested.connect(self._on_view_context_menu)
         canvas_lay.addWidget(self.view, stretch=1)
@@ -848,7 +849,7 @@ class NodeGraphWidget(QWidget):
             QPoint(0, 0),
             QPoint(0, angle),
             Qt.MouseButton.NoButton,
-            Qt.KeyboardModifier.NoModifier,
+            Qt.KeyboardModifier.ControlModifier,
             Qt.ScrollPhase.NoScrollPhase,
             False,
         )

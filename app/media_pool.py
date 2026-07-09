@@ -46,6 +46,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QProgressDialog,
     QPushButton,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -330,6 +331,7 @@ class MediaPool(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("MediaPool")
+        self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setStyleSheet(
             f"QWidget#MediaPool {{ background:transparent; font-family:{FONT_FAMILY}; }}"
             "QWidget#MediaPool[dropState=\"active\"] { background:rgba(255,255,255,5); }"
@@ -590,7 +592,8 @@ class MediaPool(QWidget):
         self._list.empty_context_menu.connect(self._show_context_menu)
         self._list.item_context_menu.connect(self._show_item_context_menu)
         self._list.auto_polish_item_requested.connect(self._on_auto_polish_item_requested)
-        self._list.setMinimumHeight(220)
+        self._list.setMinimumHeight(280)
+        self._list.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         # Drag OUT only — pool items go to tracks, but tracks don't
         # send anything back, and we don't allow rearranging inside
         # the pool either. Without ``DragOnly`` the default

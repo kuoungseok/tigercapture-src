@@ -46,7 +46,7 @@ _BINDINGS = (
     ('_refresh_top_project_breadcrumb', 'app.video_editor_localization_controller', '_refresh_top_project_breadcrumb', False),
     ('_refresh_workbench', 'app.video_editor_workbench_controller', 'refresh_workbench', False),
     ('_on_workbench_node_focused', 'app.video_editor_workbench_controller', '_on_workbench_node_focused', False),
-    ('_set_collapsible_host_open', 'app.video_editor_section_chrome', 'set_collapsible_host_open', False),
+    ('_set_collapsible_host_open', 'app.video_editor_section_chrome', 'set_collapsible_host_open', True),
     ('_toggle_media_pool_popout', 'app.video_editor_popout_controller', 'toggle_media_pool_popout', False),
     ('_make_side_dock_placeholder', 'app.video_editor_popout_controller', 'make_side_dock_placeholder_for_owner', False),
     ('_toggle_actor_library_popout', 'app.video_editor_popout_controller', 'toggle_actor_library_popout', False),

@@ -20,6 +20,7 @@ from PySide6.QtWidgets import QGraphicsView, QMenu
 
 from app.icons import app_icon
 from app.style import studio_chrome_qss
+from app.workbench_scroll import forward_wheel_to_scroll_area
 from app.workbench.node_graph.theme import (
     NODE_GRAPH_COLORS as C,
     NODE_GRAPH_SIZES as S,
@@ -94,6 +95,11 @@ class NodeGraphView(QGraphicsView):
     # ---- zoom ----
 
     def wheelEvent(self, event) -> None:
+        if not (event.modifiers() & Qt.KeyboardModifier.ControlModifier):
+            if forward_wheel_to_scroll_area(self, event):
+                return
+            event.ignore()
+            return
         step = S["zoom_step"]
         factor = step if event.angleDelta().y() > 0 else 1.0 / step
         new_zoom = self._zoom * factor
