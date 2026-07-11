@@ -33,6 +33,7 @@ from app.style import (
 from app.studio_slider import StudioSlider
 from app.video_editor_color_widgets import _HueCurveWidget, _LumaDial, parse_cube_lut
 from app.video_editor_layout_specs import (
+    EDITOR_RESIZABLE_PANE_MAX_HEIGHT,
     VIEWER_TOP_STRETCH,
     WORKBENCH_SLOT_MIN_WIDTH,
     WORKBENCH_TOP_STRETCH,
@@ -1822,7 +1823,7 @@ def _update_color_dock_visibility(self, selected_node=None) -> None:
     main_splitter = getattr(self, "_main_dock_splitter", None)
     if main_splitter is not None:
         main_splitter.setMinimumHeight(410)
-        main_splitter.setMaximumHeight(600)
+        main_splitter.setMaximumHeight(EDITOR_RESIZABLE_PANE_MAX_HEIGHT)
         main_splitter.updateGeometry()
     # Mask toolbar follows the dock ??same activation rule.
     if hasattr(self, "_mask_toolbar_widget"):
@@ -1975,7 +1976,11 @@ def _pulse_compact_color_cards(self) -> None:
 
 
 def _set_color_reference_workspace_ratio(self, active: bool) -> None:
-    layout = getattr(self, "_top_work_layout", None)
+    layout = getattr(self, "_top_work_splitter", None) or getattr(
+        self,
+        "_top_work_layout",
+        None,
+    )
     viewer = getattr(self, "_viewer_column", None)
     workbench = getattr(self, "_top_workbench_slot", None)
     if layout is None or viewer is None or workbench is None:
@@ -1984,20 +1989,31 @@ def _set_color_reference_workspace_ratio(self, active: bool) -> None:
     workbench_idx = layout.indexOf(workbench)
     if viewer_idx < 0 or workbench_idx < 0:
         return
+    set_splitter_stretch = getattr(layout, "setStretchFactor", None)
+    set_layout_stretch = getattr(layout, "setStretch", None)
+
+    def _set_stretch(index: int, value: int) -> None:
+        if callable(set_splitter_stretch):
+            set_splitter_stretch(index, value)
+        elif callable(set_layout_stretch):
+            set_layout_stretch(index, value)
+
     if active:
         # Color grading must not make the Workbench claim a wider minimum than
         # the normal editor layout. The color panel is scrollable/compact; the
         # viewer remains the primary surface and must stay visible.
-        layout.setStretch(viewer_idx, VIEWER_TOP_STRETCH)
-        layout.setStretch(workbench_idx, WORKBENCH_TOP_STRETCH)
+        _set_stretch(viewer_idx, VIEWER_TOP_STRETCH)
+        _set_stretch(workbench_idx, WORKBENCH_TOP_STRETCH)
         workbench.setMinimumWidth(WORKBENCH_SLOT_MIN_WIDTH)
     else:
-        layout.setStretch(viewer_idx, VIEWER_TOP_STRETCH)
-        layout.setStretch(workbench_idx, WORKBENCH_TOP_STRETCH)
+        _set_stretch(viewer_idx, VIEWER_TOP_STRETCH)
+        _set_stretch(workbench_idx, WORKBENCH_TOP_STRETCH)
         workbench.setMinimumWidth(WORKBENCH_SLOT_MIN_WIDTH)
-    for widget in (viewer, workbench, getattr(self, "_top_work_area", None)):
+    for widget in (viewer, workbench, getattr(self, "_top_work_area", None), layout):
         if widget is not None:
-            widget.updateGeometry()
+            update = getattr(widget, "updateGeometry", None)
+            if callable(update):
+                update()
 
 
 def _format_color_slider_label(self, key: str, value: int) -> str:

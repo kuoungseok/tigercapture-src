@@ -26,6 +26,14 @@ Milica VRM Avatar Target:
 external\assets\vtuber\booth_milica\Milica1.3free\Milica_v1.3.vrm
 ```
 
+2026-07-10 QA note: the current durable Trump sample is not always a tight
+chest-up shot. In the tested Oval Office frames, the visible person scope is
+classified as `upper_body`, so the data-driven visibility policy correctly
+selects `half_body` / `head_to_waist` instead of forcing the older
+`chest_up -> bust_up` assumption. Keep the rule data-driven:
+`chest_up` maps to `bust_up`, but true `upper_body` footage maps to at least
+`half_body`.
+
 ## User Intent
 
 - AR/PBR review evidence should use a bicycle model.

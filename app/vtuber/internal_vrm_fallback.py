@@ -110,6 +110,7 @@ def render_internal_vrm_fallback_frame(
                 descriptor,
                 max_triangles_per_geometry=preview_cap,
             )
+            diagnostics["live_preview_triangle_cap"] = int(preview_cap)
         image, render_diag = _render_descriptor_frame(
             module,
             descriptor=descriptor,
@@ -365,6 +366,11 @@ def _render_descriptor_frame(
         "render_profile": VRM_RENDER_PROFILE,
         "pbr_renderer": False,
         "ar_pbr_preview": False,
+        "texture_max_size": int(settings.get("texture_max_size", 512) or 512),
+        "fit_padding": float(settings.get("fit_padding", 0.03) or 0.03),
+        "enable_shadow_map": bool(settings.get("enable_shadow_map", False)),
+        "gpu_warmup_frames": int(settings.get("gpu_warmup_frames", 8) or 8),
+        "reuse_gpu_widget": bool(settings.get("reuse_gpu_widget", True)),
     }
     focal = float(placement.get("focal") or camera.get("focal_length_px") or max(width, height) * 0.92)
     intrinsics = {

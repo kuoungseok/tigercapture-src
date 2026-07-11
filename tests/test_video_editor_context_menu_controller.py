@@ -143,7 +143,12 @@ def test_video_clip_model_covers_nested_fx_transition_and_dispatch_commands():
         _on_clip_badge_action_requested=lambda tid, cid, action: calls.append(("focus", (tid, cid, action))),
         _extract_audio_from_video_selection=lambda _track, _clip: calls.append(("extract", _clip.id)),
         _blade_at_playhead=lambda **kwargs: calls.append(("blade", kwargs.get("track_id"))),
-        _delete_selected_clips=lambda: calls.append(("delete", None)),
+        _move_video_clip_to_playhead=lambda _track, _clip: calls.append(("move_playhead", _clip.id)),
+        _prompt_move_video_clip_to_time=lambda _track, _clip: calls.append(("move_time", _clip.id)),
+        _nudge_video_clip_frames=lambda _track, _clip, frames: calls.append(("nudge", (_clip.id, frames))),
+        _delete_video_clip_leave_gap=lambda _track, _clip: calls.append(("delete_gap", _clip.id)),
+        _ripple_delete_video_clip=lambda _track, _clip: calls.append(("ripple_delete", _clip.id)),
+        _delete_selected_clips=lambda: calls.append(("delete_legacy", None)),
         _edit_nested_sequence_clip=lambda _track, _clip: calls.append(("edit_nested", _clip.id)),
         _open_nested_sequence_for_edit=lambda _track, _clip: calls.append(("expand_nested", _clip.id)),
     )
@@ -160,7 +165,14 @@ def test_video_clip_model_covers_nested_fx_transition_and_dispatch_commands():
         "expand_nested_sequence",
         "extract_audio",
         "blade_at_playhead",
-        "delete_selected_clips",
+        "move_clip_to_playhead",
+        "move_clip_to_time",
+        "nudge_clip_left_frame",
+        "nudge_clip_right_frame",
+        "nudge_clip_left_5_frames",
+        "nudge_clip_right_5_frames",
+        "delete_clip_leave_gap",
+        "ripple_delete_clip",
     ]
     assert rows[2]["label"] == "Enable Clip FX"
     assert rows[4]["enabled"] is False
@@ -170,11 +182,21 @@ def test_video_clip_model_covers_nested_fx_transition_and_dispatch_commands():
     assert ctx.dispatch_video_clip_context_menu_action(owner, track, clip, "focus_fx_stack") is True
     assert ctx.dispatch_video_clip_context_menu_action(owner, track, clip, "extract_audio") is True
     assert ctx.dispatch_video_clip_context_menu_action(owner, track, clip, "blade_at_playhead") is True
+    assert ctx.dispatch_video_clip_context_menu_action(owner, track, clip, "move_clip_to_playhead") is True
+    assert ctx.dispatch_video_clip_context_menu_action(owner, track, clip, "nudge_clip_left_frame") is True
+    assert ctx.dispatch_video_clip_context_menu_action(owner, track, clip, "nudge_clip_right_5_frames") is True
+    assert ctx.dispatch_video_clip_context_menu_action(owner, track, clip, "delete_clip_leave_gap") is True
+    assert ctx.dispatch_video_clip_context_menu_action(owner, track, clip, "ripple_delete_clip") is True
     assert calls == [
         ("set_fx", True),
         ("focus", (7, 33, "fx")),
         ("extract", 33),
         ("blade", 7),
+        ("move_playhead", 33),
+        ("nudge", (33, -1)),
+        ("nudge", (33, 5)),
+        ("delete_gap", 33),
+        ("ripple_delete", 33),
     ]
 
 

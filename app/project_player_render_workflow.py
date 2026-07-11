@@ -438,7 +438,7 @@ def _emit_nested_sequence_frame(self, rgb: np.ndarray, pos_ms: int) -> None:
     self._emit_rgb_frame(rgb, None, _perf_detail, _perf_stage_ms, gpu_meta=gpu_meta)
 
 
-def _render_frame_at(self, pos_ms: int, force_seek: bool = False, allow_cached: bool = False) -> None:
+def _render_frame_at(self, pos_ms: int, force_seek: bool = False, allow_cached: bool = False) -> bool:
     from app.perf_monitor import perf_span, stage_threshold_ms
 
     _perf_stage_ms = stage_threshold_ms()
@@ -462,18 +462,18 @@ def _render_frame_at(self, pos_ms: int, force_seek: bool = False, allow_cached: 
             self._emit_blank()
         self._last_rendered_track_id = None
         self._last_rendered_clip_path = None
-        return
+        return True
     track, clip = pair
     if bool(getattr(clip, "is_nested_sequence", False)):
         rgb = self._render_nested_sequence_rgb(clip, pos_ms)
         if rgb is None:
             self._emit_blank()
-            return
+            return True
         self._last_rendered_track_id = None
         self._last_rendered_clip_path = None
         self._last_rendered_frame_idx = -1
         self._emit_nested_sequence_frame(rgb, pos_ms)
-        return
+        return True
     # Resolve decoder and fps: prefer per-clip source_path (multi-source),
     # fall back to per-track decoder (legacy single-source).
     clip_sp = getattr(clip, "source_path", None)
@@ -487,7 +487,7 @@ def _render_frame_at(self, pos_ms: int, force_seek: bool = False, allow_cached: 
         fps = self._fps.get(track.id, 30.0)
         clip_sp = None  # fall back path: use track-level sequential opt
     if decoder is None or fps <= 0:
-        return
+        return False
     local_ms = clip.timeline_to_source_ms(pos_ms)
     frame_idx = int(local_ms / 1000.0 * fps)
     cache_key = self._preview_frame_cache_key(pos_ms, track, clip, clip_sp, frame_idx)
@@ -496,7 +496,7 @@ def _render_frame_at(self, pos_ms: int, force_seek: bool = False, allow_cached: 
         f"{_perf_detail} frame={frame_idx}",
         _perf_stage_ms,
     ):
-        return
+        return True
     # Sequential read optimization: only seek when necessary.
     # The sequential key is now (track_id, clip_source_path) so switching
     # between clips with different source files always seeks.
@@ -515,10 +515,32 @@ def _render_frame_at(self, pos_ms: int, force_seek: bool = False, allow_cached: 
             decoder.seek_to_frame(frame_idx)
         rgb = decoder.read_rgb()
     if rgb is None:
-        return
+        return False
     self._last_rendered_track_id = track.id
     self._last_rendered_clip_path = clip_sp
     self._last_rendered_frame_idx = frame_idx
+
+    repair_applied = False
+    try:
+        from app.frame_repair import apply_frame_repair_rgb
+
+        def _repair_reader(idx: int):
+            decoder.seek_to_frame(max(0, int(idx)))
+            return decoder.read_rgb()
+
+        repaired_rgb, repair_applied = apply_frame_repair_rgb(
+            rgb,
+            clip=clip,
+            source_ms=local_ms,
+            fps=fps,
+            frame_reader=_repair_reader,
+        )
+        if repair_applied:
+            rgb = repaired_rgb
+            # The repair reader seeks around; sequential-read state is stale.
+            self._last_rendered_frame_idx = -1
+    except Exception:
+        pass
 
     # Slow-motion frame blending: when a SpeedSegment with
     # frame_blend=True covers this position and speed < 1.0, blend
@@ -534,6 +556,7 @@ def _render_frame_at(self, pos_ms: int, force_seek: bool = False, allow_cached: 
         active_seg is not None
         and getattr(active_seg, "frame_blend", False)
         and active_seg.speed < 1.0
+        and not repair_applied
     ):
         # Fractional position within this source frame (0.0–1.0)
         exact_frame = local_ms / 1000.0 * fps
@@ -955,7 +978,7 @@ def _render_frame_at(self, pos_ms: int, force_seek: bool = False, allow_cached: 
             gpu_meta=self._merge_gpu_meta(_clip_fx_meta, gpu_meta),
             cache_key=cache_key,
         )
-        return
+        return True
 
     # Determine whether the GL fragment shader can handle this grade.
     # Simple grades (brightness/contrast/saturation/3-way wheels) are
@@ -1044,6 +1067,7 @@ def _render_frame_at(self, pos_ms: int, force_seek: bool = False, allow_cached: 
         gpu_meta=self._merge_gpu_meta(_clip_fx_meta, gpu_meta),
         cache_key=cache_key,
     )
+    return True
 
 
 def _blend_frames(

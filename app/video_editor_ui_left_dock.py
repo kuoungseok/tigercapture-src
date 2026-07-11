@@ -1,14 +1,73 @@
 from __future__ import annotations
 
-from PySide6.QtWidgets import QLabel, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtCore import QByteArray, QSettings, Qt
+from PySide6.QtWidgets import QLabel, QSizePolicy, QSplitter, QVBoxLayout, QWidget
 
 from app.i18n import tr
 from app.media_pool import MediaPool
+from app.video_editor_layout_specs import (
+    LEFT_DOCK_SECTIONS_SPLITTER_HANDLE_WIDTH,
+    LEFT_DOCK_SECTIONS_SPLITTER_SETTINGS_KEY,
+    left_dock_sections_splitter_qss,
+)
 from app.video_editor_lazy_panel import LazyPanelHost
 from app.video_editor_actor_library import ActorLibraryPanel
 
 
+def _editor_settings() -> QSettings:
+    return QSettings("TigerCapture", "TigerCapture")
+
+
+def _restore_left_dock_sections_splitter_state(splitter: QSplitter) -> bool:
+    try:
+        state = _editor_settings().value(LEFT_DOCK_SECTIONS_SPLITTER_SETTINGS_KEY)
+    except Exception:
+        return False
+    if state is None:
+        return False
+    if isinstance(state, QByteArray):
+        if state.isEmpty():
+            return False
+    elif isinstance(state, (bytes, bytearray)):
+        state = QByteArray(bytes(state))
+    else:
+        return False
+    try:
+        return bool(splitter.restoreState(state))
+    except Exception:
+        return False
+
+
+def _save_left_dock_sections_splitter_state(owner) -> None:
+    splitter = getattr(owner, "_left_dock_sections_splitter", None)
+    if splitter is None:
+        return
+    try:
+        _editor_settings().setValue(
+            LEFT_DOCK_SECTIONS_SPLITTER_SETTINGS_KEY,
+            splitter.saveState(),
+        )
+    except Exception:
+        pass
+
+
 def build_left_dock_sections(self) -> None:
+    self._left_dock_sections_splitter = QSplitter(
+        Qt.Orientation.Vertical,
+        self._left_dock_host,
+    )
+    self._left_dock_sections_splitter.setObjectName("LeftDockSectionsSplitter")
+    self._left_dock_sections_splitter.setChildrenCollapsible(False)
+    self._left_dock_sections_splitter.setHandleWidth(
+        LEFT_DOCK_SECTIONS_SPLITTER_HANDLE_WIDTH,
+    )
+    self._left_dock_sections_splitter.setStyleSheet(left_dock_sections_splitter_qss())
+    self._left_dock_sections_splitter.setSizePolicy(
+        QSizePolicy.Policy.Expanding,
+        QSizePolicy.Policy.Expanding,
+    )
+    self._left_dock_layout.addWidget(self._left_dock_sections_splitter, stretch=1)
+
     # --- Media Pool section ??DaVinci-style. OS file drops go
     # here and pool items can be dragged onto a track row to
     # create a clip without going through the right-click menu.
@@ -43,6 +102,7 @@ def build_left_dock_sections(self) -> None:
     self._media_pool.avatar_target_requested.connect(self._use_vrm_media_as_avatar_target)
     self._media_pool.vtuber_studio_requested.connect(self._open_vrm_media_in_vtuber_studio)
     self._media_pool.mmd_asset_requested.connect(self._add_mmd_asset_to_timeline)
+    self._media_pool.character_asset_hub_requested.connect(self._open_character_asset_hub)
     self._media_pool_header = self._make_collapsible_section_header(
         tr("veditor.section.media_pool"),
         "media_pool",
@@ -69,10 +129,20 @@ def build_left_dock_sections(self) -> None:
     self._localized_collapsible_headers["media_pool"] = self._media_pool_header
     mph.addWidget(self._media_pool_header)
     mph.addWidget(self._media_pool, stretch=1)
-    self._left_dock_layout.addWidget(
-        self._media_pool_section_host, stretch=12,
-    )
+    self._left_dock_sections_splitter.addWidget(self._media_pool_section_host)
     self._yield_startup_ui("media_pool")
+
+    self._left_secondary_sections_host = QWidget(self._left_dock_sections_splitter)
+    self._left_secondary_sections_host.setObjectName("LeftSecondarySectionsHost")
+    self._left_secondary_sections_host.setMinimumHeight(190)
+    self._left_secondary_sections_host.setSizePolicy(
+        QSizePolicy.Policy.Expanding,
+        QSizePolicy.Policy.Expanding,
+    )
+    left_secondary_sections_layout = QVBoxLayout(self._left_secondary_sections_host)
+    left_secondary_sections_layout.setContentsMargins(0, 0, 0, 0)
+    left_secondary_sections_layout.setSpacing(10)
+    self._left_secondary_sections_layout = left_secondary_sections_layout
 
     # --- Actor Library section. Actor creation is item-first:
     # drag Live2D/Spine cards into the timeline/actor lanes instead of
@@ -98,7 +168,7 @@ def build_left_dock_sections(self) -> None:
     )
     alh.addWidget(self._actor_library_header)
     alh.addWidget(self._actor_library_panel)
-    self._left_dock_layout.addWidget(self._actor_library_section_host)
+    self._left_secondary_sections_layout.addWidget(self._actor_library_section_host)
     self._yield_startup_ui("actor_library")
 
     # --- Effects Presets section. Timeline actor cards still live above
@@ -164,7 +234,7 @@ def build_left_dock_sections(self) -> None:
     self._localized_collapsible_headers["effects"] = self._effects_library_header
     elh.addWidget(self._effects_library_header)
     elh.addWidget(effects_preset_host)
-    self._left_dock_layout.addWidget(self._effects_library_section_host)
+    self._left_secondary_sections_layout.addWidget(self._effects_library_section_host)
     self._effects_popout_btn = None
 
     # --- Title Presets section ??drag-to-timeline typography presets.
@@ -217,7 +287,7 @@ def build_left_dock_sections(self) -> None:
     )
     tpsh.addWidget(self._title_presets_header)
     tpsh.addWidget(title_presets_host)
-    self._left_dock_layout.addWidget(self._title_presets_section_host)
+    self._left_secondary_sections_layout.addWidget(self._title_presets_section_host)
 
     # --- Transitions section ??DaVinci-style clip-boundary transitions.
     # Each card can be dragged to a clip's right edge to set
@@ -271,7 +341,7 @@ def build_left_dock_sections(self) -> None:
     )
     tsh.addWidget(self._transitions_header)
     tsh.addWidget(transitions_host)
-    self._left_dock_layout.addWidget(self._transitions_section_host)
+    self._left_secondary_sections_layout.addWidget(self._transitions_section_host)
 
     # --- Workflow Presets section: one-click template/caption/sticker/motion
     # packs from the same preset library used by automation and CLI QA.
@@ -325,12 +395,20 @@ def build_left_dock_sections(self) -> None:
     )
     wpsh.addWidget(self._workflow_presets_header)
     wpsh.addWidget(workflow_presets_host)
-    self._left_dock_layout.addWidget(self._workflow_presets_section_host)
+    self._left_secondary_sections_layout.addWidget(self._workflow_presets_section_host)
     self._yield_startup_ui("preset_sections")
 
     # Keep later sections hugged to the top while giving spare height to
     # the media pool instead of an empty bottom gutter.
-    self._left_dock_layout.addStretch(0)
+    self._left_secondary_sections_layout.addStretch(0)
+    self._left_dock_sections_splitter.addWidget(self._left_secondary_sections_host)
+    self._left_dock_sections_splitter.setStretchFactor(0, 7)
+    self._left_dock_sections_splitter.setStretchFactor(1, 3)
+    if not _restore_left_dock_sections_splitter_state(self._left_dock_sections_splitter):
+        self._left_dock_sections_splitter.setSizes([520, 260])
+    self._left_dock_sections_splitter.splitterMoved.connect(
+        lambda _pos, _index: _save_left_dock_sections_splitter_state(self),
+    )
     self._media_pool_root_layout = None
     self._media_pool_root_index = self._main_dock_splitter.indexOf(
         self._left_dock_scroll,

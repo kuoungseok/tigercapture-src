@@ -66,6 +66,7 @@ _BINDINGS = (
     ('_refresh_proxy_status_ui', 'app.video_editor_proxy_controller', 'refresh_proxy_status_ui', False),
     ('_toggle_proxy_mode', 'app.video_editor_proxy_controller', 'toggle_proxy_mode', False),
     ('_start_proxy_generation', 'app.video_editor_proxy_controller', 'start_proxy_generation', False),
+    ('_queue_auto_proxy_generation', 'app.video_editor_proxy_controller', 'queue_auto_proxy_generation', False),
     ('_on_proxy_done', 'app.video_editor_proxy_controller', 'on_proxy_done', False),
     ('_on_proxy_failed', 'app.video_editor_proxy_controller', 'on_proxy_failed', False),
     ('_regenerate_proxy_for_active_source', 'app.video_editor_proxy_controller', 'regenerate_proxy_for_active_source', False),

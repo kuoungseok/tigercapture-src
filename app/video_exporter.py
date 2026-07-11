@@ -850,6 +850,8 @@ class VideoExportThread(QThread):
                 continue
             if getattr(effect, "cursor_events", None) or getattr(effect, "screenstudio_polish", None):
                 return True
+            if getattr(effect, "frame_repairs", None):
+                return True
             for attr in ("stabilizer", "video_filters", "chroma_key", "bg_removal"):
                 params = getattr(effect, attr, None)
                 if params is not None and not params.is_identity():
@@ -866,6 +868,8 @@ class VideoExportThread(QThread):
                     return True
             for track in self._render_clip_tracks or []:
                 for clip in track or []:
+                    if getattr(clip, "frame_repairs", None):
+                        return True
                     if screenstudio_fx_enabled(clip, self._project_settings):
                         return True
         except Exception:
@@ -969,6 +973,28 @@ class VideoExportThread(QThread):
         rgb = cv2.cvtColor(bgr, cv2.COLOR_BGR2RGB)
         if rgb.shape[1] != src_w or rgb.shape[0] != src_h:
             rgb = cv2.resize(rgb, (src_w, src_h), interpolation=cv2.INTER_LINEAR)
+        try:
+            from app.frame_repair import apply_frame_repair_rgb
+
+            def _repair_reader(idx: int):
+                cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(idx)))
+                ok_next, bgr_next = cap.read()
+                if not ok_next or bgr_next is None:
+                    return None
+                rgb_next = cv2.cvtColor(bgr_next, cv2.COLOR_BGR2RGB)
+                if rgb_next.shape[1] != src_w or rgb_next.shape[0] != src_h:
+                    rgb_next = cv2.resize(rgb_next, (src_w, src_h), interpolation=cv2.INTER_LINEAR)
+                return rgb_next
+
+            rgb, _repair_applied = apply_frame_repair_rgb(
+                rgb,
+                clip=clip,
+                source_ms=source_ms,
+                fps=fps,
+                frame_reader=_repair_reader,
+            )
+        except Exception:
+            pass
         rgb = self._apply_clip_stabilizer_cpu(rgb, clip, id(clip), frame_idx)
         rgb = self._apply_clip_zoom_cpu(rgb, clip, source_ms)
         rgb = self._apply_clip_post_effects_cpu(rgb, clip)
@@ -1843,6 +1869,31 @@ class VideoExportThread(QThread):
                     last_rgb = rgb
                 else:
                     rgb = last_rgb.copy()
+
+                try:
+                    from app.frame_repair import apply_frame_repair_rgb
+
+                    def _repair_reader(idx: int):
+                        cap.set(cv2.CAP_PROP_POS_FRAMES, max(0, int(idx)))
+                        ok_next, bgr_next = cap.read()
+                        if not ok_next or bgr_next is None:
+                            return None
+                        rgb_next = cv2.cvtColor(bgr_next, cv2.COLOR_BGR2RGB)
+                        if rgb_next.shape[1] != src_w or rgb_next.shape[0] != src_h:
+                            rgb_next = cv2.resize(rgb_next, (src_w, src_h), interpolation=cv2.INTER_LINEAR)
+                        return rgb_next
+
+                    rgb, _repair_applied = apply_frame_repair_rgb(
+                        rgb,
+                        clip=clip_effect,
+                        source_ms=source_ms,
+                        fps=source_fps,
+                        frame_reader=_repair_reader,
+                    )
+                    if _repair_applied:
+                        last_frame_idx = -1
+                except Exception:
+                    pass
 
                 rgb = self._apply_clip_stabilizer_cpu(
                     rgb, clip_effect, segment_idx, frame_idx

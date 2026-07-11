@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
@@ -226,6 +227,109 @@ def core_proxy_state_from_media_pool_state(pool_state: str | None) -> str:
     return "missing" if state == MEDIA_POOL_MISSING_PROXY_STATE else state
 
 
+def _settings_preview_mapping(owner: Any) -> dict:
+    settings = getattr(owner, "_project_settings", {}) or {}
+    preview = settings.get("preview") if isinstance(settings, dict) else None
+    return preview if isinstance(preview, dict) else {}
+
+
+def auto_proxy_generation_enabled(owner: Any) -> bool:
+    env = os.environ.get("TIGERCAPTURE_DISABLE_AUTO_PROXY_GENERATION", "").strip().lower()
+    if env in {"1", "true", "yes", "on"}:
+        return False
+    preview = _settings_preview_mapping(owner)
+    if "auto_proxy" in preview:
+        return bool(preview.get("auto_proxy"))
+    settings = getattr(owner, "_project_settings", {}) or {}
+    if isinstance(settings, dict) and "auto_proxy" in settings:
+        return bool(settings.get("auto_proxy"))
+    return True
+
+
+def source_preview_proxy_policy(
+    source: Path,
+    *,
+    quality_mode: str = "auto",
+    requested_preview_height: int | None = None,
+) -> dict[str, Any]:
+    from app.preview_performance_policy import preview_performance_policy_from_probe
+    from app.video_editor_media_proxy import _probe_video_metadata
+
+    return preview_performance_policy_from_probe(
+        _probe_video_metadata(Path(source)),
+        path=source,
+        requested_preview_height=requested_preview_height,
+        quality_mode=quality_mode,
+    )
+
+
+def _source_paths_for_auto_proxy(owner: Any) -> list[Path]:
+    seen: set[str] = set()
+    paths: list[Path] = []
+    for item in iter_proxy_owners(getattr(owner, "_tracks", []) or []):
+        source = owner_original_source(item)
+        if source is None:
+            continue
+        try:
+            key = str(Path(source).resolve()).casefold()
+        except Exception:
+            key = str(Path(source)).casefold()
+        if key in seen:
+            continue
+        seen.add(key)
+        paths.append(Path(source))
+    return paths
+
+
+def auto_proxy_candidates(
+    owner: Any,
+    *,
+    paths: list[Path] | None = None,
+    policy_for: Callable[[Path], dict[str, Any]] | None = None,
+    state_for: Callable[[Path], str] | None = None,
+) -> list[dict[str, Any]]:
+    if not auto_proxy_generation_enabled(owner):
+        return []
+    preview = _settings_preview_mapping(owner)
+    quality_mode = str(preview.get("quality_mode") or preview.get("mode") or "auto")
+    requested_height = preview.get("decode_height", preview.get("height", None))
+    try:
+        requested_preview_height = None if requested_height in (None, "") else int(requested_height)
+    except Exception:
+        requested_preview_height = None
+    state_for = state_for or _default_proxy_state_for
+    if policy_for is None:
+        policy_for = lambda p: source_preview_proxy_policy(
+            p,
+            quality_mode=quality_mode,
+            requested_preview_height=requested_preview_height,
+        )
+    rows: list[dict[str, Any]] = []
+    for source in paths if paths is not None else _source_paths_for_auto_proxy(owner):
+        source = Path(source)
+        try:
+            if not source.exists() or source.suffix.lower() not in {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}:
+                continue
+        except Exception:
+            continue
+        state = str(state_for(source))
+        if state not in {"missing", "stale"}:
+            continue
+        try:
+            policy = dict(policy_for(source) or {})
+        except Exception:
+            policy = {}
+        if not bool(policy.get("needs_proxy")):
+            continue
+        rows.append({
+            "source": source,
+            "state": state,
+            "force": state == "stale",
+            "policy": policy,
+        })
+    return rows
+
+
 def proxy_status_ui_state(
     source: Path | None,
     *,
@@ -430,6 +534,39 @@ def start_proxy_generation(
     if callable(start):
         start()
     return True
+
+
+def queue_auto_proxy_generation(
+    owner: Any,
+    *,
+    paths: list[Path] | None = None,
+    start_generation: Callable[..., bool] | None = start_proxy_generation,
+    policy_for: Callable[[Path], dict[str, Any]] | None = None,
+    state_for: Callable[[Path], str] | None = None,
+    max_jobs: int = 2,
+) -> int:
+    start_generation = start_generation or start_proxy_generation
+    started = 0
+    rows = auto_proxy_candidates(
+        owner,
+        paths=paths,
+        policy_for=policy_for,
+        state_for=state_for,
+    )
+    for row in rows[:max(0, int(max_jobs))]:
+        source = Path(row["source"])
+        if start_generation(owner, source, force=bool(row.get("force", False))):
+            started += 1
+    if started:
+        try:
+            status_bar = getattr(owner, "statusBar", None)
+            bar = status_bar() if callable(status_bar) else None
+            show = getattr(bar, "showMessage", None)
+            if callable(show):
+                show(f"Auto proxy generation queued: {started}", 3500)
+        except Exception:
+            pass
+    return started
 
 
 def _refresh_media_pool_proxy_statuses(owner: Any) -> None:

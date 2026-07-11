@@ -326,6 +326,7 @@ class MediaPool(QWidget):
     avatar_target_requested = Signal(str)
     vtuber_studio_requested = Signal(str)
     mmd_asset_requested = Signal(str)
+    character_asset_hub_requested = Signal(str)
     selection_changed = Signal(str)
 
     def __init__(self, parent: QWidget | None = None) -> None:
@@ -1069,6 +1070,7 @@ class MediaPool(QWidget):
         act_load = menu.addAction(tr("media_pool.menu.load_files"))
         act_youtube = menu.addAction("Import YouTube URL as MP4")
         act_import_3d = menu.addAction("Import 3D / MMD Asset...")
+        act_character_hub = menu.addAction("Open Character Asset Hub...")
         chosen = menu.exec(global_pos)
         if chosen is act_load:
             self._open_file_dialog()
@@ -1076,6 +1078,8 @@ class MediaPool(QWidget):
             self._open_youtube_url_dialog()
         elif chosen is act_import_3d:
             self._open_3d_import_dialog()
+        elif chosen is act_character_hub:
+            self._open_character_asset_hub_dialog()
 
 
     def _open_file_dialog(self) -> None:
@@ -1096,6 +1100,16 @@ class MediaPool(QWidget):
         )
         self.import_3d_paths(paths)
 
+    def _open_character_asset_hub_dialog(self) -> None:
+        folder = QFileDialog.getExistingDirectory(
+            self,
+            "Open Character Asset Hub",
+            "",
+        )
+        if not folder:
+            return
+        self._set_status_message("Opening Character Asset Hub...", transient_ms=1200)
+        self.character_asset_hub_requested.emit(str(folder))
 
     def _on_youtube_import_progress(self, pct: int, label: str) -> None:
         if self._youtube_import_progress is not None:

@@ -20,7 +20,6 @@ from app.editor_observability import probe_track_hdr_info as _probe_track_hdr_in
 from app.i18n import tr
 from app.timeline_track_row import TrackRow
 from app.video_editor_audio_widgets import AudioTrackRow, SpectrumExtractor
-from app.video_editor_media_proxy import _is_high_resolution, _probe_video_dimensions
 from app.video_editor_thumbnailing import probe_video_duration_ms
 from app.video_track_legacy import VideoTrack, _ensure_video_clips
 
@@ -236,6 +235,13 @@ def _add_track_with_source(self, path: Path) -> None:
         row.update()
     self._refresh_player_tracks(render_immediately=False)
     self._refresh_visual_preview_after_timeline_change()
+    try:
+        queue_auto_proxy = getattr(self, "_queue_auto_proxy_generation", None)
+        if callable(queue_auto_proxy):
+            queue_auto_proxy(paths=[Path(path)])
+    except Exception:
+        pass
+    _is_high_resolution = lambda *_args, **_kwargs: False
 
     # Proxy: if the source is high-resolution, ask the user once
     # whether to generate a proxy for smoother editing.
@@ -686,6 +692,7 @@ def _insert_audio_track_widget(self, track: AudioTrack) -> None:
     row = AudioTrackRow(track)
     row.set_px_per_sec(self._px_per_sec)
     row.clicked.connect(self._set_active_track)
+    row.position_requested.connect(self._on_track_position_requested)
     row.volume_changed.connect(self._on_audio_volume_changed)
     row.row_context_menu.connect(self._on_audio_row_context_menu)
     row.clip_context_menu.connect(self._on_audio_clip_context_menu)

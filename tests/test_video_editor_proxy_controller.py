@@ -454,3 +454,67 @@ def test_regenerate_and_delete_active_source_use_injected_controller_ports(tmp_p
     assert deletes == [source]
     assert pool.refreshes == 1
     assert owner.refreshes == 1
+
+
+def test_auto_proxy_candidates_use_preview_policy_and_skip_ready_sources(tmp_path):
+    source = tmp_path / "hires.mp4"
+    ready = tmp_path / "ready.mp4"
+    source.write_bytes(b"source")
+    ready.write_bytes(b"ready")
+    owner = SimpleNamespace(
+        _project_settings={"preview": {"quality_mode": "auto", "auto_proxy": True}},
+        _tracks=[],
+    )
+
+    rows = proxy_controller.auto_proxy_candidates(
+        owner,
+        paths=[source, ready],
+        policy_for=lambda path: {"needs_proxy": path == source, "preview_height": 540},
+        state_for=lambda path: "ready" if path == ready else "missing",
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["source"] == source
+    assert rows[0]["force"] is False
+    assert rows[0]["policy"]["preview_height"] == 540
+
+
+def test_queue_auto_proxy_generation_starts_missing_and_forces_stale(tmp_path):
+    source = tmp_path / "hires.mp4"
+    stale = tmp_path / "stale.mp4"
+    source.write_bytes(b"source")
+    stale.write_bytes(b"stale")
+    owner = SimpleNamespace(
+        _project_settings={"preview": {"auto_proxy": True}},
+        _tracks=[],
+        statusBar=lambda: SimpleNamespace(showMessage=lambda *_args: None),
+    )
+    starts = []
+
+    count = proxy_controller.queue_auto_proxy_generation(
+        owner,
+        paths=[source, stale],
+        policy_for=lambda _path: {"needs_proxy": True},
+        state_for=lambda path: "stale" if path == stale else "missing",
+        start_generation=lambda _owner, path, force=False: starts.append((path, force)) or True,
+        max_jobs=4,
+    )
+
+    assert count == 2
+    assert starts == [(source, False), (stale, True)]
+
+
+def test_auto_proxy_generation_can_be_disabled_from_project_settings(tmp_path):
+    source = tmp_path / "hires.mp4"
+    source.write_bytes(b"source")
+    owner = SimpleNamespace(
+        _project_settings={"preview": {"auto_proxy": False}},
+        _tracks=[],
+    )
+
+    assert proxy_controller.auto_proxy_candidates(
+        owner,
+        paths=[source],
+        policy_for=lambda _path: {"needs_proxy": True},
+        state_for=lambda _path: "missing",
+    ) == []

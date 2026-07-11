@@ -436,6 +436,127 @@ def test_open_decoder_auto_uses_frame_server_height_hint(monkeypatch, tmp_path):
     assert decoder.output_height == 720
 
 
+def test_open_decoder_high_res_policy_enables_auto_without_env(monkeypatch, tmp_path):
+    from app import video_decoder
+
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"placeholder")
+
+    class _FrameServer:
+        fps = 30.0
+        total_frames = 10
+        frame_size = (960, 540)
+
+        def __init__(self, path, output_height=None):
+            self.path = path
+            self.output_height = output_height
+
+        def open(self):
+            return True
+
+        def seek_to_frame(self, idx):
+            pass
+
+        def read_rgb(self):
+            return np.zeros((540, 960, 3), dtype=np.uint8)
+
+        def release(self):
+            pass
+
+    seen = {}
+
+    def _choose(path, preview_height):
+        seen["path"] = path
+        seen["preview_height"] = preview_height
+        return "ffmpeg_frame_server"
+
+    monkeypatch.delenv("TIGERCAPTURE_PREVIEW_DECODER_AUTO", raising=False)
+    monkeypatch.delenv("TIGERCAPTURE_PREVIEW_FRAME_SERVER", raising=False)
+    monkeypatch.delenv("TIGERCAPTURE_PREVIEW_HEIGHT", raising=False)
+    monkeypatch.setattr(
+        video_decoder,
+        "_preview_performance_policy",
+        lambda path, requested_preview_height=None: {
+            "decoder_auto": True,
+            "preview_height": 540,
+            "reasons": ["high_resolution", "high_fps", "monitoring_scale:540p"],
+        },
+    )
+    monkeypatch.setattr(video_decoder, "_choose_preview_decoder_backend", _choose)
+    monkeypatch.setattr(video_decoder, "FFmpegFrameServerDecoder", _FrameServer)
+    monkeypatch.setattr(
+        video_decoder,
+        "_wrap_for_preview_prefetch",
+        lambda decoder, preview_height: decoder,
+    )
+
+    decoder = video_decoder.open_decoder(source, hdr_info=None)
+
+    assert isinstance(decoder, _FrameServer)
+    assert seen == {"path": source, "preview_height": 540}
+    assert decoder.output_height == 540
+
+
+def test_open_decoder_policy_keeps_explicit_preview_height(monkeypatch, tmp_path):
+    from app import video_decoder
+
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"placeholder")
+
+    class _FrameServer:
+        fps = 30.0
+        total_frames = 10
+        frame_size = (640, 360)
+
+        def __init__(self, path, output_height=None):
+            self.path = path
+            self.output_height = output_height
+
+        def open(self):
+            return True
+
+        def seek_to_frame(self, idx):
+            pass
+
+        def read_rgb(self):
+            return np.zeros((360, 640, 3), dtype=np.uint8)
+
+        def release(self):
+            pass
+
+    seen = {}
+
+    def _choose(path, preview_height):
+        seen["path"] = path
+        seen["preview_height"] = preview_height
+        return "ffmpeg_frame_server"
+
+    monkeypatch.delenv("TIGERCAPTURE_PREVIEW_DECODER_AUTO", raising=False)
+    monkeypatch.delenv("TIGERCAPTURE_PREVIEW_FRAME_SERVER", raising=False)
+    monkeypatch.setattr(
+        video_decoder,
+        "_preview_performance_policy",
+        lambda path, requested_preview_height=None: {
+            "decoder_auto": True,
+            "preview_height": 540,
+            "reasons": ["high_resolution", "high_fps", "monitoring_scale:540p"],
+        },
+    )
+    monkeypatch.setattr(video_decoder, "_choose_preview_decoder_backend", _choose)
+    monkeypatch.setattr(video_decoder, "FFmpegFrameServerDecoder", _FrameServer)
+    monkeypatch.setattr(
+        video_decoder,
+        "_wrap_for_preview_prefetch",
+        lambda decoder, preview_height: decoder,
+    )
+
+    decoder = video_decoder.open_decoder(source, hdr_info=None, preview_height=360)
+
+    assert isinstance(decoder, _FrameServer)
+    assert seen == {"path": source, "preview_height": 360}
+    assert decoder.output_height == 360
+
+
 def test_open_decoder_auto_keeps_cv2_when_selected(monkeypatch, tmp_path):
     from app import video_decoder
 

@@ -224,6 +224,12 @@ def _video_clip_to_dict(c) -> dict:
             }
         except Exception:
             pass
+    try:
+        from app.frame_repair import normalize_frame_repairs
+
+        frame_repairs = normalize_frame_repairs(getattr(c, "frame_repairs", []) or [])
+    except Exception:
+        frame_repairs = list(getattr(c, "frame_repairs", []) or [])
     return {
         "id": int(c.id),
         "source_path": _p(c.source_path),
@@ -246,6 +252,7 @@ def _video_clip_to_dict(c) -> dict:
         "transition_preset_meta": dict(getattr(c, "transition_preset_meta", {}) or {}),
         "cursor_events": list(getattr(c, "cursor_events", []) or []),
         "screenstudio_polish": dict(getattr(c, "screenstudio_polish", {}) or {}),
+        "frame_repairs": frame_repairs,
         "video_filters": _effect_param_to_dict(getattr(c, "video_filters", None)),
         "chroma_key": _effect_param_to_dict(getattr(c, "chroma_key", None)),
         "stabilizer": (
@@ -1337,6 +1344,12 @@ def _video_clip_from_dict(cd: dict, fallback_src_path: Path | None):
     clip.transition_preset_meta = dict(cd.get("transition_preset_meta", {}) or {})
     clip.cursor_events = list(cd.get("cursor_events", []) or [])
     clip.screenstudio_polish = dict(cd.get("screenstudio_polish", {}) or {})
+    try:
+        from app.frame_repair import normalize_frame_repairs
+
+        clip.frame_repairs = normalize_frame_repairs(cd.get("frame_repairs", []) or [])
+    except Exception:
+        clip.frame_repairs = list(cd.get("frame_repairs", []) or [])
 
     clip.video_filters = _restore_clip_effect_param("video_filters", cd.get("video_filters", None))
     clip.chroma_key = _restore_clip_effect_param("chroma_key", cd.get("chroma_key", None))

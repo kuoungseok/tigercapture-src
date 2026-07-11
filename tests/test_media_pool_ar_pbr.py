@@ -273,6 +273,7 @@ def test_media_pool_context_menu_orders_3d_import_after_youtube(monkeypatch):
         "Import YouTube URL as MP4",
         "Import 3D / MMD Asset...",
     ]
+    assert labels[3] == "Open Character Asset Hub..."
 
 
 def test_media_pool_performance_source_flag_is_queryable_and_serializable(tmp_path):

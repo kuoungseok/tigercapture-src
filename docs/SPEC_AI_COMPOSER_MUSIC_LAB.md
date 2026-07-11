@@ -3,9 +3,9 @@
 ## Purpose
 
 Music Lab turns a natural-language request into editable background music for a
-TigerCapture timeline. The first implementation is MIDI-first: the app creates
-structured sections, chord progressions, MIDI-like notes, synthetic preview
-stems, and then places those stems onto normal audio tracks.
+TigerCapture timeline. Internally, the app creates structured sections, chord
+progressions, and note events, but the basic user-facing output is rendered
+audio: sample/SoundFont-based stems and a mix placed onto normal audio tracks.
 
 The goal is not to replace Cubase, Logic, or FL Studio. The goal is a
 creator-video music workbench where local AI can compose, revise, render, and
@@ -162,10 +162,24 @@ inspectable composition state.
 
 AI command routing:
 
-- "make a 30s BGM" routes to `music.compose_to_timeline`.
+- "make a 30s BGM" routes to `music.compose_to_timeline` with
+  `backend=sample_production` and `sample_library_policy=auto` by default.
+  This is the normal "the user asked AI to compose music" path: use
+  user-installed sample libraries when available, fall back clearly when they
+  are not, apply the default studio master chain, and avoid silently producing
+  the cheaper internal synth route.
+- Explicit renderer phrases override that default. For example, "Stable Audio
+  3.0" routes to `backend=production`, `ai_provider=stable_audio_3`, and
+  `create_mix=true`; "ACE-Step" routes to `ai_provider=acestep_api`; "LMMS"
+  routes to `ai_provider=lmms`; "internal synth/no samples/diagnostic synth"
+  routes to `backend=sample_production`,
+  `sample_library_policy=procedural_only` as a diagnostic comparison only; and
+  "sample kit first" routes to `sample_library_policy=sample_kit_first`.
 - "make the main music section stronger" routes to
   `music.regenerate_section` + `music.render_to_timeline(update_existing)` +
-  `music.mixer.auto_balance`.
+  `music.mixer.auto_balance`, carrying the existing composition's render
+  backend and `sample_library_policy` so follow-up AI edits do not regress to a
+  lower-quality renderer.
 - "make the selected music section stronger" uses
   `snapshot.music_lab_selection.section_name` from the Workbench arranger.
 - "mute selected music track" uses `snapshot.music_lab_selection.role` and
@@ -175,6 +189,29 @@ AI command routing:
   and note preview so Claude/local AI can reason about the selected block.
 
 ## Rendering Strategy
+
+Product renderer tiers:
+
+- Basic/default output is sample/SoundFont-based rendering:
+  `backend=sample_production`, `sample_library_policy=auto`, and
+  `tigerstudio.sample_production.v1`. This is the normal path for user-facing
+  Music Lab previews, timeline stems, and natural-language "compose music"
+  requests. It includes the default studio master profile
+  `one_click_sample_production_studio_v1`: bus tone shaping, rumble/mud
+  control, presence/air enhancement, room ambience, mid-side width, parallel
+  glue compression, short dropout/surge repair, sample-jump smoothing, and a
+  soft preview limiter. It also applies the default performance profile
+  `sample_production_articulation_expression_v1`: role/length-based
+  articulation classification, short-note gate shaping, velocity/expression
+  contouring, MIDI CC1/CC11 automation for SoundFont renderers, and matching
+  internal fallback envelope shaping.
+- Advanced output is AI/production rendering: explicit provider choices such as
+  Stable Audio 3.0, ACE-Step, or LMMS route to `backend=production` with
+  `ai_provider` and `create_mix=true`. AI must not be silently selected merely
+  because a provider is configured.
+- MIDI/clip data is an internal arrangement representation and an optional
+  export format. Product sound tuning is judged from rendered audio, not from
+  MIDI files.
 
 The MVP renderer is intentionally simple and local:
 
@@ -209,20 +246,25 @@ The MVP renderer is intentionally simple and local:
   direction instead of repeating one loop.
 - Render path: `music.render.preview`, `music.render_to_timeline`, and
   `music.compose_to_timeline` accept
-  `backend=auto|production|local_synth|studio_edm|soundfont` plus optional
-  `soundfont_path`.
+  `backend=auto|production|local_synth|studio_edm|soundfont|sample_production`
+  plus optional `soundfont_path`, `drum_kit_path`, and
+  `sample_library_policy=auto|sample_kit_first|soundfont_only|procedural_only`.
 - Quality tiers are explicit and machine-readable:
-  `tigerstudio.local_synth.v5` and `tigerstudio.studio_edm.v1` are
-  `draft_sketch`; `fluidsynth.soundfont.v1` is `starter_preview`;
+  `tigerstudio.local_synth.v5` is `diagnostic_only`;
+  `tigerstudio.studio_edm.v1` is `draft_sketch`;
+  `tigerstudio.sample_production.v1` is `enhanced_local_preview`;
+  `fluidsynth.soundfont.v1` is `starter_preview`;
   `production.external_music_renderer.v1` is the only
   `production_candidate` tier.
 - Modern release-quality music must not be claimed from built-in renderers.
   The current built-in paths are useful for timing, arrangement, MIDI export,
   and timeline workflow validation. They are not a replacement for a
   sample/model/DAW-grade production music engine.
-- `auto` uses a configured production renderer for mix-only preview when one
-  is available. Otherwise it uses FluidSynth + SoundFont when both are
-  available and falls back to `tigerstudio.local_synth.v5`.
+- `auto` uses `backend=sample_production`. It must not jump to AI/production
+  rendering automatically, even when a production renderer is configured.
+  Explicit `backend=soundfont` uses FluidSynth + SoundFont directly when both
+  are available. `tigerstudio.local_synth.v5` remains available only as an
+  explicit diagnostic renderer; it is not a useful music-output path.
 - `fluidsynth.soundfont.v1` enables FluidSynth reverb/chorus and runs a light
   studio-polish mix pass after rendering: stereo width, room/tail ambience,
   gentle parallel compression, soft smoothing, and final preview normalization.
@@ -232,6 +274,92 @@ The MVP renderer is intentionally simple and local:
   explicitly requested through `backend=studio_edm` or `backend=draft_synth`.
   This path does not rely on General MIDI instruments, but it is still a draft
   synth renderer for arrangement inspection.
+- Non-AI sample-production preview: `backend=sample_production` routes to
+  `tigerstudio.sample_production.v1`. It renders Music Lab tracks into grouped
+  bus stems (`percussion`, `low`, `orchestra`, `pads`, `lead`, `fx`), applies
+  bus-specific tone shaping, cinematic room/delay, stereo width, non-rhythmic
+  stealth ambience for tactical/covert prompts, short energy-dip repair,
+  sample-jump smoothing, low-resonance taming, narrow tonal-whine suppression,
+  tight sample-production timing, note-edge de-click ramps, short-surge
+  limiting, low-end continuity-safe bass phrasing, and a glue/limiter master. It is meant
+  to narrow the gap between raw MIDI/SoundFont previews and AI audio, but it is
+  still not a replacement for real DAW-grade sample libraries or AI generation.
+  Percussion quality is treated separately because synthesized kick/snare/hat
+  transients can sound like old FM/GM preview drums. Sample-production now uses
+  a sample-library-first policy: the percussion bus tries a durable local
+  SFZ/DecentSampler/`tigercapture_drumkit.json` kit from
+  `external/assets/music/drum_kits`, then SoundFont/FluidSynth, then procedural
+  synth/noise fallback. Non-percussion buses (`low`, `orchestra`, `pads`,
+  `lead`, `fx`) also try external SoundFont/FluidSynth stem rendering before
+  procedural synthesis, which reduces the overall "calculated preview" sound.
+  Backend status exposes `drum_sample_kit_ready`, `drum_sample_kits`,
+  `sample_production_percussion`, and `sample_production_bus_policy`; each
+  sample-production render records `sample_library_policy`, `bus_renderers`,
+  `external_bus_count`, `procedural_buses`, `percussion_source`, and
+  `percussion_renderer` metadata so AI/review automation can explain which
+  parts were sample-based and which were fallback synthesis.
+  Render metadata also records `studio_mastering.enabled=true`,
+  `studio_mastering.profile=one_click_sample_production_studio_v1`, and the
+  chain applied to the preview mix/stems so one-click AI music requests are
+  auditable as mastered sample renders rather than raw MIDI/SoundFont output.
+  Render metadata also records `performance_profile.enabled=true`,
+  `performance_profile.profile=sample_production_articulation_expression_v1`,
+  note/articulation counts, MIDI CC support, gate shaping, and internal fallback
+  envelope shaping so Claude/local AI can explain why the output is not a raw
+  note dump.
+  `sample_library_policy` is user/AI selectable: `auto` and
+  `sample_kit_first` try user-installed drum kits before SoundFont and internal
+  fallback, `soundfont_only` skips drum-kit files and renders through
+  FluidSynth/SoundFont when possible, and `procedural_only` disables external
+  sample assets for a diagnostic synth comparison render.
+  Metal test arrangements may use `rhythm_guitar_*`, `lead_guitar_*`,
+  `power_chord_guitar_*`, and `palm_mute_guitar_*` roles; these map to the
+  sample-production `lead` bus and SoundFont overdrive/distortion guitar
+  programs so speed/power-metal sketches are not rendered as generic synths.
+- Audio glitch diagnosis: use `tools/music_audio_glitch_probe.py` for
+  non-destructive analysis before changing render code. The probe reports
+  sample jumps, 10/25/50 ms frame drops/surges, spectral wobble candidates, and
+  separate hard-glitch, spectral-motion, and envelope-pumping diagnostics, can
+  write a JSON report/CSV event list, and can write a conservative repaired WAV.
+  `glitch_score` tracks hard discontinuities and short frame defects;
+  `spectral_wobble` is a candidate list only because musical bass/chord changes
+  can look like dominant-frequency movement. `envelope_pumping` must be checked
+  with `--bpm` when the user hears "huffing" or "훅 훅": high beat-rate
+  peak-to-peak dB usually means kick/percussion or sidechain-style gain motion is
+  dominating the mix even when `glitch_score` is zero. Reports and repaired
+  scratch WAVs belong under `debugCapture`; they are reproducible diagnostics,
+  not durable assets. Recent Music Lab work found that perceived "tape chewing"
+  and "huffing" came from different causes: tape-like ticks concentrated in
+  low/bass continuity and short percussion/mix frame dropouts, while huffing came
+  from 128 BPM beat-rate envelope motion in the percussion/kick bus. Fixes
+  should start with bass note continuity, bass tail length, pulse-layer
+  intensity, final-mix micro-dropout repair, and percussion/kick envelope balance
+  before adding broad master processing.
+- Stage-by-stage elimination: when the user still hears cutting, huffing, or
+  unexplained artifacts after the normal probe, run
+  `tools/music_render_stage_probe.py`. It renders the same composition as
+  `00_dry_note_mix`, `01_shaped_stem_mix`,
+  `02_bus_polish_no_spatial_mix`, `03_bus_spatial_gain_mix`,
+  `04_master_no_micro_mix`, and `05_master_full_mix`, with a JSON probe report
+  for each. This is the preferred way to find whether the artifact starts in
+  the raw note oscillator, stem shaping, bus polish, spatial/bus gain, master,
+  or micro-repair stage. The same tool also writes `dry_no_drums_mix` and
+  `dry_drums_only_mix`; if dry glitches disappear without drums, continue inside
+  the drum oscillator/pattern instead of changing broad mix/master effects.
+  Each stage also writes a `*_playback_safe_48k.wav` companion for human
+  listening: it is 48 kHz and peak-normalized to about 0.45. Do not add warm-up
+  beds or synthetic pre-roll to these files because that can introduce a new
+  audible transition that is not present in the measured stage WAV. Do not add
+  noise floors, silence padding, crossfaded warm-up sections, or other
+  "player-stability" audio either; playback-safe must stay a transparent
+  delivery variant of the measured render. Use the normal stage WAV/report for
+  measurement and the playback-safe file for listening checks.
+  2026-07-10 regression note: `playback_safe_v4` added a warm-up bed to a clean
+  no-drums render and created a false audible cut. The corrected v5 companion,
+  made with only 48 kHz conversion and peak normalization, did not cut. If this
+  symptom returns, audit `_playback_safe_samples()` /
+  `tools/music_render_stage_probe.py` before changing composer, drum, bass, or
+  master code.
 - Production renderer contract: a durable external renderer can be configured
   through `external/tools/music_renderer/renderer.json` or
   `TIGERCAPTURE_MUSIC_PRODUCTION_RENDERER_EXE`. It must accept
@@ -303,6 +431,12 @@ Durable asset/tool locations:
 - Optional production music renderer binaries or SDK wrappers belong under
   `external/tools/music_renderer`; licensed sample packs and models belong
   under `external/assets/music`, never in `debugCapture`.
+- SFZ/DecentSampler/DrumGizmo-style drum kits belong under
+  `external/assets/music/drum_kits`; never place sample packs in `debugCapture`.
+  Local development can use AVL Drumkits as an ignored external asset under
+  `external/assets/music/drum_kits/avl-drumkits`. The kit is not source code and
+  should stay out of commits except for project documentation and local license
+  files retained beside the asset.
 - GeneralUser GS can be used as the small default GM/GS SoundFont for local
   development. Keep its license text next to the `.sf2` file.
 - Environment overrides:
@@ -311,6 +445,12 @@ Durable asset/tool locations:
   `TIGERCAPTURE_MUSIC_PRODUCTION_RENDERER_ARGS`.
 - `debugCapture` may contain regenerated proof renders only; never store
   durable SoundFonts, sample packs, or installed synth tools there.
+- Music sample packs are not bundled with TigerCapture. The product exposes a
+  connection/install surface instead: `external/assets/music/README.md` is the
+  local guide, `music.render.backends` reports install directories, discovered
+  assets, sample-policy choices, and recommended external libraries, and the
+  Workbench Music Lab UI provides `Assets` / `Guide` buttons for opening the
+  user-managed asset folder and guide.
 
 Backend status action:
 
@@ -319,7 +459,8 @@ music.render.backends
 ```
 
 This returns the preferred backend, production renderer readiness, quality
-tiers, discovered SoundFonts, FluidSynth path, and warnings explaining why the
+tiers, discovered SoundFonts, drum sample kits, sample-library install folders,
+recommended external libraries, FluidSynth path, and warnings explaining why the
 system is falling back to starter/draft renderers.
 
 The default output location is:
@@ -342,8 +483,20 @@ The current compact Music Lab UI lives in the Workbench Sound Editor tab:
   Video Editor Music Lab. If no preview mix exists yet, Preview requests
   `music.render.preview(render_stems=false)` instead of sending the user to an
   external player or writing unnecessary stem WAVs.
-- Renderer selector: `auto renderer`, `production`, `soundfont`, `studio EDM`,
-  or `local v5`.
+- Renderer selector: `sample prod`, `production`, `soundfont`, `studio EDM`,
+  `auto renderer`, or `diagnostic synth`. `sample prod` is the normal default.
+- Sample library selector: `auto samples`, `sample kit first`,
+  `soundfont only`, or `diagnostic synth`. This controls how
+  `backend=sample_production` uses user-installed libraries. The tab also shows
+  discovered drum-kit/SoundFont counts and exposes `Assets` / `Guide` buttons
+  so users can download libraries themselves, place them in the external asset
+  folders, and reconnect without bundling those libraries in the application.
+- AI provider selector: `AI auto`, `Stable Audio 3.0`, `ACE-Step`, or
+  `LMMS offline`. Explicit AI provider choices set `backend=production`, pass
+  `ai_provider` through the action layer, and force `mix only` because the
+  current production bridge returns a finished stereo WAV rather than editable
+  stems. `Stable Audio 3.0` is labeled as an external Space path; `ACE-Step`
+  as a local/API server path; `LMMS offline` as the local fallback.
 
 Future deeper Music Lab UI can expand into a detachable dock:
 
@@ -375,9 +528,9 @@ full DAW editing.
   and second-drop progressions for longer cues.
 - `music.render.preview` writes a non-empty preview mix WAV and, when
   `render_stems=false`, does not write per-role stem WAVs.
-- EDM/NCS/electronic `backend=auto` previews use
-  `tigerstudio.studio_edm.v1`; tests should keep that route separate from
-  `fluidsynth.soundfont.v1` and `tigerstudio.local_synth.v5`.
+- Music/Composer UI default previews use `backend=sample_production` with
+  `sample_library_policy=auto`. `tigerstudio.local_synth.v5` must stay explicit
+  diagnostic-only and should not be the normal fallback for user-facing music.
 - `music.render_to_timeline` creates audio tracks and clips from those stems.
 - `music.render_to_timeline(update_existing=true)` refreshes matching
   composition/role tracks instead of adding duplicate music lanes.
@@ -385,12 +538,23 @@ full DAW editing.
   action so natural-language command routing does not need cross-step variable
   substitution.
 - `music.export_midi` writes a standard `.mid` file beginning with a valid MIDI
-  header.
+  header and includes the default performance profile metadata plus CC1/CC11
+  expression automation for non-percussion tracks.
 - `music.state` exposes compositions and rendered stem paths.
 - MIDI edit actions can create clips, write notes/chords, and quantize notes.
 - Project save/load preserves composition state and music track/clip links.
 - Clear prompts such as "make a 30s BGM" route to Music Lab instead of Sound
-  Editor mastering.
+  Editor mastering, and the generated plan must include
+  `backend=sample_production` plus `sample_library_policy=auto` unless the
+  user explicitly chooses a provider or comparison renderer.
+- Melodic generation must be phrase-based, not a tiny motif loop. The local
+  deterministic composer plans 8/16-bar phrases where possible and assigns
+  A, A-prime, B, hook, or bridge labels by section. The lead melody keeps a
+  phrase memory, scores candidate contours against recent phrases to avoid
+  immediate repetition, resolves phrase endings to chord-tone cadences, and
+  varies rhythm, register, and contour. `lead_answer` is call-and-response
+  material and `counter` is sparse offbeat support; neither should simply
+  duplicate the primary lead.
 - Clear edit prompts such as "make the main music section stronger", "remove
   drums from the music", "pad only", and "export midi" route to structured
   Music Lab/audio actions.

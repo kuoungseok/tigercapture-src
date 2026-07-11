@@ -907,7 +907,29 @@ class MMDPlayerWindow(QMainWindow):
         except Exception as exc:
             self._model = None
             self.preview.set_mmd_overlay_items([])
-            self._status.setText(f"Load failed: {type(exc).__name__}: {exc}")
+            message = f"{type(exc).__name__}: {exc}"
+            try:
+                from app.actor_loading_cache import record_actor_load
+                from app.actor_loading_status import actor_loading_diagnostic_card, format_actor_loading_diagnostic_card
+
+                record_actor_load(
+                    "mmd",
+                    str(self._model_path),
+                    status="error",
+                    stage="parse",
+                    message=message,
+                    metadata={"source": "mmd_player.load_model"},
+                )
+                card = actor_loading_diagnostic_card(
+                    "mmd",
+                    str(self._model_path),
+                    status="error",
+                    stage="parse",
+                    message=message,
+                )
+                self._status.setText(format_actor_loading_diagnostic_card(card).splitlines()[0])
+            except Exception:
+                self._status.setText(f"Load failed: {message}")
             self.preview.update_frame(self._base_frame, None)
             return
         self._update_status()

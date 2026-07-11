@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QByteArray, QSettings, Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
     QPushButton,
     QSizePolicy,
+    QSplitter,
     QStackedWidget,
     QVBoxLayout,
     QWidget,
@@ -16,7 +17,12 @@ from app.icons import app_icon, icon_size
 from app.studio_slider import StudioSlider
 from app.style import COLOR_TEXT_TERTIARY
 from app.video_editor_lazy_panel import LazyPanelHost
-from app.video_editor_layout_specs import TOP_WORK_MIN_HEIGHT
+from app.video_editor_layout_specs import (
+    RIGHT_DOCK_SECTIONS_SPLITTER_HANDLE_WIDTH,
+    RIGHT_DOCK_SECTIONS_SPLITTER_SETTINGS_KEY,
+    TOP_WORK_MIN_HEIGHT,
+    right_dock_sections_splitter_qss,
+)
 from app.video_editor_workbench_section_scroll import make_workbench_section_scroll_area
 from app.subtitles import SubtitleLaneRow, SubtitlePanel
 from app.workbench_panel import WorkbenchPanel
@@ -30,12 +36,103 @@ _WORKBENCH_TOOLS_SHORT_OPEN_HEIGHT = 154
 _WORKBENCH_LONG_PANEL_CONTENT_HEIGHT = 440
 
 
+def _editor_settings() -> QSettings:
+    return QSettings("TigerCapture", "TigerCapture")
+
+
+def _restore_right_dock_sections_splitter_state(splitter: QSplitter) -> bool:
+    try:
+        state = _editor_settings().value(RIGHT_DOCK_SECTIONS_SPLITTER_SETTINGS_KEY)
+    except Exception:
+        return False
+    if state is None:
+        return False
+    if isinstance(state, QByteArray):
+        if state.isEmpty():
+            return False
+    elif isinstance(state, (bytes, bytearray)):
+        state = QByteArray(bytes(state))
+    else:
+        return False
+    try:
+        return bool(splitter.restoreState(state))
+    except Exception:
+        return False
+
+
+def _save_right_dock_sections_splitter_state(owner) -> None:
+    splitter = getattr(owner, "_right_dock_sections_splitter", None)
+    if splitter is None:
+        return
+    try:
+        _editor_settings().setValue(
+            RIGHT_DOCK_SECTIONS_SPLITTER_SETTINGS_KEY,
+            splitter.saveState(),
+        )
+    except Exception:
+        pass
+
+
 def build_right_dock_sections(self) -> None:
+    prebuilt_ai_command_section = getattr(self, "_ai_command_section_host", None)
+    if prebuilt_ai_command_section is not None:
+        try:
+            idx = self._right_dock_layout.indexOf(prebuilt_ai_command_section)
+            if idx >= 0:
+                self._right_dock_layout.removeWidget(prebuilt_ai_command_section)
+                prebuilt_ai_command_section.setParent(None)
+        except Exception:
+            pass
+
+    self._right_dock_sections_splitter = QSplitter(
+        Qt.Orientation.Vertical,
+        self._right_dock_host,
+    )
+    self._right_dock_sections_splitter.setObjectName("RightDockSectionsSplitter")
+    self._right_dock_sections_splitter.setChildrenCollapsible(False)
+    self._right_dock_sections_splitter.setHandleWidth(
+        RIGHT_DOCK_SECTIONS_SPLITTER_HANDLE_WIDTH,
+    )
+    self._right_dock_sections_splitter.setStyleSheet(
+        right_dock_sections_splitter_qss(),
+    )
+    self._right_dock_sections_splitter.setSizePolicy(
+        QSizePolicy.Policy.Expanding,
+        QSizePolicy.Policy.Expanding,
+    )
+    self._right_dock_layout.addWidget(self._right_dock_sections_splitter, stretch=1)
+
+    self._right_workbench_pane = QWidget(self._right_dock_sections_splitter)
+    self._right_workbench_pane.setObjectName("RightWorkbenchPane")
+    self._right_workbench_pane.setSizePolicy(
+        QSizePolicy.Policy.Expanding,
+        QSizePolicy.Policy.Expanding,
+    )
+    self._right_workbench_pane_layout = QVBoxLayout(self._right_workbench_pane)
+    self._right_workbench_pane_layout.setContentsMargins(0, 0, 0, 0)
+    self._right_workbench_pane_layout.setSpacing(0)
+
+    self._right_secondary_sections_host = QWidget(self._right_dock_sections_splitter)
+    self._right_secondary_sections_host.setObjectName("RightSecondarySectionsHost")
+    self._right_secondary_sections_host.setMinimumHeight(190)
+    self._right_secondary_sections_host.setSizePolicy(
+        QSizePolicy.Policy.Expanding,
+        QSizePolicy.Policy.Expanding,
+    )
+    self._right_secondary_sections_layout = QVBoxLayout(
+        self._right_secondary_sections_host,
+    )
+    self._right_secondary_sections_layout.setContentsMargins(0, 0, 0, 0)
+    self._right_secondary_sections_layout.setSpacing(2)
+
+    self._right_dock_sections_splitter.addWidget(self._right_workbench_pane)
+    self._right_dock_sections_splitter.addWidget(self._right_secondary_sections_host)
+
     # --- Inspector section ??DaVinci-style contextual properties
     # for the currently selected track / clip. Read-only Phase B1;
     # editable knobs (transform, opacity, per-clip speed) come in
     # Phase B2 once VideoTrack supports multi-clip splits.
-    workbench_parent = getattr(self, "_top_workbench_slot", None) or self._right_dock_host
+    workbench_parent = self._right_workbench_pane
     self._workbench_section_host = QWidget(workbench_parent)
     self._workbench_section_host.setObjectName("WorkbenchSectionHost")
     self._workbench_section_host.setMinimumHeight(_WORKBENCH_MAIN_MIN_HEIGHT)
@@ -169,9 +266,12 @@ def build_right_dock_sections(self) -> None:
     self._workbench_stack.addWidget(self._color_workbench_panel)
     ish.addWidget(self._workbench_stack, stretch=1)
     top_workbench_layout = getattr(self, "_top_workbench_layout", None)
-    self._workbench_root_layout = self._right_dock_layout
-    self._right_dock_layout.insertWidget(0, self._workbench_section_host, stretch=1)
-    self._workbench_root_index = self._right_dock_layout.indexOf(
+    self._workbench_root_layout = self._right_workbench_pane_layout
+    self._right_workbench_pane_layout.addWidget(
+        self._workbench_section_host,
+        stretch=1,
+    )
+    self._workbench_root_index = self._right_workbench_pane_layout.indexOf(
         self._workbench_section_host,
     )
     if top_workbench_layout is not None:
@@ -252,7 +352,17 @@ def build_right_dock_sections(self) -> None:
         )
         ca_lay.addWidget(self._creator_tools_body, stretch=0)
         ca_lay.addWidget(self._creator_assist_placeholder, stretch=0)
-        self._right_dock_layout.insertWidget(1, self._creator_assist_section_host, stretch=0)
+        self._right_secondary_sections_layout.addWidget(
+            self._creator_assist_section_host,
+            stretch=0,
+        )
+
+    if prebuilt_ai_command_section is not None:
+        prebuilt_ai_command_section.setParent(self._right_secondary_sections_host)
+        self._right_secondary_sections_layout.addWidget(
+            prebuilt_ai_command_section,
+            stretch=0,
+        )
 
     self._ai_script_edit_panel = None
     self._ai_script_edit_section_host = QWidget(self._right_dock_host)
@@ -279,7 +389,10 @@ def build_right_dock_sections(self) -> None:
         )
     )
     script_lay.addWidget(self._ai_script_edit_placeholder, stretch=0)
-    self._right_dock_layout.addWidget(self._ai_script_edit_section_host, stretch=0)
+    self._right_secondary_sections_layout.addWidget(
+        self._ai_script_edit_section_host,
+        stretch=0,
+    )
 
     self._render_queue_section_host = QWidget(self._right_dock_host)
     self._render_queue_section_host.setObjectName("WorkbenchSectionHost")
@@ -336,7 +449,10 @@ def build_right_dock_sections(self) -> None:
         )
     )
     rq_lay.addWidget(self._render_queue_scroll_area, stretch=1)
-    self._right_dock_layout.addWidget(self._render_queue_section_host, stretch=0)
+    self._right_secondary_sections_layout.addWidget(
+        self._render_queue_section_host,
+        stretch=0,
+    )
 
     self._audio_workspace_section_host = QWidget(self._right_dock_host)
     self._audio_workspace_section_host.setObjectName("WorkbenchSectionHost")
@@ -386,7 +502,10 @@ def build_right_dock_sections(self) -> None:
         )
     )
     aw_lay.addWidget(aw_body)
-    self._right_dock_layout.addWidget(self._audio_workspace_section_host, stretch=0)
+    self._right_secondary_sections_layout.addWidget(
+        self._audio_workspace_section_host,
+        stretch=0,
+    )
 
     # --- PIP section ??Picture-in-Picture controls for the active track.
     # Shown / hidden dynamically by ``_refresh_pip_panel`` depending on
@@ -501,7 +620,10 @@ def build_right_dock_sections(self) -> None:
 
     pip_sh.addWidget(pip_body)
     self._pip_section_host.setVisible(False)   # hidden until a non-bottom track is selected
-    self._right_dock_layout.addWidget(self._pip_section_host, stretch=0)
+    self._right_secondary_sections_layout.addWidget(
+        self._pip_section_host,
+        stretch=0,
+    )
 
     # --- Subtitles section ??lives in the right dock column, but
     # can also pop out into its own floating window. The whole
@@ -586,13 +708,32 @@ def build_right_dock_sections(self) -> None:
         )
     )
     ssh.addWidget(subtitle_body, stretch=0)
-    self._right_dock_layout.addWidget(self._subtitle_section_host, stretch=0)
-    self._subtitle_root_layout = self._right_dock_layout
-    self._subtitle_root_index = self._right_dock_layout.count() - 1
+    self._right_secondary_sections_layout.addWidget(
+        self._subtitle_section_host,
+        stretch=0,
+    )
+    self._subtitle_root_layout = self._right_secondary_sections_layout
+    self._subtitle_root_index = self._right_secondary_sections_layout.count() - 1
     self._subtitle_popout: "SubtitlePopoutWindow | None" = None
     self._subtitle_placeholder: QLabel | None = None
     # Pad the bottom of the dock so the panel hugs the top.
-    self._right_dock_layout.addStretch(1)
+    self._right_secondary_bottom_spacer = QWidget(self._right_secondary_sections_host)
+    self._right_secondary_bottom_spacer.setObjectName("RightSecondaryBottomSpacer")
+    self._right_secondary_bottom_spacer.setFixedHeight(36)
+    self._right_secondary_sections_layout.addWidget(
+        self._right_secondary_bottom_spacer,
+        stretch=0,
+    )
+    self._right_secondary_sections_layout.addStretch(1)
+    self._right_dock_sections_splitter.setStretchFactor(0, 7)
+    self._right_dock_sections_splitter.setStretchFactor(1, 3)
+    if not _restore_right_dock_sections_splitter_state(
+        self._right_dock_sections_splitter,
+    ):
+        self._right_dock_sections_splitter.setSizes([540, 260])
+    self._right_dock_sections_splitter.splitterMoved.connect(
+        lambda _pos, _index: _save_right_dock_sections_splitter_state(self),
+    )
     self._yield_startup_ui("right_dock")
     self._apply_professional_ui_labels()
     self._apply_screenstudio_simple_mode_ui()

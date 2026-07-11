@@ -11,6 +11,7 @@ build/
 dist/
 *.manifest
 /TigerCapture.exe
+/TigerStudio.exe
 
 # Rust native helpers
 native/**/target/
@@ -58,4 +59,22 @@ external/assets/vtuber/
 external/assets/music/soundfonts/*.sf2
 external/assets/music/soundfonts/*.sf3
 external/assets/music/soundfonts/*.sfz
+external/assets/music/**/*.wav
+external/assets/music/**/*.flac
+external/assets/music/**/*.aif
+external/assets/music/**/*.aiff
+external/assets/music/**/*.ogg
+external/assets/music/**/*.sf2
+external/assets/music/**/*.sf3
+external/assets/music/**/*.sfz
+external/assets/music/**/*.dspreset
+external/assets/music/drum_kits/*
+!external/assets/music/drum_kits/README.md
+external/assets/music/drum_kits/**/*.wav
+external/assets/music/drum_kits/**/*.flac
+external/assets/music/drum_kits/**/*.aif
+external/assets/music/drum_kits/**/*.aiff
+external/assets/music/drum_kits/**/*.ogg
+external/assets/music/drum_kits/**/*.sfz
+external/assets/music/drum_kits/**/*.dspreset
 resources/live2d_samples/CubismWebSamples/

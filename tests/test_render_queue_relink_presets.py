@@ -1582,6 +1582,8 @@ def test_professional_preset_helpers_return_one_click_plan():
     assert "template-patch-note-update" in ids
     assert "template-spine-actor-action" in ids
     assert "actor-spine-placeholder" in ids
+    assert "template-character-intro-short" in ids
+    assert "template-gacha-character-showcase" in ids
 
     template = preset_by_id("template-gameplay-highlight")
     assert template is not None

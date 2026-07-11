@@ -40,6 +40,9 @@ from app.timeline_nle_visual_overlay import (
 )
 
 
+_TIMELINE_THUMB_BASE_SOFTEN = 1.0
+
+
 def _timeline_thumb_blend_width(tile_w: int, thumb_h: int) -> int:
     tile_w = max(1, int(tile_w))
     thumb_h = max(1, int(thumb_h))
@@ -77,12 +80,14 @@ def _timeline_thumb_tile_rects(
     return rects
 
 
-def _timeline_soft_thumb_tile(owner, pixmap, tile_w: int, thumb_h: int) -> QPixmap:
+def _timeline_thumb_tile(owner, pixmap, tile_w: int, thumb_h: int, soften: float) -> QPixmap:
     tile_w = max(1, int(tile_w))
     thumb_h = max(1, int(thumb_h))
+    soften = max(0.0, min(1.0, float(soften)))
+    soften_key = int(round(soften * 100.0))
     cache_key = None
     try:
-        cache_key = (int(pixmap.cacheKey()), tile_w, thumb_h, 82)
+        cache_key = (int(pixmap.cacheKey()), tile_w, thumb_h, soften_key)
     except Exception:
         cache_key = None
     cache = getattr(owner, "_timeline_soft_thumb_tile_cache", None) if owner is not None else None
@@ -102,7 +107,7 @@ def _timeline_soft_thumb_tile(owner, pixmap, tile_w: int, thumb_h: int) -> QPixm
         pixmap,
         0.0,
         opacity=1.0,
-        soften=0.82,
+        soften=soften,
     )
     tile_painter.end()
     if cache_key is not None and isinstance(cache, dict):
@@ -112,17 +117,29 @@ def _timeline_soft_thumb_tile(owner, pixmap, tile_w: int, thumb_h: int) -> QPixm
     return tile
 
 
-def _paint_timeline_thumb_tile_layer(
+def _timeline_soft_thumb_tile(owner, pixmap, tile_w: int, thumb_h: int) -> QPixmap:
+    return _timeline_thumb_tile(
+        owner,
+        pixmap,
+        tile_w,
+        thumb_h,
+        _TIMELINE_THUMB_BASE_SOFTEN,
+    )
+
+
+def _build_timeline_thumb_tile_layer(
     owner,
-    painter: QPainter,
     preview_rect: QRect,
     tile_rects: list[QRect],
     blend_w: int,
-    opacity: float,
     pixmap_for_rect,
-) -> None:
+    *,
+    soften: float,
+) -> QPixmap:
+    empty = QPixmap(max(1, preview_rect.width()), max(1, preview_rect.height()))
+    empty.fill(Qt.GlobalColor.transparent)
     if not tile_rects or preview_rect.width() <= 0 or preview_rect.height() <= 0:
-        return
+        return empty
     layer = QPixmap(preview_rect.width(), preview_rect.height())
     layer.fill(Qt.GlobalColor.transparent)
     layer_painter = QPainter(layer)
@@ -132,7 +149,13 @@ def _paint_timeline_thumb_tile_layer(
         pixmap = pixmap_for_rect(tile_rect)
         if pixmap is None:
             continue
-        tile = _timeline_soft_thumb_tile(owner, pixmap, tile_rect.width(), preview_rect.height())
+        tile = _timeline_thumb_tile(
+            owner,
+            pixmap,
+            tile_rect.width(),
+            preview_rect.height(),
+            soften,
+        )
         local_x = int(tile_rect.left() - preview_rect.left())
         if tile_index == 0 or blend_w <= 0:
             target = QRect(local_x, 0, tile_rect.width(), preview_rect.height())
@@ -169,6 +192,30 @@ def _paint_timeline_thumb_tile_layer(
                 QRect(remainder_x, 0, tile_rect.width() - remainder_x, preview_rect.height()),
             )
     layer_painter.end()
+    return layer
+
+
+def _paint_timeline_thumb_tile_layer(
+    owner,
+    painter: QPainter,
+    preview_rect: QRect,
+    tile_rects: list[QRect],
+    blend_w: int,
+    opacity: float,
+    pixmap_for_rect,
+    *,
+    soften: float = _TIMELINE_THUMB_BASE_SOFTEN,
+) -> None:
+    if not tile_rects or preview_rect.width() <= 0 or preview_rect.height() <= 0:
+        return
+    layer = _build_timeline_thumb_tile_layer(
+        owner,
+        preview_rect,
+        tile_rects,
+        blend_w,
+        pixmap_for_rect,
+        soften=soften,
+    )
 
     painter.save()
     clip_path = QPainterPath()
@@ -177,6 +224,80 @@ def _paint_timeline_thumb_tile_layer(
     painter.setOpacity(max(0.0, min(1.0, float(opacity))))
     painter.drawPixmap(preview_rect, layer)
     painter.restore()
+
+
+def _paint_timeline_playhead_sharp_thumb_window(
+    owner,
+    painter: QPainter,
+    preview_rect: QRect,
+    tile_rects: list[QRect],
+    blend_w: int,
+    pixmap_for_rect,
+    playhead_x: int,
+) -> None:
+    if (
+        not tile_rects
+        or preview_rect.width() <= 0
+        or preview_rect.height() <= 0
+        or playhead_x < preview_rect.left()
+        or playhead_x > preview_rect.right()
+    ):
+        return
+
+    px_per_sec = float(getattr(owner, "_px_per_sec", 80.0) or 80.0)
+    sharp_half = int(max(28, min(120, px_per_sec * 0.78)))
+    feather = int(max(36, min(144, px_per_sec * 0.90, sharp_half * 2)))
+    left = max(preview_rect.left(), int(playhead_x - sharp_half - feather))
+    right = min(preview_rect.right(), int(playhead_x + sharp_half + feather))
+    if right <= left:
+        return
+
+    layer = _build_timeline_thumb_tile_layer(
+        owner,
+        preview_rect,
+        tile_rects,
+        blend_w,
+        pixmap_for_rect,
+        soften=0.0,
+    )
+    if layer.isNull():
+        return
+
+    painter.save()
+    clip_path = QPainterPath()
+    clip_path.addRoundedRect(QRectF(preview_rect), 5.0, 5.0)
+    painter.setClipPath(clip_path, Qt.ClipOperation.IntersectClip)
+    width = max(1, right - left + 1)
+    slices = min(80, max(24, width // 4))
+    for slice_index in range(slices):
+        x0 = int(round(left + slice_index * width / slices))
+        x1 = int(round(left + (slice_index + 1) * width / slices))
+        if x1 <= x0:
+            continue
+        center = (x0 + x1) * 0.5
+        distance = abs(center - playhead_x)
+        if distance <= sharp_half:
+            alpha = 1.0
+        else:
+            alpha = 1.0 - (distance - sharp_half) / max(1.0, float(feather))
+            alpha = max(0.0, min(1.0, alpha))
+            alpha = alpha * alpha * (3.0 - 2.0 * alpha)
+        if alpha <= 0.01:
+            continue
+        painter.setOpacity(alpha)
+        source = QRect(
+            int(x0 - preview_rect.left()),
+            0,
+            int(x1 - x0),
+            preview_rect.height(),
+        )
+        painter.drawPixmap(
+            QRect(int(x0), preview_rect.top(), int(x1 - x0), preview_rect.height()),
+            layer,
+            source,
+        )
+    painter.restore()
+
 
 def paintEvent(self, event) -> None:
     painter = QPainter(self)
@@ -466,6 +587,7 @@ def paintEvent(self, event) -> None:
                 def _pixmap_for_tile(tile_rect: QRect):
                     return _valid_thumb_at(_thumb_index_for_x(tile_rect.center().x()))
 
+                painter.save()
                 painter.setClipRect(clip_rect.adjusted(5, 4, -5, -4))
                 _paint_timeline_thumb_tile_layer(
                     self,
@@ -476,7 +598,18 @@ def paintEvent(self, event) -> None:
                     0.76 if self._is_active else 0.64,
                     _pixmap_for_tile,
                 )
-                painter.setClipping(False)
+                playhead_x = self._project_ms_to_x(int(getattr(self, "_position_ms", 0) or 0))
+                if clip_rect.left() <= playhead_x <= clip_rect.right():
+                    _paint_timeline_playhead_sharp_thumb_window(
+                        self,
+                        painter,
+                        preview_rect,
+                        tile_rects,
+                        blend_w,
+                        _pixmap_for_tile,
+                        playhead_x,
+                    )
+                painter.restore()
             painter.restore()
         else:
             pass

@@ -1347,7 +1347,7 @@
       "path": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\Lamborghini Revuelto – From Now On [sitXeGjm4Mc].mp4",
       "size_bytes": 15042898,
       "slot_id": "screenstudio-real-72",
-      "registered_at": "2026-07-08T13:13:10.823786+00:00",
+      "registered_at": "2026-07-10T12:53:14.939915+00:00",
       "valid_candidate": true,
       "sidecar_ready": false,
       "cursor_event_count": 0,
@@ -1363,7 +1363,7 @@
       "path": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\South Korea 4K Drone Video ｜ Seoul, Busan, Songdo Cinematic Aerials [AA-sv3ilNBE].mp4",
       "size_bytes": 731561402,
       "slot_id": "screenstudio-real-72",
-      "registered_at": "2026-07-08T13:59:09.798607+00:00",
+      "registered_at": "2026-07-09T06:43:02.429719+00:00",
       "valid_candidate": true,
       "sidecar_ready": false,
       "cursor_event_count": 0,
@@ -1372,7 +1372,7 @@
         "missing_cursor_sidecar"
       ],
       "auto_zoom_count": 0,
-      "reason": "media pool import",
+      "reason": "track import",
       "starter_template_id": "screen-recording-demo"
     },
     {
@@ -1459,7 +1459,7 @@
       "path": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\trump_oval_office_live_GnzWEo_HfE0.mp4",
       "size_bytes": 183839151,
       "slot_id": "screenstudio-real-72",
-      "registered_at": "2026-07-07T05:34:27.254305+00:00",
+      "registered_at": "2026-07-10T07:06:17.080817+00:00",
       "valid_candidate": true,
       "sidecar_ready": false,
       "cursor_event_count": 0,
@@ -1468,7 +1468,7 @@
         "missing_cursor_sidecar"
       ],
       "auto_zoom_count": 0,
-      "reason": "media pool import",
+      "reason": "track import",
       "starter_template_id": "screen-recording-demo"
     },
     {

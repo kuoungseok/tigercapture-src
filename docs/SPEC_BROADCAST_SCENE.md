@@ -242,6 +242,18 @@ Live audio is intentionally explicit. `include_audio=true` requires one of:
 {"audio_source_kind": "file", "audio_file": "music.wav"}
 ```
 
+RTMP/RTMPS Live Targets such as YouTube Live default to generated silent stereo
+when the operator has not made an audio choice, because platform ingest is more
+stable when an audio stream is present. If the operator explicitly chooses
+`No audio`, TigerCapture honors that choice and sends video-only output.
+
+RTMP/RTMPS live commands use live-friendly H.264 defaults: B-frames are disabled,
+the GOP/keyframe interval is fixed from `keyframe_interval_seconds`, and FLV
+output uses `no_duration_filesize` so platforms such as YouTube do not wait for
+file-style duration metadata. These encoder settings improve ingest behavior but
+do not prove viewer playback. Release evidence must record ingest health and
+viewer playback as separate redacted states.
+
 `project_audio_bus` reuses the same `app.audio_tracks.build_audio_filter` path
 as export. Timeline trim, cuts, fades, gain, pan, automation, and clip effects
 are rendered to a temporary WAV, then attached to the live FFmpeg session as a

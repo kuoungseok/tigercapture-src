@@ -7,6 +7,7 @@ changing button setup code.
 from __future__ import annotations
 
 from functools import lru_cache
+from pathlib import Path
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
 from PySide6.QtGui import (
@@ -15,6 +16,7 @@ from PySide6.QtGui import (
     QConicalGradient,
     QFont,
     QIcon,
+    QImage,
     QLinearGradient,
     QPainter,
     QPainterPath,
@@ -26,6 +28,301 @@ from PySide6.QtGui import (
 
 def _color(value: str | QColor) -> QColor:
     return QColor(value) if not isinstance(value, QColor) else QColor(value)
+
+
+def _key_light_logo(pixmap: QPixmap, color: str | QColor) -> QPixmap:
+    image = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+    base = _color(color)
+    for y in range(image.height()):
+        for x in range(image.width()):
+            pixel = image.pixelColor(x, y)
+            luminance = int(pixel.red() * .299 + pixel.green() * .587 + pixel.blue() * .114)
+            if luminance < 52:
+                pixel.setAlpha(0)
+                image.setPixelColor(x, y, pixel)
+                continue
+            alpha = max(0, min(255, int((luminance - 52) / 203.0 * 255)))
+            image.setPixelColor(x, y, QColor(base.red(), base.green(), base.blue(), alpha))
+    return QPixmap.fromImage(image)
+
+
+_BLOCK_GLYPHS: dict[str, tuple[str, ...]] = {
+    "A": ("01110", "10001", "10001", "11111", "10001", "10001", "10001"),
+    "B": ("11110", "10001", "10001", "11110", "10001", "10001", "11110"),
+    "C": ("01111", "10000", "10000", "10000", "10000", "10000", "01111"),
+    "D": ("11110", "10001", "10001", "10001", "10001", "10001", "11110"),
+    "E": ("11111", "10000", "10000", "11110", "10000", "10000", "11111"),
+    "L": ("10000", "10000", "10000", "10000", "10000", "10000", "11111"),
+    "M": ("10001", "11011", "10101", "10101", "10001", "10001", "10001"),
+    "N": ("10001", "11001", "10101", "10011", "10001", "10001", "10001"),
+    "O": ("01110", "10001", "10001", "10001", "10001", "10001", "01110"),
+    "P": ("11110", "10001", "10001", "11110", "10000", "10000", "10000"),
+    "R": ("11110", "10001", "10001", "11110", "10100", "10010", "10001"),
+    "S": ("01111", "10000", "10000", "01110", "00001", "00001", "11110"),
+    "T": ("11111", "00100", "00100", "00100", "00100", "00100", "00100"),
+    "U": ("10001", "10001", "10001", "10001", "10001", "10001", "01110"),
+}
+
+
+def _paint_block_text(painter: QPainter, text: str, rect: QRectF, color: str | QColor) -> None:
+    glyphs = []
+    columns = 0
+    for char in text.upper():
+        if char == " ":
+            glyphs.append((" ", None))
+            columns += 3
+            continue
+        glyph = _BLOCK_GLYPHS.get(char)
+        if glyph is None:
+            continue
+        glyphs.append((char, glyph))
+        columns += 5
+    if not glyphs or columns <= 0:
+        return
+    columns += max(0, len(glyphs) - 1)
+    cell = min(float(rect.width()) / columns, float(rect.height()) / 7.0)
+    if cell <= 0:
+        return
+    pixel = max(0.8, cell * .82)
+    x = float(rect.left()) + (float(rect.width()) - columns * cell) * .5
+    y0 = float(rect.top()) + (float(rect.height()) - 7.0 * cell) * .5
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(_color(color))
+    radius = max(.25, cell * .16)
+    for _char, glyph in glyphs:
+        if glyph is None:
+            x += 4 * cell
+            continue
+        for row, line in enumerate(glyph):
+            for col, value in enumerate(line):
+                if value != "1":
+                    continue
+                painter.drawRoundedRect(
+                    QRectF(x + col * cell, y0 + row * cell, pixel, pixel),
+                    radius,
+                    radius,
+                )
+        x += 6 * cell
+
+
+def _paint_sound_lab_logo(painter: QPainter, rect: QRectF, color: str | QColor) -> None:
+    base = _color(color)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(base)
+
+    w = max(1.0, float(rect.width()))
+    h = max(1.0, float(rect.height()))
+    left = float(rect.left())
+    top = float(rect.top())
+    bars = [.18, .32, .46, .62, .48, .38, .30, .44, .62, .82, .96, .68, .50, .36, .28, .38, .30, .22]
+    usable_w = max(h * .90, min(w * .72, h * 4.0))
+    bar_w = max(1.0, usable_w / (len(bars) + (len(bars) - 1) * .45))
+    gap = max(.7, bar_w * .45)
+    total_w = len(bars) * bar_w + (len(bars) - 1) * gap
+    x0 = left + (w - total_w) * .5
+    center_y = top + h * .34
+    center_gap = max(1.0, h * .035)
+    radius = max(.35, h * .012)
+    for i, height in enumerate(bars):
+        x = x0 + i * (bar_w + gap)
+        half_h = h * height * .28
+        top_h = max(.8, half_h - center_gap * .5)
+        bottom_h = max(.8, half_h - center_gap * .5)
+        painter.drawRoundedRect(
+            QRectF(x, center_y - center_gap * .5 - top_h, bar_w, top_h),
+            radius,
+            radius,
+        )
+        painter.drawRoundedRect(
+            QRectF(x, center_y + center_gap * .5, bar_w, bottom_h),
+            radius,
+            radius,
+        )
+
+    _paint_block_text(
+        painter,
+        "SOUND LAB",
+        QRectF(left + w * .10, top + h * .66, w * .80, h * .29),
+        base,
+    )
+
+
+def _paint_composer_logo(painter: QPainter, rect: QRectF, color: str | QColor) -> None:
+    base = _color(color)
+
+    w = max(1.0, float(rect.width()))
+    h = max(1.0, float(rect.height()))
+    left = float(rect.left())
+    top = float(rect.top())
+    badge_w = min(w * .94, h * 2.50)
+    badge_h = min(h * .98, badge_w / 2.50)
+    bx = left + (w - badge_w) * .5
+    by = top + (h - badge_h) * .5
+    bw = badge_w
+    bh = badge_h
+
+    def pt(x: float, y: float) -> QPointF:
+        return QPointF(bx + bw * x, by + bh * y)
+
+    def box(x: float, y: float, ww: float, hh: float) -> QRectF:
+        return QRectF(bx + bw * x, by + bh * y, bw * ww, bh * hh)
+
+    heavy = max(1.0, bh * .030)
+    mid = max(1.0, bh * .021)
+    fine = max(1.0, bh * .015)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(QPen(base, heavy, Qt.PenStyle.SolidLine, Qt.PenCapStyle.SquareCap, Qt.PenJoinStyle.MiterJoin))
+
+    # Voice-Lab-style angular outer ornament.
+    left_frame = QPolygonF([
+        pt(.050, .185), pt(.085, .135), pt(.470, .135),
+        pt(.470, .150), pt(.075, .150), pt(.030, .205),
+        pt(.030, .640), pt(.072, .740), pt(.128, .740),
+        pt(.155, .675), pt(.252, .675),
+    ])
+    right_frame = QPolygonF([
+        pt(.530, .135), pt(.915, .135), pt(.950, .185),
+        pt(.970, .205), pt(.970, .640), pt(.928, .740),
+        pt(.872, .740), pt(.845, .675), pt(.748, .675),
+    ])
+    painter.drawPolyline(left_frame)
+    painter.drawPolyline(right_frame)
+
+    painter.setBrush(base)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.drawPolygon(QPolygonF([
+        pt(.050, .205), pt(.112, .165), pt(.138, .165),
+        pt(.096, .250), pt(.050, .300),
+    ]))
+    painter.drawPolygon(QPolygonF([
+        pt(.950, .205), pt(.888, .165), pt(.862, .165),
+        pt(.904, .250), pt(.950, .300),
+    ]))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    painter.setPen(QPen(base, mid, Qt.PenStyle.SolidLine, Qt.PenCapStyle.SquareCap, Qt.PenJoinStyle.MiterJoin))
+    painter.drawPolygon(QPolygonF([pt(.050, .205), pt(.140, .165), pt(.102, .265), pt(.050, .300)]))
+    painter.drawPolygon(QPolygonF([pt(.950, .205), pt(.860, .165), pt(.898, .265), pt(.950, .300)]))
+
+    for x0, side in ((.045, 1), (.955, -1)):
+        x1 = x0 + side * .032
+        for y in (.405, .445, .485, .525, .565):
+            painter.drawLine(pt(x0, y), pt(x1, y))
+
+    # Bottom title plate, including the notched shoulders and diagonal ticks.
+    plate = QPolygonF([
+        pt(.235, .625), pt(.765, .625), pt(.792, .690),
+        pt(.852, .690), pt(.918, .820), pt(.878, .885),
+        pt(.122, .885), pt(.082, .820), pt(.148, .690),
+        pt(.208, .690), pt(.235, .625),
+    ])
+    painter.setPen(QPen(base, heavy, Qt.PenStyle.SolidLine, Qt.PenCapStyle.SquareCap, Qt.PenJoinStyle.MiterJoin))
+    painter.drawPolyline(plate)
+    painter.setPen(QPen(base, mid, Qt.PenStyle.SolidLine, Qt.PenCapStyle.SquareCap, Qt.PenJoinStyle.MiterJoin))
+    painter.drawLine(pt(.095, .785), pt(.135, .865))
+    painter.drawLine(pt(.120, .770), pt(.160, .850))
+    painter.drawLine(pt(.905, .785), pt(.865, .865))
+    painter.drawLine(pt(.880, .770), pt(.840, .850))
+
+    plus = bh * .030
+    for cx in (.190, .810):
+        cy = .770
+        painter.drawLine(QPointF(pt(cx, cy).x() - plus, pt(cx, cy).y()), QPointF(pt(cx, cy).x() + plus, pt(cx, cy).y()))
+        painter.drawLine(QPointF(pt(cx, cy).x(), pt(cx, cy).y() - plus), QPointF(pt(cx, cy).x(), pt(cx, cy).y() + plus))
+
+    # The center illustration follows Voice Lab's placement, but uses sheet music.
+    painter.setPen(QPen(base, fine, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+    staff_left = bx + bw * .265
+    staff_right = bx + bw * .735
+    staff_top = by + bh * .278
+    staff_gap = max(1.0, bh * .026)
+    for row in range(5):
+        y = staff_top + row * staff_gap
+        painter.drawLine(QPointF(staff_left, y), QPointF(staff_right, y))
+
+    def draw_half_note(center: QPointF, scale: float, stem_up: bool = True) -> None:
+        note_w = bh * .023 * scale
+        note_h = bh * .015 * scale
+        note_pen = QPen(base, max(1.0, bh * .024), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+        painter.save()
+        painter.translate(center)
+        painter.rotate(-18)
+        painter.setPen(note_pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(QPointF(0, 0), note_w, note_h)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Clear)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(Qt.GlobalColor.transparent)
+        painter.drawEllipse(QPointF(0, 0), note_w * .52, note_h * .44)
+        painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_SourceOver)
+        painter.setPen(note_pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(QPointF(0, 0), note_w, note_h)
+        painter.restore()
+        stem_x = center.x() + bh * .020 * scale
+        stem_top = center.y() - bh * .125 * scale
+        stem_bottom = center.y() + bh * .006 * scale
+        if stem_up:
+            painter.drawLine(QPointF(stem_x, stem_bottom), QPointF(stem_x, stem_top))
+        else:
+            painter.drawLine(
+                QPointF(center.x() - bh * .020 * scale, center.y() - bh * .006 * scale),
+                QPointF(center.x() - bh * .020 * scale, center.y() + bh * .125 * scale),
+            )
+
+    staff_w = staff_right - staff_left
+    draw_half_note(QPointF(staff_left + staff_w * .33, staff_top + staff_gap * 3.0), 1.55)
+    draw_half_note(QPointF(staff_left + staff_w * .51, staff_top + staff_gap * 2.0), 1.40)
+    draw_half_note(QPointF(staff_left + staff_w * .68, staff_top + staff_gap * 2.8), 1.28)
+    painter.setPen(QPen(base, mid, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+    painter.drawLine(pt(.255, .360), pt(.210, .330))
+    painter.drawLine(pt(.210, .330), pt(.190, .375))
+    painter.drawLine(pt(.745, .360), pt(.790, .330))
+    painter.drawLine(pt(.790, .330), pt(.810, .375))
+
+    _paint_block_text(
+        painter,
+        "COMPOSER",
+        box(.215, .675, .570, .185),
+        base,
+    )
+
+
+def _paint_voice_lab_logo(painter: QPainter, rect: QRectF, color: str | QColor) -> None:
+    base = _color(color)
+    w = max(1.0, float(rect.width()))
+    h = max(1.0, float(rect.height()))
+    left = float(rect.left())
+    top = float(rect.top())
+    stroke = max(1.0, h * .075)
+    painter.setPen(QPen(base, stroke, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+
+    # Rounded microphone capsule.
+    mic = QRectF(left + w * .34, top + h * .16, w * .26, h * .44)
+    painter.drawRoundedRect(mic, w * .13, w * .13)
+    painter.drawLine(QPointF(left + w * .47, top + h * .62), QPointF(left + w * .47, top + h * .78))
+    painter.drawLine(QPointF(left + w * .33, top + h * .80), QPointF(left + w * .61, top + h * .80))
+    painter.drawArc(QRectF(left + w * .22, top + h * .34, w * .50, h * .34), 200 * 16, 140 * 16)
+
+    # Voice waveform bubbles to keep it distinct from a plain audio icon.
+    wave_pen = QPen(base, max(1.0, h * .052), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin)
+    painter.setPen(wave_pen)
+    path = QPainterPath()
+    path.moveTo(left + w * .12, top + h * .51)
+    path.cubicTo(left + w * .18, top + h * .34, left + w * .23, top + h * .68, left + w * .29, top + h * .50)
+    painter.drawPath(path)
+    path = QPainterPath()
+    path.moveTo(left + w * .66, top + h * .49)
+    path.cubicTo(left + w * .72, top + h * .28, left + w * .79, top + h * .72, left + w * .86, top + h * .46)
+    painter.drawPath(path)
+
+    # Small creator/AI sparkle.
+    painter.setPen(QPen(base, max(1.0, h * .045), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+    cx = left + w * .76
+    cy = top + h * .22
+    r = h * .085
+    painter.drawLine(QPointF(cx, cy - r), QPointF(cx, cy + r))
+    painter.drawLine(QPointF(cx - r, cy), QPointF(cx + r, cy))
 
 
 @lru_cache(maxsize=256)
@@ -210,6 +507,12 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
         path.cubicTo(s * .54, s * .30, s * .64, s * .74, s * .72, s * .52)
         path.cubicTo(s * .78, s * .38, s * .84, s * .45, s * .88, s * .42)
         painter.drawPath(path)
+    elif n in {"sound-lab", "sound_lab", "audio-lab", "audio_lab"}:
+        _paint_sound_lab_logo(painter, QRectF(0, 0, s, s), color)
+    elif n in {"composer", "music-composer", "music_composer", "music-lab", "music_lab"}:
+        _paint_composer_logo(painter, QRectF(0, 0, s, s), color)
+    elif n in {"voice", "voice-lab", "voice_lab", "tts", "tts-lab", "tts_lab"}:
+        _paint_voice_lab_logo(painter, QRectF(0, 0, s, s), color)
     elif n in {"fade", "dissolve", "transition"}:
         painter.drawRoundedRect(QRectF(s * .14, s * .28, s * .72, s * .44), 3, 3)
         painter.drawLine(QPointF(s * .50, s * .24), QPointF(s * .50, s * .76))
@@ -434,6 +737,80 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
     else:
         painter.drawRoundedRect(QRectF(s * .20, s * .20, s * .60, s * .60), 3, 3)
 
+    painter.end()
+    return QIcon(pix)
+
+
+@lru_cache(maxsize=64)
+def sound_lab_wide_icon(width: int = 220, height: int = 40, *, color: str = "#FFFFFF") -> QIcon:
+    safe_width = max(48, int(width or 220))
+    safe_height = max(24, int(height or 40))
+    pix = QPixmap(safe_width, safe_height)
+    pix.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pix)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    _paint_sound_lab_logo(painter, QRectF(0, 0, float(safe_width), float(safe_height)), color)
+    painter.end()
+    return QIcon(pix)
+
+
+@lru_cache(maxsize=64)
+def composer_wide_icon(width: int = 260, height: int = 42, *, color: str = "#FFFFFF") -> QIcon:
+    safe_width = max(72, int(width or 260))
+    safe_height = max(26, int(height or 42))
+    pix = QPixmap(safe_width, safe_height)
+    pix.fill(Qt.GlobalColor.transparent)
+    logo_path = Path(__file__).resolve().parents[1] / "resources" / "branding" / "composer_logo.png"
+    if logo_path.exists():
+        logo = QPixmap(str(logo_path))
+        if not logo.isNull():
+            scaled = logo.scaled(
+                QSize(safe_width, safe_height),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            painter = QPainter(pix)
+            painter.drawPixmap(
+                int((safe_width - scaled.width()) / 2),
+                int((safe_height - scaled.height()) / 2),
+                scaled,
+            )
+            painter.end()
+            return QIcon(pix)
+    painter = QPainter(pix)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    _paint_composer_logo(painter, QRectF(0, 0, float(safe_width), float(safe_height)), color)
+    painter.end()
+    return QIcon(pix)
+
+
+@lru_cache(maxsize=64)
+def voice_lab_wide_icon(width: int = 260, height: int = 42, *, color: str = "#FFFFFF") -> QIcon:
+    safe_width = max(72, int(width or 260))
+    safe_height = max(26, int(height or 42))
+    pix = QPixmap(safe_width, safe_height)
+    pix.fill(Qt.GlobalColor.transparent)
+    logo_path = Path(__file__).resolve().parents[1] / "resources" / "branding" / "voice_lab_logo.png"
+    if logo_path.exists():
+        logo = QPixmap(str(logo_path))
+        if not logo.isNull():
+            scaled = logo.scaled(
+                QSize(safe_width, safe_height),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            scaled = _key_light_logo(scaled, color)
+            painter = QPainter(pix)
+            painter.drawPixmap(
+                int((safe_width - scaled.width()) / 2),
+                int((safe_height - scaled.height()) / 2),
+                scaled,
+            )
+            painter.end()
+            return QIcon(pix)
+    painter = QPainter(pix)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    _paint_voice_lab_logo(painter, QRectF(0, 0, float(safe_width), float(safe_height)), color)
     painter.end()
     return QIcon(pix)
 

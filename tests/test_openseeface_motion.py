@@ -51,6 +51,7 @@ def test_openseeface_rows_convert_to_relative_face_motion():
     assert frames[1].face_box == (12, 22, 20, 30)
     assert summary["drives_vrm_pose"] is True
     assert "Head" in summary["driven_channels"]
+    assert "chin_offset_x_norm_mean" in summary
 
 
 def test_openseeface_rows_skip_failed_3d_rows():
@@ -79,3 +80,37 @@ def test_openseeface_rows_preserve_optional_shoulder_roll_channel():
     assert frames[1].shoulder_roll_deg == 6.0
     assert summary["shoulder_roll_range"] == 6.0
     assert "UpperChest" in summary["driven_channels"]
+
+
+def test_openseeface_default_tuning_makes_small_head_angles_readable():
+    from app.vtuber.openseeface_motion import frames_from_openseeface_rows
+
+    rows = [
+        {"Frame": "1", "FPS": "10", "Success3D": "True", "Euler.X": "0", "Euler.Y": "0", "Euler.Z": "0"},
+        {"Frame": "2", "FPS": "10", "Success3D": "True", "Euler.X": "0", "Euler.Y": "0", "Euler.Z": "0"},
+        {"Frame": "3", "FPS": "10", "Success3D": "True", "Euler.X": "0", "Euler.Y": "0", "Euler.Z": "0"},
+        {"Frame": "4", "FPS": "10", "Success3D": "True", "Euler.X": "2", "Euler.Y": "5", "Euler.Z": "-4"},
+    ]
+
+    frame = frames_from_openseeface_rows(rows)[-1]
+
+    assert frame.pitch_deg > 5.0
+    assert frame.yaw_deg > 5.0
+    assert frame.roll_deg < -4.0
+
+
+def test_openseeface_rows_measure_chin_offset_from_landmarks():
+    from app.vtuber.openseeface_motion import frames_from_openseeface_rows, summarize_openseeface_motion
+
+    row = {"Frame": "1", "FPS": "10", "Success3D": "True", "Euler.X": "0", "Euler.Y": "0", "Euler.Z": "0"}
+    for index, x in enumerate([10, 20, 30, 40, 50, 60, 70, 80, 38, 100, 110, 120, 130, 140, 150, 160, 170]):
+        row[f"Landmark[{index}].X"] = str(x)
+        row[f"Landmark[{index}].Y"] = "20"
+
+    frame = frames_from_openseeface_rows([row])[0]
+    summary = summarize_openseeface_motion([frame])
+
+    assert frame.chin_offset_x_norm < -0.25
+    assert frame.to_dict()["chin_offset_x_norm"] == frame.chin_offset_x_norm
+    assert summary["chin_left_frames"] == 1
+    assert summary["chin_right_frames"] == 0

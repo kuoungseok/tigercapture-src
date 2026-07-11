@@ -174,6 +174,7 @@ class TrackRow(QWidget):
     SPEED_MIN_DURATION_MS = 200
     CLIP_EDGE_GRAB_PX = 8        # clip trim / roll edit handle hit area
     CLIP_MIN_DURATION_MS = 100   # minimum clip duration after trim
+    PLAYHEAD_GRAB_PX = 9         # grab zone around the drawn playhead line
 
     offset_changed = Signal(int, int)  # track_id, new_offset_ms
     drag_committed = Signal(int)       # track_id ??emitted ONLY on mouseRelease
@@ -727,6 +728,12 @@ class TrackRow(QWidget):
         self._position_ms = ms
         self.update()
 
+    def _playhead_hit(self, pos: QPoint) -> bool:
+        if pos.y() < self.LABEL_H - 8 or pos.y() > self.LABEL_H + self.TIMELINE_H + 8:
+            return False
+        px = self._project_ms_to_x(self._position_ms)
+        return abs(pos.x() - px) <= self.PLAYHEAD_GRAB_PX
+
     def _track_span_ms(self) -> int:
         """Total occupied span on the project timeline in ms.
 
@@ -1210,6 +1217,8 @@ class TrackRow(QWidget):
             badges.append(("COL", "#716C7B", "#5A5664"))
         if (getattr(clip, "screenstudio_polish", {}) or {}).get("auto_zoom_actor_ids"):
             badges.append(("AP", "#75645C", "#5C596A"))
+        if getattr(clip, "frame_repairs", None):
+            badges.append(("Fix", "#6F7C61", "#4F5C58"))
 
         clip_start = int(getattr(clip, "timeline_in_ms", 0) or 0)
         clip_end = int(getattr(clip, "timeline_out_ms", clip_start) or clip_start)
@@ -1307,6 +1316,10 @@ class TrackRow(QWidget):
             entries.append(("COL", "Color Grade", "#716C7B", "#5A5664"))
         if (getattr(clip, "screenstudio_polish", {}) or {}).get("auto_zoom_actor_ids"):
             entries.append(("AP", "Auto Zoom", "#75645C", "#5C596A"))
+        if getattr(clip, "frame_repairs", None):
+            count = len(getattr(clip, "frame_repairs", []) or [])
+            label = "Frame Fix" if count <= 1 else f"Frame Fix x{count}"
+            entries.append(("FIX", label, "#6F7C61", "#4F5C58"))
         clip_start = int(getattr(clip, "timeline_in_ms", 0) or 0)
         clip_end = int(getattr(clip, "timeline_out_ms", clip_start) or clip_start)
         for actor in getattr(self.track, "typography_actors", []) or []:
@@ -1459,6 +1472,8 @@ class TrackRow(QWidget):
             return "color"
         if text == "ap":
             return "motion"
+        if text == "fix":
+            return "inspect"
         if text == "t":
             return "title"
         if text == "mot":

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QByteArray, QSettings, Qt
 from PySide6.QtWidgets import (
     QButtonGroup,
     QFrame,
@@ -25,10 +25,52 @@ from app.timeline_cursor import _timeline_tool_cursor
 from app.timeline_ruler import TimelineRuler
 from app.timeline_striped_host import StripedHost
 from app.video_editor_audio_widgets import AudioMixerPanel
-from app.video_editor_layout_specs import horizontal_tool_scroll_qss
+from app.video_editor_layout_specs import (
+    EDITOR_VERTICAL_SPLITTER_SETTINGS_KEY,
+    EDITOR_RESIZABLE_PANE_MAX_HEIGHT,
+    MAIN_DOCK_MAX_HEIGHT,
+    horizontal_tool_scroll_qss,
+)
 from app.video_editor_nle_role_panel import RoleLaneFilterBar, role_lane_filter_bar_qss
 from app.video_editor_timeline_palette import configure_timeline_tile
 from app.video_editor_window_widgets import _AnimatedTimelineToolButton
+
+
+def _editor_settings() -> QSettings:
+    return QSettings("TigerCapture", "TigerCapture")
+
+
+def _restore_editor_vertical_splitter_state(splitter) -> bool:
+    try:
+        state = _editor_settings().value(EDITOR_VERTICAL_SPLITTER_SETTINGS_KEY)
+    except Exception:
+        return False
+    if state is None:
+        return False
+    if isinstance(state, QByteArray):
+        if state.isEmpty():
+            return False
+    elif isinstance(state, (bytes, bytearray)):
+        state = QByteArray(bytes(state))
+    else:
+        return False
+    try:
+        return bool(splitter.restoreState(state))
+    except Exception:
+        return False
+
+
+def _save_editor_vertical_splitter_state(owner) -> None:
+    splitter = getattr(owner, "_editor_vertical_splitter", None)
+    if splitter is None:
+        return
+    try:
+        _editor_settings().setValue(
+            EDITOR_VERTICAL_SPLITTER_SETTINGS_KEY,
+            splitter.saveState(),
+        )
+    except Exception:
+        pass
 
 
 def build_timeline_area(self):
@@ -325,9 +367,11 @@ def build_timeline_area(self):
     self._timeline_section_host = QWidget()
     self._timeline_section_host.setObjectName("TimelineSectionHost")
     self._timeline_compact_min_height = 220
-    self._timeline_compact_max_height = 320
+    self._timeline_compact_default_height = 320
+    self._timeline_compact_max_height = EDITOR_RESIZABLE_PANE_MAX_HEIGHT
     self._timeline_mixer_min_height = 430
-    self._timeline_mixer_max_height = 560
+    self._timeline_mixer_default_height = 560
+    self._timeline_mixer_max_height = EDITOR_RESIZABLE_PANE_MAX_HEIGHT
     self._timeline_section_host.setMinimumHeight(self._timeline_compact_min_height)
     self._timeline_section_host.setMaximumHeight(self._timeline_compact_max_height)
     ts_layout = QVBoxLayout(self._timeline_section_host)
@@ -377,12 +421,25 @@ def build_timeline_area(self):
     self._active_audio_track_id: int | None = None
     ts_layout.addWidget(self._audio_mixer_panel)
 
-    self._editor_outer_layout.addWidget(self._timeline_section_host, stretch=1)
+    timeline_root = getattr(self, "_editor_vertical_splitter", None)
+    if timeline_root is not None:
+        timeline_root.addWidget(self._timeline_section_host)
+        timeline_root.setStretchFactor(0, 5)
+        timeline_root.setStretchFactor(1, 3)
+        if not _restore_editor_vertical_splitter_state(timeline_root):
+            timeline_root.setSizes(
+                [MAIN_DOCK_MAX_HEIGHT, self._timeline_compact_default_height],
+            )
+        timeline_root.splitterMoved.connect(
+            lambda _pos, _index: _save_editor_vertical_splitter_state(self),
+        )
+    else:
+        self._editor_outer_layout.addWidget(self._timeline_section_host, stretch=1)
     self._yield_startup_ui("timeline_section")
     # Track where in the main column the timeline lives so the
     # popout can leave a placeholder and put it back later.
-    self._timeline_root_layout = self._editor_outer_layout
-    self._timeline_root_index = self._editor_outer_layout.indexOf(
+    self._timeline_root_layout = timeline_root or self._editor_outer_layout
+    self._timeline_root_index = self._timeline_root_layout.indexOf(
         self._timeline_section_host,
     )
     self._timeline_popout: "TimelinePopoutWindow | None" = None

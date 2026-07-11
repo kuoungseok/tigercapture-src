@@ -1,6 +1,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 import sys
+import time
 
 import numpy as np
 from PySide6.QtCore import Qt
@@ -34,6 +35,17 @@ class _CountingDecoder(_FakeDecoder):
     def read_rgb(self):
         self.read_count += 1
         return super().read_rgb()
+
+
+class _DelayedSeekDecoder(_FakeDecoder):
+    def __init__(self):
+        self.read_count = 0
+
+    def read_rgb(self):
+        self.read_count += 1
+        if self.read_count == 1:
+            return None
+        return np.full((2, 2, 3), 127, dtype=np.uint8)
 
 
 def test_single_source_refresh_syncs_duration_before_clip_view(monkeypatch, tmp_path):
@@ -201,6 +213,48 @@ def test_refresh_tracks_can_skip_immediate_preview_render(monkeypatch, tmp_path)
         player.release()
 
 
+def test_seek_retries_when_preview_decoder_is_not_ready(monkeypatch, tmp_path):
+    from PySide6.QtWidgets import QApplication
+
+    app = QApplication.instance() or QApplication([])
+    source = tmp_path / "clip.mp4"
+    source.write_bytes(b"placeholder")
+    decoder = _DelayedSeekDecoder()
+
+    def fake_open_decoder(path, hdr_info=None, preview_height=None):
+        return decoder
+
+    monkeypatch.setattr("app.video_decoder.open_decoder", fake_open_decoder)
+    track = SimpleNamespace(
+        id=1,
+        source_path=source,
+        duration_ms=0,
+        offset_ms=0,
+        cuts=[],
+        clips=[],
+        clips_explicit=False,
+        pip_enabled=False,
+    )
+    player = ProjectPlayer()
+    frames: list[np.ndarray] = []
+    player.gpu_frame_ready.connect(lambda rgb, _grade: frames.append(np.asarray(rgb).copy()))
+    try:
+        player.refresh_tracks([track], render_immediately=False)
+
+        player.set_position(100)
+
+        deadline = time.monotonic() + 1.0
+        while not frames and time.monotonic() < deadline:
+            app.processEvents()
+            time.sleep(0.01)
+
+        assert decoder.read_count >= 2
+        assert frames
+        assert int(frames[-1][0, 0, 0]) == 127
+    finally:
+        player.release()
+
+
 def test_live2d_actor_tracks_prewarm_renderer(monkeypatch):
     import app.live2d.warmup as warmup
 
@@ -285,6 +339,59 @@ def test_play_until_previews_range_and_restores_playhead(monkeypatch, tmp_path):
         assert player.position() == 0
     finally:
         player.release()
+
+
+def test_project_player_uses_wall_clock_advance_for_late_preview_ticks(monkeypatch):
+    from app import project_player_core
+
+    ticks = iter([10.0, 10.08, 10.081])
+    monkeypatch.setattr(project_player_core.time, "monotonic", lambda: next(ticks))
+    player = ProjectPlayer()
+    try:
+        first = player._playback_advance_ms()
+        late = player._playback_advance_ms()
+        early = player._playback_advance_ms()
+    finally:
+        player.release()
+
+    assert first == 33
+    assert late == 80
+    assert early == 33
+
+
+def test_project_player_quality_mode_disables_frame_drop(monkeypatch):
+    from app import project_player_core
+
+    ticks = iter([10.0, 10.08])
+    monkeypatch.setattr(project_player_core.time, "monotonic", lambda: next(ticks))
+    player = ProjectPlayer()
+    try:
+        player.set_project_settings({"preview": {"quality_mode": "quality"}})
+
+        first = player._playback_advance_ms()
+        late = player._playback_advance_ms()
+        diag = player.preview_playback_diagnostics()
+    finally:
+        player.release()
+
+    assert first == 33
+    assert late == 33
+    assert diag["quality_mode"] == "quality"
+    assert diag["frame_drop_allowed"] is False
+    assert diag["preview_decode_height"] == 0
+
+
+def test_project_player_performance_mode_caps_preview_height_and_allows_drop():
+    player = ProjectPlayer()
+    try:
+        player.set_project_settings({"preview": {"quality_mode": "performance"}})
+        diag = player.preview_playback_diagnostics()
+    finally:
+        player.release()
+
+    assert diag["quality_mode"] == "performance"
+    assert diag["frame_drop_allowed"] is True
+    assert diag["preview_decode_height"] == 540
 
 
 def test_window_move_guard_relaxes_and_restores_preview_timer():

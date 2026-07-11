@@ -178,6 +178,104 @@ Output, and prefer `Use internal VRM fallback` for Program Output. VSeeFace
 repair/registration remains available as a secondary action because VSeeFace is
 an optional sidecar, not the required output engine.
 
+2026-07-10 broadcast QA update: the durable Trump source can drive the bundled
+OpenSeeFace `facetracker.exe` reliably when the tracker input is cropped to the
+speaker region (`0.26,0.02,0.44,0.68`) with try-hard detection and a lower
+detection threshold. The full frame may produce a CSV containing only the header
+and blank rows; blank CSV rows are not tracking data and must not make the
+video-source report look successful. The default OpenSeeFace-to-VRM motion
+tuning now lightly amplifies pitch/yaw/roll while preserving sign so subtle
+human head turns remain readable on stylized VRM broadcast framing.
+The OpenSeeFace motion frames also expose `chin_offset_x_norm`, computed from
+Landmark[8] against the tracked landmark bounding-box center. Negative values
+mean the chin is left of the face/head center in screen space. The Trump crop
+shows this consistently (about `-0.23` face-width near 4.87s), so QA can detect
+the original off-center jaw/face angle instead of relying only on Euler values.
+
+2026-07-10 private YouTube Live QA status: a generated moving-square smoke test
+successfully reached YouTube Studio, then a VRM Program Output smoke test showed
+the Milica avatar in Studio briefly. The ingest-side status stayed healthy
+enough to write frames, but the YouTube Studio preview still buffered/stalled
+intermittently. Treat this as a real product bug, not a pass: RTMP ingest
+connected and viewer playback visible are two separate evidence states. The
+current `tools/stream_vrm_youtube_smoke.py` tool is a safe QA helper that reads
+the stream key only from an environment variable and redacts reports, but its
+Trump mapping path is a fast cached-sprite motion proxy. It is useful for
+proving output plumbing and rough motion, not for claiming full per-frame
+VRM/MToon avatar rendering.
+
+Current stabilization blockers from the same run:
+
+- YouTube may auto-start a private stream when ingest begins. The Studio UI must
+  warn clearly about private/unlisted test mode, Stop ingest vs End stream, and
+  stream key regeneration after any key exposure.
+- First VRM fallback render can take tens of seconds, so Program Output needs a
+  persistent descriptor/runtime cache or prewarm path before live use.
+- YouTube Studio buffering must be captured as platform playback evidence, not
+  hidden behind green FFmpeg status.
+- Platform screenshots must come from the real editor/YouTube surface or be
+  explicitly labeled diagnostics. Do not synthesize evidence frames.
+
+2026-07-10 local editor proof update: `tools/run_vtuber_studio_trump_live.py`
+now has a `--frame-source cached-bustup` mode that opens the real
+`VTuberBroadcastStudioWindow`, fills Source Tracking with a Trump bust-up crop
+derived from OpenSeeFace face boxes, and fills Program Output with actual
+prerendered `vrm_mtoon_gpu` transparent bust-up frames. The status contract
+records `source_tracking_fit=openseeface_face_box_to_bust_up_cover_16x9`,
+`program_output_fit=broadcast_16x9_cover_background_plus_bust_up_vrm`, and a
+Program avatar height ratio of about `0.96`. This fixes the local framing/UI
+proof failure, but it is intentionally not a live renderer-performance pass:
+the same Trump/Milica frames measured about 48-56 seconds per frame through
+`render_internal_vrm_fallback_frame(..., renderer=vrm_mtoon_gpu)`. Product live
+preview needs a persistent renderer worker plus descriptor/runtime/prerender
+cache before any real-time claim.
+
+2026-07-10 follow-up proof after agent review: the same tool now records
+measured preview contracts and separate proof PNGs:
+
+```text
+debugCapture\vtuber_studio_trump_live_window_after_fit_fix.png
+debugCapture\vtuber_studio_trump_live_window_after_fit_fix_program_output.png
+debugCapture\vtuber_studio_trump_live_window_after_fit_fix_source_tracking.png
+debugCapture\vtuber_studio_trump_live_window_after_fit_fix_avatar_mapping.png
+debugCapture\vtuber_studio_trump_live_status_after_fit_fix.json
+```
+
+The fixed local status records `source_tracking_crop.crop_aspect=1.7796`,
+`single_crop_then_resize=true`, `face_fully_visible=true`,
+`program_avatar_height_ratio=0.9597`, `program_avatar_bottom_gap_ratio=0.0`,
+and `program_avatar_grounded=true`. `app/video_editor_popouts.py` now accepts
+real VRM mapping pixmaps for VRM targets instead of ignoring
+`avatar_preview_image` and falling back to a small schematic. This is a local
+Studio UI/framing pass; `live_renderer_currently_too_slow=true` remains until a
+persistent VRM/MToon renderer worker replaces the one-shot export helper.
+
+2026-07-10 live-render diagnostic follow-up: the Trump/Milica path now uses
+`app.vtuber.vrm_motion_mapping.source_pitch_to_vrm_pitch` for both internal
+VRM pose curves and VMC messages. The mapping is `vrm_pitch = -source_pitch -
+12deg`, so a source that visually starts slightly looking down is no longer
+neutralized into a backward-leaning VRM pose. Latest proof:
+
+```text
+debugCapture\vtuber_studio_trump_live_actual_render_widget_cache.png
+debugCapture\vtuber_studio_trump_live_actual_render_widget_cache_program_output.png
+debugCapture\vtuber_studio_trump_live_actual_render_widget_cache_source_tracking.png
+debugCapture\vtuber_studio_trump_live_actual_render_widget_cache_avatar_mapping.png
+debugCapture\vtuber_studio_trump_live_actual_render_widget_cache.json
+```
+
+That status records `renderer=vrm_mtoon_gpu`, `render_ok=true`,
+`mapped_vrm_motion.pitch_deg=-12.97`, `program_avatar_height_ratio=0.8472`,
+`program_avatar_grounded=true`, `live_preview_triangle_cap=12000`, and
+`gpu_widget_cache_hit=1`. Renderer performance is improved but still not
+acceptable for live playback: cached frames measured `actual_renderer_elapsed_s
+=2.852`, with render timings approximately `build_vertex_buffer_s=1.2303`,
+`hdri_load_s=0.1108`, and `gpu_widget_grab_s=0.0353`. A temporary `2400`
+triangle cap reduced time but visibly broke the avatar into dotted hair/body
+artifacts, so do not use low triangle caps as the renderer fix. The correct
+next step is to remove the per-frame CPU vertex-buffer build and helper-service
+round trip, then move animated skinning to GPU/VBO updates.
+
 The internal fallback frame path is `app/vtuber/internal_vrm_fallback.py`. It
 must render a transparent avatar frame without VSeeFace, OBS, virtual camera, or
 Qt. It must not rely on temporary AR/PBR descriptor cache files or old
@@ -240,8 +338,8 @@ ProjectPlayer.gpu_frame_ready RGB frame
 ```
 
 Live audio can currently be attached as generated silence, a Windows DirectShow
-device name, or a looped audio file. TigerCapture's full internal project-audio
-bus is not mixed into live output yet.
+device name, a looped audio file, or the TigerCapture project audio bus
+materialized to a temporary WAV before FFmpeg starts.
 
 TikTok/Instagram-style targets request a vertical 1080x1920 output canvas.
 Discord/video-call output remains manual Program Output window sharing until a

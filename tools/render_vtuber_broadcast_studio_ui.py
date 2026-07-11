@@ -180,15 +180,17 @@ def _draw_program(
     bg = _program_background_frame(background, source, _size(inner))
     canvas.paste(bg, inner[:2])
 
-    avatar_cutout = _avatar_cutout(avatar, lower_y=_model_view(report).get("lower_occlusion_y", 0.68))
-    target_h = int(_height(inner) * 1.05)
+    mv = _model_view(report)
+    avatar_cutout = _trim_alpha(_avatar_cutout(avatar, lower_y=mv.get("lower_occlusion_y", 0.68)), padding=20)
+    target_h = int(_height(inner) * 0.94)
     target_w = max(1, int(avatar_cutout.width * target_h / max(1, avatar_cutout.height)))
     avatar_cutout = avatar_cutout.resize((target_w, target_h), Image.Resampling.LANCZOS)
-    ax = inner[0] + (_width(inner) - target_w) // 2 + 90
-    ay = inner[1] - int(target_h * 0.12)
+    pan_x = float(mv.get("pan_x") or 0.0)
+    ax = inner[0] + (_width(inner) - target_w) // 2 + int(pan_x * _width(inner) * 0.18)
+    ay = inner[1] + int(_height(inner) * 0.03)
     canvas.alpha_composite(avatar_cutout, (ax, ay))
 
-    desk_y = int(inner[1] + _height(inner) * float(_model_view(report).get("lower_occlusion_y", 0.68)))
+    desk_y = int(inner[1] + _height(inner) * float(mv.get("lower_occlusion_y", 0.68)))
     if str(background.get("kind") or "") != "green_chroma":
         draw.rectangle((inner[0], desk_y, inner[2], inner[3]), fill=(31, 37, 42, 236))
         draw.rectangle((inner[0], desk_y, inner[2], desk_y + 5), fill=(88, 102, 110, 210))
@@ -222,7 +224,11 @@ def _draw_avatar_mapping(canvas: Image.Image, rect: tuple[int, int, int, int], a
     draw = ImageDraw.Draw(canvas, "RGBA")
     _panel(draw, rect, "AVATAR MAPPING", fonts)
     inner = _inset(rect, 14, 42, 14, 98)
-    frame = ImageOps.contain(avatar.convert("RGBA"), _size(inner), method=Image.Resampling.LANCZOS)
+    frame = ImageOps.contain(
+        _trim_alpha(_avatar_cutout(avatar, lower_y=_model_view(report).get("lower_occlusion_y", 0.68)), padding=18),
+        _size(inner),
+        method=Image.Resampling.LANCZOS,
+    )
     px = inner[0] + (_width(inner) - frame.width) // 2
     py = inner[1] + (_height(inner) - frame.height) // 2
     canvas.alpha_composite(frame, (px, py))
@@ -336,6 +342,20 @@ def _avatar_cutout(image: Image.Image, *, lower_y: float) -> Image.Image:
     mask[y_limit:, :] = 0
     arr[:, :, 3] = mask
     return Image.fromarray(arr, "RGBA")
+
+
+def _trim_alpha(image: Image.Image, *, padding: int = 0) -> Image.Image:
+    rgba = image.convert("RGBA")
+    alpha = rgba.getchannel("A")
+    bbox = alpha.getbbox()
+    if not bbox:
+        return rgba
+    pad = max(0, int(padding))
+    left = max(0, bbox[0] - pad)
+    top = max(0, bbox[1] - pad)
+    right = min(rgba.width, bbox[2] + pad)
+    bottom = min(rgba.height, bbox[3] + pad)
+    return rgba.crop((left, top, right, bottom))
 
 
 def _model_view(report: dict[str, Any]) -> dict[str, Any]:

@@ -10,6 +10,7 @@ from app.audio_tracks import is_audio_path, is_video_path
 from app.effect_cards import SPINE_MIME_TYPE
 from app.i18n import tr
 from app import video_editor_timeline_operations as _timeline_operations
+from app import video_editor_frame_repair_workflow as _frame_repair_workflow
 from app.video_editor_transport_workflow import _bounded_seek_position
 from app.live2d.actor_lane_row import Live2DActorLaneRow
 from app.spine_editor.actor_lane_row import SpineActorLaneRow
@@ -163,6 +164,8 @@ def eventFilter(self, obj, event):
 
     if obj is getattr(self, "_preview_label", None) or \
             obj is getattr(self, "_preview_gl", None):
+        if _frame_repair_workflow._handle_frame_repair_preview_event(self, obj, event):
+            return True
         if event.type() == event.Type.MouseButtonPress:
             if event.button() == Qt.MouseButton.LeftButton:
                 if not self._ensure_preview_pixmap_for_paint():

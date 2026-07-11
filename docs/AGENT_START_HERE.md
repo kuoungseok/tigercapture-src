@@ -19,6 +19,9 @@ Focused entry points:
   `docs/SPEC_UI_RENEWAL.md`, then `TODO.md`.
 - Review automation and presentation evidence:
   `docs/review_automation/AGENT_START_HERE.md`.
+- Music Lab / AI Composer / generated audio playback artifacts:
+  `docs/SPEC_AI_COMPOSER_MUSIC_LAB.md`, then the Music Lab section in
+  `SPEC.md`.
 - VTuber Studio, Program Output, VSeeFace, VRM, Trump source mapping:
   `docs/WORKFLOW_VTUBER_BROADCAST_CONTEXT.md`,
   `docs/VTUBER_TRUMP_SOURCE_MAPPING_CONTEXT.md`,
@@ -39,6 +42,38 @@ task unless the user explicitly asks for that.
 - Third-party/local durable assets belong under `external/assets`.
 - `app/video_editor_window.py` is a compatibility facade. Add editor features in
   focused modules and wire them through delegates, controllers, or popouts.
+- Tiger Studio and the lightweight capture launcher are separated product
+  surfaces. The capture program may be bundled with Studio, but capture-to-Studio
+  handoff is blocked by default through
+  `app.launcher_studio_policy.capture_to_studio_enabled()`. Only explicit
+  bundle/QA opt-in such as `TIGERCAPTURE_CAPTURE_TO_STUDIO=1` should expose
+  Studio buttons or construct `VideoEditorWindow` from the capture app.
+  `main.py` is the capture-app entry point; `studio_main.py`, `TigerCapture.exe
+  --studio`, packaged `TigerStudio.exe`, and source-built `TigerStudio.exe` are
+  the Studio entry paths.
+- Music Lab playback-safe files are for human listening only and must be made
+  from the measured WAV by 48 kHz conversion plus peak normalization only. Do
+  not add warm-up beds, pre-roll, noise floors, synthetic silence padding, or
+  other "player stability" audio; a previous attempt introduced a false audible
+  cut that was not present in the measured render. If the original probe report
+  is clean but a playback-safe copy cuts, audit the companion-file generator
+  before changing the composer or mix code.
+- Music Lab's basic/default renderer is sample/SoundFont-based
+  `backend=sample_production` with `sample_library_policy=auto`. AI/production
+  audio is the advanced path and must be selected explicitly with
+  `backend=production` or a concrete `ai_provider`; `auto` must not silently
+  switch to AI just because a provider is configured.
+- One-click Music Lab requests such as "make BGM/music" must render through the
+  default sample-production studio master profile
+  `one_click_sample_production_studio_v1`: bus tone shaping, rumble/mud
+  control, presence/air enhancement, room ambience, mid-side width, parallel
+  glue compression, dropout/surge repair, sample-jump smoothing, and soft
+  preview limiting. The same route also applies
+  `sample_production_articulation_expression_v1`, which classifies notes by
+  role/length, shapes short-note gates, writes CC1/CC11 expression automation
+  for SoundFont renders, and shapes internal fallback envelopes. Do not return
+  raw SoundFont/internal-synth audio for that path unless the user explicitly
+  chooses a diagnostic comparison.
 - After editor-facing changes, run
   `.\.venv\Scripts\python.exe -m pytest tests\test_editor_architecture_rules.py -q`.
 
@@ -100,6 +135,17 @@ internal idle motion when `debugCapture` has been cleaned. Remaining debt is
 first-frame performance: runtime VRM descriptor generation/rendering can be slow
 and needs a dedicated optimization pass before making strong preview-performance
 claims.
+2026-07-10 update: Trump-to-VRM pitch now goes through
+`app.vtuber.vrm_motion_mapping.source_pitch_to_vrm_pitch`
+(`vrm_pitch = -source_pitch - 12deg`) for internal VRM pose curves and VMC
+messages. The latest real Studio proof uses `vrm_mtoon_gpu` and records
+`mapped_vrm_motion.pitch_deg=-12.97`. Live-render diagnostics are faster after
+the helper keeps the hidden Qt/GL widget alive: cached frames measured about
+`2.852s/frame` with `gpu_widget_cache_hit=1`, `build_vertex_buffer_s ~= 1.23`,
+and `gpu_widget_grab_s ~= 0.035`. This is still not real-time; the next
+bottleneck is per-frame CPU vertex-buffer build plus helper-service round trip.
+Do not lower triangle caps aggressively because dense hair/cloth becomes
+visibly dotted.
 
 ## Evidence Discipline
 

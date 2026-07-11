@@ -12,12 +12,16 @@ import os
 from pathlib import Path
 import sys
 import tempfile
+import time
 from typing import Any, Mapping
 
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
+
+
+_GPU_WIDGET_CACHE: dict[tuple[Any, ...], dict[str, Any]] = {}
 
 
 def _ensure_service_gl_defaults() -> None:
@@ -29,12 +33,44 @@ def _ensure_service_gl_defaults() -> None:
 
 
 def _write_json(payload: Mapping[str, Any]) -> None:
-    print(json.dumps(dict(payload), ensure_ascii=False, default=str))
+    print(json.dumps(dict(payload), ensure_ascii=False, default=str), flush=True)
 
 
 def _load_json(path: str | Path) -> dict[str, Any]:
     payload = json.loads(Path(path).read_text(encoding="utf-8"))
     return payload if isinstance(payload, dict) else {}
+
+
+def _serve_stdio() -> int:
+    """Serve repeated render requests on stdin/stdout.
+
+    Each input line is either a full request object or
+    ``{"request_path": "..."}``.  Keeping this process alive avoids paying the
+    Python/Qt/OpenGL import and QApplication startup cost for every preview
+    frame.  The render path still owns per-request widget/FBO work.
+    """
+    for line in sys.stdin:
+        text = str(line or "").strip()
+        if not text:
+            continue
+        try:
+            payload = json.loads(text)
+            if not isinstance(payload, dict):
+                payload = {}
+            request_path = payload.get("request_path") or payload.get("request")
+            request = _load_json(request_path) if request_path else payload
+            result = render_request(request)
+        except Exception as exc:
+            result = {
+                "ok": False,
+                "mode": "full_model_view_gpu_export_service",
+                "persistent_service": True,
+                "error": f"{type(exc).__name__}: {exc}",
+            }
+        result = dict(result or {})
+        result["persistent_service"] = True
+        _write_json(result)
+    return 0
 
 
 def _resolve_descriptor(track: Mapping[str, Any], settings: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -238,11 +274,18 @@ def _render_track_overlay(
 
     width, height = max(2, int(rect_size[0])), max(2, int(rect_size[1]))
     asset = Path(str(track.get("asset_path") or descriptor.get("source_path") or "ar_pbr_asset"))
+    timings: dict[str, float] = {}
+    stage_start = time.perf_counter()
     vertices, mesh_diag = build_vertex_buffer(descriptor, track=track, time_ms=int(time_ms))
+    timings["build_vertex_buffer_s"] = round(time.perf_counter() - stage_start, 4)
+    stage_start = time.perf_counter()
     texture_plan, texture_diag = _resolve_material_texture_plan(asset, descriptor)
+    timings["texture_plan_s"] = round(time.perf_counter() - stage_start, 4)
     lighting = _lighting(track, settings)
     hdri_path_raw = str(lighting.get("hdri_path") or settings.get("hdri_path") or DEFAULT_HDRI or "").strip()
+    stage_start = time.perf_counter()
     hdri, hdri_diag = _load_hdri_or_none(Path(hdri_path_raw) if hdri_path_raw else None)
+    timings["hdri_load_s"] = round(time.perf_counter() - stage_start, 4)
     state = GpuState()
     transform = track.get("transform") if isinstance(track.get("transform"), Mapping) else {}
     rotation = transform.get("rotation", []) if isinstance(transform, Mapping) else []
@@ -510,30 +553,60 @@ def _render_track_overlay(
     draw_ground = _bool_setting(model_view, "draw_ground", False)
 
     def _grab_overlay(*, enable_shadow_map: bool) -> tuple[Path, dict[str, Any]]:
-        host = QWidget()
-        # QOpenGLWidget needs a real native surface on Windows.  Using
-        # WA_DontShowOnScreen can leave PyOpenGL with an invalid current
-        # context during resize/paint.  Keep the helper window offscreen
-        # instead so export remains worker-safe without showing UI chrome.
-        host.setWindowFlag(Qt.WindowType.Tool, True)
-        host.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
-        host.move(-32000, -32000)
+        stage_start = time.perf_counter()
+        reuse_widget = _bool_setting(settings, "reuse_gpu_widget", False)
+        texture_key = json.dumps(texture_plan, sort_keys=True, default=str)
+        cache_key = (
+            str(asset.resolve()) if asset.exists() else str(asset),
+            width,
+            height,
+            int(settings.get("texture_max_size", 1024) or 1024),
+            bool(enable_shadow_map),
+            bool(show_environment_background),
+            bool(transparent_background),
+            bool(draw_ground),
+            hdri_path_raw,
+            texture_key,
+        )
+        cached = _GPU_WIDGET_CACHE.get(cache_key) if reuse_widget else None
+        host = cached.get("host") if isinstance(cached, dict) else None
+        widget = cached.get("widget") if isinstance(cached, dict) else None
+        cache_hit = widget is not None and host is not None
+        if host is None:
+            host = QWidget()
+            # QOpenGLWidget needs a real native surface on Windows.  Using
+            # WA_DontShowOnScreen can leave PyOpenGL with an invalid current
+            # context during resize/paint.  Keep the helper window offscreen
+            # instead so export remains worker-safe without showing UI chrome.
+            host.setWindowFlag(Qt.WindowType.Tool, True)
+            host.setWindowFlag(Qt.WindowType.FramelessWindowHint, True)
+            host.move(-32000, -32000)
         widget = None
+        cache_stored = False
         try:
-            widget = GpuMeshWidget(
-                vertices,
-                state,
-                hdri,
-                mesh_diag,
-                texture_plan,
-                int(settings.get("texture_max_size", 1024) or 1024),
-                bool(enable_shadow_map),
-                float(fit_padding),
-                bool(show_environment_background),
-                bool(transparent_background),
-                bool(draw_ground),
-                parent=host,
-            )
+            if cache_hit:
+                widget = cached["widget"]
+                widget.state = state
+                widget.fit_padding = float(fit_padding)
+                widget.show_environment_background = bool(show_environment_background)
+                widget.transparent_background = bool(transparent_background)
+                widget.draw_ground = bool(draw_ground)
+                widget.replace_vertices(vertices, mesh_diag)
+            else:
+                widget = GpuMeshWidget(
+                    vertices,
+                    state,
+                    hdri,
+                    mesh_diag,
+                    texture_plan,
+                    int(settings.get("texture_max_size", 1024) or 1024),
+                    bool(enable_shadow_map),
+                    float(fit_padding),
+                    bool(show_environment_background),
+                    bool(transparent_background),
+                    bool(draw_ground),
+                    parent=host,
+                )
             widget.auto_fit_enabled = bool(auto_fit)
             widget.auto_fit_pending = bool(auto_fit)
             widget.setMinimumSize(1, 1)
@@ -543,7 +616,14 @@ def _render_track_overlay(
             widget.resize(width, height)
             host.show()
             widget.show()
-            for _ in range(8):
+            if reuse_widget and not cache_hit:
+                _GPU_WIDGET_CACHE[cache_key] = {"host": host, "widget": widget}
+                cache_stored = True
+            warmup_default = 1 if cache_hit else 8
+            warmup_frames = max(1, min(8, int(settings.get("gpu_warmup_frames", warmup_default) or warmup_default)))
+            timings["gpu_warmup_frames"] = float(warmup_frames)
+            timings["gpu_widget_cache_hit"] = 1.0 if cache_hit else 0.0
+            for _ in range(warmup_frames):
                 app.processEvents()
                 widget.update()
             app.processEvents()
@@ -553,9 +633,11 @@ def _render_track_overlay(
             suffix = "shadow" if enable_shadow_map else "safe"
             overlay_path = temp_dir / f"overlay_{str(track.get('id') or 'track')}_{suffix}.png"
             qimg.save(str(overlay_path))
+            timings["gpu_widget_grab_s"] = round(time.perf_counter() - stage_start, 4)
             return overlay_path, {
                 "mesh": mesh_diag,
                 "textures": texture_diag,
+                "timings": dict(timings),
                 "udim_rendering": {
                     "schema": "tigerstudio.ar_pbr.udim.v1",
                     "enabled": int(texture_diag.get("udim_tile_count", 0) or 0) > 0,
@@ -649,9 +731,10 @@ def _render_track_overlay(
                 },
             }
         finally:
-            if widget is not None:
+            if widget is not None and not (reuse_widget and (cache_hit or cache_stored)):
                 widget.close()
-            host.close()
+            if not (reuse_widget and (cache_hit or cache_stored)):
+                host.close()
 
     requested_shadow_map = bool(settings.get("enable_shadow_map", False))
     try:
@@ -771,6 +854,7 @@ def main() -> int:
         sys.stderr.reconfigure(encoding="utf-8")
     parser = argparse.ArgumentParser(description="AR/PBR full model-view GPU export helper")
     parser.add_argument("--probe", action="store_true")
+    parser.add_argument("--stdio", action="store_true", help="Keep the helper alive and read JSON render requests from stdin.")
     parser.add_argument("--request", type=Path)
     args = parser.parse_args()
 
@@ -789,6 +873,8 @@ def main() -> int:
         except Exception as exc:
             _write_json({"ok": False, "error": f"{type(exc).__name__}: {exc}"})
             return 1
+    if args.stdio:
+        return _serve_stdio()
     if not args.request:
         _write_json({"ok": False, "error": "--request is required unless --probe is used"})
         return 2

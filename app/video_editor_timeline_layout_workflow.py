@@ -161,14 +161,10 @@ def _refresh_timeline_mixer_geometry(self, mixer_visible: bool | None = None) ->
                     if 0 <= color_idx < len(sizes) and not color_container.isVisible():
                         sizes[color_idx] = 0
                 else:
-                    sizes[timeline_idx] = min(
-                        max(sizes[timeline_idx], 260),
-                        int(getattr(self, "_timeline_compact_max_height", 310)),
-                    )
+                    sizes[timeline_idx] = max(sizes[timeline_idx], 260)
                 splitter.setSizes(sizes)
                 splitter.updateGeometry()
     if tracks_scroll is not None:
         tracks_scroll.updateGeometry()
     host.updateGeometry()
     self.updateGeometry()
-

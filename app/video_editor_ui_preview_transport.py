@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QByteArray, QSettings, Qt
 from PySide6.QtGui import QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QFrame,
@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSplitter,
     QVBoxLayout,
     QWidget,
 )
@@ -17,30 +18,87 @@ from app.drawing import DrawingCanvas
 from app.i18n import tr
 from app.icons import app_icon, icon_size
 from app.style import COLOR_TEXT_TERTIARY
+from app.video_editor_frame_repair_workflow import install_frame_repair_transport_button
 from app.video_editor_layout_specs import (
-    TOP_WORK_MAX_HEIGHT,
+    EDITOR_RESIZABLE_PANE_MAX_HEIGHT,
+    PREVIEW_HOST_MIN_HEIGHT,
     TOP_WORK_MIN_HEIGHT,
+    TOP_WORKBENCH_SPLITTER_SETTINGS_KEY,
+    TOP_WORKBENCH_SPLITTER_HANDLE_WIDTH,
     VIEWER_COLUMN_MIN_WIDTH,
     VIEWER_TOP_STRETCH,
     WORKBENCH_SLOT_MIN_WIDTH,
     WORKBENCH_TOP_STRETCH,
     horizontal_tool_scroll_qss,
+    top_workbench_splitter_qss,
 )
 from app.video_editor_window_widgets import _PreviewSurfaceLabel
+
+
+def _editor_settings() -> QSettings:
+    return QSettings("TigerCapture", "TigerCapture")
+
+
+def _restore_top_workbench_splitter_state(splitter: QSplitter) -> bool:
+    try:
+        state = _editor_settings().value(TOP_WORKBENCH_SPLITTER_SETTINGS_KEY)
+    except Exception:
+        return False
+    if state is None:
+        return False
+    if isinstance(state, QByteArray):
+        if state.isEmpty():
+            return False
+    elif isinstance(state, (bytes, bytearray)):
+        state = QByteArray(bytes(state))
+    else:
+        return False
+    try:
+        return bool(splitter.restoreState(state))
+    except Exception:
+        return False
+
+
+def _save_top_workbench_splitter_state(owner) -> None:
+    splitter = getattr(owner, "_top_work_splitter", None)
+    if splitter is None:
+        return
+    try:
+        _editor_settings().setValue(
+            TOP_WORKBENCH_SPLITTER_SETTINGS_KEY,
+            splitter.saveState(),
+        )
+    except Exception:
+        pass
 
 
 def build_preview_transport_area(self, main_col, root) -> None:
     self._top_work_area = QWidget(main_col)
     self._top_work_area.setObjectName("TopWorkArea")
     self._top_work_area.setMinimumHeight(TOP_WORK_MIN_HEIGHT)
-    self._top_work_area.setMaximumHeight(TOP_WORK_MAX_HEIGHT)
-    top_work_layout = QHBoxLayout(self._top_work_area)
-    top_work_layout.setContentsMargins(0, 0, 0, 0)
-    top_work_layout.setSpacing(5)
-    self._top_work_layout = top_work_layout
+    self._top_work_area.setMaximumHeight(EDITOR_RESIZABLE_PANE_MAX_HEIGHT)
+    top_work_container_layout = QHBoxLayout(self._top_work_area)
+    top_work_container_layout.setContentsMargins(0, 0, 0, 0)
+    top_work_container_layout.setSpacing(0)
+    self._top_work_container_layout = top_work_container_layout
     root.addWidget(self._top_work_area, stretch=0)
 
-    self._viewer_column = QWidget(self._top_work_area)
+    top_work_splitter = QSplitter(Qt.Orientation.Horizontal, self._top_work_area)
+    top_work_splitter.setObjectName("TopWorkbenchSplitter")
+    top_work_splitter.setChildrenCollapsible(False)
+    top_work_splitter.setHandleWidth(TOP_WORKBENCH_SPLITTER_HANDLE_WIDTH)
+    top_work_splitter.setStyleSheet(top_workbench_splitter_qss())
+    top_work_splitter.setSizePolicy(
+        QSizePolicy.Policy.Expanding,
+        QSizePolicy.Policy.Expanding,
+    )
+    self._top_work_splitter = top_work_splitter
+    # Back-compat for older helpers that talk about the top work "layout":
+    # the splitter is now the controller for the viewer/workbench pair.
+    self._top_work_layout = top_work_splitter
+    top_work_container_layout.addWidget(top_work_splitter)
+
+    self._viewer_column = QWidget(top_work_splitter)
     self._viewer_column.setObjectName("ViewerColumn")
     self._viewer_column.setMinimumWidth(VIEWER_COLUMN_MIN_WIDTH)
     self._viewer_column.setSizePolicy(
@@ -51,12 +109,9 @@ def build_preview_transport_area(self, main_col, root) -> None:
     viewer_column_layout.setContentsMargins(0, 0, 0, 0)
     viewer_column_layout.setSpacing(0)
     self._viewer_column_layout = viewer_column_layout
-    top_work_layout.addWidget(
-        self._viewer_column,
-        stretch=VIEWER_TOP_STRETCH,
-    )
+    top_work_splitter.addWidget(self._viewer_column)
 
-    self._top_workbench_slot = QWidget(self._top_work_area)
+    self._top_workbench_slot = QWidget(top_work_splitter)
     self._top_workbench_slot.setObjectName("TopWorkbenchSlot")
     self._top_workbench_slot.setMinimumWidth(WORKBENCH_SLOT_MIN_WIDTH)
     self._top_workbench_slot.setSizePolicy(
@@ -67,7 +122,16 @@ def build_preview_transport_area(self, main_col, root) -> None:
     top_workbench_layout.setContentsMargins(0, 0, 0, 0)
     top_workbench_layout.setSpacing(0)
     self._top_workbench_layout = top_workbench_layout
-    top_work_layout.addWidget(self._top_workbench_slot, stretch=WORKBENCH_TOP_STRETCH)
+    top_work_splitter.addWidget(self._top_workbench_slot)
+    top_work_splitter.setStretchFactor(0, VIEWER_TOP_STRETCH)
+    top_work_splitter.setStretchFactor(1, WORKBENCH_TOP_STRETCH)
+    if not _restore_top_workbench_splitter_state(top_work_splitter):
+        top_work_splitter.setSizes(
+            [VIEWER_TOP_STRETCH * 120, WORKBENCH_TOP_STRETCH * 120],
+        )
+    top_work_splitter.splitterMoved.connect(
+        lambda _pos, _index: _save_top_workbench_splitter_state(self),
+    )
 
     self._viewer_project_breadcrumb_label = QLabel(self._viewer_column)
     self._viewer_project_breadcrumb_label.setObjectName("ViewerProjectBreadcrumb")
@@ -94,12 +158,12 @@ def build_preview_transport_area(self, main_col, root) -> None:
     viewer_column_layout.addWidget(preview_header)
     preview_host = QWidget(self._viewer_column)
     preview_host.setObjectName("PreviewHost")
-    preview_host.setMinimumHeight(270)
-    preview_host.setMaximumHeight(380)
+    preview_host.setMinimumHeight(PREVIEW_HOST_MIN_HEIGHT)
+    preview_host.setMaximumHeight(EDITOR_RESIZABLE_PANE_MAX_HEIGHT)
     preview_host.setAcceptDrops(True)
     preview_host.installEventFilter(self)
     preview_host.setSizePolicy(
-        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred
+        QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
     )
     host_layout = QVBoxLayout(preview_host)
     host_layout.setContentsMargins(0, 0, 0, 0)
@@ -307,6 +371,7 @@ def build_preview_transport_area(self, main_col, root) -> None:
     transport.addWidget(self.play_btn)
     transport.addWidget(self.stop_btn)
     transport.addWidget(self.next_frame_btn)
+    install_frame_repair_transport_button(self, transport)
     transport.addStretch(1)
     transport.addWidget(self.mark_in_btn)
     transport.addWidget(self.mark_out_btn)

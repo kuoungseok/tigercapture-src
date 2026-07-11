@@ -11,34 +11,69 @@ internal static class TigerCaptureLauncher
     {
         string root = AppDomain.CurrentDomain.BaseDirectory;
         string frozenExe = Path.Combine(root, "dist", "TigerCapture", "TigerCapture.exe");
+        string frozenStudioExe = Path.Combine(root, "dist", "TigerCapture", "TigerStudio.exe");
         string pythonw = Path.Combine(root, ".venv", "Scripts", "pythonw.exe");
         string python = Path.Combine(root, ".venv", "Scripts", "python.exe");
-        string app = Path.Combine(root, "main.py");
+        bool studioMode = IsStudioMode(args);
+        string[] forwardedArgs = StripStudioFlag(args);
+        string app = Path.Combine(root, studioMode ? "studio_main.py" : "main.py");
 
         if (File.Exists(pythonw) && File.Exists(app))
         {
-            return Start(root, pythonw, Quote(app) + AppendArgs(args));
+            return Start(root, pythonw, Quote(app) + AppendArgs(forwardedArgs));
         }
 
         if (File.Exists(python) && File.Exists(app))
         {
-            return Start(root, python, Quote(app) + AppendArgs(args));
+            return Start(root, python, Quote(app) + AppendArgs(forwardedArgs));
+        }
+
+        if (studioMode && File.Exists(frozenStudioExe))
+        {
+            return Start(root, frozenStudioExe, QuoteArgs(forwardedArgs));
         }
 
         if (File.Exists(frozenExe))
         {
-            return Start(root, frozenExe, QuoteArgs(args));
+            string frozenArgs = (studioMode ? "--studio " : "") + QuoteArgs(forwardedArgs);
+            return Start(root, frozenExe, frozenArgs.Trim());
         }
 
         string message =
             "TigerCapture could not find a runnable app.\n\n" +
             "Expected one of:\n" +
             frozenExe + "\n" +
+            frozenStudioExe + "\n" +
             pythonw + "\n" +
             python + "\n\n" +
             "Run build.ps1 or recreate .venv, then try again.";
-        MessageBox.Show(message, "TigerCapture", MessageBoxButtons.OK, MessageBoxIcon.Error);
+        MessageBox.Show(message, studioMode ? "Tiger Studio" : "TigerCapture", MessageBoxButtons.OK, MessageBoxIcon.Error);
         return 1;
+    }
+
+    private static bool IsStudioMode(string[] args)
+    {
+        string exeName = Path.GetFileNameWithoutExtension(Application.ExecutablePath) ?? "";
+        if (exeName.IndexOf("Studio", StringComparison.OrdinalIgnoreCase) >= 0)
+        {
+            return true;
+        }
+        return args != null && args.Any(arg =>
+            string.Equals(arg, "--studio", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(arg, "--tiger-studio", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(arg, "/studio", StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static string[] StripStudioFlag(string[] args)
+    {
+        if (args == null || args.Length == 0)
+        {
+            return new string[0];
+        }
+        return args.Where(arg =>
+            !string.Equals(arg, "--studio", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(arg, "--tiger-studio", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(arg, "/studio", StringComparison.OrdinalIgnoreCase)).ToArray();
     }
 
     private static int Start(string workingDirectory, string fileName, string arguments)

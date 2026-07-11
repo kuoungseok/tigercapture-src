@@ -31,6 +31,7 @@ class FaceMotionFrame:
     blink_r: float = 0.0
     confidence: float = 0.0
     face_box: tuple[int, int, int, int] | None = None
+    chin_offset_x_norm: float = 0.0
     source: str = "idle"
 
     def to_dict(self) -> dict[str, Any]:
@@ -45,6 +46,7 @@ class FaceMotionFrame:
             "blink_r": float(self.blink_r),
             "confidence": float(self.confidence),
             "face_box": list(self.face_box) if self.face_box else None,
+            "chin_offset_x_norm": float(self.chin_offset_x_norm),
             "source": self.source,
         }
 

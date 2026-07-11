@@ -95,6 +95,119 @@ class EditingClipAdapterMixin:
                 },
             }
 
+    def list_frame_repairs(self, *, track_id: int, clip_id: int) -> dict[str, Any]:
+            _track, clip = self._video_track_and_clip(track_id, clip_id)
+            from app.frame_repair import normalize_frame_repairs
+
+            repairs = normalize_frame_repairs(getattr(clip, "frame_repairs", []) or [])
+            clip.frame_repairs = repairs
+            return {
+                "track_id": _int(track_id),
+                "clip_id": _int(clip_id),
+                "repair_count": len(repairs),
+                "frame_repairs": repairs,
+            }
+
+    def add_frame_repair(
+            self,
+            *,
+            track_id: int,
+            clip_id: int,
+            source_start_ms: int,
+            source_end_ms: int,
+            method: str = "interpolate",
+            algorithm: str = "optical_flow",
+            label: str = "",
+        ) -> dict[str, Any]:
+            track, clip = self._video_track_and_clip(track_id, clip_id)
+            from app.frame_repair import make_frame_repair_range, normalize_frame_repairs
+
+            clip_start = max(0, _int(getattr(clip, "source_in_ms", 0)))
+            clip_end = _int(getattr(clip, "effective_source_out_ms", 0))
+            if clip_end <= clip_start:
+                clip_end = max(clip_start + 1, _int(getattr(clip, "source_duration_ms", clip_start + 1)))
+            start = max(clip_start, _int(source_start_ms))
+            end = min(clip_end, _int(source_end_ms))
+            if end <= start:
+                raise ValueError("frame repair range is outside the clip source window")
+            before = normalize_frame_repairs(getattr(clip, "frame_repairs", []) or [])
+            row = make_frame_repair_range(
+                source_start_ms=start,
+                source_end_ms=end,
+                method=str(method or "interpolate"),
+                algorithm=str(algorithm or "optical_flow"),
+                label=str(label or ""),
+            )
+            clip.frame_repairs = normalize_frame_repairs([*before, row])
+            self._after_timeline_mutation("Action add frame repair")
+            player = getattr(self.owner, "_player", None)
+            refresh = getattr(player, "refresh_current_frame", None)
+            if callable(refresh):
+                try:
+                    refresh()
+                except Exception:
+                    pass
+            return {
+                "track_id": _int(getattr(track, "id", track_id)),
+                "clip_id": _int(getattr(clip, "id", clip_id)),
+                "repair_id": row["id"],
+                "source_start_ms": row["source_start_ms"],
+                "source_end_ms": row["source_end_ms"],
+                "method": row["method"],
+                "algorithm": row["algorithm"],
+                "repair_count_before": len(before),
+                "repair_count_after": len(getattr(clip, "frame_repairs", []) or []),
+            }
+
+    def remove_frame_repair(
+            self,
+            *,
+            track_id: int,
+            clip_id: int,
+            repair_id: str = "",
+            source_start_ms: int | None = None,
+            source_end_ms: int | None = None,
+            clear_all: bool = False,
+        ) -> dict[str, Any]:
+            track, clip = self._video_track_and_clip(track_id, clip_id)
+            from app.frame_repair import normalize_frame_repairs
+
+            repairs = normalize_frame_repairs(getattr(clip, "frame_repairs", []) or [])
+            before_count = len(repairs)
+            if clear_all:
+                kept: list[dict[str, Any]] = []
+            elif str(repair_id or "").strip():
+                target = str(repair_id or "").strip()
+                kept = [row for row in repairs if str(row.get("id") or "") != target]
+            elif source_start_ms is not None and source_end_ms is not None:
+                start = _int(source_start_ms)
+                end = max(start + 1, _int(source_end_ms))
+                kept = [
+                    row for row in repairs
+                    if int(row["source_end_ms"]) <= start or int(row["source_start_ms"]) >= end
+                ]
+            else:
+                raise ValueError("repair_id, source range, or clear_all is required")
+            clip.frame_repairs = kept
+            changed = len(kept) != before_count
+            if changed:
+                self._after_timeline_mutation("Action remove frame repair")
+                player = getattr(self.owner, "_player", None)
+                refresh = getattr(player, "refresh_current_frame", None)
+                if callable(refresh):
+                    try:
+                        refresh()
+                    except Exception:
+                        pass
+            return {
+                "track_id": _int(getattr(track, "id", track_id)),
+                "clip_id": _int(getattr(clip, "id", clip_id)),
+                "repair_count_before": before_count,
+                "repair_count_after": len(kept),
+                "removed_count": max(0, before_count - len(kept)),
+                "changed": changed,
+            }
+
     def _native_video_trim_plan(self, track: Any, clip: Any, *, mode: str, **params: Any) -> dict[str, Any] | None:
             rows: list[dict[str, Any]] = []
             selected_index = 0

@@ -3116,6 +3116,7 @@ class GpuMeshWidget(QOpenGLWidget):
         self.ibl_prefilter_level_count = 0
         self.ibl_probe_diag: dict[str, Any] = {"available": False}
         self.material_textures: dict[str, dict[str, int]] = {}
+        self._vbo_size_bytes = 0
         self.depth_program = 0
         self.ground_program = 0
         self.shadow_fbo = 0
@@ -3220,6 +3221,7 @@ class GpuMeshWidget(QOpenGLWidget):
         GL.glBindVertexArray(self.vao)
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo)
         GL.glBufferData(GL.GL_ARRAY_BUFFER, self.vertices.nbytes, self.vertices, GL.GL_STATIC_DRAW)
+        self._vbo_size_bytes = int(self.vertices.nbytes)
         stride = 21 * 4
         GL.glEnableVertexAttribArray(0)
         GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, False, stride, ctypes.c_void_p(0))
@@ -3236,6 +3238,30 @@ class GpuMeshWidget(QOpenGLWidget):
         GL.glEnableVertexAttribArray(6)
         GL.glVertexAttribPointer(6, 3, GL.GL_FLOAT, False, stride, ctypes.c_void_p(72))
         GL.glBindVertexArray(0)
+
+    def replace_vertices(self, vertices: np.ndarray, mesh_diag: Mapping[str, Any]) -> None:
+        """Replace animated vertex data without rebuilding programs/textures."""
+        self.vertices = np.ascontiguousarray(vertices, dtype=np.float32)
+        self.mesh_diag = mesh_diag
+        self.draw_ranges = list(mesh_diag.get("draw_ranges") or [{"start": 0, "count": int(len(self.vertices)), "material_name": ""}])
+        if not int(self.vbo or 0):
+            return
+        from OpenGL import GL
+
+        self.makeCurrent()
+        try:
+            GL.glBindVertexArray(self.vao)
+            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo)
+            if int(self.vertices.nbytes) <= int(self._vbo_size_bytes or 0):
+                GL.glBufferSubData(GL.GL_ARRAY_BUFFER, 0, int(self.vertices.nbytes), self.vertices)
+            else:
+                GL.glBufferData(GL.GL_ARRAY_BUFFER, self.vertices.nbytes, self.vertices, GL.GL_DYNAMIC_DRAW)
+                self._vbo_size_bytes = int(self.vertices.nbytes)
+            GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
+            GL.glBindVertexArray(0)
+        finally:
+            self.doneCurrent()
+        self.update()
 
     def _create_shadow_resources(self) -> None:
         from OpenGL import GL

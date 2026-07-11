@@ -817,9 +817,10 @@ class VTuberBroadcastStudioWindow(QWidget):
             "Program Output",
             "Uses capture, normal media/image, or green chroma fallback. Performance Source video is never direct output.",
         )
-        self._program_card.setMinimumHeight(410)
-        self._program_preview = self._make_preview_label("Program Output preview", QSize(900, 360))
-        self._program_preview.setMinimumHeight(320)
+        self._program_card.setMinimumHeight(500)
+        self._program_preview = self._make_preview_label("Program Output preview", QSize(960, 540))
+        self._program_preview.setMinimumHeight(420)
+        self._program_preview.setProperty("studio_preview_fit", "contain")
         self._insert_card_preview(self._program_card, self._program_preview, stretch=4)
         self._program_body.setMaximumHeight(44)
         self._program_body.hide()
@@ -827,9 +828,10 @@ class VTuberBroadcastStudioWindow(QWidget):
             "Source Tracking",
             "Shows the active Performance Source frame for face/body tracking.",
         )
-        self._source_card.setMinimumHeight(230)
-        self._source_preview = self._make_preview_label("Source Tracking preview", QSize(480, 220))
-        self._source_preview.setMinimumHeight(160)
+        self._source_card.setMinimumHeight(310)
+        self._source_preview = self._make_preview_label("Source Tracking preview", QSize(640, 360))
+        self._source_preview.setMinimumHeight(240)
+        self._source_preview.setProperty("studio_preview_fit", "contain")
         self._insert_card_preview(self._source_card, self._source_preview, stretch=3)
         self._source_body.setMaximumHeight(54)
         self._source_body.hide()
@@ -837,9 +839,10 @@ class VTuberBroadcastStudioWindow(QWidget):
             "Avatar Mapping",
             "Shows how tracking drives the selected avatar: VRM/VSeeFace, Live2D, face, eyes, mouth, framing, and movement limits.",
         )
-        self._mapping_card.setMinimumHeight(230)
-        self._mapping_preview = self._make_preview_label("Avatar Mapping preview", QSize(480, 220))
-        self._mapping_preview.setMinimumHeight(160)
+        self._mapping_card.setMinimumHeight(310)
+        self._mapping_preview = self._make_preview_label("Avatar Mapping preview", QSize(640, 360))
+        self._mapping_preview.setMinimumHeight(240)
+        self._mapping_preview.setProperty("studio_preview_fit", "contain")
         self._insert_card_preview(self._mapping_card, self._mapping_preview, stretch=3)
         self._mapping_body.setMaximumHeight(54)
         self._mapping_body.hide()
@@ -854,7 +857,7 @@ class VTuberBroadcastStudioWindow(QWidget):
         grid.addWidget(self._mapping_card, 1, 1)
         grid.addWidget(self._controls_card, 2, 0, 1, 2)
         grid.setRowStretch(0, 5)
-        grid.setRowStretch(1, 3)
+        grid.setRowStretch(1, 4)
         grid.setRowStretch(2, 1)
         grid.setColumnStretch(0, 1)
         grid.setColumnStretch(1, 1)
@@ -1022,9 +1025,9 @@ class VTuberBroadcastStudioWindow(QWidget):
         if source_pixmap.isNull() and source_path:
             source_pixmap = self._pixmap_from_video(source_path, time_ms=pos_ms)
 
-        avatar_pixmap = QPixmap()
-        if str(avatar.get("kind") or "") != "vrm":
-            avatar_pixmap = self._pixmap_from_path(str(preview.get("avatar_preview_image") or ""))
+        avatar_pixmap = self._pixmap_from_path(str(preview.get("avatar_preview_image") or ""))
+        if avatar_pixmap.isNull():
+            avatar_pixmap = self._avatar_mapping_pixmap_from_editor(editor)
         if avatar_pixmap.isNull():
             avatar_pixmap = self._avatar_mapping_pixmap(layout, avatar=avatar, performance=performance)
 
@@ -1077,7 +1080,37 @@ class VTuberBroadcastStudioWindow(QWidget):
         if current_size.width() > 24 and current_size.height() > 24:
             size = current_size
         label.setText("")
-        label.setPixmap(pixmap.scaled(size, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
+        fit = str(label.property("studio_preview_fit") or "contain").strip().lower()
+        label.setPixmap(self._scaled_preview_pixmap(pixmap, size, fit=fit))
+
+    def _scaled_preview_pixmap(self, pixmap: QPixmap, size: QSize, *, fit: str) -> QPixmap:
+        width = max(1, int(size.width()))
+        height = max(1, int(size.height()))
+        if fit == "cover":
+            scaled = pixmap.scaled(
+                QSize(width, height),
+                Qt.AspectRatioMode.KeepAspectRatioByExpanding,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            x = max(0, int((scaled.width() - width) / 2))
+            y = max(0, int((scaled.height() - height) / 2))
+            return scaled.copy(x, y, width, height)
+        return pixmap.scaled(
+            QSize(width, height),
+            Qt.AspectRatioMode.KeepAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+
+    def _avatar_mapping_pixmap_from_editor(self, editor) -> QPixmap:
+        for attr in ("_avatar_mapping_pixmap", "_latest_avatar_mapping_pixmap"):
+            pixmap = getattr(editor, attr, None)
+            if isinstance(pixmap, QPixmap) and not pixmap.isNull():
+                return pixmap
+        for attr in ("_avatar_mapping_qimage", "_latest_avatar_mapping_qimage"):
+            image = getattr(editor, attr, None)
+            if isinstance(image, QImage) and not image.isNull():
+                return QPixmap.fromImage(image)
+        return QPixmap()
 
     def _avatar_mapping_pixmap(
         self,

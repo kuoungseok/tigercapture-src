@@ -18,6 +18,7 @@ from __future__ import annotations
 import os
 import sys
 import math
+import time
 from pathlib import Path
 
 import numpy as np
@@ -5108,6 +5109,10 @@ class OpenGLPreviewWidget(QOpenGLWidget):
         self._mmd_painter: _MMDDirectGLPainter | None = None
         self._mmd_failed = False
         self._mmd_debug_overlay_enabled = _env_flag("TIGERCAPTURE_MMD_DEBUG_OVERLAY")
+        self._upload_count = 0
+        self._last_upload_ms = 0.0
+        self._last_paint_ms = 0.0
+        self._last_upload_diag_s = 0.0
 
     def _surface_size_px(self) -> tuple[int, int]:
         """Return the backing OpenGL surface size in physical pixels."""
@@ -5134,6 +5139,52 @@ class OpenGLPreviewWidget(QOpenGLWidget):
         self._pending_frame = rgb
         self._uniforms = grade_to_uniforms(grade)
         self.update()
+
+    def preview_gl_diagnostics(self) -> dict[str, object]:
+        return {
+            "frame_size": [int(self._frame_size[0]), int(self._frame_size[1])],
+            "upload_count": int(self._upload_count),
+            "last_upload_ms": round(float(self._last_upload_ms), 3),
+            "last_paint_ms": round(float(self._last_paint_ms), 3),
+        }
+
+    def _record_preview_gl_upload_event(
+        self,
+        *,
+        elapsed_ms: float,
+        width: int,
+        height: int,
+        mode: str,
+    ) -> None:
+        try:
+            threshold = float(os.environ.get("TIGERCAPTURE_PREVIEW_GL_UPLOAD_SLOW_MS", "6.0"))
+        except Exception:
+            threshold = 6.0
+        now = time.monotonic()
+        if float(elapsed_ms) < threshold and now - float(self._last_upload_diag_s or 0.0) < 5.0:
+            return
+        if now - float(self._last_upload_diag_s or 0.0) < 1.0:
+            return
+        self._last_upload_diag_s = now
+        try:
+            from app.loading_performance import record_loading_event
+
+            record_loading_event(
+                "preview.gl",
+                "texture_upload",
+                status="ok",
+                elapsed_ms=float(elapsed_ms),
+                detail=f"{mode} {int(width)}x{int(height)}",
+                metadata={
+                    "width": int(width),
+                    "height": int(height),
+                    "mode": str(mode),
+                    "upload_count": int(self._upload_count),
+                    "bytes": int(width) * int(height) * 3,
+                },
+            )
+        except Exception:
+            pass
 
     def set_spine_overlay_items(self, items) -> None:
         """Set Spine actor states to draw directly in the preview GL pass."""
@@ -5378,6 +5429,7 @@ class OpenGLPreviewWidget(QOpenGLWidget):
         gl.glViewport(0, 0, max(1, w), max(1, h))
 
     def paintGL(self) -> None:
+        paint_started = time.perf_counter()
         gl = self.context().functions()
         surface_w, surface_h = self._surface_size_px()
         gl.glViewport(0, 0, surface_w, surface_h)
@@ -5391,6 +5443,8 @@ class OpenGLPreviewWidget(QOpenGLWidget):
         # wrapper churns at 60 fps. The texture is destroyed/recreated
         # only when the frame dimensions actually change.
         if self._pending_frame is not None:
+            upload_started = time.perf_counter()
+            upload_mode = "subimage"
             rgb = self._pending_frame
             h, w = rgb.shape[:2]
             qimg = QImage(
@@ -5398,6 +5452,7 @@ class OpenGLPreviewWidget(QOpenGLWidget):
             )
             no_mip = QOpenGLTexture.MipMapGeneration.DontGenerateMipMaps
             if self._texture is None or self._frame_size != (w, h):
+                upload_mode = "create"
                 if self._texture is not None:
                     self._texture.destroy()
                     self._texture = None
@@ -5414,6 +5469,15 @@ class OpenGLPreviewWidget(QOpenGLWidget):
             else:
                 # Same size — re-upload pixels into existing storage.
                 self._texture.setData(qimg, no_mip)
+            upload_ms = (time.perf_counter() - upload_started) * 1000.0
+            self._upload_count += 1
+            self._last_upload_ms = upload_ms
+            self._record_preview_gl_upload_event(
+                elapsed_ms=upload_ms,
+                width=int(w),
+                height=int(h),
+                mode=upload_mode,
+            )
             # Drop the numpy reference now that the upload has landed.
             self._pending_frame = None
 
@@ -5570,3 +5634,4 @@ class OpenGLPreviewWidget(QOpenGLWidget):
                 self.spine_overlay_failed.emit("Spine direct GL overlay failed")
 
         self._draw_mmd_debug_overlay()
+        self._last_paint_ms = (time.perf_counter() - paint_started) * 1000.0

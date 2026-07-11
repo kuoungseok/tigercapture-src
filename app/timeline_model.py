@@ -535,6 +535,9 @@ class VideoClip:
     disabled_video_filters: "Optional[Any]" = None
     disabled_chroma_key: "Optional[Any]" = None
     disabled_bg_removal: "Optional[Any]" = None
+    # Source-time bad-frame repair ranges. Preview/export replace these
+    # frames non-destructively; timeline extract still performs real cuts.
+    frame_repairs: list[dict] = field(default_factory=list)
     # ID of a linked AudioClip on an audio track; when set, moving this
     # video clip also moves the linked audio clip by the same delta.
     linked_audio_id: Optional[int] = None
@@ -785,6 +788,13 @@ class VideoTrack:
             raise ValueError("split point must be strictly inside the clip")
         split_source_ms = clip.timeline_to_source_ms(t_ms)
         right = _split_clip_right(clip, split_source_ms, t_ms)
+        from app.frame_repair import frame_repairs_for_source_window
+
+        clip.frame_repairs = frame_repairs_for_source_window(
+            getattr(clip, "frame_repairs", []) or [],
+            int(clip.source_in_ms),
+            int(split_source_ms),
+        )
         # Mutate the left half in place so the renderer / inspector
         # references stay valid.
         clip.source_out_ms = split_source_ms
@@ -850,6 +860,8 @@ def _split_clip_right(
     ``split_source_ms``. Deep-copies per-clip state so mutations on
     the right half don't leak into the left."""
     import copy as _copy
+    from app.frame_repair import frame_repairs_for_source_window
+
     right_fades = [
         FadeSegment(
             start_ms=f.start_ms, end_ms=f.end_ms, kind=f.kind,
@@ -881,6 +893,11 @@ def _split_clip_right(
         zoom_actors=right_zoom,
         cursor_events=list(getattr(clip, "cursor_events", []) or []),
         screenstudio_polish=dict(getattr(clip, "screenstudio_polish", {}) or {}),
+        frame_repairs=frame_repairs_for_source_window(
+            getattr(clip, "frame_repairs", []) or [],
+            split_source_ms,
+            clip.effective_source_out_ms,
+        ),
         typography_actors=right_typo,
         node_graph=_copy.deepcopy(clip.node_graph),
         selection_start_ms=-1,
@@ -1005,6 +1022,8 @@ def split_clips_at_project_ms(
     same logic as ``cut_clip_window``."""
     p = int(project_ms)
     out: list = []
+    from app.frame_repair import frame_repairs_for_source_window
+
     for clip in clips:
         ti = int(clip.timeline_in_ms)
         to = int(clip.timeline_out_ms)
@@ -1030,6 +1049,11 @@ def split_clips_at_project_ms(
                     a for a in clip.typography_actors
                     if getattr(a, "start_ms", 0) < split_source_ms
                 ],
+                frame_repairs=frame_repairs_for_source_window(
+                    getattr(clip, "frame_repairs", []) or [],
+                    cs,
+                    split_source_ms,
+                ),
                 node_graph=clip.node_graph,
             )
             right = VideoClip(
@@ -1050,6 +1074,11 @@ def split_clips_at_project_ms(
                     a for a in clip.typography_actors
                     if getattr(a, "end_ms", 0) > split_source_ms
                 ],
+                frame_repairs=frame_repairs_for_source_window(
+                    getattr(clip, "frame_repairs", []) or [],
+                    split_source_ms,
+                    ce,
+                ),
                 node_graph=clip.node_graph,
             )
             out.append(left)

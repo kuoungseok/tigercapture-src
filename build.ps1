@@ -3,7 +3,7 @@
 #   .\build.ps1              # PyInstaller only (dist\TigerCapture)
 #   .\build.ps1 -NSIS        # PyInstaller + NSIS (installer_output\TigerCapture-Setup-*.exe)
 #   .\build.ps1 -Installer   # alias for -NSIS
-#   .\build.ps1 -InnoSetup   # PyInstaller + Inno Setup
+#   .\build.ps1 -InnoSetup   # PyInstaller + Inno Setup (installer_output\TigerCapture-InnoSetup-*.exe)
 #   .\build.ps1 -Clean       # clean build artifacts first
 #   .\build.ps1 -Version 1.3.0 -NSIS   # explicit version override
 
@@ -42,6 +42,12 @@ Write-Host "[version] $Version" -ForegroundColor Cyan
 
 if (-not (Test-Path $python)) {
     Write-Error "venv not found at $python. Run `py -3.13 -m venv .venv` and install requirements first."
+    exit 1
+}
+
+& $python -c "import PyInstaller" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Error "PyInstaller is not installed in .venv. Run: .\.venv\Scripts\python.exe -m pip install -r requirements-build.txt"
     exit 1
 }
 
@@ -92,11 +98,17 @@ Write-Host "[pyinstaller] building dist\TigerCapture..." -ForegroundColor Cyan
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $exePath = Join-Path $root "dist\TigerCapture\TigerCapture.exe"
+$studioExePath = Join-Path $root "dist\TigerCapture\TigerStudio.exe"
 if (-not (Test-Path $exePath)) {
     Write-Error "Build failed: $exePath missing."
     exit 1
 }
+if (-not (Test-Path $studioExePath)) {
+    Write-Error "Build failed: $studioExePath missing."
+    exit 1
+}
 Write-Host "[pyinstaller] OK: $exePath" -ForegroundColor Green
+Write-Host "[pyinstaller] OK: $studioExePath" -ForegroundColor Green
 
 # 3b. Root launcher
 # PyInstaller uses an onedir layout, so copying dist\TigerCapture\TigerCapture.exe
@@ -105,6 +117,7 @@ Write-Host "[pyinstaller] OK: $exePath" -ForegroundColor Green
 # checkout, then falls back to the frozen app when no source venv is present.
 $launcherSource = Join-Path $root "tools\windows_launcher\TigerCaptureLauncher.cs"
 $launcherExe = Join-Path $root "TigerCapture.exe"
+$studioLauncherExe = Join-Path $root "TigerStudio.exe"
 if (Test-Path $launcherSource) {
     $csc = $null
     $cscCandidates = @(
@@ -123,6 +136,10 @@ if (Test-Path $launcherSource) {
         & $csc /nologo /target:winexe /optimize+ /platform:anycpu "/win32icon:$icoPath" /reference:System.Windows.Forms.dll "/out:$launcherExe" "$launcherSource"
         if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
         Write-Host "[launcher] OK: $launcherExe" -ForegroundColor Green
+        Write-Host "[launcher] building root TigerStudio.exe..." -ForegroundColor Cyan
+        & $csc /nologo /target:winexe /optimize+ /platform:anycpu "/win32icon:$icoPath" /reference:System.Windows.Forms.dll "/out:$studioLauncherExe" "$launcherSource"
+        if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+        Write-Host "[launcher] OK: $studioLauncherExe" -ForegroundColor Green
     } else {
         Write-Warning "csc.exe not found; root TigerCapture.exe launcher was not rebuilt."
     }
@@ -177,7 +194,7 @@ if ($InnoSetup) {
     Write-Host "[iscc] building installer via $iscc" -ForegroundColor Cyan
     & $iscc (Join-Path $root "installer.iss")
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
-    Write-Host "[iscc] OK: installer_output\TigerCapture-Setup-*.exe" -ForegroundColor Green
+    Write-Host "[iscc] OK: installer_output\TigerCapture-InnoSetup-*.exe" -ForegroundColor Green
 }
 
 Write-Host "Done." -ForegroundColor Green

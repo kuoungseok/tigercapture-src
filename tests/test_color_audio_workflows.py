@@ -1179,6 +1179,62 @@ def test_color_workspace_ratio_keeps_viewer_visible():
     assert workbench.updated is True
 
 
+def test_color_workspace_ratio_supports_top_work_splitter():
+    from app.video_editor_layout_specs import (
+        VIEWER_TOP_STRETCH,
+        WORKBENCH_SLOT_MIN_WIDTH,
+        WORKBENCH_TOP_STRETCH,
+    )
+    from app.video_editor_window import VideoEditorWindow
+
+    class _Widget:
+        def __init__(self):
+            self.minimum_width = None
+            self.updated = False
+
+        def setMinimumWidth(self, value):
+            self.minimum_width = int(value)
+
+        def updateGeometry(self):
+            self.updated = True
+
+    class _Splitter:
+        def __init__(self, viewer, workbench):
+            self._items = [viewer, workbench]
+            self.stretches = {}
+            self.updated = False
+
+        def indexOf(self, widget):
+            return self._items.index(widget) if widget in self._items else -1
+
+        def setStretchFactor(self, index, value):
+            self.stretches[int(index)] = int(value)
+
+        def updateGeometry(self):
+            self.updated = True
+
+    viewer = _Widget()
+    workbench = _Widget()
+    top = _Widget()
+    splitter = _Splitter(viewer, workbench)
+    editor = SimpleNamespace(
+        _top_work_splitter=splitter,
+        _top_work_layout=None,
+        _viewer_column=viewer,
+        _top_workbench_slot=workbench,
+        _top_work_area=top,
+    )
+
+    VideoEditorWindow._set_color_reference_workspace_ratio(editor, True)
+
+    assert workbench.minimum_width == WORKBENCH_SLOT_MIN_WIDTH
+    assert splitter.stretches[0] == VIEWER_TOP_STRETCH
+    assert splitter.stretches[1] == WORKBENCH_TOP_STRETCH
+    assert viewer.updated is True
+    assert workbench.updated is True
+    assert splitter.updated is True
+
+
 def test_color_tab_preview_guard_restores_last_good_frame():
     import os
     import time

@@ -20,6 +20,7 @@ def main() -> int:
     else:
         os.environ.pop("TIGERCAPTURE_STARTUP_TRACE", None)
         sys.argv = [arg for arg in sys.argv if arg != "--no-internal-trace"]
+    os.environ["TIGERCAPTURE_CAPTURE_TO_STUDIO"] = "1"
 
     # Never let the diagnostic harness leave a stuck GUI process behind.
     threading.Timer(11.0, lambda: os._exit(124)).start()

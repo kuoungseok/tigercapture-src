@@ -14,7 +14,12 @@ def test_broadcast_output_builds_rtmp_ffmpeg_command():
     assert "60" in cmd
     assert "-tune" in cmd
     assert "zerolatency" in cmd
-    assert cmd[-2:] == ["-f", "flv"] or cmd[-3:-1] == ["-f", "flv"]
+    assert "-f" in cmd
+    assert "flv" in cmd
+    assert "-flvflags" in cmd
+    assert "no_duration_filesize" in cmd
+    assert "-bf" in cmd
+    assert "-x264-params" in cmd
     assert cmd[-1] == "rtmp://localhost/live/test"
 
 
@@ -157,10 +162,11 @@ def test_local_mp4_alias_maps_to_record_file_live_target():
 def test_youtube_live_target_preflight_builds_redacted_rtmp_command():
     from app.broadcast_output import live_target_preflight
 
+    secret = "SECRET-KEY"
     diag = live_target_preflight(
         {
             "target_id": "youtube_live",
-            "stream_key": "SECRET-KEY",
+            "stream_key": secret,
             "video_bitrate_kbps": 4500,
         },
         {"width": 1280, "height": 720, "fps": 60},
@@ -170,8 +176,30 @@ def test_youtube_live_target_preflight_builds_redacted_rtmp_command():
     assert diag["ok"] is True
     assert diag["target"]["stream_key"] == "<session>"
     assert diag["target"]["stream_key_storage"] == "session"
-    assert "SECRET-KEY" not in " ".join(str(part) for part in diag["command"])
+    assert secret not in str(diag)
     assert diag["command"][-1].endswith("/<stream_key>")
+    assert diag["target"]["audio_input"]["kind"] == "silence"
+    assert "-f" in diag["command"]
+    assert "lavfi" in diag["command"]
+
+
+def test_rtmp_live_target_can_explicitly_disable_default_silent_audio():
+    from app.broadcast_output import live_target_preflight
+
+    diag = live_target_preflight(
+        {
+            "target_id": "youtube_live",
+            "stream_key": "SECRET-KEY",
+            "audio_source_kind": "none",
+            "include_audio": False,
+        },
+        {"width": 1280, "height": 720, "fps": 30},
+        ffmpeg_exe="ffmpeg-test",
+    )
+
+    assert diag["ok"] is True
+    assert diag["target"]["audio_input"]["kind"] == "none"
+    assert "-an" in diag["command"]
 
 
 def test_live_target_project_settings_never_store_raw_stream_key():

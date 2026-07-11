@@ -217,6 +217,9 @@ class ActionRegistry:
         from app.actions.music_namespace import register_music_actions
 
         register_music_actions(self)
+        from app.actions.tts_namespace import register_tts_actions
+
+        register_tts_actions(self)
         from app.actions.track_selection_namespace import register_track_selection_actions
 
         register_track_selection_actions(self)
@@ -229,6 +232,9 @@ class ActionRegistry:
         from app.actions.actor_namespace import register_actor_actions
 
         register_actor_actions(self)
+        from app.actions.character_template_namespace import register_character_template_actions
+
+        register_character_template_actions(self)
         from app.actions.mmd_namespace import register_mmd_actions
 
         register_mmd_actions(self)

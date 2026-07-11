@@ -49,7 +49,11 @@ def preview_engine_status() -> dict[str, Any]:
     except Exception as exc:
         status["native_worker"] = {"error": type(exc).__name__}
     try:
-        from app.video_decoder import _decoder_choice_cache_path, _frame_server_preview_height_hint
+        from app.video_decoder import (
+            _decoder_choice_cache_path,
+            _frame_server_preview_height_hint,
+            _preview_performance_policy_enabled,
+        )
 
         cache_path = _decoder_choice_cache_path()
         status["decoder_choice_cache"] = str(cache_path) if cache_path else ""
@@ -57,8 +61,23 @@ def preview_engine_status() -> dict[str, Any]:
             cache_path and Path(cache_path).exists()
         )
         status["frame_server_preview_height_hint"] = _frame_server_preview_height_hint(None)
+        status["preview_performance_policy"] = {
+            "schema": "tigercapture.preview.performance_policy.v1",
+            "enabled": _preview_performance_policy_enabled(),
+            "disable_env": os.environ.get("TIGERCAPTURE_DISABLE_PREVIEW_PERFORMANCE_POLICY", ""),
+            "quality_modes": ["auto", "performance", "quality"],
+            "auto_proxy_generation": (
+                os.environ.get("TIGERCAPTURE_DISABLE_AUTO_PROXY_GENERATION", "").strip().lower()
+                not in {"1", "true", "yes", "on"}
+            ),
+        }
     except Exception:
         status["decoder_choice_cache"] = ""
         status["decoder_choice_cache_exists"] = False
         status["frame_server_preview_height_hint"] = None
+        status["preview_performance_policy"] = {
+            "schema": "tigercapture.preview.performance_policy.v1",
+            "enabled": False,
+            "error": "unavailable",
+        }
     return status

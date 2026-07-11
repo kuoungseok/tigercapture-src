@@ -13,6 +13,7 @@ _BINDINGS = (
     ('_install_lazy_action_menu', 'app.video_editor_window_chrome_workflow', '_install_lazy_action_menu', False),
     ('_install_lazy_menu_builder', 'app.video_editor_window_chrome_workflow', '_install_lazy_menu_builder', False),
     ('_refresh_command_bar_responsive', 'app.video_editor_command_palette_controller', '_refresh_command_bar_responsive', False),
+    ('_reset_editor_layout_to_default', 'app.video_editor_layout_reset_workflow', 'reset_editor_layout_to_default', False),
     ('_compact_command_bar', 'app.video_editor_command_palette_controller', '_compact_command_bar', False),
     ('_make_collapsible_section_header', 'app.video_editor_window_chrome_workflow', '_make_collapsible_section_header', False),
     ('_show_existing_button_menu', 'app.video_editor_window_chrome_workflow', '_show_existing_button_menu', False),

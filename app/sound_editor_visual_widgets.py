@@ -9,6 +9,7 @@ from typing import Any
 from PySide6.QtCore import QPointF, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QBrush, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import QHBoxLayout, QPushButton, QSizePolicy, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QGridLayout
 
 from app.audio_tracks import AudioClip
 from app.icons import app_icon, icon_size
@@ -646,8 +647,10 @@ class _SoundJogShuttle05(QWidget):
         self._playing = False
         self._dial_pressed = False
         self._slot_anim_tick = 0
+        self._slot_glow_values: list[float] = [0.0] * 8
+        self._slot_decay_delays: list[int] = [0] * 8
         self._slot_anim_timer = QTimer(self)
-        self._slot_anim_timer.setInterval(90)
+        self._slot_anim_timer.setInterval(55)
         self._slot_anim_timer.timeout.connect(self._tick_slot_animation)
         self._dial_texture = QPixmap(str(_SOUND_JOG_DIAL_TEXTURE)) if _SOUND_JOG_DIAL_TEXTURE.is_file() else QPixmap()
         self.setObjectName("SoundJogShuttle05")
@@ -660,19 +663,26 @@ class _SoundJogShuttle05(QWidget):
         root = QHBoxLayout(self)
         root.setContentsMargins(10, 15, 10, 15)
         root.setSpacing(0)
-        stack = QVBoxLayout()
+        stack = QGridLayout()
         stack.setContentsMargins(0, 0, 0, 0)
-        stack.setSpacing(7)
+        stack.setHorizontalSpacing(6)
+        stack.setVerticalSpacing(7)
         self._prev_btn = self._transport_button("previous", "Step back")
+        self._play_btn = self._transport_button("play", "Play / pause")
         self._stop_btn = self._transport_button("stop", "Stop and return to start")
         self._next_btn = self._transport_button("next", "Step forward")
         self._prev_btn.clicked.connect(lambda: self._step(-1000))
+        self._play_btn.clicked.connect(self._toggle_play)
         self._stop_btn.clicked.connect(self._stop)
         self._next_btn.clicked.connect(lambda: self._step(1000))
-        for button in (self._prev_btn, self._stop_btn, self._next_btn):
-            stack.addWidget(button)
+        self._play_btn.setProperty("transport", "play")
+        stack.addWidget(self._prev_btn, 0, 0)
+        stack.addWidget(self._play_btn, 0, 1)
+        stack.addWidget(self._stop_btn, 1, 0)
+        stack.addWidget(self._next_btn, 1, 1)
         root.addLayout(stack)
         root.addStretch(1)
+        self._refresh_transport_icons()
 
     def _transport_button(self, icon: str, tooltip: str) -> QPushButton:
         button = QPushButton("", self)
@@ -680,7 +690,7 @@ class _SoundJogShuttle05(QWidget):
         button.setIcon(app_icon(icon, size=14, color="#D7DAE7"))
         button.setIconSize(icon_size(13))
         button.setToolTip(tooltip)
-        button.setFixedSize(36, 30)
+        button.setFixedSize(36, 29)
         return button
 
     def set_clip(self, clip: AudioClip | None) -> None:
@@ -690,9 +700,13 @@ class _SoundJogShuttle05(QWidget):
         self._playing = bool(getattr(clip, "_se_jog_playing", False)) if clip is not None else False
         self._level = self._derive_level(clip)
         if self._playing:
+            self._bump_active_slot_glow(strong=True)
             self._slot_anim_timer.start()
         else:
+            self._slot_glow_values = [0.0] * 8
+            self._slot_decay_delays = [0] * 8
             self._slot_anim_timer.stop()
+        self._refresh_transport_icons()
         self.update()
 
     def _derive_level(self, clip: AudioClip | None) -> float:
@@ -729,7 +743,7 @@ class _SoundJogShuttle05(QWidget):
             return [0.24 if i % 3 else 0.42 for i in range(count)]
 
     def _deck_rect(self) -> QRectF:
-        return QRectF(self.rect()).adjusted(52.0, 12.0, -35.0, -12.0)
+        return QRectF(self.rect()).adjusted(94.0, 12.0, -35.0, -12.0)
 
     def _dial_rect(self) -> QRectF:
         deck = self._deck_rect()
@@ -842,12 +856,65 @@ class _SoundJogShuttle05(QWidget):
     def _normalized_position(self) -> float:
         return max(0.0, min(1.0, self._position_ms / max(1, self._duration_ms)))
 
+    def _slot_index(self, slot_count: int = 8) -> int:
+        active = int(round(self._normalized_position() * slot_count)) % slot_count
+        if self._playing:
+            active = (active + self._slot_anim_tick // 4) % slot_count
+        return active
+
+    def _ensure_slot_buffers(self, slot_count: int = 8) -> None:
+        if len(self._slot_glow_values) != slot_count:
+            self._slot_glow_values = [0.0] * slot_count
+        if len(self._slot_decay_delays) != slot_count:
+            self._slot_decay_delays = [0] * slot_count
+
+    def _bump_active_slot_glow(self, *, strong: bool = False) -> None:
+        slot_count = 8
+        self._ensure_slot_buffers(slot_count)
+        active = self._slot_index(slot_count)
+        peak = 1.0 if strong else 0.84
+        self._slot_glow_values[active] = max(self._slot_glow_values[active], peak)
+        self._slot_decay_delays[active] = 0
+
+    def _seed_power_down_glow(self) -> None:
+        slot_count = 8
+        self._ensure_slot_buffers(slot_count)
+        active = self._slot_index(slot_count)
+        for offset, value in enumerate((1.0, 0.78, 0.58, 0.38, 0.22, 0.12)):
+            index = (active - offset) % slot_count
+            self._slot_glow_values[index] = max(self._slot_glow_values[index], value)
+            self._slot_decay_delays[index] = offset * 2
+
+    def _advance_led_afterglow(self) -> None:
+        slot_count = 8
+        self._ensure_slot_buffers(slot_count)
+        if self._playing:
+            self._slot_decay_delays = [0] * slot_count
+            for index, value in enumerate(self._slot_glow_values):
+                self._slot_glow_values[index] = max(0.0, float(value) * 0.78)
+            active = self._slot_index(slot_count)
+            self._slot_glow_values[active] = 1.0
+            self._slot_glow_values[(active - 1) % slot_count] = max(self._slot_glow_values[(active - 1) % slot_count], 0.52)
+            return
+        for index, value in enumerate(self._slot_glow_values):
+            if self._slot_decay_delays[index] > 0:
+                self._slot_decay_delays[index] -= 1
+                continue
+            self._slot_glow_values[index] = max(0.0, float(value) * 0.72)
+
+    def _has_visible_afterglow(self) -> bool:
+        return any(float(value) > 0.025 for value in self._slot_glow_values)
+
     def _set_position_ms(self, value: int, *, emit: bool = True) -> None:
         value = max(0, min(self._duration_ms, int(value)))
         if value == self._position_ms:
             return
         self._position_ms = value
         self._slot_anim_tick = (self._slot_anim_tick + 2) % 10000
+        if not self._playing:
+            self._bump_active_slot_glow()
+            if not self._slot_anim_timer.isActive():
+                self._slot_anim_timer.start()
         if self._clip is not None:
             setattr(self._clip, "_se_jog_ms", value)
         self.update()
@@ -862,14 +929,34 @@ class _SoundJogShuttle05(QWidget):
         if self._clip is not None:
             setattr(self._clip, "_se_jog_playing", playing)
         if playing:
+            self._bump_active_slot_glow(strong=True)
             self._slot_anim_timer.start()
         else:
-            self._slot_anim_timer.stop()
+            self._seed_power_down_glow()
+            if not self._slot_anim_timer.isActive():
+                self._slot_anim_timer.start()
+        self._refresh_transport_icons()
         self.update()
         self.playing_changed.emit(playing)
 
+    def _refresh_transport_icons(self) -> None:
+        if not hasattr(self, "_play_btn"):
+            return
+        icon_name = "pause" if self._playing else "play"
+        self._play_btn.setIcon(app_icon(icon_name, size=14, color="#FFFFFF" if self._playing else "#D7DAE7"))
+        self._play_btn.setIconSize(icon_size(13))
+        self._play_btn.setProperty("playing", bool(self._playing))
+        self._play_btn.style().unpolish(self._play_btn)
+        self._play_btn.style().polish(self._play_btn)
+
+    def _toggle_play(self) -> None:
+        self._set_playing(not self._playing)
+
     def _tick_slot_animation(self) -> None:
         self._slot_anim_tick = (self._slot_anim_tick + 1) % 10000
+        self._advance_led_afterglow()
+        if not self._playing and not self._has_visible_afterglow():
+            self._slot_anim_timer.stop()
         self.update()
 
     def _step(self, delta_ms: int) -> None:
@@ -1020,9 +1107,8 @@ class _SoundJogShuttle05(QWidget):
                 p.drawEllipse(dial.adjusted(inset, inset, -inset, -inset))
 
         slot_count = 8
-        active_index = int(round(self._normalized_position() * slot_count)) % slot_count
-        if self._playing:
-            active_index = (active_index + self._slot_anim_tick // 4) % slot_count
+        self._ensure_slot_buffers(slot_count)
+        active_index = self._slot_index(slot_count)
         slot_radius = radius * 0.82
         slot_w = max(1.35, radius * 0.022)
         slot_h = max(3.4, radius * 0.052)
@@ -1034,35 +1120,41 @@ class _SoundJogShuttle05(QWidget):
                 center.x() + math.cos(angle) * slot_radius,
                 center.y() + math.sin(angle) * slot_radius,
             )
-            trail = (active_index - i) % slot_count
-            intensity = 0.0
-            if trail <= 2:
-                intensity = 1.0 - trail / 3.0
+            intensity = max(0.0, min(1.0, float(self._slot_glow_values[i])))
 
             p.save()
             p.translate(slot_center)
             p.rotate(angle_deg + 90.0)
             slot = QRectF(-slot_w * 0.5, -slot_h * 0.5, slot_w, slot_h)
-            if intensity > 0.0:
-                glow = QColor(92, 196, 158, int(52 + 104 * intensity))
-                if trail == 0:
-                    glow = QColor(232, 198, 122, int(80 + 128 * intensity))
+            if intensity > 0.025:
+                warm_peak = i == active_index and intensity > 0.82
+                bloom_radius = max(slot_w, slot_h) * (2.8 + intensity * 3.2)
+                bloom = QRadialGradient(QPointF(0.0, 0.0), bloom_radius)
+                bloom_color = QColor(255, 222, 124, int(150 * intensity)) if warm_peak else QColor(102, 228, 177, int(92 * intensity))
+                bloom.setColorAt(0.0, bloom_color)
+                fade = QColor(bloom_color)
+                fade.setAlpha(0)
+                bloom.setColorAt(1.0, fade)
                 p.setPen(Qt.PenStyle.NoPen)
-                p.setBrush(glow)
-                p.drawRoundedRect(slot.adjusted(-2.0, -1.8, 2.0, 1.8), slot_w * 0.80, slot_w * 0.80)
+                p.setBrush(QBrush(bloom))
+                p.drawEllipse(QRectF(-bloom_radius, -bloom_radius, bloom_radius * 2.0, bloom_radius * 2.0))
+
+                halo = QColor(255, 226, 143, int(120 * intensity)) if warm_peak else QColor(96, 217, 169, int(82 * intensity))
+                p.setBrush(halo)
+                p.drawRoundedRect(slot.adjusted(-3.2, -2.8, 3.2, 2.8), slot_w * 0.95, slot_w * 0.95)
 
             p.setPen(QPen(QColor(0, 0, 0, 118), 0.45))
-            if intensity > 0.0:
-                if trail == 0:
-                    fill = QColor(246, 213, 135, int(190 + 54 * intensity))
+            if intensity > 0.025:
+                if i == active_index and intensity > 0.82:
+                    fill = QColor(255, 235, 158, int(226 + 29 * intensity))
                 else:
-                    fill = QColor(105, 218, 172, int(150 + 70 * intensity))
+                    fill = QColor(110, 230, 176, int(118 + 118 * intensity))
             else:
                 fill = QColor(5, 6, 7, 132)
             p.setBrush(fill)
             p.drawRoundedRect(slot, slot_w * 0.45, slot_w * 0.45)
-            if intensity > 0.0:
-                p.setPen(QPen(QColor(255, 250, 214, int(86 + 80 * intensity)), 0.35))
+            if intensity > 0.025:
+                p.setPen(QPen(QColor(255, 252, 220, int(90 + 125 * intensity)), 0.42 if intensity > 0.75 else 0.32))
                 p.drawLine(QPointF(0.0, slot.top() + 1.2), QPointF(0.0, slot.bottom() - 1.2))
             p.restore()
 
@@ -1160,34 +1252,212 @@ class _SoundJogShuttle05(QWidget):
             bar = QRectF(meter.left(), y, meter.width(), max(1.0, bar_h))
             if index < active:
                 if index >= 10:
-                    color = QColor(164, 99, 94, 204)
+                    color = QColor(236, 117, 102, 232)
                 elif index >= 8:
-                    color = QColor(164, 150, 105, 194)
+                    color = QColor(229, 192, 103, 226)
                 else:
-                    color = QColor(118, 145, 123, 180)
+                    color = QColor(132, 218, 157, 216)
             else:
                 color = QColor(74, 80, 90, 72)
             p.setPen(Qt.PenStyle.NoPen)
+            if active > 0 and index == active - 1:
+                bloom = QColor(color)
+                bloom.setAlpha(92)
+                p.setBrush(bloom)
+                p.drawRoundedRect(bar.adjusted(-4.0, -2.6, 4.0, 2.6), 2.4, 2.4)
+                bloom.setAlpha(38)
+                p.setBrush(bloom)
+                p.drawRoundedRect(bar.adjusted(-7.0, -4.5, 7.0, 4.5), 3.2, 3.2)
             p.setBrush(color)
             p.drawRoundedRect(bar, 1.5, 1.5)
+            if index < active:
+                p.setPen(QPen(QColor(255, 255, 228, 56 if index < active - 1 else 112), 0.55))
+                p.drawLine(QPointF(bar.left() + 1.2, bar.top() + 1.0), QPointF(bar.right() - 1.2, bar.top() + 1.0))
+                p.setPen(Qt.PenStyle.NoPen)
         p.end()
 
 class _MiniWaveformStrip(QWidget):
     """Compact waveform evidence strip for the renewed sound editor."""
 
+    zoom_requested = Signal(float)
+
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self._clip: AudioClip | None = None
-        self.setMinimumHeight(54)
-        self.setMaximumHeight(60)
+        self._zoom_factor = 1.0
+        self._scroll_norm = 0.0
+        self._drag_start_x: float | None = None
+        self._drag_start_scroll = 0.0
+        self._playhead_source_ms = -1
+        self._last_gap_count = 0
+        self._playback_drop_marks: list[int] = []
+        self.setObjectName("SoundWaveformStrip")
+        self.setMinimumHeight(86)
+        self.setMaximumHeight(104)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self.setMouseTracking(True)
+        self._zoom_buttons: dict[float, QPushButton] = {}
+        self._build_zoom_buttons()
+
+    def _build_zoom_buttons(self) -> None:
+        for text, factor in (("Fit", 1.0), ("2x", 2.0), ("4x", 4.0), ("8x", 8.0)):
+            button = QPushButton(text, self)
+            button.setObjectName("SoundWaveZoomButton")
+            button.setFixedSize(32 if text == "Fit" else 30, 18)
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.clicked.connect(lambda _checked=False, f=factor: self.zoom_requested.emit(f))
+            self._zoom_buttons[factor] = button
+        self._refresh_zoom_buttons()
+        self._layout_zoom_buttons()
+
+    def zoom_buttons(self) -> dict[float, QPushButton]:
+        return self._zoom_buttons
+
+    def _layout_zoom_buttons(self) -> None:
+        if not self._zoom_buttons:
+            return
+        ordered = [self._zoom_buttons[factor] for factor in (1.0, 2.0, 4.0, 8.0)]
+        gap = 4
+        total = sum(button.width() for button in ordered) + gap * (len(ordered) - 1)
+        x = max(9, self.width() - total - 12)
+        y = 4
+        for button in ordered:
+            button.move(x, y)
+            button.raise_()
+            x += button.width() + gap
+
+    def _refresh_zoom_buttons(self) -> None:
+        for zoom, button in self._zoom_buttons.items():
+            selected = abs(float(zoom) - float(self._zoom_factor)) < 0.01
+            button.setProperty("selected", bool(selected))
+            button.style().unpolish(button)
+            button.style().polish(button)
+
+    def resizeEvent(self, event) -> None:  # pragma: no cover - visual QA
+        self._layout_zoom_buttons()
+        super().resizeEvent(event)
 
     def set_clip(self, clip: AudioClip | None) -> None:
         self._clip = clip
+        self._scroll_norm = 0.0
+        if clip is None:
+            self._playhead_source_ms = -1
+        else:
+            local_ms = int(getattr(clip, "_se_jog_ms", 0) or 0)
+            trim_start = int(getattr(clip, "trim_start_ms", 0) or 0)
+            self._playhead_source_ms = max(0, trim_start + local_ms)
+        self._playback_drop_marks = []
         self.update()
 
     def refresh(self) -> None:
         self.update()
+
+    def zoom_factor(self) -> float:
+        return float(self._zoom_factor)
+
+    def set_zoom_factor(self, factor: float) -> None:
+        self._zoom_factor = max(1.0, min(16.0, float(factor or 1.0)))
+        if self._zoom_factor <= 1.001:
+            self._scroll_norm = 0.0
+        elif self._playhead_source_ms >= 0:
+            self._ensure_source_visible(self._playhead_source_ms, center=True)
+        self._refresh_zoom_buttons()
+        self.update()
+
+    def zoom_in(self) -> None:
+        self.set_zoom_factor(self._zoom_factor * 2.0)
+
+    def zoom_out(self) -> None:
+        self.set_zoom_factor(self._zoom_factor / 2.0)
+
+    def _trim_window_ms(self) -> tuple[int, int, int, int]:
+        clip = self._clip
+        if clip is None:
+            return 0, 1, 0, 1
+        trim_start = int(getattr(clip, "trim_start_ms", 0) or 0)
+        trim_end = int(getattr(clip, "trim_end_ms", getattr(clip, "duration_ms", 0)) or 0)
+        duration = max(1, int(getattr(clip, "duration_ms", 0) or 0))
+        if trim_end <= trim_start:
+            trim_end = duration
+        trim_end = max(trim_start + 1, min(duration, trim_end))
+        full = max(1, trim_end - trim_start)
+        visible = max(1, int(round(full / max(1.0, self._zoom_factor))))
+        if visible >= full:
+            return trim_start, trim_end, trim_start, trim_end
+        max_offset = full - visible
+        offset = int(round(max_offset * max(0.0, min(1.0, self._scroll_norm))))
+        return trim_start + offset, trim_start + offset + visible, trim_start, trim_end
+
+    def set_playhead_source_ms(self, source_ms: int, *, center: bool = False) -> None:
+        self._playhead_source_ms = max(0, int(source_ms))
+        self._ensure_source_visible(self._playhead_source_ms, center=center)
+        self.update()
+
+    def clear_playhead(self) -> None:
+        self._playhead_source_ms = -1
+        self.update()
+
+    def dropout_count(self) -> int:
+        return int(self._last_gap_count)
+
+    def set_playback_drop_marks(self, marks: list[int] | tuple[int, ...]) -> None:
+        self._playback_drop_marks = sorted({max(0, int(mark)) for mark in list(marks or [])})[-80:]
+        self.update()
+
+    def playback_drop_count(self) -> int:
+        return len(self._playback_drop_marks)
+
+    def _ensure_source_visible(self, source_ms: int, *, center: bool = False) -> None:
+        if self._zoom_factor <= 1.001 or self._clip is None:
+            return
+        view_start, view_end, trim_start, trim_end = self._trim_window_ms()
+        full = max(1, trim_end - trim_start)
+        visible = max(1, view_end - view_start)
+        if visible >= full:
+            self._scroll_norm = 0.0
+            return
+        margin = max(20, int(visible * 0.12))
+        if not center and view_start + margin <= source_ms <= view_end - margin:
+            return
+        target_offset = int(source_ms) - trim_start - visible // 2
+        target_offset = max(0, min(full - visible, target_offset))
+        self._scroll_norm = target_offset / max(1, full - visible)
+
+    def wheelEvent(self, event) -> None:  # pragma: no cover - visual QA
+        if event.angleDelta().y() > 0:
+            self.zoom_in()
+        else:
+            self.zoom_out()
+        event.accept()
+
+    def mousePressEvent(self, event) -> None:  # pragma: no cover - visual QA
+        if event.button() == Qt.MouseButton.LeftButton and self._zoom_factor > 1.001:
+            self._drag_start_x = float(event.position().x())
+            self._drag_start_scroll = float(self._scroll_norm)
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:  # pragma: no cover - visual QA
+        if self._drag_start_x is not None and self._zoom_factor > 1.001:
+            width = max(1.0, float(self.width()))
+            delta_norm = (self._drag_start_x - float(event.position().x())) / width
+            self._scroll_norm = max(0.0, min(1.0, self._drag_start_scroll + delta_norm * 1.35))
+            self.update()
+            event.accept()
+            return
+        if self._zoom_factor > 1.001:
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # pragma: no cover - visual QA
+        if self._drag_start_x is not None and event.button() == Qt.MouseButton.LeftButton:
+            self._drag_start_x = None
+            self.setCursor(Qt.CursorShape.OpenHandCursor if self._zoom_factor > 1.001 else Qt.CursorShape.ArrowCursor)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def paintEvent(self, event) -> None:  # pragma: no cover - visual QA
         p = QPainter(self)
@@ -1201,7 +1471,7 @@ class _MiniWaveformStrip(QWidget):
         p.drawRoundedRect(root, 6.0, 6.0)
 
         clip = self._clip
-        plot = root.adjusted(9.0, 14.0, -9.0, -8.0)
+        plot = root.adjusted(9.0, 18.0, -9.0, -13.0)
         p.setPen(QPen(QColor(255, 255, 255, 18), 1.0))
         p.drawLine(QPointF(plot.left(), plot.center().y()), QPointF(plot.right(), plot.center().y()))
 
@@ -1212,7 +1482,11 @@ class _MiniWaveformStrip(QWidget):
         p.setPen(QColor("#A7AFBA"))
         label = "waveform"
         if clip is not None:
-            label = f"waveform  {_fmt_ms(getattr(clip, 'trim_start_ms', 0))}-{_fmt_ms(getattr(clip, 'trim_end_ms', getattr(clip, 'duration_ms', 0)))}"
+            view_start, view_end, trim_start, trim_end = self._trim_window_ms()
+            if self._zoom_factor > 1.001:
+                label = f"waveform  {_fmt_ms(view_start)}-{_fmt_ms(view_end)}  {self._zoom_factor:.0f}x"
+            else:
+                label = f"waveform  {_fmt_ms(trim_start)}-{_fmt_ms(trim_end)}  fit"
         p.drawText(root.adjusted(9, 3, -9, -root.height() + 14), Qt.AlignmentFlag.AlignLeft, label)
 
         wf = getattr(clip, "waveform", None) if clip is not None else None
@@ -1228,27 +1502,82 @@ class _MiniWaveformStrip(QWidget):
             mono = (data[0] + data[1]) * 0.5 if data.ndim == 2 and data.shape[0] == 2 else data.ravel()
             if not mono.size:
                 return
-            trim_start = int(getattr(clip, "trim_start_ms", 0) or 0)
-            trim_end = int(getattr(clip, "trim_end_ms", getattr(clip, "duration_ms", 0)) or 0)
+            view_start, view_end, trim_start, trim_end = self._trim_window_ms()
             duration = max(1, int(getattr(clip, "duration_ms", 0) or 0))
-            start_i = max(0, min(mono.size - 1, int(mono.size * trim_start / duration)))
-            end_i = max(start_i + 1, min(mono.size, int(mono.size * max(trim_end, trim_start + 1) / duration)))
+            start_i = max(0, min(mono.size - 1, int(mono.size * view_start / duration)))
+            end_i = max(start_i + 1, min(mono.size, int(mono.size * max(view_end, view_start + 1) / duration)))
             mono = mono[start_i:end_i]
             if not mono.size:
                 return
             count = max(2, int(plot.width()))
-            idx = np.linspace(0, mono.size - 1, count, dtype=np.int32)
-            vals = mono[idx]
-            peak = max(float(np.max(np.abs(vals))), 0.005)
+            edges = np.linspace(0, mono.size, count + 1, dtype=np.int32)
+            env = np.zeros(count, dtype=np.float32)
+            for i in range(count):
+                lo = int(max(0, min(mono.size - 1, edges[i])))
+                hi = int(max(lo + 1, min(mono.size, edges[i + 1])))
+                segment = mono[lo:hi]
+                env[i] = float(np.max(np.abs(segment))) if segment.size else 0.0
+            peak = max(float(np.max(env)), 0.005)
             cy = plot.center().y()
-            amp = max(6.0, plot.height() * 0.42)
+            amp = max(9.0, plot.height() * 0.46)
             pts_top: list[QPointF] = []
             pts_bot: list[QPointF] = []
-            for i, val in enumerate(vals):
+            for i, val in enumerate(env):
                 x = plot.left() + i / max(count - 1, 1) * plot.width()
-                h = abs(float(val)) / peak * amp
+                h = max(0.0, min(1.0, float(val) / peak)) * amp
                 pts_top.append(QPointF(x, cy - h))
                 pts_bot.append(QPointF(x, cy + h))
+
+            path = QPainterPath()
+            if pts_top and pts_bot:
+                path.moveTo(pts_top[0])
+                for point in pts_top[1:]:
+                    path.lineTo(point)
+                for point in reversed(pts_bot):
+                    path.lineTo(point)
+                path.closeSubpath()
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QColor(118, 145, 123, 42))
+                p.drawPath(path)
+
+            median = float(np.quantile(env, 0.62)) if env.size else 0.0
+            threshold = max(0.018, median * 0.34)
+            min_gap_px = max(2, int(round(plot.width() * 0.0018)))
+            gaps: list[tuple[int, int]] = []
+            start = -1
+            for i, value in enumerate(env):
+                if float(value) <= threshold:
+                    if start < 0:
+                        start = i
+                elif start >= 0:
+                    if i - start >= min_gap_px:
+                        gaps.append((start, i))
+                    start = -1
+            if start >= 0 and count - start >= min_gap_px:
+                gaps.append((start, count))
+            filtered_gaps: list[tuple[int, int]] = []
+            for start_i_px, end_i_px in gaps:
+                left_context = env[max(0, start_i_px - 8):start_i_px]
+                right_context = env[end_i_px:min(count, end_i_px + 8)]
+                left_peak = float(left_context.max()) if left_context.size else 0.0
+                right_peak = float(right_context.max()) if right_context.size else 0.0
+                context_peak = max(left_peak, right_peak)
+                if context_peak < threshold * 1.7 and median > threshold * 1.35:
+                    continue
+                filtered_gaps.append((start_i_px, end_i_px))
+            self._last_gap_count = len(filtered_gaps)
+            for start_i_px, end_i_px in filtered_gaps:
+                left = plot.left() + start_i_px / max(count - 1, 1) * plot.width()
+                right = plot.left() + max(start_i_px + 1, end_i_px - 1) / max(count - 1, 1) * plot.width()
+                gap_rect = QRectF(left, plot.top(), max(1.5, right - left), plot.height())
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QColor(214, 96, 86, 34))
+                p.drawRoundedRect(gap_rect, 1.5, 1.5)
+            if filtered_gaps:
+                p.setPen(QColor(214, 126, 112, 176))
+                gap_label = f"source dips {len(filtered_gaps)}"
+                p.drawText(QRectF(plot.right() - 112.0, root.top() + 3.0, 104.0, 12.0), Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, gap_label)
+
             p.setPen(QPen(QColor(142, 218, 158, 226), 1.15))
             p.drawPolyline(pts_top)
             p.setPen(QPen(QColor(105, 181, 218, 190), 0.85))
@@ -1256,20 +1585,75 @@ class _MiniWaveformStrip(QWidget):
 
             fade_in = int(getattr(clip, "fade_in_ms", 0) or 0)
             fade_out = int(getattr(clip, "fade_out_ms", 0) or 0)
-            eff = max(1, trim_end - trim_start)
+            eff = max(1, view_end - view_start)
             if fade_in > 0:
-                w = min(plot.width(), plot.width() * fade_in / eff)
+                visible_fade = max(0, min(view_end, trim_start + fade_in) - view_start)
+                w = min(plot.width(), plot.width() * visible_fade / eff)
                 grad = QLinearGradient(QPointF(plot.left(), 0), QPointF(plot.left() + w, 0))
                 grad.setColorAt(0.0, QColor(0, 0, 0, 110))
                 grad.setColorAt(1.0, QColor(0, 0, 0, 0))
                 p.fillRect(QRectF(plot.left(), plot.top(), w, plot.height()), grad)
             if fade_out > 0:
-                w = min(plot.width(), plot.width() * fade_out / eff)
+                fade_start = trim_end - fade_out
+                visible_fade = max(0, view_end - max(view_start, fade_start))
+                w = min(plot.width(), plot.width() * visible_fade / eff)
                 grad = QLinearGradient(QPointF(plot.right() - w, 0), QPointF(plot.right(), 0))
                 grad.setColorAt(0.0, QColor(0, 0, 0, 0))
                 grad.setColorAt(1.0, QColor(0, 0, 0, 110))
                 p.fillRect(QRectF(plot.right() - w, plot.top(), w, plot.height()), grad)
+            if self._zoom_factor > 1.001:
+                full = max(1, trim_end - trim_start)
+                visible = max(1, view_end - view_start)
+                rail = QRectF(plot.left(), root.bottom() - 8.0, plot.width(), 3.0)
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QColor(255, 255, 255, 24))
+                p.drawRoundedRect(rail, 1.5, 1.5)
+                thumb_w = max(18.0, rail.width() * visible / full)
+                max_left = max(0.0, rail.width() - thumb_w)
+                thumb = QRectF(rail.left() + max_left * self._scroll_norm, rail.top(), thumb_w, rail.height())
+                p.setBrush(QColor(142, 218, 158, 140))
+                p.drawRoundedRect(thumb, 1.5, 1.5)
+            visible_preview_drops = [
+                mark for mark in self._playback_drop_marks
+                if view_start <= int(mark) <= view_end
+            ]
+            for mark in visible_preview_drops:
+                ratio = (int(mark) - view_start) / max(1, view_end - view_start)
+                x = plot.left() + max(0.0, min(1.0, ratio)) * plot.width()
+                band = QRectF(x - 2.0, plot.top(), 4.0, plot.height())
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QColor(240, 176, 70, 80))
+                p.drawRoundedRect(band, 2.0, 2.0)
+                p.setPen(QPen(QColor(244, 191, 88, 220), 1.0))
+                p.drawLine(QPointF(x, plot.top() - 1.0), QPointF(x, plot.bottom() + 2.0))
+            if visible_preview_drops:
+                p.setPen(QColor(245, 196, 96, 220))
+                p.drawText(
+                    QRectF(plot.left(), root.top() + 3.0, 128.0, 12.0),
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                    f"preview drops {len(self._playback_drop_marks)}",
+                )
+            if self._playhead_source_ms >= 0 and view_start <= self._playhead_source_ms <= view_end:
+                ratio = (self._playhead_source_ms - view_start) / max(1, view_end - view_start)
+                x = plot.left() + max(0.0, min(1.0, ratio)) * plot.width()
+                p.setPen(QPen(QColor(255, 93, 82, 230), 1.55))
+                p.drawLine(QPointF(x, plot.top() - 2.0), QPointF(x, plot.bottom() + 3.0))
+                p.setPen(Qt.PenStyle.NoPen)
+                p.setBrush(QColor(255, 93, 82, 230))
+                top_marker = QPainterPath()
+                top_marker.moveTo(QPointF(x, plot.top() - 2.0))
+                top_marker.lineTo(QPointF(x - 4.0, plot.top() - 8.0))
+                top_marker.lineTo(QPointF(x + 4.0, plot.top() - 8.0))
+                top_marker.closeSubpath()
+                p.drawPath(top_marker)
+                p.setPen(QColor(255, 185, 176, 218))
+                p.drawText(
+                    QRectF(max(plot.left(), x + 5.0), plot.top() - 14.0, 64.0, 12.0),
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                    _fmt_ms(self._playhead_source_ms),
+                )
         except Exception:
+            self._last_gap_count = 0
             p.setPen(QColor("#6F7782"))
             p.drawText(plot, Qt.AlignmentFlag.AlignCenter, "waveform unavailable")
 

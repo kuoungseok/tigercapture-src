@@ -1,6 +1,6 @@
 ﻿# TigerCapture Feature Spec for AI Agents
 
-Last updated: 2026-07-08
+Last updated: 2026-07-10
 
 This file is an AI-readable map of features discovered while working with the
 user. Keep it current when behavior changes, especially for features that span
@@ -55,6 +55,19 @@ Start here when changing a feature:
 - Comparison templates and before/after preview planning:
   `docs/SPEC_COMPARISON_TEMPLATES.md`.
 - Media pool: `app/media_pool.py`.
+- Character Asset Hub: `app/character_asset_hub.py`,
+  `app/character_asset_hub_window.py`,
+  `app/character_one_click_templates.py`,
+  `app/actions/character_template_namespace.py`,
+  `app/video_editor_character_asset_hub_workflow.py`,
+  `tools/qa_character_asset_hub.py`, and
+  `tests/test_character_asset_hub.py`,
+  `tests/test_character_one_click_templates.py`. This is the subculture
+  character-folder intake layer above Media Pool: a user can point it at a
+  folder and receive Live2D/Spine/MMD/VRM classification, dependency
+  diagnostics, thumbnail placeholders, render-readiness state, feature
+  summaries, recommended transform/origin, existing public action payloads for
+  timeline/avatar insertion, and one-click character result templates.
 - Workbench / node graph: `app/workbench_panel.py`, `app/workbench/node_graph/*`.
 - Masks and rotoscope: `app/node_mask.py`, `app/mask_editor_window.py`,
   `app/node_mask_dialogs.py`.
@@ -126,6 +139,28 @@ Start here when changing a feature:
 - CapCut captions/voice workflow:
   `app/capcut_voice.py`, `tools/qa_capcut_voice_workflow.py`,
   `debugCapture/capcut_voice_workflow_qa.json`.
+- Subculture TTS / voice generation direction:
+  `docs/SPEC_TTS_VOICE_LAB.md`, `app/tts_setup.py`, `app/tts_synthesis.py`,
+  `app/tts_subtitle_workflow.py`, `app/tts_lab.py`,
+  `app/actions/tts_namespace.py`, and `app/actions/editor_adapter_tts.py`.
+  Local Style-Bert-VITS2 experiments currently live outside the repo at
+  `D:\TTS\sbv2\Style-Bert-VITS2`. This folder is not a runtime dependency for
+  the current editor build, but it is a product-direction asset for the planned
+  subculture media creator studio. Do not treat it as disposable solely because
+  the current source tree has no direct reference. Future integration should use
+  an external sidecar/provider adapter instead of copying the AGPL engine into
+  the closed editor source tree. Project subtitles can now route through
+  `tts.subtitle.generate_to_timeline`, producing WAV media under
+  `external/assets/tts/generated` and placing aligned clips on a dialogue audio
+  track. The generation action checks the local endpoint first and, when the
+  sidecar install is valid but the server is offline, starts `server_fastapi.py`
+  automatically and waits for readiness before synthesis. Sidecar failure QA is
+  covered by `tools/qa_tts_voice_lab.py`, which writes
+  `debugCapture/voice_lab_sidecar_qa.json` and must return actionable
+  `tigercapture.tts_sidecar.guidance.v1` recovery steps instead of raw
+  connection errors. TTS subtitle timing can now be baked to Live2D mouth
+  parameters through `tts.subtitle.apply_actor_lipsync`, or in the same
+  generation call by passing `apply_actor_lipsync=true` plus an actor target.
 - CapCut local collaboration handoff:
   `app/capcut_collaboration.py`, `tools/qa_capcut_collab_handoff.py`,
   `debugCapture/capcut_collab_handoff_qa.json`.
@@ -282,10 +317,11 @@ Start here when changing a feature:
   layer now backs AI, MCP/local-LLM handoff, QA, review automation, and
   developer tools through validated action specs. It wraps editor/model
   capabilities through `EditorAdapter` instead of exposing arbitrary Python or
-  private editor methods directly. The current default registry exposes 402
+  private editor methods directly. The current default registry exposes 426
   unique action IDs, including timeline/NLE actions, node graph actions,
   VTuber Performance Source actions, Live2D Performance Source retargeting,
-  MMD actor/QA actions, and Music Lab / MIDI composition actions.
+  MMD actor/QA actions, capture evidence actions, and Music Lab / MIDI
+  composition actions.
   Action registration is intentionally split by namespace; AR/PBR preview/
   depth/surface actions live behind `app/actions/ar_pbr_preview_namespace.py`,
   AR/PBR gizmo actions behind `app/actions/ar_pbr_gizmo_namespace.py`, and
@@ -326,30 +362,118 @@ Start here when changing a feature:
   `docs/SPEC_AI_COMPOSER_MUSIC_LAB.md`, `app/music_composer.py`,
   `app/actions/music_namespace.py`, `app/actions/editor_adapter_music.py`, and
   `tests/test_music_composer_actions.py`. The first implementation is
-  MIDI-first and deterministic: `music.compose` creates structured sections,
-  tracks, clips, and notes; `music.render.preview` renders a local WAV preview
-  mix and can skip per-role stem WAVs with `render_stems=false`; and
+  structured-note based and deterministic: `music.compose` creates structured
+  sections, tracks, clips, and notes; `music.render.preview` renders a local
+  WAV preview mix and can skip per-role stem WAVs with `render_stems=false`; and
   `music.render_to_timeline` places rendered stems on real `AudioTrack` rows for
   the existing Sound Editor mixer/export/action stack. `update_existing=true`
   refreshes matching Music Lab composition/role tracks in place, and
-  `music.export_midi` writes a standard MIDI file. `music.compose_to_timeline`
-  is the natural-language entry action, clear music edit prompts route to
+  `music.export_midi` remains an optional interchange export rather than the
+  default sound-tuning output. `music.compose_to_timeline` is the
+  natural-language entry action, clear music edit prompts route to
   regenerate/mute/export actions, and the Workbench Sound Editor now includes a
-  compact `Music Lab` tab for prompt-to-timeline, update, and MIDI export.
+  compact `Music Lab` tab for prompt-to-timeline and update.
   Non-orchestral Music Lab generation now uses a 9-channel default baseline:
   drums, bass, bass pulse, pad/chords, arp, lead, answer lead, counter melody,
   and FX. Melodic EDM/NCS-style prompts use the same 9-channel layout with
   EDM-tuned labels and layer balances rather than the old four-track sketch.
   Music Lab chord progressions are key-aware, and long EDM/NCS prompts use
   intro/build/drop/breakdown/drop2 section plans with alternate breakdown and
-  second-drop progressions to avoid a single repeated loop.
-  Music Lab render quality is now explicit. `tigerstudio.local_synth.v5` and
-  `tigerstudio.studio_edm.v1` are `draft_sketch`; `fluidsynth.soundfont.v1` is
-  `starter_preview`; and only a configured external production renderer can be
-  reported as `production_candidate`. The built-in renderers are useful for
-  timing, arrangement, MIDI export, and workflow validation, but must not be
-  claimed as modern release-quality music. `backend=production` requires a
-  renderer under `external/tools/music_renderer` or
+  second-drop progressions to avoid a single repeated loop. Melody generation
+  now uses an internal 8/16-bar phrase planner with A, A-prime, B, hook, and
+  bridge labels, phrase memory, repetition scoring, chord-tone cadences, and
+  separate lead/answer/counter roles instead of cycling the same short motif.
+  Music Lab renderer tiers are now explicit. The basic/default user-facing
+  output is sample/SoundFont-based `backend=sample_production` with
+  `sample_library_policy=auto`; advanced AI/production output is selected only
+  by explicit provider/backend choice such as Stable Audio 3.0, ACE-Step, LMMS,
+  or `backend=production`. Auto/basic rendering must not silently switch to AI
+  just because a provider is configured. One-click AI music requests use the
+  sample-production studio master profile
+  `one_click_sample_production_studio_v1`, which records bus tone shaping,
+  rumble/mud control, presence/air, room ambience, mid-side width, parallel
+  glue compression, dropout/surge repair, sample-jump smoothing, and soft
+  preview limiting in `render_backend.studio_mastering`. The same default
+  route records `sample_production_articulation_expression_v1` in
+  `render_backend.performance_profile`; it classifies notes by role/length,
+  shapes short-note gates, writes CC1/CC11 expression automation for SoundFont
+  renders, and shapes internal fallback envelopes. `tigerstudio.local_synth.v5` is
+  `diagnostic_only`; `tigerstudio.studio_edm.v1` is `draft_sketch`;
+  `fluidsynth.soundfont.v1` is `starter_preview`;
+  `tigerstudio.sample_production.v1` is
+  `enhanced_local_preview`; and only a configured external production renderer
+  can be reported as `production_candidate`. The built-in renderers are useful
+  for timing, arrangement, MIDI export, and workflow validation, but must not be
+  claimed as modern release-quality music. `backend=sample_production` is the
+  non-AI quality step above draft renderers: it groups roles into bus stems,
+  applies bus tone shaping, cinematic ambience, stereo width, and a glue/master
+  stage, then repairs short energy dips, clicky sample jumps, low resonance,
+  narrow tonal whine, excess 10-25ms onset surges, and render-time timing
+  jitter while using continuity-safe bass phrasing/tails to avoid low-end
+  "tape chewing" artifacts. It still remains below AI/DAW-grade sample-library
+  output. Sample-production now uses a sample-library-first policy. The
+  percussion bus tries SFZ/DecentSampler/manifest drum kits from
+  `external/assets/music/drum_kits`, then SoundFont/FluidSynth, then procedural
+  synth/noise fallback. Non-percussion buses (`low`, `orchestra`, `pads`,
+  `lead`, `fx`) also try SoundFont/FluidSynth stem rendering before procedural
+  synthesis. This avoids presenting old FM/GM-like synthesized drums or
+  calculated oscillator parts as the best local preview; backend status exposes
+  `drum_sample_kit_ready`, `drum_sample_kits`,
+  `sample_production_percussion`, `sample_production_bus_policy`,
+  `sample_library_choices`, `sample_library_install_dirs`, and
+  `recommended_sample_libraries`, and
+  renders record `sample_library_policy`, `bus_renderers`,
+  `external_bus_count`, `procedural_buses`, `percussion_source`, and
+  `percussion_renderer` metadata. Music Lab accepts
+  `sample_library_policy=auto|sample_kit_first|soundfont_only|procedural_only`
+  plus optional `soundfont_path` and `drum_kit_path`, so UI, Claude, and local
+  AI can choose whether sample-production uses user-installed drum kits,
+  SoundFonts only, or diagnostic synth fallback for comparison. Sample packs,
+  model weights, and licensed libraries are not bundled with TigerCapture:
+  users install them under `external/assets/music`, the local
+  `external/assets/music/README.md` guide explains the folder layout, and the
+  compact Workbench Music Lab UI exposes `Assets` / `Guide` buttons plus
+  discovered drum-kit/SoundFont counts. Natural-language AI composition
+  requests such as "make a 30s BGM" default to
+  `music.compose_to_timeline(backend=sample_production,
+  sample_library_policy=auto)`, while explicit provider phrases such as Stable
+  Audio 3.0 / ACE-Step / LMMS select `backend=production` with the matching
+  `ai_provider` and `create_mix=true`. Follow-up AI edits inherit the current
+  composition's render backend and sample policy so section regeneration does
+  not fall back to a lower-quality renderer. The old local synth path remains
+  explicit diagnostic-only and must not be presented as a useful output path.
+  Metal-oriented sketch roles
+  (`rhythm_guitar_*`, `lead_guitar_*`, `power_chord_guitar_*`,
+  `palm_mute_guitar_*`) map to the sample-production lead bus and SoundFont
+  overdrive/distortion guitar programs.
+  `tools/music_audio_glitch_probe.py` is the required local diagnostic
+  for this path before more audio-render guesses are made: it writes JSON/CSV
+  reports for sample jumps, short frame drops/surges, spectral wobble
+  candidates, separate hard-glitch/spectral-motion/envelope-pumping diagnostics,
+  and optional conservative repaired WAVs. `glitch_score` is reserved for hard
+  audio defects; spectral wobble remains a candidate list because normal musical
+  bass/chord motion can trigger it. When the user reports "huffing" or "훅 훅",
+  rerun the probe with `--bpm` and inspect `envelope_pumping`, especially
+  beat-rate peak-to-peak dB. A zero `glitch_score` is not enough to pass this
+  case if kick/percussion or sidechain-style gain motion is still moving the
+  whole mix. Those probe reports and scratch repairs may live in `debugCapture`;
+  source assets, SDKs, and durable renderer dependencies must not. For
+  elimination testing, run `tools/music_render_stage_probe.py`; it renders
+  `00_dry_note_mix`, `01_shaped_stem_mix`,
+  `02_bus_polish_no_spatial_mix`, `03_bus_spatial_gain_mix`,
+  `04_master_no_micro_mix`, and `05_master_full_mix`, each with a probe report,
+  plus `dry_no_drums_mix` and `dry_drums_only_mix` ablations, so agents can
+  identify the first stage or role family that introduces cutting or pumping.
+  The tool also writes `*_playback_safe_48k.wav` companions for listening
+  checks; measure the normal WAV/report, but use playback-safe copies when
+  player/device buffering is suspected. Playback-safe companions must be only
+  48 kHz conversion plus peak normalization. Do not add warm-up beds, pre-roll,
+  synthetic noise floors, or extra stability padding: the 2026-07-10
+  `playback_safe_v4` probe added a warm-up bed and created a false audible cut
+  in an otherwise clean no-drums render. If a playback-safe copy fails while
+  the measured WAV/report is clean, fix the companion generator first instead
+  of guessing at the composer, drum, bass, or master stages.
+  `backend=production` requires a renderer under `external/tools/music_renderer` or
   `TIGERCAPTURE_MUSIC_PRODUCTION_RENDERER_EXE`; if missing, it fails loudly
   instead of silently producing draft/starter audio.
   The current production bridge is `tools/music_production_renderer.py`,
@@ -367,7 +491,13 @@ Start here when changing a feature:
   enable the `stable_audio_3` provider in that config. Explicit Stable Audio
   selection must override the disabled default instead of silently falling back
   to LMMS, while `auto` should keep local/offline fallbacks unless the provider
-  is intentionally enabled.
+  is intentionally enabled. The compact Workbench Music Lab UI now exposes an
+  `AI provider` selector with `AI auto`, `Stable Audio 3.0`, `ACE-Step`, and
+  `LMMS offline`; explicit provider choices send `ai_provider` through
+  `music.compose_to_timeline`, `music.render.preview`, and
+  `music.render_to_timeline`, switch the backend to `production`, and force
+  `mix only` because the current production bridge returns a stereo WAV mix
+  rather than editable stems.
   Orchestral/symphonic/trailer-score prompts now expand to 128 deterministic
   internal composition tracks: strings divisi, woodwinds, brass, timpani,
   orchestral percussion, cymbal/FX, choir, and hybrid pads. Each orchestral
@@ -375,6 +505,10 @@ Start here when changing a feature:
   parts instead of a four-track sketch.
   `.tgp` project save/load persists `music_compositions[]` plus music
   composition/role metadata on generated audio tracks and clips.
+  2026-07-10 stabilization note: sample-production stems are bus stems, not
+  necessarily the original composition role names. The percussion/drum output
+  should be addressed through the `percussion` bus stem in project-IO and
+  timeline-link tests rather than assuming a legacy `drums` rendered stem.
 - Native worker protocol and migration strategy:
   `docs/SPEC_NATIVE_WORKER.md`, `app/native_worker.py`,
   `native/tigercapture_worker/src/main.rs`.
@@ -657,6 +791,30 @@ Start here when changing a feature:
   messages instead of being used silently. The workflow reports ready cards,
   enabled actions, manifest operations, and no-cloud-default evidence so local
   caption/cleanup readiness is not confused with finished TTS/custom voice.
+  TTS is a required product direction for the planned subculture media creator
+  studio: character narration, anime-style voiceover, PPT narration, subtitle-
+  to-voice, VTuber/actor dialogue, and sentence-level replacement should all be
+  able to route through a local or user-configured voice provider. The current
+  local reference install is `D:\TTS\sbv2\Style-Bert-VITS2`; it has CUDA-ready
+  Style-Bert-VITS2, FastAPI `/voice` and `/models/info` endpoints, and local
+  model assets. Because Style-Bert-VITS2 is AGPL and its torch/whisper stack is
+  heavy, TigerCapture should integrate it as an optional sidecar/provider
+  (`tts.provider.status`, `tts.server.ensure_running`, `tts.voice.list`,
+  `tts.subtitle.plan`, `tts.subtitle.generate_to_timeline`) rather than
+  bundling or importing it directly into the editor process. The current setup
+  implementation is intentionally split: `app/tts_setup.py` owns provider
+  detection/install-plan contracts, `app/tts_lab.py` owns the friendly setup UI,
+  and `app/workbench_panel.py` exposes Voice Lab as a Composer-adjacent tool
+  under the Workbench Audio tab rather than nesting it inside Sound Editor.
+  Composer and Voice Lab are always-visible creation tools in that audio dock;
+  they must not depend on an existing audio track or selected audio clip.
+  2026-07-10 stabilization note: TTS/Voice Lab sidecar failures must be
+  actionable instead of raw connection errors. `app.tts_sidecar_runtime`
+  exposes `tigercapture.tts_sidecar.guidance.v1` guidance plus formatted text
+  for missing/incomplete provider installs, startup failures, startup timeouts,
+  and offline `/voice` servers. Subtitle TTS planning and generation actions
+  should surface that guidance and keep the editor stable when the sidecar is
+  absent.
   `tools/qa_capcut_voice_workflow.py`
   writes `debugCapture/capcut_voice_workflow_qa.json`; Creator Assist gets a
   Voice Workflow card, and the CapCut parity tracker uses its score for the
@@ -1440,20 +1598,33 @@ Start here when changing a feature:
   Dashboard exposes it as "Screen Studio Manual Zoom". Edge target rectangles
   and oversized target rectangles are part of the QA contract so manual zoom
   edits do not crop at frame boundaries.
-- The startup launcher should remain a compact action-picking surface, not a
-  template-first page. The first visible choice set is the editor-entry deck:
-  Record, Tiger Studio / Media Pool, and the Sound Editor utility action.
-  Templates and recent work are deliberately absent from the launcher first
-  screen because they made startup feel busy and hid TigerCapture's Media Pool /
-  Workbench identity. The launcher hero is short, capture mode/delay/cursor
-  options live in one thin settings bar, and the Normal/Simple workspace switch
-  is an iOS-style draggable toggle. The selected workspace mode persists to
-  `runtime_data_dir()/launcher_state.json`, can be overridden with
-  `TIGERCAPTURE_LAUNCHER_WORKSPACE_MODE`, and is ignored during pytest so tests
-  do not pollute user state. If the launcher state file is malformed, it is
-  backed up as `launcher_state.broken-*.json` and repaired to standard mode.
-  The launcher body is inside a scroll area so short windows do not clip
-  editor/capture controls.
+- The startup launcher is now the lightweight capture app boundary, not the
+  default Tiger Studio entry point. Tiger Studio and the capture program are
+  separated product surfaces; the capture program may be bundled with Studio,
+  but capture-to-Studio handoff is blocked by default so capture stays small,
+  fast, and focused. `app.launcher_studio_policy.capture_to_studio_enabled()`
+  is the shared gate. Only explicit bundle/QA opt-in through
+  `TIGERCAPTURE_CAPTURE_TO_STUDIO=1`, `TIGERCAPTURE_ALLOW_STUDIO_ENTRY=1`, or
+  `TIGERSTUDIO_BUNDLED_STUDIO_ENTRY=1` exposes the Studio button, workspace
+  switch, project/template opens, video-drop-to-editor behavior, and controller
+  `VideoEditorWindow` construction. Without that opt-in, recording results are
+  saved locally and Studio must be opened through the separate Tiger Studio app.
+  `main.py` remains the capture-app entry point. `studio_main.py` is the Studio
+  entry point, and packaged/source launchers can open it through
+  the packaged `TigerStudio.exe`, `TigerCapture.exe --studio`, or the
+  source-built `TigerStudio.exe` shim. PyInstaller builds must collect both
+  `TigerCapture.exe` and `TigerStudio.exe` into `dist/TigerCapture`. Installer
+  shortcuts should expose both the lightweight capture app and `Tiger Studio`
+  while keeping the desktop shortcut focused on capture. Windows build tooling
+  requirements live in `requirements-build.txt`; `build.ps1` must fail early
+  with that install hint when PyInstaller is absent. NSIS and Inno Setup
+  installers must use distinct output names so release artifacts do not
+  overwrite each other: NSIS writes `installer_output\TigerCapture-Setup-<version>.exe`,
+  while Inno Setup writes
+  `installer_output\TigerCapture-InnoSetup-<version>.exe`.
+  The launcher hero remains short, capture mode/delay/cursor options live in
+  one thin settings bar, and the launcher body stays inside a scroll area so
+  short windows do not clip capture controls.
 - Left-dock preset libraries must stay scroll-safe. Effect, Title,
   Transition, and Workflow preset sections use painted square vector tiles in
   an adaptive `_PresetScrollGrid`; names are tooltip/hover information, not
@@ -2567,6 +2738,15 @@ Video timeline:
   and linked-audio count. Empty nudge attempts prompt the user to select clips.
   The timeline status chip keeps this shortcut detail in a tooltip so the
   toolbar does not stretch on narrow/full-mode layouts.
+- Clip move/delete operations must also be explicit from the video-clip
+  right-click menu. The context menu targets the clicked clip, not an ambiguous
+  global selection, and exposes a `Move clip` submenu with move-to-playhead,
+  move-to-time, and frame nudge commands (`-1`, `+1`, `-5`, `+5` frames).
+  Destructive choices are named separately as `Delete clip (leave gap)` and
+  `Ripple delete clip (close gap)`. These menu items route through registered
+  Python Actions (`clip.move`, `clip.nudge_frames`, `clip.delete`, and
+  `timeline.ripple_delete`) so UI, automation, undo/history, and future MCP
+  paths share the same edit contract.
 - Plain `Up/Down` jumps the playhead to the previous/next edit point. Edit
   points include video clip in/out edges, audio clip offsets/ends, timeline
   markers, and Spine/Live2D actor clip start/end times. If the playhead is
@@ -3495,6 +3675,139 @@ Export behavior:
   covers synthetic export parity, tracked masked-node export, FFmpeg audio
   separation fallback, and tracked `BitmapMask` serialization.
 
+## Character Asset Hub
+
+Character Asset Hub is the subculture asset intake layer for folders that may
+contain Live2D, Spine, MMD, and VRM assets mixed together. It does not replace
+Media Pool, the Live2D/Spine editors, MMD Actor Editor, or VTuber Studio; it
+normalizes discovery and preflight so those existing workflows can be launched
+from a single character-card surface.
+
+Core implementation:
+
+- `app/character_asset_hub.py` is Qt-free and owns the durable report schema
+  `tigercapture.character_asset_hub.v1`.
+- `scan_character_asset_folder(root)` scans a user-selected folder and returns
+  one `tigercapture.character_asset_hub.asset.v1` record per placeable asset.
+  The first implementation recognizes `.model3.json` Live2D models, Spine
+  `.json`/`.skel`/`.atlas` skeleton candidates, MMD `.pmx`/`.pmd`/`.pbx.json`
+  models, nearby `.vmd` motions, and `.vrm` avatars.
+- Reports include `kind`, `asset_type`, `display_name`, absolute and relative
+  paths, `features`, `missing_files`, `warnings`, `errors`,
+  `recommended_transform`, `render`, `thumbnail`, and `timeline_add`.
+- Thumbnail generation is deterministic and safe by default:
+  `write_character_asset_hub_thumbnails()` writes placeholder SVG thumbnails
+  with the asset kind and readiness state. Real render-frame thumbnails can
+  replace these later, but renderer failure must never make the Hub card blank.
+- `simulate_character_asset_hub_user_flow()` is the headless user simulation:
+  it scans a folder and returns the public timeline/avatar action payloads that
+  would be invoked when the user presses Add on each ready card.
+
+Editor integration:
+
+- `app/character_asset_hub_window.py` owns the Qt dialog and card list. It is a
+  thin visual shell over the Qt-free scanner and must show friendly readiness
+  summaries, not raw JSON diagnostics.
+- The Media Pool empty-area context menu exposes `Open Character Asset Hub...`.
+  It emits `MediaPool.character_asset_hub_requested(folder)` after the user
+  chooses a folder.
+- `app/video_editor_character_asset_hub_workflow.py` is the editor bridge. It
+  opens/reuses the dialog and forwards each card Add request to the registered
+  Action Registry. Do not add parallel insertion logic here: Live2D/Spine use
+  `actor.add`, MMD uses `mmd.actor.add`, and VRM0 uses
+  `vtuber.vseeface_select_vrm0_avatar`.
+- The workflow is bound through `app/video_editor_delegates_actor.py` and wired
+  from `app/video_editor_ui_left_dock.py`; `app/video_editor_window.py` remains
+  a compatibility facade.
+
+Per-format contracts:
+
+- Live2D cards parse `FileReferences` for MOC, textures, motions, expressions,
+  physics, and pose. Missing MOC/textures block render readiness; missing
+  motions/expressions/physics/pose are recorded as optional missing files.
+  Timeline insertion uses `actor.add` with `kind=live2d`.
+- Spine cards resolve the loadable skeleton file, matching atlas, atlas texture
+  pages, animations, skins, PMA state, and binary version when available.
+  Missing atlas or texture pages block render readiness. Timeline insertion
+  uses `actor.add` with `kind=spine`, `atlas_path`, first animation, and first
+  skin.
+- MMD cards recognize PMX/PMD/PBX models and nearby VMD motions. Without
+  `render_probe`, they are dependency-ready but unprobed; with `render_probe`,
+  the hub can call MMD diagnostics and record parse/render risks. Timeline
+  insertion uses `mmd.actor.add` and attaches the nearest VMD motion when one
+  is available.
+- VRM cards use `app.vtuber.vrm_profile.inspect_vrm_profile()`. VRM0 avatars
+  become addable through `vtuber.vseeface_select_vrm0_avatar`; VRM1 or invalid
+  VRM files remain visible with diagnostics but are not advertised as
+  VSeeFace-ready avatar targets.
+
+Testing:
+
+- `tests/test_character_asset_hub.py` creates a synthetic user folder with
+  minimal Live2D, Spine, MMD, and VRM assets, verifies classification,
+  missing-file reporting, supported motion/expression/skin summaries,
+  recommended transforms, timeline payloads, placeholder thumbnail output, and
+  the Qt dialog's card/action emission path.
+- `tools/qa_character_asset_hub.py <folder>` writes a regenerated QA report to
+  `debugCapture/character_asset_hub_qa.json` and optional placeholder SVG
+  thumbnails under `debugCapture/character_asset_hub_thumbnails`.
+- This QA intentionally simulates the user at the workflow level: folder drop,
+  card generation, and Add-to-Timeline/Add-as-Avatar payload creation. UI mouse
+  automation should be a later visual smoke test, not the primary correctness
+  proof.
+
+## Character One-Click Templates
+
+Character one-click templates are result-first presets for the subculture
+creator workflow. The intended user flow is: put one character folder/model into
+Character Asset Hub, press a template, and get an executable timeline/avatar
+plan without manually building actor, title, caption, and voice steps.
+
+Core implementation:
+
+- `app/character_one_click_templates.py` is Qt-free and owns
+  `tigercapture.character_one_click_template.v1` and
+  `tigercapture.character_one_click_plan.v1`.
+- The required built-in result templates are:
+  `template-character-intro-short`, `template-talking-live2d-short`,
+  `template-game-ui-commentary`, `template-gacha-character-showcase`,
+  `template-mmd-dance-clip`, `template-anime-pv-intro`,
+  `template-meme-reaction-character`, `template-vtuber-announcement`, and
+  `template-subtitle-to-voice-dialogue-scene`.
+- Five of those are the explicit Character Short starter set and carry the
+  `character-short` tag: character intro, talking Live2D short, game UI
+  commentary, gacha showcase, and meme reaction.
+- Plans always start from the existing Character Asset Hub add contract:
+  Live2D/Spine route through `actor.add`, MMD routes through `mmd.actor.add`,
+  and VRM0 routes through `vtuber.vseeface_select_vrm0_avatar`.
+- Optional decoration steps use existing actions such as `text.add` and
+  `tts.subtitle.generate_to_timeline`. If no target video `track_id`/`clip_id`
+  is supplied, title/caption decoration steps are marked skipped rather than
+  failing the whole template. The required character/avatar step is not optional
+  and must fail loudly when the asset is missing or unsupported.
+- `app/actions/character_template_namespace.py` exposes registered actions:
+  `character.template.list`, `character.template.plan`, and
+  `character.template.apply`. The apply action executes only registered Action
+  Registry steps; it must not call private editor methods directly.
+- `app/character_asset_hub_window.py` adds a `Template` menu to each ready asset
+  card. Selecting a template emits `character.template.apply` with the selected
+  asset record, so the Hub path uses the same plan as automation and QA.
+- The same nine templates are also surfaced as built-in `kind="template"`
+  presets in `app/preset_library.py` with `requires_character_asset=true`.
+  Generic Workflow Presets can display/search them, while Character Asset Hub
+  remains the correct path for applying them to a real asset.
+
+Testing:
+
+- `tests/test_character_one_click_templates.py` verifies the nine required
+  templates, the action plan shape, registry exposure, successful Live2D actor
+  plus text application against a synthetic owner, and blocked missing-asset
+  behavior.
+- `tests/test_character_asset_hub.py` verifies the Hub dialog emits
+  `character.template.apply` from a card template selection.
+- Preset QA expects these templates to appear in `one_click_preset_plan()` for
+  character-heavy summaries.
+
 ## Live2D
 
 Core files:
@@ -3726,6 +4039,18 @@ Behavior notes:
   links. VTuber Studio registration dialogs and
   `tools/register_broadcast_platform_evidence.py` use the same preflight
   warning text before calling the backend validator.
+- Broadcast commercial evidence status, as of 2026-07-10: missing/incomplete.
+  This exact status is intentional for spec analyzers. A private YouTube Live
+  smoke run proved that TigerCapture can push RTMP Program Output and that a
+  VRM frame can appear briefly in YouTube Studio, but that run is not sufficient
+  commercial evidence. `private_rtmp_ingest` is only acceptable when registered
+  as redacted evidence through `broadcast.platform_evidence.register`, and
+  `youtube_unlisted_viewer_playback` remains missing while YouTube Studio/player
+  preview buffers or only briefly shows the avatar. Treat ingest health and
+  viewer playback as separate evidence states. `commercial_ready` and
+  `commercial_claims_ready` must stay false until both
+  `private_rtmp_ingest` and `youtube_unlisted_viewer_playback` are registered
+  with redacted notes or artifact paths.
 - Live2D authored-motion use is separate from transform mocap. The editor
   command `Auto Storyboard Live2D Motions` uses the selected Live2D clip's
   model as the source, reads all available `.motion3.json` motions, then splits
@@ -3819,6 +4144,14 @@ matching JSON diagnostics. The smoke profile reports `backend=pybullet`,
 `solver_iterations=56`, `constraint_force_avg=44.41`,
 `constraint_force_max=260.0`, `orientation_feedback=378`, and
 `profile_ok=true`.
+2026-07-10 stabilization QA reran the text corpus, editor composite/export,
+and multi-actor timeline/export paths. The working-sample evidence is
+`debugCapture/actor_working_samples_stabilization.json`: MMD preview/export
+passed for the `cantarella_wavefile_cloth_motion` path, both the single
+editor-composite and multi-actor timeline QA reports passed all six checks, and
+the MMD corpus reported 9 runnable entries. `vivian_full_body_pmx` remains a
+blocked corpus entry because its local bundle is incomplete, not because the
+renderer should silently accept the missing sphere texture.
 
 Current release posture:
 
@@ -3940,6 +4273,14 @@ Behavior notes:
   200 local actor resources scanned, stress-tier coverage rose to 10 models,
   no coverage issues remained, and 40 top-risk Live2D/Spine render baselines
   were created under `qa_corpus/actor_golden`.
+- 2026-07-10 stabilization render QA writes
+  `debugCapture/actor_render_qa_stabilization.json` and
+  `debugCapture/actor_working_samples_stabilization.json`. In that run,
+  compatibility passed for 99 scanned actor resources, 16 Spine samples passed
+  standalone nonblank render QA, and 16 sampled Live2D resources returned
+  `render_none`. Until that Live2D runtime issue is fixed, Live2D assets from
+  this run are compatibility-passing but must not be listed as render-proven
+  working samples.
 - Live2D/Spine editor loading is productized as a staged operation, not a
   blocking black box. `app.actor_compat_repair` performs non-destructive path
   repair and dependency diagnostics; `app.actor_loading_cache` records queued,
@@ -3961,6 +4302,15 @@ Behavior notes:
   Live2D/Spine open/load/drop breadcrumbs. Screen Studio-style preset coverage
   now includes cursor scissor/zoom/drag animated-icon stickers, wallpaper
   palette effects, and blade/palette template packs.
+- 2026-07-10 stabilization note: Live2D/Spine/MMD load failures must show a
+  diagnostic card instead of a black viewport, silent crash, or raw JSON dump.
+  `app.actor_loading_status.actor_loading_diagnostic_card()` emits
+  `tigercapture.actor.loading_diagnostic_card.v1` cards with title, summary,
+  blockers, next actions, and metadata; `app.actor_loading_cache` persists the
+  card on load records; `ActorLoadingManager` displays the formatted card
+  before technical details; MMD player load exceptions record the same card;
+  and actor evidence cards paint the diagnosis for failed Live2D clips. The
+  fallback policy is to keep the editor responsive and make recovery visible.
 - Actor compatibility repair now has a user-facing guidance report:
   `app.actor_compat_repair.actor_repair_guidance_report()` maps missing atlas
   pages, missing Live2D model files, unsupported formats, optional MediaPipe
@@ -4147,6 +4497,25 @@ Vocal/music separation:
   `preview_decode_height` / `preview.preview_height` style setting through to
   the decoder factory when present; absent that setting, the decoder keeps its
   source-aware 4K/720p defaults.
+- 4K/60-style preview resilience is policy-driven through
+  `app.preview_performance_policy`. Preview quality modes are `auto`,
+  `performance`, and `quality`: Auto keeps source-aware monitoring scale,
+  Performance caps monitoring decode at 540p when no explicit height is set,
+  and Quality requests original-size preview frames. Auto/Performance allow
+  playback frame dropping so project time follows audio/wall-clock time instead
+  of slowing the audio path; Quality disables this catch-up behavior. The
+  current playback mode, decode height, and dropped-frame counter are exposed by
+  `ProjectPlayer.preview_playback_diagnostics()`.
+- Importing high-resolution/high-FPS sources queues background proxy generation
+  through `app.video_editor_proxy_controller.queue_auto_proxy_generation()` when
+  `app.preview_performance_policy` marks the source as `needs_proxy`. The
+  existing toolbar and Media Pool states continue to report Original/Building/
+  Ready/Stale/Active, and export keeps using the original source media.
+- `OpenGLPreviewWidget.preview_gl_diagnostics()` reports frame size, upload
+  count, latest texture-upload time, and latest paint time. Slow or periodic
+  texture uploads are also recorded as `preview.gl/texture_upload` rows in
+  `app.loading_performance`, making it possible to separate decode stalls from
+  GPU upload/paint stalls during 4K60 QA.
 - Preview playback is mostly Python/NumPy/OpenCV plus some OpenGL paths. Heavy
   masks, full-res previews, Live2D, and Spine overlays can make playback slow.
 - Spine actor preview renders use the GL/offscreen renderer when available and
@@ -4880,6 +5249,28 @@ AI Script Edit MVP integration:
   methods to external clients. External MCP/Codex/Claude
   adapters that need broad editor control should wrap the registered action
   schema/preview/execute sequence instead of calling editor internals.
+- Editor/studio capture is now an action-only capability rather than a new UI
+  panel. `capture.targets` returns the semantic capture targets available in
+  the live editor (`editor`, `viewer`, `timeline`, `media_pool`, `workbench`,
+  `color`, `audio`, and diagnostic `screen`) and whether each target resolves
+  to a grab-capable widget. `capture.screenshot` and `capture.gif` accept the
+  same target names, so MCP/AI callers can handle commands such as "capture the
+  viewer" or "capture the timeline" without depending on launcher capture UI.
+  Launcher capture and Studio/editor action capture are intentionally separate:
+  future launcher work can split Capture and Studio visually while keeping
+  MCP/AI capture routed through the registered Action System.
+- Specific external-program capture is also exposed through the same action
+  layer, without adding a new editor UI. `app/window_capture.py` implements
+  Windows top-level window enumeration and capture. `capture.windows.list`
+  returns candidate windows by title substring, process substring, pid, or
+  handle; `capture.window.screenshot` saves a still image from the matched
+  window; and `capture.window.video` records a short MP4/MOV/MKV by piping RGB
+  frames into ffmpeg with hidden subprocess flags to avoid flashing console
+  windows. The default backend captures the visible window rectangle because it
+  works better for GPU windows such as OBS, Unreal, Chrome, and games; the
+  `printwindow` backend remains an explicit fallback for covered windows but may
+  return black for GPU-rendered apps. This is the intended route for AI/MCP
+  commands such as "record OBS for five seconds" or "capture the Chrome window."
 - `generate_edit_plan` lets external agents create deterministic Script Edit
   plans from SRT/WebVTT transcript text, existing project subtitles, an optional
   Korean/English prompt, style preset, and silence intervals. It returns the

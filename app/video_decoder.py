@@ -792,6 +792,74 @@ def _preview_decoder_auto_enabled() -> bool:
     return mode in {"1", "true", "yes", "on", "auto"} or frame_server == "auto"
 
 
+def _preview_performance_policy_enabled() -> bool:
+    disabled = os.environ.get("TIGERCAPTURE_DISABLE_PREVIEW_PERFORMANCE_POLICY", "").strip().lower()
+    return disabled not in {"1", "true", "yes", "on"}
+
+
+def _probe_preview_source_metadata(path: Path) -> dict[str, object]:
+    """Return cheap metadata for preview policy decisions.
+
+    Prefer OpenCV metadata because it is already part of the preview stack and
+    avoids spawning FFmpeg for every ordinary source.  Failures simply return an
+    empty mapping; the decoder then falls back to legacy behavior.
+    """
+    try:
+        import cv2
+
+        cap = cv2.VideoCapture(str(path))
+        if not cap or not cap.isOpened():
+            return {}
+        try:
+            return {
+                "width": int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0),
+                "height": int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0),
+                "fps": float(cap.get(cv2.CAP_PROP_FPS) or 0.0),
+            }
+        finally:
+            try:
+                cap.release()
+            except Exception:
+                pass
+    except Exception:
+        return {}
+
+
+def _preview_performance_policy(
+    path: Path,
+    *,
+    requested_preview_height: int | None = None,
+) -> dict[str, object]:
+    if not _preview_performance_policy_enabled():
+        return {}
+    try:
+        from app.preview_performance_policy import preview_performance_policy_from_probe
+
+        return preview_performance_policy_from_probe(
+            _probe_preview_source_metadata(path),
+            path=path,
+            requested_preview_height=requested_preview_height,
+        )
+    except Exception:
+        return {}
+
+
+def _effective_preview_height_request(
+    path: Path,
+    requested_preview_height: int | None,
+    policy: dict[str, object] | None,
+) -> int | None:
+    if requested_preview_height is not None:
+        return requested_preview_height
+    if not isinstance(policy, dict):
+        return None
+    try:
+        height = int(policy.get("preview_height") or 0)
+    except Exception:
+        height = 0
+    return height if height > 0 else None
+
+
 def _decoder_choice_cache_path() -> Path | None:
     raw = os.environ.get("TIGERCAPTURE_DECODER_CHOICE_CACHE", "").strip()
     if raw:
@@ -1104,6 +1172,15 @@ def open_decoder(
     decode_path = Path(path)
     original_path = decode_path
     open_started = time.perf_counter()
+    source_policy = _preview_performance_policy(
+        decode_path,
+        requested_preview_height=preview_height,
+    )
+    effective_preview_height = _effective_preview_height_request(
+        decode_path,
+        preview_height,
+        source_policy,
+    )
 
     def _record_open(backend: str, status: str = "ready", **metadata) -> None:
         try:
@@ -1133,19 +1210,23 @@ def open_decoder(
     if is_hdr:
         d = FFmpegToneMapDecoder(decode_path)
         if d.open():
-            preview_height = _resolve_preview_height(d, preview_height)
+            preview_height = _resolve_preview_height(d, effective_preview_height)
             _record_open(
                 "ffmpeg_tonemap",
                 proxy=bool(proxy_path),
                 preview_height=preview_height,
                 hdr=True,
+                preview_policy=source_policy,
             )
             return _wrap_for_preview_prefetch(d, preview_height=preview_height)
         # ffmpeg path failed — fall back to cv2 (preview will look
         # washed-out but the file at least loads).
         d.release()
-    frame_server_preview_height = _frame_server_preview_height_hint(preview_height)
-    if _preview_decoder_auto_enabled():
+    frame_server_preview_height = _frame_server_preview_height_hint(effective_preview_height)
+    policy_auto = bool(
+        isinstance(source_policy, dict) and source_policy.get("decoder_auto")
+    )
+    if _preview_decoder_auto_enabled() or policy_auto:
         backend = _choose_preview_decoder_backend(decode_path, frame_server_preview_height)
         if backend == "ffmpeg_frame_server":
             fs = FFmpegFrameServerDecoder(decode_path, output_height=frame_server_preview_height)
@@ -1156,6 +1237,8 @@ def open_decoder(
                     preview_height=frame_server_preview_height,
                     hdr=False,
                     auto=True,
+                    policy_auto=policy_auto,
+                    preview_policy=source_policy,
                 )
                 return _wrap_for_preview_prefetch(fs, preview_height=0)
             fs.release()
@@ -1168,18 +1251,25 @@ def open_decoder(
                 preview_height=frame_server_preview_height,
                 hdr=False,
                 forced_frame_server=True,
+                preview_policy=source_policy,
             )
             return _wrap_for_preview_prefetch(fs, preview_height=0)
         fs.release()
     cv = CV2Decoder(decode_path)
     if cv.open():
-        preview_height = _resolve_preview_height(cv, preview_height)
+        preview_height = _resolve_preview_height(cv, effective_preview_height)
         _record_open(
             "cv2",
             proxy=bool(proxy_path),
             preview_height=preview_height,
             hdr=False,
+            preview_policy=source_policy,
         )
         return _wrap_for_preview_prefetch(cv, preview_height=preview_height)
-    _record_open("open_failed", status="error", proxy=bool(proxy_path))
+    _record_open(
+        "open_failed",
+        status="error",
+        proxy=bool(proxy_path),
+        preview_policy=source_policy,
+    )
     return None

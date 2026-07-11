@@ -106,6 +106,7 @@ def snapshot_clip_effects_for_export(track) -> list | None:
         track_events = list(getattr(track, "cursor_events", []) or [])
         clip_polish = dict(getattr(clip, "screenstudio_polish", {}) or {})
         track_polish = dict(getattr(track, "screenstudio_polish", {}) or {})
+        frame_repairs = [dict(row) for row in (getattr(clip, "frame_repairs", []) or []) if isinstance(row, dict)]
         return SimpleNamespace(
             video_filters=clone_param(
                 getattr(clip, "video_filters", None),
@@ -129,6 +130,7 @@ def snapshot_clip_effects_for_export(track) -> list | None:
             ),
             cursor_events=clip_events or track_events,
             screenstudio_polish=clip_polish or track_polish,
+            frame_repairs=frame_repairs,
         )
 
     ranges: list[tuple[int, int, object]] = []

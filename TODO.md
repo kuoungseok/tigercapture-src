@@ -1263,6 +1263,61 @@
     `commercial_ready`, sale blockers, and next actions. The gate currently
     allows local alpha use but blocks sale-ready claims until real Record/RTMP
     and Discord/video-call platform evidence is attached.
+  - [ ] 2026-07-10 Broadcast/VRM stabilization gate:
+    today's private YouTube Live QA proved that TigerCapture can push RTMP
+    Program Output and that the VRM frame can appear in YouTube Studio, but the
+    flow is not product-stable yet. Do not mark VTuber broadcast sale-ready
+    until these defects are closed:
+    - [ ] YouTube ingest health and YouTube viewer playback must be tracked as
+      separate states. A green FFmpeg/session status is not enough when Studio
+      preview is still buffering or only briefly displays the avatar.
+    - [ ] The Live Target UI needs safer operator warnings for private/unlisted
+      tests, YouTube auto-start behavior, Stop ingest vs End stream, and stream
+      key regeneration after any manual test key exposure.
+    - [ ] VRM first-frame startup must be prewarmed or cached; the current
+      internal fallback proof can take tens of seconds before the first frame.
+      2026-07-10 measured Trump/Milica bust-up frames took about 48-56 seconds
+      per frame through `render_internal_vrm_fallback_frame(...,
+      renderer=vrm_mtoon_gpu)`, so live UI preview must use a separate
+      renderer worker plus prerender/runtime cache until the renderer is made
+      interactive.
+      2026-07-10 follow-up reduced the live-render diagnostic to about
+      `13.28s` per frame by using the persistent full-GPU helper process plus a
+      conservative `12000` preview triangle cap. A second follow-up keeps the
+      hidden Qt/GL widget alive and updates the VBO, reducing cached frames to
+      about `2.852s` with `gpu_widget_cache_hit=1`,
+      `build_vertex_buffer_s ~= 1.23`, and `gpu_widget_grab_s ~= 0.035`.
+      This is still too slow for live playback. Next: remove the per-frame CPU
+      vertex-buffer build and helper-service round trip, then move animated
+      skinning to GPU/VBO updates. Do not use low triangle caps as a fix;
+      `2400` visibly broke dense hair/body meshes.
+    - [x] 2026-07-10 Trump-to-VRM pitch mapping corrected: internal pose curves
+      and VMC messages now use `source_pitch_to_vrm_pitch`, mapping source
+      pitch to VRM pitch as `-source_pitch - 12deg`. The latest real Studio
+      proof records `mapped_vrm_motion.pitch_deg=-11.1916` so the VRM no
+      longer looks like it is leaning backward against a down-looking source.
+    - [ ] Trump-source VRM live smoke currently uses a cached avatar sprite plus
+      a fast motion proxy for YouTube QA. Replace that with full per-frame
+      VRM/MToon pose rendering before claiming true avatar mapping quality.
+    - [x] 2026-07-10 local Studio proof corrected the framing failure:
+      `tools/run_vtuber_studio_trump_live.py --frame-source cached-bustup`
+      opens the real `VTuberBroadcastStudioWindow`, crops Trump Source Tracking
+      from OpenSeeFace face boxes to a 16:9 bust-up view, and composites actual
+      prerendered `vrm_mtoon_gpu` RGBA bust-up frames so Program Output records
+      `program_avatar_height_ratio ~= 0.96`. This is valid local framing/UI
+      evidence, not live renderer-performance evidence.
+    - [x] 2026-07-10 agent-reviewed local Studio fit fix: Source Tracking now
+      expands the OpenSeeFace subject crop to one 16:9 box before resize
+      (`crop_aspect ~= 1.78`, `face_fully_visible=true`), VRM Avatar Mapping no
+      longer ignores real mapping pixmaps, Program Output records
+      `program_avatar_grounded=true` with `bottom_gap_ratio=0.0`, and the proof
+      tool writes separate Program/Source/Mapping PNGs for visual QA.
+    - [ ] Evidence capture must be reliable from the real YouTube/Program
+      Output surface. Avoid generated or composited screenshots for platform
+      evidence; use only real UI capture or clearly labeled diagnostics.
+    - [ ] Record exact redacted status artifacts for failed/buffering runs so
+      recovery diagnostics can distinguish TigerCapture encoder issues from
+      YouTube Studio/player delay.
   - [ ] Attach real broadcast platform E2E evidence:
     Record-to-file metadata, one private/unlisted RTMP ingest test with redacted
     keys, and one Discord/video-call Program Output window-share test should be

@@ -1041,6 +1041,7 @@ def cut_clip_window(
     Extracted so the editor's ``_cut_selection_in_track`` is a thin
     wrapper that handles only the GUI side (selection state, repaint,
     player refresh) and the clip math is unit-testable headless."""
+    from app.frame_repair import frame_repairs_for_source_window
     from app.timeline_model import VideoClip
     s = int(cut_start_source_ms)
     e = int(cut_end_source_ms)
@@ -1069,6 +1070,11 @@ def cut_clip_window(
                     a for a in clip.typography_actors
                     if getattr(a, "start_ms", 0) < left_end
                 ],
+                frame_repairs=frame_repairs_for_source_window(
+                    getattr(clip, "frame_repairs", []) or [],
+                    cs,
+                    left_end,
+                ),
                 node_graph=clip.node_graph,
             ))
         if ce > e:
@@ -1089,6 +1095,11 @@ def cut_clip_window(
                     a for a in clip.typography_actors
                     if getattr(a, "end_ms", 0) > right_start
                 ],
+                frame_repairs=frame_repairs_for_source_window(
+                    getattr(clip, "frame_repairs", []) or [],
+                    right_start,
+                    ce,
+                ),
                 node_graph=clip.node_graph,
             ))
     out.sort(key=lambda c: c.timeline_in_ms)

@@ -19,7 +19,7 @@ def run_actor_loading_ux_qa() -> dict:
 
     from PySide6.QtWidgets import QApplication
 
-    from app.actor_loading_status import actor_clip_badge, set_actor_clip_status
+    from app.actor_loading_status import actor_clip_badge, actor_loading_diagnostic_card, set_actor_clip_status
     from app.live2d.live2d_viewer import Live2DEditorWindow
     from app.spine_editor.editor_window import SpineEditorWindow
 
@@ -74,6 +74,22 @@ def run_actor_loading_ux_qa() -> dict:
             badge = actor_clip_badge(clip)
             if not badge or badge[0] != badge_text:
                 issues.append({"area": "timeline", "code": "bad_badge", "detail": status})
+        for kind, path in (
+            ("live2d", "missing.model3.json"),
+            ("spine", "missing.skel"),
+            ("mmd", "missing.pmx"),
+        ):
+            card = actor_loading_diagnostic_card(
+                kind,
+                path,
+                status="error",
+                stage="parse",
+                message=f"{kind} fixture failed",
+            )
+            if card.get("schema") != "tigercapture.actor.loading_diagnostic_card.v1":
+                issues.append({"area": kind, "code": "diagnostic_card_schema_missing"})
+            if not card.get("actions") or not card.get("blockers"):
+                issues.append({"area": kind, "code": "diagnostic_card_not_actionable"})
         try:
             from app.actor_loading_cache import actor_loading_cache_report, clear_actor_loading_cache, record_actor_load
             import tempfile
@@ -84,6 +100,9 @@ def run_actor_loading_ux_qa() -> dict:
             report = actor_loading_cache_report(cache_path)
             if report.get("summary", {}).get("entries") != 1:
                 issues.append({"area": "cache", "code": "record_missing"})
+            entry = (report.get("entries") or [{}])[0]
+            if not isinstance(entry.get("diagnostic_card"), dict):
+                issues.append({"area": "cache", "code": "diagnostic_card_not_cached"})
         except Exception as exc:
             issues.append({"area": "cache", "code": "cache_exception", "detail": repr(exc)})
     finally:
@@ -98,6 +117,7 @@ def run_actor_loading_ux_qa() -> dict:
         "areas": {
             "live2d": "progress/cancel/timeout/recovery/log UI",
             "spine": "progress/cancel/timeout/recovery/log UI",
+            "mmd": "diagnostic card contract for load/render failures",
             "timeline": "actor load status badges",
         },
     }

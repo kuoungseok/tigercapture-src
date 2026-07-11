@@ -6,6 +6,7 @@ from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any, Mapping
+import time
 
 import numpy as np
 from PySide6.QtCore import QObject, Qt, QTimer, Signal
@@ -311,11 +312,18 @@ class ProjectPlayer(QObject):
         self._last_rendered_clip_path: "Path | None" = None
         self._last_preview_frame_cache: dict | None = None
         self._position_ms: int = 0
+        self._seek_retry_serial: int = 0
         self._duration_ms: int = 0
         self._state: PlayerState = PlayerState.STOPPED
         self._current_segment_speed: float = 1.0
         self._bounded_play_end_ms: int | None = None
         self._bounded_play_return_ms: int | None = None
+        self._last_playback_wall_s: float | None = None
+        self._playback_fractional_ms: float = 0.0
+        self._preview_quality_mode: str = "auto"
+        self._preview_frame_drop_allowed: bool = True
+        self._preview_frame_drop_count: int = 0
+        self._last_tick_advance_ms: int = 0
         # Phase 7: shuttle gear set by the Sony jog/shuttle dial.
         # Multiplied INTO the per-segment speed so e.g. a 4× shuttle
         # over a 2× speed segment plays at 8×. ``1.0`` is the neutral
@@ -379,7 +387,43 @@ class ProjectPlayer(QObject):
 
     def set_project_settings(self, settings: dict | None) -> None:
         self._project_settings = dict(settings or {})
+        self._preview_quality_mode = self._preview_quality_mode_from_settings(
+            self._project_settings
+        )
+        self._preview_frame_drop_allowed = self._preview_frame_drop_allowed_from_settings(
+            self._project_settings
+        )
         self._last_preview_frame_cache = None
+
+    @staticmethod
+    def _preview_quality_mode_from_settings(settings: dict | None) -> str:
+        try:
+            from app.preview_performance_policy import normalize_preview_quality_mode
+        except Exception:
+            normalize_preview_quality_mode = lambda value: "auto"
+        if not isinstance(settings, dict):
+            return "auto"
+        preview = settings.get("preview")
+        raw = None
+        if isinstance(preview, dict):
+            raw = preview.get("quality_mode") or preview.get("mode")
+        if raw is None:
+            raw = settings.get("preview_quality_mode")
+        return normalize_preview_quality_mode(raw)
+
+    @classmethod
+    def _preview_frame_drop_allowed_from_settings(cls, settings: dict | None) -> bool:
+        if not isinstance(settings, dict):
+            return True
+        preview = settings.get("preview")
+        raw = None
+        if isinstance(preview, dict):
+            raw = preview.get("frame_drop_allowed")
+        if raw is None:
+            raw = settings.get("preview_frame_drop_allowed")
+        if raw is not None:
+            return bool(raw)
+        return cls._preview_quality_mode_from_settings(settings) != "quality"
 
     @staticmethod
     def _preview_decode_height_from_settings(settings: dict | None) -> int | None:
@@ -392,6 +436,7 @@ class ProjectPlayer(QObject):
         """
         if not isinstance(settings, dict):
             return None
+        mode = ProjectPlayer._preview_quality_mode_from_settings(settings)
         candidates: list[object] = [
             settings.get("preview_decode_height"),
             settings.get("preview_height"),
@@ -413,7 +458,20 @@ class ProjectPlayer(QObject):
             if value <= 0:
                 return 0
             return max(240, min(2160, value))
+        if mode == "quality":
+            return 0
+        if mode == "performance":
+            return 540
         return None
+
+    def preview_playback_diagnostics(self) -> dict[str, object]:
+        return {
+            "quality_mode": str(getattr(self, "_preview_quality_mode", "auto")),
+            "frame_drop_allowed": bool(getattr(self, "_preview_frame_drop_allowed", True)),
+            "frame_drop_count": int(getattr(self, "_preview_frame_drop_count", 0) or 0),
+            "last_tick_advance_ms": int(getattr(self, "_last_tick_advance_ms", 0) or 0),
+            "preview_decode_height": self._preview_decode_height_hint(),
+        }
 
     def _preview_decode_height_hint(self) -> int | None:
         return self._preview_decode_height_from_settings(
@@ -731,6 +789,8 @@ class ProjectPlayer(QObject):
             return
         if self._shuttle_rate <= 0.0:
             self._shuttle_rate = 1.0
+        self._last_playback_wall_s = time.monotonic()
+        self._playback_fractional_ms = 0.0
         self._update_interval()
         self._timer.start()
         self._set_state(PlayerState.PLAYING)
@@ -751,6 +811,8 @@ class ProjectPlayer(QObject):
 
     def pause(self) -> None:
         self._timer.stop()
+        self._last_playback_wall_s = None
+        self._playback_fractional_ms = 0.0
         self._bounded_play_end_ms = None
         self._bounded_play_return_ms = None
         self._set_state(PlayerState.PAUSED)
@@ -763,10 +825,14 @@ class ProjectPlayer(QObject):
 
     def stop(self) -> None:
         self._timer.stop()
+        self._last_playback_wall_s = None
+        self._playback_fractional_ms = 0.0
         self._set_state(PlayerState.STOPPED)
 
     def release(self) -> None:
         self._timer.stop()
+        self._last_playback_wall_s = None
+        self._playback_fractional_ms = 0.0
         for tid in list(self._caps.keys()):
             self._release_cap(tid)
         executor = getattr(self, "_ar_pbr_asset_import_executor", None)
@@ -832,6 +898,8 @@ class ProjectPlayer(QObject):
             return
         self._shuttle_rate = float(rate)
         if self._state is PlayerState.PLAYING:
+            self._last_playback_wall_s = time.monotonic()
+            self._playback_fractional_ms = 0.0
             self._update_interval()
 
     def set_speed(self, speed: float) -> None:
@@ -841,13 +909,70 @@ class ProjectPlayer(QObject):
         except Exception:
             self._current_segment_speed = 1.0
         if self._state is PlayerState.PLAYING:
+            self._last_playback_wall_s = time.monotonic()
+            self._playback_fractional_ms = 0.0
             self._update_interval()
+
+    def _playback_advance_ms(self) -> int:
+        """Return wall-clock playback advance for one preview tick.
+
+        Video rendering can be slower than the timer interval for heavy sources
+        such as 1080p AV1.  Project time must follow elapsed wall time so audio
+        keeps playing continuously and late video frames are skipped instead of
+        forcing repeated audio seeks.  Direct unit-test calls that happen
+        earlier than the nominal frame interval still advance by one reference
+        frame to preserve deterministic tick semantics.
+        """
+        reference_ms = 1000.0 / self.REFERENCE_FPS
+        now = time.monotonic()
+        last = self._last_playback_wall_s
+        self._last_playback_wall_s = now
+        elapsed_ms = reference_ms if last is None else max(reference_ms, (now - last) * 1000.0)
+        elapsed_ms = min(elapsed_ms, 1000.0)
+        if not bool(getattr(self, "_preview_frame_drop_allowed", True)):
+            elapsed_ms = min(elapsed_ms, reference_ms)
+        effective = max(0.0, float(self._current_segment_speed) * max(0.0, float(self._shuttle_rate)))
+        advance = elapsed_ms * max(0.05, effective) + float(self._playback_fractional_ms)
+        whole = max(1, int(advance))
+        self._playback_fractional_ms = max(0.0, advance - whole)
+        self._last_tick_advance_ms = whole
+        return whole
+
+    def _record_playback_frame_drop(self, advance_ms: int) -> None:
+        if not bool(getattr(self, "_preview_frame_drop_allowed", True)):
+            return
+        reference_ms = 1000.0 / self.REFERENCE_FPS
+        if float(advance_ms) < reference_ms * 1.5:
+            return
+        dropped = max(1, int(round(float(advance_ms) / max(1.0, reference_ms))) - 1)
+        self._preview_frame_drop_count += dropped
+        count = int(getattr(self, "_preview_frame_drop_count", 0) or 0)
+        if count != dropped and count % 30 != 0:
+            return
+        try:
+            from app.loading_performance import record_loading_event
+
+            record_loading_event(
+                "preview.playback",
+                "frame_drop",
+                status="ok",
+                detail=f"advance_ms={int(advance_ms)}",
+                metadata={
+                    "advance_ms": int(advance_ms),
+                    "dropped_frames": dropped,
+                    "total_dropped_frames": count,
+                    "quality_mode": str(getattr(self, "_preview_quality_mode", "auto")),
+                },
+            )
+        except Exception:
+            pass
 
     def _tick(self) -> None:
         if self._duration_ms <= 0:
             self.pause()
             return
-        advance_ms = int(round(1000.0 / self.REFERENCE_FPS))
+        advance_ms = self._playback_advance_ms()
+        self._record_playback_frame_drop(advance_ms)
         new_pos = self._position_ms + advance_ms
         bounded_end = self._bounded_play_end_ms
         playback_end = self._duration_ms if bounded_end is None else min(int(bounded_end), int(self._duration_ms))
@@ -889,13 +1014,45 @@ class ProjectPlayer(QObject):
         ms = max(0, min(int(ms), self._duration_ms))
         same_position = ms == self._position_ms
         self._position_ms = ms
+        if self._state is PlayerState.PLAYING:
+            self._last_playback_wall_s = time.monotonic()
+            self._playback_fractional_ms = 0.0
+        self._seek_retry_serial += 1
+        retry_serial = self._seek_retry_serial
         if __debug__:
             from app.perf_monitor import perf_span
             with perf_span("preview.seek.render", detail=f"pos={ms}"):
-                self._render_frame_at(ms, force_seek=not same_position, allow_cached=same_position)
+                rendered = self._render_frame_at(
+                    ms,
+                    force_seek=not same_position,
+                    allow_cached=same_position,
+                )
         else:
-            self._render_frame_at(ms, force_seek=not same_position, allow_cached=same_position)
+            rendered = self._render_frame_at(
+                ms,
+                force_seek=not same_position,
+                allow_cached=same_position,
+            )
         self.position_changed.emit(ms)
+        if not rendered:
+            self._schedule_seek_render_retry(ms, retry_serial, attempt=0)
+
+    def _schedule_seek_render_retry(self, ms: int, serial: int, *, attempt: int) -> None:
+        delays = (45, 120, 260, 520)
+        if attempt >= len(delays):
+            return
+        delay_ms = delays[attempt]
+
+        def _retry() -> None:
+            if serial != self._seek_retry_serial:
+                return
+            if int(ms) != int(self._position_ms):
+                return
+            rendered = self._render_frame_at(int(ms), force_seek=True, allow_cached=True)
+            if not rendered:
+                self._schedule_seek_render_retry(int(ms), serial, attempt=attempt + 1)
+
+        QTimer.singleShot(delay_ms, _retry)
 
     def refresh_current_frame(self) -> None:
         """Re-render at the current playhead — used when the grade

@@ -145,6 +145,9 @@ def test_node_graph_plain_wheel_scrolls_overflow_and_ctrl_wheel_zooms() -> None:
 
 def test_video_editor_uses_one_scroll_area_for_workbench_and_tools() -> None:
     app = _app()
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QSplitter
+
     from app.i18n import set_language
     from app.video_editor_window import VideoEditorWindow
 
@@ -154,18 +157,49 @@ def test_video_editor_uses_one_scroll_area_for_workbench_and_tools() -> None:
     editor.show()
     app.processEvents()
 
+    assert isinstance(editor._top_work_splitter, QSplitter)
+    assert editor._top_work_splitter.orientation() == Qt.Orientation.Horizontal
+    assert editor._top_work_splitter.indexOf(editor._viewer_column) == 0
+    assert editor._top_work_splitter.indexOf(editor._top_workbench_slot) == 1
+    assert editor._top_work_splitter.childrenCollapsible() is False
+    assert editor._top_work_splitter.handleWidth() >= 5
+    assert isinstance(editor._editor_vertical_splitter, QSplitter)
+    assert editor._editor_vertical_splitter.orientation() == Qt.Orientation.Vertical
+    assert editor._editor_vertical_splitter.indexOf(editor._main_dock_splitter) == 0
+    assert editor._editor_vertical_splitter.indexOf(editor._color_timeline_splitter) == 1
+    assert editor._editor_vertical_splitter.childrenCollapsible() is False
+    assert editor._editor_vertical_splitter.handleWidth() >= 6
+    assert editor._main_dock_splitter.maximumHeight() > 10000
+    assert editor._top_work_area.maximumHeight() > 10000
+    assert editor._preview_host.maximumHeight() > 10000
+    assert editor._timeline_section_host.maximumHeight() > 10000
+    assert isinstance(editor._left_dock_sections_splitter, QSplitter)
+    assert editor._left_dock_sections_splitter.orientation() == Qt.Orientation.Vertical
+    assert editor._left_dock_sections_splitter.indexOf(editor._media_pool_section_host) == 0
+    assert editor._left_dock_sections_splitter.indexOf(editor._left_secondary_sections_host) == 1
+    assert editor._left_dock_sections_splitter.childrenCollapsible() is False
+    assert editor._left_dock_sections_splitter.handleWidth() >= 5
+    assert editor._actor_library_section_host.parentWidget() is editor._left_secondary_sections_host
+    assert editor._effects_library_section_host.parentWidget() is editor._left_secondary_sections_host
+    assert isinstance(editor._right_dock_sections_splitter, QSplitter)
+    assert editor._right_dock_sections_splitter.orientation() == Qt.Orientation.Vertical
+    assert editor._right_dock_sections_splitter.indexOf(editor._right_workbench_pane) == 0
+    assert editor._right_dock_sections_splitter.indexOf(editor._right_secondary_sections_host) == 1
+    assert editor._right_dock_sections_splitter.childrenCollapsible() is False
+    assert editor._right_dock_sections_splitter.handleWidth() >= 5
     assert editor._right_dock_scroll.parentWidget() is editor._top_workbench_slot
     assert editor._right_dock_scroll.maximumHeight() > 108
-    assert editor._workbench_section_host.parentWidget() is editor._right_dock_host
+    assert editor._workbench_section_host.parentWidget() is editor._right_workbench_pane
     assert editor._workbench_section_host.minimumHeight() >= 500
     assert editor._workbench_section_host.height() >= 500
 
-    workbench_idx = editor._right_dock_layout.indexOf(editor._workbench_section_host)
-    creator_idx = editor._right_dock_layout.indexOf(editor._creator_assist_section_host)
-    ai_idx = editor._right_dock_layout.indexOf(editor._ai_command_section_host)
-    subtitle_idx = editor._right_dock_layout.indexOf(editor._subtitle_section_host)
+    assert editor._right_dock_layout.indexOf(editor._right_dock_sections_splitter) == 0
+    workbench_idx = editor._right_workbench_pane_layout.indexOf(editor._workbench_section_host)
+    creator_idx = editor._right_secondary_sections_layout.indexOf(editor._creator_assist_section_host)
+    ai_idx = editor._right_secondary_sections_layout.indexOf(editor._ai_command_section_host)
+    subtitle_idx = editor._right_secondary_sections_layout.indexOf(editor._subtitle_section_host)
     assert workbench_idx == 0
-    assert creator_idx == 1
+    assert creator_idx == 0
     assert ai_idx > creator_idx
     assert subtitle_idx > ai_idx
     assert editor._subtitle_section_host.objectName() == "WorkbenchSectionHost"

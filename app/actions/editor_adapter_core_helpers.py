@@ -15,16 +15,176 @@ def _int(value: Any, default: int = 0) -> int:
         return int(default)
 
 
+class _ScreenGrabTarget:
+    """Small grab()-compatible adapter for full-screen capture actions."""
+
+    def __init__(self, *, screen_index: int = 0) -> None:
+        self._screen_index = max(0, _int(screen_index, 0))
+
+    def grab(self) -> Any:
+        from PySide6.QtGui import QGuiApplication
+
+        screens = list(QGuiApplication.screens() or [])
+        screen = screens[min(self._screen_index, len(screens) - 1)] if screens else QGuiApplication.primaryScreen()
+        if screen is None:
+            raise RuntimeError("no screen is available for capture")
+        return screen.grabWindow(0)
+
+
 class CoreHelperMixin:
     """Private helpers shared by action adapter domain mixins."""
 
     def _capture_target_widget(self, owner: Any, target: str = "editor") -> Any:
-        widget = owner
-        if target and target != "editor":
-            candidate = getattr(owner, str(target), None)
-            if candidate is not None:
-                widget = candidate
-        return widget
+        target_text = str(target or "editor").strip().lower().replace("-", "_").replace(" ", "_")
+        if target_text in {"", "editor", "root", "window", "main", "studio", "tiger_studio"}:
+            return owner
+        if target_text in {"screen", "display", "desktop", "monitor", "full_screen", "fullscreen"}:
+            return _ScreenGrabTarget()
+
+        aliases: dict[str, tuple[str, ...]] = {
+            "viewer": (
+                "_preview_gl",
+                "_preview_label",
+                "_viewer_column",
+                "_preview_panel",
+                "_preview_container",
+            ),
+            "preview": (
+                "_preview_gl",
+                "_preview_label",
+                "_viewer_column",
+                "_preview_panel",
+                "_preview_container",
+            ),
+            "program": (
+                "_preview_gl",
+                "_preview_label",
+                "_viewer_column",
+                "_preview_panel",
+                "_preview_container",
+            ),
+            "program_output": (
+                "_preview_gl",
+                "_preview_label",
+                "_viewer_column",
+                "_preview_panel",
+                "_preview_container",
+            ),
+            "timeline": (
+                "_timeline_section_host",
+                "_timeline_scroll",
+                "_tracks_host",
+                "_timeline_ruler",
+            ),
+            "tracks": (
+                "_tracks_host",
+                "_timeline_section_host",
+                "_timeline_scroll",
+            ),
+            "media": (
+                "_media_pool",
+                "_left_dock_host",
+            ),
+            "media_pool": (
+                "_media_pool",
+                "_left_dock_host",
+            ),
+            "project_bin": (
+                "_media_pool",
+                "_left_dock_host",
+            ),
+            "workbench": (
+                "_workbench_panel",
+                "_right_dock_host",
+            ),
+            "inspector": (
+                "_workbench_panel",
+                "_right_dock_host",
+            ),
+            "right_dock": (
+                "_right_dock_host",
+                "_workbench_panel",
+            ),
+            "left_dock": (
+                "_left_dock_host",
+                "_media_pool",
+            ),
+            "color": (
+                "_color_workbench_panel",
+                "_compact_color_dock",
+                "_workbench_panel",
+            ),
+            "color_grading": (
+                "_color_workbench_panel",
+                "_compact_color_dock",
+                "_workbench_panel",
+            ),
+            "audio": (
+                "_audio_workspace_panel",
+                "_audio_mixer_panel",
+                "_workbench_panel",
+            ),
+            "sound_editor": (
+                "_audio_workspace_panel",
+                "_audio_mixer_panel",
+                "_workbench_panel",
+            ),
+            "ai": (
+                "_ai_command_dock",
+                "_ai_command_chat_log",
+                "_ai_command_input",
+            ),
+            "render": (
+                "_render_queue_section_host",
+                "_right_dock_host",
+            ),
+            "render_queue": (
+                "_render_queue_section_host",
+                "_right_dock_host",
+            ),
+        }
+
+        names = aliases.get(target_text, ())
+        if not names:
+            names = (target_text, f"_{target_text}")
+        for name in names:
+            candidate = getattr(owner, name, None)
+            grab = getattr(candidate, "grab", None)
+            if candidate is not None and callable(grab):
+                return candidate
+        direct = getattr(owner, target_text, None)
+        if direct is not None and callable(getattr(direct, "grab", None)):
+            return direct
+        return owner
+
+    def capture_target_catalog(self) -> dict[str, Any]:
+        owner = self.owner
+        targets = [
+            {"target": "editor", "description": "Full Tiger Studio editor window."},
+            {"target": "viewer", "description": "Current Program/Viewer preview surface."},
+            {"target": "timeline", "description": "Timeline ruler, tracks, and clip area."},
+            {"target": "media_pool", "description": "Left Media Pool and project-bin surface."},
+            {"target": "workbench", "description": "Right Workbench or inspector surface."},
+            {"target": "color", "description": "Color grading workbench surface."},
+            {"target": "audio", "description": "Audio or Sound Editor workbench surface."},
+            {"target": "screen", "description": "Current desktop display for diagnostics."},
+        ]
+        if owner is not None:
+            for row in targets:
+                try:
+                    widget = self._capture_target_widget(owner, str(row["target"]))
+                    row["available"] = callable(getattr(widget, "grab", None))
+                    row["resolved_type"] = type(widget).__name__
+                except Exception:
+                    row["available"] = False
+                    row["resolved_type"] = ""
+        return {
+            "schema": "tigerstudio.capture.targets.v1",
+            "ui_added": False,
+            "mcp_ready": True,
+            "targets": targets,
+        }
+
 
     def _broadcast_selection(self) -> None:
         owner = self.owner
@@ -300,4 +460,3 @@ class CoreHelperMixin:
                 rebuild(getattr(owner, "_audio_tracks", []) or [])
             except Exception:
                 pass
-

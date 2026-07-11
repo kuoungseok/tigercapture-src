@@ -89,6 +89,20 @@ NLE positioning:
   `app/actions/evidence_namespace.py` for UI focus, screenshot, GIF capture, and
   review scenario actions. Keep public UI/capture/review IDs stable and add new
   review-evidence actions there instead of growing the central registry.
+- Editor/studio capture is intentionally UI-less. `capture.targets` exposes the
+  semantic live-editor surfaces that AI/MCP can capture (`editor`, `viewer`,
+  `timeline`, `media_pool`, `workbench`, `color`, `audio`, and diagnostic
+  `screen`), while `capture.screenshot` and `capture.gif` capture those same
+  targets. This keeps launcher Capture and Studio/editor automation separable:
+  the launcher can later split Capture and Studio without changing the action
+  contract used by local LLM, MCP, Codex, or Claude workflows.
+- External application capture is also action-only. `capture.windows.list`,
+  `capture.window.screenshot`, and `capture.window.video` are ownerless actions
+  backed by `app/window_capture.py`, so MCP/AI can list visible Windows windows
+  and capture a matched title/process/pid/handle even when no editor owner is
+  attached. The default video path captures the visible window rectangle and
+  pipes frames to hidden ffmpeg; `printwindow` is available only as a fallback
+  because GPU-rendered apps can return black frames through that API.
 - UI viewer/popout registration is physically split into
   `app/actions/ui_namespace.py` and `app/actions/editor_adapter_ui.py`. It
   exposes only product actions under `ui.viewer.*` for viewer comparison/Fit
@@ -367,6 +381,9 @@ Registered actions:
 - `timeline.precision_trim`
 - `timeline.trim_to_playhead`
 - `clip.trim`
+- `clip.frame_repair.list`
+- `clip.frame_repair.add`
+- `clip.frame_repair.remove`
 - `clip.ripple_trim`
 - `timeline.ripple_delete`
 - `timeline.lift`
@@ -1035,6 +1052,9 @@ settings.*
 - `clip.roll`
 - `clip.j_cut`
 - `clip.l_cut`
+- `clip.frame_repair.list`
+- `clip.frame_repair.add`
+- `clip.frame_repair.remove`
 - `clip.set_speed`
 - `clip.add_speed_segment`
 - `clip.set_fade`
@@ -1136,15 +1156,16 @@ on 2026-07-08:
 - `music.mixer.auto_balance`
 - `music.state`
 
-The first Music Lab implementation is MIDI-first and local/deterministic.
-`music.compose` creates a structured composition with BPM, key, sections,
-instrument roles, MIDI clips, and note events. `music.render.preview` renders
-WAV preview stems and a mix without relying on external cloud music generation,
-and `music.render_to_timeline` places those rendered stems on real timeline
-`AudioTrack` rows so the existing Sound Editor mixer, export, and AI automation
-can operate on them. When `update_existing=true`, matching composition/role
-tracks are refreshed in place instead of creating duplicate music lanes.
-`music.export_midi` writes the current composition as a standard `.mid` file.
+The first Music Lab implementation is structured-note based and
+local/deterministic. `music.compose` creates a composition with BPM, key,
+sections, instrument roles, clips, and note events. `music.render.preview`
+renders WAV preview stems and a mix without relying on external cloud music
+generation, and `music.render_to_timeline` places those rendered stems on real
+timeline `AudioTrack` rows so the existing Sound Editor mixer, export, and AI
+automation can operate on them. When `update_existing=true`, matching
+composition/role tracks are refreshed in place instead of creating duplicate
+music lanes. `music.export_midi` is an optional interchange export, not the
+default sound-tuning output.
 `music.compose_to_timeline` wraps the common compose/render/insert/balance route
 as one action for natural-language command routing. The AI command router also
 maps clear edit requests such as stronger sections, drum removal, pad-only
@@ -1155,13 +1176,35 @@ tracks and clips. The product plan and future provider boundary live in
 
 `music.render.preview`, `music.render_to_timeline`, and
 `music.compose_to_timeline` accept
-`backend=auto|production|local_synth|studio_edm|soundfont` and optional
-`soundfont_path`. `music.render.backends` reports production renderer
-readiness, quality tiers, FluidSynth readiness, and durable SoundFont/SFZ
-assets. Built-in renderers are not modern release-quality music:
-`local_synth` and `studio_edm` are `draft_sketch`, `soundfont` is
-`starter_preview`, and only a configured external production renderer may be
-reported as `production_candidate`. If `backend=production` is requested
+`backend=auto|production|local_synth|studio_edm|soundfont|sample_production`,
+optional `soundfont_path` / `drum_kit_path`, and
+`sample_library_policy=auto|sample_kit_first|soundfont_only|procedural_only`.
+For natural-language "compose music / make BGM" requests, the router defaults to
+`backend=sample_production` and `sample_library_policy=auto` so AI composition
+uses user-installed sample libraries when available instead of silently falling
+back to a cheap internal synth. That default sample-production route applies
+the studio master profile `one_click_sample_production_studio_v1` and exposes
+the applied chain in `render_backend.studio_mastering`, so one-click AI music
+does not return raw SoundFont/internal-synth audio. It also applies
+`sample_production_articulation_expression_v1` and exposes
+`render_backend.performance_profile` so automation can see articulation
+counts, short-note gate shaping, CC1/CC11 expression automation, and internal
+fallback envelope shaping. Explicit provider phrases such as Stable Audio 3.0,
+ACE-Step, or LMMS select `backend=production` with the matching
+`ai_provider` and `create_mix=true`; explicit comparison phrases can select
+SoundFont-only or `procedural_only` diagnostic policies. Follow-up Music Lab
+edits inherit the current composition's render backend/policy.
+`backend=auto` is a basic renderer alias for sample-production. It must not
+select AI/production output unless the caller explicitly requests
+`backend=production` or a concrete `ai_provider`.
+`music.render.backends` reports
+production renderer readiness, quality tiers, FluidSynth readiness, durable
+SoundFont/SFZ assets, drum sample kits, sample-library policy choices, install
+folders, and recommended optional libraries. Built-in renderers are not modern
+release-quality music: `local_synth` is `diagnostic_only`, `studio_edm` is
+`draft_sketch`, `soundfont` is `starter_preview`, `sample_production` is
+`enhanced_local_preview`, and only a configured external production renderer may
+be reported as `production_candidate`. If `backend=production` is requested
 without that renderer, the action must fail loudly rather than silently
 returning draft/starter audio.
 

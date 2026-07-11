@@ -44,3 +44,16 @@ def test_parse_crop_clamps_to_valid_normalized_region():
 
     assert parse_crop("0.9,0.8,0.5,0.5") == pytest.approx((0.9, 0.8, 0.1, 0.2))
     assert parse_crop("") is None
+
+
+def test_tracking_row_count_ignores_header_and_blank_rows(tmp_path):
+    from app.vtuber.openseeface_video_source import _count_tracking_rows
+
+    csv_path = tmp_path / "openseeface.csv"
+    csv_path.write_text("Frame,FPS,Success3D\n,,\n", encoding="utf-8")
+
+    assert _count_tracking_rows(csv_path) == 0
+
+    csv_path.write_text("Frame,FPS,Success3D\n,,\n1,15,True\n", encoding="utf-8")
+
+    assert _count_tracking_rows(csv_path) == 1

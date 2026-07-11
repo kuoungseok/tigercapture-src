@@ -3,9 +3,9 @@ from app.vtuber.video_face_driver import FaceMotionFrame
 
 def _frames():
     return [
-        FaceMotionFrame(time_ms=0, face_box=(250, 90, 120, 90), yaw_deg=0.0, mouth_open=0.1, confidence=0.9),
-        FaceMotionFrame(time_ms=100, face_box=(260, 94, 120, 90), yaw_deg=8.0, roll_deg=2.0, mouth_open=0.2, confidence=0.9),
-        FaceMotionFrame(time_ms=200, face_box=(262, 96, 120, 90), yaw_deg=1.0, mouth_open=0.8, confidence=0.9),
+        FaceMotionFrame(time_ms=0, face_box=(250, 90, 120, 90), yaw_deg=0.0, mouth_open=0.1, confidence=0.9, chin_offset_x_norm=-0.12),
+        FaceMotionFrame(time_ms=100, face_box=(260, 94, 120, 90), yaw_deg=8.0, roll_deg=2.0, mouth_open=0.2, confidence=0.9, chin_offset_x_norm=-0.18),
+        FaceMotionFrame(time_ms=200, face_box=(262, 96, 120, 90), yaw_deg=1.0, mouth_open=0.8, confidence=0.9, chin_offset_x_norm=-0.14),
     ]
 
 
@@ -19,6 +19,7 @@ def test_source_framing_plan_selects_requested_slots():
     assert plan["selected_indices"] == [0, 1, 2]
     assert [frame["slot"] for frame in plan["selected_frames"]] == ["neutral", "head", "mouth"]
     assert plan["selected_frames"][1]["framing"]["model_view"]["auto_fit"] is False
+    assert plan["selected_frames"][1]["motion"]["chin_offset_x_norm"] == -0.18
 
 
 def test_source_framing_plan_matches_chest_up_source_visibility():

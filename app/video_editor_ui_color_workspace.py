@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QByteArray, QSettings, Qt
 from PySide6.QtWidgets import (
     QDialog,
     QHBoxLayout,
@@ -16,10 +16,48 @@ from PySide6.QtWidgets import (
 from app.i18n import tr
 from app.icons import app_icon, icon_size
 from app.style import editor_scrollbar_qss
+from app.video_editor_layout_specs import COLOR_TIMELINE_SPLITTER_SETTINGS_KEY
 from app.video_editor_ai_command_dock import (
     AI_COMMAND_HOST_CLOSED_HEIGHT,
     AI_COMMAND_HOST_OPEN_HEIGHT,
 )
+
+
+def _editor_settings() -> QSettings:
+    return QSettings("TigerCapture", "TigerCapture")
+
+
+def _restore_color_timeline_splitter_state(splitter: QSplitter) -> bool:
+    try:
+        state = _editor_settings().value(COLOR_TIMELINE_SPLITTER_SETTINGS_KEY)
+    except Exception:
+        return False
+    if state is None:
+        return False
+    if isinstance(state, QByteArray):
+        if state.isEmpty():
+            return False
+    elif isinstance(state, (bytes, bytearray)):
+        state = QByteArray(bytes(state))
+    else:
+        return False
+    try:
+        return bool(splitter.restoreState(state))
+    except Exception:
+        return False
+
+
+def _save_color_timeline_splitter_state(owner) -> None:
+    splitter = getattr(owner, "_color_timeline_splitter", None)
+    if splitter is None:
+        return
+    try:
+        _editor_settings().setValue(
+            COLOR_TIMELINE_SPLITTER_SETTINGS_KEY,
+            splitter.saveState(),
+        )
+    except Exception:
+        pass
 
 
 def build_color_workspace(self, main_col, root, controls_bar, sel_row) -> None:
@@ -263,6 +301,16 @@ def build_color_workspace(self, main_col, root, controls_bar, sel_row) -> None:
     self._color_container.setMaximumHeight(330)
     self._color_container.hide()  # hidden until a Color node is selected
 
+    timeline_parent = self._timeline_root_layout
+    _tl_idx = max(0, timeline_parent.indexOf(self._timeline_section_host))
+    timeline_parent_sizes = (
+        list(timeline_parent.sizes()) if isinstance(timeline_parent, QSplitter) else []
+    )
+    if isinstance(timeline_parent, QSplitter):
+        self._timeline_section_host.setParent(None)
+    else:
+        timeline_parent.removeWidget(self._timeline_section_host)
+
     color_timeline_splitter = QSplitter(Qt.Orientation.Vertical, main_col)
     color_timeline_splitter.setChildrenCollapsible(False)
     color_timeline_splitter.setHandleWidth(2)
@@ -271,16 +319,25 @@ def build_color_workspace(self, main_col, root, controls_bar, sel_row) -> None:
     # Default split: compact color dock gets a short palette strip; the
     # timeline keeps the dominant editing surface.
     # Qt will honour these proportionally on first show.
-    color_timeline_splitter.setSizes([230, 300])
     color_timeline_splitter.setStretchFactor(0, 0)
     color_timeline_splitter.setStretchFactor(1, 1)
     self._color_timeline_splitter = color_timeline_splitter
+    if not _restore_color_timeline_splitter_state(color_timeline_splitter):
+        color_timeline_splitter.setSizes([230, 300])
+    color_timeline_splitter.splitterMoved.connect(
+        lambda _pos, _index: _save_color_timeline_splitter_state(self),
+    )
 
     # Remove the bare _timeline_section_host from root and replace with
     # the splitter at the same position.
-    _tl_idx = self._timeline_root_layout.indexOf(self._timeline_section_host)
-    self._timeline_root_layout.removeWidget(self._timeline_section_host)
-    self._timeline_root_layout.insertWidget(_tl_idx, color_timeline_splitter, 1)
+    if isinstance(timeline_parent, QSplitter):
+        timeline_parent.insertWidget(_tl_idx, color_timeline_splitter)
+        timeline_parent.setStretchFactor(_tl_idx, 3)
+        if len(timeline_parent_sizes) >= 2:
+            timeline_parent.setSizes(timeline_parent_sizes)
+    else:
+        timeline_parent.insertWidget(_tl_idx, color_timeline_splitter, 1)
+    self._timeline_root_index = _tl_idx
     self._yield_startup_ui("color_timeline_splitter")
 
     # Point popout plumbing at the color_container's layout so

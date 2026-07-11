@@ -48,6 +48,15 @@ def mousePressEvent(self, event: QMouseEvent) -> None:
     x = pos.x()
     mods = event.modifiers()
     rect = self._timeline_rect()
+    if self._playhead_hit(pos):
+        self._dragging_playhead = True
+        self._drag_start_x = x
+        self._drag_start_y = pos.y()
+        self.setCursor(Qt.CursorShape.SizeHorCursor)
+        self.position_requested.emit(self.track.id, self._x_to_project_ms(x))
+        event.accept()
+        return
+
     if self._edit_tool_mode == "blade" and rect.contains(pos):
         if self._hit_test_clip(pos) is not None:
             self.tool_action_requested.emit(
@@ -283,6 +292,12 @@ def mouseMoveEvent(self, event: QMouseEvent) -> None:
     vertical_delta = abs(pos.y() - int(getattr(self, "_drag_start_y", pos.y()) or 0))
     horizontal_delta = abs(x - int(getattr(self, "_drag_start_x", x) or 0))
     wants_external_ppt_drag = outside_row and vertical_delta >= 28 and vertical_delta > max(12, horizontal_delta * 0.45)
+    if self._dragging_playhead:
+        project_ms = self._x_to_project_ms(x)
+        self.setCursor(Qt.CursorShape.SizeHorCursor)
+        self.position_requested.emit(self.track.id, project_ms)
+        event.accept()
+        return
 
     # Typography drag ??active
     if self._typo_drag_mode is not None and self._typo_drag_actor_id is not None:
@@ -602,6 +617,10 @@ def mouseMoveEvent(self, event: QMouseEvent) -> None:
     # Also update hover-state fields so paint can thicken the edge
     # handles on the thing under the cursor.
     if not (self._dragging_offset or self._dragging_playhead):
+        if self._playhead_hit(pos):
+            self.setCursor(Qt.CursorShape.SizeHorCursor)
+            self._set_hover_hint("")
+            return
         typo_actor, typo_zone = self._typography_at(pos)
         tooltip_clip = self._hit_test_clip(pos)
         tooltip_text = self._clip_effect_tooltip(tooltip_clip) if tooltip_clip is not None else ""
@@ -894,6 +913,7 @@ def mouseMoveEvent(self, event: QMouseEvent) -> None:
 def mouseReleaseEvent(self, event: QMouseEvent) -> None:
     if event.button() != Qt.MouseButton.LeftButton:
         return
+    was_dragging_playhead = self._dragging_playhead
     if self._speed_drag_mode is not None:
         # Keep segments ordered for subsequent hit-tests / painting.
         self.track.speed_segments.sort(key=lambda s: s.start_ms)
@@ -983,6 +1003,9 @@ def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         self.drag_committed.emit(self.track.id)
         self.update()
     self._dragging_playhead = False
+    if was_dragging_playhead:
+        self.setCursor(Qt.CursorShape.ArrowCursor)
+        self.update()
 
 def dragEnterEvent(self, event) -> None:
     md = event.mimeData()

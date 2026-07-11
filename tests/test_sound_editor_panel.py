@@ -1,12 +1,31 @@
 from __future__ import annotations
 
 import os
+import time
 from pathlib import Path
 
-from PySide6.QtWidgets import QApplication, QWidget
+from PySide6.QtCore import Qt
+from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QSizePolicy, QWidget
 
-from app.audio_tracks import AudioClip
-from app.sound_editor_panel import SoundEditStateStore, SoundEditorDockWindow, SoundEditorPanel
+from app.audio_tracks import AudioClip, AudioTrack
+from app.audio_tool_dock_specs import (
+    AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT,
+    AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT,
+    AUDIO_TOOL_DOCK_ICON_HEIGHT,
+    AUDIO_TOOL_DOCK_ICON_WIDTH,
+)
+from app.composer_panel import ComposerPanel, ComposerWindow
+from app.sound_editor_panel import (
+    SOUND_EDITOR_ADVANCED_LAB_HOST_HEIGHT,
+    SOUND_EDITOR_ADVANCED_VISIBLE_SCROLL_HEIGHT,
+    SOUND_EDITOR_PANEL_ADVANCED_MIN_HEIGHT,
+    SOUND_EDITOR_PANEL_MIXER_MIN_HEIGHT,
+    SOUND_EDITOR_PANEL_MIN_HEIGHT,
+    SoundEditStateStore,
+    SoundEditorDockWindow,
+    SoundEditorPanel,
+)
+from app.sound_editor_visual_widgets import _MiniWaveformStrip, _SoundJogShuttle05
 
 
 def _app() -> QApplication:
@@ -75,6 +94,29 @@ def test_sound_editor_dock_window_uses_renewed_panel_without_load_button(tmp_pat
     assert "Load" not in window.windowTitle()
 
 
+def test_sound_editor_advanced_lab_button_uses_separate_dock_row() -> None:
+    _app()
+    panel = SoundEditorPanel()
+
+    lab_buttons = [
+        button
+        for button in panel.findChildren(QPushButton)
+        if button.property("role") == "advanced_audio_lab"
+    ]
+
+    assert len(lab_buttons) == 1
+    button = lab_buttons[0]
+    assert button.text() == ""
+    assert button.objectName() == "SoundLabDockButton"
+    assert button.parentWidget().objectName() == "SoundLabDockRow"
+    assert button.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
+    assert button.minimumHeight() == AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT
+    assert button.maximumHeight() == AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT
+    assert button.iconSize().width() == AUDIO_TOOL_DOCK_ICON_WIDTH
+    assert button.iconSize().height() == AUDIO_TOOL_DOCK_ICON_HEIGHT
+    assert not button.icon().isNull()
+
+
 def test_sound_editor_dock_window_keeps_full_mixer_context(tmp_path: Path) -> None:
     _app()
     from types import SimpleNamespace
@@ -89,8 +131,8 @@ def test_sound_editor_dock_window_keeps_full_mixer_context(tmp_path: Path) -> No
     panel = window.findChild(SoundEditorPanel)
     assert panel is not None
 
-    panel._set_tab("mixer")
-
+    assert "mixer" not in panel._tab_buttons
+    assert panel._mixer_dock.isHidden() is False
     assert len(panel._mixer_strips) == 2
     assert panel._mixer_strips[2].property("active") is True
     assert panel._mixer_strips[3]._mute.isChecked() is True
@@ -173,13 +215,296 @@ def test_sound_editor_panel_embeds_reference_05_jog_shuttle(tmp_path: Path) -> N
     assert getattr(clip, "_se_jog_playing") is True
 
 
-def test_sound_editor_music_lab_shows_arrangement_view(tmp_path: Path) -> None:
+def test_sound_editor_jog_shuttle_exposes_play_pause_button(tmp_path: Path) -> None:
+    _app()
+    audio_path = tmp_path / "jog_play.wav"
+    audio_path.write_bytes(b"jog")
+    clip = AudioClip(id=831, source_path=audio_path, duration_ms=5000, trim_end_ms=5000)
+    jog = _SoundJogShuttle05()
+    events: list[bool] = []
+    jog.playing_changed.connect(events.append)
+
+    jog.set_clip(clip)
+    jog._play_btn.click()
+
+    assert events[-1] is True
+    assert getattr(clip, "_se_jog_playing") is True
+    assert jog._play_btn.property("playing") is True
+
+    jog._play_btn.click()
+
+    assert events[-1] is False
+    assert getattr(clip, "_se_jog_playing") is False
+    assert jog._play_btn.property("playing") is False
+
+
+def test_sound_editor_jog_shuttle_led_afterglow_decays_after_stop(tmp_path: Path) -> None:
+    _app()
+    audio_path = tmp_path / "jog_afterglow.wav"
+    audio_path.write_bytes(b"jog")
+    clip = AudioClip(id=8320, source_path=audio_path, duration_ms=5000, trim_end_ms=5000)
+    jog = _SoundJogShuttle05()
+
+    jog.set_clip(clip)
+    jog._set_position_ms(2400, emit=False)
+    jog._set_playing(True)
+    for _ in range(3):
+        jog._tick_slot_animation()
+
+    assert max(jog._slot_glow_values) >= 0.95
+
+    jog._set_playing(False)
+
+    assert jog._slot_anim_timer.isActive()
+    before = max(jog._slot_glow_values)
+    jog._tick_slot_animation()
+
+    assert max(jog._slot_glow_values) <= before
+
+    for _ in range(44):
+        jog._tick_slot_animation()
+
+    assert max(jog._slot_glow_values) < 0.03
+    assert not jog._slot_anim_timer.isActive()
+
+
+def test_sound_editor_waveform_detail_controls_zoom_strip(tmp_path: Path) -> None:
+    app = _app()
+    import numpy as np
+
+    audio_path = tmp_path / "wave_zoom.wav"
+    audio_path.write_bytes(b"zoom")
+    clip = AudioClip(id=832, source_path=audio_path, duration_ms=8000, trim_end_ms=8000)
+    x = np.linspace(0, 1, 2048, dtype=np.float32)
+    clip.waveform = np.vstack([
+        np.sin(x * 300.0) * 0.55,
+        np.sin(x * 247.0) * 0.42,
+    ]).astype(np.float32)
+    panel = SoundEditorPanel()
+    panel.resize(900, 720)
+    panel.show()
+
+    panel.set_clip(clip, context_label="Timeline Audio", context_key="timeline:1:832")
+    panel._set_waveform_zoom(4.0)
+    app.processEvents()
+
+    assert panel._waveform_strip.zoom_factor() == 4.0
+    assert getattr(clip, "_se_waveform_zoom") == 4.0
+    assert panel._waveform_zoom_buttons[4.0].property("selected") is True
+    assert panel._waveform_strip.geometry().top() > panel._jog_shuttle.geometry().bottom()
+    assert panel._waveform_zoom_buttons[4.0].parent() is panel._waveform_strip
+    assert panel._waveform_strip.minimumHeight() >= 80
+    assert not panel._waveform_strip.grab().isNull()
+
+
+def test_workbench_sound_editor_keeps_top_audio_blocks_separated(tmp_path: Path) -> None:
+    app = _app()
+    import numpy as np
+    from app.workbench_panel import WorkbenchPanel
+
+    audio_path = tmp_path / "workbench_audio.wav"
+    audio_path.write_bytes(b"audio")
+    clip = AudioClip(id=836, source_path=audio_path, duration_ms=48000, trim_end_ms=48000)
+    x = np.linspace(0, 1, 4096, dtype=np.float32)
+    clip.waveform = np.vstack([
+        np.sin(x * 900.0) * 0.45,
+        np.sin(x * 820.0) * 0.36,
+    ]).astype(np.float32)
+    track = AudioTrack(id=5, label="A1", clips=[clip])
+    panel = WorkbenchPanel()
+    panel.resize(744, 620)
+    panel.show()
+
+    panel.set_audio_clip(track, clip)
+    app.processEvents()
+
+    sound = panel._sound_editor_panel
+    scroll = panel._sound_editor_scroll
+    assert scroll.isVisible() is True
+    assert scroll.widget() is sound
+    assert panel._composer_dock.isVisible() is True
+    assert panel._composer_button.isVisible() is True
+    assert panel._composer_button.isCheckable() is False
+    assert panel._composer_button.minimumHeight() == AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT
+    assert panel._composer_button.maximumHeight() == AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT
+    assert panel._composer_button.iconSize().width() == AUDIO_TOOL_DOCK_ICON_WIDTH
+    assert panel._composer_button.iconSize().height() == AUDIO_TOOL_DOCK_ICON_HEIGHT
+    assert sound._advanced_btn.minimumHeight() == panel._composer_button.minimumHeight()
+    assert sound._advanced_btn.maximumHeight() == panel._composer_button.maximumHeight()
+    assert sound._advanced_btn.iconSize() == panel._composer_button.iconSize()
+    assert scroll.geometry().top() < panel._composer_dock.geometry().top()
+    assert scroll.height() >= panel._tab_stack.height() - panel._composer_dock.height() - 12
+    assert sound.minimumHeight() >= SOUND_EDITOR_PANEL_MIN_HEIGHT
+    assert sound.height() >= SOUND_EDITOR_PANEL_MIN_HEIGHT
+    assert scroll.verticalScrollBar().maximum() > 0
+    assert sound._waveform_strip.geometry().top() > sound._jog_shuttle.geometry().bottom()
+    assert sound._spectrum_strip.geometry().top() > sound._waveform_strip.geometry().bottom()
+    assert sound._tabs_bar.geometry().top() > sound._spectrum_strip.geometry().bottom()
+
+    collapsed_scroll_max = scroll.verticalScrollBar().maximum()
+    sound._set_advanced_lab_expanded(True)
+    app.processEvents()
+
+    assert sound.minimumHeight() >= SOUND_EDITOR_PANEL_ADVANCED_MIN_HEIGHT
+    assert sound._advanced_lab_host.isVisible() is True
+    assert scroll.minimumHeight() >= SOUND_EDITOR_ADVANCED_VISIBLE_SCROLL_HEIGHT
+    assert scroll.minimumHeight() < SOUND_EDITOR_PANEL_ADVANCED_MIN_HEIGHT
+    assert panel._tab_stack.minimumHeight() >= SOUND_EDITOR_ADVANCED_VISIBLE_SCROLL_HEIGHT
+    assert panel.minimumHeight() > SOUND_EDITOR_ADVANCED_VISIBLE_SCROLL_HEIGHT
+    assert scroll.verticalScrollBar().maximum() > collapsed_scroll_max
+
+    sound._set_advanced_lab_expanded(False)
+    app.processEvents()
+
+    assert sound.minimumHeight() == SOUND_EDITOR_PANEL_MIXER_MIN_HEIGHT
+    assert sound._advanced_lab_host.isVisible() is False
+    panel._composer_button.click()
+    app.processEvents()
+
+    assert getattr(panel, "_composer_scroll", None) is None
+    assert isinstance(panel._composer_window, ComposerWindow)
+    assert panel._composer_window.isVisible() is True
+    assert panel._composer_panel is panel._composer_window.composer_panel()
+    assert panel._composer_dock.findChildren(ComposerPanel) == []
+    assert scroll.isVisible() is True
+    assert sound.isVisible() is True
+    assert scroll.geometry().top() < panel._composer_dock.geometry().top()
+
+    panel.close()
+
+
+def test_workbench_sound_editor_expansion_grows_parent_section(tmp_path: Path) -> None:
+    app = _app()
+    from PySide6.QtWidgets import QVBoxLayout, QWidget
+
+    from app.workbench_panel import WorkbenchPanel
+
+    audio_path = tmp_path / "workbench_parent_audio.wav"
+    audio_path.write_bytes(b"audio")
+    clip = AudioClip(id=837, source_path=audio_path, duration_ms=48000, trim_end_ms=48000)
+    track = AudioTrack(id=6, label="A1", clips=[clip])
+    host = QWidget()
+    host.setObjectName("WorkbenchSectionHost")
+    host.setMinimumHeight(500)
+    layout = QVBoxLayout(host)
+    layout.setContentsMargins(0, 0, 0, 0)
+    panel = WorkbenchPanel(host)
+    layout.addWidget(panel)
+    host.resize(744, 620)
+    host.show()
+
+    panel.set_audio_clip(track, clip)
+    app.processEvents()
+    base_host_min = host.minimumHeight()
+
+    panel._sound_editor_panel._set_advanced_lab_expanded(True)
+    app.processEvents()
+
+    assert host.minimumHeight() > base_host_min
+    assert host.minimumHeight() >= panel.minimumHeight()
+    assert panel._sound_editor_scroll.minimumHeight() >= SOUND_EDITOR_ADVANCED_VISIBLE_SCROLL_HEIGHT
+    assert panel._sound_editor_scroll.minimumHeight() < SOUND_EDITOR_PANEL_ADVANCED_MIN_HEIGHT
+
+    panel._sound_editor_panel._set_advanced_lab_expanded(False)
+    app.processEvents()
+
+    assert host.minimumHeight() == base_host_min
+
+    host.close()
+
+
+def test_sound_editor_waveform_playhead_tracks_preview_position(tmp_path: Path) -> None:
+    app = _app()
+    import numpy as np
+
+    audio_path = tmp_path / "wave_playhead.wav"
+    audio_path.write_bytes(b"playhead")
+    clip = AudioClip(id=833, source_path=audio_path, duration_ms=8000, trim_end_ms=8000)
+    x = np.linspace(0, 1, 2048, dtype=np.float32)
+    clip.waveform = np.vstack([
+        np.sin(x * 180.0) * 0.55,
+        np.sin(x * 150.0) * 0.42,
+    ]).astype(np.float32)
+    panel = SoundEditorPanel()
+    panel.resize(900, 720)
+    panel.show()
+
+    panel.set_clip(clip, context_label="Timeline Audio", context_key="timeline:1:833")
+    panel._set_waveform_zoom(8.0)
+    panel._on_preview_player_position(6200)
+    app.processEvents()
+
+    assert panel._waveform_strip._playhead_source_ms == 6200
+    assert panel._jog_shuttle._position_ms == 6200
+    assert panel._waveform_strip._scroll_norm > 0.0
+    assert not panel._waveform_strip.grab().isNull()
+
+
+def test_sound_editor_waveform_marks_low_level_gaps(tmp_path: Path) -> None:
+    app = _app()
+    import numpy as np
+
+    audio_path = tmp_path / "wave_gap.wav"
+    audio_path.write_bytes(b"gap")
+    clip = AudioClip(id=834, source_path=audio_path, duration_ms=4000, trim_end_ms=4000)
+    wave = np.ones(1600, dtype=np.float32) * 0.55
+    wave[420:560] = 0.0
+    wave[980:1120] = 0.0
+    clip.waveform = np.vstack([wave, wave * 0.8]).astype(np.float32)
+    strip = _MiniWaveformStrip()
+    strip.resize(900, 104)
+    strip.show()
+
+    strip.set_clip(clip)
+    app.processEvents()
+    pixmap = strip.grab()
+
+    assert not pixmap.isNull()
+    assert strip.dropout_count() >= 2
+
+
+def test_sound_editor_preview_drop_diagnostics_mark_waveform(tmp_path: Path) -> None:
+    app = _app()
+    import numpy as np
+
+    audio_path = tmp_path / "preview_drop.wav"
+    audio_path.write_bytes(b"drop")
+    clip = AudioClip(id=835, source_path=audio_path, duration_ms=4000, trim_end_ms=4000)
+    x = np.linspace(0, 1, 2048, dtype=np.float32)
+    clip.waveform = np.vstack([
+        np.sin(x * 120.0) * 0.5,
+        np.sin(x * 110.0) * 0.42,
+    ]).astype(np.float32)
+    panel = SoundEditorPanel()
+    panel.resize(900, 720)
+    panel.show()
+
+    panel.set_clip(clip, context_label="Timeline Audio", context_key="timeline:1:835")
+    panel._jog_shuttle._playing = True
+    panel._preview_last_source_ms = 1000
+    panel._preview_last_wall_ms = time.monotonic() * 1000.0 - 520.0
+    panel._preview_seek_guard_until_ms = 0.0
+    panel._record_preview_timing(1090)
+    app.processEvents()
+
+    assert panel._waveform_strip.playback_drop_count() == 1
+    assert panel._waveform_strip._playback_drop_marks[-1] == 1090
+    assert not panel._waveform_strip.grab().isNull()
+
+
+def test_sound_editor_no_longer_embeds_composer_tab() -> None:
+    _app()
+    panel = SoundEditorPanel()
+
+    assert "music" not in panel._tab_buttons
+    panel._set_tab("music")
+    assert panel._stack.currentIndex() == 0
+
+
+def test_composer_panel_shows_arrangement_view(tmp_path: Path) -> None:
     app = _app()
     from app.music_composer import compose_music
 
-    audio_path = tmp_path / "music_lab.wav"
-    audio_path.write_bytes(b"music")
-    clip = AudioClip(id=84, source_path=audio_path, duration_ms=30000, trim_end_ms=30000)
     composition = compose_music(
         prompt="tech demo music",
         duration_ms=30000,
@@ -188,22 +513,19 @@ def test_sound_editor_music_lab_shows_arrangement_view(tmp_path: Path) -> None:
         key="C minor",
         bpm=124,
     ).to_dict()
-    panel = SoundEditorPanel()
+    panel = ComposerPanel()
     panel.resize(760, 720)
     panel.show()
     music_events = []
     panel.music_lab_action_requested.connect(lambda action, params: music_events.append((action, params)))
-    panel.set_clip(clip, context_label="Timeline Audio", context_key="timeline:1:84")
-    panel._set_tab("music")
     panel.set_music_composition(composition)
     panel._music_arrangement.set_selection(role="chords", section_name="build")
     app.processEvents()
 
-    arranger = panel.findChild(QWidget, "SoundMusicArrangementView")
+    arranger = panel.findChild(QWidget, "ComposerArrangementView")
     assert arranger is not None
     assert arranger.isVisible()
     assert not arranger.grab().isNull()
-    assert not panel.findChild(QWidget, "SoundJogShuttle05").isVisible()
     payload = panel._music_selection_payload()
     assert payload["composition_id"] == composition["id"]
     assert payload["role"] == "chords"
@@ -219,7 +541,129 @@ def test_sound_editor_music_lab_shows_arrangement_view(tmp_path: Path) -> None:
 
     assert music_events[-1][0] == "music.render.preview"
     assert music_events[-1][1]["composition_id"] == composition["id"]
-    assert music_events[-1][1]["backend"] == "auto"
+    assert music_events[-1][1]["backend"] == "sample_production"
+
+
+def test_composer_panel_ai_provider_selects_production_mix(tmp_path: Path) -> None:
+    app = _app()
+    from app.music_composer import compose_music
+
+    composition = compose_music(
+        prompt="stable audio music",
+        duration_ms=30000,
+        genre="electronic",
+        mood="confident",
+        key="A minor",
+        bpm=128,
+    ).to_dict()
+    panel = ComposerPanel()
+    panel.resize(760, 720)
+    panel.show()
+    music_events = []
+    panel.music_lab_action_requested.connect(lambda action, params: music_events.append((action, params)))
+    panel.set_music_composition(composition)
+
+    panel._music_ai_provider.setCurrentText("Stable Audio 3.0")
+    app.processEvents()
+
+    assert panel._music_render_backend.currentText() == "AI production"
+    assert panel._music_roles.currentText() == "mix only"
+    assert "Stable Audio 3.0" in panel._music_provider_status.text()
+
+    panel._request_music_preview()
+
+    assert music_events[-1][0] == "music.render.preview"
+    assert music_events[-1][1]["composition_id"] == composition["id"]
+    assert music_events[-1][1]["backend"] == "production"
+    assert music_events[-1][1]["ai_provider"] == "stable_audio_3"
+    assert music_events[-1][1]["render_stems"] is False
+
+    panel._request_music_generate()
+
+    assert music_events[-1][0] == "music.compose_to_timeline"
+    assert music_events[-1][1]["backend"] == "production"
+    assert music_events[-1][1]["ai_provider"] == "stable_audio_3"
+    assert music_events[-1][1]["create_mix"] is True
+
+
+def test_composer_panel_sample_production_backend(tmp_path: Path) -> None:
+    app = _app()
+    panel = ComposerPanel()
+    panel.resize(760, 720)
+    panel.show()
+    music_events = []
+    panel.music_lab_action_requested.connect(lambda action, params: music_events.append((action, params)))
+    panel._music_render_backend.setCurrentText("sample prod")
+    panel._music_sample_library.setCurrentText("soundfont only")
+    app.processEvents()
+
+    panel._request_music_generate()
+
+    assert music_events[-1][0] == "music.compose_to_timeline"
+    assert music_events[-1][1]["backend"] == "sample_production"
+    assert music_events[-1][1]["sample_library_policy"] == "soundfont_only"
+    assert "ai_provider" not in music_events[-1][1]
+
+
+def test_composer_panel_exposes_sample_asset_connection(tmp_path: Path) -> None:
+    app = _app()
+    from app.music_composer import compose_music
+
+    composition = compose_music(
+        prompt="sample asset connection test",
+        duration_ms=16000,
+        genre="electronic",
+        mood="confident",
+        key="C minor",
+        bpm=124,
+    ).to_dict()
+    panel = ComposerPanel()
+    panel.resize(760, 720)
+    panel.show()
+    music_events = []
+    panel.music_lab_action_requested.connect(lambda action, params: music_events.append((action, params)))
+    panel.set_music_composition(composition)
+    app.processEvents()
+
+    assert panel._music_sample_library.accessibleName() == "Composer sample library policy"
+    assert "Installed:" in panel._music_sample_status.text()
+
+    panel._music_sample_library.setCurrentText("diagnostic synth")
+    panel._request_music_preview()
+
+    assert music_events[-1][0] == "music.render.preview"
+    assert music_events[-1][1]["sample_library_policy"] == "procedural_only"
+
+
+def test_workbench_music_composition_opens_standalone_composer(tmp_path: Path) -> None:
+    app = _app()
+    from app.music_composer import compose_music
+    from app.workbench_panel import WorkbenchPanel
+
+    composition = compose_music(
+        prompt="standalone composer",
+        duration_ms=12000,
+        genre="electronic",
+        mood="clear",
+    ).to_dict()
+    panel = WorkbenchPanel()
+    panel.resize(744, 620)
+    panel.show()
+
+    assert getattr(panel, "_composer_panel", None) is None
+
+    panel.set_music_lab_composition(composition)
+    app.processEvents()
+
+    composer = panel._composer_panel
+    assert isinstance(composer, ComposerPanel)
+    assert panel._inspector_tab == "audio"
+    assert isinstance(panel._composer_window, ComposerWindow)
+    assert panel._composer_window.isVisible() is True
+    assert getattr(panel, "_composer_scroll", None) is None
+    assert panel._composer_button.isChecked() is False
+    assert composer.findChild(QWidget, "ComposerArrangementView") is not None
+    assert getattr(panel, "_sound_editor_scroll", None) is None or panel._sound_editor_scroll.isVisible() is False
 
 
 def test_sound_editor_panel_expands_advanced_lab_inline(tmp_path: Path) -> None:
@@ -234,6 +678,7 @@ def test_sound_editor_panel_expands_advanced_lab_inline(tmp_path: Path) -> None:
     panel.advanced_lab_requested.connect(lambda track, current_clip: events.append((track, current_clip)))
 
     panel.set_clip(clip, track="track-a", context_label="Timeline Audio", context_key="timeline:1:81")
+    collapsed_min_height = panel.minimumHeight()
     panel._request_advanced_lab()
     app.processEvents()
 
@@ -241,12 +686,50 @@ def test_sound_editor_panel_expands_advanced_lab_inline(tmp_path: Path) -> None:
     assert panel._advanced_expanded is True
     assert panel._advanced_lab_panel.isHidden() is False
     assert panel._advanced_lab_host.isVisible() is True
+    assert panel._advanced_lab_host.minimumHeight() >= SOUND_EDITOR_ADVANCED_LAB_HOST_HEIGHT
+    assert panel._advanced_lab_host.geometry().top() > panel._advanced_dock_row.geometry().bottom()
+    assert panel.minimumHeight() >= SOUND_EDITOR_PANEL_ADVANCED_MIN_HEIGHT
+    assert panel.minimumHeight() > collapsed_min_height
     assert panel._jog_shuttle.isVisible() is True
     assert panel._waveform_strip.isVisible() is True
     assert panel._spectrum_strip.isVisible() is True
     assert panel._tabs_bar.isVisible() is True
     assert panel._stack.isVisible() is True
+    assert panel._advanced_lab_tab_buttons == {}
+    assert panel.findChild(QWidget, "SoundLabTabs") is None
+    assert panel.findChild(QWidget, "SoundLabInlineScroll") is not None
+    assert panel._advanced_lab_scroll.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOn
+    assert not hasattr(panel, "_advanced_lab_stack")
+    category_titles = [
+        label.text()
+        for label in panel.findChildren(QLabel, "SoundLabCategoryTitle")
+    ]
+    assert category_titles == []
+    assert panel._advanced_lab_section_widgets["dialogue"].isVisible() is True
+    assert panel._advanced_lab_section_widgets["timing"].isVisible() is True
+    assert panel._advanced_lab_section_widgets["loudness"].isVisible() is True
+    assert panel._advanced_lab_section_widgets["ai"].isVisible() is True
+    assert panel._lab_dialogue_knobs.isVisible() is True
+    assert panel._lab_timing_knobs.isVisible() is True
+    assert panel._lab_loudness_knobs.isVisible() is True
+    assert panel._lab_ai_knobs.isVisible() is True
     assert getattr(clip, "_se_advanced_lab_expanded") is True
+
+    panel._set_advanced_lab_tab("timing")
+
+    assert panel._advanced_lab_tab == "timing"
+    assert panel._advanced_lab_section_widgets["dialogue"].isVisible() is True
+    assert panel._advanced_lab_section_widgets["timing"].isVisible() is True
+    assert panel._lab_dialogue_knobs.isVisible() is True
+    assert panel._lab_timing_knobs.isVisible() is True
+
+    panel._set_advanced_lab_expanded(False)
+    app.processEvents()
+
+    assert panel._advanced_expanded is False
+    assert panel._advanced_lab_host.isVisible() is False
+    assert panel._advanced_lab_host.maximumHeight() == 0
+    assert panel.minimumHeight() == SOUND_EDITOR_PANEL_MIXER_MIN_HEIGHT
 
 
 def test_sound_editor_inline_advanced_lab_updates_real_effect_state(tmp_path: Path) -> None:
@@ -272,7 +755,49 @@ def test_sound_editor_inline_advanced_lab_updates_real_effect_state(tmp_path: Pa
     assert clip.effects["loudness"]["target_i"] == -18.0
 
 
-def test_sound_editor_advanced_lab_restores_ai_presets_and_jog_bank(tmp_path: Path) -> None:
+def test_sound_editor_advanced_lab_knobs_are_interactive_common_knobs(tmp_path: Path) -> None:
+    _app()
+    from app.knob_widget import KnobWidget
+
+    audio_path = tmp_path / "advanced_knobs.wav"
+    audio_path.write_bytes(b"advanced")
+    clip = AudioClip(id=83, source_path=audio_path, duration_ms=4000, trim_end_ms=4000)
+    panel = SoundEditorPanel()
+
+    panel.set_clip(clip, context_label="Timeline Audio", context_key="timeline:1:83")
+    panel._set_advanced_lab_expanded(True)
+    panel._set_advanced_lab_tab("timing")
+
+    timing_knobs = panel._lab_timing_knobs.findChildren(KnobWidget)
+    assert len(timing_knobs) == 4
+    assert panel._lab_timing_knobs.minimumHeight() >= KnobWidget.CELL_HEIGHT + 28
+
+    freq = panel._lab_timing_knobs.knob("freq")
+    threshold = panel._lab_timing_knobs.knob("threshold")
+    stretch = panel._lab_timing_knobs.knob("stretch")
+    assert freq is not None
+    assert threshold is not None
+    assert stretch is not None
+    assert freq.objectName() == "SoundLabMasterKnob"
+    assert freq.property("ledAfterglow") is True
+    assert str(freq.property("dialTextureResource")).endswith("jog_dial_metal_sparse_base.png")
+
+    freq.setValue(8200.0)
+    threshold.setValue(-24.5)
+    stretch.setValue(1.35)
+
+    assert max(getattr(freq, "_slot_glow_values", [0.0])) > 0.0
+    assert clip.effects["deesser"]["enabled"]
+    assert clip.effects["deesser"]["freq"] == 8200
+    assert clip.effects["deesser"]["threshold"] == -24.5
+    assert clip.effects["time_stretch"]["enabled"]
+    assert clip.effects["time_stretch"]["ratio"] == 1.35
+    assert panel._lab_deesser_freq._slider.value() == 8200
+    assert panel._lab_deesser_threshold._slider.value() == -245
+    assert panel._time_ratio._slider.value() == 135
+
+
+def test_sound_editor_advanced_lab_restores_ai_presets_and_uses_common_dial(tmp_path: Path) -> None:
     _app()
     audio_path = tmp_path / "ai_presets.wav"
     audio_path.write_bytes(b"ai")
@@ -282,8 +807,13 @@ def test_sound_editor_advanced_lab_restores_ai_presets_and_jog_bank(tmp_path: Pa
     panel.set_clip(clip, context_label="Timeline Audio", context_key="timeline:1:84")
     panel._set_advanced_lab_expanded(True)
 
-    assert panel.findChild(QWidget, "SoundMacroJogBank") is not None
-    assert len(panel._macro_jog_bank._specs()) == 12
+    assert panel.findChild(QWidget, "SoundMacroJogBank") is None
+    assert panel._lab_jog_shuttle.property("role") == "advanced_audio_lab_dial"
+    assert panel._lab_jog_shuttle.findChild(QPushButton) is not None
+    assert panel._lab_jog_shuttle.minimumHeight() >= 126
+    assert panel.findChild(QWidget, "SoundLabTabs") is None
+    assert panel.findChild(QWidget, "SoundLabInlineScroll") is not None
+    assert panel._lab_ai_knobs is not None
 
     panel._apply_ai_preset("Suno v3")
 
@@ -293,8 +823,14 @@ def test_sound_editor_advanced_lab_restores_ai_presets_and_jog_bank(tmp_path: Pa
     assert ai["air"] == 5.0
     assert ai["clarity"] == 60.0
     assert ai["width"] == 130.0
-    assert panel._tab_buttons["ai"].isChecked()
+    assert panel._advanced_lab_tab == "ai"
+    assert not panel._tab_buttons["ai"].isChecked()
     assert panel._ai_preset_buttons["Suno v3"].property("selected") is True
+
+    panel._lab_ai_clarity._slider.setValue(73)
+
+    assert clip.effects["ai_master"]["preset"] == "Custom"
+    assert clip.effects["ai_master"]["clarity"] == 73
 
 
 def test_sound_editor_eq_graph_updates_real_effect_state(tmp_path: Path) -> None:
@@ -448,7 +984,7 @@ def test_sound_editor_panel_exposes_legacy_detail_controls(tmp_path: Path) -> No
     assert clip.effects["delay"]["mix"] == 40.0
 
 
-def test_sound_editor_mixer_tab_edits_track_strips(tmp_path: Path) -> None:
+def test_sound_editor_mixer_dock_edits_track_strips(tmp_path: Path) -> None:
     _app()
     from types import SimpleNamespace
 
@@ -461,6 +997,7 @@ def test_sound_editor_mixer_tab_edits_track_strips(tmp_path: Path) -> None:
     changed = []
     panel.mixer_track_changed.connect(lambda track: changed.append(track.id))
 
+    panel.resize(900, 720)
     panel.set_clip(clip, track=track_a, context_label="Timeline Audio", context_key="timeline:3:15")
     panel.set_mixer_tracks([track_a, track_b], active_track_id=track_a.id)
     panel._set_tab("mixer")
@@ -475,7 +1012,14 @@ def test_sound_editor_mixer_tab_edits_track_strips(tmp_path: Path) -> None:
     strip._auto_write.setChecked(True)
     strip._type.click()
 
-    assert panel._tab_buttons["mixer"].isChecked()
+    assert "mixer" not in panel._tab_buttons
+    assert panel._tab_buttons["basic"].isChecked()
+    assert panel._mixer_dock.isHidden() is False
+    assert panel._mixer_card.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
+    assert panel._mixer_scroll.maximumWidth() > 720
+    assert panel._mixer_scroll.height() <= 234
+    assert strip.width() <= 74
+    assert strip.height() <= 226
     assert track_b.volume == 0.62
     assert track_b.pan == -0.3
     assert track_b.muted is True
