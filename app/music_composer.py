@@ -53,6 +53,14 @@ MUSIC_PERFORMANCE_FEATURES = (
     "MIDI CC1/CC11 automation for SoundFont renderers",
     "internal fallback envelope shaping",
 )
+MUSIC_AUDIO_SAFETY_PROFILE = "music_audio_output_safety_v1"
+MUSIC_AUDIO_SAFETY_FEATURES = (
+    "post-master sample-jump smoothing",
+    "isolated 5/10/25ms dropout repair",
+    "short energy surge limiting",
+    "final peak guard",
+    "before/after render_backend diagnostics",
+)
 
 
 @dataclass
@@ -3085,6 +3093,12 @@ def music_render_backend_status() -> dict[str, Any]:
             "applies_to": "sample_production MIDI/SoundFont renders and internal fallback envelopes",
             "features": list(MUSIC_PERFORMANCE_FEATURES),
         },
+        "default_audio_safety": {
+            "enabled": True,
+            "profile": MUSIC_AUDIO_SAFETY_PROFILE,
+            "applies_to": "sample_production preview mixes and rendered stems",
+            "features": list(MUSIC_AUDIO_SAFETY_FEATURES),
+        },
         "sample_production_percussion": {
             "policy": "sfz_decentsampler_drumkit_then_soundfont_bus_then_procedural_synth",
             "drum_sample_kit_ready": bool(drum_sample_kits),
@@ -4690,6 +4704,97 @@ def _soften_short_energy_surges(
         samples[start:stop] *= envelope[:, None]
 
 
+def _audio_frame_anomaly_counts(samples, *, window_ms: float) -> dict[str, Any]:
+    import numpy as np
+
+    if samples.size == 0:
+        return {"window_ms": float(window_ms), "drop_count": 0, "surge_count": 0}
+    window = max(128, int(round(SAMPLE_RATE * max(2.0, float(window_ms)) / 1000.0)))
+    frame_count = int(math.ceil(samples.shape[0] / float(window)))
+    if frame_count < 3:
+        return {"window_ms": float(window_ms), "drop_count": 0, "surge_count": 0}
+    energy = np.sqrt(np.mean(samples * samples, axis=1))
+    rms = np.zeros(frame_count, dtype=np.float32)
+    for idx in range(frame_count):
+        start = idx * window
+        stop = min(samples.shape[0], start + window)
+        if stop > start:
+            rms[idx] = float(np.sqrt(np.mean(energy[start:stop] * energy[start:stop])))
+    global_rms = float(np.sqrt(np.mean(energy * energy)))
+    drop_count = 0
+    surge_count = 0
+    for idx in range(1, frame_count - 1):
+        neighbor = float((rms[idx - 1] + rms[idx + 1]) * 0.5)
+        current = float(rms[idx])
+        if neighbor > max(0.012, global_rms * 0.35) and current > 0.0 and current < neighbor * 0.35:
+            drop_count += 1
+        if neighbor > max(0.012, global_rms * 0.18) and current > max(global_rms * 1.55, neighbor * 2.20):
+            surge_count += 1
+    return {"window_ms": float(window_ms), "drop_count": int(drop_count), "surge_count": int(surge_count)}
+
+
+def _audio_safety_report(samples, *, sample_jump_threshold: float = 0.095) -> dict[str, Any]:
+    import numpy as np
+
+    if samples.size == 0:
+        return {
+            "peak": 0.0,
+            "sample_jump_threshold": float(sample_jump_threshold),
+            "sample_jump_count": 0,
+            "max_sample_jump": 0.0,
+            "frame_anomalies": [],
+        }
+    if samples.shape[0] > 1:
+        jumps = np.max(np.abs(np.diff(samples, axis=0)), axis=1)
+        sample_jump_count = int(np.count_nonzero(jumps > float(sample_jump_threshold)))
+        max_jump = float(np.max(jumps)) if jumps.size else 0.0
+    else:
+        sample_jump_count = 0
+        max_jump = 0.0
+    return {
+        "peak": float(np.max(np.abs(samples))) if samples.size else 0.0,
+        "sample_jump_threshold": float(sample_jump_threshold),
+        "sample_jump_count": sample_jump_count,
+        "max_sample_jump": max_jump,
+        "frame_anomalies": [
+            _audio_frame_anomaly_counts(samples, window_ms=10.0),
+            _audio_frame_anomaly_counts(samples, window_ms=25.0),
+            _audio_frame_anomaly_counts(samples, window_ms=50.0),
+        ],
+    }
+
+
+def _apply_audio_output_safety_guard(samples, *, repair_micro_dropouts: bool = True) -> dict[str, Any]:
+    import numpy as np
+
+    before = _audio_safety_report(samples)
+    if samples.size:
+        _smooth_sample_jumps(samples, threshold=0.085, radius=5, passes=2)
+        _soften_short_energy_surges(samples, window_ms=10.0, ceiling_ratio=2.05, max_reduction=0.70)
+        _soften_short_energy_surges(samples, window_ms=25.0, ceiling_ratio=2.12, max_reduction=0.76)
+        if repair_micro_dropouts:
+            _repair_isolated_frame_dropouts(samples, window_ms=25.0, floor_ratio=0.45, max_gain=2.25)
+            _repair_isolated_frame_dropouts(samples, window_ms=10.0, floor_ratio=0.45, max_gain=2.25)
+            _repair_isolated_frame_dropouts(samples, window_ms=5.0, floor_ratio=0.45, max_gain=2.25)
+        _smooth_sample_jumps(samples, threshold=0.075, radius=5, passes=1)
+        peak = float(np.max(np.abs(samples))) if samples.size else 0.0
+        if peak > 0.98:
+            samples[:] = samples / peak * 0.98
+    after = _audio_safety_report(samples)
+    return {
+        "enabled": True,
+        "profile": MUSIC_AUDIO_SAFETY_PROFILE,
+        "features": list(MUSIC_AUDIO_SAFETY_FEATURES),
+        "before": before,
+        "after": after,
+        "passed": bool(
+            after.get("sample_jump_count") == 0
+            and all(int(row.get("drop_count") or 0) == 0 and int(row.get("surge_count") or 0) == 0 for row in after.get("frame_anomalies", []))
+            and float(after.get("peak") or 0.0) <= 0.98
+        ),
+    }
+
+
 def _sample_production_master(samples, *, bpm: int, key: str, prompt: str, repair_micro_dropouts: bool = False) -> None:
     import numpy as np
 
@@ -4921,6 +5026,7 @@ def _render_sample_production_preview(
         "fx": 0.54,
     }
     mix = np.zeros((length, 2), dtype=np.float32)
+    stem_audio_safety: dict[str, dict[str, Any]] = {}
     for bus_name in bus_order:
         bus_samples = buses[bus_name]
         if not np.any(bus_samples):
@@ -4933,6 +5039,7 @@ def _render_sample_production_preview(
             path = out / f"{composition.id}_{bus_name}.wav"
             stem = bus_samples.copy()
             _sample_production_master(stem, bpm=composition.bpm, key=composition.key, prompt=composition.prompt)
+            stem_audio_safety[bus_name] = _apply_audio_output_safety_guard(stem, repair_micro_dropouts=False)
             _write_wav(path, stem)
             stems[bus_name] = str(path)
         mix += bus_samples
@@ -4945,6 +5052,7 @@ def _render_sample_production_preview(
         prompt=composition.prompt,
         repair_micro_dropouts=True,
     )
+    audio_safety = _apply_audio_output_safety_guard(mix, repair_micro_dropouts=True)
     mix_path = out / f"{composition.id}_sample_production_mix.wav"
     _write_wav(mix_path, mix)
     composition.rendered_stems = stems
@@ -4988,6 +5096,8 @@ def _render_sample_production_preview(
             "one_click_ai_default": True,
         },
         "performance_profile": performance_profile,
+        "audio_safety": audio_safety,
+        "stem_audio_safety": stem_audio_safety,
         "requested_soundfont_path": str(soundfont_path or ""),
         "requested_drum_kit_path": str(drum_kit_path or ""),
         "external_bus_count": int(external_bus_count),

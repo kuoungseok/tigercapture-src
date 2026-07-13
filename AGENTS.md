@@ -193,6 +193,20 @@ contract here instead of relying only on `docs/SPEC_AR_PBR_COMPOSITOR.md`.
   `app.ar_pbr.depth_occlusion` and viewer conversion in
   `app.ar_pbr.depth_view`.
 
+## Music Lab Audio Safety Rules
+
+Generated Music Lab output is not considered ready until the renderer's
+post-master safety guard has run. For `sample_production` renders,
+`render_backend.audio_safety.profile` must be `music_audio_output_safety_v1`;
+the final `after` report should have zero sample jumps, zero isolated frame
+drops/surges, and peak at or below the final guard ceiling. If the user reports
+crackling, distorted, broken, or "깨짐" audio, do not rely on `glitch_score`
+alone: inspect the relevant bus/stem, renderer source, and role mapping.
+Fast classical solo violin is a known weak case for General MIDI/SoundFont
+lead programs, so `classical_solo_violin` lead buses must use the
+`procedural_clean_violin` bypass unless the user explicitly requests a raw
+SoundFont comparison.
+
 ## VTuber Source Visibility Rules
 
 When mapping a source person capture/video to a VRM avatar, match the visible

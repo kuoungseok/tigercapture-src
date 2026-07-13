@@ -307,6 +307,13 @@ The MVP renderer is intentionally simple and local:
   note/articulation counts, MIDI CC support, gate shaping, and internal fallback
   envelope shaping so Claude/local AI can explain why the output is not a raw
   note dump.
+  Render metadata also records `audio_safety.enabled=true`,
+  `audio_safety.profile=music_audio_output_safety_v1`, and before/after
+  sample-jump/frame-anomaly/peak diagnostics for the final mix. Rendered stems
+  carry `stem_audio_safety` reports when stems are written. A sample-production
+  result should not be treated as listening-ready if the final `after` report
+  still has sample jumps, isolated frame drops/surges, or peak above the safety
+  ceiling.
   `sample_library_policy` is user/AI selectable: `auto` and
   `sample_kit_first` try user-installed drum kits before SoundFont and internal
   fallback, `soundfont_only` skips drum-kit files and renders through
@@ -316,6 +323,10 @@ The MVP renderer is intentionally simple and local:
   `power_chord_guitar_*`, and `palm_mute_guitar_*` roles; these map to the
   sample-production `lead` bus and SoundFont overdrive/distortion guitar
   programs so speed/power-metal sketches are not rendered as generic synths.
+  Fast classical solo violin is a known weak case for General MIDI/SoundFont
+  lead programs. `classical_solo_violin` lead buses therefore bypass SoundFont
+  and render through `procedural_clean_violin` unless the user explicitly asks
+  for a raw SoundFont comparison.
 - Audio glitch diagnosis: use `tools/music_audio_glitch_probe.py` for
   non-destructive analysis before changing render code. The probe reports
   sample jumps, 10/25/50 ms frame drops/surges, spectral wobble candidates, and
@@ -549,6 +560,10 @@ full DAW editing.
 - Music/Composer UI default previews use `backend=sample_production` with
   `sample_library_policy=auto`. `tigerstudio.local_synth.v5` must stay explicit
   diagnostic-only and should not be the normal fallback for user-facing music.
+- Sample-production preview metadata must include
+  `render_backend.audio_safety.profile=music_audio_output_safety_v1`; final
+  `after` diagnostics should report zero sample jumps and zero isolated frame
+  drops/surges.
 - `music.render_to_timeline` creates audio tracks and clips from those stems.
 - `music.render_to_timeline(update_existing=true)` refreshes matching
   composition/role tracks instead of adding duplicate music lanes.

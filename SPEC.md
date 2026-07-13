@@ -176,7 +176,11 @@ Start here when changing a feature:
   preferred TTS voice such as `koharune-ami`, and `bottom_right` / `auto_fit` with
   `apply_actor_motion=true`. If the chosen Live2D target is a media-pool
   `.model3.json` asset, the action creates the actor clip before applying TTS,
-  placement, and natural head/body/breath/arm motion.
+  placement, and natural head/body/breath/arm motion. TTS dialogue rows can
+  separate spoken text from rendered subtitles: `tts_text` / `spoken_text` is
+  sent to the voice sidecar, while `subtitle_text` / `display_text` is rendered
+  on video. For quick AI/user input, a line such as `Japanese => Korean`
+  produces Japanese voice synthesis and Korean on-screen subtitles.
   Voice Lab also has a local Model Maker bridge for creating additional
   Style-Bert-VITS2 voices like the user's trained `zoe` model: actions
   `tts.model.training.plan`, `tts.model.training.execution_gate`,
@@ -441,7 +445,14 @@ Start here when changing a feature:
   route records `sample_production_articulation_expression_v1` in
   `render_backend.performance_profile`; it classifies notes by role/length,
   shapes short-note gates, writes CC1/CC11 expression automation for SoundFont
-  renders, and shapes internal fallback envelopes. `tigerstudio.local_synth.v5` is
+  renders, and shapes internal fallback envelopes. The same route now records
+  `music_audio_output_safety_v1` in `render_backend.audio_safety`; final
+  sample-production mixes and stems run a post-master safety guard for sample
+  jumps, isolated 5/10/25ms dropouts, short surges, and final peak ceiling.
+  Fast `classical_solo_violin` lead buses bypass General MIDI/SoundFont lead
+  programs and use `procedural_clean_violin` because the SoundFont violin can
+  sound broken on dense Paganini-style passages even when hard glitch metrics
+  are clean. `tigerstudio.local_synth.v5` is
   `diagnostic_only`; `tigerstudio.studio_edm.v1` is `draft_sketch`;
   `fluidsynth.soundfont.v1` is `starter_preview`;
   `tigerstudio.sample_production.v1` is

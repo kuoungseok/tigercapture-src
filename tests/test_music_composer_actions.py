@@ -109,6 +109,8 @@ def test_music_actions_compose_render_and_insert_timeline(tmp_path: Path) -> Non
     assert backends["result"]["default_studio_mastering"]["profile"] == "one_click_sample_production_studio_v1"
     assert backends["result"]["default_performance_profile"]["enabled"] is True
     assert backends["result"]["default_performance_profile"]["profile"] == "sample_production_articulation_expression_v1"
+    assert backends["result"]["default_audio_safety"]["enabled"] is True
+    assert backends["result"]["default_audio_safety"]["profile"] == "music_audio_output_safety_v1"
     assert backends["result"]["quality_tiers"]["local_synth"] == "diagnostic_only"
     assert backends["result"]["quality_tiers"]["fluidsynth_soundfont"] == "starter_preview"
     assert backends["result"]["quality_tiers"]["production_external"] == "production_candidate"
@@ -350,6 +352,10 @@ def test_sample_production_backend_renders_bus_stems(tmp_path: Path) -> None:
     assert rendered["render_backend"]["performance_profile"]["profile"] == "sample_production_articulation_expression_v1"
     assert rendered["render_backend"]["performance_profile"]["note_count"] > 0
     assert rendered["render_backend"]["performance_profile"]["articulation_counts"]
+    assert rendered["render_backend"]["audio_safety"]["enabled"] is True
+    assert rendered["render_backend"]["audio_safety"]["profile"] == "music_audio_output_safety_v1"
+    assert rendered["render_backend"]["audio_safety"]["after"]["sample_jump_count"] == 0
+    assert rendered["render_backend"]["stem_audio_safety"]
     assert mix_path.exists()
     assert mix_path.stat().st_size > 44
     assert rendered["stems"]

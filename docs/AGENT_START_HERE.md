@@ -92,6 +92,14 @@ task unless the user explicitly asks for that.
   for SoundFont renders, and shapes internal fallback envelopes. Do not return
   raw SoundFont/internal-synth audio for that path unless the user explicitly
   chooses a diagnostic comparison.
+- Sample-production renders must report
+  `render_backend.audio_safety.profile=music_audio_output_safety_v1` after the
+  post-master output safety guard runs. Treat audible crackle/distortion/"깨짐"
+  as a bus/source problem even when generic glitch checks are clean. Inspect
+  bus renderers and stems; fast `classical_solo_violin` lead material should
+  bypass General MIDI/SoundFont lead programs and use
+  `procedural_clean_violin` unless the user explicitly requests a raw
+  SoundFont comparison.
 - After editor-facing changes, run
   `.\.venv\Scripts\python.exe -m pytest tests\test_editor_architecture_rules.py -q`.
 
