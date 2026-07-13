@@ -100,7 +100,9 @@ class TtsLabPage(QWidget):
         dialogue_label.setObjectName("SoundFieldLabel")
         self._dialogue_take_edit = QPlainTextEdit(self)
         self._dialogue_take_edit.setObjectName("SoundDialogueEdit")
-        self._dialogue_take_edit.setPlaceholderText("Type dialogue here. Each line becomes a subtitle, TTS clip, mouth keys, and natural blink.")
+        self._dialogue_take_edit.setPlaceholderText(
+            "Type dialogue here. Use Japanese => Korean to speak JP while showing KR subtitles."
+        )
         self._dialogue_take_edit.setMinimumHeight(62)
         self._dialogue_take_edit.setMaximumHeight(96)
         card_layout.addWidget(dialogue_label)

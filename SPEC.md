@@ -191,11 +191,16 @@ Start here when changing a feature:
   preferred TTS voice such as `koharune-ami`, and `bottom_right` / `auto_fit` with
   `apply_actor_motion=true`. If the chosen Live2D target is a media-pool
   `.model3.json` asset, the action creates the actor clip before applying TTS,
-  placement, and natural head/body/breath/arm motion. TTS dialogue rows can
-  separate spoken text from rendered subtitles: `tts_text` / `spoken_text` is
-  sent to the voice sidecar, while `subtitle_text` / `display_text` is rendered
-  on video. For quick AI/user input, a line such as `Japanese => Korean`
-  produces Japanese voice synthesis and Korean on-screen subtitles.
+  placement, and natural head/body/breath/arm motion. When a Live2D model has
+  multiple authored `.motion3.json` entries, the dialogue take also applies an
+  authored motion storyboard after TTS lip-sync: it splits the actor clip into
+  dialogue-line ranges, assigns suitable model motions by label/intent, and
+  preserves sliced mouth/blink/parameter keys on the new clips. TTS dialogue
+  rows can separate spoken text from rendered subtitles: `tts_text` /
+  `spoken_text` is sent to the voice sidecar, while `subtitle_text` /
+  `display_text` is rendered on video. For quick AI/user input, a line such as
+  `Japanese => Korean` produces Japanese voice synthesis and Korean on-screen
+  subtitles.
   Voice Lab also has a local Model Maker bridge for creating additional
   Style-Bert-VITS2 voices like the user's trained `zoe` model: actions
   `tts.model.training.plan`, `tts.model.training.execution_gate`,

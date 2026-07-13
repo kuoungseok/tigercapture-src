@@ -90,6 +90,14 @@ instructions:
   offline but the install is valid, Voice Lab starts `server_fastapi.py`, shows
   a clear waiting message, waits for `/status` or `/models/info`, then
   continues generation.
+- Bilingual dialogue rows: display captions and spoken TTS text may differ.
+  Store the rendered caption in `subtitle_text` / `display_text` and the text
+  sent to the voice model in `tts_text` / `spoken_text`. Project subtitles keep
+  the on-screen text as `Subtitle.text`; alternate spoken text is persisted in
+  `Subtitle.style["tts_text"]`. A plain dialogue line may use
+  `Japanese => Korean`, `Japanese -> Korean`, `Japanese || Korean`, or a tab
+  separator so the TTS sidecar receives Japanese while the video subtitle shows
+  Korean.
 - Actor lip-sync: subtitle/TTS clip timing can be baked into a selected Live2D
   actor through renderable `parameter_keyframes`, using `ParamMouthOpenY` and
   `ParamMouthForm` by default. It also writes natural deterministic blink
@@ -104,9 +112,14 @@ instructions:
   natural acting layer in one operation. Unless the caller explicitly disables
   it, generated dialogue applies deterministic head/body/breath/arm parameter
   keys and prefers the model's authored idle motion so a 30-second take does
-  not remain in a static A/T pose. If a Live2D actor target is not specified,
-  the first available Live2D actor clip is used. If no actor exists, the action
-  still creates subtitles and audio and reports
+  not remain in a static A/T pose. When the selected `.model3.json` exposes
+  multiple authored `.motion3.json` entries, the action applies an authored
+  dialogue storyboard after TTS lip-sync: the actor clip is split into
+  dialogue-line ranges, each range receives a suitable model motion
+  (`Greeting`, `Talk`, `Happy`, etc. when labels are available), and sliced
+  mouth/blink/parameter keys are preserved on those new clips. If a Live2D
+  actor target is not specified, the first available Live2D actor clip is used.
+  If no actor exists, the action still creates subtitles and audio and reports
   `actor_lipsync.reason=no_live2d_actor`.
 - Dialogue take planning: `tts.dialogue.plan_actor_take` is the non-mutating
   choice surface for AI and UI. It returns Live2D target candidates, TTS voice

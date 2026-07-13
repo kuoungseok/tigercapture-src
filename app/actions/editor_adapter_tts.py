@@ -402,16 +402,23 @@ class TtsAdapterMixin:
             )
             setattr(clip, "_tts_generated", True)
             setattr(clip, "_tts_subtitle_index", int(row.get("index") or 0))
-            setattr(clip, "_tts_subtitle_text", str(row.get("text") or ""))
+            setattr(clip, "_tts_subtitle_text", str(row.get("tts_text") or row.get("text") or ""))
+            setattr(clip, "_tts_spoken_text", str(row.get("tts_text") or row.get("text") or ""))
+            setattr(clip, "_tts_display_text", str(row.get("subtitle_text") or row.get("display_text") or row.get("text") or ""))
             setattr(clip, "_tts_model_name", selected_model)
             clips.append(clip)
             self._register_media_path(media_path)
             self._sync_audio_track_ui(audio_track, created=created_track and first_sync, clip=clip)
             first_sync = False
+            spoken_text = str(row.get("tts_text") or row.get("text") or "")
+            display_text = str(row.get("subtitle_text") or row.get("display_text") or spoken_text)
             added.append(
                 {
                     "subtitle_index": int(row.get("index") or 0),
-                    "text": str(row.get("text") or ""),
+                    "text": spoken_text,
+                    "tts_text": spoken_text,
+                    "subtitle_text": display_text,
+                    "display_text": display_text,
                     "path": str(media_path.resolve()),
                     "track_id": int(getattr(audio_track, "id", 0) or 0),
                     "clip_id": int(getattr(clip, "id", 0) or 0),
@@ -674,6 +681,27 @@ class TtsAdapterMixin:
         )
         if bool(apply_actor_lipsync) and actor_track_id is None:
             tts_result["actor_lipsync"] = {"applied": False, "reason": "no_live2d_actor"}
+        authored_storyboard_result: dict[str, Any] = {"applied": False, "reason": "not_requested"}
+        if bool(apply_actor_motion) and actor_track_id is not None:
+            try:
+                actor_track, actor_clip = self._actor_track_and_clip(
+                    "live2d",
+                    int(actor_track_id),
+                    int(actor_clip_index or 0),
+                )
+                from app.live2d.dialogue_motion import apply_authored_dialogue_motion_storyboard_to_track
+
+                authored_storyboard_result = apply_authored_dialogue_motion_storyboard_to_track(
+                    actor_track,
+                    actor_clip,
+                    rows=rows,
+                )
+                if bool(authored_storyboard_result.get("applied")):
+                    self._sync_actor_tracks("live2d")
+            except Exception as exc:
+                authored_storyboard_result = {"applied": False, "reason": str(exc)}
+        if bool(apply_actor_motion):
+            motion_result["authored_storyboard"] = authored_storyboard_result
         return {
             "schema": "tigercapture.tts_dialogue_actor_take.v1",
             "dialogue_line_count": len(rows),
@@ -702,12 +730,25 @@ class TtsAdapterMixin:
                             or 1
                         ),
                     )
+                    spoken_text = str(
+                        getattr(clip, "_tts_spoken_text", None)
+                        or getattr(clip, "_tts_subtitle_text", "")
+                        or ""
+                    )
+                    display_text = str(
+                        getattr(clip, "_tts_display_text", None)
+                        or getattr(clip, "_tts_subtitle_text", "")
+                        or spoken_text
+                    )
                     rows.append(
                         {
                             "subtitle_index": int(getattr(clip, "_tts_subtitle_index", len(rows)) or 0),
                             "timeline_in_ms": start_ms,
                             "duration_ms": duration_ms,
-                            "text": str(getattr(clip, "_tts_subtitle_text", "") or ""),
+                            "text": spoken_text,
+                            "tts_text": spoken_text,
+                            "subtitle_text": display_text,
+                            "display_text": display_text,
                             "clip_id": int(getattr(clip, "id", 0) or 0),
                             "audio_track_id": int(getattr(audio_track, "id", 0) or 0),
                         }
@@ -740,19 +781,35 @@ class TtsAdapterMixin:
         if lines:
             source_lines = [dict(row) for row in lines if isinstance(row, Mapping)]
         else:
-            source_lines = [{"text": text.strip()} for text in str(dialogue_text or "").splitlines() if text.strip()]
+            source_lines = [
+                self._tts_dialogue_line_mapping(text.strip())
+                for text in str(dialogue_text or "").splitlines()
+                if text.strip()
+            ]
 
         rows: list[dict[str, Any]] = []
+        from app.tts_subtitle_workflow import split_subtitle_tts_text
+
         for index, raw in enumerate(source_lines):
-            text = str(raw.get("text") or raw.get("dialogue") or raw.get("subtitle_text") or "").strip()
-            if not text:
+            style = dict(raw.get("style") or {})
+            base_text = str(
+                raw.get("text")
+                or raw.get("dialogue")
+                or raw.get("tts_text")
+                or raw.get("spoken_text")
+                or raw.get("subtitle_text")
+                or raw.get("display_text")
+                or ""
+            ).strip()
+            display_text, tts_text = split_subtitle_tts_text(base_text, style=style, row=raw)
+            if not display_text and not tts_text:
                 continue
             row_start = int(raw.get("start_ms", raw.get("timeline_in_ms", cursor)) or cursor)
             if "end_ms" in raw:
                 row_end = max(row_start + 1, int(raw.get("end_ms") or row_start + default_duration))
                 duration = row_end - row_start
             else:
-                estimated = int(round(len(text) / cps * 1000.0)) + 450
+                estimated = int(round(len(tts_text or display_text) / cps * 1000.0)) + 450
                 duration = max(700, min(6200, int(raw.get("duration_ms", estimated) or estimated)))
                 if "duration_ms" not in raw:
                     duration = max(duration, min(3200, default_duration))
@@ -763,12 +820,28 @@ class TtsAdapterMixin:
                     "start_ms": max(0, row_start),
                     "end_ms": max(row_start + 1, row_end),
                     "duration_ms": max(1, duration),
-                    "text": text,
-                    "style": dict(raw.get("style") or {}),
+                    "text": tts_text,
+                    "tts_text": tts_text,
+                    "subtitle_text": display_text,
+                    "display_text": display_text,
+                    "style": style,
                 }
             )
             cursor = max(cursor, row_end + gap)
         return rows
+
+    @staticmethod
+    def _tts_dialogue_line_mapping(text: str) -> dict[str, str]:
+        raw = str(text or "").strip()
+        for separator in ("=>", "->", "||", "\t"):
+            if separator not in raw:
+                continue
+            spoken, display = raw.split(separator, 1)
+            spoken = spoken.strip()
+            display = display.strip()
+            if spoken and display:
+                return {"tts_text": spoken, "subtitle_text": display}
+        return {"text": raw}
 
     def _tts_dialogue_take_duration(self, rows: list[Mapping[str, Any]]) -> int:
         if not rows:
@@ -1026,12 +1099,18 @@ class TtsAdapterMixin:
         for offset, row in enumerate(rows):
             start_ms = max(0, int(row.get("start_ms", 0) or 0))
             end_ms = max(start_ms + 1, int(row.get("end_ms", start_ms + 1) or start_ms + 1))
-            text = str(row.get("text") or "").strip()
+            spoken_text = str(row.get("tts_text") or row.get("text") or "").strip()
+            display_text = str(row.get("subtitle_text") or row.get("display_text") or spoken_text).strip()
             style = dict(row.get("style") or {})
+            if spoken_text and spoken_text != display_text:
+                style.setdefault("tts_text", spoken_text)
+                style.setdefault("spoken_text", spoken_text)
+                style.setdefault("subtitle_text", display_text)
+                style.setdefault("display_text", display_text)
             if Subtitle is not None:
-                item = Subtitle(start_ms=start_ms, end_ms=end_ms, text=text, style=style)
+                item = Subtitle(start_ms=start_ms, end_ms=end_ms, text=display_text, style=style)
             else:
-                item = SimpleNamespace(start_ms=start_ms, end_ms=end_ms, text=text, style=style)
+                item = SimpleNamespace(start_ms=start_ms, end_ms=end_ms, text=display_text, style=style)
             layer = getattr(panel, "layer", None)
             add = getattr(layer, "add", None)
             if callable(add):
@@ -1043,7 +1122,17 @@ class TtsAdapterMixin:
             else:
                 raise ValueError("Subtitle panel does not expose an appendable subtitle list.")
             created_items.append(item)
-            created.append({"index": offset, "start_ms": start_ms, "end_ms": end_ms, "text": text})
+            created.append(
+                {
+                    "index": offset,
+                    "start_ms": start_ms,
+                    "end_ms": end_ms,
+                    "text": spoken_text,
+                    "tts_text": spoken_text,
+                    "subtitle_text": display_text,
+                    "display_text": display_text,
+                }
+            )
 
         refresh = getattr(panel, "_refresh_list", None)
         if callable(refresh):

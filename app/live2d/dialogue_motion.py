@@ -10,11 +10,13 @@ from __future__ import annotations
 from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
+import copy
 import json
 import math
 
 
 DIALOGUE_MOTION_SCHEMA = "tigerstudio.live2d.dialogue_motion.v1"
+AUTHORED_DIALOGUE_MOTION_STORYBOARD_SCHEMA = "tigerstudio.live2d.authored_dialogue_motion_storyboard.v1"
 
 
 BODY_MOTION_PARAMS: tuple[str, ...] = (
@@ -131,6 +133,15 @@ GESTURE_PRESETS: tuple[dict[str, Any], ...] = (
 )
 
 
+MOTION_INTENT_HINTS: dict[str, tuple[str, ...]] = {
+    "greet": ("greet", "hello", "hi", "wave", "hand", "tapbody", "tap_body", "tap"),
+    "explain": ("explain", "talk", "speak", "body", "gesture", "tapbody", "tap_body", "tap"),
+    "emphasize": ("emphasis", "emphasize", "happy", "smile", "joy", "surprise", "angry", "tap"),
+    "question": ("question", "think", "tilt", "nod", "yes"),
+    "settle": ("idle", "normal", "wait", "breath", "loop"),
+}
+
+
 def _int(value: Any, default: int = 0) -> int:
     try:
         return int(round(float(value)))
@@ -210,6 +221,361 @@ def live2d_motion_choices(model_path: str | Path) -> list[dict[str, Any]]:
             )
     choices.sort(key=lambda row: (not bool(row.get("idle")), str(row.get("label") or "").casefold()))
     return choices
+
+
+def _motion_label_text(choice: Mapping[str, Any]) -> str:
+    return " ".join(
+        str(choice.get(key) or "")
+        for key in ("group", "label", "file")
+    ).casefold().replace("-", "_").replace(" ", "_")
+
+
+def _motion_matches_intent(choice: Mapping[str, Any], intent: str) -> bool:
+    label = _motion_label_text(choice)
+    return any(token in label for token in MOTION_INTENT_HINTS.get(intent, ()))
+
+
+def _dialogue_motion_intent(row: Mapping[str, Any], *, index: int, total: int) -> str:
+    text = f"{row.get('text') or ''} {row.get('subtitle_text') or ''} {row.get('display_text') or ''}".casefold()
+    if index == 0:
+        return "greet"
+    if index >= max(0, total - 1):
+        return "settle"
+    if "?" in text or "\uff1f" in text:
+        return "question"
+    if "!" in text or "\uff01" in text:
+        return "emphasize"
+    return "explain"
+
+
+def _select_authored_motion(
+    choices: list[dict[str, Any]],
+    row: Mapping[str, Any],
+    *,
+    index: int,
+    total: int,
+    seed: int,
+) -> dict[str, Any]:
+    if not choices:
+        return {}
+    idle = [choice for choice in choices if bool(choice.get("idle"))]
+    non_idle = [choice for choice in choices if not bool(choice.get("idle"))]
+    intent = _dialogue_motion_intent(row, index=index, total=total)
+    search_pool = non_idle or choices
+    intent_order = [intent]
+    if intent == "settle":
+        intent_order.extend(["explain", "greet"])
+    elif intent != "explain":
+        intent_order.append("explain")
+    intent_order.append("greet")
+    for candidate_intent in intent_order:
+        for choice in search_pool:
+            if _motion_matches_intent(choice, candidate_intent):
+                selected = dict(choice)
+                selected["intent"] = intent
+                selected["selection_reason"] = f"label_matches_{candidate_intent}"
+                return selected
+    pool = search_pool or idle or choices
+    selected = dict(pool[(index + seed) % len(pool)])
+    selected["intent"] = intent
+    selected["selection_reason"] = "deterministic_cycle"
+    return selected
+
+
+def _row_infos_for_storyboard(
+    rows: list[Mapping[str, Any]],
+    *,
+    actor_start_ms: int,
+    actor_duration_ms: int,
+) -> list[dict[str, Any]]:
+    actor_start = max(0, int(actor_start_ms))
+    actor_end = actor_start + max(1, int(actor_duration_ms))
+    infos: list[dict[str, Any]] = []
+    for index, row in enumerate(rows):
+        start, duration = _row_start_duration(row)
+        end = start + duration
+        if end <= actor_start or start >= actor_end:
+            continue
+        infos.append(
+            {
+                "index": index,
+                "start_ms": max(actor_start, start),
+                "end_ms": min(actor_end, end),
+                "duration_ms": max(1, min(actor_end, end) - max(actor_start, start)),
+                "row": dict(row),
+            }
+        )
+    infos.sort(key=lambda item: (int(item["start_ms"]), int(item["index"])))
+    return infos
+
+
+def _dialogue_storyboard_segments(
+    rows: list[Mapping[str, Any]],
+    *,
+    actor_start_ms: int,
+    actor_duration_ms: int,
+) -> list[dict[str, Any]]:
+    actor_start = max(0, int(actor_start_ms))
+    actor_end = actor_start + max(1, int(actor_duration_ms))
+    infos = _row_infos_for_storyboard(rows, actor_start_ms=actor_start, actor_duration_ms=actor_duration_ms)
+    if not infos:
+        return [
+            {
+                "index": 0,
+                "start_ms": actor_start,
+                "end_ms": actor_end,
+                "duration_ms": actor_end - actor_start,
+                "row": {},
+            }
+        ]
+    segments: list[dict[str, Any]] = []
+    cursor = actor_start
+    for pos, info in enumerate(infos):
+        next_info = infos[pos + 1] if pos + 1 < len(infos) else None
+        if next_info is not None:
+            boundary = int((int(info["end_ms"]) + int(next_info["start_ms"])) / 2)
+            boundary = max(int(info["start_ms"]) + 1, min(actor_end, boundary))
+        else:
+            boundary = actor_end
+        start = max(actor_start, min(cursor, actor_end - 1))
+        end = max(start + 1, min(actor_end, boundary))
+        segments.append(
+            {
+                "index": int(info["index"]),
+                "start_ms": start,
+                "end_ms": end,
+                "duration_ms": end - start,
+                "row": dict(info["row"]),
+            }
+        )
+        cursor = end
+    if segments and int(segments[-1]["end_ms"]) < actor_end:
+        segments[-1]["end_ms"] = actor_end
+        segments[-1]["duration_ms"] = actor_end - int(segments[-1]["start_ms"])
+    return segments
+
+
+def build_authored_dialogue_motion_storyboard(
+    model_path: str | Path,
+    rows: Iterable[Mapping[str, Any]] | None,
+    *,
+    actor_start_ms: int = 0,
+    actor_duration_ms: int = 3000,
+) -> dict[str, Any]:
+    """Plan authored Live2D motions for dialogue-line ranges."""
+    input_rows = [dict(row) for row in (rows or []) if isinstance(row, Mapping)]
+    choices = live2d_motion_choices(model_path)
+    idle = [choice for choice in choices if bool(choice.get("idle"))]
+    base_motion = dict(idle[0] if idle else choices[0]) if choices else {}
+    seed = _text_seed(input_rows)
+    segments = _dialogue_storyboard_segments(
+        input_rows,
+        actor_start_ms=actor_start_ms,
+        actor_duration_ms=actor_duration_ms,
+    )
+    line_motions: list[dict[str, Any]] = []
+    for segment_index, segment in enumerate(segments):
+        selected = _select_authored_motion(
+            choices,
+            dict(segment.get("row") or {}),
+            index=segment_index,
+            total=len(segments),
+            seed=seed,
+        )
+        if not selected:
+            continue
+        line_motions.append(
+            {
+                "segment_index": segment_index,
+                "source_row_index": int(segment.get("index", segment_index) or segment_index),
+                "start_ms": int(segment.get("start_ms", 0) or 0),
+                "end_ms": int(segment.get("end_ms", 0) or 0),
+                "duration_ms": int(segment.get("duration_ms", 0) or 0),
+                "motion_group": str(selected.get("group") or ""),
+                "motion_idx": _int(selected.get("index"), 0),
+                "motion_label": str(selected.get("label") or ""),
+                "motion_file": str(selected.get("file") or ""),
+                "intent": str(selected.get("intent") or ""),
+                "selection_reason": str(selected.get("selection_reason") or ""),
+            }
+        )
+    return {
+        "schema": AUTHORED_DIALOGUE_MOTION_STORYBOARD_SCHEMA,
+        "available": bool(choices),
+        "model_path": str(model_path or ""),
+        "seed": seed,
+        "motion_count": len(choices),
+        "base_motion": base_motion,
+        "line_motion_count": len(line_motions),
+        "line_motions": line_motions,
+        "unique_motions_used": len({(row["motion_group"], row["motion_idx"]) for row in line_motions}),
+        "strategy": "idle_base_plus_dialogue_line_authored_motions",
+    }
+
+
+def _keyframe_time_ms(key: Any) -> int:
+    if isinstance(key, Mapping):
+        return _int(key.get("time_ms"), 0)
+    return _int(getattr(key, "time_ms", 0), 0)
+
+
+def _copy_keyframe_at_time(key: Any, time_ms: int) -> Any:
+    copied = copy.deepcopy(key)
+    if isinstance(copied, dict):
+        copied["time_ms"] = max(0, int(time_ms))
+    else:
+        try:
+            copied.time_ms = max(0, int(time_ms))
+        except Exception:
+            pass
+    return copied
+
+
+def _slice_keyframes_for_segment(keys: Iterable[Any], source_clip: Any, start_ms: int, duration_ms: int) -> list[Any]:
+    source_start = _int(getattr(source_clip, "start_ms", 0), 0)
+    rel_start = max(0, int(start_ms) - source_start)
+    rel_end = rel_start + max(1, int(duration_ms))
+    sliced: list[Any] = []
+    for key in keys or []:
+        time = _keyframe_time_ms(key)
+        if rel_start <= time <= rel_end:
+            sliced.append(_copy_keyframe_at_time(key, time - rel_start))
+    return sliced
+
+
+def _slice_parameter_tracks_for_segment(
+    tracks: Mapping[str, Any] | None,
+    source_clip: Any,
+    start_ms: int,
+    duration_ms: int,
+) -> dict[str, list[Any]]:
+    out: dict[str, list[Any]] = {}
+    if not isinstance(tracks, Mapping):
+        return out
+    for raw_param_id, raw_keys in tracks.items():
+        param_id = str(raw_param_id or "").strip()
+        if not param_id:
+            continue
+        if isinstance(raw_keys, Mapping):
+            key_rows = raw_keys.get("keyframes") or raw_keys.get("keys") or []
+        else:
+            key_rows = raw_keys or []
+        sliced = _slice_keyframes_for_segment(key_rows, source_clip, start_ms, duration_ms)
+        if sliced:
+            out[param_id] = sliced
+    return out
+
+
+def _clone_dialogue_motion_segment(source_clip: Any, segment: Mapping[str, Any], *, total: int) -> Any:
+    clip = copy.deepcopy(source_clip)
+    start_ms = int(segment.get("start_ms", getattr(source_clip, "start_ms", 0)) or 0)
+    duration_ms = max(1, int(segment.get("duration_ms", getattr(source_clip, "duration_ms", 1)) or 1))
+    clip.start_ms = start_ms
+    clip.duration_ms = duration_ms
+    clip.motion_group = str(segment.get("motion_group") or getattr(source_clip, "motion_group", "") or "")
+    clip.motion_idx = _int(segment.get("motion_idx"), _int(getattr(source_clip, "motion_idx", 0), 0))
+    clip.loop = False
+    clip.kf_pos_x = _slice_keyframes_for_segment(getattr(source_clip, "kf_pos_x", []), source_clip, start_ms, duration_ms)
+    clip.kf_pos_y = _slice_keyframes_for_segment(getattr(source_clip, "kf_pos_y", []), source_clip, start_ms, duration_ms)
+    clip.kf_scale = _slice_keyframes_for_segment(getattr(source_clip, "kf_scale", []), source_clip, start_ms, duration_ms)
+    clip.kf_opacity = _slice_keyframes_for_segment(getattr(source_clip, "kf_opacity", []), source_clip, start_ms, duration_ms)
+    if hasattr(clip, "parameter_keyframes"):
+        clip.parameter_keyframes = _slice_parameter_tracks_for_segment(
+            getattr(source_clip, "parameter_keyframes", {}),
+            source_clip,
+            start_ms,
+            duration_ms,
+        )
+    if hasattr(clip, "mocap_parameter_keyframes"):
+        clip.mocap_parameter_keyframes = _slice_parameter_tracks_for_segment(
+            getattr(source_clip, "mocap_parameter_keyframes", {}),
+            source_clip,
+            start_ms,
+            duration_ms,
+        )
+    segment_payload = {
+        "schema": AUTHORED_DIALOGUE_MOTION_STORYBOARD_SCHEMA,
+        "source": "tts_dialogue_take",
+        "segment_index": int(segment.get("segment_index", 0) or 0),
+        "segment_count": int(total),
+        "motion_group": clip.motion_group,
+        "motion_idx": clip.motion_idx,
+        "motion_label": str(segment.get("motion_label") or ""),
+        "intent": str(segment.get("intent") or ""),
+        "start_ms": start_ms,
+        "duration_ms": duration_ms,
+    }
+    clip.motion_storyboard_payload = {
+        "kind": "live2d_dialogue_motion_storyboard",
+        **segment_payload,
+    }
+    payload = dict(getattr(clip, "dialogue_motion_payload", {}) or {})
+    payload["authored_motion_storyboard_segment"] = segment_payload
+    clip.dialogue_motion_payload = payload
+    reset = getattr(clip, "reset", None)
+    if callable(reset):
+        try:
+            reset()
+        except Exception:
+            pass
+    return clip
+
+
+def apply_authored_dialogue_motion_storyboard_to_track(
+    actor_track: Any,
+    source_clip: Any,
+    rows: Iterable[Mapping[str, Any]] | None = None,
+) -> dict[str, Any]:
+    """Replace one Live2D clip with dialogue-line clips using authored motions."""
+    if actor_track is None or source_clip is None:
+        return {"applied": False, "reason": "missing_track_or_clip"}
+    actor_start = max(0, _int(getattr(source_clip, "start_ms", 0), 0))
+    actor_duration = max(1, _int(getattr(source_clip, "duration_ms", 3000), 3000))
+    plan = build_authored_dialogue_motion_storyboard(
+        str(getattr(source_clip, "model_path", "") or ""),
+        rows,
+        actor_start_ms=actor_start,
+        actor_duration_ms=actor_duration,
+    )
+    if not bool(plan.get("available")):
+        return {"applied": False, "reason": "no_authored_motions", "plan": plan}
+    line_motions = [dict(row) for row in plan.get("line_motions", []) if isinstance(row, Mapping)]
+    if len(line_motions) <= 1:
+        base_motion = dict(plan.get("base_motion") or {})
+        try:
+            source_clip.motion_group = str(base_motion.get("group") or getattr(source_clip, "motion_group", "") or "")
+            source_clip.motion_idx = _int(base_motion.get("index"), _int(getattr(source_clip, "motion_idx", 0), 0))
+        except Exception:
+            pass
+        payload = dict(getattr(source_clip, "dialogue_motion_payload", {}) or {})
+        payload["authored_motion_storyboard"] = plan
+        source_clip.dialogue_motion_payload = payload
+        return {"applied": False, "reason": "single_motion_segment", "plan": plan}
+    new_clips = [
+        _clone_dialogue_motion_segment(source_clip, segment, total=len(line_motions))
+        for segment in line_motions
+    ]
+    existing = list(getattr(actor_track, "clips", []) or [])
+    replaced = 0
+    kept = []
+    for clip in existing:
+        if clip is source_clip:
+            replaced += 1
+            continue
+        kept.append(clip)
+    if replaced <= 0:
+        return {"applied": False, "reason": "source_clip_not_in_track", "plan": plan}
+    actor_track.clips = sorted(kept + new_clips, key=lambda item: _int(getattr(item, "start_ms", 0), 0))
+    return {
+        "applied": True,
+        "schema": AUTHORED_DIALOGUE_MOTION_STORYBOARD_SCHEMA,
+        "created": len(new_clips),
+        "replaced": replaced,
+        "motion_count": int(plan.get("motion_count", 0) or 0),
+        "unique_motions_used": int(plan.get("unique_motions_used", 0) or 0),
+        "motions_used": [str(row.get("motion_label") or "") for row in line_motions],
+        "plan": plan,
+    }
 
 
 def _natural_value(param_id: str, t: float, *, seed: int, speech: float) -> float:
@@ -444,9 +810,12 @@ def apply_natural_dialogue_motion_to_clip(
 
 
 __all__ = [
+    "AUTHORED_DIALOGUE_MOTION_STORYBOARD_SCHEMA",
     "BODY_MOTION_PARAMS",
     "DIALOGUE_MOTION_SCHEMA",
+    "apply_authored_dialogue_motion_storyboard_to_track",
     "apply_natural_dialogue_motion_to_clip",
+    "build_authored_dialogue_motion_storyboard",
     "build_natural_dialogue_motion_payload",
     "live2d_motion_choices",
 ]

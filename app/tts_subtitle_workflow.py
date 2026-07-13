@@ -15,6 +15,8 @@ import re
 
 
 TTS_DIALOGUE_TRACK_NAME = "TTS Dialogue"
+TTS_TEXT_KEYS = ("tts_text", "spoken_text", "voice_text", "speech_text", "source_text")
+SUBTITLE_TEXT_KEYS = ("subtitle_text", "display_text", "caption_text", "translation_text")
 
 
 def default_tts_output_dir() -> Path:
@@ -47,14 +49,39 @@ def _subtitle_items(panel: Any) -> list[Any]:
     return list(getattr(panel, "_subtitles", []) or [])
 
 
+def _first_text(mapping: Mapping[str, Any], keys: Sequence[str]) -> str:
+    for key in keys:
+        text = str(mapping.get(key) or "").strip()
+        if text:
+            return text
+    return ""
+
+
+def split_subtitle_tts_text(
+    text: str,
+    *,
+    style: Mapping[str, Any] | None = None,
+    row: Mapping[str, Any] | None = None,
+) -> tuple[str, str]:
+    """Return ``(display_text, tts_text)`` for bilingual subtitle/TTS rows."""
+    base = str(text or "").strip()
+    style_map = dict(style or {})
+    row_map = dict(row or {})
+    display = _first_text(row_map, SUBTITLE_TEXT_KEYS) or _first_text(style_map, SUBTITLE_TEXT_KEYS) or base
+    tts = _first_text(row_map, TTS_TEXT_KEYS) or _first_text(style_map, TTS_TEXT_KEYS) or base or display
+    return display, tts
+
+
 def subtitle_rows_from_owner(owner: Any) -> list[dict[str, Any]]:
     panel = getattr(owner, "_subtitle_panel", None)
     rows: list[dict[str, Any]] = []
     for index, sub in enumerate(_subtitle_items(panel)):
-        text = str(getattr(sub, "text", "") or "").strip()
+        base_text = str(getattr(sub, "text", "") or "").strip()
+        style = dict(getattr(sub, "style", {}) or {})
+        display_text, tts_text = split_subtitle_tts_text(base_text, style=style)
         start_ms = max(0, _int(getattr(sub, "start_ms", 0), 0))
         end_ms = max(start_ms + 1, _int(getattr(sub, "end_ms", start_ms + 1), start_ms + 1))
-        if not text:
+        if not display_text and not tts_text:
             continue
         rows.append(
             {
@@ -62,8 +89,11 @@ def subtitle_rows_from_owner(owner: Any) -> list[dict[str, Any]]:
                 "start_ms": start_ms,
                 "end_ms": end_ms,
                 "duration_ms": end_ms - start_ms,
-                "text": text,
-                "style": dict(getattr(sub, "style", {}) or {}),
+                "text": tts_text,
+                "tts_text": tts_text,
+                "subtitle_text": display_text,
+                "display_text": display_text,
+                "style": style,
             }
         )
     rows.sort(key=lambda row: (_int(row.get("start_ms")), _int(row.get("index"))))
@@ -202,8 +232,9 @@ def subtitle_voice_output_path(
     batch = str(batch_id or datetime.now().strftime("%Y%m%d_%H%M%S"))
     index = max(0, _int(row.get("index"), 0))
     start = max(0, _int(row.get("start_ms"), 0))
-    text_hash = hashlib.sha1(str(row.get("text") or "").encode("utf-8", errors="ignore")).hexdigest()[:8]
-    slug = _safe_slug(str(row.get("text") or ""))
+    voice_text = str(row.get("tts_text") or row.get("text") or "")
+    text_hash = hashlib.sha1(voice_text.encode("utf-8", errors="ignore")).hexdigest()[:8]
+    slug = _safe_slug(voice_text)
     return root / batch / f"tts_sub_{index:04d}_{start:08d}_{slug}_{text_hash}.wav"
 
 
@@ -289,7 +320,7 @@ def synthesize_subtitle_rows(
     for row in source_rows:
         output_path = subtitle_voice_output_path(row, output_dir=output_dir, batch_id=batch)
         result = synthesize_style_bert_voice(
-            text=str(row.get("text") or ""),
+            text=str(row.get("tts_text") or row.get("text") or ""),
             output_path=output_path,
             endpoint=endpoint,
             model_name=model_name,
@@ -327,6 +358,7 @@ __all__ = [
     "preferred_model_name",
     "preferred_dialogue_model_name",
     "stable_synthesis_params",
+    "split_subtitle_tts_text",
     "subtitle_rows_from_owner",
     "subtitle_voice_output_path",
     "synthesize_subtitle_rows",

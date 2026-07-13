@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -213,6 +214,32 @@ def _ready_japanese_and_zoe_status():
     }
 
 
+def _fake_live2d_model_with_motions(root: Path) -> Path:
+    model_dir = root / "live2d_model"
+    motion_dir = model_dir / "motions"
+    motion_dir.mkdir(parents=True)
+    for name in ("idle_01", "greet_wave", "explain_body", "happy_emphasis"):
+        (motion_dir / f"{name}.motion3.json").write_text("{}", encoding="utf-8")
+    model_path = model_dir / "avatar.model3.json"
+    model_path.write_text(
+        json.dumps(
+            {
+                "Version": 3,
+                "FileReferences": {
+                    "Motions": {
+                        "Idle": [{"File": "motions/idle_01.motion3.json"}],
+                        "Greeting": [{"File": "motions/greet_wave.motion3.json"}],
+                        "Talk": [{"File": "motions/explain_body.motion3.json"}],
+                        "Happy": [{"File": "motions/happy_emphasis.motion3.json"}],
+                    }
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    return model_path
+
+
 def test_tts_subtitle_plan_prefers_default_koharune(monkeypatch, tmp_path):
     from app.actions import build_default_action_registry
     import app.tts_setup as tts_setup
@@ -228,6 +255,32 @@ def test_tts_subtitle_plan_prefers_default_koharune(monkeypatch, tmp_path):
     assert result["result"]["subtitle_count"] == 2
     assert result["result"]["rows"][0]["start_ms"] == 1000
     assert "tts_sub_0000_" in result["result"]["rows"][0]["output_path"]
+
+
+def test_tts_subtitle_plan_separates_japanese_voice_from_korean_caption(monkeypatch, tmp_path):
+    from app.actions import build_default_action_registry
+    import app.tts_setup as tts_setup
+
+    monkeypatch.setattr(tts_setup, "tts_provider_status", lambda: _ready_japanese_and_zoe_status())
+    owner = _TtsOwner()
+    owner._subtitle_panel._rows = [
+        SimpleNamespace(
+            start_ms=1200,
+            end_ms=3100,
+            text="\uc624\ub298\uc740 \ub3c4\ucfc4\uc758 \ubc24\uac70\ub9ac\ub97c \ub530\ub77c\uac11\ub2c8\ub2e4.",
+            style={"tts_text": "\u4eca\u65e5\u306f\u6771\u4eac\u306e\u591c\u666f\u306b\u5408\u308f\u305b\u3066\u7de8\u96c6\u3057\u307e\u3059\u3002"},
+        )
+    ]
+    registry = build_default_action_registry(owner)
+
+    result = registry.execute("tts.subtitle.plan", {"output_dir": str(tmp_path / "tts")}).to_dict()
+
+    assert result["ok"] is True
+    row = result["result"]["rows"][0]
+    assert row["text"] == "\u4eca\u65e5\u306f\u6771\u4eac\u306e\u591c\u666f\u306b\u5408\u308f\u305b\u3066\u7de8\u96c6\u3057\u307e\u3059\u3002"
+    assert row["tts_text"] == "\u4eca\u65e5\u306f\u6771\u4eac\u306e\u591c\u666f\u306b\u5408\u308f\u305b\u3066\u7de8\u96c6\u3057\u307e\u3059\u3002"
+    assert row["subtitle_text"] == "\uc624\ub298\uc740 \ub3c4\ucfc4\uc758 \ubc24\uac70\ub9ac\ub97c \ub530\ub77c\uac11\ub2c8\ub2e4."
+    assert row["display_text"] == "\uc624\ub298\uc740 \ub3c4\ucfc4\uc758 \ubc24\uac70\ub9ac\ub97c \ub530\ub77c\uac11\ub2c8\ub2e4."
 
 
 def test_tts_subtitle_generation_places_audio_clips(monkeypatch, tmp_path):
@@ -419,6 +472,43 @@ def test_live2d_dialogue_motion_adds_body_head_and_breath_keys():
     assert result["gesture_beats"][0]["gesture_id"] == "greet"
 
 
+def test_live2d_dialogue_motion_storyboards_authored_model_motions(tmp_path):
+    from app.live2d.actor_track import Live2DActorClip, Live2DActorTrack
+    from app.live2d.dialogue_motion import (
+        apply_authored_dialogue_motion_storyboard_to_track,
+        apply_natural_dialogue_motion_to_clip,
+        build_authored_dialogue_motion_storyboard,
+    )
+
+    model_path = _fake_live2d_model_with_motions(tmp_path)
+    rows = [
+        {"timeline_in_ms": 1000, "duration_ms": 1200, "text": "hello"},
+        {"timeline_in_ms": 2500, "duration_ms": 1200, "text": "explain this"},
+        {"timeline_in_ms": 4000, "duration_ms": 1000, "text": "finish!"},
+    ]
+    clip = Live2DActorClip(model_path=str(model_path), start_ms=1000, duration_ms=5000)
+    track = Live2DActorTrack(id=18, clips=[clip])
+
+    plan = build_authored_dialogue_motion_storyboard(
+        str(model_path),
+        rows,
+        actor_start_ms=clip.start_ms,
+        actor_duration_ms=clip.duration_ms,
+    )
+    apply_natural_dialogue_motion_to_clip(clip, rows=rows, interval_ms=500)
+    result = apply_authored_dialogue_motion_storyboard_to_track(track, clip, rows=rows)
+
+    assert plan["available"] is True
+    assert plan["motion_count"] == 4
+    assert plan["line_motion_count"] == 3
+    assert result["applied"] is True
+    assert result["created"] == 3
+    assert len(track.clips) == 3
+    assert {segment.motion_group for segment in track.clips} >= {"Greeting", "Talk"}
+    assert all(segment.motion_storyboard_payload["kind"] == "live2d_dialogue_motion_storyboard" for segment in track.clips)
+    assert any("ParamAngleX" in segment.parameter_keyframes for segment in track.clips)
+
+
 def test_stable_synthesis_params_infer_japanese_defaults():
     from app.tts_subtitle_workflow import preferred_dialogue_model_name, stable_synthesis_params
 
@@ -478,6 +568,34 @@ def test_tts_dialogue_plan_actor_take_uses_koharune_default_for_japanese_text(mo
     ).to_dict()
 
     assert result["ok"] is True
+    assert result["result"]["recommended"]["model_name"] == "koharune-ami"
+
+
+def test_tts_dialogue_plan_actor_take_accepts_spoken_display_pairs(monkeypatch):
+    from app.actions import build_default_action_registry
+    from app.live2d.actor_track import Live2DActorClip, Live2DActorTrack
+    import app.tts_setup as tts_setup
+
+    monkeypatch.setattr(tts_setup, "tts_provider_status", lambda: _ready_japanese_and_zoe_status())
+    owner = _TtsOwner()
+    clip = Live2DActorClip(model_path="avatar.model3.json", start_ms=0, duration_ms=9000)
+    owner._live2d_actor_tracks = [Live2DActorTrack(id=16, label="Host", clips=[clip])]
+    registry = build_default_action_registry(owner)
+
+    result = registry.execute(
+        "tts.dialogue.plan_actor_take",
+        {
+            "dialogue_text": "\u3053\u3093\u306b\u3061\u306f\u3002 => \uc548\ub155\ud558\uc138\uc694.\n"
+            "\u6620\u50cf\u306b\u5408\u308f\u305b\u3066\u58f0\u3092\u91cd\u306d\u307e\u3059\u3002 => \uc601\uc0c1\uc5d0 \ub9de\ucdb0 \ubaa9\uc18c\ub9ac\ub97c \uc5b9\uc5b4\uc694.",
+        },
+    ).to_dict()
+
+    assert result["ok"] is True
+    rows = result["result"]["dialogue"]["rows"]
+    assert rows[0]["text"] == "\u3053\u3093\u306b\u3061\u306f\u3002"
+    assert rows[0]["tts_text"] == "\u3053\u3093\u306b\u3061\u306f\u3002"
+    assert rows[0]["subtitle_text"] == "\uc548\ub155\ud558\uc138\uc694."
+    assert rows[1]["display_text"] == "\uc601\uc0c1\uc5d0 \ub9de\ucdb0 \ubaa9\uc18c\ub9ac\ub97c \uc5b9\uc5b4\uc694."
     assert result["result"]["recommended"]["model_name"] == "koharune-ami"
 
 
@@ -548,6 +666,115 @@ def test_tts_dialogue_generate_actor_take_creates_subtitles_audio_and_blink(monk
     assert any(row["value"] == 0.0 for row in clip.parameter_keyframes["ParamEyeLOpen"])
     assert clip.tts_lipsync_payload["blink_count"] >= 1
     assert owner.changes[-1] == "Generate TTS subtitle track"
+
+
+def test_tts_dialogue_generate_actor_take_speaks_japanese_and_shows_korean(monkeypatch, tmp_path):
+    from app.actions import build_default_action_registry
+    from app.live2d.actor_track import Live2DActorClip, Live2DActorTrack
+    import app.tts_setup as tts_setup
+    import app.tts_subtitle_workflow as workflow
+
+    monkeypatch.setattr(tts_setup, "tts_provider_status", lambda: _ready_japanese_and_zoe_status())
+    synthesized_rows = []
+
+    def _fake_synthesize(rows, **kwargs):
+        synthesized_rows.extend(dict(row) for row in rows)
+        generated = []
+        for idx, row in enumerate(rows):
+            path = tmp_path / f"bilingual_take_{idx}.wav"
+            path.write_bytes(b"RIFF$\x00\x00\x00WAVEfmt ")
+            generated.append(
+                {
+                    **dict(row),
+                    "path": str(path),
+                    "byte_count": path.stat().st_size,
+                    "generated_duration_ms": int(row.get("duration_ms", 900) or 900),
+                    "model_name": kwargs.get("model_name", ""),
+                    "endpoint": kwargs.get("endpoint", ""),
+                }
+            )
+        return generated
+
+    monkeypatch.setattr(workflow, "synthesize_subtitle_rows", _fake_synthesize)
+    owner = _TtsOwner()
+    clip = Live2DActorClip(model_path="avatar.model3.json", start_ms=0, duration_ms=9000)
+    owner._live2d_actor_tracks = [Live2DActorTrack(id=17, clips=[clip])]
+    registry = build_default_action_registry(owner)
+
+    result = registry.execute(
+        "tts.dialogue.generate_actor_take",
+        {
+            "dialogue_text": "\u3053\u3093\u306b\u3061\u306f\u3002 => \uc548\ub155\ud558\uc138\uc694.",
+            "output_dir": str(tmp_path / "tts"),
+            "auto_start_server": False,
+        },
+    ).to_dict()
+
+    assert result["ok"] is True
+    assert synthesized_rows[0]["text"] == "\u3053\u3093\u306b\u3061\u306f\u3002"
+    assert synthesized_rows[0]["tts_text"] == "\u3053\u3093\u306b\u3061\u306f\u3002"
+    assert synthesized_rows[0]["subtitle_text"] == "\uc548\ub155\ud558\uc138\uc694."
+    created_subtitle = owner._subtitle_panel.subtitles()[-1]
+    assert created_subtitle.text == "\uc548\ub155\ud558\uc138\uc694."
+    assert created_subtitle.style["tts_text"] == "\u3053\u3093\u306b\u3061\u306f\u3002"
+    clip_row = result["result"]["tts"]["clips"][0]
+    assert clip_row["text"] == "\u3053\u3093\u306b\u3061\u306f\u3002"
+    assert clip_row["subtitle_text"] == "\uc548\ub155\ud558\uc138\uc694."
+
+
+def test_tts_dialogue_generate_actor_take_applies_authored_live2d_motions(monkeypatch, tmp_path):
+    from app.actions import build_default_action_registry
+    from app.live2d.actor_track import Live2DActorClip, Live2DActorTrack
+    import app.tts_setup as tts_setup
+    import app.tts_subtitle_workflow as workflow
+
+    model_path = _fake_live2d_model_with_motions(tmp_path)
+    monkeypatch.setattr(tts_setup, "tts_provider_status", lambda: _ready_japanese_and_zoe_status())
+
+    def _fake_synthesize(rows, **kwargs):
+        generated = []
+        for idx, row in enumerate(rows):
+            path = tmp_path / f"authored_motion_take_{idx}.wav"
+            path.write_bytes(b"RIFF$\x00\x00\x00WAVEfmt ")
+            generated.append(
+                {
+                    **dict(row),
+                    "path": str(path),
+                    "byte_count": path.stat().st_size,
+                    "generated_duration_ms": int(row.get("duration_ms", 900) or 900),
+                    "model_name": kwargs.get("model_name", ""),
+                    "endpoint": kwargs.get("endpoint", ""),
+                }
+            )
+        return generated
+
+    monkeypatch.setattr(workflow, "synthesize_subtitle_rows", _fake_synthesize)
+    owner = _TtsOwner()
+    clip = Live2DActorClip(model_path=str(model_path), start_ms=0, duration_ms=7000)
+    owner._live2d_actor_tracks = [Live2DActorTrack(id=19, clips=[clip])]
+    registry = build_default_action_registry(owner)
+
+    result = registry.execute(
+        "tts.dialogue.generate_actor_take",
+        {
+            "dialogue_text": "こんにちは。 => 안녕하세요.\n"
+            "映像に合わせて説明します。 => 영상에 맞춰 설명합니다.\n"
+            "最後は明るく締めます！ => 마지막은 밝게 마무리합니다!",
+            "output_dir": str(tmp_path / "tts"),
+            "auto_start_server": False,
+        },
+    ).to_dict()
+
+    assert result["ok"] is True
+    payload = result["result"]
+    authored = payload["actor_motion"]["authored_storyboard"]
+    assert authored["applied"] is True
+    assert authored["created"] == 3
+    storyboard_clips = owner._live2d_actor_tracks[0].clips
+    assert len(storyboard_clips) == 3
+    assert {segment.motion_group for segment in storyboard_clips} >= {"Greeting", "Talk"}
+    assert any("ParamMouthOpenY" in segment.parameter_keyframes for segment in storyboard_clips)
+    assert all(segment.dialogue_motion_payload["authored_motion_storyboard_segment"]["schema"] for segment in storyboard_clips)
 
 
 def test_tts_dialogue_generate_actor_take_can_create_actor_from_media_pool(monkeypatch, tmp_path):
