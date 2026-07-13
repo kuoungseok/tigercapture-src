@@ -53,6 +53,7 @@ from PySide6.QtWidgets import (
 
 from app.i18n import tr
 from app.icons import app_icon, icon_size
+from app.media_asset_routing import MEDIA_POOL_ITEM_MIME_TYPE
 from app.mmd.project_tracks import MMD_MIME_TYPE
 from app.style import FONT_FAMILY, editor_scrollbar_qss
 from app.ux_feedback import apply_state_to_label, media_pool_empty_state
@@ -146,9 +147,15 @@ class _MediaPoolList(QListWidget):
         self._press_pos: QPoint | None = None
         self._press_item: QListWidgetItem | None = None
 
-    def mimeData(self, items: list[QListWidgetItem]) -> QMimeData:  # type: ignore[override]
+    def _mime_data_for_items(
+        self,
+        items: list[QListWidgetItem],
+        *,
+        include_file_urls: bool,
+    ) -> QMimeData:
         md = QMimeData()
         urls: list[QUrl] = []
+        internal_paths: list[str] = []
         performance_source = False
         vrm_avatar_paths: list[str] = []
         mmd_paths: list[str] = []
@@ -156,6 +163,7 @@ class _MediaPoolList(QListWidget):
             path = item.data(Qt.ItemDataRole.UserRole)
             kind = str(item.data(Qt.ItemDataRole.UserRole + 2) or "")
             if isinstance(path, str) and path:
+                internal_paths.append(path)
                 if kind == "R":
                     vrm_avatar_paths.append(path)
                     urls.append(QUrl.fromLocalFile(path))
@@ -166,8 +174,10 @@ class _MediaPoolList(QListWidget):
                     urls.append(QUrl.fromLocalFile(path))
             if bool(item.data(ROLE_PERFORMANCE_SOURCE)):
                 performance_source = True
-        if urls:
+        if urls and include_file_urls:
             md.setUrls(urls)
+        if internal_paths:
+            md.setData(MEDIA_POOL_ITEM_MIME_TYPE, "\n".join(internal_paths).encode("utf-8"))
         if vrm_avatar_paths:
             md.setData(VRM_AVATAR_MIME_TYPE, "\n".join(vrm_avatar_paths).encode("utf-8"))
         if mmd_paths:
@@ -175,6 +185,9 @@ class _MediaPoolList(QListWidget):
         if performance_source:
             md.setData(PERFORMANCE_SOURCE_MIME_TYPE, b"1")
         return md
+
+    def mimeData(self, items: list[QListWidgetItem]) -> QMimeData:  # type: ignore[override]
+        return self._mime_data_for_items(items, include_file_urls=True)
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -258,18 +271,66 @@ class _MediaPoolList(QListWidget):
         path = item.data(Qt.ItemDataRole.UserRole)
         if not isinstance(path, str) or not path:
             return False
-        md = self.mimeData([item])
+        # Internal drags must not expose text/uri-list.  If the event leaks
+        # outside the editor, the launcher treats file URLs as an external
+        # video drop and opens a second editor window.
+        md = self._mime_data_for_items([item], include_file_urls=False)
         if not md.formats():
             return False
         drag = QDrag(self)
         drag.setMimeData(md)
-        pm = item.icon().pixmap(THUMB_SIZE, THUMB_SIZE)
-        if pm.isNull() or pm.width() == 0 or pm.height() == 0:
-            pm = _placeholder_pixmap(THUMB_SIZE)
+        pm = self._drag_chip_pixmap(item, path)
         drag.setPixmap(pm)
-        drag.setHotSpot(QPoint(pm.width() // 2, pm.height() // 2))
+        drag.setHotSpot(QPoint(18, 18))
         drag.exec(Qt.DropAction.CopyAction)
         return True
+
+    def _drag_chip_pixmap(self, item: QListWidgetItem, path: str) -> QPixmap:
+        chip_w = 176
+        chip_h = 54
+        pm = QPixmap(chip_w, chip_h)
+        pm.fill(Qt.GlobalColor.transparent)
+
+        painter = QPainter(pm)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.setPen(QPen(QColor(124, 150, 185, 150), 1))
+        painter.setBrush(QColor(12, 18, 29, 222))
+        painter.drawRoundedRect(QRect(0, 0, chip_w - 1, chip_h - 1), 9, 9)
+
+        kind = str(item.data(Qt.ItemDataRole.UserRole + 2) or "M")
+        accent = {
+            "V": QColor(255, 112, 74),
+            "A": QColor(122, 211, 153),
+            "S": QColor(160, 181, 255),
+            "R": QColor(133, 214, 203),
+            "M": QColor(206, 174, 255),
+            "3": QColor(245, 190, 100),
+        }.get(kind, QColor(148, 163, 184))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(accent)
+        painter.drawRoundedRect(QRect(8, 9, 6, chip_h - 18), 3, 3)
+
+        thumb = item.icon().pixmap(44, 32)
+        if thumb.isNull() or thumb.width() == 0 or thumb.height() == 0:
+            thumb = _placeholder_pixmap(32).scaled(
+                QSize(44, 32),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        painter.setOpacity(0.82)
+        painter.drawPixmap(QRect(19, 11, 44, 32), thumb)
+        painter.setOpacity(1.0)
+
+        label = _compact_item_name(Path(path), max_chars=22, include_suffix=True)
+        painter.setPen(QColor(232, 238, 247))
+        painter.setFont(QFont(FONT_FAMILY, 8, QFont.Weight.DemiBold))
+        painter.drawText(QRect(72, 10, 95, 18), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, label)
+        painter.setPen(QColor(150, 166, 190))
+        painter.setFont(QFont(FONT_FAMILY, 7))
+        kind_label = {"V": "VIDEO", "A": "AUDIO", "S": "ACTOR", "R": "VRM", "M": "MMD", "3": "3D"}.get(kind, "MEDIA")
+        painter.drawText(QRect(72, 30, 95, 14), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"Add {kind_label}")
+        painter.end()
+        return pm
 
     def contextMenuEvent(self, event) -> None:
         item = self.itemAt(event.pos())

@@ -347,6 +347,50 @@ class EditingReviewAdapterMixin:
                 crf=_int(crf, 23),
             )
 
+    def capture_window_video_start(
+            self,
+            *,
+            session_id: str = "",
+            path: str = "",
+            title_contains: str = "",
+            process_contains: str = "",
+            pid: int = 0,
+            hwnd: int = 0,
+            max_duration_ms: int = 600_000,
+            fps: int = 15,
+            backend: str = "auto",
+            activate: bool = False,
+            crf: int = 23,
+        ) -> dict[str, Any]:
+            from app.window_capture import start_window_video_capture
+
+            return start_window_video_capture(
+                session_id=str(session_id or ""),
+                path=path,
+                title_contains=str(title_contains or ""),
+                process_contains=str(process_contains or ""),
+                pid=_int(pid, 0),
+                hwnd=_int(hwnd, 0),
+                max_duration_ms=_int(max_duration_ms, 600_000),
+                fps=_int(fps, 15),
+                backend=str(backend or "auto"),
+                activate=_bool(activate, False),
+                crf=_int(crf, 23),
+            )
+
+    def capture_window_video_status(self, *, session_id: str = "") -> dict[str, Any]:
+            from app.window_capture import window_video_capture_status
+
+            return window_video_capture_status(session_id=str(session_id or ""))
+
+    def capture_window_video_stop(self, *, session_id: str = "", wait_ms: int = 30_000) -> dict[str, Any]:
+            from app.window_capture import stop_window_video_capture
+
+            return stop_window_video_capture(
+                session_id=str(session_id or ""),
+                wait_ms=_int(wait_ms, 30_000),
+            )
+
     def run_review_scenario(self, *, scenario: str, params: Mapping[str, Any] | None = None) -> dict[str, Any]:
             owner = self.owner
             method = getattr(owner, "_run_review_scenario", None) if owner is not None else None

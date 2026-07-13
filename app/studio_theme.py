@@ -67,6 +67,7 @@ def paint_studio_clip_block(
     fill=None,
     highlight=None,
     edge=None,
+    vertical_inset: int | None = None,
 ) -> None:
     """Paint a media clip body with restrained catalog-style layer colors."""
     if rect.width() <= 0 or rect.height() <= 0:
@@ -77,7 +78,11 @@ def paint_studio_clip_block(
     painter.save()
     painter.setClipRect(rect)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-    inset_y = 5 if rect.height() >= 32 else max(1, rect.height() // 8)
+    inset_y = (
+        max(0, int(vertical_inset))
+        if vertical_inset is not None
+        else 5 if rect.height() >= 32 else max(1, rect.height() // 8)
+    )
     r = rect.adjusted(1, inset_y, -1, -inset_y)
 
     shadow = QRect(r)
@@ -169,18 +174,29 @@ def paint_studio_playhead(
     handle_top: int | None = None,
     show_handle: bool = True,
 ) -> None:
-    """Paint a red playhead line with a small triangular handle."""
+    """Paint a crisp red playhead line with a small triangular handle."""
     painter.save()
-    glow = QPen(_with_alpha(STUDIO_PLAYHEAD, 18), 1.6)
-    glow.setCapStyle(Qt.PenCapStyle.RoundCap)
-    painter.setPen(glow)
-    painter.drawLine(x, top, x, bottom)
-    pen = QPen(STUDIO_PLAYHEAD, 1.0)
-    pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-    painter.setPen(pen)
-    painter.drawLine(x, top, x, bottom)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, False)
+
+    x = int(round(float(x)))
+    top = int(round(float(top)))
+    bottom = int(round(float(bottom)))
+    height = max(1, bottom - top + 1)
+
+    # Draw rectangular rails instead of an antialiased round-cap pen.  The
+    # playhead is used as a precision edit reference, so the one-pixel core
+    # must stay visually sharp even over softened timeline thumbnails.
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(_with_alpha(STUDIO_PLAYHEAD, 42))
+    painter.drawRect(QRect(x - 1, top, 3, height))
+    painter.setBrush(STUDIO_PLAYHEAD)
+    painter.drawRect(QRect(x, top, 1, height))
+    painter.setBrush(QColor(255, 238, 231, 148))
+    painter.drawRect(QRect(x + 1, top, 1, height))
     if show_handle:
         y = top if handle_top is None else handle_top
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         painter.setBrush(STUDIO_PLAYHEAD)
         painter.setPen(QPen(QColor("#FF9B92"), 0.8))
         d = 4

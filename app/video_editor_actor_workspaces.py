@@ -43,6 +43,7 @@ def _show_editor(editor: Any, clip: Any, lane_row: Any, path: str, loader_name: 
 
 def insert_spine_actor_lane(owner: Any, track: Any) -> SpineActorLaneRow:
     row = SpineActorLaneRow(track)
+    row.installEventFilter(owner)
     row.set_px_per_sec(owner._px_per_sec)
     row.set_lane_index(len(getattr(owner, "_actor_lane_rows", []) or []) + 1)
     row.clip_changed.connect(owner._on_actor_clip_changed)
@@ -54,6 +55,7 @@ def insert_spine_actor_lane(owner: Any, track: Any) -> SpineActorLaneRow:
 
 def insert_live2d_actor_lane(owner: Any, track: Any) -> Live2DActorLaneRow:
     row = Live2DActorLaneRow(track)
+    row.installEventFilter(owner)
     row.set_px_per_sec(owner._px_per_sec)
     row.set_lane_index(len(getattr(owner, "_live2d_lane_rows", []) or []) + 1)
     row.clip_changed.connect(owner._on_live2d_clip_changed)

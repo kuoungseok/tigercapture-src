@@ -263,25 +263,28 @@ def _apply_catalog_color_grade(image):
     from PIL import Image, ImageEnhance
 
     graded = image.convert("RGB")
-    graded = ImageEnhance.Color(graded).enhance(1.16)
-    graded = ImageEnhance.Contrast(graded).enhance(1.12)
-    graded = ImageEnhance.Brightness(graded).enhance(1.035)
+    # Catalog evidence needs a visibly non-neutral teal/orange grade, not a
+    # barely changed correction pass. Keep this in sync with
+    # docs/review_automation/COLOR_NODE_COMPARE_PRESETS.md.
+    graded = ImageEnhance.Color(graded).enhance(1.55)
+    graded = ImageEnhance.Contrast(graded).enhance(1.22)
+    graded = ImageEnhance.Brightness(graded).enhance(0.97)
     r, g, b = graded.split()
-    r = r.point(lambda value: min(255, int(value * 1.055 + 1)))
-    g = g.point(lambda value: min(255, int(value * 1.015)))
-    b = b.point(lambda value: max(0, min(255, int(value * 0.935 - 1))))
-    return ImageEnhance.Sharpness(Image.merge("RGB", (r, g, b))).enhance(1.08)
+    r = r.point(lambda value: min(255, int(value * 1.12 + 8)))
+    g = g.point(lambda value: max(0, min(255, int(value * 1.02 - 2))))
+    b = b.point(lambda value: max(0, min(255, int(value * 0.86 - 8))))
+    return ImageEnhance.Sharpness(Image.merge("RGB", (r, g, b))).enhance(1.10)
 
 
 def _apply_catalog_node_effect(image):
     from PIL import Image, ImageChops, ImageEnhance, ImageFilter
 
     base = image.convert("RGB")
-    soft = base.filter(ImageFilter.GaussianBlur(1.8))
-    glow_source = ImageEnhance.Brightness(base).enhance(1.15).filter(ImageFilter.GaussianBlur(5.5))
+    soft = base.filter(ImageFilter.GaussianBlur(36.0))
+    glow_source = ImageEnhance.Brightness(base).enhance(1.20).filter(ImageFilter.GaussianBlur(22.0))
     glow = ImageChops.screen(base, glow_source)
-    after = Image.blend(base, soft, 0.14)
-    after = Image.blend(after, glow, 0.20)
+    after = Image.blend(base, soft, 0.62)
+    after = Image.blend(after, glow, 0.18)
     after = ImageEnhance.Color(after).enhance(1.12)
     after = ImageEnhance.Contrast(after).enhance(1.09)
 
@@ -382,6 +385,33 @@ def _record_before_after_meta(
         artifacts[f"{kind}_before_after_frame"] = frame
     artifacts[f"{kind}_before_after_contract"] = str(meta_path.resolve())
     checks[key] = bool(data.get("visible_delta")) and score >= 4.0
+    if kind == "color":
+        checks["compare_viewer_and_controls_same_frame"] = bool(
+            checks.get("viewer_compare_split")
+            and checks.get("color_dock_viewer_reforced")
+        )
+        checks["color_controls_visible"] = bool(
+            checks.get("color_dock_viewer_reforced")
+            or checks.get("color_workbench_visible")
+            or checks.get("color_scope_preview_visible")
+        )
+        checks["strong_researched_color_preset_applied"] = bool(checks[key] and score >= 8.0)
+        checks["cinematic_teal_orange_preset_applied"] = bool(checks[key] and score >= 8.0)
+    else:
+        checks["compare_viewer_and_node_controls_same_frame"] = bool(
+            checks.get("viewer_compare_split")
+            and (
+                checks.get("workbench_screenshot")
+                or checks.get("workbench_mask_screenshot")
+                or checks.get("node_graph_action_ok")
+            )
+        )
+        checks["node_or_effect_controls_visible"] = bool(
+            checks.get("workbench_screenshot")
+            or checks.get("workbench_mask_screenshot")
+            or checks.get("visible_node_count")
+        )
+        checks["strong_blur_effect_applied"] = bool(checks[key] and score >= 8.0)
 
 
 def _force_viewer_frame(
@@ -600,7 +630,7 @@ def _reference_style_node_graph() -> dict[str, Any]:
             "label": "Blur1",
             "x": -190.0,
             "y": -24.0,
-            "blur_params": {"radius": 10, "shape": "gaussian", "strength": 0.72, "enabled": True},
+            "blur_params": {"radius": 32, "shape": "gaussian", "strength": 0.86, "enabled": True},
         },
         {
             "id": "E2",

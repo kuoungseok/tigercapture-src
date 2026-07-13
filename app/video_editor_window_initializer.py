@@ -217,6 +217,22 @@ def build_editor_ui_and_finish_startup(self, source_path: Path | None) -> None:
         cleanup_hidden_qt_orphan_windows(self, "video_editor.init.build_ui_done")
     except Exception:
         pass
+    try:
+        prewarm_preview_gl = getattr(self, "_prewarm_preview_gl_surface", None)
+        if callable(prewarm_preview_gl):
+            prewarm_ok = bool(prewarm_preview_gl())
+            trace_video_editor_phase(
+                self,
+                "video_editor.init.preview_gl_prewarm",
+                ok=prewarm_ok,
+            )
+    except Exception as exc:
+        trace_video_editor_phase(
+            self,
+            "video_editor.init.preview_gl_prewarm",
+            ok=False,
+            error=f"{type(exc).__name__}: {exc}",
+        )
     self._refresh_preview_qimage_mode()
     self._startup_deferred_finished = False
 

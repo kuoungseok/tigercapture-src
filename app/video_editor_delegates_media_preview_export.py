@@ -91,6 +91,7 @@ _BINDINGS = (
     ('_qimage_from_preview_rgb', 'app.video_editor_preview_frame_workflow', '_qimage_from_preview_rgb', True),
     ('_on_frame_ready', 'app.video_editor_preview_frame_workflow', '_on_frame_ready', False),
     ('_ensure_preview_gl', 'app.video_editor_preview_frame_workflow', '_ensure_preview_gl', False),
+    ('_prewarm_preview_gl_surface', 'app.video_editor_preview_frame_workflow', '_prewarm_preview_gl_surface', False),
     ('_on_gpu_frame_ready', 'app.video_editor_preview_frame_workflow', '_on_gpu_frame_ready', False),
     ('_on_spine_gpu_overlay_failed', 'app.video_editor_preview_frame_workflow', '_on_spine_gpu_overlay_failed', False),
     ('_has_recoverable_project_state', 'app.video_editor_project_workflow', '_has_recoverable_project_state', False),

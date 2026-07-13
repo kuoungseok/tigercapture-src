@@ -210,6 +210,11 @@ def _ensure_preview_gl(self):
         from app.opengl_preview import OpenGLPreviewWidget
 
         gl = OpenGLPreviewWidget(host)
+        gl.setObjectName("EditorPreviewGL")
+        try:
+            gl.setWindowFlag(Qt.WindowType.Window, False)
+        except Exception:
+            pass
         try:
             gl.spine_overlay_failed.connect(self._on_spine_gpu_overlay_failed)
         except Exception:
@@ -223,6 +228,24 @@ def _ensure_preview_gl(self):
     except Exception:
         self._preview_gl = None
         return None
+
+
+def _prewarm_preview_gl_surface(self) -> bool:
+    """Create the editor GL preview before the top-level window is shown.
+
+    Qt 6 can recreate an already-visible native top-level window when the first
+    QOpenGLWidget is dynamically added.  Keeping the actual preview widget in
+    the hierarchy from startup moves that platform transition out of media
+    drag/drop and avoids the apparent "new window" flicker on first video drop.
+    """
+    gl = _ensure_preview_gl(self)
+    if gl is None:
+        return False
+    try:
+        self._sync_preview_gl_geometry()
+    except Exception:
+        pass
+    return True
 
 
 def _on_gpu_frame_ready(self, rgb, grade) -> None:
@@ -271,6 +294,7 @@ def _on_gpu_frame_ready(self, rgb, grade) -> None:
     if gl is None:
         return
     if not gl.isVisible():
+        self._sync_preview_gl_geometry()
         gl.show()
         self._sync_preview_gl_geometry()
     gl.set_blur(0.0)  # blur is CPU-applied; shader blur is disabled

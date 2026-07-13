@@ -195,13 +195,12 @@ class PresetInspectorPanel(QFrame):
             "QLabel#PresetInspectorTitle{color:#F0F3F7;font-size:10px;font-weight:650;}"
             "QLabel#PresetInspectorBadges{color:#B8C0CA;font-size:8px;font-weight:600;}"
         )
-        self.setMinimumHeight(120)
-        self.setMaximumHeight(136)
         root = QVBoxLayout(self)
         root.setContentsMargins(6, 6, 6, 6)
         root.setSpacing(4)
         self._swatch_slot = QWidget(self)
         self._swatch_slot.setObjectName("PresetInspectorSwatchSlot")
+        self._swatch_slot.setMinimumHeight(56)
         self._swatch_lay = QVBoxLayout(self._swatch_slot)
         self._swatch_lay.setContentsMargins(0, 0, 0, 0)
         self._swatch_lay.setSpacing(0)
@@ -219,6 +218,9 @@ class PresetInspectorPanel(QFrame):
         root.addWidget(self._badges)
         root.addWidget(self._target_strip)
         root.addWidget(self._details)
+        target_height = max(168, int(root.sizeHint().height() or 0))
+        self.setMinimumHeight(target_height)
+        self.setMaximumHeight(target_height + 10)
 
     def _replace_swatch(self, card) -> None:
         if self._swatch is not None:

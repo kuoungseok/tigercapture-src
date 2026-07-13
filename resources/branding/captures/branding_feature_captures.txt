@@ -1,0 +1,9 @@
+E:\ClaudeCodeApp\GifCam\resources\branding\captures\editor_video_timeline_actual.png
+E:\ClaudeCodeApp\GifCam\resources\branding\captures\editor_timeline_tracks_actual.png
+E:\ClaudeCodeApp\GifCam\resources\branding\captures\sound_editor_sound_lab_actual.png
+E:\ClaudeCodeApp\GifCam\resources\branding\captures\sound_editor_advanced_lab_actual.png
+E:\ClaudeCodeApp\GifCam\resources\branding\captures\composer_music_lab_actual.png
+E:\ClaudeCodeApp\GifCam\resources\branding\captures\composer_arrangement_actual.png
+E:\ClaudeCodeApp\GifCam\resources\branding\captures\live2d_actual_1.png
+E:\ClaudeCodeApp\GifCam\resources\branding\captures\live2d_actual_2.png
+E:\ClaudeCodeApp\GifCam\resources\branding\captures\live2d_actual_3.png

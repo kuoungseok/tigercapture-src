@@ -19,6 +19,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -49,7 +50,7 @@ from app.audio_tool_dock_specs import (
     AUDIO_TOOL_DOCK_ICON_HEIGHT,
     AUDIO_TOOL_DOCK_ICON_WIDTH,
 )
-from app.icons import app_icon, composer_wide_icon, icon_size, voice_lab_wide_icon
+from app.icons import app_icon, icon_size, voice_lab_wide_icon
 from app.studio_slider import StudioSlider
 from app.style import FONT_FAMILY, editor_scrollbar_qss
 from app.video_editor_actor_evidence import ArPbrEvidenceCard, Live2DActorEvidenceCard
@@ -1046,6 +1047,7 @@ class WorkbenchPanel(QWidget):
             "border-right:1px solid rgba(0,0,0,105);"
             "border-bottom:1px solid rgba(0,0,0,125);"
             f"border-radius:{AUDIO_TOOL_DOCK_BUTTON_RADIUS}px; padding:0px; margin:0px;"
+            "font-size:22px; font-weight:780;"
             "}"
             "QPushButton#ComposerDockButton:hover {"
             "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
@@ -1080,18 +1082,14 @@ class WorkbenchPanel(QWidget):
         dock.setMinimumHeight(AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT * 2 + 1)
         dock.setMaximumHeight(AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT * 2 + 1)
 
-        button = QPushButton("", dock)
+        button = QPushButton("COMPOSER", dock)
         button.setObjectName("ComposerDockButton")
         button.setCheckable(False)
-        button.setIcon(composer_wide_icon(
-            AUDIO_TOOL_DOCK_ICON_WIDTH,
-            AUDIO_TOOL_DOCK_ICON_HEIGHT,
-            color="#FFFFFF",
-        ))
-        button.setIconSize(QSize(
-            AUDIO_TOOL_DOCK_ICON_WIDTH,
-            AUDIO_TOOL_DOCK_ICON_HEIGHT,
-        ))
+        composer_font = QFont(button.font())
+        composer_font.setBold(True)
+        composer_font.setPixelSize(22)
+        composer_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 4.0)
+        button.setFont(composer_font)
         button.setMinimumHeight(AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT)
         button.setMaximumHeight(AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT)
         button.setToolTip("Open Composer")

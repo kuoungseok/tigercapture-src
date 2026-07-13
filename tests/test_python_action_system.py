@@ -392,6 +392,9 @@ def test_action_registry_exposes_safe_initial_specs():
         "capture.windows.list",
         "capture.window.screenshot",
         "capture.window.video",
+        "capture.window.video.start",
+        "capture.window.video.status",
+        "capture.window.video.stop",
         "nle.real_corpus.discover",
         "nle.real_corpus.intake_board",
         "nle.real_corpus.register",
@@ -406,6 +409,10 @@ def test_action_registry_exposes_safe_initial_specs():
     assert next(row for row in specs if row["id"] == "capture.targets")["mutates"] is False
     assert next(row for row in specs if row["id"] == "capture.window.video")["mutates"] is False
     assert next(row for row in specs if row["id"] == "capture.window.video")["requires_owner"] is False
+    assert next(row for row in specs if row["id"] == "capture.window.video.start")["requires_owner"] is False
+    assert next(row for row in specs if row["id"] == "capture.window.video.stop")["requires_owner"] is False
+    video_schema = next(row for row in specs if row["id"] == "capture.window.video")["params_schema"]
+    assert "wgc_window" in video_schema["properties"]["backend"]["enum"]
 
 
 def test_action_registry_read_only_actions_are_json_ready(tmp_path):
@@ -2149,6 +2156,8 @@ def test_low_risk_track_and_playhead_actions():
 
     audio = registry.execute("track.add", {"kind": "audio", "name": "Dialogue"}).to_dict()
     zoom = registry.execute("timeline.set_zoom", {"px_per_sec": 180}).to_dict()
+    pan = registry.execute("timeline.pan", {"delta_px": 320}).to_dict()
+    pan_abs = registry.execute("timeline.pan", {"scroll_px": 40}).to_dict()
     fit = registry.execute("timeline.fit").to_dict()
     playhead = registry.execute("timeline.set_playhead", {"ms": 2400}).to_dict()
     undo = registry.execute("history.undo").to_dict()
@@ -2159,6 +2168,10 @@ def test_low_risk_track_and_playhead_actions():
     assert owner._audio_tracks[-1].label == "Dialogue"
     assert zoom["ok"] is True
     assert zoom["result"]["px_per_sec"] == 180.0
+    assert pan["ok"] is True
+    assert pan["result"]["scroll"] == 320
+    assert pan_abs["ok"] is True
+    assert pan_abs["result"]["scroll"] == 40
     assert fit["ok"] is True
     assert fit["result"]["px_per_sec"] == 190.0
     assert owner.ensure_visible_count == 1
@@ -4569,6 +4582,89 @@ def test_external_window_capture_actions_are_ownerless(tmp_path, monkeypatch):
     assert video["ok"] is True
     assert video_path.exists()
     assert video["result"]["encoder"] == "ffmpeg_rawvideo_libx264"
+
+
+def test_external_window_capture_session_actions_are_ownerless(tmp_path, monkeypatch):
+    from app.actions import build_default_action_registry
+    import app.window_capture as window_capture
+
+    calls: list[tuple[str, dict]] = []
+
+    def fake_start_window_video_capture(**kwargs):
+        calls.append(("start", dict(kwargs)))
+        Path(kwargs["path"]).parent.mkdir(parents=True, exist_ok=True)
+        return {
+            "schema": "tigerstudio.capture.window_video_session.v1",
+            "session_id": kwargs["session_id"],
+            "status": "recording",
+            "path": str(Path(kwargs["path"]).resolve()),
+            "max_duration_ms": int(kwargs["max_duration_ms"]),
+            "fps": int(kwargs["fps"]),
+            "backend": kwargs["backend"],
+            "stop_policy": "call capture.window.video.stop; hard timeout stops at max_duration_ms",
+            "window": {"hwnd": kwargs["hwnd"], "title": "Unreal Editor"},
+        }
+
+    def fake_window_video_capture_status(**kwargs):
+        calls.append(("status", dict(kwargs)))
+        return {
+            "schema": "tigerstudio.capture.window_video_session_status.v1",
+            "count": 1,
+            "sessions": [
+                {
+                    "session_id": kwargs["session_id"],
+                    "status": "recording",
+                    "running": True,
+                    "path": str(tmp_path / "unreal.mp4"),
+                }
+            ],
+        }
+
+    def fake_stop_window_video_capture(**kwargs):
+        calls.append(("stop", dict(kwargs)))
+        return {
+            "schema": "tigerstudio.capture.window_video_session_status.v1",
+            "count": 1,
+            "sessions": [
+                {
+                    "session_id": kwargs["session_id"],
+                    "status": "stopped",
+                    "running": False,
+                    "path": str(tmp_path / "unreal.mp4"),
+                    "result": {"stopped_by": "request"},
+                }
+            ],
+        }
+
+    monkeypatch.setattr(window_capture, "start_window_video_capture", fake_start_window_video_capture)
+    monkeypatch.setattr(window_capture, "window_video_capture_status", fake_window_video_capture_status)
+    monkeypatch.setattr(window_capture, "stop_window_video_capture", fake_stop_window_video_capture)
+
+    registry = build_default_action_registry(None)
+    started = registry.execute(
+        "capture.window.video.start",
+        {
+            "session_id": "unreal-terrain",
+            "path": str(tmp_path / "unreal.mp4"),
+            "hwnd": 777,
+            "max_duration_ms": 600000,
+            "fps": 15,
+            "backend": "visible",
+            "activate": True,
+        },
+    ).to_dict()
+    status = registry.execute("capture.window.video.status", {"session_id": "unreal-terrain"}).to_dict()
+    stopped = registry.execute("capture.window.video.stop", {"session_id": "unreal-terrain", "wait_ms": 5000}).to_dict()
+
+    assert started["ok"] is True
+    assert started["result"]["session_id"] == "unreal-terrain"
+    assert status["ok"] is True
+    assert status["result"]["sessions"][0]["running"] is True
+    assert stopped["ok"] is True
+    assert stopped["result"]["sessions"][0]["status"] == "stopped"
+    assert calls[0][0] == "start"
+    assert calls[0][1]["hwnd"] == 777
+    assert calls[-1] == ("stop", {"session_id": "unreal-terrain", "wait_ms": 5000})
 
 
 def test_review_scenario_action_runs_report_without_editor_owner(tmp_path):

@@ -3,7 +3,7 @@
 Last updated: 2026-07-08
 
 This is the first file a new Codex, Claude, or other coding agent should read
-before touching TigerCapture review automation.
+before touching Tiger Studio review automation.
 
 Before acting, also read `../AGENT_START_HERE.md`. It is the repository-wide
 handoff index for current assumptions such as `debugCapture` being disposable,
@@ -13,7 +13,7 @@ VTuber/VSeeFace fallback stance.
 ## One-Sentence Mission
 
 Review automation creates product-catalog presentation assets that explain what
-TigerCapture/Tiger Studio can do by driving the real editor, capturing real
+Tiger Studio can do by driving the real editor, capturing real
 feature states, and placing those captures into polished PPT/HTML/catalog
 layouts.
 
@@ -47,9 +47,10 @@ Read these before planning or editing:
 8. `FULL_PRODUCT_CATALOG_TALK_TRACK.md`
 9. `PRODUCT_CATALOG_PT_SCENARIO.md`
 10. `COMPARISON_TEMPLATE_RULES.md`
-11. `MULTI_MONITOR_RULES.md`
-12. `TEMPLATE_ASSET_MANIFEST.md`
-13. `REVIEW_AUTOMATION_TODO.md`
+11. `COLOR_NODE_COMPARE_PRESETS.md`
+12. `MULTI_MONITOR_RULES.md`
+13. `TEMPLATE_ASSET_MANIFEST.md`
+14. `REVIEW_AUTOMATION_TODO.md`
 
 Expanded references:
 
@@ -67,7 +68,7 @@ Expanded references:
 - Do not use AI-generated editor scenes as proof of features.
 - Do not attach or insert decorative/new generated images outside the already
   selected laptop and multi-monitor templates. Product-facing imagery must be
-  either the fixed approved templates or real TigerCapture editor captures,
+  either the fixed approved templates or real Tiger Studio editor captures,
   except for the approved final `Specification Index` bonsai object documented
   in `PURPOSE_RULES.md` and `FULL_PRODUCT_CATALOG_MANIFEST.md`.
 - Final PPT generation must not use old screenshots from historical capture
@@ -104,17 +105,17 @@ Expanded references:
   `E:\ClaudeCodeApp\ReviewAutomationWorkspace\source_assets\templates`.
 - Do not delete generated output broadly. If asked to remove PPTs, filter by
   exact extension with `Where-Object { $_.Extension -in '.ppt', '.pptx' }`.
-- The full product catalog is a locked 22-slide scenario defined in
+- The full product catalog is a locked 23-slide scenario defined in
   `FULL_PRODUCT_CATALOG_MANIFEST.md`. Do not add, remove, split, merge, or
   reorder those slides unless the user changes that manifest first.
-- Slide 22 is the final `Specification Index` page. It uses dense micro-spec
+- Slide 23 is the final `Specification Index` page. It uses dense micro-spec
   text and the approved blue-pot bonsai cutout only as a closing-page object. The
   bonsai is not feature evidence. Reject visible white halos, checkerboard
   remnants, background strips, or a large pasted-object drop shadow.
   Shadow mode is locked to `pot_contact_only`: only a subtle contact shadow
   under the pot base is allowed. Left subtitle/body text must wrap inside the
   left text column and never overlap the central micro-spec columns.
-- Slide 22 visible spec groups come from
+- Slide 23 visible spec groups come from
   `docs/review_automation/spec_index_groups.json`, not from improvised slide
   copy. Before regenerating the catalog, update that source from the latest
   `SPEC.md`, `TODO.md`, and relevant `docs/SPEC_*.md` changes. It must cover
@@ -125,6 +126,11 @@ Expanded references:
 - Slide 4 is `PPT Maker / Timeline-Native Presentation Studio`. It must use
   actual `.tgppt` / `app.pptgen` evidence and must not be folded into AI,
   export, or generic editor overview pages.
+- Slide 14 is `Music Lab / Composition`. Music Lab is a composition feature,
+  separate from Sound Editor, EQ/dynamics, mixer, waveform editing, and generic
+  audio pages. Its evidence must show prompt composition, sections, chords,
+  MIDI/notes, preview mix, or render-to-timeline controls from the real current
+  UI.
 - MMD catalog evidence must never use the first frame. Use a middle/active
   motion frame so the character reads as animated, not a static thumbnail. The
   semantic capture contract must explicitly include `first_frame_used=false`,
@@ -136,10 +142,24 @@ Expanded references:
   compare sidecar contract, and visibly differ from the original. If the agent
   does not know suitable preset values, it must research real preset values and
   record that source in the capture contract before building the deck.
+- The default researched color comparison preset is
+  `cinematic_teal_orange_strong_compare_v1` from
+  `COLOR_NODE_COMPARE_PRESETS.md`. Apply its strong teal-orange target values,
+  record the source URLs in the capture report, and prove
+  `strong_researched_color_preset_applied=true`. For node/effect pages, default
+  to `Gaussian Blur` with a strong visible radius, normally 24 px and never
+  below 18 px for catalog evidence, unless a stronger implemented node is
+  explicitly documented.
+- Color grading, node graph, and node/effect pages must prefer the
+  comparison-workbench composition: one real full editor/window screenshot where
+  the left Viewer shows `Before`/`After` or `Split` with a visible divider and
+  the right/workbench side shows the actual color/node/effect controls that
+  produced the result. Separate pasted screenshots, comparison-only popouts,
+  controls-only panels, and iPad crops are not valid main evidence.
 - Each full-catalog page's screen composition, template, capture source,
   action/capture method, and rejection criteria are defined in
   `FULL_PRODUCT_CATALOG_PAGE_PLAN.md`.
-- The Korean presenter narration for the locked 22-slide deck is defined in
+- The Korean presenter narration for the locked 23-slide deck is defined in
   `FULL_PRODUCT_CATALOG_TALK_TRACK.md`. Use it as speaker-note guidance, not as
   visible slide body text.
 
@@ -217,7 +237,9 @@ Before generation:
 9. iPad/detail frames must explain the selected feature, not repeat the whole
    editor. For Color Grading, the iPad must show only color controls such as
    wheels, curves, scopes, tone controls, or sliders. It must not include the
-   video viewer, media pool, or timeline.
+   video viewer, media pool, or timeline. If that color detail does not add
+   meaning beyond the main comparison-workbench capture, omit the iPad and use
+   the laptop-only layout.
 10. iPad/detail frames are optional. If there is no feature-specific detail
    worth showing, use the laptop-only template. Never duplicate the laptop
    screen into the iPad just to fill the device frame.
@@ -272,7 +294,9 @@ Every feature page needs a screenshot that visibly matches the feature:
   review-generated track art.
 - Cut/edit: zoomed timeline, selected clip, cut marker or edit boundary.
 - Color: real footage plus grading controls, scopes, or before/after.
-- Node graph: connected nodes plus selected node parameters.
+- Node graph: connected nodes plus selected node parameters, with a visible
+  before/after or split Viewer result in the same workbench capture whenever the
+  page claims an effect result.
 - Audio: waveform, mixer, sound editor, spectrum, EQ, or dynamics.
 - Comparison: use comparison templates only when the before/after state is
   visible on the canvas and the difference explains a real feature. Default to
@@ -293,7 +317,10 @@ Every feature page needs a screenshot that visibly matches the feature:
   statue/bust composited into the edit and scaled up through actions or saved
   view state. Do not use the old motorcycle debug asset for catalog evidence.
   Do not repeat the Poly Haven camera model on every 3D page; reserve the
-  camera model for camera-specific pages or fallback.
+  camera model for camera-specific pages or fallback. For the AR/PBR 3D
+  Composite catalog page, the iPad/detail frame must be the standalone AR/PBR
+  or 3D viewer for the same asset, not the composited video output, raw video
+  frame, Program Output, or a duplicate laptop/editor screen.
 - VTuber: Program Output separated from Performance Source/tracking input.
   The main laptop/monitor frame must be the full actual `VTuber Studio - Tiger
   Studio` work screen. If the page uses an iPad/detail frame, that iPad must

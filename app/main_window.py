@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from app.i18n import current_language, tr
 from app.icons import app_icon, icon_size
 from app.launcher_studio_policy import capture_to_studio_enabled
+from app.media_asset_routing import MEDIA_POOL_ITEM_MIME_TYPE
 from app.modes import CaptureMode, mode_label
 from app.paths import default_save_dir, open_in_explorer, runtime_data_dir
 from app.recent_captures import format_size, list_recent
@@ -1403,8 +1404,17 @@ class MainWindow(QMainWindow):
                 return ("audio", p)
         return None
 
+    def _is_internal_media_pool_drop(self, mime_data) -> bool:
+        try:
+            return bool(mime_data.hasFormat(MEDIA_POOL_ITEM_MIME_TYPE))
+        except Exception:
+            return False
+
     def dragEnterEvent(self, event) -> None:
         md = event.mimeData()
+        if self._is_internal_media_pool_drop(md):
+            event.ignore()
+            return
         if md.hasUrls() and self._classify_drop(md.urls()) is not None:
             event.acceptProposedAction()
             return
@@ -1412,6 +1422,9 @@ class MainWindow(QMainWindow):
 
     def dragMoveEvent(self, event) -> None:
         md = event.mimeData()
+        if self._is_internal_media_pool_drop(md):
+            event.ignore()
+            return
         if md.hasUrls() and self._classify_drop(md.urls()) is not None:
             event.acceptProposedAction()
             return
@@ -1419,6 +1432,9 @@ class MainWindow(QMainWindow):
 
     def dropEvent(self, event) -> None:
         md = event.mimeData()
+        if self._is_internal_media_pool_drop(md):
+            event.ignore()
+            return
         if md.hasUrls():
             routed = self._classify_drop(md.urls())
             if routed is not None:

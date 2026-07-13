@@ -12,6 +12,7 @@ def test_release_positioning_audit_passes_public_copy():
     assert report["summary"]["blocking_findings"] == 0
     assert report["checks"]["safe_screenstudio_language_present"] is True
     assert report["checks"]["safe_capcut_language_present"] is True
+    assert report["checks"]["safe_voice_lab_language_present"] is True
     assert report["checks"]["replacement_caveat_present"] is True
     assert report["checks"]["public_surface_coverage"] is True
 
@@ -31,6 +32,17 @@ def test_release_positioning_blocks_overstrong_competitor_claims():
         "professional_suite_grade_claim",
         "professional_nle_replacement_claim",
     }
+
+
+def test_release_positioning_blocks_overstrong_tts_claims():
+    from app.release_positioning import scan_release_positioning_text
+
+    findings = scan_release_positioning_text(
+        "TigerCapture includes a hosted TTS platform with universal voice cloning and bundled Style-Bert-VITS2.",
+        path="landing.md",
+    )
+
+    assert {row.rule_id for row in findings} == {"tts_hosted_or_universal_voice_claim"}
 
 
 def test_release_positioning_allows_guardrail_context():

@@ -641,6 +641,22 @@ def test_project_player_can_skip_qimage_for_gpu_only_preview():
         player.release()
 
 
+def test_project_player_blank_fallback_is_black_not_green():
+    player = ProjectPlayer()
+    gpu_frames = []
+    player.gpu_frame_ready.connect(lambda rgb, grade: gpu_frames.append((np.asarray(rgb).copy(), grade)))
+    try:
+        player._emit_blank()
+
+        assert len(gpu_frames) == 1
+        rgb, grade = gpu_frames[0]
+        assert grade is None
+        assert rgb.shape == (9, 16, 3)
+        assert int(rgb.max()) == 0
+    finally:
+        player.release()
+
+
 def test_project_player_emits_combined_gpu_preview_metadata_without_dropping_grade():
     player = ProjectPlayer()
     gpu_frames = []

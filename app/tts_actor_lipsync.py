@@ -52,6 +52,34 @@ def _text_activity(text: str) -> float:
 
 def _form_value(text: str) -> float:
     lowered = str(text or "").casefold()
+    rounded_vowels = (
+        "o",
+        "u",
+        "\u304a",
+        "\u3046",
+        "\u30aa",
+        "\u30a6",
+        "\uc624",
+        "\uc6b0",
+        "\uc694",
+        "\uc720",
+    )
+    wide_vowels = (
+        "i",
+        "e",
+        "\u3044",
+        "\u3048",
+        "\u30a4",
+        "\u30a8",
+        "\uc774",
+        "\uc5d0",
+        "\uc560",
+    )
+    if any(ch in lowered for ch in rounded_vowels):
+        return -0.18
+    if any(ch in lowered for ch in wide_vowels):
+        return 0.22
+    return 0.0
     if any(ch in lowered for ch in ("o", "u", "오", "우", "요")):
         return -0.18
     if any(ch in lowered for ch in ("i", "e", "이", "에", "애")):
@@ -103,6 +131,63 @@ def _dedupe_sorted_keys(keys: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return compact
 
 
+def _text_seed(rows: Iterable[Mapping[str, Any]]) -> int:
+    seed = 2166136261
+    for raw in rows or []:
+        if not isinstance(raw, Mapping):
+            continue
+        text = str(raw.get("text") or raw.get("subtitle_text") or "")
+        start, duration = _row_start_duration(raw)
+        for ch in f"{start}:{duration}:{text}":
+            seed ^= ord(ch)
+            seed = (seed * 16777619) & 0xFFFFFFFF
+    return seed or 1
+
+
+def _blink_times(duration_ms: int, *, interval_ms: int, seed: int) -> list[int]:
+    duration = max(0, int(duration_ms))
+    if duration < 900:
+        return []
+    base_interval = max(900, int(interval_ms or 3100))
+    times: list[int] = []
+    cursor = 760 + int(seed % 720)
+    index = 0
+    while cursor < duration - 110:
+        times.append(cursor)
+        wobble = ((seed >> ((index % 4) * 5)) & 0x1F) - 15
+        cursor += max(950, base_interval + wobble * 43 + (index % 3) * 170)
+        index += 1
+    return times
+
+
+def _build_blink_keys(
+    duration_ms: int,
+    *,
+    interval_ms: int,
+    blink_duration_ms: int,
+    open_value: float,
+    closed_value: float,
+    curve: str,
+    seed: int,
+) -> list[dict[str, Any]]:
+    duration = max(0, int(duration_ms))
+    if duration <= 0:
+        return []
+    open_v = _clamp(_float(open_value, 1.0), 0.0, 1.0)
+    closed_v = _clamp(_float(closed_value, 0.0), 0.0, 1.0)
+    half = max(45, min(120, _int(blink_duration_ms, 140) // 2))
+    keys: list[dict[str, Any]] = [
+        {"time_ms": 0, "value": round(open_v, 5), "curve": curve},
+    ]
+    for center in _blink_times(duration, interval_ms=interval_ms, seed=seed):
+        keys.append({"time_ms": max(0, center - half), "value": round(open_v, 5), "curve": curve})
+        keys.append({"time_ms": center, "value": round(closed_v, 5), "curve": curve})
+        keys.append({"time_ms": min(duration, center + half), "value": round(open_v, 5), "curve": curve})
+    if duration:
+        keys.append({"time_ms": duration, "value": round(open_v, 5), "curve": curve})
+    return _dedupe_sorted_keys(keys)
+
+
 def build_tts_actor_lipsync_payload(
     rows: Iterable[Mapping[str, Any]],
     *,
@@ -113,12 +198,22 @@ def build_tts_actor_lipsync_payload(
     open_value: float = 0.82,
     closed_value: float = 0.0,
     curve: str = "smoothstep",
+    include_blink: bool = True,
+    blink_left_param_id: str = "ParamEyeLOpen",
+    blink_right_param_id: str = "ParamEyeROpen",
+    blink_open_value: float = 1.0,
+    blink_closed_value: float = 0.0,
+    blink_interval_ms: int = 3100,
+    blink_duration_ms: int = 140,
 ) -> dict[str, Any]:
     """Build Live2D parameter keyframes from TTS/subtitle timeline rows."""
+    input_rows = [dict(row) for row in (rows or []) if isinstance(row, Mapping)]
     start_base = max(0, _int(actor_start_ms, 0))
     clip_duration = None if actor_duration_ms is None else max(1, _int(actor_duration_ms, 1))
     mouth_param = str(mouth_param_id or "ParamMouthOpenY").strip() or "ParamMouthOpenY"
     form_param = str(mouth_form_param_id or "ParamMouthForm").strip()
+    blink_left_param = str(blink_left_param_id or "ParamEyeLOpen").strip()
+    blink_right_param = str(blink_right_param_id or "ParamEyeROpen").strip()
     open_peak = _clamp(_float(open_value, 0.82), 0.05, 1.0)
     closed = _clamp(_float(closed_value, 0.0), 0.0, 0.2)
     curve_name = str(curve or "smoothstep")
@@ -126,7 +221,7 @@ def build_tts_actor_lipsync_payload(
     mouth_keys: list[dict[str, Any]] = []
     form_keys: list[dict[str, Any]] = []
     used_rows: list[dict[str, Any]] = []
-    for index, raw in enumerate(rows or []):
+    for index, raw in enumerate(input_rows):
         if not isinstance(raw, Mapping):
             continue
         start, duration = _row_start_duration(raw)
@@ -178,15 +273,35 @@ def build_tts_actor_lipsync_payload(
         parameter_keyframes[mouth_param] = mouth_keys
     if form_param and form_keys:
         parameter_keyframes[form_param] = _dedupe_sorted_keys(form_keys)
+    payload_duration = clip_duration if clip_duration is not None else max((row["local_end_ms"] for row in used_rows), default=0)
+    blink_count = 0
+    if bool(include_blink) and payload_duration > 0 and (blink_left_param or blink_right_param):
+        blink_keys = _build_blink_keys(
+            payload_duration,
+            interval_ms=_int(blink_interval_ms, 3100),
+            blink_duration_ms=_int(blink_duration_ms, 140),
+            open_value=_float(blink_open_value, 1.0),
+            closed_value=_float(blink_closed_value, 0.0),
+            curve=curve_name,
+            seed=_text_seed(input_rows),
+        )
+        blink_count = sum(1 for row in blink_keys if _float(row.get("value"), 1.0) <= _float(blink_closed_value, 0.0) + 0.001)
+        if blink_keys:
+            if blink_left_param:
+                parameter_keyframes[blink_left_param] = [dict(row) for row in blink_keys]
+            if blink_right_param:
+                parameter_keyframes[blink_right_param] = [dict(row) for row in blink_keys]
     return {
         "schema": TTS_ACTOR_LIPSYNC_SCHEMA,
         "ok": bool(mouth_keys),
         "mouth_param_id": mouth_param,
         "mouth_form_param_id": form_param,
+        "blink_param_ids": [param for param in (blink_left_param, blink_right_param) if param],
+        "blink_count": blink_count,
         "row_count": len(used_rows),
         "parameter_keyframes": parameter_keyframes,
         "rows": used_rows,
-        "duration_ms": clip_duration if clip_duration is not None else (max((row["local_end_ms"] for row in used_rows), default=0)),
+        "duration_ms": payload_duration,
     }
 
 

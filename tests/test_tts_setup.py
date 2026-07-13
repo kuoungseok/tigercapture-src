@@ -15,6 +15,17 @@ def _fake_style_bert_root(root: Path) -> Path:
     return root
 
 
+def _fake_style_bert_training_root(root: Path) -> Path:
+    root = _fake_style_bert_root(root)
+    tabs = root / "gradio_tabs"
+    tabs.mkdir(parents=True)
+    (tabs / "dataset.py").write_text("# fake dataset ui\n", encoding="utf-8")
+    (tabs / "train.py").write_text("# fake train ui\n", encoding="utf-8")
+    (root / "Dataset.bat").write_text("python -m gradio_tabs.dataset\n", encoding="utf-8")
+    (root / "Train.bat").write_text("python -m gradio_tabs.train\n", encoding="utf-8")
+    return root
+
+
 def test_tts_provider_status_detects_valid_sidecar(tmp_path):
     from app.tts_setup import TTS_ENV_ENDPOINT, TTS_ENV_ROOT, tts_provider_status
 
@@ -80,13 +91,86 @@ def test_tts_actions_are_registered_and_readable(tmp_path):
     assert "tts.connect_installed_sidecar" in ids
     assert "tts.server.ensure_running" in ids
     assert "tts.voice.list" in ids
+    assert "tts.model.training.plan" in ids
+    assert "tts.model.training.execution_gate" in ids
+    assert "tts.model.training.prepare_workspace" in ids
+    assert "tts.model.training.launch_dataset" in ids
+    assert "tts.model.training.launch_train" in ids
+    assert "tts.model.training.register_result" in ids
     assert "tts.subtitle.plan" in ids
     assert "tts.subtitle.generate_to_timeline" in ids
     assert "tts.subtitle.apply_actor_lipsync" in ids
+    assert "tts.dialogue.plan_actor_take" in ids
+    assert "tts.dialogue.generate_actor_take" in ids
 
     result = registry.execute("tts.install.plan", {"install_root": str(tmp_path / "tts")})
     assert result.ok is True
     assert result.result["provider_id"] == "style_bert_vits2_sidecar"
+
+
+def test_tts_model_training_plan_and_gate_use_external_sidecar_tools(tmp_path):
+    from app.tts_model_training import tts_model_training_execution_gate, tts_model_training_plan
+    from app.tts_setup import TTS_ENV_ROOT
+
+    root = _fake_style_bert_training_root(tmp_path / "Style-Bert-VITS2")
+    plan = tts_model_training_plan(model_name="Zoe Alt!", env={TTS_ENV_ROOT: str(root)})
+    gate = tts_model_training_execution_gate(model_name="Zoe Alt!", env={TTS_ENV_ROOT: str(root)})
+
+    assert plan["ready"] is True
+    assert plan["model_name"] == "Zoe_Alt"
+    assert plan["raw_audio_dir"].endswith("Data\\Zoe_Alt\\raw") or plan["raw_audio_dir"].endswith("Data/Zoe_Alt/raw")
+    assert plan["expected_model_asset_dir"].endswith("model_assets\\Zoe_Alt") or plan[
+        "expected_model_asset_dir"
+    ].endswith("model_assets/Zoe_Alt")
+    assert plan["commands"]["dataset_ui"][1:] == ["-m", "gradio_tabs.dataset"]
+    assert plan["commands"]["train_ui"][1:] == ["-m", "gradio_tabs.train"]
+    assert gate["requires_confirmation"] is True
+    assert gate["gpu_heavy"] is True
+
+
+def test_tts_model_training_prepare_workspace_copies_source_audio(tmp_path):
+    from app.tts_model_training import tts_model_training_prepare_workspace
+    from app.tts_setup import TTS_ENV_ROOT
+
+    root = _fake_style_bert_training_root(tmp_path / "Style-Bert-VITS2")
+    source = tmp_path / "voice_source"
+    source.mkdir()
+    (source / "line01.wav").write_bytes(b"RIFFfake")
+    (source / "line02.mp3").write_bytes(b"ID3fake")
+    (source / "notes.txt").write_text("skip", encoding="utf-8")
+
+    result = tts_model_training_prepare_workspace(
+        model_name="custom_voice",
+        source_audio_dir=source,
+        env={TTS_ENV_ROOT: str(root)},
+    )
+
+    raw = Path(result["raw_audio_dir"])
+    assert result["prepared"] is True
+    assert result["copied_count"] == 2
+    assert (raw / "line01.wav").is_file()
+    assert (raw / "line02.mp3").is_file()
+    assert not (raw / "notes.txt").exists()
+
+
+def test_tts_model_training_register_result_detects_completed_model(tmp_path):
+    from app.tts_model_training import tts_model_training_register_result
+    from app.tts_setup import TTS_ENV_ROOT
+
+    root = _fake_style_bert_training_root(tmp_path / "Style-Bert-VITS2")
+    model = root / "model_assets" / "custom_voice"
+    model.mkdir(parents=True)
+    (model / "config.json").write_text("{}", encoding="utf-8")
+    (model / "custom_voice.safetensors").write_text("", encoding="utf-8")
+
+    result = tts_model_training_register_result(
+        model_name="custom_voice",
+        env={TTS_ENV_ROOT: str(root)},
+    )
+
+    assert result["available"] is True
+    assert result["registered"] is True
+    assert "custom_voice" in result["models"]
 
 
 class _SubtitlePanel:
@@ -116,11 +200,20 @@ def _ready_zoe_status():
         "provider_id": "style_bert_vits2_sidecar",
         "available": True,
         "endpoint": "http://127.0.0.1:5999",
-        "root": {"model_names": ["amitaro", "zoe"]},
+        "root": {"model_names": ["amitaro", "koharune-ami", "zoe"]},
     }
 
 
-def test_tts_subtitle_plan_prefers_user_trained_zoe(monkeypatch, tmp_path):
+def _ready_japanese_and_zoe_status():
+    return {
+        "provider_id": "style_bert_vits2_sidecar",
+        "available": True,
+        "endpoint": "http://127.0.0.1:5999",
+        "root": {"model_names": ["amitaro", "jvnv-F1-jp", "jvnv-F2-jp", "koharune-ami", "zoe"]},
+    }
+
+
+def test_tts_subtitle_plan_prefers_default_koharune(monkeypatch, tmp_path):
     from app.actions import build_default_action_registry
     import app.tts_setup as tts_setup
 
@@ -131,7 +224,7 @@ def test_tts_subtitle_plan_prefers_user_trained_zoe(monkeypatch, tmp_path):
     result = registry.execute("tts.subtitle.plan", {"output_dir": str(tmp_path / "tts")}).to_dict()
 
     assert result["ok"] is True
-    assert result["result"]["model_name"] == "zoe"
+    assert result["result"]["model_name"] == "koharune-ami"
     assert result["result"]["subtitle_count"] == 2
     assert result["result"]["rows"][0]["start_ms"] == 1000
     assert "tts_sub_0000_" in result["result"]["rows"][0]["output_path"]
@@ -175,7 +268,7 @@ def test_tts_subtitle_generation_places_audio_clips(monkeypatch, tmp_path):
     ).to_dict()
 
     assert result["ok"] is True
-    assert result["result"]["model_name"] == "zoe"
+    assert result["result"]["model_name"] == "koharune-ami"
     assert result["result"]["clip_count"] == 2
     assert len(owner._audio_tracks) == 1
     track = owner._audio_tracks[0]
@@ -209,9 +302,17 @@ def test_tts_apply_actor_lipsync_bakes_live2d_mouth_keyframes():
 
     assert result["ok"] is True
     assert result["result"]["applied"] is True
-    assert result["result"]["parameter_tracks"] == ["ParamMouthOpenY", "ParamMouthForm"]
+    assert set(result["result"]["parameter_tracks"]) == {
+        "ParamMouthOpenY",
+        "ParamMouthForm",
+        "ParamEyeLOpen",
+        "ParamEyeROpen",
+    }
+    assert result["result"]["blink_count"] >= 1
     assert clip.parameter_keyframes["ParamMouthOpenY"][0]["time_ms"] == 166
     assert any(row["value"] > 0.25 for row in clip.parameter_keyframes["ParamMouthOpenY"])
+    assert any(row["value"] == 0.0 for row in clip.parameter_keyframes["ParamEyeLOpen"])
+    assert any(row["value"] == 1.0 for row in clip.parameter_keyframes["ParamEyeROpen"])
     assert clip.tts_lipsync_payload["schema"] == "tigercapture.tts_actor_lipsync.v1"
     assert owner.changes[-1] == "Apply TTS actor lip-sync"
 
@@ -262,7 +363,272 @@ def test_tts_generation_can_apply_actor_lipsync(monkeypatch, tmp_path):
     assert result["result"]["clip_count"] == 2
     assert result["result"]["actor_lipsync"]["applied"] is True
     assert "ParamMouthOpenY" in clip.parameter_keyframes
+    assert "ParamEyeLOpen" in clip.parameter_keyframes
     assert owner.changes[-1] == "Generate TTS subtitle track"
+
+
+def test_live2d_dialogue_placement_fits_visible_alpha_bounds():
+    from PIL import Image, ImageDraw
+    from app.live2d.dialogue_placement import alpha_bounds, fit_transform_from_bounds
+
+    img = Image.new("RGBA", (400, 300), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+    draw.rectangle((230, 80, 330, 285), fill=(255, 255, 255, 255))
+
+    bounds = alpha_bounds(img)
+    result = fit_transform_from_bounds(
+        bounds,
+        current_pos_x=0.5,
+        current_pos_y=0.5,
+        current_scale=1.0,
+        preset="bottom_right",
+        size_preset="auto_fit",
+        canvas_width=400,
+        canvas_height=300,
+    )
+
+    assert bounds["ok"] is True
+    assert result["measured"] is True
+    assert result["transform"]["pos_x"] > 0.63
+    assert result["transform"]["scale"] > 0.5
+    assert result["target"]["bottom_px"] > 295
+
+
+def test_live2d_dialogue_motion_adds_body_head_and_breath_keys():
+    from app.live2d.actor_track import Live2DActorClip
+    from app.live2d.dialogue_motion import apply_natural_dialogue_motion_to_clip
+
+    clip = Live2DActorClip(model_path="avatar.model3.json", start_ms=1000, duration_ms=5000)
+    result = apply_natural_dialogue_motion_to_clip(
+        clip,
+        rows=[{"timeline_in_ms": 1200, "duration_ms": 1600, "text": "こんにちは"}],
+        interval_ms=500,
+    )
+
+    assert result["schema"] == "tigerstudio.live2d.dialogue_motion.v1"
+    assert "ParamAngleX" in clip.parameter_keyframes
+    assert "ParamBodyAngleX" in clip.parameter_keyframes
+    assert "ParamBreath" in clip.parameter_keyframes
+    assert "ParamArmLA" in clip.parameter_keyframes
+    assert "ParamFaceForm" in clip.parameter_keyframes
+    assert "ParamHandAngleR" in clip.parameter_keyframes
+    assert len(clip.parameter_keyframes["ParamAngleX"]) >= 5
+    assert any(abs(row["value"]) > 6.5 for row in clip.parameter_keyframes["ParamAngleX"])
+    assert any(row["value"] > 1.0 for row in clip.parameter_keyframes["ParamArmLA"])
+    assert result["gesture_beats"]
+    assert result["gesture_beats"][0]["gesture_id"] == "greet"
+
+
+def test_stable_synthesis_params_infer_japanese_defaults():
+    from app.tts_subtitle_workflow import preferred_dialogue_model_name, stable_synthesis_params
+
+    rows = [{"text": "こんにちは。今日は短い動画を作ります。"}]
+    params = stable_synthesis_params(rows, model_name="zoe")
+
+    assert params["language"] == "JP"
+    assert params["sdp_ratio"] == 0.2
+    assert params["noise"] == 0.45
+    assert params["noisew"] == 0.6
+    assert params["length"] == 1.08
+    assert preferred_dialogue_model_name(_ready_japanese_and_zoe_status(), rows) == "koharune-ami"
+    assert preferred_dialogue_model_name(_ready_japanese_and_zoe_status(), rows, requested="zoe") == "zoe"
+    assert preferred_dialogue_model_name(_ready_japanese_and_zoe_status(), rows, requested="jvnv-F1-jp") == "jvnv-F1-jp"
+
+
+def test_tts_dialogue_plan_actor_take_lists_voice_actor_and_placement(monkeypatch):
+    from app.actions import build_default_action_registry
+    from app.live2d.actor_track import Live2DActorClip, Live2DActorTrack
+    import app.tts_setup as tts_setup
+
+    monkeypatch.setattr(tts_setup, "tts_provider_status", lambda: _ready_zoe_status())
+    owner = _TtsOwner()
+    clip = Live2DActorClip(model_path="avatar.model3.json", start_ms=0, duration_ms=9000)
+    owner._live2d_actor_tracks = [Live2DActorTrack(id=14, label="Host", clips=[clip])]
+    registry = build_default_action_registry(owner)
+
+    result = registry.execute(
+        "tts.dialogue.plan_actor_take",
+        {"dialogue_text": "Hello.\nSecond line."},
+    ).to_dict()
+
+    assert result["ok"] is True
+    payload = result["result"]
+    assert payload["dialogue"]["line_count"] == 2
+    assert payload["recommended"]["actor_target_id"] == "live2d:14:0"
+    assert payload["recommended"]["model_name"] == "koharune-ami"
+    assert any(row["id"] == "bottom_right" for row in payload["placement_presets"])
+    assert any(row["id"] == "auto_fit" for row in payload["size_presets"])
+    assert payload["live2d_targets"][0]["label"].startswith("Live2D")
+
+
+def test_tts_dialogue_plan_actor_take_uses_koharune_default_for_japanese_text(monkeypatch):
+    from app.actions import build_default_action_registry
+    from app.live2d.actor_track import Live2DActorClip, Live2DActorTrack
+    import app.tts_setup as tts_setup
+
+    monkeypatch.setattr(tts_setup, "tts_provider_status", lambda: _ready_japanese_and_zoe_status())
+    owner = _TtsOwner()
+    clip = Live2DActorClip(model_path="avatar.model3.json", start_ms=0, duration_ms=9000)
+    owner._live2d_actor_tracks = [Live2DActorTrack(id=15, label="Host", clips=[clip])]
+    registry = build_default_action_registry(owner)
+
+    result = registry.execute(
+        "tts.dialogue.plan_actor_take",
+        {"dialogue_text": "こんにちは。今日は短い動画を作ります。"},
+    ).to_dict()
+
+    assert result["ok"] is True
+    assert result["result"]["recommended"]["model_name"] == "koharune-ami"
+
+
+def test_tts_dialogue_generate_actor_take_creates_subtitles_audio_and_blink(monkeypatch, tmp_path):
+    from app.actions import build_default_action_registry
+    from app.live2d.actor_track import Live2DActorClip, Live2DActorTrack
+    import app.tts_setup as tts_setup
+    import app.tts_subtitle_workflow as workflow
+
+    monkeypatch.setattr(tts_setup, "tts_provider_status", lambda: _ready_zoe_status())
+
+    def _fake_synthesize(rows, **kwargs):
+        generated = []
+        for idx, row in enumerate(rows):
+            path = tmp_path / f"dialogue_take_{idx}.wav"
+            path.write_bytes(b"RIFF$\x00\x00\x00WAVEfmt ")
+            generated.append(
+                {
+                    **dict(row),
+                    "path": str(path),
+                    "byte_count": path.stat().st_size,
+                    "generated_duration_ms": int(row.get("duration_ms", 900) or 900),
+                    "model_name": kwargs.get("model_name", ""),
+                    "endpoint": kwargs.get("endpoint", ""),
+                }
+            )
+        return generated
+
+    monkeypatch.setattr(workflow, "synthesize_subtitle_rows", _fake_synthesize)
+    owner = _TtsOwner()
+    clip = Live2DActorClip(model_path="avatar.model3.json", start_ms=0, duration_ms=9000)
+    owner._live2d_actor_tracks = [Live2DActorTrack(id=14, clips=[clip])]
+    registry = build_default_action_registry(owner)
+
+    result = registry.execute(
+        "tts.dialogue.generate_actor_take",
+        {
+            "dialogue_text": "안녕, 오늘은 자동 대사 테스트야.\n눈도 자연스럽게 깜박여야 해.",
+            "output_dir": str(tmp_path / "tts"),
+            "track_name": "AI Dialogue Take",
+            "auto_start_server": False,
+        },
+    ).to_dict()
+
+    assert result["ok"] is True
+    payload = result["result"]
+    assert payload["dialogue_line_count"] == 2
+    assert payload["subtitles"]["created"] is True
+    assert payload["subtitles"]["count"] == 2
+    assert len(owner._subtitle_panel.subtitles()) == 4
+    assert payload["tts"]["clip_count"] == 2
+    assert payload["actor_lipsync"]["applied"] is True
+    assert payload["actor_target"]["track_id"] == 14
+    assert payload["placement"]["applied"] is True
+    assert payload["actor_motion"]["applied"] is True
+    assert payload["placement"]["transform"]["pos_x"] > 0.5
+    assert "ParamMouthOpenY" in clip.parameter_keyframes
+    assert "ParamEyeLOpen" in clip.parameter_keyframes
+    assert "ParamAngleX" in clip.parameter_keyframes
+    assert "ParamBodyAngleX" in clip.parameter_keyframes
+    assert "ParamBreath" in clip.parameter_keyframes
+    assert "ParamArmLA" in clip.parameter_keyframes
+    assert "ParamFaceForm" in clip.parameter_keyframes
+    assert "ParamHandAngleR" in clip.parameter_keyframes
+    assert clip.kf_pos_x
+    assert clip.dialogue_placement_payload["schema"] == "tigerstudio.live2d.dialogue_placement.v1"
+    assert clip.dialogue_motion_payload["schema"] == "tigerstudio.live2d.dialogue_motion.v1"
+    assert any(row["value"] == 0.0 for row in clip.parameter_keyframes["ParamEyeLOpen"])
+    assert clip.tts_lipsync_payload["blink_count"] >= 1
+    assert owner.changes[-1] == "Generate TTS subtitle track"
+
+
+def test_tts_dialogue_generate_actor_take_can_create_actor_from_media_pool(monkeypatch, tmp_path):
+    from app.actions import build_default_action_registry
+    import app.tts_setup as tts_setup
+    import app.tts_subtitle_workflow as workflow
+
+    model_path = tmp_path / "character.model3.json"
+    model_path.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(tts_setup, "tts_provider_status", lambda: _ready_zoe_status())
+
+    def _fake_synthesize(rows, **kwargs):
+        generated = []
+        for idx, row in enumerate(rows):
+            path = tmp_path / f"media_pool_take_{idx}.wav"
+            path.write_bytes(b"RIFF$\x00\x00\x00WAVEfmt ")
+            generated.append(
+                {
+                    **dict(row),
+                    "path": str(path),
+                    "byte_count": path.stat().st_size,
+                    "generated_duration_ms": 900,
+                    "model_name": kwargs.get("model_name", ""),
+                    "endpoint": kwargs.get("endpoint", ""),
+                }
+            )
+        return generated
+
+    class _MediaPool:
+        def media_pool_metadata(self):
+            return [{"path": str(model_path), "kind": "?"}]
+
+    monkeypatch.setattr(workflow, "synthesize_subtitle_rows", _fake_synthesize)
+    owner = _TtsOwner()
+    owner._media_pool = _MediaPool()
+    registry = build_default_action_registry(owner)
+
+    result = registry.execute(
+        "tts.dialogue.generate_actor_take",
+        {
+            "dialogue_text": "Create actor from media pool.",
+            "actor_target_id": "media_live2d:0",
+            "output_dir": str(tmp_path / "tts"),
+            "auto_start_server": False,
+        },
+    ).to_dict()
+
+    assert result["ok"] is True
+    payload = result["result"]
+    assert payload["actor_target"]["source"] == "media_pool_created_actor"
+    assert payload["actor_lipsync"]["applied"] is True
+    assert len(owner._live2d_actor_tracks) == 1
+    clip = owner._live2d_actor_tracks[0].clips[0]
+    assert clip.model_path.endswith("character.model3.json")
+    assert clip.dialogue_placement_payload["schema"] == "tigerstudio.live2d.dialogue_placement.v1"
+    assert clip.dialogue_motion_payload["schema"] == "tigerstudio.live2d.dialogue_motion.v1"
+
+
+def test_live2d_tts_lipsync_metadata_roundtrip():
+    from app.live2d.actor_track import Live2DActorClip, Live2DActorTrack
+    from app.project_io import _actor_track_to_dict, _live2d_actor_track_from_dict
+
+    clip = Live2DActorClip(model_path="avatar.model3.json", start_ms=0, duration_ms=3000)
+    clip.parameter_keyframes = {"ParamMouthOpenY": [{"time_ms": 100, "value": 0.6, "curve": "smoothstep"}]}
+    clip.tts_lipsync_payload = {
+        "schema": "tigercapture.tts_actor_lipsync.v1",
+        "blink_count": 1,
+        "parameter_keyframes": dict(clip.parameter_keyframes),
+    }
+    clip.tts_lipsync_source = "provided_rows"
+    clip.dialogue_placement_payload = {"schema": "tigerstudio.live2d.dialogue_placement.v1", "measured": True}
+    clip.dialogue_motion_payload = {"schema": "tigerstudio.live2d.dialogue_motion.v1", "style": "natural_dialogue"}
+    restored = _live2d_actor_track_from_dict(_actor_track_to_dict(Live2DActorTrack(id=22, clips=[clip])))
+
+    restored_clip = restored.clips[0]
+    assert restored_clip.parameter_keyframes["ParamMouthOpenY"][0]["value"] == 0.6
+    assert restored_clip.tts_lipsync_payload["schema"] == "tigercapture.tts_actor_lipsync.v1"
+    assert restored_clip.tts_lipsync_payload["blink_count"] == 1
+    assert restored_clip.tts_lipsync_source == "provided_rows"
+    assert restored_clip.dialogue_placement_payload["schema"] == "tigerstudio.live2d.dialogue_placement.v1"
+    assert restored_clip.dialogue_motion_payload["schema"] == "tigerstudio.live2d.dialogue_motion.v1"
 
 
 def test_tts_sidecar_ensure_reports_running_without_start(monkeypatch):
@@ -289,6 +655,33 @@ def test_tts_sidecar_ensure_reports_running_without_start(monkeypatch):
     assert result["ready"] is True
     assert result["started"] is False
     assert result["message"] == "TTS server is already running."
+
+
+def test_tts_voice_lab_qa_success_message_does_not_claim_not_ready(monkeypatch):
+    from tools import qa_tts_voice_lab
+
+    monkeypatch.setattr(
+        qa_tts_voice_lab,
+        "tts_setup_view_model",
+        lambda: {"ready": True},
+    )
+    monkeypatch.setattr(
+        qa_tts_voice_lab,
+        "ensure_tts_sidecar_running",
+        lambda **_kwargs: {
+            "ready": True,
+            "running": True,
+            "started": False,
+            "message": "TTS server is already running.",
+            "error": "",
+        },
+    )
+
+    report = qa_tts_voice_lab.build_voice_lab_qa_report()
+
+    assert report["ok"] is True
+    assert report["failures"] == []
+    assert report["user_message"] == "TTS server is already running."
 
 
 def test_tts_sidecar_ensure_auto_starts_and_waits(monkeypatch):

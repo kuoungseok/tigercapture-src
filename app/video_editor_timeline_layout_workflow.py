@@ -3,6 +3,11 @@ from __future__ import annotations
 from pathlib import Path
 
 from app.audio_tracks import is_audio_path, is_video_path
+from app.video_editor_media_import_controller import (
+    TARGET_WINDOW,
+    dispatch_import_decision,
+    route_mime_drop,
+)
 
 MIN_TRACK_WIDTH = 300
 
@@ -26,6 +31,21 @@ def dropEvent(self, event: QDropEvent) -> None:
         event.acceptProposedAction()
         return
     if not md.hasUrls():
+        try:
+            start_ms = int(getattr(self._player, "position", lambda: 0)())
+        except Exception:
+            start_ms = 0
+        decision = route_mime_drop(
+            self,
+            md,
+            target=TARGET_WINDOW,
+            start_ms=start_ms,
+            image_point=(0.5, 0.62),
+            open_audio_editor=True,
+        )
+        if decision.handled and dispatch_import_decision(self, decision):
+            event.acceptProposedAction()
+            return
         event.ignore()
         return
     ar_paths = self._ar_pbr_paths_from_mime(md)

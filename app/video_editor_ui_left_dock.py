@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QByteArray, QSettings, Qt
-from PySide6.QtWidgets import QLabel, QSizePolicy, QSplitter, QVBoxLayout, QWidget
+from PySide6.QtCore import QByteArray, QSettings, QTimer, Qt
+from PySide6.QtWidgets import QLabel, QPushButton, QSizePolicy, QSplitter, QVBoxLayout, QWidget
 
 from app.i18n import tr
 from app.media_pool import MediaPool
@@ -49,6 +49,69 @@ def _save_left_dock_sections_splitter_state(owner) -> None:
         )
     except Exception:
         pass
+
+
+def _refresh_left_secondary_sections_height(owner) -> None:
+    host = getattr(owner, "_left_secondary_sections_host", None)
+    layout = getattr(owner, "_left_secondary_sections_layout", None)
+    splitter = getattr(owner, "_left_dock_sections_splitter", None)
+    media_host = getattr(owner, "_media_pool_section_host", None)
+    if host is None or layout is None:
+        return
+    total = 0
+    visible_widgets = 0
+    try:
+        margins = layout.contentsMargins()
+        total += int(margins.top()) + int(margins.bottom())
+    except Exception:
+        pass
+    for idx in range(layout.count()):
+        item = layout.itemAt(idx)
+        widget = item.widget() if item is not None else None
+        if widget is None or not widget.isVisible():
+            continue
+        visible_widgets += 1
+        try:
+            hint = int(widget.sizeHint().height() or 0)
+        except Exception:
+            hint = 0
+        total += max(int(widget.minimumHeight() or 0), hint, int(widget.height() or 0), 38)
+    try:
+        total += max(0, int(layout.spacing())) * max(0, visible_widgets - 1)
+    except Exception:
+        pass
+    total = max(190, total)
+    try:
+        host.setMinimumHeight(total)
+        host.updateGeometry()
+    except Exception:
+        pass
+    if splitter is not None:
+        try:
+            media_min = int(media_host.minimumHeight() if media_host is not None else 0)
+        except Exception:
+            media_min = 0
+        try:
+            handle = int(splitter.handleWidth() or 0)
+        except Exception:
+            handle = 0
+        try:
+            splitter.setMinimumHeight(max(splitter.minimumHeight(), media_min + total + handle + 8))
+            sizes = list(splitter.sizes())
+            if len(sizes) >= 2 and sizes[1] < min(total, max(total, 220)):
+                splitter.setSizes([max(180, sizes[0]), max(total, sizes[1])])
+            splitter.updateGeometry()
+        except Exception:
+            pass
+
+
+def _wire_left_secondary_section_height_refresh(owner) -> None:
+    host = getattr(owner, "_left_secondary_sections_host", None)
+    if host is None:
+        return
+    for button in host.findChildren(QPushButton, "SectionDisclosure"):
+        button.toggled.connect(lambda _checked=False, _owner=owner: QTimer.singleShot(0, lambda: _refresh_left_secondary_sections_height(_owner)))
+    QTimer.singleShot(0, lambda: _refresh_left_secondary_sections_height(owner))
 
 
 def build_left_dock_sections(self) -> None:
@@ -406,6 +469,7 @@ def build_left_dock_sections(self) -> None:
     self._left_dock_sections_splitter.setStretchFactor(1, 3)
     if not _restore_left_dock_sections_splitter_state(self._left_dock_sections_splitter):
         self._left_dock_sections_splitter.setSizes([520, 260])
+    _wire_left_secondary_section_height_refresh(self)
     self._left_dock_sections_splitter.splitterMoved.connect(
         lambda _pos, _index: _save_left_dock_sections_splitter_state(self),
     )

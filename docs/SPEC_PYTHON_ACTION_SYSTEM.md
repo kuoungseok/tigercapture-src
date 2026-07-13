@@ -96,13 +96,30 @@ NLE positioning:
   targets. This keeps launcher Capture and Studio/editor automation separable:
   the launcher can later split Capture and Studio without changing the action
   contract used by local LLM, MCP, Codex, or Claude workflows.
+  Agent shorthand: when a user asks "캡쳐기능 봐줘", "에디터 안 캡쳐", or
+  "editor capture" without explicitly mentioning visible capture UI, region
+  selection, or launcher recording controls, interpret it as this MCP/AI action
+  surface first.
 - External application capture is also action-only. `capture.windows.list`,
   `capture.window.screenshot`, and `capture.window.video` are ownerless actions
   backed by `app/window_capture.py`, so MCP/AI can list visible Windows windows
   and capture a matched title/process/pid/handle even when no editor owner is
-  attached. The default video path captures the visible window rectangle and
-  pipes frames to hidden ffmpeg; `printwindow` is available only as a fallback
-  because GPU-rendered apps can return black frames through that API.
+  attached. `backend=auto` prefers `wgc_window` for Unreal Editor windows so
+  overlapped Unreal captures can stay targeted to the Unreal window; if WGC is
+  unavailable it falls back to visible rectangle capture. `printwindow` is
+  available only as an explicit fallback because GPU-rendered apps can return
+  black frames through that API.
+  Unreal evidence capture must not default through OBS. If an OBS Program Output
+  or OBS source records black, treat that as an OBS/source failure and switch to
+  direct Unreal `hwnd` capture with `backend=auto`.
+  For external workflows whose end time is controlled by another agent, such
+  as Unreal terrain generation, use `capture.window.video.start`, then run the
+  external work, poll `capture.window.video.status` if needed, and finish with
+  `capture.window.video.stop`. The start action requires a hard
+  `max_duration_ms` safety cap; the normal answer to "when do I stop?" is:
+  "stop when the external task completes, or at `max_duration_ms` if no stop
+  signal arrives." The Unreal-side handoff procedure is documented in
+  `docs/SPEC_UNREAL_MCP_CAPTURE_CONTROL.md`.
 - UI viewer/popout registration is physically split into
   `app/actions/ui_namespace.py` and `app/actions/editor_adapter_ui.py`. It
   exposes only product actions under `ui.viewer.*` for viewer comparison/Fit
@@ -562,6 +579,9 @@ to the new audio id while preserving the original sync offset. Callers can set
 - `ui.viewer.fit`
 - `capture.screenshot`
 - `capture.gif`
+- `capture.window.video.start`
+- `capture.window.video.status`
+- `capture.window.video.stop`
 - `review.scenario.run`
 - `creative_layer.readiness` returns the conservative claim gate for effects,
   transitions, typography, node graphs, Live2D/Spine actors, AR/PBR 3D
@@ -573,6 +593,11 @@ Implementation notes:
 - Destructive actions require `confirm_destructive=true` unless dry-run is used.
 - `capture.gif` uses an editor owner GIF backend when available and falls back
   to short Qt `grab()` frame capture for review/QA evidence.
+- `capture.window.video` is bounded fixed-duration capture. Use
+  `capture.window.video.start/status/stop` for external-agent workflows where
+  another process, for example Unreal Editor terrain generation, decides when
+  the recording should end. Always pass a `max_duration_ms` timeout so
+  unattended MCP/AI sessions cannot record indefinitely.
 - `ui.popout.*` is the unattended QA/control surface for detachable windows.
   It can list targets, open/raise them, set geometry, capture a popout image,
   and close the window without exposing private editor methods. It accepts

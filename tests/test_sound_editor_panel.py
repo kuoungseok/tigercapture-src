@@ -4,15 +4,13 @@ import os
 import time
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QPoint, QPointF, Qt
 from PySide6.QtWidgets import QApplication, QLabel, QPushButton, QSizePolicy, QWidget
 
 from app.audio_tracks import AudioClip, AudioTrack
 from app.audio_tool_dock_specs import (
     AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT,
     AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT,
-    AUDIO_TOOL_DOCK_ICON_HEIGHT,
-    AUDIO_TOOL_DOCK_ICON_WIDTH,
 )
 from app.composer_panel import ComposerPanel, ComposerWindow
 from app.sound_editor_panel import (
@@ -31,6 +29,36 @@ from app.sound_editor_visual_widgets import _MiniWaveformStrip, _SoundJogShuttle
 def _app() -> QApplication:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     return QApplication.instance() or QApplication([])
+
+
+class _FakeWheelEvent:
+    def __init__(
+        self,
+        *,
+        delta_y: int,
+        delta_x: int = 0,
+        pos: QPointF | None = None,
+        modifiers: Qt.KeyboardModifier = Qt.KeyboardModifier.NoModifier,
+    ) -> None:
+        self._delta = QPoint(int(delta_x), int(delta_y))
+        self._pos = pos or QPointF(320.0, 130.0)
+        self._modifiers = modifiers
+        self.accepted = False
+
+    def angleDelta(self) -> QPoint:
+        return self._delta
+
+    def pixelDelta(self) -> QPoint:
+        return QPoint(0, 0)
+
+    def position(self) -> QPointF:
+        return self._pos
+
+    def modifiers(self):
+        return self._modifiers
+
+    def accept(self) -> None:
+        self.accepted = True
 
 
 def test_sound_edit_state_store_preserves_media_pool_clip_edits(tmp_path: Path) -> None:
@@ -106,15 +134,13 @@ def test_sound_editor_advanced_lab_button_uses_separate_dock_row() -> None:
 
     assert len(lab_buttons) == 1
     button = lab_buttons[0]
-    assert button.text() == ""
+    assert button.text() == "SOUND LAB"
     assert button.objectName() == "SoundLabDockButton"
     assert button.parentWidget().objectName() == "SoundLabDockRow"
     assert button.sizePolicy().horizontalPolicy() == QSizePolicy.Policy.Expanding
     assert button.minimumHeight() == AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT
     assert button.maximumHeight() == AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT
-    assert button.iconSize().width() == AUDIO_TOOL_DOCK_ICON_WIDTH
-    assert button.iconSize().height() == AUDIO_TOOL_DOCK_ICON_HEIGHT
-    assert not button.icon().isNull()
+    assert button.icon().isNull()
 
 
 def test_sound_editor_dock_window_keeps_full_mixer_context(tmp_path: Path) -> None:
@@ -325,13 +351,14 @@ def test_workbench_sound_editor_keeps_top_audio_blocks_separated(tmp_path: Path)
     assert panel._composer_dock.isVisible() is True
     assert panel._composer_button.isVisible() is True
     assert panel._composer_button.isCheckable() is False
+    assert panel._composer_button.text() == "COMPOSER"
     assert panel._composer_button.minimumHeight() == AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT
     assert panel._composer_button.maximumHeight() == AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT
-    assert panel._composer_button.iconSize().width() == AUDIO_TOOL_DOCK_ICON_WIDTH
-    assert panel._composer_button.iconSize().height() == AUDIO_TOOL_DOCK_ICON_HEIGHT
+    assert panel._composer_button.icon().isNull()
+    assert sound._advanced_btn.text() == "SOUND LAB"
     assert sound._advanced_btn.minimumHeight() == panel._composer_button.minimumHeight()
     assert sound._advanced_btn.maximumHeight() == panel._composer_button.maximumHeight()
-    assert sound._advanced_btn.iconSize() == panel._composer_button.iconSize()
+    assert sound._advanced_btn.icon().isNull()
     assert scroll.geometry().top() < panel._composer_dock.geometry().top()
     assert scroll.height() >= panel._tab_stack.height() - panel._composer_dock.height() - 12
     assert sound.minimumHeight() >= SOUND_EDITOR_PANEL_MIN_HEIGHT
@@ -544,6 +571,108 @@ def test_composer_panel_shows_arrangement_view(tmp_path: Path) -> None:
     assert music_events[-1][1]["backend"] == "sample_production"
 
 
+def test_composer_arrangement_mouse_wheel_zooms_time_axis(tmp_path: Path) -> None:
+    app = _app()
+    from app.music_composer import compose_music
+
+    composition = compose_music(
+        prompt="wheel zoom music",
+        duration_ms=60000,
+        genre="electronic",
+        mood="confident",
+        key="C minor",
+        bpm=124,
+    ).to_dict()
+    panel = ComposerPanel()
+    panel.resize(760, 720)
+    panel.show()
+    panel.set_music_composition(composition)
+    app.processEvents()
+
+    arranger = panel._music_arrangement
+    arranger.resize(720, 300)
+    assert arranger._timeline_zoom == 1.0
+
+    zoom_in = _FakeWheelEvent(delta_y=120, pos=QPointF(430.0, 140.0))
+    arranger.wheelEvent(zoom_in)
+
+    assert zoom_in.accepted
+    assert arranger._timeline_zoom > 1.0
+    assert arranger._timeline_scroll_s > 0.0
+    zoomed = arranger._timeline_zoom
+    scrolled = arranger._timeline_scroll_s
+
+    pan_right = _FakeWheelEvent(delta_x=120, delta_y=0, pos=QPointF(430.0, 140.0))
+    arranger.wheelEvent(pan_right)
+
+    assert pan_right.accepted
+    assert arranger._timeline_zoom == zoomed
+    assert arranger._timeline_scroll_s > scrolled
+
+    zoom_out = _FakeWheelEvent(delta_y=-120, pos=QPointF(430.0, 140.0))
+    arranger.wheelEvent(zoom_out)
+
+    assert zoom_out.accepted
+    assert 1.0 <= arranger._timeline_zoom < zoomed
+
+
+def test_composer_arrangement_scrolls_many_tracks_with_preview_focus(tmp_path: Path) -> None:
+    app = _app()
+    sections = [
+        {"name": "intro", "start_ms": 0, "duration_ms": 16000},
+        {"name": "build", "start_ms": 16000, "duration_ms": 16000},
+        {"name": "main", "start_ms": 32000, "duration_ms": 32000},
+        {"name": "outro", "start_ms": 64000, "duration_ms": 16000},
+    ]
+    tracks = [
+        {
+            "id": f"violins_{idx:02d}",
+            "role": f"violins_{idx:02d}",
+            "clips": [{"section_name": "main", "notes": [{"pitch": 60 + idx % 12, "start_ms": 0, "duration_ms": 500}]}],
+        }
+        for idx in range(24)
+    ]
+    composition = {
+        "id": "scroll-focus-test",
+        "duration_ms": 80000,
+        "genre": "orchestral",
+        "mood": "cinematic",
+        "key": "D minor",
+        "sections": sections,
+        "tracks": tracks,
+    }
+    panel = ComposerPanel()
+    panel.resize(760, 720)
+    panel.show()
+    panel.set_music_composition(composition)
+    app.processEvents()
+
+    arranger = panel._music_arrangement
+    arranger.resize(720, 260)
+    metrics = arranger._layout_metrics()
+    assert metrics["track_scroll_max"] > 0
+    assert len(metrics["lanes"]) < len(metrics["all_lanes"])
+
+    label_pos = QPointF(metrics["rect"].left() + 20.0, metrics["grid_y"] + 24.0)
+    scroll_down = _FakeWheelEvent(delta_y=-120, pos=label_pos)
+    arranger.wheelEvent(scroll_down)
+
+    assert scroll_down.accepted
+    assert arranger._track_scroll_index == 1
+
+    arranger._timeline_zoom = 4.0
+    arranger._timeline_scroll_s = 0.0
+    arranger.set_playback_position_ms(52000, follow=True)
+
+    assert arranger._playback_position_s == 52.0
+    assert arranger._timeline_scroll_s > 0.0
+    assert arranger._section_at_time(52.0)[0] == "main"
+    assert arranger._block_pattern_phase(0.25) == 0.75
+
+    arranger.set_playback_position_ms(None)
+    assert arranger._block_pattern_phase(0.25) == 0.25
+
+
 def test_composer_panel_ai_provider_selects_production_mix(tmp_path: Path) -> None:
     app = _app()
     from app.music_composer import compose_music
@@ -633,6 +762,43 @@ def test_composer_panel_exposes_sample_asset_connection(tmp_path: Path) -> None:
 
     assert music_events[-1][0] == "music.render.preview"
     assert music_events[-1][1]["sample_library_policy"] == "procedural_only"
+
+
+def test_composer_panel_master_fx_reuses_sound_editor_effect_action(tmp_path: Path) -> None:
+    app = _app()
+    from app.music_composer import compose_music
+
+    composition = compose_music(
+        prompt="composer master fx",
+        duration_ms=16000,
+        genre="electronic",
+        mood="confident",
+        key="C minor",
+        bpm=124,
+    ).to_dict()
+    panel = ComposerPanel()
+    panel.resize(760, 760)
+    panel.show()
+    music_events = []
+    panel.music_lab_action_requested.connect(lambda action, params: music_events.append((action, params)))
+    panel.set_music_composition(composition)
+    app.processEvents()
+
+    assert panel.findChild(QWidget, "ComposerMasterFxPanel") is not None
+
+    panel._music_roles.setCurrentText("mix only")
+    panel._apply_master_fx_preset("wide")
+    panel._request_apply_master_fx()
+
+    action, params = music_events[-1]
+    assert action == "music.apply_master_fx"
+    assert params["composition_id"] == composition["id"]
+    assert params["role"] == "mix"
+    assert params["effects"]["ai_master"]["enabled"] is True
+    assert params["effects"]["ai_master"]["width"] == 138
+    assert params["effects"]["reverb"]["enabled"] is True
+    assert params["effects"]["loudness"]["enabled"] is True
+    assert set(params["effects"]) == {"ai_master", "reverb", "loudness"}
 
 
 def test_workbench_music_composition_opens_standalone_composer(tmp_path: Path) -> None:

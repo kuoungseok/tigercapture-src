@@ -25,6 +25,7 @@ a = Analysis(
     datas=[
         ('app/locales/*.py', 'app/locales'),
         ('resources/tigercapture.ico', 'resources'),
+        ('resources/branding/*.png', 'resources/branding'),
         ('resources/luts/*.cube', 'resources/luts'),
         ('resources/ui/sound_editor/*.png', 'resources/ui/sound_editor'),
     ] + extra_datas,

@@ -20,6 +20,13 @@ SAMPLE_RATE = 44100
 MUSIC_SCHEMA = "tigerstudio.music.composition.v1"
 DEFAULT_MUSIC_TRACK_COUNT = 9
 ORCHESTRAL_TRACK_COUNT = 128
+CLASSICAL_VARIATION_TRACK_COUNT = 11
+LOFI_TRACK_COUNT = 10
+ROCK_METAL_TRACK_COUNT = 8
+JAZZ_TRACK_COUNT = 8
+HIPHOP_TRAP_TRACK_COUNT = 9
+SYNTHWAVE_TRACK_COUNT = 9
+AMBIENT_TRACK_COUNT = 7
 MUSIC_QUALITY_DRAFT = "draft_sketch"
 MUSIC_QUALITY_DIAGNOSTIC = "diagnostic_only"
 MUSIC_QUALITY_STARTER = "starter_preview"
@@ -224,6 +231,36 @@ def _is_orchestral_request(prompt: str = "", genre: str = "", mood: str = "") ->
     return "trailer" in text and any(word in text for word in ("epic", "cinematic", "score"))
 
 
+def _is_classical_variation_request(prompt: str = "", genre: str = "", mood: str = "") -> bool:
+    text = f"{prompt} {genre} {mood}".lower()
+    compact = "".join(text.split())
+    direct = (
+        "paganini",
+        "caprice",
+        "solo violin",
+        "violin solo",
+        "violin concerto",
+        "virtuoso violin",
+        "classical variation",
+        "theme and variation",
+        "theme variation",
+        "rondo",
+    )
+    localized = (
+        "\ud30c\uac00\ub2c8\ub2c8",
+        "\ubc14\uc774\uc62c\ub9b0",
+        "\ubc14\uc774\uc5b4\ub9b0",
+        "\uce74\ud504\ub9ac\uc2a4",
+        "\ud074\ub798\uc2dd",
+        "\ub860\ub3c4",
+        "\ud611\uc8fc",
+        "\ubcc0\uc8fc",
+    )
+    if any(marker in text for marker in direct) or any(marker in compact for marker in localized):
+        return True
+    return "classical" in text and any(word in text for word in ("violin", "solo", "variation", "concerto"))
+
+
 def _is_melodic_edm_request(prompt: str = "", genre: str = "", mood: str = "") -> bool:
     text = f"{prompt} {genre} {mood}".lower()
     markers = (
@@ -239,12 +276,96 @@ def _is_melodic_edm_request(prompt: str = "", genre: str = "", mood: str = "") -
     return any(marker in text for marker in markers)
 
 
+def _is_lofi_request(prompt: str = "", genre: str = "", mood: str = "") -> bool:
+    text = f"{prompt} {genre} {mood}".lower()
+    compact = "".join(text.split())
+    return any(marker in text for marker in ("lofi", "lo-fi", "chillhop", "boom bap", "dusty beat")) or any(
+        marker in compact for marker in ("\ub85c\ud30c\uc774", "\uce60\ud569")
+    )
+
+
+def _is_rock_metal_request(prompt: str = "", genre: str = "", mood: str = "") -> bool:
+    text = f"{prompt} {genre} {mood}".lower()
+    compact = "".join(text.split())
+    markers = (
+        "metal",
+        "rock",
+        "speed metal",
+        "power metal",
+        "hard rock",
+        "guitar band",
+        "distorted guitar",
+    )
+    return any(marker in text for marker in markers) or any(marker in compact for marker in ("\uba54\ud0c8", "\ub77d", "\uae30\ud0c0\ubc34\ub4dc"))
+
+
+def _is_jazz_request(prompt: str = "", genre: str = "", mood: str = "") -> bool:
+    text = f"{prompt} {genre} {mood}".lower()
+    compact = "".join(text.split())
+    return any(marker in text for marker in ("jazz", "swing", "bebop", "lounge", "walking bass")) or "\uc7ac\uc988" in compact
+
+
+def _is_hiphop_trap_request(prompt: str = "", genre: str = "", mood: str = "") -> bool:
+    text = f"{prompt} {genre} {mood}".lower()
+    compact = "".join(text.split())
+    markers = ("hiphop", "hip-hop", "trap", "drill", "rap beat", "808", "boom bap")
+    return any(marker in text for marker in markers) or any(marker in compact for marker in ("\ud799\ud569", "\ud2b8\ub7a9", "\ub7a9\ube44\ud2b8"))
+
+
+def _is_synthwave_request(prompt: str = "", genre: str = "", mood: str = "") -> bool:
+    text = f"{prompt} {genre} {mood}".lower()
+    compact = "".join(text.split())
+    markers = ("synthwave", "retrowave", "outrun", "cyberpunk", "80s synth", "neon")
+    return any(marker in text for marker in markers) or any(marker in compact for marker in ("\uc2e0\uc2a4\uc6e8\uc774\ube0c", "\uc0ac\uc774\ubc84\ud391\ud06c"))
+
+
+def _is_ambient_request(prompt: str = "", genre: str = "", mood: str = "") -> bool:
+    text = f"{prompt} {genre} {mood}".lower()
+    compact = "".join(text.split())
+    markers = ("ambient", "drone", "soundscape", "meditation", "minimal texture")
+    return any(marker in text for marker in markers) or any(marker in compact for marker in ("\uc570\ube44\uc5b8\ud2b8", "\ub4dc\ub860", "\uba85\uc0c1\uc74c\uc545"))
+
+
+def _genre_planner_for(prompt: str = "", genre: str = "", mood: str = "") -> str:
+    if _is_jazz_request(prompt, genre, mood):
+        return "jazz"
+    if _is_rock_metal_request(prompt, genre, mood):
+        return "rock_metal"
+    if _is_lofi_request(prompt, genre, mood):
+        return "lofi"
+    if _is_hiphop_trap_request(prompt, genre, mood):
+        return "hiphop_trap"
+    if _is_synthwave_request(prompt, genre, mood):
+        return "synthwave"
+    if _is_ambient_request(prompt, genre, mood):
+        return "ambient"
+    return ""
+
+
 def choose_bpm(prompt: str = "", genre: str = "", mood: str = "", bpm: int | None = None) -> int:
     if bpm:
         return max(48, min(180, int(bpm)))
+    if _is_classical_variation_request(prompt, genre, mood):
+        text = f"{prompt} {genre} {mood}".lower()
+        if any(word in text for word in ("paganini", "caprice", "virtuoso", "\ud30c\uac00\ub2c8\ub2c8", "\uce74\ud504\ub9ac\uc2a4")):
+            return 132
+        return 112
     if _is_orchestral_request(prompt, genre, mood):
         return 92
     text = f"{prompt} {genre} {mood}".lower()
+    genre_planner = _genre_planner_for(prompt, genre, mood)
+    if genre_planner == "lofi":
+        return 78
+    if genre_planner == "rock_metal":
+        return 156 if any(word in text for word in ("speed", "power", "fast", "thrash")) else 136
+    if genre_planner == "jazz":
+        return 118 if "bebop" in text else 104
+    if genre_planner == "hiphop_trap":
+        return 142 if "trap" in text else 92
+    if genre_planner == "synthwave":
+        return 112
+    if genre_planner == "ambient":
+        return 72
     if any(word in text for word in ("techno", "edm", "electronic", "dance", "driving")):
         return 124
     if any(word in text for word in ("lofi", "lo-fi", "chill", "relax")):
@@ -260,6 +381,20 @@ def choose_key(prompt: str = "", mood: str = "", key: str = "") -> str:
     if _clean_text(key):
         return _clean_text(key)
     text = f"{prompt} {mood}".lower()
+    if any(word in text for word in ("paganini", "caprice", "violin", "\ud30c\uac00\ub2c8\ub2c8", "\ubc14\uc774\uc62c\ub9b0", "\uce74\ud504\ub9ac\uc2a4")):
+        return "D minor"
+    if _is_jazz_request(prompt, "", mood):
+        return "F major"
+    if _is_rock_metal_request(prompt, "", mood):
+        return "E minor"
+    if _is_hiphop_trap_request(prompt, "", mood):
+        return "C minor"
+    if _is_synthwave_request(prompt, "", mood):
+        return "A minor"
+    if _is_ambient_request(prompt, "", mood):
+        return "D minor"
+    if _is_lofi_request(prompt, "", mood):
+        return "F major"
     if any(word in text for word in ("bright", "happy", "uplift", "corporate")):
         return "C major"
     if any(word in text for word in ("dark", "tense", "trailer", "cinematic")):
@@ -330,9 +465,63 @@ def _transpose_chord(root: str, semitones: int, *, minor: bool = False) -> str:
     return f"{name}m" if minor else name
 
 
+def _transpose_chord_suffix(root: str, semitones: int, suffix: str = "") -> str:
+    index = (_NOTE_TO_INDEX.get(root, 0) + int(semitones)) % 12
+    return f"{_FLAT_NOTE_NAMES[index]}{suffix}"
+
+
 def chord_progression_for(key: str, genre: str = "", mood: str = "") -> list[str]:
     root = _key_root_name(key)
     text = f"{genre} {mood}".lower()
+    if any(word in text for word in ("jazz", "swing", "bebop", "lounge")):
+        if _is_minor(key):
+            return [
+                _transpose_chord_suffix(root, 0, "m7"),
+                _transpose_chord_suffix(root, 5, "m7"),
+                _transpose_chord_suffix(root, 10, "7"),
+                _transpose_chord_suffix(root, 3, "maj7"),
+            ]
+        return [
+            _transpose_chord_suffix(root, 2, "m7"),
+            _transpose_chord_suffix(root, 7, "7"),
+            _transpose_chord_suffix(root, 0, "maj7"),
+            _transpose_chord_suffix(root, 9, "7"),
+        ]
+    if any(word in text for word in ("lofi", "lo-fi", "chillhop", "chill")):
+        return [
+            _transpose_chord_suffix(root, 0, "maj7" if not _is_minor(key) else "m7"),
+            _transpose_chord_suffix(root, 4 if not _is_minor(key) else 8, "m7" if not _is_minor(key) else "maj7"),
+            _transpose_chord_suffix(root, 9 if not _is_minor(key) else 3, "m7" if not _is_minor(key) else "maj7"),
+            _transpose_chord_suffix(root, 5 if not _is_minor(key) else 10, "6" if not _is_minor(key) else "7"),
+        ]
+    if any(word in text for word in ("trap", "hiphop", "hip-hop", "drill", "rap beat", "808")):
+        return [
+            _transpose_chord(root, 0, minor=True),
+            _transpose_chord(root, 8),
+            _transpose_chord(root, 5, minor=True),
+            _transpose_chord(root, 10),
+        ]
+    if any(word in text for word in ("metal", "rock", "speed", "power")):
+        return [
+            _transpose_chord(root, 0, minor=True),
+            _transpose_chord(root, 10),
+            _transpose_chord(root, 8),
+            _transpose_chord(root, 7),
+        ]
+    if any(word in text for word in ("synthwave", "retrowave", "outrun", "cyberpunk")):
+        return [
+            _transpose_chord(root, 0, minor=True),
+            _transpose_chord(root, 8),
+            _transpose_chord(root, 10),
+            _transpose_chord(root, 5, minor=True),
+        ]
+    if any(word in text for word in ("ambient", "drone", "soundscape")):
+        return [
+            _transpose_chord(root, 0, minor=True),
+            _transpose_chord(root, 3),
+            _transpose_chord(root, 10),
+            _transpose_chord(root, 5, minor=True),
+        ]
     if _is_minor(key):
         return [
             _transpose_chord(root, 0, minor=True),
@@ -369,6 +558,43 @@ def _sections(duration_ms: int, chords: list[str]) -> list[MusicSection]:
         else:
             section_duration = max(1, int(round(duration * ratio)))
         rows.append(MusicSection(name=name, start_ms=start, duration_ms=section_duration, intensity=float(intensity), chord_progression=list(chords)))
+        start += section_duration
+    return rows
+
+
+def _classical_variation_sections(duration_ms: int, key: str) -> list[MusicSection]:
+    duration = max(4000, int(duration_ms or 30000))
+    minor = _is_minor(key)
+    if duration <= 24000:
+        plan = (
+            ("theme", 0.34, 0.72, ["Dm", "Bb", "C", "A"] if minor else ["D", "G", "A", "D"]),
+            ("lyrical_variation", 0.34, 0.48, ["F", "C", "Dm", "Bb"] if minor else ["G", "D", "Em", "C"]),
+            ("climax", 0.32, 0.94, ["Dm", "Bb", "F", "C", "A", "Dm"] if minor else ["D", "G", "Bm", "A", "D"]),
+        )
+    else:
+        plan = (
+            ("theme", 0.18, 0.74, ["Dm", "Bb", "C", "A"] if minor else ["D", "G", "A", "D"]),
+            ("rhythmic_variation", 0.20, 0.86, ["Dm", "A", "Dm", "C"] if minor else ["D", "A", "D", "G"]),
+            ("lyrical_variation", 0.25, 0.48, ["F", "C", "Dm", "Bb"] if minor else ["G", "D", "Em", "C"]),
+            ("climax", 0.27, 0.98, ["Dm", "Bb", "F", "C", "A", "Dm"] if minor else ["D", "G", "Bm", "A", "D"]),
+            ("solo_coda", 0.10, 0.64, ["Dm", "A", "Dm", "Dm"] if minor else ["D", "A", "D", "D"]),
+        )
+    start = 0
+    rows: list[MusicSection] = []
+    for index, (name, ratio, intensity, progression) in enumerate(plan):
+        if index == len(plan) - 1:
+            section_duration = max(1, duration - start)
+        else:
+            section_duration = max(1, int(round(duration * ratio)))
+        rows.append(
+            MusicSection(
+                name=name,
+                start_ms=start,
+                duration_ms=section_duration,
+                intensity=float(intensity),
+                chord_progression=list(progression),
+            )
+        )
         start += section_duration
     return rows
 
@@ -472,6 +698,115 @@ def _edm_sections(duration_ms: int, key: str, bpm: int) -> list[MusicSection]:
     return rows
 
 
+def _section_rows_from_ratio_plan(
+    duration_ms: int,
+    plan: tuple[tuple[str, float, float, list[str]], ...],
+) -> list[MusicSection]:
+    duration = max(4000, int(duration_ms or 30000))
+    start = 0
+    rows: list[MusicSection] = []
+    for index, (name, ratio, intensity, progression) in enumerate(plan):
+        if index == len(plan) - 1:
+            section_duration = max(1, duration - start)
+        else:
+            section_duration = max(1, int(round(duration * float(ratio))))
+        rows.append(
+            MusicSection(
+                name=name,
+                start_ms=start,
+                duration_ms=section_duration,
+                intensity=float(intensity),
+                chord_progression=list(progression),
+            )
+        )
+        start += section_duration
+    return rows
+
+
+def _genre_sections(genre_planner: str, duration_ms: int, key: str, bpm: int) -> list[MusicSection]:
+    chords = chord_progression_for(key, genre_planner, "")
+    root = _key_root_name(key)
+    minor_i = _transpose_chord(root, 0, minor=True)
+    if genre_planner == "lofi":
+        return _section_rows_from_ratio_plan(
+            duration_ms,
+            (
+                ("crate_intro", 0.20, 0.38, chords),
+                ("dusty_groove", 0.36, 0.64, chords),
+                ("sample_break", 0.24, 0.48, list(reversed(chords))),
+                ("warm_outro", 0.20, 0.34, chords[:2] + chords[:2]),
+            ),
+        )
+    if genre_planner == "rock_metal":
+        riff = [minor_i, _transpose_chord(root, 10), _transpose_chord(root, 8), _transpose_chord(root, 7)]
+        lift = [_transpose_chord(root, 3), _transpose_chord(root, 10), minor_i, _transpose_chord(root, 7)]
+        return _section_rows_from_ratio_plan(
+            duration_ms,
+            (
+                ("riff_intro", 0.16, 0.70, riff),
+                ("verse_riff", 0.30, 0.82, riff),
+                ("solo_break", 0.24, 0.76, lift),
+                ("final_chorus", 0.30, 0.94, riff),
+            ),
+        )
+    if genre_planner == "jazz":
+        head = chord_progression_for(key, "jazz", "")
+        bridge = [
+            _transpose_chord_suffix(root, 9, "m7"),
+            _transpose_chord_suffix(root, 2, "7"),
+            _transpose_chord_suffix(root, 7, "maj7"),
+            _transpose_chord_suffix(root, 0, "6"),
+        ]
+        return _section_rows_from_ratio_plan(
+            duration_ms,
+            (
+                ("head", 0.24, 0.58, head),
+                ("solo_a", 0.30, 0.74, head),
+                ("solo_b", 0.26, 0.78, bridge),
+                ("out_head", 0.20, 0.56, head),
+            ),
+        )
+    if genre_planner == "hiphop_trap":
+        hook = [minor_i, _transpose_chord(root, 8), _transpose_chord(root, 5, minor=True), _transpose_chord(root, 10)]
+        verse = [_transpose_chord(root, 8), _transpose_chord(root, 10), minor_i, _transpose_chord(root, 5, minor=True)]
+        return _section_rows_from_ratio_plan(
+            duration_ms,
+            (
+                ("intro", 0.16, 0.42, hook),
+                ("hook", 0.26, 0.86, hook),
+                ("verse", 0.30, 0.68, verse),
+                ("drop_hook", 0.20, 0.92, hook),
+                ("outro", 0.08, 0.34, hook),
+            ),
+        )
+    if genre_planner == "synthwave":
+        drive = [minor_i, _transpose_chord(root, 8), _transpose_chord(root, 10), _transpose_chord(root, 5, minor=True)]
+        lift = [_transpose_chord(root, 3), _transpose_chord(root, 10), minor_i, _transpose_chord(root, 8)]
+        return _section_rows_from_ratio_plan(
+            duration_ms,
+            (
+                ("neon_intro", 0.18, 0.42, drive),
+                ("drive", 0.30, 0.72, drive),
+                ("breakdown", 0.22, 0.46, lift),
+                ("neon_drop", 0.22, 0.88, drive),
+                ("fade", 0.08, 0.36, drive),
+            ),
+        )
+    if genre_planner == "ambient":
+        drift = [minor_i, _transpose_chord(root, 3), _transpose_chord(root, 10), _transpose_chord(root, 5, minor=True)]
+        bloom = [_transpose_chord(root, 8), _transpose_chord(root, 3), _transpose_chord(root, 10), minor_i]
+        return _section_rows_from_ratio_plan(
+            duration_ms,
+            (
+                ("fade_in", 0.24, 0.24, drift),
+                ("drift", 0.34, 0.38, drift),
+                ("bloom", 0.28, 0.54, bloom),
+                ("dissolve", 0.14, 0.28, drift),
+            ),
+        )
+    return _sections(duration_ms, chords)
+
+
 def _ms_to_tick(ms: int, bpm: int) -> int:
     beats = max(0.0, float(ms) * float(bpm) / 60000.0)
     return int(round(beats * TICKS_PER_BEAT))
@@ -501,7 +836,10 @@ def _chord_root(chord: str, key: str) -> int:
     text = str(chord or "").strip()
     if not text:
         return _root_pitch_for_key(key)
-    name = text.replace("maj", "").replace("m", "")
+    if len(text) >= 2 and text[1] in {"#", "b"}:
+        name = text[:2]
+    else:
+        name = text[:1]
     roots = {
         "C": 48,
         "C#": 49,
@@ -524,20 +862,42 @@ def _chord_root(chord: str, key: str) -> int:
     return roots.get(name, _root_pitch_for_key(key))
 
 
+def _chord_suffix(chord: str) -> str:
+    text = str(chord or "").strip()
+    if not text:
+        return ""
+    return text[2:] if len(text) >= 2 and text[1] in {"#", "b"} else text[1:]
+
+
 def _chord_notes(chord: str, key: str, octave: int = 0) -> list[int]:
     root = _chord_root(chord, key) + octave * 12
-    minor = str(chord or "").strip().endswith("m")
+    suffix = _chord_suffix(chord).lower()
+    minor = suffix.startswith("m") and not suffix.startswith("maj")
     third = 3 if minor else 4
-    return [root, root + third, root + 7]
+    notes = [root, root + third, root + 7]
+    if "6" in suffix:
+        notes.append(root + 9)
+    if "7" in suffix or "9" in suffix or "13" in suffix:
+        notes.append(root + (11 if "maj7" in suffix else 10))
+    if "9" in suffix or "13" in suffix:
+        notes.append(root + 14)
+    return notes
 
 
 def _chord_voicing(chord: str, key: str, *, role: str = "pad") -> list[int]:
     root = _chord_root(chord, key)
-    minor = str(chord or "").strip().endswith("m")
+    suffix = _chord_suffix(chord).lower()
+    minor = suffix.startswith("m") and not suffix.startswith("maj")
     third = 3 if minor else 4
+    seventh = 11 if "maj7" in suffix else 10 if ("7" in suffix or "9" in suffix or "13" in suffix) else None
+    sixth = 9 if "6" in suffix and seventh is None else None
+    upper = root + 36 + (seventh if seventh is not None else sixth if sixth is not None else (10 if minor else 11))
     if role == "pad":
-        return [root + 12, root + 19, root + 24 + third, root + 31, root + 36 + (10 if minor else 11)]
-    return [root, root + third, root + 7]
+        notes = [root + 12, root + 19, root + 24 + third, root + 31, upper]
+        if "9" in suffix or "13" in suffix:
+            notes.append(root + 50)
+        return notes
+    return _chord_notes(chord, key)
 
 
 def chord_notes(chord: str, key: str, octave: int = 0) -> list[int]:
@@ -570,6 +930,65 @@ def _role_family(role: str) -> str:
     text = str(role or "").lower()
     if text in {"drums", "bass", "chords", "pad", "melody", "fx", "lead"}:
         return text
+    if text in {"dusty_drums", "rock_drums", "swing_drums", "trap_drums", "hat_rolls", "retro_drums"}:
+        return "drums"
+    if text in {"sub_bass", "electric_bass", "walking_bass", "808_bass", "pulse_bass", "low_bloom"}:
+        return "bass"
+    if text in {
+        "jazz_chords",
+        "mellow_keys",
+        "dark_keys",
+        "analog_pad",
+        "tape_pad",
+        "jazz_piano",
+        "comping_guitar",
+        "brass_stab",
+        "rock_pad",
+        "drone_pad",
+        "shimmer_pad",
+    }:
+        return "chords"
+    if text in {
+        "sample_chop",
+        "lead_motif",
+        "sax_lead",
+        "trumpet_answer",
+        "pluck_lead",
+        "synth_lead",
+        "slow_motif",
+        "bell_echo",
+        "hook_counter",
+    }:
+        return "melody"
+    if text in {
+        "vinyl_noise",
+        "room_fx",
+        "texture_fx",
+        "brush_room",
+        "club_ambience",
+        "impact_fx",
+        "sub_fx",
+        "riser_fx",
+        "noise_sweep",
+        "neon_fx",
+        "texture_noise",
+        "space_fx",
+    }:
+        return "fx"
+    if text in {"solo_violin", "solo_violin_echo", "solo_violin_harmony"}:
+        return "classical_solo_violin"
+    if text in {"chamber_strings", "violin_section", "viola_section"}:
+        return "classical_strings"
+    if text in {"cello_bass", "classical_basses"}:
+        return "classical_low"
+    if text in {"woodwind_response", "flute_oboe_response"}:
+        return "classical_woodwind"
+    if text in {"horn_response", "brass_climax"}:
+        return "classical_brass"
+    if text in {"timpani_climax", "cymbals_climax"}:
+        return "classical_percussion"
+    if text in {"hall_pad", "soft_hall_pad"}:
+        return "classical_pad"
     if text.startswith(("violins_i_", "violins_ii_")):
         return "strings_high"
     if text.startswith("violas_"):
@@ -987,6 +1406,798 @@ def _orchestral_tracks(*, include_fx: bool = True) -> list[MusicTrack]:
     return rows
 
 
+def _classical_variation_tracks(*, include_fx: bool = True) -> list[MusicTrack]:
+    tracks = [
+        _track("solo_violin", "Solo Violin - Paganini Variation Lead", 0.92, 0.02),
+        _track("solo_violin_echo", "Solo Violin Echo", 0.20, -0.24),
+        _track("solo_violin_harmony", "Solo Violin Double Stop/Harmony", 0.18, 0.18),
+        _track("chamber_strings", "Chamber String Support", 0.22, -0.08),
+        _track("cello_bass", "Cello and Bass Foundation", 0.24, -0.22),
+        _track("woodwind_response", "Woodwind Response", 0.16, 0.18),
+        _track("horn_response", "French Horn Response", 0.14, -0.12),
+        _track("brass_climax", "Climax Brass", 0.18, 0.10),
+        _track("timpani_climax", "Climax Timpani", 0.20, -0.04),
+        _track("hall_pad", "Concert Hall Resonance Pad", 0.10, 0.0),
+    ]
+    if include_fx:
+        tracks.append(_track("cymbals_climax", "Climax Cymbals", 0.14, 0.0))
+    return tracks
+
+
+_GENRE_SPECIAL_ROLES = {
+    "dusty_drums",
+    "vinyl_noise",
+    "sub_bass",
+    "jazz_chords",
+    "sample_chop",
+    "mellow_keys",
+    "tape_pad",
+    "lead_motif",
+    "room_fx",
+    "texture_fx",
+    "rock_drums",
+    "electric_bass",
+    "palm_mute_guitar",
+    "rhythm_guitar",
+    "power_chord_guitar",
+    "lead_guitar",
+    "rock_pad",
+    "impact_fx",
+    "swing_drums",
+    "walking_bass",
+    "jazz_piano",
+    "comping_guitar",
+    "sax_lead",
+    "trumpet_answer",
+    "brush_room",
+    "club_ambience",
+    "trap_drums",
+    "808_bass",
+    "hat_rolls",
+    "dark_keys",
+    "pluck_lead",
+    "sub_fx",
+    "hook_counter",
+    "riser_fx",
+    "retro_drums",
+    "pulse_bass",
+    "analog_pad",
+    "synth_lead",
+    "brass_stab",
+    "noise_sweep",
+    "neon_fx",
+    "drone_pad",
+    "shimmer_pad",
+    "low_bloom",
+    "slow_motif",
+    "texture_noise",
+    "bell_echo",
+    "space_fx",
+}
+
+
+def _lofi_tracks(*, include_fx: bool = True) -> list[MusicTrack]:
+    tracks = [
+        _track("dusty_drums", "Dusty Lofi Drum Kit", 0.58, 0.0),
+        _track("vinyl_noise", "Vinyl Bed and Dust", 0.14, 0.0),
+        _track("sub_bass", "Warm Sub Bass", 0.50, -0.08),
+        _track("jazz_chords", "Muted Jazz Chords", 0.42, 0.10),
+        _track("sample_chop", "Crate Sample Chop", 0.34, -0.18),
+        _track("mellow_keys", "Mellow Keys", 0.32, 0.18),
+        _track("tape_pad", "Tape Pad", 0.24, 0.0),
+        _track("lead_motif", "Soft Lead Motif", 0.26, 0.14),
+        _track("room_fx", "Room Hiss", 0.10, 0.0),
+    ]
+    if include_fx:
+        tracks.append(_track("texture_fx", "Cassette Texture FX", 0.12, 0.0))
+    return tracks
+
+
+def _rock_metal_tracks(*, include_fx: bool = True) -> list[MusicTrack]:
+    tracks = [
+        _track("rock_drums", "Tight Rock Drum Kit", 0.74, 0.0),
+        _track("electric_bass", "Picked Electric Bass", 0.60, -0.06),
+        _track("palm_mute_guitar", "Palm-Muted Guitar", 0.54, -0.24),
+        _track("rhythm_guitar", "Rhythm Guitar", 0.48, 0.20),
+        _track("power_chord_guitar", "Power Chord Guitar", 0.46, -0.08),
+        _track("lead_guitar", "Lead Guitar", 0.42, 0.16),
+        _track("rock_pad", "Dark Stage Pad", 0.16, 0.0),
+    ]
+    if include_fx:
+        tracks.append(_track("impact_fx", "Amp Impact FX", 0.18, 0.0))
+    return tracks
+
+
+def _jazz_tracks(*, include_fx: bool = True) -> list[MusicTrack]:
+    tracks = [
+        _track("swing_drums", "Swing Drum Kit", 0.48, 0.0),
+        _track("walking_bass", "Walking Upright Bass", 0.54, -0.10),
+        _track("jazz_piano", "Jazz Piano Comping", 0.42, 0.16),
+        _track("comping_guitar", "Comping Guitar", 0.28, -0.18),
+        _track("sax_lead", "Tenor Sax Lead", 0.44, 0.08),
+        _track("trumpet_answer", "Muted Trumpet Answer", 0.32, -0.08),
+        _track("brush_room", "Brush Room", 0.12, 0.0),
+    ]
+    if include_fx:
+        tracks.append(_track("club_ambience", "Small Club Ambience", 0.10, 0.0))
+    return tracks
+
+
+def _hiphop_trap_tracks(*, include_fx: bool = True) -> list[MusicTrack]:
+    tracks = [
+        _track("trap_drums", "Trap Drum Kit", 0.68, 0.0),
+        _track("808_bass", "808 Bass", 0.66, -0.04),
+        _track("hat_rolls", "Hat Rolls", 0.30, 0.06),
+        _track("sample_chop", "Vocal/Soul Sample Chop", 0.28, -0.16),
+        _track("dark_keys", "Dark Keys", 0.34, 0.14),
+        _track("pluck_lead", "Pluck Lead", 0.30, 0.18),
+        _track("sub_fx", "Sub Drops", 0.16, 0.0),
+        _track("hook_counter", "Hook Counter", 0.24, -0.20),
+    ]
+    if include_fx:
+        tracks.append(_track("riser_fx", "Riser FX", 0.16, 0.0))
+    return tracks
+
+
+def _synthwave_tracks(*, include_fx: bool = True) -> list[MusicTrack]:
+    tracks = [
+        _track("retro_drums", "Retro Drum Machine", 0.58, 0.0),
+        _track("pulse_bass", "Octave Pulse Bass", 0.58, -0.08),
+        _track("analog_pad", "Wide Analog Pad", 0.40, 0.06),
+        _track("arp", "Neon Arp", 0.30, -0.16),
+        _track("synth_lead", "Singing Synth Lead", 0.42, 0.18),
+        _track("counter", "Counterline", 0.24, -0.22),
+        _track("brass_stab", "Synth Brass Stab", 0.26, 0.10),
+        _track("noise_sweep", "Noise Sweep", 0.14, 0.0),
+    ]
+    if include_fx:
+        tracks.append(_track("neon_fx", "Neon FX", 0.14, 0.0))
+    return tracks
+
+
+def _ambient_tracks(*, include_fx: bool = True) -> list[MusicTrack]:
+    tracks = [
+        _track("drone_pad", "Low Drone Pad", 0.36, -0.08),
+        _track("shimmer_pad", "Shimmer Pad", 0.34, 0.12),
+        _track("low_bloom", "Low Bloom", 0.28, 0.0),
+        _track("slow_motif", "Slow Motif", 0.20, 0.18),
+        _track("texture_noise", "Air Texture", 0.12, 0.0),
+        _track("bell_echo", "Bell Echo", 0.18, -0.16),
+    ]
+    if include_fx:
+        tracks.append(_track("space_fx", "Space FX", 0.12, 0.0))
+    return tracks
+
+
+def _genre_tracks(genre_planner: str, *, include_fx: bool = True) -> list[MusicTrack]:
+    if genre_planner == "lofi":
+        return _lofi_tracks(include_fx=include_fx)
+    if genre_planner == "rock_metal":
+        return _rock_metal_tracks(include_fx=include_fx)
+    if genre_planner == "jazz":
+        return _jazz_tracks(include_fx=include_fx)
+    if genre_planner == "hiphop_trap":
+        return _hiphop_trap_tracks(include_fx=include_fx)
+    if genre_planner == "synthwave":
+        return _synthwave_tracks(include_fx=include_fx)
+    if genre_planner == "ambient":
+        return _ambient_tracks(include_fx=include_fx)
+    return _default_music_tracks(include_fx=include_fx)
+
+
+_CLASSICAL_MOTIF_DEGREES: tuple[int, ...] = (0, 4, 0, 2, 1, 0, -1, 0, 3, 2, 1, 0, -3, -1, 1, 0)
+
+
+def _classical_variation_profile(section_name: str) -> dict[str, Any]:
+    name = str(section_name or "").lower()
+    if "rhythmic" in name:
+        return {
+            "variant": "rhythmic",
+            "beat_step": 0.25,
+            "duration": 0.18,
+            "register": 36,
+            "velocity": 106,
+            "sequence_shift": 1,
+            "reverse_every": 4,
+        }
+    if "lyrical" in name:
+        return {
+            "variant": "lyrical",
+            "beat_step": 1.0,
+            "duration": 0.92,
+            "register": 31,
+            "velocity": 72,
+            "sequence_shift": -1,
+            "reverse_every": 0,
+        }
+    if "climax" in name:
+        return {
+            "variant": "virtuoso_climax",
+            "beat_step": 0.25,
+            "duration": 0.20,
+            "register": 43,
+            "velocity": 114,
+            "sequence_shift": 2,
+            "reverse_every": 3,
+        }
+    if "coda" in name:
+        return {
+            "variant": "solo_coda",
+            "beat_step": 0.5,
+            "duration": 0.46,
+            "register": 36,
+            "velocity": 86,
+            "sequence_shift": 0,
+            "reverse_every": 0,
+        }
+    return {
+        "variant": "theme",
+        "beat_step": 0.5,
+        "duration": 0.36,
+        "register": 36,
+        "velocity": 96,
+        "sequence_shift": 0,
+        "reverse_every": 0,
+    }
+
+
+def _classical_bar_count(section: MusicSection, bpm: int) -> int:
+    bar_ms = 60000.0 / max(1, bpm) * 4.0
+    return max(1, int(math.ceil(float(section.duration_ms or 1) / max(1.0, bar_ms))))
+
+
+def _classical_degree_sequence(section: MusicSection, *, bar: int, lane: int = 1) -> tuple[int, ...]:
+    profile = _classical_variation_profile(section.name)
+    motif = list(_CLASSICAL_MOTIF_DEGREES)
+    if int(profile.get("reverse_every") or 0) and bar % int(profile["reverse_every"]) == int(profile["reverse_every"]) - 1:
+        motif = list(reversed(motif))
+    shift = int(profile.get("sequence_shift") or 0) * (bar // 2) + (int(lane) % 3)
+    variant = str(profile.get("variant") or "")
+    rows: list[int] = []
+    for index, degree in enumerate(motif):
+        value = int(degree) + shift
+        if variant == "lyrical":
+            if index % 4 in {1, 2}:
+                value += 1
+            if index >= len(motif) // 2:
+                value -= 1
+        elif variant == "rhythmic":
+            if index % 5 == 2:
+                value += 2
+            if index % 7 == 5:
+                value -= 1
+        elif variant == "virtuoso_climax":
+            if index >= len(motif) // 2:
+                value += 2
+            if index % 3 == 1:
+                value += 1
+        elif variant == "solo_coda":
+            if index > len(motif) // 2:
+                value -= 1
+        rows.append(value)
+    rows[-1] = 0
+    return tuple(rows)
+
+
+def _classical_add_scale_note(
+    clip: MidiClip,
+    section: MusicSection,
+    *,
+    bpm: int,
+    key: str,
+    beat: float,
+    degree: int,
+    duration_beats: float,
+    velocity: int,
+    register_shift: int,
+    chord: str = "",
+    chord_tone: bool = False,
+) -> None:
+    beat_tick = TICKS_PER_BEAT
+    section_start_tick = _ms_to_tick(section.start_ms, bpm)
+    section_end_tick = _ms_to_tick(section.start_ms + section.duration_ms, bpm)
+    start_tick = section_start_tick + int(round(float(beat) * beat_tick))
+    if start_tick >= section_end_tick:
+        return
+    pitch = _scale_pitch_for_degree(key, int(degree), register_shift=int(register_shift))
+    if chord_tone:
+        pitch = _nearest_chord_tone(pitch, chord, key)
+    duration_tick = max(1, int(round(float(duration_beats) * beat_tick)))
+    duration_tick = min(duration_tick, max(1, section_end_tick - start_tick))
+    clip.notes.append(
+        MidiNote(
+            pitch=max(0, min(127, int(pitch))),
+            start_tick=start_tick,
+            duration_tick=duration_tick,
+            velocity=max(1, min(127, int(velocity))),
+        )
+    )
+
+
+def _render_classical_variation_role(
+    clip: MidiClip,
+    section: MusicSection,
+    *,
+    role: str,
+    bpm: int,
+    key: str,
+    lane: int,
+) -> None:
+    family = _role_family(role)
+    profile = _classical_variation_profile(section.name)
+    variant = str(profile.get("variant") or "theme")
+    bars = _classical_bar_count(section, bpm)
+    beat_step = float(profile["beat_step"])
+    note_duration = float(profile["duration"])
+    register = int(profile["register"])
+    velocity = int(profile["velocity"])
+    is_climax = "climax" in str(section.name).lower()
+    is_coda = "coda" in str(section.name).lower()
+    is_lyrical = "lyrical" in str(section.name).lower()
+
+    if family == "classical_solo_violin":
+        if role == "solo_violin_echo" and variant not in {"theme", "lyrical", "solo_coda"}:
+            return
+        if role == "solo_violin_harmony" and variant not in {"rhythmic", "virtuoso_climax"}:
+            return
+        for bar in range(bars):
+            sequence = _classical_degree_sequence(section, bar=bar, lane=lane)
+            if role == "solo_violin_echo" and bar % 2 == 0:
+                continue
+            if role == "solo_violin_harmony" and bar % 2 == 1 and not is_climax:
+                continue
+            bar_offset = bar * 4.0
+            local_velocity = velocity
+            local_register = register
+            local_duration = note_duration
+            local_step = beat_step
+            if role == "solo_violin_echo":
+                local_velocity = int(velocity * 0.48)
+                local_register = register - 12
+                local_duration = max(note_duration * 1.22, 0.42)
+            elif role == "solo_violin_harmony":
+                local_velocity = int(velocity * (0.58 if not is_climax else 0.66))
+                local_register = register - 5
+            if is_coda and role != "solo_violin":
+                continue
+            for index, degree in enumerate(sequence):
+                beat = bar_offset + index * local_step
+                if beat >= bar_offset + 4.0:
+                    break
+                chord = section.chord_progression[bar % len(section.chord_progression)] if section.chord_progression else ""
+                phrase_end = index == len(sequence) - 1 or beat >= bar_offset + 3.5
+                degree_shift = 2 if role == "solo_violin_harmony" else 0
+                _classical_add_scale_note(
+                    clip,
+                    section,
+                    bpm=bpm,
+                    key=key,
+                    beat=beat + (0.18 if role == "solo_violin_echo" else 0.0),
+                    degree=degree + degree_shift,
+                    duration_beats=local_duration * (2.1 if phrase_end and is_lyrical else 1.0),
+                    velocity=local_velocity - (index % 4) * 2,
+                    register_shift=local_register,
+                    chord=chord,
+                    chord_tone=phrase_end or index in {0, 8},
+                )
+                if role == "solo_violin" and variant in {"rhythmic", "virtuoso_climax"} and index % 5 == 2:
+                    _classical_add_scale_note(
+                        clip,
+                        section,
+                        bpm=bpm,
+                        key=key,
+                        beat=beat + local_step * 0.48,
+                        degree=degree + 1,
+                        duration_beats=max(0.12, local_duration * 0.58),
+                        velocity=local_velocity - 10,
+                        register_shift=local_register + (12 if is_climax else 0),
+                    )
+        return
+
+    if family == "classical_strings":
+        for bar in range(bars):
+            chord = section.chord_progression[bar % len(section.chord_progression)] if section.chord_progression else ""
+            bar_offset = bar * 4.0
+            notes = _chord_voicing(chord, key, role="pad")
+            if not is_climax and bar % (3 if is_lyrical else 2) == 1:
+                continue
+            for index, pitch in enumerate(notes[: 3 if not is_climax else 5]):
+                _classical_add_scale_note(
+                    clip,
+                    section,
+                    bpm=bpm,
+                    key=key,
+                    beat=bar_offset + index * 0.04,
+                    degree=0,
+                    duration_beats=3.55 if not is_climax else 2.65,
+                    velocity=int((42 if not is_climax else 60) + section.intensity * 14),
+                    register_shift=0,
+                    chord=chord,
+                    chord_tone=True,
+                )
+                clip.notes[-1].pitch = max(0, min(127, int(pitch + (12 if is_climax and index >= 3 else 0))))
+        return
+
+    if family == "classical_low":
+        for bar in range(bars):
+            chord = section.chord_progression[bar % len(section.chord_progression)] if section.chord_progression else ""
+            root = _chord_root(chord, key) - 24
+            beat_values = (0.0, 2.0) if not is_climax else (0.0, 1.5, 2.0, 3.5)
+            for beat_pos in beat_values:
+                _classical_add_scale_note(
+                    clip,
+                    section,
+                    bpm=bpm,
+                    key=key,
+                    beat=bar * 4.0 + beat_pos,
+                    degree=0,
+                    duration_beats=1.45 if beat_pos in {0.0, 2.0} else 0.48,
+                    velocity=int(50 + section.intensity * 18),
+                    register_shift=0,
+                )
+                clip.notes[-1].pitch = max(0, min(127, int(root + (7 if beat_pos >= 2.0 else 0))))
+        return
+
+    if family == "classical_woodwind":
+        if not (is_lyrical or is_climax):
+            return
+        for bar in range(0, bars, 2):
+            sequence = _classical_degree_sequence(section, bar=bar, lane=lane)
+            for index, degree in enumerate(sequence[:6]):
+                _classical_add_scale_note(
+                    clip,
+                    section,
+                    bpm=bpm,
+                    key=key,
+                    beat=bar * 4.0 + 1.0 + index * (0.5 if is_climax else 0.75),
+                    degree=degree + (2 if index % 2 else 0),
+                    duration_beats=0.38 if is_climax else 0.72,
+                    velocity=64 if is_climax else 50,
+                    register_shift=36 if is_climax else 31,
+                )
+        return
+
+    if family == "classical_brass":
+        if not is_climax:
+            return
+        for bar in range(bars):
+            chord = section.chord_progression[bar % len(section.chord_progression)] if section.chord_progression else ""
+            notes = _chord_notes(chord, key, octave=1)
+            for index, pitch in enumerate(notes):
+                if role == "horn_response" and bar % 2:
+                    continue
+                beat = bar * 4.0 + (0.0 if role == "brass_climax" else 2.0)
+                _classical_add_scale_note(
+                    clip,
+                    section,
+                    bpm=bpm,
+                    key=key,
+                    beat=beat + index * 0.05,
+                    degree=0,
+                    duration_beats=1.3 if role == "brass_climax" else 1.7,
+                    velocity=84 if role == "brass_climax" else 72,
+                    register_shift=0,
+                )
+                clip.notes[-1].pitch = max(0, min(127, int(pitch + (12 if role == "horn_response" else 0))))
+        return
+
+    if family == "classical_percussion":
+        if not (is_climax or is_coda):
+            return
+        pitch = 49 if role == "cymbals_climax" else 47
+        for bar in range(bars):
+            hits = (0.0, 2.0) if not is_climax else (0.0, 1.5, 2.0, 3.5)
+            for hit_index, beat_pos in enumerate(hits):
+                if role == "cymbals_climax" and beat_pos not in {0.0, 3.5}:
+                    continue
+                _classical_add_scale_note(
+                    clip,
+                    section,
+                    bpm=bpm,
+                    key=key,
+                    beat=bar * 4.0 + beat_pos,
+                    degree=0,
+                    duration_beats=0.72 if role == "timpani_climax" else 1.1,
+                    velocity=82 + hit_index * 6,
+                    register_shift=0,
+                )
+                clip.notes[-1].pitch = pitch
+        return
+
+    if family == "classical_pad":
+        if not (is_lyrical or is_climax):
+            return
+        for bar in range(0, bars, 2):
+            chord = section.chord_progression[bar % len(section.chord_progression)] if section.chord_progression else ""
+            for index, pitch in enumerate(_chord_voicing(chord, key, role="pad")):
+                _classical_add_scale_note(
+                    clip,
+                    section,
+                    bpm=bpm,
+                    key=key,
+                    beat=bar * 4.0 + index * 0.06,
+                    degree=0,
+                    duration_beats=7.2,
+                    velocity=34 if is_lyrical else 46,
+                    register_shift=0,
+                )
+                clip.notes[-1].pitch = max(0, min(127, int(pitch)))
+
+
+def _genre_bar_count(section: MusicSection, bpm: int) -> int:
+    bar_ms = 60000.0 / max(1, bpm) * 4.0
+    return max(1, int(math.ceil(float(section.duration_ms or 1) / max(1.0, bar_ms))))
+
+
+def _add_pitch_note(
+    clip: MidiClip,
+    section: MusicSection,
+    *,
+    bpm: int,
+    beat: float,
+    pitch: int,
+    duration_beats: float,
+    velocity: int,
+) -> None:
+    section_start_tick = _ms_to_tick(section.start_ms, bpm)
+    section_end_tick = _ms_to_tick(section.start_ms + section.duration_ms, bpm)
+    start_tick = section_start_tick + int(round(float(beat) * TICKS_PER_BEAT))
+    if start_tick >= section_end_tick:
+        return
+    duration_tick = max(1, int(round(float(duration_beats) * TICKS_PER_BEAT)))
+    duration_tick = min(duration_tick, max(1, section_end_tick - start_tick))
+    clip.notes.append(
+        MidiNote(
+            pitch=max(0, min(127, int(pitch))),
+            start_tick=start_tick,
+            duration_tick=duration_tick,
+            velocity=max(1, min(127, int(velocity))),
+        )
+    )
+
+
+def _genre_chord_for_bar(section: MusicSection, bar: int) -> str:
+    if section.chord_progression:
+        return section.chord_progression[int(bar) % len(section.chord_progression)]
+    return ""
+
+
+def _genre_scale_pitch(key: str, degree: int, *, register_shift: int = 24) -> int:
+    return _scale_pitch_for_degree(key, int(degree), register_shift=int(register_shift))
+
+
+def _render_genre_role(
+    clip: MidiClip,
+    section: MusicSection,
+    *,
+    role: str,
+    bpm: int,
+    key: str,
+    lane: int,
+) -> None:
+    role_text = str(role or "").lower()
+    family = _role_family(role_text)
+    bars = _genre_bar_count(section, bpm)
+    intensity = max(0.05, min(1.0, float(section.intensity)))
+    section_name = str(section.name or "").lower()
+
+    if role_text in {"dusty_drums", "rock_drums", "swing_drums", "trap_drums", "retro_drums", "hat_rolls"}:
+        for bar in range(bars):
+            bar_beat = bar * 4.0
+            if role_text == "hat_rolls":
+                if intensity < 0.48:
+                    continue
+                for step in range(16):
+                    beat = bar_beat + step * 0.25
+                    velocity = 34 + int(intensity * 22) + (8 if step % 4 == 0 else 0)
+                    _add_pitch_note(clip, section, bpm=bpm, beat=beat, pitch=42, duration_beats=0.10, velocity=velocity)
+                if intensity > 0.72:
+                    for step in range(8):
+                        _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat + 3.0 + step * 0.125, pitch=46, duration_beats=0.06, velocity=42 + step)
+                continue
+            if role_text == "dusty_drums":
+                kicks = (0.0, 2.55 if bar % 2 == 0 else 2.75)
+                snares = (1.92, 3.92)
+                hats = (0.0, 0.78, 1.54, 2.32, 3.08, 3.62)
+                ghost = (2.18,) if intensity > 0.55 and bar % 2 == 1 else ()
+            elif role_text == "swing_drums":
+                kicks = (0.0, 2.62) if bar % 2 == 0 else (0.0,)
+                snares = (1.88, 3.78)
+                hats = (0.0, 0.66, 1.34, 2.0, 2.66, 3.34)
+                ghost = (1.34, 2.66) if intensity > 0.62 else (2.66,)
+            elif role_text == "trap_drums":
+                kicks = (0.0, 1.5, 2.75) if intensity > 0.68 else (0.0, 2.75)
+                snares = (2.0,)
+                hats = (0.0, 0.5, 1.0, 1.5, 2.5, 3.0, 3.5)
+                ghost = (3.75,) if intensity > 0.74 else ()
+            elif role_text == "retro_drums":
+                kicks = (0.0, 1.0, 2.0, 3.0) if intensity > 0.70 else (0.0, 2.0)
+                snares = (1.0, 3.0)
+                hats = (0.0, 0.5, 1.5, 2.0, 2.5, 3.5)
+                ghost = ()
+            else:
+                kicks = (0.0, 0.75, 2.0, 2.75) if intensity > 0.78 else (0.0, 2.0, 2.75)
+                snares = (1.0, 3.0)
+                hats = tuple(step * 0.5 for step in range(8))
+                ghost = (0.5, 1.5, 2.5, 3.5) if intensity > 0.84 else ()
+            for beat_pos in kicks:
+                _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat + beat_pos, pitch=36, duration_beats=0.32, velocity=72 + int(intensity * 28))
+            for beat_pos in snares:
+                _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat + beat_pos, pitch=38 if role_text != "retro_drums" else 39, duration_beats=0.24, velocity=66 + int(intensity * 24))
+            for beat_pos in hats:
+                _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat + beat_pos, pitch=51 if role_text == "swing_drums" else 42, duration_beats=0.13, velocity=34 + int(intensity * 22))
+            for beat_pos in ghost:
+                _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat + beat_pos, pitch=38, duration_beats=0.10, velocity=28 + int(intensity * 18))
+        return
+
+    if role_text in {"sub_bass", "electric_bass", "walking_bass", "808_bass", "pulse_bass", "low_bloom"}:
+        for bar in range(bars):
+            chord = _genre_chord_for_bar(section, bar)
+            root = _chord_root(chord, key)
+            bar_beat = bar * 4.0
+            if role_text == "walking_bass":
+                tones = _chord_notes(chord, key, octave=-1)
+                steps = (tones[0], tones[min(1, len(tones) - 1)], tones[min(2, len(tones) - 1)], tones[0] + 7)
+                for index, pitch in enumerate(steps):
+                    _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat + index, pitch=pitch, duration_beats=0.74, velocity=58 + int(intensity * 18))
+            elif role_text == "808_bass":
+                _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat, pitch=root - 24, duration_beats=2.65, velocity=76 + int(intensity * 22))
+                if intensity > 0.70:
+                    _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat + 2.75, pitch=root - 17, duration_beats=0.72, velocity=68 + int(intensity * 18))
+            elif role_text == "pulse_bass":
+                for step in range(8):
+                    pitch = root - 12 + (12 if step % 4 in {2, 3} else 0)
+                    _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat + step * 0.5, pitch=pitch, duration_beats=0.32, velocity=48 + int(intensity * 24))
+            elif role_text == "electric_bass":
+                for index, beat_pos in enumerate((0.0, 0.75, 1.5, 2.0, 2.75, 3.5)):
+                    pitch = root - 12 + (7 if index in {2, 5} else 0)
+                    _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat + beat_pos, pitch=pitch, duration_beats=0.38, velocity=58 + int(intensity * 24))
+            elif role_text == "low_bloom":
+                if bar % 2 == 0:
+                    _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat, pitch=root - 24, duration_beats=7.2, velocity=32 + int(intensity * 16))
+            else:
+                _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat, pitch=root - 12, duration_beats=1.8, velocity=54 + int(intensity * 18))
+                _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat + 2.55, pitch=root - 5, duration_beats=0.78, velocity=46 + int(intensity * 14))
+        return
+
+    if family == "guitar":
+        for bar in range(bars):
+            chord = _genre_chord_for_bar(section, bar)
+            root = _chord_root(chord, key) - 12
+            bar_beat = bar * 4.0
+            if role_text == "lead_guitar":
+                degrees = (4, 5, 7, 8, 7, 5, 4, 2) if "solo" in section_name else (0, 2, 4, 5)
+                for index, degree in enumerate(degrees):
+                    beat = bar_beat + 0.5 + index * (0.38 if "solo" in section_name else 0.72)
+                    _add_pitch_note(clip, section, bpm=bpm, beat=beat, pitch=_genre_scale_pitch(key, degree, register_shift=36), duration_beats=0.28, velocity=62 + int(intensity * 26))
+            elif role_text == "palm_mute_guitar":
+                for step in range(8):
+                    pitch = root + (7 if step % 4 == 3 else 0)
+                    _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat + step * 0.5, pitch=pitch, duration_beats=0.22, velocity=64 + int(intensity * 24))
+            else:
+                for beat_pos in (0.0, 2.0) if role_text == "power_chord_guitar" else (0.0, 1.5, 2.5):
+                    duration = 1.45 if role_text == "power_chord_guitar" else 0.78
+                    velocity = 58 + int(intensity * 24)
+                    for pitch in (root, root + 7, root + 12):
+                        _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat + beat_pos, pitch=pitch, duration_beats=duration, velocity=velocity)
+        return
+
+    if role_text in {
+        "jazz_chords",
+        "mellow_keys",
+        "dark_keys",
+        "tape_pad",
+        "rock_pad",
+        "jazz_piano",
+        "comping_guitar",
+        "analog_pad",
+        "brass_stab",
+        "drone_pad",
+        "shimmer_pad",
+    }:
+        for bar in range(bars):
+            chord = _genre_chord_for_bar(section, bar)
+            notes = _chord_voicing(chord, key, role="pad")
+            bar_beat = bar * 4.0
+            if role_text in {"tape_pad", "analog_pad", "drone_pad", "shimmer_pad", "rock_pad"}:
+                if role_text in {"drone_pad", "shimmer_pad"} and bar % 2:
+                    continue
+                duration = 3.7 if role_text not in {"drone_pad", "shimmer_pad"} else 7.4
+                velocity = 30 + int(intensity * (18 if role_text in {"drone_pad", "shimmer_pad"} else 24))
+                for index, pitch in enumerate(notes[:5]):
+                    octave = 12 if role_text == "shimmer_pad" and index >= 2 else 0
+                    _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat + index * 0.035, pitch=pitch + octave, duration_beats=duration, velocity=velocity)
+            elif role_text == "brass_stab":
+                if intensity < 0.58 and bar % 2:
+                    continue
+                for beat_pos in (0.0, 2.5) if intensity > 0.72 else (0.0,):
+                    for index, pitch in enumerate(notes[:4]):
+                        _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat + beat_pos + index * 0.025, pitch=pitch, duration_beats=0.42, velocity=48 + int(intensity * 24))
+            elif role_text in {"jazz_piano", "comping_guitar", "jazz_chords"}:
+                comp_beats = (0.0, 1.5, 2.5) if bar % 2 == 0 else (0.75, 2.0, 3.25)
+                for beat_pos in comp_beats:
+                    for index, pitch in enumerate(notes[:4]):
+                        guitar_shift = -12 if role_text == "comping_guitar" else 0
+                        _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat + beat_pos + index * 0.018, pitch=pitch + guitar_shift, duration_beats=0.46, velocity=42 + int(intensity * 22))
+            else:
+                for beat_pos in (0.0, 2.0):
+                    for index, pitch in enumerate(notes[:4]):
+                        _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat + beat_pos + index * 0.026, pitch=pitch, duration_beats=1.35, velocity=38 + int(intensity * 22))
+        return
+
+    if role_text in {"sample_chop", "lead_motif", "sax_lead", "trumpet_answer", "pluck_lead", "synth_lead", "slow_motif", "bell_echo", "hook_counter"}:
+        for bar in range(bars):
+            bar_beat = bar * 4.0
+            if role_text == "trumpet_answer" and bar % 2 == 0:
+                continue
+            if role_text == "bell_echo" and bar % 3:
+                continue
+            if role_text == "slow_motif" and bar % 2:
+                continue
+            if role_text == "sample_chop":
+                pattern = ((0.25, 0, 0.36), (1.5, 2, 0.28), (2.75, 4, 0.32), (3.45, 2, 0.20))
+                register = 24
+                base_velocity = 38
+            elif role_text == "sax_lead":
+                pattern = ((0.5, 2, 0.62), (1.35, 4, 0.44), (2.0, 5, 0.58), (3.0, 3, 0.52))
+                register = 36
+                base_velocity = 52
+            elif role_text == "trumpet_answer":
+                pattern = ((1.0, 5, 0.46), (1.75, 4, 0.28), (3.0, 2, 0.48))
+                register = 43
+                base_velocity = 48
+            elif role_text == "synth_lead":
+                pattern = ((0.0, 4, 0.48), (0.75, 7, 0.34), (1.5, 5, 0.36), (2.5, 4, 0.52), (3.25, 2, 0.28))
+                register = 36
+                base_velocity = 56
+            elif role_text == "pluck_lead":
+                pattern = ((0.5, 0, 0.28), (1.0, 2, 0.24), (2.5, 5, 0.28), (3.0, 4, 0.22))
+                register = 36
+                base_velocity = 46
+            elif role_text == "hook_counter":
+                pattern = ((1.25, 7, 0.28), (2.75, 5, 0.32))
+                register = 31
+                base_velocity = 42
+            elif role_text == "bell_echo":
+                pattern = ((0.0, 7, 1.4), (2.5, 5, 1.2))
+                register = 48
+                base_velocity = 34
+            elif role_text == "slow_motif":
+                pattern = ((0.0, 0, 2.8), (2.5, 2 + (bar % 3), 1.2))
+                register = 36
+                base_velocity = 32
+            else:
+                pattern = ((0.0, 0, 0.44), (1.25, 2, 0.36), (2.25, 4, 0.38), (3.0, 2 + (bar % 2), 0.42))
+                register = 31
+                base_velocity = 42
+            for beat_pos, degree, duration in pattern:
+                varied_degree = int(degree) + ((bar + lane) % 3 if role_text in {"sax_lead", "synth_lead", "lead_motif"} else 0)
+                _add_pitch_note(
+                    clip,
+                    section,
+                    bpm=bpm,
+                    beat=bar_beat + float(beat_pos),
+                    pitch=_genre_scale_pitch(key, varied_degree, register_shift=register),
+                    duration_beats=float(duration),
+                    velocity=base_velocity + int(intensity * 24),
+                )
+        return
+
+    if family == "fx":
+        for bar in range(0, bars, 2 if role_text in {"vinyl_noise", "texture_noise", "room_fx", "club_ambience"} else 1):
+            bar_beat = bar * 4.0
+            pitch = 72
+            if role_text in {"sub_fx"}:
+                pitch = 36
+            elif role_text in {"riser_fx", "noise_sweep", "neon_fx", "space_fx"}:
+                pitch = 84
+            elif role_text in {"brush_room", "club_ambience", "vinyl_noise", "texture_noise"}:
+                pitch = 60
+            duration = 7.4 if role_text in {"vinyl_noise", "texture_noise", "club_ambience", "space_fx"} else 1.8
+            _add_pitch_note(clip, section, bpm=bpm, beat=bar_beat, pitch=pitch, duration_beats=duration, velocity=24 + int(intensity * 24))
+        return
+
+
 def _default_music_tracks(*, include_fx: bool = True, melodic_edm: bool = False) -> list[MusicTrack]:
     if melodic_edm:
         tracks = [
@@ -1036,7 +2247,19 @@ def _generate_track_notes(track: MusicTrack, sections: list[MusicSection], *, bp
         bars = max(1, int(math.ceil(section.duration_ms / max(1, bar_ms))))
         section_tick = _ms_to_tick(section.start_ms, bpm)
         section_end_tick = section_tick + _ms_to_tick(section.duration_ms, bpm)
-        if family == "drums":
+        if role in _GENRE_SPECIAL_ROLES:
+            _render_genre_role(clip, section, role=role, bpm=bpm, key=key, lane=lane)
+        elif family in {
+            "classical_solo_violin",
+            "classical_strings",
+            "classical_low",
+            "classical_woodwind",
+            "classical_brass",
+            "classical_percussion",
+            "classical_pad",
+        }:
+            _render_classical_variation_role(clip, section, role=role, bpm=bpm, key=key, lane=lane)
+        elif family == "drums":
             for bar in range(bars):
                 bar_tick = section_tick + bar * beat_tick * 4
                 for beat in range(4):
@@ -1202,16 +2425,30 @@ def compose_music(
     genre_text = _clean_text(genre, "cinematic electronic")
     mood_text = _clean_text(mood, "confident")
     final_bpm = choose_bpm(prompt_text, genre_text, mood_text, bpm)
-    final_key = choose_key(prompt_text, mood_text, key)
+    final_key = choose_key(f"{prompt_text} {genre_text}", mood_text, key)
     duration = max(4000, min(180000, int(duration_ms or 30000)))
-    melodic_edm = _is_melodic_edm_request(prompt_text, genre_text, mood_text)
+    classical_variation = _is_classical_variation_request(prompt_text, genre_text, mood_text)
+    orchestral = _is_orchestral_request(prompt_text, genre_text, mood_text)
+    genre_planner = "" if classical_variation or orchestral else _genre_planner_for(prompt_text, genre_text, mood_text)
+    melodic_edm = not genre_planner and _is_melodic_edm_request(prompt_text, genre_text, mood_text)
     chords = chord_progression_for(final_key, genre_text, mood_text)
-    sections = _edm_sections(duration, final_key, final_bpm) if melodic_edm else _sections(duration, chords)
+    if classical_variation:
+        sections = _classical_variation_sections(duration, final_key)
+    elif genre_planner:
+        sections = _genre_sections(genre_planner, duration, final_key, final_bpm)
+    elif melodic_edm:
+        sections = _edm_sections(duration, final_key, final_bpm)
+    else:
+        sections = _sections(duration, chords)
     if melodic_edm and sections:
         duration = max(section.start_ms + section.duration_ms for section in sections)
     cid = composition_id(prompt_text, duration, genre_text, mood_text, final_bpm, final_key)
-    if _is_orchestral_request(prompt_text, genre_text, mood_text):
+    if classical_variation:
+        tracks = _classical_variation_tracks(include_fx=include_fx)
+    elif orchestral:
         tracks = _orchestral_tracks(include_fx=include_fx)
+    elif genre_planner:
+        tracks = _genre_tracks(genre_planner, include_fx=include_fx)
     else:
         tracks = _default_music_tracks(
             include_fx=include_fx,
@@ -1236,8 +2473,26 @@ def regenerate_section(composition: MusicComposition, section_name: str, *, mood
     target = str(section_name or "").strip().lower()
     if not target:
         raise ValueError("section_name is required")
+    aliases: set[str] = {target}
+    if target in {"main", "body"}:
+        aliases.update(
+            {
+                "dusty_groove",
+                "verse_riff",
+                "head",
+                "solo_a",
+                "hook",
+                "drive",
+                "drift",
+                "theme",
+                "drop",
+                "drop_1",
+                "neon_drop",
+                "bloom",
+            }
+        )
     for section in composition.sections:
-        if section.name.lower() != target:
+        if section.name.lower() not in aliases:
             continue
         if intensity is not None:
             section.intensity = max(0.05, min(1.0, float(intensity)))
@@ -1911,6 +3166,14 @@ def _note_envelope(
 def _role_tail_seconds(role: str, note: MidiNote) -> float:
     family = _role_family(role)
     role_text = str(role or "").lower()
+    if family == "classical_solo_violin":
+        return 0.24
+    if family in {"classical_strings", "classical_brass", "classical_woodwind"}:
+        return 0.30
+    if family == "classical_low":
+        return 0.20
+    if family == "classical_pad":
+        return 0.54
     if family in {"chords", "pad", "choir"}:
         return 0.42
     if family in {"strings_mid", "strings_high", "brass"}:
@@ -1925,6 +3188,8 @@ def _role_tail_seconds(role: str, note: MidiNote) -> float:
         return 0.20
     if family == "bass":
         return 0.16 if role_text.startswith(("bass_pulse", "bass_layer")) else 0.24
+    if family == "guitar":
+        return 0.12 if "palm_mute" in role_text else 0.22
     if family == "fx":
         return 0.75
     if family in {"drums", "orchestral_percussion"} and note.pitch in {38, 42, 46}:
@@ -1940,10 +3205,32 @@ def _classify_note_articulation(role: str, note: MidiNote, *, bpm: int = 120) ->
     family = _role_family(role)
     role_text = str(role or "").lower()
     beats = _note_duration_beats(note)
-    if family in {"drums", "orchestral_percussion"}:
+    if family in {"drums", "orchestral_percussion", "classical_percussion"}:
         if int(note.pitch) in {36, 38, 40, 41, 43, 45, 47, 48, 50}:
             return "hit"
         return "tick"
+    if family == "classical_solo_violin":
+        if beats <= 0.26:
+            return "spiccato"
+        if beats <= 0.58:
+            return "staccato"
+        if beats >= 1.35:
+            return "sustain"
+        return "legato"
+    if family in {"classical_strings", "classical_low"}:
+        if beats <= 0.42:
+            return "staccato"
+        if beats >= 1.7:
+            return "sustain"
+        return "legato"
+    if family in {"classical_woodwind", "classical_brass"}:
+        if beats <= 0.45:
+            return "staccato"
+        if beats >= 1.5:
+            return "sustain"
+        return "legato"
+    if family == "classical_pad":
+        return "sustain"
     if family == "timpani":
         return "roll" if beats >= 1.5 else "accent"
     if family == "guitar":
@@ -2013,7 +3300,7 @@ def _articulation_render_profile(articulation: str, role: str, note: MidiNote, *
         profile.update(gate_ratio=1.05, tail_scale=1.18, velocity_scale=0.94, edge_attack_s=0.012, edge_release_s=0.045)
     elif articulation in {"roll", "swell"}:
         profile.update(gate_ratio=1.08, tail_scale=1.24, velocity_scale=0.92, edge_attack_s=0.018, edge_release_s=0.060)
-    if family in {"drums", "orchestral_percussion"}:
+    if family in {"drums", "orchestral_percussion", "classical_percussion"}:
         profile["edge_attack_s"] = min(profile["edge_attack_s"], 0.0020)
     if family == "bass":
         profile["edge_release_s"] = max(profile["edge_release_s"], 0.014)
@@ -2044,7 +3331,7 @@ def _midi_expression_value_for_articulation(articulation: str, *, family: str) -
 
 def _midi_expression_events_for_track(track: MusicTrack, *, bpm: int, midi_channel: int) -> list[tuple[int, int, bytes]]:
     family = _role_family(track.role)
-    if family in {"drums", "orchestral_percussion"}:
+    if family in {"drums", "orchestral_percussion", "classical_percussion"}:
         return []
     events: list[tuple[int, int, bytes]] = []
     for clip in track.clips:
@@ -2060,7 +3347,19 @@ def _midi_expression_events_for_track(track: MusicTrack, *, bpm: int, midi_chann
                 mid = start + max(1, (end - start) // 3)
                 late = start + max(1, (end - start) * 2 // 3)
                 events.append((mid, 4, bytes((0xB0 | int(midi_channel), 11, min(122, expression + 8)))))
-                if family in {"strings_high", "strings_mid", "strings_low", "woodwinds", "brass", "melody"}:
+                if family in {
+                    "strings_high",
+                    "strings_mid",
+                    "strings_low",
+                    "woodwinds",
+                    "brass",
+                    "melody",
+                    "classical_solo_violin",
+                    "classical_strings",
+                    "classical_low",
+                    "classical_woodwind",
+                    "classical_brass",
+                }:
                     events.append((late, 5, bytes((0xB0 | int(midi_channel), 1, 20 if articulation == "legato" else 28))))
             elif articulation in {"spiccato", "staccato", "pulse", "palm_mute"}:
                 release_tick = start + max(1, (end - start) * 3 // 4)
@@ -2102,17 +3401,17 @@ def _humanize_note(role: str, note: MidiNote) -> tuple[float, float]:
 
     rng = np.random.default_rng(_note_seed(note, role))
     family = _role_family(role)
-    if family in {"drums", "orchestral_percussion"}:
+    if family in {"drums", "orchestral_percussion", "classical_percussion"}:
         if note.pitch == 36:
             return 0.0, float(rng.uniform(0.98, 1.03))
         if note.pitch == 38:
             return float(rng.uniform(-1.5, 2.5)), float(rng.uniform(0.94, 1.06))
         return float(rng.uniform(-3.0, 4.5)), float(rng.uniform(0.82, 1.05))
-    if family in {"chords", "pad", "choir", "strings_mid", "strings_high", "brass"}:
+    if family in {"chords", "pad", "choir", "strings_mid", "strings_high", "brass", "classical_strings", "classical_brass", "classical_pad"}:
         return float(rng.uniform(-2.0, 8.0)), float(rng.uniform(0.92, 1.04))
-    if family in {"bass", "strings_low", "timpani"}:
+    if family in {"bass", "strings_low", "timpani", "classical_low"}:
         return float(rng.uniform(-2.5, 4.0)), float(rng.uniform(0.95, 1.05))
-    if family in {"melody", "woodwinds"}:
+    if family in {"melody", "woodwinds", "guitar", "classical_solo_violin", "classical_woodwind"}:
         return float(rng.uniform(-4.0, 7.0)), float(rng.uniform(0.88, 1.08))
     return float(rng.uniform(-2.0, 5.0)), float(rng.uniform(0.92, 1.04))
 
@@ -2166,7 +3465,7 @@ def _render_note_tone(
         * max(0.2, min(1.4, velocity_scale))
         * max(0.65, min(1.25, float(articulation_profile["velocity_scale"])))
     )
-    if family in {"drums", "orchestral_percussion"}:
+    if family in {"drums", "orchestral_percussion", "classical_percussion"}:
         if note.pitch == 36:
             freq = 44.0 * np.exp(-t * 10.5) + 39.0
             click = np.sin(2.0 * np.pi * 1500.0 * t) * np.exp(-t * 96.0) * 0.022
@@ -2197,11 +3496,11 @@ def _render_note_tone(
             env = _note_envelope(local_len, active_len, attack_s=0.012, decay_s=0.22, sustain=0.42, release_s=0.34)
             roll = 1.0 + 0.014 * np.sin(2.0 * np.pi * 11.0 * t)
             wave_data = _soften_wave(sine * 0.70 + sub * 0.42 + second * 0.08, passes=2) * env * amp * 0.34 * roll
-        elif family in {"bass", "strings_low"}:
+        elif family in {"bass", "strings_low", "classical_low"}:
             sub = np.sin(2.0 * np.pi * hz * 0.5 * t)
             second = np.sin(2.0 * np.pi * hz * 2.0 * t)
             third = np.sin(2.0 * np.pi * hz * 3.0 * t)
-            if family == "strings_low":
+            if family in {"strings_low", "classical_low"}:
                 attack = 0.055
                 release = 0.22
                 bow = 0.985 + 0.015 * np.sin(2.0 * np.pi * 4.1 * t)
@@ -2217,7 +3516,7 @@ def _render_note_tone(
                 gain = 0.32 if is_pulse else 0.36
             env = _note_envelope(local_len, active_len, attack_s=attack, decay_s=0.12, sustain=0.66, release_s=release)
             wave_data = _soften_wave(body, passes=2) * env * amp * gain * bow
-        elif family in {"chords", "pad", "choir"}:
+        elif family in {"chords", "pad", "choir", "classical_pad"}:
             detune_a = np.sin(2.0 * np.pi * hz * 0.996 * t + 0.33)
             detune_b = np.sin(2.0 * np.pi * hz * 1.004 * t + 1.12)
             octave = np.sin(2.0 * np.pi * hz * 0.5 * t + 0.74)
@@ -2228,7 +3527,7 @@ def _render_note_tone(
             rng = np.random.default_rng(int(note.start_tick + note.pitch * 11))
             breath = _soften_wave(rng.normal(0.0, 1.0, local_len).astype(np.float32), passes=5) * (0.012 if family == "choir" else 0.005)
             wave_data = _soften_wave(wave, passes=3) * env * amp * (0.105 if family == "choir" else 0.13) * lfo + breath * env * amp
-        elif family in {"strings_mid", "strings_high"}:
+        elif family in {"strings_mid", "strings_high", "classical_strings", "classical_solo_violin"}:
             detune_a = np.sin(2.0 * np.pi * hz * 0.998 * t + 0.21)
             detune_b = np.sin(2.0 * np.pi * hz * 1.003 * t + 1.4)
             harmonic = np.sin(2.0 * np.pi * hz * 2.0 * t + 0.17)
@@ -2236,15 +3535,16 @@ def _render_note_tone(
             vib = np.sin(2.0 * np.pi * hz * (1.0 + vibrato) * t)
             env = _note_envelope(local_len, active_len, attack_s=0.075, decay_s=0.24, sustain=0.74, release_s=0.32)
             wave = vib * 0.44 + detune_a * 0.24 + detune_b * 0.22 + harmonic * 0.045
-            wave_data = _soften_wave(wave, passes=3) * env * amp * (0.15 if family == "strings_high" else 0.17)
-        elif family == "brass":
+            lead_gain = 0.20 if family == "classical_solo_violin" else 0.15 if family == "strings_high" else 0.17
+            wave_data = _soften_wave(wave, passes=3) * env * amp * lead_gain
+        elif family in {"brass", "classical_brass"}:
             second = np.sin(2.0 * np.pi * hz * 2.0 * t + 0.2)
             third = np.sin(2.0 * np.pi * hz * 3.0 * t + 0.5)
             swell = np.minimum(1.0, 0.55 + t / max(0.2, dur_s))
             env = _note_envelope(local_len, active_len, attack_s=0.055, decay_s=0.18, sustain=0.68, release_s=0.30)
             wave = np.tanh((sine * 0.62 + second * 0.22 + third * 0.075) * 1.1)
             wave_data = _soften_wave(wave, passes=2) * env * amp * 0.19 * swell
-        elif family == "woodwinds":
+        elif family in {"woodwinds", "classical_woodwind"}:
             vib_depth = 0.0011 * np.minimum(1.0, t / 0.18)
             vibrato = vib_depth * np.sin(2.0 * np.pi * 5.7 * t)
             vib_sine = np.sin(2.0 * np.pi * hz * (1.0 + vibrato) * t)
@@ -2253,6 +3553,23 @@ def _render_note_tone(
             breath = _soften_wave(rng.normal(0.0, 1.0, local_len).astype(np.float32), passes=4) * np.exp(-t * 18.0)
             env = _note_envelope(local_len, active_len, attack_s=0.026, decay_s=0.18, sustain=0.42, release_s=0.16)
             wave_data = _soften_wave(vib_sine * 0.70 + harmonic * 0.10 + breath * 0.022, passes=2) * env * amp * 0.18
+        elif family == "guitar":
+            phase = np.mod(hz * t, 1.0)
+            saw = phase * 2.0 - 1.0
+            second = np.sin(2.0 * np.pi * hz * 2.0 * t + 0.18)
+            fifth = np.sin(2.0 * np.pi * hz * 1.5 * t + 0.44)
+            palm = "palm_mute" in str(role or "").lower()
+            env = _note_envelope(
+                local_len,
+                active_len,
+                attack_s=0.004 if palm else 0.010,
+                decay_s=0.090 if palm else 0.16,
+                sustain=0.18 if palm else 0.48,
+                release_s=0.070 if palm else 0.20,
+            )
+            drive = np.tanh((saw * 0.42 + sine * 0.34 + second * 0.18 + fifth * 0.08) * (2.2 if palm else 1.65))
+            pick = np.sin(2.0 * np.pi * 2600.0 * t) * np.exp(-t * 70.0) * (0.018 if palm else 0.012)
+            wave_data = _soften_wave(drive + pick, passes=2) * env * amp * (0.17 if palm else 0.19)
         elif family == "fx":
             rng = np.random.default_rng(int(note.start_tick + note.pitch * 17))
             noise = _soften_wave(rng.normal(0.0, 1.0, local_len).astype(np.float32), passes=4)
@@ -2269,9 +3586,9 @@ def _render_note_tone(
             env = _note_envelope(local_len, active_len, attack_s=0.010, decay_s=0.18, sustain=0.26, release_s=0.20)
             wave = vib_sine * 0.74 + harmonic * 0.12 + breath * 0.018
             wave_data = _soften_wave(wave, passes=2) * env * amp * 0.21
-    if family in {"drums", "orchestral_percussion"}:
+    if family in {"drums", "orchestral_percussion", "classical_percussion"}:
         _apply_note_edge_ramp(wave_data, attack_s=0.0020, release_s=0.0045)
-    elif family == "bass":
+    elif family in {"bass", "classical_low"}:
         _apply_note_edge_ramp(
             wave_data,
             attack_s=max(0.0040, float(articulation_profile["edge_attack_s"])),
@@ -2309,22 +3626,22 @@ def _shape_stem(role: str, samples) -> None:
     if samples.size == 0:
         return
     role_text = _role_family(role)
-    if role_text in {"drums", "orchestral_percussion"}:
+    if role_text in {"drums", "orchestral_percussion", "classical_percussion"}:
         body = _box_filter(samples, 5)
         snap = samples - _box_filter(samples, 17)
         samples[:] = body * 0.92 + snap * 0.82
-    elif role_text in {"bass", "strings_low", "timpani"}:
+    elif role_text in {"bass", "strings_low", "timpani", "classical_low"}:
         low = _box_filter(samples, 41)
         mid = samples - _box_filter(samples, 13)
         samples[:] = low * 1.00 + mid * 0.28
-    elif role_text in {"chords", "pad", "choir", "strings_mid", "strings_high", "brass"}:
+    elif role_text in {"chords", "pad", "choir", "strings_mid", "strings_high", "brass", "classical_strings", "classical_brass", "classical_pad"}:
         low = _box_filter(samples, 113)
         smooth = _box_filter(samples, 9)
         samples[:] = (smooth - low * 0.28) * 0.92
-    elif role_text in {"melody", "woodwinds"}:
+    elif role_text in {"melody", "woodwinds", "guitar", "classical_solo_violin", "classical_woodwind"}:
         smooth = _box_filter(samples, 5)
         bite = samples - _box_filter(samples, 21)
-        samples[:] = smooth * 0.86 + bite * 0.18
+        samples[:] = smooth * (0.78 if role_text == "guitar" else 0.86) + bite * (0.28 if role_text == "guitar" else 0.18)
     elif role_text == "fx":
         samples[:] = _box_filter(samples, 7) * 0.90
     peak = float(np.max(np.abs(samples))) if samples.size else 0.0
@@ -3114,19 +4431,32 @@ def _studio_edm_bus(samples) -> None:
 def _sample_production_bus_for_role(role: str) -> str:
     family = _role_family(role)
     role_text = str(role or "").lower()
-    if family in {"drums", "orchestral_percussion", "timpani"} or "percussion" in role_text:
+    if family in {"drums", "orchestral_percussion", "timpani", "classical_percussion"} or "percussion" in role_text:
         return "percussion"
-    if family in {"bass", "strings_low"} or role_text.startswith(("contrabasses_", "cellos_")):
+    if family in {"bass", "strings_low", "classical_low"} or role_text.startswith(("contrabasses_", "cellos_")):
         return "low"
-    if family in {"strings_mid", "strings_high", "woodwinds", "brass", "choir"}:
+    if family in {"strings_mid", "strings_high", "woodwinds", "brass", "choir", "classical_strings", "classical_woodwind", "classical_brass"}:
         return "orchestra"
-    if family in {"chords", "pad"} or role_text.startswith("hybrid_pad"):
+    if family in {"chords", "pad", "classical_pad"} or role_text.startswith("hybrid_pad"):
         return "pads"
-    if family in {"melody", "guitar"}:
+    if family in {"melody", "guitar", "classical_solo_violin"}:
         return "lead"
     if family == "fx":
         return "fx"
     return "orchestra"
+
+
+def _sample_production_prefers_clean_violin_bus(bus_name: str, tracks: list[MusicTrack]) -> bool:
+    return str(bus_name or "").lower() == "lead" and any(_role_family(track.role) == "classical_solo_violin" for track in tracks)
+
+
+def _soften_clean_violin_bus(samples) -> None:
+    if getattr(samples, "size", 0) == 0:
+        return
+    smooth = _box_filter(samples, 7)
+    bite = samples - _box_filter(samples, 19)
+    samples[:] = smooth * 0.94 + bite * 0.045
+    _smooth_sample_jumps(samples, threshold=0.075, radius=5, passes=1)
 
 
 def _apply_sample_bus_polish(samples, *, bus: str, bpm: int, spatial: bool = True) -> None:
@@ -3518,6 +4848,7 @@ def _render_sample_production_preview(
         if not tracks:
             bus_renderers[bus_name] = {"source": "none", "ready": False, "reason": "no tracks"}
             continue
+        clean_violin_bus = _sample_production_prefers_clean_violin_bus(bus_name, tracks)
         external_samples = None
         external_meta: dict[str, Any] = {"source": "procedural_synth", "ready": False, "reason": "external samples skipped"}
         if bus_name == "percussion" and policy in {"auto", "sample_kit_first"}:
@@ -3529,7 +4860,7 @@ def _render_sample_production_preview(
                 target_length=length,
                 drum_kit_path=drum_kit_path,
             )
-        if external_samples is None and policy != "procedural_only":
+        if external_samples is None and policy != "procedural_only" and not clean_violin_bus:
             external_samples, external_meta = _render_soundfont_bus_samples(
                 composition,
                 tracks,
@@ -3538,6 +4869,12 @@ def _render_sample_production_preview(
                 target_length=length,
                 soundfont_path=soundfont_path,
             )
+        elif external_samples is None and clean_violin_bus:
+            external_meta = {
+                "source": "procedural_synth",
+                "ready": False,
+                "reason": "classical_solo_violin_clean_lead_bypass",
+            }
         elif external_samples is None and policy == "procedural_only":
             external_meta = {
                 "source": "procedural_synth",
@@ -3563,13 +4900,15 @@ def _render_sample_production_preview(
                         role=track.role,
                         volume=track.volume,
                         pan=track.pan,
-                        timing_jitter_scale=0.12,
+                        timing_jitter_scale=0.04 if clean_violin_bus else 0.12,
                     )
             _shape_stem(track.role, samples)
+            if clean_violin_bus:
+                _soften_clean_violin_bus(samples)
             _apply_sample_bus_polish(samples, bus=bus_name, bpm=composition.bpm, spatial=False)
             buses[bus_name] += samples
         bus_renderers[bus_name] = {
-            "source": "procedural_synth",
+            "source": "procedural_clean_violin" if clean_violin_bus else "procedural_synth",
             "ready": True,
             "reason": str(external_meta.get("reason") or "external sampler unavailable"),
         }
@@ -3913,9 +5252,66 @@ def _midi_program_for_role(role: str) -> int:
         "counter_melody": 88,
         "fx": 96,
         "lead": 80,
+        "dusty_drums": 0,
+        "rock_drums": 0,
+        "swing_drums": 0,
+        "trap_drums": 0,
+        "hat_rolls": 0,
+        "retro_drums": 0,
+        "sub_bass": 38,
+        "electric_bass": 34,
+        "walking_bass": 32,
+        "808_bass": 38,
+        "pulse_bass": 39,
+        "jazz_chords": 4,
+        "mellow_keys": 4,
+        "dark_keys": 5,
+        "tape_pad": 89,
+        "rock_pad": 89,
+        "jazz_piano": 0,
+        "comping_guitar": 27,
+        "analog_pad": 89,
+        "drone_pad": 89,
+        "shimmer_pad": 92,
+        "sample_chop": 88,
+        "lead_motif": 80,
+        "sax_lead": 66,
+        "trumpet_answer": 56,
+        "pluck_lead": 80,
+        "synth_lead": 81,
+        "hook_counter": 88,
+        "slow_motif": 80,
+        "bell_echo": 14,
+        "brass_stab": 62,
+        "vinyl_noise": 122,
+        "room_fx": 122,
+        "texture_fx": 122,
+        "brush_room": 122,
+        "club_ambience": 122,
+        "impact_fx": 96,
+        "sub_fx": 96,
+        "riser_fx": 96,
+        "noise_sweep": 96,
+        "neon_fx": 96,
+        "texture_noise": 122,
+        "space_fx": 96,
     }
     if role_text in direct:
         return direct[role_text]
+    if role_text.startswith("solo_violin"):
+        return 40
+    if role_text == "chamber_strings":
+        return 48
+    if role_text == "cello_bass":
+        return 42
+    if role_text == "woodwind_response":
+        return 73
+    if role_text == "horn_response":
+        return 60
+    if role_text == "brass_climax":
+        return 61
+    if role_text == "hall_pad":
+        return 89
     if role_text.startswith("violins_"):
         return 40
     if role_text.startswith("violas_"):
@@ -3959,6 +5355,12 @@ def _midi_program_for_role(role: str) -> int:
         "choir": 52,
         "timpani": 47,
         "guitar": 30,
+        "classical_solo_violin": 40,
+        "classical_strings": 48,
+        "classical_low": 42,
+        "classical_woodwind": 73,
+        "classical_brass": 60,
+        "classical_pad": 89,
     }.get(family, 88)
 
 
@@ -3972,10 +5374,26 @@ def _midi_channel_controllers_for_track(track: MusicTrack) -> list[tuple[int, in
     reverb = 24
     chorus = 10
     expression = 112
-    if family in {"drums", "orchestral_percussion"}:
+    if family in {"drums", "orchestral_percussion", "classical_percussion"}:
         reverb = 18
         chorus = 4
         expression = 118
+    elif family == "classical_solo_violin":
+        reverb = 48
+        chorus = 18
+        expression = 118
+    elif family in {"classical_strings", "classical_woodwind"}:
+        reverb = 44
+        chorus = 18
+        expression = 110
+    elif family in {"classical_brass", "classical_low"}:
+        reverb = 34
+        chorus = 10
+        expression = 112
+    elif family == "classical_pad":
+        reverb = 54
+        chorus = 28
+        expression = 104
     elif family == "bass":
         reverb = 10
         chorus = 8 if role_text.startswith("bass_pulse") else 3
@@ -4036,7 +5454,7 @@ def export_midi(
     for track in composition.tracks:
         role = str(track.role or track.id or "track").lower()
         family = _role_family(role)
-        percussion_channel = family in {"drums", "orchestral_percussion"} or role.startswith("cymbals_fx_")
+        percussion_channel = family in {"drums", "orchestral_percussion", "classical_percussion"} or role.startswith("cymbals_fx_")
         midi_channel = 9 if percussion_channel else channel
         if not percussion_channel:
             channel += 1

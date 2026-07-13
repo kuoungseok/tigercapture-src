@@ -53,6 +53,11 @@ from app.studio_theme import (
 )
 from app.style import COLOR_ACCENT_ORANGE
 from app.timeline_cursor import _timeline_tool_cursor
+from app.timeline_track_colors import (
+    catalog_track_palette as _catalog_track_palette,
+    is_performance_source_track as _is_performance_source_track,
+    track_palette_for_track as _track_palette_for_track,
+)
 from app.timeline_drop_guides import (
     drop_guide_detail_for_mime as _shared_drop_guide_detail_for_mime,
     drop_guide_segments_for_mime as _shared_drop_guide_segments_for_mime,
@@ -90,7 +95,7 @@ from app.video_track_legacy import VideoTrack
 
 
 TRACK_HEIGHT = 44
-TRACK_V_PADDING = 2
+TRACK_V_PADDING = 0
 DEFAULT_PX_PER_SEC = 52.0
 MIN_PX_PER_SEC = 4.0
 MAX_PX_PER_SEC = 300.0
@@ -124,7 +129,12 @@ def _append_ux_event(event: str, **payload) -> None:
         pass
 
 
-def _draw_marching_ants(painter: "QPainter", rect: "QRect", offset: int) -> None:
+def _draw_marching_ants(
+    painter: "QPainter",
+    rect: "QRect",
+    offset: int,
+    accent: "QColor | None" = None,
+) -> None:
     """Draw the selected-clip outline."""
     r = rect.adjusted(1, 1, -2, -2)
     if r.width() <= 0 or r.height() <= 0:
@@ -136,7 +146,9 @@ def _draw_marching_ants(painter: "QPainter", rect: "QRect", offset: int) -> None
     painter.drawRoundedRect(r.adjusted(0, 0, 0, 0), 3, 3)
     painter.setPen(QPen(QColor(226, 230, 236, 118), 1.1))
     painter.drawRoundedRect(r.adjusted(1, 1, -1, -1), 2, 2)
-    painter.setPen(QPen(QColor(255, 91, 76, 150), 1.2))
+    accent_color = QColor(accent) if accent is not None else QColor(255, 91, 76)
+    accent_color.setAlpha(156)
+    painter.setPen(QPen(accent_color, 1.2))
     painter.drawLine(r.left() + 5, r.top() + 2, r.right() - 5, r.top() + 2)
     painter.restore()
 
@@ -157,11 +169,9 @@ class TrackRow(QWidget):
     context_menu = Signal(int, QPoint)  # track_id, global_pos
 
     MARGIN = 180
-    # Slim header strip ??paints the active dot + track name above the
-    # timeline body. Trimmed from 18 ??14 to narrow the visual gap
-    # between the subtitle lane and the first track (users were trying
-    # to drop clips into the header area and missing).
-    LABEL_H = 13
+    # Track identity now lives in the left lane header and clip color strip.
+    # Keep no extra body header so stacked video clips read as dense lanes.
+    LABEL_H = 0
     TIMELINE_H = TRACK_HEIGHT
     FADE_EDGE_GRAB_PX = 6  # resize handle hit area in pixels
     TYPO_EDGE_GRAB_PX = 8
@@ -1797,30 +1807,10 @@ class TrackRow(QWidget):
         painter.restore()
 
     def _catalog_track_palette(self) -> tuple[QColor, QColor, QColor]:
-        palettes = (
-            ("#5A432F", "#75583A", "#D99B5D"),
-            ("#38495D", "#4B627A", "#89B4D6"),
-            ("#41533F", "#536C52", "#9ACB8C"),
-            ("#51405D", "#665179", "#BE98D8"),
-            ("#564B35", "#6D6042", "#D5B36A"),
-        )
-        try:
-            idx = max(0, int(getattr(self.track, "id", 0) or 0) - 1) % len(palettes)
-        except Exception:
-            idx = 0
-        return tuple(QColor(c) for c in palettes[idx])
+        return _catalog_track_palette(self.track)
 
     def _is_performance_source_track(self) -> bool:
-        try:
-            from app.vtuber.performance_source import is_performance_source_track
-
-            return bool(is_performance_source_track(self.track))
-        except Exception:
-            return bool(
-                getattr(self.track, "vtuber_performance_source", False)
-                or getattr(self.track, "performance_source", False)
-                or str(getattr(self.track, "track_type", "") or "").casefold() == "vtuber_performance_source"
-            )
+        return _is_performance_source_track(self.track)
 
     @staticmethod
     def _is_performance_source_clip(clip) -> bool:
@@ -1836,9 +1826,7 @@ class TrackRow(QWidget):
             )
 
     def _track_palette_for_role(self) -> tuple[QColor, QColor, QColor]:
-        if self._is_performance_source_track():
-            return QColor("#303440"), QColor("#3C4251"), QColor("#868CA0")
-        return self._catalog_track_palette()
+        return _track_palette_for_track(self.track)
 
     @staticmethod
     def _duration_chip_text(duration_ms: int) -> str:

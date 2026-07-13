@@ -322,6 +322,7 @@ def build_timeline_area(self):
     # Shared project-time ruler at the top of the scroll viewport so it
     # scrolls horizontally with the tracks.
     self._timeline_ruler = TimelineRuler()
+    self._timeline_ruler.installEventFilter(self)
     self._timeline_ruler.scrub_requested.connect(self._player.set_position)
     self._timeline_ruler.marker_delete_requested.connect(self._delete_timeline_marker)
     self._tracks_layout.addWidget(self._timeline_ruler)

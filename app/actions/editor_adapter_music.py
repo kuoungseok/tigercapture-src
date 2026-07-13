@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, Sequence
+import copy
 from pathlib import Path
 from typing import Any
 
@@ -570,6 +571,83 @@ class MusicAdapterMixin:
             changed.append({"track_id": tid, "role": role or "music", "volume": volume, "pan": pan})
         self._after_timeline_mutation("Action auto balance music mixer")
         return {"schema": MUSIC_SCHEMA, "changed": changed, "changed_count": len(changed)}
+
+    def music_apply_master_fx(
+        self,
+        *,
+        composition_id: str | None = None,
+        role: str = "mix",
+        effects: Mapping[str, Any] | None = None,
+        merge: bool = True,
+        focus_workbench: bool = False,
+    ) -> dict[str, Any]:
+        """Apply Sound Editor effect state to rendered Music Lab audio clips.
+
+        Composer owns MIDI/arrangement.  Sound shaping should still flow through
+        the Sound Editor effect model, so this action finds the rendered Music
+        Mix or requested stem tracks and merges ``AudioClip.effects`` there.
+        """
+        owner = self._require_owner()
+        target_role = str(role or "mix").strip().lower()
+        target_aliases = _music_render_role_aliases(target_role)
+        if target_role in {"", "all", "*", "music"}:
+            target_aliases = set()
+        elif target_role == "mix":
+            target_aliases = {"mix"}
+        if not isinstance(effects, Mapping):
+            effects = {}
+
+        from app.audio_tracks import default_effects_state
+
+        defaults = default_effects_state()
+        changed: list[dict[str, Any]] = []
+        last_track = None
+        last_clip = None
+        for track in list(getattr(owner, "_audio_tracks", []) or []):
+            cid = str(getattr(track, "music_composition_id", "") or "")
+            if composition_id and cid != str(composition_id):
+                continue
+            music_role = str(getattr(track, "music_role", "") or "").strip().lower()
+            label = str(getattr(track, "label", "") or "").strip().lower()
+            is_music = bool(music_role or label.startswith("music"))
+            if not is_music:
+                continue
+            if target_aliases and music_role not in target_aliases:
+                continue
+            for clip in list(getattr(track, "clips", []) or []):
+                if getattr(clip, "source_path", None) is None:
+                    continue
+                if not isinstance(getattr(clip, "effects", None), dict) or not merge:
+                    clip.effects = copy.deepcopy(defaults)
+                self._merge_sound_editor_effects(clip.effects, effects)
+                self._update_audio_track(track)
+                last_track = track
+                last_clip = clip
+                changed.append(
+                    {
+                        "track_id": _int(getattr(track, "id", 0)),
+                        "clip_id": _int(getattr(clip, "id", 0)),
+                        "role": music_role or "music",
+                        "label": str(getattr(track, "label", "") or ""),
+                    }
+                )
+        ui_updated = False
+        if last_track is not None and last_clip is not None:
+            ui_updated = self._focus_workbench_sound_editor(
+                last_track,
+                last_clip,
+                focus_workbench=_bool(focus_workbench, False),
+            )
+        if changed:
+            self._after_timeline_mutation("Action apply Composer master FX")
+        return {
+            "schema": MUSIC_SCHEMA,
+            "composition_id": str(composition_id or ""),
+            "role": target_role,
+            "changed": changed,
+            "changed_count": len(changed),
+            "ui_updated": ui_updated,
+        }
 
     def music_regenerate_section(
         self,

@@ -822,6 +822,36 @@ class VideoExportThread(QThread):
             pass
         return 30.0
 
+    def _legacy_color_grade_needs_letterbox_prerender(self) -> bool:
+        """Return True when FFmpeg-only grading would recolor encoded mattes."""
+        grade = self._color_grade
+        if self._node_item_chain or grade is None or grade.is_identity():
+            return False
+        try:
+            import cv2  # type: ignore
+            from app.video_letterbox import detect_letterbox_bands
+
+            cap = cv2.VideoCapture(str(self._source))
+            try:
+                positions = [0.0]
+                if self._segments:
+                    start, end, _speed = self._segments[0]
+                    positions.extend([max(0.0, float(start)), max(0.0, (float(start) + float(end)) * 0.5)])
+                for pos_ms in positions[:3]:
+                    if pos_ms > 0:
+                        cap.set(cv2.CAP_PROP_POS_MSEC, float(pos_ms))
+                    ok, frame = cap.read()
+                    if not ok or frame is None:
+                        continue
+                    rgb = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                    if bool(detect_letterbox_bands(rgb).get("ok")):
+                        return True
+            finally:
+                cap.release()
+        except Exception:
+            return False
+        return False
+
     @staticmethod
     def _node_chain_needs_prerender(node_item_chain: list | None) -> bool:
         """Return True when the preview node chain cannot be represented
@@ -2459,6 +2489,7 @@ class VideoExportThread(QThread):
             use_prerendered_base = (
                 self._force_prerender_base
                 or self._node_chain_needs_prerender(self._node_item_chain)
+                or self._legacy_color_grade_needs_letterbox_prerender()
                 or self._clip_effects_need_prerender(self._clip_effects)
                 or bool(self._render_clip_tracks)
                 or bool(self._ar_pbr_tracks)

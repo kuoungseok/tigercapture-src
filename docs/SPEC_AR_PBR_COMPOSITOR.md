@@ -176,8 +176,11 @@ Current implementation status:
 - `app.depth.cache` stores frame `.npy` files plus a manifest with provider,
   source path, source mtime, frame count, stale-cache status, and nearest-frame
   lookup support.
-- `app.depth.refinement` and `app.depth.temporal` provide lightweight
-  compositor-oriented edge cleanup and temporal stabilization hooks.
+- `app.depth.refinement` provides compositor-oriented depth cleanup:
+  robust normalization, invalid edge-band masking, RGB-guided edge-aware
+  smoothing, foreground bias, and a separate layered depth-matte path for
+  viewer diagnostics. `app.depth.temporal` provides scene-cut-aware temporal
+  stabilization.
 - `ProjectPlayer` and `VideoExporter` already pass depth frames into AR/PBR
   preview/export when `depth_source_id`, scene-anchor depth, or runtime depth is
   available. Cached depth is loaded first, including nearby cached frames for
@@ -194,9 +197,9 @@ Product implication:
 - TigerCapture must not claim high-quality photo/video depth generation while
   the runtime depth backend is `synthetic_luma_depth`.
 - The current fallback is sufficient for QA, simple road-plane smoke tests, and
-  proof that preview/export consume depth, but it cannot produce the
-  foreground/person-aware depth maps shown in high-quality monocular depth
-  examples.
+  proof that preview/export consume depth. The refinement pass can make viewer
+  diagnostics look like stable layered mattes, but synthetic fallback depth is
+  still not a substitute for a high-quality monocular/video depth model.
 
 Production response plan:
 
@@ -219,8 +222,10 @@ Production response plan:
    - CLI/manual QA entry point:
      `python tools/generate_depth_cache.py clip.mp4 --interval-ms 200 --max-frames 60`.
 4. PARTIAL: Edge/refinement passes before AR/PBR occlusion:
-   - lightweight RGB-aware blur and optional mask foreground bias exists.
-   - remaining work: SAM/object-mask integration and manual brush correction UI.
+   - robust normalize, invalid border masking, RGB-guided edge-aware smoothing,
+     optional foreground bias, and layered viewer matte are implemented.
+   - remaining work: SAM/object-mask integration, manual brush correction UI,
+     and a production monocular/video depth backend.
 5. PARTIAL: Video temporal stabilization:
    - lightweight temporal smoothing with scene-cut reset exists.
    - remaining work: optical-flow-guided propagation and Video Depth Anything or
@@ -620,15 +625,29 @@ Current implemented behavior as of 2026-07-03:
 - `app.ar_pbr.depth_view.depth_frame_to_rgb(...)` is the viewer-only depth map
   display path. The main ProjectPlayer preview can be switched to
   depth-map-only via `ProjectPlayer.set_ar_pbr_depth_view_mode(...)` or Python
-  Actions `ar_pbr.preview.depth_view.get/set`. Default display is grayscale
-  with near camera = white; `heat` and `inverted_grayscale` are debug options.
-  This mode is diagnostic only and must not change export/composite output.
+  Actions `ar_pbr.preview.depth_view.get/set`. The UI `Depth` button cycles
+  `off -> matte -> distance -> plane -> off`: `matte` uses
+  `app.depth.refinement.layered_depth_matte_for_viewer(...)` for cleaner object
+  bands and sharper visual edges, `distance` keeps a smoother depth gradient
+  with contour lines for distance/slope checking, and `plane` overlays rough
+  road/floor candidate regions for placement inspection. `heat` and
+  `inverted_grayscale` remain debug options. These modes are diagnostic only
+  and must not change export/composite output.
 - Depth-map-only preview is user-controlled and must stay off by default. Normal
   playback must not estimate depth unless an active AR/PBR track explicitly
   needs depth for occlusion, scene/plane anchoring, or the user has enabled the
   Depth viewer toggle. If no depth cache is available, live depth estimation may
   be slower and should be treated as an intentional diagnostic/placement cost,
   not part of the baseline video playback path.
+- AR/PBR track status is separate from the Depth viewer. Timeline AR/PBR lanes
+  expose a compact metadata badge: `3D` for manual placement, `ANCH` for
+  depth/plane anchored placement, and `TRK` when the anchored track also has
+  template tracking metadata. This badge must not run depth estimation or scene
+  solving by itself.
+- Encoded letterbox/pillarbox mattes are detected from the RGB video frame
+  before depth refinement. Detected matte bands are treated as invalid scene
+  area for depth normalization and diagnostic matte/plane inspection; they are
+  not valid road/floor or occlusion evidence.
 - Optional depth-boundary glow is configured through
   `depth_edge_glow_enabled`, `depth_edge_glow_strength`,
   `depth_edge_glow_radius_px`, and `depth_edge_glow_color`. This is a visible

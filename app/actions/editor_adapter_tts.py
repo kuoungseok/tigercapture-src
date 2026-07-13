@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Mapping
 
 
@@ -62,6 +63,74 @@ class TtsAdapterMixin:
 
         return connect_installed_tts(root_path, endpoint=endpoint, auto_start=auto_start)
 
+    def tts_model_training_plan(
+        self,
+        *,
+        model_name: str = "",
+        source_audio_dir: str = "",
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        from app.tts_model_training import tts_model_training_plan
+
+        return tts_model_training_plan(model_name=model_name, source_audio_dir=source_audio_dir)
+
+    def tts_model_training_execution_gate(
+        self,
+        *,
+        model_name: str = "",
+        source_audio_dir: str = "",
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        from app.tts_model_training import tts_model_training_execution_gate
+
+        return tts_model_training_execution_gate(model_name=model_name, source_audio_dir=source_audio_dir)
+
+    def tts_model_training_prepare_workspace(
+        self,
+        *,
+        model_name: str,
+        source_audio_dir: str = "",
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        from app.tts_model_training import tts_model_training_prepare_workspace
+
+        return tts_model_training_prepare_workspace(
+            model_name=model_name,
+            source_audio_dir=source_audio_dir,
+            overwrite=overwrite,
+        )
+
+    def tts_model_training_launch_dataset(
+        self,
+        *,
+        model_name: str = "",
+        source_audio_dir: str = "",
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        from app.tts_model_training import tts_model_training_launch_tool
+
+        return tts_model_training_launch_tool(tool="dataset", model_name=model_name, source_audio_dir=source_audio_dir)
+
+    def tts_model_training_launch_train(
+        self,
+        *,
+        model_name: str = "",
+        source_audio_dir: str = "",
+        overwrite: bool = False,
+    ) -> dict[str, Any]:
+        from app.tts_model_training import tts_model_training_launch_tool
+
+        return tts_model_training_launch_tool(tool="train", model_name=model_name, source_audio_dir=source_audio_dir)
+
+    def tts_model_training_register_result(
+        self,
+        *,
+        model_name: str,
+    ) -> dict[str, Any]:
+        from app.tts_model_training import tts_model_training_register_result
+
+        return tts_model_training_register_result(model_name=model_name)
+
     def tts_voice_list(self) -> dict[str, Any]:
         from app.tts_setup import tts_provider_status
         from app.tts_subtitle_workflow import preferred_model_name
@@ -72,7 +141,7 @@ class TtsAdapterMixin:
             "ready": bool(status.get("available")),
             "endpoint": str(status.get("endpoint") or ""),
             "models": model_names,
-            "default_model": preferred_model_name(status, "zoe"),
+            "default_model": preferred_model_name(status, "koharune-ami"),
         }
 
     def tts_subtitle_plan(
@@ -94,6 +163,79 @@ class TtsAdapterMixin:
             track_id=track_id,
             track_name=track_name or TTS_DIALOGUE_TRACK_NAME,
         )
+
+    def tts_dialogue_plan_actor_take(
+        self,
+        *,
+        dialogue_text: str = "",
+        lines: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...] | None = None,
+        start_ms: int = 0,
+        default_duration_ms: int = 1800,
+        gap_ms: int = 160,
+        chars_per_second: float = 12.0,
+    ) -> dict[str, Any]:
+        """Return selectable choices for a one-shot AI dialogue take."""
+        from app.live2d.dialogue_placement import placement_preset_options, size_preset_options
+        from app.tts_setup import tts_provider_status
+        from app.tts_subtitle_workflow import preferred_dialogue_model_name
+
+        rows = self._tts_dialogue_rows(
+            dialogue_text=dialogue_text,
+            lines=lines,
+            start_ms=start_ms,
+            default_duration_ms=default_duration_ms,
+            gap_ms=gap_ms,
+            chars_per_second=chars_per_second,
+        )
+        status = tts_provider_status()
+        model_names = list((status.get("root") or {}).get("model_names", []) or [])
+        default_model = preferred_dialogue_model_name(status, rows)
+        tts_models = [
+            {
+                "id": str(name),
+                "label": str(name),
+                "ready": bool(status.get("available")),
+                "recommended": str(name) == default_model,
+            }
+            for name in model_names
+        ]
+        live2d_targets = self._tts_live2d_target_options()
+        default_target = next((row for row in live2d_targets if row.get("recommended")), live2d_targets[0] if live2d_targets else {})
+        placement_presets = placement_preset_options()
+        size_presets = size_preset_options()
+        return {
+            "schema": "tigerstudio.tts.dialogue_actor_take_plan.v1",
+            "dialogue": {
+                "line_count": len(rows),
+                "start_ms": min((int(row.get("start_ms", 0) or 0) for row in rows), default=max(0, int(start_ms or 0))),
+                "end_ms": max((int(row.get("end_ms", 0) or 0) for row in rows), default=max(0, int(start_ms or 0))),
+                "estimated_duration_ms": self._tts_dialogue_take_duration(rows),
+                "rows": rows,
+            },
+            "live2d_targets": live2d_targets,
+            "tts_models": tts_models,
+            "placement_presets": placement_presets,
+            "size_presets": size_presets,
+            "recommended": {
+                "actor_target_id": str(default_target.get("id") or ""),
+                "model_name": default_model,
+                "placement_preset": "bottom_right",
+                "size_preset": "auto_fit",
+                "create_subtitles": True,
+                "generate_tts": True,
+                "apply_actor_lipsync": True,
+                "apply_actor_placement": True,
+                "apply_actor_motion": True,
+                "actor_motion_style": "natural_dialogue",
+                "fit_avatar_to_bottom_edge": True,
+            },
+            "diagnostics": {
+                "tts_ready": bool(status.get("available")),
+                "tts_endpoint": str(status.get("endpoint") or ""),
+                "live2d_target_count": len(live2d_targets),
+                "tts_model_count": len(tts_models),
+            },
+        }
 
     def tts_generate_subtitle_track(
         self,
@@ -120,6 +262,11 @@ class TtsAdapterMixin:
         lipsync_param_id: str = "ParamMouthOpenY",
         lipsync_form_param_id: str = "ParamMouthForm",
         lipsync_open_value: float = 0.82,
+        lipsync_include_blink: bool = True,
+        lipsync_blink_left_param_id: str = "ParamEyeLOpen",
+        lipsync_blink_right_param_id: str = "ParamEyeROpen",
+        lipsync_blink_interval_ms: int = 3100,
+        lipsync_blink_duration_ms: int = 140,
     ) -> dict[str, Any]:
         from app.audio_tracks import AudioClip, AudioTrack
         from app.tts_subtitle_workflow import (
@@ -288,6 +435,11 @@ class TtsAdapterMixin:
                     mouth_param_id=lipsync_param_id,
                     mouth_form_param_id=lipsync_form_param_id,
                     open_value=lipsync_open_value,
+                    include_blink=lipsync_include_blink,
+                    blink_left_param_id=lipsync_blink_left_param_id,
+                    blink_right_param_id=lipsync_blink_right_param_id,
+                    blink_interval_ms=lipsync_blink_interval_ms,
+                    blink_duration_ms=lipsync_blink_duration_ms,
                 )
         self._after_timeline_mutation("Generate TTS subtitle track")
         return {
@@ -315,6 +467,11 @@ class TtsAdapterMixin:
         mouth_param_id: str = "ParamMouthOpenY",
         mouth_form_param_id: str = "ParamMouthForm",
         open_value: float = 0.82,
+        include_blink: bool = True,
+        blink_left_param_id: str = "ParamEyeLOpen",
+        blink_right_param_id: str = "ParamEyeROpen",
+        blink_interval_ms: int = 3100,
+        blink_duration_ms: int = 140,
     ) -> dict[str, Any]:
         """Bake TTS/subtitle timing into a Live2D actor mouth parameter track."""
         _track, clip = self._actor_track_and_clip("live2d", int(actor_track_id), int(actor_clip_index or 0))
@@ -335,6 +492,11 @@ class TtsAdapterMixin:
             mouth_param_id=mouth_param_id,
             mouth_form_param_id=mouth_form_param_id,
             open_value=float(open_value),
+            include_blink=bool(include_blink),
+            blink_left_param_id=blink_left_param_id,
+            blink_right_param_id=blink_right_param_id,
+            blink_interval_ms=int(blink_interval_ms or 3100),
+            blink_duration_ms=int(blink_duration_ms or 140),
         )
         if not bool(payload.get("ok")):
             raise ValueError("TTS lip-sync produced no actor keyframes.")
@@ -363,6 +525,164 @@ class TtsAdapterMixin:
             "row_count": int(payload.get("row_count", 0) or 0),
             "parameter_tracks": list(generated_tracks.keys()),
             "keyframe_count": sum(len(list(keys or [])) for keys in generated_tracks.values()),
+            "blink_count": int(payload.get("blink_count", 0) or 0),
+        }
+
+    def tts_dialogue_generate_actor_take(
+        self,
+        *,
+        dialogue_text: str = "",
+        lines: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...] | None = None,
+        start_ms: int = 0,
+        default_duration_ms: int = 1800,
+        gap_ms: int = 160,
+        chars_per_second: float = 12.0,
+        create_subtitles: bool = True,
+        model_name: str = "",
+        output_dir: str = "",
+        track_id: int | None = None,
+        track_name: str = "TTS Dialogue",
+        replace_existing: bool = False,
+        language: str = "",
+        style: str = "",
+        style_weight: float | None = None,
+        sdp_ratio: float | None = None,
+        noise: float | None = None,
+        noisew: float | None = None,
+        length: float | None = None,
+        timeout_s: float = 120.0,
+        auto_start_server: bool = True,
+        server_wait_timeout_s: float = 90.0,
+        apply_actor_lipsync: bool = True,
+        actor_target_id: str = "",
+        actor_track_id: int | None = None,
+        actor_clip_index: int = 0,
+        apply_actor_placement: bool = True,
+        apply_actor_motion: bool = True,
+        actor_motion_style: str = "natural_dialogue",
+        actor_motion_interval_ms: int = 700,
+        placement_preset: str = "bottom_right",
+        size_preset: str = "auto_fit",
+        canvas_width: int = 1920,
+        canvas_height: int = 1080,
+        placement_sample_ms: int = 0,
+        placement_replace_transform_keyframes: bool = True,
+        lipsync_param_id: str = "ParamMouthOpenY",
+        lipsync_form_param_id: str = "ParamMouthForm",
+        lipsync_open_value: float = 0.82,
+        lipsync_include_blink: bool = True,
+        lipsync_blink_left_param_id: str = "ParamEyeLOpen",
+        lipsync_blink_right_param_id: str = "ParamEyeROpen",
+        lipsync_blink_interval_ms: int = 3100,
+        lipsync_blink_duration_ms: int = 140,
+    ) -> dict[str, Any]:
+        """Create subtitles, TTS audio, Live2D placement, and natural acting keys."""
+        owner = self._require_owner()
+        rows = self._tts_dialogue_rows(
+            dialogue_text=dialogue_text,
+            lines=lines,
+            start_ms=start_ms,
+            default_duration_ms=default_duration_ms,
+            gap_ms=gap_ms,
+            chars_per_second=chars_per_second,
+        )
+        if not rows:
+            raise ValueError("No dialogue text is available.")
+
+        subtitle_indices: list[int] | None = None
+        subtitle_result: dict[str, Any] = {"created": False, "count": 0, "indices": []}
+        if bool(create_subtitles):
+            subtitle_result = self._tts_append_subtitle_rows(rows)
+            subtitle_indices = [int(index) for index in subtitle_result.get("indices", [])]
+        else:
+            subtitle_indices = [int(row.get("index", idx) or idx) for idx, row in enumerate(rows)]
+
+        target = {"found": False, "track_id": actor_track_id, "clip_index": int(actor_clip_index or 0)}
+        if bool(apply_actor_lipsync) or bool(apply_actor_placement) or bool(apply_actor_motion):
+            target = self._tts_resolve_live2d_actor_target(
+                actor_target_id=actor_target_id,
+                actor_track_id=actor_track_id,
+                actor_clip_index=actor_clip_index,
+                start_ms=max(0, int(start_ms or 0)),
+                duration_ms=self._tts_dialogue_take_duration(rows),
+            )
+            actor_track_id = target.get("track_id") if target.get("found") else None
+            actor_clip_index = int(target.get("clip_index", actor_clip_index) or 0)
+
+        selected_model_name = str(model_name or "").strip()
+        if not selected_model_name:
+            from app.tts_setup import tts_provider_status
+            from app.tts_subtitle_workflow import preferred_dialogue_model_name
+
+            selected_model_name = preferred_dialogue_model_name(
+                tts_provider_status(),
+                rows,
+                language=language,
+            )
+
+        placement_result: dict[str, Any] = {"applied": False, "reason": "not_requested"}
+        if bool(apply_actor_placement) and actor_track_id is not None:
+            placement_result = self._tts_apply_live2d_dialogue_placement(
+                actor_track_id=int(actor_track_id),
+                actor_clip_index=int(actor_clip_index or 0),
+                placement_preset=placement_preset,
+                size_preset=size_preset,
+                canvas_width=canvas_width,
+                canvas_height=canvas_height,
+                sample_ms=placement_sample_ms,
+                replace_transform_keyframes=placement_replace_transform_keyframes,
+            )
+
+        motion_result: dict[str, Any] = {"applied": False, "reason": "not_requested"}
+        if bool(apply_actor_motion) and actor_track_id is not None:
+            motion_result = self._tts_apply_live2d_dialogue_motion(
+                actor_track_id=int(actor_track_id),
+                actor_clip_index=int(actor_clip_index or 0),
+                rows=rows,
+                style=actor_motion_style,
+                interval_ms=actor_motion_interval_ms,
+            )
+
+        tts_result = self.tts_generate_subtitle_track(
+            model_name=selected_model_name,
+            subtitle_indices=subtitle_indices,
+            output_dir=output_dir,
+            track_id=track_id,
+            track_name=track_name,
+            replace_existing=replace_existing,
+            language=language,
+            style=style,
+            style_weight=style_weight,
+            sdp_ratio=sdp_ratio,
+            noise=noise,
+            noisew=noisew,
+            length=length,
+            timeout_s=timeout_s,
+            auto_start_server=auto_start_server,
+            server_wait_timeout_s=server_wait_timeout_s,
+            apply_actor_lipsync=bool(apply_actor_lipsync and actor_track_id is not None),
+            actor_track_id=int(actor_track_id) if actor_track_id is not None else None,
+            actor_clip_index=int(actor_clip_index or 0),
+            lipsync_param_id=lipsync_param_id,
+            lipsync_form_param_id=lipsync_form_param_id,
+            lipsync_open_value=lipsync_open_value,
+            lipsync_include_blink=lipsync_include_blink,
+            lipsync_blink_left_param_id=lipsync_blink_left_param_id,
+            lipsync_blink_right_param_id=lipsync_blink_right_param_id,
+            lipsync_blink_interval_ms=lipsync_blink_interval_ms,
+            lipsync_blink_duration_ms=lipsync_blink_duration_ms,
+        )
+        if bool(apply_actor_lipsync) and actor_track_id is None:
+            tts_result["actor_lipsync"] = {"applied": False, "reason": "no_live2d_actor"}
+        return {
+            "schema": "tigercapture.tts_dialogue_actor_take.v1",
+            "dialogue_line_count": len(rows),
+            "subtitles": subtitle_result,
+            "actor_target": target,
+            "placement": placement_result,
+            "actor_motion": motion_result,
+            "tts": tts_result,
+            "actor_lipsync": dict(tts_result.get("actor_lipsync") or {}),
         }
 
     def _tts_lipsync_rows_from_owner(self, *, use_generated_clips: bool = True) -> list[dict[str, Any]]:
@@ -401,3 +721,380 @@ class TtsAdapterMixin:
             return subtitle_rows_from_owner(owner)
         except Exception:
             return []
+
+    def _tts_dialogue_rows(
+        self,
+        *,
+        dialogue_text: str = "",
+        lines: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...] | None = None,
+        start_ms: int = 0,
+        default_duration_ms: int = 1800,
+        gap_ms: int = 160,
+        chars_per_second: float = 12.0,
+    ) -> list[dict[str, Any]]:
+        cursor = max(0, int(start_ms or 0))
+        gap = max(0, int(gap_ms or 0))
+        default_duration = max(300, int(default_duration_ms or 1800))
+        cps = max(4.0, float(chars_per_second or 12.0))
+        source_lines: list[Mapping[str, Any]]
+        if lines:
+            source_lines = [dict(row) for row in lines if isinstance(row, Mapping)]
+        else:
+            source_lines = [{"text": text.strip()} for text in str(dialogue_text or "").splitlines() if text.strip()]
+
+        rows: list[dict[str, Any]] = []
+        for index, raw in enumerate(source_lines):
+            text = str(raw.get("text") or raw.get("dialogue") or raw.get("subtitle_text") or "").strip()
+            if not text:
+                continue
+            row_start = int(raw.get("start_ms", raw.get("timeline_in_ms", cursor)) or cursor)
+            if "end_ms" in raw:
+                row_end = max(row_start + 1, int(raw.get("end_ms") or row_start + default_duration))
+                duration = row_end - row_start
+            else:
+                estimated = int(round(len(text) / cps * 1000.0)) + 450
+                duration = max(700, min(6200, int(raw.get("duration_ms", estimated) or estimated)))
+                if "duration_ms" not in raw:
+                    duration = max(duration, min(3200, default_duration))
+                row_end = row_start + duration
+            rows.append(
+                {
+                    "index": index,
+                    "start_ms": max(0, row_start),
+                    "end_ms": max(row_start + 1, row_end),
+                    "duration_ms": max(1, duration),
+                    "text": text,
+                    "style": dict(raw.get("style") or {}),
+                }
+            )
+            cursor = max(cursor, row_end + gap)
+        return rows
+
+    def _tts_dialogue_take_duration(self, rows: list[Mapping[str, Any]]) -> int:
+        if not rows:
+            return 3000
+        start = min(max(0, int(row.get("start_ms", 0) or 0)) for row in rows)
+        end = max(max(start + 1, int(row.get("end_ms", start + 1) or start + 1)) for row in rows)
+        return max(1, end - start)
+
+    def _tts_path_is_live2d_model(self, path: str) -> bool:
+        name = Path(str(path or "")).name.casefold()
+        return bool(name.endswith(".model3.json"))
+
+    def _tts_media_pool_live2d_paths(self) -> list[str]:
+        owner = self._require_owner()
+        pool = getattr(owner, "_media_pool", None)
+        rows: list[str] = []
+        metadata = getattr(pool, "media_pool_metadata", None)
+        if callable(metadata):
+            try:
+                for item in metadata() or []:
+                    path = str(item.get("path") or "") if isinstance(item, Mapping) else ""
+                    if path and self._tts_path_is_live2d_model(path):
+                        rows.append(path)
+            except Exception:
+                pass
+        for attr in ("_media_paths", "_project_media_paths", "_imported_media_paths"):
+            for raw in getattr(owner, attr, []) or []:
+                path = str(raw or "")
+                if path and self._tts_path_is_live2d_model(path):
+                    rows.append(path)
+        deduped: list[str] = []
+        seen: set[str] = set()
+        for path in rows:
+            key = str(Path(path).expanduser()).casefold()
+            if key in seen:
+                continue
+            seen.add(key)
+            deduped.append(path)
+        return deduped
+
+    def _tts_live2d_target_options(self) -> list[dict[str, Any]]:
+        owner = self._require_owner()
+        selected_clip = None
+        getter = getattr(owner, "_selected_live2d_clip_for_mapping", None)
+        if callable(getter):
+            try:
+                selected_clip = getter()
+            except Exception:
+                selected_clip = None
+        options: list[dict[str, Any]] = []
+        for track_index, track in enumerate(getattr(owner, "_live2d_actor_tracks", []) or []):
+            track_id = int(getattr(track, "id", track_index) or track_index)
+            for clip_index, clip in enumerate(getattr(track, "clips", []) or []):
+                model_path = str(getattr(clip, "model_path", "") or "")
+                name = Path(model_path).name if model_path else f"Live2D Actor {clip_index + 1}"
+                options.append(
+                    {
+                        "id": f"live2d:{track_id}:{clip_index}",
+                        "kind": "live2d_actor_clip",
+                        "label": f"Live2D - {name}",
+                        "name": name,
+                        "path": model_path,
+                        "track_id": track_id,
+                        "track_index": track_index,
+                        "clip_index": clip_index,
+                        "track_label": str(getattr(track, "label", "") or f"Live2D {track_index + 1}"),
+                        "start_ms": int(getattr(clip, "start_ms", 0) or 0),
+                        "end_ms": int(getattr(clip, "end_ms", getattr(clip, "duration_ms", 0)) or 0),
+                        "ready": bool(model_path),
+                        "source": "timeline",
+                        "direct_key_baking": True,
+                        "recommended": clip is selected_clip,
+                    }
+                )
+        if options and not any(row.get("recommended") for row in options):
+            options[0]["recommended"] = True
+        for index, path in enumerate(self._tts_media_pool_live2d_paths()):
+            options.append(
+                {
+                    "id": f"media_live2d:{index}",
+                    "kind": "live2d_model_asset",
+                    "label": f"Live2D Asset - {Path(path).name}",
+                    "name": Path(path).name,
+                    "path": path,
+                    "source": "media_pool",
+                    "ready": Path(path).expanduser().is_file(),
+                    "direct_key_baking": False,
+                    "will_create_actor_clip": True,
+                    "recommended": False,
+                }
+            )
+        return options
+
+    def _tts_resolve_live2d_actor_target(
+        self,
+        *,
+        actor_target_id: str = "",
+        actor_track_id: int | None = None,
+        actor_clip_index: int = 0,
+        start_ms: int = 0,
+        duration_ms: int = 3000,
+    ) -> dict[str, Any]:
+        if actor_track_id is not None:
+            _track, clip = self._actor_track_and_clip("live2d", int(actor_track_id), int(actor_clip_index or 0))
+            return {
+                "found": True,
+                "id": f"live2d:{int(actor_track_id)}:{int(actor_clip_index or 0)}",
+                "track_id": int(actor_track_id),
+                "clip_index": int(actor_clip_index or 0),
+                "path": str(getattr(clip, "model_path", "") or ""),
+                "source": "explicit_track",
+            }
+
+        target_id = str(actor_target_id or "").strip()
+        if target_id.startswith("live2d:"):
+            parts = target_id.split(":")
+            if len(parts) >= 3:
+                raw_track = int(parts[1])
+                raw_clip = int(parts[2])
+                try:
+                    _track, clip = self._actor_track_and_clip("live2d", raw_track, raw_clip)
+                    return {
+                        "found": True,
+                        "id": target_id,
+                        "track_id": raw_track,
+                        "clip_index": raw_clip,
+                        "path": str(getattr(clip, "model_path", "") or ""),
+                        "source": "timeline",
+                    }
+                except Exception:
+                    tracks = list(getattr(self._require_owner(), "_live2d_actor_tracks", []) or [])
+                    if 0 <= raw_track < len(tracks):
+                        track = tracks[raw_track]
+                        clips = list(getattr(track, "clips", []) or [])
+                        if 0 <= raw_clip < len(clips):
+                            return {
+                                "found": True,
+                                "id": target_id,
+                                "track_id": int(getattr(track, "id", raw_track) or raw_track),
+                                "clip_index": raw_clip,
+                                "path": str(getattr(clips[raw_clip], "model_path", "") or ""),
+                                "source": "timeline_index_fallback",
+                            }
+                    raise
+        if target_id.startswith("media_live2d:"):
+            index = int(target_id.split(":", 1)[1] or 0)
+            paths = self._tts_media_pool_live2d_paths()
+            if 0 <= index < len(paths):
+                add = getattr(self, "add_actor", None)
+                if not callable(add):
+                    return {"found": False, "reason": "add_actor_unavailable", "id": target_id}
+                created = add(
+                    kind="live2d",
+                    path=paths[index],
+                    start_ms=max(0, int(start_ms or 0)),
+                    duration_ms=max(1, int(duration_ms or 3000)),
+                    pos_x=0.5,
+                    pos_y=0.5,
+                    scale=1.0,
+                    opacity=1.0,
+                    label="Live2D Dialogue",
+                )
+                return {
+                    "found": True,
+                    "id": target_id,
+                    "track_id": int(created.get("track_id", 0) or 0),
+                    "clip_index": int(created.get("clip_index", 0) or 0),
+                    "path": paths[index],
+                    "source": "media_pool_created_actor",
+                    "created_actor": created,
+                }
+            return {"found": False, "reason": "media_live2d_target_not_found", "id": target_id}
+
+        return self._tts_first_live2d_actor_target()
+
+    def _tts_apply_live2d_dialogue_placement(
+        self,
+        *,
+        actor_track_id: int,
+        actor_clip_index: int = 0,
+        placement_preset: str = "bottom_right",
+        size_preset: str = "auto_fit",
+        canvas_width: int = 1920,
+        canvas_height: int = 1080,
+        sample_ms: int = 0,
+        replace_transform_keyframes: bool = True,
+    ) -> dict[str, Any]:
+        _track, clip = self._actor_track_and_clip("live2d", int(actor_track_id), int(actor_clip_index or 0))
+        from app.live2d.dialogue_placement import apply_dialogue_placement_to_clip
+
+        placement = apply_dialogue_placement_to_clip(
+            clip,
+            preset=placement_preset,
+            size_preset=size_preset,
+            canvas_width=int(canvas_width or 1920),
+            canvas_height=int(canvas_height or 1080),
+            sample_ms=int(sample_ms or 0),
+            replace_transform_keyframes=bool(replace_transform_keyframes),
+        )
+        self._sync_actor_tracks("live2d")
+        self._after_timeline_mutation("Apply Live2D dialogue placement")
+        return {
+            "applied": True,
+            "actor_track_id": int(actor_track_id),
+            "actor_clip_index": int(actor_clip_index or 0),
+            **placement,
+        }
+
+    def _tts_apply_live2d_dialogue_motion(
+        self,
+        *,
+        actor_track_id: int,
+        actor_clip_index: int = 0,
+        rows: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...] | None = None,
+        style: str = "natural_dialogue",
+        interval_ms: int = 700,
+    ) -> dict[str, Any]:
+        _track, clip = self._actor_track_and_clip("live2d", int(actor_track_id), int(actor_clip_index or 0))
+        from app.live2d.dialogue_motion import apply_natural_dialogue_motion_to_clip
+
+        motion = apply_natural_dialogue_motion_to_clip(
+            clip,
+            rows=rows,
+            replace_existing=True,
+            prefer_authored_motion=True,
+            interval_ms=int(interval_ms or 700),
+            style=style,
+        )
+        self._sync_actor_tracks("live2d")
+        self._after_timeline_mutation("Apply Live2D dialogue motion")
+        return {
+            "applied": True,
+            "actor_track_id": int(actor_track_id),
+            "actor_clip_index": int(actor_clip_index or 0),
+            "schema": motion.get("schema"),
+            "style": motion.get("style"),
+            "parameter_tracks": list(motion.get("parameter_tracks") or []),
+            "keyframe_count": sum(len(list(keys or [])) for keys in dict(motion.get("parameter_keyframes") or {}).values()),
+            "authored_motion": dict(motion.get("authored_motion") or {}),
+        }
+
+    def _tts_append_subtitle_rows(self, rows: list[Mapping[str, Any]]) -> dict[str, Any]:
+        owner = self._require_owner()
+        panel = getattr(owner, "_subtitle_panel", None)
+        if panel is None:
+            raise ValueError("No subtitle panel is available for dialogue subtitles.")
+
+        created = []
+        created_items = []
+        try:
+            from app.subtitles import Subtitle
+        except Exception:
+            Subtitle = None  # type: ignore[assignment]
+
+        for offset, row in enumerate(rows):
+            start_ms = max(0, int(row.get("start_ms", 0) or 0))
+            end_ms = max(start_ms + 1, int(row.get("end_ms", start_ms + 1) or start_ms + 1))
+            text = str(row.get("text") or "").strip()
+            style = dict(row.get("style") or {})
+            if Subtitle is not None:
+                item = Subtitle(start_ms=start_ms, end_ms=end_ms, text=text, style=style)
+            else:
+                item = SimpleNamespace(start_ms=start_ms, end_ms=end_ms, text=text, style=style)
+            layer = getattr(panel, "layer", None)
+            add = getattr(layer, "add", None)
+            if callable(add):
+                add(item)
+            elif isinstance(getattr(panel, "_rows", None), list):
+                panel._rows.append(item)
+            elif isinstance(getattr(panel, "_subtitles", None), list):
+                panel._subtitles.append(item)
+            else:
+                raise ValueError("Subtitle panel does not expose an appendable subtitle list.")
+            created_items.append(item)
+            created.append({"index": offset, "start_ms": start_ms, "end_ms": end_ms, "text": text})
+
+        refresh = getattr(panel, "_refresh_list", None)
+        if callable(refresh):
+            try:
+                refresh()
+            except Exception:
+                pass
+        signal = getattr(panel, "subtitles_changed", None)
+        emit = getattr(signal, "emit", None)
+        if callable(emit):
+            try:
+                emit()
+            except Exception:
+                pass
+        changed = getattr(owner, "_on_subtitles_changed", None)
+        if callable(changed):
+            try:
+                changed()
+            except Exception:
+                pass
+        current = []
+        subtitles = getattr(panel, "subtitles", None)
+        if callable(subtitles):
+            try:
+                current = list(subtitles() or [])
+            except Exception:
+                current = []
+        if current:
+            indices = []
+            for item in created_items:
+                try:
+                    indices.append(next(idx for idx, current_item in enumerate(current) if current_item is item))
+                except StopIteration:
+                    indices.append(len(current) - len(created_items) + len(indices))
+            for row, index in zip(created, indices):
+                row["index"] = max(0, int(index))
+        return {"created": True, "count": len(created), "indices": [row["index"] for row in created], "rows": created}
+
+    def _tts_first_live2d_actor_target(self) -> dict[str, Any]:
+        owner = self._require_owner()
+        for track in getattr(owner, "_live2d_actor_tracks", []) or []:
+            clips = list(getattr(track, "clips", []) or [])
+            if clips:
+                track_id = int(getattr(track, "id", 0) or 0)
+                return {
+                    "found": True,
+                    "id": f"live2d:{track_id}:0",
+                    "track_id": track_id,
+                    "clip_index": 0,
+                    "clip_count": len(clips),
+                    "path": str(getattr(clips[0], "model_path", "") or ""),
+                    "source": "timeline_default",
+                }
+        return {"found": False, "reason": "no_live2d_actor"}

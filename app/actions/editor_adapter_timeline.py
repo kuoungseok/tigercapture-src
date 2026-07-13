@@ -948,6 +948,22 @@ class TimelineAdapterMixin:
             self._register_change("Set timeline zoom")
         return {"px_per_sec": value, "changed": bool(changed)}
 
+    def pan_timeline(
+        self,
+        *,
+        delta_px: int | float | None = None,
+        scroll_px: int | float | None = None,
+    ) -> dict[str, Any]:
+        from app.video_editor_timeline_pan import timeline_pan_by, timeline_pan_to
+
+        owner = self._require_owner()
+        if scroll_px is not None:
+            result = timeline_pan_to(owner, scroll_px)
+        else:
+            result = timeline_pan_by(owner, _float(delta_px, 0.0))
+        result["changed"] = bool(result.get("delta_px"))
+        return result
+
     def fit_timeline(self, *, visible_width: int | None = None) -> dict[str, Any]:
         owner = self._require_owner()
         before = _float(getattr(owner, "_px_per_sec", 0.0), 0.0)

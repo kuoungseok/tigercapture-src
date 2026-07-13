@@ -157,6 +157,9 @@ def test_viewer_depth_toggle_refreshes_current_frame_and_syncs_button():
         def setToolTip(self, value: str) -> None:
             self.tooltip = str(value)
 
+        def setText(self, value: str) -> None:
+            self.text = str(value)
+
         def setProperty(self, key: str, value: object) -> None:
             self.props[str(key)] = value
 
@@ -197,10 +200,15 @@ def test_viewer_depth_toggle_refreshes_current_frame_and_syncs_button():
 
     VideoEditorWindow._toggle_ar_pbr_depth_view(owner, True)
 
-    assert owner._player.mode == "grayscale"
+    assert owner._player.mode == "matte"
     assert owner._player.cleared == 1
     assert owner._player.refreshed == 1
     assert owner.viewer_depth_btn.checked is True
     assert owner.viewer_depth_btn.props["active"] is True
     assert owner._drawing_canvas.update_count == 1
-    assert owner.flashes == ["Depth map view on"]
+    assert owner.flashes == ["Depth view: Matte"]
+
+    VideoEditorWindow._toggle_ar_pbr_depth_view(owner, True)
+
+    assert owner._player.mode == "distance"
+    assert owner.flashes[-1] == "Depth view: Distance"

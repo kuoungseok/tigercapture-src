@@ -588,6 +588,7 @@ def _ar_pbr_depth_view_frame(self, rgb: np.ndarray, context: Mapping, pos_ms: in
             int(context.get("width") or rgb.shape[1]),
             int(context.get("height") or rgb.shape[0]),
             mode=mode,
+            reference_frame=rgb,
         )
         merged = {
             "ok": bool(diagnostics.get("ok")),

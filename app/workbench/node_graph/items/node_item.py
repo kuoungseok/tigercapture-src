@@ -40,6 +40,8 @@ class NodeItem(QGraphicsItem):
         self.thumbnail = None
         self.bypassed: bool = False
         self.user_color: str | None = None       # Phase 2C colour coding
+        self.track_context_color: str | None = None
+        self.track_context_label: str = ""
         # Per-node ColorGrade — DaVinci semantics where each node
         # contributes its own grade and the chain IN→OUT applies them
         # in sequence. Lazy-instantiated so adding 100 nodes without
@@ -57,6 +59,15 @@ class NodeItem(QGraphicsItem):
         self.setAcceptHoverEvents(True)
         self._hovered = False
         self._setup_ports()
+
+    def set_track_context(self, color: QColor | str | None, label: str = "") -> None:
+        if color is None:
+            self.track_context_color = None
+        else:
+            candidate = QColor(color)
+            self.track_context_color = candidate.name() if candidate.isValid() else None
+        self.track_context_label = str(label or "")
+        self.update()
 
     # ---- ports ----
 
@@ -189,6 +200,7 @@ class NodeItem(QGraphicsItem):
         painter.setBrush(QBrush(gradient))
         painter.setPen(QPen(border_color, border_w))
         painter.drawRoundedRect(rect, radius, radius)
+        paint_node_track_context_strip(self, painter, rect, radius)
 
         painter.setPen(QPen(QColor(255, 255, 255, 8), 1))
         painter.drawLine(6, 1, int(rect.width()) - 7, 1)
@@ -337,3 +349,28 @@ class NodeItem(QGraphicsItem):
     def toggle_bypass(self) -> None:
         self.bypassed = not self.bypassed
         self.update()
+
+
+def paint_node_track_context_strip(
+    node,
+    painter: QPainter,
+    rect: QRectF,
+    radius: float,
+) -> None:
+    color = QColor(getattr(node, "track_context_color", "") or "")
+    if not color.isValid():
+        return
+    selected = bool(node.isSelected())
+    color.setAlpha(204 if selected else 132)
+    glow = QColor(color)
+    glow.setAlpha(34 if selected else 18)
+    painter.save()
+    clip = QPainterPath()
+    clip.addRoundedRect(rect, radius, radius)
+    painter.setClipPath(clip)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(glow)
+    painter.drawRect(QRectF(0.0, 0.0, 8.0, rect.height()))
+    painter.setBrush(color)
+    painter.drawRect(QRectF(0.0, 0.0, 4.0, rect.height()))
+    painter.restore()

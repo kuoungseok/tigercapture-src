@@ -293,7 +293,7 @@ class SubtitleLaneRow(QWidget):
     through the layer's ``on_change`` hook.
     """
 
-    LABEL_H = 14                          # matches TrackRow header strip
+    LABEL_H = 14                          # subtitle lane keeps its own label band
     LANE_H = 26
     MARGIN = 180                          # matches TrackRow.MARGIN
     EDGE_GRAB_PX = 6

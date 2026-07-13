@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-07
 
-This is the fixed full-version product catalog scenario for TigerCapture review
+This is the fixed full-version product catalog scenario for Tiger Studio review
 automation.
 
 Companion presenter narration:
@@ -22,12 +22,12 @@ review, QA reporting, release readiness reporting, or raw evidence dumping.
 
 Do not generate PPT, PNG, HTML, or GIF output from this manifest until the user
 explicitly asks for generation. When the user asks to make the full catalog PPT,
-use this 22-slide list as the locked slide contract.
+use this 23-slide list as the locked slide contract.
 
 ## Fixed Full Version
 
 - Mode name: `full-product-catalog`
-- Slide count: 22
+- Slide count: 23
 - Audience: product catalog / external product introduction
 - Language variants: English and Korean can both be generated from this same
   manifest.
@@ -42,7 +42,7 @@ Before any full catalog rebuild:
    `docs/review_automation/` folder.
 2. Clear review/PPT generation caches so stale slide PNGs, old screenshot crops,
    and old PPT renders cannot leak into the new catalog.
-3. Use real TigerCapture editor captures from the current approved recapture
+3. Use real Tiger Studio editor captures from the current approved recapture
    batch for screen contents. Final PPT generation must reject historical
    capture roots such as `fresh_first_slide_capture`, `actual_3d_viewer_capture`,
    and `debugCapture`.
@@ -96,9 +96,9 @@ more monitors can make the workspace even more comfortable.
 - Each monitor payload must be a fresh, front-facing capture made for that
   monitor role. Do not duplicate the center editor view on the side monitors.
 
-### 2. TigerCapture Studio
+### 2. Tiger Studio
 
-Introduce TigerCapture as one local creator studio for capture, editing,
+Introduce Tiger Studio as one local creator studio for capture, editing,
 characters, 3D, audio, color, AI command, and export.
 
 ### 3. AI-Driven Editing And Automation
@@ -123,7 +123,7 @@ page unless the user edits this manifest.
 
 ### 4. PPT Maker / Timeline-Native Presentation Studio
 
-Show TigerCapture's PPT Maker as its own production surface, not as an
+Show Tiger Studio's PPT Maker as its own production surface, not as an
 external PowerPoint mockup.
 
 - Use real `.tgppt` / `app.pptgen` evidence from the current build or recapture
@@ -200,6 +200,14 @@ Show the redesigned color workspace.
 - The iPad/detail frame must be a controls-only color detail crop: wheels,
   curves, scopes, tone controls, or sliders. Do not put the video viewer, media
   pool, or timeline inside the iPad on this page.
+- Main evidence should follow the comparison-workbench layout: one real full
+  editor/window capture with the Viewer on the left showing `Before`/`After` or
+  `Split`, a visible vertical comparison divider, and the Color Grading controls
+  on the right. This is the preferred catalog proof for color pages.
+- Apply the researched
+  `cinematic_teal_orange_strong_compare_v1` preset from
+  `COLOR_NODE_COMPARE_PRESETS.md` unless a better real preset is explicitly
+  chosen. The comparison must be strong enough to read at slide scale.
 - Required evidence: manipulate a real color grade, enable the viewer's
   before/after or split comparison state, and capture that state from the
   editor. A raw footage frame, generic color panel, or neutral/original-looking
@@ -207,6 +215,10 @@ Show the redesigned color workspace.
 - Required capture contract: changed grade parameters must be non-neutral and
   the captured viewer must visibly differ from the original. If the preset
   values were not known before capture, record the researched preset source.
+- Required report flags: `strong_researched_color_preset_applied=true` and
+  `cinematic_teal_orange_preset_applied=true`.
+- Reject separate pasted images where the comparison Viewer and the controls
+  are not from the same screenshot/state.
 
 ### 12. Node Graph Composition
 
@@ -215,6 +227,12 @@ Show the connected node graph and compositing flow.
 - Nodes should have real effect names.
 - The selected node parameters should be visible.
 - The page must explain the node chain, not just show boxes.
+- Preferred main evidence is the same comparison-workbench composition used by
+  color grading: Viewer split/before-after on the left, node graph or selected
+  node parameters on the right/workbench, all in one real editor/window capture.
+- For obvious catalog proof, prefer a Gaussian Blur node/effect with radius
+  around 24 px and never below 18 px unless another implemented node produces a
+  stronger visible difference.
 - Required evidence: at least one node in the graph must visibly affect the
   viewer through before/after or split comparison.
 - Required capture contract: changed node parameters must be non-neutral and
@@ -248,11 +266,33 @@ Required visual evidence:
 - Do not ship this page as a text-only effect list.
 - The node/effect example must be captured after applying the node in the
   editor. Do not use a standalone library screenshot as the only proof.
+- Preferred main evidence uses one real comparison-workbench capture with the
+  split Viewer and the selected node/effect controls visible together.
+- Default concrete example: Gaussian Blur, about 24 px, with controls visible.
 - Required capture contract: the effect/node must use non-neutral values and a
   visible before/after delta. Unknown preset values require a recorded
   reference/source.
 
-### 14. Audio Workbench
+### 14. Music Lab / Composition
+
+Show Music Lab as a composition surface, separate from Sound Editor and audio
+mixing.
+
+- Music Lab is for prompt-driven composition, arrangement, MIDI notes, preview
+  mixes, and render-to-timeline music stems.
+- It must not be folded into Audio Workbench, EQ, dynamics, mixer, or generic
+  waveform pages.
+- Laptop/monitor evidence should show the real Music Lab or composition
+  workbench surface with prompt, mood/genre/BPM/key, sections, chords, MIDI
+  notes, preview/render controls, or timeline music output.
+- iPad/detail evidence should focus on composition detail only: selected
+  section, chord progression, note/MIDI view, preview mix, or render controls.
+- Reject pages where Music Lab is represented only by a waveform, EQ curve,
+  audio mixer, or timeline strip.
+- Required capture contract: `music_lab_composition_editor_v1` for the main
+  surface and `music_lab_composition_detail_v1` for the detail surface.
+
+### 15. Audio Workbench
 
 Show the sound editor inside the workbench.
 
@@ -261,14 +301,14 @@ Show the sound editor inside the workbench.
   track.
 - It should not look like a separate load-only sound utility.
 
-### 15. EQ, Dynamics And FX Curves
+### 16. EQ, Dynamics And FX Curves
 
 Show audio controls in a detail-emphasis layout.
 
 - The iPad/detail area is appropriate for EQ, dynamics, and FX curves.
 - Keep the main laptop/monitor context connected to the editor workflow.
 
-### 16. Live2D And Spine Actor Tracks
+### 17. Live2D And Spine Actor Tracks
 
 Live2D is the main feature on this page. Spine is mentioned briefly.
 
@@ -279,7 +319,7 @@ Live2D is the main feature on this page. Spine is mentioned briefly.
 - Do not overclaim Spine/NIKKE quality. If Spine rendering is visibly broken,
   use it only as guarded/supporting evidence or omit the visible Spine detail.
 
-### 17. VRM VTuber Studio
+### 18. VRM VTuber Studio
 
 Show VRM/VTuber Studio as its own page.
 
@@ -323,7 +363,7 @@ E:\ClaudeCodeApp\GifCam\external\assets\vtuber\booth_milica\Milica1.3free\Milica
   `vtuber_studio_program_output` -> Program Output crop for the iPad/detail
   frame.
 
-### 18. MMD / Character Motion
+### 19. MMD / Character Motion
 
 Show MMD or character motion workflow.
 
@@ -337,14 +377,14 @@ Show MMD or character motion workflow.
   `capture_frame_position=mid_motion` or equivalent middle-frame timing, and
   `mmd_motion_active=true`.
 
-### 19. AR/PBR 3D Composite
+### 20. AR/PBR 3D Composite
 
 Combine 3D asset placement, depth-aware composition, and lighting controls into
 one page.
 
 Required layout intent:
 
-- Laptop/monitor: normal TigerCapture editor view with a small 3D viewer or
+- Laptop/monitor: normal Tiger Studio editor view with a small 3D viewer or
   visible 3D object inside the editing workflow.
 - In the laptop/monitor editor view, zoom or pan the 3D object so it is large
   enough to read immediately in the video viewer. It must not be a tiny object
@@ -367,7 +407,7 @@ Required layout intent:
 - If a same-asset editor capture is missing, mark this page pending or fail the
   deck build. Do not silently fall back to an older camera or debug capture.
 
-### 20. Creator Assist
+### 21. Creator Assist
 
 Show creator assistance for clip cleanup, subtitle/caption help, auto polish, or
 editing support.
@@ -375,7 +415,7 @@ editing support.
 - Keep it product-facing.
 - Avoid raw QA/status language.
 
-### 21. Export And Render Queue
+### 22. Export And Render Queue
 
 Show delivery/output workflow.
 
@@ -385,7 +425,7 @@ Show delivery/output workflow.
 - The timeline must use the current editor track visual style and a real project
   state. Old synthetic timeline strips are not allowed.
 
-### 22. Specification Index Closing Page
+### 23. Specification Index Closing Page
 
 Close with a dense product specification index, not another editor screenshot.
 This page is the final catalog summary and must use the approved blue-pot bonsai
@@ -394,7 +434,7 @@ cutout as a right-side object.
 Recommended message:
 
 ```text
-TigerCapture Studio is one local creator studio for capture, edit, audio, color,
+Tiger Studio is one local creator studio for capture, edit, audio, color,
 actors, 3D, AI action, automation, and delivery.
 ```
 
@@ -456,7 +496,9 @@ them unless the user changes this manifest:
   Python Action/MCP automation are consolidated into slide 3.
 - PPT Maker / Timeline-Native Presentation Studio stays as slide 4. Do not fold
   it into AI, export, or generic editor overview pages.
-- Live2D and Spine are consolidated into slide 16, with Live2D as the main
+- Music Lab / Composition stays as slide 14. Do not fold it into Audio
+  Workbench, EQ/dynamics, or generic audio pages.
+- Live2D and Spine are consolidated into slide 17, with Live2D as the main
   visual feature and Spine as a small/guarded support mention.
 - AR/PBR 3D Asset, Depth-Aware 3D Composite, and 3D Viewer Lighting Controls
-  are consolidated into slide 19.
+  are consolidated into slide 20.

@@ -255,6 +255,21 @@
       - [x] Render audio waveforms as fine, precise lines.
       - [x] Keep thumbnails restrained, with first-frame emphasis rather than
         noisy repetition.
+      - [x] 2026-07-11 Timeline track identity color pass: each clip's small leading
+        vertical strip and selected-track outline now use the corresponding
+        video track color, selection uses the same hue with stronger
+        brightness/alpha, and the playhead keeps its own coral/orange identity.
+        The earlier aggressive active/inactive thumbnail focus was backed off
+        to the original visual weight so rows do not look farther apart; the
+        playhead sharp-over-blur blend stays active on every track, and node
+        graph items inherit the same track context stripe so Workbench editing
+        keeps track identity visible.
+      - [x] 2026-07-11 Timeline row density pass: reduce the unused video-row
+        header strip from a visible header gap to no extra body header, use a
+        zero-gap video-clip inset, and enlarge timeline thumbnails vertically
+        so V1/V2 rows stack without lane gaps while preserving hit testing,
+        drop guides, track color strips, and playhead drawing. The selected
+        track now uses 30% less thumbnail blur than inactive tracks.
       - [x] Refine keyframe diamonds, markers, playhead shape, and edit points.
         - [x] 2026-07-02 Playhead and cut-marker painter pass lowered line
           width, glow alpha, and cut-marker saturation in `app/studio_theme.py`.

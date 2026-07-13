@@ -372,6 +372,55 @@ def test_startup_launcher_can_enable_bundled_studio_entry(monkeypatch, tmp_path)
         window.close()
 
 
+def test_launcher_ignores_internal_media_pool_file_drag(monkeypatch, tmp_path):
+    from PySide6.QtCore import QMimeData, QUrl
+    from PySide6.QtWidgets import QApplication
+
+    from app.media_asset_routing import MEDIA_POOL_ITEM_MIME_TYPE
+    from app.main_window import MainWindow
+
+    app = QApplication.instance() or QApplication([])
+    _ = app
+    monkeypatch.setenv("TIGERCAPTURE_DATA_DIR", str(tmp_path))
+    monkeypatch.setenv("TIGERCAPTURE_CAPTURE_TO_STUDIO", "1")
+    video = tmp_path / "pool_clip.mp4"
+    video.write_bytes(b"fake")
+    mime = QMimeData()
+    mime.setUrls([QUrl.fromLocalFile(str(video))])
+    mime.setData(MEDIA_POOL_ITEM_MIME_TYPE, str(video).encode("utf-8"))
+
+    class _FakeDropEvent:
+        def __init__(self, mime_data):
+            self._mime_data = mime_data
+            self.accepted = False
+            self.ignored = False
+
+        def mimeData(self):
+            return self._mime_data
+
+        def acceptProposedAction(self):
+            self.accepted = True
+            self.ignored = False
+
+        def ignore(self):
+            self.ignored = True
+
+    window = MainWindow()
+    opened_editors: list[object] = []
+    window.open_video_editor_requested.connect(lambda payload: opened_editors.append(payload))
+    try:
+        drag = _FakeDropEvent(mime)
+        MainWindow.dragEnterEvent(window, drag)
+        drop = _FakeDropEvent(mime)
+        MainWindow.dropEvent(window, drop)
+
+        assert drag.ignored is True
+        assert drop.ignored is True
+        assert opened_editors == []
+    finally:
+        window.close()
+
+
 def test_launcher_workspace_toggle_can_restore_env_mode(monkeypatch, tmp_path):
     from PySide6.QtWidgets import QApplication
 

@@ -134,6 +134,45 @@ feature area. Wire it into the editor through `video_editor_window_delegates.py`
 the relevant controller/workflow module, or the initializer. Keep the facade
 small.
 
+## Editor Capture Means MCP/AI Capture
+
+When the user says "캡쳐기능 봐줘", "에디터 안 캡쳐", "editor capture",
+or similar without explicitly asking for launcher UI, assume they mean the
+UI-less MCP/AI capture action surface, not the visible Capture app or editor
+toolbar buttons.
+
+Start from these files:
+
+- `app/actions/evidence_namespace.py` for `capture.*` action registration.
+- `app/actions/editor_adapter_editing_review.py` for screenshot/GIF/window
+  capture action implementations.
+- `app/actions/editor_adapter_core_helpers.py` for semantic capture targets
+  such as `editor`, `viewer`, `timeline`, `media_pool`, `workbench`, `audio`,
+  `color`, and diagnostic `screen`.
+- `app/actions/ui_namespace.py` and `app/actions/editor_adapter_ui.py` for
+  `ui.popout.capture`.
+- `app/automation_bridge.py` and `app/automation_mcp.py` for MCP/AI exposure.
+- `app/window_capture.py` for ownerless external Windows app screenshot/video
+  capture.
+
+For external tools such as Unreal Editor where another AI/agent controls when
+the operation finishes, use `capture.window.video.start`, optionally poll
+`capture.window.video.status`, and call `capture.window.video.stop` when the
+external task completes. Always pass `max_duration_ms` as a hard safety cap.
+If that external agent asks "until when?", answer: until it sends stop after
+the task completes, or until `max_duration_ms` expires. The Unreal-side control
+procedure is `docs/SPEC_UNREAL_MCP_CAPTURE_CONTROL.md`. For Unreal windows,
+`backend=auto` should be used; it prefers `wgc_window` so overlapped Unreal
+Editor windows can be captured as a window target, with visible-crop fallback.
+Do not route Unreal evidence capture through OBS unless the user explicitly
+asks for OBS output; if OBS records black, switch to direct Unreal `hwnd`
+capture instead of retrying OBS.
+
+Only inspect launcher capture UI (`app/controller.py`, `app/recorder.py`,
+`app/capture.py`, recording bars/overlays) when the user explicitly asks about
+the standalone Capture app, visible recording UI, region selection, or
+capture-to-Studio handoff.
+
 ## AR/PBR Depth Preview Rules
 
 Many agents only read this file or `SPEC.md`, so keep the core AR/PBR depth

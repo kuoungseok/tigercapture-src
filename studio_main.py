@@ -115,6 +115,12 @@ def main() -> int:
         configure_preview_acceleration_defaults()
     except Exception:
         pass
+    try:
+        from app.qt_opengl_policy import configure_qt_opengl_application_attributes
+
+        configure_qt_opengl_application_attributes()
+    except Exception:
+        pass
 
     QCoreApplication.setApplicationName("Tiger Studio")
     QCoreApplication.setOrganizationName("TigerCapture")
@@ -133,7 +139,7 @@ def main() -> int:
 
     from app.i18n import initialize as init_i18n
     from app.style import APP_QSS
-    from app.video_editor_window_core import VideoEditorWindow
+    from app.studio_startup_splash import StudioStartupSplash
 
     app.setStyleSheet(APP_QSS)
     init_i18n()
@@ -141,13 +147,53 @@ def main() -> int:
     source_arg = _consume_source_arg(sys.argv)
     project_path = source_arg if source_arg is not None and source_arg.suffix.lower() == ".tgp" else None
     source_path = None if project_path is not None else source_arg
-    editor = VideoEditorWindow(source_path=source_path)
-    editor.setWindowTitle("Tiger Studio")
-    editor.show()
-    editor.raise_()
-    editor.activateWindow()
-    if project_path is not None:
-        QTimer.singleShot(0, lambda: _load_project_after_show(editor, project_path))
+    splash = StudioStartupSplash()
+    splash.set_status(
+        "Starting Tiger Studio...",
+        "Loading the editor workspace and GPU preview surface.",
+    )
+    splash.show()
+    splash.raise_()
+    splash.activateWindow()
+    app.processEvents()
+
+    state: dict[str, object] = {"splash": splash}
+
+    def _open_editor() -> None:
+        try:
+            splash.set_status(
+                "Loading editor modules...",
+                "Preparing media pool, timeline, preview, and automation actions.",
+            )
+            app.processEvents()
+            from app.video_editor_window_core import VideoEditorWindow
+
+            splash.set_status(
+                "Building editor window...",
+                "Initializing the timeline, player, audio mixer, and OpenGL preview.",
+            )
+            app.processEvents()
+            editor = VideoEditorWindow(source_path=source_path)
+            state["editor"] = editor
+            editor.setWindowTitle("Tiger Studio")
+
+            splash.set_status("Opening editor...", "Finalizing the visible workspace.")
+            app.processEvents()
+            editor.show()
+            editor.raise_()
+            editor.activateWindow()
+            splash.close()
+            if project_path is not None:
+                QTimer.singleShot(0, lambda: _load_project_after_show(editor, project_path))
+        except Exception as exc:
+            print("[studio] startup failed:", file=sys.stderr, flush=True)
+            traceback.print_exc(file=sys.stderr)
+            splash.set_error(f"{type(exc).__name__}: {exc}")
+            splash.show()
+            splash.raise_()
+            splash.activateWindow()
+
+    QTimer.singleShot(0, _open_editor)
     return app.exec()
 
 

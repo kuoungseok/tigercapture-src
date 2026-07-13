@@ -87,11 +87,102 @@ def preferred_model_name(status: Mapping[str, Any], requested: str = "") -> str:
     ]
     if requested and requested in model_names:
         return str(requested)
-    for candidate in ("zoe", "ZOE"):
+    for candidate in ("koharune-ami", "zoe", "ZOE"):
         for name in model_names:
             if name.casefold() == candidate.casefold():
                 return name
     return model_names[0] if model_names else str(requested or "")
+
+
+def _model_names_from_status(status: Mapping[str, Any]) -> list[str]:
+    return [
+        str(name)
+        for name in (((status.get("root") or {}) if isinstance(status.get("root"), Mapping) else {}).get("model_names") or [])
+    ]
+
+
+def _looks_japanese(text: str) -> bool:
+    for ch in str(text or ""):
+        code = ord(ch)
+        if 0x3040 <= code <= 0x30FF or 0x31F0 <= code <= 0x31FF:
+            return True
+    return False
+
+
+def preferred_dialogue_model_name(
+    status: Mapping[str, Any],
+    rows: Iterable[Mapping[str, Any]] | None = None,
+    *,
+    requested: str = "",
+    language: str = "",
+) -> str:
+    """Choose a voice for dialogue text while respecting explicit user picks."""
+    model_names = _model_names_from_status(status)
+    wanted = str(requested or "").strip()
+    if wanted and wanted in model_names:
+        return wanted
+    text = "\n".join(str(row.get("text") or row.get("subtitle_text") or "") for row in (rows or []) if isinstance(row, Mapping))
+    wants_jp = str(language or "").strip().casefold() in {"jp", "ja", "japanese"} or _looks_japanese(text)
+    # Local workspace defaults are product/user intent, not generic language
+    # fallbacks. Keep explicit requests authoritative, then prefer the current
+    # broadcast dialogue default before falling back to other installed JP voices.
+    for candidate in ("koharune-ami", "zoe", "ZOE"):
+        for name in model_names:
+            if name.casefold() == candidate.casefold():
+                return name
+    if wants_jp:
+        preferred_jp = (
+            "koharune-ami",
+            "jvnv-F1-jp",
+            "jvnv-F2-jp",
+            "amitaro",
+            "jvnv-M1-jp",
+            "jvnv-M2-jp",
+        )
+        for candidate in preferred_jp:
+            for name in model_names:
+                if name.casefold() == candidate.casefold():
+                    return name
+        for name in model_names:
+            low = name.casefold()
+            if "-jp" in low or "jp" == low:
+                return name
+    return preferred_model_name(status, wanted or "koharune-ami")
+
+
+def stable_synthesis_params(
+    rows: Iterable[Mapping[str, Any]],
+    *,
+    model_name: str = "",
+    language: str = "",
+    style: str = "",
+    style_weight: float | None = None,
+    sdp_ratio: float | None = None,
+    noise: float | None = None,
+    noisew: float | None = None,
+    length: float | None = None,
+) -> dict[str, Any]:
+    """Return conservative TTS defaults for dialogue-take generation.
+
+    Style-Bert-VITS2 voices can sound unstable when a Japanese voice is driven
+    without language/noise controls.  Caller-provided values always win.
+    """
+    text = "\n".join(str(row.get("text") or row.get("subtitle_text") or "") for row in rows if isinstance(row, Mapping))
+    model = str(model_name or "")
+    inferred_jp = _looks_japanese(text) or model.casefold().endswith("-jp") or "-jp" in model.casefold()
+    resolved_language = str(language or "").strip()
+    if not resolved_language and inferred_jp:
+        resolved_language = "JP"
+    return {
+        "language": resolved_language,
+        "style": str(style or ""),
+        "style_weight": 5.0 if style_weight is None and inferred_jp and style else style_weight,
+        "sdp_ratio": 0.2 if sdp_ratio is None and inferred_jp else sdp_ratio,
+        "noise": 0.45 if noise is None and inferred_jp else noise,
+        "noisew": 0.6 if noisew is None and inferred_jp else noisew,
+        "length": 1.08 if length is None and inferred_jp else length,
+        "inferred_language": "JP" if inferred_jp else "",
+    }
 
 
 def _safe_slug(text: str, *, max_chars: int = 18) -> str:
@@ -182,21 +273,33 @@ def synthesize_subtitle_rows(
     from app.tts_synthesis import synthesize_style_bert_voice
 
     batch = str(batch_id or datetime.now().strftime("%Y%m%d_%H%M%S"))
+    source_rows = [dict(row) for row in rows]
+    synthesis_params = stable_synthesis_params(
+        source_rows,
+        model_name=model_name,
+        language=language,
+        style=style,
+        style_weight=style_weight,
+        sdp_ratio=sdp_ratio,
+        noise=noise,
+        noisew=noisew,
+        length=length,
+    )
     results: list[dict[str, Any]] = []
-    for row in rows:
+    for row in source_rows:
         output_path = subtitle_voice_output_path(row, output_dir=output_dir, batch_id=batch)
         result = synthesize_style_bert_voice(
             text=str(row.get("text") or ""),
             output_path=output_path,
             endpoint=endpoint,
             model_name=model_name,
-            language=language,
-            style=style,
-            style_weight=style_weight,
-            sdp_ratio=sdp_ratio,
-            noise=noise,
-            noisew=noisew,
-            length=length,
+            language=str(synthesis_params.get("language") or ""),
+            style=str(synthesis_params.get("style") or ""),
+            style_weight=synthesis_params.get("style_weight"),
+            sdp_ratio=synthesis_params.get("sdp_ratio"),
+            noise=synthesis_params.get("noise"),
+            noisew=synthesis_params.get("noisew"),
+            length=synthesis_params.get("length"),
             timeout_s=timeout_s,
         )
         duration_ms = int(result.duration_ms or 0)
@@ -210,6 +313,7 @@ def synthesize_subtitle_rows(
                 "generated_duration_ms": duration_ms,
                 "model_name": model_name,
                 "endpoint": endpoint,
+                "synthesis_params": dict(synthesis_params),
             }
         )
     return results
@@ -221,6 +325,8 @@ __all__ = [
     "default_tts_output_dir",
     "filter_subtitle_rows",
     "preferred_model_name",
+    "preferred_dialogue_model_name",
+    "stable_synthesis_params",
     "subtitle_rows_from_owner",
     "subtitle_voice_output_path",
     "synthesize_subtitle_rows",

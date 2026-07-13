@@ -105,6 +105,8 @@ class Live2DViewport(QWidget):
         self._pos_ms: int = 0
         self._has_first_frame = False
         self._render_error_reported = False
+        self._load_token = 0
+        self._first_frame_model_path = ""
         self._timer = QTimer(self)
         self._timer.setInterval(self._FPS_MS)
         self._timer.timeout.connect(self._tick)
@@ -124,8 +126,11 @@ class Live2DViewport(QWidget):
         if not runtime_path:
             self.unload_model()
             return
+        self._load_token += 1
+        token = self._load_token
         self._evict_preview_model()
         self._model_path = source_path
+        self._first_frame_model_path = ""
         self._pixmap = None
         self._has_first_frame = False
         self._render_error_reported = False
@@ -148,7 +153,11 @@ class Live2DViewport(QWidget):
             load_path = self._model_path
 
             def _emit_loaded() -> None:
-                if not _qt_valid(self) or self._model_path != load_path:
+                if (
+                    not _qt_valid(self)
+                    or token != self._load_token
+                    or self._model_path != load_path
+                ):
                     return
                 self.model_loaded.emit(name, motions, exprs, parts, textures)
 
@@ -157,15 +166,23 @@ class Live2DViewport(QWidget):
             self.error_occurred.emit(str(e))
 
     def unload_model(self) -> None:
+        self._load_token += 1
+        self._timer.stop()
         self._evict_preview_model()
         self._model_path = None
         self._preview_clip = None
         self._pixmap = None
         self._has_first_frame = False
         self._render_error_reported = False
+        self._first_frame_model_path = ""
         self._pos_ms = 0
-        self._timer.stop()
         self.update()
+
+    def current_model_path(self) -> str:
+        return self._model_path or ""
+
+    def first_frame_model_path(self) -> str:
+        return self._first_frame_model_path or ""
 
     def play_motion(self, group: str, index: int) -> None:
         if self._preview_clip:
@@ -211,14 +228,23 @@ class Live2DViewport(QWidget):
     # ── frame update ──────────────────────────────────────────────────────────
 
     def _tick(self) -> None:
-        if not self._preview_clip or not self._preview_clip.model_path:
+        token = self._load_token
+        clip = self._preview_clip
+        model_path = self._model_path or ""
+        if not clip or not clip.model_path:
             return
         w, h = self.width(), self.height()
         if w <= 0 or h <= 0:
             return
         try:
             rw, rh = self._preview_render_size(w, h)
-            img = self._preview_clip.render_frame(rw, rh, self._pos_ms)
+            img = clip.render_frame(rw, rh, self._pos_ms)
+            if (
+                token != self._load_token
+                or clip is not self._preview_clip
+                or model_path != (self._model_path or "")
+            ):
+                return
             if img is not None:
                 if img.mode != "RGBA":
                     img = img.convert("RGBA")
@@ -233,6 +259,7 @@ class Live2DViewport(QWidget):
                 self._pixmap = QPixmap.fromImage(qi)
                 if not self._has_first_frame:
                     self._has_first_frame = True
+                    self._first_frame_model_path = model_path
                     self.first_frame_ready.emit()
                 self.update()
         except Exception as e:
@@ -569,6 +596,11 @@ class Live2DEditorWindow(QWidget):
     # ── build UI ──────────────────────────────────────────────────────────────
 
     def closeEvent(self, event):
+        self._load_generation += 1
+        try:
+            self._load_timeout_timer.stop()
+        except Exception:
+            pass
         self._apply_current_model_to_target()
         self._viewport.unload_model()
         event.ignore()
@@ -761,12 +793,19 @@ class Live2DEditorWindow(QWidget):
 
     def _refresh_model_tree(self, force: bool = False):
         global _MODEL_ICON_CACHE, _MODEL_SUPPORT_CACHE
+        if not _qt_valid(self):
+            return
+        model_grid = getattr(self, "_model_grid", None)
+        if not _qt_valid(model_grid):
+            return
         if force:
             _MODEL_ICON_CACHE.clear()
             _MODEL_SUPPORT_CACHE.clear()
-        self._model_grid.clear()
+        model_grid.clear()
         found = self._cached_model_paths(force=force)
         for path in found:
+            if not _qt_valid(model_grid):
+                return
             name = os.path.basename(path).replace(".model3.json", "")
             support_error = self._support_error_for_model(path, force=force)
             if support_error:
@@ -779,7 +818,7 @@ class Live2DEditorWindow(QWidget):
             item.setToolTip(f"{path}\n{support_error}" if support_error else path)
             item.setSizeHint(QSize(88, 96))
             item.setTextAlignment(Qt.AlignmentFlag.AlignHCenter | Qt.AlignmentFlag.AlignBottom)
-            self._model_grid.addItem(item)
+            model_grid.addItem(item)
             if icon_key not in _MODEL_ICON_CACHE:
                 self._queue_model_icon_load(item, path, force=force)
 
@@ -1375,6 +1414,11 @@ class Live2DEditorWindow(QWidget):
         """Link this editor to a timeline actor clip for live assignment."""
         self._target_clip     = clip
         self._target_lane_row = lane_row
+        if _qt_valid(lane_row):
+            try:
+                lane_row.destroyed.connect(lambda *_args, row=lane_row: self._clear_target_lane_row(row))
+            except Exception:
+                pass
 
         # Sync transform sliders to clip's current values
         ctrls = getattr(self, "_transform_controls", {})
@@ -1397,6 +1441,10 @@ class Live2DEditorWindow(QWidget):
         # Assignment is automatic: selecting/loading a model updates the linked
         # timeline clip, and closing the editor applies the current model/motion
         # one final time.
+
+    def _clear_target_lane_row(self, row=None) -> None:
+        if row is None or row is getattr(self, "_target_lane_row", None):
+            self._target_lane_row = None
 
     def load_model_deferred(self, path: str, delay_ms: int = 120) -> None:
         """Load a model after the editor has become visible and stable.
@@ -1543,11 +1591,33 @@ class Live2DEditorWindow(QWidget):
         except Exception:
             pass
         row = getattr(self, "_target_lane_row", None)
-        if row is not None:
+        if _qt_valid(row):
             try:
                 row.update()
             except Exception:
                 pass
+
+    def _same_model_path(self, left: str, right: str) -> bool:
+        if not left or not right:
+            return True
+        try:
+            return os.path.normcase(os.path.normpath(left)) == os.path.normcase(os.path.normpath(right))
+        except Exception:
+            return str(left) == str(right)
+
+    def _viewport_matches_current_load(self) -> bool:
+        viewport = getattr(self, "_viewport", None)
+        if not _qt_valid(viewport):
+            return False
+        getter = getattr(viewport, "current_model_path", None)
+        viewport_path = ""
+        if callable(getter):
+            try:
+                viewport_path = str(getter() or "")
+            except Exception:
+                viewport_path = ""
+        current_path = self._current_loading_path or self._current_model_path or ""
+        return self._same_model_path(viewport_path, current_path)
 
     def _cancel_loading(self) -> None:
         self._load_generation += 1
@@ -1663,6 +1733,8 @@ class Live2DEditorWindow(QWidget):
     def _on_model_loaded(self, name: str, motions: list, exprs: list,
                           parts: list, textures: list):
         if not _qt_valid(self):
+            return
+        if not self._viewport_matches_current_load():
             return
         required_widgets = (
             getattr(self, "_status_lbl", None),
@@ -1820,15 +1892,23 @@ class Live2DEditorWindow(QWidget):
         if motion_changed:
             clip.reset()  # restart animation from beginning
             changed = True
-        if changed and row is not None:
-            row.update()
-            row.clip_changed.emit()
+        if changed and _qt_valid(row):
+            try:
+                row.update()
+            except Exception:
+                pass
+            try:
+                row.clip_changed.emit()
+            except Exception:
+                pass
         if changed:
             self._focus_target_clip_preview()
 
     def _focus_target_clip_preview(self) -> None:
         clip = getattr(self, "_target_clip", None)
         parent = self.parent()
+        if parent is not None and not _qt_valid(parent):
+            return
         focus = getattr(parent, "_focus_actor_clip_for_edit", None)
         if clip is not None and callable(focus):
             try:
@@ -1841,8 +1921,11 @@ class Live2DEditorWindow(QWidget):
         if not _qt_valid(btn):
             return
         clip = getattr(self, "_target_clip", None)
+        parent = self.parent()
+        if parent is not None and not _qt_valid(parent):
+            parent = None
         handler = getattr(
-            self.parent(),
+            parent,
             "_on_live2d_clip_performance_source_mapping_requested",
             None,
         )
@@ -1856,8 +1939,11 @@ class Live2DEditorWindow(QWidget):
                 lbl.setText("Select a Live2D clip first")
             self._update_performance_source_mapping_button()
             return
+        parent = self.parent()
+        if parent is not None and not _qt_valid(parent):
+            parent = None
         handler = getattr(
-            self.parent(),
+            parent,
             "_on_live2d_clip_performance_source_mapping_requested",
             None,
         )
@@ -1880,6 +1966,19 @@ class Live2DEditorWindow(QWidget):
 
     def _on_first_frame_ready(self) -> None:
         if not self._loading_active:
+            return
+        if not self._viewport_matches_current_load():
+            return
+        viewport = getattr(self, "_viewport", None)
+        first_frame_path = ""
+        getter = getattr(viewport, "first_frame_model_path", None) if _qt_valid(viewport) else None
+        if callable(getter):
+            try:
+                first_frame_path = str(getter() or "")
+            except Exception:
+                first_frame_path = ""
+        current_path = self._current_loading_path or self._current_model_path or ""
+        if first_frame_path and not self._same_model_path(first_frame_path, current_path):
             return
         name = self._pending_loaded_name or (
             os.path.basename(self._current_model_path or "") or "Live2D"

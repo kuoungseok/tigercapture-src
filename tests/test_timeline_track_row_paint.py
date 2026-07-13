@@ -12,13 +12,20 @@ from PySide6.QtWidgets import QApplication
 
 import app.timeline_track_row_paint as paint_mod
 from app.timeline_model import VideoClip, VideoTrack
-from app.timeline_track_row import TrackRow
+from app.timeline_track_row import TRACK_V_PADDING, TrackRow
 from app.timeline_track_row_paint import (
     _paint_timeline_playhead_sharp_thumb_window,
     _paint_timeline_thumb_tile_layer,
+    _paint_clip_track_identity_strip,
+    _timeline_playhead_detail_boost,
+    _timeline_thumb_tile_left_fade,
+    _timeline_thumb_tile,
+    _timeline_playhead_sharp_window_metrics,
+    _timeline_track_focus_values,
     _timeline_thumb_blend_width,
     _timeline_thumb_tile_rects,
 )
+from app.studio_theme import paint_studio_playhead
 
 
 def _ensure_qapp():
@@ -120,6 +127,121 @@ def test_playhead_sharp_thumbnail_window_restores_detail_over_blur():
     assert sharp > blurred + 5.0
 
 
+def test_playhead_detail_boost_increases_thumbnail_contrast():
+    _ensure_qapp()
+    thumb = _striped_thumb(width=180, height=56)
+
+    boosted = _timeline_playhead_detail_boost(thumb)
+
+    original_contrast = _window_edge_contrast(thumb.toImage(), 20, 8, 80, 40)
+    boosted_contrast = _window_edge_contrast(boosted.toImage(), 20, 8, 80, 40)
+    assert boosted_contrast > original_contrast * 1.10
+
+
+def test_studio_playhead_paints_crisp_opaque_core():
+    _ensure_qapp()
+    canvas = QPixmap(24, 32)
+    canvas.fill(QColor(0, 0, 0, 0))
+    painter = QPainter(canvas)
+    paint_studio_playhead(painter, 12, 2, 29, show_handle=False)
+    painter.end()
+
+    image = canvas.toImage()
+    core = image.pixelColor(12, 14)
+    left = image.pixelColor(10, 14)
+    right = image.pixelColor(14, 14)
+
+    assert core.alpha() == 255
+    assert core.red() > 240
+    assert left.alpha() == 0
+    assert right.alpha() == 0
+
+
+def test_timeline_soft_thumb_uses_layered_blur_not_plain_solid():
+    _ensure_qapp()
+    thumb = _striped_thumb(width=180, height=56)
+
+    sharp = _timeline_thumb_tile(None, thumb, 180, 56, 0.0)
+    soft = _timeline_thumb_tile(None, thumb, 180, 56, 1.0)
+
+    sharp_contrast = _window_edge_contrast(sharp.toImage(), 20, 8, 80, 40)
+    soft_contrast = _window_edge_contrast(soft.toImage(), 20, 8, 80, 40)
+    assert soft_contrast < sharp_contrast * 0.55
+    assert soft_contrast > 0.5
+
+
+def test_timeline_thumb_crossfade_uses_continuous_alpha_gradient():
+    _ensure_qapp()
+    tile = QPixmap(100, 24)
+    tile.fill(QColor(220, 120, 40, 255))
+
+    faded = _timeline_thumb_tile_left_fade(tile, 60).toImage()
+    alphas = [faded.pixelColor(x, 12).alpha() for x in range(0, 61)]
+
+    assert alphas[0] < 8
+    assert alphas[-1] > 246
+    assert all(left <= right for left, right in zip(alphas, alphas[1:]))
+    assert len(set(alphas)) > 30
+
+
+def test_track_focus_reduces_selected_track_blur_while_preserving_playhead_reveal():
+    active_soften, active_opacity, active_detail = _timeline_track_focus_values(True)
+    inactive_soften, inactive_opacity, inactive_detail = _timeline_track_focus_values(False)
+
+    assert active_soften == inactive_soften * 0.70
+    assert active_opacity > inactive_opacity
+    assert active_opacity == 0.76
+    assert inactive_opacity == 0.64
+    assert active_detail == inactive_detail == 1.0
+
+
+def test_video_track_row_uses_compact_separator_instead_of_header_gap():
+    row = TrackRow(_track_with_pattern_thumbnails())
+
+    assert row.LABEL_H == 0
+    assert row.height() == row.LABEL_H + row.TIMELINE_H + TRACK_V_PADDING
+    assert TRACK_V_PADDING == 0
+    assert row.height() == row.TIMELINE_H
+
+
+def test_clip_track_identity_strip_uses_track_accent_color():
+    _ensure_qapp()
+    canvas = QPixmap(90, 42)
+    canvas.fill(QColor(0, 0, 0, 0))
+    painter = QPainter(canvas)
+    accent = QColor("#89B4D6")
+    _paint_clip_track_identity_strip(
+        painter,
+        QRect(10, 4, 70, 34),
+        accent,
+        active=True,
+        selected=False,
+    )
+    painter.end()
+
+    pixel = canvas.toImage().pixelColor(14, 20)
+    assert pixel.alpha() > 180
+    assert pixel.blue() > pixel.red()
+
+
+def test_playhead_sharp_window_uses_higher_detail_and_wider_blend():
+    preview = QRect(20, 10, 820, 56)
+    playhead_x = preview.left() + preview.width() // 2
+    old_sharp = int(max(28, min(120, 90.0 * 0.78)))
+    old_feather = int(max(36, min(144, 90.0 * 0.90, old_sharp * 2)))
+
+    metrics = _timeline_playhead_sharp_window_metrics(
+        SimpleNamespace(_px_per_sec=90.0),
+        preview,
+        playhead_x,
+    )
+
+    assert metrics is not None
+    _left, _right, sharp_half, feather = metrics
+    assert sharp_half >= int(old_sharp * 1.3)
+    assert feather >= int(old_feather * 1.5)
+
+
 def _track_with_pattern_thumbnails() -> VideoTrack:
     thumb = _striped_thumb()
     clip = VideoClip(
@@ -155,9 +277,9 @@ def test_track_row_paints_playhead_sharp_window_for_visible_clip(monkeypatch):
     calls: list[int] = []
     original = paint_mod._paint_timeline_playhead_sharp_thumb_window
 
-    def spy(owner, painter, preview_rect, tile_rects, blend_w, pixmap_for_rect, playhead_x):
+    def spy(owner, painter, preview_rect, tile_rects, blend_w, pixmap_for_rect, playhead_x, **kwargs):
         calls.append(int(playhead_x))
-        return original(owner, painter, preview_rect, tile_rects, blend_w, pixmap_for_rect, playhead_x)
+        return original(owner, painter, preview_rect, tile_rects, blend_w, pixmap_for_rect, playhead_x, **kwargs)
 
     monkeypatch.setattr(paint_mod, "_paint_timeline_playhead_sharp_thumb_window", spy)
     canvas = QPixmap(row.width(), row.height())

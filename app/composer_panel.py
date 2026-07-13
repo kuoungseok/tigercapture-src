@@ -6,10 +6,11 @@ compatible while the visible surface presents a dedicated composition tool.
 """
 from __future__ import annotations
 
+import copy
 from pathlib import Path
 from typing import Any
 
-from PySide6.QtCore import QSize, QUrl, Qt, Signal
+from PySide6.QtCore import QUrl, Qt, Signal
 from PySide6.QtWidgets import (
     QComboBox,
     QFrame,
@@ -24,8 +25,8 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtGui import QDesktopServices
 
-from app.icons import composer_wide_icon
-from app.sound_editor_panel import _MusicLabArrangementView
+from app.audio_tracks import default_effects_state
+from app.sound_editor_panel import _MusicLabArrangementView, _SoundLabKnobStrip
 from app.style import FONT_FAMILY, editor_scrollbar_qss
 
 
@@ -47,18 +48,17 @@ class ComposerPanel(QWidget):
         self._music_preview_player: Any = None
         self._music_preview_output: Any = None
         self._music_preview_loaded_path = ""
+        self._composer_master_fx: dict[str, Any] = copy.deepcopy(default_effects_state())
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(6)
 
-        banner = QPushButton("", self)
+        banner = QLabel("COMPOSER", self)
         banner.setObjectName("ComposerBanner")
-        banner.setIcon(composer_wide_icon(300, 48, color="#FFFFFF"))
-        banner.setIconSize(QSize(300, 48))
+        banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
         banner.setMinimumHeight(54)
         banner.setMaximumHeight(58)
-        banner.setEnabled(False)
         root.addWidget(banner)
 
         root.addWidget(self._build_composer_page(), 1)
@@ -66,9 +66,9 @@ class ComposerPanel(QWidget):
     def _qss(self) -> str:
         return (
             f"QWidget#ComposerPanel {{ background:#101112; font-family:{FONT_FAMILY}; }}"
-            "QPushButton#ComposerBanner {"
-            "background:rgba(126,215,154,8); color:#FFFFFF; border:1px solid rgba(126,215,154,64);"
-            "border-radius:7px; padding:0px;"
+            "QLabel#ComposerBanner {"
+            "background:rgba(126,215,154,7); color:#EAF2EE; border:1px solid rgba(126,215,154,42);"
+            "border-radius:7px; padding:0px; font-size:28px; font-weight:760; letter-spacing:2px;"
             "}"
             "QFrame#ComposerCard { background:transparent; border:none; border-top:1px solid rgba(178,186,202,16); border-radius:0px; }"
             "QLabel#ComposerCardTitle { color:#DDE2EA; font-size:10px; font-weight:720; background:transparent; }"
@@ -86,6 +86,11 @@ class ComposerPanel(QWidget):
             "border-radius:5px; padding:5px 10px; font-size:9px; font-weight:760;"
             "}"
             "QPushButton#ComposerPrimaryButton:hover { background:rgba(126,215,154,24); color:#FFFFFF; }"
+            "QFrame#ComposerMasterFxPanel { background:rgba(255,255,255,3); border:1px solid rgba(178,186,202,16); border-radius:6px; }"
+            "QWidget#SoundLabKnobStrip { background:transparent; border:none; }"
+            "QLabel#SoundLabKnobStripTitle { color:#A3ABB7; font-size:9px; font-weight:720; background:transparent; }"
+            "QLabel#SoundFieldLabel { color:#A3ABB7; font-size:9px; font-weight:560; background:transparent; }"
+            "QLabel#SoundFieldValue { color:#D9E2E4; font-size:9px; font-weight:640; background:transparent; }"
             "QComboBox#ComposerCombo, QComboBox#ComposerAIProviderCombo {"
             "background:rgba(255,255,255,5); color:#D7DAE7; border:1px solid rgba(178,186,202,24);"
             "border-radius:5px; padding:3px 7px; font-size:9px; min-height:20px;"
@@ -275,6 +280,8 @@ class ComposerPanel(QWidget):
         self._music_note_hint.setWordWrap(True)
         card_layout.addWidget(self._music_note_hint)
 
+        card_layout.addWidget(self._build_master_fx_panel(page))
+
         actions = QWidget(page)
         actions_layout = QHBoxLayout(actions)
         actions_layout.setContentsMargins(0, 0, 0, 0)
@@ -318,9 +325,162 @@ class ComposerPanel(QWidget):
         self._refresh_music_arrangement()
         return page
 
+    def _build_master_fx_panel(self, parent: QWidget) -> QWidget:
+        panel = QFrame(parent)
+        panel.setObjectName("ComposerMasterFxPanel")
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(0, 6, 0, 6)
+        layout.setSpacing(5)
+
+        header = QWidget(panel)
+        header_layout = QHBoxLayout(header)
+        header_layout.setContentsMargins(0, 0, 0, 0)
+        header_layout.setSpacing(5)
+        title = QLabel("Master FX", header)
+        title.setObjectName("ComposerCardTitle")
+        hint = QLabel("Sound Editor chain for rendered mix/stems", header)
+        hint.setObjectName("ComposerSubtitle")
+        hint.setWordWrap(True)
+        self._master_fx_enabled = QPushButton("Off", header)
+        self._master_fx_enabled.setObjectName("ComposerButton")
+        self._master_fx_enabled.setCheckable(True)
+        self._master_fx_enabled.setAccessibleName("Enable Composer Master FX")
+        self._master_fx_enabled.toggled.connect(self._on_master_fx_enabled)
+        header_layout.addWidget(title, 0)
+        header_layout.addWidget(hint, 1)
+        header_layout.addWidget(self._master_fx_enabled, 0)
+        layout.addWidget(header)
+
+        self._master_fx_knobs = _SoundLabKnobStrip("Composer master knobs", panel)
+        self._master_fx_knobs.add_knob("air", "Air", minimum=0, maximum=8, default=0, color="green", formatter=lambda v: f"{v:.1f} dB")
+        self._master_fx_knobs.add_knob("clarity", "Clarity", minimum=0, maximum=100, default=0, unit="%", color="blue", formatter=lambda v: f"{v:.0f}%")
+        self._master_fx_knobs.add_knob("width", "Width", minimum=60, maximum=180, default=100, unit="%", color="#A98FD7", formatter=lambda v: f"{v:.0f}%")
+        self._master_fx_knobs.add_knob("punch", "Punch", minimum=0, maximum=100, default=0, unit="%", color="orange", formatter=lambda v: f"{v:.0f}%")
+        self._master_fx_knobs.add_knob("space", "Space", minimum=0, maximum=55, default=0, unit="%", color="green", formatter=lambda v: f"{v:.0f}%")
+        self._master_fx_knobs.knob_changed.connect(self._on_master_fx_knob_changed)
+        layout.addWidget(self._master_fx_knobs, 0)
+
+        actions = QWidget(panel)
+        actions_layout = QHBoxLayout(actions)
+        actions_layout.setContentsMargins(0, 0, 0, 0)
+        actions_layout.setSpacing(5)
+        preset_soft = QPushButton("Soft Master", actions)
+        preset_soft.setObjectName("ComposerButton")
+        preset_soft.clicked.connect(lambda: self._apply_master_fx_preset("soft"))
+        preset_large = QPushButton("Wide Hall", actions)
+        preset_large.setObjectName("ComposerButton")
+        preset_large.clicked.connect(lambda: self._apply_master_fx_preset("wide"))
+        apply = QPushButton("Apply to Music", actions)
+        apply.setObjectName("ComposerPrimaryButton")
+        apply.setAccessibleName("Apply Composer Master FX to Composer music")
+        apply.clicked.connect(self._request_apply_master_fx)
+        self._master_fx_apply_btn = apply
+        actions_layout.addWidget(preset_soft, 0)
+        actions_layout.addWidget(preset_large, 0)
+        actions_layout.addStretch(1)
+        actions_layout.addWidget(apply, 0)
+        layout.addWidget(actions)
+        return panel
+
+    def _on_master_fx_enabled(self, enabled: bool) -> None:
+        self._master_fx_enabled.setText("On" if enabled else "Off")
+        ai = self._composer_master_fx.setdefault(
+            "ai_master",
+            copy.deepcopy(default_effects_state().get("ai_master", {})),
+        )
+        reverb = self._composer_master_fx.setdefault(
+            "reverb",
+            copy.deepcopy(default_effects_state().get("reverb", {})),
+        )
+        ai["enabled"] = bool(enabled)
+        reverb["enabled"] = bool(enabled and float(reverb.get("mix") or 0.0) > 0.0)
+
+    def _set_master_fx_value(self, fx_key: str, sub_key: str, value: Any) -> None:
+        defaults = default_effects_state()
+        state = self._composer_master_fx.setdefault(fx_key, copy.deepcopy(defaults.get(fx_key, {})))
+        state[sub_key] = value
+        if fx_key == "ai_master" and sub_key != "preset":
+            state["preset"] = "Composer"
+        if self._master_fx_enabled.isChecked():
+            if fx_key == "reverb":
+                state["enabled"] = float(state.get("mix") or 0.0) > 0.0
+            else:
+                state["enabled"] = True
+
+    def _on_master_fx_knob_changed(self, key: str, value: float) -> None:
+        if key == "air":
+            self._set_master_fx_value("ai_master", "air", round(float(value), 1))
+        elif key == "clarity":
+            self._set_master_fx_value("ai_master", "clarity", round(float(value)))
+        elif key == "width":
+            self._set_master_fx_value("ai_master", "width", round(float(value)))
+        elif key == "punch":
+            self._set_master_fx_value("ai_master", "punch", round(float(value)))
+        elif key == "space":
+            self._set_master_fx_value("reverb", "mix", round(float(value)))
+
+    def _apply_master_fx_preset(self, preset: str) -> None:
+        if preset == "wide":
+            values = {"air": 2.8, "clarity": 42, "width": 138, "punch": 24, "space": 28}
+        else:
+            values = {"air": 1.8, "clarity": 34, "width": 116, "punch": 18, "space": 14}
+        self._master_fx_enabled.setChecked(True)
+        self._master_fx_knobs.set_values({key: float(value) for key, value in values.items()})
+        for key, value in (
+            ("air", values["air"]),
+            ("clarity", values["clarity"]),
+            ("width", values["width"]),
+            ("punch", values["punch"]),
+        ):
+            self._set_master_fx_value("ai_master", key, value)
+        self._set_master_fx_value("reverb", "type", "Hall" if preset == "wide" else "Room")
+        self._set_master_fx_value("reverb", "size", 44 if preset == "wide" else 28)
+        self._set_master_fx_value("reverb", "decay_s", 2.2 if preset == "wide" else 1.3)
+        self._set_master_fx_value("reverb", "damping", 54 if preset == "wide" else 62)
+        self._set_master_fx_value("reverb", "mix", values["space"])
+        self._music_status.setText(f"Composer Master FX preset ready: {'Wide Hall' if preset == 'wide' else 'Soft Master'}")
+
+    def _master_fx_payload(self) -> dict[str, Any]:
+        enabled = bool(self._master_fx_enabled.isChecked())
+        payload: dict[str, Any] = {}
+        ai = copy.deepcopy(self._composer_master_fx.get("ai_master") or default_effects_state().get("ai_master", {}))
+        reverb = copy.deepcopy(self._composer_master_fx.get("reverb") or default_effects_state().get("reverb", {}))
+        ai["enabled"] = bool(enabled and (
+            abs(float(ai.get("air") or 0.0)) > 0.001
+            or float(ai.get("clarity") or 0.0) > 0.001
+            or abs(float(ai.get("width") or 100.0) - 100.0) > 0.001
+            or float(ai.get("punch") or 0.0) > 0.001
+            or float(ai.get("warmth") or 0.0) > 0.001
+            or float(ai.get("excite") or 0.0) > 0.001
+        ))
+        ai["preset"] = str(ai.get("preset") or "Composer")
+        reverb["enabled"] = bool(enabled and float(reverb.get("mix") or 0.0) > 0.0)
+        loudness = copy.deepcopy(default_effects_state().get("loudness", {}))
+        loudness.update({"enabled": bool(enabled), "target_i": -14.0, "true_peak": -1.0, "lra": 11.0, "target_id": "music"})
+        payload["ai_master"] = ai
+        payload["reverb"] = reverb
+        payload["loudness"] = loudness
+        return payload
+
+    def _request_apply_master_fx(self) -> None:
+        composition_id = str(self._music_selection_payload().get("composition_id") or "")
+        _roles, create_mix = self._music_roles_param()
+        role = "mix" if create_mix else "all"
+        params: dict[str, Any] = {
+            "role": role,
+            "effects": self._master_fx_payload(),
+            "merge": True,
+            "focus_workbench": False,
+        }
+        if composition_id:
+            params["composition_id"] = composition_id
+        self._music_status.setText("Applying Sound Editor Master FX to Composer audio...")
+        self.music_lab_action_requested.emit("music.apply_master_fx", params)
+
     def set_music_composition(self, composition: dict[str, Any] | None) -> None:
         self._music_composition = dict(composition or {}) if isinstance(composition, dict) else None
         self._music_arrangement.set_composition(self._music_composition)
+        self._music_arrangement.set_playback_position_ms(None)
         self._music_selection = self._music_arrangement.selection()
         self._sync_music_controls_from_composition()
         self._refresh_music_arrangement()
@@ -702,6 +862,7 @@ class ComposerPanel(QWidget):
         self._music_preview_player = QMediaPlayer(self)
         self._music_preview_player.setAudioOutput(self._music_preview_output)
         self._music_preview_player.playbackStateChanged.connect(self._on_music_preview_state_changed)
+        self._music_preview_player.positionChanged.connect(self._on_music_preview_position_changed)
         return True
 
     def _request_music_preview(self) -> None:
@@ -740,6 +901,7 @@ class ComposerPanel(QWidget):
                 player.stop()
             except Exception:
                 pass
+        self._music_arrangement.set_playback_position_ms(None)
         self._music_status.setText("Composer preview stopped.")
 
     def _on_music_preview_state_changed(self, state) -> None:
@@ -749,6 +911,9 @@ class ComposerPanel(QWidget):
         except Exception:
             playing = False
         self._music_preview_btn.setText("Pause" if playing else "Preview")
+
+    def _on_music_preview_position_changed(self, position_ms: int) -> None:
+        self._music_arrangement.set_playback_position_ms(int(position_ms or 0), follow=True)
 
     def _request_music_regenerate_selection(self) -> None:
         payload = self._music_selection_payload()

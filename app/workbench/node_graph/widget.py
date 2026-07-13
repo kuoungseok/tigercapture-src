@@ -699,6 +699,15 @@ class NodeGraphWidget(QWidget):
             self._suspend_persist = False
         if repaired_chain:
             self._save_to_current_track()
+        try:
+            from app.timeline_track_colors import track_accent_color, track_context_label
+
+            if track is None:
+                self.scene.set_track_context(None, "")
+            else:
+                self.scene.set_track_context(track_accent_color(track), track_context_label(track))
+        except Exception:
+            self.scene.set_track_context(None, "")
         self._refresh_count()
         self.minimap.refresh()
 

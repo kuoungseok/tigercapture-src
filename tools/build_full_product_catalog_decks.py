@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import json
 import shutil
+import subprocess
 import sys
 import warnings
 import zipfile
@@ -66,21 +67,32 @@ MULTI_MONITOR_OVERVIEW_RULE = (
     "and MMD/VRM-style support surfaces. Right is node-dominant with sound/audio "
     "workbench evidence. A semantic sidecar may not be auto-stamped from an "
     "existing image; it must record these role-specific facts from a real "
-    "TigerCapture capture."
+    "Tiger Studio capture."
 )
 COMPARE_EVIDENCE_RULE = (
     "Before/after evidence lock: apply the grade/filter/node through the editor "
     "action surface, enable ui.viewer.compare.set(split or before), capture the "
-    "real changed editor state, and validate that the viewer is not black. The "
-    "capture must also write a sidecar contract proving non-neutral parameter "
-    "changes and a visible delta; original/neutral-looking output is invalid."
+    "real changed editor state, and validate that the viewer is not black. For "
+    "color, node graph, and node/effect pages, the main evidence must be one "
+    "full editor/window capture where the split/before-after Viewer and the "
+    "actual controls that produced the result are visible together. The capture "
+    "must also write a sidecar contract proving non-neutral parameter changes "
+    "and a visible delta; original/neutral-looking output is invalid."
 )
 COMPARE_MIN_VISUAL_DELTA_SCORE = 4.0
 SOUND_EDITOR_CURRENT_UI_CONTRACT_VERSION = 2
 COLOR_IPAD_DETAIL_RULE = (
     "Color iPad detail lock: capture only the color-control detail surface "
     "(wheels, curves, scopes, tone controls, and sliders). The iPad source must "
-    "not contain the video viewer, media pool, or timeline."
+    "not contain the video viewer, media pool, or timeline. If the detail frame "
+    "does not add meaning beyond the main comparison workbench, use the "
+    "laptop-only template instead of filling the iPad."
+)
+AR_PBR_IPAD_DETAIL_RULE = (
+    "AR/PBR iPad detail lock: the iPad/detail frame must show the standalone "
+    "AR/PBR or 3D viewer for the same approved plaster statue/bust asset. It "
+    "must not show the composited video output, a raw video frame, a camera "
+    "model, or a duplicate of the laptop/editor screen."
 )
 ACTOR_COMPOSITE_RULE = (
     "Actor-composite evidence lock: the actor must be visible inside the editor "
@@ -205,12 +217,19 @@ COMPARE_SOURCE_REPORT_REQUIRED_CHECKS: dict[str, tuple[str, ...]] = {
         "viewer_frame_visible",
         "color_dock_viewer_reforced",
         "viewer_compare_split",
+        "compare_viewer_and_controls_same_frame",
+        "color_controls_visible",
+        "strong_researched_color_preset_applied",
+        "cinematic_teal_orange_preset_applied",
         "color_before_after_visual_delta",
     ),
     "node_before_after_editor": (
         "node_graph_action_ok",
         "viewer_frame_visible",
         "viewer_compare_split",
+        "compare_viewer_and_node_controls_same_frame",
+        "node_or_effect_controls_visible",
+        "strong_blur_effect_applied",
         "workbench_screenshot",
         "visible_node_count",
         "node_before_after_visual_delta",
@@ -220,11 +239,16 @@ COMPARE_SOURCE_REPORT_REQUIRED_CHECKS: dict[str, tuple[str, ...]] = {
         "viewer_frame_visible",
         "workbench_screenshot",
         "visible_node_count",
+        "strong_blur_effect_applied",
         "node_before_after_visual_delta",
     ),
     "node_effect_before_after_editor": (
         "node_graph_action_ok",
         "viewer_frame_visible",
+        "viewer_compare_split",
+        "compare_viewer_and_node_controls_same_frame",
+        "node_or_effect_controls_visible",
+        "strong_blur_effect_applied",
         "workbench_screenshot",
         "visible_node_count",
         "node_before_after_visual_delta",
@@ -306,6 +330,47 @@ SEMANTIC_CAPTURE_CONTRACTS: dict[str, dict[str, object]] = {
         "contains_any": ("node_effect_library", "effect_node_controls", "before_after_node_result"),
         "forbidden": ("timeline_only", "generic_editor_crop"),
     },
+    "music_lab_editor": {
+        "contract": "music_lab_composition_editor_v1",
+        "contains_all": (
+            "music_lab",
+            "composition_surface",
+            "prompt_composition",
+            "real_tigercapture_capture",
+        ),
+        "contains_any": (
+            "arranger_sections",
+            "chord_progression",
+            "midi_notes",
+            "preview_mix",
+            "render_to_timeline",
+        ),
+        "forbidden": (
+            "sound_editor_only",
+            "audio_mixer_only",
+            "eq_only",
+            "generic_editor_crop",
+            "timeline_only",
+        ),
+    },
+    "music_lab_detail": {
+        "contract": "music_lab_composition_detail_v1",
+        "contains_all": ("music_lab", "composition_detail"),
+        "contains_any": (
+            "selected_section",
+            "chord_progression",
+            "midi_notes",
+            "preview_mix",
+            "render_controls",
+        ),
+        "forbidden": (
+            "sound_editor_only",
+            "audio_mixer_only",
+            "eq_only",
+            "generic_editor_crop",
+            "timeline_only",
+        ),
+    },
     "sound_editor": {
         "contract": "sound_editor_current_ui_v1",
         "contains_all": (
@@ -363,6 +428,19 @@ SEMANTIC_CAPTURE_CONTRACTS: dict[str, dict[str, object]] = {
         "contains_all": ("mmd_viewer", "mmd_character"),
         "forbidden": ("live2d_substitute", "generic_editor_crop", "raw_video_only"),
     },
+    "ar_statue_viewer": {
+        "contract": "ar_pbr_standalone_viewer_detail_v1",
+        "contains_all": ("ar_pbr_viewer", "standalone_3d_viewer", "plaster_statue"),
+        "contains_any": ("neutral_3d_background", "ar_pbr_background_hidden", "cubemap_hidden"),
+        "forbidden": (
+            "video_composite",
+            "program_output",
+            "raw_video_frame",
+            "camera_model",
+            "duplicate_laptop_screen",
+            "full_editor",
+        ),
+    },
 }
 DETAIL_SEMANTIC_ASSETS = {
     "effects_hover_detail",
@@ -372,10 +450,12 @@ DETAIL_SEMANTIC_ASSETS = {
     "ppt_maker_detail",
     "node_graph_actual",
     "node_effect_library_detail",
+    "music_lab_detail",
     "sound_workbench",
     "sound_graphs",
     "live2d_actor_detail",
     "mmd_character_detail",
+    "ar_statue_viewer",
 }
 
 
@@ -525,7 +605,13 @@ def _compare_action_evidence(
             checks = report.get("checks") if isinstance(report.get("checks"), dict) else {}
             missing_or_false = [key for key in required if not bool(checks.get(key))]
             if missing_or_false:
-                return False, f"Compare source_report is not successful: {source_report_path}", names
+                return (
+                    False,
+                    f"Compare source_report is missing required successful checks: "
+                    + ", ".join(missing_or_false)
+                    + f" ({source_report_path})",
+                    names,
+                )
         for key in COMPARE_ACTION_KEYS:
             names.extend(_action_names_from_value(report.get(key)))
     elif not any(data.get(key) for key in COMPARE_ACTION_KEYS) and not bool(
@@ -796,7 +882,7 @@ def _overview_contract_is_ready(name: str, data: dict[str, object], tags: set[st
     ):
         return (
             False,
-            f"Multi-monitor overview contract for {name} must prove it came from a real TigerCapture window/action capture.",
+            f"Multi-monitor overview contract for {name} must prove it came from a real Tiger Studio window/action capture.",
         )
 
     if name == "overview_center_editor":
@@ -1425,12 +1511,17 @@ def _draw_catalog_text(
         y += 68 if lang == "en" else 62
     body_font = _font(20 if lang == "en" else 19, lang=lang)
     y = max(505, y + 22)
+    line_step = 31 if lang == "en" else 30
+    body_bottom_limit = 748
     for line in _wrap_text(body, 420, body_font)[:5]:
+        if y + line_step > body_bottom_limit:
+            break
         draw.text((118, y), line, fill=(84, 86, 86, 255), font=body_font)
-        y += 31 if lang == "en" else 30
-    draw.text((115, 607), f"/  {page:02d}  /  {total:02d}", fill=(36, 37, 38, 255), font=_font(16, lang=lang, mono=(lang != "ko")))
-    draw.text((115, 831), "TIGERCAPTURE PRODUCT CATALOG", fill=(94, 94, 91, 255), font=mono)
-    draw.text((1262, 831), "TIGERCAPTURE.COM", fill=(94, 94, 91, 255), font=mono)
+        y += line_step
+    marker_y = min(772, max(607, y + 18))
+    draw.text((115, marker_y), f"/  {page:02d}  /  {total:02d}", fill=(36, 37, 38, 255), font=_font(16, lang=lang, mono=(lang != "ko")))
+    draw.text((115, 831), "TIGER STUDIO PRODUCT CATALOG", fill=(94, 94, 91, 255), font=mono)
+    draw.text((1262, 831), "TIGER STUDIO", fill=(94, 94, 91, 255), font=mono)
     draw.text((1468, 831), f"PG {page:02d} / {total:02d}", fill=(94, 94, 91, 255), font=mono)
 
 
@@ -1498,6 +1589,8 @@ def _asset(name: str) -> Path:
         "node_graph_actual": FRESH_CAPTURE_ROOT / "node_effect_before_after" / "node_graph_actual_action.png",
         "node_effect_before_after_editor": FRESH_CAPTURE_ROOT / "node_effect_library" / "editor_node_effect_before_after_action.png",
         "node_effect_library_detail": FRESH_CAPTURE_ROOT / "node_effect_library" / "node_effect_library_detail_action.png",
+        "music_lab_editor": FRESH_CAPTURE_ROOT / "music_lab_composition" / "editor_music_lab_composition_action.png",
+        "music_lab_detail": FRESH_CAPTURE_ROOT / "music_lab_composition" / "music_lab_composition_detail_action.png",
         "node_editor": FRESH_CAPTURE_ROOT / "node_color_tokyo" / "editor_workbench_node_graph_action.png",
         "node_graph": FRESH_CAPTURE_ROOT / "node_color_tokyo" / "workbench_node_graph_action.png",
         "color_editor": FRESH_CAPTURE_ROOT / "node_color_tokyo" / "editor_color_dock_action.png",
@@ -1525,6 +1618,7 @@ def _asset(name: str) -> Path:
         "ar_statue_editor": AR_PBR_MATCHED_EDITOR_CAPTURE,
         "ar_composite": FRESH_CAPTURE_ROOT / "ar_pbr_statue_composite" / "viewer_ar_pbr_composited_frame.png",
         "ar_statue": FRESH_CAPTURE_ROOT / "ar_pbr_statue_composite" / "ar_pbr_statue_standalone_action.png",
+        "ar_statue_viewer": FRESH_CAPTURE_ROOT / "ar_pbr_statue_composite" / "ar_pbr_statue_viewer_detail_action.png",
         "ar_camera": FRESH_CAPTURE_ROOT / "ar_pbr_camera" / "polyhaven_camera_3d_viewer_no_cubemap_actual.png",
         "ar_car": FRESH_CAPTURE_ROOT / "ar_pbr_nexus_rx" / "nexus_rx_preview_action_zoom.png",
         "vtuber_studio_editor": FRESH_CAPTURE_ROOT / "vrm_vtuber_studio" / "vtuber_broadcast_studio_action.png",
@@ -1827,12 +1921,25 @@ def _preflight_required_assets() -> None:
         "node_graph_actual": COMPARE_EVIDENCE_RULE,
         "node_effect_before_after_editor": COMPARE_EVIDENCE_RULE,
         "node_effect_library_detail": COMPARE_EVIDENCE_RULE,
+        "music_lab_editor": (
+            "Music Lab evidence lock: capture the current Tiger Studio Music Lab "
+            "composition surface as its own product feature. It must show prompt "
+            "composition, arranger/section/chord/MIDI or preview/render-to-timeline "
+            "state. Do not substitute Sound Editor, EQ, mixer, or generic audio "
+            "workbench evidence."
+        ),
+        "music_lab_detail": (
+            "Music Lab detail lock: iPad/detail evidence must focus on composition "
+            "details such as section, chord, MIDI note, preview mix, or render "
+            "controls. It must not be an EQ/dynamics/mixer panel or timeline-only crop."
+        ),
         "live2d_composite_editor": ACTOR_COMPOSITE_RULE,
         "live2d_actor_detail": ACTOR_COMPOSITE_RULE,
         "vtuber_studio_editor": VTUBER_STUDIO_RULE,
         "vtuber_studio_program_output": VTUBER_STUDIO_RULE,
         "mmd_composite_editor": ACTOR_COMPOSITE_RULE,
         "mmd_character_detail": ACTOR_COMPOSITE_RULE,
+        "ar_statue_viewer": AR_PBR_IPAD_DETAIL_RULE,
         "export_editor_current": FEATURE_EVIDENCE_RULE,
         "export_timeline_detail_current": FEATURE_EVIDENCE_RULE,
     }
@@ -1988,6 +2095,29 @@ def _ipad_detail_contract_is_ready(spec: "PageSpec", path: Path) -> tuple[bool, 
                 f"Node Effects iPad/detail source is too small to explain the node controls: {width}x{height}",
             )
         ok, reason = _semantic_capture_contract_is_ready("node_effect_library_detail", path)
+        if not ok:
+            return False, reason
+        return True, f"{contract} ok: {width}x{height}"
+    if contract == "music_lab_composition_only":
+        try:
+            with Image.open(path) as img:
+                width, height = img.size
+        except Exception as exc:
+            return False, f"Could not inspect Music Lab iPad/detail source image: {exc}"
+        full_w, full_h = DETAIL_IPAD_FULL_EDITOR_MIN_SIZE
+        if width >= full_w and height >= full_h:
+            return (
+                False,
+                "Music Lab iPad/detail source looks like a full editor capture "
+                f"({width}x{height}). Use a focused composition detail crop, "
+                "not the full editor, media pool, viewer, audio mixer, or timeline.",
+            )
+        if width < 480 or height < 320:
+            return (
+                False,
+                f"Music Lab iPad/detail source is too small to explain composition controls: {width}x{height}",
+            )
+        ok, reason = _semantic_capture_contract_is_ready("music_lab_detail", path)
         if not ok:
             return False, reason
         return True, f"{contract} ok: {width}x{height}"
@@ -2165,8 +2295,8 @@ def _make_spec_closing_slide(spec: "PageSpec", lang: str, page: int, total: int,
     for line in _wrap_text(subtitle, 430, subtitle_font)[:3]:
         draw.text((118, subtitle_y), line, fill=(93, 94, 91, 255), font=subtitle_font)
         subtitle_y += 27
-    draw.text((115, 831), "TIGERCAPTURE PRODUCT CATALOG", fill=(94, 94, 91, 255), font=mono)
-    draw.text((1262, 831), "TIGERCAPTURE.COM", fill=(94, 94, 91, 255), font=mono)
+    draw.text((115, 831), "TIGER STUDIO PRODUCT CATALOG", fill=(94, 94, 91, 255), font=mono)
+    draw.text((1262, 831), "TIGER STUDIO", fill=(94, 94, 91, 255), font=mono)
     draw.text((1468, 831), f"PG {page:02d} / {total:02d}", fill=(94, 94, 91, 255), font=mono)
     draw.line((115, 817, 490, 817), fill=(164, 164, 158, 255), width=1)
 
@@ -2278,10 +2408,10 @@ PAGES = [
     PageSpec(
         "studio_surface",
         "MAIN EDITOR",
-        "TigerCapture\nStudio",
+        "Tiger\nStudio",
         "Import real footage, arrange tracks, preview the result, and keep media, workbench, AI, and timeline controls in one editing surface.",
         "메인 에디터",
-        "TigerCapture\nStudio",
+        "Tiger\nStudio",
         "실제 영상을 불러오고 트랙에 배치하며, 미디어 풀과 워크벤치, AI, 타임라인을 한 화면에서 다룹니다.",
         laptop_name="main_editor_current",
         laptop_frame=None,
@@ -2393,10 +2523,6 @@ PAGES = [
         "커브, 휠, 톤 컨트롤, 스코프를 통해 편집기 안에서 피니싱룸처럼 색을 다룹니다.",
         laptop_name="color_before_after_editor",
         laptop_frame=None,
-        ipad_name="color_before_after_detail",
-        ipad_crop=None,
-        ipad_contain=True,
-        ipad_contract="color_controls_only",
     ),
     PageSpec(
         "node_graph",
@@ -2424,6 +2550,20 @@ PAGES = [
         ipad_name="node_effect_library_detail",
         ipad_contain=True,
         ipad_contract="node_effect_controls_only",
+    ),
+    PageSpec(
+        "music_lab",
+        "COMPOSITION",
+        "Music Lab\nComposition",
+        "Prompt-driven composition creates editable sections, chords, MIDI notes, preview mixes, and timeline-ready music stems apart from sound editing.",
+        "작곡",
+        "Music Lab\n작곡",
+        "Music Lab은 사운드 보정이 아니라 프롬프트로 섹션, 코드, MIDI 노트, 프리뷰 믹스, 타임라인용 음악 스템을 만드는 작곡 워크플로입니다.",
+        laptop_name="music_lab_editor",
+        laptop_frame=None,
+        ipad_name="music_lab_detail",
+        ipad_contain=True,
+        ipad_contract="music_lab_composition_only",
     ),
     PageSpec(
         "audio_workbench",
@@ -2498,7 +2638,7 @@ PAGES = [
         "실시간 PBR 에셋을 영상 위에 놓고 깊이, 오클루전, 그림자, 톤, 조명 컨트롤로 합성합니다.",
         laptop_name="ar_statue_editor",
         laptop_frame=None,
-        ipad_name="ar_statue",
+        ipad_name="ar_statue_viewer",
         ipad_contain=True,
     ),
     PageSpec(
@@ -2528,7 +2668,7 @@ PAGES = [
         "closing",
         "SPECIFICATION INDEX",
         "Specification\nIndex",
-        "A compact map of TigerCapture's capture, editing, actor, 3D, AI, audio, color, and delivery surface.",
+        "A compact map of Tiger Studio's capture, editing, actor, 3D, AI, audio, color, and delivery surface.",
         "스펙 인덱스",
         "스펙\n인덱스",
         "TigerCapture의 캡처, 편집, 액터, 3D, AI, 오디오, 컬러, 전달 기능을 한 페이지에 요약합니다.",
@@ -2564,7 +2704,7 @@ def build_slides(lang: str) -> list[Path]:
 
 
 def build_deck(lang: str, slide_paths: list[Path]) -> Path:
-    out_path = _available_output_path(OUT / f"TigerCapture_Product_Catalog_Full_{lang.upper()}.pptx")
+    out_path = _available_output_path(OUT / f"TigerStudio_Product_Catalog_Full_{lang.upper()}.pptx")
     try:
         from pptx import Presentation
         from pptx.util import Inches
@@ -2779,14 +2919,51 @@ def _available_output_path(path: Path) -> Path:
     raise RuntimeError(f"Could not find an available output path near {path}")
 
 
+def _refresh_catalog_captures() -> None:
+    command = [
+        sys.executable,
+        str(ROOT / "tools" / "retry_full_catalog_page_capture.py"),
+        "--page",
+        "all",
+        "--max-attempts",
+        "1",
+        "--timeout",
+        "1200",
+        "--force-recapture",
+    ]
+    result = subprocess.run(
+        command,
+        cwd=ROOT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    if result.stdout:
+        safe_output = result.stdout.encode(
+            sys.stdout.encoding or "utf-8",
+            errors="replace",
+        ).decode(sys.stdout.encoding or "utf-8", errors="replace")
+        print(safe_output)
+    if result.returncode != 0:
+        raise RuntimeError(
+            "Fresh catalog capture regeneration failed; refusing to build a PPT "
+            "from cached or stale review images."
+        )
+
+
 def main(argv: list[str] | None = None) -> int:
     argv = list(sys.argv[1:] if argv is None else argv)
     if "--preflight-only" in argv:
         _preflight_required_assets()
         print("Full product catalog preflight ok.")
         return 0
+    fresh_captures = "--fresh-captures" in argv
     OUT.mkdir(parents=True, exist_ok=True)
     _clear_previous_outputs()
+    if fresh_captures:
+        _refresh_catalog_captures()
     _preflight_required_assets()
     results = []
     for lang in ("en", "ko"):

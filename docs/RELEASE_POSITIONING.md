@@ -1,6 +1,6 @@
 # TigerCapture Release Positioning Guardrails
 
-Last updated: 2026-07-08
+Last updated: 2026-07-11
 
 This document is the public-claim guardrail for README, website, release notes,
 pricing copy, and store text. It separates implemented behavior from parity
@@ -19,6 +19,11 @@ goals so product copy does not overclaim.
 - CapCut comparison: "CapCut-style creator assist" is acceptable for captions,
   Shorts planning, vertical reframe, publish package, and render handoff. Do not
   claim CapCut-scale template/AI ecosystem depth.
+- Voice Lab / TTS comparison: say "optional local Voice Lab sidecar",
+  "subtitle-to-voice generation", "local Style-Bert-VITS2 connection", or
+  "Model Maker bridge for local voice models". Do not claim a hosted TTS
+  platform, universal voice cloning, turnkey commercial voice marketplace, or
+  bundled TTS engine. Style-Bert-VITS2 remains an external AGPL sidecar.
 - Descript comparison: TigerCapture has a Descript-lite AI Script Edit workflow
   for transcript planning, review, safe apply, local word-timestamp
   transcription, cleanup, speech-enhance contracts, and sentence-level voice
@@ -66,7 +71,7 @@ Latest local QA evidence as of 2026-07-08:
 
 | Gate | Current Result | Public Meaning |
 |---|---:|---|
-| Final Product Readiness | 99/100, `release_ready=false` | Screen Studio interaction, scrub, Descript-lite workflow, and Qwen-backed smart AI edit corpus gates pass; commercial broadcast platform evidence still blocks full release-ready claims. |
+| Final Product Readiness | 99/100, `release_ready=false` | Screen Studio interaction, scrub, Descript-lite workflow, Voice Lab sidecar preflight, and Qwen-backed smart AI edit corpus gates pass; commercial broadcast platform evidence still blocks full release-ready claims. |
 | Preview Performance | `preview_perf_report.json` present, preview/GPU score 100 | Measured steady preview work is claimable with caveats. |
 | Preview Scrub Readiness | 92/100, `release_scrub_claim_ready=true` | Current-corpus scrub readiness is claimable under strict clean-cache measurement; universal no-latency claims remain blocked. |
 | AI Edit Corpus Quality | 99/100 with 20/20 real corpus cases, Qwen direct successes 20/20, `safe_mvp_ready=true`, `smart_edit_claim_ready=true` | Smart-edit claim is locally evidence-backed for this corpus; do not imply human customer study or universal editing quality. |
@@ -74,6 +79,7 @@ Latest local QA evidence as of 2026-07-08:
 | Product Gap Push | 98/100, `implementation_ready=true`, `claim_ready=true` | The ordered 3,4,5,1,2,6 gap report is locally claim-ready; public copy still must remain scoped to the specific evidence reports. |
 | NLE Readiness | 91/100, `professional_nle_claim_ok=false` | Strong core NLE/action surface with Source/Record, 3-point edit, Final Cut-style storyline, multicam, proxy, conform, and bin contracts; still no Premiere/Resolve-class claim until real long-project corpus clears. |
 | CapCut Parity Next | 89.38/100, `parity_ready=false` | Strong CapCut-style workflow progress; not full parity. |
+| Voice Lab Sidecar | `ready=true`, 7 local models detected including `zoe` | Optional local subtitle-to-voice generation is evidence-backed on the reference install. Public copy must still describe Style-Bert-VITS2 as an external sidecar, not bundled TigerCapture technology. |
 | Broadcast Readiness | 95/100, `alpha_ready=true`, `commercial_ready=false` | Alpha-ready broadcast foundation; not sale/commercial broadcast-ready. |
 | Automation/MCP/NLE Action Surface | 100/100 automation evidence, NLE run observed `registered_action_count=387` | Strong structured action surface claim is acceptable; do not imply arbitrary third-party automation coverage. |
 
@@ -97,6 +103,7 @@ not fabricate platform receipts.
 |---|---|---|
 | Screen Studio | Auto Polish path, cursor sidecars, click/drag/hotkey metadata support, manual zoom tools, export handoff, local 20/20 interaction QA corpus | 100% parity, perfect default results, human user recording corpus |
 | AI Script Edit | Bottom AI Command dock, Script Edit panel, SRT/VTT/local word-timestamp transcription path, rule-based prompt routing, Qwen direct provider corpus pass, reviewed safe apply, transcript deletion to reviewed video/audio ripple cuts, one-click filler/silence/retake cleanup, reviewed speech-enhance and sentence voice-replacement contracts | Full Descript replacement, autonomous story edit, hidden cloud AI, collaboration parity, universal magic one-click editing |
+| Voice Lab / TTS | Optional local Style-Bert-VITS2 sidecar connection, subtitle-to-voice generation, aligned WAV clips on a dialogue track, `koharune-ami` default-model preference when available, explicit user-trained voice selection such as `zoe`, Model Maker bridge, Voice Lab sidecar QA auto-start in project evaluation sessions | Hosted TTS platform, bundled Style-Bert-VITS2 engine, universal voice cloning, licensed voice marketplace, guaranteed commercial voice rights, cloud voice collaboration |
 | CapCut | Creator Assist recipes, Shorts planning, caption beat/publish package, vertical reframe, preset packs | CapCut-scale template marketplace, trend AI ecosystem, one-click magic for every video |
 | Resolve/Fairlight/Fusion | Color/audio/VFX foundations, scopes/LUT/HDR intent, routing payloads, repair payloads, readiness cards | Real-time Resolve Color page, Fairlight DAW, Fusion compositor replacement |
 | Professional NLE | Core timeline actions, 3-point edit foundations, NLE readiness diagnostics | Premiere/Resolve-class NLE, full multicam/conform/bin/proxy workflow, long-project proven stability |
@@ -116,8 +123,9 @@ not fabricate platform receipts.
   below release-ready.
 - Current Pro target: one-time USD $149 or subscription USD $15-$19/month is
   defensible with the current Screen Studio-style, Descript-lite, actor, PPT,
-  and local creator workflow evidence, but the copy must keep broadcast,
-  collaboration/cloud, and full professional NLE claims scoped.
+  optional Voice Lab sidecar, and local creator workflow evidence, but the copy
+  must keep broadcast, collaboration/cloud, hosted voice, and full professional
+  NLE claims scoped.
 - A $149+ price may now be defended with the gated Descript-style AI workflow
   value only while `tools/qa_descript_lite_readiness.py` reports priorities 1-5
   claim-ready. Keep the copy tied to reviewed local workflow evidence, not
@@ -163,7 +171,10 @@ Before public paid positioning, verify:
    `descript_lite_claim_ready=true` before any Descript-lite copy ships, and
    `price_149_plus_defense_ready=true` before $149+ Descript-style AI value
    defense is used.
-9. README, website, pricing, and release notes use the safe terms above.
-10. Installer/code signing/auto-update/privacy/crash-report wording is explicit.
-11. Public copy contains no unsupported external engine bridge or asset import
+9. `tools/qa_tts_voice_lab.py --auto-start --wait-timeout 120` reports
+   `ready=true` before public copy says subtitle-to-voice generation is ready on
+   the reference build.
+10. README, website, pricing, and release notes use the safe terms above.
+11. Installer/code signing/auto-update/privacy/crash-report wording is explicit.
+12. Public copy contains no unsupported external engine bridge or asset import
    claims.

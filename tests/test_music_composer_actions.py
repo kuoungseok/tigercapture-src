@@ -49,6 +49,7 @@ def test_music_actions_compose_render_and_insert_timeline(tmp_path: Path) -> Non
         "music.render_to_timeline",
         "music.export_midi",
         "music.mixer.auto_balance",
+        "music.apply_master_fx",
         "music.state",
         "midi.clip.create",
         "midi.clip.write_notes",
@@ -165,6 +166,28 @@ def test_music_actions_compose_render_and_insert_timeline(tmp_path: Path) -> Non
     assert balanced["ok"] is True
     assert balanced["result"]["changed_count"] == 2
     assert all(0.0 <= track.volume <= 1.5 for track in owner._audio_tracks)
+
+    mastered = registry.execute(
+        "music.apply_master_fx",
+        {
+            "composition_id": composition_id,
+            "role": "all",
+            "effects": {
+                "ai_master": {"enabled": True, "preset": "Composer", "air": 2.5, "clarity": 38, "width": 124},
+                "reverb": {"enabled": True, "type": "Hall", "mix": 18, "size": 42, "decay_s": 2.1},
+                "loudness": {"enabled": True, "target_i": -14.0, "true_peak": -1.0},
+            },
+        },
+    ).to_dict()
+    assert mastered["ok"] is True
+    assert mastered["result"]["changed_count"] == 2
+    for track in owner._audio_tracks:
+        effects = track.clips[0].effects
+        assert effects["ai_master"]["enabled"] is True
+        assert effects["ai_master"]["preset"] == "Composer"
+        assert effects["ai_master"]["width"] == 124
+        assert effects["reverb"]["enabled"] is True
+        assert effects["loudness"]["enabled"] is True
 
     state = registry.execute("music.state", {"composition_id": composition_id}).to_dict()
     assert state["ok"] is True
@@ -1129,6 +1152,175 @@ def test_orchestral_music_expands_to_128_internal_tracks(tmp_path: Path) -> None
     assert rendered["render_engine"] == "tigerstudio.local_synth.v5"
     assert len(rendered["stems"]) == len(prefixes)
     assert Path(rendered["preview_mix_path"]).exists()
+
+
+def test_classical_variation_planner_keeps_solo_violin_prominent_until_climax(tmp_path: Path) -> None:
+    from app.music_composer import CLASSICAL_VARIATION_TRACK_COUNT, TICKS_PER_BEAT, compose_music, export_midi, ms_to_tick
+
+    composition = compose_music(
+        prompt="Paganini caprice solo violin, lyrical middle, orchestra only in the climax",
+        duration_ms=90000,
+        genre="classical variation",
+        mood="virtuoso",
+        bpm=132,
+    )
+
+    roles = {track.role for track in composition.tracks}
+    assert len(composition.tracks) == CLASSICAL_VARIATION_TRACK_COUNT
+    assert {
+        "solo_violin",
+        "solo_violin_echo",
+        "solo_violin_harmony",
+        "chamber_strings",
+        "cello_bass",
+        "woodwind_response",
+        "horn_response",
+        "brass_climax",
+        "timpani_climax",
+        "cymbals_climax",
+    } <= roles
+    assert [section.name for section in composition.sections] == [
+        "theme",
+        "rhythmic_variation",
+        "lyrical_variation",
+        "climax",
+        "solo_coda",
+    ]
+
+    solo = next(track for track in composition.tracks if track.role == "solo_violin")
+    solo_by_section = {clip.section_name: sorted(clip.notes, key=lambda note: note.start_tick) for clip in solo.clips}
+    assert set(solo_by_section) == {section.name for section in composition.sections}
+    assert all(notes for notes in solo_by_section.values())
+
+    signatures = {
+        name: tuple(
+            (
+                round((note.start_tick - ms_to_tick(next(section.start_ms for section in composition.sections if section.name == name), composition.bpm)) / TICKS_PER_BEAT, 2),
+                int(note.pitch),
+                round(note.duration_tick / TICKS_PER_BEAT, 2),
+            )
+            for note in notes[:16]
+        )
+        for name, notes in solo_by_section.items()
+    }
+    assert len(set(signatures.values())) >= 4
+
+    theme_avg = sum(note.duration_tick for note in solo_by_section["theme"][:24]) / max(1, len(solo_by_section["theme"][:24]))
+    lyrical_avg = sum(note.duration_tick for note in solo_by_section["lyrical_variation"][:24]) / max(1, len(solo_by_section["lyrical_variation"][:24]))
+    climax_avg = sum(note.duration_tick for note in solo_by_section["climax"][:24]) / max(1, len(solo_by_section["climax"][:24]))
+    assert lyrical_avg > theme_avg
+    assert lyrical_avg > climax_avg
+
+    climax_start = ms_to_tick(next(section.start_ms for section in composition.sections if section.name == "climax"), composition.bpm)
+    heavy_roles = {"brass_climax", "timpani_climax", "cymbals_climax", "horn_response"}
+    for track in composition.tracks:
+        if track.role not in heavy_roles:
+            continue
+        notes = [note for clip in track.clips for note in clip.notes]
+        assert notes
+        assert all(note.start_tick >= climax_start for note in notes)
+
+    midi = export_midi(composition, output_dir=tmp_path)
+    payload = Path(midi["path"]).read_bytes()
+    assert midi["track_count"] == CLASSICAL_VARIATION_TRACK_COUNT
+    assert bytes((0xC0, 40)) in payload
+
+
+def test_sample_production_bypasses_soundfont_for_fast_classical_solo_violin(tmp_path: Path, monkeypatch) -> None:
+    import app.music_composer as music_composer
+
+    composition = music_composer.compose_music(
+        prompt="Paganini caprice solo violin cinematic climax",
+        duration_ms=8000,
+        genre="classical variation",
+        mood="virtuoso",
+        bpm=132,
+    )
+    soundfont_suffixes: list[str] = []
+
+    def fake_sample_kit(*_args, **_kwargs):
+        return None, {"source": "procedural_synth", "ready": False, "reason": "test skips drum kit"}
+
+    def fake_soundfont(*_args, **kwargs):
+        soundfont_suffixes.append(str(kwargs.get("suffix") or ""))
+        return None, {"source": "procedural_synth", "ready": False, "reason": "test skips soundfont"}
+
+    monkeypatch.setattr(music_composer, "_render_sample_kit_bus_samples", fake_sample_kit)
+    monkeypatch.setattr(music_composer, "_render_soundfont_bus_samples", fake_soundfont)
+
+    rendered = music_composer.render_preview(
+        composition,
+        output_dir=tmp_path,
+        backend="sample_production",
+        render_stems=False,
+    )
+
+    assert "lead_bus" not in soundfont_suffixes
+    assert rendered["render_backend"]["bus_renderers"]["lead"]["source"] == "procedural_clean_violin"
+    assert rendered["render_backend"]["bus_renderers"]["lead"]["reason"] == "classical_solo_violin_clean_lead_bypass"
+
+
+def test_genre_specific_planners_route_common_music_styles() -> None:
+    from app.music_composer import (
+        AMBIENT_TRACK_COUNT,
+        HIPHOP_TRAP_TRACK_COUNT,
+        JAZZ_TRACK_COUNT,
+        LOFI_TRACK_COUNT,
+        ROCK_METAL_TRACK_COUNT,
+        SYNTHWAVE_TRACK_COUNT,
+        compose_music,
+    )
+
+    cases = [
+        (
+            {"prompt": "dusty lofi chillhop beat", "genre": "lofi", "mood": "chill"},
+            LOFI_TRACK_COUNT,
+            {"dusty_drums", "vinyl_noise", "sample_chop", "tape_pad"},
+            {"crate_intro", "dusty_groove", "sample_break", "warm_outro"},
+        ),
+        (
+            {"prompt": "fast speed metal guitar band cue", "genre": "metal", "mood": "aggressive"},
+            ROCK_METAL_TRACK_COUNT,
+            {"rock_drums", "palm_mute_guitar", "power_chord_guitar", "lead_guitar"},
+            {"riff_intro", "verse_riff", "solo_break", "final_chorus"},
+        ),
+        (
+            {"prompt": "small club jazz swing with sax solo", "genre": "jazz", "mood": "warm"},
+            JAZZ_TRACK_COUNT,
+            {"swing_drums", "walking_bass", "jazz_piano", "sax_lead", "trumpet_answer"},
+            {"head", "solo_a", "solo_b", "out_head"},
+        ),
+        (
+            {"prompt": "dark trap hiphop beat with 808", "genre": "trap", "mood": "dark"},
+            HIPHOP_TRAP_TRACK_COUNT,
+            {"trap_drums", "808_bass", "hat_rolls", "dark_keys", "riser_fx"},
+            {"intro", "hook", "verse", "drop_hook", "outro"},
+        ),
+        (
+            {"prompt": "neon synthwave outrun theme", "genre": "synthwave", "mood": "driving"},
+            SYNTHWAVE_TRACK_COUNT,
+            {"retro_drums", "pulse_bass", "analog_pad", "synth_lead", "brass_stab"},
+            {"neon_intro", "drive", "breakdown", "neon_drop", "fade"},
+        ),
+        (
+            {"prompt": "ambient drone soundscape", "genre": "ambient", "mood": "wide"},
+            AMBIENT_TRACK_COUNT,
+            {"drone_pad", "shimmer_pad", "low_bloom", "slow_motif", "space_fx"},
+            {"fade_in", "drift", "bloom", "dissolve"},
+        ),
+    ]
+
+    for kwargs, expected_count, expected_roles, expected_sections in cases:
+        composition = compose_music(duration_ms=45000, **kwargs)
+        roles = {track.role for track in composition.tracks}
+        sections = {section.name for section in composition.sections}
+        note_count = sum(len(clip.notes) for track in composition.tracks for clip in track.clips)
+
+        assert len(composition.tracks) == expected_count
+        assert expected_roles <= roles
+        assert expected_sections == sections
+        assert note_count > 0
+        assert roles != {"drums", "bass", "bass_pulse", "chords", "arp", "melody", "lead_answer", "counter", "fx"}
 
 
 def test_music_midi_clip_edit_actions(tmp_path: Path) -> None:

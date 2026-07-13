@@ -791,7 +791,7 @@ def _composite_live2d_actors(self, rgb: np.ndarray, pos_ms: int) -> np.ndarray:
     return result
 
 def _render_actor_only(self, pos_ms: int) -> None:
-    """Render actor overlays onto green chroma when no Program clip is active."""
+    """Render actor overlays onto black when no Program clip is active."""
     import numpy as _np
     from app.perf_monitor import perf_span, stage_threshold_ms
 
@@ -799,14 +799,7 @@ def _render_actor_only(self, pos_ms: int) -> None:
     _perf_detail = f"pos={pos_ms} actor_only=1"
     # Use a sensible default preview size (1280×720)
     w, h = 1280, 720
-    try:
-        from app.vtuber.performance_source import GREEN_CHROMA_RGBA
-
-        color = tuple(int(v) for v in GREEN_CHROMA_RGBA[:3])
-    except Exception:
-        color = (0, 255, 0)
     rgb = _np.zeros((h, w, 3), dtype=_np.uint8)
-    rgb[:, :] = color
     rgb, gpu_meta = self._apply_or_defer_spine_overlay(
         rgb,
         pos_ms,
@@ -893,4 +886,3 @@ def _render_pip_overlays(self, base_rgb: np.ndarray, pos_ms: int) -> np.ndarray:
         base_rgb = self._composite_pip(base_rgb, pip_rgb, track,
                                        x=pip_x, y=pip_y, scale=pip_scale, opacity=pip_opacity)
     return base_rgb
-

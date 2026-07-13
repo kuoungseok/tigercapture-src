@@ -408,6 +408,12 @@ The MVP renderer is intentionally simple and local:
   final preview mix WAV and leaves `rendered_stems` empty. Workbench Music Lab
   Preview uses this path. Timeline insertion keeps `render_stems=true` unless
   it is inserting the single mix as a clip.
+- Composer Master FX: Composer does not own a separate audio-effect engine.
+  Its `Master FX` card reuses Sound Editor state (`AudioClip.effects`) and
+  emits `music.apply_master_fx`, which applies AI Master, space/reverb, and
+  loudness payloads to the rendered Music Mix or matching stem clips. MIDI/note
+  generation remains upstream of this step; Sound Editor effects are applied to
+  rendered audio clips and final export uses the same audio effect chain.
 
 Output:
 
@@ -503,8 +509,10 @@ Future deeper Music Lab UI can expand into a detachable dock:
 - Prompt row: genre, mood, BPM, key, duration.
 - Arrange lane: intro/build/main/outro sections.
 - Chord lane: chord progression per section.
-- Track lanes: drums, bass, chords, melody, fx, plus grouped orchestral views
-  for the 128-track score mode.
+- Track lanes: default drums/bass/chords/melody/fx roles, genre-specific
+  roles such as guitar bands, swing sections, 808/trap layers, synthwave
+  pulses, and ambient pads, plus grouped orchestral views for the 128-track
+  score mode.
 - Right panel: AI change list and regenerate controls.
 - Bottom actions: Render Preview, Render to Timeline, Auto Balance.
 
@@ -518,9 +526,19 @@ full DAW editing.
   music tracks.
 - Orchestral/symphonic/trailer-score prompts create exactly 128 internal music
   tracks with unique role ids and non-empty MIDI-note content.
-- Non-orchestral prompts create the 9-channel default baseline unless the user
-  explicitly disables FX, in which case the same arrangement can render as eight
-  channels.
+- Paganini, caprice, classical variation, rondo, concerto, or solo-violin
+  prompts use the dedicated classical variation planner from
+  `docs/SPEC_CLASSICAL_VARIATION_COMPOSER.md` instead of the generic 128-track
+  trailer plan. The solo violin must remain active in every section, and heavy
+  climax roles such as brass, timpani, and cymbals must not play before the
+  climax section.
+- Clear lofi, rock/metal, jazz, hiphop/trap, synthwave, and ambient prompts use
+  the dedicated genre planners from
+  `docs/SPEC_GENRE_COMPOSER_PLANNERS.md`. These planners must replace both
+  section names and track roles instead of relabeling the generic BGM sketch.
+- Unmatched non-orchestral prompts create the 9-channel default baseline unless
+  the user explicitly disables FX, in which case the same arrangement can render
+  as eight channels.
 - Melodic EDM/NCS-style prompts create all nine arranged layers including bass
   pulse, arp, answer lead, counter melody, and FX by default.
 - Key-aware progression tests must keep common minor EDM requests such as

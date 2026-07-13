@@ -341,10 +341,14 @@ def _sync_ar_pbr_depth_view_button(self) -> None:
     try:
         button.blockSignals(True)
         button.setChecked(mode != "off")
+        try:
+            button.setText(_depth_view_button_text(mode))
+        except Exception:
+            pass
         button.setToolTip(
-            "Show AR/PBR depth map only"
+            "Show AR/PBR depth matte"
             if mode == "off"
-            else f"Depth map view enabled ({mode}); click to return to normal preview"
+            else f"Depth view: {_depth_view_button_label(mode)}; click to cycle Matte / Distance / Plane / Off"
         )
         button.setProperty("active", mode != "off")
         button.style().unpolish(button)
@@ -359,10 +363,17 @@ def _sync_ar_pbr_depth_view_button(self) -> None:
 
 
 def _toggle_ar_pbr_depth_view(self, checked: bool = False) -> None:
+    del checked
     player = getattr(self, "_player", None)
     if player is None:
         return
-    mode = "grayscale" if bool(checked) else "off"
+    mode = _next_depth_view_mode("off")
+    getter = getattr(player, "ar_pbr_depth_view_mode", None)
+    if callable(getter):
+        try:
+            mode = _next_depth_view_mode(str(getter() or "off"))
+        except Exception:
+            mode = "matte"
     setter = getattr(player, "set_ar_pbr_depth_view_mode", None)
     if callable(setter):
         try:
@@ -393,9 +404,56 @@ def _toggle_ar_pbr_depth_view(self, checked: bool = False) -> None:
     except Exception:
         pass
     try:
-        self._flash_status("Depth map view on" if mode != "off" else "Depth map view off")
+        self._flash_status(
+            f"Depth view: {_depth_view_button_label(mode)}"
+            if mode != "off"
+            else "Depth view off"
+        )
     except Exception:
         pass
+
+
+def _next_depth_view_mode(current: str) -> str:
+    from app.ar_pbr.depth_view import normalize_depth_view_mode
+
+    mode = normalize_depth_view_mode(current)
+    if mode == "off":
+        return "matte"
+    if mode == "matte":
+        return "distance"
+    if mode == "distance":
+        return "plane"
+    return "off"
+
+
+def _depth_view_button_text(mode: str) -> str:
+    from app.ar_pbr.depth_view import normalize_depth_view_mode
+
+    canonical = normalize_depth_view_mode(mode)
+    if canonical == "off":
+        return "Depth"
+    if canonical == "distance":
+        return "Dist"
+    if canonical == "plane":
+        return "Plane"
+    if canonical == "heat":
+        return "Heat"
+    return "Matte"
+
+
+def _depth_view_button_label(mode: str) -> str:
+    from app.ar_pbr.depth_view import normalize_depth_view_mode
+
+    canonical = normalize_depth_view_mode(mode)
+    labels = {
+        "off": "Off",
+        "matte": "Matte",
+        "distance": "Distance",
+        "plane": "Plane",
+        "heat": "Heat",
+        "inverted_grayscale": "Inverted",
+    }
+    return labels.get(canonical, canonical)
 
 
 def _apply_jkl_transport(self, command: str) -> bool:

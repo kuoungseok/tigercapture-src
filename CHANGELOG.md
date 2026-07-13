@@ -64,6 +64,11 @@ Format: grouped by area, newest work at the top of each section.
   local-only ML are enabled by default again after the launcher flicker fix.
   They still remain controllable with diagnostic off switches such as
   `TIGERCAPTURE_CAPCUT_DISABLED=1` and `TIGERCAPTURE_LOCAL_ML_DISABLED=1`.
+- **Voice Lab sidecar readiness** — Voice Lab now has an optional local
+  Style-Bert-VITS2 sidecar path for subtitle-to-voice generation, prefers the
+  user's `zoe` model when available, exposes a Model Maker bridge for local
+  voice models, and has QA Dashboard preflight coverage that can auto-start the
+  sidecar for project evaluation sessions.
 
 ### UX
 

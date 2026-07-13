@@ -268,6 +268,21 @@ def register_timeline_core_actions(registry: Any) -> None:
         lambda params, dry: _timeline_set_zoom(registry, params, dry),
     )
     registry.register_adapter_action(
+        "timeline.pan",
+        "Pan the visible timeline horizontally by pixels, or jump to an absolute scroll position.",
+        "timeline",
+        "pan_timeline",
+        params_schema=schema_object(
+            {
+                "delta_px": {"type": "number"},
+                "scroll_px": {"type": "number", "minimum": 0},
+            },
+            additional_properties=True,
+        ),
+        undo_label="Pan timeline",
+        dry_summary="timeline view would pan horizontally",
+    )
+    registry.register_adapter_action(
         "timeline.fit",
         "Fit timeline contents to the visible timeline width.",
         "timeline",

@@ -98,3 +98,39 @@ def test_node_graph_widget_workflow_preset_adds_connected_chain():
         assert nodes[-1].isSelected()
     finally:
         widget.deleteLater()
+
+
+def test_node_graph_tracks_current_video_track_context_color():
+    _app()
+
+    from types import SimpleNamespace
+
+    from app.timeline_track_colors import track_accent_color, track_context_label
+    from app.workbench.node_graph.widget import NodeGraphWidget
+
+    track = SimpleNamespace(id=2, node_graph_view_data=None)
+    widget = NodeGraphWidget()
+    try:
+        widget.set_track(track)
+        nodes = list(widget.scene._serial_nodes)
+
+        assert nodes
+        assert nodes[0].track_context_color == track_accent_color(track).name()
+        assert nodes[0].track_context_label == track_context_label(track)
+    finally:
+        widget.deleteLater()
+
+
+def test_node_graph_new_nodes_inherit_track_context_color():
+    _app()
+
+    from PySide6.QtGui import QColor
+
+    from app.workbench.node_graph.scene import NodeGraphScene
+
+    scene = NodeGraphScene()
+    scene.set_track_context(QColor("#9ACB8C"), "V3")
+    node = scene.add_serial_node()
+
+    assert node.track_context_color == QColor("#9ACB8C").name()
+    assert node.track_context_label == "V3"

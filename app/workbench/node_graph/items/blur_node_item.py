@@ -16,7 +16,7 @@ from PySide6.QtCore import QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QLinearGradient, QPainter, QPen
 
 from app.blur_params import BlurParams
-from app.workbench.node_graph.items.node_item import NodeItem
+from app.workbench.node_graph.items.node_item import NodeItem, paint_node_track_context_strip
 from app.workbench.node_graph.theme import (
     NODE_GRAPH_COLORS as C,
     NODE_GRAPH_SIZES as S,
@@ -88,6 +88,7 @@ class BlurNodeItem(NodeItem):
         painter.setBrush(QBrush(gradient))
         painter.setPen(QPen(border_color, border_w))
         painter.drawRoundedRect(rect, radius, radius)
+        paint_node_track_context_strip(self, painter, rect, radius)
 
         # Teal header
         header_h = S["node_header_height"]

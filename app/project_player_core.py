@@ -105,7 +105,7 @@ def _apply_node_effect_player(node_item, rgb: np.ndarray, masks: list, frame_idx
         from app.node_mask import evaluate_node_masks
         mask = evaluate_node_masks(masks, rgb, frame_idx) if masks else None
         invert = bool(getattr(node_item, "blur_invert_mask", True))
-        return bp.apply_with_mask(rgb, mask, invert_mask=invert)
+        return _preserve_encoded_matte(rgb, bp.apply_with_mask(rgb, mask, invert_mask=invert))
     ep = getattr(node_item, "effect_params", None)
     if ep is not None:
         if ep.is_identity():
@@ -118,7 +118,7 @@ def _apply_node_effect_player(node_item, rgb: np.ndarray, masks: list, frame_idx
                 mf = mask[..., None]
                 result = np.clip(mf * result.astype(np.float32) +
                                  (1.0 - mf) * rgb.astype(np.float32), 0, 255).astype(np.uint8)
-        return result
+        return _preserve_encoded_matte(rgb, result)
     grade = getattr(node_item, "color_grade", None)
     if grade is None or grade.is_identity():
         return rgb
@@ -130,17 +130,38 @@ def _apply_node_effect_player(node_item, rgb: np.ndarray, masks: list, frame_idx
             graded = apply_to_rgb(rgb, grade).astype(np.float32)
             mf = mask[..., None]
             blended = mf * graded + (1.0 - mf) * rgb.astype(np.float32)
-            return np.clip(blended, 0, 255).astype(np.uint8)
-    return apply_to_rgb(rgb, grade)
+            return _preserve_encoded_matte(rgb, np.clip(blended, 0, 255).astype(np.uint8))
+    return _preserve_encoded_matte(rgb, apply_to_rgb(rgb, grade))
+
+
+def _preserve_encoded_matte(source_rgb: np.ndarray, processed_rgb: np.ndarray) -> np.ndarray:
+    try:
+        from app.video_letterbox import preserve_letterbox_matte
+
+        return preserve_letterbox_matte(source_rgb, processed_rgb)
+    except Exception:
+        return processed_rgb
 
 
 def _is_preview_color_grade_node(node_item) -> bool:
-    """Return True for nodes that should disappear in color Before preview."""
+    """Return True for nodes that should disappear in Before preview."""
+    if getattr(node_item, "bypassed", False):
+        return False
     kind = getattr(node_item, "NODE_KIND", "serial")
     if kind == "blur":
-        return False
+        blur_params = getattr(node_item, "blur_params", None)
+        if blur_params is None:
+            return False
+        try:
+            return not blur_params.is_identity()
+        except Exception:
+            return True
     if getattr(node_item, "effect_params", None) is not None:
-        return False
+        effect_params = getattr(node_item, "effect_params", None)
+        try:
+            return not effect_params.is_identity()
+        except Exception:
+            return True
     grade = getattr(node_item, "color_grade", None)
     return grade is not None and not grade.is_identity()
 
@@ -156,36 +177,22 @@ def _preview_compare_content_bounds(rgb: np.ndarray) -> tuple[int, int, int, int
     try:
         arr = np.asarray(rgb)
         h, w = arr.shape[:2]
+        from app.video_letterbox import detect_letterbox_bands
+
+        detection = detect_letterbox_bands(
+            arr,
+            settings={
+                "letterbox_max_matte_fraction": 0.82,
+                "letterbox_max_edge_fraction": 0.48,
+                "letterbox_max_one_sided_fraction": 0.20,
+            },
+        )
+        if bool(detection.get("ok")):
+            x, y, cw, ch = detection.get("content_rect") or [0, 0, w, h]
+            return int(y), int(y + ch), int(x), int(x + cw)
+        return 0, h, 0, w
     except Exception:
         return 0, 0, 0, 0
-    if h <= 2 or w <= 2:
-        return 0, max(0, h), 0, max(0, w)
-
-    def _dark_uniform_row(idx: int) -> bool:
-        row = arr[int(idx)]
-        return float(row.mean()) <= 34.0 and float(row.std()) <= 8.0
-
-    def _dark_uniform_col(idx: int) -> bool:
-        col = arr[:, int(idx)]
-        return float(col.mean()) <= 34.0 and float(col.std()) <= 8.0
-
-    max_y_scan = max(1, int(round(h * 0.35)))
-    max_x_scan = max(1, int(round(w * 0.35)))
-    top = 0
-    while top < max_y_scan and _dark_uniform_row(top):
-        top += 1
-    bottom = h
-    while bottom > h - max_y_scan and bottom > top + 2 and _dark_uniform_row(bottom - 1):
-        bottom -= 1
-    left = 0
-    while left < max_x_scan and _dark_uniform_col(left):
-        left += 1
-    right = w
-    while right > w - max_x_scan and right > left + 2 and _dark_uniform_col(right - 1):
-        right -= 1
-    if bottom - top < max(2, h // 8) or right - left < max(2, w // 8):
-        return 0, h, 0, w
-    return top, bottom, left, right
 
 
 def _apply_node_chain_preview_compare(
@@ -1531,15 +1538,8 @@ class ProjectPlayer(QObject):
     def _emit_blank(self) -> None:
         from app.perf_monitor import stage_threshold_ms
 
-        try:
-            from app.vtuber.performance_source import GREEN_CHROMA_RGBA
-
-            color = tuple(int(v) for v in GREEN_CHROMA_RGBA[:3])
-        except Exception:
-            color = (0, 255, 0)
         rgb = np.zeros((9, 16, 3), dtype=np.uint8)
-        rgb[:, :] = color
-        detail = f"pos={self._position_ms} green_chroma=1"
+        detail = f"pos={self._position_ms} blank_black=1"
         self._emit_rgb_frame(rgb, None, detail, stage_threshold_ms())
 
 

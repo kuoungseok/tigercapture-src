@@ -1376,7 +1376,7 @@ def test_project_player_depth_view_mode_shows_depth_map_without_compositing(tmp_
     assert not np.array_equal(out, base)
     diagnostics = player._ar_pbr_last_diagnostics
     assert diagnostics["preview_renderer_selected"] == "depth_map_only"
-    assert diagnostics["depth_view"]["mode"] == "grayscale"
+    assert diagnostics["depth_view"]["mode"] == "matte"
     assert diagnostics["depth_view"]["near_is_white"] is True
 
 
@@ -1403,7 +1403,7 @@ def test_project_player_depth_view_mode_works_without_ar_pbr_tracks(monkeypatch)
     diagnostics = player._ar_pbr_last_diagnostics
     assert diagnostics["preview_renderer_selected"] == "depth_map_only"
     assert diagnostics["active_track_count"] == 0
-    assert diagnostics["depth_view"]["mode"] == "grayscale"
+    assert diagnostics["depth_view"]["mode"] == "matte"
 
 
 def test_project_player_auto_paused_uses_full_gpu_before_packet(tmp_path, monkeypatch):

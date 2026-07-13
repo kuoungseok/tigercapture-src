@@ -41,6 +41,141 @@ from app.timeline_nle_visual_overlay import (
 
 
 _TIMELINE_THUMB_BASE_SOFTEN = 1.0
+_TIMELINE_PLAYHEAD_DETAIL_SCALE = 1.48
+_TIMELINE_PLAYHEAD_BLEND_SCALE = 1.62
+_TIMELINE_PLAYHEAD_DETAIL_BOOST = 0.88
+_TIMELINE_ACTIVE_THUMB_SOFTEN = _TIMELINE_THUMB_BASE_SOFTEN * 0.70
+_TIMELINE_INACTIVE_THUMB_SOFTEN = _TIMELINE_THUMB_BASE_SOFTEN
+
+
+def _scaled_timeline_thumb_blur(tile: QPixmap, scale_down: float) -> QPixmap:
+    if tile.isNull() or tile.width() <= 0 or tile.height() <= 0:
+        return tile
+    scale_down = max(1.0, float(scale_down))
+    if scale_down <= 1.01:
+        return tile.copy()
+    low_w = max(1, int(round(tile.width() / scale_down)))
+    low_h = max(1, int(round(tile.height() / scale_down)))
+    low = tile.scaled(
+        low_w,
+        low_h,
+        Qt.AspectRatioMode.IgnoreAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+    return low.scaled(
+        tile.width(),
+        tile.height(),
+        Qt.AspectRatioMode.IgnoreAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    )
+
+
+def _timeline_softened_thumb_tile(tile: QPixmap, soften: float) -> QPixmap:
+    softness = max(0.0, min(1.0, float(soften)))
+    if softness <= 0.0 or tile.isNull():
+        return tile
+    wide = _scaled_timeline_thumb_blur(tile, 2.8 + softness * 4.2)
+    close = _scaled_timeline_thumb_blur(tile, 1.8 + softness * 2.2)
+    result = QPixmap(tile.width(), tile.height())
+    result.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(result)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+    painter.setOpacity(1.0)
+    painter.drawPixmap(0, 0, wide)
+    painter.setOpacity(0.34)
+    painter.drawPixmap(0, 0, close)
+    painter.setOpacity(0.08)
+    painter.drawPixmap(0, 0, tile)
+    painter.end()
+    return result
+
+
+def _timeline_thumb_tile_left_fade(tile: QPixmap, crossfade_w: int) -> QPixmap:
+    if tile.isNull() or tile.width() <= 0 or tile.height() <= 0:
+        return tile
+    crossfade_w = max(0, min(int(crossfade_w), tile.width() - 1))
+    if crossfade_w <= 0:
+        return tile
+
+    faded = QPixmap(tile.width(), tile.height())
+    faded.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(faded)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+    painter.drawPixmap(0, 0, tile)
+
+    mask = QPixmap(tile.width(), tile.height())
+    mask.fill(Qt.GlobalColor.transparent)
+    mask_painter = QPainter(mask)
+    gradient = QLinearGradient(0.0, 0.0, float(crossfade_w), 0.0)
+    gradient.setColorAt(0.0, QColor(255, 255, 255, 0))
+    gradient.setColorAt(1.0, QColor(255, 255, 255, 255))
+    mask_painter.fillRect(QRect(0, 0, crossfade_w, tile.height()), QBrush(gradient))
+    if crossfade_w < tile.width():
+        mask_painter.fillRect(
+            QRect(crossfade_w, 0, tile.width() - crossfade_w, tile.height()),
+            QColor(255, 255, 255, 255),
+        )
+    mask_painter.end()
+
+    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_DestinationIn)
+    painter.drawPixmap(0, 0, mask)
+    painter.end()
+    return faded
+
+
+def _timeline_track_focus_values(active: bool) -> tuple[float, float, float]:
+    if active:
+        return _TIMELINE_ACTIVE_THUMB_SOFTEN, 0.76, 1.0
+    return _TIMELINE_INACTIVE_THUMB_SOFTEN, 0.64, 1.0
+
+
+def _paint_clip_track_identity_strip(
+    painter: QPainter,
+    clip_rect: QRect,
+    edge: QColor,
+    *,
+    active: bool,
+    selected: bool,
+) -> None:
+    if clip_rect.width() <= 10 or clip_rect.height() <= 12:
+        return
+    color = QColor(edge)
+    color.setAlpha(230 if active or selected else 138)
+    glow = QColor(edge)
+    glow.setAlpha(34 if active or selected else 16)
+    strip_w = 5 if active or selected else 4
+    strip = QRect(
+        clip_rect.left() + 4,
+        clip_rect.top() + 8,
+        strip_w,
+        max(4, clip_rect.height() - 16),
+    )
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(glow)
+    painter.drawRoundedRect(strip.adjusted(-2, -1, 3, 1), 3, 3)
+    painter.setBrush(color)
+    painter.drawRoundedRect(strip, 2, 2)
+    painter.restore()
+
+
+def _paint_active_track_context_outline(
+    painter: QPainter,
+    row_rect: QRect,
+    edge: QColor,
+    *,
+    margin_left: int,
+) -> None:
+    if row_rect.width() <= 0 or row_rect.height() <= 0:
+        return
+    color = QColor(edge)
+    color.setAlpha(188)
+    painter.save()
+    painter.setPen(Qt.PenStyle.NoPen)
+    painter.setBrush(color)
+    painter.drawRoundedRect(QRect(0, 1, 3, row_rect.height() - 2), 2, 2)
+    painter.restore()
 
 
 def _timeline_thumb_blend_width(tile_w: int, thumb_h: int) -> int:
@@ -97,9 +232,9 @@ def _timeline_thumb_tile(owner, pixmap, tile_w: int, thumb_h: int, soften: float
     if cache_key is not None and isinstance(cache, dict) and cache_key in cache:
         return cache[cache_key]
 
-    tile = QPixmap(tile_w, thumb_h)
-    tile.fill(Qt.GlobalColor.transparent)
-    tile_painter = QPainter(tile)
+    base = QPixmap(tile_w, thumb_h)
+    base.fill(Qt.GlobalColor.transparent)
+    tile_painter = QPainter(base)
     tile_painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
     _draw_pixmap_cover(
         tile_painter,
@@ -107,9 +242,10 @@ def _timeline_thumb_tile(owner, pixmap, tile_w: int, thumb_h: int, soften: float
         pixmap,
         0.0,
         opacity=1.0,
-        soften=soften,
+        soften=0.0,
     )
     tile_painter.end()
+    tile = _timeline_softened_thumb_tile(base, soften) if soften > 0.0 else base
     if cache_key is not None and isinstance(cache, dict):
         if len(cache) > 384:
             cache.clear()
@@ -125,6 +261,28 @@ def _timeline_soft_thumb_tile(owner, pixmap, tile_w: int, thumb_h: int) -> QPixm
         thumb_h,
         _TIMELINE_THUMB_BASE_SOFTEN,
     )
+
+
+def _timeline_playhead_detail_boost(
+    layer: QPixmap,
+    amount: float = _TIMELINE_PLAYHEAD_DETAIL_BOOST,
+) -> QPixmap:
+    if layer.isNull() or layer.width() <= 0 or layer.height() <= 0:
+        return layer
+    amount = max(0.0, min(1.0, float(amount)))
+    if amount <= 0.001:
+        return layer
+
+    boosted = QPixmap(layer.size())
+    boosted.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(boosted)
+    painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+    painter.drawPixmap(0, 0, layer)
+    painter.setCompositionMode(QPainter.CompositionMode.CompositionMode_Overlay)
+    painter.setOpacity(amount)
+    painter.drawPixmap(0, 0, layer)
+    painter.end()
+    return boosted
 
 
 def _build_timeline_thumb_tile_layer(
@@ -165,32 +323,13 @@ def _build_timeline_thumb_tile_layer(
             continue
 
         crossfade_w = min(blend_w, tile_rect.width() - 1)
-        slices = min(18, max(6, crossfade_w // 8))
-        for slice_index in range(slices):
-            sx0 = int(round(slice_index * crossfade_w / slices))
-            sx1 = int(round((slice_index + 1) * crossfade_w / slices))
-            if sx1 <= sx0:
-                continue
-            layer_painter.setOpacity((slice_index + 1) / slices)
-            strip = QRect(sx0, 0, sx1 - sx0, preview_rect.height())
-            layer_painter.drawPixmap(
-                QRect(local_x + sx0, 0, sx1 - sx0, preview_rect.height()),
-                tile,
-                strip,
-            )
         layer_painter.setOpacity(1.0)
-        remainder_x = crossfade_w
-        if remainder_x < tile_rect.width():
-            layer_painter.drawPixmap(
-                QRect(
-                    local_x + remainder_x,
-                    0,
-                    tile_rect.width() - remainder_x,
-                    preview_rect.height(),
-                ),
-                tile,
-                QRect(remainder_x, 0, tile_rect.width() - remainder_x, preview_rect.height()),
-            )
+        faded_tile = _timeline_thumb_tile_left_fade(tile, crossfade_w)
+        layer_painter.drawPixmap(
+            QRect(local_x, 0, tile_rect.width(), preview_rect.height()),
+            faded_tile,
+            QRect(0, 0, tile_rect.width(), preview_rect.height()),
+        )
     layer_painter.end()
     return layer
 
@@ -234,6 +373,8 @@ def _paint_timeline_playhead_sharp_thumb_window(
     blend_w: int,
     pixmap_for_rect,
     playhead_x: int,
+    *,
+    strength: float = 1.0,
 ) -> None:
     if (
         not tile_rects
@@ -244,11 +385,10 @@ def _paint_timeline_playhead_sharp_thumb_window(
     ):
         return
 
-    px_per_sec = float(getattr(owner, "_px_per_sec", 80.0) or 80.0)
-    sharp_half = int(max(28, min(120, px_per_sec * 0.78)))
-    feather = int(max(36, min(144, px_per_sec * 0.90, sharp_half * 2)))
-    left = max(preview_rect.left(), int(playhead_x - sharp_half - feather))
-    right = min(preview_rect.right(), int(playhead_x + sharp_half + feather))
+    metrics = _timeline_playhead_sharp_window_metrics(owner, preview_rect, playhead_x)
+    if metrics is None:
+        return
+    left, right, sharp_half, feather = metrics
     if right <= left:
         return
 
@@ -262,6 +402,7 @@ def _paint_timeline_playhead_sharp_thumb_window(
     )
     if layer.isNull():
         return
+    layer = _timeline_playhead_detail_boost(layer)
 
     painter.save()
     clip_path = QPainterPath()
@@ -282,6 +423,7 @@ def _paint_timeline_playhead_sharp_thumb_window(
             alpha = 1.0 - (distance - sharp_half) / max(1.0, float(feather))
             alpha = max(0.0, min(1.0, alpha))
             alpha = alpha * alpha * (3.0 - 2.0 * alpha)
+        alpha *= max(0.0, min(1.0, float(strength)))
         if alpha <= 0.01:
             continue
         painter.setOpacity(alpha)
@@ -297,6 +439,28 @@ def _paint_timeline_playhead_sharp_thumb_window(
             source,
         )
     painter.restore()
+
+
+def _timeline_playhead_sharp_window_metrics(
+    owner,
+    preview_rect: QRect,
+    playhead_x: int,
+) -> tuple[int, int, int, int] | None:
+    if (
+        preview_rect.width() <= 0
+        or preview_rect.height() <= 0
+        or playhead_x < preview_rect.left()
+        or playhead_x > preview_rect.right()
+    ):
+        return None
+    px_per_sec = float(getattr(owner, "_px_per_sec", 80.0) or 80.0)
+    base_sharp_half = max(28.0, min(120.0, px_per_sec * 0.78))
+    base_feather = max(36.0, min(144.0, px_per_sec * 0.90, base_sharp_half * 2.0))
+    sharp_half = int(max(34.0, min(144.0, base_sharp_half * _TIMELINE_PLAYHEAD_DETAIL_SCALE)))
+    feather = int(max(54.0, min(216.0, base_feather * _TIMELINE_PLAYHEAD_BLEND_SCALE)))
+    left = max(preview_rect.left(), int(playhead_x - sharp_half - feather))
+    right = min(preview_rect.right(), int(playhead_x + sharp_half + feather))
+    return left, right, sharp_half, feather
 
 
 def paintEvent(self, event) -> None:
@@ -401,6 +565,7 @@ def paintEvent(self, event) -> None:
                 fill=clip_fill,
                 highlight=clip_hi,
                 edge=clip_edge,
+                vertical_inset=0,
             )
         # Render each clip with a 2 px gap on its right edge when
         # another clip starts immediately after ??the gap is the
@@ -436,6 +601,7 @@ def paintEvent(self, event) -> None:
                 fill=clip_fill,
                 highlight=clip_hi,
                 edge=clip_edge,
+                vertical_inset=0,
             )
             if clip_rect.width() > 16 and clip_rect.height() > 10:
                 wash_rect = clip_rect.adjusted(3, 3, -3, -3)
@@ -485,7 +651,7 @@ def paintEvent(self, event) -> None:
             track_thumbs = self.track.thumbnails
             n_track = len(track_thumbs)
             track_h = max(1, rect.height())
-            thumb_h = max(22, min(track_h - 8, track_h - 6))
+            thumb_h = max(22, track_h)
             src_dur = max(1, int(self.track.duration_ms))
             painter.save()
             visible_rect = event.rect().intersected(
@@ -532,7 +698,7 @@ def paintEvent(self, event) -> None:
                 visible_clip_right = min(clip_rect.right() - 8, visible_right - 8)
                 if visible_clip_right <= visible_clip_left:
                     continue
-                y = clip_rect.top() + max(4, (clip_rect.height() - thumb_h) // 2)
+                y = clip_rect.top() + max(0, (clip_rect.height() - thumb_h) // 2)
                 preview_rect = QRect(
                     int(visible_clip_left),
                     int(y),
@@ -588,15 +754,19 @@ def paintEvent(self, event) -> None:
                     return _valid_thumb_at(_thumb_index_for_x(tile_rect.center().x()))
 
                 painter.save()
-                painter.setClipRect(clip_rect.adjusted(5, 4, -5, -4))
+                painter.setClipRect(clip_rect.adjusted(5, 0, -5, 0))
+                thumb_soften, thumb_opacity, playhead_detail_strength = _timeline_track_focus_values(
+                    self._is_active
+                )
                 _paint_timeline_thumb_tile_layer(
                     self,
                     painter,
                     preview_rect,
                     tile_rects,
                     blend_w,
-                    0.76 if self._is_active else 0.64,
+                    thumb_opacity,
                     _pixmap_for_tile,
+                    soften=thumb_soften,
                 )
                 playhead_x = self._project_ms_to_x(int(getattr(self, "_position_ms", 0) or 0))
                 if clip_rect.left() <= playhead_x <= clip_rect.right():
@@ -608,6 +778,7 @@ def paintEvent(self, event) -> None:
                         blend_w,
                         _pixmap_for_tile,
                         playhead_x,
+                        strength=playhead_detail_strength,
                     )
                 painter.restore()
             painter.restore()
@@ -637,6 +808,13 @@ def paintEvent(self, event) -> None:
                 fill=clip_fill,
                 highlight=clip_hi,
                 edge=clip_edge,
+            )
+            _paint_clip_track_identity_strip(
+                painter,
+                clip_rect,
+                clip_edge,
+                active=self._is_active,
+                selected=selected,
             )
             self._paint_clip_nle_role_chrome(painter, clip, clip_rect)
             paint_clip_anchor_cue(
@@ -1042,12 +1220,17 @@ def paintEvent(self, event) -> None:
             cr = self._clip_rect(clip)
             if cr.width() <= 0:
                 continue
-            _draw_marching_ants(painter, cr, march_off)
+            _draw_marching_ants(painter, cr, march_off, clip_edge)
         painter.restore()
 
-    # Active track: subtle left-edge bar only (no full border)
+    # Active track: same track hue as the Workbench/clip identity color.
     if self._is_active:
-        painter.fillRect(0, 0, 2, self.height(), QColor("#3A3A3A"))
+        _paint_active_track_context_outline(
+            painter,
+            QRect(0, 0, self.width(), self.height()),
+            clip_edge,
+            margin_left=self.MARGIN,
+        )
 
     # Playhead ??orange, drawn on every track at project time.
     if self._drag_snap_x is not None:

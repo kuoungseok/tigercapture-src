@@ -24,6 +24,32 @@ def _screenstudio_owner_for_preview(*args, **kwargs):
     return _impl(*args, **kwargs)
 
 
+def _node_item_has_active_preview_effect(node_item) -> bool:
+    if getattr(node_item, "bypassed", False):
+        return False
+    blur_params = getattr(node_item, "blur_params", None)
+    if blur_params is not None:
+        try:
+            if not blur_params.is_identity():
+                return True
+        except Exception:
+            return True
+    effect_params = getattr(node_item, "effect_params", None)
+    if effect_params is not None:
+        try:
+            if not effect_params.is_identity():
+                return True
+        except Exception:
+            return True
+    grade = getattr(node_item, "color_grade", None)
+    if grade is not None:
+        try:
+            return not grade.is_identity()
+        except Exception:
+            return True
+    return False
+
+
 def _emit_rgb_frame(
     self,
     rgb: np.ndarray,
@@ -665,15 +691,14 @@ def _render_frame_at(self, pos_ms: int, force_seek: bool = False, allow_cached: 
             and getattr(active_seg, "frame_blend", False)
             and active_seg.speed < 1.0
         )
-        color_grade_in_chain = any(
-            (getattr(node_item, "color_grade", None) is not None)
-            and not getattr(node_item, "color_grade").is_identity()
+        active_node_effect_in_chain = any(
+            _node_item_has_active_preview_effect(node_item)
             for node_item, _masks in node_item_chain
         )
         if (
             not frame_blend_active
             and not stabilizer_active
-            and not color_grade_in_chain
+            and not active_node_effect_in_chain
             and zactor is None
             and source_for_cache is not None
         ):

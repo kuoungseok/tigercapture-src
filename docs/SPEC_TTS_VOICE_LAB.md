@@ -1,6 +1,6 @@
 # TTS Voice Lab
 
-Last updated: 2026-07-10
+Last updated: 2026-07-13
 
 TigerCapture is moving toward a subculture media creator studio, so TTS is a
 core product direction rather than a throwaway utility. The first provider is a
@@ -25,6 +25,10 @@ Voice Lab should eventually cover:
 - `app/tts_synthesis.py`: stdlib HTTP client for the optional `/voice` sidecar.
 - `app/tts_subtitle_workflow.py`: subtitle row collection, model selection,
   deterministic generated-WAV paths, and batch synthesis planning.
+- `app/tts_model_training.py`: model-maker boundary for local Style-Bert-VITS2
+  voice training. It prepares `Data/<model>/raw`, launches the upstream Dataset
+  and Train Gradio tools, and validates completed `model_assets/<model>` assets
+  without importing PyTorch or training code into the editor process.
 - `app/tts_lab.py`: standalone Voice Lab page/window plus the `Subtitles -> Track`
   button.
 - `app/actions/tts_namespace.py`: Python Action surface for AI/MCP/QA.
@@ -64,8 +68,22 @@ instructions:
 - `Start server`: start the connected local `server_fastapi.py` from the UI.
 - `Guide`: open the local install/readme location.
 - `Refresh`: re-detect provider status.
-- `Voice`: choose one detected local model. If `zoe` exists, it is the default
-  because it is the user's trained model in the current reference install.
+- `Voice`: choose one detected local model. If `koharune-ami` exists, it is the
+  default dialogue voice in the current reference install. User-trained voices
+  such as `zoe` remain selectable and win when explicitly requested.
+- `Model Maker`: create another local voice model through the connected
+  Style-Bert-VITS2 sidecar. The editor must stage the workspace and launch the
+  upstream tools instead of hiding a long GPU training job behind one click:
+  - `Prepare` creates `Data/<model>/raw` and can copy user-selected source audio
+    files into that folder.
+  - `Dataset UI` opens the upstream Gradio dataset tool for slicing and
+    transcription.
+  - `Train UI` opens the upstream Gradio training tool for preprocessing,
+    BERT/style generation, TensorBoard, and training.
+  - `Register` validates that `model_assets/<model>` contains `config.json` and
+    model weights, then refreshes Voice Lab availability.
+  - Training uses the external sidecar install. TigerCapture must not copy the
+    AGPL training engine into the closed editor source tree.
 - `Subtitles -> Track`: synthesize project subtitles into generated WAV files
   and place them on a dialogue audio track aligned to subtitle start times.
   This command must check whether the sidecar server is responding; if it is
@@ -74,10 +92,38 @@ instructions:
   continues generation.
 - Actor lip-sync: subtitle/TTS clip timing can be baked into a selected Live2D
   actor through renderable `parameter_keyframes`, using `ParamMouthOpenY` and
-  `ParamMouthForm` by default. This is a timing-envelope bridge, not a full
-  phoneme solver yet; future audio-energy or phoneme analysis should extend the
-  same `tigercapture.tts_actor_lipsync.v1` payload instead of replacing the UI
+  `ParamMouthForm` by default. It also writes natural deterministic blink
+  tracks to `ParamEyeLOpen` and `ParamEyeROpen` by default so generated dialogue
+  takes do not look frozen. This is a timing-envelope bridge, not a full phoneme
+  solver yet; future audio-energy or phoneme analysis should extend the same
+  `tigercapture.tts_actor_lipsync.v1` payload instead of replacing the UI
   workflow.
+- One-shot dialogue take: AI/actions can pass dialogue text to
+  `tts.dialogue.generate_actor_take` and get project subtitles, generated WAV
+  clips, Live2D mouth/blink keys, bottom-edge placement, and a default
+  natural acting layer in one operation. Unless the caller explicitly disables
+  it, generated dialogue applies deterministic head/body/breath/arm parameter
+  keys and prefers the model's authored idle motion so a 30-second take does
+  not remain in a static A/T pose. If a Live2D actor target is not specified,
+  the first available Live2D actor clip is used. If no actor exists, the action
+  still creates subtitles and audio and reports
+  `actor_lipsync.reason=no_live2d_actor`.
+- Dialogue take planning: `tts.dialogue.plan_actor_take` is the non-mutating
+  choice surface for AI and UI. It returns Live2D target candidates, TTS voice
+  candidates, placement presets, size presets, and recommended defaults. The UI
+  can show these lists to the user, while AI can skip the prompt and use the
+  recommended values.
+- Dialogue placement: generated Live2D takes default to `bottom_right` with
+  `auto_fit`. The placement helper renders/measures the visible alpha bounds of
+  the Live2D frame when possible and fits that visible bbox to the preset safe
+  area so half-body or cropped models still touch the lower output edge. If
+  measurement fails, it falls back to deterministic preset coordinates and
+  records diagnostics in `dialogue_placement_payload`.
+- Dialogue TTS stability: Japanese dialogue or `*-jp` voice models default to
+  `language=JP` with conservative Style-Bert-VITS2 noise/length values unless
+  the caller explicitly overrides them. The default dialogue recommendation is
+  `koharune-ami` when present; explicit user choices such as `zoe` are
+  preserved.
 
 Automatic install must remain user-initiated and explicit. AI/MCP actions
 should return install plans and execution gates, not silently download or run a
@@ -95,6 +141,12 @@ Current setup actions:
 - `tts.server.start_plan`
 - `tts.server.ensure_running`
 - `tts.connect_installed_sidecar`
+- `tts.model.training.plan`
+- `tts.model.training.execution_gate`
+- `tts.model.training.prepare_workspace`
+- `tts.model.training.launch_dataset`
+- `tts.model.training.launch_train`
+- `tts.model.training.register_result`
 
 Current synthesis/timeline actions:
 
@@ -102,6 +154,8 @@ Current synthesis/timeline actions:
 - `tts.subtitle.plan`
 - `tts.subtitle.generate_to_timeline`
 - `tts.subtitle.apply_actor_lipsync`
+- `tts.dialogue.plan_actor_take`
+- `tts.dialogue.generate_actor_take`
 
 Generated audio should be ordinary WAV media so it can flow through existing
 Media Pool, AudioClip, Sound Editor, mixer, export, and project-save systems.
@@ -112,15 +166,30 @@ automation can pass `auto_start_server=false` only when it intentionally wants
 to fail fast or test timeline placement without launching the server.
 The same generation action accepts `apply_actor_lipsync=true`,
 `actor_track_id`, and `actor_clip_index` when the caller wants subtitle voice
-generation and Live2D mouth-key baking as one operation.
+generation and Live2D mouth/blink-key baking as one operation.
+`tts.dialogue.generate_actor_take` is the preferred AI-facing action when the
+input is raw dialogue text rather than existing subtitle rows. It accepts
+`actor_target_id`, `placement_preset`, `size_preset`, and
+`apply_actor_placement`; `apply_actor_motion` is on by default for natural
+head/body/breath/arm motion. `actor_target_id` may point to an existing timeline
+Live2D actor or a Live2D model asset in the media pool, in which case the action
+creates the actor clip before applying TTS, placement, and motion.
 
 ## QA
 
 - Unit QA must cover: missing install, partial install, server offline,
   sidecar start failure, startup timeout, successful server readiness, subtitle
-  generation, and Live2D mouth-key baking.
+  generation, Live2D mouth/blink-key baking, one-shot dialogue actor takes,
+  non-mutating dialogue take plans, Live2D alpha-bounds placement, natural
+  dialogue motion keys, Japanese synthesis defaults, media-pool Live2D target
+  creation, model-training plan contracts, workspace preparation, and completed
+  model registration.
 - `tools/qa_tts_voice_lab.py` is the local preflight script. By default it does
   not launch the sidecar; pass `--auto-start` only when a human or release QA
   intentionally wants to start `server_fastapi.py`.
+- The in-app QA Dashboard exposes this as `Voice Lab Sidecar` and runs it with
+  `--auto-start --wait-timeout 120` so video/subtitle/TTS project evaluation
+  sessions recover from an offline-but-installed server before marking the
+  workflow failed.
 - The QA report is disposable evidence and writes to
   `debugCapture/voice_lab_sidecar_qa.json`.

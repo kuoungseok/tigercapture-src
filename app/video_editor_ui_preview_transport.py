@@ -312,8 +312,8 @@ def build_preview_transport_area(self, main_col, root) -> None:
     self.viewer_depth_btn.setObjectName("ViewerDropdownButton")
     self.viewer_depth_btn.setCheckable(True)
     self.viewer_depth_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    self.viewer_depth_btn.setFixedSize(52, 30)
-    self.viewer_depth_btn.setToolTip("Show AR/PBR depth map only")
+    self.viewer_depth_btn.setFixedSize(62, 30)
+    self.viewer_depth_btn.setToolTip("Show AR/PBR depth matte / distance / plane views")
     self.viewer_depth_btn.clicked.connect(self._toggle_ar_pbr_depth_view)
 
     # Mark In / Mark Out / Clear selection ??prosumer-editor style

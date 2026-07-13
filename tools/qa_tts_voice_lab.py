@@ -23,6 +23,9 @@ def build_voice_lab_qa_report(*, auto_start: bool = False, wait_timeout_s: float
     )
     guidance = server.get("guidance") if isinstance(server.get("guidance"), dict) else {}
     ready = bool(view.get("ready")) and bool(server.get("ready"))
+    user_message = str(server.get("message") or "").strip()
+    if not ready or guidance:
+        user_message = format_tts_sidecar_guidance(guidance, fallback=user_message)
     failures: list[str] = []
     if not bool(view.get("ready")):
         failures.append("provider_setup_needed")
@@ -37,7 +40,7 @@ def build_voice_lab_qa_report(*, auto_start: bool = False, wait_timeout_s: float
         "failures": failures,
         "view": view,
         "server": server,
-        "user_message": format_tts_sidecar_guidance(guidance, fallback=str(server.get("message") or "")),
+        "user_message": user_message,
     }
 
 

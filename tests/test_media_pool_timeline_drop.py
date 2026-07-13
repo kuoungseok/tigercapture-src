@@ -9,9 +9,10 @@ def test_media_pool_video_item_mime_contains_file_url(tmp_path):
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
 
+    from app.media_asset_routing import MEDIA_POOL_ITEM_MIME_TYPE
     from app.media_pool import MediaPool
 
-    QApplication.instance() or QApplication([])
+    app = QApplication.instance() or QApplication([])
     video = tmp_path / "clip.mp4"
     video.write_bytes(b"not-a-real-video")
 
@@ -23,18 +24,20 @@ def test_media_pool_video_item_mime_contains_file_url(tmp_path):
 
         assert item.data(Qt.ItemDataRole.UserRole + 2) == "V"
         assert mime.hasUrls()
+        assert mime.hasFormat(MEDIA_POOL_ITEM_MIME_TYPE)
         assert [Path(url.toLocalFile()) for url in mime.urls()] == [video.resolve()]
     finally:
         pool.deleteLater()
 
 
-def test_media_pool_featured_item_can_start_file_drag(tmp_path, monkeypatch):
+def test_media_pool_featured_item_starts_internal_drag_without_file_url(tmp_path, monkeypatch):
     from PySide6.QtCore import Qt
     from PySide6.QtWidgets import QApplication
 
+    from app.media_asset_routing import MEDIA_POOL_ITEM_MIME_TYPE
     from app.media_pool import MediaPool
 
-    QApplication.instance() or QApplication([])
+    app = QApplication.instance() or QApplication([])
     video = tmp_path / "featured_clip.mp4"
     video.write_bytes(b"not-a-real-video")
     drags = []
@@ -75,8 +78,12 @@ def test_media_pool_featured_item_can_start_file_drag(tmp_path, monkeypatch):
         assert drags[0].source is pool._list
         assert drags[0].actions == Qt.DropAction.CopyAction
         assert drags[0].mime is not None
-        assert drags[0].mime.hasUrls()
-        assert [Path(url.toLocalFile()) for url in drags[0].mime.urls()] == [video.resolve()]
+        assert not drags[0].mime.hasUrls()
+        assert drags[0].mime.hasFormat(MEDIA_POOL_ITEM_MIME_TYPE)
+        assert drags[0].pixmap.width() <= 176
+        assert drags[0].pixmap.height() <= 54
+        assert drags[0].hotspot.x() == 18
+        assert drags[0].hotspot.y() == 18
     finally:
         pool.deleteLater()
 
@@ -87,6 +94,7 @@ class _FakeTimelineDropEvent:
         self._mime = mime
         self._x = float(x)
         self.accepted = False
+        self.ignored = False
 
     def type(self):
         return self._event_type
@@ -99,6 +107,9 @@ class _FakeTimelineDropEvent:
 
     def acceptProposedAction(self):
         self.accepted = True
+
+    def ignore(self):
+        self.ignored = True
 
 
 class _FakeTrackRowDropEvent:
@@ -186,6 +197,187 @@ def test_video_editor_tracks_viewport_accepts_media_pool_video_drop(tmp_path):
     assert added == [video]
 
 
+def test_media_pool_drop_action_reports_window_state(tmp_path):
+    from types import SimpleNamespace
+
+    from PySide6.QtWidgets import QApplication, QWidget
+
+    from app.actions import build_default_action_registry
+    from app.media_pool import MediaPool
+
+    app = QApplication.instance() or QApplication([])
+    video = tmp_path / "action_drop_clip.mp4"
+    video.write_bytes(b"not-a-real-video")
+
+    class _DropTarget(QWidget):
+        def __init__(self, owner):
+            super().__init__()
+            self.owner = owner
+            self.setAcceptDrops(True)
+
+        def dragEnterEvent(self, event):
+            event.acceptProposedAction()
+
+        def dropEvent(self, event):
+            self.owner._dropped_formats = list(event.mimeData().formats())
+            self.owner._tracks.append(SimpleNamespace(id=1))
+            self.owner._active_track_id = 1
+            event.acceptProposedAction()
+
+    owner = QWidget()
+    owner.setObjectName("EditorRoot")
+    owner.resize(640, 360)
+    owner.show()
+    target = _DropTarget(owner)
+    target.resize(640, 120)
+    target.show()
+    owner._tracks = []
+    owner._audio_tracks = []
+    owner._active_track_id = None
+    owner._project_settings = {"starter_template_id": ""}
+    owner._media_pool = MediaPool()
+    owner._media_pool.add_path(video)
+    owner._tracks_host = target
+    owner._tracks_scroll = SimpleNamespace(viewport=lambda: target)
+    try:
+        result = build_default_action_registry(owner).execute(
+            "media.pool_drop_to_timeline",
+            {"path": str(video), "drop_x": 12, "drop_y": 8, "settle_ms": 0},
+        ).to_dict()
+        payload = result["result"]
+
+        assert result["ok"] is True
+        assert payload["window_stable"] is True
+        assert payload["drag_enter_accepted"] is True
+        assert payload["drop_accepted"] is True
+        assert payload["mime_has_urls"] is False
+        assert payload["before_window"]["owner_id"] == payload["after_window"]["owner_id"]
+        assert payload["before_window"]["visible_top_level_count"] == payload["after_window"]["visible_top_level_count"]
+        assert payload["window_changes"]["video_track_count"] == {"before": 0, "after": 1}
+        assert "application/x-tigercapture-media-pool-item" in owner._dropped_formats
+    finally:
+        target.close()
+        owner.close()
+        owner._media_pool.deleteLater()
+        target.deleteLater()
+        owner.deleteLater()
+        app.processEvents()
+
+
+def test_video_editor_tracks_host_accepts_internal_pool_drop_without_reactivating_window(tmp_path):
+    from PySide6.QtCore import QEvent, QMimeData
+
+    from app.media_asset_routing import MEDIA_POOL_ITEM_MIME_TYPE
+    from app.video_editor_window import VideoEditorWindow
+
+    video = tmp_path / "internal_pool_clip.mp4"
+    video.write_bytes(b"not-a-real-video")
+    mime = QMimeData()
+    mime.setData(MEDIA_POOL_ITEM_MIME_TYPE, str(video).encode("utf-8"))
+
+    editor = VideoEditorWindow.__new__(VideoEditorWindow)
+    host = object()
+    calls: list[str] = []
+    editor._tracks_host = host
+    editor._performance_source_paths_from_mime = lambda _mime: []
+    editor._mmd_paths_from_mime = lambda _mime: []
+    editor._ar_pbr_paths_from_mime = lambda _mime: []
+    editor._timeline_media_paths_from_mime = lambda _mime: [video]
+    editor.isMinimized = lambda: True
+    editor.showNormal = lambda: calls.append("showNormal")
+    editor.raise_ = lambda: calls.append("raise")
+    editor.activateWindow = lambda: calls.append("activate")
+    editor._add_track_with_source = lambda _path: calls.append("add_track")
+    editor._add_audio_track_with_source = lambda _path, *, open_editor=False: None
+
+    drop = _FakeTimelineDropEvent(QEvent.Type.Drop, mime)
+    assert VideoEditorWindow.eventFilter(editor, host, drop) is True
+
+    assert drop.accepted is True
+    assert calls.count("add_track") == 1
+    assert "showNormal" not in calls
+    assert "raise" not in calls
+    assert "activate" not in calls
+
+
+def test_video_editor_window_accepts_internal_pool_drop_without_file_url(tmp_path):
+    from PySide6.QtCore import QMimeData
+
+    from app.media_asset_routing import MEDIA_POOL_ITEM_MIME_TYPE
+    from app.video_editor_window import VideoEditorWindow
+
+    video = tmp_path / "window_internal_pool_clip.mp4"
+    video.write_bytes(b"not-a-real-video")
+    mime = QMimeData()
+    mime.setData(MEDIA_POOL_ITEM_MIME_TYPE, str(video).encode("utf-8"))
+
+    editor = VideoEditorWindow.__new__(VideoEditorWindow)
+    editor._vrm_avatar_paths_from_mime = lambda _mime: []
+    editor._mmd_paths_from_mime = lambda _mime: []
+    editor._performance_source_paths_from_mime = lambda _mime: []
+    editor._ar_pbr_paths_from_mime = lambda _mime: []
+    editor._timeline_media_paths_from_mime = lambda _mime: [video]
+    editor._player = SimpleNamespace(position=lambda: 0)
+    added: list[Path] = []
+    editor._add_track_with_source = lambda path: added.append(Path(path))
+    editor._add_audio_track_with_source = lambda path, *, open_editor=False: None
+
+    drag = _FakeTimelineDropEvent(None, mime)
+    VideoEditorWindow.dragEnterEvent(editor, drag)
+    assert drag.accepted is True
+
+    drop = _FakeTimelineDropEvent(None, mime)
+    VideoEditorWindow.dropEvent(editor, drop)
+    assert drop.accepted is True
+    assert added == [video]
+
+
+def test_video_track_import_refreshes_player_once(tmp_path, monkeypatch):
+    from app.video_editor_window import VideoEditorWindow
+
+    video = tmp_path / "single_refresh_clip.mp4"
+    video.write_bytes(b"not-a-real-video")
+    refreshes: list[bool] = []
+    thumbnail_starts: list[int] = []
+    timers: list[int] = []
+
+    editor = VideoEditorWindow.__new__(VideoEditorWindow)
+    editor._next_track_id = 1
+    editor._tracks = []
+    editor._track_rows = {}
+    editor._register_screenstudio_real_recording_candidate = lambda *_args, **_kwargs: None
+    editor._insert_track_widget = lambda track: None
+    editor._start_thumbnail_extraction = lambda track: thumbnail_starts.append(track.id)
+    editor._set_active_track = lambda track_id: None
+    editor._load_screenstudio_cursor_sidecar_for_clip = lambda clip: None
+    editor._maybe_apply_default_screenstudio_polish_to_clip = lambda *_args, **_kwargs: 0
+    editor._flash_status = lambda text: None
+    editor._refresh_visual_preview_after_timeline_change = lambda: None
+    editor._try_apply_startup_template_if_ready = lambda reason: None
+    editor._suppress_interactive_prompts = True
+
+    def _refresh_player_tracks(*, render_immediately=False):
+        refreshes.append(bool(render_immediately))
+        for track in editor._tracks:
+            track.duration_ms = 2400
+
+    editor._refresh_player_tracks = _refresh_player_tracks
+    monkeypatch.setattr("app.video_editor_track_workflow._probe_track_hdr_info", lambda _path: None)
+    monkeypatch.setattr(
+        "app.video_editor_track_workflow.QTimer.singleShot",
+        lambda ms, callback: timers.append(int(ms)),
+    )
+
+    VideoEditorWindow._add_track_with_source(editor, video)
+
+    assert timers == [120]
+    assert thumbnail_starts == []
+    assert refreshes == [False]
+    assert len(editor._tracks) == 1
+    assert editor._tracks[0].duration_ms == 2400
+    assert len(editor._tracks[0].clips) == 1
+
+
 def test_video_track_row_accepts_and_emits_ar_pbr_asset_drop(tmp_path):
     from PySide6.QtCore import QMimeData, QPoint, QUrl
     from PySide6.QtWidgets import QApplication
@@ -213,6 +405,36 @@ def test_video_track_row_accepts_and_emits_ar_pbr_asset_drop(tmp_path):
 
         assert drop.accepted is True
         assert dropped == [(asset, 2500)]
+    finally:
+        row.deleteLater()
+
+
+def test_video_track_row_accepts_internal_pool_media_drop_without_file_url(tmp_path):
+    from PySide6.QtCore import QMimeData, QPoint
+    from PySide6.QtWidgets import QApplication
+
+    from app.media_asset_routing import MEDIA_POOL_ITEM_MIME_TYPE
+    from app.video_editor_window import TrackRow, VideoTrack
+
+    QApplication.instance() or QApplication([])
+    video = tmp_path / "row_internal_pool_clip.mp4"
+    video.write_bytes(b"not-a-real-video")
+    mime = QMimeData()
+    mime.setData(MEDIA_POOL_ITEM_MIME_TYPE, str(video).encode("utf-8"))
+
+    row = TrackRow(VideoTrack(id=9, duration_ms=10_000))
+    dropped: list[tuple[int, Path]] = []
+    row.media_dropped.connect(lambda track_id, path: dropped.append((int(track_id), Path(path))))
+    try:
+        drag = _FakeTrackRowDropEvent(mime, QPoint(row.MARGIN + 120, row.LABEL_H + 4))
+        row.dragEnterEvent(drag)
+        assert drag.accepted is True
+        assert row._drop_guide_text(mime) == "Media"
+
+        drop = _FakeTrackRowDropEvent(mime, QPoint(row.MARGIN + 120, row.LABEL_H + 4))
+        row.dropEvent(drop)
+        assert drop.accepted is True
+        assert dropped == [(9, video)]
     finally:
         row.deleteLater()
 

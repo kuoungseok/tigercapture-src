@@ -1347,7 +1347,7 @@
       "path": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\Lamborghini Revuelto – From Now On [sitXeGjm4Mc].mp4",
       "size_bytes": 15042898,
       "slot_id": "screenstudio-real-72",
-      "registered_at": "2026-07-10T12:53:14.939915+00:00",
+      "registered_at": "2026-07-11T16:30:15.170317+00:00",
       "valid_candidate": true,
       "sidecar_ready": false,
       "cursor_event_count": 0,
@@ -1356,14 +1356,14 @@
         "missing_cursor_sidecar"
       ],
       "auto_zoom_count": 0,
-      "reason": "track import",
+      "reason": "media pool import",
       "starter_template_id": "screen-recording-demo"
     },
     {
       "path": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\South Korea 4K Drone Video ｜ Seoul, Busan, Songdo Cinematic Aerials [AA-sv3ilNBE].mp4",
       "size_bytes": 731561402,
       "slot_id": "screenstudio-real-72",
-      "registered_at": "2026-07-09T06:43:02.429719+00:00",
+      "registered_at": "2026-07-11T15:40:28.706974+00:00",
       "valid_candidate": true,
       "sidecar_ready": false,
       "cursor_event_count": 0,
@@ -1372,14 +1372,14 @@
         "missing_cursor_sidecar"
       ],
       "auto_zoom_count": 0,
-      "reason": "track import",
+      "reason": "media pool import",
       "starter_template_id": "screen-recording-demo"
     },
     {
       "path": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\【4K HDR】東京空撮 Tokyo Night View 2025｜Helicopter Aerial Twilight Skyline Japan [Ui4UpsZH4Jw].mp4",
       "size_bytes": 123398073,
       "slot_id": "screenstudio-real-72",
-      "registered_at": "2026-07-08T13:22:38.671487+00:00",
+      "registered_at": "2026-07-11T15:39:20.941282+00:00",
       "valid_candidate": true,
       "sidecar_ready": false,
       "cursor_event_count": 0,
@@ -1395,7 +1395,7 @@
       "path": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\The BUGATTI W16 MISTRAL ‘BLANC ÉTERNEL’： Celebrating perpetual beauty [dsPHQmSxtFg].mp4",
       "size_bytes": 3815984,
       "slot_id": "screenstudio-real-72",
-      "registered_at": "2026-07-05T02:39:20.847285+00:00",
+      "registered_at": "2026-07-11T12:24:02.059871+00:00",
       "valid_candidate": true,
       "sidecar_ready": false,
       "cursor_event_count": 0,
@@ -1404,14 +1404,14 @@
         "missing_cursor_sidecar"
       ],
       "auto_zoom_count": 0,
-      "reason": "media pool import",
+      "reason": "track import",
       "starter_template_id": "screen-recording-demo"
     },
     {
       "path": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\SAMSUNG QD-OLED 4K 120FPS Demo ｜ UNREAL 1 Billion Colors 🌈 HDR Test (AI TV) [rjwPj0dD9wQ].mp4",
       "size_bytes": 175533114,
       "slot_id": "screenstudio-real-72",
-      "registered_at": "2026-07-07T14:50:43.243832+00:00",
+      "registered_at": "2026-07-12T00:24:49.406278+00:00",
       "valid_candidate": true,
       "sidecar_ready": false,
       "cursor_event_count": 0,
@@ -1420,7 +1420,7 @@
         "missing_cursor_sidecar"
       ],
       "auto_zoom_count": 0,
-      "reason": "media pool import",
+      "reason": "track import",
       "starter_template_id": "screen-recording-demo"
     },
     {
@@ -1475,7 +1475,55 @@
       "path": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\Inside Fallingwater： Frank Lloyd Wright's Architectural Genius in Pennsylvania ｜ House Tour [q8dcnh-4I6g].mp4",
       "size_bytes": 84592325,
       "slot_id": "screenstudio-real-72",
-      "registered_at": "2026-07-07T14:51:54.754893+00:00",
+      "registered_at": "2026-07-12T00:14:02.883579+00:00",
+      "valid_candidate": true,
+      "sidecar_ready": false,
+      "cursor_event_count": 0,
+      "cursor_counts": {},
+      "cursor_sidecar_warnings": [
+        "missing_cursor_sidecar"
+      ],
+      "auto_zoom_count": 0,
+      "reason": "track import",
+      "starter_template_id": "screen-recording-demo"
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\debugCapture\\broadcast_record_smoke.mp4",
+      "size_bytes": 38959,
+      "slot_id": "",
+      "registered_at": "2026-07-11T07:31:41.512662+00:00",
+      "valid_candidate": false,
+      "sidecar_ready": false,
+      "cursor_event_count": 0,
+      "cursor_counts": {},
+      "cursor_sidecar_warnings": [
+        "not_a_valid_recording_candidate"
+      ],
+      "auto_zoom_count": 0,
+      "reason": "track import",
+      "starter_template_id": "screen-recording-demo"
+    },
+    {
+      "path": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\Lamborghini Revuelto ? From Now On [sitXeGjm4Mc].mp4",
+      "size_bytes": 0,
+      "slot_id": "",
+      "registered_at": "2026-07-11T09:07:48.127341+00:00",
+      "valid_candidate": false,
+      "sidecar_ready": false,
+      "cursor_event_count": 0,
+      "cursor_counts": {},
+      "cursor_sidecar_warnings": [
+        "not_a_valid_recording_candidate"
+      ],
+      "auto_zoom_count": 0,
+      "reason": "track import",
+      "starter_template_id": "screen-recording-demo"
+    },
+    {
+      "path": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\【精華作品】台中七期｜台中商業中心｜西屯區夜景｜4K無人機空拍畫面｜民航局無人機合 [WTLcykcv-H0].mp4",
+      "size_bytes": 66788392,
+      "slot_id": "screenstudio-real-72",
+      "registered_at": "2026-07-11T09:26:48.617821+00:00",
       "valid_candidate": true,
       "sidecar_ready": false,
       "cursor_event_count": 0,
@@ -1486,6 +1534,134 @@
       "auto_zoom_count": 0,
       "reason": "media pool import",
       "starter_template_id": "screen-recording-demo"
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\01_seoul_sunset_bridge.mp4",
+      "size_bytes": 1612805,
+      "slot_id": "screenstudio-real-72",
+      "registered_at": "2026-07-12T11:32:59.756560+00:00",
+      "valid_candidate": true,
+      "sidecar_ready": false,
+      "cursor_event_count": 0,
+      "cursor_counts": {},
+      "cursor_sidecar_warnings": [
+        "missing_cursor_sidecar"
+      ],
+      "auto_zoom_count": 0,
+      "reason": "media pool import",
+      "starter_template_id": ""
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\02_lamborghini_moody_detail.mp4",
+      "size_bytes": 764369,
+      "slot_id": "",
+      "registered_at": "2026-07-12T11:33:00.082960+00:00",
+      "valid_candidate": false,
+      "sidecar_ready": false,
+      "cursor_event_count": 0,
+      "cursor_counts": {},
+      "cursor_sidecar_warnings": [
+        "not_a_valid_recording_candidate"
+      ],
+      "auto_zoom_count": 0,
+      "reason": "media pool import",
+      "starter_template_id": ""
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\03_bugatti_white_car.mp4",
+      "size_bytes": 1535935,
+      "slot_id": "screenstudio-real-72",
+      "registered_at": "2026-07-12T11:33:00.297386+00:00",
+      "valid_candidate": true,
+      "sidecar_ready": false,
+      "cursor_event_count": 0,
+      "cursor_counts": {},
+      "cursor_sidecar_warnings": [
+        "missing_cursor_sidecar"
+      ],
+      "auto_zoom_count": 0,
+      "reason": "media pool import",
+      "starter_template_id": ""
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\04_oled_color_macro.mp4",
+      "size_bytes": 2374695,
+      "slot_id": "screenstudio-real-72",
+      "registered_at": "2026-07-12T11:33:00.580069+00:00",
+      "valid_candidate": true,
+      "sidecar_ready": false,
+      "cursor_event_count": 0,
+      "cursor_counts": {},
+      "cursor_sidecar_warnings": [
+        "missing_cursor_sidecar"
+      ],
+      "auto_zoom_count": 0,
+      "reason": "media pool import",
+      "starter_template_id": ""
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\05_tokyo_night_city.mp4",
+      "size_bytes": 5373175,
+      "slot_id": "screenstudio-real-72",
+      "registered_at": "2026-07-12T11:33:00.949352+00:00",
+      "valid_candidate": true,
+      "sidecar_ready": false,
+      "cursor_event_count": 0,
+      "cursor_counts": {},
+      "cursor_sidecar_warnings": [
+        "missing_cursor_sidecar"
+      ],
+      "auto_zoom_count": 0,
+      "reason": "media pool import",
+      "starter_template_id": ""
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\06_lemans_race_cut.mp4",
+      "size_bytes": 3172160,
+      "slot_id": "screenstudio-real-72",
+      "registered_at": "2026-07-12T11:33:01.176179+00:00",
+      "valid_candidate": true,
+      "sidecar_ready": false,
+      "cursor_event_count": 0,
+      "cursor_counts": {},
+      "cursor_sidecar_warnings": [
+        "missing_cursor_sidecar"
+      ],
+      "auto_zoom_count": 0,
+      "reason": "media pool import",
+      "starter_template_id": ""
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\07_hdr_color_wheel.mp4",
+      "size_bytes": 1711244,
+      "slot_id": "screenstudio-real-72",
+      "registered_at": "2026-07-12T11:33:01.411144+00:00",
+      "valid_candidate": true,
+      "sidecar_ready": false,
+      "cursor_event_count": 0,
+      "cursor_counts": {},
+      "cursor_sidecar_warnings": [
+        "missing_cursor_sidecar"
+      ],
+      "auto_zoom_count": 0,
+      "reason": "media pool import",
+      "starter_template_id": ""
+    },
+    {
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\08_seoul_bridge_close.mp4",
+      "size_bytes": 6092921,
+      "slot_id": "screenstudio-real-72",
+      "registered_at": "2026-07-12T11:33:01.665276+00:00",
+      "valid_candidate": true,
+      "sidecar_ready": false,
+      "cursor_event_count": 0,
+      "cursor_counts": {},
+      "cursor_sidecar_warnings": [
+        "missing_cursor_sidecar"
+      ],
+      "auto_zoom_count": 0,
+      "reason": "media pool import",
+      "starter_template_id": ""
     }
   ]
 }

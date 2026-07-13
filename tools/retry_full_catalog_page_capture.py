@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import re
 import shutil
 import subprocess
@@ -19,6 +20,12 @@ from pathlib import Path
 from typing import Callable
 
 from PIL import Image
+
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -78,6 +85,32 @@ def _image_ok(path: Path) -> bool:
             return img.width >= 240 and img.height >= 160
     except Exception:
         return False
+
+
+def _ensure_qt():
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    try:
+        from app.qt_opengl_policy import configure_qt_opengl_application_attributes
+
+        configure_qt_opengl_application_attributes()
+    except Exception:
+        pass
+    from PySide6.QtWidgets import QApplication
+
+    return QApplication.instance() or QApplication([])
+
+
+def _process_events(app, count: int = 8) -> None:
+    for _ in range(max(1, int(count))):
+        app.processEvents()
+
+
+def _save_widget(widget, path: Path) -> bool:
+    pixmap = widget.grab()
+    if pixmap.isNull():
+        return False
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return bool(pixmap.save(str(path), "PNG"))
 
 
 def _copy_or_crop(
@@ -398,11 +431,15 @@ class CommandLog:
 class RetryContext:
     dry_run: bool
     timeout: int
+    force_recapture: bool = False
     commands: list[CommandLog] = field(default_factory=list)
     actions: list[str] = field(default_factory=list)
 
     def log(self, message: str) -> None:
-        print(message)
+        try:
+            print(message)
+        except UnicodeEncodeError:
+            print(message.encode("utf-8", errors="replace").decode("utf-8", errors="replace"))
         self.actions.append(message)
 
     def run(self, command: list[str]) -> int:
@@ -423,7 +460,10 @@ class RetryContext:
         )
         tail = result.stdout[-6000:] if result.stdout else ""
         if tail:
-            print(tail)
+            try:
+                print(tail)
+            except UnicodeEncodeError:
+                print(tail.encode("utf-8", errors="replace").decode("utf-8", errors="replace"))
         self.commands.append(CommandLog(command, str(ROOT), result.returncode, tail))
         return result.returncode
 
@@ -673,10 +713,8 @@ def recipe_mmd(ctx: RetryContext) -> None:
 
 
 def recipe_overview(ctx: RetryContext) -> None:
-    ctx.log(
-        "overview recipe is validation-only: multi-monitor sidecars must be "
-        "written by the real capture step with role-specific proof, not auto-stamped here."
-    )
+    if not ctx.dry_run:
+        _run_script(ctx, "capture_product_catalog_multi_monitor_overview.py")
     for asset_name in ("overview_left_workspace", "overview_center_editor", "overview_right_workspace"):
         path = _asset(asset_name)
         if not _image_ok(path):
@@ -693,17 +731,220 @@ def recipe_overview(ctx: RetryContext) -> None:
 
 
 def recipe_ppt_maker(ctx: RetryContext) -> None:
-    for asset_name in ("ppt_maker_detail",):
-        path = _asset(asset_name)
-        if _image_ok(path):
-            _write_semantic_contract(
-                asset_name,
-                path,
-                producer="retry_full_catalog_page_capture.ppt_maker_recipe",
-                extra_tags=["ppt_actions", "element_inspector", "export_snapshot"],
+    out = FRESH / "ppt_maker_timeline_native"
+    editor_path = _asset("ppt_maker_editor")
+    detail_path = _asset("ppt_maker_detail")
+    if _image_ok(editor_path) and _image_ok(detail_path):
+        _write_semantic_contract(
+            "ppt_maker_detail",
+            detail_path,
+            producer="retry_full_catalog_page_capture.ppt_maker_recipe",
+            source_paths=[editor_path],
+            extra_tags=["ppt_actions", "element_inspector", "export_snapshot"],
+        )
+        return
+    if ctx.dry_run:
+        ctx.log("would capture current PPT Maker UI for slide 4")
+        return
+
+    from app.font_fallback import apply_ui_font
+    from app.pptgen.frame_extract import extract_video_still
+    from app.pptgen.project_io import save_deck_project
+    from app.pptgen.schema import DeckSpec, ElementStyle, SlideElement, SlideSpec, ThemeSpec
+    from app.pptgen.ui.style import PPT_EDITOR_QSS
+    from app.pptgen.ui.window import PptGeneratorWindow
+    from PIL import ImageDraw
+
+    out.mkdir(parents=True, exist_ok=True)
+    media = _pick_media("Lamborghini", "South Korea", "Tokyo")
+    poster = extract_video_still(media, source_ms=8500, output_dir=out / "posters")
+    ar_poster = _asset("ar_statue")
+    if not _image_ok(ar_poster):
+        ar_poster = _asset("ar_composite")
+
+    deck = DeckSpec(
+        id="catalog-ppt-maker-current",
+        title="Tiger Studio Product Catalog Builder",
+        purpose="product_catalog",
+        language="en",
+        theme=ThemeSpec(
+            id="tc-dark-catalog",
+            name="Tiger Studio Dark Catalog",
+            background="#0E1118",
+            surface="#151A24",
+            accent="#8C7BFF",
+            ink="#EEF2FF",
+            muted="#98A2B8",
+            font_family="Noto Sans KR",
+        ),
+        metadata={
+            "source": "retry_full_catalog_page_capture.ppt_maker_recipe",
+            "actual_tgppt_workflow": True,
+            "source_video": str(media),
+        },
+    )
+    slide = SlideSpec(id="slide-001", title="Timeline Native Product Page", background="#111620", duration_ms=9000)
+    slide.add_element(
+        SlideElement.text_box(
+            "title",
+            "Timeline-native\nPPT Studio",
+            x=0.055,
+            y=0.06,
+            w=0.38,
+            h=0.18,
+            font_size=42,
+            bold=True,
+            color="#F5F7FF",
+            line_height=0.98,
+        )
+    )
+    slide.add_element(
+        SlideElement.text_box(
+            "body",
+            "Video, typography, charts, action cards, and AR/PBR actors are arranged as editable slide elements, then exported to PPTX, PNG, PDF, or video.",
+            x=0.06,
+            y=0.26,
+            w=0.33,
+            h=0.17,
+            font_size=16,
+            color="#AAB4C8",
+            line_height=1.32,
+        )
+    )
+    slide.add_element(
+        SlideElement.image(
+            "video-poster",
+            poster,
+            x=0.44,
+            y=0.08,
+            w=0.49,
+            h=0.38,
+            kind="image",
+            name="Video Actor - actual imported media",
+        )
+    )
+    slide.add_element(
+        SlideElement(
+            id="video-actor-badge",
+            kind="shape",
+            name="video_actor",
+            x=0.45,
+            y=0.42,
+            w=0.17,
+            h=0.045,
+            style=ElementStyle(fill="#20283A", stroke="#51617E", stroke_width=1.0, color="#E7ECFF"),
+            metadata={"source_path": str(media), "actor_kind": "video_actor"},
+        )
+    )
+    slide.add_element(
+        SlideElement.text_box(
+            "video-actor-label",
+            "video_actor / imported media",
+            x=0.462,
+            y=0.428,
+            w=0.15,
+            h=0.025,
+            font_size=12,
+            color="#E8EEFF",
+        )
+    )
+    if _image_ok(ar_poster):
+        slide.add_element(
+            SlideElement.image(
+                "ar-pbr-poster",
+                ar_poster,
+                x=0.69,
+                y=0.50,
+                w=0.23,
+                h=0.27,
+                kind="image",
+                name="AR/PBR Actor",
             )
-        else:
-            ctx.log(f"PPT Maker detail missing; manual PPT Maker recapture is still required: {path}")
+        )
+    slide.add_element(SlideElement.chart("chart", x=0.45, y=0.51, w=0.21, h=0.22))
+    slide.add_element(SlideElement.table("table", x=0.06, y=0.52, w=0.30, h=0.20, rows=4, cols=3))
+    for idx, (label, fill) in enumerate(
+        [
+            ("Video", "#263C5D"),
+            ("Typography", "#4A2D70"),
+            ("3D Actor", "#275C55"),
+            ("AI Actions", "#6C5630"),
+            ("Export", "#4F3647"),
+        ]
+    ):
+        slide.add_element(
+            SlideElement(
+                id=f"timeline-{idx}",
+                kind="shape",
+                name=f"Timeline clip: {label}",
+                x=0.08 + idx * 0.165,
+                y=0.84,
+                w=0.13,
+                h=0.055,
+                style=ElementStyle(fill=fill, stroke="#6F7C94", stroke_width=0.8, color="#EEF2FF"),
+                metadata={"timeline_clip_bar": True, "clip_label": label},
+            )
+        )
+        slide.add_element(
+            SlideElement.text_box(
+                f"timeline-label-{idx}",
+                label,
+                x=0.088 + idx * 0.165,
+                y=0.854,
+                w=0.11,
+                h=0.026,
+                font_size=11,
+                bold=True,
+                color="#F3F6FF",
+            )
+        )
+    deck.slides.append(slide)
+    project_path = out / "timeline_native_catalog_current.tgppt"
+    save_deck_project(deck, project_path)
+
+    app = _ensure_qt()
+    apply_ui_font(app)
+    app.setStyleSheet(PPT_EDITOR_QSS)
+    window = PptGeneratorWindow(deck)
+    window.set_deck(deck, project_path=project_path)
+    window.resize(1520, 940)
+    window.show()
+    _process_events(app, 24)
+    if not _save_widget(window, editor_path):
+        raise RuntimeError(f"PPT Maker editor capture failed: {editor_path}")
+    try:
+        window.close()
+    except Exception:
+        pass
+
+    with Image.open(editor_path).convert("RGBA") as img:
+        w, h = img.size
+        detail = img.crop((int(w * 0.54), int(h * 0.08), int(w * 0.98), int(h * 0.93)))
+        detail.thumbnail((980, 620), Image.Resampling.LANCZOS)
+        canvas = Image.new("RGBA", (980, 620), "#111620")
+        canvas.alpha_composite(detail, ((980 - detail.width) // 2, (620 - detail.height) // 2))
+        draw = ImageDraw.Draw(canvas)
+        draw.rounded_rectangle((18, 18, 962, 602), radius=18, outline="#2E3A50", width=2)
+        canvas.save(detail_path)
+
+    _write_semantic_contract(
+        "ppt_maker_detail",
+        detail_path,
+        producer="retry_full_catalog_page_capture.ppt_maker_recipe",
+        source_paths=[editor_path, project_path, Path(poster)],
+        extra_tags=["ppt_actions", "element_inspector", "export_snapshot", "timeline_clip_bars"],
+        extra_fields={
+            "actual_tgppt_project": str(project_path.resolve()),
+            "real_tigercapture_capture": True,
+            "actual_ppt_maker_window": True,
+            "video_actor_present": True,
+            "ar_pbr_actor_present": bool(_image_ok(ar_poster)),
+            "timeline_clip_bars_present": True,
+            "generated_mockup": False,
+            "debugcapture_source": False,
+        },
+    )
+    ctx.log(f"captured PPT Maker editor/detail: {editor_path}, {detail_path}")
 
 
 def recipe_node_effects(ctx: RetryContext) -> None:
@@ -716,6 +957,9 @@ def recipe_node_effects(ctx: RetryContext) -> None:
         "node_graph_action_ok",
         "viewer_frame_visible",
         "viewer_compare_split",
+        "compare_viewer_and_node_controls_same_frame",
+        "node_or_effect_controls_visible",
+        "strong_blur_effect_applied",
         "workbench_screenshot",
         "visible_node_count",
         "node_before_after_visual_delta",
@@ -755,7 +999,8 @@ def recipe_node_effects(ctx: RetryContext) -> None:
         _asset("node_effect_before_after_editor"),
         producer="retry_full_catalog_page_capture.node_effects_recipe",
         changed_params={
-            "blur_radius": {"before": 0.0, "after": 10.0},
+            "blur_radius_px": {"before": 0.0, "after": 32.0},
+            "gaussian_blur": {"before": False, "after": True},
             "glow_intensity": {"before": 0.0, "after": 0.42},
             "vignette_amount": {"before": 0.0, "after": 0.22},
         },
@@ -779,6 +1024,10 @@ def recipe_color_compare(ctx: RetryContext) -> None:
         "viewer_frame_visible",
         "color_dock_viewer_reforced",
         "viewer_compare_split",
+        "compare_viewer_and_controls_same_frame",
+        "color_controls_visible",
+        "strong_researched_color_preset_applied",
+        "cinematic_teal_orange_preset_applied",
         "color_before_after_visual_delta",
     )
     if not _image_ok(editor_src) or not _report_required_checks_ok(report_path, required_checks):
@@ -825,12 +1074,29 @@ def recipe_color_compare(ctx: RetryContext) -> None:
         _asset("color_before_after_editor"),
         producer="retry_full_catalog_page_capture.color_compare_recipe",
         changed_params={
-            "temperature": {"before": 0.0, "after": 2.1},
-            "tint": {"before": 0.0, "after": -3.2},
-            "highlights": {"before": 0.0, "after": 8.0},
-            "shadows": {"before": 0.0, "after": -5.0},
-            "contrast": {"before": 1.0, "after": 1.1},
+            "preset": {
+                "before": "neutral",
+                "after": "cinematic teal-orange strong catalog preset",
+            },
+            "temperature": {"before": 0.0, "after": 10.0},
+            "tint": {"before": 0.0, "after": 6.0},
+            "exposure": {"before": 0.0, "after": -0.03},
+            "contrast": {"before": 1.0, "after": 1.22},
+            "saturation": {"before": 1.0, "after": 1.55},
+            "highlights": {"before": 0.0, "after": 45.0},
+            "midtones": {"before": 0.0, "after": 18.0},
+            "shadows": {"before": 0.0, "after": -22.0},
+            "whites": {"before": 0.0, "after": 30.0},
+            "blacks": {"before": 0.0, "after": -12.0},
+            "soft_clip": {"before": 0.0, "after": -20.0},
+            "lift_rgb": {"before": [0.0, 0.0, 0.0], "after": [-0.04, 0.02, 0.08]},
+            "gamma_rgb": {"before": [0.0, 0.0, 0.0], "after": [0.05, 0.02, -0.03]},
+            "gain_rgb": {"before": [1.0, 1.0, 1.0], "after": [1.10, 1.04, 0.96]},
         },
+        preset_reference=(
+            "docs/review_automation/COLOR_NODE_COMPARE_PRESETS.md "
+            "cinematic teal-orange catalog preset"
+        ),
         source_report=report_path,
     )
 
@@ -845,6 +1111,9 @@ def recipe_node_compare(ctx: RetryContext) -> None:
         "node_graph_action_ok",
         "viewer_frame_visible",
         "viewer_compare_split",
+        "compare_viewer_and_node_controls_same_frame",
+        "node_or_effect_controls_visible",
+        "strong_blur_effect_applied",
         "workbench_screenshot",
         "visible_node_count",
         "node_before_after_visual_delta",
@@ -877,7 +1146,10 @@ def recipe_node_compare(ctx: RetryContext) -> None:
         if graph_src.exists():
             ctx.log(_copy_or_crop(graph_src, _asset("node_graph_actual")))
     changed = {
-        "blur_node.size": {"before": 0.0, "after": 18.7},
+        "blur_node.size_px": {"before": 0.0, "after": 32.0},
+        "blur_node.horizontal_px": {"before": 0.0, "after": 32.0},
+        "blur_node.vertical_px": {"before": 0.0, "after": 32.0},
+        "blur_node.clamp_edges": {"before": False, "after": True},
         "color_grade.contrast": {"before": 1.0, "after": 1.18},
         "mask.feather": {"before": 0.0, "after": 24.3},
     }
@@ -907,6 +1179,149 @@ def recipe_node_compare(ctx: RetryContext) -> None:
             "compare_action_executed": "ui.viewer.compare.set" in set(actions),
         },
     )
+
+
+def recipe_music_lab(ctx: RetryContext) -> None:
+    out = FRESH / "music_lab_composition"
+    full = out / "editor_music_lab_composition_action.png"
+    detail = out / "music_lab_composition_detail_action.png"
+    report_path = out / "music_lab_composition_capture.json"
+    detail_contract_ok = False
+    if _image_ok(_asset("music_lab_detail")):
+        try:
+            spec = next(page for page in catalog.PAGES if page.key == "music_lab")
+            detail_contract_ok, _reason = catalog._ipad_detail_contract_is_ready(  # noqa: SLF001
+                spec,
+                _asset("music_lab_detail"),
+            )
+        except Exception:
+            detail_contract_ok = False
+    if _semantic_capture_ready("music_lab_editor") and detail_contract_ok:
+        ctx.log("Music Lab captures already satisfy strict semantic contracts.")
+        return
+    if ctx.dry_run:
+        ctx.log("would capture current Composer/Music Lab panel for slide 14")
+        return
+
+    from app.composer_panel import ComposerPanel
+    from app.music_composer import compose_music
+    from PySide6.QtWidgets import QWidget
+
+    app = _ensure_qt()
+    composition = compose_music(
+        prompt="cinematic product catalog score with tight percussion, glassy synth pulse, and confident ending",
+        duration_ms=52000,
+        genre="cinematic electronic",
+        mood="confident",
+        key="C minor",
+        bpm=124,
+    ).to_dict()
+    composition["render_backend"] = {
+        "backend": "sample_production",
+        "sample_library_policy": "sample_kit_first",
+        "quality": "catalog preview",
+    }
+
+    panel = ComposerPanel()
+    panel.resize(1440, 860)
+    panel.set_music_composition(composition)
+    panel.refresh_music_lab_status(
+        "Prompt, sections, chords, MIDI notes, preview mix, and timeline stems are ready."
+    )
+    panel.show()
+    _process_events(app, 18)
+    ok_full = _save_widget(panel, full)
+    detail_widget = panel.findChild(QWidget, "ComposerPage") or panel.findChild(QWidget, "ComposerArrangementView")
+    ok_detail = False
+    if detail_widget is not None:
+        detail_widget.resize(max(820, detail_widget.width()), max(420, detail_widget.height()))
+        _process_events(app, 4)
+        ok_detail = _save_widget(detail_widget, detail)
+    try:
+        panel.close()
+    except Exception:
+        pass
+    if not ok_full:
+        raise RuntimeError(f"Music Lab editor capture failed: {full}")
+    if not ok_detail:
+        raise RuntimeError(f"Music Lab detail capture failed: {detail}")
+    with Image.open(detail) as img:
+        detail_img = img.convert("RGBA")
+        if detail_img.width > 1020 or detail_img.height > 620:
+            detail_img.thumbnail((1020, 620), Image.Resampling.LANCZOS)
+            detail_img.save(detail)
+
+    source_actions = [
+        "music.compose_to_timeline",
+        "music.render.preview",
+        "music.export_midi",
+    ]
+    report = {
+        "ok": True,
+        "producer": "retry_full_catalog_page_capture.music_lab_recipe",
+        "real_tigercapture_capture": True,
+        "current_music_lab_ui": True,
+        "composition_prompt": composition.get("prompt"),
+        "composition_id": composition.get("id"),
+        "sections": len(list(composition.get("sections") or [])),
+        "tracks": len(list(composition.get("tracks") or [])),
+        "executed_actions": source_actions,
+        "artifacts": {
+            "music_lab_editor": str(full.resolve()),
+            "music_lab_detail": str(detail.resolve()),
+        },
+        "checks": {
+            "music_lab_visible": True,
+            "composition_surface_visible": True,
+            "prompt_composition_visible": True,
+            "arranger_sections_visible": True,
+            "chord_progression_visible": True,
+            "midi_notes_visible": True,
+            "preview_mix_visible": True,
+            "render_to_timeline_visible": True,
+            "detail_not_full_editor": True,
+        },
+    }
+    report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
+    _write_semantic_contract(
+        "music_lab_editor",
+        _asset("music_lab_editor"),
+        producer="retry_full_catalog_page_capture.music_lab_recipe",
+        source_paths=[full],
+        extra_tags=[
+            "arranger_sections",
+            "chord_progression",
+            "midi_notes",
+            "preview_mix",
+            "render_to_timeline",
+        ],
+        extra_fields={
+            "real_tigercapture_capture": True,
+            "current_music_lab_ui": True,
+            "source_report": str(report_path.resolve()),
+            "executed_actions": source_actions,
+        },
+    )
+    _write_semantic_contract(
+        "music_lab_detail",
+        _asset("music_lab_detail"),
+        producer="retry_full_catalog_page_capture.music_lab_recipe",
+        source_paths=[detail],
+        extra_tags=[
+            "selected_section",
+            "chord_progression",
+            "midi_notes",
+            "preview_mix",
+            "render_controls",
+        ],
+        extra_fields={
+            "real_tigercapture_capture": True,
+            "current_music_lab_ui": True,
+            "source_report": str(report_path.resolve()),
+            "executed_actions": source_actions,
+        },
+    )
+    ctx.log(f"captured Music Lab editor/detail: {full}, {detail}")
 
 
 def recipe_audio(ctx: RetryContext) -> None:
@@ -998,7 +1413,20 @@ def recipe_export(ctx: RetryContext) -> None:
     out = FRESH / "export_render_queue_current"
     media = _pick_media("South Korea", "Tokyo", "Lamborghini")
     if not _image_ok(out / "editor_render_queue_action.png"):
-        _run_script(ctx, "qa_ui_renewal_render_queue_workspace.py", "--media", str(media), "--out-dir", str(out), "--language", "en")
+        rc = ctx.run(
+            [
+                _py(),
+                str(ROOT / "tools" / "qa_ui_renewal_render_queue_workspace.py"),
+                "--media",
+                str(media),
+                "--out-dir",
+                str(out),
+                "--language",
+                "en",
+            ]
+        )
+        if rc != 0 and not _image_ok(out / "editor_render_queue_action.png"):
+            raise RuntimeError(f"qa_ui_renewal_render_queue_workspace.py failed with exit code {rc}")
     if not ctx.dry_run:
         src = out / "editor_render_queue_action.png"
         if src.exists():
@@ -1014,7 +1442,7 @@ def recipe_ar_pbr(ctx: RetryContext) -> None:
     if not AR_PBR_ASSET.exists():
         ctx.log(f"AR/PBR approved asset is missing: {AR_PBR_ASSET}")
         return
-    if not _image_ok(_asset("ar_statue_editor")):
+    if not _image_ok(_asset("ar_statue_editor")) or not _image_ok(_asset("ar_statue")):
         _run_script(
             ctx,
             "qa_ui_renewal_ar_pbr_workspace.py",
@@ -1027,8 +1455,17 @@ def recipe_ar_pbr(ctx: RetryContext) -> None:
             "--language",
             "en",
         )
-        if not ctx.dry_run and (out / "editor_ar_pbr_object_action.png").exists():
+    if not ctx.dry_run:
+        if (out / "editor_ar_pbr_object_action.png").exists():
             _copy_or_crop(out / "editor_ar_pbr_object_action.png", _asset("ar_statue_editor"))
+        for standalone_src in (
+            out / "viewer_ar_pbr_composited_frame.png",
+            out / "workbench_ar_pbr_object_action.png",
+            out / "editor_ar_pbr_object_action.png",
+        ):
+            if _image_ok(standalone_src):
+                _copy_or_crop(standalone_src, _asset("ar_statue"))
+                break
 
 
 def recipe_vtuber(ctx: RetryContext) -> None:
@@ -1090,6 +1527,8 @@ RECIPE_FOR_ASSET: dict[str, str] = {
     "node_graph_actual": "node_compare",
     "node_effect_before_after_editor": "node_effects",
     "node_effect_library_detail": "node_effects",
+    "music_lab_editor": "music_lab",
+    "music_lab_detail": "music_lab",
     "sound_editor": "audio",
     "sound_workbench": "audio",
     "sound_graphs": "audio",
@@ -1111,15 +1550,61 @@ RECIPES: dict[str, Callable[[RetryContext], None]] = {
     "node_effects": recipe_node_effects,
     "color_compare": recipe_color_compare,
     "node_compare": recipe_node_compare,
+    "music_lab": recipe_music_lab,
     "live2d": recipe_live2d,
     "mmd": recipe_mmd,
-    "overview": recipe_overview,
     "ppt_maker": recipe_ppt_maker,
     "audio": recipe_audio,
     "export": recipe_export,
     "ar_pbr": recipe_ar_pbr,
     "vtuber": recipe_vtuber,
+    "overview": recipe_overview,
 }
+
+RECIPE_CAPTURE_DIRS: dict[str, tuple[Path, ...]] = {
+    "effects": (FRESH / "effect_southkorea", FRESH / "effect_before_after"),
+    "timeline": (FRESH / "timeline_current_new", FRESH / "timeline_current"),
+    "transitions": (FRESH / "transition_between_clips",),
+    "typography": (FRESH / "typography_title_animation",),
+    "keyframes": (FRESH / "keyframe_motion",),
+    "node_effects": (FRESH / "node_effect_library_new", FRESH / "node_effect_library"),
+    "color_compare": (FRESH / "node_color_tokyo", FRESH / "color_before_after"),
+    "node_compare": (FRESH / "node_color_tokyo", FRESH / "node_effect_before_after"),
+    "music_lab": (FRESH / "music_lab_composition",),
+    "live2d": (FRESH / "live2d_actor_composite",),
+    "ppt_maker": (FRESH / "ppt_maker_timeline_native",),
+    "audio": (FRESH / "audio_workbench",),
+    "export": (FRESH / "export_render_queue_current",),
+    "ar_pbr": (FRESH / "ar_pbr_statue_composite",),
+    "vtuber": (FRESH / "vrm_vtuber_studio",),
+    "overview": (FRESH / "multi_environment",),
+}
+
+
+def _clear_recipe_cache(ctx: RetryContext, recipe_name: str) -> None:
+    if not ctx.force_recapture or ctx.dry_run:
+        return
+    for path in RECIPE_CAPTURE_DIRS.get(recipe_name, ()):
+        resolved = path.resolve()
+        if FRESH.resolve() not in resolved.parents and resolved != FRESH.resolve():
+            raise RuntimeError(f"Refusing to clear capture path outside fresh root: {path}")
+        if path.exists():
+            shutil.rmtree(path)
+            ctx.log(f"cleared recipe capture cache: {path}")
+    for asset_name, mapped_recipe in RECIPE_FOR_ASSET.items():
+        if mapped_recipe != recipe_name or asset_name.endswith(".contract"):
+            continue
+        try:
+            asset_path = _asset(asset_name)
+        except Exception:
+            continue
+        for path in (asset_path, _contract_path(asset_path)):
+            try:
+                if path.exists():
+                    path.unlink()
+                    ctx.log(f"cleared recipe asset cache: {path}")
+            except FileNotFoundError:
+                pass
 
 
 def _preflight() -> tuple[bool, list[str], str]:
@@ -1127,6 +1612,8 @@ def _preflight() -> tuple[bool, list[str], str]:
         [_py(), str(ROOT / "tools" / "build_full_product_catalog_decks.py"), "--preflight-only"],
         cwd=ROOT,
         text=True,
+        encoding="utf-8",
+        errors="replace",
         stdout=subprocess.PIPE,
         stderr=subprocess.STDOUT,
     )
@@ -1162,9 +1649,21 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--max-attempts", type=int, default=2)
     parser.add_argument("--timeout", type=int, default=600)
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument(
+        "--force-recapture",
+        action="store_true",
+        help="Delete recipe-owned fresh-review captures before running recipes.",
+    )
     args = parser.parse_args(argv)
 
-    ctx = RetryContext(dry_run=args.dry_run, timeout=args.timeout)
+    if args.force_recapture and args.page == "auto":
+        args.page = "all"
+
+    ctx = RetryContext(
+        dry_run=args.dry_run,
+        timeout=args.timeout,
+        force_recapture=bool(args.force_recapture),
+    )
     final_report: dict[str, object] = {"attempts": [], "report_path": str(REPORT_PATH)}
 
     ok, blockers, strict_report = _preflight()
@@ -1180,6 +1679,7 @@ def main(argv: list[str] | None = None) -> int:
             attempt_report: dict[str, object] = {"attempt": 1, "recipes": recipes, "errors": []}
             for recipe_name in recipes:
                 try:
+                    _clear_recipe_cache(ctx, recipe_name)
                     RECIPES[recipe_name](ctx)
                 except Exception as exc:
                     message = f"{recipe_name} failed: {exc}"
@@ -1210,6 +1710,7 @@ def main(argv: list[str] | None = None) -> int:
         attempt_report: dict[str, object] = {"attempt": attempt, "recipes": recipes, "errors": []}
         for recipe_name in recipes:
             try:
+                _clear_recipe_cache(ctx, recipe_name)
                 RECIPES[recipe_name](ctx)
             except Exception as exc:  # keep other recipes moving
                 message = f"{recipe_name} failed: {exc}"

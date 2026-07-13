@@ -648,6 +648,10 @@ class Live2DActorClip:
     # evaluated after the authored motion update and before draw, so they can
     # layer face/gesture/hand-authored corrections on top of a selected motion.
     parameter_keyframes: dict = field(default_factory=dict)
+    tts_lipsync_payload: dict = field(default_factory=dict)
+    tts_lipsync_source: str = ""
+    dialogue_placement_payload: dict = field(default_factory=dict)
+    dialogue_motion_payload: dict = field(default_factory=dict)
 
     # Offline video/webcam retarget payloads. Transform keyframes above are the
     # broad actor movement path; mocap parameter payloads are renderable too and

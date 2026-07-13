@@ -58,8 +58,22 @@ class NodeGraphScene(QGraphicsScene):
         self._serial_nodes: list[NodeItem] = []
         self._connections: list[ConnectionItem] = []
         self._dragging_connection: Optional[ConnectionItem] = None
+        self._track_context_color: QColor | None = None
+        self._track_context_label: str = ""
 
         self.selectionChanged.connect(self._emit_selection_label)
+
+    def set_track_context(self, color: QColor | str | None, label: str = "") -> None:
+        candidate = QColor(color) if color is not None else QColor()
+        self._track_context_color = candidate if candidate.isValid() else None
+        self._track_context_label = str(label or "")
+        for node in list(self._serial_nodes):
+            self._apply_track_context_to_node(node)
+
+    def _apply_track_context_to_node(self, node) -> None:
+        setter = getattr(node, "set_track_context", None)
+        if callable(setter):
+            setter(self._track_context_color, self._track_context_label)
 
     def _build_io_anchors(self) -> None:
         self._in_node = IONodeItem("IN")
@@ -81,6 +95,7 @@ class NodeGraphScene(QGraphicsScene):
         if pos is None:
             pos = self._next_position()
         node = NodeItem(node_id=nid, label=label)
+        self._apply_track_context_to_node(node)
         node.setPos(pos)
         self.addItem(node)
         self._serial_nodes.append(node)
@@ -101,6 +116,7 @@ class NodeGraphScene(QGraphicsScene):
         if pos is None:
             pos = self._next_position()
         node = BlurNodeItem(node_id=nid, label=label)
+        self._apply_track_context_to_node(node)
         node.setPos(pos)
         self.addItem(node)
         self._serial_nodes.append(node)
@@ -123,6 +139,7 @@ class NodeGraphScene(QGraphicsScene):
         if pos is None:
             pos = self._next_position()
         node = EffectNodeItem(effect_kind=effect_kind, node_id=nid, label=label or meta[0])
+        self._apply_track_context_to_node(node)
         node.setPos(pos)
         self.addItem(node)
         self._serial_nodes.append(node)
@@ -161,6 +178,7 @@ class NodeGraphScene(QGraphicsScene):
         if pos is None:
             pos = self._next_position()
         node = ParallelMixerItem(node_id=nid)
+        self._apply_track_context_to_node(node)
         node.setPos(pos)
         self.addItem(node)
         self._serial_nodes.append(node)
@@ -503,6 +521,7 @@ class NodeGraphScene(QGraphicsScene):
             elif kind == "blur":
                 from app.workbench.node_graph.items.blur_node_item import BlurNodeItem
                 node = BlurNodeItem(node_id=nd["id"], label=nd.get("label", "Blur"))
+                self._apply_track_context_to_node(node)
                 node.setPos(pos)
                 self.addItem(node)
                 self._serial_nodes.append(node)
@@ -520,6 +539,7 @@ class NodeGraphScene(QGraphicsScene):
                 from app.effect_node_params import params_from_dict
                 node = EffectNodeItem(effect_kind=kind, node_id=nd["id"],
                                       label=nd.get("label", ""))
+                self._apply_track_context_to_node(node)
                 node.setPos(pos)
                 self.addItem(node)
                 self._serial_nodes.append(node)
@@ -531,6 +551,7 @@ class NodeGraphScene(QGraphicsScene):
                         pass
             else:
                 node = NodeItem(node_id=nd["id"], label=nd.get("label", "Serial"))
+                self._apply_track_context_to_node(node)
                 node.setPos(pos)
                 self.addItem(node)
                 self._serial_nodes.append(node)

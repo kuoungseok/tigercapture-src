@@ -1,0 +1,68 @@
+{
+  "clips": [
+    {
+      "keyword": "South Korea",
+      "role": "opening",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\South Korea 4K Drone Video ｜ Seoul, Busan, Songdo Cinematic Aerials [AA-sv3ilNBE].mp4",
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\01_seoul_sunset_bridge.mp4",
+      "start": "00:00:45",
+      "duration_ms": 4200
+    },
+    {
+      "keyword": "Lamborghini",
+      "role": "car_detail",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\Lamborghini Revuelto – From Now On [sitXeGjm4Mc].mp4",
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\02_lamborghini_moody_detail.mp4",
+      "start": "00:00:27",
+      "duration_ms": 3600
+    },
+    {
+      "keyword": "BUGATTI",
+      "role": "luxury_insert",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\The BUGATTI W16 MISTRAL ‘BLANC ÉTERNEL’： Celebrating perpetual beauty [dsPHQmSxtFg].mp4",
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\03_bugatti_white_car.mp4",
+      "start": "00:00:39",
+      "duration_ms": 3200
+    },
+    {
+      "keyword": "SAMSUNG",
+      "role": "color_fx",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\SAMSUNG QD-OLED 4K 120FPS Demo ｜ UNREAL 1 Billion Colors 🌈 HDR Test (AI TV) [rjwPj0dD9wQ].mp4",
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\04_oled_color_macro.mp4",
+      "start": "00:03:41",
+      "duration_ms": 3200
+    },
+    {
+      "keyword": "Tokyo",
+      "role": "night_city",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\【4K HDR】東京空撮 Tokyo Night View 2025｜Helicopter Aerial Twilight Skyline Japan [Ui4UpsZH4Jw].mp4",
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\05_tokyo_night_city.mp4",
+      "start": "00:02:13",
+      "duration_ms": 3967
+    },
+    {
+      "keyword": "Le Mans",
+      "role": "speed_rhythm",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\Extended Highlights ｜ 24 Hours of Le Mans 2026 ｜ FIA WEC [cE0Vw-ZQpM4].mp4",
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\06_lemans_race_cut.mp4",
+      "start": "00:38:29",
+      "duration_ms": 3400
+    },
+    {
+      "keyword": "8k HDR",
+      "role": "hdr_insert",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\8k HDR Best Mix 2022 Dolby Vision [CrIzscDUaZo].mp4",
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\07_hdr_color_wheel.mp4",
+      "start": "00:16:08",
+      "duration_ms": 3000
+    },
+    {
+      "keyword": "South Korea",
+      "role": "closing",
+      "source": "C:\\Users\\artmouse\\Videos\\TigerCapture\\YouTube Imports\\South Korea 4K Drone Video ｜ Seoul, Busan, Songdo Cinematic Aerials [AA-sv3ilNBE].mp4",
+      "path": "E:\\ClaudeCodeApp\\GifCam\\external\\assets\\ai_edit_demo\\working_clips\\08_seoul_bridge_close.mp4",
+      "start": "00:02:07",
+      "duration_ms": 3967
+    }
+  ]
+}

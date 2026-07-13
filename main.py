@@ -108,6 +108,12 @@ def main() -> int:
         configure_preview_acceleration_defaults()
     except Exception:
         pass
+    try:
+        from app.qt_opengl_policy import configure_qt_opengl_application_attributes
+
+        configure_qt_opengl_application_attributes()
+    except Exception:
+        pass
     QCoreApplication.setApplicationName("TigerCapture")
     QCoreApplication.setOrganizationName("TigerCapture")
     app = QApplication(sys.argv)

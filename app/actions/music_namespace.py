@@ -329,6 +329,25 @@ def register_music_actions(registry: Any) -> None:
         dry_summary="music mixer faders would be balanced",
     )
     registry.register_adapter_action(
+        "music.apply_master_fx",
+        "Apply Sound Editor EQ/Dynamics/FX/AI Master state to rendered Music Lab mix or stem clips.",
+        "music",
+        "music_apply_master_fx",
+        params_schema=schema_object(
+            {
+                "composition_id": {"type": "string"},
+                "role": {"type": "string"},
+                "effects": {"type": "object"},
+                "merge": {"type": "boolean"},
+                "focus_workbench": {"type": "boolean"},
+            },
+            required=("effects",),
+        ),
+        required=("effects",),
+        undo_label="Apply Composer master FX",
+        dry_summary="Sound Editor effects would be applied to rendered Composer audio",
+    )
+    registry.register_adapter_action(
         "music.state",
         "Read Music Lab composition state.",
         "music",

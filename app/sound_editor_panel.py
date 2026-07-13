@@ -13,7 +13,7 @@ from pathlib import Path
 from typing import Any
 
 from PySide6.QtCore import QPointF, QRectF, QSize, QSignalBlocker, Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QColor, QBrush, QDesktopServices, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
+from PySide6.QtGui import QColor, QBrush, QDesktopServices, QFont, QLinearGradient, QPainter, QPainterPath, QPen, QPixmap, QRadialGradient
 from PySide6.QtWidgets import (
     QFileDialog,
     QComboBox,
@@ -43,10 +43,8 @@ from app.audio_tool_dock_specs import (
     AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT,
     AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT,
     AUDIO_TOOL_DOCK_BUTTON_RADIUS,
-    AUDIO_TOOL_DOCK_ICON_HEIGHT,
-    AUDIO_TOOL_DOCK_ICON_WIDTH,
 )
-from app.icons import app_icon, icon_size, sound_lab_wide_icon
+from app.icons import app_icon, icon_size
 from app.knob_widget import FlowLayout, KnobWidget
 from app.sound_edit_state_store import SoundEditStateStore
 from app.sound_editor_mixer_widgets import (
@@ -182,23 +180,38 @@ class _MusicLabArrangementView(QWidget):
     """Compact multitrack arranger preview for Music Lab."""
 
     selection_changed = Signal(object)
+    MIN_TIMELINE_ZOOM = 1.0
+    MAX_TIMELINE_ZOOM = 8.0
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         self.setObjectName("SoundMusicArrangementView")
         self.setMinimumHeight(275)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.setMouseTracking(True)
         self._duration_s = 30
         self._mode = "stems"
         self._key = "auto key"
         self._genre = "electronic"
         self._mood = "confident"
+        self._timeline_zoom = 1.0
+        self._timeline_scroll_s = 0.0
+        self._timeline_pan_dragging = False
+        self._timeline_pan_last_x = 0.0
+        self._track_scroll_index = 0
+        self._track_scroll_dragging = False
+        self._track_scroll_drag_last_y = 0.0
+        self._playback_position_s: float | None = None
         self._composition: dict[str, Any] | None = None
         self._selection: dict[str, Any] = {"role": "drums", "section_name": "main"}
         self._block_rects: list[tuple[QRectF, str, str]] = []
         self._muted_roles: set[str] = set()
         self._solo_roles: set[str] = set()
         self._arrangement_title = "Music Lab Arrange"
+        self._pattern_timer = QTimer(self)
+        self._pattern_timer.setInterval(90)
+        self._pattern_timer.timeout.connect(self.update)
+        self._pattern_timer.start()
 
     def set_arrangement(
         self,
@@ -214,6 +227,7 @@ class _MusicLabArrangementView(QWidget):
         self._key = str(key or "auto key")
         self._genre = str(genre or "")
         self._mood = str(mood or "")
+        self._clamp_timeline_scroll()
         self.update()
 
     def set_composition(self, composition: dict[str, Any] | None) -> None:
@@ -229,6 +243,8 @@ class _MusicLabArrangementView(QWidget):
             self._selection["section_name"] = valid_sections[0] if valid_sections else "main"
         if self._selection.get("role") not in valid_roles:
             self._selection["role"] = valid_roles[0] if valid_roles else "drums"
+        self._clamp_timeline_scroll()
+        self._track_scroll_index = 0
         self.update()
 
     def composition(self) -> dict[str, Any] | None:
@@ -317,17 +333,35 @@ class _MusicLabArrangementView(QWidget):
         if comp_tracks:
             palette = {
                 "drums": (QColor(216, 176, 49), 0),
-                "bass": (QColor(81, 122, 221), 1),
-                "chords": (QColor(48, 190, 189), 2),
-                "pad": (QColor(48, 190, 189), 2),
-                "melody": (QColor(44, 160, 208), 3),
-                "fx": (QColor(114, 151, 221), 4),
-                "mix": (QColor(118, 196, 143), 5),
+                "bass": (QColor(62, 96, 180), 1),
+                "bass_pulse": (QColor(48, 78, 146), 1),
+                "bass_layer": (QColor(52, 86, 158), 1),
+                "sub_bass": (QColor(42, 66, 122), 1),
+                "chords": (QColor(42, 160, 154), 2),
+                "pad": (QColor(42, 160, 154), 2),
+                "arp": (QColor(66, 128, 120), 2),
+                "melody": (QColor(42, 150, 195), 3),
+                "lead_answer": (QColor(50, 126, 184), 3),
+                "lead_harmony": (QColor(58, 134, 186), 3),
+                "counter": (QColor(72, 112, 166), 3),
+                "counter_melody": (QColor(72, 112, 166), 3),
+                "fx": (QColor(84, 118, 186), 4),
+                "mix": (QColor(90, 164, 124), 5),
             }
             tracks = []
             for row in comp_tracks:
                 role = str(row.get("role") or row.get("id") or "").strip().lower()
-                color, index = palette.get(role, (QColor(138, 151, 177), 5))
+                color, index = palette.get(role, (QColor(78, 92, 112), 5))
+                if role.startswith(("violins_", "violas_", "flutes_", "oboes_", "clarinets_")):
+                    color, index = QColor(58, 134, 182), 3
+                elif role.startswith(("cellos_", "contrabasses_", "timpani_")):
+                    color, index = QColor(50, 82, 142), 1
+                elif role.startswith(("horns_", "trumpets_", "trombones_", "low_brass_")):
+                    color, index = QColor(164, 126, 72), 3
+                elif role.startswith(("choir_", "hybrid_pad_")):
+                    color, index = QColor(72, 138, 132), 2
+                elif role.startswith(("orchestral_percussion_", "cymbals_fx_")):
+                    color, index = QColor(172, 140, 58), 0
                 label = "Pad" if role == "chords" else (role.title() or "Track")
                 tracks.append((label, color, index))
         else:
@@ -340,6 +374,142 @@ class _MusicLabArrangementView(QWidget):
             return [("Mix", QColor(118, 196, 143), 5)]
         return tracks
 
+    def _duration_seconds(self) -> float:
+        return max(1.0, float(self._duration_s or 1))
+
+    def _visible_duration_s(self) -> float:
+        return self._duration_seconds() / max(self.MIN_TIMELINE_ZOOM, float(self._timeline_zoom or 1.0))
+
+    def _clamp_timeline_scroll(self) -> None:
+        max_scroll = max(0.0, self._duration_seconds() - self._visible_duration_s())
+        self._timeline_scroll_s = max(0.0, min(max_scroll, float(self._timeline_scroll_s or 0.0)))
+
+    def set_playback_position_ms(self, position_ms: int | float | None, *, follow: bool = False) -> None:
+        if position_ms is None:
+            self._playback_position_s = None
+            self.update()
+            return
+        seconds = max(0.0, min(self._duration_seconds(), float(position_ms) / 1000.0))
+        self._playback_position_s = seconds
+        if follow:
+            self._focus_time(seconds)
+        self.update()
+
+    def _focus_time(self, seconds: float) -> None:
+        visible = self._visible_duration_s()
+        if visible >= self._duration_seconds() - 0.001:
+            self._clamp_timeline_scroll()
+            return
+        padding = max(0.6, visible * 0.16)
+        visible_start = float(self._timeline_scroll_s)
+        visible_end = visible_start + visible
+        if seconds < visible_start + padding:
+            self._timeline_scroll_s = seconds - padding
+        elif seconds > visible_end - padding:
+            self._timeline_scroll_s = seconds - visible + padding
+        self._clamp_timeline_scroll()
+
+    def _layout_metrics(self) -> dict[str, Any]:
+        rect = self.rect().adjusted(1, 1, -1, -1)
+        left_w = 94
+        top_h = 28
+        bottom_pad = 12
+        lane_gap = 4
+        all_lanes = self._tracks()
+        available_h = max(1, rect.height() - top_h - bottom_pad)
+        preferred_lane_h = 32
+        max_visible_lanes = max(1, int((available_h + lane_gap) / (preferred_lane_h + lane_gap)))
+        visible_count = min(len(all_lanes), max_visible_lanes)
+        track_scroll_max = max(0, len(all_lanes) - visible_count)
+        self._track_scroll_index = max(0, min(track_scroll_max, int(self._track_scroll_index or 0)))
+        lanes = all_lanes[self._track_scroll_index : self._track_scroll_index + visible_count]
+        lane_h = max(24, int((available_h - lane_gap * max(0, len(lanes) - 1)) / max(1, len(lanes))))
+        grid_x = rect.left() + left_w
+        scrollbar_w = 10 if track_scroll_max > 0 else 0
+        grid_w = max(1, rect.width() - left_w - 7 - scrollbar_w)
+        grid_y = rect.top() + top_h
+        grid_h = lane_h * len(lanes) + lane_gap * max(0, len(lanes) - 1)
+        scrollbar_rect = QRectF(grid_x + grid_w + 4, grid_y, 6, grid_h) if track_scroll_max > 0 else QRectF()
+        return {
+            "rect": rect,
+            "left_w": left_w,
+            "top_h": top_h,
+            "bottom_pad": bottom_pad,
+            "lane_gap": lane_gap,
+            "all_lanes": all_lanes,
+            "lanes": lanes,
+            "lane_h": lane_h,
+            "grid_x": grid_x,
+            "grid_w": grid_w,
+            "grid_y": grid_y,
+            "grid_h": grid_h,
+            "track_scroll_max": track_scroll_max,
+            "visible_count": visible_count,
+            "scrollbar_rect": scrollbar_rect,
+        }
+
+    def _time_to_x(self, seconds: float, grid_rect: QRectF) -> float:
+        visible = max(0.001, self._visible_duration_s())
+        return float(grid_rect.left()) + ((float(seconds) - float(self._timeline_scroll_s)) / visible) * float(grid_rect.width())
+
+    def _grid_rect(self) -> QRectF:
+        metrics = self._layout_metrics()
+        return QRectF(metrics["grid_x"], metrics["grid_y"], metrics["grid_w"], metrics["grid_h"])
+
+    def _pan_timeline_by_pixels(self, delta_px: float, grid_width: float) -> None:
+        if self._timeline_zoom <= 1.01:
+            return
+        self._timeline_scroll_s -= (float(delta_px) / max(1.0, float(grid_width))) * self._visible_duration_s()
+        self._clamp_timeline_scroll()
+        self.update()
+
+    def _pan_timeline_by_wheel(self, steps: float) -> None:
+        if self._timeline_zoom <= 1.01:
+            return
+        self._timeline_scroll_s += float(steps) * self._visible_duration_s() * 0.12
+        self._clamp_timeline_scroll()
+        self.update()
+
+    def _section_time_rows(self) -> list[tuple[str, float, float, QColor]]:
+        composition = self._composition or {}
+        section_rows = [row for row in list(composition.get("sections") or []) if isinstance(row, dict)]
+        colors = {
+            "intro": QColor(175, 145, 92, 210),
+            "build": QColor(190, 162, 78, 220),
+            "main": QColor(214, 177, 58, 230),
+            "outro": QColor(138, 151, 177, 210),
+        }
+        if section_rows:
+            rows: list[tuple[str, float, float, QColor]] = []
+            cursor_s = 0.0
+            for idx, row in enumerate(section_rows):
+                name = str(row.get("name") or f"section {idx + 1}").lower()
+                duration_s = max(0.001, float(row.get("duration_ms") or 0) / 1000.0)
+                if "start_ms" in row:
+                    start_s = max(0.0, float(row.get("start_ms") or 0) / 1000.0)
+                else:
+                    start_s = cursor_s
+                cursor_s = max(cursor_s, start_s + duration_s)
+                rows.append((name, start_s, duration_s, colors.get(name, QColor(138, 151, 177, 210))))
+            return rows
+        rows = []
+        cursor_s = 0.0
+        for name, ratio, color in self._sections():
+            duration_s = max(0.001, self._duration_seconds() * float(ratio))
+            rows.append((name, cursor_s, duration_s, color))
+            cursor_s += duration_s
+        return rows
+
+    def _grid_tick_step_s(self) -> float:
+        visible = self._visible_duration_s()
+        if visible <= 10:
+            return 1.0
+        if visible <= 24:
+            return 2.0
+        if visible <= 60:
+            return 4.0
+        return 8.0
+
     def _track_data(self, role_label: str) -> dict[str, Any]:
         role = "chords" if role_label.lower() == "pad" else role_label.lower()
         for row in list((self._composition or {}).get("tracks") or []):
@@ -350,21 +520,20 @@ class _MusicLabArrangementView(QWidget):
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        rect = self.rect().adjusted(1, 1, -1, -1)
+        metrics = self._layout_metrics()
+        rect = metrics["rect"]
         painter.fillRect(rect, QColor("#0C0E10"))
         painter.setPen(QPen(QColor(178, 186, 202, 28), 1))
         painter.drawRoundedRect(QRectF(rect), 6, 6)
 
-        left_w = 94
-        top_h = 28
-        bottom_pad = 12
-        lane_gap = 4
-        lanes = self._tracks()
-        lane_h = max(24, int((rect.height() - top_h - bottom_pad - lane_gap * (len(lanes) - 1)) / max(1, len(lanes))))
-        grid_x = rect.left() + left_w
-        grid_w = max(1, rect.width() - left_w - 7)
-        grid_y = rect.top() + top_h
-        grid_h = lane_h * len(lanes) + lane_gap * max(0, len(lanes) - 1)
+        left_w = metrics["left_w"]
+        lane_gap = metrics["lane_gap"]
+        lanes = metrics["lanes"]
+        lane_h = metrics["lane_h"]
+        grid_x = metrics["grid_x"]
+        grid_w = metrics["grid_w"]
+        grid_y = metrics["grid_y"]
+        grid_h = metrics["grid_h"]
 
         painter.fillRect(QRectF(grid_x, grid_y, grid_w, grid_h), QColor(18, 21, 24, 220))
         painter.fillRect(QRectF(rect.left() + 5, grid_y, left_w - 8, grid_h), QColor(14, 16, 18, 235))
@@ -381,17 +550,33 @@ class _MusicLabArrangementView(QWidget):
         info_font.setBold(False)
         painter.setFont(info_font)
         painter.setPen(QColor("#7F8793"))
-        painter.drawText(grid_x + 4, rect.top() + 18, f"{self._duration_s}s  |  {self._genre}  |  {self._mood}  |  {self._key}")
+        zoom_suffix = f"  |  x{self._timeline_zoom:.1f}" if self._timeline_zoom > 1.01 else ""
+        painter.drawText(grid_x + 4, rect.top() + 18, f"{self._duration_s}s  |  {self._genre}  |  {self._mood}  |  {self._key}{zoom_suffix}")
 
-        bars = max(8, min(48, int(round(self._duration_s / 2))))
-        for i in range(bars + 1):
-            x = grid_x + grid_w * i / bars
-            alpha = 62 if i % 4 == 0 else 30
+        grid_rect = QRectF(grid_x, grid_y, grid_w, grid_h)
+        visible_start = float(self._timeline_scroll_s)
+        visible_end = visible_start + self._visible_duration_s()
+        tick = self._grid_tick_step_s()
+        first_tick = math.floor(visible_start / tick) * tick
+        tick_index = 0
+        current_tick = first_tick
+        while current_tick <= visible_end + tick * 0.5:
+            x = self._time_to_x(current_tick, grid_rect)
+            if x < grid_x - 1:
+                current_tick += tick
+                tick_index += 1
+                continue
+            if x > grid_x + grid_w + 1:
+                break
+            major = abs((current_tick / max(tick, 0.001)) % 4.0) < 0.001
+            alpha = 62 if major else 30
             painter.setPen(QPen(QColor(178, 186, 202, alpha), 1))
             painter.drawLine(int(x), grid_y, int(x), grid_y + grid_h)
-            if i % 4 == 0:
+            if major:
                 painter.setPen(QColor("#6D7581"))
-                painter.drawText(int(x) + 3, rect.top() + 18, str(i + 1))
+                painter.drawText(int(x) + 3, rect.top() + 18, f"{int(round(current_tick))}s")
+            current_tick += tick
+            tick_index += 1
 
         y = grid_y
         self._block_rects = []
@@ -412,7 +597,174 @@ class _MusicLabArrangementView(QWidget):
             painter.drawRect(lane_rect)
             self._paint_track_blocks(painter, lane_rect, color, role_index, track_index, role_name, muted=muted)
             y += lane_h + lane_gap
+        self._paint_preview_scrim(painter, grid_rect)
+        self._paint_playback_focus(painter, grid_rect)
+        self._paint_track_scrollbar(painter, metrics)
         painter.end()
+
+    def _paint_preview_scrim(self, painter: QPainter, grid_rect: QRectF) -> None:
+        if self._playback_position_s is None:
+            return
+        scrim = QLinearGradient(grid_rect.topLeft(), grid_rect.bottomLeft())
+        scrim.setColorAt(0.0, QColor(0, 0, 0, 78))
+        scrim.setColorAt(0.52, QColor(0, 0, 0, 96))
+        scrim.setColorAt(1.0, QColor(0, 0, 0, 84))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(scrim))
+        painter.drawRect(grid_rect)
+
+    def _section_at_time(self, seconds: float) -> tuple[str, float, float, QColor] | None:
+        for section, start_s, duration_s, color in self._section_time_rows():
+            if start_s <= seconds <= start_s + duration_s:
+                return section, start_s, duration_s, color
+        rows = self._section_time_rows()
+        return rows[-1] if rows else None
+
+    def _paint_playback_focus(self, painter: QPainter, grid_rect: QRectF) -> None:
+        if self._playback_position_s is None:
+            return
+        seconds = max(0.0, min(self._duration_seconds(), float(self._playback_position_s)))
+        effect_alpha = self._playback_effect_alpha_scale(seconds)
+        x = self._time_to_x(seconds, grid_rect)
+        section_row = self._section_at_time(seconds)
+        section_color = QColor(126, 215, 154)
+        if section_row is not None:
+            section, start_s, duration_s, section_color = section_row
+            section_left = max(grid_rect.left(), self._time_to_x(start_s, grid_rect))
+            section_right = min(grid_rect.right(), x)
+            if section_right > grid_rect.left() and section_left < grid_rect.right():
+                painter.fillRect(
+                    QRectF(section_left, grid_rect.top(), max(1.0, section_right - section_left), grid_rect.height()),
+                    QColor(126, 215, 154, 18),
+                )
+        else:
+            section = "preview"
+        if x < grid_rect.left() - 1 or x > grid_rect.right() + 1:
+            return
+        if effect_alpha <= 0.02:
+            return
+        accent = QColor(
+            int(126 * 0.62 + section_color.red() * 0.38),
+            int(215 * 0.62 + section_color.green() * 0.38),
+            int(154 * 0.62 + section_color.blue() * 0.38),
+            255,
+        )
+        self._paint_playhead_flow_trail(painter, grid_rect, x, accent, alpha_scale=effect_alpha)
+        painter.setPen(QPen(QColor(126, 215, 154, int(96 * effect_alpha)), 8.5, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawLine(QPointF(x, grid_rect.top()), QPointF(x, grid_rect.bottom()))
+        painter.setPen(QPen(QColor(235, 255, 242, int(246 * effect_alpha)), 1.7, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawLine(QPointF(x, grid_rect.top()), QPointF(x, grid_rect.bottom()))
+        marker = QPainterPath()
+        marker.moveTo(x, grid_rect.top() + 1)
+        marker.lineTo(x - 5, grid_rect.top() - 7)
+        marker.lineTo(x + 5, grid_rect.top() - 7)
+        marker.closeSubpath()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(151, 242, 181, int(246 * effect_alpha)))
+        painter.drawPath(marker)
+
+    def _playback_effect_alpha_scale(self, seconds: float) -> float:
+        remaining = self._duration_seconds() - max(0.0, float(seconds))
+        return max(0.0, min(1.0, (remaining - 0.85) / 1.6))
+
+    def _paint_playhead_flow_trail(self, painter: QPainter, grid_rect: QRectF, x: float, accent: QColor, *, alpha_scale: float = 1.0) -> None:
+        alpha_scale = max(0.0, min(1.0, float(alpha_scale)))
+        if alpha_scale <= 0.02:
+            return
+        trail_w = min(max(58.0, grid_rect.width() * 0.12), 170.0)
+        left = max(grid_rect.left(), x - trail_w)
+        right = min(grid_rect.right(), x)
+        if right <= left:
+            return
+        painter.save()
+        painter.setClipRect(QRectF(grid_rect.left(), grid_rect.top(), max(1.0, x - grid_rect.left()), grid_rect.height()))
+        phase = (time.monotonic() * 0.82) % 1.0
+        wake = QLinearGradient(QPointF(left, 0.0), QPointF(right, 0.0))
+        wake.setColorAt(0.0, self._with_alpha(accent.darker(150), 0))
+        wake.setColorAt(0.38, self._with_alpha(accent.darker(120), int(20 * alpha_scale)))
+        wake.setColorAt(0.72, self._with_alpha(accent, int(52 * alpha_scale)))
+        wake.setColorAt(0.86, self._with_alpha(accent.lighter(145), int(104 * alpha_scale)))
+        wake.setColorAt(1.0, self._with_alpha(accent.lighter(115), 0))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(wake))
+        painter.drawRoundedRect(QRectF(left, grid_rect.top(), right - left, grid_rect.height()), 4, 4)
+
+        for index, scale in enumerate((0.88, 0.52)):
+            band_phase = (phase + index * 0.29) % 1.0
+            band_x = x - trail_w * band_phase
+            if band_x < grid_rect.left() or band_x > x:
+                continue
+            band_w = max(14.0, 26.0 * scale)
+            band = QLinearGradient(QPointF(band_x - band_w, 0.0), QPointF(band_x + band_w, 0.0))
+            band.setColorAt(0.0, self._with_alpha(accent, 0))
+            band.setColorAt(0.48, self._with_alpha(accent.lighter(160), int(62 * scale * alpha_scale)))
+            band.setColorAt(1.0, self._with_alpha(accent, 0))
+            painter.setBrush(QBrush(band))
+            painter.drawRect(QRectF(max(grid_rect.left(), band_x - band_w), grid_rect.top(), min(band_w * 2.0, x - band_x + band_w), grid_rect.height()))
+
+        center = QPointF(x, grid_rect.center().y())
+        radius = max(34.0, min(72.0, grid_rect.height() * 0.30))
+        bloom = QRadialGradient(center, radius)
+        bloom.setColorAt(0.0, self._with_alpha(accent.lighter(168), int(104 * alpha_scale)))
+        bloom.setColorAt(0.28, self._with_alpha(accent.lighter(132), int(52 * alpha_scale)))
+        bloom.setColorAt(0.66, self._with_alpha(accent, int(18 * alpha_scale)))
+        bloom.setColorAt(1.0, self._with_alpha(accent, 0))
+        painter.setBrush(QBrush(bloom))
+        painter.drawEllipse(QRectF(x - radius, grid_rect.center().y() - radius, radius * 2.0, radius * 2.0))
+        painter.restore()
+
+    def _track_scroll_thumb_rect(self, metrics: dict[str, Any]) -> QRectF:
+        bar = QRectF(metrics.get("scrollbar_rect") or QRectF())
+        max_scroll = int(metrics.get("track_scroll_max") or 0)
+        total = max(1, len(list(metrics.get("all_lanes") or [])))
+        visible = max(1, int(metrics.get("visible_count") or 1))
+        if max_scroll <= 0 or bar.width() <= 0 or bar.height() <= 0:
+            return QRectF()
+        thumb_h = max(24.0, bar.height() * visible / max(visible, total))
+        travel = max(1.0, bar.height() - thumb_h)
+        y = bar.top() + travel * (float(self._track_scroll_index) / max(1.0, float(max_scroll)))
+        return QRectF(bar.left(), y, bar.width(), thumb_h)
+
+    def _paint_track_scrollbar(self, painter: QPainter, metrics: dict[str, Any]) -> None:
+        bar = QRectF(metrics.get("scrollbar_rect") or QRectF())
+        if int(metrics.get("track_scroll_max") or 0) <= 0 or bar.width() <= 0:
+            return
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QColor(24, 27, 30, 210))
+        painter.drawRoundedRect(bar, 3, 3)
+        thumb = self._track_scroll_thumb_rect(metrics)
+        painter.setBrush(QColor(126, 215, 154, 132))
+        painter.drawRoundedRect(thumb, 3, 3)
+        painter.setBrush(QColor(234, 242, 238, 42))
+        painter.drawRoundedRect(thumb.adjusted(1, 1, -1, -thumb.height() * 0.45), 2, 2)
+
+    def _scroll_tracks_by_steps(self, steps: float) -> bool:
+        metrics = self._layout_metrics()
+        max_scroll = int(metrics.get("track_scroll_max") or 0)
+        if max_scroll <= 0:
+            return False
+        old = int(self._track_scroll_index)
+        self._track_scroll_index = max(0, min(max_scroll, old + int(round(float(steps)))))
+        if self._track_scroll_index == old:
+            return False
+        self.update()
+        return True
+
+    def _set_track_scroll_from_y(self, y: float, metrics: dict[str, Any] | None = None) -> bool:
+        metrics = metrics or self._layout_metrics()
+        max_scroll = int(metrics.get("track_scroll_max") or 0)
+        if max_scroll <= 0:
+            return False
+        bar = QRectF(metrics.get("scrollbar_rect") or QRectF())
+        thumb = self._track_scroll_thumb_rect(metrics)
+        travel = max(1.0, bar.height() - thumb.height())
+        ratio = max(0.0, min(1.0, (float(y) - bar.top() - thumb.height() * 0.5) / travel))
+        index = int(round(ratio * max_scroll))
+        if index == self._track_scroll_index:
+            return False
+        self._track_scroll_index = max(0, min(max_scroll, index))
+        self.update()
+        return True
 
     def _paint_track_blocks(
         self,
@@ -425,12 +777,18 @@ class _MusicLabArrangementView(QWidget):
         *,
         muted: bool = False,
     ) -> None:
-        start_ratio = 0.0
         track_data = self._track_data(role_name)
         clips = [row for row in list(track_data.get("clips") or []) if isinstance(row, dict)]
-        for section_index, (section, ratio, section_color) in enumerate(self._sections()):
-            block_x = lane_rect.left() + lane_rect.width() * start_ratio
-            block_w = max(12.0, lane_rect.width() * ratio - 3.0)
+        for section_index, (section, start_s, duration_s, section_color) in enumerate(self._section_time_rows()):
+            block_left = self._time_to_x(start_s, lane_rect)
+            block_right = self._time_to_x(start_s + duration_s, lane_rect)
+            if block_right < lane_rect.left() or block_left > lane_rect.right():
+                continue
+            block_x = max(lane_rect.left() + 2.0, block_left + 2.0)
+            block_right = min(lane_rect.right() - 2.0, block_right - 1.0)
+            block_w = block_right - block_x
+            if block_w < 4.0:
+                continue
             if clips:
                 active = any(str(clip.get("section_name") or "").lower() == section for clip in clips)
             else:
@@ -438,79 +796,482 @@ class _MusicLabArrangementView(QWidget):
             if active:
                 block_h = lane_rect.height() - 9
                 block_y = lane_rect.top() + 4
-                block_rect = QRectF(block_x + 2, block_y, block_w, block_h)
+                block_rect = QRectF(block_x, block_y, block_w, block_h)
                 self._block_rects.append((QRectF(block_rect), role_name, section))
                 mixed = QColor(
-                    int(color.red() * 0.70 + section_color.red() * 0.30),
-                    int(color.green() * 0.70 + section_color.green() * 0.30),
-                    int(color.blue() * 0.70 + section_color.blue() * 0.30),
+                    int(color.red() * 0.82 + section_color.red() * 0.18),
+                    int(color.green() * 0.82 + section_color.green() * 0.18),
+                    int(color.blue() * 0.82 + section_color.blue() * 0.18),
                     118 if muted else 220,
                 )
-                gradient = QLinearGradient(block_x, block_y, block_x, block_y + block_h)
-                gradient.setColorAt(0.0, mixed.lighter(118))
-                gradient.setColorAt(1.0, mixed.darker(132))
+                drum_tone = QColor(
+                    int(154 * 0.86 + section_color.red() * 0.14),
+                    int(118 * 0.86 + section_color.green() * 0.14),
+                    int(38 * 0.86 + section_color.blue() * 0.14),
+                    232,
+                )
+                bar_tone = QColor(
+                    max(24, int(drum_tone.red() * 0.50)),
+                    max(22, int(drum_tone.green() * 0.50)),
+                    max(16, int(drum_tone.blue() * 0.48)),
+                    188 if muted else 238,
+                )
+                pattern_tone = QColor(
+                    int(mixed.red() * 0.58 + drum_tone.red() * 0.42),
+                    int(mixed.green() * 0.58 + drum_tone.green() * 0.42),
+                    int(mixed.blue() * 0.58 + drum_tone.blue() * 0.42),
+                    224,
+                )
+                gradient = QLinearGradient(block_rect.left(), block_y, block_rect.left(), block_y + block_h)
+                gradient.setColorAt(0.0, bar_tone.lighter(116))
+                gradient.setColorAt(0.50, bar_tone)
+                gradient.setColorAt(1.0, bar_tone.darker(160))
                 path = QPainterPath()
                 path.addRoundedRect(block_rect, 3, 3)
                 painter.fillPath(path, QBrush(gradient))
                 selected = self._selection.get("role") == role_name and self._selection.get("section_name") == section
-                painter.setPen(QPen(QColor("#F3E8C5") if selected else mixed.lighter(130), 2 if selected else 1))
+                painter.setPen(QPen(QColor("#F3E8C5") if selected else bar_tone.lighter(142), 2 if selected else 1))
                 painter.drawPath(path)
                 note_count = 0
                 if clips:
                     for clip in clips:
                         if str(clip.get("section_name") or "").lower() == section:
                             note_count += len(list(clip.get("notes") or []))
-                self._paint_note_pattern(painter, QRectF(block_x + 6, block_y + 5, block_w - 10, block_h - 10), role_index, section_index, note_count=note_count)
-            start_ratio += ratio
+                self._paint_note_pattern(
+                    painter,
+                    block_rect.adjusted(4, 5, -4, -5),
+                    role_index,
+                    section_index,
+                    note_count=note_count,
+                    color=pattern_tone,
+                    muted=muted,
+                )
 
-    def _paint_note_pattern(self, painter: QPainter, rect: QRectF, role_index: int, section_index: int, *, note_count: int = 0) -> None:
+    def _paint_note_pattern(
+        self,
+        painter: QPainter,
+        rect: QRectF,
+        role_index: int,
+        section_index: int,
+        *,
+        note_count: int = 0,
+        color: QColor | None = None,
+        muted: bool = False,
+    ) -> None:
         if rect.width() <= 4 or rect.height() <= 4:
             return
-        painter.setPen(QPen(QColor(6, 10, 13, 125), 1))
+        accent = QColor(color or QColor("#7ED79A"))
+        alpha_scale = 0.30 if muted else 1.0
+        if self._playback_position_s is not None:
+            alpha_scale *= 0.72
+        phase = self._block_pattern_phase(
+            (time.monotonic() * 0.62 + section_index * 0.21 + role_index * 0.13) % 1.0
+        )
         if role_index == 0:
             steps = max(3, min(36, note_count or int(rect.width() // 13)))
             for i in range(steps):
                 x = rect.left() + i * rect.width() / steps
                 h = rect.height() * (0.45 + 0.35 * ((i + section_index) % 3 == 0))
-                painter.drawLine(int(x), int(rect.bottom()), int(x), int(rect.bottom() - h))
+                pulse = self._flow_intensity(i / max(1, steps), phase, falloff=0.16, floor=0.18)
+                self._draw_glow_line(
+                    painter,
+                    QPointF(x, rect.bottom()),
+                    QPointF(x, rect.bottom() - h),
+                    accent,
+                    alpha_scale=alpha_scale * pulse,
+                    width=1.2,
+                )
         elif role_index == 1:
             y = rect.center().y()
-            painter.drawLine(int(rect.left()), int(y), int(rect.right()), int(y))
+            self._draw_flowing_glow_line(
+                painter,
+                QPointF(rect.left(), y),
+                QPointF(rect.right(), y),
+                accent,
+                phase,
+                alpha_scale=alpha_scale * 0.84,
+                width=1.35,
+            )
             for i in range(4):
                 x = rect.left() + i * rect.width() / 4
-                painter.drawLine(int(x), int(y), int(x + rect.width() / 7), int(y - rect.height() * 0.18))
+                self._draw_flowing_glow_line(
+                    painter,
+                    QPointF(x, y),
+                    QPointF(x + rect.width() / 7, y - rect.height() * 0.18),
+                    accent.lighter(122),
+                    (phase + i * 0.16) % 1.0,
+                    alpha_scale=alpha_scale * 0.70,
+                    width=1.1,
+                )
+            self._draw_flow_dot(painter, rect, accent, phase, alpha_scale=alpha_scale)
         elif role_index in {2, 5}:
             for offset in (0.25, 0.50, 0.75):
                 y = rect.top() + rect.height() * offset
-                painter.drawLine(int(rect.left()), int(y), int(rect.right()), int(y))
+                self._draw_flowing_glow_line(
+                    painter,
+                    QPointF(rect.left(), y),
+                    QPointF(rect.right(), y),
+                    accent,
+                    (phase + offset * 0.23) % 1.0,
+                    alpha_scale=alpha_scale * (0.22 + offset * 0.15),
+                    width=1.0,
+                )
+            self._draw_flow_dot(painter, rect, accent.lighter(120), (phase + 0.33) % 1.0, alpha_scale=alpha_scale * 0.75)
         elif role_index == 3:
             points = []
             for i in range(7):
                 x = rect.left() + i * rect.width() / 6
                 y = rect.bottom() - rect.height() * (0.20 + 0.55 * ((i + section_index) % 4) / 3)
-                points.append((x, y))
-            for a, b in zip(points, points[1:]):
-                painter.drawLine(int(a[0]), int(a[1]), int(b[0]), int(b[1]))
+                points.append(QPointF(x, y))
+            self._draw_glow_polyline(painter, points, accent, alpha_scale=alpha_scale, phase=phase)
+            self._draw_polyline_flow_dot(painter, points, accent.lighter(130), phase, alpha_scale=alpha_scale)
         else:
-            painter.drawEllipse(QRectF(rect.left(), rect.top(), rect.height() * 0.75, rect.height() * 0.75))
-            painter.drawLine(int(rect.left()), int(rect.center().y()), int(rect.right()), int(rect.center().y()))
+            orb = QRectF(rect.left(), rect.top(), rect.height() * 0.75, rect.height() * 0.75)
+            self._draw_glow_orb(painter, orb, accent, alpha_scale=alpha_scale)
+            self._draw_flowing_glow_line(
+                painter,
+                QPointF(rect.left() + rect.height() * 0.45, rect.center().y()),
+                QPointF(rect.right(), rect.center().y()),
+                accent,
+                phase,
+                alpha_scale=alpha_scale * 0.68,
+                width=1.0,
+            )
+            self._draw_flow_dot(painter, rect.adjusted(rect.height() * 0.4, 0, 0, 0), accent, phase, alpha_scale=alpha_scale * 0.85)
+
+    @staticmethod
+    def _with_alpha(color: QColor, alpha: int) -> QColor:
+        out = QColor(color)
+        out.setAlpha(max(0, min(255, int(alpha))))
+        return out
+
+    def _block_pattern_phase(self, phase: float) -> float:
+        normalized = max(0.0, min(1.0, float(phase)))
+        if self._playback_position_s is None:
+            return normalized
+        return 1.0 - normalized
+
+    @staticmethod
+    def _flow_intensity(position: float, phase: float, *, falloff: float = 0.20, floor: float = 0.16) -> float:
+        distance = abs((float(position) - float(phase) + 0.5) % 1.0 - 0.5)
+        peak = max(0.0, 1.0 - distance / max(0.001, float(falloff)))
+        return max(0.0, min(1.0, float(floor) + (1.0 - float(floor)) * peak * peak))
+
+    def _flow_gradient(
+        self,
+        start: QPointF,
+        end: QPointF,
+        color: QColor,
+        phase: float,
+        *,
+        alpha_scale: float,
+        bright_alpha: int,
+        dim_alpha: int,
+        falloff: float = 0.24,
+    ) -> QLinearGradient:
+        scale = max(0.0, min(1.0, float(alpha_scale)))
+        peak = max(0.0, min(1.0, float(phase)))
+        spread = max(0.02, min(0.48, float(falloff)))
+        grad = QLinearGradient(start, end)
+        stops: list[tuple[float, QColor]] = [
+            (0.0, self._with_alpha(color.darker(142), int(dim_alpha * scale))),
+            (1.0, self._with_alpha(color.darker(142), int(dim_alpha * scale))),
+            (peak, self._with_alpha(color.lighter(152), int(bright_alpha * scale))),
+        ]
+        for ratio, alpha_factor in ((0.28, 0.42), (0.62, 0.18), (1.0, 0.0)):
+            left = peak - spread * ratio
+            right = peak + spread * ratio
+            alpha = int((dim_alpha + (bright_alpha - dim_alpha) * alpha_factor) * scale)
+            if 0.0 < left < 1.0:
+                stops.append((left, self._with_alpha(color.lighter(118), alpha)))
+            if 0.0 < right < 1.0:
+                stops.append((right, self._with_alpha(color.lighter(118), alpha)))
+        for pos, stop_color in sorted(stops, key=lambda item: item[0]):
+            grad.setColorAt(max(0.0, min(1.0, float(pos))), stop_color)
+        return grad
+
+    def _draw_glow_line(
+        self,
+        painter: QPainter,
+        start: QPointF,
+        end: QPointF,
+        color: QColor,
+        *,
+        alpha_scale: float = 1.0,
+        width: float = 1.0,
+    ) -> None:
+        scale = max(0.0, min(1.0, float(alpha_scale)))
+        if scale <= 0.01:
+            return
+        glow = self._with_alpha(color.lighter(124), int(70 * scale))
+        core = self._with_alpha(color.lighter(165), int(205 * scale))
+        painter.setPen(QPen(glow, max(3.0, width + 3.2), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawLine(start, end)
+        painter.setPen(QPen(self._with_alpha(color, int(120 * scale)), max(1.8, width + 1.3), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawLine(start, end)
+        painter.setPen(QPen(core, width, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawLine(start, end)
+
+    def _draw_flowing_glow_line(
+        self,
+        painter: QPainter,
+        start: QPointF,
+        end: QPointF,
+        color: QColor,
+        phase: float,
+        *,
+        alpha_scale: float = 1.0,
+        width: float = 1.0,
+    ) -> None:
+        scale = max(0.0, min(1.0, float(alpha_scale)))
+        if scale <= 0.01:
+            return
+        glow = self._flow_gradient(start, end, color.lighter(108), phase, alpha_scale=scale, bright_alpha=68, dim_alpha=0, falloff=0.22)
+        core = self._flow_gradient(start, end, color.lighter(130), phase, alpha_scale=scale, bright_alpha=214, dim_alpha=4, falloff=0.16)
+        painter.setPen(QPen(QBrush(glow), max(2.4, width + 2.1), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawLine(start, end)
+        painter.setPen(QPen(QBrush(core), max(1.3, width), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap))
+        painter.drawLine(start, end)
+        self._draw_flow_peak_bloom(
+            painter,
+            start,
+            end,
+            color,
+            phase,
+            alpha_scale=scale,
+            radius=max(8.0, width * 7.5),
+        )
+
+    def _draw_flow_peak_bloom(
+        self,
+        painter: QPainter,
+        start: QPointF,
+        end: QPointF,
+        color: QColor,
+        phase: float,
+        *,
+        alpha_scale: float = 1.0,
+        radius: float = 8.0,
+    ) -> None:
+        scale = max(0.0, min(1.0, float(alpha_scale)))
+        if scale <= 0.01:
+            return
+        ratio = max(0.0, min(1.0, float(phase)))
+        x = float(start.x()) + (float(end.x()) - float(start.x())) * ratio
+        y = float(start.y()) + (float(end.y()) - float(start.y())) * ratio
+        center = QPointF(x, y)
+        radius = max(3.0, float(radius))
+        bloom = QRadialGradient(center, radius)
+        bloom.setColorAt(0.0, self._with_alpha(color.lighter(156), int(98 * scale)))
+        bloom.setColorAt(0.22, self._with_alpha(color.lighter(132), int(56 * scale)))
+        bloom.setColorAt(0.58, self._with_alpha(color, int(18 * scale)))
+        bloom.setColorAt(1.0, self._with_alpha(color, 0))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(bloom))
+        painter.drawEllipse(QRectF(x - radius, y - radius, radius * 2.0, radius * 2.0))
+
+    def _draw_glow_polyline(
+        self,
+        painter: QPainter,
+        points: list[QPointF],
+        color: QColor,
+        *,
+        alpha_scale: float = 1.0,
+        phase: float | None = None,
+    ) -> None:
+        if len(points) < 2:
+            return
+        if phase is not None:
+            total_segments = max(1, len(points) - 1)
+            for index, (start, end) in enumerate(zip(points, points[1:])):
+                local_start = index / total_segments
+                local_end = (index + 1) / total_segments
+                mid = (local_start + local_end) * 0.5
+                intensity = self._flow_intensity(mid, float(phase), falloff=0.28, floor=0.22)
+                if local_start <= float(phase) <= local_end:
+                    local_phase = (float(phase) - local_start) / max(0.001, local_end - local_start)
+                else:
+                    local_phase = 0.0 if float(phase) < local_start else 1.0
+                self._draw_flowing_glow_line(
+                    painter,
+                    start,
+                    end,
+                    color,
+                    local_phase,
+                    alpha_scale=alpha_scale * intensity,
+                    width=1.05,
+                )
+            return
+        path = QPainterPath(points[0])
+        for point in points[1:]:
+            path.lineTo(point)
+        scale = max(0.0, min(1.0, float(alpha_scale)))
+        painter.setPen(QPen(self._with_alpha(color.lighter(122), int(82 * scale)), 5.0, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.drawPath(path)
+        painter.setPen(QPen(self._with_alpha(color, int(130 * scale)), 2.4, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.drawPath(path)
+        painter.setPen(QPen(self._with_alpha(color.lighter(168), int(220 * scale)), 1.05, Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.drawPath(path)
+
+    def _draw_flow_dot(
+        self,
+        painter: QPainter,
+        rect: QRectF,
+        color: QColor,
+        phase: float,
+        *,
+        alpha_scale: float = 1.0,
+    ) -> None:
+        if rect.width() <= 2:
+            return
+        x = rect.left() + rect.width() * max(0.0, min(1.0, float(phase)))
+        y = rect.center().y()
+        radius = max(2.8, min(5.5, rect.height() * 0.16))
+        self._draw_glow_orb(painter, QRectF(x - radius, y - radius, radius * 2, radius * 2), color, alpha_scale=alpha_scale)
+
+    def _draw_polyline_flow_dot(
+        self,
+        painter: QPainter,
+        points: list[QPointF],
+        color: QColor,
+        phase: float,
+        *,
+        alpha_scale: float = 1.0,
+    ) -> None:
+        if len(points) < 2:
+            return
+        segments: list[tuple[QPointF, QPointF, float]] = []
+        total = 0.0
+        for a, b in zip(points, points[1:]):
+            length = math.hypot(float(b.x() - a.x()), float(b.y() - a.y()))
+            segments.append((a, b, length))
+            total += length
+        target = max(0.0, min(1.0, float(phase))) * max(1.0, total)
+        cursor = 0.0
+        for a, b, length in segments:
+            if cursor + length >= target:
+                ratio = 0.0 if length <= 0.001 else (target - cursor) / length
+                x = float(a.x()) + (float(b.x()) - float(a.x())) * ratio
+                y = float(a.y()) + (float(b.y()) - float(a.y())) * ratio
+                radius = 4.2
+                self._draw_glow_orb(painter, QRectF(x - radius, y - radius, radius * 2, radius * 2), color, alpha_scale=alpha_scale)
+                return
+            cursor += length
+
+    def _draw_glow_orb(self, painter: QPainter, rect: QRectF, color: QColor, *, alpha_scale: float = 1.0) -> None:
+        scale = max(0.0, min(1.0, float(alpha_scale)))
+        if scale <= 0.01:
+            return
+        center = rect.center()
+        radius = max(1.0, rect.width() * 0.5)
+        glow_rect = rect.adjusted(-radius * 1.25, -radius * 1.25, radius * 1.25, radius * 1.25)
+        grad = QRadialGradient(center, max(1.0, glow_rect.width() * 0.5))
+        grad.setColorAt(0.0, self._with_alpha(color.lighter(152), int(154 * scale)))
+        grad.setColorAt(0.35, self._with_alpha(color.lighter(122), int(76 * scale)))
+        grad.setColorAt(0.70, self._with_alpha(color, int(20 * scale)))
+        grad.setColorAt(1.0, self._with_alpha(color, 0))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(grad))
+        painter.drawEllipse(glow_rect)
+        painter.setBrush(self._with_alpha(color.lighter(136), int(182 * scale)))
+        painter.drawEllipse(rect)
+        painter.setBrush(self._with_alpha(color.lighter(178), int(132 * scale)))
+        small = QRectF(rect.center().x() - rect.width() * 0.16, rect.center().y() - rect.height() * 0.16, rect.width() * 0.32, rect.height() * 0.32)
+        painter.drawEllipse(small)
 
     def mousePressEvent(self, event) -> None:  # pragma: no cover - exercised by widget tests
         pos = event.position() if hasattr(event, "position") else event.pos()
-        for rect, role, section in reversed(self._block_rects):
-            if rect.contains(pos):
-                self.set_selection(role=role, section_name=section)
+        button = event.button() if hasattr(event, "button") else Qt.MouseButton.NoButton
+        metrics = self._layout_metrics()
+        scrollbar_rect = QRectF(metrics.get("scrollbar_rect") or QRectF()).adjusted(-3, 0, 3, 0)
+        if button == Qt.MouseButton.LeftButton and scrollbar_rect.contains(pos):
+            self._track_scroll_dragging = True
+            self._track_scroll_drag_last_y = float(pos.y())
+            self._set_track_scroll_from_y(float(pos.y()), metrics)
+            event.accept()
+            return
+        if button == Qt.MouseButton.LeftButton:
+            for rect, role, section in reversed(self._block_rects):
+                if rect.contains(pos):
+                    self._timeline_pan_dragging = False
+                    self.set_selection(role=role, section_name=section)
+                    return
+        if button in {Qt.MouseButton.LeftButton, Qt.MouseButton.MiddleButton} and self._grid_rect().contains(pos):
+            if self._timeline_zoom > 1.01:
+                self._timeline_pan_dragging = True
+                self._timeline_pan_last_x = float(pos.x())
+                event.accept()
                 return
         super().mousePressEvent(event)
 
+    def mouseMoveEvent(self, event) -> None:  # pragma: no cover - UI convenience
+        if self._track_scroll_dragging:
+            pos = event.position() if hasattr(event, "position") else event.pos()
+            self._track_scroll_drag_last_y = float(pos.y())
+            self._set_track_scroll_from_y(float(pos.y()))
+            event.accept()
+            return
+        if self._timeline_pan_dragging:
+            pos = event.position() if hasattr(event, "position") else event.pos()
+            delta_px = float(pos.x()) - float(self._timeline_pan_last_x)
+            self._timeline_pan_last_x = float(pos.x())
+            self._pan_timeline_by_pixels(delta_px, self._grid_rect().width())
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:  # pragma: no cover - UI convenience
+        if self._track_scroll_dragging:
+            self._track_scroll_dragging = False
+            event.accept()
+            return
+        if self._timeline_pan_dragging:
+            self._timeline_pan_dragging = False
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
     def wheelEvent(self, event) -> None:  # pragma: no cover - UI convenience
-        selection = self.selection()
-        role = str(selection.get("role") or "")
-        if role:
-            if event.angleDelta().y() < 0:
-                self.set_role_muted(role, role not in self._muted_roles)
-            else:
-                self.set_role_solo(role, role not in self._solo_roles)
+        delta_x = event.angleDelta().x()
+        if delta_x == 0 and not event.pixelDelta().isNull():
+            delta_x = event.pixelDelta().x()
+        if delta_x != 0:
+            self._pan_timeline_by_wheel(float(delta_x) / 120.0)
+            event.accept()
+            return
+
+        delta_y = event.angleDelta().y()
+        if delta_y == 0 and not event.pixelDelta().isNull():
+            delta_y = event.pixelDelta().y()
+        if delta_y == 0:
+            super().wheelEvent(event)
+            return
+        metrics = self._layout_metrics()
+        grid_rect = QRectF(metrics["grid_x"], metrics["grid_y"], metrics["grid_w"], metrics["grid_h"])
+        pos = event.position() if hasattr(event, "position") else event.pos()
+        label_rect = QRectF(metrics["rect"].left() + 5, metrics["grid_y"], metrics["left_w"] - 8, metrics["grid_h"])
+        scrollbar_rect = QRectF(metrics.get("scrollbar_rect") or QRectF()).adjusted(-4, 0, 4, 0)
+        if int(metrics.get("track_scroll_max") or 0) > 0 and (label_rect.contains(pos) or scrollbar_rect.contains(pos)):
+            self._scroll_tracks_by_steps(-float(delta_y) / 120.0)
+            event.accept()
+            return
+        if event.modifiers() & Qt.KeyboardModifier.ShiftModifier:
+            visible = self._visible_duration_s()
+            self._timeline_scroll_s -= (float(delta_y) / 120.0) * visible * 0.12
+            self._clamp_timeline_scroll()
+            self.update()
+            event.accept()
+            return
+        old_zoom = max(self.MIN_TIMELINE_ZOOM, float(self._timeline_zoom or 1.0))
+        cursor_ratio = (float(pos.x()) - float(grid_rect.left())) / max(1.0, float(grid_rect.width()))
+        cursor_ratio = max(0.0, min(1.0, cursor_ratio))
+        cursor_time = float(self._timeline_scroll_s) + cursor_ratio * self._visible_duration_s()
+        factor = 1.16 ** (float(delta_y) / 120.0)
+        self._timeline_zoom = max(self.MIN_TIMELINE_ZOOM, min(self.MAX_TIMELINE_ZOOM, old_zoom * factor))
+        new_visible = self._visible_duration_s()
+        self._timeline_scroll_s = cursor_time - cursor_ratio * new_visible
+        self._clamp_timeline_scroll()
+        self.update()
         event.accept()
 
 
@@ -1081,19 +1842,15 @@ class SoundEditorPanel(QWidget):
         advanced_dock_layout = QHBoxLayout(self._advanced_dock_row)
         advanced_dock_layout.setContentsMargins(4, 0, 4, 0)
         advanced_dock_layout.setSpacing(0)
-        self._advanced_btn = QPushButton("", self._advanced_dock_row)
+        self._advanced_btn = QPushButton("SOUND LAB", self._advanced_dock_row)
         self._advanced_btn.setObjectName("SoundLabDockButton")
         self._advanced_btn.setProperty("role", "advanced_audio_lab")
         self._advanced_btn.setProperty("expanded", False)
-        self._advanced_btn.setIcon(sound_lab_wide_icon(
-            AUDIO_TOOL_DOCK_ICON_WIDTH,
-            AUDIO_TOOL_DOCK_ICON_HEIGHT,
-            color="#FFFFFF",
-        ))
-        self._advanced_btn.setIconSize(QSize(
-            AUDIO_TOOL_DOCK_ICON_WIDTH,
-            AUDIO_TOOL_DOCK_ICON_HEIGHT,
-        ))
+        sound_lab_font = QFont(self._advanced_btn.font())
+        sound_lab_font.setBold(True)
+        sound_lab_font.setPixelSize(22)
+        sound_lab_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 4.0)
+        self._advanced_btn.setFont(sound_lab_font)
         self._advanced_btn.setToolTip("Expand advanced audio lab")
         self._advanced_btn.setMinimumHeight(AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT)
         self._advanced_btn.setMaximumHeight(AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT)
@@ -1128,21 +1885,20 @@ class SoundEditorPanel(QWidget):
         tabs_layout = QHBoxLayout(tabs)
         tabs_layout.setContentsMargins(4, 0, 4, 0)
         tabs_layout.setSpacing(3)
-        for tab_id, label, icon in (
-            ("basic", "Basic", "audio"),
-            ("eq", "EQ", "sliders"),
-            ("dyn", "Dynamics", "mixer"),
-            ("fx", "FX", "effects"),
-            ("ai", "AI Master", "spark"),
+        for tab_id, label, display in (
+            ("basic", "Basic", "BASIC"),
+            ("eq", "EQ", "EQ"),
+            ("dyn", "Dynamics", "DYN"),
+            ("fx", "FX", "FX"),
+            ("ai", "AI Master", "AI"),
         ):
-            button = QPushButton("", tabs)
+            button = QPushButton(display, tabs)
             button.setObjectName("SoundTab")
             button.setCheckable(True)
             button.setToolTip(label)
             button.setAccessibleName(label)
-            button.setFixedSize(27, 23)
-            button.setIcon(app_icon(icon, size=14, color="#D7DAE7"))
-            button.setIconSize(icon_size(13))
+            button.setMinimumSize(max(34, 18 + len(display) * 7), 23)
+            button.setMaximumHeight(23)
             button.clicked.connect(lambda _checked=False, t=tab_id: self._set_tab(t))
             self._tab_buttons[tab_id] = button
             tabs_layout.addWidget(button)
@@ -1303,6 +2059,7 @@ class SoundEditorPanel(QWidget):
             "QPushButton#SoundTab:checked, QPushButton#SoundToggle:checked {"
             "background:rgba(178,186,202,13); border-color:rgba(238,242,250,56); color:#FFFFFF;"
             "}"
+            "QPushButton#SoundTab { font-size:8px; font-weight:780; padding:0px 7px; }"
             "QPushButton#SoundLabTab {"
             "background:rgba(255,255,255,5); color:#C9D1DD; border:1px solid rgba(178,186,202,24);"
             "border-radius:5px; padding:0px 10px; font-size:9px; font-weight:760;"
@@ -1319,7 +2076,7 @@ class SoundEditorPanel(QWidget):
             "QWidget#SoundLabDockRow { background:transparent; border:none; }"
             "QPushButton#SoundLabDockButton {"
             "background:rgba(255,255,255,5); color:#FFFFFF; border:1px solid rgba(178,186,202,28);"
-            f"border-radius:{AUDIO_TOOL_DOCK_BUTTON_RADIUS}px; padding:0px;"
+            f"border-radius:{AUDIO_TOOL_DOCK_BUTTON_RADIUS}px; padding:0px; font-size:22px; font-weight:780;"
             "}"
             "QPushButton#SoundLabDockButton:hover {"
             "background:rgba(255,255,255,11); border-color:rgba(220,225,238,72);"
@@ -1367,6 +2124,7 @@ class SoundEditorPanel(QWidget):
             "QPushButton#SoundWaveZoomButton:hover { background:rgba(255,255,255,11); border-color:rgba(220,225,238,64); color:#FFFFFF; }"
             "QPushButton#SoundWaveZoomButton[selected=\"true\"] { background:rgba(118,145,123,26); color:#E8F4EC; border-color:rgba(126,215,154,98); }"
             "QPushButton#SoundToggle { font-size:8px; font-weight:620; padding:0px 8px; }"
+            "QPushButton#SoundToggle[compact=\"true\"] { font-size:8px; font-weight:780; padding:0px 6px; }"
             "QWidget#SoundTabs { background:transparent; border:none; }"
             "QWidget#SoundChain { background:transparent; border:none; }"
             "QWidget#SoundWorkspace { background:transparent; border:none; }"
@@ -1835,12 +2593,14 @@ class SoundEditorPanel(QWidget):
         btn = QPushButton(text, self)
         btn.setObjectName("SoundToggle")
         btn.setCheckable(True)
-        if icon_name:
+        if icon_name and not compact:
             btn.setIcon(app_icon(icon_name, size=13, color="#D7DAE7"))
             btn.setIconSize(icon_size(12))
         if compact:
-            btn.setText("")
-            btn.setFixedSize(27, 24)
+            short_text = self._compact_toggle_text(text)
+            btn.setText(short_text)
+            btn.setProperty("compact", True)
+            btn.setFixedSize(max(34, min(76, 16 + len(short_text) * 7)), 24)
             btn.setToolTip(text)
             btn.setAccessibleName(text)
         else:
@@ -1850,6 +2610,20 @@ class SoundEditorPanel(QWidget):
             btn.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
         btn.clicked.connect(handler)
         return btn
+
+    @staticmethod
+    def _compact_toggle_text(text: str) -> str:
+        label = str(text or "").strip()
+        compact_labels = {
+            "Dialogue cleanup": "DIA",
+            "De-esser": "ESS",
+            "Time stretch": "TIME",
+            "Loudness": "LOUD",
+            "Enable AI Master": "AI",
+            "Reverse": "REV",
+            "Mute": "MUTE",
+        }
+        return compact_labels.get(label, label[:5].upper())
 
     def _preset_row(self, names, callback) -> QWidget:
         row = QWidget(self)

@@ -99,7 +99,17 @@ def register_ar_pbr_preview_actions(registry: Any) -> None:
         params_schema=schema_object({
             "mode": {
                 "type": "string",
-                "enum": ["off", "grayscale", "heat", "inverted_grayscale", "depth", "depth_map"],
+                "enum": [
+                    "off",
+                    "matte",
+                    "distance",
+                    "plane",
+                    "grayscale",
+                    "heat",
+                    "inverted_grayscale",
+                    "depth",
+                    "depth_map",
+                ],
             },
             "refresh": {"type": "boolean"},
         }),

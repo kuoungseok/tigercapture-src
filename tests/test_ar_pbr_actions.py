@@ -195,6 +195,7 @@ def test_ar_pbr_gizmo_actions_are_registered_for_automation() -> None:
     depth_schema = action_specs["ar_pbr.preview.depth_view.set"]["params_schema"]["properties"]
     assert {"pan_x", "pan_y", "pan_z"} <= set(view_schema)
     assert {"mode", "refresh"} <= set(depth_schema)
+    assert {"matte", "distance", "plane"} <= set(depth_schema["mode"]["enum"])
     assert {
         "ambient_occlusion_mode",
         "ao_strength",

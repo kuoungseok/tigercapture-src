@@ -1,6 +1,6 @@
 ﻿# TigerCapture Feature Spec for AI Agents
 
-Last updated: 2026-07-10
+Last updated: 2026-07-13
 
 This file is an AI-readable map of features discovered while working with the
 user. Keep it current when behavior changes, especially for features that span
@@ -141,7 +141,8 @@ Start here when changing a feature:
   `debugCapture/capcut_voice_workflow_qa.json`.
 - Subculture TTS / voice generation direction:
   `docs/SPEC_TTS_VOICE_LAB.md`, `app/tts_setup.py`, `app/tts_synthesis.py`,
-  `app/tts_subtitle_workflow.py`, `app/tts_lab.py`,
+  `app/tts_subtitle_workflow.py`, `app/tts_model_training.py`,
+  `app/tts_lab.py`,
   `app/actions/tts_namespace.py`, and `app/actions/editor_adapter_tts.py`.
   Local Style-Bert-VITS2 experiments currently live outside the repo at
   `D:\TTS\sbv2\Style-Bert-VITS2`. This folder is not a runtime dependency for
@@ -158,9 +159,34 @@ Start here when changing a feature:
   covered by `tools/qa_tts_voice_lab.py`, which writes
   `debugCapture/voice_lab_sidecar_qa.json` and must return actionable
   `tigercapture.tts_sidecar.guidance.v1` recovery steps instead of raw
-  connection errors. TTS subtitle timing can now be baked to Live2D mouth
-  parameters through `tts.subtitle.apply_actor_lipsync`, or in the same
-  generation call by passing `apply_actor_lipsync=true` plus an actor target.
+  connection errors. The QA Dashboard exposes this as `Voice Lab Sidecar` and
+  intentionally runs it with `--auto-start --wait-timeout 120`, so project
+  evaluation sessions that load video, create subtitles, synthesize TTS, and
+  render video do not fail only because the installed local sidecar was not
+  already running. TTS subtitle timing can now be baked to Live2D mouth and
+  natural blink parameters through `tts.subtitle.apply_actor_lipsync`, or in
+  the same generation call by passing `apply_actor_lipsync=true` plus an actor
+  target. AI Dialogue Take is the higher-level path for raw dialogue text:
+  `tts.dialogue.plan_actor_take` returns selectable Live2D targets, TTS voices,
+  placement presets, size presets, and recommended defaults; then
+  `tts.dialogue.generate_actor_take` creates subtitles, generated WAV media,
+  Live2D mouth/blink keyframes, lower-corner actor placement, and default
+  natural dialogue motion in one operation. If the user does not choose
+  anything, it defaults to the selected or first timeline Live2D actor, the
+  preferred TTS voice such as `koharune-ami`, and `bottom_right` / `auto_fit` with
+  `apply_actor_motion=true`. If the chosen Live2D target is a media-pool
+  `.model3.json` asset, the action creates the actor clip before applying TTS,
+  placement, and natural head/body/breath/arm motion.
+  Voice Lab also has a local Model Maker bridge for creating additional
+  Style-Bert-VITS2 voices like the user's trained `zoe` model: actions
+  `tts.model.training.plan`, `tts.model.training.execution_gate`,
+  `tts.model.training.prepare_workspace`,
+  `tts.model.training.launch_dataset`, `tts.model.training.launch_train`, and
+  `tts.model.training.register_result` prepare `Data/<model>/raw`, launch the
+  upstream Dataset/Train Gradio tools, and validate completed
+  `model_assets/<model>` folders. The training engine remains an external
+  sidecar; do not import the PyTorch/AGPL training stack into the editor
+  process or copy it into the closed source tree.
 - CapCut local collaboration handoff:
   `app/capcut_collaboration.py`, `tools/qa_capcut_collab_handoff.py`,
   `debugCapture/capcut_collab_handoff_qa.json`.
@@ -373,6 +399,11 @@ Start here when changing a feature:
   natural-language entry action, clear music edit prompts route to
   regenerate/mute/export actions, and the Workbench Sound Editor now includes a
   compact `Music Lab` tab for prompt-to-timeline and update.
+  Composer sound shaping must reuse the Sound Editor effect model instead of
+  duplicating a second audio stack: `music.apply_master_fx` finds rendered Music
+  Mix/stem `AudioClip` rows by composition/role and merges Sound Editor
+  `AudioClip.effects` payloads, while the Composer `Master FX` card is only a
+  thin UI wrapper over AI Master, reverb/space, and loudness controls.
   Non-orchestral Music Lab generation now uses a 9-channel default baseline:
   drums, bass, bass pulse, pad/chords, arp, lead, answer lead, counter melody,
   and FX. Melodic EDM/NCS-style prompts use the same 9-channel layout with
@@ -383,6 +414,19 @@ Start here when changing a feature:
   now uses an internal 8/16-bar phrase planner with A, A-prime, B, hook, and
   bridge labels, phrase memory, repetition scoring, chord-tone cadences, and
   separate lead/answer/counter roles instead of cycling the same short motif.
+  Classical/Paganini/solo-violin prompts are a separate variation-planner path,
+  documented in `docs/SPEC_CLASSICAL_VARIATION_COMPOSER.md`. They route before
+  generic orchestral detection, keep `solo_violin` as the protagonist, vary a
+  degree-based motif across theme/rhythmic/lyrical/climax/coda sections, and
+  keep heavy roles such as brass, timpani, and cymbals silent until the climax.
+  Genre-specific deterministic planners are documented in
+  `docs/SPEC_GENRE_COMPOSER_PLANNERS.md`: lofi, rock/metal, jazz,
+  hiphop/trap, synthwave, and ambient prompts now replace the default BGM
+  sketch with dedicated section plans and track roles such as dusty drums,
+  palm-muted/power-chord guitars, swing drums, walking bass, 808 bass, retro
+  drums, pulse bass, and drumless ambient pads. Classical and orchestral routes
+  still take priority, while unmatched non-orchestral prompts continue to use
+  the 9-channel baseline.
   Music Lab renderer tiers are now explicit. The basic/default user-facing
   output is sample/SoundFont-based `backend=sample_production` with
   `sample_library_policy=auto`; advanced AI/production output is selected only
@@ -571,12 +615,18 @@ Start here when changing a feature:
   report `pbr_depth_occlusion_applied` plus `pbr_depth_occluded_pixels`. The
   main viewer also has a user-controlled depth-map-only diagnostic mode through
   the `Depth` preview toggle, `ProjectPlayer.set_ar_pbr_depth_view_mode(...)`,
-  and Python Actions `ar_pbr.preview.depth_view.get/set`. This mode is off by
-  default and must not change export output. Normal playback must not estimate
-  depth unless an active AR/PBR track explicitly needs depth for occlusion,
-  scene/plane anchoring, or the user has enabled the Depth viewer toggle. If no
-  depth cache is available, live depth estimation is an intentional diagnostic
-  or placement cost, not part of the baseline video playback path. The
+  and Python Actions `ar_pbr.preview.depth_view.get/set`. When a reference RGB
+  frame is available, the diagnostic viewer exposes `matte`, `distance`, and
+  `plane` checks: matte uses layered refinement for clean object bands,
+  distance keeps a smooth gradient with contours for distance/slope reading,
+  and plane overlays rough road/floor candidates for placement inspection. The
+  actual export/composite depth remains a smooth occlusion map. This mode is
+  off by default and must not change export output. Normal playback must not
+  estimate depth unless an active AR/PBR track explicitly needs depth for
+  occlusion, scene/plane anchoring, or the user has enabled the Depth viewer
+  toggle. If no depth cache is available, live depth estimation is an
+  intentional diagnostic or placement cost, not part of the baseline video
+  playback path. The
   full GPU service bridge serializes the current `depth_frame` as a temporary
   float32 `.npy` payload and the helper applies an overlay alpha depth matte
   before compositing; this prevents export from losing video-depth occlusion,
@@ -584,8 +634,18 @@ Start here when changing a feature:
   model-depth buffer compare inside the helper renderer. It
   also resolves road-plane/scene anchor placement before creating packets, so
   QImage fallback, GL preview, and export agree on where a model should stick to
-  the video. Worker-safe export-side model-view GPU rendering now exists through
-  the helper process below; remaining renderer work is quality depth: real
+  the video surface. The timeline AR/PBR lane status badge is intentionally
+  metadata-only: `3D` means manual 3D placement, `ANCH` means depth/plane
+  anchored placement, and `TRK` means the anchored track has tracking metadata.
+  The badge must not enable Depth view or trigger live depth estimation by
+  itself. Encoded letterbox/pillarbox matte bands are detected from the RGB
+  video frame and excluded from depth normalization and diagnostic
+  matte/distance/plane inspection; they are not valid scene depth, road/floor,
+  or occlusion evidence. The same encoded matte bands are preserved through
+  CPU preview/export color grading and node effects so grade/effect pixels do
+  not recolor black bars; legacy color-grade export falls back to CPU prerender
+  when the source has encoded mattes. Worker-safe export-side model-view GPU
+  rendering now exists through the helper process below; remaining renderer work is quality depth: real
   shadow-map passes, physically richer reflections, IBL prefilter tuning,
   batching, and camera/lens solve fidelity.
   `app.ar_pbr.full_gpu_export_service` defines and invokes the worker-safe
@@ -3936,6 +3996,31 @@ Behavior notes:
   face-box-only footage still reports mouth/eye detail as unavailable; those
   richer tracks are only marked as detail when the source payload actually
   contains gaze, mouth, or eye-open measurements.
+- Live2D AI Dialogue Take is the one-shot edited-dialogue workflow for Voice
+  Lab and AI actions. The non-mutating plan action
+  `tts.dialogue.plan_actor_take` exposes the user-choice surface: existing
+  timeline Live2D actor clips, media-pool `.model3.json` assets, available TTS
+  models, placement presets, and size presets. The mutating action
+  `tts.dialogue.generate_actor_take` accepts those choices through
+  `actor_target_id`, `model_name`, `placement_preset`, and `size_preset`; if
+  choices are omitted it uses recommended defaults and still completes the
+  take. It creates subtitle rows, TTS WAV clips, mouth keyframes, deterministic
+  natural blink keyframes, actor placement, and `apply_actor_motion` body keys.
+  Unless explicitly disabled, `app.live2d.dialogue_motion` prefers the model's
+  authored idle motion and adds deterministic head/body/breath/arm parameter
+  tracks so a 30-second generated take does not remain in a static A/T pose.
+  The default acting profile uses slower, wider face rotation for speech while
+  avoiding rapid side-to-side head-shake motion.
+  Placement is not based on an assumed full-body model:
+  `app.live2d.dialogue_placement` renders/measures the Live2D frame alpha bounds
+  when possible, then fits the visible bbox to the selected safe area such as
+  `bottom_right` / `auto_fit` so the visible lower edge touches the bottom of
+  the Program Output. The `bottom_right` preset sits close to the right edge for
+  normal VTuber-style commentary. If measurement fails, the helper uses deterministic
+  fallback coordinates and records diagnostics on
+  `Live2DActorClip.dialogue_placement_payload`. The same payload,
+  `dialogue_motion_payload`, `tts_lipsync_payload`, and `tts_lipsync_source`
+  are project state and must roundtrip through save/load.
 - The user entry points keep the original Live2D workflow intact. Dragging a
   Live2D item to the timeline creates a Live2D actor track/clip, and
   double-clicking that clip still opens the Live2D viewer for model, authored
@@ -4611,13 +4696,15 @@ Vocal/music separation:
   occlusion helper is used by synthetic/software fallback and packet PBR export,
   and `OpenGLPreviewWidget` keeps the live depth texture fragment-discard path.
   The main viewer can also show depth-map-only diagnostics through the `Depth`
-  preview toggle or Python Actions `ar_pbr.preview.depth_view.get/set`; default
-  display is grayscale with near camera = white. The toggle is user-controlled,
-  off by default, and must not affect export/composite output. Normal playback
-  should not run live depth estimation unless AR/PBR occlusion, scene/plane
-  anchoring, or explicit depth-map viewing is active; cache misses during depth
-  viewing are accepted as diagnostic/placement cost, not baseline playback
-  overhead.
+  preview toggle or Python Actions `ar_pbr.preview.depth_view.get/set`; the UI
+  button cycles `off -> matte -> distance -> plane -> off`. Matte is for
+  occlusion-boundary checks, Distance is for depth gradient/contour inspection,
+  and Plane is for rough road/floor placement candidates. The toggle is
+  user-controlled, off by default, and must not affect export/composite output.
+  Normal playback should not run live depth estimation unless AR/PBR occlusion,
+  scene/plane anchoring, or explicit depth-map viewing is active; cache misses
+  during depth viewing are accepted as diagnostic/placement cost, not baseline
+  playback overhead.
   Full GPU helper export now receives the bridge-provided depth frame as a
   temporary float32 `.npy` payload and applies an overlay alpha depth matte
   before compositing the model-view render over the source frame. The supported
@@ -5259,6 +5346,10 @@ AI Script Edit MVP integration:
   Launcher capture and Studio/editor action capture are intentionally separate:
   future launcher work can split Capture and Studio visually while keeping
   MCP/AI capture routed through the registered Action System.
+  Agent shorthand: when the user says "캡쳐기능 봐줘", "에디터 안 캡쳐", or
+  "editor capture" without explicitly mentioning visible capture UI, region
+  selection, or launcher recording controls, treat the request as MCP/AI
+  action capture first.
 - Specific external-program capture is also exposed through the same action
   layer, without adding a new editor UI. `app/window_capture.py` implements
   Windows top-level window enumeration and capture. `capture.windows.list`
@@ -5266,11 +5357,24 @@ AI Script Edit MVP integration:
   handle; `capture.window.screenshot` saves a still image from the matched
   window; and `capture.window.video` records a short MP4/MOV/MKV by piping RGB
   frames into ffmpeg with hidden subprocess flags to avoid flashing console
-  windows. The default backend captures the visible window rectangle because it
-  works better for GPU windows such as OBS, Unreal, Chrome, and games; the
-  `printwindow` backend remains an explicit fallback for covered windows but may
-  return black for GPU-rendered apps. This is the intended route for AI/MCP
-  commands such as "record OBS for five seconds" or "capture the Chrome window."
+  windows. For Unreal Editor windows, `backend=auto` prefers the `wgc_window`
+  Windows Graphics Capture backend so overlapped Unreal windows can be captured
+  as a window target; if WGC is unavailable it falls back to visible rectangle
+  capture. The `printwindow` backend remains an explicit fallback for covered
+  windows but may return black for GPU-rendered apps. This is the intended
+  route for AI/MCP commands such as "record an external tool window for five
+  seconds" or "capture the Chrome window."
+  Unreal evidence capture must not default through OBS. If an OBS Program Output
+  or OBS source records black, treat that as an OBS/source failure and switch to
+  direct Unreal `hwnd` capture with `backend=auto`.
+  When another AI agent owns the operation length, for example Unreal terrain
+  generation, use the session actions instead of guessing a fixed duration:
+  `capture.window.video.start` with a `max_duration_ms` safety cap, optional
+  `capture.window.video.status` polling, then `capture.window.video.stop` when
+  the external task completes. If an external agent asks "until when?", the
+  contract answer is "until you send stop after the task completes, with
+  `max_duration_ms` as the hard timeout." Unreal-side agents should follow
+  `docs/SPEC_UNREAL_MCP_CAPTURE_CONTROL.md`.
 - `generate_edit_plan` lets external agents create deterministic Script Edit
   plans from SRT/WebVTT transcript text, existing project subtitles, an optional
   Korean/English prompt, style preset, and silence intervals. It returns the

@@ -619,6 +619,7 @@ def _update_timeline_status(self) -> None:
         "J/K/L: reverse jog, pause, forward shuttle\n"
         ", / .: step one frame; Shift+, / Shift+.: ten frames\n"
         "Ctrl+= / Ctrl+- / Ctrl+0: zoom timeline in, out, or fit\n"
+        "Shift+Wheel, Middle-drag, or Alt+Left-drag: pan the zoomed timeline\n"
         "Keyboard jumps keep the playhead visible in the timeline viewport\n"
         "V/B/R/N/Y/U: Select, Blade, Ripple, Roll, Slip, Slide"
     )

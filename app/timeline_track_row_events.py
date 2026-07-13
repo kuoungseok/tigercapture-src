@@ -1037,14 +1037,14 @@ def dragEnterEvent(self, event) -> None:
     # mismatches to the right track type. Qt does not automatically
     # propagate drags from a dropAccepting child to its parent ??
     # so we swallow the event here and emit our own signal.
-    if md.hasUrls():
-        if (
-            self._ar_pbr_paths_from_mime(md)
-            or self._mmd_paths_from_mime(md)
-            or _shared_timeline_media_paths_from_mime(md)
-        ):
-            event.acceptProposedAction()
-            return
+    if (
+        self._ar_pbr_paths_from_mime(md)
+        or self._mmd_paths_from_mime(md)
+        or _shared_performance_source_paths_from_mime(md)
+        or _shared_timeline_media_paths_from_mime(md)
+    ):
+        event.acceptProposedAction()
+        return
     event.ignore()
 
 def dragMoveEvent(self, event) -> None:
@@ -1293,31 +1293,30 @@ def dropEvent(self, event) -> None:
         self.clicked.emit(self.track.id)
         event.acceptProposedAction()
         return
-    if md.hasUrls():
-        mmd_paths = self._mmd_paths_from_mime(md)
-        if mmd_paths:
-            self.media_dropped.emit(self.track.id, mmd_paths[0])
-            event.acceptProposedAction()
-            return
-        ar_paths = self._ar_pbr_paths_from_mime(md)
-        if ar_paths:
-            self.ar_pbr_asset_dropped.emit(
-                ar_paths[0],
-                int(self._x_to_ms(event.position().toPoint().x())),
-            )
-            event.acceptProposedAction()
-            return
-        perf_paths = _shared_performance_source_paths_from_mime(md)
-        if perf_paths:
-            self.performance_source_dropped.emit(
-                perf_paths[0],
-                int(self._x_to_ms(event.position().toPoint().x())),
-            )
-            event.acceptProposedAction()
-            return
-        media_paths = _shared_timeline_media_paths_from_mime(md)
-        if media_paths:
-            self.media_dropped.emit(self.track.id, media_paths[0])
-            event.acceptProposedAction()
-            return
+    mmd_paths = self._mmd_paths_from_mime(md)
+    if mmd_paths:
+        self.media_dropped.emit(self.track.id, mmd_paths[0])
+        event.acceptProposedAction()
+        return
+    ar_paths = self._ar_pbr_paths_from_mime(md)
+    if ar_paths:
+        self.ar_pbr_asset_dropped.emit(
+            ar_paths[0],
+            int(self._x_to_ms(event.position().toPoint().x())),
+        )
+        event.acceptProposedAction()
+        return
+    perf_paths = _shared_performance_source_paths_from_mime(md)
+    if perf_paths:
+        self.performance_source_dropped.emit(
+            perf_paths[0],
+            int(self._x_to_ms(event.position().toPoint().x())),
+        )
+        event.acceptProposedAction()
+        return
+    media_paths = _shared_timeline_media_paths_from_mime(md)
+    if media_paths:
+        self.media_dropped.emit(self.track.id, media_paths[0])
+        event.acceptProposedAction()
+        return
     event.ignore()
