@@ -155,18 +155,12 @@ Start from these files:
 - `app/window_capture.py` for ownerless external Windows app screenshot/video
   capture.
 
-For external tools such as Unreal Editor where another AI/agent controls when
-the operation finishes, use `capture.window.video.start`, optionally poll
+For external tools where another AI/agent controls when the operation finishes,
+use `capture.window.video.start`, optionally poll
 `capture.window.video.status`, and call `capture.window.video.stop` when the
 external task completes. Always pass `max_duration_ms` as a hard safety cap.
 If that external agent asks "until when?", answer: until it sends stop after
-the task completes, or until `max_duration_ms` expires. The Unreal-side control
-procedure is `docs/SPEC_UNREAL_MCP_CAPTURE_CONTROL.md`. For Unreal windows,
-`backend=auto` should be used; it prefers `wgc_window` so overlapped Unreal
-Editor windows can be captured as a window target, with visible-crop fallback.
-Do not route Unreal evidence capture through OBS unless the user explicitly
-asks for OBS output; if OBS records black, switch to direct Unreal `hwnd`
-capture instead of retrying OBS.
+the task completes, or until `max_duration_ms` expires.
 
 Only inspect launcher capture UI (`app/controller.py`, `app/recorder.py`,
 `app/capture.py`, recording bars/overlays) when the user explicitly asks about

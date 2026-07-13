@@ -187,7 +187,7 @@ The visible micro-spec groups must come from
 generation. The final page must stay product-catalog oriented: include current
 surfaces such as PPT Maker / `.tgppt`, Music Lab, Sound Editor, Local AI,
 Python Action, MCP, VTuber Studio, AR/PBR, depth-aware compositing, PPTX, and
-MP4, but exclude MRQ, Unreal Bridge, Marmoset, QA readiness numbers, and
+MP4, but exclude internal renderer bridge names, Marmoset, QA readiness numbers, and
 pass/fail status wording.
 
 ## Current Timeline Visual Contract

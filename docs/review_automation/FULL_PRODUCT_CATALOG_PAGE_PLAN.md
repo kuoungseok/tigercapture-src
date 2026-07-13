@@ -1016,7 +1016,7 @@ capture.screenshot
 
 **Reject if:**
 
-- MRQ or Unreal Bridge is mentioned.
+- Internal renderer bridge names are mentioned.
 - QA readiness numbers appear.
 - Export screen has no project context.
 - The timeline visual style does not match the current editor reference.
@@ -1086,7 +1086,7 @@ E:\ClaudeCodeApp\ReviewAutomationWorkspace\tmp\catalog_spec_closing\spec_closing
   depth-aware compositing, PPTX, or MP4.
 - The spec text reads like an implementation checklist instead of product
   capability categories.
-- The page mentions MRQ, Unreal Bridge, Marmoset, QA readiness numbers, or
+- The page mentions internal renderer bridge names, Marmoset, QA readiness numbers, or
   pass/fail status language.
 - The tree has a visible white fringe, checkerboard leftovers, or a large
   pasted-object shadow.

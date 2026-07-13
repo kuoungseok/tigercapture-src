@@ -121,7 +121,7 @@ Expanded references:
   `SPEC.md`, `TODO.md`, and relevant `docs/SPEC_*.md` changes. It must cover
   current axes such as PPT Maker / `.tgppt`, Music Lab, Sound Editor, Local AI,
   Python Action, MCP, VTuber Studio, AR/PBR, depth-aware compositing, PPTX, and
-  MP4, while excluding MRQ, Unreal Bridge, Marmoset, QA readiness numbers, and
+  MP4, while excluding internal renderer bridge names, Marmoset, QA readiness numbers, and
   pass/fail status language.
 - Slide 4 is `PPT Maker / Timeline-Native Presentation Studio`. It must use
   actual `.tgppt` / `app.pptgen` evidence and must not be folded into AI,

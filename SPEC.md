@@ -76,6 +76,21 @@ Start here when changing a feature:
   `app/sound_editor_panel.py::SoundEditorPanel`,
   `app/sound_editor_panel.py::SoundEditorDockWindow`, and legacy advanced-lab
   `app/video_editor_window.py::SoundEditorWindow`.
+- UI renewal and real-evidence review flow:
+  `docs/SPEC_UI_RENEWAL.md`, `docs/UI_RENEWAL_THREAD_HANDOFF.md`, and
+  `docs/UI_RENEWAL_EVIDENCE_INDEX.md`. Generated images may be design
+  references only; product/review evidence must come from real running UI
+  captures.
+- Broadcast scene / VTuber sidecar contracts:
+  `docs/SPEC_BROADCAST_SCENE.md`, `docs/SPEC_VTUBER_STUDIO_BROADCAST.md`, and
+  `docs/SPEC_VSEEFACE_BRIDGE.md`. VSeeFace is optional external-sidecar
+  integration; Program Output must remain usable through internal VRM fallback
+  when the sidecar is absent or degraded.
+- Repository maintainability and refactor guard:
+  `docs/SPEC_REPO_MAINTAINABILITY.md`, `AGENTS.md`, and
+  `tests/test_editor_architecture_rules.py`. New editor features belong in
+  focused modules, not in the `app/video_editor_window.py` compatibility
+  facade.
 - Typography and subtitles: `app/typography.py`, `app/typo_animations.py`,
   `app/typo_render.py`, `app/subtitles.py`,
   `app/video_editor_window.py::TypographyEditorDialog`.
@@ -1071,7 +1086,7 @@ Start here when changing a feature:
   folder dialog. During analysis, the editor merges local-only visual detections
   from `app.local_ml.local_ml_capcut_project_summary()` when a current media file
   is available, so subject-aware reframe can use OpenCV/Pillow detections without
-  cloud APIs or model downloads. The panel also exposes a `鍮좊Ⅸ ?쒖옉` button that
+  cloud APIs or model downloads. The panel also exposes a `Quick Start` button that
   selects all apply options, analyzes when needed, applies the bundle, stages
   render jobs, and copies publish text if available. The panel reports busy
   state and the last result counts for subtitles, short markers, settings, and
@@ -1096,8 +1111,8 @@ Start here when changing a feature:
   captions, hook question title, social CTA burst, subject reframe motion, feed
   swipe transition, background cutout effect, voice enhance audio, and
   templates for auto-caption shorts, long-to-shorts, subject reframe, smart
-  search edits, and social publishing. Korean search aliases include `罹≪뻔`,
-  `?먮룞?먮쭑`, `諛곌꼍?쒓굅`, and `?몃줈蹂??.
+  search edits, and social publishing. Korean natural-language aliases cover
+  common caption, auto-caption, background-removal, and intro/logo queries.
 - The editor UI now follows a professional shell direction: app command bar,
   left media/assets rail, center viewer, right contextual inspector, and bottom
   timeline. Shared theme tokens live in `app/style.py`; editor-specific panel
@@ -1435,7 +1450,7 @@ Start here when changing a feature:
   `screenstudio_simple_mode_ui`, audio defaults, transcript defaults, and
   export defaults immediately instead of only reporting the policy in QA. In
   editor UI, the main toolbar exposes an iPhone Control Center-style
-  `?쇰컲 / ?ы뵆` workspace switch so the user can see and change the active
+  `Simple / Full` workspace switch so the user can see and change the active
   mode directly. Simple Mode keeps the left Media Pool and right Workbench
   visible because they are core TigerCapture surfaces. The `Panels` toolbar
   toggle only collapses secondary preset/render/audio/subtitle panels, never
@@ -1775,9 +1790,9 @@ Start here when changing a feature:
   so A/B effect/title/transition previews can be reused on the active shot.
   Preset search supports natural Korean/user-language aliases through
   `PRESET_SEARCH_ALIASES` in `app.preset_library` and
-  `_PRESET_NATURAL_QUERY_ALIASES` in `app.video_editor_window`: searches such
-  as `?쇱툩`, `寃뚯엫`, `????좊챸`, `?덉?`, `?ㅽ뙆??, and `?쇱씠釉?D` map to
-  the English preset tags and rank stronger matches first.
+  `_PRESET_NATURAL_QUERY_ALIASES` in `app.video_editor_window`. Queries for
+  intro, game, vertical shorts, preset, sparkle, and Live2D concepts map to the
+  English preset tags and rank stronger matches first.
   Preset browsers show a compact wallpaper-palette style pack row in addition
   to the pack combo and category chips, so users can switch packs through
   square color swatches.
@@ -3129,7 +3144,8 @@ Video timeline:
 - Project-bin relink now exposes `project_bin.relink_candidate_board`, a
   file-by-file candidate board for safe path matches, name-only review,
   ambiguous choices, offline matches, and missing sources.
-  "core NLE workflow/action surface" rather than "Premiere/Resolve湲?NLE".
+  Product copy should describe this as a "core NLE workflow/action surface"
+  rather than a "Premiere/Resolve-grade NLE".
 - Remaining NLE gaps are explicit: source-monitor / record-monitor style
   3-point editing backend now exists but the dedicated UI is still shallow;
   dedicated live multicam switcher UI, deeper proxy/media management, conform,
@@ -5117,12 +5133,12 @@ AI Script Edit MVP integration:
   operations. Provider
   connection/status questions such as "Claude connected?" are answered in chat
   only and must not seed a transcript, subtitle row, or Review plan.
-- The AI Command dock keeps a compact chat transcript (`??` / provider label),
+- The AI Command dock keeps a compact chat transcript (`AI` / provider label),
   but the primary action label must be provider-specific rather than a generic
   message-send button: Claude shows `Plan 생성` when direct generation is ready
-  and `Claude CLI ?닿린` only for terminal handoff/setup, local LLM shows
-  `濡쒖뺄 LLM ?ㅽ뻾`, Qwen shows `臾대즺 AI ?ㅽ뻾`, and rule-based mode shows
-  `洹쒖튃 Plan ?앹꽦`.
+  and `Open Claude CLI` only for terminal handoff/setup, local LLM shows
+  `Run local LLM`, Qwen shows `Run free AI`, and rule-based mode shows
+  `Generate rule-based plan`.
 - Provider interaction copy is centralized in
   `app.ai_providers.provider_interaction_model()`. AI Command and Script Edit
   share the same provider run label, setup label, placeholder, and status
@@ -5138,7 +5154,7 @@ AI Script Edit MVP integration:
   the user should take. This prevents ambiguous labels such as "connected" from
   implying that Claude/Qwen/Codex directly generated the current Plan when the
   app actually used the safe rule-based planner.
-- The bottom AI Command `Review` button opens a centered `AI ?몄쭛 寃?? dialog
+- The bottom AI Command `Review` button opens a centered `AI Edit Review` dialog
   seeded with the current prompt/plan instead of unexpectedly expanding the
   cramped right Workbench Script Edit section. The underlying Script Edit widget
   owns its own dark, high-contrast styling so it remains readable in docks,
@@ -5153,7 +5169,7 @@ AI Script Edit MVP integration:
   prompts, labels the dialog as AI task review rather than subtitle entry, and
   explicitly states when no timeline operation has been produced yet.
 - Script Edit now checks provider connection/status prompts before importing
-  transcript text. Questions such as "?대줈???곌껐?먯뼱?" create a
+  transcript text. Questions such as "Is Claude connected?" create a
   `prompt_only_edit_request` status plan with zero operations and
   `transcript_required=false`, so the prompt is not inserted into subtitles or
   treated as edit text.
@@ -5368,24 +5384,19 @@ AI Script Edit MVP integration:
   handle; `capture.window.screenshot` saves a still image from the matched
   window; and `capture.window.video` records a short MP4/MOV/MKV by piping RGB
   frames into ffmpeg with hidden subprocess flags to avoid flashing console
-  windows. For Unreal Editor windows, `backend=auto` prefers the `wgc_window`
-  Windows Graphics Capture backend so overlapped Unreal windows can be captured
-  as a window target; if WGC is unavailable it falls back to visible rectangle
-  capture. The `printwindow` backend remains an explicit fallback for covered
-  windows but may return black for GPU-rendered apps. This is the intended
-  route for AI/MCP commands such as "record an external tool window for five
-  seconds" or "capture the Chrome window."
-  Unreal evidence capture must not default through OBS. If an OBS Program Output
-  or OBS source records black, treat that as an OBS/source failure and switch to
-  direct Unreal `hwnd` capture with `backend=auto`.
-  When another AI agent owns the operation length, for example Unreal terrain
-  generation, use the session actions instead of guessing a fixed duration:
+  windows. `backend=auto` may use Windows Graphics Capture for supported
+  top-level windows and falls back to visible rectangle capture when needed.
+  The `printwindow` backend remains an explicit fallback for covered windows
+  but may return black for GPU-rendered apps. This is the intended route for
+  AI/MCP commands such as "record an external tool window for five seconds" or
+  "capture the Chrome window."
+  When another AI agent owns the operation length, use the session actions
+  instead of guessing a fixed duration:
   `capture.window.video.start` with a `max_duration_ms` safety cap, optional
   `capture.window.video.status` polling, then `capture.window.video.stop` when
   the external task completes. If an external agent asks "until when?", the
   contract answer is "until you send stop after the task completes, with
-  `max_duration_ms` as the hard timeout." Unreal-side agents should follow
-  `docs/SPEC_UNREAL_MCP_CAPTURE_CONTROL.md`.
+  `max_duration_ms` as the hard timeout."
 - `generate_edit_plan` lets external agents create deterministic Script Edit
   plans from SRT/WebVTT transcript text, existing project subtitles, an optional
   Korean/English prompt, style preset, and silence intervals. It returns the
@@ -5426,7 +5437,7 @@ AI Script Edit MVP integration:
 - `app.ai_edit_apply.build_ai_script_apply_payload()` converts validated plans
   to safe editor payloads. Subtitles and markers can be materialized by the
   editor; destructive text/range cuts are still review-only during normal
-  apply, but the panel has a separate explicit "而??ㅼ젣 ?곸슜" path. That path
+  apply, but the panel has a separate explicit "Apply reviewed cuts" path. That path
   calls `app.ai_edit_apply.apply_ai_script_cut_intents_to_tracks()` and performs
   global ripple deletes across video and audio tracks after splitting at the
   reviewed cut boundaries.

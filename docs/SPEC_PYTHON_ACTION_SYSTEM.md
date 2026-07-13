@@ -104,22 +104,17 @@ NLE positioning:
   `capture.window.screenshot`, and `capture.window.video` are ownerless actions
   backed by `app/window_capture.py`, so MCP/AI can list visible Windows windows
   and capture a matched title/process/pid/handle even when no editor owner is
-  attached. `backend=auto` prefers `wgc_window` for Unreal Editor windows so
-  overlapped Unreal captures can stay targeted to the Unreal window; if WGC is
-  unavailable it falls back to visible rectangle capture. `printwindow` is
-  available only as an explicit fallback because GPU-rendered apps can return
-  black frames through that API.
-  Unreal evidence capture must not default through OBS. If an OBS Program Output
-  or OBS source records black, treat that as an OBS/source failure and switch to
-  direct Unreal `hwnd` capture with `backend=auto`.
-  For external workflows whose end time is controlled by another agent, such
-  as Unreal terrain generation, use `capture.window.video.start`, then run the
-  external work, poll `capture.window.video.status` if needed, and finish with
+  attached. `backend=auto` may use `wgc_window` for supported Windows Graphics
+  Capture paths and otherwise falls back to visible rectangle capture.
+  `printwindow` is available only as an explicit fallback because GPU-rendered
+  apps can return black frames through that API.
+  For external workflows whose end time is controlled by another agent, use
+  `capture.window.video.start`, then run the external work, poll
+  `capture.window.video.status` if needed, and finish with
   `capture.window.video.stop`. The start action requires a hard
   `max_duration_ms` safety cap; the normal answer to "when do I stop?" is:
   "stop when the external task completes, or at `max_duration_ms` if no stop
-  signal arrives." The Unreal-side handoff procedure is documented in
-  `docs/SPEC_UNREAL_MCP_CAPTURE_CONTROL.md`.
+  signal arrives."
 - UI viewer/popout registration is physically split into
   `app/actions/ui_namespace.py` and `app/actions/editor_adapter_ui.py`. It
   exposes only product actions under `ui.viewer.*` for viewer comparison/Fit
@@ -595,8 +590,8 @@ Implementation notes:
   to short Qt `grab()` frame capture for review/QA evidence.
 - `capture.window.video` is bounded fixed-duration capture. Use
   `capture.window.video.start/status/stop` for external-agent workflows where
-  another process, for example Unreal Editor terrain generation, decides when
-  the recording should end. Always pass a `max_duration_ms` timeout so
+  another process decides when the recording should end. Always pass a
+  `max_duration_ms` timeout so
   unattended MCP/AI sessions cannot record indefinitely.
 - `ui.popout.*` is the unattended QA/control surface for detachable windows.
   It can list targets, open/raise them, set geometry, capture a popout image,

@@ -420,7 +420,7 @@ editing support.
 Show delivery/output workflow.
 
 - Include export/render queue context and a meaningful timeline/project state.
-- Do not mention MRQ or Unreal Bridge in the catalog.
+- Do not mention internal renderer bridge names in the catalog.
 - Do not include QA readiness numbers.
 - The timeline must use the current editor track visual style and a real project
   state. Old synthetic timeline strips are not allowed.
@@ -462,7 +462,7 @@ Visual rules:
   must not overlap the micro-spec columns.
 - Reject visible white halos, checkerboard remnants, or background strips
   around the cutout.
-- Reject MRQ, Unreal Bridge, Marmoset, QA readiness numbers, pass/fail status
+- Reject internal renderer bridge names, Marmoset, QA readiness numbers, pass/fail status
   language, or improvised spec categories not backed by the current product
   scenario.
 - Approved source/cutout paths:

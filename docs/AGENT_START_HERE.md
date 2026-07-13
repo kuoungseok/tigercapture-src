@@ -19,8 +19,7 @@ Focused entry points:
   `docs/SPEC_UI_RENEWAL.md`, then `TODO.md`.
 - MCP/AI editor capture, including user requests like "캡쳐기능 봐줘" or
   "에디터 안 캡쳐": `docs/SPEC_PYTHON_ACTION_SYSTEM.md`, then
-  `docs/SPEC_UNREAL_MCP_CAPTURE_CONTROL.md` for Unreal/external-window
-  capture control, then `app/actions/evidence_namespace.py` and
+  `app/actions/evidence_namespace.py` and
   `app/actions/editor_adapter_editing_review.py`. Treat this as action-only
   capture unless the user explicitly asks for visible Capture app UI.
 - Review automation and presentation evidence:
@@ -62,13 +61,9 @@ task unless the user explicitly asks for that.
   `capture.gif`, `capture.windows.list`, `capture.window.screenshot`,
   `capture.window.video`, and `ui.popout.capture`. Do not start by changing
   toolbar buttons or the standalone capture launcher for that request.
-  For external tasks with unknown duration, such as Unreal terrain generation,
-  use `capture.window.video.start/status/stop` with `max_duration_ms` as the
-  hard timeout instead of guessing one fixed `duration_ms`. Use `backend=auto`
-  for Unreal so TigerCapture tries `wgc_window` before visible-crop fallback.
-  Do not route Unreal evidence capture through OBS by default; OBS black output
-  should be treated as an OBS/source failure and replaced with direct Unreal
-  `hwnd` capture.
+  For external tasks with unknown duration, use
+  `capture.window.video.start/status/stop` with `max_duration_ms` as the hard
+  timeout instead of guessing one fixed `duration_ms`.
 - Music Lab playback-safe files are for human listening only and must be made
   from the measured WAV by 48 kHz conversion plus peak normalization only. Do
   not add warm-up beds, pre-roll, noise floors, synthetic silence padding, or
