@@ -5,6 +5,7 @@ from types import SimpleNamespace
 
 from PIL import Image
 
+from app.actions import build_default_action_registry
 from app.drawing_editor_object_import import (
     PaintImportObject,
     collect_editor_paint_objects,
@@ -84,3 +85,55 @@ def test_render_typography_import_object_creates_transparent_png(tmp_path: Path)
     assert image.mode == "RGBA"
     assert image.size[0] >= 240
     assert image.getbbox() is not None
+
+
+def test_paint_editor_object_actions_list_render_and_import(tmp_path: Path) -> None:
+    typo = TextClip(
+        start_ms=0,
+        end_ms=2000,
+        text="Action title",
+        style=TextStyle(position_x=0.5, position_y=0.4, font_size=52),
+    )
+    owner = SimpleNamespace(
+        _tracks=[
+            SimpleNamespace(
+                id=1,
+                offset_ms=0,
+                duration_ms=4000,
+                source_path="scene.mp4",
+                clips=[],
+                typography_actors=[typo],
+            )
+        ],
+        _ar_pbr_tracks=[],
+        _mmd_tracks=[],
+        _spine_actor_tracks=[],
+        _live2d_actor_tracks=[],
+        _stickers=[],
+        _preview_pixmap=None,
+        _register_change=lambda _label: None,
+    )
+    registry = build_default_action_registry(owner)
+    action_ids = {row["id"] for row in registry.list_actions()}
+    assert "paint.editor_objects.list" in action_ids
+    assert "paint.editor_object.render" in action_ids
+    assert "paint.editor_object.import" in action_ids
+
+    listed = registry.execute_action("paint.editor_objects.list", {"time_ms": 250}).to_dict()
+    assert listed["ok"]
+    object_id = listed["result"]["objects"][0]["id"]
+
+    rendered = registry.execute_action(
+        "paint.editor_object.render",
+        {"object_id": object_id, "time_ms": 250, "output_dir": str(tmp_path)},
+    ).to_dict()
+    assert rendered["ok"]
+    assert Path(rendered["result"]["render"]["png_path"]).is_file()
+
+    imported = registry.execute_action(
+        "paint.editor_object.import",
+        {"object_id": object_id, "time_ms": 250, "output_dir": str(tmp_path)},
+    ).to_dict()
+    assert imported["ok"]
+    assert len(owner._stickers) == 1
+    assert Path(owner._stickers[0].png_path).is_file()

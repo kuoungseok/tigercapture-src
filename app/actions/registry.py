@@ -247,6 +247,9 @@ class ActionRegistry:
         from app.actions.ppt_namespace import register_ppt_actions
 
         register_ppt_actions(self)
+        from app.actions.paint_namespace import register_paint_actions
+
+        register_paint_actions(self)
         from app.actions.evidence_namespace import register_evidence_actions
 
         register_evidence_actions(self)

@@ -22,6 +22,7 @@ from app.actions.editor_adapter_music import MusicAdapterMixin
 from app.actions.editor_adapter_ar_pbr import ArPbrAdapterMixin
 from app.actions.editor_adapter_ppt import PptAdapterMixin
 from app.actions.editor_adapter_tts import TtsAdapterMixin
+from app.actions.editor_adapter_paint import PaintAdapterMixin
 
 
 class EditorAdapter(
@@ -31,6 +32,7 @@ class EditorAdapter(
     MmdAdapterMixin,
     ArPbrAdapterMixin,
     PptAdapterMixin,
+    PaintAdapterMixin,
     MusicAdapterMixin,
     TtsAdapterMixin,
     NleAdapterMixin,
