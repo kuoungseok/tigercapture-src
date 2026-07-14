@@ -841,6 +841,8 @@ def load_project(editor, path: str | Path) -> None:
                     color=tuple(sd.get("color") or (255, 50, 50)),
                     opacity=int(sd.get("opacity", 255)),
                     width_px=float(sd.get("width_px", 4.0)),
+                    brush_style=str(sd.get("brush_style", "round") or "round"),
+                    closed_path=bool(sd.get("closed_path", False)),
                     start_ms=int(sd.get("start_ms", 0)),
                     end_ms=sd.get("end_ms"),
                 ))

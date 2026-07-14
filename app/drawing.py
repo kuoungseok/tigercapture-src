@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import copy
+import math
 from dataclasses import dataclass, field
 from typing import Callable
 
@@ -17,12 +19,15 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QColorDialog,
+    QComboBox,
     QDialog,
     QDialogButtonBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
     QLabel,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QSizePolicy,
     QSlider,
@@ -152,6 +157,38 @@ QSlider::handle:horizontal {
     background: #9bbcff;
 }
 
+QComboBox {
+    background-color: #0f1117;
+    color: #ffffff;
+    border: 1px solid #2c3342;
+    border-radius: 6px;
+    padding: 4px 8px;
+    min-width: 118px;
+}
+
+QComboBox:hover {
+    border-color: #6aa2ff;
+}
+
+QListWidget#PaintLayerList {
+    background-color: #0f1117;
+    color: #dce6f7;
+    border: 1px solid #2c3342;
+    border-radius: 8px;
+    outline: none;
+    padding: 4px;
+}
+
+QListWidget#PaintLayerList::item {
+    border-radius: 5px;
+    padding: 5px 7px;
+}
+
+QListWidget#PaintLayerList::item:selected {
+    background-color: #263552;
+    color: #ffffff;
+}
+
 QDialogButtonBox QPushButton {
     min-width: 104px;
     padding: 9px 20px;
@@ -197,6 +234,8 @@ class Stroke:
     color: tuple[int, int, int] = (255, 50, 50)
     opacity: int = 255
     width_px: float = 4.0
+    brush_style: str = "round"
+    closed_path: bool = False
     start_ms: int = 0
     end_ms: int | None = None
 
@@ -242,7 +281,9 @@ class DrawingCanvas(QWidget):
         self._pen_color: QColor = QColor(255, 50, 50)
         self._pen_opacity: int = 255
         self._pen_width: float = 4.0
+        self._pen_style: str = "round"
         self._current_points: list[QPointF] = []  # while drawing (widget px)
+        self._path_points: list[QPointF] = []
         # Phase E — node-mask polygon editor hook. The editor sets
         # this to a callable when it wants to capture clicks for a
         # Power Window polygon. Returns True if the click was
@@ -275,13 +316,13 @@ class DrawingCanvas(QWidget):
         return self._tool
 
     def set_tool(self, tool: str) -> None:
-        if tool not in ("off", "pen", "eraser"):
+        if tool not in ("off", "pen", "eraser", "path"):
             tool = "off"
         self._tool = tool
         self._refresh_mouse_transparency()
         cursor = (
             Qt.CursorShape.CrossCursor
-            if tool in ("pen", "eraser")
+            if tool in ("pen", "eraser", "path")
             else Qt.CursorShape.ArrowCursor
         )
         self.setCursor(cursor)
@@ -295,6 +336,11 @@ class DrawingCanvas(QWidget):
 
     def set_pen_width(self, width: float) -> None:
         self._pen_width = max(1.0, min(80.0, float(width)))
+
+    def set_pen_style(self, style: str) -> None:
+        allowed = {"round", "marker", "highlighter", "dashed"}
+        self._pen_style = style if style in allowed else "round"
+        self.update()
 
     def set_extra_paint_hook(self, hook: Callable[[QPainter, int, int], None] | None) -> None:
         self._extra_paint_hook = hook
@@ -321,16 +367,34 @@ class DrawingCanvas(QWidget):
             self._paint_stroke(painter, stroke, w, h)
 
         if self._current_points:
+            stroke = Stroke(
+                points=[(p.x() / w, p.y() / h) for p in self._current_points],
+                color=(
+                    self._pen_color.red(),
+                    self._pen_color.green(),
+                    self._pen_color.blue(),
+                ),
+                opacity=self._pen_opacity,
+                width_px=self._pen_width,
+                brush_style=self._pen_style,
+            )
+            self._paint_stroke(painter, stroke, w, h)
+
+        if self._path_points:
             color = QColor(self._pen_color)
-            color.setAlpha(self._pen_opacity)
-            pen = QPen(color, self._pen_width)
-            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            color.setAlpha(max(90, min(220, self._pen_opacity)))
+            pen = QPen(color, max(1.0, self._pen_width))
+            self._configure_pen_for_style(pen, self._pen_style)
+            pen.setStyle(Qt.PenStyle.DashLine)
             painter.setPen(pen)
-            if len(self._current_points) == 1:
-                painter.drawPoint(self._current_points[0])
+            if len(self._path_points) == 1:
+                painter.drawPoint(self._path_points[0])
             else:
-                painter.drawPolyline(self._current_points)
+                painter.drawPolyline(self._path_points)
+            painter.setBrush(QColor("#ffffff"))
+            painter.setPen(QPen(QColor("#4a89ff"), 2))
+            for point in self._path_points:
+                painter.drawEllipse(point, 4, 4)
 
         # Stage 1 rotoscope — dashed Tiger Orange rectangle while
         # the user is dragging out a GrabCut bounding box.
@@ -387,14 +451,31 @@ class DrawingCanvas(QWidget):
         color = QColor(*stroke.color)
         color.setAlpha(stroke.opacity)
         pen = QPen(color, stroke.width_px)
-        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-        pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        DrawingCanvas._configure_pen_for_style(pen, getattr(stroke, "brush_style", "round"))
         painter.setPen(pen)
         pts = [QPointF(p[0] * w, p[1] * h) for p in stroke.points]
         if len(pts) == 1:
             painter.drawPoint(pts[0])
+        elif getattr(stroke, "closed_path", False) and len(pts) >= 3:
+            painter.drawPolyline(pts + [pts[0]])
         else:
             painter.drawPolyline(pts)
+
+    @staticmethod
+    def _configure_pen_for_style(pen: QPen, style: str) -> None:
+        if style == "marker":
+            pen.setCapStyle(Qt.PenCapStyle.SquareCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+        else:
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+        if style == "highlighter":
+            color = QColor(pen.color())
+            color.setAlpha(min(color.alpha(), 110))
+            pen.setColor(color)
+            pen.setCapStyle(Qt.PenCapStyle.SquareCap)
+        elif style == "dashed":
+            pen.setStyle(Qt.PenStyle.DashLine)
 
     # ------------- mouse interaction -------------
 
@@ -446,8 +527,14 @@ class DrawingCanvas(QWidget):
             self.update()
         elif self._tool == "eraser":
             self._try_erase_at(pos.x(), pos.y())
+        elif self._tool == "path":
+            self._path_points.append(QPointF(pos))
+            self.update()
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton and self._tool == "path":
+            self.commit_path(closed=False)
+            return
         if (event.button() == Qt.MouseButton.LeftButton
                 and self._interaction_hook is not None):
             pos = event.position()
@@ -600,11 +687,39 @@ class DrawingCanvas(QWidget):
             ),
             opacity=self._pen_opacity,
             width_px=self._pen_width,
+            brush_style=self._pen_style,
             start_ms=int(self._get_time_ms()),
             end_ms=None,
         )
         self._current_points = []
         self.stroke_added.emit(stroke)
+        self.update()
+
+    def commit_path(self, *, closed: bool = False) -> None:
+        if len(self._path_points) < 2:
+            return
+        w = max(1, self.width())
+        h = max(1, self.height())
+        stroke = Stroke(
+            points=[(p.x() / w, p.y() / h) for p in self._path_points],
+            color=(
+                self._pen_color.red(),
+                self._pen_color.green(),
+                self._pen_color.blue(),
+            ),
+            opacity=self._pen_opacity,
+            width_px=self._pen_width,
+            brush_style=self._pen_style,
+            closed_path=bool(closed),
+            start_ms=int(self._get_time_ms()),
+            end_ms=None,
+        )
+        self._path_points = []
+        self.stroke_added.emit(stroke)
+        self.update()
+
+    def clear_path_preview(self) -> None:
+        self._path_points = []
         self.update()
 
     def set_strokes_snapshot(self, strokes: list[Stroke]) -> None:
@@ -843,14 +958,14 @@ def compose_pil_frame_with_overlays(
             color = (r, g, b, int(s.opacity))
             stroke_w = max(1, int(round(s.width_px * width_scale)))
             pts = [(int(p[0] * w), int(p[1] * h)) for p in s.points]
-            if len(pts) == 1:
-                x, y = pts[0]
-                half = stroke_w // 2
-                draw.ellipse(
-                    [x - half, y - half, x + half, y + half], fill=color
-                )
-            elif len(pts) > 1:
-                draw.line(pts, fill=color, width=stroke_w, joint="curve")
+            _draw_pil_stroke(
+                draw,
+                pts,
+                color,
+                stroke_w,
+                getattr(s, "brush_style", "round"),
+                bool(getattr(s, "closed_path", False)),
+            )
         out = Image.alpha_composite(out, overlay)
 
     active_sub = None
@@ -902,6 +1017,65 @@ def compose_pil_frame_with_overlays(
     if frame.mode != "RGBA":
         return out.convert(frame.mode)
     return out
+
+
+def _draw_pil_stroke(
+    draw,
+    pts: list[tuple[int, int]],
+    color: tuple[int, int, int, int],
+    stroke_w: int,
+    style: str,
+    closed: bool,
+) -> None:
+    if not pts:
+        return
+    if len(pts) == 1:
+        x, y = pts[0]
+        half = max(1, stroke_w // 2)
+        draw.ellipse([x - half, y - half, x + half, y + half], fill=color)
+        return
+    draw_pts = list(pts)
+    if closed and len(draw_pts) >= 3:
+        draw_pts.append(draw_pts[0])
+    if style == "dashed":
+        _draw_pil_dashed_polyline(draw, draw_pts, color, stroke_w)
+    elif style == "highlighter":
+        hl = (color[0], color[1], color[2], min(color[3], 110))
+        draw.line(draw_pts, fill=hl, width=max(2, stroke_w), joint="curve")
+    else:
+        draw.line(draw_pts, fill=color, width=stroke_w, joint="curve")
+
+
+def _draw_pil_dashed_polyline(
+    draw,
+    pts: list[tuple[int, int]],
+    color: tuple[int, int, int, int],
+    width: int,
+) -> None:
+    dash_len = max(8.0, width * 2.4)
+    gap_len = max(5.0, width * 1.4)
+    cycle = dash_len + gap_len
+    distance_cursor = 0.0
+    for a, b in zip(pts, pts[1:]):
+        ax, ay = a
+        bx, by = b
+        seg_len = math.hypot(bx - ax, by - ay)
+        if seg_len <= 0.01:
+            continue
+        travelled = 0.0
+        while travelled < seg_len:
+            cycle_pos = distance_cursor % cycle
+            if cycle_pos < dash_len:
+                step = min(seg_len - travelled, dash_len - cycle_pos)
+                t0 = travelled / seg_len
+                t1 = (travelled + step) / seg_len
+                p0 = (ax + (bx - ax) * t0, ay + (by - ay) * t0)
+                p1 = (ax + (bx - ax) * t1, ay + (by - ay) * t1)
+                draw.line([p0, p1], fill=color, width=width)
+            else:
+                step = min(seg_len - travelled, cycle - cycle_pos)
+            travelled += max(0.01, step)
+            distance_cursor += max(0.01, step)
 
 
 def render_strokes_to_png(
@@ -990,6 +1164,10 @@ class PaintDialog(QDialog):
         self._bubble_items: list[SpeechBubbleItem] = []
         self._stickers: list["Sticker"] = list(initial_stickers or [])
         self._sticker_items: list["StickerItem"] = []
+        self._undo_stack: list[tuple[list[Stroke], list[SpeechBubble], list["Sticker"]]] = []
+        self._redo_stack: list[tuple[list[Stroke], list[SpeechBubble], list["Sticker"]]] = []
+        self._restoring_state = False
+        self._canvas_zoom = 1.0
 
         # Make the dialog large (paint-app feel). Cap at screen size.
         if parent is not None:
@@ -1183,6 +1361,31 @@ class PaintDialog(QDialog):
         title_col.addWidget(subtitle)
         top_layout.addLayout(title_col, stretch=1)
 
+        self.undo_btn = QPushButton("Undo")
+        self.undo_btn.setObjectName("PaintTool")
+        self.undo_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.undo_btn.clicked.connect(self._undo)
+        top_layout.addWidget(self.undo_btn)
+
+        self.redo_btn = QPushButton("Redo")
+        self.redo_btn.setObjectName("PaintTool")
+        self.redo_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.redo_btn.clicked.connect(self._redo)
+        top_layout.addWidget(self.redo_btn)
+
+        zoom_label = QLabel("Zoom")
+        zoom_label.setObjectName("PaintMeta")
+        top_layout.addWidget(zoom_label)
+        self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
+        self.zoom_slider.setRange(50, 200)
+        self.zoom_slider.setValue(100)
+        self.zoom_slider.setFixedWidth(120)
+        self.zoom_slider.valueChanged.connect(self._on_zoom_changed)
+        top_layout.addWidget(self.zoom_slider)
+        self._zoom_value_label = QLabel("100%")
+        self._zoom_value_label.setObjectName("PaintValue")
+        top_layout.addWidget(self._zoom_value_label)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
             parent=self,
@@ -1211,6 +1414,12 @@ class PaintDialog(QDialog):
         tool_title.setObjectName("PaintSectionTitle")
         tool_layout.addWidget(tool_title)
 
+        self.select_btn = QPushButton("↖ Select / Move")
+        self.select_btn.setCheckable(True)
+        self.select_btn.setObjectName("PaintTool")
+        self.select_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.select_btn.clicked.connect(lambda: self._set_tool("select"))
+
         self.pen_btn = QPushButton(tr("paint.btn.pen"))
         self.pen_btn.setCheckable(True)
         self.pen_btn.setChecked(True)
@@ -1223,6 +1432,12 @@ class PaintDialog(QDialog):
         self.eraser_btn.setObjectName("PaintTool")
         self.eraser_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.eraser_btn.clicked.connect(lambda: self._set_tool("eraser"))
+
+        self.path_btn = QPushButton("✦ Path")
+        self.path_btn.setCheckable(True)
+        self.path_btn.setObjectName("PaintTool")
+        self.path_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.path_btn.clicked.connect(lambda: self._set_tool("path"))
 
         self.bubble_btn = QPushButton(tr("bubble.add_button"))
         self.bubble_btn.setObjectName("BubbleBtn")
@@ -1240,11 +1455,19 @@ class PaintDialog(QDialog):
         self.clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.clear_btn.clicked.connect(self._clear_all)
 
+        self.cutout_btn = QPushButton("✂ Cutout")
+        self.cutout_btn.setObjectName("PaintTool")
+        self.cutout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.cutout_btn.clicked.connect(self._create_cutout_sticker)
+
+        tool_layout.addWidget(self.select_btn)
         tool_layout.addWidget(self.pen_btn)
         tool_layout.addWidget(self.eraser_btn)
+        tool_layout.addWidget(self.path_btn)
         tool_layout.addSpacing(8)
         tool_layout.addWidget(self.bubble_btn)
         tool_layout.addWidget(self.sticker_btn)
+        tool_layout.addWidget(self.cutout_btn)
         tool_layout.addSpacing(8)
         tool_layout.addWidget(self.clear_btn)
         tool_layout.addStretch(1)
@@ -1311,6 +1534,21 @@ class PaintDialog(QDialog):
         brush_title.setObjectName("PaintSectionTitle")
         inspector_layout.addWidget(brush_title)
 
+        style_row = QHBoxLayout()
+        style_row.setContentsMargins(0, 0, 0, 0)
+        style_label = QLabel("Style")
+        style_label.setObjectName("PaintMeta")
+        self.brush_style_combo = QComboBox()
+        self.brush_style_combo.addItem("Round pen", "round")
+        self.brush_style_combo.addItem("Marker", "marker")
+        self.brush_style_combo.addItem("Highlighter", "highlighter")
+        self.brush_style_combo.addItem("Dashed", "dashed")
+        self.brush_style_combo.currentIndexChanged.connect(self._on_brush_style_changed)
+        style_row.addWidget(style_label)
+        style_row.addStretch(1)
+        style_row.addWidget(self.brush_style_combo)
+        inspector_layout.addLayout(style_row)
+
         width_row = QHBoxLayout()
         width_row.setContentsMargins(0, 0, 0, 0)
         width_label = QLabel(tr("paint.label.width"))
@@ -1342,6 +1580,44 @@ class PaintDialog(QDialog):
         self.opacity_slider.setValue(100)
         self.opacity_slider.valueChanged.connect(self._on_opacity_changed)
         inspector_layout.addWidget(self.opacity_slider)
+
+        preset_row = QHBoxLayout()
+        preset_row.setContentsMargins(0, 0, 0, 0)
+        for label_text, width, opacity in (
+            ("Fine", 3, 100),
+            ("Marker", 8, 100),
+            ("Highlighter", 24, 42),
+        ):
+            preset_btn = QPushButton(label_text)
+            preset_btn.setObjectName("PaintCustomColor")
+            preset_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            preset_btn.clicked.connect(
+                lambda _checked=False, w=width, o=opacity: self._apply_brush_preset(w, o)
+            )
+            preset_row.addWidget(preset_btn)
+        inspector_layout.addLayout(preset_row)
+
+        path_title = QLabel("PATH")
+        path_title.setObjectName("PaintSectionTitle")
+        inspector_layout.addWidget(path_title)
+        path_row = QHBoxLayout()
+        path_row.setContentsMargins(0, 0, 0, 0)
+        self.commit_path_btn = QPushButton("Commit")
+        self.commit_path_btn.setObjectName("PaintCustomColor")
+        self.commit_path_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.commit_path_btn.clicked.connect(lambda: self._commit_path(False))
+        self.close_path_btn = QPushButton("Close")
+        self.close_path_btn.setObjectName("PaintCustomColor")
+        self.close_path_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.close_path_btn.clicked.connect(lambda: self._commit_path(True))
+        self.clear_path_btn = QPushButton("Clear")
+        self.clear_path_btn.setObjectName("PaintCustomColor")
+        self.clear_path_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_path_btn.clicked.connect(self._clear_path_preview)
+        path_row.addWidget(self.commit_path_btn)
+        path_row.addWidget(self.close_path_btn)
+        path_row.addWidget(self.clear_path_btn)
+        inspector_layout.addLayout(path_row)
 
         color_title = QLabel("COLOR")
         color_title.setObjectName("PaintSectionTitle")
@@ -1376,6 +1652,11 @@ class PaintDialog(QDialog):
         layer_title = QLabel("LAYERS")
         layer_title.setObjectName("PaintSectionTitle")
         inspector_layout.addWidget(layer_title)
+        self._layer_list = QListWidget()
+        self._layer_list.setObjectName("PaintLayerList")
+        self._layer_list.setFixedHeight(142)
+        self._layer_list.itemClicked.connect(self._select_layer_item)
+        inspector_layout.addWidget(self._layer_list)
         self._layer_count_labels: dict[str, QLabel] = {}
         for key, label_text in (
             ("strokes", "Strokes"),
@@ -1452,13 +1733,23 @@ class PaintDialog(QDialog):
     # ---------- tool actions ----------
 
     def _set_tool(self, tool: str) -> None:
-        self.canvas.set_tool(tool)
+        canvas_tool = tool if tool in ("pen", "eraser", "path") else "off"
+        self.canvas.set_tool(canvas_tool)
+        self.select_btn.setChecked(tool == "select")
         self.pen_btn.setChecked(tool == "pen")
         self.eraser_btn.setChecked(tool == "eraser")
+        self.path_btn.setChecked(tool == "path")
         if hasattr(self, "_tool_status_label"):
-            self._tool_status_label.setText("Pen" if tool == "pen" else "Eraser")
+            labels = {
+                "select": "Select / move objects",
+                "pen": "Pen",
+                "eraser": "Eraser",
+                "path": "Path: click points, double-click to commit",
+            }
+            self._tool_status_label.setText(labels.get(tool, "Select / move objects"))
 
     def _clear_all(self) -> None:
+        self._push_undo_state()
         self.canvas.clear_strokes_direct()
         self._update_inspector_counts()
 
@@ -1490,18 +1781,109 @@ class PaintDialog(QDialog):
     def _on_stroke_added(self, stroke: Stroke) -> None:
         # Override the default start_ms so all dialog strokes stamp to the
         # moment the dialog was opened.
+        self._push_undo_state()
         stroke.start_ms = self._time_ms
         self.canvas.add_stroke_direct(stroke)
         self._update_inspector_counts()
 
     def _erase_stroke_direct(self, idx: int) -> None:
+        self._push_undo_state()
         self.canvas.remove_stroke_direct(idx)
         self._update_inspector_counts()
 
+    def _apply_brush_preset(self, width: int, opacity: int) -> None:
+        self.width_slider.setValue(width)
+        self.opacity_slider.setValue(opacity)
+        if opacity < 70:
+            self.brush_style_combo.setCurrentIndex(
+                max(0, self.brush_style_combo.findData("highlighter"))
+            )
+        elif width >= 8:
+            self.brush_style_combo.setCurrentIndex(
+                max(0, self.brush_style_combo.findData("marker"))
+            )
+        self._set_tool("pen")
+
+    def _on_brush_style_changed(self) -> None:
+        style = self.brush_style_combo.currentData() or "round"
+        self.canvas.set_pen_style(str(style))
+
+    def _commit_path(self, closed: bool) -> None:
+        self.canvas.commit_path(closed=closed)
+        self._update_inspector_counts()
+
+    def _clear_path_preview(self) -> None:
+        self.canvas.clear_path_preview()
+
+    def _on_zoom_changed(self, value: int) -> None:
+        self._canvas_zoom = max(0.5, min(2.0, value / 100.0))
+        if hasattr(self, "_zoom_value_label"):
+            self._zoom_value_label.setText(f"{value}%")
+        self._update_canvas_geometry()
+
+    def _snapshot_state(self) -> tuple[list[Stroke], list[SpeechBubble], list["Sticker"]]:
+        strokes = self.canvas.embedded_strokes() if hasattr(self, "canvas") else []
+        return (
+            copy.deepcopy(strokes),
+            copy.deepcopy(getattr(self, "_bubbles", [])),
+            copy.deepcopy(getattr(self, "_stickers", [])),
+        )
+
+    def _push_undo_state(self) -> None:
+        if self._restoring_state or not hasattr(self, "canvas"):
+            return
+        self._undo_stack.append(self._snapshot_state())
+        if len(self._undo_stack) > 50:
+            self._undo_stack.pop(0)
+        self._redo_stack.clear()
+        self._update_history_buttons()
+
+    def _undo(self) -> None:
+        if not self._undo_stack:
+            return
+        self._redo_stack.append(self._snapshot_state())
+        snapshot = self._undo_stack.pop()
+        self._restore_state(snapshot)
+
+    def _redo(self) -> None:
+        if not self._redo_stack:
+            return
+        self._undo_stack.append(self._snapshot_state())
+        snapshot = self._redo_stack.pop()
+        self._restore_state(snapshot)
+
+    def _restore_state(
+        self,
+        snapshot: tuple[list[Stroke], list[SpeechBubble], list["Sticker"]],
+    ) -> None:
+        self._restoring_state = True
+        try:
+            strokes, bubbles, stickers = snapshot
+            for item in list(getattr(self, "_bubble_items", [])):
+                item.deleteLater()
+            for item in list(getattr(self, "_sticker_items", [])):
+                item.deleteLater()
+            self._bubble_items = []
+            self._sticker_items = []
+            self._bubbles = copy.deepcopy(bubbles)
+            self._stickers = copy.deepcopy(stickers)
+            self.canvas.set_strokes_snapshot(copy.deepcopy(strokes))
+            self._spawn_initial_bubbles()
+            self._spawn_initial_stickers()
+            self._update_canvas_geometry()
+        finally:
+            self._restoring_state = False
+        self._update_inspector_counts()
+        self._update_history_buttons()
+
+    def _update_history_buttons(self) -> None:
+        if hasattr(self, "undo_btn"):
+            self.undo_btn.setEnabled(bool(self._undo_stack))
+        if hasattr(self, "redo_btn"):
+            self.redo_btn.setEnabled(bool(self._redo_stack))
+
     def _update_inspector_counts(self) -> None:
         labels = getattr(self, "_layer_count_labels", {})
-        if not labels:
-            return
         strokes_count = 0
         if hasattr(self, "canvas"):
             strokes_count = len(self.canvas.embedded_strokes())
@@ -1514,6 +1896,55 @@ class PaintDialog(QDialog):
             label = labels.get(key)
             if label is not None:
                 label.setText(str(value))
+        self._update_layer_list(strokes_count)
+        self._update_history_buttons()
+
+    def _update_layer_list(self, strokes_count: int | None = None) -> None:
+        layer_list = getattr(self, "_layer_list", None)
+        if layer_list is None:
+            return
+        if strokes_count is None:
+            strokes_count = len(self.canvas.embedded_strokes()) if hasattr(self, "canvas") else 0
+        layer_list.blockSignals(True)
+        try:
+            layer_list.clear()
+            if strokes_count:
+                item = QListWidgetItem(f"Brush strokes ({strokes_count})")
+                item.setData(Qt.ItemDataRole.UserRole, "strokes")
+                layer_list.addItem(item)
+            for idx, bubble in enumerate(getattr(self, "_bubbles", [])):
+                text = bubble.text.strip() or "Speech bubble"
+                item = QListWidgetItem(f"Bubble {idx + 1}: {text[:24]}")
+                item.setData(Qt.ItemDataRole.UserRole, f"bubble:{idx}")
+                layer_list.addItem(item)
+            for idx, sticker in enumerate(getattr(self, "_stickers", [])):
+                from pathlib import Path
+
+                name = Path(sticker.png_path).name or "PNG sticker"
+                item = QListWidgetItem(f"Sticker {idx + 1}: {name[:24]}")
+                item.setData(Qt.ItemDataRole.UserRole, f"sticker:{idx}")
+                layer_list.addItem(item)
+        finally:
+            layer_list.blockSignals(False)
+
+    def _select_layer_item(self, item: QListWidgetItem) -> None:
+        layer_id = item.data(Qt.ItemDataRole.UserRole)
+        self._set_tool("select")
+        if layer_id == "strokes":
+            return
+        if isinstance(layer_id, str) and layer_id.startswith("bubble:"):
+            idx = int(layer_id.split(":", 1)[1])
+            if 0 <= idx < len(self._bubble_items):
+                bubble_item = self._bubble_items[idx]
+                bubble_item.raise_()
+                bubble_item.setFocus()
+            return
+        if isinstance(layer_id, str) and layer_id.startswith("sticker:"):
+            idx = int(layer_id.split(":", 1)[1])
+            if 0 <= idx < len(self._sticker_items):
+                sticker_item = self._sticker_items[idx]
+                sticker_item.raise_()
+                sticker_item.setFocus()
 
     # ---------- layout sync ----------
 
@@ -1536,6 +1967,14 @@ class PaintDialog(QDialog):
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
             )
+            zoom = float(getattr(self, "_canvas_zoom", 1.0) or 1.0)
+            if abs(zoom - 1.0) > 0.001:
+                bg_scaled = bg_scaled.scaled(
+                    max(1, int(bg_scaled.width() * zoom)),
+                    max(1, int(bg_scaled.height() * zoom)),
+                    Qt.AspectRatioMode.KeepAspectRatio,
+                    Qt.TransformationMode.SmoothTransformation,
+                )
         else:
             bg_scaled = QPixmap()
 
@@ -1664,6 +2103,82 @@ class PaintDialog(QDialog):
         self._stickers.append(sticker)
         self._spawn_sticker_item(sticker)
         self._update_inspector_counts()
+
+    def _create_cutout_sticker(self) -> None:
+        """Create a foreground cutout from the current frame as a PNG sticker."""
+        from datetime import datetime
+        from pathlib import Path
+
+        import numpy as np
+        from PIL import Image, ImageFilter
+        from PySide6.QtWidgets import QMessageBox
+
+        if not self._bg_pixmap_source or self._bg_pixmap_source.isNull():
+            QMessageBox.warning(self, "Cutout", "No frame is available for cutout.")
+            return
+        self._push_undo_state()
+        out_dir = Path("external/assets/paint_cutouts")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+        source_path = out_dir / f"cutout_source_{stamp}.png"
+        out_path = out_dir / f"cutout_{stamp}.png"
+        try:
+            self._bg_pixmap_source.save(str(source_path), "PNG")
+            img = Image.open(source_path).convert("RGBA")
+            rgb = np.asarray(img.convert("RGB"))
+            from app.background_removal import BackgroundRemovalParams
+
+            params = BackgroundRemovalParams(
+                enabled=True,
+                method="rembg",
+                bg_mode="transparent",
+                feather=5,
+                threshold=0.45,
+            )
+            mask = params._get_mask(rgb)
+            if mask is None:
+                raise RuntimeError("background removal unavailable")
+            alpha = Image.fromarray(
+                np.clip(mask * 255.0, 0, 255).astype("uint8"),
+                mode="L",
+            ).filter(ImageFilter.GaussianBlur(radius=1.6))
+            bbox = alpha.getbbox()
+            if bbox is None:
+                raise RuntimeError("no foreground detected")
+            cut = img.copy()
+            cut.putalpha(alpha)
+            cut = cut.crop(bbox)
+            cut.save(out_path)
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Cutout",
+                f"Cutout failed: {type(exc).__name__}",
+            )
+            return
+        finally:
+            try:
+                source_path.unlink(missing_ok=True)
+            except Exception:
+                pass
+
+        frame_w = max(1, self._bg_pixmap_source.width())
+        frame_h = max(1, self._bg_pixmap_source.height())
+        x0, y0, x1, y1 = bbox
+        sticker = Sticker(
+            png_path=str(out_path.resolve()),
+            x_norm=max(0.0, min(0.95, x0 / frame_w)),
+            y_norm=max(0.0, min(0.95, y0 / frame_h)),
+            width_norm=max(0.04, min(1.0, (x1 - x0) / frame_w)),
+            height_norm=max(0.04, min(1.0, (y1 - y0) / frame_h)),
+            start_ms=self._time_ms,
+            end_ms=-1,
+            z_index=max((s.z_index for s in self._stickers), default=0) + 1,
+        )
+        self._stickers.append(sticker)
+        self._spawn_sticker_item(sticker)
+        self._update_inspector_counts()
+        self._set_tool("select")
 
     def _spawn_sticker_item(self, sticker: "Sticker") -> "StickerItem":
         item = StickerItem(sticker, self.canvas)
