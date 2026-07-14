@@ -3694,6 +3694,13 @@ Node graph behavior:
   rectangle windows. The overlay writes normalized window coordinates back to
   `ColorGrade.color_workflow`, throttles live preview refresh to roughly 30fps
   while dragging, and records one undo step on mouse release.
+- The standalone drawing/paint dialog supports explicit PNG export from the
+  window. `Export PNG` offers a composited PNG path that includes the current
+  backing image plus all paint/object overlays, and a transparent-overlay PNG
+  path that writes only the editable paint/object layer. The same contract is
+  available to automation through `paint.export_png`, so AI workflows can
+  produce reviewable still overlays without routing through timeline video
+  export.
 - `ColorGrade.color_workflow` persists color workflow payloads from the
   professional color preset menu. `apply_to_rgb()` applies the workflow's
   qualifier/window mask and curves on the CPU path so preview/export can see
@@ -5591,6 +5598,11 @@ AI Script Edit MVP integration:
   need actions, but any user-visible Voice Lab launch or dock/section
   operation must stay reachable through these registered actions for AI/MCP
   control.
+- The paint action namespace is active: `app/actions/paint_namespace.py` owns
+  drawing-window editor-object listing/render/import plus `paint.export_png`.
+  PNG export actions must preserve the same two UI modes as the dialog:
+  composited PNG for backing image plus overlays, and transparent-overlay PNG
+  for the editable layer only.
 - The track/selection action namespace split is active:
   `app/actions/track_selection_namespace.py` owns track reorder/state/lock/mute/
   rename/select, clip selection, timeline select-all, and selection set/clear/
