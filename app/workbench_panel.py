@@ -18,7 +18,7 @@ from os.path import basename
 from pathlib import Path
 from typing import Any, Optional
 
-from PySide6.QtCore import QSize, Qt, Signal
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
@@ -47,10 +47,8 @@ from app.audio_tool_dock_specs import (
     AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT,
     AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT,
     AUDIO_TOOL_DOCK_BUTTON_RADIUS,
-    AUDIO_TOOL_DOCK_ICON_HEIGHT,
-    AUDIO_TOOL_DOCK_ICON_WIDTH,
 )
-from app.icons import app_icon, icon_size, voice_lab_wide_icon
+from app.icons import app_icon, icon_size
 from app.studio_slider import StudioSlider
 from app.style import FONT_FAMILY, editor_scrollbar_qss
 from app.video_editor_actor_evidence import ArPbrEvidenceCard, Live2DActorEvidenceCard
@@ -1097,18 +1095,14 @@ class WorkbenchPanel(QWidget):
         button.clicked.connect(lambda _checked=False: self._open_composer_window())
         dock_layout.addWidget(button)
 
-        voice_button = QPushButton("", dock)
+        voice_button = QPushButton("VOICE LAB", dock)
         voice_button.setObjectName("ComposerDockButton")
         voice_button.setCheckable(False)
-        voice_button.setIcon(voice_lab_wide_icon(
-            AUDIO_TOOL_DOCK_ICON_WIDTH,
-            AUDIO_TOOL_DOCK_ICON_HEIGHT,
-            color="#FFFFFF",
-        ))
-        voice_button.setIconSize(QSize(
-            AUDIO_TOOL_DOCK_ICON_WIDTH,
-            AUDIO_TOOL_DOCK_ICON_HEIGHT,
-        ))
+        voice_font = QFont(voice_button.font())
+        voice_font.setBold(True)
+        voice_font.setPixelSize(22)
+        voice_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 4.0)
+        voice_button.setFont(voice_font)
         voice_button.setMinimumHeight(AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT)
         voice_button.setMaximumHeight(AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT)
         voice_button.setToolTip("Open Voice Lab")

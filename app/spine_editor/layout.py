@@ -71,8 +71,13 @@ def compute_spine_editor_view_transform(
         scale,
         margin=margin,
     )
+    # Timeline/offscreen renderers receive offsets relative to the frame centre.
+    # The editor viewport stores the world origin directly in widget pixels, so
+    # convert the shared renderer placement before applying the work-view camera.
+    final_origin_x = float(width) / 2.0 + final_offset_x
+    final_origin_y = float(height) / 2.0 - final_offset_y
     if str(mode or "work").lower() not in {"work", "safe", "canvas"} or not bounds:
-        return final_scale, final_offset_x, final_offset_y, (
+        return final_scale, final_origin_x, final_origin_y, (
             0.0,
             0.0,
             float(width),
@@ -80,10 +85,10 @@ def compute_spine_editor_view_transform(
         )
 
     min_x, min_y, max_x, max_y = bounds
-    actor_left = final_offset_x + float(min_x) * final_scale
-    actor_right = final_offset_x + float(max_x) * final_scale
-    actor_top = final_offset_y - float(max_y) * final_scale
-    actor_bottom = final_offset_y - float(min_y) * final_scale
+    actor_left = final_origin_x + float(min_x) * final_scale
+    actor_right = final_origin_x + float(max_x) * final_scale
+    actor_top = final_origin_y - float(max_y) * final_scale
+    actor_bottom = final_origin_y - float(min_y) * final_scale
 
     union_left = min(0.0, actor_left)
     union_top = min(0.0, actor_top)
@@ -105,8 +110,8 @@ def compute_spine_editor_view_transform(
 
     return (
         final_scale * view_scale,
-        final_offset_x * view_scale + view_offset_x,
-        final_offset_y * view_scale + view_offset_y,
+        final_origin_x * view_scale + view_offset_x,
+        final_origin_y * view_scale + view_offset_y,
         (
             view_offset_x,
             view_offset_y,

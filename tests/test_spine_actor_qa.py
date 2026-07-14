@@ -107,6 +107,27 @@ def test_spine_editor_work_view_zooms_out_while_preserving_final_frame():
     assert actor_bottom <= 361.0
 
 
+def test_spine_editor_final_view_converts_renderer_offsets_to_widget_origin():
+    from app.spine_editor.layout import compute_spine_editor_view_transform
+
+    bounds = (0.0, 0.0, 100.0, 100.0)
+    zoom, origin_x, origin_y, frame_rect = compute_spine_editor_view_transform(
+        bounds,
+        1000,
+        500,
+        0.5,
+        0.5,
+        1.0,
+        mode="final",
+    )
+
+    actor_center_x = origin_x + 50.0 * zoom
+    actor_center_y = origin_y - 50.0 * zoom
+    assert round(actor_center_x, 4) == 500.0
+    assert round(actor_center_y, 4) == 250.0
+    assert frame_rect == (0.0, 0.0, 1000.0, 500.0)
+
+
 def test_spine_editor_work_view_adds_breathing_room_for_scaled_actor():
     from app.spine_editor.layout import compute_spine_editor_view_transform
 

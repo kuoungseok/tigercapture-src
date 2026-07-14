@@ -2140,6 +2140,11 @@ Start here when changing a feature:
   the actual final-frame placement but zooms the editor camera out when needed;
   a final-frame toggle shows the exact output crop when users need delivery
   framing.
+  2026-07-14 placement note: the Spine editor final/canvas transform treats
+  renderer offsets as frame-center-relative values and converts them to the
+  viewport widget origin before applying the work-view camera. This keeps
+  zoomed Spine actors centered in the final frame instead of cropping them to
+  the upper-left half of the viewer.
 - Missing media/model paths can be relinked without opening the UI:
   `tools/relink_project_media.py project.tgp <search-root...>` writes a
   `.relinked.tgp` copy by matching filenames under the supplied roots.

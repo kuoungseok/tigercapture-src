@@ -355,6 +355,11 @@ def test_workbench_sound_editor_keeps_top_audio_blocks_separated(tmp_path: Path)
     assert panel._composer_button.minimumHeight() == AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT
     assert panel._composer_button.maximumHeight() == AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT
     assert panel._composer_button.icon().isNull()
+    assert panel._voice_lab_button.isVisible() is True
+    assert panel._voice_lab_button.text() == "VOICE LAB"
+    assert panel._voice_lab_button.minimumHeight() == AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT
+    assert panel._voice_lab_button.maximumHeight() == AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT
+    assert panel._voice_lab_button.icon().isNull()
     assert sound._advanced_btn.text() == "SOUND LAB"
     assert sound._advanced_btn.minimumHeight() == panel._composer_button.minimumHeight()
     assert sound._advanced_btn.maximumHeight() == panel._composer_button.maximumHeight()

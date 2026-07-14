@@ -114,6 +114,58 @@ def test_left_library_sections_expand_when_secondary_splitter_is_small():
         app.processEvents()
 
 
+def test_right_workbench_sections_expand_when_secondary_splitter_is_small():
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QMouseEvent
+    from PySide6.QtWidgets import QPushButton
+
+    from app.video_editor_window import VideoEditorWindow
+
+    app = _app()
+    win = VideoEditorWindow()
+    win.resize(1280, 720)
+    win.show()
+    for _ in range(6):
+        app.processEvents()
+
+    try:
+        splitter = win._right_dock_sections_splitter
+        splitter.setSizes([640, 42])
+        app.processEvents()
+
+        host = win._ai_script_edit_section_host
+        toggle = host.findChild(QPushButton, "SectionDisclosure")
+        assert toggle is not None
+        if toggle.isChecked():
+            toggle.click()
+            app.processEvents()
+        assert host.minimumHeight() <= 51
+
+        header = host.layout().itemAt(0).widget()
+        assert header is not None
+        pos = header.rect().center()
+        event = QMouseEvent(
+            QMouseEvent.Type.MouseButtonRelease,
+            pos,
+            pos,
+            Qt.MouseButton.LeftButton,
+            Qt.MouseButton.LeftButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+        app.sendEvent(header, event)
+        for _ in range(6):
+            app.processEvents()
+
+        assert toggle.isChecked()
+        assert host.minimumHeight() >= 320
+        assert win._right_secondary_sections_host.minimumHeight() >= host.minimumHeight()
+        assert splitter.minimumHeight() > win._workbench_section_host.minimumHeight() + 120
+    finally:
+        win.close()
+        win.deleteLater()
+        app.processEvents()
+
+
 def test_effect_preset_expanded_preview_swatch_is_not_clipped():
     from PySide6.QtWidgets import QPushButton, QWidget
 

@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QByteArray, QSettings, Qt
+from PySide6.QtCore import QByteArray, QSettings, QTimer, Qt
 from PySide6.QtWidgets import (
     QHBoxLayout,
     QLabel,
@@ -71,6 +71,88 @@ def _save_right_dock_sections_splitter_state(owner) -> None:
         )
     except Exception:
         pass
+
+
+def _refresh_right_secondary_sections_height(owner) -> None:
+    host = getattr(owner, "_right_secondary_sections_host", None)
+    layout = getattr(owner, "_right_secondary_sections_layout", None)
+    splitter = getattr(owner, "_right_dock_sections_splitter", None)
+    workbench_host = getattr(owner, "_workbench_section_host", None)
+    if host is None or layout is None:
+        return
+
+    total = 0
+    visible_widgets = 0
+    try:
+        margins = layout.contentsMargins()
+        total += int(margins.top()) + int(margins.bottom())
+    except Exception:
+        pass
+
+    for idx in range(layout.count()):
+        item = layout.itemAt(idx)
+        widget = item.widget() if item is not None else None
+        if widget is None or not widget.isVisible():
+            continue
+        visible_widgets += 1
+        try:
+            hint = int(widget.sizeHint().height() or 0)
+        except Exception:
+            hint = 0
+        try:
+            minimum = int(widget.minimumHeight() or 0)
+        except Exception:
+            minimum = 0
+        try:
+            current = int(widget.height() or 0)
+        except Exception:
+            current = 0
+        total += max(minimum, hint, current, 38)
+
+    try:
+        total += max(0, int(layout.spacing())) * max(0, visible_widgets - 1)
+    except Exception:
+        pass
+
+    total = max(190, total)
+    try:
+        host.setMinimumHeight(total)
+        host.updateGeometry()
+    except Exception:
+        pass
+
+    if splitter is None:
+        return
+    try:
+        workbench_min = int(workbench_host.minimumHeight() if workbench_host is not None else 0)
+    except Exception:
+        workbench_min = 0
+    try:
+        handle = int(splitter.handleWidth() or 0)
+    except Exception:
+        handle = 0
+    try:
+        splitter.setMinimumHeight(max(splitter.minimumHeight(), workbench_min + total + handle + 8))
+        sizes = list(splitter.sizes())
+        if len(sizes) >= 2 and sizes[1] < total:
+            splitter.setSizes([max(workbench_min, sizes[0]), max(total, sizes[1])])
+        splitter.updateGeometry()
+    except Exception:
+        pass
+
+
+def _wire_right_secondary_section_height_refresh(owner) -> None:
+    host = getattr(owner, "_right_secondary_sections_host", None)
+    if host is None:
+        return
+    for button in host.findChildren(QPushButton, "SectionDisclosure"):
+        button.toggled.connect(
+            lambda _checked=False, _owner=owner: QTimer.singleShot(
+                0,
+                lambda: _refresh_right_secondary_sections_height(_owner),
+            )
+        )
+    QTimer.singleShot(0, lambda: _refresh_right_secondary_sections_height(owner))
 
 
 def build_right_dock_sections(self) -> None:
@@ -731,6 +813,7 @@ def build_right_dock_sections(self) -> None:
         self._right_dock_sections_splitter,
     ):
         self._right_dock_sections_splitter.setSizes([540, 260])
+    _wire_right_secondary_section_height_refresh(self)
     self._right_dock_sections_splitter.splitterMoved.connect(
         lambda _pos, _index: _save_right_dock_sections_splitter_state(self),
     )
