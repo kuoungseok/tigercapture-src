@@ -67,11 +67,11 @@ def test_spine_screen_layout_centers_bounds_with_shared_margin():
     assert round(500 / 2 - offset_y - 50 * scale, 4) == 250.0
 
 
-def test_spine_editor_work_view_zooms_out_while_preserving_final_frame():
+def test_spine_editor_work_view_keeps_frame_fixed_while_actor_scales():
     from app.spine_editor.layout import compute_spine_editor_view_transform
 
     bounds = (-120.0, -40.0, 520.0, 620.0)
-    work_zoom, work_x, work_y, frame_rect = compute_spine_editor_view_transform(
+    work_zoom, _work_x, _work_y, frame_rect = compute_spine_editor_view_transform(
         bounds,
         640,
         360,
@@ -79,32 +79,26 @@ def test_spine_editor_work_view_zooms_out_while_preserving_final_frame():
         0.45,
         2.8,
         mode="work",
+        frame_aspect_ratio=16 / 9,
     )
-    final_zoom, final_x, final_y, final_rect = compute_spine_editor_view_transform(
+    larger_zoom, _larger_x, _larger_y, larger_frame_rect = compute_spine_editor_view_transform(
         bounds,
         640,
         360,
         0.82,
         0.45,
-        2.8,
-        mode="final",
+        4.2,
+        mode="work",
+        frame_aspect_ratio=16 / 9,
     )
 
-    assert work_zoom < final_zoom
-    assert frame_rect != final_rect
+    assert round(larger_zoom / work_zoom, 4) == round(4.2 / 2.8, 4)
+    assert frame_rect == larger_frame_rect
     assert 0.0 <= frame_rect[0] <= 640.0
     assert 0.0 <= frame_rect[1] <= 360.0
     assert frame_rect[0] + frame_rect[2] <= 640.0
     assert frame_rect[1] + frame_rect[3] <= 360.0
-
-    actor_left = work_x + bounds[0] * work_zoom
-    actor_right = work_x + bounds[2] * work_zoom
-    actor_top = work_y - bounds[3] * work_zoom
-    actor_bottom = work_y - bounds[1] * work_zoom
-    assert actor_left >= -1.0
-    assert actor_top >= -1.0
-    assert actor_right <= 641.0
-    assert actor_bottom <= 361.0
+    assert round(frame_rect[2] / frame_rect[3], 4) == round(16 / 9, 4)
 
 
 def test_spine_editor_final_view_converts_renderer_offsets_to_widget_origin():
@@ -128,11 +122,11 @@ def test_spine_editor_final_view_converts_renderer_offsets_to_widget_origin():
     assert frame_rect == (0.0, 0.0, 1000.0, 500.0)
 
 
-def test_spine_editor_work_view_adds_breathing_room_for_scaled_actor():
+def test_spine_editor_frame_uses_requested_project_aspect_ratio():
     from app.spine_editor.layout import compute_spine_editor_view_transform
 
     bounds = (-160.0, -120.0, 460.0, 680.0)
-    work_zoom, _work_x, _work_y, frame_rect = compute_spine_editor_view_transform(
+    _work_zoom, _work_x, _work_y, frame_rect = compute_spine_editor_view_transform(
         bounds,
         960,
         540,
@@ -140,20 +134,23 @@ def test_spine_editor_work_view_adds_breathing_room_for_scaled_actor():
         0.50,
         4.2,
         mode="work",
-    )
-    final_zoom, _final_x, _final_y, final_rect = compute_spine_editor_view_transform(
-        bounds,
-        960,
-        540,
-        0.50,
-        0.50,
-        4.2,
-        mode="final",
+        frame_aspect_ratio=9 / 16,
     )
 
-    assert work_zoom < final_zoom * 0.35
-    assert frame_rect[2] < final_rect[2]
-    assert frame_rect[3] < final_rect[3]
+    assert round(frame_rect[2] / frame_rect[3], 4) == round(9 / 16, 4)
+    assert frame_rect[2] < frame_rect[3]
+
+
+def test_spine_editor_resolves_project_canvas_aspect_ratio():
+    from app.spine_editor.editor_window import _editor_output_aspect_ratio
+
+    owner = SimpleNamespace(
+        _project_settings={"canvas_width": 1080, "canvas_height": 1920},
+        _export_resolution=(1920, 1080),
+    )
+
+    assert _editor_output_aspect_ratio(owner) == 1080 / 1920
+    assert _editor_output_aspect_ratio(None) == 16 / 9
 
 
 def test_spine_renderer_clips_large_offscreen_triangle_instead_of_dropping_it():

@@ -178,6 +178,7 @@ class SpineEditorWindow(QWidget):
         self._suppress_single_folder_autoload = True
 
         self._build_ui()
+        self._sync_output_aspect_ratio_from_parent()
         self._refresh_folder_tree()
         self._suppress_single_folder_autoload = False
 
@@ -190,6 +191,14 @@ class SpineEditorWindow(QWidget):
     def closeEvent(self, event):
         event.ignore()
         self.hide()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._sync_output_aspect_ratio_from_parent()
+
+    def _sync_output_aspect_ratio_from_parent(self) -> None:
+        if hasattr(self, "_viewport") and hasattr(self._viewport, "set_output_aspect_ratio"):
+            self._viewport.set_output_aspect_ratio(_editor_output_aspect_ratio(self.parent()))
 
     # ── UI build ──────────────────────────────────────────────────────────────
 
@@ -1260,6 +1269,7 @@ class SpineEditorWindow(QWidget):
     def set_target_clip(self, clip, lane_row) -> None:
         self._target_clip     = clip
         self._target_lane_row = lane_row
+        self._sync_output_aspect_ratio_from_parent()
         self._sync_placement_controls_from_clip(clip)
         if clip and not clip.skel_path and self._current_json:
             self._assign_to_target(skel_path=self._current_json)
@@ -1319,6 +1329,29 @@ def _get_pages(atlas_path: str) -> list[str]:
         return load_atlas_pages(atlas_path)
     except Exception:
         return []
+
+
+def _editor_output_aspect_ratio(owner) -> float:
+    """Resolve the active editor canvas ratio, with a standalone 16:9 fallback."""
+    settings = getattr(owner, "_project_settings", None) if owner is not None else None
+    if isinstance(settings, dict):
+        try:
+            width = float(settings.get("canvas_width") or 0)
+            height = float(settings.get("canvas_height") or 0)
+            if width > 0 and height > 0:
+                return width / height
+        except (TypeError, ValueError):
+            pass
+    for attr in ("_export_resolution", "_preview_gl_frame_size"):
+        value = getattr(owner, attr, None) if owner is not None else None
+        if isinstance(value, (tuple, list)) and len(value) >= 2:
+            try:
+                width, height = float(value[0]), float(value[1])
+                if width > 0 and height > 0:
+                    return width / height
+            except (TypeError, ValueError):
+                pass
+    return 16.0 / 9.0
 
 
 def _section(text: str) -> QLabel:

@@ -106,6 +106,7 @@ class SpineGLViewport(QOpenGLWidget):
         self._placement_y = 0.5
         self._placement_scale = 1.0
         self._placement_view_mode = "work"
+        self._output_aspect_ratio = 16.0 / 9.0
         self._frame_rect = QRectF()
 
         self._pan_start: Optional[QPointF] = None
@@ -187,6 +188,18 @@ class SpineGLViewport(QOpenGLWidget):
     def placement_view_mode(self) -> str:
         return self._placement_view_mode
 
+    def set_output_aspect_ratio(self, aspect_ratio: float) -> None:
+        try:
+            aspect = float(aspect_ratio)
+        except (TypeError, ValueError):
+            aspect = 16.0 / 9.0
+        self._output_aspect_ratio = max(0.05, min(20.0, aspect))
+        self._apply_placement()
+        self.update()
+
+    def output_aspect_ratio(self) -> float:
+        return self._output_aspect_ratio
+
     def _apply_placement(self) -> None:
         vw, vh = max(1, self.width()), max(1, self.height())
         try:
@@ -201,6 +214,7 @@ class SpineGLViewport(QOpenGLWidget):
             self._placement_y,
             self._placement_scale,
             mode=self._placement_view_mode,
+            frame_aspect_ratio=self._output_aspect_ratio,
         )
         self._zoom = max(0.02, min(20.0, float(zoom)))
         self._offset = QPointF(float(offset_x), float(offset_y))
