@@ -670,6 +670,13 @@ def tts_provider_options(env: Mapping[str, str] | None = None) -> list[dict[str,
                 "requires_server": True,
             }
         )
+    rows.sort(
+        key=lambda row: (
+            0 if bool(row.get("available")) else 1,
+            0 if bool(row.get("installed")) else 1,
+            str(row.get("label") or row.get("provider_id") or "").casefold(),
+        )
+    )
     selected = saved_tts_selected_provider(env)
     for row in rows:
         row["selected"] = str(row.get("provider_id") or "") == selected

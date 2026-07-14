@@ -5,8 +5,8 @@ from pathlib import Path
 import subprocess
 from typing import Any
 
-from PySide6.QtCore import QSize, Qt, QUrl
-from PySide6.QtGui import QDesktopServices, QPixmap
+from PySide6.QtCore import QThread, QTimer, Qt, QUrl, Signal
+from PySide6.QtGui import QBrush, QDesktopServices, QFont, QPalette, QColor
 from PySide6.QtWidgets import (
     QApplication,
     QComboBox,
@@ -15,6 +15,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QListView,
     QMessageBox,
     QPlainTextEdit,
     QPushButton,
@@ -25,7 +26,127 @@ from PySide6.QtWidgets import (
 from app.style import FONT_FAMILY, editor_scrollbar_qss
 
 
-_VOICE_LAB_LOGO_PATH = Path(__file__).resolve().parent.parent / "resources" / "branding" / "voice_lab_logo.png"
+_VOICE_LAB_COMBO_POPUP_QSS = """
+QWidget {
+    background:#111316;
+    color:#E9ECF7;
+}
+QFrame {
+    background:#111316;
+    color:#E9ECF7;
+    border:1px solid rgba(178,186,202,52);
+}
+QAbstractItemView {
+    background:#111316;
+    color:#E9ECF7;
+    border:1px solid rgba(178,186,202,52);
+    border-radius:8px;
+    padding:4px;
+    outline:0px;
+    selection-background-color:#5268FF;
+    selection-color:#FFFFFF;
+    font-size:12px;
+    font-weight:650;
+}
+QAbstractItemView::item {
+    min-height:28px;
+    padding:5px 8px;
+    border-radius:6px;
+}
+QAbstractItemView::item:hover {
+    background:rgba(255,255,255,12);
+}
+QAbstractItemView::item:selected {
+    background:#5268FF;
+    color:#FFFFFF;
+}
+"""
+
+
+class VoiceLabComboBox(QComboBox):
+    """Combo box that restyles Qt's separate popup container on Windows."""
+
+    def showPopup(self) -> None:  # pragma: no cover - exercised by real popup windows
+        self._style_popup_container()
+        super().showPopup()
+        QTimer.singleShot(0, self._style_popup_container)
+
+    def _style_popup_container(self) -> None:
+        try:
+            view = self.view()
+            container = view.window()
+            for widget in (container, view, view.viewport()):
+                if widget is None:
+                    continue
+                widget.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+                widget.setAutoFillBackground(True)
+                widget.setStyleSheet(_VOICE_LAB_COMBO_POPUP_QSS)
+                palette = widget.palette()
+                palette.setColor(QPalette.ColorRole.Base, QColor("#111316"))
+                palette.setColor(QPalette.ColorRole.Window, QColor("#111316"))
+                palette.setColor(QPalette.ColorRole.Text, QColor("#E9ECF7"))
+                palette.setColor(QPalette.ColorRole.WindowText, QColor("#E9ECF7"))
+                palette.setColor(QPalette.ColorRole.Highlight, QColor("#5268FF"))
+                palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#FFFFFF"))
+                widget.setPalette(palette)
+        except Exception:
+            pass
+
+
+class TtsProviderInstallThread(QThread):
+    finished_payload = Signal(dict)
+
+    def __init__(self, command: list[str], *, cwd: str = "", provider_id: str = "", parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self._command = [str(part) for part in command if str(part)]
+        self._cwd = str(cwd or "")
+        self._provider_id = str(provider_id or "")
+
+    def run(self) -> None:  # pragma: no cover - exercised through UI/manual install
+        if not self._command:
+            self.finished_payload.emit(
+                {
+                    "ok": False,
+                    "provider_id": self._provider_id,
+                    "error": "Install command is empty.",
+                    "stdout": "",
+                    "stderr": "",
+                    "returncode": -1,
+                }
+            )
+            return
+        try:
+            flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
+            completed = subprocess.run(
+                self._command,
+                cwd=self._cwd or None,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                creationflags=flags,
+                check=False,
+            )
+            self.finished_payload.emit(
+                {
+                    "ok": int(completed.returncode or 0) == 0,
+                    "provider_id": self._provider_id,
+                    "returncode": int(completed.returncode or 0),
+                    "stdout": str(completed.stdout or "")[-3000:],
+                    "stderr": str(completed.stderr or "")[-3000:],
+                    "error": "" if int(completed.returncode or 0) == 0 else f"Installer exited with code {completed.returncode}.",
+                }
+            )
+        except Exception as exc:
+            self.finished_payload.emit(
+                {
+                    "ok": False,
+                    "provider_id": self._provider_id,
+                    "error": str(exc),
+                    "stdout": "",
+                    "stderr": "",
+                    "returncode": -1,
+                }
+            )
 
 
 class TtsLabPage(QWidget):
@@ -38,8 +159,11 @@ class TtsLabPage(QWidget):
         self.setMinimumHeight(420)
         self.setStyleSheet(self._qss())
         self._sidecar_process: subprocess.Popen | None = None
+        self._provider_install_thread: TtsProviderInstallThread | None = None
         self._last_training_model_name = ""
         self._refreshing_provider_combo = False
+        self._provider_rows_by_id: dict[str, dict[str, Any]] = {}
+        self._last_selected_provider_id = ""
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 5, 6, 7)
@@ -64,12 +188,12 @@ class TtsLabPage(QWidget):
         button_layout = QHBoxLayout(button_row)
         button_layout.setContentsMargins(0, 0, 0, 0)
         button_layout.setSpacing(5)
-        self._install_btn = self._button("Install", "Show the safe install plan for Style-Bert-VITS2 local TTS.")
+        self._install_btn = self._button("Install", "Install the selected Voice Library when an automatic installer is available.")
         self._connect_btn = self._button("Connect", "Choose an existing Style-Bert-VITS2 folder.")
         self._start_btn = self._button("Start server", "Start server_fastapi.py for the connected TTS sidecar.")
         self._guide_btn = self._button("Guide", "Open the local TTS install folder or setup guide.")
         self._refresh_btn = self._button("Refresh", "Refresh local TTS sidecar status.")
-        self._install_btn.clicked.connect(self.show_install_plan)
+        self._install_btn.clicked.connect(self.install_selected_provider)
         self._connect_btn.clicked.connect(self.connect_existing)
         self._start_btn.clicked.connect(self.start_server)
         self._guide_btn.clicked.connect(self.open_guide)
@@ -82,12 +206,13 @@ class TtsLabPage(QWidget):
         provider_layout = QHBoxLayout(provider_row)
         provider_layout.setContentsMargins(0, 0, 0, 0)
         provider_layout.setSpacing(5)
-        provider_label = QLabel("Engine", provider_row)
+        provider_label = QLabel("Voice Library", provider_row)
         provider_label.setObjectName("SoundFieldLabel")
-        self._provider_combo = QComboBox(provider_row)
+        self._provider_combo = VoiceLabComboBox(provider_row)
         self._provider_combo.setObjectName("SoundPresetCombo")
-        self._provider_combo.setMinimumHeight(24)
-        self._provider_combo.setToolTip("Choose the local TTS engine used by Voice Lab.")
+        self._provider_combo.setMinimumHeight(32)
+        self._style_combo_popup(self._provider_combo)
+        self._provider_combo.setToolTip("Choose the local voice library used by Voice Lab.")
         self._provider_combo.currentIndexChanged.connect(self._on_provider_changed)
         provider_layout.addWidget(provider_label)
         provider_layout.addWidget(self._provider_combo, 1)
@@ -99,9 +224,10 @@ class TtsLabPage(QWidget):
         voice_layout.setSpacing(5)
         voice_label = QLabel("Voice", voice_row)
         voice_label.setObjectName("SoundFieldLabel")
-        self._voice_combo = QComboBox(voice_row)
+        self._voice_combo = VoiceLabComboBox(voice_row)
         self._voice_combo.setObjectName("SoundPresetCombo")
-        self._voice_combo.setMinimumHeight(24)
+        self._voice_combo.setMinimumHeight(32)
+        self._style_combo_popup(self._voice_combo)
         self._subtitle_track_btn = self._button(
             "Subtitles -> Track",
             "Generate TTS wav files from project subtitles. If the local server is off, Voice Lab starts it and waits.",
@@ -119,8 +245,8 @@ class TtsLabPage(QWidget):
         self._dialogue_take_edit.setPlaceholderText(
             "Type dialogue here. Use Japanese => Korean to speak JP while showing KR subtitles."
         )
-        self._dialogue_take_edit.setMinimumHeight(62)
-        self._dialogue_take_edit.setMaximumHeight(96)
+        self._dialogue_take_edit.setMinimumHeight(92)
+        self._dialogue_take_edit.setMaximumHeight(128)
         card_layout.addWidget(dialogue_label)
         card_layout.addWidget(self._dialogue_take_edit)
 
@@ -128,13 +254,19 @@ class TtsLabPage(QWidget):
         take_layout = QHBoxLayout(take_row)
         take_layout.setContentsMargins(0, 0, 0, 0)
         take_layout.setSpacing(5)
-        self._dialogue_actor_combo = QComboBox(take_row)
+        self._dialogue_actor_combo = VoiceLabComboBox(take_row)
         self._dialogue_actor_combo.setObjectName("SoundPresetCombo")
+        self._dialogue_actor_combo.setMinimumHeight(32)
+        self._style_combo_popup(self._dialogue_actor_combo)
         self._dialogue_actor_combo.setToolTip("Live2D target. Auto uses the selected timeline actor or the first available Live2D actor.")
-        self._dialogue_placement_combo = QComboBox(take_row)
+        self._dialogue_placement_combo = VoiceLabComboBox(take_row)
         self._dialogue_placement_combo.setObjectName("SoundPresetCombo")
-        self._dialogue_size_combo = QComboBox(take_row)
+        self._dialogue_placement_combo.setMinimumHeight(32)
+        self._style_combo_popup(self._dialogue_placement_combo)
+        self._dialogue_size_combo = VoiceLabComboBox(take_row)
         self._dialogue_size_combo.setObjectName("SoundPresetCombo")
+        self._dialogue_size_combo.setMinimumHeight(32)
+        self._style_combo_popup(self._dialogue_size_combo)
         self._dialogue_take_btn = self._button(
             "Generate Take",
             "Create subtitles, TTS, Live2D mouth/blink animation, and bottom-anchored placement.",
@@ -177,12 +309,13 @@ class TtsLabPage(QWidget):
         return (
             f"QWidget#VoiceLabPage {{ background:#101112; font-family:{FONT_FAMILY}; }}"
             "QFrame#SoundCard { background:transparent; border:none; border-top:1px solid rgba(178,186,202,16); border-radius:0px; }"
-            "QLabel#SoundCardTitle { color:#DDE2EA; font-size:10px; font-weight:720; background:transparent; }"
-            "QLabel#SoundSubtitle { color:#929AA6; font-size:9px; background:transparent; }"
-            "QLabel#SoundFieldLabel { color:#A3ABB7; font-size:9px; font-weight:560; background:transparent; }"
+            "QLabel#VoiceLabWordmark { color:#F6F8FF; font-size:34px; font-weight:900; background:transparent; padding:12px 4px 10px 4px; }"
+            "QLabel#SoundCardTitle { color:#DDE2EA; font-size:14px; font-weight:760; background:transparent; }"
+            "QLabel#SoundSubtitle { color:#AEB6C5; font-size:12px; font-weight:560; background:transparent; }"
+            "QLabel#SoundFieldLabel { color:#C8CEDA; font-size:12px; font-weight:660; background:transparent; }"
             "QPushButton#SoundPresetButton {"
             "background:rgba(255,255,255,5); color:#C7CEDA; border:1px solid rgba(178,186,202,22);"
-            "border-radius:5px; padding:5px 8px; font-size:9px; font-weight:680;"
+            "border-radius:7px; padding:7px 10px; font-size:12px; font-weight:720;"
             "}"
             "QPushButton#SoundPresetButton:hover {"
             "background:rgba(255,255,255,11); border-color:rgba(220,225,238,62); color:#FFFFFF;"
@@ -190,12 +323,17 @@ class TtsLabPage(QWidget):
             "QPushButton#SoundPresetButton:disabled { color:rgba(199,206,218,72); border-color:rgba(178,186,202,12); }"
             "QComboBox#SoundPresetCombo {"
             "background:rgba(255,255,255,5); color:#D7DAE7; border:1px solid rgba(178,186,202,24);"
-            "border-radius:5px; padding:3px 7px; font-size:9px; min-height:20px;"
+            "border-radius:7px; padding:5px 10px; font-size:12px; font-weight:650; min-height:30px;"
             "}"
             "QComboBox#SoundPresetCombo:hover { background:rgba(255,255,255,10); border-color:rgba(220,225,238,62); }"
+            "QComboBox#SoundPresetCombo QAbstractItemView {"
+            "background:#111316; color:#E9ECF7; border:1px solid rgba(178,186,202,52);"
+            "selection-background-color:#5268FF; selection-color:#FFFFFF; outline:0px;"
+            "font-size:12px; font-weight:650;"
+            "}"
             "QPlainTextEdit#SoundDialogueEdit {"
             "background:rgba(255,255,255,5); color:#D7DAE7; border:1px solid rgba(178,186,202,24);"
-            "border-radius:5px; padding:6px 7px; font-size:10px; selection-background-color:#486BFF;"
+            "border-radius:7px; padding:8px 10px; font-size:12px; selection-background-color:#486BFF;"
             "}"
             "QPlainTextEdit#SoundDialogueEdit:focus { border-color:rgba(125,180,255,92); background:rgba(255,255,255,8); }"
             + editor_scrollbar_qss("QWidget#VoiceLabPage")
@@ -215,31 +353,45 @@ class TtsLabPage(QWidget):
 
     def _add_logo_header(self, layout: QVBoxLayout) -> None:
         parent = layout.parentWidget() or self
-        logo = QLabel(parent)
-        logo.setObjectName("VoiceLabLogo")
-        logo.setMinimumHeight(66)
-        logo.setMaximumHeight(106)
-        logo.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
-        if _VOICE_LAB_LOGO_PATH.exists():
-            pixmap = QPixmap(str(_VOICE_LAB_LOGO_PATH))
-            if not pixmap.isNull():
-                logo.setPixmap(
-                    pixmap.scaled(
-                        QSize(380, 100),
-                        Qt.AspectRatioMode.KeepAspectRatio,
-                        Qt.TransformationMode.SmoothTransformation,
-                    )
-                )
-                layout.addWidget(logo)
-                return
-        fallback = QLabel("Voice Lab", parent)
-        fallback.setObjectName("SoundCardTitle")
-        layout.addWidget(fallback)
+        title = QLabel("VOICE LAB", parent)
+        title.setObjectName("VoiceLabWordmark")
+        title.setMinimumHeight(72)
+        title.setMaximumHeight(96)
+        title.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        font = QFont(title.font())
+        font.setBold(True)
+        font.setPixelSize(34)
+        font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 4.0)
+        title.setFont(font)
+        layout.addWidget(title)
+
+    def _style_combo_popup(self, combo: QComboBox) -> None:
+        try:
+            view = QListView(combo)
+            view.setFrameShape(QFrame.Shape.NoFrame)
+            combo.setView(view)
+            view.setObjectName("VoiceLabComboPopup")
+            view.setStyleSheet(_VOICE_LAB_COMBO_POPUP_QSS)
+            view.setAutoFillBackground(True)
+            viewport = view.viewport()
+            viewport.setAutoFillBackground(True)
+            viewport.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+            viewport.setStyleSheet("background:#111316; color:#E9ECF7;")
+            palette = view.palette()
+            palette.setColor(QPalette.ColorRole.Base, QColor("#111316"))
+            palette.setColor(QPalette.ColorRole.Window, QColor("#111316"))
+            palette.setColor(QPalette.ColorRole.Text, QColor("#E9ECF7"))
+            palette.setColor(QPalette.ColorRole.Highlight, QColor("#5268FF"))
+            palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#FFFFFF"))
+            view.setPalette(palette)
+            viewport.setPalette(palette)
+        except Exception:
+            pass
 
     def _button(self, text: str, tooltip: str) -> QPushButton:
         button = QPushButton(text, self)
         button.setObjectName("SoundPresetButton")
-        button.setMinimumHeight(24)
+        button.setMinimumHeight(32)
         button.setToolTip(tooltip)
         button.setAccessibleName(text)
         return button
@@ -307,24 +459,47 @@ class TtsLabPage(QWidget):
 
     def _refresh_provider_combo(self, providers: list[Any], selected_provider_id: str) -> None:
         current = str(self._provider_combo.currentData() or "")
+        rows = [dict(row) for row in providers if isinstance(row, dict) and str(row.get("provider_id") or "")]
+        rows.sort(
+            key=lambda row: (
+                0 if bool(row.get("available")) else 1,
+                0 if bool(row.get("installed")) else 1,
+                str(row.get("label") or row.get("provider_id") or "").casefold(),
+            )
+        )
+        self._provider_rows_by_id = {str(row.get("provider_id") or ""): row for row in rows}
         self._refreshing_provider_combo = True
         self._provider_combo.blockSignals(True)
         self._provider_combo.clear()
-        for row in providers:
-            if not isinstance(row, dict):
-                continue
+        for row in rows:
             provider_id = str(row.get("provider_id") or "")
-            if not provider_id:
-                continue
             label = str(row.get("label") or provider_id)
-            state = "ready" if row.get("available") else str(row.get("setup_state") or "setup")
-            self._provider_combo.addItem(f"{label} ({state})", provider_id)
+            available = bool(row.get("available"))
+            installed = bool(row.get("installed"))
+            state = "ready" if available else str(row.get("setup_state") or ("installed" if installed else "install"))
+            suffix = "Ready" if available else ("Setup needed" if installed else "Install")
+            self._provider_combo.addItem(f"{label}  ·  {suffix}", provider_id)
+            index = self._provider_combo.count() - 1
+            self._provider_combo.setItemData(index, available, Qt.ItemDataRole.UserRole + 1)
+            self._provider_combo.setItemData(index, row, Qt.ItemDataRole.UserRole + 2)
+            self._provider_combo.setItemData(index, str(row.get("reason") or state), Qt.ItemDataRole.ToolTipRole)
+            self._provider_combo.setItemData(
+                index,
+                QBrush(QColor("#E9ECF7") if available else QColor("#818794")),
+                Qt.ItemDataRole.ForegroundRole,
+            )
         wanted = selected_provider_id or current
         idx = self._provider_combo.findData(wanted)
         if idx >= 0:
             self._provider_combo.setCurrentIndex(idx)
         elif self._provider_combo.count() > 0:
             self._provider_combo.setCurrentIndex(0)
+        selected_now = str(self._provider_combo.currentData() or "")
+        selected_row = self._provider_rows_by_id.get(selected_now) or {}
+        if bool(selected_row.get("available")):
+            self._last_selected_provider_id = selected_now
+        elif not self._last_selected_provider_id:
+            self._last_selected_provider_id = next((str(row.get("provider_id") or "") for row in rows if bool(row.get("available"))), selected_now)
         self._provider_combo.blockSignals(False)
         self._refreshing_provider_combo = False
 
@@ -337,6 +512,12 @@ class TtsLabPage(QWidget):
         provider_id = self._selected_provider_id()
         if not provider_id:
             return
+        row = dict(self._provider_rows_by_id.get(provider_id) or {})
+        if row and not bool(row.get("available")):
+            if self._confirm_install_for_provider(provider_id, row):
+                return
+            self._restore_provider_selection()
+            return
         try:
             from app.tts_setup import save_tts_selected_provider
 
@@ -344,6 +525,7 @@ class TtsLabPage(QWidget):
         except Exception as exc:
             self._status_label.setText(f"Could not select TTS engine: {exc}")
             return
+        self._last_selected_provider_id = provider_id
         self.refresh()
 
     def _refresh_voice_combo(self, model_names: list[Any]) -> None:
@@ -430,11 +612,113 @@ class TtsLabPage(QWidget):
         elif combo.count() > 0:
             combo.setCurrentIndex(0)
 
-    def show_install_plan(self) -> None:
+    def _restore_provider_selection(self) -> None:
+        wanted = self._last_selected_provider_id
+        if not wanted and self._provider_combo.count() > 0:
+            wanted = str(self._provider_combo.itemData(0) or "")
+        self._refreshing_provider_combo = True
+        self._provider_combo.blockSignals(True)
+        idx = self._provider_combo.findData(wanted)
+        if idx >= 0:
+            self._provider_combo.setCurrentIndex(idx)
+        elif self._provider_combo.count() > 0:
+            self._provider_combo.setCurrentIndex(0)
+        self._provider_combo.blockSignals(False)
+        self._refreshing_provider_combo = False
+
+    def _install_command_from_plan(self, plan: dict[str, Any]) -> list[str]:
+        commands = plan.get("commands") if isinstance(plan.get("commands"), dict) else {}
+        for key in ("install_and_warmup", "install", "download"):
+            command = commands.get(key) if isinstance(commands, dict) else None
+            if isinstance(command, list) and command:
+                return [str(part) for part in command if str(part)]
+        return []
+
+    def _confirm_install_for_provider(self, provider_id: str, row: dict[str, Any]) -> bool:
+        try:
+            from app.tts_setup import save_tts_selected_provider, tts_install_plan
+
+            plan = tts_install_plan(provider_id=provider_id)
+        except Exception as exc:
+            QMessageBox.warning(self, "Voice Lab", f"Could not prepare install plan: {exc}")
+            return False
+        command = self._install_command_from_plan(plan)
+        label = str(row.get("label") or plan.get("title") or provider_id)
+        target = str(plan.get("target_root") or "")
+        if not command:
+            self.show_install_plan(provider_id=provider_id)
+            return False
+        answer = QMessageBox.question(
+            self,
+            "Voice Lab",
+            (
+                f"{label} is not ready.\n\n"
+                f"Install now?\n\n"
+                f"Target: {target}\n"
+                f"Download: {plan.get('estimated_download', '')}\n\n"
+                f"{plan.get('license_notice', '')}"
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return False
+        try:
+            save_tts_selected_provider(provider_id)
+        except Exception:
+            pass
+        self._last_selected_provider_id = provider_id
+        self._start_provider_install(provider_id, plan, command)
+        return True
+
+    def _start_provider_install(self, provider_id: str, plan: dict[str, Any], command: list[str]) -> None:
+        if self._provider_install_thread is not None and self._provider_install_thread.isRunning():
+            QMessageBox.information(self, "Voice Lab", "A voice library install is already running.")
+            return
+        target = str(plan.get("target_root") or "")
+        cwd = str(Path(target).parent) if target else ""
+        self._status_label.setText(f"Installing {plan.get('title', provider_id)}...")
+        self._detail_label.setText(f"Command: {' '.join(command)}")
+        self._install_btn.setEnabled(False)
+        self._connect_btn.setEnabled(False)
+        self._provider_install_thread = TtsProviderInstallThread(command, cwd=cwd, provider_id=provider_id, parent=self)
+        self._provider_install_thread.finished_payload.connect(self._on_provider_install_finished)
+        self._provider_install_thread.start()
+
+    def _on_provider_install_finished(self, payload: dict[str, Any]) -> None:
+        ok = bool(payload.get("ok"))
+        provider_id = str(payload.get("provider_id") or self._selected_provider_id())
+        self._provider_install_thread = None
+        if ok:
+            self._status_label.setText("Voice library install finished.")
+            self._server_label.setText("Refreshing Voice Lab status.")
+            self.refresh()
+            QMessageBox.information(self, "Voice Lab", "Voice library install finished.")
+            return
+        error = str(payload.get("error") or "Voice library install failed.")
+        stderr = str(payload.get("stderr") or "").strip()
+        self._status_label.setText(error)
+        self.refresh()
+        QMessageBox.warning(self, "Voice Lab", f"{error}\n\n{stderr[-1200:]}")
+        if provider_id:
+            self._restore_provider_selection()
+
+    def install_selected_provider(self) -> None:
+        provider_id = self._selected_provider_id()
+        row = dict(self._provider_rows_by_id.get(provider_id) or {})
+        if row and bool(row.get("available")):
+            self._status_label.setText(f"{row.get('label', 'Selected voice library')} is already ready.")
+            return
+        if row:
+            self._confirm_install_for_provider(provider_id, row)
+            return
+        self.show_install_plan(provider_id=provider_id)
+
+    def show_install_plan(self, *, provider_id: str = "") -> None:
         try:
             from app.tts_setup import tts_install_plan
 
-            plan = tts_install_plan(provider_id=self._selected_provider_id())
+            plan = tts_install_plan(provider_id=provider_id or self._selected_provider_id())
         except Exception as exc:
             self._status_label.setText(f"Could not prepare TTS install plan: {exc}")
             return
@@ -453,6 +737,9 @@ class TtsLabPage(QWidget):
         if provider_id == "kokoro_local":
             start_dir = Path(__file__).resolve().parents[1] / "external" / "tools" / "tts" / "kokoro"
             title = "Connect Kokoro"
+        elif provider_id == "gpt_sovits_sidecar":
+            start_dir = Path(__file__).resolve().parents[1] / "external" / "tools" / "tts" / "gpt-sovits"
+            title = "Connect GPT-SoVITS"
         else:
             start_dir = Path(r"D:\TTS\sbv2\Style-Bert-VITS2")
             title = "Connect Style-Bert-VITS2"
@@ -788,6 +1075,8 @@ class TtsLabWindow(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent, Qt.WindowType.Window)
         self.setObjectName("VoiceLabWindow")
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet("QWidget#VoiceLabWindow { background:#101112; }")
         self.setWindowTitle("Voice Lab")
         self.setMinimumSize(760, 520)
         self.resize(900, 640)

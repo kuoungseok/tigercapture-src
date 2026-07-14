@@ -191,6 +191,28 @@ def test_tts_provider_status_requires_gpt_sovits_reference_preset(tmp_path):
     assert view["installed"] is True
 
 
+def test_tts_provider_options_sort_ready_libraries_first(tmp_path):
+    from app.tts_gpt_sovits import GPT_SOVITS_ENV_ROOT
+    from app.tts_kokoro import KOKORO_ENV_ROOT
+    from app.tts_setup import TTS_ENV_ROOT, tts_provider_options
+
+    kokoro = _fake_kokoro_root(tmp_path / "kokoro")
+    gpt_sovits = _fake_gpt_sovits_root(tmp_path / "gpt-sovits")
+    missing_style_bert = tmp_path / "missing-style-bert"
+
+    rows = tts_provider_options(
+        {
+            TTS_ENV_ROOT: str(missing_style_bert),
+            KOKORO_ENV_ROOT: str(kokoro),
+            GPT_SOVITS_ENV_ROOT: str(gpt_sovits),
+        }
+    )
+
+    assert [row["available"] for row in rows[:2]] == [True, True]
+    assert rows[-1]["provider_id"] == "style_bert_vits2_sidecar"
+    assert rows[-1]["available"] is False
+
+
 def test_tts_actions_are_registered_and_readable(tmp_path):
     from app.actions.registry import ActionRegistry
 

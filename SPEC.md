@@ -194,6 +194,12 @@ Start here when changing a feature:
   synthesis-ready only when a `voice_presets/*.json` entry points to an existing
   local `ref_audio_path`; subtitle/TTS generation then posts to the local
   `api_v2.py` `/tts` endpoint, defaulting to `http://127.0.0.1:9880`.
+  Voice Lab's provider selector is a visible Voice Library catalog rather than
+  a hidden setup choice: all known libraries stay listed, currently usable
+  libraries sort first, unavailable libraries are muted gray, and selecting an
+  unavailable library prompts for installation. Providers with safe install
+  commands run in a background installer; others fall back to the install plan
+  and guide.
   TTS subtitle timing can now be baked to Live2D mouth and
   natural blink parameters through `tts.subtitle.apply_actor_lipsync`, or in
   the same generation call by passing `apply_actor_lipsync=true` plus an actor

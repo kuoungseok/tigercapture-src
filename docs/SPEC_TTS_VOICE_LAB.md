@@ -99,8 +99,15 @@ The user should see a friendly setup path instead of raw Python dependency
 instructions:
 
 - `Install`: show a safe install plan, estimated size, and AGPL sidecar notice.
-- `Engine`: choose the active local TTS provider. Current providers are
-  `Style-Bert-VITS2`, `Kokoro`, and `GPT-SoVITS`.
+- `Voice Library`: choose the active local TTS provider. Current providers are
+  `Style-Bert-VITS2`, `Kokoro`, and `GPT-SoVITS`. The list must always show all
+  known voice libraries, sort currently usable libraries first, and render
+  unavailable libraries in muted gray rather than hiding them.
+- Selecting an unavailable voice library should ask whether to install it. If
+  the provider exposes an automatic install command, Voice Lab runs it in a
+  background install thread and refreshes status when it finishes. If no safe
+  command exists, Voice Lab falls back to the install plan/guide instead of
+  pretending it can complete the setup automatically.
 - `Install`: show a safe install plan for the selected provider. Kokoro installs
   into `external/tools/tts/kokoro`; Style-Bert-VITS2 remains an optional sidecar
   and must not be copied into the closed source tree. GPT-SoVITS installs into
