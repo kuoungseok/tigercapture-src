@@ -39,6 +39,7 @@ class TtsLabPage(QWidget):
         self.setStyleSheet(self._qss())
         self._sidecar_process: subprocess.Popen | None = None
         self._last_training_model_name = ""
+        self._refreshing_provider_combo = False
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(6, 5, 6, 7)
@@ -76,6 +77,21 @@ class TtsLabPage(QWidget):
         for button in (self._install_btn, self._connect_btn, self._start_btn, self._guide_btn, self._refresh_btn):
             button_layout.addWidget(button, 1)
         card_layout.addWidget(button_row)
+
+        provider_row = QWidget(self)
+        provider_layout = QHBoxLayout(provider_row)
+        provider_layout.setContentsMargins(0, 0, 0, 0)
+        provider_layout.setSpacing(5)
+        provider_label = QLabel("Engine", provider_row)
+        provider_label.setObjectName("SoundFieldLabel")
+        self._provider_combo = QComboBox(provider_row)
+        self._provider_combo.setObjectName("SoundPresetCombo")
+        self._provider_combo.setMinimumHeight(24)
+        self._provider_combo.setToolTip("Choose the local TTS engine used by Voice Lab.")
+        self._provider_combo.currentIndexChanged.connect(self._on_provider_changed)
+        provider_layout.addWidget(provider_label)
+        provider_layout.addWidget(self._provider_combo, 1)
+        card_layout.addWidget(provider_row)
 
         voice_row = QWidget(self)
         voice_layout = QHBoxLayout(voice_row)
@@ -238,12 +254,18 @@ class TtsLabPage(QWidget):
             self._detail_label.setText(str(exc))
             self._steps_label.setText("")
             return
+        self._refresh_provider_combo(list(view.get("providers") or []), str(view.get("provider_id") or ""))
         ready = bool(view.get("ready"))
         root = str(view.get("root") or "")
         endpoint = str(view.get("endpoint") or "")
+        provider_id = str(view.get("provider_id") or "")
+        provider_label = str(view.get("provider_label") or "Local TTS")
+        requires_server = bool(view.get("requires_server", True))
         server_running = False
-        server_note = "Server: install/connect TTS first."
-        if ready:
+        server_note = f"{provider_label}: install/connect TTS first."
+        if ready and not requires_server:
+            server_note = f"{provider_label}: ready. This engine runs locally without a server."
+        elif ready:
             try:
                 from app.tts_sidecar_runtime import tts_endpoint_health
 
@@ -273,11 +295,56 @@ class TtsLabPage(QWidget):
         cards = list((view.get("instructions") or {}).get("cards") or [])
         self._steps_label.setText("\n".join(f"- {row.get('title', '')}: {row.get('body', '')}" for row in cards[:3]))
         self._install_btn.setEnabled(not ready)
-        self._start_btn.setEnabled(ready)
+        self._install_btn.setText("Install")
+        self._connect_btn.setText("Connect")
+        self._start_btn.setEnabled(ready and requires_server)
+        self._start_btn.setVisible(requires_server)
         self._subtitle_track_btn.setEnabled(ready and self._voice_combo.count() > 0)
         self._dialogue_take_btn.setEnabled(ready and self._voice_combo.count() > 0)
         for button in (self._prepare_model_btn, self._dataset_ui_btn, self._train_ui_btn, self._register_model_btn):
-            button.setEnabled(ready)
+            button.setEnabled(ready and provider_id == "style_bert_vits2_sidecar")
+            button.setVisible(provider_id == "style_bert_vits2_sidecar")
+
+    def _refresh_provider_combo(self, providers: list[Any], selected_provider_id: str) -> None:
+        current = str(self._provider_combo.currentData() or "")
+        self._refreshing_provider_combo = True
+        self._provider_combo.blockSignals(True)
+        self._provider_combo.clear()
+        for row in providers:
+            if not isinstance(row, dict):
+                continue
+            provider_id = str(row.get("provider_id") or "")
+            if not provider_id:
+                continue
+            label = str(row.get("label") or provider_id)
+            state = "ready" if row.get("available") else str(row.get("setup_state") or "setup")
+            self._provider_combo.addItem(f"{label} ({state})", provider_id)
+        wanted = selected_provider_id or current
+        idx = self._provider_combo.findData(wanted)
+        if idx >= 0:
+            self._provider_combo.setCurrentIndex(idx)
+        elif self._provider_combo.count() > 0:
+            self._provider_combo.setCurrentIndex(0)
+        self._provider_combo.blockSignals(False)
+        self._refreshing_provider_combo = False
+
+    def _selected_provider_id(self) -> str:
+        return str(self._provider_combo.currentData() or "")
+
+    def _on_provider_changed(self, *_args: Any) -> None:
+        if self._refreshing_provider_combo:
+            return
+        provider_id = self._selected_provider_id()
+        if not provider_id:
+            return
+        try:
+            from app.tts_setup import save_tts_selected_provider
+
+            save_tts_selected_provider(provider_id)
+        except Exception as exc:
+            self._status_label.setText(f"Could not select TTS engine: {exc}")
+            return
+        self.refresh()
 
     def _refresh_voice_combo(self, model_names: list[Any]) -> None:
         selected = str(self._voice_combo.currentData() or self._voice_combo.currentText() or "")
@@ -313,7 +380,10 @@ class TtsLabPage(QWidget):
             result = (
                 registry.execute(
                     "tts.dialogue.plan_actor_take",
-                    {"dialogue_text": self._dialogue_take_edit.toPlainText()},
+                    {
+                        "provider_id": self._selected_provider_id(),
+                        "dialogue_text": self._dialogue_take_edit.toPlainText(),
+                    },
                 ).to_dict()
                 if registry is not None
                 else {"ok": False}
@@ -364,7 +434,7 @@ class TtsLabPage(QWidget):
         try:
             from app.tts_setup import tts_install_plan
 
-            plan = tts_install_plan()
+            plan = tts_install_plan(provider_id=self._selected_provider_id())
         except Exception as exc:
             self._status_label.setText(f"Could not prepare TTS install plan: {exc}")
             return
@@ -379,18 +449,24 @@ class TtsLabPage(QWidget):
         self.refresh()
 
     def connect_existing(self) -> None:
-        start_dir = Path(r"D:\TTS\sbv2\Style-Bert-VITS2")
+        provider_id = self._selected_provider_id()
+        if provider_id == "kokoro_local":
+            start_dir = Path(__file__).resolve().parents[1] / "external" / "tools" / "tts" / "kokoro"
+            title = "Connect Kokoro"
+        else:
+            start_dir = Path(r"D:\TTS\sbv2\Style-Bert-VITS2")
+            title = "Connect Style-Bert-VITS2"
         selected = QFileDialog.getExistingDirectory(
             self,
-            "Connect Style-Bert-VITS2",
+            title,
             str(start_dir if start_dir.exists() else Path.home()),
         )
         if not selected:
             return
         try:
-            from app.tts_setup import connect_installed_tts
+            from app.tts_setup import connect_installed_tts_provider
 
-            result = connect_installed_tts(selected)
+            result = connect_installed_tts_provider(selected, provider_id=provider_id)
         except Exception as exc:
             QMessageBox.warning(self, "Voice Lab", f"Could not connect TTS: {exc}")
             return
@@ -403,7 +479,7 @@ class TtsLabPage(QWidget):
         try:
             from app.tts_setup import tts_setup_view_model
 
-            view = tts_setup_view_model()
+            view = tts_setup_view_model(provider_id=self._selected_provider_id())
             root = Path(str(view.get("root") or r"D:\TTS\sbv2\Style-Bert-VITS2"))
         except Exception:
             root = Path(r"D:\TTS\sbv2\Style-Bert-VITS2")
@@ -425,12 +501,14 @@ class TtsLabPage(QWidget):
             QMessageBox.warning(self, "Voice Lab", "Open Voice Lab inside the editor before generating subtitle audio.")
             return
         model_name = str(self._voice_combo.currentData() or self._voice_combo.currentText() or "")
+        provider_id = self._selected_provider_id()
         self._server_label.setText(
-            "Server: checking. If it is offline, Voice Lab will start Style-Bert-VITS2 and wait before generating."
+            "TTS: preparing selected engine. Server will only be started when the selected engine needs one."
         )
         QApplication.processEvents()
         actor_target = self._first_live2d_actor_target()
         params = {
+            "provider_id": provider_id,
             "model_name": model_name,
             "track_name": "TTS Dialogue",
             "replace_existing": True,
@@ -483,12 +561,14 @@ class TtsLabPage(QWidget):
             QMessageBox.warning(self, "Voice Lab", "Type dialogue first.")
             return
         model_name = str(self._voice_combo.currentData() or self._voice_combo.currentText() or "")
+        provider_id = self._selected_provider_id()
         self._server_label.setText("Server: preparing AI Dialogue Take. Voice Lab will start TTS if needed.")
         QApplication.processEvents()
         result = registry.execute(
             "tts.dialogue.generate_actor_take",
             {
                 "dialogue_text": text,
+                "provider_id": provider_id,
                 "model_name": model_name,
                 "track_name": "AI Dialogue Take",
                 "replace_existing": False,
@@ -670,9 +750,12 @@ class TtsLabPage(QWidget):
         try:
             from app.tts_setup import tts_server_start_plan
 
-            plan = tts_server_start_plan()
+            plan = tts_server_start_plan(provider_id=self._selected_provider_id())
         except Exception as exc:
             self._status_label.setText(f"Could not prepare TTS server start: {exc}")
+            return
+        if not plan.get("command") and not plan.get("requires_user_action", True):
+            self._status_label.setText(str(plan.get("message") or "No server is needed for this TTS engine."))
             return
         if not plan.get("ready"):
             self._status_label.setText(str(plan.get("message") or "Install or connect TTS first."))

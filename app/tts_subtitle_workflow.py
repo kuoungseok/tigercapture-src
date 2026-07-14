@@ -241,6 +241,7 @@ def subtitle_voice_output_path(
 def build_subtitle_tts_plan(
     owner: Any,
     *,
+    provider_id: str = "",
     model_name: str = "",
     subtitle_indices: Sequence[int] | None = None,
     output_dir: str | Path | None = None,
@@ -249,7 +250,7 @@ def build_subtitle_tts_plan(
 ) -> dict[str, Any]:
     from app.tts_setup import tts_provider_status
 
-    status = tts_provider_status()
+    status = tts_provider_status(provider_id=provider_id) if provider_id else tts_provider_status()
     all_rows = subtitle_rows_from_owner(owner)
     rows = filter_subtitle_rows(all_rows, subtitle_indices)
     selected_model = preferred_model_name(status, model_name)
@@ -271,6 +272,7 @@ def build_subtitle_tts_plan(
     return {
         "provider_id": status.get("provider_id", "style_bert_vits2_sidecar"),
         "ready": bool(status.get("available")),
+        "requires_server": bool(status.get("requires_server", True)),
         "endpoint": str(status.get("endpoint") or ""),
         "model_name": selected_model,
         "provider_status": status,
@@ -288,6 +290,7 @@ def build_subtitle_tts_plan(
 def synthesize_subtitle_rows(
     rows: Iterable[Mapping[str, Any]],
     *,
+    provider_id: str = "style_bert_vits2_sidecar",
     endpoint: str,
     model_name: str,
     output_dir: str | Path | None = None,
@@ -301,6 +304,7 @@ def synthesize_subtitle_rows(
     length: float | None = None,
     timeout_s: float = 120.0,
 ) -> list[dict[str, Any]]:
+    from app.tts_kokoro import KOKORO_PROVIDER_ID, synthesize_kokoro_voice
     from app.tts_synthesis import synthesize_style_bert_voice
 
     batch = str(batch_id or datetime.now().strftime("%Y%m%d_%H%M%S"))
@@ -317,22 +321,39 @@ def synthesize_subtitle_rows(
         length=length,
     )
     results: list[dict[str, Any]] = []
+    selected_provider = str(provider_id or "style_bert_vits2_sidecar")
     for row in source_rows:
         output_path = subtitle_voice_output_path(row, output_dir=output_dir, batch_id=batch)
-        result = synthesize_style_bert_voice(
-            text=str(row.get("tts_text") or row.get("text") or ""),
-            output_path=output_path,
-            endpoint=endpoint,
-            model_name=model_name,
-            language=str(synthesis_params.get("language") or ""),
-            style=str(synthesis_params.get("style") or ""),
-            style_weight=synthesis_params.get("style_weight"),
-            sdp_ratio=synthesis_params.get("sdp_ratio"),
-            noise=synthesis_params.get("noise"),
-            noisew=synthesis_params.get("noisew"),
-            length=synthesis_params.get("length"),
-            timeout_s=timeout_s,
-        )
+        if selected_provider == KOKORO_PROVIDER_ID:
+            speed = 1.0
+            try:
+                if length is not None and float(length) > 0:
+                    speed = 1.0 / float(length)
+            except Exception:
+                speed = 1.0
+            result = synthesize_kokoro_voice(
+                text=str(row.get("tts_text") or row.get("text") or ""),
+                output_path=output_path,
+                voice=model_name or "af_heart",
+                language=language or str(synthesis_params.get("language") or ""),
+                speed=speed,
+                timeout_s=timeout_s,
+            )
+        else:
+            result = synthesize_style_bert_voice(
+                text=str(row.get("tts_text") or row.get("text") or ""),
+                output_path=output_path,
+                endpoint=endpoint,
+                model_name=model_name,
+                language=str(synthesis_params.get("language") or ""),
+                style=str(synthesis_params.get("style") or ""),
+                style_weight=synthesis_params.get("style_weight"),
+                sdp_ratio=synthesis_params.get("sdp_ratio"),
+                noise=synthesis_params.get("noise"),
+                noisew=synthesis_params.get("noisew"),
+                length=synthesis_params.get("length"),
+                timeout_s=timeout_s,
+            )
         duration_ms = int(result.duration_ms or 0)
         if duration_ms <= 0:
             duration_ms = max(1, _int(row.get("duration_ms"), _int(row.get("end_ms")) - _int(row.get("start_ms"))))
@@ -342,6 +363,7 @@ def synthesize_subtitle_rows(
                 "path": str(result.path),
                 "byte_count": result.byte_count,
                 "generated_duration_ms": duration_ms,
+                "provider_id": selected_provider,
                 "model_name": model_name,
                 "endpoint": endpoint,
                 "synthesis_params": dict(synthesis_params),

@@ -157,7 +157,7 @@ Start here when changing a feature:
 - Subculture TTS / voice generation direction:
   `docs/SPEC_TTS_VOICE_LAB.md`, `app/tts_setup.py`, `app/tts_synthesis.py`,
   `app/tts_subtitle_workflow.py`, `app/tts_model_training.py`,
-  `app/tts_lab.py`,
+  `app/tts_lab.py`, `app/tts_kokoro.py`,
   `app/actions/tts_namespace.py`, and `app/actions/editor_adapter_tts.py`.
   Local Style-Bert-VITS2 experiments currently live outside the repo at
   `D:\TTS\sbv2\Style-Bert-VITS2`. This folder is not a runtime dependency for
@@ -178,7 +178,16 @@ Start here when changing a feature:
   intentionally runs it with `--auto-start --wait-timeout 120`, so project
   evaluation sessions that load video, create subtitles, synthesize TTS, and
   render video do not fail only because the installed local sidecar was not
-  already running. TTS subtitle timing can now be baked to Live2D mouth and
+  already running. Voice Lab also supports a selectable Kokoro local provider.
+  Kokoro installs
+  under `external/tools/tts/kokoro/.venv` with a Python 3.12 runtime because the
+  current editor venv is Python 3.13 and Kokoro 0.9.x requires `<3.13`. The
+  editor must not import Kokoro directly; `app.tts_kokoro` calls
+  `tools/kokoro_synthesize.py` as a subprocess and keeps model/cache files under
+  `external/tools/tts/kokoro/hf_cache`. Voice Lab exposes an Engine selector,
+  voice list, install/connect actions, and skips Style-Bert server startup for
+  Kokoro because it is a local subprocess provider.
+  TTS subtitle timing can now be baked to Live2D mouth and
   natural blink parameters through `tts.subtitle.apply_actor_lipsync`, or in
   the same generation call by passing `apply_actor_lipsync=true` plus an actor
   target. AI Dialogue Take is the higher-level path for raw dialogue text:

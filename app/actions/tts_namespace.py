@@ -10,6 +10,7 @@ def register_tts_actions(registry: Any) -> None:
     """Register local TTS provider setup/status actions."""
     any_object = {"type": "object", "additionalProperties": True}
     voice_params = {
+        "provider_id": {"type": "string"},
         "model_name": {"type": "string"},
         "subtitle_indices": {"type": "array", "items": {"type": "integer"}},
         "output_dir": {"type": "string"},
@@ -42,18 +43,29 @@ def register_tts_actions(registry: Any) -> None:
         "Report local TTS sidecar readiness.",
         "tts",
         "tts_provider_status",
-        params_schema=schema_object({}),
+        params_schema=schema_object({"provider_id": {"type": "string"}}),
         mutating=False,
         requires_owner=False,
         changed=False,
         dry_summary="TTS provider status would be read",
     )
     registry.register_adapter_action(
+        "tts.provider.select",
+        "Select the active local TTS provider for Voice Lab.",
+        "tts",
+        "tts_select_provider",
+        params_schema=schema_object({"provider_id": {"type": "string"}}, required=("provider_id",)),
+        required=("provider_id",),
+        requires_owner=False,
+        undo_label="Select TTS provider",
+        dry_summary="active TTS provider would be selected",
+    )
+    registry.register_adapter_action(
         "tts.setup.instructions",
         "Return user-facing TTS setup instructions.",
         "tts",
         "tts_setup_instructions",
-        params_schema=schema_object({}),
+        params_schema=schema_object({"provider_id": {"type": "string"}}),
         mutating=False,
         requires_owner=False,
         changed=False,
@@ -64,7 +76,7 @@ def register_tts_actions(registry: Any) -> None:
         "Return the UI-ready Voice Lab TTS setup model.",
         "tts",
         "tts_setup_view",
-        params_schema=schema_object({}),
+        params_schema=schema_object({"provider_id": {"type": "string"}}),
         mutating=False,
         requires_owner=False,
         changed=False,
@@ -75,7 +87,7 @@ def register_tts_actions(registry: Any) -> None:
         "Return the safe local TTS install plan without running it.",
         "tts",
         "tts_install_plan",
-        params_schema=schema_object({"install_root": {"type": "string"}}),
+        params_schema=schema_object({"install_root": {"type": "string"}, "provider_id": {"type": "string"}}),
         mutating=False,
         requires_owner=False,
         changed=False,
@@ -86,7 +98,7 @@ def register_tts_actions(registry: Any) -> None:
         "Return the explicit confirmation gate for installing the TTS sidecar.",
         "tts",
         "tts_install_execution_gate",
-        params_schema=schema_object({"install_root": {"type": "string"}}),
+        params_schema=schema_object({"install_root": {"type": "string"}, "provider_id": {"type": "string"}}),
         mutating=False,
         requires_owner=False,
         changed=False,
@@ -97,7 +109,7 @@ def register_tts_actions(registry: Any) -> None:
         "Return the local TTS server start command without launching it.",
         "tts",
         "tts_server_start_plan",
-        params_schema=schema_object({}),
+        params_schema=schema_object({"provider_id": {"type": "string"}}),
         mutating=False,
         requires_owner=False,
         changed=False,
@@ -128,6 +140,7 @@ def register_tts_actions(registry: Any) -> None:
         params_schema=schema_object(
             {
                 "root_path": {"type": "string"},
+                "provider_id": {"type": "string"},
                 "endpoint": {"type": "string"},
                 "auto_start": {"type": "boolean"},
             },
@@ -216,7 +229,7 @@ def register_tts_actions(registry: Any) -> None:
         "List local TTS voice models available to Voice Lab.",
         "tts",
         "tts_voice_list",
-        params_schema=schema_object({}),
+        params_schema=schema_object({"provider_id": {"type": "string"}}),
         mutating=False,
         requires_owner=False,
         changed=False,
@@ -230,6 +243,7 @@ def register_tts_actions(registry: Any) -> None:
         params_schema=schema_object(
             {
                 "model_name": {"type": "string"},
+                "provider_id": {"type": "string"},
                 "subtitle_indices": {"type": "array", "items": {"type": "integer"}},
                 "output_dir": {"type": "string"},
                 "track_id": {"type": "integer"},
@@ -264,6 +278,7 @@ def register_tts_actions(registry: Any) -> None:
         params_schema=schema_object(
             {
                 "dialogue_text": {"type": "string"},
+                "provider_id": {"type": "string"},
                 "lines": {"type": "array", "items": any_object},
                 "start_ms": {"type": "integer"},
                 "default_duration_ms": {"type": "integer"},

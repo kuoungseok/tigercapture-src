@@ -9,35 +9,47 @@ from typing import Any, Mapping
 class TtsAdapterMixin:
     """Expose local TTS provider setup/status to actions."""
 
-    def tts_provider_status(self) -> dict[str, Any]:
+    def tts_provider_status(self, *, provider_id: str = "") -> dict[str, Any]:
         from app.tts_setup import tts_provider_status
 
-        return tts_provider_status()
+        return tts_provider_status(provider_id=provider_id) if provider_id else tts_provider_status()
 
-    def tts_setup_instructions(self) -> dict[str, Any]:
+    def tts_select_provider(self, *, provider_id: str) -> dict[str, Any]:
+        from app.tts_setup import save_tts_selected_provider, tts_provider_status
+
+        saved = save_tts_selected_provider(provider_id)
+        status = tts_provider_status(provider_id=provider_id) if provider_id else tts_provider_status()
+        return {
+            "ok": bool(saved),
+            "saved": bool(saved),
+            "provider_id": status.get("provider_id", provider_id),
+            "status": status,
+        }
+
+    def tts_setup_instructions(self, *, provider_id: str = "") -> dict[str, Any]:
         from app.tts_setup import tts_setup_instructions
 
-        return tts_setup_instructions()
+        return tts_setup_instructions(provider_id=provider_id) if provider_id else tts_setup_instructions()
 
-    def tts_setup_view(self) -> dict[str, Any]:
+    def tts_setup_view(self, *, provider_id: str = "") -> dict[str, Any]:
         from app.tts_setup import tts_setup_view_model
 
-        return tts_setup_view_model()
+        return tts_setup_view_model(provider_id=provider_id) if provider_id else tts_setup_view_model()
 
-    def tts_install_plan(self, *, install_root: str = "") -> dict[str, Any]:
+    def tts_install_plan(self, *, install_root: str = "", provider_id: str = "") -> dict[str, Any]:
         from app.tts_setup import tts_install_plan
 
-        return tts_install_plan(install_root or None)
+        return tts_install_plan(install_root or None, provider_id=provider_id)
 
-    def tts_install_execution_gate(self, *, install_root: str = "") -> dict[str, Any]:
+    def tts_install_execution_gate(self, *, install_root: str = "", provider_id: str = "") -> dict[str, Any]:
         from app.tts_setup import tts_install_execution_gate
 
-        return tts_install_execution_gate(install_root or None)
+        return tts_install_execution_gate(install_root or None, provider_id=provider_id)
 
-    def tts_server_start_plan(self) -> dict[str, Any]:
+    def tts_server_start_plan(self, *, provider_id: str = "") -> dict[str, Any]:
         from app.tts_setup import tts_server_start_plan
 
-        return tts_server_start_plan()
+        return tts_server_start_plan(provider_id=provider_id)
 
     def tts_server_ensure_running(
         self,
@@ -56,12 +68,13 @@ class TtsAdapterMixin:
         self,
         *,
         root_path: str,
+        provider_id: str = "",
         endpoint: str = "http://127.0.0.1:5000",
         auto_start: bool = False,
     ) -> dict[str, Any]:
-        from app.tts_setup import connect_installed_tts
+        from app.tts_setup import connect_installed_tts_provider
 
-        return connect_installed_tts(root_path, endpoint=endpoint, auto_start=auto_start)
+        return connect_installed_tts_provider(root_path, provider_id=provider_id, endpoint=endpoint, auto_start=auto_start)
 
     def tts_model_training_plan(
         self,
@@ -131,14 +144,15 @@ class TtsAdapterMixin:
 
         return tts_model_training_register_result(model_name=model_name)
 
-    def tts_voice_list(self) -> dict[str, Any]:
+    def tts_voice_list(self, *, provider_id: str = "") -> dict[str, Any]:
         from app.tts_setup import tts_provider_status
         from app.tts_subtitle_workflow import preferred_model_name
 
-        status = tts_provider_status()
+        status = tts_provider_status(provider_id=provider_id) if provider_id else tts_provider_status()
         model_names = list((status.get("root") or {}).get("model_names", []) or [])
         return {
             "ready": bool(status.get("available")),
+            "provider_id": status.get("provider_id", provider_id),
             "endpoint": str(status.get("endpoint") or ""),
             "models": model_names,
             "default_model": preferred_model_name(status, "koharune-ami"),
@@ -147,6 +161,7 @@ class TtsAdapterMixin:
     def tts_subtitle_plan(
         self,
         *,
+        provider_id: str = "",
         model_name: str = "",
         subtitle_indices: list[int] | tuple[int, ...] | None = None,
         output_dir: str = "",
@@ -157,6 +172,7 @@ class TtsAdapterMixin:
 
         return build_subtitle_tts_plan(
             self._require_owner(),
+            provider_id=provider_id,
             model_name=model_name,
             subtitle_indices=subtitle_indices,
             output_dir=output_dir or None,
@@ -167,6 +183,7 @@ class TtsAdapterMixin:
     def tts_dialogue_plan_actor_take(
         self,
         *,
+        provider_id: str = "",
         dialogue_text: str = "",
         lines: list[Mapping[str, Any]] | tuple[Mapping[str, Any], ...] | None = None,
         start_ms: int = 0,
@@ -187,7 +204,7 @@ class TtsAdapterMixin:
             gap_ms=gap_ms,
             chars_per_second=chars_per_second,
         )
-        status = tts_provider_status()
+        status = tts_provider_status(provider_id=provider_id) if provider_id else tts_provider_status()
         model_names = list((status.get("root") or {}).get("model_names", []) or [])
         default_model = preferred_dialogue_model_name(status, rows)
         tts_models = [
@@ -231,6 +248,7 @@ class TtsAdapterMixin:
             },
             "diagnostics": {
                 "tts_ready": bool(status.get("available")),
+                "tts_provider_id": str(status.get("provider_id") or ""),
                 "tts_endpoint": str(status.get("endpoint") or ""),
                 "live2d_target_count": len(live2d_targets),
                 "tts_model_count": len(tts_models),
@@ -240,6 +258,7 @@ class TtsAdapterMixin:
     def tts_generate_subtitle_track(
         self,
         *,
+        provider_id: str = "",
         model_name: str = "",
         subtitle_indices: list[int] | tuple[int, ...] | None = None,
         output_dir: str = "",
@@ -278,6 +297,7 @@ class TtsAdapterMixin:
         owner = self._require_owner()
         plan = build_subtitle_tts_plan(
             owner,
+            provider_id=provider_id,
             model_name=model_name,
             subtitle_indices=subtitle_indices,
             output_dir=output_dir or None,
@@ -300,8 +320,13 @@ class TtsAdapterMixin:
         if not selected_model:
             raise ValueError("No TTS voice model is available.")
 
-        server = {"ready": False, "started": False, "message": "TTS server was not checked."}
-        if auto_start_server:
+        requires_server = bool(plan.get("requires_server", True))
+        server = {
+            "ready": not requires_server,
+            "started": False,
+            "message": "TTS provider runs in-process; no server was needed." if not requires_server else "TTS server was not checked.",
+        }
+        if auto_start_server and requires_server:
             from app.tts_sidecar_runtime import ensure_tts_sidecar_running
 
             server = ensure_tts_sidecar_running(
@@ -320,6 +345,7 @@ class TtsAdapterMixin:
 
         generated = synthesize_subtitle_rows(
             rows,
+            provider_id=str(plan.get("provider_id") or provider_id or ""),
             endpoint=str(plan.get("endpoint") or ""),
             model_name=selected_model,
             output_dir=output_dir or None,
@@ -545,6 +571,7 @@ class TtsAdapterMixin:
         gap_ms: int = 160,
         chars_per_second: float = 12.0,
         create_subtitles: bool = True,
+        provider_id: str = "",
         model_name: str = "",
         output_dir: str = "",
         track_id: int | None = None,
@@ -622,7 +649,7 @@ class TtsAdapterMixin:
             from app.tts_subtitle_workflow import preferred_dialogue_model_name
 
             selected_model_name = preferred_dialogue_model_name(
-                tts_provider_status(),
+                tts_provider_status(provider_id=provider_id) if provider_id else tts_provider_status(),
                 rows,
                 language=language,
             )
@@ -651,6 +678,7 @@ class TtsAdapterMixin:
             )
 
         tts_result = self.tts_generate_subtitle_track(
+            provider_id=provider_id,
             model_name=selected_model_name,
             subtitle_indices=subtitle_indices,
             output_dir=output_dir,

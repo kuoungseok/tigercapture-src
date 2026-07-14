@@ -18,13 +18,16 @@ except Exception:  # pragma: no cover - non-Qt test hosts
     QSettings = None  # type: ignore
 
 
-TTS_PROVIDER_ID = "style_bert_vits2_sidecar"
+TTS_STYLE_BERT_PROVIDER_ID = "style_bert_vits2_sidecar"
+TTS_PROVIDER_ID = TTS_STYLE_BERT_PROVIDER_ID
 TTS_SCHEMA_VERSION = "tigercapture.tts_setup.v1"
 TTS_SETTINGS_ORG = "TigerCapture"
 TTS_SETTINGS_APP = "TigerCapture"
+TTS_SELECTED_PROVIDER_SETTINGS_KEY = "tts/selected_provider"
 TTS_ROOT_SETTINGS_KEY = "tts/style_bert_vits2/root"
 TTS_ENDPOINT_SETTINGS_KEY = "tts/style_bert_vits2/endpoint"
 TTS_AUTO_START_SETTINGS_KEY = "tts/style_bert_vits2/auto_start"
+TTS_KOKORO_ROOT_SETTINGS_KEY = "tts/kokoro/root"
 TTS_DEFAULT_ENDPOINT = "http://127.0.0.1:5000"
 TTS_DEFAULT_LOCAL_ROOT = Path(r"D:\TTS\sbv2\Style-Bert-VITS2")
 TTS_REPO_SIDECAR_ROOT = Path(__file__).resolve().parents[1] / "external" / "tools" / "tts" / "style-bert-vits2"
@@ -34,6 +37,7 @@ TTS_AGPL_NOTICE = (
     "Style-Bert-VITS2 is AGPL-3.0. Use it as an optional sidecar/provider; "
     "do not copy the engine into the closed editor source tree."
 )
+TTS_ENV_PROVIDER = "TIGERCAPTURE_TTS_PROVIDER"
 
 
 @dataclass(frozen=True)
@@ -99,6 +103,7 @@ def _path_text(value: Any) -> str:
 def saved_tts_provider_config() -> dict[str, Any]:
     auto_raw = str(_settings_value(TTS_AUTO_START_SETTINGS_KEY, "false") or "").strip().lower()
     return {
+        "provider_id": _path_text(_settings_value(TTS_SELECTED_PROVIDER_SETTINGS_KEY, TTS_PROVIDER_ID)) or TTS_PROVIDER_ID,
         "root": _path_text(_settings_value(TTS_ROOT_SETTINGS_KEY, "")),
         "endpoint": _path_text(_settings_value(TTS_ENDPOINT_SETTINGS_KEY, TTS_DEFAULT_ENDPOINT)) or TTS_DEFAULT_ENDPOINT,
         "auto_start": auto_raw in {"1", "true", "yes", "on"},
@@ -110,14 +115,57 @@ def save_tts_provider_config(
     root: str | Path = "",
     endpoint: str = TTS_DEFAULT_ENDPOINT,
     auto_start: bool = False,
+    provider_id: str = "",
 ) -> bool:
     ok = True
+    if provider_id:
+        ok = save_tts_selected_provider(provider_id) and ok
     if root not in ("", None):
         ok = _settings_set_value(TTS_ROOT_SETTINGS_KEY, str(Path(root))) and ok
     if endpoint:
         ok = _settings_set_value(TTS_ENDPOINT_SETTINGS_KEY, str(endpoint).strip()) and ok
     ok = _settings_set_value(TTS_AUTO_START_SETTINGS_KEY, "true" if auto_start else "false") and ok
     return bool(ok)
+
+
+def _normalize_provider_id(provider_id: str | None = None) -> str:
+    raw = str(provider_id or "").strip()
+    if not raw:
+        return TTS_PROVIDER_ID
+    try:
+        from app.tts_kokoro import KOKORO_PROVIDER_ID
+
+        if raw == KOKORO_PROVIDER_ID:
+            return KOKORO_PROVIDER_ID
+    except Exception:
+        pass
+    if raw in {TTS_PROVIDER_ID, "style_bert", "style-bert", "style_bert_vits2"}:
+        return TTS_PROVIDER_ID
+    return raw
+
+
+def _saved_kokoro_root() -> str:
+    return _path_text(_settings_value(TTS_KOKORO_ROOT_SETTINGS_KEY, ""))
+
+
+def save_kokoro_provider_config(root: str | Path = "") -> bool:
+    if root in ("", None):
+        return save_tts_selected_provider("kokoro_local")
+    return _settings_set_value(TTS_KOKORO_ROOT_SETTINGS_KEY, str(Path(root))) and save_tts_selected_provider("kokoro_local")
+
+
+def saved_tts_selected_provider(env: Mapping[str, str] | None = None) -> str:
+    source = env if env is not None else os.environ
+    explicit = _path_text(source.get(TTS_ENV_PROVIDER) if source is not None else "")
+    if explicit:
+        return _normalize_provider_id(explicit)
+    if env is not None and (_path_text(env.get(TTS_ENV_ROOT)) or _path_text(env.get(TTS_ENV_ENDPOINT))):
+        return TTS_PROVIDER_ID
+    return _normalize_provider_id(_settings_value(TTS_SELECTED_PROVIDER_SETTINGS_KEY, TTS_PROVIDER_ID))
+
+
+def save_tts_selected_provider(provider_id: str) -> bool:
+    return _settings_set_value(TTS_SELECTED_PROVIDER_SETTINGS_KEY, _normalize_provider_id(provider_id))
 
 
 def _candidate_roots(env: Mapping[str, str] | None = None) -> list[Path]:
@@ -210,7 +258,7 @@ def _endpoint_from_env(env: Mapping[str, str] | None = None) -> str:
     return saved_tts_provider_config().get("endpoint", TTS_DEFAULT_ENDPOINT) or TTS_DEFAULT_ENDPOINT
 
 
-def tts_provider_status(env: Mapping[str, str] | None = None) -> dict[str, Any]:
+def _style_bert_provider_status(env: Mapping[str, str] | None = None) -> dict[str, Any]:
     root = _best_root_status(env)
     endpoint = _endpoint_from_env(env)
     installed = bool(root.valid)
@@ -258,6 +306,41 @@ def tts_provider_status(env: Mapping[str, str] | None = None) -> dict[str, Any]:
     }
 
 
+def tts_provider_status(
+    env: Mapping[str, str] | None = None,
+    *,
+    provider_id: str = "",
+) -> dict[str, Any]:
+    selected = _normalize_provider_id(provider_id or saved_tts_selected_provider(env))
+    try:
+        from app.tts_kokoro import KOKORO_PROVIDER_ID, kokoro_provider_status
+
+        if selected == KOKORO_PROVIDER_ID:
+            return kokoro_provider_status(env, root=_saved_kokoro_root() or None)
+    except Exception:
+        if selected != TTS_PROVIDER_ID:
+            return {
+                "schema": TTS_SCHEMA_VERSION,
+                "provider_id": selected,
+                "label": selected or "Unknown TTS",
+                "kind": "tts",
+                "configured": False,
+                "installed": False,
+                "available": False,
+                "setup_needed": True,
+                "setup_state": "provider_error",
+                "requires_network": False,
+                "local_first": True,
+                "endpoint": "",
+                "root": {"model_names": [], "missing": ["provider import failed"]},
+                "reason": "Selected TTS provider could not be loaded.",
+                "server_command": [],
+                "supports": [],
+                "license": {},
+            }
+    return _style_bert_provider_status(env)
+
+
 def tts_server_command(root: str | Path) -> list[str]:
     path = Path(root).expanduser()
     python_path = path / "venv" / "Scripts" / "python.exe"
@@ -265,7 +348,15 @@ def tts_server_command(root: str | Path) -> list[str]:
     return [str(python_path), str(server_path)]
 
 
-def tts_install_plan(install_root: str | Path | None = None) -> dict[str, Any]:
+def tts_install_plan(install_root: str | Path | None = None, *, provider_id: str = "") -> dict[str, Any]:
+    selected = _normalize_provider_id(provider_id or saved_tts_selected_provider())
+    try:
+        from app.tts_kokoro import KOKORO_PROVIDER_ID, kokoro_install_plan
+
+        if selected == KOKORO_PROVIDER_ID:
+            return kokoro_install_plan(install_root)
+    except Exception:
+        pass
     target = Path(install_root).expanduser() if install_root else TTS_REPO_SIDECAR_ROOT
     return {
         "schema": TTS_SCHEMA_VERSION,
@@ -321,8 +412,16 @@ def tts_install_plan(install_root: str | Path | None = None) -> dict[str, Any]:
     }
 
 
-def tts_install_execution_gate(install_root: str | Path | None = None) -> dict[str, Any]:
-    plan = tts_install_plan(install_root)
+def tts_install_execution_gate(install_root: str | Path | None = None, *, provider_id: str = "") -> dict[str, Any]:
+    selected = _normalize_provider_id(provider_id or saved_tts_selected_provider())
+    try:
+        from app.tts_kokoro import KOKORO_PROVIDER_ID, kokoro_install_execution_gate
+
+        if selected == KOKORO_PROVIDER_ID:
+            return kokoro_install_execution_gate(install_root)
+    except Exception:
+        pass
+    plan = tts_install_plan(install_root, provider_id=selected)
     return {
         "schema": TTS_SCHEMA_VERSION,
         "ready_to_execute": True,
@@ -339,8 +438,20 @@ def tts_install_execution_gate(install_root: str | Path | None = None) -> dict[s
     }
 
 
-def tts_server_start_plan(env: Mapping[str, str] | None = None) -> dict[str, Any]:
-    status = tts_provider_status(env)
+def tts_server_start_plan(env: Mapping[str, str] | None = None, *, provider_id: str = "") -> dict[str, Any]:
+    status = tts_provider_status(env, provider_id=provider_id)
+    if not bool(status.get("requires_server", True)):
+        return {
+            "schema": TTS_SCHEMA_VERSION,
+            "provider_id": status.get("provider_id"),
+            "ready": bool(status.get("available")),
+            "requires_user_action": False,
+            "title": "Local TTS runtime",
+            "endpoint": "",
+            "cwd": "",
+            "command": [],
+            "message": "This provider runs in-process; no server needs to be started.",
+        }
     installed = bool(status.get("installed"))
     root = dict(status.get("root") or {})
     return {
@@ -382,20 +493,77 @@ def connect_installed_tts(root_path: str | Path, *, endpoint: str = TTS_DEFAULT_
     }
 
 
-def tts_setup_instructions(env: Mapping[str, str] | None = None) -> dict[str, Any]:
-    status = tts_provider_status(env)
-    plan = tts_install_plan()
+def connect_installed_tts_provider(
+    root_path: str | Path,
+    *,
+    provider_id: str = "",
+    endpoint: str = TTS_DEFAULT_ENDPOINT,
+    auto_start: bool = False,
+) -> dict[str, Any]:
+    selected = _normalize_provider_id(provider_id or saved_tts_selected_provider())
+    try:
+        from app.tts_kokoro import KOKORO_PROVIDER_ID, connect_installed_kokoro
+
+        if selected == KOKORO_PROVIDER_ID:
+            result = connect_installed_kokoro(root_path)
+            if result.get("ok"):
+                result = {**result, "saved": save_kokoro_provider_config(root_path)}
+            return result
+    except Exception as exc:
+        return {
+            "schema": TTS_SCHEMA_VERSION,
+            "ok": False,
+            "connected": False,
+            "error": f"Could not connect Kokoro runtime: {exc}",
+            "missing": ["kokoro provider"],
+        }
+    result = connect_installed_tts(root_path, endpoint=endpoint, auto_start=auto_start)
+    if result.get("ok"):
+        result = {**result, "saved": save_tts_selected_provider(TTS_PROVIDER_ID)}
+    return result
+
+
+def tts_provider_options(env: Mapping[str, str] | None = None) -> list[dict[str, Any]]:
+    rows = [_style_bert_provider_status(env)]
+    try:
+        from app.tts_kokoro import kokoro_provider_status
+
+        rows.append(kokoro_provider_status(env, root=_saved_kokoro_root() or None))
+    except Exception as exc:
+        rows.append(
+            {
+                "provider_id": "kokoro_local",
+                "label": "Kokoro",
+                "available": False,
+                "installed": False,
+                "setup_state": "provider_error",
+                "reason": f"Kokoro provider could not be loaded: {exc}",
+                "root": {"model_names": [], "missing": ["provider import failed"]},
+                "requires_server": False,
+            }
+        )
+    selected = saved_tts_selected_provider(env)
+    for row in rows:
+        row["selected"] = str(row.get("provider_id") or "") == selected
+    return rows
+
+
+def tts_setup_instructions(env: Mapping[str, str] | None = None, *, provider_id: str = "") -> dict[str, Any]:
+    status = tts_provider_status(env, provider_id=provider_id)
+    selected_provider = str(status.get("provider_id") or TTS_PROVIDER_ID)
+    plan = tts_install_plan(provider_id=selected_provider)
     installed = bool(status.get("installed"))
+    provider_label = str(status.get("label") or selected_provider)
     return {
         "schema": TTS_SCHEMA_VERSION,
-        "provider_id": TTS_PROVIDER_ID,
+        "provider_id": selected_provider,
         "ready": installed,
         "status": status,
-        "headline": "Local TTS is ready" if installed else "Set up local TTS",
+        "headline": f"{provider_label} is ready" if installed else f"Set up {provider_label}",
         "summary": (
-            "Use Style-Bert-VITS2 for local character voice generation."
+            f"Use {provider_label} for local voice generation."
             if installed
-            else "Install or connect Style-Bert-VITS2 to unlock voiceover, subtitles-to-voice, and PPT narration."
+            else f"Install or connect {provider_label} to unlock voiceover, subtitles-to-voice, and PPT narration."
         ),
         "primary_action": "tts.provider.status" if installed else "tts.install.plan",
         "cards": [
@@ -419,29 +587,43 @@ def tts_setup_instructions(env: Mapping[str, str] | None = None) -> dict[str, An
             },
         ],
         "install_plan": plan,
+        "providers": tts_provider_options(env),
     }
 
 
-def tts_setup_view_model(env: Mapping[str, str] | None = None) -> dict[str, Any]:
-    instructions = tts_setup_instructions(env)
+def tts_setup_view_model(env: Mapping[str, str] | None = None, *, provider_id: str = "") -> dict[str, Any]:
+    instructions = tts_setup_instructions(env, provider_id=provider_id)
     status = dict(instructions.get("status") or {})
     installed = bool(status.get("installed"))
+    selected_provider = str(status.get("provider_id") or TTS_PROVIDER_ID)
+    provider_label = str(status.get("label") or selected_provider)
+    root = status.get("root") or {}
     return {
         "schema": TTS_SCHEMA_VERSION,
         "title": "Voice Lab",
-        "subtitle": "Local anime/subculture TTS",
+        "subtitle": f"Local TTS / {provider_label}",
+        "provider_id": selected_provider,
+        "provider_label": provider_label,
+        "providers": list(instructions.get("providers") or []),
         "state": status.get("setup_state", "needs_install"),
         "ready": installed,
         "status_label": "Ready" if installed else "Setup needed",
         "detail": status.get("reason", ""),
         "endpoint": status.get("endpoint", TTS_DEFAULT_ENDPOINT),
-        "root": (status.get("root") or {}).get("root", ""),
-        "model_count": int((status.get("root") or {}).get("model_count", 0) or 0),
-        "model_names": list((status.get("root") or {}).get("model_names", []) or []),
+        "requires_server": bool(status.get("requires_server", True)),
+        "root": root.get("root", "") if isinstance(root, Mapping) else "",
+        "model_count": int((root if isinstance(root, Mapping) else {}).get("model_count", 0) or 0),
+        "model_names": list((root if isinstance(root, Mapping) else {}).get("model_names", []) or []),
+        "voice_rows": list((root if isinstance(root, Mapping) else {}).get("voice_rows", []) or []),
         "buttons": [
             {"id": "install", "label": "Install", "action": "tts.install.plan", "enabled": not installed},
             {"id": "connect", "label": "Connect", "action": "tts.connect_installed_sidecar", "enabled": True},
-            {"id": "start", "label": "Start server", "action": "tts.server.start_plan", "enabled": installed},
+            {
+                "id": "start",
+                "label": "Start server",
+                "action": "tts.server.start_plan",
+                "enabled": installed and bool(status.get("requires_server", True)),
+            },
             {"id": "guide", "label": "Guide", "action": "tts.setup.instructions", "enabled": True},
         ],
         "warnings": [] if installed else ["TTS is not bundled. Install or connect a local sidecar first."],
@@ -453,18 +635,19 @@ def tts_setup_view_model(env: Mapping[str, str] | None = None) -> dict[str, Any]
 def capcut_voice_tts_provider_row(env: Mapping[str, str] | None = None) -> dict[str, Any]:
     status = tts_provider_status(env)
     installed = bool(status.get("installed"))
+    provider_label = str(status.get("label") or "Local TTS")
     return {
-        "id": TTS_PROVIDER_ID,
-        "label": "Style-Bert-VITS2 local TTS",
+        "id": str(status.get("provider_id") or TTS_PROVIDER_ID),
+        "label": f"{provider_label} local TTS",
         "kind": "tts",
         "configured": installed,
         "requires_network": False,
         "local_first": True,
         "supports": tuple(status.get("supports") or ()),
-        "description": "Local anime/subculture voice generation through an external Style-Bert-VITS2 sidecar.",
-        "setup_hint": "Install or connect Style-Bert-VITS2 before generating character voiceover.",
+        "description": f"Local voice generation through an external {provider_label} provider.",
+        "setup_hint": f"Install or connect {provider_label} before generating character voiceover.",
         "status": "configured" if installed else "needs_setup",
-        "warning": "" if installed else "Install or connect the local TTS sidecar first.",
+        "warning": "" if installed else "Install or connect the selected local TTS provider first.",
         "setup": tts_setup_view_model(env),
     }
 
@@ -472,14 +655,21 @@ def capcut_voice_tts_provider_row(env: Mapping[str, str] | None = None) -> dict[
 __all__ = [
     "TTS_PROVIDER_ID",
     "TTS_SCHEMA_VERSION",
+    "TTS_ENV_PROVIDER",
+    "TTS_STYLE_BERT_PROVIDER_ID",
     "capcut_voice_tts_provider_row",
     "connect_installed_tts",
+    "connect_installed_tts_provider",
+    "save_kokoro_provider_config",
     "save_tts_provider_config",
+    "save_tts_selected_provider",
     "saved_tts_provider_config",
+    "saved_tts_selected_provider",
     "style_bert_vits2_root_status",
     "tts_install_execution_gate",
     "tts_install_plan",
     "tts_provider_status",
+    "tts_provider_options",
     "tts_server_start_plan",
     "tts_server_command",
     "tts_setup_instructions",

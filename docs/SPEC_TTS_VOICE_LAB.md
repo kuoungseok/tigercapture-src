@@ -1,11 +1,12 @@
 # TTS Voice Lab
 
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 TigerCapture is moving toward a subculture media creator studio, so TTS is a
 core product direction rather than a throwaway utility. The first provider is a
 local Style-Bert-VITS2 sidecar, kept outside the editor process because it is
-large, GPU/PyTorch-heavy, and AGPL-3.0 licensed.
+large, GPU/PyTorch-heavy, and AGPL-3.0 licensed. Voice Lab also supports Kokoro
+as an optional local fallback provider installed under `external/tools`.
 
 ## Product Role
 
@@ -21,8 +22,11 @@ Voice Lab should eventually cover:
 ## Current Boundary
 
 - `app/tts_setup.py`: provider detection, install plan, setup instructions,
-  sidecar command contract, CapCut voice-provider row.
+  sidecar command contract, provider selection, CapCut voice-provider row.
 - `app/tts_synthesis.py`: stdlib HTTP client for the optional `/voice` sidecar.
+- `app/tts_kokoro.py`: Kokoro provider boundary. It detects the external
+  runtime, exposes Kokoro voice presets, and calls the runtime through a
+  subprocess instead of importing Kokoro into the editor process.
 - `app/tts_subtitle_workflow.py`: subtitle row collection, model selection,
   deterministic generated-WAV paths, and batch synthesis planning.
 - `app/tts_model_training.py`: model-maker boundary for local Style-Bert-VITS2
@@ -58,14 +62,32 @@ The reference install exposes:
 - local model assets under `model_assets`
 - CUDA-ready torch environment on the user's machine
 
+Kokoro installs under:
+
+```text
+external\tools\tts\kokoro
+```
+
+The current editor venv is Python 3.13, while Kokoro 0.9.x requires Python
+`<3.13`, so the Kokoro installer creates `external\tools\tts\kokoro\.venv`
+with Python 3.12 via `uv`. Model/cache files stay under
+`external\tools\tts\kokoro\hf_cache`. The editor calls
+`tools/kokoro_synthesize.py` as a subprocess for synthesis.
+
 ## UI/UX Contract
 
 The user should see a friendly setup path instead of raw Python dependency
 instructions:
 
 - `Install`: show a safe install plan, estimated size, and AGPL sidecar notice.
-- `Connect`: select an existing Style-Bert-VITS2 folder.
+- `Engine`: choose the active local TTS provider. Current providers are
+  `Style-Bert-VITS2` and `Kokoro`.
+- `Install`: show a safe install plan for the selected provider. Kokoro installs
+  into `external/tools/tts/kokoro`; Style-Bert-VITS2 remains an optional sidecar
+  and must not be copied into the closed source tree.
+- `Connect`: select an existing provider folder.
 - `Start server`: start the connected local `server_fastapi.py` from the UI.
+  Hide/disable this for providers such as Kokoro that do not need a server.
 - `Guide`: open the local install/readme location.
 - `Refresh`: re-detect provider status.
 - `Voice`: choose one detected local model. If `koharune-ami` exists, it is the
@@ -86,10 +108,11 @@ instructions:
     AGPL training engine into the closed editor source tree.
 - `Subtitles -> Track`: synthesize project subtitles into generated WAV files
   and place them on a dialogue audio track aligned to subtitle start times.
-  This command must check whether the sidecar server is responding; if it is
-  offline but the install is valid, Voice Lab starts `server_fastapi.py`, shows
-  a clear waiting message, waits for `/status` or `/models/info`, then
-  continues generation.
+  This command follows the selected provider. For Style-Bert-VITS2 it must check
+  whether the sidecar server is responding; if it is offline but the install is
+  valid, Voice Lab starts `server_fastapi.py`, shows a clear waiting message,
+  waits for `/status` or `/models/info`, then continues generation. For Kokoro,
+  it skips server startup and runs the external venv subprocess.
 - Bilingual dialogue rows: display captions and spoken TTS text may differ.
   Store the rendered caption in `subtitle_text` / `display_text` and the text
   sent to the voice model in `tts_text` / `spoken_text`. Project subtitles keep
@@ -136,7 +159,8 @@ instructions:
   `language=JP` with conservative Style-Bert-VITS2 noise/length values unless
   the caller explicitly overrides them. The default dialogue recommendation is
   `koharune-ami` when present; explicit user choices such as `zoe` are
-  preserved.
+  preserved. Kokoro voice names such as `af_heart` and `jf_alpha` map to Kokoro
+  language codes and should stay selectable through the same Voice combo.
 
 Automatic install must remain user-initiated and explicit. AI/MCP actions
 should return install plans and execution gates, not silently download or run a
@@ -147,6 +171,7 @@ multi-GB setup.
 Current setup actions:
 
 - `tts.provider.status`
+- `tts.provider.select`
 - `tts.setup.instructions`
 - `tts.setup.view`
 - `tts.install.plan`

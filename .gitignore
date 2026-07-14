@@ -55,6 +55,7 @@ local_resources/
 external/tools/vseeface/
 external/tools/lmms/
 external/tools/fluidsynth/
+external/tools/tts/kokoro/
 external/assets/vtuber/
 external/assets/music/soundfonts/*.sf2
 external/assets/music/soundfonts/*.sf3

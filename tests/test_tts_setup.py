@@ -27,6 +27,15 @@ def _fake_style_bert_training_root(root: Path) -> Path:
     return root
 
 
+def _fake_kokoro_root(root: Path) -> Path:
+    package = root / "python"
+    (package / "kokoro").mkdir(parents=True)
+    (package / "soundfile.py").write_text("# fake soundfile\n", encoding="utf-8")
+    (package / "kokoro-0.9.9.dist-info").mkdir()
+    (package / "kokoro-0.9.9.dist-info" / "METADATA").write_text("Version: 0.9.9\n", encoding="utf-8")
+    return root
+
+
 def test_tts_provider_status_detects_valid_sidecar(tmp_path):
     from app.tts_setup import TTS_ENV_ENDPOINT, TTS_ENV_ROOT, tts_provider_status
 
@@ -81,6 +90,30 @@ def test_tts_provider_status_reports_partial_install_missing_items(tmp_path):
     assert "model_assets" in status["root"]["missing"]
 
 
+def test_tts_provider_status_can_select_kokoro_external_runtime(tmp_path):
+    from app.tts_kokoro import KOKORO_ENV_ROOT, KOKORO_PROVIDER_ID
+    from app.tts_setup import TTS_ENV_PROVIDER, tts_install_plan, tts_provider_status, tts_setup_view_model
+
+    root = _fake_kokoro_root(tmp_path / "kokoro")
+    env = {
+        TTS_ENV_PROVIDER: KOKORO_PROVIDER_ID,
+        KOKORO_ENV_ROOT: str(root),
+    }
+    status = tts_provider_status(env)
+    view = tts_setup_view_model(env)
+    plan = tts_install_plan(tmp_path / "kokoro_target", provider_id=KOKORO_PROVIDER_ID)
+
+    assert status["provider_id"] == KOKORO_PROVIDER_ID
+    assert status["available"] is True
+    assert status["requires_server"] is False
+    assert status["root"]["model_names"][0] == "af_heart"
+    assert view["provider_id"] == KOKORO_PROVIDER_ID
+    assert view["requires_server"] is False
+    assert any(row["provider_id"] == KOKORO_PROVIDER_ID for row in view["providers"])
+    assert plan["target_root"].endswith("kokoro_target")
+    assert plan["commands"]["install"][1].endswith("install_kokoro_tts.py")
+
+
 def test_tts_actions_are_registered_and_readable(tmp_path):
     from app.actions.registry import ActionRegistry
 
@@ -88,6 +121,7 @@ def test_tts_actions_are_registered_and_readable(tmp_path):
     ids = {row["id"] for row in registry.list_actions()}
 
     assert "tts.provider.status" in ids
+    assert "tts.provider.select" in ids
     assert "tts.install.plan" in ids
     assert "tts.connect_installed_sidecar" in ids
     assert "tts.server.ensure_running" in ids
@@ -214,6 +248,16 @@ def _ready_japanese_and_zoe_status():
     }
 
 
+def _ready_kokoro_status():
+    return {
+        "provider_id": "kokoro_local",
+        "available": True,
+        "requires_server": False,
+        "endpoint": "",
+        "root": {"model_names": ["af_heart", "jf_alpha"]},
+    }
+
+
 def _fake_live2d_model_with_motions(root: Path) -> Path:
     model_dir = root / "live2d_model"
     motion_dir = model_dir / "motions"
@@ -283,6 +327,25 @@ def test_tts_subtitle_plan_separates_japanese_voice_from_korean_caption(monkeypa
     assert row["display_text"] == "\uc624\ub298\uc740 \ub3c4\ucfc4\uc758 \ubc24\uac70\ub9ac\ub97c \ub530\ub77c\uac11\ub2c8\ub2e4."
 
 
+def test_tts_subtitle_plan_can_use_kokoro_provider(monkeypatch, tmp_path):
+    from app.actions import build_default_action_registry
+    import app.tts_setup as tts_setup
+
+    monkeypatch.setattr(tts_setup, "tts_provider_status", lambda **_kwargs: _ready_kokoro_status())
+    owner = _TtsOwner()
+    registry = build_default_action_registry(owner)
+
+    result = registry.execute(
+        "tts.subtitle.plan",
+        {"provider_id": "kokoro_local", "model_name": "jf_alpha", "output_dir": str(tmp_path / "tts")},
+    ).to_dict()
+
+    assert result["ok"] is True
+    assert result["result"]["provider_id"] == "kokoro_local"
+    assert result["result"]["requires_server"] is False
+    assert result["result"]["model_name"] == "jf_alpha"
+
+
 def test_tts_subtitle_generation_places_audio_clips(monkeypatch, tmp_path):
     from app.actions import build_default_action_registry
     import app.tts_setup as tts_setup
@@ -331,6 +394,42 @@ def test_tts_subtitle_generation_places_audio_clips(monkeypatch, tmp_path):
     assert [clip.trim_end_ms for clip in track.clips] == [900, 901]
     assert len(owner._action_imported_media) == 2
     assert owner.changes[-1] == "Generate TTS subtitle track"
+
+
+def test_tts_subtitle_generation_skips_server_for_kokoro(monkeypatch, tmp_path):
+    from app.actions import build_default_action_registry
+    import app.tts_kokoro as kokoro
+    import app.tts_setup as tts_setup
+
+    monkeypatch.setattr(tts_setup, "tts_provider_status", lambda **_kwargs: _ready_kokoro_status())
+
+    def _fake_kokoro(**kwargs):
+        from app.tts_synthesis import VoiceSynthesisResult
+
+        path = Path(kwargs["output_path"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"RIFF$\x00\x00\x00WAVEfmt ")
+        return VoiceSynthesisResult(path=path, byte_count=path.stat().st_size, duration_ms=777, endpoint="", model_name=kwargs["voice"])
+
+    monkeypatch.setattr(kokoro, "synthesize_kokoro_voice", _fake_kokoro)
+    owner = _TtsOwner()
+    registry = build_default_action_registry(owner)
+
+    result = registry.execute(
+        "tts.subtitle.generate_to_timeline",
+        {
+            "provider_id": "kokoro_local",
+            "model_name": "af_heart",
+            "output_dir": str(tmp_path / "tts"),
+            "auto_start_server": True,
+        },
+    ).to_dict()
+
+    assert result["ok"] is True
+    assert result["result"]["provider_id"] == "kokoro_local"
+    assert result["result"]["server"]["ready"] is True
+    assert result["result"]["server"]["started"] is False
+    assert result["result"]["clip_count"] == 2
 
 
 def test_tts_apply_actor_lipsync_bakes_live2d_mouth_keyframes():
