@@ -175,9 +175,11 @@ class SpineEditorWindow(QWidget):
 
         self._extra_dirs: list[str] = []   # user-added directories
         self._current_folder: Optional[str] = None
+        self._suppress_single_folder_autoload = True
 
         self._build_ui()
         self._refresh_folder_tree()
+        self._suppress_single_folder_autoload = False
 
         initial_spine = self._initial_spine_path()
         if autoload_sample and initial_spine:
@@ -672,7 +674,32 @@ class SpineEditorWindow(QWidget):
                 QApplication.processEvents()
 
         count = len(candidates)
-        self._status_lbl.setText(f"{count}개" if count else "Spine 파일 없음")
+        if count == 1:
+            self._status_lbl.setText("1개 - 자동 선택")
+            if not self._suppress_single_folder_autoload:
+                QTimer.singleShot(
+                    0,
+                    lambda path=candidates[0], folder=directory: self._auto_load_single_grid_item(path, folder),
+                )
+        else:
+            self._status_lbl.setText(f"{count}개" if count else "Spine 파일 없음")
+
+    def _auto_load_single_grid_item(self, path: str, directory: str) -> None:
+        if directory != self._current_folder:
+            return
+        if self._char_grid.count() != 1:
+            return
+        item = self._char_grid.item(0)
+        if item is None or item.data(Qt.ItemDataRole.UserRole) != path:
+            return
+        self._char_grid.blockSignals(True)
+        self._char_grid.setCurrentItem(item)
+        self._char_grid.blockSignals(False)
+        if path and os.path.exists(path):
+            if path != self._current_json:
+                self._load_character(path)
+            if self._target_clip is not None:
+                self._assign_to_target(skel_path=path)
 
     def _add_search_dir(self):
         directory = QFileDialog.getExistingDirectory(
