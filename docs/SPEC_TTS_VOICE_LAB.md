@@ -6,7 +6,9 @@ TigerCapture is moving toward a subculture media creator studio, so TTS is a
 core product direction rather than a throwaway utility. The first provider is a
 local Style-Bert-VITS2 sidecar, kept outside the editor process because it is
 large, GPU/PyTorch-heavy, and AGPL-3.0 licensed. Voice Lab also supports Kokoro
-as an optional local fallback provider installed under `external/tools`.
+as an optional local fallback provider installed under `external/tools`, plus
+GPT-SoVITS as an optional reference-voice sidecar for few-shot/voice-cloning
+workflows.
 
 ## Product Role
 
@@ -27,6 +29,10 @@ Voice Lab should eventually cover:
 - `app/tts_kokoro.py`: Kokoro provider boundary. It detects the external
   runtime, exposes Kokoro voice presets, and calls the runtime through a
   subprocess instead of importing Kokoro into the editor process.
+- `app/tts_gpt_sovits.py`: GPT-SoVITS provider boundary. It detects the
+  optional external sidecar, exposes reference-voice preset JSON files, builds
+  the `api_v2.py` start command, and posts to `/tts` without importing the
+  heavy torch stack into the editor process.
 - `app/tts_subtitle_workflow.py`: subtitle row collection, model selection,
   deterministic generated-WAV paths, and batch synthesis planning.
 - `app/tts_model_training.py`: model-maker boundary for local Style-Bert-VITS2
@@ -74,6 +80,19 @@ with Python 3.12 via `uv`. Model/cache files stay under
 `external\tools\tts\kokoro\hf_cache`. The editor calls
 `tools/kokoro_synthesize.py` as a subprocess for synthesis.
 
+GPT-SoVITS installs under:
+
+```text
+external\tools\tts\gpt-sovits
+```
+
+The installer only clones the official `RVC-Boss/GPT-SoVITS` repository and
+writes a preset template. It does not bundle reference audio, trained weights,
+or model caches. A usable voice must be declared as
+`external\tools\tts\gpt-sovits\voice_presets\*.json` with an existing
+`ref_audio_path`, `prompt_text`, `prompt_lang`, and `text_lang`. The server
+contract is `api_v2.py` on `http://127.0.0.1:9880`, using the `/tts` endpoint.
+
 ## UI/UX Contract
 
 The user should see a friendly setup path instead of raw Python dependency
@@ -81,10 +100,12 @@ instructions:
 
 - `Install`: show a safe install plan, estimated size, and AGPL sidecar notice.
 - `Engine`: choose the active local TTS provider. Current providers are
-  `Style-Bert-VITS2` and `Kokoro`.
+  `Style-Bert-VITS2`, `Kokoro`, and `GPT-SoVITS`.
 - `Install`: show a safe install plan for the selected provider. Kokoro installs
   into `external/tools/tts/kokoro`; Style-Bert-VITS2 remains an optional sidecar
-  and must not be copied into the closed source tree.
+  and must not be copied into the closed source tree. GPT-SoVITS installs into
+  `external/tools/tts/gpt-sovits`; it is not synthesis-ready until at least one
+  reference voice preset points to an existing local audio file.
 - `Connect`: select an existing provider folder.
 - `Start server`: start the connected local `server_fastapi.py` from the UI.
   Hide/disable this for providers such as Kokoro that do not need a server.
@@ -112,7 +133,8 @@ instructions:
   whether the sidecar server is responding; if it is offline but the install is
   valid, Voice Lab starts `server_fastapi.py`, shows a clear waiting message,
   waits for `/status` or `/models/info`, then continues generation. For Kokoro,
-  it skips server startup and runs the external venv subprocess.
+  it skips server startup and runs the external venv subprocess. For GPT-SoVITS,
+  it requires a selected reference preset and calls the local `/tts` API.
 - Bilingual dialogue rows: display captions and spoken TTS text may differ.
   Store the rendered caption in `subtitle_text` / `display_text` and the text
   sent to the voice model in `tts_text` / `spoken_text`. Project subtitles keep

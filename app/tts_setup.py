@@ -28,6 +28,8 @@ TTS_ROOT_SETTINGS_KEY = "tts/style_bert_vits2/root"
 TTS_ENDPOINT_SETTINGS_KEY = "tts/style_bert_vits2/endpoint"
 TTS_AUTO_START_SETTINGS_KEY = "tts/style_bert_vits2/auto_start"
 TTS_KOKORO_ROOT_SETTINGS_KEY = "tts/kokoro/root"
+TTS_GPT_SOVITS_ROOT_SETTINGS_KEY = "tts/gpt_sovits/root"
+TTS_GPT_SOVITS_ENDPOINT_SETTINGS_KEY = "tts/gpt_sovits/endpoint"
 TTS_DEFAULT_ENDPOINT = "http://127.0.0.1:5000"
 TTS_DEFAULT_LOCAL_ROOT = Path(r"D:\TTS\sbv2\Style-Bert-VITS2")
 TTS_REPO_SIDECAR_ROOT = Path(__file__).resolve().parents[1] / "external" / "tools" / "tts" / "style-bert-vits2"
@@ -139,6 +141,13 @@ def _normalize_provider_id(provider_id: str | None = None) -> str:
             return KOKORO_PROVIDER_ID
     except Exception:
         pass
+    try:
+        from app.tts_gpt_sovits import GPT_SOVITS_PROVIDER_ID
+
+        if raw in {GPT_SOVITS_PROVIDER_ID, "gpt_sovits", "gpt-sovits", "gptsovits"}:
+            return GPT_SOVITS_PROVIDER_ID
+    except Exception:
+        pass
     if raw in {TTS_PROVIDER_ID, "style_bert", "style-bert", "style_bert_vits2"}:
         return TTS_PROVIDER_ID
     return raw
@@ -148,10 +157,37 @@ def _saved_kokoro_root() -> str:
     return _path_text(_settings_value(TTS_KOKORO_ROOT_SETTINGS_KEY, ""))
 
 
+def _saved_gpt_sovits_root() -> str:
+    return _path_text(_settings_value(TTS_GPT_SOVITS_ROOT_SETTINGS_KEY, ""))
+
+
+def _saved_gpt_sovits_endpoint() -> str:
+    from app.tts_gpt_sovits import GPT_SOVITS_DEFAULT_ENDPOINT
+
+    return _path_text(_settings_value(TTS_GPT_SOVITS_ENDPOINT_SETTINGS_KEY, GPT_SOVITS_DEFAULT_ENDPOINT)) or GPT_SOVITS_DEFAULT_ENDPOINT
+
+
 def save_kokoro_provider_config(root: str | Path = "") -> bool:
     if root in ("", None):
         return save_tts_selected_provider("kokoro_local")
     return _settings_set_value(TTS_KOKORO_ROOT_SETTINGS_KEY, str(Path(root))) and save_tts_selected_provider("kokoro_local")
+
+
+def save_gpt_sovits_provider_config(
+    root: str | Path = "",
+    *,
+    endpoint: str = "",
+) -> bool:
+    from app.tts_gpt_sovits import GPT_SOVITS_DEFAULT_ENDPOINT, GPT_SOVITS_PROVIDER_ID
+
+    ok = save_tts_selected_provider(GPT_SOVITS_PROVIDER_ID)
+    if root not in ("", None):
+        ok = _settings_set_value(TTS_GPT_SOVITS_ROOT_SETTINGS_KEY, str(Path(root))) and ok
+    if endpoint:
+        ok = _settings_set_value(TTS_GPT_SOVITS_ENDPOINT_SETTINGS_KEY, str(endpoint).strip()) and ok
+    elif not _saved_gpt_sovits_endpoint():
+        ok = _settings_set_value(TTS_GPT_SOVITS_ENDPOINT_SETTINGS_KEY, GPT_SOVITS_DEFAULT_ENDPOINT) and ok
+    return bool(ok)
 
 
 def saved_tts_selected_provider(env: Mapping[str, str] | None = None) -> str:
@@ -338,6 +374,36 @@ def tts_provider_status(
                 "supports": [],
                 "license": {},
             }
+    try:
+        from app.tts_gpt_sovits import GPT_SOVITS_PROVIDER_ID, gpt_sovits_provider_status
+
+        if selected == GPT_SOVITS_PROVIDER_ID:
+            return gpt_sovits_provider_status(
+                env,
+                root=_saved_gpt_sovits_root() or None,
+                endpoint=_saved_gpt_sovits_endpoint(),
+            )
+    except Exception:
+        if selected != TTS_PROVIDER_ID:
+            return {
+                "schema": TTS_SCHEMA_VERSION,
+                "provider_id": selected,
+                "label": selected or "Unknown TTS",
+                "kind": "tts",
+                "configured": False,
+                "installed": False,
+                "available": False,
+                "setup_needed": True,
+                "setup_state": "provider_error",
+                "requires_network": False,
+                "local_first": True,
+                "endpoint": "",
+                "root": {"model_names": [], "missing": ["provider import failed"]},
+                "reason": "Selected TTS provider could not be loaded.",
+                "server_command": [],
+                "supports": [],
+                "license": {},
+            }
     return _style_bert_provider_status(env)
 
 
@@ -355,6 +421,13 @@ def tts_install_plan(install_root: str | Path | None = None, *, provider_id: str
 
         if selected == KOKORO_PROVIDER_ID:
             return kokoro_install_plan(install_root)
+    except Exception:
+        pass
+    try:
+        from app.tts_gpt_sovits import GPT_SOVITS_PROVIDER_ID, gpt_sovits_install_plan
+
+        if selected == GPT_SOVITS_PROVIDER_ID:
+            return gpt_sovits_install_plan(install_root)
     except Exception:
         pass
     target = Path(install_root).expanduser() if install_root else TTS_REPO_SIDECAR_ROOT
@@ -421,6 +494,13 @@ def tts_install_execution_gate(install_root: str | Path | None = None, *, provid
             return kokoro_install_execution_gate(install_root)
     except Exception:
         pass
+    try:
+        from app.tts_gpt_sovits import GPT_SOVITS_PROVIDER_ID, gpt_sovits_install_execution_gate
+
+        if selected == GPT_SOVITS_PROVIDER_ID:
+            return gpt_sovits_install_execution_gate(install_root)
+    except Exception:
+        pass
     plan = tts_install_plan(install_root, provider_id=selected)
     return {
         "schema": TTS_SCHEMA_VERSION,
@@ -454,19 +534,21 @@ def tts_server_start_plan(env: Mapping[str, str] | None = None, *, provider_id: 
         }
     installed = bool(status.get("installed"))
     root = dict(status.get("root") or {})
+    runtime_ready = bool(root.get("runtime_ready", True))
+    start_ready = installed and runtime_ready
     return {
         "schema": TTS_SCHEMA_VERSION,
-        "provider_id": TTS_PROVIDER_ID,
-        "ready": installed,
+        "provider_id": status.get("provider_id", TTS_PROVIDER_ID),
+        "ready": start_ready,
         "requires_user_action": True,
-        "title": "Start local TTS server",
+        "title": f"Start {status.get('label', 'local TTS')} server",
         "endpoint": status.get("endpoint", TTS_DEFAULT_ENDPOINT),
         "cwd": root.get("root", ""),
         "command": list(status.get("server_command") or []),
         "message": (
-            "Start server_fastapi.py from the connected Style-Bert-VITS2 sidecar."
+            str(status.get("server_message") or "")
             if installed
-            else "Install or connect Style-Bert-VITS2 before starting the TTS server."
+            else f"Install or connect {status.get('label', 'the selected TTS provider')} before starting the TTS server."
         ),
     }
 
@@ -517,6 +599,29 @@ def connect_installed_tts_provider(
             "error": f"Could not connect Kokoro runtime: {exc}",
             "missing": ["kokoro provider"],
         }
+    try:
+        from app.tts_gpt_sovits import GPT_SOVITS_PROVIDER_ID, connect_installed_gpt_sovits
+
+        if selected == GPT_SOVITS_PROVIDER_ID:
+            result = connect_installed_gpt_sovits(root_path)
+            if result.get("ok"):
+                gpt_endpoint = endpoint
+                if not gpt_endpoint or gpt_endpoint == TTS_DEFAULT_ENDPOINT:
+                    gpt_endpoint = _saved_gpt_sovits_endpoint()
+                result = {
+                    **result,
+                    "endpoint": gpt_endpoint,
+                    "saved": save_gpt_sovits_provider_config(root_path, endpoint=gpt_endpoint),
+                }
+            return result
+    except Exception as exc:
+        return {
+            "schema": TTS_SCHEMA_VERSION,
+            "ok": False,
+            "connected": False,
+            "error": f"Could not connect GPT-SoVITS sidecar: {exc}",
+            "missing": ["gpt-sovits provider"],
+        }
     result = connect_installed_tts(root_path, endpoint=endpoint, auto_start=auto_start)
     if result.get("ok"):
         result = {**result, "saved": save_tts_selected_provider(TTS_PROVIDER_ID)}
@@ -542,6 +647,29 @@ def tts_provider_options(env: Mapping[str, str] | None = None) -> list[dict[str,
                 "requires_server": False,
             }
         )
+    try:
+        from app.tts_gpt_sovits import gpt_sovits_provider_status
+
+        rows.append(
+            gpt_sovits_provider_status(
+                env,
+                root=_saved_gpt_sovits_root() or None,
+                endpoint=_saved_gpt_sovits_endpoint(),
+            )
+        )
+    except Exception as exc:
+        rows.append(
+            {
+                "provider_id": "gpt_sovits_sidecar",
+                "label": "GPT-SoVITS",
+                "available": False,
+                "installed": False,
+                "setup_state": "provider_error",
+                "reason": f"GPT-SoVITS provider could not be loaded: {exc}",
+                "root": {"model_names": [], "missing": ["provider import failed"]},
+                "requires_server": True,
+            }
+        )
     selected = saved_tts_selected_provider(env)
     for row in rows:
         row["selected"] = str(row.get("provider_id") or "") == selected
@@ -553,19 +681,20 @@ def tts_setup_instructions(env: Mapping[str, str] | None = None, *, provider_id:
     selected_provider = str(status.get("provider_id") or TTS_PROVIDER_ID)
     plan = tts_install_plan(provider_id=selected_provider)
     installed = bool(status.get("installed"))
+    available = bool(status.get("available", installed))
     provider_label = str(status.get("label") or selected_provider)
     return {
         "schema": TTS_SCHEMA_VERSION,
         "provider_id": selected_provider,
-        "ready": installed,
+        "ready": available,
         "status": status,
-        "headline": f"{provider_label} is ready" if installed else f"Set up {provider_label}",
+        "headline": f"{provider_label} is ready" if available else f"Set up {provider_label}",
         "summary": (
             f"Use {provider_label} for local voice generation."
-            if installed
+            if available
             else f"Install or connect {provider_label} to unlock voiceover, subtitles-to-voice, and PPT narration."
         ),
-        "primary_action": "tts.provider.status" if installed else "tts.install.plan",
+        "primary_action": "tts.provider.status" if available else "tts.install.plan",
         "cards": [
             {
                 "id": "local_first",
@@ -595,6 +724,7 @@ def tts_setup_view_model(env: Mapping[str, str] | None = None, *, provider_id: s
     instructions = tts_setup_instructions(env, provider_id=provider_id)
     status = dict(instructions.get("status") or {})
     installed = bool(status.get("installed"))
+    available = bool(status.get("available", installed))
     selected_provider = str(status.get("provider_id") or TTS_PROVIDER_ID)
     provider_label = str(status.get("label") or selected_provider)
     root = status.get("root") or {}
@@ -606,8 +736,9 @@ def tts_setup_view_model(env: Mapping[str, str] | None = None, *, provider_id: s
         "provider_label": provider_label,
         "providers": list(instructions.get("providers") or []),
         "state": status.get("setup_state", "needs_install"),
-        "ready": installed,
-        "status_label": "Ready" if installed else "Setup needed",
+        "ready": available,
+        "installed": installed,
+        "status_label": "Ready" if available else "Setup needed",
         "detail": status.get("reason", ""),
         "endpoint": status.get("endpoint", TTS_DEFAULT_ENDPOINT),
         "requires_server": bool(status.get("requires_server", True)),
@@ -626,7 +757,7 @@ def tts_setup_view_model(env: Mapping[str, str] | None = None, *, provider_id: s
             },
             {"id": "guide", "label": "Guide", "action": "tts.setup.instructions", "enabled": True},
         ],
-        "warnings": [] if installed else ["TTS is not bundled. Install or connect a local sidecar first."],
+        "warnings": [] if available else [str(status.get("reason") or "Install or connect a local sidecar first.")],
         "license_notice": TTS_AGPL_NOTICE,
         "instructions": instructions,
     }
@@ -660,6 +791,7 @@ __all__ = [
     "capcut_voice_tts_provider_row",
     "connect_installed_tts",
     "connect_installed_tts_provider",
+    "save_gpt_sovits_provider_config",
     "save_kokoro_provider_config",
     "save_tts_provider_config",
     "save_tts_selected_provider",

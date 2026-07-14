@@ -157,7 +157,7 @@ Start here when changing a feature:
 - Subculture TTS / voice generation direction:
   `docs/SPEC_TTS_VOICE_LAB.md`, `app/tts_setup.py`, `app/tts_synthesis.py`,
   `app/tts_subtitle_workflow.py`, `app/tts_model_training.py`,
-  `app/tts_lab.py`, `app/tts_kokoro.py`,
+  `app/tts_lab.py`, `app/tts_kokoro.py`, `app/tts_gpt_sovits.py`,
   `app/actions/tts_namespace.py`, and `app/actions/editor_adapter_tts.py`.
   Local Style-Bert-VITS2 experiments currently live outside the repo at
   `D:\TTS\sbv2\Style-Bert-VITS2`. This folder is not a runtime dependency for
@@ -186,7 +186,14 @@ Start here when changing a feature:
   `tools/kokoro_synthesize.py` as a subprocess and keeps model/cache files under
   `external/tools/tts/kokoro/hf_cache`. Voice Lab exposes an Engine selector,
   voice list, install/connect actions, and skips Style-Bert server startup for
-  Kokoro because it is a local subprocess provider.
+  Kokoro because it is a local subprocess provider. GPT-SoVITS is also exposed
+  as an optional local reference-voice sidecar under
+  `external/tools/tts/gpt-sovits`; `tools/install_gpt_sovits.py` clones the
+  official `RVC-Boss/GPT-SoVITS` repository, while user reference audio,
+  trained weights, and model caches stay outside Git. GPT-SoVITS is considered
+  synthesis-ready only when a `voice_presets/*.json` entry points to an existing
+  local `ref_audio_path`; subtitle/TTS generation then posts to the local
+  `api_v2.py` `/tts` endpoint, defaulting to `http://127.0.0.1:9880`.
   TTS subtitle timing can now be baked to Live2D mouth and
   natural blink parameters through `tts.subtitle.apply_actor_lipsync`, or in
   the same generation call by passing `apply_actor_lipsync=true` plus an actor
@@ -901,7 +908,11 @@ Start here when changing a feature:
   heavy, TigerCapture should integrate it as an optional sidecar/provider
   (`tts.provider.status`, `tts.server.ensure_running`, `tts.voice.list`,
   `tts.subtitle.plan`, `tts.subtitle.generate_to_timeline`) rather than
-  bundling or importing it directly into the editor process. The current setup
+  bundling or importing it directly into the editor process. Kokoro and
+  GPT-SoVITS follow the same provider boundary: Kokoro runs through an external
+  Python 3.12 subprocess, while GPT-SoVITS runs as an optional `api_v2.py`
+  sidecar with explicit reference-voice presets and no bundled user audio,
+  weights, or model caches. The current setup
   implementation is intentionally split: `app/tts_setup.py` owns provider
   detection/install-plan contracts, `app/tts_lab.py` owns the friendly setup UI,
   and `app/workbench_panel.py` exposes Voice Lab as a Composer-adjacent tool

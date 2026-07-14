@@ -36,6 +36,33 @@ def _fake_kokoro_root(root: Path) -> Path:
     return root
 
 
+def _fake_gpt_sovits_root(root: Path, *, with_preset: bool = True) -> Path:
+    (root / ".venv" / "Scripts").mkdir(parents=True)
+    (root / ".venv" / "Scripts" / "python.exe").write_text("", encoding="utf-8")
+    (root / "GPT_SoVITS" / "configs").mkdir(parents=True)
+    (root / "api_v2.py").write_text("# fake api\n", encoding="utf-8")
+    (root / "GPT_SoVITS" / "configs" / "tts_infer.yaml").write_text("custom:\n", encoding="utf-8")
+    if with_preset:
+        preset_dir = root / "voice_presets"
+        preset_dir.mkdir(parents=True)
+        ref_audio = preset_dir / "hero_ref.wav"
+        ref_audio.write_bytes(b"RIFF$\x00\x00\x00WAVEfmt ")
+        (preset_dir / "hero_ref.json").write_text(
+            json.dumps(
+                {
+                    "id": "hero_ref",
+                    "label": "Hero Reference",
+                    "ref_audio_path": str(ref_audio),
+                    "prompt_text": "\u3053\u3093\u306b\u3061\u306f",
+                    "prompt_lang": "ja",
+                    "text_lang": "ja",
+                }
+            ),
+            encoding="utf-8",
+        )
+    return root
+
+
 def test_tts_provider_status_detects_valid_sidecar(tmp_path):
     from app.tts_setup import TTS_ENV_ENDPOINT, TTS_ENV_ROOT, tts_provider_status
 
@@ -112,6 +139,56 @@ def test_tts_provider_status_can_select_kokoro_external_runtime(tmp_path):
     assert any(row["provider_id"] == KOKORO_PROVIDER_ID for row in view["providers"])
     assert plan["target_root"].endswith("kokoro_target")
     assert plan["commands"]["install"][1].endswith("install_kokoro_tts.py")
+
+
+def test_tts_provider_status_can_select_gpt_sovits_sidecar(tmp_path):
+    from app.tts_gpt_sovits import GPT_SOVITS_ENV_ROOT, GPT_SOVITS_PROVIDER_ID
+    from app.tts_setup import TTS_ENV_PROVIDER, tts_install_plan, tts_provider_status, tts_setup_view_model
+
+    root = _fake_gpt_sovits_root(tmp_path / "gpt-sovits")
+    env = {
+        TTS_ENV_PROVIDER: GPT_SOVITS_PROVIDER_ID,
+        GPT_SOVITS_ENV_ROOT: str(root),
+    }
+    status = tts_provider_status(env)
+    view = tts_setup_view_model(env)
+    plan = tts_install_plan(tmp_path / "gpt_target", provider_id=GPT_SOVITS_PROVIDER_ID)
+
+    assert status["provider_id"] == GPT_SOVITS_PROVIDER_ID
+    assert status["installed"] is True
+    assert status["available"] is True
+    assert status["requires_server"] is True
+    assert status["endpoint"] == "http://127.0.0.1:9880"
+    assert status["root"]["model_names"] == ["hero_ref"]
+    assert status["root"]["voice_rows"][0]["ready"] is True
+    assert status["server_command"][1].endswith("api_v2.py")
+    assert status["server_command"][-1].endswith("tts_infer.yaml")
+    assert view["provider_id"] == GPT_SOVITS_PROVIDER_ID
+    assert view["ready"] is True
+    assert any(row["provider_id"] == GPT_SOVITS_PROVIDER_ID for row in view["providers"])
+    assert plan["target_root"].endswith("gpt_target")
+    assert plan["source"]["repository"] == "https://github.com/RVC-Boss/GPT-SoVITS"
+    assert plan["commands"]["download"][1].endswith("install_gpt_sovits.py")
+
+
+def test_tts_provider_status_requires_gpt_sovits_reference_preset(tmp_path):
+    from app.tts_gpt_sovits import GPT_SOVITS_ENV_ROOT, GPT_SOVITS_PROVIDER_ID
+    from app.tts_setup import TTS_ENV_PROVIDER, tts_provider_status, tts_setup_view_model
+
+    root = _fake_gpt_sovits_root(tmp_path / "gpt-sovits", with_preset=False)
+    env = {
+        TTS_ENV_PROVIDER: GPT_SOVITS_PROVIDER_ID,
+        GPT_SOVITS_ENV_ROOT: str(root),
+    }
+    status = tts_provider_status(env)
+    view = tts_setup_view_model(env)
+
+    assert status["installed"] is True
+    assert status["available"] is False
+    assert status["setup_state"] == "needs_voice_preset"
+    assert any("voice_presets/*.json" in row for row in status["root"]["missing"])
+    assert view["ready"] is False
+    assert view["installed"] is True
 
 
 def test_tts_actions_are_registered_and_readable(tmp_path):
@@ -258,6 +335,17 @@ def _ready_kokoro_status():
     }
 
 
+def _ready_gpt_sovits_status(root: Path):
+    return {
+        "provider_id": "gpt_sovits_sidecar",
+        "available": True,
+        "installed": True,
+        "requires_server": True,
+        "endpoint": "http://127.0.0.1:9880",
+        "root": {"root": str(root), "model_names": ["hero_ref"]},
+    }
+
+
 def _fake_live2d_model_with_motions(root: Path) -> Path:
     model_dir = root / "live2d_model"
     motion_dir = model_dir / "motions"
@@ -346,6 +434,27 @@ def test_tts_subtitle_plan_can_use_kokoro_provider(monkeypatch, tmp_path):
     assert result["result"]["model_name"] == "jf_alpha"
 
 
+def test_tts_subtitle_plan_can_use_gpt_sovits_provider(monkeypatch, tmp_path):
+    from app.actions import build_default_action_registry
+    import app.tts_setup as tts_setup
+
+    root = _fake_gpt_sovits_root(tmp_path / "gpt-sovits")
+    monkeypatch.setattr(tts_setup, "tts_provider_status", lambda **_kwargs: _ready_gpt_sovits_status(root))
+    owner = _TtsOwner()
+    registry = build_default_action_registry(owner)
+
+    result = registry.execute(
+        "tts.subtitle.plan",
+        {"provider_id": "gpt_sovits_sidecar", "model_name": "hero_ref", "output_dir": str(tmp_path / "tts")},
+    ).to_dict()
+
+    assert result["ok"] is True
+    assert result["result"]["provider_id"] == "gpt_sovits_sidecar"
+    assert result["result"]["requires_server"] is True
+    assert result["result"]["endpoint"] == "http://127.0.0.1:9880"
+    assert result["result"]["model_name"] == "hero_ref"
+
+
 def test_tts_subtitle_generation_places_audio_clips(monkeypatch, tmp_path):
     from app.actions import build_default_action_registry
     import app.tts_setup as tts_setup
@@ -430,6 +539,53 @@ def test_tts_subtitle_generation_skips_server_for_kokoro(monkeypatch, tmp_path):
     assert result["result"]["server"]["ready"] is True
     assert result["result"]["server"]["started"] is False
     assert result["result"]["clip_count"] == 2
+
+
+def test_tts_subtitle_generation_dispatches_to_gpt_sovits(monkeypatch, tmp_path):
+    from app.actions import build_default_action_registry
+    import app.tts_gpt_sovits as gpt_sovits
+    import app.tts_setup as tts_setup
+
+    root = _fake_gpt_sovits_root(tmp_path / "gpt-sovits")
+    monkeypatch.setattr(tts_setup, "tts_provider_status", lambda **_kwargs: _ready_gpt_sovits_status(root))
+    calls = []
+
+    def _fake_gpt_sovits(**kwargs):
+        from app.tts_synthesis import VoiceSynthesisResult
+
+        calls.append(dict(kwargs))
+        path = Path(kwargs["output_path"])
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(b"RIFF$\x00\x00\x00WAVEfmt ")
+        return VoiceSynthesisResult(
+            path=path,
+            byte_count=path.stat().st_size,
+            duration_ms=888,
+            endpoint=kwargs["endpoint"],
+            model_name=kwargs["preset_id"],
+        )
+
+    monkeypatch.setattr(gpt_sovits, "synthesize_gpt_sovits_voice", _fake_gpt_sovits)
+    owner = _TtsOwner()
+    registry = build_default_action_registry(owner)
+
+    result = registry.execute(
+        "tts.subtitle.generate_to_timeline",
+        {
+            "provider_id": "gpt_sovits_sidecar",
+            "model_name": "hero_ref",
+            "output_dir": str(tmp_path / "tts"),
+            "auto_start_server": False,
+        },
+    ).to_dict()
+
+    assert result["ok"] is True
+    assert result["result"]["provider_id"] == "gpt_sovits_sidecar"
+    assert result["result"]["server"]["ready"] is False
+    assert result["result"]["clip_count"] == 2
+    assert calls[0]["endpoint"] == "http://127.0.0.1:9880"
+    assert calls[0]["root"] == str(root)
+    assert calls[0]["preset_id"] == "hero_ref"
 
 
 def test_tts_apply_actor_lipsync_bakes_live2d_mouth_keyframes():
