@@ -19,6 +19,8 @@ from PySide6.QtWidgets import (
     QColorDialog,
     QDialog,
     QDialogButtonBox,
+    QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QPushButton,
@@ -33,76 +35,147 @@ from app.i18n import tr
 
 
 _PAINT_DIALOG_QSS = """
-QDialog { background-color: #1a1a1c; }
-
-QPushButton#PaintTool {
-    background-color: #2a2a30;
-    color: #ffffff;
-    border: 1px solid #4a4a52;
-    border-radius: 6px;
-    padding: 7px 14px;
-    font-weight: 600;
-}
-QPushButton#PaintTool:hover {
-    background-color: #36363c;
-    border-color: #5a5a62;
-}
-QPushButton#PaintTool:checked {
-    background-color: #4a4a4a;
-    border-color: #6a6a6a;
-    color: #ffffff;
+QDialog {
+    background-color: #111216;
+    color: #f5f7fb;
 }
 
-QPushButton#BubbleBtn {
-    background-color: #4a4a4a;
+QFrame#PaintTopBar,
+QFrame#PaintToolRail,
+QFrame#PaintInspector,
+QFrame#PaintCanvasFrame {
+    background-color: #181a20;
+    border: 1px solid #2a2e39;
+    border-radius: 10px;
+}
+
+QLabel#PaintTitle {
     color: #ffffff;
-    border: 1px solid #5a5a5a;
+    font-size: 18px;
+    font-weight: 800;
+}
+
+QLabel#PaintSubtitle,
+QLabel#PaintMeta,
+QLabel#PaintCount {
+    color: #9ea8ba;
+    font-size: 11px;
+}
+
+QLabel#PaintSectionTitle {
+    color: #dce6f7;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1px;
+}
+
+QLabel#PaintValue {
+    color: #ffffff;
+    background-color: #0f1117;
+    border: 1px solid #2c3342;
     border-radius: 6px;
-    padding: 7px 14px;
-    font-weight: 700;
+    padding: 3px 7px;
+    min-width: 42px;
 }
-QPushButton#BubbleBtn:hover {
-    background-color: #5a5a5a;
-    border-color: #6a6a6a;
-}
+
+QPushButton#PaintTool,
+QPushButton#BubbleBtn,
 QPushButton#StickerBtn {
-    background-color: #4a4a4a;
+    background-color: #20242d;
     color: #ffffff;
-    border: 1px solid #5a5a5a;
-    border-radius: 6px;
-    padding: 7px 14px;
+    border: 1px solid #333a49;
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-weight: 700;
+    text-align: left;
+}
+
+QPushButton#PaintTool:hover,
+QPushButton#BubbleBtn:hover,
+QPushButton#StickerBtn:hover {
+    background-color: #2a303c;
+    border-color: #4a89ff;
+}
+
+QPushButton#PaintTool:checked,
+QPushButton#BubbleBtn:checked,
+QPushButton#StickerBtn:checked {
+    background-color: #263552;
+    border-color: #6aa2ff;
+    color: #ffffff;
+}
+
+QFrame#PaintToolRail QPushButton {
+    min-width: 128px;
+}
+
+QPushButton#PaintDanger {
+    background-color: #2a2020;
+    color: #ffdede;
+    border: 1px solid #563436;
+    border-radius: 8px;
+    padding: 9px 12px;
+    font-weight: 700;
+    text-align: left;
+}
+
+QPushButton#PaintDanger:hover {
+    background-color: #3a2727;
+    border-color: #de6969;
+}
+
+QPushButton#PaintCustomColor {
+    background-color: #222632;
+    color: #ffffff;
+    border: 1px solid #394152;
+    border-radius: 8px;
+    padding: 7px 10px;
     font-weight: 700;
 }
-QPushButton#StickerBtn:hover {
-    background-color: #5a5a5a;
-    border-color: #6a6a6a;
+
+QPushButton#PaintCustomColor:hover {
+    background-color: #2b3140;
+    border-color: #6aa2ff;
+}
+
+QSlider::groove:horizontal {
+    height: 4px;
+    border-radius: 2px;
+    background: #303746;
+}
+
+QSlider::handle:horizontal {
+    width: 16px;
+    height: 16px;
+    margin: -6px 0;
+    border-radius: 8px;
+    background: #9bbcff;
 }
 
 QDialogButtonBox QPushButton {
-    min-width: 90px;
-    padding: 8px 18px;
-    border-radius: 6px;
-    font-weight: 700;
+    min-width: 104px;
+    padding: 9px 20px;
+    border-radius: 8px;
+    font-weight: 800;
     font-size: 13px;
 }
 QDialogButtonBox QPushButton[text="OK"],
 QDialogButtonBox QPushButton:default {
-    background-color: #4a4a4a;
-    color: #ffffff;
-    border: 1px solid #5a5a5a;
+    background-color: #f0f3fa;
+    color: #171a21;
+    border: 1px solid #ffffff;
 }
 QDialogButtonBox QPushButton:default:hover,
 QDialogButtonBox QPushButton[text="OK"]:hover {
-    background-color: #5a5a5a;
-    border-color: #6a6a6a;
+    background-color: #ffffff;
 }
 QDialogButtonBox QPushButton:!default {
-    background-color: #2a2a30;
+    background-color: #242832;
     color: #ffffff;
-    border: 1px solid #4a4a52;
+    border: 1px solid #3a4150;
 }
 QDialogButtonBox QPushButton:!default:hover {
-    background-color: #36363c;
+    background-color: #303645;
 }
 """
 
@@ -937,7 +1010,7 @@ class PaintDialog(QDialog):
 
     # ---------- ui ----------
 
-    def _build_ui(self, bg: QPixmap, initial_strokes: list[Stroke]) -> None:
+    def _build_ui_legacy(self, bg: QPixmap, initial_strokes: list[Stroke]) -> None:
         self.setStyleSheet(self.styleSheet() + _PAINT_DIALOG_QSS)
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 10, 12, 12)
@@ -1085,6 +1158,252 @@ class PaintDialog(QDialog):
         # Spawn any bubbles the caller passed in (deferred until canvas has
         # a real size — triggered via the first showEvent).
 
+    def _build_ui(self, bg: QPixmap, initial_strokes: list[Stroke]) -> None:
+        self.setStyleSheet(self.styleSheet() + _PAINT_DIALOG_QSS)
+        root = QVBoxLayout(self)
+        root.setContentsMargins(12, 12, 12, 12)
+        root.setSpacing(10)
+
+        top_bar = QFrame()
+        top_bar.setObjectName("PaintTopBar")
+        top_layout = QHBoxLayout(top_bar)
+        top_layout.setContentsMargins(14, 10, 14, 10)
+        top_layout.setSpacing(12)
+
+        title_col = QVBoxLayout()
+        title_col.setContentsMargins(0, 0, 0, 0)
+        title_col.setSpacing(2)
+        title = QLabel("TigerCapture Paint")
+        title.setObjectName("PaintTitle")
+        subtitle = QLabel(
+            "Draw, erase, add speech bubbles, and place PNG stickers."
+        )
+        subtitle.setObjectName("PaintSubtitle")
+        title_col.addWidget(title)
+        title_col.addWidget(subtitle)
+        top_layout.addLayout(title_col, stretch=1)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText(
+            tr("paint.btn.done")
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText(
+            tr("paint.btn.cancel")
+        )
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        top_layout.addWidget(buttons)
+        root.addWidget(top_bar)
+
+        workspace = QHBoxLayout()
+        workspace.setSpacing(10)
+        root.addLayout(workspace, stretch=1)
+
+        tool_rail = QFrame()
+        tool_rail.setObjectName("PaintToolRail")
+        tool_layout = QVBoxLayout(tool_rail)
+        tool_layout.setContentsMargins(10, 12, 10, 12)
+        tool_layout.setSpacing(8)
+        tool_title = QLabel("TOOLS")
+        tool_title.setObjectName("PaintSectionTitle")
+        tool_layout.addWidget(tool_title)
+
+        self.pen_btn = QPushButton(tr("paint.btn.pen"))
+        self.pen_btn.setCheckable(True)
+        self.pen_btn.setChecked(True)
+        self.pen_btn.setObjectName("PaintTool")
+        self.pen_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.pen_btn.clicked.connect(lambda: self._set_tool("pen"))
+
+        self.eraser_btn = QPushButton(tr("paint.btn.eraser"))
+        self.eraser_btn.setCheckable(True)
+        self.eraser_btn.setObjectName("PaintTool")
+        self.eraser_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.eraser_btn.clicked.connect(lambda: self._set_tool("eraser"))
+
+        self.bubble_btn = QPushButton(tr("bubble.add_button"))
+        self.bubble_btn.setObjectName("BubbleBtn")
+        self.bubble_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.bubble_btn.clicked.connect(self._add_bubble)
+
+        self.sticker_btn = QPushButton(tr("sticker.add_button"))
+        self.sticker_btn.setObjectName("StickerBtn")
+        self.sticker_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.sticker_btn.setToolTip(tr("sticker.add_tooltip"))
+        self.sticker_btn.clicked.connect(self._add_sticker)
+
+        self.clear_btn = QPushButton(tr("paint.btn.clear_all"))
+        self.clear_btn.setObjectName("PaintDanger")
+        self.clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_btn.clicked.connect(self._clear_all)
+
+        tool_layout.addWidget(self.pen_btn)
+        tool_layout.addWidget(self.eraser_btn)
+        tool_layout.addSpacing(8)
+        tool_layout.addWidget(self.bubble_btn)
+        tool_layout.addWidget(self.sticker_btn)
+        tool_layout.addSpacing(8)
+        tool_layout.addWidget(self.clear_btn)
+        tool_layout.addStretch(1)
+        workspace.addWidget(tool_rail)
+
+        canvas_frame = QFrame()
+        canvas_frame.setObjectName("PaintCanvasFrame")
+        canvas_layout = QVBoxLayout(canvas_frame)
+        canvas_layout.setContentsMargins(10, 10, 10, 10)
+        canvas_layout.setSpacing(8)
+
+        canvas_bar = QHBoxLayout()
+        canvas_bar.setContentsMargins(0, 0, 0, 0)
+        canvas_title = QLabel("CANVAS")
+        canvas_title.setObjectName("PaintSectionTitle")
+        self._tool_status_label = QLabel("Pen")
+        self._tool_status_label.setObjectName("PaintMeta")
+        canvas_bar.addWidget(canvas_title)
+        canvas_bar.addStretch(1)
+        canvas_bar.addWidget(self._tool_status_label)
+        canvas_layout.addLayout(canvas_bar)
+
+        canvas_host = QWidget()
+        canvas_host.setStyleSheet("background-color: #050607; border-radius: 8px;")
+        canvas_host.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
+        )
+        self._canvas_host = canvas_host
+
+        self._bg_label = QLabel(canvas_host)
+        self._bg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._bg_label.setStyleSheet("background-color: #050607;")
+        self._bg_pixmap_source = bg
+        self._bg_label.setPixmap(
+            bg.scaled(
+                1, 1, Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            ) if bg and not bg.isNull() else QPixmap()
+        )
+
+        self.canvas = DrawingCanvas(
+            get_time_ms=lambda: self._time_ms,
+            get_strokes=lambda: [],
+            parent=canvas_host,
+        )
+        self.canvas.set_strokes_snapshot(list(initial_strokes))
+        self.canvas.set_tool("pen")
+        self.canvas.set_pen_color(self._pen_color)
+        self.canvas.set_pen_width(self._pen_width)
+        self.canvas.set_pen_opacity(self._pen_opacity)
+        self.canvas.stroke_added.connect(self._on_stroke_added)
+        self.canvas.stroke_erased_at.connect(self._erase_stroke_direct)
+
+        canvas_layout.addWidget(canvas_host, stretch=1)
+        workspace.addWidget(canvas_frame, stretch=1)
+
+        inspector = QFrame()
+        inspector.setObjectName("PaintInspector")
+        inspector_layout = QVBoxLayout(inspector)
+        inspector_layout.setContentsMargins(12, 12, 12, 12)
+        inspector_layout.setSpacing(10)
+
+        brush_title = QLabel("BRUSH")
+        brush_title.setObjectName("PaintSectionTitle")
+        inspector_layout.addWidget(brush_title)
+
+        width_row = QHBoxLayout()
+        width_row.setContentsMargins(0, 0, 0, 0)
+        width_label = QLabel(tr("paint.label.width"))
+        width_label.setObjectName("PaintMeta")
+        self._width_value_label = QLabel(f"{int(self._pen_width)} px")
+        self._width_value_label.setObjectName("PaintValue")
+        width_row.addWidget(width_label)
+        width_row.addStretch(1)
+        width_row.addWidget(self._width_value_label)
+        inspector_layout.addLayout(width_row)
+        self.width_slider = QSlider(Qt.Orientation.Horizontal)
+        self.width_slider.setRange(1, 60)
+        self.width_slider.setValue(int(self._pen_width))
+        self.width_slider.valueChanged.connect(self._on_width_changed)
+        inspector_layout.addWidget(self.width_slider)
+
+        opacity_row = QHBoxLayout()
+        opacity_row.setContentsMargins(0, 0, 0, 0)
+        opacity_label = QLabel(tr("paint.label.opacity"))
+        opacity_label.setObjectName("PaintMeta")
+        self._opacity_value_label = QLabel("100%")
+        self._opacity_value_label.setObjectName("PaintValue")
+        opacity_row.addWidget(opacity_label)
+        opacity_row.addStretch(1)
+        opacity_row.addWidget(self._opacity_value_label)
+        inspector_layout.addLayout(opacity_row)
+        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.opacity_slider.setRange(10, 100)
+        self.opacity_slider.setValue(100)
+        self.opacity_slider.valueChanged.connect(self._on_opacity_changed)
+        inspector_layout.addWidget(self.opacity_slider)
+
+        color_title = QLabel("COLOR")
+        color_title.setObjectName("PaintSectionTitle")
+        inspector_layout.addWidget(color_title)
+        color_row = QHBoxLayout()
+        color_row.setContentsMargins(0, 0, 0, 0)
+        color_label = QLabel(tr("paint.label.color"))
+        color_label.setObjectName("PaintMeta")
+        self._color_preview = QLabel()
+        self._color_preview.setFixedSize(34, 22)
+        color_row.addWidget(color_label)
+        color_row.addStretch(1)
+        color_row.addWidget(self._color_preview)
+        inspector_layout.addLayout(color_row)
+
+        palette_grid = QGridLayout()
+        palette_grid.setHorizontalSpacing(6)
+        palette_grid.setVerticalSpacing(6)
+        self._palette_btns: list[QPushButton] = []
+        for idx, rgb in enumerate(PALETTE_COLORS):
+            btn = self._make_palette_button(rgb)
+            palette_grid.addWidget(btn, idx // 4, idx % 4)
+            self._palette_btns.append(btn)
+        inspector_layout.addLayout(palette_grid)
+
+        self.custom_color_btn = QPushButton(tr("paint.btn.custom_color"))
+        self.custom_color_btn.setObjectName("PaintCustomColor")
+        self.custom_color_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.custom_color_btn.clicked.connect(self._pick_custom_color)
+        inspector_layout.addWidget(self.custom_color_btn)
+
+        layer_title = QLabel("LAYERS")
+        layer_title.setObjectName("PaintSectionTitle")
+        inspector_layout.addWidget(layer_title)
+        self._layer_count_labels: dict[str, QLabel] = {}
+        for key, label_text in (
+            ("strokes", "Strokes"),
+            ("bubbles", "Speech bubbles"),
+            ("stickers", "PNG stickers"),
+        ):
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            name_label = QLabel(label_text)
+            name_label.setObjectName("PaintMeta")
+            count_label = QLabel("0")
+            count_label.setObjectName("PaintCount")
+            row.addWidget(name_label)
+            row.addStretch(1)
+            row.addWidget(count_label)
+            inspector_layout.addLayout(row)
+            self._layer_count_labels[key] = count_label
+
+        inspector_layout.addStretch(1)
+        note = QLabel(tr("paint.note"))
+        note.setObjectName("PaintMeta")
+        note.setWordWrap(True)
+        inspector_layout.addWidget(note)
+        workspace.addWidget(inspector)
+
+        self._highlight_selected_palette()
+        self._update_inspector_counts()
+
     def showEvent(self, event) -> None:
         super().showEvent(event)
         if not self._bubble_items and self._bubbles:
@@ -1110,6 +1429,13 @@ class PaintDialog(QDialog):
             self._pen_color.green(),
             self._pen_color.blue(),
         )
+        if hasattr(self, "_color_preview"):
+            self._color_preview.setStyleSheet(
+                "QLabel { "
+                f"background-color: rgb({sel[0]},{sel[1]},{sel[2]}); "
+                "border: 1px solid #d9e5ff; border-radius: 5px; "
+                "}"
+            )
         for btn, rgb in zip(self._palette_btns, PALETTE_COLORS):
             if rgb == sel:
                 btn.setStyleSheet(
@@ -1129,9 +1455,12 @@ class PaintDialog(QDialog):
         self.canvas.set_tool(tool)
         self.pen_btn.setChecked(tool == "pen")
         self.eraser_btn.setChecked(tool == "eraser")
+        if hasattr(self, "_tool_status_label"):
+            self._tool_status_label.setText("Pen" if tool == "pen" else "Eraser")
 
     def _clear_all(self) -> None:
         self.canvas.clear_strokes_direct()
+        self._update_inspector_counts()
 
     def _pick_palette_color(self, rgb: tuple[int, int, int]) -> None:
         self._pen_color = QColor(*rgb)
@@ -1149,16 +1478,42 @@ class PaintDialog(QDialog):
     def _on_width_changed(self, value: int) -> None:
         self._pen_width = float(value)
         self.canvas.set_pen_width(self._pen_width)
+        if hasattr(self, "_width_value_label"):
+            self._width_value_label.setText(f"{value} px")
 
     def _on_opacity_changed(self, value: int) -> None:
         self._pen_opacity = int(value * 255 / 100)
         self.canvas.set_pen_opacity(self._pen_opacity)
+        if hasattr(self, "_opacity_value_label"):
+            self._opacity_value_label.setText(f"{value}%")
 
     def _on_stroke_added(self, stroke: Stroke) -> None:
         # Override the default start_ms so all dialog strokes stamp to the
         # moment the dialog was opened.
         stroke.start_ms = self._time_ms
         self.canvas.add_stroke_direct(stroke)
+        self._update_inspector_counts()
+
+    def _erase_stroke_direct(self, idx: int) -> None:
+        self.canvas.remove_stroke_direct(idx)
+        self._update_inspector_counts()
+
+    def _update_inspector_counts(self) -> None:
+        labels = getattr(self, "_layer_count_labels", {})
+        if not labels:
+            return
+        strokes_count = 0
+        if hasattr(self, "canvas"):
+            strokes_count = len(self.canvas.embedded_strokes())
+        counts = {
+            "strokes": strokes_count,
+            "bubbles": len(getattr(self, "_bubbles", [])),
+            "stickers": len(getattr(self, "_stickers", [])),
+        }
+        for key, value in counts.items():
+            label = labels.get(key)
+            if label is not None:
+                label.setText(str(value))
 
     # ---------- layout sync ----------
 
@@ -1224,6 +1579,7 @@ class PaintDialog(QDialog):
         item.moved.connect(lambda it=item: it.sync_to_bubble())
         item.deleted.connect(lambda it=item, b=bubble: self._remove_bubble(b, it))
         self._bubble_items.append(item)
+        self._update_inspector_counts()
 
     def _remove_bubble(self, bubble: "SpeechBubble", item: "SpeechBubbleItem") -> None:
         if bubble in self._bubbles:
@@ -1231,6 +1587,7 @@ class PaintDialog(QDialog):
         if item in self._bubble_items:
             self._bubble_items.remove(item)
         item.deleteLater()
+        self._update_inspector_counts()
 
     def _spawn_initial_bubbles(self) -> None:
         for bubble in self._bubbles:
@@ -1241,6 +1598,7 @@ class PaintDialog(QDialog):
             item.moved.connect(lambda it=item: it.sync_to_bubble())
             item.deleted.connect(lambda it=item, b=bubble: self._remove_bubble(b, it))
             self._bubble_items.append(item)
+        self._update_inspector_counts()
 
     def result_strokes(self) -> list[Stroke]:
         return self.canvas.embedded_strokes()
@@ -1305,6 +1663,7 @@ class PaintDialog(QDialog):
         )
         self._stickers.append(sticker)
         self._spawn_sticker_item(sticker)
+        self._update_inspector_counts()
 
     def _spawn_sticker_item(self, sticker: "Sticker") -> "StickerItem":
         item = StickerItem(sticker, self.canvas)
@@ -1321,6 +1680,7 @@ class PaintDialog(QDialog):
         item.raise_requested.connect(lambda s=sticker: self._reorder_sticker(s, +1))
         item.lower_requested.connect(lambda s=sticker: self._reorder_sticker(s, -1))
         self._sticker_items.append(item)
+        self._update_inspector_counts()
         return item
 
     def _remove_sticker(self, sticker: "Sticker", item: "StickerItem") -> None:
@@ -1329,10 +1689,12 @@ class PaintDialog(QDialog):
         if item in self._sticker_items:
             self._sticker_items.remove(item)
         item.deleteLater()
+        self._update_inspector_counts()
 
     def _spawn_initial_stickers(self) -> None:
         for sticker in self._stickers:
             self._spawn_sticker_item(sticker)
+        self._update_inspector_counts()
 
     def _duplicate_sticker(self, sticker: "Sticker") -> None:
         import copy
@@ -1345,6 +1707,7 @@ class PaintDialog(QDialog):
         dup.z_index = current_max_z + 1
         self._stickers.append(dup)
         self._spawn_sticker_item(dup)
+        self._update_inspector_counts()
 
     def _reorder_sticker(self, sticker: "Sticker", direction: int) -> None:
         """direction > 0 → send to front; < 0 → send to back."""
