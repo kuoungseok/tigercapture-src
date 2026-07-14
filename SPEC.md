@@ -198,8 +198,11 @@ Start here when changing a feature:
   a hidden setup choice: all known libraries stay listed, currently usable
   libraries sort first, unavailable libraries are muted gray, and selecting an
   unavailable library prompts for installation. Providers with safe install
-  commands run in a background installer; others fall back to the install plan
-  and guide.
+  commands run in a background installer; catalog-only planned adapters such as
+  Piper, Coqui XTTS, F5-TTS, CosyVoice, Fish Speech, OpenVoice, MeloTTS,
+  ChatTTS, Bark, Edge TTS, ElevenLabs, and Azure Speech remain visible but fall
+  back to the install plan and guide until their provider boundaries are
+  implemented.
   TTS subtitle timing can now be baked to Live2D mouth and
   natural blink parameters through `tts.subtitle.apply_actor_lipsync`, or in
   the same generation call by passing `apply_actor_lipsync=true` plus an actor
@@ -925,6 +928,11 @@ Start here when changing a feature:
   under the Workbench Audio tab rather than nesting it inside Sound Editor.
   Composer and Voice Lab are always-visible creation tools in that audio dock;
   they must not depend on an existing audio track or selected audio clip.
+  2026-07-14 UI note: the Workbench Audio dock and standalone Voice Lab window
+  use text-first `COMPOSER` / `VOICE LAB` wordmarks instead of raster logo
+  buttons. Voice Lab popup windows and all Voice Lab combo-box popup containers
+  must force dark styled backgrounds/palettes so Windows/Qt native popup frames
+  do not show white side gutters or white dropdown edges.
   2026-07-10 stabilization note: TTS/Voice Lab sidecar failures must be
   actionable instead of raw connection errors. `app.tts_sidecar_runtime`
   exposes `tigercapture.tts_sidecar.guidance.v1` guidance plus formatted text

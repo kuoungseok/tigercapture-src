@@ -160,6 +160,15 @@ def test_voice_lab_provider_combo_orders_ready_and_greys_unavailable(monkeypatch
                     "setup_state": "needs_voice_preset",
                     "reason": "Needs voice preset",
                 },
+                {
+                    "provider_id": "piper_catalog",
+                    "label": "Piper",
+                    "available": False,
+                    "installed": False,
+                    "catalog_only": True,
+                    "setup_state": "adapter_planned",
+                    "reason": "Adapter planned",
+                },
             ],
             "instructions": {"cards": []},
         }
@@ -181,6 +190,10 @@ def test_voice_lab_provider_combo_orders_ready_and_greys_unavailable(monkeypatch
         assert combo.itemData(1, Qt.ItemDataRole.UserRole + 1) is False
         assert "Install" in combo.itemText(1) or "Setup needed" in combo.itemText(1)
         assert "Needs" in str(combo.itemData(1, Qt.ItemDataRole.ToolTipRole))
+        planned_idx = combo.findData("piper_catalog")
+        assert planned_idx >= 0
+        assert "Planned" in combo.itemText(planned_idx)
+        assert combo.itemData(planned_idx, Qt.ItemDataRole.UserRole + 1) is False
         brush = combo.itemData(1, Qt.ItemDataRole.ForegroundRole)
         assert isinstance(brush, QBrush)
         assert brush.color().name().lower() == "#818794"

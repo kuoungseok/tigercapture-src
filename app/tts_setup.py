@@ -41,6 +41,105 @@ TTS_AGPL_NOTICE = (
 )
 TTS_ENV_PROVIDER = "TIGERCAPTURE_TTS_PROVIDER"
 
+TTS_VOICE_LIBRARY_CATALOG: tuple[dict[str, Any], ...] = (
+    {
+        "provider_id": "piper_catalog",
+        "label": "Piper",
+        "summary": "Lightweight offline neural TTS runtime.",
+        "requires_server": False,
+        "requires_network": True,
+        "source": {"repository": "https://github.com/rhasspy/piper"},
+    },
+    {
+        "provider_id": "coqui_xtts_catalog",
+        "label": "Coqui XTTS",
+        "summary": "Multilingual voice-cloning style TTS candidate.",
+        "requires_server": True,
+        "requires_network": True,
+        "source": {"repository": "https://github.com/coqui-ai/TTS"},
+    },
+    {
+        "provider_id": "f5_tts_catalog",
+        "label": "F5-TTS",
+        "summary": "Flow-matching voice generation candidate.",
+        "requires_server": True,
+        "requires_network": True,
+        "source": {"repository": "https://github.com/SWivid/F5-TTS"},
+    },
+    {
+        "provider_id": "cosyvoice_catalog",
+        "label": "CosyVoice",
+        "summary": "Large multilingual TTS and voice cloning candidate.",
+        "requires_server": True,
+        "requires_network": True,
+        "source": {"repository": "https://github.com/FunAudioLLM/CosyVoice"},
+    },
+    {
+        "provider_id": "fish_speech_catalog",
+        "label": "Fish Speech",
+        "summary": "Large local voice generation candidate.",
+        "requires_server": True,
+        "requires_network": True,
+        "source": {"repository": "https://github.com/fishaudio/fish-speech"},
+    },
+    {
+        "provider_id": "openvoice_catalog",
+        "label": "OpenVoice",
+        "summary": "Voice conversion / cloning candidate.",
+        "requires_server": True,
+        "requires_network": True,
+        "source": {"repository": "https://github.com/myshell-ai/OpenVoice"},
+    },
+    {
+        "provider_id": "melo_tts_catalog",
+        "label": "MeloTTS",
+        "summary": "Multilingual local TTS candidate.",
+        "requires_server": False,
+        "requires_network": True,
+        "source": {"repository": "https://github.com/myshell-ai/MeloTTS"},
+    },
+    {
+        "provider_id": "chattts_catalog",
+        "label": "ChatTTS",
+        "summary": "Conversational TTS candidate.",
+        "requires_server": True,
+        "requires_network": True,
+        "source": {"repository": "https://github.com/2noise/ChatTTS"},
+    },
+    {
+        "provider_id": "bark_catalog",
+        "label": "Bark",
+        "summary": "Generative speech/audio candidate.",
+        "requires_server": True,
+        "requires_network": True,
+        "source": {"repository": "https://github.com/suno-ai/bark"},
+    },
+    {
+        "provider_id": "edge_tts_catalog",
+        "label": "Edge TTS",
+        "summary": "Online Microsoft Edge voice wrapper candidate.",
+        "requires_server": False,
+        "requires_network": True,
+        "source": {"repository": "https://github.com/rany2/edge-tts"},
+    },
+    {
+        "provider_id": "elevenlabs_catalog",
+        "label": "ElevenLabs",
+        "summary": "Cloud/API voice provider candidate.",
+        "requires_server": False,
+        "requires_network": True,
+        "source": {"website": "https://elevenlabs.io"},
+    },
+    {
+        "provider_id": "azure_speech_catalog",
+        "label": "Azure Speech",
+        "summary": "Cloud/API speech provider candidate.",
+        "requires_server": False,
+        "requires_network": True,
+        "source": {"website": "https://azure.microsoft.com/products/ai-services/ai-speech"},
+    },
+)
+
 
 @dataclass(frozen=True)
 class TtsInstallRootStatus:
@@ -100,6 +199,88 @@ def _settings_set_value(key: str, value: Any) -> bool:
 
 def _path_text(value: Any) -> str:
     return str(value or "").strip().strip('"')
+
+
+def _catalog_provider_ids() -> set[str]:
+    return {str(row.get("provider_id") or "") for row in TTS_VOICE_LIBRARY_CATALOG}
+
+
+def _catalog_provider_template(provider_id: str) -> dict[str, Any]:
+    wanted = str(provider_id or "").strip()
+    for row in TTS_VOICE_LIBRARY_CATALOG:
+        if str(row.get("provider_id") or "") == wanted:
+            return dict(row)
+    return {}
+
+
+def _catalog_provider_status(provider_id: str) -> dict[str, Any]:
+    row = _catalog_provider_template(provider_id)
+    label = str(row.get("label") or provider_id)
+    summary = str(row.get("summary") or "Voice library candidate.")
+    return {
+        "schema": TTS_SCHEMA_VERSION,
+        "provider_id": str(row.get("provider_id") or provider_id),
+        "label": label,
+        "kind": "tts",
+        "configured": False,
+        "installed": False,
+        "available": False,
+        "setup_needed": True,
+        "setup_state": "adapter_planned",
+        "catalog_only": True,
+        "install_supported": False,
+        "requires_network": bool(row.get("requires_network", True)),
+        "local_first": not label.casefold().startswith(("elevenlabs", "azure")),
+        "requires_server": bool(row.get("requires_server", True)),
+        "endpoint": "",
+        "root": {"model_names": [], "voice_rows": [], "missing": ["provider adapter"]},
+        "reason": f"{label} is listed in the Voice Library catalog, but its Tiger Studio adapter is not implemented yet.",
+        "server_command": [],
+        "supports": list(row.get("supports") or ("catalog", "planned_adapter")),
+        "summary": summary,
+        "source": dict(row.get("source") or {}),
+        "license": {
+            "engine": label,
+            "notice": "Catalog entry only. Check the upstream license before enabling an adapter or bundling assets.",
+            "bundle_policy": "not_bundled",
+        },
+    }
+
+
+def _catalog_install_plan(provider_id: str) -> dict[str, Any]:
+    status = _catalog_provider_status(provider_id)
+    label = str(status.get("label") or provider_id)
+    return {
+        "schema": TTS_SCHEMA_VERSION,
+        "provider_id": str(status.get("provider_id") or provider_id),
+        "title": f"{label} adapter is not ready yet",
+        "target_root": "",
+        "requires_network": bool(status.get("requires_network", True)),
+        "requires_user_consent": False,
+        "estimated_download": "Not available until the provider adapter is implemented.",
+        "license_notice": str((status.get("license") or {}).get("notice") or ""),
+        "source": dict(status.get("source") or {}),
+        "commands": {},
+        "steps": [
+            {
+                "id": "adapter_needed",
+                "label": "Adapter needed",
+                "description": f"{label} is visible in the Voice Library catalog, but Tiger Studio cannot install or synthesize with it yet.",
+            },
+            {
+                "id": "future_work",
+                "label": "Future integration",
+                "description": "Add a provider boundary, installer command, voice discovery, synthesis dispatch, and QA before enabling it.",
+            },
+        ],
+        "ui_copy": {
+            "primary": "Adapter planned",
+            "secondary": "No automatic install yet",
+            "safe_default": "Nothing is downloaded because this provider has no safe adapter in Tiger Studio yet.",
+            "why": str(status.get("summary") or "Voice library candidate."),
+        },
+        "actions_after_install": [],
+    }
 
 
 def saved_tts_provider_config() -> dict[str, Any]:
@@ -404,6 +585,8 @@ def tts_provider_status(
                 "supports": [],
                 "license": {},
             }
+    if selected in _catalog_provider_ids():
+        return _catalog_provider_status(selected)
     return _style_bert_provider_status(env)
 
 
@@ -430,6 +613,8 @@ def tts_install_plan(install_root: str | Path | None = None, *, provider_id: str
             return gpt_sovits_install_plan(install_root)
     except Exception:
         pass
+    if selected in _catalog_provider_ids():
+        return _catalog_install_plan(selected)
     target = Path(install_root).expanduser() if install_root else TTS_REPO_SIDECAR_ROOT
     return {
         "schema": TTS_SCHEMA_VERSION,
@@ -501,6 +686,19 @@ def tts_install_execution_gate(install_root: str | Path | None = None, *, provid
             return gpt_sovits_install_execution_gate(install_root)
     except Exception:
         pass
+    if selected in _catalog_provider_ids():
+        plan = _catalog_install_plan(selected)
+        return {
+            "schema": TTS_SCHEMA_VERSION,
+            "ready_to_execute": False,
+            "requires_confirmation": False,
+            "destructive": False,
+            "network_download": bool(plan.get("requires_network")),
+            "long_running": False,
+            "title": str(plan.get("title") or "Voice library adapter is not ready"),
+            "message": "This Voice Library entry is visible for planning, but automatic install is not available yet.",
+            "plan": plan,
+        }
     plan = tts_install_plan(install_root, provider_id=selected)
     return {
         "schema": TTS_SCHEMA_VERSION,
@@ -670,10 +868,17 @@ def tts_provider_options(env: Mapping[str, str] | None = None) -> list[dict[str,
                 "requires_server": True,
             }
         )
+    existing = {str(row.get("provider_id") or "") for row in rows}
+    for catalog_row in TTS_VOICE_LIBRARY_CATALOG:
+        provider_id = str(catalog_row.get("provider_id") or "")
+        if provider_id and provider_id not in existing:
+            rows.append(_catalog_provider_status(provider_id))
+            existing.add(provider_id)
     rows.sort(
         key=lambda row: (
             0 if bool(row.get("available")) else 1,
             0 if bool(row.get("installed")) else 1,
+            0 if not bool(row.get("catalog_only")) else 1,
             str(row.get("label") or row.get("provider_id") or "").casefold(),
         )
     )
@@ -795,6 +1000,7 @@ __all__ = [
     "TTS_SCHEMA_VERSION",
     "TTS_ENV_PROVIDER",
     "TTS_STYLE_BERT_PROVIDER_ID",
+    "TTS_VOICE_LIBRARY_CATALOG",
     "capcut_voice_tts_provider_row",
     "connect_installed_tts",
     "connect_installed_tts_provider",

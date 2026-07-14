@@ -464,6 +464,7 @@ class TtsLabPage(QWidget):
             key=lambda row: (
                 0 if bool(row.get("available")) else 1,
                 0 if bool(row.get("installed")) else 1,
+                0 if not bool(row.get("catalog_only")) else 1,
                 str(row.get("label") or row.get("provider_id") or "").casefold(),
             )
         )
@@ -476,9 +477,10 @@ class TtsLabPage(QWidget):
             label = str(row.get("label") or provider_id)
             available = bool(row.get("available"))
             installed = bool(row.get("installed"))
+            catalog_only = bool(row.get("catalog_only"))
             state = "ready" if available else str(row.get("setup_state") or ("installed" if installed else "install"))
-            suffix = "Ready" if available else ("Setup needed" if installed else "Install")
-            self._provider_combo.addItem(f"{label}  ·  {suffix}", provider_id)
+            suffix = "Ready" if available else ("Planned" if catalog_only else ("Setup needed" if installed else "Install"))
+            self._provider_combo.addItem(f"{label} - {suffix}", provider_id)
             index = self._provider_combo.count() - 1
             self._provider_combo.setItemData(index, available, Qt.ItemDataRole.UserRole + 1)
             self._provider_combo.setItemData(index, row, Qt.ItemDataRole.UserRole + 2)
@@ -645,6 +647,18 @@ class TtsLabPage(QWidget):
         command = self._install_command_from_plan(plan)
         label = str(row.get("label") or plan.get("title") or provider_id)
         target = str(plan.get("target_root") or "")
+        if bool(row.get("catalog_only")) or not bool(row.get("install_supported", True)):
+            QMessageBox.information(
+                self,
+                "Voice Lab",
+                (
+                    f"{label} is listed in the Voice Library catalog.\n\n"
+                    "Automatic install is not available yet because the Tiger Studio adapter is not implemented.\n\n"
+                    f"{row.get('reason') or plan.get('estimated_download') or ''}"
+                ),
+            )
+            self.show_install_plan(provider_id=provider_id)
+            return False
         if not command:
             self.show_install_plan(provider_id=provider_id)
             return False

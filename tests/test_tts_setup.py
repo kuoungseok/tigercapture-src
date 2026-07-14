@@ -194,7 +194,7 @@ def test_tts_provider_status_requires_gpt_sovits_reference_preset(tmp_path):
 def test_tts_provider_options_sort_ready_libraries_first(tmp_path):
     from app.tts_gpt_sovits import GPT_SOVITS_ENV_ROOT
     from app.tts_kokoro import KOKORO_ENV_ROOT
-    from app.tts_setup import TTS_ENV_ROOT, tts_provider_options
+    from app.tts_setup import TTS_ENV_ROOT, TTS_VOICE_LIBRARY_CATALOG, tts_provider_options
 
     kokoro = _fake_kokoro_root(tmp_path / "kokoro")
     gpt_sovits = _fake_gpt_sovits_root(tmp_path / "gpt-sovits")
@@ -209,8 +209,32 @@ def test_tts_provider_options_sort_ready_libraries_first(tmp_path):
     )
 
     assert [row["available"] for row in rows[:2]] == [True, True]
-    assert rows[-1]["provider_id"] == "style_bert_vits2_sidecar"
-    assert rows[-1]["available"] is False
+    assert all(row["available"] for row in rows[:2])
+    assert not any(row["available"] for row in rows[2:])
+    provider_ids = {row["provider_id"] for row in rows}
+    assert {"style_bert_vits2_sidecar", "kokoro_local", "gpt_sovits_sidecar"} <= provider_ids
+    assert {row["provider_id"] for row in TTS_VOICE_LIBRARY_CATALOG} <= provider_ids
+    piper = next(row for row in rows if row["provider_id"] == "piper_catalog")
+    assert piper["catalog_only"] is True
+    assert piper["setup_state"] == "adapter_planned"
+    assert piper["available"] is False
+
+
+def test_tts_catalog_only_provider_status_and_plan_are_self_describing():
+    from app.tts_setup import tts_install_execution_gate, tts_install_plan, tts_provider_status
+
+    status = tts_provider_status(provider_id="piper_catalog")
+    plan = tts_install_plan(provider_id="piper_catalog")
+    gate = tts_install_execution_gate(provider_id="piper_catalog")
+
+    assert status["provider_id"] == "piper_catalog"
+    assert status["catalog_only"] is True
+    assert status["available"] is False
+    assert status["setup_state"] == "adapter_planned"
+    assert plan["provider_id"] == "piper_catalog"
+    assert plan["commands"] == {}
+    assert "Adapter needed" == plan["steps"][0]["label"]
+    assert gate["ready_to_execute"] is False
 
 
 def test_tts_actions_are_registered_and_readable(tmp_path):
