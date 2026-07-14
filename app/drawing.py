@@ -16,6 +16,8 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
     QPolygonF,
+    QKeySequence,
+    QShortcut,
 )
 from PySide6.QtWidgets import (
     QColorDialog,
@@ -28,6 +30,7 @@ from PySide6.QtWidgets import (
     QLabel,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPushButton,
     QSizePolicy,
     QSlider,
@@ -1168,6 +1171,8 @@ class PaintDialog(QDialog):
         self._redo_stack: list[tuple[list[Stroke], list[SpeechBubble], list["Sticker"]]] = []
         self._restoring_state = False
         self._canvas_zoom = 1.0
+        self._selected_layer_id: str | None = None
+        self._paint_clipboard: dict | None = None
 
         # Make the dialog large (paint-app feel). Cap at screen size.
         if parent is not None:
@@ -1656,7 +1661,24 @@ class PaintDialog(QDialog):
         self._layer_list.setObjectName("PaintLayerList")
         self._layer_list.setFixedHeight(142)
         self._layer_list.itemClicked.connect(self._select_layer_item)
+        self._layer_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._layer_list.customContextMenuRequested.connect(self._open_layer_context_menu)
         inspector_layout.addWidget(self._layer_list)
+
+        edit_row = QHBoxLayout()
+        edit_row.setContentsMargins(0, 0, 0, 0)
+        for label_text, handler in (
+            ("Copy", self._copy_selected_layer),
+            ("Cut", self._cut_selected_layer),
+            ("Paste", self._paste_layer_clipboard),
+            ("Delete", self._delete_selected_layer),
+        ):
+            btn = QPushButton(label_text)
+            btn.setObjectName("PaintCustomColor")
+            btn.setCursor(Qt.CursorShape.PointingHandCursor)
+            btn.clicked.connect(handler)
+            edit_row.addWidget(btn)
+        inspector_layout.addLayout(edit_row)
         self._layer_count_labels: dict[str, QLabel] = {}
         for key, label_text in (
             ("strokes", "Strokes"),
@@ -1684,6 +1706,7 @@ class PaintDialog(QDialog):
 
         self._highlight_selected_palette()
         self._update_inspector_counts()
+        self._install_edit_shortcuts()
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -1903,6 +1926,7 @@ class PaintDialog(QDialog):
         layer_list = getattr(self, "_layer_list", None)
         if layer_list is None:
             return
+        selected_id = self._selected_layer_id
         if strokes_count is None:
             strokes_count = len(self.canvas.embedded_strokes()) if hasattr(self, "canvas") else 0
         layer_list.blockSignals(True)
@@ -1912,23 +1936,32 @@ class PaintDialog(QDialog):
                 item = QListWidgetItem(f"Brush strokes ({strokes_count})")
                 item.setData(Qt.ItemDataRole.UserRole, "strokes")
                 layer_list.addItem(item)
+                if selected_id == "strokes":
+                    layer_list.setCurrentItem(item)
             for idx, bubble in enumerate(getattr(self, "_bubbles", [])):
                 text = bubble.text.strip() or "Speech bubble"
                 item = QListWidgetItem(f"Bubble {idx + 1}: {text[:24]}")
-                item.setData(Qt.ItemDataRole.UserRole, f"bubble:{idx}")
+                layer_id = f"bubble:{idx}"
+                item.setData(Qt.ItemDataRole.UserRole, layer_id)
                 layer_list.addItem(item)
+                if selected_id == layer_id:
+                    layer_list.setCurrentItem(item)
             for idx, sticker in enumerate(getattr(self, "_stickers", [])):
                 from pathlib import Path
 
                 name = Path(sticker.png_path).name or "PNG sticker"
                 item = QListWidgetItem(f"Sticker {idx + 1}: {name[:24]}")
-                item.setData(Qt.ItemDataRole.UserRole, f"sticker:{idx}")
+                layer_id = f"sticker:{idx}"
+                item.setData(Qt.ItemDataRole.UserRole, layer_id)
                 layer_list.addItem(item)
+                if selected_id == layer_id:
+                    layer_list.setCurrentItem(item)
         finally:
             layer_list.blockSignals(False)
 
     def _select_layer_item(self, item: QListWidgetItem) -> None:
         layer_id = item.data(Qt.ItemDataRole.UserRole)
+        self._selected_layer_id = str(layer_id) if layer_id is not None else None
         self._set_tool("select")
         if layer_id == "strokes":
             return
@@ -1945,6 +1978,191 @@ class PaintDialog(QDialog):
                 sticker_item = self._sticker_items[idx]
                 sticker_item.raise_()
                 sticker_item.setFocus()
+
+    def _install_edit_shortcuts(self) -> None:
+        shortcuts = (
+            ("Ctrl+C", self._copy_selected_layer),
+            ("Ctrl+X", self._cut_selected_layer),
+            ("Ctrl+V", self._paste_layer_clipboard),
+            ("Delete", self._delete_selected_layer),
+            ("Backspace", self._delete_selected_layer),
+            ("Ctrl+D", self._duplicate_selected_layer),
+        )
+        self._paint_shortcuts = []
+        for key, handler in shortcuts:
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            shortcut.activated.connect(handler)
+            self._paint_shortcuts.append(shortcut)
+
+    def _open_layer_context_menu(self, pos) -> None:
+        item = self._layer_list.itemAt(pos)
+        if item is not None:
+            self._layer_list.setCurrentItem(item)
+            self._select_layer_item(item)
+        menu = QMenu(self)
+        copy_action = menu.addAction("Copy")
+        cut_action = menu.addAction("Cut")
+        paste_action = menu.addAction("Paste")
+        duplicate_action = menu.addAction("Duplicate")
+        menu.addSeparator()
+        delete_action = menu.addAction("Delete")
+        has_selection = self._selected_layer_id is not None
+        copy_action.setEnabled(has_selection)
+        cut_action.setEnabled(has_selection)
+        duplicate_action.setEnabled(has_selection)
+        delete_action.setEnabled(has_selection)
+        paste_action.setEnabled(self._paint_clipboard is not None)
+        chosen = menu.exec(self._layer_list.mapToGlobal(pos))
+        if chosen is copy_action:
+            self._copy_selected_layer()
+        elif chosen is cut_action:
+            self._cut_selected_layer()
+        elif chosen is paste_action:
+            self._paste_layer_clipboard()
+        elif chosen is duplicate_action:
+            self._duplicate_selected_layer()
+        elif chosen is delete_action:
+            self._delete_selected_layer()
+
+    def _current_layer_id(self) -> str | None:
+        if self._selected_layer_id:
+            return self._selected_layer_id
+        item = self._layer_list.currentItem() if hasattr(self, "_layer_list") else None
+        if item is not None:
+            layer_id = item.data(Qt.ItemDataRole.UserRole)
+            if layer_id is not None:
+                self._selected_layer_id = str(layer_id)
+        return self._selected_layer_id
+
+    def _copy_selected_layer(self) -> None:
+        if self._text_editor_has_focus():
+            return
+        payload = self._payload_for_layer(self._current_layer_id())
+        if payload is not None:
+            self._paint_clipboard = payload
+
+    def _cut_selected_layer(self) -> None:
+        if self._text_editor_has_focus():
+            return
+        layer_id = self._current_layer_id()
+        payload = self._payload_for_layer(layer_id)
+        if payload is None:
+            return
+        self._paint_clipboard = payload
+        self._delete_layer(layer_id)
+
+    def _duplicate_selected_layer(self) -> None:
+        if self._text_editor_has_focus():
+            return
+        payload = self._payload_for_layer(self._current_layer_id())
+        if payload is None:
+            return
+        self._paste_payload(payload)
+
+    def _paste_layer_clipboard(self) -> None:
+        if self._text_editor_has_focus():
+            return
+        if self._paint_clipboard is None:
+            return
+        self._paste_payload(self._paint_clipboard)
+
+    def _delete_selected_layer(self) -> None:
+        if self._text_editor_has_focus():
+            return
+        self._delete_layer(self._current_layer_id())
+
+    def _text_editor_has_focus(self) -> bool:
+        widget = self.focusWidget()
+        while widget is not None:
+            if isinstance(widget, QTextEdit):
+                return True
+            widget = widget.parentWidget()
+        return False
+
+    def _payload_for_layer(self, layer_id: str | None) -> dict | None:
+        if not layer_id:
+            return None
+        if layer_id == "strokes":
+            strokes = self.canvas.embedded_strokes()
+            if not strokes:
+                return None
+            return {"kind": "strokes", "strokes": copy.deepcopy(strokes)}
+        if layer_id.startswith("bubble:"):
+            idx = int(layer_id.split(":", 1)[1])
+            if 0 <= idx < len(self._bubbles):
+                return {"kind": "bubble", "bubble": copy.deepcopy(self._bubbles[idx])}
+        if layer_id.startswith("sticker:"):
+            idx = int(layer_id.split(":", 1)[1])
+            if 0 <= idx < len(self._stickers):
+                return {"kind": "sticker", "sticker": copy.deepcopy(self._stickers[idx])}
+        return None
+
+    def _paste_payload(self, payload: dict) -> None:
+        kind = payload.get("kind")
+        self._push_undo_state()
+        if kind == "strokes":
+            pasted = copy.deepcopy(payload.get("strokes") or [])
+            for stroke in pasted:
+                stroke.points = [
+                    (max(0.0, min(1.0, x + 0.025)), max(0.0, min(1.0, y + 0.025)))
+                    for x, y in stroke.points
+                ]
+                stroke.start_ms = self._time_ms
+                self.canvas.add_stroke_direct(stroke)
+            self._selected_layer_id = "strokes"
+        elif kind == "bubble":
+            bubble = copy.deepcopy(payload.get("bubble"))
+            if bubble is None:
+                return
+            bubble.x_norm = min(0.95, float(bubble.x_norm) + 0.035)
+            bubble.y_norm = min(0.95, float(bubble.y_norm) + 0.035)
+            bubble.start_ms = self._time_ms
+            self._bubbles.append(bubble)
+            self._spawn_bubble_item(bubble)
+            self._selected_layer_id = f"bubble:{len(self._bubbles) - 1}"
+        elif kind == "sticker":
+            sticker = copy.deepcopy(payload.get("sticker"))
+            if sticker is None:
+                return
+            sticker.x_norm = min(0.95, float(sticker.x_norm) + 0.035)
+            sticker.y_norm = min(0.95, float(sticker.y_norm) + 0.035)
+            sticker.start_ms = self._time_ms
+            sticker.z_index = max((s.z_index for s in self._stickers), default=0) + 1
+            self._stickers.append(sticker)
+            self._spawn_sticker_item(sticker)
+            self._selected_layer_id = f"sticker:{len(self._stickers) - 1}"
+        self._update_inspector_counts()
+        self._set_tool("select")
+
+    def _delete_layer(self, layer_id: str | None) -> None:
+        if not layer_id:
+            return
+        self._push_undo_state()
+        if layer_id == "strokes":
+            self.canvas.clear_strokes_direct()
+            self._selected_layer_id = None
+        elif layer_id.startswith("bubble:"):
+            idx = int(layer_id.split(":", 1)[1])
+            if 0 <= idx < len(self._bubbles):
+                bubble = self._bubbles[idx]
+                item = self._bubble_items[idx] if idx < len(self._bubble_items) else None
+                if item is not None:
+                    self._remove_bubble(bubble, item)
+                else:
+                    self._bubbles.pop(idx)
+                self._selected_layer_id = None
+        elif layer_id.startswith("sticker:"):
+            idx = int(layer_id.split(":", 1)[1])
+            if 0 <= idx < len(self._stickers):
+                sticker = self._stickers[idx]
+                item = self._sticker_items[idx] if idx < len(self._sticker_items) else None
+                if item is not None:
+                    self._remove_sticker(sticker, item)
+                else:
+                    self._stickers.pop(idx)
+                self._selected_layer_id = None
+        self._update_inspector_counts()
 
     # ---------- layout sync ----------
 
@@ -2003,6 +2221,7 @@ class PaintDialog(QDialog):
             item.raise_()
 
     def _add_bubble(self) -> None:
+        self._push_undo_state()
         bubble = SpeechBubble(
             x_norm=0.15, y_norm=0.15,
             width_norm=0.35, height_norm=0.22,
@@ -2011,6 +2230,11 @@ class PaintDialog(QDialog):
             tail="left",
         )
         self._bubbles.append(bubble)
+        self._spawn_bubble_item(bubble)
+        self._selected_layer_id = f"bubble:{len(self._bubbles) - 1}"
+        self._update_inspector_counts()
+
+    def _spawn_bubble_item(self, bubble: "SpeechBubble") -> "SpeechBubbleItem":
         item = SpeechBubbleItem(bubble, self.canvas)
         item.sync_to_parent()
         item.show()
@@ -2018,7 +2242,7 @@ class PaintDialog(QDialog):
         item.moved.connect(lambda it=item: it.sync_to_bubble())
         item.deleted.connect(lambda it=item, b=bubble: self._remove_bubble(b, it))
         self._bubble_items.append(item)
-        self._update_inspector_counts()
+        return item
 
     def _remove_bubble(self, bubble: "SpeechBubble", item: "SpeechBubbleItem") -> None:
         if bubble in self._bubbles:
@@ -2030,13 +2254,7 @@ class PaintDialog(QDialog):
 
     def _spawn_initial_bubbles(self) -> None:
         for bubble in self._bubbles:
-            item = SpeechBubbleItem(bubble, self.canvas)
-            item.sync_to_parent()
-            item.show()
-            item.raise_()
-            item.moved.connect(lambda it=item: it.sync_to_bubble())
-            item.deleted.connect(lambda it=item, b=bubble: self._remove_bubble(b, it))
-            self._bubble_items.append(item)
+            self._spawn_bubble_item(bubble)
         self._update_inspector_counts()
 
     def result_strokes(self) -> list[Stroke]:
@@ -2100,7 +2318,9 @@ class PaintDialog(QDialog):
             start_ms=self._time_ms,
             end_ms=-1,
         )
+        self._push_undo_state()
         self._stickers.append(sticker)
+        self._selected_layer_id = f"sticker:{len(self._stickers) - 1}"
         self._spawn_sticker_item(sticker)
         self._update_inspector_counts()
 
@@ -2176,6 +2396,7 @@ class PaintDialog(QDialog):
             z_index=max((s.z_index for s in self._stickers), default=0) + 1,
         )
         self._stickers.append(sticker)
+        self._selected_layer_id = f"sticker:{len(self._stickers) - 1}"
         self._spawn_sticker_item(sticker)
         self._update_inspector_counts()
         self._set_tool("select")
@@ -2213,6 +2434,7 @@ class PaintDialog(QDialog):
 
     def _duplicate_sticker(self, sticker: "Sticker") -> None:
         import copy
+        self._push_undo_state()
         dup = copy.deepcopy(sticker)
         # Nudge the copy a little so it doesn't sit exactly on top.
         dup.x_norm = min(0.95, dup.x_norm + 0.03)
@@ -2221,6 +2443,7 @@ class PaintDialog(QDialog):
         current_max_z = max((s.z_index for s in self._stickers), default=0)
         dup.z_index = current_max_z + 1
         self._stickers.append(dup)
+        self._selected_layer_id = f"sticker:{len(self._stickers) - 1}"
         self._spawn_sticker_item(dup)
         self._update_inspector_counts()
 
