@@ -1158,11 +1158,13 @@ class PaintDialog(QDialog):
         parent: QWidget | None = None,
         initial_bubbles: list["SpeechBubble"] | None = None,
         initial_stickers: list["Sticker"] | None = None,
+        editor_object_provider: Callable[[], list] | None = None,
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle(tr("paint.title"))
         self.setModal(True)
         self._time_ms = int(time_ms)
+        self._editor_object_provider = editor_object_provider
         self._bubbles: list[SpeechBubble] = list(initial_bubbles or [])
         self._bubble_items: list[SpeechBubbleItem] = []
         self._stickers: list["Sticker"] = list(initial_stickers or [])
@@ -1359,7 +1361,7 @@ class PaintDialog(QDialog):
         title = QLabel("TigerCapture Paint")
         title.setObjectName("PaintTitle")
         subtitle = QLabel(
-            "Draw, erase, add speech bubbles, and place PNG stickers."
+            "Draw, cut out, place PNG stickers, and import editor objects."
         )
         subtitle.setObjectName("PaintSubtitle")
         title_col.addWidget(title)
@@ -1455,6 +1457,13 @@ class PaintDialog(QDialog):
         self.sticker_btn.setToolTip(tr("sticker.add_tooltip"))
         self.sticker_btn.clicked.connect(self._add_sticker)
 
+        self.editor_object_btn = QPushButton("Editor Object")
+        self.editor_object_btn.setObjectName("StickerBtn")
+        self.editor_object_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.editor_object_btn.setToolTip("Import typography, AR/PBR, and actor objects from the editor.")
+        self.editor_object_btn.setEnabled(callable(self._editor_object_provider))
+        self.editor_object_btn.clicked.connect(self._import_editor_object)
+
         self.clear_btn = QPushButton(tr("paint.btn.clear_all"))
         self.clear_btn.setObjectName("PaintDanger")
         self.clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1472,6 +1481,7 @@ class PaintDialog(QDialog):
         tool_layout.addSpacing(8)
         tool_layout.addWidget(self.bubble_btn)
         tool_layout.addWidget(self.sticker_btn)
+        tool_layout.addWidget(self.editor_object_btn)
         tool_layout.addWidget(self.cutout_btn)
         tool_layout.addSpacing(8)
         tool_layout.addWidget(self.clear_btn)
@@ -2323,6 +2333,103 @@ class PaintDialog(QDialog):
         self._selected_layer_id = f"sticker:{len(self._stickers) - 1}"
         self._spawn_sticker_item(sticker)
         self._update_inspector_counts()
+
+    def _import_editor_object(self) -> None:
+        """Import an editor creative object as a movable sticker layer."""
+        from PySide6.QtWidgets import QMessageBox
+
+        provider = getattr(self, "_editor_object_provider", None)
+        if not callable(provider):
+            QMessageBox.information(
+                self,
+                "Editor Object",
+                "No editor object source is connected to this paint window.",
+            )
+            return
+        try:
+            raw_objects = list(provider() or [])
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Editor Object",
+                f"Could not read editor objects: {type(exc).__name__}",
+            )
+            return
+        if not raw_objects:
+            QMessageBox.information(
+                self,
+                "Editor Object",
+                "No typography, AR/PBR, or actor objects are available at this point in the project.",
+            )
+            return
+
+        from app.drawing_editor_object_import import coerce_paint_import_object
+
+        objects = [coerce_paint_import_object(item) for item in raw_objects]
+        menu = QMenu(self)
+        for index, obj in enumerate(objects):
+            action = menu.addAction(obj.menu_label())
+            action.setData(index)
+        anchor = getattr(self, "editor_object_btn", self)
+        pos = anchor.mapToGlobal(anchor.rect().bottomLeft()) if hasattr(anchor, "rect") else self.cursor().pos()
+        chosen = menu.exec(pos)
+        if chosen is None:
+            return
+        try:
+            obj = objects[int(chosen.data())]
+        except Exception:
+            return
+        self._place_editor_object_sticker(obj)
+
+    def _place_editor_object_sticker(self, obj) -> None:
+        from PySide6.QtWidgets import QMessageBox
+
+        from app.drawing_editor_object_import import render_paint_import_object
+
+        canvas_w = max(1, self.canvas.width())
+        canvas_h = max(1, self.canvas.height())
+        try:
+            report = render_paint_import_object(
+                obj,
+                canvas_size=(canvas_w, canvas_h),
+            )
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Editor Object",
+                f"Import render failed: {type(exc).__name__}",
+            )
+            return
+        png_path = str(report.get("png_path") or "")
+        pm = QPixmap(png_path)
+        if pm.isNull():
+            QMessageBox.warning(
+                self,
+                "Editor Object",
+                "The imported object poster could not be decoded as a PNG.",
+            )
+            return
+        rect = dict(report.get("rect_norm") or {})
+        w_norm = max(0.04, min(1.0, float(rect.get("w", 0.28) or 0.28)))
+        h_norm = max(0.04, min(1.0, float(rect.get("h", 0.20) or 0.20)))
+        x_norm = max(0.0, min(1.0 - w_norm, float(rect.get("x", 0.15) or 0.15)))
+        y_norm = max(0.0, min(1.0 - h_norm, float(rect.get("y", 0.15) or 0.15)))
+        sticker = Sticker(
+            png_path=png_path,
+            x_norm=x_norm,
+            y_norm=y_norm,
+            width_norm=w_norm,
+            height_norm=h_norm,
+            start_ms=self._time_ms,
+            end_ms=-1,
+            z_index=max((s.z_index for s in self._stickers), default=0) + 1,
+        )
+        self._push_undo_state()
+        self._stickers.append(sticker)
+        self._selected_layer_id = f"sticker:{len(self._stickers) - 1}"
+        self._spawn_sticker_item(sticker)
+        self._update_inspector_counts()
+        self._set_tool("select")
 
     def _create_cutout_sticker(self) -> None:
         """Create a foreground cutout from the current frame as a PNG sticker."""
