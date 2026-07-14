@@ -83,6 +83,17 @@ def register_tts_actions(registry: Any) -> None:
         dry_summary="TTS setup view model would be read",
     )
     registry.register_adapter_action(
+        "tts.voice_library.catalog",
+        "List every Voice Lab voice library entry, including ready providers and planned adapters.",
+        "tts",
+        "tts_voice_library_catalog",
+        params_schema=schema_object({}),
+        mutating=False,
+        requires_owner=False,
+        changed=False,
+        dry_summary="Voice Lab voice library catalog would be listed",
+    )
+    registry.register_adapter_action(
         "tts.install.plan",
         "Return the safe local TTS install plan without running it.",
         "tts",

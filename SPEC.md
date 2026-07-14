@@ -202,7 +202,9 @@ Start here when changing a feature:
   Piper, Coqui XTTS, F5-TTS, CosyVoice, Fish Speech, OpenVoice, MeloTTS,
   ChatTTS, Bark, Edge TTS, ElevenLabs, and Azure Speech remain visible but fall
   back to the install plan and guide until their provider boundaries are
-  implemented.
+  implemented. The same list is exposed to automation as
+  `tts.voice_library.catalog` so AI/MCP workflows can discover ready,
+  unavailable, and planned libraries without scraping the UI view model.
   TTS subtitle timing can now be baked to Live2D mouth and
   natural blink parameters through `tts.subtitle.apply_actor_lipsync`, or in
   the same generation call by passing `apply_actor_lipsync=true` plus an actor

@@ -36,6 +36,11 @@ class TtsAdapterMixin:
 
         return tts_setup_view_model(provider_id=provider_id) if provider_id else tts_setup_view_model()
 
+    def tts_voice_library_catalog(self) -> dict[str, Any]:
+        from app.tts_setup import tts_voice_library_catalog
+
+        return tts_voice_library_catalog()
+
     def tts_install_plan(self, *, install_root: str = "", provider_id: str = "") -> dict[str, Any]:
         from app.tts_setup import tts_install_plan
 

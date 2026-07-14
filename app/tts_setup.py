@@ -888,6 +888,29 @@ def tts_provider_options(env: Mapping[str, str] | None = None) -> list[dict[str,
     return rows
 
 
+def tts_voice_library_catalog(env: Mapping[str, str] | None = None) -> dict[str, Any]:
+    rows = tts_provider_options(env)
+    selected = saved_tts_selected_provider(env)
+    return {
+        "schema": TTS_SCHEMA_VERSION,
+        "catalog_schema": "tigercapture.tts_voice_library_catalog.v1",
+        "provider_id": selected,
+        "selected_provider_id": selected,
+        "ready_count": sum(1 for row in rows if bool(row.get("available"))),
+        "installed_count": sum(1 for row in rows if bool(row.get("installed"))),
+        "planned_count": sum(1 for row in rows if bool(row.get("catalog_only"))),
+        "library_count": len(rows),
+        "libraries": rows,
+        "ui_contract": {
+            "sort": "available first, installed/setup next, catalog-only planned entries last",
+            "unavailable_style": "muted_gray",
+            "select_unavailable": "show install/adapter guidance before changing provider",
+            "install_action": "tts.install.plan",
+            "select_action": "tts.provider.select",
+        },
+    }
+
+
 def tts_setup_instructions(env: Mapping[str, str] | None = None, *, provider_id: str = "") -> dict[str, Any]:
     status = tts_provider_status(env, provider_id=provider_id)
     selected_provider = str(status.get("provider_id") or TTS_PROVIDER_ID)
@@ -1015,6 +1038,7 @@ __all__ = [
     "tts_install_plan",
     "tts_provider_status",
     "tts_provider_options",
+    "tts_voice_library_catalog",
     "tts_server_start_plan",
     "tts_server_command",
     "tts_setup_instructions",

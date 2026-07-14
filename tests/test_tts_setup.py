@@ -246,6 +246,7 @@ def test_tts_actions_are_registered_and_readable(tmp_path):
     assert "tts.provider.status" in ids
     assert "tts.provider.select" in ids
     assert "tts.install.plan" in ids
+    assert "tts.voice_library.catalog" in ids
     assert "tts.connect_installed_sidecar" in ids
     assert "tts.server.ensure_running" in ids
     assert "tts.voice.list" in ids
@@ -264,6 +265,23 @@ def test_tts_actions_are_registered_and_readable(tmp_path):
     result = registry.execute("tts.install.plan", {"install_root": str(tmp_path / "tts")})
     assert result.ok is True
     assert result.result["provider_id"] == "style_bert_vits2_sidecar"
+
+
+def test_tts_voice_library_catalog_action_lists_supported_and_planned_entries():
+    from app.actions import build_default_action_registry
+
+    registry = build_default_action_registry(None)
+    result = registry.execute("tts.voice_library.catalog", {}).to_dict()
+
+    assert result["ok"] is True
+    payload = result["result"]
+    assert payload["catalog_schema"] == "tigercapture.tts_voice_library_catalog.v1"
+    provider_ids = {row["provider_id"] for row in payload["libraries"]}
+    assert {"style_bert_vits2_sidecar", "kokoro_local", "gpt_sovits_sidecar"} <= provider_ids
+    assert {"piper_catalog", "coqui_xtts_catalog", "f5_tts_catalog", "elevenlabs_catalog"} <= provider_ids
+    assert payload["library_count"] >= 12
+    assert payload["planned_count"] >= 8
+    assert payload["ui_contract"]["install_action"] == "tts.install.plan"
 
 
 def test_tts_model_training_plan_and_gate_use_external_sidecar_tools(tmp_path):

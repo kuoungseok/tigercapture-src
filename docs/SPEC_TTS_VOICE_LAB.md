@@ -112,6 +112,9 @@ instructions:
   command exists or the entry is catalog-only, Voice Lab falls back to the
   install plan/guide instead of pretending it can complete the setup
   automatically.
+- Python Actions must expose the same catalog through
+  `tts.voice_library.catalog`. AI/MCP callers should not have to scrape
+  `tts.setup.view` just to discover available and planned voice libraries.
 - `Install`: show a safe install plan for the selected provider. Kokoro installs
   into `external/tools/tts/kokoro`; Style-Bert-VITS2 remains an optional sidecar
   and must not be copied into the closed source tree. GPT-SoVITS installs into
