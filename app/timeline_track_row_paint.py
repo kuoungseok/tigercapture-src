@@ -178,6 +178,41 @@ def _paint_active_track_context_outline(
     painter.restore()
 
 
+def _with_alpha(color: QColor, alpha: int) -> QColor:
+    out = QColor(color)
+    out.setAlpha(max(0, min(255, int(alpha))))
+    return out
+
+
+def _paint_track_row_background_wash(
+    painter: QPainter,
+    rect: QRect,
+    fill: QColor,
+    highlight: QColor,
+    edge: QColor,
+    *,
+    active: bool,
+) -> None:
+    """Keep each timeline row visibly tied to its track color, including gaps."""
+    if rect.width() <= 0 or rect.height() <= 0:
+        return
+    fill = QColor(fill)
+    highlight = QColor(highlight)
+    edge = QColor(edge)
+    painter.save()
+    wash = QLinearGradient(rect.left(), rect.top(), rect.right(), rect.bottom())
+    wash.setColorAt(0.0, _with_alpha(highlight.lighter(106), 46 if active else 34))
+    wash.setColorAt(0.52, _with_alpha(fill, 36 if active else 28))
+    wash.setColorAt(1.0, _with_alpha(edge.darker(112), 32 if active else 24))
+    painter.fillRect(rect, QBrush(wash))
+    painter.fillRect(rect.adjusted(0, 3, 0, -3), _with_alpha(fill.darker(135), 12 if active else 8))
+    painter.setPen(QPen(_with_alpha(edge, 56 if active else 36), 1))
+    painter.drawLine(rect.left(), rect.top(), rect.right(), rect.top())
+    painter.setPen(QPen(_with_alpha(edge.darker(125), 42 if active else 28), 1))
+    painter.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
+    painter.restore()
+
+
 def _timeline_thumb_blend_width(tile_w: int, thumb_h: int) -> int:
     tile_w = max(1, int(tile_w))
     thumb_h = max(1, int(thumb_h))
@@ -472,6 +507,12 @@ def paintEvent(self, event) -> None:
     paint_timeline_lane_header(self, painter, is_perf_track=is_perf_track)
 
     rect = self._timeline_rect()
+    row_body_rect = QRect(
+        self.MARGIN,
+        self.LABEL_H,
+        max(0, self.width() - self.MARGIN),
+        self.TIMELINE_H,
+    )
     # Multi-source tracks (source_path=None, clips=[??) must fall
     # through to the clip-rendering else-branch below.  Only a truly
     # empty slot (no source AND no clips) shows the "no source" placeholder.
@@ -480,7 +521,15 @@ def paintEvent(self, event) -> None:
         # Empty slot: BRIGHTER diagonal stripes than the host background,
         # with a dashed border ??matches the 3-level hierarchy
         # (timeline host = darkest, loaded clip = middle, empty = lightest).
-        self._paint_empty_slot_pattern(painter, rect)
+        self._paint_empty_slot_pattern(painter, row_body_rect)
+        _paint_track_row_background_wash(
+            painter,
+            row_body_rect,
+            clip_fill,
+            clip_hi,
+            clip_edge,
+            active=self._is_active,
+        )
         # Large watermark icon, drawn directly so it is font-independent.
         painter.save()
         wm_size = min(48, max(24, self.TIMELINE_H - 8))
@@ -517,12 +566,7 @@ def paintEvent(self, event) -> None:
         # the gap leaves the user staring at an empty track row.
         clips_list = list(getattr(self.track, "clips", ()) or ())
         # 1) 80% stripes across full widget width
-        full_strip = QRect(
-            self.MARGIN,
-            self.LABEL_H,
-            max(0, self.width() - self.MARGIN),
-            self.TIMELINE_H,
-        )
+        full_strip = row_body_rect
         StripedHost._draw_stripes(
             painter, full_strip,
             StripedHost.BG_80, StripedHost.STRIPE_80,
@@ -530,6 +574,14 @@ def paintEvent(self, event) -> None:
         painter.fillRect(
             full_strip.adjusted(0, 3, 0, -3),
             QColor(255, 255, 255, 2),
+        )
+        _paint_track_row_background_wash(
+            painter,
+            full_strip,
+            clip_fill,
+            clip_hi,
+            clip_edge,
+            active=self._is_active,
         )
         painter.save()
         painter.setPen(QColor(255, 255, 255, 7))
@@ -871,10 +923,12 @@ def paintEvent(self, event) -> None:
     for cut in self.track.cuts:
         x1 = self._ms_to_x(cut.start_ms)
         x2 = self._ms_to_x(cut.end_ms)
-        painter.fillRect(
-            x1, rect.top(), max(1, x2 - x1), rect.height(),
-            QColor(30, 30, 30, 200),
-        )
+        cut_rect = QRect(x1, rect.top(), max(1, x2 - x1), rect.height())
+        painter.fillRect(cut_rect, _with_alpha(clip_fill.darker(145), 126))
+        painter.fillRect(cut_rect.adjusted(0, 3, 0, -3), QColor(0, 0, 0, 78))
+        painter.setPen(QPen(_with_alpha(clip_edge, 82), 1))
+        painter.drawLine(cut_rect.left(), cut_rect.top(), cut_rect.left(), cut_rect.bottom())
+        painter.drawLine(cut_rect.right(), cut_rect.top(), cut_rect.right(), cut_rect.bottom())
         if x2 - x1 > 24:
             painter.setPen(QColor(255, 255, 255))
             painter.drawText(

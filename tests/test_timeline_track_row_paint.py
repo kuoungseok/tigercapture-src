@@ -11,7 +11,7 @@ from PySide6.QtGui import QColor, QPainter, QPixmap
 from PySide6.QtWidgets import QApplication
 
 import app.timeline_track_row_paint as paint_mod
-from app.timeline_model import VideoClip, VideoTrack
+from app.timeline_model import CutSegment, VideoClip, VideoTrack
 from app.timeline_track_row import TRACK_V_PADDING, TrackRow
 from app.timeline_track_row_paint import (
     _paint_timeline_playhead_sharp_thumb_window,
@@ -266,6 +266,98 @@ def _track_with_pattern_thumbnails() -> VideoTrack:
     }.items():
         setattr(track, name, value)
     return track
+
+
+def _track_with_two_clips_and_gap() -> VideoTrack:
+    thumb = _striped_thumb()
+    clip_a = VideoClip(
+        id=201,
+        source_path=Path("sample.mp4"),
+        source_duration_ms=1_000,
+        timeline_in_ms=0,
+        source_in_ms=0,
+        source_out_ms=1_000,
+        thumbnails=[thumb] * 2,
+    )
+    clip_b = VideoClip(
+        id=202,
+        source_path=Path("sample.mp4"),
+        source_duration_ms=1_000,
+        timeline_in_ms=2_000,
+        source_in_ms=0,
+        source_out_ms=1_000,
+        thumbnails=[thumb] * 2,
+    )
+    track = VideoTrack(id=2, clips=[clip_a, clip_b])
+    for name, value in {
+        "offset_ms": 0,
+        "source_path": Path("sample.mp4"),
+        "thumbnails": clip_a.thumbnails,
+        "speed_segments": [],
+        "cuts": [],
+        "fades": [],
+        "typography_actors": [],
+        "zoom_actors": [],
+    }.items():
+        setattr(track, name, value)
+    return track
+
+
+def _track_with_legacy_cut_overlay() -> VideoTrack:
+    thumb = _striped_thumb()
+    clip = VideoClip(
+        id=301,
+        source_path=Path("sample.mp4"),
+        source_duration_ms=3_000,
+        timeline_in_ms=0,
+        source_in_ms=0,
+        source_out_ms=3_000,
+        thumbnails=[thumb] * 4,
+    )
+    track = VideoTrack(id=2, clips=[clip])
+    for name, value in {
+        "offset_ms": 0,
+        "source_path": Path("sample.mp4"),
+        "thumbnails": clip.thumbnails,
+        "speed_segments": [],
+        "cuts": [CutSegment(1_000, 1_800)],
+        "fades": [],
+        "typography_actors": [],
+        "zoom_actors": [],
+    }.items():
+        setattr(track, name, value)
+    return track
+
+
+def _render_track_pixel(track: VideoTrack, project_ms: int) -> QColor:
+    _ensure_qapp()
+    row = TrackRow(track)
+    row.set_px_per_sec(90.0)
+    row.resize(640, row.height())
+    row.show()
+    QApplication.processEvents()
+    canvas = QPixmap(row.width(), row.height())
+    canvas.fill(QColor(0, 0, 0))
+    row.render(canvas)
+    image = canvas.toImage()
+    return image.pixelColor(
+        row._project_ms_to_x(project_ms),
+        row.LABEL_H + row.TIMELINE_H // 2,
+    )
+
+
+def test_track_background_keeps_track_hue_inside_empty_clip_gap():
+    pixel = _render_track_pixel(_track_with_two_clips_and_gap(), 1_500)
+
+    assert pixel.blue() > pixel.red() + 2
+    assert pixel.green() >= pixel.red()
+
+
+def test_legacy_cut_overlay_preserves_track_background_hue():
+    pixel = _render_track_pixel(_track_with_legacy_cut_overlay(), 1_400)
+
+    assert pixel.blue() > pixel.red() + 2
+    assert pixel.green() >= pixel.red()
 
 
 def test_track_row_paints_playhead_sharp_window_for_visible_clip(monkeypatch):
