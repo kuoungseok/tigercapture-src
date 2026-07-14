@@ -1,6 +1,6 @@
 ﻿# TigerCapture Feature Spec for AI Agents
 
-Last updated: 2026-07-13
+Last updated: 2026-07-14
 
 This file is an AI-readable map of features discovered while working with the
 user. Keep it current when behavior changes, especially for features that span
@@ -54,7 +54,8 @@ Start here when changing a feature:
 - Project save/load: `app/project_io.py`.
 - Comparison templates and before/after preview planning:
   `docs/SPEC_COMPARISON_TEMPLATES.md`.
-- Media pool: `app/media_pool.py`.
+- Media pool: `app/media_pool.py`, shared still-image helpers in
+  `app/image_media.py`.
 - Character Asset Hub: `app/character_asset_hub.py`,
   `app/character_asset_hub_window.py`,
   `app/character_one_click_templates.py`,
@@ -2791,6 +2792,18 @@ Behavior notes:
 - MP4 capture streams through FFmpeg.
 - Media files can enter through the media pool, drag/drop, editor context
   menus, or standalone Sound Editor launch.
+- Still images are first-class media-pool inputs. PNG, JPG/JPEG, JFIF, WebP,
+  and BMP files use shared helpers in `app/image_media.py`; Media Pool shows an
+  `IMG` badge, grid/list thumbnails come from the image itself, and timeline
+  thumbnail extraction short-circuits to still-frame thumbnails instead of
+  launching a video extractor.
+- Dropping or importing an image creates an image-marked visual timeline lane:
+  the underlying data stays on `VideoTrack` / `VideoClip` so color grading,
+  blur, node effects, typography, project save/load, preview, and export reuse
+  the normal visual pipeline, while `track_type="image"` and
+  `program_output=True` distinguish it from ordinary video. New image clips
+  default to `DEFAULT_IMAGE_DURATION_MS` from `app/image_media.py` unless an
+  explicit duration is supplied.
 - Media Pool can import a single YouTube URL as MP4 when `yt-dlp` is available:
   the header/context-menu command asks for a URL, validates it is a YouTube
   host, downloads into `YouTube Imports`, shows progress, and automatically
@@ -2826,6 +2839,12 @@ Video timeline:
   compatibility fields in `app/video_editor_window.py`.
 - `TrackRow` paints and edits timeline clips, trims, cuts, fades, speed, zoom,
   typography markers, context menus, and drag/drop behavior.
+- Image tracks are visual timeline tracks with an `I` lane label and image
+  palette. They are intentionally backed by video-track data objects for
+  compatibility with selection, effects, color grading, node graphs, preview,
+  and export; UI code should test `app.timeline_track_colors.is_image_track()`
+  or the `track_type="image"` marker instead of inventing a parallel image
+  timeline model.
 - Timeline selection supports additive/toggle selection with Shift or Ctrl.
   Dragging a selected clip moves the same-row selected clip group together,
   snaps group edges to project start/playhead/markers/other clip edges, and
@@ -5581,6 +5600,13 @@ AI Script Edit MVP integration:
   and base track add/remove, `app/actions/marker_namespace.py` owns marker
   actions, and `app/actions/timeline_core_namespace.py` owns transport, In/Out,
   edit-point navigation, bounded playback, zoom, snap, gap, and history actions.
+  `media.import_to_timeline` accepts `kind="image"` as well as video/audio, or
+  infers image kind from PNG/JPG/JPEG/JFIF/WebP/BMP paths. The adapter creates
+  the same image-marked visual lane used by Media Pool drag/drop, and the
+  rule-based AI command router prefers image media when prompts mention image,
+  photo, PNG, JPG, or equivalent Korean terms. Review automation treats image
+  import results as video-scoped targets so follow-up color, blur, node, text,
+  and split-compare steps can address the new still-image clip.
 - Clip edit and selection movement action namespaces are active:
   `app/actions/clip_edit_namespace.py` owns split, trim, range delete,
   lift/extract, clipboard insert/overwrite, 3-point edit, linked move,
