@@ -5,7 +5,13 @@ from PySide6.QtCore import QRect, Qt
 from PySide6.QtGui import QBrush, QColor, QFont, QLinearGradient, QPainter, QPen
 
 
-def paint_timeline_lane_header(self, painter: QPainter, *, is_perf_track: bool) -> None:
+def paint_timeline_lane_header(
+    self,
+    painter: QPainter,
+    *,
+    is_perf_track: bool,
+    is_image_track: bool = False,
+) -> None:
     painter.save()
     lane_rect = QRect(0, 0, self.MARGIN, self.LABEL_H + self.TIMELINE_H)
     body_rect = QRect(0, self.LABEL_H, self.MARGIN, self.TIMELINE_H)
@@ -25,6 +31,8 @@ def paint_timeline_lane_header(self, painter: QPainter, *, is_perf_track: bool) 
     accent = QColor("#C7CBD0" if self._is_active else "#6D7074")
     if is_perf_track:
         accent = QColor("#B4B8CC" if self._is_active else "#85899A")
+    elif is_image_track:
+        accent = QColor("#9BC8FF" if self._is_active else "#6F9DCC")
     accent.setAlpha(82 if self._is_active else 22)
     painter.fillRect(0, body_rect.top() + 8, 2, max(12, body_rect.height() - 16), accent)
     tab_rect = QRect(14, body_rect.top() + 5, 86, max(18, body_rect.height() - 10))
@@ -44,8 +52,15 @@ def paint_timeline_lane_header(self, painter: QPainter, *, is_perf_track: bool) 
     painter.setFont(lane_font)
     painter.setPen(label_color)
     lane_index = max(1, int(getattr(self, "_lane_index", 1) or 1))
-    lane_code = f"PS{lane_index}" if is_perf_track else f"V{lane_index}"
-    lane_role = "Perf Source" if is_perf_track else "Video"
+    if is_perf_track:
+        lane_code = f"PS{lane_index}"
+        lane_role = "Perf Source"
+    elif is_image_track:
+        lane_code = f"I{lane_index}"
+        lane_role = "Image"
+    else:
+        lane_code = f"V{lane_index}"
+        lane_role = "Video"
     label_y = body_rect.top() + max(0, (body_rect.height() - 16) // 2)
     painter.drawText(
         QRect(tab_rect.left(), label_y, tab_rect.width(), 16),

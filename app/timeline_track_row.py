@@ -55,6 +55,7 @@ from app.style import COLOR_ACCENT_ORANGE
 from app.timeline_cursor import _timeline_tool_cursor
 from app.timeline_track_colors import (
     catalog_track_palette as _catalog_track_palette,
+    is_image_track as _is_image_track,
     is_performance_source_track as _is_performance_source_track,
     track_palette_for_track as _track_palette_for_track,
 )
@@ -1811,6 +1812,9 @@ class TrackRow(QWidget):
 
     def _is_performance_source_track(self) -> bool:
         return _is_performance_source_track(self.track)
+
+    def _is_image_track(self) -> bool:
+        return _is_image_track(self.track)
 
     @staticmethod
     def _is_performance_source_clip(clip) -> bool:

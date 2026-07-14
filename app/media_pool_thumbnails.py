@@ -26,6 +26,7 @@ from app.media_pool_kinds import (
     _file_cache_key,
     _kind_for_path,
 )
+from app.image_media import image_pixmap
 
 
 def _probe_duration_ms(path: Path) -> int | None:
@@ -175,6 +176,18 @@ def _make_video_list_thumbnail(
         return None
 
 
+def _make_image_thumbnail(path: Path, size: int = THUMB_SIZE) -> QPixmap | None:
+    return image_pixmap(path, size, size, fit="contain")
+
+
+def _make_image_list_thumbnail(
+    path: Path,
+    width: int = LIST_THUMB_W,
+    height: int = LIST_THUMB_H,
+) -> QPixmap | None:
+    return image_pixmap(path, width, height, fit="cover")
+
+
 def _make_video_thumbnail_at(path: Path, ratio: float, size: int = THUMB_SIZE) -> QPixmap | None:
     """Extract a frame near ``ratio`` of the source duration for hover scrub."""
     ratio = max(0.0, min(1.0, float(ratio or 0.0)))
@@ -260,11 +273,12 @@ def _draw_kind_badge(pm: QPixmap, kind: str, label: str | None = None) -> QPixma
     """Overlay a small ``V`` / ``A`` badge in the bottom-right corner
     of a thumbnail so users can tell media types apart at a glance.
     Single-accent grey badge — text alone differentiates."""
-    if kind not in ("V", "A", "S", "3", "R", "M"):
+    if kind not in ("V", "A", "I", "S", "3", "R", "M"):
         return pm
     colors = {
         "V": "#E85D35",
         "A": "#5DCAA5",
+        "I": "#4FA3FF",
         "S": "#7A63FF",
         "3": "#5B8CFF",
         "R": "#B06BFF",

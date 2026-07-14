@@ -538,6 +538,7 @@ class ProjectPlayer(QObject):
         playback continues (showing blank) until the audio ends.
         """
         from app.video_decoder import open_decoder
+        from app.image_media import DEFAULT_IMAGE_DURATION_MS, is_image_path
 
         def _sync_track_decoder_metadata(track, decoder) -> None:
             fps = float(getattr(decoder, "fps", 0.0) or 0.0)
@@ -570,11 +571,14 @@ class ProjectPlayer(QObject):
                 sp = getattr(clip, "source_path", None)
                 if sp is not None:
                     clip_path = Path(sp)
+                    if is_image_path(clip_path):
+                        continue
                     active_paths.add(clip_path)
                     if track_source is None or clip_path != track_source:
                         eager_clip_paths.add(clip_path)
             if track_source is not None:
-                active_paths.add(track_source)
+                if not is_image_path(track_source):
+                    active_paths.add(track_source)
         # Release per-path decoders whose source is no longer referenced.
         for p in list(self._path_caps.keys()):
             if p not in active_paths:
@@ -609,6 +613,8 @@ class ProjectPlayer(QObject):
                     if sp is None:
                         continue
                     sp = Path(sp)
+                    if is_image_path(sp):
+                        continue
                     if sp in self._path_caps:
                         continue  # already open
                     hdr_info = getattr(t, "hdr_info", None)
@@ -629,6 +635,11 @@ class ProjectPlayer(QObject):
             # Callers re-call ``refresh_tracks`` after any change that
             # would invalidate the decoder.
             sp = Path(t.source_path)
+            if is_image_path(sp):
+                self._release_cap(t.id)
+                if int(getattr(t, "duration_ms", 0) or 0) <= 0:
+                    t.duration_ms = DEFAULT_IMAGE_DURATION_MS
+                continue
             if sp in self._path_caps and self._caps.get(t.id) is None:
                 decoder = self._path_caps[sp]
                 self._caps[t.id] = decoder
@@ -742,6 +753,7 @@ class ProjectPlayer(QObject):
             is_performance_source_clip,
             is_performance_source_track,
         )
+        from app.image_media import is_image_path
 
         for t in reversed(self._tracks):
             # PIP tracks are overlay-only — skip them for the base render.
@@ -751,10 +763,10 @@ class ProjectPlayer(QObject):
                 continue
             track_clips = self._clips_view.get(t.id, ())
             if t.source_path is None:
-                # Multi-source track: only active if it has clips with decoders.
+                # Multi-source track: active if it has clips with decoders or static images.
                 if not any(
                     getattr(c, "source_path", None) is not None
-                    and Path(c.source_path) in self._path_caps
+                    and (is_image_path(c.source_path) or Path(c.source_path) in self._path_caps)
                     for c in _source_clips_for_track(t)
                 ):
                     continue
@@ -762,7 +774,7 @@ class ProjectPlayer(QObject):
                 # Legacy single-source: decoder may be in _caps or _path_caps.
                 if t.id not in self._caps and not (
                     t.source_path is not None
-                    and Path(t.source_path) in self._path_caps
+                    and (is_image_path(t.source_path) or Path(t.source_path) in self._path_caps)
                 ):
                     continue
             for clip in track_clips:
@@ -773,7 +785,7 @@ class ProjectPlayer(QObject):
                         return t, clip
                     # For multi-source clips, also verify a decoder exists.
                     sp = getattr(clip, "source_path", None)
-                    if sp is not None and Path(sp) not in self._path_caps:
+                    if sp is not None and not is_image_path(sp) and Path(sp) not in self._path_caps:
                         continue
                     return t, clip
         return None

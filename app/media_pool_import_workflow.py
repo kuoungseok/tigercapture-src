@@ -39,6 +39,8 @@ from app.media_pool import (
     _kind_for_path,
     _make_ar_pbr_thumbnail,
     _make_audio_thumbnail,
+    _make_image_list_thumbnail,
+    _make_image_thumbnail,
     _make_mmd_thumbnail,
     _make_spine_thumbnail,
     _make_video_list_thumbnail,
@@ -52,6 +54,7 @@ from app.media_pool import (
     _probe_duration_ms,
     _proxy_state_for_video,
 )
+from app.image_media import DEFAULT_IMAGE_DURATION_MS
 
 def eventFilter(self, obj, event):
     if obj in (
@@ -103,7 +106,7 @@ def add_path(self, path: Path | str) -> bool:
     self._registered.add(key)
 
     kind = _kind_for_path(p)
-    dur_ms = _probe_duration_ms(p)
+    dur_ms = DEFAULT_IMAGE_DURATION_MS if kind == "I" else _probe_duration_ms(p)
     dur_str = _format_duration(dur_ms)
     # Compact display text for the narrow pool; full file identity stays in tooltip/data.
     item = QListWidgetItem(_media_pool_item_text(p, dur_str, self._view_mode))
@@ -148,6 +151,8 @@ def add_path(self, path: Path | str) -> bool:
         base_thumb = _make_video_thumbnail(p) or _placeholder_pixmap()
     elif kind == "A":
         base_thumb = _make_audio_thumbnail(p)
+    elif kind == "I":
+        base_thumb = _make_image_thumbnail(p) or _placeholder_pixmap()
     elif kind == "S":
         base_thumb = _make_spine_thumbnail()
     elif kind == "R":
@@ -194,6 +199,8 @@ def add_path(self, path: Path | str) -> bool:
         thumb = _draw_auto_polish_badge(thumb, auto_polish_report)
     if self._view_mode == "list" and kind == "V":
         item.setIcon(QIcon(_make_video_list_thumbnail(p) or thumb))
+    elif self._view_mode == "list" and kind == "I":
+        item.setIcon(QIcon(_make_image_list_thumbnail(p) or thumb))
     else:
         item.setIcon(QIcon(thumb))
     # Stash the probe result on the item so the workbench / future
@@ -529,4 +536,3 @@ def _apply_filter(self) -> None:
     )
     state = self._media_pool_state(total=self._list.count(), visible=visible)
     self._status_label.setText(state.title)
-

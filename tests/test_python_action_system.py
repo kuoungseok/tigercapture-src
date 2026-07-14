@@ -3304,6 +3304,34 @@ def test_extended_timeline_media_selection_effect_node_and_text_actions(tmp_path
     assert owner._tracks[0].typography_actors[0] is owner._tracks[0].clips[0].typography_actors[0]
 
 
+def test_media_import_to_timeline_supports_image_action(tmp_path):
+    from app.actions import build_default_action_registry
+
+    owner = _ActionOwner()
+    registry = build_default_action_registry(owner)
+    image_path = tmp_path / "poster.png"
+    image_path.write_bytes(b"\x89PNG\r\n\x1a\n")
+
+    schema = registry.get_action_schema("media.import_to_timeline")
+    assert "image" in schema["params_schema"]["properties"]["kind"]["enum"]
+
+    imported = registry.execute(
+        "media.import_to_timeline",
+        {"path": str(image_path), "kind": "image", "at_ms": 1200, "duration_ms": 2400},
+    ).to_dict()
+
+    assert imported["ok"] is True
+    assert imported["result"]["kind"] == "image"
+    assert imported["result"]["timeline_in_ms"] == 1200
+    assert imported["result"]["duration_ms"] == 2400
+    image_track = owner._tracks[-1]
+    image_clip = image_track.clips[0]
+    assert getattr(image_track, "track_type", "") == "image"
+    assert getattr(image_clip, "track_type", "") == "image"
+    assert Path(getattr(image_clip, "source_path")).resolve() == image_path.resolve()
+    assert owner.refresh_count >= 1
+
+
 def test_selection_state_actions_normalize_toggle_and_select_range():
     from app.actions import build_default_action_registry
     from app.audio_tracks import AudioClip, AudioTrack

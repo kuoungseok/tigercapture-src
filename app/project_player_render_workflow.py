@@ -5,6 +5,8 @@ from pathlib import Path
 import numpy as np
 from PySide6.QtGui import QImage
 
+from app.image_media import is_image_path, load_image_rgb, preview_canvas_size
+
 
 def _apply_node_chain_preview_compare(*args, **kwargs):
     from app.project_player import _apply_node_chain_preview_compare as _impl
@@ -505,68 +507,89 @@ def _render_frame_at(self, pos_ms: int, force_seek: bool = False, allow_cached: 
     clip_sp = getattr(clip, "source_path", None)
     if clip_sp is not None:
         clip_sp = Path(clip_sp)
-    if clip_sp is not None and clip_sp in self._path_caps:
+    image_clip = clip_sp is not None and is_image_path(clip_sp)
+    local_ms = clip.timeline_to_source_ms(pos_ms)
+    if image_clip:
+        canvas_w, canvas_h = preview_canvas_size(getattr(self, "_project_settings", {}) or {})
+        rgb = load_image_rgb(clip_sp, canvas_w, canvas_h)
+        if rgb is None:
+            return False
+        decoder = None
+        fps = 30.0
+        frame_idx = 0
+        cache_key = self._preview_frame_cache_key(pos_ms, track, clip, clip_sp, frame_idx)
+        if allow_cached and self._emit_cached_preview_frame(
+            cache_key,
+            f"{_perf_detail} frame={frame_idx}",
+            _perf_stage_ms,
+        ):
+            return True
+        self._last_rendered_track_id = track.id
+        self._last_rendered_clip_path = clip_sp
+        self._last_rendered_frame_idx = frame_idx
+        repair_applied = False
+    elif clip_sp is not None and clip_sp in self._path_caps:
         decoder = self._path_caps[clip_sp]
         fps = self._path_fps.get(clip_sp, 30.0)
     else:
         decoder = self._caps.get(track.id)
         fps = self._fps.get(track.id, 30.0)
         clip_sp = None  # fall back path: use track-level sequential opt
-    if decoder is None or fps <= 0:
-        return False
-    local_ms = clip.timeline_to_source_ms(pos_ms)
-    frame_idx = int(local_ms / 1000.0 * fps)
-    cache_key = self._preview_frame_cache_key(pos_ms, track, clip, clip_sp, frame_idx)
-    if allow_cached and self._emit_cached_preview_frame(
-        cache_key,
-        f"{_perf_detail} frame={frame_idx}",
-        _perf_stage_ms,
-    ):
-        return True
-    # Sequential read optimization: only seek when necessary.
-    # The sequential key is now (track_id, clip_source_path) so switching
-    # between clips with different source files always seeks.
-    need_seek = (
-        force_seek
-        or track.id != self._last_rendered_track_id
-        or clip_sp != self._last_rendered_clip_path
-        or frame_idx != self._last_rendered_frame_idx + 1
-    )
-    with perf_span(
-        "preview.stage.decode",
-        detail=f"{_perf_detail} frame={frame_idx} seek={int(need_seek)}",
-        threshold_ms=_perf_stage_ms,
-    ):
-        if need_seek:
-            decoder.seek_to_frame(frame_idx)
-        rgb = decoder.read_rgb()
-    if rgb is None:
-        return False
-    self._last_rendered_track_id = track.id
-    self._last_rendered_clip_path = clip_sp
-    self._last_rendered_frame_idx = frame_idx
-
-    repair_applied = False
-    try:
-        from app.frame_repair import apply_frame_repair_rgb
-
-        def _repair_reader(idx: int):
-            decoder.seek_to_frame(max(0, int(idx)))
-            return decoder.read_rgb()
-
-        repaired_rgb, repair_applied = apply_frame_repair_rgb(
-            rgb,
-            clip=clip,
-            source_ms=local_ms,
-            fps=fps,
-            frame_reader=_repair_reader,
+    if not image_clip:
+        if decoder is None or fps <= 0:
+            return False
+        frame_idx = int(local_ms / 1000.0 * fps)
+        cache_key = self._preview_frame_cache_key(pos_ms, track, clip, clip_sp, frame_idx)
+        if allow_cached and self._emit_cached_preview_frame(
+            cache_key,
+            f"{_perf_detail} frame={frame_idx}",
+            _perf_stage_ms,
+        ):
+            return True
+        # Sequential read optimization: only seek when necessary.
+        # The sequential key is now (track_id, clip_source_path) so switching
+        # between clips with different source files always seeks.
+        need_seek = (
+            force_seek
+            or track.id != self._last_rendered_track_id
+            or clip_sp != self._last_rendered_clip_path
+            or frame_idx != self._last_rendered_frame_idx + 1
         )
-        if repair_applied:
-            rgb = repaired_rgb
-            # The repair reader seeks around; sequential-read state is stale.
-            self._last_rendered_frame_idx = -1
-    except Exception:
-        pass
+        with perf_span(
+            "preview.stage.decode",
+            detail=f"{_perf_detail} frame={frame_idx} seek={int(need_seek)}",
+            threshold_ms=_perf_stage_ms,
+        ):
+            if need_seek:
+                decoder.seek_to_frame(frame_idx)
+            rgb = decoder.read_rgb()
+        if rgb is None:
+            return False
+        self._last_rendered_track_id = track.id
+        self._last_rendered_clip_path = clip_sp
+        self._last_rendered_frame_idx = frame_idx
+
+        repair_applied = False
+        try:
+            from app.frame_repair import apply_frame_repair_rgb
+
+            def _repair_reader(idx: int):
+                decoder.seek_to_frame(max(0, int(idx)))
+                return decoder.read_rgb()
+
+            repaired_rgb, repair_applied = apply_frame_repair_rgb(
+                rgb,
+                clip=clip,
+                source_ms=local_ms,
+                fps=fps,
+                frame_reader=_repair_reader,
+            )
+            if repair_applied:
+                rgb = repaired_rgb
+                # The repair reader seeks around; sequential-read state is stale.
+                self._last_rendered_frame_idx = -1
+        except Exception:
+            pass
 
     # Slow-motion frame blending: when a SpeedSegment with
     # frame_blend=True covers this position and speed < 1.0, blend
@@ -580,6 +603,7 @@ def _render_frame_at(self, pos_ms: int, force_seek: bool = False, allow_cached: 
             break
     if (
         active_seg is not None
+        and decoder is not None
         and getattr(active_seg, "frame_blend", False)
         and active_seg.speed < 1.0
         and not repair_applied
@@ -1223,6 +1247,11 @@ def _apply_transition_blend(
         next_sp = getattr(next_clip, "source_path", None)
         if next_sp is not None:
             next_sp = Path(next_sp)
+        next_offset_ms = pos_ms - t_start_ms
+        next_source_ms = int(next_clip.source_in_ms) + next_offset_ms
+        if next_sp is not None and is_image_path(next_sp):
+            h, w = rgb.shape[:2]
+            return load_image_rgb(next_sp, w, h)
         if next_sp is not None and next_sp in self._path_caps:
             next_decoder = self._path_caps[next_sp]
             fps = self._path_fps.get(next_sp, 30.0)
@@ -1231,8 +1260,6 @@ def _apply_transition_blend(
             fps = self._fps.get(track.id, 30.0)
         else:
             return None
-        next_offset_ms = pos_ms - t_start_ms
-        next_source_ms = int(next_clip.source_in_ms) + next_offset_ms
         next_frame_idx = int(next_source_ms / 1000.0 * fps)
         try:
             next_decoder.seek_to_frame(next_frame_idx)

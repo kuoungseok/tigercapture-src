@@ -1472,7 +1472,7 @@ class PptGeneratorWindow(QMainWindow):
             self,
             "Add PPT Media",
             "",
-            "Media Files (*.png *.jpg *.jpeg *.webp *.bmp *.gif *.mp4 *.mov *.mkv *.avi *.webm *.m4v *.fbx *.glb *.gltf *.obj *.usd *.usdz *.vrm *.pmx *.pmd *.wav *.mp3 *.m4a *.aac *.ogg *.flac);;All Files (*.*)",
+            "Media Files (*.png *.jpg *.jpeg *.jfif *.webp *.bmp *.gif *.mp4 *.mov *.mkv *.avi *.webm *.m4v *.fbx *.glb *.gltf *.obj *.usd *.usdz *.vrm *.pmx *.pmd *.wav *.mp3 *.m4a *.aac *.ogg *.flac);;All Files (*.*)",
         )
         if not paths:
             return
@@ -2354,7 +2354,7 @@ class PptGeneratorWindow(QMainWindow):
             self,
             title,
             "",
-            "Images (*.png *.jpg *.jpeg *.webp *.bmp *.gif);;All Files (*)",
+            "Images (*.png *.jpg *.jpeg *.jfif *.webp *.bmp *.gif);;All Files (*)",
         )
         return str(path or "")
 

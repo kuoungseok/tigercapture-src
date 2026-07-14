@@ -311,7 +311,7 @@ def _adapt_params(action: str, params: Mapping[str, Any], state: Mapping[str, An
     if action == "media.import_to_timeline":
         kind = str(out.get("kind") or "").strip().lower()
         # Let the adapter create an isolated review track, then reuse the actual ids.
-        if kind in {"video", "audio"}:
+        if kind in {"video", "audio", "image"}:
             out.pop("track_id", None)
         return out
     if _is_video_scoped_action(action):
@@ -364,6 +364,9 @@ def _update_state_from_result(state: dict[str, Any], action: str, result: Mappin
     if action == "media.import_to_timeline":
         kind = str(payload.get("kind") or "")
         if kind == "video":
+            state["video_track_id"] = payload.get("track_id")
+            state["video_clip_id"] = payload.get("clip_id")
+        elif kind == "image":
             state["video_track_id"] = payload.get("track_id")
             state["video_clip_id"] = payload.get("clip_id")
         elif kind == "audio":

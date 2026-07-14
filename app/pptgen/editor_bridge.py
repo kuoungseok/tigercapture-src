@@ -8,7 +8,7 @@ from typing import Any
 from app.pptgen.schema import DeckSpec, ElementStyle, SlideElement, SlideSpec
 
 
-_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif"}
+_IMAGE_SUFFIXES = {".png", ".jpg", ".jpeg", ".jfif", ".webp", ".bmp", ".gif"}
 
 
 @dataclass(frozen=True)

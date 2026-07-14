@@ -6,6 +6,8 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 
+from app.image_media import IMAGE_EXTS
+
 
 # Pool item visuals — square thumbnails in an icon-mode grid. The
 # letterbox border keeps frames with a non-square source from being
@@ -82,7 +84,7 @@ MMD_MOTION_EXTS = frozenset({
     ".vmd",
 })
 MMD_EXTS = MMD_MODEL_EXTS
-MEDIA_EXTS = VIDEO_EXTS | AUDIO_EXTS | SPINE_EXTS | AR_PBR_EXTS | VRM_EXTS | MMD_EXTS
+MEDIA_EXTS = VIDEO_EXTS | AUDIO_EXTS | IMAGE_EXTS | SPINE_EXTS | AR_PBR_EXTS | VRM_EXTS | MMD_EXTS
 THREE_D_IMPORT_FILTER = (
     "3D / MMD Assets (*.fbx *.glb *.gltf *.obj *.usd *.usdz *.vrm *.pmx *.pmd *.pbx.json);;"
     "AR/PBR 3D Assets (*.fbx *.glb *.gltf *.obj *.usd *.usdz);;"
@@ -118,6 +120,7 @@ def _badge_label_for_path(kind: str, path: Path | None = None) -> str:
     if kind == "M" and path is not None:
         return _mmd_badge_label_for_path(path)
     return {
+        "I": "IMG",
         "R": "VRM",
         "M": "MMD",
     }.get(kind, kind)
@@ -127,6 +130,8 @@ def _kind_for_path(p: Path) -> str:
     suf = p.suffix.lower()
     if suf in VIDEO_EXTS:
         return "V"
+    if suf in IMAGE_EXTS:
+        return "I"
     if suf in AUDIO_EXTS:
         return "A"
     if _is_mmd_package_path(p):

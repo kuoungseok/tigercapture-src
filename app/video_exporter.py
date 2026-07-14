@@ -975,12 +975,42 @@ class VideoExportThread(QThread):
         src_w: int,
         src_h: int,
     ):
-        import cv2  # type: ignore
-
         sp = getattr(clip, "source_path", None)
         if sp is None:
             return None, 0
         sp = Path(sp)
+        source_ms = int(getattr(clip, "source_in_ms", 0)) + (
+            int(project_ms) - int(getattr(clip, "timeline_in_ms", 0))
+        )
+        try:
+            from app.image_media import is_image_path, load_image_rgb
+
+            if is_image_path(sp):
+                rgb = load_image_rgb(sp, src_w, src_h)
+                if rgb is None:
+                    return None, 0
+                frame_idx = 0
+                rgb = self._apply_clip_stabilizer_cpu(rgb, clip, id(clip), frame_idx)
+                rgb = self._apply_clip_zoom_cpu(rgb, clip, source_ms)
+                rgb = self._apply_clip_post_effects_cpu(rgb, clip)
+                rgb = self._apply_clip_node_graph_cpu(rgb, clip)
+                rgb = self._overlay_clip_typography_cpu(rgb, clip, source_ms)
+                try:
+                    from app.screenstudio_polish import apply_cursor_fx_rgb
+                    rgb = apply_cursor_fx_rgb(
+                        rgb,
+                        source_ms,
+                        owner=clip,
+                        project_settings=self._project_settings,
+                    )
+                except Exception:
+                    pass
+                return rgb, frame_idx
+        except Exception:
+            pass
+
+        import cv2  # type: ignore
+
         entry = caps.get(sp)
         if entry is None:
             cap = cv2.VideoCapture(str(sp))
@@ -992,9 +1022,6 @@ class VideoExportThread(QThread):
             entry = (cap, fps)
             caps[sp] = entry
         cap, fps = entry
-        source_ms = int(getattr(clip, "source_in_ms", 0)) + (
-            int(project_ms) - int(getattr(clip, "timeline_in_ms", 0))
-        )
         frame_idx = max(0, int(source_ms / 1000.0 * fps))
         cap.set(cv2.CAP_PROP_POS_FRAMES, frame_idx)
         ok, bgr = cap.read()

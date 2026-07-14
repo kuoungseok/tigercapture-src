@@ -14,6 +14,7 @@ from typing import Any
 
 VIDEO_EXTS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v", ".mpg", ".mpeg", ".wmv", ".gif"}
 AUDIO_EXTS = {".mp3", ".wav", ".m4a", ".aac", ".ogg", ".flac", ".mp2", ".wma"}
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".jfif", ".webp", ".bmp"}
 
 
 @dataclass(frozen=True)
@@ -55,7 +56,8 @@ def build_ai_action_command_plan(
         return music_plan
 
     if _requests_import_to_timeline(text, compact):
-        media = _first_media(snapshot, prefer_video=not _mentions_audio(text, compact))
+        prefer_kind = "audio" if _mentions_audio(text, compact) else ("image" if _mentions_image(text, compact) else "video")
+        media = _first_media(snapshot, prefer_kind=prefer_kind)
         if media is None:
             return AIActionCommandPlan(
                 raw_prompt,
@@ -1136,7 +1138,16 @@ def _mentions_audio(text: str, compact: str) -> bool:
     return _contains_any(text, ("오디오", "소리", "음악", "audio", "sound", "music")) or "음성" in compact
 
 
+def _mentions_image(text: str, compact: str) -> bool:
+    return _contains_any(text, ("image", "photo", "picture", "png", "jpg", "jpeg", "이미지", "사진", "그림"))
+
+
 def _requests_import_to_timeline(text: str, compact: str) -> bool:
+    if _mentions_image(text, compact):
+        has_timeline_target = _contains_any(text, ("timeline", "track", "타임라인", "트랙")) or "timeline" in compact
+        has_import_verb = _contains_any(text, ("import", "place", "add", "insert", "load", "drop", "배치", "추가", "올려", "넣어"))
+        if has_timeline_target and has_import_verb:
+            return True
     if not _contains_any(text, ("미디어", "media", "video", "영상", "동영상", "오디오", "audio")):
         return False
     if not (_contains_any(text, ("타임라인", "timeline", "트랙", "track")) or "미디어풀" in compact):
@@ -2697,9 +2708,18 @@ def _find_audio_clip(snapshot: Mapping[str, Any], *, track_id: int, clip_id: int
     return None
 
 
-def _first_media(snapshot: Mapping[str, Any], *, prefer_video: bool = True) -> dict[str, Any] | None:
+def _first_media(
+    snapshot: Mapping[str, Any],
+    *,
+    prefer_video: bool = True,
+    prefer_kind: str = "",
+) -> dict[str, Any] | None:
     rows = [row for row in list(snapshot.get("media_pool") or []) if isinstance(row, Mapping)]
-    order = ("video", "audio") if prefer_video else ("audio", "video")
+    preferred = str(prefer_kind or "").strip().lower()
+    if preferred in {"video", "audio", "image"}:
+        order = (preferred,) + tuple(kind for kind in ("video", "audio", "image") if kind != preferred)
+    else:
+        order = ("video", "audio", "image") if prefer_video else ("audio", "video", "image")
     for kind in order:
         for row in rows:
             media = _media_row(row)
@@ -2714,12 +2734,14 @@ def _media_row(row: Mapping[str, Any]) -> dict[str, Any] | None:
         return None
     suffix = Path(path).suffix.casefold()
     kind = str(row.get("kind") or row.get("type") or "").casefold()
-    if kind not in {"video", "audio"}:
+    if kind not in {"video", "audio", "image"}:
         if suffix in VIDEO_EXTS:
             kind = "video"
         elif suffix in AUDIO_EXTS:
             kind = "audio"
-    if kind not in {"video", "audio"}:
+        elif suffix in IMAGE_EXTS:
+            kind = "image"
+    if kind not in {"video", "audio", "image"}:
         return None
     duration = _int(row.get("duration_ms") or row.get("duration") or 0, 0)
     return {"path": path, "kind": kind, "name": str(row.get("name") or Path(path).name), "duration_ms": duration}

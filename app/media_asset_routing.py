@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 from app.audio_tracks import is_audio_path, is_video_path
+from app.image_media import is_image_path
 
 
 VRM_AVATAR_MIME_TYPE = "application/x-tigerstudio-vrm-avatar"
@@ -106,7 +107,7 @@ def mmd_paths_from_mime(mime: Any) -> list[Path]:
 def timeline_media_paths_from_mime(mime: Any) -> list[Path]:
     return [
         path for path in mime_url_paths(mime)
-        if is_video_path(path) or is_audio_path(path)
+        if is_video_path(path) or is_audio_path(path) or is_image_path(path)
     ]
 
 

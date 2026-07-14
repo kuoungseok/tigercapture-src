@@ -81,6 +81,45 @@ def test_single_source_refresh_syncs_duration_before_clip_view(monkeypatch, tmp_
         player.release()
 
 
+def test_project_player_renders_image_clip_without_video_decoder(monkeypatch, tmp_path):
+    from PIL import Image
+
+    from app.timeline_model import VideoClip
+    from app.video_track_legacy import VideoTrack
+
+    source = tmp_path / "poster.png"
+    Image.new("RGB", (32, 18), (210, 24, 48)).save(source)
+
+    def fake_open_decoder(*_args, **_kwargs):
+        raise AssertionError("image clips must not open video decoders")
+
+    monkeypatch.setattr("app.video_decoder.open_decoder", fake_open_decoder)
+    clip = VideoClip(
+        id=10,
+        source_path=source,
+        source_duration_ms=5000,
+        timeline_in_ms=0,
+        source_in_ms=0,
+        source_out_ms=5000,
+    )
+    clip.track_type = "image"
+    track = VideoTrack(id=1, source_path=None, clips=[clip], clips_explicit=True)
+    track.track_type = "image"
+    frames: list[np.ndarray] = []
+    player = ProjectPlayer()
+    player.gpu_frame_ready.connect(lambda rgb, _payload: frames.append(np.asarray(rgb).copy()))
+    try:
+        player.set_project_settings({"width": 64, "height": 36})
+        player.refresh_tracks([track])
+
+        assert player.duration() == 5000
+        assert frames
+        assert frames[-1].shape == (36, 64, 3)
+        assert tuple(frames[-1][18, 32]) == (210, 24, 48)
+    finally:
+        player.release()
+
+
 def test_refresh_tracks_passes_project_preview_decode_height(monkeypatch, tmp_path):
     source = tmp_path / "clip.mp4"
     source.write_bytes(b"placeholder")

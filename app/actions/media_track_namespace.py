@@ -24,7 +24,7 @@ def register_media_track_actions(registry: Any) -> None:
         params_schema=schema_object(
             {
                 "path": {"type": "string"},
-                "kind": {"type": "string", "enum": ["video", "audio", ""]},
+                "kind": {"type": "string", "enum": ["video", "audio", "image", ""]},
                 "track_id": {"type": "integer"},
                 "at_ms": {"type": "integer", "minimum": 0},
                 "duration_ms": {"type": "integer", "minimum": 1},

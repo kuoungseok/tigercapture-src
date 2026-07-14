@@ -192,6 +192,12 @@ def _on_track_zoom_changed(self, track_id: int) -> None:
 
 
 def _add_track_with_source(self, path: Path) -> None:
+    from app.image_media import is_image_path
+    if is_image_path(path):
+        from app.video_editor_media_import_controller import add_image_track_with_source
+
+        add_image_track_with_source(self, path)
+        return
     self._register_screenstudio_real_recording_candidate(path, reason="track import")
     tid = self._next_track_id
     self._next_track_id += 1
@@ -732,6 +738,12 @@ def _append_clip_to_track(self, track: "VideoTrack", path: Path) -> None:
     - Calls ``_refresh_player_tracks`` so the player opens a decoder for
       the new source and recomputes project duration.
     """
+    from app.image_media import is_image_path
+    if is_image_path(path):
+        from app.video_editor_media_import_controller import append_image_clip_to_track
+
+        append_image_clip_to_track(self, track, path)
+        return
     from app.timeline_model import VideoClip as _VC, NodeGraph as _NG
     duration_ms = probe_video_duration_ms(path)
     if duration_ms <= 0:

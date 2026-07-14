@@ -28,13 +28,14 @@ def test_media_asset_routing_separates_3d_vrm_mmd_and_timeline_media(tmp_path):
     vmd = tmp_path / "dance.vmd"
     video = tmp_path / "plate.mp4"
     audio = tmp_path / "voice.wav"
+    image = tmp_path / "poster.jpg"
 
-    mime = _mime_for_paths(glb, obj, usd, vrm, pmx, vmd, video, audio)
+    mime = _mime_for_paths(glb, obj, usd, vrm, pmx, vmd, video, image, audio)
 
     assert ar_pbr_paths_from_mime(mime) == [glb, obj, usd]
     assert vrm_avatar_paths_from_mime(mime) == [vrm]
     assert mmd_paths_from_mime(mime) == [pmx, vmd]
-    assert timeline_media_paths_from_mime(mime) == [video, audio]
+    assert timeline_media_paths_from_mime(mime) == [video, image, audio]
 
 
 def test_media_asset_routing_performance_source_uses_mime_or_pool_marker(tmp_path):

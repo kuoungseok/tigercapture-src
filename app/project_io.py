@@ -1296,6 +1296,18 @@ def _video_clip_from_dict(cd: dict, fallback_src_path: Path | None):
             clip.vtuber_performance_source = True
             clip.track_type = "vtuber_performance_source"
             clip.program_output = False
+    else:
+        track_type = str(cd.get("track_type") or "").strip()
+        if track_type:
+            try:
+                clip.track_type = track_type
+            except Exception:
+                pass
+        if "program_output" in cd:
+            try:
+                clip.program_output = bool(cd.get("program_output"))
+            except Exception:
+                pass
 
     try:
         ng_data = cd.get("node_graph") or {}

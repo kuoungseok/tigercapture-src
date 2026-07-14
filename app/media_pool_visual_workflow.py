@@ -16,6 +16,8 @@ from app.media_pool import (
     _format_duration,
     _make_ar_pbr_thumbnail,
     _make_audio_thumbnail,
+    _make_image_list_thumbnail,
+    _make_image_thumbnail,
     _make_mmd_thumbnail,
     _make_spine_thumbnail,
     _make_video_list_thumbnail,
@@ -37,6 +39,7 @@ def _item_metadata_text(self, item: QListWidgetItem | None) -> str:
     kind_name = {
         "V": "Video",
         "A": "Audio",
+        "I": "Image",
         "S": "Actor",
         "R": "VRM Avatar",
         "M": _mmd_kind_name_for_path(path),
@@ -177,6 +180,8 @@ def _refresh_item_thumbnail(self, item: QListWidgetItem) -> None:
             base_thumb = _make_video_thumbnail(path) or _placeholder_pixmap()
         elif kind == "A":
             base_thumb = _make_audio_thumbnail(path)
+        elif kind == "I":
+            base_thumb = _make_image_thumbnail(path) or _placeholder_pixmap()
         elif kind == "S":
             base_thumb = _make_spine_thumbnail()
         elif kind == "R":
@@ -198,6 +203,18 @@ def _refresh_item_thumbnail(self, item: QListWidgetItem) -> None:
     )
     if self._view_mode == "list" and kind == "V":
         list_base = _make_video_list_thumbnail(path)
+        if list_base is not None and not list_base.isNull():
+            decorated = _decorate_media_thumb(
+                list_base,
+                kind,
+                path,
+                hdr_info=item.data(Qt.ItemDataRole.UserRole + 1),
+                auto_polish_report=item.data(Qt.ItemDataRole.UserRole + 6),
+                performance_source=bool(item.data(ROLE_PERFORMANCE_SOURCE)),
+            )
+        item.setIcon(QIcon(decorated))
+    elif self._view_mode == "list" and kind == "I":
+        list_base = _make_image_list_thumbnail(path)
         if list_base is not None and not list_base.isNull():
             decorated = _decorate_media_thumb(
                 list_base,
@@ -352,4 +369,3 @@ def media_health_payload(self, search_roots: list[Path | str] | None = None) -> 
     from app.media_relink import build_media_health_report
 
     return build_media_health_report(doc, roots)
-

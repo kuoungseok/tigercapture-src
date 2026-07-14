@@ -18,6 +18,7 @@ from app.audio_tracks import (
     is_video_path,
     probe_audio_duration_ms,
 )
+from app.image_media import DEFAULT_IMAGE_DURATION_MS, is_image_path
 from app.media_asset_routing import (
     ar_pbr_paths_from_mime as _shared_ar_pbr_paths_from_mime,
     mmd_paths_from_mime as _shared_mmd_paths_from_mime,
@@ -36,6 +37,7 @@ ROUTE_MMD = "mmd"
 ROUTE_AR_PBR = "ar_pbr"
 ROUTE_PERFORMANCE_SOURCE = "performance_source"
 ROUTE_VIDEO = "video"
+ROUTE_IMAGE = "image"
 ROUTE_AUDIO = "audio"
 
 TARGET_TIMELINE = "timeline"
@@ -51,6 +53,7 @@ _WINDOW_PRIORITY = (
     ROUTE_PERFORMANCE_SOURCE,
     ROUTE_AR_PBR,
     ROUTE_VIDEO,
+    ROUTE_IMAGE,
     ROUTE_AUDIO,
 )
 _TRACKS_HOST_PRIORITY = (
@@ -58,6 +61,7 @@ _TRACKS_HOST_PRIORITY = (
     ROUTE_PERFORMANCE_SOURCE,
     ROUTE_AR_PBR,
     ROUTE_VIDEO,
+    ROUTE_IMAGE,
     ROUTE_AUDIO,
 )
 _PREVIEW_PRIORITY = (
@@ -70,6 +74,7 @@ _VIDEO_ROW_PRIORITY = (
     ROUTE_AR_PBR,
     ROUTE_PERFORMANCE_SOURCE,
     ROUTE_VIDEO,
+    ROUTE_IMAGE,
     ROUTE_AUDIO,
 )
 _AUDIO_ROW_PRIORITY = (
@@ -77,6 +82,7 @@ _AUDIO_ROW_PRIORITY = (
     ROUTE_AR_PBR,
     ROUTE_PERFORMANCE_SOURCE,
     ROUTE_VIDEO,
+    ROUTE_IMAGE,
     ROUTE_AUDIO,
 )
 
@@ -200,6 +206,7 @@ def route_mime_drop(
     }
     media_paths = timeline_media_paths_from_mime(owner, mime)
     route_paths[ROUTE_VIDEO] = tuple(path for path in media_paths if is_video_path(path))
+    route_paths[ROUTE_IMAGE] = tuple(path for path in media_paths if is_image_path(path))
     route_paths[ROUTE_AUDIO] = tuple(path for path in media_paths if is_audio_path(path))
 
     priorities = {
@@ -571,6 +578,98 @@ def append_clip_to_track(
     return clip
 
 
+def _mark_image_media_object(obj: Any) -> Any:
+    try:
+        setattr(obj, "track_type", "image")
+        setattr(obj, "program_output", True)
+    except Exception:
+        pass
+    return obj
+
+
+def _image_clip(
+    owner: Any,
+    path: Path,
+    *,
+    start_ms: int,
+    duration_ms: int | None = None,
+) -> VideoClip:
+    duration = max(100, int(duration_ms or DEFAULT_IMAGE_DURATION_MS))
+    clip = VideoClip(
+        id=_next_video_clip_id(owner),
+        source_path=path,
+        source_duration_ms=duration,
+        timeline_in_ms=max(0, int(start_ms or 0)),
+        source_in_ms=0,
+        source_out_ms=duration,
+        node_graph=NodeGraph.default(),
+    )
+    return _mark_image_media_object(clip)
+
+
+def add_image_track_with_source(
+    owner: Any,
+    path: Path | str,
+    *,
+    start_ms: int | None = None,
+    duration_ms: int | None = None,
+) -> VideoTrack:
+    path = Path(path)
+    tid = _next_track_id(owner)
+    if start_ms is None:
+        start_ms = _current_playhead_ms(owner)
+    clip = _image_clip(owner, path, start_ms=max(0, int(start_ms or 0)), duration_ms=duration_ms)
+    track = VideoTrack(id=tid, source_path=None, clips=[clip])
+    _mark_image_media_object(track)
+    track.clips_explicit = True
+    track.duration_ms = int(getattr(clip, "timeline_out_ms", 0) or 0)
+    try:
+        track.label = "Image"
+    except Exception:
+        pass
+    _owner_track_list(owner, "_tracks").append(track)
+    _safe_call(getattr(owner, "_insert_track_widget", None), track)
+    _safe_call(getattr(owner, "_start_thumbnail_extraction_for_clip", None), clip, tid)
+    _safe_call(getattr(owner, "_set_active_track", None), tid)
+    _refresh_after_timeline_change(owner, render_immediately=False)
+    _flash_track_row(owner, tid, "image", int(getattr(clip, "timeline_in_ms", 0) or 0))
+    _safe_call(getattr(owner, "_register_change", None), "add image track")
+    _safe_call(getattr(owner, "_try_apply_startup_template_if_ready", None), "image import")
+    return track
+
+
+def append_image_clip_to_track(
+    owner: Any,
+    track: VideoTrack | Any,
+    path: Path | str,
+    *,
+    start_ms: int | None = None,
+    duration_ms: int | None = None,
+) -> VideoClip | None:
+    path = Path(path)
+    clips = getattr(track, "clips", None)
+    if not isinstance(clips, list):
+        track.clips = []
+        clips = track.clips
+    tail_ms = max((int(getattr(c, "timeline_out_ms", 0) or 0) for c in clips), default=0)
+    clip_start_ms = tail_ms if start_ms is None else max(0, int(start_ms or 0))
+    clip = _image_clip(owner, path, start_ms=clip_start_ms, duration_ms=duration_ms)
+    clips.append(clip)
+    _mark_image_media_object(track)
+    try:
+        track.source_path = None
+        track.clips_explicit = True
+        track.duration_ms = max(int(getattr(track, "duration_ms", 0) or 0), int(clip.timeline_out_ms))
+    except Exception:
+        pass
+    _safe_call(getattr(owner, "_start_thumbnail_extraction_for_clip", None), clip, int(getattr(track, "id", 0) or 0))
+    _refresh_after_timeline_change(owner, render_immediately=False)
+    _flash_track_row(owner, int(getattr(track, "id", 0) or 0), "image", clip_start_ms)
+    _safe_call(getattr(owner, "_register_change", None), "append image clip")
+    _safe_call(getattr(owner, "_try_apply_startup_template_if_ready", None), "image import")
+    return clip
+
+
 def add_audio_track_with_source(
     owner: Any,
     path: Path | str,
@@ -796,6 +895,15 @@ def dispatch_import_decision(owner: Any, decision: MediaImportDecision) -> bool:
         else:
             add_track_with_source(owner, path)
         return True
+    if decision.route == ROUTE_IMAGE:
+        if decision.target == TARGET_VIDEO_ROW and decision.track_id is not None:
+            return on_media_dropped_on_video_row(owner, decision.track_id, path)
+        add = getattr(owner, "_add_image_track_with_source", None)
+        if callable(add):
+            _safe_call(add, path)
+        else:
+            add_image_track_with_source(owner, path, start_ms=decision.start_ms)
+        return True
     if decision.route == ROUTE_AUDIO:
         if decision.target == TARGET_AUDIO_ROW and decision.track_id is not None:
             return on_media_dropped_on_audio_row(owner, decision.track_id, path)
@@ -873,6 +981,20 @@ def on_media_dropped_on_video_row(owner: Any, track_id: int, path: Path | str) -
             else:
                 add_track_with_source(owner, path)
         return True
+    if is_image_path(path):
+        track = _find_video_track(owner, track_id)
+        if track is not None and (
+            str(getattr(track, "track_type", "") or "").casefold() == "image"
+            or not getattr(track, "clips", [])
+        ):
+            append_image_clip_to_track(owner, track, path)
+        else:
+            add = getattr(owner, "_add_image_track_with_source", None)
+            if callable(add):
+                _safe_call(add, path)
+            else:
+                add_image_track_with_source(owner, path, start_ms=_current_playhead_ms(owner))
+        return True
     if is_audio_path(path):
         add = getattr(owner, "_add_audio_track_with_source", None)
         if callable(add):
@@ -922,6 +1044,13 @@ def on_media_dropped_on_audio_row(owner: Any, track_id: int, path: Path | str) -
         else:
             add_track_with_source(owner, path)
         return True
+    if is_image_path(path):
+        add = getattr(owner, "_add_image_track_with_source", None)
+        if callable(add):
+            _safe_call(add, path)
+        else:
+            add_image_track_with_source(owner, path, start_ms=_current_playhead_ms(owner))
+        return True
     if not is_audio_path(path):
         return False
     track = _find_audio_track(owner, track_id)
@@ -965,6 +1094,8 @@ def on_media_pool_item_added(owner: Any, path: Path | str) -> MediaImportDecisio
         if callable(marks) and bool(_safe_call(marks, path)):
             return MediaImportDecision(route=ROUTE_PERFORMANCE_SOURCE, paths=(path,), target="media_pool")
         return MediaImportDecision(route=ROUTE_VIDEO, paths=(path,), target="media_pool")
+    if is_image_path(path):
+        return MediaImportDecision(route=ROUTE_IMAGE, paths=(path,), target="media_pool")
     if is_audio_path(path):
         return MediaImportDecision(route=ROUTE_AUDIO, paths=(path,), target="media_pool")
     try:
@@ -1026,6 +1157,7 @@ __all__ = [
     "ROUTE_AR_PBR",
     "ROUTE_PERFORMANCE_SOURCE",
     "ROUTE_VIDEO",
+    "ROUTE_IMAGE",
     "ROUTE_AUDIO",
     "TARGET_TIMELINE",
     "TARGET_WINDOW",
@@ -1035,11 +1167,13 @@ __all__ = [
     "TARGET_AUDIO_ROW",
     "accepts_mime_drop",
     "add_audio_track_with_source",
+    "add_image_track_with_source",
     "add_performance_source_clip",
     "add_timeline_media_from_mime",
     "add_track_with_source",
     "append_audio_clip_to_track",
     "append_clip_to_track",
+    "append_image_clip_to_track",
     "ar_pbr_paths_from_mime",
     "dispatch_import_decision",
     "ensure_performance_source_track",

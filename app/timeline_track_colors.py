@@ -13,6 +13,7 @@ _CATALOG_TRACK_PALETTES = (
     ("#564B35", "#6D6042", "#D5B36A"),
 )
 _PERFORMANCE_SOURCE_PALETTE = ("#303440", "#3C4251", "#868CA0")
+_IMAGE_TRACK_PALETTE = ("#273E59", "#335276", "#77B5FF")
 
 
 def catalog_track_palette(track: Any) -> tuple[QColor, QColor, QColor]:
@@ -36,9 +37,30 @@ def is_performance_source_track(track: Any) -> bool:
         )
 
 
+def is_image_track(track: Any) -> bool:
+    if str(getattr(track, "track_type", "") or "").casefold() == "image":
+        return True
+    try:
+        from app.image_media import is_image_path
+
+        clips = list(getattr(track, "clips", []) or [])
+        if clips:
+            return all(
+                getattr(clip, "source_path", None) is not None
+                and is_image_path(getattr(clip, "source_path", None))
+                for clip in clips
+            )
+        source_path = getattr(track, "source_path", None)
+        return source_path is not None and is_image_path(source_path)
+    except Exception:
+        return False
+
+
 def track_palette_for_track(track: Any) -> tuple[QColor, QColor, QColor]:
     if is_performance_source_track(track):
         return tuple(QColor(color) for color in _PERFORMANCE_SOURCE_PALETTE)
+    if is_image_track(track):
+        return tuple(QColor(color) for color in _IMAGE_TRACK_PALETTE)
     return catalog_track_palette(track)
 
 
@@ -51,12 +73,18 @@ def track_context_label(track: Any) -> str:
         idx = max(1, int(getattr(track, "id", 0) or 0))
     except Exception:
         idx = 0
-    prefix = "P" if is_performance_source_track(track) else "V"
+    if is_performance_source_track(track):
+        prefix = "P"
+    elif is_image_track(track):
+        prefix = "I"
+    else:
+        prefix = "V"
     return f"{prefix}{idx}" if idx > 0 else prefix
 
 
 __all__ = [
     "catalog_track_palette",
+    "is_image_track",
     "is_performance_source_track",
     "track_accent_color",
     "track_context_label",

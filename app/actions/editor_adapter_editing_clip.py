@@ -1242,13 +1242,60 @@ class EditingClipAdapterMixin:
             kind_text = str(kind or "").strip().lower()
             if not kind_text:
                 from app.audio_tracks import is_audio_path, is_video_path
+                from app.image_media import is_image_path
 
                 if is_audio_path(media_path):
                     kind_text = "audio"
                 elif is_video_path(media_path):
                     kind_text = "video"
+                elif is_image_path(media_path):
+                    kind_text = "image"
                 else:
                     raise ValueError(f"unsupported media extension: {media_path.suffix}")
+            if kind_text == "image":
+                from app.image_media import DEFAULT_IMAGE_DURATION_MS, is_image_path
+                from app.video_editor_media_import_controller import (
+                    add_image_track_with_source,
+                    append_image_clip_to_track,
+                )
+
+                if not is_image_path(media_path):
+                    raise ValueError(f"unsupported image extension: {media_path.suffix}")
+                duration = max(100, _int(duration_ms, DEFAULT_IMAGE_DURATION_MS))
+                start = max(0, _int(at_ms)) if at_ms is not None else self._current_playhead_ms()
+                if track_id is not None:
+                    track = self._video_track(track_id)
+                    clip = append_image_clip_to_track(
+                        owner,
+                        track,
+                        media_path,
+                        start_ms=start if at_ms is not None else None,
+                        duration_ms=duration,
+                    )
+                    if clip is None:
+                        raise ValueError("image clip could not be added")
+                else:
+                    track = add_image_track_with_source(
+                        owner,
+                        media_path,
+                        start_ms=start,
+                        duration_ms=duration,
+                    )
+                    clips = list(getattr(track, "clips", []) or [])
+                    clip = clips[0] if clips else None
+                    if clip is None:
+                        raise ValueError("image clip could not be added")
+                self._after_timeline_mutation("Action import image to timeline")
+                return {
+                    "kind": "image",
+                    "track_type": str(getattr(track, "track_type", "image") or "image"),
+                    "path": str(media_path.resolve()),
+                    "track_id": _int(getattr(track, "id", 0)),
+                    "clip_id": _int(getattr(clip, "id", 0)),
+                    "timeline_in_ms": _int(getattr(clip, "timeline_in_ms", start)),
+                    "duration_ms": duration,
+                    "program_output": bool(getattr(clip, "program_output", True)),
+                }
             if kind_text == "video":
                 track = self._video_track(track_id) if track_id is not None else None
                 duration = _int(duration_ms, 0)
@@ -1375,7 +1422,7 @@ class EditingClipAdapterMixin:
                     "timeline_in_ms": start,
                     "duration_ms": duration,
                 }
-            raise ValueError("kind must be video or audio")
+            raise ValueError("kind must be video, audio, or image")
 
     def extract_audio_from_video(
             self,

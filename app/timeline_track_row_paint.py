@@ -528,9 +528,15 @@ def paintEvent(self, event) -> None:
     painter = QPainter(self)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     is_perf_track = self._is_performance_source_track()
+    is_image_track = self._is_image_track()
     clip_fill, clip_hi, clip_edge = self._track_palette_for_role()
 
-    paint_timeline_lane_header(self, painter, is_perf_track=is_perf_track)
+    paint_timeline_lane_header(
+        self,
+        painter,
+        is_perf_track=is_perf_track,
+        is_image_track=is_image_track,
+    )
 
     rect = self._timeline_rect()
     row_body_rect = QRect(
@@ -911,6 +917,8 @@ def paintEvent(self, event) -> None:
             label = ""
             if is_perf_track or self._is_performance_source_clip(clip):
                 label = f"PERF  {seconds}s input" if seconds else "PERF input"
+            elif is_image_track:
+                label = f"IMG  {seconds}s" if seconds else "IMG"
             if bool(getattr(clip, "is_nested_sequence", False)):
                 label = "Nested"
             if label:

@@ -67,6 +67,7 @@ from app.media_pool_kinds import (
     FEATURED_THUMB_W,
     GRID_H,
     GRID_W,
+    IMAGE_EXTS,
     LIST_ROW_H,
     LIST_THUMB_H,
     LIST_THUMB_W,
@@ -110,6 +111,8 @@ from app.media_pool_thumbnails import (
     _draw_proxy_badge,
     _make_ar_pbr_thumbnail,
     _make_audio_thumbnail,
+    _make_image_list_thumbnail,
+    _make_image_thumbnail,
     _make_mmd_thumbnail,
     _make_spine_thumbnail,
     _make_video_list_thumbnail,
@@ -301,6 +304,7 @@ class _MediaPoolList(QListWidget):
         accent = {
             "V": QColor(255, 112, 74),
             "A": QColor(122, 211, 153),
+            "I": QColor(94, 162, 255),
             "S": QColor(160, 181, 255),
             "R": QColor(133, 214, 203),
             "M": QColor(206, 174, 255),
@@ -327,7 +331,7 @@ class _MediaPoolList(QListWidget):
         painter.drawText(QRect(72, 10, 95, 18), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, label)
         painter.setPen(QColor(150, 166, 190))
         painter.setFont(QFont(FONT_FAMILY, 7))
-        kind_label = {"V": "VIDEO", "A": "AUDIO", "S": "ACTOR", "R": "VRM", "M": "MMD", "3": "3D"}.get(kind, "MEDIA")
+        kind_label = {"V": "VIDEO", "A": "AUDIO", "I": "IMAGE", "S": "ACTOR", "R": "VRM", "M": "MMD", "3": "3D"}.get(kind, "MEDIA")
         painter.drawText(QRect(72, 30, 95, 14), Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, f"Add {kind_label}")
         painter.end()
         return pm

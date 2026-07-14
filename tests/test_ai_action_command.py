@@ -60,6 +60,22 @@ def test_ai_action_command_routes_media_pool_video_to_timeline(tmp_path):
     assert plan.steps[0]["params"]["track_id"] == 1
 
 
+def test_ai_action_command_routes_media_pool_image_to_timeline(tmp_path):
+    snapshot = _snapshot(tmp_path)
+    image = tmp_path / "poster.jpg"
+    image.write_bytes(b"fake")
+    snapshot["media_pool"].append(
+        {"path": str(image), "kind": "image", "name": "poster.jpg", "duration_ms": 5000}
+    )
+
+    plan = build_ai_action_command_plan("add image to timeline", snapshot)
+
+    assert plan is not None
+    assert plan.steps[0]["action"] == "media.import_to_timeline"
+    assert plan.steps[0]["params"]["kind"] == "image"
+    assert plan.steps[0]["params"]["path"] == str(image)
+
+
 def test_ai_action_command_routes_split_marker_and_speed(tmp_path):
     snapshot = _snapshot(tmp_path)
 
