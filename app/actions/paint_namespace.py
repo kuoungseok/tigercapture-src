@@ -66,6 +66,24 @@ def register_paint_actions(registry: Any) -> None:
         undo_label="Import editor object into Paint",
         dry_summary="editor object would be imported into Paint as a sticker layer",
     )
+    registry.register_adapter_action(
+        "paint.export_png",
+        "Export the current Paint overlays as a PNG from the editor window.",
+        "paint",
+        "paint_export_png",
+        params_schema=schema_object(
+            {
+                "path": {"type": "string"},
+                "mode": {"type": "string", "enum": ["composited", "overlay", "transparent_overlay"]},
+                "time_ms": {"type": "integer", "minimum": 0},
+                "width": {"type": "integer", "minimum": 0},
+                "height": {"type": "integer", "minimum": 0},
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="current Paint overlays would be exported as PNG",
+    )
 
 
 __all__ = ["register_paint_actions"]

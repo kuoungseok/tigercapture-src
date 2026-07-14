@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import copy
 import math
+from datetime import datetime
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Callable
 
 from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, Signal
@@ -1120,6 +1122,119 @@ def render_strokes_to_png(
     return bool(img.save(out_path, "PNG"))
 
 
+def compose_pil_paint_overlays(
+    *,
+    strokes: list["Stroke"] | None = None,
+    bubbles: list["SpeechBubble"] | None = None,
+    stickers: list["Sticker"] | None = None,
+    time_ms: int = 0,
+    frame_size: tuple[int, int] = (1920, 1080),
+    stroke_width_scale: float = 1.0,
+):
+    """Render paint overlays onto a transparent PIL RGBA image."""
+    from PIL import Image
+
+    width = max(1, int(frame_size[0]))
+    height = max(1, int(frame_size[1]))
+    out = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    out = compose_pil_frame_with_overlays(
+        out,
+        list(strokes or []),
+        [],
+        int(time_ms),
+        width_scale=max(0.001, float(stroke_width_scale or 1.0)),
+    )
+    out = compose_pil_stickers(out, list(stickers or []), int(time_ms))
+    out = compose_pil_bubbles(out, list(bubbles or []), int(time_ms))
+    return out
+
+
+def export_paint_png(
+    out_path: str | Path,
+    *,
+    background_pixmap: QPixmap | None = None,
+    strokes: list["Stroke"] | None = None,
+    bubbles: list["SpeechBubble"] | None = None,
+    stickers: list["Sticker"] | None = None,
+    time_ms: int = 0,
+    frame_size: tuple[int, int] | None = None,
+    include_background: bool = True,
+    stroke_width_scale: float = 1.0,
+) -> dict:
+    """Write a Paint-window PNG export and return a small report.
+
+    ``include_background=False`` writes a transparent overlay PNG. When
+    ``include_background=True`` and a background pixmap exists, the output is
+    the frozen frame plus all active Paint overlays.
+    """
+    from PIL import Image
+
+    path = Path(out_path)
+    if path.suffix.lower() != ".png":
+        path = path.with_suffix(".png")
+    path.parent.mkdir(parents=True, exist_ok=True)
+    size = frame_size or _paint_export_size(background_pixmap)
+    width = max(1, int(size[0]))
+    height = max(1, int(size[1]))
+    if include_background and background_pixmap is not None and not background_pixmap.isNull():
+        base = _pixmap_to_pil_rgba(background_pixmap)
+        if base.size != (width, height):
+            base = base.resize((width, height), Image.LANCZOS)
+    else:
+        base = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+    overlay = compose_pil_paint_overlays(
+        strokes=strokes,
+        bubbles=bubbles,
+        stickers=stickers,
+        time_ms=int(time_ms),
+        frame_size=(width, height),
+        stroke_width_scale=stroke_width_scale,
+    )
+    out = Image.alpha_composite(base.convert("RGBA"), overlay)
+    out.save(path, "PNG")
+    return {
+        "schema": "tigerstudio.paint.png_export.v1",
+        "path": str(path.resolve()),
+        "mode": "composited" if include_background else "overlay",
+        "width": width,
+        "height": height,
+        "stroke_count": len(list(strokes or [])),
+        "bubble_count": len(list(bubbles or [])),
+        "sticker_count": len(list(stickers or [])),
+    }
+
+
+def _paint_export_size(
+    background_pixmap: QPixmap | None,
+    *,
+    fallback: tuple[int, int] = (1920, 1080),
+) -> tuple[int, int]:
+    if background_pixmap is not None and not background_pixmap.isNull():
+        width = int(background_pixmap.width())
+        height = int(background_pixmap.height())
+        if width > 0 and height > 0:
+            return (width, height)
+    return (max(1, int(fallback[0])), max(1, int(fallback[1])))
+
+
+def _pixmap_to_pil_rgba(pixmap: QPixmap):
+    from io import BytesIO
+
+    from PIL import Image
+    from PySide6.QtCore import QBuffer, QByteArray
+
+    qimg = pixmap.toImage()
+    byte_array = QByteArray()
+    buffer = QBuffer(byte_array)
+    buffer.open(QBuffer.OpenModeFlag.WriteOnly)
+    qimg.save(buffer, "PNG")
+    buffer.close()
+    with BytesIO(bytes(byte_array)) as bio:
+        image = Image.open(bio)
+        image.load()
+    return image.convert("RGBA")
+
+
 # ---------------------------------------------------------------------------
 #  Paint-style dialog
 # ---------------------------------------------------------------------------
@@ -1379,6 +1494,12 @@ class PaintDialog(QDialog):
         self.redo_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.redo_btn.clicked.connect(self._redo)
         top_layout.addWidget(self.redo_btn)
+
+        self.export_png_btn = QPushButton("Export PNG")
+        self.export_png_btn.setObjectName("PaintTool")
+        self.export_png_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.export_png_btn.clicked.connect(self._show_export_png_menu)
+        top_layout.addWidget(self.export_png_btn)
 
         zoom_label = QLabel("Zoom")
         zoom_label.setObjectName("PaintMeta")
@@ -1853,6 +1974,71 @@ class PaintDialog(QDialog):
         if hasattr(self, "_zoom_value_label"):
             self._zoom_value_label.setText(f"{value}%")
         self._update_canvas_geometry()
+
+    def _show_export_png_menu(self) -> None:
+        menu = QMenu(self)
+        composited_action = menu.addAction("Composited PNG")
+        overlay_action = menu.addAction("Transparent overlay PNG")
+        pos = self.export_png_btn.mapToGlobal(self.export_png_btn.rect().bottomLeft())
+        chosen = menu.exec(pos)
+        if chosen is composited_action:
+            self._export_png_to_file(include_background=True)
+        elif chosen is overlay_action:
+            self._export_png_to_file(include_background=False)
+
+    def _export_png_to_file(self, *, include_background: bool) -> None:
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        try:
+            from app.paths import default_save_dir
+
+            base_dir = default_save_dir()
+        except Exception:
+            base_dir = Path.home()
+        suffix = "composited" if include_background else "overlay"
+        stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        default_path = base_dir / f"paint_{suffix}_{stamp}.png"
+        path, _selected = QFileDialog.getSaveFileName(
+            self,
+            "Export Paint PNG",
+            str(default_path),
+            "PNG Image (*.png)",
+        )
+        if not path:
+            return
+        out = Path(path)
+        if out.suffix.lower() != ".png":
+            out = out.with_suffix(".png")
+        bg = self._bg_pixmap_source if include_background else None
+        target_size = _paint_export_size(
+            bg,
+            fallback=(max(1, self.canvas.width()), max(1, self.canvas.height())),
+        )
+        width_scale = target_size[0] / max(1, self.canvas.width())
+        try:
+            report = export_paint_png(
+                out,
+                background_pixmap=bg,
+                strokes=self.canvas.embedded_strokes(),
+                bubbles=self._bubbles,
+                stickers=self._stickers,
+                time_ms=self._time_ms,
+                frame_size=target_size,
+                include_background=include_background,
+                stroke_width_scale=width_scale,
+            )
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Export Paint PNG",
+                f"PNG export failed: {type(exc).__name__}: {exc}",
+            )
+            return
+        QMessageBox.information(
+            self,
+            "Export Paint PNG",
+            f"Wrote {report.get('mode')} PNG:\n{report.get('path')}",
+        )
 
     def _snapshot_state(self) -> tuple[list[Stroke], list[SpeechBubble], list["Sticker"]]:
         strokes = self.canvas.embedded_strokes() if hasattr(self, "canvas") else []

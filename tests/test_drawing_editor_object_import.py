@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from PIL import Image
 
 from app.actions import build_default_action_registry
+from app.drawing import SpeechBubble, Stroke, export_paint_png
 from app.drawing_editor_object_import import (
     PaintImportObject,
     collect_editor_paint_objects,
@@ -137,3 +138,75 @@ def test_paint_editor_object_actions_list_render_and_import(tmp_path: Path) -> N
     assert imported["ok"]
     assert len(owner._stickers) == 1
     assert Path(owner._stickers[0].png_path).is_file()
+
+
+def test_export_paint_png_writes_overlay_png(tmp_path: Path) -> None:
+    out = tmp_path / "paint_overlay.png"
+    report = export_paint_png(
+        out,
+        strokes=[
+            Stroke(
+                points=[(0.1, 0.1), (0.9, 0.9)],
+                color=(255, 0, 0),
+                opacity=255,
+                width_px=8,
+                start_ms=0,
+            )
+        ],
+        bubbles=[
+            SpeechBubble(
+                x_norm=0.2,
+                y_norm=0.2,
+                width_norm=0.4,
+                height_norm=0.2,
+                text="PNG",
+                start_ms=0,
+            )
+        ],
+        time_ms=100,
+        frame_size=(320, 180),
+        include_background=False,
+    )
+
+    assert report["mode"] == "overlay"
+    assert out.is_file()
+    image = Image.open(out)
+    assert image.mode == "RGBA"
+    assert image.size == (320, 180)
+    assert image.getbbox() is not None
+
+
+def test_paint_export_png_action(tmp_path: Path) -> None:
+    owner = SimpleNamespace(
+        _tracks=[],
+        _ar_pbr_tracks=[],
+        _mmd_tracks=[],
+        _spine_actor_tracks=[],
+        _live2d_actor_tracks=[],
+        _strokes=[
+            Stroke(
+                points=[(0.0, 0.0), (1.0, 1.0)],
+                color=(0, 255, 0),
+                opacity=255,
+                width_px=6,
+                start_ms=0,
+            )
+        ],
+        _bubbles=[],
+        _stickers=[],
+        _preview_pixmap=None,
+        _register_change=lambda _label: None,
+    )
+    registry = build_default_action_registry(owner)
+    assert "paint.export_png" in {row["id"] for row in registry.list_actions()}
+    out = tmp_path / "action_overlay.png"
+
+    result = registry.execute_action(
+        "paint.export_png",
+        {"path": str(out), "mode": "overlay", "time_ms": 0, "width": 160, "height": 90},
+    ).to_dict()
+
+    assert result["ok"]
+    assert out.is_file()
+    assert result["result"]["width"] == 160
+    assert result["result"]["height"] == 90

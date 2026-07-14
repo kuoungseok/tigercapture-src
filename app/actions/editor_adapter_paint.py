@@ -153,6 +153,50 @@ class PaintAdapterMixin:
             "sticker_count": len(stickers),
         }
 
+    def paint_export_png(
+        self,
+        *,
+        path: str = "",
+        mode: str = "composited",
+        time_ms: int | None = None,
+        width: int = 0,
+        height: int = 0,
+    ) -> dict[str, Any]:
+        owner = self._require_owner()
+        target_ms = self._paint_action_time_ms(time_ms)
+        mode_text = str(mode or "composited").strip().casefold().replace("-", "_")
+        include_background = mode_text not in {"overlay", "transparent", "transparent_overlay"}
+        if not path:
+            from datetime import datetime
+
+            from app.paths import default_save_dir
+
+            suffix = "composited" if include_background else "overlay"
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = str(default_save_dir() / f"paint_{suffix}_{stamp}.png")
+        background = getattr(owner, "_preview_pixmap", None) if include_background else None
+        frame_size = None
+        if int(width or 0) > 0 and int(height or 0) > 0:
+            frame_size = (int(width), int(height))
+        else:
+            frame_size = self._paint_export_size_for_owner(background)
+        canvas_w, _canvas_h = self._paint_canvas_size()
+        stroke_width_scale = max(0.001, float(frame_size[0]) / max(1, float(canvas_w)))
+        from app.drawing import export_paint_png
+
+        report = export_paint_png(
+            path,
+            background_pixmap=background,
+            strokes=list(getattr(owner, "_strokes", []) or []),
+            bubbles=list(getattr(owner, "_bubbles", []) or []),
+            stickers=list(getattr(owner, "_stickers", []) or []),
+            time_ms=target_ms,
+            frame_size=frame_size,
+            include_background=include_background,
+            stroke_width_scale=stroke_width_scale,
+        )
+        return report
+
     def _paint_action_time_ms(self, time_ms: int | None) -> int:
         if time_ms is not None:
             return max(0, _int(time_ms, 0))
@@ -188,6 +232,17 @@ class PaintAdapterMixin:
             except Exception:
                 pass
         return (1920, 1080)
+
+    def _paint_export_size_for_owner(self, background: Any) -> tuple[int, int]:
+        if background is not None:
+            try:
+                width = int(background.width())
+                height = int(background.height())
+                if width > 0 and height > 0:
+                    return (width, height)
+            except Exception:
+                pass
+        return self._paint_canvas_size()
 
     def _paint_find_import_object(
         self,
