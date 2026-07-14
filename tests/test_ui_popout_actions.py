@@ -49,14 +49,56 @@ class _FakeWindow:
         return _FakePixmap()
 
 
+class _FakeSectionButton:
+    def __init__(self, host: "_FakeSectionHost") -> None:
+        self._host = host
+
+    def isChecked(self) -> bool:
+        return bool(self._host.opened)
+
+
+class _FakeSectionHost:
+    def __init__(self, opened: bool = False) -> None:
+        self.opened = bool(opened)
+        self.visible = True
+
+    def findChildren(self, *_args):
+        return [_FakeSectionButton(self)]
+
+    def isVisible(self) -> bool:
+        return bool(self.visible)
+
+    def setVisible(self, value: bool) -> None:
+        self.visible = bool(value)
+
+    def geometry(self) -> tuple[int, int, int, int]:
+        return (1, 2, 320, 180)
+
+
+class _FakeScrollArea:
+    def __init__(self) -> None:
+        self.visible_targets: list[object] = []
+
+    def ensureWidgetVisible(self, widget, *_args) -> None:
+        self.visible_targets.append(widget)
+
+
 class _FakeWorkbenchPanel:
     def __init__(self) -> None:
         self._node_graph_popout = None
+        self._voice_lab_window = None
         self.toggle_count = 0
+        self.voice_lab_open_count = 0
 
     def _toggle_node_graph_popout(self) -> None:
         self.toggle_count += 1
         self._node_graph_popout = _FakeWindow()
+
+    def _open_voice_lab(self):
+        self.voice_lab_open_count += 1
+        self._voice_lab_window = _FakeWindow()
+        self._voice_lab_window.show()
+        return self._voice_lab_window
 
 
 class _FakeAudioMixerPanel:
@@ -109,6 +151,11 @@ class _FakeOwner:
         self._pip_popout = None
         self._workbench_panel = _FakeWorkbenchPanel()
         self._audio_mixer_panel = _FakeAudioMixerPanel()
+        self._right_dock_scroll = _FakeScrollArea()
+        self._left_dock_scroll = _FakeScrollArea()
+        self._creator_assist_section_host = _FakeSectionHost(False)
+        self._audio_workspace_section_host = _FakeSectionHost(False)
+        self._effects_library_section_host = _FakeSectionHost(False)
         self._tracks = [SimpleNamespace(id=1)]
         self._active_track_id = 1
         self._player = _FakePlayer()
@@ -194,6 +241,10 @@ class _FakeOwner:
     def _toggle_pip_popout(self) -> None:
         self._pip_popout = _FakeWindow()
 
+    def _set_collapsible_host_open(self, host, opened: bool) -> None:
+        host.opened = bool(opened)
+        host.visible = True
+
 
 def test_ui_popout_actions_are_registered_without_review_window_actions():
     from app.actions import build_default_action_registry
@@ -208,6 +259,9 @@ def test_ui_popout_actions_are_registered_without_review_window_actions():
         "ui.popout.capture",
         "ui.popout.close",
     }.issubset(action_ids)
+    assert "ui.section.list" in action_ids
+    assert "ui.section.set_open" in action_ids
+    assert "tts.voice_lab.open" in action_ids
     assert "review.ui.popout.open" not in action_ids
     assert "review.capture.window" not in action_ids
     assert "ui.viewer.compare.set" in action_ids
@@ -364,3 +418,42 @@ def test_ui_popout_supports_secondary_editor_sections():
     assert owner._audio_workspace_popout is not None
     assert owner._pip_popout is not None
     assert owner._audio_mixer_panel._popout_win is not None
+
+
+def test_ui_section_actions_open_collapsible_sections():
+    from app.actions import build_default_action_registry
+
+    owner = _FakeOwner()
+    registry = build_default_action_registry(owner)
+
+    listing = registry.execute("ui.section.list").to_dict()
+    assert listing["ok"] is True
+    sections = {row["target"]: row for row in listing["result"]["sections"]}
+    assert sections["creator_assist"]["available"] is True
+    assert sections["creator_assist"]["open"] is False
+
+    opened = registry.execute("ui.section.set_open", {"target": "creator", "open": True}).to_dict()
+    assert opened["ok"] is True
+    assert opened["result"]["target"] == "creator_assist"
+    assert opened["result"]["after"]["open"] is True
+    assert owner._creator_assist_section_host.opened is True
+    assert owner._right_dock_scroll.visible_targets[-1] is owner._creator_assist_section_host
+
+    audio = registry.execute("ui.section.set_open", {"section": "voice", "open": True}).to_dict()
+    assert audio["ok"] is True
+    assert audio["result"]["target"] == "audio_workspace"
+    assert owner._audio_workspace_section_host.opened is True
+
+
+def test_tts_voice_lab_open_action_routes_to_workbench():
+    from app.actions import build_default_action_registry
+
+    owner = _FakeOwner()
+    registry = build_default_action_registry(owner)
+
+    result = registry.execute("tts.voice_lab.open", {"activate": True}).to_dict()
+    assert result["ok"] is True
+    assert result["result"]["opened"] is True
+    assert result["result"]["visible"] is True
+    assert owner._workbench_panel.voice_lab_open_count == 1
+    assert owner._workbench_panel._voice_lab_window is not None

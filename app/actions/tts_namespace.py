@@ -94,6 +94,17 @@ def register_tts_actions(registry: Any) -> None:
         dry_summary="Voice Lab voice library catalog would be listed",
     )
     registry.register_adapter_action(
+        "tts.voice_lab.open",
+        "Open or raise the standalone Voice Lab window from the Workbench Audio dock.",
+        "tts",
+        "tts_voice_lab_open",
+        params_schema=schema_object({"activate": {"type": "boolean"}}, additional_properties=True),
+        mutating=False,
+        changed=False,
+        async_kind="ui",
+        dry_summary="Voice Lab window would be opened or raised",
+    )
+    registry.register_adapter_action(
         "tts.install.plan",
         "Return the safe local TTS install plan without running it.",
         "tts",

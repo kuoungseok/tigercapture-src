@@ -20,6 +20,14 @@ class _PopoutSpec:
     aliases: tuple[str, ...] = ()
 
 
+@dataclass(frozen=True)
+class _SectionSpec:
+    target: str
+    attr: str
+    group: str = ""
+    aliases: tuple[str, ...] = ()
+
+
 _POPOUT_SPECS: tuple[_PopoutSpec, ...] = (
     _PopoutSpec("preview", "_preview_popout", "_toggle_preview_popout", aliases=("viewer",)),
     _PopoutSpec("timeline", "_timeline_popout", "_toggle_timeline_popout"),
@@ -43,11 +51,35 @@ _POPOUT_SPECS: tuple[_PopoutSpec, ...] = (
     _PopoutSpec("audio_mixer", "_popout_win", "_toggle_popout", "_audio_mixer_panel", ("mixer", "scopes")),
 )
 
+_SECTION_SPECS: tuple[_SectionSpec, ...] = (
+    _SectionSpec("media_pool", "_media_pool_section_host", "left", ("media", "pool")),
+    _SectionSpec("actor_library", "_actor_library_section_host", "left", ("actors", "actor")),
+    _SectionSpec("effects_library", "_effects_library_section_host", "left", ("effects", "effect_library")),
+    _SectionSpec("title_presets", "_title_presets_section_host", "left", ("titles", "title")),
+    _SectionSpec("transitions", "_transitions_section_host", "left", ("transition_presets",)),
+    _SectionSpec("workflow_presets", "_workflow_presets_section_host", "left", ("workflows",)),
+    _SectionSpec("workbench", "_workbench_section_host", "right", ("inspector",)),
+    _SectionSpec("creator_assist", "_creator_assist_section_host", "right", ("creator",)),
+    _SectionSpec("ai_command", "_ai_command_section_host", "right", ("ai", "command")),
+    _SectionSpec("script_edit", "_ai_script_edit_section_host", "right", ("ai_script_edit", "script")),
+    _SectionSpec("render_queue", "_render_queue_section_host", "right", ("render", "queue")),
+    _SectionSpec("audio_workspace", "_audio_workspace_section_host", "right", ("audio", "voice", "voice_lab")),
+    _SectionSpec("subtitle", "_subtitle_section_host", "right", ("subtitles",)),
+    _SectionSpec("pip", "_pip_section_host", "right", ("picture_in_picture",)),
+    _SectionSpec("timeline", "_timeline_section_host", "timeline", ()),
+)
+
 _ALIASES: dict[str, _PopoutSpec] = {}
 for _spec in _POPOUT_SPECS:
     _ALIASES[_spec.target] = _spec
     for _alias in _spec.aliases:
         _ALIASES[_alias] = _spec
+
+_SECTION_ALIASES: dict[str, _SectionSpec] = {}
+for _spec in _SECTION_SPECS:
+    _SECTION_ALIASES[_spec.target] = _spec
+    for _alias in _spec.aliases:
+        _SECTION_ALIASES[_alias] = _spec
 
 
 def _norm_target(value: Any) -> str:
@@ -252,6 +284,61 @@ def _surface_state(widget: Any) -> dict[str, Any]:
     }
 
 
+def _resolve_section_spec(value: Any) -> _SectionSpec:
+    key = _norm_target(value)
+    spec = _SECTION_ALIASES.get(key)
+    if spec is None:
+        allowed = ", ".join(sorted(_SECTION_ALIASES))
+        raise RuntimeError(f"unknown section target: {value!r}; allowed: {allowed}")
+    return spec
+
+
+def _section_open_state(host: Any) -> bool:
+    if host is None:
+        return False
+    buttons: list[Any] = []
+    try:
+        from PySide6.QtWidgets import QPushButton
+
+        finder = getattr(host, "findChildren", None)
+        buttons = list(finder(QPushButton, "SectionDisclosure") or []) if callable(finder) else []
+    except Exception:
+        try:
+            finder = getattr(host, "findChildren", None)
+            buttons = list(finder(object, "SectionDisclosure") or []) if callable(finder) else []
+        except Exception:
+            buttons = []
+    for button in list(buttons or []):
+        checked = getattr(button, "isChecked", None)
+        if callable(checked):
+            try:
+                return bool(checked())
+            except Exception:
+                pass
+    try:
+        return bool(host.isVisible())
+    except Exception:
+        return False
+
+
+def _refresh_section_group(owner: Any, group: str) -> None:
+    if group == "left":
+        try:
+            from app.video_editor_ui_left_dock import _refresh_left_secondary_sections_height
+
+            _refresh_left_secondary_sections_height(owner)
+        except Exception:
+            pass
+    elif group == "right":
+        try:
+            from app.video_editor_ui_right_dock import _refresh_right_secondary_sections_height
+
+            _refresh_right_secondary_sections_height(owner)
+        except Exception:
+            pass
+    _process_events()
+
+
 def _window_state_changes(before: dict[str, Any], after: dict[str, Any]) -> dict[str, Any]:
     keys = (
         "owner_id",
@@ -357,6 +444,67 @@ def _apply_geometry(widget: Any, *, x: Any = None, y: Any = None, width: Any = N
 
 class UiAdapterMixin:
     """Action-facing helpers for detached editor windows."""
+
+    def list_ui_sections(self) -> dict[str, Any]:
+        owner = self._require_owner()
+        rows: list[dict[str, Any]] = []
+        for spec in _SECTION_SPECS:
+            host = getattr(owner, spec.attr, None)
+            rows.append(
+                {
+                    "target": spec.target,
+                    "attr": spec.attr,
+                    "group": spec.group,
+                    "available": host is not None,
+                    "open": _section_open_state(host),
+                    "surface": _surface_state(host),
+                    "aliases": list(spec.aliases),
+                }
+            )
+        return {"schema": "tigerstudio.actions.ui_sections.v1", "sections": rows}
+
+    def set_ui_section_open(
+        self,
+        *,
+        target: str = "",
+        section: str = "",
+        open: bool = True,
+        scroll: bool = True,
+    ) -> dict[str, Any]:
+        owner = self._require_owner()
+        spec = _resolve_section_spec(target or section)
+        host = getattr(owner, spec.attr, None)
+        if host is None:
+            raise RuntimeError(f"section is not available: {spec.target}")
+
+        before = {"open": _section_open_state(host), "surface": _surface_state(host)}
+        opened = _bool(open, True)
+        setter = getattr(owner, "_set_collapsible_host_open", None)
+        if callable(setter):
+            setter(host, opened)
+        else:
+            set_visible = getattr(host, "setVisible", None)
+            if callable(set_visible):
+                set_visible(opened)
+
+        if scroll:
+            scroll_area = getattr(owner, "_right_dock_scroll", None) if spec.group == "right" else getattr(owner, "_left_dock_scroll", None)
+            ensure_visible = getattr(scroll_area, "ensureWidgetVisible", None)
+            if callable(ensure_visible):
+                try:
+                    ensure_visible(host, 0, 8)
+                except Exception:
+                    pass
+
+        _refresh_section_group(owner, spec.group)
+        after = {"open": _section_open_state(host), "surface": _surface_state(host)}
+        return {
+            "schema": "tigerstudio.actions.ui_section_open.v1",
+            "target": spec.target,
+            "requested_open": opened,
+            "before": before,
+            "after": after,
+        }
 
     def media_pool_drop_to_timeline(
         self,

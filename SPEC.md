@@ -5564,6 +5564,14 @@ AI Script Edit MVP integration:
 - The audio action namespace split is active:
   `app/actions/audio_namespace.py` owns video-audio extraction, audio clip
   split/trim/delete/gain, and audio track mix registrations.
+- The UI and Voice Lab action split is active:
+  `app/actions/ui_namespace.py` owns detachable popout controls plus
+  collapsible section operations such as `ui.section.list` and
+  `ui.section.set_open`; `app/actions/tts_namespace.py` owns Voice Lab/TTS
+  operations including `tts.voice_lab.open`. Voice Lab styling fixes do not
+  need actions, but any user-visible Voice Lab launch or dock/section
+  operation must stay reachable through these registered actions for AI/MCP
+  control.
 - The track/selection action namespace split is active:
   `app/actions/track_selection_namespace.py` owns track reorder/state/lock/mute/
   rename/select, clip selection, timeline select-all, and selection set/clear/

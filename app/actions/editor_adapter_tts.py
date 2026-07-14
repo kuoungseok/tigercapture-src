@@ -41,6 +41,42 @@ class TtsAdapterMixin:
 
         return tts_voice_library_catalog()
 
+    def tts_voice_lab_open(self, *, activate: bool = True) -> dict[str, Any]:
+        owner = self._require_owner()
+        workbench = getattr(owner, "_workbench_panel", None)
+        opener = getattr(workbench, "_open_voice_lab", None)
+        if not callable(opener):
+            raise RuntimeError("Voice Lab window opener is not available")
+        window = opener()
+        if activate:
+            try:
+                window.raise_()
+                window.activateWindow()
+            except Exception:
+                pass
+        geometry = {}
+        try:
+            raw = window.geometry()
+            geometry = {
+                "x": int(raw.x()),
+                "y": int(raw.y()),
+                "width": int(raw.width()),
+                "height": int(raw.height()),
+            }
+        except Exception:
+            geometry = {}
+        try:
+            visible = bool(window.isVisible())
+        except Exception:
+            visible = True
+        return {
+            "schema": "tigerstudio.tts.voice_lab.open.v1",
+            "opened": True,
+            "visible": visible,
+            "window_type": type(window).__name__,
+            "geometry": geometry,
+        }
+
     def tts_install_plan(self, *, install_root: str = "", provider_id: str = "") -> dict[str, Any]:
         from app.tts_setup import tts_install_plan
 
