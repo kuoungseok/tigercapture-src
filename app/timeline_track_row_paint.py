@@ -193,7 +193,7 @@ def _paint_track_row_background_wash(
     *,
     active: bool,
 ) -> None:
-    """Keep each timeline row visibly tied to its track color, including gaps."""
+    """Apply a low-alpha track identity wash without overpowering thumbnails."""
     if rect.width() <= 0 or rect.height() <= 0:
         return
     fill = QColor(fill)
@@ -201,15 +201,41 @@ def _paint_track_row_background_wash(
     edge = QColor(edge)
     painter.save()
     wash = QLinearGradient(rect.left(), rect.top(), rect.right(), rect.bottom())
-    wash.setColorAt(0.0, _with_alpha(highlight.lighter(106), 46 if active else 34))
-    wash.setColorAt(0.52, _with_alpha(fill, 36 if active else 28))
-    wash.setColorAt(1.0, _with_alpha(edge.darker(112), 32 if active else 24))
+    wash.setColorAt(0.0, _with_alpha(highlight.lighter(106), 26 if active else 16))
+    wash.setColorAt(0.52, _with_alpha(fill, 20 if active else 12))
+    wash.setColorAt(1.0, _with_alpha(edge.darker(112), 18 if active else 10))
     painter.fillRect(rect, QBrush(wash))
-    painter.fillRect(rect.adjusted(0, 3, 0, -3), _with_alpha(fill.darker(135), 12 if active else 8))
-    painter.setPen(QPen(_with_alpha(edge, 56 if active else 36), 1))
+    painter.fillRect(rect.adjusted(0, 3, 0, -3), _with_alpha(fill.darker(135), 8 if active else 5))
+    painter.setPen(QPen(_with_alpha(edge, 42 if active else 24), 1))
     painter.drawLine(rect.left(), rect.top(), rect.right(), rect.top())
-    painter.setPen(QPen(_with_alpha(edge.darker(125), 42 if active else 28), 1))
+    painter.setPen(QPen(_with_alpha(edge.darker(125), 32 if active else 18), 1))
     painter.drawLine(rect.left(), rect.bottom(), rect.right(), rect.bottom())
+    painter.restore()
+
+
+def _paint_track_top_identity_rail(
+    painter: QPainter,
+    rect: QRect,
+    edge: QColor,
+    *,
+    active: bool,
+) -> None:
+    if rect.width() <= 0 or rect.height() <= 0:
+        return
+    edge = QColor(edge)
+    painter.save()
+    rail_h = 3 if active else 2
+    rail = QRect(rect.left(), rect.top(), rect.width(), min(rail_h, rect.height()))
+    rail_grad = QLinearGradient(rail.left(), rail.top(), rail.right(), rail.top())
+    rail_grad.setColorAt(0.0, _with_alpha(edge.lighter(108), 78 if active else 48))
+    rail_grad.setColorAt(0.55, _with_alpha(edge, 102 if active else 62))
+    rail_grad.setColorAt(1.0, _with_alpha(edge.darker(112), 62 if active else 38))
+    painter.fillRect(rail, QBrush(rail_grad))
+    if rect.height() > rail.height():
+        painter.fillRect(
+            QRect(rect.left(), rect.top() + rail.height(), rect.width(), 1),
+            QColor(0, 0, 0, 28 if active else 18),
+        )
     painter.restore()
 
 
@@ -924,9 +950,9 @@ def paintEvent(self, event) -> None:
         x1 = self._ms_to_x(cut.start_ms)
         x2 = self._ms_to_x(cut.end_ms)
         cut_rect = QRect(x1, rect.top(), max(1, x2 - x1), rect.height())
-        painter.fillRect(cut_rect, _with_alpha(clip_fill.darker(145), 126))
-        painter.fillRect(cut_rect.adjusted(0, 3, 0, -3), QColor(0, 0, 0, 78))
-        painter.setPen(QPen(_with_alpha(clip_edge, 82), 1))
+        painter.fillRect(cut_rect, QColor(14, 15, 17, 148))
+        painter.fillRect(cut_rect.adjusted(0, 3, 0, -3), _with_alpha(clip_fill.darker(150), 26))
+        painter.setPen(QPen(_with_alpha(clip_edge, 58), 1))
         painter.drawLine(cut_rect.left(), cut_rect.top(), cut_rect.left(), cut_rect.bottom())
         painter.drawLine(cut_rect.right(), cut_rect.top(), cut_rect.right(), cut_rect.bottom())
         if x2 - x1 > 24:
@@ -1262,6 +1288,12 @@ def paintEvent(self, event) -> None:
         )
 
     self._paint_tracking_status_overlay(painter, rect)
+    _paint_track_top_identity_rail(
+        painter,
+        row_body_rect,
+        clip_edge,
+        active=self._is_active,
+    )
 
     from app.timeline_track_row import _ANTS_OWNER, _draw_marching_ants
 

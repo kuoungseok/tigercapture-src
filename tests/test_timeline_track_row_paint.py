@@ -329,7 +329,7 @@ def _track_with_legacy_cut_overlay() -> VideoTrack:
     return track
 
 
-def _render_track_pixel(track: VideoTrack, project_ms: int) -> QColor:
+def _render_track_pixel(track: VideoTrack, project_ms: int, *, y_offset: int | None = None) -> QColor:
     _ensure_qapp()
     row = TrackRow(track)
     row.set_px_per_sec(90.0)
@@ -342,14 +342,21 @@ def _render_track_pixel(track: VideoTrack, project_ms: int) -> QColor:
     image = canvas.toImage()
     return image.pixelColor(
         row._project_ms_to_x(project_ms),
-        row.LABEL_H + row.TIMELINE_H // 2,
+        row.LABEL_H + (row.TIMELINE_H // 2 if y_offset is None else int(y_offset)),
     )
 
 
-def test_track_background_keeps_track_hue_inside_empty_clip_gap():
+def test_track_background_keeps_subtle_track_hue_inside_empty_clip_gap():
     pixel = _render_track_pixel(_track_with_two_clips_and_gap(), 1_500)
 
-    assert pixel.blue() > pixel.red() + 2
+    assert pixel.blue() >= pixel.red() + 2
+    assert pixel.green() >= pixel.red()
+
+
+def test_track_top_rail_carries_clear_track_identity_hue():
+    pixel = _render_track_pixel(_track_with_two_clips_and_gap(), 1_500, y_offset=1)
+
+    assert pixel.blue() > pixel.red() + 6
     assert pixel.green() >= pixel.red()
 
 
