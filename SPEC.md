@@ -3701,6 +3701,14 @@ Node graph behavior:
   available to automation through `paint.export_png`, so AI workflows can
   produce reviewable still overlays without routing through timeline video
   export.
+- The standalone drawing/paint dialog has canvas zoom controls for detailed
+  brush and object placement. The top bar exposes zoom out, zoom in, and Fit
+  buttons plus a `25%` to `400%` zoom slider and percent readout. Keyboard and
+  mouse shortcuts share the same clamped zoom path: `Ctrl++`/`Ctrl+=` zoom in,
+  `Ctrl+-` zooms out, `Ctrl+0` and `Ctrl+1` reset to fit/100%, and
+  `Ctrl+MouseWheel` zooms around the paint workspace. Zoom is an editing-view
+  affordance only; PNG/timeline export still uses the original canvas/export
+  size and normalized paint/object coordinates.
 - `ColorGrade.color_workflow` persists color workflow payloads from the
   professional color preset menu. `apply_to_rgb()` applies the workflow's
   qualifier/window mask and curves on the CPU path so preview/export can see
