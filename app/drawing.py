@@ -182,6 +182,31 @@ QSlider::handle:horizontal {
     background: #9bbcff;
 }
 
+QSlider#PaintHueSlider::groove:horizontal {
+    height: 8px;
+    border-radius: 4px;
+    background: qlineargradient(
+        x1:0, y1:0, x2:1, y2:0,
+        stop:0 #d14f4f,
+        stop:0.17 #d9b64d,
+        stop:0.33 #69b170,
+        stop:0.5 #3f9cd6,
+        stop:0.67 #6a58a9,
+        stop:0.83 #b75279,
+        stop:1 #d14f4f
+    );
+}
+
+QSlider#PaintHueSlider::handle:horizontal,
+QSlider#PaintValueSlider::handle:horizontal {
+    width: 14px;
+    height: 14px;
+    margin: -4px 0;
+    border-radius: 7px;
+    background: #eef2f7;
+    border: 1px solid #111827;
+}
+
 QComboBox {
     background-color: #0f1117;
     color: #ffffff;
@@ -1260,24 +1285,24 @@ def _pixmap_to_pil_rgba(pixmap: QPixmap):
 # ---------------------------------------------------------------------------
 
 
-# Modern creator palette: accents, markup colors, soft fills, and neutrals.
+# Modern creator palette: muted editorial swatches for screen annotation.
 PALETTE_COLORS: list[tuple[int, int, int]] = [
-    (229, 70, 70),
-    (255, 132, 64),
-    (255, 201, 71),
-    (92, 214, 122),
-    (56, 189, 248),
-    (91, 141, 239),
-    (168, 85, 247),
-    (236, 72, 153),
-    (255, 178, 178),
-    (255, 224, 145),
-    (181, 244, 190),
-    (181, 230, 255),
-    (210, 191, 255),
-    (249, 168, 212),
-    (17, 24, 39),
-    (255, 255, 255),
+    (238, 242, 247),
+    (173, 181, 194),
+    (87, 98, 114),
+    (16, 20, 27),
+    (83, 116, 255),
+    (63, 156, 214),
+    (42, 169, 145),
+    (105, 177, 112),
+    (227, 183, 74),
+    (218, 130, 79),
+    (210, 79, 79),
+    (183, 82, 121),
+    (136, 103, 224),
+    (106, 88, 169),
+    (229, 220, 198),
+    (181, 139, 94),
 ]
 
 RECENT_COLOR_LIMIT = 5
@@ -1335,6 +1360,7 @@ class PaintDialog(QDialog):
         self._pen_color = QColor(*PALETTE_COLORS[0])
         self._pen_width = 6.0
         self._pen_opacity = 255
+        self._palette_syncing = False
         self._recent_colors: list[tuple[int, int, int]] = [
             PALETTE_COLORS[0],
             PALETTE_COLORS[4],
@@ -1807,7 +1833,7 @@ class PaintDialog(QDialog):
         color_label.setObjectName("PaintMeta")
         self._color_preview = QLabel()
         self._color_preview.setObjectName("PaintColorWell")
-        self._color_preview.setFixedSize(50, 32)
+        self._color_preview.setFixedSize(64, 24)
         self._color_hex_label = QLabel("#E54646")
         self._color_hex_label.setObjectName("PaintColorHex")
         color_row.addWidget(color_label)
@@ -1815,6 +1841,33 @@ class PaintDialog(QDialog):
         color_row.addWidget(self._color_hex_label)
         color_row.addWidget(self._color_preview)
         color_panel_layout.addLayout(color_row)
+
+        mixer_label = QLabel("MIXER")
+        mixer_label.setObjectName("PaintMeta")
+        color_panel_layout.addWidget(mixer_label)
+        hue_row = QHBoxLayout()
+        hue_row.setContentsMargins(0, 0, 0, 0)
+        hue_label = QLabel("Hue")
+        hue_label.setObjectName("PaintMeta")
+        self.hue_slider = QSlider(Qt.Orientation.Horizontal)
+        self.hue_slider.setObjectName("PaintHueSlider")
+        self.hue_slider.setRange(0, 359)
+        self.hue_slider.valueChanged.connect(self._on_hue_changed)
+        hue_row.addWidget(hue_label)
+        hue_row.addWidget(self.hue_slider, stretch=1)
+        color_panel_layout.addLayout(hue_row)
+
+        value_row = QHBoxLayout()
+        value_row.setContentsMargins(0, 0, 0, 0)
+        value_label = QLabel("Value")
+        value_label.setObjectName("PaintMeta")
+        self.value_slider = QSlider(Qt.Orientation.Horizontal)
+        self.value_slider.setObjectName("PaintValueSlider")
+        self.value_slider.setRange(12, 100)
+        self.value_slider.valueChanged.connect(self._on_value_changed)
+        value_row.addWidget(value_label)
+        value_row.addWidget(self.value_slider, stretch=1)
+        color_panel_layout.addLayout(value_row)
 
         recent_label = QLabel("RECENT")
         recent_label.setObjectName("PaintMeta")
@@ -1824,13 +1877,13 @@ class PaintDialog(QDialog):
         recent_row.setSpacing(6)
         self._recent_color_btns: list[QPushButton] = []
         for rgb in self._recent_colors:
-            btn = self._make_palette_button(rgb, size=24)
+            btn = self._make_palette_button(rgb, width=40, height=18)
             recent_row.addWidget(btn)
             self._recent_color_btns.append(btn)
         recent_row.addStretch(1)
         color_panel_layout.addLayout(recent_row)
 
-        suggested_label = QLabel("SUGGESTED")
+        suggested_label = QLabel("PALETTE")
         suggested_label.setObjectName("PaintMeta")
         color_panel_layout.addWidget(suggested_label)
         palette_grid = QGridLayout()
@@ -1838,7 +1891,7 @@ class PaintDialog(QDialog):
         palette_grid.setVerticalSpacing(6)
         self._palette_btns: list[QPushButton] = []
         for idx, rgb in enumerate(PALETTE_COLORS):
-            btn = self._make_palette_button(rgb, size=24)
+            btn = self._make_palette_button(rgb, width=54, height=20)
             palette_grid.addWidget(btn, idx // 4, idx % 4)
             self._palette_btns.append(btn)
         color_panel_layout.addLayout(palette_grid)
@@ -1900,6 +1953,7 @@ class PaintDialog(QDialog):
         inspector_layout.addWidget(note)
         workspace.addWidget(inspector)
 
+        self._sync_palette_controls_from_color()
         self._highlight_selected_palette()
         self._update_inspector_counts()
         self._install_edit_shortcuts()
@@ -1911,11 +1965,17 @@ class PaintDialog(QDialog):
         if not self._sticker_items and self._stickers:
             self._spawn_initial_stickers()
 
-    def _make_palette_button(self, rgb: tuple[int, int, int], *, size: int = 28) -> QPushButton:
+    def _make_palette_button(
+        self,
+        rgb: tuple[int, int, int],
+        *,
+        width: int = 44,
+        height: int = 22,
+    ) -> QPushButton:
         btn = QPushButton()
-        btn.setFixedSize(size, size)
+        btn.setFixedSize(width, height)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._style_palette_button(btn, rgb, selected=False, size=size)
+        self._style_palette_button(btn, rgb, selected=False, width=width, height=height)
         btn.clicked.connect(
             lambda _checked=False, b=btn: self._pick_palette_color(
                 getattr(b, "_paint_rgb", rgb)
@@ -1933,7 +1993,7 @@ class PaintDialog(QDialog):
             self._color_preview.setStyleSheet(
                 "QLabel { "
                 f"background-color: rgb({sel[0]},{sel[1]},{sel[2]}); "
-                "border: 1px solid #d9e5ff; border-radius: 9px; "
+                "border: 1px solid #7f8da3; border-radius: 6px; "
                 "}"
             )
         if hasattr(self, "_color_hex_label"):
@@ -1942,6 +2002,42 @@ class PaintDialog(QDialog):
             self._style_palette_button(btn, rgb, selected=(rgb == sel))
         if hasattr(self, "_recent_color_btns"):
             self._refresh_recent_color_buttons(sel)
+        self._update_value_slider_style()
+
+    def _sync_palette_controls_from_color(self) -> None:
+        if not hasattr(self, "hue_slider") or not hasattr(self, "value_slider"):
+            return
+        hue = self._pen_color.hue()
+        if hue < 0:
+            hue = 0
+        value = max(12, min(100, round(self._pen_color.value() * 100 / 255)))
+        self._palette_syncing = True
+        try:
+            self.hue_slider.setValue(hue)
+            self.value_slider.setValue(value)
+        finally:
+            self._palette_syncing = False
+        self._update_value_slider_style()
+
+    def _update_value_slider_style(self) -> None:
+        if not hasattr(self, "value_slider"):
+            return
+        hue = self._pen_color.hue()
+        if hue < 0:
+            hue = self.hue_slider.value() if hasattr(self, "hue_slider") else 0
+        saturation = max(80, self._pen_color.saturation())
+        bright = QColor.fromHsv(hue, saturation, 255)
+        self.value_slider.setStyleSheet(
+            "QSlider#PaintValueSlider::groove:horizontal { "
+            "height: 8px; border-radius: 4px; "
+            f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
+            f"stop:0 #111827, stop:1 rgb({bright.red()},{bright.green()},{bright.blue()})); "
+            "}"
+            "QSlider#PaintValueSlider::handle:horizontal { "
+            "width: 14px; height: 14px; margin: -4px 0; border-radius: 7px; "
+            "background: #eef2f7; border: 1px solid #111827; "
+            "}"
+        )
 
     @staticmethod
     def _rgb_to_hex(rgb: tuple[int, int, int]) -> str:
@@ -1961,24 +2057,27 @@ class PaintDialog(QDialog):
         rgb: tuple[int, int, int],
         *,
         selected: bool,
-        size: int | None = None,
+        width: int | None = None,
+        height: int | None = None,
     ) -> None:
         rgb = self._normalise_rgb(rgb)
-        if size is None:
-            size = max(1, btn.width() or 24)
+        if width is None:
+            width = max(1, btn.width() or 44)
+        if height is None:
+            height = max(1, btn.height() or 22)
         setattr(btn, "_paint_rgb", rgb)
         btn.setToolTip(self._rgb_to_hex(rgb))
-        radius = max(7, min(10, size // 3))
-        border = "#f5f7fb" if selected else "#334055"
-        width = 2 if selected else 1
+        radius = max(4, min(6, height // 3))
+        border = "#b9c7dd" if selected else "#30394a"
+        border_width = 2 if selected else 1
         btn.setStyleSheet(
             "QPushButton { "
             f"background-color: rgb({rgb[0]},{rgb[1]},{rgb[2]}); "
-            f"border: {width}px solid {border}; "
+            f"border: {border_width}px solid {border}; "
             f"border-radius: {radius}px; "
             "padding: 0; "
             "}"
-            "QPushButton:hover { border-color: #8fb3ff; }"
+            "QPushButton:hover { border-color: #7fa7df; }"
         )
 
     def _refresh_recent_color_buttons(self, selected: tuple[int, int, int]) -> None:
@@ -1988,13 +2087,34 @@ class PaintDialog(QDialog):
                 continue
             rgb = self._recent_colors[idx]
             btn.show()
-            self._style_palette_button(btn, rgb, selected=(rgb == selected), size=24)
+            self._style_palette_button(btn, rgb, selected=(rgb == selected), width=40, height=18)
 
     def _remember_recent_color(self, rgb: tuple[int, int, int]) -> None:
         rgb = self._normalise_rgb(rgb)
         self._recent_colors = [item for item in self._recent_colors if item != rgb]
         self._recent_colors.insert(0, rgb)
         del self._recent_colors[RECENT_COLOR_LIMIT:]
+
+    def _apply_pen_color(self, color: QColor, *, remember: bool) -> None:
+        self._pen_color = QColor(color)
+        self.canvas.set_pen_color(self._pen_color)
+        if remember:
+            self._remember_recent_color(
+                (self._pen_color.red(), self._pen_color.green(), self._pen_color.blue())
+            )
+        self._sync_palette_controls_from_color()
+        self._highlight_selected_palette()
+
+    def _color_from_mixer(self) -> QColor:
+        hue = self.hue_slider.value() if hasattr(self, "hue_slider") else 0
+        value_percent = (
+            self.value_slider.value() if hasattr(self, "value_slider") else 100
+        )
+        value = int(value_percent * 255 / 100)
+        saturation = self._pen_color.saturation()
+        if saturation < 48:
+            saturation = 150
+        return QColor.fromHsv(hue, saturation, max(24, min(255, value)))
 
     # ---------- tool actions ----------
 
@@ -2021,20 +2141,26 @@ class PaintDialog(QDialog):
 
     def _pick_palette_color(self, rgb: tuple[int, int, int]) -> None:
         rgb = self._normalise_rgb(rgb)
-        self._pen_color = QColor(*rgb)
-        self.canvas.set_pen_color(self._pen_color)
-        self._remember_recent_color(rgb)
-        self._highlight_selected_palette()
+        self._apply_pen_color(QColor(*rgb), remember=True)
         self._set_tool("pen")
 
     def _pick_custom_color(self) -> None:
         color = QColorDialog.getColor(self._pen_color, self, tr("paint.btn.custom_color"))
         if color.isValid():
-            self._pen_color = color
-            self.canvas.set_pen_color(color)
-            self._remember_recent_color((color.red(), color.green(), color.blue()))
-            self._highlight_selected_palette()
+            self._apply_pen_color(color, remember=True)
             self._set_tool("pen")
+
+    def _on_hue_changed(self, _value: int) -> None:
+        if self._palette_syncing:
+            return
+        self._apply_pen_color(self._color_from_mixer(), remember=False)
+        self._set_tool("pen")
+
+    def _on_value_changed(self, _value: int) -> None:
+        if self._palette_syncing:
+            return
+        self._apply_pen_color(self._color_from_mixer(), remember=False)
+        self._set_tool("pen")
 
     def _on_width_changed(self, value: int) -> None:
         self._pen_width = float(value)
