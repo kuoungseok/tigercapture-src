@@ -1807,12 +1807,30 @@ class PaintDialog(QDialog):
         zoom_label = QLabel("Zoom")
         zoom_label.setObjectName("PaintMeta")
         top_layout.addWidget(zoom_label)
+        self.zoom_out_btn = QPushButton("-")
+        self.zoom_out_btn.setObjectName("PaintCustomColor")
+        self.zoom_out_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.zoom_out_btn.setToolTip("Zoom out (Ctrl+-)")
+        self.zoom_out_btn.clicked.connect(self._zoom_out)
+        top_layout.addWidget(self.zoom_out_btn)
         self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
-        self.zoom_slider.setRange(50, 200)
+        self.zoom_slider.setRange(25, 400)
         self.zoom_slider.setValue(100)
-        self.zoom_slider.setFixedWidth(120)
+        self.zoom_slider.setFixedWidth(140)
         self.zoom_slider.valueChanged.connect(self._on_zoom_changed)
         top_layout.addWidget(self.zoom_slider)
+        self.zoom_in_btn = QPushButton("+")
+        self.zoom_in_btn.setObjectName("PaintCustomColor")
+        self.zoom_in_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.zoom_in_btn.setToolTip("Zoom in (Ctrl++)")
+        self.zoom_in_btn.clicked.connect(self._zoom_in)
+        top_layout.addWidget(self.zoom_in_btn)
+        self.zoom_fit_btn = QPushButton("Fit")
+        self.zoom_fit_btn.setObjectName("PaintCustomColor")
+        self.zoom_fit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.zoom_fit_btn.setToolTip("Fit canvas (Ctrl+0)")
+        self.zoom_fit_btn.clicked.connect(self._zoom_fit)
+        top_layout.addWidget(self.zoom_fit_btn)
         self._zoom_value_label = QLabel("100%")
         self._zoom_value_label.setObjectName("PaintValue")
         top_layout.addWidget(self._zoom_value_label)
@@ -2538,10 +2556,28 @@ class PaintDialog(QDialog):
         self.canvas.clear_path_preview()
 
     def _on_zoom_changed(self, value: int) -> None:
-        self._canvas_zoom = max(0.5, min(2.0, value / 100.0))
+        self._canvas_zoom = max(0.25, min(4.0, value / 100.0))
         if hasattr(self, "_zoom_value_label"):
             self._zoom_value_label.setText(f"{value}%")
         self._update_canvas_geometry()
+
+    def _set_zoom_percent(self, value: int) -> None:
+        value = max(25, min(400, int(value)))
+        if hasattr(self, "zoom_slider"):
+            self.zoom_slider.setValue(value)
+        else:
+            self._on_zoom_changed(value)
+
+    def _zoom_in(self) -> None:
+        current = int(round(float(getattr(self, "_canvas_zoom", 1.0)) * 100))
+        self._set_zoom_percent(current + 25)
+
+    def _zoom_out(self) -> None:
+        current = int(round(float(getattr(self, "_canvas_zoom", 1.0)) * 100))
+        self._set_zoom_percent(current - 25)
+
+    def _zoom_fit(self) -> None:
+        self._set_zoom_percent(100)
 
     def _show_export_png_menu(self) -> None:
         menu = QMenu(self)
@@ -2751,6 +2787,11 @@ class PaintDialog(QDialog):
             ("Delete", self._delete_selected_layer),
             ("Backspace", self._delete_selected_layer),
             ("Ctrl+D", self._duplicate_selected_layer),
+            ("Ctrl++", self._zoom_in),
+            ("Ctrl+=", self._zoom_in),
+            ("Ctrl+-", self._zoom_out),
+            ("Ctrl+0", self._zoom_fit),
+            ("Ctrl+1", self._zoom_fit),
         )
         self._paint_shortcuts = []
         for key, handler in shortcuts:
@@ -2933,6 +2974,17 @@ class PaintDialog(QDialog):
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self._update_canvas_geometry()
+
+    def wheelEvent(self, event) -> None:
+        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+            delta = event.angleDelta().y()
+            if delta > 0:
+                self._zoom_in()
+            elif delta < 0:
+                self._zoom_out()
+            event.accept()
+            return
+        super().wheelEvent(event)
 
     def _update_canvas_geometry(self) -> None:
         host = self._canvas_host
