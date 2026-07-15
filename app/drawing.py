@@ -148,6 +148,26 @@ QPushButton#PaintCustomColor:hover {
     border-color: #6aa2ff;
 }
 
+QFrame#PaintColorPanel {
+    background-color: #121722;
+    border: 1px solid #273044;
+    border-radius: 10px;
+}
+
+QLabel#PaintColorWell {
+    border: 1px solid #4c5870;
+    border-radius: 9px;
+}
+
+QLabel#PaintColorHex {
+    color: #f5f7fb;
+    background-color: #0b0f17;
+    border: 1px solid #273044;
+    border-radius: 7px;
+    padding: 5px 8px;
+    font-weight: 800;
+}
+
 QSlider::groove:horizontal {
     height: 4px;
     border-radius: 2px;
@@ -1240,17 +1260,27 @@ def _pixmap_to_pil_rgba(pixmap: QPixmap):
 # ---------------------------------------------------------------------------
 
 
-# Preset palette — 8 common colors + custom picker
+# Modern creator palette: accents, markup colors, soft fills, and neutrals.
 PALETTE_COLORS: list[tuple[int, int, int]] = [
-    (229, 70, 70),     # red
-    (255, 140, 40),    # orange
-    (255, 210, 40),    # yellow
-    (70, 200, 90),     # green
-    (40, 120, 220),    # blue
-    (150, 70, 220),    # purple
-    (0, 0, 0),         # black
-    (255, 255, 255),   # white
+    (229, 70, 70),
+    (255, 132, 64),
+    (255, 201, 71),
+    (92, 214, 122),
+    (56, 189, 248),
+    (91, 141, 239),
+    (168, 85, 247),
+    (236, 72, 153),
+    (255, 178, 178),
+    (255, 224, 145),
+    (181, 244, 190),
+    (181, 230, 255),
+    (210, 191, 255),
+    (249, 168, 212),
+    (17, 24, 39),
+    (255, 255, 255),
 ]
+
+RECENT_COLOR_LIMIT = 5
 
 
 class PaintDialog(QDialog):
@@ -1305,6 +1335,13 @@ class PaintDialog(QDialog):
         self._pen_color = QColor(*PALETTE_COLORS[0])
         self._pen_width = 6.0
         self._pen_opacity = 255
+        self._recent_colors: list[tuple[int, int, int]] = [
+            PALETTE_COLORS[0],
+            PALETTE_COLORS[4],
+            PALETTE_COLORS[6],
+            PALETTE_COLORS[14],
+            PALETTE_COLORS[15],
+        ]
 
         self._build_ui(background_pixmap, initial_strokes)
 
@@ -1758,32 +1795,60 @@ class PaintDialog(QDialog):
         color_title = QLabel("COLOR")
         color_title.setObjectName("PaintSectionTitle")
         inspector_layout.addWidget(color_title)
+        color_panel = QFrame()
+        color_panel.setObjectName("PaintColorPanel")
+        color_panel_layout = QVBoxLayout(color_panel)
+        color_panel_layout.setContentsMargins(9, 9, 9, 9)
+        color_panel_layout.setSpacing(8)
+
         color_row = QHBoxLayout()
         color_row.setContentsMargins(0, 0, 0, 0)
-        color_label = QLabel(tr("paint.label.color"))
+        color_label = QLabel("Current")
         color_label.setObjectName("PaintMeta")
         self._color_preview = QLabel()
-        self._color_preview.setFixedSize(34, 22)
+        self._color_preview.setObjectName("PaintColorWell")
+        self._color_preview.setFixedSize(50, 32)
+        self._color_hex_label = QLabel("#E54646")
+        self._color_hex_label.setObjectName("PaintColorHex")
         color_row.addWidget(color_label)
         color_row.addStretch(1)
+        color_row.addWidget(self._color_hex_label)
         color_row.addWidget(self._color_preview)
-        inspector_layout.addLayout(color_row)
+        color_panel_layout.addLayout(color_row)
 
+        recent_label = QLabel("RECENT")
+        recent_label.setObjectName("PaintMeta")
+        color_panel_layout.addWidget(recent_label)
+        recent_row = QHBoxLayout()
+        recent_row.setContentsMargins(0, 0, 0, 0)
+        recent_row.setSpacing(6)
+        self._recent_color_btns: list[QPushButton] = []
+        for rgb in self._recent_colors:
+            btn = self._make_palette_button(rgb, size=24)
+            recent_row.addWidget(btn)
+            self._recent_color_btns.append(btn)
+        recent_row.addStretch(1)
+        color_panel_layout.addLayout(recent_row)
+
+        suggested_label = QLabel("SUGGESTED")
+        suggested_label.setObjectName("PaintMeta")
+        color_panel_layout.addWidget(suggested_label)
         palette_grid = QGridLayout()
         palette_grid.setHorizontalSpacing(6)
         palette_grid.setVerticalSpacing(6)
         self._palette_btns: list[QPushButton] = []
         for idx, rgb in enumerate(PALETTE_COLORS):
-            btn = self._make_palette_button(rgb)
+            btn = self._make_palette_button(rgb, size=24)
             palette_grid.addWidget(btn, idx // 4, idx % 4)
             self._palette_btns.append(btn)
-        inspector_layout.addLayout(palette_grid)
+        color_panel_layout.addLayout(palette_grid)
 
-        self.custom_color_btn = QPushButton(tr("paint.btn.custom_color"))
+        self.custom_color_btn = QPushButton("Advanced picker")
         self.custom_color_btn.setObjectName("PaintCustomColor")
         self.custom_color_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.custom_color_btn.clicked.connect(self._pick_custom_color)
-        inspector_layout.addWidget(self.custom_color_btn)
+        color_panel_layout.addWidget(self.custom_color_btn)
+        inspector_layout.addWidget(color_panel)
 
         layer_title = QLabel("LAYERS")
         layer_title.setObjectName("PaintSectionTitle")
@@ -1846,16 +1911,16 @@ class PaintDialog(QDialog):
         if not self._sticker_items and self._stickers:
             self._spawn_initial_stickers()
 
-    def _make_palette_button(self, rgb: tuple[int, int, int]) -> QPushButton:
+    def _make_palette_button(self, rgb: tuple[int, int, int], *, size: int = 28) -> QPushButton:
         btn = QPushButton()
-        btn.setFixedSize(28, 28)
+        btn.setFixedSize(size, size)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        btn.setStyleSheet(
-            f"QPushButton {{ background-color: rgb({rgb[0]},{rgb[1]},{rgb[2]}); "
-            f"border: 2px solid #cccccc; border-radius: 4px; }}"
-            f"QPushButton:hover {{ border-color: #333333; }}"
+        self._style_palette_button(btn, rgb, selected=False, size=size)
+        btn.clicked.connect(
+            lambda _checked=False, b=btn: self._pick_palette_color(
+                getattr(b, "_paint_rgb", rgb)
+            )
         )
-        btn.clicked.connect(lambda: self._pick_palette_color(rgb))
         return btn
 
     def _highlight_selected_palette(self) -> None:
@@ -1868,21 +1933,68 @@ class PaintDialog(QDialog):
             self._color_preview.setStyleSheet(
                 "QLabel { "
                 f"background-color: rgb({sel[0]},{sel[1]},{sel[2]}); "
-                "border: 1px solid #d9e5ff; border-radius: 5px; "
+                "border: 1px solid #d9e5ff; border-radius: 9px; "
                 "}"
             )
+        if hasattr(self, "_color_hex_label"):
+            self._color_hex_label.setText(self._rgb_to_hex(sel))
         for btn, rgb in zip(self._palette_btns, PALETTE_COLORS):
-            if rgb == sel:
-                btn.setStyleSheet(
-                    f"QPushButton {{ background-color: rgb({rgb[0]},{rgb[1]},{rgb[2]}); "
-                    f"border: 3px solid #0067c0; border-radius: 4px; }}"
-                )
-            else:
-                btn.setStyleSheet(
-                    f"QPushButton {{ background-color: rgb({rgb[0]},{rgb[1]},{rgb[2]}); "
-                    f"border: 2px solid #cccccc; border-radius: 4px; }}"
-                    f"QPushButton:hover {{ border-color: #333333; }}"
-                )
+            self._style_palette_button(btn, rgb, selected=(rgb == sel))
+        if hasattr(self, "_recent_color_btns"):
+            self._refresh_recent_color_buttons(sel)
+
+    @staticmethod
+    def _rgb_to_hex(rgb: tuple[int, int, int]) -> str:
+        return f"#{rgb[0]:02X}{rgb[1]:02X}{rgb[2]:02X}"
+
+    @staticmethod
+    def _normalise_rgb(rgb: tuple[int, int, int]) -> tuple[int, int, int]:
+        return (
+            max(0, min(255, int(rgb[0]))),
+            max(0, min(255, int(rgb[1]))),
+            max(0, min(255, int(rgb[2]))),
+        )
+
+    def _style_palette_button(
+        self,
+        btn: QPushButton,
+        rgb: tuple[int, int, int],
+        *,
+        selected: bool,
+        size: int | None = None,
+    ) -> None:
+        rgb = self._normalise_rgb(rgb)
+        if size is None:
+            size = max(1, btn.width() or 24)
+        setattr(btn, "_paint_rgb", rgb)
+        btn.setToolTip(self._rgb_to_hex(rgb))
+        radius = max(7, min(10, size // 3))
+        border = "#f5f7fb" if selected else "#334055"
+        width = 2 if selected else 1
+        btn.setStyleSheet(
+            "QPushButton { "
+            f"background-color: rgb({rgb[0]},{rgb[1]},{rgb[2]}); "
+            f"border: {width}px solid {border}; "
+            f"border-radius: {radius}px; "
+            "padding: 0; "
+            "}"
+            "QPushButton:hover { border-color: #8fb3ff; }"
+        )
+
+    def _refresh_recent_color_buttons(self, selected: tuple[int, int, int]) -> None:
+        for idx, btn in enumerate(self._recent_color_btns):
+            if idx >= len(self._recent_colors):
+                btn.hide()
+                continue
+            rgb = self._recent_colors[idx]
+            btn.show()
+            self._style_palette_button(btn, rgb, selected=(rgb == selected), size=24)
+
+    def _remember_recent_color(self, rgb: tuple[int, int, int]) -> None:
+        rgb = self._normalise_rgb(rgb)
+        self._recent_colors = [item for item in self._recent_colors if item != rgb]
+        self._recent_colors.insert(0, rgb)
+        del self._recent_colors[RECENT_COLOR_LIMIT:]
 
     # ---------- tool actions ----------
 
@@ -1908,8 +2020,10 @@ class PaintDialog(QDialog):
         self._update_inspector_counts()
 
     def _pick_palette_color(self, rgb: tuple[int, int, int]) -> None:
+        rgb = self._normalise_rgb(rgb)
         self._pen_color = QColor(*rgb)
         self.canvas.set_pen_color(self._pen_color)
+        self._remember_recent_color(rgb)
         self._highlight_selected_palette()
         self._set_tool("pen")
 
@@ -1918,7 +2032,9 @@ class PaintDialog(QDialog):
         if color.isValid():
             self._pen_color = color
             self.canvas.set_pen_color(color)
+            self._remember_recent_color((color.red(), color.green(), color.blue()))
             self._highlight_selected_palette()
+            self._set_tool("pen")
 
     def _on_width_changed(self, value: int) -> None:
         self._pen_width = float(value)
