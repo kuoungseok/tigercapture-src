@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
 from PySide6.QtGui import (
     QColor,
     QImage,
@@ -237,6 +237,27 @@ QListWidget#PaintLayerList::item {
 QListWidget#PaintLayerList::item:selected {
     background-color: #263552;
     color: #ffffff;
+}
+
+QListWidget#PaintBrushList {
+    background-color: #11151d;
+    color: #dce6f7;
+    border: 1px solid #2c3342;
+    border-radius: 8px;
+    outline: none;
+    padding: 5px;
+}
+
+QListWidget#PaintBrushList::item {
+    border-radius: 6px;
+    padding: 7px 8px;
+    margin: 1px;
+}
+
+QListWidget#PaintBrushList::item:selected {
+    background-color: #242b3a;
+    color: #ffffff;
+    border: 1px solid #7f8da3;
 }
 
 QDialogButtonBox QPushButton {
@@ -1307,6 +1328,225 @@ PALETTE_COLORS: list[tuple[int, int, int]] = [
 
 RECENT_COLOR_LIMIT = 5
 
+BRUSH_LIBRARY_PRESETS: list[dict[str, object]] = [
+    {
+        "category": "Flow Map",
+        "name": "Chalk",
+        "style": "round",
+        "width": 5,
+        "opacity": 86,
+    },
+    {
+        "category": "Flow Map",
+        "name": "Real Wet Oil",
+        "style": "marker",
+        "width": 18,
+        "opacity": 82,
+    },
+    {
+        "category": "Flow Map",
+        "name": "Screen Paper",
+        "style": "highlighter",
+        "width": 28,
+        "opacity": 38,
+    },
+    {
+        "category": "Pencil & Ink",
+        "name": "Dry Graphite",
+        "style": "round",
+        "width": 3,
+        "opacity": 72,
+    },
+    {
+        "category": "Pencil & Ink",
+        "name": "Digital Ink",
+        "style": "round",
+        "width": 7,
+        "opacity": 100,
+    },
+    {
+        "category": "Pencil & Ink",
+        "name": "Dashed Layout",
+        "style": "dashed",
+        "width": 4,
+        "opacity": 90,
+    },
+    {
+        "category": "Markers",
+        "name": "Soft Marker",
+        "style": "marker",
+        "width": 12,
+        "opacity": 76,
+    },
+    {
+        "category": "Markers",
+        "name": "Wide Highlighter",
+        "style": "highlighter",
+        "width": 30,
+        "opacity": 36,
+    },
+]
+
+
+class PainterColorWheel(QWidget):
+    colorChanged = Signal(QColor)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(142, 142)
+        self.setCursor(Qt.CursorShape.CrossCursor)
+        self._hue = 0
+        self._sat = 255
+        self._val = 255
+
+    def set_color(self, color: QColor) -> None:
+        hue = color.hue()
+        self._hue = 0 if hue < 0 else int(hue)
+        self._sat = max(0, min(255, int(color.saturation())))
+        self._val = max(0, min(255, int(color.value())))
+        self.update()
+
+    def paintEvent(self, _event: QPaintEvent) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        center = QPointF(self.width() / 2, self.height() / 2)
+        outer = min(self.width(), self.height()) / 2 - 6
+        ring_width = 12
+        ring_radius = outer - ring_width / 2
+        ring_rect = QRectF(
+            center.x() - ring_radius,
+            center.y() - ring_radius,
+            ring_radius * 2,
+            ring_radius * 2,
+        )
+        for degree in range(360):
+            painter.setPen(QPen(QColor.fromHsv(degree, 255, 235), ring_width))
+            painter.drawArc(ring_rect, int((90 - degree) * 16), -16)
+
+        hue_point, white_point, black_point = self._triangle_points()
+        image = QImage(self.width(), self.height(), QImage.Format.Format_ARGB32)
+        image.fill(Qt.GlobalColor.transparent)
+        hue_color = QColor.fromHsv(self._hue, 255, 255)
+        min_x = max(0, int(min(hue_point.x(), white_point.x(), black_point.x())) - 1)
+        max_x = min(
+            self.width(),
+            int(max(hue_point.x(), white_point.x(), black_point.x())) + 2,
+        )
+        min_y = max(0, int(min(hue_point.y(), white_point.y(), black_point.y())) - 1)
+        max_y = min(self.height(), int(max(hue_point.y(), white_point.y(), black_point.y())) + 2)
+        for y in range(min_y, max_y):
+            for x in range(min_x, max_x):
+                weights = self._triangle_weights(QPointF(x + 0.5, y + 0.5))
+                if weights is None:
+                    continue
+                hue_w, white_w, black_w = weights
+                if hue_w < -0.001 or white_w < -0.001 or black_w < -0.001:
+                    continue
+                r = int(hue_color.red() * hue_w + 255 * white_w)
+                g = int(hue_color.green() * hue_w + 255 * white_w)
+                b = int(hue_color.blue() * hue_w + 255 * white_w)
+                shade = 1.0 - black_w
+                image.setPixelColor(
+                    x,
+                    y,
+                    QColor(int(r * shade), int(g * shade), int(b * shade)),
+                )
+        painter.drawImage(0, 0, image)
+
+        triangle = QPolygonF([hue_point, white_point, black_point])
+        painter.setPen(QPen(QColor("#d9e5ff"), 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawPolygon(triangle)
+
+        angle = math.radians(self._hue)
+        selector_radius = ring_radius
+        hue_selector = QPointF(
+            center.x() + math.cos(angle) * selector_radius,
+            center.y() - math.sin(angle) * selector_radius,
+        )
+        painter.setPen(QPen(QColor("#111827"), 2))
+        painter.setBrush(QColor("#eef2f7"))
+        painter.drawEllipse(hue_selector, 5, 5)
+
+        color_selector = self._selector_point()
+        painter.setPen(QPen(QColor("#111827"), 2))
+        painter.setBrush(QColor("#f8fafc"))
+        painter.drawEllipse(color_selector, 4, 4)
+
+    def mousePressEvent(self, event: QMouseEvent) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._pick(event.position())
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if event.buttons() & Qt.MouseButton.LeftButton:
+            self._pick(event.position())
+
+    def _pick(self, pos: QPointF) -> None:
+        center = QPointF(self.width() / 2, self.height() / 2)
+        outer = min(self.width(), self.height()) / 2 - 6
+        ring_width = 12
+        distance = math.hypot(pos.x() - center.x(), pos.y() - center.y())
+        if outer - ring_width <= distance <= outer + 2:
+            angle = math.degrees(math.atan2(center.y() - pos.y(), pos.x() - center.x()))
+            self._hue = int((angle + 360) % 360)
+            self.update()
+            self.colorChanged.emit(QColor.fromHsv(self._hue, self._sat, self._val))
+            return
+        weights = self._triangle_weights(pos)
+        if weights is None:
+            return
+        hue_w, white_w, black_w = weights
+        if hue_w < -0.02 or white_w < -0.02 or black_w < -0.02:
+            return
+        value = max(0.0, min(1.0, hue_w + white_w))
+        saturation = 0.0 if value <= 0.001 else max(0.0, min(1.0, hue_w / value))
+        self._sat = int(saturation * 255)
+        self._val = int(value * 255)
+        self.update()
+        self.colorChanged.emit(QColor.fromHsv(self._hue, self._sat, self._val))
+
+    def _triangle_points(self) -> tuple[QPointF, QPointF, QPointF]:
+        center = QPointF(self.width() / 2, self.height() / 2)
+        radius = min(self.width(), self.height()) / 2 - 28
+        return (
+            QPointF(center.x() + radius * 0.78, center.y()),
+            QPointF(center.x() - radius * 0.52, center.y() - radius * 0.64),
+            QPointF(center.x() - radius * 0.52, center.y() + radius * 0.64),
+        )
+
+    def _triangle_weights(self, pos: QPointF) -> tuple[float, float, float] | None:
+        hue_point, white_point, black_point = self._triangle_points()
+        denom = (
+            (white_point.y() - black_point.y()) * (hue_point.x() - black_point.x())
+            + (black_point.x() - white_point.x()) * (hue_point.y() - black_point.y())
+        )
+        if abs(denom) < 0.0001:
+            return None
+        hue_w = (
+            (white_point.y() - black_point.y()) * (pos.x() - black_point.x())
+            + (black_point.x() - white_point.x()) * (pos.y() - black_point.y())
+        ) / denom
+        white_w = (
+            (black_point.y() - hue_point.y()) * (pos.x() - black_point.x())
+            + (hue_point.x() - black_point.x()) * (pos.y() - black_point.y())
+        ) / denom
+        black_w = 1.0 - hue_w - white_w
+        return hue_w, white_w, black_w
+
+    def _selector_point(self) -> QPointF:
+        hue_point, white_point, black_point = self._triangle_points()
+        saturation = self._sat / 255.0
+        value = self._val / 255.0
+        hue_w = value * saturation
+        white_w = value * (1.0 - saturation)
+        black_w = 1.0 - value
+        return QPointF(
+            hue_point.x() * hue_w + white_point.x() * white_w + black_point.x() * black_w,
+            hue_point.y() * hue_w
+            + white_point.y() * white_w
+            + black_point.y() * black_w,
+        )
+
 
 class PaintDialog(QDialog):
     """Full-window paint-mode dialog: frozen video frame as background,
@@ -1668,6 +1908,28 @@ class PaintDialog(QDialog):
         tool_layout.addWidget(self.editor_object_btn)
         tool_layout.addWidget(self.cutout_btn)
         tool_layout.addSpacing(8)
+
+        brush_library_title = QLabel("BRUSH LIBRARY")
+        brush_library_title.setObjectName("PaintSectionTitle")
+        tool_layout.addWidget(brush_library_title)
+        self.brush_category_combo = QComboBox()
+        self.brush_category_combo.addItem("All Brushes", "")
+        for category in dict.fromkeys(
+            str(row["category"]) for row in BRUSH_LIBRARY_PRESETS
+        ):
+            self.brush_category_combo.addItem(category, category)
+        self.brush_category_combo.currentIndexChanged.connect(
+            self._populate_brush_library
+        )
+        tool_layout.addWidget(self.brush_category_combo)
+        self.brush_library_list = QListWidget()
+        self.brush_library_list.setObjectName("PaintBrushList")
+        self.brush_library_list.setFixedHeight(190)
+        self.brush_library_list.itemClicked.connect(self._on_brush_library_item)
+        tool_layout.addWidget(self.brush_library_list)
+        self._populate_brush_library()
+        tool_layout.addSpacing(8)
+
         tool_layout.addWidget(self.clear_btn)
         tool_layout.addStretch(1)
         workspace.addWidget(tool_rail)
@@ -1842,6 +2104,15 @@ class PaintDialog(QDialog):
         color_row.addWidget(self._color_preview)
         color_panel_layout.addLayout(color_row)
 
+        wheel_row = QHBoxLayout()
+        wheel_row.setContentsMargins(0, 0, 0, 0)
+        wheel_row.addStretch(1)
+        self.color_wheel = PainterColorWheel()
+        self.color_wheel.colorChanged.connect(self._on_color_wheel_changed)
+        wheel_row.addWidget(self.color_wheel)
+        wheel_row.addStretch(1)
+        color_panel_layout.addLayout(wheel_row)
+
         mixer_label = QLabel("MIXER")
         mixer_label.setObjectName("PaintMeta")
         color_panel_layout.addWidget(mixer_label)
@@ -1965,6 +2236,53 @@ class PaintDialog(QDialog):
         if not self._sticker_items and self._stickers:
             self._spawn_initial_stickers()
 
+    def _populate_brush_library(self) -> None:
+        if not hasattr(self, "brush_library_list"):
+            return
+        selected_category = ""
+        if hasattr(self, "brush_category_combo"):
+            selected_category = str(self.brush_category_combo.currentData() or "")
+        self.brush_library_list.clear()
+        for idx, preset in enumerate(BRUSH_LIBRARY_PRESETS):
+            category = str(preset["category"])
+            if selected_category and category != selected_category:
+                continue
+            name = str(preset["name"])
+            width = int(preset["width"])
+            opacity = int(preset["opacity"])
+            item = QListWidgetItem(
+                f"{category}  |  {name}\n{width}px  /  {opacity}%"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, idx)
+            item.setSizeHint(QSize(190, 42))
+            self.brush_library_list.addItem(item)
+        if self.brush_library_list.count() > 0:
+            self.brush_library_list.setCurrentRow(0)
+
+    def _on_brush_library_item(self, item: QListWidgetItem) -> None:
+        idx = item.data(Qt.ItemDataRole.UserRole)
+        try:
+            preset = BRUSH_LIBRARY_PRESETS[int(idx)]
+        except Exception:
+            return
+        self._apply_brush_library_preset(preset)
+
+    def _apply_brush_library_preset(self, preset: dict[str, object]) -> None:
+        style = str(preset.get("style") or "round")
+        width = int(preset.get("width") or self._pen_width)
+        opacity = int(preset.get("opacity") or 100)
+        if hasattr(self, "brush_style_combo"):
+            index = self.brush_style_combo.findData(style)
+            if index >= 0:
+                self.brush_style_combo.setCurrentIndex(index)
+        if hasattr(self, "width_slider"):
+            self.width_slider.setValue(max(1, min(60, width)))
+        if hasattr(self, "opacity_slider"):
+            self.opacity_slider.setValue(max(10, min(100, opacity)))
+        self._set_tool("pen")
+        if hasattr(self, "_tool_status_label"):
+            self._tool_status_label.setText(f"Brush: {preset.get('name', 'Preset')}")
+
     def _make_palette_button(
         self,
         rgb: tuple[int, int, int],
@@ -2015,6 +2333,8 @@ class PaintDialog(QDialog):
         try:
             self.hue_slider.setValue(hue)
             self.value_slider.setValue(value)
+            if hasattr(self, "color_wheel"):
+                self.color_wheel.set_color(self._pen_color)
         finally:
             self._palette_syncing = False
         self._update_value_slider_style()
@@ -2160,6 +2480,12 @@ class PaintDialog(QDialog):
         if self._palette_syncing:
             return
         self._apply_pen_color(self._color_from_mixer(), remember=False)
+        self._set_tool("pen")
+
+    def _on_color_wheel_changed(self, color: QColor) -> None:
+        if self._palette_syncing:
+            return
+        self._apply_pen_color(color, remember=False)
         self._set_tool("pen")
 
     def _on_width_changed(self, value: int) -> None:
