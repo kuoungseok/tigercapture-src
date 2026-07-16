@@ -51,6 +51,7 @@ _BINDINGS = (
     ('_apply_creator_assist_subtitles', 'app.video_editor_screenstudio_workflow', '_apply_creator_assist_subtitles', False),
     ('_apply_editor_preset_object', 'app.video_editor_preset_workflows', '_apply_editor_preset_object', False),
     ('_open_template_browser', 'app.video_editor_preset_workflows', '_open_template_browser', False),
+    ('_open_unreal_engine_link', 'app.video_editor_unreal_workflow', 'open_unreal_engine_link', False),
     ('_apply_auto_preset_plan', 'app.video_editor_preset_workflows', '_apply_auto_preset_plan', False),
     ('_workflow_apply_summary_text', 'app.video_editor_preset_workflows', '_workflow_apply_summary_text', True),
     ('_show_workflow_apply_summary_toast', 'app.video_editor_preset_workflows', '_show_workflow_apply_summary_toast', False),

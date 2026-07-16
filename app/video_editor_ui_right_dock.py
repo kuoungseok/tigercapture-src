@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.i18n import tr
-from app.icons import app_icon, icon_size
+from app.icons import app_icon, icon_size, unreal_engine_icon
 from app.studio_slider import StudioSlider
 from app.style import COLOR_TEXT_TERTIARY
 from app.video_editor_lazy_panel import LazyPanelHost
@@ -29,7 +29,7 @@ from app.workbench_panel import WorkbenchPanel
 
 
 _WORKBENCH_MAIN_MIN_HEIGHT = max(500, TOP_WORK_MIN_HEIGHT + 90)
-_CREATOR_TOOLS_CLOSED_HEIGHT = 106
+_CREATOR_TOOLS_CLOSED_HEIGHT = 146
 _WORKBENCH_SECTION_CLOSED_HEIGHT = 51
 _WORKBENCH_TOOLS_OPEN_HEIGHT = 320
 _WORKBENCH_TOOLS_SHORT_OPEN_HEIGHT = 154
@@ -408,6 +408,21 @@ def build_right_dock_sections(self) -> None:
         self._creator_ppt_maker_btn.setMinimumHeight(34)
         self._creator_ppt_maker_btn.clicked.connect(lambda: self._open_ppt_generator())
         creator_tools_lay.addWidget(self._creator_ppt_maker_btn)
+        self._creator_unreal_engine_link_btn = QPushButton(
+            tr("veditor.creator_tools.unreal_engine_link")
+        )
+        self._creator_unreal_engine_link_btn.setObjectName("CreatorToolButton")
+        self._creator_unreal_engine_link_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._creator_unreal_engine_link_btn.setToolTip(
+            tr("veditor.creator_tools.unreal_engine_link.tooltip")
+        )
+        self._creator_unreal_engine_link_btn.setIcon(unreal_engine_icon(16))
+        self._creator_unreal_engine_link_btn.setIconSize(icon_size(16))
+        self._creator_unreal_engine_link_btn.setMinimumHeight(34)
+        self._creator_unreal_engine_link_btn.clicked.connect(
+            lambda: self._open_unreal_engine_link()
+        )
+        creator_tools_lay.addWidget(self._creator_unreal_engine_link_btn)
         self._creator_tools_body.setStyleSheet(
             "QWidget#CreatorToolsBody{background:#101112;border-top:1px solid #22262B;}"
             "QLabel#CreatorToolSummary{color:#AEB5BF;font-size:10px;background:transparent;border:none;}"

@@ -815,5 +815,27 @@ def voice_lab_wide_icon(width: int = 260, height: int = 42, *, color: str = "#FF
     return QIcon(pix)
 
 
+@lru_cache(maxsize=64)
+def unreal_engine_icon(size: int = 18, *, color: str = "#FFFFFF") -> QIcon:
+    safe_size = max(12, int(size or 18))
+    logo_path = Path(__file__).resolve().parents[1] / "resources" / "branding" / "unreal_engine_logo.svg"
+    source = QIcon(str(logo_path)).pixmap(safe_size, safe_size)
+    pix = QPixmap(safe_size, safe_size)
+    pix.fill(Qt.GlobalColor.transparent)
+    if source.isNull():
+        return app_icon("link", size=safe_size, color=color)
+
+    image = source.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+    base = _color(color)
+    for y in range(image.height()):
+        for x in range(image.width()):
+            pixel = image.pixelColor(x, y)
+            alpha = pixel.alpha()
+            if alpha <= 0:
+                continue
+            image.setPixelColor(x, y, QColor(base.red(), base.green(), base.blue(), alpha))
+    return QIcon(QPixmap.fromImage(image))
+
+
 def icon_size(px: int = 16) -> QSize:
     return QSize(px, px)

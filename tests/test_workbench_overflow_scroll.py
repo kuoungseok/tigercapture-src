@@ -205,6 +205,14 @@ def test_video_editor_uses_one_scroll_area_for_workbench_and_tools() -> None:
     assert editor._subtitle_section_host.objectName() == "WorkbenchSectionHost"
     assert editor._creator_ppt_maker_btn.isVisible() is True
     assert "PPT" in editor._creator_ppt_maker_btn.text()
+    assert editor._creator_unreal_engine_link_btn.isVisible() is True
+    unreal_label = editor._creator_unreal_engine_link_btn.text()
+    assert "언리얼" in unreal_label or "Unreal" in unreal_label
+    assert not editor._creator_unreal_engine_link_btn.icon().isNull()
+    assert (
+        editor._creator_tools_body.layout().indexOf(editor._creator_unreal_engine_link_btn)
+        > editor._creator_tools_body.layout().indexOf(editor._creator_ppt_maker_btn)
+    )
 
     initial_scroll = editor._right_dock_scroll.verticalScrollBar().value()
     editor._show_ai_command_dock()

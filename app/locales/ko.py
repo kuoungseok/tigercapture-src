@@ -152,6 +152,8 @@ TRANSLATIONS = {
     "veditor.creator_tools.summary": "콘텐츠 제작 도구를 여기에서 엽니다. PPT Maker는 발표/카탈로그 덱 제작용입니다.",
     "veditor.creator_tools.ppt_maker": "PPT 메이커",
     "veditor.creator_tools.ppt_maker.tooltip": "슬라이드 편집기와 PPTX/비디오 내보내기를 엽니다.",
+    "veditor.creator_tools.unreal_engine_link": "언리얼 엔진 링크",
+    "veditor.creator_tools.unreal_engine_link.tooltip": "Unreal 프로젝트/에디터 브리지 진입점을 엽니다.",
     "veditor.script_edit.placeholder": "열면 스크립트 편집 패널이 로드됩니다.",
     "veditor.script_edit.tooltip": "AI 명령을 열고 검토 가능한 편집 플랜을 생성합니다.",
     "veditor.ai_command.placeholder": "편집 명령을 입력하세요...",

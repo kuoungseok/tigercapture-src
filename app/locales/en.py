@@ -152,6 +152,8 @@ TRANSLATIONS = {
     "veditor.creator_tools.summary": "Open creator tools here. PPT Maker builds presentation and catalog decks.",
     "veditor.creator_tools.ppt_maker": "PPT Maker",
     "veditor.creator_tools.ppt_maker.tooltip": "Open the slide editor with PPTX and video export.",
+    "veditor.creator_tools.unreal_engine_link": "Unreal Engine Link",
+    "veditor.creator_tools.unreal_engine_link.tooltip": "Open the Unreal project/editor bridge entry point.",
     "veditor.script_edit.placeholder": "Script Edit loads when opened.",
     "veditor.script_edit.tooltip": "Open AI Command and generate an editable plan.",
     "veditor.ai_command.placeholder": "Describe an edit action...",
