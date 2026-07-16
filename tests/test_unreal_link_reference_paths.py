@@ -98,3 +98,95 @@ def test_unreal_engine_project_file_dialog_uses_uproject_filter(tmp_path) -> Non
     ]
     assert UNREAL_ENGINE_PROJECT_DIALOG_TITLE == "Open UnrealEngine5 project"
     assert "*.uproject" in UNREAL_ENGINE_PROJECT_FILTER
+
+
+def test_connected_unreal_engine_project_can_start_without_reopening(tmp_path) -> None:
+    from app.video_editor_unreal_workflow import (
+        UNREAL_ENGINE_OPEN_PROJECT_LABEL,
+        UNREAL_ENGINE_START_CONNECTED_LABEL,
+        connected_unreal_engine_project_path,
+        start_unreal_engine_link_with_project,
+    )
+
+    class Owner:
+        pass
+
+    owner = Owner()
+    project = tmp_path / "Connected.uproject"
+    setattr(owner, "_unreal_engine_project_path", str(project))
+
+    assert connected_unreal_engine_project_path(owner) == project
+    result = start_unreal_engine_link_with_project(owner, project)
+
+    assert result == {"status": "connected", "project_path": str(project)}
+    assert getattr(owner, "_unreal_engine_project_path") == str(project)
+    assert UNREAL_ENGINE_START_CONNECTED_LABEL == "Start with connected project"
+    assert UNREAL_ENGINE_OPEN_PROJECT_LABEL == "Open UnrealEngine5 project"
+
+
+def test_unreal_engine_link_start_mode_dialog_exposes_start_and_open(tmp_path) -> None:
+    from app.video_editor_unreal_workflow import (
+        UNREAL_ENGINE_OPEN_PROJECT_LABEL,
+        UNREAL_ENGINE_START_CONNECTED_LABEL,
+        choose_unreal_engine_link_start_mode,
+    )
+
+    class FakeButton:
+        def __init__(self, label):
+            self.label = label
+
+    class FakeBox:
+        def __init__(self, parent):
+            self.parent = parent
+            self.buttons = []
+            self.clicked = None
+            self.window_title = ""
+            self.text = ""
+            self.info = ""
+
+        def setIcon(self, _icon):
+            pass
+
+        def setWindowTitle(self, title):
+            self.window_title = title
+
+        def setText(self, text):
+            self.text = text
+
+        def setInformativeText(self, text):
+            self.info = text
+
+        def addButton(self, label, _role=None):
+            button = FakeButton(str(label))
+            self.buttons.append(button)
+            if button.label == UNREAL_ENGINE_START_CONNECTED_LABEL:
+                self.clicked = button
+            return button
+
+        def setDefaultButton(self, button):
+            self.default = button
+
+        def exec(self):
+            return 0
+
+        def clickedButton(self):
+            return self.clicked
+
+    boxes = []
+
+    def factory(parent):
+        box = FakeBox(parent)
+        boxes.append(box)
+        return box
+
+    choice = choose_unreal_engine_link_start_mode(
+        None,
+        tmp_path / "Connected.uproject",
+        message_box_factory=factory,
+    )
+
+    assert choice == "start"
+    assert boxes[0].window_title == "Unreal Engine Link"
+    labels = [button.label for button in boxes[0].buttons]
+    assert UNREAL_ENGINE_START_CONNECTED_LABEL in labels
+    assert UNREAL_ENGINE_OPEN_PROJECT_LABEL in labels
