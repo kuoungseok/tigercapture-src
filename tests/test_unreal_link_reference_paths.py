@@ -42,3 +42,19 @@ def test_unreal_link_reference_report_is_human_readable() -> None:
     assert "D:/UE_5.8" in text
     assert UASSET_INSPECTOR_ENV in text
     assert UE_ENGINE_ENV in text
+
+
+def test_unreal_link_reference_status_action_is_ownerless() -> None:
+    from app.actions import build_default_action_registry
+
+    registry = build_default_action_registry()
+    result = registry.execute("unreal.link.reference_status").to_dict()
+    spec = registry.get_action_schema("unreal.link.reference_status")
+
+    assert result["ok"] is True
+    assert result["changed"] is False
+    assert spec["requires_owner"] is False
+    assert result["result"]["roots"]["uasset_inspector"]["path"] == (
+        "D:/Pupg_workspace/ToolsStandalone/UAssetInspector"
+    )
+    assert result["result"]["roots"]["ue_58"]["path"] == "D:/UE_5.8"

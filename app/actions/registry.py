@@ -184,6 +184,9 @@ class ActionRegistry:
         from app.actions.creative_namespace import register_creative_readiness_actions
 
         register_creative_readiness_actions(self)
+        from app.actions.unreal_link_namespace import register_unreal_link_actions
+
+        register_unreal_link_actions(self)
         from app.actions.source_record_monitor_namespace import register_source_record_monitor_actions
 
         register_source_record_monitor_actions(self)

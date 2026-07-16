@@ -198,6 +198,7 @@ def test_action_registry_exposes_safe_initial_specs():
         "timeline.multicam.export_parity_board",
         "timeline.multicam.export_handoff",
         "creative_layer.readiness",
+        "unreal.link.reference_status",
         "timeline.edit_points",
         "timeline.jump_edit_point",
         "timeline.range",
@@ -406,6 +407,8 @@ def test_action_registry_exposes_safe_initial_specs():
     assert next(row for row in specs if row["id"] == "vtuber.vrm.bridge_status")["mutates"] is False
     assert next(row for row in specs if row["id"] == "render.queue.stage")["mutates"] is True
     assert next(row for row in specs if row["id"] == "ui.focus_surface")["mutates"] is False
+    assert next(row for row in specs if row["id"] == "unreal.link.reference_status")["mutates"] is False
+    assert next(row for row in specs if row["id"] == "unreal.link.reference_status")["requires_owner"] is False
     assert next(row for row in specs if row["id"] == "capture.targets")["mutates"] is False
     assert next(row for row in specs if row["id"] == "capture.window.video")["mutates"] is False
     assert next(row for row in specs if row["id"] == "capture.window.video")["requires_owner"] is False
