@@ -72,8 +72,8 @@ _INSPECTOR_TAB_SIZE = (62, 48)
 _INSPECTOR_TAB_COMPACT_SIZE = (17, 21)
 _INSPECTOR_TAB_IDS = ("clip", "fx", "mask", "audio", "meta")
 _AUDIO_CREATION_TOOLS_EMPTY_TEXT = (
-    "Composer and Voice Lab are always available below. Select an audio clip "
-    "only when you want clip-level sound editing."
+    "Composer, Voice Lab, and Unreal Link are always available below. Select "
+    "an audio clip only when you want clip-level sound editing."
 )
 _INSPECTOR_TAB_ICONS = {
     "clip": "video",
@@ -1077,8 +1077,8 @@ class WorkbenchPanel(QWidget):
         dock_layout = QVBoxLayout(dock)
         dock_layout.setContentsMargins(2, 0, 2, 0)
         dock_layout.setSpacing(1)
-        dock.setMinimumHeight(AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT * 2 + 1)
-        dock.setMaximumHeight(AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT * 2 + 1)
+        dock.setMinimumHeight(AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT * 3 + 2)
+        dock.setMaximumHeight(AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT * 3 + 2)
 
         button = QPushButton("COMPOSER", dock)
         button.setObjectName("ComposerDockButton")
@@ -1110,6 +1110,21 @@ class WorkbenchPanel(QWidget):
         voice_button.clicked.connect(lambda _checked=False: self._open_voice_lab())
         dock_layout.addWidget(voice_button)
 
+        unreal_button = QPushButton("UNREAL LINK", dock)
+        unreal_button.setObjectName("ComposerDockButton")
+        unreal_button.setCheckable(False)
+        unreal_font = QFont(unreal_button.font())
+        unreal_font.setBold(True)
+        unreal_font.setPixelSize(22)
+        unreal_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 4.0)
+        unreal_button.setFont(unreal_font)
+        unreal_button.setMinimumHeight(AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT)
+        unreal_button.setMaximumHeight(AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT)
+        unreal_button.setToolTip("Open Unreal Link")
+        unreal_button.setAccessibleName("Unreal Link")
+        unreal_button.clicked.connect(lambda _checked=False: self._open_unreal_link())
+        dock_layout.addWidget(unreal_button)
+
         sound_scroll = getattr(self, "_sound_editor_scroll", None)
         insert_index = (
             audio_layout.indexOf(sound_scroll) + 1
@@ -1120,6 +1135,7 @@ class WorkbenchPanel(QWidget):
         self._composer_dock = dock
         self._composer_button = button
         self._voice_lab_button = voice_button
+        self._unreal_link_button = unreal_button
         self._composer_scroll = None
         return dock
 
@@ -1182,6 +1198,19 @@ class WorkbenchPanel(QWidget):
         except Exception:
             pass
         return window
+
+    def _open_unreal_link(self) -> None:
+        button = getattr(self, "_unreal_link_button", None)
+        if button is not None:
+            button.setChecked(False)
+        self._set_inspector_tab("audio")
+        self._set_tab_empty_visible("audio", False)
+        QMessageBox.information(
+            self,
+            "Unreal Link",
+            "Unreal Link is prepared as a Workbench entry point.\n\n"
+            "Next step: connect this button to the Unreal bridge workflow.",
+        )
 
     def _set_composer_expanded(self, expanded: bool) -> None:
         if expanded:
