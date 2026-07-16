@@ -1,19 +1,57 @@
 """Unreal Engine bridge entry points for the editor shell."""
 from __future__ import annotations
 
-from PySide6.QtWidgets import QMessageBox
+from pathlib import Path
+from typing import Callable
+
+from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
 from app.unreal_link_reference_paths import format_unreal_link_reference_report
 
 
+UNREAL_ENGINE_PROJECT_DIALOG_TITLE = "Open UnrealEngine5 project"
+UNREAL_ENGINE_PROJECT_FILTER = "Unreal Engine 5 Project (*.uproject);;All Files (*)"
+
+ProjectDialogGetter = Callable[[QWidget | None, str, str, str], tuple[str, str]]
+
+
+def select_unreal_engine_project_file(
+    parent: QWidget | None,
+    *,
+    initial_dir: str = "",
+    dialog_getter: ProjectDialogGetter | None = None,
+) -> Path | None:
+    getter = dialog_getter or QFileDialog.getOpenFileName
+    path, _selected_filter = getter(
+        parent,
+        UNREAL_ENGINE_PROJECT_DIALOG_TITLE,
+        initial_dir,
+        UNREAL_ENGINE_PROJECT_FILTER,
+    )
+    text = str(path or "").strip()
+    if not text:
+        return None
+    return Path(text)
+
+
 def open_unreal_engine_link(self) -> None:
+    previous = getattr(self, "_unreal_engine_project_path", "")
+    initial_dir = str(Path(previous).parent) if previous else ""
+    project_path = select_unreal_engine_project_file(self, initial_dir=initial_dir)
+    if project_path is None:
+        return
+    setattr(self, "_unreal_engine_project_path", str(project_path))
     QMessageBox.information(
         self,
-        "언리얼 엔진 링크",
-        "언리얼 엔진 링크는 크리에이터 도구 진입점으로 준비되어 있습니다.\n\n"
-        "다음 단계: Unreal 프로젝트/에디터 감지, 캡처 세션, 에셋 브리지 워크플로우를 연결합니다.\n\n"
+        "Unreal Engine Link",
+        f"Selected Unreal Engine 5 project:\n{project_path}\n\n"
         f"{format_unreal_link_reference_report()}",
     )
 
 
-__all__ = ["open_unreal_engine_link"]
+__all__ = [
+    "UNREAL_ENGINE_PROJECT_DIALOG_TITLE",
+    "UNREAL_ENGINE_PROJECT_FILTER",
+    "open_unreal_engine_link",
+    "select_unreal_engine_project_file",
+]

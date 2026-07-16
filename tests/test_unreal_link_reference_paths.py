@@ -58,3 +58,43 @@ def test_unreal_link_reference_status_action_is_ownerless() -> None:
         "D:/Pupg_workspace/ToolsStandalone/UAssetInspector"
     )
     assert result["result"]["roots"]["ue_58"]["path"] == "D:/UE_5.8"
+
+
+def test_unreal_engine_project_file_dialog_uses_uproject_filter(tmp_path) -> None:
+    from app.video_editor_unreal_workflow import (
+        UNREAL_ENGINE_PROJECT_DIALOG_TITLE,
+        UNREAL_ENGINE_PROJECT_FILTER,
+        select_unreal_engine_project_file,
+    )
+
+    selected = tmp_path / "SampleProject.uproject"
+    calls = []
+
+    def fake_dialog(parent, title: str, initial_dir: str, file_filter: str):
+        calls.append(
+            {
+                "parent": parent,
+                "title": title,
+                "initial_dir": initial_dir,
+                "file_filter": file_filter,
+            }
+        )
+        return str(selected), file_filter
+
+    result = select_unreal_engine_project_file(
+        None,
+        initial_dir=str(tmp_path),
+        dialog_getter=fake_dialog,
+    )
+
+    assert result == selected
+    assert calls == [
+        {
+            "parent": None,
+            "title": "Open UnrealEngine5 project",
+            "initial_dir": str(tmp_path),
+            "file_filter": "Unreal Engine 5 Project (*.uproject);;All Files (*)",
+        }
+    ]
+    assert UNREAL_ENGINE_PROJECT_DIALOG_TITLE == "Open UnrealEngine5 project"
+    assert "*.uproject" in UNREAL_ENGINE_PROJECT_FILTER
