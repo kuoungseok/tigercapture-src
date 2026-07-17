@@ -1358,11 +1358,17 @@ float sample_channel(sampler2D tex, vec2 uv, vec4 channel) {
 }
 
 vec3 srgb_to_linear(vec3 c) {
-    return pow(max(c, vec3(0.0)), vec3(2.2));
+    vec3 x = clamp(c, 0.0, 1.0);
+    vec3 low = x / 12.92;
+    vec3 high = pow((x + vec3(0.055)) / 1.055, vec3(2.4));
+    return mix(low, high, step(vec3(0.04045), x));
 }
 
 vec3 linear_to_srgb(vec3 c) {
-    return pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2));
+    vec3 x = clamp(c, 0.0, 1.0);
+    vec3 low = x * 12.92;
+    vec3 high = 1.055 * pow(x, vec3(1.0 / 2.4)) - vec3(0.055);
+    return mix(low, high, step(vec3(0.0031308), x));
 }
 
 void apply_material_layer(inout vec3 albedo, inout float roughness, inout float metallic, inout float out_alpha, inout vec3 emissive) {
@@ -1738,6 +1744,9 @@ void main() {
     float wrapped_lambert = clamp((raw_lambert + 0.42) / 1.42, 0.0, 1.0);
     float ndotv = max(dot(n, view), 0.0);
     vec3 albedo = srgb_to_linear(tex.rgb);
+    if (u_has_base_tex == 1) {
+        albedo *= clamp(v_color.rgb, vec3(0.0), vec3(16.0));
+    }
     float ao = 1.0;
     if (u_has_occlusion_tex == 1) {
         ao = clamp(dot(sample_material_rgba(u_occlusion_tex, uv, v_world_pos, n), u_occlusion_channel), 0.0, 1.0);
@@ -1798,7 +1807,8 @@ void main() {
     rgb = apply_transmission_refraction(rgb, albedo, n, view, roughness, fresnel);
     rgb = apply_output_transform(rgb);
     if (u_has_base_tex == 1) {
-        vec3 preview_albedo = pow(clamp(tex.rgb, 0.0, 1.0), vec3(0.58));
+        vec3 preview_base = clamp(tex.rgb * clamp(v_color.rgb, vec3(0.0), vec3(1.0)), 0.0, 1.0);
+        vec3 preview_albedo = pow(preview_base, vec3(0.58));
         vec3 base_visibility = preview_albedo
             * (0.48 + roughness * 0.24 + (1.0 - metallic) * 0.10)
             * clamp(0.92 + u_ibl_exposure * 0.18, 0.92, 1.55)

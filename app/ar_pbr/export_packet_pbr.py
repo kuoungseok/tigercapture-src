@@ -382,6 +382,11 @@ def _draw_pbr_triangles(
             sample_v = 1.0 - v if unlit else v
             _record_udim_sampling(diagnostics, maps or {}, u, sample_v, mask)
             _record_triplanar_sampling(diagnostics, maps or {}, triplanar_rendering, mask)
+            base_factor = np.dstack((
+                np.clip(interp(13), 0.0, 16.0),
+                np.clip(interp(14), 0.0, 16.0),
+                np.clip(interp(15), 0.0, 16.0),
+            )).astype(np.float32)
             base = (
                 _sample_texture_projected(
                     base_udim,
@@ -407,14 +412,15 @@ def _draw_pbr_triangles(
                 if opacity_arr is not None or opacity_udim else None
             )
             if base is not None:
-                albedo = srgb_to_linear(base[:, :, :3])
+                albedo = srgb_to_linear(base[:, :, :3]) * base_factor
                 alpha = np.clip(base[:, :, 3] * interp(16), 0.0, 1.0) * mask.astype(np.float32)
+                if bool(np.any(np.abs(base_factor - 1.0) > 1.0e-4)):
+                    diagnostics["pbr_base_color_factor_applied"] = True
+                    diagnostics["pbr_base_color_factor_pixels"] = int(
+                        diagnostics.get("pbr_base_color_factor_pixels", 0) or 0
+                    ) + int((alpha > 0.001).sum())
             else:
-                vertex_rgb = np.dstack((
-                    np.clip(interp(13), 0.0, 1.0),
-                    np.clip(interp(14), 0.0, 1.0),
-                    np.clip(interp(15), 0.0, 1.0),
-                ))
+                vertex_rgb = np.clip(base_factor, 0.0, 1.0)
                 albedo = srgb_to_linear(vertex_rgb)
                 alpha = np.clip(interp(16), 0.0, 1.0) * mask.astype(np.float32)
             opacity_channel = _sample_texture_channel(opacity_sample, _map_channel(maps or {}, "opacity", 0))

@@ -416,6 +416,10 @@ def test_ar_pbr_shaders_use_ggx_cook_torrance_contract():
     assert "uniform int u_flip_uv_v" in preview._AR_PBR_TEXTURE_FRAGMENT_SHADER
     assert "preview_albedo = pow" in preview._AR_PBR_TEXTURE_FRAGMENT_SHADER
     assert "base_visibility" in preview._AR_PBR_TEXTURE_FRAGMENT_SHADER
+    assert "x / 12.92" in preview._AR_PBR_TEXTURE_FRAGMENT_SHADER
+    assert "1.055 * pow(x, vec3(1.0 / 2.4))" in preview._AR_PBR_TEXTURE_FRAGMENT_SHADER
+    assert "albedo *= clamp(v_color.rgb" in preview._AR_PBR_TEXTURE_FRAGMENT_SHADER
+    assert "srgb_to_linear(base_sample.rgb) * clamp(albedo" in gpu_window.FRAG_SHADER
 
 
 def test_software_renderer_uses_shared_pbr_math_contract():

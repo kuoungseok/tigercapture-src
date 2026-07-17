@@ -699,11 +699,17 @@ vec3 apply_transmission_refraction(vec3 rgb, vec3 albedo, vec3 normal, vec3 view
 }
 
 vec3 srgb_to_linear(vec3 c) {
-    return pow(max(c, vec3(0.0)), vec3(2.2));
+    vec3 x = clamp(c, 0.0, 1.0);
+    vec3 low = x / 12.92;
+    vec3 high = pow((x + vec3(0.055)) / 1.055, vec3(2.4));
+    return mix(low, high, step(vec3(0.04045), x));
 }
 
 vec3 linear_to_srgb(vec3 c) {
-    return pow(clamp(c, 0.0, 1.0), vec3(1.0 / 2.2));
+    vec3 x = clamp(c, 0.0, 1.0);
+    vec3 low = x * 12.92;
+    vec3 high = 1.055 * pow(x, vec3(1.0 / 2.4)) - vec3(0.055);
+    return mix(low, high, step(vec3(0.0031308), x));
 }
 
 void apply_material_layer(inout vec3 albedo, inout float roughness, inout float metallic, inout float out_alpha, inout vec3 emissive) {
@@ -986,7 +992,7 @@ void main() {
     float out_alpha = clamp(v_color.a, 0.0, 1.0);
     if (u_has_base_map == 1) {
         vec4 base_sample = sample_material_rgba(u_base_map, material_uv, v_world_pos, n);
-        albedo = srgb_to_linear(base_sample.rgb);
+        albedo = srgb_to_linear(base_sample.rgb) * clamp(albedo, vec3(0.0), vec3(16.0));
         if (u_base_alpha_to_opacity == 1) {
             out_alpha *= clamp(base_sample.a, 0.0, 1.0);
         }

@@ -26,6 +26,7 @@ from app.ar_pbr.pbr_math import (
 from app.ar_pbr.tone_mapping import apply_display_transform, normalize_color_management_settings
 from app.ar_pbr.placement import resolve_track_placement
 from app.ar_pbr.texture_plan import (
+    apply_material_base_color_factor,
     material_base_texture_color,
     material_base_texture_path,
     resolve_material_texture_plan,
@@ -531,7 +532,7 @@ def _sample_material_texture_color(
         x = max(0, min(image.width - 1, int(round(u * (image.width - 1)))))
         y = max(0, min(image.height - 1, int(round((1.0 - v) * (image.height - 1)))))
         r, g, b = image.getpixel((x, y))
-        return (int(r), int(g), int(b), max(0, min(255, int(alpha))))
+        return apply_material_base_color_factor((int(r), int(g), int(b)), material, alpha=alpha)
     except Exception:
         return None
 

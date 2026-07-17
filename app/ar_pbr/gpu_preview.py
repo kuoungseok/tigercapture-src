@@ -207,6 +207,7 @@ def build_gpu_preview_items(
         )
         from app.ar_pbr.placement import resolve_track_placement
         from app.ar_pbr.texture_plan import (
+            material_base_color_factor,
             material_base_texture_color,
             material_base_texture_path,
             resolve_material_texture_plan,
@@ -449,6 +450,7 @@ def build_gpu_preview_items(
                     width=width,
                     height=height,
                     avg_z=avg_z,
+                    pbr_rgba=material_base_color_factor(material),
                     force_marmoset_pbr=force_marmoset_pbr,
                 )
                 texture_triangle = material_packet.get("texture_triangle")
@@ -603,6 +605,7 @@ def build_gpu_preview_items(
                         "texture": str(row.get("texture") or ""),
                         "material_id": str(row.get("material_id") or row.get("texture") or "material"),
                         "maps": dict(row.get("maps") or {}),
+                        "base_color_factor": list(row.get("base_color_factor") or []),
                         "vertices": list(row.get("vertices") or []),
                     }
                     for row in sorted(pbr_triangles, key=lambda item: float(item.get("z", 0.0)), reverse=True)
