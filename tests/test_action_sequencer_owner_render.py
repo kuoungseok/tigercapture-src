@@ -371,11 +371,14 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
         def activateWindow(self) -> None:
             captured["activated"] = True
 
-        def apply_animation_preview_once(self, clip: str):
-            raise AssertionError("Unreal animation preview must not use AR/PBR skeletal deformation")
+        def apply_animation_preview_once(self, clip: str, *, duration_ms: float | None = None):
+            captured["played_clip"] = clip
+            captured["played_duration_ms"] = duration_ms
+            return {"status": "playing", "clip": clip, "duration_ms": duration_ms}
 
         def attach_animation_clip(self, clip: dict):
-            raise AssertionError("Unreal animation preview must not attach AR/PBR animation clips")
+            captured["attached_clip"] = dict(clip)
+            return dict(clip)
 
     class FakeAnimationExportWorker:
         def __init__(self, descriptor, animation_path, *, max_samples=48, parent=None) -> None:
@@ -465,6 +468,9 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     assert window.owner_animation_preview_result["sequence_summary"]["sample_count"] == 2
     assert window.owner_animation_sequence_plan["source"]["id"] == "MM_Idle"
     assert window.owner_animation_sequence_plan["ar_pbr_deformation_enabled"] is False
+    assert window.owner_animation_preview_result["playback_result"]["status"] == "playing"
+    assert captured["attached_clip"]["id"] == "MM_Idle"
+    assert captured["played_clip"] == "MM_Idle"
     assert window.owner_animation_clip_export["id"] == "MM_Idle"
     assert captured["export_max_samples"] == 48
     assert captured["shown"] is True

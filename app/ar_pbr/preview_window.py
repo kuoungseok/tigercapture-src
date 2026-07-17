@@ -307,6 +307,48 @@ class _ArPbrPreviewLoader(QThread):
             self.failed.emit(f"{type(exc).__name__}: {exc}")
 
 
+class _AnimationFrameBuildWorker(QThread):
+    frame_ready = Signal(object)
+    frame_failed = Signal(object)
+
+    def __init__(
+        self,
+        descriptor: dict[str, Any],
+        track: dict[str, Any],
+        time_ms: int,
+        generation: int,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._descriptor = descriptor
+        self._track = dict(track)
+        self._time_ms = int(time_ms)
+        self._generation = int(generation)
+
+    def run(self) -> None:
+        try:
+            from tools.ar_pbr_gpu_window import build_vertex_buffer
+
+            vertices, mesh_diag = build_vertex_buffer(
+                self._descriptor,
+                track=self._track,
+                time_ms=self._time_ms,
+            )
+            self.frame_ready.emit({
+                "generation": self._generation,
+                "time_ms": self._time_ms,
+                "vertices": vertices,
+                "mesh_diag": dict(mesh_diag or {}),
+            })
+        except Exception as exc:
+            self.frame_failed.emit({
+                "generation": self._generation,
+                "time_ms": self._time_ms,
+                "error": type(exc).__name__,
+                "message": str(exc),
+            })
+
+
 class _SliderRow(QWidget):
     value_changed = Signal(float)
 
@@ -538,6 +580,9 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._animation_track: dict[str, Any] | None = None
         self._animation_started_at = 0.0
         self._animation_duration_ms = 0.0
+        self._animation_generation = 0
+        self._animation_frame_worker: _AnimationFrameBuildWorker | None = None
+        self._animation_pending_frame: tuple[dict[str, Any], int, int] | None = None
         mode = str(controls_mode or "full").strip().casefold()
         self._controls_mode = mode if mode in {"full", "cubemap_only"} else "full"
         self._simple_cubemap_controls = self._controls_mode == "cubemap_only"
@@ -986,13 +1031,15 @@ class ArPbrAssetPreviewWindow(QMainWindow):
                 "start_offset_ms": 0.0,
             },
         }
+        self._animation_generation += 1
+        self._animation_pending_frame = None
         self._apply_animation_frame(track, 0)
         self._animation_track = track
         self._animation_started_at = time.monotonic()
         self._animation_duration_ms = max(1.0, float(duration_ms if duration_ms is not None else clip.get("duration_ms") or 1000.0))
         if self._animation_timer is None:
             self._animation_timer = QTimer(self)
-            self._animation_timer.setInterval(33)
+            self._animation_timer.setInterval(80)
             self._animation_timer.timeout.connect(self._tick_animation_preview)
         self._animation_timer.start()
         self._status.setText(f"Playing once: {Path(str(clip_name or clip_id)).stem}")
@@ -1027,15 +1074,50 @@ class ArPbrAssetPreviewWindow(QMainWindow):
     def _apply_animation_frame(self, track: dict[str, Any], time_ms: int) -> None:
         if self._gl_widget is None or not isinstance(self._descriptor, dict):
             return
-        try:
-            from tools.ar_pbr_gpu_window import build_vertex_buffer
-
-            vertices, mesh_diag = build_vertex_buffer(self._descriptor, track=track, time_ms=int(time_ms))
-        except Exception:
+        generation = int(self._animation_generation)
+        active_worker = self._animation_frame_worker
+        if active_worker is not None and active_worker.isRunning():
+            self._animation_pending_frame = (dict(track), int(time_ms), generation)
             return
+        worker = _AnimationFrameBuildWorker(
+            self._descriptor,
+            dict(track),
+            int(time_ms),
+            generation,
+            parent=self,
+        )
+        worker.frame_ready.connect(self._on_animation_frame_ready)
+        worker.frame_failed.connect(self._on_animation_frame_failed)
+        worker.finished.connect(lambda worker=worker: self._on_animation_frame_finished(worker))
+        self._animation_frame_worker = worker
+        worker.start()
+
+    def _on_animation_frame_ready(self, payload: dict[str, Any]) -> None:
+        if int(payload.get("generation", -1)) != int(self._animation_generation):
+            return
+        vertices = payload.get("vertices")
+        mesh_diag = payload.get("mesh_diag")
         self._mesh_diag = dict(mesh_diag or {})
         if hasattr(self._gl_widget, "set_mesh_data"):
             self._gl_widget.set_mesh_data(vertices, self._mesh_diag)
+
+    def _on_animation_frame_failed(self, payload: dict[str, Any]) -> None:
+        if int(payload.get("generation", -1)) != int(self._animation_generation):
+            return
+        self._status.setText(f"Animation frame failed: {payload.get('message') or payload.get('error') or 'unknown error'}")
+
+    def _on_animation_frame_finished(self, worker: _AnimationFrameBuildWorker) -> None:
+        if self._animation_frame_worker is worker:
+            self._animation_frame_worker = None
+        worker.deleteLater()
+        pending = self._animation_pending_frame
+        self._animation_pending_frame = None
+        if pending is None or self._animation_track is None:
+            return
+        track, time_ms, generation = pending
+        if int(generation) != int(self._animation_generation):
+            return
+        self._apply_animation_frame(track, int(time_ms))
 
     def _add_parameter_tab(self, title: str, rows: tuple[QWidget, ...], *, tooltip: str = "") -> None:
         page = QWidget(self._parameter_tabs)

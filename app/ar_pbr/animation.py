@@ -94,8 +94,7 @@ def animated_vertices_for_geometry(
 
     model = _model_by_id(descriptor).get(model_id, {})
     models = _model_by_id(descriptor)
-    units = descriptor.get("units") if isinstance(descriptor.get("units"), Mapping) else {}
-    unit_scale = _float(units.get("scale_to_meters"), 1.0)
+    unit_scale = _animation_unit_scale(descriptor)
     center = _bounds_center(geometry.get("bounds"))
     out_vertices: Sequence[Any] | list[Any] = vertices
 
@@ -191,6 +190,17 @@ def _apply_skin_animation(
     )
     if matrix_skinned is not None:
         return matrix_skinned
+    reference_pose_skinned = _apply_reference_pose_skin_animation(
+        vertices,
+        geometry=geometry,
+        descriptor=descriptor,
+        model_curves_by_id=model_curves_by_id,
+        models=models,
+        unit_scale=unit_scale,
+        local_ms=local_ms,
+    )
+    if reference_pose_skinned is not None:
+        return reference_pose_skinned
     parent_by_id = _model_parent_map(descriptor)
     bind_poses: dict[str, dict[str, list[float]]] = {}
     anim_poses: dict[str, dict[str, list[float]]] = {}
@@ -240,6 +250,99 @@ def _apply_skin_animation(
         else:
             out.append(v)
     return out if changed else vertices
+
+
+def _apply_reference_pose_skin_animation(
+    vertices: Sequence[Any],
+    *,
+    geometry: Mapping[str, Any],
+    descriptor: Mapping[str, Any],
+    model_curves_by_id: Mapping[str, Any],
+    models: Mapping[str, Mapping[str, Any]],
+    unit_scale: float,
+    local_ms: float,
+) -> list[list[float]] | None:
+    weights = geometry.get("skin_weights")
+    if not isinstance(weights, list) or not weights:
+        return None
+    try:
+        import numpy as np
+    except Exception:
+        return None
+
+    vertices_np = np.asarray(vertices, dtype=np.float64)
+    if vertices_np.ndim != 2 or vertices_np.shape[1] != 3:
+        return None
+    joint_keys, joint_indices, weight_values = _skin_weight_arrays(geometry, len(vertices_np))
+    if not joint_keys:
+        return None
+
+    parent_by_id = _model_parent_map(descriptor)
+    identity = np.eye(4, dtype=np.float64)
+    skin_mats: list[Any] = []
+    animated_matrix_count = 0
+    for joint_id in joint_keys:
+        try:
+            bind = _global_matrix(
+                joint_id,
+                models=models,
+                parent_by_id=parent_by_id,
+                model_curves_by_id=model_curves_by_id,
+                unit_scale=unit_scale,
+                local_ms=local_ms,
+                animated=False,
+            )
+            anim = _global_matrix(
+                joint_id,
+                models=models,
+                parent_by_id=parent_by_id,
+                model_curves_by_id=model_curves_by_id,
+                unit_scale=unit_scale,
+                local_ms=local_ms,
+                animated=True,
+            )
+            mat = anim @ np.linalg.inv(bind)
+        except Exception:
+            mat = identity
+        if not np.allclose(mat, identity, atol=1.0e-8):
+            animated_matrix_count += 1
+        skin_mats.append(mat)
+    if animated_matrix_count <= 0:
+        return list(vertices)
+
+    hv = np.concatenate(
+        [vertices_np, np.ones((len(vertices_np), 1), dtype=np.float64)],
+        axis=1,
+    )
+    accum = np.zeros((len(vertices_np), 4), dtype=np.float64)
+    total = np.zeros((len(vertices_np),), dtype=np.float64)
+    slot_count = joint_indices.shape[1]
+    for slot in range(slot_count):
+        ids = joint_indices[:, slot]
+        ws = weight_values[:, slot].astype(np.float64, copy=False)
+        valid = (ids >= 0) & (ws > 1.0e-8)
+        if not np.any(valid):
+            continue
+        for joint_index_raw in np.unique(ids[valid]):
+            joint_index = int(joint_index_raw)
+            mat = skin_mats[joint_index]
+            mask = valid & (ids == joint_index)
+            transformed = hv[mask] @ mat.T
+            accum[mask] += transformed * ws[mask, None]
+            total[mask] += ws[mask]
+
+    out = vertices_np.copy()
+    valid_total = total > 1.0e-8
+    if np.any(valid_total):
+        skinned = accum[valid_total]
+        w = skinned[:, 3:4]
+        nonzero_w = np.abs(w[:, 0]) > 1.0e-8
+        skinned_xyz = skinned[:, :3]
+        skinned_xyz[nonzero_w] = skinned_xyz[nonzero_w] / w[nonzero_w]
+        out[valid_total] = skinned_xyz
+    if not np.any(np.abs(out - vertices_np) > 1.0e-8):
+        return list(vertices)
+    return out.astype(float).tolist()
 
 
 def _apply_matrix_skin_animation(
@@ -330,6 +433,23 @@ def descriptor_animation_diagnostics(descriptor: Mapping[str, Any]) -> dict[str,
         "has_static_mesh_animation": any(bool((clip.get("model_curves") or {})) for clip in clips),
         "has_skeletal_animation": bool(bones) and bool(clips),
     }
+
+
+def _animation_unit_scale(descriptor: Mapping[str, Any]) -> float:
+    """Return the transform scale to use for animation bone translations.
+
+    Unreal skeletal exports already store vertex and reference-bone positions in
+    Tiger Studio runtime meters. The `units.scale_to_meters` field still records
+    the original source unit, so applying it again folds the Manny skeleton down
+    to 1/100 scale during animation.
+    """
+
+    schema = str(descriptor.get("schema") or "")
+    source_format = str(descriptor.get("source_format") or "")
+    if schema == "tigerstudio.ar_pbr.unreal_skeletal_mesh_export.v1" or source_format == "unreal_skeletal_mesh":
+        return 1.0
+    units = descriptor.get("units") if isinstance(descriptor.get("units"), Mapping) else {}
+    return _float(units.get("scale_to_meters"), 1.0)
 
 
 def _int(value: Any, default: int) -> int:
@@ -432,6 +552,66 @@ def _normalized_weight_rows(value: Any) -> list[Mapping[str, Any]]:
     if isinstance(value, list):
         return [row for row in value if isinstance(row, Mapping)]
     return []
+
+
+def _skin_weight_arrays(
+    geometry: Mapping[str, Any],
+    vertex_count: int,
+    *,
+    max_influences: int = 8,
+):
+    try:
+        import numpy as np
+    except Exception:
+        return [], None, None
+    cache_key = "_runtime_skin_weight_arrays_v1"
+    if isinstance(geometry, dict):
+        cache = geometry.get(cache_key)
+        if isinstance(cache, dict) and cache.get("vertex_count") == vertex_count and cache.get("max_influences") == max_influences:
+            return cache.get("joint_keys") or [], cache.get("joint_indices"), cache.get("weights")
+    weights_raw = geometry.get("skin_weights")
+    if not isinstance(weights_raw, list):
+        return [], None, None
+
+    joint_keys: list[str] = []
+    joint_index_by_key: dict[str, int] = {}
+    joint_indices = np.full((vertex_count, max_influences), -1, dtype=np.int32)
+    weight_values = np.zeros((vertex_count, max_influences), dtype=np.float32)
+
+    for vertex_index in range(min(vertex_count, len(weights_raw))):
+        rows = _normalized_weight_rows(weights_raw[vertex_index])
+        slot = 0
+        for row in rows:
+            if slot >= max_influences:
+                break
+            bone_id = str(row.get("bone_id") or row.get("model_id") or "")
+            if not bone_id:
+                continue
+            try:
+                weight = float(row.get("weight", 0.0) or 0.0)
+            except Exception:
+                weight = 0.0
+            if weight <= 1.0e-8:
+                continue
+            if bone_id not in joint_index_by_key:
+                joint_index_by_key[bone_id] = len(joint_keys)
+                joint_keys.append(bone_id)
+            joint_indices[vertex_index, slot] = joint_index_by_key[bone_id]
+            weight_values[vertex_index, slot] = max(0.0, min(1.0, weight))
+            slot += 1
+
+    totals = weight_values.sum(axis=1, keepdims=True)
+    valid = totals[:, 0] > 1.0e-8
+    weight_values[valid] = weight_values[valid] / totals[valid]
+    if isinstance(geometry, dict):
+        geometry[cache_key] = {
+            "vertex_count": vertex_count,
+            "max_influences": max_influences,
+            "joint_keys": joint_keys,
+            "joint_indices": joint_indices,
+            "weights": weight_values,
+        }
+    return joint_keys, joint_indices, weight_values
 
 
 def _local_pose(

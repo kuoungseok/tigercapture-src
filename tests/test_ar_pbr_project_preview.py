@@ -639,6 +639,64 @@ def test_animation_helper_applies_skeletal_rotation_and_parent_hierarchy():
     assert out[0][1] > 0.9
 
 
+def test_animation_helper_does_not_double_scale_unreal_skeletal_bones():
+    geometry = {
+        "model_id": "mesh_model",
+        "vertices": [[2, 0, 0], [2, 1, 0], [2, 0, 1]],
+        "triangles": [[0, 1, 2]],
+        "skin_weights": [
+            [{"bone_id": "bone_1", "weight": 1.0}],
+            [{"bone_id": "bone_1", "weight": 1.0}],
+            [{"bone_id": "bone_1", "weight": 1.0}],
+        ],
+    }
+    descriptor = {
+        "schema": "tigerstudio.ar_pbr.unreal_skeletal_mesh_export.v1",
+        "source_format": "unreal_skeletal_mesh",
+        "units": {"scale_to_meters": 0.01, "source": "unreal_centimeters"},
+        "models": [{"id": "mesh_model", "translation": [0, 0, 0], "scale": [1, 1, 1]}],
+        "bones": [
+            {"id": "bone_0", "index": 0, "name": "root", "parent_index": -1, "translation": [0, 0, 0], "rotation_quat": [0, 0, 0, 1], "scale": [1, 1, 1]},
+            {"id": "bone_1", "index": 1, "name": "hand", "parent_id": "bone_0", "translation": [1, 0, 0], "rotation_quat": [0, 0, 0, 1], "scale": [1, 1, 1]},
+        ],
+        "animation_clips": [{
+            "id": "clip_001",
+            "name": "MoveHand",
+            "duration_ms": 1000.0,
+            "model_curves": {
+                "bone_1": {
+                    "translation": {
+                        "x": [[0.0, 1.0], [1000.0, 2.0]],
+                        "y": [[0.0, 0.0], [1000.0, 0.0]],
+                        "z": [[0.0, 0.0], [1000.0, 0.0]],
+                    },
+                    "rotation_quat": {
+                        "x": [[0.0, 0.0], [1000.0, 0.0]],
+                        "y": [[0.0, 0.0], [1000.0, 0.0]],
+                        "z": [[0.0, 0.0], [1000.0, 0.0]],
+                        "w": [[0.0, 1.0], [1000.0, 1.0]],
+                    },
+                }
+            },
+        }],
+    }
+    track = {
+        "id": "unreal_skeletal",
+        "start_ms": 0,
+        "animation": {"auto_play": True, "loop": False, "speed": 1.0},
+    }
+
+    out = animated_vertices_for_geometry(
+        geometry["vertices"],
+        geometry=geometry,
+        descriptor=descriptor,
+        track=track,
+        time_ms=1000,
+    )
+
+    assert np.allclose(out[0], [3.0, 0.0, 0.0], atol=1.0e-5)
+
+
 def test_gpu_preview_reports_texture_plan_and_tints_packet_colors(tmp_path):
     from PIL import Image
 

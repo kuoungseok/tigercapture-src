@@ -808,6 +808,21 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
                 backend=OWNER_ANIMATION_PREVIEW_BACKEND,
             )
             sequence_info = animation_sequence_summary(sequence_plan)
+            playback_result: dict[str, Any] | None = None
+            playback_error = ""
+            if isinstance(exported_clip, dict) and sequence_plan.get("status") == "ready":
+                try:
+                    attach = getattr(window, "attach_animation_clip", None)
+                    apply_once = getattr(window, "apply_animation_preview_once", None)
+                    if callable(attach):
+                        attach(exported_clip)
+                    if callable(apply_once):
+                        playback_result = apply_once(
+                            str(exported_clip.get("id") or exported_clip.get("name") or clip),
+                            duration_ms=float(sequence_info.get("duration_ms") or 0.0) or None,
+                        )
+                except Exception as exc:
+                    playback_error = str(exc)
             result = {
                 "status": "animation_clip_exported",
                 "clip": clip,
@@ -820,6 +835,8 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
                 "reference_pipeline": ACTION_SEQUENCE_REFERENCE_PIPELINE,
                 "sequence_plan": sequence_plan,
                 "sequence_summary": sequence_info,
+                "playback_result": playback_result,
+                "playback_error": playback_error,
                 "summary": dict(summary) if isinstance(summary, dict) else _animation_clip_summary(exported_clip),
             }
             setattr(window, "owner_animation_preview_result", result)
@@ -827,16 +844,26 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             setattr(window, "owner_animation_sequence_plan", sequence_plan)
             status = getattr(window, "_status", None)
             if status is not None and hasattr(status, "setText"):
-                info = result["summary"]
-                status.setText(
-                    f"Animation sequence ready: {clip} "
-                    f"({sequence_info.get('sample_count', 0)} samples, {sequence_info.get('bone_count', 0)} bones)"
-                )
+                if playback_error:
+                    status.setText(f"Animation sequence ready but playback failed: {playback_error}")
+                elif isinstance(playback_result, dict) and playback_result.get("status") == "playing":
+                    status.setText(
+                        f"Playing animation sequence: {clip} "
+                        f"({sequence_info.get('sample_count', 0)} samples, {sequence_info.get('bone_count', 0)} bones)"
+                    )
+                else:
+                    status.setText(
+                        f"Animation sequence ready: {clip} "
+                        f"({sequence_info.get('sample_count', 0)} samples, {sequence_info.get('bone_count', 0)} bones)"
+                    )
             duration_s = float(sequence_info.get("duration_ms") or 0.0) / 1000.0
+            panel_state = "error" if playback_error else "ready"
+            playback_suffix = " / playing once" if isinstance(playback_result, dict) and playback_result.get("status") == "playing" else ""
             _set_sequence_status(
                 f"Ready: {clip} / {duration_s:.2f}s / "
-                f"{sequence_info.get('sample_count', 0)} samples / {sequence_info.get('bone_count', 0)} bones",
-                state="ready",
+                f"{sequence_info.get('sample_count', 0)} samples / {sequence_info.get('bone_count', 0)} bones"
+                f"{playback_suffix}",
+                state=panel_state,
             )
 
         def _on_failed(event: dict[str, Any]) -> None:
