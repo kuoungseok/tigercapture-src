@@ -434,6 +434,74 @@ class _ComboRow(QWidget):
         self.value_changed.emit(self.value())
 
 
+class _TopSliderRow(QWidget):
+    value_changed = Signal(float)
+
+    def __init__(
+        self,
+        label: str,
+        minimum: float,
+        maximum: float,
+        value: float,
+        *,
+        steps: int = 1000,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self.minimum = float(minimum)
+        self.maximum = float(maximum)
+        self._block_emit = False
+        self.setObjectName("ArPbrTopSliderRow")
+        self.setMinimumWidth(130)
+        self.setMaximumWidth(154)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(1)
+
+        top = QHBoxLayout()
+        top.setContentsMargins(0, 0, 0, 0)
+        top.setSpacing(4)
+        title = QLabel(label, self)
+        title.setObjectName("ArPbrTopSliderLabel")
+        self._value = QLabel("", self)
+        self._value.setObjectName("ArPbrTopSliderValue")
+        self._value.setAlignment(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
+        top.addWidget(title)
+        top.addStretch(1)
+        top.addWidget(self._value)
+        layout.addLayout(top)
+
+        self.slider = StudioSlider("accent", self)
+        self.slider.setRange(0, max(1, int(steps)))
+        self.slider.valueChanged.connect(self._on_slider_changed)
+        layout.addWidget(self.slider)
+        self.set_value(value, emit=False)
+
+    def set_value(self, value: float, *, emit: bool = False) -> None:
+        value = max(self.minimum, min(self.maximum, float(value)))
+        ratio = (value - self.minimum) / max(self.maximum - self.minimum, 1e-8)
+        self._block_emit = not emit
+        self.slider.setValue(int(round(ratio * self.slider.maximum())))
+        self._block_emit = False
+        self._set_value_label(value)
+        if emit:
+            self.value_changed.emit(value)
+
+    def value(self) -> float:
+        ratio = self.slider.value() / max(float(self.slider.maximum()), 1.0)
+        return self.minimum + (self.maximum - self.minimum) * ratio
+
+    def _set_value_label(self, value: float) -> None:
+        self._value.setText(f"{value:.2f}")
+
+    def _on_slider_changed(self, _raw: int) -> None:
+        value = self.value()
+        self._set_value_label(value)
+        if not self._block_emit:
+            self.value_changed.emit(value)
+
+
 class ArPbrAssetPreviewWindow(QMainWindow):
     """Realtime preview for FBX/GLB media-pool assets."""
 
@@ -477,6 +545,8 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         if self._active_look_preset not in _LOOK_PRESET_IDS:
             self._active_look_preset = "neutral"
         self._look_combo: QComboBox | None = None
+        self._top_bloom_strength: _TopSliderRow | None = None
+        self._top_bloom_threshold: _TopSliderRow | None = None
         self._top_hdri_combo: QComboBox | None = None
         self._render_profile = str(self._initial_lighting.get("render_profile") or PROFILE_AUTHORED).strip().casefold()
         if self._render_profile not in {PROFILE_AUTHORED, PROFILE_MARMOSET_PBR, PROFILE_VRM_MTOON}:
@@ -528,6 +598,14 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._look_combo.setToolTip("Preview-only look preset")
         self._populate_look_combo()
         header.addWidget(self._look_combo)
+        self._top_bloom_strength = _TopSliderRow("Bloom", 0.0, 2.0, DEFAULT_BLOOM_STRENGTH, parent=self)
+        self._top_bloom_strength.setToolTip("Bloom strength for the Bloomed preview look")
+        self._top_bloom_strength.setEnabled(False)
+        header.addWidget(self._top_bloom_strength)
+        self._top_bloom_threshold = _TopSliderRow("Threshold", 0.0, 1.0, DEFAULT_BLOOM_THRESHOLD, parent=self)
+        self._top_bloom_threshold.setToolTip("Lower values make bloom appear on darker highlights")
+        self._top_bloom_threshold.setEnabled(False)
+        header.addWidget(self._top_bloom_threshold)
         if self._simple_cubemap_controls:
             cubemap_label = QLabel("Cubemap", self)
             cubemap_label.setObjectName("ArPbrTopControlLabel")
@@ -851,6 +929,10 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._hdri_combo.currentIndexChanged.connect(self._set_hdri_preset_index)
         if self._look_combo is not None:
             self._look_combo.currentIndexChanged.connect(self._set_look_preset_index)
+        if self._top_bloom_strength is not None:
+            self._top_bloom_strength.value_changed.connect(self._set_bloom_strength)
+        if self._top_bloom_threshold is not None:
+            self._top_bloom_threshold.value_changed.connect(self._set_bloom_threshold)
         if self._top_hdri_combo is not None:
             self._top_hdri_combo.currentIndexChanged.connect(self._set_hdri_preset_index)
         self._sync_background_button()
@@ -1073,6 +1155,23 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         finally:
             self._look_combo.blockSignals(was_blocked)
 
+    def _sync_top_bloom_controls(self) -> None:
+        if self._state is None:
+            enabled = False
+            bloom_strength = DEFAULT_BLOOM_STRENGTH
+            bloom_threshold = DEFAULT_BLOOM_THRESHOLD
+        else:
+            enabled = self._active_look_preset == "bloomed"
+            bloom_strength = float(getattr(self._state, "bloom_strength", DEFAULT_BLOOM_STRENGTH))
+            bloom_threshold = float(getattr(self._state, "bloom_threshold", DEFAULT_BLOOM_THRESHOLD))
+        for row in (self._top_bloom_strength, self._top_bloom_threshold):
+            if row is not None:
+                row.setEnabled(enabled)
+        if self._top_bloom_strength is not None:
+            self._top_bloom_strength.set_value(bloom_strength)
+        if self._top_bloom_threshold is not None:
+            self._top_bloom_threshold.set_value(bloom_threshold)
+
     def _start_loading(self) -> None:
         self._loader = _ArPbrPreviewLoader(
             self.asset_path,
@@ -1154,6 +1253,8 @@ class ArPbrAssetPreviewWindow(QMainWindow):
     def _enable_controls(self, enabled: bool) -> None:
         for row in (
             self._look_combo,
+            self._top_bloom_strength,
+            self._top_bloom_threshold,
             self._render_profile_combo,
             self._hdri_combo,
             *(self._hdri_combo_widgets()[1:]),
@@ -1163,6 +1264,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         ):
             if row is not None:
                 row.setEnabled(enabled)
+        self._sync_top_bloom_controls()
         self._fit_btn.setEnabled(enabled)
         self._background_btn.setEnabled(enabled)
         self._reset_btn.setEnabled(enabled)
@@ -1207,6 +1309,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._specular_gi_strength.set_value(float(getattr(self._state, "specular_gi_strength", DEFAULT_SPECULAR_GI_STRENGTH)))
         self._denoise_strength.set_value(float(getattr(self._state, "denoise_strength", DEFAULT_DENOISE_STRENGTH)))
         self._sync_look_combo_to_active()
+        self._sync_top_bloom_controls()
 
     def lighting_settings(self) -> dict[str, Any]:
         if self._state is None:
@@ -1664,6 +1767,31 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._update()
         self._emit_lighting_changed()
 
+    def _refresh_post_effects_mode(self) -> None:
+        if self._state is None:
+            return
+        enabled = any(
+            float(getattr(self._state, attr, 0.0) or 0.0) > 1.0e-6
+            for attr in ("bloom_strength", "vignette_strength", "grain_strength", "sharpen_strength")
+        )
+        self._state.post_effects_mode = "post_effects" if enabled else DEFAULT_POST_EFFECTS_MODE
+
+    def _set_bloom_strength(self, value: float) -> None:
+        if self._state is None:
+            return
+        self._state.bloom_strength = max(0.0, min(2.0, float(value)))
+        self._refresh_post_effects_mode()
+        self._update()
+        self._emit_lighting_changed()
+
+    def _set_bloom_threshold(self, value: float) -> None:
+        if self._state is None:
+            return
+        self._state.bloom_threshold = max(0.0, min(1.0, float(value)))
+        self._refresh_post_effects_mode()
+        self._update()
+        self._emit_lighting_changed()
+
     def _set_surface_channel(self, attr: str, value: float) -> None:
         if self._state is None:
             return
@@ -1856,6 +1984,23 @@ QComboBox#ArPbrLookCombo QAbstractItemView {
     color: #F8F4EA;
     selection-background-color: #6D5DFB;
     border: 1px solid #37405A;
+}
+QWidget#ArPbrTopSliderRow {
+    background: transparent;
+}
+QLabel#ArPbrTopSliderLabel {
+    color: #AEB5CF;
+    font-size: 9px;
+    font-weight: 900;
+}
+QLabel#ArPbrTopSliderValue {
+    color: #F8F4EA;
+    font-size: 9px;
+    font-weight: 900;
+    min-width: 28px;
+}
+QWidget#ArPbrTopSliderRow:disabled QLabel {
+    color: #5F6679;
 }
 QTabWidget#ArPbrParamTabs::pane {
     background-color: rgba(10, 12, 22, 150);

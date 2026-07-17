@@ -57,6 +57,15 @@ def test_ar_pbr_preview_bloomed_preset_uses_visible_post_effects() -> None:
     assert bloomed["bloom_threshold"] < 0.4
 
 
+def test_ar_pbr_preview_exposes_bloom_threshold_controls() -> None:
+    source = _read_repo_file("app/ar_pbr/preview_window.py")
+
+    assert 'self._top_bloom_strength = _TopSliderRow("Bloom"' in source
+    assert 'self._top_bloom_threshold = _TopSliderRow("Threshold"' in source
+    assert "def _set_bloom_threshold" in source
+    assert 'enabled = self._active_look_preset == "bloomed"' in source
+
+
 def test_packet_ambient_occlusion_lookup_matches_live_and_export_payloads() -> None:
     from app.ar_pbr.ambient_occlusion import normalize_packet_ambient_occlusion_settings
 
