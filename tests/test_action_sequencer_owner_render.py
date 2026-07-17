@@ -73,6 +73,23 @@ def test_owner_animation_sequence_plan_normalizes_unreal_clip() -> None:
     assert plan["requires_gpu_palette_renderer"] is True
 
 
+def test_owner_animation_labels_prioritize_playable_motion(tmp_path) -> None:
+    import app.action_sequencer_owner_render as owner_render
+
+    content = tmp_path / "Content"
+    motion = content / "Characters" / "Mannequins" / "Anims" / "Pistol" / "MM_Pistol_Fire.uasset"
+    pose = content / "Characters" / "Mannequins" / "Anims" / "Pistol" / "Aim" / "MF_Pistol_Idle_ADS_AO_CU.uasset"
+    action = content / "Variant_Combat" / "Anims" / "AM_ComboAttack.uasset"
+
+    assert owner_render._animation_sequence_kind(action) == "action"
+    assert owner_render._animation_sequence_kind(motion) == "motion"
+    assert owner_render._animation_sequence_kind(pose) == "pose"
+    assert owner_render._animation_sort_key(content, action) < owner_render._animation_sort_key(content, motion)
+    assert owner_render._animation_sort_key(content, motion) < owner_render._animation_sort_key(content, pose)
+    assert owner_render._animation_display_label(content, motion).startswith("Motion /")
+    assert owner_render._animation_display_label(content, pose).startswith("Pose /")
+
+
 def test_owner_render_descriptor_prefers_combat_owner_and_manny_mesh(tmp_path, monkeypatch) -> None:
     from app.action_sequencer_owner_render import (
         ACTION_SEQUENCER_PROJECT_ENV,
@@ -248,6 +265,47 @@ def test_owner_unreal_animation_bridge_exports_clip(tmp_path, monkeypatch) -> No
     assert "24" in command
     assert "--reference-mesh" in command
     assert str(descriptor.render_asset_path) in command
+
+
+def test_owner_unreal_animation_bridge_uses_fresh_cache(tmp_path, monkeypatch) -> None:
+    from app.action_sequencer_owner_render import discover_owner_render_descriptor
+    from app.action_sequencer_unreal_asset_bridge import export_owner_unreal_animation_clip
+
+    project = tmp_path / "ActionSequencer" / "ActionSequencer.uproject"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text('{"EngineAssociation":"5.8"}', encoding="utf-8")
+    content = project.parent / "Content"
+    _touch(content / "Variant_Combat" / "Blueprints" / "BP_CombatCharacter.uasset")
+    _touch(content / "Characters" / "Mannequins" / "Meshes" / "SKM_Manny_Simple.uasset")
+    animation = _touch(content / "Characters" / "Mannequins" / "Anims" / "Unarmed" / "MM_Idle.uasset")
+    descriptor = discover_owner_render_descriptor(project)
+    target = tmp_path / "idle.cached.animation_clip.json"
+    target.write_text(
+        json.dumps({
+            "schema": "tigerstudio.ar_pbr.unreal_animation_clip_export.v1",
+            "exporter": "unit_cache",
+            "animation_clip": {
+                "id": "MM_Idle",
+                "name": "MM_Idle",
+                "duration_ms": 1000.0,
+                "sampled_frame_count": 48,
+                "rotation_space": "tiger_basis_quat_v1",
+                "model_curves": {},
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    def fail_run(*_args, **_kwargs):
+        raise AssertionError("fresh animation cache should skip export subprocess")
+
+    monkeypatch.setattr(subprocess, "run", fail_run)
+
+    clip = export_owner_unreal_animation_clip(descriptor, animation, target, max_samples=48)
+
+    assert clip["id"] == "MM_Idle"
+    assert clip["_cache_hit"] is True
+    assert clip["_exporter"] == "unit_cache"
 
 
 def test_owner_unreal_animation_bridge_falls_back_to_editor_python(tmp_path, monkeypatch) -> None:

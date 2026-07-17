@@ -106,6 +106,7 @@ def export_owner_unreal_animation_clip(
     *,
     max_samples: int = 90,
     timeout_s: float = 90.0,
+    use_cache: bool = True,
 ) -> dict[str, Any]:
     """Export a selected Unreal UAnimSequence to the AR/PBR animation clip schema."""
     project_path = Path(getattr(owner_descriptor, "project_path", "") or "")
@@ -119,6 +120,20 @@ def export_owner_unreal_animation_clip(
 
     target = Path(output_path) if output_path is not None else default_owner_unreal_animation_clip_path(owner_descriptor, asset_path)
     target.parent.mkdir(parents=True, exist_ok=True)
+
+    reference_mesh = getattr(owner_descriptor, "render_asset_path", None)
+    reference_mesh_path = Path(reference_mesh) if reference_mesh is not None else None
+    if reference_mesh_path is not None and not reference_mesh_path.exists():
+        reference_mesh_path = None
+    if use_cache:
+        cached = _load_cached_animation_clip_if_fresh(
+            target,
+            asset_path=asset_path,
+            reference_mesh_path=reference_mesh_path,
+            max_samples=max_samples,
+        )
+        if cached is not None:
+            return cached
 
     command = [
         "dotnet",
@@ -136,11 +151,8 @@ def export_owner_unreal_animation_clip(
         "--max-samples",
         str(max(2, int(max_samples))),
     ]
-    reference_mesh = getattr(owner_descriptor, "render_asset_path", None)
-    if reference_mesh is not None:
-        reference_mesh_path = Path(reference_mesh)
-        if reference_mesh_path.exists():
-            command.extend(["--reference-mesh", str(reference_mesh_path)])
+    if reference_mesh_path is not None:
+        command.extend(["--reference-mesh", str(reference_mesh_path)])
 
     startupinfo = None
     if os.name == "nt":
@@ -177,6 +189,43 @@ def export_owner_unreal_animation_clip(
     clip = dict(clip)
     clip["_export_path"] = str(target)
     return clip
+
+
+def _load_cached_animation_clip_if_fresh(
+    target: Path,
+    *,
+    asset_path: Path,
+    reference_mesh_path: Path | None,
+    max_samples: int,
+) -> dict[str, Any] | None:
+    if not target.exists() or target.stat().st_size <= 0:
+        return None
+    try:
+        target_mtime = target.stat().st_mtime
+        source_mtime = asset_path.stat().st_mtime
+        if reference_mesh_path is not None:
+            source_mtime = max(source_mtime, reference_mesh_path.stat().st_mtime)
+        if target_mtime < source_mtime:
+            return None
+        payload = json.loads(target.read_text(encoding="utf-8"))
+        clip = payload.get("animation_clip") if isinstance(payload, dict) else None
+        if not isinstance(clip, dict):
+            return None
+        if str(clip.get("rotation_space") or payload.get("rotation_space") or "") != "tiger_basis_quat_v1":
+            return None
+        requested_samples = max(2, int(max_samples))
+        exported_samples = int(float(clip.get("sampled_frame_count") or payload.get("sampled_frame_count") or 0))
+        if exported_samples > 0 and exported_samples < requested_samples:
+            return None
+        if exported_samples <= 0 and requested_samples > 2:
+            return None
+        out = dict(clip)
+        out["_export_path"] = str(target)
+        out["_exporter"] = str(payload.get("exporter") or out.get("_exporter") or "cached_animation_clip")
+        out["_cache_hit"] = True
+        return out
+    except Exception:
+        return None
 
 
 def _export_owner_unreal_animation_clip_via_editor(

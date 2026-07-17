@@ -1045,6 +1045,37 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._status.setText(f"Playing once: {Path(str(clip_name or clip_id)).stem}")
         return {"status": "playing", "clip": clip_id, "duration_ms": self._animation_duration_ms}
 
+    def apply_animation_pose_frame(self, clip_name: str, *, time_ms: int = 0) -> dict[str, Any]:
+        clip = self._find_animation_clip(clip_name)
+        if clip is None:
+            result = {
+                "status": "unavailable",
+                "reason": "asset_descriptor_has_no_matching_animation_clip",
+                "clip": str(clip_name or ""),
+            }
+            self._status.setText(f"Pose data unavailable: {Path(str(clip_name or '')).stem or 'selected'}")
+            return result
+        clip_id = str(clip.get("id") or clip.get("name") or clip_name)
+        if self._animation_timer is not None:
+            self._animation_timer.stop()
+        self._animation_track = None
+        self._animation_generation += 1
+        self._animation_pending_frame = None
+        track = {
+            "id": "action_sequencer_owner_pose",
+            "start_ms": 0,
+            "animation": {
+                "auto_play": True,
+                "loop": False,
+                "clip": clip_id,
+                "speed": 1.0,
+                "start_offset_ms": max(0, int(time_ms)),
+            },
+        }
+        self._apply_animation_frame(track, max(0, int(time_ms)))
+        self._status.setText(f"Pose applied: {Path(str(clip_name or clip_id)).stem}")
+        return {"status": "pose_applied", "clip": clip_id, "time_ms": max(0, int(time_ms))}
+
     def _find_animation_clip(self, clip_name: str) -> dict[str, Any] | None:
         clips = self._descriptor.get("animation_clips") if isinstance(self._descriptor, dict) else None
         if not isinstance(clips, list) or not clips:

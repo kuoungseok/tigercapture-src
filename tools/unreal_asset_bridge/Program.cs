@@ -323,13 +323,14 @@ static Dictionary<string, object?> ExportAnimationClip(FileInfo projectPath, Fil
             track.GetBoneTransform(frame, sequence.NumFrames, ref q, ref p, ref s);
             var timeMs = FrameToMilliseconds(frame, sequence);
             var tp = ToTigerPosition(p);
+            var tq = ToTigerQuaternion(q);
             tx.Add([timeMs, tp[0]]);
             ty.Add([timeMs, tp[1]]);
             tz.Add([timeMs, tp[2]]);
-            qx.Add([timeMs, Round(q.X)]);
-            qy.Add([timeMs, Round(q.Y)]);
-            qz.Add([timeMs, Round(q.Z)]);
-            qw.Add([timeMs, Round(q.W)]);
+            qx.Add([timeMs, tq[0]]);
+            qy.Add([timeMs, tq[1]]);
+            qz.Add([timeMs, tq[2]]);
+            qw.Add([timeMs, tq[3]]);
             sx.Add([timeMs, Round(s.X)]);
             sy.Add([timeMs, Round(s.Y)]);
             sz.Add([timeMs, Round(s.Z)]);
@@ -351,6 +352,7 @@ static Dictionary<string, object?> ExportAnimationClip(FileInfo projectPath, Fil
         ["frame_count"] = sequence.NumFrames,
         ["frames_per_second"] = Round(sequence.FramesPerSecond),
         ["sampled_frame_count"] = sampleFrames.Length,
+        ["rotation_space"] = "tiger_basis_quat_v1",
         ["model_curves"] = modelCurves,
     };
 }
@@ -404,13 +406,14 @@ static Dictionary<string, object?> ExportRawAnimationClip(UAnimSequence anim, Fi
             track.GetBoneTransform(frame, frameCount, ref q, ref p, ref s);
             var timeMs = FrameToMillisecondsFromDuration(frame, frameCount, durationSeconds * 1000.0);
             var tp = ToTigerPosition(p);
+            var tq = ToTigerQuaternion(q);
             tx.Add([timeMs, tp[0]]);
             ty.Add([timeMs, tp[1]]);
             tz.Add([timeMs, tp[2]]);
-            qx.Add([timeMs, Round(q.X)]);
-            qy.Add([timeMs, Round(q.Y)]);
-            qz.Add([timeMs, Round(q.Z)]);
-            qw.Add([timeMs, Round(q.W)]);
+            qx.Add([timeMs, tq[0]]);
+            qy.Add([timeMs, tq[1]]);
+            qz.Add([timeMs, tq[2]]);
+            qw.Add([timeMs, tq[3]]);
             sx.Add([timeMs, Round(s.X)]);
             sy.Add([timeMs, Round(s.Y)]);
             sz.Add([timeMs, Round(s.Z)]);
@@ -433,6 +436,7 @@ static Dictionary<string, object?> ExportRawAnimationClip(UAnimSequence anim, Fi
         ["frame_count"] = frameCount,
         ["frames_per_second"] = Round(frameCount / Math.Max(0.001, durationSeconds)),
         ["sampled_frame_count"] = sampleFrames.Length,
+        ["rotation_space"] = "tiger_basis_quat_v1",
         ["model_curves"] = modelCurves,
     };
 }
@@ -861,7 +865,7 @@ static List<Dictionary<string, object?>> BuildBones(List<CSkelMeshBone> bones)
             ["parent_index"] = bone.ParentIndex,
             ["parent_id"] = bone.ParentIndex >= 0 ? $"bone_{bone.ParentIndex}" : "",
             ["translation"] = ToTigerPosition(bone.Position),
-            ["rotation_quat"] = new[] { Round(bone.Orientation.X), Round(bone.Orientation.Y), Round(bone.Orientation.Z), Round(bone.Orientation.W) },
+            ["rotation_quat"] = ToTigerQuaternion(bone.Orientation),
             ["scale"] = new[] { 1.0, 1.0, 1.0 },
         });
     }
@@ -877,7 +881,7 @@ static List<Dictionary<string, object?>> BuildBonesFromReferenceSkeleton(FRefere
     {
         var translation = idx < poses.Length ? ToTigerPosition(poses[idx].Translation) : [0.0, 0.0, 0.0];
         var rotation = idx < poses.Length
-            ? new[] { Round(poses[idx].Rotation.X), Round(poses[idx].Rotation.Y), Round(poses[idx].Rotation.Z), Round(poses[idx].Rotation.W) }
+            ? ToTigerQuaternion(poses[idx].Rotation)
             : new[] { 0.0, 0.0, 0.0, 1.0 };
         outBones.Add(new Dictionary<string, object?>
         {
@@ -899,6 +903,16 @@ static double[] ToTigerPosition(FVector value)
 
 static double[] ToTigerPosition3(System.Numerics.Vector3 value)
     => [Round(value.X * 0.01), Round(value.Z * 0.01), Round(-value.Y * 0.01)];
+
+static double[] ToTigerQuaternion(FQuat value)
+    => NormalizeQuaternion(value.X, value.Z, -value.Y, value.W);
+
+static double[] NormalizeQuaternion(double x, double y, double z, double w)
+{
+    var length = Math.Sqrt(x * x + y * y + z * z + w * w);
+    if (length <= 1.0e-9) return [0.0, 0.0, 0.0, 1.0];
+    return [Round(x / length), Round(y / length), Round(z / length), Round(w / length)];
+}
 
 static double[] ToTigerNormal(FVector4 value)
 {

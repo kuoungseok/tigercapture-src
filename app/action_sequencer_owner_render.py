@@ -6,7 +6,7 @@ import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
+from typing import Any, Mapping
 
 from PySide6.QtCore import QPointF, QRectF, QThread, QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen, QPixmap
@@ -45,6 +45,7 @@ ACTION_SEQUENCER_PROJECT_ENV = "TIGERSTUDIO_ACTION_SEQUENCER_PROJECT"
 DEFAULT_ACTION_SEQUENCER_PROJECT = Path("E:/ue5example/ActionSequencer/ActionSequencer.uproject")
 OWNER_ANIMATION_PANEL_WIDTH = 200
 OWNER_ANIMATION_PREVIEW_BACKEND = "uasset_inspector_gpu_bone_palette"
+OWNER_POSE_CLIP_DURATION_THRESHOLD_MS = 250.0
 OWNER_STAGE_PREVIEW_VIEW = {
     "pitch": 0.0,
     "yaw": -90.0,
@@ -195,13 +196,59 @@ def _is_animation_sequence_candidate(path: Path) -> bool:
     return name.startswith(("am_", "mm_", "mf_"))
 
 
-def _animation_sort_key(content_root: Path, path: Path) -> tuple[str, str]:
-    return (_animation_display_group(content_root, path).casefold(), path.stem.casefold())
+def _animation_sort_key(content_root: Path, path: Path) -> tuple[int, str, str]:
+    return (
+        _animation_sequence_priority(path),
+        _animation_display_group(content_root, path).casefold(),
+        path.stem.casefold(),
+    )
 
 
 def _animation_display_label(content_root: Path, path: Path) -> str:
     group = _animation_display_group(content_root, path)
-    return f"{group} / {path.stem}" if group else path.stem
+    kind = _animation_sequence_kind(path)
+    prefix = {
+        "action": "Action",
+        "motion": "Motion",
+        "pose": "Pose",
+    }.get(kind, "Anim")
+    body = f"{group} / {path.stem}" if group else path.stem
+    return f"{prefix} / {body}"
+
+
+def _animation_sequence_kind(path: Path) -> str:
+    stem = path.stem.casefold()
+    if stem.startswith("am_"):
+        return "action"
+    if stem.startswith("mm_"):
+        return "motion"
+    if stem.startswith("mf_"):
+        return "pose"
+    return "other"
+
+
+def _animation_sequence_priority(path: Path) -> int:
+    kind = _animation_sequence_kind(path)
+    if kind == "action":
+        return 0
+    if kind == "motion":
+        return 1
+    if kind == "pose":
+        return 2
+    return 9
+
+
+def _animation_clip_is_pose(path: Path, clip: Mapping[str, Any] | None, sequence_plan: Mapping[str, Any] | None) -> bool:
+    if _animation_sequence_kind(path) == "pose":
+        return True
+    playback = sequence_plan.get("playback") if isinstance(sequence_plan, Mapping) else {}
+    duration = playback.get("duration_ms") if isinstance(playback, Mapping) else None
+    if duration is None and isinstance(clip, Mapping):
+        duration = clip.get("duration_ms")
+    try:
+        return float(duration or 0.0) > 0.0 and float(duration or 0.0) < OWNER_POSE_CLIP_DURATION_THRESHOLD_MS
+    except Exception:
+        return False
 
 
 def _animation_display_group(content_root: Path, path: Path) -> str:
@@ -632,8 +679,10 @@ class _OwnerAnimationPanel(QFrame):
                     item.setToolTip("Default idle sequence")
                 elif path == self.descriptor.action_candidate_path:
                     item.setToolTip("Primary action candidate")
+                elif _animation_sequence_kind(path) == "pose":
+                    item.setToolTip("Short pose or aim fragment. It applies a pose but may not visibly animate.")
                 else:
-                    item.setToolTip(str(path))
+                    item.setToolTip("Playable animation sequence")
                 self._list.addItem(item)
                 if current is not None and path == current:
                     self._list.setCurrentItem(item)
@@ -643,7 +692,7 @@ class _OwnerAnimationPanel(QFrame):
             self._list.setCurrentRow(0)
 
     def _select_default(self) -> None:
-        preferred = self.descriptor.idle_animation_path or self.descriptor.action_candidate_path
+        preferred = self.descriptor.action_candidate_path or self.descriptor.idle_animation_path
         if preferred is None:
             return
         for index in range(self._list.count()):
@@ -808,15 +857,26 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
                 backend=OWNER_ANIMATION_PREVIEW_BACKEND,
             )
             sequence_info = animation_sequence_summary(sequence_plan)
+            is_pose_clip = _animation_clip_is_pose(
+                path,
+                exported_clip if isinstance(exported_clip, dict) else None,
+                sequence_plan,
+            )
             playback_result: dict[str, Any] | None = None
             playback_error = ""
             if isinstance(exported_clip, dict) and sequence_plan.get("status") == "ready":
                 try:
                     attach = getattr(window, "attach_animation_clip", None)
                     apply_once = getattr(window, "apply_animation_preview_once", None)
+                    apply_pose = getattr(window, "apply_animation_pose_frame", None)
                     if callable(attach):
                         attach(exported_clip)
-                    if callable(apply_once):
+                    if is_pose_clip and callable(apply_pose):
+                        playback_result = apply_pose(
+                            str(exported_clip.get("id") or exported_clip.get("name") or clip),
+                            time_ms=int(payload.get("apply_frame_ms", 0) or 0),
+                        )
+                    elif callable(apply_once):
                         playback_result = apply_once(
                             str(exported_clip.get("id") or exported_clip.get("name") or clip),
                             duration_ms=float(sequence_info.get("duration_ms") or 0.0) or None,
@@ -835,6 +895,7 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
                 "reference_pipeline": ACTION_SEQUENCE_REFERENCE_PIPELINE,
                 "sequence_plan": sequence_plan,
                 "sequence_summary": sequence_info,
+                "sequence_kind": "pose" if is_pose_clip else _animation_sequence_kind(path),
                 "playback_result": playback_result,
                 "playback_error": playback_error,
                 "summary": dict(summary) if isinstance(summary, dict) else _animation_clip_summary(exported_clip),
@@ -846,6 +907,11 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             if status is not None and hasattr(status, "setText"):
                 if playback_error:
                     status.setText(f"Animation sequence ready but playback failed: {playback_error}")
+                elif isinstance(playback_result, dict) and playback_result.get("status") == "pose_applied":
+                    status.setText(
+                        f"Pose fragment applied: {clip} "
+                        f"({sequence_info.get('sample_count', 0)} samples, {sequence_info.get('bone_count', 0)} bones)"
+                    )
                 elif isinstance(playback_result, dict) and playback_result.get("status") == "playing":
                     status.setText(
                         f"Playing animation sequence: {clip} "
@@ -858,7 +924,12 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
                     )
             duration_s = float(sequence_info.get("duration_ms") or 0.0) / 1000.0
             panel_state = "error" if playback_error else "ready"
-            playback_suffix = " / playing once" if isinstance(playback_result, dict) and playback_result.get("status") == "playing" else ""
+            if isinstance(playback_result, dict) and playback_result.get("status") == "pose_applied":
+                playback_suffix = " / pose applied"
+            elif isinstance(playback_result, dict) and playback_result.get("status") == "playing":
+                playback_suffix = " / playing once"
+            else:
+                playback_suffix = ""
             _set_sequence_status(
                 f"Ready: {clip} / {duration_s:.2f}s / "
                 f"{sequence_info.get('sample_count', 0)} samples / {sequence_info.get('bone_count', 0)} bones"

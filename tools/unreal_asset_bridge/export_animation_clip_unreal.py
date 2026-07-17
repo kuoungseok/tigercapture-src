@@ -16,6 +16,15 @@ def _tiger_position(value) -> list[float]:
     return [_round(value.x * 0.01), _round(value.z * 0.01), _round(-value.y * 0.01)]
 
 
+def _tiger_quaternion(value) -> list[float]:
+    x = float(value.x)
+    y = float(value.z)
+    z = -float(value.y)
+    w = float(value.w)
+    length = (x * x + y * y + z * z + w * w) ** 0.5 or 1.0
+    return [_round(x / length), _round(y / length), _round(z / length), _round(w / length)]
+
+
 def _sample_times(duration_s: float, max_samples: int) -> list[float]:
     if duration_s <= 0.0:
         return [0.0]
@@ -70,16 +79,16 @@ def _main() -> dict:
         for bone_index, bone_name in enumerate(bone_names):
             transform = pose.get_bone_pose(bone_name, local_space)
             position = _tiger_position(transform.translation)
-            rotation = transform.rotation
+            rotation = _tiger_quaternion(transform.rotation)
             scale = transform.scale3d
             curve = curves[f"bone_{bone_index}"]
             curve["translation"]["x"].append([time_ms, position[0]])
             curve["translation"]["y"].append([time_ms, position[1]])
             curve["translation"]["z"].append([time_ms, position[2]])
-            curve["rotation_quat"]["x"].append([time_ms, _round(rotation.x)])
-            curve["rotation_quat"]["y"].append([time_ms, _round(rotation.y)])
-            curve["rotation_quat"]["z"].append([time_ms, _round(rotation.z)])
-            curve["rotation_quat"]["w"].append([time_ms, _round(rotation.w)])
+            curve["rotation_quat"]["x"].append([time_ms, rotation[0]])
+            curve["rotation_quat"]["y"].append([time_ms, rotation[1]])
+            curve["rotation_quat"]["z"].append([time_ms, rotation[2]])
+            curve["rotation_quat"]["w"].append([time_ms, rotation[3]])
             curve["scale"]["x"].append([time_ms, _round(scale.x)])
             curve["scale"]["y"].append([time_ms, _round(scale.y)])
             curve["scale"]["z"].append([time_ms, _round(scale.z)])
@@ -95,6 +104,7 @@ def _main() -> dict:
         "frame_count": len(times),
         "frames_per_second": _round(len(times) / max(0.001, duration_s)),
         "sampled_frame_count": len(times),
+        "rotation_space": "tiger_basis_quat_v1",
         "bone_names": bone_names,
         "model_curves": curves,
     }
