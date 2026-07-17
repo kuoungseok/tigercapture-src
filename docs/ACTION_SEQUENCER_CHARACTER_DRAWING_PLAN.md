@@ -101,6 +101,25 @@ For a two-character action preview, build a paired action descriptor:
 - `camera_plan`: framing and focal length for preview.
 - `effects`: optional impact flash, dust, trail, or hit marker.
 
+## Owner / Target Stage Convention
+
+Use `Owner` and `Target` as the paired-action terminology. `Owner` is the
+character that owns and starts the action sequence. `Target` is the controlled
+participant affected by that action.
+
+Default V1 stage layout:
+
+- `Owner` starts on the left side of the preview stage.
+- `Owner` faces right, like the opening stance in a fighting game.
+- `Target`, when present, starts on the right side and faces left.
+- The first render-window milestone should draw only `Owner`.
+- `Target` bone transforms are later stored as part of the Owner-owned action
+  descriptor, not as a separate competing sequence.
+
+This convention keeps contact solving, camera framing, and action preview
+exports deterministic. Mirrored variants can be derived later by flipping the
+stage layout after the base action is stable.
+
 If B has a matching hit reaction, use it. If B does not have a matching
 reaction, solve a temporary procedural reaction:
 
