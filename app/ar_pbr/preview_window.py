@@ -336,6 +336,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         *,
         initial_lighting: dict[str, Any] | None = None,
         initial_view: dict[str, Any] | None = None,
+        left_panel: QWidget | None = None,
         track_label: str = "",
         max_triangles: int = 120_000,
         texture_max_size: int = 1024,
@@ -354,6 +355,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._render_profiles: dict[str, Any] = {}
         self._initial_lighting = dict(initial_lighting or {})
         self._initial_view = dict(initial_view or {})
+        self._left_panel = left_panel
         mode = str(controls_mode or "full").strip().casefold()
         self._controls_mode = mode if mode in {"full", "cubemap_only"} else "full"
         self._simple_cubemap_controls = self._controls_mode == "cubemap_only"
@@ -412,6 +414,8 @@ class ArPbrAssetPreviewWindow(QMainWindow):
 
         body = QHBoxLayout()
         body.setSpacing(0)
+        if self._left_panel is not None:
+            body.addWidget(self._left_panel, stretch=0)
         self._viewport_host = QFrame(self)
         self._viewport_host.setObjectName("ArPbrViewportHost")
         self._viewport_layout = QVBoxLayout(self._viewport_host)

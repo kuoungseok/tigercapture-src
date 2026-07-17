@@ -14,6 +14,9 @@ from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
     QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QSizePolicy,
     QVBoxLayout,
@@ -35,9 +38,10 @@ from app.unreal_link_reference_paths import unreal_link_reference_roots
 ACTION_SEQUENCER_PROJECT_ENV = "TIGERSTUDIO_ACTION_SEQUENCER_PROJECT"
 DEFAULT_ACTION_SEQUENCER_PROJECT = Path("E:/ue5example/ActionSequencer/ActionSequencer.uproject")
 OWNER_STAGE_PREVIEW_VIEW = {
-    "pitch": -10.0,
-    "yaw": -108.0,
-    "pan_x": -0.78,
+    "pitch": 0.0,
+    "yaw": -90.0,
+    "pan_x": -0.86,
+    "zoom": 1.62,
 }
 
 
@@ -51,6 +55,7 @@ class OwnerRenderDescriptor:
     animation_blueprint_path: Path | None
     idle_animation_path: Path | None
     action_candidate_path: Path | None
+    animation_sequence_paths: tuple[Path, ...] = field(default_factory=tuple)
     stage_position: tuple[float, float, float] = (-120.0, 0.0, 0.0)
     stage_forward: str = "+X / screen right"
     diagnostics: tuple[str, ...] = field(default_factory=tuple)
@@ -68,6 +73,7 @@ class OwnerRenderDescriptor:
             ("Render mesh", _display_path(self.render_asset_path)),
             ("Idle pose", _display_path(self.idle_animation_path)),
             ("Action candidate", _display_path(self.action_candidate_path)),
+            ("Animation sequences", str(len(self.animation_sequence_paths))),
             ("Stage", f"left {self.stage_position}, facing {self.stage_forward}"),
         ]
 
@@ -81,6 +87,7 @@ class OwnerRenderDescriptor:
             "animation_blueprint_path": str(self.animation_blueprint_path) if self.animation_blueprint_path else None,
             "idle_animation_path": str(self.idle_animation_path) if self.idle_animation_path else None,
             "action_candidate_path": str(self.action_candidate_path) if self.action_candidate_path else None,
+            "animation_sequence_paths": [str(path) for path in self.animation_sequence_paths],
             "stage_position": list(self.stage_position),
             "stage_forward": self.stage_forward,
             "diagnostics": list(self.diagnostics),
@@ -130,6 +137,7 @@ def discover_owner_render_descriptor(project_path: Path | str | None = None) -> 
         content_root / "Variant_Combat" / "Anims" / "AM_ComboAttack.uasset",
         content_root / "Characters" / "Mannequins" / "Anims" / "Unarmed" / "Attack" / "MM_Attack_01.uasset",
     )
+    animation_sequences = _discover_animation_sequence_paths(content_root)
 
     references = unreal_link_reference_roots()
     inspector_root = references["uasset_inspector"]
@@ -148,8 +156,59 @@ def discover_owner_render_descriptor(project_path: Path | str | None = None) -> 
         animation_blueprint_path=anim_bp,
         idle_animation_path=idle_anim,
         action_candidate_path=action_candidate,
+        animation_sequence_paths=animation_sequences,
         diagnostics=tuple(diagnostics),
     )
+
+
+def _discover_animation_sequence_paths(content_root: Path) -> tuple[Path, ...]:
+    roots = (
+        content_root / "Variant_Combat" / "Anims",
+        content_root / "Characters" / "Mannequins" / "Anims",
+    )
+    seen: set[Path] = set()
+    candidates: list[Path] = []
+    for root in roots:
+        for asset in _safe_rglob(root, "*.uasset"):
+            resolved = asset.resolve()
+            if resolved in seen or not _is_animation_sequence_candidate(asset):
+                continue
+            seen.add(resolved)
+            candidates.append(asset)
+    return tuple(sorted(candidates, key=lambda path: _animation_sort_key(content_root, path)))
+
+
+def _is_animation_sequence_candidate(path: Path) -> bool:
+    name = path.stem.casefold()
+    if name.startswith(("abp_", "bs_", "ao_")):
+        return False
+    if "animblueprint" in name or "blendspace" in name or "aimoffset" in name:
+        return False
+    return name.startswith(("am_", "mm_", "mf_"))
+
+
+def _animation_sort_key(content_root: Path, path: Path) -> tuple[str, str]:
+    return (_animation_display_group(content_root, path).casefold(), path.stem.casefold())
+
+
+def _animation_display_label(content_root: Path, path: Path) -> str:
+    group = _animation_display_group(content_root, path)
+    return f"{group} / {path.stem}" if group else path.stem
+
+
+def _animation_display_group(content_root: Path, path: Path) -> str:
+    try:
+        relative = path.relative_to(content_root)
+    except ValueError:
+        return path.parent.name
+    parts = list(relative.parts)
+    if len(parts) <= 2:
+        return path.parent.name
+    if "Anims" in parts:
+        index = parts.index("Anims")
+        folder_parts = parts[index + 1 : -1]
+        return " / ".join(folder_parts) if folder_parts else "Anims"
+    return " / ".join(parts[:-1])
 
 
 def default_owner_render_capture_path(descriptor: OwnerRenderDescriptor) -> Path:
@@ -323,7 +382,7 @@ class _OwnerRenderCanvas(QWidget):
         painter.drawText(
             QRectF(18, 16, rect.width() - 36, 28),
             Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
-            "Owner-only render pass - no sequence menu, no target actor",
+            "Owner-only render pass - Action Sequencer stage-left preview",
         )
         painter.end()
 
@@ -429,11 +488,105 @@ class ActionSequencerOwnerRenderWindow(QWidget):
         return panel
 
 
+class _OwnerAnimationPanel(QFrame):
+    animation_selected = Signal(object)
+
+    def __init__(self, descriptor: OwnerRenderDescriptor, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.descriptor = descriptor
+        self._content_root = descriptor.project_path.parent / "Content"
+        self._all_paths = list(descriptor.animation_sequence_paths)
+        self.setObjectName("OwnerAnimationPanel")
+        self.setFixedWidth(285)
+        self.setStyleSheet(_owner_animation_panel_qss())
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(12, 12, 12, 12)
+        layout.setSpacing(8)
+
+        title = QLabel("Owner Animations", self)
+        title.setObjectName("OwnerAnimationTitle")
+        layout.addWidget(title)
+
+        count = QLabel(f"{len(self._all_paths)} selectable sequences", self)
+        count.setObjectName("OwnerAnimationCount")
+        layout.addWidget(count)
+
+        self._filter = QLineEdit(self)
+        self._filter.setObjectName("OwnerAnimationFilter")
+        self._filter.setPlaceholderText("Filter animations")
+        self._filter.textChanged.connect(self._refresh)
+        layout.addWidget(self._filter)
+
+        self._list = QListWidget(self)
+        self._list.setObjectName("OwnerAnimationList")
+        self._list.currentItemChanged.connect(self._on_current_item_changed)
+        layout.addWidget(self._list, stretch=1)
+
+        hint = QLabel("Select an animation for the Owner action slot.", self)
+        hint.setObjectName("OwnerAnimationHint")
+        hint.setWordWrap(True)
+        layout.addWidget(hint)
+
+        self._refresh()
+        self._select_default()
+
+    def selected_animation_path(self) -> Path | None:
+        item = self._list.currentItem()
+        data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        return Path(str(data)) if data else None
+
+    def _refresh(self) -> None:
+        query = self._filter.text().strip().casefold()
+        current = self.selected_animation_path()
+        self._list.blockSignals(True)
+        try:
+            self._list.clear()
+            for path in self._all_paths:
+                label = _animation_display_label(self._content_root, path)
+                if query and query not in label.casefold():
+                    continue
+                item = QListWidgetItem(label)
+                item.setData(Qt.ItemDataRole.UserRole, str(path))
+                if path == self.descriptor.idle_animation_path:
+                    item.setToolTip("Default idle sequence")
+                elif path == self.descriptor.action_candidate_path:
+                    item.setToolTip("Primary action candidate")
+                else:
+                    item.setToolTip(str(path))
+                self._list.addItem(item)
+                if current is not None and path == current:
+                    self._list.setCurrentItem(item)
+        finally:
+            self._list.blockSignals(False)
+        if self._list.currentItem() is None and self._list.count() > 0:
+            self._list.setCurrentRow(0)
+
+    def _select_default(self) -> None:
+        preferred = self.descriptor.idle_animation_path or self.descriptor.action_candidate_path
+        if preferred is None:
+            return
+        for index in range(self._list.count()):
+            item = self._list.item(index)
+            if Path(str(item.data(Qt.ItemDataRole.UserRole))) == preferred:
+                self._list.setCurrentRow(index)
+                return
+
+    def _on_current_item_changed(self, current: QListWidgetItem | None, _previous: QListWidgetItem | None) -> None:
+        if current is None:
+            return
+        data = current.data(Qt.ItemDataRole.UserRole)
+        if data:
+            self.animation_selected.emit(Path(str(data)))
+
+
 def open_action_sequencer_owner_render_window(owner: object, project_path: Path | str | None = None) -> QWidget:
     descriptor = discover_owner_render_descriptor(project_path)
     unreal_asset = export_owner_unreal_ar_pbr_asset(descriptor)
     from app.ar_pbr.preview_window import ArPbrAssetPreviewWindow
     from app.ar_pbr.render_profile import PROFILE_MARMOSET_PBR
+
+    animation_panel = _OwnerAnimationPanel(descriptor)
 
     window = ArPbrAssetPreviewWindow(
         unreal_asset,
@@ -463,6 +616,7 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             "ao_strength": 0.55,
         },
         initial_view=OWNER_STAGE_PREVIEW_VIEW,
+        left_panel=animation_panel,
         track_label=f"{descriptor.owner_name} Owner",
         max_triangles=180_000,
         texture_max_size=1024,
@@ -473,6 +627,18 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
     window.setWindowTitle("Action Sequencer - CombatCharacter AR/PBR Owner")
     setattr(window, "owner_render_descriptor", descriptor)
     setattr(window, "owner_unreal_ar_pbr_asset", unreal_asset)
+    setattr(window, "owner_animation_panel", animation_panel)
+    selected_animation = animation_panel.selected_animation_path()
+    if selected_animation is not None:
+        setattr(window, "owner_selected_animation_path", selected_animation)
+
+    def _on_animation_selected(path: Path) -> None:
+        setattr(window, "owner_selected_animation_path", path)
+        status = getattr(window, "_status", None)
+        if status is not None and hasattr(status, "setText"):
+            status.setText(f"Animation selected: {path.stem}")
+
+    animation_panel.animation_selected.connect(_on_animation_selected)
     setattr(owner, "_action_sequencer_owner_render_window", window)
     window.show()
     window.raise_()
@@ -593,6 +759,54 @@ def _window_qss() -> str:
         border-radius: 5px;
         padding: 8px;
         font-size: 10px;
+    }
+    """
+
+
+def _owner_animation_panel_qss() -> str:
+    return """
+    QFrame#OwnerAnimationPanel {
+        background: #0D111A;
+        border-right: 1px solid #242C3A;
+    }
+    QLabel#OwnerAnimationTitle {
+        color: #F4F7FB;
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0px;
+    }
+    QLabel#OwnerAnimationCount,
+    QLabel#OwnerAnimationHint {
+        color: #8E9BAD;
+        font-size: 10px;
+    }
+    QLineEdit#OwnerAnimationFilter {
+        color: #E8EEF7;
+        background: #121824;
+        border: 1px solid #2A3445;
+        border-radius: 5px;
+        padding: 7px 8px;
+        selection-background-color: #2E6CE6;
+    }
+    QListWidget#OwnerAnimationList {
+        color: #DCE5F2;
+        background: #090D14;
+        border: 1px solid #202838;
+        border-radius: 6px;
+        outline: 0;
+        padding: 4px;
+    }
+    QListWidget#OwnerAnimationList::item {
+        border-radius: 4px;
+        padding: 7px 8px;
+        margin: 1px;
+    }
+    QListWidget#OwnerAnimationList::item:selected {
+        color: #FFFFFF;
+        background: #1F4C7D;
+    }
+    QListWidget#OwnerAnimationList::item:hover {
+        background: #172235;
     }
     """
 

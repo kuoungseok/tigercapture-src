@@ -50,6 +50,9 @@ def test_owner_render_descriptor_prefers_combat_owner_and_manny_mesh(tmp_path, m
     assert descriptor.animation_blueprint_path == anim_bp
     assert descriptor.idle_animation_path == idle
     assert descriptor.action_candidate_path == action
+    assert idle in descriptor.animation_sequence_paths
+    assert action in descriptor.animation_sequence_paths
+    assert anim_bp not in descriptor.animation_sequence_paths
     assert descriptor.owner_class_name == "ACombatCharacter"
     assert descriptor.stage_position == (-120.0, 0.0, 0.0)
     assert descriptor.stage_forward == "+X / screen right"
@@ -91,6 +94,7 @@ def test_owner_ar_pbr_proxy_descriptor_is_renderable(tmp_path, monkeypatch) -> N
     content = project.parent / "Content"
     _touch(content / "Variant_Combat" / "Blueprints" / "BP_CombatCharacter.uasset")
     _touch(content / "Characters" / "Mannequins" / "Meshes" / "SKM_Manny_Simple.uasset")
+    _touch(content / "Characters" / "Mannequins" / "Anims" / "Unarmed" / "MM_Idle.uasset")
     descriptor = discover_owner_render_descriptor(project)
 
     proxy_path = write_owner_ar_pbr_proxy_asset(descriptor, tmp_path / "owner.arpbr")
@@ -153,12 +157,26 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     content = project.parent / "Content"
     _touch(content / "Variant_Combat" / "Blueprints" / "BP_CombatCharacter.uasset")
     _touch(content / "Characters" / "Mannequins" / "Meshes" / "SKM_Manny_Simple.uasset")
+    _touch(content / "Characters" / "Mannequins" / "Anims" / "Unarmed" / "MM_Idle.uasset")
 
     exported_asset = tmp_path / "owner.arpbr"
     exported_asset.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(owner_render, "export_owner_unreal_ar_pbr_asset", lambda _descriptor: exported_asset)
 
     captured: dict[str, object] = {}
+
+    class FakeSignal:
+        def connect(self, callback) -> None:
+            captured["animation_callback"] = callback
+
+    class FakeOwnerAnimationPanel:
+        def __init__(self, descriptor) -> None:
+            captured["panel_descriptor"] = descriptor
+            self._descriptor = descriptor
+            self.animation_selected = FakeSignal()
+
+        def selected_animation_path(self):
+            return self._descriptor.idle_animation_path
 
     class FakeArPbrAssetPreviewWindow:
         def __init__(self, *args, **kwargs) -> None:
@@ -180,6 +198,7 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     fake_preview_module = types.ModuleType("app.ar_pbr.preview_window")
     fake_preview_module.ArPbrAssetPreviewWindow = FakeArPbrAssetPreviewWindow
     monkeypatch.setitem(sys.modules, "app.ar_pbr.preview_window", fake_preview_module)
+    monkeypatch.setattr(owner_render, "_OwnerAnimationPanel", FakeOwnerAnimationPanel)
 
     owner = types.SimpleNamespace()
     window = owner_render.open_action_sequencer_owner_render_window(owner, project)
@@ -187,8 +206,11 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     assert window is owner._action_sequencer_owner_render_window
     assert captured["args"][0] == exported_asset
     assert captured["kwargs"]["initial_view"] == owner_render.OWNER_STAGE_PREVIEW_VIEW
+    assert captured["kwargs"]["left_panel"] is not None
     assert captured["kwargs"]["controls_mode"] == "cubemap_only"
     assert captured["kwargs"]["initial_lighting"]["show_environment_background"] is False
+    assert captured["panel_descriptor"].animation_sequence_paths
+    assert callable(captured["animation_callback"])
     assert captured["shown"] is True
     assert captured["raised"] is True
     assert captured["activated"] is True
