@@ -520,7 +520,8 @@ uniform vec3 u_screen_ao_color;
 uniform int u_screen_ao_ambient;
 uniform int u_screen_ao_diffuse;
 uniform int u_screen_ao_specular;
-out vec4 frag_color;
+layout(location = 0) out vec4 frag_color;
+layout(location = 1) out vec4 bloom_source;
 
 vec2 dir_to_equirect(vec3 dir) {
     vec3 d = normalize(dir);
@@ -1014,6 +1015,7 @@ void main() {
         vec3 rgb = apply_output_transform_gamma(albedo * max(u_unlit_exposure_scale, 0.0), u_unlit_output_gamma);
         rgb = clamp((rgb - vec3(0.5)) * max(u_unlit_contrast, 0.0) + vec3(0.5), 0.0, 1.0);
         frag_color = vec4(rgb, out_alpha);
+        bloom_source = vec4(rgb, out_alpha);
         return;
     }
     if (u_has_roughness_map == 1) {
@@ -1080,6 +1082,7 @@ void main() {
     rgb = apply_transmission_refraction(rgb, albedo, n, v, roughness, fresnel);
     rgb = apply_output_transform(rgb);
     frag_color = vec4(rgb, out_alpha);
+    bloom_source = vec4(rgb, out_alpha);
 }
 """
 
@@ -1148,7 +1151,8 @@ uniform int u_tone_mapping_mode;
 uniform float u_tone_exposure;
 uniform vec3 u_tone_white_balance;
 uniform float u_tone_gamma;
-out vec4 frag_color;
+layout(location = 0) out vec4 frag_color;
+layout(location = 1) out vec4 bloom_source;
 
 const float PI = 3.14159265358979323846;
 
@@ -1262,6 +1266,7 @@ void main() {
     float matte_alpha = max(u_shadow_catcher_matte_alpha, u_reflection_catcher_matte_alpha);
     float alpha = clamp(matte_alpha + shadow_alpha + reflection_amount * (0.08 + soft * 0.10), 0.0, 1.0);
     frag_color = vec4(rgb, alpha);
+    bloom_source = vec4(0.0, 0.0, 0.0, 0.0);
 }
 """
 
@@ -1293,7 +1298,8 @@ uniform int u_tone_mapping_mode;
 uniform float u_tone_exposure;
 uniform vec3 u_tone_white_balance;
 uniform float u_tone_gamma;
-out vec4 frag_color;
+layout(location = 0) out vec4 frag_color;
+layout(location = 1) out vec4 bloom_source;
 
 vec3 tonemap_aces(vec3 x) {
     const float a = 2.51;
@@ -1334,6 +1340,7 @@ void main() {
         rgb = apply_output_transform(rgb);
     }
     frag_color = vec4(rgb, 1.0);
+    bloom_source = vec4(0.0, 0.0, 0.0, 0.0);
 }
 """
 
@@ -1358,33 +1365,37 @@ POST_BLOOM_FRAG_SHADER = """
 #version 330 core
 in vec2 v_uv;
 uniform sampler2D u_scene_color;
+uniform sampler2D u_bloom_source;
 uniform vec2 u_texel_size;
 uniform float u_bloom_strength;
 uniform float u_bloom_radius;
 uniform float u_bloom_threshold;
+uniform int u_force_opaque;
 out vec4 frag_color;
 
-vec3 bright_pass(vec3 rgb) {
+vec3 bright_pass(vec4 sample_rgba) {
+    vec3 rgb = sample_rgba.rgb;
+    float source_mask = clamp(sample_rgba.a, 0.0, 1.0);
     float lum = dot(max(rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
     float threshold = clamp(u_bloom_threshold, 0.0, 1.0);
     float knee = mix(0.08, 0.24, clamp(u_bloom_radius / 12.0, 0.0, 1.0));
     float excess = max(lum - threshold, 0.0);
     float contribution = clamp(excess / max(1.0 - threshold, 0.001), 0.0, 1.0);
     float soft_mask = smoothstep(0.0, knee, excess);
-    return rgb * contribution * soft_mask;
+    return rgb * contribution * soft_mask * source_mask;
 }
 
 vec3 sample_bloom_ring(vec2 uv, float radius_px, float weight) {
     vec2 texel = u_texel_size * radius_px;
     vec3 blurred = vec3(0.0);
-    blurred += bright_pass(texture(u_scene_color, uv + texel * vec2( 1.0,  0.0)).rgb);
-    blurred += bright_pass(texture(u_scene_color, uv + texel * vec2(-1.0,  0.0)).rgb);
-    blurred += bright_pass(texture(u_scene_color, uv + texel * vec2( 0.0,  1.0)).rgb);
-    blurred += bright_pass(texture(u_scene_color, uv + texel * vec2( 0.0, -1.0)).rgb);
-    blurred += bright_pass(texture(u_scene_color, uv + texel * vec2( 0.707,  0.707)).rgb);
-    blurred += bright_pass(texture(u_scene_color, uv + texel * vec2(-0.707,  0.707)).rgb);
-    blurred += bright_pass(texture(u_scene_color, uv + texel * vec2( 0.707, -0.707)).rgb);
-    blurred += bright_pass(texture(u_scene_color, uv + texel * vec2(-0.707, -0.707)).rgb);
+    blurred += bright_pass(texture(u_bloom_source, uv + texel * vec2( 1.0,  0.0)));
+    blurred += bright_pass(texture(u_bloom_source, uv + texel * vec2(-1.0,  0.0)));
+    blurred += bright_pass(texture(u_bloom_source, uv + texel * vec2( 0.0,  1.0)));
+    blurred += bright_pass(texture(u_bloom_source, uv + texel * vec2( 0.0, -1.0)));
+    blurred += bright_pass(texture(u_bloom_source, uv + texel * vec2( 0.707,  0.707)));
+    blurred += bright_pass(texture(u_bloom_source, uv + texel * vec2(-0.707,  0.707)));
+    blurred += bright_pass(texture(u_bloom_source, uv + texel * vec2( 0.707, -0.707)));
+    blurred += bright_pass(texture(u_bloom_source, uv + texel * vec2(-0.707, -0.707)));
     return blurred * (weight / 8.0);
 }
 
@@ -1392,14 +1403,15 @@ void main() {
     vec4 base = texture(u_scene_color, v_uv);
     float radius = clamp(u_bloom_radius, 1.0, 32.0);
     float strength = clamp(u_bloom_strength, 0.0, 3.0);
-    vec3 bloom = bright_pass(base.rgb) * 0.06;
+    vec3 bloom = bright_pass(texture(u_bloom_source, v_uv)) * 0.06;
     bloom += sample_bloom_ring(v_uv, radius * 0.45, 0.34);
     bloom += sample_bloom_ring(v_uv, radius * 0.95, 0.27);
     bloom += sample_bloom_ring(v_uv, radius * 1.55, 0.16);
     bloom += sample_bloom_ring(v_uv, radius * 2.30, 0.08);
     vec3 rgb = clamp(base.rgb + bloom * strength, 0.0, 1.0);
     float bloom_alpha = clamp(max(max(bloom.r, bloom.g), bloom.b) * strength, 0.0, 1.0);
-    frag_color = vec4(rgb, max(base.a, bloom_alpha * 0.45));
+    float alpha = u_force_opaque == 1 ? 1.0 : max(base.a, bloom_alpha * 0.45);
+    frag_color = vec4(rgb, alpha);
 }
 """
 
@@ -3191,6 +3203,7 @@ class GpuMeshWidget(QOpenGLWidget):
         self.post_bloom_vao = 0
         self.scene_fbo = 0
         self.scene_color_texture = 0
+        self.scene_bloom_texture = 0
         self.scene_depth_renderbuffer = 0
         self.scene_fbo_size: tuple[int, int] = (0, 0)
         self.hdri_texture = 0
@@ -3372,17 +3385,35 @@ class GpuMeshWidget(QOpenGLWidget):
     def _bind_default_framebuffer(self) -> None:
         from OpenGL import GL
 
+        default_fbo = 0
         try:
-            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, int(self.defaultFramebufferObject()))
+            default_fbo = int(self.defaultFramebufferObject())
         except Exception:
-            GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+            default_fbo = 0
+        GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, default_fbo)
+        try:
+            GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT0 if default_fbo else GL.GL_BACK)
+        except Exception:
+            pass
+
+    @staticmethod
+    def _set_scene_draw_buffers() -> None:
+        from OpenGL import GL
+
+        buffers = [GL.GL_COLOR_ATTACHMENT0, GL.GL_COLOR_ATTACHMENT1]
+        try:
+            GL.glDrawBuffers(len(buffers), buffers)
+        except TypeError:
+            GL.glDrawBuffers(buffers)
 
     def _delete_scene_fbo(self) -> None:
         self._delete_gl_framebuffer(self.scene_fbo)
         self._delete_gl_texture(self.scene_color_texture)
+        self._delete_gl_texture(self.scene_bloom_texture)
         self._delete_gl_renderbuffer(self.scene_depth_renderbuffer)
         self.scene_fbo = 0
         self.scene_color_texture = 0
+        self.scene_bloom_texture = 0
         self.scene_depth_renderbuffer = 0
         self.scene_fbo_size = (0, 0)
 
@@ -3394,6 +3425,7 @@ class GpuMeshWidget(QOpenGLWidget):
         if (
             int(self.scene_fbo or 0)
             and int(self.scene_color_texture or 0)
+            and int(self.scene_bloom_texture or 0)
             and int(self.scene_depth_renderbuffer or 0)
             and self.scene_fbo_size == (width, height)
         ):
@@ -3403,24 +3435,26 @@ class GpuMeshWidget(QOpenGLWidget):
         try:
             self.scene_fbo = int(GL.glGenFramebuffers(1))
             self.scene_color_texture = int(GL.glGenTextures(1))
+            self.scene_bloom_texture = int(GL.glGenTextures(1))
             self.scene_depth_renderbuffer = int(GL.glGenRenderbuffers(1))
 
-            GL.glBindTexture(GL.GL_TEXTURE_2D, self.scene_color_texture)
-            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
-            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
-            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
-            GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
-            GL.glTexImage2D(
-                GL.GL_TEXTURE_2D,
-                0,
-                GL.GL_RGBA8,
-                width,
-                height,
-                0,
-                GL.GL_RGBA,
-                GL.GL_UNSIGNED_BYTE,
-                None,
-            )
+            for texture_id in (self.scene_color_texture, self.scene_bloom_texture):
+                GL.glBindTexture(GL.GL_TEXTURE_2D, texture_id)
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_S, GL.GL_CLAMP_TO_EDGE)
+                GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_WRAP_T, GL.GL_CLAMP_TO_EDGE)
+                GL.glTexImage2D(
+                    GL.GL_TEXTURE_2D,
+                    0,
+                    GL.GL_RGBA8,
+                    width,
+                    height,
+                    0,
+                    GL.GL_RGBA,
+                    GL.GL_UNSIGNED_BYTE,
+                    None,
+                )
 
             GL.glBindRenderbuffer(GL.GL_RENDERBUFFER, self.scene_depth_renderbuffer)
             GL.glRenderbufferStorage(GL.GL_RENDERBUFFER, GL.GL_DEPTH_COMPONENT24, width, height)
@@ -3433,12 +3467,20 @@ class GpuMeshWidget(QOpenGLWidget):
                 self.scene_color_texture,
                 0,
             )
+            GL.glFramebufferTexture2D(
+                GL.GL_FRAMEBUFFER,
+                GL.GL_COLOR_ATTACHMENT1,
+                GL.GL_TEXTURE_2D,
+                self.scene_bloom_texture,
+                0,
+            )
             GL.glFramebufferRenderbuffer(
                 GL.GL_FRAMEBUFFER,
                 GL.GL_DEPTH_ATTACHMENT,
                 GL.GL_RENDERBUFFER,
                 self.scene_depth_renderbuffer,
             )
+            self._set_scene_draw_buffers()
             status = GL.glCheckFramebufferStatus(GL.GL_FRAMEBUFFER)
             if status != GL.GL_FRAMEBUFFER_COMPLETE:
                 raise RuntimeError(f"scene framebuffer incomplete: {status}")
@@ -3888,7 +3930,7 @@ class GpuMeshWidget(QOpenGLWidget):
     def _draw_bloom_post(self, width: int, height: int, post_effects: Mapping[str, Any], bloom_strength: float) -> None:
         from OpenGL import GL
 
-        if not int(self.post_bloom_program or 0) or not int(self.scene_color_texture or 0):
+        if not int(self.post_bloom_program or 0) or not int(self.scene_color_texture or 0) or not int(self.scene_bloom_texture or 0):
             self._bind_default_framebuffer()
             return
         self._bind_default_framebuffer()
@@ -3900,6 +3942,9 @@ class GpuMeshWidget(QOpenGLWidget):
         GL.glActiveTexture(GL.GL_TEXTURE14)
         GL.glBindTexture(GL.GL_TEXTURE_2D, self.scene_color_texture)
         GL.glUniform1i(self._uniform_location(self.post_bloom_program, "u_scene_color"), 14)
+        GL.glActiveTexture(GL.GL_TEXTURE15)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, self.scene_bloom_texture)
+        GL.glUniform1i(self._uniform_location(self.post_bloom_program, "u_bloom_source"), 15)
         GL.glUniform2f(
             self._uniform_location(self.post_bloom_program, "u_texel_size"),
             1.0 / max(1, int(width)),
@@ -3914,9 +3959,12 @@ class GpuMeshWidget(QOpenGLWidget):
             self._uniform_location(self.post_bloom_program, "u_bloom_threshold"),
             float(post_effects.get("bloom_threshold", DEFAULT_BLOOM_THRESHOLD) or DEFAULT_BLOOM_THRESHOLD),
         )
+        GL.glUniform1i(self._uniform_location(self.post_bloom_program, "u_force_opaque"), 0 if self.transparent_background else 1)
         GL.glBindVertexArray(self.post_bloom_vao)
         GL.glDrawArrays(GL.GL_TRIANGLES, 0, 3)
         GL.glBindVertexArray(0)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+        GL.glActiveTexture(GL.GL_TEXTURE14)
         GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
         GL.glActiveTexture(GL.GL_TEXTURE0)
         GL.glUseProgram(0)
@@ -4028,14 +4076,25 @@ class GpuMeshWidget(QOpenGLWidget):
         )
         if bloom_post_active:
             GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, self.scene_fbo)
+            self._set_scene_draw_buffers()
         else:
             self._bind_default_framebuffer()
         GL.glViewport(0, 0, framebuffer_width, framebuffer_height)
         if self.transparent_background:
-            GL.glClearColor(0.0, 0.0, 0.0, 0.0)
+            clear_color = (0.0, 0.0, 0.0, 0.0)
         else:
-            GL.glClearColor(0.36, 0.40, 0.43, 1.0)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
+            clear_color = (0.36, 0.40, 0.43, 1.0)
+        if bloom_post_active:
+            GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT0)
+            GL.glClearColor(*clear_color)
+            GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
+            GL.glDrawBuffer(GL.GL_COLOR_ATTACHMENT1)
+            GL.glClearColor(0.0, 0.0, 0.0, 0.0)
+            GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+            self._set_scene_draw_buffers()
+        else:
+            GL.glClearColor(*clear_color)
+            GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
         color_management = color_management_diagnostics(self.state)
         hybrid_rendering = hybrid_rendering_diagnostics(self.state)
         transmission = transmission_diagnostics(self.state)
