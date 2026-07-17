@@ -3128,9 +3128,12 @@ class GpuMeshWidget(QOpenGLWidget):
         self.shadow_fbo = 0
         self.shadow_texture = 0
         self.shadow_qt_fbo = None
-        self.shadow_size = 2048
+        self.shadow_size = int(DEFAULT_SHADOW_MAP_SIZE)
         self.shadow_supported = False
         self.shadow_error = ""
+        self._shadow_dirty = True
+        self._last_shadow_signature: tuple[object, ...] | None = None
+        self._uniform_locations: dict[tuple[int, str], int] = {}
         self.ground_vao = 0
         self.ground_vbo = 0
         self.last_pos = None
@@ -3153,6 +3156,60 @@ class GpuMeshWidget(QOpenGLWidget):
                 GL.glDeleteTextures([int(texture_id)])
         except Exception:
             pass
+
+    def _uniform_location(self, program: int, name: str) -> int:
+        """Cache uniform lookups; PyOpenGL calls are measurable during drags."""
+        key = (int(program or 0), str(name))
+        cached = self._uniform_locations.get(key)
+        if cached is not None:
+            return int(cached)
+        from OpenGL import GL
+
+        loc = int(GL.glGetUniformLocation(int(program or 0), str(name)))
+        self._uniform_locations[key] = loc
+        return loc
+
+    def _invalidate_shadow_cache(self) -> None:
+        self._shadow_dirty = True
+
+    @staticmethod
+    def _rounded(value: float, digits: int = 5) -> float:
+        try:
+            return round(float(value), int(digits))
+        except Exception:
+            return 0.0
+
+    def _shadow_signature(self) -> tuple[object, ...]:
+        ranges = tuple(
+            (
+                int(row.get("start", 0) or 0),
+                int(row.get("count", 0) or 0),
+                bool(row.get("depth_write", True)),
+            )
+            for row in self.draw_ranges
+        )
+        return (
+            int(self._vbo_size_bytes or 0),
+            int(self.shadow_size or 0),
+            ranges,
+            self._rounded(self.state.pitch),
+            self._rounded(self.state.yaw),
+            self._rounded(self.state.roll),
+            self._rounded(self.state.zoom),
+            self._rounded(self.state.pan_x),
+            self._rounded(self.state.pan_y),
+            self._rounded(self.state.pan_z),
+            self._rounded(self.state.light_azimuth),
+            self._rounded(self.state.light_elevation),
+            self._rounded(self.state.ibl_rotation),
+            str(self.state.shadow_light_type),
+            self._rounded(self.state.shadow_spot_inner_angle),
+            self._rounded(self.state.shadow_spot_outer_angle),
+        )
+
+    def _mark_shadow_clean(self, signature: tuple[object, ...]) -> None:
+        self._last_shadow_signature = signature
+        self._shadow_dirty = False
 
     def shadow_diagnostics(self) -> dict[str, Any]:
         return shadow_filter_diagnostics(
@@ -3267,11 +3324,13 @@ class GpuMeshWidget(QOpenGLWidget):
             GL.glBindVertexArray(0)
         finally:
             self.doneCurrent()
+        self._invalidate_shadow_cache()
         self.update()
 
     def _create_shadow_resources(self) -> None:
         from OpenGL import GL
 
+        self._invalidate_shadow_cache()
         self.shadow_supported = False
         self.shadow_error = ""
         self.shadow_fbo = 0
@@ -3296,6 +3355,7 @@ class GpuMeshWidget(QOpenGLWidget):
             GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
             self.shadow_supported = True
             self.shadow_error = ""
+            self._invalidate_shadow_cache()
             return
         except Exception as qt_exc:
             qt_error = f"{type(qt_exc).__name__}: {qt_exc}"
@@ -3328,6 +3388,7 @@ class GpuMeshWidget(QOpenGLWidget):
                 raise RuntimeError(f"shadow framebuffer incomplete: {status}")
             self.shadow_supported = True
             self.shadow_error = f"qt_color_depth_fbo_unavailable; using_raw_depth_shadow_map: {qt_error}"
+            self._invalidate_shadow_cache()
         except Exception as exc:
             raw_error = f"{type(exc).__name__}: {exc}"
             self.shadow_supported = False
@@ -3556,6 +3617,7 @@ class GpuMeshWidget(QOpenGLWidget):
                 self.doneCurrent()
             except Exception:
                 pass
+        self._invalidate_shadow_cache()
         self.update()
 
     def set_environment_background_visible(self, visible: bool) -> None:
@@ -3682,7 +3744,12 @@ class GpuMeshWidget(QOpenGLWidget):
         ground_mvp = proj @ view @ ground_model
         ground_light_mvp = light_proj @ light_view @ ground_model
 
-        if self.shadow_supported:
+        shadow_signature = self._shadow_signature()
+        should_update_shadow = bool(
+            self.shadow_supported
+            and (self._shadow_dirty or shadow_signature != self._last_shadow_signature)
+        )
+        if should_update_shadow:
             shadow_bound = True
             if self.shadow_qt_fbo is not None:
                 shadow_bound = bool(self.shadow_qt_fbo.bind())
@@ -3699,19 +3766,25 @@ class GpuMeshWidget(QOpenGLWidget):
                     clear_bits |= GL.GL_COLOR_BUFFER_BIT
                 GL.glClear(clear_bits)
                 GL.glUseProgram(self.depth_program)
-                GL.glUniformMatrix4fv(GL.glGetUniformLocation(self.depth_program, "u_light_mvp"), 1, True, light_mvp)
+                GL.glUniformMatrix4fv(self._uniform_location(self.depth_program, "u_light_mvp"), 1, True, light_mvp)
                 GL.glBindVertexArray(self.vao)
                 for draw_range in self.draw_ranges:
+                    if draw_range.get("depth_write") is False:
+                        continue
+                    draw_count = int(draw_range.get("count", len(self.vertices)) or 0)
+                    if draw_count <= 0:
+                        continue
                     GL.glDrawArrays(
                         GL.GL_TRIANGLES,
                         int(draw_range.get("start", 0) or 0),
-                        int(draw_range.get("count", len(self.vertices)) or 0),
+                        draw_count,
                     )
                 GL.glBindVertexArray(0)
                 if self.shadow_qt_fbo is not None:
                     self.shadow_qt_fbo.release()
                 else:
                     GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
+                self._mark_shadow_clean(shadow_signature)
 
         GL.glViewport(0, 0, framebuffer_width, framebuffer_height)
         if self.transparent_background:
@@ -3761,17 +3834,17 @@ class GpuMeshWidget(QOpenGLWidget):
             GL.glDepthMask(False)
             GL.glDisable(GL.GL_DEPTH_TEST)
             GL.glUseProgram(self.environment_program)
-            GL.glUniform1i(GL.glGetUniformLocation(self.environment_program, "u_has_hdri"), 1 if self.hdri_texture else 0)
-            GL.glUniform1f(GL.glGetUniformLocation(self.environment_program, "u_ibl_rotation"), float(self.state.ibl_rotation))
-            GL.glUniform1f(GL.glGetUniformLocation(self.environment_program, "u_ibl_exposure"), float(self.state.ibl_exposure))
-            GL.glUniform1i(GL.glGetUniformLocation(self.environment_program, "u_tone_mapping_mode"), tone_mode)
-            GL.glUniform1f(GL.glGetUniformLocation(self.environment_program, "u_tone_exposure"), tone_exposure)
-            GL.glUniform3f(GL.glGetUniformLocation(self.environment_program, "u_tone_white_balance"), float(tone_wb[0]), float(tone_wb[1]), float(tone_wb[2]))
-            GL.glUniform1f(GL.glGetUniformLocation(self.environment_program, "u_tone_gamma"), tone_gamma)
+            GL.glUniform1i(self._uniform_location(self.environment_program, "u_has_hdri"), 1 if self.hdri_texture else 0)
+            GL.glUniform1f(self._uniform_location(self.environment_program, "u_ibl_rotation"), float(self.state.ibl_rotation))
+            GL.glUniform1f(self._uniform_location(self.environment_program, "u_ibl_exposure"), float(self.state.ibl_exposure))
+            GL.glUniform1i(self._uniform_location(self.environment_program, "u_tone_mapping_mode"), tone_mode)
+            GL.glUniform1f(self._uniform_location(self.environment_program, "u_tone_exposure"), tone_exposure)
+            GL.glUniform3f(self._uniform_location(self.environment_program, "u_tone_white_balance"), float(tone_wb[0]), float(tone_wb[1]), float(tone_wb[2]))
+            GL.glUniform1f(self._uniform_location(self.environment_program, "u_tone_gamma"), tone_gamma)
             if self.hdri_texture:
                 GL.glActiveTexture(GL.GL_TEXTURE0)
                 GL.glBindTexture(GL.GL_TEXTURE_2D, self.hdri_texture)
-                GL.glUniform1i(GL.glGetUniformLocation(self.environment_program, "u_hdri"), 0)
+                GL.glUniform1i(self._uniform_location(self.environment_program, "u_hdri"), 0)
             GL.glBindVertexArray(self.environment_vao)
             GL.glDrawArrays(GL.GL_TRIANGLES, 0, 3)
             GL.glBindVertexArray(0)
@@ -3781,226 +3854,226 @@ class GpuMeshWidget(QOpenGLWidget):
 
         if self.draw_ground:
             GL.glUseProgram(self.ground_program)
-            GL.glUniformMatrix4fv(GL.glGetUniformLocation(self.ground_program, "u_mvp"), 1, True, ground_mvp)
-            GL.glUniformMatrix4fv(GL.glGetUniformLocation(self.ground_program, "u_light_mvp"), 1, True, ground_light_mvp)
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_shadow_strength"), float(self.state.shadow_strength))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_shadow_pcf_radius"), float(self.state.shadow_pcf_radius))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_shadow_pcss_blocker_radius"), float(self.state.shadow_pcss_blocker_radius))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_shadow_bias"), float(self.state.shadow_bias))
-            GL.glUniform1i(GL.glGetUniformLocation(self.ground_program, "u_shadow_filter_mode"), 1 if self.state.shadow_filter == "pcss" else 0)
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_ibl_rotation"), float(self.state.ibl_rotation))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_ibl_exposure"), float(self.state.ibl_exposure))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_ground_reflection"), float(self.state.ground_reflection))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_shadow_catcher_opacity"), float(self.state.shadow_catcher_opacity))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_shadow_catcher_softness"), float(self.state.shadow_catcher_softness))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_shadow_catcher_matte_alpha"), float(self.state.shadow_catcher_matte_alpha))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_reflection_catcher_opacity"), float(self.state.reflection_catcher_opacity))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_reflection_catcher_roughness"), float(self.state.reflection_catcher_roughness))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_reflection_catcher_softness"), float(self.state.reflection_catcher_softness))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_reflection_catcher_matte_alpha"), float(self.state.shadow_catcher_matte_alpha))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_contact_reflection_strength"), float(self.state.contact_reflection_strength))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_contact_reflection_falloff"), float(self.state.contact_reflection_falloff))
-            GL.glUniform1i(GL.glGetUniformLocation(self.ground_program, "u_tone_mapping_mode"), tone_mode)
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_tone_exposure"), tone_exposure)
-            GL.glUniform3f(GL.glGetUniformLocation(self.ground_program, "u_tone_white_balance"), float(tone_wb[0]), float(tone_wb[1]), float(tone_wb[2]))
-            GL.glUniform1f(GL.glGetUniformLocation(self.ground_program, "u_tone_gamma"), tone_gamma)
-            GL.glUniform1i(GL.glGetUniformLocation(self.ground_program, "u_has_shadow_map"), 1 if self.shadow_supported else 0)
+            GL.glUniformMatrix4fv(self._uniform_location(self.ground_program, "u_mvp"), 1, True, ground_mvp)
+            GL.glUniformMatrix4fv(self._uniform_location(self.ground_program, "u_light_mvp"), 1, True, ground_light_mvp)
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_shadow_strength"), float(self.state.shadow_strength))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_shadow_pcf_radius"), float(self.state.shadow_pcf_radius))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_shadow_pcss_blocker_radius"), float(self.state.shadow_pcss_blocker_radius))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_shadow_bias"), float(self.state.shadow_bias))
+            GL.glUniform1i(self._uniform_location(self.ground_program, "u_shadow_filter_mode"), 1 if self.state.shadow_filter == "pcss" else 0)
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_ibl_rotation"), float(self.state.ibl_rotation))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_ibl_exposure"), float(self.state.ibl_exposure))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_ground_reflection"), float(self.state.ground_reflection))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_shadow_catcher_opacity"), float(self.state.shadow_catcher_opacity))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_shadow_catcher_softness"), float(self.state.shadow_catcher_softness))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_shadow_catcher_matte_alpha"), float(self.state.shadow_catcher_matte_alpha))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_reflection_catcher_opacity"), float(self.state.reflection_catcher_opacity))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_reflection_catcher_roughness"), float(self.state.reflection_catcher_roughness))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_reflection_catcher_softness"), float(self.state.reflection_catcher_softness))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_reflection_catcher_matte_alpha"), float(self.state.shadow_catcher_matte_alpha))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_contact_reflection_strength"), float(self.state.contact_reflection_strength))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_contact_reflection_falloff"), float(self.state.contact_reflection_falloff))
+            GL.glUniform1i(self._uniform_location(self.ground_program, "u_tone_mapping_mode"), tone_mode)
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_tone_exposure"), tone_exposure)
+            GL.glUniform3f(self._uniform_location(self.ground_program, "u_tone_white_balance"), float(tone_wb[0]), float(tone_wb[1]), float(tone_wb[2]))
+            GL.glUniform1f(self._uniform_location(self.ground_program, "u_tone_gamma"), tone_gamma)
+            GL.glUniform1i(self._uniform_location(self.ground_program, "u_has_shadow_map"), 1 if self.shadow_supported else 0)
             if self.shadow_supported:
                 GL.glActiveTexture(GL.GL_TEXTURE6)
                 GL.glBindTexture(GL.GL_TEXTURE_2D, self.shadow_texture)
-                GL.glUniform1i(GL.glGetUniformLocation(self.ground_program, "u_shadow_map"), 6)
-            GL.glUniform1i(GL.glGetUniformLocation(self.ground_program, "u_has_hdri"), 1 if self.hdri_texture else 0)
+                GL.glUniform1i(self._uniform_location(self.ground_program, "u_shadow_map"), 6)
+            GL.glUniform1i(self._uniform_location(self.ground_program, "u_has_hdri"), 1 if self.hdri_texture else 0)
             if self.hdri_texture:
                 GL.glActiveTexture(GL.GL_TEXTURE0)
                 GL.glBindTexture(GL.GL_TEXTURE_2D, self.hdri_texture)
-                GL.glUniform1i(GL.glGetUniformLocation(self.ground_program, "u_hdri"), 0)
+                GL.glUniform1i(self._uniform_location(self.ground_program, "u_hdri"), 0)
             GL.glBindVertexArray(self.ground_vao)
             GL.glDrawArrays(GL.GL_TRIANGLES, 0, 6)
             GL.glBindVertexArray(0)
 
         GL.glUseProgram(self.program)
-        GL.glUniformMatrix4fv(GL.glGetUniformLocation(self.program, "u_mvp"), 1, True, mvp)
-        GL.glUniformMatrix4fv(GL.glGetUniformLocation(self.program, "u_model"), 1, True, model)
-        GL.glUniformMatrix4fv(GL.glGetUniformLocation(self.program, "u_light_mvp"), 1, True, light_mvp)
-        GL.glUniformMatrix3fv(GL.glGetUniformLocation(self.program, "u_normal_mat"), 1, True, normal_mat)
+        GL.glUniformMatrix4fv(self._uniform_location(self.program, "u_mvp"), 1, True, mvp)
+        GL.glUniformMatrix4fv(self._uniform_location(self.program, "u_model"), 1, True, model)
+        GL.glUniformMatrix4fv(self._uniform_location(self.program, "u_light_mvp"), 1, True, light_mvp)
+        GL.glUniformMatrix3fv(self._uniform_location(self.program, "u_normal_mat"), 1, True, normal_mat)
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_light_dir"),
+            self._uniform_location(self.program, "u_light_dir"),
             float(light_dir[0]),
             float(light_dir[1]),
             float(light_dir[2]),
         )
-        GL.glUniform3f(GL.glGetUniformLocation(self.program, "u_camera_pos"), 0.0, 0.0, float(self.state.camera_z))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_ibl_exposure"), float(self.state.ibl_exposure))
+        GL.glUniform3f(self._uniform_location(self.program, "u_camera_pos"), 0.0, 0.0, float(self.state.camera_z))
+        GL.glUniform1f(self._uniform_location(self.program, "u_ibl_exposure"), float(self.state.ibl_exposure))
         unlit_controls = self.unlit_color_controls()
         GL.glUniform1f(
-            GL.glGetUniformLocation(self.program, "u_unlit_exposure_scale"),
+            self._uniform_location(self.program, "u_unlit_exposure_scale"),
             float(unlit_controls["unlit_exposure_scale"]),
         )
         GL.glUniform1f(
-            GL.glGetUniformLocation(self.program, "u_unlit_contrast"),
+            self._uniform_location(self.program, "u_unlit_contrast"),
             float(unlit_controls["unlit_contrast"]),
         )
         GL.glUniform1f(
-            GL.glGetUniformLocation(self.program, "u_unlit_output_gamma"),
+            self._uniform_location(self.program, "u_unlit_output_gamma"),
             float(unlit_controls["unlit_output_gamma"]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_ibl_rotation"), float(self.state.ibl_rotation))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_max_lod"), float(self.hdri_max_lod))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_direct_intensity"), float(self.state.direct_intensity))
-        GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_tone_mapping_mode"), tone_mode)
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_tone_exposure"), tone_exposure)
-        GL.glUniform3f(GL.glGetUniformLocation(self.program, "u_tone_white_balance"), float(tone_wb[0]), float(tone_wb[1]), float(tone_wb[2]))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_tone_gamma"), tone_gamma)
-        GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_hybrid_sample_count"), hybrid_samples)
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_diffuse_gi_strength"), diffuse_gi)
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_specular_gi_strength"), specular_gi)
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_denoise_strength"), denoise_strength)
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_transmission"), float(transmission.get("transmission", 0.0) or 0.0))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_refraction_strength"), float(transmission.get("refraction_strength", 0.0) or 0.0))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_ior"), float(transmission.get("ior", DEFAULT_IOR) or DEFAULT_IOR))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_thickness"), float(transmission.get("thickness", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_ibl_rotation"), float(self.state.ibl_rotation))
+        GL.glUniform1f(self._uniform_location(self.program, "u_max_lod"), float(self.hdri_max_lod))
+        GL.glUniform1f(self._uniform_location(self.program, "u_direct_intensity"), float(self.state.direct_intensity))
+        GL.glUniform1i(self._uniform_location(self.program, "u_tone_mapping_mode"), tone_mode)
+        GL.glUniform1f(self._uniform_location(self.program, "u_tone_exposure"), tone_exposure)
+        GL.glUniform3f(self._uniform_location(self.program, "u_tone_white_balance"), float(tone_wb[0]), float(tone_wb[1]), float(tone_wb[2]))
+        GL.glUniform1f(self._uniform_location(self.program, "u_tone_gamma"), tone_gamma)
+        GL.glUniform1i(self._uniform_location(self.program, "u_hybrid_sample_count"), hybrid_samples)
+        GL.glUniform1f(self._uniform_location(self.program, "u_diffuse_gi_strength"), diffuse_gi)
+        GL.glUniform1f(self._uniform_location(self.program, "u_specular_gi_strength"), specular_gi)
+        GL.glUniform1f(self._uniform_location(self.program, "u_denoise_strength"), denoise_strength)
+        GL.glUniform1f(self._uniform_location(self.program, "u_transmission"), float(transmission.get("transmission", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_refraction_strength"), float(transmission.get("refraction_strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_ior"), float(transmission.get("ior", DEFAULT_IOR) or DEFAULT_IOR))
+        GL.glUniform1f(self._uniform_location(self.program, "u_thickness"), float(transmission.get("thickness", 0.0) or 0.0))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_absorption_color"),
+            self._uniform_location(self.program, "u_absorption_color"),
             float(absorption_color[0]),
             float(absorption_color[1]),
             float(absorption_color[2]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_clearcoat_strength"), float(clearcoat.get("strength", 0.0) or 0.0))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_clearcoat_roughness"), float(clearcoat.get("roughness", DEFAULT_CLEARCOAT_ROUGHNESS) or DEFAULT_CLEARCOAT_ROUGHNESS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_clearcoat_ior"), float(clearcoat.get("ior", DEFAULT_CLEARCOAT_IOR) or DEFAULT_CLEARCOAT_IOR))
+        GL.glUniform1f(self._uniform_location(self.program, "u_clearcoat_strength"), float(clearcoat.get("strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_clearcoat_roughness"), float(clearcoat.get("roughness", DEFAULT_CLEARCOAT_ROUGHNESS) or DEFAULT_CLEARCOAT_ROUGHNESS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_clearcoat_ior"), float(clearcoat.get("ior", DEFAULT_CLEARCOAT_IOR) or DEFAULT_CLEARCOAT_IOR))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_clearcoat_tint"),
+            self._uniform_location(self.program, "u_clearcoat_tint"),
             float(clearcoat_tint[0]),
             float(clearcoat_tint[1]),
             float(clearcoat_tint[2]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_parallax_strength"), float(parallax.get("strength", 0.0) or 0.0))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_parallax_depth"), float(parallax.get("depth", DEFAULT_PARALLAX_DEPTH) or DEFAULT_PARALLAX_DEPTH))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_parallax_center"), float(parallax.get("center", DEFAULT_PARALLAX_CENTER) or DEFAULT_PARALLAX_CENTER))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_bevel_strength"), float(bevel.get("strength", 0.0) or 0.0))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_bevel_radius"), float(bevel.get("radius", DEFAULT_BEVEL_RADIUS) or DEFAULT_BEVEL_RADIUS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_bevel_edge_width"), float(bevel.get("edge_width", DEFAULT_BEVEL_EDGE_WIDTH) or DEFAULT_BEVEL_EDGE_WIDTH))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_material_layer_blend"), float(material_layering.get("blend", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_parallax_strength"), float(parallax.get("strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_parallax_depth"), float(parallax.get("depth", DEFAULT_PARALLAX_DEPTH) or DEFAULT_PARALLAX_DEPTH))
+        GL.glUniform1f(self._uniform_location(self.program, "u_parallax_center"), float(parallax.get("center", DEFAULT_PARALLAX_CENTER) or DEFAULT_PARALLAX_CENTER))
+        GL.glUniform1f(self._uniform_location(self.program, "u_bevel_strength"), float(bevel.get("strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_bevel_radius"), float(bevel.get("radius", DEFAULT_BEVEL_RADIUS) or DEFAULT_BEVEL_RADIUS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_bevel_edge_width"), float(bevel.get("edge_width", DEFAULT_BEVEL_EDGE_WIDTH) or DEFAULT_BEVEL_EDGE_WIDTH))
+        GL.glUniform1f(self._uniform_location(self.program, "u_material_layer_blend"), float(material_layering.get("blend", 0.0) or 0.0))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_material_layer_color"),
+            self._uniform_location(self.program, "u_material_layer_color"),
             float(material_layer_color[0]),
             float(material_layer_color[1]),
             float(material_layer_color[2]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_material_layer_roughness"), float(material_layering.get("roughness", DEFAULT_MATERIAL_LAYER_ROUGHNESS) or DEFAULT_MATERIAL_LAYER_ROUGHNESS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_material_layer_metallic"), float(material_layering.get("metallic", DEFAULT_MATERIAL_LAYER_METALLIC) or DEFAULT_MATERIAL_LAYER_METALLIC))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_material_layer_alpha"), float(material_layering.get("alpha", DEFAULT_MATERIAL_LAYER_ALPHA) or DEFAULT_MATERIAL_LAYER_ALPHA))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_material_layer_emissive_strength"), float(material_layering.get("emissive_strength", 0.0) or 0.0))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_material_layer_mask_strength"), float(material_layering.get("mask_strength", 0.0) or 0.0))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_surface_override_strength"), float(surface.get("override_strength", 0.0) or 0.0))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_surface_roughness"), float(surface.get("roughness", DEFAULT_SURFACE_ROUGHNESS) or DEFAULT_SURFACE_ROUGHNESS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_surface_metallic"), float(surface.get("metallic", DEFAULT_SURFACE_METALLIC) or DEFAULT_SURFACE_METALLIC))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_surface_reflectance"), float(surface.get("reflectance", DEFAULT_SURFACE_REFLECTANCE) or DEFAULT_SURFACE_REFLECTANCE))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_subsurface_strength"), float(subsurface.get("strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_material_layer_roughness"), float(material_layering.get("roughness", DEFAULT_MATERIAL_LAYER_ROUGHNESS) or DEFAULT_MATERIAL_LAYER_ROUGHNESS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_material_layer_metallic"), float(material_layering.get("metallic", DEFAULT_MATERIAL_LAYER_METALLIC) or DEFAULT_MATERIAL_LAYER_METALLIC))
+        GL.glUniform1f(self._uniform_location(self.program, "u_material_layer_alpha"), float(material_layering.get("alpha", DEFAULT_MATERIAL_LAYER_ALPHA) or DEFAULT_MATERIAL_LAYER_ALPHA))
+        GL.glUniform1f(self._uniform_location(self.program, "u_material_layer_emissive_strength"), float(material_layering.get("emissive_strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_material_layer_mask_strength"), float(material_layering.get("mask_strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_surface_override_strength"), float(surface.get("override_strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_surface_roughness"), float(surface.get("roughness", DEFAULT_SURFACE_ROUGHNESS) or DEFAULT_SURFACE_ROUGHNESS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_surface_metallic"), float(surface.get("metallic", DEFAULT_SURFACE_METALLIC) or DEFAULT_SURFACE_METALLIC))
+        GL.glUniform1f(self._uniform_location(self.program, "u_surface_reflectance"), float(surface.get("reflectance", DEFAULT_SURFACE_REFLECTANCE) or DEFAULT_SURFACE_REFLECTANCE))
+        GL.glUniform1f(self._uniform_location(self.program, "u_subsurface_strength"), float(subsurface.get("strength", 0.0) or 0.0))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_subsurface_color"),
+            self._uniform_location(self.program, "u_subsurface_color"),
             float(subsurface_color[0]),
             float(subsurface_color[1]),
             float(subsurface_color[2]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_subsurface_radius"), float(subsurface.get("radius", DEFAULT_SUBSURFACE_RADIUS) or DEFAULT_SUBSURFACE_RADIUS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_subsurface_power"), float(subsurface.get("power", DEFAULT_SUBSURFACE_POWER) or DEFAULT_SUBSURFACE_POWER))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_subsurface_wrap"), float(subsurface.get("wrap", DEFAULT_SUBSURFACE_WRAP) or DEFAULT_SUBSURFACE_WRAP))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_subsurface_thickness"), float(subsurface.get("thickness", DEFAULT_SUBSURFACE_THICKNESS) or DEFAULT_SUBSURFACE_THICKNESS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_hair_groom_strength"), float(hair_groom.get("strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_subsurface_radius"), float(subsurface.get("radius", DEFAULT_SUBSURFACE_RADIUS) or DEFAULT_SUBSURFACE_RADIUS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_subsurface_power"), float(subsurface.get("power", DEFAULT_SUBSURFACE_POWER) or DEFAULT_SUBSURFACE_POWER))
+        GL.glUniform1f(self._uniform_location(self.program, "u_subsurface_wrap"), float(subsurface.get("wrap", DEFAULT_SUBSURFACE_WRAP) or DEFAULT_SUBSURFACE_WRAP))
+        GL.glUniform1f(self._uniform_location(self.program, "u_subsurface_thickness"), float(subsurface.get("thickness", DEFAULT_SUBSURFACE_THICKNESS) or DEFAULT_SUBSURFACE_THICKNESS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_hair_groom_strength"), float(hair_groom.get("strength", 0.0) or 0.0))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_hair_groom_tint"),
+            self._uniform_location(self.program, "u_hair_groom_tint"),
             float(hair_tint[0]),
             float(hair_tint[1]),
             float(hair_tint[2]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_hair_primary_shift"), float(hair_groom.get("primary_shift", DEFAULT_HAIR_PRIMARY_SHIFT) if hair_groom.get("primary_shift") is not None else DEFAULT_HAIR_PRIMARY_SHIFT))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_hair_secondary_shift"), float(hair_groom.get("secondary_shift", DEFAULT_HAIR_SECONDARY_SHIFT) if hair_groom.get("secondary_shift") is not None else DEFAULT_HAIR_SECONDARY_SHIFT))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_hair_primary_roughness"), float(hair_groom.get("primary_roughness", DEFAULT_HAIR_PRIMARY_ROUGHNESS) or DEFAULT_HAIR_PRIMARY_ROUGHNESS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_hair_secondary_roughness"), float(hair_groom.get("secondary_roughness", DEFAULT_HAIR_SECONDARY_ROUGHNESS) or DEFAULT_HAIR_SECONDARY_ROUGHNESS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_hair_secondary_strength"), float(hair_groom.get("secondary_strength", DEFAULT_HAIR_SECONDARY_STRENGTH) if hair_groom.get("secondary_strength") is not None else DEFAULT_HAIR_SECONDARY_STRENGTH))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_hair_anisotropy"), float(hair_groom.get("anisotropy", DEFAULT_HAIR_ANISOTROPY) if hair_groom.get("anisotropy") is not None else DEFAULT_HAIR_ANISOTROPY))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_hair_rim_strength"), float(hair_groom.get("rim_strength", DEFAULT_HAIR_RIM_STRENGTH) if hair_groom.get("rim_strength") is not None else DEFAULT_HAIR_RIM_STRENGTH))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_cloth_sheen_strength"), float(cloth_sheen.get("strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_hair_primary_shift"), float(hair_groom.get("primary_shift", DEFAULT_HAIR_PRIMARY_SHIFT) if hair_groom.get("primary_shift") is not None else DEFAULT_HAIR_PRIMARY_SHIFT))
+        GL.glUniform1f(self._uniform_location(self.program, "u_hair_secondary_shift"), float(hair_groom.get("secondary_shift", DEFAULT_HAIR_SECONDARY_SHIFT) if hair_groom.get("secondary_shift") is not None else DEFAULT_HAIR_SECONDARY_SHIFT))
+        GL.glUniform1f(self._uniform_location(self.program, "u_hair_primary_roughness"), float(hair_groom.get("primary_roughness", DEFAULT_HAIR_PRIMARY_ROUGHNESS) or DEFAULT_HAIR_PRIMARY_ROUGHNESS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_hair_secondary_roughness"), float(hair_groom.get("secondary_roughness", DEFAULT_HAIR_SECONDARY_ROUGHNESS) or DEFAULT_HAIR_SECONDARY_ROUGHNESS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_hair_secondary_strength"), float(hair_groom.get("secondary_strength", DEFAULT_HAIR_SECONDARY_STRENGTH) if hair_groom.get("secondary_strength") is not None else DEFAULT_HAIR_SECONDARY_STRENGTH))
+        GL.glUniform1f(self._uniform_location(self.program, "u_hair_anisotropy"), float(hair_groom.get("anisotropy", DEFAULT_HAIR_ANISOTROPY) if hair_groom.get("anisotropy") is not None else DEFAULT_HAIR_ANISOTROPY))
+        GL.glUniform1f(self._uniform_location(self.program, "u_hair_rim_strength"), float(hair_groom.get("rim_strength", DEFAULT_HAIR_RIM_STRENGTH) if hair_groom.get("rim_strength") is not None else DEFAULT_HAIR_RIM_STRENGTH))
+        GL.glUniform1f(self._uniform_location(self.program, "u_cloth_sheen_strength"), float(cloth_sheen.get("strength", 0.0) or 0.0))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_cloth_sheen_color"),
+            self._uniform_location(self.program, "u_cloth_sheen_color"),
             float(cloth_color[0]),
             float(cloth_color[1]),
             float(cloth_color[2]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_cloth_sheen_roughness"), float(cloth_sheen.get("roughness", DEFAULT_CLOTH_SHEEN_ROUGHNESS) or DEFAULT_CLOTH_SHEEN_ROUGHNESS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_cloth_sheen_roughness"), float(cloth_sheen.get("roughness", DEFAULT_CLOTH_SHEEN_ROUGHNESS) or DEFAULT_CLOTH_SHEEN_ROUGHNESS))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_cloth_sheen_edge_tint"),
+            self._uniform_location(self.program, "u_cloth_sheen_edge_tint"),
             float(cloth_edge_tint[0]),
             float(cloth_edge_tint[1]),
             float(cloth_edge_tint[2]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_cloth_sheen_fiber_strength"), float(cloth_sheen.get("fiber_strength", DEFAULT_CLOTH_SHEEN_FIBER_STRENGTH) if cloth_sheen.get("fiber_strength") is not None else DEFAULT_CLOTH_SHEEN_FIBER_STRENGTH))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_cloth_sheen_wrap"), float(cloth_sheen.get("wrap", DEFAULT_CLOTH_SHEEN_WRAP) if cloth_sheen.get("wrap") is not None else DEFAULT_CLOTH_SHEEN_WRAP))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_cloth_sheen_retroreflection"), float(cloth_sheen.get("retroreflection", DEFAULT_CLOTH_SHEEN_RETROREFLECTION) if cloth_sheen.get("retroreflection") is not None else DEFAULT_CLOTH_SHEEN_RETROREFLECTION))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_glint_strength"), float(glint_sparkle.get("strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_cloth_sheen_fiber_strength"), float(cloth_sheen.get("fiber_strength", DEFAULT_CLOTH_SHEEN_FIBER_STRENGTH) if cloth_sheen.get("fiber_strength") is not None else DEFAULT_CLOTH_SHEEN_FIBER_STRENGTH))
+        GL.glUniform1f(self._uniform_location(self.program, "u_cloth_sheen_wrap"), float(cloth_sheen.get("wrap", DEFAULT_CLOTH_SHEEN_WRAP) if cloth_sheen.get("wrap") is not None else DEFAULT_CLOTH_SHEEN_WRAP))
+        GL.glUniform1f(self._uniform_location(self.program, "u_cloth_sheen_retroreflection"), float(cloth_sheen.get("retroreflection", DEFAULT_CLOTH_SHEEN_RETROREFLECTION) if cloth_sheen.get("retroreflection") is not None else DEFAULT_CLOTH_SHEEN_RETROREFLECTION))
+        GL.glUniform1f(self._uniform_location(self.program, "u_glint_strength"), float(glint_sparkle.get("strength", 0.0) or 0.0))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_glint_color"),
+            self._uniform_location(self.program, "u_glint_color"),
             float(glint_color[0]),
             float(glint_color[1]),
             float(glint_color[2]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_glint_density"), float(glint_sparkle.get("density", DEFAULT_GLINT_DENSITY) if glint_sparkle.get("density") is not None else DEFAULT_GLINT_DENSITY))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_glint_scale"), float(glint_sparkle.get("scale", DEFAULT_GLINT_SCALE) if glint_sparkle.get("scale") is not None else DEFAULT_GLINT_SCALE))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_glint_threshold"), float(glint_sparkle.get("threshold", DEFAULT_GLINT_THRESHOLD) if glint_sparkle.get("threshold") is not None else DEFAULT_GLINT_THRESHOLD))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_glint_sharpness"), float(glint_sparkle.get("sharpness", DEFAULT_GLINT_SHARPNESS) if glint_sparkle.get("sharpness") is not None else DEFAULT_GLINT_SHARPNESS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_glint_roughness_jitter"), float(glint_sparkle.get("roughness_jitter", DEFAULT_GLINT_ROUGHNESS_JITTER) if glint_sparkle.get("roughness_jitter") is not None else DEFAULT_GLINT_ROUGHNESS_JITTER))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_triplanar_strength"), float(triplanar.get("strength", 0.0) or 0.0))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_triplanar_scale"), float(triplanar.get("scale", DEFAULT_TRIPLANAR_SCALE) or DEFAULT_TRIPLANAR_SCALE))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_triplanar_blend_sharpness"), float(triplanar.get("blend_sharpness", DEFAULT_TRIPLANAR_BLEND_SHARPNESS) or DEFAULT_TRIPLANAR_BLEND_SHARPNESS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_glint_density"), float(glint_sparkle.get("density", DEFAULT_GLINT_DENSITY) if glint_sparkle.get("density") is not None else DEFAULT_GLINT_DENSITY))
+        GL.glUniform1f(self._uniform_location(self.program, "u_glint_scale"), float(glint_sparkle.get("scale", DEFAULT_GLINT_SCALE) if glint_sparkle.get("scale") is not None else DEFAULT_GLINT_SCALE))
+        GL.glUniform1f(self._uniform_location(self.program, "u_glint_threshold"), float(glint_sparkle.get("threshold", DEFAULT_GLINT_THRESHOLD) if glint_sparkle.get("threshold") is not None else DEFAULT_GLINT_THRESHOLD))
+        GL.glUniform1f(self._uniform_location(self.program, "u_glint_sharpness"), float(glint_sparkle.get("sharpness", DEFAULT_GLINT_SHARPNESS) if glint_sparkle.get("sharpness") is not None else DEFAULT_GLINT_SHARPNESS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_glint_roughness_jitter"), float(glint_sparkle.get("roughness_jitter", DEFAULT_GLINT_ROUGHNESS_JITTER) if glint_sparkle.get("roughness_jitter") is not None else DEFAULT_GLINT_ROUGHNESS_JITTER))
+        GL.glUniform1f(self._uniform_location(self.program, "u_triplanar_strength"), float(triplanar.get("strength", 0.0) or 0.0))
+        GL.glUniform1f(self._uniform_location(self.program, "u_triplanar_scale"), float(triplanar.get("scale", DEFAULT_TRIPLANAR_SCALE) or DEFAULT_TRIPLANAR_SCALE))
+        GL.glUniform1f(self._uniform_location(self.program, "u_triplanar_blend_sharpness"), float(triplanar.get("blend_sharpness", DEFAULT_TRIPLANAR_BLEND_SHARPNESS) or DEFAULT_TRIPLANAR_BLEND_SHARPNESS))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_triplanar_offset"),
+            self._uniform_location(self.program, "u_triplanar_offset"),
             float(triplanar_offset[0]),
             float(triplanar_offset[1]),
             float(triplanar_offset[2]),
         )
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_screen_ao_strength"), ao_strength)
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_screen_ao_radius"), float(ambient_occlusion.get("radius", DEFAULT_AO_RADIUS) or DEFAULT_AO_RADIUS))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_screen_ao_distance"), float(ambient_occlusion.get("distance", DEFAULT_AO_DISTANCE) or DEFAULT_AO_DISTANCE))
+        GL.glUniform1f(self._uniform_location(self.program, "u_screen_ao_strength"), ao_strength)
+        GL.glUniform1f(self._uniform_location(self.program, "u_screen_ao_radius"), float(ambient_occlusion.get("radius", DEFAULT_AO_RADIUS) or DEFAULT_AO_RADIUS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_screen_ao_distance"), float(ambient_occlusion.get("distance", DEFAULT_AO_DISTANCE) or DEFAULT_AO_DISTANCE))
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_screen_ao_color"),
+            self._uniform_location(self.program, "u_screen_ao_color"),
             float(ao_color[0]),
             float(ao_color[1]),
             float(ao_color[2]),
         )
-        GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_screen_ao_ambient"), 1 if bool(ambient_occlusion.get("ambient", True)) else 0)
-        GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_screen_ao_diffuse"), 1 if bool(ambient_occlusion.get("diffuse", True)) else 0)
-        GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_screen_ao_specular"), 1 if bool(ambient_occlusion.get("specular", False)) else 0)
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_shadow_strength"), float(self.state.shadow_strength))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_shadow_pcf_radius"), float(self.state.shadow_pcf_radius))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_shadow_pcss_blocker_radius"), float(self.state.shadow_pcss_blocker_radius))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_shadow_bias"), float(self.state.shadow_bias))
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_shadow_normal_bias"), float(self.state.shadow_normal_bias))
-        GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_shadow_filter_mode"), 1 if self.state.shadow_filter == "pcss" else 0)
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_self_shadow_strength"), float(self.state.self_shadow_strength))
-        GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_has_hdri"), 1 if self.hdri_texture else 0)
+        GL.glUniform1i(self._uniform_location(self.program, "u_screen_ao_ambient"), 1 if bool(ambient_occlusion.get("ambient", True)) else 0)
+        GL.glUniform1i(self._uniform_location(self.program, "u_screen_ao_diffuse"), 1 if bool(ambient_occlusion.get("diffuse", True)) else 0)
+        GL.glUniform1i(self._uniform_location(self.program, "u_screen_ao_specular"), 1 if bool(ambient_occlusion.get("specular", False)) else 0)
+        GL.glUniform1f(self._uniform_location(self.program, "u_shadow_strength"), float(self.state.shadow_strength))
+        GL.glUniform1f(self._uniform_location(self.program, "u_shadow_pcf_radius"), float(self.state.shadow_pcf_radius))
+        GL.glUniform1f(self._uniform_location(self.program, "u_shadow_pcss_blocker_radius"), float(self.state.shadow_pcss_blocker_radius))
+        GL.glUniform1f(self._uniform_location(self.program, "u_shadow_bias"), float(self.state.shadow_bias))
+        GL.glUniform1f(self._uniform_location(self.program, "u_shadow_normal_bias"), float(self.state.shadow_normal_bias))
+        GL.glUniform1i(self._uniform_location(self.program, "u_shadow_filter_mode"), 1 if self.state.shadow_filter == "pcss" else 0)
+        GL.glUniform1f(self._uniform_location(self.program, "u_self_shadow_strength"), float(self.state.self_shadow_strength))
+        GL.glUniform1i(self._uniform_location(self.program, "u_has_hdri"), 1 if self.hdri_texture else 0)
         has_ibl_probe = bool(self.ibl_irradiance_texture and self.ibl_prefilter_texture and self.ibl_brdf_lut_texture)
-        GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_has_ibl_probe"), 1 if has_ibl_probe else 0)
-        GL.glUniform1f(GL.glGetUniformLocation(self.program, "u_prefilter_level_count"), float(self.ibl_prefilter_level_count))
-        GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_has_shadow_map"), 1 if self.shadow_supported else 0)
+        GL.glUniform1i(self._uniform_location(self.program, "u_has_ibl_probe"), 1 if has_ibl_probe else 0)
+        GL.glUniform1f(self._uniform_location(self.program, "u_prefilter_level_count"), float(self.ibl_prefilter_level_count))
+        GL.glUniform1i(self._uniform_location(self.program, "u_has_shadow_map"), 1 if self.shadow_supported else 0)
         if self.shadow_supported:
             GL.glActiveTexture(GL.GL_TEXTURE6)
             GL.glBindTexture(GL.GL_TEXTURE_2D, self.shadow_texture)
-            GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_shadow_map"), 6)
+            GL.glUniform1i(self._uniform_location(self.program, "u_shadow_map"), 6)
         if self.hdri_texture:
             GL.glActiveTexture(GL.GL_TEXTURE0)
             GL.glBindTexture(GL.GL_TEXTURE_2D, self.hdri_texture)
-            GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_hdri"), 0)
+            GL.glUniform1i(self._uniform_location(self.program, "u_hdri"), 0)
         if has_ibl_probe:
             GL.glActiveTexture(GL.GL_TEXTURE7)
             GL.glBindTexture(GL.GL_TEXTURE_2D, self.ibl_irradiance_texture)
-            GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_irradiance"), 7)
+            GL.glUniform1i(self._uniform_location(self.program, "u_irradiance"), 7)
             GL.glActiveTexture(GL.GL_TEXTURE8)
             GL.glBindTexture(GL.GL_TEXTURE_2D, self.ibl_prefilter_texture)
-            GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_prefilter"), 8)
+            GL.glUniform1i(self._uniform_location(self.program, "u_prefilter"), 8)
             GL.glActiveTexture(GL.GL_TEXTURE9)
             GL.glBindTexture(GL.GL_TEXTURE_2D, self.ibl_brdf_lut_texture)
-            GL.glUniform1i(GL.glGetUniformLocation(self.program, "u_brdf_lut"), 9)
+            GL.glUniform1i(self._uniform_location(self.program, "u_brdf_lut"), 9)
         GL.glBindVertexArray(self.vao)
         for draw_range in self.draw_ranges:
             material_name = str(draw_range.get("material_name") or "")
@@ -4060,18 +4133,18 @@ class GpuMeshWidget(QOpenGLWidget):
         if not textures and len(self.material_textures) == 1:
             textures = next(iter(self.material_textures.values()))
         GL.glUniform1f(
-            GL.glGetUniformLocation(self.program, "u_alpha_cutoff"),
+            self._uniform_location(self.program, "u_alpha_cutoff"),
             _material_float(maps, "alpha_cutoff", 0.02, lo=0.0, hi=1.0),
         )
         emissive = _material_vec3(maps, "emissive_factor")
         GL.glUniform3f(
-            GL.glGetUniformLocation(self.program, "u_emissive_factor"),
+            self._uniform_location(self.program, "u_emissive_factor"),
             float(emissive[0]),
             float(emissive[1]),
             float(emissive[2]),
         )
         GL.glUniform1i(
-            GL.glGetUniformLocation(self.program, "u_base_alpha_to_opacity"),
+            self._uniform_location(self.program, "u_base_alpha_to_opacity"),
             1 if _base_alpha_to_opacity(material_name, maps) else 0,
         )
         for map_name, unit in texture_units.items():
@@ -4079,8 +4152,8 @@ class GpuMeshWidget(QOpenGLWidget):
             texture_id = int(textures.get(map_name, 0) or 0)
             GL.glActiveTexture(GL.GL_TEXTURE0 + unit)
             GL.glBindTexture(GL.GL_TEXTURE_2D, texture_id)
-            GL.glUniform1i(GL.glGetUniformLocation(self.program, sampler_name), unit)
-            GL.glUniform1i(GL.glGetUniformLocation(self.program, flag_name), 1 if texture_id else 0)
+            GL.glUniform1i(self._uniform_location(self.program, sampler_name), unit)
+            GL.glUniform1i(self._uniform_location(self.program, flag_name), 1 if texture_id else 0)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() in (Qt.MouseButton.LeftButton, Qt.MouseButton.MiddleButton, Qt.MouseButton.RightButton):
@@ -4876,7 +4949,7 @@ def main() -> int:
         ),
         enable_shadow_map=bool(args.enable_shadow_map),
         shadow_supported=bool(args.enable_shadow_map),
-        shadow_size=2048,
+        shadow_size=int(DEFAULT_SHADOW_MAP_SIZE),
     )
     texture_diag["shadow_filter"] = shadow_config
     texture_diag["catcher"] = catcher_settings
