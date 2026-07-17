@@ -1,8 +1,20 @@
+using System.Globalization;
 using System.Text.Json;
 using CUE4Parse.FileProvider;
+using CUE4Parse.FileProvider.Objects;
+using CUE4Parse.UE4.Assets;
+using CUE4Parse.UE4.Assets.Exports.Animation;
+using CUE4Parse.UE4.Assets.Exports.SkeletalMesh;
+using CUE4Parse.UE4.Assets.Objects;
+using CUE4Parse.UE4.Objects.Core.Math;
+using CUE4Parse.UE4.Versions;
 using CUE4Parse_Conversion;
+using CUE4Parse_Conversion.Meshes;
+using CUE4Parse_Conversion.Meshes.PSK;
+using TigerUnrealAssetBridge.MeshDescription;
 
 var command = args.Length > 0 ? args[0].Trim().ToLowerInvariant() : "--info";
+var jsonOptions = new JsonSerializerOptions { WriteIndented = true };
 
 if (command is "--info" or "info")
 {
@@ -21,9 +33,697 @@ if (command is "--info" or "info")
             "AR/PBR .arpbr descriptor export"
         }
     };
-    Console.WriteLine(JsonSerializer.Serialize(info, new JsonSerializerOptions { WriteIndented = true }));
+    Console.WriteLine(JsonSerializer.Serialize(info, jsonOptions));
     return 0;
+}
+
+if (command is "--export-skeletal-mesh" or "export-skeletal-mesh")
+{
+    try
+    {
+        var options = ParseOptions(args.Skip(1).ToArray());
+        var projectPath = RequiredPath(options, "project");
+        var assetPath = RequiredPath(options, "asset");
+        var outputPath = RequiredPath(options, "out");
+        var maxTriangles = OptionalInt(options, "max-triangles", 240_000);
+
+        var descriptor = ExportSkeletalMeshDescriptor(projectPath, assetPath, maxTriangles);
+        var payload = new Dictionary<string, object?>
+        {
+            ["schema"] = "tigerstudio.ar_pbr.unreal_skeletal_mesh_export.v1",
+            ["runtime_format"] = "ar_scene_descriptor",
+            ["descriptor"] = descriptor,
+        };
+        Directory.CreateDirectory(outputPath.DirectoryName ?? ".");
+        File.WriteAllText(outputPath.FullName, JsonSerializer.Serialize(payload, jsonOptions));
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            ok = true,
+            output = outputPath.FullName,
+            mesh = assetPath.FullName,
+            triangle_count = descriptor["metadata"] is Dictionary<string, object?> meta ? meta["triangle_count"] : null,
+            vertex_count = descriptor["metadata"] is Dictionary<string, object?> meta2 ? meta2["vertex_count"] : null,
+        }, jsonOptions));
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(JsonSerializer.Serialize(new
+        {
+            ok = false,
+            error = ex.GetType().Name,
+            message = ex.Message,
+        }, jsonOptions));
+        return 1;
+    }
 }
 
 Console.Error.WriteLine($"Unknown command: {command}");
 return 2;
+
+static Dictionary<string, object?> ExportSkeletalMeshDescriptor(FileInfo projectPath, FileInfo assetPath, int maxTriangles)
+{
+    if (!projectPath.Exists)
+        throw new FileNotFoundException("Unreal project file was not found.", projectPath.FullName);
+    if (!assetPath.Exists)
+        throw new FileNotFoundException("Skeletal mesh package was not found.", assetPath.FullName);
+
+    var contentRoot = new DirectoryInfo(Path.Combine(projectPath.DirectoryName ?? ".", "Content"));
+    if (!contentRoot.Exists)
+        throw new DirectoryNotFoundException($"Content directory not found: {contentRoot.FullName}");
+    if (!assetPath.FullName.StartsWith(contentRoot.FullName, StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException("Asset must be inside the project's Content directory.");
+
+    using var provider = CreateProvider(projectPath, contentRoot);
+    RegisterPackageDirectory(provider, contentRoot, assetPath.DirectoryName ?? contentRoot.FullName);
+    var packagePath = ResolveProviderPath(provider, contentRoot, assetPath);
+    var package = provider.LoadPackage(packagePath);
+    var mesh = package.GetExports().OfType<USkeletalMesh>().FirstOrDefault()
+        ?? throw new InvalidOperationException($"No USkeletalMesh export was found in package: {packagePath}");
+
+    List<Dictionary<string, object?>> materials;
+    List<Dictionary<string, object?>> geometries;
+    List<Dictionary<string, object?>> bones;
+    int sourceVertexCount;
+    int sourceIndexCount;
+    var lodIndex = 0;
+    var geometrySource = "cooked_lod_models";
+
+    if (mesh.TryConvert(out var converted) && converted.LODs.Count > 0)
+    {
+        var lod = converted.LODs[lodIndex];
+        if (lod.Verts is null || lod.Verts.Length == 0)
+            throw new InvalidOperationException("Converted skeletal mesh LOD has no vertices.");
+        if (lod.Indices is null || lod.Indices.Value.Length < 3)
+            throw new InvalidOperationException("Converted skeletal mesh LOD has no triangle indices.");
+        materials = BuildMaterials(mesh, lod);
+        geometries = BuildCookedGeometries(mesh, lod, materials, maxTriangles);
+        bones = BuildBones(converted.RefSkeleton);
+        sourceVertexCount = lod.Verts.Length;
+        sourceIndexCount = lod.Indices.Value.Length;
+    }
+    else
+    {
+        var warnings = new List<string>();
+        var decoded = MeshDescriptionBulkReader.TryDecodeFromPackageExports(
+            package.GetExports(),
+            provider.Versions.Game,
+            message => warnings.Add(message));
+        if (decoded is null)
+            throw new InvalidOperationException("CUE4Parse could not convert this skeletal mesh and no MeshDescriptionBulkData fallback was decoded.");
+        geometrySource = "mesh_description_bulk_data";
+        materials = BuildMaterials(mesh, null);
+        geometries = BuildMeshDescriptionGeometries(mesh, decoded, materials, maxTriangles);
+        bones = BuildBonesFromReferenceSkeleton(mesh.ReferenceSkeleton);
+        sourceVertexCount = decoded.Positions.Length;
+        sourceIndexCount = decoded.TriangleIndices.Length;
+        if (warnings.Count > 0)
+        {
+            foreach (var geometry in geometries)
+                geometry["mesh_description_warnings"] = warnings.ToArray();
+        }
+    }
+    if (geometries.Count == 0)
+        throw new InvalidOperationException("Converted skeletal mesh did not produce any AR/PBR geometry sections.");
+
+    var bounds = BoundsFromGeometries(geometries);
+    var modelId = $"model_{SanitizeId(mesh.Name)}";
+    var triangleCount = geometries.Sum(g => Convert.ToInt32(g["triangle_count"], CultureInfo.InvariantCulture));
+    var vertexCount = geometries.Sum(g => Convert.ToInt32(g["stored_vertex_count"], CultureInfo.InvariantCulture));
+    return new Dictionary<string, object?>
+    {
+        ["schema"] = "tigerstudio.ar_pbr.unreal_skeletal_mesh_export.v1",
+        ["id"] = $"unreal_skeletal_{SanitizeId(mesh.Name)}",
+        ["type"] = "ar_pbr_asset",
+        ["source_format"] = "unreal_skeletal_mesh",
+        ["runtime_format"] = "ar_scene_descriptor",
+        ["import_state"] = "ready",
+        ["backend"] = "internal_cue4parse",
+        ["mesh_count"] = geometries.Count,
+        ["material_count"] = materials.Count,
+        ["texture_count"] = 0,
+        ["animation_count"] = 0,
+        ["animation_clips"] = Array.Empty<object>(),
+        ["skeletal_mesh_count"] = 1,
+        ["skin_count"] = 1,
+        ["skeletons"] = new[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["id"] = "skeleton_0",
+                ["name"] = $"{mesh.Name} Reference Skeleton",
+                ["bone_count"] = bones.Count,
+            },
+        },
+        ["bones"] = bones,
+        ["units"] = new Dictionary<string, object?>
+        {
+            ["scale_to_meters"] = 0.01,
+            ["source"] = "unreal_centimeters",
+        },
+        ["axes"] = new Dictionary<string, object?>
+        {
+            ["up"] = "Y",
+            ["forward"] = "+X",
+            ["source"] = "unreal_z_up_converted_to_tiger_y_up",
+        },
+        ["bounds"] = bounds,
+        ["materials"] = materials,
+        ["geometries"] = geometries,
+        ["models"] = new[]
+        {
+            new Dictionary<string, object?>
+            {
+                ["id"] = modelId,
+                ["name"] = mesh.Name,
+                ["type"] = "SkeletalMesh",
+                ["translation"] = new[] { 0.0, 0.0, 0.0 },
+                ["rotation"] = new[] { 0.0, 0.0, 0.0 },
+                ["scale"] = new[] { 1.0, 1.0, 1.0 },
+            },
+        },
+        ["connections"] = geometries.SelectMany(g => new[]
+        {
+            new Dictionary<string, object?> { ["child"] = g["id"], ["parent"] = modelId, ["type"] = "Geometry" },
+            new Dictionary<string, object?> { ["child"] = g["material_id"], ["parent"] = modelId, ["type"] = "Material" },
+        }).ToArray(),
+        ["warnings"] = Array.Empty<object>(),
+        ["metadata"] = new Dictionary<string, object?>
+        {
+            ["project_path"] = projectPath.FullName,
+            ["source_asset_path"] = assetPath.FullName,
+            ["package_path"] = packagePath,
+            ["export_name"] = mesh.Name,
+            ["geometry_source"] = geometrySource,
+            ["lod_index"] = lodIndex,
+            ["source_vertex_count"] = sourceVertexCount,
+            ["source_index_count"] = sourceIndexCount,
+            ["vertex_count"] = vertexCount,
+            ["triangle_count"] = triangleCount,
+            ["section_count"] = geometries.Count,
+            ["max_triangles"] = maxTriangles,
+        },
+    };
+}
+
+static DefaultFileProvider CreateProvider(FileInfo projectPath, DirectoryInfo contentRoot)
+{
+    ObjectTypeRegistry.RegisterEngine(typeof(UMeshDescriptionBaseBulkData).Assembly);
+    var game = MapEngineAssociation(ReadEngineAssociation(projectPath));
+    var provider = new DefaultFileProvider(
+        directory: contentRoot.FullName,
+        searchOption: SearchOption.TopDirectoryOnly,
+        versions: new VersionContainer(game),
+        pathComparer: StringComparer.OrdinalIgnoreCase);
+    provider.Initialize();
+    return provider;
+}
+
+static string ReadEngineAssociation(FileInfo projectPath)
+{
+    try
+    {
+        using var doc = JsonDocument.Parse(File.ReadAllText(projectPath.FullName));
+        if (doc.RootElement.TryGetProperty("EngineAssociation", out var value))
+            return value.GetString() ?? "";
+    }
+    catch
+    {
+        return "";
+    }
+    return "";
+}
+
+static EGame MapEngineAssociation(string value)
+{
+    var text = (value ?? "").Trim();
+    var parts = text.Split('.', StringSplitOptions.RemoveEmptyEntries);
+    if (parts.Length >= 2 &&
+        int.TryParse(parts[0], NumberStyles.Integer, CultureInfo.InvariantCulture, out var major) &&
+        int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out var minor))
+    {
+        if (major == 5 && minor == 5) return EGame.GAME_UE5_5;
+        if (major == 5 && minor >= 6) return EGame.GAME_UE5_6;
+    }
+    return EGame.GAME_UE5_5;
+}
+
+static void RegisterPackageDirectory(DefaultFileProvider provider, DirectoryInfo contentRoot, string directoryPath)
+{
+    var directory = new DirectoryInfo(directoryPath);
+    if (!directory.Exists) return;
+    var files = new Dictionary<string, GameFile>(StringComparer.OrdinalIgnoreCase);
+    foreach (var path in Directory.EnumerateFiles(directory.FullName, "*.*", SearchOption.TopDirectoryOnly))
+    {
+        var ext = Path.GetExtension(path);
+        if (!IsPackageSidecarExtension(ext)) continue;
+        var gameFile = new OsGameFile(contentRoot, new FileInfo(path), "Content/", provider.Versions);
+        files[gameFile.Path] = gameFile;
+    }
+    if (files.Count > 0)
+        provider.Files.AddFiles(files, 1);
+}
+
+static string ResolveProviderPath(DefaultFileProvider provider, DirectoryInfo contentRoot, FileInfo assetPath)
+{
+    var rel = Path.GetRelativePath(contentRoot.FullName, assetPath.FullName).Replace('\\', '/');
+    var dot = rel.LastIndexOf('.');
+    var relNoExt = dot > 0 ? rel[..dot] : rel;
+    foreach (var prefix in new[] { "/Game/", "Game/", "" })
+    {
+        var withExt = prefix + relNoExt + ".uasset";
+        if (provider.Files.ContainsKey(withExt))
+            return prefix + relNoExt;
+    }
+    var suffix = "/" + relNoExt + ".uasset";
+    foreach (var key in provider.Files.Keys)
+    {
+        if (!key.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase)) continue;
+        if (key.EndsWith(suffix, StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(key, relNoExt + ".uasset", StringComparison.OrdinalIgnoreCase))
+            return key[..^".uasset".Length];
+    }
+    return "/Game/" + relNoExt;
+}
+
+static bool IsPackageSidecarExtension(string extension)
+    => extension.Equals(".uasset", StringComparison.OrdinalIgnoreCase) ||
+       extension.Equals(".umap", StringComparison.OrdinalIgnoreCase) ||
+       extension.Equals(".uexp", StringComparison.OrdinalIgnoreCase) ||
+       extension.Equals(".ubulk", StringComparison.OrdinalIgnoreCase) ||
+       extension.Equals(".uptnl", StringComparison.OrdinalIgnoreCase);
+
+static List<Dictionary<string, object?>> BuildMaterials(USkeletalMesh mesh, CSkelMeshLod? lod)
+{
+    var materialCount = Math.Max(mesh.SkeletalMaterials?.Length ?? 0, 1);
+    var materialIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+    var materials = new List<Dictionary<string, object?>>();
+    for (var idx = 0; idx < materialCount; idx++)
+    {
+        var slotName = idx < (mesh.SkeletalMaterials?.Length ?? 0)
+            ? mesh.SkeletalMaterials[idx].MaterialSlotName.Text
+            : $"material_{idx}";
+        var id = $"mat_{idx}_{SanitizeId(slotName)}";
+        if (!materialIds.Add(id))
+            id = $"mat_{idx}";
+        materials.Add(new Dictionary<string, object?>
+        {
+            ["id"] = id,
+            ["name"] = string.IsNullOrWhiteSpace(slotName) ? $"Material {idx}" : slotName,
+            ["base_color"] = MaterialBaseColor(idx),
+            ["roughness"] = idx % 3 == 0 ? 0.42 : 0.58,
+            ["metallic"] = 0.0,
+            ["reflectance"] = 0.54,
+            ["pbr_available"] = true,
+            ["source_material_index"] = idx,
+        });
+    }
+
+    foreach (var section in lod?.Sections?.Value ?? Array.Empty<CMeshSection>())
+    {
+        if (section.MaterialIndex < 0 || section.MaterialIndex >= materials.Count) continue;
+        if (!string.IsNullOrWhiteSpace(section.MaterialName))
+            materials[section.MaterialIndex]["name"] = section.MaterialName;
+    }
+    return materials;
+}
+
+static List<Dictionary<string, object?>> BuildMeshDescriptionGeometries(
+    USkeletalMesh mesh,
+    MeshDescriptionResult decoded,
+    List<Dictionary<string, object?>> materials,
+    int maxTriangles)
+{
+    var groups = new Dictionary<int, List<int>>();
+    for (var tri = 0; tri < decoded.TriangleIndices.Length / 3; tri++)
+    {
+        var group = tri < decoded.TrianglePolygonGroupIndices.Length ? decoded.TrianglePolygonGroupIndices[tri] : 0;
+        if (!groups.TryGetValue(group, out var list))
+        {
+            list = [];
+            groups[group] = list;
+        }
+        list.Add(tri);
+    }
+
+    var slotToMaterialIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+    for (var idx = 0; idx < (mesh.SkeletalMaterials?.Length ?? 0); idx++)
+    {
+        var slot = mesh.SkeletalMaterials[idx].MaterialSlotName.Text;
+        if (!string.IsNullOrWhiteSpace(slot) && !slotToMaterialIndex.ContainsKey(slot))
+            slotToMaterialIndex[slot] = idx;
+    }
+
+    var geometries = new List<Dictionary<string, object?>>();
+    var remainingTriangles = Math.Max(1, maxTriangles);
+    foreach (var (groupIndex, sourceTriangles) in groups.OrderBy(item => item.Key))
+    {
+        if (remainingTriangles <= 0) break;
+        var useTriangleCount = Math.Min(sourceTriangles.Count, remainingTriangles);
+        var stride = Math.Max(1, (int)Math.Ceiling(sourceTriangles.Count / (double)useTriangleCount));
+        var vertexMap = new Dictionary<uint, int>();
+        var outVertices = new List<double[]>();
+        var outNormals = new List<double[]>();
+        var outUvs = new List<double[]>();
+        var outWeights = new List<Dictionary<string, object?>>();
+        var outTriangles = new List<int[]>();
+
+        for (var index = 0; index < sourceTriangles.Count && outTriangles.Count < useTriangleCount; index += stride)
+        {
+            var sourceTri = sourceTriangles[index];
+            var baseIndex = sourceTri * 3;
+            if (baseIndex + 2 >= decoded.TriangleIndices.Length) continue;
+            var a = RemapDecodedVertex(decoded.TriangleIndices[baseIndex], decoded, vertexMap, outVertices, outNormals, outUvs, outWeights);
+            var b = RemapDecodedVertex(decoded.TriangleIndices[baseIndex + 1], decoded, vertexMap, outVertices, outNormals, outUvs, outWeights);
+            var c = RemapDecodedVertex(decoded.TriangleIndices[baseIndex + 2], decoded, vertexMap, outVertices, outNormals, outUvs, outWeights);
+            if (a < 0 || b < 0 || c < 0) continue;
+            outTriangles.Add([a, b, c]);
+        }
+
+        if (outTriangles.Count == 0) continue;
+        var slotName = groupIndex >= 0 && groupIndex < decoded.MaterialSlotNames.Length
+            ? decoded.MaterialSlotNames[groupIndex]
+            : "";
+        var materialIndex = slotToMaterialIndex.TryGetValue(slotName, out var mappedMaterial)
+            ? mappedMaterial
+            : Math.Clamp(groupIndex, 0, Math.Max(0, materials.Count - 1));
+        var materialId = materials.Count > 0 ? Convert.ToString(materials[materialIndex]["id"], CultureInfo.InvariantCulture) ?? "mat_0" : "mat_0";
+        geometries.Add(new Dictionary<string, object?>
+        {
+            ["id"] = $"geom_meshdesc_group_{groupIndex}",
+            ["name"] = $"{mesh.Name} MeshDescription Group {groupIndex}",
+            ["kind"] = "mesh",
+            ["material_id"] = materialId,
+            ["source_material_index"] = materialIndex,
+            ["source_material_slot"] = slotName,
+            ["source_triangle_count"] = sourceTriangles.Count,
+            ["vertex_count"] = decoded.Positions.Length,
+            ["stored_vertex_count"] = outVertices.Count,
+            ["triangle_count"] = outTriangles.Count,
+            ["decimated"] = outTriangles.Count < sourceTriangles.Count,
+            ["vertices"] = outVertices,
+            ["normals"] = outNormals,
+            ["uvs"] = outUvs,
+            ["triangles"] = outTriangles,
+            ["skin_weights"] = outWeights,
+            ["bounds"] = BoundsFromVertices(outVertices),
+        });
+        remainingTriangles -= outTriangles.Count;
+    }
+    return geometries;
+}
+
+static List<Dictionary<string, object?>> BuildCookedGeometries(
+    USkeletalMesh mesh,
+    CSkelMeshLod lod,
+    List<Dictionary<string, object?>> materials,
+    int maxTriangles)
+{
+    var vertices = lod.Verts ?? Array.Empty<CSkelMeshVertex>();
+    var indices = lod.Indices?.Value ?? Array.Empty<uint>();
+    var sections = lod.Sections?.Value;
+    if (sections is null || sections.Length == 0)
+    {
+        sections =
+        [
+            new CMeshSection(0, 0, indices.Length / 3, "Default", null)
+        ];
+    }
+
+    var geometries = new List<Dictionary<string, object?>>();
+    var remainingTriangles = Math.Max(1, maxTriangles);
+    for (var sectionIndex = 0; sectionIndex < sections.Length && remainingTriangles > 0; sectionIndex++)
+    {
+        var section = sections[sectionIndex];
+        var first = Math.Max(0, section.FirstIndex);
+        var availableIndexCount = Math.Max(0, Math.Min(indices.Length - first, section.NumFaces * 3));
+        var sourceTriangleCount = availableIndexCount / 3;
+        if (sourceTriangleCount <= 0) continue;
+        var useTriangleCount = Math.Min(sourceTriangleCount, remainingTriangles);
+        var stride = Math.Max(1, (int)Math.Ceiling(sourceTriangleCount / (double)useTriangleCount));
+        var vertexMap = new Dictionary<uint, int>();
+        var outVertices = new List<double[]>();
+        var outNormals = new List<double[]>();
+        var outUvs = new List<double[]>();
+        var outWeights = new List<Dictionary<string, object?>>();
+        var outTriangles = new List<int[]>();
+
+        for (var tri = 0; tri < sourceTriangleCount && outTriangles.Count < useTriangleCount; tri += stride)
+        {
+            var baseIndex = first + tri * 3;
+            if (baseIndex + 2 >= indices.Length) break;
+            var a = RemapVertex(indices[baseIndex], vertices, vertexMap, outVertices, outNormals, outUvs, outWeights);
+            var b = RemapVertex(indices[baseIndex + 1], vertices, vertexMap, outVertices, outNormals, outUvs, outWeights);
+            var c = RemapVertex(indices[baseIndex + 2], vertices, vertexMap, outVertices, outNormals, outUvs, outWeights);
+            if (a < 0 || b < 0 || c < 0) continue;
+            outTriangles.Add([a, b, c]);
+        }
+
+        if (outTriangles.Count == 0) continue;
+        var materialIndex = Math.Clamp(section.MaterialIndex, 0, Math.Max(0, materials.Count - 1));
+        var materialId = materials.Count > 0 ? Convert.ToString(materials[materialIndex]["id"], CultureInfo.InvariantCulture) ?? "mat_0" : "mat_0";
+        var geometry = new Dictionary<string, object?>
+        {
+            ["id"] = $"geom_lod0_section_{sectionIndex}",
+            ["name"] = $"{mesh.Name} LOD0 Section {sectionIndex}",
+            ["kind"] = "mesh",
+            ["material_id"] = materialId,
+            ["source_material_index"] = section.MaterialIndex,
+            ["source_first_index"] = section.FirstIndex,
+            ["source_triangle_count"] = sourceTriangleCount,
+            ["vertex_count"] = vertices.Length,
+            ["stored_vertex_count"] = outVertices.Count,
+            ["triangle_count"] = outTriangles.Count,
+            ["decimated"] = outTriangles.Count < sourceTriangleCount,
+            ["vertices"] = outVertices,
+            ["normals"] = outNormals,
+            ["uvs"] = outUvs,
+            ["triangles"] = outTriangles,
+            ["skin_weights"] = outWeights,
+            ["bounds"] = BoundsFromVertices(outVertices),
+        };
+        geometries.Add(geometry);
+        remainingTriangles -= outTriangles.Count;
+    }
+    return geometries;
+}
+
+static int RemapVertex(
+    uint sourceIndex,
+    CSkelMeshVertex[] vertices,
+    Dictionary<uint, int> vertexMap,
+    List<double[]> outVertices,
+    List<double[]> outNormals,
+    List<double[]> outUvs,
+    List<Dictionary<string, object?>> outWeights)
+{
+    if (sourceIndex >= vertices.Length) return -1;
+    if (vertexMap.TryGetValue(sourceIndex, out var mapped))
+        return mapped;
+    var vertex = vertices[sourceIndex];
+    mapped = outVertices.Count;
+    vertexMap[sourceIndex] = mapped;
+    outVertices.Add(ToTigerPosition(vertex.Position));
+    outNormals.Add(ToTigerNormal(vertex.Normal));
+    outUvs.Add(new[] { Round(vertex.UV.U), Round(vertex.UV.V) });
+    outWeights.Add(new Dictionary<string, object?>
+    {
+        ["joints"] = vertex.Influences.Take(4).Select(item => (int)item.Bone).ToArray(),
+        ["weights"] = vertex.Influences.Take(4).Select(item => Round(item.Weight)).ToArray(),
+    });
+    return mapped;
+}
+
+static int RemapDecodedVertex(
+    uint sourceIndex,
+    MeshDescriptionResult decoded,
+    Dictionary<uint, int> vertexMap,
+    List<double[]> outVertices,
+    List<double[]> outNormals,
+    List<double[]> outUvs,
+    List<Dictionary<string, object?>> outWeights)
+{
+    if (sourceIndex >= decoded.Positions.Length) return -1;
+    if (vertexMap.TryGetValue(sourceIndex, out var mapped))
+        return mapped;
+    mapped = outVertices.Count;
+    vertexMap[sourceIndex] = mapped;
+    outVertices.Add(ToTigerPosition3(decoded.Positions[sourceIndex]));
+    outNormals.Add(sourceIndex < decoded.Normals.Length ? ToTigerNormal3(decoded.Normals[sourceIndex]) : [0.0, 1.0, 0.0]);
+    outUvs.Add(sourceIndex < decoded.UVs.Length ? [Round(decoded.UVs[sourceIndex].X), Round(decoded.UVs[sourceIndex].Y)] : [0.0, 0.0]);
+    var baseInfluence = (int)sourceIndex * 4;
+    outWeights.Add(new Dictionary<string, object?>
+    {
+        ["joints"] = Enumerable.Range(0, 4)
+            .Select(offset => baseInfluence + offset < decoded.BoneIndices.Length ? decoded.BoneIndices[baseInfluence + offset] : 0)
+            .ToArray(),
+        ["weights"] = Enumerable.Range(0, 4)
+            .Select(offset => baseInfluence + offset < decoded.BoneWeights.Length ? Round(decoded.BoneWeights[baseInfluence + offset]) : (offset == 0 ? 1.0 : 0.0))
+            .ToArray(),
+    });
+    return mapped;
+}
+
+static List<Dictionary<string, object?>> BuildBones(List<CSkelMeshBone> bones)
+{
+    var outBones = new List<Dictionary<string, object?>>();
+    for (var idx = 0; idx < bones.Count; idx++)
+    {
+        var bone = bones[idx];
+        outBones.Add(new Dictionary<string, object?>
+        {
+            ["id"] = $"bone_{idx}",
+            ["index"] = idx,
+            ["name"] = bone.Name.Text,
+            ["parent_index"] = bone.ParentIndex,
+            ["translation"] = ToTigerPosition(bone.Position),
+            ["rotation_quat"] = new[] { Round(bone.Orientation.X), Round(bone.Orientation.Y), Round(bone.Orientation.Z), Round(bone.Orientation.W) },
+        });
+    }
+    return outBones;
+}
+
+static List<Dictionary<string, object?>> BuildBonesFromReferenceSkeleton(FReferenceSkeleton skeleton)
+{
+    var outBones = new List<Dictionary<string, object?>>();
+    var infos = skeleton.FinalRefBoneInfo ?? [];
+    var poses = skeleton.FinalRefBonePose ?? [];
+    for (var idx = 0; idx < infos.Length; idx++)
+    {
+        var translation = idx < poses.Length ? ToTigerPosition(poses[idx].Translation) : [0.0, 0.0, 0.0];
+        var rotation = idx < poses.Length
+            ? new[] { Round(poses[idx].Rotation.X), Round(poses[idx].Rotation.Y), Round(poses[idx].Rotation.Z), Round(poses[idx].Rotation.W) }
+            : new[] { 0.0, 0.0, 0.0, 1.0 };
+        outBones.Add(new Dictionary<string, object?>
+        {
+            ["id"] = $"bone_{idx}",
+            ["index"] = idx,
+            ["name"] = infos[idx].Name.Text,
+            ["parent_index"] = infos[idx].ParentIndex,
+            ["translation"] = translation,
+            ["rotation_quat"] = rotation,
+        });
+    }
+    return outBones;
+}
+
+static double[] ToTigerPosition(FVector value)
+    => [Round(value.X * 0.01), Round(value.Z * 0.01), Round(-value.Y * 0.01)];
+
+static double[] ToTigerPosition3(System.Numerics.Vector3 value)
+    => [Round(value.X * 0.01), Round(value.Z * 0.01), Round(-value.Y * 0.01)];
+
+static double[] ToTigerNormal(FVector4 value)
+{
+    var x = value.X;
+    var y = value.Z;
+    var z = -value.Y;
+    var length = Math.Sqrt(x * x + y * y + z * z);
+    if (length <= 1.0e-9) return [0.0, 1.0, 0.0];
+    return [Round(x / length), Round(y / length), Round(z / length)];
+}
+
+static double[] ToTigerNormal3(System.Numerics.Vector3 value)
+{
+    var x = value.X;
+    var y = value.Z;
+    var z = -value.Y;
+    var length = Math.Sqrt(x * x + y * y + z * z);
+    if (length <= 1.0e-9) return [0.0, 1.0, 0.0];
+    return [Round(x / length), Round(y / length), Round(z / length)];
+}
+
+static Dictionary<string, object?> BoundsFromGeometries(IEnumerable<Dictionary<string, object?>> geometries)
+{
+    var vertices = geometries
+        .SelectMany(g => g["vertices"] as IEnumerable<double[]> ?? Array.Empty<double[]>())
+        .ToList();
+    return BoundsFromVertices(vertices);
+}
+
+static Dictionary<string, object?> BoundsFromVertices(IReadOnlyList<double[]> vertices)
+{
+    if (vertices.Count == 0)
+    {
+        return new Dictionary<string, object?>
+        {
+            ["center"] = new[] { 0.0, 0.0, 0.0 },
+            ["size"] = new[] { 1.0, 1.0, 1.0 },
+        };
+    }
+    var min = new[] { double.PositiveInfinity, double.PositiveInfinity, double.PositiveInfinity };
+    var max = new[] { double.NegativeInfinity, double.NegativeInfinity, double.NegativeInfinity };
+    foreach (var vertex in vertices)
+    {
+        for (var i = 0; i < 3; i++)
+        {
+            min[i] = Math.Min(min[i], vertex[i]);
+            max[i] = Math.Max(max[i], vertex[i]);
+        }
+    }
+    return new Dictionary<string, object?>
+    {
+        ["center"] = new[] { Round((min[0] + max[0]) * 0.5), Round((min[1] + max[1]) * 0.5), Round((min[2] + max[2]) * 0.5) },
+        ["size"] = new[] { Round(Math.Max(max[0] - min[0], 1.0e-6)), Round(Math.Max(max[1] - min[1], 1.0e-6)), Round(Math.Max(max[2] - min[2], 1.0e-6)) },
+    };
+}
+
+static double[] MaterialBaseColor(int index)
+{
+    double[][] palette =
+    [
+        [0.64, 0.66, 0.63, 1.0],
+        [0.20, 0.21, 0.20, 1.0],
+        [0.92, 0.42, 0.14, 1.0],
+        [0.08, 0.09, 0.10, 1.0],
+    ];
+    return palette[Math.Abs(index) % palette.Length];
+}
+
+static string SanitizeId(string? text)
+{
+    var raw = string.IsNullOrWhiteSpace(text) ? "item" : text.Trim();
+    var chars = raw.Select(ch => char.IsLetterOrDigit(ch) ? char.ToLowerInvariant(ch) : '_').ToArray();
+    var compact = new string(chars);
+    while (compact.Contains("__", StringComparison.Ordinal))
+        compact = compact.Replace("__", "_", StringComparison.Ordinal);
+    return compact.Trim('_').Length > 0 ? compact.Trim('_') : "item";
+}
+
+static double Round(double value)
+    => Math.Round(value, 6, MidpointRounding.AwayFromZero);
+
+static Dictionary<string, string> ParseOptions(string[] values)
+{
+    var options = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+    for (var i = 0; i < values.Length; i++)
+    {
+        var token = values[i];
+        if (!token.StartsWith("--", StringComparison.Ordinal)) continue;
+        var key = token[2..];
+        var next = i + 1 < values.Length ? values[i + 1] : "";
+        if (string.IsNullOrWhiteSpace(next) || next.StartsWith("--", StringComparison.Ordinal))
+        {
+            options[key] = "true";
+            continue;
+        }
+        options[key] = next;
+        i++;
+    }
+    return options;
+}
+
+static FileInfo RequiredPath(Dictionary<string, string> options, string key)
+{
+    if (!options.TryGetValue(key, out var value) || string.IsNullOrWhiteSpace(value))
+        throw new ArgumentException($"Missing required --{key} argument.");
+    return new FileInfo(value);
+}
+
+static int OptionalInt(Dictionary<string, string> options, string key, int fallback)
+{
+    if (options.TryGetValue(key, out var value) &&
+        int.TryParse(value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsed))
+        return Math.Max(1, parsed);
+    return fallback;
+}

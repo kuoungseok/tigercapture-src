@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 
@@ -106,3 +107,36 @@ def test_owner_ar_pbr_proxy_descriptor_is_renderable(tmp_path, monkeypatch) -> N
     assert diagnostics["backend"] == "proxy_descriptor"
     assert imported["support"]["ok_for_preview"] is True
     assert imported["support"]["metrics"]["triangle_count"] > 500
+
+
+def test_owner_unreal_ar_pbr_bridge_exports_target_descriptor(tmp_path, monkeypatch) -> None:
+    from app.action_sequencer_owner_render import discover_owner_render_descriptor
+    from app.action_sequencer_unreal_asset_bridge import export_owner_unreal_ar_pbr_asset
+
+    project = tmp_path / "ActionSequencer" / "ActionSequencer.uproject"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text('{"EngineAssociation":"5.8"}', encoding="utf-8")
+    content = project.parent / "Content"
+    _touch(content / "Variant_Combat" / "Blueprints" / "BP_CombatCharacter.uasset")
+    _touch(content / "Characters" / "Mannequins" / "Meshes" / "SKM_Manny_Simple.uasset")
+    descriptor = discover_owner_render_descriptor(project)
+    target = tmp_path / "owner_real.arpbr"
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append(list(command))
+        target.write_text('{"schema":"tigerstudio.ar_pbr.unreal_skeletal_mesh_export.v1"}', encoding="utf-8")
+        return subprocess.CompletedProcess(command, 0, stdout='{"ok":true}', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    exported = export_owner_unreal_ar_pbr_asset(descriptor, target, max_triangles=1234)
+
+    assert exported == target
+    assert calls
+    command = calls[0]
+    assert "export-skeletal-mesh" in command
+    assert "--asset" in command
+    assert str(descriptor.render_asset_path) in command
+    assert "--max-triangles" in command
+    assert "1234" in command

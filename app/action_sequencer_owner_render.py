@@ -25,6 +25,10 @@ from app.action_sequencer_ar_pbr_proxy import (
     default_owner_ar_pbr_proxy_path,
     write_owner_ar_pbr_proxy_asset,
 )
+from app.action_sequencer_unreal_asset_bridge import (
+    default_owner_unreal_ar_pbr_path,
+    export_owner_unreal_ar_pbr_asset,
+)
 from app.unreal_link_reference_paths import unreal_link_reference_roots
 
 
@@ -422,12 +426,12 @@ class ActionSequencerOwnerRenderWindow(QWidget):
 
 def open_action_sequencer_owner_render_window(owner: object, project_path: Path | str | None = None) -> QWidget:
     descriptor = discover_owner_render_descriptor(project_path)
-    proxy_asset = write_owner_ar_pbr_proxy_asset(descriptor)
+    unreal_asset = export_owner_unreal_ar_pbr_asset(descriptor)
     from app.ar_pbr.preview_window import ArPbrAssetPreviewWindow
     from app.ar_pbr.render_profile import PROFILE_MARMOSET_PBR
 
     window = ArPbrAssetPreviewWindow(
-        proxy_asset,
+        unreal_asset,
         parent=None,
         initial_lighting={
             "render_profile": PROFILE_MARMOSET_PBR,
@@ -458,11 +462,11 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
         texture_max_size=1024,
         controls_mode="cubemap_only",
         display_title="CombatCharacter Owner",
-        display_subtitle="UE Manny mannequin proxy rendered through Tiger Studio AR/PBR",
+        display_subtitle="UE Manny skeletal mesh exported from .uasset through Tiger Studio AR/PBR",
     )
     window.setWindowTitle("Action Sequencer - CombatCharacter AR/PBR Owner")
     setattr(window, "owner_render_descriptor", descriptor)
-    setattr(window, "owner_ar_pbr_proxy_asset", proxy_asset)
+    setattr(window, "owner_unreal_ar_pbr_asset", unreal_asset)
     setattr(owner, "_action_sequencer_owner_render_window", window)
     window.show()
     window.raise_()
@@ -595,7 +599,9 @@ __all__ = [
     "default_action_sequencer_project_path",
     "default_owner_ar_pbr_proxy_path",
     "default_owner_render_capture_path",
+    "default_owner_unreal_ar_pbr_path",
     "discover_owner_render_descriptor",
+    "export_owner_unreal_ar_pbr_asset",
     "open_action_sequencer_owner_render_window",
     "open_uasset_inspector_for_owner",
     "render_owner_preview_frame",
