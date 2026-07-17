@@ -145,8 +145,8 @@ def discover_owner_render_descriptor(project_path: Path | str | None = None) -> 
         content_root / "Characters" / "Mannequins" / "Anims" / "Unarmed" / "MM_Idle.uasset",
     )
     action_candidate = _first_existing(
-        content_root / "Variant_Combat" / "Anims" / "AM_ComboAttack.uasset",
         content_root / "Characters" / "Mannequins" / "Anims" / "Unarmed" / "Attack" / "MM_Attack_01.uasset",
+        content_root / "Variant_Combat" / "Anims" / "AM_ComboAttack.uasset",
     )
     animation_sequences = _discover_animation_sequence_paths(content_root)
 
@@ -195,7 +195,7 @@ def _is_animation_sequence_candidate(path: Path) -> bool:
         return False
     if "animblueprint" in name or "blendspace" in name or "aimoffset" in name:
         return False
-    return name.startswith(("am_", "mm_", "mf_"))
+    return name.startswith(("mm_", "mf_"))
 
 
 def _animation_sort_key(content_root: Path, path: Path) -> tuple[int, str, str]:

@@ -80,12 +80,9 @@ def test_owner_animation_labels_prioritize_playable_motion(tmp_path) -> None:
     content = tmp_path / "Content"
     motion = content / "Characters" / "Mannequins" / "Anims" / "Pistol" / "MM_Pistol_Fire.uasset"
     pose = content / "Characters" / "Mannequins" / "Anims" / "Pistol" / "Aim" / "MF_Pistol_Idle_ADS_AO_CU.uasset"
-    action = content / "Variant_Combat" / "Anims" / "AM_ComboAttack.uasset"
 
-    assert owner_render._animation_sequence_kind(action) == "action"
     assert owner_render._animation_sequence_kind(motion) == "motion"
     assert owner_render._animation_sequence_kind(pose) == "pose"
-    assert owner_render._animation_sort_key(content, action) < owner_render._animation_sort_key(content, motion)
     assert owner_render._animation_sort_key(content, motion) < owner_render._animation_sort_key(content, pose)
     assert owner_render._animation_display_label(content, motion).startswith("Motion /")
     assert owner_render._animation_display_label(content, pose).startswith("Pose /")
@@ -129,7 +126,7 @@ def test_owner_render_descriptor_prefers_combat_owner_and_manny_mesh(tmp_path, m
     assert descriptor.idle_animation_path == idle
     assert descriptor.action_candidate_path == action
     assert idle in descriptor.animation_sequence_paths
-    assert action in descriptor.animation_sequence_paths
+    assert action not in descriptor.animation_sequence_paths
     assert anim_bp not in descriptor.animation_sequence_paths
     assert descriptor.owner_class_name == "ACombatCharacter"
     assert descriptor.stage_position == (-120.0, 0.0, 0.0)
@@ -356,6 +353,122 @@ def test_owner_unreal_animation_bridge_reuses_legacy_tiger_space_cache(tmp_path,
     assert clip["_cache_hit"] is True
 
 
+def test_owner_unreal_animation_bridge_uses_internal_batch_before_editor(tmp_path, monkeypatch) -> None:
+    from app.action_sequencer_owner_render import discover_owner_render_descriptor
+    from app.action_sequencer_unreal_asset_bridge import export_owner_unreal_animation_clips_batch
+
+    project = tmp_path / "ActionSequencer" / "ActionSequencer.uproject"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text('{"EngineAssociation":"5.8"}', encoding="utf-8")
+    content = project.parent / "Content"
+    _touch(content / "Variant_Combat" / "Blueprints" / "BP_CombatCharacter.uasset")
+    _touch(content / "Characters" / "Mannequins" / "Meshes" / "SKM_Manny_Simple.uasset")
+    idle = _touch(content / "Characters" / "Mannequins" / "Anims" / "Unarmed" / "MM_Idle.uasset")
+    jog = _touch(content / "Characters" / "Mannequins" / "Anims" / "Pistol" / "MM_Pistol_Jog.uasset")
+    descriptor = discover_owner_render_descriptor(project)
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append(list(command))
+        assert "dotnet" in str(command[0]).lower()
+        batch = Path(command[command.index("--batch-json") + 1])
+        manifest = Path(command[command.index("--out") + 1])
+        items = json.loads(batch.read_text(encoding="utf-8"))["items"]
+        results = []
+        for item in items:
+            out = Path(item["out"])
+            out.parent.mkdir(parents=True, exist_ok=True)
+            name = Path(item["source_file"]).stem
+            out.write_text(
+                json.dumps({
+                    "schema": "tigerstudio.ar_pbr.unreal_animation_clip_export.v1",
+                    "exporter": "internal_cue4parse_batch",
+                    "animation_clip": {
+                        "id": name,
+                        "name": name,
+                        "duration_ms": 1000.0,
+                        "sampled_frame_count": 48,
+                        "rotation_space": "tiger_basis_quat_v1",
+                        "model_curves": {
+                            "bone_0": {
+                                "translation": {"x": [[0.0, 0.0], [1000.0, 1.0]]},
+                                "rotation_quat": {"x": [[0.0, 0.0], [1000.0, 0.0]], "w": [[0.0, 1.0], [1000.0, 1.0]]},
+                            }
+                        },
+                    },
+                }),
+                encoding="utf-8",
+            )
+            results.append({"ok": True, "source_file": item["source_file"], "out": item["out"]})
+        manifest.write_text(
+            json.dumps({
+                "schema": "tigerstudio.ar_pbr.unreal_animation_batch_export.v1",
+                "exporter": "internal_cue4parse_batch",
+                "ok": True,
+                "count": len(items),
+                "results": results,
+            }),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout='{"ok":true}', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    results = export_owner_unreal_animation_clips_batch(descriptor, [idle, jog], max_samples=48, use_cache=False)
+
+    assert len(calls) == 1
+    assert "dotnet" in calls[0][0]
+    assert results[str(idle)]["status"] == "animation_clip_exported"
+    assert results[str(jog)]["status"] == "animation_clip_exported"
+    assert results[str(jog)]["clip"]["_exporter"] == "internal_cue4parse_batch"
+
+
+def test_owner_unreal_animation_bridge_skips_editor_for_unsupported_assets(tmp_path, monkeypatch) -> None:
+    from app.action_sequencer_owner_render import discover_owner_render_descriptor
+    from app.action_sequencer_unreal_asset_bridge import export_owner_unreal_animation_clips_batch
+
+    project = tmp_path / "ActionSequencer" / "ActionSequencer.uproject"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text('{"EngineAssociation":"5.8"}', encoding="utf-8")
+    content = project.parent / "Content"
+    _touch(content / "Variant_Combat" / "Blueprints" / "BP_CombatCharacter.uasset")
+    _touch(content / "Characters" / "Mannequins" / "Meshes" / "SKM_Manny_Simple.uasset")
+    montage = _touch(content / "Variant_Combat" / "Anims" / "AM_ComboAttack.uasset")
+    descriptor = discover_owner_render_descriptor(project)
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append(list(command))
+        assert "dotnet" in str(command[0]).lower()
+        batch = Path(command[command.index("--batch-json") + 1])
+        manifest = Path(command[command.index("--out") + 1])
+        item = json.loads(batch.read_text(encoding="utf-8"))["items"][0]
+        manifest.write_text(
+            json.dumps({
+                "schema": "tigerstudio.ar_pbr.unreal_animation_batch_export.v1",
+                "exporter": "internal_cue4parse_batch",
+                "ok": False,
+                "count": 1,
+                "results": [{
+                    "ok": False,
+                    "source_file": item["source_file"],
+                    "out": item["out"],
+                    "error": "InvalidOperationException",
+                    "message": "No UAnimSequence export was found in package: Variant_Combat/Anims/AM_ComboAttack",
+                }],
+            }),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout='{"ok":true}', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    results = export_owner_unreal_animation_clips_batch(descriptor, [montage], max_samples=48, use_cache=False)
+
+    assert len(calls) == 1
+    assert results[str(montage)]["status"] == "unsupported_animation_asset"
+
+
 def test_owner_unreal_animation_bridge_batches_uncached_editor_exports(tmp_path, monkeypatch) -> None:
     from app.action_sequencer_owner_render import discover_owner_render_descriptor
     from app.action_sequencer_unreal_asset_bridge import export_owner_unreal_animation_clips_batch
@@ -377,6 +490,8 @@ def test_owner_unreal_animation_bridge_batches_uncached_editor_exports(tmp_path,
 
     def fake_run(command, **kwargs):
         calls.append(list(command))
+        if "dotnet" in str(command[0]).lower():
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr='{"message":"internal batch failed"}')
         env = kwargs["env"]
         items = json.loads(env["TIGERSTUDIO_UNREAL_ANIM_BATCH_JSON"])
         for item in items:
@@ -413,8 +528,9 @@ def test_owner_unreal_animation_bridge_batches_uncached_editor_exports(tmp_path,
 
     results = export_owner_unreal_animation_clips_batch(descriptor, [idle, jog], max_samples=48, use_cache=False)
 
-    assert len(calls) == 1
-    assert "UnrealEditor-Cmd.exe" in calls[0][0]
+    assert len(calls) == 2
+    assert "dotnet" in calls[0][0]
+    assert "UnrealEditor-Cmd.exe" in calls[1][0]
     assert results[str(idle)]["status"] == "animation_clip_exported"
     assert results[str(jog)]["status"] == "animation_clip_exported"
     assert results[str(jog)]["clip"]["id"] == "MM_Pistol_Jog"

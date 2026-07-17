@@ -11,6 +11,7 @@ from typing import Any
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 UNREAL_ASSET_BRIDGE_PROJECT = PROJECT_ROOT / "tools" / "unreal_asset_bridge" / "TigerUnrealAssetBridge.csproj"
+UNREAL_ASSET_BRIDGE_DLL = PROJECT_ROOT / "tools" / "unreal_asset_bridge" / "bin" / "Debug" / "net8.0" / "TigerUnrealAssetBridge.dll"
 UNREAL_EDITOR_ANIMATION_EXPORT_SCRIPT = PROJECT_ROOT / "tools" / "unreal_asset_bridge" / "export_animation_clip_unreal.py"
 ANIMATION_ROTATION_SPACE = "tiger_basis_quat_v1"
 
@@ -94,12 +95,7 @@ def export_owner_unreal_ar_pbr_asset(
     target = Path(output_path) if output_path is not None else default_owner_unreal_ar_pbr_path(owner_descriptor)
     target.parent.mkdir(parents=True, exist_ok=True)
 
-    command = [
-        "dotnet",
-        "run",
-        "--project",
-        str(UNREAL_ASSET_BRIDGE_PROJECT),
-        "--",
+    command = _internal_bridge_command(
         "export-skeletal-mesh",
         "--project",
         str(project_path),
@@ -109,7 +105,7 @@ def export_owner_unreal_ar_pbr_asset(
         str(target),
         "--max-triangles",
         str(max(1, int(max_triangles))),
-    ]
+    )
 
     startupinfo = None
     if os.name == "nt":
@@ -171,12 +167,7 @@ def export_owner_unreal_animation_clip(
         if cached is not None:
             return cached
 
-    command = [
-        "dotnet",
-        "run",
-        "--project",
-        str(UNREAL_ASSET_BRIDGE_PROJECT),
-        "--",
+    command = _internal_bridge_command(
         "export-animation-clip",
         "--project",
         str(project_path),
@@ -186,7 +177,7 @@ def export_owner_unreal_animation_clip(
         str(target),
         "--max-samples",
         str(max(2, int(max_samples))),
-    ]
+    )
     if reference_mesh_path is not None:
         command.extend(["--reference-mesh", str(reference_mesh_path)])
 
@@ -278,13 +269,174 @@ def export_owner_unreal_animation_clips_batch(
     if not missing:
         return results
 
-    batch_results = _export_owner_unreal_animation_clips_via_editor_batch(
+    internal_results = _export_owner_unreal_animation_clips_via_internal_batch(
         owner_descriptor,
         missing,
         max_samples=max_samples,
-        timeout_s=timeout_s,
+        timeout_s=min(max(30.0, timeout_s), 180.0),
     )
-    results.update(batch_results)
+    remaining: list[Path] = []
+    deferred_failures: dict[str, dict[str, Any]] = {}
+    for asset_path in missing:
+        key = str(asset_path)
+        result = internal_results.get(key)
+        if result and result.get("status") == "animation_clip_exported":
+            results[key] = result
+            continue
+        if result and result.get("status") == "unsupported_animation_asset":
+            results[key] = result
+            continue
+        if result:
+            deferred_failures[key] = result
+        remaining.append(asset_path)
+
+    if remaining:
+        editor_results = _export_owner_unreal_animation_clips_via_editor_batch(
+            owner_descriptor,
+            remaining,
+            max_samples=max_samples,
+            timeout_s=timeout_s,
+        )
+        for asset_path in remaining:
+            key = str(asset_path)
+            result = editor_results.get(key)
+            if result is not None:
+                results[key] = result
+            elif key in deferred_failures:
+                results[key] = deferred_failures[key]
+    return results
+
+
+def _export_owner_unreal_animation_clips_via_internal_batch(
+    owner_descriptor: Any,
+    animation_paths: list[Path],
+    *,
+    max_samples: int,
+    timeout_s: float,
+) -> dict[str, dict[str, Any]]:
+    project_path = Path(getattr(owner_descriptor, "project_path", "") or "")
+    reference_mesh = getattr(owner_descriptor, "render_asset_path", None)
+    reference_mesh_path = Path(reference_mesh) if reference_mesh is not None else None
+    if reference_mesh_path is not None and not reference_mesh_path.exists():
+        reference_mesh_path = None
+
+    batch_items: list[dict[str, Any]] = []
+    results: dict[str, dict[str, Any]] = {}
+    for asset_path in animation_paths:
+        target = default_owner_unreal_animation_clip_path(owner_descriptor, asset_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        batch_items.append({
+            "asset": str(asset_path),
+            "out": str(target),
+            "source_file": str(asset_path),
+            "max_samples": int(max_samples),
+        })
+
+    if not batch_items:
+        return results
+
+    manifest_dir = PROJECT_ROOT / "debugCapture" / "action_sequencer_animation_clips"
+    manifest_dir.mkdir(parents=True, exist_ok=True)
+    batch_json = manifest_dir / f"internal_batch_in_{int(time.time() * 1000)}.json"
+    manifest = manifest_dir / f"internal_batch_out_{int(time.time() * 1000)}.json"
+    batch_json.write_text(json.dumps({"items": batch_items}, ensure_ascii=False), encoding="utf-8")
+
+    command = _internal_bridge_command(
+        "export-animation-clips",
+        "--project",
+        str(project_path),
+        "--batch-json",
+        str(batch_json),
+        "--out",
+        str(manifest),
+        "--max-samples",
+        str(max(2, int(max_samples))),
+    )
+    if reference_mesh_path is not None:
+        command.extend(["--reference-mesh", str(reference_mesh_path)])
+
+    startupinfo = None
+    if os.name == "nt":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0
+
+    completed = subprocess.run(
+        command,
+        cwd=str(PROJECT_ROOT),
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        startupinfo=startupinfo,
+        timeout=max(10.0, float(timeout_s)),
+        check=False,
+    )
+    if completed.returncode != 0 and (not manifest.exists() or manifest.stat().st_size <= 0):
+        message = _bridge_error_message(completed.stdout, completed.stderr)
+        for item in batch_items:
+            source = str(item["source_file"])
+            results[source] = {
+                "status": "export_failed",
+                "animation_path": source,
+                "cache_path": str(item["out"]),
+                "error": "InternalCue4ParseBatchFailed",
+                "message": message,
+            }
+        return results
+
+    payload: dict[str, Any] = {}
+    if manifest.exists() and manifest.stat().st_size > 0:
+        try:
+            loaded = json.loads(manifest.read_text(encoding="utf-8"))
+            if isinstance(loaded, dict):
+                payload = loaded
+        except Exception:
+            payload = {}
+
+    item_results = payload.get("results") if isinstance(payload.get("results"), list) else []
+    by_source: dict[str, dict[str, Any]] = {}
+    for raw in item_results:
+        if not isinstance(raw, dict):
+            continue
+        source = str(raw.get("source_file") or "")
+        if source:
+            by_source[source] = raw
+
+    for item in batch_items:
+        source = str(item["source_file"])
+        target = Path(str(item["out"]))
+        raw = by_source.get(source, {})
+        if bool(raw.get("ok")) and target.exists() and target.stat().st_size > 0:
+            try:
+                clip_payload = json.loads(target.read_text(encoding="utf-8"))
+                clip = clip_payload.get("animation_clip") if isinstance(clip_payload, dict) else None
+                if not isinstance(clip, dict):
+                    raise RuntimeError("invalid animation payload")
+                clip = _normalize_animation_clip_payload(clip_payload, clip)
+                clip["_export_path"] = str(target)
+                clip["_exporter"] = str(clip_payload.get("exporter") or payload.get("exporter") or "internal_cue4parse_batch")
+                results[source] = {
+                    "status": "animation_clip_exported",
+                    "animation_path": source,
+                    "cache_path": str(target),
+                    "clip": clip,
+                    "summary": _clip_summary(clip),
+                }
+                continue
+            except Exception as exc:
+                raw = {
+                    "error": type(exc).__name__,
+                    "message": str(exc),
+                }
+        message = str(raw.get("message") or "Internal CUE4Parse batch export did not write this clip.")
+        unsupported = "No UAnimSequence export" in message
+        results[source] = {
+            "status": "unsupported_animation_asset" if unsupported else "export_failed",
+            "animation_path": source,
+            "cache_path": str(target),
+            "error": str(raw.get("error") or "InternalCue4ParseMissingOutput"),
+            "message": message,
+        }
     return results
 
 
@@ -567,6 +719,33 @@ def _unique_existing_paths(paths: list[str | Path] | tuple[str | Path, ...]) -> 
         seen.add(key)
         out.append(path)
     return out
+
+
+def _internal_bridge_command(*args: str) -> list[str]:
+    if _internal_bridge_dll_is_fresh():
+        return ["dotnet", str(UNREAL_ASSET_BRIDGE_DLL), *args]
+    return [
+        "dotnet",
+        "run",
+        "--project",
+        str(UNREAL_ASSET_BRIDGE_PROJECT),
+        "--",
+        *args,
+    ]
+
+
+def _internal_bridge_dll_is_fresh() -> bool:
+    if not UNREAL_ASSET_BRIDGE_DLL.exists():
+        return False
+    try:
+        dll_mtime = UNREAL_ASSET_BRIDGE_DLL.stat().st_mtime
+        source_mtime = max(
+            (UNREAL_ASSET_BRIDGE_PROJECT.parent / "Program.cs").stat().st_mtime,
+            UNREAL_ASSET_BRIDGE_PROJECT.stat().st_mtime,
+        )
+        return dll_mtime >= source_mtime
+    except Exception:
+        return False
 
 
 def _clip_summary(clip: dict[str, Any] | None) -> dict[str, Any]:
