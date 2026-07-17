@@ -6,8 +6,10 @@ from typing import Callable, Literal
 
 from PySide6.QtWidgets import QFileDialog, QMessageBox, QWidget
 
-from app.unreal_link_reference_paths import format_unreal_link_reference_report
-
+from app.action_sequencer_owner_render import (
+    default_action_sequencer_project_path,
+    open_action_sequencer_owner_render_window,
+)
 
 UNREAL_ENGINE_PROJECT_DIALOG_TITLE = "Open UnrealEngine5 project"
 UNREAL_ENGINE_PROJECT_FILTER = "Unreal Engine 5 Project (*.uproject);;All Files (*)"
@@ -79,6 +81,14 @@ def start_unreal_engine_link_with_project(owner: object, project_path: Path) -> 
     }
 
 
+def _open_owner_render_window(owner: QWidget, project_path: Path) -> None:
+    start_unreal_engine_link_with_project(owner, project_path)
+    open_action_sequencer_owner_render_window(owner, project_path)
+    flash = getattr(owner, "_flash_status", None)
+    if callable(flash):
+        flash(f"Owner Render: {project_path.name}")
+
+
 def open_unreal_engine_link(self) -> None:
     connected_project = connected_unreal_engine_project_path(self)
     if connected_project is not None:
@@ -86,26 +96,20 @@ def open_unreal_engine_link(self) -> None:
         if choice == "cancel":
             return
         if choice == "start":
-            start_unreal_engine_link_with_project(self, connected_project)
-            QMessageBox.information(
-                self,
-                "Unreal Engine Link",
-                f"Started with connected Unreal Engine 5 project:\n{connected_project}\n\n"
-                f"{format_unreal_link_reference_report()}",
-            )
+            _open_owner_render_window(self, connected_project)
             return
 
-    initial_dir = str(connected_project.parent) if connected_project is not None else ""
+    default_project = default_action_sequencer_project_path()
+    if connected_project is not None:
+        initial_dir = str(connected_project.parent)
+    elif default_project.exists():
+        initial_dir = str(default_project.parent)
+    else:
+        initial_dir = ""
     project_path = select_unreal_engine_project_file(self, initial_dir=initial_dir)
     if project_path is None:
         return
-    start_unreal_engine_link_with_project(self, project_path)
-    QMessageBox.information(
-        self,
-        "Unreal Engine Link",
-        f"Selected Unreal Engine 5 project:\n{project_path}\n\n"
-        f"{format_unreal_link_reference_report()}",
-    )
+    _open_owner_render_window(self, project_path)
 
 
 __all__ = [
