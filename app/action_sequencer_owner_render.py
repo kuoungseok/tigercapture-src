@@ -31,7 +31,6 @@ from app.action_sequencer_ar_pbr_proxy import (
 from app.action_sequencer_unreal_asset_bridge import (
     default_owner_unreal_ar_pbr_path,
     export_owner_unreal_ar_pbr_asset,
-    export_owner_unreal_animation_clip,
 )
 from app.unreal_link_reference_paths import unreal_link_reference_roots
 
@@ -39,6 +38,7 @@ from app.unreal_link_reference_paths import unreal_link_reference_roots
 ACTION_SEQUENCER_PROJECT_ENV = "TIGERSTUDIO_ACTION_SEQUENCER_PROJECT"
 DEFAULT_ACTION_SEQUENCER_PROJECT = Path("E:/ue5example/ActionSequencer/ActionSequencer.uproject")
 OWNER_ANIMATION_PANEL_WIDTH = 200
+OWNER_ANIMATION_PREVIEW_BACKEND = "uasset_inspector_gpu_bone_palette"
 OWNER_STAGE_PREVIEW_VIEW = {
     "pitch": 0.0,
     "yaw": -90.0,
@@ -663,37 +663,28 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
         path = Path(str(animation_path)) if animation_path else None
         if path is not None:
             setattr(window, "owner_selected_animation_path", path)
-        setattr(window, "owner_animation_preview_request", dict(payload))
+        request = {
+            **dict(payload),
+            "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
+            "ar_pbr_animation_enabled": False,
+            "requires_unreal_playback": True,
+            "reference_pipeline": "UAssetInspector SamplePalette -> Bones UBO -> skinned shader",
+        }
+        setattr(window, "owner_animation_preview_request", request)
         clip = str(payload.get("clip") or (path.stem if path is not None else ""))
-        result = None
-        if hasattr(window, "apply_animation_preview_once"):
-            result = window.apply_animation_preview_once(clip)
-            if (
-                isinstance(result, dict)
-                and result.get("status") == "unavailable"
-                and path is not None
-                and hasattr(window, "attach_animation_clip")
-            ):
-                status = getattr(window, "_status", None)
-                if status is not None and hasattr(status, "setText"):
-                    status.setText(f"Exporting animation: {path.stem}")
-                try:
-                    exported_clip = export_owner_unreal_animation_clip(descriptor, path)
-                    window.attach_animation_clip(exported_clip)
-                    clip_id = str(exported_clip.get("id") or exported_clip.get("name") or clip)
-                    result = window.apply_animation_preview_once(clip_id)
-                except Exception as exc:
-                    result = {
-                        "status": "failed",
-                        "clip": clip,
-                        "reason": f"{type(exc).__name__}: {exc}",
-                    }
+        result = {
+            "status": "requires_uasset_inspector_palette_renderer",
+            "clip": clip,
+            "animation_path": str(path) if path is not None else "",
+            "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
+            "ar_pbr_animation_enabled": False,
+            "play_once": bool(payload.get("play_once", True)),
+            "apply_frame_ms": int(payload.get("apply_frame_ms", 0) or 0),
+        }
         setattr(window, "owner_animation_preview_result", result)
         status = getattr(window, "_status", None)
-        if status is not None and hasattr(status, "setText") and isinstance(result, dict) and result.get("status") == "unavailable":
-            status.setText(f"Animation queued: {clip} (clip data not exported yet)")
-        elif status is not None and hasattr(status, "setText") and isinstance(result, dict) and result.get("status") == "failed":
-            status.setText(f"Animation export failed: {clip}")
+        if status is not None and hasattr(status, "setText"):
+            status.setText(f"Animation selected: {clip} (UAssetInspector GPU palette path required)")
 
     animation_panel.animation_selected.connect(_on_animation_selected)
     animation_panel.animation_preview_requested.connect(_on_animation_preview_requested)
@@ -872,6 +863,7 @@ def _owner_animation_panel_qss() -> str:
 __all__ = [
     "ACTION_SEQUENCER_PROJECT_ENV",
     "OWNER_ANIMATION_PANEL_WIDTH",
+    "OWNER_ANIMATION_PREVIEW_BACKEND",
     "DEFAULT_ACTION_SEQUENCER_PROJECT",
     "OWNER_STAGE_PREVIEW_VIEW",
     "ActionSequencerOwnerRenderWindow",
@@ -882,7 +874,6 @@ __all__ = [
     "default_owner_unreal_ar_pbr_path",
     "discover_owner_render_descriptor",
     "export_owner_unreal_ar_pbr_asset",
-    "export_owner_unreal_animation_clip",
     "open_action_sequencer_owner_render_window",
     "open_uasset_inspector_for_owner",
     "render_owner_preview_frame",

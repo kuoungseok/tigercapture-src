@@ -247,6 +247,7 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     import app.action_sequencer_owner_render as owner_render
 
     assert owner_render.OWNER_ANIMATION_PANEL_WIDTH == 200
+    assert owner_render.OWNER_ANIMATION_PREVIEW_BACKEND == "uasset_inspector_gpu_bone_palette"
 
     project = tmp_path / "ActionSequencer" / "ActionSequencer.uproject"
     project.parent.mkdir(parents=True, exist_ok=True)
@@ -259,11 +260,6 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     exported_asset = tmp_path / "owner.arpbr"
     exported_asset.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(owner_render, "export_owner_unreal_ar_pbr_asset", lambda _descriptor: exported_asset)
-    monkeypatch.setattr(
-        owner_render,
-        "export_owner_unreal_animation_clip",
-        lambda _descriptor, _path: {"id": "MM_Idle", "name": "MM_Idle", "duration_ms": 1000.0, "model_curves": {}},
-    )
 
     captured: dict[str, object] = {}
 
@@ -288,7 +284,6 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
         def __init__(self, *args, **kwargs) -> None:
             captured["args"] = args
             captured["kwargs"] = kwargs
-            self._attached_clips = set()
 
         def setWindowTitle(self, title: str) -> None:
             captured["title"] = title
@@ -303,16 +298,10 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
             captured["activated"] = True
 
         def apply_animation_preview_once(self, clip: str):
-            captured.setdefault("preview_calls", []).append(clip)
-            captured["preview_clip"] = clip
-            if clip in self._attached_clips:
-                return {"status": "playing", "clip": clip}
-            return {"status": "unavailable", "clip": clip}
+            raise AssertionError("Unreal animation preview must not use AR/PBR skeletal deformation")
 
         def attach_animation_clip(self, clip: dict):
-            captured["attached_animation_clip"] = dict(clip)
-            self._attached_clips.add(str(clip.get("id") or clip.get("name") or ""))
-            return dict(clip)
+            raise AssertionError("Unreal animation preview must not attach AR/PBR animation clips")
 
     fake_preview_module = types.ModuleType("app.ar_pbr.preview_window")
     fake_preview_module.ArPbrAssetPreviewWindow = FakeArPbrAssetPreviewWindow
@@ -337,10 +326,12 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
         "apply_frame_ms": 0,
         "play_once": True,
     })
-    assert captured["preview_clip"] == "MM_Idle"
-    assert captured["preview_calls"] == ["MM_Idle", "MM_Idle"]
-    assert captured["attached_animation_clip"]["id"] == "MM_Idle"
-    assert window.owner_animation_preview_result == {"status": "playing", "clip": "MM_Idle"}
+    assert window.owner_animation_preview_request["preview_backend"] == owner_render.OWNER_ANIMATION_PREVIEW_BACKEND
+    assert window.owner_animation_preview_request["ar_pbr_animation_enabled"] is False
+    assert window.owner_animation_preview_request["reference_pipeline"] == "UAssetInspector SamplePalette -> Bones UBO -> skinned shader"
+    assert window.owner_animation_preview_result["status"] == "requires_uasset_inspector_palette_renderer"
+    assert window.owner_animation_preview_result["clip"] == "MM_Idle"
+    assert window.owner_animation_preview_result["ar_pbr_animation_enabled"] is False
     assert captured["shown"] is True
     assert captured["raised"] is True
     assert captured["activated"] is True
