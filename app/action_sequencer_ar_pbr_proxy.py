@@ -41,7 +41,7 @@ def build_owner_ar_pbr_proxy_descriptor(owner_descriptor: Any) -> dict[str, Any]
 
     def add_geometry(geometry: dict[str, Any], *, model_name: str) -> None:
         if geometry["material_id"] not in material_ids:
-            geometry["material_id"] = "mat_body_teal"
+            geometry["material_id"] = "mat_manny_shell"
         model_id = f"model_{geometry['id']}"
         geometry["model_id"] = model_id
         geometry["vertex_count"] = len(geometry.get("vertices") or [])
@@ -59,22 +59,29 @@ def build_owner_ar_pbr_proxy_descriptor(owner_descriptor: Any) -> dict[str, Any]
         connections.append({"child": geometry["id"], "parent": model_id, "type": "Geometry"})
         connections.append({"child": geometry["material_id"], "parent": model_id, "type": "Material"})
 
-    add_geometry(_ellipsoid("geom_torso", "Manny torso armor", "mat_body_teal", (0.04, 1.08, 0.0), (0.34, 0.54, 0.28), 22, 12), model_name="Torso")
-    add_geometry(_ellipsoid("geom_chest", "Combat chest plate", "mat_armor_dark", (0.20, 1.24, 0.0), (0.18, 0.30, 0.31), 18, 10), model_name="Chest plate")
-    add_geometry(_ellipsoid("geom_pelvis", "Manny pelvis", "mat_joint_black", (0.02, 0.56, 0.0), (0.28, 0.22, 0.25), 18, 9), model_name="Pelvis")
-    add_geometry(_ellipsoid("geom_neck", "Neck joint", "mat_joint_black", (0.06, 1.55, 0.0), (0.11, 0.10, 0.10), 14, 8), model_name="Neck")
-    add_geometry(_ellipsoid("geom_head", "Manny head", "mat_body_teal", (0.08, 1.78, 0.0), (0.23, 0.27, 0.20), 22, 12), model_name="Head")
-    add_geometry(_box("geom_visor", "Forward visor", "mat_visor", (0.29, 1.80, 0.0), (0.035, 0.095, 0.24)), model_name="Forward visor")
-    add_geometry(_box("geom_forward_mark", "Forward chest accent", "mat_accent_green", (0.38, 1.23, 0.0), (0.035, 0.22, 0.11)), model_name="Forward accent")
+    add_geometry(_ellipsoid("geom_torso_core", "Manny tapered torso core", "mat_manny_shell", (0.02, 1.08, 0.0), (0.27, 0.46, 0.24), 26, 13), model_name="Torso core")
+    add_geometry(_ellipsoid("geom_chest_plate", "Manny segmented chest plate", "mat_manny_panel", (0.13, 1.24, 0.0), (0.20, 0.25, 0.32), 22, 11), model_name="Chest plate")
+    add_geometry(_box("geom_chest_center_trim", "Manny chest center trim", "mat_manny_trim", (0.33, 1.24, 0.0), (0.030, 0.28, 0.035)), model_name="Chest trim")
+    add_geometry(_ellipsoid("geom_abdomen", "Manny abdomen joint", "mat_joint_black", (0.02, 0.84, 0.0), (0.20, 0.18, 0.20), 18, 9), model_name="Abdomen joint")
+    add_geometry(_ellipsoid("geom_pelvis", "Manny pelvis shell", "mat_manny_shell", (0.01, 0.57, 0.0), (0.27, 0.18, 0.28), 20, 10), model_name="Pelvis")
+    add_geometry(_ellipsoid("geom_neck", "Manny neck joint", "mat_joint_black", (0.03, 1.54, 0.0), (0.09, 0.09, 0.09), 16, 8), model_name="Neck")
+    add_geometry(_ellipsoid("geom_head", "Manny helmet head", "mat_manny_shell", (0.04, 1.78, 0.0), (0.19, 0.24, 0.17), 26, 13), model_name="Head")
+    add_geometry(_box("geom_face_plate", "Manny forward face plate", "mat_manny_panel", (0.225, 1.79, 0.0), (0.035, 0.13, 0.22)), model_name="Face plate")
+    add_geometry(_box("geom_face_trim", "Manny visor trim", "mat_manny_trim", (0.252, 1.82, 0.0), (0.018, 0.035, 0.16)), model_name="Face trim")
 
-    for side, z in (("left", -0.42), ("right", 0.42)):
-        add_geometry(_ellipsoid(f"geom_{side}_shoulder", f"{side.title()} shoulder", "mat_armor_dark", (0.06, 1.34, z), (0.16, 0.16, 0.16), 14, 8), model_name=f"{side.title()} shoulder")
-        add_geometry(_ellipsoid(f"geom_{side}_upper_arm", f"{side.title()} upper arm", "mat_body_teal", (0.08, 1.02, z), (0.13, 0.31, 0.12), 16, 9), model_name=f"{side.title()} upper arm")
-        add_geometry(_ellipsoid(f"geom_{side}_forearm", f"{side.title()} forearm guard", "mat_armor_dark", (0.16, 0.70, z), (0.13, 0.27, 0.11), 16, 9), model_name=f"{side.title()} forearm")
-        add_geometry(_ellipsoid(f"geom_{side}_hand", f"{side.title()} hand", "mat_joint_black", (0.22, 0.46, z), (0.11, 0.09, 0.10), 14, 8), model_name=f"{side.title()} hand")
-        add_geometry(_ellipsoid(f"geom_{side}_thigh", f"{side.title()} thigh armor", "mat_body_teal", (0.02, 0.22, z * 0.38), (0.13, 0.36, 0.11), 16, 9), model_name=f"{side.title()} thigh")
-        add_geometry(_ellipsoid(f"geom_{side}_shin", f"{side.title()} shin guard", "mat_armor_dark", (0.09, -0.19, z * 0.38), (0.12, 0.34, 0.10), 16, 9), model_name=f"{side.title()} shin")
-        add_geometry(_box(f"geom_{side}_foot", f"{side.title()} forward foot", "mat_joint_black", (0.21, -0.53, z * 0.38), (0.34, 0.11, 0.17)), model_name=f"{side.title()} foot")
+    for side, z in (("left", -0.39), ("right", 0.39)):
+        sign = -1.0 if side == "left" else 1.0
+        add_geometry(_ellipsoid(f"geom_{side}_shoulder_socket", f"{side.title()} shoulder socket", "mat_joint_black", (0.03, 1.34, z), (0.13, 0.13, 0.13), 16, 8), model_name=f"{side.title()} shoulder socket")
+        add_geometry(_ellipsoid(f"geom_{side}_shoulder_cap", f"{side.title()} shoulder shell", "mat_manny_shell", (0.07, 1.33, z + sign * 0.05), (0.16, 0.13, 0.14), 18, 9), model_name=f"{side.title()} shoulder shell")
+        add_geometry(_capsule_between(f"geom_{side}_upper_arm", f"{side.title()} upper arm shell", "mat_manny_shell", (0.06, 1.20, z + sign * 0.07), (0.08, 0.86, z + sign * 0.18), 0.095, 18), model_name=f"{side.title()} upper arm")
+        add_geometry(_ellipsoid(f"geom_{side}_elbow", f"{side.title()} elbow joint", "mat_joint_black", (0.08, 0.82, z + sign * 0.19), (0.10, 0.08, 0.09), 16, 8), model_name=f"{side.title()} elbow")
+        add_geometry(_capsule_between(f"geom_{side}_forearm", f"{side.title()} forearm shell", "mat_manny_panel", (0.09, 0.78, z + sign * 0.19), (0.13, 0.48, z + sign * 0.23), 0.092, 18), model_name=f"{side.title()} forearm")
+        add_geometry(_ellipsoid(f"geom_{side}_hand", f"{side.title()} hand", "mat_joint_black", (0.15, 0.40, z + sign * 0.24), (0.10, 0.075, 0.085), 14, 8), model_name=f"{side.title()} hand")
+        add_geometry(_capsule_between(f"geom_{side}_thigh", f"{side.title()} thigh shell", "mat_manny_shell", (0.00, 0.45, sign * 0.14), (0.02, 0.07, sign * 0.17), 0.105, 18), model_name=f"{side.title()} thigh")
+        add_geometry(_ellipsoid(f"geom_{side}_knee", f"{side.title()} knee joint", "mat_joint_black", (0.04, 0.02, sign * 0.17), (0.10, 0.08, 0.09), 16, 8), model_name=f"{side.title()} knee")
+        add_geometry(_capsule_between(f"geom_{side}_shin", f"{side.title()} shin shell", "mat_manny_panel", (0.05, -0.04, sign * 0.17), (0.08, -0.43, sign * 0.16), 0.095, 18), model_name=f"{side.title()} shin")
+        add_geometry(_ellipsoid(f"geom_{side}_ankle", f"{side.title()} ankle joint", "mat_joint_black", (0.09, -0.47, sign * 0.16), (0.075, 0.06, 0.075), 14, 7), model_name=f"{side.title()} ankle")
+        add_geometry(_box(f"geom_{side}_foot", f"{side.title()} forward foot", "mat_joint_black", (0.22, -0.55, sign * 0.16), (0.33, 0.105, 0.145)), model_name=f"{side.title()} foot")
 
     bounds = _bounds_from_geometries(geometries)
     triangle_count = sum(int(item.get("triangle_count", 0) or 0) for item in geometries)
@@ -116,7 +123,7 @@ def build_owner_ar_pbr_proxy_descriptor(owner_descriptor: Any) -> dict[str, Any]
             "action_candidate_path": _path_text(getattr(owner_descriptor, "action_candidate_path", None)),
             "stage_position": list(getattr(owner_descriptor, "stage_position", (-120.0, 0.0, 0.0)) or (-120.0, 0.0, 0.0)),
             "stage_forward": str(getattr(owner_descriptor, "stage_forward", "+X / screen right") or "+X / screen right"),
-            "proxy_visual_style": "combat_mannequin_pbr",
+            "proxy_visual_style": "ue_manny_mannequin_pbr_proxy",
         },
     }
 
@@ -124,21 +131,21 @@ def build_owner_ar_pbr_proxy_descriptor(owner_descriptor: Any) -> dict[str, Any]
 def _owner_proxy_materials() -> list[dict[str, Any]]:
     return [
         {
-            "id": "mat_body_teal",
-            "name": "Manny teal polymer",
-            "base_color": [0.015, 0.34, 0.41, 1.0],
-            "roughness": 0.33,
+            "id": "mat_manny_shell",
+            "name": "Manny warm grey shell",
+            "base_color": [0.62, 0.64, 0.61, 1.0],
+            "roughness": 0.38,
             "metallic": 0.05,
-            "reflectance": 0.62,
+            "reflectance": 0.55,
             "pbr_available": True,
         },
         {
-            "id": "mat_armor_dark",
-            "name": "Dark combat armor",
-            "base_color": [0.035, 0.048, 0.055, 1.0],
-            "roughness": 0.28,
-            "metallic": 0.16,
-            "reflectance": 0.68,
+            "id": "mat_manny_panel",
+            "name": "Manny dark panel",
+            "base_color": [0.18, 0.19, 0.185, 1.0],
+            "roughness": 0.34,
+            "metallic": 0.08,
+            "reflectance": 0.50,
             "pbr_available": True,
         },
         {
@@ -151,24 +158,12 @@ def _owner_proxy_materials() -> list[dict[str, Any]]:
             "pbr_available": True,
         },
         {
-            "id": "mat_visor",
-            "name": "Gloss visor",
-            "base_color": [0.01, 0.024, 0.028, 1.0],
-            "roughness": 0.09,
+            "id": "mat_manny_trim",
+            "name": "Manny orange trim",
+            "base_color": [1.0, 0.47, 0.13, 1.0],
+            "roughness": 0.30,
             "metallic": 0.0,
-            "reflectance": 0.88,
-            "pbr_available": True,
-            "clearcoat_strength": 0.55,
-            "clearcoat_roughness": 0.06,
-        },
-        {
-            "id": "mat_accent_green",
-            "name": "Stage owner accent",
-            "base_color": [0.29, 1.0, 0.57, 1.0],
-            "emissive_color": [0.12, 0.55, 0.26],
-            "roughness": 0.22,
-            "metallic": 0.0,
-            "reflectance": 0.76,
+            "reflectance": 0.72,
             "pbr_available": True,
         },
     ]
@@ -257,6 +252,88 @@ def _box(
         "triangles": triangles,
         "uvs": [[0.0, 0.0] for _ in vertices],
     }
+
+
+def _capsule_between(
+    geometry_id: str,
+    name: str,
+    material_id: str,
+    start: tuple[float, float, float],
+    end: tuple[float, float, float],
+    radius: float,
+    segments: int,
+) -> dict[str, Any]:
+    sx, sy, sz = start
+    ex, ey, ez = end
+    axis = _normalize((ex - sx, ey - sy, ez - sz))
+    if _length(axis) <= 1.0e-6:
+        return _ellipsoid(geometry_id, name, material_id, start, (radius, radius, radius), segments, 8)
+    ref = (0.0, 1.0, 0.0)
+    if abs(_dot(axis, ref)) > 0.92:
+        ref = (1.0, 0.0, 0.0)
+    side = _normalize(_cross(axis, ref))
+    up = _normalize(_cross(side, axis))
+    seg = max(8, int(segments))
+    vertices: list[list[float]] = []
+    uvs: list[list[float]] = []
+    for ring_index, center in enumerate((start, end)):
+        cx, cy, cz = center
+        for ix in range(seg):
+            angle = math.tau * float(ix) / float(seg)
+            c = math.cos(angle)
+            s = math.sin(angle)
+            px = cx + (side[0] * c + up[0] * s) * radius
+            py = cy + (side[1] * c + up[1] * s) * radius
+            pz = cz + (side[2] * c + up[2] * s) * radius
+            vertices.append([round(px, 6), round(py, 6), round(pz, 6)])
+            uvs.append([round(float(ix) / float(seg), 6), float(ring_index)])
+    start_center = len(vertices)
+    vertices.append([round(sx, 6), round(sy, 6), round(sz, 6)])
+    uvs.append([0.5, 0.0])
+    end_center = len(vertices)
+    vertices.append([round(ex, 6), round(ey, 6), round(ez, 6)])
+    uvs.append([0.5, 1.0])
+    triangles: list[list[int]] = []
+    for ix in range(seg):
+        a = ix
+        b = (ix + 1) % seg
+        c = seg + ix
+        d = seg + ((ix + 1) % seg)
+        triangles.append([a, c, b])
+        triangles.append([b, c, d])
+        triangles.append([start_center, b, a])
+        triangles.append([end_center, c, d])
+    return {
+        "id": geometry_id,
+        "name": name,
+        "material_id": material_id,
+        "vertices": vertices,
+        "triangles": triangles,
+        "uvs": uvs,
+    }
+
+
+def _length(vector: tuple[float, float, float]) -> float:
+    return math.sqrt(_dot(vector, vector))
+
+
+def _normalize(vector: tuple[float, float, float]) -> tuple[float, float, float]:
+    length = _length(vector)
+    if length <= 1.0e-9:
+        return (0.0, 0.0, 0.0)
+    return (vector[0] / length, vector[1] / length, vector[2] / length)
+
+
+def _dot(a: tuple[float, float, float], b: tuple[float, float, float]) -> float:
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _cross(a: tuple[float, float, float], b: tuple[float, float, float]) -> tuple[float, float, float]:
+    return (
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    )
 
 
 def _bounds_from_geometries(geometries: list[dict[str, Any]]) -> dict[str, list[float]]:

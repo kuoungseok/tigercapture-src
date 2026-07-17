@@ -432,7 +432,7 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
         initial_lighting={
             "render_profile": PROFILE_MARMOSET_PBR,
             "hdri_id": "studio_small_09",
-            "show_environment_background": True,
+            "show_environment_background": False,
             "ibl_exposure": 1.35,
             "ibl_rotation": 0.08,
             "light_azimuth": 38.0,
@@ -456,6 +456,9 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
         track_label=f"{descriptor.owner_name} Owner",
         max_triangles=180_000,
         texture_max_size=1024,
+        controls_mode="cubemap_only",
+        display_title="CombatCharacter Owner",
+        display_subtitle="UE Manny mannequin proxy rendered through Tiger Studio AR/PBR",
     )
     window.setWindowTitle("Action Sequencer - CombatCharacter AR/PBR Owner")
     setattr(window, "owner_render_descriptor", descriptor)

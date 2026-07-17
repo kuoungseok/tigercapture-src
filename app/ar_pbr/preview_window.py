@@ -338,6 +338,9 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         track_label: str = "",
         max_triangles: int = 120_000,
         texture_max_size: int = 1024,
+        controls_mode: str = "full",
+        display_title: str = "",
+        display_subtitle: str = "",
     ) -> None:
         super().__init__(parent, Qt.WindowType.Window)
         self.asset_path = Path(asset_path).expanduser().resolve()
@@ -349,6 +352,10 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._descriptor: dict[str, Any] = {}
         self._render_profiles: dict[str, Any] = {}
         self._initial_lighting = dict(initial_lighting or {})
+        mode = str(controls_mode or "full").strip().casefold()
+        self._controls_mode = mode if mode in {"full", "cubemap_only"} else "full"
+        self._simple_cubemap_controls = self._controls_mode == "cubemap_only"
+        self._top_hdri_combo: QComboBox | None = None
         self._render_profile = str(self._initial_lighting.get("render_profile") or PROFILE_AUTHORED).strip().casefold()
         if self._render_profile not in {PROFILE_AUTHORED, PROFILE_MARMOSET_PBR, PROFILE_VRM_MTOON}:
             self._render_profile = PROFILE_AUTHORED
@@ -379,9 +386,9 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         header.addWidget(title_icon)
         title_col = QVBoxLayout()
         title_col.setSpacing(1)
-        self._title = QLabel(self.asset_path.name, self)
+        self._title = QLabel(str(display_title or self.asset_path.name), self)
         self._title.setObjectName("ArPbrPreviewTitle")
-        self._subtitle = QLabel(str(self.asset_path.parent), self)
+        self._subtitle = QLabel(str(display_subtitle or self.asset_path.parent), self)
         self._subtitle.setObjectName("ArPbrPreviewSubtitle")
         title_col.addWidget(self._title)
         title_col.addWidget(self._subtitle)
@@ -389,6 +396,16 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._status = QLabel("Loading 3D asset", self)
         self._status.setObjectName("ArPbrPreviewStatus")
         header.addWidget(self._status)
+        if self._simple_cubemap_controls:
+            cubemap_label = QLabel("Cubemap", self)
+            cubemap_label.setObjectName("ArPbrTopControlLabel")
+            header.addWidget(cubemap_label)
+            self._top_hdri_combo = QComboBox(self)
+            self._top_hdri_combo.setObjectName("ArPbrHdriCombo")
+            self._top_hdri_combo.setMinimumWidth(240)
+            self._top_hdri_combo.setEnabled(False)
+            self._top_hdri_combo.setToolTip("HDR cubemap preset used for lighting")
+            header.addWidget(self._top_hdri_combo)
         layout.addLayout(header)
 
         body = QHBoxLayout()
@@ -654,6 +671,8 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         controls_dock.setWidget(controls)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, controls_dock)
         self._controls_dock = controls_dock
+        if self._simple_cubemap_controls:
+            controls_dock.hide()
 
         for row, callback in (
             (self._ibl_exposure, self._set_ibl_exposure),
@@ -696,6 +715,8 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._ao_mode.value_changed.connect(self._set_ambient_occlusion_mode)
         self._render_profile_combo.currentIndexChanged.connect(self._set_render_profile_index)
         self._hdri_combo.currentIndexChanged.connect(self._set_hdri_preset_index)
+        if self._top_hdri_combo is not None:
+            self._top_hdri_combo.currentIndexChanged.connect(self._set_hdri_preset_index)
         self._sync_background_button()
 
         self._start_loading()
@@ -720,19 +741,32 @@ class ArPbrAssetPreviewWindow(QMainWindow):
             self._parameter_tabs.setTabToolTip(index, tooltip)
 
     def _populate_hdri_combo(self) -> None:
-        self._hdri_combo.blockSignals(True)
+        for combo in self._hdri_combo_widgets():
+            combo.blockSignals(True)
         try:
-            self._hdri_combo.clear()
             selected_id = str(self._selected_hdri.id if self._selected_hdri is not None else "")
             selected_index = 0
-            for idx, preset in enumerate(self._hdri_presets):
-                self._hdri_combo.addItem(preset.to_combo_label(), preset.id)
-                if preset.id == selected_id:
-                    selected_index = idx
-            if self._hdri_combo.count() > 0:
-                self._hdri_combo.setCurrentIndex(selected_index)
+            for combo in self._hdri_combo_widgets():
+                combo.clear()
+                for idx, preset in enumerate(self._hdri_presets):
+                    combo.addItem(preset.to_combo_label(), preset.id)
+                    if preset.id == selected_id:
+                        selected_index = idx
+                if combo.count() > 0:
+                    combo.setCurrentIndex(selected_index)
         finally:
-            self._hdri_combo.blockSignals(False)
+            for combo in self._hdri_combo_widgets():
+                combo.blockSignals(False)
+
+    def _hdri_combo_widgets(self) -> tuple[QComboBox, ...]:
+        widgets: list[QComboBox] = []
+        combo = getattr(self, "_hdri_combo", None)
+        if combo is not None:
+            widgets.append(combo)
+        top_combo = getattr(self, "_top_hdri_combo", None)
+        if top_combo is not None:
+            widgets.append(top_combo)
+        return tuple(widgets)
 
     def _populate_render_profile_combo(self) -> None:
         rows = _render_profile_combo_rows(self._render_profiles)
@@ -767,14 +801,15 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         if self._selected_hdri is None:
             return
         selected_id = str(self._selected_hdri.id)
-        for index in range(self._hdri_combo.count()):
-            if str(self._hdri_combo.itemData(index) or "") == selected_id:
-                was_blocked = self._hdri_combo.blockSignals(True)
-                try:
-                    self._hdri_combo.setCurrentIndex(index)
-                finally:
-                    self._hdri_combo.blockSignals(was_blocked)
-                return
+        for combo in self._hdri_combo_widgets():
+            for index in range(combo.count()):
+                if str(combo.itemData(index) or "") == selected_id:
+                    was_blocked = combo.blockSignals(True)
+                    try:
+                        combo.setCurrentIndex(index)
+                    finally:
+                        combo.blockSignals(was_blocked)
+                    break
 
     def _start_loading(self) -> None:
         self._loader = _ArPbrPreviewLoader(
@@ -857,6 +892,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         for row in (
             self._render_profile_combo,
             self._hdri_combo,
+            *(self._hdri_combo_widgets()[1:]),
             self._parameter_tabs,
             self._ao_mode,
             *self._parameter_rows,
@@ -1223,6 +1259,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
             self._status.setText(f"HDRI missing: {preset.label}")
             return
         self._selected_hdri = preset
+        self._sync_hdri_combo_to_selected()
         self._status.setText(f"Loading HDRI: {preset.label}")
         try:
             from tools.ar_pbr_gpu_window import _load_hdri_or_none
