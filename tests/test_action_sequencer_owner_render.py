@@ -13,6 +13,66 @@ def _touch(path: Path) -> Path:
     return path
 
 
+def test_owner_animation_sequence_plan_normalizes_unreal_clip() -> None:
+    from app.action_sequencer_animation_sequence import (
+        ACTION_SEQUENCE_SCHEMA,
+        build_owner_animation_sequence,
+    )
+
+    clip = {
+        "id": "MM_Walk",
+        "name": "MM_Walk",
+        "duration_ms": 1000.0,
+        "source_mode": "cue4parse_animation",
+        "_export_path": "walk.animation_clip.json",
+        "bone_names": ["root", "spine_01"],
+        "model_curves": {
+            "bone_0": {
+                "bone_name": "root",
+                "translation": {
+                    "x": [[0.0, 0.0], [500.0, 4.0], [1000.0, 10.0]],
+                    "y": [[0.0, 0.0], [500.0, 0.0], [1000.0, 0.0]],
+                    "z": [[0.0, 0.0], [500.0, 2.0], [1000.0, 0.0]],
+                },
+                "rotation_quat": {
+                    "x": [[0.0, 0.0], [1000.0, 0.0]],
+                    "y": [[0.0, 0.0], [1000.0, 0.0]],
+                    "z": [[0.0, 0.0], [1000.0, 0.0]],
+                    "w": [[0.0, 1.0], [1000.0, 1.0]],
+                },
+            },
+            "bone_1": {
+                "bone_name": "spine_01",
+                "rotation_quat": {
+                    "x": [[0.0, 0.0], [1000.0, 0.1]],
+                    "y": [[0.0, 0.0], [1000.0, 0.0]],
+                    "z": [[0.0, 0.0], [1000.0, 0.0]],
+                    "w": [[0.0, 1.0], [1000.0, 0.99]],
+                },
+            },
+        },
+    }
+
+    plan = build_owner_animation_sequence(
+        clip,
+        animation_path="Content/Characters/Mannequins/Anims/MM_Walk.uasset",
+        apply_frame_ms=440,
+    )
+
+    assert plan["schema"] == ACTION_SEQUENCE_SCHEMA
+    assert plan["status"] == "ready"
+    assert plan["source"]["id"] == "MM_Walk"
+    assert plan["playback"]["mode"] == "play_once"
+    assert plan["playback"]["sample_times_ms"] == [0.0, 500.0, 1000.0]
+    assert plan["playback"]["selected_sample_ms"] == 500.0
+    assert plan["bone_palette"]["bone_count"] == 2
+    assert plan["bone_palette"]["animated_bone_count"] == 2
+    assert plan["root_motion"]["translation_delta"] == [10.0, 0.0, 0.0]
+    assert plan["root_motion"]["horizontal_distance"] == 10.0
+    assert plan["ar_pbr_deformation_enabled"] is False
+    assert plan["requires_gpu_palette_renderer"] is True
+
+
 def test_owner_render_descriptor_prefers_combat_owner_and_manny_mesh(tmp_path, monkeypatch) -> None:
     from app.action_sequencer_owner_render import (
         ACTION_SEQUENCER_PROJECT_ENV,
@@ -338,7 +398,17 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
                     "name": "MM_Idle",
                     "duration_ms": 1000.0,
                     "_export_path": "idle.animation_clip.json",
-                    "model_curves": {"bone_0": {}},
+                    "bone_names": ["root"],
+                    "model_curves": {
+                        "bone_0": {
+                            "bone_name": "root",
+                            "translation": {
+                                "x": [[0.0, 0.0], [1000.0, 0.0]],
+                                "y": [[0.0, 0.0], [1000.0, 0.0]],
+                                "z": [[0.0, 0.0], [1000.0, 0.0]],
+                            },
+                        }
+                    },
                     "sampled_frame_count": 12,
                 },
                 "summary": {
@@ -391,6 +461,10 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     assert window.owner_animation_preview_result["requires_gpu_palette_renderer"] is True
     assert window.owner_animation_preview_result["summary"]["bone_curve_count"] == 1
     assert window.owner_animation_preview_result["summary"]["sampled_frame_count"] == 12
+    assert window.owner_animation_preview_result["sequence_summary"]["bone_count"] == 1
+    assert window.owner_animation_preview_result["sequence_summary"]["sample_count"] == 2
+    assert window.owner_animation_sequence_plan["source"]["id"] == "MM_Idle"
+    assert window.owner_animation_sequence_plan["ar_pbr_deformation_enabled"] is False
     assert window.owner_animation_clip_export["id"] == "MM_Idle"
     assert captured["export_max_samples"] == 48
     assert captured["shown"] is True

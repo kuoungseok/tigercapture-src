@@ -33,6 +33,11 @@ from app.action_sequencer_unreal_asset_bridge import (
     export_owner_unreal_ar_pbr_asset,
     export_owner_unreal_animation_clip,
 )
+from app.action_sequencer_animation_sequence import (
+    ACTION_SEQUENCE_REFERENCE_PIPELINE,
+    animation_sequence_summary,
+    build_owner_animation_sequence,
+)
 from app.unreal_link_reference_paths import unreal_link_reference_roots
 
 
@@ -592,6 +597,11 @@ class _OwnerAnimationPanel(QFrame):
         hint.setWordWrap(True)
         layout.addWidget(hint)
 
+        self._sequence_status = QLabel("No animation sequence loaded.", self)
+        self._sequence_status.setObjectName("OwnerAnimationSequenceStatus")
+        self._sequence_status.setWordWrap(True)
+        layout.addWidget(self._sequence_status)
+
         self._refresh()
         self._select_default()
 
@@ -599,6 +609,12 @@ class _OwnerAnimationPanel(QFrame):
         item = self._list.currentItem()
         data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
         return Path(str(data)) if data else None
+
+    def set_sequence_status(self, message: str, *, state: str = "idle") -> None:
+        self._sequence_status.setProperty("state", state)
+        self._sequence_status.setText(message)
+        self._sequence_status.style().unpolish(self._sequence_status)
+        self._sequence_status.style().polish(self._sequence_status)
 
     def _refresh(self) -> None:
         query = self._filter.text().strip().casefold()
@@ -710,8 +726,14 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
     if selected_animation is not None:
         setattr(window, "owner_selected_animation_path", selected_animation)
 
+    def _set_sequence_status(message: str, *, state: str = "idle") -> None:
+        setter = getattr(animation_panel, "set_sequence_status", None)
+        if callable(setter):
+            setter(message, state=state)
+
     def _on_animation_selected(path: Path) -> None:
         setattr(window, "owner_selected_animation_path", path)
+        _set_sequence_status(f"Selected: {path.stem}", state="idle")
         status = getattr(window, "_status", None)
         if status is not None and hasattr(status, "setText"):
             status.setText(f"Animation selected: {path.stem}")
@@ -732,13 +754,14 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             status = getattr(window, "_status", None)
             if status is not None and hasattr(status, "setText"):
                 status.setText("Animation export is already running. Wait for the current sequence.")
+            _set_sequence_status("Export already running.", state="busy")
             return
         request = {
             **dict(payload),
             "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
             "ar_pbr_animation_enabled": False,
             "requires_unreal_playback": True,
-            "reference_pipeline": "UAssetInspector SamplePalette -> Bones UBO -> skinned shader",
+            "reference_pipeline": ACTION_SEQUENCE_REFERENCE_PIPELINE,
         }
         setattr(window, "owner_animation_preview_request", request)
         clip = str(payload.get("clip") or (path.stem if path is not None else ""))
@@ -754,6 +777,7 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             status = getattr(window, "_status", None)
             if status is not None and hasattr(status, "setText"):
                 status.setText("Animation export failed: missing asset path")
+            _set_sequence_status("Missing animation asset path.", state="error")
             return
         result = {
             "status": "exporting_animation_clip",
@@ -769,12 +793,21 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
         status = getattr(window, "_status", None)
         if status is not None and hasattr(status, "setText"):
             status.setText(f"Exporting animation sequence: {clip}")
+        _set_sequence_status(f"Exporting: {clip}", state="busy")
 
         worker = _OwnerAnimationClipExportWorker(descriptor, path, parent=window)
 
         def _on_exported(event: dict[str, Any]) -> None:
             exported_clip = event.get("clip") if isinstance(event, dict) else None
             summary = event.get("summary") if isinstance(event, dict) else None
+            sequence_plan = build_owner_animation_sequence(
+                exported_clip if isinstance(exported_clip, dict) else None,
+                animation_path=path,
+                play_once=bool(payload.get("play_once", True)),
+                apply_frame_ms=int(payload.get("apply_frame_ms", 0) or 0),
+                backend=OWNER_ANIMATION_PREVIEW_BACKEND,
+            )
+            sequence_info = animation_sequence_summary(sequence_plan)
             result = {
                 "status": "animation_clip_exported",
                 "clip": clip,
@@ -784,18 +817,27 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
                 "requires_gpu_palette_renderer": True,
                 "play_once": bool(payload.get("play_once", True)),
                 "apply_frame_ms": int(payload.get("apply_frame_ms", 0) or 0),
-                "reference_pipeline": "UAssetInspector SamplePalette -> Bones UBO -> skinned shader",
+                "reference_pipeline": ACTION_SEQUENCE_REFERENCE_PIPELINE,
+                "sequence_plan": sequence_plan,
+                "sequence_summary": sequence_info,
                 "summary": dict(summary) if isinstance(summary, dict) else _animation_clip_summary(exported_clip),
             }
             setattr(window, "owner_animation_preview_result", result)
             setattr(window, "owner_animation_clip_export", exported_clip)
+            setattr(window, "owner_animation_sequence_plan", sequence_plan)
             status = getattr(window, "_status", None)
             if status is not None and hasattr(status, "setText"):
                 info = result["summary"]
                 status.setText(
-                    f"Animation exported: {clip} "
-                    f"({info.get('sampled_frame_count', 0)} samples, {info.get('bone_curve_count', 0)} bones)"
+                    f"Animation sequence ready: {clip} "
+                    f"({sequence_info.get('sample_count', 0)} samples, {sequence_info.get('bone_count', 0)} bones)"
                 )
+            duration_s = float(sequence_info.get("duration_ms") or 0.0) / 1000.0
+            _set_sequence_status(
+                f"Ready: {clip} / {duration_s:.2f}s / "
+                f"{sequence_info.get('sample_count', 0)} samples / {sequence_info.get('bone_count', 0)} bones",
+                state="ready",
+            )
 
         def _on_failed(event: dict[str, Any]) -> None:
             result = {
@@ -812,6 +854,7 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             status = getattr(window, "_status", None)
             if status is not None and hasattr(status, "setText"):
                 status.setText(f"Animation export failed: {result['message']}")
+            _set_sequence_status(f"Failed: {result['message']}", state="error")
 
         def _on_finished() -> None:
             if getattr(window, "owner_animation_export_worker", None) is worker:
@@ -966,6 +1009,29 @@ def _owner_animation_panel_qss() -> str:
     QLabel#OwnerAnimationHint {
         color: #8E9BAD;
         font-size: 10px;
+    }
+    QLabel#OwnerAnimationSequenceStatus {
+        color: #9DB2CF;
+        background: #101724;
+        border: 1px solid #273448;
+        border-radius: 6px;
+        padding: 7px 8px;
+        font-size: 10px;
+    }
+    QLabel#OwnerAnimationSequenceStatus[state="busy"] {
+        color: #F5D485;
+        border-color: #68542A;
+        background: #1B170E;
+    }
+    QLabel#OwnerAnimationSequenceStatus[state="ready"] {
+        color: #B7F6D2;
+        border-color: #2E6B52;
+        background: #0D1B18;
+    }
+    QLabel#OwnerAnimationSequenceStatus[state="error"] {
+        color: #FFB7B7;
+        border-color: #703238;
+        background: #211012;
     }
     QLineEdit#OwnerAnimationFilter {
         color: #E8EEF7;
