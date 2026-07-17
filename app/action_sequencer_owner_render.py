@@ -34,6 +34,11 @@ from app.unreal_link_reference_paths import unreal_link_reference_roots
 
 ACTION_SEQUENCER_PROJECT_ENV = "TIGERSTUDIO_ACTION_SEQUENCER_PROJECT"
 DEFAULT_ACTION_SEQUENCER_PROJECT = Path("E:/ue5example/ActionSequencer/ActionSequencer.uproject")
+OWNER_STAGE_PREVIEW_VIEW = {
+    "pitch": -10.0,
+    "yaw": -108.0,
+    "pan_x": -0.78,
+}
 
 
 @dataclass(frozen=True)
@@ -457,6 +462,7 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             "ambient_occlusion_mode": "screen",
             "ao_strength": 0.55,
         },
+        initial_view=OWNER_STAGE_PREVIEW_VIEW,
         track_label=f"{descriptor.owner_name} Owner",
         max_triangles=180_000,
         texture_max_size=1024,
@@ -594,6 +600,7 @@ def _window_qss() -> str:
 __all__ = [
     "ACTION_SEQUENCER_PROJECT_ENV",
     "DEFAULT_ACTION_SEQUENCER_PROJECT",
+    "OWNER_STAGE_PREVIEW_VIEW",
     "ActionSequencerOwnerRenderWindow",
     "OwnerRenderDescriptor",
     "default_action_sequencer_project_path",

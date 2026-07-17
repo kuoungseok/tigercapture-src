@@ -335,6 +335,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         parent: QWidget | None = None,
         *,
         initial_lighting: dict[str, Any] | None = None,
+        initial_view: dict[str, Any] | None = None,
         track_label: str = "",
         max_triangles: int = 120_000,
         texture_max_size: int = 1024,
@@ -352,6 +353,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._descriptor: dict[str, Any] = {}
         self._render_profiles: dict[str, Any] = {}
         self._initial_lighting = dict(initial_lighting or {})
+        self._initial_view = dict(initial_view or {})
         mode = str(controls_mode or "full").strip().casefold()
         self._controls_mode = mode if mode in {"full", "cubemap_only"} else "full"
         self._simple_cubemap_controls = self._controls_mode == "cubemap_only"
@@ -873,6 +875,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._enable_controls(True)
         self.sync_controls()
         self.fit_view()
+        self._apply_initial_view()
 
     def _on_failed(self, reason: str) -> None:
         self._progress.hide()
@@ -1198,6 +1201,36 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self.sync_controls()
         self._gl_widget.update()
 
+    def _apply_initial_view(self) -> None:
+        if self._state is None or not self._initial_view:
+            return
+        changed = False
+        for key, low, high in (
+            ("pitch", -180.0, 180.0),
+            ("yaw", -360.0, 360.0),
+            ("roll", -180.0, 180.0),
+            ("zoom", 0.03, 40.0),
+            ("camera_z", 0.2, 20.0),
+            ("pan_x", -20.0, 20.0),
+            ("pan_y", -20.0, 20.0),
+            ("pan_z", -20.0, 20.0),
+        ):
+            if key not in self._initial_view:
+                continue
+            try:
+                value = float(self._initial_view[key])
+            except (TypeError, ValueError):
+                continue
+            setattr(self._state, key, max(low, min(high, value)))
+            changed = True
+        if not changed:
+            return
+        if self._gl_widget is not None:
+            self._gl_widget.auto_fit_enabled = False
+            self._gl_widget.auto_fit_pending = False
+        self.sync_controls()
+        self._update()
+
     def reset_view(self) -> None:
         if self._state is None:
             return
@@ -1249,6 +1282,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._state.ground_y = float(mins[1]) + 0.01 if isinstance(mins, list) and len(mins) >= 2 else -0.52
         self.sync_controls()
         self.fit_view()
+        self._apply_initial_view()
         self._emit_lighting_changed()
 
     def _set_hdri_preset_index(self, index: int) -> None:

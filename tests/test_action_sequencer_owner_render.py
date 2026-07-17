@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import subprocess
+import sys
+import types
 from pathlib import Path
 
 
@@ -140,3 +142,53 @@ def test_owner_unreal_ar_pbr_bridge_exports_target_descriptor(tmp_path, monkeypa
     assert str(descriptor.render_asset_path) in command
     assert "--max-triangles" in command
     assert "1234" in command
+
+
+def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None:
+    import app.action_sequencer_owner_render as owner_render
+
+    project = tmp_path / "ActionSequencer" / "ActionSequencer.uproject"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text('{"EngineAssociation":"5.8"}', encoding="utf-8")
+    content = project.parent / "Content"
+    _touch(content / "Variant_Combat" / "Blueprints" / "BP_CombatCharacter.uasset")
+    _touch(content / "Characters" / "Mannequins" / "Meshes" / "SKM_Manny_Simple.uasset")
+
+    exported_asset = tmp_path / "owner.arpbr"
+    exported_asset.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(owner_render, "export_owner_unreal_ar_pbr_asset", lambda _descriptor: exported_asset)
+
+    captured: dict[str, object] = {}
+
+    class FakeArPbrAssetPreviewWindow:
+        def __init__(self, *args, **kwargs) -> None:
+            captured["args"] = args
+            captured["kwargs"] = kwargs
+
+        def setWindowTitle(self, title: str) -> None:
+            captured["title"] = title
+
+        def show(self) -> None:
+            captured["shown"] = True
+
+        def raise_(self) -> None:
+            captured["raised"] = True
+
+        def activateWindow(self) -> None:
+            captured["activated"] = True
+
+    fake_preview_module = types.ModuleType("app.ar_pbr.preview_window")
+    fake_preview_module.ArPbrAssetPreviewWindow = FakeArPbrAssetPreviewWindow
+    monkeypatch.setitem(sys.modules, "app.ar_pbr.preview_window", fake_preview_module)
+
+    owner = types.SimpleNamespace()
+    window = owner_render.open_action_sequencer_owner_render_window(owner, project)
+
+    assert window is owner._action_sequencer_owner_render_window
+    assert captured["args"][0] == exported_asset
+    assert captured["kwargs"]["initial_view"] == owner_render.OWNER_STAGE_PREVIEW_VIEW
+    assert captured["kwargs"]["controls_mode"] == "cubemap_only"
+    assert captured["kwargs"]["initial_lighting"]["show_environment_background"] is False
+    assert captured["shown"] is True
+    assert captured["raised"] is True
+    assert captured["activated"] is True
