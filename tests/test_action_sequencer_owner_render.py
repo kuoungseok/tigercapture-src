@@ -270,6 +270,20 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
         def connect(self, callback) -> None:
             captured[self._key] = callback
 
+    class WorkerSignal:
+        def __init__(self) -> None:
+            self._callbacks = []
+
+        def connect(self, callback) -> None:
+            self._callbacks.append(callback)
+
+        def emit(self, payload=None) -> None:
+            for callback in list(self._callbacks):
+                if payload is None:
+                    callback()
+                else:
+                    callback(payload)
+
     class FakeOwnerAnimationPanel:
         def __init__(self, descriptor) -> None:
             captured["panel_descriptor"] = descriptor
@@ -303,10 +317,51 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
         def attach_animation_clip(self, clip: dict):
             raise AssertionError("Unreal animation preview must not attach AR/PBR animation clips")
 
+    class FakeAnimationExportWorker:
+        def __init__(self, descriptor, animation_path, *, max_samples=48, parent=None) -> None:
+            captured["export_descriptor"] = descriptor
+            captured["export_animation_path"] = animation_path
+            captured["export_max_samples"] = max_samples
+            self.exported = WorkerSignal()
+            self.failed = WorkerSignal()
+            self.finished = WorkerSignal()
+
+        def isRunning(self) -> bool:
+            return False
+
+        def start(self) -> None:
+            self.exported.emit({
+                "status": "animation_clip_exported",
+                "animation_path": str(captured["export_animation_path"]),
+                "clip": {
+                    "id": "MM_Idle",
+                    "name": "MM_Idle",
+                    "duration_ms": 1000.0,
+                    "_export_path": "idle.animation_clip.json",
+                    "model_curves": {"bone_0": {}},
+                    "sampled_frame_count": 12,
+                },
+                "summary": {
+                    "id": "MM_Idle",
+                    "name": "MM_Idle",
+                    "duration_ms": 1000.0,
+                    "frame_count": 30,
+                    "sampled_frame_count": 12,
+                    "bone_curve_count": 1,
+                    "source_mode": "cue4parse_animation",
+                    "export_path": "idle.animation_clip.json",
+                },
+            })
+            self.finished.emit()
+
+        def deleteLater(self) -> None:
+            captured["worker_deleted"] = True
+
     fake_preview_module = types.ModuleType("app.ar_pbr.preview_window")
     fake_preview_module.ArPbrAssetPreviewWindow = FakeArPbrAssetPreviewWindow
     monkeypatch.setitem(sys.modules, "app.ar_pbr.preview_window", fake_preview_module)
     monkeypatch.setattr(owner_render, "_OwnerAnimationPanel", FakeOwnerAnimationPanel)
+    monkeypatch.setattr(owner_render, "_OwnerAnimationClipExportWorker", FakeAnimationExportWorker)
 
     owner = types.SimpleNamespace()
     window = owner_render.open_action_sequencer_owner_render_window(owner, project)
@@ -330,9 +385,14 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     assert window.owner_animation_preview_request["preview_backend"] == owner_render.OWNER_ANIMATION_PREVIEW_BACKEND
     assert window.owner_animation_preview_request["ar_pbr_animation_enabled"] is False
     assert window.owner_animation_preview_request["reference_pipeline"] == "UAssetInspector SamplePalette -> Bones UBO -> skinned shader"
-    assert window.owner_animation_preview_result["status"] == "requires_uasset_inspector_palette_renderer"
+    assert window.owner_animation_preview_result["status"] == "animation_clip_exported"
     assert window.owner_animation_preview_result["clip"] == "MM_Idle"
     assert window.owner_animation_preview_result["ar_pbr_animation_enabled"] is False
+    assert window.owner_animation_preview_result["requires_gpu_palette_renderer"] is True
+    assert window.owner_animation_preview_result["summary"]["bone_curve_count"] == 1
+    assert window.owner_animation_preview_result["summary"]["sampled_frame_count"] == 12
+    assert window.owner_animation_clip_export["id"] == "MM_Idle"
+    assert captured["export_max_samples"] == 48
     assert captured["shown"] is True
     assert captured["raised"] is True
     assert captured["activated"] is True

@@ -31,6 +31,7 @@ from app.action_sequencer_ar_pbr_proxy import (
 from app.action_sequencer_unreal_asset_bridge import (
     default_owner_unreal_ar_pbr_path,
     export_owner_unreal_ar_pbr_asset,
+    export_owner_unreal_animation_clip,
 )
 from app.unreal_link_reference_paths import unreal_link_reference_roots
 
@@ -312,6 +313,62 @@ class _OwnerRenderWorker(QThread):
             self.failed.emit(str(exc))
             return
         self.rendered.emit(str(path))
+
+
+class _OwnerAnimationClipExportWorker(QThread):
+    exported = Signal(object)
+    failed = Signal(object)
+
+    def __init__(
+        self,
+        descriptor: OwnerRenderDescriptor,
+        animation_path: Path,
+        *,
+        max_samples: int = 48,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._descriptor = descriptor
+        self._animation_path = Path(animation_path)
+        self._max_samples = max(2, int(max_samples))
+
+    def run(self) -> None:
+        try:
+            clip = export_owner_unreal_animation_clip(
+                self._descriptor,
+                self._animation_path,
+                max_samples=self._max_samples,
+            )
+        except Exception as exc:  # pragma: no cover - exercised through UI/manual QA
+            self.failed.emit({
+                "status": "export_failed",
+                "animation_path": str(self._animation_path),
+                "error": type(exc).__name__,
+                "message": str(exc),
+            })
+            return
+        self.exported.emit({
+            "status": "animation_clip_exported",
+            "animation_path": str(self._animation_path),
+            "clip": clip,
+            "summary": _animation_clip_summary(clip),
+        })
+
+
+def _animation_clip_summary(clip: dict[str, Any] | None) -> dict[str, Any]:
+    data = clip if isinstance(clip, dict) else {}
+    curves = data.get("model_curves") if isinstance(data.get("model_curves"), dict) else {}
+    export_path = str(data.get("_export_path") or "")
+    return {
+        "id": str(data.get("id") or data.get("name") or ""),
+        "name": str(data.get("name") or data.get("id") or ""),
+        "duration_ms": float(data.get("duration_ms", 0.0) or 0.0),
+        "frame_count": int(data.get("frame_count", 0) or 0),
+        "sampled_frame_count": int(data.get("sampled_frame_count", 0) or 0),
+        "bone_curve_count": len(curves),
+        "source_mode": str(data.get("source_mode") or data.get("_exporter") or "cue4parse_animation"),
+        "export_path": export_path,
+    }
 
 
 class _OwnerRenderCanvas(QWidget):
@@ -664,6 +721,18 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
         path = Path(str(animation_path)) if animation_path else None
         if path is not None:
             setattr(window, "owner_selected_animation_path", path)
+        active_worker = getattr(window, "owner_animation_export_worker", None)
+        worker_running = False
+        if active_worker is not None and hasattr(active_worker, "isRunning"):
+            try:
+                worker_running = bool(active_worker.isRunning())
+            except RuntimeError:
+                worker_running = False
+        if worker_running:
+            status = getattr(window, "_status", None)
+            if status is not None and hasattr(status, "setText"):
+                status.setText("Animation export is already running. Wait for the current sequence.")
+            return
         request = {
             **dict(payload),
             "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
@@ -673,19 +742,87 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
         }
         setattr(window, "owner_animation_preview_request", request)
         clip = str(payload.get("clip") or (path.stem if path is not None else ""))
+        if path is None:
+            result = {
+                "status": "export_failed",
+                "reason": "missing_animation_path",
+                "clip": clip,
+                "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
+                "ar_pbr_animation_enabled": False,
+            }
+            setattr(window, "owner_animation_preview_result", result)
+            status = getattr(window, "_status", None)
+            if status is not None and hasattr(status, "setText"):
+                status.setText("Animation export failed: missing asset path")
+            return
         result = {
-            "status": "requires_uasset_inspector_palette_renderer",
+            "status": "exporting_animation_clip",
             "clip": clip,
-            "animation_path": str(path) if path is not None else "",
+            "animation_path": str(path),
             "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
             "ar_pbr_animation_enabled": False,
             "play_once": bool(payload.get("play_once", True)),
             "apply_frame_ms": int(payload.get("apply_frame_ms", 0) or 0),
+            "requires_gpu_palette_renderer": True,
         }
         setattr(window, "owner_animation_preview_result", result)
         status = getattr(window, "_status", None)
         if status is not None and hasattr(status, "setText"):
-            status.setText(f"Animation selected: {clip} (UAssetInspector GPU palette path required)")
+            status.setText(f"Exporting animation sequence: {clip}")
+
+        worker = _OwnerAnimationClipExportWorker(descriptor, path, parent=window)
+
+        def _on_exported(event: dict[str, Any]) -> None:
+            exported_clip = event.get("clip") if isinstance(event, dict) else None
+            summary = event.get("summary") if isinstance(event, dict) else None
+            result = {
+                "status": "animation_clip_exported",
+                "clip": clip,
+                "animation_path": str(path),
+                "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
+                "ar_pbr_animation_enabled": False,
+                "requires_gpu_palette_renderer": True,
+                "play_once": bool(payload.get("play_once", True)),
+                "apply_frame_ms": int(payload.get("apply_frame_ms", 0) or 0),
+                "reference_pipeline": "UAssetInspector SamplePalette -> Bones UBO -> skinned shader",
+                "summary": dict(summary) if isinstance(summary, dict) else _animation_clip_summary(exported_clip),
+            }
+            setattr(window, "owner_animation_preview_result", result)
+            setattr(window, "owner_animation_clip_export", exported_clip)
+            status = getattr(window, "_status", None)
+            if status is not None and hasattr(status, "setText"):
+                info = result["summary"]
+                status.setText(
+                    f"Animation exported: {clip} "
+                    f"({info.get('sampled_frame_count', 0)} samples, {info.get('bone_curve_count', 0)} bones)"
+                )
+
+        def _on_failed(event: dict[str, Any]) -> None:
+            result = {
+                "status": "export_failed",
+                "clip": clip,
+                "animation_path": str(path),
+                "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
+                "ar_pbr_animation_enabled": False,
+                "requires_gpu_palette_renderer": True,
+                "error": str(event.get("error") or "RuntimeError") if isinstance(event, dict) else "RuntimeError",
+                "message": str(event.get("message") or event) if isinstance(event, dict) else str(event),
+            }
+            setattr(window, "owner_animation_preview_result", result)
+            status = getattr(window, "_status", None)
+            if status is not None and hasattr(status, "setText"):
+                status.setText(f"Animation export failed: {result['message']}")
+
+        def _on_finished() -> None:
+            if getattr(window, "owner_animation_export_worker", None) is worker:
+                setattr(window, "owner_animation_export_worker", None)
+            worker.deleteLater()
+
+        worker.exported.connect(_on_exported)
+        worker.failed.connect(_on_failed)
+        worker.finished.connect(_on_finished)
+        setattr(window, "owner_animation_export_worker", worker)
+        worker.start()
 
     animation_panel.animation_selected.connect(_on_animation_selected)
     animation_panel.animation_preview_requested.connect(_on_animation_preview_requested)
