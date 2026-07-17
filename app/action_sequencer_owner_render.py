@@ -613,6 +613,7 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
         parent=None,
         initial_lighting={
             "render_profile": PROFILE_MARMOSET_PBR,
+            "look_preset": "bloomed",
             "hdri_id": "studio_small_09",
             "show_environment_background": False,
             "ibl_exposure": 1.35,

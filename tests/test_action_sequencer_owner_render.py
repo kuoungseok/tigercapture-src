@@ -316,6 +316,7 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     assert captured["kwargs"]["initial_view"] == owner_render.OWNER_STAGE_PREVIEW_VIEW
     assert captured["kwargs"]["left_panel"] is not None
     assert captured["kwargs"]["controls_mode"] == "cubemap_only"
+    assert captured["kwargs"]["initial_lighting"]["look_preset"] == "bloomed"
     assert captured["kwargs"]["initial_lighting"]["show_environment_background"] is False
     assert captured["panel_descriptor"].animation_sequence_paths
     assert callable(captured["animation_callback"])

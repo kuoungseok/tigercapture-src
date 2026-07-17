@@ -520,6 +520,9 @@ uniform vec3 u_screen_ao_color;
 uniform int u_screen_ao_ambient;
 uniform int u_screen_ao_diffuse;
 uniform int u_screen_ao_specular;
+uniform float u_bloom_strength;
+uniform float u_bloom_radius;
+uniform float u_bloom_threshold;
 out vec4 frag_color;
 
 vec2 dir_to_equirect(vec3 dir) {
@@ -972,6 +975,21 @@ float shadow_factor(vec4 light_pos, vec3 n, vec3 l) {
     return mix(1.0 - u_shadow_strength, 1.0, lit);
 }
 
+vec3 apply_preview_bloom(vec3 rgb, vec3 albedo, vec3 fresnel, float roughness, float ndotv) {
+    float strength = clamp(u_bloom_strength, 0.0, 2.0);
+    if (strength <= 0.0001) {
+        return rgb;
+    }
+    float threshold = clamp(u_bloom_threshold, 0.0, 4.0);
+    float radius = clamp(u_bloom_radius / 8.0, 0.08, 1.25);
+    float lum = dot(max(rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+    float bright = smoothstep(threshold, threshold + 0.75 + radius * 0.35, lum);
+    float rim = pow(clamp(1.0 - ndotv, 0.0, 1.0), mix(4.2, 1.75, radius));
+    vec3 tint = clamp(vec3(0.82, 0.90, 1.0) + albedo * 0.22 + fresnel * 0.65, vec3(0.0), vec3(2.0));
+    vec3 bloom = rgb * bright * (0.18 + radius * 0.26) + tint * rim * (0.08 + radius * 0.18);
+    return rgb + bloom * strength * (1.0 - roughness * 0.18);
+}
+
 void main() {
     vec3 n = normalize(v_normal);
     vec3 v = normalize(u_camera_pos - v_world_pos);
@@ -1078,6 +1096,7 @@ void main() {
     float screen_ao_shadow = clamp(1.0 - min(min(ambient_ao, diffuse_ao), specular_ao), 0.0, 1.0);
     rgb = mix(rgb, rgb * (0.82 + clamp(u_screen_ao_color, vec3(0.0), vec3(1.0)) * 0.18), screen_ao_shadow);
     rgb = apply_transmission_refraction(rgb, albedo, n, v, roughness, fresnel);
+    rgb = apply_preview_bloom(rgb, albedo, fresnel, roughness, ndotv);
     rgb = apply_output_transform(rgb);
     frag_color = vec4(rgb, out_alpha);
 }
@@ -3813,6 +3832,7 @@ class GpuMeshWidget(QOpenGLWidget):
         glint_sparkle = glint_sparkle_diagnostics(self.state)
         triplanar = triplanar_diagnostics(self.state)
         ambient_occlusion = ambient_occlusion_diagnostics(self.state)
+        post_effects = post_effects_diagnostics(self.state)
         tone_mode = int(color_management["tone_mapping_mode"])
         tone_exposure = float(color_management["tone_exposure"])
         tone_gamma = float(color_management["tone_gamma"])
@@ -3835,6 +3855,11 @@ class GpuMeshWidget(QOpenGLWidget):
         ao_strength = (
             float(ambient_occlusion.get("strength", 0.0) or 0.0)
             if bool(ambient_occlusion.get("enabled"))
+            else 0.0
+        )
+        bloom_strength = (
+            float(post_effects.get("bloom_strength", 0.0) or 0.0)
+            if bool(post_effects.get("enabled")) and bool(post_effects.get("bloom_enabled"))
             else 0.0
         )
         if self.show_environment_background:
@@ -4051,6 +4076,9 @@ class GpuMeshWidget(QOpenGLWidget):
         GL.glUniform1i(self._uniform_location(self.program, "u_screen_ao_ambient"), 1 if bool(ambient_occlusion.get("ambient", True)) else 0)
         GL.glUniform1i(self._uniform_location(self.program, "u_screen_ao_diffuse"), 1 if bool(ambient_occlusion.get("diffuse", True)) else 0)
         GL.glUniform1i(self._uniform_location(self.program, "u_screen_ao_specular"), 1 if bool(ambient_occlusion.get("specular", False)) else 0)
+        GL.glUniform1f(self._uniform_location(self.program, "u_bloom_strength"), bloom_strength)
+        GL.glUniform1f(self._uniform_location(self.program, "u_bloom_radius"), float(post_effects.get("bloom_radius", DEFAULT_BLOOM_RADIUS) or DEFAULT_BLOOM_RADIUS))
+        GL.glUniform1f(self._uniform_location(self.program, "u_bloom_threshold"), float(post_effects.get("bloom_threshold", DEFAULT_BLOOM_THRESHOLD) or DEFAULT_BLOOM_THRESHOLD))
         GL.glUniform1f(self._uniform_location(self.program, "u_shadow_strength"), float(self.state.shadow_strength))
         GL.glUniform1f(self._uniform_location(self.program, "u_shadow_pcf_radius"), float(self.state.shadow_pcf_radius))
         GL.glUniform1f(self._uniform_location(self.program, "u_shadow_pcss_blocker_radius"), float(self.state.shadow_pcss_blocker_radius))

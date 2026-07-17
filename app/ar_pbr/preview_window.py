@@ -63,6 +63,21 @@ from app.ar_pbr.hybrid_rendering import (
     DEFAULT_HYBRID_SAMPLE_COUNT,
     DEFAULT_SPECULAR_GI_STRENGTH,
 )
+from app.ar_pbr.post_effects import (
+    DEFAULT_BLOOM_RADIUS,
+    DEFAULT_BLOOM_STRENGTH,
+    DEFAULT_BLOOM_THRESHOLD,
+    DEFAULT_GRAIN_SCALE,
+    DEFAULT_GRAIN_SEED,
+    DEFAULT_GRAIN_STRENGTH,
+    DEFAULT_POST_EFFECTS_MODE,
+    DEFAULT_SHARPEN_RADIUS,
+    DEFAULT_SHARPEN_STRENGTH,
+    DEFAULT_VIGNETTE_FEATHER,
+    DEFAULT_VIGNETTE_RADIUS,
+    DEFAULT_VIGNETTE_STRENGTH,
+    normalize_post_effects_settings,
+)
 from app.ar_pbr.asset_support import asset_support_status_text
 from app.ar_pbr.render_profile import (
     PROFILE_AUTHORED,
@@ -109,6 +124,100 @@ def _render_profile_combo_rows(render_profiles: dict[str, Any] | None) -> list[d
             "enabled": True,
         })
     return rows
+
+
+_LOOK_PRESETS: tuple[dict[str, Any], ...] = (
+    {
+        "id": "neutral",
+        "label": "Neutral",
+        "status": "Look: Neutral",
+        "settings": {
+            "post_effects_mode": "off",
+            "bloom_strength": 0.0,
+            "vignette_strength": 0.0,
+            "grain_strength": 0.0,
+            "sharpen_strength": 0.0,
+        },
+    },
+    {
+        "id": "ao_proof",
+        "label": "AO Proof",
+        "status": "Look: AO Proof",
+        "settings": {
+            "ambient_occlusion_mode": "screen",
+            "ao_strength": 1.35,
+            "ao_radius": 11.0,
+            "ao_distance": 0.85,
+            "shadow_strength": 0.86,
+            "self_shadow_strength": 0.68,
+            "tone_exposure": -0.04,
+            "post_effects_mode": "off",
+            "bloom_strength": 0.0,
+        },
+    },
+    {
+        "id": "bloomed",
+        "label": "Bloomed",
+        "status": "Look: Bloomed",
+        "settings": {
+            "post_effects_mode": "post_effects",
+            "bloom_enabled": True,
+            "bloom_strength": 0.95,
+            "bloom_radius": 6.0,
+            "bloom_threshold": 0.26,
+            "vignette_strength": 0.08,
+            "vignette_radius": 0.78,
+            "vignette_feather": 0.34,
+            "sharpen_strength": 0.10,
+            "sharpen_radius": 0.8,
+            "ibl_exposure": 1.58,
+            "direct_strength": 0.72,
+            "tone_exposure": 0.18,
+            "surface_override_strength": 0.22,
+            "surface_roughness": 0.30,
+            "surface_reflectance": 0.68,
+            "clearcoat_strength": 0.30,
+            "clearcoat_roughness": 0.20,
+            "ambient_occlusion_mode": "screen",
+            "ao_strength": 0.72,
+        },
+    },
+    {
+        "id": "off",
+        "label": "Off",
+        "status": "Look: Effects Off",
+        "settings": {
+            "ambient_occlusion_mode": "off",
+            "ao_strength": 0.0,
+            "post_effects_mode": "off",
+            "bloom_strength": 0.0,
+            "vignette_strength": 0.0,
+            "grain_strength": 0.0,
+            "sharpen_strength": 0.0,
+        },
+    },
+)
+_LOOK_PRESET_IDS = {str(row["id"]) for row in _LOOK_PRESETS}
+
+
+def preview_look_preset_rows() -> tuple[dict[str, str], ...]:
+    return tuple({"id": str(row["id"]), "label": str(row["label"])} for row in _LOOK_PRESETS)
+
+
+def preview_look_preset_settings(preset_id: str) -> dict[str, Any]:
+    normalized = str(preset_id or "neutral").strip().casefold()
+    for row in _LOOK_PRESETS:
+        if str(row["id"]) == normalized:
+            return dict(row["settings"])
+    return dict(_LOOK_PRESETS[0]["settings"])
+
+
+def _look_preset_status(preset_id: str) -> str:
+    normalized = str(preset_id or "neutral").strip().casefold()
+    for row in _LOOK_PRESETS:
+        if str(row["id"]) == normalized:
+            return str(row["status"])
+    return str(_LOOK_PRESETS[0]["status"])
 
 
 class _ArPbrPreviewLoader(QThread):
@@ -364,6 +473,10 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         mode = str(controls_mode or "full").strip().casefold()
         self._controls_mode = mode if mode in {"full", "cubemap_only"} else "full"
         self._simple_cubemap_controls = self._controls_mode == "cubemap_only"
+        self._active_look_preset = str(self._initial_lighting.get("look_preset") or "neutral").strip().casefold()
+        if self._active_look_preset not in _LOOK_PRESET_IDS:
+            self._active_look_preset = "neutral"
+        self._look_combo: QComboBox | None = None
         self._top_hdri_combo: QComboBox | None = None
         self._render_profile = str(self._initial_lighting.get("render_profile") or PROFILE_AUTHORED).strip().casefold()
         if self._render_profile not in {PROFILE_AUTHORED, PROFILE_MARMOSET_PBR, PROFILE_VRM_MTOON}:
@@ -405,6 +518,16 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._status = QLabel("Loading 3D asset", self)
         self._status.setObjectName("ArPbrPreviewStatus")
         header.addWidget(self._status)
+        look_label = QLabel("Look", self)
+        look_label.setObjectName("ArPbrTopControlLabel")
+        header.addWidget(look_label)
+        self._look_combo = QComboBox(self)
+        self._look_combo.setObjectName("ArPbrLookCombo")
+        self._look_combo.setMinimumWidth(138)
+        self._look_combo.setEnabled(False)
+        self._look_combo.setToolTip("Preview-only look preset")
+        self._populate_look_combo()
+        header.addWidget(self._look_combo)
         if self._simple_cubemap_controls:
             cubemap_label = QLabel("Cubemap", self)
             cubemap_label.setObjectName("ArPbrTopControlLabel")
@@ -726,6 +849,8 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._ao_mode.value_changed.connect(self._set_ambient_occlusion_mode)
         self._render_profile_combo.currentIndexChanged.connect(self._set_render_profile_index)
         self._hdri_combo.currentIndexChanged.connect(self._set_hdri_preset_index)
+        if self._look_combo is not None:
+            self._look_combo.currentIndexChanged.connect(self._set_look_preset_index)
         if self._top_hdri_combo is not None:
             self._top_hdri_combo.currentIndexChanged.connect(self._set_hdri_preset_index)
         self._sync_background_button()
@@ -867,6 +992,22 @@ class ArPbrAssetPreviewWindow(QMainWindow):
             for combo in self._hdri_combo_widgets():
                 combo.blockSignals(False)
 
+    def _populate_look_combo(self) -> None:
+        if self._look_combo is None:
+            return
+        was_blocked = self._look_combo.blockSignals(True)
+        try:
+            self._look_combo.clear()
+            selected_index = 0
+            for index, row in enumerate(preview_look_preset_rows()):
+                self._look_combo.addItem(row["label"], row["id"])
+                if row["id"] == self._active_look_preset:
+                    selected_index = index
+            if self._look_combo.count() > 0:
+                self._look_combo.setCurrentIndex(selected_index)
+        finally:
+            self._look_combo.blockSignals(was_blocked)
+
     def _hdri_combo_widgets(self) -> tuple[QComboBox, ...]:
         widgets: list[QComboBox] = []
         combo = getattr(self, "_hdri_combo", None)
@@ -919,6 +1060,18 @@ class ArPbrAssetPreviewWindow(QMainWindow):
                     finally:
                         combo.blockSignals(was_blocked)
                     break
+
+    def _sync_look_combo_to_active(self) -> None:
+        if self._look_combo is None:
+            return
+        was_blocked = self._look_combo.blockSignals(True)
+        try:
+            for index in range(self._look_combo.count()):
+                if str(self._look_combo.itemData(index) or "") == self._active_look_preset:
+                    self._look_combo.setCurrentIndex(index)
+                    break
+        finally:
+            self._look_combo.blockSignals(was_blocked)
 
     def _start_loading(self) -> None:
         self._loader = _ArPbrPreviewLoader(
@@ -1000,6 +1153,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
 
     def _enable_controls(self, enabled: bool) -> None:
         for row in (
+            self._look_combo,
             self._render_profile_combo,
             self._hdri_combo,
             *(self._hdri_combo_widgets()[1:]),
@@ -1007,7 +1161,8 @@ class ArPbrAssetPreviewWindow(QMainWindow):
             self._ao_mode,
             *self._parameter_rows,
         ):
-            row.setEnabled(enabled)
+            if row is not None:
+                row.setEnabled(enabled)
         self._fit_btn.setEnabled(enabled)
         self._background_btn.setEnabled(enabled)
         self._reset_btn.setEnabled(enabled)
@@ -1051,13 +1206,16 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._diffuse_gi_strength.set_value(float(getattr(self._state, "diffuse_gi_strength", DEFAULT_DIFFUSE_GI_STRENGTH)))
         self._specular_gi_strength.set_value(float(getattr(self._state, "specular_gi_strength", DEFAULT_SPECULAR_GI_STRENGTH)))
         self._denoise_strength.set_value(float(getattr(self._state, "denoise_strength", DEFAULT_DENOISE_STRENGTH)))
+        self._sync_look_combo_to_active()
 
     def lighting_settings(self) -> dict[str, Any]:
         if self._state is None:
             data = dict(self._initial_lighting)
             data["render_profile"] = self._render_profile
+            data["look_preset"] = self._active_look_preset
             return data
         return {
+            "look_preset": self._active_look_preset,
             "render_profile": self._render_profile,
             "hdri_id": str(self._selected_hdri.id if self._selected_hdri is not None else ""),
             "hdri_path": str(self._selected_hdri.path if self._selected_hdri is not None else ""),
@@ -1103,11 +1261,34 @@ class ArPbrAssetPreviewWindow(QMainWindow):
             "diffuse_gi_strength": float(getattr(self._state, "diffuse_gi_strength", DEFAULT_DIFFUSE_GI_STRENGTH)),
             "specular_gi_strength": float(getattr(self._state, "specular_gi_strength", DEFAULT_SPECULAR_GI_STRENGTH)),
             "denoise_strength": float(getattr(self._state, "denoise_strength", DEFAULT_DENOISE_STRENGTH)),
+            "post_effects_mode": str(getattr(self._state, "post_effects_mode", DEFAULT_POST_EFFECTS_MODE)),
+            "post_effects_enabled": str(getattr(self._state, "post_effects_mode", DEFAULT_POST_EFFECTS_MODE)) == "post_effects",
+            "bloom_enabled": float(getattr(self._state, "bloom_strength", DEFAULT_BLOOM_STRENGTH)) > 1.0e-6,
+            "bloom_strength": float(getattr(self._state, "bloom_strength", DEFAULT_BLOOM_STRENGTH)),
+            "bloom_radius": float(getattr(self._state, "bloom_radius", DEFAULT_BLOOM_RADIUS)),
+            "bloom_threshold": float(getattr(self._state, "bloom_threshold", DEFAULT_BLOOM_THRESHOLD)),
+            "vignette_strength": float(getattr(self._state, "vignette_strength", DEFAULT_VIGNETTE_STRENGTH)),
+            "vignette_radius": float(getattr(self._state, "vignette_radius", DEFAULT_VIGNETTE_RADIUS)),
+            "vignette_feather": float(getattr(self._state, "vignette_feather", DEFAULT_VIGNETTE_FEATHER)),
+            "grain_strength": float(getattr(self._state, "grain_strength", DEFAULT_GRAIN_STRENGTH)),
+            "grain_scale": float(getattr(self._state, "grain_scale", DEFAULT_GRAIN_SCALE)),
+            "grain_seed": int(getattr(self._state, "grain_seed", DEFAULT_GRAIN_SEED)),
+            "sharpen_strength": float(getattr(self._state, "sharpen_strength", DEFAULT_SHARPEN_STRENGTH)),
+            "sharpen_radius": float(getattr(self._state, "sharpen_radius", DEFAULT_SHARPEN_RADIUS)),
         }
 
     def apply_lighting_settings(self, settings: dict[str, Any] | None, *, emit: bool = True) -> None:
         if self._state is None or not isinstance(settings, dict):
             return
+        settings = dict(settings)
+        if "look_preset" in settings:
+            preset_id = str(settings.get("look_preset") or "neutral").strip().casefold()
+            if preset_id not in _LOOK_PRESET_IDS:
+                preset_id = "neutral"
+            self._active_look_preset = preset_id
+            merged = preview_look_preset_settings(preset_id)
+            merged.update({key: value for key, value in settings.items() if key != "look_preset"})
+            settings = merged
         previous_profile = self._render_profile
         self._suppress_emit = True
         try:
@@ -1223,6 +1404,36 @@ class ArPbrAssetPreviewWindow(QMainWindow):
                 self._state.specular_gi_strength = max(0.0, min(2.0, float(settings["specular_gi_strength"])))
             if "denoise_strength" in settings:
                 self._state.denoise_strength = max(0.0, min(1.0, float(settings["denoise_strength"])))
+            if any(key in settings for key in (
+                "post_effects",
+                "post_effects_mode",
+                "post_effects_enabled",
+                "bloom_enabled",
+                "bloom_strength",
+                "bloom_radius",
+                "bloom_threshold",
+                "vignette_strength",
+                "vignette_radius",
+                "vignette_feather",
+                "grain_strength",
+                "grain_scale",
+                "grain_seed",
+                "sharpen_strength",
+                "sharpen_radius",
+            )):
+                post = normalize_post_effects_settings(settings)
+                self._state.post_effects_mode = str(post["mode"])
+                self._state.bloom_strength = float(post["bloom_strength"])
+                self._state.bloom_radius = float(post["bloom_radius"])
+                self._state.bloom_threshold = float(post["bloom_threshold"])
+                self._state.vignette_strength = float(post["vignette_strength"])
+                self._state.vignette_radius = float(post["vignette_radius"])
+                self._state.vignette_feather = float(post["vignette_feather"])
+                self._state.grain_strength = float(post["grain_strength"])
+                self._state.grain_scale = float(post["grain_scale"])
+                self._state.grain_seed = int(post["grain_seed"])
+                self._state.sharpen_strength = float(post["sharpen_strength"])
+                self._state.sharpen_radius = float(post["sharpen_radius"])
             self.sync_controls()
         finally:
             self._suppress_emit = False
@@ -1294,6 +1505,15 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._render_profile = profile
         self._apply_render_profile_to_mesh()
         self._emit_lighting_changed()
+
+    def _set_look_preset_index(self, index: int) -> None:
+        if self._look_combo is None or index < 0:
+            return
+        preset_id = str(self._look_combo.itemData(index) or "neutral")
+        if preset_id not in _LOOK_PRESET_IDS:
+            preset_id = "neutral"
+        self.apply_lighting_settings({"look_preset": preset_id}, emit=True)
+        self._status.setText(_look_preset_status(preset_id))
 
     def fit_view(self) -> None:
         if self._gl_widget is None:
@@ -1384,6 +1604,19 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._state.diffuse_gi_strength = DEFAULT_DIFFUSE_GI_STRENGTH
         self._state.specular_gi_strength = DEFAULT_SPECULAR_GI_STRENGTH
         self._state.denoise_strength = DEFAULT_DENOISE_STRENGTH
+        self._state.post_effects_mode = DEFAULT_POST_EFFECTS_MODE
+        self._state.bloom_strength = DEFAULT_BLOOM_STRENGTH
+        self._state.bloom_radius = DEFAULT_BLOOM_RADIUS
+        self._state.bloom_threshold = DEFAULT_BLOOM_THRESHOLD
+        self._state.vignette_strength = DEFAULT_VIGNETTE_STRENGTH
+        self._state.vignette_radius = DEFAULT_VIGNETTE_RADIUS
+        self._state.vignette_feather = DEFAULT_VIGNETTE_FEATHER
+        self._state.grain_strength = DEFAULT_GRAIN_STRENGTH
+        self._state.grain_scale = DEFAULT_GRAIN_SCALE
+        self._state.grain_seed = DEFAULT_GRAIN_SEED
+        self._state.sharpen_strength = DEFAULT_SHARPEN_STRENGTH
+        self._state.sharpen_radius = DEFAULT_SHARPEN_RADIUS
+        self._active_look_preset = "neutral"
         bounds = self._mesh_diag.get("normalized_bounds") if isinstance(self._mesh_diag.get("normalized_bounds"), dict) else {}
         mins = bounds.get("min", []) if isinstance(bounds, dict) else []
         self._state.ground_y = float(mins[1]) + 0.01 if isinstance(mins, list) and len(mins) >= 2 else -0.52
@@ -1561,6 +1794,11 @@ QLabel#ArPbrPreviewStatus {
     font-size: 10px;
     font-weight: 700;
 }
+QLabel#ArPbrTopControlLabel {
+    color: #AEB5CF;
+    font-size: 10px;
+    font-weight: 900;
+}
 QFrame#ArPbrViewportHost {
     background-color: #05070C;
     border: 1px solid #30384F;
@@ -1591,7 +1829,8 @@ QLabel#ArPbrControlsTitle {
     font-size: 12px;
     font-weight: 900;
 }
-QComboBox#ArPbrHdriCombo {
+QComboBox#ArPbrHdriCombo,
+QComboBox#ArPbrLookCombo {
     background-color: rgba(255, 255, 255, 18);
     color: #F8F4EA;
     border: 1px solid #37405A;
@@ -1601,15 +1840,18 @@ QComboBox#ArPbrHdriCombo {
     font-size: 11px;
     font-weight: 800;
 }
-QComboBox#ArPbrHdriCombo:hover {
+QComboBox#ArPbrHdriCombo:hover,
+QComboBox#ArPbrLookCombo:hover {
     background-color: rgba(255, 255, 255, 28);
     border-color: #7580A5;
 }
-QComboBox#ArPbrHdriCombo::drop-down {
+QComboBox#ArPbrHdriCombo::drop-down,
+QComboBox#ArPbrLookCombo::drop-down {
     border: 0px;
     width: 22px;
 }
-QComboBox#ArPbrHdriCombo QAbstractItemView {
+QComboBox#ArPbrHdriCombo QAbstractItemView,
+QComboBox#ArPbrLookCombo QAbstractItemView {
     background-color: #151927;
     color: #F8F4EA;
     selection-background-color: #6D5DFB;

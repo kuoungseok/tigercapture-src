@@ -36,6 +36,27 @@ def test_standalone_ar_pbr_viewer_shader_consumes_screen_ao_uniforms() -> None:
     assert 'GL.glUniform1i(self._uniform_location(self.program, "u_screen_ao_diffuse")' in source
 
 
+def test_standalone_ar_pbr_viewer_shader_consumes_preview_bloom_uniforms() -> None:
+    source = _read_repo_file("tools/ar_pbr_gpu_window.py")
+
+    assert "uniform float u_bloom_strength;" in source
+    assert "vec3 apply_preview_bloom" in source
+    assert "rgb = apply_preview_bloom(rgb, albedo, fresnel, roughness, ndotv);" in source
+    assert "post_effects = post_effects_diagnostics(self.state)" in source
+    assert 'GL.glUniform1f(self._uniform_location(self.program, "u_bloom_strength"), bloom_strength)' in source
+
+
+def test_ar_pbr_preview_bloomed_preset_uses_visible_post_effects() -> None:
+    from app.ar_pbr.preview_window import preview_look_preset_settings
+
+    bloomed = preview_look_preset_settings("bloomed")
+
+    assert bloomed["post_effects_mode"] == "post_effects"
+    assert bloomed["bloom_enabled"] is True
+    assert bloomed["bloom_strength"] >= 0.9
+    assert bloomed["bloom_threshold"] < 0.4
+
+
 def test_packet_ambient_occlusion_lookup_matches_live_and_export_payloads() -> None:
     from app.ar_pbr.ambient_occlusion import normalize_packet_ambient_occlusion_settings
 
