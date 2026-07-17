@@ -80,3 +80,6 @@ external/assets/music/drum_kits/**/*.ogg
 external/assets/music/drum_kits/**/*.sfz
 external/assets/music/drum_kits/**/*.dspreset
 resources/live2d_samples/CubismWebSamples/
+tools/unreal_asset_bridge/**/bin/
+tools/unreal_asset_bridge/**/obj/
+tools/unreal_asset_bridge/vendor/CUE4Parse/CUE4Parse-Natives/builddir/

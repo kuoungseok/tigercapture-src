@@ -8,6 +8,12 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="vendor\**\*.cs" />
+    <EmbeddedResource Remove="vendor\**\*" />
+    <None Remove="vendor\**\*" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="vendor\CUE4Parse\CUE4Parse\CUE4Parse.csproj" />
     <ProjectReference Include="vendor\CUE4Parse\CUE4Parse-Conversion\CUE4Parse-Conversion.csproj" />
   </ItemGroup>
