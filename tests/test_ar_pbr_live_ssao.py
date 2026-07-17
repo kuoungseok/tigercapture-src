@@ -42,6 +42,8 @@ def test_standalone_ar_pbr_viewer_shader_consumes_preview_bloom_uniforms() -> No
     assert "POST_BLOOM_FRAG_SHADER" in source
     assert "uniform float u_bloom_strength;" in source
     assert "uniform sampler2D u_scene_color;" in source
+    assert "float excess = max(lum - threshold, 0.0);" in source
+    assert "return rgb * contribution * soft_mask;" in source
     assert "vec3 sample_bloom_ring" in source
     assert "GL.glFramebufferTexture2D(" in source
     assert "self._draw_bloom_post(framebuffer_width, framebuffer_height, post_effects, bloom_strength)" in source
@@ -58,8 +60,8 @@ def test_ar_pbr_preview_bloomed_preset_uses_visible_post_effects() -> None:
 
     assert bloomed["post_effects_mode"] == "post_effects"
     assert bloomed["bloom_enabled"] is True
-    assert bloomed["bloom_strength"] >= 0.9
-    assert bloomed["bloom_threshold"] < 0.4
+    assert 0.35 <= bloomed["bloom_strength"] <= 0.8
+    assert bloomed["bloom_threshold"] >= 0.65
 
 
 def test_ar_pbr_preview_exposes_bloom_threshold_controls() -> None:

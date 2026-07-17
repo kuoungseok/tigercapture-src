@@ -1368,8 +1368,10 @@ vec3 bright_pass(vec3 rgb) {
     float lum = dot(max(rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
     float threshold = clamp(u_bloom_threshold, 0.0, 1.0);
     float knee = mix(0.08, 0.24, clamp(u_bloom_radius / 12.0, 0.0, 1.0));
-    float mask = smoothstep(threshold, threshold + knee, lum);
-    return rgb * mask;
+    float excess = max(lum - threshold, 0.0);
+    float contribution = clamp(excess / max(1.0 - threshold, 0.001), 0.0, 1.0);
+    float soft_mask = smoothstep(0.0, knee, excess);
+    return rgb * contribution * soft_mask;
 }
 
 vec3 sample_bloom_ring(vec2 uv, float radius_px, float weight) {
@@ -1390,7 +1392,7 @@ void main() {
     vec4 base = texture(u_scene_color, v_uv);
     float radius = clamp(u_bloom_radius, 1.0, 32.0);
     float strength = clamp(u_bloom_strength, 0.0, 3.0);
-    vec3 bloom = bright_pass(base.rgb) * 0.20;
+    vec3 bloom = bright_pass(base.rgb) * 0.06;
     bloom += sample_bloom_ring(v_uv, radius * 0.45, 0.34);
     bloom += sample_bloom_ring(v_uv, radius * 0.95, 0.27);
     bloom += sample_bloom_ring(v_uv, radius * 1.55, 0.16);
