@@ -81,6 +81,47 @@ PBR_VERTEX_STRIDE_FLOATS = gpu_material_packets.PBR_VERTEX_STRIDE_FLOATS
 PBR_TRIANGLE_FLOATS = gpu_material_packets.PBR_TRIANGLE_FLOATS
 
 
+def _bool_setting(settings: Mapping[str, Any], *keys: str) -> bool:
+    for key in keys:
+        if key not in settings:
+            continue
+        value = settings.get(key)
+        if isinstance(value, bool):
+            return value
+        if value is None:
+            continue
+        text = str(value).strip().casefold()
+        if text in {"1", "true", "yes", "on", "enabled"}:
+            return True
+        if text in {"0", "false", "no", "off", "disabled"}:
+            return False
+    return False
+
+
+def _preview_safe_post_effects(
+    post_effects: Mapping[str, Any],
+    *,
+    disable_bloom: bool,
+) -> dict[str, Any]:
+    out = dict(post_effects or {})
+    if not disable_bloom or not bool(out.get("bloom_enabled")):
+        return out
+    out["preview_bloom_suppressed"] = True
+    out["bloom_enabled"] = False
+    out["bloom_strength"] = 0.0
+    still_enabled = any(
+        bool(out.get(key))
+        for key in (
+            "vignette_enabled",
+            "grain_enabled",
+            "sharpen_enabled",
+        )
+    )
+    out["enabled"] = bool(still_enabled)
+    out["mode"] = "post_effects" if still_enabled else "off"
+    return out
+
+
 
 
 
@@ -141,6 +182,12 @@ def build_gpu_preview_items(
     work happens in ``OpenGLPreviewWidget``.
     """
     settings_map: Mapping[str, Any] = settings or {}
+    preview_disable_bloom = _bool_setting(
+        settings_map,
+        "preview_disable_bloom",
+        "disable_preview_bloom",
+        "forbid_preview_bloom",
+    )
     width = max(1, int(frame_size[0]))
     height = max(1, int(frame_size[1]))
     tracks = normalize_ar_tracks(ar_tracks)
@@ -306,7 +353,10 @@ def build_gpu_preview_items(
         anisotropic_rendering = normalize_anisotropic_material_settings(lighting)
         microsurface_rendering = normalize_microsurface_settings(lighting)
         depth_of_field_rendering = normalize_depth_of_field_settings(lighting)
-        post_effects_rendering = normalize_post_effects_settings(lighting)
+        post_effects_rendering = _preview_safe_post_effects(
+            normalize_post_effects_settings(lighting),
+            disable_bloom=preview_disable_bloom,
+        )
         lens_effects_rendering = normalize_lens_effects_settings(lighting)
         lens_flare_rendering = normalize_lens_flare_settings(lighting)
         render_passes = normalize_render_pass_settings(lighting)

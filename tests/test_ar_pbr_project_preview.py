@@ -75,6 +75,7 @@ def test_project_player_reuses_static_ar_pbr_gpu_packet_during_playback(tmp_path
 
     def fake_build_gpu_preview_items(**kwargs):
         calls.append(int(kwargs["time_ms"]))
+        assert kwargs["settings"]["preview_disable_bloom"] is True
         return [
             {
                 "track_id": "ar_pbr_static_cache",

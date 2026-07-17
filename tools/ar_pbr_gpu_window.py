@@ -568,15 +568,22 @@ float screen_space_ao_factor(vec3 normal, vec3 view_dir, vec3 world_pos) {
     vec3 n = normalize(normal);
     vec3 v = normalize(view_dir);
     float ndotv = clamp(dot(n, v), 0.0, 1.0);
-    float grazing = pow(1.0 - ndotv, 1.45);
-    float normal_variation = length(dFdx(n)) + length(dFdy(n));
-    float depth_variation = abs(dFdx(world_pos.z)) + abs(dFdy(world_pos.z));
     float radius = max(u_screen_ao_radius, 0.5);
     float distance = max(u_screen_ao_distance, 0.01);
-    float crease = clamp(normal_variation * radius * 0.34, 0.0, 1.0);
-    float depth_cavity = clamp(depth_variation * radius / distance * 0.18, 0.0, 1.0);
-    float underside = clamp((-n.y * 0.5 + 0.5) * 0.18, 0.0, 0.18);
-    float occlusion = clamp(crease * 0.60 + depth_cavity * 0.42 + grazing * 0.24 + underside, 0.0, 1.0);
+    vec3 dn_dx = dFdx(n);
+    vec3 dn_dy = dFdy(n);
+    vec3 dp_dx = dFdx(world_pos);
+    vec3 dp_dy = dFdy(world_pos);
+    float curvature = length(dn_dx) + length(dn_dy);
+    float depth_gradient = length(vec2(dFdx(world_pos.z), dFdy(world_pos.z)));
+    float footprint = max(max(length(dp_dx), length(dp_dy)), 0.0001);
+    float crease = smoothstep(0.015, 0.22, curvature * radius * 0.42);
+    float contact = smoothstep(0.005, max(0.006, distance * 0.34), depth_gradient * radius / max(footprint, 0.0001) * 0.025);
+    float horizon = smoothstep(0.18, 0.92, pow(1.0 - ndotv, 1.35));
+    float underside = smoothstep(0.10, 0.82, -n.y) * 0.22;
+    float micro = pow(clamp(curvature * radius * 0.22, 0.0, 1.0), 1.8) * 0.35;
+    float occlusion = clamp(crease * 0.46 + contact * 0.34 + horizon * 0.18 + underside + micro, 0.0, 1.0);
+    occlusion = smoothstep(0.02, 0.96, occlusion);
     return clamp(1.0 - occlusion * strength, 0.0, 1.0);
 }
 

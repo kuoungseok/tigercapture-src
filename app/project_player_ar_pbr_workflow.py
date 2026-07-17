@@ -745,6 +745,7 @@ def _apply_or_defer_ar_pbr_overlay(self, rgb: np.ndarray, pos_ms: int) -> tuple[
             settings = {
                 **self._ar_pbr_software_settings(active_runtime),
                 "gpu_triangle_limit": triangle_limit,
+                "preview_disable_bloom": True,
             }
             cache_key = self._ar_pbr_gpu_packet_cache_key(
                 context,
