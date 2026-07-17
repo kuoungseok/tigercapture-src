@@ -39,11 +39,16 @@ def test_standalone_ar_pbr_viewer_shader_consumes_screen_ao_uniforms() -> None:
 def test_standalone_ar_pbr_viewer_shader_consumes_preview_bloom_uniforms() -> None:
     source = _read_repo_file("tools/ar_pbr_gpu_window.py")
 
+    assert "POST_BLOOM_FRAG_SHADER" in source
     assert "uniform float u_bloom_strength;" in source
-    assert "vec3 apply_preview_bloom" in source
-    assert "rgb = apply_preview_bloom(rgb, albedo, fresnel, roughness, ndotv);" in source
+    assert "uniform sampler2D u_scene_color;" in source
+    assert "vec3 sample_bloom_ring" in source
+    assert "GL.glFramebufferTexture2D(" in source
+    assert "self._draw_bloom_post(framebuffer_width, framebuffer_height, post_effects, bloom_strength)" in source
+    assert "GL.glDrawArrays(GL.GL_TRIANGLES, 0, 3)" in source
+    assert "vec3 apply_preview_bloom" not in source
     assert "post_effects = post_effects_diagnostics(self.state)" in source
-    assert 'GL.glUniform1f(self._uniform_location(self.program, "u_bloom_strength"), bloom_strength)' in source
+    assert 'GL.glUniform1f(self._uniform_location(self.post_bloom_program, "u_bloom_strength"), float(bloom_strength))' in source
 
 
 def test_ar_pbr_preview_bloomed_preset_uses_visible_post_effects() -> None:
