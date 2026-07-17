@@ -356,6 +356,70 @@ def test_owner_unreal_animation_bridge_reuses_legacy_tiger_space_cache(tmp_path,
     assert clip["_cache_hit"] is True
 
 
+def test_owner_unreal_animation_bridge_batches_uncached_editor_exports(tmp_path, monkeypatch) -> None:
+    from app.action_sequencer_owner_render import discover_owner_render_descriptor
+    from app.action_sequencer_unreal_asset_bridge import export_owner_unreal_animation_clips_batch
+    from app.unreal_link_reference_paths import UE_ENGINE_ENV
+
+    project = tmp_path / "ActionSequencer" / "ActionSequencer.uproject"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text('{"EngineAssociation":"5.8"}', encoding="utf-8")
+    content = project.parent / "Content"
+    _touch(content / "Variant_Combat" / "Blueprints" / "BP_CombatCharacter.uasset")
+    _touch(content / "Characters" / "Mannequins" / "Meshes" / "SKM_Manny_Simple.uasset")
+    idle = _touch(content / "Characters" / "Mannequins" / "Anims" / "Unarmed" / "MM_Idle.uasset")
+    jog = _touch(content / "Characters" / "Mannequins" / "Anims" / "Pistol" / "MM_Pistol_Jog.uasset")
+    engine = tmp_path / "UE_5.8"
+    _touch(engine / "Engine" / "Binaries" / "Win64" / "UnrealEditor-Cmd.exe")
+    monkeypatch.setenv(UE_ENGINE_ENV, str(engine))
+    descriptor = discover_owner_render_descriptor(project)
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append(list(command))
+        env = kwargs["env"]
+        items = json.loads(env["TIGERSTUDIO_UNREAL_ANIM_BATCH_JSON"])
+        for item in items:
+            out = Path(item["out"])
+            out.parent.mkdir(parents=True, exist_ok=True)
+            name = Path(item["source_file"]).stem
+            out.write_text(
+                json.dumps({
+                    "schema": "tigerstudio.ar_pbr.unreal_animation_clip_export.v1",
+                    "exporter": "unreal_editor_python_batch",
+                    "animation_clip": {
+                        "id": name,
+                        "name": name,
+                        "duration_ms": 1000.0,
+                        "sampled_frame_count": 48,
+                        "rotation_space": "tiger_basis_quat_v1",
+                        "model_curves": {
+                            "bone_0": {
+                                "translation": {"x": [[0.0, 0.0], [1000.0, 1.0]]},
+                                "rotation_quat": {"x": [[0.0, 0.0], [1000.0, 0.0]], "w": [[0.0, 1.0], [1000.0, 1.0]]},
+                            }
+                        },
+                    },
+                }),
+                encoding="utf-8",
+            )
+        Path(env["TIGERSTUDIO_UNREAL_ANIM_BATCH_OUT"]).write_text(
+            json.dumps({"schema": "tigerstudio.ar_pbr.unreal_animation_batch_export.v1", "ok": True, "count": len(items)}),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout='{"ok":true}', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    results = export_owner_unreal_animation_clips_batch(descriptor, [idle, jog], max_samples=48, use_cache=False)
+
+    assert len(calls) == 1
+    assert "UnrealEditor-Cmd.exe" in calls[0][0]
+    assert results[str(idle)]["status"] == "animation_clip_exported"
+    assert results[str(jog)]["status"] == "animation_clip_exported"
+    assert results[str(jog)]["clip"]["id"] == "MM_Pistol_Jog"
+
+
 def test_owner_unreal_animation_bridge_falls_back_to_editor_python(tmp_path, monkeypatch) -> None:
     from app.action_sequencer_owner_render import discover_owner_render_descriptor
     from app.action_sequencer_unreal_asset_bridge import export_owner_unreal_animation_clip
@@ -456,6 +520,7 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
             self._descriptor = descriptor
             self.animation_selected = FakeSignal("animation_callback")
             self.animation_preview_requested = FakeSignal("animation_preview_callback")
+            self.animation_cache_batch_requested = FakeSignal("animation_cache_callback")
 
         def selected_animation_path(self):
             return self._descriptor.idle_animation_path
@@ -486,10 +551,11 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
             captured["attached_clip"] = dict(clip)
             return dict(clip)
 
-    class FakeAnimationExportWorker:
-        def __init__(self, descriptor, animation_path, *, max_samples=48, parent=None) -> None:
+    class FakeAnimationBatchExportWorker:
+        def __init__(self, descriptor, animation_paths, *, selected_path=None, max_samples=48, parent=None) -> None:
             captured["export_descriptor"] = descriptor
-            captured["export_animation_path"] = animation_path
+            captured["export_animation_paths"] = list(animation_paths)
+            captured["export_animation_path"] = selected_path
             captured["export_max_samples"] = max_samples
             self.exported = WorkerSignal()
             self.failed = WorkerSignal()
@@ -499,37 +565,48 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
             return False
 
         def start(self) -> None:
+            clip = {
+                "id": "MM_Idle",
+                "name": "MM_Idle",
+                "duration_ms": 1000.0,
+                "_export_path": "idle.animation_clip.json",
+                "bone_names": ["root"],
+                "model_curves": {
+                    "bone_0": {
+                        "bone_name": "root",
+                        "translation": {
+                            "x": [[0.0, 0.0], [1000.0, 0.0]],
+                            "y": [[0.0, 0.0], [1000.0, 0.0]],
+                            "z": [[0.0, 0.0], [1000.0, 0.0]],
+                        },
+                    }
+                },
+                "sampled_frame_count": 12,
+            }
+            summary = {
+                "id": "MM_Idle",
+                "name": "MM_Idle",
+                "duration_ms": 1000.0,
+                "frame_count": 30,
+                "sampled_frame_count": 12,
+                "bone_curve_count": 1,
+                "source_mode": "cue4parse_animation",
+                "export_path": "idle.animation_clip.json",
+            }
             self.exported.emit({
-                "status": "animation_clip_exported",
-                "animation_path": str(captured["export_animation_path"]),
-                "clip": {
-                    "id": "MM_Idle",
-                    "name": "MM_Idle",
-                    "duration_ms": 1000.0,
-                    "_export_path": "idle.animation_clip.json",
-                    "bone_names": ["root"],
-                    "model_curves": {
-                        "bone_0": {
-                            "bone_name": "root",
-                            "translation": {
-                                "x": [[0.0, 0.0], [1000.0, 0.0]],
-                                "y": [[0.0, 0.0], [1000.0, 0.0]],
-                                "z": [[0.0, 0.0], [1000.0, 0.0]],
-                            },
-                        }
-                    },
-                    "sampled_frame_count": 12,
+                "status": "animation_clip_batch_exported",
+                "selected_path": str(captured["export_animation_path"]),
+                "selected": {
+                    "status": "cached",
+                    "animation_path": str(captured["export_animation_path"]),
+                    "clip": clip,
+                    "summary": summary,
                 },
-                "summary": {
-                    "id": "MM_Idle",
-                    "name": "MM_Idle",
-                    "duration_ms": 1000.0,
-                    "frame_count": 30,
-                    "sampled_frame_count": 12,
-                    "bone_curve_count": 1,
-                    "source_mode": "cue4parse_animation",
-                    "export_path": "idle.animation_clip.json",
-                },
+                "results": {},
+                "count": 1,
+                "cached_count": 1,
+                "exported_count": 0,
+                "failed_count": 0,
             })
             self.finished.emit()
 
@@ -540,7 +617,7 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     fake_preview_module.ArPbrAssetPreviewWindow = FakeArPbrAssetPreviewWindow
     monkeypatch.setitem(sys.modules, "app.ar_pbr.preview_window", fake_preview_module)
     monkeypatch.setattr(owner_render, "_OwnerAnimationPanel", FakeOwnerAnimationPanel)
-    monkeypatch.setattr(owner_render, "_OwnerAnimationClipExportWorker", FakeAnimationExportWorker)
+    monkeypatch.setattr(owner_render, "_OwnerAnimationClipBatchExportWorker", FakeAnimationBatchExportWorker)
 
     owner = types.SimpleNamespace()
     window = owner_render.open_action_sequencer_owner_render_window(owner, project)
@@ -564,7 +641,7 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     assert window.owner_animation_preview_request["preview_backend"] == owner_render.OWNER_ANIMATION_PREVIEW_BACKEND
     assert window.owner_animation_preview_request["ar_pbr_animation_enabled"] is True
     assert window.owner_animation_preview_request["reference_pipeline"] == "UAssetInspector SamplePalette -> Bones UBO -> skinned shader"
-    assert window.owner_animation_preview_result["status"] == "animation_clip_exported"
+    assert window.owner_animation_preview_result["status"] == "animation_clip_batch_exported"
     assert window.owner_animation_preview_result["clip"] == "MM_Idle"
     assert window.owner_animation_preview_result["ar_pbr_animation_enabled"] is True
     assert window.owner_animation_preview_result["requires_gpu_palette_renderer"] is True
@@ -576,6 +653,7 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     assert window.owner_animation_sequence_plan["ar_pbr_deformation_enabled"] is True
     assert window.owner_animation_sequence_plan["deformation_mode"] == "gpu_bone_palette"
     assert window.owner_animation_preview_result["playback_result"]["status"] == "playing"
+    assert window.owner_animation_preview_result["cached_count"] == 1
     assert captured["attached_clip"]["id"] == "MM_Idle"
     assert captured["played_clip"] == "MM_Idle"
     assert window.owner_animation_clip_export["id"] == "MM_Idle"

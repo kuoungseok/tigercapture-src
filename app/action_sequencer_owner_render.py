@@ -32,6 +32,8 @@ from app.action_sequencer_unreal_asset_bridge import (
     default_owner_unreal_ar_pbr_path,
     export_owner_unreal_ar_pbr_asset,
     export_owner_unreal_animation_clip,
+    export_owner_unreal_animation_clips_batch,
+    owner_unreal_animation_clip_cache_status,
 )
 from app.action_sequencer_animation_sequence import (
     ACTION_SEQUENCE_REFERENCE_PIPELINE,
@@ -407,6 +409,53 @@ class _OwnerAnimationClipExportWorker(QThread):
         })
 
 
+class _OwnerAnimationClipBatchExportWorker(QThread):
+    exported = Signal(object)
+    failed = Signal(object)
+
+    def __init__(
+        self,
+        descriptor: OwnerRenderDescriptor,
+        animation_paths: list[Path],
+        *,
+        selected_path: Path | None = None,
+        max_samples: int = 48,
+        parent: QWidget | None = None,
+    ) -> None:
+        super().__init__(parent)
+        self._descriptor = descriptor
+        self._animation_paths = [Path(path) for path in animation_paths]
+        self._selected_path = Path(selected_path) if selected_path is not None else (self._animation_paths[0] if self._animation_paths else None)
+        self._max_samples = max(2, int(max_samples))
+
+    def run(self) -> None:
+        try:
+            results = export_owner_unreal_animation_clips_batch(
+                self._descriptor,
+                self._animation_paths,
+                max_samples=self._max_samples,
+            )
+        except Exception as exc:  # pragma: no cover - exercised through UI/manual QA
+            self.failed.emit({
+                "status": "batch_export_failed",
+                "error": type(exc).__name__,
+                "message": str(exc),
+            })
+            return
+        selected_key = str(self._selected_path) if self._selected_path is not None else ""
+        selected = results.get(selected_key) if selected_key else None
+        self.exported.emit({
+            "status": "animation_clip_batch_exported",
+            "selected_path": selected_key,
+            "selected": selected if isinstance(selected, dict) else None,
+            "results": results,
+            "count": len(results),
+            "cached_count": sum(1 for item in results.values() if item.get("status") == "cached"),
+            "exported_count": sum(1 for item in results.values() if item.get("status") == "animation_clip_exported"),
+            "failed_count": sum(1 for item in results.values() if item.get("status") == "export_failed"),
+        })
+
+
 def _animation_clip_summary(clip: dict[str, Any] | None) -> dict[str, Any]:
     data = clip if isinstance(clip, dict) else {}
     curves = data.get("model_curves") if isinstance(data.get("model_curves"), dict) else {}
@@ -602,6 +651,7 @@ class ActionSequencerOwnerRenderWindow(QWidget):
 class _OwnerAnimationPanel(QFrame):
     animation_selected = Signal(object)
     animation_preview_requested = Signal(object)
+    animation_cache_batch_requested = Signal(object)
 
     def __init__(self, descriptor: OwnerRenderDescriptor, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -630,6 +680,13 @@ class _OwnerAnimationPanel(QFrame):
         self._filter.textChanged.connect(self._refresh)
         layout.addWidget(self._filter)
 
+        self._cache_nearby_btn = QPushButton("Cache nearby", self)
+        self._cache_nearby_btn.setObjectName("OwnerAnimationCacheButton")
+        self._cache_nearby_btn.setIcon(app_icon("download", size=12))
+        self._cache_nearby_btn.setIconSize(icon_size(12))
+        self._cache_nearby_btn.clicked.connect(self._on_cache_nearby_clicked)
+        layout.addWidget(self._cache_nearby_btn)
+
         self._list = QListWidget(self)
         self._list.setObjectName("OwnerAnimationList")
         self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -657,6 +714,43 @@ class _OwnerAnimationPanel(QFrame):
         data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
         return Path(str(data)) if data else None
 
+    def preview_batch_paths(self, selected: Path | None = None, *, limit: int = 10) -> list[Path]:
+        selected = selected or self.selected_animation_path()
+        if self._list.count() <= 0:
+            return []
+        current_row = self._list.currentRow()
+        if selected is not None:
+            for index in range(self._list.count()):
+                item = self._list.item(index)
+                if Path(str(item.data(Qt.ItemDataRole.UserRole))) == selected:
+                    current_row = index
+                    break
+        if current_row < 0:
+            current_row = 0
+        ordered_rows = [current_row]
+        for offset in range(1, max(self._list.count(), int(limit))):
+            before = current_row - offset
+            after = current_row + offset
+            if before >= 0:
+                ordered_rows.append(before)
+            if after < self._list.count():
+                ordered_rows.append(after)
+            if len(ordered_rows) >= int(limit):
+                break
+        out: list[Path] = []
+        seen: set[str] = set()
+        for row in ordered_rows:
+            item = self._list.item(row)
+            if item is None:
+                continue
+            path = Path(str(item.data(Qt.ItemDataRole.UserRole)))
+            key = str(path)
+            if key in seen:
+                continue
+            seen.add(key)
+            out.append(path)
+        return out[: max(1, int(limit))]
+
     def set_sequence_status(self, message: str, *, state: str = "idle") -> None:
         self._sequence_status.setProperty("state", state)
         self._sequence_status.setText(message)
@@ -673,8 +767,12 @@ class _OwnerAnimationPanel(QFrame):
                 label = _animation_display_label(self._content_root, path)
                 if query and query not in label.casefold():
                     continue
-                item = QListWidgetItem(label)
+                cache = owner_unreal_animation_clip_cache_status(self.descriptor, path)
+                prefix = "✓" if cache.get("exists") and cache.get("fresh") else "○"
+                item = QListWidgetItem(f"{prefix} {label}")
                 item.setData(Qt.ItemDataRole.UserRole, str(path))
+                item.setData(Qt.ItemDataRole.UserRole + 1, str(cache.get("cache_path") or ""))
+                item.setData(Qt.ItemDataRole.UserRole + 2, "cached" if prefix == "✓" else "uncached")
                 if path == self.descriptor.idle_animation_path:
                     item.setToolTip("Default idle sequence")
                 elif path == self.descriptor.action_candidate_path:
@@ -683,6 +781,10 @@ class _OwnerAnimationPanel(QFrame):
                     item.setToolTip("Short pose or aim fragment. It applies a pose but may not visibly animate.")
                 else:
                     item.setToolTip("Playable animation sequence")
+                if prefix == "✓":
+                    item.setToolTip(f"{item.toolTip()}\nCached preview clip is ready.")
+                else:
+                    item.setToolTip(f"{item.toolTip()}\nPreview clip needs batch caching before instant playback.")
                 self._list.addItem(item)
                 if current is not None and path == current:
                     self._list.setCurrentItem(item)
@@ -716,10 +818,21 @@ class _OwnerAnimationPanel(QFrame):
         self.animation_selected.emit(path)
         self.animation_preview_requested.emit({
             "animation_path": path,
+            "batch_paths": [str(item) for item in self.preview_batch_paths(path, limit=10)],
             "clip": path.stem,
             "apply_frame_ms": 0,
             "play_once": True,
         })
+
+    def _on_cache_nearby_clicked(self) -> None:
+        paths = self.preview_batch_paths(limit=24)
+        if paths:
+            self.animation_cache_batch_requested.emit({
+                "animation_path": str(paths[0]),
+                "batch_paths": [str(path) for path in paths],
+                "clip": paths[0].stem,
+                "play_once": False,
+            })
 
 
 def open_action_sequencer_owner_render_window(owner: object, project_path: Path | str | None = None) -> QWidget:
@@ -828,10 +941,18 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
                 status.setText("Animation export failed: missing asset path")
             _set_sequence_status("Missing animation asset path.", state="error")
             return
+        raw_batch_paths = payload.get("batch_paths")
+        if isinstance(raw_batch_paths, (list, tuple)):
+            batch_paths = [Path(str(item)) for item in raw_batch_paths if str(item)]
+        else:
+            batch_paths = []
+        if path not in batch_paths:
+            batch_paths.insert(0, path)
         result = {
-            "status": "exporting_animation_clip",
+            "status": "caching_animation_batch",
             "clip": clip,
             "animation_path": str(path),
+            "batch_paths": [str(item) for item in batch_paths],
             "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
             "ar_pbr_animation_enabled": True,
             "play_once": bool(payload.get("play_once", True)),
@@ -841,14 +962,15 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
         setattr(window, "owner_animation_preview_result", result)
         status = getattr(window, "_status", None)
         if status is not None and hasattr(status, "setText"):
-            status.setText(f"Exporting animation sequence: {clip}")
-        _set_sequence_status(f"Exporting: {clip}", state="busy")
+            status.setText(f"Caching animation batch: {clip} + {max(0, len(batch_paths) - 1)} nearby")
+        _set_sequence_status(f"Caching batch: {len(batch_paths)} sequence(s)", state="busy")
 
-        worker = _OwnerAnimationClipExportWorker(descriptor, path, parent=window)
+        worker = _OwnerAnimationClipBatchExportWorker(descriptor, batch_paths, selected_path=path, parent=window)
 
         def _on_exported(event: dict[str, Any]) -> None:
-            exported_clip = event.get("clip") if isinstance(event, dict) else None
-            summary = event.get("summary") if isinstance(event, dict) else None
+            selected_event = event.get("selected") if isinstance(event, dict) else None
+            exported_clip = selected_event.get("clip") if isinstance(selected_event, dict) else None
+            summary = selected_event.get("summary") if isinstance(selected_event, dict) else None
             sequence_plan = build_owner_animation_sequence(
                 exported_clip if isinstance(exported_clip, dict) else None,
                 animation_path=path,
@@ -864,7 +986,8 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             )
             playback_result: dict[str, Any] | None = None
             playback_error = ""
-            if isinstance(exported_clip, dict) and sequence_plan.get("status") == "ready":
+            should_play = bool(payload.get("play_once", True))
+            if should_play and isinstance(exported_clip, dict) and sequence_plan.get("status") == "ready":
                 try:
                     attach = getattr(window, "attach_animation_clip", None)
                     apply_once = getattr(window, "apply_animation_preview_once", None)
@@ -884,9 +1007,10 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
                 except Exception as exc:
                     playback_error = str(exc)
             result = {
-                "status": "animation_clip_exported",
+                "status": "animation_clip_batch_exported",
                 "clip": clip,
                 "animation_path": str(path),
+                "batch_paths": [str(item) for item in batch_paths],
                 "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
                 "ar_pbr_animation_enabled": True,
                 "requires_gpu_palette_renderer": True,
@@ -898,11 +1022,18 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
                 "sequence_kind": "pose" if is_pose_clip else _animation_sequence_kind(path),
                 "playback_result": playback_result,
                 "playback_error": playback_error,
+                "batch_count": int(event.get("count", 0) or 0) if isinstance(event, dict) else 0,
+                "cached_count": int(event.get("cached_count", 0) or 0) if isinstance(event, dict) else 0,
+                "exported_count": int(event.get("exported_count", 0) or 0) if isinstance(event, dict) else 0,
+                "failed_count": int(event.get("failed_count", 0) or 0) if isinstance(event, dict) else 0,
                 "summary": dict(summary) if isinstance(summary, dict) else _animation_clip_summary(exported_clip),
             }
             setattr(window, "owner_animation_preview_result", result)
             setattr(window, "owner_animation_clip_export", exported_clip)
             setattr(window, "owner_animation_sequence_plan", sequence_plan)
+            refresh = getattr(animation_panel, "_refresh", None)
+            if callable(refresh):
+                refresh()
             status = getattr(window, "_status", None)
             if status is not None and hasattr(status, "setText"):
                 if playback_error:
@@ -915,12 +1046,14 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
                 elif isinstance(playback_result, dict) and playback_result.get("status") == "playing":
                     status.setText(
                         f"Playing animation sequence: {clip} "
-                        f"({sequence_info.get('sample_count', 0)} samples, {sequence_info.get('bone_count', 0)} bones)"
+                        f"({sequence_info.get('sample_count', 0)} samples, {sequence_info.get('bone_count', 0)} bones, "
+                        f"batch {result['cached_count']} cached/{result['exported_count']} exported)"
                     )
                 else:
                     status.setText(
                         f"Animation sequence ready: {clip} "
-                        f"({sequence_info.get('sample_count', 0)} samples, {sequence_info.get('bone_count', 0)} bones)"
+                        f"({sequence_info.get('sample_count', 0)} samples, {sequence_info.get('bone_count', 0)} bones, "
+                        f"batch {result['cached_count']} cached/{result['exported_count']} exported)"
                     )
             duration_s = float(sequence_info.get("duration_ms") or 0.0) / 1000.0
             panel_state = "error" if playback_error else "ready"
@@ -933,7 +1066,7 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             _set_sequence_status(
                 f"Ready: {clip} / {duration_s:.2f}s / "
                 f"{sequence_info.get('sample_count', 0)} samples / {sequence_info.get('bone_count', 0)} bones"
-                f"{playback_suffix}",
+                f"{playback_suffix} / batch {result['cached_count']} cached, {result['exported_count']} exported",
                 state=panel_state,
             )
 
@@ -967,6 +1100,7 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
 
     animation_panel.animation_selected.connect(_on_animation_selected)
     animation_panel.animation_preview_requested.connect(_on_animation_preview_requested)
+    animation_panel.animation_cache_batch_requested.connect(_on_animation_preview_requested)
     setattr(owner, "_action_sequencer_owner_render_window", window)
     window.show()
     window.raise_()
@@ -1138,6 +1272,15 @@ def _owner_animation_panel_qss() -> str:
         border-radius: 5px;
         padding: 7px 8px;
         selection-background-color: #2E6CE6;
+    }
+    QPushButton#OwnerAnimationCacheButton {
+        color: #DDE8F7;
+        background: #121A24;
+        border: 1px solid #2A3A4D;
+        border-radius: 5px;
+        padding: 5px 7px;
+        font-size: 10px;
+        font-weight: 760;
     }
     QListWidget#OwnerAnimationList {
         color: #DCE5F2;

@@ -32,16 +32,11 @@ def _sample_times(duration_s: float, max_samples: int) -> list[float]:
     return [duration_s * idx / max(1, sample_count - 1) for idx in range(sample_count)]
 
 
-def _main() -> dict:
-    asset_path = os.environ.get("TIGERSTUDIO_UNREAL_ANIM_ASSET", "").strip()
-    output_path = os.environ.get("TIGERSTUDIO_UNREAL_ANIM_OUT", "").strip()
-    reference_mesh_path = os.environ.get("TIGERSTUDIO_UNREAL_REFERENCE_MESH", "").strip()
-    max_samples = int(os.environ.get("TIGERSTUDIO_UNREAL_ANIM_MAX_SAMPLES", "90") or "90")
-    source_file = os.environ.get("TIGERSTUDIO_UNREAL_ANIM_SOURCE_FILE", "").strip()
+def _export_clip(asset_path: str, output_path: str, reference_mesh_path: str, max_samples: int, source_file: str) -> dict:
     if not asset_path:
-        raise RuntimeError("TIGERSTUDIO_UNREAL_ANIM_ASSET is required.")
+        raise RuntimeError("AnimSequence asset path is required.")
     if not output_path:
-        raise RuntimeError("TIGERSTUDIO_UNREAL_ANIM_OUT is required.")
+        raise RuntimeError("Animation output path is required.")
 
     asset = unreal.load_asset(asset_path)
     if asset is None:
@@ -115,6 +110,73 @@ def _main() -> dict:
     }
 
 
+def _main_batch(batch_json: str, batch_out: str) -> dict:
+    items = json.loads(batch_json)
+    if not isinstance(items, list):
+        raise RuntimeError("TIGERSTUDIO_UNREAL_ANIM_BATCH_JSON must be a list.")
+    results = []
+    for index, item in enumerate(items):
+        data = item if isinstance(item, dict) else {}
+        out_path = str(data.get("out") or "").strip()
+        source_file = str(data.get("source_file") or "").strip()
+        try:
+            payload = _export_clip(
+                str(data.get("asset") or "").strip(),
+                out_path,
+                str(data.get("reference_mesh") or "").strip(),
+                int(data.get("max_samples") or 90),
+                source_file,
+            )
+            _write_payload(out_path, payload)
+            results.append({"ok": True, "index": index, "out": out_path, "source_file": source_file})
+        except Exception as exc:
+            payload = {
+                "schema": "tigerstudio.ar_pbr.unreal_animation_clip_export.v1",
+                "ok": False,
+                "error": type(exc).__name__,
+                "message": str(exc),
+                "traceback": traceback.format_exc(limit=8),
+            }
+            if out_path:
+                _write_payload(out_path, payload)
+            results.append({
+                "ok": False,
+                "index": index,
+                "out": out_path,
+                "source_file": source_file,
+                "error": type(exc).__name__,
+                "message": str(exc),
+            })
+    payload = {
+        "schema": "tigerstudio.ar_pbr.unreal_animation_batch_export.v1",
+        "exporter": "unreal_editor_python_batch",
+        "ok": all(bool(item.get("ok")) for item in results),
+        "count": len(results),
+        "results": results,
+    }
+    if batch_out:
+        _write_payload(batch_out, payload)
+    return payload
+
+
+def _main() -> dict:
+    batch_json = os.environ.get("TIGERSTUDIO_UNREAL_ANIM_BATCH_JSON", "").strip()
+    if batch_json:
+        return _main_batch(batch_json, os.environ.get("TIGERSTUDIO_UNREAL_ANIM_BATCH_OUT", "").strip())
+
+    asset_path = os.environ.get("TIGERSTUDIO_UNREAL_ANIM_ASSET", "").strip()
+    output_path = os.environ.get("TIGERSTUDIO_UNREAL_ANIM_OUT", "").strip()
+    reference_mesh_path = os.environ.get("TIGERSTUDIO_UNREAL_REFERENCE_MESH", "").strip()
+    max_samples = int(os.environ.get("TIGERSTUDIO_UNREAL_ANIM_MAX_SAMPLES", "90") or "90")
+    source_file = os.environ.get("TIGERSTUDIO_UNREAL_ANIM_SOURCE_FILE", "").strip()
+    if not asset_path:
+        raise RuntimeError("TIGERSTUDIO_UNREAL_ANIM_ASSET is required.")
+    if not output_path:
+        raise RuntimeError("TIGERSTUDIO_UNREAL_ANIM_OUT is required.")
+
+    return _export_clip(asset_path, output_path, reference_mesh_path, max_samples, source_file)
+
+
 def _write_payload(path: str, payload: dict) -> None:
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     with open(path, "w", encoding="utf-8") as handle:
@@ -122,12 +184,19 @@ def _write_payload(path: str, payload: dict) -> None:
 
 
 try:
-    out_path = os.environ.get("TIGERSTUDIO_UNREAL_ANIM_OUT", "").strip()
+    out_path = (
+        os.environ.get("TIGERSTUDIO_UNREAL_ANIM_OUT", "").strip()
+        or os.environ.get("TIGERSTUDIO_UNREAL_ANIM_BATCH_OUT", "").strip()
+    )
     payload = _main()
-    _write_payload(out_path, payload)
+    if out_path:
+        _write_payload(out_path, payload)
     unreal.log("TIGER_UNREAL_ANIM_EXPORT=" + json.dumps({"ok": True, "out": out_path}, ensure_ascii=False))
 except Exception as exc:
-    out_path = os.environ.get("TIGERSTUDIO_UNREAL_ANIM_OUT", "").strip()
+    out_path = (
+        os.environ.get("TIGERSTUDIO_UNREAL_ANIM_OUT", "").strip()
+        or os.environ.get("TIGERSTUDIO_UNREAL_ANIM_BATCH_OUT", "").strip()
+    )
     payload = {
         "schema": "tigerstudio.ar_pbr.unreal_animation_clip_export.v1",
         "ok": False,

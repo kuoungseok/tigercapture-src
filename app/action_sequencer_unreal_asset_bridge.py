@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import os
 import subprocess
+import time
 from pathlib import Path
 from typing import Any
 
@@ -34,6 +35,40 @@ def default_owner_unreal_animation_clip_path(
     owner = _safe_file_stem(str(getattr(owner_descriptor, "owner_name", "Owner") or "Owner"))
     animation = _safe_file_stem(Path(animation_path).stem or "Animation")
     return base / f"action_sequencer_{project_stem}_{owner}_{animation}.animation_clip.json"
+
+
+def owner_unreal_animation_clip_cache_status(
+    owner_descriptor: Any,
+    animation_path: str | Path,
+    *,
+    max_samples: int = 48,
+) -> dict[str, Any]:
+    """Return a cheap cache hint for an owner AnimSequence preview clip."""
+
+    asset_path = Path(animation_path)
+    target = default_owner_unreal_animation_clip_path(owner_descriptor, asset_path)
+    status = {
+        "animation_path": str(asset_path),
+        "cache_path": str(target),
+        "exists": bool(target.exists() and target.stat().st_size > 0),
+        "fresh": False,
+        "validated": False,
+        "max_samples": int(max_samples),
+    }
+    if not status["exists"]:
+        return status
+    reference_mesh = getattr(owner_descriptor, "render_asset_path", None)
+    reference_mesh_path = Path(reference_mesh) if reference_mesh is not None else None
+    if reference_mesh_path is not None and not reference_mesh_path.exists():
+        reference_mesh_path = None
+    try:
+        source_mtime = asset_path.stat().st_mtime
+        if reference_mesh_path is not None:
+            source_mtime = max(source_mtime, reference_mesh_path.stat().st_mtime)
+        status["fresh"] = target.stat().st_mtime >= source_mtime
+    except Exception:
+        status["fresh"] = False
+    return status
 
 
 def export_owner_unreal_ar_pbr_asset(
@@ -192,6 +227,67 @@ def export_owner_unreal_animation_clip(
     return clip
 
 
+def export_owner_unreal_animation_clips_batch(
+    owner_descriptor: Any,
+    animation_paths: list[str | Path] | tuple[str | Path, ...],
+    *,
+    max_samples: int = 48,
+    timeout_s: float = 900.0,
+    use_cache: bool = True,
+) -> dict[str, dict[str, Any]]:
+    """Export multiple owner AnimSequences using one Unreal Editor fallback session.
+
+    Per-click one-clip export is too slow for an Action Sequencer browser. This
+    entry point validates existing caches first, then exports the remaining
+    AnimSequences in a single Unreal Editor process so the user can browse the
+    list more like an asset inspector.
+    """
+
+    paths = _unique_existing_paths(animation_paths)
+    results: dict[str, dict[str, Any]] = {}
+    missing: list[Path] = []
+    project_path = Path(getattr(owner_descriptor, "project_path", "") or "")
+    if not project_path.exists():
+        raise RuntimeError(f"Unreal project file does not exist: {project_path}")
+
+    reference_mesh = getattr(owner_descriptor, "render_asset_path", None)
+    reference_mesh_path = Path(reference_mesh) if reference_mesh is not None else None
+    if reference_mesh_path is not None and not reference_mesh_path.exists():
+        reference_mesh_path = None
+
+    for asset_path in paths:
+        target = default_owner_unreal_animation_clip_path(owner_descriptor, asset_path)
+        if use_cache:
+            cached = _load_cached_animation_clip_if_fresh(
+                target,
+                asset_path=asset_path,
+                reference_mesh_path=reference_mesh_path,
+                max_samples=max_samples,
+            )
+            if cached is not None:
+                results[str(asset_path)] = {
+                    "status": "cached",
+                    "animation_path": str(asset_path),
+                    "cache_path": str(target),
+                    "clip": cached,
+                    "summary": _clip_summary(cached),
+                }
+                continue
+        missing.append(asset_path)
+
+    if not missing:
+        return results
+
+    batch_results = _export_owner_unreal_animation_clips_via_editor_batch(
+        owner_descriptor,
+        missing,
+        max_samples=max_samples,
+        timeout_s=timeout_s,
+    )
+    results.update(batch_results)
+    return results
+
+
 def _load_cached_animation_clip_if_fresh(
     target: Path,
     *,
@@ -314,6 +410,180 @@ def _export_owner_unreal_animation_clip_via_editor(
     return clip
 
 
+def _export_owner_unreal_animation_clips_via_editor_batch(
+    owner_descriptor: Any,
+    animation_paths: list[Path],
+    *,
+    max_samples: int,
+    timeout_s: float,
+) -> dict[str, dict[str, Any]]:
+    from app.unreal_link_reference_paths import DEFAULT_UE_ENGINE_ROOT, UE_ENGINE_ENV
+
+    project_path = Path(getattr(owner_descriptor, "project_path", "") or "")
+    if not UNREAL_EDITOR_ANIMATION_EXPORT_SCRIPT.exists():
+        raise RuntimeError(f"Unreal Editor fallback script is missing: {UNREAL_EDITOR_ANIMATION_EXPORT_SCRIPT}")
+    ue_root = Path(os.environ.get(UE_ENGINE_ENV, "").strip() or DEFAULT_UE_ENGINE_ROOT)
+    editor_cmd = ue_root / "Engine" / "Binaries" / "Win64" / "UnrealEditor-Cmd.exe"
+    if not editor_cmd.exists():
+        editor_cmd = ue_root / "Engine" / "Binaries" / "Win64" / "UnrealEditor.exe"
+    if not editor_cmd.exists():
+        raise RuntimeError(f"Unreal Editor fallback is unavailable: {editor_cmd}")
+
+    reference_mesh = getattr(owner_descriptor, "render_asset_path", None)
+    reference_mesh_game_path = ""
+    if reference_mesh is not None:
+        reference_mesh_path = Path(reference_mesh)
+        if reference_mesh_path.exists():
+            reference_mesh_game_path = _content_asset_game_path(project_path, reference_mesh_path)
+
+    batch_items: list[dict[str, Any]] = []
+    results: dict[str, dict[str, Any]] = {}
+    for asset_path in animation_paths:
+        target = default_owner_unreal_animation_clip_path(owner_descriptor, asset_path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            item = {
+                "asset": _content_asset_game_path(project_path, asset_path),
+                "out": str(target),
+                "source_file": str(asset_path),
+                "max_samples": int(max_samples),
+            }
+            if reference_mesh_game_path:
+                item["reference_mesh"] = reference_mesh_game_path
+            batch_items.append(item)
+        except Exception as exc:
+            results[str(asset_path)] = {
+                "status": "export_failed",
+                "animation_path": str(asset_path),
+                "cache_path": str(target),
+                "error": type(exc).__name__,
+                "message": str(exc),
+            }
+
+    if not batch_items:
+        return results
+
+    manifest = PROJECT_ROOT / "debugCapture" / "action_sequencer_animation_clips" / f"batch_{int(time.time() * 1000)}.json"
+    manifest.parent.mkdir(parents=True, exist_ok=True)
+    env = dict(os.environ)
+    env.update({
+        "TIGERSTUDIO_UNREAL_ANIM_BATCH_JSON": json.dumps(batch_items, ensure_ascii=False),
+        "TIGERSTUDIO_UNREAL_ANIM_BATCH_OUT": str(manifest),
+    })
+    command = [
+        str(editor_cmd),
+        str(project_path),
+        "-unattended",
+        "-nop4",
+        "-nosplash",
+        "-NullRHI",
+        f"-ExecutePythonScript={UNREAL_EDITOR_ANIMATION_EXPORT_SCRIPT}",
+    ]
+    startupinfo = None
+    if os.name == "nt":
+        startupinfo = subprocess.STARTUPINFO()
+        startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
+        startupinfo.wShowWindow = 0
+
+    completed = subprocess.run(
+        command,
+        cwd=str(PROJECT_ROOT),
+        env=env,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        startupinfo=startupinfo,
+        timeout=max(30.0, float(timeout_s)),
+        check=False,
+    )
+    batch_payload: dict[str, Any] = {}
+    if manifest.exists() and manifest.stat().st_size > 0:
+        try:
+            batch_payload = json.loads(manifest.read_text(encoding="utf-8"))
+        except Exception:
+            batch_payload = {}
+    if completed.returncode != 0 and not batch_payload:
+        message = _bridge_error_message(completed.stdout, completed.stderr)
+        for item in batch_items:
+            source = str(item.get("source_file") or "")
+            results[source] = {
+                "status": "export_failed",
+                "animation_path": source,
+                "cache_path": str(item.get("out") or ""),
+                "error": "UnrealEditorBatchFailed",
+                "message": message,
+            }
+        return results
+
+    for item in batch_items:
+        source = str(item.get("source_file") or "")
+        target = Path(str(item.get("out") or ""))
+        if target.exists() and target.stat().st_size > 0:
+            try:
+                payload = json.loads(target.read_text(encoding="utf-8"))
+                if isinstance(payload, dict) and payload.get("ok") is False:
+                    raise RuntimeError(str(payload.get("message") or payload.get("error") or "export failed"))
+                clip = payload.get("animation_clip") if isinstance(payload, dict) else None
+                if not isinstance(clip, dict):
+                    raise RuntimeError("invalid animation payload")
+                clip = _normalize_animation_clip_payload(payload, clip)
+                clip["_export_path"] = str(target)
+                clip["_exporter"] = str(payload.get("exporter") or "unreal_editor_python_batch")
+                results[source] = {
+                    "status": "animation_clip_exported",
+                    "animation_path": source,
+                    "cache_path": str(target),
+                    "clip": clip,
+                    "summary": _clip_summary(clip),
+                }
+                continue
+            except Exception as exc:
+                results[source] = {
+                    "status": "export_failed",
+                    "animation_path": source,
+                    "cache_path": str(target),
+                    "error": type(exc).__name__,
+                    "message": str(exc),
+                }
+                continue
+        results[source] = {
+            "status": "export_failed",
+            "animation_path": source,
+            "cache_path": str(target),
+            "error": "MissingOutput",
+            "message": "Unreal Editor batch export did not write this clip.",
+        }
+    return results
+
+
+def _unique_existing_paths(paths: list[str | Path] | tuple[str | Path, ...]) -> list[Path]:
+    out: list[Path] = []
+    seen: set[str] = set()
+    for value in paths:
+        path = Path(value)
+        key = str(path)
+        if key in seen or not path.exists():
+            continue
+        seen.add(key)
+        out.append(path)
+    return out
+
+
+def _clip_summary(clip: dict[str, Any] | None) -> dict[str, Any]:
+    data = clip if isinstance(clip, dict) else {}
+    curves = data.get("model_curves") if isinstance(data.get("model_curves"), dict) else {}
+    return {
+        "id": str(data.get("id") or data.get("name") or ""),
+        "name": str(data.get("name") or data.get("id") or ""),
+        "duration_ms": float(data.get("duration_ms", 0.0) or 0.0),
+        "frame_count": int(data.get("frame_count", 0) or 0),
+        "sampled_frame_count": int(data.get("sampled_frame_count", 0) or 0),
+        "bone_curve_count": len(curves),
+        "source_mode": str(data.get("source_mode") or data.get("_exporter") or "unreal_editor_python_batch"),
+        "export_path": str(data.get("_export_path") or ""),
+    }
+
+
 def _normalize_animation_clip_payload(payload: dict[str, Any], clip: dict[str, Any]) -> dict[str, Any]:
     out = dict(clip)
     rotation_space = str(out.get("rotation_space") or payload.get("rotation_space") or "")
@@ -381,4 +651,6 @@ __all__ = [
     "default_owner_unreal_animation_clip_path",
     "export_owner_unreal_ar_pbr_asset",
     "export_owner_unreal_animation_clip",
+    "export_owner_unreal_animation_clips_batch",
+    "owner_unreal_animation_clip_cache_status",
 ]
