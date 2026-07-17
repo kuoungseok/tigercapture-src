@@ -148,8 +148,105 @@ def test_owner_unreal_ar_pbr_bridge_exports_target_descriptor(tmp_path, monkeypa
     assert "1234" in command
 
 
+def test_owner_unreal_animation_bridge_exports_clip(tmp_path, monkeypatch) -> None:
+    from app.action_sequencer_owner_render import discover_owner_render_descriptor
+    from app.action_sequencer_unreal_asset_bridge import export_owner_unreal_animation_clip
+
+    project = tmp_path / "ActionSequencer" / "ActionSequencer.uproject"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text('{"EngineAssociation":"5.8"}', encoding="utf-8")
+    content = project.parent / "Content"
+    _touch(content / "Variant_Combat" / "Blueprints" / "BP_CombatCharacter.uasset")
+    _touch(content / "Characters" / "Mannequins" / "Meshes" / "SKM_Manny_Simple.uasset")
+    animation = _touch(content / "Characters" / "Mannequins" / "Anims" / "Unarmed" / "MM_Idle.uasset")
+    descriptor = discover_owner_render_descriptor(project)
+    target = tmp_path / "idle.animation_clip.json"
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append(list(command))
+        target.write_text(
+            json.dumps({
+                "schema": "tigerstudio.ar_pbr.unreal_animation_clip_export.v1",
+                "animation_clip": {"id": "MM_Idle", "name": "MM_Idle", "duration_ms": 1000.0, "model_curves": {}},
+            }),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout='{"ok":true}', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    clip = export_owner_unreal_animation_clip(descriptor, animation, target, max_samples=24)
+
+    assert clip["id"] == "MM_Idle"
+    assert clip["_export_path"] == str(target)
+    command = calls[0]
+    assert "export-animation-clip" in command
+    assert "--asset" in command
+    assert str(animation) in command
+    assert "--max-samples" in command
+    assert "24" in command
+    assert "--reference-mesh" in command
+    assert str(descriptor.render_asset_path) in command
+
+
+def test_owner_unreal_animation_bridge_falls_back_to_editor_python(tmp_path, monkeypatch) -> None:
+    from app.action_sequencer_owner_render import discover_owner_render_descriptor
+    from app.action_sequencer_unreal_asset_bridge import export_owner_unreal_animation_clip
+    from app.unreal_link_reference_paths import UE_ENGINE_ENV
+
+    project = tmp_path / "ActionSequencer" / "ActionSequencer.uproject"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text('{"EngineAssociation":"5.8"}', encoding="utf-8")
+    content = project.parent / "Content"
+    _touch(content / "Variant_Combat" / "Blueprints" / "BP_CombatCharacter.uasset")
+    _touch(content / "Characters" / "Mannequins" / "Meshes" / "SKM_Manny_Simple.uasset")
+    animation = _touch(content / "Characters" / "Mannequins" / "Anims" / "Unarmed" / "MM_Idle.uasset")
+    engine = tmp_path / "UE_5.8"
+    editor = _touch(engine / "Engine" / "Binaries" / "Win64" / "UnrealEditor-Cmd.exe")
+    monkeypatch.setenv(UE_ENGINE_ENV, str(engine))
+    descriptor = discover_owner_render_descriptor(project)
+    target = tmp_path / "idle.fallback.animation_clip.json"
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append(list(command))
+        if "dotnet" in str(command[0]).lower():
+            return subprocess.CompletedProcess(command, 1, stdout="", stderr='{"message":"cue4parse failed"}')
+        assert str(editor) == command[0]
+        assert kwargs["env"]["TIGERSTUDIO_UNREAL_ANIM_ASSET"] == "/Game/Characters/Mannequins/Anims/Unarmed/MM_Idle"
+        assert kwargs["env"]["TIGERSTUDIO_UNREAL_REFERENCE_MESH"] == "/Game/Characters/Mannequins/Meshes/SKM_Manny_Simple"
+        target.write_text(
+            json.dumps({
+                "schema": "tigerstudio.ar_pbr.unreal_animation_clip_export.v1",
+                "exporter": "unreal_editor_python",
+                "animation_clip": {
+                    "id": "MM_Idle",
+                    "name": "MM_Idle",
+                    "duration_ms": 1000.0,
+                    "source_mode": "unreal_editor_python_pose",
+                    "model_curves": {"bone_0": {}},
+                },
+            }),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    clip = export_owner_unreal_animation_clip(descriptor, animation, target, max_samples=12)
+
+    assert clip["id"] == "MM_Idle"
+    assert clip["_exporter"] == "unreal_editor_python"
+    assert len(calls) == 2
+    assert "export-animation-clip" in calls[0]
+    assert any(str(item).startswith("-ExecutePythonScript=") for item in calls[1])
+
+
 def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None:
     import app.action_sequencer_owner_render as owner_render
+
+    assert owner_render.OWNER_ANIMATION_PANEL_WIDTH == 200
 
     project = tmp_path / "ActionSequencer" / "ActionSequencer.uproject"
     project.parent.mkdir(parents=True, exist_ok=True)
@@ -162,18 +259,27 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     exported_asset = tmp_path / "owner.arpbr"
     exported_asset.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(owner_render, "export_owner_unreal_ar_pbr_asset", lambda _descriptor: exported_asset)
+    monkeypatch.setattr(
+        owner_render,
+        "export_owner_unreal_animation_clip",
+        lambda _descriptor, _path: {"id": "MM_Idle", "name": "MM_Idle", "duration_ms": 1000.0, "model_curves": {}},
+    )
 
     captured: dict[str, object] = {}
 
     class FakeSignal:
+        def __init__(self, key: str) -> None:
+            self._key = key
+
         def connect(self, callback) -> None:
-            captured["animation_callback"] = callback
+            captured[self._key] = callback
 
     class FakeOwnerAnimationPanel:
         def __init__(self, descriptor) -> None:
             captured["panel_descriptor"] = descriptor
             self._descriptor = descriptor
-            self.animation_selected = FakeSignal()
+            self.animation_selected = FakeSignal("animation_callback")
+            self.animation_preview_requested = FakeSignal("animation_preview_callback")
 
         def selected_animation_path(self):
             return self._descriptor.idle_animation_path
@@ -182,6 +288,7 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
         def __init__(self, *args, **kwargs) -> None:
             captured["args"] = args
             captured["kwargs"] = kwargs
+            self._attached_clips = set()
 
         def setWindowTitle(self, title: str) -> None:
             captured["title"] = title
@@ -194,6 +301,18 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
 
         def activateWindow(self) -> None:
             captured["activated"] = True
+
+        def apply_animation_preview_once(self, clip: str):
+            captured.setdefault("preview_calls", []).append(clip)
+            captured["preview_clip"] = clip
+            if clip in self._attached_clips:
+                return {"status": "playing", "clip": clip}
+            return {"status": "unavailable", "clip": clip}
+
+        def attach_animation_clip(self, clip: dict):
+            captured["attached_animation_clip"] = dict(clip)
+            self._attached_clips.add(str(clip.get("id") or clip.get("name") or ""))
+            return dict(clip)
 
     fake_preview_module = types.ModuleType("app.ar_pbr.preview_window")
     fake_preview_module.ArPbrAssetPreviewWindow = FakeArPbrAssetPreviewWindow
@@ -211,6 +330,17 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     assert captured["kwargs"]["initial_lighting"]["show_environment_background"] is False
     assert captured["panel_descriptor"].animation_sequence_paths
     assert callable(captured["animation_callback"])
+    assert callable(captured["animation_preview_callback"])
+    captured["animation_preview_callback"]({
+        "animation_path": content / "Characters" / "Mannequins" / "Anims" / "Unarmed" / "MM_Idle.uasset",
+        "clip": "MM_Idle",
+        "apply_frame_ms": 0,
+        "play_once": True,
+    })
+    assert captured["preview_clip"] == "MM_Idle"
+    assert captured["preview_calls"] == ["MM_Idle", "MM_Idle"]
+    assert captured["attached_animation_clip"]["id"] == "MM_Idle"
+    assert window.owner_animation_preview_result == {"status": "playing", "clip": "MM_Idle"}
     assert captured["shown"] is True
     assert captured["raised"] is True
     assert captured["activated"] is True

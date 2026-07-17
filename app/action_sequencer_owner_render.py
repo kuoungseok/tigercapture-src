@@ -31,12 +31,14 @@ from app.action_sequencer_ar_pbr_proxy import (
 from app.action_sequencer_unreal_asset_bridge import (
     default_owner_unreal_ar_pbr_path,
     export_owner_unreal_ar_pbr_asset,
+    export_owner_unreal_animation_clip,
 )
 from app.unreal_link_reference_paths import unreal_link_reference_roots
 
 
 ACTION_SEQUENCER_PROJECT_ENV = "TIGERSTUDIO_ACTION_SEQUENCER_PROJECT"
 DEFAULT_ACTION_SEQUENCER_PROJECT = Path("E:/ue5example/ActionSequencer/ActionSequencer.uproject")
+OWNER_ANIMATION_PANEL_WIDTH = 200
 OWNER_STAGE_PREVIEW_VIEW = {
     "pitch": 0.0,
     "yaw": -90.0,
@@ -490,6 +492,7 @@ class ActionSequencerOwnerRenderWindow(QWidget):
 
 class _OwnerAnimationPanel(QFrame):
     animation_selected = Signal(object)
+    animation_preview_requested = Signal(object)
 
     def __init__(self, descriptor: OwnerRenderDescriptor, parent: QWidget | None = None) -> None:
         super().__init__(parent)
@@ -497,7 +500,7 @@ class _OwnerAnimationPanel(QFrame):
         self._content_root = descriptor.project_path.parent / "Content"
         self._all_paths = list(descriptor.animation_sequence_paths)
         self.setObjectName("OwnerAnimationPanel")
-        self.setFixedWidth(285)
+        self.setFixedWidth(OWNER_ANIMATION_PANEL_WIDTH)
         self.setStyleSheet(_owner_animation_panel_qss())
 
         layout = QVBoxLayout(self)
@@ -520,7 +523,11 @@ class _OwnerAnimationPanel(QFrame):
 
         self._list = QListWidget(self)
         self._list.setObjectName("OwnerAnimationList")
+        self._list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._list.setTextElideMode(Qt.TextElideMode.ElideNone)
         self._list.currentItemChanged.connect(self._on_current_item_changed)
+        self._list.itemClicked.connect(self._on_item_clicked)
         layout.addWidget(self._list, stretch=1)
 
         hint = QLabel("Select an animation for the Owner action slot.", self)
@@ -578,6 +585,19 @@ class _OwnerAnimationPanel(QFrame):
         data = current.data(Qt.ItemDataRole.UserRole)
         if data:
             self.animation_selected.emit(Path(str(data)))
+
+    def _on_item_clicked(self, item: QListWidgetItem) -> None:
+        data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        if not data:
+            return
+        path = Path(str(data))
+        self.animation_selected.emit(path)
+        self.animation_preview_requested.emit({
+            "animation_path": path,
+            "clip": path.stem,
+            "apply_frame_ms": 0,
+            "play_once": True,
+        })
 
 
 def open_action_sequencer_owner_render_window(owner: object, project_path: Path | str | None = None) -> QWidget:
@@ -638,7 +658,45 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
         if status is not None and hasattr(status, "setText"):
             status.setText(f"Animation selected: {path.stem}")
 
+    def _on_animation_preview_requested(payload: dict[str, Any]) -> None:
+        animation_path = payload.get("animation_path")
+        path = Path(str(animation_path)) if animation_path else None
+        if path is not None:
+            setattr(window, "owner_selected_animation_path", path)
+        setattr(window, "owner_animation_preview_request", dict(payload))
+        clip = str(payload.get("clip") or (path.stem if path is not None else ""))
+        result = None
+        if hasattr(window, "apply_animation_preview_once"):
+            result = window.apply_animation_preview_once(clip)
+            if (
+                isinstance(result, dict)
+                and result.get("status") == "unavailable"
+                and path is not None
+                and hasattr(window, "attach_animation_clip")
+            ):
+                status = getattr(window, "_status", None)
+                if status is not None and hasattr(status, "setText"):
+                    status.setText(f"Exporting animation: {path.stem}")
+                try:
+                    exported_clip = export_owner_unreal_animation_clip(descriptor, path)
+                    window.attach_animation_clip(exported_clip)
+                    clip_id = str(exported_clip.get("id") or exported_clip.get("name") or clip)
+                    result = window.apply_animation_preview_once(clip_id)
+                except Exception as exc:
+                    result = {
+                        "status": "failed",
+                        "clip": clip,
+                        "reason": f"{type(exc).__name__}: {exc}",
+                    }
+        setattr(window, "owner_animation_preview_result", result)
+        status = getattr(window, "_status", None)
+        if status is not None and hasattr(status, "setText") and isinstance(result, dict) and result.get("status") == "unavailable":
+            status.setText(f"Animation queued: {clip} (clip data not exported yet)")
+        elif status is not None and hasattr(status, "setText") and isinstance(result, dict) and result.get("status") == "failed":
+            status.setText(f"Animation export failed: {clip}")
+
     animation_panel.animation_selected.connect(_on_animation_selected)
+    animation_panel.animation_preview_requested.connect(_on_animation_preview_requested)
     setattr(owner, "_action_sequencer_owner_render_window", window)
     window.show()
     window.raise_()
@@ -813,6 +871,7 @@ def _owner_animation_panel_qss() -> str:
 
 __all__ = [
     "ACTION_SEQUENCER_PROJECT_ENV",
+    "OWNER_ANIMATION_PANEL_WIDTH",
     "DEFAULT_ACTION_SEQUENCER_PROJECT",
     "OWNER_STAGE_PREVIEW_VIEW",
     "ActionSequencerOwnerRenderWindow",
@@ -823,6 +882,7 @@ __all__ = [
     "default_owner_unreal_ar_pbr_path",
     "discover_owner_render_descriptor",
     "export_owner_unreal_ar_pbr_asset",
+    "export_owner_unreal_animation_clip",
     "open_action_sequencer_owner_render_window",
     "open_uasset_inspector_for_owner",
     "render_owner_preview_frame",

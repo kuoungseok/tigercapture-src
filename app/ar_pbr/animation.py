@@ -198,13 +198,9 @@ def _apply_skin_animation(
     changed = False
     for idx, raw_vertex in enumerate(vertices):
         v = _vec3(raw_vertex, (0.0, 0.0, 0.0))
-        rows = weights[idx] if idx < len(weights) else []
-        if not isinstance(rows, list):
-            rows = []
+        rows = _normalized_weight_rows(weights[idx] if idx < len(weights) else [])
         delta = [0.0, 0.0, 0.0]
         for row in rows[:8]:
-            if not isinstance(row, Mapping):
-                continue
             bone_id = str(row.get("bone_id") or row.get("model_id") or "")
             try:
                 weight = max(0.0, min(1.0, float(row.get("weight", 0.0) or 0.0)))
@@ -296,14 +292,10 @@ def _apply_matrix_skin_animation(
     for idx, raw_vertex in enumerate(vertices):
         v = _vec3(raw_vertex, (0.0, 0.0, 0.0))
         hv = np.asarray([v[0], v[1], v[2], 1.0], dtype=np.float64)
-        rows = weights[idx] if idx < len(weights) else []
-        if not isinstance(rows, list):
-            rows = []
+        rows = _normalized_weight_rows(weights[idx] if idx < len(weights) else [])
         accum = np.zeros(4, dtype=np.float64)
         total = 0.0
         for row in rows[:8]:
-            if not isinstance(row, Mapping):
-                continue
             bone_id = str(row.get("bone_id") or row.get("model_id") or "")
             mat = skin_mats.get(bone_id)
             if mat is None:
@@ -387,11 +379,18 @@ def _bounds_center(value: Any) -> list[float]:
 
 
 def _model_by_id(descriptor: Mapping[str, Any]) -> dict[str, Mapping[str, Any]]:
-    return {
+    out = {
         str(model.get("id") or ""): model
         for model in descriptor.get("models", []) or []
         if isinstance(model, Mapping)
     }
+    for bone in descriptor.get("bones", []) or []:
+        if not isinstance(bone, Mapping):
+            continue
+        bone_id = str(bone.get("id") or "")
+        if bone_id and bone_id not in out:
+            out[bone_id] = bone
+    return out
 
 
 def _model_parent_map(descriptor: Mapping[str, Any]) -> dict[str, str]:
@@ -403,14 +402,36 @@ def _model_parent_map(descriptor: Mapping[str, Any]) -> dict[str, str]:
         parent_id = str(model.get("parent_id") or "")
         if model_id and parent_id:
             out[model_id] = parent_id
-    for bone in descriptor.get("bones", []) or []:
-        if not isinstance(bone, Mapping):
-            continue
+    bones = [bone for bone in descriptor.get("bones", []) or [] if isinstance(bone, Mapping)]
+    bone_id_by_index = {
+        _int(bone.get("index"), -1): str(bone.get("id") or "")
+        for bone in bones
+        if str(bone.get("id") or "")
+    }
+    for bone in bones:
         bone_id = str(bone.get("id") or "")
         parent_id = str(bone.get("parent_id") or "")
+        if not parent_id:
+            parent_index = _int(bone.get("parent_index"), -1)
+            parent_id = bone_id_by_index.get(parent_index, "")
         if bone_id and parent_id:
             out[bone_id] = parent_id
     return out
+
+
+def _normalized_weight_rows(value: Any) -> list[Mapping[str, Any]]:
+    if isinstance(value, Mapping):
+        joints = value.get("joints")
+        weights = value.get("weights")
+        if isinstance(joints, (list, tuple)) and isinstance(weights, (list, tuple)):
+            rows: list[Mapping[str, Any]] = []
+            for idx, joint in enumerate(joints):
+                weight = weights[idx] if idx < len(weights) else 0.0
+                rows.append({"bone_id": f"bone_{_int(joint, 0)}", "weight": weight})
+            return rows
+    if isinstance(value, list):
+        return [row for row in value if isinstance(row, Mapping)]
+    return []
 
 
 def _local_pose(
@@ -425,14 +446,19 @@ def _local_pose(
     base_t = _vec3(model.get("translation"), (0.0, 0.0, 0.0))
     base_r = _vec3(model.get("rotation"), (0.0, 0.0, 0.0))
     base_s = _vec3(model.get("scale"), (1.0, 1.0, 1.0))
+    base_q = _vec4(model.get("rotation_quat"), (0.0, 0.0, 0.0, 1.0))
     curves = model_curves_by_id.get(model_id) if animated else None
     if isinstance(curves, Mapping):
+        q = _sample_quat(curves.get("rotation_quat"), local_ms, base_q)
+        if not isinstance(curves.get("rotation_quat"), Mapping):
+            q = _quat_from_euler_deg(*_sample_vec3(curves.get("rotation"), local_ms, base_r))
         return {
             "translation": _sample_vec3(curves.get("translation"), local_ms, base_t),
             "rotation": _sample_vec3(curves.get("rotation"), local_ms, base_r),
+            "rotation_quat": q,
             "scale": _sample_vec3(curves.get("scale"), local_ms, base_s),
         }
-    return {"translation": base_t, "rotation": base_r, "scale": base_s}
+    return {"translation": base_t, "rotation": base_r, "rotation_quat": base_q, "scale": base_s}
 
 
 def _local_matrix(
@@ -526,10 +552,11 @@ def _global_pose(
     )
     local_t = [value * unit_scale for value in local["translation"]]
     local_r = list(local["rotation"])
+    local_q = list(local.get("rotation_quat") or _quat_from_euler_deg(local_r[0], local_r[1], local_r[2]))
     local_s = list(local["scale"])
     parent_id = str(parent_by_id.get(model_id) or "")
     if not parent_id or parent_id in stack:
-        return {"translation": local_t, "rotation": local_r, "scale": local_s}
+        return {"translation": local_t, "rotation": local_r, "rotation_quat": local_q, "scale": local_s}
     parent = _global_pose(
         parent_id,
         models=models,
@@ -542,12 +569,13 @@ def _global_pose(
     )
     parent_s = parent["scale"]
     parent_r = parent["rotation"]
+    parent_q = list(parent.get("rotation_quat") or _quat_from_euler_deg(parent_r[0], parent_r[1], parent_r[2]))
     scaled_t = (
         local_t[0] * parent_s[0],
         local_t[1] * parent_s[1],
         local_t[2] * parent_s[2],
     )
-    rotated_t = _mat_mul_vec(_rotation_matrix(parent_r[0], parent_r[1], parent_r[2]), scaled_t)
+    rotated_t = _mat_mul_vec(_quat_to_mat3(parent_q), scaled_t)
     return {
         "translation": [
             parent["translation"][0] + rotated_t[0],
@@ -559,6 +587,7 @@ def _global_pose(
             parent_r[1] + local_r[1],
             parent_r[2] + local_r[2],
         ],
+        "rotation_quat": _quat_multiply(parent_q, local_q),
         "scale": [
             parent_s[0] * local_s[0],
             parent_s[1] * local_s[1],
@@ -576,6 +605,8 @@ def _deform_by_pose_delta(
     anim_t = _vec3(anim_pose.get("translation"), (0.0, 0.0, 0.0))
     bind_r = _vec3(bind_pose.get("rotation"), (0.0, 0.0, 0.0))
     anim_r = _vec3(anim_pose.get("rotation"), (0.0, 0.0, 0.0))
+    bind_q = _vec4(bind_pose.get("rotation_quat"), tuple(_quat_from_euler_deg(bind_r[0], bind_r[1], bind_r[2])))
+    anim_q = _vec4(anim_pose.get("rotation_quat"), tuple(_quat_from_euler_deg(anim_r[0], anim_r[1], anim_r[2])))
     bind_s = _vec3(bind_pose.get("scale"), (1.0, 1.0, 1.0))
     anim_s = _vec3(anim_pose.get("scale"), (1.0, 1.0, 1.0))
     ratio_s = [
@@ -588,7 +619,11 @@ def _deform_by_pose_delta(
         (vertex[1] - bind_t[1]) * ratio_s[1],
         (vertex[2] - bind_t[2]) * ratio_s[2],
     )
-    rotated = _mat_mul_vec(_rotation_matrix(delta_r[0], delta_r[1], delta_r[2]), local)
+    if bind_pose.get("rotation_quat") is not None or anim_pose.get("rotation_quat") is not None:
+        delta_q = _quat_multiply(anim_q, _quat_conjugate(bind_q))
+        rotated = _mat_mul_vec(_quat_to_mat3(delta_q), local)
+    else:
+        rotated = _mat_mul_vec(_rotation_matrix(delta_r[0], delta_r[1], delta_r[2]), local)
     return [
         anim_t[0] + rotated[0],
         anim_t[1] + rotated[1],
@@ -706,6 +741,22 @@ def _quat_from_euler_deg(rx_deg: float, ry_deg: float, rz_deg: float) -> list[fl
         cx * cy * sz - sx * sy * cz,
         cx * cy * cz + sx * sy * sz,
     ])
+
+
+def _quat_multiply(left: Sequence[Any], right: Sequence[Any]) -> list[float]:
+    ax, ay, az, aw = _normalize_quat(left)
+    bx, by, bz, bw = _normalize_quat(right)
+    return _normalize_quat([
+        aw * bx + ax * bw + ay * bz - az * by,
+        aw * by - ax * bz + ay * bw + az * bx,
+        aw * bz + ax * by - ay * bx + az * bw,
+        aw * bw - ax * bx - ay * by - az * bz,
+    ])
+
+
+def _quat_conjugate(value: Sequence[Any]) -> list[float]:
+    x, y, z, w = _normalize_quat(value)
+    return [-x, -y, -z, w]
 
 
 def _quat_to_mat3(q: Sequence[Any]):

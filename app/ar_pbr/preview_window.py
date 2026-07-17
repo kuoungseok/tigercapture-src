@@ -7,9 +7,10 @@ remain internal and are not shown as JSON in the UI.
 from __future__ import annotations
 
 from pathlib import Path
+import time
 from typing import Any
 
-from PySide6.QtCore import Qt, QThread, Signal
+from PySide6.QtCore import Qt, QThread, QTimer, Signal
 from PySide6.QtGui import QSurfaceFormat
 from PySide6.QtWidgets import (
     QComboBox,
@@ -356,6 +357,10 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._initial_lighting = dict(initial_lighting or {})
         self._initial_view = dict(initial_view or {})
         self._left_panel = left_panel
+        self._animation_timer: QTimer | None = None
+        self._animation_track: dict[str, Any] | None = None
+        self._animation_started_at = 0.0
+        self._animation_duration_ms = 0.0
         mode = str(controls_mode or "full").strip().casefold()
         self._controls_mode = mode if mode in {"full", "cubemap_only"} else "full"
         self._simple_cubemap_controls = self._controls_mode == "cubemap_only"
@@ -726,6 +731,104 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._sync_background_button()
 
         self._start_loading()
+
+    def attach_animation_clip(self, clip: dict[str, Any]) -> dict[str, Any]:
+        if not isinstance(clip, dict):
+            raise TypeError("animation clip must be a dictionary")
+        clips = self._descriptor.setdefault("animation_clips", [])
+        if not isinstance(clips, list):
+            clips = []
+            self._descriptor["animation_clips"] = clips
+        incoming_id = str(clip.get("id") or "")
+        incoming_name = str(clip.get("name") or "")
+        replaced = False
+        for index, existing in enumerate(list(clips)):
+            if not isinstance(existing, dict):
+                continue
+            existing_id = str(existing.get("id") or "")
+            existing_name = str(existing.get("name") or "")
+            if (incoming_id and incoming_id == existing_id) or (incoming_name and incoming_name == existing_name):
+                clips[index] = dict(clip)
+                replaced = True
+                break
+        if not replaced:
+            clips.append(dict(clip))
+        self._descriptor["animation_count"] = len(clips)
+        self._render_profiles = inspect_asset_render_profiles_from_descriptor(self._descriptor)
+        return dict(clip)
+
+    def apply_animation_preview_once(self, clip_name: str, *, duration_ms: float | None = None) -> dict[str, Any]:
+        clip = self._find_animation_clip(clip_name)
+        if clip is None:
+            result = {
+                "status": "unavailable",
+                "reason": "asset_descriptor_has_no_matching_animation_clip",
+                "clip": str(clip_name or ""),
+            }
+            self._status.setText(f"Animation data unavailable: {Path(str(clip_name or '')).stem or 'selected'}")
+            return result
+        clip_id = str(clip.get("id") or clip.get("name") or clip_name)
+        track = {
+            "id": "action_sequencer_owner_preview",
+            "start_ms": 0,
+            "animation": {
+                "auto_play": True,
+                "loop": False,
+                "clip": clip_id,
+                "speed": 1.0,
+                "start_offset_ms": 0.0,
+            },
+        }
+        self._apply_animation_frame(track, 0)
+        self._animation_track = track
+        self._animation_started_at = time.monotonic()
+        self._animation_duration_ms = max(1.0, float(duration_ms if duration_ms is not None else clip.get("duration_ms") or 1000.0))
+        if self._animation_timer is None:
+            self._animation_timer = QTimer(self)
+            self._animation_timer.setInterval(33)
+            self._animation_timer.timeout.connect(self._tick_animation_preview)
+        self._animation_timer.start()
+        self._status.setText(f"Playing once: {Path(str(clip_name or clip_id)).stem}")
+        return {"status": "playing", "clip": clip_id, "duration_ms": self._animation_duration_ms}
+
+    def _find_animation_clip(self, clip_name: str) -> dict[str, Any] | None:
+        clips = self._descriptor.get("animation_clips") if isinstance(self._descriptor, dict) else None
+        if not isinstance(clips, list) or not clips:
+            return None
+        wanted = {str(clip_name or "").strip(), Path(str(clip_name or "")).stem}
+        for clip in clips:
+            if not isinstance(clip, dict):
+                continue
+            if wanted & {str(clip.get("id") or ""), str(clip.get("name") or "")}:
+                return clip
+        return next((clip for clip in clips if isinstance(clip, dict)), None)
+
+    def _tick_animation_preview(self) -> None:
+        if self._animation_track is None:
+            if self._animation_timer is not None:
+                self._animation_timer.stop()
+            return
+        elapsed_ms = max(0.0, (time.monotonic() - self._animation_started_at) * 1000.0)
+        if elapsed_ms >= self._animation_duration_ms:
+            self._apply_animation_frame(self._animation_track, int(self._animation_duration_ms))
+            if self._animation_timer is not None:
+                self._animation_timer.stop()
+            self._animation_track = None
+            return
+        self._apply_animation_frame(self._animation_track, int(elapsed_ms))
+
+    def _apply_animation_frame(self, track: dict[str, Any], time_ms: int) -> None:
+        if self._gl_widget is None or not isinstance(self._descriptor, dict):
+            return
+        try:
+            from tools.ar_pbr_gpu_window import build_vertex_buffer
+
+            vertices, mesh_diag = build_vertex_buffer(self._descriptor, track=track, time_ms=int(time_ms))
+        except Exception:
+            return
+        self._mesh_diag = dict(mesh_diag or {})
+        if hasattr(self._gl_widget, "set_mesh_data"):
+            self._gl_widget.set_mesh_data(vertices, self._mesh_diag)
 
     def _add_parameter_tab(self, title: str, rows: tuple[QWidget, ...], *, tooltip: str = "") -> None:
         page = QWidget(self._parameter_tabs)

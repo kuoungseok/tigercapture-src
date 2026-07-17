@@ -9,6 +9,8 @@ using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Versions;
 using CUE4Parse_Conversion;
+using CUE4Parse_Conversion.Animations;
+using CUE4Parse_Conversion.Animations.PSA;
 using CUE4Parse_Conversion.Meshes;
 using CUE4Parse_Conversion.Meshes.PSK;
 using TigerUnrealAssetBridge.MeshDescription;
@@ -63,6 +65,49 @@ if (command is "--export-skeletal-mesh" or "export-skeletal-mesh")
             mesh = assetPath.FullName,
             triangle_count = descriptor["metadata"] is Dictionary<string, object?> meta ? meta["triangle_count"] : null,
             vertex_count = descriptor["metadata"] is Dictionary<string, object?> meta2 ? meta2["vertex_count"] : null,
+        }, jsonOptions));
+        return 0;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine(JsonSerializer.Serialize(new
+        {
+            ok = false,
+            error = ex.GetType().Name,
+            message = ex.Message,
+        }, jsonOptions));
+        return 1;
+    }
+}
+
+if (command is "--export-animation-clip" or "export-animation-clip")
+{
+    try
+    {
+        var options = ParseOptions(args.Skip(1).ToArray());
+        var projectPath = RequiredPath(options, "project");
+        var assetPath = RequiredPath(options, "asset");
+        var outputPath = RequiredPath(options, "out");
+        var maxSamples = OptionalInt(options, "max-samples", 90);
+        var referenceMeshPath = options.TryGetValue("reference-mesh", out var referenceMeshValue) && !string.IsNullOrWhiteSpace(referenceMeshValue)
+            ? new FileInfo(referenceMeshValue)
+            : null;
+
+        var clip = ExportAnimationClip(projectPath, assetPath, maxSamples, referenceMeshPath);
+        var payload = new Dictionary<string, object?>
+        {
+            ["schema"] = "tigerstudio.ar_pbr.unreal_animation_clip_export.v1",
+            ["animation_clip"] = clip,
+        };
+        Directory.CreateDirectory(outputPath.DirectoryName ?? ".");
+        File.WriteAllText(outputPath.FullName, JsonSerializer.Serialize(payload, jsonOptions));
+        Console.WriteLine(JsonSerializer.Serialize(new
+        {
+            ok = true,
+            output = outputPath.FullName,
+            animation = assetPath.FullName,
+            clip = clip["name"],
+            duration_ms = clip["duration_ms"],
         }, jsonOptions));
         return 0;
     }
@@ -226,6 +271,227 @@ static Dictionary<string, object?> ExportSkeletalMeshDescriptor(FileInfo project
     };
 }
 
+static Dictionary<string, object?> ExportAnimationClip(FileInfo projectPath, FileInfo assetPath, int maxSamples, FileInfo? referenceMeshPath = null)
+{
+    if (!projectPath.Exists)
+        throw new FileNotFoundException("Unreal project file was not found.", projectPath.FullName);
+    if (!assetPath.Exists)
+        throw new FileNotFoundException("Animation package was not found.", assetPath.FullName);
+    if (referenceMeshPath is not null && !referenceMeshPath.Exists)
+        throw new FileNotFoundException("Reference skeletal mesh package was not found.", referenceMeshPath.FullName);
+
+    var contentRoot = new DirectoryInfo(Path.Combine(projectPath.DirectoryName ?? ".", "Content"));
+    if (!contentRoot.Exists)
+        throw new DirectoryNotFoundException($"Content directory not found: {contentRoot.FullName}");
+    if (!assetPath.FullName.StartsWith(contentRoot.FullName, StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException("Animation asset must be inside the project's Content directory.");
+
+    using var provider = CreateProvider(projectPath, contentRoot);
+    RegisterPackageTree(provider, contentRoot);
+    var packagePath = ResolveProviderPath(provider, contentRoot, assetPath);
+    var package = provider.LoadPackage(packagePath);
+    var anim = package.GetExports().OfType<UAnimSequence>().FirstOrDefault()
+        ?? throw new InvalidOperationException($"No UAnimSequence export was found in package: {packagePath}");
+    var skeleton = TryLoadAnimationSkeleton(anim) ?? TryLoadReferenceMeshSkeleton(provider, contentRoot, referenceMeshPath);
+    if (skeleton is null)
+        return ExportRawAnimationClip(anim, assetPath, maxSamples);
+    var animSet = skeleton.ConvertAnims(anim);
+    var sequence = animSet.Sequences.FirstOrDefault()
+        ?? throw new InvalidOperationException($"Animation conversion produced no sequence: {packagePath}");
+
+    var sampleFrames = SampleFrames(Math.Max(1, sequence.NumFrames), Math.Max(2, maxSamples)).ToArray();
+    var modelCurves = new Dictionary<string, object?>();
+    for (var boneIndex = 0; boneIndex < sequence.Tracks.Count; boneIndex++)
+    {
+        var track = sequence.Tracks[boneIndex];
+        if (!track.HasKeys()) continue;
+        var tx = new List<double[]>();
+        var ty = new List<double[]>();
+        var tz = new List<double[]>();
+        var qx = new List<double[]>();
+        var qy = new List<double[]>();
+        var qz = new List<double[]>();
+        var qw = new List<double[]>();
+        var sx = new List<double[]>();
+        var sy = new List<double[]>();
+        var sz = new List<double[]>();
+        foreach (var frame in sampleFrames)
+        {
+            var q = FQuat.Identity;
+            var p = FVector.ZeroVector;
+            var s = new FVector(1.0f, 1.0f, 1.0f);
+            track.GetBoneTransform(frame, sequence.NumFrames, ref q, ref p, ref s);
+            var timeMs = FrameToMilliseconds(frame, sequence);
+            var tp = ToTigerPosition(p);
+            tx.Add([timeMs, tp[0]]);
+            ty.Add([timeMs, tp[1]]);
+            tz.Add([timeMs, tp[2]]);
+            qx.Add([timeMs, Round(q.X)]);
+            qy.Add([timeMs, Round(q.Y)]);
+            qz.Add([timeMs, Round(q.Z)]);
+            qw.Add([timeMs, Round(q.W)]);
+            sx.Add([timeMs, Round(s.X)]);
+            sy.Add([timeMs, Round(s.Y)]);
+            sz.Add([timeMs, Round(s.Z)]);
+        }
+        modelCurves[$"bone_{boneIndex}"] = new Dictionary<string, object?>
+        {
+            ["translation"] = new Dictionary<string, object?> { ["x"] = tx, ["y"] = ty, ["z"] = tz },
+            ["rotation_quat"] = new Dictionary<string, object?> { ["x"] = qx, ["y"] = qy, ["z"] = qz, ["w"] = qw },
+            ["scale"] = new Dictionary<string, object?> { ["x"] = sx, ["y"] = sy, ["z"] = sz },
+        };
+    }
+
+    return new Dictionary<string, object?>
+    {
+        ["id"] = SanitizeId(assetPath.Name),
+        ["name"] = anim.Name,
+        ["source_asset_path"] = assetPath.FullName,
+        ["duration_ms"] = Round(Math.Max(0.001, sequence.AnimEndTime) * 1000.0),
+        ["frame_count"] = sequence.NumFrames,
+        ["frames_per_second"] = Round(sequence.FramesPerSecond),
+        ["sampled_frame_count"] = sampleFrames.Length,
+        ["model_curves"] = modelCurves,
+    };
+}
+
+static Dictionary<string, object?> ExportRawAnimationClip(UAnimSequence anim, FileInfo assetPath, int maxSamples)
+{
+    var rawTracks = anim.RawAnimationData ?? Array.Empty<FRawAnimSequenceTrack>();
+    if (rawTracks.Length == 0)
+        throw new InvalidOperationException($"Animation skeleton could not be loaded and raw animation tracks are not available: {assetPath.FullName}");
+
+    var frameCount = Math.Max(1, anim.NumFrames);
+    if (frameCount <= 1)
+    {
+        frameCount = rawTracks.Max(track => Math.Max(Math.Max(track.PosKeys?.Length ?? 0, track.RotKeys?.Length ?? 0), track.ScaleKeys?.Length ?? 0));
+        frameCount = Math.Max(1, frameCount);
+    }
+    var durationSeconds = anim.SequenceLength > 0.0f ? anim.SequenceLength : Math.Max(1.0, frameCount - 1.0) / 30.0;
+    var sampleFrames = SampleFrames(frameCount, Math.Max(2, maxSamples)).ToArray();
+    var trackMap = anim.GetTrackMap();
+    var modelCurves = new Dictionary<string, object?>();
+
+    for (var trackIndex = 0; trackIndex < rawTracks.Length; trackIndex++)
+    {
+        var raw = rawTracks[trackIndex];
+        var track = new CAnimTrack
+        {
+            KeyPos = raw.PosKeys ?? Array.Empty<FVector>(),
+            KeyQuat = raw.RotKeys ?? Array.Empty<FQuat>(),
+            KeyScale = raw.ScaleKeys ?? Array.Empty<FVector>(),
+            KeyTime = raw.KeyTimes ?? Array.Empty<float>(),
+        };
+        if (!track.HasKeys()) continue;
+
+        var boneIndex = trackIndex < trackMap.Length ? trackMap[trackIndex].BoneTreeIndex : trackIndex;
+        if (boneIndex < 0) boneIndex = trackIndex;
+        var tx = new List<double[]>();
+        var ty = new List<double[]>();
+        var tz = new List<double[]>();
+        var qx = new List<double[]>();
+        var qy = new List<double[]>();
+        var qz = new List<double[]>();
+        var qw = new List<double[]>();
+        var sx = new List<double[]>();
+        var sy = new List<double[]>();
+        var sz = new List<double[]>();
+        foreach (var frame in sampleFrames)
+        {
+            var q = FQuat.Identity;
+            var p = FVector.ZeroVector;
+            var s = new FVector(1.0f, 1.0f, 1.0f);
+            track.GetBoneTransform(frame, frameCount, ref q, ref p, ref s);
+            var timeMs = FrameToMillisecondsFromDuration(frame, frameCount, durationSeconds * 1000.0);
+            var tp = ToTigerPosition(p);
+            tx.Add([timeMs, tp[0]]);
+            ty.Add([timeMs, tp[1]]);
+            tz.Add([timeMs, tp[2]]);
+            qx.Add([timeMs, Round(q.X)]);
+            qy.Add([timeMs, Round(q.Y)]);
+            qz.Add([timeMs, Round(q.Z)]);
+            qw.Add([timeMs, Round(q.W)]);
+            sx.Add([timeMs, Round(s.X)]);
+            sy.Add([timeMs, Round(s.Y)]);
+            sz.Add([timeMs, Round(s.Z)]);
+        }
+        modelCurves[$"bone_{boneIndex}"] = new Dictionary<string, object?>
+        {
+            ["translation"] = new Dictionary<string, object?> { ["x"] = tx, ["y"] = ty, ["z"] = tz },
+            ["rotation_quat"] = new Dictionary<string, object?> { ["x"] = qx, ["y"] = qy, ["z"] = qz, ["w"] = qw },
+            ["scale"] = new Dictionary<string, object?> { ["x"] = sx, ["y"] = sy, ["z"] = sz },
+        };
+    }
+
+    return new Dictionary<string, object?>
+    {
+        ["id"] = SanitizeId(assetPath.Name),
+        ["name"] = anim.Name,
+        ["source_asset_path"] = assetPath.FullName,
+        ["source_mode"] = "raw_animation_data",
+        ["duration_ms"] = Round(durationSeconds * 1000.0),
+        ["frame_count"] = frameCount,
+        ["frames_per_second"] = Round(frameCount / Math.Max(0.001, durationSeconds)),
+        ["sampled_frame_count"] = sampleFrames.Length,
+        ["model_curves"] = modelCurves,
+    };
+}
+
+static USkeleton? TryLoadAnimationSkeleton(UAnimSequence anim)
+{
+    try
+    {
+        if (anim.Skeleton.TryLoad<USkeleton>(out var skeleton))
+            return skeleton;
+    }
+    catch
+    {
+        // Some UE5 editor assets omit or defer the direct Skeleton reference.
+    }
+
+    try
+    {
+        return anim.Skeleton.Load<USkeleton>();
+    }
+    catch
+    {
+        return null;
+    }
+}
+
+static USkeleton? TryLoadReferenceMeshSkeleton(DefaultFileProvider provider, DirectoryInfo contentRoot, FileInfo? referenceMeshPath)
+{
+    if (referenceMeshPath is null)
+        return null;
+    if (!referenceMeshPath.FullName.StartsWith(contentRoot.FullName, StringComparison.OrdinalIgnoreCase))
+        throw new InvalidOperationException("Reference skeletal mesh must be inside the project's Content directory.");
+
+    var packagePath = ResolveProviderPath(provider, contentRoot, referenceMeshPath);
+    var package = provider.LoadPackage(packagePath);
+    var mesh = package.GetExports().OfType<USkeletalMesh>().FirstOrDefault();
+    if (mesh is null)
+        return null;
+
+    try
+    {
+        if (mesh.Skeleton.TryLoad<USkeleton>(out var skeleton))
+            return skeleton;
+    }
+    catch
+    {
+        // The mesh reference skeleton is still used by mesh export; animation conversion needs USkeleton.
+    }
+
+    try
+    {
+        return mesh.Skeleton.Load<USkeleton>();
+    }
+    catch
+    {
+        return null;
+    }
+}
+
 static DefaultFileProvider CreateProvider(FileInfo projectPath, DirectoryInfo contentRoot)
 {
     ObjectTypeRegistry.RegisterEngine(typeof(UMeshDescriptionBaseBulkData).Assembly);
@@ -284,6 +550,21 @@ static void RegisterPackageDirectory(DefaultFileProvider provider, DirectoryInfo
         provider.Files.AddFiles(files, 1);
 }
 
+static void RegisterPackageTree(DefaultFileProvider provider, DirectoryInfo contentRoot)
+{
+    if (!contentRoot.Exists) return;
+    var files = new Dictionary<string, GameFile>(StringComparer.OrdinalIgnoreCase);
+    foreach (var path in Directory.EnumerateFiles(contentRoot.FullName, "*.*", SearchOption.AllDirectories))
+    {
+        var ext = Path.GetExtension(path);
+        if (!IsPackageSidecarExtension(ext)) continue;
+        var gameFile = new OsGameFile(contentRoot, new FileInfo(path), "Content/", provider.Versions);
+        files[gameFile.Path] = gameFile;
+    }
+    if (files.Count > 0)
+        provider.Files.AddFiles(files, 1);
+}
+
 static string ResolveProviderPath(DefaultFileProvider provider, DirectoryInfo contentRoot, FileInfo assetPath)
 {
     var rel = Path.GetRelativePath(contentRoot.FullName, assetPath.FullName).Replace('\\', '/');
@@ -315,13 +596,14 @@ static bool IsPackageSidecarExtension(string extension)
 
 static List<Dictionary<string, object?>> BuildMaterials(USkeletalMesh mesh, CSkelMeshLod? lod)
 {
-    var materialCount = Math.Max(mesh.SkeletalMaterials?.Length ?? 0, 1);
+    var skeletalMaterials = mesh.SkeletalMaterials ?? [];
+    var materialCount = Math.Max(skeletalMaterials.Length, 1);
     var materialIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
     var materials = new List<Dictionary<string, object?>>();
     for (var idx = 0; idx < materialCount; idx++)
     {
-        var slotName = idx < (mesh.SkeletalMaterials?.Length ?? 0)
-            ? mesh.SkeletalMaterials[idx].MaterialSlotName.Text
+        var slotName = idx < skeletalMaterials.Length
+            ? skeletalMaterials[idx].MaterialSlotName.Text
             : $"material_{idx}";
         var id = $"mat_{idx}_{SanitizeId(slotName)}";
         if (!materialIds.Add(id))
@@ -367,9 +649,10 @@ static List<Dictionary<string, object?>> BuildMeshDescriptionGeometries(
     }
 
     var slotToMaterialIndex = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
-    for (var idx = 0; idx < (mesh.SkeletalMaterials?.Length ?? 0); idx++)
+    var skeletalMaterials = mesh.SkeletalMaterials ?? [];
+    for (var idx = 0; idx < skeletalMaterials.Length; idx++)
     {
-        var slot = mesh.SkeletalMaterials[idx].MaterialSlotName.Text;
+        var slot = skeletalMaterials[idx].MaterialSlotName.Text;
         if (!string.IsNullOrWhiteSpace(slot) && !slotToMaterialIndex.ContainsKey(slot))
             slotToMaterialIndex[slot] = idx;
     }
@@ -576,8 +859,10 @@ static List<Dictionary<string, object?>> BuildBones(List<CSkelMeshBone> bones)
             ["index"] = idx,
             ["name"] = bone.Name.Text,
             ["parent_index"] = bone.ParentIndex,
+            ["parent_id"] = bone.ParentIndex >= 0 ? $"bone_{bone.ParentIndex}" : "",
             ["translation"] = ToTigerPosition(bone.Position),
             ["rotation_quat"] = new[] { Round(bone.Orientation.X), Round(bone.Orientation.Y), Round(bone.Orientation.Z), Round(bone.Orientation.W) },
+            ["scale"] = new[] { 1.0, 1.0, 1.0 },
         });
     }
     return outBones;
@@ -600,8 +885,10 @@ static List<Dictionary<string, object?>> BuildBonesFromReferenceSkeleton(FRefere
             ["index"] = idx,
             ["name"] = infos[idx].Name.Text,
             ["parent_index"] = infos[idx].ParentIndex,
+            ["parent_id"] = infos[idx].ParentIndex >= 0 ? $"bone_{infos[idx].ParentIndex}" : "",
             ["translation"] = translation,
             ["rotation_quat"] = rotation,
+            ["scale"] = new[] { 1.0, 1.0, 1.0 },
         });
     }
     return outBones;
@@ -692,6 +979,36 @@ static string SanitizeId(string? text)
 
 static double Round(double value)
     => Math.Round(value, 6, MidpointRounding.AwayFromZero);
+
+static IEnumerable<float> SampleFrames(int frameCount, int maxSamples)
+{
+    if (frameCount <= 1)
+    {
+        yield return 0.0f;
+        yield break;
+    }
+    var sampleCount = Math.Min(frameCount, Math.Max(2, maxSamples));
+    for (var idx = 0; idx < sampleCount; idx++)
+    {
+        var value = (frameCount - 1) * (idx / (double)(sampleCount - 1));
+        yield return (float)value;
+    }
+}
+
+static double FrameToMilliseconds(float frame, CUE4Parse_Conversion.Animations.PSA.CAnimSequence sequence)
+{
+    if (sequence.NumFrames <= 1)
+        return 0.0;
+    var durationMs = Math.Max(0.001, sequence.AnimEndTime) * 1000.0;
+    return Round(durationMs * frame / Math.Max(1.0, sequence.NumFrames - 1.0));
+}
+
+static double FrameToMillisecondsFromDuration(float frame, int frameCount, double durationMs)
+{
+    if (frameCount <= 1)
+        return 0.0;
+    return Round(Math.Max(0.001, durationMs) * frame / Math.Max(1.0, frameCount - 1.0));
+}
 
 static Dictionary<string, string> ParseOptions(string[] values)
 {
