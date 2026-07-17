@@ -21,8 +21,7 @@ def build_owner_animation_sequence(
 ) -> dict[str, Any]:
     """Normalize an exported Unreal animation clip into a preview playback plan.
 
-    This intentionally does not enable AR/PBR skeletal deformation yet. The plan
-    is the stable handoff to the GPU bone-palette renderer so selecting an
+    The plan keeps Unreal animation data on the bone-palette path so selecting an
     AnimSequence never falls back to the old fragile static-mesh deformation path.
     """
 
@@ -79,7 +78,8 @@ def build_owner_animation_sequence(
             "bone_names": bone_names,
         },
         "root_motion": _root_motion_summary(curves),
-        "ar_pbr_deformation_enabled": False,
+        "ar_pbr_deformation_enabled": True,
+        "deformation_mode": "gpu_bone_palette",
         "requires_gpu_palette_renderer": True,
         "preview_backend": backend,
         "reference_pipeline": ACTION_SEQUENCE_REFERENCE_PIPELINE,

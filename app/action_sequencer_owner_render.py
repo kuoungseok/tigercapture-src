@@ -808,7 +808,7 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
         request = {
             **dict(payload),
             "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
-            "ar_pbr_animation_enabled": False,
+            "ar_pbr_animation_enabled": True,
             "requires_unreal_playback": True,
             "reference_pipeline": ACTION_SEQUENCE_REFERENCE_PIPELINE,
         }
@@ -820,7 +820,7 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
                 "reason": "missing_animation_path",
                 "clip": clip,
                 "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
-                "ar_pbr_animation_enabled": False,
+                "ar_pbr_animation_enabled": True,
             }
             setattr(window, "owner_animation_preview_result", result)
             status = getattr(window, "_status", None)
@@ -833,7 +833,7 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             "clip": clip,
             "animation_path": str(path),
             "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
-            "ar_pbr_animation_enabled": False,
+            "ar_pbr_animation_enabled": True,
             "play_once": bool(payload.get("play_once", True)),
             "apply_frame_ms": int(payload.get("apply_frame_ms", 0) or 0),
             "requires_gpu_palette_renderer": True,
@@ -888,7 +888,7 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
                 "clip": clip,
                 "animation_path": str(path),
                 "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
-                "ar_pbr_animation_enabled": False,
+                "ar_pbr_animation_enabled": True,
                 "requires_gpu_palette_renderer": True,
                 "play_once": bool(payload.get("play_once", True)),
                 "apply_frame_ms": int(payload.get("apply_frame_ms", 0) or 0),
@@ -943,7 +943,7 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
                 "clip": clip,
                 "animation_path": str(path),
                 "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
-                "ar_pbr_animation_enabled": False,
+                "ar_pbr_animation_enabled": True,
                 "requires_gpu_palette_renderer": True,
                 "error": str(event.get("error") or "RuntimeError") if isinstance(event, dict) else "RuntimeError",
                 "message": str(event.get("message") or event) if isinstance(event, dict) else str(event),

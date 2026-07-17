@@ -1,6 +1,6 @@
 import numpy as np
 
-from app.ar_pbr.animation import animated_vertices_for_geometry
+from app.ar_pbr.animation import animated_vertices_for_geometry, skin_matrices_for_clip
 from app.ar_pbr.gpu_preview import build_gpu_preview_items
 from app.ar_pbr.project_tracks import DEFAULT_PREVIEW_SCALE, create_preview_ar_track, transform_position_from_frame_point
 from app.ar_pbr.schema import normalize_ar_tracks
@@ -695,6 +695,59 @@ def test_animation_helper_does_not_double_scale_unreal_skeletal_bones():
     )
 
     assert np.allclose(out[0], [3.0, 0.0, 0.0], atol=1.0e-5)
+
+
+def test_gpu_skin_matrix_palette_uses_bone_indices_without_rebuilding_vertices():
+    descriptor = {
+        "bounds": {"center": [0, 0, 0], "size": [4, 4, 4]},
+        "models": [{"id": "mesh_model", "translation": [0, 0, 0], "scale": [1, 1, 1]}],
+        "bones": [
+            {"id": "bone_0", "index": 0, "name": "root", "parent_index": -1, "translation": [0, 0, 0], "rotation_quat": [0, 0, 0, 1], "scale": [1, 1, 1]},
+            {"id": "bone_1", "index": 1, "name": "hand", "parent_id": "bone_0", "translation": [1, 0, 0], "rotation_quat": [0, 0, 0, 1], "scale": [1, 1, 1]},
+        ],
+        "geometries": [{
+            "model_id": "mesh_model",
+            "vertices": [[2, 0, 0], [2, 1, 0], [2, 0, 1]],
+            "triangles": [[0, 1, 2]],
+            "skin_weights": [
+                {"joints": [1, 0, 0, 0], "weights": [1.0, 0.0, 0.0, 0.0]},
+                {"joints": [1, 0, 0, 0], "weights": [1.0, 0.0, 0.0, 0.0]},
+                {"joints": [1, 0, 0, 0], "weights": [1.0, 0.0, 0.0, 0.0]},
+            ],
+        }],
+        "animation_clips": [{
+            "id": "clip_001",
+            "name": "MoveHand",
+            "duration_ms": 1000.0,
+            "model_curves": {
+                "bone_1": {
+                    "translation": {
+                        "x": [[0.0, 1.0], [1000.0, 2.0]],
+                        "y": [[0.0, 0.0], [1000.0, 0.0]],
+                        "z": [[0.0, 0.0], [1000.0, 0.0]],
+                    },
+                    "rotation_quat": {
+                        "x": [[0.0, 0.0], [1000.0, 0.0]],
+                        "y": [[0.0, 0.0], [1000.0, 0.0]],
+                        "z": [[0.0, 0.0], [1000.0, 0.0]],
+                        "w": [[0.0, 1.0], [1000.0, 1.0]],
+                    },
+                }
+            },
+        }],
+    }
+    track = {
+        "id": "gpu_skin",
+        "start_ms": 0,
+        "animation": {"auto_play": True, "loop": False, "clip": "clip_001", "speed": 1.0},
+    }
+
+    skinning = skin_matrices_for_clip({"descriptor": descriptor}, track, 1000)
+
+    assert skinning is not None
+    assert skinning["bone_count"] == 2
+    assert skinning["animated_bone_count"] == 1
+    assert np.allclose(skinning["matrices"][1] @ np.asarray([2.0, 0.0, 0.0, 1.0]), [3.0, 0.0, 0.0, 1.0])
 
 
 def test_gpu_preview_reports_texture_plan_and_tints_packet_colors(tmp_path):

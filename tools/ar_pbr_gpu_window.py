@@ -351,10 +351,14 @@ FRAME_FIT_FOV_DEG = 45.0
 VRM_MTOON_UNLIT_EXPOSURE_SCALE = 1.0
 VRM_MTOON_UNLIT_CONTRAST = 1.0
 VRM_MTOON_UNLIT_GAMMA = 1.35
+GPU_SKINNING_MAX_BONES = 128
+GPU_VERTEX_STRIDE_FLOAT_COUNT = 29
+GPU_VERTEX_BASE_STRIDE_FLOAT_COUNT = 21
 
 
 VERT_SHADER = """
 #version 330 core
+const int MAX_SKIN_BONES = 128;
 layout(location = 0) in vec3 a_pos;
 layout(location = 1) in vec3 a_normal;
 layout(location = 2) in vec4 a_color;
@@ -362,10 +366,17 @@ layout(location = 3) in vec3 a_material;
 layout(location = 4) in vec2 a_uv;
 layout(location = 5) in vec3 a_tangent;
 layout(location = 6) in vec3 a_bitangent;
+layout(location = 7) in vec4 a_bone_indices;
+layout(location = 8) in vec4 a_bone_weights;
 uniform mat4 u_mvp;
 uniform mat4 u_model;
 uniform mat4 u_light_mvp;
 uniform mat3 u_normal_mat;
+uniform int u_skinning_enabled;
+uniform int u_skin_bone_count;
+uniform mat4 u_skin_bones[MAX_SKIN_BONES];
+uniform vec3 u_bounds_center;
+uniform float u_bounds_max_size;
 out vec3 v_world_pos;
 out vec4 v_light_pos;
 out vec3 v_normal;
@@ -374,17 +385,42 @@ out vec3 v_material;
 out vec2 v_uv;
 out vec3 v_tangent;
 out vec3 v_bitangent;
+mat4 skin_bone(float raw_index) {
+    int idx = int(raw_index + 0.5);
+    if (idx < 0 || idx >= u_skin_bone_count || idx >= MAX_SKIN_BONES) {
+        return mat4(1.0);
+    }
+    return u_skin_bones[idx];
+}
 void main() {
-    vec4 world_pos = u_model * vec4(a_pos, 1.0);
-    gl_Position = u_mvp * vec4(a_pos, 1.0);
+    vec3 object_pos = a_pos;
+    vec3 object_normal = a_normal;
+    vec3 object_tangent = a_tangent;
+    vec3 object_bitangent = a_bitangent;
+    float weight_sum = a_bone_weights.x + a_bone_weights.y + a_bone_weights.z + a_bone_weights.w;
+    if (u_skinning_enabled != 0 && weight_sum > 0.0001 && u_bounds_max_size > 0.000001) {
+        mat4 skin =
+            skin_bone(a_bone_indices.x) * a_bone_weights.x +
+            skin_bone(a_bone_indices.y) * a_bone_weights.y +
+            skin_bone(a_bone_indices.z) * a_bone_weights.z +
+            skin_bone(a_bone_indices.w) * a_bone_weights.w;
+        vec3 raw_pos = a_pos * u_bounds_max_size + u_bounds_center;
+        vec4 skinned_pos = skin * vec4(raw_pos, 1.0);
+        object_pos = (skinned_pos.xyz - u_bounds_center) / u_bounds_max_size;
+        object_normal = normalize(mat3(skin) * a_normal);
+        object_tangent = normalize(mat3(skin) * a_tangent);
+        object_bitangent = normalize(mat3(skin) * a_bitangent);
+    }
+    vec4 world_pos = u_model * vec4(object_pos, 1.0);
+    gl_Position = u_mvp * vec4(object_pos, 1.0);
     v_world_pos = world_pos.xyz;
-    v_light_pos = u_light_mvp * vec4(a_pos, 1.0);
-    v_normal = normalize(u_normal_mat * a_normal);
+    v_light_pos = u_light_mvp * vec4(object_pos, 1.0);
+    v_normal = normalize(u_normal_mat * object_normal);
     v_color = a_color;
     v_material = a_material;
     v_uv = a_uv;
-    v_tangent = normalize(u_normal_mat * a_tangent);
-    v_bitangent = normalize(u_normal_mat * a_bitangent);
+    v_tangent = normalize(u_normal_mat * object_tangent);
+    v_bitangent = normalize(u_normal_mat * object_bitangent);
 }
 """
 
@@ -1089,10 +1125,37 @@ void main() {
 
 DEPTH_VERT_SHADER = """
 #version 330 core
+const int MAX_SKIN_BONES = 128;
 layout(location = 0) in vec3 a_pos;
+layout(location = 7) in vec4 a_bone_indices;
+layout(location = 8) in vec4 a_bone_weights;
 uniform mat4 u_light_mvp;
+uniform int u_skinning_enabled;
+uniform int u_skin_bone_count;
+uniform mat4 u_skin_bones[MAX_SKIN_BONES];
+uniform vec3 u_bounds_center;
+uniform float u_bounds_max_size;
+mat4 skin_bone(float raw_index) {
+    int idx = int(raw_index + 0.5);
+    if (idx < 0 || idx >= u_skin_bone_count || idx >= MAX_SKIN_BONES) {
+        return mat4(1.0);
+    }
+    return u_skin_bones[idx];
+}
 void main() {
-    gl_Position = u_light_mvp * vec4(a_pos, 1.0);
+    vec3 object_pos = a_pos;
+    float weight_sum = a_bone_weights.x + a_bone_weights.y + a_bone_weights.z + a_bone_weights.w;
+    if (u_skinning_enabled != 0 && weight_sum > 0.0001 && u_bounds_max_size > 0.000001) {
+        mat4 skin =
+            skin_bone(a_bone_indices.x) * a_bone_weights.x +
+            skin_bone(a_bone_indices.y) * a_bone_weights.y +
+            skin_bone(a_bone_indices.z) * a_bone_weights.z +
+            skin_bone(a_bone_indices.w) * a_bone_weights.w;
+        vec3 raw_pos = a_pos * u_bounds_max_size + u_bounds_center;
+        vec4 skinned_pos = skin * vec4(raw_pos, 1.0);
+        object_pos = (skinned_pos.xyz - u_bounds_center) / u_bounds_max_size;
+    }
+    gl_Position = u_light_mvp * vec4(object_pos, 1.0);
 }
 """
 
@@ -2598,6 +2661,77 @@ def _descriptor_bounds(descriptor: Mapping[str, Any]) -> tuple[np.ndarray, float
     return center, float(max(size.max(initial=1.0), 1e-6))
 
 
+def _geometry_skin_attribute_arrays(
+    geometry: Mapping[str, Any],
+    vertex_count: int,
+    *,
+    max_influences: int = 4,
+) -> tuple[np.ndarray, np.ndarray, int]:
+    indices = np.zeros((max(0, int(vertex_count)), max_influences), dtype=np.float32)
+    weights = np.zeros((max(0, int(vertex_count)), max_influences), dtype=np.float32)
+    rows_raw = geometry.get("skin_weights")
+    if not isinstance(rows_raw, list) or vertex_count <= 0:
+        return indices, weights, 0
+    skinned_vertex_count = 0
+    for vertex_index in range(min(vertex_count, len(rows_raw))):
+        rows = _normalized_skin_rows(rows_raw[vertex_index])
+        slot = 0
+        for row in rows:
+            if slot >= max_influences:
+                break
+            bone_index = _bone_index_from_skin_row(row)
+            weight = _skin_row_weight(row)
+            if bone_index < 0 or weight <= 1.0e-8:
+                continue
+            indices[vertex_index, slot] = float(bone_index)
+            weights[vertex_index, slot] = float(max(0.0, min(1.0, weight)))
+            slot += 1
+        total = float(weights[vertex_index].sum())
+        if total > 1.0e-8:
+            weights[vertex_index] /= total
+            skinned_vertex_count += 1
+    return indices, weights, skinned_vertex_count
+
+
+def _normalized_skin_rows(value: Any) -> list[Mapping[str, Any]]:
+    if isinstance(value, Mapping):
+        joints = value.get("joints")
+        weights = value.get("weights")
+        if isinstance(joints, (list, tuple)) and isinstance(weights, (list, tuple)):
+            return [
+                {"bone_index": joints[idx], "weight": weights[idx] if idx < len(weights) else 0.0}
+                for idx in range(len(joints))
+            ]
+    if isinstance(value, list):
+        return [row for row in value if isinstance(row, Mapping)]
+    return []
+
+
+def _bone_index_from_skin_row(row: Mapping[str, Any]) -> int:
+    for key in ("bone_index", "joint", "joint_index"):
+        try:
+            return int(row[key])
+        except Exception:
+            pass
+    text = str(row.get("bone_id") or row.get("model_id") or "")
+    if text.startswith("bone_"):
+        try:
+            return int(text.split("_", 1)[1])
+        except Exception:
+            return -1
+    try:
+        return int(text)
+    except Exception:
+        return -1
+
+
+def _skin_row_weight(row: Mapping[str, Any]) -> float:
+    try:
+        return float(row.get("weight", 0.0) or 0.0)
+    except Exception:
+        return 0.0
+
+
 PREVIEW_UV_V_FLIP_MODE = "auto"
 
 
@@ -2759,6 +2893,7 @@ def build_vertex_buffer(
     skipped_triangle_count = 0
     animated_geometry_count = 0
     skeletal_geometry_count = 0
+    gpu_skinning_vertex_count = 0
     animation_clip_count = len(descriptor.get("animation_clips") or []) if isinstance(descriptor, Mapping) else 0
     flip_uv_v_for_texture_upload = _preview_uv_v_flip_enabled(descriptor)
     vertex_start = 0
@@ -2836,11 +2971,18 @@ def build_vertex_buffer(
         tangents_np, bitangents_np = _compute_tangent_basis(vertices_np, triangles_np, smooth_normals, compact_uvs)
         tangents = tangents_np[triangles_np].astype(np.float32)
         bitangents = bitangents_np[triangles_np].astype(np.float32)
+        skin_indices_np, skin_weights_np, skinned_vertices = _geometry_skin_attribute_arrays(geometry, len(vertices_np))
+        gpu_skinning_vertex_count += int(skinned_vertices)
+        skin_indices = skin_indices_np[triangles_np].astype(np.float32)
+        skin_weights = skin_weights_np[triangles_np].astype(np.float32)
         colors = np.empty((len(triangles_np), 3, 4), dtype=np.float32)
         colors[:] = np.asarray(color, dtype=np.float32)
         materials = np.empty((len(triangles_np), 3, 3), dtype=np.float32)
         materials[:] = np.asarray(pbr, dtype=np.float32)
-        chunk = np.concatenate([points, normals, colors, materials, uvs, tangents, bitangents], axis=2).reshape(-1, 21)
+        chunk = np.concatenate(
+            [points, normals, colors, materials, uvs, tangents, bitangents, skin_indices, skin_weights],
+            axis=2,
+        ).reshape(-1, GPU_VERTEX_STRIDE_FLOAT_COUNT)
         chunks.append(chunk)
         chunk_vertex_count = int(len(chunk))
         draw_ranges.append({
@@ -2861,9 +3003,9 @@ def build_vertex_buffer(
         triangle_count += int(len(triangles_np))
     if not chunks:
         chunks = [np.asarray([
-            [-0.5, -0.5, 0.0, 0.0, 0.0, 1.0, 0.95, 0.24, 0.05, 1.0, 0.45, 0.0, 0.5, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-            [0.5, -0.5, 0.0, 0.0, 0.0, 1.0, 0.95, 0.24, 0.05, 1.0, 0.45, 0.0, 0.5, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
-            [0.0, 0.5, 0.0, 0.0, 0.0, 1.0, 0.95, 0.24, 0.05, 1.0, 0.45, 0.0, 0.5, 0.5, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0],
+            [-0.5, -0.5, 0.0, 0.0, 0.0, 1.0, 0.95, 0.24, 0.05, 1.0, 0.45, 0.0, 0.5, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.5, -0.5, 0.0, 0.0, 0.0, 1.0, 0.95, 0.24, 0.05, 1.0, 0.45, 0.0, 0.5, 1.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.5, 0.0, 0.0, 0.0, 1.0, 0.95, 0.24, 0.05, 1.0, 0.45, 0.0, 0.5, 0.5, 1.0, 1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0],
         ], dtype=np.float32)]
         draw_ranges = [{"start": 0, "count": 3, "geometry_name": "fallback", "material_name": "", "normal_mode": "fallback", "has_uvs": True}]
     arr = np.ascontiguousarray(np.concatenate(chunks, axis=0), dtype=np.float32)
@@ -2875,14 +3017,19 @@ def build_vertex_buffer(
         "triangle_count": int(len(arr) // 3),
         "geometry_count": geometry_count,
         "normal_mode": "fbx_layer_normals_or_smooth",
-        "vertex_stride_float_count": 21,
+        "vertex_stride_float_count": GPU_VERTEX_STRIDE_FLOAT_COUNT,
         "shading_model": "hdr_ibl_pbr_textured_normal_mapped_shadow_mapped",
         "flipped_normal_count": int(flipped_normal_count),
         "skipped_triangle_count": int(skipped_triangle_count),
         "animation_clip_count": int(animation_clip_count),
         "animated_geometry_count": int(animated_geometry_count),
         "skeletal_geometry_count": int(skeletal_geometry_count),
+        "gpu_skinning_vertex_count": int(gpu_skinning_vertex_count),
+        "gpu_skinning_bone_count": len(descriptor.get("bones") or []) if isinstance(descriptor, Mapping) else 0,
+        "gpu_skinning_available": bool(gpu_skinning_vertex_count > 0 and len(descriptor.get("bones") or []) > 0 if isinstance(descriptor, Mapping) else False),
         "skeletal_animation_applied": bool(animated_geometry_count > 0 and skeletal_geometry_count > 0),
+        "descriptor_center": center.astype(float).tolist(),
+        "descriptor_max_size": float(max_size),
         "render_profile": render_profile,
         "render_profiles": render_profiles,
         "mtoon_color_policy": (
@@ -3226,6 +3373,8 @@ class GpuMeshWidget(QOpenGLWidget):
         self._shadow_dirty = True
         self._last_shadow_signature: tuple[object, ...] | None = None
         self._uniform_locations: dict[tuple[int, str], int] = {}
+        self.skinning_matrices: np.ndarray | None = None
+        self.skinning_diag: dict[str, Any] = {}
         self.ground_vao = 0
         self.ground_vbo = 0
         self.last_pos = None
@@ -3518,22 +3667,34 @@ class GpuMeshWidget(QOpenGLWidget):
         GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo)
         GL.glBufferData(GL.GL_ARRAY_BUFFER, self.vertices.nbytes, self.vertices, GL.GL_STATIC_DRAW)
         self._vbo_size_bytes = int(self.vertices.nbytes)
-        stride = 21 * 4
-        GL.glEnableVertexAttribArray(0)
-        GL.glVertexAttribPointer(0, 3, GL.GL_FLOAT, False, stride, ctypes.c_void_p(0))
-        GL.glEnableVertexAttribArray(1)
-        GL.glVertexAttribPointer(1, 3, GL.GL_FLOAT, False, stride, ctypes.c_void_p(12))
-        GL.glEnableVertexAttribArray(2)
-        GL.glVertexAttribPointer(2, 4, GL.GL_FLOAT, False, stride, ctypes.c_void_p(24))
-        GL.glEnableVertexAttribArray(3)
-        GL.glVertexAttribPointer(3, 3, GL.GL_FLOAT, False, stride, ctypes.c_void_p(40))
-        GL.glEnableVertexAttribArray(4)
-        GL.glVertexAttribPointer(4, 2, GL.GL_FLOAT, False, stride, ctypes.c_void_p(52))
-        GL.glEnableVertexAttribArray(5)
-        GL.glVertexAttribPointer(5, 3, GL.GL_FLOAT, False, stride, ctypes.c_void_p(60))
-        GL.glEnableVertexAttribArray(6)
-        GL.glVertexAttribPointer(6, 3, GL.GL_FLOAT, False, stride, ctypes.c_void_p(72))
+        self._configure_mesh_vertex_attributes()
         GL.glBindVertexArray(0)
+
+    def _configure_mesh_vertex_attributes(self) -> None:
+        from OpenGL import GL
+
+        stride_float_count = int(self.mesh_diag.get("vertex_stride_float_count") or GPU_VERTEX_STRIDE_FLOAT_COUNT)
+        stride = max(GPU_VERTEX_BASE_STRIDE_FLOAT_COUNT, stride_float_count) * 4
+        specs = (
+            (0, 3, 0),
+            (1, 3, 12),
+            (2, 4, 24),
+            (3, 3, 40),
+            (4, 2, 52),
+            (5, 3, 60),
+            (6, 3, 72),
+        )
+        for location, size, offset in specs:
+            GL.glEnableVertexAttribArray(location)
+            GL.glVertexAttribPointer(location, size, GL.GL_FLOAT, False, stride, ctypes.c_void_p(offset))
+        if stride_float_count >= GPU_VERTEX_STRIDE_FLOAT_COUNT:
+            GL.glEnableVertexAttribArray(7)
+            GL.glVertexAttribPointer(7, 4, GL.GL_FLOAT, False, stride, ctypes.c_void_p(84))
+            GL.glEnableVertexAttribArray(8)
+            GL.glVertexAttribPointer(8, 4, GL.GL_FLOAT, False, stride, ctypes.c_void_p(100))
+        else:
+            for location in (7, 8):
+                GL.glDisableVertexAttribArray(location)
 
     def replace_vertices(self, vertices: np.ndarray, mesh_diag: Mapping[str, Any]) -> None:
         """Replace animated vertex data without rebuilding programs/textures."""
@@ -3553,6 +3714,7 @@ class GpuMeshWidget(QOpenGLWidget):
             else:
                 GL.glBufferData(GL.GL_ARRAY_BUFFER, self.vertices.nbytes, self.vertices, GL.GL_DYNAMIC_DRAW)
                 self._vbo_size_bytes = int(self.vertices.nbytes)
+            self._configure_mesh_vertex_attributes()
             GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
             GL.glBindVertexArray(0)
         finally:
@@ -3870,6 +4032,8 @@ class GpuMeshWidget(QOpenGLWidget):
 
                 GL.glBindBuffer(GL.GL_ARRAY_BUFFER, self.vbo)
                 GL.glBufferData(GL.GL_ARRAY_BUFFER, self.vertices.nbytes, self.vertices, GL.GL_STATIC_DRAW)
+                self._vbo_size_bytes = int(self.vertices.nbytes)
+                self._configure_mesh_vertex_attributes()
                 GL.glBindBuffer(GL.GL_ARRAY_BUFFER, 0)
         finally:
             try:
@@ -3877,6 +4041,56 @@ class GpuMeshWidget(QOpenGLWidget):
             except Exception:
                 pass
         self.update()
+
+    def set_skinning_matrices(self, matrices: Any, diagnostics: Mapping[str, Any] | None = None) -> None:
+        """Update the GPU bone palette without rebuilding mesh vertices."""
+        arr = np.asarray(matrices, dtype=np.float32)
+        if arr.ndim != 3 or arr.shape[1:] != (4, 4) or len(arr) <= 0:
+            self.skinning_matrices = None
+            self.skinning_diag = {"available": False, "reason": "invalid_skinning_matrix_shape"}
+        else:
+            self.skinning_matrices = np.ascontiguousarray(arr[:GPU_SKINNING_MAX_BONES], dtype=np.float32)
+            self.skinning_diag = {
+                "available": True,
+                "bone_count": int(len(self.skinning_matrices)),
+                **dict(diagnostics or {}),
+            }
+        self._invalidate_shadow_cache()
+        self.update()
+
+    def clear_skinning_matrices(self) -> None:
+        self.skinning_matrices = None
+        self.skinning_diag = {"available": False}
+        self._invalidate_shadow_cache()
+        self.update()
+
+    def _upload_skinning_uniforms(self, program: int) -> None:
+        from OpenGL import GL
+
+        available = (
+            self.skinning_matrices is not None
+            and int(self.mesh_diag.get("gpu_skinning_vertex_count", 0) or 0) > 0
+        )
+        GL.glUniform1i(self._uniform_location(program, "u_skinning_enabled"), 1 if available else 0)
+        count = int(len(self.skinning_matrices)) if available and self.skinning_matrices is not None else 0
+        count = max(0, min(GPU_SKINNING_MAX_BONES, count))
+        GL.glUniform1i(self._uniform_location(program, "u_skin_bone_count"), count)
+        center = self.mesh_diag.get("descriptor_center") or [0.0, 0.0, 0.0]
+        max_size = float(self.mesh_diag.get("descriptor_max_size") or 1.0)
+        GL.glUniform3f(
+            self._uniform_location(program, "u_bounds_center"),
+            float(center[0] if len(center) > 0 else 0.0),
+            float(center[1] if len(center) > 1 else 0.0),
+            float(center[2] if len(center) > 2 else 0.0),
+        )
+        GL.glUniform1f(self._uniform_location(program, "u_bounds_max_size"), max(1.0e-6, max_size))
+        if count > 0 and self.skinning_matrices is not None:
+            GL.glUniformMatrix4fv(
+                self._uniform_location(program, "u_skin_bones"),
+                count,
+                True,
+                self.skinning_matrices[:count],
+            )
 
     def _upload_material_textures(self) -> None:
         for material_name, maps in self.texture_plan.items():
@@ -4045,6 +4259,7 @@ class GpuMeshWidget(QOpenGLWidget):
                 GL.glClear(clear_bits)
                 GL.glUseProgram(self.depth_program)
                 GL.glUniformMatrix4fv(self._uniform_location(self.depth_program, "u_light_mvp"), 1, True, light_mvp)
+                self._upload_skinning_uniforms(self.depth_program)
                 GL.glBindVertexArray(self.vao)
                 for draw_range in self.draw_ranges:
                     if draw_range.get("depth_write") is False:
@@ -4199,6 +4414,7 @@ class GpuMeshWidget(QOpenGLWidget):
         GL.glUniformMatrix4fv(self._uniform_location(self.program, "u_model"), 1, True, model)
         GL.glUniformMatrix4fv(self._uniform_location(self.program, "u_light_mvp"), 1, True, light_mvp)
         GL.glUniformMatrix3fv(self._uniform_location(self.program, "u_normal_mat"), 1, True, normal_mat)
+        self._upload_skinning_uniforms(self.program)
         GL.glUniform3f(
             self._uniform_location(self.program, "u_light_dir"),
             float(light_dir[0]),

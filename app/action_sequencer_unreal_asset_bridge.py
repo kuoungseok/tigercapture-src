@@ -11,6 +11,7 @@ from typing import Any
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 UNREAL_ASSET_BRIDGE_PROJECT = PROJECT_ROOT / "tools" / "unreal_asset_bridge" / "TigerUnrealAssetBridge.csproj"
 UNREAL_EDITOR_ANIMATION_EXPORT_SCRIPT = PROJECT_ROOT / "tools" / "unreal_asset_bridge" / "export_animation_clip_unreal.py"
+ANIMATION_ROTATION_SPACE = "tiger_basis_quat_v1"
 
 
 def default_owner_unreal_ar_pbr_path(owner_descriptor: Any, *, root: Path | None = None) -> Path:
@@ -186,7 +187,7 @@ def export_owner_unreal_animation_clip(
     clip = payload.get("animation_clip") if isinstance(payload, dict) else None
     if not isinstance(clip, dict):
         raise RuntimeError(f"Internal Unreal asset bridge wrote an invalid animation payload: {target}")
-    clip = dict(clip)
+    clip = _normalize_animation_clip_payload(payload, clip)
     clip["_export_path"] = str(target)
     return clip
 
@@ -211,7 +212,8 @@ def _load_cached_animation_clip_if_fresh(
         clip = payload.get("animation_clip") if isinstance(payload, dict) else None
         if not isinstance(clip, dict):
             return None
-        if str(clip.get("rotation_space") or payload.get("rotation_space") or "") != "tiger_basis_quat_v1":
+        clip = _normalize_animation_clip_payload(payload, clip)
+        if str(clip.get("rotation_space") or "") != ANIMATION_ROTATION_SPACE:
             return None
         requested_samples = max(2, int(max_samples))
         exported_samples = int(float(clip.get("sampled_frame_count") or payload.get("sampled_frame_count") or 0))
@@ -306,10 +308,42 @@ def _export_owner_unreal_animation_clip_via_editor(
     clip = payload.get("animation_clip") if isinstance(payload, dict) else None
     if not isinstance(clip, dict):
         raise RuntimeError(f"{first_error}; Unreal Editor fallback wrote an invalid animation payload: {target}")
-    clip = dict(clip)
+    clip = _normalize_animation_clip_payload(payload, clip)
     clip["_export_path"] = str(target)
     clip["_exporter"] = str(payload.get("exporter") or "unreal_editor_python") if isinstance(payload, dict) else "unreal_editor_python"
     return clip
+
+
+def _normalize_animation_clip_payload(payload: dict[str, Any], clip: dict[str, Any]) -> dict[str, Any]:
+    out = dict(clip)
+    rotation_space = str(out.get("rotation_space") or payload.get("rotation_space") or "")
+    if not rotation_space and _legacy_animation_cache_is_usable(payload, out):
+        rotation_space = ANIMATION_ROTATION_SPACE
+        out["legacy_rotation_space_assumed"] = True
+    if rotation_space:
+        out["rotation_space"] = rotation_space
+    return out
+
+
+def _legacy_animation_cache_is_usable(payload: dict[str, Any], clip: dict[str, Any]) -> bool:
+    """Accept older local caches that already contain Tiger-space bone curves."""
+
+    exporter = str(payload.get("exporter") or clip.get("_exporter") or "").strip().casefold()
+    source_mode = str(clip.get("source_mode") or "").strip().casefold()
+    if exporter not in {"unreal_editor_python", "cached_animation_clip"} and not source_mode.startswith("unreal_editor_python"):
+        return False
+    curves = clip.get("model_curves")
+    if not isinstance(curves, dict) or not curves:
+        return False
+    sampled = int(float(clip.get("sampled_frame_count") or payload.get("sampled_frame_count") or 0))
+    if sampled < 2:
+        return False
+    for key, curve in curves.items():
+        if not str(key).startswith("bone_") or not isinstance(curve, dict):
+            continue
+        if isinstance(curve.get("rotation_quat"), dict) and isinstance(curve.get("translation"), dict):
+            return True
+    return False
 
 
 def _content_asset_game_path(project_path: Path, asset_path: Path) -> str:
@@ -341,6 +375,7 @@ def _safe_file_stem(value: str) -> str:
 
 
 __all__ = [
+    "ANIMATION_ROTATION_SPACE",
     "UNREAL_ASSET_BRIDGE_PROJECT",
     "default_owner_unreal_ar_pbr_path",
     "default_owner_unreal_animation_clip_path",

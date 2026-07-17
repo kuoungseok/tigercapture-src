@@ -435,6 +435,90 @@ def descriptor_animation_diagnostics(descriptor: Mapping[str, Any]) -> dict[str,
     }
 
 
+def skin_matrices_for_clip(
+    descriptor: Mapping[str, Any],
+    track: Mapping[str, Any],
+    time_ms: int,
+) -> dict[str, Any] | None:
+    """Build a bone palette for GPU skinning at the requested timeline time."""
+
+    descriptor = _unwrap_descriptor(descriptor)
+    clip = select_animation_clip(descriptor, track)
+    if clip is None:
+        return None
+    local_ms = animation_time_ms(track, int(time_ms), clip)
+    if local_ms is None:
+        return None
+    try:
+        import numpy as np
+    except Exception:
+        return None
+
+    bones = [bone for bone in descriptor.get("bones", []) or [] if isinstance(bone, Mapping)]
+    if not bones:
+        return None
+    curves = clip.get("model_curves") if isinstance(clip.get("model_curves"), Mapping) else {}
+    if not curves:
+        return None
+
+    models = _model_by_id(descriptor)
+    parent_by_id = _model_parent_map(descriptor)
+    unit_scale = _animation_unit_scale(descriptor)
+    max_index = max(_int(bone.get("index"), idx) for idx, bone in enumerate(bones))
+    matrices = np.repeat(np.eye(4, dtype=np.float32)[None, :, :], max_index + 1, axis=0)
+    animated_count = 0
+    identity = np.eye(4, dtype=np.float64)
+    global_cache: dict[tuple[str, bool], Any] = {}
+
+    def global_matrix_cached(model_id: str, *, animated: bool, stack: tuple[str, ...] = ()):
+        key = (model_id, animated)
+        if key in global_cache:
+            return global_cache[key]
+        local = _local_matrix(
+            model_id,
+            models=models,
+            model_curves_by_id=curves,
+            unit_scale=unit_scale,
+            local_ms=local_ms,
+            animated=animated,
+        )
+        parent_id = str(parent_by_id.get(model_id) or "")
+        if parent_id and parent_id not in stack:
+            value = global_matrix_cached(parent_id, animated=animated, stack=(*stack, model_id)) @ local
+        else:
+            value = local
+        global_cache[key] = value
+        return value
+
+    for idx, bone in enumerate(bones):
+        bone_id = str(bone.get("id") or f"bone_{idx}")
+        bone_index = _int(bone.get("index"), idx)
+        if bone_index < 0 or bone_index >= len(matrices):
+            continue
+        try:
+            bind = global_matrix_cached(bone_id, animated=False)
+            anim = global_matrix_cached(bone_id, animated=True)
+            mat = anim @ np.linalg.inv(bind)
+        except Exception:
+            mat = identity
+        if not np.allclose(mat, identity, atol=1.0e-8):
+            animated_count += 1
+        matrices[bone_index] = np.asarray(mat, dtype=np.float32)
+
+    return {
+        "matrices": matrices,
+        "clip": str(clip.get("id") or clip.get("name") or ""),
+        "local_ms": float(local_ms),
+        "bone_count": int(len(matrices)),
+        "animated_bone_count": int(animated_count),
+    }
+
+
+def _unwrap_descriptor(descriptor: Mapping[str, Any]) -> Mapping[str, Any]:
+    nested = descriptor.get("descriptor") if isinstance(descriptor, Mapping) else None
+    return nested if isinstance(nested, Mapping) else descriptor
+
+
 def _animation_unit_scale(descriptor: Mapping[str, Any]) -> float:
     """Return the transform scale to use for animation bone translations.
 

@@ -69,7 +69,8 @@ def test_owner_animation_sequence_plan_normalizes_unreal_clip() -> None:
     assert plan["bone_palette"]["animated_bone_count"] == 2
     assert plan["root_motion"]["translation_delta"] == [10.0, 0.0, 0.0]
     assert plan["root_motion"]["horizontal_distance"] == 10.0
-    assert plan["ar_pbr_deformation_enabled"] is False
+    assert plan["ar_pbr_deformation_enabled"] is True
+    assert plan["deformation_mode"] == "gpu_bone_palette"
     assert plan["requires_gpu_palette_renderer"] is True
 
 
@@ -308,6 +309,53 @@ def test_owner_unreal_animation_bridge_uses_fresh_cache(tmp_path, monkeypatch) -
     assert clip["_exporter"] == "unit_cache"
 
 
+def test_owner_unreal_animation_bridge_reuses_legacy_tiger_space_cache(tmp_path, monkeypatch) -> None:
+    from app.action_sequencer_owner_render import discover_owner_render_descriptor
+    from app.action_sequencer_unreal_asset_bridge import export_owner_unreal_animation_clip
+
+    project = tmp_path / "ActionSequencer" / "ActionSequencer.uproject"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text('{"EngineAssociation":"5.8"}', encoding="utf-8")
+    content = project.parent / "Content"
+    _touch(content / "Variant_Combat" / "Blueprints" / "BP_CombatCharacter.uasset")
+    _touch(content / "Characters" / "Mannequins" / "Meshes" / "SKM_Manny_Simple.uasset")
+    animation = _touch(content / "Characters" / "Mannequins" / "Anims" / "Pistol" / "MM_Pistol_Jog.uasset")
+    descriptor = discover_owner_render_descriptor(project)
+    target = tmp_path / "legacy.cached.animation_clip.json"
+    target.write_text(
+        json.dumps({
+            "schema": "tigerstudio.ar_pbr.unreal_animation_clip_export.v1",
+            "exporter": "unreal_editor_python",
+            "animation_clip": {
+                "id": "MM_Pistol_Jog",
+                "name": "MM_Pistol_Jog",
+                "duration_ms": 966.6,
+                "sampled_frame_count": 48,
+                "source_mode": "unreal_editor_python_pose",
+                "model_curves": {
+                    "bone_0": {
+                        "translation": {"x": [[0.0, 0.0], [966.6, 1.0]]},
+                        "rotation_quat": {"x": [[0.0, 0.0], [966.6, 0.0]], "w": [[0.0, 1.0], [966.6, 1.0]]},
+                    }
+                },
+            },
+        }),
+        encoding="utf-8",
+    )
+
+    def fail_run(*_args, **_kwargs):
+        raise AssertionError("legacy local animation cache should skip export subprocess")
+
+    monkeypatch.setattr(subprocess, "run", fail_run)
+
+    clip = export_owner_unreal_animation_clip(descriptor, animation, target, max_samples=48)
+
+    assert clip["id"] == "MM_Pistol_Jog"
+    assert clip["rotation_space"] == "tiger_basis_quat_v1"
+    assert clip["legacy_rotation_space_assumed"] is True
+    assert clip["_cache_hit"] is True
+
+
 def test_owner_unreal_animation_bridge_falls_back_to_editor_python(tmp_path, monkeypatch) -> None:
     from app.action_sequencer_owner_render import discover_owner_render_descriptor
     from app.action_sequencer_unreal_asset_bridge import export_owner_unreal_animation_clip
@@ -514,18 +562,19 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
         "play_once": True,
     })
     assert window.owner_animation_preview_request["preview_backend"] == owner_render.OWNER_ANIMATION_PREVIEW_BACKEND
-    assert window.owner_animation_preview_request["ar_pbr_animation_enabled"] is False
+    assert window.owner_animation_preview_request["ar_pbr_animation_enabled"] is True
     assert window.owner_animation_preview_request["reference_pipeline"] == "UAssetInspector SamplePalette -> Bones UBO -> skinned shader"
     assert window.owner_animation_preview_result["status"] == "animation_clip_exported"
     assert window.owner_animation_preview_result["clip"] == "MM_Idle"
-    assert window.owner_animation_preview_result["ar_pbr_animation_enabled"] is False
+    assert window.owner_animation_preview_result["ar_pbr_animation_enabled"] is True
     assert window.owner_animation_preview_result["requires_gpu_palette_renderer"] is True
     assert window.owner_animation_preview_result["summary"]["bone_curve_count"] == 1
     assert window.owner_animation_preview_result["summary"]["sampled_frame_count"] == 12
     assert window.owner_animation_preview_result["sequence_summary"]["bone_count"] == 1
     assert window.owner_animation_preview_result["sequence_summary"]["sample_count"] == 2
     assert window.owner_animation_sequence_plan["source"]["id"] == "MM_Idle"
-    assert window.owner_animation_sequence_plan["ar_pbr_deformation_enabled"] is False
+    assert window.owner_animation_sequence_plan["ar_pbr_deformation_enabled"] is True
+    assert window.owner_animation_sequence_plan["deformation_mode"] == "gpu_bone_palette"
     assert window.owner_animation_preview_result["playback_result"]["status"] == "playing"
     assert captured["attached_clip"]["id"] == "MM_Idle"
     assert captured["played_clip"] == "MM_Idle"

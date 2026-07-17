@@ -1039,7 +1039,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._animation_duration_ms = max(1.0, float(duration_ms if duration_ms is not None else clip.get("duration_ms") or 1000.0))
         if self._animation_timer is None:
             self._animation_timer = QTimer(self)
-            self._animation_timer.setInterval(80)
+            self._animation_timer.setInterval(33)
             self._animation_timer.timeout.connect(self._tick_animation_preview)
         self._animation_timer.start()
         self._status.setText(f"Playing once: {Path(str(clip_name or clip_id)).stem}")
@@ -1105,6 +1105,19 @@ class ArPbrAssetPreviewWindow(QMainWindow):
     def _apply_animation_frame(self, track: dict[str, Any], time_ms: int) -> None:
         if self._gl_widget is None or not isinstance(self._descriptor, dict):
             return
+        set_skinning = getattr(self._gl_widget, "set_skinning_matrices", None)
+        if callable(set_skinning) and bool(self._mesh_diag.get("gpu_skinning_available")):
+            try:
+                from app.ar_pbr.animation import skin_matrices_for_clip
+
+                skinning = skin_matrices_for_clip(self._descriptor, track, int(time_ms))
+            except Exception:
+                skinning = None
+            if isinstance(skinning, dict) and skinning.get("matrices") is not None:
+                set_skinning(skinning["matrices"], skinning)
+                self._mesh_diag["gpu_skinning_active"] = True
+                self._mesh_diag["gpu_skinning_last_time_ms"] = int(time_ms)
+                return
         generation = int(self._animation_generation)
         active_worker = self._animation_frame_worker
         if active_worker is not None and active_worker.isRunning():
