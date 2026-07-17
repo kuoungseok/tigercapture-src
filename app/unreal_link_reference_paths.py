@@ -1,8 +1,4 @@
-"""Local reference roots for Unreal Engine Link development.
-
-These paths are intentionally references only. Do not copy or vendor these
-external directories into the Tiger Studio repository.
-"""
+"""Local reference roots and internal bridge roots for Unreal Engine Link work."""
 from __future__ import annotations
 
 import os
@@ -14,8 +10,10 @@ from typing import Any
 UASSET_INSPECTOR_ENV = "TIGERSTUDIO_UASSET_INSPECTOR_ROOT"
 UE_ENGINE_ENV = "TIGERSTUDIO_UE_ENGINE_ROOT"
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_UASSET_INSPECTOR_ROOT = Path("D:/Pupg_workspace/ToolsStandalone/UAssetInspector")
 DEFAULT_UE_ENGINE_ROOT = Path("D:/UE_5.8")
+INTERNAL_CUE4PARSE_ROOT = PROJECT_ROOT / "tools" / "unreal_asset_bridge" / "vendor" / "CUE4Parse"
 
 
 @dataclass(frozen=True)
@@ -75,6 +73,16 @@ def unreal_link_reference_roots() -> dict[str, UnrealLinkReferenceRoot]:
                 "Engine/Binaries/Win64/UnrealEditor.exe",
             ),
         ),
+        "cue4parse_internal": UnrealLinkReferenceRoot(
+            key="cue4parse_internal",
+            label="CUE4Parse internal bridge runtime",
+            path=INTERNAL_CUE4PARSE_ROOT,
+            required_children=(
+                "CUE4Parse/CUE4Parse.csproj",
+                "CUE4Parse-Conversion/CUE4Parse-Conversion.csproj",
+                "CUE4Parse-Natives",
+            ),
+        ),
     }
 
 
@@ -82,8 +90,9 @@ def unreal_link_reference_report() -> dict[str, Any]:
     roots = unreal_link_reference_roots()
     return {
         "note": (
-            "Use these as local read-only references for Unreal Engine Link "
-            "development. Do not copy the external tool or engine into this repo."
+            "Use the local editor/tool roots as read-only references. CUE4Parse is "
+            "vendored under tools/unreal_asset_bridge so Tiger can build its own "
+            "asset bridge instead of relying on a separate sidecar app."
         ),
         "env_overrides": {
             "uasset_inspector": UASSET_INSPECTOR_ENV,
@@ -113,6 +122,7 @@ def format_unreal_link_reference_report() -> str:
 __all__ = [
     "DEFAULT_UASSET_INSPECTOR_ROOT",
     "DEFAULT_UE_ENGINE_ROOT",
+    "INTERNAL_CUE4PARSE_ROOT",
     "UASSET_INSPECTOR_ENV",
     "UE_ENGINE_ENV",
     "UnrealLinkReferenceRoot",

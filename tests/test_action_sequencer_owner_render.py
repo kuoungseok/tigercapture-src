@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 
@@ -72,3 +73,36 @@ def test_owner_render_descriptor_reports_missing_mesh(tmp_path, monkeypatch) -> 
     assert descriptor.can_render is False
     assert any("BP_CombatCharacter" in item for item in descriptor.diagnostics)
     assert any("skeletal mesh" in item for item in descriptor.diagnostics)
+
+
+def test_owner_ar_pbr_proxy_descriptor_is_renderable(tmp_path, monkeypatch) -> None:
+    from app.action_sequencer_ar_pbr_proxy import (
+        OWNER_AR_PBR_PROXY_SCHEMA,
+        write_owner_ar_pbr_proxy_asset,
+    )
+    from app.action_sequencer_owner_render import discover_owner_render_descriptor
+    from app.ar_pbr.importer import import_asset
+
+    project = tmp_path / "ActionSequencer" / "ActionSequencer.uproject"
+    _touch(project)
+    content = project.parent / "Content"
+    _touch(content / "Variant_Combat" / "Blueprints" / "BP_CombatCharacter.uasset")
+    _touch(content / "Characters" / "Mannequins" / "Meshes" / "SKM_Manny_Simple.uasset")
+    descriptor = discover_owner_render_descriptor(project)
+
+    proxy_path = write_owner_ar_pbr_proxy_asset(descriptor, tmp_path / "owner.arpbr")
+    payload = json.loads(proxy_path.read_text(encoding="utf-8"))
+
+    assert payload["schema"] == OWNER_AR_PBR_PROXY_SCHEMA
+    assert payload["runtime_format"] == "ar_scene_descriptor"
+    assert payload["descriptor"]["metadata"]["owner_name"] == "BP_CombatCharacter"
+    assert payload["descriptor"]["metadata"]["render_asset_path"].endswith("SKM_Manny_Simple.uasset")
+    assert payload["descriptor"]["mesh_count"] >= 10
+    assert sum(item["triangle_count"] for item in payload["descriptor"]["geometries"]) > 500
+
+    imported, diagnostics = import_asset(proxy_path, settings={"disable_descriptor_cache": True})
+
+    assert diagnostics["imported"] is True
+    assert diagnostics["backend"] == "proxy_descriptor"
+    assert imported["support"]["ok_for_preview"] is True
+    assert imported["support"]["metrics"]["triangle_count"] > 500

@@ -317,6 +317,7 @@ SUPPORTED_ASSET_EXTS = frozenset({
     ".obj",
     ".usd",
     ".usdz",
+    ".arpbr",
 })
 
 DEFAULT_TRANSFORM = {

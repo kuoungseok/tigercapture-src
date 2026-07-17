@@ -27,3 +27,5 @@
 *.skel.bytes binary
 *.spine binary
 *.cube text eol=lf
+
+tools/unreal_asset_bridge/vendor/CUE4Parse/** -whitespace

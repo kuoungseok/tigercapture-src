@@ -21,6 +21,10 @@ from PySide6.QtWidgets import (
 )
 
 from app.icons import app_icon, icon_size, unreal_engine_icon
+from app.action_sequencer_ar_pbr_proxy import (
+    default_owner_ar_pbr_proxy_path,
+    write_owner_ar_pbr_proxy_asset,
+)
 from app.unreal_link_reference_paths import unreal_link_reference_roots
 
 
@@ -416,8 +420,46 @@ class ActionSequencerOwnerRenderWindow(QWidget):
         return panel
 
 
-def open_action_sequencer_owner_render_window(owner: object, project_path: Path | str | None = None) -> ActionSequencerOwnerRenderWindow:
-    window = ActionSequencerOwnerRenderWindow(project_path, parent=None)
+def open_action_sequencer_owner_render_window(owner: object, project_path: Path | str | None = None) -> QWidget:
+    descriptor = discover_owner_render_descriptor(project_path)
+    proxy_asset = write_owner_ar_pbr_proxy_asset(descriptor)
+    from app.ar_pbr.preview_window import ArPbrAssetPreviewWindow
+    from app.ar_pbr.render_profile import PROFILE_MARMOSET_PBR
+
+    window = ArPbrAssetPreviewWindow(
+        proxy_asset,
+        parent=None,
+        initial_lighting={
+            "render_profile": PROFILE_MARMOSET_PBR,
+            "hdri_id": "studio_small_09",
+            "show_environment_background": True,
+            "ibl_exposure": 1.35,
+            "ibl_rotation": 0.08,
+            "light_azimuth": 38.0,
+            "light_elevation": 48.0,
+            "direct_strength": 0.62,
+            "shadow_strength": 0.78,
+            "shadow_pcf_radius": 1.8,
+            "self_shadow_strength": 0.58,
+            "ground_height": -0.52,
+            "shadow_catcher_opacity": 0.68,
+            "reflection_catcher_opacity": 0.16,
+            "surface_override_strength": 0.18,
+            "surface_roughness": 0.36,
+            "surface_reflectance": 0.62,
+            "tone_mapping": "aces",
+            "tone_exposure": 0.10,
+            "tone_white_balance": 6800.0,
+            "ambient_occlusion_mode": "screen",
+            "ao_strength": 0.55,
+        },
+        track_label=f"{descriptor.owner_name} Owner",
+        max_triangles=180_000,
+        texture_max_size=1024,
+    )
+    window.setWindowTitle("Action Sequencer - CombatCharacter AR/PBR Owner")
+    setattr(window, "owner_render_descriptor", descriptor)
+    setattr(window, "owner_ar_pbr_proxy_asset", proxy_asset)
     setattr(owner, "_action_sequencer_owner_render_window", window)
     window.show()
     window.raise_()
@@ -548,10 +590,12 @@ __all__ = [
     "ActionSequencerOwnerRenderWindow",
     "OwnerRenderDescriptor",
     "default_action_sequencer_project_path",
+    "default_owner_ar_pbr_proxy_path",
     "default_owner_render_capture_path",
     "discover_owner_render_descriptor",
     "open_action_sequencer_owner_render_window",
     "open_uasset_inspector_for_owner",
     "render_owner_preview_frame",
     "uasset_inspector_executable",
+    "write_owner_ar_pbr_proxy_asset",
 ]

@@ -3,6 +3,7 @@ from __future__ import annotations
 from app.unreal_link_reference_paths import (
     DEFAULT_UASSET_INSPECTOR_ROOT,
     DEFAULT_UE_ENGINE_ROOT,
+    INTERNAL_CUE4PARSE_ROOT,
     UASSET_INSPECTOR_ENV,
     UE_ENGINE_ENV,
     format_unreal_link_reference_report,
@@ -20,6 +21,8 @@ def test_unreal_link_reference_defaults_are_registered_for_ai_development() -> N
     assert DEFAULT_UE_ENGINE_ROOT.as_posix() == "D:/UE_5.8"
     assert "UAssetInspector.sln" in roots["uasset_inspector"].required_children
     assert "Engine/Binaries/Win64/UnrealEditor.exe" in roots["ue_58"].required_children
+    assert roots["cue4parse_internal"].path == INTERNAL_CUE4PARSE_ROOT
+    assert "CUE4Parse/CUE4Parse.csproj" in roots["cue4parse_internal"].required_children
 
 
 def test_unreal_link_reference_env_overrides(monkeypatch, tmp_path) -> None:
@@ -38,8 +41,9 @@ def test_unreal_link_reference_report_is_human_readable() -> None:
     report = unreal_link_reference_report()
     text = format_unreal_link_reference_report()
 
-    assert "Do not copy" in report["note"]
+    assert "CUE4Parse is vendored" in report["note"]
     assert "D:/UE_5.8" in text
+    assert "CUE4Parse internal bridge runtime" in text
     assert UASSET_INSPECTOR_ENV in text
     assert UE_ENGINE_ENV in text
 
@@ -58,6 +62,7 @@ def test_unreal_link_reference_status_action_is_ownerless() -> None:
         "D:/Pupg_workspace/ToolsStandalone/UAssetInspector"
     )
     assert result["result"]["roots"]["ue_58"]["path"] == "D:/UE_5.8"
+    assert result["result"]["roots"]["cue4parse_internal"]["path"] == INTERNAL_CUE4PARSE_ROOT.as_posix()
 
 
 def test_unreal_engine_project_file_dialog_uses_uproject_filter(tmp_path) -> None:
