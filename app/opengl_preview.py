@@ -942,26 +942,43 @@ uniform float u_ground_shadow_strength;
 vec3 bloom_sample(vec2 uv) {
     vec4 src = texture2D(u_bloom_tex, clamp(uv, vec2(0.0), vec2(1.0)));
     float lum = dot(src.rgb, vec3(0.2126, 0.7152, 0.0722));
-    float gate = smoothstep(u_bloom_threshold, u_bloom_threshold + 0.20, lum);
-    return src.rgb * gate;
+    float threshold = clamp(u_bloom_threshold, 0.0, 1.0);
+    float excess = max(lum - threshold, 0.0);
+    float contribution = clamp(excess / max(1.0 - threshold, 0.001), 0.0, 1.0);
+    float gate = smoothstep(0.0, 0.18, excess) * contribution;
+    return src.rgb * gate * clamp(src.a, 0.0, 1.0);
+}
+
+vec3 convolution_tap(vec2 uv, vec2 dir, float radius, float offset_scale, float weight) {
+    vec2 delta = u_texel_size * radius * dir * offset_scale;
+    return (bloom_sample(uv + delta) + bloom_sample(uv - delta)) * weight;
+}
+
+vec3 convolution_axis(vec2 uv, vec2 dir, float radius, float weight) {
+    vec2 axis = normalize(dir);
+    vec3 bloom = vec3(0.0);
+    bloom += convolution_tap(uv, axis, radius, 0.35, 0.155);
+    bloom += convolution_tap(uv, axis, radius, 0.78, 0.095);
+    bloom += convolution_tap(uv, axis, radius, 1.35, 0.052);
+    bloom += convolution_tap(uv, axis, radius, 2.15, 0.025);
+    return bloom * weight;
+}
+
+vec3 convolution_bloom(vec2 uv, float radius) {
+    vec3 bloom = bloom_sample(uv) * 0.105;
+    bloom += convolution_axis(uv, vec2(1.0, 0.0), radius * 1.42, 1.00);
+    bloom += convolution_axis(uv, vec2(0.0, 1.0), radius * 0.78, 0.36);
+    bloom += convolution_axis(uv, vec2(0.707, 0.707), radius * 1.06, 0.34);
+    bloom += convolution_axis(uv, vec2(-0.707, 0.707), radius * 1.06, 0.34);
+    bloom += convolution_axis(uv, vec2(0.923, 0.382), radius * 1.72, 0.18);
+    bloom += convolution_axis(uv, vec2(-0.923, 0.382), radius * 1.72, 0.18);
+    return bloom;
 }
 
 void main() {
     vec4 layer = texture2D(u_layer_tex, v_uv);
-    vec2 px = u_texel_size * max(0.5, u_bloom_radius);
-    vec3 bloom = bloom_sample(v_uv) * 0.20416;
-    bloom += (bloom_sample(v_uv + vec2( px.x, 0.0)) +
-              bloom_sample(v_uv - vec2( px.x, 0.0)) +
-              bloom_sample(v_uv + vec2(0.0,  px.y)) +
-              bloom_sample(v_uv - vec2(0.0,  px.y))) * 0.12384;
-    bloom += (bloom_sample(v_uv + vec2( px.x,  px.y)) +
-              bloom_sample(v_uv + vec2(-px.x,  px.y)) +
-              bloom_sample(v_uv + vec2( px.x, -px.y)) +
-              bloom_sample(v_uv + vec2(-px.x, -px.y))) * 0.07785;
-    bloom += (bloom_sample(v_uv + vec2( px.x * 2.0, 0.0)) +
-              bloom_sample(v_uv - vec2( px.x * 2.0, 0.0)) +
-              bloom_sample(v_uv + vec2(0.0,  px.y * 2.0)) +
-              bloom_sample(v_uv - vec2(0.0,  px.y * 2.0))) * 0.03766;
+    float radius = max(0.5, u_bloom_radius);
+    vec3 bloom = convolution_bloom(v_uv, radius);
     vec2 shadow_delta = (v_uv - u_ground_shadow_center) / max(u_ground_shadow_radius, vec2(0.0001));
     float oval = 1.0 - smoothstep(0.46, 1.0, dot(shadow_delta, shadow_delta));
     float ground_alpha = oval * clamp(u_ground_shadow_strength, 0.0, 0.75) * (1.0 - layer.a);

@@ -889,6 +889,11 @@ def build_gpu_preview_items(
                     "bloom_strength": float(post_effects_rendering["bloom_strength"]),
                     "bloom_radius": float(post_effects_rendering["bloom_radius"]),
                     "bloom_threshold": float(post_effects_rendering["bloom_threshold"]),
+                    "bloom_method": str(post_effects_rendering["bloom_method"]),
+                    "bloom_kernel": str(post_effects_rendering["bloom_kernel"]),
+                    "bloom_convolution_scale": float(post_effects_rendering["bloom_convolution_scale"]),
+                    "bloom_scatter": float(post_effects_rendering["bloom_scatter"]),
+                    "bloom_boost": float(post_effects_rendering["bloom_boost"]),
                     "vignette_enabled": bool(post_effects_rendering["vignette_enabled"]),
                     "vignette_strength": float(post_effects_rendering["vignette_strength"]),
                     "vignette_radius": float(post_effects_rendering["vignette_radius"]),
@@ -1289,7 +1294,7 @@ def build_gpu_preview_items(
         if any(bool(row.get("enabled")) for row in post_effect_rows):
             first_post = next(row for row in post_effect_rows if bool(row.get("enabled")))
             diagnostics["gpu_renderer"]["post_effects_rendering"] = str(first_post.get("mode") or "post_effects")
-            diagnostics["gpu_renderer"]["bloom"] = "thresholded_gaussian_screen_glow" if first_post.get("bloom_enabled") else "off"
+            diagnostics["gpu_renderer"]["bloom"] = "thresholded_convolution_lens_bloom" if first_post.get("bloom_enabled") else "off"
             diagnostics["gpu_renderer"]["vignette"] = "beauty_pass_radial_falloff" if first_post.get("vignette_enabled") else "off"
             diagnostics["gpu_renderer"]["grain"] = "deterministic_film_grain" if first_post.get("grain_enabled") else "off"
             diagnostics["gpu_renderer"]["sharpen"] = "unsharp_mask" if first_post.get("sharpen_enabled") else "off"

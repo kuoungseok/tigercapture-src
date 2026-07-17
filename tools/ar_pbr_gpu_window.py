@@ -1448,29 +1448,40 @@ vec3 bright_pass(vec4 sample_rgba) {
     return rgb * contribution * soft_mask * source_mask;
 }
 
-vec3 sample_bloom_ring(vec2 uv, float radius_px, float weight) {
-    vec2 texel = u_texel_size * radius_px;
-    vec3 blurred = vec3(0.0);
-    blurred += bright_pass(texture(u_bloom_source, uv + texel * vec2( 1.0,  0.0)));
-    blurred += bright_pass(texture(u_bloom_source, uv + texel * vec2(-1.0,  0.0)));
-    blurred += bright_pass(texture(u_bloom_source, uv + texel * vec2( 0.0,  1.0)));
-    blurred += bright_pass(texture(u_bloom_source, uv + texel * vec2( 0.0, -1.0)));
-    blurred += bright_pass(texture(u_bloom_source, uv + texel * vec2( 0.707,  0.707)));
-    blurred += bright_pass(texture(u_bloom_source, uv + texel * vec2(-0.707,  0.707)));
-    blurred += bright_pass(texture(u_bloom_source, uv + texel * vec2( 0.707, -0.707)));
-    blurred += bright_pass(texture(u_bloom_source, uv + texel * vec2(-0.707, -0.707)));
-    return blurred * (weight / 8.0);
+vec3 convolution_tap(vec2 uv, vec2 dir, float radius_px, float offset_scale, float weight) {
+    vec2 delta = u_texel_size * radius_px * dir * offset_scale;
+    return (
+        bright_pass(texture(u_bloom_source, uv + delta)) +
+        bright_pass(texture(u_bloom_source, uv - delta))
+    ) * weight;
+}
+
+vec3 sample_bloom_convolution_axis(vec2 uv, vec2 dir, float radius_px, float weight) {
+    vec2 axis = normalize(dir);
+    vec3 bloom = vec3(0.0);
+    bloom += convolution_tap(uv, axis, radius_px, 0.35, 0.155);
+    bloom += convolution_tap(uv, axis, radius_px, 0.78, 0.095);
+    bloom += convolution_tap(uv, axis, radius_px, 1.35, 0.052);
+    bloom += convolution_tap(uv, axis, radius_px, 2.15, 0.025);
+    return bloom * weight;
+}
+
+vec3 sample_bloom_convolution(vec2 uv, float radius_px) {
+    vec3 bloom = bright_pass(texture(u_bloom_source, uv)) * 0.105;
+    bloom += sample_bloom_convolution_axis(uv, vec2(1.0, 0.0), radius_px * 1.42, 1.00);
+    bloom += sample_bloom_convolution_axis(uv, vec2(0.0, 1.0), radius_px * 0.78, 0.36);
+    bloom += sample_bloom_convolution_axis(uv, vec2(0.707, 0.707), radius_px * 1.06, 0.34);
+    bloom += sample_bloom_convolution_axis(uv, vec2(-0.707, 0.707), radius_px * 1.06, 0.34);
+    bloom += sample_bloom_convolution_axis(uv, vec2(0.923, 0.382), radius_px * 1.72, 0.18);
+    bloom += sample_bloom_convolution_axis(uv, vec2(-0.923, 0.382), radius_px * 1.72, 0.18);
+    return bloom;
 }
 
 void main() {
     vec4 base = texture(u_scene_color, v_uv);
     float radius = clamp(u_bloom_radius, 1.0, 32.0);
     float strength = clamp(u_bloom_strength, 0.0, 3.0);
-    vec3 bloom = bright_pass(texture(u_bloom_source, v_uv)) * 0.06;
-    bloom += sample_bloom_ring(v_uv, radius * 0.45, 0.34);
-    bloom += sample_bloom_ring(v_uv, radius * 0.95, 0.27);
-    bloom += sample_bloom_ring(v_uv, radius * 1.55, 0.16);
-    bloom += sample_bloom_ring(v_uv, radius * 2.30, 0.08);
+    vec3 bloom = sample_bloom_convolution(v_uv, radius);
     vec3 rgb = clamp(base.rgb + bloom * strength, 0.0, 1.0);
     float bloom_alpha = clamp(max(max(bloom.r, bloom.g), bloom.b) * strength, 0.0, 1.0);
     float alpha = u_force_opaque == 1 ? 1.0 : max(base.a, bloom_alpha * 0.45);

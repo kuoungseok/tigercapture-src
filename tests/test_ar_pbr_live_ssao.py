@@ -48,7 +48,8 @@ def test_standalone_ar_pbr_viewer_shader_consumes_preview_bloom_uniforms() -> No
     assert "GL.GL_COLOR_ATTACHMENT1" in source
     assert "float excess = max(lum - threshold, 0.0);" in source
     assert "return rgb * contribution * soft_mask * source_mask;" in source
-    assert "vec3 sample_bloom_ring" in source
+    assert "vec3 sample_bloom_convolution" in source
+    assert "vec3 convolution_tap" in source
     assert "texture(u_bloom_source" in source
     assert "GL.glFramebufferTexture2D(" in source
     assert "self._draw_bloom_post(framebuffer_width, framebuffer_height, post_effects, bloom_strength)" in source

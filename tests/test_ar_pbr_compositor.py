@@ -2289,6 +2289,8 @@ def test_gpu_packet_export_renderer_applies_post_effects(tmp_path):
     assert base_diag["pbr_post_effects_applied"] is False
     assert post_diag["pbr_post_effects_rendering"]["schema"] == "tigerstudio.ar_pbr.post_effects.v1"
     assert post_diag["pbr_post_effects_rendering"]["enabled"] is True
+    assert post_diag["pbr_post_effects_rendering"]["bloom_method"] == "convolution"
+    assert post_diag["pbr_post_effects_rendering"]["bloom_model"] == "thresholded_fft_convolution_lens_bloom"
     assert post_diag["pbr_post_effects_applied"] is True
     assert post_diag["pbr_bloom_applied"] is True
     assert post_diag["pbr_vignette_applied"] is True
