@@ -13,6 +13,20 @@ def _touch(path: Path) -> Path:
     return path
 
 
+def _skeletal_curve_payload(count: int = 16) -> dict[str, dict]:
+    return {
+        f"bone_{index}": {
+            "rotation_quat": {
+                "x": [[0.0, 0.0], [1000.0, 0.0]],
+                "y": [[0.0, 0.0], [1000.0, 0.0]],
+                "z": [[0.0, 0.0], [1000.0, 0.0]],
+                "w": [[0.0, 1.0], [1000.0, 1.0]],
+            }
+        }
+        for index in range(count)
+    }
+
+
 def test_owner_animation_sequence_plan_normalizes_unreal_clip() -> None:
     from app.action_sequencer_animation_sequence import (
         ACTION_SEQUENCE_SCHEMA,
@@ -470,7 +484,7 @@ def test_owner_unreal_animation_bridge_uses_fresh_cache(tmp_path, monkeypatch) -
                 "duration_ms": 1000.0,
                 "sampled_frame_count": 48,
                 "rotation_space": "tiger_basis_quat_v1",
-                "model_curves": {},
+                "model_curves": _skeletal_curve_payload(),
             },
         }),
         encoding="utf-8",
@@ -486,6 +500,69 @@ def test_owner_unreal_animation_bridge_uses_fresh_cache(tmp_path, monkeypatch) -
     assert clip["id"] == "MM_Idle"
     assert clip["_cache_hit"] is True
     assert clip["_exporter"] == "unit_cache"
+
+
+def test_owner_unreal_animation_bridge_rejects_incomplete_skeletal_cache(tmp_path, monkeypatch) -> None:
+    from app.action_sequencer_owner_render import discover_owner_render_descriptor
+    from app.action_sequencer_unreal_asset_bridge import export_owner_unreal_animation_clip
+
+    project = tmp_path / "ActionSequencer" / "ActionSequencer.uproject"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text('{"EngineAssociation":"5.8"}', encoding="utf-8")
+    content = project.parent / "Content"
+    _touch(content / "Variant_Combat" / "Blueprints" / "BP_CombatCharacter.uasset")
+    _touch(content / "Characters" / "Mannequins" / "Meshes" / "SKM_Manny_Simple.uasset")
+    animation = _touch(content / "Characters" / "Mannequins" / "Anims" / "Unarmed" / "MM_Idle.uasset")
+    descriptor = discover_owner_render_descriptor(project)
+    target = tmp_path / "idle.incomplete.cached.animation_clip.json"
+    target.write_text(
+        json.dumps({
+            "schema": "tigerstudio.ar_pbr.unreal_animation_clip_export.v1",
+            "exporter": "unreal_editor_python_batch",
+            "animation_clip": {
+                "id": "MM_Idle",
+                "name": "MM_Idle",
+                "duration_ms": 1000.0,
+                "sampled_frame_count": 48,
+                "rotation_space": "tiger_basis_quat_v1",
+                "model_curves": {
+                    "bone_0": {
+                        "translation": {"x": [[0.0, 0.0], [1000.0, 1.0]]},
+                    }
+                },
+            },
+        }),
+        encoding="utf-8",
+    )
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append(list(command))
+        target.write_text(
+            json.dumps({
+                "schema": "tigerstudio.ar_pbr.unreal_animation_clip_export.v1",
+                "exporter": "internal_cue4parse",
+                "animation_clip": {
+                    "id": "MM_Idle",
+                    "name": "MM_Idle",
+                    "duration_ms": 1000.0,
+                    "sampled_frame_count": 48,
+                    "rotation_space": "tiger_basis_quat_v1",
+                    "model_curves": _skeletal_curve_payload(),
+                },
+            }),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout='{"ok":true}', stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    clip = export_owner_unreal_animation_clip(descriptor, animation, target, max_samples=48)
+
+    assert len(calls) == 1
+    assert "export-animation-clip" in calls[0]
+    assert clip["id"] == "MM_Idle"
+    assert "_cache_hit" not in clip
 
 
 def test_owner_unreal_animation_bridge_reuses_legacy_tiger_space_cache(tmp_path, monkeypatch) -> None:
@@ -512,6 +589,7 @@ def test_owner_unreal_animation_bridge_reuses_legacy_tiger_space_cache(tmp_path,
                 "sampled_frame_count": 48,
                 "source_mode": "unreal_editor_python_pose",
                 "model_curves": {
+                    **_skeletal_curve_payload(),
                     "bone_0": {
                         "translation": {"x": [[0.0, 0.0], [966.6, 1.0]]},
                         "rotation_quat": {"x": [[0.0, 0.0], [966.6, 0.0]], "w": [[0.0, 1.0], [966.6, 1.0]]},
@@ -571,12 +649,7 @@ def test_owner_unreal_animation_bridge_uses_internal_batch_before_editor(tmp_pat
                         "duration_ms": 1000.0,
                         "sampled_frame_count": 48,
                         "rotation_space": "tiger_basis_quat_v1",
-                        "model_curves": {
-                            "bone_0": {
-                                "translation": {"x": [[0.0, 0.0], [1000.0, 1.0]]},
-                                "rotation_quat": {"x": [[0.0, 0.0], [1000.0, 0.0]], "w": [[0.0, 1.0], [1000.0, 1.0]]},
-                            }
-                        },
+                        "model_curves": _skeletal_curve_payload(),
                     },
                 }),
                 encoding="utf-8",
@@ -690,12 +763,7 @@ def test_owner_unreal_animation_bridge_batches_uncached_editor_exports(tmp_path,
                         "duration_ms": 1000.0,
                         "sampled_frame_count": 48,
                         "rotation_space": "tiger_basis_quat_v1",
-                        "model_curves": {
-                            "bone_0": {
-                                "translation": {"x": [[0.0, 0.0], [1000.0, 1.0]]},
-                                "rotation_quat": {"x": [[0.0, 0.0], [1000.0, 0.0]], "w": [[0.0, 1.0], [1000.0, 1.0]]},
-                            }
-                        },
+                        "model_curves": _skeletal_curve_payload(),
                     },
                 }),
                 encoding="utf-8",

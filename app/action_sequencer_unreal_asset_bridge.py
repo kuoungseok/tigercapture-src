@@ -14,6 +14,7 @@ UNREAL_ASSET_BRIDGE_PROJECT = PROJECT_ROOT / "tools" / "unreal_asset_bridge" / "
 UNREAL_ASSET_BRIDGE_DLL = PROJECT_ROOT / "tools" / "unreal_asset_bridge" / "bin" / "Debug" / "net8.0" / "TigerUnrealAssetBridge.dll"
 UNREAL_EDITOR_ANIMATION_EXPORT_SCRIPT = PROJECT_ROOT / "tools" / "unreal_asset_bridge" / "export_animation_clip_unreal.py"
 ANIMATION_ROTATION_SPACE = "tiger_basis_quat_v1"
+MIN_PREVIEW_SKELETAL_BONE_CURVE_COUNT = 16
 
 
 def default_owner_unreal_ar_pbr_path(owner_descriptor: Any, *, root: Path | None = None) -> Path:
@@ -69,6 +70,18 @@ def owner_unreal_animation_clip_cache_status(
         status["fresh"] = target.stat().st_mtime >= source_mtime
     except Exception:
         status["fresh"] = False
+    if status["fresh"]:
+        try:
+            payload = json.loads(target.read_text(encoding="utf-8"))
+            clip = payload.get("animation_clip") if isinstance(payload, dict) else None
+            if isinstance(clip, dict):
+                clip = _normalize_animation_clip_payload(payload, clip)
+                usable = _animation_clip_preview_cache_usable(clip, payload=payload)
+                status["validated"] = bool(usable[0])
+                status["reason"] = str(usable[1])
+        except Exception as exc:
+            status["validated"] = False
+            status["reason"] = f"cache_validation_failed:{type(exc).__name__}"
     return status
 
 
@@ -222,6 +235,16 @@ def export_owner_unreal_animation_clip(
             max_samples=max_samples,
             timeout_s=max(timeout_s, 240.0),
             first_error="Internal Control Rig curve export is not preview-safe",
+        )
+    usable, reason = _animation_clip_preview_cache_usable(clip, payload=payload)
+    if not usable:
+        return _export_owner_unreal_animation_clip_via_editor(
+            owner_descriptor,
+            asset_path,
+            target,
+            max_samples=max_samples,
+            timeout_s=max(timeout_s, 240.0),
+            first_error=f"Internal animation export is not preview-safe: {reason}",
         )
     clip["_export_path"] = str(target)
     return clip
@@ -428,6 +451,13 @@ def _export_owner_unreal_animation_clips_via_internal_batch(
                         "message": "Control Rig/Sequencer curve export requires Unreal Editor pose evaluation.",
                     }
                     raise RuntimeError(str(raw["message"]))
+                usable, reason = _animation_clip_preview_cache_usable(clip, payload=clip_payload)
+                if not usable:
+                    raw = {
+                        "error": "UnsafePreviewCache",
+                        "message": f"Internal animation export is not preview-safe: {reason}",
+                    }
+                    raise RuntimeError(str(raw["message"]))
                 clip["_export_path"] = str(target)
                 clip["_exporter"] = str(clip_payload.get("exporter") or payload.get("exporter") or "internal_cue4parse_batch")
                 results[source] = {
@@ -477,6 +507,9 @@ def _load_cached_animation_clip_if_fresh(
             return None
         clip = _normalize_animation_clip_payload(payload, clip)
         if _animation_clip_requires_editor_pose(clip):
+            return None
+        usable, _reason = _animation_clip_preview_cache_usable(clip, payload=payload)
+        if not usable:
             return None
         if str(clip.get("rotation_space") or "") != ANIMATION_ROTATION_SPACE:
             return None
@@ -789,6 +822,53 @@ def _normalize_animation_clip_payload(payload: dict[str, Any], clip: dict[str, A
     if rotation_space:
         out["rotation_space"] = rotation_space
     return out
+
+
+def _animation_clip_preview_cache_usable(
+    clip: dict[str, Any],
+    *,
+    payload: dict[str, Any] | None = None,
+) -> tuple[bool, str]:
+    """Return whether a cached clip is rich enough for skeletal preview.
+
+    Older Action Sequencer caches could contain only root translation curves.
+    They are technically fresh files, but not a usable Unreal evaluated local
+    pose for Manny/CombatCharacter, so accepting them makes other animations
+    appear frozen or partially broken.
+    """
+
+    payload = payload if isinstance(payload, dict) else {}
+    source_mode = str(clip.get("source_mode") or payload.get("source_mode") or "").strip().casefold()
+    exporter = str(payload.get("exporter") or clip.get("_exporter") or "").strip().casefold()
+    cache_family = source_mode or exporter
+    if not cache_family:
+        return False, "missing_animation_cache_source"
+    if _animation_clip_requires_editor_pose(clip):
+        return False, "requires_unreal_editor_pose_export"
+    if str(clip.get("rotation_space") or "") != ANIMATION_ROTATION_SPACE:
+        return False, "unsupported_rotation_space"
+
+    bone_curve_count = _animation_clip_bone_curve_count(clip)
+    if bone_curve_count <= 0:
+        return False, "missing_bone_curves"
+    if (
+        cache_family.startswith("unreal_editor_python")
+        or cache_family.startswith("internal_cue4parse")
+        or cache_family == "cached_animation_clip"
+    ) and bone_curve_count < MIN_PREVIEW_SKELETAL_BONE_CURVE_COUNT:
+        return False, f"incomplete_skeletal_pose_cache:{bone_curve_count}_bone_curves"
+    return True, "ok"
+
+
+def _animation_clip_bone_curve_count(clip: dict[str, Any]) -> int:
+    curves = clip.get("model_curves")
+    if not isinstance(curves, dict):
+        return 0
+    count = 0
+    for key, value in curves.items():
+        if str(key).startswith("bone_") and isinstance(value, dict) and value:
+            count += 1
+    return count
 
 
 def _animation_clip_requires_editor_pose(clip: dict[str, Any]) -> bool:

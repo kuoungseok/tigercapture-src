@@ -961,11 +961,12 @@ class _OwnerAnimationPanel(QFrame):
                 if query and query not in label.casefold():
                     continue
                 cache = owner_unreal_animation_clip_cache_status(self.descriptor, path)
-                prefix = "✓" if cache.get("exists") and cache.get("fresh") else "○"
+                is_ready_cache = bool(cache.get("exists") and cache.get("fresh") and cache.get("validated"))
+                prefix = "✓" if is_ready_cache else "○"
                 item = QListWidgetItem(f"{prefix} {label}")
                 item.setData(Qt.ItemDataRole.UserRole, str(path))
                 item.setData(Qt.ItemDataRole.UserRole + 1, str(cache.get("cache_path") or ""))
-                item.setData(Qt.ItemDataRole.UserRole + 2, "cached" if prefix == "✓" else "uncached")
+                item.setData(Qt.ItemDataRole.UserRole + 2, "cached" if is_ready_cache else "uncached")
                 if path == self.descriptor.idle_animation_path:
                     item.setToolTip("Default idle sequence")
                 elif path == self.descriptor.action_candidate_path:
@@ -974,8 +975,12 @@ class _OwnerAnimationPanel(QFrame):
                     item.setToolTip("Short pose or aim fragment. It applies a pose but may not visibly animate.")
                 else:
                     item.setToolTip("Playable animation sequence")
-                if prefix == "✓":
+                if is_ready_cache:
                     item.setToolTip(f"{item.toolTip()}\nCached preview clip is ready.")
+                elif cache.get("exists") and cache.get("fresh") and cache.get("reason"):
+                    item.setToolTip(
+                        f"{item.toolTip()}\nExisting preview cache will be rebuilt: {cache.get('reason')}"
+                    )
                 else:
                     item.setToolTip(f"{item.toolTip()}\nPreview clip needs batch caching before instant playback.")
                 self._list.addItem(item)
