@@ -50,6 +50,8 @@ def test_standalone_ar_pbr_viewer_shader_consumes_preview_bloom_uniforms() -> No
     assert "return rgb * contribution * soft_mask * source_mask;" in source
     assert "vec3 sample_bloom_convolution" in source
     assert "vec3 convolution_tap" in source
+    assert 'getattr(GL, "GL_RGBA16F", 0x881A)' in source
+    assert "vec3 bloom_rgb = max(" in source
     assert "texture(u_bloom_source" in source
     assert "GL.glFramebufferTexture2D(" in source
     assert "self._draw_bloom_post(framebuffer_width, framebuffer_height, post_effects, bloom_strength)" in source
@@ -66,8 +68,10 @@ def test_ar_pbr_preview_bloomed_preset_uses_visible_post_effects() -> None:
 
     assert bloomed["post_effects_mode"] == "post_effects"
     assert bloomed["bloom_enabled"] is True
-    assert 0.35 <= bloomed["bloom_strength"] <= 0.8
-    assert bloomed["bloom_threshold"] >= 0.65
+    assert 1.0 <= bloomed["bloom_strength"] <= 1.4
+    assert bloomed["bloom_radius"] >= 12.0
+    assert 0.35 <= bloomed["bloom_threshold"] <= 0.55
+    assert bloomed["bloom_kernel"] == "cinematic"
 
 
 def test_ar_pbr_preview_exposes_bloom_threshold_controls() -> None:

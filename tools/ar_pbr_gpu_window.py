@@ -1048,10 +1048,11 @@ void main() {
         discard;
     }
     if (unlit) {
-        vec3 rgb = apply_output_transform_gamma(albedo * max(u_unlit_exposure_scale, 0.0), u_unlit_output_gamma);
+        vec3 bloom_rgb = albedo * max(u_unlit_exposure_scale, 0.0);
+        vec3 rgb = apply_output_transform_gamma(bloom_rgb, u_unlit_output_gamma);
         rgb = clamp((rgb - vec3(0.5)) * max(u_unlit_contrast, 0.0) + vec3(0.5), 0.0, 1.0);
         frag_color = vec4(rgb, out_alpha);
-        bloom_source = vec4(rgb, out_alpha);
+        bloom_source = vec4(bloom_rgb, out_alpha);
         return;
     }
     if (u_has_roughness_map == 1) {
@@ -1116,9 +1117,17 @@ void main() {
     float screen_ao_shadow = clamp(1.0 - min(min(ambient_ao, diffuse_ao), specular_ao), 0.0, 1.0);
     rgb = mix(rgb, rgb * (0.82 + clamp(u_screen_ao_color, vec3(0.0), vec3(1.0)) * 0.18), screen_ao_shadow);
     rgb = apply_transmission_refraction(rgb, albedo, n, v, roughness, fresnel);
+    vec3 bloom_rgb = max(
+        emissive * 1.75
+        + specular * 1.25
+        + direct * 0.42
+        + specular_gi * 0.70
+        + rgb * 0.10,
+        vec3(0.0)
+    );
     rgb = apply_output_transform(rgb);
     frag_color = vec4(rgb, out_alpha);
-    bloom_source = vec4(rgb, out_alpha);
+    bloom_source = vec4(bloom_rgb, out_alpha);
 }
 """
 
@@ -3598,7 +3607,10 @@ class GpuMeshWidget(QOpenGLWidget):
             self.scene_bloom_texture = int(GL.glGenTextures(1))
             self.scene_depth_renderbuffer = int(GL.glGenRenderbuffers(1))
 
-            for texture_id in (self.scene_color_texture, self.scene_bloom_texture):
+            for texture_id, internal_format, pixel_type in (
+                (self.scene_color_texture, GL.GL_RGBA8, GL.GL_UNSIGNED_BYTE),
+                (self.scene_bloom_texture, getattr(GL, "GL_RGBA16F", 0x881A), GL.GL_FLOAT),
+            ):
                 GL.glBindTexture(GL.GL_TEXTURE_2D, texture_id)
                 GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MIN_FILTER, GL.GL_LINEAR)
                 GL.glTexParameteri(GL.GL_TEXTURE_2D, GL.GL_TEXTURE_MAG_FILTER, GL.GL_LINEAR)
@@ -3607,12 +3619,12 @@ class GpuMeshWidget(QOpenGLWidget):
                 GL.glTexImage2D(
                     GL.GL_TEXTURE_2D,
                     0,
-                    GL.GL_RGBA8,
+                    internal_format,
                     width,
                     height,
                     0,
                     GL.GL_RGBA,
-                    GL.GL_UNSIGNED_BYTE,
+                    pixel_type,
                     None,
                 )
 
