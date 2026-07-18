@@ -389,6 +389,54 @@ V1 should not attempt:
 The current Tiger Studio preview work should be treated as an authoring and
 inspection surface. Unreal remains the runtime target.
 
+## Target Reaction Authoring Model
+
+A convincing target reaction cannot be created by avoiding Target bone motion
+entirely. The important product rule is different:
+
+> The user should not have to rotate every Target bone by hand on every frame.
+
+Target reactions should be built from layered automation:
+
+1. **Reaction animation selection**
+   - Actor A owns the primary action animation.
+   - Actor B uses an existing reaction animation such as `HitReact`,
+     `Knockdown`, `Death`, `Stun`, or `Thrown`.
+   - In this mode Target bones move because the selected animation already
+     contains skeletal motion.
+   - Tiger Studio applies and previews that animation; it does not require
+     direct bone editing for basic hit reactions.
+
+2. **Automatic root alignment**
+   - Align Actor B to Actor A using impact frame, contact distance, facing
+     direction, and optional root offset.
+   - This should mostly adjust the actor/root/pelvis level rather than every
+     individual bone.
+   - V1 should make this visible as paired playback: Owner action plus Target
+     reaction, with both roles still replaceable at runtime.
+
+3. **Contact and throw correction**
+   - Grabs, body slams, throws, and finishers need additional Target bone
+     correction.
+   - That correction should be authored as non-destructive layers:
+     contact markers, motion warping, constraints, IK, and optional ragdoll or
+     knockdown blending.
+   - The source reaction animation remains the base; Tiger Studio stores only
+     the correction data needed to align the target to the action.
+
+Recommended milestone split:
+
+- **V1:** Owner animation selection, Target reaction selection, explicit
+  `Play Pair`, root/facing/timing alignment.
+- **V2:** impact/grab/release markers, target reaction recommendations, timing
+  solve, root warp.
+- **V3:** contact constraints, socket-based IK, throw/knockdown correction,
+  ragdoll blend, and polished non-destructive bake/export.
+
+This keeps Action Sequencer from becoming a full frame-by-frame bone posing
+tool while still acknowledging that high-quality paired actions eventually need
+Target skeletal correction.
+
 ## Automation Direction
 
 Other production tools and engines do not expect animators to rotate every bone
