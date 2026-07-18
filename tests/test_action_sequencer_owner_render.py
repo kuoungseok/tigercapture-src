@@ -223,7 +223,7 @@ def test_action_sequencer_stage_pair_duplicates_static_target(tmp_path) -> None:
         "animation_clips": [],
     }
 
-    pair = build_action_sequencer_stage_pair_descriptor(descriptor, target_offset=(0.0, 0.0, 1.5))
+    pair = build_action_sequencer_stage_pair_descriptor(descriptor)
 
     assert pair["schema"] == ACTION_SEQUENCER_STAGE_PAIR_SCHEMA
     assert pair["source_format"] == "action_sequencer_stage_pair"
@@ -232,16 +232,109 @@ def test_action_sequencer_stage_pair_duplicates_static_target(tmp_path) -> None:
     assert owner_geom["role"] == "performer"
     assert owner_geom["role_slot"] == "actor_a"
     assert "skin_weights" in owner_geom
-    assert owner_geom["vertices"][0] == [0.2, 0.0, -0.98]
+    assert owner_geom["vertices"][0] == [-0.2, 0.0, 0.0]
+    assert owner_geom["stage_transform"]["offset"] == [0.0, 0.0, 1.08]
+    assert owner_geom["stage_transform"]["rotate_y_180"] is False
     assert target_geom["role"] == "target"
     assert target_geom["role_slot"] == "actor_b"
     assert "skin_weights" not in target_geom
-    assert target_geom["vertices"][0] == [-0.2, 0.0, 1.5]
-    assert target_geom["vertices"][1] == [0.2, 0.0, 1.5]
+    assert target_geom["vertices"][0] == [-0.2, 0.0, 0.0]
+    assert target_geom["stage_transform"]["offset"] == [0.0, 0.0, -1.08]
+    assert target_geom["stage_transform"]["rotate_y_180"] is True
     assert target_geom["normals"][0] == [1.0, 0.0, 0.0]
     assert pair["metadata"]["action_sequencer_stage_pair"]["roles"][0]["stage_forward"] == "+X / screen right"
     assert pair["metadata"]["action_sequencer_stage_pair"]["roles"][1]["stage_forward"] == "-X / screen left"
     assert pair["bounds"]["size"][2] > descriptor["bounds"]["size"][2]
+    from tools.ar_pbr_gpu_window import build_vertex_buffer
+
+    _vertices, mesh_diag = build_vertex_buffer(pair)
+    assert mesh_diag["skeletal_geometry_count"] == 1
+    assert mesh_diag["gpu_skinning_vertex_count"] == 1
+    owner_range, target_range = mesh_diag["draw_ranges"]
+    assert owner_range["stage_offset"] == [0.0, 0.0, 1.08]
+    assert owner_range["stage_rotate_y_180"] is False
+    assert target_range["stage_offset"] == [0.0, 0.0, -1.08]
+    assert target_range["stage_rotate_y_180"] is True
+
+
+def test_owner_animation_preview_safety_allows_stable_skinning() -> None:
+    import app.action_sequencer_owner_render as owner_render
+
+    descriptor = {
+        "schema": "tigerstudio.ar_pbr.unreal_skeletal_mesh_export.v1",
+        "source_format": "unreal_skeletal_mesh",
+        "models": [],
+        "bones": [
+            {"id": "bone_0", "index": 0, "name": "root", "parent_index": -1, "translation": [0, 0, 0]},
+            {"id": "bone_1", "index": 1, "name": "spine", "parent_id": "bone_0", "translation": [0, 0, 0]},
+        ],
+        "geometries": [{
+            "id": "owner_body",
+            "role_slot": "actor_a",
+            "vertices": [[0, 0, 0], [0, 1, 0], [0.2, 0.5, 0]],
+            "skin_weights": [
+                [{"bone_id": "bone_0", "weight": 1.0}],
+                [{"bone_id": "bone_1", "weight": 1.0}],
+                [{"bone_id": "bone_1", "weight": 1.0}],
+            ],
+        }],
+    }
+    clip = {
+        "id": "stable",
+        "duration_ms": 1000.0,
+        "model_curves": {
+            "bone_1": {
+                "translation": {"y": [[0.0, 0.0], [1000.0, 0.1]]},
+                "rotation_quat": {"w": [[0.0, 1.0], [1000.0, 1.0]]},
+            }
+        },
+    }
+
+    report = owner_render._owner_animation_preview_safety_report(descriptor, clip)
+
+    assert report["ok"] is True
+    assert report["reason"] == "within_preview_bounds"
+
+
+def test_owner_animation_preview_safety_blocks_torn_skinning() -> None:
+    import app.action_sequencer_owner_render as owner_render
+
+    descriptor = {
+        "schema": "tigerstudio.ar_pbr.unreal_skeletal_mesh_export.v1",
+        "source_format": "unreal_skeletal_mesh",
+        "models": [],
+        "bones": [
+            {"id": "bone_0", "index": 0, "name": "root", "parent_index": -1, "translation": [0, 0, 0]},
+            {"id": "bone_1", "index": 1, "name": "spine", "parent_id": "bone_0", "translation": [0, 0, 0]},
+        ],
+        "geometries": [{
+            "id": "owner_body",
+            "role_slot": "actor_a",
+            "vertices": [[0, 0, 0], [0, 1, 0], [0.2, 0.5, 0]],
+            "skin_weights": [
+                [{"bone_id": "bone_0", "weight": 1.0}],
+                [{"bone_id": "bone_1", "weight": 1.0}],
+                [{"bone_id": "bone_1", "weight": 1.0}],
+            ],
+        }],
+    }
+    clip = {
+        "id": "torn",
+        "duration_ms": 1000.0,
+        "source_mode": "ue5_control_rig_sequencer_curves",
+        "model_curves": {
+            "bone_1": {
+                "translation": {"y": [[0.0, 0.0], [1000.0, 5.0]]},
+                "rotation_quat": {"w": [[0.0, 1.0], [1000.0, 1.0]]},
+            }
+        },
+    }
+
+    report = owner_render._owner_animation_preview_safety_report(descriptor, clip)
+
+    assert report["ok"] is False
+    assert report["reason"] == "animated_geometry_bounds_exceeded"
+    assert report["worst"]["height_ratio"] > owner_render.OWNER_ANIMATION_PREVIEW_MAX_GEOMETRY_HEIGHT_RATIO
 
 
 def test_owner_unreal_ar_pbr_bridge_exports_target_descriptor(tmp_path, monkeypatch) -> None:
@@ -641,6 +734,72 @@ def test_owner_unreal_animation_bridge_falls_back_to_editor_python(tmp_path, mon
     assert len(calls) == 2
     assert "export-animation-clip" in calls[0]
     assert any(str(item).startswith("-ExecutePythonScript=") for item in calls[1])
+
+
+def test_owner_unreal_animation_bridge_rejects_control_rig_fast_curve_export(tmp_path, monkeypatch) -> None:
+    from app.action_sequencer_owner_render import discover_owner_render_descriptor
+    from app.action_sequencer_unreal_asset_bridge import export_owner_unreal_animation_clip
+    from app.unreal_link_reference_paths import UE_ENGINE_ENV
+
+    project = tmp_path / "ActionSequencer" / "ActionSequencer.uproject"
+    project.parent.mkdir(parents=True, exist_ok=True)
+    project.write_text('{"EngineAssociation":"5.8"}', encoding="utf-8")
+    content = project.parent / "Content"
+    _touch(content / "Variant_Combat" / "Blueprints" / "BP_CombatCharacter.uasset")
+    _touch(content / "Characters" / "Mannequins" / "Meshes" / "SKM_Manny_Simple.uasset")
+    animation = _touch(content / "Characters" / "Mannequins" / "Anims" / "Pistol" / "MM_Pistol_Jog.uasset")
+    engine = tmp_path / "UE_5.8"
+    _touch(engine / "Engine" / "Binaries" / "Win64" / "UnrealEditor-Cmd.exe")
+    monkeypatch.setenv(UE_ENGINE_ENV, str(engine))
+    descriptor = discover_owner_render_descriptor(project)
+    target = tmp_path / "pistol_jog.animation_clip.json"
+    calls: list[list[str]] = []
+
+    def fake_run(command, **kwargs):
+        calls.append(list(command))
+        if "dotnet" in str(command[0]).lower():
+            target.write_text(
+                json.dumps({
+                    "schema": "tigerstudio.ar_pbr.unreal_animation_clip_export.v1",
+                    "exporter": "internal_cue4parse",
+                    "animation_clip": {
+                        "id": "MM_Pistol_Jog",
+                        "duration_ms": 1000.0,
+                        "sampled_frame_count": 48,
+                        "rotation_space": "tiger_basis_quat_v1",
+                        "source_mode": "ue5_control_rig_sequencer_curves",
+                        "model_curves": {"bone_0": {}},
+                    },
+                }),
+                encoding="utf-8",
+            )
+            return subprocess.CompletedProcess(command, 0, stdout='{"ok":true}', stderr="")
+        target.write_text(
+            json.dumps({
+                "schema": "tigerstudio.ar_pbr.unreal_animation_clip_export.v1",
+                "exporter": "unreal_editor_python",
+                "animation_clip": {
+                    "id": "MM_Pistol_Jog",
+                    "duration_ms": 1000.0,
+                    "sampled_frame_count": 48,
+                    "rotation_space": "tiger_basis_quat_v1",
+                    "source_mode": "unreal_editor_python_pose",
+                    "model_curves": {"bone_0": {}},
+                },
+            }),
+            encoding="utf-8",
+        )
+        return subprocess.CompletedProcess(command, 0, stdout="", stderr="")
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+
+    clip = export_owner_unreal_animation_clip(descriptor, animation, target, max_samples=48)
+
+    assert len(calls) == 2
+    assert "export-animation-clip" in calls[0]
+    assert any(str(item).startswith("-ExecutePythonScript=") for item in calls[1])
+    assert clip["source_mode"] == "unreal_editor_python_pose"
+    assert clip["_exporter"] == "unreal_editor_python"
 
 
 def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None:

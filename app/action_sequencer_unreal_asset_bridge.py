@@ -214,6 +214,15 @@ def export_owner_unreal_animation_clip(
     if not isinstance(clip, dict):
         raise RuntimeError(f"Internal Unreal asset bridge wrote an invalid animation payload: {target}")
     clip = _normalize_animation_clip_payload(payload, clip)
+    if _animation_clip_requires_editor_pose(clip):
+        return _export_owner_unreal_animation_clip_via_editor(
+            owner_descriptor,
+            asset_path,
+            target,
+            max_samples=max_samples,
+            timeout_s=max(timeout_s, 240.0),
+            first_error="Internal Control Rig curve export is not preview-safe",
+        )
     clip["_export_path"] = str(target)
     return clip
 
@@ -413,6 +422,12 @@ def _export_owner_unreal_animation_clips_via_internal_batch(
                 if not isinstance(clip, dict):
                     raise RuntimeError("invalid animation payload")
                 clip = _normalize_animation_clip_payload(clip_payload, clip)
+                if _animation_clip_requires_editor_pose(clip):
+                    raw = {
+                        "error": "RequiresUnrealEditorPose",
+                        "message": "Control Rig/Sequencer curve export requires Unreal Editor pose evaluation.",
+                    }
+                    raise RuntimeError(str(raw["message"]))
                 clip["_export_path"] = str(target)
                 clip["_exporter"] = str(clip_payload.get("exporter") or payload.get("exporter") or "internal_cue4parse_batch")
                 results[source] = {
@@ -461,6 +476,8 @@ def _load_cached_animation_clip_if_fresh(
         if not isinstance(clip, dict):
             return None
         clip = _normalize_animation_clip_payload(payload, clip)
+        if _animation_clip_requires_editor_pose(clip):
+            return None
         if str(clip.get("rotation_space") or "") != ANIMATION_ROTATION_SPACE:
             return None
         requested_samples = max(2, int(max_samples))
@@ -772,6 +789,27 @@ def _normalize_animation_clip_payload(payload: dict[str, Any], clip: dict[str, A
     if rotation_space:
         out["rotation_space"] = rotation_space
     return out
+
+
+def _animation_clip_requires_editor_pose(clip: dict[str, Any]) -> bool:
+    """Reject fast curve exports that are not safe as direct local bone poses.
+
+    UE5 Control Rig/Sequencer clips store authored control curves. They can look
+    like bone transforms after a lightweight parse, but they are not equivalent
+    to Unreal's evaluated local pose for the target skeletal mesh. Reusing those
+    caches in the AR/PBR palette path tears individual mesh sections apart, so
+    they must be re-exported through Unreal's pose evaluator and cached there.
+    """
+
+    source_mode = str(clip.get("source_mode") or "").strip().casefold()
+    if source_mode.startswith("ue5_control_rig") or "control_rig" in source_mode or "sequencer" in source_mode:
+        return True
+    notes = clip.get("conversion_notes") or clip.get("conversion_errors") or []
+    if isinstance(notes, (list, tuple)):
+        text = " ".join(str(item).casefold() for item in notes)
+    else:
+        text = str(notes).casefold()
+    return "skeleton_unresolved" in text and ("control" in source_mode or "sequencer" in text)
 
 
 def _legacy_animation_cache_is_usable(payload: dict[str, Any], clip: dict[str, Any]) -> bool:

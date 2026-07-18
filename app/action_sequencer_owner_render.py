@@ -49,6 +49,8 @@ DEFAULT_ACTION_SEQUENCER_PROJECT = Path("E:/ue5example/ActionSequencer/ActionSeq
 OWNER_ANIMATION_PANEL_WIDTH = 200
 OWNER_ANIMATION_PREVIEW_BACKEND = "uasset_inspector_gpu_bone_palette"
 OWNER_POSE_CLIP_DURATION_THRESHOLD_MS = 250.0
+OWNER_ANIMATION_PREVIEW_MAX_GEOMETRY_HEIGHT_RATIO = 2.25
+OWNER_ANIMATION_PREVIEW_SAMPLE_VERTICES = 8000
 OWNER_STAGE_PREVIEW_VIEW = {
     "pitch": 0.0,
     "yaw": -90.0,
@@ -252,6 +254,196 @@ def _animation_clip_is_pose(path: Path, clip: Mapping[str, Any] | None, sequence
         return float(duration or 0.0) > 0.0 and float(duration or 0.0) < OWNER_POSE_CLIP_DURATION_THRESHOLD_MS
     except Exception:
         return False
+
+
+def _owner_animation_preview_safety_report(
+    descriptor: Mapping[str, Any] | None,
+    clip: Mapping[str, Any] | None,
+    *,
+    max_height_ratio: float = OWNER_ANIMATION_PREVIEW_MAX_GEOMETRY_HEIGHT_RATIO,
+) -> dict[str, Any]:
+    """Return whether a clip is safe to preview with the local GPU palette path."""
+
+    if not isinstance(descriptor, Mapping) or not isinstance(clip, Mapping):
+        return {"ok": True, "reason": "missing_descriptor_or_clip"}
+    try:
+        import numpy as np
+        from app.ar_pbr.animation import skin_matrices_for_clip
+    except Exception as exc:
+        return {"ok": True, "reason": f"safety_check_unavailable:{type(exc).__name__}"}
+
+    local_descriptor = dict(descriptor)
+    local_descriptor["animation_clips"] = [dict(clip)]
+    clip_id = str(clip.get("id") or clip.get("name") or "")
+    track = {
+        "id": "action_sequencer_preview_safety",
+        "start_ms": 0,
+        "animation": {
+            "auto_play": True,
+            "loop": False,
+            "clip": clip_id,
+            "speed": 1.0,
+            "start_offset_ms": 0.0,
+        },
+    }
+    try:
+        duration_ms = max(0.0, float(clip.get("duration_ms") or 0.0))
+    except Exception:
+        duration_ms = 0.0
+    sample_times = [0.0] if duration_ms <= 0.0 else [
+        0.0,
+        duration_ms * 0.25,
+        duration_ms * 0.5,
+        duration_ms * 0.75,
+        duration_ms,
+    ]
+    geometries = [
+        item for item in local_descriptor.get("geometries", []) or []
+        if isinstance(item, Mapping)
+        and item.get("skin_weights")
+        and str(item.get("role_slot") or "actor_a") in {"", "actor_a"}
+    ]
+    if not geometries:
+        return {"ok": True, "reason": "no_owner_skeletal_geometry"}
+
+    worst: dict[str, Any] = {
+        "geometry": "",
+        "time_ms": 0.0,
+        "height_ratio": 1.0,
+        "base_height": 0.0,
+        "animated_height": 0.0,
+    }
+    for time_ms in sample_times:
+        skinning = skin_matrices_for_clip(local_descriptor, track, int(round(time_ms)))
+        matrices = skinning.get("matrices") if isinstance(skinning, dict) else None
+        if matrices is None:
+            continue
+        matrices_np = np.asarray(matrices, dtype=np.float64)
+        if matrices_np.ndim != 3 or matrices_np.shape[1:] != (4, 4):
+            continue
+        for geometry in geometries:
+            vertices = np.asarray(geometry.get("vertices") or [], dtype=np.float64)
+            if vertices.ndim != 2 or vertices.shape[1] != 3 or len(vertices) <= 0:
+                continue
+            base_min = vertices.min(axis=0)
+            base_max = vertices.max(axis=0)
+            base_height = float(max(base_max[1] - base_min[1], 1.0e-6))
+            sampled = _sample_skinned_geometry_points(vertices, geometry.get("skin_weights"), matrices_np)
+            if sampled is None or len(sampled) <= 0:
+                continue
+            animated_min = sampled.min(axis=0)
+            animated_max = sampled.max(axis=0)
+            animated_height = float(animated_max[1] - animated_min[1])
+            height_ratio = animated_height / base_height
+            if height_ratio > float(worst["height_ratio"]):
+                worst = {
+                    "geometry": str(geometry.get("name") or geometry.get("id") or ""),
+                    "time_ms": float(time_ms),
+                    "height_ratio": float(height_ratio),
+                    "base_height": float(base_height),
+                    "animated_height": float(animated_height),
+                    "base_y": [float(base_min[1]), float(base_max[1])],
+                    "animated_y": [float(animated_min[1]), float(animated_max[1])],
+                }
+
+    ok = float(worst["height_ratio"]) <= float(max_height_ratio)
+    return {
+        "ok": bool(ok),
+        "reason": "within_preview_bounds" if ok else "animated_geometry_bounds_exceeded",
+        "max_height_ratio": float(max_height_ratio),
+        "worst": worst,
+        "source_mode": str(clip.get("source_mode") or clip.get("_exporter") or ""),
+    }
+
+
+def _sample_skinned_geometry_points(vertices, skin_weights: Any, matrices) -> Any:
+    try:
+        import numpy as np
+    except Exception:
+        return None
+    rows = skin_weights if isinstance(skin_weights, list) else []
+    if not rows:
+        return None
+    stride = max(1, int(len(vertices) // max(1, OWNER_ANIMATION_PREVIEW_SAMPLE_VERTICES)))
+    indices = np.arange(0, len(vertices), stride, dtype=np.int64)
+    sampled = vertices[indices]
+    hv = np.concatenate([sampled, np.ones((len(sampled), 1), dtype=np.float64)], axis=1)
+    out = np.zeros((len(sampled), 4), dtype=np.float64)
+    total = np.zeros((len(sampled),), dtype=np.float64)
+    for sample_idx, vertex_idx in enumerate(indices):
+        influence_rows = _owner_skin_rows(rows[int(vertex_idx)] if int(vertex_idx) < len(rows) else None)
+        slot_count = 0
+        for bone_index, weight in influence_rows:
+            if slot_count >= 4:
+                break
+            if weight <= 1.0e-8 or bone_index < 0 or bone_index >= len(matrices):
+                continue
+            out[sample_idx] += (matrices[int(bone_index)] @ hv[sample_idx]) * float(weight)
+            total[sample_idx] += float(weight)
+            slot_count += 1
+    valid = total > 1.0e-8
+    if not bool(np.any(valid)):
+        return None
+    result = sampled.copy()
+    skinned = out[valid, :3]
+    w = out[valid, 3:4]
+    nonzero_w = np.abs(w[:, 0]) > 1.0e-8
+    skinned[nonzero_w] = skinned[nonzero_w] / w[nonzero_w]
+    result[valid] = skinned
+    return result
+
+
+def _owner_skin_rows(value: Any) -> list[tuple[int, float]]:
+    if isinstance(value, Mapping):
+        joints = value.get("joints")
+        weights = value.get("weights")
+        if isinstance(joints, (list, tuple)) and isinstance(weights, (list, tuple)):
+            out: list[tuple[int, float]] = []
+            for idx, joint in enumerate(joints):
+                try:
+                    bone_index = int(joint)
+                    weight = float(weights[idx] if idx < len(weights) else 0.0)
+                except Exception:
+                    continue
+                out.append((bone_index, weight))
+            return out
+    if isinstance(value, list):
+        out = []
+        for row in value:
+            if not isinstance(row, Mapping):
+                continue
+            text = str(row.get("bone_id") or row.get("model_id") or row.get("bone_index") or row.get("joint") or "")
+            if text.startswith("bone_"):
+                text = text.split("_", 1)[1]
+            try:
+                out.append((int(text), float(row.get("weight", 0.0) or 0.0)))
+            except Exception:
+                continue
+        return out
+    return []
+
+
+def _reset_owner_animation_preview_window(window: Any) -> None:
+    try:
+        timer = getattr(window, "_animation_timer", None)
+        if timer is not None and hasattr(timer, "stop"):
+            timer.stop()
+    except Exception:
+        pass
+    try:
+        setattr(window, "_animation_track", None)
+        setattr(window, "_animation_pending_frame", None)
+        current_generation = int(getattr(window, "_animation_generation", 0) or 0)
+        setattr(window, "_animation_generation", current_generation + 1)
+    except Exception:
+        pass
+    try:
+        gl_widget = getattr(window, "_gl_widget", None)
+        clear_skinning = getattr(gl_widget, "clear_skinning_matrices", None)
+        if callable(clear_skinning):
+            clear_skinning()
+    except Exception:
+        pass
 
 
 def _animation_display_group(content_root: Path, path: Path) -> str:
@@ -863,9 +1055,9 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
         "shadow_strength": 0.78,
         "shadow_pcf_radius": 1.8,
         "self_shadow_strength": 0.58,
-        "ground_height": -0.52,
         "shadow_catcher_opacity": 0.68,
-        "reflection_catcher_opacity": 0.16,
+        "reflection_catcher_opacity": 0.0,
+        "contact_reflection_strength": 0.0,
         "surface_override_strength": 0.18,
         "surface_roughness": 0.36,
         "surface_reflectance": 0.62,
@@ -999,6 +1191,22 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             playback_result: dict[str, Any] | None = None
             playback_error = ""
             should_play = bool(payload.get("play_once", True))
+            preview_safety_report: dict[str, Any] | None = None
+            if should_play and isinstance(exported_clip, dict) and sequence_plan.get("status") == "ready":
+                preview_descriptor = getattr(window, "_descriptor", None)
+                if not isinstance(preview_descriptor, Mapping):
+                    preview_descriptor = None
+                preview_safety_report = _owner_animation_preview_safety_report(preview_descriptor, exported_clip)
+                if not preview_safety_report.get("ok", True):
+                    _reset_owner_animation_preview_window(window)
+                    playback_result = {
+                        "status": "blocked_by_preview_safety",
+                        "clip": str(exported_clip.get("id") or exported_clip.get("name") or clip),
+                        "reason": preview_safety_report.get("reason"),
+                        "safety": preview_safety_report,
+                    }
+                    playback_error = "unsafe evaluated animation bounds"
+                    should_play = False
             if should_play and isinstance(exported_clip, dict) and sequence_plan.get("status") == "ready":
                 try:
                     attach = getattr(window, "attach_animation_clip", None)
@@ -1034,6 +1242,7 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
                 "sequence_kind": "pose" if is_pose_clip else _animation_sequence_kind(path),
                 "playback_result": playback_result,
                 "playback_error": playback_error,
+                "preview_safety_report": preview_safety_report,
                 "batch_count": int(event.get("count", 0) or 0) if isinstance(event, dict) else 0,
                 "cached_count": int(event.get("cached_count", 0) or 0) if isinstance(event, dict) else 0,
                 "exported_count": int(event.get("exported_count", 0) or 0) if isinstance(event, dict) else 0,
@@ -1048,7 +1257,11 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
                 refresh()
             status = getattr(window, "_status", None)
             if status is not None and hasattr(status, "setText"):
-                if playback_error:
+                if isinstance(playback_result, dict) and playback_result.get("status") == "blocked_by_preview_safety":
+                    status.setText(
+                        f"Animation preview blocked: {clip} produced unsafe skinning bounds; kept bind pose"
+                    )
+                elif playback_error:
                     status.setText(f"Animation sequence ready but playback failed: {playback_error}")
                 elif isinstance(playback_result, dict) and playback_result.get("status") == "pose_applied":
                     status.setText(
@@ -1069,7 +1282,9 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
                     )
             duration_s = float(sequence_info.get("duration_ms") or 0.0) / 1000.0
             panel_state = "error" if playback_error else "ready"
-            if isinstance(playback_result, dict) and playback_result.get("status") == "pose_applied":
+            if isinstance(playback_result, dict) and playback_result.get("status") == "blocked_by_preview_safety":
+                playback_suffix = " / preview blocked"
+            elif isinstance(playback_result, dict) and playback_result.get("status") == "pose_applied":
                 playback_suffix = " / pose applied"
             elif isinstance(playback_result, dict) and playback_result.get("status") == "playing":
                 playback_suffix = " / playing once"

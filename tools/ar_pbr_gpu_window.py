@@ -381,6 +381,10 @@ uniform int u_skin_bone_count;
 uniform mat4 u_skin_bones[MAX_SKIN_BONES];
 uniform vec3 u_bounds_center;
 uniform float u_bounds_max_size;
+uniform int u_stage_transform_enabled;
+uniform int u_stage_rotate_y_180;
+uniform vec3 u_stage_center;
+uniform vec3 u_stage_offset;
 out vec3 v_world_pos;
 out vec4 v_light_pos;
 out vec3 v_normal;
@@ -397,7 +401,7 @@ mat4 skin_bone(float raw_index) {
     return u_skin_bones[idx];
 }
 void main() {
-    vec3 object_pos = a_pos;
+    vec3 raw_object_pos = a_pos * u_bounds_max_size + u_bounds_center;
     vec3 object_normal = a_normal;
     vec3 object_tangent = a_tangent;
     vec3 object_bitangent = a_bitangent;
@@ -408,13 +412,23 @@ void main() {
             skin_bone(a_bone_indices.y) * a_bone_weights.y +
             skin_bone(a_bone_indices.z) * a_bone_weights.z +
             skin_bone(a_bone_indices.w) * a_bone_weights.w;
-        vec3 raw_pos = a_pos * u_bounds_max_size + u_bounds_center;
-        vec4 skinned_pos = skin * vec4(raw_pos, 1.0);
-        object_pos = (skinned_pos.xyz - u_bounds_center) / u_bounds_max_size;
+        vec4 skinned_pos = skin * vec4(raw_object_pos, 1.0);
+        raw_object_pos = skinned_pos.xyz;
         object_normal = normalize(mat3(skin) * a_normal);
         object_tangent = normalize(mat3(skin) * a_tangent);
         object_bitangent = normalize(mat3(skin) * a_bitangent);
     }
+    if (u_stage_transform_enabled != 0) {
+        if (u_stage_rotate_y_180 != 0) {
+            raw_object_pos.x = u_stage_center.x - (raw_object_pos.x - u_stage_center.x);
+            raw_object_pos.z = u_stage_center.z - (raw_object_pos.z - u_stage_center.z);
+            object_normal.xz *= -1.0;
+            object_tangent.xz *= -1.0;
+            object_bitangent.xz *= -1.0;
+        }
+        raw_object_pos += u_stage_offset;
+    }
+    vec3 object_pos = (raw_object_pos - u_bounds_center) / u_bounds_max_size;
     vec4 world_pos = u_model * vec4(object_pos, 1.0);
     gl_Position = u_mvp * vec4(object_pos, 1.0);
     v_world_pos = world_pos.xyz;
@@ -1148,6 +1162,10 @@ uniform int u_skin_bone_count;
 uniform mat4 u_skin_bones[MAX_SKIN_BONES];
 uniform vec3 u_bounds_center;
 uniform float u_bounds_max_size;
+uniform int u_stage_transform_enabled;
+uniform int u_stage_rotate_y_180;
+uniform vec3 u_stage_center;
+uniform vec3 u_stage_offset;
 mat4 skin_bone(float raw_index) {
     int idx = int(raw_index + 0.5);
     if (idx < 0 || idx >= u_skin_bone_count || idx >= MAX_SKIN_BONES) {
@@ -1156,7 +1174,7 @@ mat4 skin_bone(float raw_index) {
     return u_skin_bones[idx];
 }
 void main() {
-    vec3 object_pos = a_pos;
+    vec3 raw_object_pos = a_pos * u_bounds_max_size + u_bounds_center;
     float weight_sum = a_bone_weights.x + a_bone_weights.y + a_bone_weights.z + a_bone_weights.w;
     if (u_skinning_enabled != 0 && weight_sum > 0.0001 && u_bounds_max_size > 0.000001) {
         mat4 skin =
@@ -1164,10 +1182,17 @@ void main() {
             skin_bone(a_bone_indices.y) * a_bone_weights.y +
             skin_bone(a_bone_indices.z) * a_bone_weights.z +
             skin_bone(a_bone_indices.w) * a_bone_weights.w;
-        vec3 raw_pos = a_pos * u_bounds_max_size + u_bounds_center;
-        vec4 skinned_pos = skin * vec4(raw_pos, 1.0);
-        object_pos = (skinned_pos.xyz - u_bounds_center) / u_bounds_max_size;
+        vec4 skinned_pos = skin * vec4(raw_object_pos, 1.0);
+        raw_object_pos = skinned_pos.xyz;
     }
+    if (u_stage_transform_enabled != 0) {
+        if (u_stage_rotate_y_180 != 0) {
+            raw_object_pos.x = u_stage_center.x - (raw_object_pos.x - u_stage_center.x);
+            raw_object_pos.z = u_stage_center.z - (raw_object_pos.z - u_stage_center.z);
+        }
+        raw_object_pos += u_stage_offset;
+    }
+    vec3 object_pos = (raw_object_pos - u_bounds_center) / u_bounds_max_size;
     gl_Position = u_light_mvp * vec4(object_pos, 1.0);
 }
 """
@@ -2886,6 +2911,52 @@ def _skin_row_weight(row: Mapping[str, Any]) -> float:
         return 0.0
 
 
+def _geometry_stage_transform(geometry: Mapping[str, Any]) -> dict[str, Any]:
+    raw = geometry.get("stage_transform")
+    if not isinstance(raw, Mapping) or raw.get("enabled") is False:
+        return {
+            "enabled": False,
+            "center": [0.0, 0.0, 0.0],
+            "offset": [0.0, 0.0, 0.0],
+            "rotate_y_180": False,
+        }
+    center = list(raw.get("center") or [0.0, 0.0, 0.0])[:3]
+    offset = list(raw.get("offset") or [0.0, 0.0, 0.0])[:3]
+    center += [0.0] * (3 - len(center))
+    offset += [0.0] * (3 - len(offset))
+    try:
+        center_out = [float(center[0]), float(center[1]), float(center[2])]
+    except Exception:
+        center_out = [0.0, 0.0, 0.0]
+    try:
+        offset_out = [float(offset[0]), float(offset[1]), float(offset[2])]
+    except Exception:
+        offset_out = [0.0, 0.0, 0.0]
+    return {
+        "enabled": True,
+        "center": center_out,
+        "offset": offset_out,
+        "rotate_y_180": bool(raw.get("rotate_y_180")),
+    }
+
+
+def _apply_stage_transform_points(vertices: np.ndarray, transform: Mapping[str, Any]) -> np.ndarray:
+    if not bool(transform.get("enabled")) or vertices.size <= 0:
+        return vertices
+    out = np.asarray(vertices, dtype=np.float32).copy()
+    center = np.asarray(transform.get("center") or [0.0, 0.0, 0.0], dtype=np.float32)
+    offset = np.asarray(transform.get("offset") or [0.0, 0.0, 0.0], dtype=np.float32)
+    if center.shape[0] < 3:
+        center = np.pad(center, (0, 3 - center.shape[0]))
+    if offset.shape[0] < 3:
+        offset = np.pad(offset, (0, 3 - offset.shape[0]))
+    if bool(transform.get("rotate_y_180")):
+        out[:, 0] = center[0] - (out[:, 0] - center[0])
+        out[:, 2] = center[2] - (out[:, 2] - center[2])
+    out[:, :3] += offset[:3]
+    return out
+
+
 PREVIEW_UV_V_FLIP_MODE = "auto"
 
 
@@ -3040,6 +3111,7 @@ def build_vertex_buffer(
     render_profile, render_profiles, render_profile_warning = _active_render_profile(descriptor, track)
     center, max_size = _descriptor_bounds(descriptor)
     chunks: list[np.ndarray] = []
+    bounds_chunks: list[np.ndarray] = []
     draw_ranges: list[dict[str, Any]] = []
     geometry_count = 0
     triangle_count = 0
@@ -3079,6 +3151,8 @@ def build_vertex_buffer(
         triangles_np = np.asarray(tris, dtype=np.int64)
         if vertices_np.ndim != 2 or vertices_np.shape[1] != 3 or triangles_np.ndim != 2 or triangles_np.shape[1] < 3:
             continue
+        stage_transform = _geometry_stage_transform(geometry)
+        bounds_vertices_np = _apply_stage_transform_points(vertices_np, stage_transform)
         in_range = np.all((triangles_np[:, :3] >= 0) & (triangles_np[:, :3] < len(vertices_np)), axis=1)
         skipped_triangle_count += int(len(triangles_np) - int(np.count_nonzero(in_range)))
         triangles_np = triangles_np[in_range, :3]
@@ -3110,6 +3184,8 @@ def build_vertex_buffer(
         material_uv_set = _material_uv_set(material)
         geometry_count += 1
         points = ((vertices_np[triangles_np] - center) / max_size).astype(np.float32)
+        bounds_points = ((bounds_vertices_np[triangles_np] - center) / max_size).astype(np.float32)
+        bounds_chunks.append(bounds_points.reshape(-1, 3))
         normals = smooth_normals[triangles_np].astype(np.float32)
         uvs_np = _geometry_uv_array_for_material(geometry, material)
         if uvs_np.ndim == 2 and len(uvs_np) == len(vertices_np) and uvs_np.shape[1] >= 2:
@@ -3152,6 +3228,10 @@ def build_vertex_buffer(
             "depth_write": bool(material_depth_write),
             "render_queue": int(_material_render_queue(material)),
             "shader_model": str(material.get("shader_model") or material.get("source_shader") or ""),
+            "stage_transform_enabled": bool(stage_transform.get("enabled")),
+            "stage_rotate_y_180": bool(stage_transform.get("rotate_y_180")),
+            "stage_center": list(stage_transform.get("center") or [0.0, 0.0, 0.0]),
+            "stage_offset": list(stage_transform.get("offset") or [0.0, 0.0, 0.0]),
         })
         vertex_start += chunk_vertex_count
         triangle_count += int(len(triangles_np))
@@ -3163,7 +3243,7 @@ def build_vertex_buffer(
         ], dtype=np.float32)]
         draw_ranges = [{"start": 0, "count": 3, "geometry_name": "fallback", "material_name": "", "normal_mode": "fallback", "has_uvs": True}]
     arr = np.ascontiguousarray(np.concatenate(chunks, axis=0), dtype=np.float32)
-    xyz = arr[:, :3] if len(arr) else np.zeros((0, 3), dtype=np.float32)
+    xyz = np.concatenate(bounds_chunks, axis=0) if bounds_chunks else (arr[:, :3] if len(arr) else np.zeros((0, 3), dtype=np.float32))
     min_xyz = xyz.min(axis=0).tolist() if len(xyz) else [-0.5, -0.5, -0.5]
     max_xyz = xyz.max(axis=0).tolist() if len(xyz) else [0.5, 0.5, 0.5]
     return arr, {
@@ -4340,6 +4420,37 @@ class GpuMeshWidget(QOpenGLWidget):
                 self.skinning_matrices[:count],
             )
 
+    def _upload_stage_transform_uniforms(self, program: int, draw_range: Mapping[str, Any]) -> None:
+        from OpenGL import GL
+
+        enabled = bool(draw_range.get("stage_transform_enabled"))
+        center = list(draw_range.get("stage_center") or [0.0, 0.0, 0.0])[:3]
+        offset = list(draw_range.get("stage_offset") or [0.0, 0.0, 0.0])[:3]
+        center += [0.0] * (3 - len(center))
+        offset += [0.0] * (3 - len(offset))
+        try:
+            center_values = [float(center[0]), float(center[1]), float(center[2])]
+        except Exception:
+            center_values = [0.0, 0.0, 0.0]
+        try:
+            offset_values = [float(offset[0]), float(offset[1]), float(offset[2])]
+        except Exception:
+            offset_values = [0.0, 0.0, 0.0]
+        GL.glUniform1i(self._uniform_location(program, "u_stage_transform_enabled"), 1 if enabled else 0)
+        GL.glUniform1i(self._uniform_location(program, "u_stage_rotate_y_180"), 1 if bool(draw_range.get("stage_rotate_y_180")) else 0)
+        GL.glUniform3f(
+            self._uniform_location(program, "u_stage_center"),
+            float(center_values[0]),
+            float(center_values[1]),
+            float(center_values[2]),
+        )
+        GL.glUniform3f(
+            self._uniform_location(program, "u_stage_offset"),
+            float(offset_values[0]),
+            float(offset_values[1]),
+            float(offset_values[2]),
+        )
+
     def _upload_material_textures(self) -> None:
         for material_name, maps in self.texture_plan.items():
             uploaded: dict[str, int] = {}
@@ -4701,6 +4812,7 @@ class GpuMeshWidget(QOpenGLWidget):
                     draw_count = int(draw_range.get("count", len(self.vertices)) or 0)
                     if draw_count <= 0:
                         continue
+                    self._upload_stage_transform_uniforms(self.depth_program, draw_range)
                     GL.glDrawArrays(
                         GL.GL_TRIANGLES,
                         int(draw_range.get("start", 0) or 0),
@@ -5036,6 +5148,7 @@ class GpuMeshWidget(QOpenGLWidget):
             else:
                 GL.glDepthMask(True)
             self._bind_material_textures(material_name)
+            self._upload_stage_transform_uniforms(self.program, draw_range)
             GL.glDrawArrays(
                 GL.GL_TRIANGLES,
                 int(draw_range.get("start", 0) or 0),

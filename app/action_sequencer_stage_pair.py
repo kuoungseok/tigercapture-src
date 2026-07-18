@@ -8,8 +8,8 @@ from typing import Any, Mapping
 
 
 ACTION_SEQUENCER_STAGE_PAIR_SCHEMA = "tigerstudio.ar_pbr.action_sequencer_stage_pair.v1"
-DEFAULT_OWNER_STAGE_OFFSET = (0.0, 0.0, -1.08)
-DEFAULT_TARGET_STAGE_OFFSET = (0.0, 0.0, 1.08)
+DEFAULT_OWNER_STAGE_OFFSET = (0.0, 0.0, 1.08)
+DEFAULT_TARGET_STAGE_OFFSET = (0.0, 0.0, -1.08)
 
 
 def default_action_sequencer_stage_pair_path(
@@ -82,7 +82,7 @@ def build_action_sequencer_stage_pair_descriptor(
             name_prefix="Actor A Performer",
             center=center,
             offset=owner_offset,
-            rotate_y_180=True,
+            rotate_y_180=False,
             keep_skinning=True,
         )
         owner_geometries.append(owner_copy)
@@ -94,7 +94,7 @@ def build_action_sequencer_stage_pair_descriptor(
             name_prefix="Actor B Target",
             center=center,
             offset=target_offset,
-            rotate_y_180=False,
+            rotate_y_180=True,
             keep_skinning=False,
         )
         target_geometries.append(target_copy)
@@ -168,15 +168,19 @@ def _role_geometry_copy(
     out["name"] = f"{name_prefix} / {str(out.get('name') or source_id)}"
     out["role"] = role
     out["role_slot"] = role_slot
-    out["vertices"] = _transform_points(
+    transformed_vertices = _transform_points(
         out.get("vertices"),
         center=center,
         offset=offset,
         rotate_y_180=rotate_y_180,
     )
-    if rotate_y_180 and isinstance(out.get("normals"), list):
-        out["normals"] = _rotate_y_180_vectors(out.get("normals"))
-    out["bounds"] = _bounds_from_vertices(out.get("vertices") or [])
+    out["stage_transform"] = {
+        "enabled": True,
+        "center": [float(v) for v in center],
+        "offset": [float(v) for v in offset],
+        "rotate_y_180": bool(rotate_y_180),
+    }
+    out["bounds"] = _bounds_from_vertices(transformed_vertices)
     out["model_id"] = f"{prefix}_{str(out.get('model_id') or 'static_model')}"
     if not keep_skinning:
         for key in tuple(out.keys()):
