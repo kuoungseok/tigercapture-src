@@ -41,6 +41,7 @@ def test_standalone_ar_pbr_viewer_shader_consumes_preview_bloom_uniforms() -> No
 
     assert "POST_BLOOM_FRAG_SHADER" in source
     assert "uniform float u_bloom_strength;" in source
+    assert "uniform float u_bloom_boost;" in source
     assert "uniform sampler2D u_scene_color;" in source
     assert "uniform sampler2D u_bloom_source;" in source
     assert "BLOOM_BLUR_FRAG_SHADER" in source
@@ -50,10 +51,11 @@ def test_standalone_ar_pbr_viewer_shader_consumes_preview_bloom_uniforms() -> No
     assert "self.scene_bloom_texture" in source
     assert "GL.GL_COLOR_ATTACHMENT1" in source
     assert "float excess = max(lum - threshold, 0.0);" in source
-    assert "return rgb * contribution * soft_mask * source_mask;" in source
+    assert "return rgb * contribution * soft_mask * source_mask * boost;" in source
     assert "vec3 sample_blur" in source
     assert "GL.glFramebufferTexture2D(" in source
     assert "u_extract_bright" in source
+    assert "raw_threshold - min(0.34" in source
     assert 'getattr(GL, "GL_RGBA16F", 0x881A)' in source
     assert "vec3 bloom_rgb = max(" in source
     assert "texture(u_bloom_source" in source
@@ -75,12 +77,14 @@ def test_ar_pbr_preview_bloomed_preset_uses_visible_post_effects() -> None:
     assert bloomed["bloom_radius"] >= 12.0
     assert 0.35 <= bloomed["bloom_threshold"] <= 0.55
     assert bloomed["bloom_kernel"] == "cinematic"
+    assert bloomed["bloom_boost"] >= 0.8
 
 
 def test_ar_pbr_preview_exposes_bloom_threshold_controls() -> None:
     source = _read_repo_file("app/ar_pbr/preview_window.py")
 
     assert 'self._top_bloom_strength = _TopSliderRow("Bloom"' in source
+    assert 'self._top_bloom_strength = _TopSliderRow("Bloom", 0.0, 4.0' in source
     assert 'self._top_bloom_threshold = _TopSliderRow("Threshold"' in source
     assert "def _set_bloom_threshold" in source
     assert 'enabled = self._active_look_preset == "bloomed"' in source

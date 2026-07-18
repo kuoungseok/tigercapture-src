@@ -64,6 +64,7 @@ from app.ar_pbr.hybrid_rendering import (
     DEFAULT_SPECULAR_GI_STRENGTH,
 )
 from app.ar_pbr.post_effects import (
+    DEFAULT_BLOOM_BOOST,
     DEFAULT_BLOOM_RADIUS,
     DEFAULT_BLOOM_STRENGTH,
     DEFAULT_BLOOM_THRESHOLD,
@@ -647,7 +648,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._look_combo.setToolTip("Preview-only look preset")
         self._populate_look_combo()
         header.addWidget(self._look_combo)
-        self._top_bloom_strength = _TopSliderRow("Bloom", 0.0, 2.0, DEFAULT_BLOOM_STRENGTH, parent=self)
+        self._top_bloom_strength = _TopSliderRow("Bloom", 0.0, 4.0, DEFAULT_BLOOM_STRENGTH, parent=self)
         self._top_bloom_strength.setToolTip("Bloom strength for the Bloomed preview look")
         self._top_bloom_strength.setEnabled(False)
         header.addWidget(self._top_bloom_strength)
@@ -1500,6 +1501,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
             "bloom_strength": float(getattr(self._state, "bloom_strength", DEFAULT_BLOOM_STRENGTH)),
             "bloom_radius": float(getattr(self._state, "bloom_radius", DEFAULT_BLOOM_RADIUS)),
             "bloom_threshold": float(getattr(self._state, "bloom_threshold", DEFAULT_BLOOM_THRESHOLD)),
+            "bloom_boost": float(getattr(self._state, "bloom_boost", DEFAULT_BLOOM_BOOST)),
             "vignette_strength": float(getattr(self._state, "vignette_strength", DEFAULT_VIGNETTE_STRENGTH)),
             "vignette_radius": float(getattr(self._state, "vignette_radius", DEFAULT_VIGNETTE_RADIUS)),
             "vignette_feather": float(getattr(self._state, "vignette_feather", DEFAULT_VIGNETTE_FEATHER)),
@@ -1645,6 +1647,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
                 "bloom_strength",
                 "bloom_radius",
                 "bloom_threshold",
+                "bloom_boost",
                 "vignette_strength",
                 "vignette_radius",
                 "vignette_feather",
@@ -1659,6 +1662,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
                 self._state.bloom_strength = float(post["bloom_strength"])
                 self._state.bloom_radius = float(post["bloom_radius"])
                 self._state.bloom_threshold = float(post["bloom_threshold"])
+                self._state.bloom_boost = float(post["bloom_boost"])
                 self._state.vignette_strength = float(post["vignette_strength"])
                 self._state.vignette_radius = float(post["vignette_radius"])
                 self._state.vignette_feather = float(post["vignette_feather"])
@@ -1841,6 +1845,7 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._state.bloom_strength = DEFAULT_BLOOM_STRENGTH
         self._state.bloom_radius = DEFAULT_BLOOM_RADIUS
         self._state.bloom_threshold = DEFAULT_BLOOM_THRESHOLD
+        self._state.bloom_boost = DEFAULT_BLOOM_BOOST
         self._state.vignette_strength = DEFAULT_VIGNETTE_STRENGTH
         self._state.vignette_radius = DEFAULT_VIGNETTE_RADIUS
         self._state.vignette_feather = DEFAULT_VIGNETTE_FEATHER
@@ -1909,7 +1914,8 @@ class ArPbrAssetPreviewWindow(QMainWindow):
     def _set_bloom_strength(self, value: float) -> None:
         if self._state is None:
             return
-        self._state.bloom_strength = max(0.0, min(2.0, float(value)))
+        self._state.bloom_strength = max(0.0, min(4.0, float(value)))
+        self._state.bloom_boost = max(float(getattr(self._state, "bloom_boost", DEFAULT_BLOOM_BOOST)), self._state.bloom_strength * 0.42)
         self._refresh_post_effects_mode()
         self._update()
         self._emit_lighting_changed()

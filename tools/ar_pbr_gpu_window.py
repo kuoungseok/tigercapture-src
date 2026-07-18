@@ -261,6 +261,7 @@ from app.ar_pbr.displacement import (
     normalize_displacement_settings,
 )
 from app.ar_pbr.post_effects import (
+    DEFAULT_BLOOM_BOOST,
     DEFAULT_BLOOM_RADIUS,
     DEFAULT_BLOOM_STRENGTH,
     DEFAULT_BLOOM_THRESHOLD,
@@ -1441,6 +1442,7 @@ uniform vec2 u_texel_size;
 uniform vec2 u_direction;
 uniform float u_bloom_radius;
 uniform float u_bloom_threshold;
+uniform float u_bloom_boost;
 uniform int u_extract_bright;
 out vec4 frag_color;
 
@@ -1454,9 +1456,10 @@ vec3 bright_pass(vec4 sample_rgba) {
     float threshold = clamp(u_bloom_threshold, 0.0, 1.0);
     float knee = mix(0.10, 0.32, clamp(u_bloom_radius / 24.0, 0.0, 1.0));
     float excess = max(lum - threshold, 0.0);
-    float contribution = clamp(excess / max(1.0 - threshold, 0.001), 0.0, 4.0);
+    float contribution = clamp(excess / max(1.0 - threshold, 0.001), 0.0, 8.0);
     float soft_mask = smoothstep(0.0, knee, excess);
-    return rgb * contribution * soft_mask * source_mask;
+    float boost = 1.0 + clamp(u_bloom_boost, 0.0, 8.0) * (0.85 + contribution * 0.35);
+    return rgb * contribution * soft_mask * source_mask * boost;
 }
 
 vec3 sample_blur(vec2 offset_px, float weight) {
@@ -1497,7 +1500,7 @@ out vec4 frag_color;
 
 void main() {
     vec4 base = texture(u_scene_color, v_uv);
-    float strength = clamp(u_bloom_strength, 0.0, 3.0);
+    float strength = pow(clamp(u_bloom_strength, 0.0, 4.0), 1.35) * 1.75;
     vec3 bloom = max(texture(u_bloom_source, v_uv).rgb, vec3(0.0));
     vec3 rgb = clamp(base.rgb + bloom * strength, 0.0, 1.0);
     float bloom_alpha = clamp(max(max(bloom.r, bloom.g), bloom.b) * strength, 0.0, 1.0);
@@ -1725,6 +1728,7 @@ class GpuState:
     bloom_strength: float = DEFAULT_BLOOM_STRENGTH
     bloom_radius: float = DEFAULT_BLOOM_RADIUS
     bloom_threshold: float = DEFAULT_BLOOM_THRESHOLD
+    bloom_boost: float = DEFAULT_BLOOM_BOOST
     vignette_strength: float = DEFAULT_VIGNETTE_STRENGTH
     vignette_radius: float = DEFAULT_VIGNETTE_RADIUS
     vignette_feather: float = DEFAULT_VIGNETTE_FEATHER
@@ -2188,6 +2192,7 @@ def post_effects_diagnostics(state: GpuState) -> dict[str, Any]:
         "bloom_strength": getattr(state, "bloom_strength", DEFAULT_BLOOM_STRENGTH),
         "bloom_radius": getattr(state, "bloom_radius", DEFAULT_BLOOM_RADIUS),
         "bloom_threshold": getattr(state, "bloom_threshold", DEFAULT_BLOOM_THRESHOLD),
+        "bloom_boost": getattr(state, "bloom_boost", DEFAULT_BLOOM_BOOST),
         "vignette_strength": getattr(state, "vignette_strength", DEFAULT_VIGNETTE_STRENGTH),
         "vignette_radius": getattr(state, "vignette_radius", DEFAULT_VIGNETTE_RADIUS),
         "vignette_feather": getattr(state, "vignette_feather", DEFAULT_VIGNETTE_FEATHER),
@@ -4275,6 +4280,7 @@ class GpuMeshWidget(QOpenGLWidget):
         direction: tuple[float, float],
         radius: float,
         threshold: float,
+        boost: float,
         extract_bright: bool,
     ) -> bool:
         from OpenGL import GL
@@ -4306,6 +4312,7 @@ class GpuMeshWidget(QOpenGLWidget):
         )
         GL.glUniform1f(self._uniform_location(self.bloom_blur_program, "u_bloom_radius"), float(radius))
         GL.glUniform1f(self._uniform_location(self.bloom_blur_program, "u_bloom_threshold"), float(threshold))
+        GL.glUniform1f(self._uniform_location(self.bloom_blur_program, "u_bloom_boost"), float(boost))
         GL.glUniform1i(self._uniform_location(self.bloom_blur_program, "u_extract_bright"), 1 if extract_bright else 0)
         GL.glBindVertexArray(self.post_bloom_vao)
         GL.glDrawArrays(GL.GL_TRIANGLES, 0, 3)
@@ -4322,7 +4329,10 @@ class GpuMeshWidget(QOpenGLWidget):
             return int(self.scene_bloom_texture or 0), max(1, int(width)), max(1, int(height))
         blur_w, blur_h = self.bloom_blur_fbo_size
         radius = float(post_effects.get("bloom_radius", DEFAULT_BLOOM_RADIUS) or DEFAULT_BLOOM_RADIUS)
-        threshold = float(post_effects.get("bloom_threshold", DEFAULT_BLOOM_THRESHOLD) or DEFAULT_BLOOM_THRESHOLD)
+        strength = float(post_effects.get("bloom_strength", DEFAULT_BLOOM_STRENGTH) or DEFAULT_BLOOM_STRENGTH)
+        boost = max(float(post_effects.get("bloom_boost", DEFAULT_BLOOM_BOOST) or DEFAULT_BLOOM_BOOST), strength * 0.42)
+        raw_threshold = float(post_effects.get("bloom_threshold", DEFAULT_BLOOM_THRESHOLD) or DEFAULT_BLOOM_THRESHOLD)
+        threshold = max(0.02, raw_threshold - min(0.34, strength * 0.075 + boost * 0.035))
         pass_plan = (
             (int(self.scene_bloom_texture or 0), max(1, int(width)), max(1, int(height)), self.bloom_blur_fbo_a, (1.0, 0.0), radius, True),
             (self.bloom_blur_texture_a, blur_w, blur_h, self.bloom_blur_fbo_b, (0.0, 1.0), radius, False),
@@ -4340,6 +4350,7 @@ class GpuMeshWidget(QOpenGLWidget):
                 direction=direction,
                 radius=pass_radius,
                 threshold=threshold,
+                boost=boost if extract else 0.0,
                 extract_bright=extract,
             )
             if not ok:
