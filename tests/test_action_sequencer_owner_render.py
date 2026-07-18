@@ -337,6 +337,41 @@ def test_owner_animation_preview_safety_blocks_torn_skinning() -> None:
     assert report["worst"]["height_ratio"] > owner_render.OWNER_ANIMATION_PREVIEW_MAX_GEOMETRY_HEIGHT_RATIO
 
 
+def test_action_sequencer_stage_pair_animation_unit_scale_is_not_applied_twice() -> None:
+    from app.ar_pbr.animation import skin_matrices_for_clip
+
+    descriptor = {
+        "schema": "tigerstudio.ar_pbr.action_sequencer_stage_pair.v1",
+        "source_format": "action_sequencer_stage_pair",
+        "units": {"scale_to_meters": 0.01, "source": "unreal_centimeters"},
+        "models": [],
+        "bones": [
+            {"id": "bone_0", "index": 0, "name": "root", "parent_index": -1, "translation": [0, 0, 0]},
+            {"id": "bone_1", "index": 1, "name": "hand", "parent_id": "bone_0", "translation": [1, 0, 0]},
+        ],
+        "animation_clips": [{
+            "id": "move_hand",
+            "duration_ms": 1000.0,
+            "model_curves": {
+                "bone_1": {
+                    "translation": {"x": [[0.0, 1.0], [1000.0, 2.0]]},
+                    "rotation_quat": {"w": [[0.0, 1.0], [1000.0, 1.0]]},
+                }
+            },
+        }],
+    }
+    track = {
+        "id": "stage_pair_preview",
+        "start_ms": 0,
+        "animation": {"clip": "move_hand", "auto_play": True, "loop": False},
+    }
+
+    skinning = skin_matrices_for_clip(descriptor, track, 1000)
+
+    assert skinning is not None
+    assert skinning["matrices"][1][0][3] == 1.0
+
+
 def test_owner_unreal_ar_pbr_bridge_exports_target_descriptor(tmp_path, monkeypatch) -> None:
     from app.action_sequencer_owner_render import discover_owner_render_descriptor
     from app.action_sequencer_unreal_asset_bridge import export_owner_unreal_ar_pbr_asset

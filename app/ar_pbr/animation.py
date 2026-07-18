@@ -525,12 +525,18 @@ def _animation_unit_scale(descriptor: Mapping[str, Any]) -> float:
     Unreal skeletal exports already store vertex and reference-bone positions in
     Tiger Studio runtime meters. The `units.scale_to_meters` field still records
     the original source unit, so applying it again folds the Manny skeleton down
-    to 1/100 scale during animation.
+    to 1/100 scale during animation. Action Sequencer A/B stage-pair descriptors
+    wrap that same Unreal skeletal payload, so they must preserve the same rule.
     """
 
     schema = str(descriptor.get("schema") or "")
     source_format = str(descriptor.get("source_format") or "")
-    if schema == "tigerstudio.ar_pbr.unreal_skeletal_mesh_export.v1" or source_format == "unreal_skeletal_mesh":
+    if (
+        schema == "tigerstudio.ar_pbr.unreal_skeletal_mesh_export.v1"
+        or schema == "tigerstudio.ar_pbr.action_sequencer_stage_pair.v1"
+        or source_format == "unreal_skeletal_mesh"
+        or source_format == "action_sequencer_stage_pair"
+    ):
         return 1.0
     units = descriptor.get("units") if isinstance(descriptor.get("units"), Mapping) else {}
     return _float(units.get("scale_to_meters"), 1.0)
