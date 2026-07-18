@@ -1124,12 +1124,23 @@ class _OwnerAnimationPanel(QFrame):
             filter_layout.addWidget(button, index // 2, index % 2)
         layout.addWidget(filters)
 
+        action_row = QHBoxLayout()
+        action_row.setSpacing(5)
+
+        self._play_pair_btn = QPushButton("Play Pair", self)
+        self._play_pair_btn.setObjectName("OwnerAnimationPlayPairButton")
+        self._play_pair_btn.setIcon(app_icon("play", size=12))
+        self._play_pair_btn.setIconSize(icon_size(12))
+        self._play_pair_btn.clicked.connect(self._on_play_pair_clicked)
+        action_row.addWidget(self._play_pair_btn)
+
         self._cache_nearby_btn = QPushButton("Cache nearby", self)
         self._cache_nearby_btn.setObjectName("OwnerAnimationCacheButton")
         self._cache_nearby_btn.setIcon(app_icon("download", size=12))
         self._cache_nearby_btn.setIconSize(icon_size(12))
         self._cache_nearby_btn.clicked.connect(self._on_cache_nearby_clicked)
-        layout.addWidget(self._cache_nearby_btn)
+        action_row.addWidget(self._cache_nearby_btn)
+        layout.addLayout(action_row)
 
         self._list = QListWidget(self)
         self._list.setObjectName("OwnerAnimationList")
@@ -1194,6 +1205,33 @@ class _OwnerAnimationPanel(QFrame):
             "target_clip": target_preview_path.stem if target_preview_path is not None else "",
             "active_slot": self._active_slot,
             "preview_role": preview_role,
+            "apply_frame_ms": int(apply_frame_ms),
+            "play_once": bool(play_once),
+        }
+
+    def pair_preview_payload(self, *, play_once: bool = True, apply_frame_ms: int = 0) -> dict[str, Any]:
+        owner_path = self.selected_owner_animation_path()
+        target_path = self.selected_target_animation_path()
+        batch_paths: list[Path] = []
+        for path in (owner_path, target_path):
+            if path is not None and path not in batch_paths:
+                batch_paths.append(path)
+        for selected in (owner_path, target_path):
+            for path in self.preview_batch_paths(selected, limit=6):
+                if path not in batch_paths:
+                    batch_paths.append(path)
+        return {
+            "animation_path": owner_path,
+            "owner_animation_path": owner_path,
+            "target_animation_path": target_path,
+            "context_owner_animation_path": owner_path,
+            "context_target_animation_path": target_path,
+            "target_recommended_animation_path": self._target_recommended_path,
+            "batch_paths": [str(path) for path in batch_paths],
+            "clip": owner_path.stem if owner_path is not None else "",
+            "target_clip": target_path.stem if target_path is not None else "",
+            "active_slot": self._active_slot,
+            "preview_role": "pair",
             "apply_frame_ms": int(apply_frame_ms),
             "play_once": bool(play_once),
         }
@@ -1377,6 +1415,14 @@ class _OwnerAnimationPanel(QFrame):
         self.animation_selected.emit(self.preview_payload(play_once=False))
         self.animation_preview_requested.emit(self.preview_payload(play_once=True))
 
+    def _on_play_pair_clicked(self) -> None:
+        if self._owner_selected_path is None:
+            self.set_sequence_status("Select an Owner animation before playing a pair.", state="error")
+            return
+        payload = self.pair_preview_payload(play_once=True)
+        self.animation_selected.emit(payload)
+        self.animation_preview_requested.emit(payload)
+
     def _on_cache_nearby_clicked(self) -> None:
         paths: list[Path] = []
         selected_path = self.active_slot_animation_path()
@@ -1476,11 +1522,15 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
     def _on_animation_selected(payload_or_path: object) -> None:
         preview_role = "owner"
         if isinstance(payload_or_path, Mapping):
-            preview_role = "target" if str(payload_or_path.get("preview_role") or payload_or_path.get("active_slot") or "") == "target" else "owner"
+            raw_role = str(payload_or_path.get("preview_role") or payload_or_path.get("active_slot") or "")
+            preview_role = "pair" if raw_role == "pair" else "target" if raw_role == "target" else "owner"
             owner_path = payload_or_path.get("owner_animation_path")
             target_path = payload_or_path.get("target_animation_path")
             selected_path = payload_or_path.get("animation_path")
-            if preview_role == "target":
+            if preview_role == "pair":
+                path = Path(str(owner_path or selected_path)) if (owner_path or selected_path) else None
+                target = Path(str(target_path)) if target_path else None
+            elif preview_role == "target":
                 path = None
                 target = Path(str(target_path or selected_path)) if (target_path or selected_path) else None
             else:
@@ -1496,6 +1546,8 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
         target_text = f" -> Target {target.stem}" if target is not None and preview_role != "target" else ""
         if preview_role == "target":
             selected_text = f"Selected Target: {target.stem if target is not None else 'None'}"
+        elif preview_role == "pair":
+            selected_text = f"Selected Pair: {path.stem if path is not None else 'None'}{target_text}"
         else:
             selected_text = f"Selected Owner: {path.stem if path is not None else 'None'}{target_text}"
         _set_sequence_status(selected_text, state="idle")
@@ -1504,14 +1556,19 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             status.setText(selected_text)
 
     def _on_animation_preview_requested(payload: dict[str, Any]) -> None:
-        preview_role = "target" if str(payload.get("preview_role") or payload.get("active_slot") or "") == "target" else "owner"
+        raw_role = str(payload.get("preview_role") or payload.get("active_slot") or "")
+        preview_role = "pair" if raw_role == "pair" else "target" if raw_role == "target" else "owner"
         raw_selected_path = payload.get("animation_path")
         raw_owner_path = payload.get("owner_animation_path")
         raw_target_path = payload.get("target_animation_path")
         selected_path = Path(str(raw_selected_path)) if raw_selected_path else None
         owner_path = Path(str(raw_owner_path)) if raw_owner_path else None
         target_path = Path(str(raw_target_path)) if raw_target_path else None
-        if preview_role == "target":
+        if preview_role == "pair":
+            path = owner_path or selected_path
+            owner_preview_path = path
+            target_preview_path = target_path
+        elif preview_role == "target":
             path = target_path or selected_path
             owner_preview_path = None
             target_preview_path = path
@@ -1566,6 +1623,8 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             batch_paths = []
         if path not in batch_paths:
             batch_paths.insert(0, path)
+        if preview_role == "pair" and target_preview_path is not None and target_preview_path not in batch_paths:
+            batch_paths.insert(1, target_preview_path)
         result = {
             "status": "caching_animation_batch",
             "clip": clip,
@@ -1598,7 +1657,7 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
                 else None
             )
             if not isinstance(owner_event, dict):
-                owner_event = selected_event if preview_role == "owner" and isinstance(selected_event, dict) else None
+                owner_event = selected_event if preview_role in {"owner", "pair"} and isinstance(selected_event, dict) else None
             target_event = (
                 results_by_path.get(str(target_preview_path))
                 if isinstance(results_by_path, dict) and target_preview_path is not None
@@ -2040,6 +2099,7 @@ def _owner_animation_panel_qss() -> str:
         padding: 7px 8px;
         selection-background-color: #2E6CE6;
     }
+    QPushButton#OwnerAnimationPlayPairButton,
     QPushButton#OwnerAnimationCacheButton {
         color: #DDE8F7;
         background: #121A24;

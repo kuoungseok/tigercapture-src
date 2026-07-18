@@ -237,6 +237,14 @@ def test_owner_animation_panel_keeps_target_static_until_explicit_selection(tmp_
         assert payload["target_animation_path"] == target_anim
         assert payload["clip"] == "MM_HitReact_Front_Hvy_01"
         assert payload["target_clip"] == "MM_HitReact_Front_Hvy_01"
+
+        payload = panel.pair_preview_payload(play_once=True)
+        assert payload["preview_role"] == "pair"
+        assert payload["animation_path"] == owner_anim
+        assert payload["owner_animation_path"] == owner_anim
+        assert payload["target_animation_path"] == target_anim
+        assert payload["clip"] == "MM_Attack_01"
+        assert payload["target_clip"] == "MM_HitReact_Front_Hvy_01"
     finally:
         panel.close()
 
@@ -1272,48 +1280,55 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
             return False
 
         def start(self) -> None:
-            selected_path = Path(str(captured["export_animation_path"]))
-            clip_id = selected_path.stem
-            clip = {
-                "id": clip_id,
-                "name": clip_id,
-                "duration_ms": 1000.0,
-                "_export_path": f"{clip_id}.animation_clip.json",
-                "bone_names": ["root"],
-                "model_curves": {
-                    "bone_0": {
-                        "bone_name": "root",
-                        "translation": {
-                            "x": [[0.0, 0.0], [1000.0, 0.0]],
-                            "y": [[0.0, 0.0], [1000.0, 0.0]],
-                            "z": [[0.0, 0.0], [1000.0, 0.0]],
+            def make_event(path: Path) -> dict:
+                clip_id = path.stem
+                clip = {
+                    "id": clip_id,
+                    "name": clip_id,
+                    "duration_ms": 1000.0,
+                    "_export_path": f"{clip_id}.animation_clip.json",
+                    "bone_names": ["root"],
+                    "model_curves": {
+                        "bone_0": {
+                            "bone_name": "root",
+                            "translation": {
+                                "x": [[0.0, 0.0], [1000.0, 0.0]],
+                                "y": [[0.0, 0.0], [1000.0, 0.0]],
+                                "z": [[0.0, 0.0], [1000.0, 0.0]],
+                            },
                         },
-                    }
-                },
-                "sampled_frame_count": 12,
-            }
-            summary = {
-                "id": clip_id,
-                "name": clip_id,
-                "duration_ms": 1000.0,
-                "frame_count": 30,
-                "sampled_frame_count": 12,
-                "bone_curve_count": 1,
-                "source_mode": "cue4parse_animation",
-                "export_path": f"{clip_id}.animation_clip.json",
+                    },
+                    "sampled_frame_count": 12,
+                }
+                summary = {
+                    "id": clip_id,
+                    "name": clip_id,
+                    "duration_ms": 1000.0,
+                    "frame_count": 30,
+                    "sampled_frame_count": 12,
+                    "bone_curve_count": 1,
+                    "source_mode": "cue4parse_animation",
+                    "export_path": f"{clip_id}.animation_clip.json",
+                }
+                return {
+                    "status": "cached",
+                    "animation_path": str(path),
+                    "clip": clip,
+                    "summary": summary,
+                }
+
+            selected_path = Path(str(captured["export_animation_path"]))
+            results = {
+                str(path): make_event(Path(path))
+                for path in captured["export_animation_paths"]
             }
             self.exported.emit({
                 "status": "animation_clip_batch_exported",
-                "selected_path": str(captured["export_animation_path"]),
-                "selected": {
-                    "status": "cached",
-                    "animation_path": str(captured["export_animation_path"]),
-                    "clip": clip,
-                    "summary": summary,
-                },
-                "results": {},
-                "count": 1,
-                "cached_count": 1,
+                "selected_path": str(selected_path),
+                "selected": results[str(selected_path)],
+                "results": results,
+                "count": len(results),
+                "cached_count": len(results),
                 "exported_count": 0,
                 "failed_count": 0,
             })
@@ -1402,6 +1417,30 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     assert "bone_0" not in captured["attached_clip"]["model_curves"]
     assert "target_bone_0" in captured["attached_clip"]["model_curves"]
     assert captured["played_clip"] == "pair_owner__MM_HitReact_Front_Hvy_01"
+
+    owner_anim = content / "Characters" / "Mannequins" / "Anims" / "Unarmed" / "MM_Idle.uasset"
+    captured["animation_preview_callback"]({
+        "preview_role": "pair",
+        "animation_path": owner_anim,
+        "owner_animation_path": owner_anim,
+        "target_animation_path": target_anim,
+        "clip": owner_anim.stem,
+        "target_clip": target_anim.stem,
+        "batch_paths": [str(owner_anim), str(target_anim)],
+        "apply_frame_ms": 0,
+        "play_once": True,
+    })
+    assert captured["export_animation_path"] == owner_anim
+    assert window.owner_animation_preview_result["preview_role"] == "pair"
+    assert window.owner_animation_preview_result["owner_animation_path"] == str(owner_anim)
+    assert window.owner_animation_preview_result["target_animation_path"] == str(target_anim)
+    assert window.owner_animation_sequence_plan["source"]["id"] == "pair_MM_Idle__MM_HitReact_Front_Hvy_01"
+    assert captured["attached_clip"]["id"] == "pair_MM_Idle__MM_HitReact_Front_Hvy_01"
+    assert captured["attached_clip"]["owner_clip_id"] == "MM_Idle"
+    assert captured["attached_clip"]["target_clip_id"] == "MM_HitReact_Front_Hvy_01"
+    assert "bone_0" in captured["attached_clip"]["model_curves"]
+    assert "target_bone_0" in captured["attached_clip"]["model_curves"]
+    assert captured["played_clip"] == "pair_MM_Idle__MM_HitReact_Front_Hvy_01"
 
     assert captured["shown"] is True
     assert captured["raised"] is True
