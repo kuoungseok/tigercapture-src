@@ -69,6 +69,8 @@ def build_action_sequencer_stage_pair_descriptor(
     original_geometries = [dict(item) for item in descriptor.get("geometries") or [] if isinstance(item, Mapping)]
     original_connections = [dict(item) for item in descriptor.get("connections") or [] if isinstance(item, Mapping)]
     original_models = [dict(item) for item in descriptor.get("models") or [] if isinstance(item, Mapping)]
+    original_bones = [dict(item) for item in descriptor.get("bones") or [] if isinstance(item, Mapping)]
+    target_bone_index_offset = _target_bone_index_offset(original_bones)
     source_bounds = _bounds_from_geometries(original_geometries) or _bounds_from_any(descriptor.get("bounds"))
     center = tuple(float(v) for v in source_bounds.get("center", [0.0, 0.0, 0.0])[:3])
 
@@ -84,6 +86,8 @@ def build_action_sequencer_stage_pair_descriptor(
             offset=owner_offset,
             rotate_y_180=False,
             keep_skinning=True,
+            target_bone_index_offset=0,
+            remap_target_skinning=False,
         )
         owner_geometries.append(owner_copy)
 
@@ -95,7 +99,9 @@ def build_action_sequencer_stage_pair_descriptor(
             center=center,
             offset=target_offset,
             rotate_y_180=True,
-            keep_skinning=False,
+            keep_skinning=True,
+            target_bone_index_offset=target_bone_index_offset,
+            remap_target_skinning=True,
         )
         target_geometries.append(target_copy)
 
@@ -109,11 +115,12 @@ def build_action_sequencer_stage_pair_descriptor(
     descriptor["geometry_count"] = len(descriptor["geometries"])
     descriptor["bounds"] = _bounds_from_geometries(descriptor["geometries"]) or source_bounds
     descriptor["models"] = original_models + _target_models(original_models)
+    descriptor["bones"] = original_bones + _target_bones(original_bones, index_offset=target_bone_index_offset)
     descriptor["connections"] = original_connections + _target_connections(original_connections, original_geometries)
 
     warnings = list(descriptor.get("warnings") or [])
     warnings.append(
-        "Action Sequencer stage pair preview duplicates the performer mesh as a static Actor B target role until target reaction matching is implemented."
+        "Action Sequencer stage pair preview duplicates the performer skeleton for an independent Actor B target reaction slot."
     )
     descriptor["warnings"] = warnings
 
@@ -139,11 +146,12 @@ def build_action_sequencer_stage_pair_descriptor(
                 "display_name": "Target",
                 "stage_position": "right",
                 "stage_forward": "-X / screen left",
-                "animation_binding": "static_reaction_slot_pending",
+                "animation_binding": "target_reaction_animation_track",
                 "target_offset": [float(v) for v in target_offset],
+                "target_bone_index_offset": int(target_bone_index_offset),
             },
         ],
-        "target_reaction_status": "standing_static_placeholder",
+        "target_reaction_status": "target_animation_slot_available",
         "next_step": "Reaction Base Finder -> Target Root Warp -> Contact Constraint Layer -> IK Polish",
     }
     descriptor["metadata"] = metadata
@@ -160,6 +168,8 @@ def _role_geometry_copy(
     offset: tuple[float, float, float],
     rotate_y_180: bool,
     keep_skinning: bool,
+    target_bone_index_offset: int,
+    remap_target_skinning: bool,
 ) -> dict[str, Any]:
     out = deepcopy(dict(geometry))
     source_id = str(out.get("id") or "geometry")
@@ -186,7 +196,17 @@ def _role_geometry_copy(
         for key in tuple(out.keys()):
             if "skin" in str(key).casefold():
                 out.pop(key, None)
-    out["animation_role"] = "owner_animation_track" if keep_skinning else "target_static_until_reaction_base"
+    elif remap_target_skinning:
+        out["skin_weights"] = _remap_target_skin_weights(
+            out.get("skin_weights"),
+            bone_index_offset=target_bone_index_offset,
+        )
+        if isinstance(out.get("skin_joint_ids"), list):
+            out["skin_joint_ids"] = [
+                f"target_{str(item)}" if not str(item).startswith("target_") else str(item)
+                for item in out["skin_joint_ids"]
+            ]
+    out["animation_role"] = "owner_animation_track" if role_slot == "actor_a" else "target_reaction_animation_track"
     return out
 
 
@@ -206,6 +226,103 @@ def _target_models(models: list[dict[str, Any]]) -> list[dict[str, Any]]:
         copied["role_slot"] = "actor_b"
         out.append(copied)
     return out
+
+
+def _target_bone_index_offset(bones: list[dict[str, Any]]) -> int:
+    indices = []
+    for idx, bone in enumerate(bones):
+        try:
+            indices.append(int(bone.get("index", idx)))
+        except Exception:
+            indices.append(idx)
+    return max(indices, default=-1) + 1
+
+
+def _target_bones(bones: list[dict[str, Any]], *, index_offset: int) -> list[dict[str, Any]]:
+    out: list[dict[str, Any]] = []
+    id_by_index: dict[int, str] = {}
+    for idx, bone in enumerate(bones):
+        try:
+            bone_index = int(bone.get("index", idx))
+        except Exception:
+            bone_index = idx
+        bone_id = str(bone.get("id") or f"bone_{bone_index}")
+        id_by_index[bone_index] = bone_id
+    for idx, bone in enumerate(bones):
+        copied = deepcopy(bone)
+        try:
+            source_index = int(copied.get("index", idx))
+        except Exception:
+            source_index = idx
+        source_id = str(copied.get("id") or f"bone_{source_index}")
+        copied["id"] = f"target_{source_id}"
+        copied["name"] = f"Target / {str(copied.get('name') or source_id)}"
+        copied["index"] = source_index + int(index_offset)
+        copied["role"] = "target"
+        copied["role_slot"] = "actor_b"
+        parent_id = str(copied.get("parent_id") or "")
+        if parent_id:
+            copied["parent_id"] = f"target_{parent_id}"
+        try:
+            parent_index = int(copied.get("parent_index", -1))
+        except Exception:
+            parent_index = -1
+        if parent_index >= 0:
+            copied["parent_index"] = parent_index + int(index_offset)
+            if not copied.get("parent_id"):
+                parent_source_id = id_by_index.get(parent_index)
+                if parent_source_id:
+                    copied["parent_id"] = f"target_{parent_source_id}"
+        out.append(copied)
+    return out
+
+
+def _remap_target_skin_weights(value: Any, *, bone_index_offset: int) -> Any:
+    if isinstance(value, Mapping):
+        out = deepcopy(dict(value))
+        joints = out.get("joints")
+        if isinstance(joints, list):
+            out["joints"] = [_offset_bone_index(item, bone_index_offset) for item in joints]
+        return out
+    if not isinstance(value, list):
+        return value
+    remapped: list[Any] = []
+    for row in value:
+        if isinstance(row, Mapping):
+            item = deepcopy(dict(row))
+            if "bone_index" in item:
+                source_index = _int_or_none(item.get("bone_index"))
+                item["bone_index"] = _offset_bone_index(item.get("bone_index"), bone_index_offset)
+                if source_index is not None and not item.get("bone_id"):
+                    item["bone_id"] = f"target_bone_{source_index}"
+            if "joint" in item:
+                item["joint"] = _offset_bone_index(item.get("joint"), bone_index_offset)
+            if "joint_index" in item:
+                item["joint_index"] = _offset_bone_index(item.get("joint_index"), bone_index_offset)
+            for key in ("bone_id", "model_id"):
+                text = str(item.get(key) or "")
+                if text and not text.startswith("target_"):
+                    item[key] = f"target_{text}"
+            remapped.append(item)
+        elif isinstance(row, list):
+            remapped.append(_remap_target_skin_weights(row, bone_index_offset=bone_index_offset))
+        else:
+            remapped.append(row)
+    return remapped
+
+
+def _offset_bone_index(value: Any, offset: int) -> int:
+    try:
+        return int(value) + int(offset)
+    except Exception:
+        return int(offset)
+
+
+def _int_or_none(value: Any) -> int | None:
+    try:
+        return int(value)
+    except Exception:
+        return None
 
 
 def _target_connections(

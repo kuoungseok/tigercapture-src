@@ -318,6 +318,112 @@ def _animation_browser_category_label(category: str) -> str:
     return OWNER_ANIMATION_CATEGORY_LABELS.get(str(category or "other"), "Other")
 
 
+def _recommended_target_animation_path(
+    owner_path: Path | None,
+    candidates: tuple[Path, ...] | list[Path],
+    content_root: Path,
+) -> Path | None:
+    if owner_path is None:
+        return None
+    owner_text = f"{_animation_display_group(content_root, owner_path)} {owner_path.stem}".casefold()
+    ranked: list[tuple[int, str, Path]] = []
+    for candidate in candidates:
+        if candidate == owner_path:
+            continue
+        if _animation_sequence_kind(candidate) == "pose":
+            continue
+        text = f"{_animation_display_group(content_root, candidate)} {candidate.stem}".casefold()
+        score = _target_reaction_score(owner_text, text)
+        if score < 999:
+            ranked.append((score, candidate.stem.casefold(), candidate))
+    if not ranked:
+        return None
+    return sorted(ranked)[0][2]
+
+
+def _target_reaction_score(owner_text: str, target_text: str) -> int:
+    if "attack" in owner_text or "charged" in owner_text:
+        if "hitreact" in target_text and "front" in target_text and ("med" in target_text or "hvy" in target_text):
+            return 0
+        if "hitreact" in target_text:
+            return 1
+        if "death" in target_text:
+            return 4
+    if "dash" in owner_text:
+        if "hitreact" in target_text and "back" in target_text:
+            return 0
+        if "hitreact" in target_text:
+            return 2
+    if "fire" in owner_text or "pistol" in owner_text or "rifle" in owner_text:
+        if "hitreact" in target_text:
+            return 1
+    if "death" in target_text:
+        return 6
+    return 999
+
+
+def _build_action_pair_animation_clip(
+    owner_clip: Mapping[str, Any] | None,
+    target_clip: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    owner_data = dict(owner_clip or {})
+    target_data = dict(target_clip or {})
+    owner_id = str(owner_data.get("id") or owner_data.get("name") or "owner")
+    target_id = str(target_data.get("id") or target_data.get("name") or "target")
+    owner_curves = owner_data.get("model_curves") if isinstance(owner_data.get("model_curves"), Mapping) else {}
+    target_curves = target_data.get("model_curves") if isinstance(target_data.get("model_curves"), Mapping) else {}
+    combined_curves: dict[str, Any] = {
+        str(key): dict(value) if isinstance(value, Mapping) else value
+        for key, value in owner_curves.items()
+    }
+    combined_curves.update(_target_animation_curves(target_curves))
+    duration_ms = max(_clip_duration_ms(owner_data), _clip_duration_ms(target_data))
+    sample_count = max(
+        int(float(owner_data.get("sampled_frame_count") or owner_data.get("frame_count") or 0)),
+        int(float(target_data.get("sampled_frame_count") or target_data.get("frame_count") or 0)),
+        0,
+    )
+    return {
+        "id": f"pair_{owner_id}__{target_id if target_curves else 'static_target'}",
+        "name": f"{owner_id} + {target_id if target_curves else 'Static Target'}",
+        "duration_ms": duration_ms,
+        "sampled_frame_count": sample_count,
+        "rotation_space": str(owner_data.get("rotation_space") or target_data.get("rotation_space") or "tiger_basis_quat_v1"),
+        "source_mode": "action_sequencer_pair_clip",
+        "owner_clip_id": owner_id,
+        "target_clip_id": target_id if target_curves else "",
+        "model_curves": combined_curves,
+    }
+
+
+def _target_animation_curves(curves: Mapping[str, Any]) -> dict[str, Any]:
+    out: dict[str, Any] = {}
+    for key, value in curves.items():
+        target_key = _target_curve_key(str(key))
+        if isinstance(value, Mapping):
+            copied = dict(value)
+            if copied.get("bone_name"):
+                copied["bone_name"] = f"Target / {copied.get('bone_name')}"
+        else:
+            copied = value
+        out[target_key] = copied
+    return out
+
+
+def _target_curve_key(key: str) -> str:
+    text = str(key or "")
+    if text.startswith("target_"):
+        return text
+    return f"target_{text}"
+
+
+def _clip_duration_ms(clip: Mapping[str, Any]) -> float:
+    try:
+        return max(0.0, float(clip.get("duration_ms") or 0.0))
+    except Exception:
+        return 0.0
+
+
 def _animation_sequence_kind(path: Path) -> str:
     stem = path.stem.casefold()
     if stem.startswith("am_"):
@@ -950,6 +1056,14 @@ class _OwnerAnimationPanel(QFrame):
         self._all_paths = list(descriptor.animation_sequence_paths)
         self._category_filter = "all"
         self._category_buttons: dict[str, QPushButton] = {}
+        self._active_slot = "owner"
+        self._owner_selected_path = descriptor.action_candidate_path or descriptor.idle_animation_path
+        self._target_selected_path = _recommended_target_animation_path(
+            self._owner_selected_path,
+            self._all_paths,
+            self._content_root,
+        )
+        self._slot_buttons: dict[str, QPushButton] = {}
         self.setObjectName("OwnerAnimationPanel")
         self.setFixedWidth(OWNER_ANIMATION_PANEL_WIDTH)
         self.setStyleSheet(_owner_animation_panel_qss())
@@ -965,6 +1079,23 @@ class _OwnerAnimationPanel(QFrame):
         self._count = QLabel(self._count_text(len(self._all_paths)), self)
         self._count.setObjectName("OwnerAnimationCount")
         layout.addWidget(self._count)
+
+        slot_row = QHBoxLayout()
+        slot_row.setSpacing(5)
+        for label, key in (("Owner", "owner"), ("Target", "target")):
+            button = QPushButton(label, self)
+            button.setObjectName("OwnerAnimationSlotButton")
+            button.setCheckable(True)
+            button.setChecked(key == self._active_slot)
+            button.clicked.connect(lambda _checked=False, slot_key=key: self._set_active_slot(slot_key))
+            self._slot_buttons[key] = button
+            slot_row.addWidget(button)
+        layout.addLayout(slot_row)
+
+        self._slot_summary = QLabel("", self)
+        self._slot_summary.setObjectName("OwnerAnimationSlotSummary")
+        self._slot_summary.setWordWrap(True)
+        layout.addWidget(self._slot_summary)
 
         self._filter = QLineEdit(self)
         self._filter.setObjectName("OwnerAnimationFilter")
@@ -1016,14 +1147,49 @@ class _OwnerAnimationPanel(QFrame):
 
         self._refresh()
         self._select_default()
+        self._update_slot_summary()
 
     def selected_animation_path(self) -> Path | None:
+        return self.selected_owner_animation_path()
+
+    def selected_owner_animation_path(self) -> Path | None:
+        return self._owner_selected_path
+
+    def selected_target_animation_path(self) -> Path | None:
+        return self._target_selected_path
+
+    def active_slot_animation_path(self) -> Path | None:
+        return self._owner_selected_path if self._active_slot == "owner" else self._target_selected_path
+
+    def preview_payload(self, *, play_once: bool = True, apply_frame_ms: int = 0) -> dict[str, Any]:
+        owner_path = self.selected_owner_animation_path()
+        target_path = self.selected_target_animation_path()
+        batch_paths: list[Path] = []
+        for path in (owner_path, target_path):
+            if path is not None and path not in batch_paths:
+                batch_paths.append(path)
+        for path in self.preview_batch_paths(owner_path, limit=8):
+            if path not in batch_paths:
+                batch_paths.append(path)
+        return {
+            "animation_path": owner_path,
+            "owner_animation_path": owner_path,
+            "target_animation_path": target_path,
+            "batch_paths": [str(path) for path in batch_paths],
+            "clip": owner_path.stem if owner_path is not None else "",
+            "target_clip": target_path.stem if target_path is not None else "",
+            "active_slot": self._active_slot,
+            "apply_frame_ms": int(apply_frame_ms),
+            "play_once": bool(play_once),
+        }
+
+    def _current_list_animation_path(self) -> Path | None:
         item = self._list.currentItem()
         data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
         return Path(str(data)) if data else None
 
     def preview_batch_paths(self, selected: Path | None = None, *, limit: int = 10) -> list[Path]:
-        selected = selected or self.selected_animation_path()
+        selected = selected or self.active_slot_animation_path()
         if self._list.count() <= 0:
             return []
         current_row = self._list.currentRow()
@@ -1071,7 +1237,7 @@ class _OwnerAnimationPanel(QFrame):
 
     def _refresh(self) -> None:
         query = self._filter.text().strip().casefold()
-        current = self.selected_animation_path()
+        current = self.active_slot_animation_path()
         visible_paths = [
             path for path in self._all_paths
             if _animation_browser_filter_matches(self._content_root, path, self._category_filter)
@@ -1130,6 +1296,20 @@ class _OwnerAnimationPanel(QFrame):
             button.setChecked(button_key == self._category_filter)
         self._refresh()
 
+    def _set_active_slot(self, key: str) -> None:
+        self._active_slot = "target" if str(key) == "target" else "owner"
+        for button_key, button in self._slot_buttons.items():
+            button.setChecked(button_key == self._active_slot)
+        if self._active_slot == "target" and self._target_selected_path is None:
+            self._target_selected_path = _recommended_target_animation_path(
+                self._owner_selected_path,
+                self._all_paths,
+                self._content_root,
+            )
+        self._refresh()
+        self._select_default()
+        self._update_slot_summary()
+
     def _count_text(self, visible_count: int) -> str:
         motion_count = sum(1 for path in self._all_paths if _animation_sequence_kind(path) in {"action", "motion"})
         pose_count = sum(1 for path in self._all_paths if _animation_sequence_kind(path) == "pose")
@@ -1152,7 +1332,7 @@ class _OwnerAnimationPanel(QFrame):
         return -1
 
     def _select_default(self) -> None:
-        preferred = self.descriptor.action_candidate_path or self.descriptor.idle_animation_path
+        preferred = self.active_slot_animation_path()
         if preferred is None:
             return
         for index in range(self._list.count()):
@@ -1167,31 +1347,53 @@ class _OwnerAnimationPanel(QFrame):
             return
         data = current.data(Qt.ItemDataRole.UserRole)
         if data:
-            self.animation_selected.emit(Path(str(data)))
+            path = Path(str(data))
+            self._set_selected_path_for_active_slot(path, auto_recommend_target=False)
+            self.animation_selected.emit(self.preview_payload(play_once=False))
 
     def _on_item_clicked(self, item: QListWidgetItem) -> None:
         data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
         if not data:
             return
         path = Path(str(data))
-        self.animation_selected.emit(path)
-        self.animation_preview_requested.emit({
-            "animation_path": path,
-            "batch_paths": [str(item) for item in self.preview_batch_paths(path, limit=10)],
-            "clip": path.stem,
-            "apply_frame_ms": 0,
-            "play_once": True,
-        })
+        self._set_selected_path_for_active_slot(path, auto_recommend_target=self._active_slot == "owner")
+        self.animation_selected.emit(self.preview_payload(play_once=False))
+        self.animation_preview_requested.emit(self.preview_payload(play_once=True))
 
     def _on_cache_nearby_clicked(self) -> None:
-        paths = self.preview_batch_paths(limit=24)
+        paths: list[Path] = []
+        for path in (self._owner_selected_path, self._target_selected_path):
+            if path is not None and path not in paths:
+                paths.append(path)
+        for path in self.preview_batch_paths(self.active_slot_animation_path(), limit=24):
+            if path not in paths:
+                paths.append(path)
         if paths:
             self.animation_cache_batch_requested.emit({
-                "animation_path": str(paths[0]),
+                "animation_path": str(self._owner_selected_path or paths[0]),
+                "owner_animation_path": str(self._owner_selected_path or paths[0]),
+                "target_animation_path": str(self._target_selected_path or ""),
                 "batch_paths": [str(path) for path in paths],
-                "clip": paths[0].stem,
+                "clip": (self._owner_selected_path or paths[0]).stem,
+                "target_clip": self._target_selected_path.stem if self._target_selected_path is not None else "",
                 "play_once": False,
             })
+
+    def _set_selected_path_for_active_slot(self, path: Path, *, auto_recommend_target: bool) -> None:
+        if self._active_slot == "target":
+            self._target_selected_path = path
+        else:
+            self._owner_selected_path = path
+            if auto_recommend_target:
+                recommended = _recommended_target_animation_path(path, self._all_paths, self._content_root)
+                if recommended is not None:
+                    self._target_selected_path = recommended
+        self._update_slot_summary()
+
+    def _update_slot_summary(self) -> None:
+        owner = self._owner_selected_path.stem if self._owner_selected_path is not None else "None"
+        target = self._target_selected_path.stem if self._target_selected_path is not None else "Auto pending"
+        self._slot_summary.setText(f"Owner: {owner}\nTarget: {target}")
 
 
 def open_action_sequencer_owner_render_window(owner: object, project_path: Path | str | None = None) -> QWidget:
@@ -1263,18 +1465,34 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
         if callable(setter):
             setter(message, state=state)
 
-    def _on_animation_selected(path: Path) -> None:
-        setattr(window, "owner_selected_animation_path", path)
-        _set_sequence_status(f"Selected: {path.stem}", state="idle")
-        status = getattr(window, "_status", None)
-        if status is not None and hasattr(status, "setText"):
-            status.setText(f"Animation selected: {path.stem}")
-
-    def _on_animation_preview_requested(payload: dict[str, Any]) -> None:
-        animation_path = payload.get("animation_path")
-        path = Path(str(animation_path)) if animation_path else None
+    def _on_animation_selected(payload_or_path: object) -> None:
+        if isinstance(payload_or_path, Mapping):
+            owner_path = payload_or_path.get("owner_animation_path") or payload_or_path.get("animation_path")
+            target_path = payload_or_path.get("target_animation_path")
+            path = Path(str(owner_path)) if owner_path else None
+            target = Path(str(target_path)) if target_path else None
+        else:
+            path = Path(str(payload_or_path)) if payload_or_path else None
+            target = None
         if path is not None:
             setattr(window, "owner_selected_animation_path", path)
+        if target is not None:
+            setattr(window, "target_selected_animation_path", target)
+        target_text = f" -> Target {target.stem}" if target is not None else ""
+        _set_sequence_status(f"Selected: {path.stem if path is not None else 'None'}{target_text}", state="idle")
+        status = getattr(window, "_status", None)
+        if status is not None and hasattr(status, "setText"):
+            status.setText(f"Animation selected: {path.stem if path is not None else 'None'}{target_text}")
+
+    def _on_animation_preview_requested(payload: dict[str, Any]) -> None:
+        animation_path = payload.get("owner_animation_path") or payload.get("animation_path")
+        path = Path(str(animation_path)) if animation_path else None
+        raw_target_path = payload.get("target_animation_path")
+        target_path = Path(str(raw_target_path)) if raw_target_path else None
+        if path is not None:
+            setattr(window, "owner_selected_animation_path", path)
+        if target_path is not None:
+            setattr(window, "target_selected_animation_path", target_path)
         active_worker = getattr(window, "owner_animation_export_worker", None)
         worker_running = False
         if active_worker is not None and hasattr(active_worker, "isRunning"):
@@ -1318,10 +1536,14 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             batch_paths = []
         if path not in batch_paths:
             batch_paths.insert(0, path)
+        if target_path is not None and target_path not in batch_paths:
+            batch_paths.insert(1, target_path)
         result = {
             "status": "caching_animation_batch",
             "clip": clip,
+            "target_clip": str(payload.get("target_clip") or (target_path.stem if target_path is not None else "")),
             "animation_path": str(path),
+            "target_animation_path": str(target_path or ""),
             "batch_paths": [str(item) for item in batch_paths],
             "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
             "ar_pbr_animation_enabled": True,
@@ -1338,9 +1560,19 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
         worker = _OwnerAnimationClipBatchExportWorker(descriptor, batch_paths, selected_path=path, parent=window)
 
         def _on_exported(event: dict[str, Any]) -> None:
+            results_by_path = event.get("results") if isinstance(event, dict) and isinstance(event.get("results"), dict) else {}
             selected_event = event.get("selected") if isinstance(event, dict) else None
-            exported_clip = selected_event.get("clip") if isinstance(selected_event, dict) else None
-            summary = selected_event.get("summary") if isinstance(selected_event, dict) else None
+            owner_event = results_by_path.get(str(path)) if isinstance(results_by_path, dict) else None
+            if not isinstance(owner_event, dict):
+                owner_event = selected_event if isinstance(selected_event, dict) else None
+            target_event = results_by_path.get(str(target_path)) if isinstance(results_by_path, dict) and target_path is not None else None
+            exported_owner_clip = owner_event.get("clip") if isinstance(owner_event, dict) else None
+            exported_target_clip = target_event.get("clip") if isinstance(target_event, dict) else None
+            exported_clip = _build_action_pair_animation_clip(
+                exported_owner_clip if isinstance(exported_owner_clip, dict) else None,
+                exported_target_clip if isinstance(exported_target_clip, dict) else None,
+            )
+            summary = _animation_clip_summary(exported_clip)
             sequence_plan = build_owner_animation_sequence(
                 exported_clip if isinstance(exported_clip, dict) else None,
                 animation_path=path,
@@ -1351,7 +1583,7 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             sequence_info = animation_sequence_summary(sequence_plan)
             is_pose_clip = _animation_clip_is_pose(
                 path,
-                exported_clip if isinstance(exported_clip, dict) else None,
+                exported_owner_clip if isinstance(exported_owner_clip, dict) else exported_clip if isinstance(exported_clip, dict) else None,
                 sequence_plan,
             )
             playback_result: dict[str, Any] | None = None
@@ -1395,7 +1627,9 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             result = {
                 "status": "animation_clip_batch_exported",
                 "clip": clip,
+                "target_clip": str(payload.get("target_clip") or (target_path.stem if target_path is not None else "")),
                 "animation_path": str(path),
+                "target_animation_path": str(target_path or ""),
                 "batch_paths": [str(item) for item in batch_paths],
                 "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
                 "ar_pbr_animation_enabled": True,
@@ -1406,6 +1640,9 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
                 "sequence_plan": sequence_plan,
                 "sequence_summary": sequence_info,
                 "sequence_kind": "pose" if is_pose_clip else _animation_sequence_kind(path),
+                "pair_clip": str(exported_clip.get("id") or exported_clip.get("name") or ""),
+                "owner_clip_export": exported_owner_clip,
+                "target_clip_export": exported_target_clip,
                 "playback_result": playback_result,
                 "playback_error": playback_error,
                 "preview_safety_report": preview_safety_report,
@@ -1417,6 +1654,7 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             }
             setattr(window, "owner_animation_preview_result", result)
             setattr(window, "owner_animation_clip_export", exported_clip)
+            setattr(window, "target_animation_clip_export", exported_target_clip)
             setattr(window, "owner_animation_sequence_plan", sequence_plan)
             refresh = getattr(animation_panel, "_refresh", None)
             if callable(refresh):
@@ -1635,6 +1873,14 @@ def _owner_animation_panel_qss() -> str:
         color: #8E9BAD;
         font-size: 10px;
     }
+    QLabel#OwnerAnimationSlotSummary {
+        color: #B7C7DB;
+        background: #0A1019;
+        border: 1px solid #1E2A3B;
+        border-radius: 6px;
+        padding: 6px 7px;
+        font-size: 9px;
+    }
     QLabel#OwnerAnimationSequenceStatus {
         color: #9DB2CF;
         background: #101724;
@@ -1674,6 +1920,25 @@ def _owner_animation_panel_qss() -> str:
         padding: 5px 7px;
         font-size: 10px;
         font-weight: 760;
+    }
+    QPushButton#OwnerAnimationSlotButton {
+        color: #AEBBD0;
+        background: #101722;
+        border: 1px solid #263346;
+        border-radius: 5px;
+        padding: 6px 4px;
+        font-size: 10px;
+        font-weight: 820;
+    }
+    QPushButton#OwnerAnimationSlotButton:hover {
+        color: #FFFFFF;
+        border-color: #48627F;
+        background: #152033;
+    }
+    QPushButton#OwnerAnimationSlotButton:checked {
+        color: #081019;
+        background: #72F7A7;
+        border-color: #B7FFD4;
     }
     QPushButton#OwnerAnimationCategoryButton {
         color: #AAB7C8;

@@ -132,6 +132,58 @@ def test_owner_animation_browser_groups_combat_before_weapon_and_pose(tmp_path) 
     assert owner_render._animation_browser_filter_matches(content, weapon, "motion") is True
 
 
+def test_owner_animation_pair_clip_recommends_and_remaps_target(tmp_path) -> None:
+    import app.action_sequencer_owner_render as owner_render
+
+    content = tmp_path / "Content"
+    owner = content / "Variant_Combat" / "Animations" / "Melee" / "AM_Attack_Charged.uasset"
+    weak_target = content / "Characters" / "Mannequins" / "Animations" / "HitReact_Back_Lgt.uasset"
+    best_target = content / "Characters" / "Mannequins" / "Animations" / "HitReact_Front_Med.uasset"
+    pose = content / "Characters" / "Mannequins" / "Animations" / "AM_Idle_ADS_Pose.uasset"
+
+    recommended = owner_render._recommended_target_animation_path(
+        owner,
+        [owner, weak_target, best_target, pose],
+        content,
+    )
+
+    assert recommended == best_target
+
+    owner_clip = {
+        "id": "AM_Attack_Charged",
+        "duration_ms": 700.0,
+        "sampled_frame_count": 8,
+        "model_curves": {
+            "bone_0": {
+                "bone_name": "root",
+                "translation": {"x": [[0.0, 0.0], [700.0, 20.0]]},
+            }
+        },
+    }
+    target_clip = {
+        "id": "HitReact_Front_Med",
+        "duration_ms": 900.0,
+        "sampled_frame_count": 10,
+        "model_curves": {
+            "bone_0": {
+                "bone_name": "root",
+                "translation": {"x": [[0.0, 0.0], [900.0, -12.0]]},
+            }
+        },
+    }
+
+    pair = owner_render._build_action_pair_animation_clip(owner_clip, target_clip)
+
+    assert pair["id"] == "pair_AM_Attack_Charged__HitReact_Front_Med"
+    assert pair["duration_ms"] == 900.0
+    assert pair["sampled_frame_count"] == 10
+    assert pair["owner_clip_id"] == "AM_Attack_Charged"
+    assert pair["target_clip_id"] == "HitReact_Front_Med"
+    assert "bone_0" in pair["model_curves"]
+    assert "target_bone_0" in pair["model_curves"]
+    assert pair["model_curves"]["target_bone_0"]["bone_name"] == "Target / root"
+
+
 def test_owner_render_descriptor_prefers_combat_owner_and_manny_mesh(tmp_path, monkeypatch) -> None:
     from app.action_sequencer_owner_render import (
         ACTION_SEQUENCER_PROJECT_ENV,
@@ -281,19 +333,25 @@ def test_action_sequencer_stage_pair_duplicates_static_target(tmp_path) -> None:
     assert owner_geom["stage_transform"]["rotate_y_180"] is False
     assert target_geom["role"] == "target"
     assert target_geom["role_slot"] == "actor_b"
-    assert "skin_weights" not in target_geom
+    assert "skin_weights" in target_geom
+    assert target_geom["skin_weights"][0][0]["bone_index"] == 1
+    assert target_geom["skin_weights"][0][0]["bone_id"] == "target_bone_0"
     assert target_geom["vertices"][0] == [-0.2, 0.0, 0.0]
     assert target_geom["stage_transform"]["offset"] == [0.0, 0.0, -1.08]
     assert target_geom["stage_transform"]["rotate_y_180"] is True
     assert target_geom["normals"][0] == [1.0, 0.0, 0.0]
     assert pair["metadata"]["action_sequencer_stage_pair"]["roles"][0]["stage_forward"] == "+X / screen right"
     assert pair["metadata"]["action_sequencer_stage_pair"]["roles"][1]["stage_forward"] == "-X / screen left"
+    assert pair["metadata"]["action_sequencer_stage_pair"]["roles"][1]["target_bone_index_offset"] == 1
+    assert pair["metadata"]["action_sequencer_stage_pair"]["target_reaction_status"] == "target_animation_slot_available"
+    assert pair["bones"][1]["id"] == "target_bone_0"
+    assert pair["bones"][1]["index"] == 1
     assert pair["bounds"]["size"][2] > descriptor["bounds"]["size"][2]
     from tools.ar_pbr_gpu_window import build_vertex_buffer
 
     _vertices, mesh_diag = build_vertex_buffer(pair)
-    assert mesh_diag["skeletal_geometry_count"] == 1
-    assert mesh_diag["gpu_skinning_vertex_count"] == 1
+    assert mesh_diag["skeletal_geometry_count"] == 2
+    assert mesh_diag["gpu_skinning_vertex_count"] == 2
     owner_range, target_range = mesh_diag["draw_ranges"]
     assert owner_range["stage_offset"] == [0.0, 0.0, 1.08]
     assert owner_range["stage_rotate_y_180"] is False
@@ -1134,14 +1192,14 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     assert window.owner_animation_preview_result["summary"]["sampled_frame_count"] == 12
     assert window.owner_animation_preview_result["sequence_summary"]["bone_count"] == 1
     assert window.owner_animation_preview_result["sequence_summary"]["sample_count"] == 2
-    assert window.owner_animation_sequence_plan["source"]["id"] == "MM_Idle"
+    assert window.owner_animation_sequence_plan["source"]["id"] == "pair_MM_Idle__static_target"
     assert window.owner_animation_sequence_plan["ar_pbr_deformation_enabled"] is True
     assert window.owner_animation_sequence_plan["deformation_mode"] == "gpu_bone_palette"
     assert window.owner_animation_preview_result["playback_result"]["status"] == "playing"
     assert window.owner_animation_preview_result["cached_count"] == 1
-    assert captured["attached_clip"]["id"] == "MM_Idle"
-    assert captured["played_clip"] == "MM_Idle"
-    assert window.owner_animation_clip_export["id"] == "MM_Idle"
+    assert captured["attached_clip"]["id"] == "pair_MM_Idle__static_target"
+    assert captured["played_clip"] == "pair_MM_Idle__static_target"
+    assert window.owner_animation_clip_export["id"] == "pair_MM_Idle__static_target"
     assert captured["export_max_samples"] == 48
     assert captured["shown"] is True
     assert captured["raised"] is True
