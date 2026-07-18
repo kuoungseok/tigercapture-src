@@ -1,5 +1,9 @@
 # Action Sequencer Character Drawing Plan
 
+Runtime/PVP scope is defined in
+`docs/SPEC_ACTION_SEQUENCER_PVP_RUNTIME.md`. This document focuses on how the
+preview should analyze and draw characters for that role-based action system.
+
 ## Purpose
 
 This note defines how the external 3D engine link should analyze a character
