@@ -43,17 +43,20 @@ def test_standalone_ar_pbr_viewer_shader_consumes_preview_bloom_uniforms() -> No
     assert "uniform float u_bloom_strength;" in source
     assert "uniform sampler2D u_scene_color;" in source
     assert "uniform sampler2D u_bloom_source;" in source
+    assert "BLOOM_BLUR_FRAG_SHADER" in source
+    assert "self.bloom_blur_texture_a" in source
+    assert "self._blurred_bloom_texture(width, height, post_effects)" in source
     assert "layout(location = 1) out vec4 bloom_source;" in source
     assert "self.scene_bloom_texture" in source
     assert "GL.GL_COLOR_ATTACHMENT1" in source
     assert "float excess = max(lum - threshold, 0.0);" in source
     assert "return rgb * contribution * soft_mask * source_mask;" in source
-    assert "vec3 sample_bloom_convolution" in source
-    assert "vec3 convolution_tap" in source
+    assert "vec3 sample_blur" in source
+    assert "GL.glFramebufferTexture2D(" in source
+    assert "u_extract_bright" in source
     assert 'getattr(GL, "GL_RGBA16F", 0x881A)' in source
     assert "vec3 bloom_rgb = max(" in source
     assert "texture(u_bloom_source" in source
-    assert "GL.glFramebufferTexture2D(" in source
     assert "self._draw_bloom_post(framebuffer_width, framebuffer_height, post_effects, bloom_strength)" in source
     assert "GL.glDrawArrays(GL.GL_TRIANGLES, 0, 3)" in source
     assert "vec3 apply_preview_bloom" not in source
