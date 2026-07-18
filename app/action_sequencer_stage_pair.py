@@ -8,8 +8,8 @@ from typing import Any, Mapping
 
 
 ACTION_SEQUENCER_STAGE_PAIR_SCHEMA = "tigerstudio.ar_pbr.action_sequencer_stage_pair.v1"
-DEFAULT_OWNER_STAGE_OFFSET = (0.0, 0.0, -0.92)
-DEFAULT_TARGET_STAGE_OFFSET = (0.0, 0.0, 0.92)
+DEFAULT_OWNER_STAGE_OFFSET = (0.0, 0.0, -1.08)
+DEFAULT_TARGET_STAGE_OFFSET = (0.0, 0.0, 1.08)
 
 
 def default_action_sequencer_stage_pair_path(

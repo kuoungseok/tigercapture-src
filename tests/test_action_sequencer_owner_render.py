@@ -232,7 +232,7 @@ def test_action_sequencer_stage_pair_duplicates_static_target(tmp_path) -> None:
     assert owner_geom["role"] == "performer"
     assert owner_geom["role_slot"] == "actor_a"
     assert "skin_weights" in owner_geom
-    assert owner_geom["vertices"][0] == [0.2, 0.0, -0.82]
+    assert owner_geom["vertices"][0] == [0.2, 0.0, -0.98]
     assert target_geom["role"] == "target"
     assert target_geom["role_slot"] == "actor_b"
     assert "skin_weights" not in target_geom
