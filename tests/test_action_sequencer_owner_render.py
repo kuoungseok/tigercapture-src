@@ -183,6 +183,13 @@ def test_owner_animation_pair_clip_recommends_and_remaps_target(tmp_path) -> Non
     assert "target_bone_0" in pair["model_curves"]
     assert pair["model_curves"]["target_bone_0"]["bone_name"] == "Target / root"
 
+    target_only = owner_render._build_action_pair_animation_clip(None, target_clip)
+    assert target_only["id"] == "pair_owner__HitReact_Front_Med"
+    assert target_only["owner_clip_id"] == "owner"
+    assert target_only["target_clip_id"] == "HitReact_Front_Med"
+    assert "bone_0" not in target_only["model_curves"]
+    assert "target_bone_0" in target_only["model_curves"]
+
 
 def test_owner_animation_panel_keeps_target_static_until_explicit_selection(tmp_path, monkeypatch) -> None:
     import app.action_sequencer_owner_render as owner_render
@@ -213,7 +220,9 @@ def test_owner_animation_panel_keeps_target_static_until_explicit_selection(tmp_
     panel = owner_render._OwnerAnimationPanel(descriptor)
     try:
         payload = panel.preview_payload(play_once=True)
+        assert payload["preview_role"] == "owner"
         assert payload["owner_animation_path"] == owner_anim
+        assert payload["animation_path"] == owner_anim
         assert payload["target_animation_path"] is None
         assert payload["target_clip"] == ""
         assert "Target: Static" in panel._slot_summary.text()
@@ -222,7 +231,11 @@ def test_owner_animation_panel_keeps_target_static_until_explicit_selection(tmp_
         assert panel.selected_target_animation_path() is None
         panel._set_selected_path_for_active_slot(target_anim, auto_recommend_target=False)
         payload = panel.preview_payload(play_once=True)
+        assert payload["preview_role"] == "target"
+        assert payload["owner_animation_path"] is None
+        assert payload["animation_path"] == target_anim
         assert payload["target_animation_path"] == target_anim
+        assert payload["clip"] == "MM_HitReact_Front_Hvy_01"
         assert payload["target_clip"] == "MM_HitReact_Front_Hvy_01"
     finally:
         panel.close()
@@ -1149,6 +1162,15 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     _touch(content / "Variant_Combat" / "Blueprints" / "BP_CombatCharacter.uasset")
     _touch(content / "Characters" / "Mannequins" / "Meshes" / "SKM_Manny_Simple.uasset")
     _touch(content / "Characters" / "Mannequins" / "Anims" / "Unarmed" / "MM_Idle.uasset")
+    target_anim = _touch(
+        content
+        / "Characters"
+        / "Mannequins"
+        / "Anims"
+        / "Rifle"
+        / "HitReact"
+        / "MM_HitReact_Front_Hvy_01.uasset"
+    )
 
     exported_asset = tmp_path / "owner.arpbr"
     exported_asset.write_text("{}", encoding="utf-8")
@@ -1250,11 +1272,13 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
             return False
 
         def start(self) -> None:
+            selected_path = Path(str(captured["export_animation_path"]))
+            clip_id = selected_path.stem
             clip = {
-                "id": "MM_Idle",
-                "name": "MM_Idle",
+                "id": clip_id,
+                "name": clip_id,
                 "duration_ms": 1000.0,
-                "_export_path": "idle.animation_clip.json",
+                "_export_path": f"{clip_id}.animation_clip.json",
                 "bone_names": ["root"],
                 "model_curves": {
                     "bone_0": {
@@ -1269,14 +1293,14 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
                 "sampled_frame_count": 12,
             }
             summary = {
-                "id": "MM_Idle",
-                "name": "MM_Idle",
+                "id": clip_id,
+                "name": clip_id,
                 "duration_ms": 1000.0,
                 "frame_count": 30,
                 "sampled_frame_count": 12,
                 "bone_curve_count": 1,
                 "source_mode": "cue4parse_animation",
-                "export_path": "idle.animation_clip.json",
+                "export_path": f"{clip_id}.animation_clip.json",
             }
             self.exported.emit({
                 "status": "animation_clip_batch_exported",
@@ -1354,6 +1378,31 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     assert captured["played_clip"] == "pair_MM_Idle__static_target"
     assert window.owner_animation_clip_export["id"] == "pair_MM_Idle__static_target"
     assert captured["export_max_samples"] == 48
+
+    captured["animation_preview_callback"]({
+        "preview_role": "target",
+        "active_slot": "target",
+        "animation_path": target_anim,
+        "owner_animation_path": None,
+        "target_animation_path": target_anim,
+        "clip": target_anim.stem,
+        "target_clip": target_anim.stem,
+        "batch_paths": [str(target_anim)],
+        "apply_frame_ms": 0,
+        "play_once": True,
+    })
+    assert captured["export_animation_path"] == target_anim
+    assert window.owner_animation_preview_result["preview_role"] == "target"
+    assert window.owner_animation_preview_result["owner_animation_path"] == ""
+    assert window.owner_animation_preview_result["target_animation_path"] == str(target_anim)
+    assert window.owner_animation_sequence_plan["source"]["id"] == "pair_owner__MM_HitReact_Front_Hvy_01"
+    assert captured["attached_clip"]["id"] == "pair_owner__MM_HitReact_Front_Hvy_01"
+    assert captured["attached_clip"]["owner_clip_id"] == "owner"
+    assert captured["attached_clip"]["target_clip_id"] == "MM_HitReact_Front_Hvy_01"
+    assert "bone_0" not in captured["attached_clip"]["model_curves"]
+    assert "target_bone_0" in captured["attached_clip"]["model_curves"]
+    assert captured["played_clip"] == "pair_owner__MM_HitReact_Front_Hvy_01"
+
     assert captured["shown"] is True
     assert captured["raised"] is True
     assert captured["activated"] is True

@@ -1169,23 +1169,31 @@ class _OwnerAnimationPanel(QFrame):
         return self._target_selected_path or self._target_recommended_path
 
     def preview_payload(self, *, play_once: bool = True, apply_frame_ms: int = 0) -> dict[str, Any]:
-        owner_path = self.selected_owner_animation_path()
-        target_path = self.selected_target_animation_path()
+        preview_role = "target" if self._active_slot == "target" else "owner"
+        owner_selection = self.selected_owner_animation_path()
+        target_selection = self.selected_target_animation_path()
+        selected_path = owner_selection if preview_role == "owner" else (target_selection or self._target_recommended_path)
+        owner_preview_path = selected_path if preview_role == "owner" else None
+        target_preview_path = selected_path if preview_role == "target" else None
         batch_paths: list[Path] = []
-        for path in (owner_path, target_path):
+        for path in (selected_path, owner_selection, target_selection, self._target_recommended_path):
             if path is not None and path not in batch_paths:
                 batch_paths.append(path)
-        for path in self.preview_batch_paths(owner_path, limit=8):
+        for path in self.preview_batch_paths(selected_path, limit=8):
             if path not in batch_paths:
                 batch_paths.append(path)
         return {
-            "animation_path": owner_path,
-            "owner_animation_path": owner_path,
-            "target_animation_path": target_path,
+            "animation_path": selected_path,
+            "owner_animation_path": owner_preview_path,
+            "target_animation_path": target_preview_path,
+            "context_owner_animation_path": owner_selection,
+            "context_target_animation_path": target_selection,
+            "target_recommended_animation_path": self._target_recommended_path,
             "batch_paths": [str(path) for path in batch_paths],
-            "clip": owner_path.stem if owner_path is not None else "",
-            "target_clip": target_path.stem if target_path is not None else "",
+            "clip": selected_path.stem if selected_path is not None else "",
+            "target_clip": target_preview_path.stem if target_preview_path is not None else "",
             "active_slot": self._active_slot,
+            "preview_role": preview_role,
             "apply_frame_ms": int(apply_frame_ms),
             "play_once": bool(play_once),
         }
@@ -1371,22 +1379,17 @@ class _OwnerAnimationPanel(QFrame):
 
     def _on_cache_nearby_clicked(self) -> None:
         paths: list[Path] = []
-        for path in (self._owner_selected_path, self._target_selected_path):
+        selected_path = self.active_slot_animation_path()
+        for path in (selected_path, self._owner_selected_path, self._target_selected_path, self._target_recommended_path):
             if path is not None and path not in paths:
                 paths.append(path)
-        for path in self.preview_batch_paths(self.active_slot_animation_path(), limit=24):
+        for path in self.preview_batch_paths(selected_path, limit=24):
             if path not in paths:
                 paths.append(path)
         if paths:
-            self.animation_cache_batch_requested.emit({
-                "animation_path": str(self._owner_selected_path or paths[0]),
-                "owner_animation_path": str(self._owner_selected_path or paths[0]),
-                "target_animation_path": str(self._target_selected_path or ""),
-                "batch_paths": [str(path) for path in paths],
-                "clip": (self._owner_selected_path or paths[0]).stem,
-                "target_clip": self._target_selected_path.stem if self._target_selected_path is not None else "",
-                "play_once": False,
-            })
+            payload = self.preview_payload(play_once=False)
+            payload["batch_paths"] = [str(path) for path in paths]
+            self.animation_cache_batch_requested.emit(payload)
 
     def _set_selected_path_for_active_slot(self, path: Path, *, auto_recommend_target: bool) -> None:
         if self._active_slot == "target":
@@ -1471,11 +1474,18 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             setter(message, state=state)
 
     def _on_animation_selected(payload_or_path: object) -> None:
+        preview_role = "owner"
         if isinstance(payload_or_path, Mapping):
-            owner_path = payload_or_path.get("owner_animation_path") or payload_or_path.get("animation_path")
+            preview_role = "target" if str(payload_or_path.get("preview_role") or payload_or_path.get("active_slot") or "") == "target" else "owner"
+            owner_path = payload_or_path.get("owner_animation_path")
             target_path = payload_or_path.get("target_animation_path")
-            path = Path(str(owner_path)) if owner_path else None
-            target = Path(str(target_path)) if target_path else None
+            selected_path = payload_or_path.get("animation_path")
+            if preview_role == "target":
+                path = None
+                target = Path(str(target_path or selected_path)) if (target_path or selected_path) else None
+            else:
+                path = Path(str(owner_path or selected_path)) if (owner_path or selected_path) else None
+                target = Path(str(target_path)) if target_path else None
         else:
             path = Path(str(payload_or_path)) if payload_or_path else None
             target = None
@@ -1483,21 +1493,36 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             setattr(window, "owner_selected_animation_path", path)
         if target is not None:
             setattr(window, "target_selected_animation_path", target)
-        target_text = f" -> Target {target.stem}" if target is not None else ""
-        _set_sequence_status(f"Selected: {path.stem if path is not None else 'None'}{target_text}", state="idle")
+        target_text = f" -> Target {target.stem}" if target is not None and preview_role != "target" else ""
+        if preview_role == "target":
+            selected_text = f"Selected Target: {target.stem if target is not None else 'None'}"
+        else:
+            selected_text = f"Selected Owner: {path.stem if path is not None else 'None'}{target_text}"
+        _set_sequence_status(selected_text, state="idle")
         status = getattr(window, "_status", None)
         if status is not None and hasattr(status, "setText"):
-            status.setText(f"Animation selected: {path.stem if path is not None else 'None'}{target_text}")
+            status.setText(selected_text)
 
     def _on_animation_preview_requested(payload: dict[str, Any]) -> None:
-        animation_path = payload.get("owner_animation_path") or payload.get("animation_path")
-        path = Path(str(animation_path)) if animation_path else None
+        preview_role = "target" if str(payload.get("preview_role") or payload.get("active_slot") or "") == "target" else "owner"
+        raw_selected_path = payload.get("animation_path")
+        raw_owner_path = payload.get("owner_animation_path")
         raw_target_path = payload.get("target_animation_path")
+        selected_path = Path(str(raw_selected_path)) if raw_selected_path else None
+        owner_path = Path(str(raw_owner_path)) if raw_owner_path else None
         target_path = Path(str(raw_target_path)) if raw_target_path else None
-        if path is not None:
+        if preview_role == "target":
+            path = target_path or selected_path
+            owner_preview_path = None
+            target_preview_path = path
+        else:
+            path = owner_path or selected_path
+            owner_preview_path = path
+            target_preview_path = None
+        if owner_preview_path is not None:
             setattr(window, "owner_selected_animation_path", path)
-        if target_path is not None:
-            setattr(window, "target_selected_animation_path", target_path)
+        if target_preview_path is not None:
+            setattr(window, "target_selected_animation_path", target_preview_path)
         active_worker = getattr(window, "owner_animation_export_worker", None)
         worker_running = False
         if active_worker is not None and hasattr(active_worker, "isRunning"):
@@ -1541,14 +1566,14 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             batch_paths = []
         if path not in batch_paths:
             batch_paths.insert(0, path)
-        if target_path is not None and target_path not in batch_paths:
-            batch_paths.insert(1, target_path)
         result = {
             "status": "caching_animation_batch",
             "clip": clip,
-            "target_clip": str(payload.get("target_clip") or (target_path.stem if target_path is not None else "")),
+            "target_clip": str(payload.get("target_clip") or (target_preview_path.stem if target_preview_path is not None else "")),
+            "preview_role": preview_role,
             "animation_path": str(path),
-            "target_animation_path": str(target_path or ""),
+            "owner_animation_path": str(owner_preview_path or ""),
+            "target_animation_path": str(target_preview_path or ""),
             "batch_paths": [str(item) for item in batch_paths],
             "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
             "ar_pbr_animation_enabled": True,
@@ -1567,12 +1592,23 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
         def _on_exported(event: dict[str, Any]) -> None:
             results_by_path = event.get("results") if isinstance(event, dict) and isinstance(event.get("results"), dict) else {}
             selected_event = event.get("selected") if isinstance(event, dict) else None
-            owner_event = results_by_path.get(str(path)) if isinstance(results_by_path, dict) else None
+            owner_event = (
+                results_by_path.get(str(owner_preview_path))
+                if isinstance(results_by_path, dict) and owner_preview_path is not None
+                else None
+            )
             if not isinstance(owner_event, dict):
-                owner_event = selected_event if isinstance(selected_event, dict) else None
-            target_event = results_by_path.get(str(target_path)) if isinstance(results_by_path, dict) and target_path is not None else None
+                owner_event = selected_event if preview_role == "owner" and isinstance(selected_event, dict) else None
+            target_event = (
+                results_by_path.get(str(target_preview_path))
+                if isinstance(results_by_path, dict) and target_preview_path is not None
+                else None
+            )
+            if not isinstance(target_event, dict):
+                target_event = selected_event if preview_role == "target" and isinstance(selected_event, dict) else None
             exported_owner_clip = owner_event.get("clip") if isinstance(owner_event, dict) else None
             exported_target_clip = target_event.get("clip") if isinstance(target_event, dict) else None
+            selected_exported_clip = exported_target_clip if preview_role == "target" else exported_owner_clip
             exported_clip = _build_action_pair_animation_clip(
                 exported_owner_clip if isinstance(exported_owner_clip, dict) else None,
                 exported_target_clip if isinstance(exported_target_clip, dict) else None,
@@ -1588,7 +1624,7 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             sequence_info = animation_sequence_summary(sequence_plan)
             is_pose_clip = _animation_clip_is_pose(
                 path,
-                exported_owner_clip if isinstance(exported_owner_clip, dict) else exported_clip if isinstance(exported_clip, dict) else None,
+                selected_exported_clip if isinstance(selected_exported_clip, dict) else exported_clip if isinstance(exported_clip, dict) else None,
                 sequence_plan,
             )
             playback_result: dict[str, Any] | None = None
@@ -1632,9 +1668,11 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             result = {
                 "status": "animation_clip_batch_exported",
                 "clip": clip,
-                "target_clip": str(payload.get("target_clip") or (target_path.stem if target_path is not None else "")),
+                "target_clip": str(payload.get("target_clip") or (target_preview_path.stem if target_preview_path is not None else "")),
+                "preview_role": preview_role,
                 "animation_path": str(path),
-                "target_animation_path": str(target_path or ""),
+                "owner_animation_path": str(owner_preview_path or ""),
+                "target_animation_path": str(target_preview_path or ""),
                 "batch_paths": [str(item) for item in batch_paths],
                 "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
                 "ar_pbr_animation_enabled": True,
@@ -1710,7 +1748,10 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
             result = {
                 "status": "export_failed",
                 "clip": clip,
+                "preview_role": preview_role,
                 "animation_path": str(path),
+                "owner_animation_path": str(owner_preview_path or ""),
+                "target_animation_path": str(target_preview_path or ""),
                 "preview_backend": OWNER_ANIMATION_PREVIEW_BACKEND,
                 "ar_pbr_animation_enabled": True,
                 "requires_gpu_palette_renderer": True,
