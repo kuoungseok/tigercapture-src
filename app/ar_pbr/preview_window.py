@@ -64,6 +64,9 @@ from app.ar_pbr.hybrid_rendering import (
     DEFAULT_SPECULAR_GI_STRENGTH,
 )
 from app.ar_pbr.post_effects import (
+    DEFAULT_BLOOM_ANAMORPHIC_RATIO,
+    DEFAULT_BLOOM_ANAMORPHIC_STRENGTH,
+    DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD,
     DEFAULT_BLOOM_BOOST,
     DEFAULT_BLOOM_RADIUS,
     DEFAULT_BLOOM_STRENGTH,
@@ -163,13 +166,16 @@ _LOOK_PRESETS: tuple[dict[str, Any], ...] = (
         "settings": {
             "post_effects_mode": "post_effects",
             "bloom_enabled": True,
-            "bloom_strength": 1.15,
+            "bloom_strength": 1.05,
             "bloom_radius": 16.0,
-            "bloom_threshold": 0.42,
+            "bloom_threshold": 0.46,
             "bloom_kernel": "cinematic",
             "bloom_convolution_scale": 1.35,
             "bloom_scatter": 1.45,
-            "bloom_boost": 0.85,
+            "bloom_boost": 1.05,
+            "bloom_anamorphic_strength": 2.10,
+            "bloom_anamorphic_threshold": 0.88,
+            "bloom_anamorphic_ratio": 7.4,
             "vignette_strength": 0.08,
             "vignette_radius": 0.78,
             "vignette_feather": 0.34,
@@ -1502,6 +1508,15 @@ class ArPbrAssetPreviewWindow(QMainWindow):
             "bloom_radius": float(getattr(self._state, "bloom_radius", DEFAULT_BLOOM_RADIUS)),
             "bloom_threshold": float(getattr(self._state, "bloom_threshold", DEFAULT_BLOOM_THRESHOLD)),
             "bloom_boost": float(getattr(self._state, "bloom_boost", DEFAULT_BLOOM_BOOST)),
+            "bloom_anamorphic_strength": float(
+                getattr(self._state, "bloom_anamorphic_strength", DEFAULT_BLOOM_ANAMORPHIC_STRENGTH)
+            ),
+            "bloom_anamorphic_threshold": float(
+                getattr(self._state, "bloom_anamorphic_threshold", DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD)
+            ),
+            "bloom_anamorphic_ratio": float(
+                getattr(self._state, "bloom_anamorphic_ratio", DEFAULT_BLOOM_ANAMORPHIC_RATIO)
+            ),
             "vignette_strength": float(getattr(self._state, "vignette_strength", DEFAULT_VIGNETTE_STRENGTH)),
             "vignette_radius": float(getattr(self._state, "vignette_radius", DEFAULT_VIGNETTE_RADIUS)),
             "vignette_feather": float(getattr(self._state, "vignette_feather", DEFAULT_VIGNETTE_FEATHER)),
@@ -1648,6 +1663,9 @@ class ArPbrAssetPreviewWindow(QMainWindow):
                 "bloom_radius",
                 "bloom_threshold",
                 "bloom_boost",
+                "bloom_anamorphic_strength",
+                "bloom_anamorphic_threshold",
+                "bloom_anamorphic_ratio",
                 "vignette_strength",
                 "vignette_radius",
                 "vignette_feather",
@@ -1663,6 +1681,9 @@ class ArPbrAssetPreviewWindow(QMainWindow):
                 self._state.bloom_radius = float(post["bloom_radius"])
                 self._state.bloom_threshold = float(post["bloom_threshold"])
                 self._state.bloom_boost = float(post["bloom_boost"])
+                self._state.bloom_anamorphic_strength = float(post["bloom_anamorphic_strength"])
+                self._state.bloom_anamorphic_threshold = float(post["bloom_anamorphic_threshold"])
+                self._state.bloom_anamorphic_ratio = float(post["bloom_anamorphic_ratio"])
                 self._state.vignette_strength = float(post["vignette_strength"])
                 self._state.vignette_radius = float(post["vignette_radius"])
                 self._state.vignette_feather = float(post["vignette_feather"])
@@ -1846,6 +1867,9 @@ class ArPbrAssetPreviewWindow(QMainWindow):
         self._state.bloom_radius = DEFAULT_BLOOM_RADIUS
         self._state.bloom_threshold = DEFAULT_BLOOM_THRESHOLD
         self._state.bloom_boost = DEFAULT_BLOOM_BOOST
+        self._state.bloom_anamorphic_strength = DEFAULT_BLOOM_ANAMORPHIC_STRENGTH
+        self._state.bloom_anamorphic_threshold = DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD
+        self._state.bloom_anamorphic_ratio = DEFAULT_BLOOM_ANAMORPHIC_RATIO
         self._state.vignette_strength = DEFAULT_VIGNETTE_STRENGTH
         self._state.vignette_radius = DEFAULT_VIGNETTE_RADIUS
         self._state.vignette_feather = DEFAULT_VIGNETTE_FEATHER
@@ -1916,6 +1940,19 @@ class ArPbrAssetPreviewWindow(QMainWindow):
             return
         self._state.bloom_strength = max(0.0, min(4.0, float(value)))
         self._state.bloom_boost = max(float(getattr(self._state, "bloom_boost", DEFAULT_BLOOM_BOOST)), self._state.bloom_strength * 0.42)
+        peak_streak = max(0.0, self._state.bloom_strength - 0.75) * 0.72
+        self._state.bloom_anamorphic_strength = max(
+            float(getattr(self._state, "bloom_anamorphic_strength", DEFAULT_BLOOM_ANAMORPHIC_STRENGTH)),
+            peak_streak,
+        )
+        self._state.bloom_anamorphic_threshold = min(
+            float(getattr(self._state, "bloom_anamorphic_threshold", DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD)),
+            max(0.50, float(getattr(self._state, "bloom_threshold", DEFAULT_BLOOM_THRESHOLD)) + 0.18),
+        )
+        self._state.bloom_anamorphic_ratio = max(
+            float(getattr(self._state, "bloom_anamorphic_ratio", DEFAULT_BLOOM_ANAMORPHIC_RATIO)),
+            DEFAULT_BLOOM_ANAMORPHIC_RATIO,
+        )
         self._refresh_post_effects_mode()
         self._update()
         self._emit_lighting_changed()

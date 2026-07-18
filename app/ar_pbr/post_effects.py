@@ -12,6 +12,9 @@ DEFAULT_BLOOM_KERNEL = "cinematic"
 DEFAULT_BLOOM_CONVOLUTION_SCALE = 1.0
 DEFAULT_BLOOM_SCATTER = 1.0
 DEFAULT_BLOOM_BOOST = 0.0
+DEFAULT_BLOOM_ANAMORPHIC_STRENGTH = 0.0
+DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD = 0.82
+DEFAULT_BLOOM_ANAMORPHIC_RATIO = 5.5
 DEFAULT_VIGNETTE_STRENGTH = 0.0
 DEFAULT_VIGNETTE_RADIUS = 0.72
 DEFAULT_VIGNETTE_FEATHER = 0.36
@@ -131,7 +134,7 @@ def normalize_post_effects_settings(value: Any) -> dict[str, Any]:
         ),
         DEFAULT_BLOOM_STRENGTH,
         0.0,
-        2.0,
+        4.0,
     )
     bloom_enabled = _bool_value(
         _first_value(_nested(data, "bloom_enabled"), data.get("bloom_enabled")),
@@ -186,8 +189,42 @@ def normalize_post_effects_settings(value: Any) -> dict[str, Any]:
         0.0,
         8.0,
     )
+    bloom_anamorphic_strength = _float_value(
+        _first_value(
+            _nested(data, "bloom_anamorphic_strength", "anamorphic_strength", "streak_strength"),
+            data.get("bloom_anamorphic_strength"),
+            data.get("anamorphic_strength"),
+            data.get("streak_strength"),
+        ),
+        DEFAULT_BLOOM_ANAMORPHIC_STRENGTH,
+        0.0,
+        6.0,
+    )
+    bloom_anamorphic_threshold = _float_value(
+        _first_value(
+            _nested(data, "bloom_anamorphic_threshold", "anamorphic_threshold", "streak_threshold"),
+            data.get("bloom_anamorphic_threshold"),
+            data.get("anamorphic_threshold"),
+            data.get("streak_threshold"),
+        ),
+        DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD,
+        0.0,
+        2.0,
+    )
+    bloom_anamorphic_ratio = _float_value(
+        _first_value(
+            _nested(data, "bloom_anamorphic_ratio", "anamorphic_ratio", "streak_ratio"),
+            data.get("bloom_anamorphic_ratio"),
+            data.get("anamorphic_ratio"),
+            data.get("streak_ratio"),
+        ),
+        DEFAULT_BLOOM_ANAMORPHIC_RATIO,
+        1.0,
+        12.0,
+    )
     if not bloom_enabled:
         bloom_strength = 0.0
+        bloom_anamorphic_strength = 0.0
 
     vignette_strength = _float_value(
         _first_value(_nested(data, "vignette_strength", "vignette"), data.get("vignette_strength")),
@@ -282,6 +319,9 @@ def normalize_post_effects_settings(value: Any) -> dict[str, Any]:
         "bloom_convolution_scale": float(bloom_convolution_scale),
         "bloom_scatter": float(bloom_scatter),
         "bloom_boost": float(bloom_boost),
+        "bloom_anamorphic_strength": float(bloom_anamorphic_strength),
+        "bloom_anamorphic_threshold": float(bloom_anamorphic_threshold),
+        "bloom_anamorphic_ratio": float(bloom_anamorphic_ratio),
         "vignette_enabled": bool(vignette_strength > 0.0),
         "vignette_strength": float(vignette_strength),
         "vignette_radius": float(vignette_radius),
@@ -297,7 +337,7 @@ def normalize_post_effects_settings(value: Any) -> dict[str, Any]:
         "grain_model": "deterministic_hash_luma_weighted_film_grain",
         "render_pass_policy": "beauty_only_skip_data_passes",
         "alpha_policy": "preserve_existing_alpha",
-        "bloom_model": "thresholded_fft_convolution_lens_bloom",
+        "bloom_model": "thresholded_convolution_bloom_with_peak_anamorphic_streaks",
         "render_pass_safe": True,
     }
 
@@ -316,6 +356,9 @@ def flatten_post_effects_settings(value: Any) -> dict[str, Any]:
         "bloom_convolution_scale": settings["bloom_convolution_scale"],
         "bloom_scatter": settings["bloom_scatter"],
         "bloom_boost": settings["bloom_boost"],
+        "bloom_anamorphic_strength": settings["bloom_anamorphic_strength"],
+        "bloom_anamorphic_threshold": settings["bloom_anamorphic_threshold"],
+        "bloom_anamorphic_ratio": settings["bloom_anamorphic_ratio"],
         "vignette_enabled": settings["vignette_enabled"],
         "vignette_strength": settings["vignette_strength"],
         "vignette_radius": settings["vignette_radius"],
@@ -471,6 +514,31 @@ def _apply_convolution_bloom(rgb: Any, alpha: Any, cfg: Mapping[str, Any], Image
         np,
     )
     bloom_work = _fft_convolve_rgb(work, kernel, np)
+    anamorphic_strength = float(cfg.get("bloom_anamorphic_strength", DEFAULT_BLOOM_ANAMORPHIC_STRENGTH) or 0.0)
+    if anamorphic_strength > 0.0:
+        peak_threshold = max(
+            threshold + 0.14,
+            float(cfg.get("bloom_anamorphic_threshold", DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD) or DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD),
+        )
+        peak_excess = np.maximum(lum - peak_threshold, 0.0)
+        peak_gate = _smoothstep(0.0, 0.42, peak_excess)
+        peak_power = np.clip(peak_excess / max(peak_threshold, 1.0e-4), 0.0, 12.0)
+        peak_bright = rgb * (peak_gate * peak_power)[:, :, None] * alpha
+        if work_scale < 0.999:
+            peak_work = _resize_rgb_array(peak_bright, (work_w, work_h), Image, np)
+        else:
+            peak_work = peak_bright.astype(np.float32)
+        peak_kernel = _build_convolution_bloom_kernel(
+            "anamorphic",
+            radius
+            * work_scale
+            * max(1.0, min(12.0, float(cfg.get("bloom_anamorphic_ratio", DEFAULT_BLOOM_ANAMORPHIC_RATIO) or 1.0)))
+            * 0.38,
+            float(cfg.get("bloom_convolution_scale", DEFAULT_BLOOM_CONVOLUTION_SCALE) or DEFAULT_BLOOM_CONVOLUTION_SCALE),
+            float(cfg.get("bloom_scatter", DEFAULT_BLOOM_SCATTER) or DEFAULT_BLOOM_SCATTER),
+            np,
+        )
+        bloom_work = bloom_work + _fft_convolve_rgb(peak_work, peak_kernel, np) * min(6.0, max(0.0, anamorphic_strength))
     if work_scale < 0.999:
         bloom = _resize_rgb_array(bloom_work, (int(width), int(height)), Image, np)
     else:
@@ -482,6 +550,7 @@ def _apply_convolution_bloom(rgb: Any, alpha: Any, cfg: Mapping[str, Any], Image
         "bloom_kernel_size": int(kernel.shape[0]),
         "bloom_work_scale": float(work_scale),
         "bloom_source_pixels": source_pixels,
+        "bloom_anamorphic_strength": float(anamorphic_strength),
     }
     return np.clip(bloom * scatter, 0.0, None), diagnostics
 

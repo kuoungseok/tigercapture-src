@@ -672,6 +672,9 @@ def test_lighting_schema_normalizes_post_effects_settings():
             "bloom_strength": 0.44,
             "bloom_radius": 3.5,
             "bloom_threshold": 0.39,
+            "bloom_anamorphic_strength": 1.2,
+            "bloom_anamorphic_threshold": 0.71,
+            "bloom_anamorphic_ratio": 6.0,
             "vignette_strength": 0.21,
             "vignette_radius": 0.67,
             "vignette_feather": 0.31,
@@ -689,6 +692,9 @@ def test_lighting_schema_normalizes_post_effects_settings():
     assert lighting["bloom_strength"] == 0.44
     assert lighting["bloom_radius"] == 3.5
     assert lighting["bloom_threshold"] == 0.39
+    assert lighting["bloom_anamorphic_strength"] == 1.2
+    assert lighting["bloom_anamorphic_threshold"] == 0.71
+    assert lighting["bloom_anamorphic_ratio"] == 6.0
     assert lighting["vignette_enabled"] is True
     assert lighting["vignette_strength"] == 0.21
     assert lighting["vignette_radius"] == 0.67

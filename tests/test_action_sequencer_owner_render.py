@@ -731,6 +731,12 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
 
     fake_preview_module = types.ModuleType("app.ar_pbr.preview_window")
     fake_preview_module.ArPbrAssetPreviewWindow = FakeArPbrAssetPreviewWindow
+    fake_preview_module.preview_look_preset_settings = lambda _preset_id: {
+        "post_effects_mode": "post_effects",
+        "bloom_enabled": True,
+        "bloom_strength": 1.05,
+        "bloom_anamorphic_strength": 2.1,
+    }
     monkeypatch.setitem(sys.modules, "app.ar_pbr.preview_window", fake_preview_module)
     monkeypatch.setattr(owner_render, "_OwnerAnimationPanel", FakeOwnerAnimationPanel)
     monkeypatch.setattr(owner_render, "_OwnerAnimationClipBatchExportWorker", FakeAnimationBatchExportWorker)
@@ -745,6 +751,7 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     assert captured["kwargs"]["controls_mode"] == "cubemap_only"
     assert captured["kwargs"]["initial_lighting"]["look_preset"] == "bloomed"
     assert captured["kwargs"]["initial_lighting"]["show_environment_background"] is False
+    assert captured["kwargs"]["initial_lighting"]["bloom_anamorphic_strength"] == 2.1
     assert captured["panel_descriptor"].animation_sequence_paths
     assert callable(captured["animation_callback"])
     assert callable(captured["animation_preview_callback"])

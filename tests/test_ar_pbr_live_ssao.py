@@ -42,8 +42,15 @@ def test_standalone_ar_pbr_viewer_shader_consumes_preview_bloom_uniforms() -> No
     assert "POST_BLOOM_FRAG_SHADER" in source
     assert "uniform float u_bloom_strength;" in source
     assert "uniform float u_bloom_boost;" in source
+    assert "uniform float u_anamorphic_strength;" in source
+    assert "uniform float u_anamorphic_threshold;" in source
+    assert "uniform float u_anamorphic_ratio;" in source
     assert "uniform sampler2D u_scene_color;" in source
     assert "uniform sampler2D u_bloom_source;" in source
+    assert "uniform sampler2D u_peak_source;" in source
+    assert "vec3 sample_anamorphic_lens_sprite" in source
+    assert "vec3 lens_sprite = sample_anamorphic_lens_sprite();" in source
+    assert 'GL.glUniform1i(self._uniform_location(self.post_bloom_program, "u_peak_source"), 13)' in source
     assert "BLOOM_BLUR_FRAG_SHADER" in source
     assert "self.bloom_blur_texture_a" in source
     assert "self._blurred_bloom_texture(width, height, post_effects)" in source
@@ -53,6 +60,10 @@ def test_standalone_ar_pbr_viewer_shader_consumes_preview_bloom_uniforms() -> No
     assert "float excess = max(lum - threshold, 0.0);" in source
     assert "return rgb * contribution * soft_mask * source_mask * boost;" in source
     assert "vec3 sample_blur" in source
+    assert "vec3 peak_pass" in source
+    assert "vec3 sample_peak_streak" in source
+    assert "bloom += streak * clamp(u_anamorphic_strength" in source
+    assert "bloom_anamorphic_strength" in source
     assert "GL.glFramebufferTexture2D(" in source
     assert "u_extract_bright" in source
     assert "raw_threshold - min(0.34" in source
@@ -78,6 +89,8 @@ def test_ar_pbr_preview_bloomed_preset_uses_visible_post_effects() -> None:
     assert 0.35 <= bloomed["bloom_threshold"] <= 0.55
     assert bloomed["bloom_kernel"] == "cinematic"
     assert bloomed["bloom_boost"] >= 0.8
+    assert bloomed["bloom_anamorphic_strength"] >= 1.0
+    assert bloomed["bloom_anamorphic_ratio"] >= 5.0
 
 
 def test_ar_pbr_preview_exposes_bloom_threshold_controls() -> None:

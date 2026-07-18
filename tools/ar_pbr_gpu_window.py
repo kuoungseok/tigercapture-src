@@ -261,6 +261,9 @@ from app.ar_pbr.displacement import (
     normalize_displacement_settings,
 )
 from app.ar_pbr.post_effects import (
+    DEFAULT_BLOOM_ANAMORPHIC_RATIO,
+    DEFAULT_BLOOM_ANAMORPHIC_STRENGTH,
+    DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD,
     DEFAULT_BLOOM_BOOST,
     DEFAULT_BLOOM_RADIUS,
     DEFAULT_BLOOM_STRENGTH,
@@ -1443,6 +1446,9 @@ uniform vec2 u_direction;
 uniform float u_bloom_radius;
 uniform float u_bloom_threshold;
 uniform float u_bloom_boost;
+uniform float u_anamorphic_strength;
+uniform float u_anamorphic_threshold;
+uniform float u_anamorphic_ratio;
 uniform int u_extract_bright;
 out vec4 frag_color;
 
@@ -1466,6 +1472,24 @@ vec3 sample_blur(vec2 offset_px, float weight) {
     return bright_pass(texture(u_source, clamp(v_uv + u_texel_size * offset_px, vec2(0.0), vec2(1.0)))) * weight;
 }
 
+vec3 peak_pass(vec4 sample_rgba) {
+    vec3 rgb = max(sample_rgba.rgb, vec3(0.0));
+    float source_mask = clamp(sample_rgba.a, 0.0, 1.0);
+    float lum = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+    float threshold = max(clamp(u_anamorphic_threshold, 0.0, 2.0), clamp(u_bloom_threshold, 0.0, 1.0) + 0.14);
+    float excess = max(lum - threshold, 0.0);
+    float gate = smoothstep(0.0, 0.42, excess);
+    float power = clamp(excess / max(threshold, 0.001), 0.0, 12.0);
+    return rgb * gate * power * source_mask;
+}
+
+vec3 sample_peak_streak(float offset_px, float weight) {
+    vec2 offset = vec2(u_texel_size.x * offset_px, 0.0);
+    vec3 a = peak_pass(texture(u_source, clamp(v_uv + offset, vec2(0.0), vec2(1.0))));
+    vec3 b = peak_pass(texture(u_source, clamp(v_uv - offset, vec2(0.0), vec2(1.0))));
+    return (a + b) * weight;
+}
+
 void main() {
     vec2 dir = normalize(u_direction);
     float radius = max(u_bloom_radius, 1.0);
@@ -1481,6 +1505,18 @@ void main() {
     bloom += sample_blur(-dir * step_px * 4.0, 0.02699548);
     bloom += sample_blur( dir * step_px * 5.0, 0.00876430);
     bloom += sample_blur(-dir * step_px * 5.0, 0.00876430);
+    if (u_extract_bright == 1 && abs(u_direction.x) > abs(u_direction.y) && u_anamorphic_strength > 0.0) {
+        float streak_radius = radius * clamp(u_anamorphic_ratio, 1.0, 12.0);
+        vec3 streak = peak_pass(texture(u_source, v_uv)) * 0.070;
+        streak += sample_peak_streak(streak_radius * 0.16, 0.070);
+        streak += sample_peak_streak(streak_radius * 0.36, 0.060);
+        streak += sample_peak_streak(streak_radius * 0.68, 0.046);
+        streak += sample_peak_streak(streak_radius * 1.12, 0.032);
+        streak += sample_peak_streak(streak_radius * 1.76, 0.020);
+        streak += sample_peak_streak(streak_radius * 2.72, 0.012);
+        streak += sample_peak_streak(streak_radius * 4.10, 0.006);
+        bloom += streak * clamp(u_anamorphic_strength, 0.0, 6.0);
+    }
     frag_color = vec4(max(bloom, vec3(0.0)), 1.0);
 }
 """
@@ -1491,19 +1527,86 @@ POST_BLOOM_FRAG_SHADER = """
 in vec2 v_uv;
 uniform sampler2D u_scene_color;
 uniform sampler2D u_bloom_source;
+uniform sampler2D u_peak_source;
 uniform vec2 u_texel_size;
+uniform vec2 u_peak_texel_size;
 uniform float u_bloom_strength;
 uniform float u_bloom_radius;
 uniform float u_bloom_threshold;
+uniform float u_anamorphic_strength;
+uniform float u_anamorphic_threshold;
+uniform float u_anamorphic_ratio;
 uniform int u_force_opaque;
 out vec4 frag_color;
+
+vec3 peak_sprite_source(vec2 uv) {
+    vec4 sample_rgba = texture(u_peak_source, clamp(uv, vec2(0.0), vec2(1.0)));
+    vec3 rgb = max(sample_rgba.rgb, vec3(0.0));
+    float source_mask = clamp(sample_rgba.a, 0.0, 1.0);
+    float lum = dot(rgb, vec3(0.2126, 0.7152, 0.0722));
+    vec2 peak_px = u_peak_texel_size * max(2.0, u_bloom_radius * 0.11);
+    float n0 = dot(max(texture(u_peak_source, clamp(uv + vec2( peak_px.x, 0.0), vec2(0.0), vec2(1.0))).rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+    float n1 = dot(max(texture(u_peak_source, clamp(uv + vec2(-peak_px.x, 0.0), vec2(0.0), vec2(1.0))).rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+    float n2 = dot(max(texture(u_peak_source, clamp(uv + vec2(0.0,  peak_px.y), vec2(0.0), vec2(1.0))).rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+    float n3 = dot(max(texture(u_peak_source, clamp(uv + vec2(0.0, -peak_px.y), vec2(0.0), vec2(1.0))).rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+    float n4 = dot(max(texture(u_peak_source, clamp(uv + vec2( peak_px.x,  peak_px.y), vec2(0.0), vec2(1.0))).rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+    float n5 = dot(max(texture(u_peak_source, clamp(uv + vec2(-peak_px.x,  peak_px.y), vec2(0.0), vec2(1.0))).rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+    float n6 = dot(max(texture(u_peak_source, clamp(uv + vec2( peak_px.x, -peak_px.y), vec2(0.0), vec2(1.0))).rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+    float n7 = dot(max(texture(u_peak_source, clamp(uv + vec2(-peak_px.x, -peak_px.y), vec2(0.0), vec2(1.0))).rgb, vec3(0.0)), vec3(0.2126, 0.7152, 0.0722));
+    float neighbor_max = max(max(max(n0, n1), max(n2, n3)), max(max(n4, n5), max(n6, n7)));
+    float local_peak = smoothstep(0.015, 0.11, lum - neighbor_max);
+    float threshold = max(clamp(u_anamorphic_threshold, 0.0, 2.0), clamp(u_bloom_threshold, 0.0, 1.0) + 0.28);
+    float excess = max(lum - threshold, 0.0);
+    float gate = smoothstep(0.0, 0.26, excess);
+    float power = pow(clamp(excess / max(threshold, 0.001), 0.0, 14.0), 1.35);
+    return rgb * gate * power * source_mask * local_peak;
+}
+
+vec3 peak_sprite_sample(float x_px, float y_px, float weight) {
+    vec2 offset = vec2(x_px * u_peak_texel_size.x, y_px * u_peak_texel_size.y);
+    return peak_sprite_source(v_uv + offset) * weight;
+}
+
+vec3 sample_anamorphic_lens_sprite() {
+    float strength = clamp(u_anamorphic_strength, 0.0, 6.0);
+    if (strength <= 0.0) {
+        return vec3(0.0);
+    }
+    float radius = max(u_bloom_radius, 1.0);
+    float span = radius * clamp(u_anamorphic_ratio, 1.0, 12.0);
+    float y = max(1.0, radius * 0.085);
+    vec3 tint_a = vec3(1.00, 0.92, 0.78);
+    vec3 tint_b = vec3(0.64, 0.78, 1.00);
+    vec3 glare = peak_sprite_sample(0.0, 0.0, 0.12);
+    for (int i = 1; i <= 26; ++i) {
+        float t = float(i) / 26.0;
+        float curve = t * t;
+        float dx = span * mix(0.035, 2.35, curve);
+        float w = exp(-t * 4.15) * 0.040;
+        vec3 near_line =
+            peak_sprite_sample( dx, 0.0, w) +
+            peak_sprite_sample(-dx, 0.0, w);
+        vec3 soft_edge =
+            peak_sprite_sample( dx * 1.018, y, w * 0.34) +
+            peak_sprite_sample(-dx * 1.018, y, w * 0.34) +
+            peak_sprite_sample( dx * 1.018, -y, w * 0.34) +
+            peak_sprite_sample(-dx * 1.018, -y, w * 0.34) +
+            peak_sprite_sample( dx * 0.992, y * 2.0, w * 0.09) +
+            peak_sprite_sample(-dx * 0.992, -y * 2.0, w * 0.09);
+        float tint_mix = t;
+        glare += (near_line + soft_edge) * mix(tint_a, tint_b, tint_mix) * (1.0 + tint_mix * 0.22);
+    }
+    return glare * pow(strength, 1.18) * 0.92;
+}
 
 void main() {
     vec4 base = texture(u_scene_color, v_uv);
     float strength = pow(clamp(u_bloom_strength, 0.0, 4.0), 1.35) * 1.75;
     vec3 bloom = max(texture(u_bloom_source, v_uv).rgb, vec3(0.0));
-    vec3 rgb = clamp(base.rgb + bloom * strength, 0.0, 1.0);
-    float bloom_alpha = clamp(max(max(bloom.r, bloom.g), bloom.b) * strength, 0.0, 1.0);
+    vec3 lens_sprite = sample_anamorphic_lens_sprite();
+    vec3 rgb = clamp(base.rgb + bloom * strength + lens_sprite, 0.0, 1.0);
+    float lens_alpha = max(max(lens_sprite.r, lens_sprite.g), lens_sprite.b);
+    float bloom_alpha = clamp(max(max(bloom.r, bloom.g), bloom.b) * strength + lens_alpha, 0.0, 1.0);
     float alpha = u_force_opaque == 1 ? 1.0 : max(base.a, bloom_alpha * 0.45);
     frag_color = vec4(rgb, alpha);
 }
@@ -1729,6 +1832,9 @@ class GpuState:
     bloom_radius: float = DEFAULT_BLOOM_RADIUS
     bloom_threshold: float = DEFAULT_BLOOM_THRESHOLD
     bloom_boost: float = DEFAULT_BLOOM_BOOST
+    bloom_anamorphic_strength: float = DEFAULT_BLOOM_ANAMORPHIC_STRENGTH
+    bloom_anamorphic_threshold: float = DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD
+    bloom_anamorphic_ratio: float = DEFAULT_BLOOM_ANAMORPHIC_RATIO
     vignette_strength: float = DEFAULT_VIGNETTE_STRENGTH
     vignette_radius: float = DEFAULT_VIGNETTE_RADIUS
     vignette_feather: float = DEFAULT_VIGNETTE_FEATHER
@@ -2193,6 +2299,21 @@ def post_effects_diagnostics(state: GpuState) -> dict[str, Any]:
         "bloom_radius": getattr(state, "bloom_radius", DEFAULT_BLOOM_RADIUS),
         "bloom_threshold": getattr(state, "bloom_threshold", DEFAULT_BLOOM_THRESHOLD),
         "bloom_boost": getattr(state, "bloom_boost", DEFAULT_BLOOM_BOOST),
+        "bloom_anamorphic_strength": getattr(
+            state,
+            "bloom_anamorphic_strength",
+            DEFAULT_BLOOM_ANAMORPHIC_STRENGTH,
+        ),
+        "bloom_anamorphic_threshold": getattr(
+            state,
+            "bloom_anamorphic_threshold",
+            DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD,
+        ),
+        "bloom_anamorphic_ratio": getattr(
+            state,
+            "bloom_anamorphic_ratio",
+            DEFAULT_BLOOM_ANAMORPHIC_RATIO,
+        ),
         "vignette_strength": getattr(state, "vignette_strength", DEFAULT_VIGNETTE_STRENGTH),
         "vignette_radius": getattr(state, "vignette_radius", DEFAULT_VIGNETTE_RADIUS),
         "vignette_feather": getattr(state, "vignette_feather", DEFAULT_VIGNETTE_FEATHER),
@@ -4281,6 +4402,9 @@ class GpuMeshWidget(QOpenGLWidget):
         radius: float,
         threshold: float,
         boost: float,
+        anamorphic_strength: float,
+        anamorphic_threshold: float,
+        anamorphic_ratio: float,
         extract_bright: bool,
     ) -> bool:
         from OpenGL import GL
@@ -4313,6 +4437,18 @@ class GpuMeshWidget(QOpenGLWidget):
         GL.glUniform1f(self._uniform_location(self.bloom_blur_program, "u_bloom_radius"), float(radius))
         GL.glUniform1f(self._uniform_location(self.bloom_blur_program, "u_bloom_threshold"), float(threshold))
         GL.glUniform1f(self._uniform_location(self.bloom_blur_program, "u_bloom_boost"), float(boost))
+        GL.glUniform1f(
+            self._uniform_location(self.bloom_blur_program, "u_anamorphic_strength"),
+            float(anamorphic_strength),
+        )
+        GL.glUniform1f(
+            self._uniform_location(self.bloom_blur_program, "u_anamorphic_threshold"),
+            float(anamorphic_threshold),
+        )
+        GL.glUniform1f(
+            self._uniform_location(self.bloom_blur_program, "u_anamorphic_ratio"),
+            float(anamorphic_ratio),
+        )
         GL.glUniform1i(self._uniform_location(self.bloom_blur_program, "u_extract_bright"), 1 if extract_bright else 0)
         GL.glBindVertexArray(self.post_bloom_vao)
         GL.glDrawArrays(GL.GL_TRIANGLES, 0, 3)
@@ -4333,13 +4469,49 @@ class GpuMeshWidget(QOpenGLWidget):
         boost = max(float(post_effects.get("bloom_boost", DEFAULT_BLOOM_BOOST) or DEFAULT_BLOOM_BOOST), strength * 0.42)
         raw_threshold = float(post_effects.get("bloom_threshold", DEFAULT_BLOOM_THRESHOLD) or DEFAULT_BLOOM_THRESHOLD)
         threshold = max(0.02, raw_threshold - min(0.34, strength * 0.075 + boost * 0.035))
-        pass_plan = (
-            (int(self.scene_bloom_texture or 0), max(1, int(width)), max(1, int(height)), self.bloom_blur_fbo_a, (1.0, 0.0), radius, True),
-            (self.bloom_blur_texture_a, blur_w, blur_h, self.bloom_blur_fbo_b, (0.0, 1.0), radius, False),
-            (self.bloom_blur_texture_b, blur_w, blur_h, self.bloom_blur_fbo_a, (1.0, 0.0), radius * 0.62, False),
-            (self.bloom_blur_texture_a, blur_w, blur_h, self.bloom_blur_fbo_b, (0.0, 1.0), radius * 0.62, False),
+        anamorphic_strength = float(
+            post_effects.get("bloom_anamorphic_strength", DEFAULT_BLOOM_ANAMORPHIC_STRENGTH)
+            or DEFAULT_BLOOM_ANAMORPHIC_STRENGTH
         )
-        for source, source_w, source_h, target_fbo, direction, pass_radius, extract in pass_plan:
+        if anamorphic_strength <= 0.0:
+            anamorphic_strength = max(0.0, strength - 0.72) * 0.72 + boost * 0.28
+        anamorphic_strength = max(0.0, min(6.0, anamorphic_strength))
+        anamorphic_threshold = max(
+            threshold + 0.14,
+            float(
+                post_effects.get("bloom_anamorphic_threshold", DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD)
+                or DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD
+            ),
+        )
+        anamorphic_ratio = max(
+            1.0,
+            min(
+                12.0,
+                float(
+                    post_effects.get("bloom_anamorphic_ratio", DEFAULT_BLOOM_ANAMORPHIC_RATIO)
+                    or DEFAULT_BLOOM_ANAMORPHIC_RATIO
+                ),
+            ),
+        )
+        vertical_radius = radius * (0.34 if anamorphic_strength > 0.001 else 1.0)
+        second_horizontal_radius = radius * (0.82 if anamorphic_strength > 0.001 else 0.62)
+        second_vertical_radius = radius * (0.22 if anamorphic_strength > 0.001 else 0.62)
+        pass_plan = (
+            (
+                int(self.scene_bloom_texture or 0),
+                max(1, int(width)),
+                max(1, int(height)),
+                self.bloom_blur_fbo_a,
+                (1.0, 0.0),
+                radius,
+                True,
+                0.0,
+            ),
+            (self.bloom_blur_texture_a, blur_w, blur_h, self.bloom_blur_fbo_b, (0.0, 1.0), vertical_radius, False, 0.0),
+            (self.bloom_blur_texture_b, blur_w, blur_h, self.bloom_blur_fbo_a, (1.0, 0.0), second_horizontal_radius, False, 0.0),
+            (self.bloom_blur_texture_a, blur_w, blur_h, self.bloom_blur_fbo_b, (0.0, 1.0), second_vertical_radius, False, 0.0),
+        )
+        for source, source_w, source_h, target_fbo, direction, pass_radius, extract, pass_anamorphic_strength in pass_plan:
             ok = self._draw_bloom_blur_pass(
                 source_texture=source,
                 source_width=source_w,
@@ -4351,6 +4523,9 @@ class GpuMeshWidget(QOpenGLWidget):
                 radius=pass_radius,
                 threshold=threshold,
                 boost=boost if extract else 0.0,
+                anamorphic_strength=pass_anamorphic_strength,
+                anamorphic_threshold=anamorphic_threshold,
+                anamorphic_ratio=anamorphic_ratio,
                 extract_bright=extract,
             )
             if not ok:
@@ -4378,10 +4553,18 @@ class GpuMeshWidget(QOpenGLWidget):
         GL.glActiveTexture(GL.GL_TEXTURE15)
         GL.glBindTexture(GL.GL_TEXTURE_2D, int(bloom_texture or self.scene_bloom_texture))
         GL.glUniform1i(self._uniform_location(self.post_bloom_program, "u_bloom_source"), 15)
+        GL.glActiveTexture(GL.GL_TEXTURE13)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, int(self.scene_bloom_texture or 0))
+        GL.glUniform1i(self._uniform_location(self.post_bloom_program, "u_peak_source"), 13)
         GL.glUniform2f(
             self._uniform_location(self.post_bloom_program, "u_texel_size"),
             1.0 / max(1, int(bloom_width)),
             1.0 / max(1, int(bloom_height)),
+        )
+        GL.glUniform2f(
+            self._uniform_location(self.post_bloom_program, "u_peak_texel_size"),
+            1.0 / max(1, int(width)),
+            1.0 / max(1, int(height)),
         )
         GL.glUniform1f(self._uniform_location(self.post_bloom_program, "u_bloom_strength"), float(bloom_strength))
         GL.glUniform1f(
@@ -4392,10 +4575,42 @@ class GpuMeshWidget(QOpenGLWidget):
             self._uniform_location(self.post_bloom_program, "u_bloom_threshold"),
             float(post_effects.get("bloom_threshold", DEFAULT_BLOOM_THRESHOLD) or DEFAULT_BLOOM_THRESHOLD),
         )
+        anamorphic_strength = float(
+            post_effects.get("bloom_anamorphic_strength", DEFAULT_BLOOM_ANAMORPHIC_STRENGTH)
+            or DEFAULT_BLOOM_ANAMORPHIC_STRENGTH
+        )
+        if anamorphic_strength <= 0.0:
+            anamorphic_strength = max(0.0, float(bloom_strength) - 0.72) * 0.72
+        GL.glUniform1f(
+            self._uniform_location(self.post_bloom_program, "u_anamorphic_strength"),
+            max(0.0, min(6.0, anamorphic_strength)),
+        )
+        GL.glUniform1f(
+            self._uniform_location(self.post_bloom_program, "u_anamorphic_threshold"),
+            float(
+                post_effects.get("bloom_anamorphic_threshold", DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD)
+                or DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD
+            ),
+        )
+        GL.glUniform1f(
+            self._uniform_location(self.post_bloom_program, "u_anamorphic_ratio"),
+            max(
+                1.0,
+                min(
+                    12.0,
+                    float(
+                        post_effects.get("bloom_anamorphic_ratio", DEFAULT_BLOOM_ANAMORPHIC_RATIO)
+                        or DEFAULT_BLOOM_ANAMORPHIC_RATIO
+                    ),
+                ),
+            ),
+        )
         GL.glUniform1i(self._uniform_location(self.post_bloom_program, "u_force_opaque"), 0 if self.transparent_background else 1)
         GL.glBindVertexArray(self.post_bloom_vao)
         GL.glDrawArrays(GL.GL_TRIANGLES, 0, 3)
         GL.glBindVertexArray(0)
+        GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
+        GL.glActiveTexture(GL.GL_TEXTURE13)
         GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
         GL.glActiveTexture(GL.GL_TEXTURE14)
         GL.glBindTexture(GL.GL_TEXTURE_2D, 0)
@@ -5508,6 +5723,10 @@ class GpuWindow(QMainWindow):
         self.state.bloom_strength = DEFAULT_BLOOM_STRENGTH
         self.state.bloom_radius = DEFAULT_BLOOM_RADIUS
         self.state.bloom_threshold = DEFAULT_BLOOM_THRESHOLD
+        self.state.bloom_boost = DEFAULT_BLOOM_BOOST
+        self.state.bloom_anamorphic_strength = DEFAULT_BLOOM_ANAMORPHIC_STRENGTH
+        self.state.bloom_anamorphic_threshold = DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD
+        self.state.bloom_anamorphic_ratio = DEFAULT_BLOOM_ANAMORPHIC_RATIO
         self.state.vignette_strength = DEFAULT_VIGNETTE_STRENGTH
         self.state.vignette_radius = DEFAULT_VIGNETTE_RADIUS
         self.state.vignette_feather = DEFAULT_VIGNETTE_FEATHER

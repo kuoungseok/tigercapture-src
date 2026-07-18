@@ -127,6 +127,9 @@ from app.ar_pbr.depth_occlusion import (
     flatten_depth_edge_glow_settings,
 )
 from app.ar_pbr.post_effects import (
+    DEFAULT_BLOOM_ANAMORPHIC_RATIO,
+    DEFAULT_BLOOM_ANAMORPHIC_STRENGTH,
+    DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD,
     DEFAULT_BLOOM_BOOST,
     DEFAULT_BLOOM_CONVOLUTION_SCALE,
     DEFAULT_BLOOM_KERNEL,
@@ -567,6 +570,9 @@ DEFAULT_RENDER = {
         "bloom_convolution_scale": DEFAULT_BLOOM_CONVOLUTION_SCALE,
         "bloom_scatter": DEFAULT_BLOOM_SCATTER,
         "bloom_boost": DEFAULT_BLOOM_BOOST,
+        "bloom_anamorphic_strength": DEFAULT_BLOOM_ANAMORPHIC_STRENGTH,
+        "bloom_anamorphic_threshold": DEFAULT_BLOOM_ANAMORPHIC_THRESHOLD,
+        "bloom_anamorphic_ratio": DEFAULT_BLOOM_ANAMORPHIC_RATIO,
         "vignette_enabled": False,
         "vignette_strength": DEFAULT_VIGNETTE_STRENGTH,
         "vignette_radius": DEFAULT_VIGNETTE_RADIUS,
