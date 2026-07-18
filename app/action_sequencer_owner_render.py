@@ -12,6 +12,7 @@ from PySide6.QtCore import QPointF, QRectF, QThread, QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QFont, QLinearGradient, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -56,6 +57,28 @@ OWNER_STAGE_PREVIEW_VIEW = {
     "yaw": -90.0,
     "pan_x": -0.04,
     "zoom": 1.28,
+}
+OWNER_ANIMATION_FILTERS = (
+    ("All", "all"),
+    ("Combat", "combat"),
+    ("Motion", "motion"),
+    ("Weapon", "weapon"),
+    ("Move", "movement"),
+    ("Pose", "pose"),
+)
+OWNER_ANIMATION_CATEGORY_LABELS = {
+    "combat": "Combat Motions",
+    "weapon": "Weapon Actions",
+    "movement": "Movement",
+    "pose": "Pose Fragments",
+    "other": "Other",
+}
+OWNER_ANIMATION_CATEGORY_PRIORITY = {
+    "combat": 0,
+    "weapon": 1,
+    "movement": 2,
+    "pose": 3,
+    "other": 9,
 }
 
 
@@ -189,7 +212,7 @@ def _discover_animation_sequence_paths(content_root: Path) -> tuple[Path, ...]:
                 continue
             seen.add(resolved)
             candidates.append(asset)
-    return tuple(sorted(candidates, key=lambda path: _animation_sort_key(content_root, path)))
+    return tuple(sorted(candidates, key=lambda path: _animation_browser_sort_key(content_root, path)))
 
 
 def _is_animation_sequence_candidate(path: Path) -> bool:
@@ -209,6 +232,17 @@ def _animation_sort_key(content_root: Path, path: Path) -> tuple[int, str, str]:
     )
 
 
+def _animation_browser_sort_key(content_root: Path, path: Path) -> tuple[int, int, int, str, str]:
+    category = _animation_browser_category(content_root, path)
+    return (
+        OWNER_ANIMATION_CATEGORY_PRIORITY.get(category, OWNER_ANIMATION_CATEGORY_PRIORITY["other"]),
+        _animation_browser_subpriority(content_root, path),
+        _animation_sequence_priority(path),
+        _animation_display_group(content_root, path).casefold(),
+        path.stem.casefold(),
+    )
+
+
 def _animation_display_label(content_root: Path, path: Path) -> str:
     group = _animation_display_group(content_root, path)
     kind = _animation_sequence_kind(path)
@@ -219,6 +253,69 @@ def _animation_display_label(content_root: Path, path: Path) -> str:
     }.get(kind, "Anim")
     body = f"{group} / {path.stem}" if group else path.stem
     return f"{prefix} / {body}"
+
+
+def _animation_browser_item_label(content_root: Path, path: Path) -> str:
+    kind = _animation_sequence_kind(path)
+    badge = {
+        "action": "A",
+        "motion": "M",
+        "pose": "P",
+    }.get(kind, "N")
+    group = _animation_display_group(content_root, path).replace(" / ", " ")
+    body = f"{group} / {path.stem}" if group else path.stem
+    return f"{badge} {body}"
+
+
+def _animation_browser_category(content_root: Path, path: Path) -> str:
+    kind = _animation_sequence_kind(path)
+    group = _animation_display_group(content_root, path)
+    text = f"{group} {path.stem}".casefold()
+    if kind == "pose":
+        return "pose"
+    if any(token in text for token in ("attack", "hitreact", "death", "charged")):
+        return "combat"
+    if any(token in text for token in ("dash", "fall", "jog", "jump", "land", "run", "walk", "walljump")):
+        return "movement"
+    if any(token in text for token in ("ads", "aim", "dryfire", "equip", "fire", "pistol", "reload", "rifle")):
+        return "weapon"
+    return "other"
+
+
+def _animation_browser_subpriority(content_root: Path, path: Path) -> int:
+    category = _animation_browser_category(content_root, path)
+    text = f"{_animation_display_group(content_root, path)} {path.stem}".casefold()
+    if category == "combat":
+        if "attack" in text or "charged" in text:
+            return 0
+        if "hitreact" in text:
+            return 1
+        if "death" in text:
+            return 2
+        return 3
+    if category == "movement":
+        if "dash" in text:
+            return 0
+        if "jump" in text or "fall" in text or "land" in text:
+            return 1
+        if "jog" in text or "run" in text:
+            return 2
+        if "walk" in text:
+            return 3
+    return 0
+
+
+def _animation_browser_filter_matches(content_root: Path, path: Path, filter_key: str) -> bool:
+    key = str(filter_key or "all")
+    if key == "all":
+        return True
+    if key == "motion":
+        return _animation_sequence_kind(path) in {"action", "motion"}
+    return _animation_browser_category(content_root, path) == key
+
+
+def _animation_browser_category_label(category: str) -> str:
+    return OWNER_ANIMATION_CATEGORY_LABELS.get(str(category or "other"), "Other")
 
 
 def _animation_sequence_kind(path: Path) -> str:
@@ -851,6 +948,8 @@ class _OwnerAnimationPanel(QFrame):
         self.descriptor = descriptor
         self._content_root = descriptor.project_path.parent / "Content"
         self._all_paths = list(descriptor.animation_sequence_paths)
+        self._category_filter = "all"
+        self._category_buttons: dict[str, QPushButton] = {}
         self.setObjectName("OwnerAnimationPanel")
         self.setFixedWidth(OWNER_ANIMATION_PANEL_WIDTH)
         self.setStyleSheet(_owner_animation_panel_qss())
@@ -863,15 +962,31 @@ class _OwnerAnimationPanel(QFrame):
         title.setObjectName("OwnerAnimationTitle")
         layout.addWidget(title)
 
-        count = QLabel(f"{len(self._all_paths)} selectable sequences", self)
-        count.setObjectName("OwnerAnimationCount")
-        layout.addWidget(count)
+        self._count = QLabel(self._count_text(len(self._all_paths)), self)
+        self._count.setObjectName("OwnerAnimationCount")
+        layout.addWidget(self._count)
 
         self._filter = QLineEdit(self)
         self._filter.setObjectName("OwnerAnimationFilter")
         self._filter.setPlaceholderText("Filter animations")
         self._filter.textChanged.connect(self._refresh)
         layout.addWidget(self._filter)
+
+        filters = QFrame(self)
+        filters.setObjectName("OwnerAnimationFilterButtons")
+        filter_layout = QGridLayout(filters)
+        filter_layout.setContentsMargins(0, 0, 0, 0)
+        filter_layout.setHorizontalSpacing(5)
+        filter_layout.setVerticalSpacing(5)
+        for index, (label, key) in enumerate(OWNER_ANIMATION_FILTERS):
+            button = QPushButton(label, filters)
+            button.setObjectName("OwnerAnimationCategoryButton")
+            button.setCheckable(True)
+            button.setChecked(key == self._category_filter)
+            button.clicked.connect(lambda _checked=False, filter_key=key: self._set_category_filter(filter_key))
+            self._category_buttons[key] = button
+            filter_layout.addWidget(button, index // 2, index % 2)
+        layout.addWidget(filters)
 
         self._cache_nearby_btn = QPushButton("Cache nearby", self)
         self._cache_nearby_btn.setObjectName("OwnerAnimationCacheButton")
@@ -915,7 +1030,8 @@ class _OwnerAnimationPanel(QFrame):
         if selected is not None:
             for index in range(self._list.count()):
                 item = self._list.item(index)
-                if Path(str(item.data(Qt.ItemDataRole.UserRole))) == selected:
+                data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+                if data and Path(str(data)) == selected:
                     current_row = index
                     break
         if current_row < 0:
@@ -936,7 +1052,10 @@ class _OwnerAnimationPanel(QFrame):
             item = self._list.item(row)
             if item is None:
                 continue
-            path = Path(str(item.data(Qt.ItemDataRole.UserRole)))
+            data = item.data(Qt.ItemDataRole.UserRole)
+            if not data:
+                continue
+            path = Path(str(data))
             key = str(path)
             if key in seen:
                 continue
@@ -953,17 +1072,27 @@ class _OwnerAnimationPanel(QFrame):
     def _refresh(self) -> None:
         query = self._filter.text().strip().casefold()
         current = self.selected_animation_path()
+        visible_paths = [
+            path for path in self._all_paths
+            if _animation_browser_filter_matches(self._content_root, path, self._category_filter)
+        ]
         self._list.blockSignals(True)
         try:
             self._list.clear()
-            for path in self._all_paths:
+            current_category = ""
+            visible_count = 0
+            for path in visible_paths:
                 label = _animation_display_label(self._content_root, path)
                 if query and query not in label.casefold():
                     continue
+                category = _animation_browser_category(self._content_root, path)
+                if category != current_category:
+                    current_category = category
+                    self._list.addItem(self._header_item(category))
                 cache = owner_unreal_animation_clip_cache_status(self.descriptor, path)
                 is_ready_cache = bool(cache.get("exists") and cache.get("fresh") and cache.get("validated"))
                 prefix = "✓" if is_ready_cache else "○"
-                item = QListWidgetItem(f"{prefix} {label}")
+                item = QListWidgetItem(f"{prefix} {_animation_browser_item_label(self._content_root, path)}")
                 item.setData(Qt.ItemDataRole.UserRole, str(path))
                 item.setData(Qt.ItemDataRole.UserRole + 1, str(cache.get("cache_path") or ""))
                 item.setData(Qt.ItemDataRole.UserRole + 2, "cached" if is_ready_cache else "uncached")
@@ -984,12 +1113,43 @@ class _OwnerAnimationPanel(QFrame):
                 else:
                     item.setToolTip(f"{item.toolTip()}\nPreview clip needs batch caching before instant playback.")
                 self._list.addItem(item)
+                visible_count += 1
                 if current is not None and path == current:
                     self._list.setCurrentItem(item)
+            self._count.setText(self._count_text(visible_count))
         finally:
             self._list.blockSignals(False)
         if self._list.currentItem() is None and self._list.count() > 0:
-            self._list.setCurrentRow(0)
+            first_row = self._first_selectable_row()
+            if first_row >= 0:
+                self._list.setCurrentRow(first_row)
+
+    def _set_category_filter(self, key: str) -> None:
+        self._category_filter = str(key or "all")
+        for button_key, button in self._category_buttons.items():
+            button.setChecked(button_key == self._category_filter)
+        self._refresh()
+
+    def _count_text(self, visible_count: int) -> str:
+        motion_count = sum(1 for path in self._all_paths if _animation_sequence_kind(path) in {"action", "motion"})
+        pose_count = sum(1 for path in self._all_paths if _animation_sequence_kind(path) == "pose")
+        return f"{visible_count} shown / {motion_count} motion / {pose_count} pose"
+
+    def _header_item(self, category: str) -> QListWidgetItem:
+        item = QListWidgetItem(_animation_browser_category_label(category).upper())
+        item.setData(Qt.ItemDataRole.UserRole + 3, "header")
+        item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+        item.setForeground(QColor("#7FF2B1" if category == "combat" else "#8EA2BA"))
+        item.setBackground(QColor("#0E1622"))
+        item.setFont(_font(9, bold=True))
+        return item
+
+    def _first_selectable_row(self) -> int:
+        for index in range(self._list.count()):
+            item = self._list.item(index)
+            if item is not None and item.data(Qt.ItemDataRole.UserRole):
+                return index
+        return -1
 
     def _select_default(self) -> None:
         preferred = self.descriptor.action_candidate_path or self.descriptor.idle_animation_path
@@ -997,7 +1157,8 @@ class _OwnerAnimationPanel(QFrame):
             return
         for index in range(self._list.count()):
             item = self._list.item(index)
-            if Path(str(item.data(Qt.ItemDataRole.UserRole))) == preferred:
+            data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+            if data and Path(str(data)) == preferred:
                 self._list.setCurrentRow(index)
                 return
 
@@ -1513,6 +1674,25 @@ def _owner_animation_panel_qss() -> str:
         padding: 5px 7px;
         font-size: 10px;
         font-weight: 760;
+    }
+    QPushButton#OwnerAnimationCategoryButton {
+        color: #AAB7C8;
+        background: #0F1621;
+        border: 1px solid #253044;
+        border-radius: 5px;
+        padding: 5px 4px;
+        font-size: 9px;
+        font-weight: 760;
+    }
+    QPushButton#OwnerAnimationCategoryButton:hover {
+        color: #E9F2FF;
+        border-color: #3A4C68;
+        background: #141E2C;
+    }
+    QPushButton#OwnerAnimationCategoryButton:checked {
+        color: #FFFFFF;
+        background: #1F4C7D;
+        border-color: #65A5FF;
     }
     QListWidget#OwnerAnimationList {
         color: #DCE5F2;

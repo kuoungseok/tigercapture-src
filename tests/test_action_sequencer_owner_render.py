@@ -100,6 +100,36 @@ def test_owner_animation_labels_prioritize_playable_motion(tmp_path) -> None:
     assert owner_render._animation_sort_key(content, motion) < owner_render._animation_sort_key(content, pose)
     assert owner_render._animation_display_label(content, motion).startswith("Motion /")
     assert owner_render._animation_display_label(content, pose).startswith("Pose /")
+    assert owner_render._animation_browser_item_label(content, motion).startswith("M Pistol /")
+    assert owner_render._animation_browser_item_label(content, pose).startswith("P Pistol Aim /")
+
+
+def test_owner_animation_browser_groups_combat_before_weapon_and_pose(tmp_path) -> None:
+    import app.action_sequencer_owner_render as owner_render
+
+    content = tmp_path / "Content"
+    attack = content / "Characters" / "Mannequins" / "Anims" / "Unarmed" / "Attack" / "MM_Attack_01.uasset"
+    hit = content / "Characters" / "Mannequins" / "Anims" / "Rifle" / "HitReact" / "MM_HitReact_Back_Med_01.uasset"
+    death = content / "Characters" / "Mannequins" / "Anims" / "Death" / "MM_Death_Back_01.uasset"
+    weapon = content / "Characters" / "Mannequins" / "Anims" / "Pistol" / "MM_Pistol_Fire.uasset"
+    move = content / "Characters" / "Mannequins" / "Anims" / "Unarmed" / "Jump" / "MM_Dash.uasset"
+    pose = content / "Characters" / "Mannequins" / "Anims" / "Pistol" / "Jog" / "MF_Pistol_Jog_Fwd.uasset"
+
+    assert owner_render._animation_browser_category(content, attack) == "combat"
+    assert owner_render._animation_browser_category(content, hit) == "combat"
+    assert owner_render._animation_browser_category(content, death) == "combat"
+    assert owner_render._animation_browser_category(content, weapon) == "weapon"
+    assert owner_render._animation_browser_category(content, move) == "movement"
+    assert owner_render._animation_browser_category(content, pose) == "pose"
+    assert owner_render._animation_browser_sort_key(content, attack) < owner_render._animation_browser_sort_key(content, hit)
+    assert owner_render._animation_browser_sort_key(content, hit) < owner_render._animation_browser_sort_key(content, death)
+    assert owner_render._animation_browser_sort_key(content, attack) < owner_render._animation_browser_sort_key(content, weapon)
+    assert owner_render._animation_browser_sort_key(content, weapon) < owner_render._animation_browser_sort_key(content, move)
+    assert owner_render._animation_browser_sort_key(content, move) < owner_render._animation_browser_sort_key(content, pose)
+    assert owner_render._animation_browser_filter_matches(content, attack, "combat") is True
+    assert owner_render._animation_browser_filter_matches(content, weapon, "combat") is False
+    assert owner_render._animation_browser_filter_matches(content, pose, "motion") is False
+    assert owner_render._animation_browser_filter_matches(content, weapon, "motion") is True
 
 
 def test_owner_render_descriptor_prefers_combat_owner_and_manny_mesh(tmp_path, monkeypatch) -> None:
