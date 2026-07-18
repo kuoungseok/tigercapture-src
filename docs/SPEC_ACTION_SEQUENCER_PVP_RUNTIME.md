@@ -389,12 +389,54 @@ V1 should not attempt:
 The current Tiger Studio preview work should be treated as an authoring and
 inspection surface. Unreal remains the runtime target.
 
+## Automation Direction
+
+Other production tools and engines do not expect animators to rotate every bone
+on every frame for paired actions. The practical pattern is:
+
+1. Start from an authored base animation.
+2. Pick or recommend a close target reaction.
+3. Align root motion and contact markers.
+4. Add temporary constraints and IK.
+5. Bake or export compact curves and markers for runtime playback.
+
+Tiger Studio should follow that model instead of becoming a frame-by-frame bone
+posing tool.
+
+Recommended automation tools:
+
+- `Reaction Base Finder`: scans target animations and recommends likely
+  reaction bases using name, duration, direction, strength, and pose metadata.
+- `Sync Marker Solver`: aligns performer contact markers with target reaction
+  markers such as grab, lift, impact, ground contact, and recovery.
+- `Target Root Warp`: creates target root/pelvis transform curves so throws,
+  knockdowns, and grabs can move the whole target through space instead of only
+  bending bones.
+- `Constraint Layer`: pins hands, weapons, torso, feet, or contact points over
+  a time range without destructively editing the source animation.
+- `IK Polish`: applies focused pelvis, spine, head, arm, and leg correction on
+  top of the reaction base.
+- `Bake / Export`: stores the result as animation references, marker curves,
+  root offsets, constraints, and diagnostics rather than a giant hand-authored
+  per-bone-per-frame blob.
+
+V1 UI flow:
+
+1. Select Actor A action animation.
+2. Auto-list Actor B reaction candidates.
+3. Click a candidate to preview paired timing.
+4. Adjust contact frame, target root offset, pelvis/spine/head correction, and
+   optional hand/foot pins.
+5. Save the non-destructive correction layer.
+
 Near-term implementation order:
 
 1. Make the owner-only AR/PBR preview stable, fast, and correct.
-2. List owner-compatible animation sequences without per-click slow exports.
-3. Play selected owner animation immediately in the preview.
-4. Add Actor B as a role slot, not as a hardcoded mesh.
+2. Add Actor B as a visible right-side role slot facing Actor A. Current V1
+   implementation uses an AR/PBR stage-pair descriptor that duplicates the
+   performer mesh into a static target slot for composition only.
+3. List owner-compatible animation sequences without per-click slow exports.
+4. Play selected owner animation immediately in the preview.
 5. Add target reaction animation selection.
 6. Add contact marker authoring.
 7. Add relative alignment authoring.
@@ -419,4 +461,3 @@ The PVP-runtime spec is credible when:
 - Missing assets produce diagnostics rather than broken output.
 - The same action asset can be used by a player, NPC, or PVP opponent when
   bindings match.
-

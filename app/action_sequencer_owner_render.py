@@ -28,6 +28,7 @@ from app.action_sequencer_ar_pbr_proxy import (
     default_owner_ar_pbr_proxy_path,
     write_owner_ar_pbr_proxy_asset,
 )
+from app.action_sequencer_stage_pair import write_action_sequencer_stage_pair_asset
 from app.action_sequencer_unreal_asset_bridge import (
     default_owner_unreal_ar_pbr_path,
     export_owner_unreal_ar_pbr_asset,
@@ -51,8 +52,8 @@ OWNER_POSE_CLIP_DURATION_THRESHOLD_MS = 250.0
 OWNER_STAGE_PREVIEW_VIEW = {
     "pitch": 0.0,
     "yaw": -90.0,
-    "pan_x": -0.86,
-    "zoom": 1.62,
+    "pan_x": -0.04,
+    "zoom": 1.28,
 }
 
 
@@ -838,6 +839,12 @@ class _OwnerAnimationPanel(QFrame):
 def open_action_sequencer_owner_render_window(owner: object, project_path: Path | str | None = None) -> QWidget:
     descriptor = discover_owner_render_descriptor(project_path)
     unreal_asset = export_owner_unreal_ar_pbr_asset(descriptor)
+    preview_asset = unreal_asset
+    stage_pair_error = ""
+    try:
+        preview_asset = write_action_sequencer_stage_pair_asset(unreal_asset, descriptor)
+    except Exception as exc:
+        stage_pair_error = str(exc)
     from app.ar_pbr.preview_window import ArPbrAssetPreviewWindow, preview_look_preset_settings
     from app.ar_pbr.render_profile import PROFILE_MARMOSET_PBR
 
@@ -870,21 +877,24 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
     }
 
     window = ArPbrAssetPreviewWindow(
-        unreal_asset,
+        preview_asset,
         parent=None,
         initial_lighting=initial_lighting,
         initial_view=OWNER_STAGE_PREVIEW_VIEW,
         left_panel=animation_panel,
-        track_label=f"{descriptor.owner_name} Owner",
+        track_label=f"{descriptor.owner_name} Actor A/B",
         max_triangles=180_000,
         texture_max_size=1024,
         controls_mode="cubemap_only",
-        display_title="CombatCharacter Owner",
-        display_subtitle="UE Manny skeletal mesh exported from .uasset through Tiger Studio AR/PBR",
+        display_title="CombatCharacter Action Pair",
+        display_subtitle="Actor A stands left; Actor B target slot stands right, facing back toward Actor A.",
     )
-    window.setWindowTitle("Action Sequencer - CombatCharacter AR/PBR Owner")
+    window.setWindowTitle("Action Sequencer - CombatCharacter AR/PBR Pair")
     setattr(window, "owner_render_descriptor", descriptor)
     setattr(window, "owner_unreal_ar_pbr_asset", unreal_asset)
+    setattr(window, "action_sequencer_stage_pair_asset", preview_asset)
+    if stage_pair_error:
+        setattr(window, "action_sequencer_stage_pair_error", stage_pair_error)
     setattr(window, "owner_animation_panel", animation_panel)
     selected_animation = animation_panel.selected_animation_path()
     if selected_animation is not None:

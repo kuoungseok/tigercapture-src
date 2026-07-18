@@ -190,6 +190,60 @@ def test_owner_ar_pbr_proxy_descriptor_is_renderable(tmp_path, monkeypatch) -> N
     assert imported["support"]["metrics"]["triangle_count"] > 500
 
 
+def test_action_sequencer_stage_pair_duplicates_static_target(tmp_path) -> None:
+    from app.action_sequencer_stage_pair import (
+        ACTION_SEQUENCER_STAGE_PAIR_SCHEMA,
+        build_action_sequencer_stage_pair_descriptor,
+    )
+
+    descriptor = {
+        "schema": "tigerstudio.ar_pbr.unreal_skeletal_mesh_export.v1",
+        "id": "manny_owner",
+        "source_format": "unreal_skeletal_mesh",
+        "bounds": {"center": [0.0, 1.0, 0.0], "size": [1.0, 2.0, 0.5]},
+        "materials": [{"id": "mat_body", "name": "Body"}],
+        "models": [{"id": "model_body", "name": "Body", "type": "SkeletalMesh"}],
+        "connections": [
+            {"child": "geom_body", "parent": "model_body", "type": "Geometry"},
+            {"child": "mat_body", "parent": "model_body", "type": "Material"},
+        ],
+        "geometries": [
+            {
+                "id": "geom_body",
+                "name": "Body",
+                "material_id": "mat_body",
+                "vertices": [[-0.2, 0.0, 0.0], [0.2, 0.0, 0.0], [0.0, 1.8, 0.1]],
+                "triangles": [[0, 1, 2]],
+                "normals": [[1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
+                "skin_weights": [[{"bone_index": 0, "weight": 1.0}], [], []],
+                "bounds": {"center": [0.0, 0.9, 0.05], "size": [0.4, 1.8, 0.1]},
+            }
+        ],
+        "bones": [{"id": "bone_0", "name": "root"}],
+        "animation_clips": [],
+    }
+
+    pair = build_action_sequencer_stage_pair_descriptor(descriptor, target_offset=(0.0, 0.0, 1.5))
+
+    assert pair["schema"] == ACTION_SEQUENCER_STAGE_PAIR_SCHEMA
+    assert pair["source_format"] == "action_sequencer_stage_pair"
+    assert len(pair["geometries"]) == 2
+    owner_geom, target_geom = pair["geometries"]
+    assert owner_geom["role"] == "performer"
+    assert owner_geom["role_slot"] == "actor_a"
+    assert "skin_weights" in owner_geom
+    assert owner_geom["vertices"][0] == [0.2, 0.0, -0.82]
+    assert target_geom["role"] == "target"
+    assert target_geom["role_slot"] == "actor_b"
+    assert "skin_weights" not in target_geom
+    assert target_geom["vertices"][0] == [-0.2, 0.0, 1.5]
+    assert target_geom["vertices"][1] == [0.2, 0.0, 1.5]
+    assert target_geom["normals"][0] == [1.0, 0.0, 0.0]
+    assert pair["metadata"]["action_sequencer_stage_pair"]["roles"][0]["stage_forward"] == "+X / screen right"
+    assert pair["metadata"]["action_sequencer_stage_pair"]["roles"][1]["stage_forward"] == "-X / screen left"
+    assert pair["bounds"]["size"][2] > descriptor["bounds"]["size"][2]
+
+
 def test_owner_unreal_ar_pbr_bridge_exports_target_descriptor(tmp_path, monkeypatch) -> None:
     from app.action_sequencer_owner_render import discover_owner_render_descriptor
     from app.action_sequencer_unreal_asset_bridge import export_owner_unreal_ar_pbr_asset
@@ -605,7 +659,19 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
 
     exported_asset = tmp_path / "owner.arpbr"
     exported_asset.write_text("{}", encoding="utf-8")
+    stage_pair_asset = tmp_path / "stage_pair.arpbr"
+    stage_pair_asset.write_text("{}", encoding="utf-8")
     monkeypatch.setattr(owner_render, "export_owner_unreal_ar_pbr_asset", lambda _descriptor: exported_asset)
+
+    def fake_stage_pair_asset(owner_asset, _descriptor):
+        captured["stage_pair_source"] = owner_asset
+        return stage_pair_asset
+
+    monkeypatch.setattr(
+        owner_render,
+        "write_action_sequencer_stage_pair_asset",
+        fake_stage_pair_asset,
+    )
 
     captured: dict[str, object] = {}
 
@@ -745,10 +811,14 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     window = owner_render.open_action_sequencer_owner_render_window(owner, project)
 
     assert window is owner._action_sequencer_owner_render_window
-    assert captured["args"][0] == exported_asset
+    assert captured["stage_pair_source"] == exported_asset
+    assert captured["args"][0] == stage_pair_asset
+    assert window.action_sequencer_stage_pair_asset == stage_pair_asset
     assert captured["kwargs"]["initial_view"] == owner_render.OWNER_STAGE_PREVIEW_VIEW
     assert captured["kwargs"]["left_panel"] is not None
     assert captured["kwargs"]["controls_mode"] == "cubemap_only"
+    assert captured["kwargs"]["track_label"] == "BP_CombatCharacter Actor A/B"
+    assert captured["kwargs"]["display_title"] == "CombatCharacter Action Pair"
     assert captured["kwargs"]["initial_lighting"]["look_preset"] == "bloomed"
     assert captured["kwargs"]["initial_lighting"]["show_environment_background"] is False
     assert captured["kwargs"]["initial_lighting"]["bloom_anamorphic_strength"] == 2.1

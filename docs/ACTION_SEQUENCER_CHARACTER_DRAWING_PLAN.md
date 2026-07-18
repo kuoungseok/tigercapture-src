@@ -116,7 +116,9 @@ Default V1 stage layout:
 - `Owner` starts on the left side of the preview stage.
 - `Owner` faces right, like the opening stance in a fighting game.
 - `Target`, when present, starts on the right side and faces left.
-- The first render-window milestone should draw only `Owner`.
+- The first render-window milestone drew only `Owner`; the current pair-preview
+  milestone draws a static `Target` slot on the right so spacing and facing can
+  be authored before reaction matching exists.
 - `Target` bone transforms are later stored as part of the Owner-owned action
   descriptor, not as a separate competing sequence.
 
