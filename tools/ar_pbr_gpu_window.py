@@ -1457,33 +1457,46 @@ vec3 bright_pass(vec4 sample_rgba) {
     return rgb * contribution * soft_mask * source_mask;
 }
 
-vec3 convolution_tap(vec2 uv, vec2 dir, float radius_px, float offset_scale, float weight) {
-    vec2 delta = u_texel_size * radius_px * dir * offset_scale;
-    return (
-        bright_pass(texture(u_bloom_source, uv + delta)) +
-        bright_pass(texture(u_bloom_source, uv - delta))
-    ) * weight;
+vec3 convolution_tap(vec2 uv, vec2 offset_px, float weight) {
+    return bright_pass(texture(u_bloom_source, uv + u_texel_size * offset_px)) * weight;
 }
 
-vec3 sample_bloom_convolution_axis(vec2 uv, vec2 dir, float radius_px, float weight) {
+vec3 sample_bloom_convolution_axis(vec2 uv, vec2 dir, float radius_px, float weight, inout float weight_sum) {
     vec2 axis = normalize(dir);
     vec3 bloom = vec3(0.0);
-    bloom += convolution_tap(uv, axis, radius_px, 0.35, 0.155);
-    bloom += convolution_tap(uv, axis, radius_px, 0.78, 0.095);
-    bloom += convolution_tap(uv, axis, radius_px, 1.35, 0.052);
-    bloom += convolution_tap(uv, axis, radius_px, 2.15, 0.025);
-    return bloom * weight;
+    float w0 = 0.070 * weight;
+    float w1 = 0.040 * weight;
+    float w2 = 0.018 * weight;
+    bloom += convolution_tap(uv,  axis * radius_px * 0.72, w0);
+    bloom += convolution_tap(uv, -axis * radius_px * 0.72, w0);
+    bloom += convolution_tap(uv,  axis * radius_px * 1.45, w1);
+    bloom += convolution_tap(uv, -axis * radius_px * 1.45, w1);
+    bloom += convolution_tap(uv,  axis * radius_px * 2.35, w2);
+    bloom += convolution_tap(uv, -axis * radius_px * 2.35, w2);
+    weight_sum += (w0 + w1 + w2) * 2.0;
+    return bloom;
 }
 
 vec3 sample_bloom_convolution(vec2 uv, float radius_px) {
-    vec3 bloom = bright_pass(texture(u_bloom_source, uv)) * 0.105;
-    bloom += sample_bloom_convolution_axis(uv, vec2(1.0, 0.0), radius_px * 1.42, 1.00);
-    bloom += sample_bloom_convolution_axis(uv, vec2(0.0, 1.0), radius_px * 0.78, 0.36);
-    bloom += sample_bloom_convolution_axis(uv, vec2(0.707, 0.707), radius_px * 1.06, 0.34);
-    bloom += sample_bloom_convolution_axis(uv, vec2(-0.707, 0.707), radius_px * 1.06, 0.34);
-    bloom += sample_bloom_convolution_axis(uv, vec2(0.923, 0.382), radius_px * 1.72, 0.18);
-    bloom += sample_bloom_convolution_axis(uv, vec2(-0.923, 0.382), radius_px * 1.72, 0.18);
-    return bloom;
+    vec3 bloom = bright_pass(texture(u_bloom_source, uv)) * 0.090;
+    float weight_sum = 0.090;
+    const int TAP_COUNT = 28;
+    const float GOLDEN_ANGLE = 2.39996323;
+    for (int i = 0; i < TAP_COUNT; ++i) {
+        float fi = float(i) + 0.5;
+        float t = fi / float(TAP_COUNT);
+        float r = sqrt(t);
+        float angle = fi * GOLDEN_ANGLE;
+        vec2 dir = vec2(cos(angle), sin(angle));
+        float halo_weight = exp(-2.65 * t) * (0.035 + 0.025 * (1.0 - r));
+        bloom += convolution_tap(uv, dir * radius_px * r * 1.92, halo_weight);
+        weight_sum += halo_weight;
+    }
+    bloom += sample_bloom_convolution_axis(uv, vec2(1.0, 0.0), radius_px * 1.65, 0.52, weight_sum);
+    bloom += sample_bloom_convolution_axis(uv, vec2(0.0, 1.0), radius_px * 0.95, 0.18, weight_sum);
+    bloom += sample_bloom_convolution_axis(uv, vec2(0.707, 0.707), radius_px * 1.22, 0.16, weight_sum);
+    bloom += sample_bloom_convolution_axis(uv, vec2(-0.707, 0.707), radius_px * 1.22, 0.16, weight_sum);
+    return bloom / max(weight_sum, 0.0001) * 1.42;
 }
 
 void main() {
