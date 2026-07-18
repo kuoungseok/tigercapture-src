@@ -184,6 +184,50 @@ def test_owner_animation_pair_clip_recommends_and_remaps_target(tmp_path) -> Non
     assert pair["model_curves"]["target_bone_0"]["bone_name"] == "Target / root"
 
 
+def test_owner_animation_panel_keeps_target_static_until_explicit_selection(tmp_path, monkeypatch) -> None:
+    import app.action_sequencer_owner_render as owner_render
+    from PySide6.QtWidgets import QApplication
+
+    QApplication.instance() or QApplication([])
+    project = tmp_path / "ActionSequencer" / "ActionSequencer.uproject"
+    content = project.parent / "Content"
+    owner_anim = _touch(content / "Characters" / "Mannequins" / "Anims" / "Unarmed" / "Attack" / "MM_Attack_01.uasset")
+    target_anim = _touch(content / "Characters" / "Mannequins" / "Anims" / "Rifle" / "HitReact" / "MM_HitReact_Front_Hvy_01.uasset")
+    monkeypatch.setattr(
+        owner_render,
+        "owner_unreal_animation_clip_cache_status",
+        lambda *_args, **_kwargs: {"exists": False, "fresh": False, "validated": False},
+    )
+    descriptor = owner_render.OwnerRenderDescriptor(
+        project_path=project,
+        owner_name="BP_CombatCharacter",
+        owner_asset_path=None,
+        owner_class_name="BP_CombatCharacter",
+        render_asset_path=None,
+        animation_blueprint_path=None,
+        idle_animation_path=None,
+        action_candidate_path=owner_anim,
+        animation_sequence_paths=(owner_anim, target_anim),
+    )
+
+    panel = owner_render._OwnerAnimationPanel(descriptor)
+    try:
+        payload = panel.preview_payload(play_once=True)
+        assert payload["owner_animation_path"] == owner_anim
+        assert payload["target_animation_path"] is None
+        assert payload["target_clip"] == ""
+        assert "Target: Static" in panel._slot_summary.text()
+
+        panel._set_active_slot("target")
+        assert panel.selected_target_animation_path() is None
+        panel._set_selected_path_for_active_slot(target_anim, auto_recommend_target=False)
+        payload = panel.preview_payload(play_once=True)
+        assert payload["target_animation_path"] == target_anim
+        assert payload["target_clip"] == "MM_HitReact_Front_Hvy_01"
+    finally:
+        panel.close()
+
+
 def test_owner_render_descriptor_prefers_combat_owner_and_manny_mesh(tmp_path, monkeypatch) -> None:
     from app.action_sequencer_owner_render import (
         ACTION_SEQUENCER_PROJECT_ENV,
@@ -252,6 +296,104 @@ def test_owner_render_descriptor_reports_missing_mesh(tmp_path, monkeypatch) -> 
     assert any("skeletal mesh" in item for item in descriptor.diagnostics)
 
 
+def test_owner_render_resolves_cached_stage_pair_before_export(tmp_path, monkeypatch) -> None:
+    import app.action_sequencer_owner_render as owner_render
+
+    descriptor = owner_render.OwnerRenderDescriptor(
+        project_path=tmp_path / "ActionSequencer.uproject",
+        owner_name="BP_CombatCharacter",
+        owner_asset_path=None,
+        owner_class_name="BP_CombatCharacter",
+        render_asset_path=None,
+        animation_blueprint_path=None,
+        idle_animation_path=None,
+        action_candidate_path=None,
+    )
+    cached_stage_pair = tmp_path / "cached_stage_pair.arpbr"
+    cached_stage_pair.write_text(
+        json.dumps({
+            "descriptor": {
+                "metadata": {
+                    "action_sequencer_stage_pair": {
+                        "roles": [{"id": "actor_b", "target_bone_index_offset": 1}],
+                    }
+                },
+                "geometries": [{"role_slot": "actor_b", "skin_weights": [{"joints": [1], "weights": [1.0]}]}],
+            }
+        }),
+        encoding="utf-8",
+    )
+    cached_owner = tmp_path / "cached_owner.arpbr"
+    cached_owner.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(owner_render, "default_action_sequencer_stage_pair_path", lambda _descriptor: cached_stage_pair)
+    monkeypatch.setattr(owner_render, "default_owner_unreal_ar_pbr_path", lambda _descriptor: cached_owner)
+
+    def fail_export(_descriptor):
+        raise AssertionError("cached stage pair should bypass synchronous owner export")
+
+    monkeypatch.setattr(owner_render, "export_owner_unreal_ar_pbr_asset", fail_export)
+
+    unreal_asset, preview_asset, status = owner_render._resolve_action_pair_preview_assets(descriptor)
+
+    assert unreal_asset == cached_owner
+    assert preview_asset == cached_stage_pair
+    assert status == "using_cached_stage_pair"
+
+
+def test_owner_render_regenerates_stale_stage_pair_cache(tmp_path, monkeypatch) -> None:
+    import app.action_sequencer_owner_render as owner_render
+
+    descriptor = owner_render.OwnerRenderDescriptor(
+        project_path=tmp_path / "ActionSequencer.uproject",
+        owner_name="BP_CombatCharacter",
+        owner_asset_path=None,
+        owner_class_name="BP_CombatCharacter",
+        render_asset_path=None,
+        animation_blueprint_path=None,
+        idle_animation_path=None,
+        action_candidate_path=None,
+    )
+    stale_stage_pair = tmp_path / "stale_stage_pair.arpbr"
+    stale_stage_pair.write_text(
+        json.dumps({
+            "descriptor": {
+                "metadata": {
+                    "action_sequencer_stage_pair": {
+                        "roles": [{"id": "actor_b", "target_bone_index_offset": 89}],
+                    }
+                },
+                "geometries": [{"role_slot": "actor_b", "skin_weights": [{"joints": [77], "weights": [1.0]}]}],
+            }
+        }),
+        encoding="utf-8",
+    )
+    cached_owner = tmp_path / "cached_owner.arpbr"
+    cached_owner.write_text("{}", encoding="utf-8")
+    regenerated = tmp_path / "regenerated_stage_pair.arpbr"
+    monkeypatch.setattr(owner_render, "default_action_sequencer_stage_pair_path", lambda _descriptor: stale_stage_pair)
+    monkeypatch.setattr(owner_render, "default_owner_unreal_ar_pbr_path", lambda _descriptor: cached_owner)
+    monkeypatch.setattr(
+        owner_render,
+        "export_owner_unreal_ar_pbr_asset",
+        lambda _descriptor: (_ for _ in ()).throw(AssertionError("cached owner asset should be reused")),
+    )
+
+    captured: dict[str, object] = {}
+
+    def fake_write(owner_asset, _descriptor):
+        captured["owner_asset"] = owner_asset
+        return regenerated
+
+    monkeypatch.setattr(owner_render, "write_action_sequencer_stage_pair_asset", fake_write)
+
+    unreal_asset, preview_asset, status = owner_render._resolve_action_pair_preview_assets(descriptor)
+
+    assert unreal_asset == cached_owner
+    assert preview_asset == regenerated
+    assert status == ""
+    assert captured["owner_asset"] == cached_owner
+
+
 def test_owner_ar_pbr_proxy_descriptor_is_renderable(tmp_path, monkeypatch) -> None:
     from app.action_sequencer_ar_pbr_proxy import (
         OWNER_AR_PBR_PROXY_SCHEMA,
@@ -311,7 +453,7 @@ def test_action_sequencer_stage_pair_duplicates_static_target(tmp_path) -> None:
                 "vertices": [[-0.2, 0.0, 0.0], [0.2, 0.0, 0.0], [0.0, 1.8, 0.1]],
                 "triangles": [[0, 1, 2]],
                 "normals": [[1.0, 0.0, 0.0], [1.0, 0.0, 0.0], [1.0, 0.0, 0.0]],
-                "skin_weights": [[{"bone_index": 0, "weight": 1.0}], [], []],
+                "skin_weights": [[{"bone_index": 0, "weight": 1.0}], {"joints": [0, 0], "weights": [0.75, 0.25]}, []],
                 "bounds": {"center": [0.0, 0.9, 0.05], "size": [0.4, 1.8, 0.1]},
             }
         ],
@@ -336,6 +478,7 @@ def test_action_sequencer_stage_pair_duplicates_static_target(tmp_path) -> None:
     assert "skin_weights" in target_geom
     assert target_geom["skin_weights"][0][0]["bone_index"] == 1
     assert target_geom["skin_weights"][0][0]["bone_id"] == "target_bone_0"
+    assert target_geom["skin_weights"][1]["joints"] == [1, 1]
     assert target_geom["vertices"][0] == [-0.2, 0.0, 0.0]
     assert target_geom["stage_transform"]["offset"] == [0.0, 0.0, -1.08]
     assert target_geom["stage_transform"]["rotate_y_180"] is True
@@ -351,7 +494,7 @@ def test_action_sequencer_stage_pair_duplicates_static_target(tmp_path) -> None:
 
     _vertices, mesh_diag = build_vertex_buffer(pair)
     assert mesh_diag["skeletal_geometry_count"] == 2
-    assert mesh_diag["gpu_skinning_vertex_count"] == 2
+    assert mesh_diag["gpu_skinning_vertex_count"] == 4
     owner_range, target_range = mesh_diag["draw_ranges"]
     assert owner_range["stage_offset"] == [0.0, 0.0, 1.08]
     assert owner_range["stage_rotate_y_180"] is False
@@ -1011,6 +1154,16 @@ def test_owner_ar_pbr_window_uses_left_stage_view(tmp_path, monkeypatch) -> None
     exported_asset.write_text("{}", encoding="utf-8")
     stage_pair_asset = tmp_path / "stage_pair.arpbr"
     stage_pair_asset.write_text("{}", encoding="utf-8")
+    monkeypatch.setattr(
+        owner_render,
+        "default_action_sequencer_stage_pair_path",
+        lambda _descriptor: tmp_path / "missing_stage_pair.arpbr",
+    )
+    monkeypatch.setattr(
+        owner_render,
+        "default_owner_unreal_ar_pbr_path",
+        lambda _descriptor: tmp_path / "missing_owner.arpbr",
+    )
     monkeypatch.setattr(owner_render, "export_owner_unreal_ar_pbr_asset", lambda _descriptor: exported_asset)
 
     def fake_stage_pair_asset(owner_asset, _descriptor):

@@ -290,6 +290,8 @@ def _remap_target_skin_weights(value: Any, *, bone_index_offset: int) -> Any:
     for row in value:
         if isinstance(row, Mapping):
             item = deepcopy(dict(row))
+            if isinstance(item.get("joints"), list):
+                item["joints"] = [_offset_bone_index(joint, bone_index_offset) for joint in item["joints"]]
             if "bone_index" in item:
                 source_index = _int_or_none(item.get("bone_index"))
                 item["bone_index"] = _offset_bone_index(item.get("bone_index"), bone_index_offset)

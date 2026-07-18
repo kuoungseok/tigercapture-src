@@ -1,6 +1,7 @@
 """Owner-only render window for the Action Sequencer bridge."""
 from __future__ import annotations
 
+import json
 import os
 import subprocess
 import time
@@ -29,7 +30,10 @@ from app.action_sequencer_ar_pbr_proxy import (
     default_owner_ar_pbr_proxy_path,
     write_owner_ar_pbr_proxy_asset,
 )
-from app.action_sequencer_stage_pair import write_action_sequencer_stage_pair_asset
+from app.action_sequencer_stage_pair import (
+    default_action_sequencer_stage_pair_path,
+    write_action_sequencer_stage_pair_asset,
+)
 from app.action_sequencer_unreal_asset_bridge import (
     default_owner_unreal_ar_pbr_path,
     export_owner_unreal_ar_pbr_asset,
@@ -1058,11 +1062,12 @@ class _OwnerAnimationPanel(QFrame):
         self._category_buttons: dict[str, QPushButton] = {}
         self._active_slot = "owner"
         self._owner_selected_path = descriptor.action_candidate_path or descriptor.idle_animation_path
-        self._target_selected_path = _recommended_target_animation_path(
+        self._target_recommended_path = _recommended_target_animation_path(
             self._owner_selected_path,
             self._all_paths,
             self._content_root,
         )
+        self._target_selected_path: Path | None = None
         self._slot_buttons: dict[str, QPushButton] = {}
         self.setObjectName("OwnerAnimationPanel")
         self.setFixedWidth(OWNER_ANIMATION_PANEL_WIDTH)
@@ -1159,7 +1164,9 @@ class _OwnerAnimationPanel(QFrame):
         return self._target_selected_path
 
     def active_slot_animation_path(self) -> Path | None:
-        return self._owner_selected_path if self._active_slot == "owner" else self._target_selected_path
+        if self._active_slot == "owner":
+            return self._owner_selected_path
+        return self._target_selected_path or self._target_recommended_path
 
     def preview_payload(self, *, play_once: bool = True, apply_frame_ms: int = 0) -> dict[str, Any]:
         owner_path = self.selected_owner_animation_path()
@@ -1288,7 +1295,11 @@ class _OwnerAnimationPanel(QFrame):
         if self._list.currentItem() is None and self._list.count() > 0:
             first_row = self._first_selectable_row()
             if first_row >= 0:
-                self._list.setCurrentRow(first_row)
+                self._list.blockSignals(True)
+                try:
+                    self._list.setCurrentRow(first_row)
+                finally:
+                    self._list.blockSignals(False)
 
     def _set_category_filter(self, key: str) -> None:
         self._category_filter = str(key or "all")
@@ -1300,12 +1311,6 @@ class _OwnerAnimationPanel(QFrame):
         self._active_slot = "target" if str(key) == "target" else "owner"
         for button_key, button in self._slot_buttons.items():
             button.setChecked(button_key == self._active_slot)
-        if self._active_slot == "target" and self._target_selected_path is None:
-            self._target_selected_path = _recommended_target_animation_path(
-                self._owner_selected_path,
-                self._all_paths,
-                self._content_root,
-            )
         self._refresh()
         self._select_default()
         self._update_slot_summary()
@@ -1339,7 +1344,11 @@ class _OwnerAnimationPanel(QFrame):
             item = self._list.item(index)
             data = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
             if data and Path(str(data)) == preferred:
-                self._list.setCurrentRow(index)
+                self._list.blockSignals(True)
+                try:
+                    self._list.setCurrentRow(index)
+                finally:
+                    self._list.blockSignals(False)
                 return
 
     def _on_current_item_changed(self, current: QListWidgetItem | None, _previous: QListWidgetItem | None) -> None:
@@ -1384,27 +1393,23 @@ class _OwnerAnimationPanel(QFrame):
             self._target_selected_path = path
         else:
             self._owner_selected_path = path
-            if auto_recommend_target:
-                recommended = _recommended_target_animation_path(path, self._all_paths, self._content_root)
-                if recommended is not None:
-                    self._target_selected_path = recommended
+            self._target_recommended_path = _recommended_target_animation_path(path, self._all_paths, self._content_root)
         self._update_slot_summary()
 
     def _update_slot_summary(self) -> None:
         owner = self._owner_selected_path.stem if self._owner_selected_path is not None else "None"
-        target = self._target_selected_path.stem if self._target_selected_path is not None else "Auto pending"
+        if self._target_selected_path is not None:
+            target = self._target_selected_path.stem
+        elif self._target_recommended_path is not None:
+            target = f"Static (suggest: {self._target_recommended_path.stem})"
+        else:
+            target = "Static"
         self._slot_summary.setText(f"Owner: {owner}\nTarget: {target}")
 
 
 def open_action_sequencer_owner_render_window(owner: object, project_path: Path | str | None = None) -> QWidget:
     descriptor = discover_owner_render_descriptor(project_path)
-    unreal_asset = export_owner_unreal_ar_pbr_asset(descriptor)
-    preview_asset = unreal_asset
-    stage_pair_error = ""
-    try:
-        preview_asset = write_action_sequencer_stage_pair_asset(unreal_asset, descriptor)
-    except Exception as exc:
-        stage_pair_error = str(exc)
+    unreal_asset, preview_asset, stage_pair_error = _resolve_action_pair_preview_assets(descriptor)
     from app.ar_pbr.preview_window import ArPbrAssetPreviewWindow, preview_look_preset_settings
     from app.ar_pbr.render_profile import PROFILE_MARMOSET_PBR
 
@@ -1737,6 +1742,88 @@ def open_action_sequencer_owner_render_window(owner: object, project_path: Path 
     window.raise_()
     window.activateWindow()
     return window
+
+
+def _resolve_action_pair_preview_assets(descriptor: OwnerRenderDescriptor) -> tuple[Path, Path, str]:
+    cached_stage_pair = default_action_sequencer_stage_pair_path(descriptor)
+    unreal_asset = default_owner_unreal_ar_pbr_path(descriptor)
+    if (
+        cached_stage_pair.exists()
+        and cached_stage_pair.stat().st_size > 0
+        and _action_pair_stage_cache_usable(cached_stage_pair)
+    ):
+        return unreal_asset if unreal_asset.exists() else cached_stage_pair, cached_stage_pair, "using_cached_stage_pair"
+
+    if not unreal_asset.exists() or unreal_asset.stat().st_size <= 0:
+        unreal_asset = export_owner_unreal_ar_pbr_asset(descriptor)
+    preview_asset = unreal_asset
+    stage_pair_error = ""
+    try:
+        preview_asset = write_action_sequencer_stage_pair_asset(unreal_asset, descriptor)
+    except Exception as exc:
+        stage_pair_error = str(exc)
+    return unreal_asset, preview_asset, stage_pair_error
+
+
+def _action_pair_stage_cache_usable(path: Path) -> bool:
+    try:
+        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+    except Exception:
+        return False
+    descriptor = payload.get("descriptor") if isinstance(payload, Mapping) else None
+    if not isinstance(descriptor, Mapping):
+        descriptor = payload if isinstance(payload, Mapping) else None
+    if not isinstance(descriptor, Mapping):
+        return False
+    metadata = descriptor.get("metadata") if isinstance(descriptor.get("metadata"), Mapping) else {}
+    stage = metadata.get("action_sequencer_stage_pair") if isinstance(metadata.get("action_sequencer_stage_pair"), Mapping) else {}
+    offset = 0
+    for role in stage.get("roles") or []:
+        if not isinstance(role, Mapping) or str(role.get("id") or "") != "actor_b":
+            continue
+        try:
+            offset = int(role.get("target_bone_index_offset") or 0)
+        except Exception:
+            offset = 0
+        break
+    if offset <= 0:
+        return False
+    saw_target_skinning = False
+    for geometry in descriptor.get("geometries") or []:
+        if not isinstance(geometry, Mapping) or str(geometry.get("role_slot") or "") != "actor_b":
+            continue
+        rows = geometry.get("skin_weights")
+        if not isinstance(rows, list) or not rows:
+            continue
+        saw_target_skinning = True
+        for row in rows[:64]:
+            for bone_index in _skin_weight_row_indices(row):
+                if 0 <= bone_index < offset:
+                    return False
+    return saw_target_skinning
+
+
+def _skin_weight_row_indices(value: Any) -> list[int]:
+    out: list[int] = []
+    if isinstance(value, Mapping):
+        for key in ("bone_index", "joint", "joint_index"):
+            if key in value:
+                try:
+                    out.append(int(value.get(key)))
+                except Exception:
+                    pass
+        joints = value.get("joints")
+        if isinstance(joints, list):
+            for item in joints:
+                try:
+                    out.append(int(item))
+                except Exception:
+                    pass
+        return out
+    if isinstance(value, list):
+        for item in value:
+            out.extend(_skin_weight_row_indices(item))
+    return out
 
 
 def _safe_rglob(root: Path, pattern: str) -> list[Path]:
