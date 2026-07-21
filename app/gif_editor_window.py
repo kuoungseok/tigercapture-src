@@ -122,6 +122,8 @@ THUMB_W = 96
 THUMB_H = 54
 THUMB_GAP = 4
 TIMELINE_V_PAD = 10
+TIMELINE_MIN_VIEW_W = 280
+TIMELINE_MAX_HINT_W = 720
 
 
 def _fast_thumbnail_pil(img: Image.Image, target_w: int, target_h: int) -> Image.Image:
@@ -191,7 +193,7 @@ class FrameTimeline(QWidget):
         self._thumb_w: int = THUMB_W  # per-instance, wheel-zoomable
 
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setSizePolicy(QSizePolicy.Policy.Minimum, QSizePolicy.Policy.Fixed)
+        self.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Fixed)
         self.setFixedHeight(THUMB_H + TIMELINE_V_PAD * 2 + 6)
 
     def frame_count(self) -> int:
@@ -213,9 +215,20 @@ class FrameTimeline(QWidget):
             self.update(x - 1, y - 1, self._thumb_w + 2, THUMB_H + TIMELINE_V_PAD + 10)
 
     def _resize_to_content(self) -> None:
-        total_w = THUMB_GAP + len(self._thumbs) * (self._thumb_w + THUMB_GAP)
-        self.setMinimumWidth(max(total_w, 0))
-        self.resize(max(total_w, 0), self.height())
+        total_w = self._content_width()
+        self.setMinimumWidth(1)
+        self.resize(total_w, self.height())
+        self.updateGeometry()
+
+    def _content_width(self) -> int:
+        return max(1, THUMB_GAP + len(self._thumbs) * (self._thumb_w + THUMB_GAP))
+
+    def sizeHint(self) -> QSize:
+        width = min(max(self._content_width(), TIMELINE_MIN_VIEW_W), TIMELINE_MAX_HINT_W)
+        return QSize(width, self.height())
+
+    def minimumSizeHint(self) -> QSize:
+        return QSize(TIMELINE_MIN_VIEW_W, self.height())
 
     def wheelEvent(self, event) -> None:
         """Mouse wheel over the frame strip zooms thumbnail width (= timeline
@@ -601,6 +614,8 @@ class GifEditorWindow(QWidget):
         scroll.setWidgetResizable(False)
         scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        scroll.setMinimumWidth(TIMELINE_MIN_VIEW_W)
         scroll.setFixedHeight(THUMB_H + TIMELINE_V_PAD * 2 + 26)
         self._timeline_scroll = scroll
         return scroll
