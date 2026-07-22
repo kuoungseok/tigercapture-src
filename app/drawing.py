@@ -394,6 +394,24 @@ def create_blank_paint_pixmap(width: int, height: int, background: str = "#FFFFF
     return pixmap
 
 
+def create_checkerboard_paint_pixmap(width: int, height: int, cell: int = 24) -> QPixmap:
+    safe_w = max(1, min(16384, int(width or 1)))
+    safe_h = max(1, min(16384, int(height or 1)))
+    tile = max(4, int(cell or 24))
+    pixmap = QPixmap(safe_w, safe_h)
+    pixmap.fill(QColor("#d9dee8"))
+    painter = QPainter(pixmap)
+    try:
+        dark = QColor("#aeb6c4")
+        for y in range(0, safe_h, tile):
+            for x in range(0, safe_w, tile):
+                if ((x // tile) + (y // tile)) % 2:
+                    painter.fillRect(x, y, tile, tile, dark)
+    finally:
+        painter.end()
+    return pixmap
+
+
 class NewCanvasDialog(QDialog):
     """Small first-run dialog for standalone Painter canvas creation."""
 
@@ -1969,6 +1987,11 @@ class PaintDialog(QDialog):
             PaintLayer("paint-layer-1", "Layer 1")
         ]
         self._active_paint_layer_id = "paint-layer-1"
+        self._background_layer_present = True
+        self._canvas_document_size = (
+            max(1, int(background_pixmap.width())) if background_pixmap and not background_pixmap.isNull() else 1920,
+            max(1, int(background_pixmap.height())) if background_pixmap and not background_pixmap.isNull() else 1080,
+        )
 
         # Make the dialog large (paint-app feel). Cap at screen size.
         if parent is not None:
@@ -2039,6 +2062,33 @@ class PaintDialog(QDialog):
             layer = self._paint_layers[0]
             self._active_paint_layer_id = layer.layer_id
         return layer
+
+    def _display_background_pixmap(self) -> QPixmap:
+        width, height = self._canvas_document_size
+        checker = create_checkerboard_paint_pixmap(width, height)
+        if not (
+            self._background_layer_present
+            and self._bg_pixmap_source
+            and not self._bg_pixmap_source.isNull()
+        ):
+            return checker
+        try:
+            has_alpha = self._bg_pixmap_source.hasAlphaChannel()
+        except Exception:
+            has_alpha = self._bg_pixmap_source.toImage().hasAlphaChannel()
+        if not has_alpha:
+            return self._bg_pixmap_source
+        painter = QPainter(checker)
+        try:
+            painter.drawPixmap(0, 0, self._bg_pixmap_source)
+        finally:
+            painter.end()
+        return checker
+
+    def _export_background_pixmap(self) -> QPixmap | None:
+        if self._background_layer_present and self._bg_pixmap_source and not self._bg_pixmap_source.isNull():
+            return self._bg_pixmap_source
+        return None
 
     def _sync_canvas_layer_view(self) -> None:
         if not hasattr(self, "canvas"):
@@ -2157,11 +2207,12 @@ class PaintDialog(QDialog):
         self._bg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._bg_label.setStyleSheet("background-color: #1a1a1a;")
         self._bg_pixmap_source = bg
+        display_bg = self._display_background_pixmap()
         self._bg_label.setPixmap(
-            bg.scaled(
+            display_bg.scaled(
                 1, 1, Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
-            ) if bg and not bg.isNull() else QPixmap()
+            ) if display_bg and not display_bg.isNull() else QPixmap()
         )
 
         self.canvas = DrawingCanvas(
@@ -2441,11 +2492,12 @@ class PaintDialog(QDialog):
         self._bg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._bg_label.setStyleSheet("background-color: #050607;")
         self._bg_pixmap_source = bg
+        display_bg = self._display_background_pixmap()
         self._bg_label.setPixmap(
-            bg.scaled(
+            display_bg.scaled(
                 1, 1, Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,
-            ) if bg and not bg.isNull() else QPixmap()
+            ) if display_bg and not display_bg.isNull() else QPixmap()
         )
 
         self.canvas = DrawingCanvas(
@@ -3112,10 +3164,10 @@ class PaintDialog(QDialog):
         out = Path(path)
         if out.suffix.lower() != ".png":
             out = out.with_suffix(".png")
-        bg = self._bg_pixmap_source if include_background else None
+        bg = self._export_background_pixmap() if include_background else None
         target_size = _paint_export_size(
             bg,
-            fallback=(max(1, self.canvas.width()), max(1, self.canvas.height())),
+            fallback=self._canvas_document_size,
         )
         width_scale = target_size[0] / max(1, self.canvas.width())
         try:
@@ -3169,6 +3221,7 @@ class PaintDialog(QDialog):
         str,
         str | None,
         list[tuple[float, float]],
+        bool,
     ]:
         strokes = self.canvas.embedded_strokes() if hasattr(self, "canvas") else []
         return (
@@ -3179,6 +3232,7 @@ class PaintDialog(QDialog):
             str(getattr(self, "_active_paint_layer_id", "paint-layer-1")),
             self._selected_layer_id,
             self.canvas.selection_snapshot() if hasattr(self, "canvas") else [],
+            bool(getattr(self, "_background_layer_present", True)),
         )
 
     def _push_undo_state(self) -> None:
@@ -3217,6 +3271,8 @@ class PaintDialog(QDialog):
                 self._active_paint_layer_id = str(active_layer_id or "paint-layer-1")
                 self._selected_layer_id = selected_layer_id
             selection_points = snapshot[6] if len(snapshot) >= 7 else []
+            if len(snapshot) >= 8:
+                self._background_layer_present = bool(snapshot[7])
             for item in list(getattr(self, "_bubble_items", [])):
                 item.deleteLater()
             for item in list(getattr(self, "_sticker_items", [])):
@@ -3272,7 +3328,10 @@ class PaintDialog(QDialog):
         try:
             layer_list.clear()
             if self._standalone:
-                if not self._is_paint_layer_id(selected_id):
+                selected_background = (
+                    selected_id == "background" and self._background_layer_present
+                )
+                if not self._is_paint_layer_id(selected_id) and not selected_background:
                     selected_id = self._active_paint_layer_id
                     self._selected_layer_id = selected_id
                 for layer in reversed(self._paint_layers):
@@ -3285,11 +3344,13 @@ class PaintDialog(QDialog):
                     layer_list.addItem(item)
                     if selected_id == layer.layer_id:
                         layer_list.setCurrentItem(item)
-                bg_item = QListWidgetItem("Background")
-                bg_item.setIcon(app_icon("lock", size=14, color="#9EA8BA"))
-                bg_item.setData(Qt.ItemDataRole.UserRole, "background")
-                bg_item.setFlags(bg_item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
-                layer_list.addItem(bg_item)
+                if self._background_layer_present:
+                    bg_item = QListWidgetItem("Background")
+                    bg_item.setIcon(app_icon("lock", size=14, color="#9EA8BA"))
+                    bg_item.setData(Qt.ItemDataRole.UserRole, "background")
+                    layer_list.addItem(bg_item)
+                    if selected_id == "background":
+                        layer_list.setCurrentItem(bg_item)
                 self._update_layer_controls()
                 return
             if strokes_count:
@@ -3334,6 +3395,17 @@ class PaintDialog(QDialog):
         )
 
     def _update_layer_controls(self) -> None:
+        if self._selected_layer_id == "background":
+            if hasattr(self, "_layer_opacity_value"):
+                self._layer_opacity_value.setText("Locked")
+            if hasattr(self, "layer_opacity_slider"):
+                self.layer_opacity_slider.blockSignals(True)
+                try:
+                    self.layer_opacity_slider.setValue(100)
+                    self.layer_opacity_slider.setEnabled(False)
+                finally:
+                    self.layer_opacity_slider.blockSignals(False)
+            return
         layer = self._paint_layer_by_id(self._selected_layer_id) or self._active_paint_layer()
         if hasattr(self, "_layer_opacity_value"):
             self._layer_opacity_value.setText(f"{layer.opacity}%")
@@ -3395,8 +3467,8 @@ class PaintDialog(QDialog):
             self._update_layer_controls()
             return
         if self._selected_layer_id == "background":
-            self._selected_layer_id = self._active_paint_layer_id
-            self._update_layer_list()
+            self._set_tool("select")
+            self._update_layer_controls()
             return
         self._set_tool("select")
         if layer_id == "strokes":
@@ -3481,14 +3553,16 @@ class PaintDialog(QDialog):
         menu.addSeparator()
         delete_action = menu.addAction("Delete")
         selected = self._current_layer_id()
-        has_selection = selected is not None and selected != "background"
+        selected_background = selected == "background" and self._background_layer_present
+        has_selection = selected is not None and not selected_background
         is_paint_layer = self._is_paint_layer_id(selected)
         visibility_action.setEnabled(is_paint_layer)
         copy_action.setEnabled(has_selection)
         cut_action.setEnabled(has_selection)
         duplicate_action.setEnabled(has_selection)
         delete_action.setEnabled(
-            has_selection and (not is_paint_layer or len(self._paint_layers) > 1)
+            selected_background
+            or (has_selection and (not is_paint_layer or len(self._paint_layers) > 1))
         )
         paste_action.setEnabled(self._paint_clipboard is not None)
         chosen = menu.exec(self._layer_list.mapToGlobal(pos))
@@ -3659,6 +3733,15 @@ class PaintDialog(QDialog):
     def _delete_layer(self, layer_id: str | None) -> None:
         if not layer_id:
             return
+        if layer_id == "background":
+            if not self._standalone or not self._background_layer_present:
+                return
+            self._push_undo_state()
+            self._background_layer_present = False
+            self._selected_layer_id = self._active_paint_layer_id
+            self._update_canvas_geometry()
+            self._update_inspector_counts()
+            return
         if self._is_paint_layer_id(layer_id):
             if len(self._paint_layers) <= 1:
                 return
@@ -3724,9 +3807,11 @@ class PaintDialog(QDialog):
         if hw <= 0 or hh <= 0:
             return
 
-        # Scale background to fit host, keep aspect
-        if self._bg_pixmap_source and not self._bg_pixmap_source.isNull():
-            bg_scaled = self._bg_pixmap_source.scaled(
+        # Scale the display background to fit host; transparent/no background
+        # uses a Photoshop-style checkerboard but still exports as alpha.
+        display_bg = self._display_background_pixmap()
+        if display_bg and not display_bg.isNull():
+            bg_scaled = display_bg.scaled(
                 hw, hh,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,

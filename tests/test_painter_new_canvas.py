@@ -149,3 +149,48 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths() -> No
     )
 
     dialog.close()
+
+
+def test_standalone_painter_can_delete_background_to_checkerboard_alpha() -> None:
+    app = _app()
+    from PySide6.QtCore import Qt
+
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(320, 180, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.show()
+    app.processEvents()
+
+    dialog._selected_layer_id = "background"
+    dialog._update_layer_list()
+    assert dialog._layer_list.currentItem().data(Qt.ItemDataRole.UserRole) == "background"
+    dialog._delete_selected_layer()
+    app.processEvents()
+
+    layer_ids = [
+        dialog._layer_list.item(i).data(Qt.ItemDataRole.UserRole)
+        for i in range(dialog._layer_list.count())
+    ]
+    assert "background" not in layer_ids
+    assert dialog._background_layer_present is False
+    assert dialog._export_background_pixmap() is None
+
+    checker = dialog._display_background_pixmap().toImage()
+    assert checker.pixelColor(1, 1) != checker.pixelColor(25, 1)
+
+    dialog._undo()
+    app.processEvents()
+    restored_layer_ids = [
+        dialog._layer_list.item(i).data(Qt.ItemDataRole.UserRole)
+        for i in range(dialog._layer_list.count())
+    ]
+    assert "background" in restored_layer_ids
+    assert dialog._background_layer_present is True
+    assert dialog._export_background_pixmap() is not None
+
+    dialog.close()
