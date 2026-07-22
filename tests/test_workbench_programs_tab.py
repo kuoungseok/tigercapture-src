@@ -19,6 +19,7 @@ def test_workbench_programs_tab_exposes_icon_launchers() -> None:
 
     set_language("ko")
     panel = WorkbenchPanel()
+    panel.resize(520, 430)
     panel.show()
     app.processEvents()
 
@@ -40,5 +41,19 @@ def test_workbench_programs_tab_exposes_icon_launchers() -> None:
         "Engine Link",
     } <= labels
     assert all(not button.icon().isNull() for button in buttons)
+    tile_sizes = {button.width() for button in buttons}
+    assert tile_sizes == {53}
+
+    panel.resize(340, 430)
+    app.processEvents()
+    panel._update_program_launcher_metrics()
+    small_tile = buttons[0].width()
+    assert 48 <= small_tile <= 53
+
+    panel.resize(860, 430)
+    app.processEvents()
+    panel._update_program_launcher_metrics()
+    large_tile = buttons[0].width()
+    assert 53 < large_tile <= 56
 
     panel.close()

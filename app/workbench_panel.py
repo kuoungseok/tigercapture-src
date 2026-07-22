@@ -71,6 +71,9 @@ from app.workbench_cards import (
 
 _INSPECTOR_TAB_SIZE = (62, 48)
 _INSPECTOR_TAB_COMPACT_SIZE = (17, 21)
+_PROGRAM_LAUNCHER_BASE_SIZE = 53
+_PROGRAM_LAUNCHER_MIN_SIZE = 48
+_PROGRAM_LAUNCHER_MAX_SIZE = 56
 _INSPECTOR_TAB_IDS = ("clip", "fx", "mask", "audio", "programs", "meta")
 _AUDIO_CREATION_TOOLS_EMPTY_TEXT = (
     "Composer and Voice Lab are always available below. Select "
@@ -457,7 +460,7 @@ class WorkbenchPanel(QWidget):
             "}"
             "QToolButton#ProgramLauncherButton {"
             "color:#FFFFFF; border-radius:17px; padding:8px 4px 6px 4px;"
-            "font-size:9px; font-weight:820; min-width:76px; min-height:76px;"
+            "font-size:8px; font-weight:820;"
             "}"
             "QPushButton#InspectorTab[fxMode='true'], QToolButton#InspectorTab[fxMode='true'] {"
             "background:transparent; color:#8E949C; border:1px solid transparent;"
@@ -1019,8 +1022,6 @@ class WorkbenchPanel(QWidget):
         host.setObjectName("ProgramLauncherGrid")
         grid = QGridLayout(host)
         grid.setContentsMargins(6, 4, 6, 8)
-        grid.setHorizontalSpacing(7)
-        grid.setVerticalSpacing(7)
         programs = (
             (
                 "Composer",
@@ -1080,6 +1081,14 @@ class WorkbenchPanel(QWidget):
             grid.setColumnStretch(col, 1)
         layout.insertWidget(1, host, stretch=0)
         self._program_launcher_grid = host
+        self._program_launcher_layout = grid
+        self._program_launcher_buttons = []
+        for idx in range(grid.count()):
+            item = grid.itemAt(idx)
+            widget = item.widget() if item is not None else None
+            if isinstance(widget, QToolButton):
+                self._program_launcher_buttons.append(widget)
+        self._update_program_launcher_metrics()
 
     def _program_launcher_button(
         self,
@@ -1097,7 +1106,46 @@ class WorkbenchPanel(QWidget):
         button.setToolTip(tooltip)
         button.setAccessibleName(label.replace("\n", " "))
         button.setAccessibleDescription(tooltip)
-        start_color, end_color = colors
+        setattr(button, "_program_launcher_icon_name", icon_name)
+        setattr(button, "_program_launcher_colors", colors)
+        button.clicked.connect(lambda _checked=False, cb=callback: cb())
+        return button
+
+    def _update_program_launcher_metrics(self) -> None:
+        buttons = getattr(self, "_program_launcher_buttons", None)
+        if not buttons:
+            return
+        page = self._tab_pages.get("programs") if hasattr(self, "_tab_pages") else None
+        width = page.width() if page is not None and page.width() > 0 else self.width()
+        scale = max(0.90, min(1.20, float(width or 520) / 520.0))
+        tile_px = max(
+            _PROGRAM_LAUNCHER_MIN_SIZE,
+            min(_PROGRAM_LAUNCHER_MAX_SIZE, round(_PROGRAM_LAUNCHER_BASE_SIZE * scale)),
+        )
+        icon_px = max(19, min(26, round(tile_px * 0.42)))
+        radius_px = max(11, min(15, round(tile_px * 0.24)))
+        font_px = max(7, min(9, round(tile_px * 0.15)))
+        spacing_px = max(5, min(8, round(tile_px * 0.12)))
+        layout = getattr(self, "_program_launcher_layout", None)
+        if layout is not None:
+            layout.setHorizontalSpacing(spacing_px)
+            layout.setVerticalSpacing(spacing_px)
+        for button in buttons:
+            self._style_program_launcher_button(button, tile_px, icon_px, radius_px, font_px)
+
+    def _style_program_launcher_button(
+        self,
+        button: QToolButton,
+        tile_px: int,
+        icon_px: int,
+        radius_px: int,
+        font_px: int,
+    ) -> None:
+        start_color, end_color = getattr(button, "_program_launcher_colors", ("#42C7BA", "#4C64E8"))
+        icon_name = getattr(button, "_program_launcher_icon_name", "grid")
+        top_padding = max(4, round(tile_px * 0.10))
+        side_padding = max(2, round(tile_px * 0.06))
+        bottom_padding = max(3, round(tile_px * 0.07))
         button.setStyleSheet(
             "QToolButton#ProgramLauncherButton {"
             f"background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 {start_color},stop:1 {end_color});"
@@ -1105,8 +1153,9 @@ class WorkbenchPanel(QWidget):
             "border-left:1px solid rgba(255,255,255,48);"
             "border-right:1px solid rgba(0,0,0,76);"
             "border-bottom:1px solid rgba(0,0,0,104);"
-            "border-radius:17px; padding:8px 4px 6px 4px;"
-            "font-size:9px; font-weight:820; min-width:76px; min-height:76px;"
+            f"border-radius:{radius_px}px;"
+            f"padding:{top_padding}px {side_padding}px {bottom_padding}px {side_padding}px;"
+            f"font-size:{font_px}px; font-weight:820;"
             "}"
             "QToolButton#ProgramLauncherButton:hover {"
             "border-top-color:rgba(255,255,255,112); border-left-color:rgba(255,255,255,74);"
@@ -1116,11 +1165,10 @@ class WorkbenchPanel(QWidget):
             "border-right-color:rgba(255,255,255,40); border-bottom-color:rgba(255,255,255,54);"
             "}"
         )
-        icon = unreal_engine_icon(30, color="#FFFFFF") if icon_name == "unreal" else app_icon(icon_name, size=30, color="#FFFFFF")
+        button.setFixedSize(tile_px, tile_px)
+        icon = unreal_engine_icon(icon_px, color="#FFFFFF") if icon_name == "unreal" else app_icon(icon_name, size=icon_px, color="#FFFFFF")
         button.setIcon(icon)
-        button.setIconSize(icon_size(30))
-        button.clicked.connect(lambda _checked=False, cb=callback: cb())
-        return button
+        button.setIconSize(icon_size(icon_px))
 
     def _show_program_window(self, window):
         window.show()
@@ -2085,6 +2133,8 @@ class WorkbenchPanel(QWidget):
         if page is not None:
             self._tab_stack.setCurrentWidget(page)
         self._sync_inspector_chrome()
+        if self._inspector_tab == "programs":
+            self._update_program_launcher_metrics()
 
     def _sync_inspector_chrome(self) -> None:
         """Keep the FX graph visually close to the reference layout.
@@ -2175,6 +2225,10 @@ class WorkbenchPanel(QWidget):
         if text is not None:
             label.setText(text)
         label.setVisible(bool(visible))
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._update_program_launcher_metrics()
 
     @staticmethod
     def _param_active(value) -> bool:
