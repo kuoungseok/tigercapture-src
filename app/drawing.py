@@ -22,9 +22,11 @@ from PySide6.QtCore import (
     Signal,
 )
 from PySide6.QtGui import (
+    QBrush,
     QColor,
     QImage,
     QIcon,
+    QLinearGradient,
     QMouseEvent,
     QPainter,
     QPainterPath,
@@ -764,6 +766,7 @@ class DrawingCanvas(QWidget):
     stroke_added = Signal(object)  # Stroke
     stroke_erased_at = Signal(int)  # index in the strokes list
     repaint_requested = Signal()
+    selection_probe_requested = Signal(str, float, float)
 
     ERASE_RADIUS_PX = 18
 
@@ -795,6 +798,10 @@ class DrawingCanvas(QWidget):
         self._selection_drag_start: QPointF | None = None
         self._selection_drag_current: QPointF | None = None
         self._selection_phase: float = 0.0
+        self._quick_mask_enabled: bool = False
+        self._grid_visible: bool = False
+        self._snap_enabled: bool = False
+        self._grid_size_px: int = 64
         self._selection_timer = QTimer(self)
         self._selection_timer.setInterval(90)
         self._selection_timer.timeout.connect(self._advance_selection_march)
@@ -830,13 +837,22 @@ class DrawingCanvas(QWidget):
         return self._tool
 
     def set_tool(self, tool: str) -> None:
-        if tool not in ("off", "pen", "eraser", "path", "rect_select", "ellipse_select", "crop"):
+        if tool not in (
+            "off",
+            "pen",
+            "eraser",
+            "path",
+            "rect_select",
+            "ellipse_select",
+            "crop",
+            "magic_select",
+        ):
             tool = "off"
         self._tool = tool
         self._refresh_mouse_transparency()
         cursor = (
             Qt.CursorShape.CrossCursor
-            if tool in ("pen", "eraser", "path", "rect_select", "ellipse_select", "crop")
+            if tool in ("pen", "eraser", "path", "rect_select", "ellipse_select", "crop", "magic_select")
             else Qt.CursorShape.ArrowCursor
         )
         self.setCursor(cursor)
@@ -921,6 +937,35 @@ class DrawingCanvas(QWidget):
 
     def selection_aspect_mode(self) -> str:
         return str(self._selection_aspect_mode or "free")
+
+    def quick_mask_enabled(self) -> bool:
+        return bool(getattr(self, "_quick_mask_enabled", False))
+
+    def set_quick_mask_enabled(self, enabled: bool) -> None:
+        self._quick_mask_enabled = bool(enabled)
+        self.update()
+
+    def set_grid_options(
+        self,
+        *,
+        visible: bool | None = None,
+        snap: bool | None = None,
+        size_px: int | None = None,
+    ) -> None:
+        if visible is not None:
+            self._grid_visible = bool(visible)
+        if snap is not None:
+            self._snap_enabled = bool(snap)
+        if size_px is not None:
+            self._grid_size_px = max(4, min(512, int(size_px or 64)))
+        self.update()
+
+    def grid_options(self) -> dict[str, int | bool]:
+        return {
+            "visible": bool(getattr(self, "_grid_visible", False)),
+            "snap": bool(getattr(self, "_snap_enabled", False)),
+            "size_px": int(getattr(self, "_grid_size_px", 64) or 64),
+        }
 
     def select_rectangle(
         self,
@@ -1018,6 +1063,8 @@ class DrawingCanvas(QWidget):
         w = max(1, self.width())
         h = max(1, self.height())
 
+        self._paint_grid(painter, w, h)
+
         t_ms = int(self._get_time_ms())
         for stroke in self._get_strokes():
             if not stroke.is_active(t_ms):
@@ -1088,6 +1135,7 @@ class DrawingCanvas(QWidget):
                 painter.drawEllipse(point, 4, 4)
 
         self._paint_selection_drag_preview(painter, w, h)
+        self._paint_quick_mask_overlay(painter, w, h)
         self._paint_marching_ants(painter, w, h)
 
         # Stage 1 rotoscope — dashed Tiger Orange rectangle while
@@ -1185,12 +1233,7 @@ class DrawingCanvas(QWidget):
     def _paint_marching_ants(self, painter: QPainter, w: int, h: int) -> None:
         if len(self._selection_points) < 3:
             return
-        pts = [QPointF(x * w, y * h) for x, y in self._selection_points]
-        path = QPainterPath()
-        path.moveTo(pts[0])
-        for point in pts[1:]:
-            path.lineTo(point)
-        path.closeSubpath()
+        path = self._selection_path(w, h)
 
         painter.save()
         painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -1213,6 +1256,53 @@ class DrawingCanvas(QWidget):
             pen.setDashOffset(self._selection_phase + offset)
             painter.setPen(pen)
             painter.drawPath(path)
+        painter.restore()
+
+    def _selection_path(self, w: int, h: int) -> QPainterPath:
+        path = QPainterPath()
+        if len(self._selection_points) < 3:
+            return path
+        pts = [QPointF(x * w, y * h) for x, y in self._selection_points]
+        path.moveTo(pts[0])
+        for point in pts[1:]:
+            path.lineTo(point)
+        path.closeSubpath()
+        return path
+
+    def _paint_quick_mask_overlay(self, painter: QPainter, w: int, h: int) -> None:
+        if not bool(getattr(self, "_quick_mask_enabled", False)):
+            return
+        painter.save()
+        overlay = QColor(220, 43, 78, 70)
+        if len(self._selection_points) < 3:
+            painter.fillRect(QRectF(0, 0, w, h), overlay)
+            painter.restore()
+            return
+        selection_path = self._selection_path(w, h)
+        if self._selection_inverted:
+            mask_path = selection_path
+        else:
+            full_path = QPainterPath()
+            full_path.addRect(QRectF(0, 0, w, h))
+            mask_path = full_path.subtracted(selection_path)
+        painter.fillPath(mask_path, overlay)
+        painter.restore()
+
+    def _paint_grid(self, painter: QPainter, w: int, h: int) -> None:
+        if not bool(getattr(self, "_grid_visible", False)):
+            return
+        step = max(4, min(512, int(getattr(self, "_grid_size_px", 64) or 64)))
+        painter.save()
+        minor = QPen(QColor(170, 190, 220, 40), 1.0)
+        minor.setCosmetic(True)
+        major = QPen(QColor(210, 225, 245, 58), 1.0)
+        major.setCosmetic(True)
+        for idx, x in enumerate(range(0, w + 1, step)):
+            painter.setPen(major if idx % 4 == 0 else minor)
+            painter.drawLine(QPointF(x + 0.5, 0), QPointF(x + 0.5, h))
+        for idx, y in enumerate(range(0, h + 1, step)):
+            painter.setPen(major if idx % 4 == 0 else minor)
+            painter.drawLine(QPointF(0, y + 0.5), QPointF(w, y + 0.5))
         painter.restore()
 
     def _paint_selection_drag_preview(self, painter: QPainter, _w: int, _h: int) -> None:
@@ -1325,12 +1415,31 @@ class DrawingCanvas(QWidget):
             (left, bottom),
         ]
 
+    def _snap_canvas_point(self, point: QPointF) -> QPointF:
+        if not (
+            bool(getattr(self, "_grid_visible", False))
+            and bool(getattr(self, "_snap_enabled", False))
+        ):
+            return QPointF(point)
+        step = max(4, min(512, int(getattr(self, "_grid_size_px", 64) or 64)))
+        x = round(float(point.x()) / step) * step
+        y = round(float(point.y()) / step) * step
+        return QPointF(
+            max(0.0, min(float(self.width()), float(x))),
+            max(0.0, min(float(self.height()), float(y))),
+        )
+
     # ------------- mouse interaction -------------
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
             return
         pos = event.position()
+        if self._tool == "magic_select":
+            w = max(1, self.width())
+            h = max(1, self.height())
+            self.selection_probe_requested.emit("color", pos.x() / w, pos.y() / h)
+            return
         # Stage 1 rotoscope — rectangle drag for GrabCut takes
         # precedence over polygon / pen / eraser.
         if self._rect_hook is not None:
@@ -1372,8 +1481,9 @@ class DrawingCanvas(QWidget):
             return
         if self._tool in {"rect_select", "ellipse_select", "crop"}:
             self._selection_drag_tool = self._tool
-            self._selection_drag_start = QPointF(pos)
-            self._selection_drag_current = QPointF(pos)
+            snapped = self._snap_canvas_point(pos)
+            self._selection_drag_start = QPointF(snapped)
+            self._selection_drag_current = QPointF(snapped)
             self.update()
             return
         if self._tool == "pen":
@@ -1382,7 +1492,7 @@ class DrawingCanvas(QWidget):
         elif self._tool == "eraser":
             self._try_erase_at(pos.x(), pos.y())
         elif self._tool == "path":
-            self._path_points.append(QPointF(pos))
+            self._path_points.append(self._snap_canvas_point(pos))
             self.repaint_requested.emit()
             self.update()
 
@@ -1479,7 +1589,7 @@ class DrawingCanvas(QWidget):
                 self.update()
                 return
         if self._selection_drag_start is not None and self._tool in {"rect_select", "ellipse_select", "crop"}:
-            self._selection_drag_current = QPointF(event.position())
+            self._selection_drag_current = self._snap_canvas_point(event.position())
             self.update()
             return
         if self._tool != "pen" or not self._current_points:
@@ -1533,7 +1643,7 @@ class DrawingCanvas(QWidget):
             self.update()
             return
         if self._selection_drag_start is not None and self._tool in {"rect_select", "ellipse_select", "crop"}:
-            self._selection_drag_current = QPointF(event.position())
+            self._selection_drag_current = self._snap_canvas_point(event.position())
             rect = self._selection_drag_rect()
             tool = self._selection_drag_tool or self._tool
             self._selection_drag_start = None
@@ -2435,6 +2545,11 @@ class PaintDialog(QDialog):
         }
         self._selected_channel = "RGB"
         self._selection_aspect_mode = "free"
+        self._quick_mask_enabled = False
+        self._grid_visible = False
+        self._snap_to_grid = False
+        self._grid_size_px = 64
+        self._magic_select_tolerance = 32
         self._mirror_x_enabled = False
         self._mirror_y_enabled = False
         self._selected_layer_id: str | None = None
@@ -2542,6 +2657,10 @@ class PaintDialog(QDialog):
         self._add_painter_menu_action(edit_menu, "Paste", self._paste_layer_clipboard, "Ctrl+V")
         self._add_painter_menu_action(edit_menu, "Delete", self._delete_selected_layer, "Del")
         edit_menu.addSeparator()
+        self._add_painter_menu_action(edit_menu, "Fill", lambda: self._fill_document("solid"))
+        self._add_painter_menu_action(edit_menu, "Gradient Fill", lambda: self._fill_document("gradient"))
+        self._add_painter_menu_action(edit_menu, "Pattern Fill", lambda: self._fill_document("pattern"))
+        edit_menu.addSeparator()
         self._add_painter_menu_action(edit_menu, "Clear All", self._clear_all)
 
         view_menu = menu_bar.addMenu("View")
@@ -2552,6 +2671,9 @@ class PaintDialog(QDialog):
         view_menu.addSeparator()
         self._add_painter_menu_action(view_menu, "Pan Tool", lambda: self._set_tool("pan"), "H")
         self._add_painter_menu_action(view_menu, "Reset Pan", self._reset_canvas_pan)
+        view_menu.addSeparator()
+        self._add_painter_menu_action(view_menu, "Show Grid", lambda: self._set_grid_options(visible=not self._grid_visible))
+        self._add_painter_menu_action(view_menu, "Snap To Grid", lambda: self._set_grid_options(snap=not self._snap_to_grid))
         view_menu.addSeparator()
         self._add_painter_menu_action(view_menu, "Mirror Drawing Horizontal", lambda: self._set_mirror_enabled(x=not self._mirror_x_enabled))
         self._add_painter_menu_action(view_menu, "Mirror Drawing Vertical", lambda: self._set_mirror_enabled(y=not self._mirror_y_enabled))
@@ -2577,13 +2699,20 @@ class PaintDialog(QDialog):
         self._add_painter_menu_action(layer_menu, "Toggle Visibility", self._toggle_selected_layer_visibility)
         self._add_painter_menu_action(layer_menu, "Toggle Lock", self._toggle_selected_layer_lock)
         layer_menu.addSeparator()
+        self._add_painter_menu_action(layer_menu, "Add White Mask", lambda: self._create_layer_mask("white"))
         self._add_painter_menu_action(layer_menu, "Add Mask From Selection", self._mask_selected_layer_from_selection)
         self._add_painter_menu_action(layer_menu, "Add Mask From Path", self._mask_selected_layer_from_path)
+        self._add_painter_menu_action(layer_menu, "Add Mask From Channel", lambda: self._create_layer_mask("channel"))
+        self._add_painter_menu_action(layer_menu, "Add Mask From Alpha", lambda: self._create_layer_mask("layer_alpha"))
 
         select_menu = menu_bar.addMenu("Select")
         self._add_painter_menu_action(select_menu, "All", self._select_all, "Ctrl+A")
         self._add_painter_menu_action(select_menu, "Deselect", self._deselect, "Ctrl+D")
         self._add_painter_menu_action(select_menu, "Inverse", self._invert_selection, "Ctrl+Shift+I")
+        select_menu.addSeparator()
+        self._add_painter_menu_action(select_menu, "Quick Mask", lambda: self._set_quick_mask_enabled(not self._quick_mask_enabled), "Q")
+        self._add_painter_menu_action(select_menu, "Magic Select", lambda: self._set_tool("magic_select"))
+        self._add_painter_menu_action(select_menu, "Select Similar From Center", lambda: self._select_by_color_at(0.5, 0.5))
         select_menu.addSeparator()
         self._add_painter_menu_action(select_menu, "Rectangular Marquee", lambda: self._set_tool("rect_select"), "M")
         self._add_painter_menu_action(select_menu, "Elliptical Marquee", lambda: self._set_tool("ellipse_select"))
@@ -3074,6 +3203,12 @@ class PaintDialog(QDialog):
         self.ellipse_select_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.ellipse_select_btn.clicked.connect(lambda: self._set_tool("ellipse_select"))
 
+        self.magic_select_btn = QPushButton("Magic Select")
+        self.magic_select_btn.setCheckable(True)
+        self.magic_select_btn.setObjectName("PaintTool")
+        self.magic_select_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.magic_select_btn.clicked.connect(lambda: self._set_tool("magic_select"))
+
         self.crop_btn = QPushButton("Crop")
         self.crop_btn.setCheckable(True)
         self.crop_btn.setObjectName("PaintTool")
@@ -3143,6 +3278,7 @@ class PaintDialog(QDialog):
         self._configure_paint_tool_icon_button(self.pan_btn, "hand", "Pan canvas")
         self._configure_paint_tool_icon_button(self.rect_select_btn, "marquee-rect", "Rectangular marquee")
         self._configure_paint_tool_icon_button(self.ellipse_select_btn, "marquee-ellipse", "Elliptical marquee")
+        self._configure_paint_tool_icon_button(self.magic_select_btn, "target", "Magic Select / Select by Color")
         self._configure_paint_tool_icon_button(self.crop_btn, "crop", "Crop")
         self._configure_paint_tool_icon_button(self.mirror_x_btn, "mirror-x", "Mirror drawing horizontally")
         self._configure_paint_tool_icon_button(self.mirror_y_btn, "mirror-y", "Mirror drawing vertically")
@@ -3159,6 +3295,7 @@ class PaintDialog(QDialog):
         tool_layout.addWidget(self.pan_btn)
         tool_layout.addWidget(self.rect_select_btn)
         tool_layout.addWidget(self.ellipse_select_btn)
+        tool_layout.addWidget(self.magic_select_btn)
         tool_layout.addWidget(self.crop_btn)
         tool_layout.addWidget(self.mirror_x_btn)
         tool_layout.addWidget(self.mirror_y_btn)
@@ -3236,6 +3373,7 @@ class PaintDialog(QDialog):
         self.canvas.stroke_added.connect(self._on_stroke_added)
         self.canvas.stroke_erased_at.connect(self._erase_stroke_direct)
         self.canvas.repaint_requested.connect(self._update_path_list)
+        self.canvas.selection_probe_requested.connect(self._on_canvas_selection_probe)
         self.canvas.installEventFilter(self)
 
         canvas_layout.addWidget(canvas_host, stretch=1)
@@ -3314,6 +3452,69 @@ class PaintDialog(QDialog):
         tool_action_row.addWidget(self.mask_selection_btn)
         tool_action_row.addWidget(self.deselect_option_btn)
         inspector_controls_layout.addLayout(tool_action_row)
+
+        view_action_row = QHBoxLayout()
+        view_action_row.setContentsMargins(0, 0, 0, 0)
+        self.quick_mask_btn = QPushButton("Quick Mask")
+        self.quick_mask_btn.setCheckable(True)
+        self.quick_mask_btn.setObjectName("PaintCustomColor")
+        self.quick_mask_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.quick_mask_btn.setToolTip("Toggle Photoshop-style Quick Mask overlay (Q)")
+        self.quick_mask_btn.clicked.connect(lambda checked: self._set_quick_mask_enabled(bool(checked)))
+        self.grid_view_btn = QPushButton("Grid")
+        self.grid_view_btn.setCheckable(True)
+        self.grid_view_btn.setObjectName("PaintCustomColor")
+        self.grid_view_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.grid_view_btn.setToolTip("Show canvas grid")
+        self.grid_view_btn.clicked.connect(lambda checked: self._set_grid_options(visible=bool(checked)))
+        self.snap_grid_btn = QPushButton("Snap")
+        self.snap_grid_btn.setCheckable(True)
+        self.snap_grid_btn.setObjectName("PaintCustomColor")
+        self.snap_grid_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.snap_grid_btn.setToolTip("Snap marquee and path points to the grid")
+        self.snap_grid_btn.clicked.connect(lambda checked: self._set_grid_options(snap=bool(checked)))
+        view_action_row.addWidget(self.quick_mask_btn)
+        view_action_row.addWidget(self.grid_view_btn)
+        view_action_row.addWidget(self.snap_grid_btn)
+        inspector_controls_layout.addLayout(view_action_row)
+
+        magic_row = QHBoxLayout()
+        magic_row.setContentsMargins(0, 0, 0, 0)
+        magic_label = QLabel("Magic Tol")
+        magic_label.setObjectName("PaintMeta")
+        self._magic_tolerance_value_label = QLabel(f"{self._magic_select_tolerance}")
+        self._magic_tolerance_value_label.setObjectName("PaintValue")
+        magic_row.addWidget(magic_label)
+        magic_row.addStretch(1)
+        magic_row.addWidget(self._magic_tolerance_value_label)
+        inspector_controls_layout.addLayout(magic_row)
+        self.magic_tolerance_slider = QSlider(Qt.Orientation.Horizontal)
+        self.magic_tolerance_slider.setRange(0, 100)
+        self.magic_tolerance_slider.setValue(self._magic_select_tolerance)
+        self.magic_tolerance_slider.valueChanged.connect(self._on_magic_tolerance_changed)
+        inspector_controls_layout.addWidget(self.magic_tolerance_slider)
+
+        fill_action_row = QHBoxLayout()
+        fill_action_row.setContentsMargins(0, 0, 0, 0)
+        self.fill_solid_btn = QPushButton("Fill")
+        self.fill_solid_btn.setObjectName("PaintCustomColor")
+        self.fill_solid_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.fill_solid_btn.setToolTip("Fill selection or canvas with current color")
+        self.fill_solid_btn.clicked.connect(lambda: self._fill_document("solid"))
+        self.fill_gradient_btn = QPushButton("Gradient")
+        self.fill_gradient_btn.setObjectName("PaintCustomColor")
+        self.fill_gradient_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.fill_gradient_btn.setToolTip("Fill selection or canvas with a soft current-color gradient")
+        self.fill_gradient_btn.clicked.connect(lambda: self._fill_document("gradient"))
+        self.fill_pattern_btn = QPushButton("Pattern")
+        self.fill_pattern_btn.setObjectName("PaintCustomColor")
+        self.fill_pattern_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.fill_pattern_btn.setToolTip("Fill selection or canvas with a compact diagonal pattern")
+        self.fill_pattern_btn.clicked.connect(lambda: self._fill_document("pattern"))
+        fill_action_row.addWidget(self.fill_solid_btn)
+        fill_action_row.addWidget(self.fill_gradient_btn)
+        fill_action_row.addWidget(self.fill_pattern_btn)
+        inspector_controls_layout.addLayout(fill_action_row)
 
         inspector_controls_layout.addWidget(brush_title)
 
@@ -4006,7 +4207,15 @@ class PaintDialog(QDialog):
     # ---------- tool actions ----------
 
     def _set_tool(self, tool: str) -> None:
-        canvas_tool = tool if tool in ("pen", "eraser", "path", "rect_select", "ellipse_select", "crop") else "off"
+        canvas_tool = tool if tool in (
+            "pen",
+            "eraser",
+            "path",
+            "rect_select",
+            "ellipse_select",
+            "crop",
+            "magic_select",
+        ) else "off"
         self.canvas.set_tool(canvas_tool)
         self.select_btn.setChecked(tool == "select")
         if hasattr(self, "pan_btn"):
@@ -4015,6 +4224,8 @@ class PaintDialog(QDialog):
             self.rect_select_btn.setChecked(tool == "rect_select")
         if hasattr(self, "ellipse_select_btn"):
             self.ellipse_select_btn.setChecked(tool == "ellipse_select")
+        if hasattr(self, "magic_select_btn"):
+            self.magic_select_btn.setChecked(tool == "magic_select")
         if hasattr(self, "crop_btn"):
             self.crop_btn.setChecked(tool == "crop")
         self.pen_btn.setChecked(tool == "pen")
@@ -4036,6 +4247,7 @@ class PaintDialog(QDialog):
                 "path": "Path: click points, double-click to commit",
                 "rect_select": "Rectangular marquee",
                 "ellipse_select": "Elliptical marquee",
+                "magic_select": "Magic Select: click a color region",
                 "crop": "Crop: drag a crop area, then Image > Crop To Selection",
             }
             self._tool_status_label.setText(labels.get(tool, "Select / move objects"))
@@ -4076,6 +4288,71 @@ class PaintDialog(QDialog):
             self._tool_status_label.setText(f"Selection ratio: {selected}")
         return selected
 
+    def _set_quick_mask_enabled(self, enabled: bool | None = None) -> bool:
+        if enabled is None:
+            enabled = not bool(getattr(self, "_quick_mask_enabled", False))
+        self._quick_mask_enabled = bool(enabled)
+        if hasattr(self, "quick_mask_btn"):
+            self.quick_mask_btn.blockSignals(True)
+            try:
+                self.quick_mask_btn.setChecked(self._quick_mask_enabled)
+            finally:
+                self.quick_mask_btn.blockSignals(False)
+        if hasattr(self, "canvas"):
+            self.canvas.set_quick_mask_enabled(self._quick_mask_enabled)
+        if hasattr(self, "_tool_status_label"):
+            self._tool_status_label.setText(
+                "Quick Mask on" if self._quick_mask_enabled else "Quick Mask off"
+            )
+        return self._quick_mask_enabled
+
+    def _set_grid_options(
+        self,
+        *,
+        visible: bool | None = None,
+        snap: bool | None = None,
+        size_px: int | None = None,
+    ) -> dict[str, bool | int]:
+        if visible is not None:
+            self._grid_visible = bool(visible)
+        if snap is not None:
+            self._snap_to_grid = bool(snap)
+        if size_px is not None:
+            self._grid_size_px = max(4, min(512, int(size_px or 64)))
+        if hasattr(self, "grid_view_btn"):
+            self.grid_view_btn.blockSignals(True)
+            try:
+                self.grid_view_btn.setChecked(bool(self._grid_visible))
+            finally:
+                self.grid_view_btn.blockSignals(False)
+        if hasattr(self, "snap_grid_btn"):
+            self.snap_grid_btn.blockSignals(True)
+            try:
+                self.snap_grid_btn.setChecked(bool(self._snap_to_grid))
+            finally:
+                self.snap_grid_btn.blockSignals(False)
+        if hasattr(self, "canvas"):
+            self.canvas.set_grid_options(
+                visible=bool(self._grid_visible),
+                snap=bool(self._snap_to_grid),
+                size_px=int(self._grid_size_px),
+            )
+        if hasattr(self, "_tool_status_label"):
+            self._tool_status_label.setText(
+                f"Grid {'on' if self._grid_visible else 'off'} / "
+                f"Snap {'on' if self._snap_to_grid else 'off'}"
+            )
+        return {
+            "visible": bool(self._grid_visible),
+            "snap": bool(self._snap_to_grid),
+            "size_px": int(self._grid_size_px),
+        }
+
+    def _on_magic_tolerance_changed(self, value: int) -> None:
+        self._magic_select_tolerance = max(0, min(100, int(value or 0)))
+        if hasattr(self, "_magic_tolerance_value_label"):
+            self._magic_tolerance_value_label.setText(str(self._magic_select_tolerance))
+
     def _set_mirror_enabled(
         self,
         *,
@@ -4110,12 +4387,20 @@ class PaintDialog(QDialog):
         current_tool = str(getattr(self.canvas, "_tool", "off") if hasattr(self, "canvas") else "off")
         if hasattr(self, "selection_aspect_combo"):
             self.selection_aspect_combo.setEnabled(current_tool in {"rect_select", "ellipse_select", "crop"})
+        if hasattr(self, "magic_tolerance_slider"):
+            self.magic_tolerance_slider.setEnabled(current_tool == "magic_select")
         if hasattr(self, "crop_apply_btn"):
             self.crop_apply_btn.setEnabled(has_selection)
         if hasattr(self, "mask_selection_btn"):
             self.mask_selection_btn.setEnabled(has_selection and self._selected_layer_id != "background")
         if hasattr(self, "deselect_option_btn"):
             self.deselect_option_btn.setEnabled(has_selection)
+        if hasattr(self, "quick_mask_btn"):
+            self.quick_mask_btn.setChecked(bool(getattr(self, "_quick_mask_enabled", False)))
+        if hasattr(self, "grid_view_btn"):
+            self.grid_view_btn.setChecked(bool(getattr(self, "_grid_visible", False)))
+        if hasattr(self, "snap_grid_btn"):
+            self.snap_grid_btn.setChecked(bool(getattr(self, "_snap_to_grid", False)))
 
     def _apply_crop_if_crop_tool(self) -> None:
         current_tool = str(getattr(self.canvas, "_tool", "off") if hasattr(self, "canvas") else "off")
@@ -5311,6 +5596,224 @@ class PaintDialog(QDialog):
         self._update_channel_list()
         return True
 
+    def _on_canvas_selection_probe(self, kind: str, x_norm: float, y_norm: float) -> None:
+        if str(kind or "") == "color":
+            self._select_by_color_at(x_norm, y_norm)
+
+    def _select_by_color_at(
+        self,
+        x_norm: float,
+        y_norm: float,
+        *,
+        tolerance: int | None = None,
+    ) -> bool:
+        if not self._bg_pixmap_source or self._bg_pixmap_source.isNull():
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText("Magic Select needs a raster background")
+            return False
+        image = self._bg_pixmap_source.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+        width = max(1, image.width())
+        height = max(1, image.height())
+        px = max(0, min(width - 1, int(round(float(x_norm) * (width - 1)))))
+        py = max(0, min(height - 1, int(round(float(y_norm) * (height - 1)))))
+        target = image.pixelColor(px, py)
+        tol = max(0, min(100, int(tolerance if tolerance is not None else self._magic_select_tolerance)))
+        threshold = max(0, min(255, int(round(tol * 2.55))))
+        threshold_sq = threshold * threshold * 3
+        step = max(1, int(math.ceil(max(width, height) / 768.0)))
+        min_x = width
+        min_y = height
+        max_x = -1
+        max_y = -1
+        for y in range(0, height, step):
+            for x in range(0, width, step):
+                color = image.pixelColor(x, y)
+                if color.alpha() < 4 and target.alpha() >= 4:
+                    continue
+                dr = color.red() - target.red()
+                dg = color.green() - target.green()
+                db = color.blue() - target.blue()
+                if dr * dr + dg * dg + db * db <= threshold_sq:
+                    min_x = min(min_x, x)
+                    min_y = min(min_y, y)
+                    max_x = max(max_x, min(width - 1, x + step))
+                    max_y = max(max_y, min(height - 1, y + step))
+        if max_x < min_x or max_y < min_y:
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText("Magic Select found no similar color")
+            return False
+        self._push_undo_state("Magic select")
+        self.canvas.select_rectangle(
+            min_x / width,
+            min_y / height,
+            max_x / width,
+            max_y / height,
+            shape="rect",
+            aspect="free",
+        )
+        self._selected_path_item_id = "selection"
+        self._update_path_list()
+        self._set_tool("magic_select")
+        if hasattr(self, "_tool_status_label"):
+            self._tool_status_label.setText(
+                f"Magic Select tolerance {tol}: selected similar color bounds"
+            )
+        return True
+
+    def _selection_path_for_document(self, width: int, height: int) -> QPainterPath | None:
+        if not hasattr(self, "canvas") or not self.canvas.has_active_selection():
+            return None
+        points = self.canvas.selection_snapshot()
+        if len(points) < 3:
+            return None
+        path = QPainterPath()
+        path.moveTo(points[0][0] * width, points[0][1] * height)
+        for x, y in points[1:]:
+            path.lineTo(float(x) * width, float(y) * height)
+        path.closeSubpath()
+        if self.canvas.selection_inverted():
+            full = QPainterPath()
+            full.addRect(QRectF(0, 0, width, height))
+            return full.subtracted(path)
+        return path
+
+    def _fill_document(
+        self,
+        style: str = "solid",
+        *,
+        color1: str | QColor | None = None,
+        color2: str | QColor | None = None,
+    ) -> bool:
+        width, height = self._canvas_document_size
+        if not self._bg_pixmap_source or self._bg_pixmap_source.isNull():
+            self._bg_pixmap_source = create_blank_paint_pixmap(width, height, "transparent")
+        self._push_undo_state(f"{str(style or 'solid').title()} fill")
+        pixmap = QPixmap(self._bg_pixmap_source)
+        painter = QPainter(pixmap)
+        try:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+            selection_path = self._selection_path_for_document(pixmap.width(), pixmap.height())
+            if selection_path is not None:
+                painter.setClipPath(selection_path)
+            base = QColor(color1) if color1 is not None else QColor(self._pen_color)
+            if not base.isValid():
+                base = QColor(self._pen_color)
+            accent = QColor(color2) if color2 is not None else QColor(base).lighter(136)
+            if not accent.isValid():
+                accent = QColor(base).lighter(136)
+            mode = str(style or "solid").strip().casefold()
+            rect = QRectF(0, 0, pixmap.width(), pixmap.height())
+            if mode == "gradient":
+                gradient = QLinearGradient(0, 0, pixmap.width(), pixmap.height())
+                gradient.setColorAt(0.0, accent)
+                gradient.setColorAt(0.52, base)
+                gradient.setColorAt(1.0, QColor(base).darker(132))
+                painter.fillRect(rect, QBrush(gradient))
+            elif mode == "pattern":
+                painter.fillRect(rect, QColor(base).darker(118))
+                line_pen = QPen(QColor(accent), max(2, int(max(width, height) / 360)))
+                line_pen.setCosmetic(True)
+                painter.setPen(line_pen)
+                spacing = max(14, int(max(width, height) / 80))
+                for offset in range(-pixmap.height(), pixmap.width() + pixmap.height(), spacing):
+                    painter.drawLine(
+                        QPointF(offset, pixmap.height()),
+                        QPointF(offset + pixmap.height(), 0),
+                    )
+            else:
+                painter.fillRect(rect, base)
+        finally:
+            painter.end()
+        self._bg_pixmap_source = pixmap
+        self._background_layer_present = True
+        self._update_canvas_geometry()
+        self._update_channel_list()
+        if hasattr(self, "_tool_status_label"):
+            target = "selection" if self.canvas.has_active_selection() else "canvas"
+            self._tool_status_label.setText(f"{str(style or 'solid').title()} filled {target}")
+        return True
+
+    def _mask_points_from_channel(
+        self,
+        channel: str,
+        *,
+        threshold: int = 8,
+    ) -> list[tuple[float, float]]:
+        if not self._bg_pixmap_source or self._bg_pixmap_source.isNull():
+            return []
+        image = self._bg_pixmap_source.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+        width = max(1, image.width())
+        height = max(1, image.height())
+        step = max(1, int(math.ceil(max(width, height) / 768.0)))
+        min_x = width
+        min_y = height
+        max_x = -1
+        max_y = -1
+        channel_name = str(channel or "Alpha")
+        for y in range(0, height, step):
+            for x in range(0, width, step):
+                color = image.pixelColor(x, y)
+                if channel_name == "Red":
+                    value = color.red()
+                elif channel_name == "Green":
+                    value = color.green()
+                elif channel_name == "Blue":
+                    value = color.blue()
+                elif channel_name == "RGB":
+                    value = max(color.red(), color.green(), color.blue())
+                else:
+                    value = color.alpha()
+                if value > threshold:
+                    min_x = min(min_x, x)
+                    min_y = min(min_y, y)
+                    max_x = max(max_x, min(width - 1, x + step))
+                    max_y = max(max_y, min(height - 1, y + step))
+        if max_x < min_x or max_y < min_y:
+            return []
+        return [
+            (min_x / width, min_y / height),
+            (max_x / width, min_y / height),
+            (max_x / width, max_y / height),
+            (min_x / width, max_y / height),
+        ]
+
+    def _create_layer_mask(
+        self,
+        mask_type: str = "selection",
+        layer_id: str | None = None,
+    ) -> bool:
+        if layer_id and not self._select_paint_layer_by_id(layer_id):
+            return False
+        layer = self._paint_layer_by_id(self._current_layer_id()) or self._active_paint_layer()
+        if layer.locked:
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText(tr("paint.layer.locked_status"))
+            return False
+        mode = str(mask_type or "selection").strip().casefold().replace("-", "_")
+        points: list[tuple[float, float]]
+        if mode in {"white", "reveal_all", "all"}:
+            points = [(0.0, 0.0), (1.0, 0.0), (1.0, 1.0), (0.0, 1.0)]
+        elif mode in {"path", "from_path"}:
+            points = self._path_points_for_item_id(self._selected_path_item_id)
+        elif mode in {"channel", "from_channel"}:
+            points = self._mask_points_from_channel(self._selected_channel)
+        elif mode in {"alpha", "layer_alpha", "from_alpha"}:
+            points = self._mask_points_from_channel("Alpha")
+        else:
+            points = self.canvas.selection_snapshot() if hasattr(self, "canvas") else []
+        if len(points) < 3:
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText(f"Layer mask needs {mode} pixels or points")
+            return False
+        self._push_undo_state("Layer mask")
+        layer.mask = copy.deepcopy(points)
+        layer.mask_enabled = True
+        self._sync_canvas_layer_view()
+        self._update_inspector_counts()
+        if hasattr(self, "_tool_status_label"):
+            self._tool_status_label.setText(f"Layer mask from {mode}")
+        return True
+
     def _selection_bounds(self) -> tuple[float, float, float, float] | None:
         if not hasattr(self, "canvas") or not self.canvas.has_active_selection():
             return None
@@ -5568,21 +6071,7 @@ class PaintDialog(QDialog):
             self._resize_canvas_document(width, height)
 
     def _mask_selected_layer_from_selection(self) -> bool:
-        if not hasattr(self, "canvas") or not self.canvas.has_active_selection():
-            if hasattr(self, "_tool_status_label"):
-                self._tool_status_label.setText("Layer mask needs an active selection")
-            return False
-        layer = self._paint_layer_by_id(self._current_layer_id()) or self._active_paint_layer()
-        if layer.locked:
-            if hasattr(self, "_tool_status_label"):
-                self._tool_status_label.setText(tr("paint.layer.locked_status"))
-            return False
-        self._push_undo_state("Layer mask from selection")
-        layer.mask = copy.deepcopy(self.canvas.selection_snapshot())
-        layer.mask_enabled = True
-        self._sync_canvas_layer_view()
-        self._update_inspector_counts()
-        return True
+        return self._create_layer_mask("selection")
 
     def _mask_selected_layer_from_path(self) -> bool:
         item = self._path_list.currentItem() if hasattr(self, "_path_list") else None
@@ -5590,22 +6079,7 @@ class PaintDialog(QDialog):
             self._selected_path_item_id = str(
                 item.data(Qt.ItemDataRole.UserRole) or self._selected_path_item_id
             )
-        points = self._path_points_for_item_id(self._selected_path_item_id)
-        if len(points) < 3:
-            if hasattr(self, "_tool_status_label"):
-                self._tool_status_label.setText("Layer mask needs a closed path")
-            return False
-        layer = self._paint_layer_by_id(self._current_layer_id()) or self._active_paint_layer()
-        if layer.locked:
-            if hasattr(self, "_tool_status_label"):
-                self._tool_status_label.setText(tr("paint.layer.locked_status"))
-            return False
-        self._push_undo_state("Layer mask from path")
-        layer.mask = copy.deepcopy(points)
-        layer.mask_enabled = True
-        self._sync_canvas_layer_view()
-        self._update_inspector_counts()
-        return True
+        return self._create_layer_mask("path")
 
     def _install_edit_shortcuts(self) -> None:
         shortcuts = (
@@ -5618,6 +6092,7 @@ class PaintDialog(QDialog):
             ("Ctrl+J", self._duplicate_selected_layer),
             ("Ctrl+A", self._select_all),
             ("Ctrl+Shift+I", self._invert_selection),
+            ("Q", lambda: self._set_quick_mask_enabled(not self._quick_mask_enabled)),
             ("Ctrl++", self._zoom_in),
             ("Ctrl+=", self._zoom_in),
             ("Ctrl+-", self._zoom_out),
@@ -6187,6 +6662,9 @@ class PaintDialog(QDialog):
         select_all_action = menu.addAction("Select All")
         deselect_action = menu.addAction("Deselect")
         crop_action = menu.addAction("Crop To Selection")
+        fill_action = menu.addAction("Fill")
+        gradient_action = menu.addAction("Gradient Fill")
+        pattern_action = menu.addAction("Pattern Fill")
         menu.addSeparator()
         zoom_in_action = menu.addAction("Zoom In")
         zoom_out_action = menu.addAction("Zoom Out")
@@ -6209,6 +6687,9 @@ class PaintDialog(QDialog):
         deselect_action.triggered.connect(self._deselect)
         crop_action.setEnabled(bool(self._selection_bounds()))
         crop_action.triggered.connect(self._crop_to_selection)
+        fill_action.triggered.connect(lambda: self._fill_document("solid"))
+        gradient_action.triggered.connect(lambda: self._fill_document("gradient"))
+        pattern_action.triggered.connect(lambda: self._fill_document("pattern"))
         zoom_in_action.triggered.connect(self._zoom_in)
         zoom_out_action.triggered.connect(self._zoom_out)
         zoom_fit_action.triggered.connect(self._zoom_fit)
@@ -6385,6 +6866,9 @@ class PaintDialog(QDialog):
                 "zoom_percent": int(round(float(getattr(self, "_canvas_zoom", 1.0)) * 100)),
                 "pan_x": int(getattr(self, "_canvas_pan", QPoint(0, 0)).x()),
                 "pan_y": int(getattr(self, "_canvas_pan", QPoint(0, 0)).y()),
+                "grid_visible": bool(getattr(self, "_grid_visible", False)),
+                "snap_to_grid": bool(getattr(self, "_snap_to_grid", False)),
+                "grid_size_px": int(getattr(self, "_grid_size_px", 64)),
             },
             "layers": [
                 {
@@ -6416,6 +6900,8 @@ class PaintDialog(QDialog):
                 "active": bool(self.canvas.has_active_selection()) if hasattr(self, "canvas") else False,
                 "point_count": int(self.canvas.selection_point_count()) if hasattr(self, "canvas") else 0,
                 "inverted": bool(self.canvas.selection_inverted()) if hasattr(self, "canvas") else False,
+                "quick_mask_enabled": bool(getattr(self, "_quick_mask_enabled", False)),
+                "magic_tolerance": int(getattr(self, "_magic_select_tolerance", 32)),
             },
             "paths": {
                 "selected_path_id": str(self._selected_path_item_id),

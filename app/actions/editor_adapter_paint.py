@@ -79,6 +79,22 @@ class PaintAdapterMixin:
             dialog._pan_canvas_by(QPoint(int(dx or 0), int(dy or 0)))
         return dialog.painter_action_state()
 
+    def paint_view_grid(
+        self,
+        *,
+        visible: bool | None = None,
+        snap: bool | None = None,
+        size_px: int | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._set_grid_options(visible=visible, snap=snap, size_px=size_px)
+        return dialog.painter_action_state()
+
+    def paint_quick_mask_set(self, *, enabled: bool = True) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._set_quick_mask_enabled(bool(enabled))
+        return dialog.painter_action_state()
+
     def paint_layer_add(self, *, name: str = "") -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         dialog._new_paint_layer(str(name or "") or None)
@@ -213,6 +229,18 @@ class PaintAdapterMixin:
         dialog._set_selection_aspect_mode(str(aspect or "free"))
         return dialog.painter_action_state()
 
+    def paint_selection_select_by_color(
+        self,
+        *,
+        x: float = 0.5,
+        y: float = 0.5,
+        tolerance: int | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if not dialog._select_by_color_at(float(x), float(y), tolerance=tolerance):
+            raise ValueError("Magic Select could not create a color selection")
+        return dialog.painter_action_state()
+
     def paint_crop_to_selection(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         if not dialog._crop_to_selection():
@@ -241,6 +269,29 @@ class PaintAdapterMixin:
         dialog._flip_canvas(horizontal=value in {"horizontal", "x"})
         return dialog.painter_action_state()
 
+    def paint_fill_solid(self, *, color: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._fill_document("solid", color1=str(color or "") or None)
+        return dialog.painter_action_state()
+
+    def paint_fill_gradient(self, *, color1: str = "", color2: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._fill_document(
+            "gradient",
+            color1=str(color1 or "") or None,
+            color2=str(color2 or "") or None,
+        )
+        return dialog.painter_action_state()
+
+    def paint_fill_pattern(self, *, color1: str = "", color2: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._fill_document(
+            "pattern",
+            color1=str(color1 or "") or None,
+            color2=str(color2 or "") or None,
+        )
+        return dialog.painter_action_state()
+
     def paint_mirror_set(self, *, x: bool | None = None, y: bool | None = None) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         dialog._set_mirror_enabled(x=x, y=y)
@@ -262,6 +313,17 @@ class PaintAdapterMixin:
             dialog._selected_path_item_id = str(path_id)
         if not dialog._mask_selected_layer_from_path():
             raise ValueError("layer mask from path requires a path with at least 3 points")
+        return dialog.painter_action_state()
+
+    def paint_layer_mask_create(
+        self,
+        *,
+        layer_id: str = "",
+        mask_type: str = "selection",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if not dialog._create_layer_mask(str(mask_type or "selection"), layer_id or None):
+            raise ValueError("layer mask creation requires valid mask source pixels or points")
         return dialog.painter_action_state()
 
     def paint_path_to_selection(self, *, path_id: str = "") -> dict[str, Any]:
@@ -330,6 +392,9 @@ class PaintAdapterMixin:
             "ellipse_select": "ellipse_select",
             "ellipse": "ellipse_select",
             "marquee_ellipse": "ellipse_select",
+            "magic_select": "magic_select",
+            "magic_wand": "magic_select",
+            "select_color": "magic_select",
             "crop": "crop",
             "pan": "pan",
             "select": "select",

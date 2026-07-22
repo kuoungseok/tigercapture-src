@@ -165,6 +165,25 @@ Window:
   Crop To Selection, Zoom In / Out / Fit / Reset Pan을 제공한다.
 - Pan, zoom, window resize, checkerboard transparent background를 지원한다.
 
+### 2026-07-23 Photoshop식 보강
+
+- Quick Mask: `Q` 단축키, `Quick Mask` 버튼, `paint.quick_mask.set` 액션으로
+  선택 영역 바깥을 붉은 오버레이로 확인한다.
+- Magic Select / Select by Color: 좌측 툴바의 Magic Select와
+  `paint.selection.select_by_color` 액션으로 샘플 색상과 유사한 영역을 선택한다.
+  현재 구현은 빠른 자동화를 위해 픽셀 유사 영역의 bounding selection을 만든다.
+- Grid / Snap: `Grid`, `Snap` 버튼과 `paint.view.grid` 액션으로 선택 영역과 패스
+  포인트를 격자에 맞춘다.
+- Fill / Gradient / Pattern: `Fill`, `Gradient`, `Pattern` 버튼과
+  `paint.fill.solid`, `paint.fill.gradient`, `paint.fill.pattern` 액션으로 선택 영역
+  또는 전체 캔버스의 배경 래스터를 채운다.
+- Layer Mask Create: `paint.layer.mask_create`는 selection, path, channel, alpha,
+  white/reveal-all 마스크 생성을 지원한다.
+
+구현 경계: 현재 Fill 계열은 배경 래스터에 적용된다. Photoshop식 독립 raster layer,
+Clone/Heal, Content-Aware Fill, true contiguous Magic Wand, Color Range preview는 다음
+브러시/픽셀 엔진 단계에서 분리 구현한다.
+
 ## GIMP식 UX 회피 원칙
 
 사용자가 GIMP를 불편하게 느끼는 지점은 기능 수가 아니라 상태와 조작 결과가
@@ -191,6 +210,8 @@ Painter 기능은 로컬 AI, Claude, MCP, review automation이 직접 조작할 
 - `paint.document.export_png`
 - `paint.view.zoom`
 - `paint.view.pan`
+- `paint.view.grid`
+- `paint.quick_mask.set`
 - `paint.tool.set`
 - `paint.window.show_panel`
 - `paint.layer.add`
@@ -214,6 +235,7 @@ Painter 기능은 로컬 AI, Claude, MCP, review automation이 직접 조작할 
 - `paint.selection.rectangle`
 - `paint.selection.ellipse`
 - `paint.selection.set_aspect`
+- `paint.selection.select_by_color`
 - `paint.selection.to_path`
 - `paint.path.to_selection`
 - `paint.path.create`
@@ -224,7 +246,11 @@ Painter 기능은 로컬 AI, Claude, MCP, review automation이 직접 조작할 
 - `paint.image.resize`
 - `paint.canvas.resize`
 - `paint.canvas.flip`
+- `paint.fill.solid`
+- `paint.fill.gradient`
+- `paint.fill.pattern`
 - `paint.mirror.set`
+- `paint.layer.mask_create`
 - `paint.clipboard.copy`
 - `paint.clipboard.cut`
 - `paint.clipboard.paste`
@@ -237,16 +263,17 @@ AI 적용 원칙:
 
 ## 남은 구현 우선순위
 
-1. 선택 영역 제한 브러시/지우개/Fill/Delete
-2. Lasso, Polygonal Lasso, Magic Wand, Color Range
+1. 선택 영역 제한 브러시/지우개/Delete와 독립 raster layer fill
+2. Lasso, Polygonal Lasso, true contiguous Magic Wand, Color Range preview
 3. Crop overlay handles와 crop option bar
 4. Layer thumbnail, drag reorder, group, merge down, flatten image
 5. Levels, Curves, Hue/Saturation, Brightness/Contrast UI와 기존 Color Grade 모듈 재사용
 6. Save Selection as Channel, Channel to Selection, Alpha mask round-trip
 7. `.tpaint` 프로젝트 저장/재열기와 PSD/Photopea 호환 export 후보 조사
 8. Brush engine 확장: texture brush, imported brush tip, pressure profile
-9. Ruler, guide, snap, grid, navigator
-10. Keyboard parity: M, Shift+M, B, E, C, P, V, H, Z
+9. Ruler, guide lines, snap variants, navigator
+10. Clone/Heal, Content-Aware Fill, perspective/warp transform
+11. Keyboard parity: M, Shift+M, B, E, C, P, V, H, Z
 
 ## QA 기준
 

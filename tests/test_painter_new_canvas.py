@@ -98,6 +98,8 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog.rect_select_btn.toolTip() == "Rectangular marquee"
     assert dialog.ellipse_select_btn.text() == ""
     assert dialog.ellipse_select_btn.toolTip() == "Elliptical marquee"
+    assert dialog.magic_select_btn.text() == ""
+    assert dialog.magic_select_btn.toolTip() == "Magic Select / Select by Color"
     assert dialog.crop_btn.text() == ""
     assert dialog.crop_btn.toolTip() == "Crop"
     assert dialog.pen_btn.text() == ""
@@ -108,6 +110,7 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert not dialog.pan_btn.icon().isNull()
     assert not dialog.rect_select_btn.icon().isNull()
     assert not dialog.ellipse_select_btn.icon().isNull()
+    assert not dialog.magic_select_btn.icon().isNull()
     assert not dialog.crop_btn.icon().isNull()
     assert not dialog.mirror_x_btn.icon().isNull()
     assert not dialog.mirror_y_btn.icon().isNull()
@@ -119,6 +122,10 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert not dialog.brush_library_list.item(0).icon().isNull()
     assert dialog.selection_aspect_combo.parent() is dialog._paint_inspector_controls
     assert dialog.crop_apply_btn.parent() is dialog._paint_inspector_controls
+    assert dialog.quick_mask_btn.parent() is dialog._paint_inspector_controls
+    assert dialog.grid_view_btn.parent() is dialog._paint_inspector_controls
+    assert dialog.snap_grid_btn.parent() is dialog._paint_inspector_controls
+    assert dialog.magic_tolerance_slider.parent() is dialog._paint_inspector_controls
     assert dialog.toggle_channel_visibility_btn.toolTip()
     assert dialog._layer_channel_path_tabs.count() == 4
     assert [
@@ -194,6 +201,15 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeyp
     dialog._set_tool("crop")
     assert dialog.crop_btn.isChecked()
     assert dialog.crop_apply_btn.isEnabled() is False
+    dialog._set_tool("magic_select")
+    assert dialog.magic_select_btn.isChecked()
+    assert dialog.magic_tolerance_slider.isEnabled()
+    dialog._set_quick_mask_enabled(True)
+    assert dialog.quick_mask_btn.isChecked()
+    dialog._set_grid_options(visible=True, snap=True, size_px=32)
+    assert dialog.grid_view_btn.isChecked()
+    assert dialog.snap_grid_btn.isChecked()
+    assert dialog.canvas.grid_options()["size_px"] == 32
     dialog._set_zoom_percent(200)
     dialog._pan_canvas_by(QPoint(40, 20))
     assert dialog._canvas_pan != QPoint(0, 0)

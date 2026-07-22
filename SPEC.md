@@ -6064,6 +6064,11 @@ AI Script Edit MVP integration:
   actions must round-trip selection/path geometry through
   `paint.selection.to_path`, `paint.path.to_selection`,
   `paint.layer.mask_from_selection`, and `paint.layer.mask_from_path`.
+- Standalone Painter also exposes the Photoshop-style selection/view helpers
+  added in the 2026-07-23 Painter pass: Quick Mask is available through the
+  visible `Quick Mask` control, `Q`, and `paint.quick_mask.set`; Magic Select
+  uses `paint.selection.select_by_color` to build a fast similar-color bounding
+  selection; and grid/snap state is controlled by `paint.view.grid`.
 - Painter image and channel automation must stay exposed through
   `paint.crop.to_selection`, `paint.image.resize`, `paint.canvas.resize`,
   `paint.canvas.flip`, `paint.mirror.set`, `paint.channel.select`,
@@ -6071,6 +6076,11 @@ AI Script Edit MVP integration:
   copy/paste targets RGB, Red, Green, Blue, or Alpha and uses the system
   image clipboard so AI workflows can move raster channel data without a
   visible dialog.
+- Painter fill/mask automation must stay exposed through `paint.fill.solid`,
+  `paint.fill.gradient`, `paint.fill.pattern`, and `paint.layer.mask_create`.
+  Current fill operations target the document background raster or active
+  selection clip; true independent raster-layer fill, Clone/Heal, and
+  content-aware operations are later pixel-engine work, not current claims.
 - Standalone Painter must avoid GIMP-style ambiguous state changes: channel row
   clicks select the channel only, visibility changes require the explicit eye
   control or `paint.channel.set_visible`, tool-specific controls live in a

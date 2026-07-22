@@ -33,6 +33,8 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
         "paint.document.export_png",
         "paint.view.zoom",
         "paint.view.pan",
+        "paint.view.grid",
+        "paint.quick_mask.set",
         "paint.tool.set",
         "paint.window.show_panel",
         "paint.layer.add",
@@ -55,13 +57,18 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
         "paint.selection.rectangle",
         "paint.selection.ellipse",
         "paint.selection.set_aspect",
+        "paint.selection.select_by_color",
         "paint.crop.to_selection",
         "paint.image.resize",
         "paint.canvas.resize",
         "paint.canvas.flip",
+        "paint.fill.solid",
+        "paint.fill.gradient",
+        "paint.fill.pattern",
         "paint.mirror.set",
         "paint.layer.mask_from_selection",
         "paint.layer.mask_from_path",
+        "paint.layer.mask_create",
         "paint.path.to_selection",
         "paint.path.create",
         "paint.path.delete",
@@ -96,6 +103,19 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     panel = registry.execute("paint.window.show_panel", {"panel": "paths"}).to_dict()
     assert panel["ok"]
     assert dialog._layer_channel_path_tabs.currentIndex() == 2
+
+    grid = registry.execute(
+        "paint.view.grid",
+        {"visible": True, "snap": True, "size_px": 48},
+    ).to_dict()
+    assert grid["ok"]
+    assert grid["result"]["view"]["grid_visible"] is True
+    assert grid["result"]["view"]["snap_to_grid"] is True
+    assert grid["result"]["view"]["grid_size_px"] == 48
+
+    quick = registry.execute("paint.quick_mask.set", {"enabled": True}).to_dict()
+    assert quick["ok"]
+    assert quick["result"]["selection"]["quick_mask_enabled"] is True
 
     renamed = registry.execute(
         "paint.layer.rename",
@@ -205,6 +225,13 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     aspect = registry.execute("paint.selection.set_aspect", {"aspect": "square"}).to_dict()
     assert aspect["ok"]
     assert aspect["result"]["selection_aspect"] == "square"
+    color_selection = registry.execute(
+        "paint.selection.select_by_color",
+        {"x": 0.5, "y": 0.5, "tolerance": 12},
+    ).to_dict()
+    assert color_selection["ok"]
+    assert color_selection["result"]["selection"]["active"] is True
+    assert color_selection["result"]["tool"] == "magic_select"
     rectangle = registry.execute(
         "paint.selection.rectangle",
         {"x1": 0.1, "y1": 0.1, "x2": 0.4, "y2": 0.35, "aspect": "free"},
@@ -236,6 +263,24 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     assert resized_canvas["result"]["document"]["width"] == 960
     flipped = registry.execute("paint.canvas.flip", {"axis": "horizontal"}).to_dict()
     assert flipped["ok"]
+    solid = registry.execute("paint.fill.solid", {"color": "#3366CC"}).to_dict()
+    assert solid["ok"]
+    gradient = registry.execute(
+        "paint.fill.gradient",
+        {"color1": "#202833", "color2": "#E4EEF8"},
+    ).to_dict()
+    assert gradient["ok"]
+    pattern = registry.execute(
+        "paint.fill.pattern",
+        {"color1": "#203040", "color2": "#7EA5D8"},
+    ).to_dict()
+    assert pattern["ok"]
+    reveal_mask = registry.execute(
+        "paint.layer.mask_create",
+        {"layer_id": layer_id, "mask_type": "white"},
+    ).to_dict()
+    assert reveal_mask["ok"]
+    assert next(row for row in reveal_mask["result"]["layers"] if row["layer_id"] == layer_id)["mask_point_count"] == 4
     registry.execute(
         "paint.selection.rectangle",
         {"x1": 0.0, "y1": 0.0, "x2": 0.5, "y2": 0.5, "aspect": "free"},

@@ -77,6 +77,30 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="active Painter pan would change",
     )
     registry.register_adapter_action(
+        "paint.view.grid",
+        "Set Photoshop-style Painter grid visibility, snapping, and grid size.",
+        "paint",
+        "paint_view_grid",
+        params_schema=schema_object(
+            {
+                "visible": {"type": "boolean"},
+                "snap": {"type": "boolean"},
+                "size_px": {"type": "integer", "minimum": 4, "maximum": 512},
+            }
+        ),
+        undo_label="Set Painter grid",
+        dry_summary="active Painter grid or snap state would change",
+    )
+    registry.register_adapter_action(
+        "paint.quick_mask.set",
+        "Toggle Photoshop-style Quick Mask overlay for the active Painter selection.",
+        "paint",
+        "paint_quick_mask_set",
+        params_schema=schema_object({"enabled": {"type": "boolean"}}),
+        undo_label="Set Painter Quick Mask",
+        dry_summary="active Painter Quick Mask overlay would change",
+    )
+    registry.register_adapter_action(
         "paint.tool.set",
         "Set the active Painter tool.",
         "paint",
@@ -98,6 +122,9 @@ def register_paint_actions(registry: Any) -> None:
                         "rectangle",
                         "ellipse_select",
                         "ellipse",
+                        "magic_select",
+                        "magic_wand",
+                        "select_color",
                         "crop",
                     ],
                 }
@@ -353,6 +380,22 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="Painter marquee aspect mode would change",
     )
     registry.register_adapter_action(
+        "paint.selection.select_by_color",
+        "Create a Painter selection from pixels similar to the sampled color point.",
+        "paint",
+        "paint_selection_select_by_color",
+        params_schema=schema_object(
+            {
+                "x": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "tolerance": {"type": "integer", "minimum": 0, "maximum": 100},
+            },
+            required=("x", "y"),
+        ),
+        undo_label="Magic Select by color",
+        dry_summary="Painter would select similar color pixels",
+    )
+    registry.register_adapter_action(
         "paint.crop.to_selection",
         "Crop the Painter document to the active selection bounds.",
         "paint",
@@ -404,6 +447,37 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="Painter canvas would be flipped",
     )
     registry.register_adapter_action(
+        "paint.fill.solid",
+        "Fill the active Painter selection, or full canvas if none is selected, with one color.",
+        "paint",
+        "paint_fill_solid",
+        params_schema=schema_object({"color": {"type": "string"}}),
+        undo_label="Painter solid fill",
+        dry_summary="Painter selection or canvas would be solid-filled",
+    )
+    registry.register_adapter_action(
+        "paint.fill.gradient",
+        "Fill the active Painter selection, or full canvas if none is selected, with a soft gradient.",
+        "paint",
+        "paint_fill_gradient",
+        params_schema=schema_object(
+            {"color1": {"type": "string"}, "color2": {"type": "string"}}
+        ),
+        undo_label="Painter gradient fill",
+        dry_summary="Painter selection or canvas would be gradient-filled",
+    )
+    registry.register_adapter_action(
+        "paint.fill.pattern",
+        "Fill the active Painter selection, or full canvas if none is selected, with a compact pattern.",
+        "paint",
+        "paint_fill_pattern",
+        params_schema=schema_object(
+            {"color1": {"type": "string"}, "color2": {"type": "string"}}
+        ),
+        undo_label="Painter pattern fill",
+        dry_summary="Painter selection or canvas would be pattern-filled",
+    )
+    registry.register_adapter_action(
         "paint.mirror.set",
         "Set Painter mirrored drawing along the canvas horizontal and/or vertical axes.",
         "paint",
@@ -436,6 +510,23 @@ def register_paint_actions(registry: Any) -> None:
         ),
         undo_label="Layer mask from path",
         dry_summary="Painter layer mask would be created from path",
+    )
+    registry.register_adapter_action(
+        "paint.layer.mask_create",
+        "Create or replace the selected Painter layer mask from selection, path, channel, alpha, or reveal-all.",
+        "paint",
+        "paint_layer_mask_create",
+        params_schema=schema_object(
+            {
+                "layer_id": {"type": "string"},
+                "mask_type": {
+                    "type": "string",
+                    "enum": ["selection", "path", "channel", "alpha", "layer_alpha", "white", "reveal_all"],
+                },
+            }
+        ),
+        undo_label="Create Painter layer mask",
+        dry_summary="Painter layer mask would be created",
     )
     registry.register_adapter_action(
         "paint.path.to_selection",
