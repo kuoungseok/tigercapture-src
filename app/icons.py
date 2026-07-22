@@ -411,6 +411,11 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
         painter.drawRoundedRect(QRectF(s * .32, s * .36, s * .36, s * .46), 2, 2)
         painter.drawLine(QPointF(s * .43, s * .44), QPointF(s * .43, s * .74))
         painter.drawLine(QPointF(s * .57, s * .44), QPointF(s * .57, s * .74))
+    elif n in {"lock", "locked"}:
+        painter.drawRoundedRect(QRectF(s * .24, s * .44, s * .52, s * .36), 3, 3)
+        painter.drawArc(QRectF(s * .32, s * .20, s * .36, s * .36), 0, 180 * 16)
+        painter.drawLine(QPointF(s * .32, s * .38), QPointF(s * .32, s * .45))
+        painter.drawLine(QPointF(s * .68, s * .38), QPointF(s * .68, s * .45))
     elif n in {"grid"}:
         for y in (.22, .54):
             for x in (.22, .54):

@@ -337,6 +337,8 @@ class Stroke:
     width_px: float = 4.0
     brush_style: str = "round"
     closed_path: bool = False
+    layer_id: str = "paint-layer-1"
+    source_tool: str = "pen"
     start_ms: int = 0
     end_ms: int | None = None
 
@@ -346,6 +348,15 @@ class Stroke:
         if self.end_ms is not None and t_ms >= self.end_ms:
             return False
         return True
+
+
+@dataclass
+class PaintLayer:
+    layer_id: str
+    name: str
+    visible: bool = True
+    opacity: int = 100
+    locked: bool = False
 
 
 CANVAS_SIZE_PRESETS: tuple[tuple[str, int, int], ...] = (
@@ -566,6 +577,9 @@ class DrawingCanvas(QWidget):
         self._pen_opacity: int = 255
         self._pen_width: float = 4.0
         self._pen_style: str = "round"
+        self._active_layer_id: str = "paint-layer-1"
+        self._layer_visibility: dict[str, bool] = {}
+        self._layer_opacity: dict[str, int] = {}
         self._current_points: list[QPointF] = []  # while drawing (widget px)
         self._path_points: list[QPointF] = []
         # Phase E — node-mask polygon editor hook. The editor sets
@@ -626,6 +640,24 @@ class DrawingCanvas(QWidget):
         self._pen_style = style if style in allowed else "round"
         self.update()
 
+    def set_active_layer_id(self, layer_id: str | None) -> None:
+        self._active_layer_id = str(layer_id or "paint-layer-1")
+
+    def set_layer_view(
+        self,
+        visibility: dict[str, bool] | None = None,
+        opacity: dict[str, int] | None = None,
+    ) -> None:
+        self._layer_visibility = dict(visibility or {})
+        self._layer_opacity = {
+            str(key): max(0, min(100, int(value)))
+            for key, value in dict(opacity or {}).items()
+        }
+        self.update()
+
+    def path_point_count(self) -> int:
+        return len(self._path_points)
+
     def set_extra_paint_hook(self, hook: Callable[[QPainter, int, int], None] | None) -> None:
         self._extra_paint_hook = hook
         self.update()
@@ -648,7 +680,16 @@ class DrawingCanvas(QWidget):
         for stroke in self._get_strokes():
             if not stroke.is_active(t_ms):
                 continue
-            self._paint_stroke(painter, stroke, w, h)
+            layer_id = self._stroke_layer_id(stroke)
+            if not self._layer_visibility.get(layer_id, True):
+                continue
+            self._paint_stroke(
+                painter,
+                stroke,
+                w,
+                h,
+                opacity_scale=self._layer_opacity.get(layer_id, 100) / 100.0,
+            )
 
         if self._current_points:
             stroke = Stroke(
@@ -661,8 +702,16 @@ class DrawingCanvas(QWidget):
                 opacity=self._pen_opacity,
                 width_px=self._pen_width,
                 brush_style=self._pen_style,
+                layer_id=self._active_layer_id,
+                source_tool="pen",
             )
-            self._paint_stroke(painter, stroke, w, h)
+            self._paint_stroke(
+                painter,
+                stroke,
+                w,
+                h,
+                opacity_scale=self._layer_opacity.get(self._active_layer_id, 100) / 100.0,
+            )
 
         if self._path_points:
             color = QColor(self._pen_color)
@@ -731,9 +780,20 @@ class DrawingCanvas(QWidget):
                 pass
 
     @staticmethod
-    def _paint_stroke(painter: QPainter, stroke: Stroke, w: int, h: int) -> None:
+    def _stroke_layer_id(stroke: Stroke) -> str:
+        return str(getattr(stroke, "layer_id", "") or "paint-layer-1")
+
+    @staticmethod
+    def _paint_stroke(
+        painter: QPainter,
+        stroke: Stroke,
+        w: int,
+        h: int,
+        *,
+        opacity_scale: float = 1.0,
+    ) -> None:
         color = QColor(*stroke.color)
-        color.setAlpha(stroke.opacity)
+        color.setAlpha(max(0, min(255, int(stroke.opacity * opacity_scale))))
         pen = QPen(color, stroke.width_px)
         DrawingCanvas._configure_pen_for_style(pen, getattr(stroke, "brush_style", "round"))
         painter.setPen(pen)
@@ -813,6 +873,7 @@ class DrawingCanvas(QWidget):
             self._try_erase_at(pos.x(), pos.y())
         elif self._tool == "path":
             self._path_points.append(QPointF(pos))
+            self.repaint_requested.emit()
             self.update()
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
@@ -972,6 +1033,8 @@ class DrawingCanvas(QWidget):
             opacity=self._pen_opacity,
             width_px=self._pen_width,
             brush_style=self._pen_style,
+            layer_id=self._active_layer_id,
+            source_tool="pen",
             start_ms=int(self._get_time_ms()),
             end_ms=None,
         )
@@ -995,15 +1058,19 @@ class DrawingCanvas(QWidget):
             width_px=self._pen_width,
             brush_style=self._pen_style,
             closed_path=bool(closed),
+            layer_id=self._active_layer_id,
+            source_tool="path",
             start_ms=int(self._get_time_ms()),
             end_ms=None,
         )
         self._path_points = []
         self.stroke_added.emit(stroke)
+        self.repaint_requested.emit()
         self.update()
 
     def clear_path_preview(self) -> None:
         self._path_points = []
+        self.repaint_requested.emit()
         self.update()
 
     def set_strokes_snapshot(self, strokes: list[Stroke]) -> None:
@@ -1023,9 +1090,17 @@ class DrawingCanvas(QWidget):
             self._embedded_strokes.pop(index)
             self.update()
 
-    def clear_strokes_direct(self) -> None:
+    def clear_strokes_direct(self, layer_id: str | None = None) -> None:
         if hasattr(self, "_embedded_strokes"):
-            self._embedded_strokes.clear()
+            if layer_id:
+                target = str(layer_id)
+                self._embedded_strokes = [
+                    stroke for stroke in self._embedded_strokes
+                    if self._stroke_layer_id(stroke) != target
+                ]
+                self._get_strokes = lambda: self._embedded_strokes
+            else:
+                self._embedded_strokes.clear()
             self.update()
 
     def embedded_strokes(self) -> list[Stroke]:
@@ -1042,6 +1117,11 @@ class DrawingCanvas(QWidget):
         # Iterate in reverse so top-most-drawn stroke is erased first
         for idx in range(len(strokes) - 1, -1, -1):
             stroke = strokes[idx]
+            layer_id = self._stroke_layer_id(stroke)
+            if layer_id != self._active_layer_id:
+                continue
+            if not self._layer_visibility.get(layer_id, True):
+                continue
             if not stroke.is_active(t_ms):
                 continue
             for nx, ny in stroke.points:
@@ -1794,12 +1874,17 @@ class PaintDialog(QDialog):
         self._bubble_items: list[SpeechBubbleItem] = []
         self._stickers: list["Sticker"] = list(initial_stickers or [])
         self._sticker_items: list["StickerItem"] = []
-        self._undo_stack: list[tuple[list[Stroke], list[SpeechBubble], list["Sticker"]]] = []
-        self._redo_stack: list[tuple[list[Stroke], list[SpeechBubble], list["Sticker"]]] = []
+        self._undo_stack: list[tuple] = []
+        self._redo_stack: list[tuple] = []
         self._restoring_state = False
         self._canvas_zoom = 1.0
         self._selected_layer_id: str | None = None
         self._paint_clipboard: dict | None = None
+        self._paint_layer_serial = 1
+        self._paint_layers: list[PaintLayer] = [
+            PaintLayer("paint-layer-1", "Layer 1")
+        ]
+        self._active_paint_layer_id = "paint-layer-1"
 
         # Make the dialog large (paint-app feel). Cap at screen size.
         if parent is not None:
@@ -1824,6 +1909,7 @@ class PaintDialog(QDialog):
             PALETTE_COLORS[15],
         ]
 
+        self._prepare_paint_layers(initial_strokes)
         self._build_ui(background_pixmap, initial_strokes)
 
     # ---------- ui ----------
@@ -1838,6 +1924,46 @@ class PaintDialog(QDialog):
         button.setText(_clean_paint_button_text(button.text()))
         button.setIcon(app_icon(icon_name, size=icon_px, color="#EEF3FB"))
         button.setIconSize(icon_size(icon_px))
+
+    def _prepare_paint_layers(self, strokes: list[Stroke]) -> None:
+        seen = {layer.layer_id for layer in self._paint_layers}
+        for stroke in strokes:
+            layer_id = str(getattr(stroke, "layer_id", "") or "paint-layer-1")
+            setattr(stroke, "layer_id", layer_id)
+            if layer_id in seen:
+                continue
+            self._paint_layer_serial += 1
+            self._paint_layers.append(
+                PaintLayer(layer_id, f"Layer {self._paint_layer_serial}")
+            )
+            seen.add(layer_id)
+        self._selected_layer_id = self._active_paint_layer_id if self._standalone else None
+
+    def _paint_layer_by_id(self, layer_id: str | None) -> PaintLayer | None:
+        target = str(layer_id or "")
+        for layer in self._paint_layers:
+            if layer.layer_id == target:
+                return layer
+        return None
+
+    def _is_paint_layer_id(self, layer_id: str | None) -> bool:
+        return self._paint_layer_by_id(layer_id) is not None
+
+    def _active_paint_layer(self) -> PaintLayer:
+        layer = self._paint_layer_by_id(self._active_paint_layer_id)
+        if layer is None:
+            layer = self._paint_layers[0]
+            self._active_paint_layer_id = layer.layer_id
+        return layer
+
+    def _sync_canvas_layer_view(self) -> None:
+        if not hasattr(self, "canvas"):
+            return
+        self.canvas.set_active_layer_id(self._active_paint_layer_id)
+        self.canvas.set_layer_view(
+            {layer.layer_id: layer.visible for layer in self._paint_layers},
+            {layer.layer_id: layer.opacity for layer in self._paint_layers},
+        )
 
     def _build_ui_legacy(self, bg: QPixmap, initial_strokes: list[Stroke]) -> None:
         self.setStyleSheet(self.styleSheet() + _PAINT_DIALOG_QSS)
@@ -1960,6 +2086,7 @@ class PaintDialog(QDialog):
             parent=canvas_host,
         )
         self.canvas.set_strokes_snapshot(list(initial_strokes))
+        self._sync_canvas_layer_view()
         self.canvas.set_tool("pen")
         self.canvas.set_pen_color(self._pen_color)
         self.canvas.set_pen_width(self._pen_width)
@@ -2243,12 +2370,14 @@ class PaintDialog(QDialog):
             parent=canvas_host,
         )
         self.canvas.set_strokes_snapshot(list(initial_strokes))
+        self._sync_canvas_layer_view()
         self.canvas.set_tool("pen")
         self.canvas.set_pen_color(self._pen_color)
         self.canvas.set_pen_width(self._pen_width)
         self.canvas.set_pen_opacity(self._pen_opacity)
         self.canvas.stroke_added.connect(self._on_stroke_added)
         self.canvas.stroke_erased_at.connect(self._erase_stroke_direct)
+        self.canvas.repaint_requested.connect(self._update_path_list)
 
         canvas_layout.addWidget(canvas_host, stretch=1)
         workspace.addWidget(canvas_frame, stretch=1)
@@ -2347,6 +2476,12 @@ class PaintDialog(QDialog):
         path_row.addWidget(self.close_path_btn)
         path_row.addWidget(self.clear_path_btn)
         inspector_layout.addLayout(path_row)
+        self._path_list = QListWidget()
+        self._path_list.setObjectName("PaintLayerList")
+        self._path_list.setFixedHeight(82)
+        self._path_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._path_list.itemClicked.connect(self._select_path_item)
+        inspector_layout.addWidget(self._path_list)
 
         color_title = QLabel("COLOR")
         color_title.setObjectName("PaintSectionTitle")
@@ -2446,9 +2581,30 @@ class PaintDialog(QDialog):
         layer_title = QLabel("LAYERS")
         layer_title.setObjectName("PaintSectionTitle")
         inspector_layout.addWidget(layer_title)
+        layer_mode_row = QHBoxLayout()
+        layer_mode_row.setContentsMargins(0, 0, 0, 0)
+        self.layer_blend_combo = QComboBox()
+        self.layer_blend_combo.addItem("Normal", "normal")
+        self.layer_blend_combo.setEnabled(False)
+        self._layer_opacity_value = QLabel("100%")
+        self._layer_opacity_value.setObjectName("PaintValue")
+        layer_mode_row.addWidget(self.layer_blend_combo, stretch=1)
+        layer_mode_row.addWidget(self._layer_opacity_value)
+        inspector_layout.addLayout(layer_mode_row)
+
+        layer_opacity_label = QLabel("Opacity")
+        layer_opacity_label.setObjectName("PaintMeta")
+        inspector_layout.addWidget(layer_opacity_label)
+        self.layer_opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.layer_opacity_slider.setRange(0, 100)
+        self.layer_opacity_slider.setValue(100)
+        self.layer_opacity_slider.valueChanged.connect(self._on_layer_opacity_changed)
+        inspector_layout.addWidget(self.layer_opacity_slider)
+
         self._layer_list = QListWidget()
         self._layer_list.setObjectName("PaintLayerList")
-        self._layer_list.setFixedHeight(142)
+        self._layer_list.setFixedHeight(164)
+        self._layer_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._layer_list.itemClicked.connect(self._select_layer_item)
         self._layer_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._layer_list.customContextMenuRequested.connect(self._open_layer_context_menu)
@@ -2457,10 +2613,11 @@ class PaintDialog(QDialog):
         edit_row = QHBoxLayout()
         edit_row.setContentsMargins(0, 0, 0, 0)
         for label_text, handler in (
+            ("New", self._new_paint_layer),
+            ("Dup", self._duplicate_selected_layer),
             ("Copy", self._copy_selected_layer),
-            ("Cut", self._cut_selected_layer),
             ("Paste", self._paste_layer_clipboard),
-            ("Delete", self._delete_selected_layer),
+            ("Del", self._delete_selected_layer),
         ):
             btn = QPushButton(label_text)
             btn.setObjectName("PaintCustomColor")
@@ -2776,6 +2933,8 @@ class PaintDialog(QDialog):
         # moment the dialog was opened.
         self._push_undo_state()
         stroke.start_ms = self._time_ms
+        if self._standalone:
+            stroke.layer_id = self._active_paint_layer_id
         self.canvas.add_stroke_direct(stroke)
         self._update_inspector_counts()
 
@@ -2804,9 +2963,11 @@ class PaintDialog(QDialog):
     def _commit_path(self, closed: bool) -> None:
         self.canvas.commit_path(closed=closed)
         self._update_inspector_counts()
+        self._update_path_list()
 
     def _clear_path_preview(self) -> None:
         self.canvas.clear_path_preview()
+        self._update_path_list()
 
     def _on_zoom_changed(self, value: int) -> None:
         self._canvas_zoom = max(0.25, min(4.0, value / 100.0))
@@ -2876,7 +3037,7 @@ class PaintDialog(QDialog):
             report = export_paint_png(
                 out,
                 background_pixmap=bg,
-                strokes=self.canvas.embedded_strokes(),
+                strokes=self._visible_strokes_for_export(),
                 bubbles=self._bubbles,
                 stickers=self._stickers,
                 time_ms=self._time_ms,
@@ -2897,12 +3058,40 @@ class PaintDialog(QDialog):
             f"Wrote {report.get('mode')} PNG:\n{report.get('path')}",
         )
 
-    def _snapshot_state(self) -> tuple[list[Stroke], list[SpeechBubble], list["Sticker"]]:
+    def _visible_strokes_for_export(self) -> list[Stroke]:
+        if not hasattr(self, "canvas"):
+            return []
+        visibility = {layer.layer_id: layer.visible for layer in self._paint_layers}
+        opacity = {layer.layer_id: layer.opacity for layer in self._paint_layers}
+        out: list[Stroke] = []
+        for stroke in self.canvas.embedded_strokes():
+            layer_id = str(getattr(stroke, "layer_id", "") or "paint-layer-1")
+            if not visibility.get(layer_id, True):
+                continue
+            copied = copy.deepcopy(stroke)
+            copied.opacity = max(
+                0,
+                min(255, int(copied.opacity * opacity.get(layer_id, 100) / 100.0)),
+            )
+            out.append(copied)
+        return out
+
+    def _snapshot_state(self) -> tuple[
+        list[Stroke],
+        list[SpeechBubble],
+        list["Sticker"],
+        list[PaintLayer],
+        str,
+        str | None,
+    ]:
         strokes = self.canvas.embedded_strokes() if hasattr(self, "canvas") else []
         return (
             copy.deepcopy(strokes),
             copy.deepcopy(getattr(self, "_bubbles", [])),
             copy.deepcopy(getattr(self, "_stickers", [])),
+            copy.deepcopy(getattr(self, "_paint_layers", [])),
+            str(getattr(self, "_active_paint_layer_id", "paint-layer-1")),
+            self._selected_layer_id,
         )
 
     def _push_undo_state(self) -> None:
@@ -2930,11 +3119,16 @@ class PaintDialog(QDialog):
 
     def _restore_state(
         self,
-        snapshot: tuple[list[Stroke], list[SpeechBubble], list["Sticker"]],
+        snapshot,
     ) -> None:
         self._restoring_state = True
         try:
-            strokes, bubbles, stickers = snapshot
+            strokes, bubbles, stickers = snapshot[:3]
+            if len(snapshot) >= 6:
+                layers, active_layer_id, selected_layer_id = snapshot[3:6]
+                self._paint_layers = copy.deepcopy(layers)
+                self._active_paint_layer_id = str(active_layer_id or "paint-layer-1")
+                self._selected_layer_id = selected_layer_id
             for item in list(getattr(self, "_bubble_items", [])):
                 item.deleteLater()
             for item in list(getattr(self, "_sticker_items", [])):
@@ -2944,6 +3138,7 @@ class PaintDialog(QDialog):
             self._bubbles = copy.deepcopy(bubbles)
             self._stickers = copy.deepcopy(stickers)
             self.canvas.set_strokes_snapshot(copy.deepcopy(strokes))
+            self._sync_canvas_layer_view()
             self._spawn_initial_bubbles()
             self._spawn_initial_stickers()
             self._update_canvas_geometry()
@@ -2972,7 +3167,9 @@ class PaintDialog(QDialog):
             label = labels.get(key)
             if label is not None:
                 label.setText(str(value))
+        self._sync_canvas_layer_view()
         self._update_layer_list(strokes_count)
+        self._update_path_list()
         self._update_history_buttons()
 
     def _update_layer_list(self, strokes_count: int | None = None) -> None:
@@ -2985,22 +3182,39 @@ class PaintDialog(QDialog):
         layer_list.blockSignals(True)
         try:
             layer_list.clear()
+            if self._standalone:
+                if not self._is_paint_layer_id(selected_id):
+                    selected_id = self._active_paint_layer_id
+                    self._selected_layer_id = selected_id
+                for layer in reversed(self._paint_layers):
+                    count = self._stroke_count_for_layer(layer.layer_id)
+                    state = "Hidden  " if not layer.visible else ""
+                    label = f"{state}{layer.name}  {layer.opacity}%  ({count})"
+                    item = QListWidgetItem(label)
+                    item.setIcon(app_icon("layers", size=14, color="#DCE6F7"))
+                    item.setData(Qt.ItemDataRole.UserRole, layer.layer_id)
+                    layer_list.addItem(item)
+                    if selected_id == layer.layer_id:
+                        layer_list.setCurrentItem(item)
+                bg_item = QListWidgetItem("Background")
+                bg_item.setIcon(app_icon("lock", size=14, color="#9EA8BA"))
+                bg_item.setData(Qt.ItemDataRole.UserRole, "background")
+                bg_item.setFlags(bg_item.flags() & ~Qt.ItemFlag.ItemIsEnabled)
+                layer_list.addItem(bg_item)
+                self._update_layer_controls()
+                return
             if strokes_count:
-                label = (
-                    f"Drawing Layer 1 ({strokes_count})"
-                    if self._standalone
-                    else f"Brush strokes ({strokes_count})"
-                )
+                label = f"Brush strokes ({strokes_count})"
                 item = QListWidgetItem(label)
+                item.setIcon(app_icon("paint-brush", size=14, color="#DCE6F7"))
                 item.setData(Qt.ItemDataRole.UserRole, "strokes")
                 layer_list.addItem(item)
                 if selected_id == "strokes":
                     layer_list.setCurrentItem(item)
-            if self._standalone:
-                return
             for idx, bubble in enumerate(getattr(self, "_bubbles", [])):
                 text = bubble.text.strip() or "Speech bubble"
                 item = QListWidgetItem(f"Bubble {idx + 1}: {text[:24]}")
+                item.setIcon(app_icon("caption", size=14, color="#DCE6F7"))
                 layer_id = f"bubble:{idx}"
                 item.setData(Qt.ItemDataRole.UserRole, layer_id)
                 layer_list.addItem(item)
@@ -3011,6 +3225,7 @@ class PaintDialog(QDialog):
 
                 name = Path(sticker.png_path).name or "PNG sticker"
                 item = QListWidgetItem(f"Sticker {idx + 1}: {name[:24]}")
+                item.setIcon(app_icon("image", size=14, color="#DCE6F7"))
                 layer_id = f"sticker:{idx}"
                 item.setData(Qt.ItemDataRole.UserRole, layer_id)
                 layer_list.addItem(item)
@@ -3019,9 +3234,72 @@ class PaintDialog(QDialog):
         finally:
             layer_list.blockSignals(False)
 
+    def _stroke_count_for_layer(self, layer_id: str) -> int:
+        if not hasattr(self, "canvas"):
+            return 0
+        target = str(layer_id)
+        return sum(
+            1
+            for stroke in self.canvas.embedded_strokes()
+            if str(getattr(stroke, "layer_id", "") or "paint-layer-1") == target
+        )
+
+    def _update_layer_controls(self) -> None:
+        layer = self._paint_layer_by_id(self._selected_layer_id) or self._active_paint_layer()
+        if hasattr(self, "_layer_opacity_value"):
+            self._layer_opacity_value.setText(f"{layer.opacity}%")
+        if hasattr(self, "layer_opacity_slider"):
+            self.layer_opacity_slider.blockSignals(True)
+            try:
+                self.layer_opacity_slider.setValue(layer.opacity)
+                self.layer_opacity_slider.setEnabled(not layer.locked)
+            finally:
+                self.layer_opacity_slider.blockSignals(False)
+
+    def _update_path_list(self) -> None:
+        path_list = getattr(self, "_path_list", None)
+        if path_list is None:
+            return
+        active_points = self.canvas.path_point_count() if hasattr(self, "canvas") else 0
+        path_strokes = [
+            stroke for stroke in (self.canvas.embedded_strokes() if hasattr(self, "canvas") else [])
+            if str(getattr(stroke, "source_tool", "") or "") == "path"
+        ]
+        path_list.blockSignals(True)
+        try:
+            path_list.clear()
+            work_item = QListWidgetItem(f"Work Path  ({active_points} pts)")
+            work_item.setIcon(app_icon("path-tool", size=14, color="#DCE6F7"))
+            work_item.setData(Qt.ItemDataRole.UserRole, "work-path")
+            path_list.addItem(work_item)
+            if active_points:
+                path_list.setCurrentItem(work_item)
+            for idx, stroke in enumerate(path_strokes, start=1):
+                state = "closed" if bool(getattr(stroke, "closed_path", False)) else "open"
+                item = QListWidgetItem(f"Path {idx}  {state}  ({len(stroke.points)} pts)")
+                item.setIcon(app_icon("path-tool", size=14, color="#9FB9E7"))
+                item.setData(Qt.ItemDataRole.UserRole, f"path:{idx - 1}")
+                path_list.addItem(item)
+        finally:
+            path_list.blockSignals(False)
+
+    def _select_path_item(self, item: QListWidgetItem) -> None:
+        value = item.data(Qt.ItemDataRole.UserRole)
+        if value == "work-path":
+            self._set_tool("path")
+
     def _select_layer_item(self, item: QListWidgetItem) -> None:
         layer_id = item.data(Qt.ItemDataRole.UserRole)
         self._selected_layer_id = str(layer_id) if layer_id is not None else None
+        if self._standalone and self._is_paint_layer_id(self._selected_layer_id):
+            self._active_paint_layer_id = str(self._selected_layer_id)
+            self._sync_canvas_layer_view()
+            self._update_layer_controls()
+            return
+        if self._selected_layer_id == "background":
+            self._selected_layer_id = self._active_paint_layer_id
+            self._update_layer_list()
+            return
         self._set_tool("select")
         if layer_id == "strokes":
             return
@@ -3038,6 +3316,35 @@ class PaintDialog(QDialog):
                 sticker_item = self._sticker_items[idx]
                 sticker_item.raise_()
                 sticker_item.setFocus()
+
+    def _on_layer_opacity_changed(self, value: int) -> None:
+        layer = self._paint_layer_by_id(self._selected_layer_id) or self._active_paint_layer()
+        layer.opacity = max(0, min(100, int(value)))
+        if hasattr(self, "_layer_opacity_value"):
+            self._layer_opacity_value.setText(f"{layer.opacity}%")
+        self._sync_canvas_layer_view()
+        self._update_layer_list()
+
+    def _new_paint_layer(self) -> None:
+        self._push_undo_state()
+        self._paint_layer_serial += 1
+        layer = PaintLayer(
+            layer_id=f"paint-layer-{self._paint_layer_serial}",
+            name=f"Layer {self._paint_layer_serial}",
+        )
+        self._paint_layers.append(layer)
+        self._active_paint_layer_id = layer.layer_id
+        self._selected_layer_id = layer.layer_id
+        self._sync_canvas_layer_view()
+        self._update_inspector_counts()
+
+    def _toggle_selected_layer_visibility(self) -> None:
+        layer = self._paint_layer_by_id(self._current_layer_id())
+        if layer is None:
+            return
+        layer.visible = not layer.visible
+        self._sync_canvas_layer_view()
+        self._update_layer_list()
 
     def _install_edit_shortcuts(self) -> None:
         shortcuts = (
@@ -3066,20 +3373,32 @@ class PaintDialog(QDialog):
             self._layer_list.setCurrentItem(item)
             self._select_layer_item(item)
         menu = QMenu(self)
+        new_action = menu.addAction("New Layer")
+        visibility_action = menu.addAction("Toggle Visibility")
+        menu.addSeparator()
         copy_action = menu.addAction("Copy")
         cut_action = menu.addAction("Cut")
         paste_action = menu.addAction("Paste")
         duplicate_action = menu.addAction("Duplicate")
         menu.addSeparator()
         delete_action = menu.addAction("Delete")
-        has_selection = self._selected_layer_id is not None
+        selected = self._current_layer_id()
+        has_selection = selected is not None and selected != "background"
+        is_paint_layer = self._is_paint_layer_id(selected)
+        visibility_action.setEnabled(is_paint_layer)
         copy_action.setEnabled(has_selection)
         cut_action.setEnabled(has_selection)
         duplicate_action.setEnabled(has_selection)
-        delete_action.setEnabled(has_selection)
+        delete_action.setEnabled(
+            has_selection and (not is_paint_layer or len(self._paint_layers) > 1)
+        )
         paste_action.setEnabled(self._paint_clipboard is not None)
         chosen = menu.exec(self._layer_list.mapToGlobal(pos))
-        if chosen is copy_action:
+        if chosen is new_action:
+            self._new_paint_layer()
+        elif chosen is visibility_action:
+            self._toggle_selected_layer_visibility()
+        elif chosen is copy_action:
             self._copy_selected_layer()
         elif chosen is cut_action:
             self._cut_selected_layer()
@@ -3098,6 +3417,8 @@ class PaintDialog(QDialog):
             layer_id = item.data(Qt.ItemDataRole.UserRole)
             if layer_id is not None:
                 self._selected_layer_id = str(layer_id)
+        if self._standalone and not self._selected_layer_id:
+            self._selected_layer_id = self._active_paint_layer_id
         return self._selected_layer_id
 
     def _copy_selected_layer(self) -> None:
@@ -3148,6 +3469,18 @@ class PaintDialog(QDialog):
     def _payload_for_layer(self, layer_id: str | None) -> dict | None:
         if not layer_id:
             return None
+        if self._is_paint_layer_id(layer_id):
+            strokes = [
+                copy.deepcopy(stroke)
+                for stroke in self.canvas.embedded_strokes()
+                if str(getattr(stroke, "layer_id", "") or "paint-layer-1") == layer_id
+            ]
+            layer = self._paint_layer_by_id(layer_id)
+            return {
+                "kind": "paint_layer",
+                "layer": copy.deepcopy(layer),
+                "strokes": strokes,
+            }
         if layer_id == "strokes":
             strokes = self.canvas.embedded_strokes()
             if not strokes:
@@ -3166,16 +3499,40 @@ class PaintDialog(QDialog):
     def _paste_payload(self, payload: dict) -> None:
         kind = payload.get("kind")
         self._push_undo_state()
-        if kind == "strokes":
+        if kind == "paint_layer":
+            source_layer = payload.get("layer")
+            self._paint_layer_serial += 1
+            name = getattr(source_layer, "name", "Layer")
+            layer = PaintLayer(
+                layer_id=f"paint-layer-{self._paint_layer_serial}",
+                name=f"{name} copy" if "copy" not in str(name).lower() else f"Layer {self._paint_layer_serial}",
+                visible=bool(getattr(source_layer, "visible", True)),
+                opacity=max(0, min(100, int(getattr(source_layer, "opacity", 100)))),
+            )
+            self._paint_layers.append(layer)
             pasted = copy.deepcopy(payload.get("strokes") or [])
             for stroke in pasted:
                 stroke.points = [
                     (max(0.0, min(1.0, x + 0.025)), max(0.0, min(1.0, y + 0.025)))
                     for x, y in stroke.points
                 ]
+                stroke.layer_id = layer.layer_id
                 stroke.start_ms = self._time_ms
                 self.canvas.add_stroke_direct(stroke)
-            self._selected_layer_id = "strokes"
+            self._active_paint_layer_id = layer.layer_id
+            self._selected_layer_id = layer.layer_id
+        elif kind == "strokes":
+            pasted = copy.deepcopy(payload.get("strokes") or [])
+            for stroke in pasted:
+                stroke.points = [
+                    (max(0.0, min(1.0, x + 0.025)), max(0.0, min(1.0, y + 0.025)))
+                    for x, y in stroke.points
+                ]
+                if self._standalone:
+                    stroke.layer_id = self._active_paint_layer_id
+                stroke.start_ms = self._time_ms
+                self.canvas.add_stroke_direct(stroke)
+            self._selected_layer_id = self._active_paint_layer_id if self._standalone else "strokes"
         elif kind == "bubble":
             bubble = copy.deepcopy(payload.get("bubble"))
             if bubble is None:
@@ -3198,10 +3555,25 @@ class PaintDialog(QDialog):
             self._spawn_sticker_item(sticker)
             self._selected_layer_id = f"sticker:{len(self._stickers) - 1}"
         self._update_inspector_counts()
-        self._set_tool("select")
+        if not self._standalone:
+            self._set_tool("select")
 
     def _delete_layer(self, layer_id: str | None) -> None:
         if not layer_id:
+            return
+        if self._is_paint_layer_id(layer_id):
+            if len(self._paint_layers) <= 1:
+                return
+            self._push_undo_state()
+            self.canvas.clear_strokes_direct(layer_id)
+            self._paint_layers = [
+                layer for layer in self._paint_layers if layer.layer_id != layer_id
+            ]
+            next_layer = self._paint_layers[-1]
+            self._active_paint_layer_id = next_layer.layer_id
+            self._selected_layer_id = next_layer.layer_id
+            self._sync_canvas_layer_view()
+            self._update_inspector_counts()
             return
         self._push_undo_state()
         if layer_id == "strokes":

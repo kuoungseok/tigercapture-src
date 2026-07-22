@@ -843,6 +843,8 @@ def load_project(editor, path: str | Path) -> None:
                     width_px=float(sd.get("width_px", 4.0)),
                     brush_style=str(sd.get("brush_style", "round") or "round"),
                     closed_path=bool(sd.get("closed_path", False)),
+                    layer_id=str(sd.get("layer_id", "paint-layer-1") or "paint-layer-1"),
+                    source_tool=str(sd.get("source_tool", "pen") or "pen"),
                     start_ms=int(sd.get("start_ms", 0)),
                     end_ms=sd.get("end_ms"),
                 ))

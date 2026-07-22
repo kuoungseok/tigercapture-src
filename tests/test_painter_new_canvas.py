@@ -98,3 +98,45 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog._palette_btns[0].width() <= 38
 
     dialog.close()
+
+
+def test_standalone_painter_starts_with_photoshop_style_layers_and_paths() -> None:
+    app = _app()
+    from PySide6.QtCore import QPointF
+
+    from app.drawing import PaintDialog, Stroke, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(640, 360, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.show()
+    app.processEvents()
+
+    layer_labels = [dialog._layer_list.item(i).text() for i in range(dialog._layer_list.count())]
+    assert any("Layer 1" in label for label in layer_labels)
+    assert any("Background" in label for label in layer_labels)
+    assert dialog._path_list.item(0).text().startswith("Work Path")
+
+    dialog._new_paint_layer()
+    active_layer_id = dialog._active_paint_layer_id
+    dialog._on_stroke_added(
+        Stroke(points=[(0.1, 0.1), (0.2, 0.2)], layer_id="paint-layer-1")
+    )
+    assert dialog.canvas.embedded_strokes()[-1].layer_id == active_layer_id
+
+    dialog.layer_opacity_slider.setValue(45)
+    assert dialog._active_paint_layer().opacity == 45
+
+    dialog.canvas._path_points = [QPointF(10, 10), QPointF(40, 40), QPointF(60, 12)]
+    dialog._update_path_list()
+    assert "3 pts" in dialog._path_list.item(0).text()
+    dialog.canvas.commit_path(closed=True)
+    app.processEvents()
+    assert dialog.canvas.embedded_strokes()[-1].source_tool == "path"
+    assert dialog.canvas.embedded_strokes()[-1].closed_path is True
+    assert dialog._path_list.count() >= 2
+
+    dialog.close()
