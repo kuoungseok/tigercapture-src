@@ -103,6 +103,11 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
         dialog._layer_channel_path_tabs.tabText(i)
         for i in range(dialog._layer_channel_path_tabs.count())
     ] == [tr("paint.tab.layers"), tr("paint.tab.channels"), tr("paint.tab.paths")]
+    assert dialog.layer_filter_combo.currentText() == tr("paint.layer.filter_kind")
+    assert dialog.layer_blend_combo.currentText() == tr("paint.layer.blend_normal")
+    assert dialog._layer_opacity_value.text() == "100%"
+    assert dialog._layer_fill_value.text() == "100%"
+    assert not dialog._layer_lock_all_btn.isChecked()
     assert dialog._channel_list.item(0).text() == "RGB"
     assert dialog.color_wheel.width() <= 112
     assert dialog._color_preview.width() <= 48
@@ -117,6 +122,7 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths() -> No
     from PySide6.QtCore import QPointF
 
     from app.drawing import PaintDialog, Stroke, create_blank_paint_pixmap
+    from app.i18n import tr
 
     dialog = PaintDialog(
         background_pixmap=create_blank_paint_pixmap(640, 360, "#FFFFFF"),
@@ -129,7 +135,7 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths() -> No
 
     layer_labels = [dialog._layer_list.item(i).text() for i in range(dialog._layer_list.count())]
     assert any("Layer 1" in label for label in layer_labels)
-    assert any("Background" in label for label in layer_labels)
+    assert any(tr("paint.layer.background") in label for label in layer_labels)
     assert dialog._path_list.item(0).text().startswith("Work Path")
 
     dialog._new_paint_layer()
@@ -141,6 +147,22 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths() -> No
 
     dialog.layer_opacity_slider.setValue(45)
     assert dialog._active_paint_layer().opacity == 45
+
+    dialog._layer_lock_all_btn.setChecked(True)
+    app.processEvents()
+    assert dialog._active_paint_layer().locked is True
+    locked_count = len(dialog.canvas.embedded_strokes())
+    dialog._on_stroke_added(
+        Stroke(points=[(0.3, 0.3), (0.4, 0.4)], layer_id=active_layer_id)
+    )
+    assert len(dialog.canvas.embedded_strokes()) == locked_count
+    locked_layer_count = len(dialog._paint_layers)
+    dialog._delete_layer(active_layer_id)
+    assert len(dialog._paint_layers) == locked_layer_count
+    assert dialog._tool_status_label.text() == tr("paint.layer.locked_status")
+    dialog._layer_lock_all_btn.setChecked(False)
+    app.processEvents()
+    assert dialog._active_paint_layer().locked is False
 
     dialog.canvas._path_points = [QPointF(10, 10), QPointF(40, 40), QPointF(60, 12)]
     dialog._update_path_list()

@@ -222,6 +222,50 @@ QTabWidget#PaintLayerChannelPathTabs QTabBar::tab:!selected:hover {
     color: #dce6f7;
 }
 
+QFrame#PaintLayerControlPanel {
+    background-color: #16191f;
+    border: 1px solid rgba(178, 186, 202, 20);
+    border-radius: 0;
+}
+
+QLabel#PaintLayerControlLabel {
+    color: #aeb7c7;
+    font-size: 11px;
+    font-weight: 700;
+}
+
+QPushButton#PaintLayerTinyButton {
+    background-color: transparent;
+    color: #dce6f7;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 0;
+    min-width: 22px;
+    max-width: 22px;
+    min-height: 22px;
+    max-height: 22px;
+}
+
+QPushButton#PaintLayerTinyButton:hover {
+    background-color: #242a34;
+    border-color: rgba(178, 186, 202, 38);
+}
+
+QPushButton#PaintLayerTinyButton:checked {
+    background-color: #343a45;
+    border-color: rgba(220, 226, 238, 58);
+}
+
+QComboBox#PaintLayerFilterCombo,
+QComboBox#PaintLayerBlendCombo {
+    background-color: #20242b;
+    color: #dce6f7;
+    border: 1px solid rgba(178, 186, 202, 28);
+    border-radius: 3px;
+    padding: 4px 8px;
+    min-width: 0;
+}
+
 QLabel#PaintColorWell {
     border: 1px solid #4c5870;
     border-radius: 9px;
@@ -2095,6 +2139,24 @@ class PaintDialog(QDialog):
         button.setIconSize(icon_size(icon_px))
         button.setFixedSize(36, 36)
 
+    def _make_layer_tiny_button(
+        self,
+        icon_name: str,
+        label: str,
+        *,
+        checkable: bool = False,
+    ) -> QPushButton:
+        button = QPushButton("")
+        button.setObjectName("PaintLayerTinyButton")
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.setToolTip(label)
+        button.setAccessibleName(label)
+        button.setCheckable(checkable)
+        button.setIcon(app_icon(icon_name, size=13, color="#DCE6F7"))
+        button.setIconSize(icon_size(13))
+        button.setFixedSize(22, 22)
+        return button
+
     def _prepare_paint_layers(self, strokes: list[Stroke]) -> None:
         seen = {layer.layer_id for layer in self._paint_layers}
         for stroke in strokes:
@@ -2757,26 +2819,96 @@ class PaintDialog(QDialog):
         layers_tab = QWidget()
         layers_layout = QVBoxLayout(layers_tab)
         layers_layout.setContentsMargins(8, 8, 8, 8)
-        layers_layout.setSpacing(8)
+        layers_layout.setSpacing(6)
+
+        layer_controls = QFrame()
+        layer_controls.setObjectName("PaintLayerControlPanel")
+        layer_controls_layout = QVBoxLayout(layer_controls)
+        layer_controls_layout.setContentsMargins(6, 6, 6, 6)
+        layer_controls_layout.setSpacing(5)
+
+        layer_filter_row = QHBoxLayout()
+        layer_filter_row.setContentsMargins(0, 0, 0, 0)
+        layer_filter_row.setSpacing(5)
+        self.layer_filter_combo = QComboBox()
+        self.layer_filter_combo.setObjectName("PaintLayerFilterCombo")
+        self.layer_filter_combo.addItem(tr("paint.layer.filter_kind"), "kind")
+        layer_filter_row.addWidget(self.layer_filter_combo, stretch=1)
+        for icon_name, label in (
+            ("image", "Pixel layers"),
+            ("color", "Adjustment layers"),
+            ("caption", "Text layers"),
+            ("path-tool", "Shape paths"),
+            ("layers", "Smart objects"),
+            ("more", "Layer menu"),
+        ):
+            layer_filter_row.addWidget(self._make_layer_tiny_button(icon_name, label))
+        layer_controls_layout.addLayout(layer_filter_row)
+
         layer_mode_row = QHBoxLayout()
         layer_mode_row.setContentsMargins(0, 0, 0, 0)
+        layer_mode_row.setSpacing(6)
         self.layer_blend_combo = QComboBox()
-        self.layer_blend_combo.addItem("Normal", "normal")
-        self.layer_blend_combo.setEnabled(False)
+        self.layer_blend_combo.setObjectName("PaintLayerBlendCombo")
+        self.layer_blend_combo.addItem(tr("paint.layer.blend_normal"), "normal")
+        layer_opacity_text = QLabel(tr("paint.layer.opacity"))
+        layer_opacity_text.setObjectName("PaintLayerControlLabel")
         self._layer_opacity_value = QLabel("100%")
         self._layer_opacity_value.setObjectName("PaintValue")
         layer_mode_row.addWidget(self.layer_blend_combo, stretch=1)
+        layer_mode_row.addWidget(layer_opacity_text)
         layer_mode_row.addWidget(self._layer_opacity_value)
-        layers_layout.addLayout(layer_mode_row)
+        layer_controls_layout.addLayout(layer_mode_row)
 
-        layer_opacity_label = QLabel("Opacity")
-        layer_opacity_label.setObjectName("PaintMeta")
-        layers_layout.addWidget(layer_opacity_label)
         self.layer_opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.layer_opacity_slider.setRange(0, 100)
         self.layer_opacity_slider.setValue(100)
         self.layer_opacity_slider.valueChanged.connect(self._on_layer_opacity_changed)
-        layers_layout.addWidget(self.layer_opacity_slider)
+        layer_controls_layout.addWidget(self.layer_opacity_slider)
+
+        layer_lock_row = QHBoxLayout()
+        layer_lock_row.setContentsMargins(0, 0, 0, 0)
+        layer_lock_row.setSpacing(5)
+        layer_lock_label = QLabel(tr("paint.layer.lock"))
+        layer_lock_label.setObjectName("PaintLayerControlLabel")
+        layer_lock_row.addWidget(layer_lock_label)
+        self._layer_lock_transparency_btn = self._make_layer_tiny_button(
+            "grid",
+            tr("paint.layer.lock_transparency"),
+            checkable=True,
+        )
+        self._layer_lock_pixels_btn = self._make_layer_tiny_button(
+            "paint-brush",
+            tr("paint.layer.lock_pixels"),
+            checkable=True,
+        )
+        self._layer_lock_position_btn = self._make_layer_tiny_button(
+            "cursor",
+            tr("paint.layer.lock_position"),
+            checkable=True,
+        )
+        self._layer_lock_all_btn = self._make_layer_tiny_button(
+            "lock",
+            tr("paint.layer.lock_all"),
+            checkable=True,
+        )
+        self._layer_lock_all_btn.toggled.connect(self._toggle_active_layer_lock)
+        for btn in (
+            self._layer_lock_transparency_btn,
+            self._layer_lock_pixels_btn,
+            self._layer_lock_position_btn,
+            self._layer_lock_all_btn,
+        ):
+            layer_lock_row.addWidget(btn)
+        layer_lock_row.addStretch(1)
+        layer_fill_label = QLabel(tr("paint.layer.fill"))
+        layer_fill_label.setObjectName("PaintLayerControlLabel")
+        self._layer_fill_value = QLabel("100%")
+        self._layer_fill_value.setObjectName("PaintValue")
+        layer_lock_row.addWidget(layer_fill_label)
+        layer_lock_row.addWidget(self._layer_fill_value)
+        layer_controls_layout.addLayout(layer_lock_row)
+        layers_layout.addWidget(layer_controls)
 
         self._layer_list = QListWidget()
         self._layer_list.setObjectName("PaintLayerList")
@@ -3162,6 +3294,10 @@ class PaintDialog(QDialog):
     def _on_stroke_added(self, stroke: Stroke) -> None:
         # Override the default start_ms so all dialog strokes stamp to the
         # moment the dialog was opened.
+        if self._standalone and self._active_paint_layer().locked:
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText(tr("paint.layer.locked_status"))
+            return
         self._push_undo_state()
         stroke.start_ms = self._time_ms
         if self._standalone:
@@ -3170,6 +3306,14 @@ class PaintDialog(QDialog):
         self._update_inspector_counts()
 
     def _erase_stroke_direct(self, idx: int) -> None:
+        strokes = self.canvas.embedded_strokes() if hasattr(self, "canvas") else []
+        if 0 <= idx < len(strokes):
+            layer_id = str(getattr(strokes[idx], "layer_id", "") or "paint-layer-1")
+            layer = self._paint_layer_by_id(layer_id)
+            if layer is not None and layer.locked:
+                if hasattr(self, "_tool_status_label"):
+                    self._tool_status_label.setText(tr("paint.layer.locked_status"))
+                return
         self._push_undo_state()
         self.canvas.remove_stroke_direct(idx)
         self._update_inspector_counts()
@@ -3430,8 +3574,14 @@ class PaintDialog(QDialog):
                     self._selected_layer_id = selected_id
                 for layer in reversed(self._paint_layers):
                     count = self._stroke_count_for_layer(layer.layer_id)
-                    state = "Hidden  " if not layer.visible else ""
-                    label = f"{state}{layer.name}  {layer.opacity}%  ({count})"
+                    states: list[str] = []
+                    if not layer.visible:
+                        states.append("Hidden")
+                    if layer.locked:
+                        states.append("Locked")
+                    state = " ".join(states)
+                    prefix = f"{state}  " if state else ""
+                    label = f"{prefix}{layer.name}  {layer.opacity}%  ({count})"
                     item = QListWidgetItem(label)
                     item.setIcon(app_icon("layers", size=14, color="#DCE6F7"))
                     item.setData(Qt.ItemDataRole.UserRole, layer.layer_id)
@@ -3439,7 +3589,7 @@ class PaintDialog(QDialog):
                     if selected_id == layer.layer_id:
                         layer_list.setCurrentItem(item)
                 if self._background_layer_present:
-                    bg_item = QListWidgetItem("Background")
+                    bg_item = QListWidgetItem(tr("paint.layer.background"))
                     bg_item.setIcon(app_icon("lock", size=14, color="#9EA8BA"))
                     bg_item.setData(Qt.ItemDataRole.UserRole, "background")
                     layer_list.addItem(bg_item)
@@ -3491,7 +3641,10 @@ class PaintDialog(QDialog):
     def _update_layer_controls(self) -> None:
         if self._selected_layer_id == "background":
             if hasattr(self, "_layer_opacity_value"):
-                self._layer_opacity_value.setText("Locked")
+                self._layer_opacity_value.setText("100%")
+            if hasattr(self, "_layer_fill_value"):
+                self._layer_fill_value.setText("100%")
+            self._sync_layer_lock_buttons(True, enabled=False)
             if hasattr(self, "layer_opacity_slider"):
                 self.layer_opacity_slider.blockSignals(True)
                 try:
@@ -3503,6 +3656,9 @@ class PaintDialog(QDialog):
         layer = self._paint_layer_by_id(self._selected_layer_id) or self._active_paint_layer()
         if hasattr(self, "_layer_opacity_value"):
             self._layer_opacity_value.setText(f"{layer.opacity}%")
+        if hasattr(self, "_layer_fill_value"):
+            self._layer_fill_value.setText("100%")
+        self._sync_layer_lock_buttons(layer.locked, enabled=True)
         if hasattr(self, "layer_opacity_slider"):
             self.layer_opacity_slider.blockSignals(True)
             try:
@@ -3510,6 +3666,35 @@ class PaintDialog(QDialog):
                 self.layer_opacity_slider.setEnabled(not layer.locked)
             finally:
                 self.layer_opacity_slider.blockSignals(False)
+
+    def _sync_layer_lock_buttons(self, locked: bool, *, enabled: bool) -> None:
+        for attr in (
+            "_layer_lock_transparency_btn",
+            "_layer_lock_pixels_btn",
+            "_layer_lock_position_btn",
+            "_layer_lock_all_btn",
+        ):
+            btn = getattr(self, attr, None)
+            if btn is None:
+                continue
+            btn.blockSignals(True)
+            try:
+                btn.setChecked(bool(locked) if attr == "_layer_lock_all_btn" else False)
+                btn.setEnabled(enabled or attr == "_layer_lock_all_btn")
+            finally:
+                btn.blockSignals(False)
+
+    def _toggle_active_layer_lock(self, checked: bool) -> None:
+        if self._selected_layer_id == "background":
+            self._sync_layer_lock_buttons(True, enabled=False)
+            return
+        layer = self._paint_layer_by_id(self._selected_layer_id) or self._active_paint_layer()
+        if layer.locked == bool(checked):
+            return
+        self._push_undo_state()
+        layer.locked = bool(checked)
+        self._sync_canvas_layer_view()
+        self._update_inspector_counts()
 
     def _update_path_list(self) -> None:
         path_list = getattr(self, "_path_list", None)
@@ -3838,6 +4023,11 @@ class PaintDialog(QDialog):
             return
         if self._is_paint_layer_id(layer_id):
             if len(self._paint_layers) <= 1:
+                return
+            target_layer = self._paint_layer_by_id(layer_id)
+            if target_layer is not None and target_layer.locked:
+                if hasattr(self, "_tool_status_label"):
+                    self._tool_status_label.setText(tr("paint.layer.locked_status"))
                 return
             self._push_undo_state()
             self.canvas.clear_strokes_direct(layer_id)
