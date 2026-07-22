@@ -48,6 +48,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QMenu,
+    QMenuBar,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -100,6 +101,40 @@ QLabel#PaintSectionTitle {
     font-size: 11px;
     font-weight: 800;
     letter-spacing: 1px;
+}
+
+QMenuBar#PaintMenuBar {
+    background-color: #12151b;
+    border: 1px solid rgba(178, 186, 202, 22);
+    border-radius: 6px;
+    color: #dce6f7;
+    font-size: 11px;
+    padding: 2px 6px;
+}
+
+QMenuBar#PaintMenuBar::item {
+    background: transparent;
+    padding: 4px 10px;
+    border-radius: 4px;
+}
+
+QMenuBar#PaintMenuBar::item:selected {
+    background-color: #202635;
+}
+
+QMenu {
+    background-color: #15181d;
+    color: #eef3fb;
+    border: 1px solid #303847;
+    padding: 5px;
+}
+
+QMenu::item {
+    padding: 5px 24px 5px 14px;
+}
+
+QMenu::item:selected {
+    background-color: #24314a;
 }
 
 QLabel#PaintValue {
@@ -504,6 +539,7 @@ class PaintLayer:
     visible: bool = True
     opacity: int = 100
     locked: bool = False
+    blend_mode: str = "normal"
 
 
 CANVAS_SIZE_PRESETS: tuple[tuple[str, int, int], ...] = (
@@ -748,6 +784,7 @@ class DrawingCanvas(QWidget):
         self._current_points: list[QPointF] = []  # while drawing (widget px)
         self._path_points: list[QPointF] = []
         self._selection_points: list[tuple[float, float]] = []
+        self._selection_inverted: bool = False
         self._selection_phase: float = 0.0
         self._selection_timer = QTimer(self)
         self._selection_timer.setInterval(90)
@@ -847,19 +884,48 @@ class DrawingCanvas(QWidget):
     def selection_snapshot(self) -> list[tuple[float, float]]:
         return list(self._selection_points)
 
-    def set_selection_snapshot(self, points: list[tuple[float, float]] | None) -> None:
+    def selection_inverted(self) -> bool:
+        return bool(getattr(self, "_selection_inverted", False))
+
+    def set_selection_snapshot(
+        self,
+        points: list[tuple[float, float]] | None,
+        *,
+        inverted: bool = False,
+    ) -> None:
         self._selection_points = [
             (max(0.0, min(1.0, float(x))), max(0.0, min(1.0, float(y))))
             for x, y in list(points or [])
         ]
+        self._selection_inverted = bool(inverted and len(self._selection_points) >= 3)
         self._sync_selection_timer()
         self.repaint_requested.emit()
         self.update()
 
     def clear_selection(self) -> None:
-        if not self._selection_points:
+        if not self._selection_points and not self._selection_inverted:
             return
         self._selection_points = []
+        self._selection_inverted = False
+        self._sync_selection_timer()
+        self.repaint_requested.emit()
+        self.update()
+
+    def select_all(self) -> None:
+        self.set_selection_snapshot(
+            [
+                (0.0, 0.0),
+                (1.0, 0.0),
+                (1.0, 1.0),
+                (0.0, 1.0),
+            ]
+        )
+
+    def invert_selection(self) -> None:
+        if len(self._selection_points) < 3:
+            self.select_all()
+            return
+        self._selection_inverted = not bool(self._selection_inverted)
         self._sync_selection_timer()
         self.repaint_requested.emit()
         self.update()
@@ -1039,6 +1105,13 @@ class DrawingCanvas(QWidget):
 
         painter.save()
         painter.setBrush(Qt.BrushStyle.NoBrush)
+        if self._selection_inverted:
+            outside_pen = QPen(QColor(78, 142, 255, 150), 1.0)
+            outside_pen.setCosmetic(True)
+            outside_pen.setStyle(Qt.PenStyle.DashLine)
+            outside_pen.setDashOffset(-self._selection_phase)
+            painter.setPen(outside_pen)
+            painter.drawRect(QRectF(0.5, 0.5, w - 1.0, h - 1.0))
         for color, offset in (
             (QColor(0, 0, 0, 235), 0.0),
             (QColor(255, 255, 255, 245), 6.0),
@@ -1321,6 +1394,7 @@ class DrawingCanvas(QWidget):
         )
         if make_selection and len(norm_points) >= 3:
             self._selection_points = list(norm_points)
+            self._selection_inverted = False
             self._sync_selection_timer()
         self._path_points = []
         self.stroke_added.emit(stroke)
@@ -2138,6 +2212,8 @@ class PaintDialog(QDialog):
         self._sticker_items: list["StickerItem"] = []
         self._undo_stack: list[tuple] = []
         self._redo_stack: list[tuple] = []
+        self._undo_labels: list[str] = []
+        self._redo_labels: list[str] = []
         self._restoring_state = False
         self._canvas_zoom = 1.0
         self._canvas_pan = QPoint(0, 0)
@@ -2236,6 +2312,87 @@ class PaintDialog(QDialog):
         button.setFixedSize(22, 22)
         return button
 
+    def _build_painter_menu_bar(self) -> QMenuBar:
+        menu_bar = QMenuBar(self)
+        menu_bar.setObjectName("PaintMenuBar")
+
+        file_menu = menu_bar.addMenu("File")
+        self._add_painter_menu_action(file_menu, "New Canvas...", self._open_new_canvas_dialog, "Ctrl+N")
+        self._add_painter_menu_action(file_menu, "Export PNG...", lambda: self._export_png_to_file(include_background=True), "Ctrl+Shift+E")
+        self._add_painter_menu_action(file_menu, "Export Transparent PNG...", lambda: self._export_png_to_file(include_background=False))
+        file_menu.addSeparator()
+        self._add_painter_menu_action(file_menu, "Close", self.reject, "Esc")
+
+        edit_menu = menu_bar.addMenu("Edit")
+        self._add_painter_menu_action(edit_menu, "Undo", self._undo, "Ctrl+Z")
+        self._add_painter_menu_action(edit_menu, "Redo", self._redo, "Ctrl+Y")
+        edit_menu.addSeparator()
+        self._add_painter_menu_action(edit_menu, "Copy", self._copy_selected_layer, "Ctrl+C")
+        self._add_painter_menu_action(edit_menu, "Cut", self._cut_selected_layer, "Ctrl+X")
+        self._add_painter_menu_action(edit_menu, "Paste", self._paste_layer_clipboard, "Ctrl+V")
+        self._add_painter_menu_action(edit_menu, "Delete", self._delete_selected_layer, "Del")
+        edit_menu.addSeparator()
+        self._add_painter_menu_action(edit_menu, "Clear All", self._clear_all)
+
+        view_menu = menu_bar.addMenu("View")
+        self._add_painter_menu_action(view_menu, "Zoom In", self._zoom_in, "Ctrl++")
+        self._add_painter_menu_action(view_menu, "Zoom Out", self._zoom_out, "Ctrl+-")
+        self._add_painter_menu_action(view_menu, "Fit", self._zoom_fit, "Ctrl+0")
+        self._add_painter_menu_action(view_menu, "100%", lambda: self._set_zoom_percent(100), "Ctrl+1")
+        view_menu.addSeparator()
+        self._add_painter_menu_action(view_menu, "Pan Tool", lambda: self._set_tool("pan"), "H")
+        self._add_painter_menu_action(view_menu, "Reset Pan", self._reset_canvas_pan)
+
+        image_menu = menu_bar.addMenu("Image")
+        self._add_painter_menu_action(image_menu, "Channels Panel", lambda: self._show_painter_tab("channels"))
+        self._add_painter_menu_action(image_menu, "Show RGB", lambda: self._set_channel_visibility("RGB", True))
+        self._add_painter_menu_action(image_menu, "Hide Alpha", lambda: self._set_channel_visibility("Alpha", False))
+
+        layer_menu = menu_bar.addMenu("Layer")
+        self._add_painter_menu_action(layer_menu, "New Layer", self._new_paint_layer, "Ctrl+Shift+N")
+        self._add_painter_menu_action(layer_menu, "Duplicate Layer", self._duplicate_selected_layer, "Ctrl+J")
+        self._add_painter_menu_action(layer_menu, "Rename Layer...", self._rename_selected_layer)
+        self._add_painter_menu_action(layer_menu, "Delete Layer", self._delete_selected_layer)
+        layer_menu.addSeparator()
+        self._add_painter_menu_action(layer_menu, "Toggle Visibility", self._toggle_selected_layer_visibility)
+        self._add_painter_menu_action(layer_menu, "Toggle Lock", self._toggle_selected_layer_lock)
+
+        select_menu = menu_bar.addMenu("Select")
+        self._add_painter_menu_action(select_menu, "All", self._select_all, "Ctrl+A")
+        self._add_painter_menu_action(select_menu, "Deselect", self._deselect, "Ctrl+D")
+        self._add_painter_menu_action(select_menu, "Inverse", self._invert_selection, "Ctrl+Shift+I")
+        select_menu.addSeparator()
+        self._add_painter_menu_action(select_menu, "Selection To Path", self._selection_to_path)
+        self._add_painter_menu_action(select_menu, "Path To Selection", self._make_selection_from_selected_path)
+
+        path_menu = menu_bar.addMenu("Path")
+        self._add_painter_menu_action(path_menu, "Commit Work Path", lambda: self._commit_path(False))
+        self._add_painter_menu_action(path_menu, "Close Work Path", lambda: self._commit_path(True))
+        self._add_painter_menu_action(path_menu, "Clear Work Path", self._clear_path_preview)
+        path_menu.addSeparator()
+        self._add_painter_menu_action(path_menu, "Make Selection", self._make_selection_from_selected_path)
+        self._add_painter_menu_action(path_menu, "Save Selection As Path", self._selection_to_path)
+
+        window_menu = menu_bar.addMenu("Window")
+        self._add_painter_menu_action(window_menu, "Layers", lambda: self._show_painter_tab("layers"))
+        self._add_painter_menu_action(window_menu, "Channels", lambda: self._show_painter_tab("channels"))
+        self._add_painter_menu_action(window_menu, "Paths", lambda: self._show_painter_tab("paths"))
+        self._add_painter_menu_action(window_menu, "History", lambda: self._show_painter_tab("history"))
+        return menu_bar
+
+    def _add_painter_menu_action(
+        self,
+        menu: QMenu,
+        label: str,
+        handler: Callable[[], None],
+        shortcut: str | None = None,
+    ):
+        action = menu.addAction(label)
+        if shortcut:
+            action.setShortcut(QKeySequence(shortcut))
+        action.triggered.connect(handler)
+        return action
+
     def _prepare_paint_layers(self, strokes: list[Stroke]) -> None:
         seen = {layer.layer_id for layer in self._paint_layers}
         for stroke in strokes:
@@ -2327,6 +2484,72 @@ class PaintDialog(QDialog):
             {layer.layer_id: layer.visible for layer in self._paint_layers},
             {layer.layer_id: layer.opacity for layer in self._paint_layers},
         )
+
+    def _open_new_canvas_dialog(self) -> None:
+        setup = NewCanvasDialog(
+            self,
+            default_size=self._canvas_document_size,
+            default_background="transparent" if not self._background_layer_present else "#FFFFFF",
+        )
+        if setup.exec() != QDialog.DialogCode.Accepted:
+            return
+        request = setup.canvas_request()
+        self._replace_canvas_document(
+            int(request.get("width") or 1920),
+            int(request.get("height") or 1080),
+            str(request.get("background") or "#FFFFFF"),
+        )
+
+    def _replace_canvas_document(self, width: int, height: int, background: str = "#FFFFFF") -> None:
+        self._push_undo_state("New canvas")
+        width = max(64, min(16384, int(width or 1920)))
+        height = max(64, min(16384, int(height or 1080)))
+        background_text = str(background or "#FFFFFF")
+        self._canvas_document_size = (width, height)
+        self._bg_pixmap_source = create_blank_paint_pixmap(width, height, background_text)
+        self._background_layer_present = background_text.strip().lower() not in {
+            "transparent",
+            "alpha",
+            "none",
+        }
+        for item in list(getattr(self, "_bubble_items", [])):
+            item.deleteLater()
+        for item in list(getattr(self, "_sticker_items", [])):
+            item.deleteLater()
+        self._bubble_items = []
+        self._sticker_items = []
+        self._bubbles = []
+        self._stickers = []
+        self._paint_layer_serial = 1
+        self._paint_layers = [PaintLayer("paint-layer-1", "Layer 1")]
+        self._active_paint_layer_id = "paint-layer-1"
+        self._selected_layer_id = "paint-layer-1" if self._standalone else None
+        if hasattr(self, "canvas"):
+            self.canvas.set_strokes_snapshot([])
+            self.canvas.clear_selection()
+            self.canvas.clear_path_preview()
+        self._canvas_pan = QPoint(0, 0)
+        self._sync_canvas_layer_view()
+        self._update_canvas_geometry()
+        self._update_inspector_counts()
+
+    def _show_painter_tab(self, tab: str) -> None:
+        tabs = getattr(self, "_layer_channel_path_tabs", None)
+        if tabs is None:
+            return
+        target = str(tab or "").strip().casefold()
+        names = {
+            "layers": 0,
+            "layer": 0,
+            "channels": 1,
+            "channel": 1,
+            "paths": 2,
+            "path": 2,
+            "history": 3,
+        }
+        index = names.get(target, 0)
+        if 0 <= index < tabs.count():
+            tabs.setCurrentIndex(index)
 
     def _build_ui_legacy(self, bg: QPixmap, initial_strokes: list[Stroke]) -> None:
         self.setStyleSheet(self.styleSheet() + _PAINT_DIALOG_QSS)
@@ -2490,6 +2713,9 @@ class PaintDialog(QDialog):
         root = QVBoxLayout(self)
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
+
+        self._painter_menu_bar = self._build_painter_menu_bar()
+        root.addWidget(self._painter_menu_bar)
 
         top_bar = QFrame()
         top_bar.setObjectName("PaintTopBar")
@@ -2758,8 +2984,8 @@ class PaintDialog(QDialog):
         inspector_controls_scroll.setFrameShape(QFrame.Shape.NoFrame)
         inspector_controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         inspector_controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        inspector_controls_scroll.setMinimumHeight(240)
-        inspector_controls_scroll.setMaximumHeight(430)
+        inspector_controls_scroll.setMinimumHeight(190)
+        inspector_controls_scroll.setMaximumHeight(360)
         inspector_controls_scroll.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Preferred,
@@ -2992,6 +3218,10 @@ class PaintDialog(QDialog):
         self.layer_blend_combo = QComboBox()
         self.layer_blend_combo.setObjectName("PaintLayerBlendCombo")
         self.layer_blend_combo.addItem(tr("paint.layer.blend_normal"), "normal")
+        self.layer_blend_combo.addItem("Multiply", "multiply")
+        self.layer_blend_combo.addItem("Screen", "screen")
+        self.layer_blend_combo.addItem("Overlay", "overlay")
+        self.layer_blend_combo.currentIndexChanged.connect(self._on_layer_blend_changed)
         layer_opacity_text = QLabel(tr("paint.layer.opacity"))
         layer_opacity_text.setObjectName("PaintLayerControlLabel")
         self._layer_opacity_value = QLabel("100%")
@@ -3144,6 +3374,16 @@ class PaintDialog(QDialog):
         self._path_list.itemClicked.connect(self._select_path_item)
         paths_layout.addWidget(self._path_list, stretch=1)
         self._layer_channel_path_tabs.addTab(paths_tab, tr("paint.tab.paths"))
+
+        history_tab = QWidget()
+        history_layout = QVBoxLayout(history_tab)
+        history_layout.setContentsMargins(8, 8, 8, 8)
+        history_layout.setSpacing(8)
+        self._history_list = QListWidget()
+        self._history_list.setObjectName("PaintLayerList")
+        self._history_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        history_layout.addWidget(self._history_list, stretch=1)
+        self._layer_channel_path_tabs.addTab(history_tab, "History")
 
         inspector_layout.addWidget(self._layer_channel_path_tabs, stretch=1)
 
@@ -3394,7 +3634,7 @@ class PaintDialog(QDialog):
             self._tool_status_label.setText(labels.get(tool, "Select / move objects"))
 
     def _clear_all(self) -> None:
-        self._push_undo_state()
+        self._push_undo_state("Clear all")
         self.canvas.clear_strokes_direct()
         self.canvas.clear_selection()
         self._update_inspector_counts()
@@ -3447,7 +3687,7 @@ class PaintDialog(QDialog):
             if hasattr(self, "_tool_status_label"):
                 self._tool_status_label.setText(tr("paint.layer.locked_status"))
             return
-        self._push_undo_state()
+        self._push_undo_state("Paint stroke" if stroke.source_tool != "path" else "Commit path")
         stroke.start_ms = self._time_ms
         if self._standalone:
             stroke.layer_id = self._active_paint_layer_id
@@ -3463,7 +3703,7 @@ class PaintDialog(QDialog):
                 if hasattr(self, "_tool_status_label"):
                     self._tool_status_label.setText(tr("paint.layer.locked_status"))
                 return
-        self._push_undo_state()
+        self._push_undo_state("Erase stroke")
         self.canvas.remove_stroke_direct(idx)
         self._update_inspector_counts()
 
@@ -3601,16 +3841,7 @@ class PaintDialog(QDialog):
             out.append(copied)
         return out
 
-    def _snapshot_state(self) -> tuple[
-        list[Stroke],
-        list[SpeechBubble],
-        list["Sticker"],
-        list[PaintLayer],
-        str,
-        str | None,
-        list[tuple[float, float]],
-        bool,
-    ]:
+    def _snapshot_state(self) -> tuple:
         strokes = self.canvas.embedded_strokes() if hasattr(self, "canvas") else []
         return (
             copy.deepcopy(strokes),
@@ -3621,21 +3852,30 @@ class PaintDialog(QDialog):
             self._selected_layer_id,
             self.canvas.selection_snapshot() if hasattr(self, "canvas") else [],
             bool(getattr(self, "_background_layer_present", True)),
+            bool(self.canvas.selection_inverted()) if hasattr(self, "canvas") else False,
+            copy.deepcopy(getattr(self, "_channel_visibility", {})),
+            str(getattr(self, "_selected_path_item_id", "work-path")),
         )
 
-    def _push_undo_state(self) -> None:
+    def _push_undo_state(self, label: str = "Edit") -> None:
         if self._restoring_state or not hasattr(self, "canvas"):
             return
         self._undo_stack.append(self._snapshot_state())
+        self._undo_labels.append(str(label or "Edit"))
         if len(self._undo_stack) > 50:
             self._undo_stack.pop(0)
+            if self._undo_labels:
+                self._undo_labels.pop(0)
         self._redo_stack.clear()
+        self._redo_labels.clear()
         self._update_history_buttons()
 
     def _undo(self) -> None:
         if not self._undo_stack:
             return
         self._redo_stack.append(self._snapshot_state())
+        label = self._undo_labels.pop() if self._undo_labels else "Edit"
+        self._redo_labels.append(label)
         snapshot = self._undo_stack.pop()
         self._restore_state(snapshot)
 
@@ -3643,6 +3883,8 @@ class PaintDialog(QDialog):
         if not self._redo_stack:
             return
         self._undo_stack.append(self._snapshot_state())
+        label = self._redo_labels.pop() if self._redo_labels else "Edit"
+        self._undo_labels.append(label)
         snapshot = self._redo_stack.pop()
         self._restore_state(snapshot)
 
@@ -3661,6 +3903,11 @@ class PaintDialog(QDialog):
             selection_points = snapshot[6] if len(snapshot) >= 7 else []
             if len(snapshot) >= 8:
                 self._background_layer_present = bool(snapshot[7])
+            selection_inverted = bool(snapshot[8]) if len(snapshot) >= 9 else False
+            if len(snapshot) >= 10 and isinstance(snapshot[9], dict):
+                self._channel_visibility = copy.deepcopy(snapshot[9])
+            if len(snapshot) >= 11:
+                self._selected_path_item_id = str(snapshot[10] or "work-path")
             for item in list(getattr(self, "_bubble_items", [])):
                 item.deleteLater()
             for item in list(getattr(self, "_sticker_items", [])):
@@ -3670,7 +3917,10 @@ class PaintDialog(QDialog):
             self._bubbles = copy.deepcopy(bubbles)
             self._stickers = copy.deepcopy(stickers)
             self.canvas.set_strokes_snapshot(copy.deepcopy(strokes))
-            self.canvas.set_selection_snapshot(copy.deepcopy(selection_points))
+            self.canvas.set_selection_snapshot(
+                copy.deepcopy(selection_points),
+                inverted=selection_inverted,
+            )
             self._sync_canvas_layer_view()
             self._spawn_initial_bubbles()
             self._spawn_initial_stickers()
@@ -3678,6 +3928,7 @@ class PaintDialog(QDialog):
         finally:
             self._restoring_state = False
         self._update_inspector_counts()
+        self._update_channel_list()
         self._update_history_buttons()
 
     def _update_history_buttons(self) -> None:
@@ -3685,6 +3936,33 @@ class PaintDialog(QDialog):
             self.undo_btn.setEnabled(bool(self._undo_stack))
         if hasattr(self, "redo_btn"):
             self.redo_btn.setEnabled(bool(self._redo_stack))
+        self._update_history_list()
+
+    def _update_history_list(self) -> None:
+        history = getattr(self, "_history_list", None)
+        if history is None:
+            return
+        labels = list(getattr(self, "_undo_labels", []) or [])
+        redo_labels = list(getattr(self, "_redo_labels", []) or [])
+        history.blockSignals(True)
+        try:
+            history.clear()
+            base = QListWidgetItem("Document Opened")
+            base.setIcon(app_icon("image", size=14, color="#9EA8BA"))
+            history.addItem(base)
+            for label in labels:
+                item = QListWidgetItem(str(label or "Edit"))
+                item.setIcon(app_icon("more", size=14, color="#DCE6F7"))
+                history.addItem(item)
+            for label in reversed(redo_labels):
+                item = QListWidgetItem(f"Redo: {label or 'Edit'}")
+                item.setIcon(app_icon("more", size=14, color="#687487"))
+                history.addItem(item)
+            current_row = max(0, len(labels))
+            if history.count():
+                history.setCurrentRow(min(current_row, history.count() - 1))
+        finally:
+            history.blockSignals(False)
 
     def _update_inspector_counts(self) -> None:
         labels = getattr(self, "_layer_count_labels", {})
@@ -3729,6 +4007,8 @@ class PaintDialog(QDialog):
                         states.append("Hidden")
                     if layer.locked:
                         states.append("Locked")
+                    if getattr(layer, "blend_mode", "normal") != "normal":
+                        states.append(str(layer.blend_mode).title())
                     state = " ".join(states)
                     prefix = f"{state}  " if state else ""
                     label = f"{prefix}{layer.name}  {layer.opacity}%  ({count})"
@@ -3802,6 +4082,14 @@ class PaintDialog(QDialog):
                     self.layer_opacity_slider.setEnabled(False)
                 finally:
                     self.layer_opacity_slider.blockSignals(False)
+            if hasattr(self, "layer_blend_combo"):
+                self.layer_blend_combo.blockSignals(True)
+                try:
+                    normal_index = self.layer_blend_combo.findData("normal")
+                    self.layer_blend_combo.setCurrentIndex(max(0, normal_index))
+                    self.layer_blend_combo.setEnabled(False)
+                finally:
+                    self.layer_blend_combo.blockSignals(False)
             return
         layer = self._paint_layer_by_id(self._selected_layer_id) or self._active_paint_layer()
         if hasattr(self, "_layer_opacity_value"):
@@ -3816,6 +4104,14 @@ class PaintDialog(QDialog):
                 self.layer_opacity_slider.setEnabled(not layer.locked)
             finally:
                 self.layer_opacity_slider.blockSignals(False)
+        if hasattr(self, "layer_blend_combo"):
+            self.layer_blend_combo.blockSignals(True)
+            try:
+                index = self.layer_blend_combo.findData(getattr(layer, "blend_mode", "normal"))
+                self.layer_blend_combo.setCurrentIndex(max(0, index))
+                self.layer_blend_combo.setEnabled(not layer.locked)
+            finally:
+                self.layer_blend_combo.blockSignals(False)
 
     def _sync_layer_lock_buttons(self, locked: bool, *, enabled: bool) -> None:
         for attr in (
@@ -3841,7 +4137,7 @@ class PaintDialog(QDialog):
         layer = self._paint_layer_by_id(self._selected_layer_id) or self._active_paint_layer()
         if layer.locked == bool(checked):
             return
-        self._push_undo_state()
+        self._push_undo_state("Lock layer" if checked else "Unlock layer")
         layer.locked = bool(checked)
         self._sync_canvas_layer_view()
         self._update_inspector_counts()
@@ -3860,7 +4156,7 @@ class PaintDialog(QDialog):
         new_name = str(name or "").strip()
         if not accepted or not new_name or new_name == layer.name:
             return
-        self._push_undo_state()
+        self._push_undo_state("Rename layer")
         layer.name = new_name[:80]
         self._selected_layer_id = layer.layer_id
         self._update_inspector_counts()
@@ -3906,16 +4202,9 @@ class PaintDialog(QDialog):
                 self._channel_visibility.get(key, True)
                 for key in ("Red", "Green", "Blue")
             )
-            for key in ("Red", "Green", "Blue"):
-                self._channel_visibility[key] = new_visible
+            self._set_channel_visibility("RGB", new_visible)
         elif channel in {"Red", "Green", "Blue", "Alpha"}:
-            self._channel_visibility[channel] = not self._channel_visibility.get(channel, True)
-        self._channel_visibility["RGB"] = all(
-            self._channel_visibility.get(key, True)
-            for key in ("Red", "Green", "Blue")
-        )
-        self._update_channel_list()
-        self._update_canvas_geometry()
+            self._set_channel_visibility(channel, not self._channel_visibility.get(channel, True))
 
     def _update_path_list(self) -> None:
         path_list = getattr(self, "_path_list", None)
@@ -3999,11 +4288,180 @@ class PaintDialog(QDialog):
             if hasattr(self, "_tool_status_label"):
                 self._tool_status_label.setText("Path needs at least 3 points")
             return
-        self._push_undo_state()
+        self._push_undo_state("Path to selection")
         self.canvas.set_selection_snapshot(points)
         self._selected_path_item_id = "selection"
         self._update_path_list()
         self._set_tool("select")
+
+    def _select_all(self) -> None:
+        if not hasattr(self, "canvas"):
+            return
+        self._push_undo_state("Select all")
+        self.canvas.select_all()
+        self._selected_path_item_id = "selection"
+        self._update_path_list()
+        self._set_tool("select")
+
+    def _deselect(self) -> None:
+        if not hasattr(self, "canvas") or not self.canvas.has_active_selection():
+            return
+        self._push_undo_state("Deselect")
+        self.canvas.clear_selection()
+        self._selected_path_item_id = "work-path"
+        self._update_path_list()
+        self._set_tool("select")
+
+    def _invert_selection(self) -> None:
+        if not hasattr(self, "canvas"):
+            return
+        self._push_undo_state("Invert selection")
+        self.canvas.invert_selection()
+        self._selected_path_item_id = "selection"
+        self._update_path_list()
+        self._set_tool("select")
+
+    def _selection_to_path(self) -> None:
+        if not hasattr(self, "canvas"):
+            return
+        points = self.canvas.selection_snapshot()
+        if len(points) < 3:
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText("Selection needs at least 3 points")
+            return
+        self._push_undo_state("Selection to path")
+        path_index = len([
+            stroke
+            for stroke in self.canvas.embedded_strokes()
+            if str(getattr(stroke, "source_tool", "") or "") == "path"
+        ])
+        stroke = Stroke(
+            points=copy.deepcopy(points),
+            color=(
+                self._pen_color.red(),
+                self._pen_color.green(),
+                self._pen_color.blue(),
+            ),
+            opacity=self._pen_opacity,
+            width_px=self._pen_width,
+            brush_style=self.canvas._pen_style if hasattr(self.canvas, "_pen_style") else "round",
+            closed_path=True,
+            layer_id=self._active_paint_layer_id,
+            source_tool="path",
+            start_ms=self._time_ms,
+            end_ms=None,
+        )
+        self.canvas.add_stroke_direct(stroke)
+        self._selected_path_item_id = f"path:{path_index}"
+        self._update_inspector_counts()
+        self._update_path_list()
+        self._set_tool("select")
+
+    @staticmethod
+    def _normalise_path_points(points) -> list[tuple[float, float]]:
+        out: list[tuple[float, float]] = []
+        for point in list(points or []):
+            if isinstance(point, dict):
+                raw_x = point.get("x", point.get("x_norm", 0.0))
+                raw_y = point.get("y", point.get("y_norm", 0.0))
+            elif isinstance(point, (list, tuple)) and len(point) >= 2:
+                raw_x, raw_y = point[0], point[1]
+            else:
+                continue
+            try:
+                x = float(raw_x)
+                y = float(raw_y)
+            except Exception:
+                continue
+            out.append((max(0.0, min(1.0, x)), max(0.0, min(1.0, y))))
+        return out
+
+    def _create_path_from_points(
+        self,
+        points,
+        *,
+        closed: bool = True,
+        make_selection: bool = False,
+    ) -> bool:
+        norm_points = self._normalise_path_points(points)
+        if len(norm_points) < 2:
+            return False
+        self._push_undo_state("Create path")
+        path_index = len([
+            stroke
+            for stroke in self.canvas.embedded_strokes()
+            if str(getattr(stroke, "source_tool", "") or "") == "path"
+        ])
+        stroke = Stroke(
+            points=norm_points,
+            color=(
+                self._pen_color.red(),
+                self._pen_color.green(),
+                self._pen_color.blue(),
+            ),
+            opacity=self._pen_opacity,
+            width_px=self._pen_width,
+            brush_style=self.canvas._pen_style if hasattr(self.canvas, "_pen_style") else "round",
+            closed_path=bool(closed),
+            layer_id=self._active_paint_layer_id,
+            source_tool="path",
+            start_ms=self._time_ms,
+            end_ms=None,
+        )
+        self.canvas.add_stroke_direct(stroke)
+        if make_selection and len(norm_points) >= 3:
+            self.canvas.set_selection_snapshot(norm_points)
+            self._selected_path_item_id = "selection"
+        else:
+            self._selected_path_item_id = f"path:{path_index}"
+        self._update_inspector_counts()
+        self._update_path_list()
+        self._set_tool("select")
+        return True
+
+    def _delete_path_by_id(self, path_id: str | None = None) -> bool:
+        target = str(path_id or self._selected_path_item_id or "work-path")
+        if target == "work-path":
+            if not hasattr(self, "canvas") or self.canvas.path_point_count() <= 0:
+                return False
+            self._push_undo_state("Delete work path")
+            self.canvas.clear_path_preview()
+            self._update_path_list()
+            return True
+        if target == "selection":
+            if not hasattr(self, "canvas") or not self.canvas.has_active_selection():
+                return False
+            self._push_undo_state("Delete selection path")
+            self.canvas.clear_selection()
+            self._selected_path_item_id = "work-path"
+            self._update_path_list()
+            return True
+        if not target.startswith("path:"):
+            return False
+        try:
+            target_index = int(target.split(":", 1)[1])
+        except ValueError:
+            return False
+        strokes = self.canvas.embedded_strokes() if hasattr(self, "canvas") else []
+        path_seen = -1
+        absolute_index = -1
+        for idx, stroke in enumerate(strokes):
+            if str(getattr(stroke, "source_tool", "") or "") != "path":
+                continue
+            path_seen += 1
+            if path_seen == target_index:
+                absolute_index = idx
+                break
+        if absolute_index < 0:
+            return False
+        self._push_undo_state("Delete path")
+        kept = list(strokes)
+        kept.pop(absolute_index)
+        self.canvas.set_strokes_snapshot(kept)
+        self._selected_path_item_id = "work-path"
+        self._update_inspector_counts()
+        self._update_path_list()
+        return True
 
     def _select_layer_item(self, item: QListWidgetItem) -> None:
         layer_id = item.data(Qt.ItemDataRole.UserRole)
@@ -4042,12 +4500,28 @@ class PaintDialog(QDialog):
         self._sync_canvas_layer_view()
         self._update_layer_list()
 
-    def _new_paint_layer(self) -> None:
-        self._push_undo_state()
+    def _on_layer_blend_changed(self) -> None:
+        layer = self._paint_layer_by_id(self._selected_layer_id) or self._active_paint_layer()
+        mode = "normal"
+        if hasattr(self, "layer_blend_combo"):
+            mode = str(self.layer_blend_combo.currentData() or "normal")
+        if mode not in {"normal", "multiply", "screen", "overlay"}:
+            mode = "normal"
+        if getattr(layer, "blend_mode", "normal") == mode:
+            return
+        self._push_undo_state("Set layer blend mode")
+        layer.blend_mode = mode
+        self._update_layer_list()
+
+    def _new_paint_layer(self, name: str | None = None) -> None:
+        self._push_undo_state("New layer")
         self._paint_layer_serial += 1
+        if isinstance(name, bool):
+            name = None
+        raw_name = str(name or "").strip()
         layer = PaintLayer(
             layer_id=f"paint-layer-{self._paint_layer_serial}",
-            name=f"Layer {self._paint_layer_serial}",
+            name=raw_name[:80] if raw_name else f"Layer {self._paint_layer_serial}",
         )
         self._paint_layers.append(layer)
         self._active_paint_layer_id = layer.layer_id
@@ -4059,9 +4533,132 @@ class PaintDialog(QDialog):
         layer = self._paint_layer_by_id(self._current_layer_id())
         if layer is None:
             return
+        self._push_undo_state("Show layer" if not layer.visible else "Hide layer")
         layer.visible = not layer.visible
         self._sync_canvas_layer_view()
         self._update_layer_list()
+
+    def _toggle_selected_layer_lock(self) -> None:
+        if self._selected_layer_id == "background":
+            return
+        layer = self._paint_layer_by_id(self._current_layer_id()) or self._active_paint_layer()
+        self._set_layer_locked(layer.layer_id, not bool(layer.locked))
+
+    def _select_paint_layer_by_id(self, layer_id: str | None) -> PaintLayer | None:
+        if not layer_id:
+            layer_id = self._active_paint_layer_id
+        layer_id = str(layer_id)
+        layer = self._paint_layer_by_id(layer_id)
+        if layer is None:
+            return None
+        self._selected_layer_id = layer.layer_id
+        self._active_paint_layer_id = layer.layer_id
+        if hasattr(self, "_layer_list"):
+            for row in range(self._layer_list.count()):
+                item = self._layer_list.item(row)
+                if item.data(Qt.ItemDataRole.UserRole) == layer.layer_id:
+                    self._layer_list.setCurrentItem(item)
+                    break
+        self._sync_canvas_layer_view()
+        self._update_layer_controls()
+        return layer
+
+    def _rename_selected_layer(self) -> None:
+        layer = self._paint_layer_by_id(self._current_layer_id())
+        if layer is None:
+            return
+        item = self._layer_list.currentItem() if hasattr(self, "_layer_list") else None
+        if item is None or item.data(Qt.ItemDataRole.UserRole) != layer.layer_id:
+            self._selected_layer_id = layer.layer_id
+            self._update_layer_list()
+            item = self._layer_list.currentItem() if hasattr(self, "_layer_list") else None
+        if item is not None:
+            self._rename_layer_item(item)
+
+    def _rename_layer_to(self, layer_id: str | None, name: str) -> bool:
+        layer = self._select_paint_layer_by_id(layer_id)
+        new_name = str(name or "").strip()
+        if layer is None or not new_name or layer.name == new_name:
+            return False
+        self._push_undo_state("Rename layer")
+        layer.name = new_name[:80]
+        self._selected_layer_id = layer.layer_id
+        self._update_inspector_counts()
+        return True
+
+    def _set_layer_visible(self, layer_id: str | None, visible: bool) -> bool:
+        layer = self._select_paint_layer_by_id(layer_id)
+        if layer is None or layer.visible == bool(visible):
+            return False
+        self._push_undo_state("Show layer" if visible else "Hide layer")
+        layer.visible = bool(visible)
+        self._sync_canvas_layer_view()
+        self._update_inspector_counts()
+        return True
+
+    def _set_layer_locked(self, layer_id: str | None, locked: bool) -> bool:
+        layer = self._select_paint_layer_by_id(layer_id)
+        if layer is None or layer.locked == bool(locked):
+            return False
+        self._push_undo_state("Lock layer" if locked else "Unlock layer")
+        layer.locked = bool(locked)
+        self._sync_canvas_layer_view()
+        self._update_inspector_counts()
+        return True
+
+    def _set_layer_opacity_value(self, layer_id: str | None, opacity: int) -> bool:
+        layer = self._select_paint_layer_by_id(layer_id)
+        if layer is None:
+            return False
+        value = max(0, min(100, int(opacity)))
+        if layer.opacity == value:
+            return False
+        self._push_undo_state("Set layer opacity")
+        layer.opacity = value
+        self._sync_canvas_layer_view()
+        self._update_inspector_counts()
+        return True
+
+    def _set_layer_blend_mode(self, layer_id: str | None, blend_mode: str) -> bool:
+        layer = self._select_paint_layer_by_id(layer_id)
+        if layer is None:
+            return False
+        mode = str(blend_mode or "normal").strip().casefold().replace("-", "_")
+        if mode not in {"normal", "multiply", "screen", "overlay"}:
+            mode = "normal"
+        if getattr(layer, "blend_mode", "normal") == mode:
+            return False
+        self._push_undo_state("Set layer blend mode")
+        layer.blend_mode = mode
+        self._update_inspector_counts()
+        return True
+
+    def _set_channel_visibility(self, channel: str, visible: bool) -> bool:
+        channel = str(channel or "RGB").strip()
+        if channel not in {"RGB", "Red", "Green", "Blue", "Alpha"}:
+            return False
+        if channel == "RGB":
+            changed = any(
+                self._channel_visibility.get(key, True) != bool(visible)
+                for key in ("Red", "Green", "Blue")
+            )
+        else:
+            changed = self._channel_visibility.get(channel, True) != bool(visible)
+        if not changed:
+            return False
+        self._push_undo_state("Set channel visibility")
+        if channel == "RGB":
+            for key in ("Red", "Green", "Blue"):
+                self._channel_visibility[key] = bool(visible)
+        else:
+            self._channel_visibility[channel] = bool(visible)
+        self._channel_visibility["RGB"] = all(
+            self._channel_visibility.get(key, True)
+            for key in ("Red", "Green", "Blue")
+        )
+        self._update_channel_list()
+        self._update_canvas_geometry()
+        return True
 
     def _install_edit_shortcuts(self) -> None:
         shortcuts = (
@@ -4070,7 +4667,10 @@ class PaintDialog(QDialog):
             ("Ctrl+V", self._paste_layer_clipboard),
             ("Delete", self._delete_selected_layer),
             ("Backspace", self._delete_selected_layer),
-            ("Ctrl+D", self._duplicate_selected_layer),
+            ("Ctrl+D", self._deselect),
+            ("Ctrl+J", self._duplicate_selected_layer),
+            ("Ctrl+A", self._select_all),
+            ("Ctrl+Shift+I", self._invert_selection),
             ("Ctrl++", self._zoom_in),
             ("Ctrl+=", self._zoom_in),
             ("Ctrl+-", self._zoom_out),
@@ -4352,6 +4952,7 @@ class PaintDialog(QDialog):
             visible=bool(row.get("visible", True)),
             opacity=max(0, min(100, self._clipboard_int(row.get("opacity"), 100))),
             locked=bool(row.get("locked", False)),
+            blend_mode=str(row.get("blend_mode") or "normal"),
         )
 
     def _bubble_from_clipboard_dict(self, row: dict) -> "SpeechBubble":
@@ -4421,6 +5022,8 @@ class PaintDialog(QDialog):
                 name=f"{name} copy" if "copy" not in str(name).lower() else f"Layer {self._paint_layer_serial}",
                 visible=bool(getattr(source_layer, "visible", True)),
                 opacity=max(0, min(100, int(getattr(source_layer, "opacity", 100)))),
+                locked=bool(getattr(source_layer, "locked", False)),
+                blend_mode=str(getattr(source_layer, "blend_mode", "normal") or "normal"),
             )
             self._paint_layers.append(layer)
             pasted = copy.deepcopy(payload.get("strokes") or [])
@@ -4774,6 +5377,87 @@ class PaintDialog(QDialog):
 
     def result_stickers(self) -> list["Sticker"]:
         return list(self._stickers)
+
+    def export_png_to_path(
+        self,
+        path: str | Path,
+        *,
+        include_background: bool = True,
+        width: int = 0,
+        height: int = 0,
+    ) -> dict:
+        bg = self._export_background_pixmap() if include_background else None
+        target_size = (
+            (max(1, int(width)), max(1, int(height)))
+            if int(width or 0) > 0 and int(height or 0) > 0
+            else _paint_export_size(bg, fallback=self._canvas_document_size)
+        )
+        width_scale = target_size[0] / max(1, self.canvas.width())
+        return export_paint_png(
+            path,
+            background_pixmap=bg,
+            strokes=self._visible_strokes_for_export(),
+            bubbles=self._bubbles,
+            stickers=self._stickers,
+            time_ms=self._time_ms,
+            frame_size=target_size,
+            include_background=include_background,
+            stroke_width_scale=width_scale,
+        )
+
+    def painter_action_state(self) -> dict:
+        path_strokes = [
+            stroke
+            for stroke in (self.canvas.embedded_strokes() if hasattr(self, "canvas") else [])
+            if str(getattr(stroke, "source_tool", "") or "") == "path"
+        ]
+        return {
+            "schema": "tigerstudio.paint.state.v1",
+            "standalone": bool(self._standalone),
+            "document": {
+                "width": int(self._canvas_document_size[0]),
+                "height": int(self._canvas_document_size[1]),
+                "background_layer_present": bool(self._background_layer_present),
+            },
+            "view": {
+                "zoom_percent": int(round(float(getattr(self, "_canvas_zoom", 1.0)) * 100)),
+                "pan_x": int(getattr(self, "_canvas_pan", QPoint(0, 0)).x()),
+                "pan_y": int(getattr(self, "_canvas_pan", QPoint(0, 0)).y()),
+            },
+            "layers": [
+                {
+                    "layer_id": layer.layer_id,
+                    "name": layer.name,
+                    "visible": bool(layer.visible),
+                    "opacity": int(layer.opacity),
+                    "locked": bool(layer.locked),
+                    "blend_mode": str(getattr(layer, "blend_mode", "normal") or "normal"),
+                    "stroke_count": self._stroke_count_for_layer(layer.layer_id),
+                    "active": layer.layer_id == self._active_paint_layer_id,
+                    "selected": layer.layer_id == self._selected_layer_id,
+                }
+                for layer in self._paint_layers
+            ],
+            "active_layer_id": str(self._active_paint_layer_id),
+            "selected_layer_id": str(self._selected_layer_id or ""),
+            "channels": dict(self._channel_visibility),
+            "selection": {
+                "active": bool(self.canvas.has_active_selection()) if hasattr(self, "canvas") else False,
+                "point_count": int(self.canvas.selection_point_count()) if hasattr(self, "canvas") else 0,
+                "inverted": bool(self.canvas.selection_inverted()) if hasattr(self, "canvas") else False,
+            },
+            "paths": {
+                "selected_path_id": str(self._selected_path_item_id),
+                "work_path_points": int(self.canvas.path_point_count()) if hasattr(self, "canvas") else 0,
+                "saved_path_count": len(path_strokes),
+            },
+            "history": {
+                "undo_count": len(self._undo_stack),
+                "redo_count": len(self._redo_stack),
+                "undo_labels": list(self._undo_labels),
+                "redo_labels": list(self._redo_labels),
+            },
+        }
 
     # ---- sticker management ----
 

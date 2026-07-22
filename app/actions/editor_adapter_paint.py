@@ -10,6 +10,220 @@ from app.actions.editor_adapter_object_helpers import _int
 class PaintAdapterMixin:
     """Registered action surface for paint dialog object import workflows."""
 
+    def paint_state(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        return dialog.painter_action_state()
+
+    def paint_document_new(
+        self,
+        *,
+        width: int = 1920,
+        height: int = 1080,
+        background: str = "#FFFFFF",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._replace_canvas_document(int(width or 1920), int(height or 1080), str(background or "#FFFFFF"))
+        return dialog.painter_action_state()
+
+    def paint_document_export_png(
+        self,
+        *,
+        path: str = "",
+        include_background: bool = True,
+        width: int = 0,
+        height: int = 0,
+    ) -> dict[str, Any]:
+        if not path:
+            from datetime import datetime
+
+            from app.paths import default_save_dir
+
+            suffix = "composited" if include_background else "overlay"
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = str(default_save_dir() / f"paint_{suffix}_{stamp}.png")
+        dialog = self._paint_dialog_owner()
+        return dialog.export_png_to_path(
+            path,
+            include_background=bool(include_background),
+            width=int(width or 0),
+            height=int(height or 0),
+        )
+
+    def paint_view_zoom(self, *, percent: int = 100) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._set_zoom_percent(int(percent or 100))
+        return dialog.painter_action_state()
+
+    def paint_view_pan(
+        self,
+        *,
+        x: int | None = None,
+        y: int | None = None,
+        dx: int = 0,
+        dy: int = 0,
+        reset: bool = False,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if reset:
+            dialog._reset_canvas_pan()
+        elif x is not None or y is not None:
+            current = getattr(dialog, "_canvas_pan", None)
+            current_x = int(current.x()) if current is not None else 0
+            current_y = int(current.y()) if current is not None else 0
+            from PySide6.QtCore import QPoint
+
+            dialog._set_canvas_pan(QPoint(current_x if x is None else int(x), current_y if y is None else int(y)))
+        else:
+            from PySide6.QtCore import QPoint
+
+            dialog._pan_canvas_by(QPoint(int(dx or 0), int(dy or 0)))
+        return dialog.painter_action_state()
+
+    def paint_layer_add(self, *, name: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._new_paint_layer(str(name or "") or None)
+        return dialog.painter_action_state()
+
+    def paint_layer_select(self, *, layer_id: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if not dialog._select_paint_layer_by_id(layer_id or None):
+            raise ValueError("paint layer not found")
+        return dialog.painter_action_state()
+
+    def paint_layer_rename(self, *, layer_id: str = "", name: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if not dialog._rename_layer_to(layer_id or None, str(name or "")):
+            raise ValueError("layer rename did not change a paint layer")
+        return dialog.painter_action_state()
+
+    def paint_layer_duplicate(self, *, layer_id: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if layer_id:
+            dialog._select_paint_layer_by_id(layer_id)
+        dialog._duplicate_selected_layer()
+        return dialog.painter_action_state()
+
+    def paint_layer_delete(self, *, layer_id: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._delete_layer(layer_id or dialog._current_layer_id())
+        return dialog.painter_action_state()
+
+    def paint_layer_set_visible(self, *, layer_id: str = "", visible: bool = True) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._set_layer_visible(layer_id or None, bool(visible))
+        return dialog.painter_action_state()
+
+    def paint_layer_set_locked(self, *, layer_id: str = "", locked: bool = True) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._set_layer_locked(layer_id or None, bool(locked))
+        return dialog.painter_action_state()
+
+    def paint_layer_set_opacity(self, *, layer_id: str = "", opacity: int = 100) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._set_layer_opacity_value(layer_id or None, int(opacity or 0))
+        return dialog.painter_action_state()
+
+    def paint_layer_set_blend_mode(self, *, layer_id: str = "", blend_mode: str = "normal") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._set_layer_blend_mode(layer_id or None, str(blend_mode or "normal"))
+        return dialog.painter_action_state()
+
+    def paint_channel_set_visible(self, *, channel: str = "RGB", visible: bool = True) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._set_channel_visibility(str(channel or "RGB"), bool(visible))
+        return dialog.painter_action_state()
+
+    def paint_selection_select_all(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._select_all()
+        return dialog.painter_action_state()
+
+    def paint_selection_deselect(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._deselect()
+        return dialog.painter_action_state()
+
+    def paint_selection_invert(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._invert_selection()
+        return dialog.painter_action_state()
+
+    def paint_selection_to_path(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._selection_to_path()
+        return dialog.painter_action_state()
+
+    def paint_path_to_selection(self, *, path_id: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if path_id:
+            dialog._selected_path_item_id = str(path_id)
+        dialog._make_selection_from_selected_path()
+        return dialog.painter_action_state()
+
+    def paint_path_create(
+        self,
+        *,
+        points: list[Any] | None = None,
+        closed: bool = True,
+        make_selection: bool = False,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if not dialog._create_path_from_points(points or [], closed=bool(closed), make_selection=bool(make_selection)):
+            raise ValueError("path requires at least two valid normalized points")
+        return dialog.painter_action_state()
+
+    def paint_path_delete(self, *, path_id: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if not dialog._delete_path_by_id(path_id or None):
+            raise ValueError("paint path not found")
+        return dialog.painter_action_state()
+
+    def paint_path_clear(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._clear_path_preview()
+        return dialog.painter_action_state()
+
+    def paint_path_commit(self, *, closed: bool = False) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._commit_path(bool(closed))
+        return dialog.painter_action_state()
+
+    def paint_clipboard_copy(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._copy_selected_layer()
+        return dialog.painter_action_state()
+
+    def paint_clipboard_cut(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._cut_selected_layer()
+        return dialog.painter_action_state()
+
+    def paint_clipboard_paste(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._paste_layer_clipboard()
+        return dialog.painter_action_state()
+
+    def paint_tool_set(self, *, tool: str = "select") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        tool_name = str(tool or "select").strip().casefold().replace("-", "_")
+        aliases = {
+            "move": "select",
+            "hand": "pan",
+            "brush": "pen",
+            "pen": "pen",
+            "eraser": "eraser",
+            "path": "path",
+            "pan": "pan",
+            "select": "select",
+        }
+        dialog._set_tool(aliases.get(tool_name, "select"))
+        return dialog.painter_action_state()
+
+    def paint_window_show_panel(self, *, panel: str = "layers") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._show_painter_tab(str(panel or "layers"))
+        return dialog.painter_action_state()
+
     def paint_editor_objects_list(
         self,
         *,
@@ -197,6 +411,35 @@ class PaintAdapterMixin:
         )
         return report
 
+    def _paint_dialog_owner(self) -> Any:
+        owner = self._require_owner()
+        if _looks_like_paint_dialog(owner):
+            return owner
+        for attr in (
+            "_active_painter_window",
+            "_active_paint_dialog",
+            "_paint_dialog",
+            "_painter_dialog",
+        ):
+            candidate = getattr(owner, attr, None)
+            if _looks_like_paint_dialog(candidate):
+                return candidate
+        workbench = getattr(owner, "_workbench_panel", None) or getattr(owner, "workbench_panel", None)
+        candidates: list[Any] = []
+        if workbench is not None:
+            candidates.extend(list(getattr(workbench, "_painter_windows", []) or []))
+        candidates.extend(list(getattr(owner, "_painter_windows", []) or []))
+        for candidate in reversed(candidates):
+            if not _looks_like_paint_dialog(candidate):
+                continue
+            try:
+                if hasattr(candidate, "isVisible") and not candidate.isVisible():
+                    continue
+            except Exception:
+                pass
+            return candidate
+        raise ValueError("no active Painter dialog")
+
     def _paint_action_time_ms(self, time_ms: int | None) -> int:
         if time_ms is not None:
             return max(0, _int(time_ms, 0))
@@ -301,6 +544,16 @@ def _clamp_norm(value: Any, lo: float, hi: float) -> float:
     except Exception:
         number = lo
     return max(lo, min(hi, number))
+
+
+def _looks_like_paint_dialog(candidate: Any) -> bool:
+    if candidate is None:
+        return False
+    return bool(
+        hasattr(candidate, "canvas")
+        and callable(getattr(candidate, "painter_action_state", None))
+        and callable(getattr(candidate, "export_png_to_path", None))
+    )
 
 
 __all__ = ["PaintAdapterMixin"]

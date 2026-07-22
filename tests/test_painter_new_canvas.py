@@ -104,11 +104,16 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert not dialog.eraser_btn.icon().isNull()
     assert not dialog.path_btn.icon().isNull()
     assert dialog.brush_library_list.parent() is not dialog._tool_rail
-    assert dialog._layer_channel_path_tabs.count() == 3
+    assert dialog._layer_channel_path_tabs.count() == 4
     assert [
         dialog._layer_channel_path_tabs.tabText(i)
         for i in range(dialog._layer_channel_path_tabs.count())
-    ] == [tr("paint.tab.layers"), tr("paint.tab.channels"), tr("paint.tab.paths")]
+    ] == [tr("paint.tab.layers"), tr("paint.tab.channels"), tr("paint.tab.paths"), "History"]
+    menu_labels = [
+        action.text().replace("&", "")
+        for action in dialog._painter_menu_bar.actions()
+    ]
+    assert menu_labels == ["File", "Edit", "View", "Image", "Layer", "Select", "Path", "Window"]
     assert dialog.layer_filter_combo.currentText() == tr("paint.layer.filter_kind")
     assert dialog.layer_blend_combo.currentText() == tr("paint.layer.blend_normal")
     assert dialog._layer_opacity_value.text() == "100%"
@@ -261,6 +266,15 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeyp
     dialog._make_selection_from_selected_path()
     assert dialog.canvas.has_active_selection() is True
     assert dialog.canvas.selection_point_count() == 3
+    dialog._invert_selection()
+    assert dialog.canvas.selection_inverted() is True
+    dialog._selection_to_path()
+    assert dialog._path_list.count() >= 3
+    assert dialog._history_list.count() >= 2
+    dialog._select_all()
+    assert dialog.canvas.selection_point_count() == 4
+    dialog._deselect()
+    assert dialog.canvas.has_active_selection() is False
 
     dialog.close()
 
