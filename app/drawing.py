@@ -10,6 +10,7 @@ from typing import Callable
 
 from PySide6.QtCore import (
     QByteArray,
+    QEvent,
     QMimeData,
     QPoint,
     QPointF,
@@ -42,6 +43,7 @@ from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QHBoxLayout,
+    QInputDialog,
     QLabel,
     QListWidget,
     QListWidgetItem,
@@ -789,6 +791,16 @@ class DrawingCanvas(QWidget):
 
     def path_point_count(self) -> int:
         return len(self._path_points)
+
+    def path_snapshot(self) -> list[tuple[float, float]]:
+        if not self._path_points:
+            return []
+        w = max(1, self.width())
+        h = max(1, self.height())
+        return [
+            (max(0.0, min(1.0, point.x() / w)), max(0.0, min(1.0, point.y() / h)))
+            for point in self._path_points
+        ]
 
     def has_active_selection(self) -> bool:
         return len(self._selection_points) >= 3
@@ -2078,6 +2090,9 @@ class PaintDialog(QDialog):
         super().__init__(parent)
         self._standalone = bool(standalone)
         self.setWindowTitle("Painter - TigerCapture" if self._standalone else tr("paint.title"))
+        self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
+        self.setMinimumSize(760, 560)
+        self.setSizeGripEnabled(True)
         self.setModal(not self._standalone)
         self._time_ms = int(time_ms)
         self._editor_object_provider = editor_object_provider
@@ -2089,6 +2104,17 @@ class PaintDialog(QDialog):
         self._redo_stack: list[tuple] = []
         self._restoring_state = False
         self._canvas_zoom = 1.0
+        self._canvas_pan = QPoint(0, 0)
+        self._canvas_pan_drag_start: QPoint | None = None
+        self._canvas_pan_drag_origin = QPoint(0, 0)
+        self._selected_path_item_id = "work-path"
+        self._channel_visibility: dict[str, bool] = {
+            "RGB": True,
+            "Red": True,
+            "Green": True,
+            "Blue": True,
+            "Alpha": True,
+        }
         self._selected_layer_id: str | None = None
         self._paint_clipboard: dict | None = None
         self._paint_layer_serial = 1
@@ -2219,13 +2245,38 @@ class PaintDialog(QDialog):
         except Exception:
             has_alpha = self._bg_pixmap_source.toImage().hasAlphaChannel()
         if not has_alpha:
-            return self._bg_pixmap_source
+            return self._apply_channel_visibility_to_pixmap(self._bg_pixmap_source)
         painter = QPainter(checker)
         try:
             painter.drawPixmap(0, 0, self._bg_pixmap_source)
         finally:
             painter.end()
-        return checker
+        return self._apply_channel_visibility_to_pixmap(checker)
+
+    def _apply_channel_visibility_to_pixmap(self, pixmap: QPixmap) -> QPixmap:
+        if pixmap.isNull():
+            return pixmap
+        visibility = getattr(self, "_channel_visibility", None) or {}
+        red_visible = bool(visibility.get("Red", True))
+        green_visible = bool(visibility.get("Green", True))
+        blue_visible = bool(visibility.get("Blue", True))
+        alpha_visible = bool(visibility.get("Alpha", True))
+        if red_visible and green_visible and blue_visible and alpha_visible:
+            return pixmap
+        image = pixmap.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+        for y in range(image.height()):
+            for x in range(image.width()):
+                color = image.pixelColor(x, y)
+                if not red_visible:
+                    color.setRed(0)
+                if not green_visible:
+                    color.setGreen(0)
+                if not blue_visible:
+                    color.setBlue(0)
+                if not alpha_visible:
+                    color.setAlpha(255)
+                image.setPixelColor(x, y, color)
+        return QPixmap.fromImage(image)
 
     def _export_background_pixmap(self) -> QPixmap | None:
         if self._background_layer_present and self._bg_pixmap_source and not self._bg_pixmap_source.isNull():
@@ -2508,6 +2559,12 @@ class PaintDialog(QDialog):
         self.select_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.select_btn.clicked.connect(lambda: self._set_tool("select"))
 
+        self.pan_btn = QPushButton("Pan")
+        self.pan_btn.setCheckable(True)
+        self.pan_btn.setObjectName("PaintTool")
+        self.pan_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.pan_btn.clicked.connect(lambda: self._set_tool("pan"))
+
         self.pen_btn = QPushButton(tr("paint.btn.pen"))
         self.pen_btn.setCheckable(True)
         self.pen_btn.setChecked(True)
@@ -2556,6 +2613,7 @@ class PaintDialog(QDialog):
         self.cutout_btn.clicked.connect(self._create_cutout_sticker)
 
         self._configure_paint_tool_icon_button(self.select_btn, "cursor", "Select / Move")
+        self._configure_paint_tool_icon_button(self.pan_btn, "hand", "Pan canvas")
         self._configure_paint_tool_icon_button(self.pen_btn, "paint-brush", tr("paint.btn.pen"))
         self._configure_paint_tool_icon_button(self.eraser_btn, "eraser", tr("paint.btn.eraser"))
         self._configure_paint_tool_icon_button(self.path_btn, "path-tool", "Path")
@@ -2566,6 +2624,7 @@ class PaintDialog(QDialog):
         self._configure_paint_tool_icon_button(self.clear_btn, "trash", tr("paint.btn.clear_all"))
 
         tool_layout.addWidget(self.select_btn)
+        tool_layout.addWidget(self.pan_btn)
         tool_layout.addWidget(self.pen_btn)
         tool_layout.addWidget(self.eraser_btn)
         tool_layout.addWidget(self.path_btn)
@@ -2609,11 +2668,14 @@ class PaintDialog(QDialog):
         canvas_host.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
+        canvas_host.setMouseTracking(True)
+        canvas_host.installEventFilter(self)
         self._canvas_host = canvas_host
 
         self._bg_label = QLabel(canvas_host)
         self._bg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._bg_label.setStyleSheet("background-color: #050607;")
+        self._bg_label.installEventFilter(self)
         self._bg_pixmap_source = bg
         display_bg = self._display_background_pixmap()
         self._bg_label.setPixmap(
@@ -2637,6 +2699,7 @@ class PaintDialog(QDialog):
         self.canvas.stroke_added.connect(self._on_stroke_added)
         self.canvas.stroke_erased_at.connect(self._erase_stroke_direct)
         self.canvas.repaint_requested.connect(self._update_path_list)
+        self.canvas.installEventFilter(self)
 
         canvas_layout.addWidget(canvas_host, stretch=1)
         workspace.addWidget(canvas_frame, stretch=1)
@@ -2932,6 +2995,7 @@ class PaintDialog(QDialog):
         self._layer_list.setMinimumHeight(150)
         self._layer_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._layer_list.itemClicked.connect(self._select_layer_item)
+        self._layer_list.itemDoubleClicked.connect(self._rename_layer_item)
         self._layer_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._layer_list.customContextMenuRequested.connect(self._open_layer_context_menu)
         layers_layout.addWidget(self._layer_list, stretch=1)
@@ -2979,17 +3043,8 @@ class PaintDialog(QDialog):
         self._channel_list = QListWidget()
         self._channel_list.setObjectName("PaintLayerList")
         self._channel_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        for label_text, icon_name in (
-            ("RGB", "color"),
-            ("Red", "color"),
-            ("Green", "color"),
-            ("Blue", "color"),
-            ("Alpha", "grid"),
-        ):
-            item = QListWidgetItem(label_text)
-            item.setIcon(app_icon(icon_name, size=14, color="#DCE6F7"))
-            self._channel_list.addItem(item)
-        self._channel_list.setCurrentRow(0)
+        self._channel_list.itemClicked.connect(self._toggle_channel_item_visibility)
+        self._update_channel_list()
         channels_layout.addWidget(self._channel_list, stretch=1)
         self._layer_channel_path_tabs.addTab(channels_tab, tr("paint.tab.channels"))
 
@@ -3007,12 +3062,18 @@ class PaintDialog(QDialog):
         self.close_path_btn.setObjectName("PaintCustomColor")
         self.close_path_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.close_path_btn.clicked.connect(lambda: self._commit_path(True))
+        self.path_to_selection_btn = QPushButton("Select")
+        self.path_to_selection_btn.setObjectName("PaintCustomColor")
+        self.path_to_selection_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.path_to_selection_btn.setToolTip("Convert the selected path to a marching-ants selection")
+        self.path_to_selection_btn.clicked.connect(self._make_selection_from_selected_path)
         self.clear_path_btn = QPushButton("Clear")
         self.clear_path_btn.setObjectName("PaintCustomColor")
         self.clear_path_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.clear_path_btn.clicked.connect(self._clear_path_preview)
         path_row.addWidget(self.commit_path_btn)
         path_row.addWidget(self.close_path_btn)
+        path_row.addWidget(self.path_to_selection_btn)
         path_row.addWidget(self.clear_path_btn)
         paths_layout.addLayout(path_row)
         self._path_list = QListWidget()
@@ -3249,12 +3310,22 @@ class PaintDialog(QDialog):
         canvas_tool = tool if tool in ("pen", "eraser", "path") else "off"
         self.canvas.set_tool(canvas_tool)
         self.select_btn.setChecked(tool == "select")
+        if hasattr(self, "pan_btn"):
+            self.pan_btn.setChecked(tool == "pan")
         self.pen_btn.setChecked(tool == "pen")
         self.eraser_btn.setChecked(tool == "eraser")
         self.path_btn.setChecked(tool == "path")
+        host = getattr(self, "_canvas_host", None)
+        if host is not None:
+            host.setCursor(
+                Qt.CursorShape.OpenHandCursor
+                if tool == "pan"
+                else Qt.CursorShape.ArrowCursor
+            )
         if hasattr(self, "_tool_status_label"):
             labels = {
                 "select": "Select / move objects",
+                "pan": "Pan canvas",
                 "pen": "Pen",
                 "eraser": "Eraser",
                 "path": "Path: click points, double-click to commit",
@@ -3383,6 +3454,7 @@ class PaintDialog(QDialog):
         self._set_zoom_percent(current - 25)
 
     def _zoom_fit(self) -> None:
+        self._canvas_pan = QPoint(0, 0)
         self._set_zoom_percent(100)
 
     def _show_export_png_menu(self) -> None:
@@ -3713,6 +3785,77 @@ class PaintDialog(QDialog):
         self._sync_canvas_layer_view()
         self._update_inspector_counts()
 
+    def _rename_layer_item(self, item: QListWidgetItem) -> None:
+        layer_id = item.data(Qt.ItemDataRole.UserRole) if item is not None else None
+        layer = self._paint_layer_by_id(str(layer_id) if layer_id is not None else None)
+        if layer is None:
+            return
+        name, accepted = QInputDialog.getText(
+            self,
+            "Rename Layer",
+            "Layer name",
+            text=layer.name,
+        )
+        new_name = str(name or "").strip()
+        if not accepted or not new_name or new_name == layer.name:
+            return
+        self._push_undo_state()
+        layer.name = new_name[:80]
+        self._selected_layer_id = layer.layer_id
+        self._update_inspector_counts()
+
+    def _update_channel_list(self) -> None:
+        channel_list = getattr(self, "_channel_list", None)
+        if channel_list is None:
+            return
+        current = None
+        current_item = channel_list.currentItem()
+        if current_item is not None:
+            current = current_item.data(Qt.ItemDataRole.UserRole)
+        self._channel_visibility["RGB"] = all(
+            self._channel_visibility.get(channel, True)
+            for channel in ("Red", "Green", "Blue")
+        )
+        channel_list.blockSignals(True)
+        try:
+            channel_list.clear()
+            for channel in ("RGB", "Red", "Green", "Blue", "Alpha"):
+                visible = bool(self._channel_visibility.get(channel, True))
+                item = QListWidgetItem(channel)
+                item.setIcon(
+                    app_icon(
+                        "eye" if visible else "eye-off",
+                        size=14,
+                        color="#DCE6F7" if visible else "#687487",
+                    )
+                )
+                item.setData(Qt.ItemDataRole.UserRole, channel)
+                channel_list.addItem(item)
+                if current == channel:
+                    channel_list.setCurrentItem(item)
+            if channel_list.currentItem() is None and channel_list.count():
+                channel_list.setCurrentRow(0)
+        finally:
+            channel_list.blockSignals(False)
+
+    def _toggle_channel_item_visibility(self, item: QListWidgetItem) -> None:
+        channel = str(item.data(Qt.ItemDataRole.UserRole) or item.text() or "")
+        if channel == "RGB":
+            new_visible = not all(
+                self._channel_visibility.get(key, True)
+                for key in ("Red", "Green", "Blue")
+            )
+            for key in ("Red", "Green", "Blue"):
+                self._channel_visibility[key] = new_visible
+        elif channel in {"Red", "Green", "Blue", "Alpha"}:
+            self._channel_visibility[channel] = not self._channel_visibility.get(channel, True)
+        self._channel_visibility["RGB"] = all(
+            self._channel_visibility.get(key, True)
+            for key in ("Red", "Green", "Blue")
+        )
+        self._update_channel_list()
+        self._update_canvas_geometry()
+
     def _update_path_list(self) -> None:
         path_list = getattr(self, "_path_list", None)
         if path_list is None:
@@ -3729,30 +3872,77 @@ class PaintDialog(QDialog):
             work_item.setIcon(app_icon("path-tool", size=14, color="#DCE6F7"))
             work_item.setData(Qt.ItemDataRole.UserRole, "work-path")
             path_list.addItem(work_item)
-            if active_points:
+            if self._selected_path_item_id == "work-path" or active_points:
                 path_list.setCurrentItem(work_item)
             if self.canvas.has_active_selection():
                 selection_item = QListWidgetItem(
-                    f"Selection  marching ants  ({self.canvas.selection_point_count()} pts)"
+                    f"Selection Path  marching ants  ({self.canvas.selection_point_count()} pts)"
                 )
                 selection_item.setIcon(app_icon("path-tool", size=14, color="#FFFFFF"))
                 selection_item.setData(Qt.ItemDataRole.UserRole, "selection")
                 path_list.addItem(selection_item)
+                if self._selected_path_item_id == "selection" and not active_points:
+                    path_list.setCurrentItem(selection_item)
             for idx, stroke in enumerate(path_strokes, start=1):
                 state = "closed" if bool(getattr(stroke, "closed_path", False)) else "open"
                 item = QListWidgetItem(f"Path {idx}  {state}  ({len(stroke.points)} pts)")
                 item.setIcon(app_icon("path-tool", size=14, color="#9FB9E7"))
                 item.setData(Qt.ItemDataRole.UserRole, f"path:{idx - 1}")
                 path_list.addItem(item)
+                if self._selected_path_item_id == f"path:{idx - 1}" and not active_points:
+                    path_list.setCurrentItem(item)
         finally:
             path_list.blockSignals(False)
 
     def _select_path_item(self, item: QListWidgetItem) -> None:
         value = item.data(Qt.ItemDataRole.UserRole)
+        self._selected_path_item_id = str(value or "work-path")
         if value == "work-path":
             self._set_tool("path")
         elif value == "selection":
             self._set_tool("select")
+        else:
+            self._set_tool("select")
+
+    def _path_points_for_item_id(self, item_id: str | None) -> list[tuple[float, float]]:
+        value = str(item_id or "work-path")
+        if value == "work-path":
+            return self.canvas.path_snapshot() if hasattr(self, "canvas") else []
+        if value == "selection":
+            return self.canvas.selection_snapshot() if hasattr(self, "canvas") else []
+        if value.startswith("path:"):
+            try:
+                target_index = int(value.split(":", 1)[1])
+            except ValueError:
+                return []
+            path_strokes = [
+                stroke
+                for stroke in (self.canvas.embedded_strokes() if hasattr(self, "canvas") else [])
+                if str(getattr(stroke, "source_tool", "") or "") == "path"
+            ]
+            if 0 <= target_index < len(path_strokes):
+                return [
+                    (max(0.0, min(1.0, float(x))), max(0.0, min(1.0, float(y))))
+                    for x, y in path_strokes[target_index].points
+                ]
+        return []
+
+    def _make_selection_from_selected_path(self) -> None:
+        item = self._path_list.currentItem() if hasattr(self, "_path_list") else None
+        if item is not None:
+            self._selected_path_item_id = str(
+                item.data(Qt.ItemDataRole.UserRole) or self._selected_path_item_id
+            )
+        points = self._path_points_for_item_id(self._selected_path_item_id)
+        if len(points) < 3:
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText("Path needs at least 3 points")
+            return
+        self._push_undo_state()
+        self.canvas.set_selection_snapshot(points)
+        self._selected_path_item_id = "selection"
+        self._update_path_list()
+        self._set_tool("select")
 
     def _select_layer_item(self, item: QListWidgetItem) -> None:
         layer_id = item.data(Qt.ItemDataRole.UserRole)
@@ -4277,6 +4467,132 @@ class PaintDialog(QDialog):
                 self._selected_layer_id = None
         self._update_inspector_counts()
 
+    def eventFilter(self, obj, event) -> bool:
+        canvas_widgets = (
+            getattr(self, "_canvas_host", None),
+            getattr(self, "_bg_label", None),
+            getattr(self, "canvas", None),
+        )
+        if obj not in canvas_widgets:
+            return super().eventFilter(obj, event)
+        event_type = event.type()
+        if event_type == QEvent.Type.ContextMenu:
+            try:
+                self._show_canvas_context_menu(event.globalPos())
+                event.accept()
+                return True
+            except Exception:
+                return False
+        if event_type == QEvent.Type.MouseButtonPress:
+            button = event.button()
+            should_pan = (
+                button == Qt.MouseButton.MiddleButton
+                or (
+                    button == Qt.MouseButton.LeftButton
+                    and hasattr(self, "pan_btn")
+                    and self.pan_btn.isChecked()
+                )
+            )
+            if should_pan:
+                self._begin_canvas_pan(obj, event.position().toPoint())
+                event.accept()
+                return True
+        if event_type == QEvent.Type.MouseMove and self._canvas_pan_drag_start is not None:
+            self._update_canvas_pan_drag(obj, event.position().toPoint())
+            event.accept()
+            return True
+        if event_type == QEvent.Type.MouseButtonRelease and self._canvas_pan_drag_start is not None:
+            self._finish_canvas_pan()
+            event.accept()
+            return True
+        return super().eventFilter(obj, event)
+
+    def _point_in_canvas_host(self, obj, point: QPoint) -> QPoint:
+        host = getattr(self, "_canvas_host", None)
+        if host is None:
+            return QPoint(point)
+        if obj is host:
+            return QPoint(point)
+        try:
+            return obj.mapTo(host, point)
+        except Exception:
+            return QPoint(point)
+
+    def _begin_canvas_pan(self, obj, point: QPoint) -> None:
+        self._canvas_pan_drag_start = self._point_in_canvas_host(obj, point)
+        self._canvas_pan_drag_origin = QPoint(getattr(self, "_canvas_pan", QPoint(0, 0)))
+        host = getattr(self, "_canvas_host", None)
+        if host is not None:
+            host.setCursor(Qt.CursorShape.ClosedHandCursor)
+
+    def _update_canvas_pan_drag(self, obj, point: QPoint) -> None:
+        if self._canvas_pan_drag_start is None:
+            return
+        current = self._point_in_canvas_host(obj, point)
+        delta = current - self._canvas_pan_drag_start
+        self._set_canvas_pan(self._canvas_pan_drag_origin + delta)
+
+    def _finish_canvas_pan(self) -> None:
+        self._canvas_pan_drag_start = None
+        host = getattr(self, "_canvas_host", None)
+        if host is not None:
+            host.setCursor(
+                Qt.CursorShape.OpenHandCursor
+                if hasattr(self, "pan_btn") and self.pan_btn.isChecked()
+                else Qt.CursorShape.ArrowCursor
+            )
+
+    def _set_canvas_pan(self, pan: QPoint) -> None:
+        self._canvas_pan = QPoint(pan)
+        self._update_canvas_geometry()
+
+    def _pan_canvas_by(self, delta: QPoint) -> None:
+        self._set_canvas_pan(QPoint(getattr(self, "_canvas_pan", QPoint(0, 0))) + delta)
+
+    def _reset_canvas_pan(self) -> None:
+        self._set_canvas_pan(QPoint(0, 0))
+
+    @staticmethod
+    def _clamped_canvas_pan(pan: QPoint, *, canvas_size: QSize, host_size: QSize) -> QPoint:
+        max_x = max(0, (canvas_size.width() - host_size.width()) // 2)
+        max_y = max(0, (canvas_size.height() - host_size.height()) // 2)
+        return QPoint(
+            max(-max_x, min(max_x, pan.x())),
+            max(-max_y, min(max_y, pan.y())),
+        )
+
+    def _build_canvas_context_menu(self) -> QMenu:
+        menu = QMenu(self)
+        copy_action = menu.addAction("Copy")
+        cut_action = menu.addAction("Cut")
+        paste_action = menu.addAction("Paste")
+        menu.addSeparator()
+        zoom_in_action = menu.addAction("Zoom In")
+        zoom_out_action = menu.addAction("Zoom Out")
+        zoom_fit_action = menu.addAction("Fit")
+        reset_pan_action = menu.addAction("Reset Pan")
+
+        selected = self._current_layer_id()
+        selected_background = selected == "background" and self._background_layer_present
+        has_selection = selected is not None and not selected_background
+        copy_action.setEnabled(has_selection)
+        cut_action.setEnabled(has_selection)
+        paste_action.setEnabled(
+            self._paint_clipboard is not None or self._system_clipboard_has_paint_payload()
+        )
+        copy_action.triggered.connect(self._copy_selected_layer)
+        cut_action.triggered.connect(self._cut_selected_layer)
+        paste_action.triggered.connect(self._paste_layer_clipboard)
+        zoom_in_action.triggered.connect(self._zoom_in)
+        zoom_out_action.triggered.connect(self._zoom_out)
+        zoom_fit_action.triggered.connect(self._zoom_fit)
+        reset_pan_action.triggered.connect(self._reset_canvas_pan)
+        return menu
+
+    def _show_canvas_context_menu(self, global_pos: QPoint) -> None:
+        menu = self._build_canvas_context_menu()
+        menu.exec(global_pos)
+
     # ---------- layout sync ----------
 
     def resizeEvent(self, event) -> None:
@@ -4326,8 +4642,14 @@ class PaintDialog(QDialog):
         # Position the bg_label centered in the host
         bw = bg_scaled.width() if not bg_scaled.isNull() else hw
         bh = bg_scaled.height() if not bg_scaled.isNull() else hh
-        bx = (hw - bw) // 2
-        by = (hh - bh) // 2
+        pan = self._clamped_canvas_pan(
+            QPoint(getattr(self, "_canvas_pan", QPoint(0, 0))),
+            canvas_size=QSize(bw, bh),
+            host_size=QSize(hw, hh),
+        )
+        self._canvas_pan = pan
+        bx = (hw - bw) // 2 + pan.x()
+        by = (hh - bh) // 2 + pan.y()
         self._bg_label.setGeometry(bx, by, bw, bh)
         # Canvas covers the bg area exactly so stroke coords map 1:1 with video
         self.canvas.setGeometry(bx, by, bw, bh)

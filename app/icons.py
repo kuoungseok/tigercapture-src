@@ -416,6 +416,22 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
         painter.drawArc(QRectF(s * .32, s * .20, s * .36, s * .36), 0, 180 * 16)
         painter.drawLine(QPointF(s * .32, s * .38), QPointF(s * .32, s * .45))
         painter.drawLine(QPointF(s * .68, s * .38), QPointF(s * .68, s * .45))
+    elif n in {"eye", "visible"}:
+        eye = QPainterPath()
+        eye.moveTo(s * .14, s * .50)
+        eye.cubicTo(s * .28, s * .26, s * .72, s * .26, s * .86, s * .50)
+        eye.cubicTo(s * .72, s * .74, s * .28, s * .74, s * .14, s * .50)
+        painter.drawPath(eye)
+        painter.setBrush(_color(color))
+        painter.drawEllipse(QPointF(s * .50, s * .50), s * .085, s * .085)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+    elif n in {"eye-off", "hidden", "invisible"}:
+        eye = QPainterPath()
+        eye.moveTo(s * .16, s * .50)
+        eye.cubicTo(s * .30, s * .30, s * .70, s * .30, s * .84, s * .50)
+        eye.cubicTo(s * .70, s * .70, s * .30, s * .70, s * .16, s * .50)
+        painter.drawPath(eye)
+        painter.drawLine(QPointF(s * .22, s * .78), QPointF(s * .78, s * .22))
     elif n in {"grid"}:
         for y in (.22, .54):
             for x in (.22, .54):
@@ -703,6 +719,17 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
         path.lineTo(s * .22, s * .80)
         path.closeSubpath()
         painter.drawPath(path)
+    elif n in {"hand", "pan"}:
+        painter.drawLine(QPointF(s * .36, s * .48), QPointF(s * .36, s * .24))
+        painter.drawLine(QPointF(s * .48, s * .48), QPointF(s * .48, s * .18))
+        painter.drawLine(QPointF(s * .60, s * .50), QPointF(s * .60, s * .24))
+        painter.drawLine(QPointF(s * .72, s * .56), QPointF(s * .72, s * .34))
+        palm = QPainterPath()
+        palm.moveTo(s * .26, s * .46)
+        palm.cubicTo(s * .18, s * .52, s * .22, s * .64, s * .34, s * .74)
+        palm.cubicTo(s * .46, s * .86, s * .72, s * .84, s * .78, s * .64)
+        palm.lineTo(s * .78, s * .50)
+        painter.drawPath(palm)
     elif n in {"ripple", "wave"}:
         path = QPainterPath()
         path.moveTo(s * .16, s * .52)

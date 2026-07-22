@@ -86,14 +86,19 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     dialog.show()
     app.processEvents()
 
+    assert dialog.isSizeGripEnabled()
+    assert dialog.minimumWidth() <= 760
     assert dialog._tool_rail.width() <= 56
     assert dialog.select_btn.text() == ""
     assert dialog.select_btn.toolTip() == "Select / Move"
+    assert dialog.pan_btn.text() == ""
+    assert dialog.pan_btn.toolTip() == "Pan canvas"
     assert dialog.pen_btn.text() == ""
     assert dialog.pen_btn.toolTip()
     assert dialog.eraser_btn.text() == ""
     assert dialog.eraser_btn.toolTip()
     assert not dialog.select_btn.icon().isNull()
+    assert not dialog.pan_btn.icon().isNull()
     assert not dialog.pen_btn.icon().isNull()
     assert not dialog.eraser_btn.icon().isNull()
     assert not dialog.path_btn.icon().isNull()
@@ -109,6 +114,7 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog._layer_fill_value.text() == "100%"
     assert not dialog._layer_lock_all_btn.isChecked()
     assert dialog._channel_list.item(0).text() == "RGB"
+    assert not dialog._channel_list.item(0).icon().isNull()
     assert dialog.color_wheel.width() <= 112
     assert dialog._color_preview.width() <= 48
     assert dialog._recent_color_btns[0].width() <= 32
@@ -117,10 +123,10 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     dialog.close()
 
 
-def test_standalone_painter_starts_with_photoshop_style_layers_and_paths() -> None:
+def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeypatch) -> None:
     app = _app()
-    from PySide6.QtCore import QPointF
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtWidgets import QApplication, QInputDialog
 
     from app.drawing import (
         PAINT_CLIPBOARD_MIME,
@@ -143,9 +149,26 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths() -> No
     assert any("Layer 1" in label for label in layer_labels)
     assert any(tr("paint.layer.background") in label for label in layer_labels)
     assert dialog._path_list.item(0).text().startswith("Work Path")
+    assert dialog._build_canvas_context_menu().actions()[0].text() == "Copy"
+
+    dialog._set_tool("pan")
+    assert dialog.pan_btn.isChecked()
+    dialog._set_zoom_percent(200)
+    dialog._pan_canvas_by(QPoint(40, 20))
+    assert dialog._canvas_pan != QPoint(0, 0)
+    dialog._zoom_fit()
+    assert dialog._canvas_pan == QPoint(0, 0)
 
     dialog._new_paint_layer()
     active_layer_id = dialog._active_paint_layer_id
+    monkeypatch.setattr(
+        QInputDialog,
+        "getText",
+        lambda *args, **kwargs: ("Ink cleanup", True),
+    )
+    dialog._rename_layer_item(dialog._layer_list.currentItem())
+    assert dialog._active_paint_layer().name == "Ink cleanup"
+
     dialog._on_stroke_added(
         Stroke(points=[(0.1, 0.1), (0.2, 0.2)], layer_id="paint-layer-1")
     )
@@ -182,6 +205,21 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths() -> No
     assert len(dialog.canvas.embedded_strokes()) == strokes_before_paste + 1
     QApplication.clipboard().clear()
 
+    red_item = next(
+        dialog._channel_list.item(i)
+        for i in range(dialog._channel_list.count())
+        if dialog._channel_list.item(i).text() == "Red"
+    )
+    dialog._toggle_channel_item_visibility(red_item)
+    assert dialog._channel_visibility["Red"] is False
+    assert dialog._channel_visibility["RGB"] is False
+    red_item = next(
+        dialog._channel_list.item(i)
+        for i in range(dialog._channel_list.count())
+        if dialog._channel_list.item(i).text() == "Red"
+    )
+    assert not red_item.icon().isNull()
+
     dialog.canvas._path_points = [QPointF(10, 10), QPointF(40, 40), QPointF(60, 12)]
     dialog._update_path_list()
     assert "3 pts" in dialog._path_list.item(0).text()
@@ -199,6 +237,18 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths() -> No
         "Selection" in dialog._path_list.item(i).text()
         for i in range(dialog._path_list.count())
     )
+    dialog.canvas.clear_selection()
+    dialog._update_path_list()
+    saved_path_item = next(
+        dialog._path_list.item(i)
+        for i in range(dialog._path_list.count())
+        if str(dialog._path_list.item(i).data(Qt.ItemDataRole.UserRole)).startswith("path:")
+    )
+    dialog._path_list.setCurrentItem(saved_path_item)
+    dialog._select_path_item(saved_path_item)
+    dialog._make_selection_from_selected_path()
+    assert dialog.canvas.has_active_selection() is True
+    assert dialog.canvas.selection_point_count() == 3
 
     dialog.close()
 
