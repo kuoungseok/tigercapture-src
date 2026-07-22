@@ -137,6 +137,15 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths() -> No
     app.processEvents()
     assert dialog.canvas.embedded_strokes()[-1].source_tool == "path"
     assert dialog.canvas.embedded_strokes()[-1].closed_path is True
+    assert dialog.canvas.has_active_selection() is True
+    assert dialog.canvas.selection_point_count() == 3
+    phase = dialog.canvas._selection_phase
+    dialog.canvas._advance_selection_march()
+    assert dialog.canvas._selection_phase != phase
     assert dialog._path_list.count() >= 2
+    assert any(
+        "Selection" in dialog._path_list.item(i).text()
+        for i in range(dialog._path_list.count())
+    )
 
     dialog.close()

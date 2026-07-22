@@ -7,7 +7,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, Signal
+from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
 from PySide6.QtGui import (
     QColor,
     QImage,
@@ -582,6 +582,11 @@ class DrawingCanvas(QWidget):
         self._layer_opacity: dict[str, int] = {}
         self._current_points: list[QPointF] = []  # while drawing (widget px)
         self._path_points: list[QPointF] = []
+        self._selection_points: list[tuple[float, float]] = []
+        self._selection_phase: float = 0.0
+        self._selection_timer = QTimer(self)
+        self._selection_timer.setInterval(90)
+        self._selection_timer.timeout.connect(self._advance_selection_march)
         # Phase E — node-mask polygon editor hook. The editor sets
         # this to a callable when it wants to capture clicks for a
         # Power Window polygon. Returns True if the click was
@@ -658,6 +663,46 @@ class DrawingCanvas(QWidget):
     def path_point_count(self) -> int:
         return len(self._path_points)
 
+    def has_active_selection(self) -> bool:
+        return len(self._selection_points) >= 3
+
+    def selection_point_count(self) -> int:
+        return len(self._selection_points)
+
+    def selection_snapshot(self) -> list[tuple[float, float]]:
+        return list(self._selection_points)
+
+    def set_selection_snapshot(self, points: list[tuple[float, float]] | None) -> None:
+        self._selection_points = [
+            (max(0.0, min(1.0, float(x))), max(0.0, min(1.0, float(y))))
+            for x, y in list(points or [])
+        ]
+        self._sync_selection_timer()
+        self.repaint_requested.emit()
+        self.update()
+
+    def clear_selection(self) -> None:
+        if not self._selection_points:
+            return
+        self._selection_points = []
+        self._sync_selection_timer()
+        self.repaint_requested.emit()
+        self.update()
+
+    def _advance_selection_march(self) -> None:
+        if not self.has_active_selection():
+            self._selection_timer.stop()
+            return
+        self._selection_phase = (self._selection_phase + 1.0) % 12.0
+        self.update()
+
+    def _sync_selection_timer(self) -> None:
+        if self.has_active_selection():
+            if not self._selection_timer.isActive():
+                self._selection_timer.start()
+        else:
+            self._selection_timer.stop()
+
     def set_extra_paint_hook(self, hook: Callable[[QPainter, int, int], None] | None) -> None:
         self._extra_paint_hook = hook
         self.update()
@@ -728,6 +773,8 @@ class DrawingCanvas(QWidget):
             painter.setPen(QPen(QColor("#4a89ff"), 2))
             for point in self._path_points:
                 painter.drawEllipse(point, 4, 4)
+
+        self._paint_marching_ants(painter, w, h)
 
         # Stage 1 rotoscope — dashed Tiger Orange rectangle while
         # the user is dragging out a GrabCut bounding box.
@@ -805,6 +852,32 @@ class DrawingCanvas(QWidget):
         else:
             painter.drawPolyline(pts)
 
+    def _paint_marching_ants(self, painter: QPainter, w: int, h: int) -> None:
+        if len(self._selection_points) < 3:
+            return
+        pts = [QPointF(x * w, y * h) for x, y in self._selection_points]
+        path = QPainterPath()
+        path.moveTo(pts[0])
+        for point in pts[1:]:
+            path.lineTo(point)
+        path.closeSubpath()
+
+        painter.save()
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        for color, offset in (
+            (QColor(0, 0, 0, 235), 0.0),
+            (QColor(255, 255, 255, 245), 6.0),
+        ):
+            pen = QPen(color, 1.35)
+            pen.setCosmetic(True)
+            pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+            pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+            pen.setDashPattern([6.0, 6.0])
+            pen.setDashOffset(self._selection_phase + offset)
+            painter.setPen(pen)
+            painter.drawPath(path)
+        painter.restore()
+
     @staticmethod
     def _configure_pen_for_style(pen: QPen, style: str) -> None:
         if style == "marker":
@@ -878,7 +951,7 @@ class DrawingCanvas(QWidget):
 
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton and self._tool == "path":
-            self.commit_path(closed=False)
+            self.commit_path(closed=True, make_selection=True)
             return
         if (event.button() == Qt.MouseButton.LeftButton
                 and self._interaction_hook is not None):
@@ -1042,13 +1115,21 @@ class DrawingCanvas(QWidget):
         self.stroke_added.emit(stroke)
         self.update()
 
-    def commit_path(self, *, closed: bool = False) -> None:
+    def commit_path(
+        self,
+        *,
+        closed: bool = False,
+        make_selection: bool | None = None,
+    ) -> None:
         if len(self._path_points) < 2:
             return
         w = max(1, self.width())
         h = max(1, self.height())
+        norm_points = [(p.x() / w, p.y() / h) for p in self._path_points]
+        if make_selection is None:
+            make_selection = bool(closed)
         stroke = Stroke(
-            points=[(p.x() / w, p.y() / h) for p in self._path_points],
+            points=norm_points,
             color=(
                 self._pen_color.red(),
                 self._pen_color.green(),
@@ -1063,6 +1144,9 @@ class DrawingCanvas(QWidget):
             start_ms=int(self._get_time_ms()),
             end_ms=None,
         )
+        if make_selection and len(norm_points) >= 3:
+            self._selection_points = list(norm_points)
+            self._sync_selection_timer()
         self._path_points = []
         self.stroke_added.emit(stroke)
         self.repaint_requested.emit()
@@ -2885,6 +2969,7 @@ class PaintDialog(QDialog):
     def _clear_all(self) -> None:
         self._push_undo_state()
         self.canvas.clear_strokes_direct()
+        self.canvas.clear_selection()
         self._update_inspector_counts()
 
     def _pick_palette_color(self, rgb: tuple[int, int, int]) -> None:
@@ -2961,7 +3046,7 @@ class PaintDialog(QDialog):
         self.canvas.set_pen_style(str(style))
 
     def _commit_path(self, closed: bool) -> None:
-        self.canvas.commit_path(closed=closed)
+        self.canvas.commit_path(closed=closed, make_selection=closed)
         self._update_inspector_counts()
         self._update_path_list()
 
@@ -3083,6 +3168,7 @@ class PaintDialog(QDialog):
         list[PaintLayer],
         str,
         str | None,
+        list[tuple[float, float]],
     ]:
         strokes = self.canvas.embedded_strokes() if hasattr(self, "canvas") else []
         return (
@@ -3092,6 +3178,7 @@ class PaintDialog(QDialog):
             copy.deepcopy(getattr(self, "_paint_layers", [])),
             str(getattr(self, "_active_paint_layer_id", "paint-layer-1")),
             self._selected_layer_id,
+            self.canvas.selection_snapshot() if hasattr(self, "canvas") else [],
         )
 
     def _push_undo_state(self) -> None:
@@ -3129,6 +3216,7 @@ class PaintDialog(QDialog):
                 self._paint_layers = copy.deepcopy(layers)
                 self._active_paint_layer_id = str(active_layer_id or "paint-layer-1")
                 self._selected_layer_id = selected_layer_id
+            selection_points = snapshot[6] if len(snapshot) >= 7 else []
             for item in list(getattr(self, "_bubble_items", [])):
                 item.deleteLater()
             for item in list(getattr(self, "_sticker_items", [])):
@@ -3138,6 +3226,7 @@ class PaintDialog(QDialog):
             self._bubbles = copy.deepcopy(bubbles)
             self._stickers = copy.deepcopy(stickers)
             self.canvas.set_strokes_snapshot(copy.deepcopy(strokes))
+            self.canvas.set_selection_snapshot(copy.deepcopy(selection_points))
             self._sync_canvas_layer_view()
             self._spawn_initial_bubbles()
             self._spawn_initial_stickers()
@@ -3274,6 +3363,13 @@ class PaintDialog(QDialog):
             path_list.addItem(work_item)
             if active_points:
                 path_list.setCurrentItem(work_item)
+            if self.canvas.has_active_selection():
+                selection_item = QListWidgetItem(
+                    f"Selection  marching ants  ({self.canvas.selection_point_count()} pts)"
+                )
+                selection_item.setIcon(app_icon("path-tool", size=14, color="#FFFFFF"))
+                selection_item.setData(Qt.ItemDataRole.UserRole, "selection")
+                path_list.addItem(selection_item)
             for idx, stroke in enumerate(path_strokes, start=1):
                 state = "closed" if bool(getattr(stroke, "closed_path", False)) else "open"
                 item = QListWidgetItem(f"Path {idx}  {state}  ({len(stroke.points)} pts)")
@@ -3287,6 +3383,8 @@ class PaintDialog(QDialog):
         value = item.data(Qt.ItemDataRole.UserRole)
         if value == "work-path":
             self._set_tool("path")
+        elif value == "selection":
+            self._set_tool("select")
 
     def _select_layer_item(self, item: QListWidgetItem) -> None:
         layer_id = item.data(Qt.ItemDataRole.UserRole)
