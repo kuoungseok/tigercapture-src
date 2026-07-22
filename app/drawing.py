@@ -36,6 +36,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QSizePolicy,
     QSlider,
+    QSpinBox,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -316,6 +317,189 @@ class Stroke:
         if self.end_ms is not None and t_ms >= self.end_ms:
             return False
         return True
+
+
+CANVAS_SIZE_PRESETS: tuple[tuple[str, int, int], ...] = (
+    ("Full HD 16:9", 1920, 1080),
+    ("HD 16:9", 1280, 720),
+    ("4K UHD 16:9", 3840, 2160),
+    ("Square 1:1", 1080, 1080),
+    ("Vertical 9:16", 1080, 1920),
+    ("A4 Portrait 300 DPI", 2480, 3508),
+    ("A4 Landscape 300 DPI", 3508, 2480),
+)
+CANVAS_BACKGROUND_PRESETS: tuple[tuple[str, str], ...] = (
+    ("White", "#FFFFFF"),
+    ("Transparent", "transparent"),
+    ("Dark", "#101112"),
+)
+
+
+def create_blank_paint_pixmap(width: int, height: int, background: str = "#FFFFFF") -> QPixmap:
+    """Create a blank Painter canvas pixmap.
+
+    ``background="transparent"`` keeps alpha at zero; every other value is
+    treated as a QColor string and filled as an opaque page.
+    """
+    safe_w = max(1, min(16384, int(width or 1)))
+    safe_h = max(1, min(16384, int(height or 1)))
+    pixmap = QPixmap(safe_w, safe_h)
+    if str(background or "").strip().lower() in {"transparent", "alpha", "none"}:
+        pixmap.fill(QColor(0, 0, 0, 0))
+    else:
+        color = QColor(str(background or "#FFFFFF"))
+        if not color.isValid():
+            color = QColor("#FFFFFF")
+        pixmap.fill(color)
+    return pixmap
+
+
+class NewCanvasDialog(QDialog):
+    """Small first-run dialog for standalone Painter canvas creation."""
+
+    def __init__(
+        self,
+        parent: QWidget | None = None,
+        *,
+        default_size: tuple[int, int] = (1920, 1080),
+        default_background: str = "#FFFFFF",
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("New Canvas")
+        self.setModal(True)
+        self.setStyleSheet(self.styleSheet() + _PAINT_DIALOG_QSS)
+        self._syncing = False
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(10)
+
+        title = QLabel("New Canvas")
+        title.setObjectName("PaintTitle")
+        subtitle = QLabel("Choose a canvas template or enter a custom size.")
+        subtitle.setObjectName("PaintSubtitle")
+        root.addWidget(title)
+        root.addWidget(subtitle)
+
+        form = QFrame(self)
+        form.setObjectName("PaintCanvasFrame")
+        grid = QGridLayout(form)
+        grid.setContentsMargins(12, 12, 12, 12)
+        grid.setHorizontalSpacing(10)
+        grid.setVerticalSpacing(9)
+
+        preset_label = QLabel("Template")
+        preset_label.setObjectName("PaintMeta")
+        self.preset_combo = QComboBox(form)
+        for name, width, height in CANVAS_SIZE_PRESETS:
+            self.preset_combo.addItem(name, (width, height))
+        self.preset_combo.addItem("Custom", "custom")
+        self.preset_combo.currentIndexChanged.connect(self._on_preset_changed)
+        grid.addWidget(preset_label, 0, 0)
+        grid.addWidget(self.preset_combo, 0, 1, 1, 3)
+
+        width_label = QLabel("Width")
+        width_label.setObjectName("PaintMeta")
+        height_label = QLabel("Height")
+        height_label.setObjectName("PaintMeta")
+        self.width_spin = QSpinBox(form)
+        self.width_spin.setRange(64, 16384)
+        self.width_spin.setSuffix(" px")
+        self.height_spin = QSpinBox(form)
+        self.height_spin.setRange(64, 16384)
+        self.height_spin.setSuffix(" px")
+        self.width_spin.valueChanged.connect(self._on_custom_size_changed)
+        self.height_spin.valueChanged.connect(self._on_custom_size_changed)
+        grid.addWidget(width_label, 1, 0)
+        grid.addWidget(self.width_spin, 1, 1)
+        grid.addWidget(height_label, 1, 2)
+        grid.addWidget(self.height_spin, 1, 3)
+
+        background_label = QLabel("Background")
+        background_label.setObjectName("PaintMeta")
+        self.background_combo = QComboBox(form)
+        for label, value in CANVAS_BACKGROUND_PRESETS:
+            self.background_combo.addItem(label, value)
+        grid.addWidget(background_label, 2, 0)
+        grid.addWidget(self.background_combo, 2, 1, 1, 3)
+        root.addWidget(form)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Create")
+        buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Cancel")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+        self.resize(420, 240)
+        self._set_initial_values(default_size, default_background)
+
+    def _set_initial_values(self, size: tuple[int, int], background: str) -> None:
+        width = max(64, min(16384, int(size[0] or 1920)))
+        height = max(64, min(16384, int(size[1] or 1080)))
+        match_index = -1
+        for idx in range(self.preset_combo.count() - 1):
+            preset = self.preset_combo.itemData(idx)
+            if preset == (width, height):
+                match_index = idx
+                break
+        self._syncing = True
+        try:
+            self.width_spin.setValue(width)
+            self.height_spin.setValue(height)
+            self.preset_combo.setCurrentIndex(match_index if match_index >= 0 else self.preset_combo.count() - 1)
+            bg = str(background or "#FFFFFF").lower()
+            for idx in range(self.background_combo.count()):
+                if str(self.background_combo.itemData(idx)).lower() == bg:
+                    self.background_combo.setCurrentIndex(idx)
+                    break
+        finally:
+            self._syncing = False
+
+    def _on_preset_changed(self) -> None:
+        if self._syncing:
+            return
+        preset = self.preset_combo.currentData()
+        if not isinstance(preset, tuple):
+            return
+        width, height = preset
+        self._syncing = True
+        try:
+            self.width_spin.setValue(int(width))
+            self.height_spin.setValue(int(height))
+        finally:
+            self._syncing = False
+
+    def _on_custom_size_changed(self) -> None:
+        if self._syncing:
+            return
+        current = (self.width_spin.value(), self.height_spin.value())
+        for idx in range(self.preset_combo.count() - 1):
+            if self.preset_combo.itemData(idx) == current:
+                self._syncing = True
+                try:
+                    self.preset_combo.setCurrentIndex(idx)
+                finally:
+                    self._syncing = False
+                return
+        custom_index = self.preset_combo.count() - 1
+        if self.preset_combo.currentIndex() != custom_index:
+            self._syncing = True
+            try:
+                self.preset_combo.setCurrentIndex(custom_index)
+            finally:
+                self._syncing = False
+
+    def canvas_request(self) -> dict:
+        return {
+            "width": int(self.width_spin.value()),
+            "height": int(self.height_spin.value()),
+            "background": str(self.background_combo.currentData() or "#FFFFFF"),
+            "template": str(self.preset_combo.currentText() or "Custom"),
+        }
 
 
 class DrawingCanvas(QWidget):
