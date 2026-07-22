@@ -85,13 +85,18 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     dialog.show()
     app.processEvents()
 
-    assert dialog.select_btn.text() == "Select / Move"
-    assert dialog.pen_btn.text() and dialog.pen_btn.text()[0].isalnum()
-    assert dialog.eraser_btn.text() and dialog.eraser_btn.text()[0].isalnum()
+    assert dialog._tool_rail.width() <= 56
+    assert dialog.select_btn.text() == ""
+    assert dialog.select_btn.toolTip() == "Select / Move"
+    assert dialog.pen_btn.text() == ""
+    assert dialog.pen_btn.toolTip()
+    assert dialog.eraser_btn.text() == ""
+    assert dialog.eraser_btn.toolTip()
     assert not dialog.select_btn.icon().isNull()
     assert not dialog.pen_btn.icon().isNull()
     assert not dialog.eraser_btn.icon().isNull()
     assert not dialog.path_btn.icon().isNull()
+    assert dialog.brush_library_list.parent() is not dialog._tool_rail
     assert dialog.color_wheel.width() <= 112
     assert dialog._color_preview.width() <= 48
     assert dialog._recent_color_btns[0].width() <= 32

@@ -130,7 +130,20 @@ QPushButton#StickerBtn:checked {
 }
 
 QFrame#PaintToolRail QPushButton {
-    min-width: 118px;
+    min-width: 36px;
+    max-width: 36px;
+    min-height: 36px;
+    max-height: 36px;
+    padding: 0;
+    text-align: center;
+}
+
+QFrame#PaintToolRail QPushButton#PaintTool,
+QFrame#PaintToolRail QPushButton#BubbleBtn,
+QFrame#PaintToolRail QPushButton#StickerBtn,
+QFrame#PaintToolRail QPushButton#PaintDanger {
+    border-radius: 5px;
+    padding: 0;
 }
 
 QPushButton#PaintDanger {
@@ -2032,6 +2045,21 @@ class PaintDialog(QDialog):
         button.setIcon(app_icon(icon_name, size=icon_px, color="#EEF3FB"))
         button.setIconSize(icon_size(icon_px))
 
+    def _configure_paint_tool_icon_button(
+        self,
+        button: QPushButton,
+        icon_name: str,
+        label: str,
+        *,
+        icon_px: int = 18,
+    ) -> None:
+        button.setText("")
+        button.setToolTip(label)
+        button.setAccessibleName(label)
+        button.setIcon(app_icon(icon_name, size=icon_px, color="#E8EEF8"))
+        button.setIconSize(icon_size(icon_px))
+        button.setFixedSize(36, 36)
+
     def _prepare_paint_layers(self, strokes: list[Stroke]) -> None:
         seen = {layer.layer_id for layer in self._paint_layers}
         for stroke in strokes:
@@ -2353,12 +2381,12 @@ class PaintDialog(QDialog):
 
         tool_rail = QFrame()
         tool_rail.setObjectName("PaintToolRail")
+        tool_rail.setFixedWidth(52)
+        tool_rail.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        self._tool_rail = tool_rail
         tool_layout = QVBoxLayout(tool_rail)
-        tool_layout.setContentsMargins(10, 12, 10, 12)
-        tool_layout.setSpacing(8)
-        tool_title = QLabel("TOOLS")
-        tool_title.setObjectName("PaintSectionTitle")
-        tool_layout.addWidget(tool_title)
+        tool_layout.setContentsMargins(7, 8, 7, 8)
+        tool_layout.setSpacing(4)
 
         self.select_btn = QPushButton("Select / Move")
         self.select_btn.setCheckable(True)
@@ -2413,52 +2441,33 @@ class PaintDialog(QDialog):
         self.cutout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.cutout_btn.clicked.connect(self._create_cutout_sticker)
 
-        self._configure_paint_icon_button(self.select_btn, "cursor")
-        self._configure_paint_icon_button(self.pen_btn, "paint-brush")
-        self._configure_paint_icon_button(self.eraser_btn, "eraser")
-        self._configure_paint_icon_button(self.path_btn, "path-tool")
-        self._configure_paint_icon_button(self.bubble_btn, "caption")
-        self._configure_paint_icon_button(self.sticker_btn, "image")
-        self._configure_paint_icon_button(self.editor_object_btn, "layers")
-        self._configure_paint_icon_button(self.cutout_btn, "scissors")
-        self._configure_paint_icon_button(self.clear_btn, "trash")
+        self._configure_paint_tool_icon_button(self.select_btn, "cursor", "Select / Move")
+        self._configure_paint_tool_icon_button(self.pen_btn, "paint-brush", tr("paint.btn.pen"))
+        self._configure_paint_tool_icon_button(self.eraser_btn, "eraser", tr("paint.btn.eraser"))
+        self._configure_paint_tool_icon_button(self.path_btn, "path-tool", "Path")
+        self._configure_paint_tool_icon_button(self.bubble_btn, "caption", tr("bubble.add_button"))
+        self._configure_paint_tool_icon_button(self.sticker_btn, "image", tr("sticker.add_button"))
+        self._configure_paint_tool_icon_button(self.editor_object_btn, "layers", "Editor Object")
+        self._configure_paint_tool_icon_button(self.cutout_btn, "scissors", "Cutout")
+        self._configure_paint_tool_icon_button(self.clear_btn, "trash", tr("paint.btn.clear_all"))
 
         tool_layout.addWidget(self.select_btn)
         tool_layout.addWidget(self.pen_btn)
         tool_layout.addWidget(self.eraser_btn)
         tool_layout.addWidget(self.path_btn)
-        tool_layout.addSpacing(8)
+        line = QFrame()
+        line.setFrameShape(QFrame.Shape.HLine)
+        line.setStyleSheet("color: rgba(178, 186, 202, 38);")
+        tool_layout.addWidget(line)
         tool_layout.addWidget(self.bubble_btn)
         tool_layout.addWidget(self.sticker_btn)
         tool_layout.addWidget(self.editor_object_btn)
         tool_layout.addWidget(self.cutout_btn)
-        tool_layout.addSpacing(8)
         if self._standalone:
             self.bubble_btn.hide()
             self.sticker_btn.hide()
             self.editor_object_btn.hide()
             self.cutout_btn.hide()
-
-        brush_library_title = QLabel("BRUSH LIBRARY")
-        brush_library_title.setObjectName("PaintSectionTitle")
-        tool_layout.addWidget(brush_library_title)
-        self.brush_category_combo = QComboBox()
-        self.brush_category_combo.addItem("All Brushes", "")
-        for category in dict.fromkeys(
-            str(row["category"]) for row in BRUSH_LIBRARY_PRESETS
-        ):
-            self.brush_category_combo.addItem(category, category)
-        self.brush_category_combo.currentIndexChanged.connect(
-            self._populate_brush_library
-        )
-        tool_layout.addWidget(self.brush_category_combo)
-        self.brush_library_list = QListWidget()
-        self.brush_library_list.setObjectName("PaintBrushList")
-        self.brush_library_list.setFixedHeight(190)
-        self.brush_library_list.itemClicked.connect(self._on_brush_library_item)
-        tool_layout.addWidget(self.brush_library_list)
-        self._populate_brush_library()
-        tool_layout.addSpacing(8)
 
         tool_layout.addWidget(self.clear_btn)
         tool_layout.addStretch(1)
@@ -2527,6 +2536,24 @@ class PaintDialog(QDialog):
         brush_title = QLabel("BRUSH")
         brush_title.setObjectName("PaintSectionTitle")
         inspector_layout.addWidget(brush_title)
+
+        self.brush_category_combo = QComboBox()
+        self.brush_category_combo.addItem("All Brushes", "")
+        for category in dict.fromkeys(
+            str(row["category"]) for row in BRUSH_LIBRARY_PRESETS
+        ):
+            self.brush_category_combo.addItem(category, category)
+        self.brush_category_combo.currentIndexChanged.connect(
+            self._populate_brush_library
+        )
+        inspector_layout.addWidget(self.brush_category_combo)
+        self.brush_library_list = QListWidget()
+        self.brush_library_list.setObjectName("PaintBrushList")
+        self.brush_library_list.setFixedHeight(118)
+        self.brush_library_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.brush_library_list.itemClicked.connect(self._on_brush_library_item)
+        inspector_layout.addWidget(self.brush_library_list)
+        self._populate_brush_library()
 
         style_row = QHBoxLayout()
         style_row.setContentsMargins(0, 0, 0, 0)
