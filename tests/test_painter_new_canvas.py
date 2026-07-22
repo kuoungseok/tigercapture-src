@@ -120,8 +120,14 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
 def test_standalone_painter_starts_with_photoshop_style_layers_and_paths() -> None:
     app = _app()
     from PySide6.QtCore import QPointF
+    from PySide6.QtWidgets import QApplication
 
-    from app.drawing import PaintDialog, Stroke, create_blank_paint_pixmap
+    from app.drawing import (
+        PAINT_CLIPBOARD_MIME,
+        PaintDialog,
+        Stroke,
+        create_blank_paint_pixmap,
+    )
     from app.i18n import tr
 
     dialog = PaintDialog(
@@ -163,6 +169,18 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths() -> No
     dialog._layer_lock_all_btn.setChecked(False)
     app.processEvents()
     assert dialog._active_paint_layer().locked is False
+
+    dialog._copy_selected_layer()
+    clipboard_mime = QApplication.clipboard().mimeData()
+    assert clipboard_mime.hasFormat(PAINT_CLIPBOARD_MIME)
+    dialog._paint_clipboard = None
+    layers_before_paste = len(dialog._paint_layers)
+    strokes_before_paste = len(dialog.canvas.embedded_strokes())
+    dialog._paste_layer_clipboard()
+    app.processEvents()
+    assert len(dialog._paint_layers) == layers_before_paste + 1
+    assert len(dialog.canvas.embedded_strokes()) == strokes_before_paste + 1
+    QApplication.clipboard().clear()
 
     dialog.canvas._path_points = [QPointF(10, 10), QPointF(40, 40), QPointF(60, 12)]
     dialog._update_path_list()

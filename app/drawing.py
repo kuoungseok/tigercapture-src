@@ -1,13 +1,25 @@
 from __future__ import annotations
 
 import copy
+import json
 import math
 from datetime import datetime
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
-from PySide6.QtCore import QPoint, QPointF, QRect, QRectF, QSize, Qt, QTimer, Signal
+from PySide6.QtCore import (
+    QByteArray,
+    QMimeData,
+    QPoint,
+    QPointF,
+    QRect,
+    QRectF,
+    QSize,
+    Qt,
+    QTimer,
+    Signal,
+)
 from PySide6.QtGui import (
     QColor,
     QImage,
@@ -23,6 +35,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QColorDialog,
+    QApplication,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -45,6 +58,10 @@ from PySide6.QtWidgets import (
 
 from app.icons import app_icon, icon_size
 from app.i18n import tr
+
+
+PAINT_CLIPBOARD_MIME = "application/x-tigercapture-paint-payload+json"
+PAINT_CLIPBOARD_SCHEMA = "tigerstudio.paint.clipboard.v1"
 
 
 _PAINT_DIALOG_QSS = """
@@ -3843,7 +3860,9 @@ class PaintDialog(QDialog):
             selected_background
             or (has_selection and (not is_paint_layer or len(self._paint_layers) > 1))
         )
-        paste_action.setEnabled(self._paint_clipboard is not None)
+        paste_action.setEnabled(
+            self._paint_clipboard is not None or self._system_clipboard_has_paint_payload()
+        )
         chosen = menu.exec(self._layer_list.mapToGlobal(pos))
         if chosen is new_action:
             self._new_paint_layer()
@@ -3878,6 +3897,7 @@ class PaintDialog(QDialog):
         payload = self._payload_for_layer(self._current_layer_id())
         if payload is not None:
             self._paint_clipboard = payload
+            self._write_payload_to_system_clipboard(payload)
 
     def _cut_selected_layer(self) -> None:
         if self._text_editor_has_focus():
@@ -3887,6 +3907,7 @@ class PaintDialog(QDialog):
         if payload is None:
             return
         self._paint_clipboard = payload
+        self._write_payload_to_system_clipboard(payload)
         self._delete_layer(layer_id)
 
     def _duplicate_selected_layer(self) -> None:
@@ -3900,9 +3921,14 @@ class PaintDialog(QDialog):
     def _paste_layer_clipboard(self) -> None:
         if self._text_editor_has_focus():
             return
-        if self._paint_clipboard is None:
+        payload = self._payload_from_system_clipboard()
+        if payload is None:
+            payload = self._paint_clipboard
+        else:
+            self._paint_clipboard = payload
+        if payload is None:
             return
-        self._paste_payload(self._paint_clipboard)
+        self._paste_payload(payload)
 
     def _delete_selected_layer(self) -> None:
         if self._text_editor_has_focus():
@@ -3916,6 +3942,191 @@ class PaintDialog(QDialog):
                 return True
             widget = widget.parentWidget()
         return False
+
+    def _system_clipboard_has_paint_payload(self) -> bool:
+        try:
+            clipboard = QApplication.clipboard()
+            mime = clipboard.mimeData() if clipboard is not None else None
+            return bool(mime is not None and mime.hasFormat(PAINT_CLIPBOARD_MIME))
+        except Exception:
+            return False
+
+    def _write_payload_to_system_clipboard(self, payload: dict) -> None:
+        document = self._payload_to_clipboard_document(payload)
+        if document is None:
+            return
+        try:
+            encoded = json.dumps(
+                document,
+                ensure_ascii=False,
+                separators=(",", ":"),
+            ).encode("utf-8")
+            mime = QMimeData()
+            mime.setData(PAINT_CLIPBOARD_MIME, QByteArray(encoded))
+            mime.setText(f"TigerCapture Paint {document.get('kind', 'payload')}")
+            QApplication.clipboard().setMimeData(mime)
+        except Exception:
+            return
+
+    def _payload_from_system_clipboard(self) -> dict | None:
+        try:
+            clipboard = QApplication.clipboard()
+            mime = clipboard.mimeData() if clipboard is not None else None
+            if mime is None or not mime.hasFormat(PAINT_CLIPBOARD_MIME):
+                return None
+            raw = bytes(mime.data(PAINT_CLIPBOARD_MIME))
+            document = json.loads(raw.decode("utf-8"))
+        except Exception:
+            return None
+        return self._payload_from_clipboard_document(document)
+
+    def _payload_to_clipboard_document(self, payload: dict) -> dict | None:
+        kind = str(payload.get("kind") or "")
+        body: dict
+        if kind == "paint_layer":
+            layer = payload.get("layer")
+            body = {
+                "layer": asdict(layer) if isinstance(layer, PaintLayer) else None,
+                "strokes": [
+                    asdict(stroke)
+                    for stroke in payload.get("strokes") or []
+                    if isinstance(stroke, Stroke)
+                ],
+            }
+        elif kind == "strokes":
+            body = {
+                "strokes": [
+                    asdict(stroke)
+                    for stroke in payload.get("strokes") or []
+                    if isinstance(stroke, Stroke)
+                ],
+            }
+        elif kind == "bubble":
+            bubble = payload.get("bubble")
+            body = {"bubble": asdict(bubble) if isinstance(bubble, SpeechBubble) else None}
+        elif kind == "sticker":
+            sticker = payload.get("sticker")
+            body = {"sticker": asdict(sticker) if isinstance(sticker, Sticker) else None}
+        else:
+            return None
+        return {
+            "schema": PAINT_CLIPBOARD_SCHEMA,
+            "kind": kind,
+            "payload": body,
+        }
+
+    def _payload_from_clipboard_document(self, document: dict) -> dict | None:
+        if not isinstance(document, dict):
+            return None
+        if document.get("schema") != PAINT_CLIPBOARD_SCHEMA:
+            return None
+        kind = str(document.get("kind") or "")
+        body = document.get("payload")
+        if not isinstance(body, dict):
+            return None
+        if kind == "paint_layer":
+            layer = self._paint_layer_from_clipboard_dict(body.get("layer") or {})
+            return {
+                "kind": "paint_layer",
+                "layer": layer,
+                "strokes": self._strokes_from_clipboard_list(body.get("strokes")),
+            }
+        if kind == "strokes":
+            strokes = self._strokes_from_clipboard_list(body.get("strokes"))
+            return {"kind": "strokes", "strokes": strokes} if strokes else None
+        if kind == "bubble" and isinstance(body.get("bubble"), dict):
+            return {"kind": "bubble", "bubble": self._bubble_from_clipboard_dict(body["bubble"])}
+        if kind == "sticker" and isinstance(body.get("sticker"), dict):
+            return {"kind": "sticker", "sticker": self._sticker_from_clipboard_dict(body["sticker"])}
+        return None
+
+    @staticmethod
+    def _clipboard_int(value, default: int = 0) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _clipboard_float(value, default: float = 0.0) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _strokes_from_clipboard_list(self, rows) -> list[Stroke]:
+        if not isinstance(rows, list):
+            return []
+        strokes: list[Stroke] = []
+        for row in rows:
+            if isinstance(row, dict):
+                strokes.append(self._stroke_from_clipboard_dict(row))
+        return strokes
+
+    def _stroke_from_clipboard_dict(self, row: dict) -> Stroke:
+        points: list[tuple[float, float]] = []
+        for point in row.get("points") or []:
+            if isinstance(point, (list, tuple)) and len(point) >= 2:
+                points.append((
+                    max(0.0, min(1.0, self._clipboard_float(point[0]))),
+                    max(0.0, min(1.0, self._clipboard_float(point[1]))),
+                ))
+        color_raw = row.get("color") or (255, 50, 50)
+        if not isinstance(color_raw, (list, tuple)) or len(color_raw) < 3:
+            color_raw = (255, 50, 50)
+        color = tuple(
+            max(0, min(255, self._clipboard_int(color_raw[idx], 0)))
+            for idx in range(3)
+        )
+        end_ms = row.get("end_ms")
+        return Stroke(
+            points=points,
+            color=color,
+            opacity=max(0, min(255, self._clipboard_int(row.get("opacity"), 255))),
+            width_px=max(0.1, self._clipboard_float(row.get("width_px"), 4.0)),
+            brush_style=str(row.get("brush_style") or "round"),
+            closed_path=bool(row.get("closed_path", False)),
+            layer_id=str(row.get("layer_id") or "paint-layer-1"),
+            source_tool=str(row.get("source_tool") or "pen"),
+            start_ms=self._clipboard_int(row.get("start_ms"), 0),
+            end_ms=None if end_ms is None else self._clipboard_int(end_ms, 0),
+        )
+
+    def _paint_layer_from_clipboard_dict(self, row: dict) -> PaintLayer:
+        if not isinstance(row, dict):
+            row = {}
+        return PaintLayer(
+            layer_id=str(row.get("layer_id") or "paint-layer-1"),
+            name=str(row.get("name") or "Layer"),
+            visible=bool(row.get("visible", True)),
+            opacity=max(0, min(100, self._clipboard_int(row.get("opacity"), 100))),
+            locked=bool(row.get("locked", False)),
+        )
+
+    def _bubble_from_clipboard_dict(self, row: dict) -> "SpeechBubble":
+        return SpeechBubble(
+            x_norm=max(0.0, min(1.0, self._clipboard_float(row.get("x_norm"), 0.1))),
+            y_norm=max(0.0, min(1.0, self._clipboard_float(row.get("y_norm"), 0.1))),
+            width_norm=max(0.01, min(1.0, self._clipboard_float(row.get("width_norm"), 0.35))),
+            height_norm=max(0.01, min(1.0, self._clipboard_float(row.get("height_norm"), 0.18))),
+            text=str(row.get("text") or ""),
+            start_ms=self._clipboard_int(row.get("start_ms"), 0),
+            tail=str(row.get("tail") or "left"),
+        )
+
+    def _sticker_from_clipboard_dict(self, row: dict) -> "Sticker":
+        return Sticker(
+            png_path=str(row.get("png_path") or ""),
+            x_norm=max(0.0, min(1.0, self._clipboard_float(row.get("x_norm"), 0.15))),
+            y_norm=max(0.0, min(1.0, self._clipboard_float(row.get("y_norm"), 0.15))),
+            width_norm=max(0.01, min(1.0, self._clipboard_float(row.get("width_norm"), 0.2))),
+            height_norm=max(0.01, min(1.0, self._clipboard_float(row.get("height_norm"), 0.2))),
+            opacity=max(0.0, min(100.0, self._clipboard_float(row.get("opacity"), 100.0))),
+            rotation_deg=self._clipboard_float(row.get("rotation_deg"), 0.0),
+            start_ms=self._clipboard_int(row.get("start_ms"), 0),
+            end_ms=self._clipboard_int(row.get("end_ms"), -1),
+            z_index=self._clipboard_int(row.get("z_index"), 0),
+        )
 
     def _payload_for_layer(self, layer_id: str | None) -> dict | None:
         if not layer_id:
