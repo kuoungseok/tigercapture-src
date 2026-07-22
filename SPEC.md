@@ -6071,6 +6071,12 @@ AI Script Edit MVP integration:
   copy/paste targets RGB, Red, Green, Blue, or Alpha and uses the system
   image clipboard so AI workflows can move raster channel data without a
   visible dialog.
+- Standalone Painter must avoid GIMP-style ambiguous state changes: channel row
+  clicks select the channel only, visibility changes require the explicit eye
+  control or `paint.channel.set_visible`, tool-specific controls live in a
+  `TOOL OPTIONS` area rather than inside Brush/Color panels, and crop can be
+  applied from the visible `Apply Crop` control or Enter/Return when a crop
+  selection exists.
 - The track/selection action namespace split is active:
   `app/actions/track_selection_namespace.py` owns track reorder/state/lock/mute/
   rename/select, clip selection, timeline select-all, and selection set/clear/

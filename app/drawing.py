@@ -3274,6 +3274,47 @@ class PaintDialog(QDialog):
 
         brush_title = QLabel("BRUSH")
         brush_title.setObjectName("PaintSectionTitle")
+
+        tool_options_title = QLabel("TOOL OPTIONS")
+        tool_options_title.setObjectName("PaintSectionTitle")
+        inspector_controls_layout.addWidget(tool_options_title)
+
+        selection_row = QHBoxLayout()
+        selection_row.setContentsMargins(0, 0, 0, 0)
+        selection_label = QLabel("Marquee")
+        selection_label.setObjectName("PaintMeta")
+        self.selection_aspect_combo = QComboBox()
+        self.selection_aspect_combo.addItem("Free", "free")
+        self.selection_aspect_combo.addItem("Square", "square")
+        self.selection_aspect_combo.addItem("16:9", "16:9")
+        self.selection_aspect_combo.addItem("4:3", "4:3")
+        self.selection_aspect_combo.currentIndexChanged.connect(self._on_selection_aspect_changed)
+        selection_row.addWidget(selection_label)
+        selection_row.addStretch(1)
+        selection_row.addWidget(self.selection_aspect_combo)
+        inspector_controls_layout.addLayout(selection_row)
+
+        tool_action_row = QHBoxLayout()
+        tool_action_row.setContentsMargins(0, 0, 0, 0)
+        self.crop_apply_btn = QPushButton("Apply Crop")
+        self.crop_apply_btn.setObjectName("PaintCustomColor")
+        self.crop_apply_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.crop_apply_btn.setToolTip("Apply the active crop/selection bounds")
+        self.crop_apply_btn.clicked.connect(self._crop_to_selection)
+        self.mask_selection_btn = QPushButton("Mask")
+        self.mask_selection_btn.setObjectName("PaintCustomColor")
+        self.mask_selection_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.mask_selection_btn.setToolTip("Create a layer mask from the active selection")
+        self.mask_selection_btn.clicked.connect(self._mask_selected_layer_from_selection)
+        self.deselect_option_btn = QPushButton("Deselect")
+        self.deselect_option_btn.setObjectName("PaintCustomColor")
+        self.deselect_option_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.deselect_option_btn.clicked.connect(self._deselect)
+        tool_action_row.addWidget(self.crop_apply_btn)
+        tool_action_row.addWidget(self.mask_selection_btn)
+        tool_action_row.addWidget(self.deselect_option_btn)
+        inspector_controls_layout.addLayout(tool_action_row)
+
         inspector_controls_layout.addWidget(brush_title)
 
         self.brush_category_combo = QComboBox()
@@ -3347,21 +3388,6 @@ class PaintDialog(QDialog):
         self.opacity_slider.setValue(100)
         self.opacity_slider.valueChanged.connect(self._on_opacity_changed)
         inspector_controls_layout.addWidget(self.opacity_slider)
-
-        selection_row = QHBoxLayout()
-        selection_row.setContentsMargins(0, 0, 0, 0)
-        selection_label = QLabel("Selection")
-        selection_label.setObjectName("PaintMeta")
-        self.selection_aspect_combo = QComboBox()
-        self.selection_aspect_combo.addItem("Free", "free")
-        self.selection_aspect_combo.addItem("Square", "square")
-        self.selection_aspect_combo.addItem("16:9", "16:9")
-        self.selection_aspect_combo.addItem("4:3", "4:3")
-        self.selection_aspect_combo.currentIndexChanged.connect(self._on_selection_aspect_changed)
-        selection_row.addWidget(selection_label)
-        selection_row.addStretch(1)
-        selection_row.addWidget(self.selection_aspect_combo)
-        inspector_controls_layout.addLayout(selection_row)
 
         preset_row = QHBoxLayout()
         preset_row.setContentsMargins(0, 0, 0, 0)
@@ -3633,6 +3659,11 @@ class PaintDialog(QDialog):
         channels_layout.setSpacing(8)
         channel_row = QHBoxLayout()
         channel_row.setContentsMargins(0, 0, 0, 0)
+        self.toggle_channel_visibility_btn = QPushButton("Eye")
+        self.toggle_channel_visibility_btn.setObjectName("PaintCustomColor")
+        self.toggle_channel_visibility_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.toggle_channel_visibility_btn.setToolTip("Toggle visibility for the selected channel")
+        self.toggle_channel_visibility_btn.clicked.connect(self._toggle_selected_channel_visibility)
         self.copy_channel_btn = QPushButton("Copy")
         self.copy_channel_btn.setObjectName("PaintCustomColor")
         self.copy_channel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -3643,13 +3674,14 @@ class PaintDialog(QDialog):
         self.paste_channel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.paste_channel_btn.setToolTip("Paste a grayscale clipboard image into the selected channel")
         self.paste_channel_btn.clicked.connect(self._paste_selected_channel_image)
+        channel_row.addWidget(self.toggle_channel_visibility_btn)
         channel_row.addWidget(self.copy_channel_btn)
         channel_row.addWidget(self.paste_channel_btn)
         channels_layout.addLayout(channel_row)
         self._channel_list = QListWidget()
         self._channel_list.setObjectName("PaintLayerList")
         self._channel_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._channel_list.itemClicked.connect(self._toggle_channel_item_visibility)
+        self._channel_list.itemClicked.connect(self._select_channel_item)
         self._update_channel_list()
         channels_layout.addWidget(self._channel_list, stretch=1)
         self._layer_channel_path_tabs.addTab(channels_tab, tr("paint.tab.channels"))
@@ -4007,6 +4039,7 @@ class PaintDialog(QDialog):
                 "crop": "Crop: drag a crop area, then Image > Crop To Selection",
             }
             self._tool_status_label.setText(labels.get(tool, "Select / move objects"))
+        self._update_tool_option_controls()
 
     def _on_selection_aspect_changed(self) -> None:
         mode = "free"
@@ -4071,6 +4104,23 @@ class PaintDialog(QDialog):
                 f"Y {'on' if self._mirror_y_enabled else 'off'}"
             )
         return {"x": bool(self._mirror_x_enabled), "y": bool(self._mirror_y_enabled)}
+
+    def _update_tool_option_controls(self) -> None:
+        has_selection = bool(hasattr(self, "canvas") and self.canvas.has_active_selection())
+        current_tool = str(getattr(self.canvas, "_tool", "off") if hasattr(self, "canvas") else "off")
+        if hasattr(self, "selection_aspect_combo"):
+            self.selection_aspect_combo.setEnabled(current_tool in {"rect_select", "ellipse_select", "crop"})
+        if hasattr(self, "crop_apply_btn"):
+            self.crop_apply_btn.setEnabled(has_selection)
+        if hasattr(self, "mask_selection_btn"):
+            self.mask_selection_btn.setEnabled(has_selection and self._selected_layer_id != "background")
+        if hasattr(self, "deselect_option_btn"):
+            self.deselect_option_btn.setEnabled(has_selection)
+
+    def _apply_crop_if_crop_tool(self) -> None:
+        current_tool = str(getattr(self.canvas, "_tool", "off") if hasattr(self, "canvas") else "off")
+        if current_tool == "crop" and self._selection_bounds() is not None:
+            self._crop_to_selection()
 
     def _clear_all(self) -> None:
         self._push_undo_state("Clear all")
@@ -4463,6 +4513,7 @@ class PaintDialog(QDialog):
             if label is not None:
                 label.setText(str(value))
         self._sync_canvas_layer_view()
+        self._update_tool_option_controls()
         self._update_layer_list(strokes_count)
         self._update_path_list()
         self._update_history_buttons()
@@ -4683,21 +4734,39 @@ class PaintDialog(QDialog):
         finally:
             channel_list.blockSignals(False)
 
+    def _select_channel_item(self, item: QListWidgetItem) -> None:
+        channel = str(item.data(Qt.ItemDataRole.UserRole) or item.text() or "")
+        self._set_selected_channel(channel)
+
+    def _toggle_selected_channel_visibility(self) -> bool:
+        channel = self._selected_channel
+        item = None
+        if hasattr(self, "_channel_list"):
+            item = self._channel_list.currentItem()
+            if item is not None:
+                channel = str(item.data(Qt.ItemDataRole.UserRole) or channel)
+        return self._toggle_channel_name_visibility(channel)
+
     def _toggle_channel_item_visibility(self, item: QListWidgetItem) -> None:
         channel = str(item.data(Qt.ItemDataRole.UserRole) or item.text() or "")
         self._set_selected_channel(channel)
+        self._toggle_channel_name_visibility(channel)
+
+    def _toggle_channel_name_visibility(self, channel: str) -> bool:
         if channel == "RGB":
             new_visible = not all(
                 self._channel_visibility.get(key, True)
                 for key in ("Red", "Green", "Blue")
             )
-            self._set_channel_visibility("RGB", new_visible)
+            return self._set_channel_visibility("RGB", new_visible)
         elif channel in {"Red", "Green", "Blue", "Alpha"}:
-            self._set_channel_visibility(channel, not self._channel_visibility.get(channel, True))
+            return self._set_channel_visibility(channel, not self._channel_visibility.get(channel, True))
+        return False
 
     def _update_path_list(self) -> None:
         path_list = getattr(self, "_path_list", None)
         if path_list is None:
+            self._update_tool_option_controls()
             return
         active_points = self.canvas.path_point_count() if hasattr(self, "canvas") else 0
         path_strokes = [
@@ -4732,6 +4801,7 @@ class PaintDialog(QDialog):
                     path_list.setCurrentItem(item)
         finally:
             path_list.blockSignals(False)
+        self._update_tool_option_controls()
 
     def _select_path_item(self, item: QListWidgetItem) -> None:
         value = item.data(Qt.ItemDataRole.UserRole)
@@ -5553,6 +5623,8 @@ class PaintDialog(QDialog):
             ("Ctrl+-", self._zoom_out),
             ("Ctrl+0", self._zoom_fit),
             ("Ctrl+1", self._zoom_fit),
+            ("Return", self._apply_crop_if_crop_tool),
+            ("Enter", self._apply_crop_if_crop_tool),
         )
         self._paint_shortcuts = []
         for key, handler in shortcuts:

@@ -117,6 +117,9 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog.brush_library_list.parent() is not dialog._tool_rail
     assert dialog.brush_library_list.item(0).text() == ""
     assert not dialog.brush_library_list.item(0).icon().isNull()
+    assert dialog.selection_aspect_combo.parent() is dialog._paint_inspector_controls
+    assert dialog.crop_apply_btn.parent() is dialog._paint_inspector_controls
+    assert dialog.toggle_channel_visibility_btn.toolTip()
     assert dialog._layer_channel_path_tabs.count() == 4
     assert [
         dialog._layer_channel_path_tabs.tabText(i)
@@ -185,10 +188,12 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeyp
     assert dialog.pan_btn.isChecked()
     dialog._set_tool("rect_select")
     assert dialog.rect_select_btn.isChecked()
+    assert dialog.selection_aspect_combo.isEnabled()
     dialog._set_tool("ellipse_select")
     assert dialog.ellipse_select_btn.isChecked()
     dialog._set_tool("crop")
     assert dialog.crop_btn.isChecked()
+    assert dialog.crop_apply_btn.isEnabled() is False
     dialog._set_zoom_percent(200)
     dialog._pan_canvas_by(QPoint(40, 20))
     assert dialog._canvas_pan != QPoint(0, 0)
@@ -246,7 +251,10 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeyp
         for i in range(dialog._channel_list.count())
         if dialog._channel_list.item(i).text() == "Red"
     )
-    dialog._toggle_channel_item_visibility(red_item)
+    dialog._select_channel_item(red_item)
+    assert dialog._selected_channel == "Red"
+    assert dialog._channel_visibility["Red"] is True
+    dialog._toggle_selected_channel_visibility()
     assert dialog._channel_visibility["Red"] is False
     assert dialog._channel_visibility["RGB"] is False
     assert dialog._selected_channel == "Red"
@@ -305,7 +313,9 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeyp
     dialog._set_selection_aspect_mode("square")
     assert dialog._selection_aspect_mode == "square"
     dialog.canvas.select_rectangle(0.1, 0.1, 0.45, 0.35, shape="rect", aspect="square")
+    dialog._update_tool_option_controls()
     assert dialog.canvas.selection_point_count() == 4
+    assert dialog.crop_apply_btn.isEnabled() is True
     dialog.canvas.select_rectangle(0.1, 0.1, 0.45, 0.35, shape="ellipse", aspect="free")
     assert dialog.canvas.selection_point_count() == 32
 

@@ -165,6 +165,21 @@ Window:
   Crop To Selection, Zoom In / Out / Fit / Reset Pan을 제공한다.
 - Pan, zoom, window resize, checkerboard transparent background를 지원한다.
 
+## GIMP식 UX 회피 원칙
+
+사용자가 GIMP를 불편하게 느끼는 지점은 기능 수가 아니라 상태와 조작 결과가
+예측하기 어려운 데 있다. Painter는 다음 원칙을 유지한다.
+
+- 도구별 옵션은 Brush/Color 패널 안에 숨기지 않고 `TOOL OPTIONS`에 둔다.
+- 채널 행 클릭은 채널 선택만 수행한다. 표시/숨김은 눈 버튼이나 명시 action으로
+  수행한다.
+- Crop은 드래그 후 메뉴를 찾아가야만 하는 흐름을 피한다. 선택/크롭 영역이 있으면
+  `Apply Crop` 버튼과 Enter/Return으로 적용할 수 있어야 한다.
+- 버튼이 현재 상태에서 실행 불가능하면 비활성화한다. 실패를 누른 뒤에야 알게
+  만드는 흐름을 피한다.
+- 좌측 툴바는 Photoshop식 위치 기억을 우선한다. 기능이 늘어나도 같은 도구군은
+  같은 근처에 둔다.
+
 ## AI/Automation Action 계약
 
 Painter 기능은 로컬 AI, Claude, MCP, review automation이 직접 조작할 수 있어야 한다.
