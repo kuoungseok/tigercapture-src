@@ -37,6 +37,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSpinBox,
+    QTabWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -185,6 +186,40 @@ QFrame#PaintColorPanel {
     background-color: #11151b;
     border: 1px solid rgba(178, 186, 202, 22);
     border-radius: 8px;
+}
+
+QTabWidget#PaintLayerChannelPathTabs {
+    background-color: #12151b;
+}
+
+QTabWidget#PaintLayerChannelPathTabs::pane {
+    background-color: #11151b;
+    border: 1px solid rgba(178, 186, 202, 28);
+    border-top-color: rgba(178, 186, 202, 38);
+    border-radius: 0;
+    top: -1px;
+}
+
+QTabWidget#PaintLayerChannelPathTabs QTabBar::tab {
+    background-color: #24262a;
+    color: #aeb7c7;
+    border: 1px solid rgba(178, 186, 202, 30);
+    border-bottom: 0;
+    padding: 7px 13px;
+    min-width: 54px;
+    font-size: 11px;
+    font-weight: 760;
+}
+
+QTabWidget#PaintLayerChannelPathTabs QTabBar::tab:selected {
+    background-color: #3a3b3e;
+    color: #ffffff;
+    border-color: rgba(220, 226, 238, 48);
+}
+
+QTabWidget#PaintLayerChannelPathTabs QTabBar::tab:!selected:hover {
+    background-color: #2d3036;
+    color: #dce6f7;
 }
 
 QLabel#PaintColorWell {
@@ -2618,34 +2653,6 @@ class PaintDialog(QDialog):
             preset_row.addWidget(preset_btn)
         inspector_layout.addLayout(preset_row)
 
-        path_title = QLabel("PATH")
-        path_title.setObjectName("PaintSectionTitle")
-        inspector_layout.addWidget(path_title)
-        path_row = QHBoxLayout()
-        path_row.setContentsMargins(0, 0, 0, 0)
-        self.commit_path_btn = QPushButton("Commit")
-        self.commit_path_btn.setObjectName("PaintCustomColor")
-        self.commit_path_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.commit_path_btn.clicked.connect(lambda: self._commit_path(False))
-        self.close_path_btn = QPushButton("Close")
-        self.close_path_btn.setObjectName("PaintCustomColor")
-        self.close_path_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.close_path_btn.clicked.connect(lambda: self._commit_path(True))
-        self.clear_path_btn = QPushButton("Clear")
-        self.clear_path_btn.setObjectName("PaintCustomColor")
-        self.clear_path_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.clear_path_btn.clicked.connect(self._clear_path_preview)
-        path_row.addWidget(self.commit_path_btn)
-        path_row.addWidget(self.close_path_btn)
-        path_row.addWidget(self.clear_path_btn)
-        inspector_layout.addLayout(path_row)
-        self._path_list = QListWidget()
-        self._path_list.setObjectName("PaintLayerList")
-        self._path_list.setFixedHeight(82)
-        self._path_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self._path_list.itemClicked.connect(self._select_path_item)
-        inspector_layout.addWidget(self._path_list)
-
         color_title = QLabel("COLOR")
         color_title.setObjectName("PaintSectionTitle")
         inspector_layout.addWidget(color_title)
@@ -2741,9 +2748,16 @@ class PaintDialog(QDialog):
         color_panel_layout.addWidget(self.custom_color_btn)
         inspector_layout.addWidget(color_panel)
 
-        layer_title = QLabel("LAYERS")
-        layer_title.setObjectName("PaintSectionTitle")
-        inspector_layout.addWidget(layer_title)
+        self._layer_channel_path_tabs = QTabWidget()
+        self._layer_channel_path_tabs.setObjectName("PaintLayerChannelPathTabs")
+        self._layer_channel_path_tabs.setDocumentMode(True)
+        self._layer_channel_path_tabs.setTabPosition(QTabWidget.TabPosition.North)
+        self._layer_channel_path_tabs.setMinimumHeight(280)
+
+        layers_tab = QWidget()
+        layers_layout = QVBoxLayout(layers_tab)
+        layers_layout.setContentsMargins(8, 8, 8, 8)
+        layers_layout.setSpacing(8)
         layer_mode_row = QHBoxLayout()
         layer_mode_row.setContentsMargins(0, 0, 0, 0)
         self.layer_blend_combo = QComboBox()
@@ -2753,25 +2767,25 @@ class PaintDialog(QDialog):
         self._layer_opacity_value.setObjectName("PaintValue")
         layer_mode_row.addWidget(self.layer_blend_combo, stretch=1)
         layer_mode_row.addWidget(self._layer_opacity_value)
-        inspector_layout.addLayout(layer_mode_row)
+        layers_layout.addLayout(layer_mode_row)
 
         layer_opacity_label = QLabel("Opacity")
         layer_opacity_label.setObjectName("PaintMeta")
-        inspector_layout.addWidget(layer_opacity_label)
+        layers_layout.addWidget(layer_opacity_label)
         self.layer_opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.layer_opacity_slider.setRange(0, 100)
         self.layer_opacity_slider.setValue(100)
         self.layer_opacity_slider.valueChanged.connect(self._on_layer_opacity_changed)
-        inspector_layout.addWidget(self.layer_opacity_slider)
+        layers_layout.addWidget(self.layer_opacity_slider)
 
         self._layer_list = QListWidget()
         self._layer_list.setObjectName("PaintLayerList")
-        self._layer_list.setFixedHeight(164)
+        self._layer_list.setMinimumHeight(150)
         self._layer_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._layer_list.itemClicked.connect(self._select_layer_item)
         self._layer_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._layer_list.customContextMenuRequested.connect(self._open_layer_context_menu)
-        inspector_layout.addWidget(self._layer_list)
+        layers_layout.addWidget(self._layer_list, stretch=1)
 
         edit_row = QHBoxLayout()
         edit_row.setContentsMargins(0, 0, 0, 0)
@@ -2787,7 +2801,7 @@ class PaintDialog(QDialog):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(handler)
             edit_row.addWidget(btn)
-        inspector_layout.addLayout(edit_row)
+        layers_layout.addLayout(edit_row)
         self._layer_count_labels: dict[str, QLabel] = {}
         for key, label_text in (
             ("strokes", "Strokes"),
@@ -2805,10 +2819,63 @@ class PaintDialog(QDialog):
             row.addWidget(name_label)
             row.addStretch(1)
             row.addWidget(count_label)
-            inspector_layout.addLayout(row)
+            layers_layout.addLayout(row)
             self._layer_count_labels[key] = count_label
+        self._layer_channel_path_tabs.addTab(layers_tab, tr("paint.tab.layers"))
 
-        inspector_layout.addStretch(1)
+        channels_tab = QWidget()
+        channels_layout = QVBoxLayout(channels_tab)
+        channels_layout.setContentsMargins(8, 8, 8, 8)
+        channels_layout.setSpacing(8)
+        self._channel_list = QListWidget()
+        self._channel_list.setObjectName("PaintLayerList")
+        self._channel_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        for label_text, icon_name in (
+            ("RGB", "color"),
+            ("Red", "color"),
+            ("Green", "color"),
+            ("Blue", "color"),
+            ("Alpha", "grid"),
+        ):
+            item = QListWidgetItem(label_text)
+            item.setIcon(app_icon(icon_name, size=14, color="#DCE6F7"))
+            self._channel_list.addItem(item)
+        self._channel_list.setCurrentRow(0)
+        channels_layout.addWidget(self._channel_list, stretch=1)
+        self._layer_channel_path_tabs.addTab(channels_tab, tr("paint.tab.channels"))
+
+        paths_tab = QWidget()
+        paths_layout = QVBoxLayout(paths_tab)
+        paths_layout.setContentsMargins(8, 8, 8, 8)
+        paths_layout.setSpacing(8)
+        path_row = QHBoxLayout()
+        path_row.setContentsMargins(0, 0, 0, 0)
+        self.commit_path_btn = QPushButton("Commit")
+        self.commit_path_btn.setObjectName("PaintCustomColor")
+        self.commit_path_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.commit_path_btn.clicked.connect(lambda: self._commit_path(False))
+        self.close_path_btn = QPushButton("Close")
+        self.close_path_btn.setObjectName("PaintCustomColor")
+        self.close_path_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.close_path_btn.clicked.connect(lambda: self._commit_path(True))
+        self.clear_path_btn = QPushButton("Clear")
+        self.clear_path_btn.setObjectName("PaintCustomColor")
+        self.clear_path_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_path_btn.clicked.connect(self._clear_path_preview)
+        path_row.addWidget(self.commit_path_btn)
+        path_row.addWidget(self.close_path_btn)
+        path_row.addWidget(self.clear_path_btn)
+        paths_layout.addLayout(path_row)
+        self._path_list = QListWidget()
+        self._path_list.setObjectName("PaintLayerList")
+        self._path_list.setMinimumHeight(150)
+        self._path_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._path_list.itemClicked.connect(self._select_path_item)
+        paths_layout.addWidget(self._path_list, stretch=1)
+        self._layer_channel_path_tabs.addTab(paths_tab, tr("paint.tab.paths"))
+
+        inspector_layout.addWidget(self._layer_channel_path_tabs, stretch=1)
+
         note = QLabel(tr("paint.note"))
         note.setObjectName("PaintMeta")
         note.setWordWrap(True)

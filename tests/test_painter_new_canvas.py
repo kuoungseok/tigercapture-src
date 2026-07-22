@@ -75,6 +75,7 @@ def test_standalone_painter_hides_video_annotation_tools() -> None:
 def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     app = _app()
     from app.drawing import PaintDialog, create_blank_paint_pixmap
+    from app.i18n import tr
 
     dialog = PaintDialog(
         background_pixmap=create_blank_paint_pixmap(640, 360, "#FFFFFF"),
@@ -97,6 +98,12 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert not dialog.eraser_btn.icon().isNull()
     assert not dialog.path_btn.icon().isNull()
     assert dialog.brush_library_list.parent() is not dialog._tool_rail
+    assert dialog._layer_channel_path_tabs.count() == 3
+    assert [
+        dialog._layer_channel_path_tabs.tabText(i)
+        for i in range(dialog._layer_channel_path_tabs.count())
+    ] == [tr("paint.tab.layers"), tr("paint.tab.channels"), tr("paint.tab.paths")]
+    assert dialog._channel_list.item(0).text() == "RGB"
     assert dialog.color_wheel.width() <= 112
     assert dialog._color_preview.width() <= 48
     assert dialog._recent_color_btns[0].width() <= 32
