@@ -84,6 +84,7 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
         standalone=True,
     )
     dialog.show()
+    dialog.resize(1100, 640)
     app.processEvents()
 
     assert dialog.isSizeGripEnabled()
@@ -119,6 +120,17 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog._color_preview.width() <= 48
     assert dialog._recent_color_btns[0].width() <= 32
     assert dialog._palette_btns[0].width() <= 38
+    scroll = dialog._paint_inspector_controls_scroll
+    assert scroll.geometry().bottom() < dialog._layer_channel_path_tabs.geometry().top()
+    margins = dialog._paint_inspector_controls.layout().contentsMargins()
+    assert margins.right() >= 12
+    bar = scroll.verticalScrollBar()
+    if bar.isVisible():
+        color_right = dialog._paint_color_panel.mapToGlobal(
+            dialog._paint_color_panel.rect().topRight()
+        ).x()
+        bar_left = bar.mapToGlobal(bar.rect().topLeft()).x()
+        assert color_right < bar_left
 
     dialog.close()
 

@@ -49,6 +49,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QMenu,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QSlider,
     QSpinBox,
@@ -205,6 +206,41 @@ QFrame#PaintColorPanel {
     background-color: #11151b;
     border: 1px solid rgba(178, 186, 202, 22);
     border-radius: 8px;
+}
+
+QScrollArea#PaintInspectorScroll {
+    background-color: transparent;
+    border: none;
+}
+
+QScrollArea#PaintInspectorScroll > QWidget > QWidget {
+    background-color: transparent;
+}
+
+QScrollArea#PaintInspectorScroll QScrollBar:vertical {
+    background-color: #0c1017;
+    border: 1px solid rgba(178, 186, 202, 18);
+    border-radius: 4px;
+    width: 8px;
+    margin: 0;
+}
+
+QScrollArea#PaintInspectorScroll QScrollBar::handle:vertical {
+    background-color: #3b4658;
+    border-radius: 4px;
+    min-height: 32px;
+}
+
+QScrollArea#PaintInspectorScroll QScrollBar::add-line:vertical,
+QScrollArea#PaintInspectorScroll QScrollBar::sub-line:vertical {
+    height: 0;
+    background: transparent;
+    border: none;
+}
+
+QScrollArea#PaintInspectorScroll QScrollBar::add-page:vertical,
+QScrollArea#PaintInspectorScroll QScrollBar::sub-page:vertical {
+    background: transparent;
 }
 
 QTabWidget#PaintLayerChannelPathTabs {
@@ -2710,9 +2746,30 @@ class PaintDialog(QDialog):
         inspector_layout.setContentsMargins(12, 12, 12, 12)
         inspector_layout.setSpacing(10)
 
+        inspector_controls = QWidget()
+        inspector_controls_layout = QVBoxLayout(inspector_controls)
+        inspector_controls_layout.setContentsMargins(0, 0, 12, 0)
+        inspector_controls_layout.setSpacing(10)
+        self._paint_inspector_controls = inspector_controls
+
+        inspector_controls_scroll = QScrollArea()
+        inspector_controls_scroll.setObjectName("PaintInspectorScroll")
+        inspector_controls_scroll.setWidgetResizable(True)
+        inspector_controls_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        inspector_controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        inspector_controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        inspector_controls_scroll.setMinimumHeight(240)
+        inspector_controls_scroll.setMaximumHeight(430)
+        inspector_controls_scroll.setSizePolicy(
+            QSizePolicy.Policy.Expanding,
+            QSizePolicy.Policy.Preferred,
+        )
+        inspector_controls_scroll.setWidget(inspector_controls)
+        self._paint_inspector_controls_scroll = inspector_controls_scroll
+
         brush_title = QLabel("BRUSH")
         brush_title.setObjectName("PaintSectionTitle")
-        inspector_layout.addWidget(brush_title)
+        inspector_controls_layout.addWidget(brush_title)
 
         self.brush_category_combo = QComboBox()
         self.brush_category_combo.addItem("All Brushes", "")
@@ -2723,13 +2780,13 @@ class PaintDialog(QDialog):
         self.brush_category_combo.currentIndexChanged.connect(
             self._populate_brush_library
         )
-        inspector_layout.addWidget(self.brush_category_combo)
+        inspector_controls_layout.addWidget(self.brush_category_combo)
         self.brush_library_list = QListWidget()
         self.brush_library_list.setObjectName("PaintBrushList")
         self.brush_library_list.setFixedHeight(118)
         self.brush_library_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.brush_library_list.itemClicked.connect(self._on_brush_library_item)
-        inspector_layout.addWidget(self.brush_library_list)
+        inspector_controls_layout.addWidget(self.brush_library_list)
         self._populate_brush_library()
 
         style_row = QHBoxLayout()
@@ -2745,7 +2802,7 @@ class PaintDialog(QDialog):
         style_row.addWidget(style_label)
         style_row.addStretch(1)
         style_row.addWidget(self.brush_style_combo)
-        inspector_layout.addLayout(style_row)
+        inspector_controls_layout.addLayout(style_row)
 
         width_row = QHBoxLayout()
         width_row.setContentsMargins(0, 0, 0, 0)
@@ -2756,12 +2813,12 @@ class PaintDialog(QDialog):
         width_row.addWidget(width_label)
         width_row.addStretch(1)
         width_row.addWidget(self._width_value_label)
-        inspector_layout.addLayout(width_row)
+        inspector_controls_layout.addLayout(width_row)
         self.width_slider = QSlider(Qt.Orientation.Horizontal)
         self.width_slider.setRange(1, 60)
         self.width_slider.setValue(int(self._pen_width))
         self.width_slider.valueChanged.connect(self._on_width_changed)
-        inspector_layout.addWidget(self.width_slider)
+        inspector_controls_layout.addWidget(self.width_slider)
 
         opacity_row = QHBoxLayout()
         opacity_row.setContentsMargins(0, 0, 0, 0)
@@ -2772,12 +2829,12 @@ class PaintDialog(QDialog):
         opacity_row.addWidget(opacity_label)
         opacity_row.addStretch(1)
         opacity_row.addWidget(self._opacity_value_label)
-        inspector_layout.addLayout(opacity_row)
+        inspector_controls_layout.addLayout(opacity_row)
         self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
         self.opacity_slider.setRange(10, 100)
         self.opacity_slider.setValue(100)
         self.opacity_slider.valueChanged.connect(self._on_opacity_changed)
-        inspector_layout.addWidget(self.opacity_slider)
+        inspector_controls_layout.addWidget(self.opacity_slider)
 
         preset_row = QHBoxLayout()
         preset_row.setContentsMargins(0, 0, 0, 0)
@@ -2793,13 +2850,15 @@ class PaintDialog(QDialog):
                 lambda _checked=False, w=width, o=opacity: self._apply_brush_preset(w, o)
             )
             preset_row.addWidget(preset_btn)
-        inspector_layout.addLayout(preset_row)
+        inspector_controls_layout.addLayout(preset_row)
 
         color_title = QLabel("COLOR")
         color_title.setObjectName("PaintSectionTitle")
-        inspector_layout.addWidget(color_title)
+        inspector_controls_layout.addWidget(color_title)
         color_panel = QFrame()
         color_panel.setObjectName("PaintColorPanel")
+        color_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+        self._paint_color_panel = color_panel
         color_panel_layout = QVBoxLayout(color_panel)
         color_panel_layout.setContentsMargins(8, 8, 8, 8)
         color_panel_layout.setSpacing(6)
@@ -2888,7 +2947,9 @@ class PaintDialog(QDialog):
         self.custom_color_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.custom_color_btn.clicked.connect(self._pick_custom_color)
         color_panel_layout.addWidget(self.custom_color_btn)
-        inspector_layout.addWidget(color_panel)
+        inspector_controls_layout.addWidget(color_panel)
+        inspector_controls_layout.addStretch(1)
+        inspector_layout.addWidget(inspector_controls_scroll)
 
         self._layer_channel_path_tabs = QTabWidget()
         self._layer_channel_path_tabs.setObjectName("PaintLayerChannelPathTabs")
