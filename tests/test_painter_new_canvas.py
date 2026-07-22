@@ -70,3 +70,31 @@ def test_standalone_painter_hides_video_annotation_tools() -> None:
     assert dialog.cutout_btn.isHidden()
 
     dialog.close()
+
+
+def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
+    app = _app()
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(640, 360, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.show()
+    app.processEvents()
+
+    assert dialog.select_btn.text() == "Select / Move"
+    assert dialog.pen_btn.text() and dialog.pen_btn.text()[0].isalnum()
+    assert dialog.eraser_btn.text() and dialog.eraser_btn.text()[0].isalnum()
+    assert not dialog.select_btn.icon().isNull()
+    assert not dialog.pen_btn.icon().isNull()
+    assert not dialog.eraser_btn.icon().isNull()
+    assert not dialog.path_btn.icon().isNull()
+    assert dialog.color_wheel.width() <= 112
+    assert dialog._color_preview.width() <= 48
+    assert dialog._recent_color_btns[0].width() <= 32
+    assert dialog._palette_btns[0].width() <= 38
+
+    dialog.close()

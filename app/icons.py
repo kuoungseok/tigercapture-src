@@ -469,6 +469,37 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
         for x, y in ((.28, .38), (.50, .62), (.72, .46)):
             painter.drawLine(QPointF(s * x, s * .22), QPointF(s * x, s * .82))
             painter.drawEllipse(QPointF(s * x, s * y), s * .075, s * .075)
+    elif n in {"image", "picture", "photo", "sticker"}:
+        painter.drawRoundedRect(QRectF(s * .16, s * .22, s * .68, s * .56), 3, 3)
+        painter.drawEllipse(QPointF(s * .34, s * .38), s * .065, s * .065)
+        painter.drawPolyline(QPolygonF([
+            QPointF(s * .22, s * .70),
+            QPointF(s * .42, s * .50),
+            QPointF(s * .54, s * .62),
+            QPointF(s * .66, s * .46),
+            QPointF(s * .80, s * .70),
+        ]))
+    elif n in {"eraser", "erase"}:
+        painter.save()
+        painter.translate(s * .50, s * .50)
+        painter.rotate(-28)
+        painter.translate(-s * .50, -s * .50)
+        body = QRectF(s * .22, s * .38, s * .56, s * .28)
+        painter.setBrush(QColor(255, 255, 255, 24))
+        painter.drawRoundedRect(body, s * .07, s * .07)
+        painter.drawLine(QPointF(s * .42, s * .39), QPointF(s * .42, s * .65))
+        painter.restore()
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawLine(QPointF(s * .25, s * .78), QPointF(s * .74, s * .78))
+    elif n in {"path", "path-tool", "path_tool", "bezier"}:
+        curve = QPainterPath()
+        curve.moveTo(s * .18, s * .68)
+        curve.cubicTo(s * .28, s * .22, s * .58, s * .28, s * .80, s * .36)
+        painter.drawPath(curve)
+        painter.setBrush(_color(color))
+        for x, y in ((.18, .68), (.46, .34), (.80, .36)):
+            painter.drawEllipse(QPointF(s * x, s * y), s * .055, s * .055)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
     elif n in {"paint", "painter", "paint-brush", "paint_brush", "brush"}:
         painter.save()
         painter.setPen(QPen(_color(color), max(1.5, s * .075), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))

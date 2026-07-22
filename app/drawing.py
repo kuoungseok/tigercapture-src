@@ -42,6 +42,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.icons import app_icon, icon_size
 from app.i18n import tr
 
 
@@ -55,9 +56,9 @@ QFrame#PaintTopBar,
 QFrame#PaintToolRail,
 QFrame#PaintInspector,
 QFrame#PaintCanvasFrame {
-    background-color: #181a20;
-    border: 1px solid #2a2e39;
-    border-radius: 10px;
+    background-color: #15181d;
+    border: 1px solid rgba(178, 186, 202, 26);
+    border-radius: 8px;
 }
 
 QLabel#PaintTitle {
@@ -92,41 +93,54 @@ QLabel#PaintValue {
 QPushButton#PaintTool,
 QPushButton#BubbleBtn,
 QPushButton#StickerBtn {
-    background-color: #20242d;
-    color: #ffffff;
-    border: 1px solid #333a49;
-    border-radius: 8px;
-    padding: 9px 12px;
-    font-weight: 700;
+    background:qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 rgba(255,255,255,10), stop:0.48 rgba(255,255,255,5),
+        stop:1 rgba(0,0,0,22));
+    color: #eef3fb;
+    border-top: 1px solid rgba(238,242,250,44);
+    border-left: 1px solid rgba(178,186,202,28);
+    border-right: 1px solid rgba(0,0,0,82);
+    border-bottom: 1px solid rgba(0,0,0,104);
+    border-radius: 7px;
+    padding: 7px 10px;
+    font-weight: 760;
+    font-size: 11px;
     text-align: left;
+    min-height: 32px;
 }
 
 QPushButton#PaintTool:hover,
 QPushButton#BubbleBtn:hover,
 QPushButton#StickerBtn:hover {
-    background-color: #2a303c;
-    border-color: #4a89ff;
+    background:qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 rgba(255,255,255,15), stop:1 rgba(255,255,255,5));
+    border-top-color: rgba(255,255,255,70);
+    border-left-color: rgba(220,225,238,58);
 }
 
 QPushButton#PaintTool:checked,
 QPushButton#BubbleBtn:checked,
 QPushButton#StickerBtn:checked {
-    background-color: #263552;
-    border-color: #6aa2ff;
+    background: #243149;
+    border-top-color: rgba(125,170,240,122);
+    border-left-color: rgba(125,170,240,72);
+    border-right-color: rgba(0,0,0,88);
+    border-bottom-color: rgba(0,0,0,108);
     color: #ffffff;
 }
 
 QFrame#PaintToolRail QPushButton {
-    min-width: 128px;
+    min-width: 118px;
 }
 
 QPushButton#PaintDanger {
-    background-color: #2a2020;
+    background-color: #241b1d;
     color: #ffdede;
-    border: 1px solid #563436;
-    border-radius: 8px;
-    padding: 9px 12px;
-    font-weight: 700;
+    border: 1px solid rgba(204, 91, 91, 62);
+    border-radius: 7px;
+    padding: 7px 10px;
+    font-weight: 760;
+    min-height: 32px;
     text-align: left;
 }
 
@@ -136,23 +150,28 @@ QPushButton#PaintDanger:hover {
 }
 
 QPushButton#PaintCustomColor {
-    background-color: #222632;
-    color: #ffffff;
-    border: 1px solid #394152;
-    border-radius: 8px;
-    padding: 7px 10px;
-    font-weight: 700;
+    background:qlineargradient(x1:0,y1:0,x2:0,y2:1,
+        stop:0 rgba(255,255,255,8), stop:1 rgba(0,0,0,18));
+    color: #f0f4fb;
+    border-top: 1px solid rgba(238,242,250,38);
+    border-left: 1px solid rgba(178,186,202,26);
+    border-right: 1px solid rgba(0,0,0,74);
+    border-bottom: 1px solid rgba(0,0,0,96);
+    border-radius: 7px;
+    padding: 6px 9px;
+    font-weight: 760;
+    min-height: 28px;
 }
 
 QPushButton#PaintCustomColor:hover {
-    background-color: #2b3140;
-    border-color: #6aa2ff;
+    background-color: #242a34;
+    border-top-color: rgba(255,255,255,68);
 }
 
 QFrame#PaintColorPanel {
-    background-color: #121722;
-    border: 1px solid #273044;
-    border-radius: 10px;
+    background-color: #11151b;
+    border: 1px solid rgba(178, 186, 202, 22);
+    border-radius: 8px;
 }
 
 QLabel#PaintColorWell {
@@ -170,22 +189,23 @@ QLabel#PaintColorHex {
 }
 
 QSlider::groove:horizontal {
-    height: 4px;
+    height: 3px;
     border-radius: 2px;
-    background: #303746;
+    background: #282d38;
 }
 
 QSlider::handle:horizontal {
-    width: 16px;
-    height: 16px;
-    margin: -6px 0;
-    border-radius: 8px;
-    background: #9bbcff;
+    width: 12px;
+    height: 12px;
+    margin: -5px 0;
+    border-radius: 6px;
+    background: #afc2de;
+    border: 1px solid #0b0e13;
 }
 
 QSlider#PaintHueSlider::groove:horizontal {
-    height: 8px;
-    border-radius: 4px;
+    height: 5px;
+    border-radius: 3px;
     background: qlineargradient(
         x1:0, y1:0, x2:1, y2:0,
         stop:0 #d14f4f,
@@ -200,11 +220,11 @@ QSlider#PaintHueSlider::groove:horizontal {
 
 QSlider#PaintHueSlider::handle:horizontal,
 QSlider#PaintValueSlider::handle:horizontal {
-    width: 14px;
-    height: 14px;
+    width: 12px;
+    height: 12px;
     margin: -4px 0;
-    border-radius: 7px;
-    background: #eef2f7;
+    border-radius: 6px;
+    background: #e8eef8;
     border: 1px solid #111827;
 }
 
@@ -262,11 +282,11 @@ QListWidget#PaintBrushList::item:selected {
 }
 
 QDialogButtonBox QPushButton {
-    min-width: 104px;
-    padding: 9px 20px;
-    border-radius: 8px;
+    min-width: 92px;
+    padding: 8px 16px;
+    border-radius: 7px;
     font-weight: 800;
-    font-size: 13px;
+    font-size: 12px;
 }
 QDialogButtonBox QPushButton[text="OK"],
 QDialogButtonBox QPushButton:default {
@@ -287,6 +307,15 @@ QDialogButtonBox QPushButton:!default:hover {
     background-color: #303645;
 }
 """
+
+
+def _clean_paint_button_text(text: str) -> str:
+    """Strip decorative leading symbols from translated paint button labels."""
+    value = str(text or "").strip()
+    for index, char in enumerate(value):
+        if char.isalnum():
+            return value[index:].strip()
+    return value
 
 
 @dataclass
@@ -1577,7 +1606,7 @@ class PainterColorWheel(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
-        self.setFixedSize(142, 142)
+        self.setFixedSize(112, 112)
         self.setCursor(Qt.CursorShape.CrossCursor)
         self._hue = 0
         self._sat = 255
@@ -1799,6 +1828,17 @@ class PaintDialog(QDialog):
 
     # ---------- ui ----------
 
+    def _configure_paint_icon_button(
+        self,
+        button: QPushButton,
+        icon_name: str,
+        *,
+        icon_px: int = 14,
+    ) -> None:
+        button.setText(_clean_paint_button_text(button.text()))
+        button.setIcon(app_icon(icon_name, size=icon_px, color="#EEF3FB"))
+        button.setIconSize(icon_size(icon_px))
+
     def _build_ui_legacy(self, bg: QPixmap, initial_strokes: list[Stroke]) -> None:
         self.setStyleSheet(self.styleSheet() + _PAINT_DIALOG_QSS)
         root = QVBoxLayout(self)
@@ -1823,7 +1863,7 @@ class PaintDialog(QDialog):
         self.eraser_btn.clicked.connect(lambda: self._set_tool("eraser"))
 
         self.clear_btn = QPushButton(tr("paint.btn.clear_all"))
-        self.clear_btn.setObjectName("PaintTool")
+        self.clear_btn.setObjectName("PaintDanger")
         self.clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.clear_btn.clicked.connect(self._clear_all)
 
@@ -1839,6 +1879,12 @@ class PaintDialog(QDialog):
         self.sticker_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.sticker_btn.setToolTip(tr("sticker.add_tooltip"))
         self.sticker_btn.clicked.connect(self._add_sticker)
+
+        self._configure_paint_icon_button(self.pen_btn, "paint-brush")
+        self._configure_paint_icon_button(self.eraser_btn, "eraser")
+        self._configure_paint_icon_button(self.clear_btn, "trash")
+        self._configure_paint_icon_button(self.bubble_btn, "caption")
+        self._configure_paint_icon_button(self.sticker_btn, "image")
 
         toolbar.addWidget(self.pen_btn)
         toolbar.addWidget(self.eraser_btn)
@@ -1881,8 +1927,9 @@ class PaintDialog(QDialog):
         self._highlight_selected_palette()
 
         self.custom_color_btn = QPushButton(tr("paint.btn.custom_color"))
-        self.custom_color_btn.setObjectName("PaintTool")
+        self.custom_color_btn.setObjectName("PaintCustomColor")
         self.custom_color_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._configure_paint_icon_button(self.custom_color_btn, "color", icon_px=13)
         self.custom_color_btn.clicked.connect(self._pick_custom_color)
         palette_row.addWidget(self.custom_color_btn)
         palette_row.addStretch(1)
@@ -2051,7 +2098,7 @@ class PaintDialog(QDialog):
         tool_title.setObjectName("PaintSectionTitle")
         tool_layout.addWidget(tool_title)
 
-        self.select_btn = QPushButton("↖ Select / Move")
+        self.select_btn = QPushButton("Select / Move")
         self.select_btn.setCheckable(True)
         self.select_btn.setObjectName("PaintTool")
         self.select_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2070,7 +2117,7 @@ class PaintDialog(QDialog):
         self.eraser_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.eraser_btn.clicked.connect(lambda: self._set_tool("eraser"))
 
-        self.path_btn = QPushButton("✦ Path")
+        self.path_btn = QPushButton("Path")
         self.path_btn.setCheckable(True)
         self.path_btn.setObjectName("PaintTool")
         self.path_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -2099,10 +2146,20 @@ class PaintDialog(QDialog):
         self.clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.clear_btn.clicked.connect(self._clear_all)
 
-        self.cutout_btn = QPushButton("✂ Cutout")
+        self.cutout_btn = QPushButton("Cutout")
         self.cutout_btn.setObjectName("PaintTool")
         self.cutout_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.cutout_btn.clicked.connect(self._create_cutout_sticker)
+
+        self._configure_paint_icon_button(self.select_btn, "cursor")
+        self._configure_paint_icon_button(self.pen_btn, "paint-brush")
+        self._configure_paint_icon_button(self.eraser_btn, "eraser")
+        self._configure_paint_icon_button(self.path_btn, "path-tool")
+        self._configure_paint_icon_button(self.bubble_btn, "caption")
+        self._configure_paint_icon_button(self.sticker_btn, "image")
+        self._configure_paint_icon_button(self.editor_object_btn, "layers")
+        self._configure_paint_icon_button(self.cutout_btn, "scissors")
+        self._configure_paint_icon_button(self.clear_btn, "trash")
 
         tool_layout.addWidget(self.select_btn)
         tool_layout.addWidget(self.pen_btn)
@@ -2297,8 +2354,8 @@ class PaintDialog(QDialog):
         color_panel = QFrame()
         color_panel.setObjectName("PaintColorPanel")
         color_panel_layout = QVBoxLayout(color_panel)
-        color_panel_layout.setContentsMargins(9, 9, 9, 9)
-        color_panel_layout.setSpacing(8)
+        color_panel_layout.setContentsMargins(8, 8, 8, 8)
+        color_panel_layout.setSpacing(6)
 
         color_row = QHBoxLayout()
         color_row.setContentsMargins(0, 0, 0, 0)
@@ -2306,7 +2363,7 @@ class PaintDialog(QDialog):
         color_label.setObjectName("PaintMeta")
         self._color_preview = QLabel()
         self._color_preview.setObjectName("PaintColorWell")
-        self._color_preview.setFixedSize(64, 24)
+        self._color_preview.setFixedSize(48, 20)
         self._color_hex_label = QLabel("#E54646")
         self._color_hex_label.setObjectName("PaintColorHex")
         color_row.addWidget(color_label)
@@ -2356,10 +2413,10 @@ class PaintDialog(QDialog):
         color_panel_layout.addWidget(recent_label)
         recent_row = QHBoxLayout()
         recent_row.setContentsMargins(0, 0, 0, 0)
-        recent_row.setSpacing(6)
+        recent_row.setSpacing(5)
         self._recent_color_btns: list[QPushButton] = []
         for rgb in self._recent_colors:
-            btn = self._make_palette_button(rgb, width=40, height=18)
+            btn = self._make_palette_button(rgb, width=32, height=16)
             recent_row.addWidget(btn)
             self._recent_color_btns.append(btn)
         recent_row.addStretch(1)
@@ -2369,11 +2426,12 @@ class PaintDialog(QDialog):
         suggested_label.setObjectName("PaintMeta")
         color_panel_layout.addWidget(suggested_label)
         palette_grid = QGridLayout()
-        palette_grid.setHorizontalSpacing(6)
-        palette_grid.setVerticalSpacing(6)
+        palette_grid.setAlignment(Qt.AlignmentFlag.AlignLeft)
+        palette_grid.setHorizontalSpacing(5)
+        palette_grid.setVerticalSpacing(5)
         self._palette_btns: list[QPushButton] = []
         for idx, rgb in enumerate(PALETTE_COLORS):
-            btn = self._make_palette_button(rgb, width=54, height=20)
+            btn = self._make_palette_button(rgb, width=38, height=16)
             palette_grid.addWidget(btn, idx // 4, idx % 4)
             self._palette_btns.append(btn)
         color_panel_layout.addLayout(palette_grid)
@@ -2500,8 +2558,8 @@ class PaintDialog(QDialog):
         self,
         rgb: tuple[int, int, int],
         *,
-        width: int = 44,
-        height: int = 22,
+        width: int = 38,
+        height: int = 16,
     ) -> QPushButton:
         btn = QPushButton()
         btn.setFixedSize(width, height)
@@ -2562,13 +2620,13 @@ class PaintDialog(QDialog):
         bright = QColor.fromHsv(hue, saturation, 255)
         self.value_slider.setStyleSheet(
             "QSlider#PaintValueSlider::groove:horizontal { "
-            "height: 8px; border-radius: 4px; "
+            "height: 5px; border-radius: 3px; "
             f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
             f"stop:0 #111827, stop:1 rgb({bright.red()},{bright.green()},{bright.blue()})); "
             "}"
             "QSlider#PaintValueSlider::handle:horizontal { "
-            "width: 14px; height: 14px; margin: -4px 0; border-radius: 7px; "
-            "background: #eef2f7; border: 1px solid #111827; "
+            "width: 12px; height: 12px; margin: -4px 0; border-radius: 6px; "
+            "background: #e8eef8; border: 1px solid #111827; "
             "}"
         )
 
@@ -2600,8 +2658,8 @@ class PaintDialog(QDialog):
             height = max(1, btn.height() or 22)
         setattr(btn, "_paint_rgb", rgb)
         btn.setToolTip(self._rgb_to_hex(rgb))
-        radius = max(4, min(6, height // 3))
-        border = "#b9c7dd" if selected else "#30394a"
+        radius = max(4, min(5, height // 3))
+        border = "#c8d5e9" if selected else "#303847"
         border_width = 2 if selected else 1
         btn.setStyleSheet(
             "QPushButton { "
@@ -2610,7 +2668,7 @@ class PaintDialog(QDialog):
             f"border-radius: {radius}px; "
             "padding: 0; "
             "}"
-            "QPushButton:hover { border-color: #7fa7df; }"
+            "QPushButton:hover { border-color: #8fb1dd; }"
         )
 
     def _refresh_recent_color_buttons(self, selected: tuple[int, int, int]) -> None:
@@ -2620,7 +2678,7 @@ class PaintDialog(QDialog):
                 continue
             rgb = self._recent_colors[idx]
             btn.show()
-            self._style_palette_button(btn, rgb, selected=(rgb == selected), width=40, height=18)
+            self._style_palette_button(btn, rgb, selected=(rgb == selected), width=32, height=16)
 
     def _remember_recent_color(self, rgb: tuple[int, int, int]) -> None:
         rgb = self._normalise_rgb(rgb)
