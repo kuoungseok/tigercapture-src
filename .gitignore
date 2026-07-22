@@ -31,6 +31,9 @@ release/
 # Claude Code local state
 .claude/
 
+# Local agent-to-agent mailbox state
+.agent_mailbox/
+
 # OS
 Thumbs.db
 .DS_Store

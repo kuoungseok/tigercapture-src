@@ -15,6 +15,9 @@ Always start with:
 
 Focused entry points:
 
+- Claude/Codex handoff mailbox wakeups:
+  `docs/AGENT_MAILBOX_WAKEUP.md`. If `.agent_mailbox/CODEX_WAKE_PENDING.md`
+  exists, read it before assuming there is no cross-agent message.
 - UI renewal: `docs/UI_RENEWAL_THREAD_HANDOFF.md`,
   `docs/SPEC_UI_RENEWAL.md`, then `TODO.md`.
 - MCP/AI editor capture, including user requests like "캡쳐기능 봐줘" or
@@ -33,6 +36,16 @@ Focused entry points:
   `docs/SPEC_VTUBER_STUDIO_BROADCAST.md`,
   `docs/SPEC_VSEEFACE_BRIDGE.md`.
 - MMD player: `docs/mmd_player_handoff.md`.
+- Motion Designer: `docs/MOTION_DESIGNER_ARCHITECTURE.md`, then
+  `docs/MOTION_DESIGNER_MILESTONES_KO.md`. Prompt/reference-driven editable
+  generation planning is in `docs/MOTION_AI_GENERATION_PRODUCT_PLAN_KO.md`.
+  Current implementation is M0-M11 plus the M12 declarative plugin/template
+  management foundation; runtime plugin contribution hosting remains pending.
+  Use `debugCapture/motion_designer/release_acceptance/report.json` as the
+  regenerable M11 release-evidence index. M11 is SDR sRGB product scope:
+  HDR/OCIO/LUT output remains explicitly blocked until Preview/Export parity exists.
+  Do not reopen completed milestone work without a failing test, reproducible
+  defect, or explicit user request.
 
 If two areas overlap, keep the product boundary from the focused docs. Do not
 merge UI renewal, review automation, and VTuber sidecar setup into one unbounded
