@@ -293,6 +293,13 @@ def sync_mmd_tracks_to_player(owner: Any) -> None:
         player.set_mmd_tracks(getattr(owner, "_mmd_tracks", []) or [])
 
 
+def sync_motion_state_to_player(owner: Any) -> None:
+    player = getattr(owner, "_player", None)
+    if player is not None and hasattr(player, "set_motion_state"):
+        player.set_motion_state(getattr(owner, "_motion_compositions", {}) or {},
+                                getattr(owner, "_motion_clips", []) or [])
+
+
 def sync_actor_tracks_to_player(owner: Any) -> None:
     player = getattr(owner, "_player", None)
     if player is None:
@@ -324,6 +331,8 @@ def repaint_timeline_rows(owner: Any) -> None:
         _call(row, "update")
     for row in getattr(owner, "_mmd_lane_rows", []) or []:
         _call(row, "update")
+    for row in getattr(owner, "_motion_lane_rows", []) or []:
+        _call(row, "update")
 
 
 def refresh_player_tracks(
@@ -342,13 +351,19 @@ def refresh_player_tracks(
     live2d_end = _actor_tracks_extent_ms(getattr(owner, "_live2d_actor_tracks", []) or [])
     ar_pbr_end = _dict_track_extent_ms(getattr(owner, "_ar_pbr_tracks", []) or [])
     mmd_end = _dict_track_extent_ms(getattr(owner, "_mmd_tracks", []) or [])
-    extra = max(extra, nested_audio_end, embedded_audio_end, spine_end, live2d_end, ar_pbr_end, mmd_end)
+    try:
+        from app.motion_designer.timeline_bridge import motion_timeline_extent
+        motion_end = motion_timeline_extent(getattr(owner, "_motion_clips", []) or [])
+    except Exception:
+        motion_end = 0
+    extra = max(extra, nested_audio_end, embedded_audio_end, spine_end, live2d_end, ar_pbr_end, mmd_end, motion_end)
 
     player = getattr(owner, "_player", None)
     if player is not None and hasattr(player, "set_project_settings"):
         player.set_project_settings(getattr(owner, "_project_settings", {}) or {})
     _call_owner_sync(owner, "_sync_ar_pbr_tracks_to_player", sync_ar_pbr_tracks_to_player)
     _call_owner_sync(owner, "_sync_mmd_tracks_to_player", sync_mmd_tracks_to_player)
+    _call_owner_sync(owner, "_sync_motion_state_to_player", sync_motion_state_to_player)
     actor_hook = getattr(owner, "_sync_actor_tracks_to_player", None)
     if sync_actor_tracks is True or (sync_actor_tracks is None and callable(actor_hook)):
         if callable(actor_hook):
@@ -467,6 +482,8 @@ def on_position_changed(owner: Any, pos: int) -> None:
     for row in getattr(owner, "_ar_pbr_lane_rows", []) or []:
         _call(row, "set_playhead", pos)
     for row in getattr(owner, "_mmd_lane_rows", []) or []:
+        _call(row, "set_playhead", pos)
+    for row in getattr(owner, "_motion_lane_rows", []) or []:
         _call(row, "set_playhead", pos)
     _call(getattr(owner, "_timeline_ruler", None), "set_playhead", pos)
     _call(owner, "_push_snap_targets_to_rows")

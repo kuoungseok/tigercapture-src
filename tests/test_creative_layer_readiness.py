@@ -75,6 +75,27 @@ def test_creative_layer_readiness_uses_ar_pbr_full_gpu_smoke_evidence():
     assert report["full_creative_suite_claim_ok"] is False
 
 
+def test_creative_layer_readiness_scopes_unity_spine_compatibility_evidence():
+    from app.creative_layer_readiness import build_creative_layer_readiness_report
+
+    report = build_creative_layer_readiness_report({})
+
+    actor_row = next(
+        row for row in report["rows"] if row["id"] == "live2d_spine_actor_workflow"
+    )
+    evidence = " ".join(actor_row["evidence"])
+    remaining = " ".join(actor_row["remaining"])
+
+    assert "157 local models" in evidence
+    assert "UnityPy 1.25.2" in evidence
+    assert "byte-for-byte" in evidence
+    assert actor_row["compatibility_gate"] == "PASS_SCOPED"
+    assert actor_row["blocking_compatibility_issue"] is False
+    assert "Unity-exported variants remain risky" not in remaining
+    assert "Raw Spine-containing AssetBundle" in remaining
+    assert "encrypted/custom bundles" in remaining
+
+
 def test_creative_layer_readiness_qa_payload_is_json_ready():
     from tools.qa_creative_layer_readiness import run_creative_layer_readiness_qa
 

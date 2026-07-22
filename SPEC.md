@@ -3350,7 +3350,7 @@ Core file: `app/project_io.py`.
 Format:
 
 - `.tgp` is plain JSON.
-- `FORMAT_VERSION` is currently `1.1`.
+- `FORMAT_VERSION` is currently `1.2`.
 - Paths are serialized as absolute strings where possible.
 - The last project path is stored with Qt `QSettings` by
   `remember_last_project()` / `load_last_project_path()`.
@@ -3375,13 +3375,17 @@ Saved:
   video/audio/Spine/Live2D tracks, audio tracks, subtitles, markers, timeline
   zoom, playhead, preview-only comparison mode/label visibility,
   project color-management settings, Spine actor tracks, Live2D actor tracks.
+  Motion Designer documents are stored in `motion_compositions`; main-timeline
+  placements are stored separately in `motion_clips` and reference a
+  composition by stable ID.
 - Undo/redo snapshots mirror the important saved edit state: video/audio tracks,
   subtitles, active track, timeline markers, timeline zoom, playhead, Spine
   actor tracks, and Live2D actor tracks. Snapshot restore recreates deleted
   video/audio tracks, removes tracks created after the snapshot, reorders rows,
   and refreshes audio mixer/player bindings. This keeps track-level edits,
   actor-lane moves, and marker edits from becoming one-way changes inside a
-  session.
+  session. Motion compositions and Motion Clips are included in the same
+  snapshot/restore path.
 
 Regenerated on load:
 
@@ -4465,6 +4469,30 @@ Behavior notes:
   200 local actor resources scanned, stress-tier coverage rose to 10 models,
   no coverage issues remained, and 40 top-risk Live2D/Spine render baselines
   were created under `qa_corpus/actor_golden`.
+- 2026-07-14 Unity AssetBundle compatibility probe status is
+  `dependency_compatibility_verified`; this is dependency feasibility evidence,
+  not a claim that raw AssetBundle import is already a product feature.
+  The compatibility review gate is `PASS_SCOPED` with
+  `blocking_compatibility_issue=false`: extracted Spine runtime assets are a
+  supported, corpus-tested input, and standard AssetBundle reader feasibility
+  is verified. Raw AssetBundle import remains an unclaimed integration item,
+  not a blocking defect in the documented product scope.
+  `UnityPy 1.25.2` was downloaded into the isolated local tool directory
+  `external/tools/unitypy_compat` and exercised with the Tiger Studio Python
+  3.13.2 runtime. It loaded the real 30,952,617-byte VSeeFace
+  `data.unity3d` bundle in 0.155 seconds, enumerated 12,996 objects including
+  5 `TextAsset` and 134 `Texture2D` objects, and reported zero parse errors.
+  A 166,819-byte NIKKE `bba001_00.skel` payload was round-tripped through a
+  Unity `TextAsset`; the source and recovered SHA-256 were both
+  `3fa1b30d05f3236e0d2866715d87f060e95550d716b80e15bcb8d1e079539eba`.
+  The installed extracted-runtime corpus also contains 157 Unity-game-style
+  Spine models: 148 NIKKE, 6 Arknights, and 3 Blue Archive samples.
+  Review interpretation: standard Unity bundle object extraction and binary
+  Spine payload preservation are verified and should not be reported as an
+  unknown compatibility gap. End-to-end discovery/pairing of
+  `.skel`/`.atlas`/`Texture2D` from a raw Spine-containing AssetBundle is not
+  integrated or verified yet; encrypted/custom bundles and universal
+  Unity/game-export compatibility are not claimed.
 - 2026-07-10 stabilization render QA writes
   `debugCapture/actor_render_qa_stabilization.json` and
   `debugCapture/actor_working_samples_stabilization.json`. In that run,
@@ -5532,6 +5560,187 @@ AI Script Edit MVP integration:
   at `debugCapture/ai_script_edit_integration_qa.json`.
 - `tools/qa_automation_commands.py` writes the command-registry QA artifact at
   `debugCapture/automation_commands_qa.json`.
+
+## Motion Designer
+
+- The independent authoring window lives under `app/motion_designer/ui`; the
+  main-editor integration is isolated in `app/video_editor_motion_workflow.py`,
+  `app/video_editor_delegates_motion.py`, and
+  `app/video_editor_motion_lane_row.py`. Do not add Motion Designer feature
+  logic to `app/video_editor_window.py`.
+- `.tgp` format `1.2` persists `motion_compositions` and `motion_clips`.
+  Invalid motion compositions are isolated during load instead of preventing
+  the rest of the project from opening. Composition revisions invalidate the
+  shared frame cache.
+- The Qt-free evaluator supports hierarchy, hold/linear/cubic-Bezier
+  keyframes, trim/source-in/time-scale/reverse, loop/ping-pong, constraints,
+  and fade/slide/scale/pop/spring/wiggle behaviors. Behavior output can be
+  sampled and baked to ordinary transform keyframes.
+- The authoring workspace keeps four production regions visible together:
+  `Library/Inspector`, `Layers/Media/Audio`, `Canvas/Preview`, and the lower
+  `Layer Timeline + Graph`. This layout is intentionally compatible with the
+  dense layer-first workflow used by dedicated motion-graphics tools; the
+  timeline and graph are not mutually exclusive tabs.
+- The authoring UI provides a searchable object/behavior/filter library, layer
+  tree, canvas, Transform/Behaviors/Effects/Masks inspector, playback,
+  undo/redo, layer duplicate/delete, drag-based layer reorder/parenting, and
+  direct layer-bar move/trim editing. The graph panel can switch among
+  Position, Scale, Rotation, Opacity, and Anchor Point and dragging a graph
+  keyframe updates the shared composition document through the same undoable
+  controller used by the inspector and AI actions.
+- The timeline transport is fixed immediately left of the timecode and exposes
+  visible start, reverse-play, stop, forward-play, loop, and end controls.
+  Forward and reverse playback use elapsed wall time; non-looping playback
+  stops at the composition boundary, while loop mode wraps in either direction.
+  Keyboard transport uses `J` reverse, `K` stop, `L` forward, and `Ctrl+L` loop.
+- Preview and export consume the same render graph and premultiplied-alpha
+  compositor in `app/motion_designer/render_graph.py` and
+  `app/motion_designer/compositor.py`. The interactive presenter is a
+  persistent `QOpenGLWidget`; file export renders the same graph to RGBA.
+- Supported shared-render features currently include normal/add/screen/
+  multiply blends; rectangle/ellipse masks; alpha/luma track matte;
+  per-layer brightness/contrast, saturation, Gaussian blur, glow, unsharp,
+  and vignette effects; and adjustment layers. Effect and mask parameters are
+  serializable animated properties.
+- Motion masks support rectangle, ellipse, and animated Bezier paths with
+  animated feather, expansion, and opacity. Point/planar tracking caches are
+  interpolated by the Qt-free `mask_tracking.py` core and applied by the same
+  `mask_adapter.py` path in preview and export. `tracking_provider.py` can now
+  generate those samples from the current mask ROI in a source video using
+  Shi-Tomasi/LK optical flow, forward-backward rejection, and RANSAC partial
+  affine estimation. It records confidence/source revision metadata and stops
+  at detected shot cuts instead of carrying a false transform into the next
+  shot. The Masks Inspector runs generation in a cancellable worker thread and
+  exposes mode, progress, failures, and cached sample count. Automation uses
+  `motion.mask.path.set`, `motion.mask.keyframe.set`,
+  `motion.mask.tracking.set`, `motion.mask.tracking.generate`, and
+  `motion.mask.tracking.clear`. Reversed Motion layers remain an explicit
+  unsupported case for automatic generation; imported caches still work.
+- The base Vector Shape Engine is implemented in
+  `app/motion_designer/vector_shapes.py` and
+  `app/motion_designer/vector_tessellation.py`. It supports rectangle,
+  rounded rectangle, ellipse, polygon, star, and open/closed cubic-Bezier
+  paths; winding/even-odd fill; solid or linear/radial-gradient fill; stroke
+  width/dash/cap/join; union/subtract/intersect/exclude Boolean geometry;
+  Trim Path; and bounded transform/opacity Repeaters. Deterministic path
+  flattening is Qt-free, while QPainterPath construction and Boolean results
+  use a revision-sensitive bounded cache at the renderer boundary.
+- Vector-only Preview graphs use `vector_gpu.py` to tessellate the final
+  QPainterPath fill and stroke into cached triangles, then
+  `vector_gpu_renderer.py` keeps those meshes in raw OpenGL VAO/VBO resources.
+  Layer transform, anchor, opacity, and Repeater instances are GPU uniforms, so
+  repeated frames with unchanged geometry do not upload the VBO again. GPU
+  packets are Preview opt-in and are not built by export or main composition.
+  Radial gradients, effects, masks, mattes, unsupported blend modes, and
+  non-vector nodes report a reason and fall back to the shared Painter graph.
+- Fill-only typography Preview graphs use a bounded raster glyph atlas in
+  `typography_gpu.py` and persistent OpenGL textures in
+  `typography_gpu_renderer.py`. `typography_layout.py` shapes complete lines
+  with Qt `QTextLayout`/`QGlyphRun`; glyph bitmaps are cached by the resolved
+  raw font, contextual glyph id, and source cluster. Animated per-glyph
+  transform, color, and opacity are evaluated without rebuilding the atlas.
+  Arabic joining forms, ligatures, and mixed RTL/LTR positions therefore stay
+  shaped in both Painter export and GPU Preview. Page revisions prevent
+  unchanged frames from re-uploading texture data. The Windows GL QA records
+  `backend=motion_typography_gpu`, `gl_error=0`, one initial texture upload and
+  no repeated-frame upload, contextual Arabic glyph ids and valid source
+  indexes, with mean Painter RGB error below `0.2/255`.
+  Stroke, shadow, background, effects, masks, mattes, unsupported blends,
+  atlas capacity overflow, and mixed non-typography graphs fall back to the
+  shared Painter path without dropping glyphs. File export remains on that
+  common Painter path. GPU glyph fragments are clipped to the local text-layer
+  rectangle so fixed-height wrapping matches Painter/export boundaries.
+- Vector Inspector can link multiple shape layers as live Boolean operands and
+  select union, subtract, intersect, or exclude while optionally retaining the
+  operand layers in the final picture. Stable `operand_layer_ids` are stored;
+  `boolean_layers.py` resolves current operand time, hierarchy transform, and
+  anchor into target-local paths for Canvas, preview, and export. Missing,
+  non-shape, self, and cyclic links fail validation. AI/MCP callers use
+  `motion.vector.boolean.layers.set` for the same operation.
+- The Canvas shows anchor and in/out tangent handles for a selected Path.
+  Dragging updates the shared document, double-clicking inserts an anchor on
+  the nearest segment, and Delete removes an anchor or resets a selected
+  tangent. The Shape Inspector edits primitives, fill/stroke, Trim Path, and
+  Repeater parameters. These edits remain undoable through the same document
+  controller used by other Motion Designer panels.
+- Motion Designer inspector chrome is dark-only. A near-white scroll viewport
+  or content surface is a visual regression, not an alternate theme. The
+  Vector Inspector sets explicit dark palettes for its panel, viewport, and
+  content, while `tools/qa_motion_ui.py` fails capture QA when sampled inspector
+  chrome crosses the allowed brightness threshold.
+- Advanced typography reuses the existing Tiger Studio animation registry
+  through the Qt-free selector/timing adapter in
+  `app/motion_designer/typography_motion.py`. Text layers support IN/HOLD/OUT
+  animation IDs, character/word/line selectors, normalized selector ranges,
+  reverse order, per-unit stagger, and per-glyph opacity/position/scale/
+  rotation/color output. Korean/CJK and combining sequences use grapheme-aware
+  selection instead of raw byte or UTF-16 indexing.
+- `app/motion_designer/adapters/typography.py` supports multiline wrapping,
+  alignment, tracking, line height, outline/shadow/background, bounded glyph
+  path caching, variable font `wght`/`wdth` axes, and text-on-Bezier-path
+  layout. `app/motion_designer/typography_fonts.py` resolves installed font
+  fallbacks and reports missing families or invalid variable-axis tags.
+  The Text Inspector exposes style, variable axes, IN/HOLD/OUT animation,
+  selector, range, reverse, and stagger controls.
+- `tests/test_motion_typography_shaping.py` loads a real contextual font and
+  verifies Arabic joining glyph ids, RTL positions, source-index mapping,
+  mixed-direction Painter/GPU layout reuse, and shaped text-on-path. The real
+  Windows OpenGL check is `tools/qa_motion_gpu_typography.py`.
+- Motion Clips can be placed, moved, trimmed, split, duplicated, looped,
+  previewed over video, saved/reopened, and baked into final video export.
+  An inactive Motion Clip does not allocate its renderer.
+- Existing Tiger Studio `TextClip` and PPT `SlideElement` data can be imported
+  through `app/motion_designer/content_bridge.py`. Supported text/image/shape
+  layers can be converted back to a PPT element; effects, masks, hierarchy,
+  blend modes, and complex motion return explicit bake warnings rather than
+  being silently discarded.
+- Motion automation is registered in `app/actions/motion_namespace.py` and
+  implemented by `app/actions/editor_adapter_motion.py`. UI and AI mutations
+  use the same composition model and validation rules. Vector automation uses
+  `motion.vector.path.set`, `motion.vector.primitive.set`,
+  `motion.vector.boolean.set`, `motion.vector.trim.set`,
+  `motion.vector.repeater.set`, and `motion.vector.param.keyframe.set`.
+  Typography automation uses `motion.typography.style.set`,
+  `motion.typography.animation.set`, `motion.typography.text_path.set`,
+  `motion.typography.text_path.clear`, `motion.typography.text_path.offset.set`,
+  `motion.typography.param.keyframe.set`, and
+  `motion.typography.preflight`.
+- The Text Inspector exposes Follow Path, normalized Offset, and Reset Curve.
+  For the selected text layer, the Canvas renders the actual curved typography
+  plus its Bezier guide, anchor/tangent handles, and draggable offset marker.
+  Double-click inserts a path point and Delete removes the selected point or
+  tangent. These edits use the document controller and remain undoable.
+- Motion Designer includes a dockable multimodal `AI Workspace` implemented by
+  `app/motion_designer/ui/ai_panel.py`. One prompt surface accepts typed or
+  dropped text, local image/text files, and pasted clipboard images. Image
+  references remain visible as removable thumbnails. `Plan` creates a
+  reviewable proposal without mutating the composition; `Apply` commits all
+  proposed layers as one document-controller undo step.
+- The shared Qt-free request/proposal contract is
+  `app/motion_designer/ai_workspace.py`. `motion.ai.plan` exposes prompt plus
+  text/image references to AI/MCP callers, and `motion.ai.apply` applies only a
+  reviewed proposal through the same validation model as the UI. The current
+  built-in provider is a deterministic local layout fallback that can arrange
+  dropped images/text and add fade/slide/pop entrance behavior. Semantic image
+  understanding and streaming vision-language providers are not yet claimed.
+- `tools/qa_motion_ui.py` renders the real Qt authoring window at 1600x900 and
+  1280x720 into disposable `debugCapture/motion_designer` screenshots for
+  layout regression review. These captures use an actual composition with
+  layers, behaviors, effects, timeline bars, and keyframes rather than a UI
+  mockup. It also saves a shared-render-graph PNG of the Vector QA scene so
+  Trim Path and Repeater output are checked independently of offscreen
+  `QOpenGLWidget` capture support.
+  The same tool captures the real docked AI workspace with an actual attached
+  frame, generated proposal, applied layers, and undo-capable document state.
+- `tools/qa_motion_gpu_vector.py` opens a real Windows desktop OpenGL context,
+  captures the linked-Boolean scene in the actual Preview tab, requires the
+  `motion_vector_gpu` backend with zero GL errors, verifies stable VBO upload
+  count across repeated paints, and compares the framebuffer against the
+  Painter reference with mean RGB absolute error at or below `2/255`.
+- Current limits: the render graph uses QImage source surfaces presented by
+  OpenGL rather than a shader-only layer compositor. GPU-native path
+  tessellation, full PPT animation round-trip, and rich-media source adapters
+  remain pending.
 
 ## When Updating This Spec
 

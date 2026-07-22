@@ -77,6 +77,7 @@ def _is_timeline_pan_surface(owner: Any, obj: Any) -> bool:
         "_live2d_lane_rows",
         "_ar_pbr_lane_rows",
         "_mmd_lane_rows",
+        "_motion_lane_rows",
     ):
         rows = getattr(owner, name, None)
         if isinstance(rows, dict):

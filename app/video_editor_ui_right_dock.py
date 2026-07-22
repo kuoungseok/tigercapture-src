@@ -237,6 +237,13 @@ def build_right_dock_sections(self) -> None:
         self._workbench_header_widget,
     )
     wh_layout.addWidget(self._workbench_header_title, stretch=1)
+    self.workbench_motion_btn = QPushButton("MOTION", self._workbench_header_widget)
+    self.workbench_motion_btn.setObjectName("WorkbenchMotionEntryButton")
+    self.workbench_motion_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+    self.workbench_motion_btn.setToolTip("Create a Motion Clip")
+    self.workbench_motion_btn.setFixedSize(58, 20)
+    self.workbench_motion_btn.clicked.connect(self._open_motion_designer_entry)
+    wh_layout.addWidget(self.workbench_motion_btn)
     self.workbench_ppt_btn = QPushButton("PPT", self._workbench_header_widget)
     self.workbench_ppt_btn.setObjectName("WorkbenchPptEntryButton")
     self.workbench_ppt_btn.setCursor(Qt.CursorShape.PointingHandCursor)

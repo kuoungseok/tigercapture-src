@@ -669,6 +669,8 @@ class VideoExportThread(QThread):
         ar_pbr_asset_descriptors: dict | None = None,
         mmd_tracks: list | None = None,
         mmd_pre_rendered: list | None = None,
+        motion_compositions: list | dict | None = None,
+        motion_clips: list | None = None,
     ) -> None:
         super().__init__()
         self._source = Path(source_path)
@@ -730,6 +732,14 @@ class VideoExportThread(QThread):
         self._mmd_pre_rendered: list[tuple[str, float, float]] = (
             list(mmd_pre_rendered) if mmd_pre_rendered else []
         )
+        try:
+            from app.motion_designer.compositor import normalize_motion_state
+            self._motion_compositions, self._motion_clips = normalize_motion_state(
+                motion_compositions, motion_clips
+            )
+        except Exception:
+            self._motion_compositions, self._motion_clips = {}, []
+        self._motion_renderer = None
         self._ar_pbr_asset_descriptor_cache: dict[str, dict] = {
             str(key): dict(value)
             for key, value in (ar_pbr_asset_descriptors or {}).items()
@@ -1655,6 +1665,13 @@ class VideoExportThread(QThread):
             }
             return rgb
 
+    def _apply_motion_export_cpu(self, rgb, project_ms: int):
+        try:
+            from app.motion_designer.compositor import composite_motion_clips
+            return composite_motion_clips(self, rgb, int(project_ms), cache_capacity=30)
+        except Exception:
+            return rgb
+
     def _write_clip_track_base_frames(
         self,
         stdin,
@@ -1685,6 +1702,7 @@ class VideoExportThread(QThread):
                 rgb = self._apply_legacy_color_grade_cpu(rgb)
                 rgb = self._apply_ar_pbr_export_cpu(rgb, int(project_ms))
                 rgb = self._apply_mmd_export_cpu(rgb, int(project_ms))
+                rgb = self._apply_motion_export_cpu(rgb, int(project_ms))
                 rgb = self._apply_screen_frame_style_cpu(rgb)
                 stdin.write(np.ascontiguousarray(rgb).tobytes())
                 cur_ms = int(round((i + 1) * total_output_ms / total_frames))
@@ -1962,6 +1980,7 @@ class VideoExportThread(QThread):
                 project_ms, _project_segment_idx = self._render_project_position_for_output_ms(out_ms)
                 rgb = self._apply_ar_pbr_export_cpu(rgb, int(project_ms))
                 rgb = self._apply_mmd_export_cpu(rgb, int(project_ms))
+                rgb = self._apply_motion_export_cpu(rgb, int(project_ms))
                 rgb = self._apply_screenstudio_effect_cpu(rgb, source_ms, clip_effect)
                 stdin.write(np.ascontiguousarray(rgb).tobytes())
                 cur_ms = int(round((i + 1) * total_output_ms / total_frames))
@@ -2521,6 +2540,7 @@ class VideoExportThread(QThread):
                 or bool(self._render_clip_tracks)
                 or bool(self._ar_pbr_tracks)
                 or bool(self._mmd_tracks)
+                or bool(self._motion_clips)
                 or self._screenstudio_fx_need_prerender()
             )
             typo_mov_paths, typo_overlays = self._prepare_typography_overlays(
@@ -2572,6 +2592,15 @@ class VideoExportThread(QThread):
             )
             video_out_label = "outv"
             graph, video_out_label = self._append_project_lut_filters(graph, video_out_label)
+            if self._target_width and self._target_height:
+                tw, th = self._target_width, self._target_height
+                scaled_label = "outv_scaled"
+                graph = (
+                    f"{graph};[{video_out_label}]"
+                    f"scale={tw}:{th}:force_original_aspect_ratio=decrease,"
+                    f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2[{scaled_label}]"
+                )
+                video_out_label = scaled_label
             total_output_ms = int(
                 sum((e - s) / sp for (s, e, sp) in self._segments) + 0.5
             )
@@ -2663,14 +2692,6 @@ class VideoExportThread(QThread):
                 else:
                     cmd.extend(["-map", "0:a?"])
                 cmd.extend(self._format.build_audio_args())
-            # Resolution preset: scale + letterbox/pillarbox padding.
-            if self._target_width and self._target_height:
-                tw, th = self._target_width, self._target_height
-                scale_filter = (
-                    f"scale={tw}:{th}:force_original_aspect_ratio=decrease,"
-                    f"pad={tw}:{th}:(ow-iw)/2:(oh-ih)/2"
-                )
-                cmd.extend(["-vf", scale_filter])
             # FPS preset.
             if self._target_fps:
                 cmd.extend(["-r", f"{self._target_fps:.3f}"])

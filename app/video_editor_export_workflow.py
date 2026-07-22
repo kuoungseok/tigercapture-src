@@ -767,6 +767,8 @@ def _on_export(self) -> None:
         ),
         mmd_tracks=mmd_tracks,
         mmd_pre_rendered=mmd_pre_rendered,
+        motion_compositions=getattr(self, "_motion_compositions", {}) or {},
+        motion_clips=list(getattr(self, "_motion_clips", []) or []),
     )
     thread.progress.connect(
         lambda cur, tot: (dlg.setMaximum(max(1, tot)), dlg.setValue(cur))
@@ -970,6 +972,8 @@ def _on_batch_export(self) -> None:
             ),
             mmd_tracks=mmd_tracks,
             mmd_pre_rendered=mmd_pre_rendered,
+            motion_compositions=getattr(self, "_motion_compositions", {}) or {},
+            motion_clips=list(getattr(self, "_motion_clips", []) or []),
         )
         if progress_cb is not None:
             _t.progress.connect(

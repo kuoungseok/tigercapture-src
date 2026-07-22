@@ -15,6 +15,9 @@ Always start with:
 
 Focused entry points:
 
+- Claude/Codex handoff mailbox wakeups:
+  `docs/AGENT_MAILBOX_WAKEUP.md`. If `.agent_mailbox/CODEX_WAKE_PENDING.md`
+  exists, read it before assuming there is no cross-agent message.
 - UI renewal: `docs/UI_RENEWAL_THREAD_HANDOFF.md`,
   `docs/SPEC_UI_RENEWAL.md`, then `TODO.md`.
 - MCP/AI editor capture, including user requests like "캡쳐기능 봐줘" or

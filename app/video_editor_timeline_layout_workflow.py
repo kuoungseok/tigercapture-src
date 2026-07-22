@@ -113,6 +113,10 @@ def _update_tracks_host_width(self) -> None:
         pref_fn = getattr(row, "_preferred_width", None)
         row_pref = pref_fn() if callable(pref_fn) else MIN_TRACK_WIDTH
         max_w = max(max_w, max(MIN_TRACK_WIDTH, row_pref))
+    for row in getattr(self, "_motion_lane_rows", []):
+        pref_fn = getattr(row, "_preferred_width", None)
+        row_pref = pref_fn() if callable(pref_fn) else MIN_TRACK_WIDTH
+        max_w = max(max_w, max(MIN_TRACK_WIDTH, row_pref))
     # Also honor the viewport width so the divider / stripes can extend
     # the full visible area even when clips are short.
     vp_w = self._tracks_scroll.viewport().width() if hasattr(self, "_tracks_scroll") else 0
@@ -131,6 +135,8 @@ def _update_tracks_host_width(self) -> None:
     for row in getattr(self, "_ar_pbr_lane_rows", []):
         row.setFixedWidth(max_w)
     for row in getattr(self, "_mmd_lane_rows", []):
+        row.setFixedWidth(max_w)
+    for row in getattr(self, "_motion_lane_rows", []):
         row.setFixedWidth(max_w)
     # Subtitle lane must match so its background fills the full timeline.
     if hasattr(self, "_subtitle_lane"):

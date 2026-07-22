@@ -15,6 +15,7 @@ from app.video_editor_delegates_actor import install_actor_delegates
 from app.video_editor_delegates_ar_pbr import install_ar_pbr_delegates
 from app.video_editor_delegates_media_preview_export import install_media_preview_export_delegates
 from app.video_editor_delegates_ai import install_ai_delegates
+from app.video_editor_delegates_motion import install_motion_delegates
 
 
 def _window_refresh_preview_after_color_toggle(self) -> None:
@@ -63,6 +64,7 @@ def install_video_editor_window_delegates(VideoEditorWindow) -> None:
     install_ar_pbr_delegates(VideoEditorWindow)
     install_media_preview_export_delegates(VideoEditorWindow)
     install_ai_delegates(VideoEditorWindow)
+    install_motion_delegates(VideoEditorWindow)
     VideoEditorWindow._clip_badge_menu_model = _window_clip_badge_menu_model
     VideoEditorWindow._run_clip_badge_menu_action = _window_run_clip_badge_menu_action
     VideoEditorWindow._refresh_preview_after_color_toggle = _window_refresh_preview_after_color_toggle
