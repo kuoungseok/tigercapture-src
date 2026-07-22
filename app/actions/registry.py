@@ -253,6 +253,12 @@ class ActionRegistry:
         from app.actions.paint_namespace import register_paint_actions
 
         register_paint_actions(self)
+        from app.actions.motion_namespace import register_motion_actions
+
+        register_motion_actions(self)
+        from app.actions.motion_plugin_namespace import register_motion_plugin_actions
+
+        register_motion_plugin_actions(self)
         from app.actions.evidence_namespace import register_evidence_actions
 
         register_evidence_actions(self)

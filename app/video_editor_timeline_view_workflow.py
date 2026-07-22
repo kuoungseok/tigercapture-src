@@ -338,6 +338,8 @@ def _set_timeline_zoom_px(self, px_per_sec: float) -> bool:
         row.set_px_per_sec(new_px)
     for row in getattr(self, "_mmd_lane_rows", []):
         row.set_px_per_sec(new_px)
+    for row in getattr(self, "_motion_lane_rows", []):
+        row.set_px_per_sec(new_px)
     self.zoom_label.setText(self._format_zoom())
     self._update_tracks_host_width()
     return True
@@ -362,6 +364,10 @@ def _zoom_fit(self) -> None:
         ),
         max(
             (int(track.get("end_ms", 0) or 0) for track in getattr(self, "_mmd_tracks", []) or []),
+            default=0,
+        ),
+        max(
+            (int(clip.get("end_ms", 0) or 0) for clip in getattr(self, "_motion_clips", []) or []),
             default=0,
         ),
     )

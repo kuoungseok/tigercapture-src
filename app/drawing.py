@@ -24,6 +24,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QColor,
     QImage,
+    QIcon,
     QMouseEvent,
     QPainter,
     QPainterPath,
@@ -45,6 +46,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QListView,
     QListWidget,
     QListWidgetItem,
     QMenu,
@@ -540,6 +542,8 @@ class PaintLayer:
     opacity: int = 100
     locked: bool = False
     blend_mode: str = "normal"
+    mask: list[tuple[float, float]] = field(default_factory=list)
+    mask_enabled: bool = False
 
 
 CANVAS_SIZE_PRESETS: tuple[tuple[str, int, int], ...] = (
@@ -781,10 +785,15 @@ class DrawingCanvas(QWidget):
         self._active_layer_id: str = "paint-layer-1"
         self._layer_visibility: dict[str, bool] = {}
         self._layer_opacity: dict[str, int] = {}
+        self._layer_masks: dict[str, list[tuple[float, float]]] = {}
         self._current_points: list[QPointF] = []  # while drawing (widget px)
         self._path_points: list[QPointF] = []
         self._selection_points: list[tuple[float, float]] = []
         self._selection_inverted: bool = False
+        self._selection_aspect_mode: str = "free"
+        self._selection_drag_tool: str = ""
+        self._selection_drag_start: QPointF | None = None
+        self._selection_drag_current: QPointF | None = None
         self._selection_phase: float = 0.0
         self._selection_timer = QTimer(self)
         self._selection_timer.setInterval(90)
@@ -821,13 +830,13 @@ class DrawingCanvas(QWidget):
         return self._tool
 
     def set_tool(self, tool: str) -> None:
-        if tool not in ("off", "pen", "eraser", "path"):
+        if tool not in ("off", "pen", "eraser", "path", "rect_select", "ellipse_select", "crop"):
             tool = "off"
         self._tool = tool
         self._refresh_mouse_transparency()
         cursor = (
             Qt.CursorShape.CrossCursor
-            if tool in ("pen", "eraser", "path")
+            if tool in ("pen", "eraser", "path", "rect_select", "ellipse_select", "crop")
             else Qt.CursorShape.ArrowCursor
         )
         self.setCursor(cursor)
@@ -854,12 +863,23 @@ class DrawingCanvas(QWidget):
         self,
         visibility: dict[str, bool] | None = None,
         opacity: dict[str, int] | None = None,
+        masks: dict[str, list[tuple[float, float]]] | None = None,
     ) -> None:
         self._layer_visibility = dict(visibility or {})
         self._layer_opacity = {
             str(key): max(0, min(100, int(value)))
             for key, value in dict(opacity or {}).items()
         }
+        clean_masks: dict[str, list[tuple[float, float]]] = {}
+        for key, value in dict(masks or {}).items():
+            rows = list(value or [])
+            if len(rows) < 3:
+                continue
+            clean_masks[str(key)] = [
+                (max(0.0, min(1.0, float(x))), max(0.0, min(1.0, float(y))))
+                for x, y in rows
+            ]
+        self._layer_masks = clean_masks
         self.update()
 
     def path_point_count(self) -> int:
@@ -883,6 +903,42 @@ class DrawingCanvas(QWidget):
 
     def selection_snapshot(self) -> list[tuple[float, float]]:
         return list(self._selection_points)
+
+    def set_selection_aspect_mode(self, mode: str) -> None:
+        value = str(mode or "free").strip().casefold().replace("-", "_")
+        aliases = {
+            "1_1": "square",
+            "1:1": "square",
+            "square": "square",
+            "16_9": "16:9",
+            "16:9": "16:9",
+            "4_3": "4:3",
+            "4:3": "4:3",
+            "free": "free",
+            "custom": "free",
+        }
+        self._selection_aspect_mode = aliases.get(value, "free")
+
+    def selection_aspect_mode(self) -> str:
+        return str(self._selection_aspect_mode or "free")
+
+    def select_rectangle(
+        self,
+        x1: float,
+        y1: float,
+        x2: float,
+        y2: float,
+        *,
+        shape: str = "rect",
+        aspect: str | None = None,
+    ) -> None:
+        rect = self._normalized_drag_rect(
+            QPointF(float(x1) * max(1, self.width()), float(y1) * max(1, self.height())),
+            QPointF(float(x2) * max(1, self.width()), float(y2) * max(1, self.height())),
+            aspect or self._selection_aspect_mode,
+        )
+        points = self._points_from_drag_rect(rect, shape=shape)
+        self.set_selection_snapshot(points)
 
     def selection_inverted(self) -> bool:
         return bool(getattr(self, "_selection_inverted", False))
@@ -969,13 +1025,21 @@ class DrawingCanvas(QWidget):
             layer_id = self._stroke_layer_id(stroke)
             if not self._layer_visibility.get(layer_id, True):
                 continue
-            self._paint_stroke(
-                painter,
-                stroke,
-                w,
-                h,
-                opacity_scale=self._layer_opacity.get(layer_id, 100) / 100.0,
-            )
+            mask = self._layer_masks.get(layer_id, [])
+            if len(mask) >= 3:
+                painter.save()
+                self._clip_to_layer_mask(painter, mask, w, h)
+            try:
+                self._paint_stroke(
+                    painter,
+                    stroke,
+                    w,
+                    h,
+                    opacity_scale=self._layer_opacity.get(layer_id, 100) / 100.0,
+                )
+            finally:
+                if len(mask) >= 3:
+                    painter.restore()
 
         if self._current_points:
             stroke = Stroke(
@@ -991,13 +1055,21 @@ class DrawingCanvas(QWidget):
                 layer_id=self._active_layer_id,
                 source_tool="pen",
             )
-            self._paint_stroke(
-                painter,
-                stroke,
-                w,
-                h,
-                opacity_scale=self._layer_opacity.get(self._active_layer_id, 100) / 100.0,
-            )
+            mask = self._layer_masks.get(self._active_layer_id, [])
+            if len(mask) >= 3:
+                painter.save()
+                self._clip_to_layer_mask(painter, mask, w, h)
+            try:
+                self._paint_stroke(
+                    painter,
+                    stroke,
+                    w,
+                    h,
+                    opacity_scale=self._layer_opacity.get(self._active_layer_id, 100) / 100.0,
+                )
+            finally:
+                if len(mask) >= 3:
+                    painter.restore()
 
         if self._path_points:
             color = QColor(self._pen_color)
@@ -1015,6 +1087,7 @@ class DrawingCanvas(QWidget):
             for point in self._path_points:
                 painter.drawEllipse(point, 4, 4)
 
+        self._paint_selection_drag_preview(painter, w, h)
         self._paint_marching_ants(painter, w, h)
 
         # Stage 1 rotoscope — dashed Tiger Orange rectangle while
@@ -1072,6 +1145,22 @@ class DrawingCanvas(QWidget):
         return str(getattr(stroke, "layer_id", "") or "paint-layer-1")
 
     @staticmethod
+    def _clip_to_layer_mask(
+        painter: QPainter,
+        points: list[tuple[float, float]],
+        w: int,
+        h: int,
+    ) -> None:
+        if len(points) < 3:
+            return
+        path = QPainterPath()
+        path.moveTo(points[0][0] * w, points[0][1] * h)
+        for x, y in points[1:]:
+            path.lineTo(x * w, y * h)
+        path.closeSubpath()
+        painter.setClipPath(path, Qt.ClipOperation.IntersectClip)
+
+    @staticmethod
     def _paint_stroke(
         painter: QPainter,
         stroke: Stroke,
@@ -1126,6 +1215,28 @@ class DrawingCanvas(QWidget):
             painter.drawPath(path)
         painter.restore()
 
+    def _paint_selection_drag_preview(self, painter: QPainter, _w: int, _h: int) -> None:
+        if self._selection_drag_start is None or self._selection_drag_current is None:
+            return
+        rect = self._selection_drag_rect()
+        if rect.width() <= 1.0 or rect.height() <= 1.0:
+            return
+        painter.save()
+        fill = QColor(87, 139, 255, 34)
+        if self._selection_drag_tool == "crop":
+            fill = QColor(248, 181, 70, 34)
+        painter.setBrush(fill)
+        pen = QPen(QColor("#E8EEF8"), 1.35)
+        pen.setCosmetic(True)
+        pen.setDashPattern([5.0, 5.0])
+        pen.setDashOffset(self._selection_phase)
+        painter.setPen(pen)
+        if self._selection_drag_tool == "ellipse_select":
+            painter.drawEllipse(rect)
+        else:
+            painter.drawRect(rect)
+        painter.restore()
+
     @staticmethod
     def _configure_pen_for_style(pen: QPen, style: str) -> None:
         if style == "marker":
@@ -1141,6 +1252,78 @@ class DrawingCanvas(QWidget):
             pen.setCapStyle(Qt.PenCapStyle.SquareCap)
         elif style == "dashed":
             pen.setStyle(Qt.PenStyle.DashLine)
+
+    def _selection_drag_rect(self) -> QRectF:
+        if self._selection_drag_start is None or self._selection_drag_current is None:
+            return QRectF()
+        return self._normalized_drag_rect(
+            self._selection_drag_start,
+            self._selection_drag_current,
+            self._selection_aspect_mode,
+        )
+
+    def _normalized_drag_rect(
+        self,
+        start: QPointF,
+        current: QPointF,
+        aspect: str | None = None,
+    ) -> QRectF:
+        x1 = max(0.0, min(float(self.width()), float(start.x())))
+        y1 = max(0.0, min(float(self.height()), float(start.y())))
+        x2 = max(0.0, min(float(self.width()), float(current.x())))
+        y2 = max(0.0, min(float(self.height()), float(current.y())))
+        dx = x2 - x1
+        dy = y2 - y1
+        mode = str(aspect or "free").strip().casefold()
+        ratios = {
+            "square": 1.0,
+            "1:1": 1.0,
+            "16:9": 16.0 / 9.0,
+            "4:3": 4.0 / 3.0,
+        }
+        ratio = ratios.get(mode)
+        if ratio is not None and abs(dx) > 0.001 and abs(dy) > 0.001:
+            sx = 1.0 if dx >= 0 else -1.0
+            sy = 1.0 if dy >= 0 else -1.0
+            adx = abs(dx)
+            ady = abs(dy)
+            if adx / max(1.0, ady) > ratio:
+                adx = ady * ratio
+            else:
+                ady = adx / ratio
+            x2 = x1 + sx * adx
+            y2 = y1 + sy * ady
+        left = max(0.0, min(x1, x2))
+        top = max(0.0, min(y1, y2))
+        right = min(float(self.width()), max(x1, x2))
+        bottom = min(float(self.height()), max(y1, y2))
+        return QRectF(left, top, max(0.0, right - left), max(0.0, bottom - top))
+
+    def _points_from_drag_rect(self, rect: QRectF, *, shape: str = "rect") -> list[tuple[float, float]]:
+        w = max(1, self.width())
+        h = max(1, self.height())
+        left = max(0.0, min(1.0, rect.left() / w))
+        top = max(0.0, min(1.0, rect.top() / h))
+        right = max(0.0, min(1.0, rect.right() / w))
+        bottom = max(0.0, min(1.0, rect.bottom() / h))
+        if str(shape or "rect") == "ellipse":
+            cx = (left + right) * 0.5
+            cy = (top + bottom) * 0.5
+            rx = abs(right - left) * 0.5
+            ry = abs(bottom - top) * 0.5
+            return [
+                (
+                    max(0.0, min(1.0, cx + math.cos(math.tau * i / 32.0) * rx)),
+                    max(0.0, min(1.0, cy + math.sin(math.tau * i / 32.0) * ry)),
+                )
+                for i in range(32)
+            ]
+        return [
+            (left, top),
+            (right, top),
+            (right, bottom),
+            (left, bottom),
+        ]
 
     # ------------- mouse interaction -------------
 
@@ -1186,6 +1369,12 @@ class DrawingCanvas(QWidget):
                 self._color_window_drag_origin = dict(self._color_window_payload)
                 self._set_color_window_cursor(handle)
                 self.update()
+            return
+        if self._tool in {"rect_select", "ellipse_select", "crop"}:
+            self._selection_drag_tool = self._tool
+            self._selection_drag_start = QPointF(pos)
+            self._selection_drag_current = QPointF(pos)
+            self.update()
             return
         if self._tool == "pen":
             self._current_points = [QPointF(pos)]
@@ -1289,6 +1478,10 @@ class DrawingCanvas(QWidget):
             if consumed or self._interaction_active:
                 self.update()
                 return
+        if self._selection_drag_start is not None and self._tool in {"rect_select", "ellipse_select", "crop"}:
+            self._selection_drag_current = QPointF(event.position())
+            self.update()
+            return
         if self._tool != "pen" or not self._current_points:
             return
         pos = event.position()
@@ -1337,6 +1530,19 @@ class DrawingCanvas(QWidget):
             except Exception:
                 pass
             self._interaction_active = False
+            self.update()
+            return
+        if self._selection_drag_start is not None and self._tool in {"rect_select", "ellipse_select", "crop"}:
+            self._selection_drag_current = QPointF(event.position())
+            rect = self._selection_drag_rect()
+            tool = self._selection_drag_tool or self._tool
+            self._selection_drag_start = None
+            self._selection_drag_current = None
+            self._selection_drag_tool = ""
+            if rect.width() > 1.0 and rect.height() > 1.0:
+                shape = "ellipse" if tool == "ellipse_select" else "rect"
+                self.set_selection_snapshot(self._points_from_drag_rect(rect, shape=shape))
+            self.repaint_requested.emit()
             self.update()
             return
         if self._tool != "pen" or not self._current_points:
@@ -2227,6 +2433,10 @@ class PaintDialog(QDialog):
             "Blue": True,
             "Alpha": True,
         }
+        self._selected_channel = "RGB"
+        self._selection_aspect_mode = "free"
+        self._mirror_x_enabled = False
+        self._mirror_y_enabled = False
         self._selected_layer_id: str | None = None
         self._paint_clipboard: dict | None = None
         self._paint_layer_serial = 1
@@ -2342,8 +2552,18 @@ class PaintDialog(QDialog):
         view_menu.addSeparator()
         self._add_painter_menu_action(view_menu, "Pan Tool", lambda: self._set_tool("pan"), "H")
         self._add_painter_menu_action(view_menu, "Reset Pan", self._reset_canvas_pan)
+        view_menu.addSeparator()
+        self._add_painter_menu_action(view_menu, "Mirror Drawing Horizontal", lambda: self._set_mirror_enabled(x=not self._mirror_x_enabled))
+        self._add_painter_menu_action(view_menu, "Mirror Drawing Vertical", lambda: self._set_mirror_enabled(y=not self._mirror_y_enabled))
 
         image_menu = menu_bar.addMenu("Image")
+        self._add_painter_menu_action(image_menu, "Image Size...", self._prompt_image_size)
+        self._add_painter_menu_action(image_menu, "Canvas Size...", self._prompt_canvas_size)
+        self._add_painter_menu_action(image_menu, "Crop To Selection", self._crop_to_selection)
+        image_menu.addSeparator()
+        self._add_painter_menu_action(image_menu, "Flip Canvas Horizontal", lambda: self._flip_canvas(horizontal=True))
+        self._add_painter_menu_action(image_menu, "Flip Canvas Vertical", lambda: self._flip_canvas(horizontal=False))
+        image_menu.addSeparator()
         self._add_painter_menu_action(image_menu, "Channels Panel", lambda: self._show_painter_tab("channels"))
         self._add_painter_menu_action(image_menu, "Show RGB", lambda: self._set_channel_visibility("RGB", True))
         self._add_painter_menu_action(image_menu, "Hide Alpha", lambda: self._set_channel_visibility("Alpha", False))
@@ -2356,11 +2576,21 @@ class PaintDialog(QDialog):
         layer_menu.addSeparator()
         self._add_painter_menu_action(layer_menu, "Toggle Visibility", self._toggle_selected_layer_visibility)
         self._add_painter_menu_action(layer_menu, "Toggle Lock", self._toggle_selected_layer_lock)
+        layer_menu.addSeparator()
+        self._add_painter_menu_action(layer_menu, "Add Mask From Selection", self._mask_selected_layer_from_selection)
+        self._add_painter_menu_action(layer_menu, "Add Mask From Path", self._mask_selected_layer_from_path)
 
         select_menu = menu_bar.addMenu("Select")
         self._add_painter_menu_action(select_menu, "All", self._select_all, "Ctrl+A")
         self._add_painter_menu_action(select_menu, "Deselect", self._deselect, "Ctrl+D")
         self._add_painter_menu_action(select_menu, "Inverse", self._invert_selection, "Ctrl+Shift+I")
+        select_menu.addSeparator()
+        self._add_painter_menu_action(select_menu, "Rectangular Marquee", lambda: self._set_tool("rect_select"), "M")
+        self._add_painter_menu_action(select_menu, "Elliptical Marquee", lambda: self._set_tool("ellipse_select"))
+        self._add_painter_menu_action(select_menu, "Free Ratio", lambda: self._set_selection_aspect_mode("free"))
+        self._add_painter_menu_action(select_menu, "Square Ratio", lambda: self._set_selection_aspect_mode("square"))
+        self._add_painter_menu_action(select_menu, "16:9 Ratio", lambda: self._set_selection_aspect_mode("16:9"))
+        self._add_painter_menu_action(select_menu, "4:3 Ratio", lambda: self._set_selection_aspect_mode("4:3"))
         select_menu.addSeparator()
         self._add_painter_menu_action(select_menu, "Selection To Path", self._selection_to_path)
         self._add_painter_menu_action(select_menu, "Path To Selection", self._make_selection_from_selected_path)
@@ -2483,6 +2713,11 @@ class PaintDialog(QDialog):
         self.canvas.set_layer_view(
             {layer.layer_id: layer.visible for layer in self._paint_layers},
             {layer.layer_id: layer.opacity for layer in self._paint_layers},
+            {
+                layer.layer_id: list(getattr(layer, "mask", []) or [])
+                for layer in self._paint_layers
+                if bool(getattr(layer, "mask_enabled", False)) and len(getattr(layer, "mask", []) or []) >= 3
+            },
         )
 
     def _open_new_canvas_dialog(self) -> None:
@@ -2827,6 +3062,36 @@ class PaintDialog(QDialog):
         self.pan_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.pan_btn.clicked.connect(lambda: self._set_tool("pan"))
 
+        self.rect_select_btn = QPushButton("Rect Select")
+        self.rect_select_btn.setCheckable(True)
+        self.rect_select_btn.setObjectName("PaintTool")
+        self.rect_select_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.rect_select_btn.clicked.connect(lambda: self._set_tool("rect_select"))
+
+        self.ellipse_select_btn = QPushButton("Ellipse Select")
+        self.ellipse_select_btn.setCheckable(True)
+        self.ellipse_select_btn.setObjectName("PaintTool")
+        self.ellipse_select_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.ellipse_select_btn.clicked.connect(lambda: self._set_tool("ellipse_select"))
+
+        self.crop_btn = QPushButton("Crop")
+        self.crop_btn.setCheckable(True)
+        self.crop_btn.setObjectName("PaintTool")
+        self.crop_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.crop_btn.clicked.connect(lambda: self._set_tool("crop"))
+
+        self.mirror_x_btn = QPushButton("Mirror X")
+        self.mirror_x_btn.setCheckable(True)
+        self.mirror_x_btn.setObjectName("PaintTool")
+        self.mirror_x_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.mirror_x_btn.clicked.connect(lambda checked: self._set_mirror_enabled(x=bool(checked)))
+
+        self.mirror_y_btn = QPushButton("Mirror Y")
+        self.mirror_y_btn.setCheckable(True)
+        self.mirror_y_btn.setObjectName("PaintTool")
+        self.mirror_y_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.mirror_y_btn.clicked.connect(lambda checked: self._set_mirror_enabled(y=bool(checked)))
+
         self.pen_btn = QPushButton(tr("paint.btn.pen"))
         self.pen_btn.setCheckable(True)
         self.pen_btn.setChecked(True)
@@ -2876,6 +3141,11 @@ class PaintDialog(QDialog):
 
         self._configure_paint_tool_icon_button(self.select_btn, "cursor", "Select / Move")
         self._configure_paint_tool_icon_button(self.pan_btn, "hand", "Pan canvas")
+        self._configure_paint_tool_icon_button(self.rect_select_btn, "marquee-rect", "Rectangular marquee")
+        self._configure_paint_tool_icon_button(self.ellipse_select_btn, "marquee-ellipse", "Elliptical marquee")
+        self._configure_paint_tool_icon_button(self.crop_btn, "crop", "Crop")
+        self._configure_paint_tool_icon_button(self.mirror_x_btn, "mirror-x", "Mirror drawing horizontally")
+        self._configure_paint_tool_icon_button(self.mirror_y_btn, "mirror-y", "Mirror drawing vertically")
         self._configure_paint_tool_icon_button(self.pen_btn, "paint-brush", tr("paint.btn.pen"))
         self._configure_paint_tool_icon_button(self.eraser_btn, "eraser", tr("paint.btn.eraser"))
         self._configure_paint_tool_icon_button(self.path_btn, "path-tool", "Path")
@@ -2887,6 +3157,11 @@ class PaintDialog(QDialog):
 
         tool_layout.addWidget(self.select_btn)
         tool_layout.addWidget(self.pan_btn)
+        tool_layout.addWidget(self.rect_select_btn)
+        tool_layout.addWidget(self.ellipse_select_btn)
+        tool_layout.addWidget(self.crop_btn)
+        tool_layout.addWidget(self.mirror_x_btn)
+        tool_layout.addWidget(self.mirror_y_btn)
         tool_layout.addWidget(self.pen_btn)
         tool_layout.addWidget(self.eraser_btn)
         tool_layout.addWidget(self.path_btn)
@@ -3014,6 +3289,13 @@ class PaintDialog(QDialog):
         self.brush_library_list = QListWidget()
         self.brush_library_list.setObjectName("PaintBrushList")
         self.brush_library_list.setFixedHeight(118)
+        self.brush_library_list.setViewMode(QListView.ViewMode.IconMode)
+        self.brush_library_list.setResizeMode(QListView.ResizeMode.Adjust)
+        self.brush_library_list.setMovement(QListView.Movement.Static)
+        self.brush_library_list.setWrapping(True)
+        self.brush_library_list.setSpacing(6)
+        self.brush_library_list.setIconSize(QSize(76, 36))
+        self.brush_library_list.setGridSize(QSize(86, 54))
         self.brush_library_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.brush_library_list.itemClicked.connect(self._on_brush_library_item)
         inspector_controls_layout.addWidget(self.brush_library_list)
@@ -3065,6 +3347,21 @@ class PaintDialog(QDialog):
         self.opacity_slider.setValue(100)
         self.opacity_slider.valueChanged.connect(self._on_opacity_changed)
         inspector_controls_layout.addWidget(self.opacity_slider)
+
+        selection_row = QHBoxLayout()
+        selection_row.setContentsMargins(0, 0, 0, 0)
+        selection_label = QLabel("Selection")
+        selection_label.setObjectName("PaintMeta")
+        self.selection_aspect_combo = QComboBox()
+        self.selection_aspect_combo.addItem("Free", "free")
+        self.selection_aspect_combo.addItem("Square", "square")
+        self.selection_aspect_combo.addItem("16:9", "16:9")
+        self.selection_aspect_combo.addItem("4:3", "4:3")
+        self.selection_aspect_combo.currentIndexChanged.connect(self._on_selection_aspect_changed)
+        selection_row.addWidget(selection_label)
+        selection_row.addStretch(1)
+        selection_row.addWidget(self.selection_aspect_combo)
+        inspector_controls_layout.addLayout(selection_row)
 
         preset_row = QHBoxLayout()
         preset_row.setContentsMargins(0, 0, 0, 0)
@@ -3334,6 +3631,21 @@ class PaintDialog(QDialog):
         channels_layout = QVBoxLayout(channels_tab)
         channels_layout.setContentsMargins(8, 8, 8, 8)
         channels_layout.setSpacing(8)
+        channel_row = QHBoxLayout()
+        channel_row.setContentsMargins(0, 0, 0, 0)
+        self.copy_channel_btn = QPushButton("Copy")
+        self.copy_channel_btn.setObjectName("PaintCustomColor")
+        self.copy_channel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.copy_channel_btn.setToolTip("Copy the selected channel image to the system clipboard")
+        self.copy_channel_btn.clicked.connect(self._copy_selected_channel_image)
+        self.paste_channel_btn = QPushButton("Paste")
+        self.paste_channel_btn.setObjectName("PaintCustomColor")
+        self.paste_channel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.paste_channel_btn.setToolTip("Paste a grayscale clipboard image into the selected channel")
+        self.paste_channel_btn.clicked.connect(self._paste_selected_channel_image)
+        channel_row.addWidget(self.copy_channel_btn)
+        channel_row.addWidget(self.paste_channel_btn)
+        channels_layout.addLayout(channel_row)
         self._channel_list = QListWidget()
         self._channel_list.setObjectName("PaintLayerList")
         self._channel_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
@@ -3361,6 +3673,11 @@ class PaintDialog(QDialog):
         self.path_to_selection_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.path_to_selection_btn.setToolTip("Convert the selected path to a marching-ants selection")
         self.path_to_selection_btn.clicked.connect(self._make_selection_from_selected_path)
+        self.path_to_mask_btn = QPushButton("Mask")
+        self.path_to_mask_btn.setObjectName("PaintCustomColor")
+        self.path_to_mask_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.path_to_mask_btn.setToolTip("Convert the selected path to a layer mask")
+        self.path_to_mask_btn.clicked.connect(self._mask_selected_layer_from_path)
         self.clear_path_btn = QPushButton("Clear")
         self.clear_path_btn.setObjectName("PaintCustomColor")
         self.clear_path_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -3368,6 +3685,7 @@ class PaintDialog(QDialog):
         path_row.addWidget(self.commit_path_btn)
         path_row.addWidget(self.close_path_btn)
         path_row.addWidget(self.path_to_selection_btn)
+        path_row.addWidget(self.path_to_mask_btn)
         path_row.addWidget(self.clear_path_btn)
         paths_layout.addLayout(path_row)
         self._path_list = QListWidget()
@@ -3413,6 +3731,47 @@ class PaintDialog(QDialog):
         if not self._sticker_items and self._stickers:
             self._spawn_initial_stickers()
 
+    def _brush_preset_icon(self, preset: dict[str, object]) -> QIcon:
+        pixmap = QPixmap(76, 36)
+        pixmap.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        try:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QColor("#171b24"))
+            painter.drawRoundedRect(QRectF(0.5, 0.5, 75, 35), 6, 6)
+            painter.setBrush(QColor(255, 255, 255, 10))
+            painter.drawRoundedRect(QRectF(4, 4, 68, 28), 5, 5)
+            style = str(preset.get("style") or "round")
+            width = max(1.5, min(16.0, float(preset.get("width") or 4) * 0.55))
+            opacity = max(35, min(255, int(float(preset.get("opacity") or 100) * 2.55)))
+            hue_colors = {
+                "Pencil & Ink": "#DCE6F7",
+                "Flow Map": "#6FA8C8",
+                "Texture": "#A8B4C6",
+                "Utility": "#C7A46A",
+            }
+            color = QColor(hue_colors.get(str(preset.get("category") or ""), "#90A9D6"))
+            color.setAlpha(opacity)
+            pen = QPen(color, width)
+            DrawingCanvas._configure_pen_for_style(pen, style)
+            if style == "dashed":
+                pen.setDashPattern([4.0, 3.0])
+            painter.setPen(pen)
+            path = QPainterPath()
+            path.moveTo(9, 24)
+            path.cubicTo(19, 9, 33, 28, 47, 15)
+            path.cubicTo(55, 7, 62, 17, 69, 11)
+            painter.drawPath(path)
+            painter.setPen(QPen(QColor(255, 255, 255, 44), 1.0))
+            if style == "highlighter":
+                painter.drawLine(QPointF(11, 28), QPointF(66, 28))
+            elif style == "marker":
+                painter.drawLine(QPointF(12, 8), QPointF(67, 8))
+        finally:
+            painter.end()
+        return QIcon(pixmap)
+
     def _populate_brush_library(self) -> None:
         if not hasattr(self, "brush_library_list"):
             return
@@ -3427,11 +3786,10 @@ class PaintDialog(QDialog):
             name = str(preset["name"])
             width = int(preset["width"])
             opacity = int(preset["opacity"])
-            item = QListWidgetItem(
-                f"{category}  |  {name}\n{width}px  /  {opacity}%"
-            )
+            item = QListWidgetItem(self._brush_preset_icon(preset), "")
+            item.setToolTip(f"{category} | {name} | {width}px / {opacity}%")
             item.setData(Qt.ItemDataRole.UserRole, idx)
-            item.setSizeHint(QSize(190, 42))
+            item.setSizeHint(QSize(86, 54))
             self.brush_library_list.addItem(item)
         if self.brush_library_list.count() > 0:
             self.brush_library_list.setCurrentRow(0)
@@ -3616,11 +3974,17 @@ class PaintDialog(QDialog):
     # ---------- tool actions ----------
 
     def _set_tool(self, tool: str) -> None:
-        canvas_tool = tool if tool in ("pen", "eraser", "path") else "off"
+        canvas_tool = tool if tool in ("pen", "eraser", "path", "rect_select", "ellipse_select", "crop") else "off"
         self.canvas.set_tool(canvas_tool)
         self.select_btn.setChecked(tool == "select")
         if hasattr(self, "pan_btn"):
             self.pan_btn.setChecked(tool == "pan")
+        if hasattr(self, "rect_select_btn"):
+            self.rect_select_btn.setChecked(tool == "rect_select")
+        if hasattr(self, "ellipse_select_btn"):
+            self.ellipse_select_btn.setChecked(tool == "ellipse_select")
+        if hasattr(self, "crop_btn"):
+            self.crop_btn.setChecked(tool == "crop")
         self.pen_btn.setChecked(tool == "pen")
         self.eraser_btn.setChecked(tool == "eraser")
         self.path_btn.setChecked(tool == "path")
@@ -3638,8 +4002,75 @@ class PaintDialog(QDialog):
                 "pen": "Pen",
                 "eraser": "Eraser",
                 "path": "Path: click points, double-click to commit",
+                "rect_select": "Rectangular marquee",
+                "ellipse_select": "Elliptical marquee",
+                "crop": "Crop: drag a crop area, then Image > Crop To Selection",
             }
             self._tool_status_label.setText(labels.get(tool, "Select / move objects"))
+
+    def _on_selection_aspect_changed(self) -> None:
+        mode = "free"
+        if hasattr(self, "selection_aspect_combo"):
+            mode = str(self.selection_aspect_combo.currentData() or "free")
+        self._set_selection_aspect_mode(mode)
+
+    def _set_selection_aspect_mode(self, mode: str) -> str:
+        value = str(mode or "free").strip().casefold().replace("-", "_")
+        aliases = {
+            "free": "free",
+            "custom": "free",
+            "square": "square",
+            "1_1": "square",
+            "1:1": "square",
+            "16_9": "16:9",
+            "16:9": "16:9",
+            "4_3": "4:3",
+            "4:3": "4:3",
+        }
+        selected = aliases.get(value, "free")
+        self._selection_aspect_mode = selected
+        if hasattr(self, "selection_aspect_combo"):
+            index = self.selection_aspect_combo.findData(selected)
+            if index >= 0 and self.selection_aspect_combo.currentIndex() != index:
+                self.selection_aspect_combo.blockSignals(True)
+                try:
+                    self.selection_aspect_combo.setCurrentIndex(index)
+                finally:
+                    self.selection_aspect_combo.blockSignals(False)
+        if hasattr(self, "canvas"):
+            self.canvas.set_selection_aspect_mode(selected)
+        if hasattr(self, "_tool_status_label"):
+            self._tool_status_label.setText(f"Selection ratio: {selected}")
+        return selected
+
+    def _set_mirror_enabled(
+        self,
+        *,
+        x: bool | None = None,
+        y: bool | None = None,
+    ) -> dict[str, bool]:
+        if x is not None:
+            self._mirror_x_enabled = bool(x)
+        if y is not None:
+            self._mirror_y_enabled = bool(y)
+        if hasattr(self, "mirror_x_btn"):
+            self.mirror_x_btn.blockSignals(True)
+            try:
+                self.mirror_x_btn.setChecked(bool(self._mirror_x_enabled))
+            finally:
+                self.mirror_x_btn.blockSignals(False)
+        if hasattr(self, "mirror_y_btn"):
+            self.mirror_y_btn.blockSignals(True)
+            try:
+                self.mirror_y_btn.setChecked(bool(self._mirror_y_enabled))
+            finally:
+                self.mirror_y_btn.blockSignals(False)
+        if hasattr(self, "_tool_status_label"):
+            self._tool_status_label.setText(
+                f"Mirror X {'on' if self._mirror_x_enabled else 'off'} / "
+                f"Y {'on' if self._mirror_y_enabled else 'off'}"
+            )
+        return {"x": bool(self._mirror_x_enabled), "y": bool(self._mirror_y_enabled)}
 
     def _clear_all(self) -> None:
         self._push_undo_state("Clear all")
@@ -3700,7 +4131,33 @@ class PaintDialog(QDialog):
         if self._standalone:
             stroke.layer_id = self._active_paint_layer_id
         self.canvas.add_stroke_direct(stroke)
+        for mirrored in self._mirrored_strokes_for(stroke):
+            self.canvas.add_stroke_direct(mirrored)
         self._update_inspector_counts()
+
+    def _mirrored_strokes_for(self, stroke: Stroke) -> list[Stroke]:
+        if str(getattr(stroke, "source_tool", "") or "") != "pen":
+            return []
+        variants: list[tuple[bool, bool]] = []
+        if self._mirror_x_enabled:
+            variants.append((True, False))
+        if self._mirror_y_enabled:
+            variants.append((False, True))
+        if self._mirror_x_enabled and self._mirror_y_enabled:
+            variants.append((True, True))
+        out: list[Stroke] = []
+        for flip_x, flip_y in variants:
+            copied = copy.deepcopy(stroke)
+            copied.points = [
+                (
+                    max(0.0, min(1.0, 1.0 - float(x) if flip_x else float(x))),
+                    max(0.0, min(1.0, 1.0 - float(y) if flip_y else float(y))),
+                )
+                for x, y in copied.points
+            ]
+            copied.source_tool = "pen_mirror"
+            out.append(copied)
+        return out
 
     def _erase_stroke_direct(self, idx: int) -> None:
         strokes = self.canvas.embedded_strokes() if hasattr(self, "canvas") else []
@@ -3863,6 +4320,12 @@ class PaintDialog(QDialog):
             bool(self.canvas.selection_inverted()) if hasattr(self, "canvas") else False,
             copy.deepcopy(getattr(self, "_channel_visibility", {})),
             str(getattr(self, "_selected_path_item_id", "work-path")),
+            tuple(getattr(self, "_canvas_document_size", (1920, 1080))),
+            QPixmap(getattr(self, "_bg_pixmap_source", QPixmap())),
+            str(getattr(self, "_selected_channel", "RGB")),
+            str(getattr(self, "_selection_aspect_mode", "free")),
+            bool(getattr(self, "_mirror_x_enabled", False)),
+            bool(getattr(self, "_mirror_y_enabled", False)),
         )
 
     def _push_undo_state(self, label: str = "Edit") -> None:
@@ -3916,6 +4379,19 @@ class PaintDialog(QDialog):
                 self._channel_visibility = copy.deepcopy(snapshot[9])
             if len(snapshot) >= 11:
                 self._selected_path_item_id = str(snapshot[10] or "work-path")
+            if len(snapshot) >= 12 and isinstance(snapshot[11], tuple):
+                self._canvas_document_size = (
+                    max(1, int(snapshot[11][0])),
+                    max(1, int(snapshot[11][1])),
+                )
+            if len(snapshot) >= 13 and isinstance(snapshot[12], QPixmap):
+                self._bg_pixmap_source = QPixmap(snapshot[12])
+            if len(snapshot) >= 14:
+                self._selected_channel = str(snapshot[13] or "RGB")
+            if len(snapshot) >= 15:
+                self._selection_aspect_mode = self._set_selection_aspect_mode(str(snapshot[14] or "free"))
+            if len(snapshot) >= 17:
+                self._set_mirror_enabled(x=bool(snapshot[15]), y=bool(snapshot[16]))
             for item in list(getattr(self, "_bubble_items", [])):
                 item.deleteLater()
             for item in list(getattr(self, "_sticker_items", [])):
@@ -4015,6 +4491,8 @@ class PaintDialog(QDialog):
                         states.append("Hidden")
                     if layer.locked:
                         states.append("Locked")
+                    if bool(getattr(layer, "mask_enabled", False)) and len(getattr(layer, "mask", []) or []) >= 3:
+                        states.append("Mask")
                     if getattr(layer, "blend_mode", "normal") != "normal":
                         states.append(str(layer.blend_mode).title())
                     state = " ".join(states)
@@ -4177,6 +4655,8 @@ class PaintDialog(QDialog):
         current_item = channel_list.currentItem()
         if current_item is not None:
             current = current_item.data(Qt.ItemDataRole.UserRole)
+        if current is None:
+            current = getattr(self, "_selected_channel", "RGB")
         self._channel_visibility["RGB"] = all(
             self._channel_visibility.get(channel, True)
             for channel in ("Red", "Green", "Blue")
@@ -4205,6 +4685,7 @@ class PaintDialog(QDialog):
 
     def _toggle_channel_item_visibility(self, item: QListWidgetItem) -> None:
         channel = str(item.data(Qt.ItemDataRole.UserRole) or item.text() or "")
+        self._set_selected_channel(channel)
         if channel == "RGB":
             new_visible = not all(
                 self._channel_visibility.get(key, True)
@@ -4645,6 +5126,7 @@ class PaintDialog(QDialog):
         channel = str(channel or "RGB").strip()
         if channel not in {"RGB", "Red", "Green", "Blue", "Alpha"}:
             return False
+        self._selected_channel = channel
         if channel == "RGB":
             changed = any(
                 self._channel_visibility.get(key, True) != bool(visible)
@@ -4666,6 +5148,384 @@ class PaintDialog(QDialog):
         )
         self._update_channel_list()
         self._update_canvas_geometry()
+        return True
+
+    def _set_selected_channel(self, channel: str) -> str:
+        value = str(channel or "RGB").strip()
+        if value not in {"RGB", "Red", "Green", "Blue", "Alpha"}:
+            value = "RGB"
+        self._selected_channel = value
+        if hasattr(self, "_channel_list"):
+            for row in range(self._channel_list.count()):
+                item = self._channel_list.item(row)
+                if item.data(Qt.ItemDataRole.UserRole) == value:
+                    self._channel_list.setCurrentItem(item)
+                    break
+        return value
+
+    def _copy_selected_channel_image(self) -> bool:
+        return self._copy_channel_image(self._selected_channel)
+
+    def _paste_selected_channel_image(self) -> bool:
+        return self._paste_channel_image(self._selected_channel)
+
+    def _copy_channel_image(self, channel: str = "RGB") -> bool:
+        channel = self._set_selected_channel(channel)
+        if not self._bg_pixmap_source or self._bg_pixmap_source.isNull():
+            return False
+        src = self._bg_pixmap_source.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+        if channel == "RGB":
+            QApplication.clipboard().setImage(src)
+            return True
+        out = QImage(src.width(), src.height(), QImage.Format.Format_ARGB32)
+        out.fill(QColor(0, 0, 0, 255))
+        for y in range(src.height()):
+            for x in range(src.width()):
+                color = src.pixelColor(x, y)
+                if channel == "Red":
+                    value = color.red()
+                elif channel == "Green":
+                    value = color.green()
+                elif channel == "Blue":
+                    value = color.blue()
+                else:
+                    value = color.alpha()
+                out.setPixelColor(x, y, QColor(value, value, value, 255))
+        QApplication.clipboard().setImage(out)
+        return True
+
+    def _paste_channel_image(self, channel: str = "RGB") -> bool:
+        channel = self._set_selected_channel(channel)
+        clipboard = QApplication.clipboard()
+        image = clipboard.image() if clipboard is not None else QImage()
+        if image.isNull():
+            return False
+        self._push_undo_state("Paste channel")
+        if not self._bg_pixmap_source or self._bg_pixmap_source.isNull():
+            width, height = self._canvas_document_size
+            self._bg_pixmap_source = create_blank_paint_pixmap(width, height, "transparent")
+        dst = self._bg_pixmap_source.toImage().convertToFormat(QImage.Format.Format_ARGB32)
+        src = image.convertToFormat(QImage.Format.Format_ARGB32).scaled(
+            dst.width(),
+            dst.height(),
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        if channel == "RGB":
+            for y in range(dst.height()):
+                for x in range(dst.width()):
+                    src_color = src.pixelColor(x, y)
+                    dst_color = dst.pixelColor(x, y)
+                    dst_color.setRed(src_color.red())
+                    dst_color.setGreen(src_color.green())
+                    dst_color.setBlue(src_color.blue())
+                    dst.setPixelColor(x, y, dst_color)
+        else:
+            for y in range(dst.height()):
+                for x in range(dst.width()):
+                    src_color = src.pixelColor(x, y)
+                    value = int((src_color.red() + src_color.green() + src_color.blue()) / 3)
+                    dst_color = dst.pixelColor(x, y)
+                    if channel == "Red":
+                        dst_color.setRed(value)
+                    elif channel == "Green":
+                        dst_color.setGreen(value)
+                    elif channel == "Blue":
+                        dst_color.setBlue(value)
+                    elif channel == "Alpha":
+                        dst_color.setAlpha(value)
+                    dst.setPixelColor(x, y, dst_color)
+        self._bg_pixmap_source = QPixmap.fromImage(dst)
+        self._background_layer_present = True
+        self._update_canvas_geometry()
+        self._update_channel_list()
+        return True
+
+    def _selection_bounds(self) -> tuple[float, float, float, float] | None:
+        if not hasattr(self, "canvas") or not self.canvas.has_active_selection():
+            return None
+        points = self.canvas.selection_snapshot()
+        if len(points) < 3:
+            return None
+        xs = [max(0.0, min(1.0, float(x))) for x, _y in points]
+        ys = [max(0.0, min(1.0, float(y))) for _x, y in points]
+        left, right = min(xs), max(xs)
+        top, bottom = min(ys), max(ys)
+        if right - left <= 0.001 or bottom - top <= 0.001:
+            return None
+        return left, top, right, bottom
+
+    @staticmethod
+    def _remap_points_to_rect(
+        points: list[tuple[float, float]],
+        bounds: tuple[float, float, float, float],
+    ) -> list[tuple[float, float]]:
+        left, top, right, bottom = bounds
+        width = max(0.0001, right - left)
+        height = max(0.0001, bottom - top)
+        return [
+            (
+                max(0.0, min(1.0, (float(x) - left) / width)),
+                max(0.0, min(1.0, (float(y) - top) / height)),
+            )
+            for x, y in points
+        ]
+
+    def _remap_objects_to_rect(self, bounds: tuple[float, float, float, float]) -> None:
+        left, top, right, bottom = bounds
+        width = max(0.0001, right - left)
+        height = max(0.0001, bottom - top)
+        for bubble in getattr(self, "_bubbles", []):
+            bubble.x_norm = max(0.0, min(1.0, (float(bubble.x_norm) - left) / width))
+            bubble.y_norm = max(0.0, min(1.0, (float(bubble.y_norm) - top) / height))
+            bubble.width_norm = max(0.01, min(1.0, float(bubble.width_norm) / width))
+            bubble.height_norm = max(0.01, min(1.0, float(bubble.height_norm) / height))
+        for sticker in getattr(self, "_stickers", []):
+            sticker.x_norm = max(0.0, min(1.0, (float(sticker.x_norm) - left) / width))
+            sticker.y_norm = max(0.0, min(1.0, (float(sticker.y_norm) - top) / height))
+            sticker.width_norm = max(0.01, min(1.0, float(sticker.width_norm) / width))
+            sticker.height_norm = max(0.01, min(1.0, float(sticker.height_norm) / height))
+
+    def _crop_to_selection(self) -> bool:
+        bounds = self._selection_bounds()
+        if bounds is None:
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText("Crop needs an active selection")
+            return False
+        self._push_undo_state("Crop")
+        left, top, right, bottom = bounds
+        old_w, old_h = self._canvas_document_size
+        crop_rect = QRect(
+            max(0, min(old_w - 1, int(round(left * old_w)))),
+            max(0, min(old_h - 1, int(round(top * old_h)))),
+            max(1, min(old_w, int(round((right - left) * old_w)))),
+            max(1, min(old_h, int(round((bottom - top) * old_h)))),
+        )
+        self._bg_pixmap_source = self._bg_pixmap_source.copy(crop_rect)
+        self._canvas_document_size = (crop_rect.width(), crop_rect.height())
+        strokes = self.canvas.embedded_strokes()
+        for stroke in strokes:
+            stroke.points = self._remap_points_to_rect(stroke.points, bounds)
+        for layer in self._paint_layers:
+            if len(getattr(layer, "mask", []) or []) >= 3:
+                layer.mask = self._remap_points_to_rect(layer.mask, bounds)
+        self._remap_objects_to_rect(bounds)
+        self.canvas.set_strokes_snapshot(strokes)
+        self.canvas.clear_selection()
+        self._selected_path_item_id = "work-path"
+        self._canvas_pan = QPoint(0, 0)
+        self._update_canvas_geometry()
+        self._update_inspector_counts()
+        return True
+
+    def _resize_image_document(self, width: int, height: int) -> bool:
+        width = max(64, min(16384, int(width or 0)))
+        height = max(64, min(16384, int(height or 0)))
+        if (width, height) == tuple(self._canvas_document_size):
+            return False
+        self._push_undo_state("Image size")
+        if not self._bg_pixmap_source or self._bg_pixmap_source.isNull():
+            old_w, old_h = self._canvas_document_size
+            self._bg_pixmap_source = create_blank_paint_pixmap(old_w, old_h, "transparent")
+        self._bg_pixmap_source = self._bg_pixmap_source.scaled(
+            width,
+            height,
+            Qt.AspectRatioMode.IgnoreAspectRatio,
+            Qt.TransformationMode.SmoothTransformation,
+        )
+        self._canvas_document_size = (width, height)
+        self._canvas_pan = QPoint(0, 0)
+        self._update_canvas_geometry()
+        self._update_inspector_counts()
+        return True
+
+    def _resize_canvas_document(
+        self,
+        width: int,
+        height: int,
+        *,
+        background: str = "transparent",
+    ) -> bool:
+        width = max(64, min(16384, int(width or 0)))
+        height = max(64, min(16384, int(height or 0)))
+        old_w, old_h = self._canvas_document_size
+        if (width, height) == (old_w, old_h):
+            return False
+        self._push_undo_state("Canvas size")
+        if not self._bg_pixmap_source or self._bg_pixmap_source.isNull():
+            self._bg_pixmap_source = create_blank_paint_pixmap(old_w, old_h, "transparent")
+        new_pixmap = create_blank_paint_pixmap(width, height, background)
+        offset_x = (width - old_w) / 2.0
+        offset_y = (height - old_h) / 2.0
+        painter = QPainter(new_pixmap)
+        try:
+            painter.drawPixmap(int(round(offset_x)), int(round(offset_y)), self._bg_pixmap_source)
+        finally:
+            painter.end()
+        self._bg_pixmap_source = new_pixmap
+        self._canvas_document_size = (width, height)
+        strokes = self.canvas.embedded_strokes()
+        for stroke in strokes:
+            stroke.points = [
+                (
+                    max(0.0, min(1.0, (float(x) * old_w + offset_x) / width)),
+                    max(0.0, min(1.0, (float(y) * old_h + offset_y) / height)),
+                )
+                for x, y in stroke.points
+            ]
+        for layer in self._paint_layers:
+            if len(getattr(layer, "mask", []) or []) >= 3:
+                layer.mask = [
+                    (
+                        max(0.0, min(1.0, (float(x) * old_w + offset_x) / width)),
+                        max(0.0, min(1.0, (float(y) * old_h + offset_y) / height)),
+                    )
+                    for x, y in layer.mask
+                ]
+        self.canvas.set_strokes_snapshot(strokes)
+        selection = self.canvas.selection_snapshot()
+        if len(selection) >= 3:
+            self.canvas.set_selection_snapshot([
+                (
+                    max(0.0, min(1.0, (float(x) * old_w + offset_x) / width)),
+                    max(0.0, min(1.0, (float(y) * old_h + offset_y) / height)),
+                )
+                for x, y in selection
+            ])
+        self._canvas_pan = QPoint(0, 0)
+        self._update_canvas_geometry()
+        self._update_inspector_counts()
+        return True
+
+    def _flip_canvas(self, *, horizontal: bool = True) -> bool:
+        self._push_undo_state("Flip canvas")
+        image = self._bg_pixmap_source.toImage()
+        self._bg_pixmap_source = QPixmap.fromImage(image.mirrored(bool(horizontal), not bool(horizontal)))
+        strokes = self.canvas.embedded_strokes()
+        for stroke in strokes:
+            stroke.points = [
+                (
+                    max(0.0, min(1.0, 1.0 - float(x) if horizontal else float(x))),
+                    max(0.0, min(1.0, float(y) if horizontal else 1.0 - float(y))),
+                )
+                for x, y in stroke.points
+            ]
+        for layer in self._paint_layers:
+            if len(getattr(layer, "mask", []) or []) >= 3:
+                layer.mask = [
+                    (
+                        max(0.0, min(1.0, 1.0 - float(x) if horizontal else float(x))),
+                        max(0.0, min(1.0, float(y) if horizontal else 1.0 - float(y))),
+                    )
+                    for x, y in layer.mask
+                ]
+        self.canvas.set_strokes_snapshot(strokes)
+        selection = self.canvas.selection_snapshot()
+        if len(selection) >= 3:
+            self.canvas.set_selection_snapshot([
+                (
+                    max(0.0, min(1.0, 1.0 - float(x) if horizontal else float(x))),
+                    max(0.0, min(1.0, float(y) if horizontal else 1.0 - float(y))),
+                )
+                for x, y in selection
+            ])
+        for bubble in getattr(self, "_bubbles", []):
+            if horizontal:
+                bubble.x_norm = max(0.0, min(1.0, 1.0 - float(bubble.x_norm) - float(bubble.width_norm)))
+            else:
+                bubble.y_norm = max(0.0, min(1.0, 1.0 - float(bubble.y_norm) - float(bubble.height_norm)))
+        for sticker in getattr(self, "_stickers", []):
+            if horizontal:
+                sticker.x_norm = max(0.0, min(1.0, 1.0 - float(sticker.x_norm) - float(sticker.width_norm)))
+            else:
+                sticker.y_norm = max(0.0, min(1.0, 1.0 - float(sticker.y_norm) - float(sticker.height_norm)))
+        self._clear_path_preview()
+        self._update_canvas_geometry()
+        self._update_inspector_counts()
+        return True
+
+    def _prompt_image_size(self) -> None:
+        width, ok = QInputDialog.getInt(
+            self,
+            "Image Size",
+            "Width",
+            int(self._canvas_document_size[0]),
+            64,
+            16384,
+        )
+        if not ok:
+            return
+        height, ok = QInputDialog.getInt(
+            self,
+            "Image Size",
+            "Height",
+            int(self._canvas_document_size[1]),
+            64,
+            16384,
+        )
+        if ok:
+            self._resize_image_document(width, height)
+
+    def _prompt_canvas_size(self) -> None:
+        width, ok = QInputDialog.getInt(
+            self,
+            "Canvas Size",
+            "Width",
+            int(self._canvas_document_size[0]),
+            64,
+            16384,
+        )
+        if not ok:
+            return
+        height, ok = QInputDialog.getInt(
+            self,
+            "Canvas Size",
+            "Height",
+            int(self._canvas_document_size[1]),
+            64,
+            16384,
+        )
+        if ok:
+            self._resize_canvas_document(width, height)
+
+    def _mask_selected_layer_from_selection(self) -> bool:
+        if not hasattr(self, "canvas") or not self.canvas.has_active_selection():
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText("Layer mask needs an active selection")
+            return False
+        layer = self._paint_layer_by_id(self._current_layer_id()) or self._active_paint_layer()
+        if layer.locked:
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText(tr("paint.layer.locked_status"))
+            return False
+        self._push_undo_state("Layer mask from selection")
+        layer.mask = copy.deepcopy(self.canvas.selection_snapshot())
+        layer.mask_enabled = True
+        self._sync_canvas_layer_view()
+        self._update_inspector_counts()
+        return True
+
+    def _mask_selected_layer_from_path(self) -> bool:
+        item = self._path_list.currentItem() if hasattr(self, "_path_list") else None
+        if item is not None:
+            self._selected_path_item_id = str(
+                item.data(Qt.ItemDataRole.UserRole) or self._selected_path_item_id
+            )
+        points = self._path_points_for_item_id(self._selected_path_item_id)
+        if len(points) < 3:
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText("Layer mask needs a closed path")
+            return False
+        layer = self._paint_layer_by_id(self._current_layer_id()) or self._active_paint_layer()
+        if layer.locked:
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText(tr("paint.layer.locked_status"))
+            return False
+        self._push_undo_state("Layer mask from path")
+        layer.mask = copy.deepcopy(points)
+        layer.mask_enabled = True
+        self._sync_canvas_layer_view()
+        self._update_inspector_counts()
         return True
 
     def _install_edit_shortcuts(self) -> None:
@@ -4961,6 +5821,8 @@ class PaintDialog(QDialog):
             opacity=max(0, min(100, self._clipboard_int(row.get("opacity"), 100))),
             locked=bool(row.get("locked", False)),
             blend_mode=str(row.get("blend_mode") or "normal"),
+            mask=self._normalise_path_points(row.get("mask") or []),
+            mask_enabled=bool(row.get("mask_enabled", False)),
         )
 
     def _bubble_from_clipboard_dict(self, row: dict) -> "SpeechBubble":
@@ -5032,6 +5894,8 @@ class PaintDialog(QDialog):
                 opacity=max(0, min(100, int(getattr(source_layer, "opacity", 100)))),
                 locked=bool(getattr(source_layer, "locked", False)),
                 blend_mode=str(getattr(source_layer, "blend_mode", "normal") or "normal"),
+                mask=copy.deepcopy(getattr(source_layer, "mask", []) or []),
+                mask_enabled=bool(getattr(source_layer, "mask_enabled", False)),
             )
             self._paint_layers.append(layer)
             pasted = copy.deepcopy(payload.get("strokes") or [])
@@ -5239,6 +6103,10 @@ class PaintDialog(QDialog):
         cut_action = menu.addAction("Cut")
         paste_action = menu.addAction("Paste")
         menu.addSeparator()
+        select_all_action = menu.addAction("Select All")
+        deselect_action = menu.addAction("Deselect")
+        crop_action = menu.addAction("Crop To Selection")
+        menu.addSeparator()
         zoom_in_action = menu.addAction("Zoom In")
         zoom_out_action = menu.addAction("Zoom Out")
         zoom_fit_action = menu.addAction("Fit")
@@ -5255,6 +6123,11 @@ class PaintDialog(QDialog):
         copy_action.triggered.connect(self._copy_selected_layer)
         cut_action.triggered.connect(self._cut_selected_layer)
         paste_action.triggered.connect(self._paste_layer_clipboard)
+        select_all_action.triggered.connect(self._select_all)
+        deselect_action.setEnabled(bool(hasattr(self, "canvas") and self.canvas.has_active_selection()))
+        deselect_action.triggered.connect(self._deselect)
+        crop_action.setEnabled(bool(self._selection_bounds()))
+        crop_action.triggered.connect(self._crop_to_selection)
         zoom_in_action.triggered.connect(self._zoom_in)
         zoom_out_action.triggered.connect(self._zoom_out)
         zoom_fit_action.triggered.connect(self._zoom_fit)
@@ -5440,6 +6313,8 @@ class PaintDialog(QDialog):
                     "opacity": int(layer.opacity),
                     "locked": bool(layer.locked),
                     "blend_mode": str(getattr(layer, "blend_mode", "normal") or "normal"),
+                    "mask_enabled": bool(getattr(layer, "mask_enabled", False)),
+                    "mask_point_count": len(getattr(layer, "mask", []) or []),
                     "stroke_count": self._stroke_count_for_layer(layer.layer_id),
                     "active": layer.layer_id == self._active_paint_layer_id,
                     "selected": layer.layer_id == self._selected_layer_id,
@@ -5448,7 +6323,14 @@ class PaintDialog(QDialog):
             ],
             "active_layer_id": str(self._active_paint_layer_id),
             "selected_layer_id": str(self._selected_layer_id or ""),
+            "tool": str(getattr(self.canvas, "_tool", "off") if hasattr(self, "canvas") else "off"),
+            "selection_aspect": str(getattr(self, "_selection_aspect_mode", "free")),
+            "mirror": {
+                "x": bool(getattr(self, "_mirror_x_enabled", False)),
+                "y": bool(getattr(self, "_mirror_y_enabled", False)),
+            },
             "channels": dict(self._channel_visibility),
+            "selected_channel": str(getattr(self, "_selected_channel", "RGB")),
             "selection": {
                 "active": bool(self.canvas.has_active_selection()) if hasattr(self, "canvas") else False,
                 "point_count": int(self.canvas.selection_point_count()) if hasattr(self, "canvas") else 0,

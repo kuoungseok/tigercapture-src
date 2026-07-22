@@ -357,6 +357,7 @@ DEFAULT_RENDER = {
         "ibl_rotation": 0.0,
         "light_azimuth": 45.0,
         "light_elevation": 45.0,
+        "light_color": [1.0, 1.0, 1.0],
         "direct_strength": 0.42,
         "shadow_strength": DEFAULT_SHADOW_STRENGTH,
         "shadow_light_type": DEFAULT_SHADOW_LIGHT_TYPE,
@@ -759,6 +760,10 @@ def normalize_lighting_settings(value: Any) -> dict[str, Any]:
         "ibl_rotation": _clamp(_coerce_float(data.get("ibl_rotation"), defaults["ibl_rotation"]), -1.0, 1.0),
         "light_azimuth": _clamp(_coerce_float(data.get("light_azimuth"), defaults["light_azimuth"]), -180.0, 180.0),
         "light_elevation": _clamp(_coerce_float(data.get("light_elevation"), defaults["light_elevation"]), -20.0, 89.0),
+        "light_color": [
+            _clamp(value, 0.0, 8.0)
+            for value in _coerce_vector(data.get("light_color"), 3, defaults["light_color"])
+        ],
         "direct_strength": _clamp(_coerce_float(data.get("direct_strength"), defaults["direct_strength"]), 0.0, 4.0),
         "shadow_strength": _clamp(_coerce_float(data.get("shadow_strength"), defaults["shadow_strength"]), 0.0, 1.0),
         "shadow_light_type": normalize_shadow_light_type(

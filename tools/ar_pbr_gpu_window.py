@@ -455,6 +455,7 @@ in vec2 v_uv;
 in vec3 v_tangent;
 in vec3 v_bitangent;
 uniform vec3 u_light_dir;
+uniform vec3 u_light_color;
 uniform vec3 u_camera_pos;
 uniform sampler2D u_hdri;
 uniform sampler2D u_irradiance;
@@ -1117,7 +1118,7 @@ void main() {
     vec3 h = normalize(l + v);
     float ndoth = max(dot(n, h), 0.0);
     float vdoth = max(dot(v, h), 0.0);
-    vec3 direct = cook_torrance_direct(albedo, f0, roughness, metallic, ndotl, ndotv, ndoth, vdoth, direct_power) * diffuse_ao;
+    vec3 direct = cook_torrance_direct(albedo, f0, roughness, metallic, ndotl, ndotv, ndoth, vdoth, direct_power) * diffuse_ao * max(u_light_color, vec3(0.0));
     direct *= shadow;
 
     vec3 fill = albedo * (0.045 + roughness * 0.03) * kd * mix(0.48, 1.0, ambient_ao);
@@ -1645,6 +1646,7 @@ class GpuState:
     roll: float = 0.0
     zoom: float = 1.75
     camera_z: float = 3.25
+    fov_deg: float = FRAME_FIT_FOV_DEG
     pan_x: float = 0.0
     pan_y: float = 0.0
     pan_z: float = 0.0
@@ -1909,6 +1911,7 @@ class GpuState:
     triplanar_space: str = "object"
     light_azimuth: float = 45.0
     light_elevation: float = 45.0
+    light_color: tuple[float, float, float] = (1.0, 1.0, 1.0)
     direct_intensity: float = 0.42
     shadow_strength: float = DEFAULT_SHADOW_STRENGTH
     shadow_pcf_radius: float = DEFAULT_SHADOW_PCF_RADIUS
@@ -4740,7 +4743,7 @@ class GpuMeshWidget(QOpenGLWidget):
         if self.auto_fit_enabled and self.auto_fit_pending:
             self.fit_current_view()
             self.auto_fit_pending = False
-        proj = _perspective(FRAME_FIT_FOV_DEG, width / height, 0.05, 50.0)
+        proj = _perspective(max(10.0, min(120.0, float(self.state.fov_deg))), width / height, 0.05, 50.0)
         view = np.eye(4, dtype=np.float32)
         view[2, 3] = -float(self.state.camera_z)
         rot3 = _rotation_matrix(self.state.pitch, self.state.yaw, self.state.roll)
@@ -4966,6 +4969,13 @@ class GpuMeshWidget(QOpenGLWidget):
             float(light_dir[0]),
             float(light_dir[1]),
             float(light_dir[2]),
+        )
+        light_color = list(self.state.light_color) + [1.0, 1.0, 1.0]
+        GL.glUniform3f(
+            self._uniform_location(self.program, "u_light_color"),
+            max(0.0, float(light_color[0])),
+            max(0.0, float(light_color[1])),
+            max(0.0, float(light_color[2])),
         )
         GL.glUniform3f(self._uniform_location(self.program, "u_camera_pos"), 0.0, 0.0, float(self.state.camera_z))
         GL.glUniform1f(self._uniform_location(self.program, "u_ibl_exposure"), float(self.state.ibl_exposure))
@@ -5268,6 +5278,7 @@ class GpuMeshWidget(QOpenGLWidget):
                 viewport_width=max(1, self.width()),
                 viewport_height=max(1, self.height()),
                 camera_z=float(self.state.camera_z),
+                fov_deg=max(10.0, min(120.0, float(self.state.fov_deg))),
             )
             self.state.pan_x = max(-20.0, min(20.0, float(self.state.pan_x) + pan_dx))
             self.state.pan_y = max(-20.0, min(20.0, float(self.state.pan_y) + pan_dy))
@@ -6106,6 +6117,7 @@ def main() -> int:
                 "roll": float(window.state.roll),
                 "zoom": float(window.state.zoom),
                 "camera_z": float(window.state.camera_z),
+                "fov_deg": float(window.state.fov_deg),
                 "pan_x": float(window.state.pan_x),
                 "pan_y": float(window.state.pan_y),
                 "pan_z": float(window.state.pan_z),

@@ -500,6 +500,51 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
             QPointF(s * .66, s * .46),
             QPointF(s * .80, s * .70),
         ]))
+    elif n in {"marquee-rect", "rect-select", "rect_select", "selection-rect"}:
+        dash_pen = QPen(_color(color), max(1.2, s * .070))
+        dash_pen.setDashPattern([3.0, 3.0])
+        dash_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+        painter.setPen(dash_pen)
+        painter.drawRect(QRectF(s * .19, s * .24, s * .62, s * .52))
+    elif n in {"marquee-ellipse", "ellipse-select", "ellipse_select", "selection-ellipse"}:
+        dash_pen = QPen(_color(color), max(1.2, s * .070))
+        dash_pen.setDashPattern([3.0, 3.0])
+        dash_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+        painter.setPen(dash_pen)
+        painter.drawEllipse(QRectF(s * .19, s * .24, s * .62, s * .52))
+    elif n in {"crop", "crop-tool", "crop_tool"}:
+        painter.drawLine(QPointF(s * .28, s * .12), QPointF(s * .28, s * .72))
+        painter.drawLine(QPointF(s * .18, s * .28), QPointF(s * .78, s * .28))
+        painter.drawLine(QPointF(s * .72, s * .28), QPointF(s * .72, s * .88))
+        painter.drawLine(QPointF(s * .28, s * .72), QPointF(s * .88, s * .72))
+        painter.drawLine(QPointF(s * .17, s * .17), QPointF(s * .28, s * .17))
+        painter.drawLine(QPointF(s * .17, s * .17), QPointF(s * .17, s * .28))
+        painter.drawLine(QPointF(s * .83, s * .83), QPointF(s * .72, s * .83))
+        painter.drawLine(QPointF(s * .83, s * .83), QPointF(s * .83, s * .72))
+    elif n in {"mirror-x", "mirror_x", "flip-horizontal", "flip_horizontal"}:
+        painter.drawLine(QPointF(s * .50, s * .16), QPointF(s * .50, s * .84))
+        painter.drawPolygon(QPolygonF([
+            QPointF(s * .16, s * .50),
+            QPointF(s * .38, s * .28),
+            QPointF(s * .38, s * .72),
+        ]))
+        painter.drawPolygon(QPolygonF([
+            QPointF(s * .84, s * .50),
+            QPointF(s * .62, s * .28),
+            QPointF(s * .62, s * .72),
+        ]))
+    elif n in {"mirror-y", "mirror_y", "flip-vertical", "flip_vertical"}:
+        painter.drawLine(QPointF(s * .16, s * .50), QPointF(s * .84, s * .50))
+        painter.drawPolygon(QPolygonF([
+            QPointF(s * .50, s * .16),
+            QPointF(s * .28, s * .38),
+            QPointF(s * .72, s * .38),
+        ]))
+        painter.drawPolygon(QPolygonF([
+            QPointF(s * .50, s * .84),
+            QPointF(s * .28, s * .62),
+            QPointF(s * .72, s * .62),
+        ]))
     elif n in {"eraser", "erase"}:
         painter.save()
         painter.translate(s * .50, s * .50)

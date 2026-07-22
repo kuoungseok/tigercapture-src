@@ -190,6 +190,11 @@ def init_actor_state(self) -> None:
     self._mmd_lane_rows = []
     self._next_mmd_id = 1
     self._selected_mmd_track_id = ""
+    self._motion_compositions = {}
+    self._motion_clips = []
+    self._motion_lane_rows = []
+    self._motion_project_issues = []
+    self._motion_designer_window = None
 
 
 def init_project_settings(self) -> None:

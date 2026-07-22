@@ -354,6 +354,9 @@ class ProjectPlayer(QObject):
         self._live2d_actor_tracks: list = []  # list[Live2DActorTrack]
         self._ar_pbr_tracks: list[dict] = []
         self._mmd_tracks: list[dict] = []
+        self._motion_compositions: dict = {}
+        self._motion_clips: list = []
+        self._motion_renderer = None
         self._mmd_model_cache: dict[str, object] = {}
         self._mmd_motion_cache: dict[str, object | None] = {}
         self._mmd_physics_cache: dict[str, object] = {}
@@ -1657,6 +1660,12 @@ ProjectPlayer._render_live2d_only = _project_player_actor_workflow._render_live2
 ProjectPlayer._render_pip_overlays = _project_player_actor_workflow._render_pip_overlays
 
 from app import project_player_render_workflow as _project_player_render_workflow
+
+from app import project_player_motion_workflow as _project_player_motion_workflow
+
+ProjectPlayer.set_motion_state = _project_player_motion_workflow.set_motion_state
+ProjectPlayer.motion_state = _project_player_motion_workflow.motion_state
+ProjectPlayer._apply_motion_clips = _project_player_motion_workflow._apply_motion_clips
 
 ProjectPlayer._emit_rgb_frame = _project_player_render_workflow._emit_rgb_frame
 ProjectPlayer._decode_clip_rgb_for_nested = _project_player_render_workflow._decode_clip_rgb_for_nested

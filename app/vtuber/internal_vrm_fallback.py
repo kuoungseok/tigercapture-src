@@ -102,8 +102,16 @@ def render_internal_vrm_fallback_frame(
         )
         module = runtime["module"]
         frames = runtime["frames"]
-        frame = _select_motion_frame(frames, int(time_ms))
-        descriptor = module._apply_face_morphs(runtime["base_descriptor"], runtime["morph_targets"], frame)
+        explicit_frame = _motion_frame_from_settings(settings, time_ms=int(time_ms))
+        frame = explicit_frame or _select_motion_frame(frames, int(time_ms))
+        descriptor = runtime["base_descriptor"]
+        if explicit_frame is not None:
+            descriptor = module._attach_pose_animation(
+                descriptor,
+                (explicit_frame,),
+                upper_body_mode=str(settings.get("upper_body_mode") or "seated"),
+            )
+        descriptor = module._apply_face_morphs(descriptor, runtime["morph_targets"], frame)
         preview_cap = int(settings.get("contact_preview_triangle_cap", 0) or 0)
         if preview_cap > 0:
             descriptor = _limit_descriptor_triangles_for_contact_preview(
@@ -126,8 +134,8 @@ def render_internal_vrm_fallback_frame(
             {
                 "ok": bool(render_diag.get("ok", False)),
                 "descriptor_source": str(runtime.get("descriptor_source") or "unknown"),
-                "motion_source": str(runtime.get("motion_source") or "unknown"),
-                "pose_source": str(runtime.get("motion_source") or "openseeface_motion_csv"),
+                "motion_source": "explicit_motion_frame" if explicit_frame is not None else str(runtime.get("motion_source") or "unknown"),
+                "pose_source": "explicit_motion_frame" if explicit_frame is not None else str(runtime.get("motion_source") or "openseeface_motion_csv"),
                 "selected_motion_time_ms": int(frame.time_ms),
                 "selected_motion": {
                     "yaw_deg": float(getattr(frame, "yaw_deg", 0.0)),
@@ -320,6 +328,33 @@ def _idle_motion_frames() -> tuple[Any, ...]:
     return tuple(idle_motion_frame(time_ms) for time_ms in (0, 500, 1000, 1500))
 
 
+def _motion_frame_from_settings(settings: Mapping[str, Any], *, time_ms: int) -> Any | None:
+    """Build a deterministic direct pose without changing broadcast CSV behavior."""
+    raw = settings.get("motion_frame")
+    if not isinstance(raw, Mapping):
+        return None
+    from app.vtuber.video_face_driver import FaceMotionFrame
+
+    def number(name: str, default: float = 0.0) -> float:
+        try:
+            return float(raw.get(name, default) or 0.0)
+        except (TypeError, ValueError):
+            return float(default)
+
+    return FaceMotionFrame(
+        time_ms=int(raw.get("time_ms", time_ms) or time_ms),
+        yaw_deg=max(-45.0, min(45.0, number("yaw_deg"))),
+        pitch_deg=max(-35.0, min(35.0, number("pitch_deg"))),
+        roll_deg=max(-30.0, min(30.0, number("roll_deg"))),
+        shoulder_roll_deg=max(-25.0, min(25.0, number("shoulder_roll_deg"))),
+        mouth_open=max(0.0, min(1.0, number("mouth_open"))),
+        blink_l=max(0.0, min(1.0, number("blink_l"))),
+        blink_r=max(0.0, min(1.0, number("blink_r"))),
+        confidence=max(0.0, min(1.0, number("confidence", 1.0))),
+        source=str(raw.get("source") or "motion_designer_explicit_pose"),
+    )
+
+
 def _render_descriptor_frame(
     module: Any,
     *,
@@ -336,6 +371,7 @@ def _render_descriptor_frame(
     base = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     camera = settings.get("camera") if isinstance(settings.get("camera"), Mapping) else {}
     placement = settings.get("placement") if isinstance(settings.get("placement"), Mapping) else {}
+    lighting = settings.get("lighting") if isinstance(settings.get("lighting"), Mapping) else {}
     track = make_vrm_render_track(
         track_id="internal_vrm_fallback",
         asset_path=asset_path,
@@ -350,12 +386,12 @@ def _render_descriptor_frame(
         render={
             "renderer": renderer,
             "lighting": {
-                "light_azimuth": 28.0,
-                "light_elevation": 42.0,
-                "direct_strength": 0.65,
-                "ibl_exposure": 1.15,
-                "shadow_strength": 0.42,
-                "hdri_id": "studio_small_09",
+                "light_azimuth": float(lighting.get("light_azimuth", 28.0) or 28.0),
+                "light_elevation": float(lighting.get("light_elevation", 42.0) or 42.0),
+                "direct_strength": float(lighting.get("direct_strength", 0.65) or 0.65),
+                "ibl_exposure": float(lighting.get("ibl_exposure", 1.15) or 1.15),
+                "shadow_strength": float(lighting.get("shadow_strength", 0.42) or 0.42),
+                "hdri_id": str(lighting.get("hdri_id") or "studio_small_09"),
             }
         },
     )

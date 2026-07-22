@@ -46,6 +46,26 @@ def test_spine_actor_clip_falls_back_from_empty_default_skin():
     assert clip._resolved_skin_name(_Renderer()) == "large"
 
 
+def test_spine_actor_clip_falls_back_from_nearly_empty_default_skin():
+    from app.spine_editor.actor_track import SpineActorClip
+
+    class _Renderer:
+        skeleton = SimpleNamespace(skins={
+            "default": {},
+            "character": {},
+        })
+
+        def visual_bounds(self, skin_name):
+            return {
+                "default": (0.0, 0.0, 10.0, 10.0),
+                "character": (-100.0, -200.0, 100.0, 200.0),
+            }.get(skin_name)
+
+    clip = SpineActorClip(skin_name="default")
+
+    assert clip._resolved_skin_name(_Renderer()) == "character"
+
+
 def test_spine_screen_layout_centers_bounds_with_shared_margin():
     from app.spine_editor.layout import (
         SPINE_PREVIEW_FIT_MARGIN,

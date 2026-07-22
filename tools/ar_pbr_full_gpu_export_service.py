@@ -297,6 +297,9 @@ def _render_track_overlay(
     state.ibl_rotation = float(lighting.get("ibl_rotation", state.ibl_rotation) or state.ibl_rotation)
     state.light_azimuth = float(lighting.get("light_azimuth", hdri_diag.get("key_light_azimuth", state.light_azimuth)) or state.light_azimuth)
     state.light_elevation = float(lighting.get("light_elevation", hdri_diag.get("key_light_elevation", state.light_elevation)) or state.light_elevation)
+    light_color = lighting.get("light_color")
+    if isinstance(light_color, (list, tuple)) and len(light_color) >= 3:
+        state.light_color = tuple(max(0.0, min(8.0, float(value))) for value in light_color[:3])
     state.direct_intensity = float(lighting.get("direct_strength", state.direct_intensity) or state.direct_intensity)
     state.shadow_strength = float(lighting.get("shadow_strength", state.shadow_strength) or state.shadow_strength)
     state.self_shadow_strength = max(0.0, min(1.0, float(lighting.get("self_shadow_strength", state.self_shadow_strength) or state.self_shadow_strength)))
@@ -543,6 +546,7 @@ def _render_track_overlay(
     model_view = _model_view_settings(settings)
     state.zoom = _float_setting(model_view, "zoom", state.zoom)
     state.camera_z = _float_setting(model_view, "camera_z", state.camera_z)
+    state.fov_deg = max(10.0, min(120.0, _float_setting(model_view, "fov_deg", state.fov_deg)))
     state.pan_x = _float_setting(model_view, "pan_x", state.pan_x)
     state.pan_y = _float_setting(model_view, "pan_y", state.pan_y)
     state.pan_z = _float_setting(model_view, "pan_z", state.pan_z)
@@ -724,6 +728,7 @@ def _render_track_overlay(
                     "auto_fit": bool(auto_fit),
                     "zoom": float(state.zoom),
                     "camera_z": float(state.camera_z),
+                    "fov_deg": float(state.fov_deg),
                     "pan": [float(state.pan_x), float(state.pan_y), float(state.pan_z)],
                     "show_environment_background": bool(show_environment_background),
                     "transparent_background": bool(transparent_background),

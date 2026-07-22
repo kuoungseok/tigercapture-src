@@ -279,6 +279,8 @@ def _attach_pose_animation(
         }
     if str(upper_body_mode or "").casefold() == "seated":
         curves.update(_seated_arm_curves(frames))
+    elif str(upper_body_mode or "").casefold() in {"standing", "full_body", "relaxed"}:
+        curves.update(_standing_arm_curves(frames))
     out["animation_count"] = 1
     out["animation_clips"] = [
         {
@@ -301,6 +303,30 @@ def _seated_arm_curves(frames: tuple[Any, ...]) -> dict[str, dict[str, Any]]:
         "node_73": ((-12.0, -8.0, -72.0), (0.10, 0.04, 0.08)), # R upper arm
         "node_74": ((-24.0, -14.0, -52.0), (0.05, 0.03, 0.00)),# R lower arm
         "node_75": ((-6.0, -8.0, -8.0), (0.00, 0.00, 0.00)),   # R hand
+    }
+    curves: dict[str, dict[str, Any]] = {}
+    for node_id, (base, follow) in arm_nodes.items():
+        curves[node_id] = {
+            "rotation": {
+                "x": [[float(frame.time_ms), float(base[0]) + source_pitch_to_vrm_pitch(frame.pitch_deg) * float(follow[0])] for frame in frames],
+                "y": [[float(frame.time_ms), float(base[1]) + float(frame.yaw_deg) * float(follow[1])] for frame in frames],
+                "z": [[float(frame.time_ms), float(base[2]) + _frame_shoulder_roll(frame) * float(follow[2])] for frame in frames],
+            }
+        }
+    return curves
+
+
+def _standing_arm_curves(frames: tuple[Any, ...]) -> dict[str, dict[str, Any]]:
+    """Relax the imported humanoid T-pose while preserving subtle torso follow."""
+    arm_nodes = {
+        "node_53": ((1.0, -2.0, 3.0), (0.02, 0.02, 0.04)),
+        "node_54": ((-4.0, 4.0, 68.0), (0.08, 0.03, 0.06)),
+        "node_55": ((-5.0, 1.0, 8.0), (0.04, 0.02, 0.00)),
+        "node_56": ((0.0, 0.0, 0.0), (0.00, 0.00, 0.00)),
+        "node_72": ((1.0, 2.0, -3.0), (0.02, 0.02, 0.04)),
+        "node_73": ((-4.0, -4.0, -68.0), (0.08, 0.03, 0.06)),
+        "node_74": ((-5.0, -1.0, -8.0), (0.04, 0.02, 0.00)),
+        "node_75": ((0.0, 0.0, 0.0), (0.00, 0.00, 0.00)),
     }
     curves: dict[str, dict[str, Any]] = {}
     for node_id, (base, follow) in arm_nodes.items():

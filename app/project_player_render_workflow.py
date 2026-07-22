@@ -67,6 +67,8 @@ def _emit_rgb_frame(
     if rgb is None:
         return
     rgb_out = np.ascontiguousarray(rgb)
+    if getattr(self, "_motion_clips", None):
+        rgb_out = np.ascontiguousarray(self._apply_motion_clips(rgb_out, int(getattr(self, "_position_ms", 0))))
     h, w = rgb_out.shape[:2]
     gpu_payload = grade
     if gpu_meta:

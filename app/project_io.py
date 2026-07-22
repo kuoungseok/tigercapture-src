@@ -36,7 +36,7 @@ from typing import Any
 # ---------------------------------------------------------------------------
 
 EXTENSION = ".tgp"
-FORMAT_VERSION = "1.1"
+FORMAT_VERSION = "1.2"
 
 # QSettings key under the shared TigerCapture / TigerCapture
 # organisation/app pair used by app/i18n.py. Keeps "last project" in
@@ -642,6 +642,18 @@ def save_project(editor, path: str | Path) -> None:
     except Exception:
         doc["live2d_actor_tracks"] = []
     try:
+        from app.motion_designer.project_io import serialize_compositions
+
+        motion_store = getattr(editor, "_motion_compositions", None) or {}
+        motion_values = motion_store.values() if isinstance(motion_store, dict) else motion_store
+        doc["motion_compositions"] = serialize_compositions(motion_values)
+    except Exception:
+        doc["motion_compositions"] = []
+    try:
+        doc["motion_clips"] = [dict(item) for item in (getattr(editor, "_motion_clips", None) or [])]
+    except Exception:
+        doc["motion_clips"] = []
+    try:
         from app.ar_pbr.schema import normalize_ar_tracks
 
         doc["ar_pbr_tracks"] = normalize_ar_tracks(
@@ -752,6 +764,17 @@ def load_project(editor, path: str | Path) -> None:
                 editor._music_compositions[composition.id] = composition
     except Exception:
         editor._music_compositions = {}
+    try:
+        from app.motion_designer.project_io import load_motion_document
+
+        motion_load = load_motion_document(doc)
+        editor._motion_compositions = {item.id: item for item in motion_load.compositions}
+        editor._motion_project_issues = [item.to_dict() for item in motion_load.issues]
+        editor._motion_clips = [dict(item) for item in (doc.get("motion_clips") or []) if isinstance(item, dict)]
+    except Exception:
+        editor._motion_compositions = {}
+        editor._motion_clips = []
+        editor._motion_project_issues = []
 
     # 4. Restore subtitles.
     _load_subtitles(editor, doc.get("subtitles", []))
@@ -1040,6 +1063,13 @@ def load_project(editor, path: str | Path) -> None:
         except Exception:
             pass
 
+    if hasattr(editor, "_rebuild_motion_lanes"):
+        try:
+            editor._rebuild_motion_lanes()
+            editor._sync_motion_state_to_player()
+        except Exception:
+            pass
+
     try:
         editor._refresh_player_tracks()
         if hasattr(editor, "_update_tracks_host_width"):
@@ -1230,6 +1260,15 @@ def _clear_editor(editor) -> None:
             pass
     if hasattr(editor, "_mmd_lane_rows"):
         editor._mmd_lane_rows = []
+    for row in list(getattr(editor, "_motion_lane_rows", []) or []):
+        try:
+            editor._tracks_layout.removeWidget(row)
+            row.setParent(None)
+            row.deleteLater()
+        except Exception:
+            pass
+    if hasattr(editor, "_motion_lane_rows"):
+        editor._motion_lane_rows = []
     if hasattr(editor, "_spine_actor_tracks"):
         editor._spine_actor_tracks = []
     if hasattr(editor, "_live2d_actor_tracks"):
@@ -1242,6 +1281,12 @@ def _clear_editor(editor) -> None:
         editor._mmd_tracks = []
     if hasattr(editor, "_next_mmd_id"):
         editor._next_mmd_id = 1
+    if hasattr(editor, "_motion_compositions"):
+        editor._motion_compositions = {}
+    if hasattr(editor, "_motion_clips"):
+        editor._motion_clips = []
+    if hasattr(editor, "_motion_project_issues"):
+        editor._motion_project_issues = []
     try:
         editor._player.set_spine_actor_tracks([])
         editor._player.set_live2d_actor_tracks([])
