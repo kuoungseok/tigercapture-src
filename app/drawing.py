@@ -2984,8 +2984,12 @@ class PaintDialog(QDialog):
         inspector_controls_scroll.setFrameShape(QFrame.Shape.NoFrame)
         inspector_controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         inspector_controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        inspector_controls_scroll.setMinimumHeight(190)
-        inspector_controls_scroll.setMaximumHeight(360)
+        if self._standalone:
+            inspector_controls_scroll.setMinimumHeight(130)
+            inspector_controls_scroll.setMaximumHeight(230)
+        else:
+            inspector_controls_scroll.setMinimumHeight(190)
+            inspector_controls_scroll.setMaximumHeight(360)
         inspector_controls_scroll.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Preferred,
@@ -3175,13 +3179,12 @@ class PaintDialog(QDialog):
         color_panel_layout.addWidget(self.custom_color_btn)
         inspector_controls_layout.addWidget(color_panel)
         inspector_controls_layout.addStretch(1)
-        inspector_layout.addWidget(inspector_controls_scroll)
 
         self._layer_channel_path_tabs = QTabWidget()
         self._layer_channel_path_tabs.setObjectName("PaintLayerChannelPathTabs")
         self._layer_channel_path_tabs.setDocumentMode(True)
         self._layer_channel_path_tabs.setTabPosition(QTabWidget.TabPosition.North)
-        self._layer_channel_path_tabs.setMinimumHeight(280)
+        self._layer_channel_path_tabs.setMinimumHeight(320 if self._standalone else 280)
 
         layers_tab = QWidget()
         layers_layout = QVBoxLayout(layers_tab)
@@ -3385,7 +3388,12 @@ class PaintDialog(QDialog):
         history_layout.addWidget(self._history_list, stretch=1)
         self._layer_channel_path_tabs.addTab(history_tab, "History")
 
-        inspector_layout.addWidget(self._layer_channel_path_tabs, stretch=1)
+        if self._standalone:
+            inspector_layout.addWidget(self._layer_channel_path_tabs, stretch=1)
+            inspector_layout.addWidget(inspector_controls_scroll, stretch=0)
+        else:
+            inspector_layout.addWidget(inspector_controls_scroll)
+            inspector_layout.addWidget(self._layer_channel_path_tabs, stretch=1)
 
         note = QLabel(tr("paint.note"))
         note.setObjectName("PaintMeta")

@@ -126,7 +126,7 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog._recent_color_btns[0].width() <= 32
     assert dialog._palette_btns[0].width() <= 38
     scroll = dialog._paint_inspector_controls_scroll
-    assert scroll.geometry().bottom() < dialog._layer_channel_path_tabs.geometry().top()
+    assert dialog._layer_channel_path_tabs.geometry().bottom() < scroll.geometry().top()
     margins = dialog._paint_inspector_controls.layout().contentsMargins()
     assert margins.right() >= 12
     bar = scroll.verticalScrollBar()
