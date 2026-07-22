@@ -27,6 +27,8 @@ from app.video_editor_layout_specs import (
     TOP_WORKBENCH_SPLITTER_HANDLE_WIDTH,
     VIEWER_COLUMN_MIN_WIDTH,
     VIEWER_TOP_STRETCH,
+    WORKBENCH_SLOT_DEFAULT_WIDTH,
+    WORKBENCH_SLOT_MAX_WIDTH,
     WORKBENCH_SLOT_MIN_WIDTH,
     WORKBENCH_TOP_STRETCH,
     horizontal_tool_scroll_qss,
@@ -114,8 +116,9 @@ def build_preview_transport_area(self, main_col, root) -> None:
     self._top_workbench_slot = QWidget(top_work_splitter)
     self._top_workbench_slot.setObjectName("TopWorkbenchSlot")
     self._top_workbench_slot.setMinimumWidth(WORKBENCH_SLOT_MIN_WIDTH)
+    self._top_workbench_slot.setMaximumWidth(WORKBENCH_SLOT_MAX_WIDTH)
     self._top_workbench_slot.setSizePolicy(
-        QSizePolicy.Policy.Expanding,
+        QSizePolicy.Policy.Preferred,
         QSizePolicy.Policy.Expanding,
     )
     top_workbench_layout = QVBoxLayout(self._top_workbench_slot)
@@ -127,7 +130,7 @@ def build_preview_transport_area(self, main_col, root) -> None:
     top_work_splitter.setStretchFactor(1, WORKBENCH_TOP_STRETCH)
     if not _restore_top_workbench_splitter_state(top_work_splitter):
         top_work_splitter.setSizes(
-            [VIEWER_TOP_STRETCH * 120, WORKBENCH_TOP_STRETCH * 120],
+            [VIEWER_TOP_STRETCH * 160, WORKBENCH_SLOT_DEFAULT_WIDTH],
         )
     top_work_splitter.splitterMoved.connect(
         lambda _pos, _index: _save_top_workbench_splitter_state(self),

@@ -11,7 +11,7 @@ from app.video_editor_layout_specs import (
     RIGHT_DOCK_SECTIONS_SPLITTER_SETTINGS_KEY,
     TOP_WORKBENCH_SPLITTER_SETTINGS_KEY,
     VIEWER_TOP_STRETCH,
-    WORKBENCH_TOP_STRETCH,
+    WORKBENCH_SLOT_DEFAULT_WIDTH,
 )
 
 
@@ -94,7 +94,7 @@ def reset_editor_layout_to_default(self) -> dict[str, object]:
     if _set_splitter_sizes(
         self,
         "_top_work_splitter",
-        [VIEWER_TOP_STRETCH * 120, WORKBENCH_TOP_STRETCH * 120],
+        [VIEWER_TOP_STRETCH * 160, WORKBENCH_SLOT_DEFAULT_WIDTH],
     ):
         reset_splitters.append("top_workbench")
     if _set_splitter_sizes(self, "_left_dock_sections_splitter", [520, 260]):
