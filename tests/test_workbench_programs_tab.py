@@ -35,6 +35,7 @@ def test_workbench_programs_tab_exposes_icon_launchers() -> None:
         "Composer",
         "Voice Lab",
         "VTuber Studio",
+        "Painter",
         "PPT Maker",
         "Motion Designer",
         "Character Hub",

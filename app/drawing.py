@@ -1753,10 +1753,12 @@ class PaintDialog(QDialog):
         initial_bubbles: list["SpeechBubble"] | None = None,
         initial_stickers: list["Sticker"] | None = None,
         editor_object_provider: Callable[[], list] | None = None,
+        standalone: bool = False,
     ) -> None:
         super().__init__(parent)
-        self.setWindowTitle(tr("paint.title"))
-        self.setModal(True)
+        self._standalone = bool(standalone)
+        self.setWindowTitle("Painter - TigerCapture" if self._standalone else tr("paint.title"))
+        self.setModal(not self._standalone)
         self._time_ms = int(time_ms)
         self._editor_object_provider = editor_object_provider
         self._bubbles: list[SpeechBubble] = list(initial_bubbles or [])
@@ -1960,10 +1962,12 @@ class PaintDialog(QDialog):
         title_col = QVBoxLayout()
         title_col.setContentsMargins(0, 0, 0, 0)
         title_col.setSpacing(2)
-        title = QLabel("TigerCapture Paint")
+        title = QLabel("TigerCapture Painter" if self._standalone else "TigerCapture Paint")
         title.setObjectName("PaintTitle")
         subtitle = QLabel(
-            "Draw, cut out, place PNG stickers, and import editor objects."
+            "Blank canvas drawing, selections, layers, and color adjustments."
+            if self._standalone
+            else "Draw, cut out, place PNG stickers, and import editor objects."
         )
         subtitle.setObjectName("PaintSubtitle")
         title_col.addWidget(title)
@@ -2110,6 +2114,11 @@ class PaintDialog(QDialog):
         tool_layout.addWidget(self.editor_object_btn)
         tool_layout.addWidget(self.cutout_btn)
         tool_layout.addSpacing(8)
+        if self._standalone:
+            self.bubble_btn.hide()
+            self.sticker_btn.hide()
+            self.editor_object_btn.hide()
+            self.cutout_btn.hide()
 
         brush_library_title = QLabel("BRUSH LIBRARY")
         brush_library_title.setObjectName("PaintSectionTitle")
@@ -2407,6 +2416,8 @@ class PaintDialog(QDialog):
             ("bubbles", "Speech bubbles"),
             ("stickers", "PNG stickers"),
         ):
+            if self._standalone and key != "strokes":
+                continue
             row = QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
             name_label = QLabel(label_text)
@@ -2917,11 +2928,18 @@ class PaintDialog(QDialog):
         try:
             layer_list.clear()
             if strokes_count:
-                item = QListWidgetItem(f"Brush strokes ({strokes_count})")
+                label = (
+                    f"Drawing Layer 1 ({strokes_count})"
+                    if self._standalone
+                    else f"Brush strokes ({strokes_count})"
+                )
+                item = QListWidgetItem(label)
                 item.setData(Qt.ItemDataRole.UserRole, "strokes")
                 layer_list.addItem(item)
                 if selected_id == "strokes":
                     layer_list.setCurrentItem(item)
+            if self._standalone:
+                return
             for idx, bubble in enumerate(getattr(self, "_bubbles", [])):
                 text = bubble.text.strip() or "Speech bubble"
                 item = QListWidgetItem(f"Bubble {idx + 1}: {text[:24]}")

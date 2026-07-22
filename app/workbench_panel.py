@@ -1045,6 +1045,13 @@ class WorkbenchPanel(QWidget):
                 self.open_vtuber_studio_requested.emit,
             ),
             (
+                "Painter",
+                "Open a standalone blank canvas painter",
+                "paint-brush",
+                ("#56BBD4", "#6F6AE4"),
+                self._open_painter_program,
+            ),
+            (
                 "PPT\nMaker",
                 "Open the presentation and catalog deck maker",
                 "project",
@@ -1184,6 +1191,40 @@ class WorkbenchPanel(QWidget):
 
     def _open_voice_lab_program(self):
         return self._show_program_window(self._ensure_voice_lab_window())
+
+    def _open_painter_program(self) -> None:
+        from app.drawing import NewCanvasDialog, PaintDialog, create_blank_paint_pixmap
+
+        owner = self.window()
+        setup = NewCanvasDialog(owner)
+        if setup.exec() != setup.DialogCode.Accepted:
+            return
+        request = setup.canvas_request()
+        background = create_blank_paint_pixmap(
+            int(request.get("width") or 1920),
+            int(request.get("height") or 1080),
+            str(request.get("background") or "#FFFFFF"),
+        )
+        painter = PaintDialog(
+            background_pixmap=background,
+            initial_strokes=[],
+            time_ms=0,
+            parent=owner,
+            initial_bubbles=[],
+            initial_stickers=[],
+            editor_object_provider=None,
+            standalone=True,
+        )
+        painter.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
+        windows = [w for w in getattr(self, "_painter_windows", []) if w is not None]
+        windows.append(painter)
+        self._painter_windows = windows
+
+        def _forget_window(_result=0, window=painter) -> None:
+            self._painter_windows = [w for w in getattr(self, "_painter_windows", []) if w is not window]
+
+        painter.finished.connect(_forget_window)
+        self._show_program_window(painter)
 
     def _open_editor_program(self, method_name: str, title: str) -> None:
         owner = self.window()

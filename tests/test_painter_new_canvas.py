@@ -48,3 +48,25 @@ def test_new_canvas_dialog_reports_template_and_custom_size() -> None:
     assert request["height"] == 777
     assert request["template"] == "Custom"
     dialog.close()
+
+
+def test_standalone_painter_hides_video_annotation_tools() -> None:
+    app = _app()
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(640, 360, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.show()
+    app.processEvents()
+
+    assert dialog.windowTitle() == "Painter - TigerCapture"
+    assert dialog.bubble_btn.isHidden()
+    assert dialog.sticker_btn.isHidden()
+    assert dialog.editor_object_btn.isHidden()
+    assert dialog.cutout_btn.isHidden()
+
+    dialog.close()

@@ -469,6 +469,22 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
         for x, y in ((.28, .38), (.50, .62), (.72, .46)):
             painter.drawLine(QPointF(s * x, s * .22), QPointF(s * x, s * .82))
             painter.drawEllipse(QPointF(s * x, s * y), s * .075, s * .075)
+    elif n in {"paint", "painter", "paint-brush", "paint_brush", "brush"}:
+        painter.save()
+        painter.setPen(QPen(_color(color), max(1.5, s * .075), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawLine(QPointF(s * .66, s * .20), QPointF(s * .35, s * .62))
+        painter.setPen(QPen(_color(color), max(1.0, s * .050), Qt.PenStyle.SolidLine, Qt.PenCapStyle.RoundCap, Qt.PenJoinStyle.RoundJoin))
+        painter.drawRoundedRect(QRectF(s * .30, s * .56, s * .17, s * .12), s * .035, s * .035)
+        bristle = QPainterPath()
+        bristle.moveTo(s * .28, s * .66)
+        bristle.cubicTo(s * .15, s * .69, s * .14, s * .80, s * .17, s * .88)
+        bristle.cubicTo(s * .25, s * .83, s * .34, s * .82, s * .43, s * .70)
+        bristle.closeSubpath()
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(_color(color))
+        painter.drawPath(bristle)
+        painter.restore()
     elif n in {"music-note", "music_note", "note", "musical-note", "musical_note"}:
         base = _color(color)
         painter.save()
