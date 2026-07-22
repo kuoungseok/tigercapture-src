@@ -5400,7 +5400,16 @@ class PaintDialog(QDialog):
     def _flip_canvas(self, *, horizontal: bool = True) -> bool:
         self._push_undo_state("Flip canvas")
         image = self._bg_pixmap_source.toImage()
-        self._bg_pixmap_source = QPixmap.fromImage(image.mirrored(bool(horizontal), not bool(horizontal)))
+        if hasattr(image, "flipped"):
+            orientation = (
+                Qt.Orientation.Horizontal
+                if horizontal
+                else Qt.Orientation.Vertical
+            )
+            flipped = image.flipped(orientation)
+        else:
+            flipped = image.mirrored(bool(horizontal), not bool(horizontal))
+        self._bg_pixmap_source = QPixmap.fromImage(flipped)
         strokes = self.canvas.embedded_strokes()
         for stroke in strokes:
             stroke.points = [

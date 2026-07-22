@@ -45,10 +45,23 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
         "paint.layer.set_opacity",
         "paint.layer.set_blend_mode",
         "paint.channel.set_visible",
+        "paint.channel.select",
+        "paint.channel.copy_image",
+        "paint.channel.paste_image",
         "paint.selection.select_all",
         "paint.selection.deselect",
         "paint.selection.invert",
         "paint.selection.to_path",
+        "paint.selection.rectangle",
+        "paint.selection.ellipse",
+        "paint.selection.set_aspect",
+        "paint.crop.to_selection",
+        "paint.image.resize",
+        "paint.canvas.resize",
+        "paint.canvas.flip",
+        "paint.mirror.set",
+        "paint.layer.mask_from_selection",
+        "paint.layer.mask_from_path",
         "paint.path.to_selection",
         "paint.path.create",
         "paint.path.delete",
@@ -118,6 +131,10 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     ).to_dict()
     assert locked["ok"]
     assert next(row for row in locked["result"]["layers"] if row["layer_id"] == layer_id)["locked"] is True
+    registry.execute(
+        "paint.layer.set_locked",
+        {"layer_id": layer_id, "locked": False},
+    )
 
     channel = registry.execute(
         "paint.channel.set_visible",
@@ -126,10 +143,26 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     assert channel["ok"]
     assert channel["result"]["channels"]["Red"] is False
 
+    selected_channel = registry.execute("paint.channel.select", {"channel": "Green"}).to_dict()
+    assert selected_channel["ok"]
+    assert selected_channel["result"]["selected_channel"] == "Green"
+    copied_channel = registry.execute("paint.channel.copy_image", {"channel": "Blue"}).to_dict()
+    assert copied_channel["ok"]
+    pasted_channel = registry.execute("paint.channel.paste_image", {"channel": "Alpha"}).to_dict()
+    assert pasted_channel["ok"]
+    assert pasted_channel["result"]["selected_channel"] == "Alpha"
+
     selected = registry.execute("paint.selection.select_all").to_dict()
     assert selected["ok"]
     assert selected["result"]["selection"]["active"] is True
     assert selected["result"]["selection"]["point_count"] == 4
+
+    masked = registry.execute(
+        "paint.layer.mask_from_selection",
+        {"layer_id": layer_id},
+    ).to_dict()
+    assert masked["ok"]
+    assert next(row for row in masked["result"]["layers"] if row["layer_id"] == layer_id)["mask_enabled"] is True
 
     inverted = registry.execute("paint.selection.invert").to_dict()
     assert inverted["ok"]
@@ -145,6 +178,12 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     ).to_dict()
     assert path_to_selection["ok"]
     assert path_to_selection["result"]["selection"]["active"] is True
+
+    mask_from_path = registry.execute(
+        "paint.layer.mask_from_path",
+        {"layer_id": layer_id, "path_id": "path:0"},
+    ).to_dict()
+    assert mask_from_path["ok"]
 
     created_path = registry.execute(
         "paint.path.create",
@@ -162,6 +201,48 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
 
     deleted_path = registry.execute("paint.path.delete", {"path_id": "path:1"}).to_dict()
     assert deleted_path["ok"]
+
+    aspect = registry.execute("paint.selection.set_aspect", {"aspect": "square"}).to_dict()
+    assert aspect["ok"]
+    assert aspect["result"]["selection_aspect"] == "square"
+    rectangle = registry.execute(
+        "paint.selection.rectangle",
+        {"x1": 0.1, "y1": 0.1, "x2": 0.4, "y2": 0.35, "aspect": "free"},
+    ).to_dict()
+    assert rectangle["ok"]
+    assert rectangle["result"]["selection"]["point_count"] == 4
+    ellipse = registry.execute(
+        "paint.selection.ellipse",
+        {"x1": 0.1, "y1": 0.1, "x2": 0.4, "y2": 0.35, "aspect": "free"},
+    ).to_dict()
+    assert ellipse["ok"]
+    assert ellipse["result"]["selection"]["point_count"] == 32
+
+    mirror = registry.execute("paint.mirror.set", {"x": True, "y": False}).to_dict()
+    assert mirror["ok"]
+    assert mirror["result"]["mirror"]["x"] is True
+
+    resized_image = registry.execute(
+        "paint.image.resize",
+        {"width": 800, "height": 450},
+    ).to_dict()
+    assert resized_image["ok"]
+    assert resized_image["result"]["document"]["width"] == 800
+    resized_canvas = registry.execute(
+        "paint.canvas.resize",
+        {"width": 960, "height": 540, "background": "transparent"},
+    ).to_dict()
+    assert resized_canvas["ok"]
+    assert resized_canvas["result"]["document"]["width"] == 960
+    flipped = registry.execute("paint.canvas.flip", {"axis": "horizontal"}).to_dict()
+    assert flipped["ok"]
+    registry.execute(
+        "paint.selection.rectangle",
+        {"x1": 0.0, "y1": 0.0, "x2": 0.5, "y2": 0.5, "aspect": "free"},
+    )
+    cropped = registry.execute("paint.crop.to_selection").to_dict()
+    assert cropped["ok"]
+    assert cropped["result"]["document"]["width"] == 480
 
     zoom = registry.execute("paint.view.zoom", {"percent": 150}).to_dict()
     assert zoom["ok"]

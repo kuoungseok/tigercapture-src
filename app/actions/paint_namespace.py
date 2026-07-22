@@ -82,7 +82,26 @@ def register_paint_actions(registry: Any) -> None:
         "paint",
         "paint_tool_set",
         params_schema=schema_object(
-            {"tool": {"type": "string", "enum": ["select", "move", "pan", "hand", "pen", "brush", "eraser", "path"]}},
+            {
+                "tool": {
+                    "type": "string",
+                    "enum": [
+                        "select",
+                        "move",
+                        "pan",
+                        "hand",
+                        "pen",
+                        "brush",
+                        "eraser",
+                        "path",
+                        "rect_select",
+                        "rectangle",
+                        "ellipse_select",
+                        "ellipse",
+                        "crop",
+                    ],
+                }
+            },
             required=("tool",),
         ),
         undo_label="Set Painter tool",
@@ -215,6 +234,41 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="Painter channel visibility would change",
     )
     registry.register_adapter_action(
+        "paint.channel.select",
+        "Select RGB, Red, Green, Blue, or Alpha as the active Painter channel target.",
+        "paint",
+        "paint_channel_select",
+        params_schema=schema_object(
+            {"channel": {"type": "string", "enum": ["RGB", "Red", "Green", "Blue", "Alpha"]}},
+            required=("channel",),
+        ),
+        undo_label="Select Painter channel",
+        dry_summary="Painter channel target would change",
+    )
+    registry.register_adapter_action(
+        "paint.channel.copy_image",
+        "Copy the selected or specified Painter channel image to the system clipboard.",
+        "paint",
+        "paint_channel_copy_image",
+        params_schema=schema_object(
+            {"channel": {"type": "string", "enum": ["RGB", "Red", "Green", "Blue", "Alpha"]}}
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter channel image would be copied",
+    )
+    registry.register_adapter_action(
+        "paint.channel.paste_image",
+        "Paste a clipboard image into the selected or specified Painter channel.",
+        "paint",
+        "paint_channel_paste_image",
+        params_schema=schema_object(
+            {"channel": {"type": "string", "enum": ["RGB", "Red", "Green", "Blue", "Alpha"]}}
+        ),
+        undo_label="Paste Painter channel image",
+        dry_summary="clipboard image would be pasted into a Painter channel",
+    )
+    registry.register_adapter_action(
         "paint.selection.select_all",
         "Select the full Painter canvas.",
         "paint",
@@ -249,6 +303,139 @@ def register_paint_actions(registry: Any) -> None:
         params_schema=schema_object({}),
         undo_label="Selection to path",
         dry_summary="Painter selection would become a path",
+    )
+    registry.register_adapter_action(
+        "paint.selection.rectangle",
+        "Create a rectangular Painter selection from normalized 0..1 bounds.",
+        "paint",
+        "paint_selection_rectangle",
+        params_schema=schema_object(
+            {
+                "x1": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y1": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "x2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "aspect": {"type": "string", "enum": ["free", "square", "16:9", "4:3"]},
+            },
+            required=("x1", "y1", "x2", "y2"),
+        ),
+        undo_label="Rectangular Painter selection",
+        dry_summary="Painter rectangular selection would be created",
+    )
+    registry.register_adapter_action(
+        "paint.selection.ellipse",
+        "Create an elliptical Painter selection from normalized 0..1 bounds.",
+        "paint",
+        "paint_selection_ellipse",
+        params_schema=schema_object(
+            {
+                "x1": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y1": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "x2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "aspect": {"type": "string", "enum": ["free", "square", "16:9", "4:3"]},
+            },
+            required=("x1", "y1", "x2", "y2"),
+        ),
+        undo_label="Elliptical Painter selection",
+        dry_summary="Painter elliptical selection would be created",
+    )
+    registry.register_adapter_action(
+        "paint.selection.set_aspect",
+        "Set Painter marquee aspect mode to free, square, 16:9, or 4:3.",
+        "paint",
+        "paint_selection_set_aspect",
+        params_schema=schema_object(
+            {"aspect": {"type": "string", "enum": ["free", "square", "16:9", "4:3"]}},
+            required=("aspect",),
+        ),
+        undo_label="Set Painter selection aspect",
+        dry_summary="Painter marquee aspect mode would change",
+    )
+    registry.register_adapter_action(
+        "paint.crop.to_selection",
+        "Crop the Painter document to the active selection bounds.",
+        "paint",
+        "paint_crop_to_selection",
+        params_schema=schema_object({}),
+        undo_label="Crop Painter document",
+        dry_summary="Painter document would be cropped to selection",
+    )
+    registry.register_adapter_action(
+        "paint.image.resize",
+        "Resize the Painter image pixels and document dimensions.",
+        "paint",
+        "paint_image_resize",
+        params_schema=schema_object(
+            {
+                "width": {"type": "integer", "minimum": 64, "maximum": 16384},
+                "height": {"type": "integer", "minimum": 64, "maximum": 16384},
+            },
+            required=("width", "height"),
+        ),
+        undo_label="Resize Painter image",
+        dry_summary="Painter image pixels would be resized",
+    )
+    registry.register_adapter_action(
+        "paint.canvas.resize",
+        "Resize the Painter canvas without scaling layer geometry.",
+        "paint",
+        "paint_canvas_resize",
+        params_schema=schema_object(
+            {
+                "width": {"type": "integer", "minimum": 64, "maximum": 16384},
+                "height": {"type": "integer", "minimum": 64, "maximum": 16384},
+                "background": {"type": "string"},
+            },
+            required=("width", "height"),
+        ),
+        undo_label="Resize Painter canvas",
+        dry_summary="Painter canvas bounds would be resized",
+    )
+    registry.register_adapter_action(
+        "paint.canvas.flip",
+        "Flip the Painter canvas horizontally or vertically.",
+        "paint",
+        "paint_canvas_flip",
+        params_schema=schema_object(
+            {"axis": {"type": "string", "enum": ["horizontal", "vertical", "x", "y"]}}
+        ),
+        undo_label="Flip Painter canvas",
+        dry_summary="Painter canvas would be flipped",
+    )
+    registry.register_adapter_action(
+        "paint.mirror.set",
+        "Set Painter mirrored drawing along the canvas horizontal and/or vertical axes.",
+        "paint",
+        "paint_mirror_set",
+        params_schema=schema_object(
+            {
+                "x": {"type": "boolean"},
+                "y": {"type": "boolean"},
+            }
+        ),
+        undo_label="Set Painter mirror drawing",
+        dry_summary="Painter mirror drawing mode would change",
+    )
+    registry.register_adapter_action(
+        "paint.layer.mask_from_selection",
+        "Create or replace the selected Painter layer mask from the active selection.",
+        "paint",
+        "paint_layer_mask_from_selection",
+        params_schema=schema_object({"layer_id": {"type": "string"}}),
+        undo_label="Layer mask from selection",
+        dry_summary="Painter layer mask would be created from selection",
+    )
+    registry.register_adapter_action(
+        "paint.layer.mask_from_path",
+        "Create or replace the selected Painter layer mask from the active path.",
+        "paint",
+        "paint_layer_mask_from_path",
+        params_schema=schema_object(
+            {"layer_id": {"type": "string"}, "path_id": {"type": "string"}}
+        ),
+        undo_label="Layer mask from path",
+        dry_summary="Painter layer mask would be created from path",
     )
     registry.register_adapter_action(
         "paint.path.to_selection",

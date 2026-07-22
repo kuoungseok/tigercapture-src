@@ -6055,6 +6055,22 @@ AI Script Edit MVP integration:
   PNG export actions must preserve the same two UI modes as the dialog:
   composited PNG for backing image plus overlays, and transparent-overlay PNG
   for the editable layer only.
+- Standalone Painter follows the Photoshop-like contract in
+  `docs/PAINTER_STANDALONE_PLAN_KO.md`: left icon toolbar, central canvas,
+  and right-side `Layers / Channels / Paths / History` tabs. Brush presets are
+  visual stroke thumbnails rather than text-only rows. Selection actions cover
+  select-all, deselect, invert, rectangular marquee, elliptical marquee, and
+  marquee aspect modes (`free`, `square`, `16:9`, `4:3`). Path and layer-mask
+  actions must round-trip selection/path geometry through
+  `paint.selection.to_path`, `paint.path.to_selection`,
+  `paint.layer.mask_from_selection`, and `paint.layer.mask_from_path`.
+- Painter image and channel automation must stay exposed through
+  `paint.crop.to_selection`, `paint.image.resize`, `paint.canvas.resize`,
+  `paint.canvas.flip`, `paint.mirror.set`, `paint.channel.select`,
+  `paint.channel.copy_image`, and `paint.channel.paste_image`. Channel
+  copy/paste targets RGB, Red, Green, Blue, or Alpha and uses the system
+  image clipboard so AI workflows can move raster channel data without a
+  visible dialog.
 - The track/selection action namespace split is active:
   `app/actions/track_selection_namespace.py` owns track reorder/state/lock/mute/
   rename/select, clip selection, timeline select-all, and selection set/clear/

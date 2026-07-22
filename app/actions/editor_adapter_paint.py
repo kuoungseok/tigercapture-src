@@ -133,6 +133,25 @@ class PaintAdapterMixin:
         dialog._set_channel_visibility(str(channel or "RGB"), bool(visible))
         return dialog.painter_action_state()
 
+    def paint_channel_select(self, *, channel: str = "RGB") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._set_selected_channel(str(channel or "RGB"))
+        return dialog.painter_action_state()
+
+    def paint_channel_copy_image(self, *, channel: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if not dialog._copy_channel_image(str(channel or getattr(dialog, "_selected_channel", "RGB"))):
+            raise ValueError("no Painter channel image available to copy")
+        state = dialog.painter_action_state()
+        state["channel_clipboard"] = "copied"
+        return state
+
+    def paint_channel_paste_image(self, *, channel: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if not dialog._paste_channel_image(str(channel or getattr(dialog, "_selected_channel", "RGB"))):
+            raise ValueError("system clipboard does not contain an image")
+        return dialog.painter_action_state()
+
     def paint_selection_select_all(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         dialog._select_all()
@@ -151,6 +170,98 @@ class PaintAdapterMixin:
     def paint_selection_to_path(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         dialog._selection_to_path()
+        return dialog.painter_action_state()
+
+    def paint_selection_rectangle(
+        self,
+        *,
+        x1: float = 0.0,
+        y1: float = 0.0,
+        x2: float = 1.0,
+        y2: float = 1.0,
+        aspect: str = "free",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._push_undo_state("Rectangular selection")
+        dialog._set_selection_aspect_mode(str(aspect or "free"))
+        dialog.canvas.select_rectangle(float(x1), float(y1), float(x2), float(y2), shape="rect", aspect=str(aspect or "free"))
+        dialog._selected_path_item_id = "selection"
+        dialog._update_path_list()
+        dialog._set_tool("rect_select")
+        return dialog.painter_action_state()
+
+    def paint_selection_ellipse(
+        self,
+        *,
+        x1: float = 0.0,
+        y1: float = 0.0,
+        x2: float = 1.0,
+        y2: float = 1.0,
+        aspect: str = "free",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._push_undo_state("Elliptical selection")
+        dialog._set_selection_aspect_mode(str(aspect or "free"))
+        dialog.canvas.select_rectangle(float(x1), float(y1), float(x2), float(y2), shape="ellipse", aspect=str(aspect or "free"))
+        dialog._selected_path_item_id = "selection"
+        dialog._update_path_list()
+        dialog._set_tool("ellipse_select")
+        return dialog.painter_action_state()
+
+    def paint_selection_set_aspect(self, *, aspect: str = "free") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._set_selection_aspect_mode(str(aspect or "free"))
+        return dialog.painter_action_state()
+
+    def paint_crop_to_selection(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if not dialog._crop_to_selection():
+            raise ValueError("crop requires an active Painter selection")
+        return dialog.painter_action_state()
+
+    def paint_image_resize(self, *, width: int = 1920, height: int = 1080) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._resize_image_document(int(width or 1920), int(height or 1080))
+        return dialog.painter_action_state()
+
+    def paint_canvas_resize(
+        self,
+        *,
+        width: int = 1920,
+        height: int = 1080,
+        background: str = "transparent",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._resize_canvas_document(int(width or 1920), int(height or 1080), background=str(background or "transparent"))
+        return dialog.painter_action_state()
+
+    def paint_canvas_flip(self, *, axis: str = "horizontal") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        value = str(axis or "horizontal").strip().casefold()
+        dialog._flip_canvas(horizontal=value in {"horizontal", "x"})
+        return dialog.painter_action_state()
+
+    def paint_mirror_set(self, *, x: bool | None = None, y: bool | None = None) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._set_mirror_enabled(x=x, y=y)
+        return dialog.painter_action_state()
+
+    def paint_layer_mask_from_selection(self, *, layer_id: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if layer_id and not dialog._select_paint_layer_by_id(layer_id):
+            raise ValueError("paint layer not found")
+        if not dialog._mask_selected_layer_from_selection():
+            raise ValueError("layer mask from selection requires an active selection")
+        return dialog.painter_action_state()
+
+    def paint_layer_mask_from_path(self, *, layer_id: str = "", path_id: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if layer_id and not dialog._select_paint_layer_by_id(layer_id):
+            raise ValueError("paint layer not found")
+        if path_id:
+            dialog._selected_path_item_id = str(path_id)
+        if not dialog._mask_selected_layer_from_path():
+            raise ValueError("layer mask from path requires a path with at least 3 points")
         return dialog.painter_action_state()
 
     def paint_path_to_selection(self, *, path_id: str = "") -> dict[str, Any]:
@@ -213,6 +324,13 @@ class PaintAdapterMixin:
             "pen": "pen",
             "eraser": "eraser",
             "path": "path",
+            "rect_select": "rect_select",
+            "rectangle": "rect_select",
+            "marquee_rect": "rect_select",
+            "ellipse_select": "ellipse_select",
+            "ellipse": "ellipse_select",
+            "marquee_ellipse": "ellipse_select",
+            "crop": "crop",
             "pan": "pan",
             "select": "select",
         }

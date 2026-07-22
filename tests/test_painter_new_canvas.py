@@ -94,16 +94,29 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog.select_btn.toolTip() == "Select / Move"
     assert dialog.pan_btn.text() == ""
     assert dialog.pan_btn.toolTip() == "Pan canvas"
+    assert dialog.rect_select_btn.text() == ""
+    assert dialog.rect_select_btn.toolTip() == "Rectangular marquee"
+    assert dialog.ellipse_select_btn.text() == ""
+    assert dialog.ellipse_select_btn.toolTip() == "Elliptical marquee"
+    assert dialog.crop_btn.text() == ""
+    assert dialog.crop_btn.toolTip() == "Crop"
     assert dialog.pen_btn.text() == ""
     assert dialog.pen_btn.toolTip()
     assert dialog.eraser_btn.text() == ""
     assert dialog.eraser_btn.toolTip()
     assert not dialog.select_btn.icon().isNull()
     assert not dialog.pan_btn.icon().isNull()
+    assert not dialog.rect_select_btn.icon().isNull()
+    assert not dialog.ellipse_select_btn.icon().isNull()
+    assert not dialog.crop_btn.icon().isNull()
+    assert not dialog.mirror_x_btn.icon().isNull()
+    assert not dialog.mirror_y_btn.icon().isNull()
     assert not dialog.pen_btn.icon().isNull()
     assert not dialog.eraser_btn.icon().isNull()
     assert not dialog.path_btn.icon().isNull()
     assert dialog.brush_library_list.parent() is not dialog._tool_rail
+    assert dialog.brush_library_list.item(0).text() == ""
+    assert not dialog.brush_library_list.item(0).icon().isNull()
     assert dialog._layer_channel_path_tabs.count() == 4
     assert [
         dialog._layer_channel_path_tabs.tabText(i)
@@ -170,6 +183,12 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeyp
 
     dialog._set_tool("pan")
     assert dialog.pan_btn.isChecked()
+    dialog._set_tool("rect_select")
+    assert dialog.rect_select_btn.isChecked()
+    dialog._set_tool("ellipse_select")
+    assert dialog.ellipse_select_btn.isChecked()
+    dialog._set_tool("crop")
+    assert dialog.crop_btn.isChecked()
     dialog._set_zoom_percent(200)
     dialog._pan_canvas_by(QPoint(40, 20))
     assert dialog._canvas_pan != QPoint(0, 0)
@@ -230,6 +249,10 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeyp
     dialog._toggle_channel_item_visibility(red_item)
     assert dialog._channel_visibility["Red"] is False
     assert dialog._channel_visibility["RGB"] is False
+    assert dialog._selected_channel == "Red"
+    assert dialog._copy_channel_image("Red") is True
+    assert QApplication.clipboard().mimeData().hasImage()
+    assert dialog._paste_channel_image("Alpha") is True
     red_item = next(
         dialog._channel_list.item(i)
         for i in range(dialog._channel_list.count())
@@ -273,8 +296,35 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeyp
     assert dialog._history_list.count() >= 2
     dialog._select_all()
     assert dialog.canvas.selection_point_count() == 4
+    assert dialog._mask_selected_layer_from_selection() is True
+    assert dialog._active_paint_layer().mask_enabled is True
+    assert len(dialog._active_paint_layer().mask) == 4
     dialog._deselect()
     assert dialog.canvas.has_active_selection() is False
+
+    dialog._set_selection_aspect_mode("square")
+    assert dialog._selection_aspect_mode == "square"
+    dialog.canvas.select_rectangle(0.1, 0.1, 0.45, 0.35, shape="rect", aspect="square")
+    assert dialog.canvas.selection_point_count() == 4
+    dialog.canvas.select_rectangle(0.1, 0.1, 0.45, 0.35, shape="ellipse", aspect="free")
+    assert dialog.canvas.selection_point_count() == 32
+
+    strokes_before_mirror = len(dialog.canvas.embedded_strokes())
+    dialog._set_mirror_enabled(x=True, y=False)
+    assert dialog.mirror_x_btn.isChecked()
+    dialog._on_stroke_added(
+        Stroke(points=[(0.1, 0.2), (0.2, 0.25)], source_tool="pen")
+    )
+    assert len(dialog.canvas.embedded_strokes()) == strokes_before_mirror + 2
+    assert dialog.canvas.embedded_strokes()[-1].points[0][0] == 0.9
+
+    dialog.canvas.select_rectangle(0.0, 0.0, 0.5, 0.5, shape="rect", aspect="free")
+    assert dialog._crop_to_selection() is True
+    assert dialog._canvas_document_size == (320, 180)
+    assert dialog._resize_image_document(800, 450) is True
+    assert dialog._canvas_document_size == (800, 450)
+    assert dialog._resize_canvas_document(1000, 600) is True
+    assert dialog._canvas_document_size == (1000, 600)
 
     dialog.close()
 
