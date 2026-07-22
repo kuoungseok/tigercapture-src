@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QListWidget,
@@ -48,7 +49,7 @@ from app.audio_tool_dock_specs import (
     AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT,
     AUDIO_TOOL_DOCK_BUTTON_RADIUS,
 )
-from app.icons import app_icon, icon_size
+from app.icons import app_icon, icon_size, unreal_engine_icon
 from app.studio_slider import StudioSlider
 from app.style import FONT_FAMILY, editor_scrollbar_qss
 from app.video_editor_actor_evidence import ArPbrEvidenceCard, Live2DActorEvidenceCard
@@ -70,16 +71,21 @@ from app.workbench_cards import (
 
 _INSPECTOR_TAB_SIZE = (62, 48)
 _INSPECTOR_TAB_COMPACT_SIZE = (17, 21)
-_INSPECTOR_TAB_IDS = ("clip", "fx", "mask", "audio", "meta")
+_INSPECTOR_TAB_IDS = ("clip", "fx", "mask", "audio", "programs", "meta")
 _AUDIO_CREATION_TOOLS_EMPTY_TEXT = (
     "Composer and Voice Lab are always available below. Select "
     "an audio clip only when you want clip-level sound editing."
+)
+_PROGRAMS_EMPTY_TEXT = (
+    "Open Tiger Studio's focused production rooms. These are launchers, "
+    "not selected-clip properties."
 )
 _INSPECTOR_TAB_ICONS = {
     "clip": "video",
     "fx": "sliders",
     "mask": "scope",
     "audio": "audio",
+    "programs": "grid",
     "meta": "list",
 }
 _INSPECTOR_TAB_LABELS_EN = {
@@ -87,6 +93,7 @@ _INSPECTOR_TAB_LABELS_EN = {
     "fx": "Effects",
     "mask": "Mask",
     "audio": "Audio",
+    "programs": "Programs",
     "meta": "Info",
 }
 _INSPECTOR_TAB_LABELS_KO = {
@@ -94,6 +101,7 @@ _INSPECTOR_TAB_LABELS_KO = {
     "fx": "\ud6a8\uacfc",
     "mask": "\ub9c8\uc2a4\ud06c",
     "audio": "\uc624\ub514\uc624",
+    "programs": "\ud504\ub85c\uadf8\ub7a8",
     "meta": "\uc815\ubcf4",
 }
 _INSPECTOR_TAB_TOOLTIPS_EN = {
@@ -101,6 +109,7 @@ _INSPECTOR_TAB_TOOLTIPS_EN = {
     "fx": "Effects, color, and VFX stack",
     "mask": "Mask and rotoscope controls",
     "audio": "Audio clip and mixer controls",
+    "programs": "Open Composer, Voice Lab, VTuber Studio, PPT Maker, and other focused rooms",
     "meta": "Source and diagnostic information",
 }
 _INSPECTOR_TAB_TOOLTIPS_KO = {
@@ -108,6 +117,7 @@ _INSPECTOR_TAB_TOOLTIPS_KO = {
     "fx": "\ud544\ud130, \uc0c9\ubcf4\uc815, VFX \uc2a4\ud0dd",
     "mask": "\ub9c8\uc2a4\ud06c / \ub85c\ud1a0\uc2a4\ucf54\ud504 \uc81c\uc5b4",
     "audio": "\uc624\ub514\uc624 \ud074\ub9bd\uacfc \ubbf9\uc11c \uc81c\uc5b4",
+    "programs": "Composer, Voice Lab, VTuber Studio, PPT Maker \ub4f1 \uc81c\uc791 \uacf5\uac04\uc744 \uc5fd\uae30",
     "meta": "\uc18c\uc2a4 / \uc9c4\ub2e8 \uc815\ubcf4",
 }
 
@@ -442,6 +452,13 @@ class WorkbenchPanel(QWidget):
             "background:#263140;"
             "color:#FFFFFF; border-color:rgba(238,242,250,110);"
             "}"
+            "QWidget#ProgramLauncherGrid {"
+            "background:transparent; border:none;"
+            "}"
+            "QToolButton#ProgramLauncherButton {"
+            "color:#FFFFFF; border-radius:17px; padding:8px 4px 6px 4px;"
+            "font-size:9px; font-weight:820; min-width:76px; min-height:76px;"
+            "}"
             "QPushButton#InspectorTab[fxMode='true'], QToolButton#InspectorTab[fxMode='true'] {"
             "background:transparent; color:#8E949C; border:1px solid transparent;"
             "border-radius:3px; min-width:16px; min-height:21px;"
@@ -690,6 +707,7 @@ class WorkbenchPanel(QWidget):
             ("fx", "Select a video track to edit its effect graph."),
             ("mask", "Select a mask-capable node to edit tracking and masks."),
             ("audio", _AUDIO_CREATION_TOOLS_EMPTY_TEXT),
+            ("programs", _PROGRAMS_EMPTY_TEXT),
             ("meta", "Selection metadata appears here."),
         ):
             page = QWidget(self._tab_stack)
@@ -700,12 +718,12 @@ class WorkbenchPanel(QWidget):
             if tab_id == "audio":
                 layout.setAlignment(Qt.AlignmentFlag.AlignTop)
             empty = QLabel(empty_text, page)
-            empty.setObjectName("AudioCreationToolsHint" if tab_id == "audio" else "InspectorEmpty")
+            empty.setObjectName("AudioCreationToolsHint" if tab_id in {"audio", "programs"} else "InspectorEmpty")
             empty.setWordWrap(True)
-            if tab_id == "audio":
+            if tab_id in {"audio", "programs"}:
                 empty.setContentsMargins(0, 0, 0, 0)
                 empty.setMinimumHeight(12)
-                empty.setMaximumHeight(18)
+                empty.setMaximumHeight(24 if tab_id == "programs" else 18)
             layout.addWidget(empty)
             setattr(self, f"_{tab_id}_empty_label", empty)
             layout.addStretch(1)
@@ -713,6 +731,7 @@ class WorkbenchPanel(QWidget):
             self._tab_layouts[tab_id] = layout
             self._tab_stack.addWidget(page)
         root.addWidget(self._tab_stack, stretch=1)
+        self._build_program_launcher_page()
 
         # Property rows always live in the layout; they switch their
         # text contents between "selection placeholder" and concrete
@@ -990,6 +1009,144 @@ class WorkbenchPanel(QWidget):
         self._node_graph_root_layout = fx_layout
         self._node_graph_popout = None
         self._node_graph_placeholder = None
+
+    def _build_program_launcher_page(self) -> None:
+        page = self._tab_pages.get("programs")
+        layout = self._tab_layouts.get("programs")
+        if page is None or layout is None:
+            return
+        host = QWidget(page)
+        host.setObjectName("ProgramLauncherGrid")
+        grid = QGridLayout(host)
+        grid.setContentsMargins(6, 4, 6, 8)
+        grid.setHorizontalSpacing(7)
+        grid.setVerticalSpacing(7)
+        programs = (
+            (
+                "Composer",
+                "Open Music Lab and AI-assisted composition tools",
+                "music-note",
+                ("#42C7BA", "#4C64E8"),
+                self._open_composer_program,
+            ),
+            (
+                "Voice\nLab",
+                "Open TTS, voice generation, and voice production tools",
+                "voice-lab",
+                ("#9C65E6", "#D65C93"),
+                self._open_voice_lab_program,
+            ),
+            (
+                "VTuber\nStudio",
+                "Open Program Output, Source Tracking, and Avatar Mapping",
+                "video",
+                ("#40BBC2", "#7367D7"),
+                self.open_vtuber_studio_requested.emit,
+            ),
+            (
+                "PPT\nMaker",
+                "Open the presentation and catalog deck maker",
+                "project",
+                ("#E1A94C", "#D95658"),
+                lambda: self._open_editor_program("_open_ppt_generator", "PPT Maker"),
+            ),
+            (
+                "Motion\nDesigner",
+                "Open motion, pose, and character performance tools",
+                "person",
+                ("#7EB250", "#2FAE83"),
+                lambda: self._open_editor_program("_open_motion_designer_entry", "Motion Designer"),
+            ),
+            (
+                "Character\nHub",
+                "Open character assets, models, and actor libraries",
+                "actors",
+                ("#DE7AAE", "#7B70D8"),
+                lambda: self._open_editor_program("_open_character_asset_hub", "Character Hub"),
+            ),
+            (
+                "Engine\nLink",
+                "Open the Unreal Engine Link bridge",
+                "unreal",
+                ("#6F8DD8", "#2C71E8"),
+                lambda: self._open_editor_program("_open_unreal_engine_link", "Unreal Engine Link"),
+            ),
+        )
+        for idx, (label, tooltip, icon_name, colors, callback) in enumerate(programs):
+            button = self._program_launcher_button(label, tooltip, icon_name, colors, callback)
+            row, col = divmod(idx, 3)
+            grid.addWidget(button, row, col)
+        for col in range(3):
+            grid.setColumnStretch(col, 1)
+        layout.insertWidget(1, host, stretch=0)
+        self._program_launcher_grid = host
+
+    def _program_launcher_button(
+        self,
+        label: str,
+        tooltip: str,
+        icon_name: str,
+        colors: tuple[str, str],
+        callback,
+    ) -> QToolButton:
+        button = QToolButton(self._tab_pages["programs"])
+        button.setObjectName("ProgramLauncherButton")
+        button.setCursor(Qt.CursorShape.PointingHandCursor)
+        button.setText(label)
+        button.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextUnderIcon)
+        button.setToolTip(tooltip)
+        button.setAccessibleName(label.replace("\n", " "))
+        button.setAccessibleDescription(tooltip)
+        start_color, end_color = colors
+        button.setStyleSheet(
+            "QToolButton#ProgramLauncherButton {"
+            f"background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 {start_color},stop:1 {end_color});"
+            "color:#FFFFFF; border-top:1px solid rgba(255,255,255,74);"
+            "border-left:1px solid rgba(255,255,255,48);"
+            "border-right:1px solid rgba(0,0,0,76);"
+            "border-bottom:1px solid rgba(0,0,0,104);"
+            "border-radius:17px; padding:8px 4px 6px 4px;"
+            "font-size:9px; font-weight:820; min-width:76px; min-height:76px;"
+            "}"
+            "QToolButton#ProgramLauncherButton:hover {"
+            "border-top-color:rgba(255,255,255,112); border-left-color:rgba(255,255,255,74);"
+            "}"
+            "QToolButton#ProgramLauncherButton:pressed {"
+            "border-top-color:rgba(0,0,0,130); border-left-color:rgba(0,0,0,82);"
+            "border-right-color:rgba(255,255,255,40); border-bottom-color:rgba(255,255,255,54);"
+            "}"
+        )
+        icon = unreal_engine_icon(30, color="#FFFFFF") if icon_name == "unreal" else app_icon(icon_name, size=30, color="#FFFFFF")
+        button.setIcon(icon)
+        button.setIconSize(icon_size(30))
+        button.clicked.connect(lambda _checked=False, cb=callback: cb())
+        return button
+
+    def _show_program_window(self, window):
+        window.show()
+        try:
+            window.raise_()
+            window.activateWindow()
+        except Exception:
+            pass
+        return window
+
+    def _open_composer_program(self):
+        return self._show_program_window(self._ensure_composer_window())
+
+    def _open_voice_lab_program(self):
+        return self._show_program_window(self._ensure_voice_lab_window())
+
+    def _open_editor_program(self, method_name: str, title: str) -> None:
+        owner = self.window()
+        method = getattr(owner, method_name, None)
+        if not callable(method):
+            QMessageBox.information(self, title, f"{title} is not available in this build.")
+            return
+        try:
+            method()
+        except Exception as exc:
+            QMessageBox.warning(self, title, f"Could not open {title}:\n{exc}")
 
     def _ensure_sound_editor_panel(self):
         panel = getattr(self, "_sound_editor_panel", None)
@@ -2318,6 +2475,7 @@ class WorkbenchPanel(QWidget):
             self._fx_vfx_graph_btn.hide()
         self._set_tab_empty_visible("clip", True, "Select a timeline clip or track to edit properties.")
         self._set_tab_empty_visible("audio", True, _AUDIO_CREATION_TOOLS_EMPTY_TEXT)
+        self._set_tab_empty_visible("programs", True, _PROGRAMS_EMPTY_TEXT)
         self._set_tab_empty_visible("fx", True, "Select a video track to edit its effect graph.")
         self._set_tab_empty_visible("mask", True, "Select a mask-capable node to edit tracking and masks.")
         self._set_tab_empty_visible("meta", True, "Selection metadata appears here.")
