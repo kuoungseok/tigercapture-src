@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import math
+import tempfile
 from datetime import datetime
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
@@ -363,6 +364,14 @@ QComboBox#PaintLayerBlendCombo {
 QLabel#PaintColorWell {
     border: 1px solid #4c5870;
     border-radius: 9px;
+}
+
+QLabel#PaintPbrPreview {
+    background-color: #08090c;
+    border: 1px solid #2c3342;
+    border-radius: 8px;
+    color: #8f98a7;
+    min-height: 130px;
 }
 
 QLabel#PaintColorHex {
@@ -2552,6 +2561,9 @@ class PaintDialog(QDialog):
         self._magic_select_tolerance = 32
         self._mirror_x_enabled = False
         self._mirror_y_enabled = False
+        self._pbr_texture_settings: dict[str, float | str | bool] = {}
+        self._pbr_preview_payload: dict | None = None
+        self._pbr_source_path: str = ""
         self._selected_layer_id: str | None = None
         self._paint_clipboard: dict | None = None
         self._paint_layer_serial = 1
@@ -2910,6 +2922,10 @@ class PaintDialog(QDialog):
             "paths": 2,
             "path": 2,
             "history": 3,
+            "pbr": 4,
+            "pbr_maps": 4,
+            "texture": 4,
+            "materials": 4,
         }
         index = names.get(target, 0)
         if 0 <= index < tabs.count():
@@ -3939,6 +3955,100 @@ class PaintDialog(QDialog):
         history_layout.addWidget(self._history_list, stretch=1)
         self._layer_channel_path_tabs.addTab(history_tab, "History")
 
+        pbr_tab = QWidget()
+        pbr_layout = QVBoxLayout(pbr_tab)
+        pbr_layout.setContentsMargins(8, 8, 8, 8)
+        pbr_layout.setSpacing(8)
+        pbr_source = QLabel("Source: current Painter document")
+        pbr_source.setObjectName("PaintMeta")
+        pbr_layout.addWidget(pbr_source)
+
+        pbr_mode_row = QHBoxLayout()
+        pbr_mode_row.setContentsMargins(0, 0, 0, 0)
+        pbr_mode_label = QLabel("Preview")
+        pbr_mode_label.setObjectName("PaintMeta")
+        self.pbr_preview_mode_combo = QComboBox()
+        for label_text, mode in (
+            ("Material Plane", "material"),
+            ("Base Color", "base_color"),
+            ("Normal", "normal"),
+            ("AO", "ao"),
+            ("Roughness", "roughness"),
+            ("Metallic", "metallic"),
+            ("Height", "height"),
+            ("Cavity", "cavity"),
+            ("Unreal ORM", "unreal_orm"),
+            ("glTF MR", "gltf_mr"),
+        ):
+            self.pbr_preview_mode_combo.addItem(label_text, mode)
+        self.pbr_preview_mode_combo.currentIndexChanged.connect(self._queue_pbr_texture_preview)
+        pbr_mode_row.addWidget(pbr_mode_label)
+        pbr_mode_row.addWidget(self.pbr_preview_mode_combo, stretch=1)
+        pbr_layout.addLayout(pbr_mode_row)
+
+        pbr_normal_row = QHBoxLayout()
+        pbr_normal_row.setContentsMargins(0, 0, 0, 0)
+        normal_label = QLabel("Normal")
+        normal_label.setObjectName("PaintMeta")
+        self.pbr_normal_format_combo = QComboBox()
+        self.pbr_normal_format_combo.addItem("Unreal / DirectX", "unreal_directx")
+        self.pbr_normal_format_combo.addItem("OpenGL", "opengl")
+        self.pbr_normal_format_combo.currentIndexChanged.connect(self._queue_pbr_texture_preview)
+        pbr_normal_row.addWidget(normal_label)
+        pbr_normal_row.addWidget(self.pbr_normal_format_combo, stretch=1)
+        pbr_layout.addLayout(pbr_normal_row)
+
+        self._pbr_slider_labels: dict[str, QLabel] = {}
+        self._pbr_sliders: dict[str, QSlider] = {}
+        for label_text, key, minimum, maximum, value, suffix in (
+            ("Normal Strength", "normal_strength", 0, 120, 24, "x0.1"),
+            ("Normal Radius", "normal_radius_px", 0, 240, 18, "x0.1"),
+            ("AO Strength", "ao_strength", 0, 300, 82, "x0.01"),
+            ("AO Radius", "ao_radius_px", 0, 640, 80, "x0.1"),
+            ("Roughness", "roughness_bias", 0, 100, 55, "x0.01"),
+            ("Detail", "roughness_detail", 0, 100, 34, "x0.01"),
+            ("Metallic", "metallic_value", 0, 100, 0, "x0.01"),
+            ("Light Elevation", "preview_light_elevation", 3, 89, 48, "deg"),
+        ):
+            self._add_pbr_slider(pbr_layout, label_text, key, minimum, maximum, value, suffix)
+
+        self.pbr_preview_label = QLabel()
+        self.pbr_preview_label.setObjectName("PaintPbrPreview")
+        self.pbr_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.pbr_preview_label.setMinimumHeight(130)
+        pbr_layout.addWidget(self.pbr_preview_label)
+
+        pbr_buttons = QHBoxLayout()
+        pbr_buttons.setContentsMargins(0, 0, 0, 0)
+        self.pbr_refresh_btn = QPushButton("Preview")
+        self.pbr_refresh_btn.setObjectName("PaintCustomColor")
+        self.pbr_refresh_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.pbr_refresh_btn.clicked.connect(self._refresh_pbr_texture_preview)
+        self.pbr_export_maps_btn = QPushButton("Maps")
+        self.pbr_export_maps_btn.setObjectName("PaintCustomColor")
+        self.pbr_export_maps_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.pbr_export_maps_btn.setToolTip("Export separate BaseColor, Normal, AO, Roughness, Metallic, Height, and Cavity maps")
+        self.pbr_export_maps_btn.clicked.connect(lambda: self._export_pbr_texture_maps(packed=False))
+        self.pbr_export_packed_btn = QPushButton("Packed")
+        self.pbr_export_packed_btn.setObjectName("PaintCustomColor")
+        self.pbr_export_packed_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.pbr_export_packed_btn.setToolTip("Export Unreal ARM/ORM and glTF channel-packed maps")
+        self.pbr_export_packed_btn.clicked.connect(lambda: self._export_pbr_texture_maps(packed=True))
+        pbr_buttons.addWidget(self.pbr_refresh_btn)
+        pbr_buttons.addWidget(self.pbr_export_maps_btn)
+        pbr_buttons.addWidget(self.pbr_export_packed_btn)
+        pbr_layout.addLayout(pbr_buttons)
+
+        self.pbr_status_label = QLabel("Preview uses the current visible Painter document.")
+        self.pbr_status_label.setObjectName("PaintMeta")
+        self.pbr_status_label.setWordWrap(True)
+        pbr_layout.addWidget(self.pbr_status_label)
+        pbr_layout.addStretch(1)
+        self._pbr_preview_timer = QTimer(self)
+        self._pbr_preview_timer.setSingleShot(True)
+        self._pbr_preview_timer.timeout.connect(self._refresh_pbr_texture_preview)
+        self._layer_channel_path_tabs.addTab(pbr_tab, "PBR Maps")
+
         if self._standalone:
             inspector_layout.addWidget(self._layer_channel_path_tabs, stretch=1)
             inspector_layout.addWidget(inspector_controls_scroll, stretch=0)
@@ -3956,6 +4066,216 @@ class PaintDialog(QDialog):
         self._highlight_selected_palette()
         self._update_inspector_counts()
         self._install_edit_shortcuts()
+
+    def _add_pbr_slider(
+        self,
+        layout: QVBoxLayout,
+        label_text: str,
+        key: str,
+        minimum: int,
+        maximum: int,
+        value: int,
+        suffix: str,
+    ) -> None:
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        label = QLabel(label_text)
+        label.setObjectName("PaintMeta")
+        value_label = QLabel("")
+        value_label.setObjectName("PaintValue")
+        row.addWidget(label)
+        row.addStretch(1)
+        row.addWidget(value_label)
+        layout.addLayout(row)
+        slider = QSlider(Qt.Orientation.Horizontal)
+        slider.setRange(int(minimum), int(maximum))
+        slider.setValue(int(value))
+        slider.setProperty("pbr_key", key)
+        slider.setProperty("pbr_suffix", suffix)
+        slider.valueChanged.connect(lambda _value, k=key: self._on_pbr_slider_changed(k))
+        layout.addWidget(slider)
+        self._pbr_sliders[key] = slider
+        self._pbr_slider_labels[key] = value_label
+        self._sync_pbr_slider_label(key)
+
+    def _pbr_slider_value(self, key: str) -> float:
+        slider = getattr(self, "_pbr_sliders", {}).get(key)
+        if slider is None:
+            return 0.0
+        suffix = str(slider.property("pbr_suffix") or "")
+        value = float(slider.value())
+        if suffix == "x0.1":
+            return value / 10.0
+        if suffix == "x0.01":
+            return value / 100.0
+        return value
+
+    def _sync_pbr_slider_label(self, key: str) -> None:
+        label = getattr(self, "_pbr_slider_labels", {}).get(key)
+        if label is None:
+            return
+        slider = getattr(self, "_pbr_sliders", {}).get(key)
+        suffix = str(slider.property("pbr_suffix") or "") if slider is not None else ""
+        value = self._pbr_slider_value(key)
+        if suffix == "deg":
+            label.setText(f"{value:.0f} deg")
+        elif suffix == "x0.1":
+            label.setText(f"{value:.1f}")
+        elif suffix == "x0.01":
+            label.setText(f"{value:.2f}")
+        else:
+            label.setText(str(int(value)))
+
+    def _on_pbr_slider_changed(self, key: str) -> None:
+        self._sync_pbr_slider_label(key)
+        self._queue_pbr_texture_preview()
+
+    def _queue_pbr_texture_preview(self) -> None:
+        timer = getattr(self, "_pbr_preview_timer", None)
+        if timer is not None:
+            timer.start(180)
+
+    def _pbr_texture_settings_payload(self, overrides: dict | None = None) -> dict:
+        combo = getattr(self, "pbr_normal_format_combo", None)
+        settings = {
+            "normal_strength": self._pbr_slider_value("normal_strength"),
+            "normal_radius_px": self._pbr_slider_value("normal_radius_px"),
+            "normal_format": str(combo.currentData() if combo is not None else "unreal_directx"),
+            "ao_strength": self._pbr_slider_value("ao_strength"),
+            "ao_radius_px": self._pbr_slider_value("ao_radius_px"),
+            "roughness_bias": self._pbr_slider_value("roughness_bias"),
+            "roughness_detail": self._pbr_slider_value("roughness_detail"),
+            "metallic_value": self._pbr_slider_value("metallic_value"),
+            "preview_light_elevation": self._pbr_slider_value("preview_light_elevation"),
+        }
+        if overrides:
+            settings.update(dict(overrides))
+        return settings
+
+    def _pbr_source_output_path(self) -> Path:
+        root = Path(tempfile.gettempdir()) / "tiger_painter_pbr"
+        root.mkdir(parents=True, exist_ok=True)
+        return root / "painter_visible_document_source.png"
+
+    def _write_pbr_source_image(self, output_path: str | Path | None = None) -> dict:
+        from PIL import Image
+
+        path = Path(output_path) if output_path else self._pbr_source_output_path()
+        bg = self._export_background_pixmap()
+        target_size = _paint_export_size(bg, fallback=self._canvas_document_size)
+        width_scale = target_size[0] / max(1, self.canvas.width())
+        report = export_paint_png(
+            path,
+            background_pixmap=bg,
+            strokes=self._visible_strokes_for_export(),
+            bubbles=self._bubbles,
+            stickers=self._stickers,
+            time_ms=self._time_ms,
+            frame_size=target_size,
+            include_background=True,
+            stroke_width_scale=width_scale,
+        )
+        image = Image.open(path).convert("RGBA")
+        neutral = Image.new("RGBA", image.size, (128, 128, 128, 255))
+        Image.alpha_composite(neutral, image).convert("RGB").save(path, "PNG")
+        self._pbr_source_path = str(path)
+        report["pbr_source_path"] = str(path)
+        report["transparent_pixels_flattened_to"] = "#808080"
+        return report
+
+    def _refresh_pbr_texture_preview(self) -> None:
+        try:
+            mode = str(self.pbr_preview_mode_combo.currentData() or "material")
+            source = self._write_pbr_source_image()
+            out = Path(tempfile.gettempdir()) / "tiger_painter_pbr" / f"painter_pbr_preview_{mode}.png"
+            from app.ar_pbr.texture_map_lab import render_plane_preview
+
+            payload = render_plane_preview(
+                source["pbr_source_path"],
+                self._pbr_texture_settings_payload(),
+                preview_mode=mode,
+                output_path=out,
+                width=512,
+            )
+            pixmap = QPixmap(str(payload["preview_path"]))
+            if not pixmap.isNull():
+                self.pbr_preview_label.setPixmap(
+                    pixmap.scaled(
+                        self.pbr_preview_label.size(),
+                        Qt.AspectRatioMode.KeepAspectRatio,
+                        Qt.TransformationMode.SmoothTransformation,
+                    )
+                )
+            self._pbr_preview_payload = payload
+            self.pbr_status_label.setText(f"{mode} | {payload['size'][0]} x {payload['size'][1]}")
+        except Exception as exc:
+            if hasattr(self, "pbr_status_label"):
+                self.pbr_status_label.setText(f"PBR preview failed: {type(exc).__name__}: {exc}")
+
+    def _export_pbr_texture_maps(self, *, packed: bool) -> None:
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        try:
+            from app.paths import default_save_dir
+
+            base_dir = default_save_dir()
+        except Exception:
+            base_dir = Path.home()
+        selected = QFileDialog.getExistingDirectory(self, "Export Painter PBR Maps", str(base_dir))
+        if not selected:
+            return
+        try:
+            payload = self.export_pbr_maps_to_path(selected, packed=bool(packed))
+        except Exception as exc:
+            QMessageBox.warning(self, "Painter PBR Maps", f"Export failed:\n\n{type(exc).__name__}: {exc}")
+            return
+        QMessageBox.information(self, "Painter PBR Maps", f"Wrote PBR maps:\n{payload.get('output_dir')}")
+
+    def preview_pbr_map_to_path(
+        self,
+        path: str | Path,
+        *,
+        preview_mode: str = "material",
+        width: int = 512,
+        settings: dict | None = None,
+    ) -> dict:
+        source = self._write_pbr_source_image()
+        from app.ar_pbr.texture_map_lab import render_plane_preview
+
+        payload = render_plane_preview(
+            source["pbr_source_path"],
+            self._pbr_texture_settings_payload(settings),
+            preview_mode=preview_mode,
+            output_path=path,
+            width=int(width or 512),
+        )
+        self._pbr_preview_payload = payload
+        return payload
+
+    def export_pbr_maps_to_path(
+        self,
+        output_dir: str | Path,
+        *,
+        settings: dict | None = None,
+        maps: list[str] | tuple[str, ...] | None = None,
+        packed_layouts: list[str] | tuple[str, ...] | None = None,
+        packed: bool = True,
+    ) -> dict:
+        source = self._write_pbr_source_image()
+        layouts = packed_layouts
+        if layouts is None:
+            layouts = ("unreal_orm", "arm", "gltf_mr") if packed else ()
+        from app.ar_pbr.texture_map_lab import export_texture_maps
+
+        payload = export_texture_maps(
+            source["pbr_source_path"],
+            output_dir,
+            self._pbr_texture_settings_payload(settings),
+            maps=maps,
+            packed_layouts=layouts,
+        )
+        payload["painter_source"] = source
+        return payload
 
     def showEvent(self, event) -> None:
         super().showEvent(event)

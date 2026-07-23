@@ -77,6 +77,9 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
         "paint.clipboard.copy",
         "paint.clipboard.cut",
         "paint.clipboard.paste",
+        "paint.pbr.preview",
+        "paint.pbr.export",
+        "paint.pbr.substrate_plan",
     }
     assert required <= action_ids
 
@@ -103,6 +106,9 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     panel = registry.execute("paint.window.show_panel", {"panel": "paths"}).to_dict()
     assert panel["ok"]
     assert dialog._layer_channel_path_tabs.currentIndex() == 2
+    pbr_panel = registry.execute("paint.window.show_panel", {"panel": "pbr"}).to_dict()
+    assert pbr_panel["ok"]
+    assert dialog._layer_channel_path_tabs.currentIndex() == 4
 
     grid = registry.execute(
         "paint.view.grid",
@@ -309,6 +315,27 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     ).to_dict()
     assert exported["ok"]
     assert out_path.exists()
+
+    pbr_preview_path = tmp_path / "painter_pbr_preview.png"
+    pbr_preview = registry.execute(
+        "paint.pbr.preview",
+        {"path": str(pbr_preview_path), "preview_mode": "material", "width": 128},
+    ).to_dict()
+    assert pbr_preview["ok"]
+    assert pbr_preview_path.exists()
+    pbr_export = registry.execute(
+        "paint.pbr.export",
+        {
+            "output_dir": str(tmp_path / "painter_pbr_maps"),
+            "packed_layouts": ["arm"],
+            "settings": {"metallic_value": 0.1},
+        },
+    ).to_dict()
+    assert pbr_export["ok"]
+    assert (tmp_path / "painter_pbr_maps" / "painter_visible_document_source_arm.png").exists()
+    pbr_plan = registry.execute("paint.pbr.substrate_plan").to_dict()
+    assert pbr_plan["ok"]
+    assert pbr_plan["result"]["target"] == "Unreal Engine Substrate Slab BSDF"
 
     new_doc = registry.execute(
         "paint.document.new",

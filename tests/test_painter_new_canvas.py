@@ -127,11 +127,11 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog.snap_grid_btn.parent() is dialog._paint_inspector_controls
     assert dialog.magic_tolerance_slider.parent() is dialog._paint_inspector_controls
     assert dialog.toggle_channel_visibility_btn.toolTip()
-    assert dialog._layer_channel_path_tabs.count() == 4
+    assert dialog._layer_channel_path_tabs.count() == 5
     assert [
         dialog._layer_channel_path_tabs.tabText(i)
         for i in range(dialog._layer_channel_path_tabs.count())
-    ] == [tr("paint.tab.layers"), tr("paint.tab.channels"), tr("paint.tab.paths"), "History"]
+    ] == [tr("paint.tab.layers"), tr("paint.tab.channels"), tr("paint.tab.paths"), "History", "PBR Maps"]
     menu_labels = [
         action.text().replace("&", "")
         for action in dialog._painter_menu_bar.actions()
@@ -144,6 +144,9 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert not dialog._layer_lock_all_btn.isChecked()
     assert dialog._channel_list.item(0).text() == "RGB"
     assert not dialog._channel_list.item(0).icon().isNull()
+    assert dialog.pbr_preview_mode_combo.currentData() == "material"
+    assert dialog.pbr_normal_format_combo.currentData() == "unreal_directx"
+    assert dialog.pbr_preview_label.minimumHeight() >= 130
     assert dialog.color_wheel.width() <= 112
     assert dialog._color_preview.width() <= 48
     assert dialog._recent_color_btns[0].width() <= 32

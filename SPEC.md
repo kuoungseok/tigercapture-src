@@ -6096,6 +6096,13 @@ AI Script Edit MVP integration:
   Current fill operations target the document background raster or active
   selection clip; true independent raster-layer fill, Clone/Heal, and
   content-aware operations are later pixel-engine work, not current claims.
+- Painter owns the user-facing PBR texture-map workflow. The `PBR Maps` tab
+  in the Painter right panel previews the current visible Painter document on a
+  material plane, offers normal/AO/roughness/metallic controls, and exports
+  separate maps or ARM/ORM/glTF packed maps through `paint.pbr.preview`,
+  `paint.pbr.export`, and `paint.pbr.substrate_plan`. Lower-level
+  `ar_pbr.texture_lab.*` actions remain available for ownerless file-based
+  automation, but the product UI entry point is Painter.
 - Standalone Painter must avoid GIMP-style ambiguous state changes: channel row
   clicks select the channel only, visibility changes require the explicit eye
   control or `paint.channel.set_visible`, tool-specific controls live in a

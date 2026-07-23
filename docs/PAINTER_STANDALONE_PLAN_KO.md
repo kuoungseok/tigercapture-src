@@ -301,3 +301,35 @@ AI 적용 원칙:
 - `app/video_editor_window.py`에는 새 Painter 로직을 넣지 않는다.
 - Video Paint의 영상 주석 기능과 Standalone Painter의 독립 이미지 편집 기능은
   UI 노출만 다르게 하고, 가능한 한 같은 데이터 구조와 export 경로를 공유한다.
+
+## PBR Maps / Unreal Texture Workflow
+
+Painter owns the user-facing AR/PBR texture-map workflow. The feature appears
+inside the Painter right panel as a `PBR Maps` tab, not as a primary standalone
+AR/PBR window.
+
+User scenario:
+
+1. Open an image or paint a texture in Painter.
+2. Open the right-panel `PBR Maps` tab.
+3. Preview the current visible Painter document as a material plane or as
+   Base Color, Normal, AO, Roughness, Metallic, Height, Cavity, Unreal ORM, or
+   glTF MR maps.
+4. Adjust Normal strength/radius, AO strength/radius, roughness/detail,
+   metallic, and preview light elevation.
+5. Export separate maps or packed maps for Unreal/glTF.
+
+Automation contract:
+
+- `paint.pbr.preview`: render a plane or map preview from the current visible
+  Painter document.
+- `paint.pbr.export`: export separate BaseColor/Normal/AO/Roughness/Metallic/
+  Height/Cavity maps and optional ARM/ORM/glTF packed maps from Painter.
+- `paint.pbr.substrate_plan`: return Unreal Default Lit and Substrate Slab
+  wiring guidance for the generated Painter maps.
+
+The current visible Painter document is flattened to a temporary source PNG
+before map generation. Transparent pixels are composited over neutral
+`#808080` for stable map generation. Durable exports go to the user-selected
+folder or default save folder; `debugCapture` must not be used as a dependency
+or durable export location.

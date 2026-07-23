@@ -136,11 +136,11 @@ def register_paint_actions(registry: Any) -> None:
     )
     registry.register_adapter_action(
         "paint.window.show_panel",
-        "Show the Layers, Channels, Paths, or History panel in the active Painter window.",
+        "Show the Layers, Channels, Paths, History, or PBR Maps panel in the active Painter window.",
         "paint",
         "paint_window_show_panel",
         params_schema=schema_object(
-            {"panel": {"type": "string", "enum": ["layers", "channels", "paths", "history"]}},
+            {"panel": {"type": "string", "enum": ["layers", "channels", "paths", "history", "pbr", "pbr_maps"]}},
             required=("panel",),
         ),
         undo_label="Show Painter panel",
@@ -684,6 +684,84 @@ def register_paint_actions(registry: Any) -> None:
         mutating=False,
         changed=False,
         dry_summary="current Paint overlays would be exported as PNG",
+    )
+    pbr_settings = {
+        "type": "object",
+        "properties": {
+            "normal_strength": {"type": "number", "minimum": 0.0, "maximum": 12.0},
+            "normal_radius_px": {"type": "number", "minimum": 0.0, "maximum": 24.0},
+            "normal_format": {"type": "string", "enum": ["unreal_directx", "directx", "opengl"]},
+            "ao_strength": {"type": "number", "minimum": 0.0, "maximum": 3.0},
+            "ao_radius_px": {"type": "number", "minimum": 0.0, "maximum": 64.0},
+            "roughness_bias": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "roughness_detail": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "metallic_value": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "preview_light_elevation": {"type": "number", "minimum": 3.0, "maximum": 89.0},
+        },
+    }
+    registry.register_adapter_action(
+        "paint.pbr.preview",
+        "Render a Painter document AR/PBR plane or texture-map preview from the current visible Painter document.",
+        "paint",
+        "paint_pbr_preview",
+        params_schema=schema_object(
+            {
+                "path": {"type": "string"},
+                "preview_mode": {
+                    "type": "string",
+                    "enum": [
+                        "material",
+                        "base_color",
+                        "normal",
+                        "ao",
+                        "roughness",
+                        "metallic",
+                        "height",
+                        "cavity",
+                        "unreal_orm",
+                        "arm",
+                        "gltf_mr",
+                    ],
+                },
+                "width": {"type": "integer", "minimum": 64, "maximum": 8192},
+                "settings": pbr_settings,
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter PBR map preview would be rendered",
+    )
+    registry.register_adapter_action(
+        "paint.pbr.export",
+        "Export separate and packed AR/PBR texture maps from the current visible Painter document.",
+        "paint",
+        "paint_pbr_export",
+        params_schema=schema_object(
+            {
+                "output_dir": {"type": "string"},
+                "settings": pbr_settings,
+                "maps": {"type": "array", "items": {"type": "string"}},
+                "packed_layouts": {
+                    "type": "array",
+                    "items": {"type": "string", "enum": ["unreal_orm", "orm", "arm", "rma", "gltf_mr"]},
+                },
+                "packed": {"type": "boolean"},
+            }
+        ),
+        mutating=True,
+        changed=True,
+        undo_label="Export Painter PBR maps",
+        dry_summary="Painter PBR maps would be exported",
+    )
+    registry.register_adapter_action(
+        "paint.pbr.substrate_plan",
+        "Return Unreal Default Lit and Substrate wiring guidance for Painter PBR map exports.",
+        "paint",
+        "paint_pbr_substrate_plan",
+        params_schema=schema_object({"settings": pbr_settings}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter PBR Substrate plan would be returned",
     )
 
 

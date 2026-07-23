@@ -724,6 +724,14 @@ Automation surface:
 - `ar_pbr.texture_lab.substrate_plan`: returns Unreal Default Lit and
   Substrate material-wiring guidance for generated maps.
 
+Product UI note: the primary user-facing entry point for painting or editing a
+source texture and then generating PBR maps is Painter's right-panel
+`PBR Maps` tab. The lower-level `ar_pbr.texture_lab.*` actions remain useful
+for file-based automation and review tooling, but the in-app workflow should
+not force users into a separate AR/PBR window when they are already authoring
+the source texture in Painter. Painter exposes the same workflow as
+`paint.pbr.preview`, `paint.pbr.export`, and `paint.pbr.substrate_plan`.
+
 Unreal/Substrate research outcome:
 
 - Existing Default Lit PBR maps remain the practical interchange baseline.

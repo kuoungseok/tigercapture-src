@@ -407,6 +407,62 @@ class PaintAdapterMixin:
         dialog._show_painter_tab(str(panel or "layers"))
         return dialog.painter_action_state()
 
+    def paint_pbr_preview(
+        self,
+        *,
+        path: str = "",
+        preview_mode: str = "material",
+        width: int = 512,
+        settings: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if not path:
+            import tempfile
+
+            path = str(Path(tempfile.gettempdir()) / "tiger_painter_pbr" / f"painter_pbr_{preview_mode or 'material'}.png")
+        return dialog.preview_pbr_map_to_path(
+            path,
+            preview_mode=str(preview_mode or "material"),
+            width=int(width or 512),
+            settings=dict(settings or {}),
+        )
+
+    def paint_pbr_export(
+        self,
+        *,
+        output_dir: str = "",
+        settings: dict[str, Any] | None = None,
+        maps: list[str] | None = None,
+        packed_layouts: list[str] | None = None,
+        packed: bool = True,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if not output_dir:
+            from datetime import datetime
+
+            from app.paths import default_save_dir
+
+            stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_dir = str(default_save_dir() / f"painter_pbr_maps_{stamp}")
+        return dialog.export_pbr_maps_to_path(
+            output_dir,
+            settings=dict(settings or {}),
+            maps=maps,
+            packed_layouts=packed_layouts,
+            packed=bool(packed),
+        )
+
+    def paint_pbr_substrate_plan(
+        self,
+        *,
+        settings: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.ar_pbr.texture_map_lab import substrate_export_plan
+
+        merged = dialog._pbr_texture_settings_payload(dict(settings or {}))
+        return substrate_export_plan(merged)
+
     def paint_editor_objects_list(
         self,
         *,

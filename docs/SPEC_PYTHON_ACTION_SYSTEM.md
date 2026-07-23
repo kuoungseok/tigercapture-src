@@ -1328,6 +1328,9 @@ returning draft/starter audio.
 - `ar_pbr.texture_lab.preview`
 - `ar_pbr.texture_lab.export`
 - `ar_pbr.texture_lab.substrate_plan`
+- `paint.pbr.preview`
+- `paint.pbr.export`
+- `paint.pbr.substrate_plan`
 
 ### Render, Publish, Health, and QA
 
