@@ -189,6 +189,10 @@ def test_ar_pbr_gizmo_actions_are_registered_for_automation() -> None:
         "ar_pbr.gizmo.state",
         "ar_pbr.gizmo.show",
         "ar_pbr.gizmo.hide",
+        "ar_pbr.texture_lab.open",
+        "ar_pbr.texture_lab.preview",
+        "ar_pbr.texture_lab.export",
+        "ar_pbr.texture_lab.substrate_plan",
     } <= action_ids
     settings_schema = action_specs["ar_pbr.preview.settings.set"]["params_schema"]["properties"]
     view_schema = action_specs["ar_pbr.preview.view.set"]["params_schema"]["properties"]
@@ -229,6 +233,13 @@ def test_ar_pbr_gizmo_actions_are_registered_for_automation() -> None:
         "clearcoat_roughness",
         "clearcoat_ior",
     } <= set(surface_schema)
+    texture_export_schema = action_specs["ar_pbr.texture_lab.export"]["params_schema"]["properties"]
+    texture_preview_schema = action_specs["ar_pbr.texture_lab.preview"]["params_schema"]["properties"]
+    assert {"image_path", "output_dir", "settings", "maps", "packed_layouts"} <= set(texture_export_schema)
+    assert {"material", "normal", "unreal_orm", "gltf_mr"} <= set(texture_preview_schema["preview_mode"]["enum"])
+    assert {"unreal_orm", "arm", "gltf_mr", "rma"} <= set(
+        texture_export_schema["packed_layouts"]["items"]["enum"]
+    )
 
 
 def test_ar_pbr_preview_diagnostics_action_reports_packet_and_vbo_state() -> None:

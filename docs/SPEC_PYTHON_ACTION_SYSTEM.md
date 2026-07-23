@@ -1324,6 +1324,10 @@ returning draft/starter audio.
 - `ar_pbr.depth_estimate`
 - `ar_pbr.camera_solve`
 - `ar_pbr.preview`
+- `ar_pbr.texture_lab.open`
+- `ar_pbr.texture_lab.preview`
+- `ar_pbr.texture_lab.export`
+- `ar_pbr.texture_lab.substrate_plan`
 
 ### Render, Publish, Health, and QA
 

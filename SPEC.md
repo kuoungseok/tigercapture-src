@@ -707,6 +707,21 @@ Start here when changing a feature:
   rendering now exists through the helper process below; remaining renderer work is quality depth: real
   shadow-map passes, physically richer reflections, IBL prefilter tuning,
   batching, and camera/lens solve fidelity.
+  Image-to-material work is covered by the AR/PBR Texture Lab: core generation
+  lives in `app.ar_pbr.texture_map_lab`, the Qt plane-preview/sliders live in
+  `app.ar_pbr.texture_map_lab_window`, and automation is exposed through
+  `ar_pbr.texture_lab.open/preview/export/substrate_plan`. It turns a source
+  image into previewable PBR maps, exports separate BaseColor/Normal/AO/
+  Roughness/Metallic/Height/Cavity maps, and writes `unreal_orm`/`orm`/`arm`
+  packed masks with R=AO, G=Roughness, B=Metallic plus `gltf_mr` with
+  G=Roughness, B=Metallic. Unreal Substrate does not require a different
+  source texture set for the base workflow; the manifest records a Substrate
+  graph plan that feeds BaseColor/Specular/Metallic through Unreal's
+  `Substrate Metalness-To-DiffuseAlbedo-F0` helper and wires the result into a
+  Slab BSDF `DiffuseAlbedo/F0`, while Roughness and Normal go directly to the
+  Slab and AO remains a material/root occlusion input. Advanced Substrate maps
+  such as F90, second roughness, anisotropy/tangent, fuzz, and glint are future
+  optional generators rather than guessed from a single image.
   `app.ar_pbr.full_gpu_export_service` defines and invokes the worker-safe
   helper-process path for that full-GPU route.
   `tools/ar_pbr_full_gpu_export_service.py` is the default helper; it accepts

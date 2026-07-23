@@ -684,6 +684,78 @@ native helper-side model-depth-buffer compare. True per-fragment helper
 occlusion should compare video depth against the helper's rendered object depth
 buffer once that buffer is exposed in the service path.
 
+## Image Texture Map Lab
+
+As of 2026-07-23, AR/PBR also includes an image-to-material texture lab for
+turning a source image into Unreal-friendly PBR texture maps. This is separate
+from 3D model preview: it maps the generated material onto a renderer plane so
+users can inspect normals, AO, roughness, metallic response, and packed maps
+before export.
+
+Implementation ownership:
+
+- Core generation/export: `app.ar_pbr.texture_map_lab`
+- Qt plane-preview/sliders: `app.ar_pbr.texture_map_lab_window`
+- Python Actions: `ar_pbr.texture_lab.*`
+- Regression tests: `tests/test_ar_pbr_texture_map_lab.py`
+
+The lab must provide:
+
+- Plane material preview rendered from the generated maps.
+- Slider controls for normal strength/radius, height contrast/blur, AO
+  strength/radius, cavity, roughness bias/contrast/detail, metallic value, and
+  preview light/environment.
+- Individual export for `base_color`, `normal`, `ao`, `roughness`,
+  `metallic`, `height`, and `cavity`.
+- Channel-packed export layouts:
+  - `unreal_orm` / `orm` / `arm`: R=AO, G=Roughness, B=Metallic.
+  - `rma`: R=Roughness, G=Metallic, B=AO.
+  - `gltf_mr`: R=Unused/white, G=Roughness, B=Metallic.
+- Manifest output with Unreal import settings: Base Color uses sRGB/default
+  compression; normal maps use `TC_Normalmap`; scalar and packed maps use
+  non-sRGB mask/grayscale compression.
+
+Automation surface:
+
+- `ar_pbr.texture_lab.open`: opens the image texture lab window for an image.
+- `ar_pbr.texture_lab.preview`: writes a plane preview or map preview PNG.
+- `ar_pbr.texture_lab.export`: writes separate and packed texture maps plus a
+  JSON manifest.
+- `ar_pbr.texture_lab.substrate_plan`: returns Unreal Default Lit and
+  Substrate material-wiring guidance for generated maps.
+
+Unreal/Substrate research outcome:
+
+- Existing Default Lit PBR maps remain the practical interchange baseline.
+  BaseColor, Normal, Roughness, Metallic, and AO are still useful inputs for
+  Unreal material creation.
+- Substrate changes the material graph target, not the image-lab source maps.
+  Unreal 5.8 engine source shows `Substrate Slab BSDF` inputs such as
+  `DiffuseAlbedo`, `F0`, `F90`, `Roughness`, `Normal`, `Anisotropy`,
+  `SecondRoughness`, `Fuzz`, and `Glint`.
+- Unreal 5.8 engine source also exposes
+  `Substrate Metalness-To-DiffuseAlbedo-F0`, which converts legacy
+  BaseColor/Specular/Metallic into Slab `DiffuseAlbedo` and `F0`. The texture
+  lab manifest therefore emits this wiring plan instead of pretending
+  Substrate has the same direct `Metallic` input as Default Lit.
+- The lab defaults to Unreal/DirectX normal-map orientation. If an OpenGL-style
+  normal is requested, the manifest marks that Unreal should flip the green
+  channel.
+- Advanced Substrate-specific maps such as F90/edge color, second roughness,
+  anisotropy plus tangent direction, fuzz, and glint remain future optional
+  generators. They are not inferred blindly from a single source image.
+
+Research references used for this contract:
+
+- Unreal Engine Substrate overview:
+  https://dev.epicgames.com/documentation/en-us/unreal-engine/overview-of-substrate-materials-in-unreal-engine
+- Unreal Engine PBR material inputs:
+  https://dev.epicgames.com/documentation/en-us/unreal-engine/physically-based-materials-in-unreal-engine
+- Unreal Engine texture masks/channel packing:
+  https://dev.epicgames.com/documentation/unreal-engine/using-texture-masks-in-unreal-engine
+- MaterialX/OpenPBR specification:
+  https://github.com/AcademySoftwareFoundation/MaterialX/blob/main/documents/Specification/MaterialX.PBRSpec.md
+
 Skeletal meshes are supported in the descriptor pipeline and the full GPU helper
 now bakes animation before building the model-view vertex buffer. The current
 implementation is CPU pose baking plus GPU PBR rendering, not shader skinning:
