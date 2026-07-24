@@ -31,6 +31,7 @@ from .effect_mask_panel import EffectMaskPanel
 from .export_panel import MotionOutputPanel
 from .export_worker import MotionExportWorker
 from .inspector import InspectorPanel
+from .image_panel import ImagePanel
 from .layer_panel import LayerPanel
 from .library_panel import MotionLibraryPanel
 from .mmd_panel import MMDPanel
@@ -185,6 +186,7 @@ class MotionDesignerWindow(QMainWindow):
         self.media = QListWidget(self)
         self.audio = AudioReactivePanel(self)
         self.inspector = InspectorPanel(self)
+        self.image = ImagePanel(self)
         self.ar_pbr = ArPbrPanel(self)
         self.actor = ActorPanel(self)
         self.mmd = MMDPanel(self)
@@ -197,6 +199,7 @@ class MotionDesignerWindow(QMainWindow):
         self.masks = EffectMaskPanel("mask", self)
         self.inspector_tabs = QTabWidget(self)
         self.inspector_tabs.addTab(self.inspector, "Properties")
+        self.inspector_tabs.addTab(self.image, "Image")
         self.inspector_tabs.addTab(self.vector, "Shape")
         self.inspector_tabs.addTab(self.typography, "Text")
         self.inspector_tabs.addTab(self.behaviors, "Behaviors")
@@ -274,6 +277,7 @@ class MotionDesignerWindow(QMainWindow):
         self.canvas.typography_path_offset_changed.connect(self._set_typography_path_offset)
         self.inspector.property_changed.connect(self._set_inspector_property)
         self.inspector.keyframe_requested.connect(self._set_keyframe)
+        self.image.source_changed.connect(self._set_image_params)
         self.vector.source_changed.connect(self._set_vector_params)
         self.typography.source_changed.connect(self._set_typography_params)
         self.library.apply_requested.connect(self._apply_library_item)
@@ -479,6 +483,7 @@ class MotionDesignerWindow(QMainWindow):
         self._selected_layer_id = str(layer_id or "")
         layer = next((item for item in self.controller.composition.layers if item.id == self._selected_layer_id), None)
         self.inspector.set_layer(layer)
+        self.image.set_layer(layer)
         self.vector.set_layer(layer, self.controller.composition)
         self.typography.set_layer(layer)
         self.behaviors.set_layer(layer)
@@ -664,6 +669,9 @@ class MotionDesignerWindow(QMainWindow):
 
     def _set_typography_params(self, changes: object) -> None:
         self._set_source_params(changes, "text")
+
+    def _set_image_params(self, changes: object) -> None:
+        self._set_source_params(changes, "image")
 
     def _plan_ai_request(self, payload: object) -> None:
         if self._ai_generation_job is not None:

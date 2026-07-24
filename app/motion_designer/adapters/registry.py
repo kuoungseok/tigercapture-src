@@ -18,7 +18,7 @@ def render_source(
     viewport_size: tuple[int, int] | None = None,
 ):
     if layer.layer_type == "image":
-        image = render_image(layer)
+        image = render_image(layer, time_ms)
     elif layer.layer_type == "text":
         image = render_typography(layer, time_ms)
     elif layer.layer_type == "ar_pbr" or layer.source.kind == "ar_pbr":

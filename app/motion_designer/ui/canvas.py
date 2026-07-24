@@ -167,11 +167,13 @@ class MotionCanvas(QGraphicsView):
                 pixmap.setAcceptedMouseButtons(Qt.NoButton)
             return container
         if layer.layer_type == "image" and layer.source.uri and Path(layer.source.uri).is_file():
-            pixmap = QPixmap(layer.source.uri)
-            if not pixmap.isNull():
-                pixmap = pixmap.scaled(int(width), int(height), Qt.KeepAspectRatio, Qt.SmoothTransformation)
+            from app.motion_designer.adapters import render_source
+
+            image = render_source(layer, self._time_ms)
+            if not image.isNull():
+                pixmap = QPixmap.fromImage(image)
                 item = QGraphicsPixmapItem(pixmap)
-                item.setOffset(-pixmap.width() * .5, -pixmap.height() * .5)
+                item.setOffset(-image.width() * .5, -image.height() * .5)
                 return item
         if layer.layer_type == "line":
             item = QGraphicsLineItem(-width * .5, 0, width * .5, 0)

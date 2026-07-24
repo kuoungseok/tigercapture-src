@@ -29,9 +29,10 @@ def test_motion_designer_window_uses_controller_for_layer_and_undo() -> None:
     assert window.canvas.scene() is not None
     assert window.left_tabs.count() == 3
     assert window.project_tabs.count() == 3
-    assert window.inspector_tabs.count() == 11
-    assert window.inspector_tabs.tabText(9) == "VRM"
-    assert window.inspector_tabs.tabText(10) == "Particles"
+    assert window.inspector_tabs.count() == 12
+    assert window.inspector_tabs.tabText(1) == "Image"
+    assert window.inspector_tabs.tabText(10) == "VRM"
+    assert window.inspector_tabs.tabText(11) == "Particles"
     assert window.inspector_tabs.indexOf(window.ar_pbr) >= 0
     assert window.inspector_tabs.indexOf(window.actor) >= 0
     assert window.inspector_tabs.indexOf(window.mmd) >= 0
