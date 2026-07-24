@@ -4,7 +4,14 @@ from __future__ import annotations
 from typing import Any
 
 from app.actions.schema import schema_object
-from app.ar_pbr.texture_map_lab import NORMAL_FORMATS, PACKED_LAYOUTS, PREVIEW_MODES
+from app.ar_pbr.texture_map_lab import (
+    AO_ALGORITHMS,
+    NORMAL_FORMATS,
+    PACKED_LAYOUTS,
+    PREVIEW_MODES,
+    SEPARATE_MAPS,
+    TEXTURE_MAP_BACKENDS,
+)
 
 
 def texture_lab_settings_schema() -> dict[str, Any]:
@@ -14,18 +21,30 @@ def texture_lab_settings_schema() -> dict[str, Any]:
             "normal_strength": {"type": "number", "minimum": 0.0, "maximum": 12.0},
             "normal_radius_px": {"type": "number", "minimum": 0.0, "maximum": 24.0},
             "normal_format": {"type": "string", "enum": list(NORMAL_FORMATS)},
+            "normal_filter": {"type": "string", "enum": ["sobel", "central_difference"]},
             "height_invert": {"type": "boolean"},
             "height_contrast": {"type": "number", "minimum": 0.1, "maximum": 4.0},
             "height_blur_px": {"type": "number", "minimum": 0.0, "maximum": 8.0},
+            "edge_aware_smoothing": {"type": "boolean"},
+            "edge_aware_sensitivity": {"type": "number", "minimum": 0.0, "maximum": 32.0},
             "ao_strength": {"type": "number", "minimum": 0.0, "maximum": 3.0},
             "ao_radius_px": {"type": "number", "minimum": 0.0, "maximum": 64.0},
+            "ao_algorithm": {"type": "string", "enum": list(AO_ALGORITHMS)},
+            "ao_samples": {"type": "integer", "minimum": 4, "maximum": 32},
+            "ao_steps": {"type": "integer", "minimum": 2, "maximum": 24},
+            "ao_height_scale": {"type": "number", "minimum": 0.1, "maximum": 64.0},
+            "ao_multiscale": {"type": "boolean"},
             "cavity_strength": {"type": "number", "minimum": 0.0, "maximum": 2.0},
+            "cavity_radius_px": {"type": "number", "minimum": 0.2, "maximum": 32.0},
+            "curvature_strength": {"type": "number", "minimum": 0.0, "maximum": 8.0},
             "roughness_bias": {"type": "number", "minimum": 0.0, "maximum": 1.0},
             "roughness_contrast": {"type": "number", "minimum": 0.1, "maximum": 3.0},
             "roughness_detail": {"type": "number", "minimum": 0.0, "maximum": 1.0},
             "metallic_value": {"type": "number", "minimum": 0.0, "maximum": 1.0},
             "metallic_threshold": {"type": "number", "minimum": 0.0, "maximum": 1.5},
             "metallic_softness": {"type": "number", "minimum": 0.001, "maximum": 0.5},
+            "substrate_reflectance": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "f90_mask_strength": {"type": "number", "minimum": 0.0, "maximum": 1.0},
             "base_color_exposure": {"type": "number", "minimum": -3.0, "maximum": 3.0},
             "base_color_contrast": {"type": "number", "minimum": 0.1, "maximum": 3.0},
             "preview_light_azimuth": {"type": "number", "minimum": -360.0, "maximum": 360.0},
@@ -64,12 +83,26 @@ def register_ar_pbr_texture_lab_actions(registry: Any) -> None:
             "width": {"type": "integer", "minimum": 64, "maximum": 8192},
             "height": {"type": "integer", "minimum": 64, "maximum": 8192},
             "settings": settings_schema,
+            "backend": {"type": "string", "enum": list(TEXTURE_MAP_BACKENDS)},
         }, required=("image_path",)),
         required=("image_path",),
         mutating=False,
         changed=False,
         requires_owner=False,
         dry_summary="AR/PBR texture-map plane preview would be rendered",
+    )
+    registry.register_adapter_action(
+        "ar_pbr.texture_lab.backend_status",
+        "Report Texture Lab CPU/GPU backend availability and the selected map-generation backend.",
+        "ar_pbr",
+        "ar_pbr_texture_lab_backend_status",
+        params_schema=schema_object({
+            "backend": {"type": "string", "enum": list(TEXTURE_MAP_BACKENDS)},
+        }),
+        mutating=False,
+        changed=False,
+        requires_owner=False,
+        dry_summary="Texture Lab backend status would be reported",
     )
     registry.register_adapter_action(
         "ar_pbr.texture_lab.export",
@@ -80,9 +113,10 @@ def register_ar_pbr_texture_lab_actions(registry: Any) -> None:
             "image_path": {"type": "string"},
             "output_dir": {"type": "string"},
             "settings": settings_schema,
-            "maps": {"type": "array", "items": {"type": "string"}},
+            "maps": {"type": "array", "items": {"type": "string", "enum": list(SEPARATE_MAPS)}},
             "packed_layouts": {"type": "array", "items": {"type": "string", "enum": list(PACKED_LAYOUTS)}},
             "max_size": {"type": "integer", "minimum": 64, "maximum": 16384},
+            "backend": {"type": "string", "enum": list(TEXTURE_MAP_BACKENDS)},
         }, required=("image_path",)),
         required=("image_path",),
         mutating=True,

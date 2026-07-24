@@ -703,10 +703,14 @@ The lab must provide:
 
 - Plane material preview rendered from the generated maps.
 - Slider controls for normal strength/radius, height contrast/blur, AO
-  strength/radius, cavity, roughness bias/contrast/detail, metallic value, and
+  strength/radius, cavity/curvature, roughness bias/contrast/detail,
+  metallic value, optional Substrate reflectance/F90 mask strength, and
   preview light/environment.
 - Individual export for `base_color`, `normal`, `ao`, `roughness`,
-  `metallic`, `height`, and `cavity`.
+  `metallic`, `height`, `cavity`, and `curvature`.
+- Optional advanced Substrate export for `f0` and `f90_mask`; these are
+  disabled by default and must be requested explicitly through the UI checkboxes
+  or the `maps` parameter.
 - Channel-packed export layouts:
   - `unreal_orm` / `orm` / `arm`: R=AO, G=Roughness, B=Metallic.
   - `rma`: R=Roughness, G=Metallic, B=AO.
@@ -724,13 +728,12 @@ Automation surface:
 - `ar_pbr.texture_lab.substrate_plan`: returns Unreal Default Lit and
   Substrate material-wiring guidance for generated maps.
 
-Product UI note: the primary user-facing entry point for painting or editing a
-source texture and then generating PBR maps is Painter's right-panel
-`PBR Maps` tab. The lower-level `ar_pbr.texture_lab.*` actions remain useful
-for file-based automation and review tooling, but the in-app workflow should
-not force users into a separate AR/PBR window when they are already authoring
-the source texture in Painter. Painter exposes the same workflow as
-`paint.pbr.preview`, `paint.pbr.export`, and `paint.pbr.substrate_plan`.
+Product UI note: Painter's right inspector is reserved for the color palette
+and the standalone `Layers / Channels / Paths` tab set. PBR texture generation
+remains available through the Painter automation workflow:
+`paint.pbr.preview`, `paint.pbr.export`, and `paint.pbr.substrate_plan`. The
+lower-level `ar_pbr.texture_lab.*` actions remain useful for file-based
+automation and review tooling.
 
 Unreal/Substrate research outcome:
 
@@ -749,9 +752,11 @@ Unreal/Substrate research outcome:
 - The lab defaults to Unreal/DirectX normal-map orientation. If an OpenGL-style
   normal is requested, the manifest marks that Unreal should flip the green
   channel.
-- Advanced Substrate-specific maps such as F90/edge color, second roughness,
-  anisotropy plus tangent direction, fuzz, and glint remain future optional
-  generators. They are not inferred blindly from a single source image.
+- Advanced Substrate-specific `f0` and `f90_mask` maps are available as
+  optional exports. `f0` is derived from BaseColor/Metallic/reflectance and
+  `f90_mask` is a heuristic grazing-response mask; neither is part of the
+  default export set. Second roughness, anisotropy plus tangent direction, fuzz,
+  and glint remain future optional generators.
 
 Research references used for this contract:
 
@@ -848,6 +853,28 @@ Asset support regression over the local sample corpus:
 The matrix checks representative static FBX, skeletal GLB, and unsupported
 compressed GLB samples and writes
 `debugCapture/ar_pbr_asset_support_matrix_qa.json`.
+
+## Texture Lab Backend Contract
+
+`app.ar_pbr.texture_map_lab` owns the image-to-PBR map generator used by the
+AR/PBR Texture Lab window, Painter PBR panel, and Python Actions.
+
+- File-based actions: `ar_pbr.texture_lab.open`, `ar_pbr.texture_lab.preview`,
+  `ar_pbr.texture_lab.backend_status`, `ar_pbr.texture_lab.export`, and
+  `ar_pbr.texture_lab.substrate_plan`.
+- Painter actions: `paint.pbr.preview`, `paint.pbr.backend_status`,
+  `paint.pbr.export`, and `paint.pbr.substrate_plan`.
+- Preview generation should use in-memory images where possible and cache maps
+  by source/settings fingerprint. Preview-only light changes must re-shade from
+  cached maps instead of regenerating height, normal, AO, roughness, and packed
+  outputs.
+- Backend selector: `TIGERCAPTURE_TEXTURE_LAB_BACKEND=auto|cpu|torch_cuda|cupy|
+  opencv_cuda`. Implemented backends are `cpu` and optional `torch_cuda`.
+  `cupy` and `opencv_cuda` are reserved/planned statuses until their kernels are
+  implemented.
+- If PyTorch CUDA is not installed, installed without CUDA, or fails at runtime,
+  Texture Lab must keep working on CPU and surface an explicit fallback reason
+  plus install/verify commands in the UI and action payloads.
 
 ## First QA Targets
 

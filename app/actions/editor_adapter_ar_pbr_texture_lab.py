@@ -5,7 +5,12 @@ from pathlib import Path
 from typing import Any, Mapping, Sequence
 
 from app.actions.editor_adapter_ar_pbr_base import ArPbrBaseAdapterMixin
-from app.ar_pbr.texture_map_lab import export_texture_maps, render_plane_preview, substrate_export_plan
+from app.ar_pbr.texture_map_lab import (
+    export_texture_maps,
+    render_plane_preview,
+    select_texture_map_backend,
+    substrate_export_plan,
+)
 
 
 class ArPbrTextureLabAdapterMixin(ArPbrBaseAdapterMixin):
@@ -57,6 +62,7 @@ class ArPbrTextureLabAdapterMixin(ArPbrBaseAdapterMixin):
         width: int = 768,
         height: int | None = None,
         settings: Mapping[str, Any] | None = None,
+        backend: str | None = None,
     ) -> dict[str, Any]:
         return render_plane_preview(
             image_path,
@@ -65,7 +71,11 @@ class ArPbrTextureLabAdapterMixin(ArPbrBaseAdapterMixin):
             output_path=output_path,
             width=width,
             height=height,
+            backend=backend,
         )
+
+    def ar_pbr_texture_lab_backend_status(self, *, backend: str | None = None) -> dict[str, Any]:
+        return select_texture_map_backend(backend)
 
     def ar_pbr_texture_lab_export(
         self,
@@ -76,6 +86,7 @@ class ArPbrTextureLabAdapterMixin(ArPbrBaseAdapterMixin):
         maps: Sequence[str] | None = None,
         packed_layouts: Sequence[str] | None = None,
         max_size: int | None = None,
+        backend: str | None = None,
     ) -> dict[str, Any]:
         return export_texture_maps(
             image_path,
@@ -84,6 +95,7 @@ class ArPbrTextureLabAdapterMixin(ArPbrBaseAdapterMixin):
             maps=maps,
             packed_layouts=packed_layouts,
             max_size=max_size,
+            backend=backend,
         )
 
     def ar_pbr_texture_lab_substrate_plan(

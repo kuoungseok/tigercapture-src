@@ -1326,11 +1326,19 @@ returning draft/starter audio.
 - `ar_pbr.preview`
 - `ar_pbr.texture_lab.open`
 - `ar_pbr.texture_lab.preview`
+- `ar_pbr.texture_lab.backend_status`
 - `ar_pbr.texture_lab.export`
 - `ar_pbr.texture_lab.substrate_plan`
 - `paint.pbr.preview`
+- `paint.pbr.backend_status`
 - `paint.pbr.export`
 - `paint.pbr.substrate_plan`
+
+Texture Lab backend status actions report the selected map-generation backend,
+CPU/GPU fallback reason, optional PyTorch CUDA availability, and install/verify
+commands. `auto`, `cpu`, and `torch_cuda` are implemented action-level choices;
+`cupy` and `opencv_cuda` remain planned/diagnostic selectors until their kernels
+exist.
 
 ### Render, Publish, Health, and QA
 
