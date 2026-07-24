@@ -6274,6 +6274,13 @@ AI Script Edit MVP integration:
   includes foreground/background color swatches with swap. The rail can be
   collapsed or hidden, and hidden rails are restored from `Window > Show Tool
   Bar` so users cannot lose the primary tool surface.
+- Standalone Painter must open as a clean drawing document at 100% zoom with no
+  generated sample strokes, guides, or demo marks. 400-800% zoom is for pixel
+  and dot work only; it must not be the default QA or user launch state. The
+  top bar uses compact Photoshop-style quick controls for Undo, Redo, PNG
+  export, zoom out/in, Fit, and zoom value instead of large text command
+  buttons. The right inspector is capped as a side dock so the central canvas
+  remains wider than the inspector on small remote/offscreen windows.
 - The standalone Painter color panel is a compact Painter-style color dock, not
   an oversized decorative picker: a 176 px hue ring with triangular
   saturation/value picker, current-color swatch, hex readout, compact
@@ -6350,7 +6357,13 @@ AI Script Edit MVP integration:
   the canvas GPU capability contract: persistent stroke atlas readback policy,
   texture-brush parity target styles, layer/mask shader plan, and high-zoom
   dirty-region state. RDP/remote/headless sessions must keep a maintained
-  fallback path rather than failing black. Texture
+  fallback path rather than failing black. Active freehand drawing invalidates
+  only the current stroke segment's dirty bounds while the pointer moves; full
+  canvas invalidation is reserved for committed stroke/layer/document changes.
+  Standalone Painter also suppresses widget updates while the top-level window
+  is being moved, then performs one geometry sync and repaint after movement
+  idles so remote-desktop window dragging does not continuously refresh the UI.
+  Texture
   Lab/PBR preview is stricter:
   product entry points must not run CPU fallback by default. None of these paths
   may slow the default 2D drawing workspace at startup.

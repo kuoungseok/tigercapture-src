@@ -1194,6 +1194,7 @@ class DrawingCanvas(QWidget):
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
         self.setAttribute(Qt.WidgetAttribute.WA_NoSystemBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_StaticContents, True)
 
     # ------------- tool / pen config -------------
 
@@ -2706,7 +2707,7 @@ class DrawingCanvas(QWidget):
             return
         if self._tool == "pen":
             self._current_points = [QPointF(pos)]
-            self.update()
+            self._update_current_stroke_dirty(pos)
         elif self._tool == "eraser":
             self._try_erase_at(pos.x(), pos.y())
         elif self._tool == "path":
@@ -2817,7 +2818,7 @@ class DrawingCanvas(QWidget):
         last = self._current_points[-1]
         if abs(pos.x() - last.x()) + abs(pos.y() - last.y()) >= 2:
             self._current_points.append(QPointF(pos))
-            self.update()
+            self._update_current_stroke_dirty(pos, last)
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if event.button() != Qt.MouseButton.LeftButton:
@@ -2897,6 +2898,18 @@ class DrawingCanvas(QWidget):
         self._current_points = []
         self.stroke_added.emit(stroke)
         self.update()
+
+    def _update_current_stroke_dirty(self, point: QPointF, previous: QPointF | None = None) -> None:
+        radius = max(8.0, float(getattr(self, "_pen_width", 6.0) or 6.0) * 1.75)
+        if previous is None:
+            rect = QRectF(point.x() - radius, point.y() - radius, radius * 2.0, radius * 2.0)
+        else:
+            left = min(point.x(), previous.x()) - radius
+            top = min(point.y(), previous.y()) - radius
+            right = max(point.x(), previous.x()) + radius
+            bottom = max(point.y(), previous.y()) + radius
+            rect = QRectF(left, top, right - left, bottom - top)
+        self.update(rect.toAlignedRect().intersected(self.rect()))
 
     def commit_path(
         self,
@@ -4382,6 +4395,12 @@ class PaintDialog(QDialog):
         self._brush_long_press_timer = QTimer(self)
         self._brush_long_press_timer.setSingleShot(True)
         self._brush_long_press_timer.timeout.connect(self._show_brush_button_menu)
+        self._move_refresh_pause_timer = QTimer(self)
+        self._move_refresh_pause_timer.setSingleShot(True)
+        self._move_refresh_pause_timer.setInterval(140)
+        self._move_refresh_pause_timer.timeout.connect(self._finish_window_move_refresh_pause)
+        self._move_refresh_paused = False
+        self._move_refresh_pause_enabled = False
         self._paint_layer_serial = 1
         self._paint_layers: list[PaintLayer] = [
             PaintLayer("paint-layer-1", "Layer 1")
@@ -5060,48 +5079,52 @@ class PaintDialog(QDialog):
         top_bar = QFrame()
         top_bar.setObjectName("PaintTopBar")
         top_layout = QHBoxLayout(top_bar)
-        top_layout.setContentsMargins(14, 10, 14, 10)
-        top_layout.setSpacing(12)
+        top_layout.setContentsMargins(10, 6, 10, 6)
+        top_layout.setSpacing(6)
 
         title_col = QVBoxLayout()
         title_col.setContentsMargins(0, 0, 0, 0)
         title_col.setSpacing(2)
         title = QLabel("TigerCapture Painter" if self._standalone else "TigerCapture Paint")
         title.setObjectName("PaintTitle")
-        subtitle = QLabel(
-            "Blank canvas drawing, selections, layers, and color adjustments."
-            if self._standalone
-            else "Draw, cut out, place PNG stickers, and import editor objects."
-        )
+        subtitle = QLabel("Blank canvas" if self._standalone else "Video paint")
         subtitle.setObjectName("PaintSubtitle")
         title_col.addWidget(title)
         title_col.addWidget(subtitle)
         top_layout.addLayout(title_col, stretch=1)
 
-        self.undo_btn = QPushButton("Undo")
+        self.undo_btn = QPushButton("↶")
         self.undo_btn.setObjectName("PaintTool")
         self.undo_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.undo_btn.setToolTip("Undo (Ctrl+Z)")
+        self.undo_btn.setAccessibleName("Undo")
+        self.undo_btn.setFixedSize(30, 30)
         self.undo_btn.clicked.connect(self._undo)
         top_layout.addWidget(self.undo_btn)
 
-        self.redo_btn = QPushButton("Redo")
+        self.redo_btn = QPushButton("↷")
         self.redo_btn.setObjectName("PaintTool")
         self.redo_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.redo_btn.setToolTip("Redo (Ctrl+Y)")
+        self.redo_btn.setAccessibleName("Redo")
+        self.redo_btn.setFixedSize(30, 30)
         self.redo_btn.clicked.connect(self._redo)
         top_layout.addWidget(self.redo_btn)
 
-        self.export_png_btn = QPushButton("Export PNG")
+        self.export_png_btn = QPushButton("")
         self.export_png_btn.setObjectName("PaintTool")
         self.export_png_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.export_png_btn.setToolTip("Export PNG")
+        self.export_png_btn.setAccessibleName("Export PNG")
+        self.export_png_btn.setIcon(app_icon("export", size=14, color="#EEF3FB"))
+        self.export_png_btn.setIconSize(icon_size(14))
+        self.export_png_btn.setFixedSize(34, 30)
         self.export_png_btn.clicked.connect(self._show_export_png_menu)
         top_layout.addWidget(self.export_png_btn)
 
-        zoom_label = QLabel("Zoom")
-        zoom_label.setObjectName("PaintMeta")
-        top_layout.addWidget(zoom_label)
         self.zoom_out_btn = QPushButton("-")
         self.zoom_out_btn.setObjectName("PaintZoomButton")
-        self.zoom_out_btn.setFixedSize(32, 30)
+        self.zoom_out_btn.setFixedSize(28, 30)
         self.zoom_out_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.zoom_out_btn.setToolTip("Zoom out (Ctrl+-)")
         self.zoom_out_btn.clicked.connect(self._zoom_out)
@@ -5109,26 +5132,30 @@ class PaintDialog(QDialog):
         self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
         self.zoom_slider.setRange(25, PAINT_MAX_ZOOM_PERCENT)
         self.zoom_slider.setValue(100)
-        self.zoom_slider.setFixedWidth(120)
+        self.zoom_slider.setFixedWidth(84)
+        self.zoom_slider.setToolTip("Zoom: 100% normally, 400-800% for pixel work")
         self.zoom_slider.valueChanged.connect(self._on_zoom_changed)
         top_layout.addWidget(self.zoom_slider)
         self.zoom_in_btn = QPushButton("+")
         self.zoom_in_btn.setObjectName("PaintZoomButton")
-        self.zoom_in_btn.setFixedSize(32, 30)
+        self.zoom_in_btn.setFixedSize(28, 30)
         self.zoom_in_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.zoom_in_btn.setToolTip("Zoom in (Ctrl++)")
         self.zoom_in_btn.clicked.connect(self._zoom_in)
         top_layout.addWidget(self.zoom_in_btn)
-        self.zoom_fit_btn = QPushButton("Fit")
+        self.zoom_fit_btn = QPushButton("")
         self.zoom_fit_btn.setObjectName("PaintZoomButton")
-        self.zoom_fit_btn.setFixedSize(42, 30)
+        self.zoom_fit_btn.setFixedSize(30, 30)
         self.zoom_fit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.zoom_fit_btn.setToolTip("Fit canvas (Ctrl+0)")
+        self.zoom_fit_btn.setAccessibleName("Fit canvas")
+        self.zoom_fit_btn.setIcon(app_icon("zoom", size=13, color="#EEF3FB"))
+        self.zoom_fit_btn.setIconSize(icon_size(13))
         self.zoom_fit_btn.clicked.connect(self._zoom_fit)
         top_layout.addWidget(self.zoom_fit_btn)
         self._zoom_value_label = QLabel("100%")
         self._zoom_value_label.setObjectName("PaintValue")
-        self._zoom_value_label.setFixedWidth(58)
+        self._zoom_value_label.setFixedWidth(46)
         top_layout.addWidget(self._zoom_value_label)
 
         self._dialog_buttons = None
@@ -5431,9 +5458,12 @@ class PaintDialog(QDialog):
 
         inspector = QFrame()
         inspector.setObjectName("PaintInspector")
+        inspector.setMinimumWidth(248)
+        inspector.setMaximumWidth(300 if self._standalone else 330)
+        inspector.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         inspector_layout = QVBoxLayout(inspector)
-        inspector_layout.setContentsMargins(12, 12, 12, 12)
-        inspector_layout.setSpacing(10)
+        inspector_layout.setContentsMargins(9, 9, 9, 9)
+        inspector_layout.setSpacing(8)
 
         inspector_controls = QWidget()
         inspector_controls_layout = QVBoxLayout(inspector_controls)
@@ -5453,11 +5483,11 @@ class PaintDialog(QDialog):
         inspector_controls_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         inspector_controls_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         if self._standalone:
-            inspector_controls_scroll.setMinimumHeight(170)
-            inspector_controls_scroll.setMaximumHeight(430)
+            inspector_controls_scroll.setMinimumHeight(150)
+            inspector_controls_scroll.setMaximumHeight(330)
         else:
-            inspector_controls_scroll.setMinimumHeight(190)
-            inspector_controls_scroll.setMaximumHeight(480)
+            inspector_controls_scroll.setMinimumHeight(160)
+            inspector_controls_scroll.setMaximumHeight(360)
         inspector_controls_scroll.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
@@ -5581,7 +5611,7 @@ class PaintDialog(QDialog):
         color_panel = QFrame()
         color_panel.setObjectName("PaintColorPanel")
         color_panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
-        color_panel.setMinimumHeight(340)
+        color_panel.setMinimumHeight(300)
         self._paint_color_panel = color_panel
         color_panel_layout = QVBoxLayout(color_panel)
         color_panel_layout.setContentsMargins(8, 8, 8, 8)
@@ -5693,7 +5723,7 @@ class PaintDialog(QDialog):
         self._layer_channel_path_tabs.setObjectName("PaintLayerChannelPathTabs")
         self._layer_channel_path_tabs.setDocumentMode(True)
         self._layer_channel_path_tabs.setTabPosition(QTabWidget.TabPosition.North)
-        self._layer_channel_path_tabs.setMinimumHeight(280 if self._standalone else 240)
+        self._layer_channel_path_tabs.setMinimumHeight(300 if self._standalone else 250)
         self._layer_channel_path_tabs.setSizePolicy(
             QSizePolicy.Policy.Expanding,
             QSizePolicy.Policy.Expanding,
@@ -5987,7 +6017,7 @@ class PaintDialog(QDialog):
         layer_dock_layout.addWidget(note)
 
         inspector_layout.addWidget(inspector_controls_scroll, stretch=1)
-        inspector_layout.addWidget(layer_dock_panel, stretch=3)
+        inspector_layout.addWidget(layer_dock_panel, stretch=2)
         workspace.addWidget(inspector)
 
         self._sync_palette_controls_from_color()
@@ -7627,14 +7657,20 @@ class PaintDialog(QDialog):
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
+        self._move_refresh_pause_enabled = False
+        self.setUpdatesEnabled(True)
         self._fit_painter_window_to_screen()
         self._sync_color_panel_layout()
         self._schedule_canvas_geometry_update()
         self._schedule_initial_inspector_scroll()
+        QTimer.singleShot(0, self._enable_window_move_refresh_pause)
         if not self._bubble_items and self._bubbles:
             self._spawn_initial_bubbles()
         if not self._sticker_items and self._stickers:
             self._spawn_initial_stickers()
+
+    def _enable_window_move_refresh_pause(self) -> None:
+        self._move_refresh_pause_enabled = self.isVisible()
 
     def _schedule_canvas_geometry_update(self) -> None:
         self._sync_color_panel_layout()
@@ -11533,6 +11569,25 @@ class PaintDialog(QDialog):
         super().resizeEvent(event)
         self._sync_color_panel_layout()
         self._update_canvas_geometry()
+
+    def moveEvent(self, event) -> None:
+        super().moveEvent(event)
+        if not self.isVisible() or not bool(getattr(self, "_move_refresh_pause_enabled", False)):
+            return
+        if not bool(getattr(self, "_move_refresh_paused", False)):
+            self._move_refresh_paused = True
+            self.setUpdatesEnabled(False)
+        timer = getattr(self, "_move_refresh_pause_timer", None)
+        if timer is not None:
+            timer.start()
+
+    def _finish_window_move_refresh_pause(self) -> None:
+        if not bool(getattr(self, "_move_refresh_paused", False)):
+            return
+        self._move_refresh_paused = False
+        self.setUpdatesEnabled(True)
+        self._update_canvas_geometry()
+        self.update()
 
     def wheelEvent(self, event) -> None:
         if event.modifiers() & Qt.KeyboardModifier.ControlModifier:

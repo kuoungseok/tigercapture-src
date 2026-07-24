@@ -104,6 +104,34 @@ def test_standalone_painter_initial_size_respects_available_screen(monkeypatch) 
     dialog.close()
 
 
+def test_standalone_painter_pauses_repaints_while_window_moves() -> None:
+    app = _app()
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QMoveEvent
+
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(640, 360, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.show()
+    app.processEvents()
+
+    assert dialog.updatesEnabled()
+    dialog.moveEvent(QMoveEvent(QPoint(40, 48), QPoint(32, 40)))
+    assert getattr(dialog, "_move_refresh_paused", False) is True
+    assert not dialog.updatesEnabled()
+
+    dialog._finish_window_move_refresh_pause()
+    assert getattr(dialog, "_move_refresh_paused", False) is False
+    assert dialog.updatesEnabled()
+
+    dialog.close()
+
+
 def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     app = _app()
     from PySide6.QtCore import Qt
@@ -126,6 +154,21 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog.isSizeGripEnabled()
     assert getattr(dialog, "_dialog_buttons", None) is None
     assert dialog.minimumWidth() <= 760
+    assert dialog.canvas.embedded_strokes() == []
+    assert dialog.painter_action_state()["view"]["zoom_percent"] == 100
+    assert dialog.undo_btn.text() == "↶"
+    assert dialog.undo_btn.width() <= 34
+    assert dialog.redo_btn.text() == "↷"
+    assert dialog.redo_btn.width() <= 34
+    assert dialog.export_png_btn.text() == ""
+    assert not dialog.export_png_btn.icon().isNull()
+    assert dialog.zoom_slider.width() <= 90
+    assert dialog.zoom_fit_btn.text() == ""
+    assert dialog.zoom_fit_btn.width() <= 34
+    assert not dialog.zoom_fit_btn.icon().isNull()
+    assert dialog._paint_inspector_controls.parentWidget() is not None
+    assert dialog._paint_inspector_controls_scroll.maximumHeight() <= 330
+    assert dialog._paint_inspector_controls_scroll.width() <= 300
     assert dialog._tool_rail.width() <= 56
     assert dialog._tool_rail.width() >= 44
     assert dialog.tool_collapse_btn.toolTip() == "Collapse toolbar"

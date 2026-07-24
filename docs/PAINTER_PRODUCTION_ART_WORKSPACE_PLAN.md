@@ -54,12 +54,16 @@ Tiger Painter does not clone one application. Each reference owns a role:
 
 Default layout:
 
+- New standalone Painter windows open clean at 100% zoom with no sample strokes,
+  guides, or demo marks. 400-800% zoom is reserved for pixel/dot work.
 - Center: large canvas with checkerboard support, navigator framing, zoom/pan,
   and optional pixel grid at high zoom.
 - Left: compact single-column tool rail with tool groups and long-press/right
   click subtool popups.
 - Top: active tool options only. This area should not become a permanent
   command strip for unrelated features.
+- Top quick controls for Undo, Redo, PNG export, zoom out/in, Fit, and zoom
+  value must stay compact and Photoshop-like, not large text command buttons.
 - Right upper: Navigator and Reference controls.
 - Right middle: Color and Brush.
 - Right lower: Layers / Channels / Paths as a dedicated pinned tab dock.
@@ -69,6 +73,12 @@ Default layout:
 Responsive behavior:
 
 - At laptop widths, panels must scroll or collapse instead of overlapping.
+- The right inspector is a capped side dock. It must not become wider than the
+  central canvas in normal small-window or remote-work layouts.
+- Moving the top-level Painter window must pause widget updates during the drag
+  and perform one geometry sync/repaint after movement idles. Remote desktop
+  sessions must not pay continuous full-UI refresh cost while the window is
+  being moved.
 - Color wheel, brush settings, and Layers/Channels/Paths must never occupy the
   same visual space.
 - Layers / Channels / Paths are high-frequency production panels. They may

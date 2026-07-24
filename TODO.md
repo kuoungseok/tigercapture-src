@@ -13,6 +13,11 @@
     of default visual priority. Keep Layers/Channels/Paths pinned as a frequent
     production dock; optional 3D/PBR/Typography panels must not replace or hide
     it in the default drawing workspace.
+    - [x] 2026-07-24 feedback pass: standalone Painter opens clean at 100%
+      zoom with no sample strokes, the top bar uses compact Photoshop-style
+      quick controls instead of large text buttons, and the right inspector is
+      capped so the canvas remains wider than the inspector even on small
+      remote/offscreen windows.
   - [ ] Brush engine pass for production concept art: pressure/flow/hardness/
     spacing/shape dynamics/texture/smudge/mixer behavior, real stroke-preview
     thumbnails, and game-art presets for sketch, clean ink, blocking, oil,
@@ -81,6 +86,13 @@
       high-zoom dirty-region contract. Remaining GPU work: retained GL texture
       display, textured brush stamp/noise shaders, and per-layer FBO mask
       compositing.
+    - [x] 2026-07-24 paint-input feedback pass: active freehand strokes repaint
+      only the dirty segment bounds while drawing instead of invalidating the
+      whole canvas on every pointer move.
+    - [x] 2026-07-24 window-move feedback pass: standalone Painter pauses widget
+      updates while the top-level window is being dragged, then performs one
+      geometry sync/repaint after movement idles so remote desktop window moves
+      do not continuously refresh the whole UI.
   - [ ] Painter action parity: every production drawing feature above must get
     registered `paint.*` actions, dry-run/review support where destructive,
     undo transactions, and regression tests before AI/MCP claims it.
