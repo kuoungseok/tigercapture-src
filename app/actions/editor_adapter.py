@@ -24,6 +24,7 @@ from app.actions.editor_adapter_ppt import PptAdapterMixin
 from app.actions.editor_adapter_tts import TtsAdapterMixin
 from app.actions.editor_adapter_paint import PaintAdapterMixin
 from app.actions.editor_adapter_motion import MotionAdapterMixin
+from app.actions.editor_adapter_motion_advanced import MotionAdvancedAdapterMixin
 from app.actions.editor_adapter_motion_audio import MotionAudioAdapterMixin
 from app.actions.editor_adapter_motion_ar_pbr import MotionArPbrAdapterMixin
 from app.actions.editor_adapter_motion_actor import MotionActorAdapterMixin
@@ -59,6 +60,7 @@ class EditorAdapter(
     MotionActorAdapterMixin,
     MotionArPbrAdapterMixin,
     MotionAudioAdapterMixin,
+    MotionAdvancedAdapterMixin,
     MotionAdapterMixin,
     EditingAdapterMixin,
     TimelineAdapterMixin,

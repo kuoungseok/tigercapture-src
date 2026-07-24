@@ -70,6 +70,14 @@ class ArPbrPanel(QWidget):
             self._object_controls[name] = self._spin(name, label, minimum, maximum, step)
 
         self._section("Camera")
+        self.apply_to_2d = QCheckBox("Apply camera to 2D layers", content)
+        self.apply_to_2d.toggled.connect(lambda _checked: self._emit_values())
+        apply_2d_label = QLabel("2.5D Camera", content)
+        self.form.addRow(apply_2d_label, self.apply_to_2d)
+        self._rows["camera_apply_to_2d"] = (apply_2d_label, self.apply_to_2d)
+        self.parallax_strength = self._spin(
+            "camera_parallax_strength", "Parallax", 0.0, 4.0, 0.05,
+        )
         for name, label, minimum, maximum, step in (
             ("position_x", "Position X", -20, 20, .05),
             ("position_y", "Position Y", -20, 20, .05),
@@ -176,6 +184,8 @@ class ArPbrPanel(QWidget):
             }
             for name, value in values.items():
                 self._camera_controls[name].setValue(float(value))
+            self.apply_to_2d.setChecked(bool(params.get("apply_to_2d", False)))
+            self.parallax_strength.setValue(float(params.get("parallax_strength", 1.0) or 0.0))
         elif self._layer_type == "light":
             for name, fallback in (("azimuth", 45), ("elevation", 45), ("intensity", .42)):
                 self._light_controls[name].setValue(float(_default(params, name, fallback)))
@@ -219,6 +229,8 @@ class ArPbrPanel(QWidget):
                 "rotation": [c["rotation_x"].value(), c["rotation_y"].value(), c["rotation_z"].value()],
                 "fov": c["fov"].value(), "focus_distance": c["focus_distance"].value(),
                 "focus_range": c["focus_range"].value(),
+                "apply_to_2d": self.apply_to_2d.isChecked(),
+                "parallax_strength": self.parallax_strength.value(),
             })
         elif self._layer_type == "light":
             color = QColor(self.light_color.text())

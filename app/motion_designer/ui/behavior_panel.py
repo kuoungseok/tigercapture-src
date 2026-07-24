@@ -12,6 +12,10 @@ BEHAVIOR_PARAMS = {
     "pop": (("from", 0, 4, .05), ("overshoot", 0, 2, .02)),
     "spring": (("amplitude", 0, 1000, 1), ("frequency", 0, 30, .1), ("damping", 0, 30, .1)),
     "wiggle": (("amplitude", 0, 360, .5), ("frequency", 0, 30, .1)),
+    "impact": (
+        ("scale_overshoot", 0, 2, .01), ("rotation_kick", -180, 180, .5),
+        ("shake", 0, 1000, .5), ("frequency", 0, 30, .1), ("damping", 0, 30, .1),
+    ),
 }
 
 

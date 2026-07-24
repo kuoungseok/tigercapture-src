@@ -539,6 +539,61 @@ def validate_composition(composition: MotionComposition) -> ValidationReport:
             issues.append(ValidationIssue("invalid_layer_range", "Layer out_ms must be after in_ms.", path))
         if layer.parent_id and layer.parent_id not in id_set:
             issues.append(ValidationIssue("missing_parent", f"Unknown parent: {layer.parent_id}", f"{path}.parent_id"))
+        matte_id = str(layer.metadata.get("matte_layer_id") or "")
+        if matte_id == layer.id:
+            issues.append(ValidationIssue(
+                "track_matte_self_reference",
+                "A layer cannot use itself as a track matte.",
+                f"{path}.metadata.matte_layer_id",
+            ))
+        elif matte_id and matte_id not in id_set:
+            issues.append(ValidationIssue(
+                "missing_track_matte",
+                f"Unknown track matte: {matte_id}",
+                f"{path}.metadata.matte_layer_id",
+            ))
+        matte_mode = str(layer.metadata.get("matte_mode") or "alpha").lower()
+        if matte_mode not in {"alpha", "luma", "alpha_inverted", "luma_inverted"}:
+            issues.append(ValidationIssue(
+                "invalid_track_matte_mode",
+                "Track matte mode must be alpha, luma, alpha_inverted, or luma_inverted.",
+                f"{path}.metadata.matte_mode",
+            ))
+        try:
+            depth_z = float(layer.metadata.get("depth_z", 0.0) or 0.0)
+        except (TypeError, ValueError):
+            depth_z = 99.0
+        if not -8.0 <= depth_z <= 8.0:
+            issues.append(ValidationIssue(
+                "invalid_2_5d_depth",
+                "2.5D layer depth must be between -8 and 8.",
+                f"{path}.metadata.depth_z",
+            ))
+        replicator = layer.metadata.get("replicator")
+        if isinstance(replicator, Mapping):
+            try:
+                repeat_count = int(_default_value(replicator.get("count", 1)) or 1)
+            except (TypeError, ValueError):
+                repeat_count = 0
+            if not 1 <= repeat_count <= 256:
+                issues.append(ValidationIssue(
+                    "invalid_layer_replicator",
+                    "Generic layer Replicator count must be between 1 and 256.",
+                    f"{path}.metadata.replicator.count",
+                ))
+        blur = layer.metadata.get("motion_blur")
+        if isinstance(blur, Mapping):
+            try:
+                samples = int(blur.get("samples", 8) or 8)
+                shutter = float(blur.get("shutter", 0.65) or 0.0)
+            except (TypeError, ValueError):
+                samples, shutter = 0, -1.0
+            if not 2 <= samples <= 32 or not 0.0 <= shutter <= 2.0:
+                issues.append(ValidationIssue(
+                    "invalid_motion_blur",
+                    "Motion blur requires 2-32 samples and a shutter between 0 and 2.",
+                    f"{path}.metadata.motion_blur",
+                ))
         seen: set[str] = set()
         node = layer.id
         while node:

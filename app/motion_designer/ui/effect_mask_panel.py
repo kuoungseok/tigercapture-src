@@ -19,6 +19,24 @@ EFFECT_PARAMS = {
              ("intensity", 0.0, 5.0, 0.05)),
     "unsharp_mask": (("radius", 0.0, 30.0, 0.25), ("amount", 0.0, 5.0, 0.05)),
     "vignette": (("amount", 0.0, 1.0, 0.01), ("softness", 0.05, 1.0, 0.01)),
+    "directional_blur": (
+        ("length", 0.0, 200.0, 0.5), ("angle", -360.0, 360.0, 1.0),
+        ("samples", 2.0, 32.0, 1.0),
+    ),
+    "displacement": (
+        ("strength", 0.0, 300.0, 0.5), ("scale", 2.0, 1000.0, 1.0),
+        ("speed", -20.0, 20.0, 0.1),
+    ),
+    "corner_pin": (("amount", 0.0, 1.0, 0.01),),
+    "mesh_warp": (
+        ("amplitude_x", -300.0, 300.0, 0.5), ("amplitude_y", -300.0, 300.0, 0.5),
+        ("frequency_x", 0.1, 20.0, 0.1), ("frequency_y", 0.1, 20.0, 0.1),
+        ("phase", -100.0, 100.0, 0.05),
+    ),
+    "paper_fold": (
+        ("strength", 0.0, 1.0, 0.01), ("angle", -180.0, 180.0, 1.0),
+        ("width", 2.0, 500.0, 1.0),
+    ),
 }
 
 MASK_PARAMS = (

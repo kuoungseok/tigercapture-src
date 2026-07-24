@@ -1384,6 +1384,26 @@ host 구현 시 추가할 남은 QA다.
 - plugin을 비활성화해도 project가 placeholder와 진단 정보로 열린다.
 - template pack이 published control, preview, license metadata를 검증한다.
 
+## 18.1 고급 에디토리얼 모션 확장
+
+2026-07-25 기준으로 M6의 기존 Track Matte, Typography selector/stagger,
+Vector Repeater, parent hierarchy와 Cut Paper 기반 위에 다음 제품 기능을
+추가했다.
+
+- 일반 2D 레이어에 명시적으로 적용되는 2.5D Camera와 `depth_z` 패럴랙스
+- 이미지·텍스트·벡터·캐릭터 레이어 공통 Replicator
+- 레이어 이동량 기반 bounded motion blur
+- directional blur, displacement, corner pin, mesh warp, paper fold 효과
+- tape, staple, contact shadow, fold와 impact를 포함한 Paper Paste rig
+- Headline Slam, Paper Rip Reveal, Cutout Collage, Editorial Camera Push,
+  Beat-Synced Montage 연출 프리셋
+- 동일 기능의 Inspector와 `motion.*` Action/MCP 표면
+
+AR/PBR Camera의 기존 동작을 보존하기 위해 2D 투영은 `apply_to_2d=false`가
+기본이다. 현재 범위는 편집 가능한 2.5D 에디토리얼 모션이며 완전한 3D scene
+graph, 임의 동영상 displacement map, cloth simulation 또는 After Effects
+plugin 호환을 의미하지 않는다.
+
 ## 19. 병렬 작업 계획
 
 ### 순차로 해야 하는 작업

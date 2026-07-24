@@ -47,6 +47,7 @@ class MotionLibraryPanel(QWidget):
                 "behavior": QStyle.SP_MediaPlay,
                 "effect": QStyle.SP_DialogApplyButton,
                 "template": QStyle.SP_DirIcon,
+                "advanced_preset": QStyle.SP_ArrowForward,
             }[domain]), label)
             item.setData(Qt.UserRole, (domain, kind))
             item.setTextAlignment(Qt.AlignHCenter | Qt.AlignBottom)

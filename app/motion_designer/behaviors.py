@@ -60,6 +60,24 @@ def apply_behavior(values: MutableMapping[str, Any], behavior: MotionBehaviorRef
         seed = float(params.get("seed", 0.0))
         seconds = float(time_ms) / 1000.0
         values["rotation"] = float(values.get("rotation", 0.0)) + amplitude * math.sin((seconds * frequency + seed) * math.tau)
+    elif kind == "impact":
+        overshoot = float(params.get("scale_overshoot", 0.14))
+        rotation_kick = float(params.get("rotation_kick", 4.0))
+        shake = float(params.get("shake", 8.0))
+        frequency = float(params.get("frequency", 4.0))
+        damping = max(0.0, float(params.get("damping", 6.0)))
+        envelope = math.exp(-damping * t)
+        pulse = math.sin(t * math.pi) * overshoot
+        settle = math.sin(t * frequency * math.tau) * envelope
+        values["scale"] = [
+            float(values["scale"][0]) * (1.0 + pulse),
+            float(values["scale"][1]) * (1.0 + pulse),
+        ]
+        values["rotation"] = float(values.get("rotation", 0.0)) + rotation_kick * settle
+        position = list(values["position"])
+        position[0] += shake * settle
+        position[1] += shake * 0.45 * math.sin(t * (frequency + 0.5) * math.tau) * envelope
+        values["position"] = position
 
 
 def apply_behaviors(values: MutableMapping[str, Any], behaviors: list[MotionBehaviorRef], time_ms: float) -> None:

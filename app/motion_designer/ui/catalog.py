@@ -28,6 +28,7 @@ BEHAVIOR_ITEMS = (
     ("Pop", "pop"),
     ("Spring", "spring"),
     ("Wiggle", "wiggle"),
+    ("Impact", "impact"),
 )
 
 FILTER_ITEMS = (
@@ -37,6 +38,11 @@ FILTER_ITEMS = (
     ("Saturation", "saturation"),
     ("Vignette", "vignette"),
     ("Unsharp Mask", "unsharp_mask"),
+    ("Directional Blur", "directional_blur"),
+    ("Displacement", "displacement"),
+    ("Corner Pin", "corner_pin"),
+    ("Mesh Warp", "mesh_warp"),
+    ("Paper Fold", "paper_fold"),
 )
 
 CATALOG = {
@@ -54,5 +60,12 @@ CATALOG = {
         ("Anime Character Intro", "template", "anime_character_intro"),
         ("MMD Dance Title", "template", "mmd_dance_title"),
         ("VRM Stream Starting / Ending", "template", "vrm_stream_starting_ending"),
+    ),
+    "Direction Presets": (
+        ("Headline Slam", "advanced_preset", "headline_slam"),
+        ("Paper Rip Reveal", "advanced_preset", "paper_rip_reveal"),
+        ("Cutout Collage", "advanced_preset", "cutout_collage"),
+        ("Editorial Camera Push", "advanced_preset", "editorial_camera_push"),
+        ("Beat-Synced Montage", "advanced_preset", "beat_synced_montage"),
     ),
 }

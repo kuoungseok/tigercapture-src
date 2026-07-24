@@ -30,6 +30,7 @@ from .ai_worker import (
 )
 from .ar_pbr_panel import ArPbrPanel
 from .actor_panel import ActorPanel
+from .advanced_panel import AdvancedMotionPanel
 from .canvas import MotionCanvas
 from .cutout_rig_dialog import CutoutArmRigDialog
 from .effect_mask_panel import EffectMaskPanel
@@ -235,6 +236,7 @@ class MotionDesignerWindow(QMainWindow):
         self.media = QListWidget(self)
         self.audio = AudioReactivePanel(self)
         self.inspector = InspectorPanel(self)
+        self.advanced = AdvancedMotionPanel(self)
         self.image = ImagePanel(self)
         self.ar_pbr = ArPbrPanel(self)
         self.actor = ActorPanel(self)
@@ -248,6 +250,7 @@ class MotionDesignerWindow(QMainWindow):
         self.masks = EffectMaskPanel("mask", self)
         self.inspector_tabs = QTabWidget(self)
         self.inspector_tabs.addTab(self.inspector, "Properties")
+        self.inspector_tabs.addTab(self.advanced, "Motion")
         self.inspector_tabs.addTab(self.image, "Image")
         self.inspector_tabs.addTab(self.vector, "Shape")
         self.inspector_tabs.addTab(self.typography, "Text")
@@ -327,6 +330,7 @@ class MotionDesignerWindow(QMainWindow):
         self.canvas.typography_path_offset_changed.connect(self._set_typography_path_offset)
         self.inspector.property_changed.connect(self._set_inspector_property)
         self.inspector.keyframe_requested.connect(self._set_keyframe)
+        self.advanced.metadata_changed.connect(self._set_advanced_metadata)
         self.image.source_changed.connect(self._set_image_params)
         self.image.keyframe_requested.connect(self._set_image_keyframe)
         self.vector.source_changed.connect(self._set_vector_params)
@@ -545,6 +549,7 @@ class MotionDesignerWindow(QMainWindow):
         self._selected_layer_id = str(layer_id or "")
         layer = next((item for item in self.controller.composition.layers if item.id == self._selected_layer_id), None)
         self.inspector.set_layer(layer)
+        self.advanced.set_layer(layer, self.controller.composition)
         self.image.set_layer(
             layer,
             max(0, self._time_ms - layer.in_ms) if layer is not None else 0,
@@ -633,6 +638,15 @@ class MotionDesignerWindow(QMainWindow):
         candidate.revision += 1
         self.controller.replace(candidate)
 
+    def _set_advanced_metadata(self, changes: object) -> None:
+        if not self._selected_layer_id or not isinstance(changes, dict):
+            return
+        candidate = MotionComposition.from_dict(self.controller.composition.to_dict())
+        layer = find_layer(candidate, self._selected_layer_id)
+        layer.metadata.update(deepcopy(changes))
+        candidate.revision += 1
+        self.controller.replace(candidate)
+
     def _apply_library_item(self, domain: str, kind: str) -> None:
         if domain == "object":
             self._add_layer(kind)
@@ -653,6 +667,21 @@ class MotionDesignerWindow(QMainWindow):
             self.controller.replace(candidate)
             if added:
                 self._select_layer(added[-1].id)
+        elif domain == "advanced_preset":
+            from app.motion_designer.advanced_presets import apply_advanced_preset
+
+            candidate = MotionComposition.from_dict(self.controller.composition.to_dict())
+            layer_ids = [self._selected_layer_id] if self._selected_layer_id else []
+            result = apply_advanced_preset(
+                candidate,
+                kind,
+                layer_ids=layer_ids,
+                start_ms=self._time_ms,
+            )
+            self.controller.replace(candidate)
+            added = list(result.get("added_layer_ids") or [])
+            if added:
+                self._select_layer(added[-1])
 
     def _update_media_panel(self, composition: MotionComposition) -> None:
         self.media.clear()

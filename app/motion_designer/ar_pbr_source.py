@@ -98,6 +98,9 @@ def default_camera_params() -> dict[str, Any]:
         "fov": _animated(45.0, "scalar"),
         "focus_distance": _animated(3.25, "scalar"),
         "focus_range": _animated(0.28, "scalar"),
+        "apply_to_2d": False,
+        "parallax_strength": 1.0,
+        "pixels_per_unit": 120.0,
     }
 
 

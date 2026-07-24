@@ -100,6 +100,79 @@ def register_motion_actions(registry: Any) -> None:
         undo_label="Create Cut Paper Rig",
         dry_summary="an editable cut-paper rig would be created",
     )
+    advanced_ops = (
+        (
+            "motion.matte.set", "motion_matte_set",
+            {**lid, "matte_layer_id": {"type": "string"},
+             "mode": {"type": "string", "enum": ["alpha", "luma"]},
+             "inverted": {"type": "boolean"}},
+            ("composition_id", "layer_id", "matte_layer_id"),
+        ),
+        (
+            "motion.matte.clear", "motion_matte_clear", lid,
+            ("composition_id", "layer_id"),
+        ),
+        (
+            "motion.layer.depth.set", "motion_layer_depth_set",
+            {**lid, "depth_z": {"type": "number", "minimum": -8, "maximum": 8},
+             "camera_excluded": {"type": "boolean"}},
+            ("composition_id", "layer_id", "depth_z"),
+        ),
+        (
+            "motion.blur.set", "motion_blur_set",
+            {**lid, "enabled": {"type": "boolean"},
+             "samples": {"type": "integer", "minimum": 2, "maximum": 32},
+             "shutter": {"type": "number", "minimum": 0, "maximum": 2}},
+            ("composition_id", "layer_id"),
+        ),
+        (
+            "motion.replicator.set", "motion_replicator_set",
+            {**lid, "enabled": {"type": "boolean"},
+             "count": {"type": "integer", "minimum": 1, "maximum": 256},
+             "offset": {"type": "array"}, "rotation": {"type": "number"},
+             "scale": {"type": "array"}, "opacity_start": {"type": "number"},
+             "opacity_end": {"type": "number"}, "jitter": {"type": "array"},
+             "seed": {"type": "integer"}},
+            ("composition_id", "layer_id", "count"),
+        ),
+        (
+            "motion.text.animator.set", "motion_text_animator_set",
+            {**lid, "config": {"type": "object"}},
+            ("composition_id", "layer_id", "config"),
+        ),
+        (
+            "motion.camera.2_5d.set", "motion_camera_2_5d_set",
+            {**lid, "enabled": {"type": "boolean"},
+             "parallax_strength": {"type": "number", "minimum": 0, "maximum": 4},
+             "pixels_per_unit": {"type": "number", "minimum": 1, "maximum": 1000}},
+            ("composition_id", "layer_id"),
+        ),
+        (
+            "motion.paper_paste.create", "motion_paper_paste_create",
+            {**lid, "start_ms": {"type": "integer", "minimum": 0},
+             "tape_color": {"type": "string"},
+             "fold_strength": {"type": "number", "minimum": 0, "maximum": 1}},
+            ("composition_id", "layer_id", "start_ms"),
+        ),
+        (
+            "motion.advanced_preset.apply", "motion_advanced_preset_apply",
+            {**cid, "preset_id": {"type": "string", "enum": [
+                "headline_slam", "paper_rip_reveal", "cutout_collage",
+                "editorial_camera_push", "beat_synced_montage",
+            ]}, "layer_ids": {"type": "array"},
+             "start_ms": {"type": "integer", "minimum": 0},
+             "beat_interval_ms": {"type": "integer", "minimum": 80}},
+            ("composition_id", "preset_id"),
+        ),
+    )
+    for action_id, method, props, required in advanced_ops:
+        title = action_id.replace("motion.", "").replace(".", " ").title()
+        registry.register_adapter_action(
+            action_id, title, "motion", method,
+            params_schema=schema_object(props, required=required), required=required,
+            mutating=True, changed=True, undo_label=title,
+            dry_summary=f"{title} would run",
+        )
     registry.register_adapter_action(
         "motion.cutout_rig.arm_wave.create",
         "Connect torso, upper-arm, forearm, and hand layers at editable joints "

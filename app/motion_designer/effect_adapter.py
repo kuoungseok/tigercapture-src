@@ -84,5 +84,79 @@ def apply_effects(image: QImage, effects: list[MotionEffectRef], time_ms: float)
             radius = np.sqrt(xx * xx + yy * yy)
             shade = 1.0 - amount * np.clip((radius - (1.0 - softness)) / softness, 0.0, 1.0)
             rgba[..., :3] = rgb * shade[..., None]
+        elif kind == "directional_blur":
+            length = max(0.0, min(200.0, float(_value(effect, "length", time_ms, 12.0))))
+            angle = float(_value(effect, "angle", time_ms, 0.0))
+            samples = max(2, min(32, int(_value(effect, "samples", time_ms, 8))))
+            if length > 0.05:
+                radians = np.deg2rad(angle)
+                dx, dy = np.cos(radians) * length, np.sin(radians) * length
+                accumulated = np.zeros_like(rgba)
+                height, width = rgba.shape[:2]
+                for index in range(samples):
+                    amount = index / max(1, samples - 1) - 0.5
+                    matrix = np.array(
+                        [[1.0, 0.0, dx * amount], [0.0, 1.0, dy * amount]],
+                        dtype=np.float32,
+                    )
+                    accumulated += cv2.warpAffine(
+                        rgba, matrix, (width, height), flags=cv2.INTER_LINEAR,
+                        borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0),
+                    )
+                rgba = accumulated / samples
+        elif kind == "displacement":
+            strength = max(0.0, min(300.0, float(_value(effect, "strength", time_ms, 16.0))))
+            scale = max(2.0, min(1000.0, float(_value(effect, "scale", time_ms, 120.0))))
+            speed = float(_value(effect, "speed", time_ms, 0.0))
+            height, width = rgba.shape[:2]
+            yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+            phase = float(time_ms) * 0.001 * speed
+            map_x = xx + np.sin(yy / scale * np.pi * 2.0 + phase) * strength
+            map_y = yy + np.cos(xx / scale * np.pi * 2.0 - phase * 0.73) * strength
+            rgba = cv2.remap(
+                rgba, map_x, map_y, cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0),
+            )
+        elif kind == "corner_pin":
+            height, width = rgba.shape[:2]
+            amount = max(0.0, min(1.0, float(_value(effect, "amount", time_ms, 1.0))))
+            offsets = []
+            for name in ("top_left", "top_right", "bottom_right", "bottom_left"):
+                value = _value(effect, name, time_ms, [0.0, 0.0])
+                pair = list(value) if isinstance(value, (list, tuple)) else [0.0, 0.0]
+                pair.extend([0.0, 0.0])
+                offsets.append([float(pair[0]) * amount, float(pair[1]) * amount])
+            source = np.float32([[0, 0], [width - 1, 0], [width - 1, height - 1], [0, height - 1]])
+            target = source + np.float32(offsets)
+            matrix = cv2.getPerspectiveTransform(source, target)
+            rgba = cv2.warpPerspective(
+                rgba, matrix, (width, height), flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0),
+            )
+        elif kind == "mesh_warp":
+            amplitude_x = max(-300.0, min(300.0, float(_value(effect, "amplitude_x", time_ms, 12.0))))
+            amplitude_y = max(-300.0, min(300.0, float(_value(effect, "amplitude_y", time_ms, 8.0))))
+            frequency_x = max(0.1, min(20.0, float(_value(effect, "frequency_x", time_ms, 1.0))))
+            frequency_y = max(0.1, min(20.0, float(_value(effect, "frequency_y", time_ms, 1.0))))
+            phase = float(_value(effect, "phase", time_ms, 0.0))
+            height, width = rgba.shape[:2]
+            yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+            map_x = xx + np.sin((yy / max(1, height)) * np.pi * 2.0 * frequency_y + phase) * amplitude_x
+            map_y = yy + np.sin((xx / max(1, width)) * np.pi * 2.0 * frequency_x + phase) * amplitude_y
+            rgba = cv2.remap(
+                rgba, map_x, map_y, cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_CONSTANT, borderValue=(0, 0, 0, 0),
+            )
+        elif kind == "paper_fold":
+            strength = max(0.0, min(1.0, float(_value(effect, "strength", time_ms, 0.35))))
+            angle = np.deg2rad(float(_value(effect, "angle", time_ms, -18.0)))
+            width_px = max(2.0, float(_value(effect, "width", time_ms, 38.0)))
+            height, width = rgba.shape[:2]
+            yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+            centered = (xx - width * 0.5) * np.cos(angle) + (yy - height * 0.5) * np.sin(angle)
+            ridge = np.exp(-np.square(centered / width_px))
+            highlight = np.clip(centered / width_px, -1.0, 1.0) * ridge
+            shade = 1.0 + highlight * strength
+            rgba[..., :3] = rgb * shade[..., None]
         rgba = np.clip(rgba, 0, 255)
     return _qimage(rgba)

@@ -6,6 +6,7 @@ import math
 from typing import Any
 
 from .audio_reactive import evaluate_layer_transform
+from .advanced_motion import project_layer_matrix
 from .constraints import apply_look_at, point_on_path
 from .schema import MotionComposition, MotionLayer
 
@@ -102,6 +103,12 @@ def evaluate_composition(composition: MotionComposition, time_ms: float) -> list
             id=layer.id, name=layer.name, active=active, local_time_ms=remap_layer_time(layer, time_ms),
             position=list(values["position"]), scale=list(values["scale"]), rotation=float(values["rotation"]),
             opacity=max(0.0, min(1.0, float(values["opacity"]))), anchor=list(values["anchor"]),
-            matrix=world_matrix(layer), source=layer.source.to_dict(), blend_mode=layer.blend_mode,
+            matrix=project_layer_matrix(
+                world_matrix(layer),
+                composition=composition,
+                layer=layer,
+                time_ms=time_ms,
+            ),
+            source=layer.source.to_dict(), blend_mode=layer.blend_mode,
         ))
     return evaluated

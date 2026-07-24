@@ -1012,6 +1012,11 @@ Start here when changing a feature:
   hidden embedded-audio clips from the video clip's timeline position and
   source trim, then copy the Workbench proxy's gain/fade/effects state so the
   selected-video audio follows timeline edits without requiring extraction.
+  The proxy also carries `picture sync` markers generated from clip in/out,
+  transitions, video fades, zoom/motion actors, typography/keyframe events,
+  speed changes, and frame repairs. Sound Editor waveform UI renders those
+  markers as frame-locked audio editing references; moving/trimming the video
+  clip regenerates marker source/project positions before preview/export.
   2026-07-25 UI note: Composer and Voice Lab launch from the Workbench
   `Programs` tile grid; standalone Voice Lab window chrome remains text-first.
   Voice Lab popup windows and all Voice Lab combo-box popup containers
@@ -6197,6 +6202,43 @@ AI Script Edit MVP integration:
   contribution registration, sandbox/failure isolation, uninstall, and safe
   mode remain pending. These M12 source changes require a fresh installer build
   and installed-build smoke before they are included in a public binary.
+- Motion Designer advanced editorial direction is implemented across the shared
+  Preview/Export render graph. `app/motion_designer/advanced_motion.py` projects
+  ordinary 2D layers through an explicitly enabled Camera layer using editable
+  `depth_z`, FOV, camera position, roll, and parallax strength. AR/PBR camera
+  behavior is unchanged because `apply_to_2d` is off by default.
+- Any renderable image, text, vector, actor, or particle layer may use the
+  renderer-neutral metadata `replicator` contract for count, offset, rotation,
+  scale, opacity falloff, deterministic jitter, and seed. This is separate from
+  the existing vector-path Repeater and is composited before track matte output.
+  Per-layer movement-derived motion blur uses bounded temporal samples and
+  shutter values in the same shared render graph.
+- Alpha and luma track mattes remain stable layer-ID references and now have
+  dedicated `motion.matte.set/clear` actions and `Motion` Inspector controls.
+  The same Inspector exposes 2.5D depth, motion blur, and the generic
+  Replicator. Text character/word/line animation continues to use the existing
+  typography selector/stagger renderer and is exposed to automation through
+  `motion.text.animator.set`.
+- The common effect path now includes `directional_blur`, `displacement`,
+  `corner_pin`, `mesh_warp`, and `paper_fold` in addition to the existing
+  grading, blur, glow, sharpen, and vignette effects. These effects use the same
+  source surface in desktop Preview, file export, and main-timeline Motion Clip
+  compositing.
+- `app/motion_designer/paper_composite.py` creates editable paper shadow, tape,
+  staple, fold-shading, impact, and motion-blur layers around a selected source.
+  It complements the existing path-trimmed scissors/cut-hole paper rig rather
+  than replacing it. The `impact` behavior adds damped landing scale, rotation,
+  and positional response.
+- The Library `Direction Presets` category and
+  `app/motion_designer/advanced_presets.py` provide `Headline Slam`,
+  `Paper Rip Reveal`, `Cutout Collage`, `Editorial Camera Push`, and
+  `Beat-Synced Montage`. Equivalent automation is available through
+  `motion.advanced_preset.apply`, `motion.paper_paste.create`,
+  `motion.camera.2_5d.set`, `motion.layer.depth.set`, `motion.blur.set`, and
+  `motion.replicator.set`.
+- These tools provide editable 2.5D editorial motion and deterministic
+  distortion; they do not claim a full 3D scene graph, arbitrary user-authored
+  displacement video maps, cloth simulation, or After Effects plugin parity.
 - Current limits: the render graph uses QImage source surfaces presented by
   OpenGL rather than a shader-only layer compositor. Fully GPU-native Bezier
   path tessellation remains pending. Audio analysis is

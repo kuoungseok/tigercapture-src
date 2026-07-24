@@ -8,6 +8,7 @@ from PySide6.QtCore import QRectF
 from PySide6.QtGui import QImage, QPainter, QTransform
 
 from .adapters import render_source
+from .advanced_motion import evaluate_replicator
 from .boolean_layers import consumed_boolean_operand_ids, resolve_boolean_layer
 from .effect_adapter import apply_effects
 from .evaluator import evaluate_composition
@@ -40,6 +41,10 @@ class RenderNode:
     composition_time_ms: float = 0.0
     render_quality: str = "preview"
     source_viewport_size: tuple[int, int] | None = None
+    replicator_instances: list[dict[str, float]] | None = None
+    motion_blur_vector: tuple[float, float] = (0.0, 0.0)
+    motion_blur_samples: int = 1
+    motion_blur_shutter: float = 0.0
 
 
 @dataclass(slots=True)
@@ -67,12 +72,18 @@ def build_render_graph(
     output_size: tuple[int, int] | None = None,
 ) -> RenderGraph:
     states = {state.id: state for state in evaluate_composition(composition, time_ms)}
+    previous_time_ms = max(0.0, float(time_ms) - 1000.0 / max(1.0, float(composition.fps)))
+    previous_states = {
+        state.id: state for state in evaluate_composition(composition, previous_time_ms)
+    }
     consumed_operand_ids = consumed_boolean_operand_ids(composition, states)
     nodes: list[RenderNode] = []
     vector_gpu_packet_count = 0
     vector_gpu_fallback_count = 0
     typography_gpu_packet_count = 0
     typography_gpu_fallback_count = 0
+    replicated_node_count = 0
+    motion_blur_node_count = 0
     for layer in composition.layers:
         state = states[layer.id]
         if not state.active or layer.layer_type in {"group", "null", "camera", "light"} or layer.id in consumed_operand_ids:
@@ -117,6 +128,23 @@ def build_render_graph(
             typography_gpu_packet_count += 1
         elif include_vector_gpu and render_layer.layer_type == "text":
             typography_gpu_fallback_count += 1
+        replicator = evaluate_replicator(layer.metadata.get("replicator"), state.local_time_ms)
+        if len(replicator) > 1:
+            replicated_node_count += 1
+        motion_blur = layer.metadata.get("motion_blur")
+        if not isinstance(motion_blur, dict):
+            motion_blur = composition.metadata.get("motion_blur")
+        motion_blur = motion_blur if isinstance(motion_blur, dict) else {}
+        blur_enabled = bool(motion_blur.get("enabled", False))
+        samples = max(1, min(32, int(motion_blur.get("samples", 8) or 8))) if blur_enabled else 1
+        shutter = max(0.0, min(2.0, float(motion_blur.get("shutter", 0.65) or 0.0))) if blur_enabled else 0.0
+        previous = previous_states.get(layer.id)
+        vector = (
+            float(state.matrix[4] - previous.matrix[4]) * shutter,
+            float(state.matrix[5] - previous.matrix[5]) * shutter,
+        ) if previous is not None and blur_enabled else (0.0, 0.0)
+        if samples > 1 and (abs(vector[0]) > 0.05 or abs(vector[1]) > 0.05):
+            motion_blur_node_count += 1
         nodes.append(RenderNode(
             layer.id, image, state.matrix, state.opacity, state.blend_mode,
             (float(state.anchor[0]), float(state.anchor[1])), layer_type=layer.layer_type,
@@ -133,6 +161,10 @@ def build_render_graph(
             composition_time_ms=float(time_ms),
             render_quality=str(render_quality),
             source_viewport_size=output_size or (composition.width, composition.height),
+            replicator_instances=replicator,
+            motion_blur_vector=vector,
+            motion_blur_samples=samples,
+            motion_blur_shutter=shutter,
         ))
     return RenderGraph(composition.width, composition.height, nodes, {
         "renderer": "qt_painter_render_graph", "premultiplied_alpha": True,
@@ -146,6 +178,8 @@ def build_render_graph(
         "typography_gpu_requested": include_vector_gpu,
         "render_quality": str(render_quality),
         "output_size": list(output_size or (composition.width, composition.height)),
+        "replicated_node_count": replicated_node_count,
+        "motion_blur_node_count": motion_blur_node_count,
     })
 
 
@@ -162,6 +196,59 @@ def _node_image(node: RenderNode) -> QImage | None:
     return node.image
 
 
+def _instance_transform(node: RenderNode, instance: dict[str, float]) -> QTransform:
+    a, b, c, d, tx, ty = node.matrix
+    base = QTransform(a, b, 0.0, c, d, 0.0, tx, ty, 1.0)
+    local = QTransform()
+    local.translate(float(instance.get("x", 0.0)), float(instance.get("y", 0.0)))
+    local.rotate(float(instance.get("rotation", 0.0)))
+    local.scale(float(instance.get("scale_x", 1.0)), float(instance.get("scale_y", 1.0)))
+    return base * local
+
+
+def _apply_motion_blur(surface: QImage, node: RenderNode) -> QImage:
+    dx, dy = node.motion_blur_vector
+    samples = max(1, int(node.motion_blur_samples))
+    if samples <= 1 or (abs(dx) <= 0.05 and abs(dy) <= 0.05):
+        return surface
+    import cv2
+    import numpy as np
+
+    straight = surface.convertToFormat(QImage.Format_RGBA8888)
+    raw = np.frombuffer(straight.constBits(), dtype=np.uint8).reshape(
+        straight.height(), straight.bytesPerLine(),
+    )
+    rgba = raw[:, : straight.width() * 4].reshape(straight.height(), straight.width(), 4).astype(np.float32)
+    visible_y, visible_x = np.nonzero(rgba[..., 3] > 0.5)
+    if visible_x.size == 0:
+        return surface
+    margin = int(max(abs(dx), abs(dy)) * 0.6) + 3
+    left = max(0, int(visible_x.min()) - margin)
+    right = min(straight.width(), int(visible_x.max()) + margin + 1)
+    top = max(0, int(visible_y.min()) - margin)
+    bottom = min(straight.height(), int(visible_y.max()) + margin + 1)
+    region = rgba[top:bottom, left:right]
+    accumulated = np.zeros_like(region, dtype=np.float32)
+    for index in range(samples):
+        amount = index / max(1, samples - 1) - 0.5
+        matrix = np.array([[1.0, 0.0, -dx * amount], [0.0, 1.0, -dy * amount]], dtype=np.float32)
+        accumulated += cv2.warpAffine(
+            region,
+            matrix,
+            (region.shape[1], region.shape[0]),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_CONSTANT,
+            borderValue=(0, 0, 0, 0),
+        )
+    output = np.zeros_like(rgba, dtype=np.uint8)
+    output[top:bottom, left:right] = np.clip(accumulated / samples, 0, 255).astype(np.uint8)
+    output = np.ascontiguousarray(output)
+    image = QImage(
+        output.data, straight.width(), straight.height(), output.strides[0], QImage.Format_RGBA8888,
+    ).copy()
+    return image.convertToFormat(QImage.Format_RGBA8888_Premultiplied)
+
+
 def _node_surface(graph: RenderGraph, node: RenderNode) -> QImage:
     surface = transparent_image(graph.width, graph.height)
     image = _node_image(node)
@@ -170,33 +257,35 @@ def _node_surface(graph: RenderGraph, node: RenderNode) -> QImage:
     layer_painter = QPainter(surface)
     layer_painter.setRenderHint(QPainter.Antialiasing)
     layer_painter.setRenderHint(QPainter.SmoothPixmapTransform)
-    layer_painter.setOpacity(node.opacity)
-    a, b, c, d, tx, ty = node.matrix
-    layer_painter.setTransform(QTransform(a, b, 0.0, c, d, 0.0, tx, ty, 1.0))
-    layer_painter.drawImage(
-        -image.width() * node.anchor[0],
-        -image.height() * node.anchor[1],
-        image,
-    )
+    for instance in node.replicator_instances or [{"opacity": 1.0}]:
+        layer_painter.save()
+        layer_painter.setOpacity(node.opacity * float(instance.get("opacity", 1.0)))
+        layer_painter.setTransform(_instance_transform(node, instance))
+        layer_painter.drawImage(
+            -image.width() * node.anchor[0],
+            -image.height() * node.anchor[1],
+            image,
+        )
+        layer_painter.restore()
     layer_painter.end()
-    return surface
+    return _apply_motion_blur(surface, node)
 
 
 def _paint_node(painter: QPainter, node: RenderNode) -> None:
     image = _node_image(node)
     if image is None:
         return
-    painter.save()
-    painter.setCompositionMode(BLEND_MODES.get(node.blend_mode, QPainter.CompositionMode_SourceOver))
-    painter.setOpacity(node.opacity)
-    a, b, c, d, tx, ty = node.matrix
-    painter.setTransform(QTransform(a, b, 0.0, c, d, 0.0, tx, ty, 1.0), combine=True)
-    painter.drawImage(
-        -image.width() * node.anchor[0],
-        -image.height() * node.anchor[1],
-        image,
-    )
-    painter.restore()
+    for instance in node.replicator_instances or [{"opacity": 1.0}]:
+        painter.save()
+        painter.setCompositionMode(BLEND_MODES.get(node.blend_mode, QPainter.CompositionMode_SourceOver))
+        painter.setOpacity(node.opacity * float(instance.get("opacity", 1.0)))
+        painter.setTransform(_instance_transform(node, instance), combine=True)
+        painter.drawImage(
+            -image.width() * node.anchor[0],
+            -image.height() * node.anchor[1],
+            image,
+        )
+        painter.restore()
 
 
 def _luma_matte(image: QImage) -> QImage:
@@ -232,7 +321,12 @@ def render_graph_image(graph: RenderGraph) -> QImage:
         if node.layer_id in matte_ids:
             continue
         matte_node = node_by_id.get(node.matte_layer_id)
-        if matte_node is None:
+        requires_surface = (
+            matte_node is not None
+            or len(node.replicator_instances or ()) > 1
+            or node.motion_blur_samples > 1
+        )
+        if not requires_surface:
             canvas_painter = QPainter(canvas)
             _paint_node(canvas_painter, node)
             canvas_painter.end()
