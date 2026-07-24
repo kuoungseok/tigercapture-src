@@ -9,6 +9,7 @@ from PySide6.QtWidgets import QApplication, QWidget
 _PLACEMENT_DONE_PROPERTY = "_tiger_window_placement_done"
 _PLACEMENT_DISABLED_PROPERTY = "tiger_no_auto_place"
 _PLACEMENT_FILTER_PROPERTY = "_tiger_window_placement_filter"
+_PLACEMENT_LAST_TOP_LEFT_PROPERTY = "_tiger_window_placement_last_top_left"
 
 
 def target_screen_for_window(
@@ -186,6 +187,9 @@ def _place_from_event_filter(widget: QWidget, reference: QWidget | None, mark_do
         if should_auto_place_window(widget):
             if bool(widget.property(_PLACEMENT_DONE_PROPERTY)):
                 return
+            if _user_moved_since_last_placement(widget):
+                widget.setProperty(_PLACEMENT_DONE_PROPERTY, True)
+                return
             fit_window_to_current_screen(
                 widget,
                 reference=reference,
@@ -193,11 +197,30 @@ def _place_from_event_filter(widget: QWidget, reference: QWidget | None, mark_do
                 center_on_target_screen=True,
                 mark_done=mark_done,
             )
+            widget.setProperty(_PLACEMENT_LAST_TOP_LEFT_PROPERTY, _window_top_left(widget))
     except RuntimeError:
         pass
     except Exception:
         # Placement must never prevent a tool window from opening.
         pass
+
+
+def _window_top_left(widget: QWidget) -> QPoint:
+    try:
+        if widget.isVisible():
+            return QPoint(widget.frameGeometry().topLeft())
+    except Exception:
+        pass
+    return QPoint(widget.geometry().topLeft())
+
+
+def _user_moved_since_last_placement(widget: QWidget) -> bool:
+    previous = widget.property(_PLACEMENT_LAST_TOP_LEFT_PROPERTY)
+    if not isinstance(previous, QPoint):
+        return False
+    current = _window_top_left(widget)
+    delta = current - previous
+    return abs(int(delta.x())) + abs(int(delta.y())) > 4
 
 
 def _screen_candidates(widget: QWidget | None, reference: QWidget | QPoint | QRect | None):

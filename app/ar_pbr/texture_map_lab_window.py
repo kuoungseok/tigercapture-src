@@ -1,16 +1,22 @@
 """Qt window for the AR/PBR image texture-map lab."""
 from __future__ import annotations
 
+import ctypes
+import ctypes.wintypes
+import importlib
+import math
+import os
 from datetime import datetime
 from pathlib import Path
 import tempfile
 from typing import Any
 
-from PySide6.QtCore import QElapsedTimer, QRectF, Qt, QTimer
+from PySide6.QtCore import QElapsedTimer, QProcess, QRectF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
     QCheckBox,
+    QDialog,
     QFileDialog,
     QComboBox,
     QFrame,
@@ -19,8 +25,11 @@ from PySide6.QtWidgets import (
     QLabel,
     QMainWindow,
     QMessageBox,
+    QPlainTextEdit,
+    QProgressBar,
     QPushButton,
     QScrollArea,
+    QSizePolicy,
     QVBoxLayout,
     QWidget,
 )
@@ -40,11 +49,17 @@ from app.ar_pbr.texture_map_lab import (
     normalize_texture_map_settings,
     pack_texture_channels,
     render_plane_preview_from_generated,
+    render_source_preview_image,
     select_texture_map_backend,
     texture_lab_cpu_fallback_allowed,
+    texture_lab_gpu_install_plan,
     texture_map_settings_fingerprint,
     texture_map_to_image,
 )
+
+
+_WM_ENTERSIZEMOVE = 0x0231
+_WM_EXITSIZEMOVE = 0x0232
 
 
 _TEXTURE_THUMBNAILS: tuple[tuple[str, str], ...] = (
@@ -121,12 +136,22 @@ class _TextureLabPreviewCanvas(QWidget):
         super().__init__(parent)
         self._preview_pixmap = QPixmap()
         self._thumbnails: list[tuple[str, QPixmap, bool]] = []
+        self._scaled_pixmap_cache: dict[tuple[str, int, int, int], QPixmap] = {}
+        self._interactive_paint = False
         self.setObjectName("TextureLabPreview")
         self.setMinimumSize(620, 420)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
 
+    def set_interactive_paint(self, enabled: bool) -> None:
+        value = bool(enabled)
+        if self._interactive_paint == value:
+            return
+        self._interactive_paint = value
+        self.update()
+
     def set_preview_pixmap(self, pixmap: QPixmap) -> None:
         self._preview_pixmap = QPixmap(pixmap) if pixmap is not None else QPixmap()
+        self._scaled_pixmap_cache.clear()
         self.update()
 
     def preview_pixmap(self) -> QPixmap:
@@ -138,6 +163,7 @@ class _TextureLabPreviewCanvas(QWidget):
             for label, pixmap, active in thumbnails
             if pixmap is not None and not pixmap.isNull()
         ]
+        self._scaled_pixmap_cache.clear()
         self.update()
 
     def thumbnail_count(self) -> int:
@@ -145,12 +171,10 @@ class _TextureLabPreviewCanvas(QWidget):
 
     def paintEvent(self, _event) -> None:  # pragma: no cover - visual paint path
         painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        if not self._interactive_paint:
+            painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         frame = QRectF(self.rect()).adjusted(0.5, 0.5, -0.5, -0.5)
         painter.fillRect(self.rect(), QColor("#08090C"))
-        painter.setPen(QPen(QColor("#252A34"), 1.0))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.drawRoundedRect(frame, 6, 6)
 
         content = frame.adjusted(12, 12, -12, -12)
         if self._preview_pixmap.isNull():
@@ -160,7 +184,13 @@ class _TextureLabPreviewCanvas(QWidget):
             return
 
         preview_rect = self._scaled_rect(self._preview_pixmap, content)
-        painter.drawPixmap(preview_rect.toRect(), self._preview_pixmap)
+        self._draw_cached_pixmap(painter, preview_rect, self._preview_pixmap, "preview")
+        if self._interactive_paint:
+            painter.end()
+            return
+        painter.setPen(QPen(QColor("#252A34"), 1.0))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(frame, 6, 6)
         self._draw_thumbnails(painter, content, preview_rect)
         painter.end()
 
@@ -260,7 +290,235 @@ class _TextureLabPreviewCanvas(QWidget):
         if image_rect.width() < 8 or image_rect.height() < 8:
             return
         scaled = self._scaled_rect(pixmap, image_rect)
-        painter.drawPixmap(scaled.toRect(), pixmap)
+        self._draw_cached_pixmap(painter, scaled, pixmap, f"thumb:{label}")
+
+    def _draw_cached_pixmap(
+        self,
+        painter: QPainter,
+        rect: QRectF,
+        pixmap: QPixmap,
+        role: str,
+    ) -> None:
+        target = rect.toAlignedRect()
+        width = max(1, int(target.width()))
+        height = max(1, int(target.height()))
+        key = (role, int(pixmap.cacheKey()), width, height)
+        scaled = self._scaled_pixmap_cache.get(key)
+        if scaled is None or scaled.isNull():
+            scaled = pixmap.scaled(
+                width,
+                height,
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+            self._scaled_pixmap_cache[key] = scaled
+        x = target.x() + max(0, (width - scaled.width()) // 2)
+        y = target.y() + max(0, (height - scaled.height()) // 2)
+        painter.drawPixmap(x, y, scaled)
+
+
+class _TextureLabGpuInstallDialog(QDialog):
+    installed = Signal(object)
+
+    def __init__(self, parent: QWidget | None = None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Texture Lab GPU 자동 설치")
+        self.setObjectName("TextureLabGpuInstallDialog")
+        self.setMinimumSize(760, 470)
+        self._plan = texture_lab_gpu_install_plan()
+        self._process: QProcess | None = None
+        self._phase = "idle"
+        self._cancel_requested = False
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(10)
+
+        title = QLabel("Texture Lab GPU backend를 설치하고 연결합니다.", self)
+        title.setObjectName("TextureLabInstallTitle")
+        title.setWordWrap(True)
+        layout.addWidget(title)
+
+        explain = QLabel(
+            "RTX/OpenGL 프리뷰와 별개로, Texture Lab의 PBR 맵 생성은 이 가상환경에 "
+            "PyTorch CUDA가 설치되어 있어야 합니다. 설치 후 자동으로 검증하고 torch_cuda를 선택합니다.",
+            self,
+        )
+        explain.setObjectName("TextureLabInstallExplain")
+        explain.setWordWrap(True)
+        layout.addWidget(explain)
+
+        self._state = QLabel("설치 준비 완료. 시작 버튼을 누르면 콘솔 창 없이 설치합니다.", self)
+        self._state.setObjectName("TextureLabInstallState")
+        self._state.setWordWrap(True)
+        layout.addWidget(self._state)
+
+        self._progress = QProgressBar(self)
+        self._progress.setRange(0, 100)
+        self._progress.setValue(0)
+        self._progress.setTextVisible(True)
+        layout.addWidget(self._progress)
+
+        self._console = QPlainTextEdit(self)
+        self._console.setReadOnly(True)
+        self._console.setObjectName("TextureLabInstallConsole")
+        self._console.setMinimumHeight(230)
+        self._console.setPlaceholderText("설치 로그가 여기에 표시됩니다.")
+        layout.addWidget(self._console, stretch=1)
+
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        self._start_button = QPushButton("설치 시작", self)
+        self._start_button.setObjectName("TextureLabInstallPrimary")
+        self._cancel_button = QPushButton("취소", self)
+        self._close_button = QPushButton("닫기", self)
+        self._close_button.setEnabled(False)
+        self._close_button.setDefault(True)
+        self._start_button.clicked.connect(self.start_install)
+        self._cancel_button.clicked.connect(self.cancel_install)
+        self._close_button.clicked.connect(self.close)
+        buttons.addWidget(self._start_button)
+        buttons.addWidget(self._cancel_button)
+        buttons.addWidget(self._close_button)
+        layout.addLayout(buttons)
+
+        self._log("Install:")
+        self._log(str(self._plan.get("install_command") or ""))
+        self._log("")
+        self._log("Verify:")
+        self._log(str(self._plan.get("verify_command") or ""))
+
+    def start_install(self) -> None:
+        if self._process is not None and self._process.state() != QProcess.ProcessState.NotRunning:
+            return
+        self._cancel_requested = False
+        self._start_button.setEnabled(False)
+        self._close_button.setEnabled(False)
+        self._cancel_button.setEnabled(True)
+        self._progress.setRange(0, 0)
+        self._set_state("PyTorch CUDA 패키지를 설치하는 중입니다. 다운로드가 커서 시간이 걸릴 수 있습니다.", value=10, busy=True)
+        self._start_process(
+            "install",
+            str(self._plan["install_program"]),
+            [str(arg) for arg in self._plan["install_args"]],
+        )
+
+    def cancel_install(self) -> None:
+        proc = self._process
+        if proc is not None and proc.state() != QProcess.ProcessState.NotRunning:
+            self._log("사용자가 설치를 취소했습니다.")
+            self._cancel_requested = True
+            self._start_button.setEnabled(False)
+            self._cancel_button.setEnabled(False)
+            self._set_state("설치를 취소하는 중입니다.", busy=True)
+            proc.terminate()
+            QTimer.singleShot(1200, lambda p=proc: p.kill() if p.state() != QProcess.ProcessState.NotRunning else None)
+            return
+        self._finish(False, "설치가 취소되었습니다. 다시 시작할 수 있습니다.", allow_retry=True)
+
+    def _start_process(self, phase: str, program: str, args: list[str]) -> None:
+        from app.subprocess_utils import configure_hidden_qprocess
+
+        self._phase = phase
+        self._log("")
+        self._log(f"$ {program} {' '.join(args)}")
+        proc = QProcess(self)
+        proc.setProcessChannelMode(QProcess.ProcessChannelMode.MergedChannels)
+        configure_hidden_qprocess(proc)
+        proc.readyReadStandardOutput.connect(lambda p=proc: self._read_output(p))
+        proc.errorOccurred.connect(lambda _err, p=proc: self._process_error(p))
+        proc.finished.connect(lambda code, _status, p=proc: self._process_finished(p, code))
+        self._process = proc
+        proc.start(program, args)
+
+    def _read_output(self, proc: QProcess) -> None:
+        try:
+            text = bytes(proc.readAllStandardOutput()).decode("utf-8", errors="replace")
+        except Exception:
+            text = ""
+        if text:
+            self._log(text)
+
+    def _process_error(self, proc: QProcess) -> None:
+        try:
+            message = proc.errorString()
+        except Exception:
+            message = "process error"
+        self._log(f"프로세스 오류: {message}")
+
+    def _process_finished(self, proc: QProcess, exit_code: int) -> None:
+        self._read_output(proc)
+        if self._process is proc:
+            self._process = None
+        if self._cancel_requested:
+            self._cancel_requested = False
+            self._finish(False, "설치가 취소되었습니다. 다시 시작할 수 있습니다.", allow_retry=True)
+            return
+        if self._phase == "install":
+            if int(exit_code) != 0:
+                self._finish(False, f"설치가 완료되지 않았습니다. exit code: {exit_code}", allow_retry=True)
+                return
+            self._set_state("설치 완료. CUDA 사용 가능 여부를 검증하는 중입니다.", value=75, busy=True)
+            importlib.invalidate_caches()
+            self._start_process(
+                "verify",
+                str(self._plan["verify_program"]),
+                [str(arg) for arg in self._plan["verify_args"]],
+            )
+            return
+        if self._phase == "verify":
+            if int(exit_code) != 0:
+                self._finish(
+                    False,
+                    "설치는 끝났지만 torch.cuda.is_available() 검증에 실패했습니다. 로그를 확인하세요.",
+                    allow_retry=True,
+                )
+                return
+            os.environ["TIGERCAPTURE_TEXTURE_LAB_BACKEND"] = "torch_cuda"
+            importlib.invalidate_caches()
+            payload = select_texture_map_backend("torch_cuda", allow_cpu=False)
+            if payload.get("active") != "torch_cuda":
+                self._finish(
+                    False,
+                    "검증 출력은 성공했지만 Texture Lab backend 선택이 아직 torch_cuda가 아닙니다. 앱을 재시작해 주세요.",
+                    allow_retry=True,
+                )
+                return
+            self._finish(True, "완료: Texture Lab GPU backend가 연결되었습니다.", allow_retry=False)
+            self.installed.emit(payload)
+
+    def _set_state(self, text: str, *, value: int | None = None, busy: bool = False) -> None:
+        self._state.setText(text)
+        if busy:
+            self._progress.setRange(0, 0)
+        else:
+            self._progress.setRange(0, 100)
+            if value is not None:
+                self._progress.setValue(max(0, min(100, int(value))))
+
+    def _finish(self, success: bool, message: str, *, allow_retry: bool) -> None:
+        self._set_state(message, value=100 if success else 0, busy=False)
+        self._start_button.setEnabled(bool(allow_retry))
+        self._start_button.setText("다시 설치" if allow_retry else "설치 완료")
+        self._cancel_button.setEnabled(False)
+        self._close_button.setEnabled(True)
+        if success:
+            self._close_button.setText("완료 / 닫기")
+            self._close_button.setObjectName("TextureLabInstallDone")
+            self._close_button.setDefault(True)
+        self._log(message)
+
+    def _log(self, text: str) -> None:
+        clean = str(text or "").replace("\r", "\n")
+        if not clean:
+            self._console.appendPlainText("")
+        else:
+            for line in clean.splitlines():
+                self._console.appendPlainText(line.rstrip())
+        try:
+            self._console.verticalScrollBar().setValue(self._console.verticalScrollBar().maximum())
+        except Exception:
+            pass
 
 
 class ArPbrTextureMapLabWindow(QMainWindow):
@@ -285,9 +543,18 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._preview_timer.setSingleShot(True)
         self._preview_timer.timeout.connect(self.refresh_preview)
         self._light_animation_timer = QTimer(self)
-        self._light_animation_timer.setInterval(40)
+        self._light_animation_timer.setInterval(16)
+        self._light_animation_timer.setTimerType(Qt.TimerType.PreciseTimer)
         self._light_animation_timer.timeout.connect(self._advance_light_animation)
         self._light_animation_clock = QElapsedTimer()
+        self._window_motion_timer = QTimer(self)
+        self._window_motion_timer.setSingleShot(True)
+        self._window_motion_timer.setInterval(120)
+        self._window_motion_timer.timeout.connect(self._end_interactive_window_motion)
+        self._window_motion_active = False
+        self._window_updates_frozen = False
+        self._preview_refresh_deferred = False
+        self._resume_light_animation_after_motion = False
         self._sliders: dict[str, _TextureLabSlider] = {}
         self._last_preview_path: Path | None = None
         self._clipboard_shortcuts: list[QShortcut] = []
@@ -296,12 +563,12 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._substrate_mode_check: QCheckBox | None = None
         self._animate_light_check: QCheckBox | None = None
         self._delight_check: QCheckBox | None = None
-        self._animated_light_azimuth = 38.0
+        self._animated_light_azimuth = float(self._settings["preview_light_azimuth"])
         self._generated_maps_cache: dict[str, Any] | None = None
         self._backend_selection = select_texture_map_backend(allow_cpu=self._allow_cpu_fallback)
         self.setObjectName("ArPbrTextureMapLabWindow")
         self.setWindowTitle(f"AR/PBR Texture Lab - {self.image_path.name}")
-        self.resize(1120, 780)
+        self.resize(1120, 720)
         self.setStyleSheet(studio_chrome_qss(_TEXTURE_LAB_QSS))
         self._build_ui()
         self.refresh_preview()
@@ -370,6 +637,9 @@ class ArPbrTextureMapLabWindow(QMainWindow):
                 raise ValueError("clipboard does not contain an image or image file path")
             source_kind = "clipboard_path"
         self._set_source_image_path(path)
+        self._show_source_fallback_preview(
+            "Pasted image. GPU texture generation is unavailable, so showing source preview."
+        )
         self.refresh_preview()
         return {
             "pasted": True,
@@ -400,6 +670,42 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self.setWindowTitle(f"AR/PBR Texture Lab - {self.image_path.name}")
         if hasattr(self, "_subtitle"):
             self._subtitle.setText(str(self.image_path))
+            self._subtitle.setToolTip(str(self.image_path))
+
+    def _show_source_fallback_preview(self, message: str) -> None:
+        pix = QPixmap()
+        shape = "plane"
+        try:
+            shape = str(self._preview_shape_combo.currentData() or "plane")
+            mode = str(self._preview_mode_combo.currentData() or "material")
+            if mode == "material":
+                out = (
+                    Path(tempfile.gettempdir())
+                    / "tiger_ar_pbr_texture_lab"
+                    / f"{self.image_path.stem}_source_{shape}_fallback.png"
+                )
+                payload = render_source_preview_image(
+                    self.image_path,
+                    preview_shape=shape,
+                    output_path=out,
+                    width=960,
+                    settings=self.settings(),
+                )
+                pix = QPixmap(str(payload["preview_path"]))
+        except Exception:
+            pix = QPixmap()
+        if pix.isNull():
+            shape = "plane"
+            pix = QPixmap(str(self.image_path))
+        if pix.isNull():
+            return
+        self._preview.set_preview_pixmap(pix)
+        self._preview.set_thumbnail_pixmaps([])
+        self._last_preview_path = None
+        if hasattr(self, "_preview_heading") and self._preview_heading is not None:
+            self._preview_heading.setText("Sphere Source Preview" if shape == "sphere" else "Source Preview")
+        if hasattr(self, "_status"):
+            self._status.setText(message)
 
     def _copy_preview_to_clipboard_from_ui(self) -> None:
         try:
@@ -483,41 +789,35 @@ class ArPbrTextureMapLabWindow(QMainWindow):
             return f"GPU acceleration: torch_cuda | {device}"
         if active == "unavailable":
             reason = str(selection.get("reason") or "gpu_backend_required")
-            return f"GPU required: CPU fallback disabled | {reason}"
+            if not torch_status.get("module_installed"):
+                return "GPU install needed: RTX/OpenGL detected separately; PyTorch CUDA is missing in this venv"
+            if not torch_status.get("available"):
+                return "GPU install needed: PyTorch is installed, but CUDA is unavailable to this venv"
+            return f"GPU backend required: {reason}"
         if not torch_status.get("module_installed"):
-            return "GPU acceleration: CPU fallback | PyTorch CUDA is not installed"
+            return "CPU diagnostics only | Install PyTorch CUDA to enable Texture Lab GPU maps"
         if not torch_status.get("available"):
-            return "GPU acceleration: CPU fallback | PyTorch is installed but CUDA is unavailable"
-        return f"GPU acceleration: CPU fallback | {selection.get('reason', 'gpu backend unavailable')}"
+            return "CPU diagnostics only | PyTorch exists, but CUDA is unavailable"
+        return f"CPU diagnostics only | {selection.get('reason', 'gpu backend unavailable')}"
 
     def _show_gpu_setup_help(self) -> None:
-        selection = select_texture_map_backend(allow_cpu=self._allow_cpu_fallback)
-        guidance = dict(selection.get("status", {}).get("install_guidance", {}))
-        pip_command = str(guidance.get("pip_command") or "")
-        verify_command = str(guidance.get("verify_command") or "")
-        env_override = str(guidance.get("env_override") or "")
-        details = "\n".join(
-            [
-                str(guidance.get("summary") or "Texture Lab GPU acceleration needs PyTorch with CUDA."),
-                "",
-                "Install:",
-                pip_command,
-                "",
-                "Verify:",
-                verify_command,
-                "",
-                "Optional forced backend:",
-                env_override,
-                "",
-                "After install, restart TigerCapture and reopen Texture Lab.",
-            ]
-        )
-        QApplication.clipboard().setText(f"{pip_command}\n{verify_command}\n{env_override}".strip())
-        QMessageBox.information(
-            self,
-            "Texture Lab GPU Setup",
-            details + "\n\nThe commands were copied to the clipboard.",
-        )
+        dialog = getattr(self, "_gpu_install_dialog", None)
+        if dialog is not None and dialog.isVisible():
+            dialog.raise_()
+            dialog.activateWindow()
+            return
+        dialog = _TextureLabGpuInstallDialog(self)
+        dialog.setStyleSheet(studio_chrome_qss(_TEXTURE_LAB_QSS))
+        dialog.installed.connect(self._on_gpu_backend_installed)
+        self._gpu_install_dialog = dialog
+        dialog.show()
+
+    def _on_gpu_backend_installed(self, payload: object) -> None:
+        self._backend_selection = dict(payload or {})
+        if hasattr(self, "_backend_status"):
+            self._backend_status.setText(self._backend_status_text())
+        self._generated_maps_cache = None
+        self.queue_preview()
 
     def _build_ui(self) -> None:
         central = QWidget(self)
@@ -525,20 +825,26 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         root = QVBoxLayout(central)
         root.setContentsMargins(12, 12, 12, 12)
         root.setSpacing(10)
-        top = QHBoxLayout()
+        top = QVBoxLayout()
+        top.setSpacing(6)
         title = QLabel("AR/PBR Texture Lab", central)
         title.setObjectName("TextureLabTitle")
         subtitle = QLabel(str(self.image_path), central)
         subtitle.setObjectName("TextureLabSubtitle")
+        subtitle.setToolTip(str(self.image_path))
+        subtitle.setMinimumWidth(0)
+        subtitle.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         self._subtitle = subtitle
         self._backend_status = QLabel(self._backend_status_text(), central)
         self._backend_status.setObjectName("TextureLabBackendStatus")
+        self._backend_status.setMinimumWidth(0)
+        self._backend_status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
         title_block = QVBoxLayout()
         title_block.setSpacing(1)
         title_block.addWidget(title)
         title_block.addWidget(subtitle)
         title_block.addWidget(self._backend_status)
-        top.addLayout(title_block, 1)
+        top.addLayout(title_block)
         self._preview_mode_combo = QComboBox(central)
         self._preview_mode_combo.setObjectName("TextureLabCombo")
         for mode in PREVIEW_MODES:
@@ -572,11 +878,12 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         copy_preview.setIconSize(icon_size(16))
         copy_preview.setToolTip("Copy the current Texture Lab preview image to the clipboard (Ctrl+C)")
         copy_preview.clicked.connect(self._copy_preview_to_clipboard_from_ui)
-        gpu_setup = QPushButton("GPU Setup", central)
+        gpu_setup = QPushButton("Install GPU", central)
         gpu_setup.setIcon(app_icon("settings", size=16))
         gpu_setup.setIconSize(icon_size(16))
-        gpu_setup.setToolTip("Show Texture Lab GPU acceleration install and verification steps")
+        gpu_setup.setToolTip("Install and verify the Texture Lab PyTorch CUDA backend")
         gpu_setup.clicked.connect(self._show_gpu_setup_help)
+        self._gpu_setup_button = gpu_setup
         export_maps = QPushButton("Export Maps", central)
         export_maps.setIcon(app_icon("export", size=16))
         export_maps.setIconSize(icon_size(16))
@@ -585,16 +892,23 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         export_packed.setIcon(app_icon("save", size=16))
         export_packed.setIconSize(icon_size(16))
         export_packed.clicked.connect(self.export_packed)
-        top.addWidget(self._preview_mode_combo)
-        top.addWidget(self._preview_shape_combo)
-        top.addWidget(show_intrinsic)
-        top.addWidget(show_albedo)
-        top.addWidget(show_compare)
-        top.addWidget(paste_image)
-        top.addWidget(copy_preview)
-        top.addWidget(gpu_setup)
-        top.addWidget(export_maps)
-        top.addWidget(export_packed)
+        toolbar = QWidget(central)
+        toolbar.setObjectName("TextureLabTopToolbar")
+        toolbar_layout = QGridLayout(toolbar)
+        toolbar_layout.setContentsMargins(0, 0, 0, 0)
+        toolbar_layout.setHorizontalSpacing(6)
+        toolbar_layout.setVerticalSpacing(6)
+        toolbar_layout.addWidget(self._preview_mode_combo, 0, 0, 1, 2)
+        toolbar_layout.addWidget(self._preview_shape_combo, 0, 2)
+        toolbar_layout.addWidget(show_intrinsic, 0, 3)
+        toolbar_layout.addWidget(show_albedo, 0, 4)
+        toolbar_layout.addWidget(show_compare, 0, 5)
+        toolbar_layout.addWidget(paste_image, 1, 0)
+        toolbar_layout.addWidget(copy_preview, 1, 1)
+        toolbar_layout.addWidget(gpu_setup, 1, 2)
+        toolbar_layout.addWidget(export_maps, 1, 3)
+        toolbar_layout.addWidget(export_packed, 1, 4, 1, 2)
+        top.addWidget(toolbar, 0, Qt.AlignmentFlag.AlignLeft)
         copy_shortcut = QShortcut(QKeySequence.StandardKey.Copy, self)
         copy_shortcut.activated.connect(self._copy_preview_to_clipboard_from_ui)
         paste_shortcut = QShortcut(QKeySequence.StandardKey.Paste, self)
@@ -747,9 +1061,8 @@ class ArPbrTextureMapLabWindow(QMainWindow):
 
     def _advance_light_animation(self) -> None:
         elapsed = max(0, int(self._light_animation_clock.elapsed()))
-        self._animated_light_azimuth = ((elapsed / 1000.0) * 54.0 + 38.0) % 360.0
-        if self._animated_light_azimuth > 180.0:
-            self._animated_light_azimuth -= 360.0
+        phase = (elapsed / 4800.0) * (2.0 * math.pi)
+        self._animated_light_azimuth = -60.0 + (1.0 - math.cos(phase)) * 60.0
         self.refresh_preview()
 
     def _sync_substrate_controls(self) -> None:
@@ -780,6 +1093,9 @@ class ArPbrTextureMapLabWindow(QMainWindow):
                 )
 
     def queue_preview(self) -> None:
+        if self._window_motion_active or self._window_updates_frozen:
+            self._preview_refresh_deferred = True
+            return
         self._preview_timer.start(120)
 
     def _source_cache_identity(self) -> str:
@@ -809,13 +1125,35 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         return generated, False
 
     def refresh_preview(self) -> None:
+        if self._window_motion_active or self._window_updates_frozen:
+            self._preview_refresh_deferred = True
+            return
         if not self.image_path.exists():
             self._status.setText(f"Missing source image: {self.image_path}")
+            return
+        selection = select_texture_map_backend(allow_cpu=self._allow_cpu_fallback)
+        self._backend_selection = selection
+        if not self._allow_cpu_fallback and str(selection.get("active", "")) == "unavailable":
+            if hasattr(self, "_backend_status"):
+                self._backend_status.setText(self._backend_status_text())
+            self._show_source_fallback_preview(
+                "Source preview ready. Install the Texture Lab GPU backend to generate PBR maps."
+            )
             return
         try:
             mode = str(self._preview_mode_combo.currentData() or "material")
             requested_shape = str(self._preview_shape_combo.currentData() or "plane")
-            effective_shape = requested_shape if mode == "material" else "plane"
+            effective_shape = (
+                requested_shape
+                if mode not in {"intrinsic_channels", "delight_compare"}
+                else "plane"
+            )
+            animating_light = bool(
+                self._animate_light_check is not None
+                and self._animate_light_check.isChecked()
+                and self._light_animation_timer.isActive()
+            )
+            preview_size = 256 if animating_light else 960
             if self._preview_heading is not None:
                 self._preview_heading.setText(
                     f"{effective_shape.title()} Preview - {self._preview_mode_label(mode)}"
@@ -825,14 +1163,14 @@ class ArPbrTextureMapLabWindow(QMainWindow):
                 / "tiger_ar_pbr_texture_lab"
                 / f"{self.image_path.stem}_{effective_shape}_{mode}.png"
             )
-            generated, cache_hit = self._cached_generated_maps(max_size=960)
+            generated, cache_hit = self._cached_generated_maps(max_size=preview_size)
             payload = render_plane_preview_from_generated(
                 generated,
                 self.settings(),
                 preview_mode=mode,
                 preview_shape=requested_shape,
                 output_path=out,
-                width=960,
+                width=preview_size,
                 source_path=self.image_path,
                 allow_cpu_preview=self._allow_cpu_fallback,
             )
@@ -841,19 +1179,24 @@ class ArPbrTextureMapLabWindow(QMainWindow):
             self._last_preview_path = Path(payload["preview_path"])
             pix = QPixmap(str(payload["preview_path"]))
             self._preview.set_preview_pixmap(pix)
-            self._preview.set_thumbnail_pixmaps(self._thumbnail_pixmaps(active_mode=mode, generated=generated))
+            if not animating_light:
+                self._preview.set_thumbnail_pixmaps(self._thumbnail_pixmaps(active_mode=mode, generated=generated))
             backend = str(payload.get("backend", {}).get("active", "cpu"))
             cache = "cached" if cache_hit else "rendered"
             shape = str(payload.get("preview_shape", effective_shape))
-            self._status.setText(f"{shape}/{mode} | {payload['size'][0]} x {payload['size'][1]} | {backend} | {cache}")
+            cadence = " | live light" if animating_light else ""
+            self._status.setText(
+                f"{shape}/{mode} | {payload['size'][0]} x {payload['size'][1]} | {backend} | {cache}{cadence}"
+            )
         except TextureMapGpuRequiredError as exc:
             if hasattr(self, "_backend_status"):
                 self._backend_status.setText(self._backend_status_text())
             self._last_preview_path = None
-            self._preview.set_preview_pixmap(QPixmap())
-            self._preview.set_thumbnail_pixmaps([])
+            self._show_source_fallback_preview(
+                "GPU required for PBR maps. Showing source image; install Texture Lab GPU backend to generate maps."
+            )
             self._status.setText(
-                "GPU required. Texture Lab CPU fallback is disabled; "
+                "GPU required for PBR maps. Showing source image; "
                 "install/enable torch_cuda or set TIGERCAPTURE_TEXTURE_LAB_ALLOW_CPU=1 for diagnostics."
             )
         except Exception as exc:
@@ -887,7 +1230,54 @@ class ArPbrTextureMapLabWindow(QMainWindow):
 
     def resizeEvent(self, event) -> None:  # pragma: no cover - visual resize sync
         super().resizeEvent(event)
-        self.queue_preview()
+        if hasattr(self, "_preview"):
+            self._preview.update()
+
+    def nativeEvent(self, event_type, message):  # pragma: no cover - Windows native drag performance
+        if os.name == "nt":
+            try:
+                msg = ctypes.wintypes.MSG.from_address(int(message))
+                if int(msg.message) == _WM_ENTERSIZEMOVE:
+                    self._begin_interactive_window_motion()
+                elif int(msg.message) == _WM_EXITSIZEMOVE:
+                    self._window_motion_timer.stop()
+                    self._end_interactive_window_motion()
+            except Exception:
+                pass
+        return super().nativeEvent(event_type, message)
+
+    def moveEvent(self, event) -> None:  # pragma: no cover - non-Windows fallback
+        super().moveEvent(event)
+        if os.name != "nt":
+            self._begin_interactive_window_motion()
+
+    def _begin_interactive_window_motion(self) -> None:
+        if not self.isVisible() or not hasattr(self, "_preview"):
+            return
+        if not self._window_motion_active:
+            self._window_motion_active = True
+            if self._preview_timer.isActive():
+                self._preview_timer.stop()
+                self._preview_refresh_deferred = True
+            self._resume_light_animation_after_motion = bool(self._light_animation_timer.isActive())
+            if self._resume_light_animation_after_motion:
+                self._light_animation_timer.stop()
+        self._preview.set_interactive_paint(True)
+        self._window_motion_timer.start()
+
+    def _end_interactive_window_motion(self) -> None:
+        self._window_updates_frozen = False
+        self._window_motion_active = False
+        if hasattr(self, "_preview"):
+            self._preview.set_interactive_paint(False)
+            self._preview.update()
+        if self._resume_light_animation_after_motion:
+            self._resume_light_animation_after_motion = False
+            if self._animate_light_check is not None and self._animate_light_check.isChecked():
+                self._light_animation_timer.start()
+        if self._preview_refresh_deferred:
+            self._preview_refresh_deferred = False
+            self._preview_timer.start(30)
 
     def export_maps(self) -> None:
         self._export_with_layouts([])
@@ -961,6 +1351,17 @@ QLabel#TextureLabStatus {
 }
 QLabel#TextureLabBackendStatus {
     color: #B9C3D2;
+}
+QLabel#TextureLabInstallTitle {
+    color: #F3F6FE;
+    font-size: 18px;
+    font-weight: 800;
+}
+QLabel#TextureLabInstallExplain,
+QLabel#TextureLabInstallState {
+    color: #C8D3E5;
+    font-size: 13px;
+    line-height: 150%;
 }
 QFrame#TextureLabPreviewPanel {
     background: #15171D;
@@ -1058,6 +1459,34 @@ QPushButton#TextureLabModeButton {
 QPushButton#TextureLabModeButton:hover {
     background: #1D3428;
     border-color: #58D38A;
+}
+QPushButton#TextureLabInstallPrimary,
+QPushButton#TextureLabInstallDone {
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #FF6A3D, stop:1 #7B61FF);
+    color: #FFFFFF;
+    border: 1px solid #F7A36D;
+}
+QPlainTextEdit#TextureLabInstallConsole {
+    background: #10131A;
+    color: #DDE7F7;
+    border: 1px solid #303746;
+    border-radius: 8px;
+    padding: 8px;
+    font-family: "Cascadia Mono", "Consolas";
+    font-size: 12px;
+}
+QProgressBar {
+    background: #151923;
+    color: #FFFFFF;
+    border: 1px solid #343B49;
+    border-radius: 7px;
+    min-height: 16px;
+    text-align: center;
+    font-weight: 800;
+}
+QProgressBar::chunk {
+    border-radius: 7px;
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #FF6A3D, stop:0.48 #FF4D98, stop:1 #6F63FF);
 }
 QCheckBox#TextureLabCheck {
     color: #C9D2E1;

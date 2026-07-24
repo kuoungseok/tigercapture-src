@@ -107,6 +107,28 @@ vec3 normal_sample(vec2 uv) {
     return normalize(vec3(n.xy * 0.65, max(0.18, n.z)));
 }
 
+vec2 sphere_uv(vec3 n) {
+    const float PI = 3.14159265358979323846;
+    float u = atan(n.x, n.z) / (2.0 * PI) + 0.5;
+    float v = asin(clamp(n.y, -1.0, 1.0)) / PI + 0.5;
+    return vec2(fract(u), clamp(v, 0.0, 1.0));
+}
+
+vec3 sphere_tangent_normal(vec3 sphere_n, vec3 tangent_normal) {
+    vec3 tangent = vec3(sphere_n.z, 0.0, -sphere_n.x);
+    if (dot(tangent, tangent) < 0.0001) {
+        tangent = vec3(1.0, 0.0, 0.0);
+    } else {
+        tangent = normalize(tangent);
+    }
+    vec3 bitangent = normalize(cross(sphere_n, tangent));
+    return normalize(
+        tangent * tangent_normal.x
+        + bitangent * tangent_normal.y
+        + sphere_n * tangent_normal.z
+    );
+}
+
 vec3 packed_sample(vec2 uv, int code) {
     float ao = scalar_sample(u_ao, uv);
     float roughness = scalar_sample(u_roughness, uv);
@@ -128,16 +150,26 @@ vec3 material_sample(vec2 uv, vec3 surface_normal) {
     float ao = scalar_sample(u_ao, uv);
     float roughness = clamp(scalar_sample(u_roughness, uv), 0.03, 1.0);
     float metallic = clamp(scalar_sample(u_metallic, uv), 0.0, 1.0);
-    vec3 l = normalize(u_light);
+    vec3 key_l = normalize(u_light);
+    vec3 fill_l = normalize(vec3(0.68, 0.36, 0.64));
     vec3 v = normalize(vec3(0.0, 0.0, 1.0));
-    vec3 h = normalize(l + v);
-    float ndotl = max(dot(surface_normal, l), 0.0);
-    float ndoth = max(dot(surface_normal, h), 0.0);
+    vec3 key_h = normalize(key_l + v);
+    vec3 fill_h = normalize(fill_l + v);
+    float key_ndotl = max(dot(surface_normal, key_l), 0.0);
+    float fill_ndotl = max(dot(surface_normal, fill_l), 0.0);
+    float key_ndoth = max(dot(surface_normal, key_h), 0.0);
+    float fill_ndoth = max(dot(surface_normal, fill_h), 0.0);
+    float ndotv = max(dot(surface_normal, v), 0.0);
     float spec_power = mix(96.0, 10.0, roughness);
-    float spec = pow(ndoth, spec_power) * mix(0.08, 0.75, metallic) * (1.0 - roughness * 0.55);
-    float ambient = max(0.02, u_environment);
-    vec3 diffuse = base * (ambient + ndotl * 0.95) * mix(1.0, 0.35, metallic) * mix(0.55, 1.0, ao);
-    vec3 color = diffuse + vec3(spec);
+    vec3 f0 = mix(vec3(0.04), base, metallic);
+    float key_spec = pow(key_ndoth, spec_power) * (1.0 - roughness * 0.55);
+    float fill_spec = pow(fill_ndoth, spec_power) * (1.0 - roughness * 0.70) * 0.18;
+    float ambient = max(0.015, u_environment * 0.55);
+    float diffuse_light = ambient + key_ndotl * 0.92 + fill_ndotl * 0.20;
+    vec3 diffuse = base * diffuse_light * (1.0 - metallic * 0.72) * mix(0.45, 1.0, ao);
+    vec3 specular = f0 * (key_spec + fill_spec) * mix(0.55, 1.0, ao);
+    float rim = pow(1.0 - ndotv, 3.0) * 0.10;
+    vec3 color = diffuse + specular + base * rim;
     return linear_to_srgb(color);
 }
 
@@ -171,38 +203,43 @@ void main() {
         return;
     }
 
-    if (u_mode == 1) { gl_FragColor = vec4(texture2D(u_base_source, uv).rgb, 1.0); return; }
-    if (u_mode == 2) { gl_FragColor = vec4(texture2D(u_base, uv).rgb, 1.0); return; }
-    if (u_mode == 3) { gl_FragColor = vec4(texture2D(u_normal, uv).rgb, 1.0); return; }
-    if (u_mode == 4) { gl_FragColor = vec4(vec3(scalar_sample(u_ao, uv)), 1.0); return; }
-    if (u_mode == 5) { gl_FragColor = vec4(vec3(scalar_sample(u_roughness, uv)), 1.0); return; }
-    if (u_mode == 6) { gl_FragColor = vec4(vec3(scalar_sample(u_metallic, uv)), 1.0); return; }
-    if (u_mode == 7) { gl_FragColor = vec4(vec3(scalar_sample(u_height, uv)), 1.0); return; }
-    if (u_mode == 8) { gl_FragColor = vec4(vec3(scalar_sample(u_cavity, uv)), 1.0); return; }
-    if (u_mode == 9) { gl_FragColor = vec4(vec3(scalar_sample(u_curvature, uv)), 1.0); return; }
-    if (u_mode == 10) { gl_FragColor = vec4(texture2D(u_f0, uv).rgb, 1.0); return; }
-    if (u_mode == 11) { gl_FragColor = vec4(vec3(scalar_sample(u_f90, uv)), 1.0); return; }
-    if (u_mode == 12 || u_mode == 13 || u_mode == 14 || u_mode == 15) {
-        gl_FragColor = vec4(packed_sample(uv, u_mode), 1.0);
-        return;
-    }
-    if (u_mode == 16) { gl_FragColor = vec4(texture2D(u_irradiance, uv).rgb, 1.0); return; }
-    if (u_mode == 17) { gl_FragColor = vec4(texture2D(u_delight_shading, uv).rgb, 1.0); return; }
-
-    vec3 n = normal_sample(uv);
+    vec2 material_uv = uv;
+    vec3 sphere_n = vec3(0.0, 0.0, 1.0);
     if (u_shape == 1) {
         vec2 p = uv * 2.0 - 1.0;
-        p.y = -p.y;
         float r2 = dot(p, p);
         if (r2 > 1.0) {
             float vignette = smoothstep(1.6, 0.15, length(p));
             gl_FragColor = vec4(vec3(0.035, 0.038, 0.046) * (0.65 + vignette * 0.35), 1.0);
             return;
         }
-        vec3 sphere_n = normalize(vec3(p.x, p.y, sqrt(max(0.0, 1.0 - r2))));
-        n = normalize(sphere_n + vec3(n.xy * 0.22, n.z * 0.18));
+        sphere_n = normalize(vec3(p.x, p.y, sqrt(max(0.0, 1.0 - r2))));
+        material_uv = sphere_uv(sphere_n);
     }
-    gl_FragColor = vec4(material_sample(uv, n), 1.0);
+
+    if (u_mode == 1) { gl_FragColor = vec4(texture2D(u_base_source, material_uv).rgb, 1.0); return; }
+    if (u_mode == 2) { gl_FragColor = vec4(texture2D(u_base, material_uv).rgb, 1.0); return; }
+    if (u_mode == 3) { gl_FragColor = vec4(texture2D(u_normal, material_uv).rgb, 1.0); return; }
+    if (u_mode == 4) { gl_FragColor = vec4(vec3(scalar_sample(u_ao, material_uv)), 1.0); return; }
+    if (u_mode == 5) { gl_FragColor = vec4(vec3(scalar_sample(u_roughness, material_uv)), 1.0); return; }
+    if (u_mode == 6) { gl_FragColor = vec4(vec3(scalar_sample(u_metallic, material_uv)), 1.0); return; }
+    if (u_mode == 7) { gl_FragColor = vec4(vec3(scalar_sample(u_height, material_uv)), 1.0); return; }
+    if (u_mode == 8) { gl_FragColor = vec4(vec3(scalar_sample(u_cavity, material_uv)), 1.0); return; }
+    if (u_mode == 9) { gl_FragColor = vec4(vec3(scalar_sample(u_curvature, material_uv)), 1.0); return; }
+    if (u_mode == 10) { gl_FragColor = vec4(texture2D(u_f0, material_uv).rgb, 1.0); return; }
+    if (u_mode == 11) { gl_FragColor = vec4(vec3(scalar_sample(u_f90, material_uv)), 1.0); return; }
+    if (u_mode == 12 || u_mode == 13 || u_mode == 14 || u_mode == 15) {
+        gl_FragColor = vec4(packed_sample(material_uv, u_mode), 1.0);
+        return;
+    }
+    if (u_mode == 16) { gl_FragColor = vec4(texture2D(u_irradiance, material_uv).rgb, 1.0); return; }
+    if (u_mode == 17) { gl_FragColor = vec4(texture2D(u_delight_shading, material_uv).rgb, 1.0); return; }
+
+    vec3 n = normal_sample(material_uv);
+    if (u_shape == 1) {
+        n = sphere_tangent_normal(sphere_n, normal_sample(material_uv));
+    }
+    gl_FragColor = vec4(material_sample(material_uv, n), 1.0);
 }
 """
 
@@ -320,7 +357,7 @@ def render_texture_lab_gpu_preview_from_generated(
     if mode not in _MODE_CODES:
         raise ValueError(f"unknown preview mode: {preview_mode}")
     requested_shape = _normalize_preview_shape(preview_shape)
-    effective_shape = requested_shape if mode == "material" else "plane"
+    effective_shape = requested_shape if mode not in {"intrinsic_channels", "delight_compare"} else "plane"
     target_w, target_h = _target_size(generated, int(width or 768), height)
     normalized = normalize_texture_map_settings(settings)
     preview_settings = dict(generated.get("settings") or {})

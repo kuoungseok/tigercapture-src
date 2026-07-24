@@ -757,6 +757,30 @@ Start here when changing a feature:
   channels for plane/sphere previews. PNG/action outputs may read the rendered
   GPU result back to disk, but preview shading must not use the CPU compositor
   unless the caller explicitly opted into diagnostics.
+  As of 2026-07-24, the interactive material-preview contract is:
+  - Plane preview binds Base Color, tangent-space Normal, AO, Roughness, and
+    Metallic maps in the OpenGL shader instead of displaying an unmapped
+    placeholder.
+  - Sphere preview uses longitude/latitude UV mapping and transforms sampled
+    tangent-space normals into the curved sphere basis. Selecting Albedo,
+    Normal, AO, Roughness, Metallic, Height, Cavity, or a packed-map view must
+    preserve the selected sphere shape. Only explicitly multi-panel diagnostic
+    views such as Intrinsic Channels and Delight Compare may force a plane.
+  - Height is not geometric displacement in this version. It contributes to
+    generated Normal/AO workflows and can be inspected as a channel without
+    claiming tessellation or parallax displacement.
+  - The default studio light uses an upper-left key at approximately 45
+    degrees, a softer right fill, a rim contribution, and restrained ambient
+    light. The vertical light convention must keep the key above the material;
+    lower-edge lighting caused by an inverted preview axis is a regression.
+  - Animate Light moves the key only across the upper hemisphere. It requests
+    updates with a precise 16 ms timer, uses a 256-pixel GPU preview while
+    moving, skips map and thumbnail regeneration, and restores a 960-pixel
+    settled frame when animation stops. Actual frame rate remains bounded by
+    GPU render completion rather than being claimed as guaranteed 60 fps.
+  - Native window move/resize suspends heavy preview work and resumes with one
+    settled refresh, while normal widget repainting remains enabled so the
+    canvas does not disappear during interaction.
   `app.ar_pbr.full_gpu_export_service` defines and invokes the worker-safe
   helper-process path for that full-GPU route.
   `tools/ar_pbr_full_gpu_export_service.py` is the default helper; it accepts

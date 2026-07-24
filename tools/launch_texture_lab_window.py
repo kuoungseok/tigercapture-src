@@ -36,7 +36,6 @@ def main(argv: list[str]) -> int:
         image_path = image_path.resolve()
         with log.open("a", encoding="utf-8") as fh:
             fh.write(f"launch image={image_path} exists={image_path.exists()}\n")
-        from PySide6.QtCore import QTimer, Qt
         from PySide6.QtWidgets import QApplication
 
         from app.ar_pbr.texture_map_lab_window import ArPbrTextureMapLabWindow
@@ -45,14 +44,11 @@ def main(argv: list[str]) -> int:
         app = QApplication.instance() or QApplication(sys.argv)
         install_global_window_placement(app)
         window = ArPbrTextureMapLabWindow(image_path)
-        window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, True)
-        fit_window_to_current_screen(window)
+        fit_window_to_current_screen(window, mark_done=True)
         native_handle = int(window.winId())
         window.show()
         window.raise_()
         window.activateWindow()
-        QTimer.singleShot(1600, lambda: window.setWindowFlag(Qt.WindowType.WindowStaysOnTopHint, False))
-        QTimer.singleShot(1700, window.show)
         with log.open("a", encoding="utf-8") as fh:
             fh.write(
                 "shown "

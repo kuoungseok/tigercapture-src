@@ -129,3 +129,38 @@ def test_global_window_placement_refits_after_late_layout_growth() -> None:
     assert window.height() <= safe.height()
     assert safe.contains(window.geometry())
     window.close()
+
+
+def test_global_window_placement_does_not_fight_user_drag() -> None:
+    app = _qt_app()
+    from PySide6.QtCore import QEventLoop, QSize, QTimer
+    from PySide6.QtWidgets import QWidget
+
+    from app.window_placement import available_geometry_for_window, install_global_window_placement
+
+    class DraggedWindow(QWidget):
+        def sizeHint(self):  # noqa: N802 - Qt override
+            return QSize(520, 360)
+
+    install_global_window_placement(app)
+    window = DraggedWindow()
+    available = available_geometry_for_window(window)
+    window.resize(520, 360)
+    window.move(available.right() + 80, available.bottom() + 80)
+    window.show()
+
+    user_position = available.topLeft()
+
+    def move_like_user_drag() -> None:
+        window.move(user_position)
+
+    QTimer.singleShot(40, move_like_user_drag)
+    loop = QEventLoop()
+    QTimer.singleShot(520, loop.quit)
+    loop.exec()
+
+    # Later first-show placement passes should not pull the window away from a
+    # position chosen by the user, even if it violates the default safe margin.
+    assert abs(window.x() - user_position.x()) <= 4
+    assert abs(window.y() - user_position.y()) <= 4
+    window.close()

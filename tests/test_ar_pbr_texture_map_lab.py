@@ -141,6 +141,44 @@ def test_texture_lab_gpu_preview_smoke_when_context_available(tmp_path) -> None:
     assert payload["diagnostics"]["gpu_preview"]["cpu_preview"] is False
 
 
+def test_texture_lab_gpu_sphere_uses_wrapped_material_maps_when_context_available(tmp_path) -> None:
+    _qt_app()
+    from app.ar_pbr.texture_map_lab import (
+        TextureMapGpuRequiredError,
+        generate_texture_maps,
+        render_plane_preview_from_generated,
+    )
+
+    image_path = tmp_path / "sphere_source.png"
+    out = tmp_path / "gpu_sphere_preview.png"
+    _sample_image(image_path)
+    generated = generate_texture_maps(image_path, max_size=64, allow_cpu=True)
+
+    try:
+        payload = render_plane_preview_from_generated(
+            generated,
+            preview_shape="sphere",
+            preview_mode="material",
+            output_path=out,
+            width=128,
+            height=128,
+            allow_cpu_preview=False,
+        )
+    except TextureMapGpuRequiredError as exc:
+        pytest.skip(f"OpenGL Texture Lab sphere preview unavailable in this environment: {exc}")
+
+    preview = np.asarray(Image.open(out).convert("RGB"), dtype=np.float32)
+    center = preview[24:104, 24:104]
+    corners = np.concatenate(
+        [preview[:12, :12].reshape(-1, 3), preview[-12:, -12:].reshape(-1, 3)],
+        axis=0,
+    )
+    assert payload["preview_shape"] == "sphere"
+    assert payload["diagnostics"]["gpu_preview"]["shape"] == "sphere"
+    assert center.std() > 1.0
+    assert float(center.mean()) > float(corners.mean()) + 5.0
+
+
 def test_texture_map_lab_delight_reduces_baked_lighting_gradient(tmp_path) -> None:
     from app.ar_pbr.texture_map_lab import generate_texture_maps, render_plane_preview_from_generated
 
@@ -444,8 +482,24 @@ def test_texture_map_lab_actions_require_gpu_by_default(tmp_path, monkeypatch) -
     assert preview_path.exists() is False
 
 
+def test_texture_lab_gpu_install_plan_is_executable_contract() -> None:
+    from app.ar_pbr.texture_map_lab import texture_lab_gpu_install_plan
+
+    plan = texture_lab_gpu_install_plan("C:/Tiger/Python/python.exe")
+
+    assert plan["backend"] == "torch_cuda"
+    assert plan["install_program"] == "C:/Tiger/Python/python.exe"
+    assert plan["install_args"][:5] == ["-m", "pip", "install", "torch", "torchvision"]
+    assert "--index-url" in plan["install_args"]
+    assert "download.pytorch.org" in plan["install_command"]
+    assert plan["verify_program"] == "C:/Tiger/Python/python.exe"
+    assert "torch.cuda.is_available" in " ".join(plan["verify_args"])
+    assert "TIGERCAPTURE_TEXTURE_LAB_BACKEND" in plan["env_override"]
+
+
 def test_texture_map_lab_window_supports_clipboard_copy_and_paste(tmp_path) -> None:
     app = _qt_app()
+    from PySide6.QtCore import QEventLoop, QTimer
     from PySide6.QtGui import QColor, QImage
     from PySide6.QtWidgets import QApplication
 
@@ -455,6 +509,11 @@ def test_texture_map_lab_window_supports_clipboard_copy_and_paste(tmp_path) -> N
     _sample_image(image_path)
     window = ArPbrTextureMapLabWindow(image_path, allow_cpu=True)
     window.refresh_preview()
+    assert window._light_animation_timer.interval() == 16
+    assert window.settings()["preview_light_azimuth"] == pytest.approx(-45.0)
+    assert window.settings()["preview_light_elevation"] == pytest.approx(45.0)
+    assert window._gpu_setup_button.text() == "Install GPU"
+    assert window.sizeHint().width() <= 1200
     assert window._preview.thumbnail_count() >= 10
     assert window._preview_shape_combo.currentData() == "plane"
     window._preview_shape_combo.setCurrentIndex(window._preview_shape_combo.findData("sphere"))
@@ -493,4 +552,155 @@ def test_texture_map_lab_window_supports_clipboard_copy_and_paste(tmp_path) -> N
     assert Path(pasted["source_path"]).exists()
     assert window.image_path == Path(pasted["source_path"])
     assert window._last_preview_path is not None
+    window.close()
+
+
+def test_texture_map_lab_paste_keeps_source_visible_without_gpu(tmp_path, monkeypatch) -> None:
+    app = _qt_app()
+    from PySide6.QtGui import QColor, QImage
+    from PySide6.QtWidgets import QApplication
+
+    from app.ar_pbr.texture_map_lab_window import ArPbrTextureMapLabWindow
+
+    image_path = tmp_path / "source.png"
+    _sample_image(image_path)
+    monkeypatch.setenv("TIGERCAPTURE_TEXTURE_LAB_BACKEND", "cpu")
+    monkeypatch.delenv("TIGERCAPTURE_TEXTURE_LAB_ALLOW_CPU", raising=False)
+    window = ArPbrTextureMapLabWindow(image_path)
+
+    pasted_image = QImage(24, 16, QImage.Format.Format_ARGB32)
+    pasted_image.fill(QColor("#AA7733"))
+    QApplication.clipboard().setImage(pasted_image)
+    pasted = window.paste_image_from_clipboard()
+    app.processEvents()
+
+    assert pasted["pasted"] is True
+    assert window._preview.preview_pixmap().isNull() is False
+    assert window._preview.preview_pixmap().width() >= 64
+    assert window._preview_heading is not None
+    assert window._preview_heading.text() == "Source Preview"
+    assert "Source preview ready" in window._status.text()
+    window.close()
+
+
+def test_texture_map_lab_sphere_source_preview_works_without_gpu(tmp_path, monkeypatch) -> None:
+    app = _qt_app()
+    from PySide6.QtGui import QColor, QImage
+    from PySide6.QtWidgets import QApplication
+
+    from app.ar_pbr.texture_map_lab_window import ArPbrTextureMapLabWindow
+
+    image_path = tmp_path / "source.png"
+    _sample_image(image_path)
+    monkeypatch.setenv("TIGERCAPTURE_TEXTURE_LAB_BACKEND", "cpu")
+    monkeypatch.delenv("TIGERCAPTURE_TEXTURE_LAB_ALLOW_CPU", raising=False)
+    window = ArPbrTextureMapLabWindow(image_path)
+    sphere_index = window._preview_shape_combo.findData("sphere")
+    assert sphere_index >= 0
+    window._preview_shape_combo.setCurrentIndex(sphere_index)
+
+    pasted_image = QImage(32, 32, QImage.Format.Format_ARGB32)
+    pasted_image.fill(QColor("#3366CC"))
+    QApplication.clipboard().setImage(pasted_image)
+    window.paste_image_from_clipboard()
+    app.processEvents()
+
+    pixmap = window._preview.preview_pixmap()
+    assert pixmap.isNull() is False
+    assert pixmap.width() >= 64
+    assert window._preview_heading is not None
+    assert window._preview_heading.text().startswith("Sphere Source Preview")
+    assert "Source preview ready" in window._status.text()
+    window.close()
+
+
+def test_texture_map_lab_unavailable_gpu_uses_immediate_source_preview(tmp_path, monkeypatch) -> None:
+    app = _qt_app()
+    import app.ar_pbr.texture_map_lab_window as lab_window_module
+    from app.ar_pbr.texture_map_lab_window import ArPbrTextureMapLabWindow
+
+    image_path = tmp_path / "source.png"
+    _sample_image(image_path)
+    monkeypatch.setattr(
+        lab_window_module,
+        "select_texture_map_backend",
+        lambda *args, **kwargs: {
+            "requested": "auto",
+            "active": "unavailable",
+            "allow_cpu": False,
+            "reason": "gpu_backend_required",
+            "status": {"backends": {"torch_cuda": {"module_installed": False, "available": False}}},
+        },
+    )
+    monkeypatch.setattr(
+        lab_window_module,
+        "generate_texture_maps",
+        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("GPU generation must not run")),
+    )
+    window = ArPbrTextureMapLabWindow(image_path)
+    sphere_index = window._preview_shape_combo.findData("sphere")
+    window._preview_shape_combo.setCurrentIndex(sphere_index)
+    window.refresh_preview()
+    app.processEvents()
+
+    assert window._preview.preview_pixmap().isNull() is False
+    assert window._preview_heading.text() == "Sphere Source Preview"
+    assert "Source preview ready" in window._status.text()
+    window.close()
+
+
+def test_texture_map_lab_window_defers_render_without_blanketing_window_updates(tmp_path) -> None:
+    app = _qt_app()
+    from app.ar_pbr.texture_map_lab_window import ArPbrTextureMapLabWindow
+
+    image_path = tmp_path / "source.png"
+    _sample_image(image_path)
+    window = ArPbrTextureMapLabWindow(image_path, allow_cpu=True)
+    window.show()
+    app.processEvents()
+
+    window._begin_interactive_window_motion()
+
+    window.queue_preview()
+    window.refresh_preview()
+
+    assert window._window_motion_active is True
+    assert window._window_updates_frozen is False
+    assert window._preview_refresh_deferred is True
+    assert window._preview_timer.isActive() is False
+    assert window.centralWidget().updatesEnabled() is True
+
+    window._end_interactive_window_motion()
+    app.processEvents()
+
+    assert window._window_updates_frozen is False
+    assert window.centralWidget().updatesEnabled() is True
+    assert window._preview._interactive_paint is False
+    assert window._window_motion_active is False
+    assert window._preview_refresh_deferred is False
+    window.close()
+
+
+def test_texture_map_lab_preview_canvas_grab_contains_source_pixels_without_gpu(tmp_path, monkeypatch) -> None:
+    app = _qt_app()
+    from app.ar_pbr.texture_map_lab_window import ArPbrTextureMapLabWindow
+
+    image_path = tmp_path / "source.png"
+    _sample_image(image_path)
+    monkeypatch.setenv("TIGERCAPTURE_TEXTURE_LAB_BACKEND", "cpu")
+    monkeypatch.delenv("TIGERCAPTURE_TEXTURE_LAB_ALLOW_CPU", raising=False)
+    window = ArPbrTextureMapLabWindow(image_path)
+    window.show()
+    app.processEvents()
+
+    grab = window._preview.grab().toImage()
+    sampled_colors = {
+        grab.pixelColor(x, y).name()
+        for y in range(0, grab.height(), max(1, grab.height() // 20))
+        for x in range(0, grab.width(), max(1, grab.width() // 20))
+    }
+
+    assert window._preview.preview_pixmap().isNull() is False
+    assert len(sampled_colors) > 4
+    assert sampled_colors != {"#08090c"}
     window.close()

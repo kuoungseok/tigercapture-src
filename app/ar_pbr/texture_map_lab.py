@@ -13,6 +13,7 @@ from pathlib import Path
 import json
 import math
 import os
+import sys
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -75,6 +76,7 @@ PACKED_LAYOUTS: tuple[str, ...] = ("unreal_orm", "orm", "arm", "rma", "gltf_mr")
 NORMAL_FORMATS: tuple[str, ...] = ("unreal_directx", "directx", "opengl")
 AO_ALGORITHMS: tuple[str, ...] = ("heightfield_horizon", "legacy_blur")
 TEXTURE_MAP_BACKENDS: tuple[str, ...] = ("auto", "cpu", "torch_cuda", "cupy", "opencv_cuda")
+TORCH_CUDA_WHEEL_INDEX_URL = "https://download.pytorch.org/whl/cu128"
 PREVIEW_ONLY_SETTING_KEYS = frozenset(
     {
         "preview_light_azimuth",
@@ -159,9 +161,9 @@ class TextureMapLabSettings:
     f90_mask_strength: float = 0.45
     base_color_exposure: float = 0.0
     base_color_contrast: float = 1.0
-    preview_light_azimuth: float = 38.0
-    preview_light_elevation: float = 48.0
-    preview_environment: float = 0.42
+    preview_light_azimuth: float = -45.0
+    preview_light_elevation: float = 45.0
+    preview_environment: float = 0.32
     preview_animate_light: bool = False
 
 
@@ -193,6 +195,54 @@ def _module_available(name: str) -> bool:
         return importlib.util.find_spec(name) is not None
     except Exception:
         return False
+
+
+def _format_command_for_display(program: str, args: Sequence[str]) -> str:
+    parts = [str(program), *[str(arg) for arg in args]]
+
+    def quote(value: str) -> str:
+        if not value:
+            return '""'
+        if any(char.isspace() for char in value) or any(char in value for char in ('"', "'")):
+            return '"' + value.replace('"', '\\"') + '"'
+        return value
+
+    return " ".join(quote(part) for part in parts)
+
+
+def texture_lab_gpu_install_plan(python_executable: str | None = None) -> dict[str, Any]:
+    """Return the first-use install contract for Texture Lab CUDA map generation."""
+    program = str(python_executable or sys.executable or ".\\.venv\\Scripts\\python.exe")
+    install_args = [
+        "-m",
+        "pip",
+        "install",
+        "torch",
+        "torchvision",
+        "--index-url",
+        TORCH_CUDA_WHEEL_INDEX_URL,
+    ]
+    verify_script = (
+        "import json, torch; "
+        "ok=bool(torch.cuda.is_available()); "
+        "payload={'torch': torch.__version__, 'cuda_available': ok, "
+        "'device': torch.cuda.get_device_name(0) if ok else 'cpu'}; "
+        "print(json.dumps(payload, ensure_ascii=False)); "
+        "raise SystemExit(0 if ok else 3)"
+    )
+    verify_args = ["-c", verify_script]
+    return {
+        "schema_id": f"{SCHEMA_ID}.gpu_install_plan",
+        "backend": "torch_cuda",
+        "install_program": program,
+        "install_args": install_args,
+        "install_command": _format_command_for_display(program, install_args),
+        "verify_program": program,
+        "verify_args": verify_args,
+        "verify_command": _format_command_for_display(program, verify_args),
+        "env_override": "$env:TIGERCAPTURE_TEXTURE_LAB_BACKEND='torch_cuda'",
+        "wheel_index_url": TORCH_CUDA_WHEEL_INDEX_URL,
+    }
 
 
 def texture_map_backend_status() -> dict[str, Any]:
@@ -237,28 +287,34 @@ def texture_map_backend_status() -> dict[str, Any]:
         except Exception:
             opencv_cuda_devices = 0
 
+    install_plan = texture_lab_gpu_install_plan()
     install_guidance = {
         "recommended_backend": "torch_cuda",
         "summary": (
-            "Texture Lab product preview/export requires a GPU backend. "
-            "Install PyTorch with CUDA, or explicitly enable CPU diagnostics only when testing."
+            "Texture Lab map generation/export requires a CUDA tensor backend inside the "
+            "TigerCapture virtual environment. An RTX GPU and the AR/PBR OpenGL viewer can "
+            "work while PyTorch CUDA is still missing."
         ),
-        "pip_command": (
-            ".\\.venv\\Scripts\\python.exe -m pip install torch torchvision "
-            "--index-url https://download.pytorch.org/whl/cu128"
+        "why_this_can_happen": (
+            "AR/PBR model preview uses OpenGL. Texture Lab map generation uses PyTorch CUDA "
+            "kernels, so it also needs a CUDA-enabled torch package installed in this venv."
         ),
-        "verify_command": (
-            ".\\.venv\\Scripts\\python.exe -c \"import torch; "
-            "print(torch.__version__); print(torch.cuda.is_available()); "
-            "print(torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'cpu')\""
-        ),
-        "env_override": "$env:TIGERCAPTURE_TEXTURE_LAB_BACKEND='torch_cuda'",
+        "pip_command": str(install_plan["install_command"]),
+        "verify_command": str(install_plan["verify_command"]),
+        "env_override": str(install_plan["env_override"]),
+        "auto_install": install_plan,
         "notes": [
             "Install must be done in the TigerCapture virtual environment.",
+            "NVIDIA drivers or a working OpenGL AR/PBR viewer do not automatically install PyTorch.",
             "The CUDA wheel index may need to change if the local driver/toolchain policy changes.",
             "If install fails or torch.cuda.is_available() is false, product UI/actions stay GPU-required.",
             "CPU fallback is diagnostic-only via allow_cpu=true or TIGERCAPTURE_TEXTURE_LAB_ALLOW_CPU=1.",
         ],
+        "runtime_requirements": {
+            "hardware_gpu": "NVIDIA GPU and driver",
+            "preview_renderer": "OpenGL renderer for visual material preview",
+            "map_generation_backend": "torch with CUDA available from .venv",
+        },
     }
     try:
         from app.ar_pbr.texture_map_gpu_preview import texture_lab_gpu_preview_status
@@ -285,7 +341,10 @@ def texture_map_backend_status() -> dict[str, Any]:
                 "implemented": True,
                 "module_installed": torch_available,
                 "device": torch_device,
-                "note": "Uses PyTorch CUDA tensor kernels for map generation when torch with CUDA is installed.",
+                "note": (
+                    "Uses PyTorch CUDA tensor kernels for map generation. This is separate from "
+                    "the OpenGL AR/PBR viewer, so GPU hardware alone is not enough."
+                ),
             },
             "cupy": {
                 "available": cupy_cuda_available,
@@ -1748,6 +1807,59 @@ def render_plane_preview_from_generated(
         "source_fingerprint": generated.get("source_fingerprint", ""),
         "settings_fingerprint": generated.get("settings_fingerprint", ""),
         "substrate": substrate_export_plan(preview_settings),
+    }
+
+
+def render_source_preview_image(
+    image_path: str | Path,
+    *,
+    preview_shape: str = "plane",
+    output_path: str | Path | None = None,
+    width: int = 768,
+    settings: Mapping[str, Any] | None = None,
+) -> dict[str, Any]:
+    """Render a lightweight source-only preview when full PBR maps are unavailable."""
+    path = Path(image_path).expanduser()
+    shape = _normalize_preview_shape(preview_shape)
+    target_w = max(64, int(width or 768))
+    image = Image.open(path).convert("RGB")
+    ratio = target_w / max(1, image.width)
+    target_h = max(64, int(round(image.height * ratio)))
+    if image.size != (target_w, target_h):
+        image = image.resize((target_w, target_h), Image.Resampling.BICUBIC)
+    if shape == "sphere":
+        base = (np.asarray(image, dtype=np.float32) / 255.0).astype(np.float32)
+        h, w = base.shape[:2]
+        maps = {
+            "base_color": base,
+            "roughness": np.full((h, w), 0.55, dtype=np.float32),
+            "metallic": np.zeros((h, w), dtype=np.float32),
+            "ao": np.ones((h, w), dtype=np.float32),
+            "normal": np.dstack(
+                [
+                    np.full((h, w), 0.5, dtype=np.float32),
+                    np.full((h, w), 0.5, dtype=np.float32),
+                    np.ones((h, w), dtype=np.float32),
+                ]
+            ),
+        }
+        preview = _sphere_material_preview_array(maps, normalize_texture_map_settings(settings))
+        preview_img = _to_rgb_image(preview)
+    else:
+        preview_img = image
+    if output_path is None:
+        out = path.with_name(f"{path.stem}_source_{shape}_preview.png")
+    else:
+        out = Path(output_path).expanduser()
+    out.parent.mkdir(parents=True, exist_ok=True)
+    preview_img.save(out)
+    return {
+        "schema_id": f"{SCHEMA_ID}.source_preview",
+        "source_path": str(path),
+        "preview_path": str(out),
+        "preview_shape": shape,
+        "size": [int(preview_img.width), int(preview_img.height)],
+        "backend": {"active": "source_fallback", "preview_renderer": "source_only"},
     }
 
 
