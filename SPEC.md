@@ -6364,7 +6364,8 @@ AI Script Edit MVP integration:
   `docs/PAINTER_STANDALONE_PLAN_KO.md`: left icon toolbar, central canvas,
   and a right inspector where the color palette sits above a standalone
   `Layers / Channels / Paths` tab set. Brush presets are exposed from the
-  toolbar brush button as visual stroke thumbnails instead of text-only rows,
+  top tool-options `Brush Preset` button as visual stroke thumbnails instead
+  of text-only rows,
   and the full brush settings panel is reachable from the `Brush` menu and
   `Window > Brush`. Selection actions cover
   select-all, deselect, invert, rectangular marquee, elliptical marquee, and
@@ -6460,9 +6461,11 @@ AI Script Edit MVP integration:
   visible `Quick Mask` control, `Q`, and `paint.quick_mask.set`; Magic Select
   uses `paint.selection.select_by_color` to build a fast similar-color bounding
   selection; and grid/snap state is controlled by `paint.view.grid`.
-- The Painter toolbar brush button supports long-press/right-click brush
-  preset selection. The pop-up is an image-first thumbnail palette with only a
-  compact header and hover tooltips for name/width/opacity; it uses the same
+- The Painter left-rail Brush icon selects the Brush tool only and must not
+  share, own, or anchor the preset popup. The dedicated top tool-options
+  `Brush Preset` button owns the preset menu and opens it directly below that
+  button. The pop-up is an image-first thumbnail palette with a compact header,
+  category filter, and hover tooltips for name/width/opacity; it uses the same
   `BRUSH_LIBRARY_PRESETS` backing data as the Painter automation layer, and
   selecting a preset switches to Pen while applying style, width, and opacity.
   The right inspector also has a Photoshop-like `BRUSH` detail panel with
@@ -6498,7 +6501,7 @@ AI Script Edit MVP integration:
   watercolor washes with edge deposits, opaque gouache/acrylic bristles,
   soft airbrush and skin blending, hair/foliage/cloud brushes, rock/fabric
   texture, and paint splatter. These use profile-driven Qt and PIL renderers,
-  not text-only aliases. The toolbar brush popup provides an `All Brushes`
+  not text-only aliases. The top `Brush Preset` popup provides an `All Brushes`
   view plus category filtering over actual rendered-tip thumbnails, while the
   inspector retains Photoshop-style Brush/Brush Presets and parameter sections.
   The catalog is a production v1 set; pressure/tilt-sensitive pigment mixing

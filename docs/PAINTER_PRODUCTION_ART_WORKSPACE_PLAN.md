@@ -76,7 +76,10 @@ Default layout:
   Mirror X/Y and 3D Blockout. Destructive Clear stays isolated at the bottom.
   Move, Magic Select, Fill, Quick Mask, Fit, and Pen/Path use distinct
   tool-shaped icons rather than generic cursor, target, palette, or marquee
-  symbols. Tooltips include the active keyboard shortcut where one exists.
+  symbols. Brush is an explicit exception: its rail icon selects the tool only;
+  brush presets belong to the dedicated top tool-options button and must not
+  reuse or anchor to the rail icon. Tooltips include the active keyboard
+  shortcut where one exists.
   The rail itself follows the Photoshop reference: a flat neutral `#535353`
   surface, compact white monochrome glyphs, no rounded button boxes, no purple
   selection accent, no red destructive accent, and only a darker neutral hover
@@ -238,9 +241,10 @@ Implemented designer catalog subset (2026-07-25):
 - Each family has a renderer profile with distinct deposition behavior in Qt
   preview and PIL/MP4 export. Presets carry real size, opacity, hardness,
   spacing, angle, and roundness values.
-- The brush popup uses rendered tip thumbnails with `All Brushes` and category
-  filtering; the full inspector keeps Brush/Brush Presets and the familiar
-  Photoshop-style parameter-section layout.
+- The dedicated top `Brush Preset` popup uses rendered tip thumbnails with
+  `All Brushes` and category filtering; the left-rail Brush icon remains a
+  fixed tool selector. The full inspector keeps Brush/Brush Presets and the
+  familiar Photoshop-style parameter-section layout.
 
 Brush parameter contract:
 

@@ -5672,11 +5672,7 @@ class PaintDialog(QDialog):
         self._tool_rail_collapsed = False
         self._tool_rail_full_width = 40
         self._tool_rail_collapsed_width = 24
-        self._brush_long_press_menu: QMenu | None = None
-        self._brush_long_press_menu_opened = False
-        self._brush_long_press_timer = QTimer(self)
-        self._brush_long_press_timer.setSingleShot(True)
-        self._brush_long_press_timer.timeout.connect(self._show_brush_button_menu)
+        self._brush_preset_menu: QMenu | None = None
         self._move_refresh_pause_timer = QTimer(self)
         self._move_refresh_pause_timer.setSingleShot(True)
         self._move_refresh_pause_timer.setInterval(140)
@@ -6251,8 +6247,7 @@ class PaintDialog(QDialog):
         self.sticker_btn.clicked.connect(self._add_sticker)
 
         self._configure_paint_icon_button(self.pen_btn, "paint-brush")
-        self.pen_btn.setToolTip(f"{tr('paint.btn.pen')} | Hold for brush presets")
-        self.pen_btn.installEventFilter(self)
+        self.pen_btn.setToolTip(tr("paint.btn.pen"))
         self._configure_paint_icon_button(self.eraser_btn, "eraser")
         self._configure_paint_icon_button(self.clear_btn, "trash")
         self._configure_paint_icon_button(self.bubble_btn, "caption")
@@ -6681,8 +6676,7 @@ class PaintDialog(QDialog):
             "Mirror Drawing Vertically",
         )
         self._configure_paint_tool_icon_button(self.pen_btn, "paint-brush", "Brush Tool (B)")
-        self.pen_btn.setToolTip("Brush Tool (B) | Hold for brush presets")
-        self.pen_btn.installEventFilter(self)
+        self.pen_btn.setToolTip("Brush Tool (B)")
         self._configure_paint_tool_icon_button(self.eraser_btn, "eraser", "Eraser Tool (E)")
         self._configure_paint_tool_icon_button(self.path_btn, "pen-nib", "Pen / Path Tool (P)")
         self._configure_paint_tool_icon_button(self.bubble_btn, "caption", tr("bubble.add_button"))
@@ -7017,12 +7011,13 @@ class PaintDialog(QDialog):
         brush_options_row = QHBoxLayout(self._brush_options_widget)
         brush_options_row.setContentsMargins(0, 0, 0, 0)
         brush_options_row.setSpacing(5)
-        brush_preset_button = QPushButton("Brush Preset")
-        brush_preset_button.setIcon(app_icon("paint-brush", size=13, color="#EEEEEE"))
-        brush_preset_button.setIconSize(icon_size(13))
-        brush_preset_button.setToolTip("Open Brush Presets")
-        brush_preset_button.clicked.connect(self._show_brush_button_menu)
-        brush_options_row.addWidget(brush_preset_button)
+        self._brush_preset_button = QPushButton("Brush Preset")
+        self._brush_preset_button.setObjectName("PaintBrushPresetButton")
+        self._brush_preset_button.setIcon(app_icon("paint-brush", size=13, color="#EEEEEE"))
+        self._brush_preset_button.setIconSize(icon_size(13))
+        self._brush_preset_button.setToolTip("Open Brush Presets")
+        self._brush_preset_button.clicked.connect(self._show_brush_button_menu)
+        brush_options_row.addWidget(self._brush_preset_button)
         size_label = QLabel("Size")
         size_label.setObjectName("PaintMeta")
         brush_options_row.addWidget(size_label)
@@ -9860,47 +9855,12 @@ class PaintDialog(QDialog):
             self._tool_status_label.setText("Brush settings")
 
     def _show_brush_button_menu(self) -> None:
-        button = getattr(self, "pen_btn", None)
+        button = getattr(self, "_brush_preset_button", None)
         if button is None:
             return
-        timer = getattr(self, "_brush_long_press_timer", None)
-        if timer is not None:
-            timer.stop()
-        self._brush_long_press_menu_opened = True
-        button.setDown(False)
         menu = self._build_brush_button_menu()
-        menu.aboutToHide.connect(lambda: setattr(self, "_brush_long_press_menu_opened", False))
-        self._brush_long_press_menu = menu
-        menu.popup(button.mapToGlobal(QPoint(button.width() + 8, 0)))
-
-    def _handle_brush_button_event(self, event) -> bool:
-        event_type = event.type()
-        timer = getattr(self, "_brush_long_press_timer", None)
-        if event_type == QEvent.Type.ContextMenu:
-            self._show_brush_button_menu()
-            event.accept()
-            return True
-        if event_type == QEvent.Type.MouseButtonPress:
-            try:
-                if event.button() == Qt.MouseButton.LeftButton and timer is not None:
-                    self._brush_long_press_menu_opened = False
-                    timer.start(430)
-            except Exception:
-                pass
-            return False
-        if event_type in (QEvent.Type.MouseButtonRelease, QEvent.Type.MouseButtonDblClick):
-            if timer is not None:
-                timer.stop()
-            if bool(getattr(self, "_brush_long_press_menu_opened", False)):
-                event.accept()
-                if hasattr(self, "pen_btn"):
-                    self.pen_btn.setDown(False)
-                return True
-            return False
-        if event_type in (QEvent.Type.Leave, QEvent.Type.FocusOut):
-            if timer is not None:
-                timer.stop()
-        return False
+        self._brush_preset_menu = menu
+        menu.popup(button.mapToGlobal(QPoint(0, button.height() + 4)))
 
     def _make_palette_button(
         self,
@@ -13259,10 +13219,6 @@ class PaintDialog(QDialog):
         self._update_inspector_counts()
 
     def eventFilter(self, obj, event) -> bool:
-        if obj is getattr(self, "pen_btn", None):
-            if self._handle_brush_button_event(event):
-                return True
-            return super().eventFilter(obj, event)
         channel_list = getattr(self, "_channel_list", None)
         if channel_list is not None and obj is channel_list.viewport():
             if self._handle_channel_list_event(event):

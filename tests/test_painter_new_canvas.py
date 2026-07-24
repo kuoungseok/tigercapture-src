@@ -301,7 +301,11 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog.crop_btn.text() == ""
     assert dialog.crop_btn.toolTip() == "Crop Tool (C)"
     assert dialog.pen_btn.text() == ""
-    assert "Hold" in dialog.pen_btn.toolTip()
+    assert dialog.pen_btn.toolTip() == "Brush Tool (B)"
+    assert "preset" not in dialog.pen_btn.toolTip().casefold()
+    assert dialog._brush_preset_button.objectName() == "PaintBrushPresetButton"
+    assert dialog._brush_preset_button.toolTip() == "Open Brush Presets"
+    assert not dialog._brush_preset_button.icon().isNull()
     assert dialog.eraser_btn.text() == ""
     assert dialog.eraser_btn.toolTip()
     assert not dialog.select_btn.icon().isNull()
@@ -373,6 +377,11 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
         "stipple_oil",
         "knife_scrape_oil",
     } <= brush_styles
+    dialog._brush_preset_button.click()
+    app.processEvents()
+    assert dialog._brush_preset_menu is not None
+    assert dialog.pen_btn.isDown() is False
+    dialog._brush_preset_menu.close()
     brush_menu = dialog._build_brush_button_menu()
     brush_popup_list = brush_menu.findChild(QListWidget, "PaintBrushPopupList")
     brush_popup_category = brush_menu.findChild(QComboBox, "PaintBrushPopupCategory")
