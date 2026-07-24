@@ -36,6 +36,7 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
         "paint.view.grid",
         "paint.quick_mask.set",
         "paint.tool.set",
+        "paint.brush.set",
         "paint.window.show_panel",
         "paint.layer.add",
         "paint.layer.select",
@@ -77,8 +78,25 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
         "paint.clipboard.copy",
         "paint.clipboard.cut",
         "paint.clipboard.paste",
+        "paint.reference.state",
+        "paint.reference.add",
+        "paint.reference.update",
+        "paint.reference.delete",
+        "paint.reference.duplicate",
+        "paint.reference.bake",
+        "paint.3d_blockout.state",
+        "paint.3d_blockout.add",
+        "paint.3d_blockout.update",
+        "paint.3d_blockout.delete",
+        "paint.3d_blockout.duplicate",
+        "paint.3d_blockout.align_ground",
+        "paint.3d_blockout.snap",
+        "paint.3d_blockout.camera",
+        "paint.3d_blockout.camera_preset",
+        "paint.3d_blockout.bake",
         "paint.pbr.preview",
         "paint.pbr.export",
+        "paint.pbr.backend_status",
         "paint.pbr.substrate_plan",
     }
     assert required <= action_ids
@@ -103,12 +121,39 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     assert tool["ok"]
     assert dialog.path_btn.isChecked()
 
+    brush = registry.execute(
+        "paint.brush.set",
+        {
+            "preset": "real_wet_oil",
+            "hardness": 72,
+            "spacing": 36,
+            "angle": -12,
+            "roundness": 64,
+            "flip_x": True,
+        },
+    ).to_dict()
+    assert brush["ok"]
+    assert dialog.pen_btn.isChecked()
+    assert brush["result"]["brush"]["style"] == "real_wet_oil"
+    assert brush["result"]["brush"]["width_px"] == 28.0
+    assert brush["result"]["brush"]["detail"]["hardness"] == 72
+    assert brush["result"]["brush"]["detail"]["spacing"] == 36
+    assert brush["result"]["brush"]["detail"]["angle"] == -12
+    assert brush["result"]["brush"]["detail"]["roundness"] == 64
+    assert brush["result"]["brush"]["detail"]["flip_x"] is True
+    assert dialog.canvas._brush_hardness == 72
+    assert dialog.canvas._brush_spacing == 36
+    assert dialog.canvas._brush_angle == -12
+    assert dialog.canvas._brush_roundness == 64
+    assert dialog.canvas._brush_flip_x is True
+
+    brush_panel = registry.execute("paint.window.show_panel", {"panel": "brush"}).to_dict()
+    assert brush_panel["ok"]
+    assert dialog._tool_status_label.text() == "Brush settings"
+
     panel = registry.execute("paint.window.show_panel", {"panel": "paths"}).to_dict()
     assert panel["ok"]
     assert dialog._layer_channel_path_tabs.currentIndex() == 2
-    pbr_panel = registry.execute("paint.window.show_panel", {"panel": "pbr"}).to_dict()
-    assert pbr_panel["ok"]
-    assert dialog._layer_channel_path_tabs.currentIndex() == 4
 
     grid = registry.execute(
         "paint.view.grid",
@@ -298,6 +343,10 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     zoom = registry.execute("paint.view.zoom", {"percent": 150}).to_dict()
     assert zoom["ok"]
     assert zoom["result"]["view"]["zoom_percent"] == 150
+    max_zoom = registry.execute("paint.view.zoom", {"percent": 800}).to_dict()
+    assert max_zoom["ok"]
+    assert max_zoom["result"]["view"]["zoom_percent"] == 800
+    assert max_zoom["result"]["view"]["pixel_grid_visible"] is True
 
     pan = registry.execute("paint.view.pan", {"dx": 20, "dy": 10}).to_dict()
     assert pan["ok"]
@@ -319,9 +368,16 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     pbr_preview_path = tmp_path / "painter_pbr_preview.png"
     pbr_preview = registry.execute(
         "paint.pbr.preview",
-        {"path": str(pbr_preview_path), "preview_mode": "material", "width": 128},
+        {
+            "path": str(pbr_preview_path),
+            "preview_mode": "material",
+            "preview_shape": "sphere",
+            "width": 128,
+            "allow_cpu": True,
+        },
     ).to_dict()
     assert pbr_preview["ok"]
+    assert pbr_preview["result"]["preview_shape"] == "sphere"
     assert pbr_preview_path.exists()
     pbr_export = registry.execute(
         "paint.pbr.export",
@@ -329,6 +385,7 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
             "output_dir": str(tmp_path / "painter_pbr_maps"),
             "packed_layouts": ["arm"],
             "settings": {"metallic_value": 0.1},
+            "allow_cpu": True,
         },
     ).to_dict()
     assert pbr_export["ok"]
@@ -336,6 +393,107 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     pbr_plan = registry.execute("paint.pbr.substrate_plan").to_dict()
     assert pbr_plan["ok"]
     assert pbr_plan["result"]["target"] == "Unreal Engine Substrate Slab BSDF"
+    pbr_backend = registry.execute("paint.pbr.backend_status", {"allow_cpu": True}).to_dict()
+    assert pbr_backend["ok"]
+    assert pbr_backend["result"]["active"] in {"cpu", "torch_cuda"}
+    assert "install_guidance" in pbr_backend["result"]["status"]
+
+    reference_path = tmp_path / "paint_reference.png"
+    assert create_blank_paint_pixmap(160, 90, "#88AAFF").save(str(reference_path), "PNG")
+    reference = registry.execute(
+        "paint.reference.add",
+        {
+            "path": str(reference_path),
+            "name": "Color Script",
+            "x_norm": 0.1,
+            "y_norm": 0.12,
+            "width_norm": 0.4,
+            "height_norm": 0.25,
+            "opacity": 0.5,
+        },
+    ).to_dict()
+    assert reference["ok"]
+    assert reference["result"]["board"]["reference_count"] == 1
+    assert reference["result"]["ui_contract"]["exported_by_default"] is False
+    reference_id = reference["result"]["board"]["references"][0]["id"]
+    moved_reference = registry.execute(
+        "paint.reference.update",
+        {"reference_id": reference_id, "x_norm": 0.2, "opacity": 0.72},
+    ).to_dict()
+    assert moved_reference["ok"]
+    assert moved_reference["result"]["board"]["references"][0]["x_norm"] == 0.2
+    assert moved_reference["result"]["board"]["references"][0]["opacity"] == 0.72
+    duplicated_reference = registry.execute(
+        "paint.reference.duplicate",
+        {"reference_id": reference_id, "offset_x": 0.03},
+    ).to_dict()
+    assert duplicated_reference["ok"]
+    assert duplicated_reference["result"]["board"]["reference_count"] == 2
+    baked_reference = registry.execute("paint.reference.bake", {"reference_id": reference_id}).to_dict()
+    assert baked_reference["ok"]
+    assert baked_reference["result"]["bake"]["path"] == str(reference_path)
+    deleted_reference = registry.execute("paint.reference.delete", {"reference_id": reference_id}).to_dict()
+    assert deleted_reference["ok"]
+    assert deleted_reference["result"]["board"]["reference_count"] == 1
+
+    blockout = registry.execute(
+        "paint.3d_blockout.add",
+        {"kind": "box", "name": "Room Block", "sx": 2.0, "sy": 1.2, "preview_width": 320, "preview_height": 180},
+    ).to_dict()
+    assert blockout["ok"]
+    assert blockout["result"]["scene"]["primitive_count"] == 1
+    assert blockout["result"]["gpu_contract"]["future_gpu_preview"] is True
+    assert blockout["result"]["ui_guardrails"]["preserve_texture_lab_entry_points"] is True
+    assert blockout["result"]["ui_guardrails"]["layers_channels_paths_remain_primary_dock"] is True
+    primitive_id = blockout["result"]["scene"]["primitives"][0]["id"]
+    updated_blockout = registry.execute(
+        "paint.3d_blockout.update",
+        {"primitive_id": primitive_id, "kind": "arch", "x": 1.0, "sx": 3.0, "sy": 2.2, "rz": 12.0},
+    ).to_dict()
+    assert updated_blockout["ok"]
+    assert updated_blockout["result"]["scene"]["primitives"][0]["kind"] == "arch"
+    assert updated_blockout["result"]["gizmo_contract"]["object_modes"] == ["move", "rotate", "scale"]
+    duplicated_blockout = registry.execute(
+        "paint.3d_blockout.duplicate",
+        {"primitive_id": primitive_id, "offset_x": 0.5, "offset_z": 0.5},
+    ).to_dict()
+    assert duplicated_blockout["ok"]
+    assert duplicated_blockout["result"]["scene"]["primitive_count"] == 2
+    grounded_blockout = registry.execute(
+        "paint.3d_blockout.align_ground",
+        {"primitive_id": primitive_id},
+    ).to_dict()
+    assert grounded_blockout["ok"]
+    assert grounded_blockout["result"]["scene"]["primitives"][0]["position"][1] == 0.0
+    snap_blockout = registry.execute(
+        "paint.3d_blockout.snap",
+        {"enabled": True, "primitive_id": primitive_id},
+    ).to_dict()
+    assert snap_blockout["ok"]
+    assert snap_blockout["result"]["scene"]["snap_to_grid"] is True
+    camera = registry.execute(
+        "paint.3d_blockout.camera",
+        {"yaw_degrees": 20, "pitch_degrees": -10, "target_x": 0.5, "distance": 5.0, "fov_degrees": 35},
+    ).to_dict()
+    assert camera["ok"]
+    assert camera["result"]["scene"]["camera"]["fov_degrees"] == 35.0
+    assert camera["result"]["scene"]["camera"]["target"][0] == 0.5
+    camera_preset = registry.execute(
+        "paint.3d_blockout.camera_preset",
+        {"preset": "top"},
+    ).to_dict()
+    assert camera_preset["ok"]
+    assert camera_preset["result"]["scene"]["camera"]["pitch_degrees"] == -82.0
+    blockout_state = registry.execute("paint.3d_blockout.state").to_dict()
+    assert blockout_state["ok"]
+    assert blockout_state["result"]["projection"]["face_count"] > 0
+    baked_blockout = registry.execute("paint.3d_blockout.bake").to_dict()
+    assert baked_blockout["ok"]
+    assert baked_blockout["result"]["bake"]["stroke_count"] > 0
+    assert baked_blockout["result"]["bake"]["layer_name"] == "3D Blockout Guide"
+    deleted_blockout = registry.execute("paint.3d_blockout.delete", {"primitive_id": primitive_id}).to_dict()
+    assert deleted_blockout["ok"]
+    assert deleted_blockout["result"]["scene"]["primitive_count"] == 1
 
     new_doc = registry.execute(
         "paint.document.new",

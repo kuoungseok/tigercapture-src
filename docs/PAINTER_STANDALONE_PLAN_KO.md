@@ -52,8 +52,8 @@ Standalone Painter의 기본 레이아웃은 Photoshop에 익숙한 사용자를
 - 상단: 메뉴바와 작업 옵션 바
 - 왼쪽: 세로 아이콘 툴바
 - 중앙: 캔버스, 투명 배경 체크패턴, marching ants 선택 영역
-- 오른쪽 상단: Layers / Channels / Paths / History 탭
-- 오른쪽 하단: Brush Presets / Color / Adjustments / Navigator 계열 보조 패널
+- 오른쪽: Color palette 아래에 독립 Layers / Channels / Paths 3탭 패널
+- Brush Presets는 오른쪽 패널에 두지 않고 툴바 브러쉬 버튼의 롱프레스/우클릭 메뉴로 제공
 
 왼쪽 툴바 기본 항목:
 
@@ -304,14 +304,15 @@ AI 적용 원칙:
 
 ## PBR Maps / Unreal Texture Workflow
 
-Painter owns the user-facing AR/PBR texture-map workflow. The feature appears
-inside the Painter right panel as a `PBR Maps` tab, not as a primary standalone
-AR/PBR window.
+Painter owns the AR/PBR texture-map automation workflow, but it is no longer
+mixed into the right inspector. The right panel stays focused on Color plus the
+Layers / Channels / Paths 3-tab panel.
 
 User scenario:
 
 1. Open an image or paint a texture in Painter.
-2. Open the right-panel `PBR Maps` tab.
+2. Use `paint.pbr.preview` or the PBR automation entry point from the Painter
+   workflow.
 3. Preview the current visible Painter document as a material plane or as
    Base Color, Normal, AO, Roughness, Metallic, Height, Cavity, Unreal ORM, or
    glTF MR maps.
@@ -324,7 +325,8 @@ Automation contract:
 - `paint.pbr.preview`: render a plane or map preview from the current visible
   Painter document.
 - `paint.pbr.export`: export separate BaseColor/Normal/AO/Roughness/Metallic/
-  Height/Cavity maps and optional ARM/ORM/glTF packed maps from Painter.
+  Height/Cavity/Curvature maps, optional Substrate `f0`/`f90_mask` maps, and
+  optional ARM/ORM/glTF packed maps from Painter.
 - `paint.pbr.substrate_plan`: return Unreal Default Lit and Substrate Slab
   wiring guidance for the generated Painter maps.
 

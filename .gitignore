@@ -60,6 +60,7 @@ external/tools/lmms/
 external/tools/fluidsynth/
 external/tools/tts/kokoro/
 external/tools/tts/gpt-sovits/
+external/assets/paint_clipboard/
 external/assets/vtuber/
 external/assets/music/soundfonts/*.sf2
 external/assets/music/soundfonts/*.sf3

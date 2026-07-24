@@ -367,6 +367,43 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
         painter.drawLine(QPointF(s * .32, s * .48), QPointF(s * .68, s * .48))
         painter.drawLine(QPointF(s * .50, s * .62), QPointF(s * .34, s * .84))
         painter.drawLine(QPointF(s * .50, s * .62), QPointF(s * .66, s * .84))
+    elif n in {"motion", "motion-designer", "motion_designer", "keyframes"}:
+        painter.setPen(
+            QPen(
+                _color(color),
+                max(1.4, s * .070),
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+                Qt.PenJoinStyle.RoundJoin,
+            )
+        )
+        curve = QPainterPath()
+        curve.moveTo(s * .16, s * .58)
+        curve.cubicTo(s * .30, s * .24, s * .43, s * .80, s * .58, s * .45)
+        curve.cubicTo(s * .67, s * .25, s * .76, s * .28, s * .86, s * .36)
+        painter.drawPath(curve)
+        painter.setBrush(_color(color))
+        painter.setPen(Qt.PenStyle.NoPen)
+        for x, y in ((.16, .58), (.43, .68), (.58, .45), (.86, .36)):
+            diamond = QPolygonF([
+                QPointF(s * x, s * (y - .085)),
+                QPointF(s * (x + .085), s * y),
+                QPointF(s * x, s * (y + .085)),
+                QPointF(s * (x - .085), s * y),
+            ])
+            painter.drawPolygon(diamond)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(
+            QPen(
+                _color(color),
+                max(1.0, s * .052),
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+            )
+        )
+        for x in (.22, .42, .62, .82):
+            painter.drawLine(QPointF(s * x, s * .78), QPointF(s * x, s * .88))
+        painter.drawLine(QPointF(s * .14, s * .83), QPointF(s * .90, s * .83))
     elif n in {"more", "ellipsis"}:
         painter.setBrush(_color(color))
         painter.setPen(Qt.PenStyle.NoPen)
@@ -384,6 +421,16 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
         painter.drawRoundedRect(QRectF(s * .20, s * .18, s * .60, s * .64), 2, 2)
         painter.drawRect(QRectF(s * .34, s * .18, s * .30, s * .22))
         painter.drawRoundedRect(QRectF(s * .34, s * .58, s * .32, s * .20), 2, 2)
+    elif n in {"copy", "duplicate"}:
+        painter.drawRoundedRect(QRectF(s * .28, s * .18, s * .46, s * .56), 2, 2)
+        painter.drawRoundedRect(QRectF(s * .18, s * .30, s * .46, s * .56), 2, 2)
+        painter.drawLine(QPointF(s * .28, s * .44), QPointF(s * .54, s * .44))
+        painter.drawLine(QPointF(s * .28, s * .58), QPointF(s * .54, s * .58))
+    elif n in {"paste", "clipboard"}:
+        painter.drawRoundedRect(QRectF(s * .22, s * .26, s * .56, s * .58), 2, 2)
+        painter.drawRoundedRect(QRectF(s * .36, s * .16, s * .28, s * .18), 2, 2)
+        painter.drawLine(QPointF(s * .34, s * .48), QPointF(s * .66, s * .48))
+        painter.drawLine(QPointF(s * .34, s * .62), QPointF(s * .62, s * .62))
     elif n in {"link", "relink", "chain"}:
         painter.drawArc(QRectF(s * .16, s * .34, s * .38, s * .30), 35 * 16, 290 * 16)
         painter.drawArc(QRectF(s * .46, s * .34, s * .38, s * .30), 215 * 16, 290 * 16)

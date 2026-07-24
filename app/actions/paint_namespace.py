@@ -55,7 +55,7 @@ def register_paint_actions(registry: Any) -> None:
         "Set the active Painter canvas zoom percentage.",
         "paint",
         "paint_view_zoom",
-        params_schema=schema_object({"percent": {"type": "integer", "minimum": 25, "maximum": 400}}),
+        params_schema=schema_object({"percent": {"type": "integer", "minimum": 25, "maximum": 800}}),
         undo_label="Set Painter zoom",
         dry_summary="active Painter zoom would change",
     )
@@ -135,12 +135,51 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="active Painter tool would change",
     )
     registry.register_adapter_action(
+        "paint.brush.set",
+        "Set the active Painter brush preset, style, size, opacity, and brush detail controls.",
+        "paint",
+        "paint_brush_set",
+        params_schema=schema_object(
+            {
+                "preset": {"type": "string"},
+                "style": {
+                    "type": "string",
+                    "enum": [
+                        "round",
+                        "marker",
+                        "highlighter",
+                        "dashed",
+                        "loaded_oil",
+                        "impasto_oil",
+                        "oil_smear",
+                        "soft_oil_glaze",
+                        "real_wet_oil",
+                        "bristle_oil",
+                        "dry_oil",
+                        "palette_knife",
+                        "textured_chalk",
+                    ],
+                },
+                "width": {"type": "integer", "minimum": 1, "maximum": 60},
+                "opacity": {"type": "integer", "minimum": 10, "maximum": 100},
+                "hardness": {"type": "integer", "minimum": 1, "maximum": 100},
+                "spacing": {"type": "integer", "minimum": 1, "maximum": 200},
+                "angle": {"type": "integer", "minimum": -180, "maximum": 180},
+                "roundness": {"type": "integer", "minimum": 10, "maximum": 100},
+                "flip_x": {"type": "boolean"},
+                "flip_y": {"type": "boolean"},
+            }
+        ),
+        undo_label="Set Painter brush",
+        dry_summary="active Painter brush preset or brush parameters would change",
+    )
+    registry.register_adapter_action(
         "paint.window.show_panel",
-        "Show the Layers, Channels, Paths, History, or PBR Maps panel in the active Painter window.",
+        "Show the Brush, Layers, Channels, or Paths panel in the active Painter window.",
         "paint",
         "paint_window_show_panel",
         params_schema=schema_object(
-            {"panel": {"type": "string", "enum": ["layers", "channels", "paths", "history", "pbr", "pbr_maps"]}},
+            {"panel": {"type": "string", "enum": ["brush", "layers", "channels", "paths"]}},
             required=("panel",),
         ),
         undo_label="Show Painter panel",
@@ -667,6 +706,254 @@ def register_paint_actions(registry: Any) -> None:
         undo_label="Import editor object into Paint",
         dry_summary="editor object would be imported into Paint as a sticker layer",
     )
+    reference_params = {
+        "reference_id": {"type": "string"},
+        "path": {"type": "string"},
+        "name": {"type": "string"},
+        "x_norm": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "y_norm": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        "width_norm": {"type": "number", "minimum": 0.02, "maximum": 1.0},
+        "height_norm": {"type": "number", "minimum": 0.02, "maximum": 1.0},
+        "opacity": {"type": "number", "minimum": 0.05, "maximum": 1.0},
+        "visible": {"type": "boolean"},
+        "locked": {"type": "boolean"},
+    }
+    registry.register_adapter_action(
+        "paint.reference.state",
+        "Read the active Painter reference board without changing paint layers.",
+        "paint",
+        "paint_reference_state",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter reference board would be read",
+    )
+    registry.register_adapter_action(
+        "paint.reference.add",
+        "Add a non-destructive reference image to the Painter board.",
+        "paint",
+        "paint_reference_add",
+        params_schema=schema_object(reference_params, required=("path",)),
+        undo_label="Add Painter reference image",
+        dry_summary="Painter reference image would be added",
+    )
+    registry.register_adapter_action(
+        "paint.reference.update",
+        "Update position, size, opacity, visibility, or label for a Painter reference image.",
+        "paint",
+        "paint_reference_update",
+        params_schema=schema_object(reference_params, required=("reference_id",)),
+        undo_label="Update Painter reference image",
+        dry_summary="Painter reference image would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.reference.delete",
+        "Delete a Painter reference image from the reference board.",
+        "paint",
+        "paint_reference_delete",
+        params_schema=schema_object({"reference_id": {"type": "string"}}, required=("reference_id",)),
+        undo_label="Delete Painter reference image",
+        dry_summary="Painter reference image would be deleted",
+    )
+    registry.register_adapter_action(
+        "paint.reference.duplicate",
+        "Duplicate a Painter reference image while keeping it non-destructive.",
+        "paint",
+        "paint_reference_duplicate",
+        params_schema=schema_object(
+            {
+                "reference_id": {"type": "string"},
+                "offset_x": {"type": "number"},
+                "offset_y": {"type": "number"},
+            },
+            required=("reference_id",),
+        ),
+        undo_label="Duplicate Painter reference image",
+        dry_summary="Painter reference image would be duplicated",
+    )
+    registry.register_adapter_action(
+        "paint.reference.bake",
+        "Bake a selected Painter reference into an exportable sticker layer.",
+        "paint",
+        "paint_reference_bake",
+        params_schema=schema_object({"reference_id": {"type": "string"}}),
+        undo_label="Bake Painter reference image",
+        dry_summary="Painter reference image would be baked into an exportable sticker layer",
+    )
+    blockout_primitive = {
+        "primitive_id": {"type": "string"},
+        "kind": {
+            "type": "string",
+            "enum": ["box", "arch"],
+        },
+        "name": {"type": "string"},
+        "x": {"type": "number"},
+        "y": {"type": "number"},
+        "z": {"type": "number"},
+        "rx": {"type": "number"},
+        "ry": {"type": "number"},
+        "rz": {"type": "number"},
+        "sx": {"type": "number", "minimum": 0.001},
+        "sy": {"type": "number", "minimum": 0.001},
+        "sz": {"type": "number", "minimum": 0.001},
+        "color": {"type": "string"},
+        "opacity": {"type": "number", "minimum": 0.05, "maximum": 1.0},
+        "wireframe": {"type": "boolean"},
+        "locked": {"type": "boolean"},
+        "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
+        "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
+    }
+    registry.register_adapter_action(
+        "paint.3d_blockout.state",
+        "Read the active Painter 3D blockout scene and projected guide geometry.",
+        "paint",
+        "paint_3d_blockout_state",
+        params_schema=schema_object(
+            {
+                "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
+                "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter 3D blockout scene would be read",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.add",
+        "Add a simple concept-art 3D blockout primitive to the active Painter scene.",
+        "paint",
+        "paint_3d_blockout_add",
+        params_schema=schema_object(blockout_primitive),
+        undo_label="Add Painter 3D blockout primitive",
+        dry_summary="Painter 3D blockout primitive would be added",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.update",
+        "Update a Painter 3D blockout primitive transform, color, or guide state.",
+        "paint",
+        "paint_3d_blockout_update",
+        params_schema=schema_object(blockout_primitive, required=("primitive_id",)),
+        undo_label="Update Painter 3D blockout primitive",
+        dry_summary="Painter 3D blockout primitive would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.delete",
+        "Delete a Painter 3D blockout primitive from the active scene.",
+        "paint",
+        "paint_3d_blockout_delete",
+        params_schema=schema_object(
+            {
+                "primitive_id": {"type": "string"},
+                "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
+                "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
+            },
+            required=("primitive_id",),
+        ),
+        undo_label="Delete Painter 3D blockout primitive",
+        dry_summary="Painter 3D blockout primitive would be deleted",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.duplicate",
+        "Duplicate a Painter 3D blockout primitive for fast box-based scene construction.",
+        "paint",
+        "paint_3d_blockout_duplicate",
+        params_schema=schema_object(
+            {
+                "primitive_id": {"type": "string"},
+                "offset_x": {"type": "number"},
+                "offset_y": {"type": "number"},
+                "offset_z": {"type": "number"},
+                "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
+                "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
+            },
+            required=("primitive_id",),
+        ),
+        undo_label="Duplicate Painter 3D blockout primitive",
+        dry_summary="Painter 3D blockout primitive would be duplicated",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.align_ground",
+        "Align a Painter 3D blockout primitive to the ground plane.",
+        "paint",
+        "paint_3d_blockout_align_ground",
+        params_schema=schema_object(
+            {
+                "primitive_id": {"type": "string"},
+                "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
+                "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
+            },
+            required=("primitive_id",),
+        ),
+        undo_label="Align Painter 3D blockout primitive to ground",
+        dry_summary="Painter 3D blockout primitive would be aligned to ground",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.snap",
+        "Enable/disable blockout grid snapping or snap a selected primitive to the current grid.",
+        "paint",
+        "paint_3d_blockout_snap",
+        params_schema=schema_object(
+            {
+                "enabled": {"type": "boolean"},
+                "primitive_id": {"type": "string"},
+                "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
+                "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
+            }
+        ),
+        undo_label="Set Painter 3D blockout snap",
+        dry_summary="Painter 3D blockout snap would be changed",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.camera",
+        "Adjust the Painter 3D blockout camera orbit, pan, zoom distance, or FOV.",
+        "paint",
+        "paint_3d_blockout_camera",
+        params_schema=schema_object(
+            {
+                "yaw_degrees": {"type": "number"},
+                "pitch_degrees": {"type": "number"},
+                "distance": {"type": "number", "minimum": 0.25},
+                "target_x": {"type": "number"},
+                "target_y": {"type": "number"},
+                "target_z": {"type": "number"},
+                "fov_degrees": {"type": "number", "minimum": 15.0, "maximum": 90.0},
+                "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
+                "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
+            }
+        ),
+        undo_label="Adjust Painter 3D blockout camera",
+        dry_summary="Painter 3D blockout camera would be adjusted",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.camera_preset",
+        "Apply a Painter 3D blockout camera preset such as front, side, top, or perspective.",
+        "paint",
+        "paint_3d_blockout_camera_preset",
+        params_schema=schema_object(
+            {
+                "preset": {"type": "string", "enum": ["front", "side", "top", "perspective"]},
+                "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
+                "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
+            },
+            required=("preset",),
+        ),
+        undo_label="Apply Painter 3D blockout camera preset",
+        dry_summary="Painter 3D blockout camera preset would be applied",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.bake",
+        "Bake the current Painter 3D blockout wire guide into a new paint layer.",
+        "paint",
+        "paint_3d_blockout_bake",
+        params_schema=schema_object(
+            {
+                "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
+                "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
+            }
+        ),
+        undo_label="Bake Painter 3D blockout",
+        dry_summary="Painter 3D blockout guide would be baked into a paint layer",
+    )
     registry.register_adapter_action(
         "paint.export_png",
         "Export the current Paint overlays as a PNG from the editor window.",
@@ -691,8 +978,22 @@ def register_paint_actions(registry: Any) -> None:
             "normal_strength": {"type": "number", "minimum": 0.0, "maximum": 12.0},
             "normal_radius_px": {"type": "number", "minimum": 0.0, "maximum": 24.0},
             "normal_format": {"type": "string", "enum": ["unreal_directx", "directx", "opengl"]},
+            "normal_filter": {"type": "string", "enum": ["sobel", "central_difference"]},
+            "height_invert": {"type": "boolean"},
+            "height_contrast": {"type": "number", "minimum": 0.1, "maximum": 4.0},
+            "height_blur_px": {"type": "number", "minimum": 0.0, "maximum": 8.0},
+            "edge_aware_smoothing": {"type": "boolean"},
+            "edge_aware_sensitivity": {"type": "number", "minimum": 0.0, "maximum": 32.0},
             "ao_strength": {"type": "number", "minimum": 0.0, "maximum": 3.0},
             "ao_radius_px": {"type": "number", "minimum": 0.0, "maximum": 64.0},
+            "ao_algorithm": {"type": "string", "enum": ["heightfield_horizon", "legacy_blur"]},
+            "ao_samples": {"type": "integer", "minimum": 4, "maximum": 32},
+            "ao_steps": {"type": "integer", "minimum": 2, "maximum": 24},
+            "ao_height_scale": {"type": "number", "minimum": 0.1, "maximum": 64.0},
+            "ao_multiscale": {"type": "boolean"},
+            "cavity_strength": {"type": "number", "minimum": 0.0, "maximum": 2.0},
+            "cavity_radius_px": {"type": "number", "minimum": 0.2, "maximum": 32.0},
+            "curvature_strength": {"type": "number", "minimum": 0.0, "maximum": 8.0},
             "roughness_bias": {"type": "number", "minimum": 0.0, "maximum": 1.0},
             "roughness_detail": {"type": "number", "minimum": 0.0, "maximum": 1.0},
             "metallic_value": {"type": "number", "minimum": 0.0, "maximum": 1.0},
@@ -718,13 +1019,19 @@ def register_paint_actions(registry: Any) -> None:
                         "metallic",
                         "height",
                         "cavity",
+                        "curvature",
                         "unreal_orm",
                         "arm",
                         "gltf_mr",
                     ],
                 },
+                "preview_shape": {"type": "string", "enum": ["plane", "sphere"]},
                 "width": {"type": "integer", "minimum": 64, "maximum": 8192},
                 "settings": pbr_settings,
+                "allow_cpu": {
+                    "type": "boolean",
+                    "description": "Diagnostic only. Product Painter PBR preview defaults to GPU-required mode.",
+                },
             }
         ),
         mutating=False,
@@ -746,12 +1053,34 @@ def register_paint_actions(registry: Any) -> None:
                     "items": {"type": "string", "enum": ["unreal_orm", "orm", "arm", "rma", "gltf_mr"]},
                 },
                 "packed": {"type": "boolean"},
+                "allow_cpu": {
+                    "type": "boolean",
+                    "description": "Diagnostic only. Product Painter PBR export defaults to GPU-required mode.",
+                },
             }
         ),
         mutating=True,
         changed=True,
         undo_label="Export Painter PBR maps",
         dry_summary="Painter PBR maps would be exported",
+    )
+    registry.register_adapter_action(
+        "paint.pbr.backend_status",
+        "Report Painter PBR Texture Lab CPU/GPU backend availability and selected backend.",
+        "paint",
+        "paint_pbr_backend_status",
+        params_schema=schema_object(
+            {
+                "backend": {"type": "string", "enum": ["auto", "cpu", "torch_cuda", "cupy", "opencv_cuda"]},
+                "allow_cpu": {
+                    "type": "boolean",
+                    "description": "Diagnostic only. Product Painter PBR backend selection defaults to GPU-required mode.",
+                },
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter PBR Texture Lab backend status would be reported",
     )
     registry.register_adapter_action(
         "paint.pbr.substrate_plan",

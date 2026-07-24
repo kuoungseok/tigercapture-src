@@ -402,9 +402,85 @@ class PaintAdapterMixin:
         dialog._set_tool(aliases.get(tool_name, "select"))
         return dialog.painter_action_state()
 
+    def paint_brush_set(
+        self,
+        *,
+        preset: str = "",
+        style: str = "",
+        width: int | None = None,
+        opacity: int | None = None,
+        hardness: int | None = None,
+        spacing: int | None = None,
+        angle: int | None = None,
+        roundness: int | None = None,
+        flip_x: bool | None = None,
+        flip_y: bool | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.drawing import BRUSH_LIBRARY_PRESETS, _normalize_paint_brush_style
+
+        preset_key = str(preset or "").strip().casefold().replace("-", "_").replace(" ", "_")
+        if preset_key:
+            for row in BRUSH_LIBRARY_PRESETS:
+                name_key = str(row.get("name") or "").strip().casefold().replace("-", "_").replace(" ", "_")
+                style_key = str(row.get("style") or "").strip().casefold().replace("-", "_").replace(" ", "_")
+                if preset_key in {name_key, style_key}:
+                    dialog._apply_brush_library_preset(row)
+                    break
+            else:
+                raise ValueError("Painter brush preset not found")
+
+        if style:
+            style_id = _normalize_paint_brush_style(str(style))
+            dialog._pen_style = style_id
+            if hasattr(dialog, "canvas"):
+                dialog.canvas.set_pen_style(style_id)
+            if hasattr(dialog, "brush_style_combo"):
+                index = dialog.brush_style_combo.findData(style_id)
+                if index >= 0:
+                    dialog.brush_style_combo.setCurrentIndex(index)
+        if width is not None:
+            value = max(1, min(60, int(width or 1)))
+            if hasattr(dialog, "width_slider"):
+                dialog.width_slider.setValue(value)
+            else:
+                dialog._pen_width = float(value)
+                if hasattr(dialog, "canvas"):
+                    dialog.canvas.set_pen_width(dialog._pen_width)
+        if opacity is not None:
+            value = max(10, min(100, int(opacity or 100)))
+            if hasattr(dialog, "opacity_slider"):
+                dialog.opacity_slider.setValue(value)
+            else:
+                dialog._pen_opacity = int(value * 255 / 100)
+                if hasattr(dialog, "canvas"):
+                    dialog.canvas.set_pen_opacity(dialog._pen_opacity)
+        for key, value in (
+            ("hardness", hardness),
+            ("spacing", spacing),
+            ("angle", angle),
+            ("roundness", roundness),
+        ):
+            if value is not None:
+                dialog._set_brush_detail_value(key, int(value))
+        if flip_x is not None:
+            dialog._set_brush_detail_toggle("flip_x", bool(flip_x))
+        if flip_y is not None:
+            dialog._set_brush_detail_toggle("flip_y", bool(flip_y))
+        dialog._set_tool("pen")
+        return dialog.painter_action_state()
+
     def paint_window_show_panel(self, *, panel: str = "layers") -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
-        dialog._show_painter_tab(str(panel or "layers"))
+        target = str(panel or "layers")
+        if target.strip().casefold() in {"brush", "brushes", "brush_settings"}:
+            dialog._focus_brush_panel()
+        elif target.strip().casefold() in {"reference", "references", "reference_board", "ref"}:
+            dialog._focus_reference_board_panel()
+        elif target.strip().casefold() in {"3d", "blockout", "3d_blockout"}:
+            dialog._focus_3d_blockout_panel()
+        else:
+            dialog._show_painter_tab(target)
         return dialog.painter_action_state()
 
     def paint_pbr_preview(
@@ -412,8 +488,10 @@ class PaintAdapterMixin:
         *,
         path: str = "",
         preview_mode: str = "material",
+        preview_shape: str = "plane",
         width: int = 512,
         settings: dict[str, Any] | None = None,
+        allow_cpu: bool | None = None,
     ) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         if not path:
@@ -423,8 +501,10 @@ class PaintAdapterMixin:
         return dialog.preview_pbr_map_to_path(
             path,
             preview_mode=str(preview_mode or "material"),
+            preview_shape=str(preview_shape or "plane"),
             width=int(width or 512),
             settings=dict(settings or {}),
+            allow_cpu=allow_cpu,
         )
 
     def paint_pbr_export(
@@ -435,6 +515,7 @@ class PaintAdapterMixin:
         maps: list[str] | None = None,
         packed_layouts: list[str] | None = None,
         packed: bool = True,
+        allow_cpu: bool | None = None,
     ) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         if not output_dir:
@@ -450,6 +531,7 @@ class PaintAdapterMixin:
             maps=maps,
             packed_layouts=packed_layouts,
             packed=bool(packed),
+            allow_cpu=allow_cpu,
         )
 
     def paint_pbr_substrate_plan(
@@ -462,6 +544,18 @@ class PaintAdapterMixin:
 
         merged = dialog._pbr_texture_settings_payload(dict(settings or {}))
         return substrate_export_plan(merged)
+
+    def paint_pbr_backend_status(
+        self,
+        *,
+        backend: str = "auto",
+        allow_cpu: bool | None = None,
+    ) -> dict[str, Any]:
+        self._paint_dialog_owner()
+        from app.ar_pbr.texture_map_lab import select_texture_map_backend, texture_lab_cpu_fallback_allowed
+
+        cpu_allowed = texture_lab_cpu_fallback_allowed(False) if allow_cpu is None else bool(allow_cpu)
+        return select_texture_map_backend(backend, allow_cpu=cpu_allowed)
 
     def paint_editor_objects_list(
         self,
@@ -606,6 +700,175 @@ class PaintAdapterMixin:
             "sticker_count": len(stickers),
         }
 
+    def paint_3d_blockout_state(
+        self,
+        *,
+        preview_width: int = 640,
+        preview_height: int = 360,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        scene = self._paint_3d_blockout_scene(dialog)
+        return self._paint_3d_blockout_payload(scene, preview_width=preview_width, preview_height=preview_height)
+
+    def paint_3d_blockout_add(
+        self,
+        *,
+        preview_width: int = 640,
+        preview_height: int = 360,
+        **params: Any,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_3d_blockout import add_blockout_primitive
+
+        scene = add_blockout_primitive(self._paint_3d_blockout_scene(dialog), **dict(params))
+        self._store_paint_3d_blockout_scene(dialog, scene)
+        self._register_change("Add Painter 3D blockout primitive")
+        return self._paint_3d_blockout_payload(scene, preview_width=preview_width, preview_height=preview_height)
+
+    def paint_3d_blockout_update(
+        self,
+        *,
+        primitive_id: str = "",
+        preview_width: int = 640,
+        preview_height: int = 360,
+        **params: Any,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_3d_blockout import update_blockout_primitive
+
+        scene = update_blockout_primitive(
+            self._paint_3d_blockout_scene(dialog),
+            str(primitive_id or ""),
+            **dict(params),
+        )
+        self._store_paint_3d_blockout_scene(dialog, scene)
+        self._register_change("Update Painter 3D blockout primitive")
+        return self._paint_3d_blockout_payload(scene, preview_width=preview_width, preview_height=preview_height)
+
+    def paint_3d_blockout_delete(
+        self,
+        *,
+        primitive_id: str = "",
+        preview_width: int = 640,
+        preview_height: int = 360,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_3d_blockout import delete_blockout_primitive
+
+        scene = delete_blockout_primitive(self._paint_3d_blockout_scene(dialog), str(primitive_id or ""))
+        self._store_paint_3d_blockout_scene(dialog, scene)
+        self._register_change("Delete Painter 3D blockout primitive")
+        return self._paint_3d_blockout_payload(scene, preview_width=preview_width, preview_height=preview_height)
+
+    def paint_3d_blockout_duplicate(
+        self,
+        *,
+        primitive_id: str = "",
+        offset_x: float = 0.65,
+        offset_y: float = 0.0,
+        offset_z: float = 0.25,
+        preview_width: int = 640,
+        preview_height: int = 360,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_3d_blockout import duplicate_blockout_primitive
+
+        scene = duplicate_blockout_primitive(
+            self._paint_3d_blockout_scene(dialog),
+            str(primitive_id or ""),
+            offset=(float(offset_x), float(offset_y), float(offset_z)),
+        )
+        rows = scene.to_dict().get("primitives", [])
+        if rows:
+            setattr(dialog, "_painter_3d_blockout_selected_id", str(rows[-1].get("id") or ""))
+        self._store_paint_3d_blockout_scene(dialog, scene)
+        self._register_change("Duplicate Painter 3D blockout primitive")
+        return self._paint_3d_blockout_payload(scene, preview_width=preview_width, preview_height=preview_height)
+
+    def paint_3d_blockout_align_ground(
+        self,
+        *,
+        primitive_id: str = "",
+        preview_width: int = 640,
+        preview_height: int = 360,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_3d_blockout import align_blockout_primitive_to_ground
+
+        scene = align_blockout_primitive_to_ground(self._paint_3d_blockout_scene(dialog), str(primitive_id or ""))
+        self._store_paint_3d_blockout_scene(dialog, scene)
+        self._register_change("Align Painter 3D blockout primitive to ground")
+        return self._paint_3d_blockout_payload(scene, preview_width=preview_width, preview_height=preview_height)
+
+    def paint_3d_blockout_snap(
+        self,
+        *,
+        enabled: bool | None = None,
+        primitive_id: str = "",
+        preview_width: int = 640,
+        preview_height: int = 360,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_3d_blockout import set_blockout_snap, snap_blockout_primitive_to_grid
+
+        scene = self._paint_3d_blockout_scene(dialog)
+        if enabled is not None:
+            scene = set_blockout_snap(scene, bool(enabled))
+        if str(primitive_id or "").strip():
+            scene = snap_blockout_primitive_to_grid(scene, str(primitive_id or ""))
+        self._store_paint_3d_blockout_scene(dialog, scene)
+        self._register_change("Set Painter 3D blockout snap")
+        return self._paint_3d_blockout_payload(scene, preview_width=preview_width, preview_height=preview_height)
+
+    def paint_3d_blockout_camera(
+        self,
+        *,
+        preview_width: int = 640,
+        preview_height: int = 360,
+        **params: Any,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_3d_blockout import update_blockout_camera
+
+        scene = update_blockout_camera(self._paint_3d_blockout_scene(dialog), **dict(params))
+        self._store_paint_3d_blockout_scene(dialog, scene)
+        self._register_change("Adjust Painter 3D blockout camera")
+        return self._paint_3d_blockout_payload(scene, preview_width=preview_width, preview_height=preview_height)
+
+    def paint_3d_blockout_camera_preset(
+        self,
+        *,
+        preset: str = "perspective",
+        preview_width: int = 640,
+        preview_height: int = 360,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_3d_blockout import apply_blockout_camera_preset
+
+        scene = apply_blockout_camera_preset(self._paint_3d_blockout_scene(dialog), str(preset or "perspective"))
+        self._store_paint_3d_blockout_scene(dialog, scene)
+        self._register_change("Apply Painter 3D blockout camera preset")
+        return self._paint_3d_blockout_payload(scene, preview_width=preview_width, preview_height=preview_height)
+
+    def paint_3d_blockout_bake(
+        self,
+        *,
+        preview_width: int = 640,
+        preview_height: int = 360,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        bake = getattr(dialog, "_bake_3d_blockout_to_layer", None)
+        if not callable(bake):
+            raise RuntimeError("Active Painter dialog does not support 3D blockout baking")
+        report = bake()
+        if not report:
+            raise ValueError("No Painter 3D blockout guide edges are available to bake")
+        self._register_change("Bake Painter 3D blockout")
+        scene = self._paint_3d_blockout_scene(dialog)
+        payload = self._paint_3d_blockout_payload(scene, preview_width=preview_width, preview_height=preview_height)
+        payload["bake"] = report
+        return payload
+
     def paint_export_png(
         self,
         *,
@@ -649,6 +912,58 @@ class PaintAdapterMixin:
             stroke_width_scale=stroke_width_scale,
         )
         return report
+
+    def _paint_3d_blockout_scene(self, dialog: Any):
+        from app.painter_3d_blockout import blockout_scene_from_dict
+
+        return blockout_scene_from_dict(getattr(dialog, "_painter_3d_blockout_scene", None))
+
+    def _store_paint_3d_blockout_scene(self, dialog: Any, scene: Any) -> None:
+        setattr(dialog, "_painter_3d_blockout_scene", scene.to_dict())
+        refresh = getattr(dialog, "_refresh_3d_blockout_panel", None)
+        if callable(refresh):
+            try:
+                refresh()
+            except Exception:
+                pass
+        update = getattr(dialog, "update", None)
+        if callable(update):
+            try:
+                update()
+            except Exception:
+                pass
+
+    def _paint_3d_blockout_payload(
+        self,
+        scene: Any,
+        *,
+        preview_width: int = 640,
+        preview_height: int = 360,
+    ) -> dict[str, Any]:
+        from app.painter_3d_blockout import project_blockout_scene
+
+        projection = project_blockout_scene(scene, int(preview_width or 640), int(preview_height or 360))
+        return {
+            "schema": "tigerstudio.actions.paint.3d_blockout.v1",
+            "scene": scene.to_dict(),
+            "projection": projection,
+            "gpu_contract": {
+                "future_gpu_preview": True,
+                "payload_is_serializable": True,
+                "qt_preview_is_reference_only": True,
+            },
+            "ui_guardrails": {
+                "preserve_texture_lab_entry_points": True,
+                "layers_channels_paths_remain_primary_dock": True,
+                "blockout_is_optional_painter_doorway": True,
+            },
+            "gizmo_contract": {
+                "standard_3d_gizmo": True,
+                "object_modes": ["move", "rotate", "scale"],
+                "camera_modes": ["orbit", "pan", "zoom_distance", "fov"],
+                "primitive_scope": ["box", "arch"],
+            },
+        }
 
     def _paint_dialog_owner(self) -> Any:
         owner = self._require_owner()
@@ -774,6 +1089,154 @@ class PaintAdapterMixin:
             "width_norm": float(getattr(obj, "width_norm", 0.0) or 0.0),
             "height_norm": float(getattr(obj, "height_norm", 0.0) or 0.0),
             "payload": dict(getattr(obj, "payload", {}) or {}),
+        }
+
+    def _paint_reference_board(self, dialog: Any):
+        from app.painter_reference_board import reference_board_from_dict
+
+        return reference_board_from_dict(getattr(dialog, "_painter_reference_board", None))
+
+    def _store_paint_reference_board(self, dialog: Any, board: Any) -> None:
+        setattr(dialog, "_painter_reference_board", board.to_dict())
+        refresh = getattr(dialog, "_refresh_reference_board_panel", None)
+        if callable(refresh):
+            try:
+                refresh()
+            except Exception:
+                pass
+        update = getattr(dialog, "update", None)
+        if callable(update):
+            try:
+                update()
+            except Exception:
+                pass
+
+    def _paint_reference_payload(self, dialog: Any) -> dict[str, Any]:
+        board = self._paint_reference_board(dialog)
+        selected = str(getattr(dialog, "_painter_reference_selected_id", "") or "")
+        return {
+            "schema": "tigerstudio.actions.paint.reference_board.v1",
+            "board": board.to_dict(),
+            "selected_reference_id": selected,
+            "ui_contract": {
+                "non_destructive_reference_overlay": True,
+                "exported_by_default": False,
+                "requires_explicit_bake": True,
+                "layers_channels_paths_remain_primary_dock": True,
+            },
+        }
+
+    def paint_reference_state(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        return self._paint_reference_payload(dialog)
+
+    def paint_reference_add(
+        self,
+        *,
+        path: str = "",
+        name: str = "",
+        x_norm: float = 0.04,
+        y_norm: float = 0.04,
+        width_norm: float = 0.34,
+        height_norm: float = 0.34,
+        opacity: float = 0.58,
+        visible: bool = True,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_reference_board import add_reference_image
+
+        board = add_reference_image(
+            self._paint_reference_board(dialog),
+            path=str(path or ""),
+            name=str(name or ""),
+            x_norm=float(x_norm),
+            y_norm=float(y_norm),
+            width_norm=float(width_norm),
+            height_norm=float(height_norm),
+            opacity=float(opacity),
+            visible=bool(visible),
+        )
+        rows = board.to_dict().get("references", [])
+        if rows:
+            setattr(dialog, "_painter_reference_selected_id", str(rows[-1].get("id") or ""))
+        self._store_paint_reference_board(dialog, board)
+        return self._paint_reference_payload(dialog)
+
+    def paint_reference_update(
+        self,
+        *,
+        reference_id: str = "",
+        name: str | None = None,
+        x_norm: float | None = None,
+        y_norm: float | None = None,
+        width_norm: float | None = None,
+        height_norm: float | None = None,
+        opacity: float | None = None,
+        visible: bool | None = None,
+        locked: bool | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        target = str(reference_id or getattr(dialog, "_painter_reference_selected_id", "") or "")
+        from app.painter_reference_board import update_reference_image
+
+        board = update_reference_image(
+            self._paint_reference_board(dialog),
+            target,
+            name=name,
+            x_norm=x_norm,
+            y_norm=y_norm,
+            width_norm=width_norm,
+            height_norm=height_norm,
+            opacity=opacity,
+            visible=visible,
+            locked=locked,
+        )
+        setattr(dialog, "_painter_reference_selected_id", target)
+        self._store_paint_reference_board(dialog, board)
+        return self._paint_reference_payload(dialog)
+
+    def paint_reference_delete(self, *, reference_id: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        target = str(reference_id or getattr(dialog, "_painter_reference_selected_id", "") or "")
+        from app.painter_reference_board import delete_reference_image
+
+        board = delete_reference_image(self._paint_reference_board(dialog), target)
+        rows = board.to_dict().get("references", [])
+        setattr(dialog, "_painter_reference_selected_id", str(rows[-1].get("id") or "") if rows else "")
+        self._store_paint_reference_board(dialog, board)
+        return self._paint_reference_payload(dialog)
+
+    def paint_reference_duplicate(
+        self,
+        *,
+        reference_id: str = "",
+        offset_x: float = 0.04,
+        offset_y: float = 0.04,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        target = str(reference_id or getattr(dialog, "_painter_reference_selected_id", "") or "")
+        from app.painter_reference_board import duplicate_reference_image
+
+        board = duplicate_reference_image(
+            self._paint_reference_board(dialog),
+            target,
+            offset_x=float(offset_x),
+            offset_y=float(offset_y),
+        )
+        rows = board.to_dict().get("references", [])
+        if rows:
+            setattr(dialog, "_painter_reference_selected_id", str(rows[-1].get("id") or ""))
+        self._store_paint_reference_board(dialog, board)
+        return self._paint_reference_payload(dialog)
+
+    def paint_reference_bake(self, *, reference_id: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if reference_id:
+            setattr(dialog, "_painter_reference_selected_id", str(reference_id))
+        bake = dialog._bake_selected_reference_to_sticker()
+        return {
+            **self._paint_reference_payload(dialog),
+            "bake": dict(bake or {}),
         }
 
 

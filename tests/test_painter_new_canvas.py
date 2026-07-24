@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+from pathlib import Path
 
 
 def _app():
@@ -52,7 +53,7 @@ def test_new_canvas_dialog_reports_template_and_custom_size() -> None:
 
 def test_standalone_painter_hides_video_annotation_tools() -> None:
     app = _app()
-    from app.drawing import PaintDialog, create_blank_paint_pixmap
+    from app.drawing import BRUSH_LIBRARY_PRESETS, PaintDialog, create_blank_paint_pixmap
 
     dialog = PaintDialog(
         background_pixmap=create_blank_paint_pixmap(640, 360, "#FFFFFF"),
@@ -72,9 +73,43 @@ def test_standalone_painter_hides_video_annotation_tools() -> None:
     dialog.close()
 
 
+def test_standalone_painter_initial_size_respects_available_screen(monkeypatch) -> None:
+    _app()
+    from PySide6.QtCore import QRect
+
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    monkeypatch.setattr(
+        PaintDialog,
+        "_available_painter_geometry",
+        lambda self, parent=None: QRect(0, 0, 800, 600),
+    )
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(640, 360, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+
+    assert dialog.width() <= 752
+    assert dialog.height() <= 536
+    assert dialog.minimumWidth() <= 752
+    assert dialog.minimumHeight() <= 536
+    dialog.move(2000, 2000)
+    dialog._fit_painter_window_to_screen()
+    assert dialog.x() + dialog.width() <= 800
+    assert dialog.y() + dialog.height() <= 600
+
+    dialog.close()
+
+
 def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     app = _app()
-    from app.drawing import PaintDialog, create_blank_paint_pixmap
+    from PySide6.QtCore import Qt
+    from PySide6.QtWidgets import QListView, QListWidget
+
+    from app.drawing import BRUSH_LIBRARY_PRESETS, PaintDialog, create_blank_paint_pixmap
     from app.i18n import tr
 
     dialog = PaintDialog(
@@ -86,10 +121,19 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     dialog.show()
     dialog.resize(1100, 640)
     app.processEvents()
+    app.processEvents()
 
     assert dialog.isSizeGripEnabled()
+    assert getattr(dialog, "_dialog_buttons", None) is None
     assert dialog.minimumWidth() <= 760
     assert dialog._tool_rail.width() <= 56
+    assert dialog._tool_rail.width() >= 44
+    assert dialog.tool_collapse_btn.toolTip() == "Collapse toolbar"
+    assert dialog.tool_close_btn.toolTip() == "Close toolbar"
+    assert dialog._tool_button_host.isVisible()
+    assert dialog._tool_swatch_panel.isVisible()
+    assert dialog.foreground_swatch_btn.toolTip().startswith("Foreground color")
+    assert dialog.background_swatch_btn.toolTip().startswith("Background color")
     assert dialog.select_btn.text() == ""
     assert dialog.select_btn.toolTip() == "Select / Move"
     assert dialog.pan_btn.text() == ""
@@ -103,7 +147,7 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog.crop_btn.text() == ""
     assert dialog.crop_btn.toolTip() == "Crop"
     assert dialog.pen_btn.text() == ""
-    assert dialog.pen_btn.toolTip()
+    assert "Hold" in dialog.pen_btn.toolTip()
     assert dialog.eraser_btn.text() == ""
     assert dialog.eraser_btn.toolTip()
     assert not dialog.select_btn.icon().isNull()
@@ -117,56 +161,248 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert not dialog.pen_btn.icon().isNull()
     assert not dialog.eraser_btn.icon().isNull()
     assert not dialog.path_btn.icon().isNull()
-    assert dialog.brush_library_list.parent() is not dialog._tool_rail
-    assert dialog.brush_library_list.item(0).text() == ""
-    assert not dialog.brush_library_list.item(0).icon().isNull()
+    assert dialog.fill_tool_btn.text() == ""
+    assert dialog.fill_tool_btn.toolTip() == "Paint Bucket / Fill"
+    assert not dialog.fill_tool_btn.icon().isNull()
+    assert dialog.zoom_fit_rail_btn.text() == ""
+    assert dialog.zoom_fit_rail_btn.toolTip() == "Fit canvas"
+    assert not dialog.zoom_fit_rail_btn.icon().isNull()
+    assert dialog.quick_mask_rail_btn.text() == ""
+    assert dialog.quick_mask_rail_btn.toolTip() == "Quick Mask"
+    assert not dialog.quick_mask_rail_btn.icon().isNull()
+    dialog._set_tool_rail_collapsed(True)
+    app.processEvents()
+    assert dialog._tool_rail.width() <= 34
+    assert dialog._tool_button_host.isVisible() is False
+    assert dialog._tool_swatch_panel.isVisible() is False
+    assert dialog.tool_close_btn.isVisible() is False
+    assert dialog.tool_collapse_btn.toolTip() == "Expand toolbar"
+    dialog._set_tool_rail_collapsed(False)
+    app.processEvents()
+    assert dialog._tool_rail.width() >= 44
+    assert dialog._tool_button_host.isVisible()
+    assert dialog._tool_swatch_panel.isVisible()
+    dialog._swap_painter_foreground_background()
+    app.processEvents()
+    assert dialog.foreground_swatch_btn.toolTip().startswith("Foreground color")
+    assert hasattr(dialog, "brush_library_list")
+    assert dialog.brush_library_list.viewMode() == QListView.ViewMode.IconMode
+    assert dialog.brush_library_list.count() == len(BRUSH_LIBRARY_PRESETS)
+    assert dialog._paint_brush_detail_panel.parent() is dialog._paint_inspector_controls
+    assert dialog._brush_detail_category_buttons["Brush Tip Shape"].isChecked()
+    assert dialog._brush_detail_category_buttons["Smoothing"].isChecked()
+    assert dialog.brush_style_combo.findData("real_wet_oil") >= 0
+    assert dialog.width_slider.value() == int(dialog._pen_width)
+    assert dialog.brush_hardness_slider.value() == 100
+    assert dialog.brush_spacing_slider.value() == 25
+    assert dialog.brush_roundness_slider.value() == 100
+    assert dialog._brush_detail_preview.pixmap() is not None
+    assert not dialog._brush_detail_preview.pixmap().isNull()
+    brush_styles = {str(row["style"]) for row in BRUSH_LIBRARY_PRESETS}
+    assert {
+        "loaded_oil",
+        "impasto_oil",
+        "oil_smear",
+        "soft_oil_glaze",
+        "real_wet_oil",
+        "bristle_oil",
+        "dry_oil",
+        "palette_knife",
+        "textured_chalk",
+    } <= brush_styles
+    brush_menu = dialog._build_brush_button_menu()
+    brush_popup_list = brush_menu.findChild(QListWidget, "PaintBrushPopupList")
+    assert brush_popup_list is not None
+    assert brush_popup_list.viewMode() == QListView.ViewMode.IconMode
+    assert brush_popup_list.count() == len(BRUSH_LIBRARY_PRESETS)
+    assert brush_popup_list.item(0).text() == ""
+    assert BRUSH_LIBRARY_PRESETS[0]["name"] in brush_popup_list.item(0).toolTip()
+    assert not brush_popup_list.item(0).icon().isNull()
+    brush_popup_list.itemClicked.emit(brush_popup_list.item(0))
+    app.processEvents()
+    assert dialog.pen_btn.isChecked()
+    assert int(dialog._pen_width) == BRUSH_LIBRARY_PRESETS[0]["width"]
+    assert dialog.canvas._pen_style == BRUSH_LIBRARY_PRESETS[0]["style"]
+    assert dialog._pen_opacity == int(BRUSH_LIBRARY_PRESETS[0]["opacity"] * 255 / 100)
+    assert "Brush:" in dialog._tool_status_label.text()
     assert dialog.selection_aspect_combo.parent() is dialog._paint_inspector_controls
     assert dialog.crop_apply_btn.parent() is dialog._paint_inspector_controls
     assert dialog.quick_mask_btn.parent() is dialog._paint_inspector_controls
     assert dialog.grid_view_btn.parent() is dialog._paint_inspector_controls
     assert dialog.snap_grid_btn.parent() is dialog._paint_inspector_controls
     assert dialog.magic_tolerance_slider.parent() is dialog._paint_inspector_controls
-    assert dialog.toggle_channel_visibility_btn.toolTip()
-    assert dialog._layer_channel_path_tabs.count() == 5
+    assert not hasattr(dialog, "toggle_channel_visibility_btn")
+    assert dialog._layer_channel_path_tabs.count() == 3
     assert [
         dialog._layer_channel_path_tabs.tabText(i)
         for i in range(dialog._layer_channel_path_tabs.count())
-    ] == [tr("paint.tab.layers"), tr("paint.tab.channels"), tr("paint.tab.paths"), "History", "PBR Maps"]
+    ] == [tr("paint.tab.layers"), tr("paint.tab.channels"), tr("paint.tab.paths")]
+    assert not hasattr(dialog, "_paint_panel_tab_buttons")
+    assert dialog._layer_channel_path_tabs.tabBar().isVisible()
+    assert dialog._layer_channel_path_tabs.tabBar().usesScrollButtons() is False
+    assert dialog._paint_layer_dock_panel.minimumHeight() >= 340
+    assert dialog._layer_channel_path_tabs.minimumHeight() >= 280
+    assert dialog._layer_list.minimumHeight() >= 126
+    assert dialog._channel_list.minimumHeight() >= 150
+    assert dialog._path_list.minimumHeight() >= 170
+    assert dialog._layer_filter_icon_strip.isHidden()
+    dialog._show_painter_tab("paths")
+    app.processEvents()
+    assert dialog._layer_channel_path_tabs.currentIndex() == 2
     menu_labels = [
         action.text().replace("&", "")
         for action in dialog._painter_menu_bar.actions()
     ]
-    assert menu_labels == ["File", "Edit", "View", "Image", "Layer", "Select", "Path", "Window"]
+    assert menu_labels == ["File", "Edit", "View", "Brush", "Image", "Layer", "Select", "Path", "Window"]
+    assert "Brush Settings" in [
+        action.text().replace("&", "")
+        for action in dialog._painter_brush_menu.actions()
+    ]
+    assert "PBR Texture Lab..." in [
+        action.text().replace("&", "")
+        for action in dialog._painter_image_menu.actions()
+    ]
+    assert "Export PBR Maps..." in [
+        action.text().replace("&", "")
+        for action in dialog._painter_image_menu.actions()
+    ]
+    assert "PBR Texture Lab..." in [
+        action.text().replace("&", "")
+        for action in dialog._painter_window_menu.actions()
+    ]
+    assert "Brush" in [
+        action.text().replace("&", "")
+        for action in dialog._painter_window_menu.actions()
+    ]
     assert dialog.layer_filter_combo.currentText() == tr("paint.layer.filter_kind")
+    assert len(dialog._layer_filter_tiny_buttons) == 6
+    assert all(not btn.isVisible() for btn in dialog._layer_filter_tiny_buttons)
     assert dialog.layer_blend_combo.currentText() == tr("paint.layer.blend_normal")
     assert dialog._layer_opacity_value.text() == "100%"
     assert dialog._layer_fill_value.text() == "100%"
+    assert dialog._layer_fill_label.geometry().top() > dialog._layer_lock_label.geometry().bottom()
     assert not dialog._layer_lock_all_btn.isChecked()
     assert dialog._channel_list.item(0).text() == "RGB"
     assert not dialog._channel_list.item(0).icon().isNull()
-    assert dialog.pbr_preview_mode_combo.currentData() == "material"
-    assert dialog.pbr_normal_format_combo.currentData() == "unreal_directx"
-    assert dialog.pbr_preview_label.minimumHeight() >= 130
-    assert dialog.color_wheel.width() <= 112
+    assert "eye icon" in dialog._channel_list.item(0).toolTip()
+    assert not (dialog._channel_list.item(0).flags() & Qt.ItemFlag.ItemIsUserCheckable)
+    assert not hasattr(dialog, "pbr_preview_mode_combo")
+    assert not hasattr(dialog, "pbr_normal_format_combo")
+    assert not hasattr(dialog, "pbr_preview_label")
+    assert dialog.color_wheel.width() == 176
+    assert dialog.color_wheel.height() == 176
+    assert dialog.color_wheel.geometry().bottom() < dialog._paint_mixer_label.geometry().top()
     assert dialog._color_preview.width() <= 48
+    assert dialog._paint_mixer_label.text() == "Mixer"
     assert dialog._recent_color_btns[0].width() <= 32
-    assert dialog._palette_btns[0].width() <= 38
+    assert dialog._paint_harmony_label.text() == "Shades"
+    assert len(dialog._palette_btns) == 8
+    assert dialog._palette_btns[0].width() <= 30
+    assert "shade" in dialog._palette_btns[0].toolTip().lower()
     scroll = dialog._paint_inspector_controls_scroll
-    assert dialog._layer_channel_path_tabs.geometry().bottom() < scroll.geometry().top()
+    assert dialog._layer_channel_path_tabs.parent() is dialog._paint_layer_dock_panel
+    assert dialog._paint_layer_dock_panel.height() >= 300
+    color_bottom = dialog._paint_color_panel.mapToGlobal(
+        dialog._paint_color_panel.rect().bottomLeft()
+    ).y()
+    layer_top = dialog._paint_layer_dock_panel.mapToGlobal(
+        dialog._paint_layer_dock_panel.rect().topLeft()
+    ).y()
+    assert color_bottom < layer_top or scroll.verticalScrollBar().isVisible()
+    bar = scroll.verticalScrollBar()
+    assert bar.value() >= dialog._paint_color_section_title.y() - 2
+    visible_bottom = bar.value() + scroll.viewport().height()
+    wheel_bottom = (
+        dialog._paint_color_panel.y()
+        + dialog.color_wheel.y()
+        + dialog.color_wheel.height()
+    )
+    assert wheel_bottom <= visible_bottom
     margins = dialog._paint_inspector_controls.layout().contentsMargins()
     assert margins.right() >= 12
-    bar = scroll.verticalScrollBar()
     if bar.isVisible():
         color_right = dialog._paint_color_panel.mapToGlobal(
             dialog._paint_color_panel.rect().topRight()
         ).x()
         bar_left = bar.mapToGlobal(bar.rect().topLeft()).x()
         assert color_right < bar_left
+    dialog.resize(760, 560)
+    app.processEvents()
+    dialog._sync_color_panel_layout()
+    assert 140 <= dialog.color_wheel.width() <= 176
+    assert dialog.color_wheel.geometry().bottom() < dialog._paint_mixer_label.geometry().top()
+    assert dialog._paint_color_panel.minimumHeight() >= dialog.color_wheel.height() + 210
 
     dialog.close()
 
 
-def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeypatch) -> None:
+def test_painter_oil_brush_renders_textured_preview_and_export(tmp_path: Path) -> None:
+    _app()
+    from PySide6.QtGui import QImage, QPainter
+
+    from app.drawing import (
+        DrawingCanvas,
+        Stroke,
+        compose_pil_frame_with_overlays,
+        render_strokes_to_png,
+    )
+
+    stroke = Stroke(
+        points=[
+            (0.08, 0.72),
+            (0.24, 0.28),
+            (0.44, 0.62),
+            (0.64, 0.22),
+            (0.88, 0.38),
+        ],
+        color=(230, 78, 32),
+        opacity=230,
+        width_px=30,
+        brush_style="impasto_oil",
+    )
+
+    preview = QImage(320, 180, QImage.Format.Format_ARGB32)
+    preview.fill(0)
+    painter = QPainter(preview)
+    try:
+        DrawingCanvas._paint_stroke(painter, stroke, 320, 180)
+    finally:
+        painter.end()
+
+    preview_colors = set()
+    preview_alpha_pixels = 0
+    for y in range(0, preview.height(), 2):
+        for x in range(0, preview.width(), 2):
+            color = preview.pixelColor(x, y)
+            if color.alpha() <= 0:
+                continue
+            preview_alpha_pixels += 1
+            preview_colors.add((color.red(), color.green(), color.blue(), color.alpha()))
+    assert preview_alpha_pixels > 180
+    assert len(preview_colors) > 14
+
+    out_path = tmp_path / "wet_oil.png"
+    assert render_strokes_to_png([stroke], 320, 180, str(out_path))
+    exported = QImage(str(out_path))
+    assert not exported.isNull()
+    assert any(
+        exported.pixelColor(x, y).alpha() > 0
+        for y in range(0, exported.height(), 3)
+        for x in range(0, exported.width(), 3)
+    )
+
+    from PIL import Image
+
+    pil = compose_pil_frame_with_overlays(
+        frame=Image.new("RGBA", (320, 180), (0, 0, 0, 0)),
+        strokes=[stroke],
+        subtitles=[],
+        time_ms=0,
+    )
+    assert pil.getbbox() is not None
+
+
+def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeypatch, tmp_path) -> None:
     app = _app()
     from PySide6.QtCore import QPoint, QPointF, Qt
     from PySide6.QtWidgets import QApplication, QInputDialog
@@ -218,6 +454,16 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeyp
     assert dialog._canvas_pan != QPoint(0, 0)
     dialog._zoom_fit()
     assert dialog._canvas_pan == QPoint(0, 0)
+    dialog._set_zoom_percent(800)
+    app.processEvents()
+    pixel_grid = dialog.canvas.pixel_grid_state()
+    assert pixel_grid["visible"] is True
+    assert pixel_grid["stride_x"] >= 1
+    assert pixel_grid["cell_width_px"] > 0
+    state = dialog.painter_action_state()
+    assert state["view"]["zoom_percent"] == 800
+    assert state["view"]["pixel_grid_visible"] is True
+    dialog._zoom_fit()
 
     dialog._new_paint_layer()
     active_layer_id = dialog._active_paint_layer_id
@@ -256,6 +502,7 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeyp
     dialog._copy_selected_layer()
     clipboard_mime = QApplication.clipboard().mimeData()
     assert clipboard_mime.hasFormat(PAINT_CLIPBOARD_MIME)
+    assert clipboard_mime.hasImage()
     dialog._paint_clipboard = None
     layers_before_paste = len(dialog._paint_layers)
     strokes_before_paste = len(dialog.canvas.embedded_strokes())
@@ -263,6 +510,45 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeyp
     app.processEvents()
     assert len(dialog._paint_layers) == layers_before_paste + 1
     assert len(dialog.canvas.embedded_strokes()) == strokes_before_paste + 1
+    QApplication.clipboard().clear()
+
+    from PySide6.QtGui import QColor, QImage
+    import app.drawing as drawing_module
+
+    clipboard_dir = tmp_path / "paint_clipboard"
+    monkeypatch.setattr(drawing_module, "PAINT_CLIPBOARD_IMAGE_DIR", clipboard_dir)
+    image = QImage(80, 40, QImage.Format.Format_ARGB32)
+    image.fill(QColor("#34c8ff"))
+    QApplication.clipboard().setImage(image)
+    paste_action = next(
+        action
+        for action in dialog._build_canvas_context_menu().actions()
+        if action.text() == "Paste"
+    )
+    assert paste_action.isEnabled()
+    stickers_before_paste = len(dialog.result_stickers())
+    dialog._paste_layer_clipboard()
+    app.processEvents()
+    assert len(dialog.result_stickers()) == stickers_before_paste + 1
+    pasted_sticker = dialog.result_stickers()[-1]
+    assert Path(pasted_sticker.png_path).exists()
+    assert pasted_sticker.width_norm > 0
+    assert pasted_sticker.height_norm > 0
+    assert dialog._selected_layer_id == f"sticker:{len(dialog.result_stickers()) - 1}"
+
+    dialog._copy_selected_layer()
+    sticker_copy_mime = QApplication.clipboard().mimeData()
+    assert sticker_copy_mime.hasFormat(PAINT_CLIPBOARD_MIME)
+    assert sticker_copy_mime.hasImage()
+
+    stickers_before_cut = len(dialog.result_stickers())
+    dialog._cut_selected_layer()
+    app.processEvents()
+    assert len(dialog.result_stickers()) == stickers_before_cut - 1
+    assert QApplication.clipboard().mimeData().hasImage()
+    dialog._paste_layer_clipboard()
+    app.processEvents()
+    assert len(dialog.result_stickers()) == stickers_before_cut
     QApplication.clipboard().clear()
 
     red_item = next(
@@ -273,7 +559,7 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeyp
     dialog._select_channel_item(red_item)
     assert dialog._selected_channel == "Red"
     assert dialog._channel_visibility["Red"] is True
-    dialog._toggle_selected_channel_visibility()
+    dialog._toggle_channel_item_visibility(red_item)
     assert dialog._channel_visibility["Red"] is False
     assert dialog._channel_visibility["RGB"] is False
     assert dialog._selected_channel == "Red"
@@ -320,7 +606,7 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeyp
     assert dialog.canvas.selection_inverted() is True
     dialog._selection_to_path()
     assert dialog._path_list.count() >= 3
-    assert dialog._history_list.count() >= 2
+    assert len(dialog._undo_labels) >= 1
     dialog._select_all()
     assert dialog.canvas.selection_point_count() == 4
     assert dialog._mask_selected_layer_from_selection() is True

@@ -1,0 +1,479 @@
+# Tiger Painter Production Art Workspace Plan
+
+## Purpose
+
+Tiger Painter is a primary drawing workspace for game concept artists. It is
+not a video annotation helper. The product target is a Photoshop / Clip Studio
+Paint / Corel Painter style workspace for character, prop, background,
+environment, and texture artists.
+
+Typography, 3D, PBR, and video paint-over are supporting options. They must not
+take over the first screen or make the drawing workflow feel like the video
+editor.
+
+## User Profile
+
+- Character concept artist painting line art, values, color, and finish passes.
+- Background concept artist blocking a scene with simple 3D forms, then painting
+  over it.
+- Prop and material artist creating texture ideas, icon sheets, or PBR source
+  maps.
+- Illustrator using references, layers, masks, selections, and brush presets for
+  long drawing sessions.
+
+## Product North Star
+
+A user should be able to open Painter, create a canvas, pick a brush, arrange
+references, sketch, block values, paint details, manage layers, and optionally
+use simple 3D blockout without touching the video timeline.
+
+First impression:
+
+- Large canvas dominates.
+- Brush/color/layer surfaces are obvious.
+- Tool options are near the top and change with the active tool.
+- 3D/PBR/Typography are visible as optional workspaces, not primary content.
+
+## UX Reference Map
+
+Tiger Painter does not clone one application. Each reference owns a role:
+
+| Reference | Tiger Painter adopts | Tiger Painter rejects |
+| --- | --- | --- |
+| Photoshop | Tool rail, top tool options, Layers/Channels/Paths, masks, selections, shortcuts | Overloaded legacy dialogs and hidden mode traps |
+| Clip Studio Paint | Concept-art flow, perspective rulers, 3D reference materials, line/paint workflow | Manga-only assumptions and complex asset stores |
+| Corel Painter | Natural-media brush feel, stroke-preview expectation, oil/dry/knife media | Dense old-style panels and deep simulation before basic UX is stable |
+| Krita | Inspectable brush engine, preset resources, popup palette behavior | Making every brush parameter equally prominent |
+| Procreate | Fast canvas interaction, low-friction drawing, direct feel | Touch-only assumptions and hidden desktop controls |
+| PureRef | Reference board, pinned images, zoom/pan references | Replacing the main canvas with a board UI |
+| SketchUp | Simple box-based blockout and camera framing for artists | Full CAD or mesh-modeling depth |
+| Blender gizmo basics | Familiar move/rotate/scale manipulators | Blender-level workspace complexity |
+| Clip Studio 3D Material | 3D as draw-over reference | 3D becoming the main authoring surface |
+
+## Workspace Layout Contract
+
+Default layout:
+
+- Center: large canvas with checkerboard support, navigator framing, zoom/pan,
+  and optional pixel grid at high zoom.
+- Left: compact single-column tool rail with tool groups and long-press/right
+  click subtool popups.
+- Top: active tool options only. This area should not become a permanent
+  command strip for unrelated features.
+- Right upper: Navigator and Reference controls.
+- Right middle: Color and Brush.
+- Right lower: Layers / Channels / Paths as a dedicated pinned tab dock.
+- Optional lower or popout panels: Brush Presets, History, 3D Blockout,
+  Typography, PBR Texture Lab.
+
+Responsive behavior:
+
+- At laptop widths, panels must scroll or collapse instead of overlapping.
+- Color wheel, brush settings, and Layers/Channels/Paths must never occupy the
+  same visual space.
+- Layers / Channels / Paths are high-frequency production panels. They may
+  resize or scroll, but they must not be hidden behind optional 3D, PBR,
+  Typography, History, or helper panels in the default drawing workspace.
+- Canvas must initialize to the available screen area without requiring window
+  resize.
+- All persistent panels need a recoverable Window menu entry.
+
+## Tool Rail Contract
+
+Primary tools:
+
+- Move
+- Marquee selection
+- Lasso / polygon lasso
+- Magic wand / color select
+- Crop
+- Eyedropper
+- Brush / pencil
+- Eraser
+- Smudge / blur / sharpen group
+- Fill / gradient
+- Pen / path
+- Type
+- Shape
+- Hand / pan
+- Zoom
+- Foreground/background swatches with swap
+- Quick mask
+
+Rules:
+
+- Tool rail labels live in tooltips and accessibility names, not permanent text.
+- Unsupported tools should not appear as fake buttons.
+- Long-press/right-click subtool popups are required for brush-like and
+  selection-like groups.
+- Active tool should expose a clear selected state and update the top options.
+
+## Canvas Interaction Contract
+
+Required interactions:
+
+- `B` brush, `E` eraser, `V` move, `H` hand, `Z` zoom, `I` eyedropper.
+- `[` and `]` adjust brush size.
+- `Space + drag` pans.
+- `Ctrl + wheel` zooms.
+- `Alt + click` samples color.
+- Fit / 100% / 200% / 400% / 800% zoom targets.
+- At maximum or high zoom, show a pixel grid suitable for dot work.
+- Pixel brush mode must use nearest-neighbor display and no antialiasing.
+- Flip canvas and grayscale/value check must be one gesture away.
+
+## Brush Engine Requirements
+
+Brushes are the product core. Minimum production-art brush families:
+
+- Hard Round
+- Soft Round
+- Sketch Pencil
+- Clean Ink
+- Blocking Brush
+- Loaded Oil
+- Impasto Oil
+- Dry Brush
+- Palette Knife
+- Smudge Paint
+- Marker
+- Chalk
+- Airbrush
+- Pixel Brush
+- Hair Strand
+- Skin Soft
+- Metal Highlight
+- Cloud / Smoke
+- Rock / Ground
+- Fabric / Grunge Texture
+
+Brush parameter contract:
+
+- Size
+- Opacity
+- Flow
+- Hardness
+- Spacing
+- Angle
+- Roundness
+- Texture
+- Scatter
+- Smoothing / stabilization
+- Pressure curve
+- Optional tilt/rotation hooks
+- Wet/smudge/mixer behavior for later passes
+
+Preset UX:
+
+- Presets must show actual stroke thumbnails, not text-only rows.
+- Brush popup should be image-first with compact labels on hover.
+- The right Brush panel can expose deeper parameter tabs.
+- Selecting a preset must update the active tool, size, opacity, style, and
+  preview consistently.
+
+## Layer / Channel / Path Contract
+
+Layers:
+
+- Thumbnail
+- Rename
+- Visibility toggle
+- Lock toggle
+- Lock transparent pixels
+- Opacity and fill
+- Blend mode
+- Duplicate
+- Delete
+- Merge down
+- Flatten
+- Drag reorder
+- Group/folder plan
+- Clipping mask
+- Layer mask
+- Color label
+
+Channels:
+
+- RGB, Red, Green, Blue, Alpha rows.
+- Eye icons are toggles, not text buttons.
+- Clicking a row selects the channel only.
+- Copy/paste channel image data must work through the system clipboard.
+
+Paths:
+
+- Work Path
+- Save path
+- Delete path
+- Path to selection
+- Selection to path
+- Stroke path
+- Fill path
+- Path to layer mask
+
+Layer/Channel/Path must be a real lower-right dock, not squeezed under the color
+wheel where controls overlap.
+
+## Selection And Transform Contract
+
+Selection tools:
+
+- Rectangular marquee
+- Elliptical marquee
+- Lasso
+- Polygon lasso
+- Magic wand / similar color
+- Color range
+
+Selection operations:
+
+- Select all
+- Deselect
+- Invert
+- Feather
+- Expand / contract
+- Save selection as channel
+- Selection to mask
+- Selection to path
+
+Transform operations:
+
+- Move selection
+- Transform selection
+- Free transform
+- Rotate
+- Scale
+- Skew
+- Flip
+
+Destructive operations must have undo transactions and action dry-run/review
+support before they are exposed to AI/MCP workflows.
+
+## Reference Workflow Contract
+
+Reference features:
+
+- PureRef-like reference board.
+- Add image from file, clipboard, or media pool.
+- Pin, scale, rotate, arrange, lock, and hide references.
+- Per-reference opacity.
+- Sample color from reference.
+- Extract palette from reference.
+- Navigator thumbnail.
+- Flip canvas without modifying pixels.
+- Value check / grayscale view.
+- Silhouette check.
+- Perspective guides, ruler guides, and symmetry drawing.
+
+References are not paint layers unless explicitly imported or baked.
+
+2026-07-24 first slice:
+
+- `REFERENCE` inspector panel above optional 3D blockout.
+- Add reference images from file or clipboard.
+- Keep references as non-destructive canvas overlays; they are not exported by
+  default and do not become paint layers automatically.
+- Per-selected-reference position, size, opacity, and visibility controls.
+- Duplicate/delete and explicit bake-to-sticker for cases where the reference
+  should become exportable artwork.
+- `Window > Reference Board` and `paint.reference.state/add/update/delete/
+  duplicate/bake` action coverage.
+
+Remaining:
+
+- Media Pool add.
+- Rotation and lock UI.
+- Color sample and palette extraction.
+- Navigator thumbnail.
+- Value/silhouette check.
+- Perspective ruler and symmetry integration.
+
+## 3D Blockout Contract
+
+3D blockout exists for background and environment concept artists who block a
+room, street, building, or prop massing before painting. It is not a Blender
+replacement.
+
+Primitive set:
+
+- Box
+- Arch, only as a simple doorway/window/opening helper
+
+Boxes are the primary primitive. Artists should create floors, walls, desks,
+stairs, buildings, shelves, and prop masses by stretching, widening, rotating,
+and duplicating boxes instead of choosing many specialized primitives.
+
+Interaction:
+
+- Move / rotate / scale gizmo.
+- Grid snap.
+- Duplicate.
+- Align to ground.
+- Camera orbit / pan / zoom.
+- Camera FOV control.
+- Simple camera presets: front, side, top, perspective.
+- Horizon line and vanishing point overlays.
+
+Draw-over modes:
+
+- Solid clay value.
+- Wireframe.
+- Transparent overlay.
+- Silhouette.
+- Depth/fog guide.
+- Shadow guide.
+- Line extraction.
+- Value snapshot.
+- Bake to paint layer.
+
+Rules:
+
+- 3D blockout data stays separate from raster paint layers until baked.
+- It must be hideable without changing the painting document.
+- It must be reachable from optional panel/menu/action surfaces.
+- 3D should help composition and perspective, not dominate the drawing UI.
+- Keep the interaction closer to a standard 3D transform gizmo than to a
+  modeling package: move, rotate, scale, camera orbit/pan/zoom, and FOV only.
+
+## Typography / PBR / Video Boundary
+
+Typography:
+
+- Optional for callouts, title concepts, UI mockups, and graphic layout.
+- It must not occupy the default Painter right dock.
+
+PBR:
+
+- Optional texture artist workflow.
+- Existing Texture Lab entry points must be preserved. `PBR Texture Lab...`,
+  PBR preview/export actions, and the shared Texture Lab backend remain valid
+  doorways even while Painter is re-centered around drawing.
+- Texture Lab and material preview are separate panels or popouts.
+- Texture Lab must not displace the pinned Layers / Channels / Paths dock.
+- PBR actions may use Painter output as source, but the painting canvas stays
+  the authoring center.
+
+## GPU / Performance Direction
+
+Painter is expected to lean heavily on GPU-backed paths as the workspace grows.
+Large canvases, high-zoom pixel work, natural-media brush preview, 3D blockout,
+Texture Lab/PBR previews, material map generation, and optional video paint-over
+must be designed so CPU fallbacks are safe but not treated as the final quality
+or performance target.
+
+Rules:
+
+- New 3D/PBR/preview surfaces should define their data contract so a GPU
+  renderer can consume it without rewriting the Painter UI.
+- CPU/QPainter implementations are acceptable as first-pass visual contracts,
+  but they must not block later OpenGL/Vulkan/Rust/C++ acceleration.
+- Any feature that claims parity with export must document preview/export GPU
+  parity expectations and test coverage.
+- GPU-heavy optional panels must not make the default 2D drawing workspace slow
+  to open or use.
+
+Video:
+
+- Video paint-over is a supporting workflow.
+- The default Painter product must remain usable with no timeline or media clip.
+
+## Python Action Parity
+
+Every production Painter feature intended for AI/MCP must have action coverage.
+Use registered `paint.*` actions only; do not expose private widget methods.
+
+Required action families:
+
+- `paint.state`
+- `paint.document.*`
+- `paint.view.*`
+- `paint.tool.*`
+- `paint.brush.*`
+- `paint.layer.*`
+- `paint.channel.*`
+- `paint.path.*`
+- `paint.selection.*`
+- `paint.transform.*`
+- `paint.clipboard.*`
+- `paint.reference.*`
+- `paint.3d_blockout.*`
+- `paint.pbr.*`
+
+Action rules:
+
+- Dry-run/preview first for destructive operations.
+- Undo transaction required for mutations.
+- Stable IDs required for layers, references, paths, selections, and 3D
+  blockout items.
+- Tests must cover action schema, preview, execute, and sequence behavior.
+
+## QA Gates
+
+Minimum QA matrix before claiming production-art readiness:
+
+- Small laptop window around 760x560.
+- 1080p desktop.
+- High-DPI Windows scaling.
+- Empty canvas startup fit.
+- Heavy brush stroke performance.
+- Oil/dry/ink/pixel preset visual snapshots.
+- 800% pixel grid and pixel brush behavior.
+- Copy / cut / paste with internal payload and system image clipboard.
+- Layer visibility, lock, opacity, blend mode, duplicate, delete, merge.
+- Channel eye toggle and channel copy/paste.
+- Path to selection and selection to path.
+- Selection feather/expand/contract.
+- Transform selection and free transform.
+- Reference board add/pin/opacity/sample.
+- 3D blockout box/arch scene with wire/value/bake.
+- PNG export.
+- PSD compatibility plan or explicit limitation.
+- Action registry parity tests.
+
+## Milestones
+
+M0: Planning and claim cleanup
+
+- This document is the source of truth for Painter production-art scope.
+- SPEC/TODO should link here instead of duplicating large prose.
+
+M1: Drawing-first layout
+
+- Rebalance the Painter window around canvas, tool options, Color/Brush,
+  Navigator/Reference, and Layers/Channels/Paths.
+- Move Typography/PBR/3D into optional panels.
+
+M2: Brush UX and engine pass
+
+- Stroke-thumbnail preset library.
+- Production-art brush families.
+- Flow/hardness/spacing/angle/roundness/texture/smoothing wiring.
+
+M3: Layers, masks, selections, transforms
+
+- Layer workflow polish.
+- Selection and transform completeness.
+- Clipboard and mask reliability.
+
+M4: Reference board
+
+- PureRef-like reference placement.
+- Palette extraction, value check, flip canvas, navigator, symmetry/rulers.
+
+M5: 3D blockout
+
+- Box/arch placement, standard transform gizmo, camera/FOV controls,
+  wire/value/transparent views, bake to paint layer, action coverage.
+
+M6: Production-art QA and docs
+
+- Snapshot tests, action tests, manual QA checklist, honest readiness status.
+
+## Implementation Guardrails For Agent B
+
+- Do not add Painter feature logic to `app/video_editor_window.py`.
+- Keep code changes in focused modules where possible.
+- Preserve existing `paint.*` action IDs.
+- Add new actions only when the UI feature can also be driven by AI/MCP.
+- Keep the first implementation pass below the requested line budget.
+- Do not claim Photoshop, Clip Studio, or Corel Painter parity until QA gates
+  pass with real screenshots and action evidence.
