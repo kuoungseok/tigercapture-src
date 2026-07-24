@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from PySide6.QtCore import QPointF, Qt
+import math
+
+from PySide6.QtCore import QPointF, Qt, QTimer
 from PySide6.QtGui import QColor, QLinearGradient, QMouseEvent, QPainter, QPen, QBrush
 from PySide6.QtWidgets import QSlider, QWidget
 
@@ -21,6 +23,11 @@ class StudioSlider(QSlider):
         self._studio_slider_kind = kind
         self._studio_dragging = False
         self._studio_hovering = False
+        self._studio_led_level = 0.0
+        self._studio_led_phase = 0.0
+        self._studio_led_timer = QTimer(self)
+        self._studio_led_timer.setInterval(33)
+        self._studio_led_timer.timeout.connect(self._advance_led_animation)
         if orientation == Qt.Orientation.Horizontal:
             self.setMinimumHeight(30)
             self.setMaximumHeight(32)
@@ -64,11 +71,39 @@ class StudioSlider(QSlider):
             ratio = 1.0 - ratio
         return left + (right - left) * ratio
 
+    def _led_color(self) -> QColor:
+        colors = {
+            "audio": "#84E7B2",
+            "temperature": "#88C7FF",
+            "tint": "#D58BFF",
+            "accent": "#A8C7FF",
+            "neutral": "#D9E2EF",
+        }
+        return QColor(colors.get(self._studio_slider_kind, "#D9E2EF"))
+
+    def _wake_led(self, level: float = 1.0) -> None:
+        self._studio_led_level = max(self._studio_led_level, max(0.0, min(1.0, float(level))))
+        if not self._studio_led_timer.isActive():
+            self._studio_led_timer.start()
+        self.update()
+
+    def _advance_led_animation(self) -> None:
+        target = 1.0 if self._studio_dragging or self.isSliderDown() else 0.0
+        speed = 0.22 if target > self._studio_led_level else 0.085
+        self._studio_led_level += (target - self._studio_led_level) * speed
+        self._studio_led_phase = (self._studio_led_phase + 0.19) % math.tau
+        if target <= 0.0 and self._studio_led_level < 0.015:
+            self._studio_led_level = 0.0
+            self._studio_led_timer.stop()
+        self.update()
+
     def _set_from_mouse_x(self, x: float) -> None:
         value = max(self.minimum(), min(self.maximum(), self._value_from_x(x)))
         self.setSliderPosition(value)
         if self.hasTracking():
             self.setValue(value)
+        if self._studio_dragging:
+            self._wake_led(1.0)
         self.update()
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
@@ -80,6 +115,7 @@ class StudioSlider(QSlider):
         self.setCursor(Qt.CursorShape.ClosedHandCursor)
         self.setFocus(Qt.FocusReason.MouseFocusReason)
         self.setSliderDown(True)
+        self._wake_led(1.0)
         self._set_from_mouse_x(event.position().x())
         event.accept()
 
@@ -183,6 +219,28 @@ class StudioSlider(QSlider):
             p.setBrush(Qt.BrushStyle.NoBrush)
             p.drawEllipse(QPointF(hx, cy), 9.4, 9.4)
 
+        led_level = max(0.0, min(1.0, self._studio_led_level))
+        if led_level > 0.001:
+            pulse = 0.68 + math.sin(self._studio_led_phase) * 0.32
+            led_alpha = led_level * pulse
+            led_color = self._led_color()
+            rail_glow = QColor(led_color)
+            rail_glow.setAlpha(int(85 * led_alpha))
+            rail_glow_pen = QPen(rail_glow, 4.6)
+            rail_glow_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+            p.setPen(rail_glow_pen)
+            p.drawLine(QPointF(left, cy), QPointF(hx, cy))
+
+            p.setPen(Qt.PenStyle.NoPen)
+            glow_outer = QColor(led_color)
+            glow_outer.setAlpha(int(34 * led_alpha))
+            p.setBrush(glow_outer)
+            p.drawEllipse(QPointF(hx, cy), 16.0, 16.0)
+            glow_inner = QColor(led_color)
+            glow_inner.setAlpha(int(58 * led_alpha))
+            p.setBrush(glow_inner)
+            p.drawEllipse(QPointF(hx, cy), 10.8, 10.8)
+
         p.setPen(Qt.PenStyle.NoPen)
         p.setBrush(QColor(0, 0, 0, 115))
         p.drawEllipse(QPointF(hx, cy + 1.2), 8.8, 8.8)
@@ -194,6 +252,12 @@ class StudioSlider(QSlider):
         p.drawEllipse(QPointF(hx - 1.9, cy - 2.0), 1.9, 1.9)
         p.setBrush(QColor(35, 40, 47, 110))
         p.drawEllipse(QPointF(hx, cy), 2.7, 2.7)
+        if led_level > 0.001:
+            led_core = self._led_color()
+            led_core.setAlpha(int(135 + 95 * led_level))
+            p.setBrush(led_core)
+            p.setPen(QPen(QColor(245, 250, 255, int(90 + 80 * led_level)), 0.9))
+            p.drawEllipse(QPointF(hx, cy), 3.1, 3.1)
         p.setPen(QPen(QColor(235, 240, 247, 130), 1.0))
         p.drawLine(QPointF(hx - 2.4, cy - 3.0), QPointF(hx - 2.4, cy + 3.0))
         p.drawLine(QPointF(hx + 2.4, cy - 3.0), QPointF(hx + 2.4, cy + 3.0))
