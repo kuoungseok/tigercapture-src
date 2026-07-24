@@ -156,6 +156,15 @@ def test_texture_map_lab_delight_reduces_baked_lighting_gradient(tmp_path) -> No
     assert compare["preview_mode"] == "delight_compare"
     assert compare_image.width == 192
     assert compare_image.height >= 64
+    albedo = render_plane_preview_from_generated(
+        delighted,
+        {"delight_enabled": True},
+        preview_mode="albedo",
+        output_path=tmp_path / "albedo.png",
+        width=96,
+    )
+    assert albedo["preview_mode"] == "albedo"
+    assert Image.open(albedo["preview_path"]).size[0] == 96
 
 
 def test_texture_map_lab_exports_separate_and_packed_maps(tmp_path) -> None:
@@ -352,7 +361,11 @@ def test_texture_map_lab_window_supports_clipboard_copy_and_paste(tmp_path) -> N
     assert window._sliders["delight_strength"].isEnabled() is False
     window._delight_check.setChecked(True)
     assert window._sliders["delight_strength"].isEnabled() is True
+    assert window._preview_mode_combo.currentData() == "albedo"
+    window._show_delight_compare_preview()
     assert window._preview_mode_combo.currentData() == "delight_compare"
+    window._show_albedo_preview()
+    assert window._preview_mode_combo.currentData() == "albedo"
 
     copied = window.copy_preview_to_clipboard()
     assert copied["copied"] is True

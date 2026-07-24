@@ -712,12 +712,15 @@ The lab must provide:
   and contact shadows are already baked into the image. It estimates a
   low-frequency illumination/shading field from BaseColor luminance, removes it
   with a user strength/radius/detail-preservation control, and exposes the
-  diagnostic `base_color_source` and `delight_shading` preview maps. Enabling
-  the option in the UI must switch to a visible `De-Light Compare` preview when
-  the user was in the broad material/base-color view, so the change is not
-  hidden under the plane-lighting preview. This is a practical de-lighting
-  approximation, not a full inverse-rendering solve, so the UI must present it
-  as an adjustable cleanup option rather than a physically guaranteed albedo.
+  diagnostic `base_color_source` and `delight_shading` preview maps. The main
+  window must expose an explicit `Albedo` control that shows the de-lighted
+  BaseColor result directly instead of hiding it behind the generic Base Color
+  naming. Enabling the option in the UI must switch to this visible Albedo
+  preview when the user was in the broad material/base-color view, and a
+  separate `Compare` control must remain available for source/result/difference
+  inspection. This is a practical de-lighting approximation, not a full
+  inverse-rendering solve, so the UI must present it as an adjustable cleanup
+  option rather than a physically guaranteed albedo.
 - Individual export for `base_color`, `normal`, `ao`, `roughness`,
   `metallic`, `height`, `cavity`, and `curvature`.
 - Optional advanced Substrate export for `f0` and `f90_mask`; these are

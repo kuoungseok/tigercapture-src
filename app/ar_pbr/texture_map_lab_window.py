@@ -397,6 +397,31 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         except Exception as exc:
             QMessageBox.warning(self, "Texture Lab Clipboard", f"Paste failed.\n\n{type(exc).__name__}: {exc}")
 
+    def _select_preview_mode(self, mode: str) -> bool:
+        index = self._preview_mode_combo.findData(mode)
+        if index < 0:
+            return False
+        self._preview_mode_combo.setCurrentIndex(index)
+        return True
+
+    def _show_albedo_preview(self) -> None:
+        if self._delight_check is not None and not self._delight_check.isChecked():
+            self._delight_check.blockSignals(True)
+            self._delight_check.setChecked(True)
+            self._delight_check.blockSignals(False)
+            self._sync_delight_controls()
+        if not self._select_preview_mode("albedo"):
+            self.queue_preview()
+
+    def _show_delight_compare_preview(self) -> None:
+        if self._delight_check is not None and not self._delight_check.isChecked():
+            self._delight_check.blockSignals(True)
+            self._delight_check.setChecked(True)
+            self._delight_check.blockSignals(False)
+            self._sync_delight_controls()
+        if not self._select_preview_mode("delight_compare"):
+            self.queue_preview()
+
     def _backend_status_text(self) -> str:
         selection = select_texture_map_backend()
         self._backend_selection = selection
@@ -466,6 +491,14 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         for mode in PREVIEW_MODES:
             self._preview_mode_combo.addItem(mode.replace("_", " ").title(), mode)
         self._preview_mode_combo.currentIndexChanged.connect(self.queue_preview)
+        show_albedo = QPushButton("Albedo", central)
+        show_albedo.setObjectName("TextureLabModeButton")
+        show_albedo.setToolTip("Show the de-lighted albedo/BaseColor result in the main preview")
+        show_albedo.clicked.connect(self._show_albedo_preview)
+        show_compare = QPushButton("Compare", central)
+        show_compare.setObjectName("TextureLabModeButton")
+        show_compare.setToolTip("Compare source BaseColor, de-lighted albedo, and amplified difference")
+        show_compare.clicked.connect(self._show_delight_compare_preview)
         paste_image = QPushButton("Paste Image", central)
         paste_image.setIcon(app_icon("paste", size=16))
         paste_image.setIconSize(icon_size(16))
@@ -490,6 +523,8 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         export_packed.setIconSize(icon_size(16))
         export_packed.clicked.connect(self.export_packed)
         top.addWidget(self._preview_mode_combo)
+        top.addWidget(show_albedo)
+        top.addWidget(show_compare)
         top.addWidget(paste_image)
         top.addWidget(copy_preview)
         top.addWidget(gpu_setup)
@@ -622,9 +657,7 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         if checked and self._preview_mode_combo is not None:
             current = str(self._preview_mode_combo.currentData() or "")
             if current in {"material", "base_color", "base_color_source"}:
-                compare_index = self._preview_mode_combo.findData("delight_compare")
-                if compare_index >= 0:
-                    self._preview_mode_combo.setCurrentIndex(compare_index)
+                if self._select_preview_mode("albedo"):
                     return
         self.queue_preview()
 
@@ -894,6 +927,16 @@ QPushButton:hover {
 QPushButton:pressed {
     background: #D85A30;
     color: #FFFFFF;
+}
+QPushButton#TextureLabModeButton {
+    background: #17251E;
+    color: #DDF7E8;
+    border: 1px solid #3D7758;
+    padding: 8px 14px;
+}
+QPushButton#TextureLabModeButton:hover {
+    background: #1D3428;
+    border-color: #58D38A;
 }
 QCheckBox#TextureLabCheck {
     color: #C9D2E1;

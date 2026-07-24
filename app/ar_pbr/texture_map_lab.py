@@ -49,6 +49,7 @@ SEPARATE_MAPS: tuple[str, ...] = DEFAULT_SEPARATE_MAPS + OPTIONAL_SUBSTRATE_MAPS
 DEFAULT_PACKED_LAYOUTS: tuple[str, ...] = ("unreal_orm", "gltf_mr")
 PREVIEW_MODES: tuple[str, ...] = (
     "material",
+    "albedo",
     "delight_compare",
     "base_color_source",
     "base_color",
@@ -1526,6 +1527,8 @@ def render_plane_preview(
 
 
 def _preview_array_for_mode(maps: Mapping[str, np.ndarray], settings: Mapping[str, Any], mode: str) -> np.ndarray:
+    if mode == "albedo":
+        return np.asarray(maps["base_color"], dtype=np.float32)
     if mode == "delight_compare":
         source = np.asarray(maps.get("base_color_source", maps["base_color"]), dtype=np.float32)
         delighted = np.asarray(maps["base_color"], dtype=np.float32)
