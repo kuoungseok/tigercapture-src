@@ -4497,6 +4497,15 @@ class PaintDialog(QDialog):
         line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         return line
 
+    def _register_painter_tool_shortcut(
+        self,
+        key: str,
+        handler: Callable[[], None],
+    ) -> None:
+        shortcut = QShortcut(QKeySequence(key), self)
+        shortcut.activated.connect(handler)
+        self._painter_tool_shortcuts.append(shortcut)
+
     def _build_tool_rail_swatch_panel(self, parent_layout: QVBoxLayout) -> None:
         panel = QFrame()
         panel.setObjectName("PaintToolSwatches")
@@ -5338,47 +5347,111 @@ class PaintDialog(QDialog):
         self.blockout_rail_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.blockout_rail_btn.clicked.connect(self._focus_3d_blockout_panel)
 
-        self._configure_paint_tool_icon_button(self.select_btn, "cursor", "Select / Move")
-        self._configure_paint_tool_icon_button(self.pan_btn, "hand", "Pan canvas")
-        self._configure_paint_tool_icon_button(self.rect_select_btn, "marquee-rect", "Rectangular marquee")
-        self._configure_paint_tool_icon_button(self.ellipse_select_btn, "marquee-ellipse", "Elliptical marquee")
-        self._configure_paint_tool_icon_button(self.magic_select_btn, "target", "Magic Select / Select by Color")
-        self._configure_paint_tool_icon_button(self.crop_btn, "crop", "Crop")
-        self._configure_paint_tool_icon_button(self.mirror_x_btn, "mirror-x", "Mirror drawing horizontally")
-        self._configure_paint_tool_icon_button(self.mirror_y_btn, "mirror-y", "Mirror drawing vertically")
-        self._configure_paint_tool_icon_button(self.pen_btn, "paint-brush", tr("paint.btn.pen"))
-        self.pen_btn.setToolTip(f"{tr('paint.btn.pen')} | Hold for brush presets")
+        self._configure_paint_tool_icon_button(
+            self.select_btn,
+            "move-tool",
+            "Move / Select Objects (V)",
+        )
+        self._configure_paint_tool_icon_button(self.pan_btn, "hand", "Hand / Pan Canvas (H)")
+        self._configure_paint_tool_icon_button(
+            self.rect_select_btn,
+            "marquee-rect",
+            "Rectangular Marquee (M)",
+        )
+        self._configure_paint_tool_icon_button(
+            self.ellipse_select_btn,
+            "marquee-ellipse",
+            "Elliptical Marquee",
+        )
+        self._configure_paint_tool_icon_button(
+            self.magic_select_btn,
+            "magic-wand",
+            "Magic Select / Select by Color (W)",
+        )
+        self._configure_paint_tool_icon_button(self.crop_btn, "crop", "Crop Tool (C)")
+        self._configure_paint_tool_icon_button(
+            self.mirror_x_btn,
+            "mirror-x",
+            "Mirror Drawing Horizontally",
+        )
+        self._configure_paint_tool_icon_button(
+            self.mirror_y_btn,
+            "mirror-y",
+            "Mirror Drawing Vertically",
+        )
+        self._configure_paint_tool_icon_button(self.pen_btn, "paint-brush", "Brush Tool (B)")
+        self.pen_btn.setToolTip("Brush Tool (B) | Hold for brush presets")
         self.pen_btn.installEventFilter(self)
-        self._configure_paint_tool_icon_button(self.eraser_btn, "eraser", tr("paint.btn.eraser"))
-        self._configure_paint_tool_icon_button(self.path_btn, "path-tool", "Path")
+        self._configure_paint_tool_icon_button(self.eraser_btn, "eraser", "Eraser Tool (E)")
+        self._configure_paint_tool_icon_button(self.path_btn, "pen-nib", "Pen / Path Tool (P)")
         self._configure_paint_tool_icon_button(self.bubble_btn, "caption", tr("bubble.add_button"))
         self._configure_paint_tool_icon_button(self.sticker_btn, "image", tr("sticker.add_button"))
         self._configure_paint_tool_icon_button(self.editor_object_btn, "layers", "Editor Object")
         self._configure_paint_tool_icon_button(self.cutout_btn, "scissors", "Cutout")
-        self._configure_paint_tool_icon_button(self.fill_tool_btn, "palette", "Paint Bucket / Fill")
-        self._configure_paint_tool_icon_button(self.zoom_fit_rail_btn, "zoom", "Fit canvas")
-        self._configure_paint_tool_icon_button(self.quick_mask_rail_btn, "marquee-rect", "Quick Mask")
+        self._configure_paint_tool_icon_button(
+            self.fill_tool_btn,
+            "paint-bucket",
+            "Paint Bucket / Fill (G)",
+        )
+        self._configure_paint_tool_icon_button(
+            self.zoom_fit_rail_btn,
+            "zoom-fit",
+            "Fit Canvas to Window (Ctrl+0)",
+        )
+        self._configure_paint_tool_icon_button(
+            self.quick_mask_rail_btn,
+            "quick-mask",
+            "Quick Mask Mode (Q)",
+        )
         self._configure_paint_tool_icon_button(self.blockout_rail_btn, "box", "3D Blockout")
         self._configure_paint_tool_icon_button(self.clear_btn, "trash", tr("paint.btn.clear_all"))
 
-        tool_buttons_layout.addWidget(self.rect_select_btn)
-        tool_buttons_layout.addWidget(self.ellipse_select_btn)
-        tool_buttons_layout.addWidget(self.magic_select_btn)
-        tool_buttons_layout.addWidget(self.crop_btn)
-        tool_buttons_layout.addWidget(self._make_tool_rail_separator())
-        tool_buttons_layout.addWidget(self.select_btn)
-        tool_buttons_layout.addWidget(self.pan_btn)
-        tool_buttons_layout.addWidget(self.zoom_fit_rail_btn)
-        tool_buttons_layout.addWidget(self._make_tool_rail_separator())
-        tool_buttons_layout.addWidget(self.pen_btn)
-        tool_buttons_layout.addWidget(self.eraser_btn)
-        tool_buttons_layout.addWidget(self.fill_tool_btn)
-        tool_buttons_layout.addWidget(self.path_btn)
-        tool_buttons_layout.addWidget(self._make_tool_rail_separator())
-        tool_buttons_layout.addWidget(self.mirror_x_btn)
-        tool_buttons_layout.addWidget(self.mirror_y_btn)
-        tool_buttons_layout.addWidget(self.quick_mask_rail_btn)
-        tool_buttons_layout.addWidget(self.blockout_rail_btn)
+        self._painter_tool_shortcuts: list[QShortcut] = []
+        for key, handler in (
+            ("V", lambda: self._set_tool("select")),
+            ("W", lambda: self._set_tool("magic_select")),
+            ("C", lambda: self._set_tool("crop")),
+            ("B", lambda: self._set_tool("pen")),
+            ("E", lambda: self._set_tool("eraser")),
+            ("G", lambda: self._fill_document("solid")),
+            ("P", lambda: self._set_tool("path")),
+        ):
+            self._register_painter_tool_shortcut(key, handler)
+
+        self._paint_toolbar_order = [
+            "move",
+            "rect_marquee",
+            "ellipse_marquee",
+            "magic_select",
+            "crop",
+            "brush",
+            "eraser",
+            "fill",
+            "path",
+            "hand",
+            "fit",
+            "quick_mask",
+            "mirror_x",
+            "mirror_y",
+            "3d_blockout",
+        ]
+        for group in (
+            (
+                self.select_btn,
+                self.rect_select_btn,
+                self.ellipse_select_btn,
+                self.magic_select_btn,
+                self.crop_btn,
+            ),
+            (self.pen_btn, self.eraser_btn, self.fill_tool_btn, self.path_btn),
+            (self.pan_btn, self.zoom_fit_rail_btn, self.quick_mask_rail_btn),
+            (self.mirror_x_btn, self.mirror_y_btn, self.blockout_rail_btn),
+        ):
+            if tool_buttons_layout.count():
+                tool_buttons_layout.addWidget(self._make_tool_rail_separator())
+            for button in group:
+                tool_buttons_layout.addWidget(button)
+
         tool_buttons_layout.addWidget(self._make_tool_rail_separator())
         tool_buttons_layout.addWidget(self.bubble_btn)
         tool_buttons_layout.addWidget(self.sticker_btn)

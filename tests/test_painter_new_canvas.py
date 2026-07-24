@@ -179,20 +179,42 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog.tool_close_btn.toolTip() == "Close toolbar"
     assert dialog._tool_button_host.isVisible()
     assert dialog._tool_swatch_panel.isVisible()
+    assert dialog._paint_toolbar_order == [
+        "move",
+        "rect_marquee",
+        "ellipse_marquee",
+        "magic_select",
+        "crop",
+        "brush",
+        "eraser",
+        "fill",
+        "path",
+        "hand",
+        "fit",
+        "quick_mask",
+        "mirror_x",
+        "mirror_y",
+        "3d_blockout",
+    ]
+    assert dialog.select_btn.toolTip() == "Move / Select Objects (V)"
+    assert dialog.magic_select_btn.toolTip() == "Magic Select / Select by Color (W)"
+    assert dialog.fill_tool_btn.toolTip() == "Paint Bucket / Fill (G)"
+    assert dialog.quick_mask_rail_btn.toolTip() == "Quick Mask Mode (Q)"
+    assert len(dialog._painter_tool_shortcuts) == 7
     assert dialog.foreground_swatch_btn.toolTip().startswith("Foreground color")
     assert dialog.background_swatch_btn.toolTip().startswith("Background color")
     assert dialog.select_btn.text() == ""
-    assert dialog.select_btn.toolTip() == "Select / Move"
+    assert dialog.select_btn.toolTip() == "Move / Select Objects (V)"
     assert dialog.pan_btn.text() == ""
-    assert dialog.pan_btn.toolTip() == "Pan canvas"
+    assert dialog.pan_btn.toolTip() == "Hand / Pan Canvas (H)"
     assert dialog.rect_select_btn.text() == ""
-    assert dialog.rect_select_btn.toolTip() == "Rectangular marquee"
+    assert dialog.rect_select_btn.toolTip() == "Rectangular Marquee (M)"
     assert dialog.ellipse_select_btn.text() == ""
-    assert dialog.ellipse_select_btn.toolTip() == "Elliptical marquee"
+    assert dialog.ellipse_select_btn.toolTip() == "Elliptical Marquee"
     assert dialog.magic_select_btn.text() == ""
-    assert dialog.magic_select_btn.toolTip() == "Magic Select / Select by Color"
+    assert dialog.magic_select_btn.toolTip() == "Magic Select / Select by Color (W)"
     assert dialog.crop_btn.text() == ""
-    assert dialog.crop_btn.toolTip() == "Crop"
+    assert dialog.crop_btn.toolTip() == "Crop Tool (C)"
     assert dialog.pen_btn.text() == ""
     assert "Hold" in dialog.pen_btn.toolTip()
     assert dialog.eraser_btn.text() == ""
@@ -209,13 +231,13 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert not dialog.eraser_btn.icon().isNull()
     assert not dialog.path_btn.icon().isNull()
     assert dialog.fill_tool_btn.text() == ""
-    assert dialog.fill_tool_btn.toolTip() == "Paint Bucket / Fill"
+    assert dialog.fill_tool_btn.toolTip() == "Paint Bucket / Fill (G)"
     assert not dialog.fill_tool_btn.icon().isNull()
     assert dialog.zoom_fit_rail_btn.text() == ""
-    assert dialog.zoom_fit_rail_btn.toolTip() == "Fit canvas"
+    assert dialog.zoom_fit_rail_btn.toolTip() == "Fit Canvas to Window (Ctrl+0)"
     assert not dialog.zoom_fit_rail_btn.icon().isNull()
     assert dialog.quick_mask_rail_btn.text() == ""
-    assert dialog.quick_mask_rail_btn.toolTip() == "Quick Mask"
+    assert dialog.quick_mask_rail_btn.toolTip() == "Quick Mask Mode (Q)"
     assert not dialog.quick_mask_rail_btn.icon().isNull()
     dialog._set_tool_rail_collapsed(True)
     app.processEvents()

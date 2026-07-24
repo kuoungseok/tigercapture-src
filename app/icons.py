@@ -797,6 +797,98 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
         painter.drawLine(QPointF(s * .36, s * .50), QPointF(s * .82, s * .80))
         painter.drawEllipse(QPointF(s * .25, s * .38), s * .11, s * .11)
         painter.drawEllipse(QPointF(s * .25, s * .62), s * .11, s * .11)
+    elif n in {"move-tool", "move_tool", "four-way-arrow"}:
+        center = QPointF(s * .50, s * .50)
+        painter.drawLine(QPointF(s * .50, s * .14), QPointF(s * .50, s * .86))
+        painter.drawLine(QPointF(s * .14, s * .50), QPointF(s * .86, s * .50))
+        for points in (
+            ((.50, .10), (.40, .24), (.60, .24)),
+            ((.50, .90), (.40, .76), (.60, .76)),
+            ((.10, .50), (.24, .40), (.24, .60)),
+            ((.90, .50), (.76, .40), (.76, .60)),
+        ):
+            painter.setBrush(_color(color))
+            painter.drawPolygon(QPolygonF([QPointF(s * x, s * y) for x, y in points]))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(center, s * .035, s * .035)
+    elif n in {"magic-wand", "magic_wand", "wand"}:
+        painter.setPen(
+            QPen(
+                _color(color),
+                max(1.8, s * .105),
+                Qt.PenStyle.SolidLine,
+                Qt.PenCapStyle.RoundCap,
+            )
+        )
+        painter.drawLine(QPointF(s * .23, s * .78), QPointF(s * .65, s * .36))
+        painter.setPen(QPen(_color(color), max(1.2, s * .065)))
+        for cx, cy, radius in ((.72, .23, .13), (.81, .48, .08), (.48, .18, .065)):
+            painter.drawLine(
+                QPointF(s * cx, s * (cy - radius)),
+                QPointF(s * cx, s * (cy + radius)),
+            )
+            painter.drawLine(
+                QPointF(s * (cx - radius), s * cy),
+                QPointF(s * (cx + radius), s * cy),
+            )
+    elif n in {"paint-bucket", "paint_bucket", "bucket-fill", "bucket_fill"}:
+        painter.save()
+        painter.translate(s * .50, s * .50)
+        painter.rotate(-35)
+        bucket = QPolygonF(
+            [
+                QPointF(-s * .23, -s * .20),
+                QPointF(s * .20, -s * .20),
+                QPointF(s * .25, s * .18),
+                QPointF(-s * .25, s * .18),
+            ]
+        )
+        painter.drawPolygon(bucket)
+        painter.drawArc(QRectF(-s * .19, -s * .35, s * .38, s * .30), 0, 180 * 16)
+        painter.restore()
+        drop = QPainterPath()
+        drop.moveTo(s * .78, s * .55)
+        drop.cubicTo(s * .68, s * .68, s * .69, s * .82, s * .78, s * .84)
+        drop.cubicTo(s * .88, s * .82, s * .89, s * .68, s * .78, s * .55)
+        painter.drawPath(drop)
+    elif n in {"quick-mask", "quick_mask"}:
+        dash_pen = QPen(_color(color), max(1.2, s * .060))
+        dash_pen.setDashPattern([2.4, 2.4])
+        painter.setPen(dash_pen)
+        painter.drawRect(QRectF(s * .14, s * .19, s * .72, s * .62))
+        painter.setPen(QPen(_color(color), max(1.5, s * .080)))
+        painter.drawEllipse(QPointF(s * .50, s * .50), s * .20, s * .20)
+    elif n in {"zoom-fit", "zoom_fit", "fit-view", "fit_view"}:
+        corner = s * .18
+        for x, y, dx, dy in (
+            (.14, .14, 1, 1),
+            (.86, .14, -1, 1),
+            (.14, .86, 1, -1),
+            (.86, .86, -1, -1),
+        ):
+            painter.drawLine(
+                QPointF(s * x, s * y),
+                QPointF(s * x + corner * dx, s * y),
+            )
+            painter.drawLine(
+                QPointF(s * x, s * y),
+                QPointF(s * x, s * y + corner * dy),
+            )
+        painter.drawEllipse(QPointF(s * .50, s * .48), s * .15, s * .15)
+        painter.drawLine(QPointF(s * .61, s * .59), QPointF(s * .72, s * .70))
+    elif n in {"pen-nib", "pen_nib", "bezier-pen", "bezier_pen"}:
+        nib = QPolygonF(
+            [
+                QPointF(s * .50, s * .12),
+                QPointF(s * .76, s * .39),
+                QPointF(s * .62, s * .78),
+                QPointF(s * .38, s * .78),
+                QPointF(s * .24, s * .39),
+            ]
+        )
+        painter.drawPolygon(nib)
+        painter.drawEllipse(QPointF(s * .50, s * .47), s * .075, s * .075)
+        painter.drawLine(QPointF(s * .50, s * .55), QPointF(s * .50, s * .78))
     elif n in {"zoom", "search"}:
         painter.drawEllipse(QPointF(s * .43, s * .42), s * .23, s * .23)
         painter.drawLine(QPointF(s * .60, s * .60), QPointF(s * .82, s * .82))

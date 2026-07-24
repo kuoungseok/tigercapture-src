@@ -60,6 +60,12 @@ Default layout:
   and optional pixel grid at high zoom.
 - Left: compact single-column tool rail with tool groups and long-press/right
   click subtool popups.
+  Its fixed Photoshop-familiar order is Move; rectangular/elliptical marquee,
+  Magic Select, Crop; Brush, Eraser, Fill, Pen/Path; Hand, Fit, Quick Mask;
+  Mirror X/Y and 3D Blockout. Destructive Clear stays isolated at the bottom.
+  Move, Magic Select, Fill, Quick Mask, Fit, and Pen/Path use distinct
+  tool-shaped icons rather than generic cursor, target, palette, or marquee
+  symbols. Tooltips include the active keyboard shortcut where one exists.
 - Top: active tool options only. This area should not become a permanent
   command strip for unrelated features.
 - Top quick controls for Undo, Redo, PNG export, active-tool status, and document
