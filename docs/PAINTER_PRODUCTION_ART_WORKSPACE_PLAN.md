@@ -36,6 +36,10 @@ First impression:
 
 ## UX Reference Map
 
+The maintained Photoshop parity matrix is
+`docs/PAINTER_PHOTOSHOP_PARITY_AUDIT.md`. Agents must use that matrix instead of
+waiting for the user to identify individual mismatches.
+
 Tiger Painter does not clone one application. Each reference owns a role:
 
 | Reference | Tiger Painter adopts | Tiger Painter rejects |
@@ -79,6 +83,10 @@ Default layout:
   or checked cell. Foreground/background swatches remain square and unframed.
 - Top: active tool options only. This area should not become a permanent
   command strip for unrelated features.
+- The top options bar exposes Photoshop-style contextual controls: Brush/Eraser
+  size and opacity; marquee New/Add/Subtract/Intersect plus style; Magic Select
+  tolerance; Crop apply/mask/deselect; and Fill mode. Non-active tool controls
+  are hidden rather than disabled clutter.
 - Top quick controls for Undo, Redo, PNG export, active-tool status, and document
   actions must stay compact and Photoshop-like, not large text command buttons.
   Zoom controls do not belong in the title/top bar; zoom lives in the View menu,
@@ -88,6 +96,11 @@ Default layout:
 - Right lower: Layers / Channels / Paths as a dedicated pinned tab dock.
 - Optional lower or popout panels: Brush Presets, History, 3D Blockout,
   Typography, PBR Texture Lab.
+- In the clean default workspace, detailed Brush, Reference, and 3D panels are
+  closed. Color plus Layers/Channels/Paths remain visible; optional panels show
+  only after the user chooses their Window/toolbar entry.
+- A compact bottom status bar owns zoom and document-size feedback. Zoom does
+  not return to the title or options bar.
 
 Responsive behavior:
 

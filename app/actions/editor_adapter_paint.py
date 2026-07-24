@@ -250,10 +250,12 @@ class PaintAdapterMixin:
         x2: float = 1.0,
         y2: float = 1.0,
         aspect: str = "free",
+        mode: str = "new",
     ) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         dialog._push_undo_state("Rectangular selection")
         dialog._set_selection_aspect_mode(str(aspect or "free"))
+        dialog._set_selection_combine_mode(str(mode or "new"))
         dialog.canvas.select_rectangle(float(x1), float(y1), float(x2), float(y2), shape="rect", aspect=str(aspect or "free"))
         dialog._selected_path_item_id = "selection"
         dialog._update_path_list()
@@ -268,10 +270,12 @@ class PaintAdapterMixin:
         x2: float = 1.0,
         y2: float = 1.0,
         aspect: str = "free",
+        mode: str = "new",
     ) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         dialog._push_undo_state("Elliptical selection")
         dialog._set_selection_aspect_mode(str(aspect or "free"))
+        dialog._set_selection_combine_mode(str(mode or "new"))
         dialog.canvas.select_rectangle(float(x1), float(y1), float(x2), float(y2), shape="ellipse", aspect=str(aspect or "free"))
         dialog._selected_path_item_id = "selection"
         dialog._update_path_list()
@@ -281,6 +285,11 @@ class PaintAdapterMixin:
     def paint_selection_set_aspect(self, *, aspect: str = "free") -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         dialog._set_selection_aspect_mode(str(aspect or "free"))
+        return dialog.painter_action_state()
+
+    def paint_selection_set_mode(self, *, mode: str = "new") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._set_selection_combine_mode(str(mode or "new"))
         return dialog.painter_action_state()
 
     def paint_selection_select_by_color(

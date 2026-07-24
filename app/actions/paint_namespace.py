@@ -443,6 +443,7 @@ def register_paint_actions(registry: Any) -> None:
                 "x2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "y2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "aspect": {"type": "string", "enum": ["free", "square", "16:9", "4:3"]},
+                "mode": {"type": "string", "enum": ["new", "add", "subtract", "intersect"]},
             },
             required=("x1", "y1", "x2", "y2"),
         ),
@@ -461,6 +462,7 @@ def register_paint_actions(registry: Any) -> None:
                 "x2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "y2": {"type": "number", "minimum": 0.0, "maximum": 1.0},
                 "aspect": {"type": "string", "enum": ["free", "square", "16:9", "4:3"]},
+                "mode": {"type": "string", "enum": ["new", "add", "subtract", "intersect"]},
             },
             required=("x1", "y1", "x2", "y2"),
         ),
@@ -478,6 +480,18 @@ def register_paint_actions(registry: Any) -> None:
         ),
         undo_label="Set Painter selection aspect",
         dry_summary="Painter marquee aspect mode would change",
+    )
+    registry.register_adapter_action(
+        "paint.selection.set_mode",
+        "Set how the next Painter selection combines with the current selection.",
+        "paint",
+        "paint_selection_set_mode",
+        params_schema=schema_object(
+            {"mode": {"type": "string", "enum": ["new", "add", "subtract", "intersect"]}},
+            required=("mode",),
+        ),
+        undo_label="Set Painter selection mode",
+        dry_summary="Painter selection combination mode would change",
     )
     registry.register_adapter_action(
         "paint.selection.select_by_color",

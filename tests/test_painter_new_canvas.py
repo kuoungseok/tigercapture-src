@@ -88,6 +88,52 @@ def test_new_canvas_defaults_to_empty_transparency_with_display_only_checkerboar
     dialog.close()
 
 
+def test_photoshop_selection_modes_and_layer_reorder_change_document_state() -> None:
+    app = _app()
+    from PySide6.QtCore import Qt
+
+    from app.drawing import PaintDialog, Stroke, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(320, 180),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.show()
+    app.processEvents()
+
+    dialog._set_tool("rect_select")
+    assert dialog._selection_options_widget.isVisible()
+    dialog.canvas.select_rectangle(0.05, 0.05, 0.35, 0.35)
+    first_points = dialog.canvas.selection_snapshot()
+    dialog._set_selection_combine_mode("add")
+    dialog.canvas.select_rectangle(0.55, 0.55, 0.9, 0.9)
+    assert dialog.canvas.selection_snapshot() != first_points
+    assert dialog.painter_action_state()["selection"]["combine_mode"] == "add"
+
+    dialog.canvas.set_strokes_snapshot(
+        [Stroke(points=[(0.1, 0.1), (0.2, 0.2)], layer_id="paint-layer-1")]
+    )
+    dialog._new_paint_layer("Top")
+    top_id = dialog._active_paint_layer_id
+    dialog.canvas.add_stroke_direct(
+        Stroke(points=[(0.7, 0.7), (0.8, 0.8)], layer_id=top_id)
+    )
+    dialog._update_layer_list()
+    assert dialog._layer_list.item(0).data(Qt.ItemDataRole.UserRole) == top_id
+
+    moved = dialog._layer_list.takeItem(1)
+    dialog._layer_list.insertItem(0, moved)
+    dialog._on_layer_rows_moved()
+
+    assert [layer.layer_id for layer in dialog._paint_layers] == [top_id, "paint-layer-1"]
+    assert [
+        stroke.layer_id for stroke in dialog._visible_strokes_for_export()
+    ] == [top_id, "paint-layer-1"]
+    dialog.close()
+
+
 def test_standalone_painter_hides_video_annotation_tools() -> None:
     app = _app()
     from app.drawing import BRUSH_LIBRARY_PRESETS, PaintDialog, create_blank_paint_pixmap
@@ -333,12 +379,23 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog.canvas._pen_style == BRUSH_LIBRARY_PRESETS[0]["style"]
     assert dialog._pen_opacity == int(BRUSH_LIBRARY_PRESETS[0]["opacity"] * 255 / 100)
     assert "Brush:" in dialog._tool_status_label.text()
-    assert dialog.selection_aspect_combo.parent() is dialog._paint_inspector_controls
-    assert dialog.crop_apply_btn.parent() is dialog._paint_inspector_controls
-    assert dialog.quick_mask_btn.parent() is dialog._paint_inspector_controls
-    assert dialog.grid_view_btn.parent() is dialog._paint_inspector_controls
-    assert dialog.snap_grid_btn.parent() is dialog._paint_inspector_controls
-    assert dialog.magic_tolerance_slider.parent() is dialog._paint_inspector_controls
+    assert dialog.selection_aspect_combo.parent() is dialog._selection_options_widget
+    assert dialog.crop_apply_btn.parent() is dialog._selection_action_widget
+    assert dialog.magic_tolerance_slider.parent() is dialog._magic_options_widget
+    assert dialog._tool_options_host.parent().objectName() == "PaintTopBar"
+    assert dialog._tool_options_host.height() <= 34
+    assert dialog.quick_mask_btn.isHidden()
+    assert dialog.grid_view_btn.isHidden()
+    assert dialog.snap_grid_btn.isHidden()
+    assert dialog.undo_btn.isHidden()
+    assert dialog.redo_btn.isHidden()
+    assert dialog.export_png_btn.isHidden()
+    assert dialog._paint_status_bar.height() <= 24
+    assert dialog._status_zoom_spin.value() == 100
+    assert dialog._status_document_label.text() == "640 x 360 px"
+    assert dialog._paint_brush_detail_panel.isHidden()
+    assert dialog._paint_reference_panel.isHidden()
+    assert dialog._paint_3d_blockout_panel.isHidden()
     assert not hasattr(dialog, "toggle_channel_visibility_btn")
     assert dialog._layer_channel_path_tabs.count() == 3
     assert [
@@ -368,7 +425,7 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
         action.text().replace("&", "")
         for action in dialog._painter_menu_bar.actions()
     ]
-    assert menu_labels == ["File", "Edit", "View", "Brush", "Image", "Layer", "Select", "Path", "Window"]
+    assert menu_labels == ["File", "Edit", "Image", "Layer", "Select", "View", "Window"]
     assert "Brush Settings" in [
         action.text().replace("&", "")
         for action in dialog._painter_brush_menu.actions()
@@ -393,7 +450,7 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert len(dialog._layer_filter_tiny_buttons) == 6
     assert all(not btn.isVisible() for btn in dialog._layer_filter_tiny_buttons)
     assert dialog.layer_blend_combo.currentText() == tr("paint.layer.blend_normal")
-    assert dialog._layer_opacity_value.text() == "100%"
+    assert dialog._layer_opacity_value.value() == 100
     assert dialog._layer_fill_value.text() == "100%"
     assert dialog._layer_fill_label.geometry().top() > dialog._layer_lock_label.geometry().bottom()
     assert not dialog._layer_lock_all_btn.isChecked()

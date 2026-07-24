@@ -62,6 +62,7 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
         "paint.selection.rectangle",
         "paint.selection.ellipse",
         "paint.selection.set_aspect",
+        "paint.selection.set_mode",
         "paint.selection.select_by_color",
         "paint.crop.to_selection",
         "paint.image.resize",
@@ -330,6 +331,12 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     aspect = registry.execute("paint.selection.set_aspect", {"aspect": "square"}).to_dict()
     assert aspect["ok"]
     assert aspect["result"]["selection_aspect"] == "square"
+    combine_mode = registry.execute(
+        "paint.selection.set_mode",
+        {"mode": "add"},
+    ).to_dict()
+    assert combine_mode["ok"]
+    assert combine_mode["result"]["selection"]["combine_mode"] == "add"
     color_selection = registry.execute(
         "paint.selection.select_by_color",
         {"x": 0.5, "y": 0.5, "tolerance": 12},
@@ -339,7 +346,14 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     assert color_selection["result"]["tool"] == "magic_select"
     rectangle = registry.execute(
         "paint.selection.rectangle",
-        {"x1": 0.1, "y1": 0.1, "x2": 0.4, "y2": 0.35, "aspect": "free"},
+        {
+            "x1": 0.1,
+            "y1": 0.1,
+            "x2": 0.4,
+            "y2": 0.35,
+            "aspect": "free",
+            "mode": "new",
+        },
     ).to_dict()
     assert rectangle["ok"]
     assert rectangle["result"]["selection"]["point_count"] == 4

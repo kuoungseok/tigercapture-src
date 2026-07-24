@@ -6212,6 +6212,16 @@ AI Script Edit MVP integration:
   checker tiles are a view-only transparency indicator and must never be baked
   into document pixels or PNG export. Choosing White or Dark in `New Canvas`
   explicitly creates the corresponding Background layer.
+- The detailed Photoshop parity audit is
+  `docs/PAINTER_PHOTOSHOP_PARITY_AUDIT.md`. Painter uses a flat
+  `File/Edit/Image/Layer/Select/View/Window` menu order, a contextual options
+  bar directly below it, a borderless dominant document canvas, and a bottom
+  zoom/document status bar. The options bar owns Brush/Eraser size and opacity,
+  marquee New/Add/Subtract/Intersect plus ratio, Magic tolerance, Crop actions,
+  and Fill choices. Brush detail, Reference, and 3D panels are optional and
+  closed in the clean default workspace. Layer drag reorder changes actual
+  preview and export stroke order; `paint.selection.set_mode` exposes the same
+  selection-combination state to AI automation.
 - Painter 3D support is for game-art blockout and paint-over, not a general 3D
   editor. The first-class 3D workflow is a simple reference layer/panel where
   artists primarily place boxes, stretch them longer/wider/taller, and move,

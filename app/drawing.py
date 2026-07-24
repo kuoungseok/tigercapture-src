@@ -41,6 +41,7 @@ from PySide6.QtGui import (
     QShortcut,
 )
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QColorDialog,
     QApplication,
     QComboBox,
@@ -94,9 +95,91 @@ QDialog {
 QFrame#PaintTopBar,
 QFrame#PaintInspector,
 QFrame#PaintCanvasFrame {
-    background-color: #11151b;
-    border: 1px solid rgba(178, 186, 202, 22);
-    border-radius: 6px;
+    background-color: #535353;
+    border: none;
+    border-radius: 0;
+}
+
+QFrame#PaintTopBar {
+    background-color: #474747;
+    border-top: 1px solid #656565;
+    border-bottom: 1px solid #303030;
+    min-height: 34px;
+    max-height: 34px;
+}
+
+QWidget#PaintToolOptionsHost {
+    background-color: transparent;
+}
+
+QLabel#PaintActiveToolName {
+    color: #f1f1f1;
+    font-size: 11px;
+    font-weight: 700;
+    min-width: 66px;
+}
+
+QFrame#PaintOptionSeparator {
+    background-color: #707070;
+    border: none;
+    min-width: 1px;
+    max-width: 1px;
+    min-height: 20px;
+    max-height: 20px;
+}
+
+QFrame#PaintStatusBar {
+    background-color: #3f3f3f;
+    border-top: 1px solid #2f2f2f;
+    border-bottom: none;
+    min-height: 23px;
+    max-height: 23px;
+}
+
+QFrame#PaintStatusBar QLabel {
+    color: #d8d8d8;
+    font-size: 10px;
+}
+
+QFrame#PaintStatusBar QSpinBox {
+    background-color: transparent;
+    color: #eeeeee;
+    border: none;
+    border-radius: 0;
+    min-height: 19px;
+    max-height: 19px;
+    padding: 0 3px;
+}
+
+QWidget#PaintToolOptionsHost QPushButton {
+    background-color: transparent;
+    color: #eeeeee;
+    border: 1px solid transparent;
+    border-radius: 2px;
+    min-height: 22px;
+    max-height: 22px;
+    padding: 0 7px;
+}
+
+QWidget#PaintToolOptionsHost QPushButton:hover {
+    background-color: #606060;
+    border-color: #727272;
+}
+
+QWidget#PaintToolOptionsHost QPushButton:checked {
+    background-color: #2f2f2f;
+    border-color: #8a8a8a;
+}
+
+QWidget#PaintToolOptionsHost QComboBox,
+QWidget#PaintToolOptionsHost QSpinBox {
+    background-color: #343434;
+    color: #f1f1f1;
+    border: 1px solid #272727;
+    border-radius: 2px;
+    min-height: 22px;
+    max-height: 22px;
+    padding: 0 5px;
 }
 
 QFrame#PaintToolRail {
@@ -132,22 +215,22 @@ QLabel#PaintSectionTitle {
 }
 
 QMenuBar#PaintMenuBar {
-    background-color: #12151b;
-    border: 1px solid rgba(178, 186, 202, 22);
-    border-radius: 6px;
-    color: #dce6f7;
+    background-color: #3f3f3f;
+    border: none;
+    border-radius: 0;
+    color: #eeeeee;
     font-size: 11px;
-    padding: 2px 6px;
+    padding: 0 4px;
 }
 
 QMenuBar#PaintMenuBar::item {
     background: transparent;
-    padding: 4px 10px;
-    border-radius: 4px;
+    padding: 5px 9px;
+    border-radius: 0;
 }
 
 QMenuBar#PaintMenuBar::item:selected {
-    background-color: #202635;
+    background-color: #5b5b5b;
 }
 
 QMenu {
@@ -1291,11 +1374,13 @@ class DrawingCanvas(QWidget):
         self._layer_visibility: dict[str, bool] = {}
         self._layer_opacity: dict[str, int] = {}
         self._layer_masks: dict[str, list[tuple[float, float]]] = {}
+        self._layer_order: list[str] = []
         self._current_points: list[QPointF] = []  # while drawing (widget px)
         self._path_points: list[QPointF] = []
         self._selection_points: list[tuple[float, float]] = []
         self._selection_inverted: bool = False
         self._selection_aspect_mode: str = "free"
+        self._selection_combine_mode: str = "new"
         self._selection_drag_tool: str = ""
         self._selection_drag_start: QPointF | None = None
         self._selection_drag_current: QPointF | None = None
@@ -1437,6 +1522,7 @@ class DrawingCanvas(QWidget):
         visibility: dict[str, bool] | None = None,
         opacity: dict[str, int] | None = None,
         masks: dict[str, list[tuple[float, float]]] | None = None,
+        order: list[str] | None = None,
     ) -> None:
         self._layer_visibility = dict(visibility or {})
         self._layer_opacity = {
@@ -1453,6 +1539,7 @@ class DrawingCanvas(QWidget):
                 for x, y in rows
             ]
         self._layer_masks = clean_masks
+        self._layer_order = [str(layer_id) for layer_id in list(order or [])]
         self.update()
 
     def path_point_count(self) -> int:
@@ -1494,6 +1581,49 @@ class DrawingCanvas(QWidget):
 
     def selection_aspect_mode(self) -> str:
         return str(self._selection_aspect_mode or "free")
+
+    def set_selection_combine_mode(self, mode: str) -> None:
+        value = str(mode or "new").strip().casefold()
+        self._selection_combine_mode = (
+            value if value in {"new", "add", "subtract", "intersect"} else "new"
+        )
+
+    def selection_combine_mode(self) -> str:
+        return str(getattr(self, "_selection_combine_mode", "new") or "new")
+
+    @staticmethod
+    def _normalized_selection_path(points: list[tuple[float, float]]) -> QPainterPath:
+        path = QPainterPath()
+        if len(points) < 3:
+            return path
+        path.moveTo(float(points[0][0]), float(points[0][1]))
+        for x, y in points[1:]:
+            path.lineTo(float(x), float(y))
+        path.closeSubpath()
+        return path
+
+    def _combine_selection(
+        self,
+        points: list[tuple[float, float]],
+    ) -> list[tuple[float, float]]:
+        mode = self.selection_combine_mode()
+        if mode == "new" or len(self._selection_points) < 3:
+            return list(points)
+        current = self._normalized_selection_path(self._selection_points)
+        incoming = self._normalized_selection_path(points)
+        if mode == "add":
+            combined = current.united(incoming)
+        elif mode == "subtract":
+            combined = current.subtracted(incoming)
+        else:
+            combined = current.intersected(incoming)
+        polygon = combined.toFillPolygon()
+        if polygon.isEmpty():
+            return []
+        return [
+            (max(0.0, min(1.0, float(point.x()))), max(0.0, min(1.0, float(point.y()))))
+            for point in polygon
+        ]
 
     def quick_mask_enabled(self) -> bool:
         return bool(getattr(self, "_quick_mask_enabled", False))
@@ -1653,7 +1783,7 @@ class DrawingCanvas(QWidget):
             aspect or self._selection_aspect_mode,
         )
         points = self._points_from_drag_rect(rect, shape=shape)
-        self.set_selection_snapshot(points)
+        self.set_selection_snapshot(self._combine_selection(points))
 
     def selection_inverted(self) -> bool:
         return bool(getattr(self, "_selection_inverted", False))
@@ -1737,6 +1867,9 @@ class DrawingCanvas(QWidget):
 
         t_ms = int(self._get_time_ms())
         strokes = list(self._get_strokes())
+        if self._layer_order:
+            layer_rank = {layer_id: index for index, layer_id in enumerate(self._layer_order)}
+            strokes.sort(key=lambda stroke: layer_rank.get(self._stroke_layer_id(stroke), len(layer_rank)))
         if not self._paint_strokes_with_gpu_cache(painter, strokes, w, h, t_ms):
             for stroke in strokes:
                 if not stroke.is_active(t_ms):
@@ -3029,7 +3162,8 @@ class DrawingCanvas(QWidget):
             self._selection_drag_tool = ""
             if rect.width() > 1.0 and rect.height() > 1.0:
                 shape = "ellipse" if tool == "ellipse_select" else "rect"
-                self.set_selection_snapshot(self._points_from_drag_rect(rect, shape=shape))
+                points = self._points_from_drag_rect(rect, shape=shape)
+                self.set_selection_snapshot(self._combine_selection(points))
             self.repaint_requested.emit()
             self.update()
             return
@@ -4625,6 +4759,7 @@ class PaintDialog(QDialog):
         }
         self._selected_channel = "RGB"
         self._selection_aspect_mode = "free"
+        self._selection_combine_mode = "new"
         self._quick_mask_enabled = False
         self._grid_visible = False
         self._snap_to_grid = False
@@ -4985,6 +5120,22 @@ class PaintDialog(QDialog):
         self._add_painter_menu_action(window_menu, "Show Tool Bar", self._show_tool_rail)
         window_menu.addSeparator()
         self._add_painter_menu_action(window_menu, "PBR Texture Lab...", self._open_pbr_texture_lab_window)
+
+        # Match Photoshop's high-frequency menu order. Brush presets and path
+        # commands stay available from the options bar and their dock panels
+        # instead of occupying custom top-level menus.
+        for action in list(menu_bar.actions()):
+            menu_bar.removeAction(action)
+        for menu in (
+            file_menu,
+            edit_menu,
+            image_menu,
+            layer_menu,
+            select_menu,
+            view_menu,
+            window_menu,
+        ):
+            menu_bar.addAction(menu.menuAction())
         return menu_bar
 
     def _add_painter_menu_action(
@@ -5095,6 +5246,7 @@ class PaintDialog(QDialog):
                 for layer in self._paint_layers
                 if bool(getattr(layer, "mask_enabled", False)) and len(getattr(layer, "mask", []) or []) >= 3
             },
+            [layer.layer_id for layer in self._paint_layers],
         )
 
     def _open_new_canvas_dialog(self) -> None:
@@ -5351,8 +5503,8 @@ class PaintDialog(QDialog):
     def _build_ui(self, bg: QPixmap, initial_strokes: list[Stroke]) -> None:
         self.setStyleSheet(self.styleSheet() + _PAINT_DIALOG_QSS)
         root = QVBoxLayout(self)
-        root.setContentsMargins(12, 12, 12, 12)
-        root.setSpacing(10)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(0)
 
         self._painter_menu_bar = self._build_painter_menu_bar()
         root.addWidget(self._painter_menu_bar)
@@ -5360,19 +5512,30 @@ class PaintDialog(QDialog):
         top_bar = QFrame()
         top_bar.setObjectName("PaintTopBar")
         top_layout = QHBoxLayout(top_bar)
-        top_layout.setContentsMargins(10, 6, 10, 6)
-        top_layout.setSpacing(6)
+        top_layout.setContentsMargins(6, 4, 8, 4)
+        top_layout.setSpacing(5)
 
-        title_col = QVBoxLayout()
-        title_col.setContentsMargins(0, 0, 0, 0)
-        title_col.setSpacing(2)
-        title = QLabel("Tiger Studio Painter" if self._standalone else "Tiger Studio Paint")
-        title.setObjectName("PaintTitle")
-        subtitle = QLabel("Blank canvas" if self._standalone else "Video paint")
-        subtitle.setObjectName("PaintSubtitle")
-        title_col.addWidget(title)
-        title_col.addWidget(subtitle)
-        top_layout.addLayout(title_col, stretch=1)
+        self._active_tool_icon = QLabel()
+        self._active_tool_icon.setFixedSize(22, 22)
+        self._active_tool_icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._active_tool_icon.setPixmap(
+            app_icon("paint-brush", size=14, color="#F0F0F0").pixmap(14, 14)
+        )
+        top_layout.addWidget(self._active_tool_icon)
+        self._active_tool_name = QLabel("Brush")
+        self._active_tool_name.setObjectName("PaintActiveToolName")
+        top_layout.addWidget(self._active_tool_name)
+
+        option_separator = QFrame()
+        option_separator.setObjectName("PaintOptionSeparator")
+        top_layout.addWidget(option_separator)
+
+        self._tool_options_host = QWidget(top_bar)
+        self._tool_options_host.setObjectName("PaintToolOptionsHost")
+        self._tool_options_layout = QHBoxLayout(self._tool_options_host)
+        self._tool_options_layout.setContentsMargins(0, 0, 0, 0)
+        self._tool_options_layout.setSpacing(5)
+        top_layout.addWidget(self._tool_options_host, stretch=1)
 
         self.undo_btn = QPushButton("↶")
         self.undo_btn.setObjectName("PaintTool")
@@ -5381,7 +5544,7 @@ class PaintDialog(QDialog):
         self.undo_btn.setAccessibleName("Undo")
         self.undo_btn.setFixedSize(30, 30)
         self.undo_btn.clicked.connect(self._undo)
-        top_layout.addWidget(self.undo_btn)
+        self.undo_btn.hide()
 
         self.redo_btn = QPushButton("↷")
         self.redo_btn.setObjectName("PaintTool")
@@ -5390,7 +5553,7 @@ class PaintDialog(QDialog):
         self.redo_btn.setAccessibleName("Redo")
         self.redo_btn.setFixedSize(30, 30)
         self.redo_btn.clicked.connect(self._redo)
-        top_layout.addWidget(self.redo_btn)
+        self.redo_btn.hide()
 
         self.export_png_btn = QPushButton("")
         self.export_png_btn.setObjectName("PaintTool")
@@ -5401,7 +5564,7 @@ class PaintDialog(QDialog):
         self.export_png_btn.setIconSize(icon_size(14))
         self.export_png_btn.setFixedSize(34, 30)
         self.export_png_btn.clicked.connect(self._show_export_png_menu)
-        top_layout.addWidget(self.export_png_btn)
+        self.export_png_btn.hide()
 
         self.zoom_slider = QSlider(Qt.Orientation.Horizontal, self)
         self.zoom_slider.setRange(25, PAINT_MAX_ZOOM_PERCENT)
@@ -5444,7 +5607,8 @@ class PaintDialog(QDialog):
         root.addWidget(top_bar)
 
         workspace = QHBoxLayout()
-        workspace.setSpacing(10)
+        workspace.setContentsMargins(0, 0, 0, 0)
+        workspace.setSpacing(0)
         root.addLayout(workspace, stretch=1)
 
         tool_rail = QFrame()
@@ -5585,9 +5749,10 @@ class PaintDialog(QDialog):
         self.cutout_btn.clicked.connect(self._create_cutout_sticker)
 
         self.fill_tool_btn = QPushButton("Fill")
+        self.fill_tool_btn.setCheckable(True)
         self.fill_tool_btn.setObjectName("PaintTool")
         self.fill_tool_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.fill_tool_btn.clicked.connect(lambda: self._fill_document("solid"))
+        self.fill_tool_btn.clicked.connect(lambda: self._set_tool("fill"))
 
         self.zoom_fit_rail_btn = QPushButton("Zoom")
         self.zoom_fit_rail_btn.setObjectName("PaintTool")
@@ -5673,7 +5838,7 @@ class PaintDialog(QDialog):
             ("C", lambda: self._set_tool("crop")),
             ("B", lambda: self._set_tool("pen")),
             ("E", lambda: self._set_tool("eraser")),
-            ("G", lambda: self._fill_document("solid")),
+            ("G", lambda: self._set_tool("fill")),
             ("P", lambda: self._set_tool("path")),
         ):
             self._register_painter_tool_shortcut(key, handler)
@@ -5732,8 +5897,8 @@ class PaintDialog(QDialog):
         canvas_frame = QFrame()
         canvas_frame.setObjectName("PaintCanvasFrame")
         canvas_layout = QVBoxLayout(canvas_frame)
-        canvas_layout.setContentsMargins(10, 10, 10, 10)
-        canvas_layout.setSpacing(8)
+        canvas_layout.setContentsMargins(0, 0, 0, 0)
+        canvas_layout.setSpacing(0)
 
         canvas_bar = QHBoxLayout()
         canvas_bar.setContentsMargins(0, 0, 0, 0)
@@ -5744,7 +5909,9 @@ class PaintDialog(QDialog):
         canvas_bar.addWidget(canvas_title)
         canvas_bar.addStretch(1)
         canvas_bar.addWidget(self._tool_status_label)
-        canvas_layout.addLayout(canvas_bar)
+        self._canvas_title_label = canvas_title
+        canvas_title.hide()
+        self._tool_status_label.hide()
 
         canvas_host = QWidget()
         canvas_host.setStyleSheet("background-color: #050607; border-radius: 8px;")
@@ -5835,25 +6002,53 @@ class PaintDialog(QDialog):
 
         tool_options_title = QLabel("TOOL OPTIONS")
         tool_options_title.setObjectName("PaintSectionTitle")
-        inspector_controls_layout.addWidget(tool_options_title)
+        tool_options_title.hide()
 
-        selection_row = QHBoxLayout()
+        self._selection_options_widget = QWidget(self._tool_options_host)
+        selection_row = QHBoxLayout(self._selection_options_widget)
         selection_row.setContentsMargins(0, 0, 0, 0)
-        selection_label = QLabel("Marquee")
+        selection_row.setSpacing(3)
+        selection_label = QLabel("Mode")
         selection_label.setObjectName("PaintMeta")
-        self.selection_aspect_combo = QComboBox()
-        self.selection_aspect_combo.addItem("Free", "free")
-        self.selection_aspect_combo.addItem("Square", "square")
-        self.selection_aspect_combo.addItem("16:9", "16:9")
-        self.selection_aspect_combo.addItem("4:3", "4:3")
-        self.selection_aspect_combo.currentIndexChanged.connect(self._on_selection_aspect_changed)
         selection_row.addWidget(selection_label)
-        selection_row.addStretch(1)
+        self._selection_mode_buttons: dict[str, QPushButton] = {}
+        for mode, icon_name, tooltip in (
+            ("new", "selection-new", "New selection"),
+            ("add", "plus", "Add to selection"),
+            ("subtract", "minus", "Subtract from selection"),
+            ("intersect", "selection-intersect", "Intersect with selection"),
+        ):
+            button = QPushButton("")
+            button.setCheckable(True)
+            button.setFixedSize(24, 22)
+            button.setIcon(app_icon(icon_name, size=12, color="#EEEEEE"))
+            button.setIconSize(icon_size(12))
+            button.setToolTip(tooltip)
+            button.clicked.connect(
+                lambda _checked=False, value=mode: self._set_selection_combine_mode(value)
+            )
+            self._selection_mode_buttons[mode] = button
+            selection_row.addWidget(button)
+        self._selection_mode_buttons["new"].setChecked(True)
+        option_separator = QFrame()
+        option_separator.setObjectName("PaintOptionSeparator")
+        selection_row.addWidget(option_separator)
+        selection_style_label = QLabel("Style")
+        selection_style_label.setObjectName("PaintMeta")
+        self.selection_aspect_combo = QComboBox()
+        self.selection_aspect_combo.addItem("Normal", "free")
+        self.selection_aspect_combo.addItem("Fixed Ratio 1:1", "square")
+        self.selection_aspect_combo.addItem("Fixed Ratio 16:9", "16:9")
+        self.selection_aspect_combo.addItem("Fixed Ratio 4:3", "4:3")
+        self.selection_aspect_combo.currentIndexChanged.connect(self._on_selection_aspect_changed)
+        selection_row.addWidget(selection_style_label)
         selection_row.addWidget(self.selection_aspect_combo)
-        inspector_controls_layout.addLayout(selection_row)
+        self._tool_options_layout.addWidget(self._selection_options_widget)
 
-        tool_action_row = QHBoxLayout()
+        self._selection_action_widget = QWidget(self._tool_options_host)
+        tool_action_row = QHBoxLayout(self._selection_action_widget)
         tool_action_row.setContentsMargins(0, 0, 0, 0)
+        tool_action_row.setSpacing(3)
         self.crop_apply_btn = QPushButton("Apply Crop")
         self.crop_apply_btn.setObjectName("PaintCustomColor")
         self.crop_apply_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -5871,7 +6066,7 @@ class PaintDialog(QDialog):
         tool_action_row.addWidget(self.crop_apply_btn)
         tool_action_row.addWidget(self.mask_selection_btn)
         tool_action_row.addWidget(self.deselect_option_btn)
-        inspector_controls_layout.addLayout(tool_action_row)
+        self._tool_options_layout.addWidget(self._selection_action_widget)
 
         view_action_row = QHBoxLayout()
         view_action_row.setContentsMargins(0, 0, 0, 0)
@@ -5896,26 +6091,32 @@ class PaintDialog(QDialog):
         view_action_row.addWidget(self.quick_mask_btn)
         view_action_row.addWidget(self.grid_view_btn)
         view_action_row.addWidget(self.snap_grid_btn)
-        inspector_controls_layout.addLayout(view_action_row)
+        self.quick_mask_btn.hide()
+        self.grid_view_btn.hide()
+        self.snap_grid_btn.hide()
 
-        magic_row = QHBoxLayout()
+        self._magic_options_widget = QWidget(self._tool_options_host)
+        magic_row = QHBoxLayout(self._magic_options_widget)
         magic_row.setContentsMargins(0, 0, 0, 0)
-        magic_label = QLabel("Magic Tol")
+        magic_row.setSpacing(5)
+        magic_label = QLabel("Tolerance")
         magic_label.setObjectName("PaintMeta")
-        self._magic_tolerance_value_label = QLabel(f"{self._magic_select_tolerance}")
-        self._magic_tolerance_value_label.setObjectName("PaintValue")
         magic_row.addWidget(magic_label)
-        magic_row.addStretch(1)
-        magic_row.addWidget(self._magic_tolerance_value_label)
-        inspector_controls_layout.addLayout(magic_row)
-        self.magic_tolerance_slider = QSlider(Qt.Orientation.Horizontal)
+        self.magic_tolerance_slider = QSpinBox()
         self.magic_tolerance_slider.setRange(0, 100)
         self.magic_tolerance_slider.setValue(self._magic_select_tolerance)
+        self.magic_tolerance_slider.setFixedWidth(58)
         self.magic_tolerance_slider.valueChanged.connect(self._on_magic_tolerance_changed)
-        inspector_controls_layout.addWidget(self.magic_tolerance_slider)
+        magic_row.addWidget(self.magic_tolerance_slider)
+        self._magic_tolerance_value_label = QLabel(f"{self._magic_select_tolerance}")
+        self._magic_tolerance_value_label.setObjectName("PaintValue")
+        self._magic_tolerance_value_label.hide()
+        self._tool_options_layout.addWidget(self._magic_options_widget)
 
-        fill_action_row = QHBoxLayout()
+        self._fill_options_widget = QWidget(self._tool_options_host)
+        fill_action_row = QHBoxLayout(self._fill_options_widget)
         fill_action_row.setContentsMargins(0, 0, 0, 0)
+        fill_action_row.setSpacing(3)
         self.fill_solid_btn = QPushButton("Fill")
         self.fill_solid_btn.setObjectName("PaintCustomColor")
         self.fill_solid_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -5934,13 +6135,47 @@ class PaintDialog(QDialog):
         fill_action_row.addWidget(self.fill_solid_btn)
         fill_action_row.addWidget(self.fill_gradient_btn)
         fill_action_row.addWidget(self.fill_pattern_btn)
-        inspector_controls_layout.addLayout(fill_action_row)
+        self._tool_options_layout.addWidget(self._fill_options_widget)
+
+        self._brush_options_widget = QWidget(self._tool_options_host)
+        brush_options_row = QHBoxLayout(self._brush_options_widget)
+        brush_options_row.setContentsMargins(0, 0, 0, 0)
+        brush_options_row.setSpacing(5)
+        brush_preset_button = QPushButton("Brush Preset")
+        brush_preset_button.setIcon(app_icon("paint-brush", size=13, color="#EEEEEE"))
+        brush_preset_button.setIconSize(icon_size(13))
+        brush_preset_button.setToolTip("Open Brush Presets")
+        brush_preset_button.clicked.connect(self._show_brush_button_menu)
+        brush_options_row.addWidget(brush_preset_button)
+        size_label = QLabel("Size")
+        size_label.setObjectName("PaintMeta")
+        brush_options_row.addWidget(size_label)
+        self._top_brush_size_spin = QSpinBox()
+        self._top_brush_size_spin.setRange(1, 60)
+        self._top_brush_size_spin.setSuffix(" px")
+        self._top_brush_size_spin.setValue(int(round(self._pen_width)))
+        self._top_brush_size_spin.setFixedWidth(72)
+        self._top_brush_size_spin.valueChanged.connect(self._on_width_changed)
+        brush_options_row.addWidget(self._top_brush_size_spin)
+        opacity_label = QLabel("Opacity")
+        opacity_label.setObjectName("PaintMeta")
+        brush_options_row.addWidget(opacity_label)
+        self._top_brush_opacity_spin = QSpinBox()
+        self._top_brush_opacity_spin.setRange(1, 100)
+        self._top_brush_opacity_spin.setSuffix("%")
+        self._top_brush_opacity_spin.setValue(100)
+        self._top_brush_opacity_spin.setFixedWidth(66)
+        self._top_brush_opacity_spin.valueChanged.connect(self._on_opacity_changed)
+        brush_options_row.addWidget(self._top_brush_opacity_spin)
+        self._tool_options_layout.addWidget(self._brush_options_widget)
 
         self._paint_brush_section_title = QLabel("BRUSH")
         self._paint_brush_section_title.setObjectName("PaintSectionTitle")
         inspector_controls_layout.addWidget(self._paint_brush_section_title)
         self._paint_brush_detail_panel = self._build_brush_detail_panel()
         inspector_controls_layout.addWidget(self._paint_brush_detail_panel)
+        self._paint_brush_section_title.hide()
+        self._paint_brush_detail_panel.hide()
 
         color_title = QLabel("COLOR")
         color_title.setObjectName("PaintSectionTitle")
@@ -6088,9 +6323,11 @@ class PaintDialog(QDialog):
 
         self._paint_reference_panel = self._build_reference_board_panel()
         inspector_controls_layout.addWidget(self._paint_reference_panel)
+        self._paint_reference_panel.hide()
 
         self._paint_3d_blockout_panel = self._build_3d_blockout_panel()
         inspector_controls_layout.addWidget(self._paint_3d_blockout_panel)
+        self._paint_3d_blockout_panel.hide()
 
         self._layer_channel_path_tabs = QTabWidget()
         self._layer_channel_path_tabs.setObjectName("PaintLayerChannelPathTabs")
@@ -6166,9 +6403,13 @@ class PaintDialog(QDialog):
         layer_opacity_text.setObjectName("PaintLayerControlLabel")
         layer_opacity_text.setMinimumWidth(42)
         self._layer_opacity_label = layer_opacity_text
-        self._layer_opacity_value = QLabel("100%")
-        self._layer_opacity_value.setObjectName("PaintValue")
-        self._layer_opacity_value.setFixedWidth(46)
+        self._layer_opacity_value = QSpinBox()
+        self._layer_opacity_value.setObjectName("PaintLayerOpacitySpin")
+        self._layer_opacity_value.setRange(0, 100)
+        self._layer_opacity_value.setSuffix("%")
+        self._layer_opacity_value.setValue(100)
+        self._layer_opacity_value.setFixedWidth(58)
+        self._layer_opacity_value.valueChanged.connect(self._on_layer_opacity_changed)
         layer_mode_row.addWidget(self.layer_blend_combo, stretch=1)
         layer_mode_row.addWidget(layer_opacity_text)
         layer_mode_row.addWidget(self._layer_opacity_value)
@@ -6239,8 +6480,14 @@ class PaintDialog(QDialog):
         self._layer_list.setMinimumHeight(126)
         self._layer_list.setIconSize(QSize(58, 30))
         self._layer_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._layer_list.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self._layer_list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self._layer_list.setDragEnabled(True)
+        self._layer_list.setAcceptDrops(True)
+        self._layer_list.setDropIndicatorShown(True)
         self._layer_list.itemClicked.connect(self._select_layer_item)
         self._layer_list.itemDoubleClicked.connect(self._rename_layer_item)
+        self._layer_list.model().rowsMoved.connect(self._on_layer_rows_moved)
         self._layer_list.viewport().installEventFilter(self)
         self._layer_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._layer_list.customContextMenuRequested.connect(self._open_layer_context_menu)
@@ -6351,11 +6598,38 @@ class PaintDialog(QDialog):
         inspector_layout.addWidget(layer_dock_panel, stretch=2)
         workspace.addWidget(inspector)
 
+        status_bar = QFrame()
+        status_bar.setObjectName("PaintStatusBar")
+        status_bar.setFixedHeight(23)
+        status_layout = QHBoxLayout(status_bar)
+        status_layout.setContentsMargins(7, 1, 8, 1)
+        status_layout.setSpacing(8)
+        self._status_zoom_spin = QSpinBox()
+        self._status_zoom_spin.setRange(25, PAINT_MAX_ZOOM_PERCENT)
+        self._status_zoom_spin.setSuffix("%")
+        self._status_zoom_spin.setValue(100)
+        self._status_zoom_spin.setFixedWidth(58)
+        self._status_zoom_spin.valueChanged.connect(self._set_zoom_percent)
+        status_layout.addWidget(self._status_zoom_spin)
+        status_separator = QFrame()
+        status_separator.setObjectName("PaintOptionSeparator")
+        status_layout.addWidget(status_separator)
+        self._status_document_label = QLabel(
+            f"{self._canvas_document_size[0]} x {self._canvas_document_size[1]} px"
+        )
+        status_layout.addWidget(self._status_document_label)
+        status_layout.addStretch(1)
+        self._status_layer_label = QLabel("Layer 1")
+        status_layout.addWidget(self._status_layer_label)
+        root.addWidget(status_bar)
+        self._paint_status_bar = status_bar
+
         self._sync_palette_controls_from_color()
         self._highlight_selected_palette()
         self._update_brush_detail_preview()
         self._update_inspector_counts()
         self._install_edit_shortcuts()
+        self._set_tool("pen")
 
     def _build_reference_board_panel(self) -> QFrame:
         panel = QFrame()
@@ -6912,6 +7186,7 @@ class PaintDialog(QDialog):
         panel = getattr(self, "_paint_reference_panel", None)
         scroll = getattr(self, "_paint_inspector_controls_scroll", None)
         if panel is not None and scroll is not None:
+            panel.show()
             scroll.ensureWidgetVisible(panel, 0, 12)
         self._refresh_reference_board_panel()
 
@@ -7620,6 +7895,7 @@ class PaintDialog(QDialog):
         panel = getattr(self, "_paint_3d_blockout_panel", None)
         scroll = getattr(self, "_paint_inspector_controls_scroll", None)
         if panel is not None and scroll is not None:
+            panel.show()
             scroll.ensureWidgetVisible(panel, 0, 12)
         self._refresh_3d_blockout_panel()
 
@@ -8653,6 +8929,10 @@ class PaintDialog(QDialog):
         panel = getattr(self, "_paint_brush_detail_panel", None)
         scroll = getattr(self, "_paint_inspector_controls_scroll", None)
         if panel is not None and scroll is not None:
+            title = getattr(self, "_paint_brush_section_title", None)
+            if title is not None:
+                title.show()
+            panel.show()
             scroll.ensureWidgetVisible(panel, 0, 12)
         if hasattr(self, "brush_style_combo"):
             self.brush_style_combo.setFocus()
@@ -9023,6 +9303,7 @@ class PaintDialog(QDialog):
     # ---------- tool actions ----------
 
     def _set_tool(self, tool: str) -> None:
+        self._active_ui_tool = str(tool or "select")
         canvas_tool = tool if tool in (
             "pen",
             "eraser",
@@ -9047,6 +9328,27 @@ class PaintDialog(QDialog):
         self.pen_btn.setChecked(tool == "pen")
         self.eraser_btn.setChecked(tool == "eraser")
         self.path_btn.setChecked(tool == "path")
+        if hasattr(self, "fill_tool_btn"):
+            self.fill_tool_btn.setChecked(tool == "fill")
+        tool_meta = {
+            "select": ("Move", "move-tool"),
+            "pan": ("Hand", "hand"),
+            "pen": ("Brush", "paint-brush"),
+            "eraser": ("Eraser", "eraser"),
+            "path": ("Pen", "pen-nib"),
+            "rect_select": ("Rectangular Marquee", "marquee-rect"),
+            "ellipse_select": ("Elliptical Marquee", "marquee-ellipse"),
+            "magic_select": ("Magic Select", "magic-wand"),
+            "crop": ("Crop", "crop"),
+            "fill": ("Paint Bucket", "paint-bucket"),
+        }
+        tool_name, tool_icon = tool_meta.get(tool, ("Move", "move-tool"))
+        if hasattr(self, "_active_tool_name"):
+            self._active_tool_name.setText(tool_name)
+        if hasattr(self, "_active_tool_icon"):
+            self._active_tool_icon.setPixmap(
+                app_icon(tool_icon, size=14, color="#F0F0F0").pixmap(14, 14)
+            )
         host = getattr(self, "_canvas_host", None)
         if host is not None:
             host.setCursor(
@@ -9065,9 +9367,24 @@ class PaintDialog(QDialog):
                 "ellipse_select": "Elliptical marquee",
                 "magic_select": "Magic Select: click a color region",
                 "crop": "Crop: drag a crop area, then Image > Crop To Selection",
+                "fill": "Paint Bucket: choose a fill mode in the options bar",
             }
             self._tool_status_label.setText(labels.get(tool, "Select / move objects"))
         self._update_tool_option_controls()
+
+    def _set_selection_combine_mode(self, mode: str) -> str:
+        value = str(mode or "new").strip().casefold()
+        selected = value if value in {"new", "add", "subtract", "intersect"} else "new"
+        self._selection_combine_mode = selected
+        if hasattr(self, "canvas"):
+            self.canvas.set_selection_combine_mode(selected)
+        for key, button in getattr(self, "_selection_mode_buttons", {}).items():
+            button.blockSignals(True)
+            try:
+                button.setChecked(key == selected)
+            finally:
+                button.blockSignals(False)
+        return selected
 
     def _on_selection_aspect_changed(self) -> None:
         mode = "free"
@@ -9264,6 +9581,18 @@ class PaintDialog(QDialog):
     def _update_tool_option_controls(self) -> None:
         has_selection = bool(hasattr(self, "canvas") and self.canvas.has_active_selection())
         current_tool = str(getattr(self.canvas, "_tool", "off") if hasattr(self, "canvas") else "off")
+        ui_tool = str(getattr(self, "_active_ui_tool", current_tool) or current_tool)
+        selection_tool = current_tool in {"rect_select", "ellipse_select"}
+        for name, visible in (
+            ("_selection_options_widget", selection_tool),
+            ("_selection_action_widget", current_tool == "crop" or has_selection),
+            ("_magic_options_widget", current_tool == "magic_select"),
+            ("_fill_options_widget", ui_tool == "fill"),
+            ("_brush_options_widget", current_tool in {"pen", "eraser"}),
+        ):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.setVisible(bool(visible))
         if hasattr(self, "selection_aspect_combo"):
             self.selection_aspect_combo.setEnabled(current_tool in {"rect_select", "ellipse_select", "crop"})
         if hasattr(self, "magic_tolerance_slider"):
@@ -9332,6 +9661,12 @@ class PaintDialog(QDialog):
     def _on_width_changed(self, value: int) -> None:
         self._pen_width = float(value)
         self.canvas.set_pen_width(self._pen_width)
+        if hasattr(self, "_top_brush_size_spin") and self.sender() is not self._top_brush_size_spin:
+            self._top_brush_size_spin.blockSignals(True)
+            try:
+                self._top_brush_size_spin.setValue(int(value))
+            finally:
+                self._top_brush_size_spin.blockSignals(False)
         if hasattr(self, "_width_value_label"):
             self._width_value_label.setText(f"{value} px")
         label = getattr(self, "_brush_detail_value_labels", {}).get("size")
@@ -9342,6 +9677,12 @@ class PaintDialog(QDialog):
     def _on_opacity_changed(self, value: int) -> None:
         self._pen_opacity = int(value * 255 / 100)
         self.canvas.set_pen_opacity(self._pen_opacity)
+        if hasattr(self, "_top_brush_opacity_spin") and self.sender() is not self._top_brush_opacity_spin:
+            self._top_brush_opacity_spin.blockSignals(True)
+            try:
+                self._top_brush_opacity_spin.setValue(int(value))
+            finally:
+                self._top_brush_opacity_spin.blockSignals(False)
         if hasattr(self, "_opacity_value_label"):
             self._opacity_value_label.setText(f"{value}%")
         label = getattr(self, "_brush_detail_value_labels", {}).get("opacity")
@@ -9454,6 +9795,10 @@ class PaintDialog(QDialog):
         self._canvas_zoom = max(0.25, min(PAINT_MAX_ZOOM_PERCENT / 100.0, value / 100.0))
         if hasattr(self, "_zoom_value_label"):
             self._zoom_value_label.setText(f"{value}%")
+        if hasattr(self, "_status_zoom_spin"):
+            self._status_zoom_spin.blockSignals(True)
+            self._status_zoom_spin.setValue(value)
+            self._status_zoom_spin.blockSignals(False)
         if hasattr(self, "canvas"):
             self.canvas.set_view_zoom_percent(value)
         self._update_canvas_geometry()
@@ -9548,7 +9893,15 @@ class PaintDialog(QDialog):
         visibility = {layer.layer_id: layer.visible for layer in self._paint_layers}
         opacity = {layer.layer_id: layer.opacity for layer in self._paint_layers}
         out: list[Stroke] = []
-        for stroke in self.canvas.embedded_strokes():
+        layer_rank = {layer.layer_id: index for index, layer in enumerate(self._paint_layers)}
+        strokes = list(self.canvas.embedded_strokes())
+        strokes.sort(
+            key=lambda stroke: layer_rank.get(
+                str(getattr(stroke, "layer_id", "") or "paint-layer-1"),
+                len(layer_rank),
+            )
+        )
+        for stroke in strokes:
             layer_id = str(getattr(stroke, "layer_id", "") or "paint-layer-1")
             if not visibility.get(layer_id, True):
                 continue
@@ -9744,6 +10097,13 @@ class PaintDialog(QDialog):
         self._update_layer_list(strokes_count)
         self._update_path_list()
         self._update_history_buttons()
+        if hasattr(self, "_status_document_label"):
+            self._status_document_label.setText(
+                f"{self._canvas_document_size[0]} x {self._canvas_document_size[1]} px"
+            )
+        if hasattr(self, "_status_layer_label"):
+            layer = self._paint_layer_by_id(self._active_paint_layer_id)
+            self._status_layer_label.setText(layer.name if layer is not None else "Background")
 
     def _paint_panel_row_icon(
         self,
@@ -9885,6 +10245,11 @@ class PaintDialog(QDialog):
                     item.setSizeHint(QSize(0, 38))
                     item.setData(Qt.ItemDataRole.UserRole, layer.layer_id)
                     item.setData(Qt.ItemDataRole.UserRole + 1, color_label)
+                    item.setFlags(
+                        item.flags()
+                        | Qt.ItemFlag.ItemIsDragEnabled
+                        | Qt.ItemFlag.ItemIsDropEnabled
+                    )
                     if accent:
                         bg = QColor(accent)
                         bg.setAlpha(72)
@@ -9927,6 +10292,11 @@ class PaintDialog(QDialog):
                     )
                     bg_item.setSizeHint(QSize(0, 38))
                     bg_item.setData(Qt.ItemDataRole.UserRole, "background")
+                    bg_item.setFlags(
+                        bg_item.flags()
+                        & ~Qt.ItemFlag.ItemIsDragEnabled
+                        & ~Qt.ItemFlag.ItemIsDropEnabled
+                    )
                     layer_list.addItem(bg_item)
                     if selected_id == "background":
                         layer_list.setCurrentItem(bg_item)
@@ -9961,6 +10331,30 @@ class PaintDialog(QDialog):
         finally:
             layer_list.blockSignals(False)
 
+    def _on_layer_rows_moved(self, *_args) -> None:
+        if bool(getattr(self, "_syncing_layer_order", False)):
+            return
+        layer_list = getattr(self, "_layer_list", None)
+        if layer_list is None:
+            return
+        visual_ids = [
+            str(layer_list.item(row).data(Qt.ItemDataRole.UserRole) or "")
+            for row in range(layer_list.count())
+        ]
+        paint_ids = [layer_id for layer_id in visual_ids if self._is_paint_layer_id(layer_id)]
+        if len(paint_ids) != len(self._paint_layers):
+            self._update_layer_list()
+            return
+        lookup = {layer.layer_id: layer for layer in self._paint_layers}
+        reordered = [lookup[layer_id] for layer_id in reversed(paint_ids) if layer_id in lookup]
+        if len(reordered) != len(self._paint_layers):
+            self._update_layer_list()
+            return
+        self._push_undo_state("Reorder layers")
+        self._paint_layers = reordered
+        self._sync_canvas_layer_view()
+        self._update_layer_list()
+
     def _stroke_count_for_layer(self, layer_id: str) -> int:
         if not hasattr(self, "canvas"):
             return 0
@@ -9974,7 +10368,10 @@ class PaintDialog(QDialog):
     def _update_layer_controls(self) -> None:
         if self._selected_layer_id == "background":
             if hasattr(self, "_layer_opacity_value"):
-                self._layer_opacity_value.setText("100%")
+                self._layer_opacity_value.blockSignals(True)
+                self._layer_opacity_value.setValue(100)
+                self._layer_opacity_value.setEnabled(False)
+                self._layer_opacity_value.blockSignals(False)
             if hasattr(self, "_layer_fill_value"):
                 self._layer_fill_value.setText("100%")
             self._sync_layer_lock_buttons(True, enabled=False)
@@ -9996,7 +10393,10 @@ class PaintDialog(QDialog):
             return
         layer = self._paint_layer_by_id(self._selected_layer_id) or self._active_paint_layer()
         if hasattr(self, "_layer_opacity_value"):
-            self._layer_opacity_value.setText(f"{layer.opacity}%")
+            self._layer_opacity_value.blockSignals(True)
+            self._layer_opacity_value.setValue(int(layer.opacity))
+            self._layer_opacity_value.setEnabled(not layer.locked)
+            self._layer_opacity_value.blockSignals(False)
         if hasattr(self, "_layer_fill_value"):
             self._layer_fill_value.setText("100%")
         self._sync_layer_lock_buttons(layer.locked, enabled=True)
@@ -10468,7 +10868,13 @@ class PaintDialog(QDialog):
         layer = self._paint_layer_by_id(self._selected_layer_id) or self._active_paint_layer()
         layer.opacity = max(0, min(100, int(value)))
         if hasattr(self, "_layer_opacity_value"):
-            self._layer_opacity_value.setText(f"{layer.opacity}%")
+            self._layer_opacity_value.blockSignals(True)
+            self._layer_opacity_value.setValue(layer.opacity)
+            self._layer_opacity_value.blockSignals(False)
+        if hasattr(self, "layer_opacity_slider"):
+            self.layer_opacity_slider.blockSignals(True)
+            self.layer_opacity_slider.setValue(layer.opacity)
+            self.layer_opacity_slider.blockSignals(False)
         self._sync_canvas_layer_view()
         self._update_layer_list()
 
@@ -10533,6 +10939,8 @@ class PaintDialog(QDialog):
                     break
         self._sync_canvas_layer_view()
         self._update_layer_controls()
+        if hasattr(self, "_status_layer_label"):
+            self._status_layer_label.setText(layer.name)
         return layer
 
     def _rename_selected_layer(self) -> None:
@@ -12360,6 +12768,7 @@ class PaintDialog(QDialog):
             "active_layer_id": str(self._active_paint_layer_id),
             "selected_layer_id": str(self._selected_layer_id or ""),
             "tool": str(getattr(self.canvas, "_tool", "off") if hasattr(self, "canvas") else "off"),
+            "ui_tool": str(getattr(self, "_active_ui_tool", "select")),
             "brush": {
                 "style": _normalize_paint_brush_style(
                     getattr(self.canvas, "_pen_style", getattr(self, "_pen_style", "round"))
@@ -12395,6 +12804,7 @@ class PaintDialog(QDialog):
                 "inverted": bool(self.canvas.selection_inverted()) if hasattr(self, "canvas") else False,
                 "quick_mask_enabled": bool(getattr(self, "_quick_mask_enabled", False)),
                 "magic_tolerance": int(getattr(self, "_magic_select_tolerance", 32)),
+                "combine_mode": str(getattr(self, "_selection_combine_mode", "new")),
             },
             "paths": {
                 "selected_path_id": str(self._selected_path_item_id),
