@@ -41,6 +41,8 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
         "paint.quick_mask.set",
         "paint.tool.set",
         "paint.brush.set",
+        "paint.brush.library.view",
+        "paint.brush.favorite.set",
         "paint.stroke.draw",
         "paint.history.undo",
         "paint.history.redo",
@@ -201,11 +203,36 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     assert brush["result"]["brush"]["detail"]["angle"] == -12
     assert brush["result"]["brush"]["detail"]["roundness"] == 64
     assert brush["result"]["brush"]["detail"]["flip_x"] is True
+    assert brush["result"]["brush"]["library"]["name"] == "Tiger Studio Brushes"
+    assert brush["result"]["brush"]["library"]["preset_count"] > 30
+    assert brush["result"]["brush"]["library"]["recent_indices"]
     assert dialog.canvas._brush_hardness == 72
     assert dialog.canvas._brush_spacing == 36
     assert dialog.canvas._brush_angle == -12
     assert dialog.canvas._brush_roundness == 64
     assert dialog.canvas._brush_flip_x is True
+
+    favorite = registry.execute(
+        "paint.brush.favorite.set",
+        {"preset": "real_wet_oil", "favorite": True},
+    ).to_dict()
+    assert favorite["ok"]
+    assert favorite["result"]["brush"]["library"]["favorite_count"] == 1
+
+    library_view = registry.execute(
+        "paint.brush.library.view",
+        {
+            "tab": "library",
+            "category": "Water Media",
+            "filter": "watercolor",
+            "search": "watercolor",
+        },
+    ).to_dict()
+    assert library_view["ok"]
+    assert library_view["result"]["brush"]["library"]["filter"] == "watercolor"
+    assert library_view["result"]["brush"]["library"]["search"] == "watercolor"
+    assert dialog._brush_panel_stack.currentWidget() is dialog._brush_library_page
+    assert dialog.brush_library_list.count() > 0
 
     ai_strokes = registry.execute(
         "paint.stroke.draw",

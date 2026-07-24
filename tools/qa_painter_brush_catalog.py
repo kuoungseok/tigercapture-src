@@ -15,7 +15,13 @@ from PySide6.QtCore import QPointF, QRectF
 from PySide6.QtGui import QColor, QFont, QImage, QPainter, QPen
 from PySide6.QtWidgets import QApplication
 
-from app.drawing import BRUSH_LIBRARY_PRESETS, DrawingCanvas, Stroke
+from app.drawing import (
+    BRUSH_LIBRARY_PRESETS,
+    DrawingCanvas,
+    PaintDialog,
+    Stroke,
+    create_blank_paint_pixmap,
+)
 
 
 CATALOG_CATEGORIES = (
@@ -110,6 +116,27 @@ def render_contact_sheet(path: Path) -> None:
         raise RuntimeError(f"Failed to save Painter brush QA sheet: {path}")
 
 
+def render_brush_panel(path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(960, 540, "transparent"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.resize(1180, 760)
+    dialog.show()
+    dialog._set_brush_tab("presets")
+    app.processEvents()
+    app.processEvents()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    panel = dialog._paint_brush_detail_panel
+    if not panel.grab().save(str(path), "PNG"):
+        dialog.close()
+        raise RuntimeError(f"Failed to save Painter brush panel QA image: {path}")
+    dialog.close()
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument(
@@ -117,9 +144,16 @@ def main() -> int:
         type=Path,
         default=Path("debugCapture/painter/professional_brush_catalog.png"),
     )
+    parser.add_argument(
+        "--ui-output",
+        type=Path,
+        default=Path("debugCapture/painter/corel_style_brush_library_panel.png"),
+    )
     args = parser.parse_args()
     render_contact_sheet(args.output)
+    render_brush_panel(args.ui_output)
     print(args.output.resolve())
+    print(args.ui_output.resolve())
     return 0
 
 

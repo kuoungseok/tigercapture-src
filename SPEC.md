@@ -6509,6 +6509,20 @@ AI Script Edit MVP integration:
   inspector retains Photoshop-style Brush/Brush Presets and parameter sections.
   The catalog is a production v1 set; pressure/tilt-sensitive pigment mixing
   and persistent wet-canvas fluid simulation remain later engine work.
+- The 2026-07-25 brush workspace pass follows Corel Painter's documented
+  information architecture without copying proprietary brush resources. The
+  `Brush Library` tab is a real full-view selector: active library and favorite
+  controls at the top, search and functional filters (`My Favorites`, `Stamps`,
+  `Watercolor`, `Thick Paint`), a recent-brush strip, categories on the left,
+  variants on the right, and a bottom dab/stroke preview. `Brush Controls` is a
+  separate stacked page with engine sections on the left and current-brush
+  controls plus live preview on the right. Tabs switch actual pages rather than
+  acting as decorative labels. Session favorites and recent brushes are
+  reflected in `paint.state`; `paint.brush.library.view` controls tab/category/
+  filter/search state and `paint.brush.favorite.set` controls favorites.
+  The initial library is `Tiger Studio Brushes`; external Painter libraries,
+  Painter brush packs, and ABR/captured-dab import remain separate future
+  ingestion work and must not be simulated as installed content.
 - The left Painter toolbar is a compact Photoshop-style single-column icon
   rail, not a text toolbar and not a two-column grid. It groups real supported
   tools with separators, keeps labels in tooltips/accessibility names, exposes

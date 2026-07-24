@@ -52,6 +52,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QInputDialog,
     QLabel,
+    QLineEdit,
     QListView,
     QListWidget,
     QListWidgetItem,
@@ -62,6 +63,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSlider,
     QSpinBox,
+    QStackedWidget,
     QTabWidget,
     QTextEdit,
     QVBoxLayout,
@@ -952,30 +954,69 @@ QFrame#PaintLayerControlPanel QSlider::handle:horizontal {
 }
 
 QListWidget#PaintBrushList {
-    background-color: #11151d;
-    color: #dce6f7;
-    border: 1px solid #2c3342;
-    border-radius: 8px;
+    background-color: #3f3f3f;
+    color: #eeeeee;
+    border: 1px solid #2f2f2f;
+    border-radius: 0;
     outline: none;
-    padding: 5px;
+    padding: 3px;
 }
 
 QListWidget#PaintBrushList::item {
-    border-radius: 6px;
-    padding: 7px 8px;
+    border-radius: 0;
+    padding: 3px;
     margin: 1px;
 }
 
 QListWidget#PaintBrushList::item:selected {
-    background-color: #242b3a;
+    background-color: #626262;
     color: #ffffff;
-    border: 1px solid #7f8da3;
+    border: 1px solid #a4a4a4;
+}
+
+QListWidget#PaintBrushCategoryList,
+QListWidget#PaintBrushRecentList {
+    background-color: #414141;
+    color: #e5e5e5;
+    border: 1px solid #303030;
+    border-radius: 0;
+    outline: none;
+}
+
+QListWidget#PaintBrushCategoryList::item {
+    min-height: 22px;
+    padding: 2px 5px;
+}
+
+QListWidget#PaintBrushCategoryList::item:selected,
+QListWidget#PaintBrushRecentList::item:selected {
+    background-color: #686868;
+    color: #ffffff;
+}
+
+QLineEdit#PaintBrushSearch,
+QComboBox#PaintBrushLibrarySelector,
+QComboBox#PaintBrushFilter {
+    background-color: #3d3d3d;
+    color: #eeeeee;
+    border: 1px solid #2c2c2c;
+    border-radius: 0;
+    min-height: 22px;
+    padding: 1px 5px;
+}
+
+QPushButton#PaintBrushLibraryTool {
+    background-color: #494949;
+    color: #eeeeee;
+    border: 1px solid #2d2d2d;
+    border-radius: 0;
+    font-size: 15px;
 }
 
 QFrame#PaintBrushDetailPanel {
-    background-color: #10141b;
-    border: 1px solid #2c3342;
-    border-radius: 8px;
+    background-color: #494949;
+    border: 1px solid #303030;
+    border-radius: 0;
 }
 
 QPushButton#PaintBrushTab,
@@ -5702,6 +5743,9 @@ class PaintDialog(QDialog):
         self._pen_style = "round"
         self._brush_detail_settings: dict[str, int | bool] = dict(BRUSH_DETAIL_DEFAULTS)
         self._brush_detail_syncing = False
+        self._brush_favorites: set[str] = set()
+        self._brush_recent_indices: list[int] = []
+        self._active_brush_preset_index = 0
         self._palette_syncing = False
         self._recent_colors: list[tuple[int, int, int]] = [
             PALETTE_COLORS[0],
@@ -9232,35 +9276,43 @@ class PaintDialog(QDialog):
     def _build_brush_detail_panel(self) -> QFrame:
         panel = QFrame()
         panel.setObjectName("PaintBrushDetailPanel")
-        panel.setMinimumHeight(430)
+        panel.setMinimumHeight(470)
         panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(8, 8, 8, 8)
-        layout.setSpacing(7)
+        layout.setSpacing(5)
 
         tab_row = QHBoxLayout()
         tab_row.setContentsMargins(0, 0, 0, 0)
-        self._brush_settings_tab_btn = QPushButton("Brush")
+        self._brush_settings_tab_btn = QPushButton("Brush Controls")
         self._brush_settings_tab_btn.setObjectName("PaintBrushTab")
         self._brush_settings_tab_btn.setCheckable(True)
-        self._brush_settings_tab_btn.setChecked(True)
-        self._brush_presets_tab_btn = QPushButton("Brush Presets")
+        self._brush_settings_tab_btn.setChecked(False)
+        self._brush_presets_tab_btn = QPushButton("Brush Library")
         self._brush_presets_tab_btn.setObjectName("PaintBrushTab")
         self._brush_presets_tab_btn.setCheckable(True)
-        self._brush_presets_tab_btn.setChecked(False)
+        self._brush_presets_tab_btn.setChecked(True)
         self._brush_settings_tab_btn.clicked.connect(lambda: self._set_brush_tab("settings"))
         self._brush_presets_tab_btn.clicked.connect(lambda: self._set_brush_tab("presets"))
         tab_row.addWidget(self._brush_settings_tab_btn)
         tab_row.addWidget(self._brush_presets_tab_btn)
         layout.addLayout(tab_row)
 
+        self._brush_panel_stack = QStackedWidget(panel)
+        self._brush_panel_stack.setObjectName("PaintBrushPanelStack")
+        layout.addWidget(self._brush_panel_stack)
+
+        controls_page = QWidget(self._brush_panel_stack)
         body_row = QHBoxLayout()
+        controls_page.setLayout(body_row)
         body_row.setContentsMargins(0, 0, 0, 0)
-        body_row.setSpacing(8)
-        category_frame = QFrame()
+        body_row.setSpacing(6)
+        category_frame = QFrame(controls_page)
+        category_frame.setObjectName("PaintBrushControlCategories")
+        category_frame.setFixedWidth(106)
         category_layout = QVBoxLayout(category_frame)
         category_layout.setContentsMargins(0, 0, 0, 0)
-        category_layout.setSpacing(3)
+        category_layout.setSpacing(2)
         self._brush_detail_category_buttons: dict[str, QPushButton] = {}
         for name in BRUSH_DETAIL_SECTIONS:
             button = QPushButton(name)
@@ -9281,41 +9333,11 @@ class PaintDialog(QDialog):
         category_layout.addStretch(1)
         body_row.addWidget(category_frame, 0)
 
-        control_frame = QFrame()
+        control_frame = QFrame(controls_page)
+        control_frame.setObjectName("PaintBrushControlValues")
         control_layout = QVBoxLayout(control_frame)
         control_layout.setContentsMargins(0, 0, 0, 0)
-        control_layout.setSpacing(6)
-
-        preset_header = QHBoxLayout()
-        preset_header.setContentsMargins(0, 0, 0, 0)
-        preset_label = QLabel("Tip Presets")
-        preset_label.setObjectName("PaintColorLabel")
-        self.brush_category_combo = QComboBox()
-        self.brush_category_combo.addItem("All", "")
-        for category in sorted({str(row.get("category") or "Brushes") for row in BRUSH_LIBRARY_PRESETS}):
-            self.brush_category_combo.addItem(category, category)
-        self.brush_category_combo.currentIndexChanged.connect(self._populate_brush_library)
-        preset_header.addWidget(preset_label)
-        preset_header.addStretch(1)
-        preset_header.addWidget(self.brush_category_combo)
-        control_layout.addLayout(preset_header)
-
-        self.brush_library_list = QListWidget()
-        self.brush_library_list.setObjectName("PaintBrushList")
-        self.brush_library_list.setViewMode(QListView.ViewMode.IconMode)
-        self.brush_library_list.setMovement(QListView.Movement.Static)
-        self.brush_library_list.setResizeMode(QListView.ResizeMode.Adjust)
-        self.brush_library_list.setFlow(QListView.Flow.LeftToRight)
-        self.brush_library_list.setWrapping(True)
-        self.brush_library_list.setUniformItemSizes(True)
-        self.brush_library_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.brush_library_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.brush_library_list.setIconSize(BRUSH_PRESET_ICON_SIZE)
-        self.brush_library_list.setGridSize(BRUSH_PANEL_PRESET_CELL_SIZE)
-        self.brush_library_list.setMinimumHeight(126)
-        self.brush_library_list.setMaximumHeight(150)
-        self.brush_library_list.itemClicked.connect(self._on_brush_library_item)
-        control_layout.addWidget(self.brush_library_list)
+        control_layout.setSpacing(4)
 
         style_row = QHBoxLayout()
         style_row.setContentsMargins(0, 0, 0, 0)
@@ -9459,8 +9481,122 @@ class PaintDialog(QDialog):
         control_layout.addWidget(self._brush_detail_preview)
 
         body_row.addWidget(control_frame, stretch=1)
-        layout.addLayout(body_row)
+        self._brush_panel_stack.addWidget(controls_page)
+
+        library_page = QWidget(self._brush_panel_stack)
+        library_layout = QVBoxLayout(library_page)
+        library_layout.setContentsMargins(0, 0, 0, 0)
+        library_layout.setSpacing(4)
+
+        library_header = QHBoxLayout()
+        library_header.setContentsMargins(0, 0, 0, 0)
+        self._brush_library_selector = QComboBox(library_page)
+        self._brush_library_selector.setObjectName("PaintBrushLibrarySelector")
+        self._brush_library_selector.addItem("Tiger Studio Brushes", "tiger_studio")
+        self._brush_library_selector.setToolTip("Active brush library")
+        library_header.addWidget(self._brush_library_selector, stretch=1)
+        self._brush_favorite_btn = QPushButton("☆")
+        self._brush_favorite_btn.setObjectName("PaintBrushLibraryTool")
+        self._brush_favorite_btn.setFixedSize(26, 24)
+        self._brush_favorite_btn.setToolTip("Mark selected brush as favorite")
+        self._brush_favorite_btn.clicked.connect(self._toggle_active_brush_favorite)
+        library_header.addWidget(self._brush_favorite_btn)
+        self._brush_filter_combo = QComboBox(library_page)
+        self._brush_filter_combo.setObjectName("PaintBrushFilter")
+        for label, value in (
+            ("All", ""),
+            ("My Favorites", "favorites"),
+            ("Stamps", "stamps"),
+            ("Watercolor", "watercolor"),
+            ("Thick Paint", "thick_paint"),
+        ):
+            self._brush_filter_combo.addItem(label, value)
+        self._brush_filter_combo.currentIndexChanged.connect(
+            lambda _index: self._populate_brush_library()
+        )
+        library_header.addWidget(self._brush_filter_combo)
+        library_layout.addLayout(library_header)
+
+        self._brush_search_edit = QLineEdit(library_page)
+        self._brush_search_edit.setObjectName("PaintBrushSearch")
+        self._brush_search_edit.setPlaceholderText("Search brushes")
+        self._brush_search_edit.setClearButtonEnabled(True)
+        self._brush_search_edit.textChanged.connect(
+            lambda _text: self._populate_brush_library()
+        )
+        library_layout.addWidget(self._brush_search_edit)
+
+        recent_label = QLabel("RECENT")
+        recent_label.setObjectName("PaintColorLabel")
+        library_layout.addWidget(recent_label)
+        self._brush_recent_list = QListWidget(library_page)
+        self._brush_recent_list.setObjectName("PaintBrushRecentList")
+        self._brush_recent_list.setViewMode(QListView.ViewMode.IconMode)
+        self._brush_recent_list.setFlow(QListView.Flow.LeftToRight)
+        self._brush_recent_list.setWrapping(False)
+        self._brush_recent_list.setMovement(QListView.Movement.Static)
+        self._brush_recent_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self._brush_recent_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._brush_recent_list.setIconSize(BRUSH_PRESET_ICON_SIZE)
+        self._brush_recent_list.setGridSize(BRUSH_PANEL_PRESET_CELL_SIZE)
+        self._brush_recent_list.setFixedHeight(BRUSH_PANEL_PRESET_CELL_SIZE.height() + 8)
+        self._brush_recent_list.itemClicked.connect(self._on_brush_library_item)
+        library_layout.addWidget(self._brush_recent_list)
+
+        selector_body = QHBoxLayout()
+        selector_body.setContentsMargins(0, 0, 0, 0)
+        selector_body.setSpacing(4)
+        self._brush_category_list = QListWidget(library_page)
+        self._brush_category_list.setObjectName("PaintBrushCategoryList")
+        self._brush_category_list.setFixedWidth(92)
+        all_item = QListWidgetItem("All Brushes")
+        all_item.setData(Qt.ItemDataRole.UserRole, "")
+        self._brush_category_list.addItem(all_item)
+        for category in sorted(
+            {str(row.get("category") or "Brushes") for row in BRUSH_LIBRARY_PRESETS}
+        ):
+            item = QListWidgetItem(category)
+            item.setData(Qt.ItemDataRole.UserRole, category)
+            self._brush_category_list.addItem(item)
+        self._brush_category_list.setCurrentRow(0)
+        self._brush_category_list.currentItemChanged.connect(
+            lambda _current, _previous: self._populate_brush_library()
+        )
+        selector_body.addWidget(self._brush_category_list)
+
+        self.brush_library_list = QListWidget(library_page)
+        self.brush_library_list.setObjectName("PaintBrushList")
+        self.brush_library_list.setViewMode(QListView.ViewMode.IconMode)
+        self.brush_library_list.setMovement(QListView.Movement.Static)
+        self.brush_library_list.setResizeMode(QListView.ResizeMode.Adjust)
+        self.brush_library_list.setFlow(QListView.Flow.LeftToRight)
+        self.brush_library_list.setWrapping(True)
+        self.brush_library_list.setUniformItemSizes(True)
+        self.brush_library_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self.brush_library_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        self.brush_library_list.setIconSize(BRUSH_PRESET_ICON_SIZE)
+        self.brush_library_list.setGridSize(BRUSH_PANEL_PRESET_CELL_SIZE)
+        self.brush_library_list.setMinimumHeight(150)
+        self.brush_library_list.itemClicked.connect(self._on_brush_library_item)
+        self.brush_library_list.currentItemChanged.connect(self._on_brush_library_current_item)
+        selector_body.addWidget(self.brush_library_list, stretch=1)
+        library_layout.addLayout(selector_body, stretch=1)
+
+        self._brush_library_preview = QLabel(library_page)
+        self._brush_library_preview.setObjectName("PaintBrushPreview")
+        self._brush_library_preview.setMinimumHeight(64)
+        self._brush_library_preview.setMaximumHeight(72)
+        self._brush_library_preview.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed
+        )
+        library_layout.addWidget(self._brush_library_preview)
+
+        self._brush_panel_stack.addWidget(library_page)
+        self._brush_controls_page = controls_page
+        self._brush_library_page = library_page
+        self._brush_panel_stack.setCurrentWidget(library_page)
         self._populate_brush_library()
+        self._populate_brush_recent_list()
         self._sync_brush_detail_controls()
         return panel
 
@@ -9470,6 +9606,11 @@ class PaintDialog(QDialog):
             self._brush_settings_tab_btn.setChecked(not show_presets)
         if hasattr(self, "_brush_presets_tab_btn"):
             self._brush_presets_tab_btn.setChecked(show_presets)
+        stack = getattr(self, "_brush_panel_stack", None)
+        if stack is not None:
+            stack.setCurrentWidget(
+                self._brush_library_page if show_presets else self._brush_controls_page
+            )
         if show_presets and hasattr(self, "brush_library_list"):
             self.brush_library_list.setFocus()
         elif hasattr(self, "brush_style_combo"):
@@ -9633,7 +9774,16 @@ class PaintDialog(QDialog):
             painter.end()
         label.setPixmap(pixmap)
 
-    def _brush_preset_icon(self, preset: dict[str, object]) -> QIcon:
+    @staticmethod
+    def _brush_preset_key(preset: dict[str, object]) -> str:
+        return f"{preset.get('category', '')}::{preset.get('name', '')}::{preset.get('style', '')}"
+
+    def _brush_preset_icon(
+        self,
+        preset: dict[str, object],
+        *,
+        favorite: bool = False,
+    ) -> QIcon:
         pixmap = QPixmap(76, 36)
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
@@ -9683,31 +9833,221 @@ class PaintDialog(QDialog):
                 painter.drawLine(QPointF(12, 8), QPointF(67, 8))
             elif style in PAINT_TEXTURED_BRUSH_STYLES:
                 painter.drawLine(QPointF(12, 30), QPointF(67, 30))
+            if favorite:
+                painter.setPen(Qt.PenStyle.NoPen)
+                painter.setBrush(QColor("#F2B84B"))
+                painter.drawEllipse(QPointF(69, 7), 3.0, 3.0)
         finally:
             painter.end()
         return QIcon(pixmap)
+
+    def _brush_preset_matches_filter(
+        self,
+        preset: dict[str, object],
+        filter_id: str,
+    ) -> bool:
+        if not filter_id:
+            return True
+        category = str(preset.get("category") or "")
+        style = str(preset.get("style") or "")
+        if filter_id == "favorites":
+            return self._brush_preset_key(preset) in self._brush_favorites
+        if filter_id == "watercolor":
+            return category == "Water Media" or "watercolor" in style
+        if filter_id == "thick_paint":
+            return category in {"Oils", "Pro Oils"} or style in {
+                "gouache_flat",
+                "acrylic_bristle",
+            }
+        if filter_id == "stamps":
+            return style in {
+                "pixel_square",
+                "stipple_oil",
+                "foliage_scatter",
+                "paint_splatter",
+                "rock_ground",
+                "fabric_grunge",
+                "textured_chalk",
+            }
+        return True
 
     def _populate_brush_library(self) -> None:
         if not hasattr(self, "brush_library_list"):
             return
         selected_category = ""
-        if hasattr(self, "brush_category_combo"):
-            selected_category = str(self.brush_category_combo.currentData() or "")
+        category_list = getattr(self, "_brush_category_list", None)
+        if category_list is not None and category_list.currentItem() is not None:
+            selected_category = str(
+                category_list.currentItem().data(Qt.ItemDataRole.UserRole) or ""
+            )
+        search_text = str(
+            getattr(self, "_brush_search_edit", None).text()
+            if getattr(self, "_brush_search_edit", None) is not None
+            else ""
+        ).strip().casefold()
+        filter_id = str(
+            getattr(self, "_brush_filter_combo", None).currentData()
+            if getattr(self, "_brush_filter_combo", None) is not None
+            else ""
+        )
+        previous_index = self._active_brush_preset_index
         self.brush_library_list.clear()
         for idx, preset in enumerate(BRUSH_LIBRARY_PRESETS):
             category = str(preset["category"])
             if selected_category and category != selected_category:
                 continue
+            if search_text:
+                haystack = " ".join(
+                    (
+                        category,
+                        str(preset.get("name") or ""),
+                        str(preset.get("style") or ""),
+                    )
+                ).casefold()
+                if search_text not in haystack:
+                    continue
+            if not self._brush_preset_matches_filter(preset, filter_id):
+                continue
             name = str(preset["name"])
             width = int(preset["width"])
             opacity = int(preset["opacity"])
-            item = QListWidgetItem(self._brush_preset_icon(preset), "")
+            favorite = self._brush_preset_key(preset) in self._brush_favorites
+            item = QListWidgetItem(
+                self._brush_preset_icon(preset, favorite=favorite),
+                "",
+            )
             item.setToolTip(f"{category} | {name} | {width}px / {opacity}%")
             item.setData(Qt.ItemDataRole.UserRole, idx)
             item.setSizeHint(BRUSH_PANEL_PRESET_CELL_SIZE)
             self.brush_library_list.addItem(item)
         if self.brush_library_list.count() > 0:
-            self.brush_library_list.setCurrentRow(0)
+            selected_row = 0
+            for row in range(self.brush_library_list.count()):
+                item = self.brush_library_list.item(row)
+                if int(item.data(Qt.ItemDataRole.UserRole)) == previous_index:
+                    selected_row = row
+                    break
+            self.brush_library_list.setCurrentRow(selected_row)
+            self._on_brush_library_current_item(
+                self.brush_library_list.currentItem(),
+                None,
+            )
+        else:
+            self._update_brush_library_preview(None)
+
+    def _populate_brush_recent_list(self) -> None:
+        recent_list = getattr(self, "_brush_recent_list", None)
+        if recent_list is None:
+            return
+        recent_list.clear()
+        for idx in self._brush_recent_indices[:8]:
+            if not (0 <= idx < len(BRUSH_LIBRARY_PRESETS)):
+                continue
+            preset = BRUSH_LIBRARY_PRESETS[idx]
+            favorite = self._brush_preset_key(preset) in self._brush_favorites
+            item = QListWidgetItem(
+                self._brush_preset_icon(preset, favorite=favorite),
+                "",
+            )
+            item.setData(Qt.ItemDataRole.UserRole, idx)
+            item.setToolTip(f"Recent | {preset.get('name', 'Brush')}")
+            item.setSizeHint(BRUSH_PANEL_PRESET_CELL_SIZE)
+            recent_list.addItem(item)
+
+    def _on_brush_library_current_item(
+        self,
+        item: QListWidgetItem | None,
+        _previous: QListWidgetItem | None,
+    ) -> None:
+        if item is None:
+            self._update_brush_library_preview(None)
+            return
+        try:
+            idx = int(item.data(Qt.ItemDataRole.UserRole))
+            preset = BRUSH_LIBRARY_PRESETS[idx]
+        except Exception:
+            self._update_brush_library_preview(None)
+            return
+        self._active_brush_preset_index = idx
+        self._update_brush_favorite_button()
+        self._update_brush_library_preview(preset)
+
+    def _update_brush_favorite_button(self) -> None:
+        button = getattr(self, "_brush_favorite_btn", None)
+        if button is None:
+            return
+        try:
+            preset = BRUSH_LIBRARY_PRESETS[self._active_brush_preset_index]
+        except Exception:
+            button.setText("☆")
+            return
+        favorite = self._brush_preset_key(preset) in self._brush_favorites
+        button.setText("★" if favorite else "☆")
+        button.setToolTip(
+            "Remove selected brush from favorites"
+            if favorite
+            else "Mark selected brush as favorite"
+        )
+
+    def _toggle_active_brush_favorite(self) -> None:
+        try:
+            preset = BRUSH_LIBRARY_PRESETS[self._active_brush_preset_index]
+        except Exception:
+            return
+        key = self._brush_preset_key(preset)
+        if key in self._brush_favorites:
+            self._brush_favorites.remove(key)
+        else:
+            self._brush_favorites.add(key)
+        self._update_brush_favorite_button()
+        self._populate_brush_library()
+        self._populate_brush_recent_list()
+
+    def _update_brush_library_preview(
+        self,
+        preset: dict[str, object] | None,
+    ) -> None:
+        label = getattr(self, "_brush_library_preview", None)
+        if label is None:
+            return
+        width = max(220, int(label.width() or 260))
+        height = max(64, int(label.height() or 64))
+        pixmap = QPixmap(width, height)
+        pixmap.fill(QColor("#484848"))
+        painter = QPainter(pixmap)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        try:
+            if preset is None:
+                painter.setPen(QColor("#B8B8B8"))
+                painter.drawText(QRectF(8, 8, width - 16, height - 16), "No brushes match")
+            else:
+                color = QColor("#F2F2F2")
+                stroke = Stroke(
+                    points=[
+                        (0.06, 0.68),
+                        (0.24, 0.34),
+                        (0.45, 0.60),
+                        (0.66, 0.30),
+                        (0.92, 0.54),
+                    ],
+                    color=(color.red(), color.green(), color.blue()),
+                    opacity=max(
+                        1,
+                        min(255, int(float(preset.get("opacity") or 100) * 2.55)),
+                    ),
+                    width_px=max(2.0, min(34.0, float(preset.get("width") or 8))),
+                    brush_style=str(preset.get("style") or "round"),
+                    brush_hardness=int(preset.get("hardness") or 100),
+                    brush_spacing=int(preset.get("spacing") or 25),
+                    brush_angle=int(preset.get("angle") or 0),
+                    brush_roundness=int(preset.get("roundness") or 100),
+                )
+                DrawingCanvas._paint_stroke(painter, stroke, width, height)
+                painter.setPen(QColor(255, 255, 255, 185))
+                painter.drawText(QPointF(8, 15), str(preset.get("name") or "Brush"))
+        finally:
+            painter.end()
+        label.setPixmap(pixmap)
 
     def _on_brush_library_item(self, item: QListWidgetItem) -> None:
         idx = item.data(Qt.ItemDataRole.UserRole)
@@ -9715,9 +10055,19 @@ class PaintDialog(QDialog):
             preset = BRUSH_LIBRARY_PRESETS[int(idx)]
         except Exception:
             return
+        self._active_brush_preset_index = int(idx)
         self._apply_brush_library_preset(preset)
 
     def _apply_brush_library_preset(self, preset: dict[str, object]) -> None:
+        try:
+            preset_index = BRUSH_LIBRARY_PRESETS.index(preset)
+        except ValueError:
+            preset_index = self._active_brush_preset_index
+        self._active_brush_preset_index = preset_index
+        if preset_index in self._brush_recent_indices:
+            self._brush_recent_indices.remove(preset_index)
+        self._brush_recent_indices.insert(0, preset_index)
+        del self._brush_recent_indices[8:]
         style = _normalize_paint_brush_style(str(preset.get("style") or "round"))
         width = int(preset.get("width") or self._pen_width)
         opacity = int(preset.get("opacity") or 100)
@@ -9750,6 +10100,9 @@ class PaintDialog(QDialog):
         if hasattr(self, "_opacity_value_label"):
             self._opacity_value_label.setText(f"{clamped_opacity}%")
         self._sync_brush_detail_controls()
+        self._populate_brush_recent_list()
+        self._update_brush_favorite_button()
+        self._update_brush_library_preview(preset)
         self._set_tool("pen")
         if hasattr(self, "_tool_status_label"):
             self._tool_status_label.setText(f"Brush: {preset.get('name', 'Preset')}")
@@ -9845,6 +10198,7 @@ class PaintDialog(QDialog):
                     break
 
     def _focus_brush_panel(self) -> None:
+        self._set_brush_tab("settings")
         panel = getattr(self, "_paint_brush_detail_panel", None)
         scroll = getattr(self, "_paint_inspector_controls_scroll", None)
         if panel is not None and scroll is not None:
@@ -13658,6 +14012,26 @@ class PaintDialog(QDialog):
                 "width_px": float(getattr(self, "_pen_width", 0.0)),
                 "opacity": int(round(float(getattr(self, "_pen_opacity", 255)) * 100.0 / 255.0)),
                 "detail": dict(getattr(self, "_brush_detail_settings", BRUSH_DETAIL_DEFAULTS)),
+                "library": {
+                    "id": "tiger_studio",
+                    "name": "Tiger Studio Brushes",
+                    "preset_count": len(BRUSH_LIBRARY_PRESETS),
+                    "active_preset_index": int(
+                        getattr(self, "_active_brush_preset_index", 0)
+                    ),
+                    "favorite_count": len(getattr(self, "_brush_favorites", set())),
+                    "recent_indices": list(getattr(self, "_brush_recent_indices", [])),
+                    "filter": str(
+                        getattr(self, "_brush_filter_combo", None).currentData()
+                        if getattr(self, "_brush_filter_combo", None) is not None
+                        else ""
+                    ),
+                    "search": str(
+                        getattr(self, "_brush_search_edit", None).text()
+                        if getattr(self, "_brush_search_edit", None) is not None
+                        else ""
+                    ),
+                },
                 "engine": {
                     "preset_thumbnail_mode": "actual_stroke_preview",
                     "active_sections": sorted(BRUSH_DETAIL_ACTIVE_SECTIONS),

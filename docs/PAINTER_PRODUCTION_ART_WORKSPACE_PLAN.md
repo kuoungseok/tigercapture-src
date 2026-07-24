@@ -247,6 +247,34 @@ Implemented designer catalog subset (2026-07-25):
   and proportionally reduced cells. The full inspector keeps Brush/Brush
   Presets and the familiar Photoshop-style parameter-section layout.
 
+## Corel Painter Brush Workspace Reference
+
+Official layout references:
+
+- Brush Selector full/compact view and component map:
+  <https://product.corel.com/help/Painter/540111155/Corel-Painter-en/Corel-Painter-Brush-selector.html>
+- Favorites and multi-filter behavior:
+  <https://product.corel.com/help/Painter/540111162/Corel-Painter-en/Corel-Painter-Filtering-brushes.html>
+- Captured dab libraries and PNG/JPEG dab import:
+  <https://product.corel.com/help/Painter/540111162/Corel-Painter-en/Corel-Painter-Capturing-brush-dabs.html>
+- Advanced brush controls:
+  <https://product.corel.com/help/Painter/540111155/Corel-Painter-en/Corel-Painter-Exploring-Brush-controls.html>
+
+Implemented layout contract (2026-07-25):
+
+- `Brush Library` is a real stacked page with library selector, favorite
+  toggle, search, working Favorites/Stamps/Watercolor/Thick Paint filters,
+  recent brushes, category list, variant grid, and dab/stroke preview.
+- `Brush Controls` is a separate page with engine sections and current-brush
+  controls. The two tab buttons switch pages rather than sharing one long
+  control surface.
+- `paint.state` reports library/search/filter/favorite/recent state.
+  `paint.brush.library.view` and `paint.brush.favorite.set` expose the same
+  workflow to Claude and local automation.
+- Tiger Studio uses its own renderer profiles and thumbnails. Corel's
+  proprietary default brushes and commercial packs are references only and
+  are not bundled or presented as installed resources.
+
 Brush parameter contract:
 
 - Size

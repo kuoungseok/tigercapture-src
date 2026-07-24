@@ -232,6 +232,40 @@ def register_paint_actions(registry: Any) -> None:
         undo_label="Set Painter brush",
         dry_summary="active Painter brush preset or brush parameters would change",
     )
+    registry.register_adapter_action(
+        "paint.brush.library.view",
+        "Show and filter the Corel-style Painter brush library or advanced controls.",
+        "paint",
+        "paint_brush_library_view",
+        params_schema=schema_object(
+            {
+                "tab": {"type": "string", "enum": ["library", "controls"]},
+                "category": {"type": "string"},
+                "filter": {
+                    "type": "string",
+                    "enum": ["", "favorites", "stamps", "watercolor", "thick_paint"],
+                },
+                "search": {"type": "string"},
+            }
+        ),
+        undo_label="Set Painter brush library view",
+        dry_summary="Painter brush library view would change",
+    )
+    registry.register_adapter_action(
+        "paint.brush.favorite.set",
+        "Mark or unmark a Painter brush preset as a favorite.",
+        "paint",
+        "paint_brush_favorite_set",
+        params_schema=schema_object(
+            {
+                "preset": {"type": "string"},
+                "favorite": {"type": "boolean"},
+            },
+            required=("preset", "favorite"),
+        ),
+        undo_label="Set Painter brush favorite",
+        dry_summary="Painter brush favorite state would change",
+    )
     point_schema = {
         "type": "object",
         "properties": {

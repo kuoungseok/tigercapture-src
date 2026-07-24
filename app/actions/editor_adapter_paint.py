@@ -4,6 +4,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any
 
+from PySide6.QtCore import Qt
+
 from app.actions.editor_adapter_object_helpers import _int
 
 
@@ -531,6 +533,75 @@ class PaintAdapterMixin:
         if flip_y is not None:
             dialog._set_brush_detail_toggle("flip_y", bool(flip_y))
         dialog._set_tool("pen")
+        return dialog.painter_action_state()
+
+    def paint_brush_library_view(
+        self,
+        *,
+        tab: str = "library",
+        category: str = "",
+        filter: str = "",
+        search: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._set_brush_tab("settings" if str(tab).strip().casefold() == "controls" else "presets")
+        category_key = str(category or "").strip().casefold()
+        category_list = getattr(dialog, "_brush_category_list", None)
+        if category_list is not None:
+            target_row = 0
+            if category_key:
+                for row in range(category_list.count()):
+                    item = category_list.item(row)
+                    item_key = str(
+                        item.data(Qt.ItemDataRole.UserRole) or item.text()
+                    ).strip().casefold()
+                    if item_key == category_key:
+                        target_row = row
+                        break
+                else:
+                    raise ValueError("Painter brush category not found")
+            category_list.setCurrentRow(target_row)
+        filter_combo = getattr(dialog, "_brush_filter_combo", None)
+        if filter_combo is not None:
+            filter_index = filter_combo.findData(str(filter or "").strip().casefold())
+            if filter_index < 0:
+                raise ValueError("Painter brush filter not found")
+            filter_combo.setCurrentIndex(filter_index)
+        search_edit = getattr(dialog, "_brush_search_edit", None)
+        if search_edit is not None:
+            search_edit.setText(str(search or ""))
+        dialog._populate_brush_library()
+        return dialog.painter_action_state()
+
+    def paint_brush_favorite_set(
+        self,
+        *,
+        preset: str,
+        favorite: bool,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.drawing import BRUSH_LIBRARY_PRESETS
+
+        preset_key = str(preset or "").strip().casefold().replace("-", "_").replace(" ", "_")
+        selected_index = -1
+        for index, row in enumerate(BRUSH_LIBRARY_PRESETS):
+            name_key = str(row.get("name") or "").strip().casefold().replace("-", "_").replace(" ", "_")
+            style_key = str(row.get("style") or "").strip().casefold().replace("-", "_").replace(" ", "_")
+            if preset_key in {name_key, style_key}:
+                selected_index = index
+                break
+        if selected_index < 0:
+            raise ValueError("Painter brush preset not found")
+        selected = BRUSH_LIBRARY_PRESETS[selected_index]
+        key = dialog._brush_preset_key(selected)
+        if bool(favorite):
+            dialog._brush_favorites.add(key)
+        else:
+            dialog._brush_favorites.discard(key)
+        dialog._active_brush_preset_index = selected_index
+        dialog._update_brush_favorite_button()
+        dialog._populate_brush_library()
+        dialog._populate_brush_recent_list()
         return dialog.painter_action_state()
 
     def paint_stroke_draw(
