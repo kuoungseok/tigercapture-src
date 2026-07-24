@@ -4,6 +4,36 @@ from __future__ import annotations
 from typing import Any
 
 from app.actions.schema import schema_object
+from app.painter_brush_catalog import DESIGNER_BRUSH_STYLE_IDS
+
+
+PAINT_ACTION_BRUSH_STYLES = tuple(
+    sorted(
+        {
+            "round",
+            "marker",
+            "highlighter",
+            "dashed",
+            "loaded_oil",
+            "impasto_oil",
+            "oil_smear",
+            "soft_oil_glaze",
+            "real_wet_oil",
+            "bristle_oil",
+            "dry_oil",
+            "palette_knife",
+            "filbert_oil",
+            "flat_hog_oil",
+            "fan_bristle_oil",
+            "rigger_oil",
+            "scumble_oil",
+            "stipple_oil",
+            "knife_scrape_oil",
+            "textured_chalk",
+        }
+        | set(DESIGNER_BRUSH_STYLE_IDS)
+    )
+)
 
 
 def register_paint_actions(registry: Any) -> None:
@@ -187,21 +217,7 @@ def register_paint_actions(registry: Any) -> None:
                 "preset": {"type": "string"},
                 "style": {
                     "type": "string",
-                    "enum": [
-                        "round",
-                        "marker",
-                        "highlighter",
-                        "dashed",
-                        "loaded_oil",
-                        "impasto_oil",
-                        "oil_smear",
-                        "soft_oil_glaze",
-                        "real_wet_oil",
-                        "bristle_oil",
-                        "dry_oil",
-                        "palette_knife",
-                        "textured_chalk",
-                    ],
+                    "enum": list(PAINT_ACTION_BRUSH_STYLES),
                 },
                 "width": {"type": "integer", "minimum": 1, "maximum": 60},
                 "opacity": {"type": "integer", "minimum": 10, "maximum": 100},
@@ -239,21 +255,7 @@ def register_paint_actions(registry: Any) -> None:
             "width": {"type": "number", "minimum": 0.25, "maximum": 512.0},
             "style": {
                 "type": "string",
-                "enum": [
-                    "round",
-                    "marker",
-                    "highlighter",
-                    "dashed",
-                    "loaded_oil",
-                    "impasto_oil",
-                    "oil_smear",
-                    "soft_oil_glaze",
-                    "real_wet_oil",
-                    "bristle_oil",
-                    "dry_oil",
-                    "palette_knife",
-                    "textured_chalk",
-                ],
+                "enum": list(PAINT_ACTION_BRUSH_STYLES),
             },
             "hardness": {"type": "integer", "minimum": 1, "maximum": 100},
             "spacing": {"type": "integer", "minimum": 1, "maximum": 200},

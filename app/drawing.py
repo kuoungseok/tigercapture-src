@@ -71,6 +71,11 @@ from PySide6.QtWidgets import (
 
 from app.icons import app_icon, icon_size
 from app.i18n import tr
+from app.painter_brush_catalog import (
+    DESIGNER_BRUSH_PRESETS,
+    DESIGNER_BRUSH_RENDER_PROFILES,
+    DESIGNER_BRUSH_STYLE_IDS,
+)
 from app.window_placement import available_geometry_for_window
 
 
@@ -2122,6 +2127,191 @@ class DrawingCanvas(QWidget):
                 painter.drawEllipse(QPointF(x, y), width * 0.5, width * 0.36)
                 return
 
+            profile = DESIGNER_BRUSH_RENDER_PROFILES.get(style)
+            if profile is not None:
+                mode = str(profile["mode"])
+                body = float(profile.get("body", 1.0))
+                profile_alpha = float(profile.get("alpha", 0.5))
+                if mode in {"soft", "soft_flat"}:
+                    layers = max(2, int(profile.get("layers", 5)))
+                    for layer in range(layers, 0, -1):
+                        ratio = layer / layers
+                        pen = QPen(
+                            DrawingCanvas._brush_color_variant(
+                                color,
+                                int(alpha * profile_alpha * (0.26 + (1.0 - ratio) * 0.20)),
+                                light=96 + int((1.0 - ratio) * 18),
+                            ),
+                            max(1.0, width * body * (0.30 + ratio * 0.70)),
+                        )
+                        pen.setCapStyle(
+                            Qt.PenCapStyle.SquareCap if mode == "soft_flat" else Qt.PenCapStyle.RoundCap
+                        )
+                        pen.setJoinStyle(
+                            Qt.PenJoinStyle.BevelJoin if mode == "soft_flat" else Qt.PenJoinStyle.RoundJoin
+                        )
+                        DrawingCanvas._draw_qt_polyline(painter, points, pen)
+                    return
+
+                if mode == "flat":
+                    base = QPen(
+                        DrawingCanvas._brush_color_variant(color, int(alpha * profile_alpha), light=96),
+                        max(1.0, width * body),
+                    )
+                    base.setCapStyle(Qt.PenCapStyle.SquareCap)
+                    base.setJoinStyle(Qt.PenJoinStyle.BevelJoin)
+                    DrawingCanvas._draw_qt_polyline(painter, points, base)
+                    for lane, pos in enumerate((-0.36, 0.0, 0.36)):
+                        lane_color = DrawingCanvas._brush_color_variant(
+                            color,
+                            int(alpha * (0.12 + lane * 0.04)),
+                            light=126 if pos < 0 else 70 if pos > 0 else 104,
+                        )
+                        lane_pen = QPen(lane_color, max(1.0, width * 0.055))
+                        lane_pen.setCapStyle(Qt.PenCapStyle.SquareCap)
+                        DrawingCanvas._draw_qt_polyline(
+                            painter, _offset_polyline_xy(points, pos * width * body), lane_pen
+                        )
+                    return
+
+                if mode == "pixel":
+                    step = max(1.0, width * float(profile.get("spacing", 0.72)))
+                    painter.setRenderHint(QPainter.RenderHint.Antialiasing, False)
+                    painter.setPen(Qt.PenStyle.NoPen)
+                    painter.setBrush(DrawingCanvas._brush_color_variant(color, alpha, light=100))
+                    size = max(1, int(round(width * body)))
+                    for x, y, _angle, _idx in _sample_polyline_xy(points, step):
+                        painter.drawRect(
+                            int(round(x - size / 2)),
+                            int(round(y - size / 2)),
+                            size,
+                            size,
+                        )
+                    return
+
+                if mode in {"strands", "paint"}:
+                    lanes = max(2, int(profile.get("lanes", 5)))
+                    if mode == "paint":
+                        under = QPen(
+                            DrawingCanvas._brush_color_variant(
+                                color, int(alpha * profile_alpha * 0.62), light=88
+                            ),
+                            max(1.0, width * body),
+                        )
+                        under.setCapStyle(Qt.PenCapStyle.SquareCap)
+                        DrawingCanvas._draw_qt_polyline(painter, points, under)
+                    for lane in range(lanes):
+                        pos = 0.0 if lanes == 1 else (lane - (lanes - 1) / 2.0) / ((lanes - 1) / 2.0)
+                        noise = _paint_noise(lane, salt + 131)
+                        pen = QPen(
+                            DrawingCanvas._brush_color_variant(
+                                color,
+                                int(alpha * profile_alpha * (0.32 + noise * 0.34)),
+                                light=70 + int(noise * 68),
+                            ),
+                            max(
+                                0.8,
+                                width
+                                * body
+                                * ((0.13 + noise * 0.08) if mode == "strands" else (0.035 + noise * 0.035)),
+                            ),
+                        )
+                        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                        if mode == "paint" and noise > 0.58:
+                            pen.setDashPattern([max(2.0, width * 0.48), max(1.0, width * 0.12)])
+                        DrawingCanvas._draw_qt_polyline(
+                            painter,
+                            _offset_polyline_xy(points, pos * width * body * 0.48),
+                            pen,
+                        )
+                    return
+
+                if mode == "wash":
+                    under = QPen(
+                        DrawingCanvas._brush_color_variant(
+                            color, int(alpha * profile_alpha), light=110
+                        ),
+                        max(2.0, width * body),
+                    )
+                    under.setCapStyle(Qt.PenCapStyle.RoundCap)
+                    under.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+                    DrawingCanvas._draw_qt_polyline(painter, points, under)
+                    for pos, light in ((-0.46, 134), (0.46, 72)):
+                        edge = QPen(
+                            DrawingCanvas._brush_color_variant(
+                                color, int(alpha * profile_alpha * 0.76), light=light
+                            ),
+                            max(1.0, width * 0.06),
+                        )
+                        edge.setCapStyle(Qt.PenCapStyle.RoundCap)
+                        DrawingCanvas._draw_qt_polyline(
+                            painter, _offset_polyline_xy(points, pos * width * body), edge
+                        )
+                    for x, y, _angle, idx in _sample_polyline_xy(points, max(8.0, width * 0.72)):
+                        noise = _paint_noise(idx, salt + 149)
+                        bloom = DrawingCanvas._brush_color_variant(
+                            color, int(alpha * profile_alpha * (0.16 + noise * 0.20)), light=122
+                        )
+                        painter.setPen(Qt.PenStyle.NoPen)
+                        painter.setBrush(bloom)
+                        radius = width * (0.16 + noise * 0.18)
+                        painter.drawEllipse(QPointF(x, y), radius, radius * 0.76)
+                    return
+
+                step = max(2.0, width * (0.16 if mode == "cloud" else 0.22))
+                density = max(3, int(profile.get("density", 8)))
+                samples = _sample_polyline_xy(points, step)
+                for x, y, angle, idx in samples:
+                    noise = _paint_noise(idx, salt + 163)
+                    if mode in {"grain", "crosshatch"} and noise < 0.28:
+                        continue
+                    count = max(2, density // 4)
+                    for dab_index in range(count):
+                        grain = _paint_noise(idx * density + dab_index, salt + 179)
+                        side = (grain - 0.5) * width * body * (1.50 if mode == "cloud" else 1.05)
+                        along = (
+                            _paint_noise(idx * density + dab_index, salt + 191) - 0.5
+                        ) * width * body
+                        px = x + math.cos(angle) * along + math.cos(angle + math.pi / 2.0) * side
+                        py = y + math.sin(angle) * along + math.sin(angle + math.pi / 2.0) * side
+                        dab_alpha = int(
+                            alpha
+                            * profile_alpha
+                            * (0.30 + grain * 0.48)
+                            * (0.46 if mode == "cloud" else 1.0)
+                        )
+                        dab = DrawingCanvas._brush_color_variant(
+                            color, dab_alpha, light=78 + int(grain * 68)
+                        )
+                        if mode in {"scatter", "cloud"}:
+                            painter.setPen(Qt.PenStyle.NoPen)
+                            painter.setBrush(dab)
+                            radius = width * body * (
+                                (0.06 + grain * 0.13)
+                                if mode == "scatter"
+                                else (0.12 + grain * 0.24)
+                            )
+                            painter.drawEllipse(
+                                QPointF(px, py),
+                                max(0.8, radius),
+                                max(0.8, radius * (0.66 + grain * 0.42)),
+                            )
+                        else:
+                            dab_angle = angle + (grain - 0.5) * (
+                                1.6 if mode == "crosshatch" else 0.8
+                            )
+                            DrawingCanvas._paint_rotated_dab(
+                                painter,
+                                px,
+                                py,
+                                dab_angle,
+                                width * body * (0.10 + grain * 0.32),
+                                max(0.8, width * body * (0.025 + grain * 0.055)),
+                                dab,
+                                rounded=mode != "crosshatch",
+                            )
+                return
+
             if style in {"loaded_oil", "impasto_oil", "oil_smear", "soft_oil_glaze"}:
                 base_width = {
                     "loaded_oil": 0.92,
@@ -2270,6 +2460,203 @@ class DrawingCanvas(QWidget):
                             _offset_polyline_xy(points, pos * width * 0.50),
                             pen,
                         )
+                return
+
+            if style in {
+                "filbert_oil",
+                "flat_hog_oil",
+                "fan_bristle_oil",
+                "rigger_oil",
+                "scumble_oil",
+                "stipple_oil",
+                "knife_scrape_oil",
+            }:
+                if style == "filbert_oil":
+                    under = QPen(
+                        DrawingCanvas._oil_color_variant(
+                            color, int(alpha * 0.46), saturation_scale=0.94, value_scale=0.82
+                        ),
+                        max(2.0, width * 0.78),
+                    )
+                    under.setCapStyle(Qt.PenCapStyle.RoundCap)
+                    under.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+                    DrawingCanvas._draw_qt_polyline(painter, points, under)
+                    for x, y, angle, idx in _sample_polyline_xy(points, max(3.0, width * 0.20)):
+                        noise = _paint_noise(idx, salt)
+                        side = (_paint_noise(idx, salt + 19) - 0.5) * width * 0.42
+                        normal = angle + math.pi / 2.0
+                        dab = DrawingCanvas._oil_color_variant(
+                            color,
+                            int(alpha * (0.24 + noise * 0.20)),
+                            hue_shift=(noise - 0.5) * 8,
+                            saturation_scale=0.88 + noise * 0.18,
+                            value_scale=0.74 + noise * 0.44,
+                        )
+                        DrawingCanvas._paint_rotated_dab(
+                            painter,
+                            x + math.cos(normal) * side,
+                            y + math.sin(normal) * side,
+                            angle,
+                            width * (0.46 + noise * 0.48),
+                            max(1.0, width * (0.14 + noise * 0.14)),
+                            dab,
+                            rounded=True,
+                        )
+                    return
+
+                if style == "flat_hog_oil":
+                    base = QPen(
+                        DrawingCanvas._oil_color_variant(
+                            color, int(alpha * 0.50), saturation_scale=0.92, value_scale=0.78
+                        ),
+                        max(2.0, width * 0.82),
+                    )
+                    base.setCapStyle(Qt.PenCapStyle.SquareCap)
+                    base.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+                    DrawingCanvas._draw_qt_polyline(painter, points, base)
+                    for lane in range(15):
+                        pos = (lane - 7) / 7.0
+                        noise = _paint_noise(lane, salt + 31)
+                        pen = QPen(
+                            DrawingCanvas._oil_color_variant(
+                                color,
+                                int(alpha * (0.13 + noise * 0.16)),
+                                saturation_scale=0.90,
+                                value_scale=1.28 if pos < 0 else 0.62,
+                            ),
+                            max(1.0, width * (0.028 + noise * 0.032)),
+                        )
+                        pen.setCapStyle(Qt.PenCapStyle.SquareCap)
+                        if noise > 0.46:
+                            pen.setDashPattern([max(2.0, width * 0.62), max(1.0, width * 0.12)])
+                        DrawingCanvas._draw_qt_polyline(
+                            painter, _offset_polyline_xy(points, pos * width * 0.46), pen
+                        )
+                    return
+
+                if style == "fan_bristle_oil":
+                    for lane in range(21):
+                        pos = (lane - 10) / 10.0
+                        noise = _paint_noise(lane, salt + 43)
+                        spread = math.copysign(abs(pos) ** 0.78, pos)
+                        pen = QPen(
+                            DrawingCanvas._oil_color_variant(
+                                color,
+                                int(alpha * (0.12 + noise * 0.22) * (1.0 - abs(pos) * 0.24)),
+                                saturation_scale=0.84 + noise * 0.22,
+                                value_scale=0.68 + noise * 0.58,
+                            ),
+                            max(0.8, width * (0.018 + noise * 0.030)),
+                        )
+                        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                        pen.setDashPattern(
+                            [max(2.0, width * (0.28 + noise * 0.34)), max(1.0, width * 0.16)]
+                        )
+                        DrawingCanvas._draw_qt_polyline(
+                            painter,
+                            _offset_polyline_xy(points, spread * width * 0.54),
+                            pen,
+                        )
+                    return
+
+                if style == "rigger_oil":
+                    core = QPen(
+                        DrawingCanvas._oil_color_variant(
+                            color, int(alpha * 0.72), saturation_scale=0.96, value_scale=0.88
+                        ),
+                        max(1.0, width * 0.54),
+                    )
+                    core.setCapStyle(Qt.PenCapStyle.RoundCap)
+                    core.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+                    DrawingCanvas._draw_qt_polyline(painter, points, core)
+                    for lane, pos in enumerate((-0.22, 0.0, 0.22)):
+                        noise = _paint_noise(lane, salt + 59)
+                        pen = QPen(
+                            DrawingCanvas._oil_color_variant(
+                                color,
+                                int(alpha * (0.18 + noise * 0.18)),
+                                value_scale=1.30 if pos < 0 else 0.68,
+                            ),
+                            max(0.7, width * 0.10),
+                        )
+                        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                        DrawingCanvas._draw_qt_polyline(
+                            painter, _offset_polyline_xy(points, pos * width), pen
+                        )
+                    return
+
+                if style in {"scumble_oil", "stipple_oil"}:
+                    step = max(
+                        3.0,
+                        width * (0.24 if style == "stipple_oil" else 0.20),
+                    )
+                    for x, y, angle, idx in _sample_polyline_xy(points, step):
+                        noise = _paint_noise(idx, salt)
+                        if style == "scumble_oil" and noise < 0.42:
+                            continue
+                        cluster_count = 3 if style == "stipple_oil" else 2
+                        for cluster in range(cluster_count):
+                            grain = _paint_noise(idx * 7 + cluster, salt + 71)
+                            side = (grain - 0.5) * width * (1.0 if style == "stipple_oil" else 1.18)
+                            along = (_paint_noise(idx * 11 + cluster, salt + 83) - 0.5) * width * 0.44
+                            px = x + math.cos(angle) * along + math.cos(angle + math.pi / 2.0) * side
+                            py = y + math.sin(angle) * along + math.sin(angle + math.pi / 2.0) * side
+                            dab = DrawingCanvas._oil_color_variant(
+                                color,
+                                int(alpha * (0.18 + grain * 0.28)),
+                                hue_shift=(grain - 0.5) * 8,
+                                saturation_scale=0.88,
+                                value_scale=0.72 + grain * 0.58,
+                            )
+                            if style == "stipple_oil":
+                                painter.setPen(Qt.PenStyle.NoPen)
+                                painter.setBrush(dab)
+                                radius = max(1.0, width * (0.07 + grain * 0.12))
+                                painter.drawEllipse(QPointF(px, py), radius, radius * (0.72 + grain * 0.3))
+                            else:
+                                DrawingCanvas._paint_rotated_dab(
+                                    painter,
+                                    px,
+                                    py,
+                                    angle + (grain - 0.5) * 0.34,
+                                    width * (0.28 + grain * 0.55),
+                                    max(1.0, width * (0.045 + grain * 0.075)),
+                                    dab,
+                                    rounded=False,
+                                )
+                    return
+
+                base = QPen(
+                    DrawingCanvas._oil_color_variant(
+                        color, int(alpha * 0.24), saturation_scale=0.88, value_scale=0.72
+                    ),
+                    max(2.0, width * 0.62),
+                )
+                base.setCapStyle(Qt.PenCapStyle.SquareCap)
+                base.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+                DrawingCanvas._draw_qt_polyline(painter, points, base)
+                for x, y, angle, idx in _sample_polyline_xy(points, max(7.0, width * 0.42)):
+                    noise = _paint_noise(idx, salt + 97)
+                    if noise < 0.26:
+                        continue
+                    side = (_paint_noise(idx, salt + 101) - 0.5) * width * 0.72
+                    normal = angle + math.pi / 2.0
+                    dab = DrawingCanvas._oil_color_variant(
+                        color,
+                        int(alpha * (0.22 + noise * 0.28)),
+                        saturation_scale=0.90,
+                        value_scale=0.62 + noise * 0.72,
+                    )
+                    DrawingCanvas._paint_rotated_dab(
+                        painter,
+                        x + math.cos(normal) * side,
+                        y + math.sin(normal) * side,
+                        angle,
+                        width * (0.70 + noise * 1.10),
+                        max(1.0, width * (0.055 + noise * 0.070)),
+                        dab,
+                        rounded=False,
+                    )
                 return
 
             if style == "palette_knife":
@@ -3690,6 +4077,167 @@ def _draw_pil_textured_stroke(
         draw.ellipse([x - half_w, y - half_w * 0.72, x + half_w, y + half_w * 0.72], fill=color)
         return
 
+    profile = DESIGNER_BRUSH_RENDER_PROFILES.get(style)
+    if profile is not None:
+        mode = str(profile["mode"])
+        body = float(profile.get("body", 1.0))
+        profile_alpha = float(profile.get("alpha", 0.5))
+        if mode in {"soft", "soft_flat"}:
+            layers = max(2, int(profile.get("layers", 5)))
+            for layer in range(layers, 0, -1):
+                ratio = layer / layers
+                _draw_pil_line(
+                    draw,
+                    points,
+                    _pil_color_variant(
+                        color,
+                        int(alpha * profile_alpha * (0.26 + (1.0 - ratio) * 0.20)),
+                        light=96 + int((1.0 - ratio) * 18),
+                    ),
+                    max(1.0, width * body * (0.30 + ratio * 0.70)),
+                )
+            return
+
+        if mode == "flat":
+            _draw_pil_line(
+                draw,
+                points,
+                _pil_color_variant(color, int(alpha * profile_alpha), light=96),
+                max(1.0, width * body),
+            )
+            for lane, pos in enumerate((-0.36, 0.0, 0.36)):
+                _draw_pil_line(
+                    draw,
+                    _offset_polyline_xy(points, pos * width * body),
+                    _pil_color_variant(
+                        color,
+                        int(alpha * (0.12 + lane * 0.04)),
+                        light=126 if pos < 0 else 70 if pos > 0 else 104,
+                    ),
+                    max(1.0, width * 0.055),
+                )
+            return
+
+        if mode == "pixel":
+            step = max(1.0, width * float(profile.get("spacing", 0.72)))
+            size = max(1, int(round(width * body)))
+            fill = _pil_color_variant(color, alpha, light=100)
+            for x, y, _angle, _idx in _sample_polyline_xy(points, step):
+                draw.rectangle(
+                    [x - size / 2, y - size / 2, x + size / 2, y + size / 2],
+                    fill=fill,
+                )
+            return
+
+        if mode in {"strands", "paint"}:
+            lanes = max(2, int(profile.get("lanes", 5)))
+            if mode == "paint":
+                _draw_pil_line(
+                    draw,
+                    points,
+                    _pil_color_variant(color, int(alpha * profile_alpha * 0.62), light=88),
+                    max(1.0, width * body),
+                )
+            for lane in range(lanes):
+                pos = 0.0 if lanes == 1 else (lane - (lanes - 1) / 2.0) / ((lanes - 1) / 2.0)
+                noise = _paint_noise(lane, salt + 131)
+                lane_points = _offset_polyline_xy(points, pos * width * body * 0.48)
+                if mode == "paint" and noise > 0.58:
+                    lane_points = lane_points[::2] or lane_points
+                _draw_pil_line(
+                    draw,
+                    lane_points,
+                    _pil_color_variant(
+                        color,
+                        int(alpha * profile_alpha * (0.32 + noise * 0.34)),
+                        light=70 + int(noise * 68),
+                    ),
+                    max(
+                        1.0,
+                        width
+                        * body
+                        * ((0.13 + noise * 0.08) if mode == "strands" else (0.035 + noise * 0.035)),
+                    ),
+                )
+            return
+
+        if mode == "wash":
+            _draw_pil_line(
+                draw,
+                points,
+                _pil_color_variant(color, int(alpha * profile_alpha), light=110),
+                max(2.0, width * body),
+            )
+            for pos, light in ((-0.46, 134), (0.46, 72)):
+                _draw_pil_line(
+                    draw,
+                    _offset_polyline_xy(points, pos * width * body),
+                    _pil_color_variant(
+                        color, int(alpha * profile_alpha * 0.76), light=light
+                    ),
+                    max(1.0, width * 0.06),
+                )
+            for x, y, _angle, idx in _sample_polyline_xy(points, max(8.0, width * 0.72)):
+                noise = _paint_noise(idx, salt + 149)
+                radius = width * (0.16 + noise * 0.18)
+                bloom = _pil_color_variant(
+                    color, int(alpha * profile_alpha * (0.16 + noise * 0.20)), light=122
+                )
+                draw.ellipse(
+                    [x - radius, y - radius * 0.76, x + radius, y + radius * 0.76],
+                    fill=bloom,
+                )
+            return
+
+        step = max(2.0, width * (0.16 if mode == "cloud" else 0.22))
+        density = max(3, int(profile.get("density", 8)))
+        for x, y, angle, idx in _sample_polyline_xy(points, step):
+            noise = _paint_noise(idx, salt + 163)
+            if mode in {"grain", "crosshatch"} and noise < 0.28:
+                continue
+            for dab_index in range(max(2, density // 4)):
+                grain = _paint_noise(idx * density + dab_index, salt + 179)
+                side = (grain - 0.5) * width * body * (1.50 if mode == "cloud" else 1.05)
+                along = (
+                    _paint_noise(idx * density + dab_index, salt + 191) - 0.5
+                ) * width * body
+                px = x + math.cos(angle) * along + math.cos(angle + math.pi / 2.0) * side
+                py = y + math.sin(angle) * along + math.sin(angle + math.pi / 2.0) * side
+                dab = _pil_color_variant(
+                    color,
+                    int(
+                        alpha
+                        * profile_alpha
+                        * (0.30 + grain * 0.48)
+                        * (0.46 if mode == "cloud" else 1.0)
+                    ),
+                    light=78 + int(grain * 68),
+                )
+                if mode in {"scatter", "cloud"}:
+                    radius = width * body * (
+                        (0.06 + grain * 0.13) if mode == "scatter" else (0.12 + grain * 0.24)
+                    )
+                    draw.ellipse(
+                        [
+                            px - radius,
+                            py - radius * (0.66 + grain * 0.42),
+                            px + radius,
+                            py + radius * (0.66 + grain * 0.42),
+                        ],
+                        fill=dab,
+                    )
+                else:
+                    _draw_pil_rotated_dab(
+                        draw,
+                        px,
+                        py,
+                        angle + (grain - 0.5) * (1.6 if mode == "crosshatch" else 0.8),
+                        width * body * (0.10 + grain * 0.32),
+                        max(1.0, width * body * (0.025 + grain * 0.055)),
+                        dab,
+                    )
+        return
+
     if style in {"loaded_oil", "impasto_oil", "oil_smear", "soft_oil_glaze"}:
         base_width = {
             "loaded_oil": 0.92,
@@ -3824,6 +4372,189 @@ def _draw_pil_textured_stroke(
                     ),
                     max(1.0, width * (0.035 + noise * 0.035)),
                 )
+        return
+
+    if style in {
+        "filbert_oil",
+        "flat_hog_oil",
+        "fan_bristle_oil",
+        "rigger_oil",
+        "scumble_oil",
+        "stipple_oil",
+        "knife_scrape_oil",
+    }:
+        if style == "filbert_oil":
+            _draw_pil_line(
+                draw,
+                points,
+                _pil_oil_color_variant(
+                    color, int(alpha * 0.46), saturation_scale=0.94, value_scale=0.82
+                ),
+                width * 0.78,
+            )
+            for x, y, angle, idx in _sample_polyline_xy(points, max(3.0, width * 0.20)):
+                noise = _paint_noise(idx, salt)
+                side = (_paint_noise(idx, salt + 19) - 0.5) * width * 0.42
+                normal = angle + math.pi / 2.0
+                _draw_pil_rotated_dab(
+                    draw,
+                    x + math.cos(normal) * side,
+                    y + math.sin(normal) * side,
+                    angle,
+                    width * (0.46 + noise * 0.48),
+                    max(1.0, width * (0.14 + noise * 0.14)),
+                    _pil_oil_color_variant(
+                        color,
+                        int(alpha * (0.24 + noise * 0.20)),
+                        hue_shift=(noise - 0.5) * 8,
+                        saturation_scale=0.88 + noise * 0.18,
+                        value_scale=0.74 + noise * 0.44,
+                    ),
+                )
+            return
+
+        if style == "flat_hog_oil":
+            _draw_pil_line(
+                draw,
+                points,
+                _pil_oil_color_variant(
+                    color, int(alpha * 0.50), saturation_scale=0.92, value_scale=0.78
+                ),
+                width * 0.82,
+            )
+            for lane in range(15):
+                pos = (lane - 7) / 7.0
+                noise = _paint_noise(lane, salt + 31)
+                lane_points = _offset_polyline_xy(points, pos * width * 0.46)
+                if noise > 0.46:
+                    lane_points = lane_points[::2] or lane_points
+                _draw_pil_line(
+                    draw,
+                    lane_points,
+                    _pil_oil_color_variant(
+                        color,
+                        int(alpha * (0.13 + noise * 0.16)),
+                        saturation_scale=0.90,
+                        value_scale=1.28 if pos < 0 else 0.62,
+                    ),
+                    max(1.0, width * (0.028 + noise * 0.032)),
+                )
+            return
+
+        if style == "fan_bristle_oil":
+            for lane in range(21):
+                pos = (lane - 10) / 10.0
+                noise = _paint_noise(lane, salt + 43)
+                spread = math.copysign(abs(pos) ** 0.78, pos)
+                lane_points = _offset_polyline_xy(points, spread * width * 0.54)
+                if lane % 3:
+                    lane_points = lane_points[::2] or lane_points
+                _draw_pil_line(
+                    draw,
+                    lane_points,
+                    _pil_oil_color_variant(
+                        color,
+                        int(alpha * (0.12 + noise * 0.22) * (1.0 - abs(pos) * 0.24)),
+                        saturation_scale=0.84 + noise * 0.22,
+                        value_scale=0.68 + noise * 0.58,
+                    ),
+                    max(1.0, width * (0.018 + noise * 0.030)),
+                )
+            return
+
+        if style == "rigger_oil":
+            _draw_pil_line(
+                draw,
+                points,
+                _pil_oil_color_variant(
+                    color, int(alpha * 0.72), saturation_scale=0.96, value_scale=0.88
+                ),
+                max(1.0, width * 0.54),
+            )
+            for lane, pos in enumerate((-0.22, 0.0, 0.22)):
+                noise = _paint_noise(lane, salt + 59)
+                _draw_pil_line(
+                    draw,
+                    _offset_polyline_xy(points, pos * width),
+                    _pil_oil_color_variant(
+                        color,
+                        int(alpha * (0.18 + noise * 0.18)),
+                        value_scale=1.30 if pos < 0 else 0.68,
+                    ),
+                    max(1.0, width * 0.10),
+                )
+            return
+
+        if style in {"scumble_oil", "stipple_oil"}:
+            step = max(3.0, width * (0.24 if style == "stipple_oil" else 0.20))
+            for x, y, angle, idx in _sample_polyline_xy(points, step):
+                noise = _paint_noise(idx, salt)
+                if style == "scumble_oil" and noise < 0.42:
+                    continue
+                for cluster in range(3 if style == "stipple_oil" else 2):
+                    grain = _paint_noise(idx * 7 + cluster, salt + 71)
+                    side = (grain - 0.5) * width * (1.0 if style == "stipple_oil" else 1.18)
+                    along = (_paint_noise(idx * 11 + cluster, salt + 83) - 0.5) * width * 0.44
+                    px = x + math.cos(angle) * along + math.cos(angle + math.pi / 2.0) * side
+                    py = y + math.sin(angle) * along + math.sin(angle + math.pi / 2.0) * side
+                    dab = _pil_oil_color_variant(
+                        color,
+                        int(alpha * (0.18 + grain * 0.28)),
+                        hue_shift=(grain - 0.5) * 8,
+                        saturation_scale=0.88,
+                        value_scale=0.72 + grain * 0.58,
+                    )
+                    if style == "stipple_oil":
+                        radius = max(1.0, width * (0.07 + grain * 0.12))
+                        draw.ellipse(
+                            [
+                                px - radius,
+                                py - radius * (0.72 + grain * 0.3),
+                                px + radius,
+                                py + radius * (0.72 + grain * 0.3),
+                            ],
+                            fill=dab,
+                        )
+                    else:
+                        _draw_pil_rotated_dab(
+                            draw,
+                            px,
+                            py,
+                            angle + (grain - 0.5) * 0.34,
+                            width * (0.28 + grain * 0.55),
+                            max(1.0, width * (0.045 + grain * 0.075)),
+                            dab,
+                        )
+            return
+
+        _draw_pil_line(
+            draw,
+            points,
+            _pil_oil_color_variant(
+                color, int(alpha * 0.24), saturation_scale=0.88, value_scale=0.72
+            ),
+            width * 0.62,
+        )
+        for x, y, angle, idx in _sample_polyline_xy(points, max(7.0, width * 0.42)):
+            noise = _paint_noise(idx, salt + 97)
+            if noise < 0.26:
+                continue
+            side = (_paint_noise(idx, salt + 101) - 0.5) * width * 0.72
+            normal = angle + math.pi / 2.0
+            _draw_pil_rotated_dab(
+                draw,
+                x + math.cos(normal) * side,
+                y + math.sin(normal) * side,
+                angle,
+                width * (0.70 + noise * 1.10),
+                max(1.0, width * (0.055 + noise * 0.070)),
+                _pil_oil_color_variant(
+                    color,
+                    int(alpha * (0.22 + noise * 0.28)),
+                    saturation_scale=0.90,
+                    value_scale=0.62 + noise * 0.72,
+                ),
+            )
         return
 
     if style == "palette_knife":
@@ -4138,8 +4869,15 @@ PAINT_TEXTURED_BRUSH_STYLES = frozenset(
         "bristle_oil",
         "dry_oil",
         "palette_knife",
+        "filbert_oil",
+        "flat_hog_oil",
+        "fan_bristle_oil",
+        "rigger_oil",
+        "scumble_oil",
+        "stipple_oil",
+        "knife_scrape_oil",
         "textured_chalk",
-    }
+    } | set(DESIGNER_BRUSH_STYLE_IDS)
 )
 PAINT_BRUSH_STYLE_IDS = frozenset(
     {"round", "marker", "highlighter", "dashed"} | set(PAINT_TEXTURED_BRUSH_STYLES)
@@ -4190,6 +4928,35 @@ def _normalize_paint_brush_style(style: str | None) -> str:
         "glaze_oil": "soft_oil_glaze",
         "bristle": "bristle_oil",
         "oil_bristle": "bristle_oil",
+        "filbert": "filbert_oil",
+        "filbert_brush": "filbert_oil",
+        "flat_hog": "flat_hog_oil",
+        "hog_bristle": "flat_hog_oil",
+        "fan": "fan_bristle_oil",
+        "fan_brush": "fan_bristle_oil",
+        "rigger": "rigger_oil",
+        "liner": "rigger_oil",
+        "scumble": "scumble_oil",
+        "stipple": "stipple_oil",
+        "knife_scrape": "knife_scrape_oil",
+        "soft_brush": "soft_round",
+        "flat_brush": "hard_flat",
+        "pixel": "pixel_square",
+        "pencil": "graphite_pencil",
+        "graphite": "graphite_pencil",
+        "charcoal": "charcoal_vine",
+        "ink": "technical_ink",
+        "watercolor": "watercolor_wash",
+        "gouache": "gouache_flat",
+        "acrylic": "acrylic_bristle",
+        "airbrush": "airbrush_soft",
+        "skin": "skin_blender",
+        "hair": "hair_strand",
+        "foliage": "foliage_scatter",
+        "cloud": "cloud_smoke",
+        "rock": "rock_ground",
+        "grunge": "fabric_grunge",
+        "splatter": "paint_splatter",
         "drybrush": "dry_oil",
         "dry_brush": "dry_oil",
         "knife": "palette_knife",
@@ -4294,6 +5061,10 @@ BRUSH_LIBRARY_PRESETS: list[dict[str, object]] = [
         "style": "loaded_oil",
         "width": 42,
         "opacity": 92,
+        "hardness": 86,
+        "spacing": 18,
+        "angle": -8,
+        "roundness": 54,
     },
     {
         "category": "Oils",
@@ -4301,6 +5072,10 @@ BRUSH_LIBRARY_PRESETS: list[dict[str, object]] = [
         "style": "impasto_oil",
         "width": 34,
         "opacity": 94,
+        "hardness": 94,
+        "spacing": 14,
+        "angle": 0,
+        "roundness": 62,
     },
     {
         "category": "Oils",
@@ -4308,6 +5083,10 @@ BRUSH_LIBRARY_PRESETS: list[dict[str, object]] = [
         "style": "oil_smear",
         "width": 38,
         "opacity": 72,
+        "hardness": 62,
+        "spacing": 12,
+        "angle": -12,
+        "roundness": 48,
     },
     {
         "category": "Oils",
@@ -4315,6 +5094,10 @@ BRUSH_LIBRARY_PRESETS: list[dict[str, object]] = [
         "style": "soft_oil_glaze",
         "width": 48,
         "opacity": 42,
+        "hardness": 28,
+        "spacing": 9,
+        "angle": 0,
+        "roundness": 76,
     },
     {
         "category": "Oils",
@@ -4322,6 +5105,10 @@ BRUSH_LIBRARY_PRESETS: list[dict[str, object]] = [
         "style": "real_wet_oil",
         "width": 28,
         "opacity": 88,
+        "hardness": 72,
+        "spacing": 12,
+        "angle": 4,
+        "roundness": 68,
     },
     {
         "category": "Oils",
@@ -4329,6 +5116,10 @@ BRUSH_LIBRARY_PRESETS: list[dict[str, object]] = [
         "style": "bristle_oil",
         "width": 22,
         "opacity": 84,
+        "hardness": 76,
+        "spacing": 20,
+        "angle": 0,
+        "roundness": 42,
     },
     {
         "category": "Oils",
@@ -4336,6 +5127,10 @@ BRUSH_LIBRARY_PRESETS: list[dict[str, object]] = [
         "style": "dry_oil",
         "width": 18,
         "opacity": 78,
+        "hardness": 88,
+        "spacing": 34,
+        "angle": 9,
+        "roundness": 38,
     },
     {
         "category": "Oils",
@@ -4343,6 +5138,87 @@ BRUSH_LIBRARY_PRESETS: list[dict[str, object]] = [
         "style": "palette_knife",
         "width": 30,
         "opacity": 90,
+        "hardness": 96,
+        "spacing": 22,
+        "angle": -18,
+        "roundness": 30,
+    },
+    {
+        "category": "Pro Oils",
+        "name": "Filbert Portrait",
+        "style": "filbert_oil",
+        "width": 28,
+        "opacity": 90,
+        "hardness": 82,
+        "spacing": 15,
+        "angle": -6,
+        "roundness": 58,
+    },
+    {
+        "category": "Pro Oils",
+        "name": "Hog Flat No. 12",
+        "style": "flat_hog_oil",
+        "width": 36,
+        "opacity": 94,
+        "hardness": 91,
+        "spacing": 17,
+        "angle": 0,
+        "roundness": 32,
+    },
+    {
+        "category": "Pro Oils",
+        "name": "Fan Foliage",
+        "style": "fan_bristle_oil",
+        "width": 44,
+        "opacity": 78,
+        "hardness": 74,
+        "spacing": 28,
+        "angle": 0,
+        "roundness": 44,
+    },
+    {
+        "category": "Pro Oils",
+        "name": "Rigger Long Line",
+        "style": "rigger_oil",
+        "width": 7,
+        "opacity": 92,
+        "hardness": 84,
+        "spacing": 8,
+        "angle": 0,
+        "roundness": 88,
+    },
+    {
+        "category": "Pro Oils",
+        "name": "Dry Scumble",
+        "style": "scumble_oil",
+        "width": 46,
+        "opacity": 68,
+        "hardness": 86,
+        "spacing": 42,
+        "angle": 12,
+        "roundness": 34,
+    },
+    {
+        "category": "Pro Oils",
+        "name": "Stipple Bloom",
+        "style": "stipple_oil",
+        "width": 24,
+        "opacity": 82,
+        "hardness": 72,
+        "spacing": 48,
+        "angle": 0,
+        "roundness": 100,
+    },
+    {
+        "category": "Pro Oils",
+        "name": "Knife Scrape",
+        "style": "knife_scrape_oil",
+        "width": 38,
+        "opacity": 86,
+        "hardness": 98,
+        "spacing": 30,
+        "angle": -22,
+        "roundness": 22,
     },
     {
         "category": "Texture",
@@ -4393,7 +5269,7 @@ BRUSH_LIBRARY_PRESETS: list[dict[str, object]] = [
         "width": 28,
         "opacity": 38,
     },
-]
+] + [dict(row) for row in DESIGNER_BRUSH_PRESETS]
 
 
 class PainterColorWheel(QWidget):
@@ -8461,9 +9337,23 @@ class PaintDialog(QDialog):
             ("Bristle Oil", "bristle_oil"),
             ("Dry Oil", "dry_oil"),
             ("Palette Knife", "palette_knife"),
+            ("Filbert Oil", "filbert_oil"),
+            ("Flat Hog Oil", "flat_hog_oil"),
+            ("Fan Bristle Oil", "fan_bristle_oil"),
+            ("Rigger Oil", "rigger_oil"),
+            ("Scumble Oil", "scumble_oil"),
+            ("Stipple Oil", "stipple_oil"),
+            ("Knife Scrape Oil", "knife_scrape_oil"),
             ("Textured Chalk", "textured_chalk"),
         ):
             self.brush_style_combo.addItem(label, style_id)
+        existing_styles = {
+            str(self.brush_style_combo.itemData(index))
+            for index in range(self.brush_style_combo.count())
+        }
+        for style_id in sorted(DESIGNER_BRUSH_STYLE_IDS):
+            if style_id not in existing_styles:
+                self.brush_style_combo.addItem(style_id.replace("_", " ").title(), style_id)
         self.brush_style_combo.currentIndexChanged.connect(self._on_brush_style_changed)
         style_row.addWidget(style_label)
         style_row.addWidget(self.brush_style_combo, stretch=1)
@@ -8782,6 +9672,10 @@ class PaintDialog(QDialog):
                 opacity=color.alpha(),
                 width_px=width,
                 brush_style=style,
+                brush_hardness=int(preset.get("hardness") or 100),
+                brush_spacing=int(preset.get("spacing") or 25),
+                brush_angle=int(preset.get("angle") or 0),
+                brush_roundness=int(preset.get("roundness") or 100),
             )
             DrawingCanvas._paint_stroke(painter, stroke, 76, 36)
             painter.setPen(QPen(QColor(255, 255, 255, 44), 1.0))
@@ -8834,10 +9728,17 @@ class PaintDialog(QDialog):
         self._pen_width = float(clamped_width)
         self._pen_opacity = int(clamped_opacity * 255 / 100)
         self._pen_style = style
+        for key in ("hardness", "spacing", "angle", "roundness"):
+            if key in preset:
+                self._brush_detail_settings[key] = int(preset[key])
+        for key in ("flip_x", "flip_y"):
+            if key in preset:
+                self._brush_detail_settings[key] = bool(preset[key])
         if hasattr(self, "canvas"):
             self.canvas.set_pen_style(style)
             self.canvas.set_pen_width(self._pen_width)
             self.canvas.set_pen_opacity(self._pen_opacity)
+            self.canvas.set_brush_detail(**self._canvas_brush_detail_payload())
         if hasattr(self, "brush_style_combo"):
             index = self.brush_style_combo.findData(style)
             if index >= 0:
@@ -8868,6 +9769,15 @@ class PaintDialog(QDialog):
         title.setObjectName("PaintSectionTitle")
         panel_layout.addWidget(title)
 
+        category_combo = QComboBox(panel)
+        category_combo.setObjectName("PaintBrushPopupCategory")
+        category_combo.addItem("All Brushes", "")
+        for category in sorted(
+            {str(row.get("category") or "Brushes") for row in BRUSH_LIBRARY_PRESETS}
+        ):
+            category_combo.addItem(category, category)
+        panel_layout.addWidget(category_combo)
+
         preset_list = QListWidget(panel)
         preset_list.setObjectName("PaintBrushPopupList")
         preset_list.setViewMode(QListView.ViewMode.IconMode)
@@ -8880,17 +9790,25 @@ class PaintDialog(QDialog):
         preset_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
         preset_list.setIconSize(QSize(76, 36))
         preset_list.setGridSize(QSize(94, 58))
-        for idx, preset in enumerate(BRUSH_LIBRARY_PRESETS):
-            category = str(preset.get("category") or "Brushes")
-            name = str(preset.get("name") or f"Brush {idx + 1}")
-            width = int(preset.get("width") or 1)
-            opacity = int(preset.get("opacity") or 100)
-            style = str(preset.get("style") or "round")
-            item = QListWidgetItem(self._brush_preset_icon(preset), "")
-            item.setData(Qt.ItemDataRole.UserRole, idx)
-            item.setToolTip(f"{category} | {name} | {style} | {width}px / {opacity}%")
-            item.setSizeHint(QSize(94, 58))
-            preset_list.addItem(item)
+        def _populate_popup_presets() -> None:
+            selected_category = str(category_combo.currentData() or "")
+            preset_list.clear()
+            for idx, preset in enumerate(BRUSH_LIBRARY_PRESETS):
+                category = str(preset.get("category") or "Brushes")
+                if selected_category and category != selected_category:
+                    continue
+                name = str(preset.get("name") or f"Brush {idx + 1}")
+                width = int(preset.get("width") or 1)
+                opacity = int(preset.get("opacity") or 100)
+                style = str(preset.get("style") or "round")
+                item = QListWidgetItem(self._brush_preset_icon(preset), "")
+                item.setData(Qt.ItemDataRole.UserRole, idx)
+                item.setToolTip(f"{category} | {name} | {style} | {width}px / {opacity}%")
+                item.setSizeHint(QSize(94, 58))
+                preset_list.addItem(item)
+
+        _populate_popup_presets()
+        category_combo.currentIndexChanged.connect(lambda _index: _populate_popup_presets())
 
         columns = min(4, max(1, preset_list.count()))
         rows = min(3, max(1, math.ceil(max(1, preset_list.count()) / columns)))

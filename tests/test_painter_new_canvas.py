@@ -218,7 +218,7 @@ def test_standalone_painter_pauses_repaints_while_window_moves() -> None:
 def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     app = _app()
     from PySide6.QtCore import QPointF, QSize, Qt
-    from PySide6.QtWidgets import QListView, QListWidget
+    from PySide6.QtWidgets import QComboBox, QListView, QListWidget
 
     from app.drawing import BRUSH_LIBRARY_PRESETS, PaintDialog, create_blank_paint_pixmap
     from app.i18n import tr
@@ -364,9 +364,23 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
         "palette_knife",
         "textured_chalk",
     } <= brush_styles
+    assert {
+        "filbert_oil",
+        "flat_hog_oil",
+        "fan_bristle_oil",
+        "rigger_oil",
+        "scumble_oil",
+        "stipple_oil",
+        "knife_scrape_oil",
+    } <= brush_styles
     brush_menu = dialog._build_brush_button_menu()
     brush_popup_list = brush_menu.findChild(QListWidget, "PaintBrushPopupList")
+    brush_popup_category = brush_menu.findChild(QComboBox, "PaintBrushPopupCategory")
     assert brush_popup_list is not None
+    assert brush_popup_category is not None
+    assert brush_popup_category.findText("Pro Oils") >= 0
+    assert brush_popup_category.findText("Water Media") >= 0
+    assert brush_popup_category.findText("Concept") >= 0
     assert brush_popup_list.viewMode() == QListView.ViewMode.IconMode
     assert brush_popup_list.count() == len(BRUSH_LIBRARY_PRESETS)
     assert brush_popup_list.item(0).text() == ""
@@ -378,6 +392,8 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert int(dialog._pen_width) == BRUSH_LIBRARY_PRESETS[0]["width"]
     assert dialog.canvas._pen_style == BRUSH_LIBRARY_PRESETS[0]["style"]
     assert dialog._pen_opacity == int(BRUSH_LIBRARY_PRESETS[0]["opacity"] * 255 / 100)
+    assert dialog._brush_detail_settings["hardness"] == BRUSH_LIBRARY_PRESETS[0]["hardness"]
+    assert dialog._brush_detail_settings["spacing"] == BRUSH_LIBRARY_PRESETS[0]["spacing"]
     assert "Brush:" in dialog._tool_status_label.text()
     assert dialog.selection_aspect_combo.parent() is dialog._selection_options_widget
     assert dialog.crop_apply_btn.parent() is dialog._selection_action_widget
@@ -611,6 +627,118 @@ def test_painter_oil_brush_renders_textured_preview_and_export(tmp_path: Path) -
         time_ms=0,
     )
     assert pil.getbbox() is not None
+
+
+def test_painter_pro_oil_brushes_render_distinct_textures() -> None:
+    _app()
+    from PySide6.QtGui import QImage, QPainter
+
+    from app.drawing import DrawingCanvas, Stroke
+
+    styles = (
+        "filbert_oil",
+        "flat_hog_oil",
+        "fan_bristle_oil",
+        "rigger_oil",
+        "scumble_oil",
+        "stipple_oil",
+        "knife_scrape_oil",
+    )
+    signatures: set[tuple[int, int, int]] = set()
+    for style in styles:
+        image = QImage(300, 100, QImage.Format.Format_ARGB32)
+        image.fill(0)
+        painter = QPainter(image)
+        try:
+            DrawingCanvas._paint_stroke(
+                painter,
+                Stroke(
+                    points=[(0.06, 0.72), (0.30, 0.28), (0.58, 0.66), (0.92, 0.34)],
+                    color=(214, 84, 38),
+                    opacity=236,
+                    width_px=28,
+                    brush_style=style,
+                ),
+                image.width(),
+                image.height(),
+            )
+        finally:
+            painter.end()
+        alpha_count = 0
+        color_count: set[tuple[int, int, int, int]] = set()
+        alpha_sum = 0
+        for y in range(0, image.height(), 2):
+            for x in range(0, image.width(), 2):
+                pixel = image.pixelColor(x, y)
+                if pixel.alpha() <= 0:
+                    continue
+                alpha_count += 1
+                alpha_sum += pixel.alpha()
+                color_count.add((pixel.red(), pixel.green(), pixel.blue(), pixel.alpha()))
+        assert alpha_count > 24, style
+        assert len(color_count) > 3, style
+        signatures.add((alpha_count, len(color_count), alpha_sum // max(1, alpha_count)))
+    assert len(signatures) == len(styles)
+
+
+def test_painter_designer_brush_catalog_renders_all_profiles() -> None:
+    _app()
+    from PySide6.QtGui import QImage, QPainter
+
+    from app.drawing import DrawingCanvas, Stroke
+    from app.painter_brush_catalog import (
+        DESIGNER_BRUSH_PRESETS,
+        DESIGNER_BRUSH_STYLE_IDS,
+    )
+
+    assert len(DESIGNER_BRUSH_PRESETS) >= 20
+    assert {
+        "soft_round",
+        "graphite_pencil",
+        "technical_ink",
+        "watercolor_wash",
+        "gouache_flat",
+        "airbrush_soft",
+        "hair_strand",
+        "foliage_scatter",
+        "cloud_smoke",
+        "rock_ground",
+        "fabric_grunge",
+        "paint_splatter",
+        "pixel_square",
+    } <= DESIGNER_BRUSH_STYLE_IDS
+
+    signatures: set[tuple[int, int]] = set()
+    for style in DESIGNER_BRUSH_STYLE_IDS:
+        image = QImage(240, 84, QImage.Format.Format_ARGB32)
+        image.fill(0)
+        painter = QPainter(image)
+        try:
+            DrawingCanvas._paint_stroke(
+                painter,
+                Stroke(
+                    points=[(0.08, 0.70), (0.34, 0.26), (0.62, 0.68), (0.92, 0.30)],
+                    color=(76, 142, 208),
+                    opacity=232,
+                    width_px=24,
+                    brush_style=style,
+                ),
+                image.width(),
+                image.height(),
+            )
+        finally:
+            painter.end()
+        alpha_count = 0
+        alpha_sum = 0
+        for y in range(0, image.height(), 2):
+            for x in range(0, image.width(), 2):
+                pixel_alpha = image.pixelColor(x, y).alpha()
+                if pixel_alpha > 0:
+                    alpha_count += 1
+                    alpha_sum += pixel_alpha
+        assert alpha_count > 8, style
+        signatures.add((alpha_count, alpha_sum // max(1, alpha_count)))
+    assert len(signatures) >= len(DESIGNER_BRUSH_STYLE_IDS) - 2
 
 
 def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeypatch, tmp_path) -> None:

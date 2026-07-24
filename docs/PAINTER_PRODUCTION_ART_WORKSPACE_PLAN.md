@@ -214,6 +214,34 @@ Brushes are the product core. Minimum production-art brush families:
 - Rock / Ground
 - Fabric / Grunge Texture
 
+Implemented professional oil subset (2026-07-25):
+
+- Filbert Portrait: rounded, overlapping loaded-paint deposits.
+- Hog Flat No. 12: square edge with individual stiff-bristle grooves.
+- Fan Foliage: separated, broken fan lanes for foliage and hair masses.
+- Rigger Long Line: narrow continuous core with subtle pigment lanes.
+- Dry Scumble: broken canvas-revealing deposits.
+- Stipple Bloom: clustered irregular oil dots.
+- Knife Scrape: sharp low body with raised broken deposits.
+- These are renderer-level styles, not names over one generic brush. The Qt
+  canvas and PIL/MP4 export paths share the same style contract, preset
+  thumbnails use actual stroke rendering, and Painter actions can select or
+  draw every style.
+
+Implemented designer catalog subset (2026-07-25):
+
+- Basic: hard/soft round, hard/soft flat, and pixel-square tips.
+- Drawing and Ink: graphite, vine/block charcoal, technical pen, expressive ink.
+- Water Media: transparent watercolor wash/edge and opaque gouache/acrylic.
+- Airbrush and Concept: soft airbrush, skin blender, hair, foliage, cloud/smoke.
+- Texture and FX: rock/ground, fabric/grunge, and paint splatter.
+- Each family has a renderer profile with distinct deposition behavior in Qt
+  preview and PIL/MP4 export. Presets carry real size, opacity, hardness,
+  spacing, angle, and roundness values.
+- The brush popup uses rendered tip thumbnails with `All Brushes` and category
+  filtering; the full inspector keeps Brush/Brush Presets and the familiar
+  Photoshop-style parameter-section layout.
+
 Brush parameter contract:
 
 - Size

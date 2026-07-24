@@ -6432,6 +6432,28 @@ AI Script Edit MVP integration:
   bristle lanes, and palette-knife scrape marks. This is an expressive
   textured-stroke engine, not a full Corel Painter-style wet media simulation
   with real pigment mixing or canvas-state smudge physics.
+- The 2026-07-25 professional oil pass adds seven renderer-distinct brush tips:
+  `filbert_oil`, `flat_hog_oil`, `fan_bristle_oil`, `rigger_oil`,
+  `scumble_oil`, `stipple_oil`, and `knife_scrape_oil`. They model rounded
+  filbert deposits, square hog-bristle grooves, separated fan lanes, long
+  rigger lines, canvas-revealing scumble, clustered stipple, and sharp broken
+  knife deposits in both Qt canvas output and PIL/MP4 export. `Pro Oils`
+  presets store real hardness, spacing, angle, and roundness values, apply
+  those values to the active controls, and use the same renderer for their
+  thumbnail previews. Both `paint.brush.set` and `paint.stroke.draw` expose
+  every professional style to local/Claude automation.
+- The 2026-07-25 designer catalog pass expands Painter beyond oil with 22
+  production presets across Basic, Drawing, Ink, Water Media, Airbrush,
+  Concept, Texture, and FX. Renderer styles include soft/flat/pixel tips,
+  graphite and charcoal grain, technical and expressive ink strands,
+  watercolor washes with edge deposits, opaque gouache/acrylic bristles,
+  soft airbrush and skin blending, hair/foliage/cloud brushes, rock/fabric
+  texture, and paint splatter. These use profile-driven Qt and PIL renderers,
+  not text-only aliases. The toolbar brush popup provides an `All Brushes`
+  view plus category filtering over actual rendered-tip thumbnails, while the
+  inspector retains Photoshop-style Brush/Brush Presets and parameter sections.
+  The catalog is a production v1 set; pressure/tilt-sensitive pigment mixing
+  and persistent wet-canvas fluid simulation remain later engine work.
 - The left Painter toolbar is a compact Photoshop-style single-column icon
   rail, not a text toolbar and not a two-column grid. It groups real supported
   tools with separators, keeps labels in tooltips/accessibility names, exposes

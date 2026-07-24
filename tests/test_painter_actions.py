@@ -26,7 +26,8 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     app.processEvents()
 
     registry = ActionRegistry(owner=dialog)
-    action_ids = {row["id"] for row in registry.list_actions()}
+    action_specs = {row["id"]: row for row in registry.list_actions()}
+    action_ids = set(action_specs)
     required = {
         "paint.state",
         "paint.gpu.status",
@@ -110,6 +111,17 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
         "paint.pbr.substrate_plan",
     }
     assert required <= action_ids
+    brush_style_enum = set(
+        action_specs["paint.brush.set"]["params_schema"]["properties"]["style"]["enum"]
+    )
+    assert {
+        "filbert_oil",
+        "graphite_pencil",
+        "watercolor_wash",
+        "airbrush_soft",
+        "foliage_scatter",
+        "paint_splatter",
+    } <= brush_style_enum
 
     state = registry.execute("paint.state").to_dict()
     assert state["ok"]
