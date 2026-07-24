@@ -18,7 +18,12 @@ from typing import Any, Mapping, Sequence
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter
 
-from app.ar_pbr.pbr_math import material_f0
+from app.ar_pbr.pbr_math import (
+    fresnel_schlick_f90,
+    material_f0,
+    substrate_f90,
+    substrate_metalness_to_diffuse_albedo_f0,
+)
 
 
 SCHEMA_ID = "tigerstudio.ar_pbr.texture_map_lab.v1"
@@ -63,6 +68,7 @@ PREVIEW_ONLY_SETTING_KEYS = frozenset(
         "preview_light_azimuth",
         "preview_light_elevation",
         "preview_environment",
+        "preview_animate_light",
     }
 )
 UNREAL_TEXTURE_IMPORT_SETTINGS: dict[str, dict[str, Any]] = {
@@ -112,6 +118,8 @@ class TextureMapLabSettings:
     metallic_value: float = 0.0
     metallic_threshold: float = 1.1
     metallic_softness: float = 0.08
+    substrate_enabled: bool = False
+    substrate_mode: str = "off"
     substrate_reflectance: float = 0.5
     f90_mask_strength: float = 0.45
     base_color_exposure: float = 0.0
@@ -119,6 +127,7 @@ class TextureMapLabSettings:
     preview_light_azimuth: float = 38.0
     preview_light_elevation: float = 48.0
     preview_environment: float = 0.42
+    preview_animate_light: bool = False
 
 
 def clamp_float(value: Any, minimum: float, maximum: float, default: float) -> float:
@@ -129,6 +138,19 @@ def clamp_float(value: Any, minimum: float, maximum: float, default: float) -> f
     if math.isnan(number) or math.isinf(number):
         number = float(default)
     return max(float(minimum), min(float(maximum), number))
+
+
+def bool_setting(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return bool(default)
+    text = str(value).strip().casefold()
+    if text in {"1", "true", "yes", "on", "enabled", "enable", "substrate", "slab"}:
+        return True
+    if text in {"0", "false", "no", "off", "disabled", "disable", "none"}:
+        return False
+    return bool(default)
 
 
 def _module_available(name: str) -> bool:
@@ -295,6 +317,19 @@ def normalize_texture_map_settings(settings: Mapping[str, Any] | None = None) ->
     normal_filter = str(raw.get("normal_filter", defaults.normal_filter) or defaults.normal_filter).strip().lower()
     if normal_filter not in {"sobel", "central_difference"}:
         normal_filter = defaults.normal_filter
+    substrate_mode = str(raw.get("substrate_mode", defaults.substrate_mode) or defaults.substrate_mode).strip().lower()
+    if substrate_mode in {"substrate", "substrate_slab", "bsdf_slab"}:
+        substrate_mode = "slab"
+    if substrate_mode not in {"off", "slab"}:
+        substrate_mode = defaults.substrate_mode
+    substrate_enabled = bool_setting(
+        raw.get("substrate_enabled", raw.get("use_substrate")),
+        substrate_mode == "slab" or defaults.substrate_enabled,
+    )
+    if substrate_enabled:
+        substrate_mode = "slab"
+    else:
+        substrate_mode = "off"
     return {
         "schema_id": SCHEMA_ID,
         "normal_strength": clamp_float(raw.get("normal_strength"), 0.0, 12.0, defaults.normal_strength),
@@ -327,6 +362,8 @@ def normalize_texture_map_settings(settings: Mapping[str, Any] | None = None) ->
         "metallic_value": clamp_float(raw.get("metallic_value"), 0.0, 1.0, defaults.metallic_value),
         "metallic_threshold": clamp_float(raw.get("metallic_threshold"), 0.0, 1.5, defaults.metallic_threshold),
         "metallic_softness": clamp_float(raw.get("metallic_softness"), 0.001, 0.5, defaults.metallic_softness),
+        "substrate_enabled": substrate_enabled,
+        "substrate_mode": substrate_mode,
         "substrate_reflectance": clamp_float(
             raw.get("substrate_reflectance"),
             0.0,
@@ -349,6 +386,10 @@ def normalize_texture_map_settings(settings: Mapping[str, Any] | None = None) ->
             defaults.preview_light_elevation,
         ),
         "preview_environment": clamp_float(raw.get("preview_environment"), 0.0, 1.5, defaults.preview_environment),
+        "preview_animate_light": bool_setting(
+            raw.get("preview_animate_light"),
+            defaults.preview_animate_light,
+        ),
     }
 
 
@@ -1123,11 +1164,18 @@ def _algorithm_metadata(settings: Mapping[str, Any]) -> dict[str, Any]:
             "method": "metalness_to_substrate_f0",
             "source": "base_color_metallic_reflectance",
             "reflectance": float(settings.get("substrate_reflectance", 0.5)),
+            "active_workflow": bool(settings.get("substrate_enabled", False)),
         },
         "f90_mask": {
             "method": "heuristic_grazing_response_mask",
             "source": "heightfield_relief_curvature_smoothness_ao",
             "strength": float(settings.get("f90_mask_strength", 0.45)),
+        },
+        "substrate": {
+            "enabled": bool(settings.get("substrate_enabled", False)),
+            "mode": str(settings.get("substrate_mode", "off")),
+            "metallic_direct_input": False if bool(settings.get("substrate_enabled", False)) else True,
+            "metallic_policy": "helper_input_only_when_substrate_enabled",
         },
         "edge_aware": bool(settings.get("edge_aware_smoothing", True)),
     }
@@ -1193,7 +1241,14 @@ def substrate_export_plan(settings: Mapping[str, Any] | None = None) -> dict[str
     return {
         "schema_id": f"{SCHEMA_ID}.unreal_substrate",
         "target": "Unreal Engine Substrate Slab BSDF",
+        "enabled": bool(normalized.get("substrate_enabled", False)),
+        "mode": str(normalized.get("substrate_mode", "off")),
         "legacy_pbr_compatibility": True,
+        "metallic_policy": (
+            "disabled_as_direct_substrate_input_helper_conversion_only"
+            if bool(normalized.get("substrate_enabled", False))
+            else "legacy_default_lit_direct_input"
+        ),
         "generated_map_algorithms": _algorithm_metadata(normalized),
         "normal": {
             "format": normalized["normal_format"],
@@ -1353,7 +1408,26 @@ def _preview_array_for_mode(maps: Mapping[str, np.ndarray], settings: Mapping[st
     roughness = np.asarray(maps["roughness"], dtype=np.float32)
     metallic = np.asarray(maps["metallic"], dtype=np.float32)
     ao = np.asarray(maps["ao"], dtype=np.float32)
-    f0 = np.asarray(maps.get("f0", material_f0(base, metallic, settings.get("substrate_reflectance", 0.5))), dtype=np.float32)
+    substrate_enabled = bool(settings.get("substrate_enabled", False))
+    if substrate_enabled:
+        diffuse_albedo, f0 = substrate_metalness_to_diffuse_albedo_f0(
+            albedo=base,
+            metallic=metallic,
+            reflectance=settings.get("substrate_reflectance", 0.5),
+            f0_override=maps.get("f0"),
+        )
+        f90_mask = np.asarray(maps.get("f90_mask", np.ones_like(metallic)), dtype=np.float32)
+        f90 = substrate_f90(
+            f0=f0,
+            f90_color=(1.0, 1.0, 1.0),
+            f90_mask=f90_mask,
+            strength=float(settings.get("f90_mask_strength", 0.45)),
+        )
+        fresnel = fresnel_schlick_f90(np.full_like(roughness, vdoth, dtype=np.float32), f0, f90)
+    else:
+        diffuse_albedo = base
+        f0 = np.asarray(maps.get("f0", material_f0(base, metallic, settings.get("substrate_reflectance", 0.5))), dtype=np.float32)
+        fresnel = f0 + (1.0 - f0) * ((1.0 - vdoth) ** 5.0)
     # Inline a simplified preview BRDF so the plane render remains responsive.
     alpha = np.maximum(roughness * roughness, 0.001)
     alpha2 = alpha * alpha
@@ -1362,14 +1436,16 @@ def _preview_array_for_mode(maps: Mapping[str, np.ndarray], settings: Mapping[st
     k = ((roughness + 1.0) * (roughness + 1.0)) / 8.0
     gv = ndotv / np.maximum(ndotv * (1.0 - k) + k, 1.0e-5)
     gl = ndotl / np.maximum(ndotl * (1.0 - k) + k, 1.0e-5)
-    fresnel = f0 + (1.0 - f0) * ((1.0 - vdoth) ** 5.0)
-    diffuse = (1.0 - fresnel) * (1.0 - metallic[..., None]) * base / np.pi
+    if substrate_enabled:
+        diffuse = (1.0 - fresnel) * diffuse_albedo / np.pi
+    else:
+        diffuse = (1.0 - fresnel) * (1.0 - metallic[..., None]) * base / np.pi
     specular = (d[..., None] * gv[..., None] * gl[..., None] * fresnel) / np.maximum(
         4.0 * ndotv[..., None] * ndotl[..., None],
         1.0e-5,
     )
     lit = (diffuse + specular) * ndotl[..., None] * 2.2
-    env = base * float(settings["preview_environment"]) * ao[..., None]
+    env = diffuse_albedo * float(settings["preview_environment"]) * ao[..., None]
     preview = env + lit * ao[..., None]
     return np.clip(preview, 0.0, 1.0).astype(np.float32)
 
@@ -1391,7 +1467,12 @@ def export_texture_maps(
         out_dir = Path(output_dir).expanduser()
     out_dir.mkdir(parents=True, exist_ok=True)
     generated = generate_texture_maps(path, settings, max_size=max_size, backend=backend)
-    map_names = _normalize_name_list(maps, DEFAULT_SEPARATE_MAPS)
+    default_maps = (
+        tuple(name for name in DEFAULT_SEPARATE_MAPS if name != "metallic") + OPTIONAL_SUBSTRATE_MAPS
+        if bool(generated["settings"].get("substrate_enabled", False))
+        else DEFAULT_SEPARATE_MAPS
+    )
+    map_names = _normalize_name_list(maps, default_maps)
     layout_names = _normalize_name_list(packed_layouts, DEFAULT_PACKED_LAYOUTS)
     files: dict[str, str] = {}
     for name in map_names:

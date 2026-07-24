@@ -9,10 +9,14 @@ from app.ar_pbr.anisotropy import (
 )
 from app.ar_pbr.pbr_math import (
     cook_torrance_direct,
+    cook_torrance_substrate_slab_direct,
     energy_conserving_diffuse_weight,
     fresnel_schlick,
+    fresnel_schlick_f90,
     material_f0,
     srgb_to_linear,
+    substrate_f90,
+    substrate_metalness_to_diffuse_albedo_f0,
 )
 from app.ar_pbr.ambient_occlusion import normalize_ambient_occlusion_settings
 from app.ar_pbr.depth_occlusion import (
@@ -41,6 +45,7 @@ from app.ar_pbr.microsurface import (
 )
 from app.ar_pbr.parallax import apply_parallax_uv, normalize_parallax_settings
 from app.ar_pbr.subsurface import apply_subsurface_scattering, normalize_subsurface_settings
+from app.ar_pbr.substrate import normalize_substrate_settings
 from app.ar_pbr.surface import normalize_surface_settings
 from app.ar_pbr.tone_mapping import apply_display_transform, normalize_color_management_settings
 from app.ar_pbr.transmission import apply_screen_space_refraction, normalize_transmission_settings
@@ -171,6 +176,7 @@ def _draw_pbr_triangles(
     lens_effects_rendering = normalize_lens_effects_settings(lighting)
     lens_flare_rendering = normalize_lens_flare_settings(lighting)
     triplanar_rendering = normalize_triplanar_settings(lighting)
+    substrate_rendering = normalize_substrate_settings(lighting)
     diagnostics["pbr_color_management"] = color_management
     diagnostics["pbr_hybrid_rendering"] = hybrid_rendering
     diagnostics["pbr_ray_gi_detail"] = ray_gi_detail
@@ -194,6 +200,7 @@ def _draw_pbr_triangles(
     diagnostics["pbr_lens_effects_rendering"] = lens_effects_rendering
     diagnostics["pbr_lens_flare_rendering"] = lens_flare_rendering
     diagnostics["pbr_triplanar_rendering"] = triplanar_rendering
+    diagnostics["pbr_substrate_rendering"] = substrate_rendering
     hdri_path = str(lighting.get("hdri_path") or "")
     ibl_probe = _load_ibl_probe(hdri_path)
     hdri_env = ibl_probe.environment if ibl_probe is not None and ibl_probe.available else None
@@ -230,12 +237,19 @@ def _draw_pbr_triangles(
         if not isinstance(tri, Mapping):
             continue
         maps = tri.get("maps") if isinstance(tri.get("maps"), Mapping) else {}
+        tri_substrate_rendering = normalize_substrate_settings(lighting, maps=maps or {})
+        if bool(tri_substrate_rendering.get("enabled")):
+            diagnostics["pbr_substrate_rendering"] = tri_substrate_rendering
         unlit = str((maps or {}).get("unlit") or "").strip().casefold() in {"1", "true", "yes", "on"}
         texture_path = str((maps or {}).get("base") or tri.get("texture") or "")
         base_arr = _texture_array(texture_path)
         rough_arr = _texture_array(str((maps or {}).get("roughness") or ""))
         metal_arr = _texture_array(str((maps or {}).get("metallic") or ""))
         spec_arr = _texture_array(str((maps or {}).get("specular") or ""))
+        diffuse_albedo_arr = _texture_array(str((maps or {}).get("diffuse_albedo") or ""))
+        f0_arr = _texture_array(str((maps or {}).get("f0") or ""))
+        f90_arr = _texture_array(str((maps or {}).get("f90") or ""))
+        f90_mask_arr = _texture_array(str((maps or {}).get("f90_mask") or ""))
         normal_arr = _texture_array(str((maps or {}).get("normal") or ""))
         occlusion_arr = _texture_array(str((maps or {}).get("occlusion") or ""))
         emissive_arr = _texture_array(str((maps or {}).get("emissive") or ""))
@@ -245,6 +259,10 @@ def _draw_pbr_triangles(
         rough_udim = _texture_udim_arrays(maps or {}, "roughness")
         metal_udim = _texture_udim_arrays(maps or {}, "metallic")
         spec_udim = _texture_udim_arrays(maps or {}, "specular")
+        diffuse_albedo_udim = _texture_udim_arrays(maps or {}, "diffuse_albedo")
+        f0_udim = _texture_udim_arrays(maps or {}, "f0")
+        f90_udim = _texture_udim_arrays(maps or {}, "f90")
+        f90_mask_udim = _texture_udim_arrays(maps or {}, "f90_mask")
         normal_udim = _texture_udim_arrays(maps or {}, "normal")
         occlusion_udim = _texture_udim_arrays(maps or {}, "occlusion")
         emissive_udim = _texture_udim_arrays(maps or {}, "emissive")
@@ -255,12 +273,30 @@ def _draw_pbr_triangles(
             and rough_arr is None
             and metal_arr is None
             and spec_arr is None
+            and diffuse_albedo_arr is None
+            and f0_arr is None
+            and f90_arr is None
+            and f90_mask_arr is None
             and normal_arr is None
             and occlusion_arr is None
             and emissive_arr is None
             and opacity_arr is None
             and height_arr is None
-            and not any((base_udim, rough_udim, metal_udim, spec_udim, normal_udim, occlusion_udim, emissive_udim, opacity_udim, height_udim))
+            and not any((
+                base_udim,
+                rough_udim,
+                metal_udim,
+                spec_udim,
+                diffuse_albedo_udim,
+                f0_udim,
+                f90_udim,
+                f90_mask_udim,
+                normal_udim,
+                occlusion_udim,
+                emissive_udim,
+                opacity_udim,
+                height_udim,
+            ))
         ):
             diagnostics.setdefault("warnings", []).append(f"pbr triangle skipped missing texture maps: {texture_path}")
             continue
@@ -626,6 +662,54 @@ def _draw_pbr_triangles(
                 )
                 if emissive_arr is not None or emissive_udim else None
             )
+            diffuse_albedo_sample = (
+                _sample_texture_projected(
+                    diffuse_albedo_udim,
+                    diffuse_albedo_arr,
+                    u,
+                    v,
+                    world_pos=triplanar_pos,
+                    normal=triplanar_normal,
+                    settings=triplanar_rendering,
+                )
+                if diffuse_albedo_arr is not None or diffuse_albedo_udim else None
+            )
+            f0_sample = (
+                _sample_texture_projected(
+                    f0_udim,
+                    f0_arr,
+                    u,
+                    v,
+                    world_pos=triplanar_pos,
+                    normal=triplanar_normal,
+                    settings=triplanar_rendering,
+                )
+                if f0_arr is not None or f0_udim else None
+            )
+            f90_sample = (
+                _sample_texture_projected(
+                    f90_udim,
+                    f90_arr,
+                    u,
+                    v,
+                    world_pos=triplanar_pos,
+                    normal=triplanar_normal,
+                    settings=triplanar_rendering,
+                )
+                if f90_arr is not None or f90_udim else None
+            )
+            f90_mask_sample = (
+                _sample_texture_projected(
+                    f90_mask_udim,
+                    f90_mask_arr,
+                    u,
+                    v,
+                    world_pos=triplanar_pos,
+                    normal=triplanar_normal,
+                    settings=triplanar_rendering,
+                )
+                if f90_mask_arr is not None or f90_mask_udim else None
+            )
             rough_channel = _sample_texture_channel(rough_sample, _map_channel(maps or {}, "roughness", 0))
             metal_channel = _sample_texture_channel(metal_sample, _map_channel(maps or {}, "metallic", 0))
             spec_channel = _sample_texture_channel(spec_sample, _map_channel(maps or {}, "specular", 0))
@@ -716,8 +800,64 @@ def _draw_pbr_triangles(
                     float(micro_roughness_diag.get("max_delta", 0.0) or 0.0),
                 )
 
-            f0 = material_f0(albedo, metallic, reflectance)
-            fresnel = fresnel_schlick(ndotv, f0)
+            substrate_enabled = bool(tri_substrate_rendering.get("enabled"))
+            f0_override = None
+            diffuse_albedo = None
+            f90_mask = np.ones_like(roughness, dtype=np.float32)
+            if f0_sample is not None:
+                f0_override = np.clip(f0_sample[:, :, :3], 0.0, 1.0)
+                diagnostics["pbr_substrate_f0_map_applied"] = True
+                diagnostics["pbr_substrate_f0_map_pixels"] = int(
+                    diagnostics.get("pbr_substrate_f0_map_pixels", 0) or 0
+                ) + int((alpha > 0.001).sum())
+            if diffuse_albedo_sample is not None:
+                diffuse_albedo = srgb_to_linear(diffuse_albedo_sample[:, :, :3])
+                diagnostics["pbr_substrate_diffuse_albedo_map_applied"] = True
+                diagnostics["pbr_substrate_diffuse_albedo_map_pixels"] = int(
+                    diagnostics.get("pbr_substrate_diffuse_albedo_map_pixels", 0) or 0
+                ) + int((alpha > 0.001).sum())
+            f90_mask_channel = _sample_texture_channel(
+                f90_mask_sample,
+                _map_channel(maps or {}, "f90_mask", 0),
+            )
+            if f90_mask_channel is not None:
+                f90_mask = np.clip(f90_mask_channel, 0.0, 1.0)
+                diagnostics["pbr_substrate_f90_mask_map_applied"] = True
+                diagnostics["pbr_substrate_f90_mask_map_pixels"] = int(
+                    diagnostics.get("pbr_substrate_f90_mask_map_pixels", 0) or 0
+                ) + int((alpha > 0.001).sum())
+            if substrate_enabled:
+                helper_diffuse_albedo, f0 = substrate_metalness_to_diffuse_albedo_f0(
+                    albedo=albedo,
+                    metallic=metallic,
+                    reflectance=reflectance,
+                    f0_override=f0_override,
+                )
+                if diffuse_albedo is None:
+                    diffuse_albedo = helper_diffuse_albedo
+                if f90_sample is not None:
+                    f90_color = np.clip(f90_sample[:, :, :3], 0.0, 1.0)
+                    diagnostics["pbr_substrate_f90_map_applied"] = True
+                    diagnostics["pbr_substrate_f90_map_pixels"] = int(
+                        diagnostics.get("pbr_substrate_f90_map_pixels", 0) or 0
+                    ) + int((alpha > 0.001).sum())
+                else:
+                    f90_color = np.asarray(tri_substrate_rendering.get("f90_color") or [1.0, 1.0, 1.0], dtype=np.float32)
+                f90 = substrate_f90(
+                    f0=f0,
+                    f90_color=f90_color,
+                    f90_mask=f90_mask * float(tri_substrate_rendering.get("f90_mask_strength", 1.0) or 1.0),
+                    strength=float(tri_substrate_rendering.get("f90_strength", 1.0) or 1.0),
+                )
+                fresnel = fresnel_schlick_f90(ndotv, f0, f90)
+                diagnostics["pbr_substrate_applied"] = True
+                diagnostics["pbr_substrate_pixels"] = int(
+                    diagnostics.get("pbr_substrate_pixels", 0) or 0
+                ) + int((alpha > 0.001).sum())
+            else:
+                f0 = material_f0(albedo, metallic, reflectance)
+                fresnel = fresnel_schlick(ndotv, f0)
+                diffuse_albedo = albedo
             diffuse_env = None
             spec_env_rgb = None
             brdf_terms = None
@@ -767,23 +907,42 @@ def _draw_pbr_triangles(
             else:
                 specular_term = fresnel * (1.25 - roughness[:, :, None] * 0.45)
 
-            diffuse_weight = energy_conserving_diffuse_weight(fresnel, metallic)
-            diffuse = albedo * diffuse_env * diffuse_weight * ao[:, :, None]
+            if substrate_enabled:
+                diffuse_weight = np.clip(1.0 - fresnel, 0.0, 1.0)
+                shading_metallic = np.zeros_like(metallic, dtype=np.float32)
+            else:
+                diffuse_weight = energy_conserving_diffuse_weight(fresnel, metallic)
+                shading_metallic = metallic
+            diffuse = diffuse_albedo * diffuse_env * diffuse_weight * ao[:, :, None]
             specular_env = spec_env_rgb * specular_term * (0.64 + 0.36 * ao[:, :, None])
             vdoth = np.maximum(view[0] * half_vec[0] + view[1] * half_vec[1] + view[2] * half_vec[2], 0.0)
-            direct = cook_torrance_direct(
-                albedo=albedo,
-                f0=f0,
-                roughness=roughness,
-                metallic=metallic,
-                ndotl=lambert,
-                ndotv=ndotv,
-                ndoth=hdotn,
-                vdoth=np.full_like(roughness, float(vdoth), dtype=np.float32),
-                light_strength=direct_strength,
-                ao=ao,
-            )
-            fill = albedo * (0.045 + roughness[:, :, None] * 0.03) * diffuse_weight * (0.48 + 0.52 * ao[:, :, None])
+            if substrate_enabled:
+                direct = cook_torrance_substrate_slab_direct(
+                    diffuse_albedo=diffuse_albedo,
+                    f0=f0,
+                    f90=f90,
+                    roughness=roughness,
+                    ndotl=lambert,
+                    ndotv=ndotv,
+                    ndoth=hdotn,
+                    vdoth=np.full_like(roughness, float(vdoth), dtype=np.float32),
+                    light_strength=direct_strength,
+                    ao=ao,
+                )
+            else:
+                direct = cook_torrance_direct(
+                    albedo=albedo,
+                    f0=f0,
+                    roughness=roughness,
+                    metallic=metallic,
+                    ndotl=lambert,
+                    ndotv=ndotv,
+                    ndoth=hdotn,
+                    vdoth=np.full_like(roughness, float(vdoth), dtype=np.float32),
+                    light_strength=direct_strength,
+                    ao=ao,
+                )
+            fill = diffuse_albedo * (0.045 + roughness[:, :, None] * 0.03) * diffuse_weight * (0.48 + 0.52 * ao[:, :, None])
             direct_clamp = float(ray_gi_detail.get("direct_radiance_clamp", 0.0) or 0.0)
             indirect_clamp = float(ray_gi_detail.get("indirect_radiance_clamp", 0.0) or 0.0)
             if bool(ray_gi_detail.get("enabled")) and direct_clamp > 0.0:
@@ -796,13 +955,13 @@ def _draw_pbr_triangles(
             rgb = indirect + direct + emissive
             rgb = apply_hybrid_gi(
                 rgb,
-                albedo=albedo,
+                albedo=diffuse_albedo,
                 diffuse_env=diffuse_env,
                 spec_env=spec_env_rgb,
                 diffuse_weight=diffuse_weight,
                 fresnel=fresnel,
                 roughness=roughness,
-                metallic=metallic,
+                metallic=shading_metallic,
                 ao=ao,
                 settings=hybrid_rendering,
             )

@@ -81,7 +81,21 @@ def material_texture_maps(
     if not isinstance(maps, Mapping):
         return {}
     out: dict[str, str] = {}
-    for key in ("base", "roughness", "metallic", "specular", "normal", "occlusion", "emissive", "opacity", "height"):
+    for key in (
+        "base",
+        "roughness",
+        "metallic",
+        "specular",
+        "diffuse_albedo",
+        "f0",
+        "f90",
+        "f90_mask",
+        "normal",
+        "occlusion",
+        "emissive",
+        "opacity",
+        "height",
+    ):
         path = str(maps.get(key) or "")
         if path:
             out[key] = path
@@ -106,6 +120,11 @@ def material_texture_maps(
         "uv_v_flip",
         "shader_model",
         "source_shader",
+        "substrate_enabled",
+        "substrate_mode",
+        "substrate_f90_color",
+        "substrate_f90_strength",
+        "substrate_f90_mask_strength",
         "render_queue",
         "mtoon_render_queue",
         "mtoon_cull_mode",

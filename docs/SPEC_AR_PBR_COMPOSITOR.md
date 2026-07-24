@@ -686,7 +686,7 @@ buffer once that buffer is exposed in the service path.
 
 ## Image Texture Map Lab
 
-As of 2026-07-23, AR/PBR also includes an image-to-material texture lab for
+As of 2026-07-24, AR/PBR also includes an image-to-material texture lab for
 turning a source image into Unreal-friendly PBR texture maps. This is separate
 from 3D model preview: it maps the generated material onto a renderer plane so
 users can inspect normals, AO, roughness, metallic response, and packed maps
@@ -704,13 +704,21 @@ The lab must provide:
 - Plane material preview rendered from the generated maps.
 - Slider controls for normal strength/radius, height contrast/blur, AO
   strength/radius, cavity/curvature, roughness bias/contrast/detail,
-  metallic value, optional Substrate reflectance/F90 mask strength, and
-  preview light/environment.
+  metallic value, optional Substrate reflectance/F90 mask strength, Substrate
+  Slab mode, preview light/environment, and animated-light preview.
 - Individual export for `base_color`, `normal`, `ao`, `roughness`,
   `metallic`, `height`, `cavity`, and `curvature`.
 - Optional advanced Substrate export for `f0` and `f90_mask`; these are
   disabled by default and must be requested explicitly through the UI checkboxes
-  or the `maps` parameter.
+  or the `maps` parameter in normal Default Lit workflow. When Texture Lab
+  `Substrate Slab` mode is enabled, `f0` and `f90_mask` become default
+  separate-map exports and `metallic` is removed from the default separate
+  export. Metallic remains generated internally as a helper input for
+  `Substrate Metalness-To-DiffuseAlbedo-F0`, so the UI must show Metallic as a
+  disabled/locked direct input rather than as a direct Substrate socket.
+- The `Animate Light` preview option orbits the preview point light in XY so
+  normal, AO, roughness, F0, and F90 response can be inspected without
+  regenerating texture maps.
 - Channel-packed export layouts:
   - `unreal_orm` / `orm` / `arm`: R=AO, G=Roughness, B=Metallic.
   - `rma`: R=Roughness, G=Metallic, B=AO.
@@ -749,14 +757,21 @@ Unreal/Substrate research outcome:
   BaseColor/Specular/Metallic into Slab `DiffuseAlbedo` and `F0`. The texture
   lab manifest therefore emits this wiring plan instead of pretending
   Substrate has the same direct `Metallic` input as Default Lit.
+- TigerCapture's renderer implements a Substrate Slab output-match path, not a
+  full Unreal renderer clone. The packet and software renderers convert
+  BaseColor/Metallic/Reflectance to `DiffuseAlbedo/F0`, optionally sample
+  `diffuse_albedo`, `f0`, `f90`, and `f90_mask` maps, and shade with an
+  F90-aware Slab approximation. Existing metal/rough PBR remains the default
+  path unless Substrate settings or maps are present.
 - The lab defaults to Unreal/DirectX normal-map orientation. If an OpenGL-style
   normal is requested, the manifest marks that Unreal should flip the green
   channel.
 - Advanced Substrate-specific `f0` and `f90_mask` maps are available as
   optional exports. `f0` is derived from BaseColor/Metallic/reflectance and
-  `f90_mask` is a heuristic grazing-response mask; neither is part of the
-  default export set. Second roughness, anisotropy plus tangent direction, fuzz,
-  and glint remain future optional generators.
+  `f90_mask` is a heuristic grazing-response mask. They become default
+  separate exports only when the user explicitly enables Texture Lab
+  `Substrate Slab` mode. Second roughness, anisotropy plus tangent direction,
+  fuzz, and glint remain future optional generators.
 
 Research references used for this contract:
 

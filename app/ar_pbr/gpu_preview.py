@@ -46,6 +46,7 @@ from app.ar_pbr.lens_flare import normalize_lens_flare_settings
 from app.ar_pbr.render_passes import normalize_render_pass_settings
 from app.ar_pbr.motion_blur import merge_motion_blur_settings
 from app.ar_pbr.subsurface import normalize_subsurface_settings
+from app.ar_pbr.substrate import normalize_substrate_settings
 from app.ar_pbr.surface import normalize_surface_settings
 from app.ar_pbr.triplanar import normalize_triplanar_settings
 from app.ar_pbr.transmission import normalize_transmission_settings
@@ -219,6 +220,7 @@ def build_gpu_preview_items(
         "texture_material_count": 0,
         "texture_missing_count": 0,
         "texture_tinted_triangle_count": 0,
+        "pbr_substrate_material_count": 0,
         "pbr_triangle_count": 0,
         "live_depth_texture_triangle_count": 0,
         "shadow_triangle_count": 0,
@@ -362,6 +364,7 @@ def build_gpu_preview_items(
         render_passes = normalize_render_pass_settings(lighting)
         motion_blur = merge_motion_blur_settings(settings_map, lighting)
         triplanar_rendering = normalize_triplanar_settings(lighting)
+        substrate_rendering = normalize_substrate_settings(lighting)
         shadow_catcher_settings = catcher_settings["shadow_catcher"]
         reflection_catcher_settings = catcher_settings["reflection_catcher"]
         light_dir = _light_direction_from_lighting(lighting, (-0.35, -0.65, -0.72))
@@ -403,6 +406,19 @@ def build_gpu_preview_items(
             texture_color = material_base_texture_color(texture_plan, material, alpha=base_color[3])
             texture_path = material_base_texture_path(texture_plan, material)
             texture_maps = gpu_material_packets.material_texture_maps(texture_plan, material)
+            material_substrate = normalize_substrate_settings(lighting, maps=texture_maps)
+            if bool(material_substrate.get("enabled")):
+                texture_maps = {
+                    **texture_maps,
+                    "substrate_enabled": "1",
+                    "substrate_mode": "slab",
+                    "substrate_f90_color": ",".join(str(v) for v in material_substrate.get("f90_color", [])),
+                    "substrate_f90_strength": str(material_substrate.get("f90_strength", 1.0)),
+                    "substrate_f90_mask_strength": str(material_substrate.get("f90_mask_strength", 1.0)),
+                }
+                diagnostics["pbr_substrate_material_count"] = int(
+                    diagnostics.get("pbr_substrate_material_count", 0) or 0
+                ) + 1
             force_marmoset_pbr = render_profile == PROFILE_MARMOSET_PBR and gpu_material_packets.material_has_pbr_data(material)
             is_unlit_material = gpu_material_packets.material_unlit(material) and not force_marmoset_pbr
             is_mtoon_material = render_profile == PROFILE_VRM_MTOON and is_unlit_material
@@ -797,6 +813,11 @@ def build_gpu_preview_items(
                     "surface_roughness": float(surface_rendering["roughness"]),
                     "surface_metallic": float(surface_rendering["metallic"]),
                     "surface_reflectance": float(surface_rendering["reflectance"]),
+                    "substrate_enabled": bool(substrate_rendering["enabled"]),
+                    "substrate_mode": str(substrate_rendering["mode"]),
+                    "substrate_f90_color": list(substrate_rendering["f90_color"]),
+                    "substrate_f90_strength": float(substrate_rendering["f90_strength"]),
+                    "substrate_f90_mask_strength": float(substrate_rendering["f90_mask_strength"]),
                     "subsurface_mode": str(subsurface_rendering["mode"]),
                     "subsurface_enabled": bool(subsurface_rendering["enabled"]),
                     "subsurface_strength": float(subsurface_rendering["strength"]),
@@ -971,6 +992,7 @@ def build_gpu_preview_items(
                 "bevel_rendering": bevel_rendering,
                 "material_layering": material_layering,
                 "subsurface_rendering": subsurface_rendering,
+                "substrate_rendering": substrate_rendering,
                 "hair_groom_rendering": hair_groom_rendering,
                 "cloth_sheen_rendering": cloth_sheen_rendering,
                 "glint_sparkle_rendering": glint_sparkle_rendering,
@@ -1186,6 +1208,24 @@ def build_gpu_preview_items(
             diagnostics["gpu_renderer"]["material_layering"] = str(first_layer.get("mode") or "layered")
             diagnostics["gpu_renderer"]["material_layer"] = "single_overlay_material_layer"
             diagnostics["gpu_renderer"]["material_layer_blend"] = float(first_layer.get("blend", 0.0) or 0.0)
+        substrate_rows = [
+            item.get("substrate_rendering")
+            for item in items
+            if isinstance(item, Mapping) and isinstance(item.get("substrate_rendering"), Mapping)
+        ]
+        if any(bool(row.get("enabled")) for row in substrate_rows):
+            first_substrate = next(row for row in substrate_rows if bool(row.get("enabled")))
+            diagnostics["gpu_renderer"]["substrate_rendering"] = str(first_substrate.get("mode") or "slab")
+            diagnostics["gpu_renderer"]["substrate"] = "substrate_slab_output_match_helper"
+            diagnostics["gpu_renderer"]["substrate_helper"] = str(
+                first_substrate.get("helper") or "Substrate Metalness-To-DiffuseAlbedo-F0"
+            )
+            diagnostics["gpu_renderer"]["substrate_f90_strength"] = float(
+                first_substrate.get("f90_strength", 1.0) or 1.0
+            )
+        elif int(diagnostics.get("pbr_substrate_material_count", 0) or 0) > 0:
+            diagnostics["gpu_renderer"]["substrate_rendering"] = "slab"
+            diagnostics["gpu_renderer"]["substrate"] = "substrate_slab_output_match_helper"
         subsurface_rows = [
             item.get("subsurface_rendering")
             for item in items

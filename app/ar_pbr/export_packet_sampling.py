@@ -333,7 +333,21 @@ def _record_udim_sampling(diagnostics: dict[str, Any], maps: Mapping[str, Any], 
 
     map_rows: list[dict[str, Any]] = []
     all_tiles: set[int] = set()
-    for map_name in ("base", "roughness", "metallic", "specular", "normal", "occlusion", "emissive", "opacity", "height"):
+    for map_name in (
+        "base",
+        "roughness",
+        "metallic",
+        "specular",
+        "diffuse_albedo",
+        "f0",
+        "f90",
+        "f90_mask",
+        "normal",
+        "occlusion",
+        "emissive",
+        "opacity",
+        "height",
+    ):
         tiles = decode_udim_tiles(maps.get(f"{map_name}_udim_tiles") if isinstance(maps, Mapping) else None)
         if not tiles:
             continue

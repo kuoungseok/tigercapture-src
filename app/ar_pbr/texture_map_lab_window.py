@@ -6,7 +6,7 @@ from pathlib import Path
 import tempfile
 from typing import Any
 
-from PySide6.QtCore import QRectF, Qt, QTimer
+from PySide6.QtCore import QElapsedTimer, QRectF, Qt, QTimer
 from PySide6.QtGui import QColor, QFont, QPainter, QPen, QKeySequence, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QApplication,
@@ -267,10 +267,17 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._preview_timer = QTimer(self)
         self._preview_timer.setSingleShot(True)
         self._preview_timer.timeout.connect(self.refresh_preview)
+        self._light_animation_timer = QTimer(self)
+        self._light_animation_timer.setInterval(40)
+        self._light_animation_timer.timeout.connect(self._advance_light_animation)
+        self._light_animation_clock = QElapsedTimer()
         self._sliders: dict[str, _TextureLabSlider] = {}
         self._last_preview_path: Path | None = None
         self._clipboard_shortcuts: list[QShortcut] = []
         self._advanced_map_checks: dict[str, QCheckBox] = {}
+        self._substrate_mode_check: QCheckBox | None = None
+        self._animate_light_check: QCheckBox | None = None
+        self._animated_light_azimuth = 38.0
         self._generated_maps_cache: dict[str, Any] | None = None
         self._backend_selection = select_texture_map_backend()
         self.setObjectName("ArPbrTextureMapLabWindow")
@@ -285,6 +292,19 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         for key, slider in self._sliders.items():
             values[key] = slider.value()
         values["normal_format"] = str(self._normal_format_combo.currentData() or "unreal_directx")
+        if bool(self._animate_light_check.isChecked()) if self._animate_light_check is not None else False:
+            values["preview_light_azimuth"] = self._animated_light_azimuth
+        values["preview_animate_light"] = bool(
+            self._animate_light_check.isChecked()
+            if self._animate_light_check is not None
+            else self._settings.get("preview_animate_light", False)
+        )
+        values["substrate_enabled"] = bool(
+            self._substrate_mode_check.isChecked()
+            if self._substrate_mode_check is not None
+            else self._settings.get("substrate_enabled", False)
+        )
+        values["substrate_mode"] = "slab" if values["substrate_enabled"] else "off"
         return normalize_texture_map_settings(values)
 
     def copy_preview_to_clipboard(self) -> dict[str, Any]:
@@ -519,12 +539,26 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._add_slider(controls_layout, "Roughness Contrast", "roughness_contrast", 0.1, 3.0, 0.01)
         self._add_slider(controls_layout, "Roughness Detail", "roughness_detail", 0.0, 1.0, 0.01)
         self._add_slider(controls_layout, "Metallic", "metallic_value", 0.0, 1.0, 0.01)
-        controls_layout.addWidget(_section_label("Substrate Optional Maps", controls))
+        controls_layout.addWidget(_section_label("Substrate", controls))
+        self._substrate_mode_check = QCheckBox("Substrate Slab", controls)
+        self._substrate_mode_check.setObjectName("TextureLabCheck")
+        self._substrate_mode_check.setChecked(bool(self._settings.get("substrate_enabled", False)))
+        self._substrate_mode_check.setToolTip(
+            "Use Unreal Substrate Slab output contract. Metallic is converted through DiffuseAlbedo/F0."
+        )
+        self._substrate_mode_check.toggled.connect(self._on_substrate_mode_toggled)
+        controls_layout.addWidget(self._substrate_mode_check)
         self._add_advanced_map_check(controls_layout, controls, "Export F0 Map", "f0")
         self._add_advanced_map_check(controls_layout, controls, "Export F90 Mask", "f90_mask")
         self._add_slider(controls_layout, "F0 Reflectance", "substrate_reflectance", 0.0, 1.0, 0.01)
         self._add_slider(controls_layout, "F90 Mask", "f90_mask_strength", 0.0, 1.0, 0.01)
         controls_layout.addWidget(_section_label("Preview Light", controls))
+        self._animate_light_check = QCheckBox("Animate Light", controls)
+        self._animate_light_check.setObjectName("TextureLabCheck")
+        self._animate_light_check.setChecked(bool(self._settings.get("preview_animate_light", False)))
+        self._animate_light_check.setToolTip("Orbit the preview point light around the plane to inspect shading.")
+        self._animate_light_check.toggled.connect(self._on_animate_light_toggled)
+        controls_layout.addWidget(self._animate_light_check)
         self._add_slider(controls_layout, "Azimuth", "preview_light_azimuth", -180.0, 180.0, 1.0)
         self._add_slider(controls_layout, "Elevation", "preview_light_elevation", 3.0, 89.0, 1.0)
         self._add_slider(controls_layout, "Environment", "preview_environment", 0.0, 1.5, 0.01)
@@ -533,6 +567,8 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         content.addWidget(scroll, 0)
         root.addLayout(content, 1)
         self.setCentralWidget(central)
+        self._sync_substrate_controls()
+        self._on_animate_light_toggled(bool(self._animate_light_check.isChecked()) if self._animate_light_check else False)
 
     def _add_slider(
         self,
@@ -555,6 +591,50 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         check.setToolTip(f"Include {map_name} when exporting separate maps")
         self._advanced_map_checks[map_name] = check
         layout.addWidget(check)
+
+    def _on_substrate_mode_toggled(self, _checked: bool) -> None:
+        self._sync_substrate_controls()
+        self.queue_preview()
+
+    def _on_animate_light_toggled(self, checked: bool) -> None:
+        if checked:
+            slider = self._sliders.get("preview_light_azimuth")
+            if slider is not None:
+                self._animated_light_azimuth = slider.value()
+                slider.setEnabled(False)
+                slider.setToolTip("Animate Light is driving the preview azimuth.")
+            self._light_animation_clock.restart()
+            self._light_animation_timer.start()
+        else:
+            self._light_animation_timer.stop()
+            slider = self._sliders.get("preview_light_azimuth")
+            if slider is not None:
+                slider.setEnabled(True)
+                slider.setToolTip("")
+                slider.set_value(self._animated_light_azimuth)
+        self.queue_preview()
+
+    def _advance_light_animation(self) -> None:
+        elapsed = max(0, int(self._light_animation_clock.elapsed()))
+        self._animated_light_azimuth = ((elapsed / 1000.0) * 54.0 + 38.0) % 360.0
+        if self._animated_light_azimuth > 180.0:
+            self._animated_light_azimuth -= 360.0
+        self.refresh_preview()
+
+    def _sync_substrate_controls(self) -> None:
+        substrate_enabled = bool(self._substrate_mode_check.isChecked()) if self._substrate_mode_check else False
+        metallic_slider = self._sliders.get("metallic_value")
+        if metallic_slider is not None:
+            metallic_slider.setEnabled(not substrate_enabled)
+            metallic_slider.setToolTip(
+                "Substrate Slab has no direct Metallic input; the value is used only by the DiffuseAlbedo/F0 helper."
+                if substrate_enabled
+                else ""
+            )
+        for name in ("f0", "f90_mask"):
+            check = self._advanced_map_checks.get(name)
+            if check is not None and substrate_enabled:
+                check.setChecked(True)
 
     def queue_preview(self) -> None:
         self._preview_timer.start(120)
@@ -665,6 +745,11 @@ class ArPbrTextureMapLabWindow(QMainWindow):
 
     def _selected_export_maps(self) -> list[str]:
         names = list(DEFAULT_SEPARATE_MAPS)
+        if bool(self.settings().get("substrate_enabled", False)):
+            names = [name for name in names if name != "metallic"]
+            for substrate_map in ("f0", "f90_mask"):
+                if substrate_map not in names:
+                    names.append(substrate_map)
         for name, check in self._advanced_map_checks.items():
             if check.isChecked() and name not in names:
                 names.append(name)
@@ -721,6 +806,10 @@ QLabel#TextureLabValueLabel {
     color: #D9E0EA;
     font-size: 11px;
     font-family: "Cascadia Mono", "Consolas";
+}
+QLabel#TextureLabControlLabel:disabled,
+QLabel#TextureLabValueLabel:disabled {
+    color: #596273;
 }
 QComboBox#TextureLabCombo {
     background: #1A1D25;
@@ -779,6 +868,9 @@ QCheckBox#TextureLabCheck::indicator {
 QCheckBox#TextureLabCheck::indicator:checked {
     background: #58D38A;
     border-color: #77E5A0;
+}
+QCheckBox#TextureLabCheck:disabled {
+    color: #596273;
 }
 """
     + editor_scrollbar_qss()
