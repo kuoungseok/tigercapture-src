@@ -6467,7 +6467,10 @@ AI Script Edit MVP integration:
   button. The pop-up is an image-first thumbnail palette with a compact header,
   category filter, and hover tooltips for name/width/opacity; it uses the same
   `BRUSH_LIBRARY_PRESETS` backing data as the Painter automation layer, and
-  selecting a preset switches to Pen while applying style, width, and opacity.
+  both the inspector palette and top preset popup use compact `53x25` rendered
+  brush icons (30% smaller than the original `76x36` presentation) with
+  proportionally reduced cells.
+  Selecting a preset switches to Pen while applying style, width, and opacity.
   The right inspector also has a Photoshop-like `BRUSH` detail panel with
   Brush/Brush Presets tabs, tip preset thumbnails, style selection, Size,
   Opacity, Hardness, Spacing, Angle, Roundness, Flip X/Y, section toggles, and

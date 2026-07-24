@@ -243,8 +243,9 @@ Implemented designer catalog subset (2026-07-25):
   spacing, angle, and roundness values.
 - The dedicated top `Brush Preset` popup uses rendered tip thumbnails with
   `All Brushes` and category filtering; the left-rail Brush icon remains a
-  fixed tool selector. The full inspector keeps Brush/Brush Presets and the
-  familiar Photoshop-style parameter-section layout.
+  fixed tool selector. Both popup and inspector use compact `53x25` thumbnails
+  and proportionally reduced cells. The full inspector keeps Brush/Brush
+  Presets and the familiar Photoshop-style parameter-section layout.
 
 Brush parameter contract:
 

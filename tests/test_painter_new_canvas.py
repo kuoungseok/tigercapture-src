@@ -136,7 +136,11 @@ def test_photoshop_selection_modes_and_layer_reorder_change_document_state() -> 
 
 def test_standalone_painter_hides_video_annotation_tools() -> None:
     app = _app()
-    from app.drawing import BRUSH_LIBRARY_PRESETS, PaintDialog, create_blank_paint_pixmap
+    from app.drawing import (
+        BRUSH_LIBRARY_PRESETS,
+        PaintDialog,
+        create_blank_paint_pixmap,
+    )
 
     dialog = PaintDialog(
         background_pixmap=create_blank_paint_pixmap(640, 360, "#FFFFFF"),
@@ -220,7 +224,14 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     from PySide6.QtCore import QPointF, QSize, Qt
     from PySide6.QtWidgets import QComboBox, QListView, QListWidget
 
-    from app.drawing import BRUSH_LIBRARY_PRESETS, PaintDialog, create_blank_paint_pixmap
+    from app.drawing import (
+        BRUSH_LIBRARY_PRESETS,
+        BRUSH_PANEL_PRESET_CELL_SIZE,
+        BRUSH_POPUP_PRESET_CELL_SIZE,
+        BRUSH_PRESET_ICON_SIZE,
+        PaintDialog,
+        create_blank_paint_pixmap,
+    )
     from app.i18n import tr
 
     dialog = PaintDialog(
@@ -346,6 +357,8 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert hasattr(dialog, "brush_library_list")
     assert dialog.brush_library_list.viewMode() == QListView.ViewMode.IconMode
     assert dialog.brush_library_list.count() == len(BRUSH_LIBRARY_PRESETS)
+    assert dialog.brush_library_list.iconSize() == BRUSH_PRESET_ICON_SIZE
+    assert dialog.brush_library_list.gridSize() == BRUSH_PANEL_PRESET_CELL_SIZE
     assert dialog._paint_brush_detail_panel.parent() is dialog._paint_inspector_controls
     assert dialog._brush_detail_category_buttons["Brush Tip Shape"].isChecked()
     assert dialog._brush_detail_category_buttons["Smoothing"].isChecked()
@@ -391,6 +404,8 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert brush_popup_category.findText("Water Media") >= 0
     assert brush_popup_category.findText("Concept") >= 0
     assert brush_popup_list.viewMode() == QListView.ViewMode.IconMode
+    assert brush_popup_list.iconSize() == BRUSH_PRESET_ICON_SIZE
+    assert brush_popup_list.gridSize() == BRUSH_POPUP_PRESET_CELL_SIZE
     assert brush_popup_list.count() == len(BRUSH_LIBRARY_PRESETS)
     assert brush_popup_list.item(0).text() == ""
     assert BRUSH_LIBRARY_PRESETS[0]["name"] in brush_popup_list.item(0).toolTip()

@@ -4908,6 +4908,9 @@ BRUSH_DETAIL_DEFAULTS: dict[str, int | bool] = {
     "flip_x": False,
     "flip_y": False,
 }
+BRUSH_PRESET_ICON_SIZE = QSize(53, 25)
+BRUSH_PANEL_PRESET_CELL_SIZE = QSize(60, 38)
+BRUSH_POPUP_PRESET_CELL_SIZE = QSize(66, 41)
 
 
 def _normalize_paint_brush_style(style: str | None) -> str:
@@ -9307,8 +9310,8 @@ class PaintDialog(QDialog):
         self.brush_library_list.setUniformItemSizes(True)
         self.brush_library_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.brush_library_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        self.brush_library_list.setIconSize(QSize(76, 36))
-        self.brush_library_list.setGridSize(QSize(86, 52))
+        self.brush_library_list.setIconSize(BRUSH_PRESET_ICON_SIZE)
+        self.brush_library_list.setGridSize(BRUSH_PANEL_PRESET_CELL_SIZE)
         self.brush_library_list.setMinimumHeight(126)
         self.brush_library_list.setMaximumHeight(150)
         self.brush_library_list.itemClicked.connect(self._on_brush_library_item)
@@ -9701,7 +9704,7 @@ class PaintDialog(QDialog):
             item = QListWidgetItem(self._brush_preset_icon(preset), "")
             item.setToolTip(f"{category} | {name} | {width}px / {opacity}%")
             item.setData(Qt.ItemDataRole.UserRole, idx)
-            item.setSizeHint(QSize(86, 54))
+            item.setSizeHint(BRUSH_PANEL_PRESET_CELL_SIZE)
             self.brush_library_list.addItem(item)
         if self.brush_library_list.count() > 0:
             self.brush_library_list.setCurrentRow(0)
@@ -9783,8 +9786,8 @@ class PaintDialog(QDialog):
         preset_list.setUniformItemSizes(True)
         preset_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         preset_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        preset_list.setIconSize(QSize(76, 36))
-        preset_list.setGridSize(QSize(94, 58))
+        preset_list.setIconSize(BRUSH_PRESET_ICON_SIZE)
+        preset_list.setGridSize(BRUSH_POPUP_PRESET_CELL_SIZE)
         def _populate_popup_presets() -> None:
             selected_category = str(category_combo.currentData() or "")
             preset_list.clear()
@@ -9799,7 +9802,7 @@ class PaintDialog(QDialog):
                 item = QListWidgetItem(self._brush_preset_icon(preset), "")
                 item.setData(Qt.ItemDataRole.UserRole, idx)
                 item.setToolTip(f"{category} | {name} | {style} | {width}px / {opacity}%")
-                item.setSizeHint(QSize(94, 58))
+                item.setSizeHint(BRUSH_POPUP_PRESET_CELL_SIZE)
                 preset_list.addItem(item)
 
         _populate_popup_presets()
@@ -9807,7 +9810,10 @@ class PaintDialog(QDialog):
 
         columns = min(4, max(1, preset_list.count()))
         rows = min(3, max(1, math.ceil(max(1, preset_list.count()) / columns)))
-        preset_list.setFixedSize(columns * 94 + 14, rows * 58 + 12)
+        preset_list.setFixedSize(
+            columns * BRUSH_POPUP_PRESET_CELL_SIZE.width() + 14,
+            rows * BRUSH_POPUP_PRESET_CELL_SIZE.height() + 12,
+        )
 
         def _apply_popup_item(item: QListWidgetItem) -> None:
             try:
