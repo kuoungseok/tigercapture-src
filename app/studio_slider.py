@@ -73,13 +73,13 @@ class StudioSlider(QSlider):
 
     def _led_color(self) -> QColor:
         colors = {
-            "audio": "#7EF0C6",
-            "temperature": "#88C7FF",
-            "tint": "#D58BFF",
-            "accent": "#FFE1A0",
-            "neutral": "#FFE7B8",
+            "audio": "#4EF2B6",
+            "temperature": "#4EB5FF",
+            "tint": "#C95CFF",
+            "accent": "#FFC857",
+            "neutral": "#FFD36A",
         }
-        return QColor(colors.get(self._studio_slider_kind, "#FFE1A0"))
+        return QColor(colors.get(self._studio_slider_kind, "#FFC857"))
 
     def _wake_led(self, level: float = 1.0) -> None:
         self._studio_led_level = max(self._studio_led_level, max(0.0, min(1.0, float(level))))

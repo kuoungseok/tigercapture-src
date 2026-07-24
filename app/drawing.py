@@ -73,6 +73,7 @@ from PySide6.QtWidgets import (
 
 from app.icons import app_icon, icon_size
 from app.i18n import tr
+from app.studio_slider import StudioSlider
 from app.painter_brush_catalog import (
     DESIGNER_BRUSH_PRESETS,
     DESIGNER_BRUSH_RENDER_PROFILES,
@@ -5987,8 +5988,8 @@ class PaintDialog(QDialog):
 
         brush_menu = menu_bar.addMenu("Brush")
         self._painter_brush_menu = brush_menu
-        self._add_painter_menu_action(brush_menu, "Brush Settings", self._focus_brush_panel, "F5")
-        self._add_painter_menu_action(brush_menu, "Brush Presets Popup", self._show_brush_button_menu)
+        self._add_painter_menu_action(brush_menu, "Brush Selector", self._focus_brush_selector, "F5")
+        self._add_painter_menu_action(brush_menu, "Advanced Brush Controls", self._focus_brush_panel)
         brush_menu.addSeparator()
         for preset in BRUSH_LIBRARY_PRESETS:
             name = str(preset.get("name") or "Brush")
@@ -6338,7 +6339,7 @@ class PaintDialog(QDialog):
 
         # Width + opacity sliders
         toolbar.addWidget(QLabel(tr("paint.label.width")))
-        self.width_slider = QSlider(Qt.Orientation.Horizontal)
+        self.width_slider = StudioSlider("accent")
         self.width_slider.setRange(1, 60)
         self.width_slider.setValue(int(self._pen_width))
         self.width_slider.setFixedWidth(120)
@@ -6347,7 +6348,7 @@ class PaintDialog(QDialog):
 
         toolbar.addSpacing(10)
         toolbar.addWidget(QLabel(tr("paint.label.opacity")))
-        self.opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.opacity_slider = StudioSlider("accent")
         self.opacity_slider.setRange(10, 100)
         self.opacity_slider.setValue(100)
         self.opacity_slider.setFixedWidth(120)
@@ -6512,7 +6513,7 @@ class PaintDialog(QDialog):
         self.export_png_btn.clicked.connect(self._show_export_png_menu)
         self.export_png_btn.hide()
 
-        self.zoom_slider = QSlider(Qt.Orientation.Horizontal, self)
+        self.zoom_slider = StudioSlider("neutral", self)
         self.zoom_slider.setRange(25, PAINT_MAX_ZOOM_PERCENT)
         self.zoom_slider.setValue(100)
         self.zoom_slider.valueChanged.connect(self._on_zoom_changed)
@@ -7086,12 +7087,12 @@ class PaintDialog(QDialog):
         brush_options_row = QHBoxLayout(self._brush_options_widget)
         brush_options_row.setContentsMargins(0, 0, 0, 0)
         brush_options_row.setSpacing(5)
-        self._brush_preset_button = QPushButton("Brush Preset")
+        self._brush_preset_button = QPushButton("Brush Selector")
         self._brush_preset_button.setObjectName("PaintBrushPresetButton")
-        self._brush_preset_button.setIcon(app_icon("paint-brush", size=13, color="#EEEEEE"))
+        self._brush_preset_button.setIcon(app_icon("list", size=13, color="#EEEEEE"))
         self._brush_preset_button.setIconSize(icon_size(13))
-        self._brush_preset_button.setToolTip("Open Brush Presets")
-        self._brush_preset_button.clicked.connect(self._show_brush_button_menu)
+        self._brush_preset_button.setToolTip("Open Brush Selector")
+        self._brush_preset_button.clicked.connect(self._focus_brush_selector)
         brush_options_row.addWidget(self._brush_preset_button)
         size_label = QLabel("Size")
         size_label.setObjectName("PaintMeta")
@@ -7361,7 +7362,7 @@ class PaintDialog(QDialog):
         layer_mode_row.addWidget(self._layer_opacity_value)
         layer_controls_layout.addLayout(layer_mode_row)
 
-        self.layer_opacity_slider = QSlider(Qt.Orientation.Horizontal)
+        self.layer_opacity_slider = StudioSlider("accent")
         self.layer_opacity_slider.setRange(0, 100)
         self.layer_opacity_slider.setValue(100)
         self.layer_opacity_slider.setFixedHeight(18)
@@ -8865,7 +8866,7 @@ class PaintDialog(QDialog):
         row.addStretch(1)
         row.addWidget(value_label)
         layout.addLayout(row)
-        slider = QSlider(Qt.Orientation.Horizontal)
+        slider = StudioSlider("accent")
         slider.setRange(int(minimum), int(maximum))
         slider.setValue(int(value))
         slider.setProperty("pbr_key", key)
@@ -9422,7 +9423,7 @@ class PaintDialog(QDialog):
         self._brush_detail_value_labels: dict[str, QLabel] = {}
         self._brush_detail_sliders: dict[str, QSlider] = {}
 
-        def add_slider(label: str, key: str, minimum: int, maximum: int, value: int, suffix: str) -> QSlider:
+        def add_slider(label: str, key: str, minimum: int, maximum: int, value: int, suffix: str) -> StudioSlider:
             row = QHBoxLayout()
             row.setContentsMargins(0, 0, 0, 0)
             name_label = QLabel(label)
@@ -9434,7 +9435,7 @@ class PaintDialog(QDialog):
             row.addWidget(name_label)
             row.addWidget(value_label)
             control_layout.addLayout(row)
-            slider = QSlider(Qt.Orientation.Horizontal)
+            slider = StudioSlider("accent")
             slider.setRange(minimum, maximum)
             slider.setValue(value)
             control_layout.addWidget(slider)
@@ -10370,6 +10371,25 @@ class PaintDialog(QDialog):
 
     def _focus_brush_panel(self) -> None:
         self._set_brush_tab("settings")
+        self._show_brush_panel()
+        if hasattr(self, "brush_style_combo"):
+            self.brush_style_combo.setFocus()
+        elif hasattr(self, "pen_btn"):
+            self.pen_btn.setFocus()
+        if hasattr(self, "_tool_status_label"):
+            self._tool_status_label.setText("Advanced brush controls")
+
+    def _focus_brush_selector(self) -> None:
+        self._set_brush_tab("presets")
+        self._show_brush_panel()
+        if hasattr(self, "brush_library_list"):
+            self.brush_library_list.setFocus()
+        elif hasattr(self, "pen_btn"):
+            self.pen_btn.setFocus()
+        if hasattr(self, "_tool_status_label"):
+            self._tool_status_label.setText("Brush Selector")
+
+    def _show_brush_panel(self) -> None:
         panel = getattr(self, "_paint_brush_detail_panel", None)
         scroll = getattr(self, "_paint_inspector_controls_scroll", None)
         if panel is not None and scroll is not None:
@@ -10378,12 +10398,6 @@ class PaintDialog(QDialog):
                 title.show()
             panel.show()
             scroll.ensureWidgetVisible(panel, 0, 12)
-        if hasattr(self, "brush_style_combo"):
-            self.brush_style_combo.setFocus()
-        elif hasattr(self, "pen_btn"):
-            self.pen_btn.setFocus()
-        if hasattr(self, "_tool_status_label"):
-            self._tool_status_label.setText("Brush settings")
 
     def _show_brush_button_menu(self) -> None:
         button = getattr(self, "_brush_preset_button", None)

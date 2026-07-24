@@ -232,6 +232,7 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
         create_blank_paint_pixmap,
     )
     from app.i18n import tr
+    from app.studio_slider import StudioSlider
 
     dialog = PaintDialog(
         background_pixmap=create_blank_paint_pixmap(640, 360, "#FFFFFF"),
@@ -243,6 +244,8 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     dialog.resize(1100, 640)
     app.processEvents()
     app.processEvents()
+    initial_scroll = dialog._paint_inspector_controls_scroll.verticalScrollBar()
+    assert initial_scroll.value() >= dialog._paint_color_panel.y() - 2
 
     assert dialog.isSizeGripEnabled()
     assert getattr(dialog, "_dialog_buttons", None) is None
@@ -314,7 +317,8 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog.pen_btn.toolTip() == "Brush Tool (B)"
     assert "preset" not in dialog.pen_btn.toolTip().casefold()
     assert dialog._brush_preset_button.objectName() == "PaintBrushPresetButton"
-    assert dialog._brush_preset_button.toolTip() == "Open Brush Presets"
+    assert dialog._brush_preset_button.text() == "Brush Selector"
+    assert dialog._brush_preset_button.toolTip() == "Open Brush Selector"
     assert not dialog._brush_preset_button.icon().isNull()
     assert dialog.eraser_btn.text() == ""
     assert dialog.eraser_btn.toolTip()
@@ -412,9 +416,17 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     } <= brush_styles
     dialog._brush_preset_button.click()
     app.processEvents()
-    assert dialog._brush_preset_menu is not None
+    assert dialog._brush_panel_stack.currentWidget() is dialog._brush_library_page
+    assert dialog._paint_brush_detail_panel.isHidden() is False
+    assert dialog._brush_preset_menu is None
     assert dialog.pen_btn.isDown() is False
-    dialog._brush_preset_menu.close()
+    assert isinstance(dialog.width_slider, StudioSlider)
+    assert isinstance(dialog.opacity_slider, StudioSlider)
+    assert isinstance(dialog.brush_hardness_slider, StudioSlider)
+    assert isinstance(dialog.brush_spacing_slider, StudioSlider)
+    assert isinstance(dialog.brush_angle_slider, StudioSlider)
+    assert isinstance(dialog.brush_roundness_slider, StudioSlider)
+    assert isinstance(dialog.layer_opacity_slider, StudioSlider)
     brush_menu = dialog._build_brush_button_menu()
     brush_popup_list = brush_menu.findChild(QListWidget, "PaintBrushPopupList")
     brush_popup_category = brush_menu.findChild(QComboBox, "PaintBrushPopupCategory")
@@ -466,7 +478,7 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog._paint_status_bar.height() <= 24
     assert dialog._status_zoom_spin.value() == 100
     assert dialog._status_document_label.text() == "640 x 360 px"
-    assert dialog._paint_brush_detail_panel.isHidden()
+    assert dialog._paint_brush_detail_panel.isHidden() is False
     assert dialog._paint_reference_panel.isHidden()
     assert dialog._paint_3d_blockout_panel.isHidden()
     assert not hasattr(dialog, "toggle_channel_visibility_btn")
@@ -499,10 +511,12 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
         for action in dialog._painter_menu_bar.actions()
     ]
     assert menu_labels == ["File", "Edit", "Image", "Layer", "Select", "View", "Window"]
-    assert "Brush Settings" in [
+    brush_menu_labels = [
         action.text().replace("&", "")
         for action in dialog._painter_brush_menu.actions()
     ]
+    assert "Brush Selector" in brush_menu_labels
+    assert "Advanced Brush Controls" in brush_menu_labels
     assert "PBR Texture Lab..." in [
         action.text().replace("&", "")
         for action in dialog._painter_image_menu.actions()
@@ -601,7 +615,6 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     ).y()
     assert color_bottom < layer_top or scroll.verticalScrollBar().isVisible()
     bar = scroll.verticalScrollBar()
-    assert bar.value() >= dialog._paint_color_panel.y() - 2
     margins = dialog._paint_inspector_controls.layout().contentsMargins()
     assert margins.right() >= 6
     if bar.isVisible():

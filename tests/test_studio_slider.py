@@ -78,5 +78,13 @@ def test_studio_slider_general_led_uses_warm_touch_feedback() -> None:
     accent = StudioSlider("accent")
     neutral = StudioSlider("neutral")
 
-    assert accent._led_color().name().upper() == "#FFE1A0"
-    assert neutral._led_color().name().upper() == "#FFE7B8"
+    assert accent._led_color().name().upper() == "#FFC857"
+    assert neutral._led_color().name().upper() == "#FFD36A"
+
+
+def test_studio_slider_led_palette_is_more_saturated() -> None:
+    _qt_app()
+    from app.studio_slider import StudioSlider
+
+    for kind in ("audio", "temperature", "tint", "accent", "neutral"):
+        assert StudioSlider(kind)._led_color().hsvSaturation() >= 120

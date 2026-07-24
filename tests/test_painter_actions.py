@@ -306,7 +306,7 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
 
     brush_panel = registry.execute("paint.window.show_panel", {"panel": "brush"}).to_dict()
     assert brush_panel["ok"]
-    assert dialog._tool_status_label.text() == "Brush settings"
+    assert dialog._tool_status_label.text() == "Advanced brush controls"
 
     panel = registry.execute("paint.window.show_panel", {"panel": "paths"}).to_dict()
     assert panel["ok"]

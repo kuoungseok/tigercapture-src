@@ -273,6 +273,10 @@ Implemented Painter 2023 layout contract (2026-07-25):
 - `Advanced Brush Controls` is a separate page with engine sections and
   current-brush controls. Small selector/control icons switch actual pages
   without a large decorative tab row.
+- The Brush tool options bar labels the former preset entry point `Brush
+  Selector` and focuses the full selector directly. Brush and other ordinary
+  Painter numeric controls use the shared `StudioSlider`; HSV channel sliders
+  retain their functional color gradients.
 - `paint.state` reports library/search/filter-list/compact/favorite/recent state.
   `paint.brush.library.view` and `paint.brush.favorite.set` expose the same
   workflow to Claude and local automation.

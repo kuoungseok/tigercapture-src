@@ -6522,7 +6522,11 @@ AI Script Edit MVP integration:
   recent brushes, active filters, and compact mode are reflected in
   `paint.state`; `paint.brush.library.view` controls tab/category/single or
   multi-filter/search/compact state and `paint.brush.favorite.set` controls
-  favorites.
+  favorites. The Brush tool options bar exposes `Brush Selector` at the former
+  `Brush Preset` position and opens the full selector directly rather than a
+  second preset-grid popup. Painter numeric controls use the shared
+  `StudioSlider`; hue/saturation/value controls remain dedicated color
+  gradients because the gradient itself conveys the edited channel.
   The initial library is `Tiger Studio Brushes`; external Painter libraries,
   Painter brush packs, and ABR/captured-dab import remain separate future
   ingestion work and must not be simulated as installed content.
