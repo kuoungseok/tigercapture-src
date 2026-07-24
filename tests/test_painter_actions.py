@@ -29,6 +29,7 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     action_ids = {row["id"] for row in registry.list_actions()}
     required = {
         "paint.state",
+        "paint.gpu.status",
         "paint.document.new",
         "paint.document.export_png",
         "paint.view.zoom",
@@ -106,6 +107,15 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     state = registry.execute("paint.state").to_dict()
     assert state["ok"]
     assert state["result"]["document"]["width"] == 640
+    assert state["result"]["gpu"]["remote_safe"] is True
+
+    gpu_status = registry.execute("paint.gpu.status").to_dict()
+    assert gpu_status["ok"]
+    assert gpu_status["result"]["renderer"] == "painter_blockout_opengl_offscreen_v1"
+    assert gpu_status["result"]["remote_safe"] is True
+    assert gpu_status["result"]["fallback_on_context_failure"] is True
+    assert gpu_status["result"]["remote_work_contract"]["safe_for_rdp"] is True
+    assert gpu_status["result"]["remote_work_contract"]["fallback_is_product_path"] is True
 
     added = registry.execute("paint.layer.add", {"name": "AI Ink"}).to_dict()
     assert added["ok"]
@@ -459,7 +469,11 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     ).to_dict()
     assert blockout["ok"]
     assert blockout["result"]["scene"]["primitive_count"] == 1
+    assert blockout["result"]["renderer"]["preferred"] == "painter_blockout_opengl_offscreen_v1"
+    assert blockout["result"]["renderer"]["remote_safe"] is True
     assert blockout["result"]["gpu_contract"]["future_gpu_preview"] is True
+    assert blockout["result"]["gpu_contract"]["opengl_first_preview"] is True
+    assert blockout["result"]["gpu_contract"]["qpainter_fallback"] is True
     assert blockout["result"]["ui_guardrails"]["preserve_texture_lab_entry_points"] is True
     assert blockout["result"]["ui_guardrails"]["layers_channels_paths_remain_primary_dock"] is True
     primitive_id = blockout["result"]["scene"]["primitives"][0]["id"]

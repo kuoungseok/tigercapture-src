@@ -19,6 +19,16 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="active Painter state would be read",
     )
     registry.register_adapter_action(
+        "paint.gpu.status",
+        "Report Painter OpenGL readiness, active/fallback renderer state, and remote-safe fallback policy.",
+        "paint",
+        "paint_gpu_status",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter GPU/OpenGL status would be read",
+    )
+    registry.register_adapter_action(
         "paint.document.new",
         "Replace the active Painter document with a new blank canvas.",
         "paint",

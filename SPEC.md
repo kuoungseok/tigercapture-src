@@ -6210,8 +6210,15 @@ AI Script Edit MVP integration:
   presets, `paint.3d_blockout.state/add/update/delete/duplicate/align_ground/
   snap/camera/camera_preset/bake` actions, and bake-to-layer as normal Painter
   strokes on a new `3D Blockout Guide` layer.
-  This is still a QPainter/CPU reference path with a GPU-ready serialized
-  scene/projection contract, not the final accelerated blockout renderer.
+  3D blockout preview/overlay now uses an OpenGL-first policy through
+  `app.painter_opengl`: when the current Qt session can create an offscreen GL
+  context it renders the serialized scene/projection to an FBO, and when RDP,
+  headless Qt, missing PyOpenGL, or disabled GPU settings prevent that, it
+  falls back to the maintained QPainter path instead of showing a black surface
+  or crashing. `paint.gpu.status` exposes the readiness/fallback contract and
+  last blockout renderer for AI/MCP workflows. The paint canvas itself remains
+  on the current QPainter stroke engine until the separate texture/FBO
+  stroke-atlas pass lands.
 - Painter reference-board support is non-destructive by default. The 2026-07-24
   first slice adds a right-inspector `REFERENCE` panel, image import from file
   or clipboard, selected reference position/size/opacity/visibility controls,
@@ -6325,12 +6332,14 @@ AI Script Edit MVP integration:
   `TIGERCAPTURE_TEXTURE_LAB_ALLOW_CPU=1`. The Painter UI must expose backend
   status and missing-GPU install guidance through the shared Texture Lab backend
   contract.
-- Painter implementation is GPU-forward: natural-media brush preview, 3D
-  blockout, high-zoom canvas work, and optional video paint-over may use
-  CPU/QPainter first-pass contracts while their data models stay ready for GPU
-  preview/export parity. Texture Lab/PBR preview is stricter: product entry
-  points must not run CPU fallback by default. None of these paths may slow the
-  default 2D drawing workspace at startup.
+- Painter implementation is GPU-forward and remote-safe: natural-media brush
+  preview, 3D blockout, high-zoom canvas work, and optional video paint-over may
+  use CPU/QPainter first-pass contracts while their data models stay ready for
+  GPU preview/export parity. OpenGL preview paths must be preferred when a valid
+  context exists, but RDP/remote/headless sessions must keep a maintained
+  fallback path rather than failing black. Texture Lab/PBR preview is stricter:
+  product entry points must not run CPU fallback by default. None of these paths
+  may slow the default 2D drawing workspace at startup.
 - Standalone Painter must avoid GIMP-style ambiguous state changes: channel row
   clicks select the channel only, visibility changes require the per-row eye
   icon toggle or `paint.channel.set_visible`, tool-specific controls live in a

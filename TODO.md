@@ -57,6 +57,11 @@
     canvas work, Texture Lab/PBR previews, and 3D blockout with GPU
     acceleration/parity as the target. CPU/QPainter fallbacks are acceptable
     first passes only if they do not slow default 2D drawing startup.
+    - [x] 2026-07-24 first OpenGL slice: 3D blockout preview/overlay now tries
+      an optional offscreen OpenGL FBO renderer first, keeps QPainter fallback
+      as the remote/RDP-safe product path, and exposes `paint.gpu.status` for
+      AI/MCP readiness checks. Remaining GPU work: actual paint-canvas stroke
+      texture/FBO atlas, high-zoom canvas acceleration, and parity evidence.
   - [ ] Painter action parity: every production drawing feature above must get
     registered `paint.*` actions, dry-run/review support where destructive,
     undo transactions, and regression tests before AI/MCP claims it.

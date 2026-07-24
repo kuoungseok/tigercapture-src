@@ -34,6 +34,23 @@ def test_painter_3d_blockout_projects_and_renders_gpu_ready_preview(tmp_path: Pa
     assert out.exists()
 
 
+def test_painter_opengl_status_is_remote_safe() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from app.painter_opengl import painter_opengl_status
+
+    app = QApplication.instance() or QApplication([])
+    assert app is not None
+    status = painter_opengl_status()
+    assert status["schema"] == "tigerstudio.painter.opengl.status.v1"
+    assert status["renderer"] == "painter_blockout_opengl_offscreen_v1"
+    assert status["default_policy"] == "auto_opengl_with_qpainter_fallback"
+    assert status["remote_safe"] is True
+    assert status["fallback_on_context_failure"] is True
+    assert status["surfaces"]["blockout_preview"] == "opengl_offscreen_if_available"
+
+
 def test_painter_3d_blockout_crud_normalizes_and_rejects_duplicate_ids() -> None:
     from app.painter_3d_blockout import (
         add_blockout_primitive,
@@ -136,6 +153,10 @@ def test_painter_3d_blockout_panel_updates_scene_and_overlay() -> None:
     scene = dialog._current_3d_blockout_scene().to_dict()
     assert scene["primitive_count"] == 1
     assert dialog._blockout_overlay_label.isVisible()
+    renderer = dialog.painter_action_state()["gpu"]["blockout_renderer"]
+    assert renderer["active"] in {"opengl", "qpainter"}
+    assert renderer["renderer"] in {"painter_blockout_opengl_offscreen_v1", "painter_blockout_qpainter_v1"}
+    assert dialog.painter_action_state()["gpu"]["remote_safe"] is True
 
     dialog._painter_3d_blockout_controls["sx"].setValue(240)
     dialog._painter_3d_blockout_controls["cam_fov"].setValue(36)

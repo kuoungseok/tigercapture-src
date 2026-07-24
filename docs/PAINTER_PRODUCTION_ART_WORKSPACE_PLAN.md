@@ -374,10 +374,27 @@ Rules:
   renderer can consume it without rewriting the Painter UI.
 - CPU/QPainter implementations are acceptable as first-pass visual contracts,
   but they must not block later OpenGL/Vulkan/Rust/C++ acceleration.
+- Remote-work safety is mandatory. OpenGL paths must be preferred when a valid
+  desktop/context exists, but Remote Desktop, headless Qt, and disabled-GPU
+  sessions must fall back to a maintained QPainter path instead of showing a
+  black surface or crashing.
 - Any feature that claims parity with export must document preview/export GPU
   parity expectations and test coverage.
 - GPU-heavy optional panels must not make the default 2D drawing workspace slow
   to open or use.
+
+2026-07-24 OpenGL first pass:
+
+- `app.painter_opengl` owns the optional Painter OpenGL helpers instead of
+  importing PyOpenGL from the main drawing dialog at startup.
+- 3D blockout preview/overlay render through an offscreen OpenGL FBO when Qt
+  and PyOpenGL can create a context; otherwise the same projection renders
+  through the existing QPainter path.
+- `paint.gpu.status` exposes OpenGL dependency readiness, the last blockout
+  renderer, and the remote-safe fallback contract for AI/MCP automation.
+- The active paint canvas still uses the current QPainter stroke engine. The
+  next GPU pass is a texture/FBO stroke-atlas canvas path, not a risky wholesale
+  `QOpenGLWidget` swap.
 
 Video:
 

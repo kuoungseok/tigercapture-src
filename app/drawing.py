@@ -4117,6 +4117,12 @@ class PaintDialog(QDialog):
         self._painter_3d_blockout_syncing = False
         self._painter_3d_blockout_drag: dict | None = None
         self._painter_3d_blockout_controls: dict[str, QSpinBox] = {}
+        self._painter_3d_blockout_renderer_status: dict = {
+            "renderer": "painter_blockout_qpainter_v1",
+            "active": "qpainter",
+            "fallback": True,
+            "reason": "not_rendered_yet",
+        }
         self._selected_layer_id: str | None = None
         self._paint_clipboard: dict | None = None
         self._paint_initial_color_scroll_pending = True
@@ -6788,9 +6794,31 @@ class PaintDialog(QDialog):
         label.raise_()
 
     def _render_3d_blockout_pixmap(self, scene, width: int, height: int, *, include_gizmo: bool) -> QPixmap:
-        from app.painter_3d_blockout import render_blockout_scene_qimage
+        target_w = max(1, int(width))
+        target_h = max(1, int(height))
+        try:
+            from app.painter_opengl import PAINTER_OPENGL_RENDERER_ID, render_blockout_scene_opengl_qimage
 
-        image = render_blockout_scene_qimage(scene, max(1, int(width)), max(1, int(height)))
+            image = render_blockout_scene_opengl_qimage(scene, target_w, target_h)
+            self._painter_3d_blockout_renderer_status = {
+                "renderer": PAINTER_OPENGL_RENDERER_ID,
+                "active": "opengl",
+                "fallback": False,
+                "size": [target_w, target_h],
+                "surface": "offscreen_fbo",
+            }
+        except Exception as exc:
+            from app.painter_3d_blockout import render_blockout_scene_qimage
+
+            image = render_blockout_scene_qimage(scene, target_w, target_h)
+            self._painter_3d_blockout_renderer_status = {
+                "renderer": "painter_blockout_qpainter_v1",
+                "active": "qpainter",
+                "fallback": True,
+                "size": [target_w, target_h],
+                "fallback_from": "opengl",
+                "reason": f"{type(exc).__name__}: {exc}",
+            }
         pixmap = QPixmap.fromImage(image)
         if not include_gizmo:
             return pixmap
@@ -11445,6 +11473,12 @@ class PaintDialog(QDialog):
                 **self._current_reference_board().to_dict(),
                 "selected_reference_id": str(getattr(self, "_painter_reference_selected_id", "") or ""),
                 "overlay_visible": bool(getattr(self, "reference_overlay_btn", None) and self.reference_overlay_btn.isChecked()),
+            },
+            "gpu": {
+                "policy": "auto_opengl_with_qpainter_fallback",
+                "remote_safe": True,
+                "blockout_renderer": dict(getattr(self, "_painter_3d_blockout_renderer_status", {}) or {}),
+                "paint_canvas_renderer": "qpainter_cpu_current_planned_opengl_texture_fbo",
             },
             "history": {
                 "undo_count": len(self._undo_stack),

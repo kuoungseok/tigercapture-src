@@ -14,6 +14,22 @@ class PaintAdapterMixin:
         dialog = self._paint_dialog_owner()
         return dialog.painter_action_state()
 
+    def paint_gpu_status(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_opengl import painter_opengl_status
+
+        status = painter_opengl_status()
+        state = dialog.painter_action_state()
+        return {
+            **status,
+            "last_blockout_renderer": dict(state.get("gpu", {}).get("blockout_renderer", {}) or {}),
+            "remote_work_contract": {
+                "safe_for_rdp": True,
+                "opengl_is_preferred_not_required": True,
+                "fallback_is_product_path": True,
+            },
+        }
+
     def paint_document_new(
         self,
         *,
@@ -941,14 +957,28 @@ class PaintAdapterMixin:
         preview_height: int = 360,
     ) -> dict[str, Any]:
         from app.painter_3d_blockout import project_blockout_scene
+        from app.painter_opengl import PAINTER_OPENGL_RENDERER_ID
 
         projection = project_blockout_scene(scene, int(preview_width or 640), int(preview_height or 360))
+        try:
+            dialog = self._paint_dialog_owner()
+            renderer_status = dict(getattr(dialog, "_painter_3d_blockout_renderer_status", {}) or {})
+        except Exception:
+            renderer_status = {}
         return {
             "schema": "tigerstudio.actions.paint.3d_blockout.v1",
             "scene": scene.to_dict(),
             "projection": projection,
+            "renderer": {
+                "preferred": PAINTER_OPENGL_RENDERER_ID,
+                "fallback": "painter_blockout_qpainter_v1",
+                "last_render": renderer_status,
+                "remote_safe": True,
+            },
             "gpu_contract": {
                 "future_gpu_preview": True,
+                "opengl_first_preview": True,
+                "qpainter_fallback": True,
                 "payload_is_serializable": True,
                 "qt_preview_is_reference_only": True,
             },
