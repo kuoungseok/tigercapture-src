@@ -541,7 +541,9 @@ class PaintAdapterMixin:
         tab: str = "library",
         category: str = "",
         filter: str = "",
+        filters: list[str] | None = None,
         search: str = "",
+        compact: bool | None = None,
     ) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         dialog._set_brush_tab("settings" if str(tab).strip().casefold() == "controls" else "presets")
@@ -561,15 +563,20 @@ class PaintAdapterMixin:
                 else:
                     raise ValueError("Painter brush category not found")
             category_list.setCurrentRow(target_row)
-        filter_combo = getattr(dialog, "_brush_filter_combo", None)
-        if filter_combo is not None:
-            filter_index = filter_combo.findData(str(filter or "").strip().casefold())
-            if filter_index < 0:
-                raise ValueError("Painter brush filter not found")
-            filter_combo.setCurrentIndex(filter_index)
+        requested_filters = list(filters or [])
+        legacy_filter = str(filter or "").strip().casefold()
+        if legacy_filter and legacy_filter not in requested_filters:
+            requested_filters.append(legacy_filter)
+        dialog._set_brush_filters(requested_filters)
         search_edit = getattr(dialog, "_brush_search_edit", None)
         if search_edit is not None:
             search_edit.setText(str(search or ""))
+        if compact is not None:
+            compact_button = getattr(dialog, "_brush_compact_btn", None)
+            if compact_button is not None:
+                compact_button.setChecked(bool(compact))
+            else:
+                dialog._set_brush_selector_compact(bool(compact))
         dialog._populate_brush_library()
         return dialog.painter_action_state()
 

@@ -243,9 +243,31 @@ def register_paint_actions(registry: Any) -> None:
                 "category": {"type": "string"},
                 "filter": {
                     "type": "string",
-                    "enum": ["", "favorites", "stamps", "watercolor", "thick_paint"],
+                    "enum": [
+                        "",
+                        "favorites",
+                        "masters",
+                        "stamps",
+                        "watercolor",
+                        "thick_paint",
+                    ],
+                },
+                "filters": {
+                    "type": "array",
+                    "items": {
+                        "type": "string",
+                        "enum": [
+                            "favorites",
+                            "masters",
+                            "stamps",
+                            "watercolor",
+                            "thick_paint",
+                        ],
+                    },
+                    "uniqueItems": True,
                 },
                 "search": {"type": "string"},
+                "compact": {"type": "boolean"},
             }
         ),
         undo_label="Set Painter brush library view",

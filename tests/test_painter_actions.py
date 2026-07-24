@@ -224,12 +224,17 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
         {
             "tab": "library",
             "category": "Water Media",
-            "filter": "watercolor",
+            "filters": ["masters", "watercolor"],
             "search": "watercolor",
+            "compact": True,
         },
     ).to_dict()
     assert library_view["ok"]
-    assert library_view["result"]["brush"]["library"]["filter"] == "watercolor"
+    assert library_view["result"]["brush"]["library"]["filters"] == [
+        "masters",
+        "watercolor",
+    ]
+    assert library_view["result"]["brush"]["library"]["compact"] is True
     assert library_view["result"]["brush"]["library"]["search"] == "watercolor"
     assert dialog._brush_panel_stack.currentWidget() is dialog._brush_library_page
     assert dialog.brush_library_list.count() > 0

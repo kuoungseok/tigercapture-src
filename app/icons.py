@@ -409,6 +409,32 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
         painter.setPen(Qt.PenStyle.NoPen)
         for x in (.28, .50, .72):
             painter.drawEllipse(QPointF(s * x, s * .50), s * .055, s * .055)
+    elif n in {"favorite", "star"}:
+        import math
+
+        points = []
+        for index in range(10):
+            angle = math.radians(-90 + index * 36)
+            radius = s * (.34 if index % 2 == 0 else .15)
+            points.append(
+                QPointF(
+                    s * .50 + math.cos(angle) * radius,
+                    s * .50 + math.sin(angle) * radius,
+                )
+            )
+        painter.setBrush(_color(color))
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.drawPolygon(QPolygonF(points))
+    elif n in {"filter", "funnel"}:
+        funnel = QPainterPath()
+        funnel.moveTo(s * .16, s * .22)
+        funnel.lineTo(s * .84, s * .22)
+        funnel.lineTo(s * .59, s * .51)
+        funnel.lineTo(s * .59, s * .76)
+        funnel.lineTo(s * .42, s * .84)
+        funnel.lineTo(s * .42, s * .51)
+        funnel.closeSubpath()
+        painter.drawPath(funnel)
     elif n in {"export", "upload"}:
         painter.drawLine(QPointF(s * .50, s * .78), QPointF(s * .50, s * .24))
         painter.drawLine(QPointF(s * .30, s * .43), QPointF(s * .50, s * .23))

@@ -226,7 +226,6 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
 
     from app.drawing import (
         BRUSH_LIBRARY_PRESETS,
-        BRUSH_PANEL_PRESET_CELL_SIZE,
         BRUSH_POPUP_PRESET_CELL_SIZE,
         BRUSH_PRESET_ICON_SIZE,
         PaintDialog,
@@ -355,17 +354,18 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     app.processEvents()
     assert dialog.foreground_swatch_btn.toolTip().startswith("Foreground color")
     assert hasattr(dialog, "brush_library_list")
-    assert dialog.brush_library_list.viewMode() == QListView.ViewMode.IconMode
+    assert dialog.brush_library_list.viewMode() == QListView.ViewMode.ListMode
     assert dialog.brush_library_list.count() == len(BRUSH_LIBRARY_PRESETS)
     assert dialog.brush_library_list.iconSize() == BRUSH_PRESET_ICON_SIZE
-    assert dialog.brush_library_list.gridSize() == BRUSH_PANEL_PRESET_CELL_SIZE
+    assert dialog.brush_library_list.item(0).text() == BRUSH_LIBRARY_PRESETS[0]["name"]
     assert dialog._brush_panel_stack.currentWidget() is dialog._brush_library_page
     assert dialog._brush_library_selector.currentText() == "Tiger Studio Brushes"
     assert dialog._brush_category_list.item(0).text() == "All Brushes"
-    assert dialog._brush_filter_combo.findText("My Favorites") >= 0
-    assert dialog._brush_filter_combo.findText("Watercolor") >= 0
-    assert dialog._brush_filter_combo.findText("Thick Paint") >= 0
+    assert {"favorites", "masters", "watercolor", "thick_paint"} <= set(
+        dialog._brush_filter_actions
+    )
     assert dialog._brush_library_preview.pixmap() is not None
+    assert dialog._brush_compatibility_label.text()
     dialog._set_brush_tab("settings")
     assert dialog._brush_panel_stack.currentWidget() is dialog._brush_controls_page
     dialog._set_brush_tab("presets")
@@ -439,14 +439,18 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog._brush_detail_settings["hardness"] == BRUSH_LIBRARY_PRESETS[0]["hardness"]
     assert dialog._brush_detail_settings["spacing"] == BRUSH_LIBRARY_PRESETS[0]["spacing"]
     assert dialog._brush_recent_list.count() == 1
+    assert dialog._brush_recent_list.isHidden() is False
     dialog._toggle_active_brush_favorite()
-    assert dialog._brush_favorite_btn.text() == "★"
-    dialog._brush_filter_combo.setCurrentIndex(
-        dialog._brush_filter_combo.findData("favorites")
-    )
+    assert dialog._brush_favorite_btn.isChecked()
+    dialog._set_brush_filters(["favorites"])
     app.processEvents()
     assert dialog.brush_library_list.count() == 1
-    dialog._brush_filter_combo.setCurrentIndex(0)
+    dialog._set_brush_filters([])
+    dialog._brush_compact_btn.setChecked(True)
+    app.processEvents()
+    assert dialog._brush_selector_compact is True
+    assert dialog._brush_category_list.isVisible() is False
+    dialog._brush_compact_btn.setChecked(False)
     assert "Brush:" in dialog._tool_status_label.text()
     assert dialog.selection_aspect_combo.parent() is dialog._selection_options_widget
     assert dialog.crop_apply_btn.parent() is dialog._selection_action_widget

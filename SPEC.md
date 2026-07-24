@@ -6509,17 +6509,20 @@ AI Script Edit MVP integration:
   inspector retains Photoshop-style Brush/Brush Presets and parameter sections.
   The catalog is a production v1 set; pressure/tilt-sensitive pigment mixing
   and persistent wet-canvas fluid simulation remain later engine work.
-- The 2026-07-25 brush workspace pass follows Corel Painter's documented
-  information architecture without copying proprietary brush resources. The
-  `Brush Library` tab is a real full-view selector: active library and favorite
-  controls at the top, search and functional filters (`My Favorites`, `Stamps`,
-  `Watercolor`, `Thick Paint`), a recent-brush strip, categories on the left,
-  variants on the right, and a bottom dab/stroke preview. `Brush Controls` is a
-  separate stacked page with engine sections on the left and current-brush
-  controls plus live preview on the right. Tabs switch actual pages rather than
-  acting as decorative labels. Session favorites and recent brushes are
-  reflected in `paint.state`; `paint.brush.library.view` controls tab/category/
-  filter/search state and `paint.brush.favorite.set` controls favorites.
+- The 2026-07-25 brush workspace pass follows the current Painter 2023 Brush
+  Selector information architecture without copying proprietary brush
+  resources. The selector uses a compact icon header rather than large text
+  tabs, active-library and favorite controls, search, simultaneous checkable
+  filters (`My Favorites`, `Painter Masters`, `Stamps`, `Watercolor
+  Compatible`, `Thick Paint Compatible`), an empty-state-aware recent strip,
+  categories on the left, and named stroke-preview rows on the right. Full and
+  Compact selector modes are functional. The selected brush preview is kept
+  shallow and reports Default/Watercolor/Thick Paint layer compatibility.
+  Advanced Brush Controls remain a separate stacked page. Session favorites,
+  recent brushes, active filters, and compact mode are reflected in
+  `paint.state`; `paint.brush.library.view` controls tab/category/single or
+  multi-filter/search/compact state and `paint.brush.favorite.set` controls
+  favorites.
   The initial library is `Tiger Studio Brushes`; external Painter libraries,
   Painter brush packs, and ABR/captured-dab import remain separate future
   ingestion work and must not be simulated as installed content.

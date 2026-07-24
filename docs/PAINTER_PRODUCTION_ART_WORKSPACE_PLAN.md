@@ -260,15 +260,20 @@ Official layout references:
 - Advanced brush controls:
   <https://product.corel.com/help/Painter/540111155/Corel-Painter-en/Corel-Painter-Exploring-Brush-controls.html>
 
-Implemented layout contract (2026-07-25):
+Implemented Painter 2023 layout contract (2026-07-25):
 
-- `Brush Library` is a real stacked page with library selector, favorite
-  toggle, search, working Favorites/Stamps/Watercolor/Thick Paint filters,
-  recent brushes, category list, variant grid, and dab/stroke preview.
-- `Brush Controls` is a separate page with engine sections and current-brush
-  controls. The two tab buttons switch pages rather than sharing one long
-  control surface.
-- `paint.state` reports library/search/filter/favorite/recent state.
+- `Brush Selector` is a real stacked page with a restrained icon header,
+  library selector, favorite toggle, search, simultaneous checkable
+  Favorites/Painter Masters/Stamps/Watercolor/Thick Paint filters, and an
+  empty-state-aware recent strip.
+- The full view uses compact categories on the left and named stroke-preview
+  rows on the right. Compact mode hides library/category/recent chrome while
+  preserving search and brush variants. The selected-brush footer is shallow
+  and reports compatible Default, Watercolor, and Thick Paint layer types.
+- `Advanced Brush Controls` is a separate page with engine sections and
+  current-brush controls. Small selector/control icons switch actual pages
+  without a large decorative tab row.
+- `paint.state` reports library/search/filter-list/compact/favorite/recent state.
   `paint.brush.library.view` and `paint.brush.favorite.set` expose the same
   workflow to Claude and local automation.
 - Tiger Studio uses its own renderer profiles and thumbnails. Corel's
