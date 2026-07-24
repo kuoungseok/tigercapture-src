@@ -19,7 +19,6 @@ from pathlib import Path
 from typing import Any, Optional
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QFont
 from PySide6.QtWidgets import (
     QApplication,
     QButtonGroup,
@@ -44,11 +43,6 @@ from PySide6.QtWidgets import (
 )
 
 from app.i18n import current_language, tr
-from app.audio_tool_dock_specs import (
-    AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT,
-    AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT,
-    AUDIO_TOOL_DOCK_BUTTON_RADIUS,
-)
 from app.icons import app_icon, icon_size, unreal_engine_icon
 from app.studio_slider import StudioSlider
 from app.style import FONT_FAMILY, editor_scrollbar_qss
@@ -76,8 +70,8 @@ _PROGRAM_LAUNCHER_MIN_SIZE = 66
 _PROGRAM_LAUNCHER_MAX_SIZE = 84
 _INSPECTOR_TAB_IDS = ("clip", "fx", "mask", "audio", "programs", "meta")
 _AUDIO_CREATION_TOOLS_EMPTY_TEXT = (
-    "Composer and Voice Lab are always available below. Select "
-    "an audio clip only when you want clip-level sound editing."
+    "Select an audio clip, or select a video clip with embedded audio, "
+    "to edit sound here."
 )
 _PROGRAMS_EMPTY_TEXT = (
     "Open Tiger Studio's focused production rooms. These are launchers, "
@@ -919,7 +913,6 @@ class WorkbenchPanel(QWidget):
         self._audio_evidence_card = _AudioEvidenceCard(self._tab_pages["audio"])
         self._audio_evidence_card.hide()
         self._tab_layouts["audio"].insertWidget(1, self._audio_evidence_card)
-        self._ensure_composer_dock()
 
         self._typography_evidence_card = _TypographyEvidenceCard(self._tab_pages["fx"])
         self._typography_evidence_card.hide()
@@ -1271,105 +1264,11 @@ class WorkbenchPanel(QWidget):
         return panel
 
     def _ensure_composer_dock(self):
-        dock = getattr(self, "_composer_dock", None)
-        if dock is not None:
-            return dock
-        audio_layout = self._tab_layouts["audio"]
-        for idx in range(audio_layout.count() - 1, -1, -1):
-            item = audio_layout.itemAt(idx)
-            if item is not None and item.spacerItem() is not None:
-                audio_layout.takeAt(idx)
-
-        dock = QWidget(self._tab_pages["audio"])
-        dock.setObjectName("ComposerDock")
-        dock.setStyleSheet(
-            "QWidget#ComposerDock { background:transparent; border:none; }"
-            "QPushButton#ComposerDockButton {"
-            "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-            " stop:0 rgba(255,255,255,14), stop:0.48 rgba(255,255,255,5),"
-            " stop:1 rgba(0,0,0,28)); color:#FFFFFF;"
-            "border-top:1px solid rgba(245,248,255,50);"
-            "border-left:1px solid rgba(230,236,250,32);"
-            "border-right:1px solid rgba(0,0,0,105);"
-            "border-bottom:1px solid rgba(0,0,0,125);"
-            f"border-radius:{AUDIO_TOOL_DOCK_BUTTON_RADIUS}px; padding:0px; margin:0px;"
-            "font-size:22px; font-weight:780;"
-            "}"
-            "QPushButton#ComposerDockButton:hover {"
-            "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-            " stop:0 rgba(255,255,255,22), stop:0.52 rgba(255,255,255,8),"
-            " stop:1 rgba(0,0,0,18));"
-            "border-top:1px solid rgba(255,255,255,72);"
-            "border-left:1px solid rgba(255,255,255,46);"
-            "border-right:1px solid rgba(0,0,0,88);"
-            "border-bottom:1px solid rgba(0,0,0,108);"
-            "}"
-            "QPushButton#ComposerDockButton:checked {"
-            "background:rgba(126,215,154,12);"
-            "border-top:1px solid rgba(126,215,154,92);"
-            "border-left:1px solid rgba(126,215,154,52);"
-            "border-right:1px solid rgba(0,0,0,95);"
-            "border-bottom:1px solid rgba(0,0,0,115);"
-            "}"
-            "QPushButton#ComposerDockButton:pressed {"
-            "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-            " stop:0 rgba(0,0,0,38), stop:1 rgba(255,255,255,7));"
-            "border-top:1px solid rgba(0,0,0,130);"
-            "border-left:1px solid rgba(0,0,0,95);"
-            "border-right:1px solid rgba(255,255,255,30);"
-            "border-bottom:1px solid rgba(255,255,255,45);"
-            "}"
-            "QScrollArea#ComposerScroll { background:transparent; border:none; }"
-            "QScrollArea#ComposerScroll > QWidget > QWidget { background:transparent; }"
-        )
-        dock_layout = QVBoxLayout(dock)
-        dock_layout.setContentsMargins(2, 0, 2, 0)
-        dock_layout.setSpacing(1)
-        dock.setMinimumHeight(AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT * 2 + 1)
-        dock.setMaximumHeight(AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT * 2 + 1)
-
-        button = QPushButton("COMPOSER", dock)
-        button.setObjectName("ComposerDockButton")
-        button.setCheckable(False)
-        composer_font = QFont(button.font())
-        composer_font.setBold(True)
-        composer_font.setPixelSize(22)
-        composer_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 4.0)
-        button.setFont(composer_font)
-        button.setMinimumHeight(AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT)
-        button.setMaximumHeight(AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT)
-        button.setToolTip("Open Composer")
-        button.setAccessibleName("Composer")
-        button.clicked.connect(lambda _checked=False: self._open_composer_window())
-        dock_layout.addWidget(button)
-
-        voice_button = QPushButton("VOICE LAB", dock)
-        voice_button.setObjectName("ComposerDockButton")
-        voice_button.setCheckable(False)
-        voice_font = QFont(voice_button.font())
-        voice_font.setBold(True)
-        voice_font.setPixelSize(22)
-        voice_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 4.0)
-        voice_button.setFont(voice_font)
-        voice_button.setMinimumHeight(AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT)
-        voice_button.setMaximumHeight(AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT)
-        voice_button.setToolTip("Open Voice Lab")
-        voice_button.setAccessibleName("Voice Lab")
-        voice_button.clicked.connect(lambda _checked=False: self._open_voice_lab())
-        dock_layout.addWidget(voice_button)
-
-        sound_scroll = getattr(self, "_sound_editor_scroll", None)
-        insert_index = (
-            audio_layout.indexOf(sound_scroll) + 1
-            if sound_scroll is not None and audio_layout.indexOf(sound_scroll) >= 0
-            else 1
-        )
-        audio_layout.insertWidget(insert_index, dock, stretch=0)
-        self._composer_dock = dock
-        self._composer_button = button
-        self._voice_lab_button = voice_button
+        self._composer_dock = None
+        self._composer_button = None
+        self._voice_lab_button = None
         self._composer_scroll = None
-        return dock
+        return None
 
     def _ensure_composer_window(self):
         window = getattr(self, "_composer_window", None)
@@ -1377,7 +1276,6 @@ class WorkbenchPanel(QWidget):
             return window
         from app.composer_panel import ComposerWindow
 
-        self._ensure_composer_dock()
         window = ComposerWindow(self.window())
         window.music_lab_action_requested.connect(self.music_lab_action_requested.emit)
         window.music_lab_selection_changed.connect(self.music_lab_selection_changed.emit)
@@ -1412,7 +1310,6 @@ class WorkbenchPanel(QWidget):
             return window
         from app.tts_lab import TtsLabWindow
 
-        self._ensure_composer_dock()
         editor_owner = self.window()
         window = TtsLabWindow(editor_owner)
         setattr(window, "_editor", editor_owner)
@@ -1530,6 +1427,110 @@ class WorkbenchPanel(QWidget):
         widget = getattr(self, "_node_graph_widget", None)
         if widget is not None:
             widget.hide()
+
+    def _video_embedded_audio_proxy_clip(self, track, selected_clip=None):
+        """Return a transient AudioClip for a video's embedded audio stream."""
+        anchor = selected_clip if selected_clip is not None else track
+        source = getattr(anchor, "source_path", None) or getattr(track, "source_path", None)
+        if source in (None, ""):
+            return None
+        try:
+            source_path = Path(source)
+        except Exception:
+            return None
+        try:
+            cache_key = str(source_path.resolve()).casefold()
+        except Exception:
+            cache_key = str(source_path).casefold()
+        duration_cache = getattr(self, "_video_embedded_audio_duration_cache", None)
+        if duration_cache is None:
+            duration_cache = {}
+            self._video_embedded_audio_duration_cache = duration_cache
+        duration_ms = duration_cache.get(cache_key)
+        if duration_ms is None:
+            try:
+                from app.audio_tracks import probe_audio_duration_ms
+
+                duration_ms = int(probe_audio_duration_ms(source_path) or 0)
+            except Exception:
+                duration_ms = 0
+            duration_cache[cache_key] = duration_ms
+        if duration_ms <= 0:
+            return None
+
+        fallback_offset = int(getattr(track, "offset_ms", 0) or 0)
+        timeline_in = int(getattr(anchor, "timeline_in_ms", fallback_offset) or fallback_offset)
+        source_in = max(0, int(getattr(anchor, "source_in_ms", 0) or 0))
+        source_duration = max(
+            0,
+            int(
+                getattr(
+                    anchor,
+                    "source_duration_ms",
+                    getattr(track, "duration_ms", 0),
+                )
+                or 0
+            ),
+        )
+        source_out = int(
+            getattr(anchor, "effective_source_out_ms", getattr(anchor, "source_out_ms", 0))
+            or 0
+        )
+        if source_out <= 0:
+            source_out = source_duration or duration_ms
+        if source_out <= source_in:
+            length = int(getattr(anchor, "effective_length_ms", 0) or 0)
+            if length <= 0:
+                length = int(getattr(track, "duration_ms", duration_ms) or duration_ms)
+            source_out = source_in + length
+        trim_start = min(source_in, duration_ms)
+        trim_end = min(max(source_out, trim_start), duration_ms)
+        if trim_end <= trim_start:
+            return None
+
+        proxy = getattr(anchor, "_embedded_audio_proxy_clip", None)
+        if proxy is None:
+            from app.audio_tracks import AudioClip
+
+            raw_id = int(getattr(anchor, "id", getattr(track, "id", 0)) or 0)
+            proxy = AudioClip(id=-300000 - abs(raw_id))
+            setattr(anchor, "_embedded_audio_proxy_clip", proxy)
+        proxy.source_path = source_path
+        proxy.duration_ms = int(duration_ms)
+        proxy.offset_ms = int(timeline_in)
+        proxy.trim_start_ms = int(trim_start)
+        proxy.trim_end_ms = int(trim_end)
+        setattr(proxy, "preview_embedded_video_audio", True)
+        setattr(proxy, "workbench_embedded_video_audio", True)
+        setattr(
+            proxy,
+            "_embedded_video_audio_signature",
+            (cache_key, int(timeline_in), int(trim_start), int(trim_end)),
+        )
+        return proxy
+
+    def _prepare_video_embedded_audio_panel(self, track, selected_clip=None) -> bool:
+        clip = self._video_embedded_audio_proxy_clip(track, selected_clip)
+        if clip is None:
+            self._hide_sound_editor_panel()
+            self._set_tab_empty_visible(
+                "audio",
+                True,
+                "This video selection has no detected embedded audio stream.",
+            )
+            return False
+        sound_panel = self._ensure_sound_editor_panel()
+        context_id = getattr(selected_clip, "id", getattr(track, "id", "none"))
+        sound_panel.set_clip(
+            clip,
+            track=None,
+            context_label="Embedded Video Audio",
+            context_key=f"video-embedded:{context_id}:{getattr(clip, 'source_path', '')}",
+        )
+        sound_panel.set_mixer_tracks([], active_track_id=None)
+        self._show_sound_editor_panel()
+        self._set_tab_empty_visible("audio", False)
+        return True
 
     # ---- public API ----
 
@@ -2164,11 +2165,6 @@ class WorkbenchPanel(QWidget):
 
     def _set_inspector_tab(self, tab: str) -> None:
         self._inspector_tab = tab or "clip"
-        if self._inspector_tab == "audio":
-            try:
-                self._ensure_composer_dock().show()
-            except Exception:
-                pass
         btn = self._inspector_tab_buttons.get(self._inspector_tab)
         if btn is not None:
             btn.setChecked(True)
@@ -2176,6 +2172,10 @@ class WorkbenchPanel(QWidget):
         if page is not None:
             self._tab_stack.setCurrentWidget(page)
         self._sync_inspector_chrome()
+        if self._inspector_tab == "audio" and self._target and self._target[0] == "video":
+            track = self._target[1]
+            selected_clip = self._target[2] if len(self._target) > 2 else None
+            self._prepare_video_embedded_audio_panel(track, selected_clip)
         if self._inspector_tab == "programs":
             self._update_program_launcher_metrics()
 
@@ -2260,11 +2260,6 @@ class WorkbenchPanel(QWidget):
         label = getattr(self, f"_{tab}_empty_label", None)
         if label is None:
             return
-        if tab == "audio":
-            try:
-                self._ensure_composer_dock().show()
-            except Exception:
-                pass
         if text is not None:
             label.setText(text)
         label.setVisible(bool(visible))
@@ -2850,7 +2845,6 @@ class WorkbenchPanel(QWidget):
         self._rows_host.show()
         if hasattr(self, "_audio_evidence_card"):
             self._audio_evidence_card.hide()
-        self._hide_sound_editor_panel()
         if hasattr(self, "_typography_evidence_card"):
             self._typography_evidence_card.hide()
         if hasattr(self, "_edit_point_evidence_card"):
@@ -2859,6 +2853,7 @@ class WorkbenchPanel(QWidget):
                 self._edit_point_evidence_card.set_context(track, selected_clip)
             self._edit_point_evidence_card.setVisible(show_edit_point)
         self._set_tab_empty_visible("clip", False)
+        self._hide_sound_editor_panel()
         self._set_tab_empty_visible("audio", True, _AUDIO_CREATION_TOOLS_EMPTY_TEXT)
 
         if hasattr(self, "_live2d_mapping_host"):

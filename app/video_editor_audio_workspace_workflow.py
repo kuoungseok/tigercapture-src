@@ -316,6 +316,10 @@ def _on_workbench_sound_editor_changed(self) -> None:
         source = getattr(clip, "source_path", None)
         if store is not None and source is not None:
             store.touch(store.media_key(source))
+    elif target[0] == "video":
+        refresh = getattr(self, "_refresh_player_tracks", None)
+        if callable(refresh):
+            refresh()
 
 
 def _on_workbench_sound_editor_mixer_track_changed(self, track) -> None:

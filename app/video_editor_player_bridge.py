@@ -195,6 +195,32 @@ def _video_clip_audio_fields(track: Any, clip: Any) -> tuple[Path | None, int, i
     return source_path, timeline_in, source_in, source_out, duration
 
 
+def _copy_embedded_audio_edit_state(audio_clip: Any, video_clip: Any) -> None:
+    proxy = getattr(video_clip, "_embedded_audio_proxy_clip", None)
+    if proxy is None:
+        return
+    for attr in (
+        "gain",
+        "fade_in_ms",
+        "fade_out_ms",
+        "fades",
+        "cuts",
+        "volume_points",
+        "effects",
+        "_se_speed",
+        "_se_pitch",
+        "_se_reverse",
+    ):
+        if hasattr(proxy, attr):
+            try:
+                setattr(audio_clip, attr, copy.deepcopy(getattr(proxy, attr)))
+            except Exception:
+                setattr(audio_clip, attr, getattr(proxy, attr))
+    for attr in ("waveform", "spectrum_bins"):
+        if hasattr(proxy, attr):
+            setattr(audio_clip, attr, getattr(proxy, attr))
+
+
 def collect_video_embedded_audio_preview_clips(owner: Any) -> list[Any]:
     from app.audio_tracks import AudioClip
 
@@ -223,6 +249,7 @@ def collect_video_embedded_audio_preview_clips(owner: Any) -> list[Any]:
                 trim_start_ms=source_in,
                 trim_end_ms=source_out,
             )
+            _copy_embedded_audio_edit_state(audio_clip, clip)
             setattr(audio_clip, "preview_embedded_video_audio", True)
             collected.append(audio_clip)
             next_id -= 1

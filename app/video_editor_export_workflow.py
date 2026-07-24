@@ -537,6 +537,16 @@ def _on_export(self) -> None:
             acc_ms += seg_out_ms
         return None
 
+    def _source_ms_to_output_ms(source_ms: int) -> int | None:
+        acc_ms = 0.0
+        for seg_start, seg_end, seg_speed in segments:
+            speed = max(float(seg_speed), 0.001)
+            seg_out_ms = (int(seg_end) - int(seg_start)) / speed
+            if int(seg_start) <= source_ms < int(seg_end):
+                return int(round(acc_ms + (source_ms - int(seg_start)) / speed))
+            acc_ms += seg_out_ms
+        return None
+
     def _remap_audio_tracks_for_export(audio_tracks: list[AudioTrack]) -> list[AudioTrack]:
         if not has_nested_or_multisource:
             return list(audio_tracks)
@@ -580,6 +590,39 @@ def _on_export(self) -> None:
                 collected.extend(_collect_nested_audio_clips(child_track, clip_base))
         return collected
 
+    def _collect_video_embedded_audio_clips_for_export() -> list[AudioClip]:
+        import copy
+        from types import SimpleNamespace
+
+        from app.audio_tracks import probe_audio_duration_ms
+        from app.video_editor_player_bridge import collect_video_embedded_audio_preview_clips
+
+        probe_owner = SimpleNamespace(
+            _tracks=[track],
+            _audio_tracks=list(getattr(self, "_audio_tracks", []) or []),
+        )
+        collected = collect_video_embedded_audio_preview_clips(probe_owner)
+        remapped: list[AudioClip] = []
+        for src_clip in collected:
+            audio_duration_ms = int(probe_audio_duration_ms(Path(src_clip.source_path)) or 0)
+            if audio_duration_ms <= 0:
+                continue
+            if has_nested_or_multisource:
+                out_offset = _project_ms_to_output_ms(int(getattr(src_clip, "offset_ms", 0) or 0))
+            else:
+                out_offset = _source_ms_to_output_ms(int(getattr(src_clip, "trim_start_ms", 0) or 0))
+            if out_offset is None:
+                continue
+            dst_clip = copy.deepcopy(src_clip)
+            dst_clip.duration_ms = int(audio_duration_ms)
+            dst_clip.trim_start_ms = min(int(dst_clip.trim_start_ms), audio_duration_ms)
+            dst_clip.trim_end_ms = min(int(dst_clip.trim_end_ms), audio_duration_ms)
+            if dst_clip.effective_length_ms <= 0:
+                continue
+            dst_clip.offset_ms = int(out_offset)
+            remapped.append(dst_clip)
+        return remapped
+
     export_audio_tracks = _remap_audio_tracks_for_export(
         [t for t in self._audio_tracks if t.is_loaded]
     )
@@ -587,6 +630,15 @@ def _on_export(self) -> None:
     if nested_audio_clips:
         export_audio_tracks.append(
             AudioTrack(id=-9001, clips=nested_audio_clips, label="Nested audio")
+        )
+    embedded_audio_clips = _collect_video_embedded_audio_clips_for_export()
+    if embedded_audio_clips:
+        export_audio_tracks.append(
+            AudioTrack(
+                id=-9002,
+                clips=embedded_audio_clips,
+                label="Embedded video audio",
+            )
         )
 
     from app.video_exporter import get_export_format

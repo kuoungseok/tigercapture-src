@@ -348,25 +348,16 @@ def test_workbench_sound_editor_keeps_top_audio_blocks_separated(tmp_path: Path)
     scroll = panel._sound_editor_scroll
     assert scroll.isVisible() is True
     assert scroll.widget() is sound
-    assert panel._composer_dock.isVisible() is True
-    assert panel._composer_button.isVisible() is True
-    assert panel._composer_button.isCheckable() is False
-    assert panel._composer_button.text() == "COMPOSER"
-    assert panel._composer_button.minimumHeight() == AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT
-    assert panel._composer_button.maximumHeight() == AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT
-    assert panel._composer_button.icon().isNull()
-    assert panel._voice_lab_button.isVisible() is True
-    assert panel._voice_lab_button.text() == "VOICE LAB"
-    assert panel._voice_lab_button.minimumHeight() == AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT
-    assert panel._voice_lab_button.maximumHeight() == AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT
-    assert panel._voice_lab_button.icon().isNull()
+    assert getattr(panel, "_composer_dock", None) is None
+    assert getattr(panel, "_composer_button", None) is None
+    assert getattr(panel, "_voice_lab_button", None) is None
+    assert panel.findChildren(QPushButton, "ComposerDockButton") == []
     assert not hasattr(panel, "_unreal_link_button")
     assert sound._advanced_btn.text() == "SOUND LAB"
-    assert sound._advanced_btn.minimumHeight() == panel._composer_button.minimumHeight()
-    assert sound._advanced_btn.maximumHeight() == panel._composer_button.maximumHeight()
+    assert sound._advanced_btn.minimumHeight() == AUDIO_TOOL_DOCK_BUTTON_MIN_HEIGHT
+    assert sound._advanced_btn.maximumHeight() == AUDIO_TOOL_DOCK_BUTTON_MAX_HEIGHT
     assert sound._advanced_btn.icon().isNull()
-    assert scroll.geometry().top() < panel._composer_dock.geometry().top()
-    assert scroll.height() >= panel._tab_stack.height() - panel._composer_dock.height() - 12
+    assert scroll.height() >= panel._tab_stack.height() - 12
     assert sound.minimumHeight() >= SOUND_EDITOR_PANEL_MIN_HEIGHT
     assert sound.height() >= SOUND_EDITOR_PANEL_MIN_HEIGHT
     assert scroll.verticalScrollBar().maximum() > 0
@@ -391,17 +382,69 @@ def test_workbench_sound_editor_keeps_top_audio_blocks_separated(tmp_path: Path)
 
     assert sound.minimumHeight() == SOUND_EDITOR_PANEL_MIXER_MIN_HEIGHT
     assert sound._advanced_lab_host.isVisible() is False
-    panel._composer_button.click()
+    panel._open_composer_window()
     app.processEvents()
 
     assert getattr(panel, "_composer_scroll", None) is None
     assert isinstance(panel._composer_window, ComposerWindow)
     assert panel._composer_window.isVisible() is True
     assert panel._composer_panel is panel._composer_window.composer_panel()
-    assert panel._composer_dock.findChildren(ComposerPanel) == []
     assert scroll.isVisible() is True
     assert sound.isVisible() is True
-    assert scroll.geometry().top() < panel._composer_dock.geometry().top()
+
+    panel.close()
+
+
+def test_workbench_video_clip_with_embedded_audio_exposes_sound_editor(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    app = _app()
+    import app.audio_tracks as audio_tracks
+    from app.timeline_model import VideoClip
+    from app.video_track_legacy import VideoTrack
+    from app.workbench_panel import WorkbenchPanel
+
+    video_path = tmp_path / "camera_with_audio.mp4"
+    video_path.write_bytes(b"video")
+    monkeypatch.setattr(audio_tracks, "probe_audio_duration_ms", lambda _path: 9000)
+    clip = VideoClip(
+        id=22,
+        source_path=video_path,
+        source_duration_ms=10000,
+        timeline_in_ms=1300,
+        source_in_ms=2000,
+        source_out_ms=7000,
+    )
+    track = VideoTrack(id=7, source_path=None, duration_ms=10000, clips=[clip])
+    panel = WorkbenchPanel()
+    panel.resize(744, 620)
+    panel.show()
+
+    panel.set_video_track(track, selected_clip=clip)
+    panel._set_inspector_tab("audio")
+    app.processEvents()
+
+    sound = panel._sound_editor_panel
+    proxy = sound.current_clip()
+    assert proxy is getattr(clip, "_embedded_audio_proxy_clip")
+    assert sound._title.text() == "Embedded Video Audio"
+    assert panel._sound_editor_scroll.isVisible() is True
+    assert panel._audio_empty_label.isVisible() is False
+    assert proxy.source_path == video_path
+    assert proxy.duration_ms == 9000
+    assert proxy.offset_ms == 1300
+    assert proxy.trim_start_ms == 2000
+    assert proxy.trim_end_ms == 7000
+    assert getattr(proxy, "workbench_embedded_video_audio") is True
+
+    proxy.gain = 0.42
+    panel.set_video_track(track, selected_clip=clip)
+    panel._set_inspector_tab("audio")
+    app.processEvents()
+
+    assert sound.current_clip() is proxy
+    assert sound.current_clip().gain == 0.42
 
     panel.close()
 
@@ -833,7 +876,7 @@ def test_workbench_music_composition_opens_standalone_composer(tmp_path: Path) -
     assert isinstance(panel._composer_window, ComposerWindow)
     assert panel._composer_window.isVisible() is True
     assert getattr(panel, "_composer_scroll", None) is None
-    assert panel._composer_button.isChecked() is False
+    assert getattr(panel, "_composer_button", None) is None
     assert composer.findChild(QWidget, "ComposerArrangementView") is not None
     assert getattr(panel, "_sound_editor_scroll", None) is None or panel._sound_editor_scroll.isVisible() is False
 

@@ -1001,13 +1001,20 @@ Start here when changing a feature:
   weights, or model caches. The current setup
   implementation is intentionally split: `app/tts_setup.py` owns provider
   detection/install-plan contracts, `app/tts_lab.py` owns the friendly setup UI,
-  and `app/workbench_panel.py` exposes Voice Lab as a Composer-adjacent tool
-  under the Workbench Audio tab rather than nesting it inside Sound Editor.
-  Composer and Voice Lab are always-visible creation tools in that audio dock;
-  they must not depend on an existing audio track or selected audio clip.
-  2026-07-14 UI note: the Workbench Audio dock and standalone Voice Lab window
-  use text-first `COMPOSER` / `VOICE LAB` wordmarks instead of raster logo
-  buttons. Voice Lab popup windows and all Voice Lab combo-box popup containers
+  and `app/workbench_panel.py` exposes Voice Lab as a Composer-adjacent tool in
+  the Workbench `Programs` tab rather than nesting it inside Sound Editor or
+  the clip-level Audio tab. Composer and Voice Lab must remain available
+  without an existing audio track or selected audio clip, but the Audio tab
+  itself must not show large `COMPOSER` / `VOICE LAB` launcher buttons.
+  Video clips with detected embedded audio expose the clip-scoped Sound Editor
+  through a transient `AudioClip` proxy; this does not create a timeline audio
+  track unless the user explicitly extracts audio. Preview and export rebuild
+  hidden embedded-audio clips from the video clip's timeline position and
+  source trim, then copy the Workbench proxy's gain/fade/effects state so the
+  selected-video audio follows timeline edits without requiring extraction.
+  2026-07-25 UI note: Composer and Voice Lab launch from the Workbench
+  `Programs` tile grid; standalone Voice Lab window chrome remains text-first.
+  Voice Lab popup windows and all Voice Lab combo-box popup containers
   must force dark styled backgrounds/palettes so Windows/Qt native popup frames
   do not show white side gutters or white dropdown edges.
   2026-07-10 stabilization note: TTS/Voice Lab sidecar failures must be

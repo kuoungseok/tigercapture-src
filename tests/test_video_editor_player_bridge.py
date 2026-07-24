@@ -227,6 +227,61 @@ def test_sync_video_embedded_audio_preview_track_updates_hidden_track() -> None:
     assert owner._audio_mixer.updated.clips[0].trim_end_ms == 1800
 
 
+def test_video_embedded_audio_preview_follows_timeline_with_editor_state() -> None:
+    from app.audio_tracks import AudioClip
+    from app.timeline_model import VideoClip
+
+    source = Path("scene.mp4")
+    clip = VideoClip(
+        id=32,
+        source_path=source,
+        source_duration_ms=9000,
+        timeline_in_ms=1000,
+        source_in_ms=1500,
+        source_out_ms=3600,
+    )
+    proxy = AudioClip(
+        id=-300032,
+        source_path=source,
+        duration_ms=9000,
+        offset_ms=1000,
+        trim_start_ms=1500,
+        trim_end_ms=3600,
+        fade_in_ms=120,
+        fade_out_ms=240,
+        gain=0.42,
+    )
+    proxy.effects["eq"]["low"]["gain"] = 4.5
+    setattr(proxy, "_se_speed", 1.2)
+    setattr(clip, "_embedded_audio_proxy_clip", proxy)
+    owner = SimpleNamespace(
+        _tracks=[SimpleNamespace(id=1, clips=[clip])],
+        _audio_tracks=[],
+    )
+
+    [audio_clip] = bridge.collect_video_embedded_audio_preview_clips(owner)
+
+    assert audio_clip.offset_ms == 1000
+    assert audio_clip.trim_start_ms == 1500
+    assert audio_clip.trim_end_ms == 3600
+    assert audio_clip.gain == 0.42
+    assert audio_clip.fade_in_ms == 120
+    assert audio_clip.fade_out_ms == 240
+    assert audio_clip.effects["eq"]["low"]["gain"] == 4.5
+    assert getattr(audio_clip, "_se_speed") == 1.2
+
+    clip.timeline_in_ms = 4200
+    clip.source_in_ms = 2300
+    clip.source_out_ms = 5200
+    [moved_audio_clip] = bridge.collect_video_embedded_audio_preview_clips(owner)
+
+    assert moved_audio_clip.offset_ms == 4200
+    assert moved_audio_clip.trim_start_ms == 2300
+    assert moved_audio_clip.trim_end_ms == 5200
+    assert moved_audio_clip.gain == 0.42
+    assert moved_audio_clip.effects["eq"]["low"]["gain"] == 4.5
+
+
 class _RefreshPlayer:
     def __init__(self, log: list[str]) -> None:
         self.log = log
