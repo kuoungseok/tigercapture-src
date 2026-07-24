@@ -537,6 +537,7 @@ class BasicLocalSegmentationProvider:
         *,
         max_elements: int,
         point_hints: Iterable[tuple[float, float]] = (),
+        object_hints: Iterable[Mapping[str, Any] | Sequence[Any]] = (),
     ) -> SemanticSegmentationResult:
         del point_hints
         return segment_image(
@@ -544,6 +545,7 @@ class BasicLocalSegmentationProvider:
             alpha,
             mode="basic",
             max_elements=max_elements,
+            object_hints=object_hints,
         )
 
 
@@ -566,6 +568,7 @@ class SamSegmentationProvider:
         *,
         max_elements: int,
         point_hints: Iterable[tuple[float, float]] = (),
+        object_hints: Iterable[Mapping[str, Any] | Sequence[Any]] = (),
     ) -> SemanticSegmentationResult:
         return segment_image(
             rgb,
@@ -573,6 +576,7 @@ class SamSegmentationProvider:
             mode="sam",
             max_elements=max_elements,
             point_hints=point_hints,
+            object_hints=object_hints,
         )
 
 
@@ -583,16 +587,19 @@ def segmentation_capabilities() -> dict[str, dict[str, Any]]:
             "available": True,
             "automatic": True,
             "point_hints": False,
+            "box_hints": False,
         },
         BasicLocalSegmentationProvider.provider_id: {
             "available": True,
             "automatic": True,
             "point_hints": False,
+            "box_hints": True,
         },
         sam.provider_id: {
             "available": sam.available(),
             "automatic": True,
             "point_hints": True,
+            "box_hints": True,
         },
     }
 
@@ -600,12 +607,14 @@ def segmentation_capabilities() -> dict[str, dict[str, Any]]:
 __all__ = [
     "SEGMENTATION_MODES",
     "BasicLocalSegmentationProvider",
+    "ObjectSegmentationHint",
     "SamSegmentationProvider",
     "SegmentationCandidate",
     "SemanticSegmentationProvider",
     "SemanticSegmentationResult",
     "clean_binary_mask",
     "component_records",
+    "normalize_object_hints",
     "segmentation_capabilities",
     "segment_image",
 ]
