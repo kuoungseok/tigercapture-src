@@ -5770,12 +5770,19 @@ class PaintDialog(QDialog):
         self.reference_duplicate_btn = QPushButton("Dup")
         self.reference_delete_btn = QPushButton("Del")
         self.reference_bake_btn = QPushButton("Bake")
+        option_row = QHBoxLayout()
+        option_row.setContentsMargins(0, 0, 0, 0)
+        option_row.setSpacing(4)
         self.reference_overlay_btn = QPushButton("Overlay")
         self.reference_overlay_btn.setCheckable(True)
         self.reference_overlay_btn.setChecked(True)
         self.reference_visible_btn = QPushButton("Visible")
         self.reference_visible_btn.setCheckable(True)
         self.reference_visible_btn.setChecked(True)
+        self.reference_lock_btn = QPushButton("Lock")
+        self.reference_lock_btn.setCheckable(True)
+        self.reference_sample_btn = QPushButton("Sample")
+        self.reference_palette_btn = QPushButton("Palette")
         for btn, handler in (
             (self.reference_add_btn, self._add_reference_image_from_file),
             (self.reference_clipboard_btn, self._add_reference_image_from_clipboard),
@@ -5787,13 +5794,23 @@ class PaintDialog(QDialog):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(handler)
             action_row.addWidget(btn)
-        for btn in (self.reference_overlay_btn, self.reference_visible_btn):
+        for btn in (
+            self.reference_overlay_btn,
+            self.reference_visible_btn,
+            self.reference_lock_btn,
+            self.reference_sample_btn,
+            self.reference_palette_btn,
+        ):
             btn.setObjectName("PaintCustomColor")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            action_row.addWidget(btn)
+            option_row.addWidget(btn)
         self.reference_overlay_btn.toggled.connect(lambda _checked=False: self._refresh_reference_overlay())
         self.reference_visible_btn.toggled.connect(lambda checked=False: self._set_selected_reference_visible(bool(checked)))
+        self.reference_lock_btn.toggled.connect(lambda checked=False: self._set_selected_reference_locked(bool(checked)))
+        self.reference_sample_btn.clicked.connect(self._sample_selected_reference_color)
+        self.reference_palette_btn.clicked.connect(self._extract_selected_reference_palette)
         layout.addLayout(action_row)
+        layout.addLayout(option_row)
 
         self._reference_preview_label = QLabel("Drop references here")
         self._reference_preview_label.setObjectName("PaintReferencePreview")
@@ -5818,6 +5835,7 @@ class PaintDialog(QDialog):
                 ("W", "ref_w", 2, 100, 34, "%"),
                 ("H", "ref_h", 2, 100, 34, "%"),
                 ("Op", "ref_opacity", 5, 100, 58, "%"),
+                ("Rot", "ref_rotation", -180, 180, 0, " deg"),
             )
         ):
             row, col = divmod(index, 3)
@@ -5981,6 +5999,7 @@ class PaintDialog(QDialog):
             width_norm=float(reference.get("width_norm", 0.34) or 0.34),
             height_norm=float(reference.get("height_norm", 0.34) or 0.34),
             opacity=float(reference.get("opacity", 0.58) or 0.58) * 100.0,
+            rotation_deg=float(reference.get("rotation_deg", 0.0) or 0.0),
             start_ms=int(getattr(self, "_time_ms", 0)),
             end_ms=-1,
             z_index=max((s.z_index for s in self._stickers), default=0) + 1,
@@ -6015,6 +6034,21 @@ class PaintDialog(QDialog):
             return
         self._store_reference_board(board)
 
+    def _set_selected_reference_locked(self, locked: bool) -> None:
+        if bool(getattr(self, "_painter_reference_syncing", False)):
+            return
+        reference_id = str(getattr(self, "_painter_reference_selected_id", "") or "")
+        if not reference_id:
+            return
+        from app.painter_reference_board import update_reference_image
+
+        self._push_undo_state("Lock reference" if locked else "Unlock reference")
+        try:
+            board = update_reference_image(self._current_reference_board(), reference_id, locked=bool(locked))
+        except ValueError:
+            return
+        self._store_reference_board(board)
+
     def _on_reference_spin_changed(self, _key: str) -> None:
         if bool(getattr(self, "_painter_reference_syncing", False)):
             return
@@ -6026,6 +6060,12 @@ class PaintDialog(QDialog):
             return
         controls = getattr(self, "_painter_reference_controls", {})
         if not controls:
+            return
+        selected = self._selected_reference_payload()
+        if bool((selected or {}).get("locked", False)):
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText("Reference is locked")
+            self._sync_reference_control_values(selected)
             return
         from app.painter_reference_board import update_reference_image
 
@@ -6039,10 +6079,49 @@ class PaintDialog(QDialog):
                 width_norm=controls["ref_w"].value() / 100.0,
                 height_norm=controls["ref_h"].value() / 100.0,
                 opacity=controls["ref_opacity"].value() / 100.0,
+                rotation_deg=controls["ref_rotation"].value(),
             )
         except ValueError:
             return
         self._store_reference_board(board)
+
+    def _sample_selected_reference_color(self) -> None:
+        selected = self._selected_reference_payload()
+        if not selected:
+            return
+        try:
+            from app.painter_reference_board import sample_reference_color
+
+            sample = sample_reference_color(str(selected.get("path") or ""))
+            rgb = tuple(int(value) for value in sample.get("rgb", [255, 255, 255])[:3])
+            self._apply_pen_color(QColor(*rgb), remember=True)
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText(f"Reference sample {sample.get('hex', '')}".strip())
+        except Exception as exc:
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText(f"Reference sample failed: {type(exc).__name__}")
+
+    def _extract_selected_reference_palette(self) -> None:
+        selected = self._selected_reference_payload()
+        if not selected:
+            return
+        try:
+            from app.painter_reference_board import extract_reference_palette
+
+            payload = extract_reference_palette(str(selected.get("path") or ""), max_colors=8)
+            colors = []
+            for row in payload.get("colors", []) or []:
+                rgb = row.get("rgb")
+                if isinstance(rgb, list) and len(rgb) >= 3:
+                    colors.append((int(rgb[0]), int(rgb[1]), int(rgb[2])))
+            if colors:
+                self._recent_colors = colors[:RECENT_COLOR_LIMIT]
+                self._apply_pen_color(QColor(*colors[0]), remember=False)
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText(f"Reference palette {len(colors)} colors")
+        except Exception as exc:
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText(f"Reference palette failed: {type(exc).__name__}")
 
     def _selected_reference_payload(self) -> dict | None:
         reference_id = str(getattr(self, "_painter_reference_selected_id", "") or "")
@@ -6111,12 +6190,22 @@ class PaintDialog(QDialog):
             "ref_w": int(round(float((selected or {}).get("width_norm", 0.34)) * 100)),
             "ref_h": int(round(float((selected or {}).get("height_norm", 0.34)) * 100)),
             "ref_opacity": int(round(float((selected or {}).get("opacity", 0.58)) * 100)),
+            "ref_rotation": int(round(float((selected or {}).get("rotation_deg", 0.0)))),
         }
         for key, value in values.items():
             if key in controls:
                 controls[key].setValue(value)
+                controls[key].setEnabled(bool(selected) and not bool((selected or {}).get("locked", False)))
         if hasattr(self, "reference_visible_btn"):
             self.reference_visible_btn.setChecked(bool((selected or {}).get("visible", True)))
+            self.reference_visible_btn.setEnabled(bool(selected))
+        if hasattr(self, "reference_lock_btn"):
+            self.reference_lock_btn.setChecked(bool((selected or {}).get("locked", False)))
+            self.reference_lock_btn.setEnabled(bool(selected))
+        for attr in ("reference_duplicate_btn", "reference_delete_btn", "reference_bake_btn", "reference_sample_btn", "reference_palette_btn"):
+            btn = getattr(self, attr, None)
+            if btn is not None:
+                btn.setEnabled(bool(selected))
 
     def _refresh_reference_overlay(self) -> None:
         host = getattr(self, "_canvas_host", None)
@@ -6157,7 +6246,15 @@ class PaintDialog(QDialog):
             w = max(16, min(w, canvas_rect.right() - x + 1))
             h = max(16, min(h, canvas_rect.bottom() - y + 1))
             label.setGeometry(x, y, w, h)
-            label.setPixmap(self._reference_pixmap_with_opacity(source, w, h, float(row.get("opacity", 0.58) or 0.58)))
+            label.setPixmap(
+                self._reference_pixmap_with_opacity(
+                    source,
+                    w,
+                    h,
+                    float(row.get("opacity", 0.58) or 0.58),
+                    float(row.get("rotation_deg", 0.0) or 0.0),
+                )
+            )
             label.show()
             label.raise_()
         for reference_id, label in list(labels.items()):
@@ -6168,7 +6265,13 @@ class PaintDialog(QDialog):
         canvas.raise_()
 
     @staticmethod
-    def _reference_pixmap_with_opacity(source: QPixmap, width: int, height: int, opacity: float) -> QPixmap:
+    def _reference_pixmap_with_opacity(
+        source: QPixmap,
+        width: int,
+        height: int,
+        opacity: float,
+        rotation_deg: float = 0.0,
+    ) -> QPixmap:
         target = QPixmap(max(1, int(width)), max(1, int(height)))
         target.fill(Qt.GlobalColor.transparent)
         scaled = source.scaled(
@@ -6180,6 +6283,11 @@ class PaintDialog(QDialog):
         painter = QPainter(target)
         try:
             painter.setOpacity(max(0.05, min(1.0, float(opacity))))
+            cx = target.width() / 2.0
+            cy = target.height() / 2.0
+            painter.translate(cx, cy)
+            painter.rotate(float(rotation_deg or 0.0))
+            painter.translate(-cx, -cy)
             painter.drawPixmap((target.width() - scaled.width()) // 2, (target.height() - scaled.height()) // 2, scaled)
         finally:
             painter.end()

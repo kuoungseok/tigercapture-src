@@ -179,7 +179,7 @@ def register_paint_actions(registry: Any) -> None:
         "paint",
         "paint_window_show_panel",
         params_schema=schema_object(
-            {"panel": {"type": "string", "enum": ["brush", "layers", "channels", "paths"]}},
+            {"panel": {"type": "string", "enum": ["brush", "layers", "channels", "paths", "reference", "3d_blockout"]}},
             required=("panel",),
         ),
         undo_label="Show Painter panel",
@@ -715,6 +715,7 @@ def register_paint_actions(registry: Any) -> None:
         "width_norm": {"type": "number", "minimum": 0.02, "maximum": 1.0},
         "height_norm": {"type": "number", "minimum": 0.02, "maximum": 1.0},
         "opacity": {"type": "number", "minimum": 0.05, "maximum": 1.0},
+        "rotation_deg": {"type": "number", "minimum": -180.0, "maximum": 180.0},
         "visible": {"type": "boolean"},
         "locked": {"type": "boolean"},
     }
@@ -779,6 +780,37 @@ def register_paint_actions(registry: Any) -> None:
         params_schema=schema_object({"reference_id": {"type": "string"}}),
         undo_label="Bake Painter reference image",
         dry_summary="Painter reference image would be baked into an exportable sticker layer",
+    )
+    registry.register_adapter_action(
+        "paint.reference.sample_color",
+        "Sample a color from a Painter reference image and optionally apply it as foreground color.",
+        "paint",
+        "paint_reference_sample_color",
+        params_schema=schema_object(
+            {
+                "reference_id": {"type": "string"},
+                "x_norm": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y_norm": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "apply": {"type": "boolean"},
+            }
+        ),
+        undo_label="Sample Painter reference color",
+        dry_summary="Painter reference color would be sampled",
+    )
+    registry.register_adapter_action(
+        "paint.reference.extract_palette",
+        "Extract a compact color palette from a Painter reference image and optionally apply it to recent colors.",
+        "paint",
+        "paint_reference_extract_palette",
+        params_schema=schema_object(
+            {
+                "reference_id": {"type": "string"},
+                "max_colors": {"type": "integer", "minimum": 1, "maximum": 12},
+                "apply": {"type": "boolean"},
+            }
+        ),
+        undo_label="Extract Painter reference palette",
+        dry_summary="Painter reference palette would be extracted",
     )
     blockout_primitive = {
         "primitive_id": {"type": "string"},

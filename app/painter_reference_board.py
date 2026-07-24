@@ -21,6 +21,7 @@ class PainterReferenceImage:
     width_norm: float = 0.34
     height_norm: float = 0.34
     opacity: float = 0.58
+    rotation_deg: float = 0.0
     visible: bool = True
     locked: bool = False
 
@@ -36,6 +37,7 @@ class PainterReferenceImage:
             width_norm=_clamp(float(self.width_norm), 0.02, 1.0),
             height_norm=_clamp(float(self.height_norm), 0.02, 1.0),
             opacity=_clamp(float(self.opacity), 0.05, 1.0),
+            rotation_deg=_normalize_rotation(self.rotation_deg),
             visible=bool(self.visible),
             locked=bool(self.locked),
         )
@@ -51,6 +53,7 @@ class PainterReferenceImage:
             "width_norm": round(row.width_norm, 5),
             "height_norm": round(row.height_norm, 5),
             "opacity": round(row.opacity, 4),
+            "rotation_deg": round(row.rotation_deg, 4),
             "visible": row.visible,
             "locked": row.locked,
         }
@@ -103,6 +106,7 @@ def reference_board_from_dict(payload: Any) -> PainterReferenceBoard:
                 width_norm=float(row.get("width_norm", 0.34) or 0.34),
                 height_norm=float(row.get("height_norm", 0.34) or 0.34),
                 opacity=float(row.get("opacity", 0.58) or 0.58),
+                rotation_deg=float(row.get("rotation_deg", 0.0) or 0.0),
                 visible=bool(row.get("visible", True)),
                 locked=bool(row.get("locked", False)),
             )
@@ -130,6 +134,7 @@ def add_reference_image(board: PainterReferenceBoard | dict[str, Any] | None, **
         width_norm=float(params.get("width_norm", 0.34) or 0.34),
         height_norm=float(params.get("height_norm", 0.34) or 0.34),
         opacity=float(params.get("opacity", 0.58) or 0.58),
+        rotation_deg=float(params.get("rotation_deg", 0.0) or 0.0),
         visible=bool(params.get("visible", True)),
         locked=bool(params.get("locked", False)),
     ).normalized()
@@ -154,7 +159,18 @@ def update_reference_image(
             continue
         found = True
         row = ref.to_dict()
-        for key in ("path", "name", "x_norm", "y_norm", "width_norm", "height_norm", "opacity", "visible", "locked"):
+        for key in (
+            "path",
+            "name",
+            "x_norm",
+            "y_norm",
+            "width_norm",
+            "height_norm",
+            "opacity",
+            "rotation_deg",
+            "visible",
+            "locked",
+        ):
             if key in params and params[key] is not None:
                 row[key] = params[key]
         updated.append(
@@ -167,6 +183,7 @@ def update_reference_image(
                 width_norm=float(row.get("width_norm", 0.34) or 0.34),
                 height_norm=float(row.get("height_norm", 0.34) or 0.34),
                 opacity=float(row.get("opacity", 0.58) or 0.58),
+                rotation_deg=float(row.get("rotation_deg", 0.0) or 0.0),
                 visible=bool(row.get("visible", True)),
                 locked=bool(row.get("locked", False)),
             ).normalized()
@@ -206,6 +223,7 @@ def duplicate_reference_image(
         width_norm=source.width_norm,
         height_norm=source.height_norm,
         opacity=source.opacity,
+        rotation_deg=source.rotation_deg,
         visible=source.visible,
         locked=source.locked,
     ).normalized()
@@ -290,6 +308,17 @@ def _reference_index(reference_id: str) -> int:
 
 def _clamp(value: float, lo: float = 0.0, hi: float = 1.0) -> float:
     return max(lo, min(hi, value))
+
+
+def _normalize_rotation(value: Any) -> float:
+    try:
+        degrees = float(value)
+    except Exception:
+        degrees = 0.0
+    degrees = degrees % 360.0
+    if degrees > 180.0:
+        degrees -= 360.0
+    return degrees
 
 
 __all__ = [

@@ -84,6 +84,8 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
         "paint.reference.delete",
         "paint.reference.duplicate",
         "paint.reference.bake",
+        "paint.reference.sample_color",
+        "paint.reference.extract_palette",
         "paint.3d_blockout.state",
         "paint.3d_blockout.add",
         "paint.3d_blockout.update",
@@ -410,6 +412,7 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
             "width_norm": 0.4,
             "height_norm": 0.25,
             "opacity": 0.5,
+            "rotation_deg": 12,
         },
     ).to_dict()
     assert reference["ok"]
@@ -418,11 +421,25 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     reference_id = reference["result"]["board"]["references"][0]["id"]
     moved_reference = registry.execute(
         "paint.reference.update",
-        {"reference_id": reference_id, "x_norm": 0.2, "opacity": 0.72},
+        {"reference_id": reference_id, "x_norm": 0.2, "opacity": 0.72, "rotation_deg": -20, "locked": True},
     ).to_dict()
     assert moved_reference["ok"]
     assert moved_reference["result"]["board"]["references"][0]["x_norm"] == 0.2
     assert moved_reference["result"]["board"]["references"][0]["opacity"] == 0.72
+    assert moved_reference["result"]["board"]["references"][0]["rotation_deg"] == -20.0
+    assert moved_reference["result"]["board"]["references"][0]["locked"] is True
+    sampled_reference = registry.execute(
+        "paint.reference.sample_color",
+        {"reference_id": reference_id, "x_norm": 0.5, "y_norm": 0.5},
+    ).to_dict()
+    assert sampled_reference["ok"]
+    assert sampled_reference["result"]["sample"]["hex"] == "#88AAFF"
+    palette_reference = registry.execute(
+        "paint.reference.extract_palette",
+        {"reference_id": reference_id, "max_colors": 4},
+    ).to_dict()
+    assert palette_reference["ok"]
+    assert palette_reference["result"]["palette"]["color_count"] >= 1
     duplicated_reference = registry.execute(
         "paint.reference.duplicate",
         {"reference_id": reference_id, "offset_x": 0.03},

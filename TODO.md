@@ -2,6 +2,68 @@
 
 ## Remaining Product Gaps
 
+- [ ] Painter production art workspace:
+  Painter must be treated as a primary drawing app for game concept artists,
+  not as a video-annotation helper. Use
+  `docs/PAINTER_PRODUCTION_ART_WORKSPACE_PLAN.md` as the implementation source
+  of truth, with `SPEC.md` carrying only the durable product contract.
+  - [ ] Rebalance Painter layout around drawing: large central canvas, compact
+    left rail, top tool options, right Navigator/Reference, Color/Brush, and
+    Layers/Channels/Paths. Move Typography/PBR/3D into optional panels instead
+    of default visual priority. Keep Layers/Channels/Paths pinned as a frequent
+    production dock; optional 3D/PBR/Typography panels must not replace or hide
+    it in the default drawing workspace.
+  - [ ] Brush engine pass for production concept art: pressure/flow/hardness/
+    spacing/shape dynamics/texture/smudge/mixer behavior, real stroke-preview
+    thumbnails, and game-art presets for sketch, clean ink, blocking, oil,
+    dry brush, texture, hair, skin, metal, smoke/cloud, ground/rock, and pixel.
+  - [ ] Layer workflow pass: thumbnails, clipping mask, layer mask clarity,
+    group/folder planning, drag reorder, blend-mode readability, lock
+    transparency, duplicate/merge/flatten behavior, and PSD compatibility plan.
+  - [ ] Selection/transform pass: lasso/polygon lasso, color range, feather,
+    expand/contract, transform selection, free transform, rotate/scale/skew,
+    and selection-to-mask polish.
+  - [ ] Reference workflow pass: PureRef-like image board, pinned references,
+    navigator/value-check/flip-canvas controls, perspective rulers, symmetry,
+    and silhouette/value preview.
+    - [x] 2026-07-24 first slice: non-destructive Painter reference board,
+      file/clipboard image add, selected position/size/opacity/visibility,
+      canvas overlay, duplicate/delete, explicit bake-to-sticker, `Window >
+      Reference Board`, `paint.reference.*` action coverage, and regression
+      tests. Remaining reference work: media-pool add, rotate/lock UI,
+      color sample, palette extraction, navigator/value/silhouette views, and
+      perspective/symmetry guides.
+    - [x] 2026-07-24 second slice: reference rotation, reference lock UI,
+      bake-with-rotation, color sampling, palette extraction, and
+      `paint.reference.sample_color` / `paint.reference.extract_palette`
+      action coverage. Remaining reference work: media-pool add, navigator,
+      value/silhouette views, and perspective/symmetry guides.
+  - [ ] 3D blockout pass for background concept art: box-first placement with
+    stretch/widen/tall scale, move/rotate/scale standard gizmos, optional simple
+    arch helpers for door/window openings, grid snap, camera orbit/pan/zoom/FOV,
+    perspective/horizon/vanishing overlays, wireframe/transparent/value/
+    silhouette views, opacity control, and bake-to-paint-layer. Keep it a
+    drawing reference, not a Blender clone.
+    - [x] 2026-07-24 first slice: box/arch data model, canvas overlay,
+      selected move/scale/rotate handles, duplicate, align-to-ground, grid
+      snapping, camera/FOV controls and presets, `paint.3d_blockout.*` action
+      coverage, and bake-to-layer as Painter strokes on a
+      `3D Blockout Guide` layer.
+  - [ ] Preserve Texture Lab entry points while moving PBR into optional
+    texture-artist workflow. Existing `PBR Texture Lab...`, `paint.pbr.*`, and
+    `ar_pbr.texture_lab.*` doorways must keep working and must not displace the
+    pinned Layers/Channels/Paths dock.
+  - [ ] GPU-forward Painter architecture: design brush preview, high-zoom
+    canvas work, Texture Lab/PBR previews, and 3D blockout with GPU
+    acceleration/parity as the target. CPU/QPainter fallbacks are acceptable
+    first passes only if they do not slow default 2D drawing startup.
+  - [ ] Painter action parity: every production drawing feature above must get
+    registered `paint.*` actions, dry-run/review support where destructive,
+    undo transactions, and regression tests before AI/MCP claims it.
+  - [ ] Painter QA matrix: small laptop window, 1080p, high-DPI, tablet/stylus
+    input, pixel-art 800% zoom, heavy brush strokes, layer/mask operations,
+    copy/cut/paste, PNG/PSD/export paths, and optional 3D blockout overlay.
+
 - [x] 2026-07-08 Music Lab arranger handoff: Workbench Sound Editor `Music Lab`
   now displays real composition sections/tracks/clips instead of a static
   mockup, supports selected-block regenerate/section resize controls, exposes

@@ -278,11 +278,19 @@ References are not paint layers unless explicitly imported or baked.
 - `Window > Reference Board` and `paint.reference.state/add/update/delete/
   duplicate/bake` action coverage.
 
+2026-07-24 second slice:
+
+- Per-reference rotation is stored, previewed, baked to sticker rotation, and
+  exposed through `paint.reference.add/update`.
+- Reference lock UI prevents accidental panel edits while keeping visibility
+  and unlock controls available.
+- Reference color sampling and palette extraction are available from the
+  `REFERENCE` panel and through `paint.reference.sample_color` and
+  `paint.reference.extract_palette`.
+
 Remaining:
 
 - Media Pool add.
-- Rotation and lock UI.
-- Color sample and palette extraction.
 - Navigator thumbnail.
 - Value/silhouette check.
 - Perspective ruler and symmetry integration.

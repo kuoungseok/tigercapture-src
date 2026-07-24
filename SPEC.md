@@ -3722,12 +3722,18 @@ Node graph behavior:
   export.
 - The standalone drawing/paint dialog has canvas zoom controls for detailed
   brush and object placement. The top bar exposes zoom out, zoom in, and Fit
-  buttons plus a `25%` to `400%` zoom slider and percent readout. Keyboard and
+  buttons plus a `25%` to `800%` zoom slider and percent readout. Keyboard and
   mouse shortcuts share the same clamped zoom path: `Ctrl++`/`Ctrl+=` zoom in,
   `Ctrl+-` zooms out, `Ctrl+0` and `Ctrl+1` reset to fit/100%, and
   `Ctrl+MouseWheel` zooms around the paint workspace. Zoom is an editing-view
   affordance only; PNG/timeline export still uses the original canvas/export
   size and normalized paint/object coordinates.
+- At high Painter zoom levels, the canvas draws an automatic pixel-grid overlay
+  from the backing document pixel dimensions so dot/pixel-art work has visible
+  cells. The overlay is view-only, separate from the explicit Grid/Snap controls,
+  stride-capped for large documents, and never baked into PNG/timeline export.
+  High-zoom canvas display uses crisp nearest-neighbor scaling so source pixel
+  boundaries remain legible while normal zoom keeps smoother preview scaling.
 - `ColorGrade.color_workflow` persists color workflow payloads from the
   professional color preset menu. `apply_to_rgb()` applies the workflow's
   qualifier/window mask and curves on the CPU path so preview/export can see
@@ -6066,24 +6072,150 @@ AI Script Edit MVP integration:
   operation must stay reachable through these registered actions for AI/MCP
   control.
 - The paint action namespace is active: `app/actions/paint_namespace.py` owns
-  drawing-window editor-object listing/render/import plus `paint.export_png`.
-  PNG export actions must preserve the same two UI modes as the dialog:
-  composited PNG for backing image plus overlays, and transparent-overlay PNG
-  for the editable layer only.
+  drawing-window editor-object listing/render/import
+  (`paint.editor_objects.list`, `paint.editor_object.render`,
+  `paint.editor_object.import`), document creation/export
+  (`paint.document.new`, `paint.document.export_png`), and the legacy
+  `paint.export_png` export path. PNG export actions must preserve the same two
+  UI modes as the dialog: composited PNG for backing image plus overlays, and
+  transparent-overlay PNG for the editable layer only.
+- Standalone Painter is a production drawing workspace for game concept art,
+  not a video-annotation side tool. Its north star is a Photoshop/Clip Studio
+  style replacement for character, background, prop, and texture artists. Video
+  paint-over, typography, 3D, and PBR are optional supporting workflows; the
+  default workspace must prioritize drawing, brush choice, color, reference,
+  layers, masks, selections, and canvas navigation.
+- The implementation source of truth for the game concept-art Painter workspace
+  is `docs/PAINTER_PRODUCTION_ART_WORKSPACE_PLAN.md`; keep future detailed UX,
+  brush, layer, reference, 3D blockout, action parity, and QA planning there
+  instead of duplicating large prose in this file.
+- Painter UX references are role-based, not a one-app clone:
+  Photoshop defines the base mental model (left tool rail, top tool options,
+  Layers/Channels/Paths, selection/mask/layer workflow, and shortcuts);
+  Clip Studio Paint defines game-character/concept-art flow, perspective
+  guides, rulers, and 3D materials as drawing references; Corel Painter defines
+  natural-media brush feel and stroke-preview expectations; Krita defines an
+  inspectable brush-engine/preset palette model; Procreate informs fast
+  low-friction drawing interactions; PureRef informs reference-board behavior;
+  SketchUp plus Blender gizmos inform simple 3D blockout placement; Clip Studio
+  3D Material informs how 3D should stay a draw-over reference instead of taking
+  over the painting workflow. Do not import Blender-level UI complexity, old
+  Corel-style dense panels, CapCut/Screen Studio video chrome, or main editor
+  timeline-first behavior into Painter.
+- The intended Painter layout is: large central canvas, compact left icon rail,
+  top current-tool options, right Navigator/Reference plus Color/Brush plus
+  a pinned Layers/Channels/Paths dock, and optional lower/popup panels for Brush Presets,
+  History, 3D Blockout, Typography, and PBR. Painter must remain usable as a
+  pure 2D drawing app with every optional panel hidden. Layers/Channels/Paths
+  are frequent production panels and must not be displaced by optional 3D,
+  PBR, typography, or helper panels in the default workspace.
 - Standalone Painter follows the Photoshop-like contract in
   `docs/PAINTER_STANDALONE_PLAN_KO.md`: left icon toolbar, central canvas,
-  and right-side `Layers / Channels / Paths / History` tabs. Brush presets are
-  visual stroke thumbnails rather than text-only rows. Selection actions cover
+  and a right inspector where the color palette sits above a standalone
+  `Layers / Channels / Paths` tab set. Brush presets are exposed from the
+  toolbar brush button as visual stroke thumbnails instead of text-only rows,
+  and the full brush settings panel is reachable from the `Brush` menu and
+  `Window > Brush`. Selection actions cover
   select-all, deselect, invert, rectangular marquee, elliptical marquee, and
   marquee aspect modes (`free`, `square`, `16:9`, `4:3`). Path and layer-mask
   actions must round-trip selection/path geometry through
   `paint.selection.to_path`, `paint.path.to_selection`,
   `paint.layer.mask_from_selection`, and `paint.layer.mask_from_path`.
+- Painter 3D support is for game-art blockout and paint-over, not a general 3D
+  editor. The first-class 3D workflow is a simple reference layer/panel where
+  artists primarily place boxes, stretch them longer/wider/taller, and move,
+  rotate, or scale them with a standard 3D gizmo. A simple arch helper is
+  allowed for doorway/window/opening composition, but other modeling-style
+  primitives stay out of the default scope. The camera must support orbit, pan,
+  zoom distance, and FOV adjustment so artists can match a scene perspective
+  before painting over it. Grid snap, perspective guides, horizon/vanishing-
+  point overlays, wireframe, transparent/value/silhouette views, and shadow/
+  depth guides are optional aids; 3D blockout data must stay separate from
+  paint strokes/layers until explicitly baked, support undo, and remain
+  reachable through registered `paint.3d_blockout.*` actions before any MCP/AI
+  workflow relies on it.
+  The 2026-07-24 Painter blockout pass implements the first production
+  contract slice: box and arch primitives, canvas overlay preview, selected
+  object move/scale/rotate gizmo handles, duplicate, align-to-ground, grid
+  snapping, orbit/pan/distance/FOV controls, front/side/top/perspective camera
+  presets, `paint.3d_blockout.state/add/update/delete/duplicate/align_ground/
+  snap/camera/camera_preset/bake` actions, and bake-to-layer as normal Painter
+  strokes on a new `3D Blockout Guide` layer.
+  This is still a QPainter/CPU reference path with a GPU-ready serialized
+  scene/projection contract, not the final accelerated blockout renderer.
+- Painter reference-board support is non-destructive by default. The 2026-07-24
+  first slice adds a right-inspector `REFERENCE` panel, image import from file
+  or clipboard, selected reference position/size/opacity/visibility controls,
+  canvas overlay rendering behind transparent paint strokes, duplicate/delete,
+  explicit bake-to-exportable sticker, `Window > Reference Board`, and
+  registered `paint.reference.state/add/update/delete/duplicate/bake` actions.
+  The second 2026-07-24 slice adds per-reference rotation, lock UI,
+  bake-with-rotation behavior, and `paint.reference.sample_color` /
+  `paint.reference.extract_palette` actions for reference-driven color picking.
+  Reference images do not export or merge into paint layers unless the user
+  explicitly bakes them. The remaining parity work is media-pool reference add,
+  navigator thumbnails, value/silhouette checks, perspective rulers, and
+  symmetry drawing.
 - Standalone Painter also exposes the Photoshop-style selection/view helpers
   added in the 2026-07-23 Painter pass: Quick Mask is available through the
   visible `Quick Mask` control, `Q`, and `paint.quick_mask.set`; Magic Select
   uses `paint.selection.select_by_color` to build a fast similar-color bounding
   selection; and grid/snap state is controlled by `paint.view.grid`.
+- The Painter toolbar brush button supports long-press/right-click brush
+  preset selection. The pop-up is an image-first thumbnail palette with only a
+  compact header and hover tooltips for name/width/opacity; it uses the same
+  `BRUSH_LIBRARY_PRESETS` backing data as the Painter automation layer, and
+  selecting a preset switches to Pen while applying style, width, and opacity.
+  The right inspector also has a Photoshop-like `BRUSH` detail panel with
+  Brush/Brush Presets tabs, tip preset thumbnails, style selection, Size,
+  Opacity, Hardness, Spacing, Angle, Roundness, Flip X/Y, section toggles, and
+  a live stroke preview. Size, Opacity, Style, and preset selection are wired
+  to all current strokes; Hardness, Spacing, Angle, Roundness, and Flip X/Y are
+  persisted in `Stroke` data and rendered through the general tip-dab brush
+  path. The deeper dynamics/scattering categories are visible planning surfaces
+  for the next brush-engine pass. The 2026-07-23 brush-engine pass adds
+  first-tier textured Painter-style brushes (`loaded_oil`, `impasto_oil`,
+  `oil_smear`, `soft_oil_glaze`, `real_wet_oil`, `bristle_oil`, `dry_oil`,
+  `palette_knife`, `textured_chalk`) that render in both the Qt preview and the
+  PIL/MP4 export path from the same `brush_style` field. Oil brushes simulate
+  loaded-paint chunks, impasto ridge highlights/shadows, smear/glaze passes,
+  bristle lanes, and palette-knife scrape marks. This is an expressive
+  textured-stroke engine, not a full Corel Painter-style wet media simulation
+  with real pigment mixing or canvas-state smudge physics.
+- The left Painter toolbar is a compact Photoshop-style single-column icon
+  rail, not a text toolbar and not a two-column grid. It groups real supported
+  tools with separators, keeps labels in tooltips/accessibility names, exposes
+  Fit/Fill/Quick Mask shortcuts without duplicating fake unsupported tools, and
+  includes foreground/background color swatches with swap. The rail can be
+  collapsed or hidden, and hidden rails are restored from `Window > Show Tool
+  Bar` so users cannot lose the primary tool surface.
+- The standalone Painter color panel is a compact Painter-style color dock, not
+  an oversized decorative picker: a 176 px hue ring with triangular
+  saturation/value picker, current-color swatch, hex readout, compact
+  Mixer/Hue/Value controls, Recent swatches, a compact current-color-derived
+  `Shades` harmony strip, and an `Advanced Picker` handoff. It does not show a
+  large decorative all-purpose color grid because that consumed inspector space
+  without helping brush work. It keeps the Painter reference shape while using
+  Tiger Studio's restrained chrome. The color dock must stay in the upper
+  inspector scroll without overlapping the larger independent lower
+  `Layers / Channels / Paths` dock. The Layers tab control header must split
+  filter, layer-kind icons, opacity, lock, and fill status into separate rows
+  so the middle controls remain readable at narrow inspector widths. Painter
+  inspector controls should visually follow the main Video Editor Workbench
+  property-panel language: flatter dark rows, compact radii, restrained borders,
+  and editor-style slider handles instead of bulky standalone-app widgets.
+- Standalone Painter startup sizing must respect the current screen's available
+  geometry. Its initial and minimum window sizes are capped below the monitor
+  work area, then clamped back on-screen on first show so low-resolution laptop
+  or scaled Windows desktops do not open with controls outside the viewport.
+- Painter automation includes direct document, view, tool, brush, panel, layer,
+  channel, selection, path, clipboard, fill, mask, mirror, crop, image, canvas,
+  editor-object, and PBR actions. Layer automation covers add/select/rename/
+  duplicate/delete, visibility, lock, opacity, and blend mode. Selection
+  automation covers select-all, deselect, invert, rectangle, ellipse, aspect
+  mode, similar-color selection, and selection-to-path. Path automation covers
+  create/delete/clear/commit and path-to-selection. Clipboard automation covers
+  `paint.clipboard.copy`, `paint.clipboard.cut`, and `paint.clipboard.paste`.
 - Painter image and channel automation must stay exposed through
   `paint.crop.to_selection`, `paint.image.resize`, `paint.canvas.resize`,
   `paint.canvas.flip`, `paint.mirror.set`, `paint.channel.select`,
@@ -6091,21 +6223,47 @@ AI Script Edit MVP integration:
   copy/paste targets RGB, Red, Green, Blue, or Alpha and uses the system
   image clipboard so AI workflows can move raster channel data without a
   visible dialog.
+- Painter `Copy`/`Cut`/`Paste` must accept both the internal Tiger Studio paint
+  payload and normal system clipboard images. Copy/Cut writes the internal
+  payload plus a standard image preview when the selected paint layer, strokes,
+  bubble, or sticker can be rasterized. Pasted screenshots, copied images,
+  local image file URLs, or local image-path text are saved under
+  `external/assets/paint_clipboard` and placed as movable PNG sticker layers so
+  undo, selection, resizing, and export continue to use the existing sticker
+  pipeline.
 - Painter fill/mask automation must stay exposed through `paint.fill.solid`,
   `paint.fill.gradient`, `paint.fill.pattern`, and `paint.layer.mask_create`.
   Current fill operations target the document background raster or active
   selection clip; true independent raster-layer fill, Clone/Heal, and
   content-aware operations are later pixel-engine work, not current claims.
-- Painter owns the user-facing PBR texture-map workflow. The `PBR Maps` tab
-  in the Painter right panel previews the current visible Painter document on a
-  material plane, offers normal/AO/roughness/metallic controls, and exports
-  separate maps or ARM/ORM/glTF packed maps through `paint.pbr.preview`,
-  `paint.pbr.export`, and `paint.pbr.substrate_plan`. Lower-level
-  `ar_pbr.texture_lab.*` actions remain available for ownerless file-based
-  automation, but the product UI entry point is Painter.
+- Painter owns the PBR texture-map automation workflow through
+  `paint.pbr.preview`, `paint.pbr.backend_status`, `paint.pbr.export`, and
+  `paint.pbr.substrate_plan`, with
+  stable internal defaults for normal/AO/roughness/metallic generation. The
+  shared Texture Lab export surface covers Base/Normal/AO/Roughness/Metallic/
+  Height/Cavity/Curvature plus optional Substrate-oriented `f0` and `f90_mask`
+  maps. Existing Texture Lab entry points must be preserved as optional Painter
+  doorways. These controls are no longer mixed into the right-side
+  layer/channel/path tab set, and must not displace that pinned dock;
+  lower-level `ar_pbr.texture_lab.*` actions remain available for ownerless
+  file-based automation.
+  Painter preview uses an in-memory, preview-sized source and the shared
+  Texture Lab map cache so slider changes do not write and reopen a 4K PNG for
+  every refresh. Painter PBR preview/export inherits the Texture Lab GPU-required
+  default: CPU map generation and CPU preview compositing are available only for
+  explicit diagnostics through `allow_cpu=true` or
+  `TIGERCAPTURE_TEXTURE_LAB_ALLOW_CPU=1`. The Painter UI must expose backend
+  status and missing-GPU install guidance through the shared Texture Lab backend
+  contract.
+- Painter implementation is GPU-forward: natural-media brush preview, 3D
+  blockout, high-zoom canvas work, and optional video paint-over may use
+  CPU/QPainter first-pass contracts while their data models stay ready for GPU
+  preview/export parity. Texture Lab/PBR preview is stricter: product entry
+  points must not run CPU fallback by default. None of these paths may slow the
+  default 2D drawing workspace at startup.
 - Standalone Painter must avoid GIMP-style ambiguous state changes: channel row
-  clicks select the channel only, visibility changes require the explicit eye
-  control or `paint.channel.set_visible`, tool-specific controls live in a
+  clicks select the channel only, visibility changes require the per-row eye
+  icon toggle or `paint.channel.set_visible`, tool-specific controls live in a
   `TOOL OPTIONS` area rather than inside Brush/Color panels, and crop can be
   applied from the visible `Apply Crop` control or Enter/Return when a crop
   selection exists.

@@ -1140,7 +1140,9 @@ class PaintAdapterMixin:
         width_norm: float = 0.34,
         height_norm: float = 0.34,
         opacity: float = 0.58,
+        rotation_deg: float = 0.0,
         visible: bool = True,
+        locked: bool = False,
     ) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         from app.painter_reference_board import add_reference_image
@@ -1154,7 +1156,9 @@ class PaintAdapterMixin:
             width_norm=float(width_norm),
             height_norm=float(height_norm),
             opacity=float(opacity),
+            rotation_deg=float(rotation_deg),
             visible=bool(visible),
+            locked=bool(locked),
         )
         rows = board.to_dict().get("references", [])
         if rows:
@@ -1172,6 +1176,7 @@ class PaintAdapterMixin:
         width_norm: float | None = None,
         height_norm: float | None = None,
         opacity: float | None = None,
+        rotation_deg: float | None = None,
         visible: bool | None = None,
         locked: bool | None = None,
     ) -> dict[str, Any]:
@@ -1188,6 +1193,7 @@ class PaintAdapterMixin:
             width_norm=width_norm,
             height_norm=height_norm,
             opacity=opacity,
+            rotation_deg=rotation_deg,
             visible=visible,
             locked=locked,
         )
@@ -1237,6 +1243,68 @@ class PaintAdapterMixin:
         return {
             **self._paint_reference_payload(dialog),
             "bake": dict(bake or {}),
+        }
+
+    def paint_reference_sample_color(
+        self,
+        *,
+        reference_id: str = "",
+        x_norm: float = 0.5,
+        y_norm: float = 0.5,
+        apply: bool = True,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        target = str(reference_id or getattr(dialog, "_painter_reference_selected_id", "") or "")
+        if target:
+            setattr(dialog, "_painter_reference_selected_id", target)
+        reference = dialog._selected_reference_payload()
+        if not reference:
+            raise ValueError("Painter reference not found")
+        from app.painter_reference_board import sample_reference_color
+        from PySide6.QtGui import QColor
+
+        sample = sample_reference_color(str(reference.get("path") or ""), x_norm=float(x_norm), y_norm=float(y_norm))
+        if bool(apply):
+            rgb = sample.get("rgb", [255, 255, 255])
+            dialog._apply_pen_color(QColor(int(rgb[0]), int(rgb[1]), int(rgb[2])), remember=True)
+        return {
+            **self._paint_reference_payload(dialog),
+            "sample": sample,
+            "applied_to_foreground": bool(apply),
+        }
+
+    def paint_reference_extract_palette(
+        self,
+        *,
+        reference_id: str = "",
+        max_colors: int = 8,
+        apply: bool = True,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        target = str(reference_id or getattr(dialog, "_painter_reference_selected_id", "") or "")
+        if target:
+            setattr(dialog, "_painter_reference_selected_id", target)
+        reference = dialog._selected_reference_payload()
+        if not reference:
+            raise ValueError("Painter reference not found")
+        from app.painter_reference_board import extract_reference_palette
+        from PySide6.QtGui import QColor
+
+        palette = extract_reference_palette(str(reference.get("path") or ""), max_colors=int(max_colors or 8))
+        applied_colors: list[tuple[int, int, int]] = []
+        if bool(apply):
+            for row in palette.get("colors", []) or []:
+                rgb = row.get("rgb")
+                if isinstance(rgb, list) and len(rgb) >= 3:
+                    applied_colors.append((int(rgb[0]), int(rgb[1]), int(rgb[2])))
+            if applied_colors:
+                limit = len(getattr(dialog, "_recent_colors", []) or []) or 5
+                dialog._recent_colors = applied_colors[:limit]
+                dialog._apply_pen_color(QColor(*applied_colors[0]), remember=False)
+        return {
+            **self._paint_reference_payload(dialog),
+            "palette": palette,
+            "applied_to_recent_colors": bool(apply),
         }
 
 
