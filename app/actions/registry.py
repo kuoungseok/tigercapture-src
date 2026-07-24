@@ -259,6 +259,9 @@ class ActionRegistry:
         from app.actions.motion_plugin_namespace import register_motion_plugin_actions
 
         register_motion_plugin_actions(self)
+        from app.actions.motion_ai_generation_namespace import register_motion_ai_generation_actions
+
+        register_motion_ai_generation_actions(self)
         from app.actions.evidence_namespace import register_evidence_actions
 
         register_evidence_actions(self)

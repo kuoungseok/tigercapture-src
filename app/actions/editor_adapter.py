@@ -39,9 +39,11 @@ from app.actions.editor_adapter_motion_release import MotionReleaseAdapterMixin
 from app.actions.editor_adapter_motion_relink import MotionRelinkAdapterMixin
 from app.actions.editor_adapter_motion_recovery import MotionRecoveryAdapterMixin
 from app.actions.editor_adapter_motion_plugin import MotionPluginAdapterMixin
+from app.actions.editor_adapter_motion_ai_generation import MotionAIGenerationAdapterMixin
 
 
 class EditorAdapter(
+    MotionAIGenerationAdapterMixin,
     MotionPluginAdapterMixin,
     MotionRecoveryAdapterMixin,
     MotionRelinkAdapterMixin,

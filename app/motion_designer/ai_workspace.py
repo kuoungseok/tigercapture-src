@@ -305,6 +305,11 @@ def apply_motion_ai_proposal(
     normalized = proposal if isinstance(proposal, MotionAIProposal) else MotionAIProposal.from_dict(proposal)
     if normalized.composition_id and normalized.composition_id != composition.id:
         raise ValueError("Motion AI proposal targets a different composition")
+    generation = normalized.analysis.get("generation_plan") if isinstance(normalized.analysis, Mapping) else None
+    if isinstance(generation, Mapping):
+        base_revision = int(generation.get("base_revision", composition.revision) or composition.revision)
+        if base_revision != composition.revision:
+            raise ValueError("Motion AI proposal was created for a stale composition revision")
     candidate = MotionComposition.from_dict(composition.to_dict())
     if not normalized.layers:
         return candidate

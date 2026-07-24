@@ -17,7 +17,7 @@ import shlex
 import shutil
 import sys
 import urllib.error
-from typing import Any
+from typing import Any, Callable
 
 from app.ai_edit_plan import (
     AI_EDIT_PLAN_SCHEMA_V1,
@@ -162,6 +162,30 @@ class AIProviderPlanResult:
             "provider": self.provider,
             "plan": self.plan.to_dict() if self.plan is not None else None,
             "reason": self.reason,
+            "metadata": dict(self.metadata or {}),
+        }
+
+
+@dataclass(frozen=True)
+class AIProviderJSONResult:
+    """Validated structured output returned through the shared AI boundary."""
+
+    ok: bool
+    provider: str
+    selected_provider: str
+    payload: Mapping[str, Any] | None = None
+    reason: str = ""
+    fallback_used: bool = False
+    metadata: Mapping[str, Any] | None = None
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "ok": bool(self.ok),
+            "provider": self.provider,
+            "selected_provider": self.selected_provider,
+            "payload": dict(self.payload or {}),
+            "reason": self.reason,
+            "fallback_used": bool(self.fallback_used),
             "metadata": dict(self.metadata or {}),
         }
 
@@ -1864,6 +1888,183 @@ def generate_selected_provider_plan(
             reason=reason,
             metadata={"endpoint": endpoint, "url": url, "technical_error": str(exc)},
         )
+
+
+def generate_selected_provider_json(
+    task: str,
+    user_command: str,
+    *,
+    output_contract: Mapping[str, Any],
+    input_payload: Mapping[str, Any],
+    safe_baseline: Mapping[str, Any],
+    validate_payload: Callable[[Mapping[str, Any]], Mapping[str, Any]],
+    provider_id: str | None = None,
+    env: Mapping[str, str] | None = None,
+    timeout_seconds: int = QWEN_EXECUTOR_TIMEOUT_SECONDS,
+) -> AIProviderJSONResult:
+    """Generate one validated JSON object without granting project access.
+
+    This is the task-agnostic counterpart to ``generate_selected_provider_plan``.
+    Providers receive compact data and a safe deterministic baseline. The caller
+    owns the schema validator, and only its normalized result can cross this
+    boundary. Provider failures return that validated baseline with explicit
+    fallback metadata instead of exposing untrusted output.
+    """
+
+    statuses = ai_provider_readiness(env)
+    selected = _normalized_provider_id(provider_id) or selected_ai_provider_id(env)
+    effective = provider_effective_generation_for_selection(selected, statuses)
+
+    def validated(value: Mapping[str, Any]) -> dict[str, Any]:
+        normalized = validate_payload(dict(value))
+        if not isinstance(normalized, Mapping):
+            raise ValueError("structured provider validator must return an object")
+        return dict(normalized)
+
+    try:
+        baseline = validated(safe_baseline)
+    except Exception as exc:
+        return AIProviderJSONResult(
+            ok=False,
+            provider="rule_based",
+            selected_provider=selected,
+            reason=f"Safe baseline failed validation: {exc}",
+            fallback_used=True,
+        )
+
+    def fallback(reason: str, **metadata: Any) -> AIProviderJSONResult:
+        return AIProviderJSONResult(
+            ok=True,
+            provider="rule_based",
+            selected_provider=selected,
+            payload=baseline,
+            reason=str(reason or "Provider unavailable; deterministic fallback used."),
+            fallback_used=selected != "rule_based" or effective != "rule_based",
+            metadata={
+                "task": str(task or "structured_json"),
+                "effective_generation_provider": effective,
+                **metadata,
+            },
+        )
+
+    if effective in {"rule_based", "manual_json"}:
+        reason = (
+            "Manual JSON is not a direct generator; deterministic fallback used."
+            if effective == "manual_json"
+            else "Deterministic rule-based generation used."
+        )
+        return fallback(reason)
+
+    request_payload = {
+        "schema_version": 1,
+        "task": str(task or "tiger_studio_structured_json"),
+        "instruction": (
+            "Return exactly one JSON object matching output_contract. Do not return markdown, "
+            "code, shell commands, scripts, file operations, or project mutations. Preserve "
+            "safe_baseline when uncertain. The editor validates and reviews the result before apply."
+        ),
+        "output_contract": _compact_provider_json(dict(output_contract)),
+        "user_command": str(user_command or "").strip(),
+        "input": _compact_provider_json(dict(input_payload)),
+        "safe_baseline": _compact_provider_json(baseline),
+    }
+    system_message = (
+        "You are Tiger Studio's structured planning provider. Return one JSON object only. "
+        "Never emit code, commands, patches, markdown, or direct project mutations. "
+        "Use only keys and enum values from output_contract. If uncertain, copy safe_baseline."
+    )
+
+    try:
+        raw = ""
+        executor = ""
+        endpoint = ""
+        if effective == "claude_mcp":
+            row = statuses.get(effective) or {}
+            command = str(row.get("cli_command") or "").strip()
+            if not command:
+                raise RuntimeError("Claude CLI is not configured")
+            prompt_text = (
+                system_message
+                + "\n\nStructured request:\n"
+                + json.dumps(request_payload, ensure_ascii=False, sort_keys=True)
+            )
+            raw = _run_claude_cli_print(command, prompt_text, timeout_seconds=timeout_seconds)
+            executor = "claude_cli_print"
+        elif effective in {"local_llm", "codex_mcp"}:
+            row = statuses.get(effective) or {}
+            command_key = "command" if effective == "local_llm" else "cli_command"
+            command = str(row.get(command_key) or "").strip()
+            if not command:
+                raise RuntimeError(f"{effective} command is not configured")
+            raw = _run_local_llm_command(command, request_payload, timeout_seconds=timeout_seconds)
+            executor = f"{effective}_command"
+        elif effective == QWEN_LOCAL_PROVIDER_ID:
+            import urllib.request
+
+            row = statuses.get(effective) or {}
+            endpoint = str(row.get("endpoint") or "").strip()
+            url = _provider_chat_url(endpoint)
+            if not url:
+                raise RuntimeError("Qwen endpoint is not configured")
+            body = {
+                "model": QWEN_LOCAL_MANIFEST["model_ref"],
+                "messages": [
+                    {"role": "system", "content": system_message},
+                    {
+                        "role": "user",
+                        "content": json.dumps(request_payload, ensure_ascii=False, sort_keys=True),
+                    },
+                ],
+                "temperature": 0.0,
+                "response_format": {"type": "json_object"},
+                "stream": False,
+            }
+            request = urllib.request.Request(
+                url,
+                data=json.dumps(body, ensure_ascii=False).encode("utf-8"),
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urllib.request.urlopen(request, timeout=max(1, int(timeout_seconds))) as response:
+                raw = response.read().decode("utf-8", errors="replace")
+            executor = "qwen_local_openai_compatible"
+        else:
+            return fallback(f"Unsupported effective provider: {effective}")
+
+        decoded = json.loads(str(raw or "").strip())
+        if isinstance(decoded, Mapping) and str(decoded.get("schema") or "").strip():
+            candidate = dict(decoded)
+        else:
+            content = _content_text_from_provider_json(decoded)
+            candidate = json.loads(_extract_json_object(content or str(raw or "")))
+        if not isinstance(candidate, Mapping):
+            raise ValueError("provider output must be a JSON object")
+        payload = validated(candidate)
+        if effective == QWEN_LOCAL_PROVIDER_ID:
+            save_qwen_executor_state(ok=True, error="")
+        elif effective == "claude_mcp":
+            save_claude_executor_state(ok=True, error="")
+        return AIProviderJSONResult(
+            ok=True,
+            provider=effective,
+            selected_provider=selected,
+            payload=payload,
+            fallback_used=False,
+            metadata={
+                "task": str(task or "structured_json"),
+                "executor": executor,
+                "endpoint": endpoint,
+                "bytes": len(str(raw).encode("utf-8", "replace")),
+                "validated": True,
+            },
+        )
+    except Exception as exc:
+        reason = _provider_user_fallback_reason(provider_user_label(effective), exc)
+        if effective == QWEN_LOCAL_PROVIDER_ID:
+            save_qwen_executor_state(ok=False, error=reason)
+        elif effective == "claude_mcp":
+            save_claude_executor_state(ok=False, error=reason)
+        return fallback(reason, technical_error=str(exc))
 
 
 def provider_status_label(env: Mapping[str, str] | None = None) -> str:

@@ -1,5 +1,22 @@
 # Tiger Studio AI Motion Generation 제품 기획서
 
+## 구현 상태 (2026-07-23)
+
+- AIG0 계약 기준선 구현: 기존 Tiger Studio AI provider 선택, 준비 상태,
+  deterministic fallback, JSON-only, Review-before-Apply 경계를 재사용한다.
+- AIG1 1차 구현: 이미지/텍스트 reference 수집과 로컬 파일 사실 확인을 지원한다.
+  의미 기반 이미지 이해는 아직 주장하지 않는다.
+- AIG2 1차 구현: versioned Creative Brief와 Beat Storyboard를 생성하고 엄격히 검증한다.
+- AIG3 1차 구현: storyboard를 native Image/Typography/Vector/Behavior 레이어로 컴파일한다.
+- AIG5 backend 1차 구현: stable layer ID와 base revision을 사용하는 scope-aware patch를
+  계획하고 한 번의 revision으로 적용한다.
+- 아직 남은 제품 단계: 다중 candidate strip/preview cache(AIG4), patch diff UI(AIG5),
+  실제 multimodal vision/video provider와 provenance(AIG6), 설치본 evidence(AIG7).
+
+구현 파일은 `app/motion_designer/ai_generation.py`, provider 공용 경계는
+`app/ai_providers.py`, Action/MCP 표면은
+`app/actions/motion_ai_generation_namespace.py`이다.
+
 작성일: 2026-07-23  
 상태: 제품 기획 및 구현 기준 초안  
 대상: Tiger Studio Motion Designer  

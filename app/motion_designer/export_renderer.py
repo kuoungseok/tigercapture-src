@@ -15,6 +15,11 @@ from .source_frame import transparent_image
 
 class MotionExportRenderer:
     def __init__(self, *, cache_capacity: int = 120) -> None:
+        # Standalone/headless exports do not pass through main_window's UI font
+        # bootstrap. Register known Windows fonts before shaping typography.
+        from app.font_fallback import load_application_ui_fonts
+
+        load_application_ui_fonts()
         self.cache = MotionFrameCache(cache_capacity)
 
     def render_frame(self, composition: MotionComposition, time_ms: float, *, width: int | None = None,

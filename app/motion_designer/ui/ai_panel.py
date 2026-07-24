@@ -93,6 +93,7 @@ class MotionAIPanel(QWidget):
         self.setMaximumWidth(430)
         self._references: list[MotionAIReference] = []
         self._proposal: dict | None = None
+        self._provider_status = self._read_provider_status()
         if attachment_root is None:
             app_data = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
             attachment_root = Path(app_data or Path.home() / ".tigercapture") / "motion_ai" / "imports"
@@ -107,7 +108,7 @@ class MotionAIPanel(QWidget):
         title.setObjectName("MotionAIHeading")
         header.addWidget(title)
         header.addStretch(1)
-        self.status = QLabel("Local Draft", self)
+        self.status = QLabel(self._provider_status, self)
         self.status.setObjectName("MotionAIStatus")
         header.addWidget(self.status)
         root.addLayout(header)
@@ -235,15 +236,34 @@ class MotionAIPanel(QWidget):
         self.references.clear()
         self._references.clear()
         self.result.clear()
-        self.status.setText("Local Draft")
+        self.status.setText(self._provider_status)
         self._invalidate_proposal()
 
     def request_plan(self) -> None:
         self.plan_requested.emit({
             "prompt": self.prompt.toPlainText().strip(),
             "references": self.reference_dicts(),
-            "provider": "local_layout",
+            "provider": "",
         })
+
+    def set_generating(self, active: bool) -> None:
+        self.plan_button.setEnabled(not active)
+        self.attach_button.setEnabled(not active)
+        self.clear_button.setEnabled(not active)
+        if active:
+            self.apply_button.setEnabled(False)
+            self.status.setText("Planning...")
+            self.result.setPlainText(
+                "The selected Tiger Studio AI provider is preparing a reviewable storyboard."
+            )
+        elif self._proposal is None:
+            self.status.setText(self._provider_status)
+
+    def set_error(self, message: str) -> None:
+        self._proposal = None
+        self.set_generating(False)
+        self.status.setText("Plan failed")
+        self.result.setPlainText(str(message or "Motion AI generation failed."))
 
     def set_proposal(self, proposal: dict) -> None:
         self._proposal = dict(proposal)
@@ -265,7 +285,8 @@ class MotionAIPanel(QWidget):
             lines.extend(["", "Review:", *[f"- {item}" for item in warnings]])
         self.result.setPlainText("\n".join(lines).strip())
         self.apply_button.setEnabled(bool(layers))
-        self.status.setText(f"{len(layers)} layer draft")
+        provider = str(proposal.get("provider") or "AI")
+        self.status.setText(f"{provider} / {len(layers)} layers")
 
     def apply_proposal(self) -> None:
         if self._proposal:
@@ -322,6 +343,28 @@ class MotionAIPanel(QWidget):
     def _invalidate_proposal(self) -> None:
         self._proposal = None
         self.apply_button.setEnabled(False)
+
+    @staticmethod
+    def _read_provider_status() -> str:
+        try:
+            from app.ai_providers import provider_user_state
+
+            state = provider_user_state()
+            labels = {
+                "qwen_local": "Qwen Local",
+                "codex_mcp": "Codex",
+                "claude_mcp": "Claude",
+                "local_llm": "Local LLM",
+                "manual_json": "Manual JSON",
+                "rule_based": "Rule-based",
+            }
+            selected_id = str(state.get("selected_provider") or "")
+            effective_id = str(state.get("effective_generation_provider") or selected_id)
+            selected = labels.get(selected_id, selected_id or "AI")
+            effective = labels.get(effective_id, effective_id or selected)
+            return selected if selected == effective else f"{selected} -> {effective}"
+        except Exception:
+            return "AI Ready"
 
 
 __all__ = ["MotionAIPanel", "MotionAIPromptEdit"]

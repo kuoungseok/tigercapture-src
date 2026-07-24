@@ -32,6 +32,12 @@ def test_polygon_star_and_rounded_rectangle_primitives_have_expected_topology() 
     assert len(flatten_path(ellipse, tolerance=.25)) > 16
 
 
+def test_path_params_accept_generated_primitive_alias() -> None:
+    ellipse = path_from_params({"primitive": "ellipse", "width": 200, "height": 120})
+    assert len(ellipse.points) == 4
+    assert len(flatten_path(ellipse, tolerance=.25)) > 16
+
+
 def test_trim_path_supports_closed_wrap_and_repeater_is_bounded() -> None:
     square = [(0.0, 0.0), (100.0, 0.0), (100.0, 100.0),
               (0.0, 100.0), (0.0, 0.0)]

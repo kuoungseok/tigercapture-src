@@ -53,6 +53,20 @@ def test_premultiplied_rgba_and_revision_cache(tmp_path: Path) -> None:
     app.processEvents()
 
 
+def test_export_renderer_registers_application_fonts(monkeypatch) -> None:
+    _app()
+    calls = 0
+
+    def loaded() -> tuple[str, ...]:
+        nonlocal calls
+        calls += 1
+        return ("Test Sans",)
+
+    monkeypatch.setattr("app.font_fallback.load_application_ui_fonts", loaded)
+    MotionExportRenderer()
+    assert calls == 1
+
+
 def test_png_sequence_and_mp4_smoke(tmp_path: Path) -> None:
     app = _app()
     composition = _composition()

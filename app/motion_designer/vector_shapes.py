@@ -139,7 +139,10 @@ def default_pen_path(width: float, height: float) -> VectorPath:
 def path_from_params(params: Mapping[str, Any], time_ms: float = 0.0) -> VectorPath:
     width = float(evaluate_source_param(params, "width", time_ms, 400.0))
     height = float(evaluate_source_param(params, "height", time_ms, 220.0))
-    kind = str(evaluate_source_param(params, "shape", time_ms, "rectangle"))
+    # Generated/imported Motion layers historically used ``primitive`` while
+    # the native vector editor writes ``shape``. Accept both contracts.
+    primitive = evaluate_source_param(params, "primitive", time_ms, "rectangle")
+    kind = str(evaluate_source_param(params, "shape", time_ms, primitive))
     path_data = evaluate_source_param(params, "path", time_ms, None)
     if isinstance(path_data, Mapping) and path_data.get("points"):
         return VectorPath.from_dict(path_data)

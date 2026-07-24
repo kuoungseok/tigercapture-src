@@ -80,7 +80,7 @@ def test_motion_tracking_provider_is_qt_and_renderer_free() -> None:
 
 
 def test_motion_ai_request_and_proposal_core_is_qt_free() -> None:
-    for name in ("ai_workspace.py", "ai_planner.py"):
+    for name in ("ai_workspace.py", "ai_planner.py", "ai_generation.py"):
         path = MOTION_ROOT / name
         offenders = sorted(name for name in _imports(path) if name.startswith("PySide6"))
         assert not offenders, f"{path.relative_to(ROOT)} imports UI dependencies: {offenders}"

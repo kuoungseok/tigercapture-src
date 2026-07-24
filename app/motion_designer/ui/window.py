@@ -10,7 +10,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout, QWidget,
 )
 
-from app.motion_designer.ai_workspace import build_motion_ai_proposal, apply_motion_ai_proposal
+from app.motion_designer.ai_workspace import apply_motion_ai_proposal
 from app.motion_designer.commands import find_layer, set_keyframe
 from app.motion_designer.composition_service import CompositionService
 from app.motion_designer.schema import (
@@ -23,6 +23,7 @@ from .behavior_panel import BehaviorPanel
 from .audio_panel import AudioReactivePanel
 from .audio_worker import MotionAudioAnalysisWorker
 from .ai_panel import MotionAIPanel
+from .ai_worker import MotionAIGenerationWorker
 from .ar_pbr_panel import ArPbrPanel
 from .actor_panel import ActorPanel
 from .canvas import MotionCanvas
@@ -174,6 +175,7 @@ class MotionDesignerWindow(QMainWindow):
         self._tracking_jobs: dict[str, tuple[QThread, MotionTrackingWorker, str]] = {}
         self._audio_analysis_job: tuple[QThread, MotionAudioAnalysisWorker] | None = None
         self._motion_export_job: tuple[QThread, MotionExportWorker] | None = None
+        self._ai_generation_job: tuple[QThread, MotionAIGenerationWorker] | None = None
         self.controller = MotionDocumentController(composition or MotionComposition(), self._on_model_changed)
 
         self.toolbar = MotionToolbar(self)
@@ -663,14 +665,58 @@ class MotionDesignerWindow(QMainWindow):
         self._set_source_params(changes, "text")
 
     def _plan_ai_request(self, payload: object) -> None:
+        if self._ai_generation_job is not None:
+            return
         values = payload if isinstance(payload, dict) else {}
-        proposal = build_motion_ai_proposal(
-            self.controller.composition,
-            prompt=str(values.get("prompt") or ""),
-            references=values.get("references") or [],
-            provider=str(values.get("provider") or "local_layout"),
+        from app.ai_providers import effective_generation_provider_id
+        from app.motion_designer.ai_generation import generate_motion_ai_proposal
+
+        requested_provider = str(values.get("provider") or "").strip()
+        effective_provider = (
+            "rule_based"
+            if requested_provider in {"local_layout", "rule_based"}
+            else effective_generation_provider_id()
         )
-        self.ai.set_proposal(proposal.to_dict())
+        if effective_provider == "rule_based":
+            try:
+                proposal = generate_motion_ai_proposal(
+                    self.controller.composition,
+                    str(values.get("prompt") or ""),
+                    values.get("references") or [],
+                    provider_id="rule_based",
+                )
+            except Exception as exc:
+                self.ai.set_error(str(exc))
+            else:
+                self.ai.set_proposal(proposal.to_dict())
+            return
+        thread = QThread(self)
+        worker = MotionAIGenerationWorker(self.controller.composition, values)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.completed.connect(self._finish_ai_generation)
+        worker.failed.connect(self._fail_ai_generation)
+        worker.completed.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(lambda: self._clear_ai_generation_job(thread))
+        self._ai_generation_job = (thread, worker)
+        self.ai.set_generating(True)
+        thread.start()
+
+    def _finish_ai_generation(self, proposal: object) -> None:
+        self.ai.set_generating(False)
+        if isinstance(proposal, dict):
+            self.ai.set_proposal(proposal)
+        else:
+            self.ai.set_error("Motion AI returned an invalid proposal.")
+
+    def _fail_ai_generation(self, message: str) -> None:
+        self.ai.set_error(message)
+
+    def _clear_ai_generation_job(self, thread: QThread) -> None:
+        if self._ai_generation_job is not None and self._ai_generation_job[0] is thread:
+            self._ai_generation_job = None
 
     def _apply_ai_proposal(self, payload: object) -> None:
         if not isinstance(payload, dict):
@@ -1113,4 +1159,8 @@ class MotionDesignerWindow(QMainWindow):
             worker.cancel()
             thread.quit()
             thread.wait(5000)
+        if self._ai_generation_job is not None:
+            thread, _worker = self._ai_generation_job
+            thread.quit()
+            thread.wait(35000)
         super().closeEvent(event)
