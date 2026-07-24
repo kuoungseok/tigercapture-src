@@ -6218,10 +6218,13 @@ AI Script Edit MVP integration:
   or crashing. `paint.gpu.status` exposes the readiness/fallback contract and
   last blockout renderer for AI/MCP workflows. The paint canvas itself remains
   remote-safe: basic round/marker/highlighter strokes may render through an
-  offscreen OpenGL FBO cache, while masks, textured brushes, custom tip
-  dynamics, unavailable GL, and headless/RDP failures fall back to the
-  maintained QPainter stroke loop. The separate persistent texture/FBO
-  stroke-atlas pass remains the next canvas GPU target.
+  offscreen OpenGL FBO cache wrapped by a session-local persistent stroke atlas
+  cache, while masks, textured brushes, custom tip dynamics, unavailable GL,
+  and headless/RDP failures fall back to the maintained QPainter stroke loop.
+  The atlas path reports `painter_canvas_opengl_persistent_stroke_atlas_v1`
+  and limits GL readback to stroke-signature changes; the next canvas GPU
+  target is retained GL texture display plus textured-brush stamp/noise shader
+  parity.
 - Painter reference-board support is non-destructive by default. The 2026-07-24
   first slice adds a right-inspector `REFERENCE` panel, image import from file
   or clipboard, selected reference position/size/opacity/visibility controls,
@@ -6232,9 +6235,12 @@ AI Script Edit MVP integration:
   bake-with-rotation behavior, and `paint.reference.sample_color` /
   `paint.reference.extract_palette` actions for reference-driven color picking.
   Reference images do not export or merge into paint layers unless the user
-  explicitly bakes them. The remaining parity work is media-pool reference add,
-  navigator thumbnails, value/silhouette checks, perspective rulers, and
-  symmetry drawing.
+  explicitly bakes them. The third 2026-07-24 slice adds canvas-level
+  perspective and symmetry overlays controlled by `paint.guide.perspective` and
+  `paint.guide.symmetry`, and reports them through `paint.state.guides`. These
+  overlays are remote-safe QPainter guides today; perspective snapping and true
+  mirrored stroke drawing remain later work. The remaining parity work is
+  media-pool reference add, navigator thumbnails, and value/silhouette checks.
 - Standalone Painter also exposes the Photoshop-style selection/view helpers
   added in the 2026-07-23 Painter pass: Quick Mask is available through the
   visible `Quick Mask` control, `Q`, and `paint.quick_mask.set`; Magic Select
@@ -6289,8 +6295,8 @@ AI Script Edit MVP integration:
   on-screen on first show so low-resolution laptop, scaled Windows desktops, and
   multi-monitor workspaces do not open with controls outside the viewport.
 - Painter automation includes direct document, view, tool, brush, panel, layer,
-  channel, selection, path, clipboard, fill, mask, mirror, crop, image, canvas,
-  editor-object, and PBR actions. Layer automation covers add/select/rename/
+  guide, channel, selection, path, clipboard, fill, mask, mirror, crop, image,
+  canvas, editor-object, and PBR actions. Layer automation covers add/select/rename/
   duplicate/delete, visibility, lock, opacity, and blend mode. Selection
   automation covers select-all, deselect, invert, rectangle, ellipse, aspect
   mode, similar-color selection, and selection-to-path. Path automation covers
@@ -6340,8 +6346,11 @@ AI Script Edit MVP integration:
   use CPU/QPainter first-pass contracts while their data models stay ready for
   GPU preview/export parity. OpenGL preview paths must be preferred when a valid
   context exists, and the Painter canvas exposes its last `canvas_renderer`
-  through `paint.state` / `paint.gpu.status`, but RDP/remote/headless sessions
-  must keep a maintained fallback path rather than failing black. Texture
+  through `paint.state` / `paint.gpu.status`. `paint.gpu.status` also exposes
+  the canvas GPU capability contract: persistent stroke atlas readback policy,
+  texture-brush parity target styles, layer/mask shader plan, and high-zoom
+  dirty-region state. RDP/remote/headless sessions must keep a maintained
+  fallback path rather than failing black. Texture
   Lab/PBR preview is stricter:
   product entry points must not run CPU fallback by default. None of these paths
   may slow the default 2D drawing workspace at startup.

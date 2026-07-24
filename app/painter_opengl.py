@@ -16,8 +16,22 @@ from PySide6.QtGui import QGuiApplication, QImage, QOffscreenSurface, QOpenGLCon
 
 PAINTER_OPENGL_RENDERER_ID = "painter_blockout_opengl_offscreen_v1"
 PAINTER_CANVAS_OPENGL_RENDERER_ID = "painter_canvas_opengl_stroke_fbo_v1"
+PAINTER_CANVAS_ATLAS_RENDERER_ID = "painter_canvas_opengl_persistent_stroke_atlas_v1"
 PAINTER_CANVAS_FALLBACK_RENDERER_ID = "painter_canvas_qpainter_strokes_v1"
 _BASIC_CANVAS_STYLES = frozenset({"round", "marker", "highlighter"})
+_TEXTURED_CANVAS_STYLES = frozenset(
+    {
+        "real_wet_oil",
+        "loaded_oil",
+        "impasto_oil",
+        "oil_smear",
+        "soft_oil_glaze",
+        "bristle_oil",
+        "dry_oil",
+        "palette_knife",
+        "textured_chalk",
+    }
+)
 
 
 class PainterOpenGLUnavailable(RuntimeError):
@@ -70,7 +84,7 @@ def painter_opengl_status() -> dict[str, Any]:
         "surfaces": {
             "blockout_preview": "opengl_offscreen_if_available",
             "blockout_canvas_overlay": "opengl_offscreen_if_available",
-            "paint_canvas": "opengl_basic_stroke_fbo_if_supported",
+            "paint_canvas": "opengl_persistent_stroke_atlas_if_supported",
         },
         "canvas": painter_canvas_opengl_status(),
     }
@@ -89,23 +103,160 @@ def painter_canvas_opengl_status() -> dict[str, Any]:
         pyopengl_error = str(exc)
     return {
         "schema": "tigerstudio.painter.canvas.opengl.status.v1",
-        "renderer": PAINTER_CANVAS_OPENGL_RENDERER_ID,
+        "renderer": PAINTER_CANVAS_ATLAS_RENDERER_ID,
+        "base_renderer": PAINTER_CANVAS_OPENGL_RENDERER_ID,
         "enabled": bool(enabled),
         "available": bool(enabled and app_ready and pyopengl_ready),
         "remote_safe": True,
         "fallback_renderer": PAINTER_CANVAS_FALLBACK_RENDERER_ID,
         "fallback_on_context_failure": True,
-        "supported_first_pass": {
+        "capabilities": painter_canvas_gpu_capabilities(),
+        "supported_first_pass": painter_canvas_gpu_capabilities()["basic_strokes"],
+        "next_gpu_target": "retained_gl_texture_display_and_textured_brush_shader_parity",
+        "pyopengl": bool(pyopengl_ready),
+        "pyopengl_error": pyopengl_error,
+    }
+
+
+def painter_canvas_gpu_capabilities() -> dict[str, Any]:
+    """Return the Painter canvas GPU contract visible to UI and automation."""
+
+    return {
+        "schema": "tigerstudio.painter.canvas.gpu.capabilities.v1",
+        "remote_safe": True,
+        "persistent_stroke_atlas": {
+            "enabled": True,
+            "renderer": PAINTER_CANVAS_ATLAS_RENDERER_ID,
+            "base_renderer": PAINTER_CANVAS_OPENGL_RENDERER_ID,
+            "readback_policy": "only_when_stroke_signature_changes",
+            "cache_scope": "active_canvas_session",
+            "fallback_renderer": PAINTER_CANVAS_FALLBACK_RENDERER_ID,
+            "next": "retained_gl_context_texture_display",
+        },
+        "basic_strokes": {
             "stroke_styles": sorted(_BASIC_CANVAS_STYLES),
             "unsupported_falls_back": True,
             "layer_masks": "fallback",
             "textured_brushes": "fallback",
             "tip_dynamics": "fallback",
         },
-        "next_gpu_target": "persistent_texture_fbo_stroke_atlas",
-        "pyopengl": bool(pyopengl_ready),
-        "pyopengl_error": pyopengl_error,
+        "texture_brush_gpu_parity": {
+            "target_styles": sorted(_TEXTURED_CANVAS_STYLES),
+            "current": "qpainter_fallback",
+            "shader_plan": "dab_atlas_noise_texture_brush_stamp_shader",
+            "parity_contract": "gpu_path_must_match_qpainter_preview_before_enable",
+        },
+        "layer_compositing": {
+            "visibility": "contracted",
+            "opacity": "contracted",
+            "blend_modes": ["normal"],
+            "masks": "qpainter_fallback_until_mask_shader",
+            "shader_plan": "per_layer_fbo_opacity_blend_mask_shader",
+        },
+        "high_zoom_canvas": {
+            "max_zoom_percent": 800,
+            "pixel_grid": "dirty_region_qpainter_overlay",
+            "stroke_cache": "signature_atlas_cache",
+            "next": "gpu_texture_display_dirty_region_upload",
+        },
     }
+
+
+class PainterCanvasStrokeAtlas:
+    """Session-local cache for the canvas GL stroke image.
+
+    The current Qt widget still paints the cached result through QPainter, but
+    this keeps the GL readback to signature changes and gives the next retained
+    texture/FBO pass a stable contract to replace internally.
+    """
+
+    def __init__(self) -> None:
+        self.signature: str | None = None
+        self.image: QImage | None = None
+        self.report: dict[str, Any] = {}
+        self.failed_signature: str | None = None
+
+    def clear(self) -> None:
+        self.signature = None
+        self.image = None
+        self.report = {}
+        self.failed_signature = None
+
+    def render(
+        self,
+        strokes: list[Any],
+        *,
+        width: int,
+        height: int,
+        time_ms: int,
+        layer_visibility: dict[str, bool] | None = None,
+        layer_opacity: dict[str, int] | None = None,
+        layer_masks: dict[str, list[tuple[float, float]]] | None = None,
+    ) -> tuple[QImage, dict[str, Any]]:
+        signature = canvas_stroke_gpu_signature(
+            list(strokes or []),
+            width=width,
+            height=height,
+            time_ms=time_ms,
+            layer_visibility=layer_visibility,
+            layer_opacity=layer_opacity,
+            layer_masks=layer_masks,
+        )
+        if signature and signature == self.failed_signature:
+            raise PainterOpenGLUnavailable("Painter canvas atlas skipped a known failing stroke signature.")
+        if (
+            signature
+            and signature == self.signature
+            and isinstance(self.image, QImage)
+            and not self.image.isNull()
+        ):
+            report = {
+                **dict(self.report or {}),
+                "renderer": PAINTER_CANVAS_ATLAS_RENDERER_ID,
+                "source_renderer": self.report.get("source_renderer", PAINTER_CANVAS_OPENGL_RENDERER_ID),
+                "active": "opengl",
+                "fallback": False,
+                "cache_hit": True,
+                "persistent_atlas": True,
+                "readback": False,
+                "readback_policy": "only_when_stroke_signature_changes",
+                "signature": signature,
+            }
+            return self.image, report
+
+        try:
+            image, report = render_canvas_strokes_opengl_qimage(
+                list(strokes or []),
+                width=width,
+                height=height,
+                time_ms=time_ms,
+                layer_visibility=layer_visibility,
+                layer_opacity=layer_opacity,
+                layer_masks=layer_masks,
+            )
+        except Exception:
+            self.failed_signature = signature
+            raise
+        if image.isNull():
+            self.failed_signature = signature
+            raise PainterOpenGLUnavailable("Painter canvas atlas received an empty GL render.")
+
+        source_renderer = str(dict(report or {}).get("renderer") or PAINTER_CANVAS_OPENGL_RENDERER_ID)
+        atlas_report = {
+            **dict(report or {}),
+            "renderer": PAINTER_CANVAS_ATLAS_RENDERER_ID,
+            "source_renderer": source_renderer,
+            "cache_hit": False,
+            "persistent_atlas": True,
+            "readback": True,
+            "readback_policy": "only_when_stroke_signature_changes",
+            "signature": signature,
+        }
+        self.signature = signature
+        self.image = image
+        self.report = dict(atlas_report)
+        self.failed_signature = None
+        return image, atlas_report
 
 
 def render_blockout_scene_opengl_qimage(scene: Any, width: int = 640, height: int = 360) -> QImage:
@@ -546,12 +697,15 @@ def _stroke_tip_is_default(stroke: Any) -> bool:
 
 
 __all__ = [
+    "PAINTER_CANVAS_ATLAS_RENDERER_ID",
     "PAINTER_CANVAS_FALLBACK_RENDERER_ID",
     "PAINTER_CANVAS_OPENGL_RENDERER_ID",
     "PAINTER_OPENGL_RENDERER_ID",
+    "PainterCanvasStrokeAtlas",
     "PainterOpenGLUnavailable",
     "canvas_stroke_gpu_signature",
     "painter_canvas_opengl_enabled",
+    "painter_canvas_gpu_capabilities",
     "painter_canvas_opengl_status",
     "painter_opengl_enabled",
     "painter_opengl_status",

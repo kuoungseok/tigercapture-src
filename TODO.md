@@ -38,6 +38,10 @@
       `paint.reference.sample_color` / `paint.reference.extract_palette`
       action coverage. Remaining reference work: media-pool add, navigator,
       value/silhouette views, and perspective/symmetry guides.
+    - [x] 2026-07-24 third slice: canvas-level perspective and symmetry guide
+      overlays with `paint.guide.perspective` / `paint.guide.symmetry` action
+      coverage and `paint.state.guides` reporting. Remaining reference work:
+      media-pool add, navigator, and value/silhouette views.
   - [ ] 3D blockout pass for background concept art: box-first placement with
     stretch/widen/tall scale, move/rotate/scale standard gizmos, optional simple
     arch helpers for door/window openings, grid snap, camera orbit/pan/zoom/FOV,
@@ -68,6 +72,15 @@
       brushes, layer masks, unsupported GL, and remote/headless failures still
       fall back to the maintained QPainter stroke loop. Remaining GPU work:
       persistent stroke atlas, textured-brush parity, and reduced readback.
+    - [x] 2026-07-24 stroke-atlas slice: the active Painter canvas now routes
+      supported OpenGL strokes through a session-local persistent stroke atlas
+      cache, so GL FBO readback happens only when the stroke signature changes.
+      `paint.gpu.status` reports
+      `painter_canvas_opengl_persistent_stroke_atlas_v1` plus the base FBO
+      renderer, texture-brush parity target styles, layer/mask shader plan, and
+      high-zoom dirty-region contract. Remaining GPU work: retained GL texture
+      display, textured brush stamp/noise shaders, and per-layer FBO mask
+      compositing.
   - [ ] Painter action parity: every production drawing feature above must get
     registered `paint.*` actions, dry-run/review support where destructive,
     undo transactions, and regression tests before AI/MCP claims it.

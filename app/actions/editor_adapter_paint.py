@@ -107,6 +107,38 @@ class PaintAdapterMixin:
         dialog._set_grid_options(visible=visible, snap=snap, size_px=size_px)
         return dialog.painter_action_state()
 
+    def paint_guide_perspective(
+        self,
+        *,
+        enabled: bool | None = None,
+        horizon: float | None = None,
+        left_x: float | None = None,
+        left_y: float | None = None,
+        right_x: float | None = None,
+        right_y: float | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._set_perspective_guide_options(
+            enabled=enabled,
+            horizon=horizon,
+            left_x=left_x,
+            left_y=left_y,
+            right_x=right_x,
+            right_y=right_y,
+        )
+        return dialog.painter_action_state()
+
+    def paint_guide_symmetry(
+        self,
+        *,
+        enabled: bool | None = None,
+        axis: str | None = None,
+        position: float | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._set_symmetry_guide_options(enabled=enabled, axis=axis, position=position)
+        return dialog.painter_action_state()
+
     def paint_quick_mask_set(self, *, enabled: bool = True) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         dialog._set_quick_mask_enabled(bool(enabled))

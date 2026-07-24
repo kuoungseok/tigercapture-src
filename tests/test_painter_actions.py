@@ -35,6 +35,8 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
         "paint.view.zoom",
         "paint.view.pan",
         "paint.view.grid",
+        "paint.guide.perspective",
+        "paint.guide.symmetry",
         "paint.quick_mask.set",
         "paint.tool.set",
         "paint.brush.set",
@@ -109,12 +111,15 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     assert state["result"]["document"]["width"] == 640
     assert state["result"]["gpu"]["remote_safe"] is True
     assert state["result"]["gpu"]["canvas_renderer"]["remote_safe"] is True
-    assert state["result"]["gpu"]["paint_canvas_next_gpu_target"] == "persistent_texture_fbo_stroke_atlas"
+    assert state["result"]["gpu"]["paint_canvas_next_gpu_target"] == "retained_gl_texture_display_and_textured_brush_shader_parity"
+    assert state["result"]["gpu"]["capabilities"]["persistent_stroke_atlas"]["enabled"] is True
+    assert state["result"]["brush"]["engine"]["preset_thumbnail_mode"] == "actual_stroke_preview"
 
     gpu_status = registry.execute("paint.gpu.status").to_dict()
     assert gpu_status["ok"]
     assert gpu_status["result"]["renderer"] == "painter_blockout_opengl_offscreen_v1"
-    assert gpu_status["result"]["canvas"]["renderer"] == "painter_canvas_opengl_stroke_fbo_v1"
+    assert gpu_status["result"]["canvas"]["renderer"] == "painter_canvas_opengl_persistent_stroke_atlas_v1"
+    assert gpu_status["result"]["canvas"]["base_renderer"] == "painter_canvas_opengl_stroke_fbo_v1"
     assert gpu_status["result"]["canvas"]["fallback_renderer"] == "painter_canvas_qpainter_strokes_v1"
     assert gpu_status["result"]["canvas"]["supported_first_pass"]["unsupported_falls_back"] is True
     assert gpu_status["result"]["last_canvas_renderer"]["remote_safe"] is True
@@ -122,6 +127,26 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     assert gpu_status["result"]["fallback_on_context_failure"] is True
     assert gpu_status["result"]["remote_work_contract"]["safe_for_rdp"] is True
     assert gpu_status["result"]["remote_work_contract"]["fallback_is_product_path"] is True
+
+    perspective = registry.execute(
+        "paint.guide.perspective",
+        {"enabled": True, "horizon": 0.42, "left_x": -0.15, "right_x": 1.2},
+    ).to_dict()
+    assert perspective["ok"]
+    assert perspective["result"]["guides"]["perspective"]["enabled"] is True
+    assert perspective["result"]["guides"]["perspective"]["horizon"] == 0.42
+
+    symmetry = registry.execute(
+        "paint.guide.symmetry",
+        {"enabled": True, "axis": "horizontal", "position": 0.58},
+    ).to_dict()
+    assert symmetry["ok"]
+    assert symmetry["result"]["guides"]["symmetry"]["enabled"] is True
+    assert symmetry["result"]["guides"]["symmetry"]["axis"] == "horizontal"
+
+    high_zoom = registry.execute("paint.view.zoom", {"percent": 800}).to_dict()
+    assert high_zoom["ok"]
+    assert high_zoom["result"]["gpu"]["high_zoom"]["current_zoom_percent"] == 800
 
     added = registry.execute("paint.layer.add", {"name": "AI Ink"}).to_dict()
     assert added["ok"]

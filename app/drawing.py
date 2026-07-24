@@ -1182,6 +1182,14 @@ class DrawingCanvas(QWidget):
         self._painter_canvas_gpu_cache_key: str | None = None
         self._painter_canvas_gpu_cache_image: QImage | None = None
         self._painter_canvas_gpu_failure_key: str | None = None
+        self._painter_canvas_stroke_atlas = None
+        self._perspective_guides_enabled: bool = False
+        self._perspective_horizon_norm: float = 0.5
+        self._perspective_left_vp: tuple[float, float] = (0.08, 0.5)
+        self._perspective_right_vp: tuple[float, float] = (0.92, 0.5)
+        self._symmetry_guide_enabled: bool = False
+        self._symmetry_guide_axis: str = "vertical"
+        self._symmetry_guide_position_norm: float = 0.5
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -1355,6 +1363,64 @@ class DrawingCanvas(QWidget):
             "snap": bool(getattr(self, "_snap_enabled", False)),
             "size_px": int(getattr(self, "_grid_size_px", 64) or 64),
         }
+
+    def set_perspective_guides(
+        self,
+        *,
+        enabled: bool | None = None,
+        horizon: float | None = None,
+        left_vp: tuple[float, float] | None = None,
+        right_vp: tuple[float, float] | None = None,
+    ) -> None:
+        if enabled is not None:
+            self._perspective_guides_enabled = bool(enabled)
+        if horizon is not None:
+            self._perspective_horizon_norm = max(0.02, min(0.98, float(horizon)))
+        if left_vp is not None:
+            self._perspective_left_vp = self._clamp_normalized_point(left_vp)
+        if right_vp is not None:
+            self._perspective_right_vp = self._clamp_normalized_point(right_vp)
+        self.update()
+
+    def perspective_guide_state(self) -> dict[str, object]:
+        return {
+            "enabled": bool(getattr(self, "_perspective_guides_enabled", False)),
+            "horizon": float(getattr(self, "_perspective_horizon_norm", 0.5) or 0.5),
+            "left_vp": list(getattr(self, "_perspective_left_vp", (0.08, 0.5)) or (0.08, 0.5)),
+            "right_vp": list(getattr(self, "_perspective_right_vp", (0.92, 0.5)) or (0.92, 0.5)),
+            "renderer": "qpainter_overlay_remote_safe_v1",
+        }
+
+    def set_symmetry_guide(
+        self,
+        *,
+        enabled: bool | None = None,
+        axis: str | None = None,
+        position: float | None = None,
+    ) -> None:
+        if enabled is not None:
+            self._symmetry_guide_enabled = bool(enabled)
+        if axis is not None:
+            value = str(axis or "vertical").strip().casefold()
+            self._symmetry_guide_axis = value if value in {"vertical", "horizontal"} else "vertical"
+        if position is not None:
+            self._symmetry_guide_position_norm = max(0.02, min(0.98, float(position)))
+        self.update()
+
+    def symmetry_guide_state(self) -> dict[str, object]:
+        return {
+            "enabled": bool(getattr(self, "_symmetry_guide_enabled", False)),
+            "axis": str(getattr(self, "_symmetry_guide_axis", "vertical") or "vertical"),
+            "position": float(getattr(self, "_symmetry_guide_position_norm", 0.5) or 0.5),
+            "renderer": "qpainter_overlay_remote_safe_v1",
+        }
+
+    @staticmethod
+    def _clamp_normalized_point(point: tuple[float, float] | list[float]) -> tuple[float, float]:
+        values = list(point or (0.5, 0.5))
+        x = float(values[0]) if values else 0.5
+        y = float(values[1]) if len(values) > 1 else 0.5
+        return (max(-1.5, min(2.5, x)), max(0.02, min(0.98, y)))
 
     def set_document_size(self, width: int, height: int) -> None:
         self._document_size_px = (
@@ -1581,6 +1647,8 @@ class DrawingCanvas(QWidget):
             for point in self._path_points:
                 painter.drawEllipse(point, 4, 4)
 
+        self._paint_perspective_guides(painter, w, h)
+        self._paint_symmetry_guide(painter, w, h)
         self._paint_pixel_grid_overlay(painter, w, h)
         self._paint_selection_drag_preview(painter, w, h)
         self._paint_quick_mask_overlay(painter, w, h)
@@ -2179,6 +2247,12 @@ class DrawingCanvas(QWidget):
         t_ms: int,
     ) -> bool:
         if not strokes:
+            atlas = getattr(self, "_painter_canvas_stroke_atlas", None)
+            if hasattr(atlas, "clear"):
+                atlas.clear()
+            self._painter_canvas_gpu_cache_key = None
+            self._painter_canvas_gpu_cache_image = None
+            self._painter_canvas_gpu_failure_key = None
             self._painter_canvas_renderer_status = {
                 "renderer": "painter_canvas_none_v1",
                 "active": "none",
@@ -2190,8 +2264,8 @@ class DrawingCanvas(QWidget):
             return True
         try:
             from app.painter_opengl import (
+                PainterCanvasStrokeAtlas,
                 canvas_stroke_gpu_signature,
-                render_canvas_strokes_opengl_qimage,
             )
 
             signature = canvas_stroke_gpu_signature(
@@ -2205,24 +2279,11 @@ class DrawingCanvas(QWidget):
             )
             if signature and signature == getattr(self, "_painter_canvas_gpu_failure_key", None):
                 return False
-            image = getattr(self, "_painter_canvas_gpu_cache_image", None)
-            if (
-                signature
-                and signature == getattr(self, "_painter_canvas_gpu_cache_key", None)
-                and isinstance(image, QImage)
-                and not image.isNull()
-            ):
-                painter.drawImage(0, 0, image)
-                self._painter_canvas_renderer_status = {
-                    **dict(getattr(self, "_painter_canvas_renderer_status", {}) or {}),
-                    "active": "opengl",
-                    "fallback": False,
-                    "cache_hit": True,
-                    "remote_safe": True,
-                    "size": [int(w), int(h)],
-                }
-                return True
-            image, report = render_canvas_strokes_opengl_qimage(
+            atlas = getattr(self, "_painter_canvas_stroke_atlas", None)
+            if atlas is None:
+                atlas = PainterCanvasStrokeAtlas()
+                self._painter_canvas_stroke_atlas = atlas
+            image, report = atlas.render(
                 strokes,
                 width=w,
                 height=h,
@@ -2238,7 +2299,6 @@ class DrawingCanvas(QWidget):
             self._painter_canvas_gpu_failure_key = None
             self._painter_canvas_renderer_status = {
                 **dict(report or {}),
-                "cache_hit": False,
                 "remote_safe": True,
             }
             painter.drawImage(0, 0, image)
@@ -2250,6 +2310,9 @@ class DrawingCanvas(QWidget):
                 PAINTER_CANVAS_FALLBACK_RENDERER_ID = "painter_canvas_qpainter_strokes_v1"
             self._painter_canvas_gpu_cache_key = None
             self._painter_canvas_gpu_cache_image = None
+            atlas = getattr(self, "_painter_canvas_stroke_atlas", None)
+            if hasattr(atlas, "clear"):
+                atlas.clear()
             self._painter_canvas_renderer_status = {
                 "renderer": PAINTER_CANVAS_FALLBACK_RENDERER_ID,
                 "active": "qpainter",
@@ -2347,6 +2410,76 @@ class DrawingCanvas(QWidget):
             painter.setPen(major if idx % 4 == 0 else minor)
             painter.drawLine(QPointF(0, y + 0.5), QPointF(w, y + 0.5))
         painter.restore()
+
+    def _paint_perspective_guides(self, painter: QPainter, w: int, h: int) -> None:
+        if not bool(getattr(self, "_perspective_guides_enabled", False)):
+            return
+        horizon = max(0.02, min(0.98, float(getattr(self, "_perspective_horizon_norm", 0.5) or 0.5)))
+        left_vp = getattr(self, "_perspective_left_vp", (0.08, horizon)) or (0.08, horizon)
+        right_vp = getattr(self, "_perspective_right_vp", (0.92, horizon)) or (0.92, horizon)
+        lpt = QPointF(float(left_vp[0]) * w, float(left_vp[1]) * h)
+        rpt = QPointF(float(right_vp[0]) * w, float(right_vp[1]) * h)
+        y = horizon * h
+        painter.save()
+        try:
+            horizon_pen = QPen(QColor(120, 190, 255, 112), 1.0)
+            horizon_pen.setCosmetic(True)
+            horizon_pen.setStyle(Qt.PenStyle.DashLine)
+            painter.setPen(horizon_pen)
+            painter.drawLine(QPointF(0, y), QPointF(w, y))
+
+            ray_pen = QPen(QColor(255, 191, 120, 76), 1.0)
+            ray_pen.setCosmetic(True)
+            painter.setPen(ray_pen)
+            anchors = [
+                QPointF(0, 0),
+                QPointF(w * 0.25, 0),
+                QPointF(w * 0.5, 0),
+                QPointF(w * 0.75, 0),
+                QPointF(w, 0),
+                QPointF(0, h),
+                QPointF(w * 0.25, h),
+                QPointF(w * 0.5, h),
+                QPointF(w * 0.75, h),
+                QPointF(w, h),
+            ]
+            for anchor in anchors:
+                painter.drawLine(lpt, anchor)
+                painter.drawLine(rpt, anchor)
+
+            painter.setBrush(QColor(120, 190, 255, 80))
+            painter.setPen(QPen(QColor(230, 244, 255, 130), 1.0))
+            painter.drawEllipse(lpt, 4.0, 4.0)
+            painter.drawEllipse(rpt, 4.0, 4.0)
+        finally:
+            painter.restore()
+
+    def _paint_symmetry_guide(self, painter: QPainter, w: int, h: int) -> None:
+        if not bool(getattr(self, "_symmetry_guide_enabled", False)):
+            return
+        axis = str(getattr(self, "_symmetry_guide_axis", "vertical") or "vertical")
+        position = max(0.02, min(0.98, float(getattr(self, "_symmetry_guide_position_norm", 0.5) or 0.5)))
+        painter.save()
+        try:
+            glow = QPen(QColor(138, 255, 208, 52), 5.0)
+            glow.setCosmetic(True)
+            core = QPen(QColor(214, 255, 240, 150), 1.2)
+            core.setCosmetic(True)
+            core.setStyle(Qt.PenStyle.DashDotLine)
+            if axis == "horizontal":
+                y = position * h
+                painter.setPen(glow)
+                painter.drawLine(QPointF(0, y), QPointF(w, y))
+                painter.setPen(core)
+                painter.drawLine(QPointF(0, y), QPointF(w, y))
+            else:
+                x = position * w
+                painter.setPen(glow)
+                painter.drawLine(QPointF(x, 0), QPointF(x, h))
+                painter.setPen(core)
+                painter.drawLine(QPointF(x, 0), QPointF(x, h))
+        finally:
+            painter.restore()
 
     def _paint_pixel_grid_overlay(self, painter: QPainter, w: int, h: int) -> None:
         metrics = self._pixel_grid_metrics(w, h)
@@ -8625,6 +8758,63 @@ class PaintDialog(QDialog):
             "size_px": int(self._grid_size_px),
         }
 
+    def _set_perspective_guide_options(
+        self,
+        *,
+        enabled: bool | None = None,
+        horizon: float | None = None,
+        left_x: float | None = None,
+        left_y: float | None = None,
+        right_x: float | None = None,
+        right_y: float | None = None,
+    ) -> dict[str, object]:
+        current = (
+            self.canvas.perspective_guide_state()
+            if hasattr(self, "canvas") and hasattr(self.canvas, "perspective_guide_state")
+            else {"horizon": 0.5, "left_vp": [0.08, 0.5], "right_vp": [0.92, 0.5]}
+        )
+        left = list(current.get("left_vp", [0.08, 0.5]) or [0.08, 0.5])
+        right = list(current.get("right_vp", [0.92, 0.5]) or [0.92, 0.5])
+        if left_x is not None:
+            left[0] = float(left_x)
+        if left_y is not None:
+            left[1] = float(left_y)
+        if right_x is not None:
+            right[0] = float(right_x)
+        if right_y is not None:
+            right[1] = float(right_y)
+        if hasattr(self, "canvas"):
+            self.canvas.set_perspective_guides(
+                enabled=enabled,
+                horizon=horizon,
+                left_vp=(float(left[0]), float(left[1])),
+                right_vp=(float(right[0]), float(right[1])),
+            )
+        if hasattr(self, "_tool_status_label"):
+            active = bool(enabled) if enabled is not None else bool(current.get("enabled", False))
+            self._tool_status_label.setText(f"Perspective guide {'on' if active else 'off'}")
+        return self.canvas.perspective_guide_state() if hasattr(self, "canvas") else {"enabled": False}
+
+    def _set_symmetry_guide_options(
+        self,
+        *,
+        enabled: bool | None = None,
+        axis: str | None = None,
+        position: float | None = None,
+    ) -> dict[str, object]:
+        if hasattr(self, "canvas"):
+            self.canvas.set_symmetry_guide(
+                enabled=enabled,
+                axis=axis,
+                position=position,
+            )
+        if hasattr(self, "_tool_status_label"):
+            state = self.canvas.symmetry_guide_state() if hasattr(self, "canvas") else {"enabled": False}
+            self._tool_status_label.setText(
+                f"Symmetry guide {'on' if state.get('enabled') else 'off'}"
+            )
+        return self.canvas.symmetry_guide_state() if hasattr(self, "canvas") else {"enabled": False}
+
     def _on_magic_tolerance_changed(self, value: int) -> None:
         self._magic_select_tolerance = max(0, min(100, int(value or 0)))
         if hasattr(self, "_magic_tolerance_value_label"):
@@ -11514,6 +11704,25 @@ class PaintDialog(QDialog):
                 "major_every": 0,
             }
         )
+        perspective_guides = (
+            self.canvas.perspective_guide_state()
+            if hasattr(self, "canvas") and hasattr(self.canvas, "perspective_guide_state")
+            else {"enabled": False}
+        )
+        symmetry_guide = (
+            self.canvas.symmetry_guide_state()
+            if hasattr(self, "canvas") and hasattr(self.canvas, "symmetry_guide_state")
+            else {"enabled": False}
+        )
+        try:
+            from app.painter_opengl import painter_canvas_gpu_capabilities
+
+            gpu_capabilities = painter_canvas_gpu_capabilities()
+        except Exception:
+            gpu_capabilities = {
+                "remote_safe": True,
+                "persistent_stroke_atlas": {"enabled": False, "fallback_renderer": "painter_canvas_qpainter_strokes_v1"},
+            }
         return {
             "schema": "tigerstudio.paint.state.v1",
             "standalone": bool(self._standalone),
@@ -11564,11 +11773,23 @@ class PaintDialog(QDialog):
                 "width_px": float(getattr(self, "_pen_width", 0.0)),
                 "opacity": int(round(float(getattr(self, "_pen_opacity", 255)) * 100.0 / 255.0)),
                 "detail": dict(getattr(self, "_brush_detail_settings", BRUSH_DETAIL_DEFAULTS)),
+                "engine": {
+                    "preset_thumbnail_mode": "actual_stroke_preview",
+                    "active_sections": sorted(BRUSH_DETAIL_ACTIVE_SECTIONS),
+                    "pressure_curve": "planned_tablet_input",
+                    "smoothing": "planned_stroke_resampling",
+                    "texture_dynamics": "qpainter_current_gpu_shader_target",
+                    "gpu_texture_parity": gpu_capabilities.get("texture_brush_gpu_parity", {}),
+                },
             },
             "selection_aspect": str(getattr(self, "_selection_aspect_mode", "free")),
             "mirror": {
                 "x": bool(getattr(self, "_mirror_x_enabled", False)),
                 "y": bool(getattr(self, "_mirror_y_enabled", False)),
+            },
+            "guides": {
+                "perspective": perspective_guides,
+                "symmetry": symmetry_guide,
             },
             "channels": dict(self._channel_visibility),
             "selected_channel": str(getattr(self, "_selected_channel", "RGB")),
@@ -11592,6 +11813,7 @@ class PaintDialog(QDialog):
             "gpu": {
                 "policy": "auto_opengl_with_qpainter_fallback",
                 "remote_safe": True,
+                "capabilities": gpu_capabilities,
                 "blockout_renderer": dict(getattr(self, "_painter_3d_blockout_renderer_status", {}) or {}),
                 "canvas_renderer": dict(
                     getattr(
@@ -11601,8 +11823,17 @@ class PaintDialog(QDialog):
                     )
                     or {}
                 ),
-                "paint_canvas_renderer": "opengl_basic_stroke_fbo_with_qpainter_fallback",
-                "paint_canvas_next_gpu_target": "persistent_texture_fbo_stroke_atlas",
+                "paint_canvas_renderer": "opengl_persistent_stroke_atlas_with_qpainter_fallback",
+                "paint_canvas_next_gpu_target": "retained_gl_texture_display_and_textured_brush_shader_parity",
+                "high_zoom": {
+                    "max_zoom_percent": PAINT_MAX_ZOOM_PERCENT,
+                    "current_zoom_percent": int(round(float(getattr(self, "_canvas_zoom", 1.0)) * 100)),
+                    "pixel_grid_visible": bool(pixel_grid.get("visible", False)),
+                    "pixel_grid_stride_x": int(pixel_grid.get("stride_x", 0) or 0),
+                    "pixel_grid_stride_y": int(pixel_grid.get("stride_y", 0) or 0),
+                    "dirty_region_policy": "signature_atlas_cache_plus_visible_pixel_grid_clip",
+                    "display_path": "qwidget_blit_current_retained_gl_texture_next",
+                },
             },
             "history": {
                 "undo_count": len(self._undo_stack),

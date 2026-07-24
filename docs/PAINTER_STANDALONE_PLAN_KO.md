@@ -211,6 +211,8 @@ Painter 기능은 로컬 AI, Claude, MCP, review automation이 직접 조작할 
 - `paint.view.zoom`
 - `paint.view.pan`
 - `paint.view.grid`
+- `paint.guide.perspective`
+- `paint.guide.symmetry`
 - `paint.quick_mask.set`
 - `paint.tool.set`
 - `paint.window.show_panel`

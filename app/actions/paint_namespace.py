@@ -102,6 +102,39 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="active Painter grid or snap state would change",
     )
     registry.register_adapter_action(
+        "paint.guide.perspective",
+        "Set Painter perspective ruler overlay with horizon and two vanishing points.",
+        "paint",
+        "paint_guide_perspective",
+        params_schema=schema_object(
+            {
+                "enabled": {"type": "boolean"},
+                "horizon": {"type": "number", "minimum": 0.02, "maximum": 0.98},
+                "left_x": {"type": "number", "minimum": -1.5, "maximum": 2.5},
+                "left_y": {"type": "number", "minimum": 0.02, "maximum": 0.98},
+                "right_x": {"type": "number", "minimum": -1.5, "maximum": 2.5},
+                "right_y": {"type": "number", "minimum": 0.02, "maximum": 0.98},
+            }
+        ),
+        undo_label="Set Painter perspective guide",
+        dry_summary="active Painter perspective guide would change",
+    )
+    registry.register_adapter_action(
+        "paint.guide.symmetry",
+        "Set Painter symmetry guide overlay for drawing alignment.",
+        "paint",
+        "paint_guide_symmetry",
+        params_schema=schema_object(
+            {
+                "enabled": {"type": "boolean"},
+                "axis": {"type": "string", "enum": ["vertical", "horizontal"]},
+                "position": {"type": "number", "minimum": 0.02, "maximum": 0.98},
+            }
+        ),
+        undo_label="Set Painter symmetry guide",
+        dry_summary="active Painter symmetry guide would change",
+    )
+    registry.register_adapter_action(
         "paint.quick_mask.set",
         "Toggle Photoshop-style Quick Mask overlay for the active Painter selection.",
         "paint",

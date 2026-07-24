@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 from pathlib import Path
+from types import SimpleNamespace
 
 
 def test_painter_3d_blockout_projects_and_renders_gpu_ready_preview(tmp_path: Path) -> None:
@@ -83,13 +84,59 @@ def test_painter_canvas_gpu_path_reports_remote_safe_renderer() -> None:
     assert canvas_status["remote_safe"] is True
     assert canvas_status["active"] in {"opengl", "qpainter"}
     assert canvas_status["renderer"] in {
-        "painter_canvas_opengl_stroke_fbo_v1",
+        "painter_canvas_opengl_persistent_stroke_atlas_v1",
         "painter_canvas_qpainter_strokes_v1",
     }
+    if canvas_status["active"] == "opengl":
+        assert canvas_status["source_renderer"] == "painter_canvas_opengl_stroke_fbo_v1"
 
     dialog.close()
     dialog.deleteLater()
     app.processEvents()
+
+
+def test_painter_canvas_stroke_atlas_reuses_signature(monkeypatch) -> None:
+    from PySide6.QtGui import QImage
+
+    import app.painter_opengl as painter_opengl
+
+    calls = {"count": 0}
+
+    def fake_render(*_args, width: int, height: int, **_kwargs):
+        calls["count"] += 1
+        image = QImage(max(1, int(width)), max(1, int(height)), QImage.Format.Format_RGBA8888)
+        image.fill(0)
+        return image, {
+            "renderer": painter_opengl.PAINTER_CANVAS_OPENGL_RENDERER_ID,
+            "active": "opengl",
+            "fallback": False,
+            "size": [int(width), int(height)],
+        }
+
+    monkeypatch.setattr(painter_opengl, "render_canvas_strokes_opengl_qimage", fake_render)
+    atlas = painter_opengl.PainterCanvasStrokeAtlas()
+    stroke = SimpleNamespace(
+        points=[(0.1, 0.2), (0.4, 0.5)],
+        color=(255, 255, 255),
+        opacity=255,
+        width_px=4.0,
+        brush_style="round",
+        layer_id="paint-layer-1",
+        start_ms=0,
+        end_ms=None,
+        closed_path=False,
+    )
+
+    image_1, report_1 = atlas.render([stroke], width=320, height=180, time_ms=0)
+    image_2, report_2 = atlas.render([stroke], width=320, height=180, time_ms=0)
+
+    assert calls["count"] == 1
+    assert image_1 is image_2
+    assert report_1["renderer"] == "painter_canvas_opengl_persistent_stroke_atlas_v1"
+    assert report_1["source_renderer"] == "painter_canvas_opengl_stroke_fbo_v1"
+    assert report_1["readback"] is True
+    assert report_2["cache_hit"] is True
+    assert report_2["readback"] is False
 
 
 def test_painter_3d_blockout_crud_normalizes_and_rejects_duplicate_ids() -> None:

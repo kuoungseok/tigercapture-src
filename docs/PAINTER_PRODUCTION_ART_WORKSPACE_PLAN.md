@@ -288,12 +288,24 @@ References are not paint layers unless explicitly imported or baked.
   `REFERENCE` panel and through `paint.reference.sample_color` and
   `paint.reference.extract_palette`.
 
+2026-07-24 third slice:
+
+- Perspective ruler overlay is available on the canvas and through
+  `paint.guide.perspective`, with horizon and left/right vanishing point
+  controls stored in `paint.state.guides`.
+- Symmetry guide overlay is available on the canvas and through
+  `paint.guide.symmetry`, with vertical/horizontal axis and normalized position
+  stored in `paint.state.guides`.
+- These guides are QPainter overlays for remote reliability today; they are
+  intentionally separate from the stroke engine so future mirrored-stroke and
+  perspective-ruler snapping can reuse the same state.
+
 Remaining:
 
 - Media Pool add.
 - Navigator thumbnail.
 - Value/silhouette check.
-- Perspective ruler and symmetry integration.
+- Perspective snapping and true mirrored stroke drawing.
 
 ## 3D Blockout Contract
 
@@ -396,13 +408,21 @@ Rules:
   falls back to the maintained QPainter stroke loop for masks, textured oil/
   chalk/knife brushes, custom tip dynamics, unavailable GL, or remote/headless
   failures.
+- The active Painter canvas now wraps that FBO renderer in a session-local
+  persistent stroke atlas cache. The widget still blits the cached image through
+  QPainter, but OpenGL readback is limited to stroke-signature changes and the
+  renderer reports `painter_canvas_opengl_persistent_stroke_atlas_v1` when that
+  path is active.
+- `paint.state` and `paint.gpu.status` report the texture-brush GPU parity
+  target (`dab_atlas_noise_texture_brush_stamp_shader`), layer/mask shader plan
+  (`per_layer_fbo_opacity_blend_mask_shader`), and high-zoom dirty-region
+  contract so review automation and local AI do not infer unsupported parity.
 - `paint.gpu.status` exposes OpenGL dependency readiness, the last blockout
   renderer, the last canvas renderer, and the remote-safe fallback contract for
   AI/MCP automation.
-- The next canvas GPU pass is a persistent texture/FBO stroke atlas that avoids
-  repeated readback and extends parity to textured brushes. Do not replace the
-  whole canvas with a `QOpenGLWidget` until remote/RDP fallback and parity QA
-  are proven.
+- The next canvas GPU pass is retained GL texture display plus textured-brush
+  stamp/noise shaders. Do not replace the whole canvas with a `QOpenGLWidget`
+  until remote/RDP fallback and parity QA are proven.
 
 Video:
 
@@ -419,6 +439,7 @@ Required action families:
 - `paint.state`
 - `paint.document.*`
 - `paint.view.*`
+- `paint.guide.*`
 - `paint.tool.*`
 - `paint.brush.*`
 - `paint.layer.*`
