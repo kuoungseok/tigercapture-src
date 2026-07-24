@@ -56,6 +56,13 @@ Default layout:
 
 - New standalone Painter windows open clean at 100% zoom with no sample strokes,
   guides, or demo marks. 400-800% zoom is reserved for pixel/dot work.
+- New documents and newly added paint layers are pixel-empty until the user
+  paints, pastes, or runs Fill. Transparent documents show Photoshop-style
+  neutral-gray checkerboard tiles in the canvas and layer thumbnail UI only;
+  the checkerboard is never stored in document pixels or exported.
+- `New Canvas` defaults to `Transparent`. White and dark page backgrounds remain
+  explicit user choices and are the only presets that create a Background
+  layer at document creation time.
 - Center: large canvas with checkerboard support, navigator framing, zoom/pan,
   and optional pixel grid at high zoom.
 - Left: compact single-column tool rail with tool groups and long-press/right

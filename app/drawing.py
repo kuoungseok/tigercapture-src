@@ -1020,8 +1020,8 @@ CANVAS_SIZE_PRESETS: tuple[tuple[str, int, int], ...] = (
     ("A4 Landscape 300 DPI", 3508, 2480),
 )
 CANVAS_BACKGROUND_PRESETS: tuple[tuple[str, str], ...] = (
-    ("White", "#FFFFFF"),
     ("Transparent", "transparent"),
+    ("White", "#FFFFFF"),
     ("Dark", "#101112"),
 )
 
@@ -1048,7 +1048,7 @@ def _normalise_paint_layer_color_label(value: str | None) -> str:
     return key
 
 
-def create_blank_paint_pixmap(width: int, height: int, background: str = "#FFFFFF") -> QPixmap:
+def create_blank_paint_pixmap(width: int, height: int, background: str = "transparent") -> QPixmap:
     """Create a blank Painter canvas pixmap.
 
     ``background="transparent"`` keeps alpha at zero; every other value is
@@ -1067,15 +1067,27 @@ def create_blank_paint_pixmap(width: int, height: int, background: str = "#FFFFF
     return pixmap
 
 
-def create_checkerboard_paint_pixmap(width: int, height: int, cell: int = 24) -> QPixmap:
+def paint_pixmap_has_visible_pixels(pixmap: QPixmap | None) -> bool:
+    """Return whether a document pixmap contains at least one visible pixel."""
+    if pixmap is None or pixmap.isNull():
+        return False
+    image = pixmap.toImage()
+    if not image.hasAlphaChannel():
+        return True
+    rgba = image.convertToFormat(QImage.Format.Format_RGBA8888)
+    raw = bytes(rgba.constBits())
+    return any(raw[3::4])
+
+
+def create_checkerboard_paint_pixmap(width: int, height: int, cell: int = 16) -> QPixmap:
     safe_w = max(1, min(16384, int(width or 1)))
     safe_h = max(1, min(16384, int(height or 1)))
     tile = max(4, int(cell or 24))
     pixmap = QPixmap(safe_w, safe_h)
-    pixmap.fill(QColor("#d9dee8"))
+    pixmap.fill(QColor("#eeeeee"))
     painter = QPainter(pixmap)
     try:
-        dark = QColor("#aeb6c4")
+        dark = QColor("#c7c7c7")
         for y in range(0, safe_h, tile):
             for x in range(0, safe_w, tile):
                 if ((x // tile) + (y // tile)) % 2:
@@ -1093,7 +1105,7 @@ class NewCanvasDialog(QDialog):
         parent: QWidget | None = None,
         *,
         default_size: tuple[int, int] = (1920, 1080),
-        default_background: str = "#FFFFFF",
+        default_background: str = "transparent",
     ) -> None:
         super().__init__(parent)
         self.setWindowTitle("New Canvas")
@@ -1182,7 +1194,7 @@ class NewCanvasDialog(QDialog):
             self.width_spin.setValue(width)
             self.height_spin.setValue(height)
             self.preset_combo.setCurrentIndex(match_index if match_index >= 0 else self.preset_combo.count() - 1)
-            bg = str(background or "#FFFFFF").lower()
+            bg = str(background or "transparent").lower()
             for idx in range(self.background_combo.count()):
                 if str(self.background_combo.itemData(idx)).lower() == bg:
                     self.background_combo.setCurrentIndex(idx)
@@ -1228,7 +1240,7 @@ class NewCanvasDialog(QDialog):
         return {
             "width": int(self.width_spin.value()),
             "height": int(self.height_spin.value()),
-            "background": str(self.background_combo.currentData() or "#FFFFFF"),
+            "background": str(self.background_combo.currentData() or "transparent"),
             "template": str(self.preset_combo.currentText() or "Custom"),
         }
 
@@ -4665,7 +4677,7 @@ class PaintDialog(QDialog):
             PaintLayer("paint-layer-1", "Layer 1")
         ]
         self._active_paint_layer_id = "paint-layer-1"
-        self._background_layer_present = True
+        self._background_layer_present = paint_pixmap_has_visible_pixels(background_pixmap)
         self._canvas_document_size = (
             max(1, int(background_pixmap.width())) if background_pixmap and not background_pixmap.isNull() else 1920,
             max(1, int(background_pixmap.height())) if background_pixmap and not background_pixmap.isNull() else 1080,
@@ -5089,7 +5101,7 @@ class PaintDialog(QDialog):
         setup = NewCanvasDialog(
             self,
             default_size=self._canvas_document_size,
-            default_background="transparent" if not self._background_layer_present else "#FFFFFF",
+            default_background="transparent",
         )
         if setup.exec() != QDialog.DialogCode.Accepted:
             return
@@ -5097,14 +5109,14 @@ class PaintDialog(QDialog):
         self._replace_canvas_document(
             int(request.get("width") or 1920),
             int(request.get("height") or 1080),
-            str(request.get("background") or "#FFFFFF"),
+            str(request.get("background") or "transparent"),
         )
 
-    def _replace_canvas_document(self, width: int, height: int, background: str = "#FFFFFF") -> None:
+    def _replace_canvas_document(self, width: int, height: int, background: str = "transparent") -> None:
         self._push_undo_state("New canvas")
         width = max(64, min(16384, int(width or 1920)))
         height = max(64, min(16384, int(height or 1080)))
-        background_text = str(background or "#FFFFFF")
+        background_text = str(background or "transparent")
         self._canvas_document_size = (width, height)
         self._bg_pixmap_source = create_blank_paint_pixmap(width, height, background_text)
         self._background_layer_present = background_text.strip().lower() not in {

@@ -26,6 +26,9 @@ def test_create_blank_paint_pixmap_supports_solid_and_transparent_backgrounds() 
     pixel = transparent.toImage().pixelColor(0, 0)
     assert pixel.alpha() == 0
 
+    default_blank = create_blank_paint_pixmap(64, 64)
+    assert default_blank.toImage().pixelColor(32, 32).alpha() == 0
+
 
 def test_new_canvas_dialog_reports_template_and_custom_size() -> None:
     app = _app()
@@ -48,6 +51,40 @@ def test_new_canvas_dialog_reports_template_and_custom_size() -> None:
     assert request["width"] == 1234
     assert request["height"] == 777
     assert request["template"] == "Custom"
+    dialog.close()
+
+
+def test_new_canvas_defaults_to_empty_transparency_with_display_only_checkerboard() -> None:
+    app = _app()
+    from app.drawing import NewCanvasDialog, PaintDialog, create_blank_paint_pixmap
+
+    setup = NewCanvasDialog()
+    assert setup.canvas_request()["background"] == "transparent"
+    setup.close()
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(320, 180),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.show()
+    app.processEvents()
+
+    assert dialog._background_layer_present is False
+    assert dialog._bg_pixmap_source.toImage().pixelColor(20, 20).alpha() == 0
+    assert dialog._display_background_pixmap().toImage().pixelColor(20, 20).alpha() == 255
+    assert dialog.canvas.embedded_strokes() == []
+    assert [layer.name for layer in dialog._paint_layers] == ["Layer 1"]
+
+    dialog._new_paint_layer()
+    assert dialog.canvas.embedded_strokes() == []
+    assert [layer.name for layer in dialog._paint_layers] == ["Layer 1", "Layer 2"]
+    assert dialog._background_layer_present is False
+
+    assert dialog._fill_document("solid", color1="#336699")
+    assert dialog._background_layer_present is True
+    assert dialog._bg_pixmap_source.toImage().pixelColor(20, 20).alpha() == 255
     dialog.close()
 
 

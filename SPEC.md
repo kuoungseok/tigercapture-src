@@ -6206,6 +6206,12 @@ AI Script Edit MVP integration:
   dedicated eye hit area plus thumbnails; RGB, Red, Green, Blue, and Alpha
   thumbnails must visualize their actual channel data. Rounded card panels,
   purple control accents, and oversized tab buttons are invalid in this dock.
+- New Painter documents default to transparent and contain no painted pixels,
+  sample strokes, or implicit Background layer. New paint layers are likewise
+  empty until paint, paste, or Fill modifies them. Photoshop-style neutral-gray
+  checker tiles are a view-only transparency indicator and must never be baked
+  into document pixels or PNG export. Choosing White or Dark in `New Canvas`
+  explicitly creates the corresponding Background layer.
 - Painter 3D support is for game-art blockout and paint-over, not a general 3D
   editor. The first-class 3D workflow is a simple reference layer/panel where
   artists primarily place boxes, stretch them longer/wider/taller, and move,

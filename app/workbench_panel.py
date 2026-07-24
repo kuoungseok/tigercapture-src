@@ -1205,7 +1205,7 @@ class WorkbenchPanel(QWidget):
         background = create_blank_paint_pixmap(
             int(request.get("width") or 1920),
             int(request.get("height") or 1080),
-            str(request.get("background") or "#FFFFFF"),
+            str(request.get("background") or "transparent"),
         )
         painter = PaintDialog(
             background_pixmap=background,
