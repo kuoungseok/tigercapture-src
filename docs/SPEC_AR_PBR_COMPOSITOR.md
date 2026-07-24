@@ -713,14 +713,21 @@ The lab must provide:
   low-frequency illumination/shading field from BaseColor luminance, removes it
   with a user strength/radius/detail-preservation control, and exposes the
   diagnostic `base_color_source` and `delight_shading` preview maps. The main
-  window must expose an explicit `Albedo` control that shows the de-lighted
-  BaseColor result directly instead of hiding it behind the generic Base Color
-  naming. Enabling the option in the UI must switch to this visible Albedo
-  preview when the user was in the broad material/base-color view, and a
-  separate `Compare` control must remain available for source/result/difference
-  inspection. This is a practical de-lighting approximation, not a full
-  inverse-rendering solve, so the UI must present it as an adjustable cleanup
-  option rather than a physically guaranteed albedo.
+  window must expose an explicit `Intrinsic` control showing
+  `Input / Albedo / Normal / Roughness / Irradiance` together as the primary
+  RGB-to-X channel-estimation view. The main preview must identify the current
+  channel above the texture, and the Intrinsic view must place each tile label
+  above its corresponding texture so thumbnails are not the only channel
+  labels. It must also expose an explicit `Albedo` control that shows the
+  de-lighted BaseColor result directly instead of hiding it behind the generic
+  Base Color naming. Enabling the option in the UI must
+  switch to this visible Albedo preview when the user was in the broad
+  material/base-color view, and a separate `Compare` control must remain
+  available for source/result/difference inspection. `Irradiance` is the
+  estimated low-frequency lighting field used by de-lighting. This is a
+  practical de-lighting approximation, not a full inverse-rendering solve, so
+  the UI must present it as an adjustable cleanup option rather than a
+  physically guaranteed albedo.
 - Individual export for `base_color`, `normal`, `ao`, `roughness`,
   `metallic`, `height`, `cavity`, and `curvature`.
 - Optional advanced Substrate export for `f0` and `f90_mask`; these are

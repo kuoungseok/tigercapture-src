@@ -16,7 +16,7 @@ import os
 from typing import Any, Mapping, Sequence
 
 import numpy as np
-from PIL import Image, ImageEnhance, ImageFilter
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
 
 from app.ar_pbr.pbr_math import (
     fresnel_schlick_f90,
@@ -39,6 +39,7 @@ DEFAULT_SEPARATE_MAPS: tuple[str, ...] = (
 )
 ANALYSIS_MAPS: tuple[str, ...] = (
     "base_color_source",
+    "irradiance",
     "delight_shading",
 )
 OPTIONAL_SUBSTRATE_MAPS: tuple[str, ...] = (
@@ -49,6 +50,7 @@ SEPARATE_MAPS: tuple[str, ...] = DEFAULT_SEPARATE_MAPS + OPTIONAL_SUBSTRATE_MAPS
 DEFAULT_PACKED_LAYOUTS: tuple[str, ...] = ("unreal_orm", "gltf_mr")
 PREVIEW_MODES: tuple[str, ...] = (
     "material",
+    "intrinsic_channels",
     "albedo",
     "delight_compare",
     "base_color_source",
@@ -57,6 +59,7 @@ PREVIEW_MODES: tuple[str, ...] = (
     "ao",
     "roughness",
     "metallic",
+    "irradiance",
     "delight_shading",
     "height",
     "cavity",
@@ -94,6 +97,11 @@ UNREAL_TEXTURE_IMPORT_SETTINGS: dict[str, dict[str, Any]] = {
         "sRGB": True,
         "compression": "Default",
         "usage": "Diagnostic source BaseColor before de-light/albedo recovery",
+    },
+    "irradiance": {
+        "sRGB": False,
+        "compression": "Grayscale",
+        "usage": "Diagnostic estimated low-frequency irradiance / baked lighting field",
     },
     "delight_shading": {
         "sRGB": False,
@@ -1166,6 +1174,7 @@ def _generate_texture_maps_torch_cuda(
         "ao": cpu(ao),
         "roughness": cpu(roughness),
         "metallic": cpu(metallic),
+        "irradiance": cpu(delight_shading),
         "delight_shading": cpu(delight_shading),
         "cavity": cpu(cavity),
         "curvature": cpu(curvature),
@@ -1210,6 +1219,7 @@ def _generate_texture_maps_cpu(
         "ao": ao,
         "roughness": roughness,
         "metallic": metallic,
+        "irradiance": delight_shading,
         "delight_shading": delight_shading,
         "cavity": cavity,
         "curvature": curvature,
@@ -1526,7 +1536,49 @@ def render_plane_preview(
     )
 
 
+def _intrinsic_channels_preview_array(maps: Mapping[str, np.ndarray]) -> np.ndarray:
+    base = np.asarray(maps["base_color"], dtype=np.float32)
+    tile_w = max(1, int(base.shape[1]))
+    tile_h = max(1, int(base.shape[0]))
+    label_h = max(20, int(round(tile_h * 0.085)))
+    gap = max(3, int(round(tile_w * 0.012)))
+    panels: tuple[tuple[str, str], ...] = (
+        ("Input", "base_color_source"),
+        ("Albedo", "base_color"),
+        ("Normal", "normal"),
+        ("Roughness", "roughness"),
+        ("Irradiance", "irradiance"),
+    )
+    canvas_w = tile_w * len(panels) + gap * (len(panels) - 1)
+    canvas_h = label_h + tile_h
+    canvas = Image.new("RGB", (canvas_w, canvas_h), "#08090C")
+    draw = ImageDraw.Draw(canvas)
+    x = 0
+    for label, map_name in panels:
+        value = maps.get(map_name)
+        if value is None and map_name == "irradiance":
+            value = maps.get("delight_shading")
+        if value is None:
+            value = np.zeros((tile_h, tile_w), dtype=np.float32)
+        tile = texture_map_to_image(map_name, np.asarray(value, dtype=np.float32)).convert("RGB")
+        if tile.size != (tile_w, tile_h):
+            tile = tile.resize((tile_w, tile_h), Image.Resampling.BICUBIC)
+        label_rect = (x, 0, x + tile_w, label_h)
+        draw.rectangle(label_rect, fill="#11151D")
+        text_bbox = draw.textbbox((0, 0), label)
+        text_w = max(1, int(text_bbox[2] - text_bbox[0]))
+        text_h = max(1, int(text_bbox[3] - text_bbox[1]))
+        text_x = x + max(0, (tile_w - text_w) // 2)
+        text_y = max(0, (label_h - text_h) // 2) - 1
+        draw.text((text_x, text_y), label, fill="#E8ECF5")
+        canvas.paste(tile, (x, label_h))
+        x += tile_w + gap
+    return (np.asarray(canvas, dtype=np.float32) / 255.0).astype(np.float32)
+
+
 def _preview_array_for_mode(maps: Mapping[str, np.ndarray], settings: Mapping[str, Any], mode: str) -> np.ndarray:
+    if mode == "intrinsic_channels":
+        return _intrinsic_channels_preview_array(maps)
     if mode == "albedo":
         return np.asarray(maps["base_color"], dtype=np.float32)
     if mode == "delight_compare":

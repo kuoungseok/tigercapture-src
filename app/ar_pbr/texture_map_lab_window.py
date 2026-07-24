@@ -50,6 +50,7 @@ _TEXTURE_THUMBNAILS: tuple[tuple[str, str], ...] = (
     ("Normal", "normal"),
     ("AO", "ao"),
     ("Rough", "roughness"),
+    ("Irrad", "irradiance"),
     ("Shade", "delight_shading"),
     ("Height", "height"),
     ("Cavity", "cavity"),
@@ -277,6 +278,7 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._last_preview_path: Path | None = None
         self._clipboard_shortcuts: list[QShortcut] = []
         self._advanced_map_checks: dict[str, QCheckBox] = {}
+        self._preview_heading: QLabel | None = None
         self._substrate_mode_check: QCheckBox | None = None
         self._animate_light_check: QCheckBox | None = None
         self._delight_check: QCheckBox | None = None
@@ -413,6 +415,15 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         if not self._select_preview_mode("albedo"):
             self.queue_preview()
 
+    def _show_intrinsic_channels_preview(self) -> None:
+        if self._delight_check is not None and not self._delight_check.isChecked():
+            self._delight_check.blockSignals(True)
+            self._delight_check.setChecked(True)
+            self._delight_check.blockSignals(False)
+            self._sync_delight_controls()
+        if not self._select_preview_mode("intrinsic_channels"):
+            self.queue_preview()
+
     def _show_delight_compare_preview(self) -> None:
         if self._delight_check is not None and not self._delight_check.isChecked():
             self._delight_check.blockSignals(True)
@@ -421,6 +432,31 @@ class ArPbrTextureMapLabWindow(QMainWindow):
             self._sync_delight_controls()
         if not self._select_preview_mode("delight_compare"):
             self.queue_preview()
+
+    def _preview_mode_label(self, mode: str) -> str:
+        labels = {
+            "material": "Material",
+            "intrinsic_channels": "Intrinsic Channels",
+            "albedo": "Albedo",
+            "delight_compare": "De-Light Compare",
+            "base_color_source": "Input BaseColor",
+            "base_color": "BaseColor / Albedo",
+            "normal": "Normal",
+            "ao": "Ambient Occlusion",
+            "roughness": "Roughness",
+            "metallic": "Metallic",
+            "irradiance": "Irradiance",
+            "delight_shading": "De-light Shading Field",
+            "height": "Height",
+            "cavity": "Cavity",
+            "curvature": "Curvature",
+            "f0": "Substrate F0",
+            "f90_mask": "Substrate F90 Mask",
+            "unreal_orm": "Unreal ORM",
+            "arm": "ARM Packed",
+            "gltf_mr": "glTF MR",
+        }
+        return labels.get(mode, mode.replace("_", " ").title())
 
     def _backend_status_text(self) -> str:
         selection = select_texture_map_backend()
@@ -491,6 +527,10 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         for mode in PREVIEW_MODES:
             self._preview_mode_combo.addItem(mode.replace("_", " ").title(), mode)
         self._preview_mode_combo.currentIndexChanged.connect(self.queue_preview)
+        show_intrinsic = QPushButton("Intrinsic", central)
+        show_intrinsic.setObjectName("TextureLabModeButton")
+        show_intrinsic.setToolTip("Show Input, Albedo, Normal, Roughness, and Irradiance together")
+        show_intrinsic.clicked.connect(self._show_intrinsic_channels_preview)
         show_albedo = QPushButton("Albedo", central)
         show_albedo.setObjectName("TextureLabModeButton")
         show_albedo.setToolTip("Show the de-lighted albedo/BaseColor result in the main preview")
@@ -523,6 +563,7 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         export_packed.setIconSize(icon_size(16))
         export_packed.clicked.connect(self.export_packed)
         top.addWidget(self._preview_mode_combo)
+        top.addWidget(show_intrinsic)
         top.addWidget(show_albedo)
         top.addWidget(show_compare)
         top.addWidget(paste_image)
@@ -546,6 +587,7 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         preview_layout.setSpacing(8)
         preview_label = QLabel("Plane Preview", preview_panel)
         preview_label.setObjectName("TextureLabSection")
+        self._preview_heading = preview_label
         self._preview = _TextureLabPreviewCanvas(preview_panel)
         self._status = QLabel("", preview_panel)
         self._status.setObjectName("TextureLabStatus")
@@ -743,6 +785,8 @@ class ArPbrTextureMapLabWindow(QMainWindow):
             return
         try:
             mode = str(self._preview_mode_combo.currentData() or "material")
+            if self._preview_heading is not None:
+                self._preview_heading.setText(f"Plane Preview - {self._preview_mode_label(mode)}")
             out = Path(tempfile.gettempdir()) / "tiger_ar_pbr_texture_lab" / f"{self.image_path.stem}_{mode}.png"
             generated, cache_hit = self._cached_generated_maps(max_size=960)
             payload = render_plane_preview_from_generated(

@@ -45,6 +45,7 @@ def test_texture_map_lab_generates_unreal_ready_maps(tmp_path) -> None:
         "ao",
         "roughness",
         "metallic",
+        "irradiance",
         "delight_shading",
         "height",
         "cavity",
@@ -59,6 +60,7 @@ def test_texture_map_lab_generates_unreal_ready_maps(tmp_path) -> None:
     assert maps["curvature"].shape == (24, 32)
     assert maps["f0"].shape == (24, 32, 3)
     assert maps["f90_mask"].shape == (24, 32)
+    assert maps["irradiance"].shape == (24, 32)
     assert maps["delight_shading"].shape == (24, 32)
     assert float(np.mean(maps["normal"][..., 2])) > 0.7
     assert float(np.max(maps["metallic"])) == 0.0
@@ -165,6 +167,17 @@ def test_texture_map_lab_delight_reduces_baked_lighting_gradient(tmp_path) -> No
     )
     assert albedo["preview_mode"] == "albedo"
     assert Image.open(albedo["preview_path"]).size[0] == 96
+    intrinsic = render_plane_preview_from_generated(
+        delighted,
+        {"delight_enabled": True},
+        preview_mode="intrinsic_channels",
+        output_path=tmp_path / "intrinsic.png",
+        width=240,
+    )
+    intrinsic_image = Image.open(intrinsic["preview_path"]).convert("RGB")
+    assert intrinsic["preview_mode"] == "intrinsic_channels"
+    assert intrinsic_image.width == 240
+    assert intrinsic_image.height >= 64
 
 
 def test_texture_map_lab_exports_separate_and_packed_maps(tmp_path) -> None:
@@ -366,6 +379,11 @@ def test_texture_map_lab_window_supports_clipboard_copy_and_paste(tmp_path) -> N
     assert window._preview_mode_combo.currentData() == "delight_compare"
     window._show_albedo_preview()
     assert window._preview_mode_combo.currentData() == "albedo"
+    window._show_intrinsic_channels_preview()
+    assert window._preview_mode_combo.currentData() == "intrinsic_channels"
+    window.refresh_preview()
+    assert window._preview_heading is not None
+    assert window._preview_heading.text().endswith("Intrinsic Channels")
 
     copied = window.copy_preview_to_clipboard()
     assert copied["copied"] is True
