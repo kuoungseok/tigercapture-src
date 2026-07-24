@@ -40,6 +40,7 @@ def test_texture_map_lab_generates_unreal_ready_maps(tmp_path) -> None:
     maps = payload["maps"]
     assert {
         "base_color",
+        "base_color_source",
         "normal",
         "ao",
         "roughness",
@@ -52,6 +53,7 @@ def test_texture_map_lab_generates_unreal_ready_maps(tmp_path) -> None:
         "f90_mask",
     } <= set(maps)
     assert maps["base_color"].shape == (24, 32, 3)
+    assert maps["base_color_source"].shape == (24, 32, 3)
     assert maps["normal"].shape == (24, 32, 3)
     assert maps["roughness"].shape == (24, 32)
     assert maps["curvature"].shape == (24, 32)
@@ -95,7 +97,7 @@ def test_texture_map_lab_supports_in_memory_preview_backend_status(tmp_path) -> 
 
 
 def test_texture_map_lab_delight_reduces_baked_lighting_gradient(tmp_path) -> None:
-    from app.ar_pbr.texture_map_lab import generate_texture_maps
+    from app.ar_pbr.texture_map_lab import generate_texture_maps, render_plane_preview_from_generated
 
     h, w = 48, 96
     y = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
@@ -138,8 +140,22 @@ def test_texture_map_lab_delight_reduces_baked_lighting_gradient(tmp_path) -> No
     delighted_side_delta = abs(float(np.mean(delighted_luma[:, :16])) - float(np.mean(delighted_luma[:, -16:])))
 
     assert delighted_side_delta < baseline_side_delta * 0.65
+    assert np.mean(np.abs(delighted["maps"]["base_color_source"] - delighted["maps"]["base_color"])) > 0.02
     assert delighted["maps"]["delight_shading"].shape == (h, w)
+    assert float(np.std(delighted["maps"]["delight_shading"])) > 0.18
     assert delighted["algorithms"]["delight"]["enabled"] is True
+
+    compare = render_plane_preview_from_generated(
+        delighted,
+        {"delight_enabled": True},
+        preview_mode="delight_compare",
+        output_path=tmp_path / "compare.png",
+        width=192,
+    )
+    compare_image = Image.open(compare["preview_path"]).convert("RGB")
+    assert compare["preview_mode"] == "delight_compare"
+    assert compare_image.width == 192
+    assert compare_image.height >= 64
 
 
 def test_texture_map_lab_exports_separate_and_packed_maps(tmp_path) -> None:
@@ -336,6 +352,7 @@ def test_texture_map_lab_window_supports_clipboard_copy_and_paste(tmp_path) -> N
     assert window._sliders["delight_strength"].isEnabled() is False
     window._delight_check.setChecked(True)
     assert window._sliders["delight_strength"].isEnabled() is True
+    assert window._preview_mode_combo.currentData() == "delight_compare"
 
     copied = window.copy_preview_to_clipboard()
     assert copied["copied"] is True

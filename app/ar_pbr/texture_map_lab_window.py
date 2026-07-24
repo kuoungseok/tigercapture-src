@@ -45,6 +45,7 @@ from app.ar_pbr.texture_map_lab import (
 
 
 _TEXTURE_THUMBNAILS: tuple[tuple[str, str], ...] = (
+    ("Raw", "base_color_source"),
     ("Base", "base_color"),
     ("Normal", "normal"),
     ("AO", "ao"),
@@ -616,8 +617,15 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._sync_substrate_controls()
         self.queue_preview()
 
-    def _on_delight_toggled(self, _checked: bool) -> None:
+    def _on_delight_toggled(self, checked: bool) -> None:
         self._sync_delight_controls()
+        if checked and self._preview_mode_combo is not None:
+            current = str(self._preview_mode_combo.currentData() or "")
+            if current in {"material", "base_color", "base_color_source"}:
+                compare_index = self._preview_mode_combo.findData("delight_compare")
+                if compare_index >= 0:
+                    self._preview_mode_combo.setCurrentIndex(compare_index)
+                    return
         self.queue_preview()
 
     def _on_animate_light_toggled(self, checked: bool) -> None:

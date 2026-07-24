@@ -38,6 +38,7 @@ DEFAULT_SEPARATE_MAPS: tuple[str, ...] = (
     "curvature",
 )
 ANALYSIS_MAPS: tuple[str, ...] = (
+    "base_color_source",
     "delight_shading",
 )
 OPTIONAL_SUBSTRATE_MAPS: tuple[str, ...] = (
@@ -48,6 +49,8 @@ SEPARATE_MAPS: tuple[str, ...] = DEFAULT_SEPARATE_MAPS + OPTIONAL_SUBSTRATE_MAPS
 DEFAULT_PACKED_LAYOUTS: tuple[str, ...] = ("unreal_orm", "gltf_mr")
 PREVIEW_MODES: tuple[str, ...] = (
     "material",
+    "delight_compare",
+    "base_color_source",
     "base_color",
     "normal",
     "ao",
@@ -86,6 +89,11 @@ UNREAL_TEXTURE_IMPORT_SETTINGS: dict[str, dict[str, Any]] = {
     "curvature": {"sRGB": False, "compression": "Grayscale"},
     "f0": {"sRGB": False, "compression": "Default", "usage": "Optional Substrate direct F0 override"},
     "f90_mask": {"sRGB": False, "compression": "Grayscale", "usage": "Optional Substrate grazing/F90 mask"},
+    "base_color_source": {
+        "sRGB": True,
+        "compression": "Default",
+        "usage": "Diagnostic source BaseColor before de-light/albedo recovery",
+    },
     "delight_shading": {
         "sRGB": False,
         "compression": "Grayscale",
@@ -787,19 +795,23 @@ def _delight_base_color(rgb: np.ndarray, settings: Mapping[str, Any]) -> tuple[n
         return np.clip(rgb, 0.0, 1.0).astype(np.float32), np.ones(rgb.shape[:2], dtype=np.float32)
     luma = rgb[..., 0] * 0.2126 + rgb[..., 1] * 0.7152 + rgb[..., 2] * 0.0722
     radius = float(settings.get("delight_radius_px", 42.0))
+    macro_radius = max(1.0, radius)
+    broad_radius = max(macro_radius * 2.35, macro_radius + 8.0)
+    macro = _blur_float(luma, macro_radius)
+    broad = _blur_float(luma, broad_radius)
+    illumination = broad * 0.72 + macro * 0.28
     if bool(settings.get("edge_aware_smoothing", True)):
-        illumination = _edge_aware_blur_float(
+        edge_aware = _edge_aware_blur_float(
             luma,
             luma,
-            radius,
-            sensitivity=float(settings.get("edge_aware_sensitivity", 9.0)) * 0.5,
+            macro_radius,
+            sensitivity=float(settings.get("edge_aware_sensitivity", 9.0)) * 0.18,
         )
-    else:
-        illumination = _blur_float(luma, radius)
+        illumination = illumination * 0.86 + edge_aware * 0.14
     illumination = np.clip(illumination, 0.025, 1.0).astype(np.float32)
-    neutral = float(np.exp(np.mean(np.log(np.clip(illumination, 0.025, 1.0)))))
+    neutral = float(np.median(illumination))
     neutral = max(0.05, min(0.95, neutral))
-    correction = np.clip(neutral / illumination, 0.45, 2.35)
+    correction = np.clip(neutral / illumination, 0.32, 3.10)
     corrected = np.clip(rgb * np.power(correction[:, :, None], strength), 0.0, 1.0)
     preserve = float(settings.get("delight_contrast_preservation", 0.25))
     if preserve > 0.001:
@@ -811,7 +823,12 @@ def _delight_base_color(rgb: np.ndarray, settings: Mapping[str, Any]) -> tuple[n
         corrected_median = float(np.median(corrected_luma))
         if corrected_median > 1.0e-4:
             corrected = np.clip(corrected * ((target_median / corrected_median) ** 0.20), 0.0, 1.0)
-    shading_display = np.clip(illumination / max(0.05, float(np.percentile(illumination, 95.0))), 0.0, 1.0)
+    low = float(np.percentile(illumination, 2.0))
+    high = float(np.percentile(illumination, 98.0))
+    if high > low + 1.0e-4:
+        shading_display = np.clip((illumination - low) / (high - low), 0.0, 1.0)
+    else:
+        shading_display = np.clip(illumination / max(0.05, float(np.percentile(illumination, 95.0))), 0.0, 1.0)
     return corrected.astype(np.float32), shading_display.astype(np.float32)
 
 
@@ -859,20 +876,24 @@ def _torch_delight_base_color(base: Any, settings: Mapping[str, Any], torch: Any
         return torch.clamp(base, 0.0, 1.0), torch.ones_like(base[..., 0])
     luma = base[..., 0] * 0.2126 + base[..., 1] * 0.7152 + base[..., 2] * 0.0722
     radius = float(settings.get("delight_radius_px", 42.0))
+    macro_radius = max(1.0, radius)
+    broad_radius = max(macro_radius * 2.35, macro_radius + 8.0)
+    macro = _torch_gaussian_blur_2d(luma, macro_radius, torch)
+    broad = _torch_gaussian_blur_2d(luma, broad_radius, torch)
+    illumination = broad * 0.72 + macro * 0.28
     if bool(settings.get("edge_aware_smoothing", True)):
-        illumination = _torch_edge_aware_blur(
+        edge_aware = _torch_edge_aware_blur(
             luma,
             luma,
-            radius,
-            float(settings.get("edge_aware_sensitivity", 9.0)) * 0.5,
+            macro_radius,
+            float(settings.get("edge_aware_sensitivity", 9.0)) * 0.18,
             torch,
         )
-    else:
-        illumination = _torch_gaussian_blur_2d(luma, radius, torch)
+        illumination = illumination * 0.86 + edge_aware * 0.14
     illumination = torch.clamp(illumination, 0.025, 1.0)
-    neutral = torch.exp(torch.mean(torch.log(illumination)))
+    neutral = torch.quantile(illumination.reshape(-1), 0.50)
     neutral = torch.clamp(neutral, 0.05, 0.95)
-    correction = torch.clamp(neutral / illumination, 0.45, 2.35)
+    correction = torch.clamp(neutral / illumination, 0.32, 3.10)
     corrected = torch.clamp(base * torch.pow(correction[..., None], strength), 0.0, 1.0)
     preserve = float(settings.get("delight_contrast_preservation", 0.25))
     if preserve > 0.001:
@@ -883,8 +904,13 @@ def _torch_delight_base_color(base: Any, settings: Mapping[str, Any], torch: Any
         target_mean = torch.clamp(torch.mean(luma), min=1.0e-4)
         corrected_mean = torch.clamp(torch.mean(corrected_luma), min=1.0e-4)
         corrected = torch.clamp(corrected * torch.pow(target_mean / corrected_mean, 0.20), 0.0, 1.0)
-    high = torch.clamp(torch.quantile(illumination.reshape(-1), 0.95), min=0.05)
-    shading_display = torch.clamp(illumination / high, 0.0, 1.0)
+    low = torch.quantile(illumination.reshape(-1), 0.02)
+    high = torch.quantile(illumination.reshape(-1), 0.98)
+    if bool((high > low + 1.0e-4).item()):
+        shading_display = torch.clamp((illumination - low) / (high - low), 0.0, 1.0)
+    else:
+        high = torch.clamp(torch.quantile(illumination.reshape(-1), 0.95), min=0.05)
+        shading_display = torch.clamp(illumination / high, 0.0, 1.0)
     return corrected, shading_display
 
 
@@ -939,6 +965,7 @@ def _generate_texture_maps_torch_cuda(
     exposure = float(normalized["base_color_exposure"])
     contrast = float(normalized["base_color_contrast"])
     base = torch.clamp(((base * (2.0 ** exposure)) - 0.5) * contrast + 0.5, 0.0, 1.0)
+    base_source = torch.clamp(base, 0.0, 1.0)
     guide_luma = base[..., 0] * 0.2126 + base[..., 1] * 0.7152 + base[..., 2] * 0.0722
     base, delight_shading = _torch_delight_base_color(base, normalized, torch)
     guide_luma = base[..., 0] * 0.2126 + base[..., 1] * 0.7152 + base[..., 2] * 0.0722
@@ -1131,6 +1158,7 @@ def _generate_texture_maps_torch_cuda(
         return value.detach().clamp(0.0, 1.0).cpu().numpy().astype(np.float32)
 
     maps = {
+        "base_color_source": cpu(base_source),
         "base_color": cpu(base),
         "height": cpu(height),
         "normal": cpu(normal),
@@ -1174,6 +1202,7 @@ def _generate_texture_maps_cpu(
     f0 = _f0_from_material_maps(base_color, metallic, normalized)
     f90_mask = _f90_mask_from_material_maps(base_color, height, roughness, curvature, ao, normalized)
     maps = {
+        "base_color_source": base_color_raw,
         "base_color": base_color,
         "height": height,
         "normal": normal,
@@ -1497,6 +1526,17 @@ def render_plane_preview(
 
 
 def _preview_array_for_mode(maps: Mapping[str, np.ndarray], settings: Mapping[str, Any], mode: str) -> np.ndarray:
+    if mode == "delight_compare":
+        source = np.asarray(maps.get("base_color_source", maps["base_color"]), dtype=np.float32)
+        delighted = np.asarray(maps["base_color"], dtype=np.float32)
+        diff = np.clip(np.abs(delighted - source) * 5.0, 0.0, 1.0)
+        if diff.ndim == 2:
+            diff = np.dstack([diff, diff, diff])
+        divider = np.zeros((source.shape[0], max(1, source.shape[1] // 80), 3), dtype=np.float32)
+        divider[..., 0] = 0.18
+        divider[..., 1] = 0.24
+        divider[..., 2] = 0.33
+        return np.concatenate([source, divider, delighted, divider, diff], axis=1).astype(np.float32)
     if mode in maps:
         value = np.asarray(maps[mode], dtype=np.float32)
         if value.ndim == 2:
