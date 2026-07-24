@@ -878,6 +878,7 @@ class PaintLayer:
     blend_mode: str = "normal"
     mask: list[tuple[float, float]] = field(default_factory=list)
     mask_enabled: bool = False
+    color_label: str = "none"
 
 
 CANVAS_SIZE_PRESETS: tuple[tuple[str, int, int], ...] = (
@@ -894,6 +895,28 @@ CANVAS_BACKGROUND_PRESETS: tuple[tuple[str, str], ...] = (
     ("Transparent", "transparent"),
     ("Dark", "#101112"),
 )
+
+PAINT_LAYER_COLOR_LABELS: tuple[tuple[str, str, str], ...] = (
+    ("none", "None", ""),
+    ("red", "Red", "#8A3A3A"),
+    ("orange", "Orange", "#8A5731"),
+    ("yellow", "Yellow", "#7A6C2E"),
+    ("green", "Green", "#3D6B48"),
+    ("blue", "Blue", "#365B86"),
+    ("violet", "Violet", "#59477F"),
+    ("gray", "Gray", "#555B64"),
+)
+PAINT_LAYER_COLOR_LABEL_MAP = {
+    key: {"name": label, "color": color}
+    for key, label, color in PAINT_LAYER_COLOR_LABELS
+}
+
+
+def _normalise_paint_layer_color_label(value: str | None) -> str:
+    key = str(value or "none").strip().casefold().replace(" ", "_").replace("-", "_")
+    if key not in PAINT_LAYER_COLOR_LABEL_MAP:
+        return "none"
+    return key
 
 
 def create_blank_paint_pixmap(width: int, height: int, background: str = "#FFFFFF") -> QPixmap:
@@ -5741,7 +5764,7 @@ class PaintDialog(QDialog):
         layer_controls = QFrame()
         layer_controls.setObjectName("PaintLayerControlPanel")
         layer_controls.setMinimumHeight(150)
-        layer_controls.setMaximumHeight(162)
+        layer_controls.setMaximumHeight(164)
         layer_controls.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         layer_controls_layout = QVBoxLayout(layer_controls)
         layer_controls_layout.setContentsMargins(7, 7, 7, 7)
@@ -5775,7 +5798,6 @@ class PaintDialog(QDialog):
             self._layer_filter_tiny_buttons.append(btn)
             layer_filter_icon_row.addWidget(btn)
         layer_filter_icon_row.addStretch(1)
-        layer_filter_icon_strip.hide()
         self._layer_filter_icon_strip = layer_filter_icon_strip
         layer_controls_layout.addWidget(layer_filter_icon_strip)
 
@@ -5874,18 +5896,21 @@ class PaintDialog(QDialog):
 
         edit_row = QHBoxLayout()
         edit_row.setContentsMargins(0, 0, 0, 0)
-        for label_text, handler in (
-            ("New", self._new_paint_layer),
-            ("Dup", self._duplicate_selected_layer),
-            ("Copy", self._copy_selected_layer),
-            ("Paste", self._paste_layer_clipboard),
-            ("Del", self._delete_selected_layer),
+        self.layer_new_btn = self._make_layer_tiny_button("plus", "New Layer")
+        self.layer_duplicate_btn = self._make_layer_tiny_button("duplicate", "Duplicate Layer")
+        self.layer_copy_btn = self._make_layer_tiny_button("copy", "Copy Layer")
+        self.layer_paste_btn = self._make_layer_tiny_button("paste", "Paste Layer")
+        self.layer_delete_btn = self._make_layer_tiny_button("trash", "Delete Layer")
+        for btn, handler in (
+            (self.layer_new_btn, self._new_paint_layer),
+            (self.layer_duplicate_btn, self._duplicate_selected_layer),
+            (self.layer_copy_btn, self._copy_selected_layer),
+            (self.layer_paste_btn, self._paste_layer_clipboard),
+            (self.layer_delete_btn, self._delete_selected_layer),
         ):
-            btn = QPushButton(label_text)
-            btn.setObjectName("PaintCustomColor")
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(handler)
             edit_row.addWidget(btn)
+        edit_row.addStretch(1)
         layers_layout.addLayout(edit_row)
         self._layer_count_labels: dict[str, QLabel] = {}
         self._layer_channel_path_tabs.addTab(layers_tab, tr("paint.tab.layers"))
@@ -5897,14 +5922,10 @@ class PaintDialog(QDialog):
         channels_layout.setSpacing(8)
         channel_row = QHBoxLayout()
         channel_row.setContentsMargins(0, 0, 0, 0)
-        self.copy_channel_btn = QPushButton("Copy")
-        self.copy_channel_btn.setObjectName("PaintCustomColor")
-        self.copy_channel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.copy_channel_btn = self._make_layer_tiny_button("copy", "Copy selected channel image")
         self.copy_channel_btn.setToolTip("Copy the selected channel image to the system clipboard")
         self.copy_channel_btn.clicked.connect(self._copy_selected_channel_image)
-        self.paste_channel_btn = QPushButton("Paste")
-        self.paste_channel_btn.setObjectName("PaintCustomColor")
-        self.paste_channel_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.paste_channel_btn = self._make_layer_tiny_button("paste", "Paste image into selected channel")
         self.paste_channel_btn.setToolTip("Paste a grayscale clipboard image into the selected channel")
         self.paste_channel_btn.clicked.connect(self._paste_selected_channel_image)
         channel_row.addWidget(self.copy_channel_btn)
@@ -5928,33 +5949,24 @@ class PaintDialog(QDialog):
         paths_layout.setSpacing(8)
         path_row = QHBoxLayout()
         path_row.setContentsMargins(0, 0, 0, 0)
-        self.commit_path_btn = QPushButton("Commit")
-        self.commit_path_btn.setObjectName("PaintCustomColor")
-        self.commit_path_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.commit_path_btn = self._make_layer_tiny_button("path-tool", "Save/commit Work Path")
         self.commit_path_btn.clicked.connect(lambda: self._commit_path(False))
-        self.close_path_btn = QPushButton("Close")
-        self.close_path_btn.setObjectName("PaintCustomColor")
-        self.close_path_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.close_path_btn = self._make_layer_tiny_button("shape", "Close Work Path")
         self.close_path_btn.clicked.connect(lambda: self._commit_path(True))
-        self.path_to_selection_btn = QPushButton("Select")
-        self.path_to_selection_btn.setObjectName("PaintCustomColor")
-        self.path_to_selection_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.path_to_selection_btn = self._make_layer_tiny_button("rect-select", "Load path as selection")
         self.path_to_selection_btn.setToolTip("Convert the selected path to a marching-ants selection")
         self.path_to_selection_btn.clicked.connect(self._make_selection_from_selected_path)
-        self.path_to_mask_btn = QPushButton("Mask")
-        self.path_to_mask_btn.setObjectName("PaintCustomColor")
-        self.path_to_mask_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.path_to_mask_btn = self._make_layer_tiny_button("quick-mask", "Make layer mask from path")
         self.path_to_mask_btn.setToolTip("Convert the selected path to a layer mask")
         self.path_to_mask_btn.clicked.connect(self._mask_selected_layer_from_path)
-        self.clear_path_btn = QPushButton("Clear")
-        self.clear_path_btn.setObjectName("PaintCustomColor")
-        self.clear_path_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.clear_path_btn = self._make_layer_tiny_button("trash", "Clear Work Path")
         self.clear_path_btn.clicked.connect(self._clear_path_preview)
         path_row.addWidget(self.commit_path_btn)
         path_row.addWidget(self.close_path_btn)
         path_row.addWidget(self.path_to_selection_btn)
         path_row.addWidget(self.path_to_mask_btn)
         path_row.addWidget(self.clear_path_btn)
+        path_row.addStretch(1)
         paths_layout.addLayout(path_row)
         self._path_list = QListWidget()
         self._path_list.setObjectName("PaintLayerList")
@@ -9407,6 +9419,11 @@ class PaintDialog(QDialog):
                     selected_id = self._active_paint_layer_id
                     self._selected_layer_id = selected_id
                 for layer in reversed(self._paint_layers):
+                    color_label = _normalise_paint_layer_color_label(
+                        getattr(layer, "color_label", "none")
+                    )
+                    color_meta = PAINT_LAYER_COLOR_LABEL_MAP[color_label]
+                    accent = str(color_meta["color"] or "")
                     states: list[str] = []
                     if not layer.visible:
                         states.append("Hidden")
@@ -9421,8 +9438,27 @@ class PaintDialog(QDialog):
                     suffix = f"  {layer.opacity}%" if int(layer.opacity) != 100 else ""
                     label = f"{prefix}{layer.name}{suffix}"
                     item = QListWidgetItem(label)
-                    item.setIcon(app_icon("layers", size=14, color="#DCE6F7"))
+                    icon_color = accent or ("#DCE6F7" if layer.visible else "#687487")
+                    item.setIcon(
+                        app_icon(
+                            "eye" if layer.visible else "eye-off",
+                            size=14,
+                            color=icon_color,
+                        )
+                    )
                     item.setData(Qt.ItemDataRole.UserRole, layer.layer_id)
+                    item.setData(Qt.ItemDataRole.UserRole + 1, color_label)
+                    if accent:
+                        bg = QColor(accent)
+                        bg.setAlpha(72)
+                        item.setBackground(QBrush(bg))
+                    item.setToolTip(
+                        f"{layer.name}\n"
+                        f"Visible: {'yes' if layer.visible else 'no'}\n"
+                        f"Opacity: {layer.opacity}%\n"
+                        f"Blend: {getattr(layer, 'blend_mode', 'normal')}\n"
+                        f"Color label: {color_meta['name']}"
+                    )
                     layer_list.addItem(item)
                     if selected_id == layer.layer_id:
                         layer_list.setCurrentItem(item)
@@ -10107,6 +10143,18 @@ class PaintDialog(QDialog):
         self._update_inspector_counts()
         return True
 
+    def _set_layer_color_label(self, layer_id: str | None, color_label: str) -> bool:
+        layer = self._select_paint_layer_by_id(layer_id)
+        if layer is None:
+            return False
+        label = _normalise_paint_layer_color_label(color_label)
+        if _normalise_paint_layer_color_label(getattr(layer, "color_label", "none")) == label:
+            return False
+        self._push_undo_state("Set layer color label")
+        layer.color_label = label
+        self._update_inspector_counts()
+        return True
+
     def _set_channel_visibility(self, channel: str, visible: bool) -> bool:
         channel = str(channel or "RGB").strip()
         if channel not in {"RGB", "Red", "Green", "Blue", "Alpha"}:
@@ -10751,6 +10799,11 @@ class PaintDialog(QDialog):
         cut_action = menu.addAction("Cut")
         paste_action = menu.addAction("Paste")
         duplicate_action = menu.addAction("Duplicate")
+        color_menu = menu.addMenu("Layer Color")
+        color_actions: dict[object, str] = {}
+        for color_key, color_name, _hex in PAINT_LAYER_COLOR_LABELS:
+            action = color_menu.addAction(color_name)
+            color_actions[action] = color_key
         menu.addSeparator()
         delete_action = menu.addAction("Delete")
         selected = self._current_layer_id()
@@ -10761,6 +10814,7 @@ class PaintDialog(QDialog):
         copy_action.setEnabled(has_selection)
         cut_action.setEnabled(self._can_cut_layer_id(selected))
         duplicate_action.setEnabled(has_selection)
+        color_menu.setEnabled(is_paint_layer)
         delete_action.setEnabled(
             selected_background
             or (has_selection and (not is_paint_layer or len(self._paint_layers) > 1))
@@ -10779,6 +10833,8 @@ class PaintDialog(QDialog):
             self._paste_layer_clipboard()
         elif chosen is duplicate_action:
             self._duplicate_selected_layer()
+        elif chosen in color_actions:
+            self._set_layer_color_label(selected, color_actions[chosen])
         elif chosen is delete_action:
             self._delete_selected_layer()
 
@@ -11230,6 +11286,7 @@ class PaintDialog(QDialog):
             blend_mode=str(row.get("blend_mode") or "normal"),
             mask=self._normalise_path_points(row.get("mask") or []),
             mask_enabled=bool(row.get("mask_enabled", False)),
+            color_label=_normalise_paint_layer_color_label(row.get("color_label")),
         )
 
     def _bubble_from_clipboard_dict(self, row: dict) -> "SpeechBubble":
@@ -11303,6 +11360,9 @@ class PaintDialog(QDialog):
                 blend_mode=str(getattr(source_layer, "blend_mode", "normal") or "normal"),
                 mask=copy.deepcopy(getattr(source_layer, "mask", []) or []),
                 mask_enabled=bool(getattr(source_layer, "mask_enabled", False)),
+                color_label=_normalise_paint_layer_color_label(
+                    getattr(source_layer, "color_label", "none")
+                ),
             )
             self._paint_layers.append(layer)
             pasted = copy.deepcopy(payload.get("strokes") or [])
@@ -11819,6 +11879,9 @@ class PaintDialog(QDialog):
                     "opacity": int(layer.opacity),
                     "locked": bool(layer.locked),
                     "blend_mode": str(getattr(layer, "blend_mode", "normal") or "normal"),
+                    "color_label": _normalise_paint_layer_color_label(
+                        getattr(layer, "color_label", "none")
+                    ),
                     "mask_enabled": bool(getattr(layer, "mask_enabled", False)),
                     "mask_point_count": len(getattr(layer, "mask", []) or []),
                     "stroke_count": self._stroke_count_for_layer(layer.layer_id),

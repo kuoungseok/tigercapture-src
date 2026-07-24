@@ -193,6 +193,11 @@ class PaintAdapterMixin:
         dialog._set_layer_blend_mode(layer_id or None, str(blend_mode or "normal"))
         return dialog.painter_action_state()
 
+    def paint_layer_set_color(self, *, layer_id: str = "", color_label: str = "none") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._set_layer_color_label(layer_id or None, str(color_label or "none"))
+        return dialog.painter_action_state()
+
     def paint_channel_set_visible(self, *, channel: str = "RGB", visible: bool = True) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         dialog._set_channel_visibility(str(channel or "RGB"), bool(visible))

@@ -6190,6 +6190,15 @@ AI Script Edit MVP integration:
   actions must round-trip selection/path geometry through
   `paint.selection.to_path`, `paint.path.to_selection`,
   `paint.layer.mask_from_selection`, and `paint.layer.mask_from_path`.
+  The Layers/Channels/Paths dock must stay Photoshop-familiar: the Layers tab
+  shows kind filter icons, blend/opacity/lock/fill controls, row visibility
+  icons, subtle layer color labels, and small bottom-row icon actions instead
+  of large text buttons; the Channels tab exposes RGB/Red/Green/Blue/Alpha with
+  eye-icon visibility toggles and copy/paste channel image actions; the Paths
+  tab keeps a Work Path stack plus selected/saved paths with direct make-
+  selection and make-mask commands. Path mode must preserve the Photoshop
+  mental model that Pen creates paths, Path Selection moves paths, Direct
+  Selection adjusts points, and paths can become selections or layer masks.
 - Painter 3D support is for game-art blockout and paint-over, not a general 3D
   editor. The first-class 3D workflow is a simple reference layer/panel where
   artists primarily place boxes, stretch them longer/wider/taller, and move,
@@ -6278,9 +6287,10 @@ AI Script Edit MVP integration:
   generated sample strokes, guides, or demo marks. 400-800% zoom is for pixel
   and dot work only; it must not be the default QA or user launch state. The
   top bar uses compact Photoshop-style quick controls for Undo, Redo, PNG
-  export, zoom out/in, Fit, and zoom value instead of large text command
-  buttons. The right inspector is capped as a side dock so the central canvas
-  remains wider than the inspector on small remote/offscreen windows.
+  export, and mode/status only; zoom belongs in the View menu, shortcuts, and
+  tool rail rather than an always-visible inspector strip. The right inspector
+  is capped as a side dock so the central canvas remains wider than the
+  inspector on small remote/offscreen windows.
 - The standalone Painter color panel is a compact Painter-style color dock, not
   an oversized decorative picker: a 176 px hue ring with triangular
   saturation/value picker, current-color swatch, hex readout, compact
@@ -6304,9 +6314,10 @@ AI Script Edit MVP integration:
 - Painter automation includes direct document, view, tool, brush, panel, layer,
   guide, channel, selection, path, clipboard, fill, mask, mirror, crop, image,
   canvas, editor-object, and PBR actions. Layer automation covers add/select/rename/
-  duplicate/delete, visibility, lock, opacity, and blend mode. Selection
-  automation covers select-all, deselect, invert, rectangle, ellipse, aspect
-  mode, similar-color selection, and selection-to-path. Path automation covers
+  duplicate/delete, visibility, lock, opacity, blend mode, and Photoshop-style
+  layer color labels through `paint.layer.set_color`. Selection automation
+  covers select-all, deselect, invert, rectangle, ellipse, aspect mode,
+  similar-color selection, and selection-to-path. Path automation covers
   create/delete/clear/commit and path-to-selection. Clipboard automation covers
   `paint.clipboard.copy`, `paint.clipboard.cut`, and `paint.clipboard.paste`.
 - Painter image and channel automation must stay exposed through

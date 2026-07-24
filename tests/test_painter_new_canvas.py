@@ -292,7 +292,14 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog._layer_list.minimumHeight() >= 126
     assert dialog._channel_list.minimumHeight() >= 150
     assert dialog._path_list.minimumHeight() >= 170
-    assert dialog._layer_filter_icon_strip.isHidden()
+    assert dialog._layer_filter_icon_strip.isVisible()
+    assert all(btn.isVisible() for btn in dialog._layer_filter_tiny_buttons)
+    assert dialog.layer_new_btn.text() == ""
+    assert dialog.layer_duplicate_btn.text() == ""
+    assert dialog.layer_copy_btn.text() == ""
+    assert dialog.layer_paste_btn.text() == ""
+    assert dialog.layer_delete_btn.text() == ""
+    assert not dialog.layer_new_btn.icon().isNull()
     dialog._show_painter_tab("paths")
     app.processEvents()
     assert dialog._layer_channel_path_tabs.currentIndex() == 2
@@ -356,6 +363,11 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
         for idx in range(dialog._layer_list.count())
     ]
     assert not any("Strokes" in label for label in layer_labels)
+    assert dialog._layer_list.item(0).data(Qt.ItemDataRole.UserRole + 1) == "none"
+    assert not dialog.copy_channel_btn.icon().isNull()
+    assert dialog.copy_channel_btn.text() == ""
+    assert not dialog.commit_path_btn.icon().isNull()
+    assert dialog.commit_path_btn.text() == ""
     assert dialog._layer_channel_path_tabs.tabIcon(0).isNull()
     color_bottom = dialog._paint_color_panel.mapToGlobal(
         dialog._paint_color_panel.rect().bottomLeft()
@@ -528,6 +540,15 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeyp
     )
     dialog._rename_layer_item(dialog._layer_list.currentItem())
     assert dialog._active_paint_layer().name == "Ink cleanup"
+    assert dialog._set_layer_color_label(active_layer_id, "violet") is True
+    assert dialog._active_paint_layer().color_label == "violet"
+    assert dialog.painter_action_state()["layers"][-1]["color_label"] == "violet"
+    color_item = next(
+        dialog._layer_list.item(i)
+        for i in range(dialog._layer_list.count())
+        if dialog._layer_list.item(i).data(Qt.ItemDataRole.UserRole) == active_layer_id
+    )
+    assert color_item.data(Qt.ItemDataRole.UserRole + 1) == "violet"
 
     dialog._on_stroke_added(
         Stroke(points=[(0.1, 0.1), (0.2, 0.2)], layer_id="paint-layer-1")

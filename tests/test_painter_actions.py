@@ -50,6 +50,7 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
         "paint.layer.set_locked",
         "paint.layer.set_opacity",
         "paint.layer.set_blend_mode",
+        "paint.layer.set_color",
         "paint.channel.set_visible",
         "paint.channel.select",
         "paint.channel.copy_image",
@@ -217,6 +218,16 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     ).to_dict()
     assert renamed["ok"]
     assert any(row["name"] == "Line Art" for row in renamed["result"]["layers"])
+
+    color_labeled = registry.execute(
+        "paint.layer.set_color",
+        {"layer_id": layer_id, "color_label": "blue"},
+    ).to_dict()
+    assert color_labeled["ok"]
+    assert any(
+        row["layer_id"] == layer_id and row["color_label"] == "blue"
+        for row in color_labeled["result"]["layers"]
+    )
 
     opacity = registry.execute(
         "paint.layer.set_opacity",

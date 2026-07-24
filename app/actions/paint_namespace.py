@@ -328,6 +328,24 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="Painter layer blend mode would change",
     )
     registry.register_adapter_action(
+        "paint.layer.set_color",
+        "Set the Photoshop-style Painter layer color label.",
+        "paint",
+        "paint_layer_set_color",
+        params_schema=schema_object(
+            {
+                "layer_id": {"type": "string"},
+                "color_label": {
+                    "type": "string",
+                    "enum": ["none", "red", "orange", "yellow", "green", "blue", "violet", "gray"],
+                },
+            },
+            required=("color_label",),
+        ),
+        undo_label="Set Painter layer color label",
+        dry_summary="Painter layer color label would change",
+    )
+    registry.register_adapter_action(
         "paint.channel.set_visible",
         "Set RGB, Red, Green, Blue, or Alpha visibility in the active Painter document.",
         "paint",

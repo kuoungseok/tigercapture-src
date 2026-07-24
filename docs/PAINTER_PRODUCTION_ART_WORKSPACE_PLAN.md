@@ -62,10 +62,10 @@ Default layout:
   click subtool popups.
 - Top: active tool options only. This area should not become a permanent
   command strip for unrelated features.
-- Top quick controls for Undo, Redo, PNG export, zoom out/in, Fit, and zoom
-  value must stay compact and Photoshop-like, not large text command buttons.
-  Zoom controls do not belong in the title/top bar; zoom lives in the View
-  menu, shortcuts, canvas context menu, and toolbar affordances.
+- Top quick controls for Undo, Redo, PNG export, active-tool status, and document
+  actions must stay compact and Photoshop-like, not large text command buttons.
+  Zoom controls do not belong in the title/top bar; zoom lives in the View menu,
+  shortcuts, canvas context menu, and toolbar affordances.
 - Right upper: Navigator and Reference controls.
 - Right middle: Color and Brush.
 - Right lower: Layers / Channels / Paths as a dedicated pinned tab dock.
@@ -91,6 +91,17 @@ Responsive behavior:
   Typography, History, or helper panels in the default drawing workspace.
   Tabs should be flat and Photoshop-like. Debug counters, stroke totals, and
   export-note copy do not belong in this dock.
+- The Layers tab follows the Photoshop mental model: kind filter icons,
+  blend/opacity/lock/fill controls, visible layer rows with eye icons, subtle
+  layer color labels, and a compact bottom icon row for new, duplicate, copy,
+  paste, and delete. Large text action buttons do not belong in the default dock.
+- The Channels tab lists RGB, Red, Green, Blue, and Alpha with eye-icon
+  visibility toggles and channel copy/paste. Selecting a row changes the active
+  channel; visibility changes through the eye hit area or automation.
+- The Paths tab exposes Work Path, Selection Path, and saved paths, with direct
+  make-selection and make-mask commands. Pen creates paths, Path Selection moves
+  whole paths, Direct Selection edits points, and saved paths round-trip through
+  selection and mask operations.
 - Canvas must initialize to the available screen area without requiring window
   resize.
 - All persistent panels need a recoverable Window menu entry.
