@@ -470,6 +470,8 @@ def compile_generation_plan(
                             max_elements=max_decomposed_elements,
                             include_depth=True,
                             segmentation_mode=segmentation_mode,
+                            point_hints=image_ref.metadata.get("point_hints") or (),
+                            object_hints=image_ref.metadata.get("object_hints") or (),
                             inpaint_mode=inpaint_mode,
                             reconstruct_text=reconstruct_text,
                             ocr_native_threshold=ocr_native_threshold,

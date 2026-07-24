@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 import hashlib
 import json
 from pathlib import Path
-from typing import Any, Iterable, Mapping
+from typing import Any, Iterable, Mapping, Sequence
 
 from .schema import Keyframe, MotionBehaviorRef, MotionComposition, MotionLayer, SourceRef
 
@@ -151,6 +151,7 @@ def _source_fingerprint(
     inpaint_mode: str,
     reconstruct_text: bool,
     ocr_native_threshold: float,
+    hint_signature: str,
 ) -> str:
     digest = hashlib.sha256()
     digest.update(IMAGE_DECOMPOSITION_ALGORITHM.encode("ascii"))
@@ -159,7 +160,7 @@ def _source_fingerprint(
             f"|{int(width)}x{int(height)}|{int(max_elements)}"
             f"|seg={segmentation_mode}|depth={int(bool(include_depth))}"
             f"|inpaint={inpaint_mode}|text={int(bool(reconstruct_text))}"
-            f"|ocr={float(ocr_native_threshold):.3f}|"
+            f"|ocr={float(ocr_native_threshold):.3f}|hints={hint_signature}|"
         ).encode("ascii")
     )
     with path.open("rb") as stream:
@@ -217,6 +218,7 @@ def decompose_image(
     include_depth: bool = True,
     segmentation_mode: str = "auto",
     point_hints: Iterable[tuple[float, float]] = (),
+    object_hints: Iterable[Mapping[str, Any] | Sequence[Any]] = (),
     inpaint_mode: str = "auto",
     reconstruct_text: bool = True,
     ocr_native_threshold: float = 0.78,
@@ -236,6 +238,23 @@ def decompose_image(
     segmentation_mode = str(segmentation_mode or "auto").strip().casefold()
     inpaint_mode = str(inpaint_mode or "auto").strip().casefold()
     ocr_native_threshold = max(0.5, min(0.98, float(ocr_native_threshold)))
+    normalized_point_hints = [
+        [float(x), float(y)]
+        for x, y in point_hints
+    ]
+    normalized_object_hints = [
+        dict(item) if isinstance(item, Mapping) else {"bbox": list(item)}
+        for item in object_hints
+    ]
+    hint_signature = hashlib.sha256(json.dumps(
+        {
+            "points": normalized_point_hints,
+            "objects": normalized_object_hints,
+        },
+        ensure_ascii=True,
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")).hexdigest()[:16]
     fingerprint = _source_fingerprint(
         source,
         width,
@@ -246,6 +265,7 @@ def decompose_image(
         inpaint_mode=inpaint_mode,
         reconstruct_text=reconstruct_text,
         ocr_native_threshold=ocr_native_threshold,
+        hint_signature=hint_signature,
     )
     root = Path(cache_root) if cache_root else _default_cache_root()
     target = root / fingerprint[:20]
@@ -270,7 +290,8 @@ def decompose_image(
         alpha,
         mode=segmentation_mode,
         max_elements=max_elements,
-        point_hints=point_hints,
+        point_hints=normalized_point_hints,
+        object_hints=normalized_object_hints,
     )
     foreground = segmentation_result.foreground_mask
     segmentation = {

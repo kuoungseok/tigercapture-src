@@ -24,6 +24,24 @@ POINT_HINTS_SCHEMA = {
         "maxItems": 2,
     },
 }
+OBJECT_HINTS_SCHEMA = {
+    "type": "array",
+    "items": {
+        "type": "object",
+        "properties": {
+            "id": {"type": "string"},
+            "label": {"type": "string"},
+            "bbox": {
+                "type": "array",
+                "items": {"type": "number"},
+                "minItems": 4,
+                "maxItems": 4,
+            },
+        },
+        "required": ["bbox"],
+    },
+    "description": "Named normalized or pixel-space boxes for guided multi-object segmentation.",
+}
 
 
 def _decomposition_params() -> dict[str, Any]:
@@ -35,6 +53,7 @@ def _decomposition_params() -> dict[str, Any]:
         "include_depth": {"type": "boolean"},
         "segmentation_mode": {"type": "string", "enum": ["auto", "basic", "sam"]},
         "point_hints": POINT_HINTS_SCHEMA,
+        "object_hints": OBJECT_HINTS_SCHEMA,
         "inpaint_mode": {"type": "string", "enum": ["auto", "fast", "enhanced_local"]},
         "reconstruct_text": {"type": "boolean"},
         "ocr_native_threshold": {"type": "number", "minimum": 0.5, "maximum": 0.98},
