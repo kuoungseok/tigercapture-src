@@ -18,7 +18,7 @@ from .schema import Keyframe, MotionBehaviorRef, MotionComposition, MotionLayer,
 
 
 IMAGE_DECOMPOSITION_SCHEMA = "tigerstudio.motion.image_decomposition.v1"
-IMAGE_DECOMPOSITION_ALGORITHM = "semantic_layer_graph_v5"
+IMAGE_DECOMPOSITION_ALGORITHM = "semantic_layer_graph_v8"
 
 
 def _as_bbox(value: Iterable[Any]) -> tuple[int, int, int, int]:
@@ -195,9 +195,15 @@ def _save_rgba(path: Path, rgb, mask) -> None:
     import numpy as np
     from PIL import Image
 
-    radius = max(0.7, min(rgb.shape[:2]) * 0.0025)
-    alpha = cv2.GaussianBlur(mask.astype(np.float32) / 255.0, (0, 0), radius)
-    alpha = np.clip(alpha * 255.0, 0, 255).astype(np.uint8)
+    alpha = np.clip(mask, 0, 255).astype(np.uint8)
+    if not np.any((alpha > 0) & (alpha < 255)):
+        radius = max(0.7, min(rgb.shape[:2]) * 0.0025)
+        alpha = cv2.GaussianBlur(
+            alpha.astype(np.float32) / 255.0,
+            (0, 0),
+            radius,
+        )
+        alpha = np.clip(alpha * 255.0, 0, 255).astype(np.uint8)
     rgba = np.dstack((rgb, alpha))
     Image.fromarray(rgba, "RGBA").save(path)
 
@@ -219,6 +225,10 @@ def decompose_image(
     segmentation_mode: str = "auto",
     point_hints: Iterable[tuple[float, float]] = (),
     object_hints: Iterable[Mapping[str, Any] | Sequence[Any]] = (),
+    auto_detect_objects: bool = False,
+    object_labels: Iterable[str] = (),
+    object_detector_model: str | Path | None = None,
+    matting_mode: str = "edge_aware",
     inpaint_mode: str = "auto",
     reconstruct_text: bool = True,
     ocr_native_threshold: float = 0.78,
@@ -246,10 +256,21 @@ def decompose_image(
         dict(item) if isinstance(item, Mapping) else {"bbox": list(item)}
         for item in object_hints
     ]
+    normalized_object_labels = [
+        str(item).strip()
+        for item in object_labels
+        if str(item).strip()
+    ]
+    detector_model = str(object_detector_model or "").strip()
+    matting_mode = str(matting_mode or "edge_aware").strip().casefold()
     hint_signature = hashlib.sha256(json.dumps(
         {
             "points": normalized_point_hints,
             "objects": normalized_object_hints,
+            "auto_detect_objects": bool(auto_detect_objects),
+            "object_labels": normalized_object_labels,
+            "object_detector_model": detector_model,
+            "matting_mode": matting_mode,
         },
         ensure_ascii=True,
         sort_keys=True,
@@ -276,6 +297,9 @@ def decompose_image(
                 json.loads(manifest_path.read_text(encoding="utf-8"))
             )
             if cached.algorithm == IMAGE_DECOMPOSITION_ALGORITHM and cached.assets_ready():
+                from .cutout_quality import evaluate_decomposition_cutout_quality
+
+                evaluate_decomposition_cutout_quality(cached)
                 cached.diagnostics["cache_hit"] = True
                 return cached
         except (OSError, ValueError, json.JSONDecodeError):
@@ -283,7 +307,22 @@ def decompose_image(
 
     target.mkdir(parents=True, exist_ok=True)
     rgb, alpha = _fit_rgba_canvas(source, width, height)
-    from .semantic_segmentation import component_records, segment_image
+    object_detection = None
+    if bool(auto_detect_objects) and not normalized_object_hints:
+        from .object_detection import detect_image_objects
+
+        object_detection = detect_image_objects(
+            rgb,
+            alpha,
+            max_objects=max_elements,
+            requested_labels=normalized_object_labels,
+            model_path=detector_model or None,
+        )
+        normalized_object_hints = [
+            item.to_hint()
+            for item in object_detection.objects
+        ]
+    from .semantic_segmentation import component_records, mask_record, segment_image
 
     segmentation_result = segment_image(
         rgb,
@@ -322,13 +361,18 @@ def decompose_image(
             candidate.mask,
             cv2.bitwise_not(text_mask),
         )
-        records = component_records(candidate_mask, max_elements=1)
-        if not records:
+        record = mask_record(candidate_mask)
+        if record is None:
             continue
-        record = records[0]
         record["semantic_label"] = candidate.semantic_label
         record["segmentation_confidence"] = candidate.confidence
         record["segmentation_metadata"] = dict(candidate.metadata)
+        candidate_alpha = getattr(candidate, "alpha", None)
+        if candidate_alpha is not None:
+            record["source_alpha"] = cv2.bitwise_and(
+                candidate_alpha,
+                cv2.bitwise_not(text_mask),
+            )
         components.append(record)
     if not components:
         components = component_records(object_mask, max_elements=max_elements)
@@ -377,16 +421,30 @@ def decompose_image(
         Image.fromarray(background_array, "RGB").save(background_path_obj)
 
     elements: list[DecomposedImageElement] = []
+    element_ids: set[str] = set()
     total_pixels = float(max(1, width * height))
     motion_locked_components = 0
     for index, record in enumerate(components):
         from .mask_integrity import analyze_mask_integrity, motion_lock_required
+        from .mask_matting import MatteResult, refine_alpha_matte
 
         mask = record["mask"]
+        source_alpha = record.get("source_alpha")
+        matte = (
+            refine_alpha_matte(rgb, mask, mode=matting_mode)
+            if source_alpha is None
+            else MatteResult(
+                alpha=source_alpha,
+                provider="birefnet_soft_alpha",
+                soft_pixel_ratio=float(
+                    np.count_nonzero((source_alpha > 0) & (source_alpha < 255))
+                ) / float(max(1, source_alpha.size)),
+            )
+        )
         rgba_path = target / f"element_{index + 1:02d}.png"
         mask_path = target / f"element_{index + 1:02d}_mask.png"
-        _save_rgba(rgba_path, rgb, mask)
-        _save_mask(mask_path, mask)
+        _save_rgba(rgba_path, rgb, matte.alpha)
+        _save_mask(mask_path, matte.alpha)
         selected_depth = depth[mask > 0]
         depth_value = float(np.median(selected_depth)) if selected_depth.size else 0.5
         role = "primary_subject" if index == 0 else "secondary_element"
@@ -397,10 +455,22 @@ def decompose_image(
         )
         if motion_lock_to_background:
             motion_locked_components += 1
+        segmentation_metadata = dict(record.get("segmentation_metadata") or {})
+        hinted_id = str(segmentation_metadata.get("object_hint_id") or "").strip()
+        element_id = hinted_id or f"element_{index + 1:02d}"
+        if element_id in element_ids:
+            element_id = f"element_{index + 1:02d}"
+        element_ids.add(element_id)
+        semantic_label = str(record.get("semantic_label") or "subject")
+        display_label = (
+            semantic_label.replace("_", " ").strip().title()
+            if semantic_label and semantic_label != "subject"
+            else ("Primary Subject" if index == 0 else f"Secondary Element {index}")
+        )
         elements.append(DecomposedImageElement(
-            id=f"element_{index + 1:02d}",
+            id=element_id,
             role=role,
-            label="Primary Subject" if index == 0 else f"Secondary Element {index}",
+            label=display_label,
             bbox=_as_bbox(record["bbox"]),
             rgba_path=str(rgba_path.resolve()),
             mask_path=str(mask_path.resolve()),
@@ -409,8 +479,8 @@ def decompose_image(
             confidence=float(segmentation.get("confidence", 0.5)),
             motion_hint="hero_parallax" if index == 0 else "staggered_parallax",
             metadata={
-                **dict(record.get("segmentation_metadata") or {}),
-                "semantic_label": str(record.get("semantic_label") or "subject"),
+                **segmentation_metadata,
+                "semantic_label": semantic_label,
                 "segmentation_provider": segmentation_result.provider,
                 "segmentation_confidence": float(
                     record.get(
@@ -418,6 +488,7 @@ def decompose_image(
                         segmentation_result.confidence,
                     )
                 ),
+                "matting": matte.diagnostics(),
                 "mask_integrity": integrity.to_dict(),
                 "mask_fill_ratio": integrity.mask_fill_ratio,
                 "motion_lock_to_background": motion_lock_to_background,
@@ -449,6 +520,8 @@ def decompose_image(
         ))
 
     warnings = [*depth_warnings, *typography.warnings, *inpaint.warnings]
+    if object_detection is not None:
+        warnings.extend(object_detection.warnings)
     warnings.extend(
         str(item)
         for item in segmentation_result.diagnostics.get("warnings", [])
@@ -493,6 +566,22 @@ def decompose_image(
             "segmentation_backend": str(segmentation.get("backend") or ""),
             "segmentation_confidence": float(segmentation.get("confidence", 0.0)),
             "segmentation": segmentation_result.summary(),
+            "object_detection": (
+                object_detection.to_dict()
+                if object_detection is not None
+                else {
+                    "provider": (
+                        "provided_hints"
+                        if normalized_object_hints
+                        else "disabled"
+                    ),
+                    "semantic": False,
+                    "object_count": len(normalized_object_hints),
+                    "objects": list(normalized_object_hints),
+                    "warnings": [],
+                }
+            ),
+            "matting_mode": matting_mode,
             "foreground_coverage": foreground_coverage,
             "component_count": len(components),
             "motion_locked_component_count": motion_locked_components,
@@ -509,12 +598,29 @@ def decompose_image(
             "warnings": warnings,
         },
     )
+    from .cutout_quality import evaluate_decomposition_cutout_quality
+
+    cutout_quality = evaluate_decomposition_cutout_quality(result)
+    quality_messages = [
+        (
+            f"Cutout quality {item['severity']}: {item['message']} "
+            f"({item['element_id']})"
+        )
+        for item in [
+            *cutout_quality.get("blockers", []),
+            *cutout_quality.get("warnings", []),
+        ]
+    ]
+    result.diagnostics["warnings"] = list(dict.fromkeys([
+        *warnings,
+        *quality_messages,
+    ]))
     from .image_motion_validation import validate_decomposition_result
 
     validation = validate_decomposition_result(result)
     result.diagnostics["validation"] = validation.to_dict()
     result.diagnostics["warnings"] = list(dict.fromkeys([
-        *warnings,
+        *result.diagnostics.get("warnings", []),
         *validation.warnings,
         *[f"Validation error: {item}" for item in validation.errors],
     ]))
@@ -588,6 +694,7 @@ def compile_decomposition_layers(
     motion_variant: str = "auto",
     prompt: str = "",
     audio_hits_ms: Iterable[int] = (),
+    allow_quality_override: bool = False,
 ) -> list[MotionLayer]:
     """Compile decomposition assets into staggered editable 2.5D layers."""
     normalized = (
@@ -597,6 +704,12 @@ def compile_decomposition_layers(
     )
     if not normalized.elements:
         return []
+    from .cutout_quality import require_accepted_cutout_quality
+
+    require_accepted_cutout_quality(
+        normalized,
+        allow_override=bool(allow_quality_override),
+    )
     duration = max(1, int(out_ms) - int(in_ms))
     end_time = max(1, duration - 1)
     center_x, center_y = float(center[0]), float(center[1])

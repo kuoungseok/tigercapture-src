@@ -58,6 +58,114 @@ def register_motion_actions(registry: Any) -> None:
         registry.register_adapter_action(action_id, title, "motion", method,
             params_schema=schema_object(props, required=required), required=required,
             destructive=action_id.endswith("delete"), undo_label=title, dry_summary=f"{title} would run")
+    registry.register_adapter_action(
+        "motion.cut_paper.create",
+        "Create an editable cut-paper rig with a hole matte, released paper piece, "
+        "trimmed fiber edge, shadow, and path-following scissors.",
+        "motion",
+        "motion_cut_paper_create",
+        params_schema=schema_object(
+            {
+                **lid,
+                "center_x": {"type": "number"},
+                "center_y": {"type": "number"},
+                "radius_x": {"type": "number", "exclusiveMinimum": 0},
+                "radius_y": {"type": "number", "exclusiveMinimum": 0},
+                "start_ms": {"type": "integer", "minimum": 0},
+                "cut_duration_ms": {"type": "integer", "minimum": 120},
+                "release_duration_ms": {"type": "integer", "minimum": 120},
+                "seed": {"type": "integer"},
+            },
+            required=(
+                "composition_id",
+                "layer_id",
+                "center_x",
+                "center_y",
+                "radius_x",
+                "radius_y",
+                "start_ms",
+            ),
+        ),
+        required=(
+            "composition_id",
+            "layer_id",
+            "center_x",
+            "center_y",
+            "radius_x",
+            "radius_y",
+            "start_ms",
+        ),
+        mutating=True,
+        changed=True,
+        undo_label="Create Cut Paper Rig",
+        dry_summary="an editable cut-paper rig would be created",
+    )
+    registry.register_adapter_action(
+        "motion.cutout_rig.arm_wave.create",
+        "Connect torso, upper-arm, forearm, and hand layers at editable joints "
+        "and create a waving FK animation.",
+        "motion",
+        "motion_cutout_arm_wave_create",
+        params_schema=schema_object(
+            {
+                "composition_id": {"type": "string"},
+                "torso_layer_id": {"type": "string"},
+                "upper_arm_layer_id": {"type": "string"},
+                "forearm_layer_id": {"type": "string"},
+                "hand_layer_id": {"type": "string"},
+                "shoulder": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "minItems": 2,
+                    "maxItems": 2,
+                },
+                "elbow": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "minItems": 2,
+                    "maxItems": 2,
+                },
+                "wrist": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "minItems": 2,
+                    "maxItems": 2,
+                },
+                "start_ms": {"type": "integer", "minimum": 0},
+                "end_ms": {"type": "integer", "minimum": 1},
+                "side": {"type": "string", "enum": ["left", "right"]},
+                "cycles": {"type": "integer", "minimum": 1, "maximum": 8},
+            },
+            required=(
+                "composition_id",
+                "torso_layer_id",
+                "upper_arm_layer_id",
+                "forearm_layer_id",
+                "hand_layer_id",
+                "shoulder",
+                "elbow",
+                "wrist",
+                "start_ms",
+                "end_ms",
+            ),
+        ),
+        required=(
+            "composition_id",
+            "torso_layer_id",
+            "upper_arm_layer_id",
+            "forearm_layer_id",
+            "hand_layer_id",
+            "shoulder",
+            "elbow",
+            "wrist",
+            "start_ms",
+            "end_ms",
+        ),
+        mutating=True,
+        changed=True,
+        undo_label="Create Cutout Arm Wave",
+        dry_summary="an editable cutout arm chain and wave animation would be created",
+    )
     animation_ops = (
         ("motion.keyframe.set", "motion_keyframe_set", {**lid, "property_name": {"type": "string"}, "keyframe": {"type": "object"}}, ("composition_id", "layer_id", "property_name", "keyframe"), True),
         ("motion.keyframe.delete", "motion_keyframe_delete", {**lid, "property_name": {"type": "string"}, "keyframe_id": {"type": "string"}}, ("composition_id", "layer_id", "property_name", "keyframe_id"), True),
@@ -89,6 +197,48 @@ def register_motion_actions(registry: Any) -> None:
         registry.register_adapter_action(action_id, title, "motion", method,
             params_schema=schema_object(props, required=required), required=required, mutating=mutating,
             changed=mutating, undo_label=title if mutating else "", dry_summary=f"{title} would run")
+    image_parameter = {
+        **lid,
+        "parameter_name": {
+            "type": "string",
+            "enum": ["tilt_x", "tilt_y", "perspective"],
+        },
+    }
+    image_animation_ops = (
+        (
+            "motion.image.param.set",
+            "motion_image_param_set",
+            {**image_parameter, "value": {"type": "number"}},
+            ("composition_id", "layer_id", "parameter_name", "value"),
+        ),
+        (
+            "motion.image.param.keyframe.set",
+            "motion_image_param_keyframe_set",
+            {**image_parameter, "keyframe": {"type": "object"}},
+            ("composition_id", "layer_id", "parameter_name", "keyframe"),
+        ),
+        (
+            "motion.image.param.keyframe.delete",
+            "motion_image_param_keyframe_delete",
+            {**image_parameter, "keyframe_id": {"type": "string"}},
+            ("composition_id", "layer_id", "parameter_name", "keyframe_id"),
+        ),
+    )
+    for action_id, method, props, required in image_animation_ops:
+        title = action_id.replace("motion.", "").replace(".", " ").title()
+        registry.register_adapter_action(
+            action_id,
+            title,
+            "motion",
+            method,
+            params_schema=schema_object(props, required=required),
+            required=required,
+            mutating=True,
+            changed=True,
+            destructive=action_id.endswith("delete"),
+            undo_label=title,
+            dry_summary=f"{title} would run",
+        )
     effect_mask_ops = (
         ("motion.effect.list", "motion_effect_list", lid, ("composition_id", "layer_id"), False),
         ("motion.effect.add", "motion_effect_add", {**lid, "effect": {"type": "object"}}, ("composition_id", "layer_id", "effect"), True),

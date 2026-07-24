@@ -10,6 +10,7 @@ from app.ai_providers import generate_selected_provider_json, provider_snapshot
 from .ai_planner import analyze_motion_ai_layers
 from .ai_workspace import MotionAIProposal, MotionAIReference
 from .schema import (
+    AnimatedProperty,
     MotionBehaviorRef,
     MotionComposition,
     MotionLayer,
@@ -33,8 +34,16 @@ LAYOUTS = {
     "split_right", "title_card",
 }
 MOTIONS = {"fade", "hold", "pop", "slide_left", "slide_right", "zoom_in", "zoom_out"}
-PATCH_TYPES = {"set_behavior", "set_text", "set_timing", "set_transform", "set_visibility"}
+PATCH_TYPES = {
+    "set_behavior",
+    "set_source_param",
+    "set_text",
+    "set_timing",
+    "set_transform",
+    "set_visibility",
+}
 TRANSFORM_PROPERTIES = {"anchor", "opacity", "position", "rotation", "scale"}
+IMAGE_SOURCE_PROPERTIES = {"perspective", "tilt_x", "tilt_y"}
 
 MOTION_AI_GENERATION_CONTRACT_V1: dict[str, Any] = {
     "schema": MOTION_AI_GENERATION_SCHEMA,
@@ -403,6 +412,51 @@ def _layout_geometry(layout: str, width: int, height: int) -> tuple[float, float
     return width * .5, height * .5, width, height, "cover"
 
 
+def _reference_style_colors(
+    reference_analysis: Mapping[str, Any],
+) -> tuple[str, str, bool]:
+    rows = [
+        item
+        for item in reference_analysis.get("image_style", [])
+        if isinstance(item, Mapping)
+    ]
+    palette = [
+        str(value)
+        for value in (rows[0].get("palette", []) if rows else [])
+        if isinstance(value, str) and re.fullmatch(r"#[0-9a-fA-F]{6}", value)
+    ]
+    if not palette:
+        return "#151922", "#f5f7fa", False
+
+    def rgb(value: str) -> tuple[int, int, int]:
+        return tuple(int(value[index:index + 2], 16) for index in (1, 3, 5))
+
+    darkest = min(
+        palette,
+        key=lambda value: sum(
+            channel * weight
+            for channel, weight in zip(rgb(value), (0.2126, 0.7152, 0.0722))
+        ),
+    )
+    lightest = max(
+        palette,
+        key=lambda value: sum(
+            channel * weight
+            for channel, weight in zip(rgb(value), (0.2126, 0.7152, 0.0722))
+        ),
+    )
+    background_rgb = tuple(round(channel * 0.45) for channel in rgb(darkest))
+    foreground_rgb = tuple(
+        round(channel + (255 - channel) * 0.45)
+        for channel in rgb(lightest)
+    )
+    return (
+        "#" + "".join(f"{channel:02x}" for channel in background_rgb),
+        "#" + "".join(f"{channel:02x}" for channel in foreground_rgb),
+        True,
+    )
+
+
 def _motion_behavior(beat: MotionStoryboardBeat) -> MotionBehaviorRef | None:
     span = min(900, max(120, beat.end_ms - beat.start_ms))
     if beat.motion == "hold":
@@ -432,6 +486,9 @@ def compile_generation_plan(
     decompose_images: bool = True,
     max_decomposed_elements: int = 5,
     segmentation_mode: str = "auto",
+    auto_detect_objects: bool = True,
+    object_detector_model: str = "",
+    matting_mode: str = "edge_aware",
     inpaint_mode: str = "auto",
     reconstruct_text: bool = True,
     ocr_native_threshold: float = 0.78,
@@ -443,6 +500,22 @@ def compile_generation_plan(
     by_id = {item.id: item for item in refs}
     layers: list[MotionLayer] = []
     warnings = list(normalized.warnings)
+    from .reference_analysis import analyze_motion_references
+
+    reference_analysis = analyze_motion_references(
+        refs,
+        duration_ms=composition.duration_ms,
+    )
+    warnings.extend(
+        str(item) for item in reference_analysis.get("warnings", [])
+    )
+    timing_markers = [
+        int(value)
+        for value in reference_analysis.get("timing_markers_ms", [])
+    ]
+    style_background, style_foreground, style_applied = _reference_style_colors(
+        reference_analysis
+    )
     decomposition_reports: list[dict[str, Any]] = []
     for beat in normalized.beats:
         behavior = _motion_behavior(beat)
@@ -472,9 +545,33 @@ def compile_generation_plan(
                             segmentation_mode=segmentation_mode,
                             point_hints=image_ref.metadata.get("point_hints") or (),
                             object_hints=image_ref.metadata.get("object_hints") or (),
+                            auto_detect_objects=bool(
+                                image_ref.metadata.get(
+                                    "auto_detect_objects",
+                                    auto_detect_objects,
+                                )
+                            ),
+                            object_labels=image_ref.metadata.get("object_labels") or (),
+                            object_detector_model=str(
+                                image_ref.metadata.get("object_detector_model")
+                                or object_detector_model
+                                or ""
+                            ),
+                            matting_mode=str(
+                                image_ref.metadata.get("matting_mode")
+                                or matting_mode
+                            ),
                             inpaint_mode=inpaint_mode,
                             reconstruct_text=reconstruct_text,
                             ocr_native_threshold=ocr_native_threshold,
+                        )
+                        report = decomposition.to_dict()
+                        report["reference_id"] = image_ref.id
+                        report["beat_id"] = beat.id
+                        decomposition_reports.append(report)
+                        warnings.extend(
+                            str(item)
+                            for item in decomposition.diagnostics.get("warnings", [])
                         )
                         decomposed_layers = compile_decomposition_layers(
                             composition,
@@ -493,19 +590,16 @@ def compile_generation_plan(
                                 normalized.brief.objective,
                                 *normalized.brief.tone_keywords,
                             ]).strip(),
+                            audio_hits_ms=tuple(
+                                marker - beat.start_ms
+                                for marker in timing_markers
+                                if beat.start_ms <= marker < beat.end_ms
+                            ),
                         )
                         if decomposed_layers:
                             for decomposed_layer in decomposed_layers:
                                 decomposed_layer.metadata["ai_generation_id"] = normalized.id
                             layers.extend(decomposed_layers)
-                            report = decomposition.to_dict()
-                            report["reference_id"] = image_ref.id
-                            report["beat_id"] = beat.id
-                            decomposition_reports.append(report)
-                            warnings.extend(
-                                str(item)
-                                for item in decomposition.diagnostics.get("warnings", [])
-                            )
                             decomposition_compiled = True
                     except Exception as exc:
                         warnings.append(
@@ -541,7 +635,9 @@ def compile_generation_plan(
                 layer_type="shape",
                 source=SourceRef(kind="shape", params={
                     "primitive": "rectangle", "width": composition.width, "height": composition.height,
-                    "fill": "#151922", "stroke": "#151922", "stroke_width": 0.0,
+                    "fill": style_background,
+                    "stroke": style_background,
+                    "stroke_width": 0.0,
                 }),
                 in_ms=beat.start_ms,
                 out_ms=beat.end_ms,
@@ -560,7 +656,7 @@ def compile_generation_plan(
                     "font_family": "Segoe UI",
                     "font_size": max(28, round(composition.height * .075)),
                     "font_weight": 700,
-                    "fill": "#f5f7fa",
+                    "fill": style_foreground,
                     "stroke": "#111317cc",
                     "stroke_width": 1.5,
                     "alignment": "center",
@@ -576,6 +672,17 @@ def compile_generation_plan(
             if behavior is not None:
                 text_layer.behaviors = [MotionBehaviorRef.from_dict(behavior.to_dict())]
             layers.append(text_layer)
+    from .reference_analysis import apply_video_motion_reference
+
+    video_rows = [
+        item
+        for item in reference_analysis.get("video", [])
+        if isinstance(item, Mapping)
+    ]
+    transferred_layers = apply_video_motion_reference(
+        layers,
+        video_rows[0] if video_rows else None,
+    )
     analysis = analyze_motion_ai_layers(composition, layers)
     analysis["generation_plan"] = normalized.to_dict()
     analysis["provider_contract"] = dict(provider_metadata or {})
@@ -589,6 +696,19 @@ def compile_generation_plan(
         str(motion_variant or "auto"),
     )
     analysis["image_decompositions"] = decomposition_reports
+    analysis["reference_analysis"] = reference_analysis
+    analysis["style_reference_applied"] = style_applied
+    analysis["video_motion_transferred_layer_count"] = transferred_layers
+    analysis["reference_provenance"] = [
+        {
+            "id": item.id,
+            "kind": item.kind,
+            "name": item.name,
+            "uri": item.uri,
+            "provenance": dict(item.metadata.get("provenance") or {}),
+        }
+        for item in refs
+    ]
     analysis["decomposed_reference_count"] = len({
         str(item.get("reference_id") or "") for item in decomposition_reports
     })
@@ -615,6 +735,9 @@ def generate_motion_ai_proposal(
     decompose_images: bool = True,
     max_decomposed_elements: int = 5,
     segmentation_mode: str = "auto",
+    auto_detect_objects: bool = True,
+    object_detector_model: str = "",
+    matting_mode: str = "edge_aware",
     inpaint_mode: str = "auto",
     reconstruct_text: bool = True,
     ocr_native_threshold: float = 0.78,
@@ -660,6 +783,9 @@ def generate_motion_ai_proposal(
         decompose_images=decompose_images,
         max_decomposed_elements=max_decomposed_elements,
         segmentation_mode=segmentation_mode,
+        auto_detect_objects=auto_detect_objects,
+        object_detector_model=object_detector_model,
+        matting_mode=matting_mode,
         inpaint_mode=inpaint_mode,
         reconstruct_text=reconstruct_text,
         ocr_native_threshold=ocr_native_threshold,
@@ -713,6 +839,11 @@ def generate_motion_ai_candidates(
                 options.get("max_decomposed_elements", 5)
             ),
             segmentation_mode=str(options.get("segmentation_mode") or "auto"),
+            auto_detect_objects=bool(options.get("auto_detect_objects", True)),
+            object_detector_model=str(
+                options.get("object_detector_model") or ""
+            ),
+            matting_mode=str(options.get("matting_mode") or "edge_aware"),
             inpaint_mode=str(options.get("inpaint_mode") or "auto"),
             reconstruct_text=bool(options.get("reconstruct_text", True)),
             ocr_native_threshold=float(
@@ -811,6 +942,29 @@ def validate_motion_ai_patch(
             prop = str(params.get("property") or "")
             if prop not in TRANSFORM_PROPERTIES:
                 raise MotionAIContractError(f"unsupported transform property: {prop}")
+        elif op_type == "set_source_param":
+            _known_keys(
+                params,
+                allowed={"parameter", "value"},
+                required={"parameter", "value"},
+                path="operation.params",
+            )
+            parameter = str(params.get("parameter") or "")
+            if parameter not in IMAGE_SOURCE_PROPERTIES:
+                raise MotionAIContractError(
+                    f"unsupported image source parameter: {parameter}"
+                )
+            if not isinstance(params.get("value"), (int, float)):
+                raise MotionAIContractError(
+                    "operation.params.value must be numeric"
+                )
+            if (
+                composition is not None
+                and known_layers[layer_id].layer_type != "image"
+            ):
+                raise MotionAIContractError(
+                    "set_source_param requires an image layer"
+                )
         elif op_type == "set_behavior":
             _known_keys(params, allowed={"behavior"}, required={"behavior"}, path="operation.params")
             behavior = _mapping(params.get("behavior"), "operation.params.behavior")
@@ -881,6 +1035,20 @@ def build_deterministic_patch(
                 params={"property": "scale", "value": [float(current[0]) * 1.15, float(current[1]) * 1.15]},
                 reason="Requested larger scale",
             ))
+        if layer.layer_type == "image" and "tilt left" in normalized:
+            operations.append(MotionAIPatchOperation(
+                type="set_source_param",
+                layer_id=layer.id,
+                params={"parameter": "tilt_y", "value": -5.0},
+                reason="Requested editable left image tilt",
+            ))
+        elif layer.layer_type == "image" and "tilt right" in normalized:
+            operations.append(MotionAIPatchOperation(
+                type="set_source_param",
+                layer_id=layer.id,
+                params={"parameter": "tilt_y", "value": 5.0},
+                reason="Requested editable right image tilt",
+            ))
     warnings = [] if operations else ["The safe fallback could not infer a scoped edit. Refine the prompt or select target layers."]
     return MotionAIPatch(
         composition_id=composition.id,
@@ -948,6 +1116,17 @@ def apply_motion_ai_patch(composition: MotionComposition, patch: Mapping[str, An
         elif op_type == "set_transform":
             prop = getattr(layer.transform, str(params["property"]))
             prop.default = params["value"]
+        elif op_type == "set_source_param":
+            parameter = str(params["parameter"])
+            current = layer.source.params.get(parameter)
+            if isinstance(current, Mapping) and (
+                "default" in current or "keyframes" in current
+            ):
+                prop = AnimatedProperty.from_dict(current)
+                prop.default = float(params["value"])
+                layer.source.params[parameter] = prop.to_dict()
+            else:
+                layer.source.params[parameter] = float(params["value"])
         elif op_type == "set_behavior":
             layer.behaviors = [MotionBehaviorRef.from_dict(params["behavior"])]
         elif op_type == "set_visibility":
@@ -957,11 +1136,42 @@ def apply_motion_ai_patch(composition: MotionComposition, patch: Mapping[str, An
     report = validate_composition(candidate)
     if not report.ok:
         raise MotionAIContractError(report.issues[0].message)
+    from .ai_continuity import (
+        record_motion_ai_event,
+        validate_motion_continuity,
+    )
+
+    continuity = validate_motion_continuity(composition, candidate)
+    if not continuity["ok"]:
+        raise MotionAIContractError(continuity["issues"][0]["message"])
+    if normalized["operations"]:
+        provider_contract = normalized["metadata"].get("provider_contract")
+        provider = (
+            str(provider_contract.get("provider") or "")
+            if isinstance(provider_contract, Mapping)
+            else str(normalized["metadata"].get("planner") or "")
+        )
+        record_motion_ai_event(
+            candidate,
+            event_type="patch_apply",
+            prompt=normalized["prompt"],
+            provider=provider,
+            base_revision=composition.revision,
+            details={
+                "patch_id": normalized["id"],
+                "operation_count": len(normalized["operations"]),
+                "operation_types": [
+                    item["type"] for item in normalized["operations"]
+                ],
+            },
+            continuity=continuity,
+        )
     return candidate
 
 
 def motion_ai_provider_status() -> dict[str, Any]:
     snapshot = provider_snapshot()
+    from .object_detection import object_detection_capabilities
     from .semantic_segmentation import segmentation_capabilities
 
     return {
@@ -976,7 +1186,18 @@ def motion_ai_provider_status() -> dict[str, Any]:
             "patch_schema": MOTION_AI_PATCH_SCHEMA,
         },
         "layered_image": {
+            "object_detection": object_detection_capabilities(),
             "segmentation": segmentation_capabilities(),
+            "matting": {
+                "edge_aware_local": {
+                    "available": True,
+                    "provider": "opencv_edge_aware_trimap",
+                },
+                "hair_quality_semantic_matting": {
+                    "available": False,
+                    "requires_optional_model": True,
+                },
+            },
             "inpainting": {
                 "fast_local": {"available": True},
                 "enhanced_local": {
@@ -988,6 +1209,20 @@ def motion_ai_provider_status() -> dict[str, Any]:
                     "requires_explicit_consent": True,
                 },
             },
+        },
+        "multimodal_references": {
+            "image": {"available": True, "editable_layers": True},
+            "text": {"available": True, "native_typography": True},
+            "audio": {"available": True, "beat_sync": True},
+            "video": {
+                "available": True,
+                "motion_transfer": "camera_and_layer_motion",
+                "pose_transfer": False,
+            },
+        },
+        "provenance": {
+            "local_manifest": True,
+            "c2pa_signed": False,
         },
     }
 

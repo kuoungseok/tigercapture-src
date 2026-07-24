@@ -192,10 +192,12 @@ def test_motion_image_decomposition_action_is_registered_and_callable(tmp_path: 
         "motion.ai.layer.pivot",
         "motion.ai.layer.order",
         "motion.ai.background.inpaint",
+        "motion.ai.background.replace",
         "motion.ai.text.reconstruct",
         "motion.ai.choreography.plan",
         "motion.ai.choreography.apply",
         "motion.ai.candidate.preview",
+        "motion.ai.cutout.quality.validate",
         "motion.ai.integrity.validate",
     }
     assert expected <= action_ids
@@ -209,11 +211,27 @@ def test_motion_image_decomposition_action_is_registered_and_callable(tmp_path: 
     assert execution.ok
     assert execution.result["schema"] == IMAGE_DECOMPOSITION_SCHEMA
     assert execution.result["elements"]
+    clean_plate = tmp_path / "clean_plate.png"
+    Image.new("RGB", (320, 180), (20, 70, 110)).save(clean_plate)
+    replacement = registry.execute("motion.ai.background.replace", {
+        "decomposition": execution.result,
+        "background_path": str(clean_plate),
+        "provider": "test_reviewed_plate",
+    })
+    assert replacement.ok
+    assert replacement.result["diagnostics"]["inpaint"]["provider"] == "test_reviewed_plate"
+    assert Path(replacement.result["background_path"]).is_file()
     validation = registry.execute("motion.ai.integrity.validate", {
         "decomposition": execution.result,
     })
     assert validation.ok
     assert validation.result["ok"] is True
+    quality = registry.execute("motion.ai.cutout.quality.validate", {
+        "decomposition": execution.result,
+    })
+    assert quality.ok
+    assert quality.result["schema"] == "tigerstudio.motion.cutout_quality.v1"
+    assert quality.result["accepted"] is True
     choreography = registry.execute("motion.ai.choreography.plan", {
         "decomposition": execution.result,
         "duration_ms": 2400,

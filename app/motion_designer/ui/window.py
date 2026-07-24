@@ -6,7 +6,7 @@ from typing import Callable
 
 from PySide6.QtCore import QElapsedTimer, QThread, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
-    QDockWidget, QFileDialog, QListWidget, QMainWindow, QSplitter, QTabWidget,
+    QDialog, QDockWidget, QFileDialog, QListWidget, QMainWindow, QSplitter, QTabWidget,
     QVBoxLayout, QWidget,
 )
 
@@ -23,10 +23,15 @@ from .behavior_panel import BehaviorPanel
 from .audio_panel import AudioReactivePanel
 from .audio_worker import MotionAudioAnalysisWorker
 from .ai_panel import MotionAIPanel
-from .ai_worker import MotionAIGenerationWorker
+from .ai_worker import (
+    MotionAICandidatePreviewWorker,
+    MotionAIGenerationWorker,
+    MotionAIPatchWorker,
+)
 from .ar_pbr_panel import ArPbrPanel
 from .actor_panel import ActorPanel
 from .canvas import MotionCanvas
+from .cutout_rig_dialog import CutoutArmRigDialog
 from .effect_mask_panel import EffectMaskPanel
 from .export_panel import MotionOutputPanel
 from .export_worker import MotionExportWorker
@@ -115,12 +120,51 @@ class MotionDocumentController:
         set_keyframe(candidate, layer_id, property_name, Keyframe(time_ms=time_ms, value=value))
         self._commit(candidate)
 
+    def set_source_keyframe(
+        self,
+        layer_id: str,
+        parameter_name: str,
+        value,
+        time_ms: int,
+    ) -> None:
+        candidate = MotionComposition.from_dict(self.composition.to_dict())
+        layer = find_layer(candidate, layer_id)
+        current = layer.source.params.get(parameter_name, value)
+        prop = (
+            AnimatedProperty.from_dict(current)
+            if isinstance(current, dict)
+            and ("default" in current or "keyframes" in current)
+            else AnimatedProperty(value_type="scalar", default=float(current))
+        )
+        frame = Keyframe(time_ms=max(0, int(time_ms)), value=float(value))
+        prop.keyframes = [
+            item
+            for item in prop.keyframes
+            if item.id != frame.id and item.time_ms != frame.time_ms
+        ]
+        prop.keyframes.append(frame)
+        prop.keyframes.sort(key=lambda item: (item.time_ms, item.id))
+        layer.source.params[parameter_name] = prop.to_dict()
+        candidate.revision += 1
+        self._commit(candidate)
+
     def update_keyframe(
         self, layer_id: str, property_name: str, keyframe_id: str, time_ms: int, value,
     ) -> None:
         candidate = MotionComposition.from_dict(self.composition.to_dict())
         layer = find_layer(candidate, layer_id)
-        prop = layer.transform.properties().get(property_name)
+        if str(property_name).startswith("source:"):
+            parameter_name = str(property_name).split(":", 1)[1]
+            current = layer.source.params.get(parameter_name)
+            prop = (
+                AnimatedProperty.from_dict(current)
+                if isinstance(current, dict)
+                and ("default" in current or "keyframes" in current)
+                else None
+            )
+        else:
+            parameter_name = ""
+            prop = layer.transform.properties().get(property_name)
         if prop is None:
             raise ValueError(f"Unknown animated property: {property_name}")
         keyframe = next((item for item in prop.keyframes if item.id == keyframe_id), None)
@@ -134,6 +178,8 @@ class MotionDocumentController:
         keyframe.time_ms = target_time_ms
         keyframe.value = value
         prop.keyframes.sort(key=lambda item: (item.time_ms, item.id))
+        if parameter_name:
+            layer.source.params[parameter_name] = prop.to_dict()
         candidate.revision += 1
         self._commit(candidate)
 
@@ -177,6 +223,9 @@ class MotionDesignerWindow(QMainWindow):
         self._audio_analysis_job: tuple[QThread, MotionAudioAnalysisWorker] | None = None
         self._motion_export_job: tuple[QThread, MotionExportWorker] | None = None
         self._ai_generation_job: tuple[QThread, MotionAIGenerationWorker] | None = None
+        self._ai_preview_job: tuple[QThread, MotionAICandidatePreviewWorker] | None = None
+        self._ai_preview_pending: dict | None = None
+        self._ai_patch_job: tuple[QThread, MotionAIPatchWorker] | None = None
         self.controller = MotionDocumentController(composition or MotionComposition(), self._on_model_changed)
 
         self.toolbar = MotionToolbar(self)
@@ -260,6 +309,7 @@ class MotionDesignerWindow(QMainWindow):
         self.toolbar.add_layer_requested.connect(self._add_layer)
         self.toolbar.behavior_requested.connect(self._add_behavior)
         self.toolbar.effect_requested.connect(self._add_effect)
+        self.toolbar.rig_requested.connect(self._open_rig)
         self.toolbar.delete_requested.connect(self._delete_selected)
         self.toolbar.duplicate_requested.connect(self._duplicate_selected)
         self.toolbar.undo_requested.connect(self.controller.undo)
@@ -278,6 +328,7 @@ class MotionDesignerWindow(QMainWindow):
         self.inspector.property_changed.connect(self._set_inspector_property)
         self.inspector.keyframe_requested.connect(self._set_keyframe)
         self.image.source_changed.connect(self._set_image_params)
+        self.image.keyframe_requested.connect(self._set_image_keyframe)
         self.vector.source_changed.connect(self._set_vector_params)
         self.typography.source_changed.connect(self._set_typography_params)
         self.library.apply_requested.connect(self._apply_library_item)
@@ -309,6 +360,8 @@ class MotionDesignerWindow(QMainWindow):
         self.viewer_header.safe_changed.connect(self.canvas.set_safe_guides_visible)
         self.ai.plan_requested.connect(self._plan_ai_request)
         self.ai.apply_requested.connect(self._apply_ai_proposal)
+        self.ai.patch_requested.connect(self._plan_ai_patch)
+        self.ai.patch_apply_requested.connect(self._apply_ai_patch)
         self.ai.decomposition_repaired.connect(self._repair_ai_decomposition)
         self.audio.analyze_requested.connect(self._start_audio_analysis)
         self.audio.bind_requested.connect(self._bind_audio_reactive)
@@ -338,6 +391,15 @@ class MotionDesignerWindow(QMainWindow):
         self.composition_changed.emit(composition)
         if self._selected_layer_id:
             self._select_layer(self._selected_layer_id)
+
+    def _open_rig(self, rig_kind: str) -> None:
+        if str(rig_kind) != "arm_wave":
+            return
+        if len(self.controller.composition.layers) < 4:
+            return
+        dialog = CutoutArmRigDialog(self.controller.composition, self)
+        if dialog.exec() == QDialog.Accepted:
+            self.controller.replace(dialog.result_composition())
 
     def _add_layer(self, layer_type: str) -> None:
         composition = self.controller.composition
@@ -483,7 +545,10 @@ class MotionDesignerWindow(QMainWindow):
         self._selected_layer_id = str(layer_id or "")
         layer = next((item for item in self.controller.composition.layers if item.id == self._selected_layer_id), None)
         self.inspector.set_layer(layer)
-        self.image.set_layer(layer)
+        self.image.set_layer(
+            layer,
+            max(0, self._time_ms - layer.in_ms) if layer is not None else 0,
+        )
         self.vector.set_layer(layer, self.controller.composition)
         self.typography.set_layer(layer)
         self.behaviors.set_layer(layer)
@@ -671,12 +736,53 @@ class MotionDesignerWindow(QMainWindow):
         self._set_source_params(changes, "text")
 
     def _set_image_params(self, changes: object) -> None:
-        self._set_source_params(changes, "image")
+        if not self._selected_layer_id or not isinstance(changes, dict):
+            return
+        layer = find_layer(self.controller.composition, self._selected_layer_id)
+        if layer.layer_type != "image":
+            return
+        source = layer.source.to_dict()
+        params = dict(source.get("params", {}))
+        for name, value in changes.items():
+            current = deepcopy(params.get(name))
+            if isinstance(current, dict) and (
+                "default" in current or "keyframes" in current
+            ):
+                current["default"] = float(value)
+                params[name] = current
+            else:
+                params[name] = value
+        source["params"] = params
+        self.controller.update_layer(layer.id, {"source": source})
+
+    def _set_image_keyframe(self, parameter_name: str) -> None:
+        if not self._selected_layer_id:
+            return
+        layer = find_layer(self.controller.composition, self._selected_layer_id)
+        if layer.layer_type != "image":
+            return
+        self.controller.set_source_keyframe(
+            layer.id,
+            str(parameter_name),
+            self.image.value(parameter_name),
+            max(0, self._time_ms - layer.in_ms),
+        )
 
     def _plan_ai_request(self, payload: object) -> None:
         if self._ai_generation_job is not None:
             return
         values = payload if isinstance(payload, dict) else {}
+        segmentation_mode = str(values.get("segmentation_mode") or "auto")
+        if (
+            bool(values.get("decompose_images", True))
+            and segmentation_mode in {"auto", "birefnet", "sam2"}
+            and not bool(values.get("segmentation_setup_ready"))
+        ):
+            self.ai.set_error(
+                "AI-quality cutout is not installed. Use Install cutout AI, "
+                "or explicitly choose Legacy Basic."
+            )
+            return
         from app.ai_providers import effective_generation_provider_id
         requested_provider = str(values.get("provider") or "").strip()
         effective_provider = (
@@ -737,6 +843,7 @@ class MotionDesignerWindow(QMainWindow):
         if isinstance(proposal, dict):
             if proposal.get("schema") == "tigerstudio.motion.ai.candidate_set.v1":
                 self.ai.set_candidate_set(proposal)
+                self._start_ai_candidate_previews(proposal)
             else:
                 self.ai.set_proposal(proposal)
         else:
@@ -748,6 +855,87 @@ class MotionDesignerWindow(QMainWindow):
     def _clear_ai_generation_job(self, thread: QThread) -> None:
         if self._ai_generation_job is not None and self._ai_generation_job[0] is thread:
             self._ai_generation_job = None
+
+    def _start_ai_candidate_previews(self, payload: dict) -> None:
+        candidates = [
+            dict(item)
+            for item in payload.get("candidates", [])
+            if isinstance(item, dict)
+        ]
+        if len(candidates) < 2:
+            return
+        if self._ai_preview_job is not None:
+            self._ai_preview_pending = dict(payload)
+            self._ai_preview_job[1].cancel()
+            return
+        from PySide6.QtCore import QStandardPaths
+
+        cache_base = QStandardPaths.writableLocation(QStandardPaths.CacheLocation)
+        cache_root = Path(cache_base or Path.home() / ".tigercapture") / "motion_ai" / "candidate_previews"
+        thread = QThread(self)
+        worker = MotionAICandidatePreviewWorker(
+            self.controller.composition,
+            candidates,
+            cache_root,
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.completed.connect(self.ai.set_candidate_previews)
+        worker.failed.connect(self.ai.set_candidate_preview_error)
+        worker.completed.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(lambda: self._clear_ai_preview_job(thread))
+        self._ai_preview_job = (thread, worker)
+        thread.start()
+
+    def _clear_ai_preview_job(self, thread: QThread) -> None:
+        if self._ai_preview_job is not None and self._ai_preview_job[0] is thread:
+            self._ai_preview_job = None
+            pending = self._ai_preview_pending
+            self._ai_preview_pending = None
+            if pending is not None:
+                QTimer.singleShot(
+                    0,
+                    lambda payload=dict(pending): self._start_ai_candidate_previews(payload),
+                )
+
+    def _plan_ai_patch(self, payload: object) -> None:
+        if self._ai_patch_job is not None or not isinstance(payload, dict):
+            return
+        thread = QThread(self)
+        worker = MotionAIPatchWorker(
+            self.controller.composition,
+            str(payload.get("prompt") or ""),
+            [str(item) for item in payload.get("layer_ids", [])],
+            str(payload.get("provider") or ""),
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.completed.connect(self._finish_ai_patch)
+        worker.failed.connect(self._fail_ai_patch)
+        worker.completed.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(lambda: self._clear_ai_patch_job(thread))
+        self._ai_patch_job = (thread, worker)
+        self.ai.set_patch_planning(True)
+        thread.start()
+
+    def _finish_ai_patch(self, payload: object) -> None:
+        self.ai.set_patch_planning(False)
+        if isinstance(payload, dict):
+            self.ai.set_patch(payload)
+        else:
+            self.ai.set_error("Motion AI returned an invalid revision.")
+
+    def _fail_ai_patch(self, message: str) -> None:
+        self.ai.set_patch_planning(False)
+        self.ai.set_error(message)
+
+    def _clear_ai_patch_job(self, thread: QThread) -> None:
+        if self._ai_patch_job is not None and self._ai_patch_job[0] is thread:
+            self._ai_patch_job = None
 
     def _repair_ai_decomposition(self, payload: object) -> None:
         if not isinstance(payload, dict) or not isinstance(self.ai._proposal, dict):
@@ -889,7 +1077,30 @@ class MotionDesignerWindow(QMainWindow):
         self.controller.replace(candidate)
         if added_ids:
             self._select_layer(added_ids[-1])
-        self.ai.set_applied(len(added_ids))
+        self.ai.set_applied(len(added_ids), added_ids)
+
+    def _apply_ai_patch(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        from app.motion_designer.ai_generation import apply_motion_ai_patch
+
+        operation_count = len(payload.get("operations") or [])
+        candidate = apply_motion_ai_patch(self.controller.composition, payload)
+        self.controller.replace(candidate)
+        preview_from = max(
+            0,
+            min(
+                (
+                    find_layer(candidate, str(item.get("layer_id") or "")).in_ms
+                    for item in payload.get("operations", [])
+                    if isinstance(item, dict)
+                ),
+                default=0,
+            ) - 500,
+        )
+        self._set_time(preview_from)
+        self.timeline.set_time(preview_from)
+        self.ai.set_patch_applied(operation_count)
 
     def _set_inspector_property(self, key: str, value: float) -> None:
         if self.inspector.is_loading() or not self._selected_layer_id:
@@ -1248,6 +1459,21 @@ class MotionDesignerWindow(QMainWindow):
         self.canvas.set_time(self._time_ms)
         self.preview.set_time(self._time_ms)
         self.timeline.tracks.set_state(self.controller.composition, self._time_ms)
+        if self._selected_layer_id:
+            layer = next(
+                (
+                    item
+                    for item in self.controller.composition.layers
+                    if item.id == self._selected_layer_id
+                ),
+                None,
+            )
+            self.image.set_layer(
+                layer,
+                max(0, self._time_ms - layer.in_ms)
+                if layer is not None
+                else 0,
+            )
 
     def _set_playing(self, playing: bool) -> None:
         self._set_playback_direction(1 if playing else 0)
@@ -1324,6 +1550,16 @@ class MotionDesignerWindow(QMainWindow):
             thread.wait(5000)
         if self._ai_generation_job is not None:
             thread, _worker = self._ai_generation_job
+            thread.quit()
+            thread.wait(35000)
+        if self._ai_preview_job is not None:
+            self._ai_preview_pending = None
+            thread, worker = self._ai_preview_job
+            worker.cancel()
+            thread.quit()
+            thread.wait(15000)
+        if self._ai_patch_job is not None:
+            thread, _worker = self._ai_patch_job
             thread.quit()
             thread.wait(35000)
         super().closeEvent(event)

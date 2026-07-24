@@ -10,12 +10,57 @@ class MotionAIGenerationAdapterMixin:
 
         return motion_ai_provider_status()
 
+    def motion_ai_segmentation_setup_status(self) -> dict[str, Any]:
+        from app.motion_designer.segmentation_setup import segmentation_setup_status
+
+        return segmentation_setup_status()
+
+    def motion_ai_segmentation_setup_plan(self) -> dict[str, Any]:
+        from app.motion_designer.segmentation_setup import segmentation_install_plan
+
+        return segmentation_install_plan()
+
+    def motion_ai_segmentation_setup_install(self, *, confirm: bool = False) -> dict[str, Any]:
+        from pathlib import Path
+        import subprocess
+
+        from app.motion_designer.segmentation_setup import (
+            segmentation_install_plan,
+            segmentation_setup_status,
+        )
+
+        status = segmentation_setup_status()
+        if bool(status.get("available")):
+            return {"ok": True, "started": False, "already_ready": True, "status": status}
+        plan = segmentation_install_plan()
+        if not bool(confirm):
+            return {
+                "ok": False,
+                "started": False,
+                "confirmation_required": True,
+                "plan": plan,
+            }
+        process = subprocess.Popen(
+            plan["command"],
+            cwd=str(Path(__file__).resolve().parents[2]),
+            creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+        return {
+            "ok": True,
+            "started": True,
+            "pid": int(process.pid),
+            "plan": plan,
+            "poll_action": "motion.ai.segmentation.setup.status",
+        }
+
     def motion_ai_reference_analyze(self, references: list[Mapping[str, Any]] | None = None) -> dict[str, Any]:
         from app.motion_designer.ai_workspace import MotionAIReference
 
+        normalized = [
+            MotionAIReference.from_dict(raw) for raw in references or []
+        ]
         rows: list[dict[str, Any]] = []
-        for raw in references or []:
-            item = MotionAIReference.from_dict(raw)
+        for item in normalized:
             row = {
                 "id": item.id,
                 "kind": item.kind,
@@ -32,7 +77,7 @@ class MotionAIGenerationAdapterMixin:
 
                 path = Path(item.uri) if item.uri and not item.uri.startswith(("http://", "https://")) else None
                 row["available"] = bool(path and path.is_file())
-                if path and path.is_file():
+                if path and path.is_file() and item.kind == "image":
                     try:
                         from PIL import Image
 
@@ -45,13 +90,61 @@ class MotionAIGenerationAdapterMixin:
                             })
                     except Exception as exc:
                         row["probe_warning"] = str(exc)
+                elif path and path.is_file():
+                    stat = path.stat()
+                    row.update({
+                        "size": int(stat.st_size),
+                        "mtime_ns": int(stat.st_mtime_ns),
+                    })
             rows.append(row)
+        from app.motion_designer.reference_analysis import (
+            analyze_motion_references,
+        )
+
+        reference_analysis = analyze_motion_references(
+            normalized,
+            duration_ms=30_000,
+        )
         return {
             "count": len(rows),
             "references": rows,
             "semantic_vision_used": False,
+            "reference_analysis": reference_analysis,
             "note": "This stage probes local asset facts; the selected planner assigns editable roles.",
         }
+
+    def motion_ai_provenance_inspect(
+        self,
+        *,
+        composition_id: str,
+    ) -> dict[str, Any]:
+        from app.motion_designer.ai_continuity import motion_ai_audit_report
+
+        composition = self._motion_store().get(composition_id)
+        if composition is None:
+            raise ValueError(f"motion composition not found: {composition_id}")
+        return motion_ai_audit_report(composition)
+
+    def motion_ai_continuity_validate(
+        self,
+        *,
+        composition_id: str,
+        candidate: Mapping[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        from app.motion_designer.ai_continuity import (
+            validate_motion_continuity,
+        )
+        from app.motion_designer.schema import MotionComposition
+
+        composition = self._motion_store().get(composition_id)
+        if composition is None:
+            raise ValueError(f"motion composition not found: {composition_id}")
+        after = (
+            MotionComposition.from_dict(candidate)
+            if isinstance(candidate, Mapping)
+            else composition
+        )
+        return validate_motion_continuity(composition, after)
 
     def motion_ai_reference_decompose(
         self,
@@ -64,6 +157,10 @@ class MotionAIGenerationAdapterMixin:
         segmentation_mode: str = "auto",
         point_hints: list[list[float]] | None = None,
         object_hints: list[Mapping[str, Any]] | None = None,
+        auto_detect_objects: bool = False,
+        object_labels: list[str] | None = None,
+        object_detector_model: str = "",
+        matting_mode: str = "edge_aware",
         inpaint_mode: str = "auto",
         reconstruct_text: bool = True,
         ocr_native_threshold: float = 0.78,
@@ -80,6 +177,10 @@ class MotionAIGenerationAdapterMixin:
             segmentation_mode=segmentation_mode,
             point_hints=point_hints or (),
             object_hints=object_hints or (),
+            auto_detect_objects=bool(auto_detect_objects),
+            object_labels=object_labels or (),
+            object_detector_model=object_detector_model or None,
+            matting_mode=matting_mode,
             inpaint_mode=inpaint_mode,
             reconstruct_text=reconstruct_text,
             ocr_native_threshold=ocr_native_threshold,
@@ -94,7 +195,7 @@ class MotionAIGenerationAdapterMixin:
 
     def motion_ai_layer_mask_refine(self, **params: Any) -> dict[str, Any]:
         values = dict(params)
-        values["segmentation_mode"] = "sam"
+        values["segmentation_mode"] = "sam2"
         values["force"] = True
         return self.motion_ai_reference_decompose(**values)
 
@@ -217,6 +318,23 @@ class MotionAIGenerationAdapterMixin:
     def motion_ai_background_inpaint(self, **params: Any) -> dict[str, Any]:
         return self.motion_ai_reference_decompose(**params)
 
+    def motion_ai_background_replace(
+        self,
+        *,
+        decomposition: Mapping[str, Any],
+        background_path: str,
+        provider: str = "manual_background_plate",
+    ) -> dict[str, Any]:
+        from app.motion_designer.image_decomposition_edits import (
+            replace_decomposition_background,
+        )
+
+        return replace_decomposition_background(
+            decomposition,
+            background_path,
+            provider=provider,
+        ).to_dict()
+
     def motion_ai_text_reconstruct(self, **params: Any) -> dict[str, Any]:
         values = dict(params)
         values["reconstruct_text"] = True
@@ -266,6 +384,19 @@ class MotionAIGenerationAdapterMixin:
         result = ImageDecompositionResult.from_dict(decomposition)
         return validate_decomposition_result(result).to_dict()
 
+    def motion_ai_cutout_quality_validate(
+        self,
+        *,
+        decomposition: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        from app.motion_designer.cutout_quality import (
+            evaluate_decomposition_cutout_quality,
+        )
+        from app.motion_designer.image_decomposition import ImageDecompositionResult
+
+        result = ImageDecompositionResult.from_dict(decomposition)
+        return evaluate_decomposition_cutout_quality(result)
+
     def motion_ai_choreography_apply(
         self,
         *,
@@ -282,6 +413,7 @@ class MotionAIGenerationAdapterMixin:
         motion_style: str = "",
         audio_hits_ms: list[int] | None = None,
         base_revision: int | None = None,
+        allow_quality_override: bool = False,
     ) -> dict[str, Any]:
         from app.motion_designer.image_decomposition import (
             ImageDecompositionResult,
@@ -311,6 +443,7 @@ class MotionAIGenerationAdapterMixin:
             motion_variant=variant,
             prompt=prompt,
             audio_hits_ms=audio_hits_ms or (),
+            allow_quality_override=bool(allow_quality_override),
         )
         if not layers:
             raise ValueError("decomposition did not compile into Motion layers")
@@ -373,6 +506,9 @@ class MotionAIGenerationAdapterMixin:
         decompose_images: bool = True,
         max_decomposed_elements: int = 5,
         segmentation_mode: str = "auto",
+        auto_detect_objects: bool = True,
+        object_detector_model: str = "",
+        matting_mode: str = "edge_aware",
         inpaint_mode: str = "auto",
         reconstruct_text: bool = True,
         ocr_native_threshold: float = 0.78,
@@ -383,6 +519,9 @@ class MotionAIGenerationAdapterMixin:
             decompose_images,
             max_decomposed_elements,
             segmentation_mode,
+            auto_detect_objects,
+            object_detector_model,
+            matting_mode,
             inpaint_mode,
             reconstruct_text,
             ocr_native_threshold,
@@ -413,6 +552,9 @@ class MotionAIGenerationAdapterMixin:
         decompose_images: bool = True,
         max_decomposed_elements: int = 5,
         segmentation_mode: str = "auto",
+        auto_detect_objects: bool = True,
+        object_detector_model: str = "",
+        matting_mode: str = "edge_aware",
         inpaint_mode: str = "auto",
         reconstruct_text: bool = True,
         ocr_native_threshold: float = 0.78,
@@ -426,6 +568,9 @@ class MotionAIGenerationAdapterMixin:
             decompose_images=decompose_images,
             max_decomposed_elements=max_decomposed_elements,
             segmentation_mode=segmentation_mode,
+            auto_detect_objects=auto_detect_objects,
+            object_detector_model=object_detector_model,
+            matting_mode=matting_mode,
             inpaint_mode=inpaint_mode,
             reconstruct_text=reconstruct_text,
             ocr_native_threshold=ocr_native_threshold,
@@ -445,6 +590,9 @@ class MotionAIGenerationAdapterMixin:
         decompose_images: bool = True,
         max_decomposed_elements: int = 5,
         segmentation_mode: str = "auto",
+        auto_detect_objects: bool = True,
+        object_detector_model: str = "",
+        matting_mode: str = "edge_aware",
         inpaint_mode: str = "auto",
         reconstruct_text: bool = True,
         ocr_native_threshold: float = 0.78,
@@ -463,6 +611,9 @@ class MotionAIGenerationAdapterMixin:
             decompose_images=decompose_images,
             max_decomposed_elements=max_decomposed_elements,
             segmentation_mode=segmentation_mode,
+            auto_detect_objects=auto_detect_objects,
+            object_detector_model=object_detector_model,
+            matting_mode=matting_mode,
             inpaint_mode=inpaint_mode,
             reconstruct_text=reconstruct_text,
             ocr_native_threshold=ocr_native_threshold,
@@ -479,6 +630,9 @@ class MotionAIGenerationAdapterMixin:
         decompose_images: bool = True,
         max_decomposed_elements: int = 5,
         segmentation_mode: str = "auto",
+        auto_detect_objects: bool = True,
+        object_detector_model: str = "",
+        matting_mode: str = "edge_aware",
         inpaint_mode: str = "auto",
         reconstruct_text: bool = True,
         ocr_native_threshold: float = 0.78,
@@ -503,6 +657,9 @@ class MotionAIGenerationAdapterMixin:
             decompose_images=decompose_images,
             max_decomposed_elements=max_decomposed_elements,
             segmentation_mode=segmentation_mode,
+            auto_detect_objects=auto_detect_objects,
+            object_detector_model=object_detector_model,
+            matting_mode=matting_mode,
             inpaint_mode=inpaint_mode,
             reconstruct_text=reconstruct_text,
             ocr_native_threshold=ocr_native_threshold,

@@ -9,7 +9,7 @@ from app.actions.schema import schema_object
 REFERENCE_SCHEMA = {
     "type": "array",
     "items": {"type": "object"},
-    "description": "Image/text references already admitted by the Motion AI intake contract.",
+    "description": "Image, text, audio, or video references admitted by the Motion AI intake contract.",
 }
 DECOMPOSITION_SCHEMA = {
     "type": "object",
@@ -31,16 +31,45 @@ OBJECT_HINTS_SCHEMA = {
         "properties": {
             "id": {"type": "string"},
             "label": {"type": "string"},
+            "parent_id": {"type": "string"},
+            "part": {"type": "string"},
+            "rigid": {"type": "boolean"},
+            "pivot": {
+                "type": "array",
+                "items": {"type": "number"},
+                "minItems": 2,
+                "maxItems": 2,
+            },
             "bbox": {
                 "type": "array",
                 "items": {"type": "number"},
                 "minItems": 4,
                 "maxItems": 4,
             },
+            "foreground_points": {
+                "type": "array",
+                "items": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "minItems": 2,
+                    "maxItems": 2,
+                },
+                "description": "Normalized or pixel-space points that must remain inside the object.",
+            },
+            "background_points": {
+                "type": "array",
+                "items": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "minItems": 2,
+                    "maxItems": 2,
+                },
+                "description": "Normalized or pixel-space points that must remain outside the object.",
+            },
         },
         "required": ["bbox"],
     },
-    "description": "Named normalized or pixel-space boxes for guided multi-object segmentation.",
+    "description": "Named boxes with optional foreground/background points for guided multi-object segmentation.",
 }
 
 
@@ -51,9 +80,23 @@ def _decomposition_params() -> dict[str, Any]:
         "height": {"type": "integer", "minimum": 64, "maximum": 8192},
         "max_elements": {"type": "integer", "minimum": 1, "maximum": 12},
         "include_depth": {"type": "boolean"},
-        "segmentation_mode": {"type": "string", "enum": ["auto", "basic", "sam"]},
+        "segmentation_mode": {
+            "type": "string",
+            "enum": ["auto", "birefnet", "sam2", "basic", "sam"],
+        },
         "point_hints": POINT_HINTS_SCHEMA,
         "object_hints": OBJECT_HINTS_SCHEMA,
+        "auto_detect_objects": {"type": "boolean"},
+        "object_labels": {
+            "type": "array",
+            "items": {"type": "string"},
+            "maxItems": 24,
+        },
+        "object_detector_model": {"type": "string"},
+        "matting_mode": {
+            "type": "string",
+            "enum": ["binary", "edge_aware"],
+        },
         "inpaint_mode": {"type": "string", "enum": ["auto", "fast", "enhanced_local"]},
         "reconstruct_text": {"type": "boolean"},
         "ocr_native_threshold": {"type": "number", "minimum": 0.5, "maximum": 0.98},
@@ -73,6 +116,36 @@ def register_motion_ai_generation_actions(registry: Any) -> None:
         requires_owner=False,
     )
     registry.register_adapter_action(
+        "motion.ai.segmentation.setup.status",
+        "Inspect local BiRefNet Matting and SAM 2 readiness without downloading anything.",
+        "motion",
+        "motion_ai_segmentation_setup_status",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        requires_owner=False,
+    )
+    registry.register_adapter_action(
+        "motion.ai.segmentation.setup.plan",
+        "Return the consent-gated Motion AI cutout installation plan.",
+        "motion",
+        "motion_ai_segmentation_setup_plan",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        requires_owner=False,
+    )
+    registry.register_adapter_action(
+        "motion.ai.segmentation.setup.install",
+        "Start the local BiRefNet and SAM 2 installation only after explicit confirmation.",
+        "motion",
+        "motion_ai_segmentation_setup_install",
+        params_schema=schema_object({"confirm": {"type": "boolean"}}),
+        mutating=True,
+        changed=True,
+        requires_owner=True,
+    )
+    registry.register_adapter_action(
         "motion.ai.reference.analyze",
         "Probe Motion AI reference facts without mutating a project.",
         "motion",
@@ -81,6 +154,32 @@ def register_motion_ai_generation_actions(registry: Any) -> None:
         mutating=False,
         changed=False,
         requires_owner=False,
+    )
+    registry.register_adapter_action(
+        "motion.ai.provenance.inspect",
+        "Inspect Motion AI edit history and local asset provenance.",
+        "motion",
+        "motion_ai_provenance_inspect",
+        params_schema=schema_object(
+            {"composition_id": {"type": "string"}},
+            required=("composition_id",),
+        ),
+        required=("composition_id",),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.ai.continuity.validate",
+        "Validate stable layer, source, hierarchy, and timing continuity.",
+        "motion",
+        "motion_ai_continuity_validate",
+        params_schema=schema_object({
+            "composition_id": {"type": "string"},
+            "candidate": {"type": "object"},
+        }, required=("composition_id",)),
+        required=("composition_id",),
+        mutating=False,
+        changed=False,
     )
     registry.register_adapter_action(
         "motion.ai.reference.decompose",
@@ -261,6 +360,21 @@ def register_motion_ai_generation_actions(registry: Any) -> None:
         requires_owner=False,
     )
     registry.register_adapter_action(
+        "motion.ai.background.replace",
+        "Replace a generated decomposition background with a reviewed local background plate.",
+        "motion",
+        "motion_ai_background_replace",
+        params_schema=schema_object({
+            "decomposition": DECOMPOSITION_SCHEMA,
+            "background_path": {"type": "string"},
+            "provider": {"type": "string"},
+        }, required=("decomposition", "background_path")),
+        required=("decomposition", "background_path"),
+        mutating=False,
+        changed=False,
+        requires_owner=False,
+    )
+    registry.register_adapter_action(
         "motion.ai.text.reconstruct",
         "Analyze high-confidence OCR regions for native editable Motion typography.",
         "motion",
@@ -306,6 +420,19 @@ def register_motion_ai_generation_actions(registry: Any) -> None:
         requires_owner=False,
     )
     registry.register_adapter_action(
+        "motion.ai.cutout.quality.validate",
+        "Measure opaque-background leakage, bright edge spill, detached fragments, and source-frame crop risk.",
+        "motion",
+        "motion_ai_cutout_quality_validate",
+        params_schema=schema_object({
+            "decomposition": DECOMPOSITION_SCHEMA,
+        }, required=("decomposition",)),
+        required=("decomposition",),
+        mutating=False,
+        changed=False,
+        requires_owner=False,
+    )
+    registry.register_adapter_action(
         "motion.ai.choreography.apply",
         "Compile one reviewed decomposition and choreography into a Motion composition revision.",
         "motion",
@@ -330,6 +457,10 @@ def register_motion_ai_generation_actions(registry: Any) -> None:
             "motion_style": {"type": "string"},
             "audio_hits_ms": {"type": "array", "items": {"type": "integer", "minimum": 0}},
             "base_revision": {"type": "integer", "minimum": 0},
+            "allow_quality_override": {
+                "type": "boolean",
+                "description": "Explicitly apply a decomposition rejected by the cutout quality gate.",
+            },
         }, required=(
             "composition_id", "decomposition", "in_ms", "out_ms",
         )),
@@ -365,7 +496,16 @@ def register_motion_ai_generation_actions(registry: Any) -> None:
         "provider": {"type": "string"},
         "decompose_images": {"type": "boolean"},
         "max_decomposed_elements": {"type": "integer", "minimum": 1, "maximum": 12},
-        "segmentation_mode": {"type": "string", "enum": ["auto", "basic", "sam"]},
+        "segmentation_mode": {
+            "type": "string",
+            "enum": ["auto", "birefnet", "sam2", "basic", "sam"],
+        },
+        "auto_detect_objects": {"type": "boolean"},
+        "object_detector_model": {"type": "string"},
+        "matting_mode": {
+            "type": "string",
+            "enum": ["binary", "edge_aware"],
+        },
         "inpaint_mode": {"type": "string", "enum": ["auto", "fast", "enhanced_local"]},
         "reconstruct_text": {"type": "boolean"},
         "ocr_native_threshold": {"type": "number", "minimum": 0.5, "maximum": 0.98},

@@ -1,11 +1,64 @@
 # Tiger Studio AI Motion Generation 제품 기획서
 
+## Gemini Omni 공식 설명 재검토 반영 (2026-07-24)
+
+Google 공식 Gemini Omni 소개의 핵심은 텍스트·이미지·영상·오디오를 함께
+참조하는 생성, 기존 결과를 이어가는 대화형 수정, 캐릭터와 장면의 일관성,
+배경·행동·객체 변경, 음원 동기화, 모션/스타일 참조, 디지털 아바타, 그리고
+출처 표시다. Tiger Studio는 같은 생성 모델을 주장하지 않고 다음 기능을
+편집 가능한 Motion Composition으로 대응한다.
+
+1. **자동 객체 제안**: 선택형 로컬 Ultralytics 모델은 의미 라벨을 제공하고,
+   기본 OpenCV 경로는 의미를 추측하지 않는 `object_01` 형식의 검토 가능한
+   전경 영역만 제안한다.
+2. **마스크와 매팅**: source alpha, Basic Local, 선택형 SAM 뒤에
+   edge-aware trimap alpha 보정을 적용한다. 학습형 hair matting은 아직 별도
+   선택 모델이 필요하다.
+3. **배경 복원**: 작은 구멍/제한된 카메라 이동은 결정론적 로컬 inpaint를
+   사용하고, 큰 영역은 사용자가 검토한 clean plate로 교체할 수 있다.
+4. **객체/파트 모션**: 위치·크기·Z 회전뿐 아니라 이미지 `tilt_x`,
+   `tilt_y`, `perspective`를 키프레임과 Graph에서 편집한다.
+   객체 힌트의 `parent_id`, `part`, `rigid`, `pivot`을 보존해 파츠 리그를
+   만들 수 있으며 팔·바퀴 같은 의미를 근거 없이 추정하지 않는다.
+5. **한 요청 오케스트레이션**: Prompt + References에서 브리프, 비트
+   스토리보드, 분해, 안무, 검증, 후보 Preview까지 한 작업으로 실행하며
+   Apply 전에는 프로젝트를 변경하지 않는다.
+6. **대화형 후속 수정**: stable layer ID와 base revision을 사용하는
+   allowlist patch로 텍스트·타이밍·변환·이미지 틸트/원근·행동·표시를
+   수정하고 하나의 undo revision으로 적용한다.
+
+공식 소개를 다시 읽고 1~6 외에 추가한 범위:
+
+- **오디오 참조**: 비트/온셋을 추출해 분해 레이어 안무 타이밍에 전달한다.
+- **영상 모션 참조**: OpenCV optical flow로 카메라/레이어 움직임을
+  이미지 틸트와 원근 곡선으로 전이한다. 사람 pose transfer는 주장하지 않는다.
+- **이미지 스타일 참조**: 로컬 이미지의 팔레트·명도·방향을 분석해 네이티브
+  title card와 Typography 색에 반영한다. 정체성 또는 전체 화풍 생성은 아니다.
+- **연속성 검사**: 후속 수정에서 기존 source URI와 reference ID, 부모 관계,
+  레이어 시간 범위를 검사하고 대화 이력을 composition metadata에 남긴다.
+- **출처 기록**: 로컬 참조의 크기·mtime·제한된 content hash를 기록하고
+  `motion.ai.provenance.inspect`로 확인한다. 서명 키가 없으므로 C2PA 서명
+  완료라고 표시하지 않는다.
+
+남은 생성 모델 경계:
+
+- 기본 설치는 새 픽셀/영상, 새 캐릭터 행동, 배경 환경을 생성하지 않는다.
+- 외부 생성 공급자가 만든 이미지/영상은 동일 reference 계약으로 받아
+  분해·합성·키프레임 편집할 수 있다.
+- Gemini Omni와 같은 물리적 자연스러움, 임의 객체 삽입, 캐릭터 정체성
+  보존을 제품 주장으로 사용하려면 실제 vision/generative provider와 별도
+  품질 평가가 필요하다.
+
+공식 참고:
+https://blog.google/intl/ko-kr/company-news/technology/gemini-omni-kr/
+
 ## 구현 상태 (2026-07-24)
 
 - AIG0 계약 기준선 구현: 기존 Tiger Studio AI provider 선택, 준비 상태,
   deterministic fallback, JSON-only, Review-before-Apply 경계를 재사용한다.
-- AIG1 1차 구현: 이미지/텍스트 reference 수집과 로컬 파일 사실 확인을 지원한다.
-  의미 기반 이미지 이해는 아직 주장하지 않는다.
+- AIG1 1차 구현: 이미지/텍스트/오디오/영상 reference 수집, 로컬 파일 사실
+  확인, 오디오 비트, 영상 camera/layer optical-flow 분석을 지원한다.
+  의미 기반 이미지 이해나 사람 pose transfer는 아직 주장하지 않는다.
 - AIG1 이미지 분해 제품 경로 구현: `image_decomposition.py`가 source alpha,
   Basic Local 또는 선택형 SAM 공급자로 배경과 주·보조 피사체를 분리하고,
   마스크 무결성, Layer Graph, 선택적 로컬 OCR, 공용 depth, 배경 복원과
@@ -13,22 +66,47 @@
   AI Workspace의 `Explode image layers`, 고급 옵션, `Refine Layers`와
   `motion.ai.reference.decompose`, `motion.ai.layer.*` Action이 같은 서비스를
   사용한다.
+  불투명 단일 이미지에는 이름·박스와 선택적 전경/배경 포인트를 가진
+  `object_hints`를 전달해 캐릭터·자동차 등 여러 객체를 독립 GrabCut
+  마스크로 추출할 수 있다. 연결되지 않은 다리·소품 같은 검수된 객체 파트도
+  하나의 편집 레이어로 보존한다. 검수된 clean plate는
+  `motion.ai.background.replace`로 교체할 수 있다.
+  박스가 없으면 OpenCV가 의미 없는 전경 후보를 제안하며, 사용자 설치
+  Ultralytics 모델이 있을 때만 의미 라벨을 자동 제안한다. 추출 알파는
+  edge-aware local trimap 매팅을 거친다.
 - AIG2 1차 구현: versioned Creative Brief와 Beat Storyboard를 생성하고 엄격히 검증한다.
 - AIG3 구현: storyboard를 native Image/Typography/Vector/Behavior 레이어로
   컴파일하고, 분해된 배경/피사체/텍스트에 depth-weighted 2.5D parallax,
   Ken Burns scale, staggered fade/pop을 적용한다. Clean, Dynamic, Collage
-  후보는 강체·부모 잠금과 사용자 피벗을 보존한다.
-- AIG4 1차 구현: AI Workspace가 하나의 provider plan에서 Clean/Dynamic/
-  Collage 후보 3개를 만들고 selector로 비교한다. 후보 레이어 보정 후 현재 후보만
-  재컴파일하며 `motion.ai.candidate.preview`가 실제 PNG 검토 프레임을 만든다.
-- AIG5 backend 1차 구현: stable layer ID와 base revision을 사용하는 scope-aware patch를
-  계획하고 한 번의 revision으로 적용한다.
-- 아직 남은 제품 단계: 썸네일형 candidate strip/preview cache 고도화(AIG4),
-  patch diff UI(AIG5), 실제 multimodal vision/video provider와 provenance(AIG6),
+  후보는 강체·부모 잠금과 사용자 피벗을 보존한다. 이미지 소스 파라미터의
+  `tilt_x`, `tilt_y`, `perspective`도 시간축에서 평가되어 객체별 X/Y축 원근
+  회전이 Preview와 Export에 동일하게 반영된다. Image Inspector, Timeline,
+  Graph, Action이 같은 소스 키프레임을 편집한다.
+- AIG4 구현: AI Workspace가 하나의 provider plan에서 Clean/Dynamic/
+  Collage 후보 3개를 만들고 가로 candidate strip에서 비교한다. 실제 공유
+  렌더러로 대표 프레임과 썸네일을 만들며 composition/candidate content hash로
+  preview cache를 재사용한다. 후보 레이어 보정 후 현재 후보만 재컴파일하며
+  `motion.ai.candidate.preview`도 실제 PNG 검토 프레임을 만든다.
+- AIG5 구현: stable layer ID와 base revision을 사용하는 scope-aware patch를
+  계획하고 변경 전/후 값, 이유, 영향 레이어와 시간 범위를 diff UI에서 검토한
+  뒤 한 번의 revision으로 적용한다. 기존 source/reference identity와
+  부모·시간 연속성을 검사하고, 대화 이력과 로컬 참조 provenance를 composition
+  metadata에 누적한다.
+- 아직 남은 제품 단계: 실제 multimodal vision/generative provider와 C2PA
+  서명(AIG6),
   설치본 저장/재열기 및 장시간 evidence(AIG7).
   현재 Basic Local 분해는 범용 semantic instance segmentation, 생성형 대형-hole inpaint,
   mesh warp 또는 Gemini Omni 영상 레이어 생성을 주장하지 않는다. 분해 신뢰도가
   낮으면 원본 단일 이미지 레이어로 되돌아간다.
+  제품 기본 누끼 경로는 BiRefNet-matting soft alpha와 SAM 2.1 Hiera Small
+  보조 마스크로 전환한다. 모델이 없는 환경에서는 `Auto (AI not installed)`와
+  설치 버튼을 표시하고 정상 Apply를 막는다. 사용자가 동의한 경우에만 약
+  1.3GB 모델은 `external/assets/motion_ai/models`, 선택 런타임 패키지는
+  `external/tools/motion_ai/python_packages`에 격리 설치한다.
+  GrabCut은 명시적으로 선택하는 `Legacy Basic` 호환 도구로만 유지한다.
+  박스 유도 다중 객체 분리와 의미 없는 자동 전경 제안은 구현되었지만, 박스 없이
+  객체 종류까지 판별하는 자동 발견은 선택형 로컬 검출기 또는 향후 동의형 Vision
+  공급자가 필요하다.
 
 구현 파일은 `app/motion_designer/ai_generation.py`와
 `app/motion_designer/image_decomposition.py`, provider 공용 경계는
@@ -750,20 +828,20 @@ report를 가진다. 생성형 provider의 픽셀 결과를 고정 golden으로 
 
 ### AIG4 - Candidate Preview와 선택
 
-- 2~3개 candidate
-- low-resolution preview job/cache
-- candidate strip과 실제 canvas playback
-- 선택 전 project immutability
+- [x] 2~3개 candidate
+- [x] 실제 공유 렌더러 기반 low-resolution preview job/cache
+- [x] 가로 candidate strip과 실제 canvas proposal 적용
+- [x] 선택 전 project immutability
 
 완료 조건: 후보 선택·취소·재생성에서 임시 composition과 cache가 누수되지 않음.
 
 ### AIG5 - Conversational Patch
 
-- scope-aware patch planner
-- stable layer/property/time targeting
-- diff review
-- conflict/revision 처리
-- one-transaction apply/undo
+- [x] scope-aware patch planner
+- [x] stable layer/property/time targeting
+- [x] 변경 전/후 diff review와 영향 시간 범위
+- [x] conflict/revision 처리
+- [x] one-transaction apply/undo
 
 완료 조건: 50개 한국어/영어 수정 prompt에서 범위 밖 mutation 0개.
 

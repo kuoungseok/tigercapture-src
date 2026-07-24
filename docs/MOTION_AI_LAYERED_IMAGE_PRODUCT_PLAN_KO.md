@@ -5,9 +5,14 @@
 - `LIM0~LIM2` 구현: v1 manifest/cache, Alpha·Basic Local·선택형 SAM 공급자
   계약, 마스크 무결성, 비파괴 Merge/Split/Mask Replace/Lock/Parent/Pivot/
   Z-order, Layer Graph와 첫 프레임 재합성 검증을 지원한다.
+- 한 장의 불투명 이미지에서도 `object_hints`로 지정한 인물·자동차 같은 객체를
+  이름이 유지되는 별도 GrabCut 마스크와 RGBA 레이어로 분리한다. 이 경로는
+  박스 유도 분할이다. 기본 자동 제안은 의미 없는 전경 영역이며, 사용자가 설치한
+  Ultralytics 호환 검출 모델이 있을 때만 의미 라벨을 자동 제안한다.
 - `LIM3` 로컬 경로 구현: Fast Local과 multi-scale 복원, 복원 신뢰도에 따른
   카메라 이동 제한을 적용한다. `Enhanced Local` 모델이 없으면 명시적으로 Fast
-  Local로 폴백하며 Cloud inpaint는 아직 지원하지 않는다.
+  Local로 폴백하며 Cloud inpaint는 아직 지원하지 않는다. 큰 객체 제거에서 로컬
+  복원이 부족한 경우 검수된 clean plate를 비파괴 교체할 수 있다.
 - `LIM4` 구현: OCR line 병합, 제목/본문/CTA 역할, confidence gate,
   native Typography와 raster fallback을 지원한다.
 - `LIM5` 구현: Clean/Dynamic/Collage 후보, 레이어별 방향·속도·stagger,
@@ -19,6 +24,13 @@
   시작/중간/끝 PNG 및 Dynamic MP4를 생성하는
   `tools/qa_motion_layered_images.py`를 제공한다. 설치본의 저장/재열기,
   장시간 메모리, 선택형 모델 설치 UX와 Cloud 동의 검증은 릴리스 QA로 남는다.
+- 이미지 레이어는 시간에 따라 평가되는 `tilt_x`, `tilt_y`, `perspective`를
+  지원한다. 위치·크기·Z 회전뿐 아니라 X/Y축 원근 기울임도 Preview와 MP4가 같은
+  렌더 경로를 사용한다. Image Inspector의 K 버튼, Layer Timeline 다이아몬드,
+  Graph Editor와 Action에서 이 값의 키프레임을 편집할 수 있다.
+- Edge-aware local trimap 매팅, 객체 힌트의 부모·파트·피벗 보존, 음원 비트
+  안무, 영상 optical-flow 참조를 이미지 틸트/원근 곡선으로 전이하는 경로가
+  구현됐다. 영상 참조는 카메라/레이어 모션 전이이며 인체 pose transfer가 아니다.
 
 제품 표현은 현재도 `AI-assisted editable layered motion composition`이다.
 Basic Local 결과를 범용 의미 분할 또는 모든 이미지의 완전한 자동 분해로 주장하지
@@ -94,21 +106,33 @@ AI 보조 제작 기능이다.
 | 로컬 이미지 분석 | 구현 | `app/motion_designer/image_decomposition.py` |
 | Source Alpha 사용 | 구현 | 동일 모듈 |
 | Alpha·Basic Local·선택형 SAM 공급자 계약 | 구현 | `semantic_segmentation.py` |
+| 이름·박스 기반 다중 객체 분리 | 구현 | `object_hints`, `grabcut_box_hints` |
+| 자동 전경 객체 제안 | 구현 | `object_detection.py`; 기본은 의미 없는 영역 |
+| 선택형 의미 객체 검출 | 계약 구현 | 사용자 설치 Ultralytics 모델 필요 |
+| Edge-aware alpha 매팅 | 구현 | `mask_matting.py` |
 | 연결 성분별 RGBA·마스크 생성 | 구현 | 동일 모듈 |
 | 공용 Depth Provider 연결 | 구현 | `app/depth/providers.py` |
 | Fast/multi-scale 인페인팅과 이동 제한 | 구현 | `background_inpainting.py` |
+| 검수된 clean plate 비파괴 교체 | 구현 | `image_decomposition_edits.py` |
 | OCR와 네이티브 Typography confidence gate | 구현 | `typography_reconstruction.py` |
 | Layer Graph와 비파괴 보정 | 구현 | `layer_graph.py`, `image_decomposition_edits.py` |
 | Clean/Dynamic/Collage 안무 컴파일 | 구현 | `motion_choreography.py` |
 | 투명·희소 강체 보호 | 구현 | 배경과 동일 변환으로 잠금 |
 | 이미지 분해/보정 UI와 3후보 선택 | 구현 | `ui/ai_panel.py`, `ui/layer_extraction_dialog.py` |
 | 이미지 분해·보정·안무·프리뷰 Action | 구현 | `motion.ai.layer.*`, `motion.ai.choreography.*` |
+| 객체별 2.5D X/Y축 기울임과 키프레임 | 구현 | `adapters/image.py`, `ui/image_panel.py`, `ui/timeline.py` |
+| 이미지 팔레트·오디오 비트·영상 모션 참조 | 구현 | `reference_analysis.py` |
+| 대화 이력·연속성·로컬 출처 기록 | 구현 | `ai_continuity.py` |
 | AI Brief·Storyboard·Composition 컴파일 | 1차 구현 | `ai_generation.py` |
 | Claude 등 기존 AI 계약 사용 | 구현 | `app/ai_providers.py` |
 
 현재 Basic Local 경로는 유용한 폴백이지만 의미 기반 인스턴스 분할은 아니다.
 선택형 SAM이 없거나 복잡한 콜라주에서 사람, 손, 소품, 글자와 장식을 정확히
 구분하지 못하면 보정 UI 또는 향후 동의형 Vision 공급자가 필요하다.
+현재 기본 설치에서는 AI 또는 사용자가 제공한 객체 박스를 로컬 GrabCut의
+유도 정보로 사용할 수 있다. 따라서 "한 이미지 속 지정된 캐릭터와 자동차를
+분리해 각각 움직이는 편집 가능한 2.5D 결과"는 지원하지만, 박스 없이 모든
+객체의 종류와 경계를 자동 발견하는 기능은 선택형 SAM/검출기 단계로 구분한다.
 
 ## 5. 대표 사용자 시나리오
 

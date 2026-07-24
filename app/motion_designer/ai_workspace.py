@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import hashlib
 import math
 import mimetypes
 from pathlib import Path
@@ -16,6 +17,8 @@ MOTION_AI_REQUEST_SCHEMA = "tigercapture.motion.ai.request.v1"
 MOTION_AI_PROPOSAL_SCHEMA = "tigercapture.motion.ai.proposal.v1"
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".gif", ".tif", ".tiff"}
 TEXT_EXTENSIONS = {".txt", ".md", ".markdown", ".csv", ".json", ".srt", ".vtt"}
+AUDIO_EXTENSIONS = {".wav", ".mp3", ".m4a", ".aac", ".flac", ".ogg", ".opus"}
+VIDEO_EXTENSIONS = {".mp4", ".mov", ".mkv", ".avi", ".webm", ".m4v"}
 MAX_TEXT_ATTACHMENT_CHARS = 64_000
 
 
@@ -43,7 +46,7 @@ class MotionAIReference:
     @classmethod
     def from_dict(cls, data: Mapping[str, Any]) -> "MotionAIReference":
         kind = str(data.get("kind") or "").strip().lower()
-        if kind not in {"image", "text"}:
+        if kind not in {"audio", "image", "text", "video"}:
             raise ValueError(f"unsupported Motion AI reference kind: {kind or 'empty'}")
         return cls(
             id=str(data.get("id") or new_motion_id("reference")),
@@ -127,6 +130,32 @@ class MotionAIProposal:
         )
 
 
+def reference_provenance(path: str | Path, *, kind: str) -> dict[str, Any]:
+    """Build a stable local-reference record without modifying the source."""
+    source = Path(path).expanduser().resolve()
+    stat = source.stat()
+    digest = hashlib.sha256()
+    digest.update(str(source).casefold().encode("utf-8", errors="replace"))
+    digest.update(str(int(stat.st_size)).encode("ascii"))
+    digest.update(str(int(stat.st_mtime_ns)).encode("ascii"))
+    hash_scope = "path_size_mtime"
+    if stat.st_size <= 64 * 1024 * 1024:
+        with source.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+        hash_scope = "content_and_stat"
+    return {
+        "schema": "tigerstudio.motion.asset_provenance.v1",
+        "kind": str(kind),
+        "source_uri": str(source),
+        "source_size": int(stat.st_size),
+        "source_mtime_ns": int(stat.st_mtime_ns),
+        "fingerprint": digest.hexdigest(),
+        "hash_scope": hash_scope,
+        "c2pa_signed": False,
+    }
+
+
 def reference_from_path(path: str | Path) -> MotionAIReference:
     source = Path(path).expanduser()
     if not source.is_file():
@@ -134,12 +163,31 @@ def reference_from_path(path: str | Path) -> MotionAIReference:
     suffix = source.suffix.lower()
     mime_type = mimetypes.guess_type(str(source))[0] or "application/octet-stream"
     if suffix in IMAGE_EXTENSIONS:
-        return MotionAIReference(kind="image", name=source.name, uri=str(source.resolve()), mime_type=mime_type)
+        kind = "image"
+    elif suffix in AUDIO_EXTENSIONS:
+        kind = "audio"
+    elif suffix in VIDEO_EXTENSIONS:
+        kind = "video"
+    else:
+        kind = ""
+    if kind:
+        return MotionAIReference(
+            kind=kind,
+            name=source.name,
+            uri=str(source.resolve()),
+            mime_type=mime_type,
+            metadata={"provenance": reference_provenance(source, kind=kind)},
+        )
     if suffix in TEXT_EXTENSIONS:
         with source.open("r", encoding="utf-8", errors="replace") as stream:
             text = stream.read(MAX_TEXT_ATTACHMENT_CHARS)
         return MotionAIReference(
-            kind="text", name=source.name, uri=str(source.resolve()), text=text, mime_type=mime_type,
+            kind="text",
+            name=source.name,
+            uri=str(source.resolve()),
+            text=text,
+            mime_type=mime_type,
+            metadata={"provenance": reference_provenance(source, kind="text")},
         )
     raise ValueError(f"unsupported Motion AI reference type: {source.suffix or source.name}")
 
@@ -228,6 +276,8 @@ def build_motion_ai_proposal(
     )
     images = [item for item in normalized_refs if item.kind == "image"]
     texts = [item for item in normalized_refs if item.kind == "text" and item.text.strip()]
+    audio = [item for item in normalized_refs if item.kind == "audio"]
+    video = [item for item in normalized_refs if item.kind == "video"]
     warnings: list[str] = []
     layers: list[MotionLayer] = []
     behavior = _prompt_behavior(request.prompt, composition.duration_ms)
@@ -280,7 +330,8 @@ def build_motion_ai_proposal(
     if not layers:
         warnings.append("No layer-ready image or quoted/text reference was supplied; the request remains context-only.")
     summary = (
-        f"Prepared {len(layers)} layer(s) from {len(images)} image and {len(texts)} text reference(s)."
+        f"Prepared {len(layers)} layer(s) from {len(images)} image, "
+        f"{len(texts)} text, {len(audio)} audio, and {len(video)} video reference(s)."
     )
     from .ai_planner import analyze_motion_ai_layers
 
@@ -325,4 +376,26 @@ def apply_motion_ai_proposal(
     report = validate_composition(candidate)
     if not report.ok:
         raise ValueError(report.issues[0].message)
+    from .ai_continuity import (
+        record_motion_ai_event,
+        validate_motion_continuity,
+    )
+
+    continuity = validate_motion_continuity(composition, candidate)
+    if not continuity["ok"]:
+        raise ValueError(continuity["issues"][0]["message"])
+    record_motion_ai_event(
+        candidate,
+        event_type="proposal_apply",
+        prompt=str(generation.get("prompt") or "") if isinstance(generation, Mapping) else "",
+        provider=normalized.provider,
+        base_revision=composition.revision,
+        reference_provenance=normalized.analysis.get("reference_provenance", []),
+        details={
+            "proposal_id": normalized.id,
+            "request_id": normalized.request_id,
+            "added_layer_count": len(normalized.layers),
+        },
+        continuity=continuity,
+    )
     return candidate

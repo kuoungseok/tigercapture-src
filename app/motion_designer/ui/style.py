@@ -94,6 +94,24 @@ QListWidget#MotionAIReferences {
   background: #15181d; border: 1px dashed #3d4651; border-radius: 3px;
   padding: 2px; selection-background-color: #2d5368;
 }
+QListWidget#MotionAICandidateStrip {
+  background: #121419; border: 1px solid #30353d; border-radius: 3px;
+  padding: 3px; selection-background-color: #294f63;
+}
+QListWidget#MotionAICandidateStrip::item {
+  background: #171a1f; border: 1px solid #30353d; border-radius: 2px;
+  margin-right: 3px; padding: 3px;
+}
+QListWidget#MotionAICandidateStrip::item:selected {
+  background: #294f63; border-color: #62a0ba;
+}
+QWidget#MotionAIPatchDiff {
+  background: #121419; border-top: 1px solid #30353d;
+}
+QWidget#MotionAIPatchDiff QTreeWidget {
+  background: #121419; alternate-background-color: #171a1f;
+  color: #d7dbe1; border: 1px solid #30353d;
+}
 QLabel#MotionAIHeading { color: #f0f2f5; font-weight: 700; }
 QLabel#MotionAIStatus { color: #76b4cb; font-size: 10px; }
 QLabel#MotionAIHint { color: #7e8792; font-size: 10px; }

@@ -253,6 +253,10 @@ def test_motion_ai_panel_builds_reviewable_multimodal_draft_and_undoes(tmp_path)
     window.ai.prompt.insertFromMimeData(text_mime)
     assert "MOTION AI" in window.ai.prompt.toPlainText()
     window.ai.advanced_button.setChecked(True)
+    window.ai.extraction.segmentation.setCurrentIndex(
+        window.ai.extraction.segmentation.findData("basic")
+    )
+    window.ai.extraction.auto_detect.setChecked(False)
     window.ai.request_plan()
     assert window.ai._proposal is None
     loop = QEventLoop()
@@ -268,7 +272,8 @@ def test_motion_ai_panel_builds_reviewable_multimodal_draft_and_undoes(tmp_path)
     poll.stop()
     assert window.ai._proposal is not None
     assert window.ai.candidate_selector.count() == 3
-    assert window.ai.candidate_selector.isVisibleTo(window.ai)
+    assert window.ai.candidate_strip.count() == 3
+    assert window.ai.candidate_strip.isVisibleTo(window.ai)
     assert window.ai.apply_button.isEnabled()
     assert len(window.ai._proposal["layers"]) >= 2
     assert "Preflight:" in window.ai.result.toPlainText()

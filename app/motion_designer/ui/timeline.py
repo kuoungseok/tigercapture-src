@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QSplitter, QToolButton, QVBoxLayout, QWidget,
 )
 
-from app.motion_designer.schema import MotionComposition
+from app.motion_designer.schema import AnimatedProperty, MotionComposition
 from app.icons import app_icon
 
 from .graph_editor import GraphEditor
@@ -92,6 +92,9 @@ class MotionTimeline(QWidget):
             ("position", "Position"), ("scale", "Scale"),
             ("rotation", "Rotation"), ("opacity", "Opacity"),
             ("anchor", "Anchor Point"),
+            ("source:tilt_x", "Image Tilt X"),
+            ("source:tilt_y", "Image Tilt Y"),
+            ("source:perspective", "Image Perspective"),
         ):
             item = QListWidgetItem(label)
             item.setData(Qt.UserRole, key)
@@ -156,7 +159,15 @@ class MotionTimeline(QWidget):
                 None,
             )
             if layer is not None:
-                prop = layer.transform.properties().get(property_name)
+                if property_name.startswith("source:") and layer.layer_type == "image":
+                    source_name = property_name.split(":", 1)[1]
+                    current = layer.source.params.get(source_name)
+                    if isinstance(current, dict) and (
+                        "default" in current or "keyframes" in current
+                    ):
+                        prop = AnimatedProperty.from_dict(current)
+                else:
+                    prop = layer.transform.properties().get(property_name)
         duration_ms = self._composition.duration_ms if self._composition is not None else 1
         self.graph_editor.set_property(prop, duration_ms=duration_ms)
 

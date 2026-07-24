@@ -4,7 +4,7 @@ from PySide6.QtCore import QPointF, QRectF, Qt, Signal
 from PySide6.QtGui import QColor, QMouseEvent, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QWidget
 
-from app.motion_designer.schema import MotionComposition, MotionLayer
+from app.motion_designer.schema import AnimatedProperty, MotionComposition, MotionLayer
 
 
 LAYER_COLORS = {
@@ -105,6 +105,17 @@ class LayerTimelineView(QWidget):
                 for prop in layer.transform.properties().values()
                 for key in prop.keyframes
             }
+            if layer.layer_type == "image":
+                for name in ("tilt_x", "tilt_y", "perspective"):
+                    value = layer.source.params.get(name)
+                    if not isinstance(value, dict) or (
+                        "default" not in value and "keyframes" not in value
+                    ):
+                        continue
+                    prop = AnimatedProperty.from_dict(value)
+                    key_times.update(
+                        layer.in_ms + key.time_ms for key in prop.keyframes
+                    )
             for key_time in key_times:
                 x = self._x(key_time)
                 y = top + self.ROW_HEIGHT * .5

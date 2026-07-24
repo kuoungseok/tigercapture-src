@@ -740,7 +740,18 @@ Start here when changing a feature:
   GPU backend is available, Texture Lab must show a GPU-required state instead
   of silently choosing CPU fallback or implying GPU acceleration. The legacy CPU
   path remains useful for small deterministic tests and offline diagnostics, not
-  for the normal interactive product path. GPU preview composition is owned by
+  for the normal interactive product path. Texture Lab also follows
+  TigerStudio's first-use automation policy: the
+  `Install GPU` control opens an in-app progress/log dialog, runs the current
+  TigerCapture virtual environment through `python -m pip install torch
+  torchvision --index-url https://download.pytorch.org/whl/cu128`, verifies
+  `torch.cuda.is_available()` in the same venv, and automatically selects
+  `TIGERCAPTURE_TEXTURE_LAB_BACKEND=torch_cuda` for the running process when
+  verification succeeds. The dialog must make clear that RTX/OpenGL AR/PBR
+  preview working does not prove the PyTorch CUDA map-generation backend is
+  installed; these are separate GPU paths. Completion must be explicit, with
+  the close button enabled only after success, failure, or cancellation.
+  GPU preview composition is owned by
   `app.ar_pbr.texture_map_gpu_preview`, an offscreen OpenGL fragment-shader
   compositor that samples Base/Normal/AO/Roughness/Metallic and packed map
   channels for plane/sphere previews. PNG/action outputs may read the rendered
@@ -5649,6 +5660,11 @@ AI Script Edit MVP integration:
   Position, Scale, Rotation, Opacity, and Anchor Point and dragging a graph
   keyframe updates the shared composition document through the same undoable
   controller used by the inspector and AI actions.
+- Image layers expose `tilt_x`, `tilt_y`, and `perspective` beside ordinary
+  transform controls. Each control can create source-parameter keyframes; the
+  Layer Timeline paints their diamonds and the Graph panel edits their curves
+  through the same document controller. Changing a static value preserves
+  existing source keyframes instead of replacing the animated property.
 - The timeline transport is fixed immediately left of the timecode and exposes
   visible start, reverse-play, stop, forward-play, loop, and end controls.
   Forward and reverse playback use elapsed wall time; non-looping playback
@@ -5921,8 +5937,8 @@ AI Script Edit MVP integration:
   tangent. These edits use the document controller and remain undoable.
 - Motion Designer includes a dockable multimodal `AI Workspace` implemented by
   `app/motion_designer/ui/ai_panel.py`. One prompt surface accepts typed or
-  dropped text, local image/text files, and pasted clipboard images. Image
-  references remain visible as removable thumbnails. `Plan` creates a
+  dropped text, local image/text/audio/video files, and pasted clipboard images.
+  References remain visible as removable items. `Plan` creates a
   reviewable proposal without mutating the composition; `Apply` commits all
   proposed layers as one document-controller undo step.
 - The shared Qt-free request/proposal contract is
@@ -5940,23 +5956,111 @@ AI Script Edit MVP integration:
   `motion.ai.brief.create`, `motion.ai.storyboard.generate`,
   `motion.ai.candidate.generate`, `motion.ai.candidates.generate`,
   `motion.ai.candidate.preview`, `motion.ai.layer.*`,
-  `motion.ai.background.inpaint`, `motion.ai.text.reconstruct`,
+  `motion.ai.background.inpaint`, `motion.ai.background.replace`,
+  `motion.ai.text.reconstruct`,
   `motion.ai.choreography.plan/apply`, `motion.ai.integrity.validate`,
-  `motion.ai.patch.plan`, and `motion.ai.patch.apply`.
+  `motion.ai.patch.plan`, `motion.ai.patch.apply`,
+  `motion.ai.provenance.inspect`, and `motion.ai.continuity.validate`.
+  Image source automation uses `motion.image.param.set`,
+  `motion.image.param.keyframe.set`, and
+  `motion.image.param.keyframe.delete`.
   Candidate generation does not change the composition;
   candidate apply or patch apply is reviewed and committed as one revision.
   Patch plans are restricted to registered layer IDs and the allowlisted text,
-  timing, transform, behavior, and visibility operations, with stale-revision
-  rejection. Layered-image generation uses source alpha, Basic Local, or
+  timing, transform, image-source parameter, behavior, and visibility
+  operations, with stale-revision rejection. Layered-image generation uses
+  source alpha, Basic Local, or
   optional SAM segmentation behind one provider contract; mask integrity,
   background reconstruction limits, OCR confidence gates, parent/rigid/pivot/
   z-order graph data, and first-frame reconstruction validation are recorded in
   the regenerable manifest. The AI dock creates selectable Clean, Dynamic, and
-  Collage treatments off the UI thread. `Refine Layers` supports original/
+  Collage treatments off the UI thread and presents them in a horizontal
+  candidate strip. Representative frames and thumbnails are rendered through
+  the shared Motion renderer and reused from a content-hashed preview cache.
+  Follow-up prompts produce a scope-aware patch diff with before/after values,
+  reasons, affected layers, and affected time range before one-revision apply.
+  `Refine Layers` supports original/
   reconstruction comparison, add/remove mask brush, merge/split, lock,
   parenting, pivot, and ordering, then recompiles only the reviewed candidate
   before the existing single Apply/Undo transaction.
   Basic Local is not claimed as universal semantic instance segmentation.
+  When `auto_detect_objects` is enabled without a configured local semantic
+  detector, OpenCV proposes reviewable generic foreground regions only. It
+  does not invent character, limb, product, or vehicle labels. A user-installed
+  Ultralytics-compatible checkpoint can provide semantic labels through
+  `TIGERSTUDIO_OBJECT_DETECTOR_MODEL`; Tiger Studio never downloads that model
+  implicitly.
+  A decomposition request can carry named normalized `object_hints`, including
+  optional foreground/background points. Basic Local runs an independent
+  GrabCut pass for each box, preserves reviewed disconnected components such
+  as legs or accessories, and retains labels plus optional parent, part, rigid,
+  and pivot data in separate editable RGBA/mask layers. This enables reviewed
+  part rigs without heuristic limb naming. Edge-aware local trimap matting
+  preserves soft boundary alpha; it is
+  not claimed as learned hair matting. A reviewed
+  clean background plate can replace weak large-hole local inpainting through
+  `motion.ai.background.replace`. Image layers evaluate animatable `tilt_x`,
+  `tilt_y`, and `perspective` source parameters in the shared Preview/Export
+  renderer, providing independent X/Y perspective tilt in addition to normal
+  position, scale, and Z rotation.
+  Motion AI now treats OpenCV GrabCut as an explicit `Legacy Basic`
+  compatibility mode rather than the normal quality path. The recommended
+  local stack is BiRefNet-matting for automatic soft-alpha cutout and SAM 2.1
+  Hiera Small for point/box-assisted masks. Their readiness contract lives in
+  `app.motion_designer.segmentation_setup`; models are stored durably under
+  `external/assets/motion_ai/models` and optional Python packages under
+  `external/tools/motion_ai/python_packages`, never `debugCapture`. The
+  installer does not modify the editor's primary Python package directory.
+  When either model
+  is unavailable, the Motion UI labels it `not installed`, exposes a
+  consent-gated `Install cutout AI` action, and blocks normal Auto apply
+  instead of silently presenting GrabCut as an AI result. Installation plans
+  and status are also exposed through
+  `motion.ai.segmentation.setup.status/plan/install`; install requires explicit
+  `confirm=true`.
+  Every extracted RGBA foreground is evaluated by the shared
+  `tigerstudio.motion.cutout_quality.v1` contract before it can be compiled
+  into independently animated Motion layers. The deterministic gate rejects
+  empty or fully opaque plates, near-full-frame foreground masks, and long
+  low-contrast alpha boundaries that remain connected to the source
+  background. Bright neutral edge spill, detached fragments, and source-frame
+  crop risk remain explicit review warnings because they cannot be classified
+  semantically with certainty. Cached decompositions and every manual
+  merge/split/mask edit are reevaluated under the current contract. Failed
+  extraction remains visible and repairable in the layer-review UI, but its
+  repaired-layer Apply action stays disabled and normal choreography compile
+  fails before the bad cutout reaches Preview or Export. Automation can inspect
+  the same report through `motion.ai.cutout.quality.validate`; bypass requires
+  the explicit `allow_quality_override=true` argument and is never implicit.
+  Reviewed, separated body parts can be converted into an editable 2D cutout
+  arm rig through the Motion toolbar `Rig > Arm Wave...` or Python Action
+  `motion.cutout_rig.arm_wave.create`. The contract uses four aligned
+  transparent layers (torso, upper arm, forearm, hand), composition-pixel
+  shoulder/elbow/wrist pivots, and a torso -> upper arm -> forearm -> hand FK
+  hierarchy. It writes ordinary anchor, parent, and rotation keyframes for
+  lift, repeated wave, and lower phases, so the result remains editable and
+  uses the same hierarchy evaluation in Preview and Export. This is rigid 2D
+  cutout articulation; it does not claim Live2D mesh deformation, automatic
+  limb recognition, inverse kinematics, or hidden-joint texture synthesis.
+  `motion.cut_paper.create` separately creates an editable five-layer
+  cut-paper treatment with a hole matte, released paper piece, edge shadow,
+  trimmed fiber line, and path-following scissors.
+  Audio references are decoded by the existing deterministic analyzer and
+  contribute beat markers to generated choreography. Video references are
+  sampled by OpenCV Farneback flow; restrained camera/layer motion is converted
+  to editable image tilt/perspective curves. This is not body-pose or character
+  performance transfer. Image references expose a deterministic palette,
+  luminance, and orientation profile; generated native title cards and text
+  derive restrained foreground/background colors from that profile. This is
+  palette-and-tone transfer, not identity or full visual-style synthesis.
+  Proposal and scoped-patch application append bounded conversation history,
+  preserve existing layer/source/reference identity, validate hierarchy and
+  timing continuity, and record local reference fingerprints in composition
+  metadata. The manifest is inspectable but is not cryptographically C2PA
+  signed. External image/video generation can feed its output back through the
+  same reference contract, but the base installation does not claim Gemini
+  Omni-equivalent pixel generation, arbitrary object insertion, environment
+  synthesis, or physical-scene generation.
   Missing SAM or enhanced inpainting reports an explicit local fallback;
   cloud image transfer is not performed without a future consented provider.
   The detailed product boundary and QA corpus are defined in
@@ -5993,6 +6097,11 @@ AI Script Edit MVP integration:
   `QOpenGLWidget` capture support.
   The same tool captures the real docked AI workspace with an actual attached
   frame, generated proposal, applied layers, and undo-capable document state.
+- `tools/qa_motion_ai_review_ui.py` opens the actual Motion Designer window,
+  generates three candidate compositions, renders and caches their thumbnail
+  previews, applies one candidate, and displays a conversational patch with
+  before/after values and affected time range. Candidate application and patch
+  application remain separate reviewable document revisions.
 - `tools/qa_motion_gpu_vector.py` opens a real Windows desktop OpenGL context,
   captures the linked-Boolean scene in the actual Preview tab, requires the
   `motion_vector_gpu` backend with zero GL errors, verifies stable VBO upload

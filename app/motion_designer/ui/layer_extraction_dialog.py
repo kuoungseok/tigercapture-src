@@ -66,6 +66,11 @@ class LayerExtractionDialog(QDialog):
             "beat_id": str(decomposition.get("beat_id") or ""),
         }
         self._result = ImageDecompositionResult.from_dict(decomposition)
+        from app.motion_designer.cutout_quality import (
+            evaluate_decomposition_cutout_quality,
+        )
+
+        evaluate_decomposition_cutout_quality(self._result)
 
         root = QVBoxLayout(self)
         splitter = QSplitter(Qt.Horizontal, self)
@@ -175,14 +180,14 @@ class LayerExtractionDialog(QDialog):
         right_layout.addStretch(1)
         splitter.setSizes([220, 600, 190])
 
-        buttons = QDialogButtonBox(
+        self.buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel,
             parent=self,
         )
-        buttons.button(QDialogButtonBox.Ok).setText("Use Repaired Layers")
-        buttons.accepted.connect(self.accept)
-        buttons.rejected.connect(self.reject)
-        root.addWidget(buttons)
+        self.buttons.button(QDialogButtonBox.Ok).setText("Use Repaired Layers")
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        root.addWidget(self.buttons)
         self._refresh()
 
     def result_dict(self) -> dict:
@@ -241,10 +246,20 @@ class LayerExtractionDialog(QDialog):
             self.layers.setCurrentRow(0)
         self._load_selected_mask()
         validation = self._result.diagnostics.get("validation", {})
+        quality = self._result.diagnostics.get("cutout_quality", {})
+        accepted = bool(quality.get("accepted"))
+        quality_status = str(quality.get("status") or "unavailable")
         self.status.setText(
             f"{len(self._result.elements)} layers / "
+            f"cutout {quality_status} / "
             f"integrity {'passed' if validation.get('ok') else 'review required'}"
+            + (
+                " / Fix the mask before use."
+                if not accepted
+                else ""
+            )
         )
+        self.buttons.button(QDialogButtonBox.Ok).setEnabled(accepted)
 
     def _load_selected_mask(self, *_args) -> None:
         element = self._selected_visual()

@@ -181,6 +181,26 @@ def validate_decomposition_result(result: Any) -> ImageMotionValidationReport:
             errors.append(f"Mask asset is missing for {_value(item, 'id', '')}.")
 
     diagnostics = dict(_value(result, "diagnostics", {}) or {})
+    cutout_quality = diagnostics.get("cutout_quality")
+    if isinstance(cutout_quality, Mapping):
+        if not bool(cutout_quality.get("accepted")):
+            blocker_codes = [
+                str(item.get("code") or "quality_failure")
+                for item in cutout_quality.get("blockers", [])
+                if isinstance(item, Mapping)
+            ]
+            errors.append(
+                "Cutout quality gate rejected the decomposition"
+                + (
+                    ": " + ", ".join(dict.fromkeys(blocker_codes))
+                    if blocker_codes
+                    else "."
+                )
+            )
+        if bool(cutout_quality.get("requires_review")):
+            warnings.append(
+                "Cutout quality requires visual review for edge spill or source-frame cropping."
+            )
     graph = diagnostics.get("layer_graph")
     if isinstance(graph, Mapping):
         from .layer_graph import validate_layer_graph

@@ -8,6 +8,7 @@ import pytest
 from app.motion_designer.image_decomposition import decompose_image
 from app.motion_designer.image_decomposition_edits import (
     merge_decomposition_elements,
+    replace_decomposition_background,
     replace_decomposition_element_mask,
     set_decomposition_lock,
     set_decomposition_parent,
@@ -99,7 +100,12 @@ def test_manual_mask_replacement_rebuilds_rgba_and_integrity(tmp_path: Path) -> 
     assert edited.metadata["manual_mask_revision"] is True
     assert edited.bbox[2] > target.bbox[2]
     assert Path(edited.rgba_path).is_file()
-    assert changed.diagnostics["validation"]["ok"] is True
+    assert changed.diagnostics["validation"]["ok"] is False
+    assert changed.diagnostics["cutout_quality"]["accepted"] is False
+    assert any(
+        item["code"] == "background_connected_to_subject"
+        for item in changed.diagnostics["cutout_quality"]["blockers"]
+    )
 
 
 def test_pivot_and_z_order_edits_survive_graph_refresh(tmp_path: Path) -> None:
@@ -119,3 +125,24 @@ def test_pivot_and_z_order_edits_survive_graph_refresh(tmp_path: Path) -> None:
     )
     reordered_target = next(item for item in reordered.elements if item.id == target.id)
     assert reordered_target.metadata["z_order"] == 99
+
+
+def test_reviewed_background_plate_replaces_generated_inpaint(tmp_path: Path) -> None:
+    result = _decomposition(tmp_path)
+    replacement = Image.new("RGB", (640, 360), (14, 92, 61))
+    replacement_path = tmp_path / "reviewed_background.png"
+    replacement.save(replacement_path)
+
+    changed = replace_decomposition_background(
+        result,
+        replacement_path,
+        provider="reviewed_clean_plate",
+    )
+
+    output = Path(changed.background_path)
+    assert output.is_file()
+    assert Image.open(output).convert("RGB").getpixel((160, 90)) == (14, 92, 61)
+    assert changed.diagnostics["edited"] is True
+    assert changed.diagnostics["edit_operation"]["kind"] == "background_replace"
+    assert changed.diagnostics["inpaint"]["provider"] == "reviewed_clean_plate"
+    assert changed.diagnostics["validation"]["ok"] is True

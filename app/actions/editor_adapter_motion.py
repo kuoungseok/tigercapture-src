@@ -16,6 +16,8 @@ from app.motion_designer.timeline_bridge import duplicate_motion_clip, split_mot
 
 
 class MotionAdapterMixin:
+    _MOTION_IMAGE_PARAMS = {"tilt_x", "tilt_y", "perspective"}
+
     def _motion_clip_store(self) -> list[dict[str, Any]]:
         owner = self._require_owner()
         clips = getattr(owner, "_motion_clips", None)
@@ -146,6 +148,114 @@ class MotionAdapterMixin:
         self._motion_commit(service)
         return result.to_dict()
 
+    def motion_cut_paper_create(
+        self,
+        *,
+        composition_id: str,
+        layer_id: str,
+        center_x: float,
+        center_y: float,
+        radius_x: float,
+        radius_y: float,
+        start_ms: int,
+        cut_duration_ms: int = 1400,
+        release_duration_ms: int = 700,
+        seed: int = 17,
+    ) -> dict[str, Any]:
+        from app.motion_designer.cut_paper import build_cut_paper_rig
+
+        composition = self._motion_store().get(str(composition_id))
+        if composition is None:
+            raise ValueError(f"motion composition not found: {composition_id}")
+        source = find_layer(composition, str(layer_id))
+        if source.layer_type not in {"image", "video"}:
+            raise ValueError("cut paper requires an image or video source layer")
+        if float(radius_x) <= 0.0 or float(radius_y) <= 0.0:
+            raise ValueError("cut paper radii must be positive")
+        rig = build_cut_paper_rig(
+            composition,
+            source,
+            center_x=float(center_x),
+            center_y=float(center_y),
+            radius_x=float(radius_x),
+            radius_y=float(radius_y),
+            start_ms=int(start_ms),
+            cut_duration_ms=int(cut_duration_ms),
+            release_duration_ms=int(release_duration_ms),
+            seed=int(seed),
+        )
+        insert_at = composition.layers.index(source) + 1
+        composition.layers[insert_at:insert_at] = rig.layers
+        composition.revision += 1
+        return {
+            "changed": True,
+            "undo_label": "Create Cut Paper Rig",
+            "composition_id": composition.id,
+            "source_layer_id": source.id,
+            "revision": composition.revision,
+            **rig.to_dict(),
+        }
+
+    def motion_cutout_arm_wave_create(
+        self,
+        *,
+        composition_id: str,
+        torso_layer_id: str,
+        upper_arm_layer_id: str,
+        forearm_layer_id: str,
+        hand_layer_id: str,
+        shoulder: list[float],
+        elbow: list[float],
+        wrist: list[float],
+        start_ms: int,
+        end_ms: int,
+        side: str = "right",
+        cycles: int = 3,
+    ) -> dict[str, Any]:
+        from app.motion_designer.cutout_rig import ArmJointLayout, apply_arm_wave_rig
+
+        composition = self._motion_store().get(str(composition_id))
+        if composition is None:
+            raise ValueError(f"motion composition not found: {composition_id}")
+        points = (shoulder, elbow, wrist)
+        if any(not isinstance(point, (list, tuple)) or len(point) < 2 for point in points):
+            raise ValueError("shoulder, elbow, and wrist require [x, y] coordinates")
+        layers = [
+            find_layer(composition, layer_id)
+            for layer_id in (
+                torso_layer_id,
+                upper_arm_layer_id,
+                forearm_layer_id,
+                hand_layer_id,
+            )
+        ]
+        if len({layer.id for layer in layers}) != 4:
+            raise ValueError("cutout arm rig requires four different layers")
+        report = apply_arm_wave_rig(
+            composition,
+            torso=layers[0],
+            upper_arm=layers[1],
+            forearm=layers[2],
+            hand=layers[3],
+            joints=ArmJointLayout(
+                shoulder=(float(shoulder[0]), float(shoulder[1])),
+                elbow=(float(elbow[0]), float(elbow[1])),
+                wrist=(float(wrist[0]), float(wrist[1])),
+            ),
+            start_ms=int(start_ms),
+            end_ms=int(end_ms),
+            side=str(side),
+            cycles=int(cycles),
+        )
+        composition.revision += 1
+        return {
+            "changed": True,
+            "undo_label": "Create Cutout Arm Wave",
+            "composition_id": composition.id,
+            "revision": composition.revision,
+            **report,
+        }
+
     def motion_keyframe_set(self, *, composition_id: str, layer_id: str, property_name: str,
                             keyframe: Mapping[str, Any]) -> dict[str, Any]:
         composition = self._motion_store().get(composition_id)
@@ -156,6 +266,121 @@ class MotionAdapterMixin:
 
     def motion_keyframe_add(self, **params: Any) -> dict[str, Any]:
         return self.motion_keyframe_set(**params)
+
+    def motion_image_param_set(
+        self,
+        *,
+        composition_id: str,
+        layer_id: str,
+        parameter_name: str,
+        value: Any,
+    ) -> dict[str, Any]:
+        composition = self._motion_store().get(str(composition_id))
+        if composition is None:
+            raise ValueError(f"motion composition not found: {composition_id}")
+        layer = find_layer(composition, layer_id)
+        if layer.layer_type != "image":
+            raise ValueError("motion image parameters require an image layer")
+        name = str(parameter_name or "").strip()
+        if name not in self._MOTION_IMAGE_PARAMS:
+            raise ValueError(f"unsupported motion image parameter: {name}")
+        current = layer.source.params.get(name)
+        if isinstance(current, Mapping) and (
+            "default" in current or "keyframes" in current
+        ):
+            prop = AnimatedProperty.from_dict(current)
+            prop.default = float(value)
+            layer.source.params[name] = prop.to_dict()
+        else:
+            layer.source.params[name] = float(value)
+        composition.revision += 1
+        self._motion_sync_owner()
+        return {
+            "changed": True,
+            "undo_label": "Set Motion Image Parameter",
+            "parameter_name": name,
+            "value": float(value),
+            "revision": composition.revision,
+        }
+
+    def motion_image_param_keyframe_set(
+        self,
+        *,
+        composition_id: str,
+        layer_id: str,
+        parameter_name: str,
+        keyframe: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        composition = self._motion_store().get(str(composition_id))
+        if composition is None:
+            raise ValueError(f"motion composition not found: {composition_id}")
+        layer = find_layer(composition, layer_id)
+        if layer.layer_type != "image":
+            raise ValueError("motion image parameters require an image layer")
+        name = str(parameter_name or "").strip()
+        if name not in self._MOTION_IMAGE_PARAMS:
+            raise ValueError(f"unsupported motion image parameter: {name}")
+        current = layer.source.params.get(name, 2.6 if name == "perspective" else 0.0)
+        prop = (
+            AnimatedProperty.from_dict(current)
+            if isinstance(current, Mapping)
+            and ("default" in current or "keyframes" in current)
+            else AnimatedProperty(value_type="scalar", default=float(current))
+        )
+        frame = Keyframe.from_dict(keyframe)
+        frame.value = float(frame.value)
+        prop.keyframes = [
+            item
+            for item in prop.keyframes
+            if item.id != frame.id and item.time_ms != frame.time_ms
+        ]
+        prop.keyframes.append(frame)
+        prop.keyframes.sort(key=lambda item: (item.time_ms, item.id))
+        layer.source.params[name] = prop.to_dict()
+        composition.revision += 1
+        self._motion_sync_owner()
+        return {
+            "changed": True,
+            "undo_label": "Set Motion Image Parameter Keyframe",
+            "parameter_name": name,
+            "keyframe": frame.to_dict(),
+            "revision": composition.revision,
+        }
+
+    def motion_image_param_keyframe_delete(
+        self,
+        *,
+        composition_id: str,
+        layer_id: str,
+        parameter_name: str,
+        keyframe_id: str,
+    ) -> dict[str, Any]:
+        composition = self._motion_store().get(str(composition_id))
+        if composition is None:
+            raise ValueError(f"motion composition not found: {composition_id}")
+        layer = find_layer(composition, layer_id)
+        name = str(parameter_name or "").strip()
+        if layer.layer_type != "image" or name not in self._MOTION_IMAGE_PARAMS:
+            raise ValueError("unknown motion image parameter")
+        current = layer.source.params.get(name)
+        if not isinstance(current, Mapping):
+            raise ValueError("motion image parameter has no keyframes")
+        prop = AnimatedProperty.from_dict(current)
+        before = len(prop.keyframes)
+        prop.keyframes = [
+            item for item in prop.keyframes if item.id != str(keyframe_id)
+        ]
+        if len(prop.keyframes) == before:
+            raise ValueError(f"motion image keyframe not found: {keyframe_id}")
+        layer.source.params[name] = prop.to_dict()
+        composition.revision += 1
+        self._motion_sync_owner()
+        return {
+            "changed": True,
+            "undo_label": "Delete Motion Image Parameter Keyframe",
+            "parameter_name": name,
+            "revision": composition.revision,
+        }
 
     def motion_keyframe_update(self, *, composition_id: str, layer_id: str, property_name: str,
                                keyframe_id: str, changes: Mapping[str, Any]) -> dict[str, Any]:

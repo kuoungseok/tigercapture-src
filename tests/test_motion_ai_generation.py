@@ -13,10 +13,13 @@ from app.motion_designer.ai_generation import (
     apply_motion_ai_patch,
     build_deterministic_generation_plan,
     compile_generation_plan,
+    generate_motion_ai_candidates,
     generate_motion_ai_patch,
     generate_motion_ai_proposal,
     validate_motion_generation_plan,
 )
+from app.motion_designer.candidate_preview import render_candidate_preview_set
+from app.motion_designer.ai_patch_diff import build_motion_ai_patch_diff
 from app.motion_designer.ai_workspace import MotionAIReference, apply_motion_ai_proposal
 from app.motion_designer.schema import MotionComposition
 
@@ -55,6 +58,41 @@ def test_shared_provider_json_contract_returns_validated_safe_baseline() -> None
     assert result.provider == "rule_based"
     assert result.payload == baseline
     assert result.metadata["effective_generation_provider"] == "rule_based"
+
+
+def test_candidate_preview_set_renders_real_frames_and_reuses_cache(tmp_path) -> None:
+    composition = MotionComposition(
+        width=320,
+        height=180,
+        duration_ms=1200,
+    )
+    proposals = [
+        item.to_dict()
+        for item in generate_motion_ai_candidates(
+            composition,
+            "Energetic TIGER title",
+            [],
+            provider_id="rule_based",
+        )
+    ]
+
+    first = render_candidate_preview_set(
+        composition,
+        proposals,
+        cache_root=tmp_path / "candidate_cache",
+        thumbnail_size=(128, 72),
+    )
+    assert len(first["previews"]) == 3
+    assert all(Path(item["thumbnail_path"]).is_file() for item in first["previews"])
+    assert not any(item["cache_hit"] for item in first["previews"])
+
+    second = render_candidate_preview_set(
+        composition,
+        proposals,
+        cache_root=tmp_path / "candidate_cache",
+        thumbnail_size=(128, 72),
+    )
+    assert all(item["cache_hit"] for item in second["previews"])
 
 
 def test_motion_generation_compiles_storyboard_to_editable_layers() -> None:
@@ -127,6 +165,15 @@ def test_motion_patch_is_layer_scoped_and_applies_as_one_revision() -> None:
         provider_id="rule_based",
     )
     assert {item["layer_id"] for item in patch["operations"]} == {text_layer.id}
+    diff = build_motion_ai_patch_diff(composition, patch)
+    assert diff["operation_count"] == len(patch["operations"])
+    assert diff["affected_layer_ids"] == [text_layer.id]
+    assert any(
+        item["property"] == "Text"
+        and item["before"] == "Before"
+        and item["after"] == "After"
+        for item in diff["rows"]
+    )
     changed = apply_motion_ai_patch(composition, patch)
     updated = next(layer for layer in changed.layers if layer.id == text_layer.id)
     assert changed.revision == composition.revision + 1
@@ -199,7 +246,12 @@ def test_motion_ai_generation_actions_expose_review_before_apply_contract(tmp_pa
     action_ids = {item["id"] for item in registry.list_actions()}
     assert {
         "motion.ai.provider.status",
+        "motion.ai.segmentation.setup.status",
+        "motion.ai.segmentation.setup.plan",
+        "motion.ai.segmentation.setup.install",
         "motion.ai.reference.analyze",
+        "motion.ai.provenance.inspect",
+        "motion.ai.continuity.validate",
         "motion.ai.reference.decompose",
         "motion.ai.layer.analyze",
         "motion.ai.layer.segment",
@@ -209,6 +261,7 @@ def test_motion_ai_generation_actions_expose_review_before_apply_contract(tmp_pa
         "motion.ai.layer.lock",
         "motion.ai.layer.group",
         "motion.ai.background.inpaint",
+        "motion.ai.background.replace",
         "motion.ai.text.reconstruct",
         "motion.ai.choreography.plan",
         "motion.ai.integrity.validate",

@@ -13,6 +13,7 @@ class MotionToolbar(QToolBar):
     add_layer_requested = Signal(str)
     behavior_requested = Signal(str)
     effect_requested = Signal(str)
+    rig_requested = Signal(str)
     delete_requested = Signal()
     duplicate_requested = Signal()
     undo_requested = Signal()
@@ -49,6 +50,10 @@ class MotionToolbar(QToolBar):
         ))
         self.addWidget(self._menu_button(
             "Filters", QStyle.SP_DialogApplyButton, FILTER_ITEMS, self.effect_requested,
+        ))
+        self.addWidget(self._menu_button(
+            "Rig", QStyle.SP_FileDialogDetailedView,
+            (("Arm Wave...", "arm_wave"),), self.rig_requested,
         ))
         self.addSeparator()
         self.ai_action = QAction(

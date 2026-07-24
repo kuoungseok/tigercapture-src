@@ -75,12 +75,22 @@ def _refresh_graph_and_validation(
         "edit_operation": dict(operation),
         "layer_graph": graph.to_dict(),
     }
+    from .cutout_quality import evaluate_decomposition_cutout_quality
+
+    quality = evaluate_decomposition_cutout_quality(result)
     from .image_motion_validation import validate_decomposition_result
 
     validation = validate_decomposition_result(result)
     result.diagnostics["validation"] = validation.to_dict()
     result.diagnostics["warnings"] = list(dict.fromkeys([
         *[str(item) for item in result.diagnostics.get("warnings", [])],
+        *[
+            f"Cutout quality {item['severity']}: {item['message']} ({item['element_id']})"
+            for item in [
+                *quality.get("blockers", []),
+                *quality.get("warnings", []),
+            ]
+        ],
         *validation.warnings,
         *[f"Validation error: {item}" for item in validation.errors],
     ]))
@@ -525,9 +535,51 @@ def set_decomposition_z_order(
     )
 
 
+def replace_decomposition_background(
+    value: ImageDecompositionResult | Mapping[str, Any],
+    background_path: str | Path,
+    *,
+    provider: str = "manual_background_plate",
+) -> ImageDecompositionResult:
+    from PIL import Image
+
+    result = _clone_result(_normalized_result(value))
+    source = Path(background_path).expanduser().resolve()
+    if not source.is_file():
+        raise FileNotFoundError(f"replacement background not found: {source}")
+    operation = {
+        "kind": "background_replace",
+        "background_path": str(source),
+        "provider": str(provider or "manual_background_plate"),
+    }
+    target = _edit_target(result, operation)
+    rgb, _ = _fit_rgba_canvas(source, result.width, result.height)
+    output = target / "background.png"
+    Image.fromarray(rgb, "RGB").save(output)
+    result.background_path = str(output.resolve())
+    result.diagnostics["inpaint"] = {
+        "provider": operation["provider"],
+        "confidence": 1.0,
+        "coverage": float(
+            result.diagnostics.get("inpaint", {}).get("coverage", 0.0)
+            if isinstance(result.diagnostics.get("inpaint"), Mapping)
+            else 0.0
+        ),
+        "max_camera_travel_ratio": 0.12,
+        "warnings": [],
+        "source_path": str(source),
+    }
+    result.diagnostics["max_camera_travel_ratio"] = 0.12
+    return _refresh_graph_and_validation(
+        result,
+        operation=operation,
+        target=target,
+    )
+
+
 __all__ = [
     "merge_decomposition_elements",
-    "replace_decomposition_element_mask",
+    "replace_decomposition_background",
     "replace_decomposition_element_mask",
     "set_decomposition_lock",
     "set_decomposition_parent",

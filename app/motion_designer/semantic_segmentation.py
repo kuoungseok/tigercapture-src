@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 from typing import Any, Iterable, Protocol, Sequence
 
 
-SEGMENTATION_MODES = ("auto", "basic", "sam")
+SEGMENTATION_MODES = ("auto", "birefnet", "sam2", "basic", "sam")
 
 
 class SemanticSegmentationProvider(Protocol):
@@ -38,6 +38,7 @@ class SegmentationCandidate:
     confidence: float
     semantic_label: str = "subject"
     metadata: dict[str, Any] = field(default_factory=dict)
+    alpha: Any = None
 
     def summary(self) -> dict[str, Any]:
         return {
@@ -77,13 +78,49 @@ class ObjectSegmentationHint:
     id: str
     label: str
     bbox: tuple[float, float, float, float]
+    parent_id: str = ""
+    part: str = ""
+    pivot: tuple[float, float] | None = None
+    rigid: bool = False
+    foreground_points: tuple[tuple[float, float], ...] = ()
+    background_points: tuple[tuple[float, float], ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
-        return {
+        data = {
             "id": self.id,
             "label": self.label,
             "bbox": list(self.bbox),
+            "parent_id": self.parent_id,
+            "part": self.part,
+            "rigid": bool(self.rigid),
         }
+        if self.pivot is not None:
+            data["pivot"] = [float(self.pivot[0]), float(self.pivot[1])]
+        if self.foreground_points:
+            data["foreground_points"] = [
+                [float(point[0]), float(point[1])]
+                for point in self.foreground_points
+            ]
+        if self.background_points:
+            data["background_points"] = [
+                [float(point[0]), float(point[1])]
+                for point in self.background_points
+            ]
+        return data
+
+
+def _normalize_points(value: Any) -> tuple[tuple[float, float], ...]:
+    if not isinstance(value, Sequence) or isinstance(value, (str, bytes)):
+        return ()
+    points: list[tuple[float, float]] = []
+    for item in value:
+        if (
+            isinstance(item, Sequence)
+            and not isinstance(item, (str, bytes))
+            and len(item) >= 2
+        ):
+            points.append((float(item[0]), float(item[1])))
+    return tuple(points)
 
 
 def normalize_object_hints(
@@ -95,10 +132,37 @@ def normalize_object_hints(
             raw_bbox = value.get("bbox")
             identifier = str(value.get("id") or f"object_{index + 1:02d}")
             label = str(value.get("label") or value.get("role") or "subject")
+            parent_id = str(value.get("parent_id") or "")
+            part = str(value.get("part") or "")
+            raw_pivot = value.get("pivot")
+            pivot = (
+                (float(raw_pivot[0]), float(raw_pivot[1]))
+                if isinstance(raw_pivot, Sequence)
+                and not isinstance(raw_pivot, (str, bytes))
+                and len(raw_pivot) >= 2
+                else None
+            )
+            rigid = bool(value.get("rigid", bool(parent_id)))
+            foreground_points = _normalize_points(
+                value.get("foreground_points")
+                or value.get("positive_points")
+                or ()
+            )
+            background_points = _normalize_points(
+                value.get("background_points")
+                or value.get("negative_points")
+                or ()
+            )
         elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
             raw_bbox = value
             identifier = f"object_{index + 1:02d}"
             label = "subject"
+            parent_id = ""
+            part = ""
+            pivot = None
+            rigid = False
+            foreground_points = ()
+            background_points = ()
         else:
             continue
         if not isinstance(raw_bbox, Sequence) or isinstance(raw_bbox, (str, bytes)):
@@ -110,6 +174,12 @@ def normalize_object_hints(
             id=identifier,
             label=label,
             bbox=(bbox[0], bbox[1], bbox[2], bbox[3]),
+            parent_id=parent_id,
+            part=part,
+            pivot=pivot,
+            rigid=rigid,
+            foreground_points=foreground_points,
+            background_points=background_points,
         ))
     return hints
 
@@ -159,6 +229,39 @@ def component_records(mask, *, max_elements: int) -> list[dict[str, Any]]:
         })
     records.sort(key=lambda item: (-float(item["score"]), -int(item["area"])))
     return records[:max(1, int(max_elements))]
+
+
+def mask_record(mask, *, clean: bool = True) -> dict[str, Any] | None:
+    """Describe one complete object mask without dropping disconnected parts."""
+    import numpy as np
+
+    binary = clean_binary_mask(mask) if clean else np.where(mask > 0, 255, 0).astype(np.uint8)
+    ys, xs = np.nonzero(binary)
+    if not len(xs):
+        return None
+    left = int(xs.min())
+    top = int(ys.min())
+    right = int(xs.max()) + 1
+    bottom = int(ys.max()) + 1
+    width = max(1, right - left)
+    height = max(1, bottom - top)
+    area = int(len(xs))
+    cx = float(xs.mean())
+    cy = float(ys.mean())
+    canvas_height, canvas_width = binary.shape[:2]
+    center_distance = (
+        (cx / max(1, canvas_width) - 0.5) ** 2
+        + (cy / max(1, canvas_height) - 0.5) ** 2
+    ) ** 0.5
+    return {
+        "label": 1,
+        "bbox": (left, top, width, height),
+        "area": area,
+        "score": float(area) * max(0.55, 1.15 - center_distance),
+        "centroid": (cx, cy),
+        "mask_fill_ratio": float(area) / float(max(1, width * height)),
+        "mask": binary,
+    }
 
 
 def _border_distance_mask(rgb):
@@ -285,6 +388,21 @@ def _pixel_bbox(
     return left, top, right - left, bottom - top
 
 
+def _pixel_point(
+    point: tuple[float, float],
+    width: int,
+    height: int,
+) -> tuple[int, int]:
+    x, y = point
+    if max(abs(x), abs(y)) <= 1.0:
+        x *= max(1, width - 1)
+        y *= max(1, height - 1)
+    return (
+        max(0, min(width - 1, int(round(x)))),
+        max(0, min(height - 1, int(round(y)))),
+    )
+
+
 def _grabcut_candidates_from_hints(
     rgb,
     hints: Sequence[ObjectSegmentationHint],
@@ -312,6 +430,44 @@ def _grabcut_candidates_from_hints(
                 6,
                 cv2.GC_INIT_WITH_RECT,
             )
+            foreground_seeds = [
+                _pixel_point(point, width, height)
+                for point in hint.foreground_points
+            ]
+            background_seeds = [
+                _pixel_point(point, width, height)
+                for point in hint.background_points
+            ]
+            seed_radius = max(
+                2,
+                int(round(min(rect[2], rect[3]) * 0.014)),
+            )
+            if foreground_seeds or background_seeds:
+                for x, y in background_seeds:
+                    cv2.circle(
+                        mask_state,
+                        (x, y),
+                        seed_radius,
+                        int(cv2.GC_BGD),
+                        thickness=-1,
+                    )
+                for x, y in foreground_seeds:
+                    cv2.circle(
+                        mask_state,
+                        (x, y),
+                        seed_radius,
+                        int(cv2.GC_FGD),
+                        thickness=-1,
+                    )
+                cv2.grabCut(
+                    bgr,
+                    mask_state,
+                    None,
+                    background_model,
+                    foreground_model,
+                    4,
+                    cv2.GC_INIT_WITH_MASK,
+                )
         except Exception:
             continue
         mask = np.where(
@@ -319,18 +475,14 @@ def _grabcut_candidates_from_hints(
             255,
             0,
         ).astype(np.uint8)
-        records = component_records(clean_binary_mask(mask), max_elements=4)
-        if not records:
+        cleaned_mask = clean_binary_mask(mask)
+        for x, y in background_seeds:
+            cv2.circle(cleaned_mask, (x, y), seed_radius, 0, thickness=-1)
+        for x, y in foreground_seeds:
+            cv2.circle(cleaned_mask, (x, y), seed_radius, 255, thickness=-1)
+        record = mask_record(cleaned_mask, clean=False)
+        if record is None:
             continue
-        center_x = rect[0] + rect[2] * 0.5
-        center_y = rect[1] + rect[3] * 0.5
-        record = min(
-            records,
-            key=lambda item: (
-                (float(item["centroid"][0]) - center_x) ** 2
-                + (float(item["centroid"][1]) - center_y) ** 2
-            ) / max(1.0, float(item["area"])),
-        )
         coverage = float(record["area"]) / float(max(1, rect[2] * rect[3]))
         if coverage < 0.02 or coverage > 1.15:
             continue
@@ -350,6 +502,16 @@ def _grabcut_candidates_from_hints(
                 "object_hint_bbox": list(hint.bbox),
                 "pixel_hint_bbox": list(rect),
                 "mask_fill_ratio": float(record["mask_fill_ratio"]),
+                "parent_id": hint.parent_id,
+                "part": hint.part,
+                "pivot": list(hint.pivot) if hint.pivot is not None else [],
+                "rigid": bool(hint.rigid),
+                "foreground_points": [
+                    list(point) for point in hint.foreground_points
+                ],
+                "background_points": [
+                    list(point) for point in hint.background_points
+                ],
             },
         ))
     accepted.sort(key=lambda item: (-item.score, -item.area))
@@ -455,8 +617,92 @@ def segment_image(
         else str(basic.get("provider") or "basic")
     )
     candidates = guided_candidates or basic_candidates
+    modern_state = "not_requested"
+    if requested in {"auto", "birefnet", "sam2"} and not bool(basic.get("transparent_source")):
+        try:
+            from .segmentation_setup import (
+                BIREFNET_PROVIDER_ID,
+                SAM2_PROVIDER_ID,
+                segmentation_provider_status,
+            )
+
+            birefnet_ready = bool(
+                segmentation_provider_status(BIREFNET_PROVIDER_ID)["available"]
+            )
+            sam2_ready = bool(
+                segmentation_provider_status(SAM2_PROVIDER_ID)["available"]
+            )
+        except Exception:
+            birefnet_ready = False
+            sam2_ready = False
+        if requested == "sam2" or (requested == "auto" and normalized_object_hints and sam2_ready):
+            if sam2_ready:
+                try:
+                    from .modern_segmentation import sam2_masks_from_hints
+
+                    sam2_hints = normalized_object_hints or [
+                        {"id": "subject", "label": "subject", "bbox": [0.02, 0.02, 0.96, 0.96]}
+                    ]
+                    rows = sam2_masks_from_hints(
+                        rgb,
+                        [item.to_dict() if hasattr(item, "to_dict") else item for item in sam2_hints],
+                    )
+                    modern_candidates: list[SegmentationCandidate] = []
+                    for mask, score, metadata in rows[:max_elements]:
+                        record = mask_record(mask, clean=False)
+                        if record is None:
+                            continue
+                        modern_candidates.append(SegmentationCandidate(
+                            mask=record["mask"],
+                            bbox=record["bbox"],
+                            area=int(record["area"]),
+                            score=float(record["score"]) * max(0.2, float(score)),
+                            confidence=max(0.0, min(1.0, float(score))),
+                            semantic_label=str(metadata.get("label") or "subject"),
+                            metadata={
+                                "provider": "local_sam2",
+                                "object_hint_id": str(metadata.get("id") or ""),
+                                "parent_id": str(metadata.get("parent_id") or ""),
+                                "part": str(metadata.get("part") or ""),
+                                "rigid": bool(metadata.get("rigid", False)),
+                            },
+                        ))
+                    if modern_candidates:
+                        candidates = modern_candidates
+                        provider = "local_sam2"
+                        modern_state = "ready"
+                except Exception as exc:
+                    modern_state = f"sam2_failed:{exc}"
+            else:
+                modern_state = "sam2_not_installed"
+        if provider != "local_sam2" and requested in {"auto", "birefnet"}:
+            if birefnet_ready:
+                try:
+                    from .modern_segmentation import birefnet_alpha
+
+                    soft_alpha = birefnet_alpha(rgb)
+                    mask = np.where(soft_alpha >= 96, 255, 0).astype(np.uint8)
+                    record = mask_record(mask, clean=False)
+                    if record is not None:
+                        candidates = [SegmentationCandidate(
+                            mask=record["mask"],
+                            bbox=record["bbox"],
+                            area=int(record["area"]),
+                            score=float(record["score"]),
+                            confidence=0.94,
+                            semantic_label="subject",
+                            metadata={"provider": "local_birefnet_matting"},
+                            alpha=soft_alpha,
+                        )]
+                        provider = "local_birefnet_matting"
+                        modern_state = "ready"
+                except Exception as exc:
+                    modern_state = f"birefnet_failed:{exc}"
+            elif modern_state == "not_requested":
+                modern_state = "birefnet_not_installed"
+
     sam_state = "not_requested"
-    if requested in {"auto", "sam"} and not bool(basic.get("transparent_source")):
+    if requested == "sam" and not bool(basic.get("transparent_source")):
         seeds = [
             (
                 max(0.0, min(1.0, float(item.bbox[0] + item.bbox[2] * 0.5))),
@@ -500,6 +746,15 @@ def segment_image(
     warnings: list[str] = []
     if requested == "sam" and provider != "local_sam":
         warnings.append("SAM was requested but unavailable; Basic Local segmentation was used.")
+    if requested in {"auto", "birefnet", "sam2"} and provider not in {
+        "local_birefnet_matting",
+        "local_sam2",
+        "source_alpha",
+    }:
+        warnings.append(
+            "Modern cutout AI is unavailable; a compatibility result was produced. "
+            "The Motion UI must request model setup before normal Apply."
+        )
     return SemanticSegmentationResult(
         requested_mode=requested,
         provider=provider,
@@ -509,6 +764,11 @@ def segment_image(
         transparent_source=bool(basic.get("transparent_source")),
         diagnostics={
             "sam_state": sam_state,
+            "modern_state": modern_state,
+            "legacy_fallback": bool(
+                requested in {"auto", "birefnet", "sam2"}
+                and provider not in {"local_birefnet_matting", "local_sam2", "source_alpha"}
+            ),
             "basic_provider": str(basic.get("provider") or ""),
             "basic_coverage": float(
                 basic.get(
@@ -582,6 +842,12 @@ class SamSegmentationProvider:
 
 def segmentation_capabilities() -> dict[str, dict[str, Any]]:
     sam = SamSegmentationProvider()
+    try:
+        from .segmentation_setup import segmentation_setup_status
+
+        modern = segmentation_setup_status()
+    except Exception:
+        modern = {}
     return {
         "source_alpha": {
             "available": True,
@@ -593,6 +859,21 @@ def segmentation_capabilities() -> dict[str, dict[str, Any]]:
             "available": True,
             "automatic": True,
             "point_hints": False,
+            "box_hints": True,
+            "legacy": True,
+        },
+        "local_birefnet_matting": {
+            "available": bool(modern.get("automatic_cutout_ready")),
+            "automatic": True,
+            "soft_alpha": True,
+            "point_hints": False,
+            "box_hints": False,
+        },
+        "local_sam2": {
+            "available": bool(modern.get("assisted_segmentation_ready")),
+            "automatic": False,
+            "soft_alpha": False,
+            "point_hints": True,
             "box_hints": True,
         },
         sam.provider_id: {
@@ -614,6 +895,7 @@ __all__ = [
     "SemanticSegmentationResult",
     "clean_binary_mask",
     "component_records",
+    "mask_record",
     "normalize_object_hints",
     "segmentation_capabilities",
     "segment_image",
