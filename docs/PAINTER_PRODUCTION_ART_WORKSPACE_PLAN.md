@@ -112,6 +112,14 @@ Responsive behavior:
   make-selection and make-mask commands. Pen creates paths, Path Selection moves
   whole paths, Direct Selection edits points, and saved paths round-trip through
   selection and mask operations.
+- The default right dock follows the Photoshop panel reference rather than the
+  general Tiger Studio card theme. It uses a neutral flat gray surface, compact
+  `Color / Swatches / Gradients / Patterns` tabs, an interactive horizontal
+  saturation/value field with a vertical hue strip, and thin
+  `Layers / Channels / Paths` tabs. Layer and channel rows include an eye hit
+  area plus a real thumbnail; channel thumbnails visualize RGB, Red, Green,
+  Blue, and Alpha independently. Purple sliders, rounded cards, and oversized
+  tab buttons do not belong in this dock.
 - Canvas must initialize to the available screen area without requiring window
   resize.
 - All persistent panels need a recoverable Window menu entry.

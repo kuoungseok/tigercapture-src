@@ -134,7 +134,7 @@ def test_standalone_painter_pauses_repaints_while_window_moves() -> None:
 
 def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     app = _app()
-    from PySide6.QtCore import Qt
+    from PySide6.QtCore import QPointF, QSize, Qt
     from PySide6.QtWidgets import QListView, QListWidget
 
     from app.drawing import BRUSH_LIBRARY_PRESETS, PaintDialog, create_blank_paint_pixmap
@@ -368,11 +368,42 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert not hasattr(dialog, "pbr_normal_format_combo")
     assert not hasattr(dialog, "pbr_preview_label")
     assert dialog._paint_color_wheel_frame.isHidden()
+    assert dialog._paint_color_tabs.count() == 4
+    assert [
+        dialog._paint_color_tabs.tabText(index)
+        for index in range(dialog._paint_color_tabs.count())
+    ] == ["Color", "Swatches", "Gradients", "Patterns"]
+    assert dialog.photoshop_color_field.isVisible()
+    dialog.photoshop_color_field._drag_target = "hue"
+    dialog.photoshop_color_field._pick(
+        QPointF(
+            dialog.photoshop_color_field._hue_rect().center().x(),
+            dialog.photoshop_color_field._hue_rect().center().y(),
+        )
+    )
+    app.processEvents()
+    assert 170 <= dialog._pen_color.hue() <= 190
+    dialog.photoshop_color_field._drag_target = "field"
+    dialog.photoshop_color_field._pick(
+        QPointF(
+            dialog.photoshop_color_field._field_rect().right(),
+            dialog.photoshop_color_field._field_rect().top(),
+        )
+    )
+    app.processEvents()
+    assert dialog._pen_color.saturation() >= 250
+    assert dialog._pen_color.value() >= 250
+    assert dialog._paint_color_matrix_frame.isVisible() is False
+    dialog._paint_color_tabs.setCurrentIndex(1)
+    app.processEvents()
     assert dialog._paint_color_matrix_frame.isVisible()
     assert dialog._paint_color_matrix_frame.height() <= 90
+    dialog._paint_color_tabs.setCurrentIndex(0)
     assert dialog._color_preview.width() <= 48
     assert dialog._paint_mixer_label.text() == "Mixer"
-    assert hasattr(dialog, "saturation_slider")
+    assert dialog.saturation_slider.isHidden()
+    assert dialog.hue_slider.isHidden()
+    assert dialog.value_slider.isHidden()
     assert dialog._recent_color_btns[0].width() <= 32
     assert dialog._paint_harmony_label.isHidden()
     assert len(dialog._palette_btns) == 8
@@ -388,6 +419,8 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     ]
     assert not any("Strokes" in label for label in layer_labels)
     assert dialog._layer_list.item(0).data(Qt.ItemDataRole.UserRole + 1) == "none"
+    assert dialog._layer_list.iconSize() == QSize(58, 30)
+    assert dialog._channel_list.iconSize() == QSize(58, 30)
     assert not dialog.copy_channel_btn.icon().isNull()
     assert dialog.copy_channel_btn.text() == ""
     assert not dialog.commit_path_btn.icon().isNull()
@@ -401,16 +434,9 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     ).y()
     assert color_bottom < layer_top or scroll.verticalScrollBar().isVisible()
     bar = scroll.verticalScrollBar()
-    assert bar.value() >= dialog._paint_color_section_title.y() - 2
-    visible_bottom = bar.value() + scroll.viewport().height()
-    selector_bottom = (
-        dialog._paint_color_panel.y()
-        + dialog._paint_color_matrix_frame.y()
-        + dialog._paint_color_matrix_frame.height()
-    )
-    assert selector_bottom <= visible_bottom
+    assert bar.value() >= dialog._paint_color_panel.y() - 2
     margins = dialog._paint_inspector_controls.layout().contentsMargins()
-    assert margins.right() >= 12
+    assert margins.right() >= 6
     if bar.isVisible():
         color_right = dialog._paint_color_panel.mapToGlobal(
             dialog._paint_color_panel.rect().topRight()
@@ -421,7 +447,8 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     app.processEvents()
     dialog._sync_color_panel_layout()
     assert dialog._paint_color_wheel_frame.isHidden()
-    assert dialog._paint_color_panel.minimumHeight() <= 290
+    assert dialog._paint_color_panel.minimumHeight() == 148
+    assert dialog._paint_color_panel.maximumHeight() == 194
 
     dialog.close()
 

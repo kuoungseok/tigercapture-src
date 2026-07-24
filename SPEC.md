@@ -6199,6 +6199,13 @@ AI Script Edit MVP integration:
   selection and make-mask commands. Path mode must preserve the Photoshop
   mental model that Pen creates paths, Path Selection moves paths, Direct
   Selection adjusts points, and paths can become selections or layer masks.
+  The dock's visual contract also follows the Photoshop panel reference: neutral
+  flat gray surfaces, compact `Color / Swatches / Gradients / Patterns` tabs,
+  an interactive horizontal saturation/value field with a vertical hue strip,
+  and thin `Layers / Channels / Paths` tabs. Layer and channel rows expose a
+  dedicated eye hit area plus thumbnails; RGB, Red, Green, Blue, and Alpha
+  thumbnails must visualize their actual channel data. Rounded card panels,
+  purple control accents, and oversized tab buttons are invalid in this dock.
 - Painter 3D support is for game-art blockout and paint-over, not a general 3D
   editor. The first-class 3D workflow is a simple reference layer/panel where
   artists primarily place boxes, stretch them longer/wider/taller, and move,
