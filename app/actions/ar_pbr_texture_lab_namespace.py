@@ -9,6 +9,7 @@ from app.ar_pbr.texture_map_lab import (
     NORMAL_FORMATS,
     PACKED_LAYOUTS,
     PREVIEW_MODES,
+    PREVIEW_SHAPES,
     SEPARATE_MAPS,
     TEXTURE_MAP_BACKENDS,
 )
@@ -87,10 +88,15 @@ def register_ar_pbr_texture_lab_actions(registry: Any) -> None:
             "image_path": {"type": "string"},
             "output_path": {"type": "string"},
             "preview_mode": {"type": "string", "enum": list(PREVIEW_MODES)},
+            "preview_shape": {"type": "string", "enum": list(PREVIEW_SHAPES)},
             "width": {"type": "integer", "minimum": 64, "maximum": 8192},
             "height": {"type": "integer", "minimum": 64, "maximum": 8192},
             "settings": settings_schema,
             "backend": {"type": "string", "enum": list(TEXTURE_MAP_BACKENDS)},
+            "allow_cpu": {
+                "type": "boolean",
+                "description": "Diagnostic only. Product preview/export defaults to GPU-required mode.",
+            },
         }, required=("image_path",)),
         required=("image_path",),
         mutating=False,
@@ -105,6 +111,10 @@ def register_ar_pbr_texture_lab_actions(registry: Any) -> None:
         "ar_pbr_texture_lab_backend_status",
         params_schema=schema_object({
             "backend": {"type": "string", "enum": list(TEXTURE_MAP_BACKENDS)},
+            "allow_cpu": {
+                "type": "boolean",
+                "description": "Diagnostic only. Product backend selection defaults to GPU-required mode.",
+            },
         }),
         mutating=False,
         changed=False,
@@ -124,6 +134,10 @@ def register_ar_pbr_texture_lab_actions(registry: Any) -> None:
             "packed_layouts": {"type": "array", "items": {"type": "string", "enum": list(PACKED_LAYOUTS)}},
             "max_size": {"type": "integer", "minimum": 64, "maximum": 16384},
             "backend": {"type": "string", "enum": list(TEXTURE_MAP_BACKENDS)},
+            "allow_cpu": {
+                "type": "boolean",
+                "description": "Diagnostic only. Product export defaults to GPU-required mode.",
+            },
         }, required=("image_path",)),
         required=("image_path",),
         mutating=True,

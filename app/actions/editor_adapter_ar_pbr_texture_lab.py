@@ -10,6 +10,7 @@ from app.ar_pbr.texture_map_lab import (
     render_plane_preview,
     select_texture_map_backend,
     substrate_export_plan,
+    texture_lab_cpu_fallback_allowed,
 )
 
 
@@ -59,23 +60,35 @@ class ArPbrTextureLabAdapterMixin(ArPbrBaseAdapterMixin):
         image_path: str,
         output_path: str | None = None,
         preview_mode: str = "material",
+        preview_shape: str = "plane",
         width: int = 768,
         height: int | None = None,
         settings: Mapping[str, Any] | None = None,
         backend: str | None = None,
+        allow_cpu: bool | None = None,
     ) -> dict[str, Any]:
+        cpu_allowed = texture_lab_cpu_fallback_allowed(False) if allow_cpu is None else bool(allow_cpu)
         return render_plane_preview(
             image_path,
             settings,
             preview_mode=preview_mode,
+            preview_shape=preview_shape,
             output_path=output_path,
             width=width,
             height=height,
             backend=backend,
+            allow_cpu=cpu_allowed,
+            allow_cpu_preview=cpu_allowed,
         )
 
-    def ar_pbr_texture_lab_backend_status(self, *, backend: str | None = None) -> dict[str, Any]:
-        return select_texture_map_backend(backend)
+    def ar_pbr_texture_lab_backend_status(
+        self,
+        *,
+        backend: str | None = None,
+        allow_cpu: bool | None = None,
+    ) -> dict[str, Any]:
+        cpu_allowed = texture_lab_cpu_fallback_allowed(False) if allow_cpu is None else bool(allow_cpu)
+        return select_texture_map_backend(backend, allow_cpu=cpu_allowed)
 
     def ar_pbr_texture_lab_export(
         self,
@@ -87,7 +100,9 @@ class ArPbrTextureLabAdapterMixin(ArPbrBaseAdapterMixin):
         packed_layouts: Sequence[str] | None = None,
         max_size: int | None = None,
         backend: str | None = None,
+        allow_cpu: bool | None = None,
     ) -> dict[str, Any]:
+        cpu_allowed = texture_lab_cpu_fallback_allowed(False) if allow_cpu is None else bool(allow_cpu)
         return export_texture_maps(
             image_path,
             output_dir,
@@ -96,6 +111,7 @@ class ArPbrTextureLabAdapterMixin(ArPbrBaseAdapterMixin):
             packed_layouts=packed_layouts,
             max_size=max_size,
             backend=backend,
+            allow_cpu=cpu_allowed,
         )
 
     def ar_pbr_texture_lab_substrate_plan(

@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import sys
+import time
 from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
@@ -365,7 +366,14 @@ def capture_ai(reference_path: Path, output_path: Path) -> None:
     window.ai.prompt.setPlainText(
         'Use the dropped frame as a full background, fade it in, and add "OMNI MOTION".'
     )
+    window.ai.advanced_button.setChecked(True)
     window.ai.request_plan()
+    deadline = time.monotonic() + 15.0
+    while window.ai._proposal is None and time.monotonic() < deadline:
+        app.processEvents()
+        time.sleep(0.01)
+    if window.ai._proposal is None:
+        raise RuntimeError("Motion AI UI QA timed out waiting for candidates")
     window.ai.apply_proposal()
     window.timeline.set_time_and_emit(1200)
     app.processEvents()

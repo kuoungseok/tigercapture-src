@@ -6066,6 +6066,9 @@ def main() -> int:
     QSurfaceFormat.setDefaultFormat(fmt)
 
     app = QApplication(sys.argv)
+    from app.window_placement import install_global_window_placement
+
+    install_global_window_placement(app)
     window = GpuWindow(
         asset,
         descriptor,

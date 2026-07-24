@@ -69,3 +69,14 @@ def test_studio_slider_led_pulses_while_dragging_and_fades_after_release() -> No
 
     assert slider._studio_led_level == 0.0
     assert not slider._studio_led_timer.isActive()
+
+
+def test_studio_slider_general_led_uses_warm_touch_feedback() -> None:
+    _qt_app()
+    from app.studio_slider import StudioSlider
+
+    accent = StudioSlider("accent")
+    neutral = StudioSlider("neutral")
+
+    assert accent._led_color().name().upper() == "#FFE1A0"
+    assert neutral._led_color().name().upper() == "#FFE7B8"

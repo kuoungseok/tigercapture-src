@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
+from pathlib import Path
 
 import pytest
 
@@ -138,7 +139,7 @@ def test_motion_patch_is_layer_scoped_and_applies_as_one_revision() -> None:
         apply_motion_ai_patch(changed, stale)
 
 
-def test_motion_ai_generation_actions_expose_review_before_apply_contract() -> None:
+def test_motion_ai_generation_actions_expose_review_before_apply_contract(tmp_path) -> None:
     owner = Owner()
     registry = ActionRegistry(owner)
     created = registry.execute("motion.composition.create", {
@@ -153,6 +154,25 @@ def test_motion_ai_generation_actions_expose_review_before_apply_contract() -> N
     assert candidate.ok
     assert candidate.result["analysis"]["generation_plan"]["brief"]["title"] == "Review Me"
     assert owner._motion_compositions[composition_id].layers == []
+    preview = registry.execute("motion.ai.candidate.preview", {
+        "composition_id": composition_id,
+        "proposal": candidate.result,
+        "output_dir": str(tmp_path / "candidate_preview"),
+        "times_ms": [0, 1200, 2399],
+    })
+    assert preview.ok
+    assert all(Path(path).is_file() for path in preview.result["frames"])
+    candidate_set = registry.execute("motion.ai.candidates.generate", {
+        "composition_id": composition_id,
+        "prompt": 'clean fade "Review Me"',
+        "provider": "rule_based",
+        "decompose_images": False,
+    })
+    assert candidate_set.ok
+    assert [
+        item["analysis"]["motion_variant"]
+        for item in candidate_set.result["candidates"]
+    ] == ["clean", "dynamic", "collage"]
 
     applied = registry.execute("motion.ai.apply", {
         "composition_id": composition_id,
@@ -180,9 +200,24 @@ def test_motion_ai_generation_actions_expose_review_before_apply_contract() -> N
     assert {
         "motion.ai.provider.status",
         "motion.ai.reference.analyze",
+        "motion.ai.reference.decompose",
+        "motion.ai.layer.analyze",
+        "motion.ai.layer.segment",
+        "motion.ai.layer.mask.refine",
+        "motion.ai.layer.merge",
+        "motion.ai.layer.split",
+        "motion.ai.layer.lock",
+        "motion.ai.layer.group",
+        "motion.ai.background.inpaint",
+        "motion.ai.text.reconstruct",
+        "motion.ai.choreography.plan",
+        "motion.ai.integrity.validate",
         "motion.ai.brief.create",
         "motion.ai.storyboard.generate",
         "motion.ai.candidate.generate",
+        "motion.ai.candidates.generate",
+        "motion.ai.choreography.apply",
+        "motion.ai.candidate.preview",
         "motion.ai.patch.plan",
         "motion.ai.patch.apply",
     } <= action_ids

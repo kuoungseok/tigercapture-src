@@ -47,6 +47,7 @@ logs/
 .pytest_cache/
 *.log
 _test_*.py
+outputs/
 
 # Debug captures / scratch zips (not part of the project)
 debugCapture/

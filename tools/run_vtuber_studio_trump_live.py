@@ -96,8 +96,10 @@ def main(argv: list[str] | None = None) -> int:
     from PySide6.QtCore import QTimer, Qt
     from PySide6.QtWidgets import QApplication
     from app.video_editor_popouts import VTuberBroadcastStudioWindow
+    from app.window_placement import install_global_window_placement
 
     app = QApplication.instance() or QApplication(["tigercapture-vtuber-studio-trump-live"])
+    install_global_window_placement(app)
     controller = _LiveTrumpStudio(
         trump_source=trump_source,
         program_background=program_background,

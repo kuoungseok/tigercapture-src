@@ -321,7 +321,10 @@ def _quoted_text(prompt: str) -> list[str]:
 
 def _prompt_motion(prompt: str, index: int) -> str:
     normalized = prompt.casefold()
-    if any(token in normalized for token in ("pop", "bounce", "팝", "튀")):
+    if any(token in normalized for token in (
+        "pop", "bounce", "active", "dynamic", "impact",
+        "팝", "튀", "액티브", "역동", "강렬", "화려",
+    )):
         return "pop"
     if any(token in normalized for token in ("zoom", "확대", "줌")):
         return "zoom_in"
@@ -426,6 +429,13 @@ def compile_generation_plan(
     *,
     provider: str,
     provider_metadata: Mapping[str, Any] | None = None,
+    decompose_images: bool = True,
+    max_decomposed_elements: int = 5,
+    segmentation_mode: str = "auto",
+    inpaint_mode: str = "auto",
+    reconstruct_text: bool = True,
+    ocr_native_threshold: float = 0.78,
+    motion_variant: str = "auto",
 ) -> MotionAIProposal:
     normalized = plan if isinstance(plan, MotionAIGenerationPlan) else MotionAIGenerationPlan.from_dict(plan)
     refs = [item if isinstance(item, MotionAIReference) else MotionAIReference.from_dict(item) for item in references]
@@ -433,33 +443,96 @@ def compile_generation_plan(
     by_id = {item.id: item for item in refs}
     layers: list[MotionLayer] = []
     warnings = list(normalized.warnings)
+    decomposition_reports: list[dict[str, Any]] = []
     for beat in normalized.beats:
         behavior = _motion_behavior(beat)
         image_ref = next((by_id.get(ref_id) for ref_id in beat.reference_ids if by_id.get(ref_id, None) and by_id[ref_id].kind == "image"), None)
         if image_ref is not None:
             x, y, layer_width, layer_height, fit = _layout_geometry(beat.layout, composition.width, composition.height)
-            layer = MotionLayer(
-                name=image_ref.name or beat.purpose,
-                layer_type="image",
-                source=SourceRef(kind="image", uri=image_ref.uri, params={
-                    "width": layer_width, "height": layer_height, "fit": fit,
-                }),
-                in_ms=beat.start_ms,
-                out_ms=beat.end_ms,
-                metadata={
-                    "ai_generation_id": normalized.id,
-                    "ai_beat_id": beat.id,
-                    "ai_reference_id": image_ref.id,
-                },
-            )
-            layer.transform.position.default = [float(x), float(y)]
-            if behavior is not None:
-                layer.behaviors = [behavior]
-            if image_ref.uri and not image_ref.uri.startswith(("http://", "https://")):
+            decomposition_compiled = False
+            decomposition_enabled = bool(image_ref.metadata.get("decompose", decompose_images))
+            local_image = image_ref.uri and not image_ref.uri.startswith(("http://", "https://"))
+            if decomposition_enabled and local_image:
                 from pathlib import Path
-                if not Path(image_ref.uri).is_file():
-                    warnings.append(f"Image needs relink before rendering: {image_ref.name or image_ref.uri}")
-            layers.append(layer)
+
+                source_path = Path(image_ref.uri)
+                if source_path.is_file():
+                    try:
+                        from .image_decomposition import (
+                            compile_decomposition_layers,
+                            decompose_image,
+                        )
+
+                        decomposition = decompose_image(
+                            source_path,
+                            width=layer_width,
+                            height=layer_height,
+                            max_elements=max_decomposed_elements,
+                            include_depth=True,
+                            segmentation_mode=segmentation_mode,
+                            inpaint_mode=inpaint_mode,
+                            reconstruct_text=reconstruct_text,
+                            ocr_native_threshold=ocr_native_threshold,
+                        )
+                        decomposed_layers = compile_decomposition_layers(
+                            composition,
+                            decomposition,
+                            reference_id=image_ref.id,
+                            name=image_ref.name or beat.purpose,
+                            in_ms=beat.start_ms,
+                            out_ms=beat.end_ms,
+                            center=(x, y),
+                            size=(layer_width, layer_height),
+                            beat_id=beat.id,
+                            motion_style=beat.motion,
+                            motion_variant=motion_variant,
+                            prompt=" ".join([
+                                normalized.prompt,
+                                normalized.brief.objective,
+                                *normalized.brief.tone_keywords,
+                            ]).strip(),
+                        )
+                        if decomposed_layers:
+                            for decomposed_layer in decomposed_layers:
+                                decomposed_layer.metadata["ai_generation_id"] = normalized.id
+                            layers.extend(decomposed_layers)
+                            report = decomposition.to_dict()
+                            report["reference_id"] = image_ref.id
+                            report["beat_id"] = beat.id
+                            decomposition_reports.append(report)
+                            warnings.extend(
+                                str(item)
+                                for item in decomposition.diagnostics.get("warnings", [])
+                            )
+                            decomposition_compiled = True
+                    except Exception as exc:
+                        warnings.append(
+                            f"Image decomposition fell back to one layer for "
+                            f"{image_ref.name or image_ref.uri}: {exc}"
+                        )
+            if not decomposition_compiled:
+                layer = MotionLayer(
+                    name=image_ref.name or beat.purpose,
+                    layer_type="image",
+                    source=SourceRef(kind="image", uri=image_ref.uri, params={
+                        "width": layer_width, "height": layer_height, "fit": fit,
+                    }),
+                    in_ms=beat.start_ms,
+                    out_ms=beat.end_ms,
+                    metadata={
+                        "ai_generation_id": normalized.id,
+                        "ai_beat_id": beat.id,
+                        "ai_reference_id": image_ref.id,
+                    },
+                )
+                layer.transform.position.default = [float(x), float(y)]
+                if behavior is not None:
+                    layer.behaviors = [behavior]
+                if image_ref.uri and not image_ref.uri.startswith(("http://", "https://")):
+                    from pathlib import Path
+                    if not Path(image_ref.uri).is_file():
+                        warnings.append(f"Image needs relink before rendering: {image_ref.name or image_ref.uri}")
+                layers.append(layer)
         elif beat.layout == "title_card":
             layer = MotionLayer(
                 name=f"{beat.purpose} Background",
@@ -504,6 +577,19 @@ def compile_generation_plan(
     analysis = analyze_motion_ai_layers(composition, layers)
     analysis["generation_plan"] = normalized.to_dict()
     analysis["provider_contract"] = dict(provider_metadata or {})
+    analysis["motion_variant"] = next(
+        (
+            str(layer.metadata.get("motion_choreography", {}).get("variant") or "")
+            for layer in layers
+            if isinstance(layer.metadata.get("motion_choreography"), Mapping)
+            and layer.metadata.get("motion_choreography", {}).get("variant")
+        ),
+        str(motion_variant or "auto"),
+    )
+    analysis["image_decompositions"] = decomposition_reports
+    analysis["decomposed_reference_count"] = len({
+        str(item.get("reference_id") or "") for item in decomposition_reports
+    })
     warnings.extend(str(item) for item in analysis.get("warnings", []))
     return MotionAIProposal(
         composition_id=composition.id,
@@ -524,6 +610,13 @@ def generate_motion_ai_proposal(
     provider_id: str | None = None,
     env: Mapping[str, str] | None = None,
     timeout_seconds: int = 90,
+    decompose_images: bool = True,
+    max_decomposed_elements: int = 5,
+    segmentation_mode: str = "auto",
+    inpaint_mode: str = "auto",
+    reconstruct_text: bool = True,
+    ocr_native_threshold: float = 0.78,
+    motion_variant: str = "auto",
 ) -> MotionAIProposal:
     refs = [item if isinstance(item, MotionAIReference) else MotionAIReference.from_dict(item) for item in references]
     baseline = build_deterministic_generation_plan(composition, prompt, refs)
@@ -557,11 +650,76 @@ def generate_motion_ai_proposal(
     provider_meta = result.to_dict()
     provider_meta.pop("payload", None)
     proposal = compile_generation_plan(
-        composition, plan, refs, provider=result.provider, provider_metadata=provider_meta,
+        composition,
+        plan,
+        refs,
+        provider=result.provider,
+        provider_metadata=provider_meta,
+        decompose_images=decompose_images,
+        max_decomposed_elements=max_decomposed_elements,
+        segmentation_mode=segmentation_mode,
+        inpaint_mode=inpaint_mode,
+        reconstruct_text=reconstruct_text,
+        ocr_native_threshold=ocr_native_threshold,
+        motion_variant=motion_variant,
     )
     if result.fallback_used and result.reason:
         proposal.warnings.insert(0, result.reason)
     return proposal
+
+
+def generate_motion_ai_candidates(
+    composition: MotionComposition,
+    prompt: str,
+    references: Iterable[MotionAIReference | Mapping[str, Any]],
+    *,
+    variants: Iterable[str] = ("clean", "dynamic", "collage"),
+    **options: Any,
+) -> list[MotionAIProposal]:
+    """Generate one provider plan, then compile deterministic motion variants."""
+    refs = [
+        item
+        if isinstance(item, MotionAIReference)
+        else MotionAIReference.from_dict(item)
+        for item in references
+    ]
+    normalized_variants = list(dict.fromkeys(
+        str(item or "").strip().casefold()
+        for item in variants
+        if str(item or "").strip().casefold() in {"clean", "dynamic", "collage"}
+    ))
+    if not normalized_variants:
+        normalized_variants = ["clean"]
+    first = generate_motion_ai_proposal(
+        composition,
+        prompt,
+        refs,
+        motion_variant=normalized_variants[0],
+        **options,
+    )
+    plan = MotionAIGenerationPlan.from_dict(first.analysis["generation_plan"])
+    proposals = [first]
+    for variant in normalized_variants[1:]:
+        proposal = compile_generation_plan(
+            composition,
+            plan,
+            refs,
+            provider=first.provider,
+            provider_metadata=first.analysis.get("provider_contract") or {},
+            decompose_images=bool(options.get("decompose_images", True)),
+            max_decomposed_elements=int(
+                options.get("max_decomposed_elements", 5)
+            ),
+            segmentation_mode=str(options.get("segmentation_mode") or "auto"),
+            inpaint_mode=str(options.get("inpaint_mode") or "auto"),
+            reconstruct_text=bool(options.get("reconstruct_text", True)),
+            ocr_native_threshold=float(
+                options.get("ocr_native_threshold", 0.78)
+            ),
+            motion_variant=variant,
+        )
+        proposals.append(proposal)
+    return proposals
 
 
 @dataclass(slots=True)
@@ -802,6 +960,8 @@ def apply_motion_ai_patch(composition: MotionComposition, patch: Mapping[str, An
 
 def motion_ai_provider_status() -> dict[str, Any]:
     snapshot = provider_snapshot()
+    from .semantic_segmentation import segmentation_capabilities
+
     return {
         "selected_provider": snapshot["selected_provider"],
         "effective_generation_provider": snapshot["effective_generation_provider"],
@@ -812,6 +972,20 @@ def motion_ai_provider_status() -> dict[str, Any]:
             "review_before_apply": True,
             "generation_schema": MOTION_AI_GENERATION_SCHEMA,
             "patch_schema": MOTION_AI_PATCH_SCHEMA,
+        },
+        "layered_image": {
+            "segmentation": segmentation_capabilities(),
+            "inpainting": {
+                "fast_local": {"available": True},
+                "enhanced_local": {
+                    "available": False,
+                    "fallback": "opencv_multiscale_ns",
+                },
+                "cloud_quality": {
+                    "available": False,
+                    "requires_explicit_consent": True,
+                },
+            },
         },
     }
 
@@ -831,6 +1005,7 @@ __all__ = [
     "build_deterministic_generation_plan",
     "build_deterministic_patch",
     "compile_generation_plan",
+    "generate_motion_ai_candidates",
     "generate_motion_ai_patch",
     "generate_motion_ai_proposal",
     "motion_ai_provider_status",

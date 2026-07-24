@@ -9,6 +9,8 @@
 
 프롬프트와 여러 참조 이미지에서 편집 가능한 Motion Composition을 생성하는 AI
 확장 기획은 `docs/MOTION_AI_GENERATION_PRODUCT_PLAN_KO.md`를 따른다.
+이미지 내부를 의미 레이어로 분해하고 각 레이어를 개별 연출하는 상세 계획은
+`docs/MOTION_AI_LAYERED_IMAGE_PRODUCT_PLAN_KO.md`를 따른다.
 
 ## 1. 한 줄 정의
 

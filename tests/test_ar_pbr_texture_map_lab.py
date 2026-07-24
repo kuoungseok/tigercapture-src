@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 from PIL import Image
+import pytest
 
 
 def _sample_image(path) -> None:
@@ -96,6 +97,48 @@ def test_texture_map_lab_supports_in_memory_preview_backend_status(tmp_path) -> 
     assert generated["size"] == [32, 24]
     assert preview["backend"]["active"] in {"cpu", "torch_cuda"}
     assert backend["status"]["install_guidance"]["recommended_backend"] == "torch_cuda"
+    assert backend["status"]["preview_renderer"]["cpu_preview"] is False
+
+
+def test_texture_lab_gpu_preview_status_is_cpu_free() -> None:
+    from app.ar_pbr.texture_map_gpu_preview import texture_lab_gpu_preview_status
+
+    status = texture_lab_gpu_preview_status()
+
+    assert status["renderer"] == "opengl_offscreen_texture_lab"
+    assert status["cpu_preview"] is False
+    assert "material" in status["supported_modes"]
+    assert "unreal_orm" in status["supported_packed_layouts"]
+
+
+def test_texture_lab_gpu_preview_smoke_when_context_available(tmp_path) -> None:
+    _qt_app()
+    from app.ar_pbr.texture_map_lab import (
+        TextureMapGpuRequiredError,
+        generate_texture_maps,
+        render_plane_preview_from_generated,
+    )
+
+    image_path = tmp_path / "source.png"
+    out = tmp_path / "gpu_preview.png"
+    _sample_image(image_path)
+    generated = generate_texture_maps(image_path, {"preview_environment": 0.45}, max_size=64, allow_cpu=True)
+
+    try:
+        payload = render_plane_preview_from_generated(
+            generated,
+            {"preview_environment": 0.45},
+            output_path=out,
+            width=96,
+            allow_cpu_preview=False,
+        )
+    except TextureMapGpuRequiredError as exc:
+        pytest.skip(f"OpenGL Texture Lab preview unavailable in this environment: {exc}")
+
+    assert out.exists()
+    assert payload["backend"]["preview_renderer"] == "opengl_offscreen_texture_lab"
+    assert payload["backend"]["cpu_preview"] is False
+    assert payload["diagnostics"]["gpu_preview"]["cpu_preview"] is False
 
 
 def test_texture_map_lab_delight_reduces_baked_lighting_gradient(tmp_path) -> None:
@@ -306,6 +349,19 @@ def test_texture_map_lab_plane_preview_and_substrate_plan(tmp_path) -> None:
     assert Image.open(out).size == (128, 96)
     assert preview.std() > 0.1
     assert payload["preview_mode"] == "material"
+    assert payload["preview_shape"] == "plane"
+    sphere_out = tmp_path / "sphere.png"
+    sphere_payload = render_plane_preview(
+        image_path,
+        {"preview_environment": 0.35},
+        output_path=sphere_out,
+        preview_shape="sphere",
+        width=128,
+    )
+    assert sphere_out.exists()
+    sphere_preview = np.asarray(Image.open(sphere_out).convert("RGB"), dtype=np.float32)
+    assert sphere_payload["preview_shape"] == "sphere"
+    assert sphere_preview.std() > 0.1
     f0_payload = render_plane_preview(image_path, {}, output_path=tmp_path / "f0.png", preview_mode="f0", width=64)
     f90_payload = render_plane_preview(
         image_path,
@@ -333,17 +389,24 @@ def test_texture_map_lab_actions_execute_without_editor_owner(tmp_path) -> None:
 
     preview = registry.execute(
         "ar_pbr.texture_lab.preview",
-        {"image_path": str(image_path), "output_path": str(preview_path), "width": 96},
+        {
+            "image_path": str(image_path),
+            "output_path": str(preview_path),
+            "preview_shape": "sphere",
+            "width": 96,
+            "allow_cpu": True,
+        },
     ).to_dict()
     export = registry.execute(
         "ar_pbr.texture_lab.export",
-        {"image_path": str(image_path), "output_dir": str(out_dir), "packed_layouts": ["arm"]},
+        {"image_path": str(image_path), "output_dir": str(out_dir), "packed_layouts": ["arm"], "allow_cpu": True},
     ).to_dict()
-    backend = registry.execute("ar_pbr.texture_lab.backend_status").to_dict()
+    backend = registry.execute("ar_pbr.texture_lab.backend_status", {"allow_cpu": True}).to_dict()
     plan = registry.execute("ar_pbr.texture_lab.substrate_plan").to_dict()
 
     assert preview["ok"] is True
     assert preview_path.exists()
+    assert preview["result"]["preview_shape"] == "sphere"
     assert export["ok"] is True
     assert export["changed"] is True
     assert (out_dir / "source_arm.png").exists()
@@ -357,6 +420,30 @@ def test_texture_map_lab_actions_execute_without_editor_owner(tmp_path) -> None:
     assert "substrate_mode" in settings_props
 
 
+def test_texture_map_lab_actions_require_gpu_by_default(tmp_path, monkeypatch) -> None:
+    from app.actions import build_default_action_registry
+
+    image_path = tmp_path / "source.png"
+    preview_path = tmp_path / "preview.png"
+    _sample_image(image_path)
+    monkeypatch.setenv("TIGERCAPTURE_TEXTURE_LAB_BACKEND", "cpu")
+    monkeypatch.delenv("TIGERCAPTURE_TEXTURE_LAB_ALLOW_CPU", raising=False)
+    registry = build_default_action_registry(None)
+
+    preview = registry.execute(
+        "ar_pbr.texture_lab.preview",
+        {"image_path": str(image_path), "output_path": str(preview_path), "width": 96},
+    ).to_dict()
+    backend = registry.execute("ar_pbr.texture_lab.backend_status").to_dict()
+
+    assert preview["ok"] is False
+    assert "GPU backend" in preview["error"]
+    assert backend["ok"] is True
+    assert backend["result"]["active"] == "unavailable"
+    assert backend["result"]["reason"] == "cpu_backend_disabled_by_policy"
+    assert preview_path.exists() is False
+
+
 def test_texture_map_lab_window_supports_clipboard_copy_and_paste(tmp_path) -> None:
     app = _qt_app()
     from PySide6.QtGui import QColor, QImage
@@ -366,9 +453,15 @@ def test_texture_map_lab_window_supports_clipboard_copy_and_paste(tmp_path) -> N
 
     image_path = tmp_path / "source.png"
     _sample_image(image_path)
-    window = ArPbrTextureMapLabWindow(image_path)
+    window = ArPbrTextureMapLabWindow(image_path, allow_cpu=True)
     window.refresh_preview()
     assert window._preview.thumbnail_count() >= 10
+    assert window._preview_shape_combo.currentData() == "plane"
+    window._preview_shape_combo.setCurrentIndex(window._preview_shape_combo.findData("sphere"))
+    window.refresh_preview()
+    assert window._preview_heading is not None
+    assert window._preview_heading.text().startswith("Sphere Preview")
+    window._preview_shape_combo.setCurrentIndex(window._preview_shape_combo.findData("plane"))
     assert window._advanced_map_checks["f0"].isChecked() is False
     assert window._delight_check is not None
     assert window._sliders["delight_strength"].isEnabled() is False

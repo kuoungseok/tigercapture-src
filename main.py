@@ -121,6 +121,10 @@ def main() -> int:
     app.setApplicationName("TigerCapture")
     app.setOrganizationName("TigerCapture")
 
+    from app.window_placement import install_global_window_placement
+
+    install_global_window_placement(app)
+
     from app.font_fallback import apply_ui_font
     apply_ui_font(app)
 

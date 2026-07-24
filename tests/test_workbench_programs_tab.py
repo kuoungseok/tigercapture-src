@@ -30,6 +30,7 @@ def test_workbench_programs_tab_exposes_icon_launchers() -> None:
 
     buttons = panel.findChildren(QToolButton, "ProgramLauncherButton")
     labels = {button.accessibleName() for button in buttons}
+    ordered_labels = [button.accessibleName() for button in panel._program_launcher_buttons]
 
     assert {
         "Composer",
@@ -41,20 +42,28 @@ def test_workbench_programs_tab_exposes_icon_launchers() -> None:
         "Character Hub",
         "Engine Link",
     } <= labels
+    assert ordered_labels[:3] == ["Composer", "Voice Lab", "Motion Designer"]
+    motion_button = next(
+        button for button in panel._program_launcher_buttons
+        if button.accessibleName() == "Motion Designer"
+    )
+    assert getattr(motion_button, "_program_launcher_icon_name") == "motion-designer"
     assert all(not button.icon().isNull() for button in buttons)
-    tile_sizes = {button.width() for button in buttons}
-    assert tile_sizes == {53}
+    tile_sizes = {(button.width(), button.height()) for button in buttons}
+    assert tile_sizes == {(72, 86)}
 
     panel.resize(340, 430)
     app.processEvents()
     panel._update_program_launcher_metrics()
-    small_tile = buttons[0].width()
-    assert 48 <= small_tile <= 53
+    small_tile = (buttons[0].width(), buttons[0].height())
+    assert 66 <= small_tile[0] <= 72
+    assert small_tile[1] > small_tile[0]
 
     panel.resize(860, 430)
     app.processEvents()
     panel._update_program_launcher_metrics()
-    large_tile = buttons[0].width()
-    assert 53 < large_tile <= 56
+    large_tile = (buttons[0].width(), buttons[0].height())
+    assert 72 < large_tile[0] <= 84
+    assert large_tile[1] > large_tile[0]
 
     panel.close()

@@ -305,6 +305,7 @@ class MotionDesignerWindow(QMainWindow):
         self.viewer_header.safe_changed.connect(self.canvas.set_safe_guides_visible)
         self.ai.plan_requested.connect(self._plan_ai_request)
         self.ai.apply_requested.connect(self._apply_ai_proposal)
+        self.ai.decomposition_repaired.connect(self._repair_ai_decomposition)
         self.audio.analyze_requested.connect(self._start_audio_analysis)
         self.audio.bind_requested.connect(self._bind_audio_reactive)
         self.audio.bake_requested.connect(self._bake_audio_reactive)
@@ -669,21 +670,40 @@ class MotionDesignerWindow(QMainWindow):
             return
         values = payload if isinstance(payload, dict) else {}
         from app.ai_providers import effective_generation_provider_id
-        from app.motion_designer.ai_generation import generate_motion_ai_proposal
-
         requested_provider = str(values.get("provider") or "").strip()
         effective_provider = (
             "rule_based"
             if requested_provider in {"local_layout", "rule_based"}
             else effective_generation_provider_id()
         )
-        if effective_provider == "rule_based":
+        if effective_provider == "rule_based" and not bool(
+            values.get("decompose_images", True)
+        ):
+            from app.motion_designer.ai_generation import generate_motion_ai_proposal
+
             try:
                 proposal = generate_motion_ai_proposal(
                     self.controller.composition,
                     str(values.get("prompt") or ""),
                     values.get("references") or [],
                     provider_id="rule_based",
+                    decompose_images=bool(values.get("decompose_images", True)),
+                    max_decomposed_elements=int(
+                        values.get("max_decomposed_elements", 5)
+                    ),
+                    segmentation_mode=str(
+                        values.get("segmentation_mode") or "auto"
+                    ),
+                    inpaint_mode=str(values.get("inpaint_mode") or "auto"),
+                    reconstruct_text=bool(
+                        values.get("reconstruct_text", True)
+                    ),
+                    ocr_native_threshold=float(
+                        values.get("ocr_native_threshold", 0.78)
+                    ),
+                    motion_variant=str(
+                        values.get("motion_variant") or "auto"
+                    ),
                 )
             except Exception as exc:
                 self.ai.set_error(str(exc))
@@ -707,7 +727,10 @@ class MotionDesignerWindow(QMainWindow):
     def _finish_ai_generation(self, proposal: object) -> None:
         self.ai.set_generating(False)
         if isinstance(proposal, dict):
-            self.ai.set_proposal(proposal)
+            if proposal.get("schema") == "tigerstudio.motion.ai.candidate_set.v1":
+                self.ai.set_candidate_set(proposal)
+            else:
+                self.ai.set_proposal(proposal)
         else:
             self.ai.set_error("Motion AI returned an invalid proposal.")
 
@@ -717,6 +740,138 @@ class MotionDesignerWindow(QMainWindow):
     def _clear_ai_generation_job(self, thread: QThread) -> None:
         if self._ai_generation_job is not None and self._ai_generation_job[0] is thread:
             self._ai_generation_job = None
+
+    def _repair_ai_decomposition(self, payload: object) -> None:
+        if not isinstance(payload, dict) or not isinstance(self.ai._proposal, dict):
+            return
+        from app.motion_designer.ai_planner import analyze_motion_ai_layers
+        from app.motion_designer.image_decomposition import (
+            ImageDecompositionResult,
+            compile_decomposition_layers,
+        )
+
+        proposal = deepcopy(self.ai._proposal)
+        raw_layers = [
+            item for item in proposal.get("layers", []) if isinstance(item, dict)
+        ]
+        reference_id = str(payload.get("reference_id") or "")
+        beat_id = str(payload.get("beat_id") or "")
+
+        def belongs_to_decomposition(item: dict) -> bool:
+            metadata = item.get("metadata") if isinstance(item.get("metadata"), dict) else {}
+            decomposition = (
+                metadata.get("image_decomposition")
+                if isinstance(metadata.get("image_decomposition"), dict)
+                else {}
+            )
+            return (
+                (not reference_id or decomposition.get("reference_id") == reference_id)
+                and (not beat_id or metadata.get("ai_beat_id") == beat_id)
+                and bool(decomposition)
+            )
+
+        indexes = [
+            index for index, item in enumerate(raw_layers)
+            if belongs_to_decomposition(item)
+        ]
+        if not indexes:
+            self.ai.set_error("The repaired decomposition no longer matches this candidate.")
+            return
+        old_layers = [MotionLayer.from_dict(raw_layers[index]) for index in indexes]
+        background = next(
+            (
+                item for item in old_layers
+                if item.metadata.get("image_decomposition", {}).get("role")
+                == "background"
+            ),
+            old_layers[0],
+        )
+        generation = (
+            proposal.get("analysis", {}).get("generation_plan", {})
+            if isinstance(proposal.get("analysis"), dict)
+            else {}
+        )
+        beat = next(
+            (
+                item for item in generation.get("beats", [])
+                if isinstance(item, dict) and str(item.get("id") or "") == beat_id
+            ),
+            {},
+        )
+        source_width = int(background.source.params.get("width", self.controller.composition.width))
+        source_height = int(background.source.params.get("height", self.controller.composition.height))
+        center = background.transform.position.default
+        compiled = compile_decomposition_layers(
+            self.controller.composition,
+            ImageDecompositionResult.from_dict(payload),
+            reference_id=reference_id or "layered_image",
+            name=background.name.removesuffix(" / Background"),
+            in_ms=background.in_ms,
+            out_ms=background.out_ms,
+            center=(float(center[0]), float(center[1])),
+            size=(source_width, source_height),
+            beat_id=beat_id,
+            motion_style=str(beat.get("motion") or "pop"),
+            motion_variant=str(
+                proposal.get("analysis", {}).get("motion_variant") or "auto"
+            ),
+            prompt=str(generation.get("prompt") or ""),
+        )
+        generation_id = str(old_layers[0].metadata.get("ai_generation_id") or "")
+        for layer in compiled:
+            if generation_id:
+                layer.metadata["ai_generation_id"] = generation_id
+        first_index = min(indexes)
+        kept = [
+            item for index, item in enumerate(raw_layers) if index not in indexes
+        ]
+        for offset, layer in enumerate(compiled):
+            kept.insert(first_index + offset, layer.to_dict())
+        proposal["layers"] = kept
+
+        old_analysis = (
+            proposal.get("analysis") if isinstance(proposal.get("analysis"), dict) else {}
+        )
+        rebuilt = analyze_motion_ai_layers(
+            self.controller.composition,
+            [MotionLayer.from_dict(item) for item in kept],
+        )
+        for key in (
+            "generation_plan",
+            "provider_contract",
+            "motion_variant",
+        ):
+            if key in old_analysis:
+                rebuilt[key] = deepcopy(old_analysis[key])
+        reports = [
+            dict(item)
+            for item in old_analysis.get("image_decompositions", [])
+            if isinstance(item, dict)
+        ]
+        replacement_index = next(
+            (
+                index for index, item in enumerate(reports)
+                if (
+                    (not reference_id or item.get("reference_id") == reference_id)
+                    and (not beat_id or item.get("beat_id") == beat_id)
+                )
+            ),
+            -1,
+        )
+        if replacement_index >= 0:
+            reports[replacement_index] = dict(payload)
+        else:
+            reports.append(dict(payload))
+        rebuilt["image_decompositions"] = reports
+        rebuilt["decomposed_reference_count"] = len({
+            str(item.get("reference_id") or "") for item in reports
+        })
+        proposal["analysis"] = rebuilt
+        proposal["warnings"] = list(dict.fromkeys([
+            *[str(item) for item in proposal.get("warnings", [])],
+            *[str(item) for item in rebuilt.get("warnings", [])],
+        ]))
+        self.ai.update_current_proposal(proposal)
 
     def _apply_ai_proposal(self, payload: object) -> None:
         if not isinstance(payload, dict):

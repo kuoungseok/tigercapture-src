@@ -4,8 +4,9 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Iterable
 
-from PySide6.QtCore import QRectF
-from PySide6.QtGui import QImage, QPainter
+from PySide6.QtCore import QCoreApplication, QRectF
+from PySide6.QtGui import QGuiApplication, QImage, QPainter
+from PySide6.QtWidgets import QApplication
 
 from .cache import MotionFrameCache
 from .render_graph import build_render_graph, paint_render_graph
@@ -15,11 +16,17 @@ from .source_frame import transparent_image
 
 class MotionExportRenderer:
     def __init__(self, *, cache_capacity: int = 120) -> None:
+        self._owned_application = None
+        application = QCoreApplication.instance()
+        if application is None:
+            self._owned_application = QApplication([])
+            application = self._owned_application
         # Standalone/headless exports do not pass through main_window's UI font
         # bootstrap. Register known Windows fonts before shaping typography.
-        from app.font_fallback import load_application_ui_fonts
+        if isinstance(application, QGuiApplication):
+            from app.font_fallback import load_application_ui_fonts
 
-        load_application_ui_fonts()
+            load_application_ui_fonts()
         self.cache = MotionFrameCache(cache_capacity)
 
     def render_frame(self, composition: MotionComposition, time_ms: float, *, width: int | None = None,

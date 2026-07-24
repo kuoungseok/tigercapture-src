@@ -16,6 +16,7 @@ from PySide6.QtWidgets import QApplication
 from app.font_fallback import apply_ui_font
 from app.mmd.player_window import DEFAULT_MODEL, DEFAULT_MOTION, MMDPlayerWindow
 from app.style import APP_QSS
+from app.window_placement import install_global_window_placement
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -27,6 +28,7 @@ def main(argv: list[str] | None = None) -> int:
     QCoreApplication.setApplicationName("TigerCapture MMD Player")
     QCoreApplication.setOrganizationName("TigerCapture")
     app = QApplication(sys.argv[:1])
+    install_global_window_placement(app)
     app.setStyle("Fusion")
     app.setStyleSheet(APP_QSS)
     apply_ui_font(app)

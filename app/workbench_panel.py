@@ -71,9 +71,9 @@ from app.workbench_cards import (
 
 _INSPECTOR_TAB_SIZE = (62, 48)
 _INSPECTOR_TAB_COMPACT_SIZE = (17, 21)
-_PROGRAM_LAUNCHER_BASE_SIZE = 53
-_PROGRAM_LAUNCHER_MIN_SIZE = 48
-_PROGRAM_LAUNCHER_MAX_SIZE = 56
+_PROGRAM_LAUNCHER_BASE_SIZE = 72
+_PROGRAM_LAUNCHER_MIN_SIZE = 66
+_PROGRAM_LAUNCHER_MAX_SIZE = 84
 _INSPECTOR_TAB_IDS = ("clip", "fx", "mask", "audio", "programs", "meta")
 _AUDIO_CREATION_TOOLS_EMPTY_TEXT = (
     "Composer and Voice Lab are always available below. Select "
@@ -1038,6 +1038,13 @@ class WorkbenchPanel(QWidget):
                 self._open_voice_lab_program,
             ),
             (
+                "Motion\nDesigner",
+                "Open motion graphics, keyframes, and character performance tools",
+                "motion-designer",
+                ("#7EB250", "#2FAE83"),
+                lambda: self._open_editor_program("_open_motion_designer_entry", "Motion Designer"),
+            ),
+            (
                 "VTuber\nStudio",
                 "Open Program Output, Source Tracking, and Avatar Mapping",
                 "video",
@@ -1057,13 +1064,6 @@ class WorkbenchPanel(QWidget):
                 "project",
                 ("#E1A94C", "#D95658"),
                 lambda: self._open_editor_program("_open_ppt_generator", "PPT Maker"),
-            ),
-            (
-                "Motion\nDesigner",
-                "Open motion, pose, and character performance tools",
-                "person",
-                ("#7EB250", "#2FAE83"),
-                lambda: self._open_editor_program("_open_motion_designer_entry", "Motion Designer"),
             ),
             (
                 "Character\nHub",
@@ -1129,30 +1129,32 @@ class WorkbenchPanel(QWidget):
             _PROGRAM_LAUNCHER_MIN_SIZE,
             min(_PROGRAM_LAUNCHER_MAX_SIZE, round(_PROGRAM_LAUNCHER_BASE_SIZE * scale)),
         )
-        icon_px = max(19, min(26, round(tile_px * 0.42)))
-        radius_px = max(11, min(15, round(tile_px * 0.24)))
-        font_px = max(7, min(9, round(tile_px * 0.15)))
-        spacing_px = max(5, min(8, round(tile_px * 0.12)))
+        tile_h = max(tile_px + 14, round(tile_px * 1.18))
+        icon_px = max(20, min(27, round(tile_px * 0.36)))
+        radius_px = max(12, min(16, round(tile_px * 0.20)))
+        font_px = max(9, min(10, round(tile_px * 0.14)))
+        spacing_px = max(8, min(12, round(tile_px * 0.13)))
         layout = getattr(self, "_program_launcher_layout", None)
         if layout is not None:
             layout.setHorizontalSpacing(spacing_px)
             layout.setVerticalSpacing(spacing_px)
         for button in buttons:
-            self._style_program_launcher_button(button, tile_px, icon_px, radius_px, font_px)
+            self._style_program_launcher_button(button, tile_px, tile_h, icon_px, radius_px, font_px)
 
     def _style_program_launcher_button(
         self,
         button: QToolButton,
         tile_px: int,
+        tile_h: int,
         icon_px: int,
         radius_px: int,
         font_px: int,
     ) -> None:
         start_color, end_color = getattr(button, "_program_launcher_colors", ("#42C7BA", "#4C64E8"))
         icon_name = getattr(button, "_program_launcher_icon_name", "grid")
-        top_padding = max(4, round(tile_px * 0.10))
-        side_padding = max(2, round(tile_px * 0.06))
-        bottom_padding = max(3, round(tile_px * 0.07))
+        top_padding = max(5, round(tile_px * 0.08))
+        side_padding = max(3, round(tile_px * 0.05))
+        bottom_padding = max(6, round(tile_px * 0.09))
         button.setStyleSheet(
             "QToolButton#ProgramLauncherButton {"
             f"background:qlineargradient(x1:0,y1:0,x2:1,y2:1,stop:0 {start_color},stop:1 {end_color});"
@@ -1162,7 +1164,7 @@ class WorkbenchPanel(QWidget):
             "border-bottom:1px solid rgba(0,0,0,104);"
             f"border-radius:{radius_px}px;"
             f"padding:{top_padding}px {side_padding}px {bottom_padding}px {side_padding}px;"
-            f"font-size:{font_px}px; font-weight:820;"
+            f"font-size:{font_px}px; font-weight:820; text-align:center;"
             "}"
             "QToolButton#ProgramLauncherButton:hover {"
             "border-top-color:rgba(255,255,255,112); border-left-color:rgba(255,255,255,74);"
@@ -1172,7 +1174,7 @@ class WorkbenchPanel(QWidget):
             "border-right-color:rgba(255,255,255,40); border-bottom-color:rgba(255,255,255,54);"
             "}"
         )
-        button.setFixedSize(tile_px, tile_px)
+        button.setFixedSize(tile_px, tile_h)
         icon = unreal_engine_icon(icon_px, color="#FFFFFF") if icon_name == "unreal" else app_icon(icon_name, size=icon_px, color="#FFFFFF")
         button.setIcon(icon)
         button.setIconSize(icon_size(icon_px))

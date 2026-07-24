@@ -710,18 +710,42 @@ Start here when changing a feature:
   Image-to-material work is covered by the AR/PBR Texture Lab: core generation
   lives in `app.ar_pbr.texture_map_lab`, the Qt plane-preview/sliders live in
   `app.ar_pbr.texture_map_lab_window`, and automation is exposed through
-  `ar_pbr.texture_lab.open/preview/export/substrate_plan`. It turns a source
+  `ar_pbr.texture_lab.open/preview/backend_status/export/substrate_plan`. It turns a source
   image into previewable PBR maps, exports separate BaseColor/Normal/AO/
-  Roughness/Metallic/Height/Cavity maps, and writes `unreal_orm`/`orm`/`arm`
-  packed masks with R=AO, G=Roughness, B=Metallic plus `gltf_mr` with
-  G=Roughness, B=Metallic. Unreal Substrate does not require a different
+  Roughness/Metallic/Height/Cavity/Curvature maps, and writes
+  `unreal_orm`/`orm`/`arm` packed masks with R=AO, G=Roughness, B=Metallic
+  plus `gltf_mr` with G=Roughness, B=Metallic. Optional advanced Substrate
+  exports can also include an `f0` RGB map and `f90_mask` grayscale mask, but
+  they are disabled by default because most materials should use constants or
+  the Metalness-To-DiffuseAlbedo-F0 helper. Unreal Substrate does not require a different
   source texture set for the base workflow; the manifest records a Substrate
   graph plan that feeds BaseColor/Specular/Metallic through Unreal's
   `Substrate Metalness-To-DiffuseAlbedo-F0` helper and wires the result into a
   Slab BSDF `DiffuseAlbedo/F0`, while Roughness and Normal go directly to the
   Slab and AO remains a material/root occlusion input. Advanced Substrate maps
-  such as F90, second roughness, anisotropy/tangent, fuzz, and glint are future
+  such as second roughness, anisotropy/tangent, fuzz, and glint remain future
   optional generators rather than guessed from a single image.
+  Texture Lab preview must avoid full-resolution PNG round trips where an
+  in-memory source is available, cache generated maps by source/settings
+  fingerprint, and re-shade preview-only light changes without regenerating
+  height/normal/AO maps. The user-facing lab supports both `plane` and
+  `sphere` material preview shapes so artists can inspect flat texture response
+  and curved-lighting response without leaving the tool; generated channel
+  labels and thumbnail labels must stay large enough to read in normal editor
+  screenshots. `TIGERCAPTURE_TEXTURE_LAB_BACKEND=auto|cpu|torch_cuda|
+  cupy|opencv_cuda` selects the map backend. Product UI/actions are GPU-required
+  by default: CPU map generation and CPU/Pillow preview compositing are
+  diagnostic-only and must require either explicit action parameter
+  `allow_cpu=true` or `TIGERCAPTURE_TEXTURE_LAB_ALLOW_CPU=1`. If no implemented
+  GPU backend is available, Texture Lab must show a GPU-required state instead
+  of silently choosing CPU fallback or implying GPU acceleration. The legacy CPU
+  path remains useful for small deterministic tests and offline diagnostics, not
+  for the normal interactive product path. GPU preview composition is owned by
+  `app.ar_pbr.texture_map_gpu_preview`, an offscreen OpenGL fragment-shader
+  compositor that samples Base/Normal/AO/Roughness/Metallic and packed map
+  channels for plane/sphere previews. PNG/action outputs may read the rendered
+  GPU result back to disk, but preview shading must not use the CPU compositor
+  unless the caller explicitly opted into diagnostics.
   `app.ar_pbr.full_gpu_export_service` defines and invokes the worker-safe
   helper-process path for that full-GPU route.
   `tools/ar_pbr_full_gpu_export_service.py` is the default helper; it accepts
@@ -1117,7 +1141,10 @@ Start here when changing a feature:
   export defaults, render-queue handoff, and publish copy without hiding the
   normal TigerCapture media-pool/workbench/timeline identity. The panel is
   lazy-loaded only when opened so launcher-to-editor startup does not eagerly
-  construct CapCut review widgets.
+  construct CapCut review widgets. Creator Assist must not carry general
+  program launchers such as PPT Maker or Unreal Engine Link; those belong only
+  in the Workbench `Programs` category so the right dock has one clear tool
+  launcher surface.
 - CapCut parity is intentionally tracked as a gap, not a claim. The current
   strongest local-first surfaces are Creator Assist, safe apply bundles,
   quick-result recommendations, preset search, publish review/provider handoff,
@@ -1211,6 +1238,18 @@ Start here when changing a feature:
   accents, menus, sliders, and scrollbars. This currently covers the new
   project dialog, mask editor, Live2D editor, Spine editor/scanner/timeline
   panels, actor-lane context menus, and Workbench node graph/popout chrome.
+- Top-level Studio windows must fit onto the focused/parent/current monitor
+  before first show and through the first few post-show layout passes. The
+  shared `app.window_placement` policy is installed from Studio/Capture entry
+  points and user-facing standalone tool launchers, including Preview/Color/
+  Timeline/Media Pool/Workbench/VTuber popouts, Motion Designer, Spine, MMD,
+  AR/PBR preview tools, Texture Lab, and PPT Maker. It uses current cursor/focus
+  screen selection for ownerless windows, accounts for sizeHint/minimumSizeHint
+  growth before first show, clamps oversized dialogs to the active screen's
+  available geometry, and runs short 0/120/360 ms first-show refit passes so
+  late Qt layout expansion cannot leave a window spanning monitors. Menus,
+  tooltips, and popups are excluded, and exceptional windows can opt out with
+  the `tiger_no_auto_place` Qt property.
 - Screen-recording-inspired timeline visuals live in `app/studio_theme.py`:
   media clips use amber alpha-blended blocks, zoom/actions use violet blocks,
   blade cuts use yellow scissors markers, and the playhead is violet. Shared
@@ -1885,9 +1924,10 @@ Start here when changing a feature:
   card count, and absence of numeric spinboxes.
 - Slider controls across the main editor, Workbench, Audio Mixer, Color page,
   Live2D editor, Spine editor, and node parameter widgets use the same quiet
-  Screen Studio-style language: dark 3 px rail, single purple fill, compact
-  round purple thumb. Avoid cyan/orange slider fills unless the control itself
-  is explicitly color-domain data.
+  Screen Studio-style language: dark 3 px rail, compact round thumb, and a
+  localized warm LED touch glow around the active handle that fades after
+  release. Avoid full-rail glow fills, cyan/orange slider fills, or persistent
+  neon bars unless the control itself is explicitly color-domain data.
 - The editor icon strategy is code-native by default. `app/icons.py` provides
   vector icons for project menus, media/video/audio/actor filters, grid/list
   views, pop-out, delete, marker, mark-in/out, scopes, mixer, proxy/layers,
@@ -5886,12 +5926,41 @@ AI Script Edit MVP integration:
   reviewable proposal without mutating the composition; `Apply` commits all
   proposed layers as one document-controller undo step.
 - The shared Qt-free request/proposal contract is
-  `app/motion_designer/ai_workspace.py`. `motion.ai.plan` exposes prompt plus
-  text/image references to AI/MCP callers, and `motion.ai.apply` applies only a
-  reviewed proposal through the same validation model as the UI. The current
-  built-in provider is a deterministic local layout fallback that can arrange
-  dropped images/text and add fade/slide/pop entrance behavior. Semantic image
-  understanding and streaming vision-language providers are not yet claimed.
+  `app/motion_designer/ai_workspace.py`. The versioned brief, beat storyboard,
+  editable composition compiler, and scoped patch contracts are implemented in
+  `app/motion_designer/ai_generation.py`. Motion generation uses the existing
+  Tiger Studio provider selection/readiness boundary in `app/ai_providers.py`:
+  a provider can return only structured JSON, never mutate a project, and its
+  output must pass the Motion schema validator before it reaches Review.
+  Provider failure falls back explicitly to a deterministic validated plan.
+  The AI panel runs provider planning off the UI thread and continues to use
+  `Apply` as the single document-controller mutation point.
+- `motion.ai.plan/apply` remain the v1 compatibility actions. New Action/MCP
+  endpoints are `motion.ai.provider.status`, `motion.ai.reference.analyze`,
+  `motion.ai.brief.create`, `motion.ai.storyboard.generate`,
+  `motion.ai.candidate.generate`, `motion.ai.candidates.generate`,
+  `motion.ai.candidate.preview`, `motion.ai.layer.*`,
+  `motion.ai.background.inpaint`, `motion.ai.text.reconstruct`,
+  `motion.ai.choreography.plan/apply`, `motion.ai.integrity.validate`,
+  `motion.ai.patch.plan`, and `motion.ai.patch.apply`.
+  Candidate generation does not change the composition;
+  candidate apply or patch apply is reviewed and committed as one revision.
+  Patch plans are restricted to registered layer IDs and the allowlisted text,
+  timing, transform, behavior, and visibility operations, with stale-revision
+  rejection. Layered-image generation uses source alpha, Basic Local, or
+  optional SAM segmentation behind one provider contract; mask integrity,
+  background reconstruction limits, OCR confidence gates, parent/rigid/pivot/
+  z-order graph data, and first-frame reconstruction validation are recorded in
+  the regenerable manifest. The AI dock creates selectable Clean, Dynamic, and
+  Collage treatments off the UI thread. `Refine Layers` supports original/
+  reconstruction comparison, add/remove mask brush, merge/split, lock,
+  parenting, pivot, and ordering, then recompiles only the reviewed candidate
+  before the existing single Apply/Undo transaction.
+  Basic Local is not claimed as universal semantic instance segmentation.
+  Missing SAM or enhanced inpainting reports an explicit local fallback;
+  cloud image transfer is not performed without a future consented provider.
+  The detailed product boundary and QA corpus are defined in
+  `docs/MOTION_AI_LAYERED_IMAGE_PRODUCT_PLAN_KO.md`.
 - Motion Designer M10 adds safe structured expressions, deterministic
   particles, ten built-in templates, broadcast cost/cache preflight, and AI
   proposal analysis. `expressions.py` evaluates a bounded JSON operation tree
@@ -6205,9 +6274,10 @@ AI Script Edit MVP integration:
   property-panel language: flatter dark rows, compact radii, restrained borders,
   and editor-style slider handles instead of bulky standalone-app widgets.
 - Standalone Painter startup sizing must respect the current screen's available
-  geometry. Its initial and minimum window sizes are capped below the monitor
-  work area, then clamped back on-screen on first show so low-resolution laptop
-  or scaled Windows desktops do not open with controls outside the viewport.
+  geometry and the same global Studio window-placement policy. Its initial and
+  minimum window sizes are capped below the monitor work area, then clamped back
+  on-screen on first show so low-resolution laptop, scaled Windows desktops, and
+  multi-monitor workspaces do not open with controls outside the viewport.
 - Painter automation includes direct document, view, tool, brush, panel, layer,
   channel, selection, path, clipboard, fill, mask, mirror, crop, image, canvas,
   editor-object, and PBR actions. Layer automation covers add/select/rename/

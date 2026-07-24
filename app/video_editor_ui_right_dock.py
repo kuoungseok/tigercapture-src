@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.i18n import tr
-from app.icons import app_icon, icon_size, unreal_engine_icon
+from app.icons import app_icon, icon_size
 from app.studio_slider import StudioSlider
 from app.style import COLOR_TEXT_TERTIARY
 from app.video_editor_lazy_panel import LazyPanelHost
@@ -29,7 +29,7 @@ from app.workbench_panel import WorkbenchPanel
 
 
 _WORKBENCH_MAIN_MIN_HEIGHT = max(500, TOP_WORK_MIN_HEIGHT + 90)
-_CREATOR_TOOLS_CLOSED_HEIGHT = 146
+_CREATOR_TOOLS_CLOSED_HEIGHT = 51
 _WORKBENCH_SECTION_CLOSED_HEIGHT = 51
 _WORKBENCH_TOOLS_OPEN_HEIGHT = 320
 _WORKBENCH_TOOLS_SHORT_OPEN_HEIGHT = 154
@@ -237,13 +237,6 @@ def build_right_dock_sections(self) -> None:
         self._workbench_header_widget,
     )
     wh_layout.addWidget(self._workbench_header_title, stretch=1)
-    self.workbench_motion_btn = QPushButton("MOTION", self._workbench_header_widget)
-    self.workbench_motion_btn.setObjectName("WorkbenchMotionEntryButton")
-    self.workbench_motion_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-    self.workbench_motion_btn.setToolTip("Create a Motion Clip")
-    self.workbench_motion_btn.setFixedSize(58, 20)
-    self.workbench_motion_btn.clicked.connect(self._open_motion_designer_entry)
-    wh_layout.addWidget(self.workbench_motion_btn)
     self.workbench_ppt_btn = QPushButton("PPT", self._workbench_header_widget)
     self.workbench_ppt_btn.setObjectName("WorkbenchPptEntryButton")
     self.workbench_ppt_btn.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -395,48 +388,13 @@ def build_right_dock_sections(self) -> None:
         self._creator_assist_placeholder = QLabel(tr("veditor.creator_assist.placeholder"))
         self._creator_assist_placeholder.setObjectName("CreatorAssistSummary")
         self._creator_assist_placeholder.setWordWrap(True)
+        # Creator Assist is for AI/editing assistance. Tool launchers such as
+        # PPT Maker and Unreal Engine Link live in the Workbench Programs tab.
         self._creator_tools_body = QWidget(self._creator_assist_section_host)
         self._creator_tools_body.setObjectName("CreatorToolsBody")
-        creator_tools_lay = QVBoxLayout(self._creator_tools_body)
-        creator_tools_lay.setContentsMargins(7, 5, 7, 7)
-        creator_tools_lay.setSpacing(5)
-        creator_tools_summary = QLabel(tr("veditor.creator_tools.summary"))
-        creator_tools_summary.setObjectName("CreatorToolSummary")
-        creator_tools_summary.setWordWrap(True)
-        creator_tools_lay.addWidget(creator_tools_summary)
-        self._creator_ppt_maker_btn = QPushButton(tr("veditor.creator_tools.ppt_maker"))
-        self._creator_ppt_maker_btn.setObjectName("CreatorToolButton")
-        self._creator_ppt_maker_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._creator_ppt_maker_btn.setToolTip(
-            tr("veditor.creator_tools.ppt_maker.tooltip")
-        )
-        self._creator_ppt_maker_btn.setIcon(app_icon("layers", size=13))
-        self._creator_ppt_maker_btn.setIconSize(icon_size(13))
-        self._creator_ppt_maker_btn.setMinimumHeight(34)
-        self._creator_ppt_maker_btn.clicked.connect(lambda: self._open_ppt_generator())
-        creator_tools_lay.addWidget(self._creator_ppt_maker_btn)
-        self._creator_unreal_engine_link_btn = QPushButton(
-            tr("veditor.creator_tools.unreal_engine_link")
-        )
-        self._creator_unreal_engine_link_btn.setObjectName("CreatorToolButton")
-        self._creator_unreal_engine_link_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self._creator_unreal_engine_link_btn.setToolTip(
-            tr("veditor.creator_tools.unreal_engine_link.tooltip")
-        )
-        self._creator_unreal_engine_link_btn.setIcon(unreal_engine_icon(16))
-        self._creator_unreal_engine_link_btn.setIconSize(icon_size(16))
-        self._creator_unreal_engine_link_btn.setMinimumHeight(34)
-        self._creator_unreal_engine_link_btn.clicked.connect(
-            lambda: self._open_unreal_engine_link()
-        )
-        creator_tools_lay.addWidget(self._creator_unreal_engine_link_btn)
-        self._creator_tools_body.setStyleSheet(
-            "QWidget#CreatorToolsBody{background:#101112;border-top:1px solid #22262B;}"
-            "QLabel#CreatorToolSummary{color:#AEB5BF;font-size:10px;background:transparent;border:none;}"
-            "QPushButton#CreatorToolButton{color:#E8EDF6;background:#15181D;border:1px solid #2B3037;"
-            "border-radius:5px;padding:5px 8px;font-size:10px;font-weight:720;text-align:left;}"
-            "QPushButton#CreatorToolButton:hover{background:#20252B;border-color:#68717E;color:#FFFFFF;}"
-        )
+        self._creator_tools_body.hide()
+        self._creator_ppt_maker_btn = None
+        self._creator_unreal_engine_link_btn = None
 
         def _ensure_creator_assist_with_tools():
             loaded = self._ensure_creator_assist_panel()

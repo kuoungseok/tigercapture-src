@@ -16,7 +16,7 @@ import os
 from typing import Any, Mapping, Sequence
 
 import numpy as np
-from PIL import Image, ImageDraw, ImageEnhance, ImageFilter
+from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 
 from app.ar_pbr.pbr_math import (
     fresnel_schlick_f90,
@@ -70,6 +70,7 @@ PREVIEW_MODES: tuple[str, ...] = (
     "arm",
     "gltf_mr",
 )
+PREVIEW_SHAPES: tuple[str, ...] = ("plane", "sphere")
 PACKED_LAYOUTS: tuple[str, ...] = ("unreal_orm", "orm", "arm", "rma", "gltf_mr")
 NORMAL_FORMATS: tuple[str, ...] = ("unreal_directx", "directx", "opengl")
 AO_ALGORITHMS: tuple[str, ...] = ("heightfield_horizon", "legacy_blur")
@@ -82,6 +83,10 @@ PREVIEW_ONLY_SETTING_KEYS = frozenset(
         "preview_animate_light",
     }
 )
+
+
+class TextureMapGpuRequiredError(RuntimeError):
+    """Raised when Texture Lab is asked to render without a GPU backend."""
 UNREAL_TEXTURE_IMPORT_SETTINGS: dict[str, dict[str, Any]] = {
     "base_color": {"sRGB": True, "compression": "Default"},
     "normal": {"sRGB": False, "compression": "TC_Normalmap"},
@@ -234,7 +239,10 @@ def texture_map_backend_status() -> dict[str, Any]:
 
     install_guidance = {
         "recommended_backend": "torch_cuda",
-        "summary": "Texture Lab GPU acceleration needs PyTorch with CUDA. Current environment will use CPU until it is installed.",
+        "summary": (
+            "Texture Lab product preview/export requires a GPU backend. "
+            "Install PyTorch with CUDA, or explicitly enable CPU diagnostics only when testing."
+        ),
         "pip_command": (
             ".\\.venv\\Scripts\\python.exe -m pip install torch torchvision "
             "--index-url https://download.pytorch.org/whl/cu128"
@@ -248,15 +256,28 @@ def texture_map_backend_status() -> dict[str, Any]:
         "notes": [
             "Install must be done in the TigerCapture virtual environment.",
             "The CUDA wheel index may need to change if the local driver/toolchain policy changes.",
-            "If install fails or torch.cuda.is_available() is false, Texture Lab keeps using CPU safely.",
+            "If install fails or torch.cuda.is_available() is false, product UI/actions stay GPU-required.",
+            "CPU fallback is diagnostic-only via allow_cpu=true or TIGERCAPTURE_TEXTURE_LAB_ALLOW_CPU=1.",
         ],
     }
+    try:
+        from app.ar_pbr.texture_map_gpu_preview import texture_lab_gpu_preview_status
+
+        preview_renderer = texture_lab_gpu_preview_status()
+    except Exception as exc:
+        preview_renderer = {
+            "renderer": "opengl_offscreen_texture_lab",
+            "available": False,
+            "error": str(exc),
+            "cpu_preview": False,
+        }
     return {
         "schema_id": f"{SCHEMA_ID}.backend_status",
         "env_backend": str(os.environ.get("TIGERCAPTURE_TEXTURE_LAB_BACKEND", "auto") or "auto"),
         "implemented_backends": ["cpu", "torch_cuda"],
         "planned_gpu_backends": ["torch_cuda", "cupy", "opencv_cuda"],
         "install_guidance": install_guidance,
+        "preview_renderer": preview_renderer,
         "backends": {
             "cpu": {"available": True, "implemented": True},
             "torch_cuda": {
@@ -284,14 +305,28 @@ def texture_map_backend_status() -> dict[str, Any]:
     }
 
 
-def select_texture_map_backend(requested: str | None = None) -> dict[str, Any]:
+def texture_lab_cpu_fallback_allowed(default: bool = False) -> bool:
+    raw = os.environ.get("TIGERCAPTURE_TEXTURE_LAB_ALLOW_CPU")
+    if raw is None:
+        return bool(default)
+    return str(raw).strip().casefold() in {"1", "true", "yes", "on", "allow", "allowed"}
+
+
+def select_texture_map_backend(requested: str | None = None, *, allow_cpu: bool = True) -> dict[str, Any]:
     requested_name = str(requested or os.environ.get("TIGERCAPTURE_TEXTURE_LAB_BACKEND", "auto") or "auto").strip().lower()
     if requested_name not in TEXTURE_MAP_BACKENDS:
         requested_name = "auto"
     status = texture_map_backend_status()
-    active = "cpu"
-    reason = "cpu_backend_is_the_only_fully_implemented_backend"
-    if requested_name in {"torch_cuda", "cupy", "opencv_cuda"}:
+    cpu_allowed = bool(allow_cpu)
+    active = "unavailable"
+    reason = "gpu_backend_required"
+    if requested_name == "cpu":
+        if cpu_allowed:
+            active = "cpu"
+            reason = "requested_cpu_backend_selected"
+        else:
+            reason = "cpu_backend_disabled_by_policy"
+    elif requested_name in {"torch_cuda", "cupy", "opencv_cuda"}:
         backend = status["backends"].get(requested_name, {})
         if not backend.get("available"):
             reason = f"{requested_name}_not_available"
@@ -300,6 +335,9 @@ def select_texture_map_backend(requested: str | None = None) -> dict[str, Any]:
         else:
             active = requested_name
             reason = "requested_backend_selected"
+        if active == "unavailable" and cpu_allowed:
+            active = "cpu"
+            reason = f"{reason}_cpu_fallback"
     elif requested_name == "auto":
         for candidate in ("torch_cuda", "cupy", "opencv_cuda"):
             backend = status["backends"].get(candidate, {})
@@ -307,11 +345,16 @@ def select_texture_map_backend(requested: str | None = None) -> dict[str, Any]:
                 active = candidate
                 reason = "auto_gpu_backend_selected"
                 break
+        if active == "unavailable" and cpu_allowed:
+            active = "cpu"
+            reason = "auto_cpu_fallback_allowed"
     return {
         "requested": requested_name,
         "active": active,
         "fallback": active != requested_name and requested_name != "auto",
         "reason": reason,
+        "allow_cpu": cpu_allowed,
+        "gpu_required": active == "unavailable",
         "status": status,
     }
 
@@ -1244,15 +1287,27 @@ def generate_texture_maps_from_image(
     max_size: int | None = None,
     source_path: str = "",
     backend: str | None = None,
+    allow_cpu: bool = True,
 ) -> dict[str, Any]:
     """Generate base, scalar, normal, and packed-ready PBR maps from an in-memory image."""
     normalized = normalize_texture_map_settings(settings)
-    selected_backend = select_texture_map_backend(backend)
+    selected_backend = select_texture_map_backend(backend, allow_cpu=allow_cpu)
+    if selected_backend["active"] == "unavailable":
+        raise TextureMapGpuRequiredError(
+            f"Texture Lab requires a GPU backend; CPU fallback is disabled ({selected_backend['reason']})."
+        )
     resized = _resize_for_max_size(image.convert("RGB"), max_size)
     if selected_backend["active"] == "torch_cuda":
         try:
             result = _generate_texture_maps_torch_cuda(resized, normalized, source_path=source_path)
         except Exception as exc:
+            if not allow_cpu:
+                selected_backend = dict(selected_backend)
+                selected_backend["reason"] = f"torch_cuda_failed:{type(exc).__name__}"
+                selected_backend["gpu_required"] = True
+                raise TextureMapGpuRequiredError(
+                    f"Texture Lab GPU backend failed and CPU fallback is disabled: {type(exc).__name__}: {exc}"
+                ) from exc
             fallback_backend = select_texture_map_backend("cpu")
             fallback_backend["requested"] = selected_backend.get("requested", "torch_cuda")
             fallback_backend["fallback"] = True
@@ -1273,6 +1328,7 @@ def generate_texture_maps(
     *,
     max_size: int | None = None,
     backend: str | None = None,
+    allow_cpu: bool = True,
 ) -> dict[str, Any]:
     """Generate base, scalar, normal, and packed-ready PBR maps from an image."""
     path = Path(image_path).expanduser()
@@ -1280,7 +1336,14 @@ def generate_texture_maps(
         raise FileNotFoundError(str(path))
     with Image.open(path) as source:
         image = source.convert("RGB")
-    return generate_texture_maps_from_image(image, settings, max_size=max_size, source_path=str(path), backend=backend)
+    return generate_texture_maps_from_image(
+        image,
+        settings,
+        max_size=max_size,
+        source_path=str(path),
+        backend=backend,
+        allow_cpu=allow_cpu,
+    )
 
 
 def _algorithm_metadata(settings: Mapping[str, Any]) -> dict[str, Any]:
@@ -1462,19 +1525,188 @@ def substrate_export_plan(settings: Mapping[str, Any] | None = None) -> dict[str
     }
 
 
+def _normalize_preview_shape(value: Any) -> str:
+    shape = str(value or "plane").strip().lower()
+    if shape not in PREVIEW_SHAPES:
+        raise ValueError(f"unknown preview shape: {value}")
+    return shape
+
+
+def _texture_lab_label_font(pixel_size: int) -> ImageFont.ImageFont:
+    size = max(12, int(pixel_size))
+    for name in (
+        "malgunbd.ttf",
+        "malgun.ttf",
+        "segoeuib.ttf",
+        "seguisb.ttf",
+        "arialbd.ttf",
+        "arial.ttf",
+        "DejaVuSans-Bold.ttf",
+    ):
+        try:
+            return ImageFont.truetype(name, size)
+        except Exception:
+            continue
+    try:
+        return ImageFont.load_default(size=size)
+    except TypeError:
+        return ImageFont.load_default()
+
+
+def _sample_map_nearest(value: np.ndarray, x_index: np.ndarray, y_index: np.ndarray) -> np.ndarray:
+    arr = np.asarray(value, dtype=np.float32)
+    if arr.ndim < 2:
+        arr = np.asarray(arr).reshape((1, 1))
+    y = np.clip(y_index, 0, max(0, arr.shape[0] - 1)).astype(np.int32)
+    x = np.clip(x_index, 0, max(0, arr.shape[1] - 1)).astype(np.int32)
+    return arr[y, x]
+
+
+def _sphere_material_preview_array(maps: Mapping[str, np.ndarray], settings: Mapping[str, Any]) -> np.ndarray:
+    base_src = np.asarray(maps["base_color"], dtype=np.float32)
+    tex_h, tex_w = base_src.shape[:2]
+    out_h = max(96, tex_h)
+    out_w = max(96, tex_w)
+    yy, xx = np.mgrid[0:out_h, 0:out_w].astype(np.float32)
+    radius = max(24.0, min(out_w, out_h) * 0.42)
+    cx = (out_w - 1.0) * 0.5
+    cy = (out_h - 1.0) * 0.50
+    nx = (xx - cx) / radius
+    ny = (cy - yy) / radius
+    rr2 = nx * nx + ny * ny
+    mask = rr2 <= 1.0
+    nz = np.sqrt(np.clip(1.0 - rr2, 0.0, 1.0))
+
+    u = np.clip(nx * 0.5 + 0.5, 0.0, 1.0)
+    v = np.clip(0.5 - ny * 0.5, 0.0, 1.0)
+    x_index = np.rint(u * max(1, tex_w - 1)).astype(np.int32)
+    y_index = np.rint(v * max(1, tex_h - 1)).astype(np.int32)
+
+    base = _sample_map_nearest(base_src, x_index, y_index)
+    roughness = _sample_map_nearest(np.asarray(maps["roughness"], dtype=np.float32), x_index, y_index)
+    metallic = _sample_map_nearest(np.asarray(maps["metallic"], dtype=np.float32), x_index, y_index)
+    ao = _sample_map_nearest(np.asarray(maps["ao"], dtype=np.float32), x_index, y_index)
+    detail = _sample_map_nearest(np.asarray(maps["normal"], dtype=np.float32), x_index, y_index) * 2.0 - 1.0
+
+    geom_normal = np.dstack([nx, ny, nz]).astype(np.float32)
+    normal = geom_normal.copy()
+    if detail.ndim == 3 and detail.shape[-1] >= 3:
+        normal[..., 0] += detail[..., 0] * 0.18
+        normal[..., 1] += detail[..., 1] * 0.18
+        normal[..., 2] += (detail[..., 2] - 1.0) * 0.08
+    normal /= np.maximum(np.linalg.norm(normal, axis=2, keepdims=True), 1.0e-6)
+
+    az = math.radians(float(settings["preview_light_azimuth"]))
+    el = math.radians(float(settings["preview_light_elevation"]))
+    light = np.array([math.cos(el) * math.cos(az), math.cos(el) * math.sin(az), math.sin(el)], dtype=np.float32)
+    light /= max(float(np.linalg.norm(light)), 1.0e-6)
+    view = np.array([0.0, 0.0, 1.0], dtype=np.float32)
+    half_vec = light + view
+    half_vec /= max(float(np.linalg.norm(half_vec)), 1.0e-6)
+    ndotl = np.clip(np.sum(normal * light[None, None, :], axis=2), 0.0, 1.0)
+    ndotv = np.clip(normal[..., 2], 0.0, 1.0)
+    ndoth = np.clip(np.sum(normal * half_vec[None, None, :], axis=2), 0.0, 1.0)
+    vdoth = float(np.clip(np.dot(view, half_vec), 0.0, 1.0))
+
+    substrate_enabled = bool(settings.get("substrate_enabled", False))
+    if substrate_enabled:
+        f0_override = (
+            _sample_map_nearest(np.asarray(maps["f0"], dtype=np.float32), x_index, y_index)
+            if "f0" in maps
+            else None
+        )
+        diffuse_albedo, f0 = substrate_metalness_to_diffuse_albedo_f0(
+            albedo=base,
+            metallic=metallic,
+            reflectance=settings.get("substrate_reflectance", 0.5),
+            f0_override=f0_override,
+        )
+        f90_mask = (
+            _sample_map_nearest(np.asarray(maps["f90_mask"], dtype=np.float32), x_index, y_index)
+            if "f90_mask" in maps
+            else np.ones_like(metallic)
+        )
+        f90 = substrate_f90(
+            f0=f0,
+            f90_color=(1.0, 1.0, 1.0),
+            f90_mask=f90_mask,
+            strength=float(settings.get("f90_mask_strength", 0.45)),
+        )
+        fresnel = fresnel_schlick_f90(np.full_like(roughness, vdoth, dtype=np.float32), f0, f90)
+    else:
+        diffuse_albedo = base
+        f0 = material_f0(base, metallic, settings.get("substrate_reflectance", 0.5))
+        fresnel = f0 + (1.0 - f0) * ((1.0 - vdoth) ** 5.0)
+
+    alpha = np.maximum(roughness * roughness, 0.001)
+    alpha2 = alpha * alpha
+    denom = np.maximum(ndoth * ndoth * (alpha2 - 1.0) + 1.0, 1.0e-5)
+    d = alpha2 / np.maximum(np.pi * denom * denom, 1.0e-5)
+    k = ((roughness + 1.0) * (roughness + 1.0)) / 8.0
+    gv = ndotv / np.maximum(ndotv * (1.0 - k) + k, 1.0e-5)
+    gl = ndotl / np.maximum(ndotl * (1.0 - k) + k, 1.0e-5)
+    if substrate_enabled:
+        diffuse = (1.0 - fresnel) * diffuse_albedo / np.pi
+    else:
+        diffuse = (1.0 - fresnel) * (1.0 - metallic[..., None]) * base / np.pi
+    specular = (d[..., None] * gv[..., None] * gl[..., None] * fresnel) / np.maximum(
+        4.0 * ndotv[..., None] * ndotl[..., None],
+        1.0e-5,
+    )
+    lit = (diffuse + specular) * ndotl[..., None] * 2.3
+    env = diffuse_albedo * float(settings["preview_environment"]) * ao[..., None]
+    preview = np.clip(env + lit * ao[..., None], 0.0, 1.0)
+
+    background = np.zeros((out_h, out_w, 3), dtype=np.float32)
+    background[..., 0] = 0.030
+    background[..., 1] = 0.034
+    background[..., 2] = 0.045
+    shadow = np.exp(
+        -(
+            ((xx - cx) / max(1.0, radius * 0.86)) ** 2
+            + ((yy - (cy + radius * 0.82)) / max(1.0, radius * 0.18)) ** 2
+        )
+    )
+    background *= 1.0 - shadow[..., None] * 0.38
+
+    edge = np.clip((1.0 - rr2) / 0.10, 0.0, 1.0)
+    edge = edge * edge * (3.0 - 2.0 * edge)
+    rim = np.clip((1.0 - nz) ** 3.0, 0.0, 1.0) * 0.10
+    sphere = np.clip(preview + rim[..., None], 0.0, 1.0)
+    blend = (edge * mask.astype(np.float32))[..., None]
+    out = background * (1.0 - blend) + sphere * blend
+    return np.clip(out, 0.0, 1.0).astype(np.float32)
+
+
 def render_plane_preview_from_generated(
     generated: Mapping[str, Any],
     settings: Mapping[str, Any] | None = None,
     *,
     preview_mode: str = "material",
+    preview_shape: str = "plane",
     output_path: str | Path | None = None,
     width: int = 768,
     height: int | None = None,
     source_path: str | Path | None = None,
+    allow_cpu_preview: bool = True,
 ) -> dict[str, Any]:
+    if not allow_cpu_preview:
+        from app.ar_pbr.texture_map_gpu_preview import render_texture_lab_gpu_preview_from_generated
+
+        return render_texture_lab_gpu_preview_from_generated(
+            generated,
+            settings,
+            preview_mode=preview_mode,
+            preview_shape=preview_shape,
+            output_path=output_path,
+            width=width,
+            height=height,
+            source_path=source_path,
+        )
     mode = str(preview_mode or "material").strip().lower()
     if mode not in PREVIEW_MODES:
         raise ValueError(f"unknown preview mode: {preview_mode}")
+    requested_shape = _normalize_preview_shape(preview_shape)
     w = max(64, int(width or 768))
     if height is not None:
         h = max(64, int(height))
@@ -1484,7 +1716,11 @@ def render_plane_preview_from_generated(
     preview_settings = dict(generated.get("settings") or {})
     if settings is not None:
         preview_settings.update(normalize_texture_map_settings(settings))
-    preview = _preview_array_for_mode(maps, preview_settings, mode)
+    effective_shape = requested_shape if mode == "material" else "plane"
+    if effective_shape == "sphere":
+        preview = _sphere_material_preview_array(maps, preview_settings)
+    else:
+        preview = _preview_array_for_mode(maps, preview_settings, mode)
     preview_img = _to_rgb_image(preview)
     target_w = w
     target_h = h if h else max(64, int(round(preview_img.height * (target_w / max(1, preview_img.width)))))
@@ -1492,7 +1728,7 @@ def render_plane_preview_from_generated(
         preview_img = preview_img.resize((target_w, target_h), Image.Resampling.BICUBIC)
     if output_path is None:
         source = Path(str(source_path or generated.get("source_path") or "texture_source.png")).expanduser()
-        out = source.with_name(f"{source.stem}_pbr_plane_preview_{mode}.png")
+        out = source.with_name(f"{source.stem}_pbr_{effective_shape}_preview_{mode}.png")
     else:
         out = Path(output_path).expanduser()
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -1502,6 +1738,8 @@ def render_plane_preview_from_generated(
         "source_path": str(source_path or generated.get("source_path") or ""),
         "preview_path": str(out),
         "preview_mode": mode,
+        "preview_shape": effective_shape,
+        "requested_preview_shape": requested_shape,
         "size": [int(preview_img.size[0]), int(preview_img.size[1])],
         "settings": preview_settings,
         "algorithms": generated["algorithms"],
@@ -1518,21 +1756,27 @@ def render_plane_preview(
     settings: Mapping[str, Any] | None = None,
     *,
     preview_mode: str = "material",
+    preview_shape: str = "plane",
     output_path: str | Path | None = None,
     width: int = 768,
     height: int | None = None,
     backend: str | None = None,
+    allow_cpu: bool = True,
+    allow_cpu_preview: bool | None = None,
 ) -> dict[str, Any]:
     w = max(64, int(width or 768))
-    generated = generate_texture_maps(image_path, settings, max_size=w, backend=backend)
+    generated = generate_texture_maps(image_path, settings, max_size=w, backend=backend, allow_cpu=allow_cpu)
+    cpu_preview_allowed = allow_cpu if allow_cpu_preview is None else bool(allow_cpu_preview)
     return render_plane_preview_from_generated(
         generated,
         settings,
         preview_mode=preview_mode,
+        preview_shape=preview_shape,
         output_path=output_path,
         width=width,
         height=height,
         source_path=image_path,
+        allow_cpu_preview=cpu_preview_allowed,
     )
 
 
@@ -1540,7 +1784,8 @@ def _intrinsic_channels_preview_array(maps: Mapping[str, np.ndarray]) -> np.ndar
     base = np.asarray(maps["base_color"], dtype=np.float32)
     tile_w = max(1, int(base.shape[1]))
     tile_h = max(1, int(base.shape[0]))
-    label_h = max(20, int(round(tile_h * 0.085)))
+    label_h = max(34, int(round(tile_h * 0.105)))
+    label_font = _texture_lab_label_font(max(14, min(28, int(round(label_h * 0.50)))))
     gap = max(3, int(round(tile_w * 0.012)))
     panels: tuple[tuple[str, str], ...] = (
         ("Input", "base_color_source"),
@@ -1565,12 +1810,12 @@ def _intrinsic_channels_preview_array(maps: Mapping[str, np.ndarray]) -> np.ndar
             tile = tile.resize((tile_w, tile_h), Image.Resampling.BICUBIC)
         label_rect = (x, 0, x + tile_w, label_h)
         draw.rectangle(label_rect, fill="#11151D")
-        text_bbox = draw.textbbox((0, 0), label)
+        text_bbox = draw.textbbox((0, 0), label, font=label_font)
         text_w = max(1, int(text_bbox[2] - text_bbox[0]))
         text_h = max(1, int(text_bbox[3] - text_bbox[1]))
         text_x = x + max(0, (tile_w - text_w) // 2)
         text_y = max(0, (label_h - text_h) // 2) - 1
-        draw.text((text_x, text_y), label, fill="#E8ECF5")
+        draw.text((text_x, text_y), label, fill="#E8ECF5", font=label_font)
         canvas.paste(tile, (x, label_h))
         x += tile_w + gap
     return (np.asarray(canvas, dtype=np.float32) / 255.0).astype(np.float32)
@@ -1668,6 +1913,7 @@ def export_texture_maps(
     packed_layouts: Sequence[str] | None = None,
     max_size: int | None = None,
     backend: str | None = None,
+    allow_cpu: bool = True,
 ) -> dict[str, Any]:
     path = Path(image_path).expanduser()
     if output_dir is None:
@@ -1675,7 +1921,7 @@ def export_texture_maps(
     else:
         out_dir = Path(output_dir).expanduser()
     out_dir.mkdir(parents=True, exist_ok=True)
-    generated = generate_texture_maps(path, settings, max_size=max_size, backend=backend)
+    generated = generate_texture_maps(path, settings, max_size=max_size, backend=backend, allow_cpu=allow_cpu)
     default_maps = (
         tuple(name for name in DEFAULT_SEPARATE_MAPS if name != "metallic") + OPTIONAL_SUBSTRATE_MAPS
         if bool(generated["settings"].get("substrate_enabled", False))

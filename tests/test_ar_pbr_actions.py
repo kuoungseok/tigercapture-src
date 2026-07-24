@@ -237,9 +237,14 @@ def test_ar_pbr_gizmo_actions_are_registered_for_automation() -> None:
     texture_export_schema = action_specs["ar_pbr.texture_lab.export"]["params_schema"]["properties"]
     texture_preview_schema = action_specs["ar_pbr.texture_lab.preview"]["params_schema"]["properties"]
     backend_schema = action_specs["ar_pbr.texture_lab.backend_status"]["params_schema"]["properties"]
-    assert {"image_path", "output_dir", "settings", "maps", "packed_layouts", "backend"} <= set(texture_export_schema)
+    assert {"image_path", "output_dir", "settings", "maps", "packed_layouts", "backend", "allow_cpu"} <= set(
+        texture_export_schema
+    )
+    assert "allow_cpu" in backend_schema
+    assert "allow_cpu" in texture_preview_schema
     assert {"auto", "cpu", "torch_cuda"} <= set(backend_schema["backend"]["enum"])
     assert {"auto", "cpu", "torch_cuda"} <= set(texture_preview_schema["backend"]["enum"])
+    assert {"plane", "sphere"} <= set(texture_preview_schema["preview_shape"]["enum"])
     assert {"material", "normal", "f0", "f90_mask", "unreal_orm", "gltf_mr"} <= set(
         texture_preview_schema["preview_mode"]["enum"]
     )

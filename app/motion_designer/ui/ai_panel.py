@@ -7,6 +7,8 @@ from PySide6.QtCore import QSize, QStandardPaths, Qt, Signal
 from PySide6.QtGui import QIcon, QImage, QKeyEvent, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
+    QComboBox,
     QFileDialog,
     QHBoxLayout,
     QLabel,
@@ -25,6 +27,7 @@ from app.motion_designer.ai_workspace import (
     MotionAIRequest,
     references_from_paths,
 )
+from .layer_extraction_panel import LayerExtractionPanel
 
 
 class MotionAIPromptEdit(QPlainTextEdit):
@@ -84,6 +87,7 @@ class MotionAIReferenceList(QListWidget):
 class MotionAIPanel(QWidget):
     plan_requested = Signal(object)
     apply_requested = Signal(object)
+    decomposition_repaired = Signal(object)
 
     def __init__(self, parent=None, *, attachment_root: str | Path | None = None) -> None:
         super().__init__(parent)
@@ -93,6 +97,7 @@ class MotionAIPanel(QWidget):
         self.setMaximumWidth(430)
         self._references: list[MotionAIReference] = []
         self._proposal: dict | None = None
+        self._candidates: list[dict] = []
         self._provider_status = self._read_provider_status()
         if attachment_root is None:
             app_data = QStandardPaths.writableLocation(QStandardPaths.AppDataLocation)
@@ -148,6 +153,18 @@ class MotionAIPanel(QWidget):
         self.clear_button.setToolTip("Clear prompt and references")
         self.clear_button.clicked.connect(self.clear_request)
         tools.addWidget(self.clear_button)
+        self.decompose_images = QCheckBox("Explode image layers", self)
+        self.decompose_images.setChecked(True)
+        self.decompose_images.setToolTip(
+            "Separate local image references into editable background, subject, text, and depth layers."
+        )
+        self.decompose_images.toggled.connect(self._invalidate_proposal)
+        tools.addWidget(self.decompose_images)
+        self.advanced_button = QToolButton(self)
+        self.advanced_button.setText("Advanced")
+        self.advanced_button.setCheckable(True)
+        self.advanced_button.setToolTip("Show layer extraction and motion controls")
+        tools.addWidget(self.advanced_button)
         tools.addStretch(1)
         self.plan_button = QPushButton("Plan", self)
         self.plan_button.clicked.connect(self.request_plan)
@@ -159,9 +176,32 @@ class MotionAIPanel(QWidget):
         tools.addWidget(self.apply_button)
         root.addLayout(tools)
 
+        self.extraction = LayerExtractionPanel(self)
+        self.extraction.setVisible(False)
+        self.extraction.options_changed.connect(self._invalidate_proposal)
+        self.advanced_button.toggled.connect(self.extraction.setVisible)
+        root.addWidget(self.extraction)
+
+        result_header = QHBoxLayout()
         result_label = QLabel("PROPOSAL", self)
         result_label.setObjectName("MotionAIHeading")
-        root.addWidget(result_label)
+        result_header.addWidget(result_label)
+        result_header.addStretch(1)
+        self.candidate_selector = QComboBox(self)
+        self.candidate_selector.setToolTip("Choose a generated motion treatment")
+        self.candidate_selector.setVisible(False)
+        self.candidate_selector.currentIndexChanged.connect(
+            self._select_candidate
+        )
+        result_header.addWidget(self.candidate_selector)
+        self.repair_button = QPushButton("Refine Layers", self)
+        self.repair_button.setEnabled(False)
+        self.repair_button.setToolTip(
+            "Review original, reconstructed background, masks, locks, and groups"
+        )
+        self.repair_button.clicked.connect(self._open_layer_repair)
+        result_header.addWidget(self.repair_button)
+        root.addLayout(result_header)
         self.result = QPlainTextEdit(self)
         self.result.setObjectName("MotionAIResult")
         self.result.setReadOnly(True)
@@ -244,12 +284,20 @@ class MotionAIPanel(QWidget):
             "prompt": self.prompt.toPlainText().strip(),
             "references": self.reference_dicts(),
             "provider": "",
+            "decompose_images": self.decompose_images.isChecked(),
+            **self.extraction.options(),
         })
 
     def set_generating(self, active: bool) -> None:
         self.plan_button.setEnabled(not active)
         self.attach_button.setEnabled(not active)
         self.clear_button.setEnabled(not active)
+        self.decompose_images.setEnabled(not active)
+        self.advanced_button.setEnabled(not active)
+        self.extraction.set_generating(active)
+        self.repair_button.setEnabled(
+            not active and self._proposal_has_decomposition()
+        )
         if active:
             self.apply_button.setEnabled(False)
             self.status.setText("Planning...")
@@ -266,6 +314,40 @@ class MotionAIPanel(QWidget):
         self.result.setPlainText(str(message or "Motion AI generation failed."))
 
     def set_proposal(self, proposal: dict) -> None:
+        self._candidates = [dict(proposal)]
+        self.candidate_selector.setVisible(False)
+        self._display_proposal(dict(proposal))
+
+    def set_candidate_set(self, payload: dict) -> None:
+        candidates = [
+            dict(item)
+            for item in payload.get("candidates", [])
+            if isinstance(item, dict)
+        ]
+        if not candidates:
+            self.set_error("Motion AI returned no candidates.")
+            return
+        self._candidates = candidates
+        self.candidate_selector.blockSignals(True)
+        self.candidate_selector.clear()
+        for index, item in enumerate(candidates, 1):
+            analysis = item.get("analysis") if isinstance(item.get("analysis"), dict) else {}
+            variant = str(analysis.get("motion_variant") or f"Candidate {index}")
+            self.candidate_selector.addItem(variant.title(), index - 1)
+        selected = max(0, min(
+            len(candidates) - 1,
+            int(payload.get("selected_index", 0) or 0),
+        ))
+        self.candidate_selector.setCurrentIndex(selected)
+        self.candidate_selector.blockSignals(False)
+        self.candidate_selector.setVisible(len(candidates) > 1)
+        self._display_proposal(candidates[selected])
+
+    def _select_candidate(self, index: int) -> None:
+        if 0 <= int(index) < len(self._candidates):
+            self._display_proposal(self._candidates[int(index)])
+
+    def _display_proposal(self, proposal: dict) -> None:
         self._proposal = dict(proposal)
         summary = str(proposal.get("summary") or "")
         layers = list(proposal.get("layers") or [])
@@ -281,6 +363,40 @@ class MotionAIPanel(QWidget):
                 f"- Assets: {len(analysis.get('missing_assets') or [])} missing",
                 f"- Bake/cache: {len(analysis.get('bake_requirements') or [])} required",
             ])
+        decompositions = [
+            item for item in analysis.get("image_decompositions", [])
+            if isinstance(item, dict)
+        ]
+        if decompositions:
+            locked_count = sum(
+                1
+                for report in decompositions
+                for element in report.get("elements", [])
+                if isinstance(element, dict)
+                and bool((element.get("metadata") or {}).get("motion_lock_to_background"))
+            )
+            providers = list(dict.fromkeys(
+                str(
+                    (report.get("diagnostics") or {}).get("segmentation", {}).get("provider")
+                    or (report.get("diagnostics") or {}).get("segmentation_backend")
+                    or "unknown"
+                )
+                for report in decompositions
+            ))
+            valid_count = sum(
+                1
+                for report in decompositions
+                if bool((report.get("diagnostics") or {}).get("validation", {}).get("ok"))
+            )
+            lines.extend([
+                "",
+                "Layer extraction:",
+                f"- Provider: {', '.join(providers)}",
+                f"- Background locks: {locked_count}",
+                f"- Integrity: {valid_count}/{len(decompositions)} passed",
+                f"- Motion: {analysis.get('motion_variant', self.extraction.variant.currentText())}",
+            ])
+        self.repair_button.setEnabled(bool(decompositions))
         if warnings:
             lines.extend(["", "Review:", *[f"- {item}" for item in warnings]])
         self.result.setPlainText("\n".join(lines).strip())
@@ -342,7 +458,47 @@ class MotionAIPanel(QWidget):
 
     def _invalidate_proposal(self) -> None:
         self._proposal = None
+        self._candidates.clear()
+        self.candidate_selector.clear()
+        self.candidate_selector.setVisible(False)
+        self.repair_button.setEnabled(False)
         self.apply_button.setEnabled(False)
+
+    def update_current_proposal(self, proposal: dict) -> None:
+        current = self.candidate_selector.currentIndex()
+        if 0 <= current < len(self._candidates):
+            self._candidates[current] = dict(proposal)
+        else:
+            self._candidates = [dict(proposal)]
+        self._display_proposal(dict(proposal))
+
+    def _proposal_has_decomposition(self) -> bool:
+        if not isinstance(self._proposal, dict):
+            return False
+        analysis = (
+            self._proposal.get("analysis")
+            if isinstance(self._proposal.get("analysis"), dict)
+            else {}
+        )
+        return any(
+            isinstance(item, dict)
+            for item in analysis.get("image_decompositions", [])
+        )
+
+    def _open_layer_repair(self) -> None:
+        if not self._proposal_has_decomposition():
+            return
+        from .layer_extraction_dialog import LayerExtractionDialog
+
+        analysis = self._proposal.get("analysis", {})
+        decomposition = next(
+            item
+            for item in analysis.get("image_decompositions", [])
+            if isinstance(item, dict)
+        )
+        dialog = LayerExtractionDialog(decomposition, self)
+        if dialog.exec() == dialog.Accepted:
+            self.decomposition_repaired.emit(dialog.result_dict())
 
     @staticmethod
     def _read_provider_status() -> str:

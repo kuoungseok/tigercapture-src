@@ -1,21 +1,41 @@
 # Tiger Studio AI Motion Generation 제품 기획서
 
-## 구현 상태 (2026-07-23)
+## 구현 상태 (2026-07-24)
 
 - AIG0 계약 기준선 구현: 기존 Tiger Studio AI provider 선택, 준비 상태,
   deterministic fallback, JSON-only, Review-before-Apply 경계를 재사용한다.
 - AIG1 1차 구현: 이미지/텍스트 reference 수집과 로컬 파일 사실 확인을 지원한다.
   의미 기반 이미지 이해는 아직 주장하지 않는다.
+- AIG1 이미지 분해 제품 경로 구현: `image_decomposition.py`가 source alpha,
+  Basic Local 또는 선택형 SAM 공급자로 배경과 주·보조 피사체를 분리하고,
+  마스크 무결성, Layer Graph, 선택적 로컬 OCR, 공용 depth, 배경 복원과
+  카메라 이동 제한을 포함한 regenerable RGBA/mask/depth cache를 만든다.
+  AI Workspace의 `Explode image layers`, 고급 옵션, `Refine Layers`와
+  `motion.ai.reference.decompose`, `motion.ai.layer.*` Action이 같은 서비스를
+  사용한다.
 - AIG2 1차 구현: versioned Creative Brief와 Beat Storyboard를 생성하고 엄격히 검증한다.
-- AIG3 1차 구현: storyboard를 native Image/Typography/Vector/Behavior 레이어로 컴파일한다.
+- AIG3 구현: storyboard를 native Image/Typography/Vector/Behavior 레이어로
+  컴파일하고, 분해된 배경/피사체/텍스트에 depth-weighted 2.5D parallax,
+  Ken Burns scale, staggered fade/pop을 적용한다. Clean, Dynamic, Collage
+  후보는 강체·부모 잠금과 사용자 피벗을 보존한다.
+- AIG4 1차 구현: AI Workspace가 하나의 provider plan에서 Clean/Dynamic/
+  Collage 후보 3개를 만들고 selector로 비교한다. 후보 레이어 보정 후 현재 후보만
+  재컴파일하며 `motion.ai.candidate.preview`가 실제 PNG 검토 프레임을 만든다.
 - AIG5 backend 1차 구현: stable layer ID와 base revision을 사용하는 scope-aware patch를
   계획하고 한 번의 revision으로 적용한다.
-- 아직 남은 제품 단계: 다중 candidate strip/preview cache(AIG4), patch diff UI(AIG5),
-  실제 multimodal vision/video provider와 provenance(AIG6), 설치본 evidence(AIG7).
+- 아직 남은 제품 단계: 썸네일형 candidate strip/preview cache 고도화(AIG4),
+  patch diff UI(AIG5), 실제 multimodal vision/video provider와 provenance(AIG6),
+  설치본 저장/재열기 및 장시간 evidence(AIG7).
+  현재 Basic Local 분해는 범용 semantic instance segmentation, 생성형 대형-hole inpaint,
+  mesh warp 또는 Gemini Omni 영상 레이어 생성을 주장하지 않는다. 분해 신뢰도가
+  낮으면 원본 단일 이미지 레이어로 되돌아간다.
 
-구현 파일은 `app/motion_designer/ai_generation.py`, provider 공용 경계는
+구현 파일은 `app/motion_designer/ai_generation.py`와
+`app/motion_designer/image_decomposition.py`, provider 공용 경계는
 `app/ai_providers.py`, Action/MCP 표면은
 `app/actions/motion_ai_generation_namespace.py`이다.
+세부 이미지 레이어 제품 계약은
+`docs/MOTION_AI_LAYERED_IMAGE_PRODUCT_PLAN_KO.md`를 따른다.
 
 작성일: 2026-07-23  
 상태: 제품 기획 및 구현 기준 초안  

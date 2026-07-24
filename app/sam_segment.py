@@ -155,3 +155,52 @@ def sam_mask_from_point(rgb, nx: float, ny: float):
     best = masks[best_idx]
     out = np.where(best, 255, 0).astype(np.uint8)
     return out
+
+
+def sam_masks_from_points(rgb, points):
+    """Return one best SAM mask per normalized foreground point.
+
+    The image embedding is computed once for all points. Each result is a
+    ``(mask, confidence, point)`` tuple. Invalid points are clamped to the
+    source bounds and failed candidates are skipped.
+    """
+    predictor = _get_predictor()
+    if predictor is None:
+        return []
+    h, w = rgb.shape[:2]
+    if w <= 0 or h <= 0:
+        return []
+    normalized = [
+        (
+            max(0.0, min(1.0, float(point[0]))),
+            max(0.0, min(1.0, float(point[1]))),
+        )
+        for point in points
+    ]
+    if not normalized:
+        return []
+    try:
+        predictor.set_image(rgb)
+    except Exception:
+        return []
+    results = []
+    for nx, ny in normalized:
+        x = int(round(nx * (w - 1)))
+        y = int(round(ny * (h - 1)))
+        try:
+            masks, scores, _ = predictor.predict(
+                point_coords=np.array([[x, y]]),
+                point_labels=np.array([1]),
+                multimask_output=True,
+            )
+        except Exception:
+            continue
+        if masks is None or len(masks) == 0:
+            continue
+        best_idx = int(np.argmax(scores))
+        results.append((
+            np.where(masks[best_idx], 255, 0).astype(np.uint8),
+            float(scores[best_idx]),
+            (nx, ny),
+        ))
+    return results

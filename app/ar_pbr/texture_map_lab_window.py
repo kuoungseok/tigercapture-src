@@ -32,6 +32,8 @@ from app.ar_pbr.texture_map_lab import (
     DEFAULT_SEPARATE_MAPS,
     PACKED_LAYOUTS,
     PREVIEW_MODES,
+    PREVIEW_SHAPES,
+    TextureMapGpuRequiredError,
     default_texture_map_settings,
     export_texture_maps,
     generate_texture_maps,
@@ -39,6 +41,7 @@ from app.ar_pbr.texture_map_lab import (
     pack_texture_channels,
     render_plane_preview_from_generated,
     select_texture_map_backend,
+    texture_lab_cpu_fallback_allowed,
     texture_map_settings_fingerprint,
     texture_map_to_image,
 )
@@ -177,7 +180,7 @@ class _TextureLabPreviewCanvas(QWidget):
             return
         left_width = max(0.0, preview_rect.left() - content.left())
         right_width = max(0.0, content.right() - preview_rect.right())
-        min_side_width = 86.0
+        min_side_width = 104.0
         if left_width >= min_side_width and right_width >= min_side_width:
             split = (len(self._thumbnails) + 1) // 2
             self._draw_thumbnail_column(painter, content, content.left(), left_width, self._thumbnails[:split])
@@ -209,10 +212,10 @@ class _TextureLabPreviewCanvas(QWidget):
             return
         gap = 7.0
         side_pad = 8.0
-        width = max(64.0, min(138.0, gutter_width - side_pad * 2.0))
+        width = max(90.0, min(168.0, gutter_width - side_pad * 2.0))
         x = x_start + (gutter_width - width) * 0.5
         usable_height = content.height()
-        item_height = min(86.0, max(46.0, (usable_height - gap * (len(thumbnails) - 1)) / len(thumbnails)))
+        item_height = min(104.0, max(64.0, (usable_height - gap * (len(thumbnails) - 1)) / len(thumbnails)))
         visible_count = min(len(thumbnails), max(1, int((usable_height + gap) / max(1.0, item_height + gap))))
         rows = thumbnails[:visible_count]
         total_height = item_height * len(rows) + gap * max(0, len(rows) - 1)
@@ -226,8 +229,8 @@ class _TextureLabPreviewCanvas(QWidget):
         rows = self._thumbnails[:6]
         if not rows:
             return
-        width = min(92.0, max(58.0, (content.width() - gap * (len(rows) - 1)) / len(rows)))
-        height = 52.0
+        width = min(124.0, max(84.0, (content.width() - gap * (len(rows) - 1)) / len(rows)))
+        height = 72.0
         total_width = width * len(rows) + gap * max(0, len(rows) - 1)
         x = content.left() + (content.width() - total_width) * 0.5
         y = min(content.bottom() - height, preview_rect.bottom() + 8.0)
@@ -246,14 +249,14 @@ class _TextureLabPreviewCanvas(QWidget):
         painter.setPen(QPen(QColor("#58D38A" if active else "#303746"), 1.0))
         painter.setBrush(QColor(18, 21, 27, 226))
         painter.drawRoundedRect(rect, 5, 5)
-        label_rect = QRectF(rect.left() + 5, rect.top() + 3, rect.width() - 10, 13)
+        label_rect = QRectF(rect.left() + 6, rect.top() + 4, rect.width() - 12, 20)
         font = QFont("Cascadia Mono")
-        font.setPixelSize(9)
+        font.setPixelSize(12)
         font.setBold(True)
         painter.setFont(font)
         painter.setPen(QColor("#F2F5FB" if active else "#B8C2D2"))
         painter.drawText(label_rect, Qt.AlignmentFlag.AlignCenter, label)
-        image_rect = rect.adjusted(5, 18, -5, -5)
+        image_rect = rect.adjusted(6, 28, -6, -6)
         if image_rect.width() < 8 or image_rect.height() < 8:
             return
         scaled = self._scaled_rect(pixmap, image_rect)
@@ -263,9 +266,20 @@ class _TextureLabPreviewCanvas(QWidget):
 class ArPbrTextureMapLabWindow(QMainWindow):
     """Image-to-material plane preview and export controls."""
 
-    def __init__(self, image_path: str | Path, parent: QWidget | None = None) -> None:
+    def __init__(
+        self,
+        image_path: str | Path,
+        parent: QWidget | None = None,
+        *,
+        allow_cpu: bool | None = None,
+    ) -> None:
         super().__init__(parent)
         self.image_path = Path(image_path).expanduser()
+        self._allow_cpu_fallback = (
+            texture_lab_cpu_fallback_allowed(False)
+            if allow_cpu is None
+            else bool(allow_cpu)
+        )
         self._settings = normalize_texture_map_settings(default_texture_map_settings())
         self._preview_timer = QTimer(self)
         self._preview_timer.setSingleShot(True)
@@ -284,7 +298,7 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._delight_check: QCheckBox | None = None
         self._animated_light_azimuth = 38.0
         self._generated_maps_cache: dict[str, Any] | None = None
-        self._backend_selection = select_texture_map_backend()
+        self._backend_selection = select_texture_map_backend(allow_cpu=self._allow_cpu_fallback)
         self.setObjectName("ArPbrTextureMapLabWindow")
         self.setWindowTitle(f"AR/PBR Texture Lab - {self.image_path.name}")
         self.resize(1120, 780)
@@ -459,7 +473,7 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         return labels.get(mode, mode.replace("_", " ").title())
 
     def _backend_status_text(self) -> str:
-        selection = select_texture_map_backend()
+        selection = select_texture_map_backend(allow_cpu=self._allow_cpu_fallback)
         self._backend_selection = selection
         active = str(selection.get("active", "cpu"))
         status = selection.get("status", {})
@@ -467,6 +481,9 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         if active == "torch_cuda":
             device = str(torch_status.get("device") or "CUDA GPU")
             return f"GPU acceleration: torch_cuda | {device}"
+        if active == "unavailable":
+            reason = str(selection.get("reason") or "gpu_backend_required")
+            return f"GPU required: CPU fallback disabled | {reason}"
         if not torch_status.get("module_installed"):
             return "GPU acceleration: CPU fallback | PyTorch CUDA is not installed"
         if not torch_status.get("available"):
@@ -474,7 +491,7 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         return f"GPU acceleration: CPU fallback | {selection.get('reason', 'gpu backend unavailable')}"
 
     def _show_gpu_setup_help(self) -> None:
-        selection = select_texture_map_backend()
+        selection = select_texture_map_backend(allow_cpu=self._allow_cpu_fallback)
         guidance = dict(selection.get("status", {}).get("install_guidance", {}))
         pip_command = str(guidance.get("pip_command") or "")
         verify_command = str(guidance.get("verify_command") or "")
@@ -527,6 +544,12 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         for mode in PREVIEW_MODES:
             self._preview_mode_combo.addItem(mode.replace("_", " ").title(), mode)
         self._preview_mode_combo.currentIndexChanged.connect(self.queue_preview)
+        self._preview_shape_combo = QComboBox(central)
+        self._preview_shape_combo.setObjectName("TextureLabShapeCombo")
+        for shape in PREVIEW_SHAPES:
+            self._preview_shape_combo.addItem(shape.title(), shape)
+        self._preview_shape_combo.setToolTip("Material preview shape. Texture-map channels still display as flat maps.")
+        self._preview_shape_combo.currentIndexChanged.connect(self.queue_preview)
         show_intrinsic = QPushButton("Intrinsic", central)
         show_intrinsic.setObjectName("TextureLabModeButton")
         show_intrinsic.setToolTip("Show Input, Albedo, Normal, Roughness, and Irradiance together")
@@ -563,6 +586,7 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         export_packed.setIconSize(icon_size(16))
         export_packed.clicked.connect(self.export_packed)
         top.addWidget(self._preview_mode_combo)
+        top.addWidget(self._preview_shape_combo)
         top.addWidget(show_intrinsic)
         top.addWidget(show_albedo)
         top.addWidget(show_compare)
@@ -775,7 +799,12 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         cached = self._generated_maps_cache
         if isinstance(cached, dict) and cached.get("key") == key:
             return cached["generated"], True
-        generated = generate_texture_maps(self.image_path, settings, max_size=max_size)
+        generated = generate_texture_maps(
+            self.image_path,
+            settings,
+            max_size=max_size,
+            allow_cpu=self._allow_cpu_fallback,
+        )
         self._generated_maps_cache = {"key": key, "generated": generated}
         return generated, False
 
@@ -785,17 +814,27 @@ class ArPbrTextureMapLabWindow(QMainWindow):
             return
         try:
             mode = str(self._preview_mode_combo.currentData() or "material")
+            requested_shape = str(self._preview_shape_combo.currentData() or "plane")
+            effective_shape = requested_shape if mode == "material" else "plane"
             if self._preview_heading is not None:
-                self._preview_heading.setText(f"Plane Preview - {self._preview_mode_label(mode)}")
-            out = Path(tempfile.gettempdir()) / "tiger_ar_pbr_texture_lab" / f"{self.image_path.stem}_{mode}.png"
+                self._preview_heading.setText(
+                    f"{effective_shape.title()} Preview - {self._preview_mode_label(mode)}"
+                )
+            out = (
+                Path(tempfile.gettempdir())
+                / "tiger_ar_pbr_texture_lab"
+                / f"{self.image_path.stem}_{effective_shape}_{mode}.png"
+            )
             generated, cache_hit = self._cached_generated_maps(max_size=960)
             payload = render_plane_preview_from_generated(
                 generated,
                 self.settings(),
                 preview_mode=mode,
+                preview_shape=requested_shape,
                 output_path=out,
                 width=960,
                 source_path=self.image_path,
+                allow_cpu_preview=self._allow_cpu_fallback,
             )
             if hasattr(self, "_backend_status"):
                 self._backend_status.setText(self._backend_status_text())
@@ -805,7 +844,18 @@ class ArPbrTextureMapLabWindow(QMainWindow):
             self._preview.set_thumbnail_pixmaps(self._thumbnail_pixmaps(active_mode=mode, generated=generated))
             backend = str(payload.get("backend", {}).get("active", "cpu"))
             cache = "cached" if cache_hit else "rendered"
-            self._status.setText(f"{mode} | {payload['size'][0]} x {payload['size'][1]} | {backend} | {cache}")
+            shape = str(payload.get("preview_shape", effective_shape))
+            self._status.setText(f"{shape}/{mode} | {payload['size'][0]} x {payload['size'][1]} | {backend} | {cache}")
+        except TextureMapGpuRequiredError as exc:
+            if hasattr(self, "_backend_status"):
+                self._backend_status.setText(self._backend_status_text())
+            self._last_preview_path = None
+            self._preview.set_preview_pixmap(QPixmap())
+            self._preview.set_thumbnail_pixmaps([])
+            self._status.setText(
+                "GPU required. Texture Lab CPU fallback is disabled; "
+                "install/enable torch_cuda or set TIGERCAPTURE_TEXTURE_LAB_ALLOW_CPU=1 for diagnostics."
+            )
         except Exception as exc:
             self._status.setText(f"Preview failed: {type(exc).__name__}: {exc}")
 
@@ -858,7 +908,17 @@ class ArPbrTextureMapLabWindow(QMainWindow):
                 self.settings(),
                 maps=map_names,
                 packed_layouts=packed_layouts,
+                allow_cpu=self._allow_cpu_fallback,
             )
+        except TextureMapGpuRequiredError as exc:
+            QMessageBox.warning(
+                self,
+                "Texture Lab",
+                "GPU required. Texture Lab CPU fallback is disabled.\n\n"
+                f"{exc}\n\nInstall/enable torch_cuda or use TIGERCAPTURE_TEXTURE_LAB_ALLOW_CPU=1 "
+                "only for diagnostics.",
+            )
+            return
         except Exception as exc:
             QMessageBox.warning(self, "Texture Lab", f"Export failed.\n\n{type(exc).__name__}: {exc}")
             return
@@ -897,7 +957,7 @@ QLabel#TextureLabSubtitle,
 QLabel#TextureLabBackendStatus,
 QLabel#TextureLabStatus {
     color: #8F98A7;
-    font-size: 11px;
+    font-size: 12px;
 }
 QLabel#TextureLabBackendStatus {
     color: #B9C3D2;
@@ -914,18 +974,18 @@ QWidget#TextureLabPreview {
 }
 QLabel#TextureLabSection {
     color: #C9D2E1;
-    font-size: 11px;
+    font-size: 13px;
     font-weight: 700;
     letter-spacing: 0px;
     padding-top: 6px;
 }
 QLabel#TextureLabControlLabel {
     color: #A9B4C5;
-    font-size: 11px;
+    font-size: 12px;
 }
 QLabel#TextureLabValueLabel {
     color: #D9E0EA;
-    font-size: 11px;
+    font-size: 12px;
     font-family: "Cascadia Mono", "Consolas";
 }
 QLabel#TextureLabControlLabel:disabled,
@@ -938,13 +998,29 @@ QComboBox#TextureLabCombo {
     border: 1px solid #303746;
     border-radius: 6px;
     padding: 7px 10px;
+    font-size: 12px;
     min-width: 180px;
+}
+QComboBox#TextureLabShapeCombo {
+    background: #1A1D25;
+    color: #E8ECF5;
+    border: 1px solid #303746;
+    border-radius: 6px;
+    padding: 7px 10px;
+    font-size: 12px;
+    min-width: 92px;
+    max-width: 112px;
 }
 QComboBox#TextureLabCombo::drop-down {
     border: 0px;
     width: 22px;
 }
-QComboBox#TextureLabCombo QAbstractItemView {
+QComboBox#TextureLabShapeCombo::drop-down {
+    border: 0px;
+    width: 20px;
+}
+QComboBox#TextureLabCombo QAbstractItemView,
+QComboBox#TextureLabShapeCombo QAbstractItemView {
     background: #141720;
     color: #E8ECF5;
     border: 1px solid #303746;
@@ -963,6 +1039,7 @@ QPushButton {
     border: 1px solid #343B49;
     border-radius: 6px;
     padding: 8px 12px;
+    font-size: 12px;
     font-weight: 700;
 }
 QPushButton:hover {
@@ -984,7 +1061,7 @@ QPushButton#TextureLabModeButton:hover {
 }
 QCheckBox#TextureLabCheck {
     color: #C9D2E1;
-    font-size: 11px;
+    font-size: 12px;
     font-weight: 700;
     spacing: 8px;
     padding: 3px 0px;

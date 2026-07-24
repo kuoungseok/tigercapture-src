@@ -73,13 +73,13 @@ class StudioSlider(QSlider):
 
     def _led_color(self) -> QColor:
         colors = {
-            "audio": "#84E7B2",
+            "audio": "#7EF0C6",
             "temperature": "#88C7FF",
             "tint": "#D58BFF",
-            "accent": "#A8C7FF",
-            "neutral": "#D9E2EF",
+            "accent": "#FFE1A0",
+            "neutral": "#FFE7B8",
         }
-        return QColor(colors.get(self._studio_slider_kind, "#D9E2EF"))
+        return QColor(colors.get(self._studio_slider_kind, "#FFE1A0"))
 
     def _wake_led(self, level: float = 1.0) -> None:
         self._studio_led_level = max(self._studio_led_level, max(0.0, min(1.0, float(level))))
@@ -224,12 +224,30 @@ class StudioSlider(QSlider):
             pulse = 0.68 + math.sin(self._studio_led_phase) * 0.32
             led_alpha = led_level * pulse
             led_color = self._led_color()
-            rail_glow = QColor(led_color)
-            rail_glow.setAlpha(int(85 * led_alpha))
-            rail_glow_pen = QPen(rail_glow, 4.6)
-            rail_glow_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
-            p.setPen(rail_glow_pen)
-            p.drawLine(QPointF(left, cy), QPointF(hx, cy))
+            glow_half = max(26.0, min(72.0, (right - left) * 0.16))
+            glow_left = max(left, hx - glow_half)
+            glow_right = min(right, hx + glow_half)
+
+            def _local_led_gradient(alpha_scale: float) -> QLinearGradient:
+                grad = QLinearGradient(QPointF(glow_left, cy), QPointF(glow_right, cy))
+                edge = QColor(led_color)
+                edge.setAlpha(0)
+                shoulder = QColor(led_color)
+                shoulder.setAlpha(int(56 * led_alpha * alpha_scale))
+                hot = QColor("#FFF7D8")
+                hot.setAlpha(int(142 * led_alpha * alpha_scale))
+                grad.setColorAt(0.0, edge)
+                grad.setColorAt(0.30, shoulder)
+                grad.setColorAt(0.50, hot)
+                grad.setColorAt(0.70, shoulder)
+                grad.setColorAt(1.0, edge)
+                return grad
+
+            for width, alpha_scale in ((10.0, 0.45), (5.8, 0.72), (2.2, 1.0)):
+                local_glow_pen = QPen(QBrush(_local_led_gradient(alpha_scale)), width)
+                local_glow_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                p.setPen(local_glow_pen)
+                p.drawLine(QPointF(glow_left, cy), QPointF(glow_right, cy))
 
             p.setPen(Qt.PenStyle.NoPen)
             glow_outer = QColor(led_color)

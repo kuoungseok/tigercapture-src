@@ -15,11 +15,13 @@ if str(ROOT) not in sys.path:
 from PySide6.QtWidgets import QApplication
 
 from app.motion_designer.ui.window import MotionDesignerWindow
+from app.window_placement import install_global_window_placement
 from tools.qa_motion_ui import build_demo_composition
 
 
 def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
+    install_global_window_placement(app)
     window = MotionDesignerWindow(build_demo_composition())
     window.show()
     window.raise_()

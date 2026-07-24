@@ -97,6 +97,17 @@ QListWidget#MotionAIReferences {
 QLabel#MotionAIHeading { color: #f0f2f5; font-weight: 700; }
 QLabel#MotionAIStatus { color: #76b4cb; font-size: 10px; }
 QLabel#MotionAIHint { color: #7e8792; font-size: 10px; }
+QWidget#MotionLayerExtractionPanel {
+  background: #15181d; color: #d7dbe1; border-top: 1px solid #30353d;
+}
+QDialog#MotionLayerExtractionDialog,
+QDialog#MotionLayerExtractionDialog QWidget {
+  background: #121419; color: #d7dbe1;
+}
+QWidget#MotionMaskRefineCanvas {
+  background: #101217; border: 1px solid #343b45;
+}
+QLabel#MotionAIOptionLabel { color: #8f98a4; font-size: 10px; }
 QLabel#MotionAudioStatus { color: #76b4cb; font-size: 10px; }
 QLabel#MotionActorStatus { color: #76b4cb; font-size: 10px; }
 QLabel#MotionMMDStatus { color: #76b4cb; font-size: 10px; }

@@ -81,8 +81,10 @@ def main() -> int:
 
     from PySide6.QtWidgets import QApplication
     from app.pptgen.ui.window import PptGeneratorWindow
+    from app.window_placement import install_global_window_placement
 
     app = QApplication.instance() or QApplication(sys.argv)
+    install_global_window_placement(app)
     window = PptGeneratorWindow()
     window.show()
     return int(app.exec())

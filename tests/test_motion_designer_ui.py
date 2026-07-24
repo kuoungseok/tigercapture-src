@@ -229,14 +229,20 @@ def test_motion_ai_panel_builds_reviewable_multimodal_draft_and_undoes(tmp_path)
     if existing is not None and not isinstance(existing, QApplication):
         pytest.skip("A non-GUI Qt application already owns this test process")
     from PySide6.QtCore import QMimeData, QUrl
-    from PySide6.QtGui import QColor, QImage
+    from PySide6.QtGui import QColor, QImage, QPainter
 
     app = QApplication.instance() or QApplication([])
     image_path = tmp_path / "reference.png"
     image = QImage(320, 180, QImage.Format_RGBA8888)
-    image.fill(QColor("#d96a43"))
+    image.fill(QColor("#e2e8ee"))
+    painter = QPainter(image)
+    painter.setBrush(QColor("#d96a43"))
+    painter.setPen(Qt.NoPen)
+    painter.drawEllipse(96, 30, 128, 140)
+    painter.end()
     assert image.save(str(image_path))
     window = MotionDesignerWindow(MotionComposition(width=960, height=540, duration_ms=3000))
+    assert window.ai.decompose_images.isChecked()
     image_mime = QMimeData()
     image_mime.setUrls([QUrl.fromLocalFile(str(image_path))])
     window.ai.prompt.insertFromMimeData(image_mime)
@@ -245,19 +251,122 @@ def test_motion_ai_panel_builds_reviewable_multimodal_draft_and_undoes(tmp_path)
     text_mime.setText('배경을 페이드 인하고 "MOTION AI" 제목을 추가')
     window.ai.prompt.insertFromMimeData(text_mime)
     assert "MOTION AI" in window.ai.prompt.toPlainText()
+    window.ai.advanced_button.setChecked(True)
     window.ai.request_plan()
+    assert window.ai._proposal is None
+    loop = QEventLoop()
+    poll = QTimer()
+    poll.setInterval(10)
+    poll.timeout.connect(lambda: loop.quit() if window.ai._proposal is not None else None)
+    timeout = QTimer()
+    timeout.setSingleShot(True)
+    timeout.timeout.connect(loop.quit)
+    poll.start()
+    timeout.start(5000)
+    loop.exec()
+    poll.stop()
+    assert window.ai._proposal is not None
+    assert window.ai.candidate_selector.count() == 3
+    assert window.ai.candidate_selector.isVisibleTo(window.ai)
     assert window.ai.apply_button.isEnabled()
-    assert len(window.ai._proposal["layers"]) == 2
+    assert len(window.ai._proposal["layers"]) >= 2
     assert "Preflight:" in window.ai.result.toPlainText()
     assert "Render: realtime" in window.ai.result.toPlainText()
+    assert "Layer extraction:" in window.ai.result.toPlainText()
+    from app.motion_designer.image_decomposition_edits import set_decomposition_lock
+
+    decomposition = window.ai._proposal["analysis"]["image_decompositions"][0]
+    visual_id = next(
+        item["id"] for item in decomposition["elements"] if item["role"] != "text"
+    )
+    repaired = set_decomposition_lock(
+        decomposition,
+        [visual_id],
+        locked=True,
+    ).to_dict()
+    repaired.update({
+        "reference_id": decomposition["reference_id"],
+        "beat_id": decomposition["beat_id"],
+    })
+    window._repair_ai_decomposition(repaired)
+    repaired_report = window.ai._proposal["analysis"]["image_decompositions"][0]
+    repaired_element = next(
+        item for item in repaired_report["elements"] if item["id"] == visual_id
+    )
+    assert repaired_element["metadata"]["motion_lock_to_background"] is True
     window.ai.apply_proposal()
-    assert len(window.controller.composition.layers) == 2
-    assert window.ai.status.text() == "Applied 2"
+    applied_count = len(window.controller.composition.layers)
+    assert applied_count >= 2
+    assert window.ai.status.text() == f"Applied {applied_count}"
     window.controller.undo()
     assert window.controller.composition.layers == []
     window.ai_dock.close()
     assert not window.toolbar.ai_action.isChecked()
     window.close()
+    app.processEvents()
+
+
+def test_motion_mask_refine_canvas_adds_and_removes_brush_strokes() -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    from PySide6.QtCore import QPoint
+    from PySide6.QtGui import QColor, QImage
+
+    from app.motion_designer.ui.mask_refine_canvas import MaskRefineCanvas
+
+    app = QApplication.instance() or QApplication([])
+    source = QImage(80, 60, QImage.Format_RGBA8888)
+    source.fill(QColor("#35404d"))
+    mask = QImage(80, 60, QImage.Format_Grayscale8)
+    mask.fill(0)
+    canvas = MaskRefineCanvas()
+    canvas.set_images(source, mask)
+    canvas.set_brush_radius(4)
+    canvas.set_mode("add")
+    canvas._paint_mask(QPoint(10, 20), QPoint(50, 20))
+    assert canvas.mask_image().pixelColor(30, 20).red() > 240
+    canvas.set_mode("remove")
+    canvas._paint_mask(QPoint(28, 20), QPoint(32, 20))
+    assert canvas.mask_image().pixelColor(30, 20).red() < 16
+    canvas.close()
+    app.processEvents()
+
+
+def test_layer_extraction_dialog_keeps_dark_surface_and_edit_controls(tmp_path) -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    from PIL import Image, ImageDraw
+
+    from app.motion_designer.image_decomposition import decompose_image
+    from app.motion_designer.ui.layer_extraction_dialog import (
+        LayerExtractionDialog,
+    )
+    from app.motion_designer.ui.style import MOTION_DESIGNER_QSS
+
+    app = QApplication.instance() or QApplication([])
+    source = Image.new("RGB", (240, 160), (226, 232, 238))
+    ImageDraw.Draw(source).ellipse((65, 20, 180, 150), fill=(220, 70, 55))
+    source_path = tmp_path / "dialog_source.png"
+    source.save(source_path)
+    decomposition = decompose_image(
+        source_path,
+        width=240,
+        height=160,
+        cache_root=tmp_path / "cache",
+        include_depth=False,
+        force=True,
+    )
+    dialog = LayerExtractionDialog(decomposition.to_dict())
+    dialog.setStyleSheet(MOTION_DESIGNER_QSS)
+    dialog.show()
+    app.processEvents()
+    assert dialog.layers.count() >= 1
+    assert dialog.parent_button.text() == "Set Parent"
+    image = dialog.grab().toImage()
+    assert image.pixelColor(2, 2).lightness() < 80
+    dialog.close()
     app.processEvents()
 
 
