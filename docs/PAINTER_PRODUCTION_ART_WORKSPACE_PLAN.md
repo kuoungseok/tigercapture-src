@@ -87,10 +87,11 @@ Default layout:
   size and opacity; marquee New/Add/Subtract/Intersect plus style; Magic Select
   tolerance; Crop apply/mask/deselect; and Fill mode. Non-active tool controls
   are hidden rather than disabled clutter.
-- Top quick controls for Undo, Redo, PNG export, active-tool status, and document
-  actions must stay compact and Photoshop-like, not large text command buttons.
-  Zoom controls do not belong in the title/top bar; zoom lives in the View menu,
-  shortcuts, canvas context menu, and toolbar affordances.
+- Undo/Redo belong in Edit plus keyboard shortcuts, and PNG export belongs in
+  File. They must not occupy a permanent quick-control row above the canvas.
+  The area below the menu is reserved for contextual controls of the active
+  tool. Zoom does not belong in the title/options bar; it lives in the View
+  menu, shortcuts, canvas context menu, status bar, and toolbar affordances.
 - Right upper: Navigator and Reference controls.
 - Right middle: Color and Brush.
 - Right lower: Layers / Channels / Paths as a dedicated pinned tab dock.

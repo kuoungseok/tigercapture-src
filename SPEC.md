@@ -6442,11 +6442,14 @@ AI Script Edit MVP integration:
 - Standalone Painter must open as a clean drawing document at 100% zoom with no
   generated sample strokes, guides, or demo marks. 400-800% zoom is for pixel
   and dot work only; it must not be the default QA or user launch state. The
-  top bar uses compact Photoshop-style quick controls for Undo, Redo, PNG
-  export, and mode/status only; zoom belongs in the View menu, shortcuts, and
-  tool rail rather than an always-visible inspector strip. The right inspector
-  is capped as a side dock so the central canvas remains wider than the
-  inspector on small remote/offscreen windows.
+  top application area follows the Photoshop desktop hierarchy: the menu bar
+  owns File/Edit commands and the contextual options bar contains controls for
+  the active tool only. Undo/Redo stay under Edit and their shortcuts; PNG
+  export stays under File; zoom stays in the View menu, shortcuts, canvas
+  context menu, status bar, and tool rail. These commands must not return as a
+  permanent row of large buttons above the canvas. The right inspector is
+  capped as a side dock so the central canvas remains wider than the inspector
+  on small remote/offscreen windows.
 - The standalone Painter color panel is a compact Painter-style color dock, not
   an oversized decorative picker: a 176 px hue ring with triangular
   saturation/value picker, current-color swatch, hex readout, compact

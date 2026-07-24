@@ -1,6 +1,6 @@
 # Tiger Studio Painter: Photoshop Parity Audit
 
-Updated: 2026-07-24
+Updated: 2026-07-25
 
 ## Objective
 
@@ -38,6 +38,12 @@ Primary references:
 | Right dock | Color and production panels stacked/docked | Implemented baseline |
 | Optional panels | Open only when requested | Brush detail, Reference, and 3D hidden by default |
 | Responsive | No overlap at 1100x640 and 1300x880 | Screenshot QA required on every structural pass |
+
+The 2026-07-25 contract review also removed the stale requirement for a
+permanent Undo/Redo/Export/Zoom command row. Undo/Redo are Edit commands, export
+is a File command, zoom is a View/status/canvas-navigation control, and the
+options bar is reserved for the active tool. This hierarchy is the durable
+specification for future Painter passes.
 
 ## Tool And Selection Audit
 
