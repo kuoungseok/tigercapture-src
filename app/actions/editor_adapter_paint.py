@@ -23,6 +23,7 @@ class PaintAdapterMixin:
         return {
             **status,
             "last_blockout_renderer": dict(state.get("gpu", {}).get("blockout_renderer", {}) or {}),
+            "last_canvas_renderer": dict(state.get("gpu", {}).get("canvas_renderer", {}) or {}),
             "remote_work_contract": {
                 "safe_for_rdp": True,
                 "opengl_is_preferred_not_required": True,

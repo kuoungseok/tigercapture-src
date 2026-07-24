@@ -62,6 +62,12 @@
       as the remote/RDP-safe product path, and exposes `paint.gpu.status` for
       AI/MCP readiness checks. Remaining GPU work: actual paint-canvas stroke
       texture/FBO atlas, high-zoom canvas acceleration, and parity evidence.
+    - [x] 2026-07-24 canvas OpenGL slice: the active Painter canvas now has an
+      OpenGL basic-stroke FBO cache for round/marker/highlighter strokes and
+      records `canvas_renderer` in `paint.state` / `paint.gpu.status`. Complex
+      brushes, layer masks, unsupported GL, and remote/headless failures still
+      fall back to the maintained QPainter stroke loop. Remaining GPU work:
+      persistent stroke atlas, textured-brush parity, and reduced readback.
   - [ ] Painter action parity: every production drawing feature above must get
     registered `paint.*` actions, dry-run/review support where destructive,
     undo transactions, and regression tests before AI/MCP claims it.

@@ -51,6 +51,47 @@ def test_painter_opengl_status_is_remote_safe() -> None:
     assert status["surfaces"]["blockout_preview"] == "opengl_offscreen_if_available"
 
 
+def test_painter_canvas_gpu_path_reports_remote_safe_renderer() -> None:
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    from PySide6.QtWidgets import QApplication
+
+    from app.drawing import PaintDialog, Stroke, create_blank_paint_pixmap
+
+    app = QApplication.instance() or QApplication([])
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(320, 180, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.show()
+    app.processEvents()
+
+    dialog.canvas.add_stroke_direct(
+        Stroke(
+            points=[(0.1, 0.2), (0.35, 0.5), (0.7, 0.3)],
+            color=(48, 150, 255),
+            opacity=220,
+            width_px=6.0,
+            brush_style="round",
+        )
+    )
+    dialog.canvas.grab()
+    app.processEvents()
+
+    canvas_status = dialog.painter_action_state()["gpu"]["canvas_renderer"]
+    assert canvas_status["remote_safe"] is True
+    assert canvas_status["active"] in {"opengl", "qpainter"}
+    assert canvas_status["renderer"] in {
+        "painter_canvas_opengl_stroke_fbo_v1",
+        "painter_canvas_qpainter_strokes_v1",
+    }
+
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
 def test_painter_3d_blockout_crud_normalizes_and_rejects_duplicate_ids() -> None:
     from app.painter_3d_blockout import (
         add_blockout_primitive,

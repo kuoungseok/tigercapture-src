@@ -108,10 +108,16 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     assert state["ok"]
     assert state["result"]["document"]["width"] == 640
     assert state["result"]["gpu"]["remote_safe"] is True
+    assert state["result"]["gpu"]["canvas_renderer"]["remote_safe"] is True
+    assert state["result"]["gpu"]["paint_canvas_next_gpu_target"] == "persistent_texture_fbo_stroke_atlas"
 
     gpu_status = registry.execute("paint.gpu.status").to_dict()
     assert gpu_status["ok"]
     assert gpu_status["result"]["renderer"] == "painter_blockout_opengl_offscreen_v1"
+    assert gpu_status["result"]["canvas"]["renderer"] == "painter_canvas_opengl_stroke_fbo_v1"
+    assert gpu_status["result"]["canvas"]["fallback_renderer"] == "painter_canvas_qpainter_strokes_v1"
+    assert gpu_status["result"]["canvas"]["supported_first_pass"]["unsupported_falls_back"] is True
+    assert gpu_status["result"]["last_canvas_renderer"]["remote_safe"] is True
     assert gpu_status["result"]["remote_safe"] is True
     assert gpu_status["result"]["fallback_on_context_failure"] is True
     assert gpu_status["result"]["remote_work_contract"]["safe_for_rdp"] is True

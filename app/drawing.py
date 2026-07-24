@@ -1172,6 +1172,16 @@ class DrawingCanvas(QWidget):
         self._extra_paint_hook: Callable[[QPainter, int, int], None] | None = None
         self._interaction_hook: Callable[[str, float, float, QMouseEvent], bool] | None = None
         self._interaction_active = False
+        self._painter_canvas_renderer_status: dict = {
+            "renderer": "painter_canvas_qpainter_strokes_v1",
+            "active": "qpainter",
+            "fallback": True,
+            "reason": "not_rendered_yet",
+            "remote_safe": True,
+        }
+        self._painter_canvas_gpu_cache_key: str | None = None
+        self._painter_canvas_gpu_cache_image: QImage | None = None
+        self._painter_canvas_gpu_failure_key: str | None = None
 
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
         self.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents, True)
@@ -1500,27 +1510,29 @@ class DrawingCanvas(QWidget):
         self._paint_grid(painter, w, h)
 
         t_ms = int(self._get_time_ms())
-        for stroke in self._get_strokes():
-            if not stroke.is_active(t_ms):
-                continue
-            layer_id = self._stroke_layer_id(stroke)
-            if not self._layer_visibility.get(layer_id, True):
-                continue
-            mask = self._layer_masks.get(layer_id, [])
-            if len(mask) >= 3:
-                painter.save()
-                self._clip_to_layer_mask(painter, mask, w, h)
-            try:
-                self._paint_stroke(
-                    painter,
-                    stroke,
-                    w,
-                    h,
-                    opacity_scale=self._layer_opacity.get(layer_id, 100) / 100.0,
-                )
-            finally:
+        strokes = list(self._get_strokes())
+        if not self._paint_strokes_with_gpu_cache(painter, strokes, w, h, t_ms):
+            for stroke in strokes:
+                if not stroke.is_active(t_ms):
+                    continue
+                layer_id = self._stroke_layer_id(stroke)
+                if not self._layer_visibility.get(layer_id, True):
+                    continue
+                mask = self._layer_masks.get(layer_id, [])
                 if len(mask) >= 3:
-                    painter.restore()
+                    painter.save()
+                    self._clip_to_layer_mask(painter, mask, w, h)
+                try:
+                    self._paint_stroke(
+                        painter,
+                        stroke,
+                        w,
+                        h,
+                        opacity_scale=self._layer_opacity.get(layer_id, 100) / 100.0,
+                    )
+                finally:
+                    if len(mask) >= 3:
+                        painter.restore()
 
         if self._current_points:
             stroke = Stroke(
@@ -2157,6 +2169,109 @@ class DrawingCanvas(QWidget):
             painter.drawPolyline(pts + [pts[0]])
         else:
             painter.drawPolyline(pts)
+
+    def _paint_strokes_with_gpu_cache(
+        self,
+        painter: QPainter,
+        strokes: list[Stroke],
+        w: int,
+        h: int,
+        t_ms: int,
+    ) -> bool:
+        if not strokes:
+            self._painter_canvas_renderer_status = {
+                "renderer": "painter_canvas_none_v1",
+                "active": "none",
+                "fallback": False,
+                "reason": "no_strokes",
+                "remote_safe": True,
+                "size": [int(w), int(h)],
+            }
+            return True
+        try:
+            from app.painter_opengl import (
+                canvas_stroke_gpu_signature,
+                render_canvas_strokes_opengl_qimage,
+            )
+
+            signature = canvas_stroke_gpu_signature(
+                strokes,
+                width=w,
+                height=h,
+                time_ms=t_ms,
+                layer_visibility=self._layer_visibility,
+                layer_opacity=self._layer_opacity,
+                layer_masks=self._layer_masks,
+            )
+            if signature and signature == getattr(self, "_painter_canvas_gpu_failure_key", None):
+                return False
+            image = getattr(self, "_painter_canvas_gpu_cache_image", None)
+            if (
+                signature
+                and signature == getattr(self, "_painter_canvas_gpu_cache_key", None)
+                and isinstance(image, QImage)
+                and not image.isNull()
+            ):
+                painter.drawImage(0, 0, image)
+                self._painter_canvas_renderer_status = {
+                    **dict(getattr(self, "_painter_canvas_renderer_status", {}) or {}),
+                    "active": "opengl",
+                    "fallback": False,
+                    "cache_hit": True,
+                    "remote_safe": True,
+                    "size": [int(w), int(h)],
+                }
+                return True
+            image, report = render_canvas_strokes_opengl_qimage(
+                strokes,
+                width=w,
+                height=h,
+                time_ms=t_ms,
+                layer_visibility=self._layer_visibility,
+                layer_opacity=self._layer_opacity,
+                layer_masks=self._layer_masks,
+            )
+            if image.isNull():
+                raise RuntimeError("Painter canvas OpenGL returned an empty image.")
+            self._painter_canvas_gpu_cache_key = signature
+            self._painter_canvas_gpu_cache_image = image
+            self._painter_canvas_gpu_failure_key = None
+            self._painter_canvas_renderer_status = {
+                **dict(report or {}),
+                "cache_hit": False,
+                "remote_safe": True,
+            }
+            painter.drawImage(0, 0, image)
+            return True
+        except Exception as exc:
+            try:
+                from app.painter_opengl import PAINTER_CANVAS_FALLBACK_RENDERER_ID
+            except Exception:
+                PAINTER_CANVAS_FALLBACK_RENDERER_ID = "painter_canvas_qpainter_strokes_v1"
+            self._painter_canvas_gpu_cache_key = None
+            self._painter_canvas_gpu_cache_image = None
+            self._painter_canvas_renderer_status = {
+                "renderer": PAINTER_CANVAS_FALLBACK_RENDERER_ID,
+                "active": "qpainter",
+                "fallback": True,
+                "fallback_from": "opengl",
+                "reason": f"{type(exc).__name__}: {exc}",
+                "remote_safe": True,
+                "size": [int(w), int(h)],
+            }
+            try:
+                self._painter_canvas_gpu_failure_key = canvas_stroke_gpu_signature(
+                    strokes,
+                    width=w,
+                    height=h,
+                    time_ms=t_ms,
+                    layer_visibility=self._layer_visibility,
+                    layer_opacity=self._layer_opacity,
+                    layer_masks=self._layer_masks,
+                )
+            except Exception:
+                self._painter_canvas_gpu_failure_key = None
+            return False
 
     def _paint_marching_ants(self, painter: QPainter, w: int, h: int) -> None:
         if len(self._selection_points) < 3:
@@ -11478,7 +11593,16 @@ class PaintDialog(QDialog):
                 "policy": "auto_opengl_with_qpainter_fallback",
                 "remote_safe": True,
                 "blockout_renderer": dict(getattr(self, "_painter_3d_blockout_renderer_status", {}) or {}),
-                "paint_canvas_renderer": "qpainter_cpu_current_planned_opengl_texture_fbo",
+                "canvas_renderer": dict(
+                    getattr(
+                        getattr(self, "canvas", None),
+                        "_painter_canvas_renderer_status",
+                        getattr(self, "_painter_canvas_renderer_status", {}),
+                    )
+                    or {}
+                ),
+                "paint_canvas_renderer": "opengl_basic_stroke_fbo_with_qpainter_fallback",
+                "paint_canvas_next_gpu_target": "persistent_texture_fbo_stroke_atlas",
             },
             "history": {
                 "undo_count": len(self._undo_stack),

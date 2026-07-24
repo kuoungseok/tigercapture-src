@@ -390,11 +390,19 @@ Rules:
 - 3D blockout preview/overlay render through an offscreen OpenGL FBO when Qt
   and PyOpenGL can create a context; otherwise the same projection renders
   through the existing QPainter path.
+- The active Painter canvas has a first-pass OpenGL stroke-layer path for
+  basic round/marker/highlighter strokes. It renders those supported strokes
+  through an offscreen FBO and caches the result per stroke signature, then
+  falls back to the maintained QPainter stroke loop for masks, textured oil/
+  chalk/knife brushes, custom tip dynamics, unavailable GL, or remote/headless
+  failures.
 - `paint.gpu.status` exposes OpenGL dependency readiness, the last blockout
-  renderer, and the remote-safe fallback contract for AI/MCP automation.
-- The active paint canvas still uses the current QPainter stroke engine. The
-  next GPU pass is a texture/FBO stroke-atlas canvas path, not a risky wholesale
-  `QOpenGLWidget` swap.
+  renderer, the last canvas renderer, and the remote-safe fallback contract for
+  AI/MCP automation.
+- The next canvas GPU pass is a persistent texture/FBO stroke atlas that avoids
+  repeated readback and extends parity to textured brushes. Do not replace the
+  whole canvas with a `QOpenGLWidget` until remote/RDP fallback and parity QA
+  are proven.
 
 Video:
 

@@ -6217,8 +6217,11 @@ AI Script Edit MVP integration:
   falls back to the maintained QPainter path instead of showing a black surface
   or crashing. `paint.gpu.status` exposes the readiness/fallback contract and
   last blockout renderer for AI/MCP workflows. The paint canvas itself remains
-  on the current QPainter stroke engine until the separate texture/FBO
-  stroke-atlas pass lands.
+  remote-safe: basic round/marker/highlighter strokes may render through an
+  offscreen OpenGL FBO cache, while masks, textured brushes, custom tip
+  dynamics, unavailable GL, and headless/RDP failures fall back to the
+  maintained QPainter stroke loop. The separate persistent texture/FBO
+  stroke-atlas pass remains the next canvas GPU target.
 - Painter reference-board support is non-destructive by default. The 2026-07-24
   first slice adds a right-inspector `REFERENCE` panel, image import from file
   or clipboard, selected reference position/size/opacity/visibility controls,
@@ -6336,8 +6339,10 @@ AI Script Edit MVP integration:
   preview, 3D blockout, high-zoom canvas work, and optional video paint-over may
   use CPU/QPainter first-pass contracts while their data models stay ready for
   GPU preview/export parity. OpenGL preview paths must be preferred when a valid
-  context exists, but RDP/remote/headless sessions must keep a maintained
-  fallback path rather than failing black. Texture Lab/PBR preview is stricter:
+  context exists, and the Painter canvas exposes its last `canvas_renderer`
+  through `paint.state` / `paint.gpu.status`, but RDP/remote/headless sessions
+  must keep a maintained fallback path rather than failing black. Texture
+  Lab/PBR preview is stricter:
   product entry points must not run CPU fallback by default. None of these paths
   may slow the default 2D drawing workspace at startup.
 - Standalone Painter must avoid GIMP-style ambiguous state changes: channel row
