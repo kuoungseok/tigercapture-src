@@ -533,6 +533,110 @@ class PaintAdapterMixin:
         dialog._set_tool("pen")
         return dialog.painter_action_state()
 
+    def paint_stroke_draw(
+        self,
+        *,
+        strokes: list[dict[str, Any]] | None = None,
+        undo_label: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        rows = list(strokes or [])
+        if not rows:
+            raise ValueError("strokes must contain at least one stroke")
+        if len(rows) > 512:
+            raise ValueError("strokes cannot contain more than 512 entries")
+
+        from PySide6.QtGui import QColor
+
+        from app.drawing import Stroke
+
+        paint_layers = {
+            str(layer.layer_id): layer
+            for layer in list(getattr(dialog, "_paint_layers", []) or [])
+        }
+        active_layer_id = str(getattr(dialog, "_active_paint_layer_id", "") or "paint-layer-1")
+        prepared: list[Stroke] = []
+        point_count = 0
+        for index, row in enumerate(rows):
+            if not isinstance(row, dict):
+                raise ValueError(f"stroke {index} must be an object")
+            raw_points = list(row.get("points") or [])
+            if len(raw_points) < 2:
+                raise ValueError(f"stroke {index} requires at least two points")
+            if len(raw_points) > 2048:
+                raise ValueError(f"stroke {index} exceeds the 2048 point limit")
+            points: list[tuple[float, float]] = []
+            for point_index, point in enumerate(raw_points):
+                if not isinstance(point, dict) or "x" not in point or "y" not in point:
+                    raise ValueError(f"stroke {index} point {point_index} requires x and y")
+                x = float(point["x"])
+                y = float(point["y"])
+                if not 0.0 <= x <= 1.0 or not 0.0 <= y <= 1.0:
+                    raise ValueError(
+                        f"stroke {index} point {point_index} is outside normalized canvas bounds"
+                    )
+                points.append((x, y))
+
+            layer_id = str(row.get("layer_id") or active_layer_id)
+            layer = paint_layers.get(layer_id)
+            if layer is None:
+                raise ValueError(f"stroke {index} references unknown layer_id: {layer_id}")
+            if bool(getattr(layer, "locked", False)):
+                raise ValueError(f"stroke {index} targets locked layer_id: {layer_id}")
+
+            color_value = str(row.get("color") or "#EEF2F7")
+            color = QColor(color_value)
+            if not color.isValid():
+                raise ValueError(f"stroke {index} has invalid color: {color_value}")
+            opacity_percent = max(1, min(100, int(row.get("opacity", 100) or 100)))
+            prepared.append(
+                Stroke(
+                    points=points,
+                    color=(color.red(), color.green(), color.blue()),
+                    opacity=int(round(opacity_percent * 255 / 100)),
+                    width_px=max(0.25, min(512.0, float(row.get("width", 4.0) or 4.0))),
+                    brush_style=str(row.get("style") or "round"),
+                    brush_hardness=max(1, min(100, int(row.get("hardness", 100) or 100))),
+                    brush_spacing=max(1, min(200, int(row.get("spacing", 25) or 25))),
+                    brush_angle=max(-180, min(180, int(row.get("angle", 0) or 0))),
+                    brush_roundness=max(10, min(100, int(row.get("roundness", 100) or 100))),
+                    closed_path=bool(row.get("closed", False)),
+                    layer_id=layer_id,
+                    source_tool="ai_paint",
+                    start_ms=int(getattr(dialog, "_time_ms", 0) or 0),
+                )
+            )
+            point_count += len(points)
+
+        dialog._push_undo_state(str(undo_label or "AI paint strokes"))
+        existing = dialog.canvas.embedded_strokes()
+        dialog.canvas.set_strokes_snapshot([*existing, *prepared])
+        dialog._update_inspector_counts()
+        state = dialog.painter_action_state()
+        state["stroke_draw"] = {
+            "stroke_count": len(prepared),
+            "point_count": point_count,
+            "undo_label": str(undo_label or "AI paint strokes"),
+            "coordinate_space": "normalized_canvas",
+        }
+        return state
+
+    def paint_history_undo(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        before = len(getattr(dialog, "_undo_stack", []) or [])
+        dialog._undo()
+        state = dialog.painter_action_state()
+        state["history_action"] = {"operation": "undo", "changed": before > 0}
+        return state
+
+    def paint_history_redo(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        before = len(getattr(dialog, "_redo_stack", []) or [])
+        dialog._redo()
+        state = dialog.painter_action_state()
+        state["history_action"] = {"operation": "redo", "changed": before > 0}
+        return state
+
     def paint_window_show_panel(self, *, panel: str = "layers") -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         target = str(panel or "layers")

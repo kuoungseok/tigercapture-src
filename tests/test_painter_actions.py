@@ -40,6 +40,9 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
         "paint.quick_mask.set",
         "paint.tool.set",
         "paint.brush.set",
+        "paint.stroke.draw",
+        "paint.history.undo",
+        "paint.history.redo",
         "paint.window.show_panel",
         "paint.layer.add",
         "paint.layer.select",
@@ -191,6 +194,71 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     assert dialog.canvas._brush_angle == -12
     assert dialog.canvas._brush_roundness == 64
     assert dialog.canvas._brush_flip_x is True
+
+    ai_strokes = registry.execute(
+        "paint.stroke.draw",
+        {
+            "undo_label": "Claude painterly sky",
+            "strokes": [
+                {
+                    "points": [
+                        {"x": 0.10, "y": 0.20},
+                        {"x": 0.25, "y": 0.14},
+                        {"x": 0.42, "y": 0.22},
+                    ],
+                    "color": "#2457A6",
+                    "opacity": 86,
+                    "width": 18,
+                    "style": "loaded_oil",
+                    "hardness": 72,
+                    "spacing": 19,
+                    "layer_id": layer_id,
+                },
+                {
+                    "points": [
+                        {"x": 0.18, "y": 0.30},
+                        {"x": 0.31, "y": 0.25},
+                    ],
+                    "color": "#F0C541",
+                    "width": 9,
+                    "style": "impasto_oil",
+                    "layer_id": layer_id,
+                },
+            ],
+        },
+    ).to_dict()
+    assert ai_strokes["ok"]
+    assert ai_strokes["result"]["stroke_draw"]["stroke_count"] == 2
+    assert ai_strokes["result"]["stroke_draw"]["point_count"] == 5
+    assert ai_strokes["result"]["history"]["undo_labels"][-1] == "Claude painterly sky"
+    assert len(dialog.canvas.embedded_strokes()) == 2
+
+    undone = registry.execute("paint.history.undo").to_dict()
+    assert undone["ok"]
+    assert undone["result"]["history_action"]["changed"] is True
+    assert len(dialog.canvas.embedded_strokes()) == 0
+
+    redone = registry.execute("paint.history.redo").to_dict()
+    assert redone["ok"]
+    assert redone["result"]["history_action"]["changed"] is True
+    assert len(dialog.canvas.embedded_strokes()) == 2
+
+    ai_render_path = tmp_path / "claude_painter_strokes.png"
+    rendered = registry.execute(
+        "paint.document.export_png",
+        {"path": str(ai_render_path), "include_background": False},
+    ).to_dict()
+    assert rendered["ok"]
+    assert ai_render_path.exists()
+    from PySide6.QtGui import QImage
+
+    rendered_image = QImage(str(ai_render_path))
+    assert not rendered_image.isNull()
+    assert any(
+        rendered_image.pixelColor(x, y).alpha() > 0
+        for y in range(0, rendered_image.height(), max(1, rendered_image.height() // 24))
+        for x in range(0, rendered_image.width(), max(1, rendered_image.width() // 24))
+    )
 
     brush_panel = registry.execute("paint.window.show_panel", {"panel": "brush"}).to_dict()
     assert brush_panel["ok"]

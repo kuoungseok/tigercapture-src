@@ -130,6 +130,13 @@ Every user-facing Painter command must have one registered `paint.*` action,
 return state that explains the active document/layer/selection, and use the same
 implementation as the UI. New UI-only behavior is incomplete.
 
+Claude/local-agent painting is contracted through `paint.stroke.draw`, using
+normalized points and the real Painter brush/render model. Batches are atomic
+Painter undo steps exposed through `paint.history.undo` and
+`paint.history.redo`; they do not use the video-editor history stack. Agents
+should inspect `paint.state` between composition passes and use
+`paint.document.export_png` for visual review output.
+
 The agent should work from this audit in priority order and update statuses
 without waiting for the user to point out each missing control.
 

@@ -216,6 +216,94 @@ def register_paint_actions(registry: Any) -> None:
         undo_label="Set Painter brush",
         dry_summary="active Painter brush preset or brush parameters would change",
     )
+    point_schema = {
+        "type": "object",
+        "properties": {
+            "x": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "y": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+        },
+        "required": ["x", "y"],
+        "additionalProperties": False,
+    }
+    stroke_schema = {
+        "type": "object",
+        "properties": {
+            "points": {
+                "type": "array",
+                "items": point_schema,
+                "minItems": 2,
+                "maxItems": 2048,
+            },
+            "color": {"type": "string", "pattern": "^#[0-9A-Fa-f]{6}$"},
+            "opacity": {"type": "integer", "minimum": 1, "maximum": 100},
+            "width": {"type": "number", "minimum": 0.25, "maximum": 512.0},
+            "style": {
+                "type": "string",
+                "enum": [
+                    "round",
+                    "marker",
+                    "highlighter",
+                    "dashed",
+                    "loaded_oil",
+                    "impasto_oil",
+                    "oil_smear",
+                    "soft_oil_glaze",
+                    "real_wet_oil",
+                    "bristle_oil",
+                    "dry_oil",
+                    "palette_knife",
+                    "textured_chalk",
+                ],
+            },
+            "hardness": {"type": "integer", "minimum": 1, "maximum": 100},
+            "spacing": {"type": "integer", "minimum": 1, "maximum": 200},
+            "angle": {"type": "integer", "minimum": -180, "maximum": 180},
+            "roundness": {"type": "integer", "minimum": 10, "maximum": 100},
+            "closed": {"type": "boolean"},
+            "layer_id": {"type": "string"},
+        },
+        "required": ["points"],
+        "additionalProperties": False,
+    }
+    registry.register_adapter_action(
+        "paint.stroke.draw",
+        (
+            "Draw one or more normalized-coordinate brush strokes into Painter. "
+            "Use batches for AI/Claude painting; the entire batch is one undo step."
+        ),
+        "paint",
+        "paint_stroke_draw",
+        params_schema=schema_object(
+            {
+                "strokes": {
+                    "type": "array",
+                    "items": stroke_schema,
+                    "minItems": 1,
+                    "maxItems": 512,
+                },
+                "undo_label": {"type": "string"},
+            },
+            required=("strokes",),
+        ),
+        undo_label="Draw AI Painter strokes",
+        dry_summary="AI-planned brush strokes would be drawn on the Painter canvas",
+    )
+    registry.register_adapter_action(
+        "paint.history.undo",
+        "Undo the latest Painter document operation.",
+        "paint",
+        "paint_history_undo",
+        undo_label="Undo Painter operation",
+        dry_summary="latest Painter document operation would be undone",
+    )
+    registry.register_adapter_action(
+        "paint.history.redo",
+        "Redo the latest undone Painter document operation.",
+        "paint",
+        "paint_history_redo",
+        undo_label="Redo Painter operation",
+        dry_summary="latest undone Painter document operation would be redone",
+    )
     registry.register_adapter_action(
         "paint.window.show_panel",
         "Show the Brush, Layers, Channels, or Paths panel in the active Painter window.",
