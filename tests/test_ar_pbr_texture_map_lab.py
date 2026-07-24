@@ -44,6 +44,7 @@ def test_texture_map_lab_generates_unreal_ready_maps(tmp_path) -> None:
         "ao",
         "roughness",
         "metallic",
+        "delight_shading",
         "height",
         "cavity",
         "curvature",
@@ -56,6 +57,7 @@ def test_texture_map_lab_generates_unreal_ready_maps(tmp_path) -> None:
     assert maps["curvature"].shape == (24, 32)
     assert maps["f0"].shape == (24, 32, 3)
     assert maps["f90_mask"].shape == (24, 32)
+    assert maps["delight_shading"].shape == (24, 32)
     assert float(np.mean(maps["normal"][..., 2])) > 0.7
     assert float(np.max(maps["metallic"])) == 0.0
     assert 0.02 <= float(np.mean(maps["f0"])) <= 0.08
@@ -90,6 +92,54 @@ def test_texture_map_lab_supports_in_memory_preview_backend_status(tmp_path) -> 
     assert generated["size"] == [32, 24]
     assert preview["backend"]["active"] in {"cpu", "torch_cuda"}
     assert backend["status"]["install_guidance"]["recommended_backend"] == "torch_cuda"
+
+
+def test_texture_map_lab_delight_reduces_baked_lighting_gradient(tmp_path) -> None:
+    from app.ar_pbr.texture_map_lab import generate_texture_maps
+
+    h, w = 48, 96
+    y = np.linspace(0.0, 1.0, h, dtype=np.float32)[:, None]
+    x = np.linspace(0.0, 1.0, w, dtype=np.float32)[None, :]
+    material = np.dstack(
+        [
+            np.full((h, w), 0.20, dtype=np.float32) + np.tile(np.sin(x * np.pi * 14.0), (h, 1)) * 0.025,
+            np.full((h, w), 0.58, dtype=np.float32) + np.tile(np.cos(y * np.pi * 7.0), (1, w)) * 0.035,
+            np.full((h, w), 0.15, dtype=np.float32),
+        ]
+    )
+    baked_light = np.linspace(0.35, 1.15, w, dtype=np.float32)[None, :, None]
+    rgb = np.clip(material * baked_light, 0.0, 1.0)
+    image_path = tmp_path / "baked_grass_photo.png"
+    Image.fromarray(np.clip(rgb * 255.0 + 0.5, 0, 255).astype(np.uint8), mode="RGB").save(image_path)
+
+    baseline = generate_texture_maps(image_path, {"delight_enabled": False}, max_size=96)
+    delighted = generate_texture_maps(
+        image_path,
+        {
+            "delight_enabled": True,
+            "delight_strength": 0.90,
+            "delight_radius_px": 18.0,
+            "delight_contrast_preservation": 0.0,
+        },
+        max_size=96,
+    )
+
+    baseline_luma = (
+        baseline["maps"]["base_color"][..., 0] * 0.2126
+        + baseline["maps"]["base_color"][..., 1] * 0.7152
+        + baseline["maps"]["base_color"][..., 2] * 0.0722
+    )
+    delighted_luma = (
+        delighted["maps"]["base_color"][..., 0] * 0.2126
+        + delighted["maps"]["base_color"][..., 1] * 0.7152
+        + delighted["maps"]["base_color"][..., 2] * 0.0722
+    )
+    baseline_side_delta = abs(float(np.mean(baseline_luma[:, :16])) - float(np.mean(baseline_luma[:, -16:])))
+    delighted_side_delta = abs(float(np.mean(delighted_luma[:, :16])) - float(np.mean(delighted_luma[:, -16:])))
+
+    assert delighted_side_delta < baseline_side_delta * 0.65
+    assert delighted["maps"]["delight_shading"].shape == (h, w)
+    assert delighted["algorithms"]["delight"]["enabled"] is True
 
 
 def test_texture_map_lab_exports_separate_and_packed_maps(tmp_path) -> None:
@@ -235,6 +285,7 @@ def test_texture_map_lab_plane_preview_and_substrate_plan(tmp_path) -> None:
 
 def test_texture_map_lab_actions_execute_without_editor_owner(tmp_path) -> None:
     from app.actions import build_default_action_registry
+    from app.actions.ar_pbr_texture_lab_namespace import texture_lab_settings_schema
 
     image_path = tmp_path / "source.png"
     preview_path = tmp_path / "preview.png"
@@ -262,6 +313,10 @@ def test_texture_map_lab_actions_execute_without_editor_owner(tmp_path) -> None:
     assert backend["result"]["status"]["install_guidance"]["recommended_backend"] == "torch_cuda"
     assert plan["ok"] is True
     assert plan["result"]["target"] == "Unreal Engine Substrate Slab BSDF"
+    settings_props = texture_lab_settings_schema()["properties"]
+    assert "delight_enabled" in settings_props
+    assert "preview_animate_light" in settings_props
+    assert "substrate_mode" in settings_props
 
 
 def test_texture_map_lab_window_supports_clipboard_copy_and_paste(tmp_path) -> None:
@@ -277,6 +332,10 @@ def test_texture_map_lab_window_supports_clipboard_copy_and_paste(tmp_path) -> N
     window.refresh_preview()
     assert window._preview.thumbnail_count() >= 10
     assert window._advanced_map_checks["f0"].isChecked() is False
+    assert window._delight_check is not None
+    assert window._sliders["delight_strength"].isEnabled() is False
+    window._delight_check.setChecked(True)
+    assert window._sliders["delight_strength"].isEnabled() is True
 
     copied = window.copy_preview_to_clipboard()
     assert copied["copied"] is True

@@ -37,11 +37,14 @@ DEFAULT_SEPARATE_MAPS: tuple[str, ...] = (
     "cavity",
     "curvature",
 )
+ANALYSIS_MAPS: tuple[str, ...] = (
+    "delight_shading",
+)
 OPTIONAL_SUBSTRATE_MAPS: tuple[str, ...] = (
     "f0",
     "f90_mask",
 )
-SEPARATE_MAPS: tuple[str, ...] = DEFAULT_SEPARATE_MAPS + OPTIONAL_SUBSTRATE_MAPS
+SEPARATE_MAPS: tuple[str, ...] = DEFAULT_SEPARATE_MAPS + OPTIONAL_SUBSTRATE_MAPS + ANALYSIS_MAPS
 DEFAULT_PACKED_LAYOUTS: tuple[str, ...] = ("unreal_orm", "gltf_mr")
 PREVIEW_MODES: tuple[str, ...] = (
     "material",
@@ -50,6 +53,7 @@ PREVIEW_MODES: tuple[str, ...] = (
     "ao",
     "roughness",
     "metallic",
+    "delight_shading",
     "height",
     "cavity",
     "curvature",
@@ -82,6 +86,11 @@ UNREAL_TEXTURE_IMPORT_SETTINGS: dict[str, dict[str, Any]] = {
     "curvature": {"sRGB": False, "compression": "Grayscale"},
     "f0": {"sRGB": False, "compression": "Default", "usage": "Optional Substrate direct F0 override"},
     "f90_mask": {"sRGB": False, "compression": "Grayscale", "usage": "Optional Substrate grazing/F90 mask"},
+    "delight_shading": {
+        "sRGB": False,
+        "compression": "Grayscale",
+        "usage": "Diagnostic estimated illumination removed from BaseColor",
+    },
     "unreal_orm": {"sRGB": False, "compression": "TC_Masks", "channels": "R=AO, G=Roughness, B=Metallic"},
     "orm": {"sRGB": False, "compression": "TC_Masks", "channels": "R=AO, G=Roughness, B=Metallic"},
     "arm": {"sRGB": False, "compression": "TC_Masks", "channels": "R=AO, G=Roughness, B=Metallic"},
@@ -118,6 +127,10 @@ class TextureMapLabSettings:
     metallic_value: float = 0.0
     metallic_threshold: float = 1.1
     metallic_softness: float = 0.08
+    delight_enabled: bool = False
+    delight_strength: float = 0.65
+    delight_radius_px: float = 42.0
+    delight_contrast_preservation: float = 0.25
     substrate_enabled: bool = False
     substrate_mode: str = "off"
     substrate_reflectance: float = 0.5
@@ -362,6 +375,15 @@ def normalize_texture_map_settings(settings: Mapping[str, Any] | None = None) ->
         "metallic_value": clamp_float(raw.get("metallic_value"), 0.0, 1.0, defaults.metallic_value),
         "metallic_threshold": clamp_float(raw.get("metallic_threshold"), 0.0, 1.5, defaults.metallic_threshold),
         "metallic_softness": clamp_float(raw.get("metallic_softness"), 0.001, 0.5, defaults.metallic_softness),
+        "delight_enabled": bool_setting(raw.get("delight_enabled"), defaults.delight_enabled),
+        "delight_strength": clamp_float(raw.get("delight_strength"), 0.0, 1.0, defaults.delight_strength),
+        "delight_radius_px": clamp_float(raw.get("delight_radius_px"), 1.0, 256.0, defaults.delight_radius_px),
+        "delight_contrast_preservation": clamp_float(
+            raw.get("delight_contrast_preservation"),
+            0.0,
+            1.0,
+            defaults.delight_contrast_preservation,
+        ),
         "substrate_enabled": substrate_enabled,
         "substrate_mode": substrate_mode,
         "substrate_reflectance": clamp_float(
@@ -751,6 +773,48 @@ def _f90_mask_from_material_maps(
     return np.clip(mask * strength, 0.0, 1.0).astype(np.float32)
 
 
+def _delight_base_color(rgb: np.ndarray, settings: Mapping[str, Any]) -> tuple[np.ndarray, np.ndarray]:
+    """Estimate broad illumination and remove it from a photographic base map.
+
+    The goal is a production-friendly de-light, not a perfect intrinsic-image
+    solve.  It removes low-frequency light/shadow gradients while keeping the
+    high-frequency material detail that should stay in BaseColor.
+    """
+    if not bool(settings.get("delight_enabled", False)):
+        return np.clip(rgb, 0.0, 1.0).astype(np.float32), np.ones(rgb.shape[:2], dtype=np.float32)
+    strength = float(settings.get("delight_strength", 0.65))
+    if strength <= 0.001:
+        return np.clip(rgb, 0.0, 1.0).astype(np.float32), np.ones(rgb.shape[:2], dtype=np.float32)
+    luma = rgb[..., 0] * 0.2126 + rgb[..., 1] * 0.7152 + rgb[..., 2] * 0.0722
+    radius = float(settings.get("delight_radius_px", 42.0))
+    if bool(settings.get("edge_aware_smoothing", True)):
+        illumination = _edge_aware_blur_float(
+            luma,
+            luma,
+            radius,
+            sensitivity=float(settings.get("edge_aware_sensitivity", 9.0)) * 0.5,
+        )
+    else:
+        illumination = _blur_float(luma, radius)
+    illumination = np.clip(illumination, 0.025, 1.0).astype(np.float32)
+    neutral = float(np.exp(np.mean(np.log(np.clip(illumination, 0.025, 1.0)))))
+    neutral = max(0.05, min(0.95, neutral))
+    correction = np.clip(neutral / illumination, 0.45, 2.35)
+    corrected = np.clip(rgb * np.power(correction[:, :, None], strength), 0.0, 1.0)
+    preserve = float(settings.get("delight_contrast_preservation", 0.25))
+    if preserve > 0.001:
+        corrected_luma = corrected[..., 0] * 0.2126 + corrected[..., 1] * 0.7152 + corrected[..., 2] * 0.0722
+        original_detail = luma - _blur_float(luma, max(1.0, radius * 0.18))
+        detail_gain = 1.0 + original_detail[:, :, None] * preserve
+        corrected = np.clip(corrected * detail_gain, 0.0, 1.0)
+        target_median = float(np.median(luma))
+        corrected_median = float(np.median(corrected_luma))
+        if corrected_median > 1.0e-4:
+            corrected = np.clip(corrected * ((target_median / corrected_median) ** 0.20), 0.0, 1.0)
+    shading_display = np.clip(illumination / max(0.05, float(np.percentile(illumination, 95.0))), 0.0, 1.0)
+    return corrected.astype(np.float32), shading_display.astype(np.float32)
+
+
 def _base_color_from_source(image: Image.Image, settings: Mapping[str, Any]) -> np.ndarray:
     exposure = float(settings["base_color_exposure"])
     contrast = float(settings["base_color_contrast"])
@@ -785,6 +849,43 @@ def _torch_edge_aware_blur(value: Any, guide: Any | None, radius: float, sensiti
     edge_delta = torch.abs(guide - guide_blur)
     weight = torch.exp(-edge_delta * float(sensitivity))
     return torch.clamp(value * (1.0 - weight) + blurred * weight, 0.0, 1.0)
+
+
+def _torch_delight_base_color(base: Any, settings: Mapping[str, Any], torch: Any) -> tuple[Any, Any]:
+    if not bool(settings.get("delight_enabled", False)):
+        return torch.clamp(base, 0.0, 1.0), torch.ones_like(base[..., 0])
+    strength = float(settings.get("delight_strength", 0.65))
+    if strength <= 0.001:
+        return torch.clamp(base, 0.0, 1.0), torch.ones_like(base[..., 0])
+    luma = base[..., 0] * 0.2126 + base[..., 1] * 0.7152 + base[..., 2] * 0.0722
+    radius = float(settings.get("delight_radius_px", 42.0))
+    if bool(settings.get("edge_aware_smoothing", True)):
+        illumination = _torch_edge_aware_blur(
+            luma,
+            luma,
+            radius,
+            float(settings.get("edge_aware_sensitivity", 9.0)) * 0.5,
+            torch,
+        )
+    else:
+        illumination = _torch_gaussian_blur_2d(luma, radius, torch)
+    illumination = torch.clamp(illumination, 0.025, 1.0)
+    neutral = torch.exp(torch.mean(torch.log(illumination)))
+    neutral = torch.clamp(neutral, 0.05, 0.95)
+    correction = torch.clamp(neutral / illumination, 0.45, 2.35)
+    corrected = torch.clamp(base * torch.pow(correction[..., None], strength), 0.0, 1.0)
+    preserve = float(settings.get("delight_contrast_preservation", 0.25))
+    if preserve > 0.001:
+        local = _torch_gaussian_blur_2d(luma, max(1.0, radius * 0.18), torch)
+        detail_gain = 1.0 + (luma - local)[..., None] * preserve
+        corrected = torch.clamp(corrected * detail_gain, 0.0, 1.0)
+        corrected_luma = corrected[..., 0] * 0.2126 + corrected[..., 1] * 0.7152 + corrected[..., 2] * 0.0722
+        target_mean = torch.clamp(torch.mean(luma), min=1.0e-4)
+        corrected_mean = torch.clamp(torch.mean(corrected_luma), min=1.0e-4)
+        corrected = torch.clamp(corrected * torch.pow(target_mean / corrected_mean, 0.20), 0.0, 1.0)
+    high = torch.clamp(torch.quantile(illumination.reshape(-1), 0.95), min=0.05)
+    shading_display = torch.clamp(illumination / high, 0.0, 1.0)
+    return corrected, shading_display
 
 
 def _torch_shift_clamped(value: Any, dy: int, dx: int) -> Any:
@@ -838,6 +939,8 @@ def _generate_texture_maps_torch_cuda(
     exposure = float(normalized["base_color_exposure"])
     contrast = float(normalized["base_color_contrast"])
     base = torch.clamp(((base * (2.0 ** exposure)) - 0.5) * contrast + 0.5, 0.0, 1.0)
+    guide_luma = base[..., 0] * 0.2126 + base[..., 1] * 0.7152 + base[..., 2] * 0.0722
+    base, delight_shading = _torch_delight_base_color(base, normalized, torch)
     guide_luma = base[..., 0] * 0.2126 + base[..., 1] * 0.7152 + base[..., 2] * 0.0722
     height = torch.clamp((guide_luma - 0.5) * float(normalized["height_contrast"]) + 0.5, 0.0, 1.0)
     height_blur = float(normalized["height_blur_px"])
@@ -1034,6 +1137,7 @@ def _generate_texture_maps_torch_cuda(
         "ao": cpu(ao),
         "roughness": cpu(roughness),
         "metallic": cpu(metallic),
+        "delight_shading": cpu(delight_shading),
         "cavity": cpu(cavity),
         "curvature": cpu(curvature),
         "f0": cpu(f0),
@@ -1057,7 +1161,8 @@ def _generate_texture_maps_cpu(
     source_path: str = "",
 ) -> dict[str, Any]:
     image = image.convert("RGB")
-    base_color = _base_color_from_source(image, normalized)
+    base_color_raw = _base_color_from_source(image, normalized)
+    base_color, delight_shading = _delight_base_color(base_color_raw, normalized)
     guide_luma = base_color[..., 0] * 0.2126 + base_color[..., 1] * 0.7152 + base_color[..., 2] * 0.0722
     height = _height_from_source(base_color, normalized)
     normal = _normal_from_height(height, normalized)
@@ -1075,6 +1180,7 @@ def _generate_texture_maps_cpu(
         "ao": ao,
         "roughness": roughness,
         "metallic": metallic,
+        "delight_shading": delight_shading,
         "cavity": cavity,
         "curvature": curvature,
         "f0": f0,
@@ -1170,6 +1276,14 @@ def _algorithm_metadata(settings: Mapping[str, Any]) -> dict[str, Any]:
             "method": "heuristic_grazing_response_mask",
             "source": "heightfield_relief_curvature_smoothness_ao",
             "strength": float(settings.get("f90_mask_strength", 0.45)),
+        },
+        "delight": {
+            "enabled": bool(settings.get("delight_enabled", False)),
+            "method": "low_frequency_intrinsic_de_lighting",
+            "source": "base_color_luminance_edge_aware_illumination_field",
+            "strength": float(settings.get("delight_strength", 0.65)),
+            "radius_px": float(settings.get("delight_radius_px", 42.0)),
+            "contrast_preservation": float(settings.get("delight_contrast_preservation", 0.25)),
         },
         "substrate": {
             "enabled": bool(settings.get("substrate_enabled", False)),

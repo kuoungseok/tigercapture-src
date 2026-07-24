@@ -43,6 +43,12 @@ def texture_lab_settings_schema() -> dict[str, Any]:
             "metallic_value": {"type": "number", "minimum": 0.0, "maximum": 1.0},
             "metallic_threshold": {"type": "number", "minimum": 0.0, "maximum": 1.5},
             "metallic_softness": {"type": "number", "minimum": 0.001, "maximum": 0.5},
+            "delight_enabled": {"type": "boolean"},
+            "delight_strength": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "delight_radius_px": {"type": "number", "minimum": 1.0, "maximum": 256.0},
+            "delight_contrast_preservation": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "substrate_enabled": {"type": "boolean"},
+            "substrate_mode": {"type": "string", "enum": ["off", "slab"]},
             "substrate_reflectance": {"type": "number", "minimum": 0.0, "maximum": 1.0},
             "f90_mask_strength": {"type": "number", "minimum": 0.0, "maximum": 1.0},
             "base_color_exposure": {"type": "number", "minimum": -3.0, "maximum": 3.0},
@@ -50,6 +56,7 @@ def texture_lab_settings_schema() -> dict[str, Any]:
             "preview_light_azimuth": {"type": "number", "minimum": -360.0, "maximum": 360.0},
             "preview_light_elevation": {"type": "number", "minimum": 3.0, "maximum": 89.0},
             "preview_environment": {"type": "number", "minimum": 0.0, "maximum": 1.5},
+            "preview_animate_light": {"type": "boolean"},
         },
     }
 

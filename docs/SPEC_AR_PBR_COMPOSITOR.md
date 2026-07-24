@@ -704,8 +704,17 @@ The lab must provide:
 - Plane material preview rendered from the generated maps.
 - Slider controls for normal strength/radius, height contrast/blur, AO
   strength/radius, cavity/curvature, roughness bias/contrast/detail,
-  metallic value, optional Substrate reflectance/F90 mask strength, Substrate
-  Slab mode, preview light/environment, and animated-light preview.
+  metallic value, optional Base Color de-light/albedo recovery, optional
+  Substrate reflectance/F90 mask strength, Substrate Slab mode, preview
+  light/environment, and animated-light preview.
+- `De-light Albedo` is an optional photographic albedo recovery pass for
+  internet/photo sources such as grass, asphalt, fabric, or walls where sunlight
+  and contact shadows are already baked into the image. It estimates a
+  low-frequency illumination/shading field from BaseColor luminance, removes it
+  with a user strength/radius/detail-preservation control, and exposes the
+  diagnostic `delight_shading` preview map. This is a practical de-lighting
+  approximation, not a full inverse-rendering solve, so the UI must present it
+  as an adjustable cleanup option rather than a physically guaranteed albedo.
 - Individual export for `base_color`, `normal`, `ao`, `roughness`,
   `metallic`, `height`, `cavity`, and `curvature`.
 - Optional advanced Substrate export for `f0` and `f90_mask`; these are

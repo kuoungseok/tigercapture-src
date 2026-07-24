@@ -49,6 +49,7 @@ _TEXTURE_THUMBNAILS: tuple[tuple[str, str], ...] = (
     ("Normal", "normal"),
     ("AO", "ao"),
     ("Rough", "roughness"),
+    ("Shade", "delight_shading"),
     ("Height", "height"),
     ("Cavity", "cavity"),
     ("Curv", "curvature"),
@@ -277,6 +278,7 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._advanced_map_checks: dict[str, QCheckBox] = {}
         self._substrate_mode_check: QCheckBox | None = None
         self._animate_light_check: QCheckBox | None = None
+        self._delight_check: QCheckBox | None = None
         self._animated_light_azimuth = 38.0
         self._generated_maps_cache: dict[str, Any] | None = None
         self._backend_selection = select_texture_map_backend()
@@ -292,13 +294,20 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         for key, slider in self._sliders.items():
             values[key] = slider.value()
         values["normal_format"] = str(self._normal_format_combo.currentData() or "unreal_directx")
-        if bool(self._animate_light_check.isChecked()) if self._animate_light_check is not None else False:
-            values["preview_light_azimuth"] = self._animated_light_azimuth
-        values["preview_animate_light"] = bool(
-            self._animate_light_check.isChecked()
-            if self._animate_light_check is not None
-            else self._settings.get("preview_animate_light", False)
+        delight_checked = (
+            bool(self._delight_check.isChecked())
+            if self._delight_check is not None
+            else bool(self._settings.get("delight_enabled", False))
         )
+        values["delight_enabled"] = delight_checked
+        animate_light_checked = (
+            bool(self._animate_light_check.isChecked())
+            if self._animate_light_check is not None
+            else bool(self._settings.get("preview_animate_light", False))
+        )
+        if animate_light_checked:
+            values["preview_light_azimuth"] = self._animated_light_azimuth
+        values["preview_animate_light"] = animate_light_checked
         values["substrate_enabled"] = bool(
             self._substrate_mode_check.isChecked()
             if self._substrate_mode_check is not None
@@ -521,6 +530,16 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._normal_format_combo.addItem("Unreal / DirectX Normal", "unreal_directx")
         self._normal_format_combo.addItem("OpenGL Normal", "opengl")
         self._normal_format_combo.currentIndexChanged.connect(self.queue_preview)
+        controls_layout.addWidget(_section_label("Base Color / Albedo", controls))
+        self._delight_check = QCheckBox("De-light Albedo", controls)
+        self._delight_check.setObjectName("TextureLabCheck")
+        self._delight_check.setChecked(bool(self._settings.get("delight_enabled", False)))
+        self._delight_check.setToolTip("Remove broad photographic lighting and shadow from BaseColor.")
+        self._delight_check.toggled.connect(self._on_delight_toggled)
+        controls_layout.addWidget(self._delight_check)
+        self._add_slider(controls_layout, "De-light Strength", "delight_strength", 0.0, 1.0, 0.01)
+        self._add_slider(controls_layout, "Shading Radius", "delight_radius_px", 1.0, 256.0, 1.0)
+        self._add_slider(controls_layout, "Detail Preserve", "delight_contrast_preservation", 0.0, 1.0, 0.01)
         controls_layout.addWidget(_section_label("Normal", controls))
         controls_layout.addWidget(self._normal_format_combo)
         self._add_slider(controls_layout, "Strength", "normal_strength", 0.0, 12.0, 0.1)
@@ -568,6 +587,7 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         root.addLayout(content, 1)
         self.setCentralWidget(central)
         self._sync_substrate_controls()
+        self._sync_delight_controls()
         self._on_animate_light_toggled(bool(self._animate_light_check.isChecked()) if self._animate_light_check else False)
 
     def _add_slider(
@@ -594,6 +614,10 @@ class ArPbrTextureMapLabWindow(QMainWindow):
 
     def _on_substrate_mode_toggled(self, _checked: bool) -> None:
         self._sync_substrate_controls()
+        self.queue_preview()
+
+    def _on_delight_toggled(self, _checked: bool) -> None:
+        self._sync_delight_controls()
         self.queue_preview()
 
     def _on_animate_light_toggled(self, checked: bool) -> None:
@@ -635,6 +659,18 @@ class ArPbrTextureMapLabWindow(QMainWindow):
             check = self._advanced_map_checks.get(name)
             if check is not None and substrate_enabled:
                 check.setChecked(True)
+
+    def _sync_delight_controls(self) -> None:
+        enabled = bool(self._delight_check.isChecked()) if self._delight_check else False
+        for key in ("delight_strength", "delight_radius_px", "delight_contrast_preservation"):
+            slider = self._sliders.get(key)
+            if slider is not None:
+                slider.setEnabled(enabled)
+                slider.setToolTip(
+                    "Controls estimated illumination removal for de-lighted BaseColor."
+                    if enabled
+                    else "Enable De-light Albedo to edit this value."
+                )
 
     def queue_preview(self) -> None:
         self._preview_timer.start(120)
