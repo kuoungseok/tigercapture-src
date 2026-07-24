@@ -92,12 +92,17 @@ QDialog {
 }
 
 QFrame#PaintTopBar,
-QFrame#PaintToolRail,
 QFrame#PaintInspector,
 QFrame#PaintCanvasFrame {
     background-color: #11151b;
     border: 1px solid rgba(178, 186, 202, 22);
     border-radius: 6px;
+}
+
+QFrame#PaintToolRail {
+    background-color: #535353;
+    border: none;
+    border-radius: 0;
 }
 
 QLabel#PaintTitle {
@@ -230,10 +235,10 @@ QPushButton#StickerBtn:checked {
 }
 
 QFrame#PaintToolRail QPushButton {
-    min-width: 34px;
-    max-width: 34px;
-    min-height: 34px;
-    max-height: 34px;
+    min-width: 30px;
+    max-width: 30px;
+    min-height: 26px;
+    max-height: 26px;
     padding: 0;
     text-align: center;
 }
@@ -242,8 +247,33 @@ QFrame#PaintToolRail QPushButton#PaintTool,
 QFrame#PaintToolRail QPushButton#BubbleBtn,
 QFrame#PaintToolRail QPushButton#StickerBtn,
 QFrame#PaintToolRail QPushButton#PaintDanger {
-    border-radius: 6px;
+    background-color: transparent;
+    border: none;
+    border-radius: 0;
     padding: 0;
+}
+
+QFrame#PaintToolRail QPushButton#PaintTool:hover,
+QFrame#PaintToolRail QPushButton#BubbleBtn:hover,
+QFrame#PaintToolRail QPushButton#StickerBtn:hover,
+QFrame#PaintToolRail QPushButton#PaintDanger:hover {
+    background-color: #626262;
+    border: none;
+}
+
+QFrame#PaintToolRail QPushButton#PaintTool:checked,
+QFrame#PaintToolRail QPushButton#BubbleBtn:checked,
+QFrame#PaintToolRail QPushButton#StickerBtn:checked {
+    background-color: #3f3f3f;
+    border: none;
+}
+
+QLabel#PaintToolRailGrip {
+    color: #bdbdbd;
+    background-color: transparent;
+    border: none;
+    font-size: 8px;
+    letter-spacing: 1px;
 }
 
 QPushButton#PaintToolRailChrome {
@@ -265,37 +295,37 @@ QPushButton#PaintToolRailChrome:hover {
 }
 
 QFrame#PaintToolRailSeparator {
-    background-color: rgba(178, 186, 202, 32);
+    background-color: transparent;
     border: none;
-    min-height: 1px;
-    max-height: 1px;
+    min-height: 3px;
+    max-height: 3px;
 }
 
 QFrame#PaintToolSwatches {
-    background-color: #0d1016;
-    border: 1px solid rgba(178, 186, 202, 30);
-    border-radius: 6px;
+    background-color: transparent;
+    border: none;
+    border-radius: 0;
 }
 
 QPushButton#PaintForegroundSwatch,
 QPushButton#PaintBackgroundSwatch {
-    border: 1px solid rgba(238, 242, 250, 86);
-    border-radius: 3px;
+    border: 1px solid #f0f0f0;
+    border-radius: 0;
     padding: 0;
 }
 
 QPushButton#PaintForegroundSwatch {
-    min-width: 25px;
-    max-width: 25px;
-    min-height: 25px;
-    max-height: 25px;
+    min-width: 22px;
+    max-width: 22px;
+    min-height: 22px;
+    max-height: 22px;
 }
 
 QPushButton#PaintBackgroundSwatch {
-    min-width: 23px;
-    max-width: 23px;
-    min-height: 23px;
-    max-height: 23px;
+    min-width: 21px;
+    max-width: 21px;
+    min-height: 21px;
+    max-height: 21px;
 }
 
 QPushButton#PaintForegroundSwatch:hover,
@@ -4343,7 +4373,7 @@ class PaintDialog(QDialog):
     ) -> None:
         super().__init__(parent)
         self._standalone = bool(standalone)
-        self.setWindowTitle("Painter - TigerCapture" if self._standalone else tr("paint.title"))
+        self.setWindowTitle("Painter - Tiger Studio" if self._standalone else tr("paint.title"))
         self.setWindowFlag(Qt.WindowType.WindowMaximizeButtonHint, True)
         self.setSizeGripEnabled(True)
         self.setModal(not self._standalone)
@@ -4406,8 +4436,8 @@ class PaintDialog(QDialog):
         self._paint_clipboard: dict | None = None
         self._paint_initial_color_scroll_pending = True
         self._tool_rail_collapsed = False
-        self._tool_rail_full_width = 50
-        self._tool_rail_collapsed_width = 30
+        self._tool_rail_full_width = 40
+        self._tool_rail_collapsed_width = 24
         self._brush_long_press_menu: QMenu | None = None
         self._brush_long_press_menu_opened = False
         self._brush_long_press_timer = QTimer(self)
@@ -4470,14 +4500,14 @@ class PaintDialog(QDialog):
         icon_name: str,
         label: str,
         *,
-        icon_px: int = 17,
+        icon_px: int = 16,
     ) -> None:
         button.setText("")
         button.setToolTip(label)
         button.setAccessibleName(label)
-        button.setIcon(app_icon(icon_name, size=icon_px, color="#E8EEF8"))
+        button.setIcon(app_icon(icon_name, size=icon_px, color="#E8E8E8"))
         button.setIconSize(icon_size(icon_px))
-        button.setFixedSize(34, 34)
+        button.setFixedSize(30, 26)
 
     def _make_tool_rail_chrome_button(self, icon_name: str, label: str) -> QPushButton:
         button = QPushButton("")
@@ -4493,7 +4523,7 @@ class PaintDialog(QDialog):
     def _make_tool_rail_separator(self) -> QFrame:
         line = QFrame()
         line.setObjectName("PaintToolRailSeparator")
-        line.setFixedHeight(1)
+        line.setFixedHeight(3)
         line.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
         return line
 
@@ -4509,7 +4539,7 @@ class PaintDialog(QDialog):
     def _build_tool_rail_swatch_panel(self, parent_layout: QVBoxLayout) -> None:
         panel = QFrame()
         panel.setObjectName("PaintToolSwatches")
-        panel.setFixedSize(38, 44)
+        panel.setFixedSize(32, 40)
         panel.setToolTip("Foreground / background colors")
         self._tool_swatch_panel = panel
 
@@ -4517,16 +4547,16 @@ class PaintDialog(QDialog):
         self.background_swatch_btn.setObjectName("PaintBackgroundSwatch")
         self.background_swatch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.background_swatch_btn.setToolTip("Background color")
-        self.background_swatch_btn.setFixedSize(23, 23)
-        self.background_swatch_btn.move(11, 16)
+        self.background_swatch_btn.setFixedSize(21, 21)
+        self.background_swatch_btn.move(9, 16)
         self.background_swatch_btn.clicked.connect(self._pick_background_color)
 
         self.foreground_swatch_btn = QPushButton(panel)
         self.foreground_swatch_btn.setObjectName("PaintForegroundSwatch")
         self.foreground_swatch_btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self.foreground_swatch_btn.setToolTip("Foreground color")
-        self.foreground_swatch_btn.setFixedSize(25, 25)
-        self.foreground_swatch_btn.move(3, 5)
+        self.foreground_swatch_btn.setFixedSize(22, 22)
+        self.foreground_swatch_btn.move(1, 4)
         self.foreground_swatch_btn.clicked.connect(self._pick_custom_color)
         self.foreground_swatch_btn.raise_()
 
@@ -4537,7 +4567,7 @@ class PaintDialog(QDialog):
         self.swap_swatch_btn.setIcon(app_icon("repeat", size=11, color="#AEB8C9"))
         self.swap_swatch_btn.setIconSize(icon_size(11))
         self.swap_swatch_btn.setFixedSize(14, 14)
-        self.swap_swatch_btn.move(23, 1)
+        self.swap_swatch_btn.move(18, 0)
         self.swap_swatch_btn.clicked.connect(self._swap_painter_foreground_background)
         self.swap_swatch_btn.raise_()
 
@@ -5113,7 +5143,7 @@ class PaintDialog(QDialog):
         title_col = QVBoxLayout()
         title_col.setContentsMargins(0, 0, 0, 0)
         title_col.setSpacing(2)
-        title = QLabel("TigerCapture Painter" if self._standalone else "TigerCapture Paint")
+        title = QLabel("Tiger Studio Painter" if self._standalone else "Tiger Studio Paint")
         title.setObjectName("PaintTitle")
         subtitle = QLabel("Blank canvas" if self._standalone else "Video paint")
         subtitle.setObjectName("PaintSubtitle")
@@ -5200,8 +5230,8 @@ class PaintDialog(QDialog):
         tool_rail.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         self._tool_rail = tool_rail
         tool_layout = QVBoxLayout(tool_rail)
-        tool_layout.setContentsMargins(6, 6, 6, 6)
-        tool_layout.setSpacing(5)
+        tool_layout.setContentsMargins(5, 3, 5, 4)
+        tool_layout.setSpacing(0)
 
         tool_chrome_row = QHBoxLayout()
         tool_chrome_row.setContentsMargins(0, 0, 0, 0)
@@ -5213,9 +5243,16 @@ class PaintDialog(QDialog):
         self.tool_collapse_btn.clicked.connect(self._toggle_tool_rail_collapsed)
         self.tool_close_btn = self._make_tool_rail_chrome_button("x", "Close toolbar")
         self.tool_close_btn.clicked.connect(self._hide_tool_rail)
-        tool_chrome_row.addWidget(self.tool_collapse_btn)
+        self.tool_collapse_btn.hide()
+        self.tool_close_btn.hide()
         tool_chrome_row.addStretch(1)
-        tool_chrome_row.addWidget(self.tool_close_btn)
+        self._tool_rail_grip = QLabel("••••")
+        self._tool_rail_grip.setObjectName("PaintToolRailGrip")
+        self._tool_rail_grip.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._tool_rail_grip.setFixedHeight(8)
+        self._tool_rail_grip.setToolTip("Painter tools")
+        tool_chrome_row.addWidget(self._tool_rail_grip)
+        tool_chrome_row.addStretch(1)
         tool_layout.addLayout(tool_chrome_row)
 
         tool_button_host = QWidget(tool_rail)
@@ -5227,7 +5264,7 @@ class PaintDialog(QDialog):
         self._tool_button_host = tool_button_host
         tool_buttons_layout = QVBoxLayout(tool_button_host)
         tool_buttons_layout.setContentsMargins(0, 0, 0, 0)
-        tool_buttons_layout.setSpacing(4)
+        tool_buttons_layout.setSpacing(0)
 
         self.select_btn = QPushButton("Select / Move")
         self.select_btn.setCheckable(True)
@@ -8664,13 +8701,17 @@ class PaintDialog(QDialog):
             swatches.setVisible(not collapsed)
         close_btn = getattr(self, "tool_close_btn", None)
         if close_btn is not None:
-            close_btn.setVisible(not collapsed)
+            close_btn.hide()
         collapse_btn = getattr(self, "tool_collapse_btn", None)
         if collapse_btn is not None:
+            collapse_btn.hide()
             collapse_btn.setIcon(
                 app_icon("chevron-right" if collapsed else "chevron-down", size=11, color="#AEB8C9")
             )
             collapse_btn.setToolTip("Expand toolbar" if collapsed else "Collapse toolbar")
+        grip = getattr(self, "_tool_rail_grip", None)
+        if grip is not None:
+            grip.setVisible(True)
 
     def _toggle_tool_rail_collapsed(self) -> None:
         self._set_tool_rail_collapsed(not bool(getattr(self, "_tool_rail_collapsed", False)))
@@ -11041,7 +11082,7 @@ class PaintDialog(QDialog):
             preview_image = self._payload_to_system_clipboard_image(payload)
             if preview_image is not None and not preview_image.isNull():
                 mime.setImageData(preview_image)
-            mime.setText(f"TigerCapture Paint {document.get('kind', 'payload')}")
+            mime.setText(f"Tiger Studio Paint {document.get('kind', 'payload')}")
             QApplication.clipboard().setMimeData(mime)
         except Exception:
             return

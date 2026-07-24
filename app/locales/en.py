@@ -770,7 +770,7 @@ TRANSLATIONS = {
     "subtitle.edit.text": "Text",
     "subtitle.edit.placeholder": "Enter subtitle text…",
     "subtitle.edit.show_box": "Show background box (off = outline/shadow only)",
-    "paint.title": "Draw — TigerCapture",
+    "paint.title": "Draw — Tiger Studio",
     "paint.hint": "Click: open paint · Right-click: clear all",
     "paint.btn.pen": "🖌 Pen",
     "paint.btn.eraser": "🧹 Eraser",

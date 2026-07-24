@@ -66,6 +66,10 @@ Default layout:
   Move, Magic Select, Fill, Quick Mask, Fit, and Pen/Path use distinct
   tool-shaped icons rather than generic cursor, target, palette, or marquee
   symbols. Tooltips include the active keyboard shortcut where one exists.
+  The rail itself follows the Photoshop reference: a flat neutral `#535353`
+  surface, compact white monochrome glyphs, no rounded button boxes, no purple
+  selection accent, no red destructive accent, and only a darker neutral hover
+  or checked cell. Foreground/background swatches remain square and unframed.
 - Top: active tool options only. This area should not become a permanent
   command strip for unrelated features.
 - Top quick controls for Undo, Redo, PNG export, active-tool status, and document

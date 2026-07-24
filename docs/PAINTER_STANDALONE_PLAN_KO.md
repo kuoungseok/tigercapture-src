@@ -2,7 +2,7 @@
 
 ## 목적
 
-TigerCapture Paint를 영상 프레임 위에 간단히 주석을 그리는 도구에서,
+Tiger Studio Paint를 영상 프레임 위에 간단히 주석을 그리는 도구에서,
 독립 실행 가능한 Photoshop형 2D Painter/이미지 편집 도구로 확장한다.
 
 Video Paint는 계속 영상 위 주석, 말풍선, PNG 스티커, Editor Object, Cutout

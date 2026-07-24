@@ -64,7 +64,7 @@ def test_standalone_painter_hides_video_annotation_tools() -> None:
     dialog.show()
     app.processEvents()
 
-    assert dialog.windowTitle() == "Painter - TigerCapture"
+    assert dialog.windowTitle() == "Painter - Tiger Studio"
     assert dialog.bubble_btn.isHidden()
     assert dialog.sticker_btn.isHidden()
     assert dialog.editor_object_btn.isHidden()
@@ -173,10 +173,12 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog._paint_inspector_controls.parentWidget() is not None
     assert dialog._paint_inspector_controls_scroll.maximumHeight() <= 330
     assert dialog._paint_inspector_controls_scroll.width() <= 300
-    assert dialog._tool_rail.width() <= 56
-    assert dialog._tool_rail.width() >= 44
+    assert dialog._tool_rail.width() == 40
     assert dialog.tool_collapse_btn.toolTip() == "Collapse toolbar"
     assert dialog.tool_close_btn.toolTip() == "Close toolbar"
+    assert dialog.tool_collapse_btn.isVisible() is False
+    assert dialog.tool_close_btn.isVisible() is False
+    assert dialog._tool_rail_grip.isVisible()
     assert dialog._tool_button_host.isVisible()
     assert dialog._tool_swatch_panel.isVisible()
     assert dialog._paint_toolbar_order == [
@@ -248,7 +250,7 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog.tool_collapse_btn.toolTip() == "Expand toolbar"
     dialog._set_tool_rail_collapsed(False)
     app.processEvents()
-    assert dialog._tool_rail.width() >= 44
+    assert dialog._tool_rail.width() == 40
     assert dialog._tool_button_host.isVisible()
     assert dialog._tool_swatch_panel.isVisible()
     dialog._swap_painter_foreground_background()

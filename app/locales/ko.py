@@ -770,7 +770,7 @@ TRANSLATIONS = {
     "subtitle.edit.text": "텍스트",
     "subtitle.edit.placeholder": "자막 텍스트를 입력하세요…",
     "subtitle.edit.show_box": "배경 박스 표시 (끄면 외곽선/그림자만)",
-    "paint.title": "그리기 — TigerCapture",
+    "paint.title": "그리기 — Tiger Studio",
     "paint.hint": "클릭: 그리기 창 열기 · 우클릭: 모두 지우기",
     "paint.btn.pen": "🖌 펜",
     "paint.btn.eraser": "🧹 지우개",

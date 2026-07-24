@@ -680,7 +680,7 @@ TRANSLATIONS = {
     "subtitle.edit.text": "文本",
     "subtitle.edit.placeholder": "输入字幕文本…",
     "subtitle.edit.show_box": "显示背景框（关闭 = 仅描边/阴影）",
-    "paint.title": "绘制 — TigerCapture",
+    "paint.title": "绘制 — Tiger Studio",
     "paint.hint": "点击：打开绘制 · 右键：清除全部",
     "paint.btn.pen": "🖌 画笔",
     "paint.btn.eraser": "🧹 橡皮擦",

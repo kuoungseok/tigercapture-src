@@ -670,7 +670,7 @@ TRANSLATIONS = {
     "subtitle.edit.text": "テキスト",
     "subtitle.edit.placeholder": "字幕テキストを入力…",
     "subtitle.edit.show_box": "背景ボックスを表示 (オフ=縁取り/影のみ)",
-    "paint.title": "描画 — TigerCapture",
+    "paint.title": "描画 — Tiger Studio",
     "paint.hint": "クリック: 描画を開く · 右クリック: 全て消去",
     "paint.btn.pen": "🖌 ペン",
     "paint.btn.eraser": "🧹 消しゴム",
