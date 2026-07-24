@@ -345,22 +345,6 @@ QPushButton#PaintCustomColor:hover {
     border-color: rgba(210, 218, 235, 52);
 }
 
-QPushButton#PaintZoomButton {
-    background-color: #191e27;
-    color: #f3f6fb;
-    border: 1px solid rgba(178,186,202,32);
-    border-radius: 5px;
-    padding: 0;
-    font-weight: 800;
-    font-size: 11px;
-    min-height: 28px;
-}
-
-QPushButton#PaintZoomButton:hover {
-    background-color: #202635;
-    border-color: rgba(210, 218, 235, 52);
-}
-
 QFrame#PaintColorPanel {
     background-color: #11151b;
     border: 1px solid rgba(178, 186, 202, 22);
@@ -394,10 +378,16 @@ QFrame#PaintColorWheelFrame {
     border-radius: 5px;
 }
 
+QFrame#PaintColorMatrixFrame {
+    background-color: #0f131a;
+    border: 1px solid rgba(178, 186, 202, 18);
+    border-radius: 5px;
+}
+
 QFrame#PaintLayerDockPanel {
-    background-color: #11151b;
+    background-color: #12151a;
     border: 1px solid rgba(178, 186, 202, 24);
-    border-radius: 6px;
+    border-radius: 3px;
 }
 
 QFrame#PaintBlockoutPanel {
@@ -512,28 +502,27 @@ QScrollArea#PaintInspectorScroll QScrollBar::sub-page:vertical {
 }
 
 QTabWidget#PaintLayerChannelPathTabs {
-    background-color: #11151b;
+    background-color: #12151a;
 }
 
 QTabWidget#PaintLayerChannelPathTabs::pane {
-    background-color: #11151b;
+    background-color: #12151a;
     border: 1px solid rgba(178, 186, 202, 24);
-    border-top-color: rgba(178, 186, 202, 34);
-    border-radius: 5px;
-    top: -1px;
+    border-radius: 0;
+    top: 0;
 }
 
 QTabWidget#PaintLayerChannelPathTabs QTabBar::tab {
-    background-color: #191e27;
-    color: #aeb7c7;
-    border: 1px solid rgba(178, 186, 202, 28);
-    border-bottom-color: rgba(178, 186, 202, 18);
-    border-radius: 5px;
-    padding: 5px 10px;
-    min-width: 54px;
-    min-height: 24px;
+    background-color: #15181e;
+    color: #9fa9b8;
+    border: 1px solid rgba(178, 186, 202, 22);
+    border-bottom: none;
+    border-radius: 0;
+    padding: 4px 12px;
+    min-width: 42px;
+    min-height: 20px;
     font-size: 11px;
-    font-weight: 760;
+    font-weight: 680;
 }
 
 QWidget#PaintPanelTabButtonGrid {
@@ -563,20 +552,20 @@ QPushButton#PaintPanelTabButton:checked {
 }
 
 QTabWidget#PaintLayerChannelPathTabs QTabBar::tab:selected {
-    background-color: #2d3450;
-    color: #ffffff;
-    border-color: rgba(139, 124, 255, 118);
+    background-color: #22262d;
+    color: #eef3fb;
+    border-color: rgba(204, 213, 228, 46);
 }
 
 QTabWidget#PaintLayerChannelPathTabs QTabBar::tab:!selected:hover {
-    background-color: #2d3036;
+    background-color: #1b2028;
     color: #dce6f7;
 }
 
 QFrame#PaintLayerControlPanel {
-    background-color: #0f131a;
+    background-color: #15181d;
     border: 1px solid rgba(178, 186, 202, 18);
-    border-radius: 5px;
+    border-radius: 2px;
 }
 
 QLabel#PaintLayerControlLabel {
@@ -645,41 +634,46 @@ QLabel#PaintColorHex {
 QFrame#PaintColorPanel QSlider::groove:horizontal {
     height: 3px;
     border-radius: 2px;
-    background: rgba(238, 242, 250, 22);
+    background: #292B35;
 }
 
 QFrame#PaintColorPanel QSlider::handle:horizontal {
-    width: 10px;
-    height: 10px;
-    margin: -4px 0;
-    border-radius: 5px;
-    background: #eef3fb;
-    border: 1px solid rgba(10, 14, 20, 210);
+    width: 14px;
+    height: 14px;
+    margin: -6px 0;
+    border-radius: 7px;
+    background: #6452FF;
+    border: 1px solid #9C8EFF;
 }
 
 QSlider::groove:horizontal {
     height: 3px;
     border-radius: 2px;
-    background: #282d38;
+    background: #292B35;
 }
 
 QSlider::sub-page:horizontal {
-    background: #6452FF;
+    background: #5B45FF;
     border-radius: 2px;
 }
 
 QSlider::add-page:horizontal {
-    background: #282d38;
+    background: #292B35;
     border-radius: 2px;
 }
 
 QSlider::handle:horizontal {
-    width: 12px;
-    height: 12px;
-    margin: -5px 0;
-    border-radius: 6px;
+    width: 14px;
+    height: 14px;
+    margin: -6px 0;
+    border-radius: 7px;
     background: #6452FF;
     border: 1px solid #9C8EFF;
+}
+
+QSlider::handle:horizontal:hover {
+    background: #7566FF;
+    border-color: #D6D0FF;
 }
 
 QSlider#PaintHueSlider::groove:horizontal {
@@ -698,13 +692,14 @@ QSlider#PaintHueSlider::groove:horizontal {
 }
 
 QSlider#PaintHueSlider::handle:horizontal,
+QSlider#PaintSaturationSlider::handle:horizontal,
 QSlider#PaintValueSlider::handle:horizontal {
-    width: 10px;
-    height: 10px;
-    margin: -4px 0;
-    border-radius: 5px;
-    background: #e8eef8;
-    border: 1px solid #111827;
+    width: 14px;
+    height: 14px;
+    margin: -6px 0;
+    border-radius: 7px;
+    background: #6452FF;
+    border: 1px solid #9C8EFF;
 }
 
 QComboBox {
@@ -721,21 +716,21 @@ QComboBox:hover {
 }
 
 QListWidget#PaintLayerList {
-    background-color: #0f1117;
+    background-color: #101318;
     color: #dce6f7;
-    border: 1px solid #2c3342;
-    border-radius: 8px;
+    border: 1px solid rgba(178, 186, 202, 22);
+    border-radius: 2px;
     outline: none;
     padding: 4px;
 }
 
 QListWidget#PaintLayerList::item {
-    border-radius: 5px;
+    border-radius: 2px;
     padding: 5px 7px;
 }
 
 QListWidget#PaintLayerList::item:selected {
-    background-color: #263552;
+    background-color: #283345;
     color: #ffffff;
 }
 
@@ -4608,6 +4603,7 @@ class PaintDialog(QDialog):
         self._add_painter_menu_action(edit_menu, "Clear All", self._clear_all)
 
         view_menu = menu_bar.addMenu("View")
+        self._painter_view_menu = view_menu
         self._add_painter_menu_action(view_menu, "Zoom In", self._zoom_in, "Ctrl++")
         self._add_painter_menu_action(view_menu, "Zoom Out", self._zoom_out, "Ctrl+-")
         self._add_painter_menu_action(view_menu, "Fit", self._zoom_fit, "Ctrl+0")
@@ -5122,41 +5118,27 @@ class PaintDialog(QDialog):
         self.export_png_btn.clicked.connect(self._show_export_png_menu)
         top_layout.addWidget(self.export_png_btn)
 
-        self.zoom_out_btn = QPushButton("-")
-        self.zoom_out_btn.setObjectName("PaintZoomButton")
-        self.zoom_out_btn.setFixedSize(28, 30)
-        self.zoom_out_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.zoom_out_btn.setToolTip("Zoom out (Ctrl+-)")
-        self.zoom_out_btn.clicked.connect(self._zoom_out)
-        top_layout.addWidget(self.zoom_out_btn)
-        self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
+        self.zoom_slider = QSlider(Qt.Orientation.Horizontal, self)
         self.zoom_slider.setRange(25, PAINT_MAX_ZOOM_PERCENT)
         self.zoom_slider.setValue(100)
-        self.zoom_slider.setFixedWidth(84)
-        self.zoom_slider.setToolTip("Zoom: 100% normally, 400-800% for pixel work")
         self.zoom_slider.valueChanged.connect(self._on_zoom_changed)
-        top_layout.addWidget(self.zoom_slider)
-        self.zoom_in_btn = QPushButton("+")
-        self.zoom_in_btn.setObjectName("PaintZoomButton")
-        self.zoom_in_btn.setFixedSize(28, 30)
-        self.zoom_in_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.zoom_slider.hide()
+        self.zoom_out_btn = QPushButton("-", self)
+        self.zoom_out_btn.setToolTip("Zoom out (Ctrl+-)")
+        self.zoom_out_btn.hide()
+        self.zoom_out_btn.clicked.connect(self._zoom_out)
+        self.zoom_in_btn = QPushButton("+", self)
         self.zoom_in_btn.setToolTip("Zoom in (Ctrl++)")
+        self.zoom_in_btn.hide()
         self.zoom_in_btn.clicked.connect(self._zoom_in)
-        top_layout.addWidget(self.zoom_in_btn)
-        self.zoom_fit_btn = QPushButton("")
-        self.zoom_fit_btn.setObjectName("PaintZoomButton")
-        self.zoom_fit_btn.setFixedSize(30, 30)
-        self.zoom_fit_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.zoom_fit_btn = QPushButton("", self)
         self.zoom_fit_btn.setToolTip("Fit canvas (Ctrl+0)")
         self.zoom_fit_btn.setAccessibleName("Fit canvas")
-        self.zoom_fit_btn.setIcon(app_icon("zoom", size=13, color="#EEF3FB"))
-        self.zoom_fit_btn.setIconSize(icon_size(13))
+        self.zoom_fit_btn.hide()
         self.zoom_fit_btn.clicked.connect(self._zoom_fit)
-        top_layout.addWidget(self.zoom_fit_btn)
-        self._zoom_value_label = QLabel("100%")
+        self._zoom_value_label = QLabel("100%", self)
         self._zoom_value_label.setObjectName("PaintValue")
-        self._zoom_value_label.setFixedWidth(46)
-        top_layout.addWidget(self._zoom_value_label)
+        self._zoom_value_label.hide()
 
         self._dialog_buttons = None
         if not self._standalone:
@@ -5642,7 +5624,22 @@ class PaintDialog(QDialog):
         self.color_wheel = PainterColorWheel()
         self.color_wheel.colorChanged.connect(self._on_color_wheel_changed)
         wheel_row.addWidget(self.color_wheel, 0, Qt.AlignmentFlag.AlignCenter)
-        color_panel_layout.addWidget(wheel_frame)
+        wheel_frame.hide()
+
+        matrix_frame = QFrame()
+        matrix_frame.setObjectName("PaintColorMatrixFrame")
+        self._paint_color_matrix_frame = matrix_frame
+        matrix_grid = QGridLayout(matrix_frame)
+        matrix_grid.setContentsMargins(8, 8, 8, 8)
+        matrix_grid.setHorizontalSpacing(5)
+        matrix_grid.setVerticalSpacing(5)
+        self._palette_btns: list[QPushButton] = []
+        for idx, (rgb, label) in enumerate(self._derived_palette_colors()):
+            btn = self._make_palette_button(rgb, width=44, height=18)
+            btn.setToolTip(label)
+            matrix_grid.addWidget(btn, idx // 4, idx % 4)
+            self._palette_btns.append(btn)
+        color_panel_layout.addWidget(matrix_frame)
 
         mixer_label = QLabel("Mixer")
         mixer_label.setObjectName("PaintColorSectionLabel")
@@ -5661,6 +5658,20 @@ class PaintDialog(QDialog):
         hue_row.addWidget(hue_label)
         hue_row.addWidget(self.hue_slider, stretch=1)
         color_panel_layout.addLayout(hue_row)
+
+        saturation_row = QHBoxLayout()
+        saturation_row.setContentsMargins(0, 0, 0, 0)
+        saturation_row.setSpacing(6)
+        saturation_label = QLabel("Sat")
+        saturation_label.setObjectName("PaintColorLabel")
+        saturation_label.setFixedWidth(36)
+        self.saturation_slider = QSlider(Qt.Orientation.Horizontal)
+        self.saturation_slider.setObjectName("PaintSaturationSlider")
+        self.saturation_slider.setRange(0, 100)
+        self.saturation_slider.valueChanged.connect(self._on_saturation_changed)
+        saturation_row.addWidget(saturation_label)
+        saturation_row.addWidget(self.saturation_slider, stretch=1)
+        color_panel_layout.addLayout(saturation_row)
 
         value_row = QHBoxLayout()
         value_row.setContentsMargins(0, 0, 0, 0)
@@ -5693,18 +5704,7 @@ class PaintDialog(QDialog):
         suggested_label = QLabel("Shades")
         suggested_label.setObjectName("PaintColorSectionLabel")
         self._paint_harmony_label = suggested_label
-        color_panel_layout.addWidget(suggested_label)
-        palette_grid = QHBoxLayout()
-        palette_grid.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        palette_grid.setSpacing(4)
-        self._palette_btns: list[QPushButton] = []
-        for rgb, label in self._derived_palette_colors():
-            btn = self._make_palette_button(rgb, width=26, height=18)
-            btn.setToolTip(label)
-            palette_grid.addWidget(btn)
-            self._palette_btns.append(btn)
-        palette_grid.addStretch(1)
-        color_panel_layout.addLayout(palette_grid)
+        suggested_label.hide()
 
         self.custom_color_btn = QPushButton("Advanced Picker")
         self.custom_color_btn.setObjectName("PaintCustomColor")
@@ -5730,9 +5730,8 @@ class PaintDialog(QDialog):
         )
         tab_bar = self._layer_channel_path_tabs.tabBar()
         tab_bar.setUsesScrollButtons(False)
-        tab_bar.setExpanding(True)
+        tab_bar.setExpanding(False)
         tab_bar.setElideMode(Qt.TextElideMode.ElideRight)
-        self._layer_channel_path_tabs.setIconSize(icon_size(13))
 
         layers_tab = QWidget()
         layers_layout = QVBoxLayout(layers_tab)
@@ -5889,29 +5888,7 @@ class PaintDialog(QDialog):
             edit_row.addWidget(btn)
         layers_layout.addLayout(edit_row)
         self._layer_count_labels: dict[str, QLabel] = {}
-        for key, label_text in (
-            ("strokes", "Strokes"),
-            ("bubbles", "Speech bubbles"),
-            ("stickers", "PNG stickers"),
-        ):
-            if self._standalone and key != "strokes":
-                continue
-            row = QHBoxLayout()
-            row.setContentsMargins(0, 0, 0, 0)
-            name_label = QLabel(label_text)
-            name_label.setObjectName("PaintMeta")
-            count_label = QLabel("0")
-            count_label.setObjectName("PaintCount")
-            row.addWidget(name_label)
-            row.addStretch(1)
-            row.addWidget(count_label)
-            layers_layout.addLayout(row)
-            self._layer_count_labels[key] = count_label
-        self._layer_channel_path_tabs.addTab(
-            layers_tab,
-            app_icon("layers", size=13),
-            tr("paint.tab.layers"),
-        )
+        self._layer_channel_path_tabs.addTab(layers_tab, tr("paint.tab.layers"))
         self._layer_channel_path_tabs.setTabToolTip(0, tr("paint.tab.layers"))
 
         channels_tab = QWidget()
@@ -5942,11 +5919,7 @@ class PaintDialog(QDialog):
         self._channel_list.viewport().installEventFilter(self)
         self._update_channel_list()
         channels_layout.addWidget(self._channel_list, stretch=1)
-        self._layer_channel_path_tabs.addTab(
-            channels_tab,
-            app_icon("sliders", size=13),
-            tr("paint.tab.channels"),
-        )
+        self._layer_channel_path_tabs.addTab(channels_tab, tr("paint.tab.channels"))
         self._layer_channel_path_tabs.setTabToolTip(1, tr("paint.tab.channels"))
 
         paths_tab = QWidget()
@@ -5989,11 +5962,7 @@ class PaintDialog(QDialog):
         self._path_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self._path_list.itemClicked.connect(self._select_path_item)
         paths_layout.addWidget(self._path_list, stretch=1)
-        self._layer_channel_path_tabs.addTab(
-            paths_tab,
-            app_icon("path-tool", size=13),
-            tr("paint.tab.paths"),
-        )
+        self._layer_channel_path_tabs.addTab(paths_tab, tr("paint.tab.paths"))
         self._layer_channel_path_tabs.setTabToolTip(2, tr("paint.tab.paths"))
 
         inspector_controls_layout.addStretch(1)
@@ -6010,11 +5979,7 @@ class PaintDialog(QDialog):
         layer_dock_layout.setContentsMargins(8, 8, 8, 8)
         layer_dock_layout.setSpacing(6)
         layer_dock_layout.addWidget(self._layer_channel_path_tabs, stretch=1)
-        note = QLabel(tr("paint.note"))
-        note.setObjectName("PaintLayerDockNote")
-        note.setWordWrap(True)
-        self._paint_export_note = note
-        layer_dock_layout.addWidget(note)
+        self._paint_export_note = None
 
         inspector_layout.addWidget(inspector_controls_scroll, stretch=1)
         inspector_layout.addWidget(layer_dock_panel, stretch=2)
@@ -7697,6 +7662,16 @@ class PaintDialog(QDialog):
         available_width = int(panel.width() or 0)
         if available_width <= 40 and scroll is not None:
             available_width = int(scroll.viewport().width() or 0)
+        matrix_frame = getattr(self, "_paint_color_matrix_frame", None)
+        if wheel_frame is not None and wheel_frame.isHidden():
+            if matrix_frame is not None:
+                matrix_frame.setMinimumHeight(56)
+                matrix_frame.setMaximumHeight(78)
+            panel.layout().activate()
+            required_height = max(236, int(panel.layout().sizeHint().height()))
+            if panel.minimumHeight() != required_height:
+                panel.setMinimumHeight(required_height)
+            return
         target_size = PainterColorWheel.DISPLAY_SIZE
         if available_width > 0:
             target_size = min(
@@ -7732,10 +7707,10 @@ class PaintDialog(QDialog):
             return
         target = int(color_title.y())
         color_panel = getattr(self, "_paint_color_panel", None)
-        wheel = getattr(self, "color_wheel", None)
-        if color_panel is not None and wheel is not None:
-            wheel_bottom = int(color_panel.y() + wheel.y() + wheel.height())
-            target = max(target, wheel_bottom - int(scroll.viewport().height()) + 12)
+        selector = getattr(self, "_paint_color_matrix_frame", None)
+        if color_panel is not None and selector is not None:
+            selector_bottom = int(color_panel.y() + selector.y() + selector.height())
+            target = max(target, selector_bottom - int(scroll.viewport().height()) + 12)
         bar.setValue(max(0, min(target, int(bar.maximum()))))
         self._paint_initial_color_scroll_pending = False
 
@@ -8403,6 +8378,7 @@ class PaintDialog(QDialog):
             self._refresh_recent_color_buttons(sel)
         if hasattr(self, "foreground_swatch_btn"):
             self._refresh_toolbar_color_swatches()
+        self._update_saturation_slider_style()
         self._update_value_slider_style()
 
     def _sync_palette_controls_from_color(self) -> None:
@@ -8411,16 +8387,42 @@ class PaintDialog(QDialog):
         hue = self._pen_color.hue()
         if hue < 0:
             hue = 0
+        saturation = max(0, min(100, round(self._pen_color.saturation() * 100 / 255)))
         value = max(12, min(100, round(self._pen_color.value() * 100 / 255)))
         self._palette_syncing = True
         try:
             self.hue_slider.setValue(hue)
+            if hasattr(self, "saturation_slider"):
+                self.saturation_slider.setValue(saturation)
             self.value_slider.setValue(value)
             if hasattr(self, "color_wheel"):
                 self.color_wheel.set_color(self._pen_color)
         finally:
             self._palette_syncing = False
+        self._update_saturation_slider_style()
         self._update_value_slider_style()
+
+    def _update_saturation_slider_style(self) -> None:
+        if not hasattr(self, "saturation_slider"):
+            return
+        hue = self._pen_color.hue()
+        if hue < 0:
+            hue = self.hue_slider.value() if hasattr(self, "hue_slider") else 0
+        value = max(80, self._pen_color.value())
+        neutral = QColor.fromHsv(hue, 0, value)
+        saturated = QColor.fromHsv(hue, 255, value)
+        self.saturation_slider.setStyleSheet(
+            "QSlider#PaintSaturationSlider::groove:horizontal { "
+            "height: 3px; border-radius: 2px; "
+            f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
+            f"stop:0 rgb({neutral.red()},{neutral.green()},{neutral.blue()}), "
+            f"stop:1 rgb({saturated.red()},{saturated.green()},{saturated.blue()})); "
+            "}"
+            "QSlider#PaintSaturationSlider::handle:horizontal { "
+            "width: 14px; height: 14px; margin: -6px 0; border-radius: 7px; "
+            "background: #6452FF; border: 1px solid #9C8EFF; "
+            "}"
+        )
 
     def _update_value_slider_style(self) -> None:
         if not hasattr(self, "value_slider"):
@@ -8432,13 +8434,13 @@ class PaintDialog(QDialog):
         bright = QColor.fromHsv(hue, saturation, 255)
         self.value_slider.setStyleSheet(
             "QSlider#PaintValueSlider::groove:horizontal { "
-            "height: 4px; border-radius: 2px; "
+            "height: 3px; border-radius: 2px; "
             f"background: qlineargradient(x1:0, y1:0, x2:1, y2:0, "
             f"stop:0 #111827, stop:1 rgb({bright.red()},{bright.green()},{bright.blue()})); "
             "}"
             "QSlider#PaintValueSlider::handle:horizontal { "
-            "width: 10px; height: 10px; margin: -4px 0; border-radius: 5px; "
-            "background: #e8eef8; border: 1px solid #111827; "
+            "width: 14px; height: 14px; margin: -6px 0; border-radius: 7px; "
+            "background: #6452FF; border: 1px solid #9C8EFF; "
             "}"
         )
 
@@ -8614,7 +8616,7 @@ class PaintDialog(QDialog):
         buttons = getattr(self, "_palette_btns", [])
         for btn, (rgb, label) in zip(buttons, self._derived_palette_colors()):
             btn.show()
-            self._style_palette_button(btn, rgb, selected=(rgb == selected), width=26, height=18)
+            self._style_palette_button(btn, rgb, selected=(rgb == selected), width=44, height=18)
             btn.setToolTip(f"{label} | {self._rgb_to_hex(rgb)}")
 
     def _remember_recent_color(self, rgb: tuple[int, int, int]) -> None:
@@ -8635,13 +8637,16 @@ class PaintDialog(QDialog):
 
     def _color_from_mixer(self) -> QColor:
         hue = self.hue_slider.value() if hasattr(self, "hue_slider") else 0
+        saturation_percent = (
+            self.saturation_slider.value()
+            if hasattr(self, "saturation_slider")
+            else round(self._pen_color.saturation() * 100 / 255)
+        )
         value_percent = (
             self.value_slider.value() if hasattr(self, "value_slider") else 100
         )
         value = int(value_percent * 255 / 100)
-        saturation = self._pen_color.saturation()
-        if saturation < 48:
-            saturation = 150
+        saturation = int(max(0, min(100, saturation_percent)) * 255 / 100)
         return QColor.fromHsv(hue, saturation, max(24, min(255, value)))
 
     # ---------- tool actions ----------
@@ -8930,6 +8935,12 @@ class PaintDialog(QDialog):
             self._set_tool("pen")
 
     def _on_hue_changed(self, _value: int) -> None:
+        if self._palette_syncing:
+            return
+        self._apply_pen_color(self._color_from_mixer(), remember=False)
+        self._set_tool("pen")
+
+    def _on_saturation_changed(self, _value: int) -> None:
         if self._palette_syncing:
             return
         self._apply_pen_color(self._color_from_mixer(), remember=False)
@@ -9396,7 +9407,6 @@ class PaintDialog(QDialog):
                     selected_id = self._active_paint_layer_id
                     self._selected_layer_id = selected_id
                 for layer in reversed(self._paint_layers):
-                    count = self._stroke_count_for_layer(layer.layer_id)
                     states: list[str] = []
                     if not layer.visible:
                         states.append("Hidden")
@@ -9408,7 +9418,8 @@ class PaintDialog(QDialog):
                         states.append(str(layer.blend_mode).title())
                     state = " ".join(states)
                     prefix = f"{state}  " if state else ""
-                    label = f"{prefix}{layer.name}  {layer.opacity}%  ({count})"
+                    suffix = f"  {layer.opacity}%" if int(layer.opacity) != 100 else ""
+                    label = f"{prefix}{layer.name}{suffix}"
                     item = QListWidgetItem(label)
                     item.setIcon(app_icon("layers", size=14, color="#DCE6F7"))
                     item.setData(Qt.ItemDataRole.UserRole, layer.layer_id)

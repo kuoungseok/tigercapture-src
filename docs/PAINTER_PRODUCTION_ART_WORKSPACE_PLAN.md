@@ -64,6 +64,8 @@ Default layout:
   command strip for unrelated features.
 - Top quick controls for Undo, Redo, PNG export, zoom out/in, Fit, and zoom
   value must stay compact and Photoshop-like, not large text command buttons.
+  Zoom controls do not belong in the title/top bar; zoom lives in the View
+  menu, shortcuts, canvas context menu, and toolbar affordances.
 - Right upper: Navigator and Reference controls.
 - Right middle: Color and Brush.
 - Right lower: Layers / Channels / Paths as a dedicated pinned tab dock.
@@ -81,9 +83,14 @@ Responsive behavior:
   being moved.
 - Color wheel, brush settings, and Layers/Channels/Paths must never occupy the
   same visual space.
+- The default Color panel should prefer a compact current-color row, swatch
+  matrix, and H/S/V sliders. A large decorative hue wheel must not be the
+  default right-inspector surface.
 - Layers / Channels / Paths are high-frequency production panels. They may
   resize or scroll, but they must not be hidden behind optional 3D, PBR,
   Typography, History, or helper panels in the default drawing workspace.
+  Tabs should be flat and Photoshop-like. Debug counters, stroke totals, and
+  export-note copy do not belong in this dock.
 - Canvas must initialize to the available screen area without requiring window
   resize.
 - All persistent panels need a recoverable Window menu entry.

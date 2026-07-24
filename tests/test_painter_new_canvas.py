@@ -162,10 +162,14 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog.redo_btn.width() <= 34
     assert dialog.export_png_btn.text() == ""
     assert not dialog.export_png_btn.icon().isNull()
-    assert dialog.zoom_slider.width() <= 90
-    assert dialog.zoom_fit_btn.text() == ""
-    assert dialog.zoom_fit_btn.width() <= 34
-    assert not dialog.zoom_fit_btn.icon().isNull()
+    assert dialog.zoom_slider.isHidden()
+    assert dialog.zoom_out_btn.isHidden()
+    assert dialog.zoom_in_btn.isHidden()
+    assert dialog.zoom_fit_btn.isHidden()
+    assert "Zoom In" in [
+        action.text().replace("&", "")
+        for action in dialog._painter_view_menu.actions()
+    ]
     assert dialog._paint_inspector_controls.parentWidget() is not None
     assert dialog._paint_inspector_controls_scroll.maximumHeight() <= 330
     assert dialog._paint_inspector_controls_scroll.width() <= 300
@@ -332,19 +336,27 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert not hasattr(dialog, "pbr_preview_mode_combo")
     assert not hasattr(dialog, "pbr_normal_format_combo")
     assert not hasattr(dialog, "pbr_preview_label")
-    assert dialog.color_wheel.width() == 176
-    assert dialog.color_wheel.height() == 176
-    assert dialog.color_wheel.geometry().bottom() < dialog._paint_mixer_label.geometry().top()
+    assert dialog._paint_color_wheel_frame.isHidden()
+    assert dialog._paint_color_matrix_frame.isVisible()
+    assert dialog._paint_color_matrix_frame.height() <= 90
     assert dialog._color_preview.width() <= 48
     assert dialog._paint_mixer_label.text() == "Mixer"
+    assert hasattr(dialog, "saturation_slider")
     assert dialog._recent_color_btns[0].width() <= 32
-    assert dialog._paint_harmony_label.text() == "Shades"
+    assert dialog._paint_harmony_label.isHidden()
     assert len(dialog._palette_btns) == 8
-    assert dialog._palette_btns[0].width() <= 30
+    assert dialog._palette_btns[0].width() <= 48
     assert "shade" in dialog._palette_btns[0].toolTip().lower()
     scroll = dialog._paint_inspector_controls_scroll
     assert dialog._layer_channel_path_tabs.parent() is dialog._paint_layer_dock_panel
     assert dialog._paint_layer_dock_panel.height() >= 300
+    assert dialog._paint_export_note is None
+    layer_labels = [
+        dialog._layer_list.item(idx).text()
+        for idx in range(dialog._layer_list.count())
+    ]
+    assert not any("Strokes" in label for label in layer_labels)
+    assert dialog._layer_channel_path_tabs.tabIcon(0).isNull()
     color_bottom = dialog._paint_color_panel.mapToGlobal(
         dialog._paint_color_panel.rect().bottomLeft()
     ).y()
@@ -355,12 +367,12 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     bar = scroll.verticalScrollBar()
     assert bar.value() >= dialog._paint_color_section_title.y() - 2
     visible_bottom = bar.value() + scroll.viewport().height()
-    wheel_bottom = (
+    selector_bottom = (
         dialog._paint_color_panel.y()
-        + dialog.color_wheel.y()
-        + dialog.color_wheel.height()
+        + dialog._paint_color_matrix_frame.y()
+        + dialog._paint_color_matrix_frame.height()
     )
-    assert wheel_bottom <= visible_bottom
+    assert selector_bottom <= visible_bottom
     margins = dialog._paint_inspector_controls.layout().contentsMargins()
     assert margins.right() >= 12
     if bar.isVisible():
@@ -372,9 +384,8 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     dialog.resize(760, 560)
     app.processEvents()
     dialog._sync_color_panel_layout()
-    assert 140 <= dialog.color_wheel.width() <= 176
-    assert dialog.color_wheel.geometry().bottom() < dialog._paint_mixer_label.geometry().top()
-    assert dialog._paint_color_panel.minimumHeight() >= dialog.color_wheel.height() + 210
+    assert dialog._paint_color_wheel_frame.isHidden()
+    assert dialog._paint_color_panel.minimumHeight() <= 290
 
     dialog.close()
 
