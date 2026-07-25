@@ -729,7 +729,10 @@ class PaintAdapterMixin:
             points: list[tuple[float, float]] = []
             pressure: list[float] = []
             tilt: list[float] = []
+            tilt_x: list[float] = []
+            tilt_y: list[float] = []
             rotation: list[float] = []
+            tangential_pressure: list[float] = []
             paint_load: list[float] = []
             for point_index, point in enumerate(raw_points):
                 if not isinstance(point, dict) or "x" not in point or "y" not in point:
@@ -743,7 +746,12 @@ class PaintAdapterMixin:
                 points.append((x, y))
                 pressure.append(max(0.0, min(1.0, float(point.get("pressure", 0.82)))))
                 tilt.append(max(0.0, min(1.0, float(point.get("tilt", 0.5)))))
+                tilt_x.append(max(-1.0, min(1.0, float(point.get("tilt_x", 0.0)))))
+                tilt_y.append(max(-1.0, min(1.0, float(point.get("tilt_y", 0.0)))))
                 rotation.append(max(0.0, min(1.0, float(point.get("rotation", 0.5)))))
+                tangential_pressure.append(
+                    max(-1.0, min(1.0, float(point.get("tangential_pressure", 0.0))))
+                )
                 paint_load.append(max(0.0, min(1.0, float(point.get("load", 1.0)))))
 
             layer_id = str(row.get("layer_id") or active_layer_id)
@@ -787,7 +795,10 @@ class PaintAdapterMixin:
                     brush_engine_version=engine_version,
                     point_pressure=pressure,
                     point_tilt=tilt,
+                    point_tilt_x=tilt_x,
+                    point_tilt_y=tilt_y,
                     point_rotation=rotation,
+                    point_tangential_pressure=tangential_pressure,
                     point_load=paint_load,
                     bristle_count=max(
                         0, min(64, int(row.get("bristle_count", 0) or 0))
@@ -822,7 +833,15 @@ class PaintAdapterMixin:
             "engine_versions": sorted(
                 {int(stroke.brush_engine_version) for stroke in prepared}
             ),
-            "dynamic_channels": ["pressure", "tilt", "rotation", "load"],
+            "dynamic_channels": [
+                "pressure",
+                "tilt",
+                "tilt_x",
+                "tilt_y",
+                "rotation",
+                "tangential_pressure",
+                "load",
+            ],
         }
         return state
 

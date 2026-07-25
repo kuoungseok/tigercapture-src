@@ -6,6 +6,7 @@ from typing import Any, Mapping, Sequence
 
 
 _CHANNELS = ("pressure", "tilt", "rotation", "load")
+_SIGNED_CHANNELS = ("tilt_x", "tilt_y", "tangential_pressure")
 
 
 def smooth_action_points(
@@ -51,6 +52,16 @@ def smooth_action_points(
                         t,
                     )
                 )
+            for channel in _SIGNED_CHANNELS:
+                row[channel] = _clamp_signed(
+                    _catmull(
+                        p0[channel],
+                        p1[channel],
+                        p2[channel],
+                        p3[channel],
+                        t,
+                    )
+                )
             if not out or _distance(out[-1], row) > 1e-7:
                 out.append(row)
         if len(out) >= budget - 1:
@@ -72,6 +83,8 @@ def _normalized_point(point: Mapping[str, Any]) -> dict[str, float]:
         ("load", 1.0),
     ):
         row[channel] = _clamp01(float(point.get(channel, default)))
+    for channel in _SIGNED_CHANNELS:
+        row[channel] = _clamp_signed(float(point.get(channel, 0.0)))
     return row
 
 
@@ -92,6 +105,10 @@ def _distance(first: Mapping[str, float], second: Mapping[str, float]) -> float:
 
 def _clamp01(value: float) -> float:
     return max(0.0, min(1.0, float(value)))
+
+
+def _clamp_signed(value: float) -> float:
+    return max(-1.0, min(1.0, float(value)))
 
 
 __all__ = ["smooth_action_points"]

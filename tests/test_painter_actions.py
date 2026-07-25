@@ -312,8 +312,24 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
                 },
                 {
                     "points": [
-                        {"x": 0.18, "y": 0.30, "pressure": 0.46, "load": 1.0},
-                        {"x": 0.31, "y": 0.25, "pressure": 0.91, "load": 0.72},
+                        {
+                            "x": 0.18,
+                            "y": 0.30,
+                            "pressure": 0.46,
+                            "tilt_x": -0.4,
+                            "tilt_y": 0.2,
+                            "tangential_pressure": -0.25,
+                            "load": 1.0,
+                        },
+                        {
+                            "x": 0.31,
+                            "y": 0.25,
+                            "pressure": 0.91,
+                            "tilt_x": 0.3,
+                            "tilt_y": -0.1,
+                            "tangential_pressure": 0.35,
+                            "load": 0.72,
+                        },
                     ],
                     "color": "#F0C541",
                     "width": 9,
@@ -334,7 +350,10 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     assert ai_strokes["result"]["stroke_draw"]["dynamic_channels"] == [
         "pressure",
         "tilt",
+        "tilt_x",
+        "tilt_y",
         "rotation",
+        "tangential_pressure",
         "load",
     ]
     assert ai_strokes["result"]["history"]["undo_labels"][-1] == "Claude painterly sky"
@@ -343,6 +362,9 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     assert material_stroke.material_enabled is True
     assert material_stroke.material_thickness == 0.86
     assert material_stroke.point_pressure == [0.46, 0.91]
+    assert material_stroke.point_tilt_x == [-0.4, 0.3]
+    assert material_stroke.point_tilt_y == [0.2, -0.1]
+    assert material_stroke.point_tangential_pressure == [-0.25, 0.35]
 
     undone = registry.execute("paint.history.undo").to_dict()
     assert undone["ok"]

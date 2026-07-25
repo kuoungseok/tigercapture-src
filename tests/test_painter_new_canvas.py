@@ -965,7 +965,14 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeyp
     assert color_item.data(Qt.ItemDataRole.UserRole + 1) == "violet"
 
     dialog._on_stroke_added(
-        Stroke(points=[(0.1, 0.1), (0.2, 0.2)], layer_id="paint-layer-1")
+        Stroke(
+            points=[(0.1, 0.1), (0.2, 0.2)],
+            layer_id="paint-layer-1",
+            point_pressure=[0.3, 0.9],
+            point_tilt_x=[-0.5, 0.4],
+            point_tilt_y=[0.2, -0.1],
+            point_tangential_pressure=[-0.25, 0.35],
+        )
     )
     assert dialog.canvas.embedded_strokes()[-1].layer_id == active_layer_id
 
@@ -999,6 +1006,11 @@ def test_standalone_painter_starts_with_photoshop_style_layers_and_paths(monkeyp
     app.processEvents()
     assert len(dialog._paint_layers) == layers_before_paste + 1
     assert len(dialog.canvas.embedded_strokes()) == strokes_before_paste + 1
+    pasted_stroke = dialog.canvas.embedded_strokes()[-1]
+    assert pasted_stroke.point_pressure == [0.3, 0.9]
+    assert pasted_stroke.point_tilt_x == [-0.5, 0.4]
+    assert pasted_stroke.point_tilt_y == [0.2, -0.1]
+    assert pasted_stroke.point_tangential_pressure == [-0.25, 0.35]
     QApplication.clipboard().clear()
 
     from PySide6.QtGui import QColor, QImage

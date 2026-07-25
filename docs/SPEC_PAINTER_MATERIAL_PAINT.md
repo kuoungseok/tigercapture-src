@@ -59,16 +59,28 @@ stroke-channel rasterization.
 ### Bristle Engine v2
 
 Material-compatible oil and acrylic strokes can use `brush_engine_version=2`.
-The stroke stores normalized per-point `pressure`, `tilt`, `rotation`, and
-paint `load`, plus bristle count, deterministic seed, and load depletion.
+The stroke stores normalized per-point `pressure`, scalar `tilt`, signed
+`tilt_x`/`tilt_y`, barrel `rotation`, `tangential_pressure`, and paint `load`,
+plus bristle count, deterministic seed, and load depletion.
 The engine builds independent strand paths perpendicular to the authored
 stroke tangent instead of drawing decorative lines over one fixed-width body.
 
 Color and material rasterization consume the same strand paths. Pressure
-changes strand spread and width; load and depletion change deposition along
-the stroke. Height, direction, roughness, normal, AO, and the visible color
-therefore describe the same authored brush marks. Long interactive paths are
-bounded to 256 lane samples to protect Painter responsiveness.
+changes strand spread and width; signed X/Y tilt shifts and fans the contact
+patch in the physical pen direction; load and depletion change deposition
+along the stroke. Height, direction, roughness, normal, AO, and the visible
+color therefore describe the same authored brush marks. Long interactive
+paths are bounded to 256 lane samples to protect Painter responsiveness.
+
+### Tablet input
+
+Painter consumes native Qt tablet press/move/release events. Each accepted
+sample retains pressure, X/Y tilt, rotation, and tangential barrel pressure
+through live preview, the editable `Stroke`, Undo/Redo, clipboard payloads,
+project save/load, GPU-canvas signatures, and PNG/PBR rendering. Mouse strokes
+use full pressure and zero tilt so existing mouse-authored artwork keeps its
+previous width. Basic GPU strokes use per-segment widths; unsupported complex
+brushes continue through the maintained QPainter/material renderer.
 
 The interactive canvas uses a cached material-lighting overlay for immediate
 feedback. The existing Texture Lab/OpenGL plane renderer remains the
@@ -101,10 +113,11 @@ native Height/Normal/AO/Roughness channels.
   Roughness.
 - `paint.material.preview.set` enables/disables the canvas material preview and
   controls light azimuth/elevation.
-- `paint.stroke.draw` accepts per-point `pressure`, `tilt`, `rotation`, and
-  `load`, plus `engine_version`, `bristle_count`, `seed`, and
-  `load_depletion`. AI strokes targeting Material Paint layers automatically
-  receive the layer's material settings.
+- `paint.stroke.draw` accepts per-point `pressure`, scalar `tilt`, signed
+  `tilt_x`/`tilt_y`, `rotation`, `tangential_pressure`, and `load`, plus
+  `engine_version`, `bristle_count`, `seed`, and `load_depletion`. AI strokes
+  targeting Material Paint layers automatically receive the layer's material
+  settings.
 - `paint.view.zoom_area` magnifies and centers a normalized canvas rectangle.
 - `paint.state` reports layer type, layer material settings, active brush
   material capability, active material controls, and preview state.
@@ -137,5 +150,8 @@ All mutations use the existing Painter undo stack.
 - Persistent GPU Height/Roughness atlas and retained OpenGL material shader.
 - Palette-knife height displacement and scrape/carve operations.
 - Wet-paint advection, pigment mixing, drying time, and per-layer varnish.
+- Pressure curves/device calibration and brush-specific barrel-pressure
+  mappings.
+- ABR/captured-dab import.
 - Parallax occlusion mapping and optional tessellated close-up preview.
 - Material-channel painting/erasing and channel thumbnails.

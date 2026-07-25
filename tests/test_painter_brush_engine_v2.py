@@ -32,6 +32,34 @@ def test_bristle_lanes_follow_path_normal_and_deplete_load() -> None:
     assert all(lane[-1][3] < lane[0][3] for lane in lanes)
 
 
+def test_bristle_lanes_follow_tablet_tilt_direction() -> None:
+    from app.drawing import Stroke
+    from app.painter_brush_engine_v2 import bristle_lane_paths
+
+    base = Stroke(
+        points=[(0.2, 0.5), (0.5, 0.5), (0.8, 0.5)],
+        width_px=30,
+        brush_style="bristle_oil",
+        brush_engine_version=2,
+        point_pressure=[0.8, 0.8, 0.8],
+        bristle_count=12,
+    )
+    tilted = Stroke(
+        **{
+            **base.__dict__,
+            "point_tilt": [0.8, 0.8, 0.8],
+            "point_tilt_x": [0.7, 0.7, 0.7],
+            "point_tilt_y": [-0.4, -0.4, -0.4],
+        }
+    )
+    base_lanes = bristle_lane_paths(base, width=200, height=100)
+    tilted_lanes = bristle_lane_paths(tilted, width=200, height=100)
+    base_center = base_lanes[len(base_lanes) // 2][1]
+    tilted_center = tilted_lanes[len(tilted_lanes) // 2][1]
+    assert tilted_center[0] > base_center[0]
+    assert tilted_center[1] < base_center[1]
+
+
 def test_bristle_v2_color_and_material_use_authored_strands() -> None:
     _app()
     import numpy as np

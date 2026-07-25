@@ -59,6 +59,34 @@ def normalize_curve(values: Sequence[Any] | None, count: int, default: float) ->
     return out
 
 
+def normalize_signed_curve(
+    values: Sequence[Any] | None,
+    count: int,
+    default: float = 0.0,
+) -> list[float]:
+    rows = list(values or [])
+    if not rows:
+        return [max(-1.0, min(1.0, float(default)))] * max(0, count)
+    clean = []
+    for value in rows:
+        try:
+            clean.append(max(-1.0, min(1.0, float(value))))
+        except (TypeError, ValueError):
+            clean.append(max(-1.0, min(1.0, float(default))))
+    if len(clean) == count:
+        return clean
+    if count <= 1:
+        return [clean[0]]
+    out = []
+    for index in range(count):
+        position = index * (len(clean) - 1) / max(1, count - 1)
+        left = min(len(clean) - 1, int(math.floor(position)))
+        right = min(len(clean) - 1, left + 1)
+        blend = position - left
+        out.append(clean[left] * (1.0 - blend) + clean[right] * blend)
+    return out
+
+
 def stroke_uses_bristle_v2(stroke: Any) -> bool:
     return (
         int(_value(stroke, "brush_engine_version", 1) or 1) >= 2
@@ -94,6 +122,12 @@ def bristle_lane_paths(
             )
     point_count = len(points)
     pressure = normalize_curve(_value(stroke, "point_pressure", []), point_count, 0.82)
+    tilt = normalize_curve(_value(stroke, "point_tilt", []), point_count, 0.5)
+    raw_tilt_x = list(_value(stroke, "point_tilt_x", []) or [])
+    raw_tilt_y = list(_value(stroke, "point_tilt_y", []) or [])
+    tilt_x = normalize_signed_curve(raw_tilt_x, point_count)
+    tilt_y = normalize_signed_curve(raw_tilt_y, point_count)
+    has_directional_tilt = bool(raw_tilt_x or raw_tilt_y)
     load = normalize_curve(_value(stroke, "point_load", []), point_count, 1.0)
     rotation = normalize_curve(_value(stroke, "point_rotation", []), point_count, 0.5)
     depletion = max(0.0, min(1.0, float(_value(stroke, "load_depletion", 0.28) or 0.0)))
@@ -117,13 +151,116 @@ def bristle_lane_paths(
             progress = index / max(1, point_count - 1)
             local_pressure = pressure[index]
             local_load = max(0.04, load[index] * (1.0 - depletion * progress))
+            tilt_magnitude = (
+                min(1.0, math.hypot(tilt_x[index], tilt_y[index]))
+                if has_directional_tilt
+                else min(1.0, abs(tilt[index] - 0.5) * 2.0)
+            )
             fan = 1.0 + (rotation[index] - 0.5) * lane_norm * 0.42
             jitter = math.sin(index * 1.71 + lane * 2.13 + seed * 0.19) * base_width * 0.025
-            offset = lane_norm * base_width * 0.47 * local_pressure * fan + jitter
-            strand.append((x + nx * offset, y + ny * offset, local_pressure, local_load))
+            offset = (
+                lane_norm
+                * base_width
+                * 0.47
+                * local_pressure
+                * fan
+                * (1.0 + tilt_magnitude * 0.38)
+                + jitter
+            )
+            tilt_shift = base_width * 0.16
+            strand.append(
+                (
+                    x + nx * offset + tilt_x[index] * tilt_shift,
+                    y + ny * offset + tilt_y[index] * tilt_shift,
+                    local_pressure,
+                    local_load,
+                )
+            )
         if lane_noise > 0.10:
             out.append(strand)
     return out
+
+
+def paint_dynamic_basic_stroke(
+    painter: QPainter,
+    stroke: Any,
+    width: int,
+    height: int,
+    color: QColor,
+) -> bool:
+    """Render basic strokes with per-point pressure and tablet tilt."""
+
+    raw_points = list(_value(stroke, "points", []) or [])
+    pressure_values = list(_value(stroke, "point_pressure", []) or [])
+    tilt_x_values = list(_value(stroke, "point_tilt_x", []) or [])
+    tilt_y_values = list(_value(stroke, "point_tilt_y", []) or [])
+    if not raw_points or not (pressure_values or tilt_x_values or tilt_y_values):
+        return False
+    has_pressure_effect = any(abs(float(value) - 1.0) > 1e-4 for value in pressure_values)
+    has_tilt_effect = any(abs(float(value)) > 1e-4 for value in (*tilt_x_values, *tilt_y_values))
+    if not (has_pressure_effect or has_tilt_effect):
+        return False
+    points = [
+        QPointF(float(point[0]) * width, float(point[1]) * height)
+        for point in raw_points
+    ]
+    count = len(points)
+    pressure = normalize_curve(pressure_values, count, 1.0)
+    tilt_x = normalize_signed_curve(tilt_x_values, count)
+    tilt_y = normalize_signed_curve(tilt_y_values, count)
+    base_width = max(0.25, float(_value(stroke, "width_px", 4.0) or 4.0))
+    closed = bool(_value(stroke, "closed_path", False))
+    style = str(_value(stroke, "brush_style", "round") or "round").casefold()
+    pairs = list(zip(range(count - 1), range(1, count)))
+    if closed and count >= 3:
+        pairs.append((count - 1, 0))
+    painter.save()
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    try:
+        if count == 1:
+            point_color = QColor(color)
+            if style == "highlighter":
+                point_color.setAlpha(min(point_color.alpha(), 110))
+            pen = QPen(point_color, base_width * (0.18 + pressure[0] * 0.82))
+            pen.setCapStyle(
+                Qt.PenCapStyle.SquareCap
+                if style in {"marker", "highlighter"}
+                else Qt.PenCapStyle.RoundCap
+            )
+            painter.setPen(pen)
+            painter.drawPoint(points[0])
+            return True
+        for first_index, second_index in pairs:
+            local_pressure = (pressure[first_index] + pressure[second_index]) * 0.5
+            tx = (tilt_x[first_index] + tilt_x[second_index]) * 0.5
+            ty = (tilt_y[first_index] + tilt_y[second_index]) * 0.5
+            tilt_magnitude = min(1.0, math.hypot(tx, ty))
+            pen_width = (
+                base_width
+                * (0.18 + local_pressure * 0.82)
+                * (1.0 + tilt_magnitude * 0.24)
+            )
+            segment_color = QColor(color)
+            if style == "highlighter":
+                segment_color.setAlpha(min(segment_color.alpha(), 110))
+            pen = QPen(segment_color, max(0.25, pen_width))
+            if style in {"marker", "highlighter"}:
+                pen.setCapStyle(Qt.PenCapStyle.SquareCap)
+                pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+            else:
+                pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+                pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            if style == "dashed":
+                pen.setStyle(Qt.PenStyle.DashLine)
+            painter.setPen(pen)
+            shift = base_width * 0.10
+            painter.drawLine(
+                points[first_index] + QPointF(tilt_x[first_index] * shift, tilt_y[first_index] * shift),
+                points[second_index] + QPointF(tilt_x[second_index] * shift, tilt_y[second_index] * shift),
+            )
+    finally:
+        painter.restore()
+    return True
 
 
 def _lane_color(base: QColor, lane: int, seed: int, alpha: int) -> QColor:

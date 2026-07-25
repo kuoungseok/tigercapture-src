@@ -874,6 +874,54 @@ def load_project(editor, path: str | Path) -> None:
                     closed_path=bool(sd.get("closed_path", False)),
                     layer_id=str(sd.get("layer_id", "paint-layer-1") or "paint-layer-1"),
                     source_tool=str(sd.get("source_tool", "pen") or "pen"),
+                    brush_engine_version=max(1, min(2, int(sd.get("brush_engine_version", 1) or 1))),
+                    point_pressure=[
+                        max(0.0, min(1.0, float(value)))
+                        for value in (sd.get("point_pressure") or [])
+                    ],
+                    point_tilt=[
+                        max(0.0, min(1.0, float(value)))
+                        for value in (sd.get("point_tilt") or [])
+                    ],
+                    point_tilt_x=[
+                        max(-1.0, min(1.0, float(value)))
+                        for value in (sd.get("point_tilt_x") or [])
+                    ],
+                    point_tilt_y=[
+                        max(-1.0, min(1.0, float(value)))
+                        for value in (sd.get("point_tilt_y") or [])
+                    ],
+                    point_rotation=[
+                        max(0.0, min(1.0, float(value)))
+                        for value in (sd.get("point_rotation") or [])
+                    ],
+                    point_tangential_pressure=[
+                        max(-1.0, min(1.0, float(value)))
+                        for value in (sd.get("point_tangential_pressure") or [])
+                    ],
+                    point_load=[
+                        max(0.0, min(1.0, float(value)))
+                        for value in (sd.get("point_load") or [])
+                    ],
+                    bristle_count=max(0, min(64, int(sd.get("bristle_count", 0) or 0))),
+                    brush_seed=int(sd.get("brush_seed", 0) or 0),
+                    load_depletion=max(
+                        0.0, min(1.0, float(sd.get("load_depletion", 0.28) or 0.0))
+                    ),
+                    material_enabled=bool(sd.get("material_enabled", False)),
+                    material_load=max(0.0, min(1.0, float(sd.get("material_load", 0.0) or 0.0))),
+                    material_thickness=max(
+                        0.0, min(1.0, float(sd.get("material_thickness", 0.0) or 0.0))
+                    ),
+                    material_wetness=max(
+                        0.0, min(1.0, float(sd.get("material_wetness", 0.0) or 0.0))
+                    ),
+                    material_gloss=max(
+                        0.0, min(1.0, float(sd.get("material_gloss", 0.0) or 0.0))
+                    ),
+                    material_roughness=max(
+                        0.0, min(1.0, float(sd.get("material_roughness", 0.56)))
+                    ),
                     start_ms=int(sd.get("start_ms", 0)),
                     end_ms=sd.get("end_ms"),
                 ))

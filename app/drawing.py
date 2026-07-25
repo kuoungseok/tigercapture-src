@@ -41,6 +41,7 @@ from PySide6.QtGui import (
     QPen,
     QPixmap,
     QPolygonF,
+    QTabletEvent,
     QKeySequence,
     QShortcut,
 )
@@ -1295,7 +1296,10 @@ class Stroke:
     brush_engine_version: int = 1
     point_pressure: list[float] = field(default_factory=list)
     point_tilt: list[float] = field(default_factory=list)
+    point_tilt_x: list[float] = field(default_factory=list)
+    point_tilt_y: list[float] = field(default_factory=list)
     point_rotation: list[float] = field(default_factory=list)
+    point_tangential_pressure: list[float] = field(default_factory=list)
     point_load: list[float] = field(default_factory=list)
     bristle_count: int = 0
     brush_seed: int = 0
@@ -1616,6 +1620,14 @@ class DrawingCanvas(QWidget):
         self._layer_masks: dict[str, list[tuple[float, float]]] = {}
         self._layer_order: list[str] = []
         self._current_points: list[QPointF] = []  # while drawing (widget px)
+        self._current_pressure: list[float] = []
+        self._current_tilt: list[float] = []
+        self._current_tilt_x: list[float] = []
+        self._current_tilt_y: list[float] = []
+        self._current_rotation: list[float] = []
+        self._current_tangential_pressure: list[float] = []
+        self._current_load: list[float] = []
+        self._tablet_stroke_active = False
         self._path_points: list[QPointF] = []
         self._selection_points: list[tuple[float, float]] = []
         self._selection_inverted: bool = False
@@ -2193,6 +2205,13 @@ class DrawingCanvas(QWidget):
                 **self._current_brush_detail_kwargs(),
                 layer_id=self._active_layer_id,
                 source_tool="pen",
+                point_pressure=list(self._current_pressure),
+                point_tilt=list(self._current_tilt),
+                point_tilt_x=list(self._current_tilt_x),
+                point_tilt_y=list(self._current_tilt_y),
+                point_rotation=list(self._current_rotation),
+                point_tangential_pressure=list(self._current_tangential_pressure),
+                point_load=list(self._current_load),
             )
             mask = self._layer_masks.get(self._active_layer_id, [])
             if len(mask) >= 3:
@@ -3182,7 +3201,10 @@ class DrawingCanvas(QWidget):
         color = QColor(*stroke.color)
         color.setAlpha(max(0, min(255, int(stroke.opacity * opacity_scale))))
         style = _normalize_paint_brush_style(getattr(stroke, "brush_style", "round"))
-        from app.painter_brush_engine_v2 import paint_bristle_v2
+        from app.painter_brush_engine_v2 import (
+            paint_bristle_v2,
+            paint_dynamic_basic_stroke,
+        )
 
         if paint_bristle_v2(painter, stroke, w, h, color):
             return
@@ -3191,6 +3213,8 @@ class DrawingCanvas(QWidget):
             return
         if DrawingCanvas._stroke_uses_tip_detail(stroke):
             DrawingCanvas._paint_tip_detail_stroke(painter, stroke, w, h, color, style)
+            return
+        if paint_dynamic_basic_stroke(painter, stroke, w, h, color):
             return
         pen = QPen(color, stroke.width_px)
         DrawingCanvas._configure_pen_for_style(pen, style)
@@ -3616,7 +3640,113 @@ class DrawingCanvas(QWidget):
 
     # ------------- mouse interaction -------------
 
+    def _clear_current_stroke(self) -> None:
+        self._current_points = []
+        self._current_pressure = []
+        self._current_tilt = []
+        self._current_tilt_x = []
+        self._current_tilt_y = []
+        self._current_rotation = []
+        self._current_tangential_pressure = []
+        self._current_load = []
+
+    def _append_current_stroke_sample(
+        self,
+        point: QPointF,
+        sample,
+        *,
+        force: bool = False,
+    ) -> bool:
+        if self._current_points and not force:
+            previous = self._current_points[-1]
+            if abs(point.x() - previous.x()) + abs(point.y() - previous.y()) < 2:
+                return False
+        previous = self._current_points[-1] if self._current_points else None
+        self._current_points.append(QPointF(point))
+        self._current_pressure.append(float(sample.pressure))
+        self._current_tilt.append(float(sample.tilt))
+        self._current_tilt_x.append(float(sample.tilt_x))
+        self._current_tilt_y.append(float(sample.tilt_y))
+        self._current_rotation.append(float(sample.rotation))
+        self._current_tangential_pressure.append(float(sample.tangential_pressure))
+        self._current_load.append(float(sample.load))
+        self._update_current_stroke_dirty(point, previous)
+        return True
+
+    def _begin_current_stroke(self, point: QPointF, sample) -> None:
+        self._clear_current_stroke()
+        self._append_current_stroke_sample(point, sample, force=True)
+
+    def _finish_current_stroke(self) -> None:
+        if not self._current_points:
+            return
+        w = max(1, self.width())
+        h = max(1, self.height())
+        stroke = Stroke(
+            points=[(p.x() / w, p.y() / h) for p in self._current_points],
+            color=(
+                self._pen_color.red(),
+                self._pen_color.green(),
+                self._pen_color.blue(),
+            ),
+            opacity=self._pen_opacity,
+            width_px=self._pen_width,
+            brush_style=self._pen_style,
+            **self._current_brush_detail_kwargs(),
+            layer_id=self._active_layer_id,
+            source_tool="pen",
+            point_pressure=list(self._current_pressure),
+            point_tilt=list(self._current_tilt),
+            point_tilt_x=list(self._current_tilt_x),
+            point_tilt_y=list(self._current_tilt_y),
+            point_rotation=list(self._current_rotation),
+            point_tangential_pressure=list(self._current_tangential_pressure),
+            point_load=list(self._current_load),
+            start_ms=int(self._get_time_ms()),
+            end_ms=None,
+        )
+        self._clear_current_stroke()
+        self.stroke_added.emit(stroke)
+        self.update()
+
+    def tabletEvent(self, event: QTabletEvent) -> None:
+        if self._tool not in {"pen", "eraser"}:
+            event.ignore()
+            return
+        from app.painter_stylus import tablet_stylus_sample
+
+        event_type = event.type()
+        point = QPointF(event.position())
+        pointer_name = str(event.pointerType()).casefold()
+        erasing = self._tool == "eraser" or "eraser" in pointer_name
+        if event_type == QEvent.Type.TabletPress:
+            self._tablet_stroke_active = True
+            if erasing:
+                self._try_erase_at(point.x(), point.y())
+            else:
+                self._begin_current_stroke(point, tablet_stylus_sample(event))
+        elif event_type == QEvent.Type.TabletMove and self._tablet_stroke_active:
+            if erasing:
+                self._try_erase_at(point.x(), point.y())
+            else:
+                self._append_current_stroke_sample(point, tablet_stylus_sample(event))
+        elif event_type == QEvent.Type.TabletRelease and self._tablet_stroke_active:
+            if not erasing:
+                self._append_current_stroke_sample(
+                    point,
+                    tablet_stylus_sample(event),
+                    force=True,
+                )
+                self._finish_current_stroke()
+            self._tablet_stroke_active = False
+        else:
+            event.ignore()
+            return
+        event.accept()
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
+        if self._tablet_stroke_active:
+            return
         if event.button() != Qt.MouseButton.LeftButton:
             return
         pos = event.position()
@@ -3681,8 +3811,9 @@ class DrawingCanvas(QWidget):
             self.update()
             return
         if self._tool == "pen":
-            self._current_points = [QPointF(pos)]
-            self._update_current_stroke_dirty(pos)
+            from app.painter_stylus import mouse_stylus_sample
+
+            self._begin_current_stroke(pos, mouse_stylus_sample())
         elif self._tool == "eraser":
             self._try_erase_at(pos.x(), pos.y())
         elif self._tool == "path":
@@ -3760,6 +3891,8 @@ class DrawingCanvas(QWidget):
         self.update()
 
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        if self._tablet_stroke_active:
+            return
         if self._color_window_drag_handle is not None:
             self._update_color_window_drag(event.position(), commit=False)
             return
@@ -3794,13 +3927,13 @@ class DrawingCanvas(QWidget):
         if self._tool != "pen" or not self._current_points:
             return
         pos = event.position()
-        # Only add a point if moved at least 2px from the previous one
-        last = self._current_points[-1]
-        if abs(pos.x() - last.x()) + abs(pos.y() - last.y()) >= 2:
-            self._current_points.append(QPointF(pos))
-            self._update_current_stroke_dirty(pos, last)
+        from app.painter_stylus import mouse_stylus_sample
+
+        self._append_current_stroke_sample(pos, mouse_stylus_sample())
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
+        if self._tablet_stroke_active:
+            return
         if event.button() != Qt.MouseButton.LeftButton:
             return
         if self._color_window_drag_handle is not None:
@@ -3871,28 +4004,14 @@ class DrawingCanvas(QWidget):
             return
         if self._tool != "pen" or not self._current_points:
             return
-        w = max(1, self.width())
-        h = max(1, self.height())
-        norm_pts = [(p.x() / w, p.y() / h) for p in self._current_points]
-        stroke = Stroke(
-            points=norm_pts,
-            color=(
-                self._pen_color.red(),
-                self._pen_color.green(),
-                self._pen_color.blue(),
-            ),
-            opacity=self._pen_opacity,
-            width_px=self._pen_width,
-            brush_style=self._pen_style,
-            **self._current_brush_detail_kwargs(),
-            layer_id=self._active_layer_id,
-            source_tool="pen",
-            start_ms=int(self._get_time_ms()),
-            end_ms=None,
+        from app.painter_stylus import mouse_stylus_sample
+
+        self._append_current_stroke_sample(
+            event.position(),
+            mouse_stylus_sample(),
+            force=True,
         )
-        self._current_points = []
-        self.stroke_added.emit(stroke)
-        self.update()
+        self._finish_current_stroke()
 
     def _update_current_stroke_dirty(self, point: QPointF, previous: QPointF | None = None) -> None:
         radius = max(8.0, float(getattr(self, "_pen_width", 6.0) or 6.0) * 1.75)
@@ -15522,9 +15641,21 @@ class PaintDialog(QDialog):
                 max(0.0, min(1.0, self._clipboard_float(value, 0.5)))
                 for value in (row.get("point_tilt") or [])
             ],
+            point_tilt_x=[
+                max(-1.0, min(1.0, self._clipboard_float(value, 0.0)))
+                for value in (row.get("point_tilt_x") or [])
+            ],
+            point_tilt_y=[
+                max(-1.0, min(1.0, self._clipboard_float(value, 0.0)))
+                for value in (row.get("point_tilt_y") or [])
+            ],
             point_rotation=[
                 max(0.0, min(1.0, self._clipboard_float(value, 0.5)))
                 for value in (row.get("point_rotation") or [])
+            ],
+            point_tangential_pressure=[
+                max(-1.0, min(1.0, self._clipboard_float(value, 0.0)))
+                for value in (row.get("point_tangential_pressure") or [])
             ],
             point_load=[
                 max(0.0, min(1.0, self._clipboard_float(value, 1.0)))
@@ -16376,7 +16507,15 @@ class PaintDialog(QDialog):
                     "preset_thumbnail_mode": "actual_stroke_preview",
                     "active_sections": sorted(BRUSH_DETAIL_ACTIVE_SECTIONS),
                     "pressure_curve": "per_point_normalized_v2",
-                    "dynamic_channels": ["pressure", "tilt", "rotation", "load"],
+                    "dynamic_channels": [
+                        "pressure",
+                        "tilt",
+                        "tilt_x",
+                        "tilt_y",
+                        "rotation",
+                        "tangential_pressure",
+                        "load",
+                    ],
                     "bristle_strands": "shared_color_material_paths_v2",
                     "smoothing": "bounded_256_point_lane_resampling",
                     "texture_dynamics": "qpainter_v2_with_gpu_fallback_contract",

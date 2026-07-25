@@ -167,7 +167,12 @@ def material_paint_signature(
                 "engine": int(_value(stroke, "brush_engine_version", 1) or 1),
                 "pressure": list(_value(stroke, "point_pressure", []) or []),
                 "tilt": list(_value(stroke, "point_tilt", []) or []),
+                "tilt_x": list(_value(stroke, "point_tilt_x", []) or []),
+                "tilt_y": list(_value(stroke, "point_tilt_y", []) or []),
                 "rotation": list(_value(stroke, "point_rotation", []) or []),
+                "tangential_pressure": list(
+                    _value(stroke, "point_tangential_pressure", []) or []
+                ),
                 "point_load": list(_value(stroke, "point_load", []) or []),
                 "bristles": int(_value(stroke, "bristle_count", 0) or 0),
                 "seed": int(_value(stroke, "brush_seed", 0) or 0),
@@ -354,9 +359,52 @@ def rasterize_material_channels(
         direction_written = False
         from app.painter_brush_engine_v2 import (
             bristle_lane_paths,
+            normalize_curve,
+            normalize_signed_curve,
             stipple_dabs,
             stroke_uses_bristle_v2,
         )
+        point_count = len(points)
+        pressure_curve = normalize_curve(
+            _value(stroke, "point_pressure", []) or [],
+            point_count,
+            1.0,
+        )
+        tilt_x_curve = normalize_signed_curve(
+            _value(stroke, "point_tilt_x", []) or [],
+            point_count,
+        )
+        tilt_y_curve = normalize_signed_curve(
+            _value(stroke, "point_tilt_y", []) or [],
+            point_count,
+        )
+        dynamic_points = [
+            (
+                max(0, min(width - 1, int(round(point[0] + tilt_x_curve[index] * width_px * 0.10)))),
+                max(0, min(height - 1, int(round(point[1] + tilt_y_curve[index] * width_px * 0.10)))),
+            )
+            for index, point in enumerate(points)
+        ]
+        dynamic_widths = [
+            max(
+                1,
+                int(
+                    round(
+                        width_px
+                        * (0.18 + pressure_curve[index] * 0.82)
+                        * (
+                            1.0
+                            + min(
+                                1.0,
+                                math.hypot(tilt_x_curve[index], tilt_y_curve[index]),
+                            )
+                            * 0.24
+                        )
+                    )
+                ),
+            )
+            for index in range(point_count)
+        ]
 
         if style == "stipple_oil":
             brush_seed = int(_value(stroke, "brush_seed", 0) or 0)
@@ -429,7 +477,19 @@ def rasterize_material_channels(
                 direction_y += mask * (dy / length)
             direction_written = True
         else:
-            _draw_polyline(mask, points, width_px)
+            if len(dynamic_points) == 1:
+                _draw_polyline(mask, dynamic_points, dynamic_widths[0])
+            else:
+                for index, (first, second) in enumerate(
+                    zip(dynamic_points, dynamic_points[1:])
+                ):
+                    _draw_weighted_segment(
+                        mask,
+                        first,
+                        second,
+                        max(1, int(round((dynamic_widths[index] + dynamic_widths[index + 1]) * 0.5))),
+                        1.0,
+                    )
 
         if style in {"loaded_oil", "impasto_oil"}:
             body = np.zeros_like(relief)
@@ -521,12 +581,26 @@ def rasterize_material_channels(
         roughness_weight += mask
 
         if not direction_written:
-            for first, second in zip(points, points[1:]):
+            for index, (first, second) in enumerate(
+                zip(dynamic_points, dynamic_points[1:])
+            ):
                 dx = float(second[0] - first[0])
                 dy = float(second[1] - first[1])
                 length = max(1.0, math.hypot(dx, dy))
                 segment = np.zeros_like(relief)
-                _draw_polyline(segment, [first, second], width_px)
+                _draw_polyline(
+                    segment,
+                    [first, second],
+                    max(
+                        1,
+                        int(
+                            round(
+                                (dynamic_widths[index] + dynamic_widths[index + 1])
+                                * 0.5
+                            )
+                        ),
+                    ),
+                )
                 direction_x += segment * (dx / length)
                 direction_y += segment * (dy / length)
         stroke_count += 1

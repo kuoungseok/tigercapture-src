@@ -6534,8 +6534,16 @@ AI Script Edit MVP integration:
   not text-only aliases. The top `Brush Preset` popup provides an `All Brushes`
   view plus category filtering over actual rendered-tip thumbnails, while the
   inspector retains Photoshop-style Brush/Brush Presets and parameter sections.
-  The catalog is a production v1 set; pressure/tilt-sensitive pigment mixing
-  and persistent wet-canvas fluid simulation remain later engine work.
+  The catalog is a production v1 set. The 2026-07-26 tablet pass captures
+  native pressure, signed X/Y tilt, barrel rotation, and tangential pressure
+  per point; preserves those channels through live preview, editable strokes,
+  Undo/Redo, clipboard, project save/load, Actions, GPU cache signatures, and
+  PNG/PBR rendering; and exposes the same contract through `paint.stroke.draw`.
+  Pressure changes basic-stroke width and Engine v2 bristle spread while X/Y
+  tilt shifts/fans the contact patch. Mouse input remains full-pressure and
+  zero-tilt for visual compatibility. Brush-specific pigment mixing, device
+  calibration curves, and persistent wet-canvas fluid simulation remain later
+  engine work.
 - The 2026-07-25 brush workspace pass follows the current Painter 2023 Brush
   Selector information architecture without copying proprietary brush
   resources. The selector uses a compact icon header rather than large text

@@ -7,6 +7,7 @@ window does not import PyOpenGL until a GPU preview is actually requested.
 """
 from __future__ import annotations
 
+import math
 import os
 from typing import Any
 
@@ -412,6 +413,16 @@ def canvas_stroke_gpu_signature(
         h.update(f":closed={bool(getattr(stroke, 'closed_path', False))}".encode("ascii"))
         for x, y in list(getattr(stroke, "points", []) or []):
             h.update(f";{float(x):.5f},{float(y):.5f}".encode("ascii"))
+        for channel in (
+            "point_pressure",
+            "point_tilt_x",
+            "point_tilt_y",
+            "point_rotation",
+            "point_tangential_pressure",
+        ):
+            values = list(getattr(stroke, channel, []) or [])
+            h.update(f":{channel}=".encode("ascii"))
+            h.update(",".join(f"{float(value):.4f}" for value in values).encode("ascii"))
     return h.hexdigest()
 
 
@@ -751,6 +762,36 @@ def _collect_canvas_gpu_strokes(
         ]
         if not points:
             continue
+        from app.painter_brush_engine_v2 import normalize_curve, normalize_signed_curve
+
+        point_count = len(points)
+        pressure = normalize_curve(
+            getattr(stroke, "point_pressure", []) or [],
+            point_count,
+            1.0,
+        )
+        tilt_x = normalize_signed_curve(
+            getattr(stroke, "point_tilt_x", []) or [],
+            point_count,
+        )
+        tilt_y = normalize_signed_curve(
+            getattr(stroke, "point_tilt_y", []) or [],
+            point_count,
+        )
+        base_width = max(1.0, float(getattr(stroke, "width_px", 1.0) or 1.0))
+        points = [
+            (
+                point[0] + tilt_x[index] * base_width * 0.10,
+                point[1] + tilt_y[index] * base_width * 0.10,
+            )
+            for index, point in enumerate(points)
+        ]
+        dynamic_widths = [
+            base_width
+            * (0.18 + pressure[index] * 0.82)
+            * (1.0 + min(1.0, math.hypot(tilt_x[index], tilt_y[index])) * 0.24)
+            for index in range(point_count)
+        ]
         color = tuple(getattr(stroke, "color", (255, 255, 255)) or (255, 255, 255))
         alpha = max(0.0, min(1.0, float(getattr(stroke, "opacity", 255) or 255) / 255.0))
         alpha *= max(0.0, min(1.0, float(layer_opacity.get(layer_id, 100)) / 100.0))
@@ -765,7 +806,8 @@ def _collect_canvas_gpu_strokes(
                     max(0, min(255, int(color[2] if len(color) > 2 else 255))) / 255.0,
                     alpha,
                 ),
-                "width": max(1.0, float(getattr(stroke, "width_px", 1.0) or 1.0)),
+                "width": base_width,
+                "dynamic_widths": dynamic_widths,
                 "closed": bool(getattr(stroke, "closed_path", False)),
                 "style": style,
             }
@@ -782,8 +824,9 @@ def _draw_canvas_stroke(GL: Any, stroke: dict[str, Any], width: int, height: int
     line_width = max(1.0, float(stroke.get("width", 1.0) or 1.0))
     if str(stroke.get("style") or "") == "marker":
         line_width *= 1.08
+    dynamic_widths = list(stroke.get("dynamic_widths", []) or [])
     GL.glLineWidth(line_width)
-    GL.glPointSize(line_width)
+    GL.glPointSize(max(1.0, dynamic_widths[0] if dynamic_widths else line_width))
     if len(points) == 1:
         GL.glBegin(GL.GL_POINTS)
         try:
@@ -791,12 +834,36 @@ def _draw_canvas_stroke(GL: Any, stroke: dict[str, Any], width: int, height: int
         finally:
             GL.glEnd()
         return
-    GL.glBegin(GL.GL_LINE_LOOP if bool(stroke.get("closed", False)) else GL.GL_LINE_STRIP)
-    try:
-        for x, y in points:
-            _gl_vertex(GL, float(x), float(y), width, height)
-    finally:
-        GL.glEnd()
+    if dynamic_widths:
+        pairs = list(zip(range(len(points) - 1), range(1, len(points))))
+        if bool(stroke.get("closed", False)) and len(points) >= 3:
+            pairs.append((len(points) - 1, 0))
+        for first_index, second_index in pairs:
+            GL.glLineWidth(
+                max(
+                    1.0,
+                    (dynamic_widths[first_index] + dynamic_widths[second_index]) * 0.5,
+                )
+            )
+            GL.glBegin(GL.GL_LINES)
+            try:
+                for point_index in (first_index, second_index):
+                    _gl_vertex(
+                        GL,
+                        float(points[point_index][0]),
+                        float(points[point_index][1]),
+                        width,
+                        height,
+                    )
+            finally:
+                GL.glEnd()
+    else:
+        GL.glBegin(GL.GL_LINE_LOOP if bool(stroke.get("closed", False)) else GL.GL_LINE_STRIP)
+        try:
+            for x, y in points:
+                _gl_vertex(GL, float(x), float(y), width, height)
+        finally:
+            GL.glEnd()
     GL.glBegin(GL.GL_POINTS)
     try:
         for x, y in points:
