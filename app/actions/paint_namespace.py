@@ -347,6 +347,10 @@ def register_paint_actions(registry: Any) -> None:
             "bristle_count": {"type": "integer", "minimum": 0, "maximum": 64},
             "seed": {"type": "integer"},
             "load_depletion": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "path_mode": {
+                "type": "string",
+                "enum": ["smooth", "polyline"],
+            },
         },
         "required": ["points"],
         "additionalProperties": False,

@@ -5048,14 +5048,32 @@ def compose_pil_paint_overlays(
 
     width = max(1, int(frame_size[0]))
     height = max(1, int(frame_size[1]))
-    out = Image.new("RGBA", (width, height), (0, 0, 0, 0))
-    out = compose_pil_frame_with_overlays(
-        out,
-        list(strokes or []),
-        [],
-        int(time_ms),
-        width_scale=max(0.001, float(stroke_width_scale or 1.0)),
-    )
+    active_strokes = [
+        stroke
+        for stroke in list(strokes or [])
+        if stroke.is_active(int(time_ms))
+    ]
+    image = QImage(width, height, QImage.Format.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    try:
+        for stroke in active_strokes:
+            scaled_stroke = copy.copy(stroke)
+            scaled_stroke.width_px = max(
+                0.25,
+                float(stroke.width_px)
+                * max(0.001, float(stroke_width_scale or 1.0)),
+            )
+            DrawingCanvas._paint_stroke(
+                painter,
+                scaled_stroke,
+                width,
+                height,
+            )
+    finally:
+        painter.end()
+    out = _qimage_to_pil_rgba(image)
     out = compose_pil_stickers(out, list(stickers or []), int(time_ms))
     out = compose_pil_bubbles(out, list(bubbles or []), int(time_ms))
     return out
@@ -5140,6 +5158,23 @@ def _pixmap_to_pil_rgba(pixmap: QPixmap):
     buffer = QBuffer(byte_array)
     buffer.open(QBuffer.OpenModeFlag.WriteOnly)
     qimg.save(buffer, "PNG")
+    buffer.close()
+    with BytesIO(bytes(byte_array)) as bio:
+        image = Image.open(bio)
+        image.load()
+    return image.convert("RGBA")
+
+
+def _qimage_to_pil_rgba(qimage: QImage):
+    from io import BytesIO
+
+    from PIL import Image
+    from PySide6.QtCore import QBuffer, QByteArray
+
+    byte_array = QByteArray()
+    buffer = QBuffer(byte_array)
+    buffer.open(QBuffer.OpenModeFlag.WriteOnly)
+    qimage.save(buffer, "PNG")
     buffer.close()
     with BytesIO(bytes(byte_array)) as bio:
         image = Image.open(bio)

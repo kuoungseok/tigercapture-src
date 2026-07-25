@@ -708,6 +708,19 @@ Action rules:
 - Undo transaction required for mutations.
 - Stable IDs required for layers, references, paths, selections, and 3D
   blockout items.
+- Action-authored natural curves use `path_mode=smooth`; deliberate hard-edged
+  construction may opt into `path_mode=polyline`. The action response preserves
+  the submitted control-point count and separately reports the interpolated
+  render-point count.
+- Every AI-authored stroke must target an explicit stable layer ID. Provider
+  runners must not rely on whichever layer happens to be active.
+- Long provider sessions save replayable action checkpoints as work proceeds.
+  Visual agents must periodically inspect a real Painter export of the current
+  canvas instead of planning an entire painting from coordinates alone.
+- PNG and Painter-to-PBR source export must render strokes through the same
+  canonical `DrawingCanvas._paint_stroke` path used by the canvas. Falling back
+  to the legacy PIL line renderer for current brush-engine strokes is a release
+  blocker because it drops bristle, oil, pressure, and material appearance.
 - Tests must cover action schema, preview, execute, and sequence behavior.
 
 ## QA Gates

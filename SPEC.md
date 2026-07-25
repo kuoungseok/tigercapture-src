@@ -6611,14 +6611,22 @@ AI Script Edit MVP integration:
   export renderer as manual drawing. `paint.stroke.draw` accepts up to 512
   strokes per call, each with normalized canvas points, color, opacity, width,
   textured brush style, tip hardness/spacing/angle/roundness, closed state, and
-  destination layer. One batch is one named undo transaction so Claude or a
+  destination layer. Action-authored paths declare `path_mode=smooth` for
+  interpolated natural curves or `path_mode=polyline` for intentional corners.
+  Responses preserve the submitted `point_count` and separately report
+  `rendered_point_count`. One batch is one named undo transaction so Claude or a
   local AI can build painterly passages efficiently without synthesizing mouse
   events. Unknown or locked destination layers and out-of-bounds points fail
   without partially applying the batch. `paint.history.undo` and
   `paint.history.redo` operate on the Painter document history rather than the
   video-editor `history.*` stack. Agents inspect progress through `paint.state`
-  and may render review iterations through `paint.document.export_png`; image
-  generation is optional and is not required for action-driven painting.
+  and render review iterations through `paint.document.export_png`. Direct
+  provider runners require explicit destination layer IDs, feed periodic real
+  canvas exports back to the visual model, and save replayable in-progress
+  action checkpoints. PNG and Painter-to-PBR source export must use the same
+  canonical Bristle Engine stroke renderer as the canvas; legacy PIL line
+  rendering is not valid export parity. Image generation is optional and is not
+  required for action-driven painting.
 - Painter image and channel automation must stay exposed through
   `paint.crop.to_selection`, `paint.image.resize`, `paint.canvas.resize`,
   `paint.canvas.flip`, `paint.mirror.set`, `paint.channel.select`,

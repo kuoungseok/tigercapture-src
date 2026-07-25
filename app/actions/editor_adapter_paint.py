@@ -709,6 +709,7 @@ class PaintAdapterMixin:
         active_layer_id = str(getattr(dialog, "_active_paint_layer_id", "") or "paint-layer-1")
         prepared: list[Stroke] = []
         point_count = 0
+        rendered_point_count = 0
         for index, row in enumerate(rows):
             if not isinstance(row, dict):
                 raise ValueError(f"stroke {index} must be an object")
@@ -717,6 +718,14 @@ class PaintAdapterMixin:
                 raise ValueError(f"stroke {index} requires at least two points")
             if len(raw_points) > 2048:
                 raise ValueError(f"stroke {index} exceeds the 2048 point limit")
+            point_count += len(raw_points)
+            path_mode = str(row.get("path_mode") or "smooth").strip().casefold()
+            if path_mode not in {"smooth", "polyline"}:
+                raise ValueError(f"stroke {index} has invalid path_mode: {path_mode}")
+            if path_mode == "smooth" and len(raw_points) >= 3:
+                from app.painter_stroke_geometry import smooth_action_points
+
+                raw_points = smooth_action_points(raw_points)
             points: list[tuple[float, float]] = []
             pressure: list[float] = []
             tilt: list[float] = []
@@ -797,7 +806,7 @@ class PaintAdapterMixin:
                     start_ms=int(getattr(dialog, "_time_ms", 0) or 0),
                 )
             )
-            point_count += len(points)
+            rendered_point_count += len(points)
 
         dialog._push_undo_state(str(undo_label or "AI paint strokes"))
         existing = dialog.canvas.embedded_strokes()
@@ -807,6 +816,7 @@ class PaintAdapterMixin:
         state["stroke_draw"] = {
             "stroke_count": len(prepared),
             "point_count": point_count,
+            "rendered_point_count": rendered_point_count,
             "undo_label": str(undo_label or "AI paint strokes"),
             "coordinate_space": "normalized_canvas",
             "engine_versions": sorted(
