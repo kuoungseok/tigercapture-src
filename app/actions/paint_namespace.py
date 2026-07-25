@@ -376,12 +376,62 @@ def register_paint_actions(registry: Any) -> None:
     )
     registry.register_adapter_action(
         "paint.layer.add",
-        "Add a new layer to the active Painter document.",
+        "Add a standard or stroke-native Material Paint layer to the active Painter document.",
         "paint",
         "paint_layer_add",
-        params_schema=schema_object({"name": {"type": "string"}}),
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "layer_type": {"type": "string", "enum": ["standard", "material"]},
+            }
+        ),
         undo_label="Add Painter layer",
         dry_summary="a Painter layer would be added",
+    )
+    registry.register_adapter_action(
+        "paint.layer.set_type",
+        "Convert a Painter layer between standard color paint and stroke-native Material Paint.",
+        "paint",
+        "paint_layer_set_type",
+        params_schema=schema_object(
+            {
+                "layer_id": {"type": "string"},
+                "layer_type": {"type": "string", "enum": ["standard", "material"]},
+            },
+            required=("layer_type",),
+        ),
+        undo_label="Set Painter layer type",
+        dry_summary="Painter layer type would change",
+    )
+    material_properties = {
+        key: {"type": "number", "minimum": 0.0, "maximum": 1.0}
+        for key in ("load", "thickness", "wetness", "gloss", "roughness")
+    }
+    registry.register_adapter_action(
+        "paint.material.settings.set",
+        "Set native Material Paint deposition and surface response for the active material layer.",
+        "paint",
+        "paint_material_settings_set",
+        params_schema=schema_object(
+            {"layer_id": {"type": "string"}, **material_properties}
+        ),
+        undo_label="Set Painter material paint",
+        dry_summary="Material Paint deposition or surface controls would change",
+    )
+    registry.register_adapter_action(
+        "paint.material.preview.set",
+        "Set the canvas Material Paint relief preview and inspection light direction.",
+        "paint",
+        "paint_material_preview_set",
+        params_schema=schema_object(
+            {
+                "enabled": {"type": "boolean"},
+                "azimuth_deg": {"type": "number", "minimum": -180.0, "maximum": 180.0},
+                "elevation_deg": {"type": "number", "minimum": 5.0, "maximum": 85.0},
+            }
+        ),
+        undo_label="Set Painter material preview",
+        dry_summary="Material Paint relief preview would change",
     )
     registry.register_adapter_action(
         "paint.layer.select",

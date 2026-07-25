@@ -48,6 +48,9 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
         "paint.history.redo",
         "paint.window.show_panel",
         "paint.layer.add",
+        "paint.layer.set_type",
+        "paint.material.settings.set",
+        "paint.material.preview.set",
         "paint.layer.select",
         "paint.layer.rename",
         "paint.layer.duplicate",
@@ -172,6 +175,38 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     assert added["ok"]
     layer_id = added["result"]["active_layer_id"]
     assert any(row["name"] == "AI Ink" for row in added["result"]["layers"])
+
+    material = registry.execute(
+        "paint.layer.add",
+        {"name": "AI Impasto", "layer_type": "material"},
+    ).to_dict()
+    assert material["ok"]
+    material_layer_id = material["result"]["active_layer_id"]
+    assert next(
+        row for row in material["result"]["layers"] if row["layer_id"] == material_layer_id
+    )["layer_type"] == "material"
+
+    material_settings = registry.execute(
+        "paint.material.settings.set",
+        {
+            "layer_id": material_layer_id,
+            "load": 0.92,
+            "thickness": 0.86,
+            "wetness": 0.41,
+            "gloss": 0.36,
+            "roughness": 0.48,
+        },
+    ).to_dict()
+    assert material_settings["ok"]
+    assert material_settings["result"]["brush"]["material"]["settings"]["thickness"] == 0.86
+
+    material_preview = registry.execute(
+        "paint.material.preview.set",
+        {"enabled": True, "azimuth_deg": 24.0, "elevation_deg": 56.0},
+    ).to_dict()
+    assert material_preview["ok"]
+    assert material_preview["result"]["material_preview"]["enabled"] is True
+    assert material_preview["result"]["material_preview"]["azimuth_deg"] == 24.0
 
     selected_layer = registry.execute(
         "paint.layer.select",

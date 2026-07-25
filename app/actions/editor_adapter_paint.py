@@ -146,9 +146,65 @@ class PaintAdapterMixin:
         dialog._set_quick_mask_enabled(bool(enabled))
         return dialog.painter_action_state()
 
-    def paint_layer_add(self, *, name: str = "") -> dict[str, Any]:
+    def paint_layer_add(
+        self,
+        *,
+        name: str = "",
+        layer_type: str = "standard",
+    ) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
-        dialog._new_paint_layer(str(name or "") or None)
+        dialog._new_paint_layer(
+            str(name or "") or None,
+            layer_type=str(layer_type or "standard"),
+        )
+        return dialog.painter_action_state()
+
+    def paint_layer_set_type(
+        self,
+        *,
+        layer_id: str = "",
+        layer_type: str = "standard",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if not dialog._set_paint_layer_type(layer_id or None, str(layer_type or "standard")):
+            raise ValueError("Painter layer type did not change")
+        return dialog.painter_action_state()
+
+    def paint_material_settings_set(
+        self,
+        *,
+        layer_id: str = "",
+        load: float | None = None,
+        thickness: float | None = None,
+        wetness: float | None = None,
+        gloss: float | None = None,
+        roughness: float | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        values = {
+            "load": load,
+            "thickness": thickness,
+            "wetness": wetness,
+            "gloss": gloss,
+            "roughness": roughness,
+        }
+        if not dialog._set_material_settings(values, layer_id=layer_id or None):
+            raise ValueError("Material Paint settings require a material layer and a changed value")
+        return dialog.painter_action_state()
+
+    def paint_material_preview_set(
+        self,
+        *,
+        enabled: bool | None = None,
+        azimuth_deg: float | None = None,
+        elevation_deg: float | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._set_material_preview(
+            enabled=enabled,
+            azimuth_deg=azimuth_deg,
+            elevation_deg=elevation_deg,
+        )
         return dialog.painter_action_state()
 
     def paint_layer_select(self, *, layer_id: str = "") -> dict[str, Any]:

@@ -11,6 +11,8 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Callable
 
+import numpy as np
+
 from PySide6.QtCore import (
     QByteArray,
     QEvent,
@@ -1235,6 +1237,12 @@ class Stroke:
     closed_path: bool = False
     layer_id: str = "paint-layer-1"
     source_tool: str = "pen"
+    material_enabled: bool = False
+    material_load: float = 0.0
+    material_thickness: float = 0.0
+    material_wetness: float = 0.0
+    material_gloss: float = 0.0
+    material_roughness: float = 0.56
     start_ms: int = 0
     end_ms: int | None = None
 
@@ -1257,6 +1265,8 @@ class PaintLayer:
     mask: list[tuple[float, float]] = field(default_factory=list)
     mask_enabled: bool = False
     color_label: str = "none"
+    layer_type: str = "standard"
+    material_settings: dict[str, float] = field(default_factory=dict)
 
 
 CANVAS_SIZE_PRESETS: tuple[tuple[str, int, int], ...] = (
@@ -5814,6 +5824,15 @@ class PaintDialog(QDialog):
         self._pbr_texture_lab_window = None
         self._pbr_slider_labels: dict[str, QLabel] = {}
         self._pbr_sliders: dict[str, QSlider] = {}
+        from app.painter_material_paint import MATERIAL_PAINT_DEFAULTS
+
+        self._material_paint_settings: dict[str, float] = dict(MATERIAL_PAINT_DEFAULTS)
+        self._material_preview_enabled = False
+        self._material_preview_light_azimuth_deg = -38.0
+        self._material_preview_light_elevation_deg = 48.0
+        self._material_preview_cache: dict | None = None
+        self._material_control_sliders: dict[str, StudioSlider] = {}
+        self._material_control_labels: dict[str, QLabel] = {}
         self._painter_reference_board: dict | None = None
         self._painter_reference_selected_id = ""
         self._painter_reference_syncing = False
@@ -6112,6 +6131,11 @@ class PaintDialog(QDialog):
 
         layer_menu = menu_bar.addMenu("Layer")
         self._add_painter_menu_action(layer_menu, "New Layer", self._new_paint_layer, "Ctrl+Shift+N")
+        self._add_painter_menu_action(
+            layer_menu,
+            "New Material Paint Layer",
+            self._new_material_paint_layer,
+        )
         self._add_painter_menu_action(layer_menu, "Duplicate Layer", self._duplicate_selected_layer, "Ctrl+J")
         self._add_painter_menu_action(layer_menu, "Rename Layer...", self._rename_selected_layer)
         self._add_painter_menu_action(layer_menu, "Delete Layer", self._delete_selected_layer)
@@ -6336,6 +6360,9 @@ class PaintDialog(QDialog):
         self._paint_layers = [PaintLayer("paint-layer-1", "Layer 1")]
         self._active_paint_layer_id = "paint-layer-1"
         self._selected_layer_id = "paint-layer-1" if self._standalone else None
+        self._material_preview_enabled = False
+        self._material_preview_cache = None
+        self._pbr_preview_maps_cache = None
         if hasattr(self, "canvas"):
             self.canvas.set_strokes_snapshot([])
             self.canvas.clear_selection()
@@ -6344,6 +6371,7 @@ class PaintDialog(QDialog):
         self._sync_canvas_layer_view()
         self._update_canvas_geometry()
         self._update_inspector_counts()
+        self._sync_material_controls()
 
     def _show_painter_tab(self, tab: str | int) -> None:
         tabs = getattr(self, "_layer_channel_path_tabs", None)
@@ -6513,6 +6541,7 @@ class PaintDialog(QDialog):
         self.canvas.set_pen_opacity(self._pen_opacity)
         self.canvas.set_brush_detail(**self._canvas_brush_detail_payload())
         self.canvas.stroke_added.connect(self._on_stroke_added)
+        self.canvas.set_extra_paint_hook(self._paint_material_preview_overlay)
         self.canvas.stroke_erased_at.connect(
             lambda idx: self.canvas.remove_stroke_direct(idx)
         )
@@ -7041,6 +7070,7 @@ class PaintDialog(QDialog):
         self.canvas.set_pen_opacity(self._pen_opacity)
         self.canvas.set_brush_detail(**self._canvas_brush_detail_payload())
         self.canvas.stroke_added.connect(self._on_stroke_added)
+        self.canvas.set_extra_paint_hook(self._paint_material_preview_overlay)
         self.canvas.stroke_erased_at.connect(self._erase_stroke_direct)
         self.canvas.repaint_requested.connect(self._update_path_list)
         self.canvas.selection_probe_requested.connect(self._on_canvas_selection_probe)
@@ -7259,6 +7289,21 @@ class PaintDialog(QDialog):
         self._top_brush_opacity_spin.setFixedWidth(66)
         self._top_brush_opacity_spin.valueChanged.connect(self._on_opacity_changed)
         brush_options_row.addWidget(self._top_brush_opacity_spin)
+        self._material_options_button = QPushButton("Material")
+        self._material_options_button.setObjectName("PaintMaterialOptionsButton")
+        self._material_options_button.setIcon(app_icon("layers", size=12, color="#E7C06A"))
+        self._material_options_button.setIconSize(icon_size(12))
+        self._material_options_button.setToolTip(
+            "Load, thickness, wetness, gloss, and roughness for Material Paint strokes"
+        )
+        self._material_options_button.setMenu(self._build_material_options_menu())
+        brush_options_row.addWidget(self._material_options_button)
+        self._material_preview_button = QPushButton("PBR")
+        self._material_preview_button.setObjectName("PaintMaterialPreviewButton")
+        self._material_preview_button.setCheckable(True)
+        self._material_preview_button.setToolTip("Preview authored paint relief under a movable light")
+        self._material_preview_button.toggled.connect(self._set_material_preview_enabled)
+        brush_options_row.addWidget(self._material_preview_button)
         self._tool_options_layout.addWidget(self._brush_options_widget)
 
         self._paint_brush_section_title = QLabel("BRUSH")
@@ -7588,12 +7633,17 @@ class PaintDialog(QDialog):
         edit_row = QHBoxLayout()
         edit_row.setContentsMargins(0, 0, 0, 0)
         self.layer_new_btn = self._make_layer_tiny_button("plus", "New Layer")
+        self.layer_new_material_btn = self._make_layer_tiny_button(
+            "layers",
+            "New Material Paint Layer",
+        )
         self.layer_duplicate_btn = self._make_layer_tiny_button("duplicate", "Duplicate Layer")
         self.layer_copy_btn = self._make_layer_tiny_button("copy", "Copy Layer")
         self.layer_paste_btn = self._make_layer_tiny_button("paste", "Paste Layer")
         self.layer_delete_btn = self._make_layer_tiny_button("trash", "Delete Layer")
         for btn, handler in (
             (self.layer_new_btn, self._new_paint_layer),
+            (self.layer_new_material_btn, self._new_material_paint_layer),
             (self.layer_duplicate_btn, self._duplicate_selected_layer),
             (self.layer_copy_btn, self._copy_selected_layer),
             (self.layer_paste_btn, self._paste_layer_clipboard),
@@ -9657,9 +9707,21 @@ class PaintDialog(QDialog):
         payload_settings = self._pbr_texture_settings_payload(settings)
         cpu_allowed = texture_lab_cpu_fallback_allowed(False) if allow_cpu is None else bool(allow_cpu)
         generation_key = texture_map_settings_fingerprint(payload_settings)
+        from app.painter_material_paint import material_paint_signature
+
+        material_signature = material_paint_signature(
+            self.canvas.embedded_strokes(),
+            self._paint_layers,
+            width=int(source_report.get("width", max_size) or max_size),
+            height=int(source_report.get("height", max_size) or max_size),
+            time_ms=self._time_ms,
+            light_azimuth_deg=self._material_preview_light_azimuth_deg,
+            light_elevation_deg=self._material_preview_light_elevation_deg,
+        )
         cache_key = {
             "source": str(source_report.get("fingerprint") or ""),
             "settings": generation_key,
+            "material": material_signature,
             "max_size": int(max_size),
             "allow_cpu": bool(cpu_allowed),
         }
@@ -9676,6 +9738,24 @@ class PaintDialog(QDialog):
             source_path="painter://visible-document",
             allow_cpu=cpu_allowed,
         )
+        from app.painter_material_paint import (
+            has_material_strokes,
+            merge_material_channels_into_generated,
+            rasterize_material_channels,
+        )
+
+        if has_material_strokes(self.canvas.embedded_strokes(), self._paint_layers):
+            channels = rasterize_material_channels(
+                self.canvas.embedded_strokes(),
+                self._paint_layers,
+                width=int(source_report.get("width", max_size) or max_size),
+                height=int(source_report.get("height", max_size) or max_size),
+                time_ms=self._time_ms,
+                light_azimuth_deg=self._material_preview_light_azimuth_deg,
+                light_elevation_deg=self._material_preview_light_elevation_deg,
+            )
+            generated = merge_material_channels_into_generated(generated, channels)
+            source_report["material_paint"] = dict(generated.get("material_paint") or {})
         self._pbr_preview_maps_cache = {"key": cache_key, "generated": generated}
         source_report = dict(source_report)
         source_report["cache_hit"] = False
@@ -9783,23 +9863,81 @@ class PaintDialog(QDialog):
         packed: bool = True,
         allow_cpu: bool | None = None,
     ) -> dict:
-        source = self._write_pbr_source_image()
-        layouts = packed_layouts
-        if layouts is None:
-            layouts = ("unreal_orm", "arm", "gltf_mr") if packed else ()
-        from app.ar_pbr.texture_map_lab import export_texture_maps, texture_lab_cpu_fallback_allowed
-        cpu_allowed = texture_lab_cpu_fallback_allowed(False) if allow_cpu is None else bool(allow_cpu)
+        from app.ar_pbr.texture_map_lab import (
+            DEFAULT_PACKED_LAYOUTS,
+            DEFAULT_SEPARATE_MAPS,
+            OPTIONAL_SUBSTRATE_MAPS,
+            pack_texture_channels,
+            packed_layout_metadata,
+            texture_lab_cpu_fallback_allowed,
+            texture_map_to_image,
+        )
 
-        payload = export_texture_maps(
-            source["pbr_source_path"],
-            output_dir,
-            self._pbr_texture_settings_payload(settings),
-            maps=maps,
-            packed_layouts=layouts,
+        cpu_allowed = texture_lab_cpu_fallback_allowed(False) if allow_cpu is None else bool(allow_cpu)
+        generated, source = self._pbr_preview_generated_maps(
+            max_size=max(self._canvas_document_size),
+            settings=settings,
             allow_cpu=cpu_allowed,
         )
-        payload["painter_source"] = source
-        return payload
+        out_dir = Path(output_dir).expanduser()
+        out_dir.mkdir(parents=True, exist_ok=True)
+        source_name = "painter_visible_document_source"
+        default_maps = (
+            tuple(name for name in DEFAULT_SEPARATE_MAPS if name != "metallic")
+            + OPTIONAL_SUBSTRATE_MAPS
+            if bool(generated["settings"].get("substrate_enabled", False))
+            else DEFAULT_SEPARATE_MAPS
+        )
+        map_names = list(maps or default_maps)
+        layout_names = list(
+            packed_layouts
+            if packed_layouts is not None
+            else (DEFAULT_PACKED_LAYOUTS if packed else ())
+        )
+        files: dict[str, str] = {}
+        for name in map_names:
+            if name not in generated["maps"]:
+                raise ValueError(f"unknown texture map: {name}")
+            file_path = out_dir / f"{source_name}_{name}.png"
+            texture_map_to_image(name, generated["maps"][name]).save(file_path)
+            files[name] = str(file_path)
+        packed_files: dict[str, str] = {}
+        packed_meta: dict[str, object] = {}
+        from PIL import Image
+
+        for layout in layout_names:
+            packed_map = np.asarray(
+                pack_texture_channels(generated["maps"], layout),
+                dtype=np.float32,
+            )
+            packed_image = Image.fromarray(
+                np.uint8(np.clip(packed_map, 0.0, 1.0) * 255.0),
+                mode="RGB",
+            )
+            file_path = out_dir / f"{source_name}_{layout}.png"
+            packed_image.save(file_path)
+            packed_files[layout] = str(file_path)
+            packed_meta[layout] = packed_layout_metadata(layout)
+        manifest = {
+            "schema": "tigerstudio.painter.material_export.v1",
+            "output_dir": str(out_dir),
+            "size": list(generated.get("size") or []),
+            "settings": dict(generated.get("settings") or {}),
+            "files": files,
+            "packed_files": packed_files,
+            "packed_layouts": packed_meta,
+            "material_paint": dict(generated.get("material_paint") or {}),
+            "painter_source": source,
+        }
+        manifest_path = out_dir / f"{source_name}_pbr_manifest.json"
+        manifest_path.write_text(
+            json.dumps(manifest, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        return {
+            **manifest,
+            "manifest_path": str(manifest_path),
+        }
 
     def showEvent(self, event) -> None:
         super().showEvent(event)
@@ -10867,9 +11005,191 @@ class PaintDialog(QDialog):
         self._populate_brush_recent_list()
         self._update_brush_favorite_button()
         self._update_brush_library_preview(preset)
+        try:
+            from app.painter_material_paint import brush_material_capability
+
+            capability = brush_material_capability(style)
+            if capability.get("compatible"):
+                self._material_paint_settings.update(dict(capability.get("profile") or {}))
+                self._sync_material_controls()
+        except Exception:
+            pass
         self._set_tool("pen")
         if hasattr(self, "_tool_status_label"):
             self._tool_status_label.setText(f"Brush: {preset.get('name', 'Preset')}")
+
+    def _build_material_options_menu(self) -> QMenu:
+        menu = QMenu(self)
+        menu.setObjectName("PaintMaterialOptionsMenu")
+        panel = QFrame(menu)
+        panel.setObjectName("PaintMaterialOptionsPanel")
+        panel.setFixedWidth(286)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(9, 8, 9, 9)
+        layout.setSpacing(6)
+
+        heading = QLabel("MATERIAL PAINT")
+        heading.setObjectName("PaintBrushPanelTitle")
+        layout.addWidget(heading)
+        note = QLabel("Native stroke relief and surface response")
+        note.setObjectName("PaintBrushMeta")
+        layout.addWidget(note)
+
+        self._material_control_sliders = {}
+        self._material_control_labels = {}
+        for title, key in (
+            ("Load", "load"),
+            ("Thickness", "thickness"),
+            ("Wetness", "wetness"),
+            ("Gloss", "gloss"),
+            ("Roughness", "roughness"),
+        ):
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            label = QLabel(title)
+            label.setObjectName("PaintMeta")
+            label.setFixedWidth(66)
+            slider = StudioSlider("accent", panel)
+            slider.setRange(0, 100)
+            slider.setValue(
+                int(round(float(self._material_paint_settings.get(key, 0.0)) * 100.0))
+            )
+            value = QLabel(f"{slider.value()}%")
+            value.setObjectName("PaintValue")
+            value.setFixedWidth(44)
+            slider.valueChanged.connect(
+                lambda amount, setting=key: self._set_material_brush_setting(
+                    setting,
+                    float(amount) / 100.0,
+                )
+            )
+            row.addWidget(label)
+            row.addWidget(slider, stretch=1)
+            row.addWidget(value)
+            layout.addLayout(row)
+            self._material_control_sliders[key] = slider
+            self._material_control_labels[key] = value
+
+        widget_action = QWidgetAction(menu)
+        widget_action.setDefaultWidget(panel)
+        menu.addAction(widget_action)
+        return menu
+
+    def _set_material_brush_setting(self, key: str, value: float) -> None:
+        from app.painter_material_paint import MATERIAL_PAINT_DEFAULTS
+
+        if key not in MATERIAL_PAINT_DEFAULTS:
+            return
+        self._material_paint_settings[key] = max(0.0, min(1.0, float(value)))
+        label = getattr(self, "_material_control_labels", {}).get(key)
+        if label is not None:
+            label.setText(f"{int(round(self._material_paint_settings[key] * 100.0))}%")
+        layer = self._active_paint_layer()
+        if str(getattr(layer, "layer_type", "standard")) == "material":
+            layer.material_settings = dict(self._material_paint_settings)
+        self._material_preview_cache = None
+        if hasattr(self, "canvas"):
+            self.canvas.update()
+
+    def _sync_material_controls(self) -> None:
+        if not hasattr(self, "_paint_layers"):
+            return
+        layer = self._active_paint_layer()
+        active = str(getattr(layer, "layer_type", "standard")) == "material"
+        if active:
+            from app.painter_material_paint import normalize_material_settings
+
+            self._material_paint_settings = normalize_material_settings(
+                getattr(layer, "material_settings", {})
+            )
+        for key, slider in getattr(self, "_material_control_sliders", {}).items():
+            slider.blockSignals(True)
+            try:
+                slider.setValue(
+                    int(round(float(self._material_paint_settings.get(key, 0.0)) * 100.0))
+                )
+            finally:
+                slider.blockSignals(False)
+            label = getattr(self, "_material_control_labels", {}).get(key)
+            if label is not None:
+                label.setText(f"{slider.value()}%")
+        for name in ("_material_options_button", "_material_preview_button"):
+            widget = getattr(self, name, None)
+            if widget is not None:
+                widget.setVisible(active)
+                widget.setEnabled(active)
+        preview_button = getattr(self, "_material_preview_button", None)
+        if preview_button is not None:
+            preview_button.blockSignals(True)
+            preview_button.setChecked(bool(self._material_preview_enabled and active))
+            preview_button.blockSignals(False)
+
+    def _set_material_preview_enabled(self, enabled: bool) -> None:
+        active = str(getattr(self._active_paint_layer(), "layer_type", "standard")) == "material"
+        self._material_preview_enabled = bool(enabled and active)
+        self._material_preview_cache = None
+        if hasattr(self, "canvas"):
+            self.canvas.update()
+        if hasattr(self, "_tool_status_label"):
+            self._tool_status_label.setText(
+                "Material PBR preview on"
+                if self._material_preview_enabled
+                else "Material PBR preview off"
+            )
+
+    def _paint_material_preview_overlay(self, painter: QPainter, width: int, height: int) -> None:
+        if not bool(getattr(self, "_material_preview_enabled", False)):
+            return
+        if not hasattr(self, "canvas"):
+            return
+        from app.painter_material_paint import (
+            has_material_strokes,
+            material_paint_signature,
+            material_preview_rgba,
+            rasterize_material_channels,
+        )
+
+        strokes = self.canvas.embedded_strokes()
+        if not has_material_strokes(strokes, self._paint_layers):
+            return
+        signature = material_paint_signature(
+            strokes,
+            self._paint_layers,
+            width=width,
+            height=height,
+            time_ms=self._time_ms,
+            light_azimuth_deg=self._material_preview_light_azimuth_deg,
+            light_elevation_deg=self._material_preview_light_elevation_deg,
+        )
+        cached = getattr(self, "_material_preview_cache", None)
+        if not isinstance(cached, dict) or cached.get("signature") != signature:
+            channels = rasterize_material_channels(
+                strokes,
+                self._paint_layers,
+                width=width,
+                height=height,
+                time_ms=self._time_ms,
+                light_azimuth_deg=self._material_preview_light_azimuth_deg,
+                light_elevation_deg=self._material_preview_light_elevation_deg,
+            )
+            rgba = np.ascontiguousarray(material_preview_rgba(channels))
+            image = QImage(
+                rgba.data,
+                int(rgba.shape[1]),
+                int(rgba.shape[0]),
+                int(rgba.strides[0]),
+                QImage.Format.Format_RGBA8888,
+            ).copy()
+            cached = {
+                "signature": signature,
+                "image": image,
+                "channels": channels,
+                "renderer": "painter_material_heightfield_preview_v1",
+            }
+            self._material_preview_cache = cached
+        image = cached.get("image")
+        if isinstance(image, QImage) and not image.isNull():
+            painter.drawImage(0, 0, image)
 
     def _build_brush_button_menu(self) -> QMenu:
         menu = QMenu(self)
@@ -11971,6 +12291,20 @@ class PaintDialog(QDialog):
         stroke.start_ms = self._time_ms
         if self._standalone:
             stroke.layer_id = self._active_paint_layer_id
+        layer = self._active_paint_layer()
+        if str(getattr(layer, "layer_type", "standard")) == "material":
+            from app.painter_material_paint import normalize_material_settings
+
+            material = normalize_material_settings(self._material_paint_settings)
+            layer.material_settings = dict(material)
+            stroke.material_enabled = True
+            stroke.material_load = material["load"]
+            stroke.material_thickness = material["thickness"]
+            stroke.material_wetness = material["wetness"]
+            stroke.material_gloss = material["gloss"]
+            stroke.material_roughness = material["roughness"]
+            self._material_preview_cache = None
+            self._pbr_preview_maps_cache = None
         self.canvas.add_stroke_direct(stroke)
         for mirrored in self._mirrored_strokes_for(stroke):
             self.canvas.add_stroke_direct(mirrored)
@@ -12314,6 +12648,9 @@ class PaintDialog(QDialog):
         self._update_inspector_counts()
         self._update_channel_list()
         self._update_history_buttons()
+        self._material_preview_cache = None
+        self._pbr_preview_maps_cache = None
+        self._sync_material_controls()
 
     def _update_history_buttons(self) -> None:
         if hasattr(self, "undo_btn"):
@@ -12505,7 +12842,12 @@ class PaintDialog(QDialog):
                         states.append("Mask")
                     if getattr(layer, "blend_mode", "normal") != "normal":
                         states.append(str(layer.blend_mode).title())
-                    item = QListWidgetItem(layer.name)
+                    layer_type = str(getattr(layer, "layer_type", "standard") or "standard")
+                    if layer_type == "material":
+                        states.append("Material Paint")
+                    item = QListWidgetItem(
+                        f"{layer.name}  [M]" if layer_type == "material" else layer.name
+                    )
                     item.setIcon(
                         self._paint_panel_row_icon(
                             visible=bool(layer.visible),
@@ -12529,6 +12871,7 @@ class PaintDialog(QDialog):
                         f"Visible: {'yes' if layer.visible else 'no'}\n"
                         f"Opacity: {layer.opacity}%\n"
                         f"Blend: {getattr(layer, 'blend_mode', 'normal')}\n"
+                        f"Type: {layer_type}\n"
                         f"Color label: {color_meta['name']}"
                     )
                     layer_list.addItem(item)
@@ -13168,21 +13511,55 @@ class PaintDialog(QDialog):
         layer.blend_mode = mode
         self._update_layer_list()
 
-    def _new_paint_layer(self, name: str | None = None) -> None:
+    def _new_paint_layer(
+        self,
+        name: str | None = None,
+        *,
+        layer_type: str = "standard",
+    ) -> PaintLayer:
+        from app.painter_material_paint import (
+            normalize_layer_type,
+            normalize_material_settings,
+        )
+
         self._push_undo_state("New layer")
         self._paint_layer_serial += 1
         if isinstance(name, bool):
             name = None
         raw_name = str(name or "").strip()
+        normalized_type = normalize_layer_type(layer_type)
         layer = PaintLayer(
             layer_id=f"paint-layer-{self._paint_layer_serial}",
             name=raw_name[:80] if raw_name else f"Layer {self._paint_layer_serial}",
+            layer_type=normalized_type,
+            material_settings=(
+                normalize_material_settings(self._material_paint_settings)
+                if normalized_type == "material"
+                else {}
+            ),
         )
         self._paint_layers.append(layer)
         self._active_paint_layer_id = layer.layer_id
         self._selected_layer_id = layer.layer_id
         self._sync_canvas_layer_view()
         self._update_inspector_counts()
+        self._sync_material_controls()
+        return layer
+
+    def _new_material_paint_layer(self, name: str | None = None) -> PaintLayer:
+        if isinstance(name, bool):
+            name = None
+        layer = self._new_paint_layer(
+            str(name or "").strip() or "Material Paint",
+            layer_type="material",
+        )
+        self._material_preview_enabled = True
+        self._material_preview_cache = None
+        self._pbr_preview_maps_cache = None
+        self._sync_material_controls()
+        if hasattr(self, "canvas"):
+            self.canvas.update()
+        return layer
 
     def _toggle_selected_layer_visibility(self) -> None:
         layer = self._paint_layer_by_id(self._current_layer_id())
@@ -13218,9 +13595,101 @@ class PaintDialog(QDialog):
                     break
         self._sync_canvas_layer_view()
         self._update_layer_controls()
+        self._sync_material_controls()
+        self._material_preview_cache = None
         if hasattr(self, "_status_layer_label"):
             self._status_layer_label.setText(layer.name)
         return layer
+
+    def _set_paint_layer_type(self, layer_id: str | None, layer_type: str) -> bool:
+        from app.painter_material_paint import (
+            normalize_layer_type,
+            normalize_material_settings,
+        )
+
+        layer = self._select_paint_layer_by_id(layer_id)
+        if layer is None:
+            return False
+        normalized = normalize_layer_type(layer_type)
+        if str(getattr(layer, "layer_type", "standard")) == normalized:
+            return False
+        self._push_undo_state("Set layer type")
+        layer.layer_type = normalized
+        layer.material_settings = (
+            normalize_material_settings(
+                getattr(layer, "material_settings", {}) or self._material_paint_settings
+            )
+            if normalized == "material"
+            else {}
+        )
+        if normalized == "material":
+            self._material_preview_enabled = True
+        self._material_preview_cache = None
+        self._pbr_preview_maps_cache = None
+        self._sync_material_controls()
+        self._update_inspector_counts()
+        if hasattr(self, "canvas"):
+            self.canvas.update()
+        return True
+
+    def _set_material_settings(
+        self,
+        values: dict[str, object],
+        *,
+        layer_id: str | None = None,
+    ) -> bool:
+        from app.painter_material_paint import (
+            MATERIAL_PAINT_DEFAULTS,
+            normalize_material_settings,
+        )
+
+        layer = self._select_paint_layer_by_id(layer_id)
+        if layer is None or str(getattr(layer, "layer_type", "standard")) != "material":
+            return False
+        current = normalize_material_settings(getattr(layer, "material_settings", {}))
+        changed = False
+        for key in MATERIAL_PAINT_DEFAULTS:
+            if key in values and values[key] is not None:
+                current[key] = max(0.0, min(1.0, float(values[key])))
+                changed = True
+        if not changed:
+            return False
+        self._push_undo_state("Set material paint")
+        layer.material_settings = normalize_material_settings(current)
+        self._material_paint_settings = dict(layer.material_settings)
+        self._material_preview_cache = None
+        self._pbr_preview_maps_cache = None
+        self._sync_material_controls()
+        if hasattr(self, "canvas"):
+            self.canvas.update()
+        return True
+
+    def _set_material_preview(
+        self,
+        *,
+        enabled: bool | None = None,
+        azimuth_deg: float | None = None,
+        elevation_deg: float | None = None,
+    ) -> dict[str, object]:
+        if enabled is not None:
+            self._material_preview_enabled = bool(enabled)
+        if azimuth_deg is not None:
+            self._material_preview_light_azimuth_deg = max(
+                -180.0, min(180.0, float(azimuth_deg))
+            )
+        if elevation_deg is not None:
+            self._material_preview_light_elevation_deg = max(
+                5.0, min(85.0, float(elevation_deg))
+            )
+        self._material_preview_cache = None
+        self._sync_material_controls()
+        if hasattr(self, "canvas"):
+            self.canvas.update()
+        return {
+            "enabled": bool(self._material_preview_enabled),
+            "azimuth_deg": float(self._material_preview_light_azimuth_deg),
+            "elevation_deg": float(self._material_preview_light_elevation_deg),
+        }
 
     def _rename_selected_layer(self) -> None:
         layer = self._paint_layer_by_id(self._current_layer_id())
@@ -13947,6 +14416,7 @@ class PaintDialog(QDialog):
             self._select_layer_item(item)
         menu = QMenu(self)
         new_action = menu.addAction("New Layer")
+        new_material_action = menu.addAction("New Material Paint Layer")
         visibility_action = menu.addAction("Toggle Visibility")
         menu.addSeparator()
         copy_action = menu.addAction("Copy")
@@ -13977,6 +14447,8 @@ class PaintDialog(QDialog):
         chosen = menu.exec(self._layer_list.mapToGlobal(pos))
         if chosen is new_action:
             self._new_paint_layer()
+        elif chosen is new_material_action:
+            self._new_material_paint_layer()
         elif chosen is visibility_action:
             self._toggle_selected_layer_visibility()
         elif chosen is copy_action:
@@ -14426,11 +14898,31 @@ class PaintDialog(QDialog):
             source_tool=str(row.get("source_tool") or "pen"),
             start_ms=self._clipboard_int(row.get("start_ms"), 0),
             end_ms=None if end_ms is None else self._clipboard_int(end_ms, 0),
+            material_enabled=bool(row.get("material_enabled", False)),
+            material_load=max(0.0, min(1.0, self._clipboard_float(row.get("material_load"), 0.78))),
+            material_thickness=max(
+                0.0, min(1.0, self._clipboard_float(row.get("material_thickness"), 0.62))
+            ),
+            material_wetness=max(
+                0.0, min(1.0, self._clipboard_float(row.get("material_wetness"), 0.34))
+            ),
+            material_gloss=max(
+                0.0, min(1.0, self._clipboard_float(row.get("material_gloss"), 0.28))
+            ),
+            material_roughness=max(
+                0.0, min(1.0, self._clipboard_float(row.get("material_roughness"), 0.56))
+            ),
         )
 
     def _paint_layer_from_clipboard_dict(self, row: dict) -> PaintLayer:
+        from app.painter_material_paint import (
+            normalize_layer_type,
+            normalize_material_settings,
+        )
+
         if not isinstance(row, dict):
             row = {}
+        layer_type = normalize_layer_type(row.get("layer_type"))
         return PaintLayer(
             layer_id=str(row.get("layer_id") or "paint-layer-1"),
             name=str(row.get("name") or "Layer"),
@@ -14441,6 +14933,12 @@ class PaintDialog(QDialog):
             mask=self._normalise_path_points(row.get("mask") or []),
             mask_enabled=bool(row.get("mask_enabled", False)),
             color_label=_normalise_paint_layer_color_label(row.get("color_label")),
+            layer_type=layer_type,
+            material_settings=(
+                normalize_material_settings(row.get("material_settings"))
+                if layer_type == "material"
+                else {}
+            ),
         )
 
     def _bubble_from_clipboard_dict(self, row: dict) -> "SpeechBubble":
@@ -14517,6 +15015,10 @@ class PaintDialog(QDialog):
                 color_label=_normalise_paint_layer_color_label(
                     getattr(source_layer, "color_label", "none")
                 ),
+                layer_type=str(getattr(source_layer, "layer_type", "standard") or "standard"),
+                material_settings=copy.deepcopy(
+                    getattr(source_layer, "material_settings", {}) or {}
+                ),
             )
             self._paint_layers.append(layer)
             pasted = copy.deepcopy(payload.get("strokes") or [])
@@ -14530,6 +15032,9 @@ class PaintDialog(QDialog):
                 self.canvas.add_stroke_direct(stroke)
             self._active_paint_layer_id = layer.layer_id
             self._selected_layer_id = layer.layer_id
+            self._material_preview_cache = None
+            self._pbr_preview_maps_cache = None
+            self._sync_material_controls()
         elif kind == "strokes":
             pasted = copy.deepcopy(payload.get("strokes") or [])
             for stroke in pasted:
@@ -15131,6 +15636,12 @@ class PaintDialog(QDialog):
                     "opacity": int(layer.opacity),
                     "locked": bool(layer.locked),
                     "blend_mode": str(getattr(layer, "blend_mode", "normal") or "normal"),
+                    "layer_type": str(
+                        getattr(layer, "layer_type", "standard") or "standard"
+                    ),
+                    "material_settings": dict(
+                        getattr(layer, "material_settings", {}) or {}
+                    ),
                     "color_label": _normalise_paint_layer_color_label(
                         getattr(layer, "color_label", "none")
                     ),
@@ -15184,6 +15695,37 @@ class PaintDialog(QDialog):
                     "texture_dynamics": "qpainter_current_gpu_shader_target",
                     "gpu_texture_parity": gpu_capabilities.get("texture_brush_gpu_parity", {}),
                 },
+                "material": {
+                    "settings": dict(getattr(self, "_material_paint_settings", {})),
+                    "active_layer_is_material": str(
+                        getattr(self._active_paint_layer(), "layer_type", "standard")
+                    )
+                    == "material",
+                },
+            },
+            "material_preview": {
+                "enabled": bool(getattr(self, "_material_preview_enabled", False)),
+                "azimuth_deg": float(
+                    getattr(self, "_material_preview_light_azimuth_deg", -38.0)
+                ),
+                "elevation_deg": float(
+                    getattr(self, "_material_preview_light_elevation_deg", 48.0)
+                ),
+                "renderer": "painter_material_heightfield_preview_v1",
+                "native_channels": [
+                    "height",
+                    "normal",
+                    "roughness",
+                    "ao",
+                    "direction",
+                ],
+                "stroke_count": sum(
+                    1
+                    for stroke in (
+                        self.canvas.embedded_strokes() if hasattr(self, "canvas") else []
+                    )
+                    if bool(getattr(stroke, "material_enabled", False))
+                ),
             },
             "selection_aspect": str(getattr(self, "_selection_aspect_mode", "free")),
             "mirror": {
