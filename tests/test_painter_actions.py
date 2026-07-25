@@ -685,6 +685,7 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
         "paint.3d_blockout.material_preview",
         {
             "material_lit": False,
+            "show_floor": False,
             "show_shadows": False,
             "show_fog": True,
             "show_depth": True,
@@ -694,6 +695,7 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     ).to_dict()
     assert material["ok"]
     assert material["result"]["scene"]["material_lit"] is False
+    assert material["result"]["scene"]["show_floor"] is False
     assert material["result"]["scene"]["show_shadows"] is False
     assert material["result"]["scene"]["show_fog"] is True
     assert material["result"]["scene"]["show_depth"] is True

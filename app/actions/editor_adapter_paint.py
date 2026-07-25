@@ -1084,6 +1084,7 @@ class PaintAdapterMixin:
         self,
         *,
         material_lit: bool | None = None,
+        show_floor: bool | None = None,
         show_shadows: bool | None = None,
         show_fog: bool | None = None,
         show_depth: bool | None = None,
@@ -1099,6 +1100,8 @@ class PaintAdapterMixin:
         changes: dict[str, Any] = {}
         if material_lit is not None:
             changes["material_lit"] = bool(material_lit)
+        if show_floor is not None:
+            changes["show_floor"] = bool(show_floor)
         if show_shadows is not None:
             changes["show_shadows"] = bool(show_shadows)
         if show_fog is not None:

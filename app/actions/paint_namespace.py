@@ -1185,6 +1185,7 @@ def register_paint_actions(registry: Any) -> None:
         params_schema=schema_object(
             {
                 "material_lit": {"type": "boolean"},
+                "show_floor": {"type": "boolean"},
                 "show_shadows": {"type": "boolean"},
                 "show_fog": {"type": "boolean"},
                 "show_depth": {"type": "boolean"},

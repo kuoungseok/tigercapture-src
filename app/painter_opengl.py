@@ -325,7 +325,9 @@ def render_blockout_scene_opengl_qimage(scene: Any, width: int = 640, height: in
         GL.glClear(GL.GL_COLOR_BUFFER_BIT)
 
         scene_payload = projection.get("scene") if isinstance(projection.get("scene"), dict) else {}
-        if bool(scene_payload.get("show_grid", True)):
+        for tile in projection.get("floor_tiles", []) or []:
+            _draw_floor_tile(GL, tile, target_w, target_h)
+        if bool(scene_payload.get("show_grid", True)) and not bool(scene_payload.get("show_floor", False)):
             _draw_grid(GL, target_w, target_h)
         for shadow in projection.get("shadows", []) or []:
             _draw_shadow(GL, shadow, target_w, target_h)
@@ -553,6 +555,17 @@ def _draw_face(GL: Any, face: dict[str, Any], width: int, height: int) -> None:
     GL.glBegin(GL.GL_POLYGON)
     try:
         for x, y in face.get("points", []) or []:
+            _gl_vertex(GL, float(x), float(y), width, height)
+    finally:
+        GL.glEnd()
+
+
+def _draw_floor_tile(GL: Any, tile: dict[str, Any], width: int, height: int) -> None:
+    rgba = _hex_to_rgba(str(tile.get("color") or "#707276"), 1.0)
+    GL.glColor4f(*rgba)
+    GL.glBegin(GL.GL_POLYGON)
+    try:
+        for x, y in tile.get("points", []) or []:
             _gl_vertex(GL, float(x), float(y), width, height)
     finally:
         GL.glEnd()

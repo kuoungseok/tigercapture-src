@@ -8284,6 +8284,10 @@ class PaintDialog(QDialog):
         self.blockout_grid_btn = QPushButton("Grid")
         self.blockout_grid_btn.setCheckable(True)
         self.blockout_grid_btn.setChecked(True)
+        self.blockout_floor_btn = QPushButton("Floor")
+        self.blockout_floor_btn.setCheckable(True)
+        self.blockout_floor_btn.setChecked(True)
+        self.blockout_floor_btn.setToolTip("Toggle the world-aligned checker ground")
         for btn, handler in (
             (self.blockout_duplicate_btn, self._duplicate_selected_3d_blockout_primitive),
             (self.blockout_ground_btn, self._align_selected_3d_blockout_to_ground),
@@ -8294,7 +8298,13 @@ class PaintDialog(QDialog):
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             btn.clicked.connect(handler)
             action_row.addWidget(btn)
-        for btn in (self.blockout_overlay_btn, self.blockout_snap_btn, self.blockout_wire_btn, self.blockout_grid_btn):
+        for btn in (
+            self.blockout_overlay_btn,
+            self.blockout_snap_btn,
+            self.blockout_wire_btn,
+            self.blockout_grid_btn,
+            self.blockout_floor_btn,
+        ):
             btn.setObjectName("PaintCustomColor")
             btn.setCursor(Qt.CursorShape.PointingHandCursor)
             action_row.addWidget(btn)
@@ -8302,6 +8312,7 @@ class PaintDialog(QDialog):
         self.blockout_snap_btn.toggled.connect(lambda checked=False: self._set_3d_blockout_snap(bool(checked)))
         self.blockout_wire_btn.toggled.connect(lambda checked=False: self._set_3d_blockout_scene_flag("show_wireframe", bool(checked)))
         self.blockout_grid_btn.toggled.connect(lambda checked=False: self._set_3d_blockout_scene_flag("show_grid", bool(checked)))
+        self.blockout_floor_btn.toggled.connect(lambda checked=False: self._set_3d_blockout_scene_flag("show_floor", bool(checked)))
         layout.addLayout(action_row)
 
         material_row = QHBoxLayout()
@@ -8705,6 +8716,7 @@ class PaintDialog(QDialog):
             grid_size=scene.grid_size,
             show_grid=bool(enabled) if key == "show_grid" else scene.show_grid,
             show_wireframe=bool(enabled) if key == "show_wireframe" else scene.show_wireframe,
+            show_floor=bool(enabled) if key == "show_floor" else scene.show_floor,
             material_lit=bool(enabled) if key == "material_lit" else scene.material_lit,
             show_shadows=bool(enabled) if key == "show_shadows" else scene.show_shadows,
             show_fog=bool(enabled) if key == "show_fog" else scene.show_fog,
@@ -8874,6 +8886,8 @@ class PaintDialog(QDialog):
             self.blockout_wire_btn.setChecked(bool(scene_payload.get("show_wireframe", True)))
         if hasattr(self, "blockout_grid_btn"):
             self.blockout_grid_btn.setChecked(bool(scene_payload.get("show_grid", True)))
+        if hasattr(self, "blockout_floor_btn"):
+            self.blockout_floor_btn.setChecked(bool(scene_payload.get("show_floor", True)))
         if hasattr(self, "blockout_snap_btn"):
             self.blockout_snap_btn.setChecked(bool(scene_payload.get("snap_to_grid", False)))
         if hasattr(self, "blockout_lit_btn"):

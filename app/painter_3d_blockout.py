@@ -13,7 +13,7 @@ Design guardrails:
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
-from math import cos, pi, radians, sin, tan
+from math import cos, floor, pi, radians, sin, tan
 from typing import Any, Iterable, Sequence
 
 
@@ -101,6 +101,7 @@ class BlockoutScene:
     grid_size: float = 1.0
     show_grid: bool = True
     show_wireframe: bool = True
+    show_floor: bool = True
     material_lit: bool = True
     show_shadows: bool = True
     show_fog: bool = False
@@ -120,6 +121,7 @@ class BlockoutScene:
             grid_size=max(0.05, float(self.grid_size or 1.0)),
             show_grid=bool(self.show_grid),
             show_wireframe=bool(self.show_wireframe),
+            show_floor=bool(self.show_floor),
             material_lit=bool(self.material_lit),
             show_shadows=bool(self.show_shadows),
             show_fog=bool(self.show_fog),
@@ -139,6 +141,7 @@ class BlockoutScene:
             "grid_size": round(scene.grid_size, 4),
             "show_grid": scene.show_grid,
             "show_wireframe": scene.show_wireframe,
+            "show_floor": scene.show_floor,
             "material_lit": scene.material_lit,
             "show_shadows": scene.show_shadows,
             "show_fog": scene.show_fog,
@@ -195,6 +198,7 @@ def blockout_scene_from_dict(payload: Any) -> BlockoutScene:
         grid_size=float(payload.get("grid_size", 1.0) or 1.0),
         show_grid=bool(payload.get("show_grid", True)),
         show_wireframe=bool(payload.get("show_wireframe", True)),
+        show_floor=bool(payload.get("show_floor", True)),
         material_lit=bool(payload.get("material_lit", True)),
         show_shadows=bool(payload.get("show_shadows", True)),
         show_fog=bool(payload.get("show_fog", False)),
@@ -458,6 +462,7 @@ def project_blockout_scene(scene: BlockoutScene | dict[str, Any], width: int = 6
     faces: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
     shadows: list[dict[str, Any]] = []
+    floor_tiles = _project_world_checker_floor(normalized, w, h) if normalized.show_floor else []
     light_direction = _direction_from_angles(
         normalized.light_yaw_degrees,
         normalized.light_pitch_degrees,
@@ -550,6 +555,7 @@ def project_blockout_scene(scene: BlockoutScene | dict[str, Any], width: int = 6
         "schema": "tigerstudio.painter.3d_blockout.projection.v1",
         "viewport": {"width": w, "height": h},
         "scene": normalized.to_dict(),
+        "floor_tiles": floor_tiles,
         "shadows": shadows,
         "faces": faces,
         "edges": edges,
@@ -572,7 +578,14 @@ def render_blockout_scene_qimage(scene: BlockoutScene | dict[str, Any], width: i
     painter = QPainter(image)
     try:
         painter.setRenderHint(QPainter.Antialiasing, True)
-        if projection["scene"].get("show_grid"):
+        for tile in projection.get("floor_tiles", []):
+            polygon = QPolygonF(
+                [QPointF(float(x), float(y)) for x, y in tile.get("points", [])]
+            )
+            painter.setPen(Qt.NoPen)
+            painter.setBrush(QColor(str(tile.get("color") or "#707276")))
+            painter.drawPolygon(polygon)
+        if projection["scene"].get("show_grid") and not projection["scene"].get("show_floor"):
             painter.setPen(QPen(QColor(210, 220, 255, 36), 1, Qt.DashLine))
             step = max(24, int(min(w, h) / 10))
             for x in range(w // 2 % step, w, step):
@@ -626,6 +639,55 @@ def render_blockout_scene_qimage(scene: BlockoutScene | dict[str, Any], width: i
     finally:
         painter.end()
     return image
+
+
+def _project_world_checker_floor(
+    scene: BlockoutScene,
+    width: int,
+    height: int,
+    *,
+    tile_size: float = 1.0,
+    radius: int = 14,
+) -> list[dict[str, Any]]:
+    """Project a world-aligned checker whose tile size ignores actor scale."""
+
+    size = max(0.05, float(tile_size))
+    center_x = floor(scene.camera.target[0] / size) * size
+    center_y = floor(scene.camera.target[1] / size) * size
+    tiles: list[dict[str, Any]] = []
+    for tile_y in range(-radius, radius):
+        for tile_x in range(-radius, radius):
+            x0 = center_x + tile_x * size
+            y0 = center_y + tile_y * size
+            corners = (
+                (x0, y0, 0.0),
+                (x0 + size, y0, 0.0),
+                (x0 + size, y0 + size, 0.0),
+                (x0, y0 + size, 0.0),
+            )
+            camera_points = [_world_to_camera_point(point, scene.camera) for point in corners]
+            clipped = _clip_camera_polygon_near(camera_points, near=0.06)
+            if len(clipped) < 3:
+                continue
+            projected = [_project_camera_point(point, scene.camera, width, height) for point in clipped]
+            points = [
+                (round(float(point["x"]), 3), round(float(point["y"]), 3))
+                for point in projected
+            ]
+            if not points:
+                continue
+            depth = sum(float(point["depth"]) for point in projected) / len(projected)
+            tiles.append(
+                {
+                    "points": points,
+                    "depth": round(depth, 5),
+                    "color": "#74767A" if (tile_x + tile_y) % 2 == 0 else "#606266",
+                    "world_tile_size": size,
+                    "world_origin": [round(x0, 4), round(y0, 4), 0.0],
+                }
+            )
+    tiles.sort(key=lambda row: float(row["depth"]), reverse=True)
+    return tiles
 
 
 def _primitive_from_params(primitive_id: str, params: dict[str, Any]) -> BlockoutPrimitive:
@@ -762,21 +824,61 @@ def _rotate_xyz(point: Vec3, rotation: Vec3) -> Vec3:
 
 
 def _project_point(point: Vec3, camera: BlockoutCamera, width: int, height: int) -> dict[str, float] | None:
+    camera_point = _world_to_camera_point(point, camera)
+    if camera_point[1] <= 0.04:
+        return None
+    return _project_camera_point(camera_point, camera, width, height)
+
+
+def _world_to_camera_point(point: Vec3, camera: BlockoutCamera) -> Vec3:
     x, y, z = point[0] - camera.target[0], point[1] - camera.target[1], point[2] - camera.target[2]
     yaw = radians(-camera.yaw_degrees)
     x, y = x * cos(yaw) + y * sin(yaw), -x * sin(yaw) + y * cos(yaw)
-    pitch = radians(-camera.pitch_degrees)
+    pitch = radians(camera.pitch_degrees)
     z, y = z * cos(pitch) - y * sin(pitch), z * sin(pitch) + y * cos(pitch)
     y += max(0.25, float(camera.distance))
-    if y <= 0.04:
-        return None
+    return (x, y, z)
+
+
+def _project_camera_point(
+    point: Vec3,
+    camera: BlockoutCamera,
+    width: int,
+    height: int,
+) -> dict[str, float]:
+    x, y, z = point
     focal = 0.5 * min(width, height) / tan(radians(_clamp(camera.fov_degrees, 15.0, 90.0)) * 0.5)
     return {"x": width * 0.5 + x * focal / y, "y": height * 0.5 - z * focal / y, "depth": y}
 
 
+def _clip_camera_polygon_near(points: Sequence[Vec3], *, near: float) -> list[Vec3]:
+    if not points:
+        return []
+    clipped: list[Vec3] = []
+    previous = points[-1]
+    previous_inside = previous[1] >= near
+    for current in points:
+        current_inside = current[1] >= near
+        if current_inside != previous_inside:
+            denominator = current[1] - previous[1]
+            amount = 0.0 if abs(denominator) < 0.000001 else (near - previous[1]) / denominator
+            clipped.append(
+                (
+                    previous[0] + (current[0] - previous[0]) * amount,
+                    near,
+                    previous[2] + (current[2] - previous[2]) * amount,
+                )
+            )
+        if current_inside:
+            clipped.append(current)
+        previous = current
+        previous_inside = current_inside
+    return clipped
+
+
 def _camera_to_world_vector(point: Vec3, camera: BlockoutCamera) -> Vec3:
     x_camera, y_camera, z_camera = point
-    pitch = radians(-camera.pitch_degrees)
+    pitch = radians(camera.pitch_degrees)
     z = z_camera * cos(pitch) + y_camera * sin(pitch)
     y_rotated = -z_camera * sin(pitch) + y_camera * cos(pitch)
     yaw = radians(-camera.yaw_degrees)

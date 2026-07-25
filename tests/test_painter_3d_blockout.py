@@ -26,9 +26,12 @@ def test_painter_3d_blockout_projects_and_renders_gpu_ready_preview(tmp_path: Pa
     assert projection["edge_count"] > 0
     assert projection["scene"]["material_lit"] is True
     assert projection["scene"]["show_shadows"] is True
+    assert projection["scene"]["show_floor"] is True
     assert projection["scene"]["light_yaw_degrees"] == 45.0
     assert projection["scene"]["light_pitch_degrees"] == 45.0
     assert projection["shadows"]
+    assert projection["floor_tiles"]
+    assert {tile["world_tile_size"] for tile in projection["floor_tiles"]} == {1.0}
     assert "box" in projection["scene"]["supported_primitives"]
     assert "arch" in projection["scene"]["supported_primitives"]
 

@@ -480,6 +480,9 @@ Draw-over modes:
 - Opaque white Lit material by default.
 - Configurable directional light, defaulting to 45 degrees horizontally and
   vertically.
+- World-aligned checker floor on Z=0, enabled by default with an independent
+  Floor toggle. Its tile size is fixed in world units and never inherits actor
+  or Plane scale.
 - Independent Lit and Shadow toggles; shadows default on.
 - Wireframe.
 - Transparent overlay.

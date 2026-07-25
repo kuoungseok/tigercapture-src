@@ -6416,8 +6416,11 @@ AI Script Edit MVP integration:
   zoom. Grid snap, wireframe, and camera presets remain available.
   Default shapes use an opaque white Lit material under a configurable
   directional light (45-degree horizontal and vertical defaults) with shadows
-  enabled. Lit, Shadow, Fog, and diagnostic grayscale Depth are independent
-  toggles. 3D scene data stays separate from raster strokes but is represented
+  enabled. A world-aligned Z=0 checker floor is enabled by default and has its
+  own visibility toggle; checker tile size is fixed in world units and must
+  not stretch when a Plane or other actor is scaled. Lit, Shadow, Fog, and
+  diagnostic grayscale Depth are independent toggles. 3D scene data stays
+  separate from raster strokes but is represented
   by a bottom `3D Blockout` reference layer whose visibility and opacity are
   controlled through the normal Layers dock. Paint strokes render above this
   guide. Leaving 3D Place freezes the current result into a reusable 2D display
