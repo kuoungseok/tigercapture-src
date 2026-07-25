@@ -231,6 +231,16 @@ def _blur(values: np.ndarray, radius: float) -> np.ndarray:
         return values
 
 
+def _shift_clamped(values: np.ndarray, dx: int, dy: int) -> np.ndarray:
+    height, width = values.shape[:2]
+    pad_x = abs(int(dx))
+    pad_y = abs(int(dy))
+    padded = np.pad(values, ((pad_y, pad_y), (pad_x, pad_x)), mode="edge")
+    start_x = pad_x - int(dx)
+    start_y = pad_y - int(dy)
+    return padded[start_y : start_y + height, start_x : start_x + width]
+
+
 def rasterize_material_channels(
     strokes: Sequence[Any],
     layers: Sequence[Any],
@@ -375,7 +385,26 @@ def rasterize_material_channels(
     signed_normal = normal * 2.0 - 1.0
     diffuse = np.clip(np.sum(signed_normal * light[None, None, :], axis=2), 0.0, 1.0)
     ridge = np.clip((diffuse - 0.58) / np.maximum(0.08, roughness * 0.38), 0.0, 1.0)
-    shading = np.clip(0.70 + diffuse * 0.42 + ridge * (1.0 - roughness) * 0.34, 0.55, 1.34)
+    soft_shadow = np.zeros_like(relief)
+    for distance in (2, 4, 7, 11):
+        dx = int(round(-float(light[0]) * distance))
+        dy = int(round(-float(light[1]) * distance))
+        blocker = _shift_clamped(relief, dx, dy)
+        clearance = float(distance) * 0.006 / max(0.18, float(light[2]))
+        soft_shadow = np.maximum(soft_shadow, blocker - relief - clearance)
+    soft_shadow = np.clip(
+        _blur(soft_shadow, max(0.8, min(width, height) / 360.0)) * 4.6,
+        0.0,
+        1.0,
+    )
+    shading = np.clip(
+        0.66
+        + diffuse * 0.48
+        + ridge * (1.0 - roughness) * 0.42
+        - soft_shadow * 0.36,
+        0.42,
+        1.42,
+    )
 
     return {
         "schema": MATERIAL_PAINT_SCHEMA,
@@ -389,6 +418,7 @@ def rasterize_material_channels(
         "ao": ao,
         "direction": np.stack((direction_x, direction_y), axis=2),
         "shading": shading.astype(np.float32),
+        "soft_shadow": soft_shadow.astype(np.float32),
         "light": {
             "azimuth_deg": float(light_azimuth_deg),
             "elevation_deg": float(light_elevation_deg),
@@ -407,7 +437,7 @@ def material_preview_rgba(channels: Mapping[str, Any]) -> np.ndarray:
     rgba = np.zeros((shading.shape[0], shading.shape[1], 4), dtype=np.uint8)
     white = light >= shadow
     rgba[..., :3] = np.where(white[..., None], 255, 0).astype(np.uint8)
-    alpha = np.maximum(light * 0.72, shadow * 0.88) * coverage
+    alpha = np.maximum(light * 0.82, shadow * 0.96) * coverage
     rgba[..., 3] = np.uint8(np.clip(alpha * 255.0, 0.0, 255.0))
     return rgba
 

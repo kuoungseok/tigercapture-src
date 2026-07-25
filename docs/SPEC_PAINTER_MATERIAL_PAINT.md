@@ -51,7 +51,9 @@ stroke-channel rasterization.
 4. Tangent-space normals are derived from authored height, not RGB luminance.
 5. AO is derived from local heightfield concavity.
 6. Roughness uses the stroke values and wetness/gloss response.
-7. Painter's PBR generation path merges these native channels over the
+7. A directional heightfield shadow pass makes raised paint cast a soft local
+   shadow in the interactive material preview.
+8. Painter's PBR generation path merges these native channels over the
    image-derived fallback maps.
 
 The interactive canvas uses a cached material-lighting overlay for immediate
@@ -67,6 +69,10 @@ native Height/Normal/AO/Roughness channels.
 - Material layers display an `M`/material status in their row and tooltip.
 - Brush options: `Material` controls and a `PBR` preview toggle appear only
   for Material Paint layers.
+- The left toolbar uses a magnifier tool. A short click activates the current
+  zoom mode; press-and-hold opens Zoom In, Zoom Out, Zoom Area, and Fit Canvas.
+- Zoom Area magnifies and centers the dragged canvas rectangle without
+  creating or changing a selection.
 - Choosing a material-compatible brush on a normal layer does not silently
   change the document. The brush remains a color brush until the user creates
   or converts a Material Paint layer.
@@ -79,6 +85,7 @@ native Height/Normal/AO/Roughness channels.
   Roughness.
 - `paint.material.preview.set` enables/disables the canvas material preview and
   controls light azimuth/elevation.
+- `paint.view.zoom_area` magnifies and centers a normalized canvas rectangle.
 - `paint.state` reports layer type, layer material settings, active brush
   material capability, active material controls, and preview state.
 

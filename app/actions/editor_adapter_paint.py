@@ -73,6 +73,24 @@ class PaintAdapterMixin:
         dialog._set_zoom_percent(int(percent or 100))
         return dialog.painter_action_state()
 
+    def paint_view_zoom_area(
+        self,
+        *,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._handle_canvas_zoom_request(
+            "zoom_area",
+            float(x),
+            float(y),
+            float(width),
+            float(height),
+        )
+        return dialog.painter_action_state()
+
     def paint_view_pan(
         self,
         *,

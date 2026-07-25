@@ -34,6 +34,7 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
         "paint.document.new",
         "paint.document.export_png",
         "paint.view.zoom",
+        "paint.view.zoom_area",
         "paint.view.pan",
         "paint.view.grid",
         "paint.guide.perspective",
@@ -170,6 +171,13 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     high_zoom = registry.execute("paint.view.zoom", {"percent": 800}).to_dict()
     assert high_zoom["ok"]
     assert high_zoom["result"]["gpu"]["high_zoom"]["current_zoom_percent"] == 800
+    registry.execute("paint.view.zoom", {"percent": 100})
+    zoom_area = registry.execute(
+        "paint.view.zoom_area",
+        {"x": 0.25, "y": 0.25, "width": 0.5, "height": 0.5},
+    ).to_dict()
+    assert zoom_area["ok"]
+    assert zoom_area["result"]["view"]["zoom_percent"] == 200
 
     added = registry.execute("paint.layer.add", {"name": "AI Ink"}).to_dict()
     assert added["ok"]

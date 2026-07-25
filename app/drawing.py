@@ -1522,6 +1522,7 @@ class DrawingCanvas(QWidget):
     stroke_erased_at = Signal(int)  # index in the strokes list
     repaint_requested = Signal()
     selection_probe_requested = Signal(str, float, float)
+    zoom_requested = Signal(str, float, float, float, float)
 
     ERASE_RADIUS_PX = 18
 
@@ -1631,13 +1632,27 @@ class DrawingCanvas(QWidget):
             "ellipse_select",
             "crop",
             "magic_select",
+            "zoom_in",
+            "zoom_out",
+            "zoom_area",
         ):
             tool = "off"
         self._tool = tool
         self._refresh_mouse_transparency()
         cursor = (
             Qt.CursorShape.CrossCursor
-            if tool in ("pen", "eraser", "path", "rect_select", "ellipse_select", "crop", "magic_select")
+            if tool in (
+                "pen",
+                "eraser",
+                "path",
+                "rect_select",
+                "ellipse_select",
+                "crop",
+                "magic_select",
+                "zoom_in",
+                "zoom_out",
+                "zoom_area",
+            )
             else Qt.CursorShape.ArrowCursor
         )
         self.setCursor(cursor)
@@ -3383,6 +3398,8 @@ class DrawingCanvas(QWidget):
         fill = QColor(87, 139, 255, 34)
         if self._selection_drag_tool == "crop":
             fill = QColor(248, 181, 70, 34)
+        elif self._selection_drag_tool == "zoom_area":
+            fill = QColor(104, 190, 255, 28)
         painter.setBrush(fill)
         pen = QPen(QColor("#E8EEF8"), 1.35)
         pen.setCosmetic(True)
@@ -3504,6 +3521,15 @@ class DrawingCanvas(QWidget):
         if event.button() != Qt.MouseButton.LeftButton:
             return
         pos = event.position()
+        if self._tool in {"zoom_in", "zoom_out"}:
+            self.zoom_requested.emit(
+                self._tool,
+                max(0.0, min(1.0, pos.x() / max(1, self.width()))),
+                max(0.0, min(1.0, pos.y() / max(1, self.height()))),
+                0.0,
+                0.0,
+            )
+            return
         if self._tool == "magic_select":
             w = max(1, self.width())
             h = max(1, self.height())
@@ -3548,7 +3574,7 @@ class DrawingCanvas(QWidget):
                 self._set_color_window_cursor(handle)
                 self.update()
             return
-        if self._tool in {"rect_select", "ellipse_select", "crop"}:
+        if self._tool in {"rect_select", "ellipse_select", "crop", "zoom_area"}:
             self._selection_drag_tool = self._tool
             snapped = self._snap_canvas_point(pos)
             self._selection_drag_start = QPointF(snapped)
@@ -3657,7 +3683,12 @@ class DrawingCanvas(QWidget):
             if consumed or self._interaction_active:
                 self.update()
                 return
-        if self._selection_drag_start is not None and self._tool in {"rect_select", "ellipse_select", "crop"}:
+        if self._selection_drag_start is not None and self._tool in {
+            "rect_select",
+            "ellipse_select",
+            "crop",
+            "zoom_area",
+        }:
             self._selection_drag_current = self._snap_canvas_point(event.position())
             self.update()
             return
@@ -3711,7 +3742,12 @@ class DrawingCanvas(QWidget):
             self._interaction_active = False
             self.update()
             return
-        if self._selection_drag_start is not None and self._tool in {"rect_select", "ellipse_select", "crop"}:
+        if self._selection_drag_start is not None and self._tool in {
+            "rect_select",
+            "ellipse_select",
+            "crop",
+            "zoom_area",
+        }:
             self._selection_drag_current = self._snap_canvas_point(event.position())
             rect = self._selection_drag_rect()
             tool = self._selection_drag_tool or self._tool
@@ -3719,9 +3755,18 @@ class DrawingCanvas(QWidget):
             self._selection_drag_current = None
             self._selection_drag_tool = ""
             if rect.width() > 1.0 and rect.height() > 1.0:
-                shape = "ellipse" if tool == "ellipse_select" else "rect"
-                points = self._points_from_drag_rect(rect, shape=shape)
-                self.set_selection_snapshot(self._combine_selection(points))
+                if tool == "zoom_area":
+                    self.zoom_requested.emit(
+                        "zoom_area",
+                        rect.left() / max(1, self.width()),
+                        rect.top() / max(1, self.height()),
+                        rect.width() / max(1, self.width()),
+                        rect.height() / max(1, self.height()),
+                    )
+                else:
+                    shape = "ellipse" if tool == "ellipse_select" else "rect"
+                    points = self._points_from_drag_rect(rect, shape=shape)
+                    self.set_selection_snapshot(self._combine_selection(points))
             self.repaint_requested.emit()
             self.update()
             return
@@ -6542,6 +6587,7 @@ class PaintDialog(QDialog):
         self.canvas.set_brush_detail(**self._canvas_brush_detail_payload())
         self.canvas.stroke_added.connect(self._on_stroke_added)
         self.canvas.set_extra_paint_hook(self._paint_material_preview_overlay)
+        self.canvas.zoom_requested.connect(self._handle_canvas_zoom_request)
         self.canvas.stroke_erased_at.connect(
             lambda idx: self.canvas.remove_stroke_direct(idx)
         )
@@ -6826,9 +6872,17 @@ class PaintDialog(QDialog):
         self.fill_tool_btn.clicked.connect(lambda: self._set_tool("fill"))
 
         self.zoom_fit_rail_btn = QPushButton("Zoom")
+        self.zoom_fit_rail_btn.setCheckable(True)
         self.zoom_fit_rail_btn.setObjectName("PaintTool")
         self.zoom_fit_rail_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.zoom_fit_rail_btn.clicked.connect(self._zoom_fit)
+        self._zoom_tool_mode = "zoom_in"
+        self._zoom_tool_menu_opened = False
+        self._zoom_tool_hold_timer = QTimer(self)
+        self._zoom_tool_hold_timer.setSingleShot(True)
+        self._zoom_tool_hold_timer.setInterval(420)
+        self._zoom_tool_hold_timer.timeout.connect(self._show_zoom_tool_menu)
+        self.zoom_fit_rail_btn.pressed.connect(self._on_zoom_tool_pressed)
+        self.zoom_fit_rail_btn.released.connect(self._on_zoom_tool_released)
 
         self.quick_mask_rail_btn = QPushButton("Quick Mask")
         self.quick_mask_rail_btn.setCheckable(True)
@@ -6893,8 +6947,8 @@ class PaintDialog(QDialog):
         )
         self._configure_paint_tool_icon_button(
             self.zoom_fit_rail_btn,
-            "zoom-fit",
-            "Fit Canvas to Window (Ctrl+0)",
+            "zoom",
+            "Zoom Tool: click to activate, hold for Zoom In / Zoom Out / Zoom Area (Z)",
         )
         self._configure_paint_tool_icon_button(
             self.quick_mask_rail_btn,
@@ -6913,6 +6967,7 @@ class PaintDialog(QDialog):
             ("E", lambda: self._set_tool("eraser")),
             ("G", lambda: self._set_tool("fill")),
             ("P", lambda: self._set_tool("path")),
+            ("Z", lambda: self._set_zoom_tool_mode("zoom_in")),
         ):
             self._register_painter_tool_shortcut(key, handler)
 
@@ -6927,7 +6982,7 @@ class PaintDialog(QDialog):
             "fill",
             "path",
             "hand",
-            "fit",
+            "zoom",
             "quick_mask",
             "mirror_x",
             "mirror_y",
@@ -7071,6 +7126,7 @@ class PaintDialog(QDialog):
         self.canvas.set_brush_detail(**self._canvas_brush_detail_payload())
         self.canvas.stroke_added.connect(self._on_stroke_added)
         self.canvas.set_extra_paint_hook(self._paint_material_preview_overlay)
+        self.canvas.zoom_requested.connect(self._handle_canvas_zoom_request)
         self.canvas.stroke_erased_at.connect(self._erase_stroke_direct)
         self.canvas.repaint_requested.connect(self._update_path_list)
         self.canvas.selection_probe_requested.connect(self._on_canvas_selection_probe)
@@ -11874,6 +11930,91 @@ class PaintDialog(QDialog):
 
     # ---------- tool actions ----------
 
+    def _on_zoom_tool_pressed(self) -> None:
+        self._zoom_tool_menu_opened = False
+        timer = getattr(self, "_zoom_tool_hold_timer", None)
+        if timer is not None:
+            timer.start()
+
+    def _on_zoom_tool_released(self) -> None:
+        timer = getattr(self, "_zoom_tool_hold_timer", None)
+        if timer is not None and timer.isActive():
+            timer.stop()
+        if not bool(getattr(self, "_zoom_tool_menu_opened", False)):
+            self._set_zoom_tool_mode(getattr(self, "_zoom_tool_mode", "zoom_in"))
+
+    def _show_zoom_tool_menu(self) -> None:
+        button = getattr(self, "zoom_fit_rail_btn", None)
+        if button is None:
+            return
+        self._zoom_tool_menu_opened = True
+        menu = QMenu(self)
+        menu.setObjectName("PaintZoomToolMenu")
+        actions: list[tuple[str, str, str]] = [
+            ("Zoom In", "zoom_in", "zoom"),
+            ("Zoom Out", "zoom_out", "zoom"),
+            ("Zoom Area", "zoom_area", "marquee-rect"),
+        ]
+        for label, mode, icon_name in actions:
+            action = menu.addAction(app_icon(icon_name, size=14, color="#E8EDF5"), label)
+            action.setCheckable(True)
+            action.setChecked(str(getattr(self, "_zoom_tool_mode", "zoom_in")) == mode)
+            action.triggered.connect(
+                lambda _checked=False, value=mode: self._set_zoom_tool_mode(value)
+            )
+        menu.addSeparator()
+        fit_action = menu.addAction(
+            app_icon("zoom-fit", size=14, color="#E8EDF5"),
+            "Fit Canvas",
+        )
+        fit_action.triggered.connect(self._zoom_fit)
+        self._zoom_tool_menu = menu
+        menu.popup(button.mapToGlobal(button.rect().topRight()))
+
+    def _set_zoom_tool_mode(self, mode: str) -> None:
+        value = str(mode or "zoom_in")
+        if value not in {"zoom_in", "zoom_out", "zoom_area"}:
+            value = "zoom_in"
+        self._zoom_tool_mode = value
+        button = getattr(self, "zoom_fit_rail_btn", None)
+        if button is not None:
+            labels = {
+                "zoom_in": "Zoom In Tool",
+                "zoom_out": "Zoom Out Tool",
+                "zoom_area": "Zoom Area Tool",
+            }
+            button.setToolTip(
+                f"{labels[value]} (Z). Hold for Zoom In / Zoom Out / Zoom Area."
+            )
+        self._set_tool(value)
+
+    def _handle_canvas_zoom_request(
+        self,
+        mode: str,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+    ) -> None:
+        value = str(mode or "zoom_in")
+        current = int(round(float(getattr(self, "_canvas_zoom", 1.0)) * 100))
+        if value == "zoom_area" and float(width) > 0.001 and float(height) > 0.001:
+            factor = min(1.0 / float(width), 1.0 / float(height))
+            target = int(round(current * factor))
+            center_x = float(x) + float(width) * 0.5
+            center_y = float(y) + float(height) * 0.5
+        else:
+            target = current + (25 if value == "zoom_in" else -25)
+            center_x = float(x)
+            center_y = float(y)
+        self._set_zoom_percent(max(25, min(PAINT_MAX_ZOOM_PERCENT, target)))
+        if hasattr(self, "canvas"):
+            pan = QPoint(
+                int(round(self.canvas.width() * (0.5 - center_x))),
+                int(round(self.canvas.height() * (0.5 - center_y))),
+            )
+            self._set_canvas_pan(pan)
+
     def _set_tool(self, tool: str) -> None:
         self._active_ui_tool = str(tool or "select")
         if tool == "3d_blockout":
@@ -11889,6 +12030,9 @@ class PaintDialog(QDialog):
             "crop",
             "magic_select",
             "fill",
+            "zoom_in",
+            "zoom_out",
+            "zoom_area",
         }:
             self._canvas_workspace_mode = "paint"
         canvas_tool = tool if tool in (
@@ -11899,6 +12043,9 @@ class PaintDialog(QDialog):
             "ellipse_select",
             "crop",
             "magic_select",
+            "zoom_in",
+            "zoom_out",
+            "zoom_area",
         ) else "off"
         self.canvas.set_tool(canvas_tool)
         self.select_btn.setChecked(tool == "select")
@@ -11917,6 +12064,10 @@ class PaintDialog(QDialog):
         self.path_btn.setChecked(tool == "path")
         if hasattr(self, "fill_tool_btn"):
             self.fill_tool_btn.setChecked(tool == "fill")
+        if hasattr(self, "zoom_fit_rail_btn"):
+            self.zoom_fit_rail_btn.setChecked(
+                tool in {"zoom_in", "zoom_out", "zoom_area"}
+            )
         tool_meta = {
             "select": ("Move", "move-tool"),
             "pan": ("Hand", "hand"),
@@ -11928,6 +12079,9 @@ class PaintDialog(QDialog):
             "magic_select": ("Magic Select", "magic-wand"),
             "crop": ("Crop", "crop"),
             "fill": ("Paint Bucket", "paint-bucket"),
+            "zoom_in": ("Zoom In", "zoom"),
+            "zoom_out": ("Zoom Out", "zoom"),
+            "zoom_area": ("Zoom Area", "marquee-rect"),
             "3d_blockout": ("3D Place", "box"),
         }
         tool_name, tool_icon = tool_meta.get(tool, ("Move", "move-tool"))
@@ -11956,6 +12110,9 @@ class PaintDialog(QDialog):
                 "magic_select": "Magic Select: click a color region",
                 "crop": "Crop: drag a crop area, then Image > Crop To Selection",
                 "fill": "Paint Bucket: choose a fill mode in the options bar",
+                "zoom_in": "Zoom In: click the canvas",
+                "zoom_out": "Zoom Out: click the canvas",
+                "zoom_area": "Zoom Area: drag around the area to magnify",
                 "3d_blockout": "3D Place: select or transform primitives on the canvas",
             }
             self._tool_status_label.setText(labels.get(tool, "Select / move objects"))

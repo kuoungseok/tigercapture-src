@@ -100,6 +100,23 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="active Painter zoom would change",
     )
     registry.register_adapter_action(
+        "paint.view.zoom_area",
+        "Magnify and center a normalized rectangular area of the active Painter canvas.",
+        "paint",
+        "paint_view_zoom_area",
+        params_schema=schema_object(
+            {
+                "x": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "y": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "width": {"type": "number", "minimum": 0.001, "maximum": 1.0},
+                "height": {"type": "number", "minimum": 0.001, "maximum": 1.0},
+            },
+            required=("x", "y", "width", "height"),
+        ),
+        undo_label="Zoom Painter area",
+        dry_summary="a Painter canvas area would be magnified and centered",
+    )
+    registry.register_adapter_action(
         "paint.view.pan",
         "Move or reset the active Painter canvas pan offset.",
         "paint",
@@ -199,6 +216,9 @@ def register_paint_actions(registry: Any) -> None:
                         "magic_wand",
                         "select_color",
                         "crop",
+                        "zoom_in",
+                        "zoom_out",
+                        "zoom_area",
                     ],
                 }
             },

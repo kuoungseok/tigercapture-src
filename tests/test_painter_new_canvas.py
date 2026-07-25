@@ -287,7 +287,7 @@ def test_standalone_painter_uses_vector_icons_and_full_brush_selector() -> None:
         "fill",
         "path",
         "hand",
-        "fit",
+        "zoom",
         "quick_mask",
         "mirror_x",
         "mirror_y",
@@ -297,7 +297,7 @@ def test_standalone_painter_uses_vector_icons_and_full_brush_selector() -> None:
     assert dialog.magic_select_btn.toolTip() == "Magic Select / Select by Color (W)"
     assert dialog.fill_tool_btn.toolTip() == "Paint Bucket / Fill (G)"
     assert dialog.quick_mask_rail_btn.toolTip() == "Quick Mask Mode (Q)"
-    assert len(dialog._painter_tool_shortcuts) == 7
+    assert len(dialog._painter_tool_shortcuts) == 8
     assert dialog.foreground_swatch_btn.toolTip().startswith("Foreground color")
     assert dialog.background_swatch_btn.toolTip().startswith("Background color")
     assert dialog.select_btn.text() == ""
@@ -336,8 +336,20 @@ def test_standalone_painter_uses_vector_icons_and_full_brush_selector() -> None:
     assert dialog.fill_tool_btn.toolTip() == "Paint Bucket / Fill (G)"
     assert not dialog.fill_tool_btn.icon().isNull()
     assert dialog.zoom_fit_rail_btn.text() == ""
-    assert dialog.zoom_fit_rail_btn.toolTip() == "Fit Canvas to Window (Ctrl+0)"
+    assert "hold for Zoom In / Zoom Out / Zoom Area" in dialog.zoom_fit_rail_btn.toolTip()
     assert not dialog.zoom_fit_rail_btn.icon().isNull()
+    dialog._show_zoom_tool_menu()
+    app.processEvents()
+    assert [
+        action.text() for action in dialog._zoom_tool_menu.actions() if not action.isSeparator()
+    ] == ["Zoom In", "Zoom Out", "Zoom Area", "Fit Canvas"]
+    dialog._zoom_tool_menu.close()
+    dialog._set_zoom_tool_mode("zoom_area")
+    assert dialog.canvas.tool() == "zoom_area"
+    assert dialog.zoom_fit_rail_btn.isChecked()
+    dialog._handle_canvas_zoom_request("zoom_area", 0.25, 0.25, 0.5, 0.5)
+    assert dialog.painter_action_state()["view"]["zoom_percent"] == 200
+    dialog._zoom_fit()
     assert dialog.quick_mask_rail_btn.text() == ""
     assert dialog.quick_mask_rail_btn.toolTip() == "Quick Mask Mode (Q)"
     assert not dialog.quick_mask_rail_btn.icon().isNull()

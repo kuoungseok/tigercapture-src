@@ -45,6 +45,7 @@ def test_material_channels_are_authored_from_strokes() -> None:
     assert channels["height"].shape == (108, 192)
     assert channels["normal"].shape == (108, 192, 3)
     assert channels["direction"].shape == (108, 192, 2)
+    assert channels["soft_shadow"].shape == (108, 192)
     assert float(np.max(channels["height"])) > 0.05
     assert float(np.std(channels["normal"][..., 0])) > 0.001
     assert float(np.min(channels["roughness"])) < 0.72
