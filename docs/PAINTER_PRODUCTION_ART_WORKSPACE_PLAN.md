@@ -329,6 +329,23 @@ Implemented structural baseline (2026-07-25):
 - Preview and export consume the same stroke ordering, material settings,
   bristle paths, and height contract.
 
+Implemented Wet Canvas v1 baseline (2026-07-26):
+
+- A Material Paint layer can own editable wet state with Mix, Bleed, Pickup,
+  Dry Time, explicit time advance, and Dry Now controls.
+- Sequential overlapping strokes exchange RGB color while the saved layer
+  state is wet. Optional bounded diffusion provides shallow bleed.
+- Drying is explicit and deterministic rather than wall-clock-driven, so
+  Undo/Redo, automation, reopening, canvas preview, and PNG export agree.
+- Strokes remain editable source data; enabling or drying Wet Canvas does not
+  flatten the layer.
+- `paint.wet_canvas.settings.set`, `paint.wet_canvas.advance`, and
+  `paint.wet_canvas.dry` expose the same state to Claude, OpenAI, and local AI.
+- Active wet exchange declares its QPainter fallback instead of pretending to
+  use the persistent OpenGL stroke atlas.
+- This baseline is deliberately described as shallow RGB exchange, not
+  physical pigment mixing.
+
 Required next physical-media stage:
 
 - One active wet paint layer plus accumulated dry height layers.

@@ -1334,6 +1334,7 @@ class PaintLayer:
     color_label: str = "none"
     layer_type: str = "standard"
     material_settings: dict[str, float] = field(default_factory=dict)
+    wet_canvas_settings: dict[str, object] = field(default_factory=dict)
 
 
 CANVAS_SIZE_PRESETS: tuple[tuple[str, int, int], ...] = (
@@ -1619,6 +1620,9 @@ class DrawingCanvas(QWidget):
         self._layer_opacity: dict[str, int] = {}
         self._layer_masks: dict[str, list[tuple[float, float]]] = {}
         self._layer_order: list[str] = []
+        self._layer_wet_canvas_settings: dict[str, dict[str, object]] = {}
+        self._wet_canvas_render_cache: dict[str, tuple[str, QImage]] = {}
+        self._wet_canvas_reports: dict[str, dict[str, object]] = {}
         self._current_points: list[QPointF] = []  # while drawing (widget px)
         self._current_pressure: list[float] = []
         self._current_tilt: list[float] = []
@@ -1790,6 +1794,7 @@ class DrawingCanvas(QWidget):
         opacity: dict[str, int] | None = None,
         masks: dict[str, list[tuple[float, float]]] | None = None,
         order: list[str] | None = None,
+        wet_canvas_settings: dict[str, dict[str, object]] | None = None,
     ) -> None:
         self._layer_visibility = dict(visibility or {})
         self._layer_opacity = {
@@ -1807,6 +1812,12 @@ class DrawingCanvas(QWidget):
             ]
         self._layer_masks = clean_masks
         self._layer_order = [str(layer_id) for layer_id in list(order or [])]
+        from app.painter_wet_canvas import normalize_wet_canvas_settings
+
+        self._layer_wet_canvas_settings = {
+            str(layer_id): normalize_wet_canvas_settings(settings)
+            for layer_id, settings in dict(wet_canvas_settings or {}).items()
+        }
         self.update()
 
     def path_point_count(self) -> int:
@@ -2140,6 +2151,66 @@ class DrawingCanvas(QWidget):
 
     # ------------- paint -------------
 
+    def _wet_canvas_layer_enabled(self, layer_id: str) -> bool:
+        from app.painter_wet_canvas import wet_canvas_remaining
+
+        settings = self._layer_wet_canvas_settings.get(str(layer_id), {})
+        return bool(settings.get("enabled", False) and wet_canvas_remaining(settings) > 0.0)
+
+    def _paint_wet_canvas_layer(
+        self,
+        painter: QPainter,
+        strokes: list[Stroke],
+        layer_id: str,
+        width: int,
+        height: int,
+        time_ms: int,
+    ) -> None:
+        from app.painter_wet_canvas import (
+            render_wet_layer_qimage,
+            wet_canvas_signature,
+        )
+
+        layer_strokes = [
+            stroke
+            for stroke in strokes
+            if self._stroke_layer_id(stroke) == layer_id and stroke.is_active(time_ms)
+        ]
+        if not layer_strokes:
+            return
+        opacity_scale = self._layer_opacity.get(layer_id, 100) / 100.0
+        settings = self._layer_wet_canvas_settings.get(layer_id, {})
+        signature = wet_canvas_signature(
+            layer_strokes,
+            settings,
+            width=width,
+            height=height,
+            time_ms=time_ms,
+            opacity_scale=opacity_scale,
+        )
+        cached = self._wet_canvas_render_cache.get(layer_id)
+        if cached is not None and cached[0] == signature:
+            image = cached[1]
+        else:
+            image, report = render_wet_layer_qimage(
+                layer_strokes,
+                settings=settings,
+                width=width,
+                height=height,
+                time_ms=time_ms,
+                opacity_scale=opacity_scale,
+                render_stroke=lambda target, stroke, render_w, render_h, alpha: self._paint_stroke(
+                    target,
+                    stroke,
+                    render_w,
+                    render_h,
+                    opacity_scale=alpha,
+                ),
+            )
+            self._wet_canvas_render_cache[layer_id] = (signature, image)
+            self._wet_canvas_reports[layer_id] = dict(report)
+        painter.drawImage(0, 0, image)
+
     def paintEvent(self, _event: QPaintEvent) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
@@ -2167,11 +2238,33 @@ class DrawingCanvas(QWidget):
                 render_h,
                 t_ms,
             ):
+                painted_wet_layers: set[str] = set()
                 for stroke in strokes:
                     if not stroke.is_active(t_ms):
                         continue
                     layer_id = self._stroke_layer_id(stroke)
                     if not self._layer_visibility.get(layer_id, True):
+                        continue
+                    if self._wet_canvas_layer_enabled(layer_id):
+                        if layer_id in painted_wet_layers:
+                            continue
+                        mask = self._layer_masks.get(layer_id, [])
+                        if len(mask) >= 3:
+                            painter.save()
+                            self._clip_to_layer_mask(painter, mask, render_w, render_h)
+                        try:
+                            self._paint_wet_canvas_layer(
+                                painter,
+                                strokes,
+                                layer_id,
+                                render_w,
+                                render_h,
+                                t_ms,
+                            )
+                        finally:
+                            if len(mask) >= 3:
+                                painter.restore()
+                        painted_wet_layers.add(layer_id)
                         continue
                     mask = self._layer_masks.get(layer_id, [])
                     if len(mask) >= 3:
@@ -3235,6 +3328,20 @@ class DrawingCanvas(QWidget):
         h: int,
         t_ms: int,
     ) -> bool:
+        if any(
+            self._wet_canvas_layer_enabled(layer_id)
+            for layer_id in self._layer_wet_canvas_settings
+        ):
+            self._painter_canvas_renderer_status = {
+                "renderer": "painter_canvas_qpainter_wet_layer_v1",
+                "active": "qpainter",
+                "fallback": True,
+                "fallback_from": "opengl",
+                "reason": "wet_canvas_requires_editable_color_exchange",
+                "remote_safe": True,
+                "size": [int(w), int(h)],
+            }
+            return False
         if not strokes:
             atlas = getattr(self, "_painter_canvas_stroke_atlas", None)
             if hasattr(atlas, "clear"):
@@ -5161,6 +5268,7 @@ def compose_pil_paint_overlays(
     time_ms: int = 0,
     frame_size: tuple[int, int] = (1920, 1080),
     stroke_width_scale: float = 1.0,
+    paint_layers: list["PaintLayer"] | None = None,
 ):
     """Render paint overlays onto a transparent PIL RGBA image."""
     from PIL import Image
@@ -5168,25 +5276,82 @@ def compose_pil_paint_overlays(
     width = max(1, int(frame_size[0]))
     height = max(1, int(frame_size[1]))
     active_strokes = [
-        stroke
+        copy.copy(stroke)
         for stroke in list(strokes or [])
         if stroke.is_active(int(time_ms))
     ]
+    for stroke in active_strokes:
+        stroke.width_px = max(
+            0.25,
+            float(stroke.width_px)
+            * max(0.001, float(stroke_width_scale or 1.0)),
+        )
+    layer_rows = list(paint_layers or [])
+    if layer_rows:
+        layer_rank = {
+            str(layer.layer_id): index for index, layer in enumerate(layer_rows)
+        }
+        active_strokes.sort(
+            key=lambda stroke: layer_rank.get(
+                str(getattr(stroke, "layer_id", "") or "paint-layer-1"),
+                len(layer_rank),
+            )
+        )
+    wet_settings_by_layer = {
+        str(layer.layer_id): dict(getattr(layer, "wet_canvas_settings", {}) or {})
+        for layer in layer_rows
+        if str(getattr(layer, "layer_type", "standard") or "standard") == "material"
+    }
     image = QImage(width, height, QImage.Format.Format_ARGB32)
     image.fill(0)
     painter = QPainter(image)
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     try:
+        painted_wet_layers: set[str] = set()
         for stroke in active_strokes:
-            scaled_stroke = copy.copy(stroke)
-            scaled_stroke.width_px = max(
-                0.25,
-                float(stroke.width_px)
-                * max(0.001, float(stroke_width_scale or 1.0)),
+            layer_id = str(
+                getattr(stroke, "layer_id", "") or "paint-layer-1"
             )
+            wet_settings = wet_settings_by_layer.get(layer_id)
+            if wet_settings:
+                from app.painter_wet_canvas import (
+                    render_wet_layer_qimage,
+                    wet_canvas_remaining,
+                )
+
+                if wet_canvas_remaining(wet_settings) > 0.0:
+                    if layer_id in painted_wet_layers:
+                        continue
+                    layer_strokes = [
+                        candidate
+                        for candidate in active_strokes
+                        if str(
+                            getattr(candidate, "layer_id", "")
+                            or "paint-layer-1"
+                        )
+                        == layer_id
+                    ]
+                    wet_image, _report = render_wet_layer_qimage(
+                        layer_strokes,
+                        settings=wet_settings,
+                        width=width,
+                        height=height,
+                        time_ms=int(time_ms),
+                        opacity_scale=1.0,
+                        render_stroke=lambda target, item, render_w, render_h, alpha: DrawingCanvas._paint_stroke(
+                            target,
+                            item,
+                            render_w,
+                            render_h,
+                            opacity_scale=alpha,
+                        ),
+                    )
+                    painter.drawImage(0, 0, wet_image)
+                    painted_wet_layers.add(layer_id)
+                    continue
             DrawingCanvas._paint_stroke(
                 painter,
-                scaled_stroke,
+                stroke,
                 width,
                 height,
             )
@@ -5209,6 +5374,7 @@ def export_paint_png(
     frame_size: tuple[int, int] | None = None,
     include_background: bool = True,
     stroke_width_scale: float = 1.0,
+    paint_layers: list["PaintLayer"] | None = None,
 ) -> dict:
     """Write a Paint-window PNG export and return a small report.
 
@@ -5238,6 +5404,7 @@ def export_paint_png(
         time_ms=int(time_ms),
         frame_size=(width, height),
         stroke_width_scale=stroke_width_scale,
+        paint_layers=paint_layers,
     )
     out = Image.alpha_composite(base.convert("RGBA"), overlay)
     out.save(path, "PNG")
@@ -5250,6 +5417,16 @@ def export_paint_png(
         "stroke_count": len(list(strokes or [])),
         "bubble_count": len(list(bubbles or [])),
         "sticker_count": len(list(stickers or [])),
+        "wet_canvas_layer_count": sum(
+            1
+            for layer in list(paint_layers or [])
+            if bool(
+                dict(getattr(layer, "wet_canvas_settings", {}) or {}).get(
+                    "enabled",
+                    False,
+                )
+            )
+        ),
     }
 
 
@@ -6131,6 +6308,9 @@ class PaintDialog(QDialog):
         self._material_preview_cache: dict | None = None
         self._material_control_sliders: dict[str, StudioSlider] = {}
         self._material_control_labels: dict[str, QLabel] = {}
+        self._wet_canvas_control_sliders: dict[str, StudioSlider] = {}
+        self._wet_canvas_control_labels: dict[str, QLabel] = {}
+        self._wet_canvas_enabled_check: QCheckBox | None = None
         self._painter_reference_board: dict | None = None
         self._painter_reference_selected_id = ""
         self._painter_reference_syncing = False
@@ -6628,6 +6808,12 @@ class PaintDialog(QDialog):
                 if bool(getattr(layer, "mask_enabled", False)) and len(getattr(layer, "mask", []) or []) >= 3
             },
             [layer.layer_id for layer in self._paint_layers],
+            {
+                layer.layer_id: dict(getattr(layer, "wet_canvas_settings", {}) or {})
+                for layer in self._paint_layers
+                if str(getattr(layer, "layer_type", "standard") or "standard")
+                == "material"
+            },
         )
 
     def _open_new_canvas_dialog(self) -> None:
@@ -11669,6 +11855,80 @@ class PaintDialog(QDialog):
             self._material_control_sliders[key] = slider
             self._material_control_labels[key] = value
 
+        wet_heading = QLabel("WET CANVAS")
+        wet_heading.setObjectName("PaintBrushPanelTitle")
+        layout.addWidget(wet_heading)
+        from app.painter_wet_canvas import normalize_wet_canvas_settings
+
+        wet_settings = normalize_wet_canvas_settings(
+            getattr(self._active_paint_layer(), "wet_canvas_settings", {})
+        )
+        self._wet_canvas_enabled_check = QCheckBox("Enable editable wet layer")
+        self._wet_canvas_enabled_check.setChecked(bool(wet_settings["enabled"]))
+        self._wet_canvas_enabled_check.toggled.connect(
+            lambda enabled: self._set_wet_canvas_settings({"enabled": bool(enabled)})
+        )
+        layout.addWidget(self._wet_canvas_enabled_check)
+        self._wet_canvas_control_sliders = {}
+        self._wet_canvas_control_labels = {}
+        for title, key in (
+            ("Mix", "mixing"),
+            ("Bleed", "diffusion"),
+            ("Pickup", "pickup"),
+        ):
+            row = QHBoxLayout()
+            row.setContentsMargins(0, 0, 0, 0)
+            label = QLabel(title)
+            label.setObjectName("PaintMeta")
+            label.setFixedWidth(66)
+            slider = StudioSlider("accent", panel)
+            slider.setRange(0, 100)
+            slider.setValue(int(round(float(wet_settings[key]) * 100.0)))
+            value = QLabel(f"{slider.value()}%")
+            value.setObjectName("PaintValue")
+            value.setFixedWidth(44)
+            slider.valueChanged.connect(
+                lambda amount, setting=key: self._set_wet_canvas_settings(
+                    {setting: float(amount) / 100.0}
+                )
+            )
+            row.addWidget(label)
+            row.addWidget(slider, stretch=1)
+            row.addWidget(value)
+            layout.addLayout(row)
+            self._wet_canvas_control_sliders[key] = slider
+            self._wet_canvas_control_labels[key] = value
+
+        dry_row = QHBoxLayout()
+        dry_row.setContentsMargins(0, 0, 0, 0)
+        dry_label = QLabel("Dry time")
+        dry_label.setObjectName("PaintMeta")
+        dry_label.setFixedWidth(66)
+        dry_slider = StudioSlider("accent", panel)
+        dry_slider.setRange(1, 60)
+        dry_slider.setValue(
+            max(1, min(60, int(round(float(wet_settings["drying_seconds"]) / 60.0))))
+        )
+        dry_value = QLabel(f"{dry_slider.value()} min")
+        dry_value.setObjectName("PaintValue")
+        dry_value.setFixedWidth(44)
+        dry_slider.valueChanged.connect(
+            lambda minutes: self._set_wet_canvas_settings(
+                {"drying_seconds": float(minutes) * 60.0}
+            )
+        )
+        dry_row.addWidget(dry_label)
+        dry_row.addWidget(dry_slider, stretch=1)
+        dry_row.addWidget(dry_value)
+        layout.addLayout(dry_row)
+        self._wet_canvas_control_sliders["drying_seconds"] = dry_slider
+        self._wet_canvas_control_labels["drying_seconds"] = dry_value
+
+        dry_now = QPushButton("Dry Now")
+        dry_now.setObjectName("PaintSmallButton")
+        dry_now.clicked.connect(self._dry_active_wet_canvas)
+        layout.addWidget(dry_now)
+
         widget_action = QWidgetAction(menu)
         widget_action.setDefaultWidget(panel)
         menu.addAction(widget_action)
@@ -11722,6 +11982,130 @@ class PaintDialog(QDialog):
             preview_button.blockSignals(True)
             preview_button.setChecked(bool(self._material_preview_enabled and active))
             preview_button.blockSignals(False)
+        self._sync_wet_canvas_controls()
+
+    def _sync_wet_canvas_controls(self) -> None:
+        from app.painter_wet_canvas import normalize_wet_canvas_settings
+
+        layer = self._active_paint_layer()
+        settings = normalize_wet_canvas_settings(
+            getattr(layer, "wet_canvas_settings", {})
+        )
+        enabled_check = getattr(self, "_wet_canvas_enabled_check", None)
+        if enabled_check is not None:
+            enabled_check.blockSignals(True)
+            enabled_check.setChecked(bool(settings["enabled"]))
+            enabled_check.setEnabled(
+                str(getattr(layer, "layer_type", "standard")) == "material"
+            )
+            enabled_check.blockSignals(False)
+        for key, slider in getattr(self, "_wet_canvas_control_sliders", {}).items():
+            slider.blockSignals(True)
+            try:
+                if key == "drying_seconds":
+                    slider.setValue(
+                        max(
+                            1,
+                            min(
+                                60,
+                                int(round(float(settings["drying_seconds"]) / 60.0)),
+                            ),
+                        )
+                    )
+                else:
+                    slider.setValue(int(round(float(settings[key]) * 100.0)))
+            finally:
+                slider.blockSignals(False)
+            label = getattr(self, "_wet_canvas_control_labels", {}).get(key)
+            if label is not None:
+                label.setText(
+                    f"{slider.value()} min"
+                    if key == "drying_seconds"
+                    else f"{slider.value()}%"
+                )
+
+    def _set_wet_canvas_settings(
+        self,
+        values: dict[str, object],
+        *,
+        layer_id: str | None = None,
+        push_undo: bool = True,
+    ) -> bool:
+        from app.painter_wet_canvas import (
+            WET_CANVAS_DEFAULTS,
+            normalize_wet_canvas_settings,
+        )
+
+        layer = self._paint_layer_by_id(layer_id) if layer_id else self._active_paint_layer()
+        if layer is None or str(getattr(layer, "layer_type", "standard")) != "material":
+            return False
+        current = normalize_wet_canvas_settings(
+            getattr(layer, "wet_canvas_settings", {})
+        )
+        was_enabled = bool(current["enabled"])
+        changed = False
+        for key in WET_CANVAS_DEFAULTS:
+            if key not in values or values[key] is None:
+                continue
+            if key == "enabled":
+                next_value = bool(values[key])
+            elif key in {"drying_seconds", "elapsed_seconds"}:
+                next_value = max(0.0, min(86400.0, float(values[key])))
+            else:
+                next_value = max(0.0, min(1.0, float(values[key])))
+            if current.get(key) != next_value:
+                current[key] = next_value
+                changed = True
+        if not changed:
+            return False
+        if (
+            values.get("enabled") is True
+            and not was_enabled
+            and current["elapsed_seconds"] >= current["drying_seconds"]
+        ):
+            current["elapsed_seconds"] = 0.0
+        if push_undo:
+            self._push_undo_state("Set wet canvas")
+        layer.wet_canvas_settings = normalize_wet_canvas_settings(current)
+        self.canvas._wet_canvas_render_cache.pop(layer.layer_id, None)
+        self._sync_canvas_layer_view()
+        self._sync_wet_canvas_controls()
+        self._material_preview_cache = None
+        self._pbr_preview_maps_cache = None
+        return True
+
+    def _advance_wet_canvas(
+        self,
+        seconds: float,
+        *,
+        layer_id: str | None = None,
+    ) -> bool:
+        from app.painter_wet_canvas import advance_wet_canvas
+
+        layer = self._paint_layer_by_id(layer_id) if layer_id else self._active_paint_layer()
+        if layer is None or str(getattr(layer, "layer_type", "standard")) != "material":
+            return False
+        current = advance_wet_canvas(
+            getattr(layer, "wet_canvas_settings", {}),
+            max(0.0, float(seconds)),
+        )
+        return self._set_wet_canvas_settings(
+            current,
+            layer_id=layer.layer_id,
+            push_undo=True,
+        )
+
+    def _dry_active_wet_canvas(self) -> bool:
+        from app.painter_wet_canvas import dry_wet_canvas
+
+        layer = self._active_paint_layer()
+        if str(getattr(layer, "layer_type", "standard")) != "material":
+            return False
+        return self._set_wet_canvas_settings(
+            dry_wet_canvas(getattr(layer, "wet_canvas_settings", {})),
+            layer_id=layer.layer_id,
+            push_undo=True,
+        )
 
     def _set_material_preview_enabled(self, enabled: bool) -> None:
         active = str(getattr(self._active_paint_layer(), "layer_type", "standard")) == "material"
@@ -13037,8 +13421,17 @@ class PaintDialog(QDialog):
             stroke.material_wetness = material["wetness"]
             stroke.material_gloss = material["gloss"]
             stroke.material_roughness = material["roughness"]
+            from app.painter_wet_canvas import normalize_wet_canvas_settings
+
+            wet_settings = normalize_wet_canvas_settings(
+                getattr(layer, "wet_canvas_settings", {})
+            )
+            if wet_settings["enabled"]:
+                wet_settings["elapsed_seconds"] = 0.0
+                layer.wet_canvas_settings = wet_settings
             self._material_preview_cache = None
             self._pbr_preview_maps_cache = None
+            self._sync_canvas_layer_view()
         self.canvas.add_stroke_direct(stroke)
         for mirrored in self._mirrored_strokes_for(stroke):
             self.canvas.add_stroke_direct(mirrored)
@@ -13211,6 +13604,7 @@ class PaintDialog(QDialog):
                 frame_size=target_size,
                 include_background=include_background,
                 stroke_width_scale=width_scale,
+                paint_layers=self._paint_layers,
             )
         except Exception as exc:
             QMessageBox.warning(
@@ -14255,6 +14649,7 @@ class PaintDialog(QDialog):
             normalize_layer_type,
             normalize_material_settings,
         )
+        from app.painter_wet_canvas import normalize_wet_canvas_settings
 
         self._push_undo_state("New layer")
         self._paint_layer_serial += 1
@@ -14268,6 +14663,11 @@ class PaintDialog(QDialog):
             layer_type=normalized_type,
             material_settings=(
                 normalize_material_settings(self._material_paint_settings)
+                if normalized_type == "material"
+                else {}
+            ),
+            wet_canvas_settings=(
+                normalize_wet_canvas_settings(None)
                 if normalized_type == "material"
                 else {}
             ),
@@ -14340,6 +14740,7 @@ class PaintDialog(QDialog):
             normalize_layer_type,
             normalize_material_settings,
         )
+        from app.painter_wet_canvas import normalize_wet_canvas_settings
 
         layer = self._select_paint_layer_by_id(layer_id)
         if layer is None:
@@ -14352,6 +14753,13 @@ class PaintDialog(QDialog):
         layer.material_settings = (
             normalize_material_settings(
                 getattr(layer, "material_settings", {}) or self._material_paint_settings
+            )
+            if normalized == "material"
+            else {}
+        )
+        layer.wet_canvas_settings = (
+            normalize_wet_canvas_settings(
+                getattr(layer, "wet_canvas_settings", {})
             )
             if normalized == "material"
             else {}
@@ -15689,6 +16097,7 @@ class PaintDialog(QDialog):
             normalize_layer_type,
             normalize_material_settings,
         )
+        from app.painter_wet_canvas import normalize_wet_canvas_settings
 
         if not isinstance(row, dict):
             row = {}
@@ -15706,6 +16115,11 @@ class PaintDialog(QDialog):
             layer_type=layer_type,
             material_settings=(
                 normalize_material_settings(row.get("material_settings"))
+                if layer_type == "material"
+                else {}
+            ),
+            wet_canvas_settings=(
+                normalize_wet_canvas_settings(row.get("wet_canvas_settings"))
                 if layer_type == "material"
                 else {}
             ),
@@ -16381,6 +16795,7 @@ class PaintDialog(QDialog):
             frame_size=target_size,
             include_background=include_background,
             stroke_width_scale=width_scale,
+            paint_layers=self._paint_layers,
         )
 
     def painter_action_state(self) -> dict:
@@ -16457,6 +16872,9 @@ class PaintDialog(QDialog):
                     "material_settings": dict(
                         getattr(layer, "material_settings", {}) or {}
                     ),
+                    "wet_canvas_settings": dict(
+                        getattr(layer, "wet_canvas_settings", {}) or {}
+                    ),
                     "color_label": _normalise_paint_layer_color_label(
                         getattr(layer, "color_label", "none")
                     ),
@@ -16527,6 +16945,14 @@ class PaintDialog(QDialog):
                         getattr(self._active_paint_layer(), "layer_type", "standard")
                     )
                     == "material",
+                    "wet_canvas": dict(
+                        getattr(
+                            self._active_paint_layer(),
+                            "wet_canvas_settings",
+                            {},
+                        )
+                        or {}
+                    ),
                 },
             },
             "material_preview": {
@@ -16551,6 +16977,11 @@ class PaintDialog(QDialog):
                         self.canvas.embedded_strokes() if hasattr(self, "canvas") else []
                     )
                     if bool(getattr(stroke, "material_enabled", False))
+                ),
+                "wet_canvas_reports": dict(
+                    getattr(self.canvas, "_wet_canvas_reports", {})
+                    if hasattr(self, "canvas")
+                    else {}
                 ),
             },
             "selection_aspect": str(getattr(self, "_selection_aspect_mode", "free")),

@@ -225,6 +225,52 @@ class PaintAdapterMixin:
         )
         return dialog.painter_action_state()
 
+    def paint_wet_canvas_settings_set(
+        self,
+        *,
+        layer_id: str = "",
+        enabled: bool | None = None,
+        mixing: float | None = None,
+        diffusion: float | None = None,
+        pickup: float | None = None,
+        drying_seconds: float | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        values = {
+            "enabled": enabled,
+            "mixing": mixing,
+            "diffusion": diffusion,
+            "pickup": pickup,
+            "drying_seconds": drying_seconds,
+        }
+        if not dialog._set_wet_canvas_settings(values, layer_id=layer_id or None):
+            raise ValueError(
+                "Wet Canvas settings require a material layer and a changed value"
+            )
+        return dialog.painter_action_state()
+
+    def paint_wet_canvas_advance(
+        self,
+        *,
+        seconds: float = 0.0,
+        layer_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if not dialog._advance_wet_canvas(
+            max(0.0, float(seconds)),
+            layer_id=layer_id or None,
+        ):
+            raise ValueError("Wet Canvas did not advance")
+        return dialog.painter_action_state()
+
+    def paint_wet_canvas_dry(self, *, layer_id: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        if layer_id:
+            dialog._select_paint_layer_by_id(layer_id)
+        if not dialog._dry_active_wet_canvas():
+            raise ValueError("Wet Canvas requires an active material layer")
+        return dialog.painter_action_state()
+
     def paint_layer_select(self, *, layer_id: str = "") -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         if not dialog._select_paint_layer_by_id(layer_id or None):
@@ -1342,6 +1388,7 @@ class PaintAdapterMixin:
             frame_size=frame_size,
             include_background=include_background,
             stroke_width_scale=stroke_width_scale,
+            paint_layers=list(getattr(owner, "_paint_layers", []) or []),
         )
         return report
 
@@ -1986,6 +2033,7 @@ class PaintAdapterMixin:
             time_ms=int(dialog._time_ms),
             frame_size=(width, height),
             stroke_width_scale=1.0,
+            paint_layers=list(getattr(dialog, "_paint_layers", []) or []),
         )
         rendered = Image.alpha_composite(base.convert("RGBA"), overlay)
         comparison = compare_reference_to_render(runtime, rendered)

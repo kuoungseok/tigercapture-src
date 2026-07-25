@@ -1,6 +1,6 @@
 # Tiger Studio Painter Material Paint
 
-Status: product implementation with Bristle Engine v2
+Status: product implementation with Bristle Engine v2 and Wet Canvas v1
 
 ## Goal
 
@@ -39,6 +39,21 @@ The initial controls are:
 - `Wetness`: softness and reduced roughness of fresh paint.
 - `Gloss`: specular smoothness.
 - `Roughness`: authored surface roughness before wetness/gloss response.
+
+Material layers can additionally enable `Wet Canvas`. This state belongs to
+the layer rather than the selected brush:
+
+- `Mix`: sequential color exchange where fresh strokes overlap existing wet
+  paint.
+- `Bleed`: bounded soft diffusion around paint that is still wet.
+- `Pickup`: how strongly the incoming stroke takes color from the wet layer.
+- `Dry Time`: deterministic saved drying duration.
+- `Dry Now`: marks the layer dry without flattening or deleting editable
+  strokes.
+
+Wet Canvas v1 uses deterministic RGB exchange. It is an editable artistic
+model, not spectral pigment chemistry, conservative fluid transport, or a
+physical claim about real paint.
 
 ## Rendering
 
@@ -88,6 +103,26 @@ authoritative PBR inspection surface and consumes the merged native maps.
 Normal PNG export remains visually compatible; PBR map export can preserve the
 native Height/Normal/AO/Roughness channels.
 
+### Wet Canvas v1
+
+`app/painter_wet_canvas.py` owns normalized layer state, explicit drying
+advance, cache signatures, and the shared Qt/PNG wet-layer renderer. Strokes
+remain the source of truth and are rendered sequentially into one temporary
+layer surface. Existing wet coverage influences the next stroke's RGB at
+overlaps; an optional bounded Gaussian pass provides shallow bleed.
+
+Drying is not tied to wall-clock time. The document stores `drying_seconds`
+and `elapsed_seconds`, while UI and automation explicitly advance or finish
+the state. This keeps Undo/Redo, scripted review, reopening, and PNG export
+deterministic. Adding a new stroke to an enabled material layer makes that
+layer fresh again.
+
+The editable wet renderer currently uses the maintained QPainter path. The
+canvas reports an explicit OpenGL fallback reason while wet exchange is active;
+dry material layers continue through the existing renderer paths. Native
+Height/Normal/AO/Roughness still come from Material Paint deposition and are
+not synthesized from the wet RGB result.
+
 ## UX
 
 - Layer menu: `New Material Paint Layer`.
@@ -95,6 +130,8 @@ native Height/Normal/AO/Roughness channels.
 - Material layers display an `M`/material status in their row and tooltip.
 - Brush options: `Material` controls and a `PBR` preview toggle appear only
   for Material Paint layers.
+- The Material menu exposes a compact Wet Canvas section only for Material
+  Paint layers. Enabling it does not flatten the layer.
 - The left toolbar uses a magnifier tool. A short click activates the current
   zoom mode; press-and-hold opens Zoom In, Zoom Out, Zoom Area, and Fit Canvas.
 - Active Zoom In and Zoom Out modes use magnifier cursors with an in-lens `+`
@@ -113,14 +150,21 @@ native Height/Normal/AO/Roughness channels.
   Roughness.
 - `paint.material.preview.set` enables/disables the canvas material preview and
   controls light azimuth/elevation.
+- `paint.wet_canvas.settings.set` controls enabled state, Mix, Bleed, Pickup,
+  and Dry Time on a material layer.
+- `paint.wet_canvas.advance` advances saved drying state by an explicit number
+  of seconds.
+- `paint.wet_canvas.dry` dries the selected material layer without flattening
+  its strokes.
 - `paint.stroke.draw` accepts per-point `pressure`, scalar `tilt`, signed
   `tilt_x`/`tilt_y`, `rotation`, `tangential_pressure`, and `load`, plus
   `engine_version`, `bristle_count`, `seed`, and `load_depletion`. AI strokes
   targeting Material Paint layers automatically receive the layer's material
   settings.
 - `paint.view.zoom_area` magnifies and centers a normalized canvas rectangle.
-- `paint.state` reports layer type, layer material settings, active brush
-  material capability, active material controls, and preview state.
+- `paint.state` reports layer type, layer material and Wet Canvas settings,
+  active brush material capability, active material controls, and preview
+  state.
 - `paint.study.analyze_reference/segment_regions/build_underpaint/
   trace_contours/generate_strokes/compare_render/refine_region/quality_report`
   provide one provider-neutral path for Claude, OpenAI, and local AI. The
@@ -136,9 +180,12 @@ All mutations use the existing Painter undo stack.
 
 - Existing strokes and clipboard payloads default to standard color behavior.
 - Existing `PaintLayer` data defaults to `layer_type=standard`.
+- Existing material layers default to Wet Canvas disabled.
 - Native material maps are generated only when at least one visible Material
   Paint layer contains material-enabled strokes.
 - Canvas material previews are cached by stroke/layer/settings/light signature.
+- Wet color output is cached by stroke/layer/wet-state signature and is shared
+  by interactive canvas rendering and PNG export.
 - View zoom does not change retained stroke, Material Height/Normal, reference,
   3D Blockout, or background cache resolution. Those surfaces stay at the
   unzoomed canvas resolution and are scaled only for display; selection,
@@ -149,7 +196,9 @@ All mutations use the existing Painter undo stack.
 
 - Persistent GPU Height/Roughness atlas and retained OpenGL material shader.
 - Palette-knife height displacement and scrape/carve operations.
-- Wet-paint advection, pigment mixing, drying time, and per-layer varnish.
+- Persistent GPU wet atlas, conservative paint-volume advection, bidirectional
+  physical brush/canvas pigment storage, spectral/validated pigment mixing,
+  and per-layer varnish.
 - Pressure curves/device calibration and brush-specific barrel-pressure
   mappings.
 - ABR/captured-dab import.

@@ -473,6 +473,59 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="Material Paint relief preview would change",
     )
     registry.register_adapter_action(
+        "paint.wet_canvas.settings.set",
+        (
+            "Enable and configure deterministic editable wet-layer color "
+            "exchange for a Painter material layer."
+        ),
+        "paint",
+        "paint_wet_canvas_settings_set",
+        params_schema=schema_object(
+            {
+                "layer_id": {"type": "string"},
+                "enabled": {"type": "boolean"},
+                "mixing": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "diffusion": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "pickup": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                "drying_seconds": {
+                    "type": "number",
+                    "minimum": 1.0,
+                    "maximum": 86400.0,
+                },
+            }
+        ),
+        undo_label="Set Painter Wet Canvas",
+        dry_summary="Wet Canvas settings would change",
+    )
+    registry.register_adapter_action(
+        "paint.wet_canvas.advance",
+        "Advance the saved Wet Canvas drying state by a deterministic duration.",
+        "paint",
+        "paint_wet_canvas_advance",
+        params_schema=schema_object(
+            {
+                "layer_id": {"type": "string"},
+                "seconds": {
+                    "type": "number",
+                    "minimum": 0.0,
+                    "maximum": 86400.0,
+                },
+            },
+            required=("seconds",),
+        ),
+        undo_label="Advance Painter Wet Canvas",
+        dry_summary="Wet Canvas drying time would advance",
+    )
+    registry.register_adapter_action(
+        "paint.wet_canvas.dry",
+        "Dry the selected Painter material layer without flattening its strokes.",
+        "paint",
+        "paint_wet_canvas_dry",
+        params_schema=schema_object({"layer_id": {"type": "string"}}),
+        undo_label="Dry Painter Wet Canvas",
+        dry_summary="Wet Canvas would become dry",
+    )
+    registry.register_adapter_action(
         "paint.layer.select",
         "Select a Painter layer by id.",
         "paint",

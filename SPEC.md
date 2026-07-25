@@ -6519,11 +6519,15 @@ AI Script Edit MVP integration:
   compressed contact plateau, and stipple uses compact irregular deposits.
   Opaque later paint buries earlier relief in its solid contact region so
   underpaint ridges cannot show through the center of a top stroke. The current
-  implementation remains a deterministic 2.5D deposited-height renderer, not
-  a full wet-paint simulator: conservative fluid transport, active-wet versus
-  dry pigment layers, brush pickup, and physical pigment mixing remain explicit
-  future work. The research and acceptance contract is maintained in
-  `docs/PAINTER_PRODUCTION_ART_WORKSPACE_PLAN.md`.
+  implementation remains a deterministic 2.5D deposited-height renderer. The
+  2026-07-26 Wet Canvas v1 baseline adds editable, layer-owned RGB color
+  exchange with Mix/Bleed/Pickup controls, saved deterministic drying state,
+  Dry Now, canvas/PNG parity, Undo/Redo, and
+  `paint.wet_canvas.settings.set/advance/dry` actions. It is not a full
+  wet-paint simulator: conservative fluid transport, per-cell paint volume and
+  velocity, physical bidirectional pigment storage, and spectral pigment
+  mixing remain explicit future work. The research and acceptance contract is
+  maintained in `docs/PAINTER_PRODUCTION_ART_WORKSPACE_PLAN.md`.
 - The 2026-07-25 designer catalog pass expands Painter beyond oil with 22
   production presets across Basic, Drawing, Ink, Water Media, Airbrush,
   Concept, Texture, and FX. Renderer styles include soft/flat/pixel tips,
@@ -6541,9 +6545,11 @@ AI Script Edit MVP integration:
   PNG/PBR rendering; and exposes the same contract through `paint.stroke.draw`.
   Pressure changes basic-stroke width and Engine v2 bristle spread while X/Y
   tilt shifts/fans the contact patch. Mouse input remains full-pressure and
-  zero-tilt for visual compatibility. Brush-specific pigment mixing, device
-  calibration curves, and persistent wet-canvas fluid simulation remain later
-  engine work.
+  zero-tilt for visual compatibility. Wet Canvas v1 consumes these editable
+  strokes through deterministic RGB overlap exchange and bounded bleed while
+  keeping native material relief channels intact. Device calibration curves,
+  persistent GPU wet-canvas fluid simulation, and validated physical pigment
+  mixing remain later engine work.
 - The 2026-07-25 brush workspace pass follows the current Painter 2023 Brush
   Selector information architecture without copying proprietary brush
   resources. The selector uses a compact icon header rather than large text
