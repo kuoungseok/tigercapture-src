@@ -108,6 +108,14 @@ native Height/Normal/AO/Roughness channels.
 - `paint.view.zoom_area` magnifies and centers a normalized canvas rectangle.
 - `paint.state` reports layer type, layer material settings, active brush
   material capability, active material controls, and preview state.
+- `paint.study.analyze_reference/segment_regions/build_underpaint/
+  trace_contours/generate_strokes/compare_render/refine_region/quality_report`
+  provide one provider-neutral path for Claude, OpenAI, and local AI. The
+  pipeline creates stable standard/material layers and editable Engine v2
+  strokes; it never bakes the approved reference into final pixels.
+- AI study refinement uses measured render error and semantic focus regions
+  supplied as normalized boxes. Completion requires
+  `paint.study.quality_report.status=ready`.
 
 All mutations use the existing Painter undo stack.
 

@@ -33,6 +33,14 @@ TOOL_ACTIONS = (
     "paint.material.settings.set",
     "paint.material.preview.set",
     "paint.stroke.draw",
+    "paint.study.analyze_reference",
+    "paint.study.segment_regions",
+    "paint.study.build_underpaint",
+    "paint.study.trace_contours",
+    "paint.study.generate_strokes",
+    "paint.study.compare_render",
+    "paint.study.refine_region",
+    "paint.study.quality_report",
 )
 REFINE_ACTIONS = tuple(action for action in TOOL_ACTIONS if action != "paint.document.new")
 
@@ -394,6 +402,9 @@ Do not generate or return an image. Every visible pixel must be made by paint.* 
 Artwork brief:
 {args.prompt}
 
+Approved local reference path:
+{str(args.reference.resolve()) if args.reference else "(none)"}
+
 Build the work in deliberate passes:
 1. Create a {max(64, int(args.width))}x{max(64, int(args.height))} canvas with an appropriate ground.
 2. Establish broad value masses with fills and broad strokes.
@@ -406,6 +417,11 @@ Build the work in deliberate passes:
    Do not cover the entire image with uniform tubes or dots.
 6. Preserve the reference's large value structure, spatial depth, focal hierarchy, and
    characteristic directional rhythm.
+
+When an approved reference path exists, prefer the deterministic paint.study.* workflow:
+analyze with semantic focus regions, segment, underpaint, forms/detail/accent, contours,
+compare, refine measured error, and stop only when quality_report returns ready. Do not
+replace this workflow with hand-authored coordinate guesses.
 
 Inspect tool results for layer ids before targeting new layers. Finish only after a
 complete first-pass painting exists. This is pass 1.

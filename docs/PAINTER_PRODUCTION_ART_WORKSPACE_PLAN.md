@@ -699,6 +699,7 @@ Required action families:
 - `paint.transform.*`
 - `paint.clipboard.*`
 - `paint.reference.*`
+- `paint.study.*`
 - `paint.3d_blockout.*`
 - `paint.pbr.*`
 
@@ -722,6 +723,21 @@ Action rules:
   to the legacy PIL line renderer for current brush-engine strokes is a release
   blocker because it drops bristle, oil, pressure, and material appearance.
 - Tests must cover action schema, preview, execute, and sequence behavior.
+
+AI study reconstruction follows `docs/PAINTER_AI_STUDY_PIPELINE.md`. Providers
+must use `analyze_reference -> segment_regions -> build_underpaint ->
+generate_strokes -> trace_contours -> compare_render -> refine_region ->
+quality_report`; they may not replace reference analysis with improvised raw
+coordinates. The approved reference remains non-destructive and excluded from
+export. `quality_report.status=ready` is the only completion signal.
+
+The 2026-07-25 production proof reconstructs the approved moonlit-woman oil
+reference as 21,199 editable strokes across five generated study layers plus one
+refinement layer, with zero baked reference pixels. At 800x1000 it reports mean
+RGB absolute error `8.729/255`, luminance correlation `0.928`, structural-edge
+F1 `0.643`, face-region error `9.056/255`, and hand-region error `11.834/255`.
+These numbers are a repeatable proof corpus, not universal thresholds for every
+style.
 
 ## QA Gates
 

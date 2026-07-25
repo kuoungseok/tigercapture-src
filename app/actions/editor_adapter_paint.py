@@ -1750,6 +1750,257 @@ class PaintAdapterMixin:
             "applied_to_recent_colors": bool(apply),
         }
 
+    def _paint_study_runtime(self, dialog: Any) -> dict[str, Any]:
+        runtime = getattr(dialog, "_paint_study_runtime", None)
+        if not isinstance(runtime, dict):
+            raise ValueError("paint.study.analyze_reference must run first")
+        current_strokes = [
+            stroke
+            for stroke in dialog.canvas.embedded_strokes()
+            if str(getattr(stroke, "source_tool", "") or "").startswith("ai_study_")
+        ]
+        runtime["stroke_count"] = len(current_strokes)
+        layer_ids = {
+            str(getattr(layer, "layer_id", "") or "")
+            for layer in list(getattr(dialog, "_paint_layers", []) or [])
+        }
+        runtime["generated_layers"] = [
+            row
+            for row in list(
+                runtime.get("generated_layer_history")
+                or runtime.get("generated_layers")
+                or []
+            )
+            if str(row.get("layer_id") or "") in layer_ids
+        ]
+        return runtime
+
+    def paint_study_analyze_reference(
+        self,
+        *,
+        reference_path: str = "",
+        target_width: int = 800,
+        region_count: int = 12,
+        seed: int = 240725,
+        focus_regions: list[dict[str, Any]] | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        import time
+        from app.painter_ai_study import analyze_reference
+
+        started = time.perf_counter()
+        runtime, report = analyze_reference(
+            reference_path,
+            target_width=int(target_width or 800),
+            max_regions=int(region_count or 12),
+            seed=int(seed or 0),
+            focus_regions=focus_regions,
+        )
+        runtime.setdefault("timings", []).append(
+            {
+                "operation": "analyze_reference",
+                "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 3),
+            }
+        )
+        setattr(dialog, "_paint_study_runtime", runtime)
+        return {"study": report}
+
+    def paint_study_segment_regions(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ai_study import segment_report
+
+        return {"study": segment_report(self._paint_study_runtime(dialog))}
+
+    def _paint_study_add_phase(
+        self,
+        dialog: Any,
+        *,
+        phase: str,
+        max_strokes: int,
+        layer_name: str,
+        seed_offset: int,
+        refinement: bool = False,
+    ) -> dict[str, Any]:
+        from app.drawing import PaintLayer
+        from app.painter_ai_study import (
+            generate_phase_strokes,
+            generate_refinement_strokes,
+            quality_report,
+        )
+
+        runtime = self._paint_study_runtime(dialog)
+        import time
+        started = time.perf_counter()
+        label = str(layer_name or "").strip() or f"AI Study {str(phase).title()}"
+        next_serial = int(dialog._paint_layer_serial) + 1
+        layer_id = f"paint-layer-{next_serial}"
+        layer_type = "material" if str(phase) == "accent" else "standard"
+        if refinement:
+            generated = generate_refinement_strokes(
+                runtime,
+                layer_id=layer_id,
+                max_strokes=int(max_strokes or 5000),
+                seed_offset=int(seed_offset or 0),
+            )
+        else:
+            generated = generate_phase_strokes(
+                runtime,
+                phase=str(phase),
+                layer_id=layer_id,
+                max_strokes=int(max_strokes or 5000),
+                seed_offset=int(seed_offset or 0),
+            )
+        dialog._push_undo_state(label)
+        dialog._paint_layer_serial = next_serial
+        layer = PaintLayer(
+            layer_id=layer_id,
+            name=label[:80],
+            layer_type=layer_type,
+        )
+        dialog._paint_layers.append(layer)
+        dialog._active_paint_layer_id = layer_id
+        dialog._selected_layer_id = layer_id
+        existing = dialog.canvas.embedded_strokes()
+        dialog.canvas.set_strokes_snapshot([*existing, *generated])
+        runtime["stroke_count"] = int(runtime.get("stroke_count", 0)) + len(generated)
+        layer_report = {
+            "layer_id": layer_id,
+            "name": label[:80],
+            "phase": "refinement" if refinement else str(phase),
+            "stroke_count": len(generated),
+        }
+        runtime.setdefault("generated_layer_history", []).append(layer_report)
+        runtime.setdefault("generated_layers", []).append(layer_report)
+        runtime["last_comparison"] = {}
+        runtime.pop("error_map", None)
+        elapsed_ms = round((time.perf_counter() - started) * 1000.0, 3)
+        runtime.setdefault("timings", []).append(
+            {
+                "operation": "refine_region" if refinement else f"generate_{phase}",
+                "elapsed_ms": elapsed_ms,
+                "stroke_count": len(generated),
+            }
+        )
+        dialog._sync_canvas_layer_view()
+        dialog._update_inspector_counts()
+        return {
+            "study": quality_report(runtime),
+            "generated": {
+                "layer_id": layer_id,
+                "phase": "refinement" if refinement else str(phase),
+                "stroke_count": len(generated),
+                "elapsed_ms": elapsed_ms,
+            },
+        }
+
+    def paint_study_build_underpaint(
+        self,
+        *,
+        max_strokes: int = 5000,
+        layer_name: str = "AI Study Underpaint",
+        seed_offset: int = 0,
+    ) -> dict[str, Any]:
+        return self._paint_study_add_phase(
+            self._paint_dialog_owner(),
+            phase="underpaint",
+            max_strokes=max_strokes,
+            layer_name=layer_name,
+            seed_offset=seed_offset,
+        )
+
+    def paint_study_trace_contours(
+        self,
+        *,
+        max_strokes: int = 5000,
+        layer_name: str = "AI Study Contours",
+        seed_offset: int = 0,
+    ) -> dict[str, Any]:
+        return self._paint_study_add_phase(
+            self._paint_dialog_owner(),
+            phase="contour",
+            max_strokes=max_strokes,
+            layer_name=layer_name,
+            seed_offset=seed_offset,
+        )
+
+    def paint_study_generate_strokes(
+        self,
+        *,
+        phase: str = "forms",
+        max_strokes: int = 5000,
+        layer_name: str = "",
+        seed_offset: int = 0,
+    ) -> dict[str, Any]:
+        return self._paint_study_add_phase(
+            self._paint_dialog_owner(),
+            phase=phase,
+            max_strokes=max_strokes,
+            layer_name=layer_name,
+            seed_offset=seed_offset,
+        )
+
+    def paint_study_compare_render(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        runtime = self._paint_study_runtime(dialog)
+        import time
+        started = time.perf_counter()
+        from PIL import Image
+        from app.drawing import (
+            _pixmap_to_pil_rgba,
+            compose_pil_paint_overlays,
+        )
+        from app.painter_ai_study import compare_reference_to_render
+
+        width, height = int(runtime["width"]), int(runtime["height"])
+        background = dialog._export_background_pixmap()
+        if background is not None and not background.isNull():
+            base = _pixmap_to_pil_rgba(background).resize(
+                (width, height),
+                Image.Resampling.LANCZOS,
+            )
+        else:
+            base = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+        overlay = compose_pil_paint_overlays(
+            strokes=dialog._visible_strokes_for_export(),
+            bubbles=[],
+            stickers=[],
+            time_ms=int(dialog._time_ms),
+            frame_size=(width, height),
+            stroke_width_scale=1.0,
+        )
+        rendered = Image.alpha_composite(base.convert("RGBA"), overlay)
+        comparison = compare_reference_to_render(runtime, rendered)
+        runtime.setdefault("timings", []).append(
+            {
+                "operation": "compare_render",
+                "elapsed_ms": round((time.perf_counter() - started) * 1000.0, 3),
+                "stroke_count": int(runtime.get("stroke_count", 0)),
+            }
+        )
+        return {"study": comparison}
+
+    def paint_study_refine_region(
+        self,
+        *,
+        max_strokes: int = 5000,
+        layer_name: str = "AI Study Refinement",
+        seed_offset: int = 0,
+    ) -> dict[str, Any]:
+        return self._paint_study_add_phase(
+            self._paint_dialog_owner(),
+            phase="detail",
+            max_strokes=max_strokes,
+            layer_name=layer_name,
+            seed_offset=seed_offset,
+            refinement=True,
+        )
+
+    def paint_study_quality_report(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ai_study import quality_report
+
+        return {"study": quality_report(self._paint_study_runtime(dialog))}
+
 
 def _clamp_norm(value: Any, lo: float, hi: float) -> float:
     try:

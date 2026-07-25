@@ -6627,6 +6627,16 @@ AI Script Edit MVP integration:
   canonical Bristle Engine stroke renderer as the canvas; legacy PIL line
   rendering is not valid export parity. Image generation is optional and is not
   required for action-driven painting.
+- High-fidelity reference reconstruction is provider-neutral and uses
+  `paint.study.analyze_reference`, `segment_regions`, `build_underpaint`,
+  `generate_strokes`, `trace_contours`, `compare_render`, `refine_region`, and
+  `quality_report`. Claude, OpenAI, and local providers select semantic focus
+  regions and pass order; Tiger Studio performs deterministic Lab segmentation,
+  structure-flow planning, vector underpainting, editable Engine v2 stroke
+  creation, and measured error refinement. Providers must not invent the full
+  image as raw coordinates or bake the approved reference into export pixels.
+  They stop only when `quality_report.status=ready`. The durable rule and gate
+  contract is `docs/PAINTER_AI_STUDY_PIPELINE.md`.
 - Painter image and channel automation must stay exposed through
   `paint.crop.to_selection`, `paint.image.resize`, `paint.canvas.resize`,
   `paint.canvas.flip`, `paint.mirror.set`, `paint.channel.select`,

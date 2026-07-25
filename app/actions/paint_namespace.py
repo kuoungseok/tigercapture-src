@@ -1115,6 +1115,121 @@ def register_paint_actions(registry: Any) -> None:
         undo_label="Extract Painter reference palette",
         dry_summary="Painter reference palette would be extracted",
     )
+    study_session_params = {
+        "reference_path": {"type": "string"},
+        "target_width": {"type": "integer", "minimum": 256, "maximum": 1600},
+        "region_count": {"type": "integer", "minimum": 3, "maximum": 24},
+        "seed": {"type": "integer"},
+        "focus_regions": {
+            "type": "array",
+            "maxItems": 16,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string"},
+                    "bbox_norm": {
+                        "type": "array",
+                        "minItems": 4,
+                        "maxItems": 4,
+                        "items": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    },
+                    "priority": {"type": "number", "minimum": 0.1, "maximum": 3.0},
+                },
+                "required": ["bbox_norm"],
+                "additionalProperties": False,
+            },
+        },
+    }
+    registry.register_adapter_action(
+        "paint.study.analyze_reference",
+        "Analyze an approved reference for deterministic AI-guided Painter reconstruction.",
+        "paint",
+        "paint_study_analyze_reference",
+        params_schema=schema_object(study_session_params, required=("reference_path",)),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter study reference would be analyzed",
+    )
+    registry.register_adapter_action(
+        "paint.study.segment_regions",
+        "Read deterministic color and edge regions for the active Painter study.",
+        "paint",
+        "paint_study_segment_regions",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter study regions would be reported",
+    )
+    study_generate_params = {
+        "max_strokes": {"type": "integer", "minimum": 1, "maximum": 50000},
+        "layer_name": {"type": "string"},
+        "seed_offset": {"type": "integer"},
+    }
+    registry.register_adapter_action(
+        "paint.study.build_underpaint",
+        "Build broad editable underpainting strokes from the active Painter study.",
+        "paint",
+        "paint_study_build_underpaint",
+        params_schema=schema_object(study_generate_params),
+        undo_label="Build AI study underpaint",
+        dry_summary="editable underpainting strokes would be generated",
+    )
+    registry.register_adapter_action(
+        "paint.study.trace_contours",
+        "Trace high-value reference contours as editable Painter strokes.",
+        "paint",
+        "paint_study_trace_contours",
+        params_schema=schema_object(study_generate_params),
+        undo_label="Trace AI study contours",
+        dry_summary="editable contour strokes would be generated",
+    )
+    registry.register_adapter_action(
+        "paint.study.generate_strokes",
+        "Generate one editable Painter study stroke phase.",
+        "paint",
+        "paint_study_generate_strokes",
+        params_schema=schema_object(
+            {
+                **study_generate_params,
+                "phase": {
+                    "type": "string",
+                    "enum": ["underpaint", "forms", "detail", "contour", "accent"],
+                },
+            },
+            required=("phase",),
+        ),
+        undo_label="Generate AI study strokes",
+        dry_summary="editable study strokes would be generated",
+    )
+    registry.register_adapter_action(
+        "paint.study.compare_render",
+        "Compare the current real Painter render with the active approved reference.",
+        "paint",
+        "paint_study_compare_render",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter study render would be compared with its reference",
+    )
+    registry.register_adapter_action(
+        "paint.study.refine_region",
+        "Add deterministic editable strokes to the highest-error study regions.",
+        "paint",
+        "paint_study_refine_region",
+        params_schema=schema_object(study_generate_params),
+        undo_label="Refine AI study regions",
+        dry_summary="highest-error study regions would receive editable correction strokes",
+    )
+    registry.register_adapter_action(
+        "paint.study.quality_report",
+        "Report whether the active Painter study passes editability and fidelity gates.",
+        "paint",
+        "paint_study_quality_report",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter study quality gates would be reported",
+    )
     blockout_primitive = {
         "primitive_id": {"type": "string"},
         "kind": {
