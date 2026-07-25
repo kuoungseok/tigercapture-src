@@ -29,6 +29,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QCursor,
     QDrag,
     QImage,
     QIcon,
@@ -97,6 +98,42 @@ PAINT_BLOCKOUT_SHAPE_MIME = "application/x-tigerstudio-painter-blockout-shape"
 
 def _distance_qpointf(a: QPointF, b: QPointF) -> float:
     return math.hypot(float(a.x() - b.x()), float(a.y() - b.y()))
+
+
+def _zoom_tool_cursor(mode: str) -> QCursor:
+    """Return a high-contrast magnifier cursor with an in-lens mode mark."""
+    value = str(mode or "zoom_in")
+    if value not in {"zoom_in", "zoom_out"}:
+        return QCursor(Qt.CursorShape.CrossCursor)
+
+    pixmap = QPixmap(28, 28)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+    try:
+        shadow_pen = QPen(QColor(0, 0, 0, 220), 4.0)
+        shadow_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(shadow_pen)
+        painter.setBrush(QColor(20, 22, 26, 210))
+        painter.drawEllipse(QPointF(9.5, 9.5), 7.0, 7.0)
+        painter.drawLine(QPointF(14.4, 14.4), QPointF(23.0, 23.0))
+
+        outline_pen = QPen(QColor(245, 248, 252), 2.0)
+        outline_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(outline_pen)
+        painter.setBrush(QColor(38, 42, 49, 235))
+        painter.drawEllipse(QPointF(9.5, 9.5), 6.4, 6.4)
+        painter.drawLine(QPointF(14.2, 14.2), QPointF(22.4, 22.4))
+
+        mark_pen = QPen(QColor(255, 255, 255), 1.8)
+        mark_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(mark_pen)
+        painter.drawLine(QPointF(6.1, 9.5), QPointF(12.9, 9.5))
+        if value == "zoom_in":
+            painter.drawLine(QPointF(9.5, 6.1), QPointF(9.5, 12.9))
+    finally:
+        painter.end()
+    return QCursor(pixmap, 10, 10)
 
 
 _PAINT_DIALOG_QSS = """
@@ -1647,22 +1684,23 @@ class DrawingCanvas(QWidget):
             tool = "off"
         self._tool = tool
         self._refresh_mouse_transparency()
-        cursor = (
-            Qt.CursorShape.CrossCursor
-            if tool in (
-                "pen",
-                "eraser",
-                "path",
-                "rect_select",
-                "ellipse_select",
-                "crop",
-                "magic_select",
-                "zoom_in",
-                "zoom_out",
-                "zoom_area",
+        if tool in {"zoom_in", "zoom_out"}:
+            cursor = _zoom_tool_cursor(tool)
+        else:
+            cursor = (
+                Qt.CursorShape.CrossCursor
+                if tool in (
+                    "pen",
+                    "eraser",
+                    "path",
+                    "rect_select",
+                    "ellipse_select",
+                    "crop",
+                    "magic_select",
+                    "zoom_area",
+                )
+                else Qt.CursorShape.ArrowCursor
             )
-            else Qt.CursorShape.ArrowCursor
-        )
         self.setCursor(cursor)
         self.update()
 
@@ -12105,11 +12143,14 @@ class PaintDialog(QDialog):
             )
         host = getattr(self, "_canvas_host", None)
         if host is not None:
-            host.setCursor(
-                Qt.CursorShape.OpenHandCursor
-                if tool == "pan"
-                else Qt.CursorShape.ArrowCursor
-            )
+            if tool in {"zoom_in", "zoom_out"}:
+                host.setCursor(_zoom_tool_cursor(tool))
+            else:
+                host.setCursor(
+                    Qt.CursorShape.OpenHandCursor
+                    if tool == "pan"
+                    else Qt.CursorShape.ArrowCursor
+                )
         if hasattr(self, "_tool_status_label"):
             labels = {
                 "select": "Select / move objects",

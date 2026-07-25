@@ -85,6 +85,8 @@ native Height/Normal/AO/Roughness channels.
   for Material Paint layers.
 - The left toolbar uses a magnifier tool. A short click activates the current
   zoom mode; press-and-hold opens Zoom In, Zoom Out, Zoom Area, and Fit Canvas.
+- Active Zoom In and Zoom Out modes use magnifier cursors with an in-lens `+`
+  or `-` mark, so the click behavior is visible before the user acts.
 - Zoom Area magnifies and centers the dragged canvas rectangle without
   creating or changing a selection.
 - Choosing a material-compatible brush on a normal layer does not silently

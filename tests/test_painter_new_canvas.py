@@ -344,6 +344,14 @@ def test_standalone_painter_uses_vector_icons_and_full_brush_selector() -> None:
         action.text() for action in dialog._zoom_tool_menu.actions() if not action.isSeparator()
     ] == ["Zoom In", "Zoom Out", "Zoom Area", "Fit Canvas"]
     dialog._zoom_tool_menu.close()
+    dialog._set_zoom_tool_mode("zoom_in")
+    zoom_in_cursor = dialog.canvas.cursor().pixmap()
+    assert not zoom_in_cursor.isNull()
+    assert not dialog._canvas_host.cursor().pixmap().isNull()
+    dialog._set_zoom_tool_mode("zoom_out")
+    zoom_out_cursor = dialog.canvas.cursor().pixmap()
+    assert not zoom_out_cursor.isNull()
+    assert zoom_in_cursor.toImage() != zoom_out_cursor.toImage()
     dialog._set_zoom_tool_mode("zoom_area")
     assert dialog.canvas.tool() == "zoom_area"
     assert dialog.zoom_fit_rail_btn.isChecked()
