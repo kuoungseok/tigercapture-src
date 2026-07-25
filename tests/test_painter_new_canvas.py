@@ -221,7 +221,7 @@ def test_standalone_painter_pauses_repaints_while_window_moves() -> None:
 
 def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     app = _app()
-    from PySide6.QtCore import QPointF, QSize, Qt
+    from PySide6.QtCore import QPoint, QPointF, QSize, Qt
     from PySide6.QtWidgets import QComboBox, QListView, QListWidget
 
     from app.drawing import (
@@ -318,7 +318,7 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert "preset" not in dialog.pen_btn.toolTip().casefold()
     assert dialog._brush_preset_button.objectName() == "PaintBrushPresetButton"
     assert dialog._brush_preset_button.text() == "Brush Selector"
-    assert dialog._brush_preset_button.toolTip() == "Open Brush Selector"
+    assert dialog._brush_preset_button.toolTip() == "Show Brush Selector below"
     assert not dialog._brush_preset_button.icon().isNull()
     assert dialog.eraser_btn.text() == ""
     assert dialog.eraser_btn.toolTip()
@@ -416,9 +416,17 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     } <= brush_styles
     dialog._brush_preset_button.click()
     app.processEvents()
-    assert dialog._brush_panel_stack.currentWidget() is dialog._brush_library_page
-    assert dialog._paint_brush_detail_panel.isHidden() is False
-    assert dialog._brush_preset_menu is None
+    assert dialog._paint_brush_detail_panel.isHidden() is True
+    assert dialog._brush_preset_menu is not None
+    assert dialog._brush_preset_menu.isVisible()
+    popup_origin = dialog._brush_preset_menu.pos()
+    button_bottom = dialog._brush_preset_button.mapToGlobal(
+        QPoint(0, dialog._brush_preset_button.height())
+    )
+    assert popup_origin.y() >= button_bottom.y()
+    dialog._brush_preset_menu.close()
+    app.processEvents()
+    assert dialog._brush_preset_button.isChecked() is False
     assert dialog.pen_btn.isDown() is False
     assert isinstance(dialog.width_slider, StudioSlider)
     assert isinstance(dialog.opacity_slider, StudioSlider)
@@ -478,7 +486,7 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert dialog._paint_status_bar.height() <= 24
     assert dialog._status_zoom_spin.value() == 100
     assert dialog._status_document_label.text() == "640 x 360 px"
-    assert dialog._paint_brush_detail_panel.isHidden() is False
+    assert dialog._paint_brush_detail_panel.isHidden() is True
     assert dialog._paint_reference_panel.isHidden()
     assert dialog._paint_3d_blockout_panel.isHidden()
     assert not hasattr(dialog, "toggle_channel_visibility_btn")

@@ -6533,8 +6533,11 @@ AI Script Edit MVP integration:
   `paint.state`; `paint.brush.library.view` controls tab/category/single or
   multi-filter/search/compact state and `paint.brush.favorite.set` controls
   favorites. The Brush tool options bar exposes `Brush Selector` at the former
-  `Brush Preset` position and opens the full selector directly rather than a
-  second preset-grid popup. Painter numeric controls use the shared
+  `Brush Preset` position. Clicking it opens a compact category/preset grid
+  directly below that button and never redirects the user to the right
+  inspector. Re-clicking closes the grid and choosing a brush applies it and
+  collapses the grid. The right inspector is reserved for Advanced Brush
+  Controls. Painter numeric controls use the shared
   `StudioSlider`; hue/saturation/value controls remain dedicated color
   gradients because the gradient itself conveys the edited channel.
   The initial library is `Tiger Studio Brushes`; external Painter libraries,

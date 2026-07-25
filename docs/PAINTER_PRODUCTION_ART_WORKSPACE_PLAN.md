@@ -262,10 +262,13 @@ Official layout references:
 
 Implemented Painter 2023 layout contract (2026-07-25):
 
-- `Brush Selector` is a real stacked page with a restrained icon header,
-  library selector, favorite toggle, search, simultaneous checkable
-  Favorites/Painter Masters/Stamps/Watercolor/Thick Paint filters, and an
-  empty-state-aware recent strip.
+- The top-options `Brush Selector` opens a compact category/preset grid directly
+  below its button. It never shifts focus to the right inspector; re-click
+  closes it and choosing a brush applies then collapses it.
+- The maintained full library model still owns library selection, favorites,
+  search, simultaneous Favorites/Painter Masters/Stamps/Watercolor/Thick Paint
+  filters, and the empty-state-aware recent strip for automation/state and
+  future dedicated selector surfaces.
 - The full view uses compact categories on the left and named stroke-preview
   rows on the right. Compact mode hides library/category/recent chrome while
   preserving search and brush variants. The selected-brush footer is shallow
@@ -274,9 +277,10 @@ Implemented Painter 2023 layout contract (2026-07-25):
   current-brush controls. Small selector/control icons switch actual pages
   without a large decorative tab row.
 - The Brush tool options bar labels the former preset entry point `Brush
-  Selector` and focuses the full selector directly. Brush and other ordinary
-  Painter numeric controls use the shared `StudioSlider`; HSV channel sliders
-  retain their functional color gradients.
+  Selector` and anchors its dropdown immediately below. The right inspector is
+  reserved for `Advanced Brush Controls`. Brush and other ordinary Painter
+  numeric controls use the shared `StudioSlider`; HSV channel sliders retain
+  their functional color gradients.
 - `paint.state` reports library/search/filter-list/compact/favorite/recent state.
   `paint.brush.library.view` and `paint.brush.favorite.set` expose the same
   workflow to Claude and local automation.

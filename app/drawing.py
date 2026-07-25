@@ -7165,9 +7165,10 @@ class PaintDialog(QDialog):
         brush_options_row.setSpacing(5)
         self._brush_preset_button = QPushButton("Brush Selector")
         self._brush_preset_button.setObjectName("PaintBrushPresetButton")
+        self._brush_preset_button.setCheckable(True)
         self._brush_preset_button.setIcon(app_icon("list", size=13, color="#EEEEEE"))
         self._brush_preset_button.setIconSize(icon_size(13))
-        self._brush_preset_button.setToolTip("Open Brush Selector")
+        self._brush_preset_button.setToolTip("Show Brush Selector below")
         self._brush_preset_button.clicked.connect(self._focus_brush_selector)
         brush_options_row.addWidget(self._brush_preset_button)
         size_label = QLabel("Size")
@@ -10903,12 +10904,7 @@ class PaintDialog(QDialog):
             self._tool_status_label.setText("Advanced brush controls")
 
     def _focus_brush_selector(self) -> None:
-        self._set_brush_tab("presets")
-        self._show_brush_panel()
-        if hasattr(self, "brush_library_list"):
-            self.brush_library_list.setFocus()
-        elif hasattr(self, "pen_btn"):
-            self.pen_btn.setFocus()
+        self._show_brush_button_menu()
         if hasattr(self, "_tool_status_label"):
             self._tool_status_label.setText("Brush Selector")
 
@@ -10926,8 +10922,21 @@ class PaintDialog(QDialog):
         button = getattr(self, "_brush_preset_button", None)
         if button is None:
             return
+        existing = getattr(self, "_brush_preset_menu", None)
+        if existing is not None and existing.isVisible():
+            existing.close()
+            button.setChecked(False)
+            return
+        panel = getattr(self, "_paint_brush_detail_panel", None)
+        title = getattr(self, "_paint_brush_section_title", None)
+        if panel is not None:
+            panel.hide()
+        if title is not None:
+            title.hide()
         menu = self._build_brush_button_menu()
         self._brush_preset_menu = menu
+        button.setChecked(True)
+        menu.aboutToHide.connect(lambda b=button: b.setChecked(False))
         menu.popup(button.mapToGlobal(QPoint(0, button.height() + 4)))
 
     def _make_palette_button(
