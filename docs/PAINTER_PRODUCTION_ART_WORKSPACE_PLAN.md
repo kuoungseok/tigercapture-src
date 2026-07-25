@@ -452,31 +452,39 @@ replacement.
 
 Primitive set:
 
-- Box
+- Cube
+- Sphere
+- Cylinder
+- Cone
+- Plane
 - Arch, only as a simple doorway/window/opening helper
 
-Boxes are the primary primitive. Artists should create floors, walls, desks,
-stairs, buildings, shelves, and prop masses by stretching, widening, rotating,
-and duplicating boxes instead of choosing many specialized primitives.
+Cube remains the primary massing primitive. The compact Unreal-style Shapes
+palette may be clicked for a focus-point placement or dragged onto the canvas;
+drop placement uses screen-to-world unprojection against the Z-up ground plane.
 
 Interaction:
 
-- Move / rotate / scale gizmo.
+- Canvas mode toggle: Paint / 3D Place.
+- Unreal-style X-red/Y-green/Z-blue move / rotate / scale gizmo; Z is up.
 - Grid snap.
 - Duplicate.
 - Align to ground.
-- Camera orbit / pan / zoom.
+- Camera orbit / pan / W-A-S-D travel / wheel zoom.
 - Camera FOV control.
 - Simple camera presets: front, side, top, perspective.
 - Horizon line and vanishing point overlays.
 
 Draw-over modes:
 
-- Solid clay value.
+- Opaque white Lit material by default.
+- Configurable directional light, defaulting to 45 degrees horizontally and
+  vertically.
+- Independent Lit and Shadow toggles; shadows default on.
 - Wireframe.
 - Transparent overlay.
 - Silhouette.
-- Depth/fog guide.
+- Independent fog and grayscale depth diagnostic toggles.
 - Shadow guide.
 - Line extraction.
 - Value snapshot.
@@ -484,12 +492,36 @@ Draw-over modes:
 
 Rules:
 
-- 3D blockout data stays separate from raster paint layers until baked.
-- It must be hideable without changing the painting document.
+- 3D blockout data stays separate from raster strokes, but appears as a bottom
+  `3D Blockout` reference layer with normal visibility and opacity controls.
+- Paint strokes must composite above the 3D reference.
+- Paint mode uses a retained 2D snapshot cache for the current 3D guide; edits
+  in 3D Place invalidate it.
 - It must be reachable from optional panel/menu/action surfaces.
 - 3D should help composition and perspective, not dominate the drawing UI.
 - Keep the interaction closer to a standard 3D transform gizmo than to a
   modeling package: move, rotate, scale, camera orbit/pan/zoom, and FOV only.
+- AI/MCP may control the same material preview through
+  `paint.3d_blockout.material_preview`.
+
+### Future Figure Pose Mode
+
+Painter should later add a separate `Figure` placement mode for character
+sketch reference. It reuses the canvas camera, Z-up gizmo, depth/fog preview,
+and bottom reference-layer composition, but must not turn the basic Shapes
+palette into a character editor.
+
+- Use a GitHub-hosted rigged human mannequin only after its redistribution and
+  commercial-use license is verified; keep durable models under
+  `external/assets`, never `debugCapture`.
+- Provide bone selection and local joint rotation, root move/rotate/scale,
+  mirrored pose, reset pose, and saved pose presets.
+- Offer proportion presets and readable silhouette/value/depth views for
+  drawing reference rather than skinning, animation, or character production.
+- Expose pose state and joint edits through dedicated actions so local AI can
+  construct a pose without hard-coded screen coordinates.
+- Keep the mannequin scene editable while Paint mode consumes a retained 2D
+  guide cache, matching the 3D Blockout paint-over contract.
 
 ## Typography / PBR / Video Boundary
 

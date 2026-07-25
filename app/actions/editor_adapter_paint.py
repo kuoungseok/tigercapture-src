@@ -1080,6 +1080,44 @@ class PaintAdapterMixin:
         self._register_change("Adjust Painter 3D blockout camera")
         return self._paint_3d_blockout_payload(scene, preview_width=preview_width, preview_height=preview_height)
 
+    def paint_3d_blockout_material_preview(
+        self,
+        *,
+        material_lit: bool | None = None,
+        show_shadows: bool | None = None,
+        show_fog: bool | None = None,
+        show_depth: bool | None = None,
+        light_yaw_degrees: float | None = None,
+        light_pitch_degrees: float | None = None,
+        preview_width: int = 640,
+        preview_height: int = 360,
+    ) -> dict[str, Any]:
+        from dataclasses import replace
+
+        dialog = self._paint_dialog_owner()
+        scene = self._paint_3d_blockout_scene(dialog)
+        changes: dict[str, Any] = {}
+        if material_lit is not None:
+            changes["material_lit"] = bool(material_lit)
+        if show_shadows is not None:
+            changes["show_shadows"] = bool(show_shadows)
+        if show_fog is not None:
+            changes["show_fog"] = bool(show_fog)
+        if show_depth is not None:
+            changes["show_depth"] = bool(show_depth)
+        if light_yaw_degrees is not None:
+            changes["light_yaw_degrees"] = float(light_yaw_degrees)
+        if light_pitch_degrees is not None:
+            changes["light_pitch_degrees"] = float(light_pitch_degrees)
+        scene = replace(scene, **changes).normalized()
+        self._store_paint_3d_blockout_scene(dialog, scene)
+        self._register_change("Adjust Painter 3D blockout material preview")
+        return self._paint_3d_blockout_payload(
+            scene,
+            preview_width=preview_width,
+            preview_height=preview_height,
+        )
+
     def paint_3d_blockout_camera_preset(
         self,
         *,
@@ -1165,6 +1203,14 @@ class PaintAdapterMixin:
 
     def _store_paint_3d_blockout_scene(self, dialog: Any, scene: Any) -> None:
         setattr(dialog, "_painter_3d_blockout_scene", scene.to_dict())
+        setattr(dialog, "_painter_3d_blockout_flat_cache", None)
+        if scene.to_dict().get("primitive_count", 0):
+            ensure_layer = getattr(dialog, "_ensure_3d_blockout_layer", None)
+            if callable(ensure_layer):
+                try:
+                    ensure_layer()
+                except Exception:
+                    pass
         refresh = getattr(dialog, "_refresh_3d_blockout_panel", None)
         if callable(refresh):
             try:
@@ -1218,9 +1264,17 @@ class PaintAdapterMixin:
             },
             "gizmo_contract": {
                 "standard_3d_gizmo": True,
+                "axis_convention": "z_up_x_red_y_green_z_blue",
                 "object_modes": ["move", "rotate", "scale"],
-                "camera_modes": ["orbit", "pan", "zoom_distance", "fov"],
-                "primitive_scope": ["box", "arch"],
+                "camera_modes": ["orbit", "pan", "wasd", "wheel_zoom", "zoom_distance", "fov"],
+                "primitive_scope": ["box", "sphere", "cylinder", "cone", "plane", "arch"],
+                "drop_placement": "screen_to_world_ground_plane",
+            },
+            "paint_over_contract": {
+                "reference_layer": "paint-layer-3d-blockout",
+                "paint_strokes_above_reference": True,
+                "paint_mode_flat_cache": True,
+                "scene_remains_editable": True,
             },
         }
 

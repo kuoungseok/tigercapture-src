@@ -1037,7 +1037,7 @@ def register_paint_actions(registry: Any) -> None:
         "primitive_id": {"type": "string"},
         "kind": {
             "type": "string",
-            "enum": ["box", "arch"],
+            "enum": ["box", "sphere", "cylinder", "cone", "plane", "arch"],
         },
         "name": {"type": "string"},
         "x": {"type": "number"},
@@ -1176,6 +1176,26 @@ def register_paint_actions(registry: Any) -> None:
         ),
         undo_label="Adjust Painter 3D blockout camera",
         dry_summary="Painter 3D blockout camera would be adjusted",
+    )
+    registry.register_adapter_action(
+        "paint.3d_blockout.material_preview",
+        "Adjust the Painter blockout lit-white material, shadows, and directional light.",
+        "paint",
+        "paint_3d_blockout_material_preview",
+        params_schema=schema_object(
+            {
+                "material_lit": {"type": "boolean"},
+                "show_shadows": {"type": "boolean"},
+                "show_fog": {"type": "boolean"},
+                "show_depth": {"type": "boolean"},
+                "light_yaw_degrees": {"type": "number", "minimum": -180.0, "maximum": 180.0},
+                "light_pitch_degrees": {"type": "number", "minimum": 5.0, "maximum": 85.0},
+                "preview_width": {"type": "integer", "minimum": 64, "maximum": 8192},
+                "preview_height": {"type": "integer", "minimum": 64, "maximum": 8192},
+            }
+        ),
+        undo_label="Adjust Painter 3D blockout material preview",
+        dry_summary="Painter 3D blockout material preview would be adjusted",
     )
     registry.register_adapter_action(
         "paint.3d_blockout.camera_preset",

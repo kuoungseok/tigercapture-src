@@ -327,6 +327,8 @@ def render_blockout_scene_opengl_qimage(scene: Any, width: int = 640, height: in
         scene_payload = projection.get("scene") if isinstance(projection.get("scene"), dict) else {}
         if bool(scene_payload.get("show_grid", True)):
             _draw_grid(GL, target_w, target_h)
+        for shadow in projection.get("shadows", []) or []:
+            _draw_shadow(GL, shadow, target_w, target_h)
         for face in projection.get("faces", []) or []:
             _draw_face(GL, face, target_w, target_h)
         for edge in projection.get("edges", []) or []:
@@ -532,12 +534,53 @@ def _draw_grid(GL: Any, width: int, height: int) -> None:
 
 
 def _draw_face(GL: Any, face: dict[str, Any], width: int, height: int) -> None:
-    rgba = _hex_to_rgba(str(face.get("color") or "#7C8CFF"), float(face.get("opacity", 0.72) or 0.72))
+    if bool(face.get("depth_preview", False)):
+        value = max(0.0, min(1.0, float(face.get("depth_value", 1.0) or 1.0)))
+        rgba = (value, value, value, float(face.get("opacity", 1.0) or 1.0))
+    else:
+        rgba = _hex_to_rgba(str(face.get("color") or "#F2F2F2"), float(face.get("opacity", 1.0) or 1.0))
+    shade = max(0.0, min(1.0, float(face.get("shade", 1.0) or 1.0)))
+    fog = 0.0 if bool(face.get("depth_preview", False)) else max(0.0, min(0.75, float(face.get("fog", 0.0) or 0.0)))
+    fog_rgb = (58 / 255.0, 60 / 255.0, 63 / 255.0)
+    shade = 1.0 if bool(face.get("depth_preview", False)) else shade
+    rgba = (
+        rgba[0] * shade * (1.0 - fog) + fog_rgb[0] * fog,
+        rgba[1] * shade * (1.0 - fog) + fog_rgb[1] * fog,
+        rgba[2] * shade * (1.0 - fog) + fog_rgb[2] * fog,
+        rgba[3],
+    )
     GL.glColor4f(*rgba)
     GL.glBegin(GL.GL_POLYGON)
     try:
         for x, y in face.get("points", []) or []:
             _gl_vertex(GL, float(x), float(y), width, height)
+    finally:
+        GL.glEnd()
+
+
+def _draw_shadow(GL: Any, shadow: dict[str, Any], width: int, height: int) -> None:
+    from math import cos, pi, sin
+
+    rect = shadow.get("rect")
+    if not isinstance(rect, (list, tuple)) or len(rect) < 4:
+        return
+    x, y, rect_w, rect_h = (float(value) for value in rect[:4])
+    cx = x + rect_w * 0.5
+    cy = y + rect_h * 0.5
+    opacity = max(0.0, min(0.5, float(shadow.get("opacity", 0.25) or 0.25)))
+    GL.glColor4f(0.0, 0.0, 0.0, opacity)
+    GL.glBegin(GL.GL_TRIANGLE_FAN)
+    try:
+        _gl_vertex(GL, cx, cy, width, height)
+        for index in range(25):
+            angle = 2.0 * pi * index / 24.0
+            _gl_vertex(
+                GL,
+                cx + cos(angle) * rect_w * 0.5,
+                cy + sin(angle) * rect_h * 0.5,
+                width,
+                height,
+            )
     finally:
         GL.glEnd()
 
@@ -562,15 +605,15 @@ def _gl_vertex(GL: Any, x: float, y: float, width: int, height: int) -> None:
 
 
 def _hex_to_rgba(value: str, opacity: float) -> tuple[float, float, float, float]:
-    text = str(value or "#7C8CFF").strip()
+    text = str(value or "#F2F2F2").strip()
     if not (text.startswith("#") and len(text) == 7):
-        text = "#7C8CFF"
+        text = "#F2F2F2"
     try:
         r = int(text[1:3], 16) / 255.0
         g = int(text[3:5], 16) / 255.0
         b = int(text[5:7], 16) / 255.0
     except Exception:
-        r, g, b = (124 / 255.0, 140 / 255.0, 1.0)
+        r, g, b = (242 / 255.0, 242 / 255.0, 242 / 255.0)
     a = max(0.05, min(1.0, float(opacity)))
     return (r, g, b, a)
 

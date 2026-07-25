@@ -105,6 +105,7 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
         "paint.3d_blockout.align_ground",
         "paint.3d_blockout.snap",
         "paint.3d_blockout.camera",
+        "paint.3d_blockout.material_preview",
         "paint.3d_blockout.camera_preset",
         "paint.3d_blockout.bake",
         "paint.pbr.preview",
@@ -644,6 +645,9 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     assert blockout["result"]["gpu_contract"]["qpainter_fallback"] is True
     assert blockout["result"]["ui_guardrails"]["preserve_texture_lab_entry_points"] is True
     assert blockout["result"]["ui_guardrails"]["layers_channels_paths_remain_primary_dock"] is True
+    assert blockout["result"]["gizmo_contract"]["axis_convention"] == "z_up_x_red_y_green_z_blue"
+    assert blockout["result"]["gizmo_contract"]["drop_placement"] == "screen_to_world_ground_plane"
+    assert blockout["result"]["paint_over_contract"]["paint_strokes_above_reference"] is True
     primitive_id = blockout["result"]["scene"]["primitives"][0]["id"]
     updated_blockout = registry.execute(
         "paint.3d_blockout.update",
@@ -663,7 +667,7 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
         {"primitive_id": primitive_id},
     ).to_dict()
     assert grounded_blockout["ok"]
-    assert grounded_blockout["result"]["scene"]["primitives"][0]["position"][1] == 0.0
+    assert grounded_blockout["result"]["scene"]["primitives"][0]["position"][2] == 0.0
     snap_blockout = registry.execute(
         "paint.3d_blockout.snap",
         {"enabled": True, "primitive_id": primitive_id},
@@ -677,6 +681,23 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     assert camera["ok"]
     assert camera["result"]["scene"]["camera"]["fov_degrees"] == 35.0
     assert camera["result"]["scene"]["camera"]["target"][0] == 0.5
+    material = registry.execute(
+        "paint.3d_blockout.material_preview",
+        {
+            "material_lit": False,
+            "show_shadows": False,
+            "show_fog": True,
+            "show_depth": True,
+            "light_yaw_degrees": 70,
+            "light_pitch_degrees": 30,
+        },
+    ).to_dict()
+    assert material["ok"]
+    assert material["result"]["scene"]["material_lit"] is False
+    assert material["result"]["scene"]["show_shadows"] is False
+    assert material["result"]["scene"]["show_fog"] is True
+    assert material["result"]["scene"]["show_depth"] is True
+    assert material["result"]["scene"]["light_yaw_degrees"] == 70.0
     camera_preset = registry.execute(
         "paint.3d_blockout.camera_preset",
         {"preset": "top"},

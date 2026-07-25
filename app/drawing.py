@@ -27,6 +27,7 @@ from PySide6.QtCore import (
 from PySide6.QtGui import (
     QBrush,
     QColor,
+    QDrag,
     QImage,
     QIcon,
     QLinearGradient,
@@ -88,6 +89,7 @@ PAINT_CLIPBOARD_IMAGE_DIR = Path("external/assets/paint_clipboard")
 PAINT_REFERENCE_IMAGE_DIR = Path("external/assets/painter_references")
 PAINT_MAX_ZOOM_PERCENT = 800
 PAINT_PIXEL_GRID_FINE_ZOOM_PERCENT = 800
+PAINT_BLOCKOUT_SHAPE_MIME = "application/x-tigerstudio-painter-blockout-shape"
 
 
 def _distance_qpointf(a: QPointF, b: QPointF) -> float:
@@ -147,6 +149,35 @@ QFrame#PaintStatusBar {
 QFrame#PaintStatusBar QLabel {
     color: #d8d8d8;
     font-size: 10px;
+}
+
+QWidget#PaintCanvasModeBar {
+    background-color: #2f3134;
+    border-bottom: 1px solid #222427;
+}
+
+QPushButton#PaintCanvasModeButton,
+QPushButton#PaintBlockoutModeButton {
+    background-color: transparent;
+    color: #cfd2d7;
+    border: 1px solid transparent;
+    border-radius: 2px;
+    padding: 2px 7px;
+    min-height: 20px;
+    font-size: 10px;
+    font-weight: 600;
+}
+
+QPushButton#PaintCanvasModeButton:hover,
+QPushButton#PaintBlockoutModeButton:hover {
+    background-color: #45484d;
+}
+
+QPushButton#PaintCanvasModeButton:checked,
+QPushButton#PaintBlockoutModeButton:checked {
+    background-color: #505761;
+    color: #ffffff;
+    border-color: #69727f;
 }
 
 QFrame#PaintStatusBar QSpinBox {
@@ -573,12 +604,6 @@ QFrame#PaintBlockoutPanel {
 
 QFrame#PaintReferencePanel {
     background-color: #11151b;
-    border: 1px solid rgba(178, 186, 202, 24);
-    border-radius: 6px;
-}
-
-QLabel#PaintBlockoutPreview {
-    background-color: #080b11;
     border: 1px solid rgba(178, 186, 202, 24);
     border-radius: 6px;
 }
@@ -5730,6 +5755,8 @@ class PaintDialog(QDialog):
         self._painter_3d_blockout_selected_id = ""
         self._painter_3d_blockout_syncing = False
         self._painter_3d_blockout_drag: dict | None = None
+        self._canvas_workspace_mode = "paint"
+        self._blockout_transform_mode = "select"
         self._painter_3d_blockout_controls: dict[str, QSpinBox] = {}
         self._painter_3d_blockout_renderer_status: dict = {
             "renderer": "painter_blockout_qpainter_v1",
@@ -6716,8 +6743,11 @@ class PaintDialog(QDialog):
 
         self.blockout_rail_btn = QPushButton("3D")
         self.blockout_rail_btn.setObjectName("PaintTool")
+        self.blockout_rail_btn.setCheckable(True)
         self.blockout_rail_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.blockout_rail_btn.clicked.connect(self._focus_3d_blockout_panel)
+        self.blockout_rail_btn.clicked.connect(
+            lambda: self._set_canvas_workspace_mode("3d_place")
+        )
 
         self._configure_paint_tool_icon_button(
             self.select_btn,
@@ -6846,24 +6876,67 @@ class PaintDialog(QDialog):
         canvas_layout.setContentsMargins(0, 0, 0, 0)
         canvas_layout.setSpacing(0)
 
-        canvas_bar = QHBoxLayout()
+        canvas_mode_bar = QWidget(canvas_frame)
+        canvas_mode_bar.setObjectName("PaintCanvasModeBar")
+        canvas_bar = QHBoxLayout(canvas_mode_bar)
         canvas_bar.setContentsMargins(0, 0, 0, 0)
+        canvas_bar.setSpacing(2)
         canvas_title = QLabel("CANVAS")
         canvas_title.setObjectName("PaintSectionTitle")
         self._tool_status_label = QLabel("Pen")
         self._tool_status_label.setObjectName("PaintMeta")
-        canvas_bar.addWidget(canvas_title)
+        self._canvas_mode_paint_btn = QPushButton("Paint")
+        self._canvas_mode_paint_btn.setObjectName("PaintCanvasModeButton")
+        self._canvas_mode_paint_btn.setCheckable(True)
+        self._canvas_mode_paint_btn.setChecked(True)
+        self._canvas_mode_paint_btn.clicked.connect(
+            lambda: self._set_canvas_workspace_mode("paint")
+        )
+        self._canvas_mode_3d_btn = QPushButton("3D Place")
+        self._canvas_mode_3d_btn.setObjectName("PaintCanvasModeButton")
+        self._canvas_mode_3d_btn.setCheckable(True)
+        self._canvas_mode_3d_btn.clicked.connect(
+            lambda: self._set_canvas_workspace_mode("3d_place")
+        )
+        canvas_bar.addWidget(self._canvas_mode_paint_btn)
+        canvas_bar.addWidget(self._canvas_mode_3d_btn)
+        self._blockout_transform_buttons: dict[str, QPushButton] = {}
+        self._blockout_transform_host = QWidget(canvas_mode_bar)
+        self._blockout_transform_host.setObjectName("PaintBlockoutTransformHost")
+        transform_bar = QHBoxLayout(self._blockout_transform_host)
+        transform_bar.setContentsMargins(5, 0, 0, 0)
+        transform_bar.setSpacing(1)
+        for label, mode in (
+            ("Select", "select"),
+            ("Move", "move"),
+            ("Rotate", "rotate"),
+            ("Scale", "scale"),
+        ):
+            button = QPushButton(label)
+            button.setObjectName("PaintBlockoutModeButton")
+            button.setCheckable(True)
+            button.setChecked(mode == "select")
+            button.clicked.connect(
+                lambda _checked=False, value=mode: self._set_3d_blockout_transform_mode(value)
+            )
+            transform_bar.addWidget(button)
+            self._blockout_transform_buttons[mode] = button
+        canvas_bar.addWidget(self._blockout_transform_host)
         canvas_bar.addStretch(1)
+        canvas_bar.addWidget(canvas_title)
         canvas_bar.addWidget(self._tool_status_label)
         self._canvas_title_label = canvas_title
         canvas_title.hide()
         self._tool_status_label.hide()
+        self._blockout_transform_host.hide()
 
         canvas_host = QWidget()
         canvas_host.setStyleSheet("background-color: #050607; border-radius: 8px;")
         canvas_host.setSizePolicy(
             QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding
         )
+        canvas_host.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
+        canvas_host.setAcceptDrops(True)
         canvas_host.setMouseTracking(True)
         canvas_host.installEventFilter(self)
         self._canvas_host = canvas_host
@@ -6871,6 +6944,7 @@ class PaintDialog(QDialog):
         self._bg_label = QLabel(canvas_host)
         self._bg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._bg_label.setStyleSheet("background-color: #050607;")
+        self._bg_label.setAcceptDrops(True)
         self._bg_label.installEventFilter(self)
         self._bg_pixmap_source = bg
         display_bg = self._display_background_pixmap()
@@ -6903,7 +6977,9 @@ class PaintDialog(QDialog):
         self.canvas.repaint_requested.connect(self._update_path_list)
         self.canvas.selection_probe_requested.connect(self._on_canvas_selection_probe)
         self.canvas.installEventFilter(self)
+        self.canvas.setAcceptDrops(True)
 
+        canvas_layout.addWidget(canvas_mode_bar)
         canvas_layout.addWidget(canvas_host, stretch=1)
         workspace.addWidget(canvas_frame, stretch=1)
 
@@ -8140,7 +8216,7 @@ class PaintDialog(QDialog):
     def _build_3d_blockout_panel(self) -> QFrame:
         panel = QFrame()
         panel.setObjectName("PaintBlockoutPanel")
-        panel.setMinimumHeight(360)
+        panel.setMinimumHeight(242)
         panel.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum)
         layout = QVBoxLayout(panel)
         layout.setContentsMargins(8, 8, 8, 8)
@@ -8150,24 +8226,56 @@ class PaintDialog(QDialog):
         header.setContentsMargins(0, 0, 0, 0)
         title = QLabel("3D BLOCKOUT")
         title.setObjectName("PaintSectionTitle")
-        self._blockout_status_label = QLabel("box-first guide")
+        self._blockout_status_label = QLabel("canvas editing")
         self._blockout_status_label.setObjectName("PaintBlockoutStatus")
         header.addWidget(title)
         header.addStretch(1)
         header.addWidget(self._blockout_status_label)
         layout.addLayout(header)
 
+        primitive_title = QLabel("Place Shapes")
+        primitive_title.setObjectName("PaintColorSectionLabel")
+        layout.addWidget(primitive_title)
+        primitive_grid = QGridLayout()
+        primitive_grid.setContentsMargins(0, 0, 0, 0)
+        primitive_grid.setHorizontalSpacing(3)
+        primitive_grid.setVerticalSpacing(3)
+        self._blockout_primitive_buttons: dict[str, QPushButton] = {}
+        for index, (label, kind) in enumerate(
+            (
+                ("Cube", "box"),
+                ("Sphere", "sphere"),
+                ("Cylinder", "cylinder"),
+                ("Cone", "cone"),
+                ("Plane", "plane"),
+                ("Arch", "arch"),
+            )
+        ):
+            button = QPushButton(label)
+            button.setObjectName("PaintCustomColor")
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            button.setToolTip(f"Place {label} on the Painter canvas")
+            button.setProperty("blockoutShapeKind", kind)
+            button.installEventFilter(self)
+            button.clicked.connect(
+                lambda _checked=False, value=kind: self._add_3d_blockout_primitive(value)
+            )
+            primitive_grid.addWidget(button, index // 3, index % 3)
+            self._blockout_primitive_buttons[kind] = button
+        self.blockout_add_box_btn = self._blockout_primitive_buttons["box"]
+        self.blockout_add_arch_btn = self._blockout_primitive_buttons["arch"]
+        layout.addLayout(primitive_grid)
+
         action_row = QHBoxLayout()
         action_row.setContentsMargins(0, 0, 0, 0)
-        self.blockout_add_box_btn = QPushButton("Box")
-        self.blockout_add_arch_btn = QPushButton("Arch")
         self.blockout_duplicate_btn = QPushButton("Dup")
         self.blockout_ground_btn = QPushButton("Ground")
         self.blockout_delete_btn = QPushButton("Del")
         self.blockout_bake_btn = QPushButton("Bake")
-        self.blockout_overlay_btn = QPushButton("Overlay")
+        self.blockout_overlay_btn = QPushButton("Canvas")
         self.blockout_overlay_btn.setCheckable(True)
         self.blockout_overlay_btn.setChecked(True)
+        self.blockout_overlay_btn.setToolTip("Show or hide the 3D guide on the Painter canvas")
         self.blockout_snap_btn = QPushButton("Snap")
         self.blockout_snap_btn.setCheckable(True)
         self.blockout_wire_btn = QPushButton("Wire")
@@ -8177,8 +8285,6 @@ class PaintDialog(QDialog):
         self.blockout_grid_btn.setCheckable(True)
         self.blockout_grid_btn.setChecked(True)
         for btn, handler in (
-            (self.blockout_add_box_btn, lambda: self._add_3d_blockout_primitive("box")),
-            (self.blockout_add_arch_btn, lambda: self._add_3d_blockout_primitive("arch")),
             (self.blockout_duplicate_btn, self._duplicate_selected_3d_blockout_primitive),
             (self.blockout_ground_btn, self._align_selected_3d_blockout_to_ground),
             (self.blockout_delete_btn, self._delete_selected_3d_blockout_primitive),
@@ -8198,11 +8304,57 @@ class PaintDialog(QDialog):
         self.blockout_grid_btn.toggled.connect(lambda checked=False: self._set_3d_blockout_scene_flag("show_grid", bool(checked)))
         layout.addLayout(action_row)
 
-        self._blockout_preview_label = QLabel()
-        self._blockout_preview_label.setObjectName("PaintBlockoutPreview")
-        self._blockout_preview_label.setMinimumHeight(118)
-        self._blockout_preview_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        layout.addWidget(self._blockout_preview_label)
+        material_row = QHBoxLayout()
+        material_row.setContentsMargins(0, 0, 0, 0)
+        material_row.setSpacing(4)
+        self.blockout_lit_btn = QPushButton("Lit")
+        self.blockout_lit_btn.setCheckable(True)
+        self.blockout_lit_btn.setChecked(True)
+        self.blockout_lit_btn.setToolTip("Toggle lit white material preview")
+        self.blockout_shadow_btn = QPushButton("Shadow")
+        self.blockout_shadow_btn.setCheckable(True)
+        self.blockout_shadow_btn.setChecked(True)
+        self.blockout_shadow_btn.setToolTip("Toggle directional-light ground shadows")
+        self.blockout_fog_btn = QPushButton("Fog")
+        self.blockout_fog_btn.setCheckable(True)
+        self.blockout_fog_btn.setChecked(False)
+        self.blockout_fog_btn.setToolTip("Fade distant geometry into the gray viewport")
+        self.blockout_depth_btn = QPushButton("Depth")
+        self.blockout_depth_btn.setCheckable(True)
+        self.blockout_depth_btn.setChecked(False)
+        self.blockout_depth_btn.setToolTip("Show a non-destructive grayscale camera-depth diagnostic")
+        for button in (
+            self.blockout_lit_btn,
+            self.blockout_shadow_btn,
+            self.blockout_fog_btn,
+            self.blockout_depth_btn,
+        ):
+            button.setObjectName("PaintCustomColor")
+            button.setCursor(Qt.CursorShape.PointingHandCursor)
+            material_row.addWidget(button)
+        self.blockout_lit_btn.toggled.connect(
+            lambda checked=False: self._set_3d_blockout_scene_flag("material_lit", bool(checked))
+        )
+        self.blockout_shadow_btn.toggled.connect(
+            lambda checked=False: self._set_3d_blockout_scene_flag("show_shadows", bool(checked))
+        )
+        self.blockout_fog_btn.toggled.connect(
+            lambda checked=False: self._set_3d_blockout_scene_flag("show_fog", bool(checked))
+        )
+        self.blockout_depth_btn.toggled.connect(
+            lambda checked=False: self._set_3d_blockout_scene_flag("show_depth", bool(checked))
+        )
+        light_specs = (
+            ("Light H", "light_yaw", -180, 180, 45, "째"),
+            ("Light V", "light_pitch", 5, 85, 45, "째"),
+        )
+        light_grid = QGridLayout()
+        light_grid.setContentsMargins(0, 0, 0, 0)
+        light_grid.setHorizontalSpacing(4)
+        for index, spec in enumerate(light_specs):
+            self._add_3d_blockout_spin(light_grid, 0, index, *spec)
+        material_row.addLayout(light_grid, stretch=1)
+        layout.addLayout(material_row)
 
         self._blockout_list = QListWidget()
         self._blockout_list.setObjectName("PaintBlockoutList")
@@ -8246,7 +8398,7 @@ class PaintDialog(QDialog):
             ("Dist", "cam_distance", 25, 3000, 850, ""),
             ("FOV", "cam_fov", 15, 90, 42, "°"),
             ("Pan X", "cam_tx", -500, 500, 0, ""),
-            ("Pan Y", "cam_ty", -500, 500, 80, ""),
+            ("Pan Z", "cam_tz", -500, 500, 80, ""),
         )
         for index, spec in enumerate(camera_specs):
             row, col = divmod(index, 2)
@@ -8263,8 +8415,64 @@ class PaintDialog(QDialog):
             btn.clicked.connect(lambda _checked=False, p=preset: self._apply_3d_blockout_camera_preset(p))
             camera_preset_row.addWidget(btn)
         layout.addLayout(camera_preset_row)
+        self._ensure_canvas_3d_shape_palette()
         QTimer.singleShot(0, self._refresh_3d_blockout_panel)
         return panel
+
+    def _ensure_canvas_3d_shape_palette(self) -> QFrame | None:
+        existing = getattr(self, "_blockout_canvas_shape_palette", None)
+        if existing is not None:
+            return existing
+        host = getattr(self, "_canvas_host", None)
+        if host is None:
+            return None
+        palette = QFrame(host)
+        palette.setObjectName("PaintBlockoutPanel")
+        palette.setFixedWidth(184)
+        palette_layout = QVBoxLayout(palette)
+        palette_layout.setContentsMargins(8, 7, 8, 8)
+        palette_layout.setSpacing(5)
+        title = QLabel("PLACE ACTORS")
+        title.setObjectName("PaintSectionTitle")
+        palette_layout.addWidget(title)
+        subtitle = QLabel("Shapes")
+        subtitle.setObjectName("PaintColorSectionLabel")
+        palette_layout.addWidget(subtitle)
+        grid = QGridLayout()
+        grid.setContentsMargins(0, 0, 0, 0)
+        grid.setHorizontalSpacing(4)
+        grid.setVerticalSpacing(4)
+        self._blockout_canvas_shape_buttons: dict[str, QPushButton] = {}
+        for index, (label, kind) in enumerate(
+            (
+                ("Cube", "box"),
+                ("Sphere", "sphere"),
+                ("Cylinder", "cylinder"),
+                ("Cone", "cone"),
+                ("Plane", "plane"),
+                ("Arch", "arch"),
+            )
+        ):
+            button = QPushButton(label)
+            button.setObjectName("PaintCustomColor")
+            button.setCursor(Qt.CursorShape.OpenHandCursor)
+            button.setToolTip(f"Click or drag {label} onto the 3D canvas")
+            button.setProperty("blockoutShapeKind", kind)
+            button.installEventFilter(self)
+            button.clicked.connect(
+                lambda _checked=False, value=kind: self._add_3d_blockout_primitive(value)
+            )
+            grid.addWidget(button, index // 2, index % 2)
+            self._blockout_canvas_shape_buttons[kind] = button
+        palette_layout.addLayout(grid)
+        help_text = QLabel("Drag to place on ground")
+        help_text.setObjectName("PaintMeta")
+        palette_layout.addWidget(help_text)
+        palette.adjustSize()
+        palette.move(10, 10)
+        palette.hide()
+        self._blockout_canvas_shape_palette = palette
+        return palette
 
     def _add_3d_blockout_spin(
         self,
@@ -8306,17 +8514,64 @@ class PaintDialog(QDialog):
 
     def _store_3d_blockout_scene(self, scene) -> None:
         self._painter_3d_blockout_scene = scene.to_dict()
+        self._painter_3d_blockout_flat_cache = None
         self._refresh_3d_blockout_panel()
 
-    def _add_3d_blockout_primitive(self, kind: str) -> None:
-        from app.painter_3d_blockout import add_blockout_primitive
+    def _add_3d_blockout_primitive(
+        self,
+        kind: str,
+        *,
+        world_position: tuple[float, float, float] | None = None,
+    ) -> None:
+        from app.painter_3d_blockout import add_blockout_primitive, align_blockout_primitive_to_ground
 
+        self._set_canvas_workspace_mode("3d_place", focus_panel=False)
         self._push_undo_state(f"Add {kind.title()} blockout")
-        scene = add_blockout_primitive(self._current_3d_blockout_scene(), kind=kind, name=f"{kind.title()} {self._current_3d_blockout_scene().next_index}")
+        self._ensure_3d_blockout_layer()
+        params: dict[str, object] = {
+            "kind": kind,
+            "name": f"{kind.title()} {self._current_3d_blockout_scene().next_index}",
+        }
+        if world_position is not None:
+            params.update(
+                {
+                    "x": float(world_position[0]),
+                    "y": float(world_position[1]),
+                    "z": float(world_position[2]),
+                }
+            )
+        scene = add_blockout_primitive(self._current_3d_blockout_scene(), **params)
         rows = scene.to_dict().get("primitives", [])
         if rows:
             self._painter_3d_blockout_selected_id = str(rows[-1].get("id") or "")
+            scene = align_blockout_primitive_to_ground(
+                scene,
+                self._painter_3d_blockout_selected_id,
+            )
         self._store_3d_blockout_scene(scene)
+
+    def _ensure_3d_blockout_layer(self) -> PaintLayer:
+        layer_id = "paint-layer-3d-blockout"
+        existing = self._paint_layer_by_id(layer_id)
+        if existing is not None:
+            self._selected_layer_id = layer_id
+            self._update_layer_controls()
+            return existing
+        layer = PaintLayer(
+            layer_id=layer_id,
+            name="3D Blockout",
+            visible=True,
+            opacity=100,
+            locked=False,
+        )
+        self._paint_layers.insert(0, layer)
+        self._selected_layer_id = layer_id
+        self._sync_canvas_layer_view()
+        self._update_layer_controls()
+        return layer
+
+    def _3d_blockout_layer(self) -> PaintLayer | None:
+        return self._paint_layer_by_id("paint-layer-3d-blockout")
 
     def _delete_selected_3d_blockout_primitive(self) -> None:
         primitive_id = str(getattr(self, "_painter_3d_blockout_selected_id", "") or "")
@@ -8450,6 +8705,12 @@ class PaintDialog(QDialog):
             grid_size=scene.grid_size,
             show_grid=bool(enabled) if key == "show_grid" else scene.show_grid,
             show_wireframe=bool(enabled) if key == "show_wireframe" else scene.show_wireframe,
+            material_lit=bool(enabled) if key == "material_lit" else scene.material_lit,
+            show_shadows=bool(enabled) if key == "show_shadows" else scene.show_shadows,
+            show_fog=bool(enabled) if key == "show_fog" else scene.show_fog,
+            show_depth=bool(enabled) if key == "show_depth" else scene.show_depth,
+            light_yaw_degrees=scene.light_yaw_degrees,
+            light_pitch_degrees=scene.light_pitch_degrees,
             snap_to_grid=scene.snap_to_grid,
             next_index=scene.next_index,
         )
@@ -8474,8 +8735,26 @@ class PaintDialog(QDialog):
             return
         if key.startswith("cam_"):
             self._update_3d_blockout_camera_from_controls()
+        elif key.startswith("light_"):
+            self._update_3d_blockout_light_from_controls()
         else:
             self._update_selected_3d_blockout_transform()
+
+    def _update_3d_blockout_light_from_controls(self) -> None:
+        from dataclasses import replace
+
+        controls = getattr(self, "_painter_3d_blockout_controls", {})
+        if "light_yaw" not in controls or "light_pitch" not in controls:
+            return
+        self._push_undo_state("Adjust 3D blockout light")
+        scene = self._current_3d_blockout_scene()
+        self._store_3d_blockout_scene(
+            replace(
+                scene,
+                light_yaw_degrees=float(controls["light_yaw"].value()),
+                light_pitch_degrees=float(controls["light_pitch"].value()),
+            ).normalized()
+        )
 
     def _update_selected_3d_blockout_transform(self) -> None:
         primitive_id = str(getattr(self, "_painter_3d_blockout_selected_id", "") or "")
@@ -8519,12 +8798,12 @@ class PaintDialog(QDialog):
             distance=controls["cam_distance"].value() / 100.0,
             fov_degrees=controls["cam_fov"].value(),
             target_x=controls["cam_tx"].value() / 100.0,
-            target_y=controls["cam_ty"].value() / 100.0,
+            target_z=controls["cam_tz"].value() / 100.0,
         )
         self._store_3d_blockout_scene(scene)
 
     def _refresh_3d_blockout_panel(self) -> None:
-        if not hasattr(self, "_blockout_preview_label"):
+        if not hasattr(self, "_blockout_list"):
             return
         self._painter_3d_blockout_syncing = True
         try:
@@ -8537,7 +8816,7 @@ class PaintDialog(QDialog):
                 self._painter_3d_blockout_selected_id = ""
             status = getattr(self, "_blockout_status_label", None)
             if status is not None:
-                status.setText(f"{len(rows)} obj | box + arch")
+                status.setText(f"{len(rows)} obj | canvas")
             lst = getattr(self, "_blockout_list", None)
             if lst is not None:
                 lst.clear()
@@ -8550,11 +8829,6 @@ class PaintDialog(QDialog):
                         lst.setCurrentItem(item)
             selected = next((row for row in rows if str(row.get("id") or "") == self._painter_3d_blockout_selected_id), None)
             self._sync_3d_blockout_control_values(payload, selected)
-            preview = getattr(self, "_blockout_preview_label", None)
-            if preview is not None:
-                width = max(160, int(preview.width() or 260))
-                height = max(100, int(preview.height() or 128))
-                preview.setPixmap(self._render_3d_blockout_pixmap(scene, width, height, include_gizmo=True))
         finally:
             self._painter_3d_blockout_syncing = False
         self._refresh_3d_blockout_overlay()
@@ -8582,14 +8856,16 @@ class PaintDialog(QDialog):
                 if key in controls:
                     controls[key].setValue(value)
         camera = dict(scene_payload.get("camera") or {})
-        target = list(camera.get("target") or [0.0, 0.8, 0.0])
+        target = list(camera.get("target") or [0.0, 0.0, 0.8])
         camera_values = {
             "cam_yaw": int(round(float(camera.get("yaw_degrees", 35.0)))),
             "cam_pitch": int(round(float(camera.get("pitch_degrees", -18.0)))),
             "cam_distance": int(round(float(camera.get("distance", 8.5)) * 100)),
             "cam_fov": int(round(float(camera.get("fov_degrees", 42.0)))),
             "cam_tx": int(round(float(target[0]) * 100)),
-            "cam_ty": int(round(float(target[1]) * 100)),
+            "cam_tz": int(round(float(target[2]) * 100)),
+            "light_yaw": int(round(float(scene_payload.get("light_yaw_degrees", 45.0)))),
+            "light_pitch": int(round(float(scene_payload.get("light_pitch_degrees", 45.0)))),
         }
         for key, value in camera_values.items():
             if key in controls:
@@ -8600,6 +8876,14 @@ class PaintDialog(QDialog):
             self.blockout_grid_btn.setChecked(bool(scene_payload.get("show_grid", True)))
         if hasattr(self, "blockout_snap_btn"):
             self.blockout_snap_btn.setChecked(bool(scene_payload.get("snap_to_grid", False)))
+        if hasattr(self, "blockout_lit_btn"):
+            self.blockout_lit_btn.setChecked(bool(scene_payload.get("material_lit", True)))
+        if hasattr(self, "blockout_shadow_btn"):
+            self.blockout_shadow_btn.setChecked(bool(scene_payload.get("show_shadows", True)))
+        if hasattr(self, "blockout_fog_btn"):
+            self.blockout_fog_btn.setChecked(bool(scene_payload.get("show_fog", False)))
+        if hasattr(self, "blockout_depth_btn"):
+            self.blockout_depth_btn.setChecked(bool(scene_payload.get("show_depth", False)))
 
     def _refresh_3d_blockout_overlay(self) -> None:
         label = getattr(self, "_blockout_overlay_label", None)
@@ -8608,10 +8892,15 @@ class PaintDialog(QDialog):
             return
         scene = self._current_3d_blockout_scene()
         payload = scene.to_dict()
+        placement_mode = str(getattr(self, "_canvas_workspace_mode", "paint")) == "3d_place"
+        blockout_layer = self._3d_blockout_layer()
+        if blockout_layer is not None and not blockout_layer.visible:
+            label.hide()
+            return
         if not bool(getattr(self, "blockout_overlay_btn", None) and self.blockout_overlay_btn.isChecked()):
             label.hide()
             return
-        if int(payload.get("primitive_count", 0) or 0) <= 0:
+        if int(payload.get("primitive_count", 0) or 0) <= 0 and not placement_mode:
             label.hide()
             return
         size = canvas.size()
@@ -8619,12 +8908,51 @@ class PaintDialog(QDialog):
             label.hide()
             return
         label.setGeometry(canvas.geometry())
-        label.setPixmap(self._render_3d_blockout_pixmap(scene, size.width(), size.height(), include_gizmo=True))
+        content_opacity = (
+            max(0.0, min(1.0, blockout_layer.opacity / 100.0))
+            if blockout_layer is not None
+            else 1.0
+        )
+        cached = getattr(self, "_painter_3d_blockout_flat_cache", None)
+        if (
+            not placement_mode
+            and isinstance(cached, QPixmap)
+            and cached.size() == size
+        ):
+            pixmap = cached
+        else:
+            pixmap = self._render_3d_blockout_pixmap(
+                scene,
+                size.width(),
+                size.height(),
+                include_gizmo=placement_mode,
+                viewport_background=placement_mode,
+                content_opacity=content_opacity,
+            )
+            if not placement_mode:
+                self._painter_3d_blockout_flat_cache = pixmap
+        label.setPixmap(pixmap)
         label.show()
-        canvas.raise_()
-        label.raise_()
+        if placement_mode:
+            canvas.raise_()
+            label.raise_()
+        else:
+            label.raise_()
+            canvas.raise_()
+        palette = getattr(self, "_blockout_canvas_shape_palette", None)
+        if palette is not None and placement_mode:
+            palette.raise_()
 
-    def _render_3d_blockout_pixmap(self, scene, width: int, height: int, *, include_gizmo: bool) -> QPixmap:
+    def _render_3d_blockout_pixmap(
+        self,
+        scene,
+        width: int,
+        height: int,
+        *,
+        include_gizmo: bool,
+        viewport_background: bool = False,
+        content_opacity: float = 1.0,
+    ) -> QPixmap:
         target_w = max(1, int(width))
         target_h = max(1, int(height))
         try:
@@ -8650,7 +8978,27 @@ class PaintDialog(QDialog):
                 "fallback_from": "opengl",
                 "reason": f"{type(exc).__name__}: {exc}",
             }
-        pixmap = QPixmap.fromImage(image)
+        opacity = max(0.0, min(1.0, float(content_opacity)))
+        if opacity < 0.999:
+            faded = QImage(target_w, target_h, QImage.Format.Format_ARGB32_Premultiplied)
+            faded.fill(QColor(0, 0, 0, 0))
+            faded_painter = QPainter(faded)
+            try:
+                faded_painter.setOpacity(opacity)
+                faded_painter.drawImage(0, 0, image)
+            finally:
+                faded_painter.end()
+            image = faded
+        if viewport_background:
+            pixmap = QPixmap(target_w, target_h)
+            pixmap.fill(QColor("#3A3C3F"))
+            background_painter = QPainter(pixmap)
+            try:
+                background_painter.drawImage(0, 0, image)
+            finally:
+                background_painter.end()
+        else:
+            pixmap = QPixmap.fromImage(image)
         if not include_gizmo:
             return pixmap
         bounds = self._selected_3d_blockout_bounds(width, height)
@@ -8660,26 +9008,47 @@ class PaintDialog(QDialog):
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
             center = bounds.center()
-            rotate = self._blockout_rotate_handle(bounds)
-            scale = self._blockout_scale_handle(bounds)
             painter.setPen(QPen(QColor(255, 255, 255, 210), 1.4, Qt.PenStyle.DashLine))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(bounds)
-            painter.setPen(QPen(QColor("#ff5f57"), 2.2))
-            painter.drawLine(center, QPointF(center.x() + 42.0, center.y()))
-            painter.setBrush(QColor("#ff5f57"))
-            painter.drawEllipse(QPointF(center.x() + 42.0, center.y()), 3.2, 3.2)
-            painter.setPen(QPen(QColor("#35d07f"), 2.2))
-            painter.drawLine(center, QPointF(center.x(), center.y() - 42.0))
-            painter.setBrush(QColor("#35d07f"))
-            painter.drawEllipse(QPointF(center.x(), center.y() - 42.0), 3.2, 3.2)
-            painter.setPen(QPen(QColor("#5da8ff"), 2.0))
-            painter.setBrush(QColor(93, 168, 255, 190))
-            painter.drawRect(QRectF(scale.x() - 5.0, scale.y() - 5.0, 10.0, 10.0))
-            painter.setPen(QPen(QColor("#ffcc4d"), 2.0))
-            painter.setBrush(QColor(255, 204, 77, 180))
-            painter.drawLine(bounds.center(), rotate)
-            painter.drawEllipse(rotate, 6.0, 6.0)
+            mode = str(getattr(self, "_blockout_transform_mode", "select") or "select")
+            axes = self._blockout_gizmo_axis_points(bounds)
+            axis_colors = {
+                "x": QColor("#F04444"),
+                "y": QColor("#45C96B"),
+                "z": QColor("#438BFF"),
+            }
+            if mode in {"move", "scale"}:
+                for axis in ("x", "y", "z"):
+                    endpoint = axes[axis]
+                    color = axis_colors[axis]
+                    painter.setPen(QPen(color, 2.5))
+                    painter.setBrush(color)
+                    painter.drawLine(center, endpoint)
+                    if mode == "scale":
+                        painter.drawRect(QRectF(endpoint.x() - 4.5, endpoint.y() - 4.5, 9.0, 9.0))
+                    else:
+                        direction = endpoint - center
+                        length = max(1.0, math.hypot(direction.x(), direction.y()))
+                        ux, uy = direction.x() / length, direction.y() / length
+                        side_x, side_y = -uy, ux
+                        painter.drawPolygon(
+                            QPolygonF(
+                                [
+                                    endpoint,
+                                    QPointF(endpoint.x() - ux * 11.0 + side_x * 5.0, endpoint.y() - uy * 11.0 + side_y * 5.0),
+                                    QPointF(endpoint.x() - ux * 11.0 - side_x * 5.0, endpoint.y() - uy * 11.0 - side_y * 5.0),
+                                ]
+                            )
+                        )
+            elif mode == "rotate":
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(QPen(axis_colors["x"], 2.0))
+                painter.drawEllipse(QRectF(center.x() - 48.0, center.y() - 15.0, 96.0, 30.0))
+                painter.setPen(QPen(axis_colors["y"], 2.0))
+                painter.drawEllipse(QRectF(center.x() - 21.0, center.y() - 48.0, 42.0, 96.0))
+                painter.setPen(QPen(axis_colors["z"], 2.2))
+                painter.drawEllipse(QRectF(center.x() - 39.0, center.y() - 39.0, 78.0, 78.0))
             painter.setPen(QPen(QColor(255, 255, 255, 230), 1.2))
             painter.setBrush(QColor(255, 255, 255, 210))
             painter.drawEllipse(center, 4.5, 4.5)
@@ -8691,6 +9060,14 @@ class PaintDialog(QDialog):
         primitive_id = str(getattr(self, "_painter_3d_blockout_selected_id", "") or "")
         if not primitive_id:
             return None
+        return self._3d_blockout_bounds_for_id(primitive_id, width, height)
+
+    def _3d_blockout_bounds_for_id(
+        self,
+        primitive_id: str,
+        width: int,
+        height: int,
+    ) -> QRectF | None:
         from app.painter_3d_blockout import project_blockout_scene
 
         projection = project_blockout_scene(self._current_3d_blockout_scene(), max(1, int(width)), max(1, int(height)))
@@ -8717,6 +9094,27 @@ class PaintDialog(QDialog):
             max(8.0, min(float(height), max(ys)) - max(0.0, min(ys))),
         )
 
+    def _3d_blockout_primitive_at(self, point: QPointF) -> str:
+        canvas = getattr(self, "canvas", None)
+        if canvas is None:
+            return ""
+        rows = list(self._current_3d_blockout_scene().to_dict().get("primitives", []) or [])
+        candidates: list[tuple[float, str]] = []
+        for row in reversed(rows):
+            primitive_id = str(row.get("id") or "")
+            bounds = self._3d_blockout_bounds_for_id(
+                primitive_id,
+                canvas.width(),
+                canvas.height(),
+            )
+            if bounds is None:
+                continue
+            padded = QRectF(bounds)
+            padded.adjust(-6.0, -6.0, 6.0, 6.0)
+            if padded.contains(point):
+                candidates.append((max(1.0, bounds.width() * bounds.height()), primitive_id))
+        return min(candidates, default=(0.0, ""), key=lambda row: row[0])[1]
+
     @staticmethod
     def _blockout_scale_handle(bounds: QRectF) -> QPointF:
         return QPointF(bounds.right(), bounds.bottom())
@@ -8724,6 +9122,15 @@ class PaintDialog(QDialog):
     @staticmethod
     def _blockout_rotate_handle(bounds: QRectF) -> QPointF:
         return QPointF(bounds.center().x(), bounds.top() - 28.0)
+
+    @staticmethod
+    def _blockout_gizmo_axis_points(bounds: QRectF) -> dict[str, QPointF]:
+        center = bounds.center()
+        return {
+            "x": QPointF(center.x() + 48.0, center.y() + 8.0),
+            "y": QPointF(center.x() - 36.0, center.y() + 24.0),
+            "z": QPointF(center.x(), center.y() - 52.0),
+        }
 
     def _canvas_local_point_from_widget(self, obj, point: QPoint) -> QPointF | None:
         canvas = getattr(self, "canvas", None)
@@ -8742,6 +9149,11 @@ class PaintDialog(QDialog):
             return None
         rotate = self._blockout_rotate_handle(bounds)
         scale = self._blockout_scale_handle(bounds)
+        selected_mode = str(getattr(self, "_blockout_transform_mode", "select") or "select")
+        if selected_mode in {"move", "scale"}:
+            for axis, endpoint in self._blockout_gizmo_axis_points(bounds).items():
+                if _distance_qpointf(point, endpoint) <= 14.0:
+                    return f"{selected_mode}_{axis}"
         if _distance_qpointf(point, rotate) <= 16.0:
             return "rotate"
         if _distance_qpointf(point, scale) <= 16.0:
@@ -8749,21 +9161,34 @@ class PaintDialog(QDialog):
         padded = QRectF(bounds)
         padded.adjust(-10.0, -10.0, 10.0, 10.0)
         if padded.contains(point):
-            return "move"
+            mode = str(getattr(self, "_blockout_transform_mode", "select") or "select")
+            return mode if mode in {"select", "move", "rotate", "scale"} else "select"
         return None
 
     def _begin_3d_blockout_drag(self, obj, point: QPoint) -> bool:
-        if not bool(getattr(self, "blockout_overlay_btn", None) and self.blockout_overlay_btn.isChecked()):
+        if str(getattr(self, "_canvas_workspace_mode", "paint")) != "3d_place":
             return False
-        primitive_id = str(getattr(self, "_painter_3d_blockout_selected_id", "") or "")
-        if not primitive_id:
+        if not bool(getattr(self, "blockout_overlay_btn", None) and self.blockout_overlay_btn.isChecked()):
             return False
         local = self._canvas_local_point_from_widget(obj, point)
         if local is None:
             return False
+        primitive_id = str(getattr(self, "_painter_3d_blockout_selected_id", "") or "")
         mode = self._blockout_drag_mode_at(local)
         if mode is None:
+            hit_id = self._3d_blockout_primitive_at(local)
+            if not hit_id:
+                return False
+            primitive_id = hit_id
+            self._painter_3d_blockout_selected_id = hit_id
+            self._refresh_3d_blockout_panel()
+            mode = self._blockout_drag_mode_at(local)
+        if mode is None:
             return False
+        if mode == "select":
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText("3D Place: object selected")
+            return True
         scene = self._current_3d_blockout_scene().to_dict()
         selected = next((row for row in scene.get("primitives", []) or [] if str(row.get("id") or "") == primitive_id), None)
         if selected is None:
@@ -8783,7 +9208,11 @@ class PaintDialog(QDialog):
         }
         host = getattr(self, "_canvas_host", None)
         if host is not None:
-            host.setCursor(Qt.CursorShape.SizeAllCursor if mode == "move" else Qt.CursorShape.CrossCursor)
+            host.setCursor(
+                Qt.CursorShape.SizeAllCursor
+                if mode == "move" or mode.startswith("move_")
+                else Qt.CursorShape.CrossCursor
+            )
         return True
 
     def _update_3d_blockout_drag(self, obj, point: QPoint) -> None:
@@ -8800,13 +9229,33 @@ class PaintDialog(QDialog):
         if mode == "move":
             pos = list(drag.get("start_position") or [0.0, 0.0, 0.0])
             params["x"] = float(pos[0]) + float(delta.x()) / 100.0
-            params["y"] = float(pos[1]) - float(delta.y()) / 100.0
-            params["z"] = float(pos[2])
+            params["y"] = float(pos[1])
+            params["z"] = float(pos[2]) - float(delta.y()) / 100.0
+        elif mode.startswith("move_"):
+            pos = list(drag.get("start_position") or [0.0, 0.0, 0.0])
+            axis = mode.rsplit("_", 1)[1]
+            if axis == "x":
+                params["x"] = float(pos[0]) + float(delta.x()) / 100.0
+            elif axis == "y":
+                params["y"] = float(pos[1]) + float(delta.y() - delta.x()) / 140.0
+            else:
+                params["z"] = float(pos[2]) - float(delta.y()) / 100.0
         elif mode == "scale":
             scale = list(drag.get("start_scale") or [1.0, 1.0, 1.0])
             params["sx"] = max(0.1, float(scale[0]) + float(delta.x()) / 100.0)
-            params["sy"] = max(0.1, float(scale[1]) + float(delta.y()) / 100.0)
-            params["sz"] = max(0.1, float(scale[2]))
+            params["sy"] = max(0.1, float(scale[1]))
+            params["sz"] = max(0.1, float(scale[2]) + float(delta.y()) / 100.0)
+        elif mode.startswith("scale_"):
+            scale = list(drag.get("start_scale") or [1.0, 1.0, 1.0])
+            axis = mode.rsplit("_", 1)[1]
+            delta_value = (
+                float(delta.x()) / 100.0
+                if axis == "x"
+                else float(delta.y() - delta.x()) / 140.0
+                if axis == "y"
+                else -float(delta.y()) / 100.0
+            )
+            params[f"s{axis}"] = max(0.1, float(scale[{"x": 0, "y": 1, "z": 2}[axis]]) + delta_value)
         elif mode == "rotate":
             center = QPointF(drag["start_bounds_center"])
             start_angle = math.degrees(math.atan2(start.y() - center.y(), start.x() - center.x()))
@@ -8839,12 +9288,72 @@ class PaintDialog(QDialog):
             host.setCursor(Qt.CursorShape.ArrowCursor)
 
     def _focus_3d_blockout_panel(self) -> None:
+        self._set_canvas_workspace_mode("3d_place", focus_panel=False)
         panel = getattr(self, "_paint_3d_blockout_panel", None)
         scroll = getattr(self, "_paint_inspector_controls_scroll", None)
         if panel is not None and scroll is not None:
             panel.show()
             scroll.ensureWidgetVisible(panel, 0, 12)
         self._refresh_3d_blockout_panel()
+
+    def _set_canvas_workspace_mode(
+        self,
+        mode: str,
+        *,
+        focus_panel: bool = True,
+    ) -> str:
+        selected = "3d_place" if str(mode or "").strip().casefold() in {
+            "3d",
+            "3d_place",
+            "place",
+            "placement",
+            "blockout",
+        } else "paint"
+        self._canvas_workspace_mode = selected
+        if selected == "3d_place":
+            self._set_tool("3d_blockout")
+            if focus_panel:
+                self._focus_3d_blockout_panel()
+        else:
+            self._set_tool("pen")
+        self._sync_canvas_workspace_mode_controls()
+        self._refresh_3d_blockout_overlay()
+        return selected
+
+    def _sync_canvas_workspace_mode_controls(self) -> None:
+        blockout = str(getattr(self, "_canvas_workspace_mode", "paint")) == "3d_place"
+        for button_name, checked in (
+            ("_canvas_mode_paint_btn", not blockout),
+            ("_canvas_mode_3d_btn", blockout),
+            ("blockout_rail_btn", blockout),
+        ):
+            button = getattr(self, button_name, None)
+            if button is not None:
+                button.blockSignals(True)
+                button.setChecked(checked)
+                button.blockSignals(False)
+        host = getattr(self, "_blockout_transform_host", None)
+        if host is not None:
+            host.setVisible(blockout)
+        palette = self._ensure_canvas_3d_shape_palette()
+        if palette is not None:
+            palette.setVisible(blockout)
+            if blockout:
+                palette.move(10, 10)
+                palette.raise_()
+
+    def _set_3d_blockout_transform_mode(self, mode: str) -> str:
+        selected = str(mode or "").strip().casefold()
+        if selected not in {"select", "move", "rotate", "scale"}:
+            selected = "select"
+        self._blockout_transform_mode = selected
+        for key, button in getattr(self, "_blockout_transform_buttons", {}).items():
+            button.blockSignals(True)
+            button.setChecked(key == selected)
+            button.blockSignals(False)
+        if hasattr(self, "_tool_status_label"):
+            self._tool_status_label.setText(f"3D Place: {selected.title()}")
+        return selected
 
     def _add_pbr_slider(
         self,
@@ -10727,6 +11236,21 @@ class PaintDialog(QDialog):
 
     def _set_tool(self, tool: str) -> None:
         self._active_ui_tool = str(tool or "select")
+        if tool == "3d_blockout":
+            self._canvas_workspace_mode = "3d_place"
+        elif tool in {
+            "select",
+            "pan",
+            "pen",
+            "eraser",
+            "path",
+            "rect_select",
+            "ellipse_select",
+            "crop",
+            "magic_select",
+            "fill",
+        }:
+            self._canvas_workspace_mode = "paint"
         canvas_tool = tool if tool in (
             "pen",
             "eraser",
@@ -10764,6 +11288,7 @@ class PaintDialog(QDialog):
             "magic_select": ("Magic Select", "magic-wand"),
             "crop": ("Crop", "crop"),
             "fill": ("Paint Bucket", "paint-bucket"),
+            "3d_blockout": ("3D Place", "box"),
         }
         tool_name, tool_icon = tool_meta.get(tool, ("Move", "move-tool"))
         if hasattr(self, "_active_tool_name"):
@@ -10791,8 +11316,10 @@ class PaintDialog(QDialog):
                 "magic_select": "Magic Select: click a color region",
                 "crop": "Crop: drag a crop area, then Image > Crop To Selection",
                 "fill": "Paint Bucket: choose a fill mode in the options bar",
+                "3d_blockout": "3D Place: select or transform primitives on the canvas",
             }
             self._tool_status_label.setText(labels.get(tool, "Select / move objects"))
+        self._sync_canvas_workspace_mode_controls()
         self._update_tool_option_controls()
 
     def _set_selection_combine_mode(self, mode: str) -> str:
@@ -12261,6 +12788,10 @@ class PaintDialog(QDialog):
     def _select_layer_item(self, item: QListWidgetItem) -> None:
         layer_id = item.data(Qt.ItemDataRole.UserRole)
         self._selected_layer_id = str(layer_id) if layer_id is not None else None
+        if self._selected_layer_id == "paint-layer-3d-blockout":
+            self._set_canvas_workspace_mode("3d_place", focus_panel=False)
+            self._update_layer_controls()
+            return
         if self._standalone and self._is_paint_layer_id(self._selected_layer_id):
             self._active_paint_layer_id = str(self._selected_layer_id)
             self._sync_canvas_layer_view()
@@ -12300,6 +12831,9 @@ class PaintDialog(QDialog):
             self.layer_opacity_slider.blockSignals(False)
         self._sync_canvas_layer_view()
         self._update_layer_list()
+        if layer.layer_id == "paint-layer-3d-blockout":
+            self._painter_3d_blockout_flat_cache = None
+            self._refresh_3d_blockout_overlay()
 
     def _on_layer_blend_changed(self) -> None:
         layer = self._paint_layer_by_id(self._selected_layer_id) or self._active_paint_layer()
@@ -12338,6 +12872,8 @@ class PaintDialog(QDialog):
         layer.visible = not layer.visible
         self._sync_canvas_layer_view()
         self._update_layer_list()
+        if layer.layer_id == "paint-layer-3d-blockout":
+            self._refresh_3d_blockout_overlay()
 
     def _toggle_selected_layer_lock(self) -> None:
         if self._selected_layer_id == "background":
@@ -12397,6 +12933,8 @@ class PaintDialog(QDialog):
         layer.visible = bool(visible)
         self._sync_canvas_layer_view()
         self._update_inspector_counts()
+        if layer.layer_id == "paint-layer-3d-blockout":
+            self._refresh_3d_blockout_overlay()
         return True
 
     def _set_layer_locked(self, layer_id: str | None, locked: bool) -> bool:
@@ -12419,6 +12957,9 @@ class PaintDialog(QDialog):
         self._push_undo_state("Set layer opacity")
         layer.opacity = value
         self._sync_canvas_layer_view()
+        if layer.layer_id == "paint-layer-3d-blockout":
+            self._painter_3d_blockout_flat_cache = None
+            self._refresh_3d_blockout_overlay()
         self._update_inspector_counts()
         return True
 
@@ -13764,6 +14305,27 @@ class PaintDialog(QDialog):
         self._update_inspector_counts()
 
     def eventFilter(self, obj, event) -> bool:
+        shape_kind = str(obj.property("blockoutShapeKind") or "") if isinstance(obj, QPushButton) else ""
+        if shape_kind:
+            if event.type() == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+                self._blockout_shape_drag_start = QPoint(event.position().toPoint())
+            elif (
+                event.type() == QEvent.Type.MouseMove
+                and event.buttons() & Qt.MouseButton.LeftButton
+                and getattr(self, "_blockout_shape_drag_start", None) is not None
+            ):
+                distance = (
+                    event.position().toPoint()
+                    - QPoint(self._blockout_shape_drag_start)
+                ).manhattanLength()
+                if distance >= QApplication.startDragDistance():
+                    mime = QMimeData()
+                    mime.setData(PAINT_BLOCKOUT_SHAPE_MIME, shape_kind.encode("ascii", "ignore"))
+                    drag = QDrag(obj)
+                    drag.setMimeData(mime)
+                    drag.exec(Qt.DropAction.CopyAction)
+                    self._blockout_shape_drag_start = None
+                    return True
         channel_list = getattr(self, "_channel_list", None)
         if channel_list is not None and obj is channel_list.viewport():
             if self._handle_channel_list_event(event):
@@ -13782,6 +14344,38 @@ class PaintDialog(QDialog):
         if obj not in canvas_widgets:
             return super().eventFilter(obj, event)
         event_type = event.type()
+        placement_mode = str(getattr(self, "_canvas_workspace_mode", "paint")) == "3d_place"
+        if event_type in (QEvent.Type.DragEnter, QEvent.Type.DragMove):
+            if event.mimeData().hasFormat(PAINT_BLOCKOUT_SHAPE_MIME):
+                event.acceptProposedAction()
+                return True
+        if event_type == QEvent.Type.Drop and event.mimeData().hasFormat(PAINT_BLOCKOUT_SHAPE_MIME):
+            kind = bytes(event.mimeData().data(PAINT_BLOCKOUT_SHAPE_MIME)).decode("ascii", "ignore")
+            local = self._canvas_local_point_from_widget(obj, event.position().toPoint())
+            canvas = getattr(self, "canvas", None)
+            if local is not None and canvas is not None:
+                from app.painter_3d_blockout import screen_to_blockout_ground
+
+                world = screen_to_blockout_ground(
+                    self._current_3d_blockout_scene(),
+                    local.x(),
+                    local.y(),
+                    canvas.width(),
+                    canvas.height(),
+                )
+                self._add_3d_blockout_primitive(kind, world_position=world)
+                event.acceptProposedAction()
+                return True
+        if placement_mode and event_type == QEvent.Type.Wheel:
+            self._zoom_3d_blockout_camera(event.angleDelta().y())
+            event.accept()
+            return True
+        if placement_mode and event_type == QEvent.Type.KeyPress:
+            key = event.key()
+            if key in (Qt.Key.Key_W, Qt.Key.Key_A, Qt.Key.Key_S, Qt.Key.Key_D):
+                self._nudge_3d_blockout_camera(key)
+                event.accept()
+                return True
         if event_type == QEvent.Type.ContextMenu:
             try:
                 self._show_canvas_context_menu(event.globalPos())
@@ -13790,6 +14384,10 @@ class PaintDialog(QDialog):
             except Exception:
                 return False
         if event_type == QEvent.Type.MouseButtonPress and event.button() == Qt.MouseButton.LeftButton:
+            if placement_mode:
+                host = getattr(self, "_canvas_host", None)
+                if host is not None:
+                    host.setFocus(Qt.FocusReason.MouseFocusReason)
             if self._begin_3d_blockout_drag(obj, event.position().toPoint()):
                 event.accept()
                 return True
@@ -13846,6 +14444,46 @@ class PaintDialog(QDialog):
         host = getattr(self, "_canvas_host", None)
         if host is not None:
             host.setCursor(Qt.CursorShape.ClosedHandCursor)
+
+    def _zoom_3d_blockout_camera(self, wheel_delta: int) -> None:
+        from app.painter_3d_blockout import update_blockout_camera
+
+        scene = self._current_3d_blockout_scene()
+        direction = -1.0 if int(wheel_delta) > 0 else 1.0
+        distance = max(0.25, min(30.0, scene.camera.distance + direction * 0.45))
+        self._store_3d_blockout_scene(update_blockout_camera(scene, distance=distance))
+
+    def _nudge_3d_blockout_camera(self, key: int) -> None:
+        from math import cos, radians, sin
+
+        from app.painter_3d_blockout import update_blockout_camera
+
+        scene = self._current_3d_blockout_scene()
+        target_x, target_y, target_z = scene.camera.target
+        yaw = radians(scene.camera.yaw_degrees)
+        forward = (sin(yaw), cos(yaw))
+        right = (cos(yaw), -sin(yaw))
+        step = 0.22
+        if key == Qt.Key.Key_W:
+            target_x += forward[0] * step
+            target_y += forward[1] * step
+        elif key == Qt.Key.Key_S:
+            target_x -= forward[0] * step
+            target_y -= forward[1] * step
+        elif key == Qt.Key.Key_D:
+            target_x += right[0] * step
+            target_y += right[1] * step
+        elif key == Qt.Key.Key_A:
+            target_x -= right[0] * step
+            target_y -= right[1] * step
+        self._store_3d_blockout_scene(
+            update_blockout_camera(
+                scene,
+                target_x=target_x,
+                target_y=target_y,
+                target_z=target_z,
+            )
+        )
 
     def _update_canvas_pan_drag(self, obj, point: QPoint) -> None:
         if self._canvas_pan_drag_start is None:

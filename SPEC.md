@@ -6406,25 +6406,32 @@ AI Script Edit MVP integration:
   preview and export stroke order; `paint.selection.set_mode` exposes the same
   selection-combination state to AI automation.
 - Painter 3D support is for game-art blockout and paint-over, not a general 3D
-  editor. The first-class 3D workflow is a simple reference layer/panel where
-  artists primarily place boxes, stretch them longer/wider/taller, and move,
-  rotate, or scale them with a standard 3D gizmo. A simple arch helper is
-  allowed for doorway/window/opening composition, but other modeling-style
-  primitives stay out of the default scope. The camera must support orbit, pan,
-  zoom distance, and FOV adjustment so artists can match a scene perspective
-  before painting over it. Grid snap, perspective guides, horizon/vanishing-
-  point overlays, wireframe, transparent/value/silhouette views, and shadow/
-  depth guides are optional aids; 3D blockout data must stay separate from
-  paint strokes/layers until explicitly baked, support undo, and remain
+  editor. The first-class workflow runs directly in the Painter canvas through
+  `Paint | 3D Place` modes. Its Shapes palette provides Cube, Sphere, Cylinder,
+  Cone, Plane, and Arch; clicking adds at the default focus while dragging a
+  shape onto the canvas unprojects the cursor through the active camera and
+  places it on the Z-up ground plane. Artists move, rotate, and scale the result
+  with an Unreal-style X-red/Y-green/Z-blue gizmo. Camera distance, orbit, pan,
+  and FOV are editable; 3D mode also accepts W/A/S/D camera travel and wheel
+  zoom. Grid snap, wireframe, and camera presets remain available.
+  Default shapes use an opaque white Lit material under a configurable
+  directional light (45-degree horizontal and vertical defaults) with shadows
+  enabled. Lit, Shadow, Fog, and diagnostic grayscale Depth are independent
+  toggles. 3D scene data stays separate from raster strokes but is represented
+  by a bottom `3D Blockout` reference layer whose visibility and opacity are
+  controlled through the normal Layers dock. Paint strokes render above this
+  guide. Leaving 3D Place freezes the current result into a reusable 2D display
+  cache for fast paint-over; returning to 3D or changing scene/camera/material
+  state invalidates that cache. The workflow must support undo and remain
   reachable through registered `paint.3d_blockout.*` actions before any MCP/AI
   workflow relies on it.
-  The 2026-07-24 Painter blockout pass implements the first production
-  contract slice: box and arch primitives, canvas overlay preview, selected
-  object move/scale/rotate gizmo handles, duplicate, align-to-ground, grid
-  snapping, orbit/pan/distance/FOV controls, front/side/top/perspective camera
-  presets, `paint.3d_blockout.state/add/update/delete/duplicate/align_ground/
-  snap/camera/camera_preset/bake` actions, and bake-to-layer as normal Painter
-  strokes on a new `3D Blockout Guide` layer.
+  The action surface includes `state/add/update/delete/duplicate/align_ground/
+  snap/camera/material_preview/camera_preset/bake`; `material_preview` controls
+  Lit, shadows, fog, depth, and directional-light angles.
+  A later Figure mode may reuse this camera/layer/cache contract with a
+  license-verified rigged mannequin, bone-local joint rotation, mirrored and
+  saved pose presets, and dedicated automation actions. Figure assets must be
+  durable external assets and must never depend on `debugCapture`.
   3D blockout preview/overlay now uses an OpenGL-first policy through
   `app.painter_opengl`: when the current Qt session can create an offscreen GL
   context it renders the serialized scene/projection to an FBO, and when RDP,

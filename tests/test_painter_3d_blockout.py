@@ -24,6 +24,11 @@ def test_painter_3d_blockout_projects_and_renders_gpu_ready_preview(tmp_path: Pa
     assert projection["scene"]["primitive_count"] == 3
     assert projection["face_count"] > 0
     assert projection["edge_count"] > 0
+    assert projection["scene"]["material_lit"] is True
+    assert projection["scene"]["show_shadows"] is True
+    assert projection["scene"]["light_yaw_degrees"] == 45.0
+    assert projection["scene"]["light_pitch_degrees"] == 45.0
+    assert projection["shadows"]
     assert "box" in projection["scene"]["supported_primitives"]
     assert "arch" in projection["scene"]["supported_primitives"]
 
@@ -161,7 +166,7 @@ def test_painter_3d_blockout_crud_normalizes_and_rejects_duplicate_ids() -> None
     )
     primitive = scene.to_dict()["primitives"][0]
     assert primitive["kind"] == "box"
-    assert primitive["color"] == "#7C8CFF"
+    assert primitive["color"] == "#F2F2F2"
     assert primitive["opacity"] == 1.0
 
     try:
@@ -187,7 +192,7 @@ def test_painter_3d_blockout_crud_normalizes_and_rejects_duplicate_ids() -> None
     scene = update_blockout_primitive(scene, "blockout:room", y=-3.0, sx=2.0, sy=1.5, sz=1.0)
     scene = align_blockout_primitive_to_ground(scene, "blockout:room")
     grounded = scene.to_dict()["primitives"][0]
-    assert grounded["position"][1] == 0.0
+    assert grounded["position"][2] == 0.0
 
     scene = update_blockout_primitive(scene, "blockout:room", x=0.26, y=0.74, z=1.26, rx=11, ry=17)
     scene = snap_blockout_primitive_to_grid(scene, "blockout:room", grid_size=0.5)
@@ -207,7 +212,12 @@ def test_painter_3d_blockout_crud_normalizes_and_rejects_duplicate_ids() -> None
 
 
 def test_painter_3d_blockout_camera_updates_fov_and_pan() -> None:
-    from app.painter_3d_blockout import add_blockout_primitive, default_blockout_scene, update_blockout_camera
+    from app.painter_3d_blockout import (
+        add_blockout_primitive,
+        default_blockout_scene,
+        screen_to_blockout_ground,
+        update_blockout_camera,
+    )
 
     scene = add_blockout_primitive(default_blockout_scene(), kind="box", sx=2.0)
     scene = update_blockout_camera(scene, yaw_degrees=18, pitch_degrees=-8, target_x=0.25, distance=4.5, fov_degrees=33)
@@ -217,6 +227,9 @@ def test_painter_3d_blockout_camera_updates_fov_and_pan() -> None:
     assert camera["target"][0] == 0.25
     assert camera["distance"] == 4.5
     assert camera["fov_degrees"] == 33.0
+    world = screen_to_blockout_ground(scene, 320, 250, 640, 360)
+    assert len(world) == 3
+    assert abs(world[2]) < 0.0001
 
 
 def test_painter_3d_blockout_panel_updates_scene_and_overlay() -> None:
@@ -240,6 +253,10 @@ def test_painter_3d_blockout_panel_updates_scene_and_overlay() -> None:
     app.processEvents()
     scene = dialog._current_3d_blockout_scene().to_dict()
     assert scene["primitive_count"] == 1
+    blockout_layer = dialog._paint_layer_by_id("paint-layer-3d-blockout")
+    assert blockout_layer is not None
+    assert blockout_layer.opacity == 100
+    assert dialog._paint_layers[0].layer_id == "paint-layer-3d-blockout"
     assert dialog._blockout_overlay_label.isVisible()
     renderer = dialog.painter_action_state()["gpu"]["blockout_renderer"]
     assert renderer["active"] in {"opengl", "qpainter"}
@@ -256,14 +273,16 @@ def test_painter_3d_blockout_panel_updates_scene_and_overlay() -> None:
     bounds = dialog._selected_3d_blockout_bounds(dialog.canvas.width(), dialog.canvas.height())
     assert bounds is not None
     center = bounds.center()
+    dialog._set_3d_blockout_transform_mode("move")
     assert dialog._begin_3d_blockout_drag(dialog.canvas, QPoint(int(center.x()), int(center.y())))
     dialog._update_3d_blockout_drag(dialog.canvas, QPoint(int(center.x() + 40), int(center.y() - 20)))
     dialog._finish_3d_blockout_drag()
     app.processEvents()
     moved = dialog._current_3d_blockout_scene().to_dict()["primitives"][0]
     assert moved["position"][0] > 0.35
-    assert moved["position"][1] > 0.15
+    assert moved["position"][2] > 0.65
 
+    dialog._set_3d_blockout_transform_mode("scale")
     bounds = dialog._selected_3d_blockout_bounds(dialog.canvas.width(), dialog.canvas.height())
     assert bounds is not None
     scale_handle = dialog._blockout_scale_handle(bounds)
@@ -276,7 +295,7 @@ def test_painter_3d_blockout_panel_updates_scene_and_overlay() -> None:
     app.processEvents()
     scaled = dialog._current_3d_blockout_scene().to_dict()["primitives"][0]
     assert scaled["scale"][0] > moved["scale"][0]
-    assert scaled["scale"][1] > moved["scale"][1]
+    assert scaled["scale"][2] > moved["scale"][2]
 
     bounds = dialog._selected_3d_blockout_bounds(dialog.canvas.width(), dialog.canvas.height())
     assert bounds is not None
@@ -290,6 +309,10 @@ def test_painter_3d_blockout_panel_updates_scene_and_overlay() -> None:
     app.processEvents()
     rotated = dialog._current_3d_blockout_scene().to_dict()["primitives"][0]
     assert abs(rotated["rotation"][2]) > 1.0
+
+    dialog._selected_layer_id = "paint-layer-3d-blockout"
+    dialog._on_layer_opacity_changed(55)
+    assert dialog._3d_blockout_layer().opacity == 55
 
     bake = dialog._bake_3d_blockout_to_layer()
     app.processEvents()

@@ -12,8 +12,8 @@ Design guardrails:
 """
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from math import cos, radians, sin, tan
+from dataclasses import dataclass, field, replace
+from math import cos, pi, radians, sin, tan
 from typing import Any, Iterable, Sequence
 
 
@@ -22,6 +22,10 @@ Vec3 = tuple[float, float, float]
 SUPPORTED_PRIMITIVES = {
     "arch",
     "box",
+    "cone",
+    "cylinder",
+    "plane",
+    "sphere",
 }
 
 
@@ -30,7 +34,7 @@ class BlockoutCamera:
     yaw_degrees: float = 35.0
     pitch_degrees: float = -18.0
     distance: float = 8.5
-    target: Vec3 = (0.0, 0.8, 0.0)
+    target: Vec3 = (0.0, 0.0, 0.8)
     fov_degrees: float = 42.0
 
     def to_dict(self) -> dict[str, Any]:
@@ -51,8 +55,8 @@ class BlockoutPrimitive:
     position: Vec3 = (0.0, 0.0, 0.0)
     rotation: Vec3 = (0.0, 0.0, 0.0)
     scale: Vec3 = (1.0, 1.0, 1.0)
-    color: str = "#7C8CFF"
-    opacity: float = 0.72
+    color: str = "#F2F2F2"
+    opacity: float = 1.0
     wireframe: bool = True
     locked: bool = False
 
@@ -97,6 +101,12 @@ class BlockoutScene:
     grid_size: float = 1.0
     show_grid: bool = True
     show_wireframe: bool = True
+    material_lit: bool = True
+    show_shadows: bool = True
+    show_fog: bool = False
+    show_depth: bool = False
+    light_yaw_degrees: float = 45.0
+    light_pitch_degrees: float = 45.0
     snap_to_grid: bool = False
     next_index: int = 1
 
@@ -110,6 +120,12 @@ class BlockoutScene:
             grid_size=max(0.05, float(self.grid_size or 1.0)),
             show_grid=bool(self.show_grid),
             show_wireframe=bool(self.show_wireframe),
+            material_lit=bool(self.material_lit),
+            show_shadows=bool(self.show_shadows),
+            show_fog=bool(self.show_fog),
+            show_depth=bool(self.show_depth),
+            light_yaw_degrees=float(self.light_yaw_degrees) % 360.0,
+            light_pitch_degrees=_clamp(float(self.light_pitch_degrees), 5.0, 85.0),
             snap_to_grid=bool(self.snap_to_grid),
             next_index=max(1, next_index),
         )
@@ -123,6 +139,12 @@ class BlockoutScene:
             "grid_size": round(scene.grid_size, 4),
             "show_grid": scene.show_grid,
             "show_wireframe": scene.show_wireframe,
+            "material_lit": scene.material_lit,
+            "show_shadows": scene.show_shadows,
+            "show_fog": scene.show_fog,
+            "show_depth": scene.show_depth,
+            "light_yaw_degrees": round(scene.light_yaw_degrees, 4),
+            "light_pitch_degrees": round(scene.light_pitch_degrees, 4),
             "snap_to_grid": scene.snap_to_grid,
             "next_index": int(scene.next_index),
             "primitive_count": len(scene.primitives),
@@ -146,7 +168,7 @@ def blockout_scene_from_dict(payload: Any) -> BlockoutScene:
         yaw_degrees=float(camera_payload.get("yaw_degrees", 35.0) or 35.0),
         pitch_degrees=float(camera_payload.get("pitch_degrees", -18.0) or -18.0),
         distance=max(0.25, float(camera_payload.get("distance", 8.5) or 8.5)),
-        target=_vec3(camera_payload.get("target", (0.0, 0.8, 0.0))),
+        target=_vec3(camera_payload.get("target", (0.0, 0.0, 0.8))),
         fov_degrees=_clamp(float(camera_payload.get("fov_degrees", 42.0) or 42.0), 15.0, 90.0),
     )
     primitives = []
@@ -161,8 +183,8 @@ def blockout_scene_from_dict(payload: Any) -> BlockoutScene:
                 position=_vec3(row.get("position", (0.0, 0.0, 0.0))),
                 rotation=_vec3(row.get("rotation", (0.0, 0.0, 0.0))),
                 scale=_vec3(row.get("scale", (1.0, 1.0, 1.0))),
-                color=str(row.get("color") or "#7C8CFF"),
-                opacity=float(row.get("opacity", 0.72) or 0.72),
+                color=str(row.get("color") or "#F2F2F2"),
+                opacity=float(row.get("opacity", 1.0) or 1.0),
                 wireframe=bool(row.get("wireframe", True)),
                 locked=bool(row.get("locked", False)),
             )
@@ -173,6 +195,12 @@ def blockout_scene_from_dict(payload: Any) -> BlockoutScene:
         grid_size=float(payload.get("grid_size", 1.0) or 1.0),
         show_grid=bool(payload.get("show_grid", True)),
         show_wireframe=bool(payload.get("show_wireframe", True)),
+        material_lit=bool(payload.get("material_lit", True)),
+        show_shadows=bool(payload.get("show_shadows", True)),
+        show_fog=bool(payload.get("show_fog", False)),
+        show_depth=bool(payload.get("show_depth", False)),
+        light_yaw_degrees=float(payload.get("light_yaw_degrees", 45.0) or 45.0),
+        light_pitch_degrees=float(payload.get("light_pitch_degrees", 45.0) or 45.0),
         snap_to_grid=bool(payload.get("snap_to_grid", False)),
         next_index=int(payload.get("next_index", 1) or 1),
     ).normalized()
@@ -198,15 +226,7 @@ def update_blockout_camera(scene: BlockoutScene | dict[str, Any], **params: Any)
         target=_vec3(target),
         fov_degrees=_clamp(fov, 15.0, 90.0),
     )
-    return BlockoutScene(
-        camera=camera,
-        primitives=base.primitives,
-        grid_size=base.grid_size,
-        show_grid=base.show_grid,
-        show_wireframe=base.show_wireframe,
-        snap_to_grid=base.snap_to_grid,
-        next_index=base.next_index,
-    ).normalized()
+    return replace(base, camera=camera).normalized()
 
 
 def add_blockout_primitive(scene: BlockoutScene | dict[str, Any] | None, **params: Any) -> BlockoutScene:
@@ -215,13 +235,9 @@ def add_blockout_primitive(scene: BlockoutScene | dict[str, Any] | None, **param
     if any(p.id == primitive_id for p in base.primitives):
         raise ValueError(f"3D blockout primitive already exists: {primitive_id}")
     primitive = _primitive_from_params(primitive_id, params)
-    return BlockoutScene(
-        camera=base.camera,
+    return replace(
+        base,
         primitives=(*base.primitives, primitive),
-        grid_size=base.grid_size,
-        show_grid=base.show_grid,
-        show_wireframe=base.show_wireframe,
-        snap_to_grid=base.snap_to_grid,
         next_index=max(base.next_index + 1, _primitive_index(primitive_id) + 1),
     ).normalized()
 
@@ -254,14 +270,9 @@ def update_blockout_primitive(scene: BlockoutScene | dict[str, Any], primitive_i
         )
     if not found:
         raise ValueError(f"3D blockout primitive not found: {wanted}")
-    return BlockoutScene(
-        camera=base.camera,
+    return replace(
+        base,
         primitives=tuple(updated),
-        grid_size=base.grid_size,
-        show_grid=base.show_grid,
-        show_wireframe=base.show_wireframe,
-        snap_to_grid=base.snap_to_grid,
-        next_index=base.next_index,
     ).normalized()
 
 
@@ -271,14 +282,9 @@ def delete_blockout_primitive(scene: BlockoutScene | dict[str, Any], primitive_i
     remaining = tuple(p for p in base.primitives if p.id != wanted)
     if len(remaining) == len(base.primitives):
         raise ValueError(f"3D blockout primitive not found: {wanted}")
-    return BlockoutScene(
-        camera=base.camera,
+    return replace(
+        base,
         primitives=remaining,
-        grid_size=base.grid_size,
-        show_grid=base.show_grid,
-        show_wireframe=base.show_wireframe,
-        snap_to_grid=base.snap_to_grid,
-        next_index=base.next_index,
     ).normalized()
 
 
@@ -308,13 +314,9 @@ def duplicate_blockout_primitive(
         wireframe=source.wireframe,
         locked=source.locked,
     ).normalized()
-    return BlockoutScene(
-        camera=base.camera,
+    return replace(
+        base,
         primitives=(*base.primitives, duplicated),
-        grid_size=base.grid_size,
-        show_grid=base.show_grid,
-        show_wireframe=base.show_wireframe,
-        snap_to_grid=base.snap_to_grid,
         next_index=max(base.next_index + 1, _primitive_index(new_id) + 1),
     ).normalized()
 
@@ -330,14 +332,14 @@ def align_blockout_primitive_to_ground(scene: BlockoutScene | dict[str, Any], pr
             continue
         found = True
         sx, sy, sz = primitive.scale
-        px, _py, pz = primitive.position
-        ground_y = 0.0 if primitive.kind == "arch" else sy * 0.5
+        px, py, _pz = primitive.position
+        ground_z = 0.0 if primitive.kind == "arch" else sz * 0.5
         updated.append(
             BlockoutPrimitive(
                 id=primitive.id,
                 kind=primitive.kind,
                 name=primitive.name,
-                position=(px, ground_y, pz),
+                position=(px, py, ground_z),
                 rotation=primitive.rotation,
                 scale=(sx, sy, sz),
                 color=primitive.color,
@@ -348,14 +350,9 @@ def align_blockout_primitive_to_ground(scene: BlockoutScene | dict[str, Any], pr
         )
     if not found:
         raise ValueError(f"3D blockout primitive not found: {wanted}")
-    return BlockoutScene(
-        camera=base.camera,
+    return replace(
+        base,
         primitives=tuple(updated),
-        grid_size=base.grid_size,
-        show_grid=base.show_grid,
-        show_wireframe=base.show_wireframe,
-        snap_to_grid=base.snap_to_grid,
-        next_index=base.next_index,
     ).normalized()
 
 
@@ -391,28 +388,15 @@ def snap_blockout_primitive_to_grid(
         )
     if not found:
         raise ValueError(f"3D blockout primitive not found: {wanted}")
-    return BlockoutScene(
-        camera=base.camera,
+    return replace(
+        base,
         primitives=tuple(updated),
-        grid_size=base.grid_size,
-        show_grid=base.show_grid,
-        show_wireframe=base.show_wireframe,
-        snap_to_grid=base.snap_to_grid,
-        next_index=base.next_index,
     ).normalized()
 
 
 def set_blockout_snap(scene: BlockoutScene | dict[str, Any], enabled: bool) -> BlockoutScene:
     base = blockout_scene_from_dict(scene)
-    return BlockoutScene(
-        camera=base.camera,
-        primitives=base.primitives,
-        grid_size=base.grid_size,
-        show_grid=base.show_grid,
-        show_wireframe=base.show_wireframe,
-        snap_to_grid=bool(enabled),
-        next_index=base.next_index,
-    ).normalized()
+    return replace(base, snap_to_grid=bool(enabled)).normalized()
 
 
 def apply_blockout_camera_preset(scene: BlockoutScene | dict[str, Any], preset: str) -> BlockoutScene:
@@ -426,6 +410,45 @@ def apply_blockout_camera_preset(scene: BlockoutScene | dict[str, Any], preset: 
     return update_blockout_camera(scene, yaw_degrees=35.0, pitch_degrees=-18.0, distance=8.5, fov_degrees=42.0)
 
 
+def screen_to_blockout_ground(
+    scene: BlockoutScene | dict[str, Any],
+    screen_x: float,
+    screen_y: float,
+    width: int,
+    height: int,
+) -> Vec3:
+    """Unproject a canvas point to the Z-up blockout ground plane."""
+
+    normalized = blockout_scene_from_dict(scene)
+    camera = normalized.camera
+    w = max(1, int(width or 1))
+    h = max(1, int(height or 1))
+    focal = 0.5 * min(w, h) / tan(radians(_clamp(camera.fov_degrees, 15.0, 90.0)) * 0.5)
+    ray_camera = (
+        (float(screen_x) - w * 0.5) / focal,
+        1.0,
+        (h * 0.5 - float(screen_y)) / focal,
+    )
+    origin_camera = (0.0, -max(0.25, float(camera.distance)), 0.0)
+    origin_relative = _camera_to_world_vector(origin_camera, camera)
+    ray_world = _normalized(_camera_to_world_vector(ray_camera, camera))
+    origin_world = (
+        origin_relative[0] + camera.target[0],
+        origin_relative[1] + camera.target[1],
+        origin_relative[2] + camera.target[2],
+    )
+    if abs(ray_world[2]) < 0.00001:
+        return (camera.target[0], camera.target[1], 0.0)
+    distance = -origin_world[2] / ray_world[2]
+    if distance <= 0.0:
+        return (camera.target[0], camera.target[1], 0.0)
+    return (
+        origin_world[0] + ray_world[0] * distance,
+        origin_world[1] + ray_world[1] * distance,
+        0.0,
+    )
+
+
 def project_blockout_scene(scene: BlockoutScene | dict[str, Any], width: int = 640, height: int = 360) -> dict[str, Any]:
     """Project a 3D blockout scene to serializable 2D faces/edges."""
 
@@ -434,16 +457,48 @@ def project_blockout_scene(scene: BlockoutScene | dict[str, Any], width: int = 6
     h = max(1, int(height or 1))
     faces: list[dict[str, Any]] = []
     edges: list[dict[str, Any]] = []
+    shadows: list[dict[str, Any]] = []
+    light_direction = _direction_from_angles(
+        normalized.light_yaw_degrees,
+        normalized.light_pitch_degrees,
+    )
     for primitive in normalized.primitives:
         mesh = _mesh_for_primitive(primitive)
         transformed = [_transform_local_vertex(vertex, primitive) for vertex in mesh["vertices"]]
         projected = [_project_point(vertex, normalized.camera, w, h) for vertex in transformed]
+        if normalized.show_shadows and primitive.kind != "plane":
+            ground_points = [
+                _project_point((vertex[0], vertex[1], 0.002), normalized.camera, w, h)
+                for vertex in transformed
+            ]
+            visible_ground = [point for point in ground_points if point is not None]
+            if visible_ground:
+                xs = [float(point["x"]) for point in visible_ground]
+                ys = [float(point["y"]) for point in visible_ground]
+                shadows.append(
+                    {
+                        "primitive_id": primitive.id,
+                        "rect": [
+                            round(min(xs), 3),
+                            round(min(ys), 3),
+                            round(max(6.0, max(xs) - min(xs)), 3),
+                            round(max(4.0, max(ys) - min(ys)), 3),
+                        ],
+                        "opacity": round(min(0.34, 0.16 + primitive.opacity * 0.16), 4),
+                    }
+                )
         for face_index, face in enumerate(mesh["faces"]):
             points = [projected[index] for index in face]
             if any(point is None for point in points):
                 continue
             depth = sum(projected[index]["depth"] for index in face if projected[index] is not None) / len(face)
             screen_points = [(round(p["x"], 3), round(p["y"], 3)) for p in points if p is not None]
+            shade = 1.0
+            if normalized.material_lit and len(face) >= 3:
+                a, b, c = (transformed[index] for index in face[:3])
+                normal = _normalized(_cross(_subtract(b, a), _subtract(c, a)))
+                diffuse = abs(_dot(normal, light_direction))
+                shade = 0.38 + 0.62 * diffuse
             faces.append(
                 {
                     "primitive_id": primitive.id,
@@ -453,6 +508,19 @@ def project_blockout_scene(scene: BlockoutScene | dict[str, Any], width: int = 6
                     "depth": round(depth, 5),
                     "color": primitive.color,
                     "opacity": round(primitive.opacity, 4),
+                    "shade": round(shade, 4),
+                    "depth_preview": normalized.show_depth,
+                    "fog": round(
+                        _clamp(
+                            (depth - normalized.camera.distance * 0.6)
+                            / max(0.25, normalized.camera.distance * 1.8),
+                            0.0,
+                            0.58,
+                        )
+                        if normalized.show_fog
+                        else 0.0,
+                        4,
+                    ),
                 }
             )
             if primitive.wireframe or normalized.show_wireframe:
@@ -469,12 +537,20 @@ def project_blockout_scene(scene: BlockoutScene | dict[str, Any], width: int = 6
                     }
                     if edge not in edges:
                         edges.append(edge)
+    if faces:
+        near_depth = min(float(row["depth"]) for row in faces)
+        far_depth = max(float(row["depth"]) for row in faces)
+        depth_span = max(0.0001, far_depth - near_depth)
+        for row in faces:
+            normalized_depth = (float(row["depth"]) - near_depth) / depth_span
+            row["depth_value"] = round(1.0 - normalized_depth * 0.78, 4)
     faces.sort(key=lambda row: row["depth"], reverse=True)
     edges.sort(key=lambda row: row["depth"], reverse=True)
     return {
         "schema": "tigerstudio.painter.3d_blockout.projection.v1",
         "viewport": {"width": w, "height": h},
         "scene": normalized.to_dict(),
+        "shadows": shadows,
         "faces": faces,
         "edges": edges,
         "face_count": len(faces),
@@ -485,7 +561,7 @@ def project_blockout_scene(scene: BlockoutScene | dict[str, Any], width: int = 6
 def render_blockout_scene_qimage(scene: BlockoutScene | dict[str, Any], width: int = 640, height: int = 360):
     """Render a lightweight preview QImage for tests and future UI panels."""
 
-    from PySide6.QtCore import QPointF, Qt
+    from PySide6.QtCore import QPointF, QRectF, Qt
     from PySide6.QtGui import QColor, QImage, QPainter, QPen, QPolygonF
 
     w = max(1, int(width or 1))
@@ -503,8 +579,39 @@ def render_blockout_scene_qimage(scene: BlockoutScene | dict[str, Any], width: i
                 painter.drawLine(x, 0, x, h)
             for y in range(h // 2 % step, h, step):
                 painter.drawLine(0, y, w, y)
+        for shadow in projection.get("shadows", []):
+            x, y, width, height = shadow["rect"]
+            opacity = _clamp(float(shadow.get("opacity", 0.25)), 0.0, 0.5)
+            for inset, alpha_scale in ((0.0, 0.35), (2.0, 0.55), (5.0, 1.0)):
+                painter.setPen(Qt.NoPen)
+                painter.setBrush(QColor(0, 0, 0, int(255 * opacity * alpha_scale)))
+                painter.drawEllipse(
+                    QRectF(
+                        float(x) + inset,
+                        float(y) + inset * 0.45,
+                        max(1.0, float(width) - inset * 2.0),
+                        max(1.0, float(height) - inset * 0.9),
+                    )
+                )
         for face in projection["faces"]:
-            color = QColor(str(face["color"]))
+            if bool(projection["scene"].get("show_depth", False)):
+                value = int(255 * _clamp(float(face.get("depth_value", 1.0)), 0.0, 1.0))
+                color = QColor(value, value, value)
+            else:
+                color = QColor(str(face["color"]))
+            shade = _clamp(float(face.get("shade", 1.0)), 0.0, 1.0)
+            if not bool(projection["scene"].get("show_depth", False)):
+                color.setRed(int(color.red() * shade))
+                color.setGreen(int(color.green() * shade))
+                color.setBlue(int(color.blue() * shade))
+            fog = (
+                0.0
+                if bool(projection["scene"].get("show_depth", False))
+                else _clamp(float(face.get("fog", 0.0)), 0.0, 0.75)
+            )
+            color.setRed(int(color.red() * (1.0 - fog) + 58 * fog))
+            color.setGreen(int(color.green() * (1.0 - fog) + 60 * fog))
+            color.setBlue(int(color.blue() * (1.0 - fog) + 63 * fog))
             color.setAlphaF(_clamp(float(face["opacity"]), 0.05, 1.0))
             polygon = QPolygonF([QPointF(float(x), float(y)) for x, y in face["points"]])
             painter.setPen(Qt.NoPen)
@@ -530,8 +637,8 @@ def _primitive_from_params(primitive_id: str, params: dict[str, Any]) -> Blockou
         position=_params_vec(params, "x", "y", "z", (0.0, 0.0, 0.0)),
         rotation=_params_vec(params, "rx", "ry", "rz", (0.0, 0.0, 0.0)),
         scale=_params_vec(params, "sx", "sy", "sz", _default_scale_for_kind(kind)),
-        color=str(params.get("color") or "#7C8CFF"),
-        opacity=float(params.get("opacity", 0.72) or 0.72),
+        color=str(params.get("color") or "#F2F2F2"),
+        opacity=float(params.get("opacity", 1.0) or 1.0),
         wireframe=bool(params.get("wireframe", True)),
         locked=bool(params.get("locked", False)),
     ).normalized()
@@ -556,8 +663,20 @@ def _apply_param_updates(payload: dict[str, Any], params: dict[str, Any]) -> Non
 
 
 def _mesh_for_primitive(primitive: BlockoutPrimitive) -> dict[str, Any]:
-    if primitive.normalized().kind == "arch":
-        return _compound_boxes([(-0.42, 0.5, 0.0, 0.16, 1.0, 0.2), (0.42, 0.5, 0.0, 0.16, 1.0, 0.2), (0.0, 0.98, 0.0, 1.0, 0.18, 0.2)])
+    kind = primitive.normalized().kind
+    if kind == "arch":
+        return _compound_boxes([(-0.42, 0.0, 0.5, 0.16, 0.2, 1.0), (0.42, 0.0, 0.5, 0.16, 0.2, 1.0), (0.0, 0.0, 0.98, 1.0, 0.2, 0.18)])
+    if kind == "sphere":
+        return _sphere_mesh()
+    if kind == "cylinder":
+        return _cylinder_mesh(cone=False)
+    if kind == "cone":
+        return _cylinder_mesh(cone=True)
+    if kind == "plane":
+        return {
+            "vertices": [(-0.5, -0.5, 0.0), (0.5, -0.5, 0.0), (0.5, 0.5, 0.0), (-0.5, 0.5, 0.0)],
+            "faces": [(0, 1, 2, 3)],
+        }
     return _box_mesh((1.0, 1.0, 1.0))
 
 
@@ -576,6 +695,49 @@ def _compound_boxes(parts: Iterable[tuple[float, float, float, float, float, flo
         offset = len(vertices)
         vertices.extend((x + cx, y + cy, z + cz) for x, y, z in mesh["vertices"])
         faces.extend(tuple(index + offset for index in face) for face in mesh["faces"])
+    return {"vertices": vertices, "faces": faces}
+
+
+def _sphere_mesh(*, latitude_steps: int = 6, longitude_steps: int = 10) -> dict[str, Any]:
+    vertices: list[Vec3] = []
+    faces: list[tuple[int, ...]] = []
+    for latitude in range(latitude_steps + 1):
+        phi = -pi * 0.5 + pi * latitude / latitude_steps
+        z = sin(phi) * 0.5
+        radius = cos(phi) * 0.5
+        for longitude in range(longitude_steps):
+            theta = 2.0 * pi * longitude / longitude_steps
+            vertices.append((cos(theta) * radius, sin(theta) * radius, z))
+    for latitude in range(latitude_steps):
+        row = latitude * longitude_steps
+        next_row = (latitude + 1) * longitude_steps
+        for longitude in range(longitude_steps):
+            nxt = (longitude + 1) % longitude_steps
+            faces.append((row + longitude, row + nxt, next_row + nxt, next_row + longitude))
+    return {"vertices": vertices, "faces": faces}
+
+
+def _cylinder_mesh(*, cone: bool, segments: int = 12) -> dict[str, Any]:
+    vertices: list[Vec3] = []
+    faces: list[tuple[int, ...]] = []
+    for z, radius in ((-0.5, 0.5), (0.5, 0.0 if cone else 0.5)):
+        for segment in range(segments):
+            theta = 2.0 * pi * segment / segments
+            vertices.append((cos(theta) * radius, sin(theta) * radius, z))
+    bottom_center = len(vertices)
+    vertices.append((0.0, 0.0, -0.5))
+    top_center = len(vertices)
+    vertices.append((0.0, 0.0, 0.5))
+    for segment in range(segments):
+        nxt = (segment + 1) % segments
+        lower_a = segment
+        lower_b = nxt
+        upper_a = segments + segment
+        upper_b = segments + nxt
+        faces.append((lower_a, lower_b, upper_b, upper_a))
+        faces.append((bottom_center, lower_b, lower_a))
+        if not cone:
+            faces.append((top_center, upper_a, upper_b))
     return {"vertices": vertices, "faces": faces}
 
 
@@ -602,18 +764,63 @@ def _rotate_xyz(point: Vec3, rotation: Vec3) -> Vec3:
 def _project_point(point: Vec3, camera: BlockoutCamera, width: int, height: int) -> dict[str, float] | None:
     x, y, z = point[0] - camera.target[0], point[1] - camera.target[1], point[2] - camera.target[2]
     yaw = radians(-camera.yaw_degrees)
-    x, z = x * cos(yaw) + z * sin(yaw), -x * sin(yaw) + z * cos(yaw)
+    x, y = x * cos(yaw) + y * sin(yaw), -x * sin(yaw) + y * cos(yaw)
     pitch = radians(-camera.pitch_degrees)
-    y, z = y * cos(pitch) - z * sin(pitch), y * sin(pitch) + z * cos(pitch)
-    z += max(0.25, float(camera.distance))
-    if z <= 0.04:
+    z, y = z * cos(pitch) - y * sin(pitch), z * sin(pitch) + y * cos(pitch)
+    y += max(0.25, float(camera.distance))
+    if y <= 0.04:
         return None
     focal = 0.5 * min(width, height) / tan(radians(_clamp(camera.fov_degrees, 15.0, 90.0)) * 0.5)
-    return {"x": width * 0.5 + x * focal / z, "y": height * 0.5 - y * focal / z, "depth": z}
+    return {"x": width * 0.5 + x * focal / y, "y": height * 0.5 - z * focal / y, "depth": y}
+
+
+def _camera_to_world_vector(point: Vec3, camera: BlockoutCamera) -> Vec3:
+    x_camera, y_camera, z_camera = point
+    pitch = radians(-camera.pitch_degrees)
+    z = z_camera * cos(pitch) + y_camera * sin(pitch)
+    y_rotated = -z_camera * sin(pitch) + y_camera * cos(pitch)
+    yaw = radians(-camera.yaw_degrees)
+    x = x_camera * cos(yaw) - y_rotated * sin(yaw)
+    y = x_camera * sin(yaw) + y_rotated * cos(yaw)
+    return (x, y, z)
 
 
 def _face_edges(face: Sequence[int]) -> list[tuple[int, int]]:
     return [(int(face[index]), int(face[(index + 1) % len(face)])) for index in range(len(face))]
+
+
+def _subtract(a: Vec3, b: Vec3) -> Vec3:
+    return (a[0] - b[0], a[1] - b[1], a[2] - b[2])
+
+
+def _cross(a: Vec3, b: Vec3) -> Vec3:
+    return (
+        a[1] * b[2] - a[2] * b[1],
+        a[2] * b[0] - a[0] * b[2],
+        a[0] * b[1] - a[1] * b[0],
+    )
+
+
+def _dot(a: Vec3, b: Vec3) -> float:
+    return a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+
+
+def _normalized(value: Vec3) -> Vec3:
+    length = max(0.000001, (_dot(value, value)) ** 0.5)
+    return (value[0] / length, value[1] / length, value[2] / length)
+
+
+def _direction_from_angles(yaw_degrees: float, pitch_degrees: float) -> Vec3:
+    yaw = radians(float(yaw_degrees))
+    pitch = radians(float(pitch_degrees))
+    horizontal = cos(pitch)
+    return _normalized(
+        (
+            cos(yaw) * horizontal,
+            sin(yaw) * horizontal,
+            sin(pitch),
+        )
+    )
 
 
 def _params_vec(params: dict[str, Any], x_key: str, y_key: str, z_key: str, default: Vec3) -> Vec3:
@@ -627,8 +834,11 @@ def _params_vec(params: dict[str, Any], x_key: str, y_key: str, z_key: str, defa
 
 
 def _default_scale_for_kind(kind: str) -> Vec3:
-    if _supported_kind(kind) == "arch":
+    normalized = _supported_kind(kind)
+    if normalized == "arch":
         return (2.2, 2.4, 0.8)
+    if normalized == "plane":
+        return (3.0, 3.0, 1.0)
     return (1.0, 1.0, 1.0)
 
 
@@ -661,10 +871,10 @@ def _primitive_index(primitive_id: str) -> int:
 
 
 def _normalize_hex(value: Any) -> str:
-    text = str(value or "#7C8CFF").strip()
+    text = str(value or "#F2F2F2").strip()
     if len(text) == 7 and text.startswith("#"):
         return text.upper()
-    return "#7C8CFF"
+    return "#F2F2F2"
 
 
 def _clamp(value: float, lo: float, hi: float) -> float:
@@ -696,6 +906,7 @@ __all__ = [
     "delete_blockout_primitive",
     "duplicate_blockout_primitive",
     "project_blockout_scene",
+    "screen_to_blockout_ground",
     "render_blockout_scene_qimage",
     "set_blockout_snap",
     "snap_blockout_primitive_to_grid",
