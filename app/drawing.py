@@ -43,6 +43,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QColorDialog,
     QApplication,
     QComboBox,
@@ -288,40 +289,107 @@ QMenu::item:selected {
 }
 
 QMenu#PaintBrushPopup {
-    background-color: #10131a;
-    border: 1px solid rgba(178, 186, 202, 40);
-    border-radius: 10px;
-    padding: 6px;
+    background-color: #292929;
+    border: 1px solid #0f0f0f;
+    border-radius: 2px;
+    padding: 1px;
 }
 
 QFrame#PaintBrushPopupPanel {
-    background-color: #10131a;
+    background-color: #303030;
     border: none;
 }
 
+QFrame#PaintBrushPopupNotice {
+    background-color: #454545;
+    border: 1px solid #202020;
+    color: #ededed;
+}
+
+QComboBox#PaintBrushPopupLibrary,
+QLineEdit#PaintBrushPopupSearch {
+    background-color: #4a4a4a;
+    border: 1px solid #202020;
+    border-radius: 1px;
+    color: #f0f0f0;
+    min-height: 24px;
+    padding: 1px 6px;
+}
+
+QListWidget#PaintBrushPopupCategory {
+    background-color: #393939;
+    border: 1px solid #202020;
+    color: #ececec;
+    outline: none;
+}
+
+QListWidget#PaintBrushPopupCategory::item {
+    min-height: 24px;
+    padding: 1px 5px;
+}
+
+QListWidget#PaintBrushPopupCategory::item:hover {
+    background-color: #484848;
+}
+
+QListWidget#PaintBrushPopupCategory::item:selected {
+    background-color: #575757;
+    border-left: 2px solid #d99b31;
+    color: #ffffff;
+}
+
 QListWidget#PaintBrushPopupList {
-    background-color: transparent;
-    border: none;
+    background-color: #252525;
+    border: 1px solid #1d1d1d;
     outline: none;
 }
 
 QListWidget#PaintBrushPopupList::item {
-    background-color: #171c25;
-    border: 1px solid rgba(178, 186, 202, 28);
-    border-radius: 8px;
-    padding: 6px;
-    margin: 3px;
+    background-color: #303030;
+    border: 1px solid #222222;
+    border-radius: 0;
+    color: #f1f1f1;
+    padding: 2px 5px;
+    margin: 1px;
 }
 
 QListWidget#PaintBrushPopupList::item:hover {
-    background-color: #202837;
-    border-color: rgba(220, 226, 238, 58);
+    background-color: #3d3d3d;
+    border-color: #595959;
 }
 
 QListWidget#PaintBrushPopupList::item:selected {
-    background:qlineargradient(x1:0,y1:0,x2:1,y2:1,
-        stop:0 #ff6a4a, stop:.52 #ff4ca0, stop:1 #735cff);
-    border-color: rgba(255, 255, 255, 92);
+    background-color: #393939;
+    border: 1px solid #d99b31;
+}
+
+QFrame#PaintBrushPopupFilters,
+QFrame#PaintBrushPopupFooter {
+    background-color: #353535;
+    border: 1px solid #202020;
+}
+
+QCheckBox#PaintBrushPopupFilter {
+    color: #ededed;
+    spacing: 5px;
+    min-height: 22px;
+}
+
+QCheckBox#PaintBrushPopupFilter::indicator {
+    width: 14px;
+    height: 14px;
+    border: 1px solid #777777;
+    background-color: #2a2a2a;
+}
+
+QCheckBox#PaintBrushPopupFilter::indicator:checked {
+    background-color: #d99b31;
+    border-color: #f1bd59;
+}
+
+QLabel#PaintBrushPopupPreview {
+    background-color: #222222;
+    border: 1px solid #171717;
 }
 
 QLabel#PaintValue {
@@ -10808,61 +10876,276 @@ class PaintDialog(QDialog):
         menu.setObjectName("PaintBrushPopup")
         panel = QFrame(menu)
         panel.setObjectName("PaintBrushPopupPanel")
+        panel.setFixedSize(620, 500)
         panel_layout = QVBoxLayout(panel)
-        panel_layout.setContentsMargins(6, 6, 6, 6)
+        panel_layout.setContentsMargins(7, 6, 7, 7)
         panel_layout.setSpacing(5)
 
-        title = QLabel("BRUSH")
-        title.setObjectName("PaintSectionTitle")
-        panel_layout.addWidget(title)
+        header = QHBoxLayout()
+        header.setContentsMargins(0, 0, 0, 0)
+        title = QLabel("Brush Selector")
+        title.setObjectName("PaintBrushPanelTitle")
+        header.addWidget(title)
+        header.addStretch(1)
+        menu_icon = QLabel()
+        menu_icon.setPixmap(app_icon("menu", size=14, color="#D8D8D8").pixmap(14, 14))
+        header.addWidget(menu_icon)
+        panel_layout.addLayout(header)
 
-        category_combo = QComboBox(panel)
-        category_combo.setObjectName("PaintBrushPopupCategory")
-        category_combo.addItem("All Brushes", "")
+        notice = QFrame(panel)
+        notice.setObjectName("PaintBrushPopupNotice")
+        notice_layout = QHBoxLayout(notice)
+        notice_layout.setContentsMargins(8, 4, 8, 4)
+        notice_layout.addWidget(QLabel("New brushes added..."))
+        notice_layout.addStretch(1)
+        notice_layout.addWidget(QLabel("Brush Store"))
+        panel_layout.addWidget(notice)
+
+        library_row = QHBoxLayout()
+        library_row.setContentsMargins(0, 0, 0, 0)
+        library_row.addWidget(QLabel("Brush Library:"))
+        library_combo = QComboBox(panel)
+        library_combo.setObjectName("PaintBrushPopupLibrary")
+        library_combo.addItem("Tiger Studio Brushes", "tiger_studio")
+        library_row.addWidget(library_combo, stretch=1)
+        search_edit = QLineEdit(panel)
+        search_edit.setObjectName("PaintBrushPopupSearch")
+        search_edit.setPlaceholderText("Search brushes")
+        search_edit.setClearButtonEnabled(True)
+        search_edit.setFixedWidth(190)
+        library_row.addWidget(search_edit)
+        panel_layout.addLayout(library_row)
+
+        selector_body = QHBoxLayout()
+        selector_body.setContentsMargins(0, 0, 0, 0)
+        selector_body.setSpacing(5)
+
+        category_list = QListWidget(panel)
+        category_list.setObjectName("PaintBrushPopupCategory")
+        category_list.setFixedWidth(154)
+        category_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        all_item = QListWidgetItem(app_icon("brush", size=14, color="#D7D7D7"), "All Brushes")
+        all_item.setData(Qt.ItemDataRole.UserRole, "")
+        category_list.addItem(all_item)
+        recent_item = QListWidgetItem(app_icon("history", size=14, color="#D7D7D7"), "Recent Brushes")
+        recent_item.setData(Qt.ItemDataRole.UserRole, "__recent__")
+        category_list.addItem(recent_item)
         for category in sorted(
             {str(row.get("category") or "Brushes") for row in BRUSH_LIBRARY_PRESETS}
         ):
-            category_combo.addItem(category, category)
-        panel_layout.addWidget(category_combo)
+            item = QListWidgetItem(app_icon("brush", size=14, color="#C7CDD7"), category)
+            item.setData(Qt.ItemDataRole.UserRole, category)
+            category_list.addItem(item)
+        category_list.setCurrentRow(0)
+        selector_body.addWidget(category_list)
 
         preset_list = QListWidget(panel)
         preset_list.setObjectName("PaintBrushPopupList")
-        preset_list.setViewMode(QListView.ViewMode.IconMode)
+        preset_list.setViewMode(QListView.ViewMode.ListMode)
         preset_list.setMovement(QListView.Movement.Static)
-        preset_list.setResizeMode(QListView.ResizeMode.Adjust)
-        preset_list.setFlow(QListView.Flow.LeftToRight)
-        preset_list.setWrapping(True)
+        preset_list.setResizeMode(QListView.ResizeMode.Fixed)
+        preset_list.setFlow(QListView.Flow.TopToBottom)
+        preset_list.setWrapping(False)
         preset_list.setUniformItemSizes(True)
         preset_list.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         preset_list.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        preset_list.setIconSize(BRUSH_PRESET_ICON_SIZE)
-        preset_list.setGridSize(BRUSH_POPUP_PRESET_CELL_SIZE)
-        def _populate_popup_presets() -> None:
-            selected_category = str(category_combo.currentData() or "")
-            preset_list.clear()
-            for idx, preset in enumerate(BRUSH_LIBRARY_PRESETS):
-                category = str(preset.get("category") or "Brushes")
-                if selected_category and category != selected_category:
+        preset_list.setIconSize(QSize(118, 48))
+        preset_list.setFixedWidth(292)
+        selector_body.addWidget(preset_list, stretch=1)
+
+        filter_panel = QFrame(panel)
+        filter_panel.setObjectName("PaintBrushPopupFilters")
+        filter_panel.setFixedWidth(148)
+        filter_layout = QVBoxLayout(filter_panel)
+        filter_layout.setContentsMargins(7, 7, 7, 7)
+        filter_layout.setSpacing(4)
+        filter_title = QLabel("FILTER BRUSHES")
+        filter_title.setObjectName("PaintColorLabel")
+        filter_layout.addWidget(filter_title)
+        popup_filter_checks: dict[str, QCheckBox] = {}
+        for label, filter_id in (
+            ("My Favorites", "favorites"),
+            ("Painter Masters", "masters"),
+            ("Stamps", "stamps"),
+            ("Watercolor Compatible", "watercolor"),
+            ("Thick Paint Compatible", "thick_paint"),
+        ):
+            checkbox = QCheckBox(label, filter_panel)
+            checkbox.setObjectName("PaintBrushPopupFilter")
+            checkbox.setChecked(filter_id in self._brush_active_filters)
+            popup_filter_checks[filter_id] = checkbox
+            filter_layout.addWidget(checkbox)
+        filter_layout.addStretch(1)
+        clear_filters = QPushButton("Clear Filters")
+        clear_filters.setObjectName("PaintCustomColor")
+        filter_layout.addWidget(clear_filters)
+        selector_body.addWidget(filter_panel)
+        panel_layout.addLayout(selector_body, stretch=1)
+
+        footer = QFrame(panel)
+        footer.setObjectName("PaintBrushPopupFooter")
+        footer_layout = QHBoxLayout(footer)
+        footer_layout.setContentsMargins(7, 5, 7, 5)
+        preview = QLabel(footer)
+        preview.setObjectName("PaintBrushPopupPreview")
+        preview.setFixedSize(150, 52)
+        preview.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        footer_layout.addWidget(preview)
+        footer_text = QVBoxLayout()
+        selected_name = QLabel("Select a brush")
+        selected_name.setObjectName("PaintBrushPanelTitle")
+        compatibility = QLabel("Layer compatibility: Default Layer")
+        compatibility.setObjectName("PaintBrushMeta")
+        footer_text.addWidget(selected_name)
+        footer_text.addWidget(compatibility)
+        footer_layout.addLayout(footer_text, stretch=1)
+        favorite_button = QPushButton()
+        favorite_button.setObjectName("PaintBrushLibraryTool")
+        favorite_button.setCheckable(True)
+        favorite_button.setFixedSize(28, 26)
+        favorite_button.setToolTip("Toggle selected brush favorite")
+        footer_layout.addWidget(favorite_button)
+        panel_layout.addWidget(footer)
+
+        current_popup_index = {"value": self._active_brush_preset_index}
+
+        def _matching_indices() -> list[int]:
+            current = category_list.currentItem()
+            category = str(current.data(Qt.ItemDataRole.UserRole) or "") if current is not None else ""
+            search = search_edit.text().strip().casefold()
+            active_filters = {
+                filter_id
+                for filter_id, checkbox in popup_filter_checks.items()
+                if checkbox.isChecked()
+            }
+            if category == "__recent__":
+                candidates = [
+                    index
+                    for index in self._brush_recent_indices
+                    if 0 <= index < len(BRUSH_LIBRARY_PRESETS)
+                ]
+            else:
+                candidates = list(range(len(BRUSH_LIBRARY_PRESETS)))
+            result: list[int] = []
+            for index in candidates:
+                preset = BRUSH_LIBRARY_PRESETS[index]
+                preset_category = str(preset.get("category") or "Brushes")
+                if category and category != "__recent__" and preset_category != category:
                     continue
+                haystack = " ".join(
+                    (
+                        preset_category,
+                        str(preset.get("name") or ""),
+                        str(preset.get("style") or ""),
+                    )
+                ).casefold()
+                if search and search not in haystack:
+                    continue
+                if not all(
+                    self._brush_preset_matches_filter(preset, filter_id)
+                    for filter_id in active_filters
+                ):
+                    continue
+                result.append(index)
+            return result
+
+        def _update_popup_footer(item: QListWidgetItem | None) -> None:
+            if item is None:
+                preview.clear()
+                selected_name.setText("No matching brush")
+                compatibility.setText("Layer compatibility: -")
+                favorite_button.blockSignals(True)
+                favorite_button.setChecked(False)
+                favorite_button.blockSignals(False)
+                return
+            try:
+                index = int(item.data(Qt.ItemDataRole.UserRole))
+                preset = BRUSH_LIBRARY_PRESETS[index]
+            except Exception:
+                return
+            current_popup_index["value"] = index
+            selected_name.setText(str(preset.get("name") or "Brush"))
+            style = str(preset.get("style") or "")
+            category = str(preset.get("category") or "")
+            layers = ["Default"]
+            if category == "Water Media" or "watercolor" in style:
+                layers.append("Watercolor")
+            if self._brush_preset_matches_filter(preset, "thick_paint"):
+                layers.append("Thick Paint")
+            compatibility.setText("Layer compatibility: " + ", ".join(layers))
+            preview.setPixmap(
+                self._brush_preset_icon(
+                    preset,
+                    favorite=self._brush_preset_key(preset) in self._brush_favorites,
+                ).pixmap(146, 50)
+            )
+            favorite = self._brush_preset_key(preset) in self._brush_favorites
+            favorite_button.blockSignals(True)
+            favorite_button.setChecked(favorite)
+            favorite_button.setIcon(
+                app_icon("favorite", size=14, color="#F0C66A" if favorite else "#D9D9D9")
+            )
+            favorite_button.blockSignals(False)
+
+        def _populate_popup_presets() -> None:
+            preset_list.clear()
+            wanted_index = current_popup_index["value"]
+            selected_row = -1
+            for row, idx in enumerate(_matching_indices()):
+                preset = BRUSH_LIBRARY_PRESETS[idx]
+                category = str(preset.get("category") or "Brushes")
                 name = str(preset.get("name") or f"Brush {idx + 1}")
                 width = int(preset.get("width") or 1)
                 opacity = int(preset.get("opacity") or 100)
                 style = str(preset.get("style") or "round")
-                item = QListWidgetItem(self._brush_preset_icon(preset), "")
+                favorite = self._brush_preset_key(preset) in self._brush_favorites
+                item = QListWidgetItem(self._brush_preset_icon(preset, favorite=favorite), name)
                 item.setData(Qt.ItemDataRole.UserRole, idx)
                 item.setToolTip(f"{category} | {name} | {style} | {width}px / {opacity}%")
-                item.setSizeHint(BRUSH_POPUP_PRESET_CELL_SIZE)
+                item.setSizeHint(QSize(0, 58))
                 preset_list.addItem(item)
+                if idx == wanted_index:
+                    selected_row = row
+            if preset_list.count():
+                preset_list.setCurrentRow(selected_row if selected_row >= 0 else 0)
+                _update_popup_footer(preset_list.currentItem())
+            else:
+                _update_popup_footer(None)
+
+        def _set_popup_filter(filter_id: str, checked: bool) -> None:
+            self._set_brush_filter_enabled(filter_id, checked)
+            action = getattr(self, "_brush_filter_actions", {}).get(filter_id)
+            if action is not None and action.isChecked() != checked:
+                action.blockSignals(True)
+                action.setChecked(checked)
+                action.blockSignals(False)
+            _populate_popup_presets()
+
+        def _clear_popup_filters() -> None:
+            for filter_id, checkbox in popup_filter_checks.items():
+                checkbox.blockSignals(True)
+                checkbox.setChecked(False)
+                checkbox.blockSignals(False)
+                action = getattr(self, "_brush_filter_actions", {}).get(filter_id)
+                if action is not None:
+                    action.blockSignals(True)
+                    action.setChecked(False)
+                    action.blockSignals(False)
+            self._brush_active_filters.clear()
+            self._populate_brush_library()
+            _populate_popup_presets()
 
         _populate_popup_presets()
-        category_combo.currentIndexChanged.connect(lambda _index: _populate_popup_presets())
-
-        columns = min(4, max(1, preset_list.count()))
-        rows = min(3, max(1, math.ceil(max(1, preset_list.count()) / columns)))
-        preset_list.setFixedSize(
-            columns * BRUSH_POPUP_PRESET_CELL_SIZE.width() + 14,
-            rows * BRUSH_POPUP_PRESET_CELL_SIZE.height() + 12,
+        category_list.currentItemChanged.connect(
+            lambda _current, _previous: _populate_popup_presets()
         )
+        search_edit.textChanged.connect(lambda _text: _populate_popup_presets())
+        for filter_id, checkbox in popup_filter_checks.items():
+            checkbox.toggled.connect(
+                lambda checked=False, value=filter_id: _set_popup_filter(value, bool(checked))
+            )
+        preset_list.currentItemChanged.connect(_update_popup_footer)
+        clear_filters.clicked.connect(_clear_popup_filters)
 
         def _apply_popup_item(item: QListWidgetItem) -> None:
             try:
@@ -10872,8 +11155,22 @@ class PaintDialog(QDialog):
             self._apply_brush_preset_by_index(index)
             menu.close()
 
+        def _toggle_popup_favorite(checked: bool) -> None:
+            index = int(current_popup_index["value"])
+            if not (0 <= index < len(BRUSH_LIBRARY_PRESETS)):
+                return
+            preset = BRUSH_LIBRARY_PRESETS[index]
+            key = self._brush_preset_key(preset)
+            if checked:
+                self._brush_favorites.add(key)
+            else:
+                self._brush_favorites.discard(key)
+            self._active_brush_preset_index = index
+            self._update_brush_favorite_button()
+            _populate_popup_presets()
+
+        favorite_button.toggled.connect(_toggle_popup_favorite)
         preset_list.itemClicked.connect(_apply_popup_item)
-        panel_layout.addWidget(preset_list)
 
         widget_action = QWidgetAction(menu)
         widget_action.setDefaultWidget(panel)

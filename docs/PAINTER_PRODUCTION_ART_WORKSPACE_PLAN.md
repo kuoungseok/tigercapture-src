@@ -262,13 +262,14 @@ Official layout references:
 
 Implemented Painter 2023 layout contract (2026-07-25):
 
-- The top-options `Brush Selector` opens a compact category/preset grid directly
-  below its button. It never shifts focus to the right inspector; re-click
-  closes it and choosing a brush applies then collapses it.
-- The maintained full library model still owns library selection, favorites,
-  search, simultaneous Favorites/Painter Masters/Stamps/Watercolor/Thick Paint
-  filters, and the empty-state-aware recent strip for automation/state and
-  future dedicated selector surfaces.
+- The top-options `Brush Selector` opens a full Painter-style selector directly
+  below its button. It contains the active library, search, recent brushes,
+  category navigation, named stroke previews, simultaneous
+  Favorites/Painter Masters/Stamps/Watercolor/Thick Paint filters, a clear
+  command, favorites, and the selected brush's layer-compatibility preview.
+  These controls use the maintained library model and update the same state
+  exposed to automation. It never shifts focus to the right inspector;
+  re-click closes it and choosing a brush applies then collapses it.
 - The full view uses compact categories on the left and named stroke-preview
   rows on the right. Compact mode hides library/category/recent chrome while
   preserving search and brush variants. The selected-brush footer is shallow

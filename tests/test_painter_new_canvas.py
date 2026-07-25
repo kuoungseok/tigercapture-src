@@ -219,14 +219,13 @@ def test_standalone_painter_pauses_repaints_while_window_moves() -> None:
     dialog.close()
 
 
-def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
+def test_standalone_painter_uses_vector_icons_and_full_brush_selector() -> None:
     app = _app()
     from PySide6.QtCore import QPoint, QPointF, QSize, Qt
-    from PySide6.QtWidgets import QComboBox, QListView, QListWidget
+    from PySide6.QtWidgets import QCheckBox, QComboBox, QLineEdit, QListView, QListWidget
 
     from app.drawing import (
         BRUSH_LIBRARY_PRESETS,
-        BRUSH_POPUP_PRESET_CELL_SIZE,
         BRUSH_PRESET_ICON_SIZE,
         PaintDialog,
         create_blank_paint_pixmap,
@@ -437,19 +436,63 @@ def test_standalone_painter_uses_vector_icons_and_compact_palette() -> None:
     assert isinstance(dialog.layer_opacity_slider, StudioSlider)
     brush_menu = dialog._build_brush_button_menu()
     brush_popup_list = brush_menu.findChild(QListWidget, "PaintBrushPopupList")
-    brush_popup_category = brush_menu.findChild(QComboBox, "PaintBrushPopupCategory")
+    brush_popup_category = brush_menu.findChild(QListWidget, "PaintBrushPopupCategory")
+    brush_popup_library = brush_menu.findChild(QComboBox, "PaintBrushPopupLibrary")
+    brush_popup_search = brush_menu.findChild(QLineEdit, "PaintBrushPopupSearch")
+    brush_popup_filters = brush_menu.findChildren(QCheckBox, "PaintBrushPopupFilter")
     assert brush_popup_list is not None
     assert brush_popup_category is not None
-    assert brush_popup_category.findText("Pro Oils") >= 0
-    assert brush_popup_category.findText("Water Media") >= 0
-    assert brush_popup_category.findText("Concept") >= 0
-    assert brush_popup_list.viewMode() == QListView.ViewMode.IconMode
-    assert brush_popup_list.iconSize() == BRUSH_PRESET_ICON_SIZE
-    assert brush_popup_list.gridSize() == BRUSH_POPUP_PRESET_CELL_SIZE
+    assert brush_popup_library is not None
+    assert brush_popup_library.currentText() == "Tiger Studio Brushes"
+    assert brush_popup_search is not None
+    popup_categories = {
+        brush_popup_category.item(row).text()
+        for row in range(brush_popup_category.count())
+    }
+    assert {"All Brushes", "Recent Brushes", "Pro Oils", "Water Media", "Concept"} <= popup_categories
+    assert brush_popup_list.viewMode() == QListView.ViewMode.ListMode
+    assert brush_popup_list.iconSize() == QSize(118, 48)
     assert brush_popup_list.count() == len(BRUSH_LIBRARY_PRESETS)
-    assert brush_popup_list.item(0).text() == ""
+    assert brush_popup_list.item(0).text() == BRUSH_LIBRARY_PRESETS[0]["name"]
     assert BRUSH_LIBRARY_PRESETS[0]["name"] in brush_popup_list.item(0).toolTip()
     assert not brush_popup_list.item(0).icon().isNull()
+    assert {checkbox.text() for checkbox in brush_popup_filters} == {
+        "My Favorites",
+        "Painter Masters",
+        "Stamps",
+        "Watercolor Compatible",
+        "Thick Paint Compatible",
+    }
+    watercolor_filter = next(
+        checkbox
+        for checkbox in brush_popup_filters
+        if checkbox.text() == "Watercolor Compatible"
+    )
+    watercolor_filter.setChecked(True)
+    app.processEvents()
+    assert "watercolor" in dialog._brush_active_filters
+    assert dialog._brush_filter_actions["watercolor"].isChecked()
+    assert 0 < brush_popup_list.count() < len(BRUSH_LIBRARY_PRESETS)
+    watercolor_filter.setChecked(False)
+    app.processEvents()
+    assert "watercolor" not in dialog._brush_active_filters
+    brush_popup_search.setText("watercolor")
+    app.processEvents()
+    assert 0 < brush_popup_list.count() < len(BRUSH_LIBRARY_PRESETS)
+    brush_popup_search.clear()
+    app.processEvents()
+    pro_oils_row = next(
+        row
+        for row in range(brush_popup_category.count())
+        if brush_popup_category.item(row).text() == "Pro Oils"
+    )
+    brush_popup_category.setCurrentRow(pro_oils_row)
+    app.processEvents()
+    assert brush_popup_list.count() == sum(
+        preset["category"] == "Pro Oils" for preset in BRUSH_LIBRARY_PRESETS
+    )
+    brush_popup_category.setCurrentRow(0)
+    app.processEvents()
     brush_popup_list.itemClicked.emit(brush_popup_list.item(0))
     app.processEvents()
     assert dialog.pen_btn.isChecked()
