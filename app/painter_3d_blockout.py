@@ -472,17 +472,42 @@ def project_blockout_scene(scene: BlockoutScene | dict[str, Any], width: int = 6
         transformed = [_transform_local_vertex(vertex, primitive) for vertex in mesh["vertices"]]
         projected = [_project_point(vertex, normalized.camera, w, h) for vertex in transformed]
         if normalized.show_shadows and primitive.kind != "plane":
+            light_z = float(light_direction[2])
+            ground_world: list[Vec3] = []
+            for vertex in transformed:
+                height_above_ground = max(0.0, float(vertex[2]))
+                cast_scale = height_above_ground / max(0.12, abs(light_z))
+                ground_world.append(
+                    (
+                        float(vertex[0]) - float(light_direction[0]) * cast_scale,
+                        float(vertex[1]) - float(light_direction[1]) * cast_scale,
+                        0.006,
+                    )
+                )
             ground_points = [
-                _project_point((vertex[0], vertex[1], 0.002), normalized.camera, w, h)
-                for vertex in transformed
+                _project_point(vertex, normalized.camera, w, h)
+                for vertex in ground_world
             ]
             visible_ground = [point for point in ground_points if point is not None]
             if visible_ground:
                 xs = [float(point["x"]) for point in visible_ground]
                 ys = [float(point["y"]) for point in visible_ground]
+                hull = _convex_hull_2d(
+                    [(float(point["x"]), float(point["y"])) for point in visible_ground]
+                )
                 shadows.append(
                     {
                         "primitive_id": primitive.id,
+                        "kind": primitive.kind,
+                        "polygon": [(round(x, 3), round(y, 3)) for x, y in hull],
+                        "point_depths": [
+                            round(float(point["depth"]), 5) for point in visible_ground
+                        ],
+                        "depth": round(
+                            sum(float(point["depth"]) for point in visible_ground)
+                            / len(visible_ground),
+                            5,
+                        ),
                         "rect": [
                             round(min(xs), 3),
                             round(min(ys), 3),
@@ -510,6 +535,11 @@ def project_blockout_scene(scene: BlockoutScene | dict[str, Any], width: int = 6
                     "kind": primitive.kind,
                     "face_index": face_index,
                     "points": screen_points,
+                    "point_depths": [
+                        round(float(projected[index]["depth"]), 5)
+                        for index in face
+                        if projected[index] is not None
+                    ],
                     "depth": round(depth, 5),
                     "color": primitive.color,
                     "opacity": round(primitive.opacity, 4),
@@ -551,6 +581,11 @@ def project_blockout_scene(scene: BlockoutScene | dict[str, Any], width: int = 6
             row["depth_value"] = round(1.0 - normalized_depth * 0.78, 4)
     faces.sort(key=lambda row: row["depth"], reverse=True)
     edges.sort(key=lambda row: row["depth"], reverse=True)
+    all_depths = [
+        float(depth)
+        for row in [*floor_tiles, *shadows, *faces]
+        for depth in (row.get("point_depths") or [row.get("depth", 0.0)])
+    ]
     return {
         "schema": "tigerstudio.painter.3d_blockout.projection.v1",
         "viewport": {"width": w, "height": h},
@@ -559,8 +594,36 @@ def project_blockout_scene(scene: BlockoutScene | dict[str, Any], width: int = 6
         "shadows": shadows,
         "faces": faces,
         "edges": edges,
+        "depth_range": {
+            "near": min(all_depths, default=0.05),
+            "far": max(all_depths, default=max(1.0, normalized.camera.distance * 2.0)),
+        },
         "face_count": len(faces),
         "edge_count": len(edges),
+    }
+
+
+def project_blockout_world_point(
+    scene: BlockoutScene | dict[str, Any],
+    point: Vec3,
+    width: int,
+    height: int,
+) -> dict[str, float] | None:
+    """Project one world point through the same camera used by the preview."""
+
+    normalized = blockout_scene_from_dict(scene)
+    projected = _project_point(
+        _vec3(point),
+        normalized.camera,
+        max(1, int(width or 1)),
+        max(1, int(height or 1)),
+    )
+    if projected is None:
+        return None
+    return {
+        "x": float(projected["x"]),
+        "y": float(projected["y"]),
+        "depth": float(projected["depth"]),
     }
 
 
@@ -595,6 +658,27 @@ def render_blockout_scene_qimage(scene: BlockoutScene | dict[str, Any], width: i
         for shadow in projection.get("shadows", []):
             x, y, width, height = shadow["rect"]
             opacity = _clamp(float(shadow.get("opacity", 0.25)), 0.0, 0.5)
+            polygon_points = [
+                QPointF(float(px), float(py))
+                for px, py in shadow.get("polygon", []) or []
+            ]
+            if len(polygon_points) >= 3:
+                polygon = QPolygonF(polygon_points)
+                center = polygon.boundingRect().center()
+                for scale, alpha_scale in ((1.12, 0.28), (1.05, 0.5), (1.0, 0.9)):
+                    softened = QPolygonF(
+                        [
+                            QPointF(
+                                center.x() + (point.x() - center.x()) * scale,
+                                center.y() + (point.y() - center.y()) * scale,
+                            )
+                            for point in polygon
+                        ]
+                    )
+                    painter.setPen(Qt.NoPen)
+                    painter.setBrush(QColor(0, 0, 0, int(255 * opacity * alpha_scale)))
+                    painter.drawPolygon(softened)
+                continue
             for inset, alpha_scale in ((0.0, 0.35), (2.0, 0.55), (5.0, 1.0)):
                 painter.setPen(Qt.NoPen)
                 painter.setBrush(QColor(0, 0, 0, int(255 * opacity * alpha_scale)))
@@ -680,6 +764,9 @@ def _project_world_checker_floor(
             tiles.append(
                 {
                     "points": points,
+                    "point_depths": [
+                        round(float(point["depth"]), 5) for point in projected
+                    ],
                     "depth": round(depth, 5),
                     "color": "#74767A" if (tile_x + tile_y) % 2 == 0 else "#606266",
                     "world_tile_size": size,
@@ -688,6 +775,35 @@ def _project_world_checker_floor(
             )
     tiles.sort(key=lambda row: float(row["depth"]), reverse=True)
     return tiles
+
+
+def _convex_hull_2d(points: Sequence[tuple[float, float]]) -> list[tuple[float, float]]:
+    """Return a stable screen-space hull for projected ground shadows."""
+
+    unique = sorted(set((float(x), float(y)) for x, y in points))
+    if len(unique) <= 2:
+        return unique
+
+    def cross(
+        origin: tuple[float, float],
+        a: tuple[float, float],
+        b: tuple[float, float],
+    ) -> float:
+        return (a[0] - origin[0]) * (b[1] - origin[1]) - (
+            a[1] - origin[1]
+        ) * (b[0] - origin[0])
+
+    lower: list[tuple[float, float]] = []
+    for point in unique:
+        while len(lower) >= 2 and cross(lower[-2], lower[-1], point) <= 0.0:
+            lower.pop()
+        lower.append(point)
+    upper: list[tuple[float, float]] = []
+    for point in reversed(unique):
+        while len(upper) >= 2 and cross(upper[-2], upper[-1], point) <= 0.0:
+            upper.pop()
+        upper.append(point)
+    return lower[:-1] + upper[:-1]
 
 
 def _primitive_from_params(primitive_id: str, params: dict[str, Any]) -> BlockoutPrimitive:
@@ -1008,6 +1124,7 @@ __all__ = [
     "delete_blockout_primitive",
     "duplicate_blockout_primitive",
     "project_blockout_scene",
+    "project_blockout_world_point",
     "screen_to_blockout_ground",
     "render_blockout_scene_qimage",
     "set_blockout_snap",

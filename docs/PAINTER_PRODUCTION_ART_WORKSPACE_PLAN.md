@@ -471,7 +471,11 @@ drop placement uses screen-to-world unprojection against the Z-up ground plane.
 Interaction:
 
 - Canvas mode toggle: Paint / 3D Place.
+- Move is the default 3D transform mode.
 - Unreal-style X-red/Y-green/Z-blue move / rotate / scale gizmo; Z is up.
+- Clicking an actor selects it and shows the current transform gizmo. Each
+  complete axis line or ring is pickable, the active axis brightens during
+  drag, and the transform is constrained to that world axis.
 - Grid snap.
 - Duplicate.
 - Align to ground.
@@ -489,6 +493,11 @@ Draw-over modes:
   Floor toggle. Its tile size is fixed in world units and never inherits actor
   or Plane scale.
 - Independent Lit and Shadow toggles; shadows default on.
+- The OpenGL preview uses a depth attachment and point depth from projected
+  floor/object geometry, so the checker floor and actor faces occlude in
+  camera depth rather than UI draw order.
+- Directional-light shadows use each primitive's projected ground silhouette;
+  cubes and arches must not fall back to a generic circular blob.
 - Wireframe.
 - Transparent overlay.
 - Silhouette.

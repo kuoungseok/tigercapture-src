@@ -281,7 +281,7 @@ def render_blockout_scene_opengl_qimage(scene: Any, width: int = 640, height: in
     fmt.setRenderableType(QSurfaceFormat.RenderableType.OpenGL)
     fmt.setProfile(QSurfaceFormat.OpenGLContextProfile.CompatibilityProfile)
     fmt.setVersion(2, 1)
-    fmt.setDepthBufferSize(0)
+    fmt.setDepthBufferSize(24)
     fmt.setStencilBufferSize(0)
     surface = QOffscreenSurface()
     surface.setFormat(fmt)
@@ -299,6 +299,7 @@ def render_blockout_scene_opengl_qimage(scene: Any, width: int = 640, height: in
 
     fbo = 0
     color_texture = 0
+    depth_buffer = 0
     try:
         fbo = int(GL.glGenFramebuffers(1))
         color_texture = int(GL.glGenTextures(1))
@@ -310,11 +311,21 @@ def render_blockout_scene_opengl_qimage(scene: Any, width: int = 640, height: in
         GL.glTexImage2D(GL.GL_TEXTURE_2D, 0, GL.GL_RGBA8, target_w, target_h, 0, GL.GL_RGBA, GL.GL_UNSIGNED_BYTE, None)
         GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, fbo)
         GL.glFramebufferTexture2D(GL.GL_FRAMEBUFFER, GL.GL_COLOR_ATTACHMENT0, GL.GL_TEXTURE_2D, color_texture, 0)
+        depth_buffer = int(GL.glGenRenderbuffers(1))
+        GL.glBindRenderbuffer(GL.GL_RENDERBUFFER, depth_buffer)
+        GL.glRenderbufferStorage(GL.GL_RENDERBUFFER, GL.GL_DEPTH_COMPONENT24, target_w, target_h)
+        GL.glFramebufferRenderbuffer(
+            GL.GL_FRAMEBUFFER,
+            GL.GL_DEPTH_ATTACHMENT,
+            GL.GL_RENDERBUFFER,
+            depth_buffer,
+        )
         if int(GL.glCheckFramebufferStatus(GL.GL_FRAMEBUFFER)) != int(GL.GL_FRAMEBUFFER_COMPLETE):
             raise PainterOpenGLUnavailable("Painter OpenGL framebuffer is incomplete.")
 
         GL.glViewport(0, 0, target_w, target_h)
-        GL.glDisable(GL.GL_DEPTH_TEST)
+        GL.glEnable(GL.GL_DEPTH_TEST)
+        GL.glDepthFunc(GL.GL_LEQUAL)
         GL.glEnable(GL.GL_BLEND)
         GL.glEnable(GL.GL_LINE_SMOOTH)
         GL.glEnable(GL.GL_POINT_SMOOTH)
@@ -322,19 +333,23 @@ def render_blockout_scene_opengl_qimage(scene: Any, width: int = 640, height: in
         GL.glHint(GL.GL_POINT_SMOOTH_HINT, GL.GL_NICEST)
         GL.glBlendFunc(GL.GL_SRC_ALPHA, GL.GL_ONE_MINUS_SRC_ALPHA)
         GL.glClearColor(0.0, 0.0, 0.0, 0.0)
-        GL.glClear(GL.GL_COLOR_BUFFER_BIT)
+        GL.glClearDepth(1.0)
+        GL.glClear(GL.GL_COLOR_BUFFER_BIT | GL.GL_DEPTH_BUFFER_BIT)
 
         scene_payload = projection.get("scene") if isinstance(projection.get("scene"), dict) else {}
+        depth_range = projection.get("depth_range") or {}
         for tile in projection.get("floor_tiles", []) or []:
-            _draw_floor_tile(GL, tile, target_w, target_h)
+            _draw_floor_tile(GL, tile, target_w, target_h, depth_range)
         if bool(scene_payload.get("show_grid", True)) and not bool(scene_payload.get("show_floor", False)):
             _draw_grid(GL, target_w, target_h)
+        GL.glDisable(GL.GL_DEPTH_TEST)
         for shadow in projection.get("shadows", []) or []:
-            _draw_shadow(GL, shadow, target_w, target_h)
+            _draw_shadow(GL, shadow, target_w, target_h, depth_range)
+        GL.glEnable(GL.GL_DEPTH_TEST)
         for face in projection.get("faces", []) or []:
-            _draw_face(GL, face, target_w, target_h)
+            _draw_face(GL, face, target_w, target_h, depth_range)
         for edge in projection.get("edges", []) or []:
-            _draw_edge(GL, edge, target_w, target_h)
+            _draw_edge(GL, edge, target_w, target_h, depth_range)
         GL.glFlush()
 
         raw = GL.glReadPixels(0, 0, target_w, target_h, GL.GL_RGBA, GL.GL_UNSIGNED_BYTE)
@@ -345,6 +360,8 @@ def render_blockout_scene_opengl_qimage(scene: Any, width: int = 640, height: in
         try:
             if color_texture:
                 GL.glDeleteTextures(1, [int(color_texture)])
+            if depth_buffer:
+                GL.glDeleteRenderbuffers(1, [int(depth_buffer)])
             if fbo:
                 GL.glDeleteFramebuffers(1, [int(fbo)])
             GL.glBindFramebuffer(GL.GL_FRAMEBUFFER, 0)
@@ -535,7 +552,13 @@ def _draw_grid(GL: Any, width: int, height: int) -> None:
         GL.glEnd()
 
 
-def _draw_face(GL: Any, face: dict[str, Any], width: int, height: int) -> None:
+def _draw_face(
+    GL: Any,
+    face: dict[str, Any],
+    width: int,
+    height: int,
+    depth_range: dict[str, Any],
+) -> None:
     if bool(face.get("depth_preview", False)):
         value = max(0.0, min(1.0, float(face.get("depth_value", 1.0) or 1.0)))
         rgba = (value, value, value, float(face.get("opacity", 1.0) or 1.0))
@@ -554,33 +577,64 @@ def _draw_face(GL: Any, face: dict[str, Any], width: int, height: int) -> None:
     GL.glColor4f(*rgba)
     GL.glBegin(GL.GL_POLYGON)
     try:
-        for x, y in face.get("points", []) or []:
-            _gl_vertex(GL, float(x), float(y), width, height)
+        points = face.get("points", []) or []
+        depths = face.get("point_depths", []) or []
+        fallback_depth = float(face.get("depth", 0.0) or 0.0)
+        for index, (x, y) in enumerate(points):
+            depth = float(depths[index]) if index < len(depths) else fallback_depth
+            _gl_vertex_depth(GL, float(x), float(y), depth, width, height, depth_range)
     finally:
         GL.glEnd()
 
 
-def _draw_floor_tile(GL: Any, tile: dict[str, Any], width: int, height: int) -> None:
+def _draw_floor_tile(
+    GL: Any,
+    tile: dict[str, Any],
+    width: int,
+    height: int,
+    depth_range: dict[str, Any],
+) -> None:
     rgba = _hex_to_rgba(str(tile.get("color") or "#707276"), 1.0)
     GL.glColor4f(*rgba)
     GL.glBegin(GL.GL_POLYGON)
     try:
-        for x, y in tile.get("points", []) or []:
-            _gl_vertex(GL, float(x), float(y), width, height)
+        points = tile.get("points", []) or []
+        depths = tile.get("point_depths", []) or []
+        fallback_depth = float(tile.get("depth", 0.0) or 0.0)
+        for index, (x, y) in enumerate(points):
+            depth = float(depths[index]) if index < len(depths) else fallback_depth
+            _gl_vertex_depth(GL, float(x), float(y), depth, width, height, depth_range)
     finally:
         GL.glEnd()
 
 
-def _draw_shadow(GL: Any, shadow: dict[str, Any], width: int, height: int) -> None:
+def _draw_shadow(
+    GL: Any,
+    shadow: dict[str, Any],
+    width: int,
+    height: int,
+    depth_range: dict[str, Any],
+) -> None:
     from math import cos, pi, sin
 
+    polygon = shadow.get("polygon") or []
+    depth = float(shadow.get("depth", 0.0) or 0.0)
+    opacity = max(0.0, min(0.5, float(shadow.get("opacity", 0.25) or 0.25)))
+    if len(polygon) >= 3:
+        GL.glColor4f(0.0, 0.0, 0.0, opacity)
+        GL.glBegin(GL.GL_POLYGON)
+        try:
+            for x, y in polygon:
+                _gl_vertex(GL, float(x), float(y), width, height)
+        finally:
+            GL.glEnd()
+        return
     rect = shadow.get("rect")
     if not isinstance(rect, (list, tuple)) or len(rect) < 4:
         return
     x, y, rect_w, rect_h = (float(value) for value in rect[:4])
     cx = x + rect_w * 0.5
     cy = y + rect_h * 0.5
-    opacity = max(0.0, min(0.5, float(shadow.get("opacity", 0.25) or 0.25)))
     GL.glColor4f(0.0, 0.0, 0.0, opacity)
     GL.glBegin(GL.GL_TRIANGLE_FAN)
     try:
@@ -598,7 +652,13 @@ def _draw_shadow(GL: Any, shadow: dict[str, Any], width: int, height: int) -> No
         GL.glEnd()
 
 
-def _draw_edge(GL: Any, edge: dict[str, Any], width: int, height: int) -> None:
+def _draw_edge(
+    GL: Any,
+    edge: dict[str, Any],
+    width: int,
+    height: int,
+    depth_range: dict[str, Any],
+) -> None:
     a = edge.get("a")
     b = edge.get("b")
     if not isinstance(a, (list, tuple)) or not isinstance(b, (list, tuple)) or len(a) < 2 or len(b) < 2:
@@ -607,14 +667,41 @@ def _draw_edge(GL: Any, edge: dict[str, Any], width: int, height: int) -> None:
     GL.glColor4f(0.96, 0.975, 1.0, 0.72)
     GL.glBegin(GL.GL_LINES)
     try:
-        _gl_vertex(GL, float(a[0]), float(a[1]), width, height)
-        _gl_vertex(GL, float(b[0]), float(b[1]), width, height)
+        depth = max(0.0, float(edge.get("depth", 0.0) or 0.0) - 0.004)
+        _gl_vertex_depth(GL, float(a[0]), float(a[1]), depth, width, height, depth_range)
+        _gl_vertex_depth(GL, float(b[0]), float(b[1]), depth, width, height, depth_range)
     finally:
         GL.glEnd()
 
 
 def _gl_vertex(GL: Any, x: float, y: float, width: int, height: int) -> None:
     GL.glVertex2f((float(x) / max(1.0, float(width))) * 2.0 - 1.0, 1.0 - (float(y) / max(1.0, float(height))) * 2.0)
+
+
+def _gl_vertex_depth(
+    GL: Any,
+    x: float,
+    y: float,
+    depth: float,
+    width: int,
+    height: int,
+    depth_range: dict[str, Any],
+) -> None:
+    near = float(depth_range.get("near", 0.05) or 0.05)
+    far = max(near + 0.001, float(depth_range.get("far", near + 1.0) or near + 1.0))
+    camera_depth = max(near, min(far, float(depth)))
+    # The X/Y coordinates are already perspective projected. Use the matching
+    # reciprocal camera-depth mapping so intersecting face triangles agree
+    # with the depth buffer instead of producing linear-depth wedges.
+    depth_ndc = (
+        (far + near) / (far - near)
+        - (2.0 * far * near) / (camera_depth * (far - near))
+    )
+    GL.glVertex3f(
+        (float(x) / max(1.0, float(width))) * 2.0 - 1.0,
+        1.0 - (float(y) / max(1.0, float(height))) * 2.0,
+        max(-1.0, min(1.0, depth_ndc)),
+    )
 
 
 def _hex_to_rgba(value: str, opacity: float) -> tuple[float, float, float, float]:

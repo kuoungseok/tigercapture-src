@@ -100,6 +100,24 @@ def _distance_qpointf(a: QPointF, b: QPointF) -> float:
     return math.hypot(float(a.x() - b.x()), float(a.y() - b.y()))
 
 
+def _distance_to_segment(point: QPointF, start: QPointF, end: QPointF) -> float:
+    dx = float(end.x() - start.x())
+    dy = float(end.y() - start.y())
+    length_squared = dx * dx + dy * dy
+    if length_squared <= 0.0001:
+        return _distance_qpointf(point, start)
+    amount = max(
+        0.0,
+        min(
+            1.0,
+            ((point.x() - start.x()) * dx + (point.y() - start.y()) * dy)
+            / length_squared,
+        ),
+    )
+    closest = QPointF(start.x() + dx * amount, start.y() + dy * amount)
+    return _distance_qpointf(point, closest)
+
+
 def _zoom_tool_cursor(mode: str) -> QCursor:
     """Return a high-contrast magnifier cursor with an in-lens mode mark."""
     value = str(mode or "zoom_in")
@@ -5970,7 +5988,8 @@ class PaintDialog(QDialog):
         self._painter_3d_blockout_drag: dict | None = None
         self._canvas_workspace_mode = "paint"
         self._canvas_workspace_user_generation = 0
-        self._blockout_transform_mode = "select"
+        self._blockout_transform_mode = "move"
+        self._blockout_active_axis = ""
         self._painter_3d_blockout_controls: dict[str, QSpinBox] = {}
         self._painter_3d_blockout_renderer_status: dict = {
             "renderer": "painter_blockout_qpainter_v1",
@@ -6082,6 +6101,20 @@ class PaintDialog(QDialog):
         shortcut = QShortcut(QKeySequence(key), self)
         shortcut.activated.connect(handler)
         self._painter_tool_shortcuts.append(shortcut)
+
+    def _handle_painter_3d_camera_shortcut(
+        self,
+        key: int,
+        *,
+        paint_fallback: Callable[[], None] | None = None,
+    ) -> None:
+        if str(getattr(self, "_canvas_workspace_mode", "paint")) == "3d_place":
+            focus = QApplication.focusWidget()
+            if not isinstance(focus, (QLineEdit, QTextEdit, QSpinBox)):
+                self._nudge_3d_blockout_camera(key)
+            return
+        if paint_fallback is not None:
+            paint_fallback()
 
     def _build_tool_rail_swatch_panel(self, parent_layout: QVBoxLayout) -> None:
         panel = QFrame()
@@ -7043,7 +7076,13 @@ class PaintDialog(QDialog):
         self._painter_tool_shortcuts: list[QShortcut] = []
         for key, handler in (
             ("V", lambda: self._set_tool("select")),
-            ("W", lambda: self._set_tool("magic_select")),
+            (
+                "W",
+                lambda: self._handle_painter_3d_camera_shortcut(
+                    Qt.Key.Key_W,
+                    paint_fallback=lambda: self._set_tool("magic_select"),
+                ),
+            ),
             ("C", lambda: self._set_tool("crop")),
             ("B", lambda: self._set_tool("pen")),
             ("E", lambda: self._set_tool("eraser")),
@@ -7052,6 +7091,19 @@ class PaintDialog(QDialog):
             ("Z", lambda: self._set_zoom_tool_mode("zoom_in")),
         ):
             self._register_painter_tool_shortcut(key, handler)
+        self._blockout_camera_shortcuts: list[QShortcut] = []
+        for key, qt_key in (
+            ("A", Qt.Key.Key_A),
+            ("S", Qt.Key.Key_S),
+            ("D", Qt.Key.Key_D),
+        ):
+            shortcut = QShortcut(QKeySequence(key), self)
+            shortcut.setContext(Qt.ShortcutContext.WidgetWithChildrenShortcut)
+            shortcut.setEnabled(False)
+            shortcut.activated.connect(
+                lambda value=qt_key: self._handle_painter_3d_camera_shortcut(value)
+            )
+            self._blockout_camera_shortcuts.append(shortcut)
 
         self._paint_toolbar_order = [
             "move",
@@ -7149,7 +7201,7 @@ class PaintDialog(QDialog):
             button = QPushButton(label)
             button.setObjectName("PaintBlockoutModeButton")
             button.setCheckable(True)
-            button.setChecked(mode == "select")
+            button.setChecked(mode == "move")
             button.clicked.connect(
                 lambda _checked=False, value=mode: self._set_3d_blockout_transform_mode(value)
             )
@@ -9289,23 +9341,27 @@ class PaintDialog(QDialog):
         painter = QPainter(pixmap)
         try:
             painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-            center = bounds.center()
+            geometry = self._blockout_gizmo_geometry(bounds)
+            center = geometry["center"]
             painter.setPen(QPen(QColor(255, 255, 255, 210), 1.4, Qt.PenStyle.DashLine))
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRect(bounds)
             mode = str(getattr(self, "_blockout_transform_mode", "select") or "select")
-            axes = self._blockout_gizmo_axis_points(bounds)
+            axes = geometry["axes"]
             axis_colors = {
                 "x": QColor("#F04444"),
                 "y": QColor("#45C96B"),
                 "z": QColor("#438BFF"),
             }
+            active_axis = str(getattr(self, "_blockout_active_axis", "") or "")
             if mode in {"move", "scale"}:
                 for axis in ("x", "y", "z"):
                     endpoint = axes[axis]
                     color = axis_colors[axis]
-                    painter.setPen(QPen(color, 2.5))
-                    painter.setBrush(color)
+                    active = axis == active_axis
+                    display_color = color.lighter(155) if active else color
+                    painter.setPen(QPen(display_color, 4.2 if active else 2.5))
+                    painter.setBrush(display_color)
                     painter.drawLine(center, endpoint)
                     if mode == "scale":
                         painter.drawRect(QRectF(endpoint.x() - 4.5, endpoint.y() - 4.5, 9.0, 9.0))
@@ -9325,12 +9381,15 @@ class PaintDialog(QDialog):
                         )
             elif mode == "rotate":
                 painter.setBrush(Qt.BrushStyle.NoBrush)
-                painter.setPen(QPen(axis_colors["x"], 2.0))
-                painter.drawEllipse(QRectF(center.x() - 48.0, center.y() - 15.0, 96.0, 30.0))
-                painter.setPen(QPen(axis_colors["y"], 2.0))
-                painter.drawEllipse(QRectF(center.x() - 21.0, center.y() - 48.0, 42.0, 96.0))
-                painter.setPen(QPen(axis_colors["z"], 2.2))
-                painter.drawEllipse(QRectF(center.x() - 39.0, center.y() - 39.0, 78.0, 78.0))
+                for axis in ("x", "y", "z"):
+                    color = axis_colors[axis]
+                    active = axis == active_axis
+                    painter.setPen(
+                        QPen(color.lighter(155) if active else color, 4.2 if active else 2.1)
+                    )
+                    points = geometry["rings"].get(axis, [])
+                    if len(points) >= 3:
+                        painter.drawPolyline(QPolygonF(points))
             painter.setPen(QPen(QColor(255, 255, 255, 230), 1.2))
             painter.setBrush(QColor(255, 255, 255, 210))
             painter.drawEllipse(center, 4.5, 4.5)
@@ -9405,14 +9464,99 @@ class PaintDialog(QDialog):
     def _blockout_rotate_handle(bounds: QRectF) -> QPointF:
         return QPointF(bounds.center().x(), bounds.top() - 28.0)
 
-    @staticmethod
-    def _blockout_gizmo_axis_points(bounds: QRectF) -> dict[str, QPointF]:
-        center = bounds.center()
-        return {
-            "x": QPointF(center.x() + 48.0, center.y() + 8.0),
-            "y": QPointF(center.x() - 36.0, center.y() + 24.0),
-            "z": QPointF(center.x(), center.y() - 52.0),
+    def _blockout_gizmo_geometry(self, bounds: QRectF) -> dict[str, object]:
+        from app.painter_3d_blockout import project_blockout_world_point
+
+        canvas = getattr(self, "canvas", None)
+        scene = self._current_3d_blockout_scene()
+        primitive_id = str(getattr(self, "_painter_3d_blockout_selected_id", "") or "")
+        primitive = next(
+            (row for row in scene.primitives if row.id == primitive_id),
+            None,
+        )
+        if canvas is None or primitive is None:
+            center = bounds.center()
+            return {
+                "center": center,
+                "axes": {
+                    "x": QPointF(center.x() + 48.0, center.y() + 8.0),
+                    "y": QPointF(center.x() - 36.0, center.y() + 24.0),
+                    "z": QPointF(center.x(), center.y() - 52.0),
+                },
+                "rings": {},
+            }
+        width, height = max(1, canvas.width()), max(1, canvas.height())
+        origin = tuple(float(value) for value in primitive.position)
+        projected_origin = project_blockout_world_point(scene, origin, width, height)
+        center = (
+            QPointF(float(projected_origin["x"]), float(projected_origin["y"]))
+            if projected_origin is not None
+            else bounds.center()
+        )
+        axes: dict[str, QPointF] = {}
+        unit_vectors = {
+            "x": (1.0, 0.0, 0.0),
+            "y": (0.0, 1.0, 0.0),
+            "z": (0.0, 0.0, 1.0),
         }
+        for axis, vector in unit_vectors.items():
+            projected = project_blockout_world_point(
+                scene,
+                (
+                    origin[0] + vector[0],
+                    origin[1] + vector[1],
+                    origin[2] + vector[2],
+                ),
+                width,
+                height,
+            )
+            if projected is None:
+                axes[axis] = center
+                continue
+            direction = QPointF(
+                float(projected["x"]) - center.x(),
+                float(projected["y"]) - center.y(),
+            )
+            length = max(0.001, math.hypot(direction.x(), direction.y()))
+            display_length = 52.0
+            axes[axis] = QPointF(
+                center.x() + direction.x() * display_length / length,
+                center.y() + direction.y() * display_length / length,
+            )
+
+        radius = max(0.65, max(float(value) for value in primitive.scale) * 0.72)
+        rings: dict[str, list[QPointF]] = {}
+        for axis in ("x", "y", "z"):
+            points: list[QPointF] = []
+            for index in range(49):
+                angle = math.tau * index / 48.0
+                c, s = math.cos(angle) * radius, math.sin(angle) * radius
+                offset = (
+                    (0.0, c, s)
+                    if axis == "x"
+                    else (c, 0.0, s)
+                    if axis == "y"
+                    else (c, s, 0.0)
+                )
+                projected = project_blockout_world_point(
+                    scene,
+                    (
+                        origin[0] + offset[0],
+                        origin[1] + offset[1],
+                        origin[2] + offset[2],
+                    ),
+                    width,
+                    height,
+                )
+                if projected is not None:
+                    points.append(
+                        QPointF(float(projected["x"]), float(projected["y"]))
+                    )
+            rings[axis] = points
+        return {"center": center, "axes": axes, "rings": rings}
+
+    def _blockout_gizmo_axis_points(self, bounds: QRectF) -> dict[str, QPointF]:
+        return dict(self._blockout_gizmo_geometry(bounds)["axes"])
 
     def _canvas_local_point_from_widget(self, obj, point: QPoint) -> QPointF | None:
         canvas = getattr(self, "canvas", None)
@@ -9432,10 +9576,25 @@ class PaintDialog(QDialog):
         rotate = self._blockout_rotate_handle(bounds)
         scale = self._blockout_scale_handle(bounds)
         selected_mode = str(getattr(self, "_blockout_transform_mode", "select") or "select")
+        geometry = self._blockout_gizmo_geometry(bounds)
         if selected_mode in {"move", "scale"}:
-            for axis, endpoint in self._blockout_gizmo_axis_points(bounds).items():
-                if _distance_qpointf(point, endpoint) <= 14.0:
+            center = geometry["center"]
+            for axis, endpoint in geometry["axes"].items():
+                vector = endpoint - center
+                length = max(1.0, math.hypot(vector.x(), vector.y()))
+                hit_start = QPointF(
+                    center.x() + vector.x() * 10.0 / length,
+                    center.y() + vector.y() * 10.0 / length,
+                )
+                if _distance_to_segment(point, hit_start, endpoint) <= 8.0:
                     return f"{selected_mode}_{axis}"
+        if selected_mode == "rotate":
+            for axis, ring in geometry["rings"].items():
+                if any(
+                    _distance_to_segment(point, ring[index - 1], ring[index]) <= 7.0
+                    for index in range(1, len(ring))
+                ):
+                    return f"rotate_{axis}"
         if _distance_qpointf(point, rotate) <= 16.0:
             return "rotate"
         if _distance_qpointf(point, scale) <= 16.0:
@@ -9478,6 +9637,19 @@ class PaintDialog(QDialog):
         bounds = self._selected_3d_blockout_bounds(getattr(self, "canvas").width(), getattr(self, "canvas").height())
         if bounds is None:
             return False
+        geometry = self._blockout_gizmo_geometry(bounds)
+        rotate_tangent = QPointF(1.0, 0.0)
+        if mode.startswith("rotate_"):
+            axis = mode.rsplit("_", 1)[1]
+            ring = list(geometry["rings"].get(axis, []) or [])
+            nearest: tuple[float, QPointF] | None = None
+            for index in range(1, len(ring)):
+                distance = _distance_to_segment(local, ring[index - 1], ring[index])
+                tangent = ring[index] - ring[index - 1]
+                if nearest is None or distance < nearest[0]:
+                    nearest = (distance, tangent)
+            if nearest is not None:
+                rotate_tangent = nearest[1]
         self._push_undo_state(f"3D blockout {mode}")
         self._painter_3d_blockout_drag = {
             "mode": mode,
@@ -9486,8 +9658,11 @@ class PaintDialog(QDialog):
             "start_position": list(selected.get("position") or [0.0, 0.0, 0.0]),
             "start_rotation": list(selected.get("rotation") or [0.0, 0.0, 0.0]),
             "start_scale": list(selected.get("scale") or [1.0, 1.0, 1.0]),
-            "start_bounds_center": QPointF(bounds.center()),
+            "start_bounds_center": QPointF(geometry["center"]),
+            "rotate_tangent": QPointF(rotate_tangent),
         }
+        self._blockout_active_axis = mode.rsplit("_", 1)[1] if "_" in mode else ""
+        self._refresh_3d_blockout_overlay()
         host = getattr(self, "_canvas_host", None)
         if host is not None:
             host.setCursor(
@@ -9516,12 +9691,23 @@ class PaintDialog(QDialog):
         elif mode.startswith("move_"):
             pos = list(drag.get("start_position") or [0.0, 0.0, 0.0])
             axis = mode.rsplit("_", 1)[1]
-            if axis == "x":
-                params["x"] = float(pos[0]) + float(delta.x()) / 100.0
-            elif axis == "y":
-                params["y"] = float(pos[1]) + float(delta.y() - delta.x()) / 140.0
-            else:
-                params["z"] = float(pos[2]) - float(delta.y()) / 100.0
+            bounds = self._selected_3d_blockout_bounds(
+                getattr(self, "canvas").width(),
+                getattr(self, "canvas").height(),
+            )
+            if bounds is None:
+                return
+            geometry = self._blockout_gizmo_geometry(bounds)
+            endpoint = geometry["axes"][axis]
+            axis_vector = endpoint - geometry["center"]
+            length_squared = max(
+                1.0,
+                axis_vector.x() * axis_vector.x() + axis_vector.y() * axis_vector.y(),
+            )
+            amount = (
+                delta.x() * axis_vector.x() + delta.y() * axis_vector.y()
+            ) / length_squared
+            params[axis] = float(pos[{"x": 0, "y": 1, "z": 2}[axis]]) + float(amount)
         elif mode == "scale":
             scale = list(drag.get("start_scale") or [1.0, 1.0, 1.0])
             params["sx"] = max(0.1, float(scale[0]) + float(delta.x()) / 100.0)
@@ -9530,14 +9716,38 @@ class PaintDialog(QDialog):
         elif mode.startswith("scale_"):
             scale = list(drag.get("start_scale") or [1.0, 1.0, 1.0])
             axis = mode.rsplit("_", 1)[1]
-            delta_value = (
-                float(delta.x()) / 100.0
-                if axis == "x"
-                else float(delta.y() - delta.x()) / 140.0
-                if axis == "y"
-                else -float(delta.y()) / 100.0
+            bounds = self._selected_3d_blockout_bounds(
+                getattr(self, "canvas").width(),
+                getattr(self, "canvas").height(),
+            )
+            if bounds is None:
+                return
+            geometry = self._blockout_gizmo_geometry(bounds)
+            endpoint = geometry["axes"][axis]
+            axis_vector = endpoint - geometry["center"]
+            length_squared = max(
+                1.0,
+                axis_vector.x() * axis_vector.x() + axis_vector.y() * axis_vector.y(),
+            )
+            delta_value = float(
+                (
+                    delta.x() * axis_vector.x() + delta.y() * axis_vector.y()
+                )
+                / length_squared
             )
             params[f"s{axis}"] = max(0.1, float(scale[{"x": 0, "y": 1, "z": 2}[axis]]) + delta_value)
+        elif mode.startswith("rotate_"):
+            axis = mode.rsplit("_", 1)[1]
+            rot = list(drag.get("start_rotation") or [0.0, 0.0, 0.0])
+            tangent = QPointF(drag.get("rotate_tangent") or QPointF(1.0, 0.0))
+            tangent_length = max(0.001, math.hypot(tangent.x(), tangent.y()))
+            signed_pixels = (
+                delta.x() * tangent.x() + delta.y() * tangent.y()
+            ) / tangent_length
+            params[f"r{axis}"] = (
+                float(rot[{"x": 0, "y": 1, "z": 2}[axis]])
+                + float(signed_pixels) * 0.9
+            )
         elif mode == "rotate":
             center = QPointF(drag["start_bounds_center"])
             start_angle = math.degrees(math.atan2(start.y() - center.y(), start.x() - center.x()))
@@ -9565,9 +9775,11 @@ class PaintDialog(QDialog):
 
     def _finish_3d_blockout_drag(self) -> None:
         self._painter_3d_blockout_drag = None
+        self._blockout_active_axis = ""
         host = getattr(self, "_canvas_host", None)
         if host is not None:
             host.setCursor(Qt.CursorShape.ArrowCursor)
+        self._refresh_3d_blockout_overlay()
 
     def _focus_3d_blockout_panel(self) -> None:
         self._set_canvas_workspace_mode("3d_place", focus_panel=False)
@@ -9665,6 +9877,9 @@ class PaintDialog(QDialog):
         self._canvas_workspace_mode = selected
         if selected == "3d_place":
             self._set_tool("3d_blockout")
+            self._set_3d_blockout_transform_mode(
+                str(getattr(self, "_blockout_transform_mode", "move") or "move")
+            )
             if focus_panel:
                 self._focus_3d_blockout_panel()
         else:
@@ -9688,6 +9903,8 @@ class PaintDialog(QDialog):
         host = getattr(self, "_blockout_transform_host", None)
         if host is not None:
             host.setVisible(blockout)
+        for shortcut in getattr(self, "_blockout_camera_shortcuts", []):
+            shortcut.setEnabled(blockout)
         panel = getattr(self, "_paint_3d_blockout_panel", None)
         if panel is not None:
             panel.hide()
@@ -9697,18 +9914,23 @@ class PaintDialog(QDialog):
             if blockout:
                 palette.move(10, 10)
                 palette.raise_()
+                canvas_host = getattr(self, "_canvas_host", None)
+                if canvas_host is not None:
+                    canvas_host.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _set_3d_blockout_transform_mode(self, mode: str) -> str:
         selected = str(mode or "").strip().casefold()
         if selected not in {"select", "move", "rotate", "scale"}:
-            selected = "select"
+            selected = "move"
         self._blockout_transform_mode = selected
+        self._blockout_active_axis = ""
         for key, button in getattr(self, "_blockout_transform_buttons", {}).items():
             button.blockSignals(True)
             button.setChecked(key == selected)
             button.blockSignals(False)
         if hasattr(self, "_tool_status_label"):
             self._tool_status_label.setText(f"3D Place: {selected.title()}")
+        self._refresh_3d_blockout_overlay()
         return selected
 
     def _add_pbr_slider(
@@ -15510,6 +15732,17 @@ class PaintDialog(QDialog):
                     self._stickers.pop(idx)
                 self._selected_layer_id = None
         self._update_inspector_counts()
+
+    def keyPressEvent(self, event) -> None:
+        if str(getattr(self, "_canvas_workspace_mode", "paint")) == "3d_place":
+            key = event.key()
+            if key in (Qt.Key.Key_W, Qt.Key.Key_A, Qt.Key.Key_S, Qt.Key.Key_D):
+                focus = QApplication.focusWidget()
+                if not isinstance(focus, (QLineEdit, QTextEdit, QSpinBox)):
+                    self._nudge_3d_blockout_camera(key)
+                    event.accept()
+                    return
+        super().keyPressEvent(event)
 
     def eventFilter(self, obj, event) -> bool:
         shape_kind = str(obj.property("blockoutShapeKind") or "") if isinstance(obj, QPushButton) else ""

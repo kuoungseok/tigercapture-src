@@ -30,7 +30,17 @@ def test_painter_3d_blockout_projects_and_renders_gpu_ready_preview(tmp_path: Pa
     assert projection["scene"]["light_yaw_degrees"] == 45.0
     assert projection["scene"]["light_pitch_degrees"] == 45.0
     assert projection["shadows"]
+    cube_shadow = next(
+        shadow
+        for shadow in projection["shadows"]
+        if shadow["primitive_id"] == "blockout:1"
+    )
+    assert cube_shadow["kind"] == "box"
+    assert len(cube_shadow["polygon"]) >= 4
+    assert cube_shadow["depth"] > 0.0
     assert projection["floor_tiles"]
+    assert all(tile["point_depths"] for tile in projection["floor_tiles"])
+    assert projection["depth_range"]["far"] > projection["depth_range"]["near"]
     assert {tile["world_tile_size"] for tile in projection["floor_tiles"]} == {1.0}
     assert "box" in projection["scene"]["supported_primitives"]
     assert "arch" in projection["scene"]["supported_primitives"]
@@ -237,7 +247,8 @@ def test_painter_3d_blockout_camera_updates_fov_and_pan() -> None:
 
 def test_painter_3d_blockout_panel_updates_scene_and_overlay() -> None:
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-    from PySide6.QtCore import QPoint
+    from PySide6.QtCore import QEvent, QPoint, Qt
+    from PySide6.QtGui import QKeyEvent
     from PySide6.QtWidgets import QApplication
 
     from app.drawing import PaintDialog, create_blank_paint_pixmap
@@ -255,6 +266,8 @@ def test_painter_3d_blockout_panel_updates_scene_and_overlay() -> None:
     dialog._set_canvas_workspace_mode("3d_place")
     app.processEvents()
     assert dialog._canvas_workspace_mode == "3d_place"
+    assert dialog._blockout_transform_mode == "move"
+    assert dialog._blockout_transform_buttons["move"].isChecked()
     assert dialog._paint_3d_blockout_panel.isHidden()
     assert dialog._blockout_canvas_shape_palette.isVisible()
     assert dialog._blockout_scene_menu_btn.isVisible()
@@ -313,6 +326,49 @@ def test_painter_3d_blockout_panel_updates_scene_and_overlay() -> None:
     assert bounds is not None
     center = bounds.center()
     dialog._set_3d_blockout_transform_mode("move")
+    x_axis = dialog._blockout_gizmo_axis_points(bounds)["x"]
+    x_axis_start = QPoint(
+        int(center.x() + (x_axis.x() - center.x()) * 0.55),
+        int(center.y() + (x_axis.y() - center.y()) * 0.55),
+    )
+    before_axis_move = dialog._current_3d_blockout_scene().to_dict()["primitives"][0]
+    assert dialog._begin_3d_blockout_drag(dialog.canvas, x_axis_start)
+    assert dialog._blockout_active_axis == "x"
+    dialog._update_3d_blockout_drag(
+        dialog.canvas,
+        QPoint(x_axis_start.x() + 36, x_axis_start.y() + 6),
+    )
+    dialog._finish_3d_blockout_drag()
+    after_axis_move = dialog._current_3d_blockout_scene().to_dict()["primitives"][0]
+    assert after_axis_move["position"][0] > before_axis_move["position"][0]
+    assert after_axis_move["position"][1:] == before_axis_move["position"][1:]
+    assert dialog._blockout_active_axis == ""
+
+    dialog._set_3d_blockout_transform_mode("scale")
+    bounds = dialog._selected_3d_blockout_bounds(dialog.canvas.width(), dialog.canvas.height())
+    geometry = dialog._blockout_gizmo_geometry(bounds)
+    z_center = geometry["center"]
+    z_end = geometry["axes"]["z"]
+    z_start = QPoint(
+        int(z_center.x() + (z_end.x() - z_center.x()) * 0.65),
+        int(z_center.y() + (z_end.y() - z_center.y()) * 0.65),
+    )
+    scale_before = dialog._current_3d_blockout_scene().to_dict()["primitives"][0]
+    assert dialog._begin_3d_blockout_drag(dialog.canvas, z_start)
+    assert dialog._blockout_active_axis == "z"
+    dialog._update_3d_blockout_drag(
+        dialog.canvas,
+        QPoint(int(z_start.x() + (z_end.x() - z_center.x()) * 0.5), int(z_start.y() + (z_end.y() - z_center.y()) * 0.5)),
+    )
+    dialog._finish_3d_blockout_drag()
+    scale_after = dialog._current_3d_blockout_scene().to_dict()["primitives"][0]
+    assert scale_after["scale"][2] > scale_before["scale"][2]
+    assert scale_after["scale"][:2] == scale_before["scale"][:2]
+
+    dialog._set_3d_blockout_transform_mode("move")
+    bounds = dialog._selected_3d_blockout_bounds(dialog.canvas.width(), dialog.canvas.height())
+    assert bounds is not None
+    center = bounds.center()
     assert dialog._begin_3d_blockout_drag(dialog.canvas, QPoint(int(center.x()), int(center.y())))
     dialog._update_3d_blockout_drag(dialog.canvas, QPoint(int(center.x() + 40), int(center.y() - 20)))
     dialog._finish_3d_blockout_drag()
@@ -348,6 +404,17 @@ def test_painter_3d_blockout_panel_updates_scene_and_overlay() -> None:
     app.processEvents()
     rotated = dialog._current_3d_blockout_scene().to_dict()["primitives"][0]
     assert abs(rotated["rotation"][2]) > 1.0
+
+    camera_before = dialog._current_3d_blockout_scene().camera.target
+    dialog.keyPressEvent(
+        QKeyEvent(
+            QEvent.Type.KeyPress,
+            Qt.Key.Key_W,
+            Qt.KeyboardModifier.NoModifier,
+        )
+    )
+    camera_after = dialog._current_3d_blockout_scene().camera.target
+    assert camera_after != camera_before
 
     dialog._selected_layer_id = "paint-layer-3d-blockout"
     dialog._on_layer_opacity_changed(55)
