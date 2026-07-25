@@ -88,6 +88,111 @@ def test_material_channels_merge_with_texture_lab_maps() -> None:
     assert not np.array_equal(merged["maps"]["normal"], base["maps"]["normal"])
 
 
+def test_oil_styles_generate_distinct_relief_profiles() -> None:
+    from app.drawing import PaintLayer, Stroke
+    from app.painter_material_paint import rasterize_material_channels
+
+    layer = PaintLayer(
+        "oil",
+        "Oil Relief",
+        layer_type="material",
+        material_settings={
+            "load": 0.95,
+            "thickness": 0.92,
+            "wetness": 0.24,
+            "gloss": 0.42,
+            "roughness": 0.44,
+        },
+    )
+
+    def render(style: str) -> np.ndarray:
+        stroke = Stroke(
+            points=[(0.1, 0.5), (0.9, 0.5)],
+            width_px=34,
+            brush_style=style,
+            layer_id=layer.layer_id,
+            material_enabled=True,
+            material_load=0.95,
+            material_thickness=0.92,
+            material_wetness=0.24,
+            material_gloss=0.42,
+            material_roughness=0.44,
+            brush_engine_version=2,
+            bristle_count=14,
+            brush_seed=1776,
+            point_pressure=[0.9, 0.86],
+            point_load=[1.0, 0.78],
+        )
+        return rasterize_material_channels(
+            [stroke],
+            [layer],
+            width=240,
+            height=120,
+        )["height"]
+
+    impasto = render("impasto_oil")
+    knife = render("palette_knife")
+    stipple = render("stipple_oil")
+
+    assert not np.allclose(impasto, knife)
+    assert not np.allclose(knife, stipple)
+    assert not np.allclose(impasto, stipple)
+    assert np.count_nonzero(stipple > 0.02) < np.count_nonzero(impasto > 0.02)
+    assert float(np.percentile(knife[knife > 0.02], 25)) > 0.02
+
+
+def test_opaque_impasto_buries_underpaint_relief() -> None:
+    from app.drawing import PaintLayer, Stroke
+    from app.painter_material_paint import rasterize_material_channels
+
+    layer = PaintLayer("oil", "Oil", layer_type="material")
+    underpaint = Stroke(
+        points=[(0.05, 0.5), (0.95, 0.5)],
+        width_px=30,
+        brush_style="palette_knife",
+        layer_id=layer.layer_id,
+        material_enabled=True,
+        material_load=1.0,
+        material_thickness=1.0,
+        brush_engine_version=2,
+        brush_seed=10,
+    )
+    overpaint = Stroke(
+        points=[(0.5, 0.05), (0.5, 0.95)],
+        width_px=34,
+        brush_style="impasto_oil",
+        layer_id=layer.layer_id,
+        material_enabled=True,
+        material_load=1.0,
+        material_thickness=1.0,
+        brush_engine_version=2,
+        brush_seed=11,
+        bristle_count=16,
+    )
+    under = rasterize_material_channels(
+        [underpaint],
+        [layer],
+        width=180,
+        height=140,
+    )["height"]
+    combined = rasterize_material_channels(
+        [underpaint, overpaint],
+        [layer],
+        width=180,
+        height=140,
+    )["height"]
+    crossing = (slice(63, 77), slice(82, 98))
+    over_only = rasterize_material_channels(
+        [overpaint],
+        [layer],
+        width=180,
+        height=140,
+    )["height"]
+    assert float(np.mean(combined[crossing] - over_only[crossing])) < float(
+        np.mean(under[crossing])
+    ) * 0.45
+
+
 def test_material_layer_ui_and_stroke_contract(tmp_path: Path) -> None:
     app = _app()
     from app.drawing import PaintDialog, Stroke, create_blank_paint_pixmap

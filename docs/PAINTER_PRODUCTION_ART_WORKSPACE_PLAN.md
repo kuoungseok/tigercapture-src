@@ -305,6 +305,64 @@ Brush parameter contract:
 - Optional tilt/rotation hooks
 - Wet/smudge/mixer behavior for later passes
 
+### Oil Material Engine Contract
+
+The oil renderer must be driven by deposited paint structure, not by a generic
+RGB stroke with decorative periodic bump noise.
+
+Implemented structural baseline (2026-07-25):
+
+- `loaded_oil` and `impasto_oil` use the same authored bristle paths for color
+  and height. Each bristle deposits its own pressure/load-weighted ridge.
+- `palette_knife` and `knife_scrape_oil` use a compressed plateau contact
+  profile; `stipple_oil` uses compact irregular deposits. They do not alias one
+  generic round brush.
+- Opaque later deposits bury the earlier relief beneath their contact region.
+  Underpaint may remain in broken edge gaps, but its ridges must not continue
+  visibly through the solid center of a thick top stroke.
+- Material preview derives normals, roughness variation, self-occlusion,
+  directional diffuse light, specular response, and soft cast-shadow
+  approximation from the accumulated height field.
+- Periodic sine/cosine micro-ridge decoration is prohibited. Fine structure
+  must come from authored bristles, captured/stamped tip texture, canvas
+  interaction, or a documented physical simulation state.
+- Preview and export consume the same stroke ordering, material settings,
+  bristle paths, and height contract.
+
+Required next physical-media stage:
+
+- One active wet paint layer plus accumulated dry height layers.
+- Per-cell paint volume, velocity, and pigment storage with conservative
+  transport; pressure controls how deeply the brush participates in pigment
+  exchange.
+- Bidirectional brush/canvas pigment pickup and depletion.
+- Captured bristle/knife stamp atlases at a resolution that retains individual
+  bristle marks, followed by GPU texture/FBO accumulation.
+- Environment-map illumination and stronger physically derived soft shadows;
+  canvas texture influence must be independently adjustable for bare canvas
+  and painted areas.
+- Spectral or validated pigment mixing is a separate milestone. Current RGB
+  blending must not be described as physical pigment mixing.
+
+Research basis:
+
+- Baxter, Wendt, and Lin, *IMPaSTo: A Realistic, Interactive Model for Paint*:
+  one wet layer, unlimited dry height-field layers, volume-preserving
+  advection, pigment storage, and Kubelka-Munk optical mixing.
+  <https://cs.vu.nl/~eliens/media/local/documents/impasto.pdf>
+- Stuyck et al., *Real-Time Oil Painting on Mobile Hardware*: 2.5D paint
+  height, layered pigments, brush/canvas exchange, pressure-dependent layer
+  participation, shallow-water transport, and GPU-oriented implementation.
+  <https://graphics.cs.kuleuven.be/publications/SD2016RTOPOMH/index.html>
+- Rebelle 8 official manual/release notes: per-bristle opacity/impasto curves,
+  paint scratching, environment-based RealShader, SoftShadows, and separate
+  canvas/paint texture influence.
+  <https://www.escapemotions.com/products/rebelle/manual/8.2/interface/panel-visual-settings/>
+- Corel Painter official help: layer-owned Impasto depth, Color+Depth versus
+  Depth methods, texture-luminance depth, loaded palette knives, finite brush
+  load, and canvas mixing.
+  <https://product.corel.com/help/Painter-Essentials/540233473/Main/EN/Win/Documentation/Corel-Painter-Exploring-brush-categories.html>
+
 Preset UX:
 
 - Presets must show actual stroke thumbnails, not text-only rows.

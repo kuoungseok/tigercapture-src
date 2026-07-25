@@ -21,6 +21,9 @@ BRISTLE_V2_STYLES = frozenset(
         "fan_bristle_oil",
         "dry_oil",
         "scumble_oil",
+        "stipple_oil",
+        "palette_knife",
+        "knife_scrape_oil",
         "acrylic_bristle",
     }
 )
@@ -134,6 +137,143 @@ def _lane_color(base: QColor, lane: int, seed: int, alpha: int) -> QColor:
     return QColor.fromRgbF(rr, gg, bb, max(0.0, min(1.0, alpha / 255.0)))
 
 
+def stipple_dabs(
+    stroke: Any,
+    *,
+    width: int,
+    height: int,
+) -> list[tuple[float, float, float, float, float]]:
+    """Return compact, irregular paint deposits without translucent stamp rings."""
+
+    raw_points = list(_value(stroke, "points", []) or [])
+    if not raw_points:
+        return []
+    points = [
+        (float(point[0]) * width, float(point[1]) * height)
+        for point in raw_points
+    ]
+    center_x = sum(point[0] for point in points) / len(points)
+    center_y = sum(point[1] for point in points) / len(points)
+    if len(points) >= 2:
+        angle = math.atan2(
+            points[-1][1] - points[0][1],
+            points[-1][0] - points[0][0],
+        )
+    else:
+        angle = 0.0
+    normal_x = -math.sin(angle)
+    normal_y = math.cos(angle)
+    tangent_x = math.cos(angle)
+    tangent_y = math.sin(angle)
+    base_width = max(1.0, float(_value(stroke, "width_px", 4.0) or 4.0))
+    seed = int(_value(stroke, "brush_seed", 0) or 0)
+    dabs: list[tuple[float, float, float, float, float]] = []
+    count = max(3, min(7, int(round(base_width * 0.18))))
+    for index in range(count):
+        noise_a = math.sin((index + 1) * 19.73 + seed * 0.173)
+        noise_b = math.sin((index + 1) * 31.17 + seed * 0.097)
+        along = noise_a * base_width * 0.19
+        across = noise_b * base_width * 0.31
+        radius_x = base_width * (0.075 + (noise_b * 0.5 + 0.5) * 0.055)
+        radius_y = base_width * (0.055 + (noise_a * 0.5 + 0.5) * 0.045)
+        dabs.append(
+            (
+                center_x + tangent_x * along + normal_x * across,
+                center_y + tangent_y * along + normal_y * across,
+                max(1.0, radius_x),
+                max(0.85, radius_y),
+                angle + noise_b * 0.42,
+            )
+        )
+    return dabs
+
+
+def _paint_stipple_oil(
+    painter: QPainter,
+    stroke: Any,
+    width: int,
+    height: int,
+    color: QColor,
+) -> None:
+    seed = int(_value(stroke, "brush_seed", 0) or 0)
+    material_enabled = bool(_value(stroke, "material_enabled", False))
+    for index, (x, y, radius_x, radius_y, angle) in enumerate(
+        stipple_dabs(stroke, width=width, height=height)
+    ):
+        dab_color = _lane_color(color, index, seed, color.alpha())
+        if material_enabled:
+            dab_color.setRed(int(dab_color.red() * 0.32 + color.red() * 0.68))
+            dab_color.setGreen(int(dab_color.green() * 0.32 + color.green() * 0.68))
+            dab_color.setBlue(int(dab_color.blue() * 0.32 + color.blue() * 0.68))
+            dab_color.setAlpha(color.alpha())
+        else:
+            dab_color.setAlpha(max(1, int(color.alpha() * 0.78)))
+        half_length = max(0.5, radius_x * 0.46)
+        dx = math.cos(angle) * half_length
+        dy = math.sin(angle) * half_length
+        pen = QPen(dab_color, max(1.0, radius_y * 2.0))
+        pen.setCapStyle(Qt.PenCapStyle.RoundCap)
+        painter.setPen(pen)
+        painter.drawLine(QPointF(x - dx, y - dy), QPointF(x + dx, y + dy))
+
+
+def _paint_palette_knife_oil(
+    painter: QPainter,
+    stroke: Any,
+    width: int,
+    height: int,
+    color: QColor,
+) -> None:
+    points = [
+        QPointF(float(point[0]) * width, float(point[1]) * height)
+        for point in list(_value(stroke, "points", []) or [])
+    ]
+    if not points:
+        return
+    base_width = max(1.0, float(_value(stroke, "width_px", 4.0) or 4.0))
+    seed = int(_value(stroke, "brush_seed", 0) or 0)
+    material_enabled = bool(_value(stroke, "material_enabled", False))
+    base = QColor(color)
+    base.setAlpha(color.alpha() if material_enabled else max(1, int(color.alpha() * 0.88)))
+    base_pen = QPen(base, base_width * 0.96)
+    base_pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+    base_pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+    painter.setPen(base_pen)
+    if len(points) == 1:
+        painter.drawPoint(points[0])
+    else:
+        painter.drawPolyline(points)
+
+    # Short broken deposits remove the synthetic parallel-line look while
+    # preserving the broad, compressed plateau of a real palette knife.
+    for segment_index, (first, second) in enumerate(zip(points, points[1:])):
+        dx = second.x() - first.x()
+        dy = second.y() - first.y()
+        length = max(0.001, math.hypot(dx, dy))
+        tx, ty = dx / length, dy / length
+        nx, ny = -ty, tx
+        deposits = max(2, int(math.ceil(length / max(6.0, base_width * 0.22))))
+        for deposit_index in range(deposits):
+            key = segment_index * 131 + deposit_index
+            noise_a = math.sin((key + 1) * 17.13 + seed * 0.113)
+            noise_b = math.sin((key + 1) * 29.71 + seed * 0.071)
+            t = (deposit_index + 0.5 + noise_a * 0.24) / deposits
+            cx = first.x() + dx * t + nx * noise_b * base_width * 0.31
+            cy = first.y() + dy * t + ny * noise_b * base_width * 0.31
+            half = base_width * (0.07 + (noise_a * 0.5 + 0.5) * 0.13)
+            detail = _lane_color(color, key, seed, color.alpha())
+            detail.setAlpha(
+                max(1, int(color.alpha() * (0.82 if material_enabled else 0.48)))
+            )
+            pen = QPen(detail, max(0.8, base_width * (0.025 + abs(noise_b) * 0.045)))
+            pen.setCapStyle(Qt.PenCapStyle.FlatCap)
+            painter.setPen(pen)
+            painter.drawLine(
+                QPointF(cx - tx * half, cy - ty * half),
+                QPointF(cx + tx * half, cy + ty * half),
+            )
+
+
 def paint_bristle_v2(
     painter: QPainter,
     stroke: Any,
@@ -143,13 +283,35 @@ def paint_bristle_v2(
 ) -> bool:
     if not stroke_uses_bristle_v2(stroke):
         return False
+    style = str(_value(stroke, "brush_style", "") or "").casefold()
+    if style == "stipple_oil":
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        try:
+            _paint_stipple_oil(painter, stroke, width, height, color)
+        finally:
+            painter.restore()
+        return True
+    if style in {"palette_knife", "knife_scrape_oil"}:
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        try:
+            _paint_palette_knife_oil(painter, stroke, width, height, color)
+        finally:
+            painter.restore()
+        return True
     lanes = bristle_lane_paths(stroke, width=width, height=height)
     if not lanes:
         return False
     base_width = max(0.25, float(_value(stroke, "width_px", 4.0) or 4.0))
     seed = int(_value(stroke, "brush_seed", 0) or 0)
-    lane_width = max(0.65, base_width / max(5, len(lanes)) * 0.92)
-    style = str(_value(stroke, "brush_style", "") or "").casefold()
+    lane_width = max(
+        0.65,
+        base_width
+        / max(5, len(lanes))
+        * (1.16 if bool(_value(stroke, "material_enabled", False)) else 0.92),
+    )
+    material_enabled = bool(_value(stroke, "material_enabled", False))
     painter.save()
     painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
     try:
@@ -160,8 +322,28 @@ def paint_bristle_v2(
             "bristle_oil": 0.24,
         }.get(style, 0.42)
         body = QColor(color)
+        if material_enabled:
+            body_alpha_scale = max(
+                body_alpha_scale,
+                1.0
+                if style in {"impasto_oil", "loaded_oil"}
+                else 0.92
+                if style in {"palette_knife", "knife_scrape_oil", "bristle_oil"}
+                else 0.82,
+            )
         body.setAlpha(max(1, min(255, int(color.alpha() * body_alpha_scale))))
-        body_pen = QPen(body, max(1.0, base_width * 0.76))
+        body_pen = QPen(
+            body,
+            max(
+                1.0,
+                base_width
+                * (
+                    0.62
+                    if material_enabled and style in {"impasto_oil", "loaded_oil"}
+                    else 0.76
+                ),
+            ),
+        )
         body_pen.setCapStyle(Qt.PenCapStyle.RoundCap)
         body_pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
         painter.setPen(body_pen)
@@ -176,6 +358,10 @@ def paint_bristle_v2(
 
         for lane_index, strand in enumerate(lanes):
             lane_color = _lane_color(color, lane_index, seed, color.alpha())
+            if material_enabled:
+                lane_color.setRed(int(lane_color.red() * 0.38 + color.red() * 0.62))
+                lane_color.setGreen(int(lane_color.green() * 0.38 + color.green() * 0.62))
+                lane_color.setBlue(int(lane_color.blue() * 0.38 + color.blue() * 0.62))
             for index in range(len(strand) - 1):
                 x1, y1, pressure, load = strand[index]
                 x2, y2, next_pressure, next_load = strand[index + 1]
@@ -184,6 +370,8 @@ def paint_bristle_v2(
                     * (0.34 + 0.66 * min(load, next_load))
                     * (0.48 + 0.52 * min(pressure, next_pressure))
                 )
+                if material_enabled:
+                    alpha = max(alpha, int(color.alpha() * 0.90))
                 segment_color = QColor(lane_color)
                 segment_color.setAlpha(max(1, min(255, alpha)))
                 pen = QPen(
@@ -194,7 +382,7 @@ def paint_bristle_v2(
                 pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
                 painter.setPen(pen)
                 painter.drawLine(QPointF(x1, y1), QPointF(x2, y2))
-                if lane_index % 4 == 0:
+                if not material_enabled and lane_index % 4 == 0:
                     highlight = QColor(255, 246, 220, max(4, int(alpha * 0.20)))
                     highlight_pen = QPen(highlight, max(0.35, pen.widthF() * 0.24))
                     highlight_pen.setCapStyle(Qt.PenCapStyle.FlatCap)

@@ -296,6 +296,7 @@ def rasterize_material_channels(
     direction_x = np.zeros_like(relief)
     direction_y = np.zeros_like(relief)
     stroke_count = 0
+    profile_counts: dict[str, int] = {}
 
     for stroke in strokes:
         layer_id = str(_value(stroke, "layer_id", "") or "paint-layer-1")
@@ -335,6 +336,7 @@ def rasterize_material_channels(
             min(1.0, float(_value(stroke, "material_roughness", settings["roughness"]))),
         )
         style = str(_value(stroke, "brush_style", "round") or "round").casefold()
+        profile_counts[style] = int(profile_counts.get(style, 0)) + 1
         width_px = max(1, int(round(float(_value(stroke, "width_px", 1.0) or 1.0))))
         opacity = max(0.0, min(1.0, float(_value(stroke, "opacity", 255) or 0) / 255.0))
         deposition = (
@@ -348,10 +350,41 @@ def rasterize_material_channels(
             continue
 
         mask = np.zeros_like(relief)
+        burial_mask: np.ndarray | None = None
         direction_written = False
-        from app.painter_brush_engine_v2 import bristle_lane_paths, stroke_uses_bristle_v2
+        from app.painter_brush_engine_v2 import (
+            bristle_lane_paths,
+            stipple_dabs,
+            stroke_uses_bristle_v2,
+        )
 
-        if stroke_uses_bristle_v2(stroke):
+        if style == "stipple_oil":
+            brush_seed = int(_value(stroke, "brush_seed", 0) or 0)
+            for x, y, radius_x, radius_y, angle in stipple_dabs(
+                stroke,
+                width=width - 1,
+                height=height - 1,
+            ):
+                half_length = max(0.5, radius_x * 0.46)
+                first = (
+                    max(0, min(width - 1, int(round(x - math.cos(angle) * half_length)))),
+                    max(0, min(height - 1, int(round(y - math.sin(angle) * half_length)))),
+                )
+                second = (
+                    max(0, min(width - 1, int(round(x + math.cos(angle) * half_length)))),
+                    max(0, min(height - 1, int(round(y + math.sin(angle) * half_length)))),
+                )
+                _draw_weighted_segment(
+                    mask,
+                    first,
+                    second,
+                    max(1, int(round(radius_y * 2.0))),
+                    0.72 + 0.18 * math.sin(brush_seed * 0.11 + x * 0.07 + y * 0.05),
+                )
+            direction_written = True
+        elif style in {"palette_knife", "knife_scrape_oil"}:
+            _draw_polyline(mask, points, max(2, int(round(width_px * 0.94))))
+        elif stroke_uses_bristle_v2(stroke):
             lanes = bristle_lane_paths(stroke, width=width - 1, height=height - 1)
             lane_width = max(1, int(round(width_px / max(5, len(lanes)) * 0.92)))
             if style not in {"dry_oil", "scumble_oil", "fan_bristle_oil"}:
@@ -398,7 +431,26 @@ def rasterize_material_channels(
         else:
             _draw_polyline(mask, points, width_px)
 
-        if (
+        if style in {"loaded_oil", "impasto_oil"}:
+            body = np.zeros_like(relief)
+            _draw_polyline(body, points, max(2, int(round(width_px * 0.82))))
+            burial_mask = body
+            rounded_body = _blur(body, max(0.9, width_px * 0.085))
+            bristle_deposit = np.clip(mask, 0.0, 1.0)
+            mask = np.clip(
+                rounded_body * (0.38 if style == "impasto_oil" else 0.48)
+                + bristle_deposit * (0.82 if style == "impasto_oil" else 0.64),
+                0.0,
+                1.0,
+            )
+        elif style in {"palette_knife", "knife_scrape_oil"}:
+            body = np.zeros_like(relief)
+            _draw_polyline(body, points, max(2, int(round(width_px * 0.94))))
+            plateau = _blur(body, max(0.55, width_px * 0.028))
+            plateau = np.clip((plateau - 0.12) * 1.28, 0.0, 1.0)
+            burial_mask = plateau
+            mask = np.clip(plateau + mask * 0.12, 0.0, 1.0)
+        elif (
             not stroke_uses_bristle_v2(stroke)
             and style in {"bristle_oil", "flat_hog_oil", "filbert_oil", "fan_bristle_oil"}
         ):
@@ -410,23 +462,62 @@ def rasterize_material_channels(
                 ]
                 _draw_polyline(ridge, shifted, max(1, width_px // 9))
             mask = np.clip(mask * 0.62 + ridge * 0.62, 0.0, 1.0)
-        elif style in {"dry_oil", "scumble_oil", "stipple_oil"}:
+        elif style in {"dry_oil", "scumble_oil"}:
             yy, xx = np.indices(mask.shape)
             grain = (
                 np.sin(xx * 0.47 + yy * 0.19 + stroke_count * 1.7) * 0.5 + 0.5
             ).astype(np.float32)
             mask *= np.clip((grain - 0.22) * 1.35, 0.0, 1.0)
-        elif style in {"palette_knife", "knife_scrape_oil"}:
-            mask = np.maximum(mask, _blur(mask, max(0.6, width_px * 0.06)) * 0.82)
+        elif style == "stipple_oil":
+            mask = np.clip(mask, 0.0, 1.0)
 
+        # Fresh opaque paint buries the older surface instead of adding its
+        # normals forever. Without this, underpaint ridges visibly continue
+        # through a thick later stroke as if the top color were transparent.
+        burial_strength = min(
+            0.97,
+            opacity
+            * layer["opacity"]
+            * max(0.0, min(1.0, deposition))
+            * (
+                0.96
+                if style in {"impasto_oil", "loaded_oil"}
+                else 0.88
+                if style in {"palette_knife", "knife_scrape_oil"}
+                else 0.72
+            ),
+        )
+        burial = np.clip(
+            (burial_mask if burial_mask is not None else mask) * burial_strength,
+            0.0,
+            0.97,
+        )
+        relief *= 1.0 - burial
         relief += mask * deposition * 0.24
         coverage = np.maximum(coverage, mask * opacity * layer["opacity"])
+        style_roughness = {
+            "impasto_oil": 0.04,
+            "loaded_oil": 0.02,
+            "palette_knife": 0.07,
+            "knife_scrape_oil": 0.12,
+            "stipple_oil": 0.16,
+            "dry_oil": 0.18,
+            "scumble_oil": 0.20,
+        }.get(style, 0.08)
         surface_roughness = np.clip(
             authored_roughness + (1.0 - load) * 0.12 - wetness * 0.22 - gloss * 0.30,
             0.04,
             1.0,
         )
-        roughness_sum += mask * float(surface_roughness)
+        local_roughness = np.clip(
+            float(surface_roughness)
+            + style_roughness
+            + (1.0 - mask) * 0.10
+            - mask * wetness * 0.09,
+            0.04,
+            1.0,
+        )
+        roughness_sum += mask * local_roughness
         roughness_weight += mask
 
         if not direction_written:
@@ -440,7 +531,7 @@ def rasterize_material_channels(
                 direction_y += segment * (dy / length)
         stroke_count += 1
 
-    relief = np.clip(relief, 0.0, 1.0)
+    relief = np.clip(1.0 - np.exp(-np.maximum(relief, 0.0) * 1.16), 0.0, 1.0)
     coverage = np.clip(coverage, 0.0, 1.0)
     roughness = np.where(
         roughness_weight > 1e-5,
@@ -448,7 +539,7 @@ def rasterize_material_channels(
         0.72,
     ).astype(np.float32)
     grad_y, grad_x = np.gradient(relief)
-    normal_strength = 8.0
+    normal_strength = 9.2
     nx = -grad_x * normal_strength
     ny = grad_y * normal_strength
     nz = np.ones_like(relief)
@@ -472,7 +563,19 @@ def rasterize_material_channels(
     )
     signed_normal = normal * 2.0 - 1.0
     diffuse = np.clip(np.sum(signed_normal * light[None, None, :], axis=2), 0.0, 1.0)
-    ridge = np.clip((diffuse - 0.58) / np.maximum(0.08, roughness * 0.38), 0.0, 1.0)
+    half_vector = light + np.asarray([0.0, 0.0, 1.0], dtype=np.float32)
+    half_vector /= max(0.0001, float(np.linalg.norm(half_vector)))
+    normal_dot_half = np.clip(
+        np.sum(signed_normal * half_vector[None, None, :], axis=2),
+        0.0,
+        1.0,
+    )
+    specular_power = 7.0 + np.square(1.0 - roughness) * 72.0
+    specular = (
+        np.power(normal_dot_half, specular_power)
+        * (1.0 - roughness)
+        * 0.72
+    )
     soft_shadow = np.zeros_like(relief)
     for distance in (2, 4, 7, 11):
         dx = int(round(-float(light[0]) * distance))
@@ -486,18 +589,20 @@ def rasterize_material_channels(
         1.0,
     )
     shading = np.clip(
-        0.66
-        + diffuse * 0.48
-        + ridge * (1.0 - roughness) * 0.42
-        - soft_shadow * 0.36,
-        0.42,
-        1.42,
+        0.72
+        + diffuse * 0.34
+        + specular
+        - soft_shadow * 0.43
+        - (1.0 - ao) * 0.18,
+        0.38,
+        1.34,
     )
 
     return {
         "schema": MATERIAL_PAINT_SCHEMA,
         "size": [width, height],
         "stroke_count": int(stroke_count),
+        "style_profiles": profile_counts,
         "active": bool(stroke_count),
         "height": relief,
         "coverage": coverage,
@@ -519,13 +624,13 @@ def material_preview_rgba(channels: Mapping[str, Any]) -> np.ndarray:
     coverage = np.asarray(channels.get("coverage"), dtype=np.float32)
     if shading.ndim != 2 or coverage.shape != shading.shape:
         return np.zeros((8, 8, 4), dtype=np.uint8)
-    delta = shading - 1.0
+    delta = np.where(np.abs(shading - 1.0) < 0.025, 0.0, shading - 1.0)
     light = np.clip(delta, 0.0, 1.0)
     shadow = np.clip(-delta, 0.0, 1.0)
     rgba = np.zeros((shading.shape[0], shading.shape[1], 4), dtype=np.uint8)
     white = light >= shadow
     rgba[..., :3] = np.where(white[..., None], 255, 0).astype(np.uint8)
-    alpha = np.maximum(light * 0.82, shadow * 0.96) * coverage
+    alpha = np.maximum(light * 0.84, shadow * 0.82) * coverage
     rgba[..., 3] = np.uint8(np.clip(alpha * 255.0, 0.0, 255.0))
     return rgba
 

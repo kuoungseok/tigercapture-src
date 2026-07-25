@@ -79,3 +79,54 @@ def test_bristle_v2_color_and_material_use_authored_strands() -> None:
     assert int(np.count_nonzero(occupied)) > 100
     assert float(np.std(channels["height"][occupied])) > 0.003
     assert float(np.std(channels["normal"][..., 0])) > 0.001
+
+
+def test_material_stipple_is_opaque_compact_and_uses_matching_relief_dabs() -> None:
+    _app()
+    import numpy as np
+    from PySide6.QtCore import Qt
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    from app.drawing import PaintLayer, Stroke
+    from app.painter_brush_engine_v2 import paint_bristle_v2, stipple_dabs
+    from app.painter_material_paint import rasterize_material_channels
+
+    layer = PaintLayer("stipple", "Stipple", layer_type="material")
+    stroke = Stroke(
+        points=[(0.49, 0.50), (0.51, 0.505)],
+        color=(174, 36, 28),
+        width_px=28,
+        brush_style="stipple_oil",
+        layer_id=layer.layer_id,
+        brush_engine_version=2,
+        brush_seed=901,
+        material_enabled=True,
+        material_load=1.0,
+        material_thickness=1.0,
+    )
+    image = QImage(180, 120, QImage.Format.Format_ARGB32_Premultiplied)
+    image.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(image)
+    try:
+        assert paint_bristle_v2(painter, stroke, 180, 120, QColor(174, 36, 28, 255))
+    finally:
+        painter.end()
+
+    dabs = stipple_dabs(stroke, width=180, height=120)
+    assert 3 <= len(dabs) <= 7
+    opaque_pixels = sum(
+        image.pixelColor(x, y).alpha() >= 245
+        for y in range(image.height())
+        for x in range(image.width())
+    )
+    painted_pixels = sum(
+        image.pixelColor(x, y).alpha() > 0
+        for y in range(image.height())
+        for x in range(image.width())
+    )
+    assert opaque_pixels > 20
+    assert painted_pixels < 500
+
+    channels = rasterize_material_channels([stroke], [layer], width=180, height=120)
+    relief_pixels = int(np.count_nonzero(channels["height"] > 0.01))
+    assert 20 < relief_pixels < 700

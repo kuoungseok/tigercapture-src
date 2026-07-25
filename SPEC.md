@@ -6513,6 +6513,17 @@ AI Script Edit MVP integration:
   those values to the active controls, and use the same renderer for their
   thumbnail previews. Both `paint.brush.set` and `paint.stroke.draw` expose
   every professional style to local/Claude automation.
+- The 2026-07-25 oil-material correction removes periodic procedural
+  micro-ridge decoration from the material path. Color and height now share
+  authored bristle paths for loaded/impasto strokes, palette knives use a
+  compressed contact plateau, and stipple uses compact irregular deposits.
+  Opaque later paint buries earlier relief in its solid contact region so
+  underpaint ridges cannot show through the center of a top stroke. The current
+  implementation remains a deterministic 2.5D deposited-height renderer, not
+  a full wet-paint simulator: conservative fluid transport, active-wet versus
+  dry pigment layers, brush pickup, and physical pigment mixing remain explicit
+  future work. The research and acceptance contract is maintained in
+  `docs/PAINTER_PRODUCTION_ART_WORKSPACE_PLAN.md`.
 - The 2026-07-25 designer catalog pass expands Painter beyond oil with 22
   production presets across Basic, Drawing, Ink, Water Media, Airbrush,
   Concept, Texture, and FX. Renderer styles include soft/flat/pixel tips,
