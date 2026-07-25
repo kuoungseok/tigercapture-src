@@ -10876,7 +10876,7 @@ class PaintDialog(QDialog):
         menu.setObjectName("PaintBrushPopup")
         panel = QFrame(menu)
         panel.setObjectName("PaintBrushPopupPanel")
-        panel.setFixedSize(620, 500)
+        panel.setFixedSize(654, 500)
         panel_layout = QVBoxLayout(panel)
         panel_layout.setContentsMargins(7, 6, 7, 7)
         panel_layout.setSpacing(5)
@@ -10955,7 +10955,7 @@ class PaintDialog(QDialog):
 
         filter_panel = QFrame(panel)
         filter_panel.setObjectName("PaintBrushPopupFilters")
-        filter_panel.setFixedWidth(148)
+        filter_panel.setFixedWidth(182)
         filter_layout = QVBoxLayout(filter_panel)
         filter_layout.setContentsMargins(7, 7, 7, 7)
         filter_layout.setSpacing(4)
