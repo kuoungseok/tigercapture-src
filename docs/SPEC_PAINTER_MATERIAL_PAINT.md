@@ -1,6 +1,6 @@
 # Tiger Studio Painter Material Paint
 
-Status: first product implementation
+Status: product implementation with Bristle Engine v2
 
 ## Goal
 
@@ -56,6 +56,20 @@ stroke-channel rasterization.
 8. Painter's PBR generation path merges these native channels over the
    image-derived fallback maps.
 
+### Bristle Engine v2
+
+Material-compatible oil and acrylic strokes can use `brush_engine_version=2`.
+The stroke stores normalized per-point `pressure`, `tilt`, `rotation`, and
+paint `load`, plus bristle count, deterministic seed, and load depletion.
+The engine builds independent strand paths perpendicular to the authored
+stroke tangent instead of drawing decorative lines over one fixed-width body.
+
+Color and material rasterization consume the same strand paths. Pressure
+changes strand spread and width; load and depletion change deposition along
+the stroke. Height, direction, roughness, normal, AO, and the visible color
+therefore describe the same authored brush marks. Long interactive paths are
+bounded to 256 lane samples to protect Painter responsiveness.
+
 The interactive canvas uses a cached material-lighting overlay for immediate
 feedback. The existing Texture Lab/OpenGL plane renderer remains the
 authoritative PBR inspection surface and consumes the merged native maps.
@@ -85,6 +99,10 @@ native Height/Normal/AO/Roughness channels.
   Roughness.
 - `paint.material.preview.set` enables/disables the canvas material preview and
   controls light azimuth/elevation.
+- `paint.stroke.draw` accepts per-point `pressure`, `tilt`, `rotation`, and
+  `load`, plus `engine_version`, `bristle_count`, `seed`, and
+  `load_depletion`. AI strokes targeting Material Paint layers automatically
+  receive the layer's material settings.
 - `paint.view.zoom_area` magnifies and centers a normalized canvas rectangle.
 - `paint.state` reports layer type, layer material settings, active brush
   material capability, active material controls, and preview state.

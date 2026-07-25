@@ -304,13 +304,17 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
                 },
                 {
                     "points": [
-                        {"x": 0.18, "y": 0.30},
-                        {"x": 0.31, "y": 0.25},
+                        {"x": 0.18, "y": 0.30, "pressure": 0.46, "load": 1.0},
+                        {"x": 0.31, "y": 0.25, "pressure": 0.91, "load": 0.72},
                     ],
                     "color": "#F0C541",
                     "width": 9,
                     "style": "impasto_oil",
-                    "layer_id": layer_id,
+                    "engine_version": 2,
+                    "bristle_count": 11,
+                    "seed": 83,
+                    "load_depletion": 0.36,
+                    "layer_id": material_layer_id,
                 },
             ],
         },
@@ -318,8 +322,19 @@ def test_painter_actions_register_and_control_standalone_dialog(tmp_path: Path) 
     assert ai_strokes["ok"]
     assert ai_strokes["result"]["stroke_draw"]["stroke_count"] == 2
     assert ai_strokes["result"]["stroke_draw"]["point_count"] == 5
+    assert ai_strokes["result"]["stroke_draw"]["engine_versions"] == [1, 2]
+    assert ai_strokes["result"]["stroke_draw"]["dynamic_channels"] == [
+        "pressure",
+        "tilt",
+        "rotation",
+        "load",
+    ]
     assert ai_strokes["result"]["history"]["undo_labels"][-1] == "Claude painterly sky"
     assert len(dialog.canvas.embedded_strokes()) == 2
+    material_stroke = dialog.canvas.embedded_strokes()[-1]
+    assert material_stroke.material_enabled is True
+    assert material_stroke.material_thickness == 0.86
+    assert material_stroke.point_pressure == [0.46, 0.91]
 
     undone = registry.execute("paint.history.undo").to_dict()
     assert undone["ok"]

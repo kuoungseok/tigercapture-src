@@ -718,6 +718,10 @@ class PaintAdapterMixin:
             if len(raw_points) > 2048:
                 raise ValueError(f"stroke {index} exceeds the 2048 point limit")
             points: list[tuple[float, float]] = []
+            pressure: list[float] = []
+            tilt: list[float] = []
+            rotation: list[float] = []
+            paint_load: list[float] = []
             for point_index, point in enumerate(raw_points):
                 if not isinstance(point, dict) or "x" not in point or "y" not in point:
                     raise ValueError(f"stroke {index} point {point_index} requires x and y")
@@ -728,6 +732,10 @@ class PaintAdapterMixin:
                         f"stroke {index} point {point_index} is outside normalized canvas bounds"
                     )
                 points.append((x, y))
+                pressure.append(max(0.0, min(1.0, float(point.get("pressure", 0.82)))))
+                tilt.append(max(0.0, min(1.0, float(point.get("tilt", 0.5)))))
+                rotation.append(max(0.0, min(1.0, float(point.get("rotation", 0.5)))))
+                paint_load.append(max(0.0, min(1.0, float(point.get("load", 1.0)))))
 
             layer_id = str(row.get("layer_id") or active_layer_id)
             layer = paint_layers.get(layer_id)
@@ -741,6 +749,18 @@ class PaintAdapterMixin:
             if not color.isValid():
                 raise ValueError(f"stroke {index} has invalid color: {color_value}")
             opacity_percent = max(1, min(100, int(row.get("opacity", 100) or 100)))
+            is_material = str(getattr(layer, "layer_type", "standard") or "standard") == "material"
+            engine_version = max(
+                1,
+                min(2, int(row.get("engine_version", 2 if is_material else 1) or 1)),
+            )
+            material = {}
+            if is_material:
+                from app.painter_material_paint import normalize_material_settings
+
+                material = normalize_material_settings(
+                    getattr(layer, "material_settings", {}) or {}
+                )
             prepared.append(
                 Stroke(
                     points=points,
@@ -755,6 +775,25 @@ class PaintAdapterMixin:
                     closed_path=bool(row.get("closed", False)),
                     layer_id=layer_id,
                     source_tool="ai_paint",
+                    brush_engine_version=engine_version,
+                    point_pressure=pressure,
+                    point_tilt=tilt,
+                    point_rotation=rotation,
+                    point_load=paint_load,
+                    bristle_count=max(
+                        0, min(64, int(row.get("bristle_count", 0) or 0))
+                    ),
+                    brush_seed=int(row.get("seed", index * 7919 + len(points) * 131) or 0),
+                    load_depletion=max(
+                        0.0,
+                        min(1.0, float(row.get("load_depletion", 0.28) or 0.0)),
+                    ),
+                    material_enabled=is_material,
+                    material_load=float(material.get("load", 0.0)),
+                    material_thickness=float(material.get("thickness", 0.0)),
+                    material_wetness=float(material.get("wetness", 0.0)),
+                    material_gloss=float(material.get("gloss", 0.0)),
+                    material_roughness=float(material.get("roughness", 0.56)),
                     start_ms=int(getattr(dialog, "_time_ms", 0) or 0),
                 )
             )
@@ -770,6 +809,10 @@ class PaintAdapterMixin:
             "point_count": point_count,
             "undo_label": str(undo_label or "AI paint strokes"),
             "coordinate_space": "normalized_canvas",
+            "engine_versions": sorted(
+                {int(stroke.brush_engine_version) for stroke in prepared}
+            ),
+            "dynamic_channels": ["pressure", "tilt", "rotation", "load"],
         }
         return state
 

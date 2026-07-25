@@ -164,6 +164,14 @@ def material_paint_signature(
                 "width": float(_value(stroke, "width_px", 1.0) or 1.0),
                 "style": str(_value(stroke, "brush_style", "round") or "round"),
                 "enabled": bool(_value(stroke, "material_enabled", False)),
+                "engine": int(_value(stroke, "brush_engine_version", 1) or 1),
+                "pressure": list(_value(stroke, "point_pressure", []) or []),
+                "tilt": list(_value(stroke, "point_tilt", []) or []),
+                "rotation": list(_value(stroke, "point_rotation", []) or []),
+                "point_load": list(_value(stroke, "point_load", []) or []),
+                "bristles": int(_value(stroke, "bristle_count", 0) or 0),
+                "seed": int(_value(stroke, "brush_seed", 0) or 0),
+                "depletion": float(_value(stroke, "load_depletion", 0.28) or 0.0),
                 "load": float(_value(stroke, "material_load", layer["settings"]["load"])),
                 "thickness": float(
                     _value(stroke, "material_thickness", layer["settings"]["thickness"])
@@ -219,6 +227,33 @@ def _draw_polyline(mask: np.ndarray, points: list[tuple[int, int]], width: int) 
     else:
         draw.line(points, fill=255, width=max(1, int(width)), joint="curve")
     mask[:] = np.asarray(image, dtype=np.float32) / 255.0
+
+
+def _draw_weighted_segment(
+    mask: np.ndarray,
+    first: tuple[int, int],
+    second: tuple[int, int],
+    width: int,
+    value: float,
+) -> None:
+    value = max(0.0, min(1.0, float(value)))
+    try:
+        import cv2
+
+        cv2.line(
+            mask,
+            first,
+            second,
+            value,
+            max(1, int(width)),
+            lineType=cv2.LINE_AA,
+        )
+        return
+    except Exception:
+        pass
+    segment = np.zeros_like(mask)
+    _draw_polyline(segment, [first, second], width)
+    np.maximum(mask, segment * value, out=mask)
 
 
 def _blur(values: np.ndarray, radius: float) -> np.ndarray:
@@ -313,8 +348,60 @@ def rasterize_material_channels(
             continue
 
         mask = np.zeros_like(relief)
-        _draw_polyline(mask, points, width_px)
-        if style in {"bristle_oil", "flat_hog_oil", "filbert_oil", "fan_bristle_oil"}:
+        direction_written = False
+        from app.painter_brush_engine_v2 import bristle_lane_paths, stroke_uses_bristle_v2
+
+        if stroke_uses_bristle_v2(stroke):
+            lanes = bristle_lane_paths(stroke, width=width - 1, height=height - 1)
+            lane_width = max(1, int(round(width_px / max(5, len(lanes)) * 0.92)))
+            if style not in {"dry_oil", "scumble_oil", "fan_bristle_oil"}:
+                for first, second in zip(points, points[1:]):
+                    _draw_weighted_segment(
+                        mask,
+                        first,
+                        second,
+                        max(1, int(round(width_px * 0.70))),
+                        0.34,
+                    )
+            for lane in lanes:
+                for first, second in zip(lane, lane[1:]):
+                    x1, y1, pressure_a, load_a = first
+                    x2, y2, pressure_b, load_b = second
+                    lane_deposit = max(
+                        0.04,
+                        min(1.0, (pressure_a + pressure_b) * 0.25 + (load_a + load_b) * 0.25),
+                    )
+                    segment_points = [
+                        (
+                            max(0, min(width - 1, int(round(x1)))),
+                            max(0, min(height - 1, int(round(y1)))),
+                        ),
+                        (
+                            max(0, min(width - 1, int(round(x2)))),
+                            max(0, min(height - 1, int(round(y2)))),
+                        ),
+                    ]
+                    _draw_weighted_segment(
+                        mask,
+                        segment_points[0],
+                        segment_points[1],
+                        lane_width,
+                        lane_deposit,
+                    )
+            if lanes and lanes[0]:
+                dx = float(lanes[0][-1][0] - lanes[0][0][0])
+                dy = float(lanes[0][-1][1] - lanes[0][0][1])
+                length = max(1.0, math.hypot(dx, dy))
+                direction_x += mask * (dx / length)
+                direction_y += mask * (dy / length)
+            direction_written = True
+        else:
+            _draw_polyline(mask, points, width_px)
+
+        if (
+            not stroke_uses_bristle_v2(stroke)
+            and style in {"bristle_oil", "flat_hog_oil", "filbert_oil", "fan_bristle_oil"}
+        ):
             ridge = np.zeros_like(relief)
             for offset_ratio in (-0.30, -0.10, 0.12, 0.31):
                 shifted = [
@@ -342,14 +429,15 @@ def rasterize_material_channels(
         roughness_sum += mask * float(surface_roughness)
         roughness_weight += mask
 
-        for first, second in zip(points, points[1:]):
-            dx = float(second[0] - first[0])
-            dy = float(second[1] - first[1])
-            length = max(1.0, math.hypot(dx, dy))
-            segment = np.zeros_like(relief)
-            _draw_polyline(segment, [first, second], width_px)
-            direction_x += segment * (dx / length)
-            direction_y += segment * (dy / length)
+        if not direction_written:
+            for first, second in zip(points, points[1:]):
+                dx = float(second[0] - first[0])
+                dy = float(second[1] - first[1])
+                length = max(1.0, math.hypot(dx, dy))
+                segment = np.zeros_like(relief)
+                _draw_polyline(segment, [first, second], width_px)
+                direction_x += segment * (dx / length)
+                direction_y += segment * (dy / length)
         stroke_count += 1
 
     relief = np.clip(relief, 0.0, 1.0)

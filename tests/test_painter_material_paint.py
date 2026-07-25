@@ -122,6 +122,10 @@ def test_material_layer_ui_and_stroke_contract(tmp_path: Path) -> None:
     assert state["material_preview"]["stroke_count"] == 1
     saved_stroke = dialog.canvas.embedded_strokes()[-1]
     assert saved_stroke.material_enabled is True
+    assert saved_stroke.brush_engine_version == 2
+    assert len(saved_stroke.point_pressure) == len(saved_stroke.points)
+    assert len(saved_stroke.point_load) == len(saved_stroke.points)
+    assert saved_stroke.bristle_count >= 7
     assert saved_stroke.material_thickness == 0.91
     assert saved_stroke.material_roughness == 0.37
     assert dialog._material_options_button.isVisible()

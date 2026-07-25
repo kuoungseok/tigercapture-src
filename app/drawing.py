@@ -1237,6 +1237,14 @@ class Stroke:
     closed_path: bool = False
     layer_id: str = "paint-layer-1"
     source_tool: str = "pen"
+    brush_engine_version: int = 1
+    point_pressure: list[float] = field(default_factory=list)
+    point_tilt: list[float] = field(default_factory=list)
+    point_rotation: list[float] = field(default_factory=list)
+    point_load: list[float] = field(default_factory=list)
+    bristle_count: int = 0
+    brush_seed: int = 0
+    load_depletion: float = 0.28
     material_enabled: bool = False
     material_load: float = 0.0
     material_thickness: float = 0.0
@@ -3087,6 +3095,10 @@ class DrawingCanvas(QWidget):
         color = QColor(*stroke.color)
         color.setAlpha(max(0, min(255, int(stroke.opacity * opacity_scale))))
         style = _normalize_paint_brush_style(getattr(stroke, "brush_style", "round"))
+        from app.painter_brush_engine_v2 import paint_bristle_v2
+
+        if paint_bristle_v2(painter, stroke, w, h, color):
+            return
         if style in PAINT_TEXTURED_BRUSH_STYLES:
             DrawingCanvas._paint_textured_stroke(painter, stroke, w, h, color)
             return
@@ -12454,6 +12466,34 @@ class PaintDialog(QDialog):
 
             material = normalize_material_settings(self._material_paint_settings)
             layer.material_settings = dict(material)
+            point_count = len(stroke.points)
+            if point_count:
+                stroke.brush_engine_version = 2
+                stroke.brush_seed = stroke.brush_seed or (
+                    len(self.canvas.embedded_strokes()) * 7919 + point_count * 131
+                )
+                stroke.bristle_count = stroke.bristle_count or max(
+                    7, min(36, int(round(stroke.width_px * 0.46)))
+                )
+                if not stroke.point_pressure:
+                    stroke.point_pressure = [
+                        max(
+                            0.28,
+                            min(
+                                1.0,
+                                0.68
+                                + math.sin(index / max(1, point_count - 1) * math.pi)
+                                * 0.26,
+                            ),
+                        )
+                        for index in range(point_count)
+                    ]
+                if not stroke.point_tilt:
+                    stroke.point_tilt = [0.5] * point_count
+                if not stroke.point_rotation:
+                    stroke.point_rotation = [0.5] * point_count
+                if not stroke.point_load:
+                    stroke.point_load = [material["load"]] * point_count
             stroke.material_enabled = True
             stroke.material_load = material["load"]
             stroke.material_thickness = material["thickness"]
@@ -15053,6 +15093,30 @@ class PaintDialog(QDialog):
             closed_path=bool(row.get("closed_path", False)),
             layer_id=str(row.get("layer_id") or "paint-layer-1"),
             source_tool=str(row.get("source_tool") or "pen"),
+            brush_engine_version=max(
+                1, min(2, self._clipboard_int(row.get("brush_engine_version"), 1))
+            ),
+            point_pressure=[
+                max(0.0, min(1.0, self._clipboard_float(value, 0.82)))
+                for value in (row.get("point_pressure") or [])
+            ],
+            point_tilt=[
+                max(0.0, min(1.0, self._clipboard_float(value, 0.5)))
+                for value in (row.get("point_tilt") or [])
+            ],
+            point_rotation=[
+                max(0.0, min(1.0, self._clipboard_float(value, 0.5)))
+                for value in (row.get("point_rotation") or [])
+            ],
+            point_load=[
+                max(0.0, min(1.0, self._clipboard_float(value, 1.0)))
+                for value in (row.get("point_load") or [])
+            ],
+            bristle_count=max(0, min(64, self._clipboard_int(row.get("bristle_count"), 0))),
+            brush_seed=self._clipboard_int(row.get("brush_seed"), 0),
+            load_depletion=max(
+                0.0, min(1.0, self._clipboard_float(row.get("load_depletion"), 0.28))
+            ),
             start_ms=self._clipboard_int(row.get("start_ms"), 0),
             end_ms=None if end_ms is None else self._clipboard_int(end_ms, 0),
             material_enabled=bool(row.get("material_enabled", False)),
@@ -15845,11 +15909,14 @@ class PaintDialog(QDialog):
                     ),
                 },
                 "engine": {
+                    "version": 2,
                     "preset_thumbnail_mode": "actual_stroke_preview",
                     "active_sections": sorted(BRUSH_DETAIL_ACTIVE_SECTIONS),
-                    "pressure_curve": "planned_tablet_input",
-                    "smoothing": "planned_stroke_resampling",
-                    "texture_dynamics": "qpainter_current_gpu_shader_target",
+                    "pressure_curve": "per_point_normalized_v2",
+                    "dynamic_channels": ["pressure", "tilt", "rotation", "load"],
+                    "bristle_strands": "shared_color_material_paths_v2",
+                    "smoothing": "bounded_256_point_lane_resampling",
+                    "texture_dynamics": "qpainter_v2_with_gpu_fallback_contract",
                     "gpu_texture_parity": gpu_capabilities.get("texture_brush_gpu_parity", {}),
                 },
                 "material": {
