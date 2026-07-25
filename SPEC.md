@@ -6637,6 +6637,14 @@ AI Script Edit MVP integration:
   image as raw coordinates or bake the approved reference into export pixels.
   They stop only when `quality_report.status=ready`. The durable rule and gate
   contract is `docs/PAINTER_AI_STUDY_PIPELINE.md`.
+- A user request to capture AI painting must produce a real Painter-window
+  timelapse from the same generated layers and editable strokes. The replay
+  begins on a blank canvas and advances through underpaint, forms, detail,
+  accent, contours, and measured refinement. To keep capture responsive,
+  `tools/capture_painter_study_timelapse.py` may pre-render truthful cumulative
+  layer states before recording; it must not show the generated reference as a
+  fake drawing process. Final PNG, MP4, and capture JSON remain regenerable
+  evidence, while durable references live under `external/assets`.
 - Painter image and channel automation must stay exposed through
   `paint.crop.to_selection`, `paint.image.resize`, `paint.canvas.resize`,
   `paint.canvas.flip`, `paint.mirror.set`, `paint.channel.select`,

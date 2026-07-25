@@ -87,3 +87,19 @@ Verified result:
 
 The output and JSON action log are regenerable QA evidence and therefore remain
 ignored local assets rather than source dependencies.
+
+## Drawing-Process Capture
+
+When a user asks an AI to paint and capture the process, the provider must use
+the same study actions and editable strokes as the final document. The capture
+must start from a blank Painter canvas and visibly advance through underpaint,
+forms, detail, accent, contours, and measured refinement. It must not substitute
+the generated reference itself as a fake painting process.
+
+`tools/capture_painter_study_timelapse.py` first completes and verifies the
+study, then pre-renders truthful cumulative layer states before recording. This
+keeps the visible Painter window responsive instead of forcing it to repaint
+tens of thousands of strokes for every captured video frame. The captured
+window still shows the real generated layer stack and the same final export.
+The MP4, final PNG, and capture JSON are regenerable local evidence; the source
+reference must live under `external/assets`, never `debugCapture`.
