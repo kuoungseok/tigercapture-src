@@ -1,6 +1,7 @@
 """App-facing update preparation workflow."""
 from __future__ import annotations
 
+import os
 from pathlib import Path
 from typing import Any
 
@@ -9,6 +10,7 @@ from app.update.checker import read_manifest_source
 from app.update.current import current_app_version, current_update_channel
 from app.update.downloader import download_artifact
 from app.update.manifest import DEFAULT_KIND, DEFAULT_PLATFORM, evaluate_manifest, manifest_from_json
+from app.update.runtime import default_manifest_source, default_updater_command
 from app.update.verifier import verify_artifact_file
 
 
@@ -56,7 +58,11 @@ def prepare_update_from_manifest(
         restart_args=restart_args,
     )
     written_plan = write_apply_plan(plan, plan_path)
-    command = updater_command(updater_exe, written_plan) if updater_exe is not None else []
+    command = (
+        updater_command(updater_exe, written_plan, pid=os.getpid())
+        if updater_exe is not None
+        else default_updater_command(written_plan, pid=os.getpid())
+    )
     return {
         "ok": True,
         "stage": "prepared",
@@ -66,3 +72,8 @@ def prepare_update_from_manifest(
         "plan_path": str(written_plan),
         "updater_command": command,
     }
+
+
+def prepare_update_from_default_manifest(**kwargs: Any) -> dict[str, Any]:
+    """Prepare an update using the packaged default manifest URL."""
+    return prepare_update_from_manifest(default_manifest_source(), **kwargs)

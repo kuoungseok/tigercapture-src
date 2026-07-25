@@ -19,7 +19,7 @@ if worker_release.exists():
 extra_datas = copy_metadata('imageio_ffmpeg')
 
 a = Analysis(
-    ['main.py', 'studio_main.py'],
+    ['main.py', 'studio_main.py', 'tools/tigercapture_updater.py'],
     pathex=[str(project_root)],
     binaries=native_binaries,
     datas=[
@@ -99,6 +99,7 @@ pyz = PYZ(a.pure)
 
 capture_scripts = [script for script in a.scripts if Path(script[1]).name == 'main.py'] or [a.scripts[0]]
 studio_scripts = [script for script in a.scripts if Path(script[1]).name == 'studio_main.py'] or [a.scripts[-1]]
+updater_scripts = [script for script in a.scripts if Path(script[1]).name == 'tigercapture_updater.py'] or [a.scripts[-1]]
 
 exe = EXE(
     pyz,
@@ -140,9 +141,30 @@ studio_exe = EXE(
     version='version_info.txt',
 )
 
+updater_exe = EXE(
+    pyz,
+    updater_scripts,
+    [],
+    exclude_binaries=True,
+    name='TigerCaptureUpdater',
+    debug=False,
+    bootloader_ignore_signals=False,
+    strip=False,
+    upx=False,
+    console=False,
+    disable_windowed_traceback=False,
+    argv_emulation=False,
+    target_arch=None,
+    codesign_identity=None,
+    entitlements_file=None,
+    icon='resources/tigercapture.ico',
+    version='version_info.txt',
+)
+
 coll = COLLECT(
     exe,
     studio_exe,
+    updater_exe,
     a.binaries,
     a.datas,
     strip=False,

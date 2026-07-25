@@ -4,6 +4,8 @@
 #   .\build.ps1 -NSIS        # PyInstaller + NSIS (installer_output\TigerCapture-Setup-*.exe)
 #   .\build.ps1 -Installer   # alias for -NSIS
 #   .\build.ps1 -InnoSetup   # PyInstaller + Inno Setup (installer_output\TigerCapture-InnoSetup-*.exe)
+#   .\build.ps1 -PortableUpdate # PyInstaller + portable update zip
+#   .\build.ps1 -Version 1.4.3 -PortableUpdate -UpdateManifestOutput installer_output\latest.json
 #   .\build.ps1 -Clean       # clean build artifacts first
 #   .\build.ps1 -Version 1.3.0 -NSIS   # explicit version override
 
@@ -11,8 +13,12 @@ param(
     [switch]$Installer,
     [switch]$NSIS,
     [switch]$InnoSetup,
+    [switch]$PortableUpdate,
     [switch]$Clean,
-    [string]$Version = ""
+    [string]$Version = "",
+    [string]$UpdateArtifactUrl = "",
+    [string]$UpdateManifestOutput = "",
+    [string]$UpdateReleaseNotesUrl = ""
 )
 
 if ($Installer) { $NSIS = $true }
@@ -99,6 +105,7 @@ if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
 $exePath = Join-Path $root "dist\TigerCapture\TigerCapture.exe"
 $studioExePath = Join-Path $root "dist\TigerCapture\TigerStudio.exe"
+$updaterExePath = Join-Path $root "dist\TigerCapture\TigerCaptureUpdater.exe"
 if (-not (Test-Path $exePath)) {
     Write-Error "Build failed: $exePath missing."
     exit 1
@@ -107,8 +114,13 @@ if (-not (Test-Path $studioExePath)) {
     Write-Error "Build failed: $studioExePath missing."
     exit 1
 }
+if (-not (Test-Path $updaterExePath)) {
+    Write-Error "Build failed: $updaterExePath missing."
+    exit 1
+}
 Write-Host "[pyinstaller] OK: $exePath" -ForegroundColor Green
 Write-Host "[pyinstaller] OK: $studioExePath" -ForegroundColor Green
+Write-Host "[pyinstaller] OK: $updaterExePath" -ForegroundColor Green
 
 # 3b. Root launcher
 # PyInstaller uses an onedir layout, so copying dist\TigerCapture\TigerCapture.exe
@@ -195,6 +207,33 @@ if ($InnoSetup) {
     & $iscc (Join-Path $root "installer.iss")
     if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
     Write-Host "[iscc] OK: installer_output\TigerCapture-InnoSetup-*.exe" -ForegroundColor Green
+}
+
+if ($PortableUpdate) {
+    New-Item -ItemType Directory -Force (Join-Path $root "installer_output") | Out-Null
+    $portableZip = Join-Path $root "installer_output\TigerCapture-Portable-$Version.zip"
+    $packageArgs = @(
+        (Join-Path $root "tools\build_portable_update_package.py"),
+        "--dist-dir", (Join-Path $root "dist\TigerCapture"),
+        "--version", $Version,
+        "--output", $portableZip
+    )
+    if ($UpdateArtifactUrl) {
+        $packageArgs += @("--artifact-url", $UpdateArtifactUrl)
+    }
+    if ($UpdateManifestOutput) {
+        $packageArgs += @("--manifest-output", $UpdateManifestOutput)
+    }
+    if ($UpdateReleaseNotesUrl) {
+        $packageArgs += @("--release-notes-url", $UpdateReleaseNotesUrl)
+    }
+    Write-Host "[update] building portable package..." -ForegroundColor Cyan
+    & $python @packageArgs
+    if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+    Write-Host "[update] OK: $portableZip" -ForegroundColor Green
+    if ($UpdateManifestOutput) {
+        Write-Host "[update] OK: $UpdateManifestOutput" -ForegroundColor Green
+    }
 }
 
 Write-Host "Done." -ForegroundColor Green

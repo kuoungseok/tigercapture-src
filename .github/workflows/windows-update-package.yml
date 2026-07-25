@@ -1,0 +1,98 @@
+name: Windows update package
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release version, for example 1.4.3"
+        required: true
+        type: string
+      publish_release:
+        description: "Attach the portable update zip and latest.json to a GitHub Release"
+        required: false
+        type: boolean
+        default: false
+      release_notes_url:
+        description: "Optional release notes URL stored in latest.json"
+        required: false
+        type: string
+        default: ""
+
+concurrency:
+  group: windows-update-package-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 60
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.13
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Install dependencies
+        shell: pwsh
+        run: |
+          python -m venv .venv
+          .\.venv\Scripts\python.exe -m pip install --upgrade pip
+          .\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-build.txt
+
+      - name: Update-system unit tests
+        shell: pwsh
+        run: .\.venv\Scripts\python.exe -m pytest tests\test_update_system.py -q
+
+      - name: Build portable update package
+        shell: pwsh
+        env:
+          VERSION: ${{ inputs.version }}
+          RELEASE_NOTES_URL: ${{ inputs.release_notes_url }}
+        run: |
+          $artifactUrl = "https://github.com/${{ github.repository }}/releases/download/v$env:VERSION/TigerCapture-Portable-$env:VERSION.zip"
+          .\build.ps1 `
+            -Clean `
+            -Version $env:VERSION `
+            -PortableUpdate `
+            -UpdateArtifactUrl $artifactUrl `
+            -UpdateManifestOutput installer_output\latest.json `
+            -UpdateReleaseNotesUrl $env:RELEASE_NOTES_URL
+          .\.venv\Scripts\python.exe tools\verify_update_package.py `
+            --manifest installer_output\latest.json `
+            --artifact "installer_output\TigerCapture-Portable-$env:VERSION.zip" `
+            --current-version 0.0.0 `
+            --kind portable_zip
+
+      - name: Upload update artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TigerCapture-update-${{ inputs.version }}
+          path: |
+            installer_output/TigerCapture-Portable-${{ inputs.version }}.zip
+            installer_output/latest.json
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Publish GitHub Release assets
+        if: ${{ inputs.publish_release }}
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          $tag = "v$env:VERSION"
+          $zip = "installer_output\TigerCapture-Portable-$env:VERSION.zip"
+          $manifest = "installer_output\latest.json"
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -eq 0) {
+            gh release upload $tag $zip $manifest --clobber
+          } else {
+            gh release create $tag $zip $manifest --title "TigerCapture $env:VERSION" --notes "TigerCapture update package."
+          }

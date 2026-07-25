@@ -1,6 +1,6 @@
 # TigerCapture Update System
 
-Last updated: 2026-07-06
+Last updated: 2026-07-25
 
 TigerCapture now has the code structure needed for safe app updates. The app
 process checks and stages an update; a separate updater process applies it after
@@ -34,6 +34,17 @@ the app exits.
   verify SHA-256, write apply plan, and return the updater command.
 - `tools/tigercapture_updater.py`
   Applies a staged `portable_zip` or silent installer plan after the app exits.
+- `TigerCapture.spec`
+  Packages `TigerCaptureUpdater.exe` next to `TigerCapture.exe` and
+  `TigerStudio.exe` so a running app can hand off file replacement to a
+  separate process.
+- `tools/build_portable_update_package.py`
+  Zips `dist/TigerCapture` into a root `TigerCapture/` portable update package
+  and can emit a matching `latest.json` manifest.
+- `.github/workflows/windows-update-package.yml`
+  Manual GitHub Actions workflow that builds the Windows portable update zip,
+  writes `latest.json`, verifies SHA-256, and optionally attaches both files to
+  a GitHub Release.
 
 ## Manifest Shape
 
@@ -80,9 +91,31 @@ Verify before publishing:
   --current-version 1.4.2
 ```
 
+Build a portable update package and manifest from a local PyInstaller build:
+
+```powershell
+.\build.ps1 -Clean -Version 1.4.3 -PortableUpdate `
+  -UpdateArtifactUrl https://github.com/kuoungseok/tigercapture/releases/download/v1.4.3/TigerCapture-Portable-1.4.3.zip `
+  -UpdateManifestOutput installer_output\latest.json `
+  -UpdateReleaseNotesUrl https://github.com/kuoungseok/tigercapture/releases/tag/v1.4.3
+```
+
+The packaged app defaults to:
+
+```text
+https://github.com/kuoungseok/tigercapture/releases/latest/download/latest.json
+```
+
+Override it for staging or private QA with:
+
+```powershell
+$env:TIGERCAPTURE_UPDATE_MANIFEST_URL="file:///D:/path/to/latest.json"
+```
+
 ## Apply Flow
 
-1. App calls `app.update.workflow.prepare_update_from_manifest(...)`.
+1. App calls `app.update.workflow.prepare_update_from_default_manifest(...)`
+   or `prepare_update_from_manifest(...)` with an explicit manifest URL.
 2. The workflow checks `latest.json`, downloads the selected artifact, verifies
    SHA-256, writes an apply plan, and returns the updater command.
 3. App launches the updater command and exits.
@@ -90,9 +123,20 @@ Verify before publishing:
    install folder for portable zips, applies files or runs the silent installer,
    then restarts the app.
 
+## GitHub Release Flow
+
+1. Run **Windows update package** from GitHub Actions.
+2. Enter the version, for example `1.4.3`.
+3. Leave `publish_release=false` for a dry artifact build, or set it to `true`
+   to upload `TigerCapture-Portable-1.4.3.zip` and `latest.json` to release tag
+   `v1.4.3`.
+4. The app reads GitHub's `latest` release manifest and stages the matching
+   `portable_zip`.
+
 ## Current Limitations
 
-- The foundation is implemented, but the editor UI button/menu is not wired yet.
+- The foundation and packaging path are implemented, but the editor UI
+  button/menu is not wired yet.
 - SHA-256 is enforced; detached signature verification is reserved in the
   manifest contract and should be required before public auto-update claims.
 - Differential patching is intentionally out of scope. Use full installer or
