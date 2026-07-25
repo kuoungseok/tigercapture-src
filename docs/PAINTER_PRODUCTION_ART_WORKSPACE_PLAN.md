@@ -506,6 +506,12 @@ Rules:
 - Paint mode uses a retained 2D snapshot cache for the current 3D guide; edits
   in 3D Place invalidate it.
 - It must be reachable from optional panel/menu/action surfaces.
+- 3D Place uses one canvas-side `PLACE ACTORS` palette. Do not duplicate Shapes
+  or scene controls in the right Layers/Channels/Paths inspector.
+- The compact top `Scene` menu owns Grid, Floor, Lit, Shadows, Fog, Depth,
+  Snap, camera presets, selected-object commands, and Bake.
+- Maximizing, restoring, or freely resizing the Painter window must preserve
+  3D Place mode, its transform mode, actor palette, and rendered overlay.
 - 3D should help composition and perspective, not dominate the drawing UI.
 - Keep the interaction closer to a standard 3D transform gizmo than to a
   modeling package: move, rotate, scale, camera orbit/pan/zoom, and FOV only.

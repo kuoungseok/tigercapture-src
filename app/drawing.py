@@ -5969,6 +5969,7 @@ class PaintDialog(QDialog):
         self._painter_3d_blockout_syncing = False
         self._painter_3d_blockout_drag: dict | None = None
         self._canvas_workspace_mode = "paint"
+        self._canvas_workspace_user_generation = 0
         self._blockout_transform_mode = "select"
         self._painter_3d_blockout_controls: dict[str, QSpinBox] = {}
         self._painter_3d_blockout_renderer_status: dict = {
@@ -7154,6 +7155,11 @@ class PaintDialog(QDialog):
             )
             transform_bar.addWidget(button)
             self._blockout_transform_buttons[mode] = button
+        self._blockout_scene_menu_btn = QPushButton("Scene")
+        self._blockout_scene_menu_btn.setObjectName("PaintBlockoutModeButton")
+        self._blockout_scene_menu_btn.setToolTip("3D scene display, camera, and object commands")
+        self._blockout_scene_menu_btn.clicked.connect(self._show_3d_blockout_scene_menu)
+        transform_bar.addWidget(self._blockout_scene_menu_btn)
         canvas_bar.addWidget(self._blockout_transform_host)
         canvas_bar.addStretch(1)
         canvas_bar.addWidget(canvas_title)
@@ -9566,11 +9572,79 @@ class PaintDialog(QDialog):
     def _focus_3d_blockout_panel(self) -> None:
         self._set_canvas_workspace_mode("3d_place", focus_panel=False)
         panel = getattr(self, "_paint_3d_blockout_panel", None)
-        scroll = getattr(self, "_paint_inspector_controls_scroll", None)
-        if panel is not None and scroll is not None:
-            panel.show()
-            scroll.ensureWidgetVisible(panel, 0, 12)
+        if panel is not None:
+            panel.hide()
         self._refresh_3d_blockout_panel()
+
+    def _build_3d_blockout_scene_menu(self) -> QMenu:
+        scene = self._current_3d_blockout_scene()
+        payload = scene.to_dict()
+        menu = QMenu(self)
+        menu.setObjectName("PaintBlockoutSceneMenu")
+
+        toggle_specs = (
+            ("Grid", "show_grid", bool(payload.get("show_grid", True))),
+            ("Floor", "show_floor", bool(payload.get("show_floor", True))),
+            ("Lit", "material_lit", bool(payload.get("material_lit", True))),
+            ("Shadows", "show_shadows", bool(payload.get("show_shadows", True))),
+            ("Fog", "show_fog", bool(payload.get("show_fog", False))),
+            ("Depth", "show_depth", bool(payload.get("show_depth", False))),
+        )
+        for label, key, checked in toggle_specs:
+            action = menu.addAction(label)
+            action.setCheckable(True)
+            action.setChecked(checked)
+            action.toggled.connect(
+                lambda enabled=False, flag=key: self._set_3d_blockout_scene_flag(
+                    flag,
+                    bool(enabled),
+                )
+            )
+        snap_action = menu.addAction("Snap to Grid")
+        snap_action.setCheckable(True)
+        snap_action.setChecked(bool(payload.get("snap_to_grid", False)))
+        snap_action.toggled.connect(
+            lambda enabled=False: self._set_3d_blockout_snap(bool(enabled))
+        )
+
+        camera_menu = menu.addMenu("Camera")
+        for label, preset in (
+            ("Perspective", "perspective"),
+            ("Front", "front"),
+            ("Side", "side"),
+            ("Top", "top"),
+        ):
+            action = camera_menu.addAction(label)
+            action.triggered.connect(
+                lambda _checked=False, value=preset: self._apply_3d_blockout_camera_preset(
+                    value
+                )
+            )
+
+        menu.addSeparator()
+        duplicate_action = menu.addAction("Duplicate Selected")
+        ground_action = menu.addAction("Place Selected on Ground")
+        delete_action = menu.addAction("Delete Selected")
+        bake_action = menu.addAction("Bake 3D Guide to Paint Layer")
+        has_selection = bool(
+            str(getattr(self, "_painter_3d_blockout_selected_id", "") or "")
+        )
+        for action in (duplicate_action, ground_action, delete_action):
+            action.setEnabled(has_selection)
+        duplicate_action.triggered.connect(self._duplicate_selected_3d_blockout_primitive)
+        ground_action.triggered.connect(self._align_selected_3d_blockout_to_ground)
+        delete_action.triggered.connect(self._delete_selected_3d_blockout_primitive)
+        bake_action.setEnabled(int(payload.get("primitive_count", 0) or 0) > 0)
+        bake_action.triggered.connect(self._bake_3d_blockout_to_layer)
+        return menu
+
+    def _show_3d_blockout_scene_menu(self) -> None:
+        button = getattr(self, "_blockout_scene_menu_btn", None)
+        if button is None:
+            return
+        menu = self._build_3d_blockout_scene_menu()
+        self._blockout_scene_menu = menu
+        menu.popup(button.mapToGlobal(button.rect().bottomLeft()))
 
     def _set_canvas_workspace_mode(
         self,
@@ -9585,6 +9659,9 @@ class PaintDialog(QDialog):
             "placement",
             "blockout",
         } else "paint"
+        self._canvas_workspace_user_generation = int(
+            getattr(self, "_canvas_workspace_user_generation", 0)
+        ) + 1
         self._canvas_workspace_mode = selected
         if selected == "3d_place":
             self._set_tool("3d_blockout")
@@ -9611,6 +9688,9 @@ class PaintDialog(QDialog):
         host = getattr(self, "_blockout_transform_host", None)
         if host is not None:
             host.setVisible(blockout)
+        panel = getattr(self, "_paint_3d_blockout_panel", None)
+        if panel is not None:
+            panel.hide()
         palette = self._ensure_canvas_3d_shape_palette()
         if palette is not None:
             palette.setVisible(blockout)
@@ -15696,9 +15776,44 @@ class PaintDialog(QDialog):
     # ---------- layout sync ----------
 
     def resizeEvent(self, event) -> None:
+        preserved_workspace = str(
+            getattr(self, "_canvas_workspace_mode", "paint") or "paint"
+        )
+        workspace_generation = int(
+            getattr(self, "_canvas_workspace_user_generation", 0)
+        )
         super().resizeEvent(event)
         self._sync_color_panel_layout()
         self._update_canvas_geometry()
+        if preserved_workspace == "3d_place":
+            self._restore_3d_workspace_after_resize(
+                preserved_workspace,
+                workspace_generation,
+            )
+            QTimer.singleShot(
+                80,
+                lambda mode=preserved_workspace, generation=workspace_generation: (
+                    self._restore_3d_workspace_after_resize(mode, generation)
+                ),
+            )
+
+    def _restore_3d_workspace_after_resize(
+        self,
+        expected_mode: str,
+        expected_generation: int,
+    ) -> None:
+        if str(expected_mode or "") != "3d_place":
+            return
+        if int(getattr(self, "_canvas_workspace_user_generation", 0)) != int(
+            expected_generation
+        ):
+            return
+        self._canvas_workspace_mode = "3d_place"
+        self._active_ui_tool = "3d_blockout"
+        if hasattr(self, "canvas"):
+            self.canvas.set_tool("off")
+        self._sync_canvas_workspace_mode_controls()
+        self._refresh_3d_blockout_overlay()
 
     def moveEvent(self, event) -> None:
         super().moveEvent(event)

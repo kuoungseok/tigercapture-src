@@ -252,6 +252,42 @@ def test_painter_3d_blockout_panel_updates_scene_and_overlay() -> None:
     dialog.show()
     app.processEvents()
 
+    dialog._set_canvas_workspace_mode("3d_place")
+    app.processEvents()
+    assert dialog._canvas_workspace_mode == "3d_place"
+    assert dialog._paint_3d_blockout_panel.isHidden()
+    assert dialog._blockout_canvas_shape_palette.isVisible()
+    assert dialog._blockout_scene_menu_btn.isVisible()
+    scene_menu = dialog._build_3d_blockout_scene_menu()
+    assert [action.text() for action in scene_menu.actions()] == [
+        "Grid",
+        "Floor",
+        "Lit",
+        "Shadows",
+        "Fog",
+        "Depth",
+        "Snap to Grid",
+        "Camera",
+        "",
+        "Duplicate Selected",
+        "Place Selected on Ground",
+        "Delete Selected",
+        "Bake 3D Guide to Paint Layer",
+    ]
+
+    dialog.resize(980, 680)
+    app.processEvents()
+    assert dialog._canvas_workspace_mode == "3d_place"
+    assert dialog._canvas_mode_3d_btn.isChecked()
+    assert dialog._blockout_canvas_shape_palette.isVisible()
+    dialog.showMaximized()
+    app.processEvents()
+    dialog.showNormal()
+    app.processEvents()
+    assert dialog._canvas_workspace_mode == "3d_place"
+    assert dialog._canvas_mode_3d_btn.isChecked()
+    assert dialog._blockout_canvas_shape_palette.isVisible()
+
     dialog._add_3d_blockout_primitive("box")
     app.processEvents()
     scene = dialog._current_3d_blockout_scene().to_dict()
