@@ -1960,6 +1960,22 @@ class DrawingCanvas(QWidget):
         self._view_zoom_percent = max(25, min(PAINT_MAX_ZOOM_PERCENT, int(percent or 100)))
         self.update()
 
+    def stable_render_size(self, width: int | None = None, height: int | None = None) -> QSize:
+        """Return the unzoomed cache size used for retained stroke/material rendering."""
+        display_width = max(1, int(self.width() if width is None else width))
+        display_height = max(1, int(self.height() if height is None else height))
+        zoom = max(
+            0.25,
+            min(
+                PAINT_MAX_ZOOM_PERCENT / 100.0,
+                float(getattr(self, "_view_zoom_percent", 100) or 100) / 100.0,
+            ),
+        )
+        return QSize(
+            max(1, int(round(display_width / zoom))),
+            max(1, int(round(display_height / zoom))),
+        )
+
     def pixel_grid_state(self) -> dict[str, int | float | bool]:
         metrics = self._pixel_grid_metrics(max(1, self.width()), max(1, self.height()))
         return {
@@ -2107,28 +2123,43 @@ class DrawingCanvas(QWidget):
         if self._layer_order:
             layer_rank = {layer_id: index for index, layer_id in enumerate(self._layer_order)}
             strokes.sort(key=lambda stroke: layer_rank.get(self._stroke_layer_id(stroke), len(layer_rank)))
-        if not self._paint_strokes_with_gpu_cache(painter, strokes, w, h, t_ms):
-            for stroke in strokes:
-                if not stroke.is_active(t_ms):
-                    continue
-                layer_id = self._stroke_layer_id(stroke)
-                if not self._layer_visibility.get(layer_id, True):
-                    continue
-                mask = self._layer_masks.get(layer_id, [])
-                if len(mask) >= 3:
-                    painter.save()
-                    self._clip_to_layer_mask(painter, mask, w, h)
-                try:
-                    self._paint_stroke(
-                        painter,
-                        stroke,
-                        w,
-                        h,
-                        opacity_scale=self._layer_opacity.get(layer_id, 100) / 100.0,
-                    )
-                finally:
+        stable_size = self.stable_render_size(w, h)
+        render_w = max(1, stable_size.width())
+        render_h = max(1, stable_size.height())
+        painter.save()
+        try:
+            if render_w != w or render_h != h:
+                painter.scale(float(w) / render_w, float(h) / render_h)
+            if not self._paint_strokes_with_gpu_cache(
+                painter,
+                strokes,
+                render_w,
+                render_h,
+                t_ms,
+            ):
+                for stroke in strokes:
+                    if not stroke.is_active(t_ms):
+                        continue
+                    layer_id = self._stroke_layer_id(stroke)
+                    if not self._layer_visibility.get(layer_id, True):
+                        continue
+                    mask = self._layer_masks.get(layer_id, [])
                     if len(mask) >= 3:
-                        painter.restore()
+                        painter.save()
+                        self._clip_to_layer_mask(painter, mask, render_w, render_h)
+                    try:
+                        self._paint_stroke(
+                            painter,
+                            stroke,
+                            render_w,
+                            render_h,
+                            opacity_scale=self._layer_opacity.get(layer_id, 100) / 100.0,
+                        )
+                    finally:
+                        if len(mask) >= 3:
+                            painter.restore()
+        finally:
+            painter.restore()
 
         if self._current_points:
             stroke = Stroke(
@@ -8356,6 +8387,9 @@ class PaintDialog(QDialog):
         canvas_rect = canvas.geometry()
         cw = max(1, canvas_rect.width())
         ch = max(1, canvas_rect.height())
+        stable_size = canvas.stable_render_size(cw, ch)
+        stable_scale_x = float(stable_size.width()) / cw
+        stable_scale_y = float(stable_size.height()) / ch
         for row in rows:
             reference_id = str(row.get("id") or "")
             if not reference_id:
@@ -8383,11 +8417,12 @@ class PaintDialog(QDialog):
             w = max(16, min(w, canvas_rect.right() - x + 1))
             h = max(16, min(h, canvas_rect.bottom() - y + 1))
             label.setGeometry(x, y, w, h)
+            label.setScaledContents(True)
             label.setPixmap(
                 self._reference_pixmap_with_opacity(
                     source,
-                    w,
-                    h,
+                    max(8, int(round(w * stable_scale_x))),
+                    max(8, int(round(h * stable_scale_y))),
                     float(row.get("opacity", 0.58) or 0.58),
                     float(row.get("rotation_deg", 0.0) or 0.0),
                 )
@@ -9147,6 +9182,8 @@ class PaintDialog(QDialog):
             label.hide()
             return
         label.setGeometry(canvas.geometry())
+        label.setScaledContents(True)
+        render_size = canvas.stable_render_size(size.width(), size.height())
         content_opacity = (
             max(0.0, min(1.0, blockout_layer.opacity / 100.0))
             if blockout_layer is not None
@@ -9156,14 +9193,14 @@ class PaintDialog(QDialog):
         if (
             not placement_mode
             and isinstance(cached, QPixmap)
-            and cached.size() == size
+            and cached.size() == render_size
         ):
             pixmap = cached
         else:
             pixmap = self._render_3d_blockout_pixmap(
                 scene,
-                size.width(),
-                size.height(),
+                render_size.width(),
+                render_size.height(),
                 include_gizmo=placement_mode,
                 viewport_background=placement_mode,
                 content_opacity=content_opacity,
@@ -11258,11 +11295,14 @@ class PaintDialog(QDialog):
         strokes = self.canvas.embedded_strokes()
         if not has_material_strokes(strokes, self._paint_layers):
             return
+        stable_size = self.canvas.stable_render_size(width, height)
+        render_width = max(1, stable_size.width())
+        render_height = max(1, stable_size.height())
         signature = material_paint_signature(
             strokes,
             self._paint_layers,
-            width=width,
-            height=height,
+            width=render_width,
+            height=render_height,
             time_ms=self._time_ms,
             light_azimuth_deg=self._material_preview_light_azimuth_deg,
             light_elevation_deg=self._material_preview_light_elevation_deg,
@@ -11272,8 +11312,8 @@ class PaintDialog(QDialog):
             channels = rasterize_material_channels(
                 strokes,
                 self._paint_layers,
-                width=width,
-                height=height,
+                width=render_width,
+                height=render_height,
                 time_ms=self._time_ms,
                 light_azimuth_deg=self._material_preview_light_azimuth_deg,
                 light_elevation_deg=self._material_preview_light_elevation_deg,
@@ -11295,7 +11335,7 @@ class PaintDialog(QDialog):
             self._material_preview_cache = cached
         image = cached.get("image")
         if isinstance(image, QImage) and not image.isNull():
-            painter.drawImage(0, 0, image)
+            painter.drawImage(QRectF(0, 0, width, height), image)
 
     def _build_brush_button_menu(self) -> QMenu:
         menu = QMenu(self)
@@ -15708,25 +15748,24 @@ class PaintDialog(QDialog):
                 if int(round(zoom * 100.0)) >= 400
                 else Qt.TransformationMode.SmoothTransformation
             )
-            bg_scaled = display_bg.scaled(
+            bg_base = display_bg.scaled(
                 hw, hh,
                 Qt.AspectRatioMode.KeepAspectRatio,
                 transform_mode,
             )
-            if abs(zoom - 1.0) > 0.001:
-                bg_scaled = bg_scaled.scaled(
-                    max(1, int(bg_scaled.width() * zoom)),
-                    max(1, int(bg_scaled.height() * zoom)),
-                    Qt.AspectRatioMode.KeepAspectRatio,
-                    transform_mode,
-                )
+            base_width = max(1, bg_base.width())
+            base_height = max(1, bg_base.height())
         else:
-            bg_scaled = QPixmap()
+            zoom = float(getattr(self, "_canvas_zoom", 1.0) or 1.0)
+            bg_base = QPixmap()
+            base_width = max(1, hw)
+            base_height = max(1, hh)
 
-        self._bg_label.setPixmap(bg_scaled)
+        self._bg_label.setPixmap(bg_base)
+        self._bg_label.setScaledContents(True)
         # Position the bg_label centered in the host
-        bw = bg_scaled.width() if not bg_scaled.isNull() else hw
-        bh = bg_scaled.height() if not bg_scaled.isNull() else hh
+        bw = max(1, int(round(base_width * zoom)))
+        bh = max(1, int(round(base_height * zoom)))
         pan = self._clamped_canvas_pan(
             QPoint(getattr(self, "_canvas_pan", QPoint(0, 0))),
             canvas_size=QSize(bw, bh),

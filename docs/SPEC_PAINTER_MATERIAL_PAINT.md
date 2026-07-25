@@ -118,6 +118,10 @@ All mutations use the existing Painter undo stack.
 - Native material maps are generated only when at least one visible Material
   Paint layer contains material-enabled strokes.
 - Canvas material previews are cached by stroke/layer/settings/light signature.
+- View zoom does not change retained stroke, Material Height/Normal, reference,
+  3D Blockout, or background cache resolution. Those surfaces stay at the
+  unzoomed canvas resolution and are scaled only for display; selection,
+  guides, pixel grid, and the live stroke remain viewport-native overlays.
 - The feature must preserve QPainter and remote-session fallback behavior.
 
 ## Follow-up Work

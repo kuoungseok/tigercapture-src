@@ -130,6 +130,22 @@ def test_material_layer_ui_and_stroke_contract(tmp_path: Path) -> None:
     assert saved_stroke.material_roughness == 0.37
     assert dialog._material_options_button.isVisible()
 
+    dialog.canvas.repaint()
+    initial_preview = dict(dialog._material_preview_cache or {})
+    initial_signature = initial_preview.get("signature")
+    initial_image_key = initial_preview.get("image").cacheKey()
+    initial_render_size = dialog.canvas.stable_render_size()
+    initial_background_size = dialog._bg_label.pixmap().size()
+    dialog._set_zoom_percent(200)
+    app.processEvents()
+    dialog.canvas.repaint()
+    zoomed_preview = dict(dialog._material_preview_cache or {})
+    assert dialog.canvas.stable_render_size() == initial_render_size
+    assert zoomed_preview.get("signature") == initial_signature
+    assert zoomed_preview.get("image").cacheKey() == initial_image_key
+    assert dialog._bg_label.pixmap().size() == initial_background_size
+    assert dialog._bg_label.width() > dialog._bg_label.pixmap().width()
+
     output = tmp_path / "material_preview.png"
     payload = dialog.preview_pbr_map_to_path(output, allow_cpu=True)
     assert output.exists()
