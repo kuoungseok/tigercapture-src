@@ -136,6 +136,23 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="the visible Painter canvas workspace would change",
     )
     registry.register_adapter_action(
+        "paint.ui.view.fit",
+        "Fit all UI artboards, the active artboard, or the current selection in the Painter canvas.",
+        "paint",
+        "paint_ui_view_fit",
+        params_schema=schema_object(
+            {
+                "mode": {
+                    "type": "string",
+                    "enum": ["all", "artboard", "selection"],
+                }
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter UI canvas camera would be fitted",
+    )
+    registry.register_adapter_action(
         "paint.ui.artboard.add",
         "Add a general UI artboard to the active Painter document.",
         "paint",

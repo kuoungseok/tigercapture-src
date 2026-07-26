@@ -33,6 +33,7 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     assert {
         "paint.ui.document.inspect",
         "paint.ui.workspace.set",
+        "paint.ui.view.fit",
         "paint.ui.artboard.add",
         "paint.ui.artboard.activate",
         "paint.ui.artboard.update",
@@ -76,6 +77,8 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     assert artboard_added["ok"]
     desktop_id = artboard_added["result"]["ui_design"]["active_artboard_id"]
     assert desktop_id != "artboard-1"
+    artboards = artboard_added["result"]["ui_design"]["document"]["artboards"]
+    assert artboards[1]["x"] > artboards[0]["x"] + artboards[0]["width"]
     activated = registry.execute(
         "paint.ui.artboard.activate",
         {"artboard_id": "artboard-1"},
@@ -134,6 +137,13 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         arranged["result"]["ui_design"]["document"]["objects"][0]["x"]
         == 90.0
     )
+    fit_selection = registry.execute(
+        "paint.ui.view.fit",
+        {"mode": "selection"},
+    ).to_dict()
+    assert fit_selection["ok"]
+    assert fit_selection["result"]["ui_view"]["mode"] == "selection"
+    assert fit_selection["result"]["ui_view"]["zoom_percent"] > 0
     component_result = registry.execute(
         "paint.ui.component.add",
         {"name": "Primary Button", "root_object_id": object_id},
@@ -701,5 +711,73 @@ def test_painter_ui_overlay_preserves_active_artboard_aspect_ratio() -> None:
     assert desktop_scale > 0.0
     assert desktop_viewport.width() > phone_viewport.width()
 
+    overlay.deleteLater()
+    app.processEvents()
+
+
+def test_painter_ui_overlay_multi_artboard_fit_pan_and_activation() -> None:
+    app = _app()
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from app.painter_ui_document import (
+        add_ui_artboard,
+        create_ui_document,
+        set_active_ui_artboard,
+    )
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    document = create_ui_document(390, 844, name="Phone")
+    document, desktop = add_ui_artboard(
+        document,
+        name="Desktop",
+        width=1440,
+        height=900,
+    )
+    document = set_active_ui_artboard(document, "artboard-1")
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(1000, 700)
+    overlay.set_document(document)
+    overlay.show()
+    app.processEvents()
+
+    phone_viewport, all_scale = overlay._artboard_viewport(document["artboards"][0])
+    desktop_viewport, desktop_scale = overlay._artboard_viewport(desktop)
+    assert all_scale == desktop_scale
+    assert phone_viewport.right() < desktop_viewport.left()
+
+    overlay.fit_artboard(desktop["id"])
+    assert overlay.view_state()["scale"] > all_scale
+    before = overlay.view_state()
+    QTest.mousePress(
+        overlay,
+        Qt.MouseButton.MiddleButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(500, 350),
+    )
+    QTest.mouseMove(overlay, QPoint(540, 380))
+    QTest.mouseRelease(
+        overlay,
+        Qt.MouseButton.MiddleButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(540, 380),
+    )
+    after = overlay.view_state()
+    assert after["offset_x"] > before["offset_x"]
+    assert after["offset_y"] > before["offset_y"]
+
+    activated: list[str] = []
+    overlay.artboard_activation_requested.connect(activated.append)
+    overlay.fit_all()
+    desktop_viewport, _scale = overlay._artboard_viewport(desktop)
+    QTest.mouseClick(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        desktop_viewport.center().toPoint(),
+    )
+    assert activated == [desktop["id"]]
+
+    overlay.close()
     overlay.deleteLater()
     app.processEvents()

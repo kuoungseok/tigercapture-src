@@ -649,6 +649,10 @@ def add_ui_artboard(
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     document = normalize_ui_document(value)
     artboard_id = _next_id("artboard", document["artboards"])
+    right_edge = max(
+        float(item["x"]) + float(item["width"])
+        for item in document["artboards"]
+    )
     row = _normalize_artboard(
         {
             "id": artboard_id,
@@ -656,6 +660,8 @@ def add_ui_artboard(
             "width": width,
             "height": height,
             "breakpoint": breakpoint,
+            "x": right_edge + 80.0,
+            "y": min(float(item["y"]) for item in document["artboards"]),
         },
         len(document["artboards"]),
     )

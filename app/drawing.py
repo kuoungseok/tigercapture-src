@@ -7611,6 +7611,42 @@ class PaintDialog(QDialog):
         self._ui_design_snap_btn.setFixedSize(28, 24)
         self._ui_design_snap_btn.toggled.connect(self._set_painter_ui_snap)
         ui_tool_bar.addWidget(self._ui_design_snap_btn)
+        self._ui_design_view_buttons: dict[str, QPushButton] = {}
+        for label, mode, icon_name in (
+            ("Fit all artboards", "all", "zoom-fit"),
+            ("Fit active artboard", "artboard", "fit"),
+            ("Fit selection", "selection", "ui-frame"),
+        ):
+            button = QPushButton("")
+            button.setObjectName("PaintBlockoutModeButton")
+            button.setToolTip(label)
+            button.setAccessibleName(label)
+            button.setIcon(app_icon(icon_name, size=13, color="#E4E8EE"))
+            button.setIconSize(icon_size(13))
+            button.setFixedSize(28, 24)
+            button.clicked.connect(
+                lambda _checked=False, value=mode: self._fit_painter_ui_view(value)
+            )
+            ui_tool_bar.addWidget(button)
+            self._ui_design_view_buttons[mode] = button
+        self._ui_design_view_buttons: dict[str, QPushButton] = {}
+        for label, mode, icon_name in (
+            ("Fit all artboards", "all", "zoom-fit"),
+            ("Fit active artboard", "artboard", "fit"),
+            ("Fit selection", "selection", "ui-frame"),
+        ):
+            button = QPushButton("")
+            button.setObjectName("PaintBlockoutModeButton")
+            button.setToolTip(label)
+            button.setAccessibleName(label)
+            button.setIcon(app_icon(icon_name, size=13, color="#E4E8EE"))
+            button.setIconSize(icon_size(13))
+            button.setFixedSize(28, 24)
+            button.clicked.connect(
+                lambda _checked=False, value=mode: self._fit_painter_ui_view(value)
+            )
+            ui_tool_bar.addWidget(button)
+            self._ui_design_view_buttons[mode] = button
         self._ui_design_tool_host.hide()
         canvas_bar.addWidget(self._ui_design_tool_host)
         self._blockout_transform_buttons: dict[str, QPushButton] = {}
@@ -7678,6 +7714,12 @@ class PaintDialog(QDialog):
         )
         self._painter_ui_overlay.key_command.connect(
             self._handle_painter_ui_key_command
+        )
+        self._painter_ui_overlay.artboard_activation_requested.connect(
+            self._set_painter_ui_artboard
+        )
+        self._painter_ui_overlay.artboard_activation_requested.connect(
+            self._set_painter_ui_artboard
         )
         self._painter_ui_overlay.hide()
 
@@ -10517,6 +10559,56 @@ class PaintDialog(QDialog):
                 if enabled
                 else "UI Design: Free transform"
             )
+
+    def _fit_painter_ui_view(self, mode: str = "all") -> dict:
+        overlay = getattr(self, "_painter_ui_overlay", None)
+        if overlay is None:
+            return {}
+        requested = str(mode or "all").strip().casefold()
+        if requested == "selection":
+            if not overlay.fit_selection():
+                overlay.fit_artboard()
+                requested = "artboard"
+        elif requested == "artboard":
+            overlay.fit_artboard()
+        else:
+            requested = "all"
+            overlay.fit_all()
+        overlay.setFocus(Qt.FocusReason.OtherFocusReason)
+        if hasattr(self, "_tool_status_label"):
+            self._tool_status_label.setText(
+                {
+                    "all": "UI Design: All artboards",
+                    "artboard": "UI Design: Active artboard",
+                    "selection": "UI Design: Selection",
+                }[requested]
+            )
+        return {"mode": requested, **overlay.view_state()}
+
+    def _fit_painter_ui_view(self, mode: str = "all") -> dict:
+        overlay = getattr(self, "_painter_ui_overlay", None)
+        if overlay is None:
+            return {}
+        requested = str(mode or "all").strip().casefold()
+        if requested == "selection":
+            if not overlay.fit_selection():
+                overlay.fit_artboard()
+                requested = "artboard"
+        elif requested == "artboard":
+            overlay.fit_artboard()
+        else:
+            requested = "all"
+            overlay.fit_all()
+        overlay.setFocus(Qt.FocusReason.OtherFocusReason)
+        if hasattr(self, "_tool_status_label"):
+            self._tool_status_label.setText(
+                {
+                    "all": "UI Design: All artboards",
+                    "artboard": "UI Design: Active artboard",
+                    "selection": "UI Design: Selection",
+                }[requested]
+            )
+        return {"mode": requested, **overlay.view_state()}
 
     @staticmethod
     def _painter_ui_object_preset(kind: str) -> dict:

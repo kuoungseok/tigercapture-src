@@ -32,6 +32,7 @@ class PainterUIDesignOverlay(QWidget):
     objects_changes_requested = Signal(object)
     object_create_requested = Signal(str, float, float, float, float)
     key_command = Signal(str, bool)
+    artboard_activation_requested = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -49,6 +50,10 @@ class PainterUIDesignOverlay(QWidget):
         self._rotation_start_angle = 0.0
         self._snap_enabled = False
         self._snap_size = 8.0
+        self._view_scale: float | None = None
+        self._view_offset = QPointF()
+        self._pan_start = QPointF()
+        self._pan_origin = QPointF()
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -84,25 +89,99 @@ class PainterUIDesignOverlay(QWidget):
             row for row in self._document["artboards"] if row["id"] == active
         )
 
-    def _artboard_viewport(self) -> tuple[QRectF, float]:
-        artboard = self._active_artboard()
+    def _scene_bounds(self) -> QRectF:
+        bounds = QRectF()
+        for artboard in self._document["artboards"]:
+            rect = QRectF(
+                float(artboard["x"]),
+                float(artboard["y"]),
+                float(artboard["width"]),
+                float(artboard["height"]),
+            )
+            bounds = rect if bounds.isNull() else bounds.united(rect)
+        return bounds
+
+    def _fit_transform(self, bounds: QRectF) -> tuple[float, QPointF]:
         available_width = max(1.0, float(self.width()) - 24.0)
         available_height = max(1.0, float(self.height()) - 24.0)
         scale = min(
-            available_width / max(1.0, float(artboard["width"])),
-            available_height / max(1.0, float(artboard["height"])),
+            available_width / max(1.0, bounds.width()),
+            available_height / max(1.0, bounds.height()),
         )
-        width = float(artboard["width"]) * scale
-        height = float(artboard["height"]) * scale
-        return (
-            QRectF(
-                (float(self.width()) - width) * 0.5,
-                (float(self.height()) - height) * 0.5,
-                width,
-                height,
-            ),
-            scale,
+        offset = QPointF(
+            float(self.width()) * 0.5 - bounds.center().x() * scale,
+            float(self.height()) * 0.5 - bounds.center().y() * scale,
         )
+        return scale, offset
+
+    def _view_transform(self) -> tuple[float, QPointF]:
+        if self._view_scale is None:
+            return self._fit_transform(self._scene_bounds())
+        return self._view_scale, QPointF(self._view_offset)
+
+    def _artboard_viewport(
+        self,
+        artboard: Mapping[str, Any] | None = None,
+    ) -> tuple[QRectF, float]:
+        row = artboard or self._active_artboard()
+        scale, offset = self._view_transform()
+        return QRectF(
+            offset.x() + float(row["x"]) * scale,
+            offset.y() + float(row["y"]) * scale,
+            float(row["width"]) * scale,
+            float(row["height"]) * scale,
+        ), scale
+
+    def fit_all(self) -> None:
+        self._view_scale, self._view_offset = self._fit_transform(
+            self._scene_bounds()
+        )
+        self.update()
+
+    def fit_artboard(self, artboard_id: str = "") -> None:
+        target = str(artboard_id or self._document["active_artboard_id"])
+        artboard = next(
+            row for row in self._document["artboards"] if row["id"] == target
+        )
+        bounds = QRectF(
+            float(artboard["x"]),
+            float(artboard["y"]),
+            float(artboard["width"]),
+            float(artboard["height"]),
+        )
+        self._view_scale, self._view_offset = self._fit_transform(bounds)
+        self.update()
+
+    def fit_selection(self) -> bool:
+        selected_ids = set(self._document["selection"]["object_ids"])
+        rows = [
+            row for row in self._document["objects"] if row["id"] in selected_ids
+        ]
+        if not rows:
+            return False
+        bounds = QRectF()
+        artboards = {row["id"]: row for row in self._document["artboards"]}
+        for row in rows:
+            artboard = artboards[row["artboard_id"]]
+            rect = QRectF(
+                float(artboard["x"]) + float(row["x"]),
+                float(artboard["y"]) + float(row["y"]),
+                float(row["width"]),
+                float(row["height"]),
+            )
+            bounds = rect if bounds.isNull() else bounds.united(rect)
+        self._view_scale, self._view_offset = self._fit_transform(bounds)
+        self.update()
+        return True
+
+    def view_state(self) -> dict[str, Any]:
+        scale, offset = self._view_transform()
+        return {
+            "scale": scale,
+            "zoom_percent": round(scale * 100.0, 2),
+            "offset_x": offset.x(),
+            "offset_y": offset.y(),
+        }
 
     def _scale(self) -> tuple[float, float]:
         _viewport, scale = self._artboard_viewport()
@@ -116,7 +195,12 @@ class PainterUIDesignOverlay(QWidget):
         )
 
     def _object_rect(self, row: Mapping[str, Any]) -> QRectF:
-        viewport, scale = self._artboard_viewport()
+        artboard = next(
+            item
+            for item in self._document["artboards"]
+            if item["id"] == row["artboard_id"]
+        )
+        viewport, scale = self._artboard_viewport(artboard)
         return QRectF(
             viewport.x() + float(row["x"]) * scale,
             viewport.y() + float(row["y"]) * scale,
@@ -165,12 +249,11 @@ class PainterUIDesignOverlay(QWidget):
         )
 
     def _visible_objects(self, *, reverse: bool = False) -> list[dict[str, Any]]:
-        active = self._document["active_artboard_id"]
         return sorted(
             (
                 row
                 for row in self._document["objects"]
-                if row["artboard_id"] == active and row["visible"]
+                if row["visible"]
             ),
             key=lambda row: row["z_index"],
             reverse=reverse,
@@ -226,13 +309,29 @@ class PainterUIDesignOverlay(QWidget):
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        artboard = self._active_artboard()
-        viewport, _scale = self._artboard_viewport()
         painter.fillRect(self.rect(), QColor(18, 21, 27, 86))
-        painter.fillRect(viewport, QColor(str(artboard.get("background") or "#FFFFFF")))
-        painter.setBrush(Qt.BrushStyle.NoBrush)
-        painter.setPen(QPen(QColor("#718096"), 1.0))
-        painter.drawRect(viewport)
+        active_id = self._document["active_artboard_id"]
+        for artboard in self._document["artboards"]:
+            viewport, _scale = self._artboard_viewport(artboard)
+            painter.fillRect(
+                viewport,
+                QColor(str(artboard.get("background") or "#FFFFFF")),
+            )
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(
+                QPen(
+                    QColor("#72A7FF")
+                    if artboard["id"] == active_id
+                    else QColor("#657184"),
+                    2.0 if artboard["id"] == active_id else 1.0,
+                )
+            )
+            painter.drawRect(viewport)
+            painter.setPen(QColor("#B7C0CD"))
+            painter.drawText(
+                QPointF(viewport.left(), viewport.top() - 7.0),
+                str(artboard["name"]),
+            )
         selected = self._document["selection"]["object_id"]
         selected_ids = set(self._document["selection"]["object_ids"])
         for row in self._visible_objects():
@@ -280,6 +379,14 @@ class PainterUIDesignOverlay(QWidget):
         self.update()
 
     def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.MiddleButton:
+            self._interaction = "pan"
+            self._pan_start = QPointF(event.position())
+            _scale, offset = self._view_transform()
+            self._pan_origin = offset
+            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+            event.accept()
+            return
         if event.button() != Qt.MouseButton.LeftButton:
             event.ignore()
             return
@@ -337,6 +444,17 @@ class PainterUIDesignOverlay(QWidget):
                 selected = row["id"]
                 selected_row = row
                 break
+        if selected_row is None:
+            for artboard in reversed(self._document["artboards"]):
+                viewport, _scale = self._artboard_viewport(artboard)
+                if viewport.contains(event.position()):
+                    if artboard["id"] != self._document["active_artboard_id"]:
+                        self.artboard_activation_requested.emit(artboard["id"])
+                    break
+        if selected_row is not None:
+            target_artboard = str(selected_row["artboard_id"])
+            if target_artboard != self._document["active_artboard_id"]:
+                self.artboard_activation_requested.emit(target_artboard)
         modifiers = event.modifiers()
         if modifiers & Qt.KeyboardModifier.ControlModifier:
             self.object_selection_requested.emit(selected, "toggle")
@@ -390,6 +508,14 @@ class PainterUIDesignOverlay(QWidget):
                 self._press_position,
                 position,
             ).normalized()
+            self.update()
+            event.accept()
+            return
+        if self._interaction == "pan":
+            self._view_scale, _offset = self._view_transform()
+            self._view_offset = self._pan_origin + (
+                event.position() - self._pan_start
+            )
             self.update()
             event.accept()
             return
@@ -549,7 +675,29 @@ class PainterUIDesignOverlay(QWidget):
                         float(row["height"]),
                     )
         self._cancel_interaction()
+        if self._tool == "select":
+            self.setCursor(Qt.CursorShape.ArrowCursor)
         self._move_original_positions = {}
+        event.accept()
+
+    def wheelEvent(self, event) -> None:
+        delta = event.angleDelta().y()
+        if not delta:
+            event.ignore()
+            return
+        old_scale, old_offset = self._view_transform()
+        anchor = QPointF(event.position())
+        world = QPointF(
+            (anchor.x() - old_offset.x()) / max(0.0001, old_scale),
+            (anchor.y() - old_offset.y()) / max(0.0001, old_scale),
+        )
+        factor = 1.15 if delta > 0 else 1.0 / 1.15
+        self._view_scale = max(0.03, min(8.0, old_scale * factor))
+        self._view_offset = QPointF(
+            anchor.x() - world.x() * self._view_scale,
+            anchor.y() - world.y() * self._view_scale,
+        )
+        self.update()
         event.accept()
 
     def keyPressEvent(self, event) -> None:

@@ -12,6 +12,16 @@ P0 implementation checkpoint (2026-07-26):
 - Legacy `.tspaint` documents migrate through the shared normalization path and
   typed records survive save/open round trips.
 
+P1 implementation checkpoint (2026-07-26, navigation slice):
+
+- New artboards receive deterministic freeform document positions instead of
+  overlapping the active artboard.
+- The UI canvas renders all artboards in one document-space overview.
+- Middle-button pan and cursor-anchored wheel zoom use a persistent view camera.
+- Toolbar commands and `paint.ui.view.fit` provide all-artboards, active
+  artboard, and selection fitting.
+- Clicking another artboard or one of its objects activates that artboard.
+
 관련 구현 현황:
 
 - `docs/PLAN_PAINTER_UI_DESIGNER.md`

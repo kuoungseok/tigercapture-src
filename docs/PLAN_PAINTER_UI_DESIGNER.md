@@ -31,6 +31,10 @@ Implementation checkpoint:
 - M1 hierarchy editing now includes editable Group/Ungroup, child-preserving
   group movement, hierarchy indentation, layer forward/backward reordering,
   drag/drop nesting and root extraction, Undo, Actions, and screenshot proof.
+- M1 canvas navigation now renders freeform multi-artboard document space,
+  auto-places new artboards without overlap, supports middle-button pan and
+  cursor-anchored wheel zoom, activates clicked artboards, and exposes
+  all/artboard/selection Fit controls through both toolbar icons and Actions.
 - Freeform multi-artboard overview placement, expanded Inspect editing, and
   broader responsive screenshot QA remain before M1 completion.
   M2-M6 remain milestone work.

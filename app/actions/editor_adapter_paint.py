@@ -78,6 +78,13 @@ class PaintAdapterMixin:
         state["workspace"]["mode"] = selected
         return state
 
+    def paint_ui_view_fit(self, *, mode: str = "all") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        view = dialog._fit_painter_ui_view(str(mode or "all"))
+        state = dialog.painter_action_state()
+        state["ui_view"] = view
+        return state
+
     def paint_ui_artboard_add(
         self,
         *,
