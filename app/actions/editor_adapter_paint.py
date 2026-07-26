@@ -581,6 +581,66 @@ class PaintAdapterMixin:
         dialog._push_undo_state("Add UI component")
         return self._paint_ui_commit(dialog, "Add UI component", document)
 
+    def paint_ui_component_create(
+        self,
+        *,
+        root_object_id: str = "",
+        name: str = "",
+        description: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_components import convert_ui_object_to_component
+
+        selected_id = str(
+            root_object_id
+            or dialog._painter_ui_document["selection"]["object_id"]
+        )
+        document, _component = convert_ui_object_to_component(
+            dialog._painter_ui_document,
+            root_object_id=selected_id,
+            name=name,
+            description=description,
+        )
+        dialog._push_undo_state("Create UI component")
+        return self._paint_ui_commit(dialog, "Create UI component", document)
+
+    def paint_ui_component_instantiate(
+        self,
+        *,
+        component_id: str,
+        artboard_id: str = "",
+        x: float | None = None,
+        y: float | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_components import instantiate_ui_component
+
+        document, _result = instantiate_ui_component(
+            dialog._painter_ui_document,
+            component_id=str(component_id),
+            artboard_id=str(artboard_id or ""),
+            x=x,
+            y=y,
+        )
+        dialog._push_undo_state("Instantiate UI component")
+        return self._paint_ui_commit(dialog, "Instantiate UI component", document)
+
+    def paint_ui_component_sync(self, *, component_id: str) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_components import sync_ui_component_instances
+
+        document = sync_ui_component_instances(
+            dialog._painter_ui_document,
+            str(component_id),
+        )
+        document["revision"] += 1
+        dialog._push_undo_state("Sync UI component instances")
+        return self._paint_ui_commit(
+            dialog,
+            "Sync UI component instances",
+            document,
+        )
+
     def paint_ui_component_update(
         self,
         *,

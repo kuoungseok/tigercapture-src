@@ -13,7 +13,7 @@ Unreal target engine: `D:\UE_5.8\Engine`
 
 Implementation checkpoint:
 
-- P0 document model is at UI document version 7: components, tokens,
+- P0 document model is at UI document version 8: components, tokens,
   interactions, and Auto Layout are typed records with stable-ID CRUD,
   reference/cycle validation, explicit referenced-delete handling, Action
   coverage, migration, and `.tspaint` save/open round-trip tests.
@@ -86,6 +86,12 @@ Implementation checkpoint:
   or token IDs. UI and automation share artboard/token mutation and Undo;
   automation uses `paint.ui.theme.set/inspect` and
   `paint.ui.token.theme.set/remove`.
+- P4 foundation converts a selected object subtree into a Component Definition
+  and creates Instance subtrees with new stable IDs and stable source links.
+  Definition property/topology updates synchronize automatically, while local
+  Instance edits persist as dotted-path overrides. Inspector and
+  `paint.ui.component.create/instantiate/sync` share Undo and document services.
+  Variants, state properties, and detach/localize remain the next P4 slices.
 - Image-resource embedding/hashing and adapter-output parity remain in M2/P8.
   M3-M6 remain milestone work.
 - Product-adoption work is now explicit in M2A/M2B: editable template gallery,

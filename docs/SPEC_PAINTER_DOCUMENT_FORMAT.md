@@ -81,7 +81,7 @@ preview. The format preserves:
   read-only per-target `Native`, `Material`, `Baked`, or `Blocked` status and
   the classifier reason for Asset Export, Design Handoff, Review Prototype,
   and Unreal UMG. Delivery preflight v2 uses these same four dispositions.
-- UI document version 7 normalizes each object's `layout` record. Containers
+- UI document version 8 normalizes each object's `layout` record. Containers
   support `none`, `horizontal`, or `vertical` mode; independent L/T/R/B
   padding; non-negative gap; main-axis `start/center/end/space_between`; and
   cross-axis `start/center/end/stretch`. Child `positioning=absolute` bypasses
@@ -106,6 +106,18 @@ preview. The format preserves:
   Automation uses `paint.ui.theme.set/inspect` and
   `paint.ui.token.theme.set/remove`. A dedicated visual token library and
   binding picker remain P5 work.
+- Component Definitions and Instances remain ordinary UI object subtrees.
+  Objects persist `component_role` (`none`, `definition`, or `instance`),
+  stable `component_source_object_id`, and dotted-path `instance_overrides`.
+  Instance objects receive new stable object IDs while their source IDs retain
+  deterministic Definition correspondence.
+- Definition property edits and direct child additions/removals synchronize to
+  all Instances. Local Instance edits are recorded as overrides and reapplied
+  after Definition synchronization. Inspector uses Create/Instance commands;
+  automation uses `paint.ui.component.create`,
+  `paint.ui.component.instantiate`, and `paint.ui.component.sync`.
+- Variant/property authoring, state sets, and detaching an Instance into a
+  local component remain subsequent P4 work.
 - Every artboard normalizes a provider-neutral `layout_grid` record with
   `none`, `grid`, or `columns` mode, plus custom horizontal/vertical `guides`
   and safe-area insets. `safe_area_visible` controls the authoring overlay only.

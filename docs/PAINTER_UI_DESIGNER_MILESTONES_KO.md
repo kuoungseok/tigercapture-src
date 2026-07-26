@@ -122,6 +122,14 @@ Status: responsive Auto Layout, artboard guides, diagnostics, breakpoint/orienta
 - component definition/instance/variant
 - instance override
 
+P4 component checkpoint:
+
+- Component Definition conversion and Instance subtree creation implemented
+- Definition property and direct-child topology synchronization implemented
+- stable source object IDs and local dotted-path Instance overrides implemented
+- Inspector Create/Instance commands and Action/Undo parity implemented
+- Variant/state authoring, detach/localize, and a dedicated Components panel remain
+
 완료 기준:
 
 - mobile/desktop sample을 같은 component/token 원본으로 제작

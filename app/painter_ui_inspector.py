@@ -76,6 +76,8 @@ class PainterUIInspector(QWidget):
     artboard_layout_changed = Signal(str, object)
     responsive_override_changed = Signal(str, str, str, object)
     responsive_override_remove_requested = Signal(str, str, str)
+    component_create_requested = Signal(str, str)
+    component_instantiate_requested = Signal(str, str, float, float)
     object_selected = Signal(str)
     selection_changed = Signal(object, str)
     geometry_changed = Signal(str, object)
@@ -412,6 +414,28 @@ class PainterUIInspector(QWidget):
         self.responsive_status_label = QLabel("Base values")
         self.responsive_status_label.setObjectName("PaintMuted")
         form.addRow("", self.responsive_status_label)
+        component_row = QFrame()
+        component_layout = QHBoxLayout(component_row)
+        component_layout.setContentsMargins(0, 0, 0, 0)
+        component_layout.setSpacing(3)
+        self.component_create_button = QPushButton("Create")
+        self.component_create_button.setToolTip(
+            "Convert the selected object subtree into a component definition"
+        )
+        self.component_create_button.clicked.connect(self._emit_component_create)
+        self.component_instance_button = QPushButton("Instance")
+        self.component_instance_button.setToolTip(
+            "Create another instance of the selected object's component"
+        )
+        self.component_instance_button.clicked.connect(
+            self._emit_component_instantiate
+        )
+        component_layout.addWidget(self.component_create_button)
+        component_layout.addWidget(self.component_instance_button)
+        form.addRow("Component", component_row)
+        self.component_status_label = QLabel("Not a component")
+        self.component_status_label.setObjectName("PaintMuted")
+        form.addRow("", self.component_status_label)
         self.auto_layout_mode_combo = QComboBox()
         for label, mode in (
             ("None", "none"),
@@ -815,7 +839,18 @@ class PainterUIInspector(QWidget):
                     parent_id = parent["parent_id"]
                 prefix = "  " * depth
                 state = "" if row["visible"] else "  [hidden]"
-                item = QListWidgetItem(f"{prefix}{row['name']}  [{row['kind']}]{state}")
+                component_role = str(row.get("component_role") or "none")
+                component_state = (
+                    "  [component]"
+                    if component_role == "definition"
+                    else "  [instance]"
+                    if component_role == "instance"
+                    else ""
+                )
+                item = QListWidgetItem(
+                    f"{prefix}{row['name']}  [{row['kind']}]"
+                    f"{component_state}{state}"
+                )
                 item.setData(Qt.ItemDataRole.UserRole, row["id"])
                 item.setData(int(Qt.ItemDataRole.UserRole) + 1, row["kind"])
                 self.layer_list.addItem(item)
@@ -904,6 +939,8 @@ class PainterUIInspector(QWidget):
             self.aspect_lock_check,
             self.responsive_edit_check,
             self.responsive_clear_button,
+            self.component_create_button,
+            self.component_instance_button,
             *self.size_limit_controls.values(),
             self.visible_check,
             self.locked_check,
@@ -920,6 +957,7 @@ class PainterUIInspector(QWidget):
             self.image_source_edit.clear()
             self.accessibility_label_edit.clear()
             self.focus_order_spin.setValue(0)
+            self.component_status_label.setText("Not a component")
             for target, label in self.delivery_status_labels.items():
                 label.setText(f"{self._delivery_title(target)}: -")
                 label.setToolTip("")
@@ -938,6 +976,18 @@ class PainterUIInspector(QWidget):
             )
         )
         self.responsive_clear_button.setEnabled(override is not None)
+        component_role = str(base_row.get("component_role") or "none")
+        component_id = str(base_row.get("component_id") or "")
+        self.component_create_button.setEnabled(component_role == "none")
+        self.component_instance_button.setEnabled(bool(component_id))
+        if component_role == "definition":
+            component_text = "Definition"
+        elif component_role == "instance":
+            override_count = len(base_row.get("instance_overrides") or {})
+            component_text = f"Instance / {override_count} override"
+        else:
+            component_text = "Not a component"
+        self.component_status_label.setText(component_text)
         self.name_edit.setText(str(row["name"]))
         self.kind_label.setText(str(row["kind"]).title())
         for key, spin in self.geometry_controls.items():
@@ -1094,6 +1144,26 @@ class PainterUIInspector(QWidget):
             self._selected_id(),
             breakpoint,
             orientation,
+        )
+
+    def _emit_component_create(self) -> None:
+        row = self._selected_row()
+        if self._syncing or row is None:
+            return
+        self.component_create_requested.emit(
+            str(row["id"]),
+            str(row["name"]),
+        )
+
+    def _emit_component_instantiate(self) -> None:
+        row = self._selected_row()
+        if self._syncing or row is None or not row.get("component_id"):
+            return
+        self.component_instantiate_requested.emit(
+            str(row["component_id"]),
+            str(row["artboard_id"]),
+            float(row["x"]) + 32.0,
+            float(row["y"]) + 32.0,
         )
 
     def _on_selection_changed(self) -> None:

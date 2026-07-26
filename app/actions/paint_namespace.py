@@ -591,6 +591,52 @@ def register_paint_actions(registry: Any) -> None:
             dry_summary=summary,
         )
     registry.register_adapter_action(
+        "paint.ui.component.create",
+        "Convert a selected UI object subtree into a reusable component definition.",
+        "paint",
+        "paint_ui_component_create",
+        params_schema=schema_object(
+            {
+                "root_object_id": {"type": "string"},
+                "name": {"type": "string"},
+                "description": {"type": "string"},
+            }
+        ),
+        undo_label="Create UI component",
+        dry_summary="the selected UI subtree would become a component definition",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.instantiate",
+        "Create an editable instance of a component definition.",
+        "paint",
+        "paint_ui_component_instantiate",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "artboard_id": {"type": "string"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+            },
+            required=("component_id",),
+        ),
+        required=("component_id",),
+        undo_label="Instantiate UI component",
+        dry_summary="a component instance would be created",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.sync",
+        "Synchronize component instances from their current definition.",
+        "paint",
+        "paint_ui_component_sync",
+        params_schema=schema_object(
+            {"component_id": {"type": "string"}},
+            required=("component_id",),
+        ),
+        required=("component_id",),
+        undo_label="Sync UI component instances",
+        dry_summary="component instances would be synchronized",
+    )
+    registry.register_adapter_action(
         "paint.ui.component.add",
         "Create a typed reusable component definition rooted at a Painter UI object.",
         "paint",

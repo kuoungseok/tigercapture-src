@@ -8182,6 +8182,12 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.responsive_override_remove_requested.connect(
             self._remove_painter_ui_responsive_override
         )
+        self._paint_ui_inspector.component_create_requested.connect(
+            self._create_painter_ui_component
+        )
+        self._paint_ui_inspector.component_instantiate_requested.connect(
+            self._instantiate_painter_ui_component
+        )
         self._paint_ui_inspector.duplicate_requested.connect(
             self._duplicate_painter_ui_object
         )
@@ -10960,6 +10966,50 @@ class PaintDialog(QDialog):
             {"responsive_overrides": overrides},
             label="Remove UI responsive override",
         )
+
+    def _create_painter_ui_component(
+        self,
+        root_object_id: str,
+        name: str,
+    ) -> None:
+        from app.painter_ui_components import convert_ui_object_to_component
+
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _component = convert_ui_object_to_component(
+            current,
+            root_object_id=str(root_object_id),
+            name=str(name),
+        )
+        self._push_undo_state("Create UI component")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _instantiate_painter_ui_component(
+        self,
+        component_id: str,
+        artboard_id: str,
+        x: float,
+        y: float,
+    ) -> None:
+        from app.painter_ui_components import instantiate_ui_component
+
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _result = instantiate_ui_component(
+            current,
+            component_id=str(component_id),
+            artboard_id=str(artboard_id),
+            x=float(x),
+            y=float(y),
+        )
+        self._push_undo_state("Instantiate UI component")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
 
     def _update_painter_ui_objects_batch(
         self,

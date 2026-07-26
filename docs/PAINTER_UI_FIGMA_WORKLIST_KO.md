@@ -4,7 +4,7 @@ Status: canonical implementation backlog; P0 complete
 
 P0 implementation checkpoint (2026-07-26):
 
-- UI document version 7 defines typed component, token, interaction, and
+- UI document version 8 defines typed component, token, interaction, and
   deterministic Auto Layout records.
 - Stable IDs are preserved by update operations and assigned during v1 migration.
 - Parent, component, token, interaction, alias, and cycle references are validated.
@@ -207,6 +207,21 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
 6. 컴포넌트 원본 수정 시 인스턴스 갱신
 7. 원본 연결 해제와 로컬 컴포넌트 변환
 8. 컴포넌트 참조 순환 방지
+
+현재 구현 기반:
+
+- 선택 subtree를 Component Definition으로 변환
+- 새 stable object ID와 source stable ID를 가진 Instance subtree 생성
+- Definition 속성 및 직접 자식 추가/삭제를 모든 Instance에 동기화
+- Instance 로컬 편집을 dotted-path override로 보존
+- Inspector Create/Instance 명령과
+  `paint.ui.component.create/instantiate/sync` Action parity
+
+남은 범위:
+
+- Variant/property와 상태 세트
+- Instance detach 및 local component 변환
+- 전용 Components 패널과 override property editor
 
 ## P5. 디자인 토큰
 

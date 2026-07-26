@@ -6668,7 +6668,7 @@ AI Script Edit MVP integration:
   UMG disposition plus reason. `painter_ui_delivery` is the single classifier:
   preflight v2 reports only `Native`, `Material`, `Baked`, or `Blocked`, so UI,
   Actions, and handoff cannot silently disagree about conversion support.
-- Painter UI document version 7 defines deterministic Auto Layout. A Frame,
+- Painter UI document version 8 defines deterministic Auto Layout. A Frame,
   Group, or Button may use Horizontal or Vertical flow with independent
   L/T/R/B padding, gap, main-axis Start/Center/End/Space Between, and
   cross-axis Start/Center/End/Stretch. Children are ordered by stable z/document
@@ -6705,6 +6705,14 @@ AI Script Edit MVP integration:
   preview without mutating authored values. UI changes use the normal artboard
   mutation/Undo path; automation uses `paint.ui.theme.set/inspect` and
   `paint.ui.token.theme.set/remove`.
+- Painter UI objects persist `component_role`, stable
+  `component_source_object_id`, and dotted-path `instance_overrides`.
+  A selected subtree can become a Component Definition; Instance creation
+  clones its hierarchy with new object IDs while retaining source IDs.
+  Definition property and child-topology changes synchronize to every Instance,
+  and local Instance edits remain explicit overrides. Inspector and Actions
+  share the same Undoable service through `paint.ui.component.create`,
+  `paint.ui.component.instantiate`, and `paint.ui.component.sync`.
 - Painter UI groups keep stable child IDs and remain editable: grouping,
   ungrouping, and layer-stack reordering are exposed through
   `paint.ui.object.group`, `paint.ui.object.ungroup`, and
