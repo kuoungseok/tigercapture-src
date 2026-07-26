@@ -52,6 +52,10 @@ preview. The format preserves:
 - floor/grid, world-aligned checker behavior, Lit mode, shadows, fog, depth
   preview, light yaw/pitch, and snapping
 - current Paint/3D workspace and Move/Rotate/Scale mode
+- provider-neutral `tigerstudio.painter.ui.v1` UI document, including
+  artboards, UI objects, hierarchy, style/content, constraints, selection,
+  delivery profiles, and revision
+- current Paint/UI Design/3D Place workspace
 
 Opening a `.tspaint` restores the editable 3D scene. Baking the blockout to 2D
 is optional and does not replace the saved scene.
@@ -69,12 +73,19 @@ Actions:
 
 - `paint.document.save`
 - `paint.document.open`
+- `paint.ui.document.inspect`
+- `paint.ui.artboard.add/update/remove`
+- `paint.ui.object.add/update/remove`
+- `paint.ui.delivery.profiles/preflight`
+- `paint.ui.handoff.export`
 - `paint.state` reports the native format, current path, dirty state, and 3D
-  persistence capability
+  persistence capability, plus the current UI document validation and
+  workspace mode
 
 ## Compatibility Boundary
 
 The video editor `.tgp` format still owns timeline overlays. `.tspaint` is the
 authoritative format for standalone Painter documents and their full 2D/3D
-construction state. Do not claim that PNG or the legacy stroke-only `.tgp`
-overlay fields can replace `.tspaint`.
+construction and general UI design state. Do not claim that PNG, a generated
+handoff package, Unreal UMG, or the legacy stroke-only `.tgp` overlay fields
+can replace `.tspaint`.

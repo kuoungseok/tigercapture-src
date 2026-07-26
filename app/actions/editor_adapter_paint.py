@@ -57,6 +57,154 @@ class PaintAdapterMixin:
         dialog = self._paint_dialog_owner()
         return dialog.open_document_from_path(path)
 
+    def _paint_ui_commit(self, dialog, label: str, document: dict[str, Any]) -> dict[str, Any]:
+        dialog._painter_ui_document = document
+        dialog._painter_document_dirty = True
+        refresh = getattr(dialog, "_refresh_painter_ui_overlay", None)
+        if callable(refresh):
+            refresh()
+        return dialog.painter_action_state()
+
+    def paint_ui_document_inspect(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import inspect_ui_document
+
+        return inspect_ui_document(getattr(dialog, "_painter_ui_document", None))
+
+    def paint_ui_workspace_set(self, *, mode: str = "ui_design") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        selected = dialog._set_canvas_workspace_mode(str(mode or "ui_design"))
+        state = dialog.painter_action_state()
+        state["workspace"]["mode"] = selected
+        return state
+
+    def paint_ui_artboard_add(
+        self,
+        *,
+        name: str = "",
+        width: int = 1920,
+        height: int = 1080,
+        breakpoint: str = "custom",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import add_ui_artboard
+
+        document, _row = add_ui_artboard(
+            dialog._painter_ui_document,
+            name=name,
+            width=width,
+            height=height,
+            breakpoint=breakpoint,
+        )
+        dialog._push_undo_state("Add UI artboard")
+        return self._paint_ui_commit(dialog, "Add UI artboard", document)
+
+    def paint_ui_artboard_update(
+        self,
+        *,
+        artboard_id: str,
+        changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import update_ui_artboard
+
+        document, _row = update_ui_artboard(
+            dialog._painter_ui_document,
+            artboard_id,
+            changes,
+        )
+        dialog._push_undo_state("Update UI artboard")
+        return self._paint_ui_commit(dialog, "Update UI artboard", document)
+
+    def paint_ui_artboard_remove(self, *, artboard_id: str) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import remove_ui_artboard
+
+        document, _result = remove_ui_artboard(
+            dialog._painter_ui_document,
+            artboard_id,
+        )
+        dialog._push_undo_state("Remove UI artboard")
+        return self._paint_ui_commit(dialog, "Remove UI artboard", document)
+
+    def paint_ui_object_add(
+        self,
+        *,
+        kind: str = "rectangle",
+        name: str = "",
+        artboard_id: str = "",
+        parent_id: str = "",
+        x: float = 0.0,
+        y: float = 0.0,
+        width: float = 160.0,
+        height: float = 64.0,
+        style: dict[str, Any] | None = None,
+        content: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import add_ui_object
+
+        document, _row = add_ui_object(
+            dialog._painter_ui_document,
+            kind=kind,
+            name=name,
+            artboard_id=artboard_id,
+            parent_id=parent_id,
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            style=style,
+            content=content,
+        )
+        dialog._push_undo_state("Add UI object")
+        return self._paint_ui_commit(dialog, "Add UI object", document)
+
+    def paint_ui_object_update(
+        self,
+        *,
+        object_id: str,
+        changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import update_ui_object
+
+        document, _row = update_ui_object(
+            dialog._painter_ui_document,
+            object_id,
+            changes,
+        )
+        dialog._push_undo_state("Update UI object")
+        return self._paint_ui_commit(dialog, "Update UI object", document)
+
+    def paint_ui_object_remove(self, *, object_id: str) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import remove_ui_object
+
+        document, _result = remove_ui_object(
+            dialog._painter_ui_document,
+            object_id,
+        )
+        dialog._push_undo_state("Remove UI object")
+        return self._paint_ui_commit(dialog, "Remove UI object", document)
+
+    def paint_ui_delivery_profiles(self) -> dict[str, Any]:
+        from app.painter_ui_delivery import list_ui_delivery_profiles
+
+        return list_ui_delivery_profiles()
+
+    def paint_ui_delivery_preflight(self, *, target: str) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_delivery import preflight_ui_delivery
+
+        return preflight_ui_delivery(dialog._painter_ui_document, target)
+
+    def paint_ui_handoff_export(self, *, output_dir: str) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_delivery import package_design_handoff
+
+        return package_design_handoff(dialog._painter_ui_document, output_dir)
+
     def paint_document_export_png(
         self,
         *,

@@ -6371,6 +6371,9 @@ class PaintDialog(QDialog):
             max(1, int(background_pixmap.width())) if background_pixmap and not background_pixmap.isNull() else 1920,
             max(1, int(background_pixmap.height())) if background_pixmap and not background_pixmap.isNull() else 1080,
         )
+        from app.painter_ui_document import create_ui_document
+
+        self._painter_ui_document = create_ui_document(*self._canvas_document_size)
 
         self._configure_initial_painter_window_size(parent)
 
@@ -6863,6 +6866,9 @@ class PaintDialog(QDialog):
         height = max(64, min(16384, int(height or 1080)))
         background_text = str(background or "transparent")
         self._canvas_document_size = (width, height)
+        from app.painter_ui_document import create_ui_document
+
+        self._painter_ui_document = create_ui_document(width, height)
         self._bg_pixmap_source = create_blank_paint_pixmap(width, height, background_text)
         self._background_layer_present = background_text.strip().lower() not in {
             "transparent",
@@ -7544,6 +7550,12 @@ class PaintDialog(QDialog):
         self._canvas_mode_paint_btn.clicked.connect(
             lambda: self._set_canvas_workspace_mode("paint")
         )
+        self._canvas_mode_ui_btn = QPushButton("UI Design")
+        self._canvas_mode_ui_btn.setObjectName("PaintCanvasModeButton")
+        self._canvas_mode_ui_btn.setCheckable(True)
+        self._canvas_mode_ui_btn.clicked.connect(
+            lambda: self._set_canvas_workspace_mode("ui_design")
+        )
         self._canvas_mode_3d_btn = QPushButton("3D Place")
         self._canvas_mode_3d_btn.setObjectName("PaintCanvasModeButton")
         self._canvas_mode_3d_btn.setCheckable(True)
@@ -7551,7 +7563,31 @@ class PaintDialog(QDialog):
             lambda: self._set_canvas_workspace_mode("3d_place")
         )
         canvas_bar.addWidget(self._canvas_mode_paint_btn)
+        canvas_bar.addWidget(self._canvas_mode_ui_btn)
         canvas_bar.addWidget(self._canvas_mode_3d_btn)
+        self._ui_design_tool_host = QWidget(canvas_mode_bar)
+        self._ui_design_tool_host.setObjectName("PaintUIDesignToolHost")
+        ui_tool_bar = QHBoxLayout(self._ui_design_tool_host)
+        ui_tool_bar.setContentsMargins(5, 0, 0, 0)
+        ui_tool_bar.setSpacing(1)
+        self._ui_design_tool_buttons: dict[str, QPushButton] = {}
+        for label, kind in (
+            ("Frame", "frame"),
+            ("Text", "text"),
+            ("Button", "button"),
+        ):
+            button = QPushButton(label)
+            button.setObjectName("PaintBlockoutModeButton")
+            button.setToolTip(f"Add {label}")
+            button.clicked.connect(
+                lambda _checked=False, value=kind: self._add_default_painter_ui_object(
+                    value
+                )
+            )
+            ui_tool_bar.addWidget(button)
+            self._ui_design_tool_buttons[kind] = button
+        self._ui_design_tool_host.hide()
+        canvas_bar.addWidget(self._ui_design_tool_host)
         self._blockout_transform_buttons: dict[str, QPushButton] = {}
         self._blockout_transform_host = QWidget(canvas_mode_bar)
         self._blockout_transform_host.setObjectName("PaintBlockoutTransformHost")
@@ -7597,6 +7633,16 @@ class PaintDialog(QDialog):
         canvas_host.setMouseTracking(True)
         canvas_host.installEventFilter(self)
         self._canvas_host = canvas_host
+        from app.painter_ui_workspace import PainterUIDesignOverlay
+
+        self._painter_ui_overlay = PainterUIDesignOverlay(canvas_host)
+        self._painter_ui_overlay.object_selected.connect(
+            self._select_painter_ui_object
+        )
+        self._painter_ui_overlay.object_move_requested.connect(
+            self._move_painter_ui_object
+        )
+        self._painter_ui_overlay.hide()
 
         self._bg_label = QLabel(canvas_host)
         self._bg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -10230,13 +10276,19 @@ class PaintDialog(QDialog):
         *,
         focus_panel: bool = True,
     ) -> str:
-        selected = "3d_place" if str(mode or "").strip().casefold() in {
+        requested = str(mode or "").strip().casefold()
+        if requested in {"ui", "ui_design", "designer", "design"}:
+            selected = "ui_design"
+        elif requested in {
             "3d",
             "3d_place",
             "place",
             "placement",
             "blockout",
-        } else "paint"
+        }:
+            selected = "3d_place"
+        else:
+            selected = "paint"
         self._canvas_workspace_user_generation = int(
             getattr(self, "_canvas_workspace_user_generation", 0)
         ) + 1
@@ -10248,6 +10300,9 @@ class PaintDialog(QDialog):
             )
             if focus_panel:
                 self._focus_3d_blockout_panel()
+        elif selected == "ui_design":
+            self._set_tool("select")
+            self._canvas_workspace_mode = "ui_design"
         else:
             self._set_tool("pen")
         self._sync_canvas_workspace_mode_controls()
@@ -10255,9 +10310,12 @@ class PaintDialog(QDialog):
         return selected
 
     def _sync_canvas_workspace_mode_controls(self) -> None:
-        blockout = str(getattr(self, "_canvas_workspace_mode", "paint")) == "3d_place"
+        workspace_mode = str(getattr(self, "_canvas_workspace_mode", "paint"))
+        blockout = workspace_mode == "3d_place"
+        ui_design = workspace_mode == "ui_design"
         for button_name, checked in (
-            ("_canvas_mode_paint_btn", not blockout),
+            ("_canvas_mode_paint_btn", not blockout and not ui_design),
+            ("_canvas_mode_ui_btn", ui_design),
             ("_canvas_mode_3d_btn", blockout),
             ("blockout_rail_btn", blockout),
         ):
@@ -10269,6 +10327,9 @@ class PaintDialog(QDialog):
         host = getattr(self, "_blockout_transform_host", None)
         if host is not None:
             host.setVisible(blockout)
+        ui_host = getattr(self, "_ui_design_tool_host", None)
+        if ui_host is not None:
+            ui_host.setVisible(ui_design)
         for shortcut in getattr(self, "_blockout_camera_shortcuts", []):
             shortcut.setEnabled(blockout)
         panel = getattr(self, "_paint_3d_blockout_panel", None)
@@ -10283,6 +10344,128 @@ class PaintDialog(QDialog):
                 canvas_host = getattr(self, "_canvas_host", None)
                 if canvas_host is not None:
                     canvas_host.setFocus(Qt.FocusReason.OtherFocusReason)
+        overlay = getattr(self, "_painter_ui_overlay", None)
+        if overlay is not None:
+            overlay.setVisible(ui_design)
+            if ui_design:
+                self._refresh_painter_ui_overlay()
+                overlay.raise_()
+
+    def _select_painter_ui_object(self, object_id: str) -> None:
+        from app.painter_ui_document import select_ui_object
+
+        self._painter_ui_document = select_ui_object(
+            getattr(self, "_painter_ui_document", None),
+            str(object_id or ""),
+        )
+        self._refresh_painter_ui_overlay()
+
+    def _add_default_painter_ui_object(self, kind: str) -> None:
+        from app.painter_ui_document import add_ui_object, normalize_ui_document
+
+        document = normalize_ui_document(
+            getattr(self, "_painter_ui_document", None),
+            fallback_width=self._canvas_document_size[0],
+            fallback_height=self._canvas_document_size[1],
+        )
+        active_id = document["active_artboard_id"]
+        artboard = next(
+            row for row in document["artboards"] if row["id"] == active_id
+        )
+        index = sum(
+            1 for row in document["objects"] if row["artboard_id"] == active_id
+        )
+        presets = {
+            "frame": {
+                "name": "Frame",
+                "width": min(420.0, artboard["width"] * 0.62),
+                "height": min(280.0, artboard["height"] * 0.36),
+                "style": {"fill": "#263344"},
+            },
+            "text": {
+                "name": "Heading",
+                "width": min(360.0, artboard["width"] * 0.72),
+                "height": 56.0,
+                "style": {"fill": "#2B3645", "text_color": "#F4F7FC"},
+                "content": {"text": "Heading"},
+            },
+            "button": {
+                "name": "Primary Button",
+                "width": min(280.0, artboard["width"] * 0.7),
+                "height": 56.0,
+                "style": {"fill": "#4C74DB", "radius": 6},
+                "content": {"text": "Continue"},
+            },
+        }
+        preset = presets.get(str(kind), presets["frame"])
+        width = float(preset["width"])
+        height = float(preset["height"])
+        x = max(0.0, (float(artboard["width"]) - width) * 0.5)
+        y = max(
+            0.0,
+            min(
+                float(artboard["height"]) - height,
+                72.0 + float(index) * 28.0,
+            ),
+        )
+        updated, _row = add_ui_object(
+            document,
+            kind=str(kind),
+            name=str(preset["name"]),
+            artboard_id=active_id,
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            style=dict(preset.get("style") or {}),
+            content=dict(preset.get("content") or {}),
+        )
+        self._push_undo_state(f"Add UI {kind}")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _move_painter_ui_object(
+        self,
+        object_id: str,
+        x: float,
+        y: float,
+    ) -> None:
+        from app.painter_ui_document import update_ui_object
+
+        current = getattr(self, "_painter_ui_document", None)
+        original = next(
+            (
+                row
+                for row in (current or {}).get("objects", [])
+                if row.get("id") == object_id
+            ),
+            None,
+        )
+        if original is None:
+            return
+        if abs(float(original.get("x", 0.0)) - float(x)) < 0.01 and abs(
+            float(original.get("y", 0.0)) - float(y)
+        ) < 0.01:
+            return
+        updated, _row = update_ui_object(
+            current,
+            object_id,
+            {"x": float(x), "y": float(y)},
+        )
+        self._push_undo_state("Move UI object")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _refresh_painter_ui_overlay(self) -> None:
+        overlay = getattr(self, "_painter_ui_overlay", None)
+        if overlay is None:
+            return
+        overlay.set_document(getattr(self, "_painter_ui_document", None))
+        if str(getattr(self, "_canvas_workspace_mode", "paint")) == "ui_design":
+            overlay.show()
+            overlay.raise_()
 
     def _set_3d_blockout_transform_mode(self, mode: str) -> str:
         selected = str(mode or "").strip().casefold()
@@ -12973,6 +13156,9 @@ class PaintDialog(QDialog):
 
     def _set_tool(self, tool: str) -> None:
         self._active_ui_tool = str(tool or "select")
+        previous_workspace = str(
+            getattr(self, "_canvas_workspace_mode", "paint") or "paint"
+        )
         if tool == "3d_blockout":
             self._canvas_workspace_mode = "3d_place"
         elif tool in {
@@ -12990,7 +13176,12 @@ class PaintDialog(QDialog):
             "zoom_out",
             "zoom_area",
         }:
-            self._canvas_workspace_mode = "paint"
+            self._canvas_workspace_mode = (
+                "ui_design"
+                if previous_workspace == "ui_design"
+                and tool in {"select", "pan", "zoom_in", "zoom_out", "zoom_area"}
+                else "paint"
+            )
         canvas_tool = tool if tool in (
             "pen",
             "eraser",
@@ -13696,6 +13887,8 @@ class PaintDialog(QDialog):
             copy.deepcopy(getattr(self, "_painter_3d_blockout_scene", None)),
             str(getattr(self, "_painter_3d_blockout_selected_id", "")),
             self.canvas.path_snapshot() if hasattr(self, "canvas") else [],
+            copy.deepcopy(getattr(self, "_painter_ui_document", None)),
+            str(getattr(self, "_canvas_workspace_mode", "paint") or "paint"),
         )
 
     def _push_undo_state(self, label: str = "Edit") -> None:
@@ -13736,6 +13929,8 @@ class PaintDialog(QDialog):
     ) -> None:
         self._restoring_state = True
         restored_work_path = copy.deepcopy(snapshot[21]) if len(snapshot) >= 22 else None
+        restored_ui_document = copy.deepcopy(snapshot[22]) if len(snapshot) >= 23 else None
+        restored_workspace_mode = str(snapshot[23]) if len(snapshot) >= 24 else ""
         try:
             strokes, bubbles, stickers = snapshot[:3]
             if len(snapshot) >= 6:
@@ -13802,6 +13997,18 @@ class PaintDialog(QDialog):
                 self.canvas.set_path_snapshot(restored_work_path)
             self._refresh_reference_board_panel()
             self._refresh_3d_blockout_panel()
+            if restored_ui_document is not None:
+                from app.painter_ui_document import normalize_ui_document
+
+                self._painter_ui_document = normalize_ui_document(
+                    restored_ui_document,
+                    fallback_width=self._canvas_document_size[0],
+                    fallback_height=self._canvas_document_size[1],
+                )
+            if restored_workspace_mode:
+                self._canvas_workspace_mode = restored_workspace_mode
+            self._sync_canvas_workspace_mode_controls()
+            self._refresh_painter_ui_overlay()
         finally:
             self._restoring_state = False
         self._update_inspector_counts()
@@ -16738,6 +16945,10 @@ class PaintDialog(QDialog):
         self.canvas.setGeometry(bx, by, bw, bh)
         self.canvas.set_document_size(*self._canvas_document_size)
         self.canvas.set_view_zoom_percent(int(round(float(getattr(self, "_canvas_zoom", 1.0)) * 100)))
+        ui_overlay = getattr(self, "_painter_ui_overlay", None)
+        if ui_overlay is not None:
+            ui_overlay.setGeometry(bx, by, bw, bh)
+            self._refresh_painter_ui_overlay()
         self._refresh_reference_overlay()
         self._refresh_3d_blockout_overlay()
         self.canvas.raise_()
@@ -16892,6 +17103,7 @@ class PaintDialog(QDialog):
             "reference_selected_id": str(self._painter_reference_selected_id),
             "blockout_3d": copy.deepcopy(self._painter_3d_blockout_scene),
             "blockout_selected_id": str(self._painter_3d_blockout_selected_id),
+            "ui_document": copy.deepcopy(self._painter_ui_document),
             "workspace": {
                 "mode": str(self._canvas_workspace_mode),
                 "transform_mode": str(self._blockout_transform_mode),
@@ -17099,6 +17311,13 @@ class PaintDialog(QDialog):
         pbr = pbr if isinstance(pbr, dict) else {}
         self._pbr_texture_settings.update(dict(pbr.get("settings") or {}))
         self._pbr_source_path = str(pbr.get("source_path") or "")
+        from app.painter_ui_document import normalize_ui_document
+
+        self._painter_ui_document = normalize_ui_document(
+            payload.get("ui_document"),
+            fallback_width=width,
+            fallback_height=height,
+        )
         workspace = payload.get("workspace")
         workspace = workspace if isinstance(workspace, dict) else {}
         self._canvas_workspace_mode = str(workspace.get("mode") or "paint")
@@ -17116,6 +17335,7 @@ class PaintDialog(QDialog):
         self._sync_canvas_layer_view()
         self._sync_material_controls()
         self._update_canvas_geometry()
+        self._sync_canvas_workspace_mode_controls()
         self.canvas.set_path_snapshot(
             self._normalise_path_points(paths.get("work_path") or [])
         )
@@ -17201,6 +17421,11 @@ class PaintDialog(QDialog):
                 "remote_safe": True,
                 "persistent_stroke_atlas": {"enabled": False, "fallback_renderer": "painter_canvas_qpainter_strokes_v1"},
             }
+        from app.painter_ui_document import inspect_ui_document
+
+        ui_design_state = inspect_ui_document(
+            getattr(self, "_painter_ui_document", None)
+        )
         return {
             "schema": "tigerstudio.paint.state.v1",
             "standalone": bool(self._standalone),
@@ -17258,6 +17483,13 @@ class PaintDialog(QDialog):
             ],
             "active_layer_id": str(self._active_paint_layer_id),
             "selected_layer_id": str(self._selected_layer_id or ""),
+            "workspace": {
+                "mode": str(
+                    getattr(self, "_canvas_workspace_mode", "paint") or "paint"
+                ),
+                "available_modes": ["paint", "ui_design", "3d_place"],
+            },
+            "ui_design": ui_design_state,
             "tool": str(getattr(self.canvas, "_tool", "off") if hasattr(self, "canvas") else "off"),
             "ui_tool": str(getattr(self, "_active_ui_tool", "select")),
             "brush": {

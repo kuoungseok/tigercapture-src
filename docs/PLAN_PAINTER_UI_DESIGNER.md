@@ -1,12 +1,21 @@
 # Tiger Studio Painter General UI Designer Plan
 
-Status: proposed
+Status: active implementation
 
 Primary scope: general UI authoring, prototyping, asset delivery, and handoff
 
 First native runtime adapter: Motion Designer Unreal Link and TigerStudioUMG
 
 Unreal target engine: `D:\UE_5.8\Engine`
+
+Implementation checkpoint:
+
+- M0 general UI document, validation, `.tspaint` persistence, Action/MCP,
+  delivery preflight, and Design Handoff package are implemented.
+- M1 workspace foundation is implemented with `Paint | UI Design | 3D Place`,
+  direct Frame/Text/Button creation, canvas selection, and drag movement.
+- M1 production editing controls and M2-M6 remain milestone work.
+- Detailed status: `docs/PAINTER_UI_DESIGNER_MILESTONES_KO.md`
 
 ## 1. Product Goal
 

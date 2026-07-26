@@ -5,6 +5,7 @@ from typing import Any
 
 from app.actions.schema import schema_object
 from app.painter_brush_catalog import DESIGNER_BRUSH_STYLE_IDS
+from app.painter_ui_document import UI_DELIVERY_TARGETS, UI_OBJECT_KINDS
 
 
 PAINT_ACTION_BRUSH_STYLES = tuple(
@@ -100,6 +101,175 @@ def register_paint_actions(registry: Any) -> None:
         ),
         undo_label="Open Painter document",
         dry_summary="active Painter document would be replaced from .tspaint",
+    )
+    registry.register_adapter_action(
+        "paint.ui.document.inspect",
+        "Inspect the provider-neutral Painter UI document, validation, artboards, objects, and delivery targets.",
+        "paint",
+        "paint_ui_document_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter UI document would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.workspace.set",
+        "Switch Painter between Paint, UI Design, and 3D Place canvas workspaces.",
+        "paint",
+        "paint_ui_workspace_set",
+        params_schema=schema_object(
+            {
+                "mode": {
+                    "type": "string",
+                    "enum": ["paint", "ui_design", "3d_place"],
+                }
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="the visible Painter canvas workspace would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.artboard.add",
+        "Add a general UI artboard to the active Painter document.",
+        "paint",
+        "paint_ui_artboard_add",
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "width": {"type": "integer", "minimum": 1, "maximum": 16384},
+                "height": {"type": "integer", "minimum": 1, "maximum": 16384},
+                "breakpoint": {"type": "string"},
+            }
+        ),
+        undo_label="Add UI artboard",
+        dry_summary="a UI artboard would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.artboard.update",
+        "Update a general UI artboard without introducing target-runtime types.",
+        "paint",
+        "paint_ui_artboard_update",
+        params_schema=schema_object(
+            {
+                "artboard_id": {"type": "string"},
+                "changes": any_object,
+            },
+            required=("artboard_id", "changes"),
+        ),
+        required=("artboard_id", "changes"),
+        undo_label="Update UI artboard",
+        dry_summary="a UI artboard would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.artboard.remove",
+        "Remove a UI artboard and its owned objects while keeping at least one artboard.",
+        "paint",
+        "paint_ui_artboard_remove",
+        params_schema=schema_object(
+            {"artboard_id": {"type": "string"}},
+            required=("artboard_id",),
+        ),
+        required=("artboard_id",),
+        undo_label="Remove UI artboard",
+        dry_summary="a UI artboard and its owned objects would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.add",
+        "Add a provider-neutral UI object to a Painter artboard.",
+        "paint",
+        "paint_ui_object_add",
+        params_schema=schema_object(
+            {
+                "kind": {
+                    "type": "string",
+                    "enum": sorted(UI_OBJECT_KINDS),
+                },
+                "name": {"type": "string"},
+                "artboard_id": {"type": "string"},
+                "parent_id": {"type": "string"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "width": {"type": "number", "minimum": 1},
+                "height": {"type": "number", "minimum": 1},
+                "style": any_object,
+                "content": any_object,
+            }
+        ),
+        undo_label="Add UI object",
+        dry_summary="a provider-neutral UI object would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.update",
+        "Update a Painter UI object and validate parent/artboard references.",
+        "paint",
+        "paint_ui_object_update",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "changes": any_object,
+            },
+            required=("object_id", "changes"),
+        ),
+        required=("object_id", "changes"),
+        undo_label="Update UI object",
+        dry_summary="a UI object would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.remove",
+        "Remove a Painter UI object and its child hierarchy.",
+        "paint",
+        "paint_ui_object_remove",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}},
+            required=("object_id",),
+        ),
+        required=("object_id",),
+        undo_label="Remove UI object",
+        dry_summary="a UI object hierarchy would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.delivery.profiles",
+        "List general Painter UI delivery adapters and artifact capabilities.",
+        "paint",
+        "paint_ui_delivery_profiles",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI delivery profiles would be listed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.delivery.preflight",
+        "Classify each UI object as native, converted, baked, or blocked for a delivery target.",
+        "paint",
+        "paint_ui_delivery_preflight",
+        params_schema=schema_object(
+            {
+                "target": {
+                    "type": "string",
+                    "enum": list(UI_DELIVERY_TARGETS),
+                }
+            },
+            required=("target",),
+        ),
+        required=("target",),
+        mutating=False,
+        changed=False,
+        dry_summary="the selected UI delivery target would be preflighted",
+    )
+    registry.register_adapter_action(
+        "paint.ui.handoff.export",
+        "Export a target-neutral design handoff package with document, tokens, components, interactions, and manifest.",
+        "paint",
+        "paint_ui_handoff_export",
+        params_schema=schema_object(
+            {"output_dir": {"type": "string"}},
+            required=("output_dir",),
+        ),
+        required=("output_dir",),
+        mutating=False,
+        changed=False,
+        dry_summary="a general Painter UI design handoff package would be written",
     )
     registry.register_adapter_action(
         "paint.document.export_png",
