@@ -50,8 +50,13 @@ Implementation checkpoint:
   feathered geometry shadows, CSS RGBA colors, font weight/alignment, explicit
   line breaks, word wrapping, and line height. Box shadow and text shadow stay
   separate so button labels do not inherit the button surface shadow.
-- Pivot/constraints, image fitting and 9-slice, accessibility, target delivery
-  status, and adapter-output parity remain in M2. M3-M6 remain milestone work.
+- M2/P2 now also includes editable pivot X/Y, horizontal/vertical
+  left/center/right/stretch/scale constraints, minimum/preferred/maximum size,
+  and aspect locking. Constraint anchors are recaptured after geometry edits,
+  resolve deterministically against resized artboards or parents, drive the
+  canvas pivot/handles, and use the shared Undo/Action mutation path.
+- Image fitting and 9-slice, accessibility, target delivery status, and
+  adapter-output parity remain in M2. M3-M6 remain milestone work.
 - Product-adoption work is now explicit in M2A/M2B: editable template gallery,
   reusable component/variant libraries, Auto Layout presets, design tokens,
   versioned library updates, comments, revision history, reviewer mode, and

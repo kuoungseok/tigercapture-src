@@ -23,6 +23,12 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.painter_ui_constraints import (
+    capture_ui_constraints,
+    constrain_ui_size,
+    constraint_parent_geometry,
+    normalize_ui_constraints,
+)
 from app.painter_ui_document import normalize_ui_document
 
 
@@ -186,6 +192,74 @@ class PainterUIInspector(QWidget):
             spin.editingFinished.connect(self._emit_geometry)
             self.geometry_controls[key] = spin
             form.addRow(key.upper(), spin)
+        pivot_row = QFrame()
+        pivot_layout = QHBoxLayout(pivot_row)
+        pivot_layout.setContentsMargins(0, 0, 0, 0)
+        pivot_layout.setSpacing(3)
+        self.pivot_x_spin = QDoubleSpinBox()
+        self.pivot_y_spin = QDoubleSpinBox()
+        for label, spin in (("X ", self.pivot_x_spin), ("Y ", self.pivot_y_spin)):
+            spin.setRange(0.0, 1.0)
+            spin.setDecimals(2)
+            spin.setSingleStep(0.05)
+            spin.setPrefix(label)
+            spin.editingFinished.connect(self._emit_properties)
+            pivot_layout.addWidget(spin)
+        form.addRow("Pivot", pivot_row)
+        constraint_row = QFrame()
+        constraint_layout = QHBoxLayout(constraint_row)
+        constraint_layout.setContentsMargins(0, 0, 0, 0)
+        constraint_layout.setSpacing(3)
+        self.horizontal_constraint_combo = QComboBox()
+        for label, value in (
+            ("Left", "left"),
+            ("Center", "center"),
+            ("Right", "right"),
+            ("Stretch", "stretch"),
+            ("Scale", "scale"),
+        ):
+            self.horizontal_constraint_combo.addItem(label, value)
+        self.horizontal_constraint_combo.currentIndexChanged.connect(
+            self._emit_properties
+        )
+        self.vertical_constraint_combo = QComboBox()
+        for label, value in (
+            ("Top", "top"),
+            ("Center", "center"),
+            ("Bottom", "bottom"),
+            ("Stretch", "stretch"),
+            ("Scale", "scale"),
+        ):
+            self.vertical_constraint_combo.addItem(label, value)
+        self.vertical_constraint_combo.currentIndexChanged.connect(
+            self._emit_properties
+        )
+        constraint_layout.addWidget(self.horizontal_constraint_combo)
+        constraint_layout.addWidget(self.vertical_constraint_combo)
+        form.addRow("Constraints", constraint_row)
+        self.size_limit_controls: dict[str, QDoubleSpinBox] = {}
+        for label, width_key, height_key in (
+            ("Minimum", "min_width", "min_height"),
+            ("Preferred", "preferred_width", "preferred_height"),
+            ("Maximum", "max_width", "max_height"),
+        ):
+            row_widget = QFrame()
+            row_layout = QHBoxLayout(row_widget)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(3)
+            for prefix, key in (("W ", width_key), ("H ", height_key)):
+                spin = QDoubleSpinBox()
+                spin.setRange(0.0, 100000.0)
+                spin.setDecimals(1)
+                spin.setPrefix(prefix)
+                spin.setSuffix(" px")
+                spin.editingFinished.connect(self._emit_properties)
+                self.size_limit_controls[key] = spin
+                row_layout.addWidget(spin)
+            form.addRow(label, row_widget)
+        self.aspect_lock_check = QCheckBox("Lock aspect ratio")
+        self.aspect_lock_check.toggled.connect(self._emit_properties)
+        form.addRow("Ratio", self.aspect_lock_check)
         self.opacity_spin = QSpinBox()
         self.opacity_spin.setRange(0, 100)
         self.opacity_spin.setSuffix("%")
@@ -401,6 +475,12 @@ class PainterUIInspector(QWidget):
             self.font_weight_combo,
             self.text_align_combo,
             self.line_height_spin,
+            self.pivot_x_spin,
+            self.pivot_y_spin,
+            self.horizontal_constraint_combo,
+            self.vertical_constraint_combo,
+            self.aspect_lock_check,
+            *self.size_limit_controls.values(),
             self.visible_check,
             self.locked_check,
             *self.geometry_controls.values(),
@@ -448,6 +528,26 @@ class PainterUIInspector(QWidget):
         )
         self.text_align_combo.setCurrentIndex(max(0, align_index))
         self.line_height_spin.setValue(float(style.get("line_height") or 1.2))
+        constraints = normalize_ui_constraints(
+            row.get("constraints"),
+            width=float(row["width"]),
+            height=float(row["height"]),
+        )
+        self.pivot_x_spin.setValue(float(constraints["pivot_x"]))
+        self.pivot_y_spin.setValue(float(constraints["pivot_y"]))
+        horizontal_index = self.horizontal_constraint_combo.findData(
+            constraints["horizontal"]
+        )
+        self.horizontal_constraint_combo.setCurrentIndex(
+            max(0, horizontal_index)
+        )
+        vertical_index = self.vertical_constraint_combo.findData(
+            constraints["vertical"]
+        )
+        self.vertical_constraint_combo.setCurrentIndex(max(0, vertical_index))
+        for key, spin in self.size_limit_controls.items():
+            spin.setValue(float(constraints[key]))
+        self.aspect_lock_check.setChecked(bool(constraints["lock_aspect"]))
         self.visible_check.setChecked(bool(row["visible"]))
         self.locked_check.setChecked(bool(row["locked"]))
 
@@ -489,11 +589,28 @@ class PainterUIInspector(QWidget):
     def _emit_geometry(self) -> None:
         if self._syncing or not self._selected_id():
             return
+        row = self._selected_row()
+        if row is None:
+            return
+        constraints = row.get("constraints")
+        width, height = constrain_ui_size(
+            self.geometry_controls["width"].value(),
+            self.geometry_controls["height"].value(),
+            constraints,
+            fallback_ratio=(
+                float(row.get("width") or 1.0)
+                / max(0.0001, float(row.get("height") or 1.0))
+            ),
+        )
         self.geometry_changed.emit(
             self._selected_id(),
             {
-                key: float(spin.value())
-                for key, spin in self.geometry_controls.items()
+                **{
+                    key: float(spin.value())
+                    for key, spin in self.geometry_controls.items()
+                },
+                "width": width,
+                "height": height,
             },
         )
 
@@ -501,7 +618,9 @@ class PainterUIInspector(QWidget):
         if self._syncing or not self._selected_id():
             return
         row = self._selected_row()
-        style = dict((row or {}).get("style") or {})
+        if row is None:
+            return
+        style = dict(row.get("style") or {})
         fill = self.fill_edit.text().strip()
         if fill:
             style["fill"] = fill
@@ -526,8 +645,8 @@ class PainterUIInspector(QWidget):
             }
         else:
             style.pop("shadow", None)
-        content = dict((row or {}).get("content") or {})
-        if (row or {}).get("kind") in {"text", "button"}:
+        content = dict(row.get("content") or {})
+        if row.get("kind") in {"text", "button"}:
             content["text"] = self.text_edit.text()
             style["font_size"] = float(self.font_size_spin.value())
             style["font_weight"] = int(
@@ -537,6 +656,22 @@ class PainterUIInspector(QWidget):
                 self.text_align_combo.currentData() or "left"
             )
             style["line_height"] = float(self.line_height_spin.value())
+        constraints = capture_ui_constraints(
+            row,
+            constraint_parent_geometry(self._document, row),
+            {
+                "horizontal": self.horizontal_constraint_combo.currentData()
+                or "left",
+                "vertical": self.vertical_constraint_combo.currentData() or "top",
+                "pivot_x": self.pivot_x_spin.value(),
+                "pivot_y": self.pivot_y_spin.value(),
+                "lock_aspect": self.aspect_lock_check.isChecked(),
+                **{
+                    key: spin.value()
+                    for key, spin in self.size_limit_controls.items()
+                },
+            },
+        )
         self.properties_changed.emit(
             self._selected_id(),
             {
@@ -546,6 +681,7 @@ class PainterUIInspector(QWidget):
                 "locked": self.locked_check.isChecked(),
                 "style": style,
                 "content": content,
+                "constraints": constraints,
             },
         )
 

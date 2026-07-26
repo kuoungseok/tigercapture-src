@@ -135,6 +135,100 @@ def test_inspector_payload_round_trips_through_document_update() -> None:
     app.processEvents()
 
 
+def test_inspector_emits_pivot_constraints_and_size_policy() -> None:
+    app = _app()
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_inspector import PainterUIInspector
+
+    document = create_ui_document(390, 844, name="Phone")
+    document, row = add_ui_object(
+        document,
+        kind="rectangle",
+        name="Footer",
+        x=24,
+        y=720,
+        width=342,
+        height=72,
+    )
+    inspector = PainterUIInspector()
+    inspector.set_document(document)
+    emitted: list[dict] = []
+    inspector.properties_changed.connect(
+        lambda _object_id, changes: emitted.append(changes)
+    )
+
+    inspector.pivot_x_spin.setValue(0.25)
+    inspector.pivot_y_spin.setValue(0.75)
+    inspector.horizontal_constraint_combo.setCurrentIndex(
+        inspector.horizontal_constraint_combo.findData("right")
+    )
+    inspector.vertical_constraint_combo.setCurrentIndex(
+        inspector.vertical_constraint_combo.findData("bottom")
+    )
+    inspector.size_limit_controls["min_width"].setValue(240)
+    inspector.size_limit_controls["min_height"].setValue(48)
+    inspector.size_limit_controls["preferred_width"].setValue(342)
+    inspector.size_limit_controls["preferred_height"].setValue(72)
+    inspector.size_limit_controls["max_width"].setValue(480)
+    inspector.size_limit_controls["max_height"].setValue(96)
+    inspector.aspect_lock_check.setChecked(True)
+    inspector._emit_properties()
+
+    constraints = emitted[-1]["constraints"]
+    assert constraints["horizontal"] == "right"
+    assert constraints["vertical"] == "bottom"
+    assert constraints["pivot_x"] == 0.25
+    assert constraints["pivot_y"] == 0.75
+    assert constraints["min_width"] == 240.0
+    assert constraints["max_height"] == 96.0
+    assert constraints["lock_aspect"] is True
+    assert constraints["aspect_ratio"] == 342 / 72
+    assert constraints["right"] == 24.0
+    assert constraints["bottom"] == 52.0
+    assert constraints["reference_parent_width"] == 390.0
+    assert constraints["reference_parent_height"] == 844.0
+    assert row["id"] == document["selection"]["object_id"]
+    inspector.deleteLater()
+    app.processEvents()
+
+
+def test_inspector_geometry_obeys_locked_aspect_and_size_limits() -> None:
+    app = _app()
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_inspector import PainterUIInspector
+
+    document = create_ui_document(800, 600)
+    document, row = add_ui_object(
+        document,
+        kind="rectangle",
+        width=200,
+        height=100,
+    )
+    row = document["objects"][0]
+    row["constraints"] = {
+        "lock_aspect": True,
+        "aspect_ratio": 2.0,
+        "min_width": 120.0,
+        "min_height": 60.0,
+        "max_width": 240.0,
+        "max_height": 120.0,
+    }
+    inspector = PainterUIInspector()
+    inspector.set_document(document)
+    emitted: list[dict] = []
+    inspector.geometry_changed.connect(
+        lambda _object_id, changes: emitted.append(changes)
+    )
+    inspector.geometry_controls["width"].setValue(400)
+    inspector.geometry_controls["height"].setValue(300)
+    inspector._emit_geometry()
+
+    assert emitted[-1]["width"] == 240.0
+    assert emitted[-1]["height"] == 120.0
+    inspector.deleteLater()
+    app.processEvents()
+
+
 def test_inspector_style_changes_use_dialog_undo_path() -> None:
     app = _app()
     from app.drawing import PaintDialog, create_blank_paint_pixmap
@@ -169,6 +263,46 @@ def test_inspector_style_changes_use_dialog_undo_path() -> None:
     restored = dialog._painter_ui_document["objects"][-1]
     assert restored["style"] == original_style
     assert restored["content"] == original_content
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
+def test_constraint_geometry_changes_use_dialog_undo_path() -> None:
+    app = _app()
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(800, 600, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog._add_default_painter_ui_object("rectangle")
+    row = dialog._painter_ui_document["objects"][-1]
+    original_x = float(row["x"])
+    original_constraints = dict(row["constraints"])
+    dialog._update_painter_ui_object_changes(
+        row["id"],
+        {
+            "x": original_x + 40.0,
+            "constraints": {
+                **original_constraints,
+                "horizontal": "right",
+                "pivot_x": 0.25,
+            },
+        },
+    )
+    changed = dialog._painter_ui_document["objects"][-1]
+    assert changed["x"] == original_x + 40.0
+    assert changed["constraints"]["horizontal"] == "right"
+    assert changed["constraints"]["pivot_x"] == 0.25
+    assert "right" in changed["constraints"]
+
+    dialog._undo()
+    restored = dialog._painter_ui_document["objects"][-1]
+    assert restored["x"] == original_x
+    assert restored["constraints"] == original_constraints
     dialog.close()
     dialog.deleteLater()
     app.processEvents()

@@ -88,19 +88,22 @@ Status: core interactive editing implemented
 - 자유 배치형 multi-artboard overview, pan/zoom/Fit
 - marquee selection, Smart Guide, 비율/중심 resize
 - 아트보드 제목 드래그 이동과 mobile/desktop/console/broadcast 프리셋
+- 피벗 X/Y, 좌우·상하 Constraint, 최소/권장/최대 크기, 비율 잠금
+- 아트보드/부모 크기 변경에 대한 deterministic constraint 해석
+- 피벗 기준 회전·hit test와 constraint-aware 캔버스 resize
 - phone Layers/Inspect 및 desktop 다중 선택 화면 캡처
 
 후속 검증:
 
 - 실제 mobile 및 여러 desktop 크기의 지속적인 screenshot QA
 - target adapter 출력과 캔버스 스타일의 parity
-- constraint, image fit, 9-slice, 접근성은 P2/M2 후속 범위
+- image fit, 9-slice, 접근성은 P2/M2 후속 범위
 
 ## M2: Responsive Layout and Design System
 
-Status: pending
+Status: constraint foundation implemented; Auto Layout and tokens pending
 
-- anchors and constraints
+- anchors and constraints (implemented foundation)
 - horizontal/vertical auto layout
 - padding, gap, wrap
 - layout grid and safe area

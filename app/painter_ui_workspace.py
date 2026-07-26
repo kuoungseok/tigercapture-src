@@ -8,6 +8,12 @@ from PySide6.QtCore import QPointF, QRectF, Signal, Qt
 from PySide6.QtGui import QColor, QPainter, QPen, QTransform
 from PySide6.QtWidgets import QWidget
 
+from app.painter_ui_constraints import (
+    constrain_ui_size,
+    reanchor_resize_rect,
+    resolve_ui_constraints,
+    ui_pivot_point,
+)
 from app.painter_ui_document import normalize_ui_document
 from app.painter_ui_style_renderer import (
     draw_ui_object_shadow,
@@ -58,6 +64,7 @@ class PainterUIDesignOverlay(QWidget):
         self._snap_size = 8.0
         self._view_scale: float | None = None
         self._view_offset = QPointF()
+        self._resolved_geometry: dict[str, dict[str, float]] = {}
         self._pan_start = QPointF()
         self._pan_origin = QPointF()
         self._marquee_mode = "replace"
@@ -71,6 +78,7 @@ class PainterUIDesignOverlay(QWidget):
 
     def set_document(self, value: Mapping[str, Any] | None) -> None:
         self._document = normalize_ui_document(value)
+        self._resolved_geometry = resolve_ui_constraints(self._document)
         self.update()
 
     def set_tool(self, tool: str) -> str:
@@ -216,11 +224,12 @@ class PainterUIDesignOverlay(QWidget):
             if item["id"] == row["artboard_id"]
         )
         viewport, scale = self._artboard_viewport(artboard)
+        geometry = self._resolved_geometry.get(str(row["id"]), row)
         return QRectF(
-            viewport.x() + float(row["x"]) * scale,
-            viewport.y() + float(row["y"]) * scale,
-            float(row["width"]) * scale,
-            float(row["height"]) * scale,
+            viewport.x() + float(geometry["x"]) * scale,
+            viewport.y() + float(geometry["y"]) * scale,
+            float(geometry["width"]) * scale,
+            float(geometry["height"]) * scale,
         )
 
     @staticmethod
@@ -236,18 +245,27 @@ class PainterUIDesignOverlay(QWidget):
         }
 
     @staticmethod
-    def _rotation_handle_rect(rect: QRectF) -> QRectF:
-        center_x = rect.center().x()
-        return QRectF(center_x - 5.0, rect.top() - 25.0, 10.0, 10.0)
+    def _rotation_handle_rect(
+        rect: QRectF,
+        constraints: Mapping[str, Any] | None = None,
+    ) -> QRectF:
+        pivot = ui_pivot_point(rect, constraints)
+        return QRectF(pivot.x() - 5.0, rect.top() - 25.0, 10.0, 10.0)
 
     @staticmethod
-    def _unrotated_point(point: QPointF, rect: QRectF, angle: float) -> QPointF:
+    def _unrotated_point(
+        point: QPointF,
+        rect: QRectF,
+        angle: float,
+        constraints: Mapping[str, Any] | None = None,
+    ) -> QPointF:
         if abs(float(angle)) < 0.001:
             return QPointF(point)
+        pivot = ui_pivot_point(rect, constraints)
         transform = QTransform()
-        transform.translate(rect.center().x(), rect.center().y())
+        transform.translate(pivot.x(), pivot.y())
         transform.rotate(-float(angle))
-        transform.translate(-rect.center().x(), -rect.center().y())
+        transform.translate(-pivot.x(), -pivot.y())
         return transform.map(point)
 
     def _snap(self, value: float) -> float:
@@ -315,38 +333,50 @@ class PainterUIDesignOverlay(QWidget):
     def _resize_rect(self, point: QPointF, modifiers) -> QRectF:
         original = QRectF(self._original_rect)
         center_based = bool(modifiers & Qt.KeyboardModifier.AltModifier)
-        keep_ratio = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        force_ratio = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        row = next(
+            (
+                item
+                for item in self._document["objects"]
+                if item["id"] == self._active_object_id
+            ),
+            None,
+        )
+        constraints = row.get("constraints") if row is not None else None
         if center_based:
             center = original.center()
             half_width = abs(point.x() - center.x())
             half_height = abs(point.y() - center.y())
-            if keep_ratio:
-                ratio = original.width() / max(0.0001, original.height())
-                if half_width / max(0.0001, half_height) > ratio:
-                    half_height = half_width / ratio
-                else:
-                    half_width = half_height * ratio
-            return QRectF(
+            raw = QRectF(
                 center.x() - half_width,
                 center.y() - half_height,
                 half_width * 2.0,
                 half_height * 2.0,
             )
-        anchor = {
-            "nw": original.bottomRight(),
-            "ne": original.bottomLeft(),
-            "sw": original.topRight(),
-            "se": original.topLeft(),
-        }[self._active_handle]
-        dx = point.x() - anchor.x()
-        dy = point.y() - anchor.y()
-        if keep_ratio:
-            ratio = original.width() / max(0.0001, original.height())
-            if abs(dx) / max(0.0001, abs(dy)) > ratio:
-                dy = math.copysign(abs(dx) / ratio, dy or dx or 1.0)
-            else:
-                dx = math.copysign(abs(dy) * ratio, dx or dy or 1.0)
-        return QRectF(anchor, QPointF(anchor.x() + dx, anchor.y() + dy)).normalized()
+        else:
+            anchor = {
+                "nw": original.bottomRight(),
+                "ne": original.bottomLeft(),
+                "sw": original.topRight(),
+                "se": original.topLeft(),
+            }[self._active_handle]
+            raw = QRectF(anchor, point).normalized()
+        _viewport, scale = self._artboard_viewport()
+        width, height = constrain_ui_size(
+            raw.width() / max(0.0001, scale),
+            raw.height() / max(0.0001, scale),
+            constraints,
+            force_ratio=force_ratio,
+            fallback_ratio=original.width() / max(0.0001, original.height()),
+        )
+        return reanchor_resize_rect(
+            raw,
+            original,
+            self._active_handle,
+            center_based=center_based,
+            width=width * scale,
+            height=height * scale,
+        )
 
     def _selected_row(self) -> dict[str, Any] | None:
         selected = self._document["selection"]["object_id"]
@@ -467,10 +497,11 @@ class PainterUIDesignOverlay(QWidget):
             painter.save()
             rect = self._object_rect(row)
             rotation = float(row.get("rotation", 0.0))
+            pivot = ui_pivot_point(rect, row.get("constraints"))
             if abs(rotation) >= 0.001:
-                painter.translate(rect.center())
+                painter.translate(pivot)
                 painter.rotate(rotation)
-                painter.translate(-rect.center())
+                painter.translate(-pivot)
             self._paint_object(painter, row)
             is_selected = row["id"] in selected_ids
             painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -486,13 +517,18 @@ class PainterUIDesignOverlay(QWidget):
                 painter.setPen(QPen(QColor("#356FC7"), 1.0))
                 for handle in self._handle_rects(rect).values():
                     painter.drawRect(handle)
-                rotate_handle = self._rotation_handle_rect(rect)
+                rotate_handle = self._rotation_handle_rect(
+                    rect,
+                    row.get("constraints"),
+                )
                 painter.drawLine(
-                    QPointF(rect.center().x(), rect.top()),
-                    QPointF(rect.center().x(), rotate_handle.bottom()),
+                    pivot,
+                    QPointF(pivot.x(), rotate_handle.bottom()),
                 )
                 painter.setBrush(QColor("#F4F7FC"))
                 painter.drawEllipse(rotate_handle)
+                painter.setBrush(QColor("#72A7FF"))
+                painter.drawEllipse(pivot, 3.0, 3.0)
             painter.restore()
 
         if self._interaction == "create" and not self._preview_rect.isNull():
@@ -576,13 +612,20 @@ class PainterUIDesignOverlay(QWidget):
                 event.position(),
                 selected_rect,
                 float(selected_row.get("rotation", 0.0)),
+                selected_row.get("constraints"),
             )
-            if self._rotation_handle_rect(selected_rect).contains(local_position):
+            if self._rotation_handle_rect(
+                selected_rect,
+                selected_row.get("constraints"),
+            ).contains(local_position):
                 self._interaction = "rotate"
                 self._active_object_id = selected_row["id"]
                 self._original_rect = QRectF(selected_rect)
                 self._original_rotation = float(selected_row.get("rotation", 0.0))
-                delta = event.position() - selected_rect.center()
+                delta = event.position() - ui_pivot_point(
+                    selected_rect,
+                    selected_row.get("constraints"),
+                )
                 self._rotation_start_angle = math.degrees(
                     math.atan2(delta.y(), delta.x())
                 )
@@ -605,6 +648,7 @@ class PainterUIDesignOverlay(QWidget):
                 event.position(),
                 rect,
                 float(row.get("rotation", 0.0)),
+                row.get("constraints"),
             )
             if rect.contains(local_position):
                 selected = row["id"]
@@ -786,6 +830,7 @@ class PainterUIDesignOverlay(QWidget):
                 event.position(),
                 self._original_rect,
                 float(row.get("rotation", 0.0)),
+                row.get("constraints"),
             )
             rect = self._resize_rect(point, event.modifiers())
             if rect.width() >= 8.0 and rect.height() >= 8.0:
@@ -813,7 +858,10 @@ class PainterUIDesignOverlay(QWidget):
                 for row in self._document["objects"]
                 if row["id"] == self._active_object_id
             )
-            delta = event.position() - self._original_rect.center()
+            delta = event.position() - ui_pivot_point(
+                self._original_rect,
+                row.get("constraints"),
+            )
             angle = math.degrees(math.atan2(delta.y(), delta.x()))
             rotation = self._original_rotation + angle - self._rotation_start_angle
             if self._snap_enabled:

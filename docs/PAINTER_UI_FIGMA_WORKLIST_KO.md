@@ -46,6 +46,22 @@ P2 implementation checkpoint (2026-07-26, visual style slice):
   `text_shadow`; text objects inherit their general shadow as a text shadow,
   while button labels do not duplicate the button's box shadow.
 
+P2 implementation checkpoint (2026-07-26, responsive constraint slice):
+
+- Inspect exposes normalized pivot X/Y, horizontal and vertical constraints,
+  minimum/preferred/maximum size, and aspect-ratio locking.
+- Constraint capture records stable parent dimensions, edge margins, and center
+  offsets. Left/center/right/stretch/scale and
+  top/center/bottom/stretch/scale resolve deterministically when an artboard or
+  parent changes size.
+- Canvas rotation, hit testing, the rotation handle, and its visible pivot
+  marker use the authored pivot rather than an implicit object center.
+- Canvas and Inspector resizing share the same minimum/maximum/aspect rules;
+  Shift temporarily locks the current ratio and Alt preserves center resizing.
+- Geometry edits recapture the active constraint anchors through the shared
+  document mutation path, so refresh, Undo/Redo, UI controls, and Actions do
+  not make constrained objects jump back to stale margins.
+
 관련 구현 현황:
 
 - `docs/PLAN_PAINTER_UI_DESIGNER.md`
@@ -115,13 +131,13 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
 현재 구현된 기반:
 
 - X/Y/W/H, 회전, 불투명도, 표시, 잠금
+- 피벗, 좌우·상하 Constraint, 최소/권장/최대 크기, 비율 잠금
 - Fill, Stroke, Stroke Width, Radius, 구조화된 Shadow 편집과 저장
 - 텍스트 내용, 크기, 굵기, 정렬, 행간 편집과 저장
 - UI와 Action이 공유하는 문서 mutation 및 Undo 경로
 
 남은 범위:
 
-- 피벗, Constraint, 최소/권장/최대 크기, 비율 잠금
 - 이미지 Fit/Fill/Stretch/Tile, 9-slice
 - 접근성 메타데이터와 target별 전달 상태
 - target adapter 출력과 캔버스 스타일 렌더링 parity 검증

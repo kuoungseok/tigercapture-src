@@ -6641,6 +6641,16 @@ AI Script Edit MVP integration:
   object exposes resize/rotation handles. Phone and desktop artboards preserve
   their document aspect ratio while fitting the available UI Design workspace
   rather than stretching to the underlying paint-canvas dimensions.
+- Painter UI object constraints use normalized pivot X/Y; horizontal
+  left/center/right/stretch/scale; vertical
+  top/center/bottom/stretch/scale; minimum, preferred, and maximum dimensions;
+  and optional aspect locking. The document captures reference-parent size,
+  edge margins, and center offsets, then resolves them deterministically when
+  artboards or parent objects resize. Canvas rotation and hit testing use the
+  authored pivot. Canvas and Inspector resizing share the same size-policy
+  resolver, and geometry edits recapture anchors through the normal undoable
+  `paint.ui.object.update` mutation path rather than maintaining private UI
+  state.
 - Painter UI groups keep stable child IDs and remain editable: grouping,
   ungrouping, and layer-stack reordering are exposed through
   `paint.ui.object.group`, `paint.ui.object.ungroup`, and

@@ -10827,6 +10827,10 @@ class PaintDialog(QDialog):
         *,
         label: str = "Edit UI object",
     ) -> None:
+        from app.painter_ui_constraints import (
+            capture_ui_constraints,
+            constraint_parent_geometry,
+        )
         from app.painter_ui_document import update_ui_object
 
         if not isinstance(changes, dict):
@@ -10840,10 +10844,27 @@ class PaintDialog(QDialog):
             ),
             None,
         )
-        if original is None or all(original.get(key) == value for key, value in changes.items()):
+        if original is None:
+            return
+        effective_changes = dict(changes)
+        if {"x", "y", "width", "height"} & effective_changes.keys():
+            candidate = {**original, **effective_changes}
+            effective_changes["constraints"] = capture_ui_constraints(
+                candidate,
+                constraint_parent_geometry(current, candidate),
+                candidate.get("constraints"),
+            )
+        if all(
+            original.get(key) == value
+            for key, value in effective_changes.items()
+        ):
             return
         self._push_undo_state(label)
-        updated, _row = update_ui_object(current, object_id, changes)
+        updated, _row = update_ui_object(
+            current,
+            object_id,
+            effective_changes,
+        )
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
