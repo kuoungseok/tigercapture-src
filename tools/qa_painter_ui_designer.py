@@ -123,10 +123,69 @@ def main() -> int:
         },
     ):
         last_add = registry.execute("paint.ui.object.add", payload).to_dict()
-    registry.execute(
+    desktop_added = registry.execute(
         "paint.ui.artboard.add",
         {"name": "Desktop", "width": 1440, "height": 900, "breakpoint": "desktop"},
+    ).to_dict()
+    desktop_id = str(
+        desktop_added["result"]["ui_design"]["active_artboard_id"]
     )
+    desktop_object_ids = []
+    for payload in (
+        {
+            "kind": "frame",
+            "name": "Dashboard Panel",
+            "artboard_id": desktop_id,
+            "x": 120,
+            "y": 130,
+            "width": 1200,
+            "height": 640,
+            "style": {"fill": "#202B38", "stroke": "#53657C"},
+        },
+        {
+            "kind": "rectangle",
+            "name": "Metric A",
+            "artboard_id": desktop_id,
+            "x": 190,
+            "y": 230,
+            "width": 260,
+            "height": 150,
+            "style": {"fill": "#304458", "stroke": "#65809A"},
+        },
+        {
+            "kind": "rectangle",
+            "name": "Metric B",
+            "artboard_id": desktop_id,
+            "x": 590,
+            "y": 280,
+            "width": 260,
+            "height": 150,
+            "style": {"fill": "#385568", "stroke": "#6D91A7"},
+        },
+        {
+            "kind": "rectangle",
+            "name": "Metric C",
+            "artboard_id": desktop_id,
+            "x": 990,
+            "y": 330,
+            "width": 260,
+            "height": 150,
+            "style": {"fill": "#455A70", "stroke": "#7B8FA8"},
+        },
+    ):
+        added = registry.execute("paint.ui.object.add", payload).to_dict()
+        desktop_object_ids.append(
+            str(added["result"]["ui_design"]["selected_object_id"])
+        )
+    registry.execute(
+        "paint.ui.selection.set",
+        {
+            "object_ids": desktop_object_ids[1:],
+            "primary_object_id": desktop_object_ids[-1],
+        },
+    )
+    registry.execute("paint.ui.object.arrange", {"command": "top"})
+    registry.execute("paint.ui.object.arrange", {"command": "distribute_h"})
     registry.execute("paint.ui.artboard.activate", {"artboard_id": "artboard-1"})
     button_id = str(
         (((last_add or {}).get("result") or {}).get("ui_design") or {}).get(
@@ -149,18 +208,34 @@ def main() -> int:
     app.processEvents()
     inspect_screenshot_path = output_dir / "painter_ui_designer_m1_inspect.png"
     dialog.grab().save(str(inspect_screenshot_path), "PNG")
+    registry.execute("paint.ui.artboard.activate", {"artboard_id": desktop_id})
+    registry.execute(
+        "paint.ui.selection.set",
+        {
+            "object_ids": desktop_object_ids[1:],
+            "primary_object_id": desktop_object_ids[-1],
+        },
+    )
+    dialog._paint_ui_inspector._tabs.setCurrentIndex(0)
+    app.processEvents()
+    desktop_screenshot_path = output_dir / "painter_ui_designer_m1_desktop.png"
+    dialog.grab().save(str(desktop_screenshot_path), "PNG")
     state = dialog.painter_action_state()
     report = {
         "schema": "tigerstudio.painter.ui.qa.v1",
         "ok": (
             state["workspace"]["mode"] == "ui_design"
             and state["ui_design"]["validation"]["ok"]
-            and state["ui_design"]["validation"]["object_count"] == 8
+            and state["ui_design"]["validation"]["object_count"] == 12
+            and state["ui_design"]["validation"]["artboard_count"] == 2
+            and len(state["ui_design"]["selected_object_ids"]) == 3
             and screenshot_path.is_file()
             and inspect_screenshot_path.is_file()
+            and desktop_screenshot_path.is_file()
         ),
         "screenshot": str(screenshot_path),
         "inspect_screenshot": str(inspect_screenshot_path),
+        "desktop_screenshot": str(desktop_screenshot_path),
         "workspace": state["workspace"],
         "ui_design": state["ui_design"],
     }

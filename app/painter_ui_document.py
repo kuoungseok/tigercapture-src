@@ -73,7 +73,7 @@ def create_ui_document(
         "document_id": "ui-document-1",
         "revision": 0,
         "active_artboard_id": artboard_id,
-        "selection": {"object_id": ""},
+        "selection": {"object_id": "", "object_ids": []},
         "artboards": [
             {
                 "id": artboard_id,
@@ -196,8 +196,31 @@ def normalize_ui_document(
     selection = raw.get("selection")
     selection = selection if isinstance(selection, Mapping) else {}
     selected_id = str(selection.get("object_id") or "")
-    if selected_id not in {row["id"] for row in objects}:
+    object_by_id = {row["id"]: row for row in objects}
+    raw_selected_ids = selection.get("object_ids")
+    if not isinstance(raw_selected_ids, list):
+        raw_selected_ids = [selected_id] if selected_id else []
+    selected_ids: list[str] = []
+    for value in raw_selected_ids:
+        candidate = str(value or "")
+        row = object_by_id.get(candidate)
+        if (
+            candidate
+            and row is not None
+            and row["artboard_id"] == active_artboard_id
+            and candidate not in selected_ids
+        ):
+            selected_ids.append(candidate)
+    selected_row = object_by_id.get(selected_id)
+    if (
+        selected_row is None
+        or selected_row["artboard_id"] != active_artboard_id
+    ):
         selected_id = ""
+    if selected_id and selected_id not in selected_ids:
+        selected_ids.append(selected_id)
+    if not selected_id and selected_ids:
+        selected_id = selected_ids[-1]
     profiles = [
         copy.deepcopy(dict(row))
         for row in raw.get("delivery_profiles", [])
@@ -215,7 +238,10 @@ def normalize_ui_document(
         "document_id": str(raw.get("document_id") or "ui-document-1"),
         "revision": max(0, int(_number(raw.get("revision"), 0))),
         "active_artboard_id": active_artboard_id,
-        "selection": {"object_id": selected_id},
+        "selection": {
+            "object_id": selected_id,
+            "object_ids": selected_ids,
+        },
         "artboards": artboards,
         "objects": objects,
         "components": copy.deepcopy(list(raw.get("components") or [])),
@@ -289,6 +315,7 @@ def inspect_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         "validation": validate_ui_document(document),
         "active_artboard_id": document["active_artboard_id"],
         "selected_object_id": document["selection"]["object_id"],
+        "selected_object_ids": list(document["selection"]["object_ids"]),
         "delivery_targets": list(UI_DELIVERY_TARGETS),
     }
 
@@ -322,6 +349,7 @@ def add_ui_artboard(
     document["artboards"].append(row)
     document["active_artboard_id"] = artboard_id
     document["selection"]["object_id"] = ""
+    document["selection"]["object_ids"] = []
     return _revised(document), copy.deepcopy(row)
 
 
@@ -363,6 +391,11 @@ def remove_ui_artboard(
         document["active_artboard_id"] = document["artboards"][0]["id"]
     if document["selection"]["object_id"] in removed_objects:
         document["selection"]["object_id"] = ""
+    document["selection"]["object_ids"] = [
+        object_id
+        for object_id in document["selection"]["object_ids"]
+        if object_id not in removed_objects
+    ]
     return _revised(document), {
         "artboard_id": artboard_id,
         "removed_object_ids": removed_objects,
@@ -387,6 +420,7 @@ def set_active_ui_artboard(
     )
     if selected_row is not None and selected_row["artboard_id"] != target:
         document["selection"]["object_id"] = ""
+        document["selection"]["object_ids"] = []
     return _revised(document)
 
 
@@ -431,6 +465,7 @@ def add_ui_object(
     )
     document["objects"].append(row)
     document["selection"]["object_id"] = object_id
+    document["selection"]["object_ids"] = [object_id]
     return _revised(document), copy.deepcopy(row)
 
 
@@ -454,6 +489,8 @@ def update_ui_object(
         if not validation["ok"]:
             raise PainterUIDocumentError("Invalid UI object update: " + ", ".join(validation["errors"]))
         document["selection"]["object_id"] = object_id
+        if object_id not in document["selection"]["object_ids"]:
+            document["selection"]["object_ids"].append(object_id)
         return _revised(document), copy.deepcopy(updated_row)
     raise PainterUIDocumentError(f"UI object not found: {object_id}")
 
@@ -480,17 +517,75 @@ def remove_ui_object(
     ]
     if document["selection"]["object_id"] in removed:
         document["selection"]["object_id"] = ""
+    document["selection"]["object_ids"] = [
+        selected
+        for selected in document["selection"]["object_ids"]
+        if selected not in removed
+    ]
+    if (
+        not document["selection"]["object_id"]
+        and document["selection"]["object_ids"]
+    ):
+        document["selection"]["object_id"] = document["selection"]["object_ids"][-1]
     return _revised(document), {"removed_object_ids": sorted(removed)}
 
 
 def select_ui_object(
     value: Mapping[str, Any],
     object_id: str = "",
+    *,
+    mode: str = "replace",
 ) -> dict[str, Any]:
     document = normalize_ui_document(value)
     if object_id and object_id not in {row["id"] for row in document["objects"]}:
         raise PainterUIDocumentError(f"UI object not found: {object_id}")
-    document["selection"]["object_id"] = str(object_id or "")
+    selected = list(document["selection"]["object_ids"])
+    target = str(object_id or "")
+    operation = str(mode or "replace").strip().casefold()
+    if not target:
+        selected = []
+    elif operation == "add":
+        if target not in selected:
+            selected.append(target)
+    elif operation == "toggle":
+        if target in selected:
+            selected.remove(target)
+        else:
+            selected.append(target)
+    else:
+        selected = [target]
+    document["selection"]["object_ids"] = selected
+    document["selection"]["object_id"] = (
+        target if target in selected else selected[-1] if selected else ""
+    )
+    return document
+
+
+def select_ui_objects(
+    value: Mapping[str, Any],
+    object_ids: list[str] | tuple[str, ...],
+    *,
+    primary_object_id: str = "",
+) -> dict[str, Any]:
+    document = normalize_ui_document(value)
+    active = document["active_artboard_id"]
+    valid_by_id = {
+        row["id"]: row
+        for row in document["objects"]
+        if row["artboard_id"] == active
+    }
+    selected: list[str] = []
+    for value_id in object_ids:
+        object_id = str(value_id or "")
+        if object_id in valid_by_id and object_id not in selected:
+            selected.append(object_id)
+    primary = str(primary_object_id or "")
+    if primary not in selected:
+        primary = selected[-1] if selected else ""
+    document["selection"] = {
+        "object_id": primary,
+        "object_ids": selected,
+    }
     return document
 
 
@@ -508,6 +603,7 @@ __all__ = [
     "remove_ui_artboard",
     "remove_ui_object",
     "select_ui_object",
+    "select_ui_objects",
     "set_active_ui_artboard",
     "update_ui_artboard",
     "update_ui_object",

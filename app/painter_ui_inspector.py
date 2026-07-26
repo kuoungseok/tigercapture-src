@@ -5,6 +5,7 @@ from typing import Any, Mapping
 
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
+    QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
@@ -28,6 +29,7 @@ from app.painter_ui_document import normalize_ui_document
 class PainterUIInspector(QWidget):
     artboard_selected = Signal(str)
     object_selected = Signal(str)
+    selection_changed = Signal(object, str)
     geometry_changed = Signal(str, object)
     properties_changed = Signal(str, object)
     duplicate_requested = Signal(str)
@@ -61,6 +63,9 @@ class PainterUIInspector(QWidget):
         layers_layout.setContentsMargins(4, 4, 4, 4)
         self.layer_list = QListWidget()
         self.layer_list.setObjectName("PaintLayerList")
+        self.layer_list.setSelectionMode(
+            QAbstractItemView.SelectionMode.ExtendedSelection
+        )
         self.layer_list.itemSelectionChanged.connect(self._on_selection_changed)
         layers_layout.addWidget(self.layer_list, 1)
         actions = QHBoxLayout()
@@ -124,6 +129,8 @@ class PainterUIInspector(QWidget):
             ("T", "top"),
             ("VC", "vcenter"),
             ("B", "bottom"),
+            ("DH", "distribute_h"),
+            ("DV", "distribute_v"),
         ):
             button = QPushButton(label)
             button.setFixedHeight(24)
@@ -140,6 +147,7 @@ class PainterUIInspector(QWidget):
     def set_document(self, value: Mapping[str, Any] | None) -> None:
         self._document = normalize_ui_document(value)
         selected = self._document["selection"]["object_id"]
+        selected_ids = set(self._document["selection"]["object_ids"])
         active = self._document["active_artboard_id"]
         rows = sorted(
             (
@@ -169,8 +177,9 @@ class PainterUIInspector(QWidget):
                 item = QListWidgetItem(f"{prefix}{row['name']}  [{row['kind']}]{state}")
                 item.setData(Qt.ItemDataRole.UserRole, row["id"])
                 self.layer_list.addItem(item)
-                if row["id"] == selected:
+                if row["id"] in selected_ids:
                     item.setSelected(True)
+                if row["id"] == selected:
                     self.layer_list.setCurrentItem(item)
             self._sync_selected_fields()
         finally:
@@ -214,10 +223,18 @@ class PainterUIInspector(QWidget):
     def _on_selection_changed(self) -> None:
         if self._syncing:
             return
-        item = self.layer_list.currentItem()
-        self.object_selected.emit(
-            str(item.data(Qt.ItemDataRole.UserRole) or "") if item else ""
+        selected_ids = [
+            str(item.data(Qt.ItemDataRole.UserRole) or "")
+            for item in self.layer_list.selectedItems()
+            if str(item.data(Qt.ItemDataRole.UserRole) or "")
+        ]
+        current = self.layer_list.currentItem()
+        primary = (
+            str(current.data(Qt.ItemDataRole.UserRole) or "")
+            if current is not None
+            else selected_ids[-1] if selected_ids else ""
         )
+        self.selection_changed.emit(selected_ids, primary)
 
     def _on_artboard_changed(self) -> None:
         if self._syncing:

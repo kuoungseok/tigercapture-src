@@ -85,6 +85,8 @@ Actions:
 - `paint.ui.artboard.add/update/remove`
 - `paint.ui.artboard.activate`
 - `paint.ui.object.add/update/remove`
+- `paint.ui.selection.set`
+- `paint.ui.object.arrange`
 - `paint.ui.delivery.profiles/preflight`
 - `paint.ui.handoff.export`
 - `paint.state` reports the native format, current path, dirty state, and 3D

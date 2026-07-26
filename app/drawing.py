@@ -7661,7 +7661,7 @@ class PaintDialog(QDialog):
         from app.painter_ui_workspace import PainterUIDesignOverlay
 
         self._painter_ui_overlay = PainterUIDesignOverlay(canvas_host)
-        self._painter_ui_overlay.object_selected.connect(
+        self._painter_ui_overlay.object_selection_requested.connect(
             self._select_painter_ui_object
         )
         self._painter_ui_overlay.object_geometry_requested.connect(
@@ -7669,6 +7669,9 @@ class PaintDialog(QDialog):
         )
         self._painter_ui_overlay.object_changes_requested.connect(
             self._update_painter_ui_object_changes
+        )
+        self._painter_ui_overlay.objects_changes_requested.connect(
+            self._update_painter_ui_objects_batch
         )
         self._painter_ui_overlay.object_create_requested.connect(
             self._create_painter_ui_object_from_rect
@@ -8110,8 +8113,8 @@ class PaintDialog(QDialog):
         from app.painter_ui_inspector import PainterUIInspector
 
         self._paint_ui_inspector = PainterUIInspector()
-        self._paint_ui_inspector.object_selected.connect(
-            self._select_painter_ui_object
+        self._paint_ui_inspector.selection_changed.connect(
+            self._set_painter_ui_selection
         )
         self._paint_ui_inspector.artboard_selected.connect(
             self._set_painter_ui_artboard
@@ -10367,6 +10370,8 @@ class PaintDialog(QDialog):
         else:
             self._set_tool("pen")
         self._sync_canvas_workspace_mode_controls()
+        self._update_canvas_geometry()
+        QTimer.singleShot(0, self._update_canvas_geometry)
         self._refresh_3d_blockout_overlay()
         return selected
 
@@ -10422,12 +10427,36 @@ class PaintDialog(QDialog):
                 overlay.raise_()
                 overlay.setFocus(Qt.FocusReason.OtherFocusReason)
 
-    def _select_painter_ui_object(self, object_id: str) -> None:
+    def _select_painter_ui_object(
+        self,
+        object_id: str,
+        mode: str = "replace",
+    ) -> None:
         from app.painter_ui_document import select_ui_object
 
         self._painter_ui_document = select_ui_object(
             getattr(self, "_painter_ui_document", None),
             str(object_id or ""),
+            mode=str(mode or "replace"),
+        )
+        self._refresh_painter_ui_overlay()
+
+    def _set_painter_ui_selection(
+        self,
+        object_ids: object,
+        primary_object_id: str = "",
+    ) -> None:
+        from app.painter_ui_document import select_ui_objects
+
+        values = (
+            [str(value) for value in object_ids]
+            if isinstance(object_ids, (list, tuple))
+            else []
+        )
+        self._painter_ui_document = select_ui_objects(
+            getattr(self, "_painter_ui_document", None),
+            values,
+            primary_object_id=str(primary_object_id or ""),
         )
         self._refresh_painter_ui_overlay()
 
@@ -10656,6 +10685,42 @@ class PaintDialog(QDialog):
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
 
+    def _update_painter_ui_objects_batch(
+        self,
+        changes_by_id: object,
+        *,
+        label: str = "Transform UI objects",
+    ) -> None:
+        from app.painter_ui_document import update_ui_object
+
+        if not isinstance(changes_by_id, dict) or not changes_by_id:
+            return
+        current = getattr(self, "_painter_ui_document", None)
+        original_by_id = {
+            str(row.get("id") or ""): row
+            for row in (current or {}).get("objects", [])
+        }
+        effective: dict[str, dict[str, object]] = {}
+        for raw_object_id, raw_changes in changes_by_id.items():
+            object_id = str(raw_object_id or "")
+            if not isinstance(raw_changes, dict) or object_id not in original_by_id:
+                continue
+            changes = dict(raw_changes)
+            if any(
+                original_by_id[object_id].get(key) != value
+                for key, value in changes.items()
+            ):
+                effective[object_id] = changes
+        if not effective:
+            return
+        self._push_undo_state(label)
+        updated = current
+        for object_id, changes in effective.items():
+            updated, _row = update_ui_object(updated, object_id, changes)
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
     def _move_painter_ui_object(
         self,
         object_id: str,
@@ -10687,16 +10752,19 @@ class PaintDialog(QDialog):
 
     def _align_painter_ui_object(self, object_id: str, command: str) -> None:
         current = getattr(self, "_painter_ui_document", None)
-        row = next(
-            (
-                item
-                for item in (current or {}).get("objects", [])
-                if item.get("id") == object_id
-            ),
-            None,
+        selected_ids = list(
+            ((current or {}).get("selection") or {}).get("object_ids") or []
         )
-        if row is None or row.get("locked"):
+        if object_id and object_id not in selected_ids:
+            selected_ids = [object_id]
+        rows = [
+            item
+            for item in (current or {}).get("objects", [])
+            if item.get("id") in selected_ids and not item.get("locked")
+        ]
+        if not rows:
             return
+        row = rows[-1]
         artboard = next(
             (
                 item
@@ -10707,37 +10775,79 @@ class PaintDialog(QDialog):
         )
         if artboard is None:
             return
-        changes: dict[str, float] = {}
-        if command == "left":
-            changes["x"] = 0.0
-        elif command == "hcenter":
-            changes["x"] = max(
-                0.0,
-                (float(artboard["width"]) - float(row["width"])) * 0.5,
-            )
-        elif command == "right":
-            changes["x"] = max(
-                0.0,
-                float(artboard["width"]) - float(row["width"]),
-            )
-        elif command == "top":
-            changes["y"] = 0.0
-        elif command == "vcenter":
-            changes["y"] = max(
-                0.0,
-                (float(artboard["height"]) - float(row["height"])) * 0.5,
-            )
-        elif command == "bottom":
-            changes["y"] = max(
-                0.0,
-                float(artboard["height"]) - float(row["height"]),
-            )
-        if changes:
-            self._update_painter_ui_object_changes(
-                object_id,
-                changes,
-                label=f"Align UI object {command}",
-            )
+        min_x = min(float(item["x"]) for item in rows)
+        min_y = min(float(item["y"]) for item in rows)
+        max_x = max(float(item["x"]) + float(item["width"]) for item in rows)
+        max_y = max(float(item["y"]) + float(item["height"]) for item in rows)
+        center_x = (min_x + max_x) * 0.5
+        center_y = (min_y + max_y) * 0.5
+        changes_by_id: dict[str, dict[str, float]] = {}
+        if command in {"distribute_h", "distribute_v"} and len(rows) >= 3:
+            if command == "distribute_h":
+                ordered = sorted(rows, key=lambda item: float(item["x"]))
+                total = sum(float(item["width"]) for item in ordered)
+                gap = max(0.0, (max_x - min_x - total) / (len(ordered) - 1))
+                cursor = min_x
+                for item in ordered:
+                    changes_by_id[item["id"]] = {"x": cursor}
+                    cursor += float(item["width"]) + gap
+            else:
+                ordered = sorted(rows, key=lambda item: float(item["y"]))
+                total = sum(float(item["height"]) for item in ordered)
+                gap = max(0.0, (max_y - min_y - total) / (len(ordered) - 1))
+                cursor = min_y
+                for item in ordered:
+                    changes_by_id[item["id"]] = {"y": cursor}
+                    cursor += float(item["height"]) + gap
+        else:
+            for item in rows:
+                changes: dict[str, float] = {}
+                if command == "left":
+                    changes["x"] = min_x if len(rows) > 1 else 0.0
+                elif command == "hcenter":
+                    changes["x"] = (
+                        center_x - float(item["width"]) * 0.5
+                        if len(rows) > 1
+                        else max(
+                            0.0,
+                            (float(artboard["width"]) - float(item["width"])) * 0.5,
+                        )
+                    )
+                elif command == "right":
+                    changes["x"] = (
+                        max_x - float(item["width"])
+                        if len(rows) > 1
+                        else max(
+                            0.0,
+                            float(artboard["width"]) - float(item["width"]),
+                        )
+                    )
+                elif command == "top":
+                    changes["y"] = min_y if len(rows) > 1 else 0.0
+                elif command == "vcenter":
+                    changes["y"] = (
+                        center_y - float(item["height"]) * 0.5
+                        if len(rows) > 1
+                        else max(
+                            0.0,
+                            (float(artboard["height"]) - float(item["height"])) * 0.5,
+                        )
+                    )
+                elif command == "bottom":
+                    changes["y"] = (
+                        max_y - float(item["height"])
+                        if len(rows) > 1
+                        else max(
+                            0.0,
+                            float(artboard["height"]) - float(item["height"]),
+                        )
+                    )
+                if changes:
+                    changes_by_id[item["id"]] = changes
+        self._update_painter_ui_objects_batch(
+            changes_by_id,
+            label=f"Arrange UI objects {command}",
+        )
 
     def _duplicate_painter_ui_object(self, object_id: str = "") -> None:
         from app.painter_ui_document import add_ui_object, update_ui_object
@@ -17316,11 +17426,19 @@ class PaintDialog(QDialog):
         self.canvas.set_view_zoom_percent(int(round(float(getattr(self, "_canvas_zoom", 1.0)) * 100)))
         ui_overlay = getattr(self, "_painter_ui_overlay", None)
         if ui_overlay is not None:
-            ui_overlay.setGeometry(bx, by, bw, bh)
+            if str(getattr(self, "_canvas_workspace_mode", "paint")) == "ui_design":
+                ui_overlay.setGeometry(0, 0, hw, hh)
+            else:
+                ui_overlay.setGeometry(bx, by, bw, bh)
             self._refresh_painter_ui_overlay()
         self._refresh_reference_overlay()
         self._refresh_3d_blockout_overlay()
         self.canvas.raise_()
+        if (
+            ui_overlay is not None
+            and str(getattr(self, "_canvas_workspace_mode", "paint")) == "ui_design"
+        ):
+            ui_overlay.raise_()
         # Re-lay out any speech bubble items so their normalized coords map
         # onto the current canvas rect.
         for item in getattr(self, "_bubble_items", []):

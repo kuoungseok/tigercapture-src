@@ -26,8 +26,10 @@ _HANDLE_NAMES = ("nw", "ne", "sw", "se")
 
 class PainterUIDesignOverlay(QWidget):
     object_selected = Signal(str)
+    object_selection_requested = Signal(str, str)
     object_geometry_requested = Signal(str, float, float, float, float)
     object_changes_requested = Signal(str, object)
+    objects_changes_requested = Signal(object)
     object_create_requested = Signal(str, float, float, float, float)
     key_command = Signal(str, bool)
 
@@ -42,6 +44,7 @@ class PainterUIDesignOverlay(QWidget):
         self._original_rect = QRectF()
         self._preview_rect = QRectF()
         self._drag_offset = QPointF()
+        self._move_original_positions: dict[str, tuple[float, float]] = {}
         self._original_rotation = 0.0
         self._rotation_start_angle = 0.0
         self._snap_enabled = False
@@ -81,27 +84,44 @@ class PainterUIDesignOverlay(QWidget):
             row for row in self._document["artboards"] if row["id"] == active
         )
 
-    def _scale(self) -> tuple[float, float]:
+    def _artboard_viewport(self) -> tuple[QRectF, float]:
         artboard = self._active_artboard()
+        available_width = max(1.0, float(self.width()) - 24.0)
+        available_height = max(1.0, float(self.height()) - 24.0)
+        scale = min(
+            available_width / max(1.0, float(artboard["width"])),
+            available_height / max(1.0, float(artboard["height"])),
+        )
+        width = float(artboard["width"]) * scale
+        height = float(artboard["height"]) * scale
         return (
-            self.width() / max(1.0, float(artboard["width"])),
-            self.height() / max(1.0, float(artboard["height"])),
+            QRectF(
+                (float(self.width()) - width) * 0.5,
+                (float(self.height()) - height) * 0.5,
+                width,
+                height,
+            ),
+            scale,
         )
 
+    def _scale(self) -> tuple[float, float]:
+        _viewport, scale = self._artboard_viewport()
+        return scale, scale
+
     def _document_point(self, point: QPointF) -> QPointF:
-        sx, sy = self._scale()
+        viewport, scale = self._artboard_viewport()
         return QPointF(
-            point.x() / max(0.0001, sx),
-            point.y() / max(0.0001, sy),
+            (point.x() - viewport.x()) / max(0.0001, scale),
+            (point.y() - viewport.y()) / max(0.0001, scale),
         )
 
     def _object_rect(self, row: Mapping[str, Any]) -> QRectF:
-        sx, sy = self._scale()
+        viewport, scale = self._artboard_viewport()
         return QRectF(
-            float(row["x"]) * sx,
-            float(row["y"]) * sy,
-            float(row["width"]) * sx,
-            float(row["height"]) * sy,
+            viewport.x() + float(row["x"]) * scale,
+            viewport.y() + float(row["y"]) * scale,
+            float(row["width"]) * scale,
+            float(row["height"]) * scale,
         )
 
     @staticmethod
@@ -138,6 +158,7 @@ class PainterUIDesignOverlay(QWidget):
 
     def _selected_row(self) -> dict[str, Any] | None:
         selected = self._document["selection"]["object_id"]
+        selected_ids = set(self._document["selection"]["object_ids"])
         return next(
             (row for row in self._document["objects"] if row["id"] == selected),
             None,
@@ -203,7 +224,15 @@ class PainterUIDesignOverlay(QWidget):
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        artboard = self._active_artboard()
+        viewport, _scale = self._artboard_viewport()
+        painter.fillRect(self.rect(), QColor(18, 21, 27, 86))
+        painter.fillRect(viewport, QColor(str(artboard.get("background") or "#FFFFFF")))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor("#718096"), 1.0))
+        painter.drawRect(viewport)
         selected = self._document["selection"]["object_id"]
+        selected_ids = set(self._document["selection"]["object_ids"])
         for row in self._visible_objects():
             painter.save()
             rect = self._object_rect(row)
@@ -213,7 +242,7 @@ class PainterUIDesignOverlay(QWidget):
                 painter.rotate(rotation)
                 painter.translate(-rect.center())
             self._paint_object(painter, row)
-            is_selected = row["id"] == selected
+            is_selected = row["id"] in selected_ids
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.setPen(
                 QPen(
@@ -222,7 +251,7 @@ class PainterUIDesignOverlay(QWidget):
                 )
             )
             painter.drawRect(rect)
-            if is_selected and not row["locked"]:
+            if row["id"] == selected and not row["locked"]:
                 painter.setBrush(QColor("#F4F7FC"))
                 painter.setPen(QPen(QColor("#356FC7"), 1.0))
                 for handle in self._handle_rects(rect).values():
@@ -254,8 +283,12 @@ class PainterUIDesignOverlay(QWidget):
             return
         self.setFocus(Qt.FocusReason.MouseFocusReason)
         self._press_position = QPointF(event.position())
+        viewport, _scale = self._artboard_viewport()
 
         if self._tool in _CREATE_TOOLS:
+            if not viewport.contains(self._press_position):
+                event.ignore()
+                return
             self._interaction = "create"
             self._preview_rect = QRectF(self._press_position, self._press_position)
             event.accept()
@@ -290,6 +323,7 @@ class PainterUIDesignOverlay(QWidget):
                     return
 
         selected = ""
+        selected_row = None
         for row in self._visible_objects(reverse=True):
             rect = self._object_rect(row)
             local_position = self._unrotated_point(
@@ -299,22 +333,50 @@ class PainterUIDesignOverlay(QWidget):
             )
             if rect.contains(local_position):
                 selected = row["id"]
-                if not row["locked"]:
-                    self._interaction = "move"
-                    self._active_object_id = selected
-                    self._original_rect = QRectF(rect)
-                    self._drag_offset = event.position() - rect.topLeft()
+                selected_row = row
                 break
+        modifiers = event.modifiers()
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            self.object_selection_requested.emit(selected, "toggle")
+            self._cancel_interaction()
+            event.accept()
+            return
+        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+            self.object_selection_requested.emit(selected, "add")
+            self._cancel_interaction()
+            event.accept()
+            return
         if not selected:
             self._cancel_interaction()
-        self.object_selected.emit(selected)
+            self.object_selection_requested.emit("", "replace")
+        else:
+            if selected not in self._document["selection"]["object_ids"]:
+                self.object_selection_requested.emit(selected, "replace")
+            if selected_row is not None and not selected_row["locked"]:
+                self._interaction = "move"
+                self._active_object_id = selected
+                self._original_rect = QRectF(self._object_rect(selected_row))
+                self._drag_offset = event.position() - self._original_rect.topLeft()
+                selected_ids = list(self._document["selection"]["object_ids"])
+                if selected not in selected_ids:
+                    selected_ids = [selected]
+                self._move_original_positions = {
+                    row["id"]: (float(row["x"]), float(row["y"]))
+                    for row in self._document["objects"]
+                    if row["id"] in selected_ids and not row["locked"]
+                }
         event.accept()
 
     def mouseMoveEvent(self, event) -> None:
         if self._interaction == "create":
+            viewport, _scale = self._artboard_viewport()
+            position = QPointF(
+                max(viewport.left(), min(viewport.right(), event.position().x())),
+                max(viewport.top(), min(viewport.bottom(), event.position().y())),
+            )
             self._preview_rect = QRectF(
                 self._press_position,
-                event.position(),
+                position,
             ).normalized()
             self.update()
             event.accept()
@@ -327,20 +389,44 @@ class PainterUIDesignOverlay(QWidget):
                 for row in self._document["objects"]
                 if row["id"] == self._active_object_id
             )
-            row["x"] = max(
+            next_x = max(
                 0.0,
                 min(
                     float(artboard["width"]) - float(row["width"]),
                     self._snap(doc.x()),
                 ),
             )
-            row["y"] = max(
+            next_y = max(
                 0.0,
                 min(
                     float(artboard["height"]) - float(row["height"]),
                     self._snap(doc.y()),
                 ),
             )
+            original_primary = self._move_original_positions.get(
+                row["id"],
+                (float(row["x"]), float(row["y"])),
+            )
+            delta_x = next_x - original_primary[0]
+            delta_y = next_y - original_primary[1]
+            for moving_row in self._document["objects"]:
+                original = self._move_original_positions.get(moving_row["id"])
+                if original is None:
+                    continue
+                moving_row["x"] = max(
+                    0.0,
+                    min(
+                        float(artboard["width"]) - float(moving_row["width"]),
+                        original[0] + delta_x,
+                    ),
+                )
+                moving_row["y"] = max(
+                    0.0,
+                    min(
+                        float(artboard["height"]) - float(moving_row["height"]),
+                        original[1] + delta_y,
+                    ),
+                )
             self.update()
             event.accept()
             return
@@ -366,16 +452,20 @@ class PainterUIDesignOverlay(QWidget):
                 rect.setRight(point.x())
             rect = rect.normalized()
             if rect.width() >= 8.0 and rect.height() >= 8.0:
-                sx, sy = self._scale()
-                row["x"] = self._snap(rect.x() / max(0.0001, sx))
-                row["y"] = self._snap(rect.y() / max(0.0001, sy))
+                viewport, scale = self._artboard_viewport()
+                row["x"] = self._snap(
+                    (rect.x() - viewport.x()) / max(0.0001, scale)
+                )
+                row["y"] = self._snap(
+                    (rect.y() - viewport.y()) / max(0.0001, scale)
+                )
                 row["width"] = max(
                     1.0,
-                    self._snap(rect.width() / max(0.0001, sx)),
+                    self._snap(rect.width() / max(0.0001, scale)),
                 )
                 row["height"] = max(
                     1.0,
-                    self._snap(rect.height() / max(0.0001, sy)),
+                    self._snap(rect.height() / max(0.0001, scale)),
                 )
                 self.update()
             event.accept()
@@ -403,13 +493,17 @@ class PainterUIDesignOverlay(QWidget):
         if interaction == "create":
             rect = self._preview_rect.normalized()
             if rect.width() >= 6.0 and rect.height() >= 6.0:
-                sx, sy = self._scale()
+                viewport, scale = self._artboard_viewport()
                 self.object_create_requested.emit(
                     self._tool,
-                    self._snap(rect.x() / max(0.0001, sx)),
-                    self._snap(rect.y() / max(0.0001, sy)),
-                    max(1.0, self._snap(rect.width() / max(0.0001, sx))),
-                    max(1.0, self._snap(rect.height() / max(0.0001, sy))),
+                    self._snap(
+                        (rect.x() - viewport.x()) / max(0.0001, scale)
+                    ),
+                    self._snap(
+                        (rect.y() - viewport.y()) / max(0.0001, scale)
+                    ),
+                    max(1.0, self._snap(rect.width() / max(0.0001, scale))),
+                    max(1.0, self._snap(rect.height() / max(0.0001, scale))),
                 )
         elif interaction in {"move", "resize", "rotate"} and object_id:
             row = next(
@@ -417,7 +511,19 @@ class PainterUIDesignOverlay(QWidget):
                 None,
             )
             if row is not None:
-                if interaction == "rotate":
+                if interaction == "move" and len(self._move_original_positions) > 1:
+                    self.objects_changes_requested.emit(
+                        {
+                            selected_id: {
+                                "x": float(selected_row["x"]),
+                                "y": float(selected_row["y"]),
+                            }
+                            for selected_id in self._move_original_positions
+                            for selected_row in self._document["objects"]
+                            if selected_row["id"] == selected_id
+                        }
+                    )
+                elif interaction == "rotate":
                     self.object_changes_requested.emit(
                         object_id,
                         {"rotation": float(row["rotation"])},
@@ -431,6 +537,7 @@ class PainterUIDesignOverlay(QWidget):
                         float(row["height"]),
                     )
         self._cancel_interaction()
+        self._move_original_positions = {}
         event.accept()
 
     def keyPressEvent(self, event) -> None:

@@ -17,8 +17,12 @@ Implementation checkpoint:
   move/duplicate/delete, rotation-aware transforms, optional 8 px/15 degree
   snapping, artboard activation, artboard alignment, and a dedicated UI
   `Layers | Inspect` panel.
-- M1 multi-selection distribute, multi-artboard canvas layout, hierarchy
-  editing, and broader responsive screenshot QA remain before M1 completion.
+- M1 now also includes Ctrl/Shift and Layers-panel multi-selection, group move
+  with one-step Undo, selection-bound alignment, horizontal/vertical
+  distribution, automation actions for selection/arrangement, and
+  aspect-preserving phone/desktop artboard transitions with desktop QA proof.
+- M1 hierarchy editing, freeform multi-artboard overview placement, and broader
+  responsive screenshot QA remain before M1 completion.
   M2-M6 remain milestone work.
 - Product-adoption work is now explicit in M2A/M2B: editable template gallery,
   reusable component/variant libraries, Auto Layout presets, design tokens,

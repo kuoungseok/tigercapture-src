@@ -149,6 +149,49 @@ def test_general_ui_document_switches_artboards_and_clears_foreign_selection() -
     assert phone_button["id"] in {row["id"] for row in document["objects"]}
 
 
+def test_general_ui_document_multi_selection_modes_are_stable() -> None:
+    from app.painter_ui_document import (
+        add_ui_object,
+        create_ui_document,
+        normalize_ui_document,
+        select_ui_object,
+        select_ui_objects,
+    )
+
+    document = create_ui_document(800, 600)
+    rows = []
+    for index in range(3):
+        document, row = add_ui_object(
+            document,
+            kind="rectangle",
+            x=40 + index * 120,
+            y=80,
+            width=80,
+            height=60,
+        )
+        rows.append(row)
+
+    document = select_ui_object(document, rows[0]["id"])
+    document = select_ui_object(document, rows[1]["id"], mode="add")
+    assert document["selection"] == {
+        "object_id": rows[1]["id"],
+        "object_ids": [rows[0]["id"], rows[1]["id"]],
+    }
+    document = select_ui_object(document, rows[0]["id"], mode="toggle")
+    assert document["selection"]["object_ids"] == [rows[1]["id"]]
+
+    document = select_ui_objects(
+        document,
+        [rows[2]["id"], rows[0]["id"]],
+        primary_object_id=rows[2]["id"],
+    )
+    restored = normalize_ui_document(document)
+    assert restored["selection"] == {
+        "object_id": rows[2]["id"],
+        "object_ids": [rows[2]["id"], rows[0]["id"]],
+    }
+
+
 def test_general_ui_document_preserves_unknown_kinds_for_explicit_preflight() -> None:
     from app.painter_ui_delivery import preflight_ui_delivery
     from app.painter_ui_document import normalize_ui_document, validate_ui_document

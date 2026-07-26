@@ -67,15 +67,19 @@ Status: interactive editing implemented, completion pending
 - Inspect의 name/type/X/Y/W/H/opacity/fill/visible/locked 편집
 - artboard 선택기와 `paint.ui.artboard.activate`
 - artboard 기준 left/hcenter/right/top/vcenter/bottom 정렬
+- Ctrl/Shift 캔버스 선택과 Layers 패널 다중 선택
+- 다중 선택 객체의 그룹 이동과 단일 Undo
+- 선택 경계 기준 정렬과 수평/수직 균등 분배
+- `paint.ui.selection.set`, `paint.ui.object.arrange` 자동화 계약
+- 휴대폰/데스크톱 아트보드 비율 보존 전환
 - keyboard 1 px 이동, Shift+방향키 10 px 이동, Delete, Ctrl+D
 - UI 객체 duplicate/delete와 Undo/Redo
 - Action으로 만든 객체가 화면에 즉시 반영
-- desktop QA의 Layers/Inspect 두 화면 캡처
+- phone Layers/Inspect 및 desktop 다중 선택 화면 캡처
 
 남은 완료 조건:
 
-- multi-selection align/distribute
-- multi-artboard canvas 배치와 전환
+- 자유 배치형 multi-artboard overview
 - Inspect의 text/typography/constraint/parent hierarchy 편집
 - Layers의 drag reorder, parent/group hierarchy 편집
 - 실제 mobile 및 여러 desktop 크기 screenshot QA

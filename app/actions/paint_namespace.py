@@ -242,6 +242,51 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a UI object hierarchy would be removed",
     )
     registry.register_adapter_action(
+        "paint.ui.selection.set",
+        "Select one or more UI objects on the active Painter artboard.",
+        "paint",
+        "paint_ui_selection_set",
+        params_schema=schema_object(
+            {
+                "object_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "uniqueItems": True,
+                },
+                "primary_object_id": {"type": "string"},
+            }
+        ),
+        undo_label="Set UI selection",
+        dry_summary="the active Painter UI selection would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.arrange",
+        "Align or distribute the selected Painter UI objects.",
+        "paint",
+        "paint_ui_object_arrange",
+        params_schema=schema_object(
+            {
+                "command": {
+                    "type": "string",
+                    "enum": [
+                        "left",
+                        "hcenter",
+                        "right",
+                        "top",
+                        "vcenter",
+                        "bottom",
+                        "distribute_h",
+                        "distribute_v",
+                    ],
+                }
+            },
+            required=("command",),
+        ),
+        required=("command",),
+        undo_label="Arrange UI objects",
+        dry_summary="selected Painter UI objects would be aligned or distributed",
+    )
+    registry.register_adapter_action(
         "paint.ui.delivery.profiles",
         "List general Painter UI delivery adapters and artifact capabilities.",
         "paint",

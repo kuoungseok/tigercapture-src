@@ -6633,6 +6633,14 @@ AI Script Edit MVP integration:
   similar-color selection, and selection-to-path. Path automation covers
   create/delete/clear/commit and path-to-selection. Clipboard automation covers
   `paint.clipboard.copy`, `paint.clipboard.cut`, and `paint.clipboard.paste`.
+- Painter UI Design automation includes `paint.ui.selection.set` for
+  provider-neutral multi-selection and `paint.ui.object.arrange` for
+  selection-bound alignment or horizontal/vertical distribution. The canvas
+  and Layers panel share the same ordered selection contract; Ctrl toggles,
+  Shift adds, group movement is one Undo transaction, and only the primary
+  object exposes resize/rotation handles. Phone and desktop artboards preserve
+  their document aspect ratio while fitting the available UI Design workspace
+  rather than stretching to the underlying paint-canvas dimensions.
 - Painter AI/agent painting uses the same editable `Stroke` model and preview/
   export renderer as manual drawing. `paint.stroke.draw` accepts up to 512
   strokes per call, each with normalized canvas points, color, opacity, width,

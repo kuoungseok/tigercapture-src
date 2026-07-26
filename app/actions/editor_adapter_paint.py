@@ -201,6 +201,33 @@ class PaintAdapterMixin:
         dialog._push_undo_state("Remove UI object")
         return self._paint_ui_commit(dialog, "Remove UI object", document)
 
+    def paint_ui_selection_set(
+        self,
+        *,
+        object_ids: list[str] | None = None,
+        primary_object_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        dialog._set_painter_ui_selection(
+            list(object_ids or []),
+            str(primary_object_id or ""),
+        )
+        return dialog.painter_action_state()
+
+    def paint_ui_object_arrange(self, *, command: str) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        selected = str(
+            (
+                getattr(dialog, "_painter_ui_document", {}).get("selection")
+                or {}
+            ).get("object_id")
+            or ""
+        )
+        if not selected:
+            raise ValueError("paint.ui.object.arrange requires a UI selection")
+        dialog._align_painter_ui_object(selected, str(command or ""))
+        return dialog.painter_action_state()
+
     def paint_ui_delivery_profiles(self) -> dict[str, Any]:
         from app.painter_ui_delivery import list_ui_delivery_profiles
 

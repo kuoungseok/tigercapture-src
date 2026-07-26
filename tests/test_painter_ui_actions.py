@@ -40,6 +40,8 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.object.add",
         "paint.ui.object.update",
         "paint.ui.object.remove",
+        "paint.ui.selection.set",
+        "paint.ui.object.arrange",
         "paint.ui.delivery.profiles",
         "paint.ui.delivery.preflight",
         "paint.ui.handoff.export",
@@ -103,6 +105,22 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     dialog._redo()
     redone = dialog.painter_action_state()
     assert redone["ui_design"]["document"]["objects"][0]["width"] == 300.0
+
+    selected = registry.execute(
+        "paint.ui.selection.set",
+        {"object_ids": [object_id], "primary_object_id": object_id},
+    ).to_dict()
+    assert selected["ok"]
+    assert selected["result"]["ui_design"]["selected_object_ids"] == [object_id]
+    arranged = registry.execute(
+        "paint.ui.object.arrange",
+        {"command": "right"},
+    ).to_dict()
+    assert arranged["ok"]
+    assert (
+        arranged["result"]["ui_design"]["document"]["objects"][0]["x"]
+        == 90.0
+    )
 
     handoff_dir = tmp_path / "handoff"
     handoff = registry.execute(
@@ -238,6 +256,82 @@ def test_painter_ui_design_toolbar_creates_edits_and_lists_visible_objects() -> 
     app.processEvents()
 
 
+def test_painter_ui_multi_select_align_distribute_and_group_undo() -> None:
+    app = _app()
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(800, 600, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.show()
+    dialog._set_canvas_workspace_mode("ui_design")
+    rows = []
+    for x, y in ((60, 80), (310, 170), (650, 260)):
+        dialog._create_painter_ui_object_from_rect(
+            "rectangle",
+            float(x),
+            float(y),
+            80.0,
+            60.0,
+        )
+        rows.append(dialog.painter_action_state()["ui_design"]["selected_object_id"])
+
+    dialog._set_painter_ui_selection(rows, rows[-1])
+    app.processEvents()
+    state = dialog.painter_action_state()["ui_design"]
+    assert state["selected_object_ids"] == rows
+    assert len(dialog._paint_ui_inspector.layer_list.selectedItems()) == 3
+
+    dialog._align_painter_ui_object(rows[-1], "top")
+    objects = {
+        row["id"]: row
+        for row in dialog.painter_action_state()["ui_design"]["document"]["objects"]
+    }
+    assert {objects[object_id]["y"] for object_id in rows} == {80.0}
+
+    dialog._update_painter_ui_objects_batch(
+        {
+            rows[0]: {"x": 60.0},
+            rows[1]: {"x": 250.0},
+            rows[2]: {"x": 650.0},
+        },
+        label="Reset UI positions",
+    )
+    dialog._align_painter_ui_object(rows[-1], "distribute_h")
+    objects = {
+        row["id"]: row
+        for row in dialog.painter_action_state()["ui_design"]["document"]["objects"]
+    }
+    ordered = sorted((objects[object_id] for object_id in rows), key=lambda row: row["x"])
+    gaps = [
+        ordered[index + 1]["x"] - (ordered[index]["x"] + ordered[index]["width"])
+        for index in range(2)
+    ]
+    assert abs(gaps[0] - gaps[1]) < 0.001
+
+    before_move = {object_id: objects[object_id]["x"] for object_id in rows}
+    dialog._update_painter_ui_objects_batch(
+        {
+            object_id: {"x": before_move[object_id] + 24.0}
+            for object_id in rows
+        },
+        label="Move UI selection",
+    )
+    dialog._undo()
+    undone = {
+        row["id"]: row
+        for row in dialog.painter_action_state()["ui_design"]["document"]["objects"]
+    }
+    assert {object_id: undone[object_id]["x"] for object_id in rows} == before_move
+
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
 def test_painter_ui_overlay_drag_create_move_and_resize_signals() -> None:
     app = _app()
     from PySide6.QtCore import QPoint, Qt
@@ -364,5 +458,40 @@ def test_painter_ui_overlay_drag_create_move_and_resize_signals() -> None:
     assert abs(float(changes[-1][1]["rotation"])) >= 80.0
 
     overlay.close()
+    overlay.deleteLater()
+    app.processEvents()
+
+
+def test_painter_ui_overlay_preserves_active_artboard_aspect_ratio() -> None:
+    app = _app()
+    from app.painter_ui_document import (
+        add_ui_artboard,
+        create_ui_document,
+        set_active_ui_artboard,
+    )
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(1000, 700)
+    document = create_ui_document(390, 844, name="Phone")
+    phone_viewport, phone_scale = overlay._artboard_viewport()
+    overlay.set_document(document)
+    phone_viewport, phone_scale = overlay._artboard_viewport()
+    assert abs(phone_viewport.width() / phone_viewport.height() - 390 / 844) < 0.001
+    assert phone_scale > 0.0
+
+    document, desktop = add_ui_artboard(
+        document,
+        name="Desktop",
+        width=1440,
+        height=900,
+    )
+    document = set_active_ui_artboard(document, desktop["id"])
+    overlay.set_document(document)
+    desktop_viewport, desktop_scale = overlay._artboard_viewport()
+    assert abs(desktop_viewport.width() / desktop_viewport.height() - 1.6) < 0.001
+    assert desktop_scale > 0.0
+    assert desktop_viewport.width() > phone_viewport.width()
+
     overlay.deleteLater()
     app.processEvents()
