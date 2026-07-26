@@ -18,7 +18,8 @@ _TARGET_CAPABILITIES: dict[str, dict[str, Any]] = {
         "title": "Asset Export",
         "artifact_types": ["png", "webp", "svg", "density_variants"],
         "native_kinds": {"rectangle", "ellipse", "line", "path", "text", "image"},
-        "converted_kinds": {"frame", "group", "button", "progress"},
+        "material_kinds": set(),
+        "baked_kinds": {"frame", "group", "button", "progress"},
     },
     "design_handoff": {
         "title": "Design Handoff",
@@ -27,7 +28,8 @@ _TARGET_CAPABILITIES: dict[str, dict[str, Any]] = {
             "frame", "group", "rectangle", "ellipse", "line", "path", "text",
             "image", "button", "progress",
         },
-        "converted_kinds": set(),
+        "material_kinds": set(),
+        "baked_kinds": set(),
     },
     "review_prototype": {
         "title": "Review Prototype",
@@ -36,13 +38,15 @@ _TARGET_CAPABILITIES: dict[str, dict[str, Any]] = {
             "frame", "group", "rectangle", "ellipse", "line", "text", "image",
             "button", "progress",
         },
-        "converted_kinds": {"path"},
+        "material_kinds": set(),
+        "baked_kinds": {"path"},
     },
     "unreal_umg": {
         "title": "Unreal UMG",
         "artifact_types": ["widget_blueprint"],
         "native_kinds": {"frame", "group", "text", "image", "button", "progress"},
-        "converted_kinds": {"rectangle", "ellipse", "line", "path"},
+        "material_kinds": {"rectangle", "ellipse", "line", "path"},
+        "baked_kinds": set(),
     },
 }
 
@@ -64,6 +68,74 @@ def list_ui_delivery_profiles() -> dict[str, Any]:
     }
 
 
+def classify_ui_object_delivery(
+    value: Mapping[str, Any],
+    target: str,
+) -> dict[str, Any]:
+    target_id = str(target or "").strip().casefold()
+    if target_id not in _TARGET_CAPABILITIES:
+        raise ValueError(f"Unknown Painter UI delivery target: {target}")
+    obj = dict(value)
+    kind = str(obj.get("kind") or "").strip().casefold()
+    style = obj.get("style")
+    style = style if isinstance(style, Mapping) else {}
+    capabilities = _TARGET_CAPABILITIES[target_id]
+    if style.get("paint_layer_id"):
+        disposition = "baked"
+        reason = "Painter layer appearance requires a deterministic asset bake"
+    elif (
+        target_id == "unreal_umg"
+        and any(style.get(key) for key in ("gradient", "mask", "material"))
+    ):
+        disposition = "material"
+        reason = "represented by a generated or shared Unreal UI Material"
+    elif kind in capabilities["native_kinds"]:
+        disposition = "native"
+        reason = "represented directly by the target"
+    elif kind in capabilities["material_kinds"]:
+        disposition = "material"
+        reason = "represented through the target material adapter"
+    elif kind in capabilities["baked_kinds"]:
+        disposition = "baked"
+        reason = "converted to a deterministic raster asset"
+    else:
+        disposition = "blocked"
+        reason = "target adapter has no declared conversion"
+    return {
+        "object_id": str(obj.get("id") or ""),
+        "name": str(obj.get("name") or kind or "UI Object"),
+        "kind": kind,
+        "target": target_id,
+        "disposition": disposition,
+        "display_disposition": disposition.title(),
+        "reason": reason,
+    }
+
+
+def ui_object_delivery_statuses(
+    value: Mapping[str, Any],
+    object_id: str,
+) -> dict[str, Any]:
+    document = normalize_ui_document(value)
+    selected_id = str(object_id or "")
+    obj = next(
+        (row for row in document["objects"] if row["id"] == selected_id),
+        None,
+    )
+    if obj is None:
+        raise ValueError(f"Unknown Painter UI object: {object_id}")
+    return {
+        "schema": "tigerstudio.painter.ui.object_delivery_status.v1",
+        "document_id": document["document_id"],
+        "revision": document["revision"],
+        "object_id": selected_id,
+        "targets": [
+            classify_ui_object_delivery(obj, target)
+            for target in UI_DELIVERY_TARGETS
+        ],
+    }
+
+
 def preflight_ui_delivery(
     value: Mapping[str, Any],
     target: str,
@@ -75,31 +147,11 @@ def preflight_ui_delivery(
     validation = validate_ui_document(document)
     capabilities = _TARGET_CAPABILITIES[target_id]
     rows: list[dict[str, Any]] = []
-    counts = {"native": 0, "converted": 0, "baked": 0, "blocked": 0}
+    counts = {"native": 0, "material": 0, "baked": 0, "blocked": 0}
     for obj in document["objects"]:
-        kind = obj["kind"]
-        if kind in capabilities["native_kinds"]:
-            disposition = "native"
-            reason = "represented directly by the target"
-        elif kind in capabilities["converted_kinds"]:
-            disposition = "converted"
-            reason = "converted through the target adapter"
-        else:
-            disposition = "blocked"
-            reason = "target adapter has no declared conversion"
-        if obj["style"].get("paint_layer_id"):
-            disposition = "baked"
-            reason = "Painter layer appearance requires a deterministic asset bake"
-        counts[disposition] += 1
-        rows.append(
-            {
-                "object_id": obj["id"],
-                "name": obj["name"],
-                "kind": kind,
-                "disposition": disposition,
-                "reason": reason,
-            }
-        )
+        status = classify_ui_object_delivery(obj, target_id)
+        counts[status["disposition"]] += 1
+        rows.append(status)
     blockers = list(validation["errors"])
     blockers.extend(
         f"blocked_object:{row['object_id']}"
@@ -107,7 +159,7 @@ def preflight_ui_delivery(
         if row["disposition"] == "blocked"
     )
     return {
-        "schema": "tigerstudio.painter.ui.delivery_preflight.v1",
+        "schema": "tigerstudio.painter.ui.delivery_preflight.v2",
         "ok": not blockers,
         "target": target_id,
         "title": capabilities["title"],
@@ -189,7 +241,9 @@ def package_design_handoff(
 
 
 __all__ = [
+    "classify_ui_object_delivery",
     "list_ui_delivery_profiles",
     "package_design_handoff",
     "preflight_ui_delivery",
+    "ui_object_delivery_statuses",
 ]

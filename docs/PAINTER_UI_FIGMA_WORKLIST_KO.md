@@ -151,11 +151,13 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
 - 이미지 Fit/Fill/Stretch/Tile, 타일 배율, 9-slice 여백
 - Fill, Stroke, Stroke Width, Radius, 구조화된 Shadow 편집과 저장
 - 텍스트 내용, 크기, 굵기, 정렬, 행간 편집과 저장
+- 접근성 role, label, focus order 편집과 문서 정규화
+- 대상별 `Native/Material/Baked/Blocked` 상태와 판정 이유 표시
+- 접근성 라벨 누락과 아트보드별 명시 focus order 중복 검사
 - UI와 Action이 공유하는 문서 mutation 및 Undo 경로
 
 남은 범위:
 
-- 접근성 메타데이터와 target별 전달 상태
 - target adapter 출력과 캔버스 스타일 렌더링 parity 검증
 
 ## P3. Auto Layout와 반응형

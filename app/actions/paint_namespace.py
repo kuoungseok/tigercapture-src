@@ -532,7 +532,7 @@ def register_paint_actions(registry: Any) -> None:
     )
     registry.register_adapter_action(
         "paint.ui.delivery.preflight",
-        "Classify each UI object as native, converted, baked, or blocked for a delivery target.",
+        "Classify each UI object as native, material, baked, or blocked for a delivery target.",
         "paint",
         "paint_ui_delivery_preflight",
         params_schema=schema_object(

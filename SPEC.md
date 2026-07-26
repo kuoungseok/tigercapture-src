@@ -6660,6 +6660,14 @@ AI Script Edit MVP integration:
   `paint.ui.object.update` contract. Missing sources remain visible as crossed
   placeholders. Source-byte embedding, hashes, density variants, and delivery
   packaging remain explicit P8 follow-up scope.
+- Painter UI objects normalize editable accessibility `role`, `label`, and
+  `focus_order`; zero uses document order and positive values are explicit.
+  Validation reports missing semantic labels and duplicate positive focus
+  orders per artboard. The Inspector uses the shared undoable object mutation
+  path and displays Asset Export, Design Handoff, Review Prototype, and Unreal
+  UMG disposition plus reason. `painter_ui_delivery` is the single classifier:
+  preflight v2 reports only `Native`, `Material`, `Baked`, or `Blocked`, so UI,
+  Actions, and handoff cannot silently disagree about conversion support.
 - Painter UI groups keep stable child IDs and remain editable: grouping,
   ungrouping, and layer-stack reordering are exposed through
   `paint.ui.object.group`, `paint.ui.object.ungroup`, and

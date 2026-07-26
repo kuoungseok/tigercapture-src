@@ -418,6 +418,59 @@ class PainterUIInspector(QWidget):
         text_layout_row.addWidget(self.text_align_combo)
         text_layout_row.addWidget(self.line_height_spin)
         form.addRow("Text Layout", text_layout)
+        self.accessibility_role_combo = QComboBox()
+        for label, role in (
+            ("Auto", "auto"),
+            ("None", "none"),
+            ("Button", "button"),
+            ("Checkbox", "checkbox"),
+            ("Heading", "heading"),
+            ("Image", "image"),
+            ("Link", "link"),
+            ("Progress", "progress"),
+            ("Slider", "slider"),
+            ("Text", "text"),
+        ):
+            self.accessibility_role_combo.addItem(label, role)
+        self.accessibility_role_combo.currentIndexChanged.connect(
+            self._emit_properties
+        )
+        form.addRow("A11y Role", self.accessibility_role_combo)
+        self.accessibility_label_edit = QLineEdit()
+        self.accessibility_label_edit.setPlaceholderText(
+            "Screen reader label"
+        )
+        self.accessibility_label_edit.editingFinished.connect(
+            self._emit_properties
+        )
+        form.addRow("A11y Label", self.accessibility_label_edit)
+        self.focus_order_spin = QSpinBox()
+        self.focus_order_spin.setRange(0, 9999)
+        self.focus_order_spin.setSpecialValueText("Auto")
+        self.focus_order_spin.setToolTip(
+            "0 follows document order; positive values define an explicit order"
+        )
+        self.focus_order_spin.editingFinished.connect(self._emit_properties)
+        form.addRow("Focus Order", self.focus_order_spin)
+        delivery_status = QFrame()
+        delivery_layout = QVBoxLayout(delivery_status)
+        delivery_layout.setContentsMargins(0, 2, 0, 2)
+        delivery_layout.setSpacing(2)
+        self.delivery_status_labels: dict[str, QLabel] = {}
+        for target, title in (
+            ("asset_export", "Asset"),
+            ("design_handoff", "Handoff"),
+            ("review_prototype", "Prototype"),
+            ("unreal_umg", "Unreal UMG"),
+        ):
+            label = QLabel(f"{title}: -")
+            label.setObjectName("PainterUIDeliveryStatus")
+            label.setTextInteractionFlags(
+                Qt.TextInteractionFlag.TextSelectableByMouse
+            )
+            delivery_layout.addWidget(label)
+            self.delivery_status_labels[target] = label
+        form.addRow("Delivery", delivery_status)
         self.visible_check = QCheckBox("Visible")
         self.visible_check.toggled.connect(self._emit_properties)
         self.locked_check = QCheckBox("Locked")
@@ -550,6 +603,9 @@ class PainterUIInspector(QWidget):
             self.image_tile_scale_spin,
             self.nine_slice_check,
             *self.nine_slice_controls.values(),
+            self.accessibility_role_combo,
+            self.accessibility_label_edit,
+            self.focus_order_spin,
             self.pivot_x_spin,
             self.pivot_y_spin,
             self.horizontal_constraint_combo,
@@ -569,6 +625,11 @@ class PainterUIInspector(QWidget):
             self.shadow_color_edit.clear()
             self.text_edit.clear()
             self.image_source_edit.clear()
+            self.accessibility_label_edit.clear()
+            self.focus_order_spin.setValue(0)
+            for target, label in self.delivery_status_labels.items():
+                label.setText(f"{self._delivery_title(target)}: -")
+                label.setToolTip("")
             return
         self.name_edit.setText(str(row["name"]))
         self.kind_label.setText(str(row["kind"]).title())
@@ -629,6 +690,24 @@ class PainterUIInspector(QWidget):
         for edge, spin in self.nine_slice_controls.items():
             spin.setValue(float(image_content["nine_slice"][edge]))
         self._sync_image_control_states()
+        accessibility = row["accessibility"]
+        role_index = self.accessibility_role_combo.findData(
+            accessibility["role"]
+        )
+        self.accessibility_role_combo.setCurrentIndex(max(0, role_index))
+        self.accessibility_label_edit.setText(accessibility["label"])
+        self.focus_order_spin.setValue(accessibility["focus_order"])
+        from app.painter_ui_delivery import ui_object_delivery_statuses
+
+        statuses = ui_object_delivery_statuses(self._document, row["id"])
+        for status in statuses["targets"]:
+            target = status["target"]
+            label = self.delivery_status_labels[target]
+            label.setText(
+                f"{self._delivery_title(target)}: "
+                f"{status['display_disposition']}"
+            )
+            label.setToolTip(status["reason"])
         constraints = normalize_ui_constraints(
             row.get("constraints"),
             width=float(row["width"]),
@@ -800,8 +879,24 @@ class PainterUIInspector(QWidget):
                 "style": style,
                 "content": content,
                 "constraints": constraints,
+                "accessibility": {
+                    "role": str(
+                        self.accessibility_role_combo.currentData() or "auto"
+                    ),
+                    "label": self.accessibility_label_edit.text().strip(),
+                    "focus_order": int(self.focus_order_spin.value()),
+                },
             },
         )
+
+    @staticmethod
+    def _delivery_title(target: str) -> str:
+        return {
+            "asset_export": "Asset",
+            "design_handoff": "Handoff",
+            "review_prototype": "Prototype",
+            "unreal_umg": "Unreal UMG",
+        }.get(str(target), str(target))
 
     def _choose_image_source(self) -> None:
         if self._syncing or self._selected_row() is None:

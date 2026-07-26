@@ -25,6 +25,18 @@ UI_DELIVERY_TARGETS = (
     "review_prototype",
     "unreal_umg",
 )
+UI_ACCESSIBILITY_ROLES = {
+    "auto",
+    "none",
+    "button",
+    "checkbox",
+    "heading",
+    "image",
+    "link",
+    "progress",
+    "slider",
+    "text",
+}
 UI_TOKEN_KINDS = {
     "color",
     "typography",
@@ -74,6 +86,22 @@ def _number(value: Any, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return float(default)
+
+
+def _normalize_accessibility(value: Any) -> dict[str, Any]:
+    row = value if isinstance(value, Mapping) else {}
+    role = str(row.get("role") or "auto").strip().casefold()
+    if role not in UI_ACCESSIBILITY_ROLES:
+        role = "auto"
+    try:
+        focus_order = max(0, int(row.get("focus_order") or 0))
+    except (TypeError, ValueError):
+        focus_order = 0
+    return {
+        "role": role,
+        "label": str(row.get("label") or "").strip(),
+        "focus_order": focus_order,
+    }
 
 
 def _next_id(prefix: str, rows: list[Mapping[str, Any]]) -> str:
@@ -198,11 +226,7 @@ def _normalize_object(
             if isinstance(token_bindings, Mapping)
             else {}
         ),
-        "accessibility": copy.deepcopy(
-            dict(row.get("accessibility"))
-            if isinstance(row.get("accessibility"), Mapping)
-            else {}
-        ),
+        "accessibility": _normalize_accessibility(row.get("accessibility")),
     }
 
 
@@ -464,6 +488,7 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
     artboard_id_set = set(artboard_ids)
     component_id_set = set(component_ids)
     token_id_set = set(token_ids)
+    focus_orders: dict[tuple[str, int], str] = {}
     for row in document["objects"]:
         if row["kind"] not in UI_OBJECT_KINDS:
             errors.append(f"unsupported_object_kind:{row['id']}:{row['kind']}")
@@ -492,6 +517,39 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
             warnings.append(f"fully_transparent:{row['id']}")
         if not row["visible"]:
             warnings.append(f"hidden:{row['id']}")
+        accessibility = row["accessibility"]
+        role = accessibility["role"]
+        label = accessibility["label"]
+        focus_order = accessibility["focus_order"]
+        effective_role = (
+            {
+                "button": "button",
+                "image": "image",
+                "progress": "progress",
+                "text": "text",
+            }.get(row["kind"], "none")
+            if role == "auto"
+            else role
+        )
+        effective_label = label
+        if not effective_label and effective_role in {"button", "heading", "text"}:
+            effective_label = str(row["content"].get("text") or "").strip()
+        if (
+            effective_role
+            in {"button", "checkbox", "image", "link", "progress", "slider"}
+            and not effective_label
+        ):
+            warnings.append(f"missing_accessibility_label:{row['id']}")
+        if focus_order > 0:
+            focus_key = (row["artboard_id"], focus_order)
+            existing_id = focus_orders.get(focus_key)
+            if existing_id:
+                warnings.append(
+                    f"duplicate_focus_order:{row['artboard_id']}:{focus_order}:"
+                    f"{existing_id}:{row['id']}"
+                )
+            else:
+                focus_orders[focus_key] = row["id"]
     for object_id in object_ids:
         seen: set[str] = set()
         current = object_by_id.get(object_id)

@@ -59,8 +59,12 @@ Implementation checkpoint:
   Tile, bounded tile scale, and source-pixel 9-slice margins. The Inspector,
   canvas, persistence, Undo, and generic object Action share one content
   contract; missing sources remain visibly diagnosed.
-- Image-resource embedding/hashing, accessibility, target delivery status, and
-  adapter-output parity remain in M2/P8. M3-M6 remain milestone work.
+- M2/P2 now normalizes and edits accessibility role, label, and focus order,
+  warns about missing labels and duplicate explicit focus order, and shows the
+  selected object's per-target `Native/Material/Baked/Blocked` status with a
+  reason from the shared delivery preflight classifier.
+- Image-resource embedding/hashing and adapter-output parity remain in M2/P8.
+  M3-M6 remain milestone work.
 - Product-adoption work is now explicit in M2A/M2B: editable template gallery,
   reusable component/variant libraries, Auto Layout presets, design tokens,
   versioned library updates, comments, revision history, reviewer mode, and

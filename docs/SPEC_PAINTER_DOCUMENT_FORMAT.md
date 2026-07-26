@@ -72,6 +72,15 @@ preview. The format preserves:
   modification-aware cache. Missing files render an explicit placeholder.
   Embedding UI image bytes, hashes, and density variants in the native
   container is future asset-delivery work and is not claimed by this slice.
+- Every UI object normalizes an `accessibility` record with `role`, `label`,
+  and `focus_order`. Focus order `0` follows document order; positive values
+  are explicit. Validation warns about missing labels for semantic interactive
+  roles and duplicate positive focus orders within an artboard.
+- Inspect edits accessibility through the same undoable
+  `paint.ui.object.update` mutation used by UI and Actions. It also presents
+  read-only per-target `Native`, `Material`, `Baked`, or `Blocked` status and
+  the classifier reason for Asset Export, Design Handoff, Review Prototype,
+  and Unreal UMG. Delivery preflight v2 uses these same four dispositions.
 
 Opening a `.tspaint` restores the editable 3D scene. Baking the blockout to 2D
 is optional and does not replace the saved scene.

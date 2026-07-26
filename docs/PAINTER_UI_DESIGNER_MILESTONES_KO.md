@@ -93,13 +93,16 @@ Status: core interactive editing implemented
 - 피벗 기준 회전·hit test와 constraint-aware 캔버스 resize
 - 실제 이미지 파일 미리보기와 Fit/Fill/Stretch/Tile 배치
 - source-pixel L/T/R/B 여백을 사용하는 deterministic 9-slice
+- 접근성 role, label, focus order 편집과 Action/Undo 왕복
+- 접근성 라벨 누락과 아트보드별 명시 focus order 중복 경고
+- 선택 객체의 대상별 `Native/Material/Baked/Blocked` 상태와 판정 이유
 - phone Layers/Inspect 및 desktop 다중 선택 화면 캡처
 
 후속 검증:
 
 - 실제 mobile 및 여러 desktop 크기의 지속적인 screenshot QA
 - target adapter 출력과 캔버스 스타일의 parity
-- 이미지 리소스 임베딩·해시·density 전달과 접근성은 P2/P8 후속 범위
+- 이미지 리소스 임베딩·해시·density 전달은 P8 후속 범위
 
 ## M2: Responsive Layout and Design System
 
