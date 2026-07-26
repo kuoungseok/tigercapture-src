@@ -6757,6 +6757,24 @@ AI Script Edit MVP integration:
   difficulty, and license data; `.tspaint` persists that provenance under
   `linked_targets.template_source`. UI and AI share
   `paint.ui.template.catalog.inspect` and `paint.ui.template.apply`.
+- Painter UI production authoring extends that gallery with validated
+  `.tstemplate` import/export/install, user templates, recent items, favorites,
+  explicit license/dependency/hash manifests, and version-update inspection.
+  Object-anchored comments, replies, resolution, named checkpoints, stable-ID
+  revision diff, developer inspection, and offline review packages persist
+  through `.tspaint`. A self-contained HTML prototype replays pointer and
+  keyboard triggers plus navigation, overlays, state, visibility, opacity,
+  animation, and sound actions. Production delivery exports PNG/WebP/SVG,
+  density variants, object slices, trim/padding, 9-slice, texture atlas, and
+  resource hashes without silently omitting unsupported vector appearance.
+- Painter Unreal output uses the shared `TigerStudioUMG` backend through
+  `paint.ui.umg.preflight/package/generate`; no Painter-specific Unreal plugin
+  exists. Win64 Development/Shipping builds and real UE 5.8 generation were
+  verified with an eight-widget checkout Widget Blueprint. AI co-design uses
+  `paint.ui.ai.plan/apply/audit`: it returns a preview document and revision
+  diff, requires explicit apply, supports selected operations, rejects stale
+  plans, and audits accessibility, localization, resource budgets, and target
+  delivery.
 - Painter UI groups keep stable child IDs and remain editable: grouping,
   ungrouping, and layer-stack reordering are exposed through
   `paint.ui.object.group`, `paint.ui.object.ungroup`, and

@@ -21,10 +21,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-from app.painter_ui_templates import (
-    get_ui_template,
-    instantiate_ui_template,
-    list_ui_templates,
+from app.painter_ui_template_store import (
+    inspect_ui_template_store,
+    instantiate_stored_ui_template,
+    set_ui_template_favorite,
 )
 from app.painter_ui_themes import resolve_ui_theme_document
 
@@ -32,8 +32,32 @@ from app.painter_ui_themes import resolve_ui_theme_document
 TEMPLATE_THUMBNAIL_SIZE = QSize(240, 150)
 
 
+def _gallery_templates() -> list[dict[str, Any]]:
+    store = inspect_ui_template_store()
+    installed_latest: dict[str, dict[str, Any]] = {}
+    for row in store["installed"]:
+        key = str(row["id"])
+        if key not in installed_latest or int(row["version"]) > int(
+            installed_latest[key]["version"]
+        ):
+            installed_latest[key] = row
+    rows = [dict(row) for row in store["built_in"]]
+    rows.extend(installed_latest.values())
+    favorite_ids = set(store["favorites"])
+    recent_ids = set(store["recent"])
+    for row in rows:
+        row["favorite"] = row["id"] in favorite_ids
+        row["recent"] = row["id"] in recent_ids
+        row.setdefault("artboard_presets", [])
+        row.setdefault("features", ["Complete editable document"])
+        row.setdefault("difficulty", "Custom")
+        row.setdefault("tags", [])
+        row.setdefault("description", "")
+    return rows
+
+
 def ui_template_thumbnail(template_id: str) -> QPixmap:
-    document, _report = instantiate_ui_template(template_id)
+    document, _report = instantiate_stored_ui_template(template_id)
     document = resolve_ui_theme_document(document)
     artboard = document["artboards"][0]
     width = TEMPLATE_THUMBNAIL_SIZE.width()
@@ -118,7 +142,7 @@ class PainterUITemplateGalleryDialog(QDialog):
         self.category_combo = QComboBox()
         self.category_combo.addItem("All categories", "")
         for category in sorted(
-            {row["category"] for row in list_ui_templates()}
+            {row["category"] for row in _gallery_templates()}
         ):
             self.category_combo.addItem(category, category)
         filters.addWidget(self.search_edit, 1)
@@ -154,11 +178,14 @@ class PainterUITemplateGalleryDialog(QDialog):
         self.detail_features.setWordWrap(True)
         self.detail_license = QLabel("")
         self.detail_license.setWordWrap(True)
+        self.favorite_button = QPushButton("Add to Favorites")
+        self.favorite_button.clicked.connect(self._toggle_favorite)
         detail_layout.addWidget(self.detail_title)
         detail_layout.addWidget(self.detail_meta)
         detail_layout.addWidget(self.detail_description)
         detail_layout.addWidget(self.detail_features)
         detail_layout.addWidget(self.detail_license)
+        detail_layout.addWidget(self.favorite_button)
         detail_layout.addStretch(1)
         content.addWidget(details)
         root.addLayout(content, 1)
@@ -182,10 +209,23 @@ class PainterUITemplateGalleryDialog(QDialog):
     def _populate(self, *_args) -> None:
         selected = self.selected_template_id
         self.items.clear()
-        rows = list_ui_templates(
-            query=self.search_edit.text(),
-            category=str(self.category_combo.currentData() or ""),
-        )
+        query = self.search_edit.text().strip().casefold()
+        category = str(self.category_combo.currentData() or "").casefold()
+        rows = []
+        for row in _gallery_templates():
+            if category and str(row["category"]).casefold() != category:
+                continue
+            haystack = " ".join(
+                [
+                    str(row["name"]),
+                    str(row["category"]),
+                    str(row["description"]),
+                    *[str(tag) for tag in row["tags"]],
+                ]
+            ).casefold()
+            if query and query not in haystack:
+                continue
+            rows.append(row)
         for row in rows:
             item = QListWidgetItem(
                 QIcon(ui_template_thumbnail(str(row["id"]))),
@@ -220,7 +260,9 @@ class PainterUITemplateGalleryDialog(QDialog):
             self.detail_description.clear()
             self.detail_features.clear()
             self.detail_license.clear()
+            self.favorite_button.setEnabled(False)
             return
+        self.favorite_button.setEnabled(True)
         self.detail_title.setText(str(row["name"]))
         self.detail_meta.setText(
             f"{row['category']}  |  {row['difficulty']}  |  "
@@ -239,6 +281,22 @@ class PainterUITemplateGalleryDialog(QDialog):
             f"{license_row['name']}<br>"
             f"Commercial use: {'Yes' if license_row['commercial_use'] else 'No'}"
         )
+        self.favorite_button.setText(
+            "Remove from Favorites"
+            if row.get("favorite")
+            else "Add to Favorites"
+        )
+
+    def _toggle_favorite(self) -> None:
+        item = self.items.currentItem()
+        row = item.data(Qt.ItemDataRole.UserRole + 1) if item else {}
+        if not isinstance(row, dict) or not row:
+            return
+        set_ui_template_favorite(
+            str(row["id"]),
+            not bool(row.get("favorite")),
+        )
+        self._populate()
 
 
 class PainterUITemplateLibrary(QWidget):
@@ -249,7 +307,7 @@ class PainterUITemplateLibrary(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         layout.setSpacing(6)
-        catalog = list_ui_templates()
+        catalog = _gallery_templates()
         summary = QLabel(
             f"{len(catalog)} complete templates across "
             f"{len({row['category'] for row in catalog})} categories"
@@ -259,9 +317,10 @@ class PainterUITemplateLibrary(QWidget):
         layout.addWidget(summary)
         self.quick_list = QListWidget()
         for row in catalog:
+            prefix = "★ " if row.get("favorite") else ""
             item = QListWidgetItem(
                 QIcon(ui_template_thumbnail(str(row["id"]))),
-                f"{row['name']}\n{row['category']}",
+                f"{prefix}{row['name']}\n{row['category']}",
             )
             item.setData(Qt.ItemDataRole.UserRole, str(row["id"]))
             self.quick_list.addItem(item)

@@ -8164,6 +8164,48 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.template_apply_requested.connect(
             self._apply_painter_ui_template
         )
+        self._paint_ui_inspector.template_save_requested.connect(
+            self._save_painter_ui_template
+        )
+        self._paint_ui_inspector.template_install_requested.connect(
+            self._install_painter_ui_template
+        )
+        self._paint_ui_inspector.review_comment_add_requested.connect(
+            self._add_painter_ui_review_comment
+        )
+        self._paint_ui_inspector.review_comment_update_requested.connect(
+            self._update_painter_ui_review_comment
+        )
+        self._paint_ui_inspector.review_checkpoint_requested.connect(
+            self._create_painter_ui_review_checkpoint
+        )
+        self._paint_ui_inspector.review_export_requested.connect(
+            self._export_painter_ui_review
+        )
+        self._paint_ui_inspector.prototype_export_requested.connect(
+            self._export_painter_ui_prototype
+        )
+        self._paint_ui_inspector.assets_export_requested.connect(
+            self._export_painter_ui_assets
+        )
+        self._paint_ui_inspector.umg_preflight_requested.connect(
+            self._preflight_painter_ui_umg
+        )
+        self._paint_ui_inspector.umg_package_requested.connect(
+            self._package_painter_ui_umg
+        )
+        self._paint_ui_inspector.umg_generate_requested.connect(
+            self._generate_painter_ui_umg
+        )
+        self._paint_ui_inspector.ai_plan_requested.connect(
+            self._plan_painter_ui_ai_design
+        )
+        self._paint_ui_inspector.ai_apply_requested.connect(
+            self._apply_painter_ui_ai_design
+        )
+        self._paint_ui_inspector.ai_audit_requested.connect(
+            self._audit_painter_ui_ai_design
+        )
         self._paint_ui_inspector.artboard_selected.connect(
             self._set_painter_ui_artboard
         )
@@ -11021,13 +11063,223 @@ class PaintDialog(QDialog):
         self._refresh_painter_ui_overlay()
 
     def _apply_painter_ui_template(self, template_id: str) -> None:
-        from app.painter_ui_templates import instantiate_ui_template
+        from app.painter_ui_template_store import instantiate_stored_ui_template
 
-        document, _report = instantiate_ui_template(str(template_id))
+        document, _report = instantiate_stored_ui_template(str(template_id))
         self._push_undo_state("Apply UI template")
         self._painter_ui_document = document
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
+
+    def _painter_ui_production_status(self, text: str) -> None:
+        panel = getattr(
+            getattr(self, "_paint_ui_inspector", None),
+            "production_panel",
+            None,
+        )
+        if panel is not None:
+            panel.set_status(str(text))
+
+    def _save_painter_ui_template(self, template_id: str, name: str) -> None:
+        if not str(template_id).strip() or not str(name).strip():
+            self._painter_ui_production_status(
+                "Template ID and name are required."
+            )
+            return
+        from app.painter_ui_template_store import save_user_ui_template
+
+        report = save_user_ui_template(
+            self._painter_ui_document,
+            template_id=template_id,
+            name=name,
+        )
+        self._painter_ui_production_status(
+            f"Template saved: {report['manifest']['name']}"
+        )
+
+    def _install_painter_ui_template(self, path: str) -> None:
+        from app.painter_ui_template_store import install_ui_template_package
+
+        report = install_ui_template_package(path)
+        self._painter_ui_production_status(
+            f"Template installed: {report['manifest']['name']}"
+        )
+
+    def _add_painter_ui_review_comment(self, text: str) -> None:
+        if not str(text).strip():
+            self._painter_ui_production_status("Comment text is required.")
+            return
+        from app.painter_ui_review import add_ui_review_comment
+
+        document, _comment = add_ui_review_comment(
+            self._painter_ui_document,
+            text=text,
+            object_id=str(
+                self._painter_ui_document["selection"]["object_id"] or ""
+            ),
+        )
+        self._push_undo_state("Add UI review comment")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+        self._painter_ui_production_status("Review comment added.")
+
+    def _update_painter_ui_review_comment(
+        self,
+        comment_id: str,
+        changes: object,
+    ) -> None:
+        from app.painter_ui_review import update_ui_review_comment
+
+        document, _comment = update_ui_review_comment(
+            self._painter_ui_document,
+            comment_id,
+            dict(changes or {}),
+        )
+        self._push_undo_state("Update UI review comment")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+        self._painter_ui_production_status("Review comment updated.")
+
+    def _create_painter_ui_review_checkpoint(self, name: str) -> None:
+        if not str(name).strip():
+            self._painter_ui_production_status("Checkpoint name is required.")
+            return
+        from app.painter_ui_review import create_ui_review_checkpoint
+
+        document, checkpoint = create_ui_review_checkpoint(
+            self._painter_ui_document,
+            name=name,
+        )
+        self._push_undo_state("Create UI review checkpoint")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+        self._painter_ui_production_status(
+            f"Checkpoint created: {checkpoint['name']}"
+        )
+
+    def _export_painter_ui_review(self, output_dir: str) -> None:
+        from app.painter_ui_review import export_ui_review_package
+
+        report = export_ui_review_package(
+            self._painter_ui_document,
+            output_dir,
+        )
+        self._painter_ui_production_status(
+            f"Review exported: {report['entrypoint']}"
+        )
+
+    def _export_painter_ui_prototype(self, output_dir: str) -> None:
+        from app.painter_ui_prototype import export_ui_prototype
+
+        report = export_ui_prototype(
+            self._painter_ui_document,
+            output_dir,
+        )
+        self._painter_ui_production_status(
+            f"Prototype exported: {report['entrypoint']}"
+        )
+
+    def _export_painter_ui_assets(
+        self,
+        output_dir: str,
+        formats: object,
+        densities: object,
+        create_atlas: bool,
+    ) -> None:
+        from app.painter_ui_asset_export import export_ui_assets
+
+        report = export_ui_assets(
+            self._painter_ui_document,
+            output_dir,
+            formats=list(formats or []),
+            densities=list(densities or []),
+            create_atlas=bool(create_atlas),
+        )
+        self._painter_ui_production_status(
+            f"Assets exported: {report['manifest_path']}"
+        )
+
+    def _preflight_painter_ui_umg(self) -> None:
+        from app.painter_ui_umg_adapter import preflight_painter_umg
+
+        report = preflight_painter_umg(self._painter_ui_document)
+        self._painter_ui_production_status(
+            "UMG ready."
+            if report["ok"]
+            else f"UMG blocked: {len(report['blockers'])} objects"
+        )
+
+    def _package_painter_ui_umg(self, output_dir: str) -> None:
+        from app.painter_ui_umg_adapter import package_painter_umg
+
+        report = package_painter_umg(
+            self._painter_ui_document,
+            output_dir,
+        )
+        self._painter_ui_production_status(
+            f"UMG package: {report['document_path']}"
+        )
+
+    def _generate_painter_ui_umg(
+        self,
+        project_path: str,
+        output_dir: str,
+    ) -> None:
+        from app.painter_ui_umg_adapter import generate_painter_umg
+
+        self._painter_ui_production_status("Generating Widget Blueprint...")
+        report = generate_painter_umg(
+            self._painter_ui_document,
+            project_path=project_path,
+            output_dir=output_dir,
+        )
+        self._painter_ui_production_status(
+            "Widget Blueprint generated."
+            if report.get("ok")
+            else "Widget Blueprint generation failed; inspect preflight report."
+        )
+
+    def _plan_painter_ui_ai_design(self, prompt: str) -> None:
+        if not str(prompt).strip():
+            self._painter_ui_production_status("Describe the UI to create.")
+            return
+        from app.painter_ui_ai_design import plan_ui_co_design
+
+        plan = plan_ui_co_design(self._painter_ui_document, prompt=prompt)
+        self._paint_ui_inspector.production_panel.set_ai_plan(plan)
+        self._painter_ui_production_status(
+            "AI plan ready. Review the summary before applying."
+        )
+
+    def _apply_painter_ui_ai_design(self, plan: object) -> None:
+        if not isinstance(plan, dict) or not plan:
+            self._painter_ui_production_status("Create an AI plan first.")
+            return
+        from app.painter_ui_ai_design import apply_ui_co_design
+
+        document, report = apply_ui_co_design(
+            self._painter_ui_document,
+            plan,
+        )
+        self._push_undo_state("Apply AI UI design plan")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+        self._painter_ui_production_status(
+            f"AI plan applied: {report['diff']['change_count']} changes"
+        )
+
+    def _audit_painter_ui_ai_design(self) -> None:
+        from app.painter_ui_ai_design import audit_ui_design
+
+        report = audit_ui_design(self._painter_ui_document)
+        counts = report["severity_counts"]
+        self._painter_ui_production_status(
+            f"QA: {counts['error']} errors, {counts['warning']} warnings"
+        )
 
     def _instantiate_painter_ui_component(
         self,

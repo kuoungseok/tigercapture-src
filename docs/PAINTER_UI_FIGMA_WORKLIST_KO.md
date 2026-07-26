@@ -1,6 +1,6 @@
 # Painter UI 전용 모드 작업 목록
 
-Status: canonical implementation backlog; P0 complete
+Status: canonical implementation backlog; P0-P10 local production foundation complete
 
 P0 implementation checkpoint (2026-07-26):
 
@@ -92,6 +92,19 @@ P2 implementation checkpoint (2026-07-26, image layout slice):
   update, Undo/Redo, persistence, and `paint.ui.object.update` Action path.
 - Embedding referenced image bytes, resource hashes, density variants, and
   delivery packaging remains P8 asset-delivery work.
+
+P6-P10 implementation checkpoint (2026-07-27):
+
+- Object-anchored comments, replies, resolve state, checkpoints, revision diff,
+  developer Inspect, and offline review packages are implemented.
+- Prototype runtime and self-contained pointer/keyboard HTML export support all
+  declared interaction triggers and actions.
+- Production export provides PNG/WebP/SVG, density variants, object slices,
+  trim/padding, 9-slice, atlas, resource hashes, and explicit bake metadata.
+- Painter uses the shared `TigerStudioUMG` adapter and plugin. UE 5.8 produced
+  and loaded an 8-widget Widget Blueprint from the checkout sample.
+- AI co-design uses an explicit plan/preview/diff/partial-apply contract plus
+  accessibility, localization, budget, and delivery audits.
 
 관련 구현 현황:
 

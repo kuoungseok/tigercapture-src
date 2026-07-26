@@ -148,7 +148,7 @@ P4 component checkpoint:
 
 ## M2A: 템플릿·라이브러리·디자인 시스템
 
-상태: 기반 구현 진행 중
+상태: 로컬·오프라인 제품 범위 구현
 
 구현 체크포인트:
 
@@ -159,12 +159,15 @@ P4 component checkpoint:
 - `.tspaint`에 `linked_targets.template_source` provenance 영속 저장
 - UI와 `paint.ui.template.catalog.inspect/apply` Action이 같은 생성 서비스 사용
 
-남은 범위:
+추가 구현 체크포인트:
 
-- 외부 템플릿·라이브러리 패키지 입출력
-- 최근 항목, 즐겨찾기, 사용자 템플릿 저장
-- 라이브러리 버전 비교와 선택적 업데이트 검토
-- 더 넓고 시각적으로 검증된 고품질 템플릿 카탈로그
+- license, dependency, document hash를 포함하는 `.tstemplate` 입출력
+- 패키지 검증·설치, 사용자 템플릿 저장, 최근 항목과 즐겨찾기
+- 버전·dependency·document hash 선택적 업데이트 검토
+- 내장/설치 템플릿을 함께 보여주는 시각 갤러리
+
+남은 콘텐츠 작업은 카탈로그 규모 확대와 지속적인 실제 화면 시각 QA다.
+이는 기능 차단 항목이 아니라 기본 라이브러리 콘텐츠 확장 범위다.
 
 이 마일스톤은 화면 하나를 그리는 기능을 넘어 UI 제작 도구를 계속 사용할
 이유를 만든다. 템플릿을 열 수 있다는 것만으로 완료하지 않으며, 템플릿은
@@ -209,7 +212,18 @@ P4 component checkpoint:
 
 ## M2B: 협업과 리뷰 운영
 
-상태: 대기
+상태: 로컬·오프라인 리뷰 범위 구현
+
+구현 체크포인트:
+
+- stable object/artboard anchor, 작성자, reply, resolve 상태의 댓글
+- `.tspaint`에 댓글과 이름 있는 체크포인트 영속 저장
+- stable ID 기준 artboard/object/component/token/interaction revision diff
+- 읽기 전용 HTML 리뷰 패키지와 JSON 개발자 Inspect 보고서
+- UI `Publish | Review`와 `paint.ui.review.*` Action 공유
+- 클라우드 서비스 없이 완전한 로컬 리뷰
+
+실시간 다중 사용자 동기화와 원격 팀 전송은 선택적 서비스 후속 범위다.
 
 - 객체에 고정되는 댓글과 리뷰 스레드
 - 작성자, 시각, 해결 상태, stable object reference
@@ -230,7 +244,16 @@ P4 component checkpoint:
 
 ## M3: Prototype and Developer Handoff
 
-Status: pending
+Status: implemented local prototype scope
+
+Implementation checkpoint:
+
+- click/double click/hover/press/focus/keyboard runtime
+- navigate/back/open-close overlay/state/visibility/opacity/material scalar
+- animation/sound event dispatch
+- pointer/keyboard 동작이 포함된 self-contained HTML prototype
+- 원본 문서·manifest·validation을 함께 내보내는 offline artifact
+- `paint.ui.prototype.inspect/trigger/export`
 
 - click/tap/hover/focus/keyboard trigger
 - state/variant transition
@@ -249,7 +272,17 @@ Status: pending
 
 ## M4: Production Asset Delivery
 
-Status: pending
+Status: implemented
+
+Implementation checkpoint:
+
+- PNG/WebP/SVG와 @1x/@2x/@3x/custom density
+- artboard와 object slice, padding, transparent trim
+- unsupported vector 표현을 누락하지 않는 embedded PNG SVG bake
+- deterministic name, SHA-256, sRGB/alpha metadata
+- 9-slice metadata, texture atlas image/JSON
+- image/font/sound resource ID, 존재 여부, 크기, hash
+- `paint.ui.assets.export`
 
 - PNG/WebP/SVG capability-aware export
 - export region and slice
@@ -268,7 +301,7 @@ Status: pending
 
 ## M5: Unreal UMG Adapter
 
-Status: shared Motion Designer backend exists; Painter adapter pending
+Status: Painter adapter implemented; real UE compile/generation verified
 
 - Painter provider adapter
 - shared Tiger UMG schema extension
@@ -288,9 +321,29 @@ Status: shared Motion Designer backend exists; Painter adapter pending
 
 Painter 전용 Unreal plugin은 만들지 않는다.
 
+2026-07-27 verification:
+
+- Painter artboard를 provider=`painter` 공용 Tiger UMG 문서로 변환
+- `Native/Material/Baked/Blocked` preflight와 명시적 blocker
+- `paint.ui.umg.preflight/package/generate`
+- `D:\UE_5.8\Engine` BuildPlugin Win64 Development/Shipping 성공
+- `accessible_checkout`로 Widget Blueprint 생성
+- generated widget 8, generated asset load 성공, errors 0
+- 실제 Unreal 화면 캡처는 release evidence 갱신 시 추가한다.
+
 ## M6: AI Co-design and Production QA
 
-Status: pending
+Status: safe local co-design foundation implemented
+
+Implementation checkpoint:
+
+- 자연어 요구를 완성형 템플릿과 editable operation plan으로 변환
+- 적용 전 preview document와 stable-ID revision diff
+- required operation과 selected partial apply
+- stale revision과 다른 document plan 차단
+- accessibility, localization, object/image budget, delivery audit
+- UI `Publish | AI`와 `paint.ui.ai.plan/apply/audit`
+- AI provider는 직접 문서를 쓰지 않고 등록 Action만 사용
 
 - 자연어 screen/component 생성
 - 변경 계획과 부분 적용

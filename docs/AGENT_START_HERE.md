@@ -52,6 +52,13 @@ Focused entry points:
   priority and product boundaries; the milestone document records implemented
   evidence. Painter owns static UI structure/layout/components/tokens, Motion
   Designer owns animation, and Unreal output must use shared `TigerStudioUMG`.
+  As of 2026-07-27 the local M2A-M6 production foundation is implemented:
+  `.tstemplate` packages and local library state, review comments/checkpoints,
+  revision diff, self-contained prototype, production asset export, shared
+  Painter UMG adapter, and safe AI plan/preview/partial apply/audit Actions.
+  Cloud multi-user sync and broader template content remain optional follow-up
+  scope. UE 5.8 generated and loaded an eight-widget Painter sample; refresh
+  visible Unreal capture evidence before making screenshot-based release claims.
 
 If two areas overlap, keep the product boundary from the focused docs. Do not
 merge UI renewal, review automation, and VTuber sidecar setup into one unbounded

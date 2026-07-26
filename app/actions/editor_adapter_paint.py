@@ -88,6 +88,349 @@ class PaintAdapterMixin:
             "template": report,
         }
 
+    def paint_ui_template_store_inspect(self, *, store_root: str = "") -> dict[str, Any]:
+        from app.painter_ui_template_store import inspect_ui_template_store
+
+        return inspect_ui_template_store(store_root=store_root or None)
+
+    def paint_ui_template_package_export(
+        self,
+        *,
+        path: str,
+        template_id: str,
+        name: str,
+        category: str = "User",
+        description: str = "",
+        tags: list[str] | None = None,
+        version: int = 1,
+        author: str = "",
+        license_id: str = "User-Owned",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_template_store import export_ui_template_package
+
+        return export_ui_template_package(
+            dialog._painter_ui_document,
+            path,
+            template_id=template_id,
+            name=name,
+            category=category,
+            description=description,
+            tags=tags,
+            version=version,
+            author=author,
+            license_id=license_id,
+        )
+
+    def paint_ui_template_package_install(
+        self,
+        *,
+        path: str,
+        store_root: str = "",
+    ) -> dict[str, Any]:
+        from app.painter_ui_template_store import install_ui_template_package
+
+        return install_ui_template_package(path, store_root=store_root or None)
+
+    def paint_ui_template_user_save(
+        self,
+        *,
+        template_id: str,
+        name: str,
+        store_root: str = "",
+        category: str = "User",
+        description: str = "",
+        tags: list[str] | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_template_store import save_user_ui_template
+
+        return save_user_ui_template(
+            dialog._painter_ui_document,
+            template_id=template_id,
+            name=name,
+            store_root=store_root or None,
+            category=category,
+            description=description,
+            tags=tags,
+        )
+
+    def paint_ui_template_favorite_set(
+        self,
+        *,
+        template_id: str,
+        favorite: bool,
+        store_root: str = "",
+    ) -> dict[str, Any]:
+        from app.painter_ui_template_store import set_ui_template_favorite
+
+        return set_ui_template_favorite(
+            template_id,
+            favorite,
+            store_root=store_root or None,
+        )
+
+    def paint_ui_template_stored_apply(
+        self,
+        *,
+        template_id: str,
+        store_root: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_template_store import instantiate_stored_ui_template
+
+        document, report = instantiate_stored_ui_template(
+            template_id,
+            store_root=store_root or None,
+        )
+        dialog._push_undo_state("Apply stored UI template")
+        self._paint_ui_commit(dialog, "Apply stored UI template", document)
+        return {**dialog.painter_action_state(), "template": report}
+
+    def paint_ui_template_update_inspect(
+        self,
+        *,
+        candidate_path: str,
+        current_manifest: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        from app.painter_ui_template_store import compare_ui_template_update
+
+        return compare_ui_template_update(
+            current_manifest or {},
+            candidate_path,
+        )
+
+    def paint_ui_review_inspect(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_review import inspect_ui_review
+
+        return inspect_ui_review(dialog._painter_ui_document)
+
+    def paint_ui_review_comment_add(
+        self,
+        *,
+        text: str,
+        object_id: str = "",
+        artboard_id: str = "",
+        author: str = "",
+        x: float = 0.5,
+        y: float = 0.5,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_review import add_ui_review_comment
+
+        document, comment = add_ui_review_comment(
+            dialog._painter_ui_document,
+            text=text,
+            object_id=object_id,
+            artboard_id=artboard_id,
+            author=author,
+            x=x,
+            y=y,
+        )
+        dialog._push_undo_state("Add UI review comment")
+        self._paint_ui_commit(dialog, "Add UI review comment", document)
+        return {**dialog.painter_action_state(), "comment": comment}
+
+    def paint_ui_review_comment_update(
+        self,
+        *,
+        comment_id: str,
+        changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_review import update_ui_review_comment
+
+        document, comment = update_ui_review_comment(
+            dialog._painter_ui_document,
+            comment_id,
+            changes,
+        )
+        dialog._push_undo_state("Update UI review comment")
+        self._paint_ui_commit(dialog, "Update UI review comment", document)
+        return {**dialog.painter_action_state(), "comment": comment}
+
+    def paint_ui_review_comment_remove(self, *, comment_id: str) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_review import remove_ui_review_comment
+
+        document = remove_ui_review_comment(
+            dialog._painter_ui_document,
+            comment_id,
+        )
+        dialog._push_undo_state("Remove UI review comment")
+        return self._paint_ui_commit(dialog, "Remove UI review comment", document)
+
+    def paint_ui_review_checkpoint_create(
+        self,
+        *,
+        name: str,
+        author: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_review import create_ui_review_checkpoint
+
+        document, checkpoint = create_ui_review_checkpoint(
+            dialog._painter_ui_document,
+            name=name,
+            author=author,
+        )
+        dialog._push_undo_state("Create UI review checkpoint")
+        self._paint_ui_commit(dialog, "Create UI review checkpoint", document)
+        return {**dialog.painter_action_state(), "checkpoint": checkpoint}
+
+    def paint_ui_review_checkpoint_diff(self, *, checkpoint_id: str) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_review import diff_ui_checkpoint
+
+        return diff_ui_checkpoint(dialog._painter_ui_document, checkpoint_id)
+
+    def paint_ui_review_export(self, *, output_dir: str) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_review import export_ui_review_package
+
+        return export_ui_review_package(
+            dialog._painter_ui_document,
+            output_dir,
+        )
+
+    def paint_ui_developer_inspect(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_review import developer_inspect_ui_document
+
+        return developer_inspect_ui_document(dialog._painter_ui_document)
+
+    def paint_ui_prototype_inspect(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_prototype import inspect_ui_prototype
+
+        return inspect_ui_prototype(dialog._painter_ui_document)
+
+    def paint_ui_prototype_trigger(
+        self,
+        *,
+        source_object_id: str,
+        trigger: str,
+        state: dict[str, Any] | None = None,
+        key: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_prototype import execute_ui_prototype_trigger
+
+        return execute_ui_prototype_trigger(
+            dialog._painter_ui_document,
+            state,
+            source_object_id=source_object_id,
+            trigger=trigger,
+            key=key,
+        )
+
+    def paint_ui_prototype_export(self, *, output_dir: str) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_prototype import export_ui_prototype
+
+        return export_ui_prototype(dialog._painter_ui_document, output_dir)
+
+    def paint_ui_assets_export(
+        self,
+        *,
+        output_dir: str,
+        formats: list[str] | None = None,
+        densities: list[float] | None = None,
+        create_atlas: bool = False,
+        object_ids: list[str] | None = None,
+        trim_transparent: bool = False,
+        padding: int = 0,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_asset_export import export_ui_assets
+
+        return export_ui_assets(
+            dialog._painter_ui_document,
+            output_dir,
+            formats=formats,
+            densities=densities,
+            create_atlas=create_atlas,
+            object_ids=object_ids,
+            trim_transparent=trim_transparent,
+            padding=padding,
+        )
+
+    def paint_ui_umg_preflight(self, *, artboard_id: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_umg_adapter import preflight_painter_umg
+
+        return preflight_painter_umg(
+            dialog._painter_ui_document,
+            artboard_id=artboard_id,
+        )
+
+    def paint_ui_umg_package(
+        self,
+        *,
+        output_dir: str,
+        artboard_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_umg_adapter import package_painter_umg
+
+        return package_painter_umg(
+            dialog._painter_ui_document,
+            output_dir,
+            artboard_id=artboard_id,
+        )
+
+    def paint_ui_umg_generate(
+        self,
+        *,
+        project_path: str,
+        output_dir: str,
+        artboard_id: str = "",
+        destination_root: str = "/Game/TigerStudio/Generated",
+        timeout_seconds: int = 300,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_umg_adapter import generate_painter_umg
+
+        return generate_painter_umg(
+            dialog._painter_ui_document,
+            project_path=project_path,
+            output_dir=output_dir,
+            artboard_id=artboard_id,
+            destination_root=destination_root,
+            timeout_seconds=timeout_seconds,
+        )
+
+    def paint_ui_ai_plan(self, *, prompt: str) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_ai_design import plan_ui_co_design
+
+        return plan_ui_co_design(dialog._painter_ui_document, prompt=prompt)
+
+    def paint_ui_ai_apply(
+        self,
+        *,
+        plan: dict[str, Any],
+        selected_operation_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_ai_design import apply_ui_co_design
+
+        document, report = apply_ui_co_design(
+            dialog._painter_ui_document,
+            plan,
+            selected_operation_ids=selected_operation_ids,
+        )
+        dialog._push_undo_state("Apply AI UI design plan")
+        self._paint_ui_commit(dialog, "Apply AI UI design plan", document)
+        return {**dialog.painter_action_state(), "ai_apply": report}
+
+    def paint_ui_ai_audit(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_ai_design import audit_ui_design
+
+        return audit_ui_design(dialog._painter_ui_document)
+
     def paint_ui_component_library_inspect(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         from app.painter_ui_component_library import inspect_ui_component_library

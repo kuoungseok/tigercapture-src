@@ -72,6 +72,20 @@ class PainterUILayerList(QListWidget):
 
 class PainterUIInspector(QWidget):
     template_apply_requested = Signal(str)
+    template_save_requested = Signal(str, str)
+    template_install_requested = Signal(str)
+    review_comment_add_requested = Signal(str)
+    review_comment_update_requested = Signal(str, object)
+    review_checkpoint_requested = Signal(str)
+    review_export_requested = Signal(str)
+    prototype_export_requested = Signal(str)
+    assets_export_requested = Signal(str, object, object, bool)
+    umg_preflight_requested = Signal()
+    umg_package_requested = Signal(str)
+    umg_generate_requested = Signal(str, str)
+    ai_plan_requested = Signal(str)
+    ai_apply_requested = Signal(object)
+    ai_audit_requested = Signal()
     artboard_selected = Signal(str)
     artboard_add_requested = Signal(str, int, int, str)
     artboard_layout_changed = Signal(str, object)
@@ -366,6 +380,28 @@ class PainterUIInspector(QWidget):
             self.token_export_requested
         )
         tabs.addTab(self.token_library, "Tokens")
+
+        from app.painter_ui_production_panel import PainterUIProductionPanel
+
+        self.production_panel = PainterUIProductionPanel()
+        for source, target in (
+            (self.production_panel.template_save_requested, self.template_save_requested),
+            (self.production_panel.template_install_requested, self.template_install_requested),
+            (self.production_panel.review_comment_add_requested, self.review_comment_add_requested),
+            (self.production_panel.review_comment_update_requested, self.review_comment_update_requested),
+            (self.production_panel.review_checkpoint_requested, self.review_checkpoint_requested),
+            (self.production_panel.review_export_requested, self.review_export_requested),
+            (self.production_panel.prototype_export_requested, self.prototype_export_requested),
+            (self.production_panel.assets_export_requested, self.assets_export_requested),
+            (self.production_panel.umg_preflight_requested, self.umg_preflight_requested),
+            (self.production_panel.umg_package_requested, self.umg_package_requested),
+            (self.production_panel.umg_generate_requested, self.umg_generate_requested),
+            (self.production_panel.ai_plan_requested, self.ai_plan_requested),
+            (self.production_panel.ai_apply_requested, self.ai_apply_requested),
+            (self.production_panel.ai_audit_requested, self.ai_audit_requested),
+        ):
+            source.connect(target)
+        tabs.addTab(self.production_panel, "Publish")
 
         inspect_page = QWidget()
         inspect_layout = QVBoxLayout(inspect_page)
@@ -911,6 +947,7 @@ class PainterUIInspector(QWidget):
         self._document = normalize_ui_document(value)
         self.component_library.set_document(self._document)
         self.token_library.set_document(self._document)
+        self.production_panel.set_document(self._document)
         selected = self._document["selection"]["object_id"]
         selected_ids = set(self._document["selection"]["object_ids"])
         active = self._document["active_artboard_id"]

@@ -12,6 +12,18 @@ native_binaries = []
 if worker_release.exists():
     native_binaries.append((str(worker_release), "bundled/native"))
 
+umg_plugin_bundle = (
+    project_root / "bundled" / "unreal_plugins" / "UMG" / "TigerStudioUMG"
+)
+umg_plugin_datas = []
+if umg_plugin_bundle.exists():
+    umg_plugin_datas.append(
+        (
+            str(umg_plugin_bundle),
+            "bundled/unreal_plugins/UMG/TigerStudioUMG",
+        )
+    )
+
 # imageio_ffmpeg ships ffmpeg.exe as a wheel; modern imageio.v2.get_writer
 # probes the dist's metadata at runtime, so the .dist-info directory has
 # to land in the bundle. Without copy_metadata, MP4 export crashes with
@@ -28,7 +40,7 @@ a = Analysis(
         ('resources/branding/*.png', 'resources/branding'),
         ('resources/luts/*.cube', 'resources/luts'),
         ('resources/ui/sound_editor/*.png', 'resources/ui/sound_editor'),
-    ] + extra_datas,
+    ] + umg_plugin_datas + extra_datas,
     hiddenimports=[
         # Locales are loaded dynamically from a string lookup, so each
         # one needs to be declared here for PyInstaller to bundle it.

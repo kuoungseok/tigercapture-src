@@ -123,6 +123,14 @@ Implementation checkpoint:
   automation share `paint.ui.template.catalog.inspect/apply`. External package
   import/export, favorites/recent, update review, and broader catalog quality
   remain M2A work.
+- M2A-M6 local production scope now includes `.tstemplate` package
+  import/export/install, user templates, recent/favorites, update review,
+  object comments/checkpoints/revision diff, offline review and prototype
+  packages, production density/slice/atlas export, the shared Painter UMG
+  adapter, and Action-driven AI plan/preview/partial apply/audit.
+- The shared `TigerStudioUMG` plugin builds against `D:\UE_5.8\Engine`; a real
+  checkout sample generated and loaded an eight-widget Widget Blueprint.
+  Release evidence still needs a refreshed visible Unreal screenshot.
 - Detailed status: `docs/PAINTER_UI_DESIGNER_MILESTONES_KO.md`
 
 ## 1. Product Goal

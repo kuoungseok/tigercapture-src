@@ -2579,6 +2579,11 @@ def register_paint_actions(registry: Any) -> None:
         changed=False,
         dry_summary="Painter PBR Substrate plan would be returned",
     )
+    from app.actions.paint_ui_production_namespace import (
+        register_paint_ui_production_actions,
+    )
+
+    register_paint_ui_production_actions(registry)
 
 
 __all__ = ["register_paint_actions"]

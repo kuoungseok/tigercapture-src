@@ -1,0 +1,265 @@
+"""Compact user-facing production panel for Painter UI milestones M2A-M6."""
+from __future__ import annotations
+
+from typing import Any, Mapping
+
+from PySide6.QtCore import Signal
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QFileDialog,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from app.painter_ui_document import normalize_ui_document
+from app.painter_ui_review import inspect_ui_review
+
+
+class PainterUIProductionPanel(QWidget):
+    template_save_requested = Signal(str, str)
+    template_install_requested = Signal(str)
+    review_comment_add_requested = Signal(str)
+    review_comment_update_requested = Signal(str, object)
+    review_checkpoint_requested = Signal(str)
+    review_export_requested = Signal(str)
+    prototype_export_requested = Signal(str)
+    assets_export_requested = Signal(str, object, object, bool)
+    umg_preflight_requested = Signal()
+    umg_package_requested = Signal(str)
+    umg_generate_requested = Signal(str, str)
+    ai_plan_requested = Signal(str)
+    ai_apply_requested = Signal(object)
+    ai_audit_requested = Signal()
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._document = normalize_ui_document(None)
+        self._ai_plan: dict[str, Any] = {}
+        root = QVBoxLayout(self)
+        root.setContentsMargins(4, 4, 4, 4)
+        root.setSpacing(4)
+        tabs = QTabWidget()
+        tabs.setDocumentMode(True)
+        root.addWidget(tabs)
+
+        library = QWidget()
+        library_layout = QVBoxLayout(library)
+        library_layout.setContentsMargins(4, 4, 4, 4)
+        self.template_id_edit = QLineEdit()
+        self.template_id_edit.setPlaceholderText("Template ID")
+        self.template_name_edit = QLineEdit()
+        self.template_name_edit.setPlaceholderText("Template name")
+        save_template = QPushButton("Save Current as Template")
+        save_template.clicked.connect(
+            lambda: self.template_save_requested.emit(
+                self.template_id_edit.text().strip(),
+                self.template_name_edit.text().strip(),
+            )
+        )
+        install_template = QPushButton("Install Template Package")
+        install_template.clicked.connect(self._choose_template_package)
+        library_layout.addWidget(self.template_id_edit)
+        library_layout.addWidget(self.template_name_edit)
+        library_layout.addWidget(save_template)
+        library_layout.addWidget(install_template)
+        library_layout.addStretch(1)
+        tabs.addTab(library, "Library")
+
+        review = QWidget()
+        review_layout = QVBoxLayout(review)
+        review_layout.setContentsMargins(4, 4, 4, 4)
+        self.review_list = QListWidget()
+        self.review_comment_edit = QLineEdit()
+        self.review_comment_edit.setPlaceholderText("Comment on selection")
+        add_comment = QPushButton("Add Comment")
+        add_comment.clicked.connect(
+            lambda: self.review_comment_add_requested.emit(
+                self.review_comment_edit.text().strip()
+            )
+        )
+        resolve_comment = QPushButton("Resolve Selected")
+        resolve_comment.clicked.connect(self._resolve_selected_comment)
+        self.checkpoint_edit = QLineEdit()
+        self.checkpoint_edit.setPlaceholderText("Checkpoint name")
+        create_checkpoint = QPushButton("Create Checkpoint")
+        create_checkpoint.clicked.connect(
+            lambda: self.review_checkpoint_requested.emit(
+                self.checkpoint_edit.text().strip()
+            )
+        )
+        export_review = QPushButton("Export Offline Review")
+        export_review.clicked.connect(
+            lambda: self._choose_directory(self.review_export_requested)
+        )
+        review_layout.addWidget(self.review_list, 1)
+        review_layout.addWidget(self.review_comment_edit)
+        review_actions = QHBoxLayout()
+        review_actions.addWidget(add_comment)
+        review_actions.addWidget(resolve_comment)
+        review_layout.addLayout(review_actions)
+        review_layout.addWidget(self.checkpoint_edit)
+        review_layout.addWidget(create_checkpoint)
+        review_layout.addWidget(export_review)
+        tabs.addTab(review, "Review")
+
+        deliver = QWidget()
+        deliver_layout = QVBoxLayout(deliver)
+        deliver_layout.setContentsMargins(4, 4, 4, 4)
+        export_prototype = QPushButton("Export Interactive Prototype")
+        export_prototype.clicked.connect(
+            lambda: self._choose_directory(self.prototype_export_requested)
+        )
+        self.asset_png = QCheckBox("PNG")
+        self.asset_png.setChecked(True)
+        self.asset_webp = QCheckBox("WebP")
+        self.asset_svg = QCheckBox("SVG")
+        self.asset_atlas = QCheckBox("Texture Atlas")
+        density_label = QLabel("Density: @1x @2x @3x")
+        export_assets = QPushButton("Export Production Assets")
+        export_assets.clicked.connect(self._choose_asset_directory)
+        deliver_layout.addWidget(export_prototype)
+        deliver_layout.addWidget(density_label)
+        format_row = QHBoxLayout()
+        for control in (self.asset_png, self.asset_webp, self.asset_svg):
+            format_row.addWidget(control)
+        deliver_layout.addLayout(format_row)
+        deliver_layout.addWidget(self.asset_atlas)
+        deliver_layout.addWidget(export_assets)
+        deliver_layout.addStretch(1)
+        tabs.addTab(deliver, "Deliver")
+
+        unreal = QWidget()
+        unreal_layout = QVBoxLayout(unreal)
+        unreal_layout.setContentsMargins(4, 4, 4, 4)
+        self.unreal_project_edit = QLineEdit()
+        self.unreal_project_edit.setPlaceholderText("Unreal .uproject path")
+        preflight = QPushButton("UMG Preflight")
+        preflight.clicked.connect(self.umg_preflight_requested)
+        package = QPushButton("Package TigerStudioUMG")
+        package.clicked.connect(
+            lambda: self._choose_directory(self.umg_package_requested)
+        )
+        generate = QPushButton("Generate in Unreal 5.8")
+        generate.clicked.connect(self._choose_umg_output)
+        unreal_layout.addWidget(self.unreal_project_edit)
+        unreal_layout.addWidget(preflight)
+        unreal_layout.addWidget(package)
+        unreal_layout.addWidget(generate)
+        unreal_layout.addStretch(1)
+        tabs.addTab(unreal, "Unreal")
+
+        ai = QWidget()
+        ai_layout = QVBoxLayout(ai)
+        ai_layout.setContentsMargins(4, 4, 4, 4)
+        self.ai_prompt_edit = QLineEdit()
+        self.ai_prompt_edit.setPlaceholderText(
+            "Describe a screen, component, or product UI"
+        )
+        plan = QPushButton("Plan and Preview")
+        plan.clicked.connect(
+            lambda: self.ai_plan_requested.emit(self.ai_prompt_edit.text().strip())
+        )
+        self.ai_summary = QLabel("No AI plan")
+        self.ai_summary.setWordWrap(True)
+        apply_plan = QPushButton("Apply Approved Plan")
+        apply_plan.clicked.connect(lambda: self.ai_apply_requested.emit(self._ai_plan))
+        audit = QPushButton("Run Product QA")
+        audit.clicked.connect(self.ai_audit_requested)
+        ai_layout.addWidget(self.ai_prompt_edit)
+        ai_layout.addWidget(plan)
+        ai_layout.addWidget(self.ai_summary)
+        ai_layout.addWidget(apply_plan)
+        ai_layout.addWidget(audit)
+        ai_layout.addStretch(1)
+        tabs.addTab(ai, "AI")
+
+        self.status_label = QLabel("Production tools ready")
+        self.status_label.setWordWrap(True)
+        root.addWidget(self.status_label)
+
+    def set_document(self, value: Mapping[str, Any] | None) -> None:
+        self._document = normalize_ui_document(value)
+        review = inspect_ui_review(self._document)
+        self.review_list.clear()
+        for row in review["comments"]:
+            prefix = "Resolved" if row.get("resolved") else "Open"
+            item = QListWidgetItem(
+                f"{prefix} | {row.get('author')}: {row.get('text')}"
+            )
+            item.setData(256, row["id"])
+            self.review_list.addItem(item)
+        self.status_label.setText(
+            f"{len(self._document['artboards'])} artboards | "
+            f"{len(self._document['objects'])} objects | "
+            f"{review['unresolved_count']} open comments"
+        )
+
+    def set_ai_plan(self, plan: Mapping[str, Any]) -> None:
+        self._ai_plan = dict(plan)
+        self.ai_summary.setText(
+            str(plan.get("summary") or "AI plan ready")
+            + f"\n{len(plan.get('operations', []))} operations, explicit apply required."
+        )
+
+    def set_status(self, text: str) -> None:
+        self.status_label.setText(str(text))
+
+    def _choose_template_package(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(
+            self,
+            "Install Painter UI Template",
+            "",
+            "Tiger UI Template (*.tstemplate)",
+        )
+        if path:
+            self.template_install_requested.emit(path)
+
+    def _choose_directory(self, signal) -> None:
+        path = QFileDialog.getExistingDirectory(self, "Select Output Folder")
+        if path:
+            signal.emit(path)
+
+    def _choose_asset_directory(self) -> None:
+        path = QFileDialog.getExistingDirectory(self, "Export UI Assets")
+        if not path:
+            return
+        formats = []
+        if self.asset_png.isChecked():
+            formats.append("png")
+        if self.asset_webp.isChecked():
+            formats.append("webp")
+        if self.asset_svg.isChecked():
+            formats.append("svg")
+        self.assets_export_requested.emit(
+            path,
+            formats or ["png"],
+            [1.0, 2.0, 3.0],
+            self.asset_atlas.isChecked(),
+        )
+
+    def _choose_umg_output(self) -> None:
+        project = self.unreal_project_edit.text().strip()
+        if not project:
+            self.set_status("Choose an Unreal .uproject before generation.")
+            return
+        output = QFileDialog.getExistingDirectory(self, "Package UMG Document")
+        if output:
+            self.umg_generate_requested.emit(project, output)
+
+    def _resolve_selected_comment(self) -> None:
+        item = self.review_list.currentItem()
+        if item is not None:
+            self.review_comment_update_requested.emit(
+                str(item.data(256) or ""),
+                {"resolved": True},
+            )
+
+
+__all__ = ["PainterUIProductionPanel"]

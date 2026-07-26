@@ -15,6 +15,7 @@ dist/
 
 # Rust native helpers
 native/**/target/
+bundled/unreal_plugins/
 
 # NSIS / installer
 installer_output/
