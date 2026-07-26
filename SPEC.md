@@ -6647,6 +6647,12 @@ AI Script Edit MVP integration:
   `paint.ui.object.reorder`. Group movement translates descendants in one Undo
   transaction; ungrouping removes only the group container and preserves its
   children.
+- Layers drag/drop uses the same provider-neutral hierarchy contract as
+  `paint.ui.object.reparent`: dropping in a group center nests the selection,
+  dropping above or below an item reorders it beside that sibling, and dropping
+  on empty space returns it to the artboard root. Cycle checks, active-artboard
+  validation, ordered selection, stable IDs, and one-step Undo apply to UI and
+  Action callers equally.
 - Painter AI/agent painting uses the same editable `Stroke` model and preview/
   export renderer as manual drawing. `paint.stroke.draw` accepts up to 512
   strokes per call, each with normalized canvas points, color, opacity, width,

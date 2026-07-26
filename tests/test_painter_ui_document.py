@@ -244,6 +244,80 @@ def test_general_ui_document_group_ungroup_and_reorder() -> None:
     assert validate_ui_document(document)["ok"] is True
 
 
+def test_general_ui_document_drag_hierarchy_move_and_cycle_guard() -> None:
+    import pytest
+
+    from app.painter_ui_document import (
+        PainterUIDocumentError,
+        add_ui_object,
+        create_ui_document,
+        group_ui_objects,
+        move_ui_objects_in_hierarchy,
+    )
+
+    document = create_ui_document(800, 600)
+    rows = []
+    for index in range(3):
+        document, row = add_ui_object(
+            document,
+            kind="rectangle",
+            x=50 + index * 140,
+            y=90,
+            width=100,
+            height=70,
+        )
+        rows.append(row)
+    document, group = group_ui_objects(
+        document,
+        [rows[0]["id"], rows[1]["id"]],
+        name="Cards",
+    )
+    document = move_ui_objects_in_hierarchy(
+        document,
+        [rows[2]["id"]],
+        target_parent_id=group["id"],
+        placement="inside",
+    )
+    by_id = {row["id"]: row for row in document["objects"]}
+    assert by_id[rows[2]["id"]]["parent_id"] == group["id"]
+    assert document["selection"]["object_ids"] == [rows[2]["id"]]
+
+    document = move_ui_objects_in_hierarchy(
+        document,
+        [rows[0]["id"]],
+        placement="root",
+    )
+    by_id = {row["id"]: row for row in document["objects"]}
+    assert by_id[rows[0]["id"]]["parent_id"] == ""
+
+    document = move_ui_objects_in_hierarchy(
+        document,
+        [rows[0]["id"]],
+        anchor_id=group["id"],
+        placement="before",
+    )
+    ordered = sorted(document["objects"], key=lambda row: row["z_index"])
+    ordered_ids = [row["id"] for row in ordered]
+    assert ordered_ids.index(rows[0]["id"]) > ordered_ids.index(group["id"])
+    document, nested_group = add_ui_object(
+        document,
+        kind="group",
+        name="Nested Group",
+        parent_id=group["id"],
+        x=80,
+        y=100,
+        width=200,
+        height=120,
+    )
+    with pytest.raises(PainterUIDocumentError, match="cycle"):
+        move_ui_objects_in_hierarchy(
+            document,
+            [group["id"]],
+            target_parent_id=nested_group["id"],
+            placement="inside",
+        )
+
+
 def test_general_ui_document_preserves_unknown_kinds_for_explicit_preflight() -> None:
     from app.painter_ui_delivery import preflight_ui_delivery
     from app.painter_ui_document import normalize_ui_document, validate_ui_document

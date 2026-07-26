@@ -273,6 +273,27 @@ class PaintAdapterMixin:
         dialog._push_undo_state("Reorder UI objects")
         return self._paint_ui_commit(dialog, "Reorder UI objects", document)
 
+    def paint_ui_object_reparent(
+        self,
+        *,
+        object_ids: list[str],
+        target_parent_id: str = "",
+        anchor_id: str = "",
+        placement: str = "inside",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import move_ui_objects_in_hierarchy
+
+        document = move_ui_objects_in_hierarchy(
+            dialog._painter_ui_document,
+            list(object_ids or []),
+            target_parent_id=str(target_parent_id or ""),
+            anchor_id=str(anchor_id or ""),
+            placement=str(placement or "inside"),
+        )
+        dialog._push_undo_state("Move UI hierarchy")
+        return self._paint_ui_commit(dialog, "Move UI hierarchy", document)
+
     def paint_ui_delivery_profiles(self) -> dict[str, Any]:
         from app.painter_ui_delivery import list_ui_delivery_profiles
 

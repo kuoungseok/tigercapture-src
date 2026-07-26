@@ -26,6 +26,42 @@ from PySide6.QtWidgets import (
 from app.painter_ui_document import normalize_ui_document
 
 
+class PainterUILayerList(QListWidget):
+    hierarchy_drop_requested = Signal(object, str, str)
+
+    def dropEvent(self, event) -> None:
+        selected_ids = [
+            str(item.data(Qt.ItemDataRole.UserRole) or "")
+            for item in self.selectedItems()
+            if str(item.data(Qt.ItemDataRole.UserRole) or "")
+        ]
+        if not selected_ids:
+            event.ignore()
+            return
+        point = event.position().toPoint()
+        target = self.itemAt(point)
+        if target is None:
+            self.hierarchy_drop_requested.emit(selected_ids, "", "root")
+            event.acceptProposedAction()
+            return
+        target_id = str(target.data(Qt.ItemDataRole.UserRole) or "")
+        if not target_id or target_id in selected_ids:
+            event.ignore()
+            return
+        rect = self.visualItemRect(target)
+        relative_y = point.y() - rect.top()
+        if relative_y < rect.height() * 0.25:
+            placement = "before"
+        elif relative_y > rect.height() * 0.75:
+            placement = "after"
+        elif str(target.data(int(Qt.ItemDataRole.UserRole) + 1) or "") == "group":
+            placement = "inside"
+        else:
+            placement = "after"
+        self.hierarchy_drop_requested.emit(selected_ids, target_id, placement)
+        event.acceptProposedAction()
+
+
 class PainterUIInspector(QWidget):
     artboard_selected = Signal(str)
     object_selected = Signal(str)
@@ -38,6 +74,7 @@ class PainterUIInspector(QWidget):
     group_requested = Signal(object)
     ungroup_requested = Signal(str)
     reorder_requested = Signal(object, str)
+    hierarchy_drop_requested = Signal(object, str, str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -64,12 +101,22 @@ class PainterUIInspector(QWidget):
         layers_page = QWidget()
         layers_layout = QVBoxLayout(layers_page)
         layers_layout.setContentsMargins(4, 4, 4, 4)
-        self.layer_list = QListWidget()
+        self.layer_list = PainterUILayerList()
         self.layer_list.setObjectName("PaintLayerList")
         self.layer_list.setSelectionMode(
             QAbstractItemView.SelectionMode.ExtendedSelection
         )
+        self.layer_list.setDragDropMode(
+            QAbstractItemView.DragDropMode.InternalMove
+        )
+        self.layer_list.setDefaultDropAction(Qt.DropAction.MoveAction)
+        self.layer_list.setDragEnabled(True)
+        self.layer_list.setAcceptDrops(True)
+        self.layer_list.setDropIndicatorShown(True)
         self.layer_list.itemSelectionChanged.connect(self._on_selection_changed)
+        self.layer_list.hierarchy_drop_requested.connect(
+            self.hierarchy_drop_requested
+        )
         layers_layout.addWidget(self.layer_list, 1)
         actions = QHBoxLayout()
         duplicate = QPushButton("Duplicate")
@@ -166,15 +213,24 @@ class PainterUIInspector(QWidget):
         selected = self._document["selection"]["object_id"]
         selected_ids = set(self._document["selection"]["object_ids"])
         active = self._document["active_artboard_id"]
-        rows = sorted(
-            (
-                row
-                for row in self._document["objects"]
-                if row["artboard_id"] == active
-            ),
-            key=lambda row: row["z_index"],
-            reverse=True,
-        )
+        active_rows = [
+            row
+            for row in self._document["objects"]
+            if row["artboard_id"] == active
+        ]
+        children_by_parent: dict[str, list[dict[str, Any]]] = {}
+        for row in active_rows:
+            children_by_parent.setdefault(row["parent_id"], []).append(row)
+        for children in children_by_parent.values():
+            children.sort(key=lambda row: row["z_index"], reverse=True)
+        rows: list[dict[str, Any]] = []
+
+        def append_children(parent_id: str) -> None:
+            for row in children_by_parent.get(parent_id, []):
+                rows.append(row)
+                append_children(row["id"])
+
+        append_children("")
         self._syncing = True
         try:
             self.artboard_combo.clear()
@@ -204,6 +260,7 @@ class PainterUIInspector(QWidget):
                 state = "" if row["visible"] else "  [hidden]"
                 item = QListWidgetItem(f"{prefix}{row['name']}  [{row['kind']}]{state}")
                 item.setData(Qt.ItemDataRole.UserRole, row["id"])
+                item.setData(int(Qt.ItemDataRole.UserRole) + 1, row["kind"])
                 self.layer_list.addItem(item)
                 if row["id"] in selected_ids:
                     item.setSelected(True)

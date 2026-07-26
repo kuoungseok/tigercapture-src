@@ -739,6 +739,118 @@ def reorder_ui_objects(
     return _revised(document)
 
 
+def move_ui_objects_in_hierarchy(
+    value: Mapping[str, Any],
+    object_ids: list[str] | tuple[str, ...],
+    *,
+    target_parent_id: str = "",
+    anchor_id: str = "",
+    placement: str = "inside",
+) -> dict[str, Any]:
+    document = normalize_ui_document(value)
+    active = document["active_artboard_id"]
+    object_by_id = {row["id"]: row for row in document["objects"]}
+    selected_ids = list(dict.fromkeys(str(item or "") for item in object_ids))
+    selected_ids = [
+        object_id
+        for object_id in selected_ids
+        if object_id in object_by_id
+        and object_by_id[object_id]["artboard_id"] == active
+    ]
+    if not selected_ids:
+        raise PainterUIDocumentError("Hierarchy move requires UI objects")
+    selected = set(selected_ids)
+    if any(object_by_id[object_id]["parent_id"] in selected for object_id in selected):
+        raise PainterUIDocumentError(
+            "Move a parent or its child, not both in one hierarchy operation"
+        )
+    parent_id = str(target_parent_id or "")
+    anchor = str(anchor_id or "")
+    operation = str(placement or "inside").strip().casefold()
+    if parent_id:
+        parent = object_by_id.get(parent_id)
+        if parent is None or parent["artboard_id"] != active:
+            raise PainterUIDocumentError(f"UI parent object not found: {parent_id}")
+        if parent["kind"] != "group":
+            raise PainterUIDocumentError("UI objects can only nest inside a group")
+    if anchor:
+        anchor_row = object_by_id.get(anchor)
+        if anchor_row is None or anchor_row["artboard_id"] != active:
+            raise PainterUIDocumentError(f"UI anchor object not found: {anchor}")
+    descendants = set(selected)
+    changed = True
+    while changed:
+        before = len(descendants)
+        descendants.update(
+            row["id"]
+            for row in document["objects"]
+            if row["parent_id"] in descendants
+        )
+        changed = len(descendants) != before
+    if parent_id in descendants or anchor in descendants:
+        raise PainterUIDocumentError("Hierarchy move would create a cycle")
+
+    if operation in {"before", "after"} and anchor:
+        parent_id = object_by_id[anchor]["parent_id"]
+    elif operation == "root":
+        parent_id = ""
+        anchor = ""
+    elif operation != "inside":
+        raise PainterUIDocumentError(
+            f"Unsupported UI hierarchy placement: {placement}"
+        )
+    for row in document["objects"]:
+        if row["id"] in selected:
+            row["parent_id"] = parent_id
+
+    active_rows = sorted(
+        (
+            row
+            for row in document["objects"]
+            if row["artboard_id"] == active
+        ),
+        key=lambda row: int(row["z_index"]),
+    )
+    moving = [row for row in active_rows if row["id"] in selected]
+    stationary = [row for row in active_rows if row["id"] not in selected]
+    if operation == "inside":
+        insert_at = next(
+            (
+                index + 1
+                for index, row in enumerate(stationary)
+                if row["id"] == parent_id
+            ),
+            len(stationary),
+        )
+    elif operation == "before":
+        insert_at = next(
+            index + 1
+            for index, row in enumerate(stationary)
+            if row["id"] == anchor
+        )
+    elif operation == "after":
+        insert_at = next(
+            index
+            for index, row in enumerate(stationary)
+            if row["id"] == anchor
+        )
+    else:
+        insert_at = len(stationary)
+    active_rows = stationary[:insert_at] + moving + stationary[insert_at:]
+    for z_index, row in enumerate(active_rows):
+        row["z_index"] = z_index
+    document["selection"] = {
+        "object_id": selected_ids[-1],
+        "object_ids": selected_ids,
+    }
+    validation = validate_ui_document(document)
+    if not validation["ok"]:
+        raise PainterUIDocumentError(
+            "Invalid UI hierarchy move: " + ", ".join(validation["errors"])
+        )
+    return _revised(document)
+
+
 __all__ = [
     "PainterUIDocumentError",
     "UI_DELIVERY_TARGETS",
@@ -750,6 +862,7 @@ __all__ = [
     "create_ui_document",
     "group_ui_objects",
     "inspect_ui_document",
+    "move_ui_objects_in_hierarchy",
     "normalize_ui_document",
     "remove_ui_artboard",
     "remove_ui_object",

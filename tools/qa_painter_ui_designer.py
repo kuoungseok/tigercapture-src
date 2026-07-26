@@ -227,18 +227,38 @@ def main() -> int:
             "name": "Metrics Group",
         },
     ).to_dict()
+    group_id = str(grouped["result"]["ui_design"]["selected_object_id"])
+    registry.execute(
+        "paint.ui.object.reparent",
+        {
+            "object_ids": [desktop_object_ids[1]],
+            "placement": "root",
+        },
+    )
+    dialog._paint_ui_inspector.hierarchy_drop_requested.emit(
+        [desktop_object_ids[1]],
+        group_id,
+        "inside",
+    )
     app.processEvents()
     hierarchy_screenshot_path = (
         output_dir / "painter_ui_designer_m1_hierarchy.png"
     )
     dialog.grab().save(str(hierarchy_screenshot_path), "PNG")
     state = dialog.painter_action_state()
-    selected_object_id = state["ui_design"]["selected_object_id"]
-    selected_row = next(
+    group_row = next(
         (
             row
             for row in state["ui_design"]["document"]["objects"]
-            if row["id"] == selected_object_id
+            if row["id"] == group_id
+        ),
+        {},
+    )
+    hierarchy_child = next(
+        (
+            row
+            for row in state["ui_design"]["document"]["objects"]
+            if row["id"] == desktop_object_ids[1]
         ),
         {},
     )
@@ -249,8 +269,9 @@ def main() -> int:
             and state["ui_design"]["validation"]["ok"]
             and state["ui_design"]["validation"]["object_count"] == 13
             and state["ui_design"]["validation"]["artboard_count"] == 2
-            and selected_row.get("kind") == "group"
+            and group_row.get("kind") == "group"
             and grouped.get("ok") is True
+            and hierarchy_child.get("parent_id") == group_id
             and screenshot_path.is_file()
             and inspect_screenshot_path.is_file()
             and desktop_screenshot_path.is_file()

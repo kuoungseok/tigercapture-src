@@ -23,9 +23,9 @@ Implementation checkpoint:
   aspect-preserving phone/desktop artboard transitions with desktop QA proof.
 - M1 hierarchy editing now includes editable Group/Ungroup, child-preserving
   group movement, hierarchy indentation, layer forward/backward reordering,
-  Undo, Actions, and screenshot proof.
-- Drag/drop nesting, freeform multi-artboard overview placement, and broader
-  responsive screenshot QA remain before M1 completion.
+  drag/drop nesting and root extraction, Undo, Actions, and screenshot proof.
+- Freeform multi-artboard overview placement, expanded Inspect editing, and
+  broader responsive screenshot QA remain before M1 completion.
   M2-M6 remain milestone work.
 - Product-adoption work is now explicit in M2A/M2B: editable template gallery,
   reusable component/variant libraries, Auto Layout presets, design tokens,

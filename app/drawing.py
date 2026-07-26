@@ -8143,6 +8143,9 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.reorder_requested.connect(
             self._reorder_painter_ui_objects
         )
+        self._paint_ui_inspector.hierarchy_drop_requested.connect(
+            self._move_painter_ui_hierarchy
+        )
         inspector_controls_layout.addWidget(self._paint_ui_inspector, stretch=1)
         self._paint_ui_inspector.hide()
 
@@ -10914,6 +10917,35 @@ class PaintDialog(QDialog):
             selected_ids,
             str(command or ""),
         )
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _move_painter_ui_hierarchy(
+        self,
+        object_ids: object,
+        target_id: str,
+        placement: str,
+    ) -> None:
+        from app.painter_ui_document import move_ui_objects_in_hierarchy
+
+        selected_ids = (
+            [str(value) for value in object_ids]
+            if isinstance(object_ids, (list, tuple))
+            else []
+        )
+        if not selected_ids:
+            return
+        target = str(target_id or "")
+        operation = str(placement or "root")
+        updated = move_ui_objects_in_hierarchy(
+            getattr(self, "_painter_ui_document", None),
+            selected_ids,
+            target_parent_id=target if operation == "inside" else "",
+            anchor_id=target if operation in {"before", "after"} else "",
+            placement=operation,
+        )
+        self._push_undo_state("Move UI hierarchy")
+        self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
 

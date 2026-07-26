@@ -345,6 +345,32 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="selected Painter UI objects would move in the layer stack",
     )
     registry.register_adapter_action(
+        "paint.ui.object.reparent",
+        "Move Painter UI objects into a group, beside a sibling, or to root.",
+        "paint",
+        "paint_ui_object_reparent",
+        params_schema=schema_object(
+            {
+                "object_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "uniqueItems": True,
+                },
+                "target_parent_id": {"type": "string"},
+                "anchor_id": {"type": "string"},
+                "placement": {
+                    "type": "string",
+                    "enum": ["inside", "before", "after", "root"],
+                },
+            },
+            required=("object_ids", "placement"),
+        ),
+        required=("object_ids", "placement"),
+        undo_label="Move UI hierarchy",
+        dry_summary="selected Painter UI objects would move in the hierarchy",
+    )
+    registry.register_adapter_action(
         "paint.ui.delivery.profiles",
         "List general Painter UI delivery adapters and artifact capabilities.",
         "paint",

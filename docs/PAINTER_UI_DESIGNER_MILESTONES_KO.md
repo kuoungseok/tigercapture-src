@@ -74,6 +74,8 @@ Status: interactive editing implemented, completion pending
 - 휴대폰/데스크톱 아트보드 비율 보존 전환
 - Group/Ungroup, 자식 보존 그룹 이동, 계층 들여쓰기
 - 레이어 앞/뒤 순서 변경과 `paint.ui.object.group/ungroup/reorder`
+- 그룹 중앙 드롭 nesting, 항목 위·아래 sibling reorder, 빈 영역 root 이동
+- `paint.ui.object.reparent`와 동일한 Layers 드래그/드롭 Undo 계약
 - keyboard 1 px 이동, Shift+방향키 10 px 이동, Delete, Ctrl+D
 - UI 객체 duplicate/delete와 Undo/Redo
 - Action으로 만든 객체가 화면에 즉시 반영
@@ -83,7 +85,6 @@ Status: interactive editing implemented, completion pending
 
 - 자유 배치형 multi-artboard overview
 - Inspect의 text/typography/constraint/parent hierarchy 편집
-- Layers의 drag/drop reorder와 parent nesting
 - 실제 mobile 및 여러 desktop 크기 screenshot QA
 
 ## M2: Responsive Layout and Design System
