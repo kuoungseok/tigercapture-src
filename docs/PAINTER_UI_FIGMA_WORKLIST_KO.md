@@ -62,6 +62,22 @@ P2 implementation checkpoint (2026-07-26, responsive constraint slice):
   document mutation path, so refresh, Undo/Redo, UI controls, and Actions do
   not make constrained objects jump back to stale margins.
 
+P2 implementation checkpoint (2026-07-26, image layout slice):
+
+- Image objects load PNG, WebP, JPEG, or BMP source files through a bounded
+  modification-aware preview cache instead of always drawing a placeholder.
+- Inspect exposes Fit (contain), Fill (center crop), Stretch, and Tile with a
+  bounded tile scale. Missing or invalid files keep the explicit crossed
+  placeholder rather than silently disappearing.
+- Optional 9-slice stores left/top/right/bottom source-pixel margins and renders
+  nine deterministic regions. Corners retain their source size where possible;
+  margins proportionally contract when the destination is smaller than the
+  combined fixed edges.
+- Image settings preserve unrelated content metadata and use the same document
+  update, Undo/Redo, persistence, and `paint.ui.object.update` Action path.
+- Embedding referenced image bytes, resource hashes, density variants, and
+  delivery packaging remains P8 asset-delivery work.
+
 관련 구현 현황:
 
 - `docs/PLAN_PAINTER_UI_DESIGNER.md`
@@ -132,13 +148,13 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
 
 - X/Y/W/H, 회전, 불투명도, 표시, 잠금
 - 피벗, 좌우·상하 Constraint, 최소/권장/최대 크기, 비율 잠금
+- 이미지 Fit/Fill/Stretch/Tile, 타일 배율, 9-slice 여백
 - Fill, Stroke, Stroke Width, Radius, 구조화된 Shadow 편집과 저장
 - 텍스트 내용, 크기, 굵기, 정렬, 행간 편집과 저장
 - UI와 Action이 공유하는 문서 mutation 및 Undo 경로
 
 남은 범위:
 
-- 이미지 Fit/Fill/Stretch/Tile, 9-slice
 - 접근성 메타데이터와 target별 전달 상태
 - target adapter 출력과 캔버스 스타일 렌더링 parity 검증
 

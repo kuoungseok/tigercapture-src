@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
     QDoubleSpinBox,
+    QFileDialog,
     QFormLayout,
     QFrame,
     QHBoxLayout,
@@ -308,6 +309,74 @@ class PainterUIInspector(QWidget):
         self.text_edit.setPlaceholderText("Text")
         self.text_edit.editingFinished.connect(self._emit_properties)
         form.addRow("Text", self.text_edit)
+        image_source_row = QFrame()
+        image_source_layout = QHBoxLayout(image_source_row)
+        image_source_layout.setContentsMargins(0, 0, 0, 0)
+        image_source_layout.setSpacing(3)
+        self.image_source_edit = QLineEdit()
+        self.image_source_edit.setPlaceholderText("PNG, WebP, or JPEG path")
+        self.image_source_edit.editingFinished.connect(self._emit_properties)
+        image_browse = QPushButton("...")
+        image_browse.setFixedWidth(30)
+        image_browse.setToolTip("Choose image source")
+        image_browse.clicked.connect(self._choose_image_source)
+        self.image_browse_button = image_browse
+        image_source_layout.addWidget(self.image_source_edit, 1)
+        image_source_layout.addWidget(image_browse)
+        form.addRow("Image", image_source_row)
+        image_layout_row = QFrame()
+        image_layout = QHBoxLayout(image_layout_row)
+        image_layout.setContentsMargins(0, 0, 0, 0)
+        image_layout.setSpacing(3)
+        self.image_fit_combo = QComboBox()
+        for label, value in (
+            ("Fit", "fit"),
+            ("Fill", "fill"),
+            ("Stretch", "stretch"),
+            ("Tile", "tile"),
+        ):
+            self.image_fit_combo.addItem(label, value)
+        self.image_fit_combo.currentIndexChanged.connect(self._emit_properties)
+        self.image_fit_combo.currentIndexChanged.connect(
+            self._sync_image_control_states
+        )
+        self.image_tile_scale_spin = QDoubleSpinBox()
+        self.image_tile_scale_spin.setRange(0.05, 16.0)
+        self.image_tile_scale_spin.setDecimals(2)
+        self.image_tile_scale_spin.setSingleStep(0.1)
+        self.image_tile_scale_spin.setPrefix("Tile ")
+        self.image_tile_scale_spin.editingFinished.connect(
+            self._emit_properties
+        )
+        image_layout.addWidget(self.image_fit_combo)
+        image_layout.addWidget(self.image_tile_scale_spin)
+        form.addRow("Image Fit", image_layout_row)
+        self.nine_slice_check = QCheckBox("Enable 9-slice")
+        self.nine_slice_check.toggled.connect(self._emit_properties)
+        self.nine_slice_check.toggled.connect(
+            self._sync_image_control_states
+        )
+        form.addRow("9-slice", self.nine_slice_check)
+        slice_margin_row = QFrame()
+        slice_margin_layout = QHBoxLayout(slice_margin_row)
+        slice_margin_layout.setContentsMargins(0, 0, 0, 0)
+        slice_margin_layout.setSpacing(3)
+        self.nine_slice_controls: dict[str, QDoubleSpinBox] = {}
+        for prefix, edge in (
+            ("L ", "left"),
+            ("T ", "top"),
+            ("R ", "right"),
+            ("B ", "bottom"),
+        ):
+            spin = QDoubleSpinBox()
+            spin.setRange(0.0, 16384.0)
+            spin.setDecimals(1)
+            spin.setPrefix(prefix)
+            spin.setSuffix(" px")
+            spin.editingFinished.connect(self._emit_properties)
+            self.nine_slice_controls[edge] = spin
+            slice_margin_layout.addWidget(spin)
+        form.addRow("Slice Margins", slice_margin_row)
         text_metrics = QFrame()
         text_metrics_layout = QHBoxLayout(text_metrics)
         text_metrics_layout.setContentsMargins(0, 0, 0, 0)
@@ -475,6 +544,12 @@ class PainterUIInspector(QWidget):
             self.font_weight_combo,
             self.text_align_combo,
             self.line_height_spin,
+            self.image_source_edit,
+            self.image_browse_button,
+            self.image_fit_combo,
+            self.image_tile_scale_spin,
+            self.nine_slice_check,
+            *self.nine_slice_controls.values(),
             self.pivot_x_spin,
             self.pivot_y_spin,
             self.horizontal_constraint_combo,
@@ -493,6 +568,7 @@ class PainterUIInspector(QWidget):
             self.stroke_edit.clear()
             self.shadow_color_edit.clear()
             self.text_edit.clear()
+            self.image_source_edit.clear()
             return
         self.name_edit.setText(str(row["name"]))
         self.kind_label.setText(str(row["kind"]).title())
@@ -528,6 +604,31 @@ class PainterUIInspector(QWidget):
         )
         self.text_align_combo.setCurrentIndex(max(0, align_index))
         self.line_height_spin.setValue(float(style.get("line_height") or 1.2))
+        from app.painter_ui_image_renderer import normalize_ui_image_content
+
+        image_content = normalize_ui_image_content(row.get("content"))
+        is_image = row["kind"] == "image"
+        for widget in (
+            self.image_source_edit,
+            self.image_browse_button,
+            self.image_fit_combo,
+            self.image_tile_scale_spin,
+            self.nine_slice_check,
+            *self.nine_slice_controls.values(),
+        ):
+            widget.setEnabled(is_image)
+        self.image_source_edit.setText(image_content["source_path"])
+        image_fit_index = self.image_fit_combo.findData(
+            image_content["image_fit"]
+        )
+        self.image_fit_combo.setCurrentIndex(max(0, image_fit_index))
+        self.image_tile_scale_spin.setValue(image_content["tile_scale"])
+        self.nine_slice_check.setChecked(
+            image_content["nine_slice_enabled"]
+        )
+        for edge, spin in self.nine_slice_controls.items():
+            spin.setValue(float(image_content["nine_slice"][edge]))
+        self._sync_image_control_states()
         constraints = normalize_ui_constraints(
             row.get("constraints"),
             width=float(row["width"]),
@@ -656,6 +757,23 @@ class PainterUIInspector(QWidget):
                 self.text_align_combo.currentData() or "left"
             )
             style["line_height"] = float(self.line_height_spin.value())
+        if row.get("kind") == "image":
+            content.update(
+                {
+                    "source_path": self.image_source_edit.text().strip(),
+                    "image_fit": str(
+                        self.image_fit_combo.currentData() or "fit"
+                    ),
+                    "tile_scale": float(self.image_tile_scale_spin.value()),
+                    "nine_slice_enabled": (
+                        self.nine_slice_check.isChecked()
+                    ),
+                    "nine_slice": {
+                        edge: float(spin.value())
+                        for edge, spin in self.nine_slice_controls.items()
+                    },
+                }
+            )
         constraints = capture_ui_constraints(
             row,
             constraint_parent_geometry(self._document, row),
@@ -684,6 +802,30 @@ class PainterUIInspector(QWidget):
                 "constraints": constraints,
             },
         )
+
+    def _choose_image_source(self) -> None:
+        if self._syncing or self._selected_row() is None:
+            return
+        path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "Choose UI Image",
+            self.image_source_edit.text().strip(),
+            "Images (*.png *.webp *.jpg *.jpeg *.bmp);;All Files (*)",
+        )
+        if not path:
+            return
+        self.image_source_edit.setText(path)
+        self._emit_properties()
+
+    def _sync_image_control_states(self) -> None:
+        row = self._selected_row()
+        is_image = row is not None and row.get("kind") == "image"
+        tiled = self.image_fit_combo.currentData() == "tile"
+        sliced = self.nine_slice_check.isChecked()
+        self.image_tile_scale_spin.setEnabled(is_image and tiled and not sliced)
+        self.image_fit_combo.setEnabled(is_image and not sliced)
+        for spin in self.nine_slice_controls.values():
+            spin.setEnabled(is_image and sliced)
 
     def _emit_duplicate(self) -> None:
         if self._selected_id():

@@ -6651,6 +6651,15 @@ AI Script Edit MVP integration:
   resolver, and geometry edits recapture anchors through the normal undoable
   `paint.ui.object.update` mutation path rather than maintaining private UI
   state.
+- Painter UI image objects render real PNG, WebP, JPEG, and BMP references with
+  `fit` (contain), `fill` (center crop), `stretch`, or bounded-scale `tile`
+  placement. Optional 9-slice rendering uses left/top/right/bottom source-pixel
+  margins, preserves corner regions when space allows, and proportionally
+  contracts fixed edges for undersized destinations. Inspector edits preserve
+  unrelated image content metadata and flow through the same undoable
+  `paint.ui.object.update` contract. Missing sources remain visible as crossed
+  placeholders. Source-byte embedding, hashes, density variants, and delivery
+  packaging remain explicit P8 follow-up scope.
 - Painter UI groups keep stable child IDs and remain editable: grouping,
   ungrouping, and layer-stack reordering are exposed through
   `paint.ui.object.group`, `paint.ui.object.ungroup`, and

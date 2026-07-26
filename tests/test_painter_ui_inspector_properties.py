@@ -306,3 +306,97 @@ def test_constraint_geometry_changes_use_dialog_undo_path() -> None:
     dialog.close()
     dialog.deleteLater()
     app.processEvents()
+
+
+def test_inspector_emits_image_fit_tile_and_nine_slice_properties() -> None:
+    app = _app()
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_inspector import PainterUIInspector
+
+    document = create_ui_document(800, 600)
+    document, row = add_ui_object(
+        document,
+        kind="image",
+        name="Panel Texture",
+        content={"resource_id": "panel-texture"},
+    )
+    inspector = PainterUIInspector()
+    inspector.set_document(document)
+    emitted: list[dict] = []
+    inspector.properties_changed.connect(
+        lambda _object_id, changes: emitted.append(changes)
+    )
+
+    inspector.image_source_edit.setText("C:/assets/panel.png")
+    inspector.image_fit_combo.setCurrentIndex(
+        inspector.image_fit_combo.findData("tile")
+    )
+    inspector.image_tile_scale_spin.setValue(0.75)
+    inspector.nine_slice_check.setChecked(True)
+    for edge, value in {
+        "left": 12,
+        "top": 14,
+        "right": 16,
+        "bottom": 18,
+    }.items():
+        inspector.nine_slice_controls[edge].setValue(value)
+    inspector._emit_properties()
+
+    content = emitted[-1]["content"]
+    assert content["source_path"] == "C:/assets/panel.png"
+    assert content["image_fit"] == "tile"
+    assert content["tile_scale"] == 0.75
+    assert content["nine_slice_enabled"] is True
+    assert content["nine_slice"] == {
+        "left": 12.0,
+        "top": 14.0,
+        "right": 16.0,
+        "bottom": 18.0,
+    }
+    assert content["resource_id"] == "panel-texture"
+    assert row["id"] == document["selection"]["object_id"]
+    assert not inspector.image_fit_combo.isEnabled()
+    assert inspector.nine_slice_controls["left"].isEnabled()
+    inspector.deleteLater()
+    app.processEvents()
+
+
+def test_image_properties_use_dialog_undo_path() -> None:
+    app = _app()
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(800, 600, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog._add_default_painter_ui_object("image")
+    row = dialog._painter_ui_document["objects"][-1]
+    original_content = dict(row["content"])
+    dialog._update_painter_ui_object_changes(
+        row["id"],
+        {
+            "content": {
+                "source_path": "panel.png",
+                "image_fit": "fill",
+                "nine_slice_enabled": True,
+                "nine_slice": {
+                    "left": 8,
+                    "top": 8,
+                    "right": 8,
+                    "bottom": 8,
+                },
+            }
+        },
+    )
+    changed = dialog._painter_ui_document["objects"][-1]
+    assert changed["content"]["image_fit"] == "fill"
+    assert changed["content"]["nine_slice_enabled"] is True
+
+    dialog._undo()
+    restored = dialog._painter_ui_document["objects"][-1]
+    assert restored["content"] == original_content
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()

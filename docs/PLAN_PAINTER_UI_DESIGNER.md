@@ -55,8 +55,12 @@ Implementation checkpoint:
   and aspect locking. Constraint anchors are recaptured after geometry edits,
   resolve deterministically against resized artboards or parents, drive the
   canvas pivot/handles, and use the shared Undo/Action mutation path.
-- Image fitting and 9-slice, accessibility, target delivery status, and
-  adapter-output parity remain in M2. M3-M6 remain milestone work.
+- M2/P2 image objects now render real referenced files with Fit, Fill, Stretch,
+  Tile, bounded tile scale, and source-pixel 9-slice margins. The Inspector,
+  canvas, persistence, Undo, and generic object Action share one content
+  contract; missing sources remain visibly diagnosed.
+- Image-resource embedding/hashing, accessibility, target delivery status, and
+  adapter-output parity remain in M2/P8. M3-M6 remain milestone work.
 - Product-adoption work is now explicit in M2A/M2B: editable template gallery,
   reusable component/variant libraries, Auto Layout presets, design tokens,
   versioned library updates, comments, revision history, reviewer mode, and

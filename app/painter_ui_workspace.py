@@ -15,6 +15,7 @@ from app.painter_ui_constraints import (
     ui_pivot_point,
 )
 from app.painter_ui_document import normalize_ui_document
+from app.painter_ui_image_renderer import draw_ui_image
 from app.painter_ui_style_renderer import (
     draw_ui_object_shadow,
     draw_ui_text_block,
@@ -441,12 +442,17 @@ class PainterUIDesignOverlay(QWidget):
         elif kind == "text":
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.setPen(ui_color(style.get("text_color"), "#F2F5F9"))
+        elif kind == "image":
+            radius = max(0.0, float(style.get("radius") or 0.0) * scale)
+            painter.drawRoundedRect(rect, radius, radius)
+            if not draw_ui_image(painter, rect, row.get("content")):
+                painter.drawLine(rect.topLeft(), rect.bottomRight())
+                painter.drawLine(rect.topRight(), rect.bottomLeft())
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRoundedRect(rect, radius, radius)
         else:
             radius = max(0.0, float(style.get("radius") or 0.0) * scale)
             painter.drawRoundedRect(rect, radius, radius)
-            if kind == "image":
-                painter.drawLine(rect.topLeft(), rect.bottomRight())
-                painter.drawLine(rect.topRight(), rect.bottomLeft())
 
         label = str(row["content"].get("text") or "")
         if kind in {"text", "button"} and not label:

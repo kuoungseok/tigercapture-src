@@ -64,6 +64,14 @@ preview. The format preserves:
   Image, Button, and Progress tools plus a dedicated `Layers | Inspect` panel
 - Inspect edits name, type-readable geometry, opacity, fill, visibility, and
   lock state without converting UI objects into Paint layers
+- Image-object content preserves `source_path`, `image_fit`
+  (`fit/fill/stretch/tile`), `tile_scale`, `nine_slice_enabled`, and
+  source-pixel `nine_slice` left/top/right/bottom margins. These values survive
+  `.tspaint` round trips through the provider-neutral UI document.
+- Current image preview references the source file and uses an in-memory
+  modification-aware cache. Missing files render an explicit placeholder.
+  Embedding UI image bytes, hashes, and density variants in the native
+  container is future asset-delivery work and is not claimed by this slice.
 
 Opening a `.tspaint` restores the editable 3D scene. Baking the blockout to 2D
 is optional and does not replace the saved scene.
