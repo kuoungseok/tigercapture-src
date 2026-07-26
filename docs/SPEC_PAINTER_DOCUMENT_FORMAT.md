@@ -87,6 +87,7 @@ Actions:
 - `paint.ui.object.add/update/remove`
 - `paint.ui.selection.set`
 - `paint.ui.object.arrange`
+- `paint.ui.object.group/ungroup/reorder`
 - `paint.ui.delivery.profiles/preflight`
 - `paint.ui.handoff.export`
 - `paint.state` reports the native format, current path, dirty state, and 3D

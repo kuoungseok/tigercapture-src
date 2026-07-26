@@ -35,6 +35,9 @@ class PainterUIInspector(QWidget):
     duplicate_requested = Signal(str)
     delete_requested = Signal(str)
     arrange_requested = Signal(str, str)
+    group_requested = Signal(object)
+    ungroup_requested = Signal(str)
+    reorder_requested = Signal(object, str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -76,6 +79,20 @@ class PainterUIInspector(QWidget):
         actions.addWidget(duplicate)
         actions.addWidget(delete)
         layers_layout.addLayout(actions)
+        hierarchy_actions = QHBoxLayout()
+        group = QPushButton("Group")
+        ungroup = QPushButton("Ungroup")
+        backward = QPushButton("Down")
+        forward = QPushButton("Up")
+        group.clicked.connect(self._emit_group)
+        ungroup.clicked.connect(self._emit_ungroup)
+        backward.clicked.connect(lambda: self._emit_reorder("backward"))
+        forward.clicked.connect(lambda: self._emit_reorder("forward"))
+        hierarchy_actions.addWidget(group)
+        hierarchy_actions.addWidget(ungroup)
+        hierarchy_actions.addWidget(backward)
+        hierarchy_actions.addWidget(forward)
+        layers_layout.addLayout(hierarchy_actions)
         tabs.addTab(layers_page, "Layers")
 
         inspect_page = QWidget()
@@ -171,8 +188,19 @@ class PainterUIInspector(QWidget):
                         self.artboard_combo.count() - 1
                     )
             self.layer_list.clear()
+            row_by_id = {row["id"]: row for row in rows}
             for row in rows:
-                prefix = "  " if row["parent_id"] else ""
+                depth = 0
+                parent_id = row["parent_id"]
+                visited = set()
+                while parent_id and parent_id not in visited:
+                    visited.add(parent_id)
+                    parent = row_by_id.get(parent_id)
+                    if parent is None:
+                        break
+                    depth += 1
+                    parent_id = parent["parent_id"]
+                prefix = "  " * depth
                 state = "" if row["visible"] else "  [hidden]"
                 item = QListWidgetItem(f"{prefix}{row['name']}  [{row['kind']}]{state}")
                 item.setData(Qt.ItemDataRole.UserRole, row["id"])
@@ -284,6 +312,27 @@ class PainterUIInspector(QWidget):
     def _emit_arrange(self, command: str) -> None:
         if self._selected_id():
             self.arrange_requested.emit(self._selected_id(), str(command))
+
+    def _selected_ids(self) -> list[str]:
+        return [
+            str(item.data(Qt.ItemDataRole.UserRole) or "")
+            for item in self.layer_list.selectedItems()
+            if str(item.data(Qt.ItemDataRole.UserRole) or "")
+        ]
+
+    def _emit_group(self) -> None:
+        selected_ids = self._selected_ids()
+        if len(selected_ids) >= 2:
+            self.group_requested.emit(selected_ids)
+
+    def _emit_ungroup(self) -> None:
+        if self._selected_id():
+            self.ungroup_requested.emit(self._selected_id())
+
+    def _emit_reorder(self, command: str) -> None:
+        selected_ids = self._selected_ids()
+        if selected_ids:
+            self.reorder_requested.emit(selected_ids, str(command))
 
 
 __all__ = ["PainterUIInspector"]

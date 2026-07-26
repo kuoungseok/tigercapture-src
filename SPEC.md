@@ -6641,6 +6641,12 @@ AI Script Edit MVP integration:
   object exposes resize/rotation handles. Phone and desktop artboards preserve
   their document aspect ratio while fitting the available UI Design workspace
   rather than stretching to the underlying paint-canvas dimensions.
+- Painter UI groups keep stable child IDs and remain editable: grouping,
+  ungrouping, and layer-stack reordering are exposed through
+  `paint.ui.object.group`, `paint.ui.object.ungroup`, and
+  `paint.ui.object.reorder`. Group movement translates descendants in one Undo
+  transaction; ungrouping removes only the group container and preserves its
+  children.
 - Painter AI/agent painting uses the same editable `Stroke` model and preview/
   export renderer as manual drawing. `paint.stroke.draw` accepts up to 512
   strokes per call, each with normalized canvas points, color, opacity, width,

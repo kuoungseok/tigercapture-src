@@ -180,6 +180,8 @@ class PainterUIDesignOverlay(QWidget):
         rect = self._object_rect(row)
         style = row["style"]
         kind = str(row["kind"])
+        if kind == "group":
+            return
         fill = QColor(str(style.get("fill") or "#506884"))
         fill.setAlphaF(max(0.06, min(1.0, float(row["opacity"]))))
         stroke = QColor(str(style.get("stroke") or "#93A3B8"))
@@ -360,10 +362,20 @@ class PainterUIDesignOverlay(QWidget):
                 selected_ids = list(self._document["selection"]["object_ids"])
                 if selected not in selected_ids:
                     selected_ids = [selected]
+                descendants = set(selected_ids)
+                changed = True
+                while changed:
+                    before = len(descendants)
+                    descendants.update(
+                        row["id"]
+                        for row in self._document["objects"]
+                        if row["parent_id"] in descendants
+                    )
+                    changed = len(descendants) != before
                 self._move_original_positions = {
                     row["id"]: (float(row["x"]), float(row["y"]))
                     for row in self._document["objects"]
-                    if row["id"] in selected_ids and not row["locked"]
+                    if row["id"] in descendants and not row["locked"]
                 }
         event.accept()
 

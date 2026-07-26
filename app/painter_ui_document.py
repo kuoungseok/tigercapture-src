@@ -589,6 +589,156 @@ def select_ui_objects(
     return document
 
 
+def group_ui_objects(
+    value: Mapping[str, Any],
+    object_ids: list[str] | tuple[str, ...],
+    *,
+    name: str = "Group",
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    document = normalize_ui_document(value)
+    active = document["active_artboard_id"]
+    selected_ids = list(dict.fromkeys(str(item or "") for item in object_ids))
+    rows = [
+        row
+        for row in document["objects"]
+        if row["id"] in selected_ids and row["artboard_id"] == active
+    ]
+    if len(rows) < 2:
+        raise PainterUIDocumentError("Grouping requires at least two UI objects")
+    selected_set = {row["id"] for row in rows}
+    if any(row["parent_id"] in selected_set for row in rows):
+        raise PainterUIDocumentError(
+            "Select sibling UI objects rather than an ancestor and its child"
+        )
+    parent_ids = {row["parent_id"] for row in rows}
+    parent_id = parent_ids.pop() if len(parent_ids) == 1 else ""
+    min_x = min(float(row["x"]) for row in rows)
+    min_y = min(float(row["y"]) for row in rows)
+    max_x = max(float(row["x"]) + float(row["width"]) for row in rows)
+    max_y = max(float(row["y"]) + float(row["height"]) for row in rows)
+    group_id = _next_id("ui-object", document["objects"])
+    group_row = _normalize_object(
+        {
+            "id": group_id,
+            "kind": "group",
+            "name": str(name or "Group"),
+            "artboard_id": active,
+            "parent_id": parent_id,
+            "x": min_x,
+            "y": min_y,
+            "width": max(1.0, max_x - min_x),
+            "height": max(1.0, max_y - min_y),
+            "z_index": max(int(row["z_index"]) for row in rows) + 1,
+            "style": {"fill": "#00000000", "stroke": "#718096"},
+        },
+        len(document["objects"]),
+        active,
+    )
+    for row in document["objects"]:
+        if row["id"] in selected_set:
+            row["parent_id"] = group_id
+    document["objects"].append(group_row)
+    document["selection"] = {
+        "object_id": group_id,
+        "object_ids": [group_id],
+    }
+    return _revised(document), copy.deepcopy(group_row)
+
+
+def ungroup_ui_object(
+    value: Mapping[str, Any],
+    object_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    document = normalize_ui_document(value)
+    group = next(
+        (row for row in document["objects"] if row["id"] == object_id),
+        None,
+    )
+    if group is None:
+        raise PainterUIDocumentError(f"UI object not found: {object_id}")
+    if group["kind"] != "group":
+        raise PainterUIDocumentError("Only a UI group can be ungrouped")
+    child_ids = [
+        row["id"] for row in document["objects"] if row["parent_id"] == object_id
+    ]
+    for row in document["objects"]:
+        if row["parent_id"] == object_id:
+            row["parent_id"] = group["parent_id"]
+    document["objects"] = [
+        row for row in document["objects"] if row["id"] != object_id
+    ]
+    document["selection"] = {
+        "object_id": child_ids[-1] if child_ids else "",
+        "object_ids": child_ids,
+    }
+    return _revised(document), {
+        "removed_group_id": object_id,
+        "child_object_ids": child_ids,
+    }
+
+
+def reorder_ui_objects(
+    value: Mapping[str, Any],
+    object_ids: list[str] | tuple[str, ...],
+    command: str,
+) -> dict[str, Any]:
+    document = normalize_ui_document(value)
+    active = document["active_artboard_id"]
+    selected = {
+        str(object_id or "")
+        for object_id in object_ids
+        if str(object_id or "")
+    }
+    if not selected:
+        return document
+    active_rows = sorted(
+        (
+            row
+            for row in document["objects"]
+            if row["artboard_id"] == active
+        ),
+        key=lambda row: int(row["z_index"]),
+    )
+    if not selected.issubset({row["id"] for row in active_rows}):
+        raise PainterUIDocumentError(
+            "UI reorder selection must belong to the active artboard"
+        )
+    operation = str(command or "").strip().casefold()
+    if operation == "front":
+        active_rows = [
+            row for row in active_rows if row["id"] not in selected
+        ] + [row for row in active_rows if row["id"] in selected]
+    elif operation == "back":
+        active_rows = [
+            row for row in active_rows if row["id"] in selected
+        ] + [row for row in active_rows if row["id"] not in selected]
+    elif operation == "forward":
+        for index in range(len(active_rows) - 2, -1, -1):
+            if (
+                active_rows[index]["id"] in selected
+                and active_rows[index + 1]["id"] not in selected
+            ):
+                active_rows[index], active_rows[index + 1] = (
+                    active_rows[index + 1],
+                    active_rows[index],
+                )
+    elif operation == "backward":
+        for index in range(1, len(active_rows)):
+            if (
+                active_rows[index]["id"] in selected
+                and active_rows[index - 1]["id"] not in selected
+            ):
+                active_rows[index], active_rows[index - 1] = (
+                    active_rows[index - 1],
+                    active_rows[index],
+                )
+    else:
+        raise PainterUIDocumentError(f"Unsupported UI reorder command: {command}")
+    for z_index, row in enumerate(active_rows):
+        row["z_index"] = z_index
+    return _revised(document)
+
+
 __all__ = [
     "PainterUIDocumentError",
     "UI_DELIVERY_TARGETS",
@@ -598,14 +748,17 @@ __all__ = [
     "add_ui_artboard",
     "add_ui_object",
     "create_ui_document",
+    "group_ui_objects",
     "inspect_ui_document",
     "normalize_ui_document",
     "remove_ui_artboard",
     "remove_ui_object",
+    "reorder_ui_objects",
     "select_ui_object",
     "select_ui_objects",
     "set_active_ui_artboard",
     "update_ui_artboard",
     "update_ui_object",
+    "ungroup_ui_object",
     "validate_ui_document",
 ]

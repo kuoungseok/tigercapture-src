@@ -220,22 +220,46 @@ def main() -> int:
     app.processEvents()
     desktop_screenshot_path = output_dir / "painter_ui_designer_m1_desktop.png"
     dialog.grab().save(str(desktop_screenshot_path), "PNG")
+    grouped = registry.execute(
+        "paint.ui.object.group",
+        {
+            "object_ids": desktop_object_ids[1:],
+            "name": "Metrics Group",
+        },
+    ).to_dict()
+    app.processEvents()
+    hierarchy_screenshot_path = (
+        output_dir / "painter_ui_designer_m1_hierarchy.png"
+    )
+    dialog.grab().save(str(hierarchy_screenshot_path), "PNG")
     state = dialog.painter_action_state()
+    selected_object_id = state["ui_design"]["selected_object_id"]
+    selected_row = next(
+        (
+            row
+            for row in state["ui_design"]["document"]["objects"]
+            if row["id"] == selected_object_id
+        ),
+        {},
+    )
     report = {
         "schema": "tigerstudio.painter.ui.qa.v1",
         "ok": (
             state["workspace"]["mode"] == "ui_design"
             and state["ui_design"]["validation"]["ok"]
-            and state["ui_design"]["validation"]["object_count"] == 12
+            and state["ui_design"]["validation"]["object_count"] == 13
             and state["ui_design"]["validation"]["artboard_count"] == 2
-            and len(state["ui_design"]["selected_object_ids"]) == 3
+            and selected_row.get("kind") == "group"
+            and grouped.get("ok") is True
             and screenshot_path.is_file()
             and inspect_screenshot_path.is_file()
             and desktop_screenshot_path.is_file()
+            and hierarchy_screenshot_path.is_file()
         ),
         "screenshot": str(screenshot_path),
         "inspect_screenshot": str(inspect_screenshot_path),
         "desktop_screenshot": str(desktop_screenshot_path),
+        "hierarchy_screenshot": str(hierarchy_screenshot_path),
         "workspace": state["workspace"],
         "ui_design": state["ui_design"],
     }

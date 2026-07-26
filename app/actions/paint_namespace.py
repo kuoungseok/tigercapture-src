@@ -287,6 +287,64 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="selected Painter UI objects would be aligned or distributed",
     )
     registry.register_adapter_action(
+        "paint.ui.object.group",
+        "Create an editable group from two or more Painter UI objects.",
+        "paint",
+        "paint_ui_object_group",
+        params_schema=schema_object(
+            {
+                "object_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 2,
+                    "uniqueItems": True,
+                },
+                "name": {"type": "string"},
+            },
+            required=("object_ids",),
+        ),
+        required=("object_ids",),
+        undo_label="Group UI objects",
+        dry_summary="the selected Painter UI objects would be grouped",
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.ungroup",
+        "Remove a Painter UI group while preserving its child objects.",
+        "paint",
+        "paint_ui_object_ungroup",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}},
+            required=("object_id",),
+        ),
+        required=("object_id",),
+        undo_label="Ungroup UI objects",
+        dry_summary="the selected Painter UI group would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.reorder",
+        "Move selected Painter UI objects through the active artboard stack.",
+        "paint",
+        "paint_ui_object_reorder",
+        params_schema=schema_object(
+            {
+                "object_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "minItems": 1,
+                    "uniqueItems": True,
+                },
+                "command": {
+                    "type": "string",
+                    "enum": ["front", "forward", "backward", "back"],
+                },
+            },
+            required=("object_ids", "command"),
+        ),
+        required=("object_ids", "command"),
+        undo_label="Reorder UI objects",
+        dry_summary="selected Painter UI objects would move in the layer stack",
+    )
+    registry.register_adapter_action(
         "paint.ui.delivery.profiles",
         "List general Painter UI delivery adapters and artifact capabilities.",
         "paint",

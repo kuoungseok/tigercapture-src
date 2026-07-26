@@ -42,6 +42,9 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.object.remove",
         "paint.ui.selection.set",
         "paint.ui.object.arrange",
+        "paint.ui.object.group",
+        "paint.ui.object.ungroup",
+        "paint.ui.object.reorder",
         "paint.ui.delivery.profiles",
         "paint.ui.delivery.preflight",
         "paint.ui.handoff.export",
@@ -326,6 +329,84 @@ def test_painter_ui_multi_select_align_distribute_and_group_undo() -> None:
         for row in dialog.painter_action_state()["ui_design"]["document"]["objects"]
     }
     assert {object_id: undone[object_id]["x"] for object_id in rows} == before_move
+
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
+def test_painter_ui_group_actions_preserve_children_and_undo() -> None:
+    app = _app()
+    from app.actions.registry import ActionRegistry
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(800, 600, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.show()
+    dialog._set_canvas_workspace_mode("ui_design")
+    registry = ActionRegistry(owner=dialog)
+    object_ids = []
+    for x in (80, 280, 480):
+        result = registry.execute(
+            "paint.ui.object.add",
+            {
+                "kind": "rectangle",
+                "x": x,
+                "y": 120,
+                "width": 120,
+                "height": 90,
+            },
+        ).to_dict()
+        object_ids.append(result["result"]["ui_design"]["selected_object_id"])
+
+    grouped = registry.execute(
+        "paint.ui.object.group",
+        {"object_ids": object_ids[:2], "name": "Cards"},
+    ).to_dict()
+    assert grouped["ok"]
+    document = grouped["result"]["ui_design"]["document"]
+    group_id = grouped["result"]["ui_design"]["selected_object_id"]
+    assert next(row for row in document["objects"] if row["id"] == group_id)[
+        "kind"
+    ] == "group"
+    assert {
+        row["parent_id"]
+        for row in document["objects"]
+        if row["id"] in object_ids[:2]
+    } == {group_id}
+
+    reordered = registry.execute(
+        "paint.ui.object.reorder",
+        {"object_ids": [group_id], "command": "back"},
+    ).to_dict()
+    assert reordered["ok"]
+    order = sorted(
+        reordered["result"]["ui_design"]["document"]["objects"],
+        key=lambda row: row["z_index"],
+    )
+    assert order[0]["id"] == group_id
+
+    ungrouped = registry.execute(
+        "paint.ui.object.ungroup",
+        {"object_id": group_id},
+    ).to_dict()
+    assert ungrouped["ok"]
+    assert group_id not in {
+        row["id"]
+        for row in ungrouped["result"]["ui_design"]["document"]["objects"]
+    }
+    assert set(ungrouped["result"]["ui_design"]["selected_object_ids"]) == set(
+        object_ids[:2]
+    )
+    dialog._undo()
+    assert group_id in {
+        row["id"]
+        for row in dialog.painter_action_state()["ui_design"]["document"]["objects"]
+    }
 
     dialog.close()
     dialog.deleteLater()

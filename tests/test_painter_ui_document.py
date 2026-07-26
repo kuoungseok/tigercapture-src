@@ -192,6 +192,58 @@ def test_general_ui_document_multi_selection_modes_are_stable() -> None:
     }
 
 
+def test_general_ui_document_group_ungroup_and_reorder() -> None:
+    from app.painter_ui_document import (
+        add_ui_object,
+        create_ui_document,
+        group_ui_objects,
+        reorder_ui_objects,
+        ungroup_ui_object,
+        validate_ui_document,
+    )
+
+    document = create_ui_document(800, 600)
+    rows = []
+    for index in range(3):
+        document, row = add_ui_object(
+            document,
+            kind="rectangle",
+            x=60 + index * 140,
+            y=100,
+            width=100,
+            height=80,
+        )
+        rows.append(row)
+    document = reorder_ui_objects(document, [rows[0]["id"]], "front")
+    ordered = sorted(document["objects"], key=lambda row: row["z_index"])
+    assert ordered[-1]["id"] == rows[0]["id"]
+
+    document, group = group_ui_objects(
+        document,
+        [rows[0]["id"], rows[1]["id"]],
+        name="Header Group",
+    )
+    children = {
+        row["id"]: row
+        for row in document["objects"]
+        if row["id"] in {rows[0]["id"], rows[1]["id"]}
+    }
+    assert group["kind"] == "group"
+    assert {row["parent_id"] for row in children.values()} == {group["id"]}
+    assert document["selection"]["object_ids"] == [group["id"]]
+    assert validate_ui_document(document)["ok"] is True
+
+    document, result = ungroup_ui_object(document, group["id"])
+    assert result["child_object_ids"] == [rows[0]["id"], rows[1]["id"]]
+    assert group["id"] not in {row["id"] for row in document["objects"]}
+    assert {
+        row["parent_id"]
+        for row in document["objects"]
+        if row["id"] in result["child_object_ids"]
+    } == {""}
+    assert validate_ui_document(document)["ok"] is True
+
+
 def test_general_ui_document_preserves_unknown_kinds_for_explicit_preflight() -> None:
     from app.painter_ui_delivery import preflight_ui_delivery
     from app.painter_ui_document import normalize_ui_document, validate_ui_document

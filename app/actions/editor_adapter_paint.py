@@ -228,6 +228,51 @@ class PaintAdapterMixin:
         dialog._align_painter_ui_object(selected, str(command or ""))
         return dialog.painter_action_state()
 
+    def paint_ui_object_group(
+        self,
+        *,
+        object_ids: list[str],
+        name: str = "Group",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import group_ui_objects
+
+        document, _group = group_ui_objects(
+            dialog._painter_ui_document,
+            list(object_ids or []),
+            name=str(name or "Group"),
+        )
+        dialog._push_undo_state("Group UI objects")
+        return self._paint_ui_commit(dialog, "Group UI objects", document)
+
+    def paint_ui_object_ungroup(self, *, object_id: str) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import ungroup_ui_object
+
+        document, _result = ungroup_ui_object(
+            dialog._painter_ui_document,
+            str(object_id or ""),
+        )
+        dialog._push_undo_state("Ungroup UI objects")
+        return self._paint_ui_commit(dialog, "Ungroup UI objects", document)
+
+    def paint_ui_object_reorder(
+        self,
+        *,
+        object_ids: list[str],
+        command: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import reorder_ui_objects
+
+        document = reorder_ui_objects(
+            dialog._painter_ui_document,
+            list(object_ids or []),
+            str(command or ""),
+        )
+        dialog._push_undo_state("Reorder UI objects")
+        return self._paint_ui_commit(dialog, "Reorder UI objects", document)
+
     def paint_ui_delivery_profiles(self) -> dict[str, Any]:
         from app.painter_ui_delivery import list_ui_delivery_profiles
 

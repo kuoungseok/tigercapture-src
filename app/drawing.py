@@ -8134,6 +8134,15 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.arrange_requested.connect(
             self._align_painter_ui_object
         )
+        self._paint_ui_inspector.group_requested.connect(
+            self._group_painter_ui_objects
+        )
+        self._paint_ui_inspector.ungroup_requested.connect(
+            self._ungroup_painter_ui_object
+        )
+        self._paint_ui_inspector.reorder_requested.connect(
+            self._reorder_painter_ui_objects
+        )
         inspector_controls_layout.addWidget(self._paint_ui_inspector, stretch=1)
         self._paint_ui_inspector.hide()
 
@@ -10848,6 +10857,65 @@ class PaintDialog(QDialog):
             changes_by_id,
             label=f"Arrange UI objects {command}",
         )
+
+    def _group_painter_ui_objects(self, object_ids: object) -> None:
+        from app.painter_ui_document import group_ui_objects
+
+        selected_ids = (
+            [str(value) for value in object_ids]
+            if isinstance(object_ids, (list, tuple))
+            else []
+        )
+        if len(selected_ids) < 2:
+            return
+        self._push_undo_state("Group UI objects")
+        updated, _group = group_ui_objects(
+            getattr(self, "_painter_ui_document", None),
+            selected_ids,
+        )
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _ungroup_painter_ui_object(self, object_id: str = "") -> None:
+        from app.painter_ui_document import ungroup_ui_object
+
+        current = getattr(self, "_painter_ui_document", None)
+        target = str(
+            object_id
+            or ((current or {}).get("selection") or {}).get("object_id")
+            or ""
+        )
+        if not target:
+            return
+        self._push_undo_state("Ungroup UI objects")
+        updated, _result = ungroup_ui_object(current, target)
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _reorder_painter_ui_objects(
+        self,
+        object_ids: object,
+        command: str,
+    ) -> None:
+        from app.painter_ui_document import reorder_ui_objects
+
+        selected_ids = (
+            [str(value) for value in object_ids]
+            if isinstance(object_ids, (list, tuple))
+            else []
+        )
+        if not selected_ids:
+            return
+        self._push_undo_state(f"Reorder UI objects {command}")
+        self._painter_ui_document = reorder_ui_objects(
+            getattr(self, "_painter_ui_document", None),
+            selected_ids,
+            str(command or ""),
+        )
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
 
     def _duplicate_painter_ui_object(self, object_id: str = "") -> None:
         from app.painter_ui_document import add_ui_object, update_ui_object
