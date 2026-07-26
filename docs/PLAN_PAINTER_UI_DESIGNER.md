@@ -41,9 +41,14 @@ Implementation checkpoint:
 - M1 artboard authoring now includes title-drag freeform positioning with Undo
   and Inspector creation presets for mobile, desktop, console, and broadcast
   targets.
-- Freeform multi-artboard overview placement, expanded Inspect editing, and
-  broader responsive screenshot QA remain before M1 completion.
-  M2-M6 remain milestone work.
+- M1's core P1 editing scope is complete. Broader responsive screenshot QA
+  continues as cross-milestone validation rather than blocking canvas editing.
+- M2/P2 Inspector work has started with editable Fill, Stroke, Stroke Width,
+  Radius, structured Shadow, text content, font size/weight, alignment, and
+  line height. These changes use the shared UI document mutation and Undo path.
+- Pivot/constraints, image fitting and 9-slice, accessibility, target delivery
+  status, and full preview rendering parity remain in M2. M3-M6 remain
+  milestone work.
 - Product-adoption work is now explicit in M2A/M2B: editable template gallery,
   reusable component/variant libraries, Auto Layout presets, design tokens,
   versioned library updates, comments, revision history, reviewer mode, and

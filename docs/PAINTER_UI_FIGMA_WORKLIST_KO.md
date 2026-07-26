@@ -31,6 +31,17 @@ P1 implementation checkpoint (2026-07-26, navigation slice):
 - Inspector presets add iPhone, Android, desktop, console, and broadcast
   artboards with deterministic non-overlapping placement.
 
+P2 implementation checkpoint (2026-07-26, visual style slice):
+
+- Inspect edits Fill, Stroke, Stroke Width, Radius, and a structured shadow
+  (`x/y/blur/spread/color`) through the shared UI document mutation path.
+- Text and button objects expose editable content, font size, font weight,
+  alignment, and line height; non-text selections disable these controls.
+- Inspector payloads preserve unrelated style/content fields and participate in
+  the existing PaintDialog Undo path.
+- Stroke, width, radius, and font size already render in the canvas preview.
+  Shadow rendering and full typography parity remain follow-up work.
+
 관련 구현 현황:
 
 - `docs/PLAN_PAINTER_UI_DESIGNER.md`
@@ -81,7 +92,9 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
 - 다중 선택, 그룹 이동, 정렬, 균등 분배
 - Group/Ungroup과 자식 보존 이동
 - Layers 순서 변경, 그룹 nesting, root 이동
-- phone/desktop 아트보드 전환과 비율 보존
+- 전체 아트보드 자유 배치, 화면 이동과 줌, Fit 명령
+- marquee 선택, Smart Guide, 비율/중심 기준 resize
+- 모바일, 데스크톱, 콘솔, 방송 아트보드 프리셋
 
 ## P2. 인스펙터 확장
 
@@ -94,6 +107,20 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
 7. 9-slice margin
 8. 접근성 role, label, focus order
 9. 선택 객체의 target별 `Native/Material/Baked/Blocked` 표시
+
+현재 구현된 기반:
+
+- X/Y/W/H, 회전, 불투명도, 표시, 잠금
+- Fill, Stroke, Stroke Width, Radius, 구조화된 Shadow 편집과 저장
+- 텍스트 내용, 크기, 굵기, 정렬, 행간 편집과 저장
+- UI와 Action이 공유하는 문서 mutation 및 Undo 경로
+
+남은 범위:
+
+- 피벗, Constraint, 최소/권장/최대 크기, 비율 잠금
+- 이미지 Fit/Fill/Stretch/Tile, 9-slice
+- 접근성 메타데이터와 target별 전달 상태
+- Shadow와 전체 typography의 캔버스/출력 렌더링 parity
 
 ## P3. Auto Layout와 반응형
 

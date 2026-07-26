@@ -195,6 +195,86 @@ class PainterUIInspector(QWidget):
         self.fill_edit.setPlaceholderText("#RRGGBB")
         self.fill_edit.editingFinished.connect(self._emit_properties)
         form.addRow("Fill", self.fill_edit)
+        self.stroke_edit = QLineEdit()
+        self.stroke_edit.setPlaceholderText("#RRGGBB")
+        self.stroke_edit.editingFinished.connect(self._emit_properties)
+        form.addRow("Stroke", self.stroke_edit)
+        self.stroke_width_spin = QDoubleSpinBox()
+        self.stroke_width_spin.setRange(0.0, 64.0)
+        self.stroke_width_spin.setDecimals(1)
+        self.stroke_width_spin.setSuffix(" px")
+        self.stroke_width_spin.editingFinished.connect(self._emit_properties)
+        form.addRow("Stroke Width", self.stroke_width_spin)
+        self.radius_spin = QDoubleSpinBox()
+        self.radius_spin.setRange(0.0, 4096.0)
+        self.radius_spin.setDecimals(1)
+        self.radius_spin.setSuffix(" px")
+        self.radius_spin.editingFinished.connect(self._emit_properties)
+        form.addRow("Radius", self.radius_spin)
+        self.shadow_color_edit = QLineEdit()
+        self.shadow_color_edit.setPlaceholderText("#00000066")
+        self.shadow_color_edit.editingFinished.connect(self._emit_properties)
+        form.addRow("Shadow", self.shadow_color_edit)
+        shadow_metrics = QFrame()
+        shadow_metrics_layout = QHBoxLayout(shadow_metrics)
+        shadow_metrics_layout.setContentsMargins(0, 0, 0, 0)
+        shadow_metrics_layout.setSpacing(3)
+        self.shadow_y_spin = QDoubleSpinBox()
+        self.shadow_y_spin.setRange(-512.0, 512.0)
+        self.shadow_y_spin.setPrefix("Y ")
+        self.shadow_y_spin.editingFinished.connect(self._emit_properties)
+        self.shadow_blur_spin = QDoubleSpinBox()
+        self.shadow_blur_spin.setRange(0.0, 512.0)
+        self.shadow_blur_spin.setPrefix("Blur ")
+        self.shadow_blur_spin.editingFinished.connect(self._emit_properties)
+        shadow_metrics_layout.addWidget(self.shadow_y_spin)
+        shadow_metrics_layout.addWidget(self.shadow_blur_spin)
+        form.addRow("", shadow_metrics)
+        self.text_edit = QLineEdit()
+        self.text_edit.setPlaceholderText("Text")
+        self.text_edit.editingFinished.connect(self._emit_properties)
+        form.addRow("Text", self.text_edit)
+        text_metrics = QFrame()
+        text_metrics_layout = QHBoxLayout(text_metrics)
+        text_metrics_layout.setContentsMargins(0, 0, 0, 0)
+        text_metrics_layout.setSpacing(3)
+        self.font_size_spin = QDoubleSpinBox()
+        self.font_size_spin.setRange(1.0, 512.0)
+        self.font_size_spin.setSuffix(" px")
+        self.font_size_spin.editingFinished.connect(self._emit_properties)
+        self.font_weight_combo = QComboBox()
+        for label, weight in (
+            ("Regular", 400),
+            ("Medium", 500),
+            ("Semibold", 600),
+            ("Bold", 700),
+        ):
+            self.font_weight_combo.addItem(label, weight)
+        self.font_weight_combo.currentIndexChanged.connect(self._emit_properties)
+        text_metrics_layout.addWidget(self.font_size_spin)
+        text_metrics_layout.addWidget(self.font_weight_combo)
+        form.addRow("Typography", text_metrics)
+        text_layout = QFrame()
+        text_layout_row = QHBoxLayout(text_layout)
+        text_layout_row.setContentsMargins(0, 0, 0, 0)
+        text_layout_row.setSpacing(3)
+        self.text_align_combo = QComboBox()
+        for label, alignment in (
+            ("Left", "left"),
+            ("Center", "center"),
+            ("Right", "right"),
+        ):
+            self.text_align_combo.addItem(label, alignment)
+        self.text_align_combo.currentIndexChanged.connect(self._emit_properties)
+        self.line_height_spin = QDoubleSpinBox()
+        self.line_height_spin.setRange(0.5, 4.0)
+        self.line_height_spin.setDecimals(2)
+        self.line_height_spin.setSingleStep(0.05)
+        self.line_height_spin.setPrefix("Line ")
+        self.line_height_spin.editingFinished.connect(self._emit_properties)
+        text_layout_row.addWidget(self.text_align_combo)
+        text_layout_row.addWidget(self.line_height_spin)
+        form.addRow("Text Layout", text_layout)
         self.visible_check = QCheckBox("Visible")
         self.visible_check.toggled.connect(self._emit_properties)
         self.locked_check = QCheckBox("Locked")
@@ -310,6 +390,17 @@ class PainterUIInspector(QWidget):
             self.name_edit,
             self.opacity_spin,
             self.fill_edit,
+            self.stroke_edit,
+            self.stroke_width_spin,
+            self.radius_spin,
+            self.shadow_color_edit,
+            self.shadow_y_spin,
+            self.shadow_blur_spin,
+            self.text_edit,
+            self.font_size_spin,
+            self.font_weight_combo,
+            self.text_align_combo,
+            self.line_height_spin,
             self.visible_check,
             self.locked_check,
             *self.geometry_controls.values(),
@@ -318,6 +409,10 @@ class PainterUIInspector(QWidget):
         if row is None:
             self.name_edit.clear()
             self.kind_label.setText("-")
+            self.fill_edit.clear()
+            self.stroke_edit.clear()
+            self.shadow_color_edit.clear()
+            self.text_edit.clear()
             return
         self.name_edit.setText(str(row["name"]))
         self.kind_label.setText(str(row["kind"]).title())
@@ -325,6 +420,34 @@ class PainterUIInspector(QWidget):
             spin.setValue(float(row[key]))
         self.opacity_spin.setValue(int(round(float(row["opacity"]) * 100.0)))
         self.fill_edit.setText(str(row["style"].get("fill") or ""))
+        style = row["style"]
+        self.stroke_edit.setText(str(style.get("stroke") or ""))
+        self.stroke_width_spin.setValue(float(style.get("stroke_width") or 0.0))
+        self.radius_spin.setValue(float(style.get("radius") or 0.0))
+        shadow = style.get("shadow")
+        shadow = shadow if isinstance(shadow, Mapping) else {}
+        self.shadow_color_edit.setText(str(shadow.get("color") or ""))
+        self.shadow_y_spin.setValue(float(shadow.get("y") or 0.0))
+        self.shadow_blur_spin.setValue(float(shadow.get("blur") or 0.0))
+        is_text = row["kind"] in {"text", "button"}
+        for widget in (
+            self.text_edit,
+            self.font_size_spin,
+            self.font_weight_combo,
+            self.text_align_combo,
+            self.line_height_spin,
+        ):
+            widget.setEnabled(is_text)
+        self.text_edit.setText(str(row["content"].get("text") or ""))
+        self.font_size_spin.setValue(float(style.get("font_size") or 14.0))
+        weight = int(style.get("font_weight") or 400)
+        weight_index = self.font_weight_combo.findData(weight)
+        self.font_weight_combo.setCurrentIndex(max(0, weight_index))
+        align_index = self.text_align_combo.findData(
+            str(style.get("text_align") or "left")
+        )
+        self.text_align_combo.setCurrentIndex(max(0, align_index))
+        self.line_height_spin.setValue(float(style.get("line_height") or 1.2))
         self.visible_check.setChecked(bool(row["visible"]))
         self.locked_check.setChecked(bool(row["locked"]))
 
@@ -382,6 +505,38 @@ class PainterUIInspector(QWidget):
         fill = self.fill_edit.text().strip()
         if fill:
             style["fill"] = fill
+        else:
+            style.pop("fill", None)
+        stroke = self.stroke_edit.text().strip()
+        if stroke:
+            style["stroke"] = stroke
+        else:
+            style.pop("stroke", None)
+        style["stroke_width"] = float(self.stroke_width_spin.value())
+        style["radius"] = float(self.radius_spin.value())
+        shadow_color = self.shadow_color_edit.text().strip()
+        shadow_blur = float(self.shadow_blur_spin.value())
+        if shadow_color or shadow_blur > 0.0:
+            style["shadow"] = {
+                "x": 0.0,
+                "y": float(self.shadow_y_spin.value()),
+                "blur": shadow_blur,
+                "spread": 0.0,
+                "color": shadow_color or "#00000066",
+            }
+        else:
+            style.pop("shadow", None)
+        content = dict((row or {}).get("content") or {})
+        if (row or {}).get("kind") in {"text", "button"}:
+            content["text"] = self.text_edit.text()
+            style["font_size"] = float(self.font_size_spin.value())
+            style["font_weight"] = int(
+                self.font_weight_combo.currentData() or 400
+            )
+            style["text_align"] = str(
+                self.text_align_combo.currentData() or "left"
+            )
+            style["line_height"] = float(self.line_height_spin.value())
         self.properties_changed.emit(
             self._selected_id(),
             {
@@ -390,6 +545,7 @@ class PainterUIInspector(QWidget):
                 "visible": self.visible_check.isChecked(),
                 "locked": self.locked_check.isChecked(),
                 "style": style,
+                "content": content,
             },
         )
 
