@@ -91,7 +91,10 @@ Implementation checkpoint:
   reporting, and stable-ID binding/unbinding for common style, layout,
   opacity, and content paths. `paint.ui.token.library.inspect` gives AI the
   same report; `paint.ui.token.bind/unbind` use the same undoable object
-  mutation path as the UI. Token JSON package import/export remains part of P8.
+  mutation path as the UI. Deterministic token JSON import/export is also
+  implemented with legacy-array compatibility and explicit update, skip, or
+  regenerate conflict policies. P8 still owns the complete multi-artifact
+  handoff package.
 - P4 foundation converts a selected object subtree into a Component Definition
   and creates Instance subtrees with new stable IDs and stable source links.
   Definition property/topology updates synchronize automatically, while local

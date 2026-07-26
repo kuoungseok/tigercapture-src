@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import json
 
 
 def _app():
@@ -82,12 +83,16 @@ def test_token_library_widget_edits_and_binds_stable_token_ids() -> None:
 
     updates: list[tuple[str, dict[str, object]]] = []
     bindings: list[tuple[str, str, str]] = []
+    imports: list[str] = []
+    exports: list[bool] = []
     library.token_update_requested.connect(
         lambda token_id, changes: updates.append((token_id, dict(changes)))
     )
     library.token_binding_requested.connect(
         lambda *args: bindings.append(args)
     )
+    library.token_import_requested.connect(imports.append)
+    library.token_export_requested.connect(lambda: exports.append(True))
 
     selected = None
     for index in range(library.tree.topLevelItemCount()):
@@ -110,6 +115,11 @@ def test_token_library_widget_edits_and_binds_stable_token_ids() -> None:
     assert bindings[-1] == (obj["id"], "style.stroke", primary["id"])
     library.unbind_button.click()
     assert bindings[-1] == (obj["id"], "style.stroke", "")
+    library.conflict_policy_combo.setCurrentIndex(2)
+    library.import_button.click()
+    library.export_button.click()
+    assert imports == ["regenerate"]
+    assert exports == [True]
 
     library.search_edit.setText("missing")
     assert library.tree.topLevelItemCount() == 0
@@ -119,7 +129,53 @@ def test_token_library_widget_edits_and_binds_stable_token_ids() -> None:
     app.processEvents()
 
 
-def test_token_library_actions_inspect_bind_and_unbind() -> None:
+def test_token_library_json_round_trip_and_conflict_policies(tmp_path) -> None:
+    from app.painter_ui_token_io import (
+        export_ui_token_library,
+        import_ui_token_library,
+    )
+
+    document, _obj, primary, alias, _unused = _token_document()
+    path = tmp_path / "tokens.json"
+    exported = export_ui_token_library(document, path)
+    assert exported["ok"] is True
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload["schema"] == "tigerstudio.painter.ui.token_library.v1"
+    assert payload["tokens"][1]["alias_token_id"] == primary["id"]
+
+    empty = {**document, "tokens": [], "objects": []}
+    imported, report = import_ui_token_library(empty, path)
+    assert report["added_ids"] == [
+        primary["id"],
+        alias["id"],
+        "ui-token-3",
+    ]
+    imported_alias = next(
+        row for row in imported["tokens"] if row["id"] == alias["id"]
+    )
+    assert imported_alias["alias_token_id"] == primary["id"]
+
+    regenerated, report = import_ui_token_library(
+        document,
+        path,
+        conflict_policy="regenerate",
+    )
+    assert len(regenerated["tokens"]) == 6
+    assert report["id_map"][primary["id"]] != primary["id"]
+    regenerated_alias = next(
+        row
+        for row in regenerated["tokens"]
+        if row["id"] == report["id_map"][alias["id"]]
+    )
+    assert (
+        regenerated_alias["alias_token_id"]
+        == report["id_map"][primary["id"]]
+    )
+
+
+def test_token_library_actions_inspect_bind_unbind_and_transfer(
+    tmp_path,
+) -> None:
     app = _app()
     from app.actions.registry import ActionRegistry
     from app.drawing import PaintDialog, create_blank_paint_pixmap
@@ -138,6 +194,15 @@ def test_token_library_actions_inspect_bind_and_unbind() -> None:
     assert inspected["ok"] is True
     assert inspected["changed"] is False
     assert inspected["result"]["token_count"] == 3
+
+    path = tmp_path / "tokens.json"
+    exported = registry.execute(
+        "paint.ui.token.library.export",
+        {"path": str(path)},
+    ).to_dict()
+    assert exported["ok"] is True
+    assert exported["changed"] is False
+    assert path.exists()
 
     bound = registry.execute(
         "paint.ui.token.bind",
@@ -162,6 +227,16 @@ def test_token_library_actions_inspect_bind_and_unbind() -> None:
         "token_bindings"
     ]
     assert "style.stroke" not in bindings
+
+    imported = registry.execute(
+        "paint.ui.token.library.import",
+        {"path": str(path), "conflict_policy": "regenerate"},
+    ).to_dict()
+    assert imported["ok"] is True
+    assert imported["result"]["token_import"]["conflict_policy"] == "regenerate"
+    assert (
+        imported["result"]["ui_design"]["validation"]["token_count"] == 6
+    )
     dialog.close()
     dialog.deleteLater()
     app.processEvents()

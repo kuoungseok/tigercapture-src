@@ -87,6 +87,37 @@ class PaintAdapterMixin:
             getattr(dialog, "_painter_ui_document", None)
         )
 
+    def paint_ui_token_library_export(self, *, path: str) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_token_io import export_ui_token_library
+
+        if not str(path or "").strip():
+            raise ValueError("paint.ui.token.library.export requires path")
+        return export_ui_token_library(dialog._painter_ui_document, path)
+
+    def paint_ui_token_library_import(
+        self,
+        *,
+        path: str,
+        conflict_policy: str = "update",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_token_io import import_ui_token_library
+
+        if not str(path or "").strip():
+            raise ValueError("paint.ui.token.library.import requires path")
+        document, report = import_ui_token_library(
+            dialog._painter_ui_document,
+            path,
+            conflict_policy=conflict_policy,
+        )
+        dialog._push_undo_state("Import UI tokens")
+        self._paint_ui_commit(dialog, "Import UI tokens", document)
+        return {
+            **dialog.painter_action_state(),
+            "token_import": report,
+        }
+
     def paint_ui_workspace_set(self, *, mode: str = "ui_design") -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         selected = dialog._set_canvas_workspace_mode(str(mode or "ui_design"))

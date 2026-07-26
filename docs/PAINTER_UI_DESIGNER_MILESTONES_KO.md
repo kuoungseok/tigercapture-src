@@ -120,7 +120,8 @@ Status: responsive Auto Layout, artboard guides, diagnostics, breakpoint/orienta
 - light/dark/high-contrast theme (implemented preview and resolution)
 - color/typography/spacing/radius/border/shadow/opacity/icon/image tokens
   (typed CRUD, themed resolution, searchable library, usage/unused reporting,
-  aliases, and stable-ID Bind/Unbind UI/Actions implemented)
+  aliases, stable-ID Bind/Unbind UI/Actions, and deterministic JSON
+  import/export with explicit conflict policies implemented)
 - component definition/instance/variant
 - instance override
 

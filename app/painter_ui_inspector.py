@@ -86,6 +86,8 @@ class PainterUIInspector(QWidget):
     token_update_requested = Signal(str, object)
     token_remove_requested = Signal(str, bool)
     token_binding_requested = Signal(str, str, str)
+    token_import_requested = Signal(str)
+    token_export_requested = Signal()
     object_selected = Signal(str)
     selection_changed = Signal(object, str)
     geometry_changed = Signal(str, object)
@@ -347,6 +349,12 @@ class PainterUIInspector(QWidget):
         )
         self.token_library.token_binding_requested.connect(
             self.token_binding_requested
+        )
+        self.token_library.token_import_requested.connect(
+            self.token_import_requested
+        )
+        self.token_library.token_export_requested.connect(
+            self.token_export_requested
         )
         tabs.addTab(self.token_library, "Tokens")
 

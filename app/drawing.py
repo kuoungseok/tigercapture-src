@@ -8212,6 +8212,12 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.token_binding_requested.connect(
             self._bind_painter_ui_token
         )
+        self._paint_ui_inspector.token_import_requested.connect(
+            self._import_painter_ui_tokens
+        )
+        self._paint_ui_inspector.token_export_requested.connect(
+            self._export_painter_ui_tokens
+        )
         self._paint_ui_inspector.duplicate_requested.connect(
             self._duplicate_painter_ui_object
         )
@@ -11210,6 +11216,39 @@ class PaintDialog(QDialog):
             {"token_bindings": bindings},
             label="Bind UI token" if token_id else "Unbind UI token",
         )
+
+    def _import_painter_ui_tokens(self, conflict_policy: str) -> None:
+        from app.painter_ui_token_io import import_ui_token_library
+
+        path, _selected = QFileDialog.getOpenFileName(
+            self,
+            "Import UI Tokens",
+            "",
+            "Tiger Studio Token Library (*.json);;JSON (*.json)",
+        )
+        if not path:
+            return
+        updated, _report = import_ui_token_library(
+            self._painter_ui_document,
+            path,
+            conflict_policy=str(conflict_policy or "update"),
+        )
+        self._push_undo_state("Import UI tokens")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _export_painter_ui_tokens(self) -> None:
+        from app.painter_ui_token_io import export_ui_token_library
+
+        path, _selected = QFileDialog.getSaveFileName(
+            self,
+            "Export UI Tokens",
+            "tokens.json",
+            "Tiger Studio Token Library (*.json);;JSON (*.json)",
+        )
+        if path:
+            export_ui_token_library(self._painter_ui_document, path)
 
     def _update_painter_ui_objects_batch(
         self,

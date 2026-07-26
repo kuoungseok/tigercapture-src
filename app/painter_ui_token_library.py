@@ -105,6 +105,8 @@ class PainterUITokenLibrary(QWidget):
     token_update_requested = Signal(str, object)
     token_remove_requested = Signal(str, bool)
     token_binding_requested = Signal(str, str, str)
+    token_import_requested = Signal(str)
+    token_export_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -173,6 +175,24 @@ class PainterUITokenLibrary(QWidget):
         commands.addWidget(self.apply_button)
         commands.addWidget(self.delete_button)
         layout.addLayout(commands)
+
+        transfer_row = QHBoxLayout()
+        self.conflict_policy_combo = QComboBox()
+        self.conflict_policy_combo.addItem("Update conflicts", "update")
+        self.conflict_policy_combo.addItem("Skip conflicts", "skip")
+        self.conflict_policy_combo.addItem("Create new IDs", "regenerate")
+        self.import_button = QPushButton("Import")
+        self.import_button.clicked.connect(
+            lambda: self.token_import_requested.emit(
+                str(self.conflict_policy_combo.currentData() or "update")
+            )
+        )
+        self.export_button = QPushButton("Export")
+        self.export_button.clicked.connect(self.token_export_requested)
+        transfer_row.addWidget(self.conflict_policy_combo, 1)
+        transfer_row.addWidget(self.import_button)
+        transfer_row.addWidget(self.export_button)
+        layout.addLayout(transfer_row)
 
         binding_row = QHBoxLayout()
         self.binding_path_combo = QComboBox()

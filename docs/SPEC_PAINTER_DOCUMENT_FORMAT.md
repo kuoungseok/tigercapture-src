@@ -113,6 +113,12 @@ preview. The format preserves:
   Automation uses the equivalent read-only
   `paint.ui.token.library.inspect` and undoable
   `paint.ui.token.bind/unbind` Actions.
+- Token-library JSON uses
+  `tigerstudio.painter.ui.token_library.v1` with source document metadata and
+  normalized token records. Import also accepts the legacy handoff token-array
+  form. ID conflicts require `update`, `skip`, or `regenerate`; regenerate
+  rewrites imported alias references to the corresponding new stable IDs.
+  `paint.ui.token.library.import/export` and the Tokens tab share this service.
 - Component Definitions and Instances remain ordinary UI object subtrees.
   Objects persist `component_role` (`none`, `definition`, or `instance`),
   stable `component_source_object_id`, and dotted-path `instance_overrides`.

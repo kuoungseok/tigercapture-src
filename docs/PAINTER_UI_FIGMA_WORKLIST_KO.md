@@ -207,7 +207,8 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
 
 - dedicated P5 token-library and token-binding authoring UX (implemented:
   searchable typed library, theme/alias editing, usage and unused inspection,
-  stable-ID Bind/Unbind UI and Actions)
+  stable-ID Bind/Unbind UI and Actions, deterministic JSON import/export with
+  update/skip/regenerate conflict policies)
 
 ## P4. 컴포넌트 시스템
 

@@ -6742,7 +6742,11 @@ AI Script Edit MVP integration:
   tokens, and binds supported object properties by stable token ID. UI and AI
   use the same document services through `paint.ui.token.library.inspect`,
   `paint.ui.token.bind`, and `paint.ui.token.unbind`; token edits and bindings
-  remain Undo/Redo operations.
+  remain Undo/Redo operations. The same panel imports and exports deterministic
+  token-library JSON. Import accepts legacy token arrays or the versioned
+  library envelope and requires an explicit `update`, `skip`, or `regenerate`
+  stable-ID conflict policy; regenerated aliases are remapped as one graph.
+  Automation uses `paint.ui.token.library.import/export`.
 - Painter UI groups keep stable child IDs and remain editable: grouping,
   ungrouping, and layer-stack reordering are exposed through
   `paint.ui.object.group`, `paint.ui.object.ungroup`, and

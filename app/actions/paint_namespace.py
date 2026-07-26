@@ -139,6 +139,39 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="the Painter design-token library would be inspected",
     )
     registry.register_adapter_action(
+        "paint.ui.token.library.export",
+        "Export the typed design-token library as deterministic JSON.",
+        "paint",
+        "paint_ui_token_library_export",
+        params_schema=schema_object(
+            {"path": {"type": "string", "minLength": 1}},
+            required=("path",),
+        ),
+        required=("path",),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter token library would be exported to JSON",
+    )
+    registry.register_adapter_action(
+        "paint.ui.token.library.import",
+        "Import a token JSON library with explicit stable-ID conflict handling.",
+        "paint",
+        "paint_ui_token_library_import",
+        params_schema=schema_object(
+            {
+                "path": {"type": "string", "minLength": 1},
+                "conflict_policy": {
+                    "type": "string",
+                    "enum": ["update", "skip", "regenerate"],
+                },
+            },
+            required=("path",),
+        ),
+        required=("path",),
+        undo_label="Import UI tokens",
+        dry_summary="a token JSON library would be imported",
+    )
+    registry.register_adapter_action(
         "paint.ui.workspace.set",
         "Switch Painter between Paint, UI Design, and 3D Place canvas workspaces.",
         "paint",
