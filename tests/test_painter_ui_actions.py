@@ -781,3 +781,91 @@ def test_painter_ui_overlay_multi_artboard_fit_pan_and_activation() -> None:
     overlay.close()
     overlay.deleteLater()
     app.processEvents()
+
+
+def test_painter_ui_overlay_marquee_selection_emits_replace_then_add() -> None:
+    app = _app()
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    document = create_ui_document(800, 600)
+    document, first = add_ui_object(
+        document, kind="rectangle", x=100, y=100, width=100, height=80
+    )
+    document, second = add_ui_object(
+        document, kind="rectangle", x=260, y=120, width=100, height=80
+    )
+    document["selection"] = {"object_id": "", "object_ids": []}
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(800, 600)
+    overlay.set_document(document)
+    overlay.show()
+    app.processEvents()
+    emitted: list[tuple[str, str]] = []
+    overlay.object_selection_requested.connect(
+        lambda object_id, mode: emitted.append((object_id, mode))
+    )
+
+    first_rect = overlay._object_rect(first)
+    second_rect = overlay._object_rect(second)
+    start = QPoint(
+        int(first_rect.left() - 12),
+        int(first_rect.top() - 12),
+    )
+    end = QPoint(
+        int(second_rect.right() + 12),
+        int(second_rect.bottom() + 12),
+    )
+    QTest.mousePress(overlay, Qt.MouseButton.LeftButton, pos=start)
+    QTest.mouseMove(overlay, end)
+    QTest.mouseRelease(overlay, Qt.MouseButton.LeftButton, pos=end)
+    assert emitted == [(first["id"], "replace"), (second["id"], "add")]
+
+    overlay.close()
+    overlay.deleteLater()
+    app.processEvents()
+
+
+def test_painter_ui_overlay_resize_constraints_and_smart_guides() -> None:
+    app = _app()
+    from PySide6.QtCore import QPointF, QRectF, Qt
+
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(800, 600)
+    overlay._original_rect = QRectF(100, 100, 200, 100)
+    overlay._active_handle = "se"
+    ratio_rect = overlay._resize_rect(
+        QPointF(360, 260),
+        Qt.KeyboardModifier.ShiftModifier,
+    )
+    assert abs(ratio_rect.width() / ratio_rect.height() - 2.0) < 0.001
+    centered_rect = overlay._resize_rect(
+        QPointF(360, 220),
+        Qt.KeyboardModifier.AltModifier,
+    )
+    assert centered_rect.center() == overlay._original_rect.center()
+
+    document = create_ui_document(800, 600)
+    document, moving = add_ui_object(
+        document, kind="rectangle", x=80, y=100, width=100, height=80
+    )
+    document, _target = add_ui_object(
+        document, kind="rectangle", x=300, y=100, width=100, height=80
+    )
+    overlay.set_document(document)
+    overlay.set_snap(True, 8.0)
+    overlay._move_original_positions = {moving["id"]: (80.0, 100.0)}
+    snapped_x, snapped_y = overlay._smart_snap_position(moving, 198.0, 100.0)
+    assert snapped_x == 200.0
+    assert snapped_y == 100.0
+    assert overlay._guide_x is not None
+    assert overlay._guide_y is not None
+
+    overlay.deleteLater()
+    app.processEvents()

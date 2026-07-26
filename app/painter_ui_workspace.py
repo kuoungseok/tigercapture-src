@@ -54,6 +54,9 @@ class PainterUIDesignOverlay(QWidget):
         self._view_offset = QPointF()
         self._pan_start = QPointF()
         self._pan_origin = QPointF()
+        self._marquee_mode = "replace"
+        self._guide_x: float | None = None
+        self._guide_y: float | None = None
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -240,6 +243,99 @@ class PainterUIDesignOverlay(QWidget):
             return float(value)
         return round(float(value) / self._snap_size) * self._snap_size
 
+    def _smart_snap_position(
+        self,
+        row: Mapping[str, Any],
+        x: float,
+        y: float,
+    ) -> tuple[float, float]:
+        self._guide_x = None
+        self._guide_y = None
+        if not self._snap_enabled:
+            return x, y
+        _viewport, scale = self._artboard_viewport()
+        tolerance = 6.0 / max(0.0001, scale)
+        width = float(row["width"])
+        height = float(row["height"])
+        moving_x = (x, x + width * 0.5, x + width)
+        moving_y = (y, y + height * 0.5, y + height)
+        excluded = set(self._move_original_positions)
+        candidates_x: list[float] = []
+        candidates_y: list[float] = []
+        for other in self._document["objects"]:
+            if (
+                other["id"] in excluded
+                or other["artboard_id"] != row["artboard_id"]
+                or not other["visible"]
+            ):
+                continue
+            ox = float(other["x"])
+            oy = float(other["y"])
+            ow = float(other["width"])
+            oh = float(other["height"])
+            candidates_x.extend((ox, ox + ow * 0.5, ox + ow))
+            candidates_y.extend((oy, oy + oh * 0.5, oy + oh))
+        best_x: tuple[float, float] | None = None
+        best_y: tuple[float, float] | None = None
+        for candidate in candidates_x:
+            for anchor in moving_x:
+                delta = candidate - anchor
+                if abs(delta) <= tolerance and (
+                    best_x is None or abs(delta) < abs(best_x[0])
+                ):
+                    best_x = (delta, candidate)
+        for candidate in candidates_y:
+            for anchor in moving_y:
+                delta = candidate - anchor
+                if abs(delta) <= tolerance and (
+                    best_y is None or abs(delta) < abs(best_y[0])
+                ):
+                    best_y = (delta, candidate)
+        viewport, scale = self._artboard_viewport()
+        if best_x is not None:
+            x += best_x[0]
+            self._guide_x = viewport.left() + best_x[1] * scale
+        if best_y is not None:
+            y += best_y[0]
+            self._guide_y = viewport.top() + best_y[1] * scale
+        return x, y
+
+    def _resize_rect(self, point: QPointF, modifiers) -> QRectF:
+        original = QRectF(self._original_rect)
+        center_based = bool(modifiers & Qt.KeyboardModifier.AltModifier)
+        keep_ratio = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
+        if center_based:
+            center = original.center()
+            half_width = abs(point.x() - center.x())
+            half_height = abs(point.y() - center.y())
+            if keep_ratio:
+                ratio = original.width() / max(0.0001, original.height())
+                if half_width / max(0.0001, half_height) > ratio:
+                    half_height = half_width / ratio
+                else:
+                    half_width = half_height * ratio
+            return QRectF(
+                center.x() - half_width,
+                center.y() - half_height,
+                half_width * 2.0,
+                half_height * 2.0,
+            )
+        anchor = {
+            "nw": original.bottomRight(),
+            "ne": original.bottomLeft(),
+            "sw": original.topRight(),
+            "se": original.topLeft(),
+        }[self._active_handle]
+        dx = point.x() - anchor.x()
+        dy = point.y() - anchor.y()
+        if keep_ratio:
+            ratio = original.width() / max(0.0001, original.height())
+            if abs(dx) / max(0.0001, abs(dy)) > ratio:
+                dy = math.copysign(abs(dx) / ratio, dy or dx or 1.0)
+            else:
+                dx = math.copysign(abs(dy) * ratio, dx or dy or 1.0)
+        return QRectF(anchor, QPointF(anchor.x() + dx, anchor.y() + dy)).normalized()
+
     def _selected_row(self) -> dict[str, Any] | None:
         selected = self._document["selection"]["object_id"]
         selected_ids = set(self._document["selection"]["object_ids"])
@@ -370,6 +466,23 @@ class PainterUIDesignOverlay(QWidget):
             painter.setBrush(QColor(80, 130, 210, 48))
             painter.setPen(QPen(QColor("#79AFFF"), 1.5, Qt.PenStyle.DashLine))
             painter.drawRect(self._preview_rect.normalized())
+        elif self._interaction == "marquee" and not self._preview_rect.isNull():
+            painter.setBrush(QColor(71, 124, 210, 34))
+            painter.setPen(QPen(QColor("#6FA0F5"), 1.0, Qt.PenStyle.DashLine))
+            painter.drawRect(self._preview_rect.normalized())
+        if self._guide_x is not None or self._guide_y is not None:
+            viewport, _scale = self._artboard_viewport()
+            painter.setPen(QPen(QColor("#FF4FA3"), 1.0))
+            if self._guide_x is not None:
+                painter.drawLine(
+                    QPointF(self._guide_x, viewport.top()),
+                    QPointF(self._guide_x, viewport.bottom()),
+                )
+            if self._guide_y is not None:
+                painter.drawLine(
+                    QPointF(viewport.left(), self._guide_y),
+                    QPointF(viewport.right(), self._guide_y),
+                )
 
     def _cancel_interaction(self) -> None:
         self._interaction = ""
@@ -377,6 +490,8 @@ class PainterUIDesignOverlay(QWidget):
         self._active_handle = ""
         self._preview_rect = QRectF()
         self.update()
+        self._guide_x = None
+        self._guide_y = None
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.MiddleButton:
@@ -456,19 +571,29 @@ class PainterUIDesignOverlay(QWidget):
             if target_artboard != self._document["active_artboard_id"]:
                 self.artboard_activation_requested.emit(target_artboard)
         modifiers = event.modifiers()
-        if modifiers & Qt.KeyboardModifier.ControlModifier:
+        if selected and modifiers & Qt.KeyboardModifier.ControlModifier:
             self.object_selection_requested.emit(selected, "toggle")
             self._cancel_interaction()
             event.accept()
             return
-        if modifiers & Qt.KeyboardModifier.ShiftModifier:
+        if selected and modifiers & Qt.KeyboardModifier.ShiftModifier:
             self.object_selection_requested.emit(selected, "add")
             self._cancel_interaction()
             event.accept()
             return
         if not selected:
-            self._cancel_interaction()
-            self.object_selection_requested.emit("", "replace")
+            self._interaction = "marquee"
+            self._preview_rect = QRectF(
+                self._press_position,
+                self._press_position,
+            )
+            self._marquee_mode = (
+                "toggle"
+                if modifiers & Qt.KeyboardModifier.ControlModifier
+                else "add"
+                if modifiers & Qt.KeyboardModifier.ShiftModifier
+                else "replace"
+            )
         else:
             if selected not in self._document["selection"]["object_ids"]:
                 self.object_selection_requested.emit(selected, "replace")
@@ -521,6 +646,14 @@ class PainterUIDesignOverlay(QWidget):
             return
         if self._interaction == "move":
             artboard = self._active_artboard()
+        if self._interaction == "marquee":
+            self._preview_rect = QRectF(
+                self._press_position,
+                event.position(),
+            ).normalized()
+            self.update()
+            event.accept()
+            return
             doc = self._document_point(event.position() - self._drag_offset)
             row = next(
                 row
@@ -544,6 +677,11 @@ class PainterUIDesignOverlay(QWidget):
             original_primary = self._move_original_positions.get(
                 row["id"],
                 (float(row["x"]), float(row["y"])),
+            next_x, next_y = self._smart_snap_position(
+                row,
+                next_x,
+                next_y,
+            )
             )
             delta_x = next_x - original_primary[0]
             delta_y = next_y - original_primary[1]
@@ -569,7 +707,6 @@ class PainterUIDesignOverlay(QWidget):
             event.accept()
             return
         if self._interaction == "resize":
-            rect = QRectF(self._original_rect)
             row = next(
                 row
                 for row in self._document["objects"]
@@ -580,15 +717,7 @@ class PainterUIDesignOverlay(QWidget):
                 self._original_rect,
                 float(row.get("rotation", 0.0)),
             )
-            if "n" in self._active_handle:
-                rect.setTop(point.y())
-            if "s" in self._active_handle:
-                rect.setBottom(point.y())
-            if "w" in self._active_handle:
-                rect.setLeft(point.x())
-            if "e" in self._active_handle:
-                rect.setRight(point.x())
-            rect = rect.normalized()
+            rect = self._resize_rect(point, event.modifiers())
             if rect.width() >= 8.0 and rect.height() >= 8.0:
                 viewport, scale = self._artboard_viewport()
                 row["x"] = self._snap(
@@ -647,6 +776,28 @@ class PainterUIDesignOverlay(QWidget):
             row = next(
                 (row for row in self._document["objects"] if row["id"] == object_id),
                 None,
+        elif interaction == "marquee":
+            rect = self._preview_rect.normalized()
+            active = self._document["active_artboard_id"]
+            selected_ids = [
+                row["id"]
+                for row in self._visible_objects()
+                if row["artboard_id"] == active
+                and rect.intersects(self._object_rect(row))
+            ] if rect.width() >= 3.0 and rect.height() >= 3.0 else []
+            if self._marquee_mode == "replace":
+                if selected_ids:
+                    self.object_selection_requested.emit(selected_ids[0], "replace")
+                    for selected_id in selected_ids[1:]:
+                        self.object_selection_requested.emit(selected_id, "add")
+                else:
+                    self.object_selection_requested.emit("", "replace")
+            else:
+                for selected_id in selected_ids:
+                    self.object_selection_requested.emit(
+                        selected_id,
+                        self._marquee_mode,
+                    )
             )
             if row is not None:
                 if interaction == "move" and len(self._move_original_positions) > 1:

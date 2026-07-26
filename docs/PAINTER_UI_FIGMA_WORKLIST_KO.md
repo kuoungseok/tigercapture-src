@@ -21,6 +21,11 @@ P1 implementation checkpoint (2026-07-26, navigation slice):
 - Toolbar commands and `paint.ui.view.fit` provide all-artboards, active
   artboard, and selection fitting.
 - Clicking another artboard or one of its objects activates that artboard.
+- Dragging empty canvas space creates a marquee selection; Shift adds and Ctrl
+  toggles intersecting objects on the active artboard.
+- Corner resize supports Shift aspect lock and Alt center-based scaling.
+- Grid snapping also evaluates peer edges and centers, snaps within a
+  screen-space tolerance, and paints visible Smart Guides while moving.
 
 관련 구현 현황:
 

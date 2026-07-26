@@ -35,6 +35,9 @@ Implementation checkpoint:
   auto-places new artboards without overlap, supports middle-button pan and
   cursor-anchored wheel zoom, activates clicked artboards, and exposes
   all/artboard/selection Fit controls through both toolbar icons and Actions.
+- M1 canvas manipulation now includes marquee selection with additive/toggle
+  modifiers, Shift aspect-locked resize, Alt center-based resize, and visible
+  edge/center Smart Guides integrated with the existing snap control.
 - Freeform multi-artboard overview placement, expanded Inspect editing, and
   broader responsive screenshot QA remain before M1 completion.
   M2-M6 remain milestone work.
