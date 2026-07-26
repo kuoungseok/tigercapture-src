@@ -118,7 +118,9 @@ Status: responsive Auto Layout, artboard guides, diagnostics, breakpoint/orienta
 - breakpoint/orientation object override (implemented)
 - portrait/landscape preview
 - light/dark/high-contrast theme (implemented preview and resolution)
-- color/typography/spacing/radius/effect tokens (typed CRUD and themed resolution implemented; dedicated library UX remains P5)
+- color/typography/spacing/radius/border/shadow/opacity/icon/image tokens
+  (typed CRUD, themed resolution, searchable library, usage/unused reporting,
+  aliases, and stable-ID Bind/Unbind UI/Actions implemented)
 - component definition/instance/variant
 - instance override
 

@@ -86,6 +86,12 @@ Implementation checkpoint:
   or token IDs. UI and automation share artboard/token mutation and Undo;
   automation uses `paint.ui.theme.set/inspect` and
   `paint.ui.token.theme.set/remove`.
+- P5 now exposes the typed token model through a searchable `Tokens` library
+  tab. It supports default and per-theme values, aliases, usage and unused
+  reporting, and stable-ID binding/unbinding for common style, layout,
+  opacity, and content paths. `paint.ui.token.library.inspect` gives AI the
+  same report; `paint.ui.token.bind/unbind` use the same undoable object
+  mutation path as the UI. Token JSON package import/export remains part of P8.
 - P4 foundation converts a selected object subtree into a Component Definition
   and creates Instance subtrees with new stable IDs and stable source links.
   Definition property/topology updates synchronize automatically, while local

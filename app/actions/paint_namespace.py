@@ -129,6 +129,16 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="the Painter component library would be inspected",
     )
     registry.register_adapter_action(
+        "paint.ui.token.library.inspect",
+        "Inspect design tokens, theme values, aliases, stable bindings, and unused-token status.",
+        "paint",
+        "paint_ui_token_library_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter design-token library would be inspected",
+    )
+    registry.register_adapter_action(
         "paint.ui.workspace.set",
         "Switch Painter between Paint, UI Design, and 3D Place canvas workspaces.",
         "paint",
@@ -830,6 +840,54 @@ def register_paint_actions(registry: Any) -> None:
         required=("token_id",),
         undo_label="Remove UI token",
         dry_summary="a UI token would be removed",
+    )
+    token_binding_schema = schema_object(
+        {
+            "object_id": {"type": "string"},
+            "path": {
+                "type": "string",
+                "enum": [
+                    "style.fill",
+                    "style.stroke",
+                    "style.text_color",
+                    "style.stroke_width",
+                    "style.radius",
+                    "style.shadow",
+                    "style.font_size",
+                    "layout.gap",
+                    "opacity",
+                    "content.source",
+                ],
+            },
+            "token_id": {"type": "string"},
+        },
+        required=("object_id", "path", "token_id"),
+    )
+    registry.register_adapter_action(
+        "paint.ui.token.bind",
+        "Bind a selected object property to a design token by stable token ID.",
+        "paint",
+        "paint_ui_token_bind",
+        params_schema=token_binding_schema,
+        required=("object_id", "path", "token_id"),
+        undo_label="Bind UI token",
+        dry_summary="an object property would be bound to a stable UI token",
+    )
+    registry.register_adapter_action(
+        "paint.ui.token.unbind",
+        "Remove a design-token binding without changing the token or other properties.",
+        "paint",
+        "paint_ui_token_unbind",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "path": token_binding_schema["properties"]["path"],
+            },
+            required=("object_id", "path"),
+        ),
+        required=("object_id", "path"),
+        undo_label="Unbind UI token",
+        dry_summary="an object property token binding would be removed",
     )
     registry.register_adapter_action(
         "paint.ui.interaction.add",

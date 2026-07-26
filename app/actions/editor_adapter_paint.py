@@ -79,6 +79,14 @@ class PaintAdapterMixin:
             getattr(dialog, "_painter_ui_document", None)
         )
 
+    def paint_ui_token_library_inspect(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_token_library import inspect_ui_token_library
+
+        return inspect_ui_token_library(
+            getattr(dialog, "_painter_ui_document", None)
+        )
+
     def paint_ui_workspace_set(self, *, mode: str = "ui_design") -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         selected = dialog._set_canvas_workspace_mode(str(mode or "ui_design"))
@@ -878,6 +886,73 @@ class PaintAdapterMixin:
         )
         dialog._push_undo_state("Remove UI token")
         return self._paint_ui_commit(dialog, "Remove UI token", document)
+
+    def paint_ui_token_bind(
+        self,
+        *,
+        object_id: str,
+        path: str,
+        token_id: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import update_ui_object
+        from app.painter_ui_token_library import TOKEN_BINDING_PATHS
+
+        binding_path = str(path or "")
+        if binding_path not in TOKEN_BINDING_PATHS:
+            raise ValueError(f"Unsupported UI token binding path: {binding_path}")
+        if token_id not in {
+            row["id"] for row in dialog._painter_ui_document["tokens"]
+        }:
+            raise ValueError(f"UI token not found: {token_id}")
+        row = next(
+            (
+                item
+                for item in dialog._painter_ui_document["objects"]
+                if item["id"] == str(object_id)
+            ),
+            None,
+        )
+        if row is None:
+            raise ValueError(f"UI object not found: {object_id}")
+        bindings = dict(row["token_bindings"])
+        bindings[binding_path] = str(token_id)
+        document, _row = update_ui_object(
+            dialog._painter_ui_document,
+            str(object_id),
+            {"token_bindings": bindings},
+        )
+        dialog._push_undo_state("Bind UI token")
+        return self._paint_ui_commit(dialog, "Bind UI token", document)
+
+    def paint_ui_token_unbind(
+        self,
+        *,
+        object_id: str,
+        path: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import update_ui_object
+
+        row = next(
+            (
+                item
+                for item in dialog._painter_ui_document["objects"]
+                if item["id"] == str(object_id)
+            ),
+            None,
+        )
+        if row is None:
+            raise ValueError(f"UI object not found: {object_id}")
+        bindings = dict(row["token_bindings"])
+        bindings.pop(str(path or ""), None)
+        document, _row = update_ui_object(
+            dialog._painter_ui_document,
+            str(object_id),
+            {"token_bindings": bindings},
+        )
+        dialog._push_undo_state("Unbind UI token")
+        return self._paint_ui_commit(dialog, "Unbind UI token", document)
 
     def paint_ui_interaction_add(
         self,

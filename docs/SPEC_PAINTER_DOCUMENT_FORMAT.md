@@ -105,8 +105,14 @@ preview. The format preserves:
   document. The authored base document remains unchanged.
 - Inspector theme selection uses the normal artboard mutation and Undo path.
   Automation uses `paint.ui.theme.set/inspect` and
-  `paint.ui.token.theme.set/remove`. A dedicated visual token library and
-  binding picker remain P5 work.
+  `paint.ui.token.theme.set/remove`.
+- The dedicated `Tokens` Inspector tab groups all typed token kinds, edits
+  default and Light/Dark/High Contrast values, assigns aliases, reports direct
+  bindings and alias references, and identifies unused tokens. Its binding
+  picker writes stable token IDs to supported provider-neutral object paths.
+  Automation uses the equivalent read-only
+  `paint.ui.token.library.inspect` and undoable
+  `paint.ui.token.bind/unbind` Actions.
 - Component Definitions and Instances remain ordinary UI object subtrees.
   Objects persist `component_role` (`none`, `definition`, or `instance`),
   stable `component_source_object_id`, and dotted-path `instance_overrides`.

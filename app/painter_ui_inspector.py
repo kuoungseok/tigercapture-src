@@ -82,6 +82,10 @@ class PainterUIInspector(QWidget):
     component_variant_switch_requested = Signal(str, str)
     component_detach_requested = Signal(str, bool, str)
     component_update_requested = Signal(str, object)
+    token_add_requested = Signal(object)
+    token_update_requested = Signal(str, object)
+    token_remove_requested = Signal(str, bool)
+    token_binding_requested = Signal(str, str, str)
     object_selected = Signal(str)
     selection_changed = Signal(object, str)
     geometry_changed = Signal(str, object)
@@ -330,6 +334,21 @@ class PainterUIInspector(QWidget):
             self.component_update_requested
         )
         tabs.addTab(self.component_library, "Components")
+
+        from app.painter_ui_token_library import PainterUITokenLibrary
+
+        self.token_library = PainterUITokenLibrary()
+        self.token_library.token_add_requested.connect(self.token_add_requested)
+        self.token_library.token_update_requested.connect(
+            self.token_update_requested
+        )
+        self.token_library.token_remove_requested.connect(
+            self.token_remove_requested
+        )
+        self.token_library.token_binding_requested.connect(
+            self.token_binding_requested
+        )
+        tabs.addTab(self.token_library, "Tokens")
 
         inspect_page = QWidget()
         inspect_layout = QVBoxLayout(inspect_page)
@@ -874,6 +893,7 @@ class PainterUIInspector(QWidget):
     def set_document(self, value: Mapping[str, Any] | None) -> None:
         self._document = normalize_ui_document(value)
         self.component_library.set_document(self._document)
+        self.token_library.set_document(self._document)
         selected = self._document["selection"]["object_id"]
         selected_ids = set(self._document["selection"]["object_ids"])
         active = self._document["active_artboard_id"]

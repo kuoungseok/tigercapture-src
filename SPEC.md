@@ -6735,6 +6735,14 @@ AI Script Edit MVP integration:
   renames component records. The read-only
   `paint.ui.component.library.inspect` Action exposes the same family and usage
   report to AI automation.
+- Painter UI Design includes a dedicated `Tokens` library tab for Color,
+  Typography, Spacing, Radius, Border, Shadow, Opacity, Icon, and Image tokens.
+  It searches and groups typed tokens, edits default and Light/Dark/High
+  Contrast values, manages aliases, reports binding/alias usage and unused
+  tokens, and binds supported object properties by stable token ID. UI and AI
+  use the same document services through `paint.ui.token.library.inspect`,
+  `paint.ui.token.bind`, and `paint.ui.token.unbind`; token edits and bindings
+  remain Undo/Redo operations.
 - Painter UI groups keep stable child IDs and remain editable: grouping,
   ungrouping, and layer-stack reordering are exposed through
   `paint.ui.object.group`, `paint.ui.object.ungroup`, and

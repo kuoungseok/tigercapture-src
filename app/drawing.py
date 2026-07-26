@@ -8200,6 +8200,18 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.component_update_requested.connect(
             self._update_painter_ui_component
         )
+        self._paint_ui_inspector.token_add_requested.connect(
+            self._add_painter_ui_token
+        )
+        self._paint_ui_inspector.token_update_requested.connect(
+            self._update_painter_ui_token
+        )
+        self._paint_ui_inspector.token_remove_requested.connect(
+            self._remove_painter_ui_token
+        )
+        self._paint_ui_inspector.token_binding_requested.connect(
+            self._bind_painter_ui_token
+        )
         self._paint_ui_inspector.duplicate_requested.connect(
             self._duplicate_painter_ui_object
         )
@@ -11114,6 +11126,90 @@ class PaintDialog(QDialog):
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
+
+    def _add_painter_ui_token(self, values: object) -> None:
+        from app.painter_ui_document import add_ui_token
+
+        if not isinstance(values, dict):
+            return
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _token = add_ui_token(
+            current,
+            name=str(values.get("name") or ""),
+            kind=str(values.get("kind") or "color"),
+            token_value=values.get("value"),
+            theme_values=values.get("theme_values"),
+            alias_token_id=str(values.get("alias_token_id") or ""),
+            description=str(values.get("description") or ""),
+        )
+        self._push_undo_state("Add UI token")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _update_painter_ui_token(self, token_id: str, changes: object) -> None:
+        from app.painter_ui_document import update_ui_token
+
+        if not isinstance(changes, dict):
+            return
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _token = update_ui_token(current, str(token_id), changes)
+        self._push_undo_state("Update UI token")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _remove_painter_ui_token(
+        self,
+        token_id: str,
+        detach_references: bool,
+    ) -> None:
+        from app.painter_ui_document import remove_ui_token
+
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _result = remove_ui_token(
+            current,
+            str(token_id),
+            detach_references=bool(detach_references),
+        )
+        self._push_undo_state("Remove UI token")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _bind_painter_ui_token(
+        self,
+        object_id: str,
+        path: str,
+        token_id: str,
+    ) -> None:
+        current = getattr(self, "_painter_ui_document", None)
+        row = next(
+            (
+                item
+                for item in (current or {}).get("objects", [])
+                if item.get("id") == str(object_id)
+            ),
+            None,
+        )
+        if row is None:
+            return
+        bindings = dict(row.get("token_bindings") or {})
+        if token_id:
+            bindings[str(path)] = str(token_id)
+        else:
+            bindings.pop(str(path), None)
+        self._update_painter_ui_object_changes(
+            str(object_id),
+            {"token_bindings": bindings},
+            label="Bind UI token" if token_id else "Unbind UI token",
+        )
 
     def _update_painter_ui_objects_batch(
         self,
