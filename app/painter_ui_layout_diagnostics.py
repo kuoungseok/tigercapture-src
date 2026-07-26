@@ -29,6 +29,9 @@ def _diagnostic(
 
 
 def diagnose_ui_layout(document: Mapping[str, Any]) -> dict[str, Any]:
+    from app.painter_ui_responsive import resolve_ui_responsive_document
+
+    document = resolve_ui_responsive_document(document)
     diagnostics: list[dict[str, str]] = []
     objects = {
         str(row["id"]): row

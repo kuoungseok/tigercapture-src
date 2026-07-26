@@ -81,7 +81,7 @@ preview. The format preserves:
   read-only per-target `Native`, `Material`, `Baked`, or `Blocked` status and
   the classifier reason for Asset Export, Design Handoff, Review Prototype,
   and Unreal UMG. Delivery preflight v2 uses these same four dispositions.
-- UI document version 5 normalizes each object's `layout` record. Containers
+- UI document version 6 normalizes each object's `layout` record. Containers
   support `none`, `horizontal`, or `vertical` mode; independent L/T/R/B
   padding; non-negative gap; main-axis `start/center/end/space_between`; and
   cross-axis `start/center/end/stretch`. Child `positioning=absolute` bypasses
@@ -103,6 +103,11 @@ preview. The format preserves:
   blocking errors. Ignored Wrap and fixed-content overflow are warnings.
   `paint.ui.layout.diagnostics` exposes the same report used by delivery
   preflight and Inspector status.
+- Every object owns a normalized `responsive_overrides` list. Each record has a
+  stable ID, breakpoint, orientation, and a bounded `changes` map. Wildcard
+  records resolve before exact context records. Base object IDs and hierarchy
+  remain unchanged, and `paint.ui.responsive.override.set/remove` use the same
+  object mutation and Undo path as Inspector editing.
 
 Opening a `.tspaint` restores the editable 3D scene. Baking the blockout to 2D
 is optional and does not replace the saved scene.

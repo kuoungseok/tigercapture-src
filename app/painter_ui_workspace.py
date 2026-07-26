@@ -50,6 +50,7 @@ class PainterUIDesignOverlay(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._document = normalize_ui_document(None)
+        self._effective_document = self._document
         self._tool = "select"
         self._interaction = ""
         self._active_object_id = ""
@@ -79,7 +80,10 @@ class PainterUIDesignOverlay(QWidget):
 
     def set_document(self, value: Mapping[str, Any] | None) -> None:
         self._document = normalize_ui_document(value)
-        self._resolved_geometry = resolve_ui_constraints(self._document)
+        from app.painter_ui_responsive import resolve_ui_responsive_document
+
+        self._effective_document = resolve_ui_responsive_document(self._document)
+        self._resolved_geometry = resolve_ui_constraints(self._effective_document)
         self.update()
 
     @staticmethod
@@ -467,7 +471,7 @@ class PainterUIDesignOverlay(QWidget):
         return sorted(
             (
                 row
-                for row in self._document["objects"]
+                for row in self._effective_document["objects"]
                 if row["visible"]
             ),
             key=lambda row: row["z_index"],

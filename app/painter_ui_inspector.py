@@ -74,6 +74,8 @@ class PainterUIInspector(QWidget):
     artboard_selected = Signal(str)
     artboard_add_requested = Signal(str, int, int, str)
     artboard_layout_changed = Signal(str, object)
+    responsive_override_changed = Signal(str, str, str, object)
+    responsive_override_remove_requested = Signal(str, str, str)
     object_selected = Signal(str)
     selection_changed = Signal(object, str)
     geometry_changed = Signal(str, object)
@@ -130,6 +132,29 @@ class PainterUIInspector(QWidget):
         artboard_layout_form = QFormLayout(artboard_layout_frame)
         artboard_layout_form.setContentsMargins(4, 4, 4, 4)
         artboard_layout_form.setSpacing(3)
+        context_row = QFrame()
+        context_layout = QHBoxLayout(context_row)
+        context_layout.setContentsMargins(0, 0, 0, 0)
+        context_layout.setSpacing(3)
+        self.artboard_breakpoint_combo = QComboBox()
+        self.artboard_breakpoint_combo.setEditable(True)
+        for breakpoint in ("custom", "mobile", "desktop", "console", "broadcast"):
+            self.artboard_breakpoint_combo.addItem(breakpoint.title(), breakpoint)
+        self.artboard_orientation_combo = QComboBox()
+        self.artboard_orientation_combo.addItem("Portrait", "portrait")
+        self.artboard_orientation_combo.addItem("Landscape", "landscape")
+        self.artboard_breakpoint_combo.currentIndexChanged.connect(
+            self._emit_artboard_context
+        )
+        self.artboard_breakpoint_combo.lineEdit().editingFinished.connect(
+            self._emit_artboard_context
+        )
+        self.artboard_orientation_combo.currentIndexChanged.connect(
+            self._emit_artboard_context
+        )
+        context_layout.addWidget(self.artboard_breakpoint_combo)
+        context_layout.addWidget(self.artboard_orientation_combo)
+        artboard_layout_form.addRow("Context", context_row)
         self.artboard_grid_mode_combo = QComboBox()
         for label, mode in (
             ("No layout grid", "none"),
@@ -358,6 +383,24 @@ class PainterUIInspector(QWidget):
         self.aspect_lock_check = QCheckBox("Lock aspect ratio")
         self.aspect_lock_check.toggled.connect(self._emit_properties)
         form.addRow("Ratio", self.aspect_lock_check)
+        responsive_row = QFrame()
+        responsive_layout = QHBoxLayout(responsive_row)
+        responsive_layout.setContentsMargins(0, 0, 0, 0)
+        responsive_layout.setSpacing(3)
+        self.responsive_edit_check = QCheckBox("Edit current override")
+        self.responsive_edit_check.toggled.connect(
+            self._on_responsive_edit_toggled
+        )
+        self.responsive_clear_button = QPushButton("Clear")
+        self.responsive_clear_button.clicked.connect(
+            self._emit_responsive_override_remove
+        )
+        responsive_layout.addWidget(self.responsive_edit_check, 1)
+        responsive_layout.addWidget(self.responsive_clear_button)
+        form.addRow("Responsive", responsive_row)
+        self.responsive_status_label = QLabel("Base values")
+        self.responsive_status_label.setObjectName("PaintMuted")
+        form.addRow("", self.responsive_status_label)
         self.auto_layout_mode_combo = QComboBox()
         for label, mode in (
             ("None", "none"),
@@ -784,8 +827,18 @@ class PainterUIInspector(QWidget):
         )
 
     def _sync_selected_fields(self) -> None:
-        row = self._selected_row()
-        enabled = row is not None
+        base_row = self._selected_row()
+        row = base_row
+        enabled = base_row is not None
+        breakpoint, orientation = self._responsive_context()
+        if base_row is not None and self.responsive_edit_check.isChecked():
+            from app.painter_ui_responsive import resolve_ui_responsive_object
+
+            row = resolve_ui_responsive_object(
+                base_row,
+                breakpoint=breakpoint,
+                orientation=orientation,
+            )
         for widget in (
             self.name_edit,
             self.opacity_spin,
@@ -824,6 +877,8 @@ class PainterUIInspector(QWidget):
             self.horizontal_constraint_combo,
             self.vertical_constraint_combo,
             self.aspect_lock_check,
+            self.responsive_edit_check,
+            self.responsive_clear_button,
             *self.size_limit_controls.values(),
             self.visible_check,
             self.locked_check,
@@ -844,6 +899,20 @@ class PainterUIInspector(QWidget):
                 label.setText(f"{self._delivery_title(target)}: -")
                 label.setToolTip("")
             return
+        from app.painter_ui_responsive import responsive_override_for_context
+
+        override = responsive_override_for_context(
+            base_row,
+            breakpoint=breakpoint,
+            orientation=orientation,
+        )
+        self.responsive_status_label.setText(
+            (
+                f"{breakpoint} / {orientation}: "
+                + ("Override active" if override else "No override")
+            )
+        )
+        self.responsive_clear_button.setEnabled(override is not None)
         self.name_edit.setText(str(row["name"]))
         self.kind_label.setText(str(row["kind"]).title())
         for key, spin in self.geometry_controls.items():
@@ -978,6 +1047,30 @@ class PainterUIInspector(QWidget):
         self.visible_check.setChecked(bool(row["visible"]))
         self.locked_check.setChecked(bool(row["locked"]))
 
+    def _responsive_context(self) -> tuple[str, str]:
+        from app.painter_ui_responsive import responsive_context
+
+        return responsive_context(self._active_artboard())
+
+    def _on_responsive_edit_toggled(self, _checked: bool) -> None:
+        if self._syncing:
+            return
+        self._syncing = True
+        try:
+            self._sync_selected_fields()
+        finally:
+            self._syncing = False
+
+    def _emit_responsive_override_remove(self) -> None:
+        if self._syncing or not self._selected_id():
+            return
+        breakpoint, orientation = self._responsive_context()
+        self.responsive_override_remove_requested.emit(
+            self._selected_id(),
+            breakpoint,
+            orientation,
+        )
+
     def _on_selection_changed(self) -> None:
         if self._syncing:
             return
@@ -1011,6 +1104,18 @@ class PainterUIInspector(QWidget):
         from app.painter_ui_artboard_layout import normalize_ui_artboard_layout
 
         artboard = self._active_artboard()
+        breakpoint = str(artboard.get("breakpoint") or "custom")
+        breakpoint_index = self.artboard_breakpoint_combo.findData(breakpoint)
+        if breakpoint_index >= 0:
+            self.artboard_breakpoint_combo.setCurrentIndex(breakpoint_index)
+        else:
+            self.artboard_breakpoint_combo.setEditText(breakpoint)
+        orientation_index = self.artboard_orientation_combo.findData(
+            str(artboard.get("orientation") or "portrait")
+        )
+        self.artboard_orientation_combo.setCurrentIndex(
+            max(0, orientation_index)
+        )
         layout = normalize_ui_artboard_layout(
             artboard,
             width=float(artboard["width"]),
@@ -1117,6 +1222,30 @@ class PainterUIInspector(QWidget):
         self.artboard_grid_margin_spin.setEnabled(columns)
         self.artboard_grid_size_spin.setEnabled(uniform)
 
+    def _emit_artboard_context(self) -> None:
+        if self._syncing:
+            return
+        artboard = self._active_artboard()
+        breakpoint = str(
+            self.artboard_breakpoint_combo.currentText() or "custom"
+        ).strip().casefold()
+        orientation = str(
+            self.artboard_orientation_combo.currentData() or "portrait"
+        )
+        width = int(artboard["width"])
+        height = int(artboard["height"])
+        if (orientation == "landscape") != (width >= height):
+            width, height = height, width
+        self.artboard_layout_changed.emit(
+            str(artboard["id"]),
+            {
+                "breakpoint": breakpoint,
+                "orientation": orientation,
+                "width": width,
+                "height": height,
+            },
+        )
+
     def _emit_add_artboard(self) -> None:
         preset = self.artboard_preset_combo.currentData()
         if not isinstance(preset, tuple) or len(preset) != 4:
@@ -1145,17 +1274,24 @@ class PainterUIInspector(QWidget):
                 / max(0.0001, float(row.get("height") or 1.0))
             ),
         )
-        self.geometry_changed.emit(
-            self._selected_id(),
-            {
-                **{
-                    key: float(spin.value())
-                    for key, spin in self.geometry_controls.items()
-                },
-                "width": width,
-                "height": height,
+        changes = {
+            **{
+                key: float(spin.value())
+                for key, spin in self.geometry_controls.items()
             },
-        )
+            "width": width,
+            "height": height,
+        }
+        if self.responsive_edit_check.isChecked():
+            breakpoint, orientation = self._responsive_context()
+            self.responsive_override_changed.emit(
+                self._selected_id(),
+                breakpoint,
+                orientation,
+                changes,
+            )
+        else:
+            self.geometry_changed.emit(self._selected_id(), changes)
 
     def _emit_properties(self) -> None:
         if self._syncing or not self._selected_id():
@@ -1259,26 +1395,34 @@ class PainterUIInspector(QWidget):
                 "wrap": self.auto_layout_wrap_check.isChecked(),
             }
         )
-        self.properties_changed.emit(
-            self._selected_id(),
-            {
-                "name": self.name_edit.text().strip() or str((row or {}).get("name") or "UI Object"),
-                "opacity": self.opacity_spin.value() / 100.0,
-                "visible": self.visible_check.isChecked(),
-                "locked": self.locked_check.isChecked(),
-                "style": style,
-                "content": content,
-                "constraints": constraints,
-                "layout": layout,
-                "accessibility": {
-                    "role": str(
-                        self.accessibility_role_combo.currentData() or "auto"
-                    ),
-                    "label": self.accessibility_label_edit.text().strip(),
-                    "focus_order": int(self.focus_order_spin.value()),
-                },
+        changes = {
+            "name": self.name_edit.text().strip()
+            or str((row or {}).get("name") or "UI Object"),
+            "opacity": self.opacity_spin.value() / 100.0,
+            "visible": self.visible_check.isChecked(),
+            "locked": self.locked_check.isChecked(),
+            "style": style,
+            "content": content,
+            "constraints": constraints,
+            "layout": layout,
+            "accessibility": {
+                "role": str(
+                    self.accessibility_role_combo.currentData() or "auto"
+                ),
+                "label": self.accessibility_label_edit.text().strip(),
+                "focus_order": int(self.focus_order_spin.value()),
             },
-        )
+        }
+        if self.responsive_edit_check.isChecked():
+            breakpoint, orientation = self._responsive_context()
+            self.responsive_override_changed.emit(
+                self._selected_id(),
+                breakpoint,
+                orientation,
+                changes,
+            )
+        else:
+            self.properties_changed.emit(self._selected_id(), changes)
 
     @staticmethod
     def _delivery_title(target: str) -> str:

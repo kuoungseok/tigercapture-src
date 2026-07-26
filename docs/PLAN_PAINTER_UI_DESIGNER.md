@@ -13,7 +13,7 @@ Unreal target engine: `D:\UE_5.8\Engine`
 
 Implementation checkpoint:
 
-- P0 document model is at UI document version 5: components, tokens,
+- P0 document model is at UI document version 6: components, tokens,
   interactions, and Auto Layout are typed records with stable-ID CRUD,
   reference/cycle validation, explicit referenced-delete handling, Action
   coverage, migration, and `.tspaint` save/open round-trip tests.
@@ -76,6 +76,10 @@ Implementation checkpoint:
 - M2/P3 validation now reports layout cycles and impossible constraints through
   one structured diagnostic contract. Inspector, Actions, document validation,
   and delivery preflight agree on blocking errors and non-blocking warnings.
+- M2/P3 objects now support stable-ID breakpoint/orientation overrides.
+  Wildcard and exact contexts compose deterministically, and the active artboard
+  context feeds Canvas, Constraint, Auto Layout, Motion geometry, Inspector,
+  Actions, persistence, and Undo.
 - Image-resource embedding/hashing and adapter-output parity remain in M2/P8.
   M3-M6 remain milestone work.
 - Product-adoption work is now explicit in M2A/M2B: editable template gallery,

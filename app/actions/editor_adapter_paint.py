@@ -91,6 +91,86 @@ class PaintAdapterMixin:
 
         return diagnose_ui_layout(dialog._painter_ui_document)
 
+    def paint_ui_responsive_override_set(
+        self,
+        *,
+        object_id: str,
+        breakpoint: str = "",
+        orientation: str = "",
+        changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_responsive import (
+            responsive_context,
+            set_ui_responsive_override,
+        )
+
+        row = next(
+            (
+                item
+                for item in dialog._painter_ui_document["objects"]
+                if item["id"] == str(object_id)
+            ),
+            None,
+        )
+        if row is None:
+            raise ValueError(f"Painter UI object not found: {object_id}")
+        artboard = next(
+            item
+            for item in dialog._painter_ui_document["artboards"]
+            if item["id"] == row["artboard_id"]
+        )
+        current_breakpoint, current_orientation = responsive_context(artboard)
+        overrides = set_ui_responsive_override(
+            row,
+            breakpoint=breakpoint or current_breakpoint,
+            orientation=orientation or current_orientation,
+            changes=changes,
+        )
+        return self.paint_ui_object_update(
+            object_id=str(object_id),
+            changes={"responsive_overrides": overrides},
+        )
+
+    def paint_ui_responsive_override_remove(
+        self,
+        *,
+        object_id: str,
+        breakpoint: str = "",
+        orientation: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_responsive import (
+            remove_ui_responsive_override,
+            responsive_context,
+        )
+
+        row = next(
+            (
+                item
+                for item in dialog._painter_ui_document["objects"]
+                if item["id"] == str(object_id)
+            ),
+            None,
+        )
+        if row is None:
+            raise ValueError(f"Painter UI object not found: {object_id}")
+        artboard = next(
+            item
+            for item in dialog._painter_ui_document["artboards"]
+            if item["id"] == row["artboard_id"]
+        )
+        current_breakpoint, current_orientation = responsive_context(artboard)
+        overrides = remove_ui_responsive_override(
+            row,
+            breakpoint=breakpoint or current_breakpoint,
+            orientation=orientation or current_orientation,
+        )
+        return self.paint_ui_object_update(
+            object_id=str(object_id),
+            changes={"responsive_overrides": overrides},
+        )
+
     def paint_ui_artboard_add(
         self,
         *,

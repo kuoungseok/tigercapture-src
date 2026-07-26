@@ -163,6 +163,47 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="Painter UI layout diagnostics would be returned",
     )
     registry.register_adapter_action(
+        "paint.ui.responsive.override.set",
+        "Set an object override for a breakpoint and orientation context.",
+        "paint",
+        "paint_ui_responsive_override_set",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "breakpoint": {"type": "string"},
+                "orientation": {
+                    "type": "string",
+                    "enum": ["any", "portrait", "landscape"],
+                },
+                "changes": any_object,
+            },
+            required=("object_id", "changes"),
+        ),
+        required=("object_id", "changes"),
+        undo_label="Set UI responsive override",
+        dry_summary="a responsive object override would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.responsive.override.remove",
+        "Remove an object override for a breakpoint and orientation context.",
+        "paint",
+        "paint_ui_responsive_override_remove",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "breakpoint": {"type": "string"},
+                "orientation": {
+                    "type": "string",
+                    "enum": ["any", "portrait", "landscape"],
+                },
+            },
+            required=("object_id",),
+        ),
+        required=("object_id",),
+        undo_label="Remove UI responsive override",
+        dry_summary="a responsive object override would be removed",
+    )
+    registry.register_adapter_action(
         "paint.ui.artboard.add",
         "Add a general UI artboard to the active Painter document.",
         "paint",

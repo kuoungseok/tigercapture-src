@@ -8176,6 +8176,12 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.properties_changed.connect(
             self._update_painter_ui_object_changes
         )
+        self._paint_ui_inspector.responsive_override_changed.connect(
+            self._update_painter_ui_responsive_override
+        )
+        self._paint_ui_inspector.responsive_override_remove_requested.connect(
+            self._remove_painter_ui_responsive_override
+        )
         self._paint_ui_inspector.duplicate_requested.connect(
             self._duplicate_painter_ui_object
         )
@@ -10890,6 +10896,70 @@ class PaintDialog(QDialog):
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
+
+    def _update_painter_ui_responsive_override(
+        self,
+        object_id: str,
+        breakpoint: str,
+        orientation: str,
+        changes: object,
+    ) -> None:
+        if not isinstance(changes, dict):
+            return
+        from app.painter_ui_responsive import set_ui_responsive_override
+
+        current = getattr(self, "_painter_ui_document", None)
+        row = next(
+            (
+                item
+                for item in (current or {}).get("objects", [])
+                if item.get("id") == object_id
+            ),
+            None,
+        )
+        if row is None:
+            return
+        overrides = set_ui_responsive_override(
+            row,
+            breakpoint=breakpoint,
+            orientation=orientation,
+            changes=changes,
+        )
+        self._update_painter_ui_object_changes(
+            object_id,
+            {"responsive_overrides": overrides},
+            label="Edit UI responsive override",
+        )
+
+    def _remove_painter_ui_responsive_override(
+        self,
+        object_id: str,
+        breakpoint: str,
+        orientation: str,
+    ) -> None:
+        from app.painter_ui_responsive import remove_ui_responsive_override
+
+        current = getattr(self, "_painter_ui_document", None)
+        row = next(
+            (
+                item
+                for item in (current or {}).get("objects", [])
+                if item.get("id") == object_id
+            ),
+            None,
+        )
+        if row is None:
+            return
+        overrides = remove_ui_responsive_override(
+            row,
+            breakpoint=breakpoint,
+            orientation=orientation,
+        )
+        self._update_painter_ui_object_changes(
+            object_id,
+            {"responsive_overrides": overrides},
+            label="Remove UI responsive override",
+        )
 
     def _update_painter_ui_objects_batch(
         self,

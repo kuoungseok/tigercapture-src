@@ -8,7 +8,7 @@ from app.painter_ui_auto_layout import normalize_ui_auto_layout
 
 
 UI_DOCUMENT_SCHEMA = "tigerstudio.painter.ui.v1"
-UI_DOCUMENT_VERSION = 5
+UI_DOCUMENT_VERSION = 6
 UI_OBJECT_KINDS = {
     "frame",
     "group",
@@ -202,13 +202,16 @@ def _normalize_object(
     default_artboard_id: str,
 ) -> dict[str, Any]:
     kind = str(row.get("kind") or "rectangle").strip().casefold()
+    object_id = str(row.get("id") or f"ui-object-{index + 1}")
     style = row.get("style")
     content = row.get("content")
     constraints = row.get("constraints")
     layout = row.get("layout")
     token_bindings = row.get("token_bindings")
+    from app.painter_ui_responsive import normalize_ui_responsive_overrides
+
     return {
-        "id": str(row.get("id") or f"ui-object-{index + 1}"),
+        "id": object_id,
         "kind": kind,
         "name": str(row.get("name") or kind.replace("_", " ").title()),
         "artboard_id": str(row.get("artboard_id") or default_artboard_id),
@@ -244,6 +247,10 @@ def _normalize_object(
             else {}
         ),
         "accessibility": _normalize_accessibility(row.get("accessibility")),
+        "responsive_overrides": normalize_ui_responsive_overrides(
+            row.get("responsive_overrides"),
+            object_id=object_id,
+        ),
     }
 
 
@@ -488,6 +495,11 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
     component_ids = [row["id"] for row in document["components"]]
     token_ids = [row["id"] for row in document["tokens"]]
     interaction_ids = [row["id"] for row in document["interactions"]]
+    responsive_override_ids = [
+        override["id"]
+        for row in document["objects"]
+        for override in row["responsive_overrides"]
+    ]
     if len(set(artboard_ids)) != len(artboard_ids):
         errors.append("duplicate_artboard_id")
     if len(set(object_ids)) != len(object_ids):
@@ -498,7 +510,16 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         errors.append("duplicate_token_id")
     if len(set(interaction_ids)) != len(interaction_ids):
         errors.append("duplicate_interaction_id")
-    all_ids = artboard_ids + object_ids + component_ids + token_ids + interaction_ids
+    if len(set(responsive_override_ids)) != len(responsive_override_ids):
+        errors.append("duplicate_responsive_override_id")
+    all_ids = (
+        artboard_ids
+        + object_ids
+        + component_ids
+        + token_ids
+        + interaction_ids
+        + responsive_override_ids
+    )
     if len(set(all_ids)) != len(all_ids):
         errors.append("duplicate_stable_id")
     object_by_id = {row["id"]: row for row in document["objects"]}
