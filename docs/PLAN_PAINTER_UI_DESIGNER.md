@@ -4,6 +4,9 @@ Status: active implementation
 
 Primary scope: general UI authoring, prototyping, asset delivery, and handoff
 
+Canonical P0-P10 implementation backlog:
+`docs/PAINTER_UI_FIGMA_WORKLIST_KO.md`
+
 First native runtime adapter: Motion Designer Unreal Link and TigerStudioUMG
 
 Unreal target engine: `D:\UE_5.8\Engine`

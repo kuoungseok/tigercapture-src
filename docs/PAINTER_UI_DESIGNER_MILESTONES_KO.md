@@ -5,6 +5,9 @@ Status: active implementation
 Canonical product plan:
 `docs/PLAN_PAINTER_UI_DESIGNER.md`
 
+Canonical P0-P10 worklist:
+`docs/PAINTER_UI_FIGMA_WORKLIST_KO.md`
+
 ## 원칙
 
 - General UI document가 원본이고 UMG는 output adapter다.

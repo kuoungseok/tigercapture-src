@@ -46,6 +46,12 @@ Focused entry points:
   HDR/OCIO/LUT output remains explicitly blocked until Preview/Export parity exists.
   Do not reopen completed milestone work without a failing test, reproducible
   defect, or explicit user request.
+- Painter UI Designer: read `docs/PAINTER_UI_FIGMA_WORKLIST_KO.md` first,
+  followed by `docs/PLAN_PAINTER_UI_DESIGNER.md` and
+  `docs/PAINTER_UI_DESIGNER_MILESTONES_KO.md`. The P0-P10 worklist owns
+  priority and product boundaries; the milestone document records implemented
+  evidence. Painter owns static UI structure/layout/components/tokens, Motion
+  Designer owns animation, and Unreal output must use shared `TigerStudioUMG`.
 
 If two areas overlap, keep the product boundary from the focused docs. Do not
 merge UI renewal, review automation, and VTuber sidecar setup into one unbounded
