@@ -81,6 +81,16 @@ preview. The format preserves:
   read-only per-target `Native`, `Material`, `Baked`, or `Blocked` status and
   the classifier reason for Asset Export, Design Handoff, Review Prototype,
   and Unreal UMG. Delivery preflight v2 uses these same four dispositions.
+- UI document version 3 normalizes each object's `layout` record. Containers
+  support `none`, `horizontal`, or `vertical` mode; independent L/T/R/B
+  padding; non-negative gap; main-axis `start/center/end/space_between`; and
+  cross-axis `start/center/end/stretch`. Child `positioning=absolute` bypasses
+  the parent's flow. Constraint geometry resolves first, then nested Auto
+  Layout resolves outer-to-inner in stable z/document order.
+- Inspector edits this contract through the normal object mutation and
+  Undo/Redo path. Automation uses `paint.ui.layout.set`, which delegates to
+  the same `paint.ui.object.update` service rather than storing private layout
+  state.
 
 Opening a `.tspaint` restores the editable 3D scene. Baking the blockout to 2D
 is optional and does not replace the saved scene.

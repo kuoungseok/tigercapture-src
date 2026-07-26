@@ -197,6 +197,51 @@ class PaintAdapterMixin:
         dialog._push_undo_state("Update UI object")
         return self._paint_ui_commit(dialog, "Update UI object", document)
 
+    def paint_ui_layout_set(
+        self,
+        *,
+        object_id: str,
+        mode: str,
+        padding: dict[str, Any] | None = None,
+        gap: float | None = None,
+        main_alignment: str = "",
+        cross_alignment: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_auto_layout import normalize_ui_auto_layout
+
+        row = next(
+            (
+                item
+                for item in dialog._painter_ui_document["objects"]
+                if item["id"] == str(object_id)
+            ),
+            None,
+        )
+        if row is None:
+            raise ValueError(f"Painter UI object not found: {object_id}")
+        existing = normalize_ui_auto_layout(row.get("layout"))
+        layout = normalize_ui_auto_layout(
+            {
+                **existing,
+                "mode": mode,
+                "padding": (
+                    dict(padding) if padding is not None else existing["padding"]
+                ),
+                "gap": existing["gap"] if gap is None else gap,
+                "main_alignment": (
+                    main_alignment or existing["main_alignment"]
+                ),
+                "cross_alignment": (
+                    cross_alignment or existing["cross_alignment"]
+                ),
+            }
+        )
+        return self.paint_ui_object_update(
+            object_id=str(object_id),
+            changes={"layout": layout},
+        )
+
     def paint_ui_object_remove(self, *, object_id: str) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         from app.painter_ui_document import remove_ui_object

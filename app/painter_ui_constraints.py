@@ -265,7 +265,9 @@ def resolve_ui_constraints(
 
     for target_id in objects:
         resolve(target_id)
-    return geometry
+    from app.painter_ui_auto_layout import resolve_ui_auto_layout
+
+    return resolve_ui_auto_layout(document, geometry)
 
 
 def ui_pivot_point(

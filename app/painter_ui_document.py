@@ -4,9 +4,11 @@ from __future__ import annotations
 import copy
 from typing import Any, Mapping
 
+from app.painter_ui_auto_layout import normalize_ui_auto_layout
+
 
 UI_DOCUMENT_SCHEMA = "tigerstudio.painter.ui.v1"
-UI_DOCUMENT_VERSION = 2
+UI_DOCUMENT_VERSION = 3
 UI_OBJECT_KINDS = {
     "frame",
     "group",
@@ -214,7 +216,9 @@ def _normalize_object(
             if isinstance(constraints, Mapping)
             else {"horizontal": "left", "vertical": "top"}
         ),
-        "layout": copy.deepcopy(dict(layout)) if isinstance(layout, Mapping) else {},
+        "layout": normalize_ui_auto_layout(
+            dict(layout) if isinstance(layout, Mapping) else {}
+        ),
         "component_id": str(row.get("component_id") or ""),
         "variant": str(row.get("variant") or ""),
         "token_bindings": (

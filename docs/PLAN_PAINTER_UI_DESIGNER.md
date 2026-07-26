@@ -13,10 +13,10 @@ Unreal target engine: `D:\UE_5.8\Engine`
 
 Implementation checkpoint:
 
-- P0 document model is complete at UI document version 2: components, tokens,
-  and interactions are typed records with stable-ID CRUD, reference/cycle
-  validation, explicit referenced-delete handling, Action coverage, v1
-  migration, and `.tspaint` save/open round-trip tests.
+- P0 document model is at UI document version 3: components, tokens,
+  interactions, and Auto Layout are typed records with stable-ID CRUD,
+  reference/cycle validation, explicit referenced-delete handling, Action
+  coverage, migration, and `.tspaint` save/open round-trip tests.
 - M0 general UI document, validation, `.tspaint` persistence, Action/MCP,
   delivery preflight, and Design Handoff package are implemented.
 - M1 interactive editing now includes `Paint | UI Design | 3D Place`,
@@ -63,6 +63,11 @@ Implementation checkpoint:
   warns about missing labels and duplicate explicit focus order, and shows the
   selected object's per-target `Native/Material/Baked/Blocked` status with a
   reason from the shared delivery preflight classifier.
+- M2/P3 Auto Layout foundation supports Horizontal/Vertical flow, independent
+  L/T/R/B padding, gap, main-axis Start/Center/End/Space Between, cross-axis
+  Start/Center/End/Stretch, and absolute-positioned child escape. Constraint
+  resolution feeds one deterministic outer-to-inner layout calculator shared
+  by canvas, Inspector, persistence, Undo, and `paint.ui.layout.set`.
 - Image-resource embedding/hashing and adapter-output parity remain in M2/P8.
   M3-M6 remain milestone work.
 - Product-adoption work is now explicit in M2A/M2B: editable template gallery,

@@ -30,6 +30,7 @@ from app.painter_ui_constraints import (
     constraint_parent_geometry,
     normalize_ui_constraints,
 )
+from app.painter_ui_auto_layout import normalize_ui_auto_layout
 from app.painter_ui_document import normalize_ui_document
 
 
@@ -261,6 +262,90 @@ class PainterUIInspector(QWidget):
         self.aspect_lock_check = QCheckBox("Lock aspect ratio")
         self.aspect_lock_check.toggled.connect(self._emit_properties)
         form.addRow("Ratio", self.aspect_lock_check)
+        self.auto_layout_mode_combo = QComboBox()
+        for label, mode in (
+            ("None", "none"),
+            ("Horizontal", "horizontal"),
+            ("Vertical", "vertical"),
+        ):
+            self.auto_layout_mode_combo.addItem(label, mode)
+        self.auto_layout_mode_combo.currentIndexChanged.connect(
+            self._sync_auto_layout_control_states
+        )
+        self.auto_layout_mode_combo.currentIndexChanged.connect(
+            self._emit_properties
+        )
+        form.addRow("Auto Layout", self.auto_layout_mode_combo)
+        auto_padding = QFrame()
+        auto_padding_layout = QHBoxLayout(auto_padding)
+        auto_padding_layout.setContentsMargins(0, 0, 0, 0)
+        auto_padding_layout.setSpacing(3)
+        self.auto_layout_padding_controls: dict[str, QDoubleSpinBox] = {}
+        for prefix, edge in (
+            ("L ", "left"),
+            ("T ", "top"),
+            ("R ", "right"),
+            ("B ", "bottom"),
+        ):
+            spin = QDoubleSpinBox()
+            spin.setRange(0.0, 10000.0)
+            spin.setDecimals(1)
+            spin.setPrefix(prefix)
+            spin.setSuffix(" px")
+            spin.editingFinished.connect(self._emit_properties)
+            self.auto_layout_padding_controls[edge] = spin
+            auto_padding_layout.addWidget(spin)
+        form.addRow("Padding", auto_padding)
+        auto_flow = QFrame()
+        auto_flow_layout = QHBoxLayout(auto_flow)
+        auto_flow_layout.setContentsMargins(0, 0, 0, 0)
+        auto_flow_layout.setSpacing(3)
+        self.auto_layout_gap_spin = QDoubleSpinBox()
+        self.auto_layout_gap_spin.setRange(0.0, 10000.0)
+        self.auto_layout_gap_spin.setDecimals(1)
+        self.auto_layout_gap_spin.setPrefix("Gap ")
+        self.auto_layout_gap_spin.setSuffix(" px")
+        self.auto_layout_gap_spin.editingFinished.connect(
+            self._emit_properties
+        )
+        self.auto_layout_main_combo = QComboBox()
+        for label, alignment in (
+            ("Start", "start"),
+            ("Center", "center"),
+            ("End", "end"),
+            ("Space Between", "space_between"),
+        ):
+            self.auto_layout_main_combo.addItem(label, alignment)
+        self.auto_layout_main_combo.currentIndexChanged.connect(
+            self._emit_properties
+        )
+        auto_flow_layout.addWidget(self.auto_layout_gap_spin)
+        auto_flow_layout.addWidget(self.auto_layout_main_combo)
+        form.addRow("Flow", auto_flow)
+        auto_cross = QFrame()
+        auto_cross_layout = QHBoxLayout(auto_cross)
+        auto_cross_layout.setContentsMargins(0, 0, 0, 0)
+        auto_cross_layout.setSpacing(3)
+        self.auto_layout_cross_combo = QComboBox()
+        for label, alignment in (
+            ("Start", "start"),
+            ("Center", "center"),
+            ("End", "end"),
+            ("Stretch", "stretch"),
+        ):
+            self.auto_layout_cross_combo.addItem(label, alignment)
+        self.auto_layout_cross_combo.currentIndexChanged.connect(
+            self._emit_properties
+        )
+        self.auto_layout_positioning_combo = QComboBox()
+        self.auto_layout_positioning_combo.addItem("Auto", "auto")
+        self.auto_layout_positioning_combo.addItem("Absolute", "absolute")
+        self.auto_layout_positioning_combo.currentIndexChanged.connect(
+            self._emit_properties
+        )
+        auto_cross_layout.addWidget(self.auto_layout_cross_combo)
+        auto_cross_layout.addWidget(self.auto_layout_positioning_combo)
+        form.addRow("Align / Position", auto_cross)
         self.opacity_spin = QSpinBox()
         self.opacity_spin.setRange(0, 100)
         self.opacity_spin.setSuffix("%")
@@ -606,6 +691,12 @@ class PainterUIInspector(QWidget):
             self.accessibility_role_combo,
             self.accessibility_label_edit,
             self.focus_order_spin,
+            self.auto_layout_mode_combo,
+            self.auto_layout_gap_spin,
+            self.auto_layout_main_combo,
+            self.auto_layout_cross_combo,
+            self.auto_layout_positioning_combo,
+            *self.auto_layout_padding_controls.values(),
             self.pivot_x_spin,
             self.pivot_y_spin,
             self.horizontal_constraint_combo,
@@ -690,6 +781,27 @@ class PainterUIInspector(QWidget):
         for edge, spin in self.nine_slice_controls.items():
             spin.setValue(float(image_content["nine_slice"][edge]))
         self._sync_image_control_states()
+        layout = normalize_ui_auto_layout(row.get("layout"))
+        mode_index = self.auto_layout_mode_combo.findData(layout["mode"])
+        self.auto_layout_mode_combo.setCurrentIndex(max(0, mode_index))
+        for edge, spin in self.auto_layout_padding_controls.items():
+            spin.setValue(float(layout["padding"][edge]))
+        self.auto_layout_gap_spin.setValue(float(layout["gap"]))
+        main_index = self.auto_layout_main_combo.findData(
+            layout["main_alignment"]
+        )
+        self.auto_layout_main_combo.setCurrentIndex(max(0, main_index))
+        cross_index = self.auto_layout_cross_combo.findData(
+            layout["cross_alignment"]
+        )
+        self.auto_layout_cross_combo.setCurrentIndex(max(0, cross_index))
+        positioning_index = self.auto_layout_positioning_combo.findData(
+            layout["positioning"]
+        )
+        self.auto_layout_positioning_combo.setCurrentIndex(
+            max(0, positioning_index)
+        )
+        self._sync_auto_layout_control_states()
         accessibility = row["accessibility"]
         role_index = self.accessibility_role_combo.findData(
             accessibility["role"]
@@ -869,6 +981,26 @@ class PainterUIInspector(QWidget):
                 },
             },
         )
+        layout = normalize_ui_auto_layout(
+            {
+                **dict(row.get("layout") or {}),
+                "mode": self.auto_layout_mode_combo.currentData() or "none",
+                "padding": {
+                    edge: float(spin.value())
+                    for edge, spin in self.auto_layout_padding_controls.items()
+                },
+                "gap": float(self.auto_layout_gap_spin.value()),
+                "main_alignment": (
+                    self.auto_layout_main_combo.currentData() or "start"
+                ),
+                "cross_alignment": (
+                    self.auto_layout_cross_combo.currentData() or "start"
+                ),
+                "positioning": (
+                    self.auto_layout_positioning_combo.currentData() or "auto"
+                ),
+            }
+        )
         self.properties_changed.emit(
             self._selected_id(),
             {
@@ -879,6 +1011,7 @@ class PainterUIInspector(QWidget):
                 "style": style,
                 "content": content,
                 "constraints": constraints,
+                "layout": layout,
                 "accessibility": {
                     "role": str(
                         self.accessibility_role_combo.currentData() or "auto"
@@ -921,6 +1054,29 @@ class PainterUIInspector(QWidget):
         self.image_fit_combo.setEnabled(is_image and not sliced)
         for spin in self.nine_slice_controls.values():
             spin.setEnabled(is_image and sliced)
+
+    def _sync_auto_layout_control_states(self) -> None:
+        row = self._selected_row()
+        is_container = (
+            row is not None
+            and row.get("kind") in {"frame", "group", "button"}
+        )
+        active = (
+            is_container
+            and self.auto_layout_mode_combo.currentData()
+            in {"horizontal", "vertical"}
+        )
+        self.auto_layout_mode_combo.setEnabled(is_container)
+        for widget in (
+            self.auto_layout_gap_spin,
+            self.auto_layout_main_combo,
+            self.auto_layout_cross_combo,
+            *self.auto_layout_padding_controls.values(),
+        ):
+            widget.setEnabled(active)
+        self.auto_layout_positioning_combo.setEnabled(
+            row is not None and bool(row.get("parent_id"))
+        )
 
     def _emit_duplicate(self) -> None:
         if self._selected_id():

@@ -106,11 +106,13 @@ Status: core interactive editing implemented
 
 ## M2: Responsive Layout and Design System
 
-Status: constraint foundation implemented; Auto Layout and tokens pending
+Status: constraint and first Auto Layout foundation implemented; advanced sizing and tokens pending
 
 - anchors and constraints (implemented foundation)
-- horizontal/vertical auto layout
-- padding, gap, wrap
+- horizontal/vertical auto layout (implemented)
+- padding, gap, main/cross alignment (implemented)
+- absolute child positioning escape (implemented)
+- wrap, Hug/Fill sizing (pending)
 - layout grid and safe area
 - compact/regular breakpoint
 - portrait/landscape preview

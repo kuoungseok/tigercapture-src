@@ -252,6 +252,35 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a UI object would be updated",
     )
     registry.register_adapter_action(
+        "paint.ui.layout.set",
+        "Set deterministic Horizontal or Vertical Auto Layout on a Painter UI container.",
+        "paint",
+        "paint_ui_layout_set",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "mode": {
+                    "type": "string",
+                    "enum": ["none", "horizontal", "vertical"],
+                },
+                "padding": any_object,
+                "gap": {"type": "number", "minimum": 0},
+                "main_alignment": {
+                    "type": "string",
+                    "enum": ["start", "center", "end", "space_between"],
+                },
+                "cross_alignment": {
+                    "type": "string",
+                    "enum": ["start", "center", "end", "stretch"],
+                },
+            },
+            required=("object_id", "mode"),
+        ),
+        required=("object_id", "mode"),
+        undo_label="Set UI Auto Layout",
+        dry_summary="Painter UI Auto Layout would be updated",
+    )
+    registry.register_adapter_action(
         "paint.ui.object.remove",
         "Remove a Painter UI object and its child hierarchy.",
         "paint",

@@ -4,7 +4,8 @@ Status: canonical implementation backlog; P0 complete
 
 P0 implementation checkpoint (2026-07-26):
 
-- UI document version 2 defines typed component, token, and interaction records.
+- UI document version 3 defines typed component, token, interaction, and
+  deterministic Auto Layout records.
 - Stable IDs are preserved by update operations and assigned during v1 migration.
 - Parent, component, token, interaction, alias, and cycle references are validated.
 - Referenced component/token deletion is blocked unless explicit detachment is requested.
@@ -170,6 +171,21 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
 6. Desktop, mobile, console, broadcast 프리셋
 7. Light/Dark/High Contrast 테마 미리보기
 8. 레이아웃 순환과 불가능한 Constraint 검출
+
+현재 구현된 기반:
+
+- Horizontal/Vertical Auto Layout과 고정 크기 자식 흐름
+- L/T/R/B Padding, Gap, main Start/Center/End/Space Between
+- cross Start/Center/End/Stretch
+- `positioning=absolute` 자식의 자동 흐름 제외
+- 중첩 컨테이너의 바깥쪽부터 안쪽 순서로 결정적 배치
+- Inspector, `.tspaint`, Undo/Redo, `paint.ui.layout.set` Action 공유 계약
+
+남은 범위:
+
+- Wrap, Hug Content, Fill Container와 Grid
+- layout cycle/impossible constraint 진단 강화
+- breakpoint, orientation, theme override
 
 ## P4. 컴포넌트 시스템
 
