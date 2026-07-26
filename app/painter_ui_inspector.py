@@ -71,6 +71,7 @@ class PainterUILayerList(QListWidget):
 
 
 class PainterUIInspector(QWidget):
+    template_apply_requested = Signal(str)
     artboard_selected = Signal(str)
     artboard_add_requested = Signal(str, int, int, str)
     artboard_layout_changed = Signal(str, object)
@@ -272,6 +273,14 @@ class PainterUIInspector(QWidget):
         tabs.setDocumentMode(True)
         self._tabs = tabs
         root.addWidget(tabs, 1)
+
+        from app.painter_ui_template_gallery import PainterUITemplateLibrary
+
+        self.template_library = PainterUITemplateLibrary()
+        self.template_library.template_apply_requested.connect(
+            self.template_apply_requested
+        )
+        tabs.addTab(self.template_library, "Templates")
 
         layers_page = QWidget()
         layers_layout = QVBoxLayout(layers_page)

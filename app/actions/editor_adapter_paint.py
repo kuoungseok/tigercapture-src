@@ -71,6 +71,23 @@ class PaintAdapterMixin:
 
         return inspect_ui_document(getattr(dialog, "_painter_ui_document", None))
 
+    def paint_ui_template_catalog_inspect(self) -> dict[str, Any]:
+        from app.painter_ui_templates import inspect_ui_template_catalog
+
+        return inspect_ui_template_catalog()
+
+    def paint_ui_template_apply(self, *, template_id: str) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_templates import instantiate_ui_template
+
+        document, report = instantiate_ui_template(str(template_id))
+        dialog._push_undo_state("Apply UI template")
+        self._paint_ui_commit(dialog, "Apply UI template", document)
+        return {
+            **dialog.painter_action_state(),
+            "template": report,
+        }
+
     def paint_ui_component_library_inspect(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         from app.painter_ui_component_library import inspect_ui_component_library

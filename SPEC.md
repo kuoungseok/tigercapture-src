@@ -6747,6 +6747,16 @@ AI Script Edit MVP integration:
   library envelope and requires an explicit `update`, `skip`, or `regenerate`
   stable-ID conflict policy; regenerated aliases are remapped as one graph.
   Automation uses `paint.ui.token.library.import/export`.
+- Painter UI Design includes a visual `Templates` library and full gallery.
+  The initial catalog contains 12 original complete-document templates across
+  11 categories: Mobile, Web/SaaS, Dashboard, E-commerce, Portfolio, Game UI,
+  Broadcast, Presentation, Wireframe, Forms, and Design System. Applying a
+  template duplicates editable artboards, objects, tokens, a reusable
+  Component Definition, and a prototype-ready interaction rather than placing
+  a flattened image. Every manifest includes source, author, version, tags,
+  difficulty, and license data; `.tspaint` persists that provenance under
+  `linked_targets.template_source`. UI and AI share
+  `paint.ui.template.catalog.inspect` and `paint.ui.template.apply`.
 - Painter UI groups keep stable child IDs and remain editable: grouping,
   ungrouping, and layer-stack reordering are exposed through
   `paint.ui.object.group`, `paint.ui.object.ungroup`, and

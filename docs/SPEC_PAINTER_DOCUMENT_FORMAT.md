@@ -151,6 +151,15 @@ preview. The format preserves:
   state. Definition selection, Instance placement, Variant creation, and
   component rename use stable IDs and shared mutations.
   `paint.ui.component.library.inspect` exposes the same read-only report.
+- Complete-document templates use
+  `tigerstudio.painter.ui.template_package.v1` manifests. A manifest includes
+  stable template ID, version, category, tags, artboard presets, feature list,
+  author, source, and explicit license terms. Applying a built-in template
+  creates a normal version-9 UI document and stores immutable source
+  provenance in `linked_targets.template_source`; all template contents remain
+  ordinary editable artboards, objects, tokens, components, and interactions.
+  `paint.ui.template.catalog.inspect/apply` use the same instantiate service as
+  the visual Template Gallery.
 - Every artboard normalizes a provider-neutral `layout_grid` record with
   `none`, `grid`, or `columns` mode, plus custom horizontal/vertical `guides`
   and safe-area insets. `safe_area_visible` controls the authoring overlay only.

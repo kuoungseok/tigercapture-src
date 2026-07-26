@@ -22,6 +22,10 @@ P0 implementation checkpoint (2026-07-26):
 - The dedicated Components tab provides searchable family/Variant hierarchy,
   Instance usage, Definition selection, Instance placement, Variant creation,
   rename, and read-only Action inspection.
+- M2A template foundation provides a visual gallery with 12 complete editable
+  documents across 11 categories. Every template includes typed tokens, a
+  Component Definition, an interaction, source/version/license provenance, and
+  shared `paint.ui.template.catalog.inspect/apply` Actions.
 
 P1 implementation checkpoint (2026-07-26, navigation slice):
 

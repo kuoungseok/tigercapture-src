@@ -8161,6 +8161,9 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.selection_changed.connect(
             self._set_painter_ui_selection
         )
+        self._paint_ui_inspector.template_apply_requested.connect(
+            self._apply_painter_ui_template
+        )
         self._paint_ui_inspector.artboard_selected.connect(
             self._set_painter_ui_artboard
         )
@@ -11014,6 +11017,15 @@ class PaintDialog(QDialog):
         )
         self._push_undo_state("Create UI component")
         self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _apply_painter_ui_template(self, template_id: str) -> None:
+        from app.painter_ui_templates import instantiate_ui_template
+
+        document, _report = instantiate_ui_template(str(template_id))
+        self._push_undo_state("Apply UI template")
+        self._painter_ui_document = document
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
 

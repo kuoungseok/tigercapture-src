@@ -119,6 +119,29 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="the Painter UI document would be inspected",
     )
     registry.register_adapter_action(
+        "paint.ui.template.catalog.inspect",
+        "Inspect built-in complete-document templates, categories, tags, sources, and licenses.",
+        "paint",
+        "paint_ui_template_catalog_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter UI template catalog would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.template.apply",
+        "Replace the active UI document with an editable template copy while preserving source provenance.",
+        "paint",
+        "paint_ui_template_apply",
+        params_schema=schema_object(
+            {"template_id": {"type": "string", "minLength": 1}},
+            required=("template_id",),
+        ),
+        required=("template_id",),
+        undo_label="Apply UI template",
+        dry_summary="a complete Painter UI template would replace the active document",
+    )
+    registry.register_adapter_action(
         "paint.ui.component.library.inspect",
         "Inspect component families, Variants, stable roots, and Instance usage.",
         "paint",

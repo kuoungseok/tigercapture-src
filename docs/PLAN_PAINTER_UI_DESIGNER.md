@@ -116,6 +116,13 @@ Implementation checkpoint:
   reusable component/variant libraries, Auto Layout presets, design tokens,
   versioned library updates, comments, revision history, reviewer mode, and
   developer inspection. Template count alone is not a completion metric.
+- M2A foundation now includes a visual gallery with twelve original
+  complete-document templates across eleven categories. Each template
+  duplicates editable artboards, objects, tokens, a Component Definition, and
+  an interaction, and persists source/version/license provenance. UI and
+  automation share `paint.ui.template.catalog.inspect/apply`. External package
+  import/export, favorites/recent, update review, and broader catalog quality
+  remain M2A work.
 - Detailed status: `docs/PAINTER_UI_DESIGNER_MILESTONES_KO.md`
 
 ## 1. Product Goal

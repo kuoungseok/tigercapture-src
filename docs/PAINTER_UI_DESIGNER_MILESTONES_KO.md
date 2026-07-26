@@ -148,7 +148,23 @@ P4 component checkpoint:
 
 ## M2A: 템플릿·라이브러리·디자인 시스템
 
-상태: 대기
+상태: 기반 구현 진행 중
+
+구현 체크포인트:
+
+- 11개 카테고리의 오리지널 완성 문서 템플릿 12개
+- 검색, 카테고리 필터, 실제 문서 기반 썸네일을 제공하는 시각적 갤러리
+- 각 템플릿에 artboard, object, token, Component Definition, interaction 포함
+- source, author, version, tag, difficulty, license manifest
+- `.tspaint`에 `linked_targets.template_source` provenance 영속 저장
+- UI와 `paint.ui.template.catalog.inspect/apply` Action이 같은 생성 서비스 사용
+
+남은 범위:
+
+- 외부 템플릿·라이브러리 패키지 입출력
+- 최근 항목, 즐겨찾기, 사용자 템플릿 저장
+- 라이브러리 버전 비교와 선택적 업데이트 검토
+- 더 넓고 시각적으로 검증된 고품질 템플릿 카탈로그
 
 이 마일스톤은 화면 하나를 그리는 기능을 넘어 UI 제작 도구를 계속 사용할
 이유를 만든다. 템플릿을 열 수 있다는 것만으로 완료하지 않으며, 템플릿은
