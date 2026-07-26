@@ -13,7 +13,7 @@ Unreal target engine: `D:\UE_5.8\Engine`
 
 Implementation checkpoint:
 
-- P0 document model is at UI document version 8: components, tokens,
+- P0 document model is at UI document version 9: components, tokens,
   interactions, and Auto Layout are typed records with stable-ID CRUD,
   reference/cycle validation, explicit referenced-delete handling, Action
   coverage, migration, and `.tspaint` save/open round-trip tests.
@@ -91,7 +91,10 @@ Implementation checkpoint:
   Definition property/topology updates synchronize automatically, while local
   Instance edits persist as dotted-path overrides. Inspector and
   `paint.ui.component.create/instantiate/sync` share Undo and document services.
-  Variants, state properties, and detach/localize remain the next P4 slices.
+  Typed component properties and interactive Normal/Hover/Pressed/Focused/
+  Disabled/Selected state overrides now resolve in Canvas and Inspector before
+  responsive/theme values. UI and Actions share Undo. Separate Variant
+  topology and detach/localize remain the next P4 slices.
 - Image-resource embedding/hashing and adapter-output parity remain in M2/P8.
   M3-M6 remain milestone work.
 - Product-adoption work is now explicit in M2A/M2B: editable template gallery,

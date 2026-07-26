@@ -81,7 +81,7 @@ preview. The format preserves:
   read-only per-target `Native`, `Material`, `Baked`, or `Blocked` status and
   the classifier reason for Asset Export, Design Handoff, Review Prototype,
   and Unreal UMG. Delivery preflight v2 uses these same four dispositions.
-- UI document version 8 normalizes each object's `layout` record. Containers
+- UI document version 9 normalizes each object's `layout` record. Containers
   support `none`, `horizontal`, or `vertical` mode; independent L/T/R/B
   padding; non-negative gap; main-axis `start/center/end/space_between`; and
   cross-axis `start/center/end/stretch`. Child `positioning=absolute` bypasses
@@ -98,8 +98,9 @@ preview. The format preserves:
   `value`, per-theme `theme_values`, and an optional stable
   `alias_token_id`. Object `token_bindings` use provider-neutral dotted paths
   such as `style.fill`, `style.text_color`, `layout.gap`, or `opacity`.
-- Theme resolution applies responsive object overrides first, then resolves
-  token aliases and themed values without changing stable object/token IDs.
+- Effective preview resolves component state and local Instance overrides,
+  then responsive object overrides, then token aliases and themed values
+  without changing stable object/token IDs.
   Canvas, Inspector, and layout diagnostics use this effective preview
   document. The authored base document remains unchanged.
 - Inspector theme selection uses the normal artboard mutation and Undo path.
@@ -116,8 +117,16 @@ preview. The format preserves:
   after Definition synchronization. Inspector uses Create/Instance commands;
   automation uses `paint.ui.component.create`,
   `paint.ui.component.instantiate`, and `paint.ui.component.sync`.
-- Variant/property authoring, state sets, and detaching an Instance into a
-  local component remain subsequent P4 work.
+- Component property definitions are typed and include a default `state` enum:
+  Normal, Hover, Pressed, Focused, Disabled, and Selected. State visual
+  overrides are stored per Definition source-object ID. Instance roots persist
+  `component_properties`; Inspector State preview and Actions
+  `paint.ui.component.property.define`,
+  `paint.ui.component.state.override.set`, and
+  `paint.ui.component.instance.property.set` use the shared undoable mutation
+  path.
+- Separate Variant component topology and detaching an Instance into a local
+  component remain subsequent P4 work.
 - Every artboard normalizes a provider-neutral `layout_grid` record with
   `none`, `grid`, or `columns` mode, plus custom horizontal/vertical `guides`
   and safe-area insets. `safe_area_visible` controls the authoring overlay only.

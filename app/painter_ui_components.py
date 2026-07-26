@@ -6,6 +6,14 @@ from typing import Any, Mapping
 
 
 UI_COMPONENT_ROLES = ("none", "definition", "instance")
+UI_COMPONENT_STATES = (
+    "normal",
+    "hover",
+    "pressed",
+    "focused",
+    "disabled",
+    "selected",
+)
 _STRUCTURAL_FIELDS = {
     "id",
     "artboard_id",
@@ -15,6 +23,7 @@ _STRUCTURAL_FIELDS = {
     "component_role",
     "component_source_object_id",
     "instance_overrides",
+    "component_properties",
 }
 
 
@@ -30,6 +39,82 @@ def normalize_ui_instance_overrides(value: object) -> dict[str, Any]:
         str(path): copy.deepcopy(item)
         for path, item in value.items()
         if str(path or "").strip()
+    }
+
+
+def normalize_ui_component_properties(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    return {
+        str(name): copy.deepcopy(item)
+        for name, item in value.items()
+        if str(name or "").strip()
+    }
+
+
+def normalize_ui_component_property_definitions(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    definitions: dict[str, Any] = {}
+    for name, raw in value.items():
+        property_name = str(name or "").strip()
+        if not property_name:
+            continue
+        row = dict(raw) if isinstance(raw, Mapping) else {"default": raw}
+        property_type = str(row.get("type") or "text").strip().casefold()
+        values = [
+            str(item)
+            for item in row.get("values", [])
+            if str(item or "").strip()
+        ]
+        if property_type == "enum" and not values:
+            values = list(UI_COMPONENT_STATES) if property_name == "state" else []
+        default = copy.deepcopy(row.get("default"))
+        if default is None and values:
+            default = values[0]
+        definitions[property_name] = {
+            "type": property_type,
+            "default": default,
+            "values": values,
+            "description": str(row.get("description") or ""),
+        }
+    return definitions
+
+
+def default_ui_component_property_definitions() -> dict[str, Any]:
+    return {
+        "state": {
+            "type": "enum",
+            "default": "normal",
+            "values": list(UI_COMPONENT_STATES),
+            "description": "Interactive component state",
+        }
+    }
+
+
+def normalize_ui_component_state_overrides(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    result: dict[str, Any] = {}
+    for state, source_rows in value.items():
+        state_name = str(state or "").strip().casefold()
+        if not state_name or not isinstance(source_rows, Mapping):
+            continue
+        result[state_name] = {
+            str(source_id): copy.deepcopy(dict(changes))
+            for source_id, changes in source_rows.items()
+            if str(source_id or "").strip() and isinstance(changes, Mapping)
+        }
+    return result
+
+
+def component_property_defaults(component: Mapping[str, Any]) -> dict[str, Any]:
+    definitions = normalize_ui_component_property_definitions(
+        component.get("property_definitions")
+    )
+    return {
+        name: copy.deepcopy(row.get("default"))
+        for name, row in definitions.items()
     }
 
 
@@ -151,6 +236,7 @@ def convert_ui_object_to_component(
         name=name or str(root["name"]),
         root_object_id=str(root_object_id),
         description=description,
+        property_definitions=default_ui_component_property_definitions(),
     )
     member_ids = set(_subtree_ids(document, str(root_object_id)))
     for row in document["objects"]:
@@ -160,6 +246,7 @@ def convert_ui_object_to_component(
         row["component_role"] = "definition"
         row["component_source_object_id"] = row["id"]
         row["instance_overrides"] = {}
+        row["component_properties"] = {}
     validation = validate_ui_document(document)
     if not validation["ok"]:
         raise PainterUIDocumentError(
@@ -233,6 +320,11 @@ def instantiate_ui_component(
         clone["component_role"] = "instance"
         clone["component_source_object_id"] = source["id"]
         clone["instance_overrides"] = {}
+        clone["component_properties"] = (
+            component_property_defaults(component)
+            if source["id"] == source_root["id"]
+            else {}
+        )
         if source["id"] == source_root["id"]:
             clone["name"] = f"{component['name']} Instance"
         created.append(clone)
@@ -335,6 +427,7 @@ def sync_ui_component_instances(
                 instance["component_role"] = "instance"
                 instance["component_source_object_id"] = source_id
                 instance["instance_overrides"] = {}
+                instance["component_properties"] = {}
                 document["objects"].append(instance)
                 members[source_id] = instance
             preserved = {
@@ -356,13 +449,202 @@ def sync_ui_component_instances(
     return document
 
 
+def define_ui_component_property(
+    value: Mapping[str, Any],
+    *,
+    component_id: str,
+    property_name: str,
+    definition: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    from app.painter_ui_document import (
+        PainterUIDocumentError,
+        normalize_ui_document,
+        validate_ui_document,
+    )
+
+    document = normalize_ui_document(value)
+    component = next(
+        (row for row in document["components"] if row["id"] == component_id),
+        None,
+    )
+    if component is None:
+        raise PainterUIDocumentError(f"UI component not found: {component_id}")
+    definitions = normalize_ui_component_property_definitions(
+        component.get("property_definitions")
+    )
+    definitions[str(property_name)] = dict(definition)
+    component["property_definitions"] = normalize_ui_component_property_definitions(
+        definitions
+    )
+    validation = validate_ui_document(document)
+    if not validation["ok"]:
+        raise PainterUIDocumentError(
+            "Invalid component property: " + ", ".join(validation["errors"])
+        )
+    document["revision"] += 1
+    return document, copy.deepcopy(component["property_definitions"][str(property_name)])
+
+
+def set_ui_component_state_override(
+    value: Mapping[str, Any],
+    *,
+    component_id: str,
+    state: str,
+    source_object_id: str,
+    changes: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    from app.painter_ui_document import (
+        PainterUIDocumentError,
+        normalize_ui_document,
+        validate_ui_document,
+    )
+
+    document = normalize_ui_document(value)
+    component = next(
+        (row for row in document["components"] if row["id"] == component_id),
+        None,
+    )
+    if component is None:
+        raise PainterUIDocumentError(f"UI component not found: {component_id}")
+    source = next(
+        (
+            row
+            for row in document["objects"]
+            if row["id"] == source_object_id
+            and row["component_id"] == component_id
+            and row["component_role"] == "definition"
+        ),
+        None,
+    )
+    if source is None:
+        raise PainterUIDocumentError(
+            f"Component source object not found: {source_object_id}"
+        )
+    state_name = str(state or "normal").strip().casefold()
+    overrides = normalize_ui_component_state_overrides(
+        component.get("state_overrides")
+    )
+    overrides.setdefault(state_name, {})[str(source_object_id)] = copy.deepcopy(
+        dict(changes)
+    )
+    component["state_overrides"] = overrides
+    validation = validate_ui_document(document)
+    if not validation["ok"]:
+        raise PainterUIDocumentError(
+            "Invalid component state override: " + ", ".join(validation["errors"])
+        )
+    document["revision"] += 1
+    return document, copy.deepcopy(overrides[state_name][str(source_object_id)])
+
+
+def set_ui_instance_component_property(
+    value: Mapping[str, Any],
+    *,
+    instance_root_id: str,
+    property_name: str,
+    property_value: Any,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    from app.painter_ui_document import (
+        PainterUIDocumentError,
+        normalize_ui_document,
+        validate_ui_document,
+    )
+
+    document = normalize_ui_document(value)
+    root = next(
+        (row for row in document["objects"] if row["id"] == instance_root_id),
+        None,
+    )
+    if root is None or root["component_role"] != "instance":
+        raise PainterUIDocumentError(f"Component instance not found: {instance_root_id}")
+    component = next(
+        row for row in document["components"] if row["id"] == root["component_id"]
+    )
+    definitions = normalize_ui_component_property_definitions(
+        component.get("property_definitions")
+    )
+    definition = definitions.get(str(property_name))
+    if definition is None:
+        raise PainterUIDocumentError(
+            f"Component property not found: {property_name}"
+        )
+    if definition["type"] == "enum" and definition["values"]:
+        if str(property_value) not in definition["values"]:
+            raise PainterUIDocumentError(
+                f"Invalid component property value: {property_name}={property_value}"
+            )
+    properties = component_property_defaults(component)
+    properties.update(normalize_ui_component_properties(root.get("component_properties")))
+    properties[str(property_name)] = copy.deepcopy(property_value)
+    root["component_properties"] = properties
+    validation = validate_ui_document(document)
+    if not validation["ok"]:
+        raise PainterUIDocumentError(
+            "Invalid component instance property: " + ", ".join(validation["errors"])
+        )
+    document["revision"] += 1
+    return document, copy.deepcopy(properties)
+
+
+def resolve_ui_component_document(value: Mapping[str, Any]) -> dict[str, Any]:
+    from app.painter_ui_document import normalize_ui_document
+
+    document = normalize_ui_document(value)
+    components = {row["id"]: row for row in document["components"]}
+    objects = {row["id"]: row for row in document["objects"]}
+    instance_roots = []
+    for row in document["objects"]:
+        if row["component_role"] != "instance":
+            continue
+        component = components.get(row["component_id"])
+        if component is None:
+            continue
+        if row["component_source_object_id"] == component["root_object_id"]:
+            instance_roots.append(row)
+    for root in instance_roots:
+        component = components[root["component_id"]]
+        properties = component_property_defaults(component)
+        properties.update(
+            normalize_ui_component_properties(root.get("component_properties"))
+        )
+        state = str(properties.get("state") or "normal").strip().casefold()
+        state_rows = normalize_ui_component_state_overrides(
+            component.get("state_overrides")
+        ).get(state, {})
+        for object_id in _subtree_ids(document, root["id"]):
+            row = objects.get(object_id)
+            if row is None:
+                continue
+            changes = state_rows.get(row["component_source_object_id"])
+            resolved = copy.deepcopy(row)
+            if isinstance(changes, Mapping):
+                for path, item in _flatten_changes(changes).items():
+                    _apply_path(resolved, path, item)
+            resolved = apply_ui_instance_overrides(resolved)
+            resolved["resolved_component_properties"] = copy.deepcopy(properties)
+            resolved["resolved_component_state"] = state
+            objects[object_id] = resolved
+    document["objects"] = [objects[row["id"]] for row in document["objects"]]
+    return document
+
+
 __all__ = [
     "UI_COMPONENT_ROLES",
+    "UI_COMPONENT_STATES",
     "apply_ui_instance_overrides",
+    "component_property_defaults",
     "convert_ui_object_to_component",
+    "default_ui_component_property_definitions",
+    "define_ui_component_property",
     "instantiate_ui_component",
     "merge_ui_instance_overrides",
+    "normalize_ui_component_properties",
+    "normalize_ui_component_property_definitions",
     "normalize_ui_component_role",
+    "normalize_ui_component_state_overrides",
     "normalize_ui_instance_overrides",
+    "resolve_ui_component_document",
+    "set_ui_component_state_override",
+    "set_ui_instance_component_property",
     "sync_ui_component_instances",
 ]

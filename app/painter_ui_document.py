@@ -8,7 +8,7 @@ from app.painter_ui_auto_layout import normalize_ui_auto_layout
 
 
 UI_DOCUMENT_SCHEMA = "tigerstudio.painter.ui.v1"
-UI_DOCUMENT_VERSION = 8
+UI_DOCUMENT_VERSION = 9
 UI_OBJECT_KINDS = {
     "frame",
     "group",
@@ -213,6 +213,7 @@ def _normalize_object(
     token_bindings = row.get("token_bindings")
     from app.painter_ui_responsive import normalize_ui_responsive_overrides
     from app.painter_ui_components import (
+        normalize_ui_component_properties,
         normalize_ui_component_role,
         normalize_ui_instance_overrides,
     )
@@ -250,6 +251,9 @@ def _normalize_object(
         "instance_overrides": normalize_ui_instance_overrides(
             row.get("instance_overrides")
         ),
+        "component_properties": normalize_ui_component_properties(
+            row.get("component_properties")
+        ),
         "variant": str(row.get("variant") or ""),
         "token_bindings": (
             {
@@ -269,15 +273,22 @@ def _normalize_object(
 
 
 def _normalize_component(row: Mapping[str, Any], index: int) -> dict[str, Any]:
-    properties = row.get("property_definitions")
+    from app.painter_ui_components import (
+        normalize_ui_component_property_definitions,
+        normalize_ui_component_state_overrides,
+    )
+
     return {
         "id": str(row.get("id") or f"ui-component-{index + 1}"),
         "name": str(row.get("name") or f"Component {index + 1}"),
         "root_object_id": str(row.get("root_object_id") or ""),
         "base_component_id": str(row.get("base_component_id") or ""),
         "description": str(row.get("description") or ""),
-        "property_definitions": (
-            copy.deepcopy(dict(properties)) if isinstance(properties, Mapping) else {}
+        "property_definitions": normalize_ui_component_property_definitions(
+            row.get("property_definitions")
+        ),
+        "state_overrides": normalize_ui_component_state_overrides(
+            row.get("state_overrides")
         ),
         "variant_ids": [
             str(value)
@@ -538,6 +549,7 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
     object_by_id = {row["id"]: row for row in document["objects"]}
     artboard_id_set = set(artboard_ids)
     component_id_set = set(component_ids)
+    component_by_id = {row["id"]: row for row in document["components"]}
     token_id_set = set(token_ids)
     focus_orders: dict[tuple[str, int], str] = {}
     for row in document["objects"]:
@@ -578,6 +590,26 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
                 errors.append(
                     f"invalid_component_instance_source:{row['id']}:{source_object_id}"
                 )
+            component = component_by_id.get(component_id)
+            if component is not None:
+                definitions = component["property_definitions"]
+                for property_name, property_value in row[
+                    "component_properties"
+                ].items():
+                    definition = definitions.get(property_name)
+                    if definition is None:
+                        errors.append(
+                            f"missing_component_property:{row['id']}:{property_name}"
+                        )
+                    elif (
+                        definition["type"] == "enum"
+                        and definition["values"]
+                        and str(property_value) not in definition["values"]
+                    ):
+                        errors.append(
+                            f"invalid_component_property_value:{row['id']}:"
+                            f"{property_name}:{property_value}"
+                        )
         for property_name, token_id in row["token_bindings"].items():
             if token_id and token_id not in token_id_set:
                 errors.append(
@@ -649,6 +681,36 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         for variant_id in row["variant_ids"]:
             if variant_id not in component_id_set:
                 errors.append(f"missing_component_variant:{row['id']}:{variant_id}")
+        for property_name, definition in row["property_definitions"].items():
+            if (
+                definition["type"] == "enum"
+                and definition["values"]
+                and str(definition["default"]) not in definition["values"]
+            ):
+                errors.append(
+                    f"invalid_component_property_default:{row['id']}:"
+                    f"{property_name}:{definition['default']}"
+                )
+        for state, source_rows in row["state_overrides"].items():
+            state_definition = row["property_definitions"].get("state")
+            if (
+                state_definition
+                and state_definition["type"] == "enum"
+                and state_definition["values"]
+                and state not in state_definition["values"]
+            ):
+                errors.append(f"invalid_component_state:{row['id']}:{state}")
+            for source_id in source_rows:
+                source = object_by_id.get(source_id)
+                if (
+                    source is None
+                    or source["component_role"] != "definition"
+                    or source["component_id"] != row["id"]
+                ):
+                    errors.append(
+                        f"invalid_component_state_source:{row['id']}:"
+                        f"{state}:{source_id}"
+                    )
     _append_cycle_errors(
         document["components"],
         reference_key="base_component_id",
@@ -766,6 +828,7 @@ def _remove_dangling_records(
             row["component_role"] = "none"
             row["component_source_object_id"] = ""
             row["instance_overrides"] = {}
+            row["component_properties"] = {}
     removed_interactions = {
         row["id"]
         for row in document["interactions"]
@@ -1481,6 +1544,7 @@ def remove_ui_component(
                 row["component_role"] = "none"
                 row["component_source_object_id"] = ""
                 row["instance_overrides"] = {}
+                row["component_properties"] = {}
         for row in document["components"]:
             if row["base_component_id"] == component_id:
                 row["base_component_id"] = ""

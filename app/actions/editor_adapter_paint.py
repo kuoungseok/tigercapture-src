@@ -641,6 +641,77 @@ class PaintAdapterMixin:
             document,
         )
 
+    def paint_ui_component_property_define(
+        self,
+        *,
+        component_id: str,
+        property_name: str,
+        definition: dict[str, Any],
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_components import define_ui_component_property
+
+        document, _property = define_ui_component_property(
+            dialog._painter_ui_document,
+            component_id=str(component_id),
+            property_name=str(property_name),
+            definition=dict(definition or {}),
+        )
+        dialog._push_undo_state("Define UI component property")
+        return self._paint_ui_commit(
+            dialog,
+            "Define UI component property",
+            document,
+        )
+
+    def paint_ui_component_state_override_set(
+        self,
+        *,
+        component_id: str,
+        state: str,
+        source_object_id: str,
+        changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_components import set_ui_component_state_override
+
+        document, _override = set_ui_component_state_override(
+            dialog._painter_ui_document,
+            component_id=str(component_id),
+            state=str(state),
+            source_object_id=str(source_object_id),
+            changes=dict(changes or {}),
+        )
+        dialog._push_undo_state("Set UI component state")
+        return self._paint_ui_commit(
+            dialog,
+            "Set UI component state",
+            document,
+        )
+
+    def paint_ui_component_instance_property_set(
+        self,
+        *,
+        instance_root_id: str,
+        property_name: str,
+        value: Any,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_components import set_ui_instance_component_property
+
+        document, _properties = set_ui_instance_component_property(
+            dialog._painter_ui_document,
+            instance_root_id=str(instance_root_id),
+            property_name=str(property_name),
+            property_value=value,
+        )
+        dialog._push_undo_state("Set UI component instance property")
+        return self._paint_ui_commit(
+            dialog,
+            "Set UI component instance property",
+            document,
+        )
+
     def paint_ui_component_update(
         self,
         *,

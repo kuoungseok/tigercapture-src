@@ -4,7 +4,7 @@ Status: canonical implementation backlog; P0 complete
 
 P0 implementation checkpoint (2026-07-26):
 
-- UI document version 8 defines typed component, token, interaction, and
+- UI document version 9 defines typed component, token, interaction, and
   deterministic Auto Layout records.
 - Stable IDs are preserved by update operations and assigned during v1 migration.
 - Parent, component, token, interaction, alias, and cycle references are validated.
@@ -12,6 +12,10 @@ P0 implementation checkpoint (2026-07-26):
 - Painter Actions expose CRUD for all three record types.
 - Legacy `.tspaint` documents migrate through the shared normalization path and
   typed records survive save/open round trips.
+- Component definitions expose typed properties and state overrides for
+  Normal, Hover, Pressed, Focused, Disabled, and Selected. Instance state
+  preview, Canvas resolution, Inspector editing, Actions, Undo, and validation
+  share one stable-ID contract.
 
 P1 implementation checkpoint (2026-07-26, navigation slice):
 

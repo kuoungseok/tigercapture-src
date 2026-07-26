@@ -6668,7 +6668,7 @@ AI Script Edit MVP integration:
   UMG disposition plus reason. `painter_ui_delivery` is the single classifier:
   preflight v2 reports only `Native`, `Material`, `Baked`, or `Blocked`, so UI,
   Actions, and handoff cannot silently disagree about conversion support.
-- Painter UI document version 8 defines deterministic Auto Layout. A Frame,
+- Painter UI document version 9 defines deterministic Auto Layout. A Frame,
   Group, or Button may use Horizontal or Vertical flow with independent
   L/T/R/B padding, gap, main-axis Start/Center/End/Space Between, and
   cross-axis Start/Center/End/Stretch. Children are ordered by stable z/document
@@ -6713,6 +6713,15 @@ AI Script Edit MVP integration:
   and local Instance edits remain explicit overrides. Inspector and Actions
   share the same Undoable service through `paint.ui.component.create`,
   `paint.ui.component.instantiate`, and `paint.ui.component.sync`.
+- Component Definitions expose typed properties and receive a default `state`
+  enum with Normal, Hover, Pressed, Focused, Disabled, and Selected values.
+  State overrides address Definition objects by stable source ID; Instance
+  roots persist property values. Effective preview order is component state,
+  local Instance override, responsive override, then theme token. Inspector
+  State preview and `paint.ui.component.property.define`,
+  `paint.ui.component.state.override.set`, and
+  `paint.ui.component.instance.property.set` share the same undoable document
+  services. Separate Variant topology and detach/localize remain P4 follow-up.
 - Painter UI groups keep stable child IDs and remain editable: grouping,
   ungrouping, and layer-stack reordering are exposed through
   `paint.ui.object.group`, `paint.ui.object.ungroup`, and

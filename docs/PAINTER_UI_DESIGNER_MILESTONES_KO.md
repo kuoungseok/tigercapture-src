@@ -128,7 +128,10 @@ P4 component checkpoint:
 - Definition property and direct-child topology synchronization implemented
 - stable source object IDs and local dotted-path Instance overrides implemented
 - Inspector Create/Instance commands and Action/Undo parity implemented
-- Variant/state authoring, detach/localize, and a dedicated Components panel remain
+- typed component properties and Normal/Hover/Pressed/Focused/Disabled/Selected
+  state override authoring implemented
+- Instance state preview and Action/Undo parity implemented
+- separate Variant topology, detach/localize, and a dedicated Components panel remain
 
 완료 기준:
 

@@ -637,6 +637,73 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="component instances would be synchronized",
     )
     registry.register_adapter_action(
+        "paint.ui.component.property.define",
+        "Define a typed property exposed by a Painter UI component.",
+        "paint",
+        "paint_ui_component_property_define",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "property_name": {"type": "string"},
+                "definition": any_object,
+            },
+            required=("component_id", "property_name", "definition"),
+        ),
+        required=("component_id", "property_name", "definition"),
+        undo_label="Define UI component property",
+        dry_summary="a typed component property would be defined",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.state.override.set",
+        "Set visual overrides for one interactive component state.",
+        "paint",
+        "paint_ui_component_state_override_set",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "state": {
+                    "type": "string",
+                    "enum": [
+                        "normal",
+                        "hover",
+                        "pressed",
+                        "focused",
+                        "disabled",
+                        "selected",
+                    ],
+                },
+                "source_object_id": {"type": "string"},
+                "changes": any_object,
+            },
+            required=(
+                "component_id",
+                "state",
+                "source_object_id",
+                "changes",
+            ),
+        ),
+        required=("component_id", "state", "source_object_id", "changes"),
+        undo_label="Set UI component state",
+        dry_summary="a component state appearance would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.instance.property.set",
+        "Set a typed property, including preview state, on a component instance.",
+        "paint",
+        "paint_ui_component_instance_property_set",
+        params_schema=schema_object(
+            {
+                "instance_root_id": {"type": "string"},
+                "property_name": {"type": "string"},
+                "value": {},
+            },
+            required=("instance_root_id", "property_name", "value"),
+        ),
+        required=("instance_root_id", "property_name", "value"),
+        undo_label="Set UI component instance property",
+        dry_summary="a component instance property would be changed",
+    )
+    registry.register_adapter_action(
         "paint.ui.component.add",
         "Create a typed reusable component definition rooted at a Painter UI object.",
         "paint",

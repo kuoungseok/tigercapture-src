@@ -436,6 +436,23 @@ class PainterUIInspector(QWidget):
         self.component_status_label = QLabel("Not a component")
         self.component_status_label.setObjectName("PaintMuted")
         form.addRow("", self.component_status_label)
+        self.component_state_combo = QComboBox()
+        for label, state in (
+            ("Normal", "normal"),
+            ("Hover", "hover"),
+            ("Pressed", "pressed"),
+            ("Focused", "focused"),
+            ("Disabled", "disabled"),
+            ("Selected", "selected"),
+        ):
+            self.component_state_combo.addItem(label, state)
+        self.component_state_combo.setToolTip(
+            "Preview this component instance in an interactive state"
+        )
+        self.component_state_combo.currentIndexChanged.connect(
+            self._emit_component_state
+        )
+        form.addRow("State", self.component_state_combo)
         self.auto_layout_mode_combo = QComboBox()
         for label, mode in (
             ("None", "none"),
@@ -872,16 +889,57 @@ class PainterUIInspector(QWidget):
             None,
         )
 
+    def _component_instance_root(
+        self,
+        row: Mapping[str, Any] | None,
+    ) -> dict[str, Any] | None:
+        if not row or str(row.get("component_role") or "") != "instance":
+            return None
+        component_id = str(row.get("component_id") or "")
+        component = next(
+            (
+                item
+                for item in self._document["components"]
+                if item["id"] == component_id
+            ),
+            None,
+        )
+        if component is None:
+            return None
+        source_root_id = str(component.get("root_object_id") or "")
+        objects = {item["id"]: item for item in self._document["objects"]}
+        current = dict(row)
+        while current:
+            if (
+                str(current.get("component_source_object_id") or "")
+                == source_root_id
+            ):
+                return objects.get(str(current["id"]))
+            current = objects.get(str(current.get("parent_id") or ""))
+        return None
+
     def _sync_selected_fields(self) -> None:
         base_row = self._selected_row()
         row = base_row
         enabled = base_row is not None
         breakpoint, orientation = self._responsive_context()
+        if row is not None and row.get("component_role") == "instance":
+            from app.painter_ui_components import resolve_ui_component_document
+
+            component_document = resolve_ui_component_document(self._document)
+            row = next(
+                (
+                    item
+                    for item in component_document["objects"]
+                    if item["id"] == row["id"]
+                ),
+                row,
+            )
         if base_row is not None and self.responsive_edit_check.isChecked():
             from app.painter_ui_responsive import resolve_ui_responsive_object
 
             row = resolve_ui_responsive_object(
-                base_row,
+                row,
                 breakpoint=breakpoint,
                 orientation=orientation,
             )
@@ -941,6 +999,7 @@ class PainterUIInspector(QWidget):
             self.responsive_clear_button,
             self.component_create_button,
             self.component_instance_button,
+            self.component_state_combo,
             *self.size_limit_controls.values(),
             self.visible_check,
             self.locked_check,
@@ -958,6 +1017,7 @@ class PainterUIInspector(QWidget):
             self.accessibility_label_edit.clear()
             self.focus_order_spin.setValue(0)
             self.component_status_label.setText("Not a component")
+            self.component_state_combo.setCurrentIndex(0)
             for target, label in self.delivery_status_labels.items():
                 label.setText(f"{self._delivery_title(target)}: -")
                 label.setToolTip("")
@@ -980,11 +1040,23 @@ class PainterUIInspector(QWidget):
         component_id = str(base_row.get("component_id") or "")
         self.component_create_button.setEnabled(component_role == "none")
         self.component_instance_button.setEnabled(bool(component_id))
+        instance_root = self._component_instance_root(base_row)
+        self.component_state_combo.setEnabled(instance_root is not None)
+        component_state = str(
+            (instance_root or {}).get("component_properties", {}).get(
+                "state", "normal"
+            )
+        )
+        state_index = self.component_state_combo.findData(component_state)
+        self.component_state_combo.setCurrentIndex(max(0, state_index))
         if component_role == "definition":
             component_text = "Definition"
         elif component_role == "instance":
             override_count = len(base_row.get("instance_overrides") or {})
-            component_text = f"Instance / {override_count} override"
+            component_text = (
+                f"Instance / {component_state.title()} / "
+                f"{override_count} override"
+            )
         else:
             component_text = "Not a component"
         self.component_status_label.setText(component_text)
@@ -1164,6 +1236,20 @@ class PainterUIInspector(QWidget):
             str(row["artboard_id"]),
             float(row["x"]) + 32.0,
             float(row["y"]) + 32.0,
+        )
+
+    def _emit_component_state(self) -> None:
+        row = self._selected_row()
+        instance_root = self._component_instance_root(row)
+        if self._syncing or instance_root is None:
+            return
+        properties = dict(instance_root.get("component_properties") or {})
+        properties["state"] = str(
+            self.component_state_combo.currentData() or "normal"
+        )
+        self.properties_changed.emit(
+            str(instance_root["id"]),
+            {"component_properties": properties},
         )
 
     def _on_selection_changed(self) -> None:
