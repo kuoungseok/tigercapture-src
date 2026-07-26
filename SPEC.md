@@ -6668,7 +6668,7 @@ AI Script Edit MVP integration:
   UMG disposition plus reason. `painter_ui_delivery` is the single classifier:
   preflight v2 reports only `Native`, `Material`, `Baked`, or `Blocked`, so UI,
   Actions, and handoff cannot silently disagree about conversion support.
-- Painter UI document version 6 defines deterministic Auto Layout. A Frame,
+- Painter UI document version 7 defines deterministic Auto Layout. A Frame,
   Group, or Button may use Horizontal or Vertical flow with independent
   L/T/R/B padding, gap, main-axis Start/Center/End/Space Between, and
   cross-axis Start/Center/End/Stretch. Children are ordered by stable z/document
@@ -6679,7 +6679,7 @@ AI Script Edit MVP integration:
   distributes remaining line space after fixed children and gaps. Inspector
   edits and
   `paint.ui.layout.set` both delegate to the undoable object mutation path.
-  Theme overrides remain explicit P3 follow-up work.
+  Localization overrides remain explicit follow-up work.
 - Each Painter UI artboard stores provider-neutral `layout_grid`, `guides`,
   `safe_area`, and `safe_area_visible` records. Uniform grids and multi-column
   layouts are clipped to the owning artboard; custom horizontal/vertical guides
@@ -6698,6 +6698,13 @@ AI Script Edit MVP integration:
   drives Canvas, Constraint, and Auto Layout resolution. Inspector can edit or
   clear the current context override, while automation uses
   `paint.ui.responsive.override.set/remove`; both use normal Undo/Redo.
+- Painter UI artboards persist `light`, `dark`, or `high_contrast` preview
+  themes. Typed tokens resolve default values, per-theme `theme_values`, and
+  stable alias chains into provider-neutral object paths after responsive
+  overrides. Canvas, Inspector, and layout diagnostics share this effective
+  preview without mutating authored values. UI changes use the normal artboard
+  mutation/Undo path; automation uses `paint.ui.theme.set/inspect` and
+  `paint.ui.token.theme.set/remove`.
 - Painter UI groups keep stable child IDs and remain editable: grouping,
   ungrouping, and layer-stack reordering are exposed through
   `paint.ui.object.group`, `paint.ui.object.ungroup`, and

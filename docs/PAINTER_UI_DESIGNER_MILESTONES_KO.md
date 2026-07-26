@@ -106,7 +106,7 @@ Status: core interactive editing implemented
 
 ## M2: Responsive Layout and Design System
 
-Status: responsive Auto Layout, artboard guides, diagnostics, and breakpoint/orientation overrides implemented; themes and tokens pending
+Status: responsive Auto Layout, artboard guides, diagnostics, breakpoint/orientation overrides, and theme-token preview implemented
 
 - anchors and constraints (implemented foundation)
 - horizontal/vertical auto layout (implemented)
@@ -117,8 +117,8 @@ Status: responsive Auto Layout, artboard guides, diagnostics, and breakpoint/ori
 - layout cycle/impossible constraint diagnostics (implemented)
 - breakpoint/orientation object override (implemented)
 - portrait/landscape preview
-- light/dark/high-contrast theme
-- color/typography/spacing/radius/effect tokens
+- light/dark/high-contrast theme (implemented preview and resolution)
+- color/typography/spacing/radius/effect tokens (typed CRUD and themed resolution implemented; dedicated library UX remains P5)
 - component definition/instance/variant
 - instance override
 

@@ -171,6 +171,92 @@ class PaintAdapterMixin:
             changes={"responsive_overrides": overrides},
         )
 
+    def paint_ui_theme_set(
+        self,
+        *,
+        theme: str,
+        artboard_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_themes import normalize_ui_theme
+
+        selected_artboard_id = str(
+            artboard_id or dialog._painter_ui_document["active_artboard_id"]
+        )
+        return self.paint_ui_artboard_update(
+            artboard_id=selected_artboard_id,
+            changes={"theme": normalize_ui_theme(theme)},
+        )
+
+    def paint_ui_theme_inspect(self, *, artboard_id: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_themes import inspect_ui_theme
+
+        return inspect_ui_theme(
+            dialog._painter_ui_document,
+            artboard_id=str(artboard_id or ""),
+        )
+
+    def paint_ui_token_theme_set(
+        self,
+        *,
+        token_id: str,
+        theme: str,
+        value: Any,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_themes import set_ui_token_theme_value
+
+        token = next(
+            (
+                row
+                for row in dialog._painter_ui_document["tokens"]
+                if row["id"] == str(token_id)
+            ),
+            None,
+        )
+        if token is None:
+            raise ValueError(f"Painter UI token not found: {token_id}")
+        return self.paint_ui_token_update(
+            token_id=str(token_id),
+            changes={
+                "theme_values": set_ui_token_theme_value(
+                    token,
+                    theme=theme,
+                    value=value,
+                )
+            },
+        )
+
+    def paint_ui_token_theme_remove(
+        self,
+        *,
+        token_id: str,
+        theme: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_themes import remove_ui_token_theme_value
+
+        token = next(
+            (
+                row
+                for row in dialog._painter_ui_document["tokens"]
+                if row["id"] == str(token_id)
+            ),
+            None,
+        )
+        if token is None:
+            raise ValueError(f"Painter UI token not found: {token_id}")
+        return self.paint_ui_token_update(
+            token_id=str(token_id),
+            changes={
+                "theme_values": remove_ui_token_theme_value(
+                    token,
+                    theme=theme,
+                )
+            },
+        )
+
     def paint_ui_artboard_add(
         self,
         *,

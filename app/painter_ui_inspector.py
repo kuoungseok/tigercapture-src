@@ -155,6 +155,17 @@ class PainterUIInspector(QWidget):
         context_layout.addWidget(self.artboard_breakpoint_combo)
         context_layout.addWidget(self.artboard_orientation_combo)
         artboard_layout_form.addRow("Context", context_row)
+        self.artboard_theme_combo = QComboBox()
+        self.artboard_theme_combo.addItem("Light", "light")
+        self.artboard_theme_combo.addItem("Dark", "dark")
+        self.artboard_theme_combo.addItem("High Contrast", "high_contrast")
+        self.artboard_theme_combo.setToolTip(
+            "Preview token values for this artboard theme"
+        )
+        self.artboard_theme_combo.currentIndexChanged.connect(
+            self._emit_artboard_context
+        )
+        artboard_layout_form.addRow("Theme", self.artboard_theme_combo)
         self.artboard_grid_mode_combo = QComboBox()
         for label, mode in (
             ("No layout grid", "none"),
@@ -839,6 +850,20 @@ class PainterUIInspector(QWidget):
                 breakpoint=breakpoint,
                 orientation=orientation,
             )
+        if row is not None:
+            from app.painter_ui_themes import (
+                resolve_ui_theme_object,
+                ui_theme_for_artboard,
+            )
+
+            row = resolve_ui_theme_object(
+                row,
+                theme=ui_theme_for_artboard(self._active_artboard()),
+                tokens={
+                    token["id"]: token
+                    for token in self._document["tokens"]
+                },
+            )
         for widget in (
             self.name_edit,
             self.opacity_spin,
@@ -1116,6 +1141,10 @@ class PainterUIInspector(QWidget):
         self.artboard_orientation_combo.setCurrentIndex(
             max(0, orientation_index)
         )
+        theme_index = self.artboard_theme_combo.findData(
+            str(artboard.get("theme") or "light")
+        )
+        self.artboard_theme_combo.setCurrentIndex(max(0, theme_index))
         layout = normalize_ui_artboard_layout(
             artboard,
             width=float(artboard["width"]),
@@ -1232,6 +1261,7 @@ class PainterUIInspector(QWidget):
         orientation = str(
             self.artboard_orientation_combo.currentData() or "portrait"
         )
+        theme = str(self.artboard_theme_combo.currentData() or "light")
         width = int(artboard["width"])
         height = int(artboard["height"])
         if (orientation == "landscape") != (width >= height):
@@ -1241,6 +1271,7 @@ class PainterUIInspector(QWidget):
             {
                 "breakpoint": breakpoint,
                 "orientation": orientation,
+                "theme": theme,
                 "width": width,
                 "height": height,
             },

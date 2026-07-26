@@ -81,7 +81,7 @@ preview. The format preserves:
   read-only per-target `Native`, `Material`, `Baked`, or `Blocked` status and
   the classifier reason for Asset Export, Design Handoff, Review Prototype,
   and Unreal UMG. Delivery preflight v2 uses these same four dispositions.
-- UI document version 6 normalizes each object's `layout` record. Containers
+- UI document version 7 normalizes each object's `layout` record. Containers
   support `none`, `horizontal`, or `vertical` mode; independent L/T/R/B
   padding; non-negative gap; main-axis `start/center/end/space_between`; and
   cross-axis `start/center/end/stretch`. Child `positioning=absolute` bypasses
@@ -93,6 +93,19 @@ preview. The format preserves:
   Undo/Redo path. Automation uses `paint.ui.layout.set`, which delegates to
   the same `paint.ui.object.update` service rather than storing private layout
   state.
+- Every artboard persists a normalized `theme` context. `light`, `dark`, and
+  `high_contrast` are the built-in preview modes. Tokens preserve a default
+  `value`, per-theme `theme_values`, and an optional stable
+  `alias_token_id`. Object `token_bindings` use provider-neutral dotted paths
+  such as `style.fill`, `style.text_color`, `layout.gap`, or `opacity`.
+- Theme resolution applies responsive object overrides first, then resolves
+  token aliases and themed values without changing stable object/token IDs.
+  Canvas, Inspector, and layout diagnostics use this effective preview
+  document. The authored base document remains unchanged.
+- Inspector theme selection uses the normal artboard mutation and Undo path.
+  Automation uses `paint.ui.theme.set/inspect` and
+  `paint.ui.token.theme.set/remove`. A dedicated visual token library and
+  binding picker remain P5 work.
 - Every artboard normalizes a provider-neutral `layout_grid` record with
   `none`, `grid`, or `columns` mode, plus custom horizontal/vertical `guides`
   and safe-area insets. `safe_area_visible` controls the authoring overlay only.

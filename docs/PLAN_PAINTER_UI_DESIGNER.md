@@ -13,7 +13,7 @@ Unreal target engine: `D:\UE_5.8\Engine`
 
 Implementation checkpoint:
 
-- P0 document model is at UI document version 6: components, tokens,
+- P0 document model is at UI document version 7: components, tokens,
   interactions, and Auto Layout are typed records with stable-ID CRUD,
   reference/cycle validation, explicit referenced-delete handling, Action
   coverage, migration, and `.tspaint` save/open round-trip tests.
@@ -80,6 +80,12 @@ Implementation checkpoint:
   Wildcard and exact contexts compose deterministically, and the active artboard
   context feeds Canvas, Constraint, Auto Layout, Motion geometry, Inspector,
   Actions, persistence, and Undo.
+- M2/P3 artboards now select Light, Dark, or High Contrast preview themes.
+  Object `token_bindings` resolve typed token defaults, theme values, and alias
+  chains into Canvas and Inspector properties without replacing stable object
+  or token IDs. UI and automation share artboard/token mutation and Undo;
+  automation uses `paint.ui.theme.set/inspect` and
+  `paint.ui.token.theme.set/remove`.
 - Image-resource embedding/hashing and adapter-output parity remain in M2/P8.
   M3-M6 remain milestone work.
 - Product-adoption work is now explicit in M2A/M2B: editable template gallery,

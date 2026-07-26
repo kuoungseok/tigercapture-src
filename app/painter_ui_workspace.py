@@ -80,9 +80,9 @@ class PainterUIDesignOverlay(QWidget):
 
     def set_document(self, value: Mapping[str, Any] | None) -> None:
         self._document = normalize_ui_document(value)
-        from app.painter_ui_responsive import resolve_ui_responsive_document
+        from app.painter_ui_themes import resolve_ui_theme_document
 
-        self._effective_document = resolve_ui_responsive_document(self._document)
+        self._effective_document = resolve_ui_theme_document(self._document)
         self._resolved_geometry = resolve_ui_constraints(self._effective_document)
         self.update()
 

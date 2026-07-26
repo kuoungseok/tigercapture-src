@@ -4,7 +4,7 @@ Status: canonical implementation backlog; P0 complete
 
 P0 implementation checkpoint (2026-07-26):
 
-- UI document version 6 defines typed component, token, interaction, and
+- UI document version 7 defines typed component, token, interaction, and
   deterministic Auto Layout records.
 - Stable IDs are preserved by update operations and assigned during v1 migration.
 - Parent, component, token, interaction, alias, and cycle references are validated.
@@ -190,10 +190,12 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
 - stable-ID breakpoint/orientation override와 wildcard→exact 계층 합성
 - Canvas, Constraint, Auto Layout, Motion geometry 반응형 context 공유
 - Inspector override 편집/삭제와 `paint.ui.responsive.override.set/remove`
+- Light/Dark/High Contrast artboard preview and token alias/theme resolution
+- `paint.ui.theme.set/inspect` and `paint.ui.token.theme.set/remove` Action parity
 
 남은 범위:
 
-- theme override
+- dedicated P5 token-library and token-binding authoring UX
 
 ## P4. 컴포넌트 시스템
 

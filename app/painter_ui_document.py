@@ -8,7 +8,7 @@ from app.painter_ui_auto_layout import normalize_ui_auto_layout
 
 
 UI_DOCUMENT_SCHEMA = "tigerstudio.painter.ui.v1"
-UI_DOCUMENT_VERSION = 6
+UI_DOCUMENT_VERSION = 7
 UI_OBJECT_KINDS = {
     "frame",
     "group",
@@ -146,6 +146,7 @@ def create_ui_document(
                 "background": "#FFFFFF",
                 "breakpoint": "custom",
                 "orientation": "landscape" if width >= height else "portrait",
+                "theme": "light",
                 "safe_area": {"left": 0, "top": 0, "right": 0, "bottom": 0},
                 "safe_area_visible": False,
                 "layout_grid": {
@@ -177,6 +178,7 @@ def _normalize_artboard(row: Mapping[str, Any], index: int) -> dict[str, Any]:
     width = _positive(row.get("width"), 1920.0)
     height = _positive(row.get("height"), 1080.0)
     from app.painter_ui_artboard_layout import normalize_ui_artboard_layout
+    from app.painter_ui_themes import normalize_ui_theme
 
     layout = normalize_ui_artboard_layout(row, width=width, height=height)
     return {
@@ -192,6 +194,7 @@ def _normalize_artboard(row: Mapping[str, Any], index: int) -> dict[str, Any]:
             row.get("orientation")
             or ("landscape" if width >= height else "portrait")
         ),
+        "theme": normalize_ui_theme(row.get("theme"), "light"),
         **layout,
     }
 
@@ -280,15 +283,14 @@ def _normalize_component(row: Mapping[str, Any], index: int) -> dict[str, Any]:
 
 def _normalize_token(row: Mapping[str, Any], index: int) -> dict[str, Any]:
     kind = str(row.get("kind") or "color").strip().casefold()
-    themes = row.get("theme_values")
+    from app.painter_ui_themes import normalize_ui_theme_values
+
     return {
         "id": str(row.get("id") or f"ui-token-{index + 1}"),
         "name": str(row.get("name") or f"Token {index + 1}"),
         "kind": kind,
         "value": copy.deepcopy(row.get("value")),
-        "theme_values": (
-            copy.deepcopy(dict(themes)) if isinstance(themes, Mapping) else {}
-        ),
+        "theme_values": normalize_ui_theme_values(row.get("theme_values")),
         "alias_token_id": str(row.get("alias_token_id") or ""),
         "description": str(row.get("description") or ""),
     }

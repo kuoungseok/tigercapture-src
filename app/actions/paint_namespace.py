@@ -204,6 +204,76 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a responsive object override would be removed",
     )
     registry.register_adapter_action(
+        "paint.ui.theme.set",
+        "Set the Light, Dark, or High Contrast preview theme for an artboard.",
+        "paint",
+        "paint_ui_theme_set",
+        params_schema=schema_object(
+            {
+                "artboard_id": {"type": "string"},
+                "theme": {
+                    "type": "string",
+                    "enum": ["light", "dark", "high_contrast"],
+                },
+            },
+            required=("theme",),
+        ),
+        required=("theme",),
+        undo_label="Set UI theme",
+        dry_summary="the artboard preview theme would be changed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.theme.inspect",
+        "Inspect resolved design-token bindings for an artboard theme.",
+        "paint",
+        "paint_ui_theme_inspect",
+        params_schema=schema_object(
+            {"artboard_id": {"type": "string"}},
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="resolved UI theme bindings would be returned",
+    )
+    registry.register_adapter_action(
+        "paint.ui.token.theme.set",
+        "Set one theme-specific value on a design token.",
+        "paint",
+        "paint_ui_token_theme_set",
+        params_schema=schema_object(
+            {
+                "token_id": {"type": "string"},
+                "theme": {
+                    "type": "string",
+                    "enum": ["light", "dark", "high_contrast"],
+                },
+                "value": {},
+            },
+            required=("token_id", "theme", "value"),
+        ),
+        required=("token_id", "theme", "value"),
+        undo_label="Set UI token theme value",
+        dry_summary="a theme-specific token value would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.token.theme.remove",
+        "Remove one theme-specific value from a design token.",
+        "paint",
+        "paint_ui_token_theme_remove",
+        params_schema=schema_object(
+            {
+                "token_id": {"type": "string"},
+                "theme": {
+                    "type": "string",
+                    "enum": ["light", "dark", "high_contrast"],
+                },
+            },
+            required=("token_id", "theme"),
+        ),
+        required=("token_id", "theme"),
+        undo_label="Remove UI token theme value",
+        dry_summary="a theme-specific token value would be removed",
+    )
+    registry.register_adapter_action(
         "paint.ui.artboard.add",
         "Add a general UI artboard to the active Painter document.",
         "paint",
