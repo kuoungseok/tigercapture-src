@@ -82,6 +82,82 @@ class PainterUIDesignOverlay(QWidget):
         self._resolved_geometry = resolve_ui_constraints(self._document)
         self.update()
 
+    @staticmethod
+    def _paint_artboard_layout(
+        painter: QPainter,
+        artboard: Mapping[str, Any],
+        viewport: QRectF,
+        scale: float,
+    ) -> None:
+        from app.painter_ui_artboard_layout import normalize_ui_artboard_layout
+
+        layout = normalize_ui_artboard_layout(
+            artboard,
+            width=float(artboard["width"]),
+            height=float(artboard["height"]),
+        )
+        grid = layout["layout_grid"]
+        painter.save()
+        painter.setClipRect(viewport)
+        color = QColor(str(grid["color"]))
+        line_color = QColor(color)
+        line_color.setAlpha(max(48, line_color.alpha()))
+        mode = grid["mode"] if grid["visible"] else "none"
+        if mode == "grid":
+            step = float(grid["size"]) * scale
+            if step >= 3.0:
+                painter.setPen(QPen(line_color, 1.0))
+                x = viewport.left() + step
+                while x < viewport.right() and x <= viewport.left() + step * 1024:
+                    painter.drawLine(QPointF(x, viewport.top()), QPointF(x, viewport.bottom()))
+                    x += step
+                y = viewport.top() + step
+                while y < viewport.bottom() and y <= viewport.top() + step * 1024:
+                    painter.drawLine(QPointF(viewport.left(), y), QPointF(viewport.right(), y))
+                    y += step
+        elif mode == "columns":
+            count = int(grid["count"])
+            margin = float(grid["margin"]) * scale
+            gutter = float(grid["gutter"]) * scale
+            available = viewport.width() - margin * 2.0 - gutter * max(0, count - 1)
+            column_width = available / count if count > 0 else 0.0
+            if column_width > 0.0:
+                fill = QColor(color)
+                fill.setAlpha(max(18, min(72, fill.alpha())))
+                painter.setPen(QPen(line_color, 1.0))
+                painter.setBrush(fill)
+                x = viewport.left() + margin
+                for _index in range(count):
+                    column = QRectF(x, viewport.top(), column_width, viewport.height())
+                    painter.drawRect(column)
+                    x += column_width + gutter
+        guides = layout["guides"]
+        if guides["visible"]:
+            guide_pen = QPen(QColor("#35B9FFB8"), 1.0, Qt.PenStyle.DashLine)
+            painter.setPen(guide_pen)
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            for position in guides["vertical"]:
+                x = viewport.left() + float(position) * scale
+                painter.drawLine(QPointF(x, viewport.top()), QPointF(x, viewport.bottom()))
+            for position in guides["horizontal"]:
+                y = viewport.top() + float(position) * scale
+                painter.drawLine(QPointF(viewport.left(), y), QPointF(viewport.right(), y))
+        if layout["safe_area_visible"]:
+            safe = layout["safe_area"]
+            safe_rect = viewport.adjusted(
+                float(safe["left"]) * scale,
+                float(safe["top"]) * scale,
+                -float(safe["right"]) * scale,
+                -float(safe["bottom"]) * scale,
+            )
+            if safe_rect.width() > 0.0 and safe_rect.height() > 0.0:
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(
+                    QPen(QColor("#F4C96BB8"), 1.0, Qt.PenStyle.DashLine)
+                )
+                painter.drawRect(safe_rect)
+        painter.restore()
+
     def set_tool(self, tool: str) -> str:
         requested = str(tool or "select").strip().casefold()
         self._tool = requested if requested in _CREATE_TOOLS else "select"
@@ -477,11 +553,12 @@ class PainterUIDesignOverlay(QWidget):
         painter.fillRect(self.rect(), QColor(18, 21, 27, 86))
         active_id = self._document["active_artboard_id"]
         for artboard in self._document["artboards"]:
-            viewport, _scale = self._artboard_viewport(artboard)
+            viewport, scale = self._artboard_viewport(artboard)
             painter.fillRect(
                 viewport,
                 QColor(str(artboard.get("background") or "#FFFFFF")),
             )
+            self._paint_artboard_layout(painter, artboard, viewport, scale)
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.setPen(
                 QPen(

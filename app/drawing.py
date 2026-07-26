@@ -8167,6 +8167,9 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.artboard_add_requested.connect(
             self._add_painter_ui_artboard_preset
         )
+        self._paint_ui_inspector.artboard_layout_changed.connect(
+            self._update_painter_ui_artboard_changes
+        )
         self._paint_ui_inspector.geometry_changed.connect(
             self._update_painter_ui_object_changes
         )
@@ -10560,6 +10563,25 @@ class PaintDialog(QDialog):
             current,
             str(artboard_id),
             {"x": float(x), "y": float(y)},
+        )
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _update_painter_ui_artboard_changes(
+        self,
+        artboard_id: str,
+        changes: object,
+    ) -> None:
+        if not isinstance(changes, dict):
+            return
+        from app.painter_ui_document import update_ui_artboard
+
+        current = getattr(self, "_painter_ui_document", None)
+        self._push_undo_state("Update UI artboard layout")
+        self._painter_ui_document, _updated = update_ui_artboard(
+            current,
+            str(artboard_id),
+            changes,
         )
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()

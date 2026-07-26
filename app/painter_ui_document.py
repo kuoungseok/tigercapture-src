@@ -8,7 +8,7 @@ from app.painter_ui_auto_layout import normalize_ui_auto_layout
 
 
 UI_DOCUMENT_SCHEMA = "tigerstudio.painter.ui.v1"
-UI_DOCUMENT_VERSION = 4
+UI_DOCUMENT_VERSION = 5
 UI_OBJECT_KINDS = {
     "frame",
     "group",
@@ -147,6 +147,21 @@ def create_ui_document(
                 "breakpoint": "custom",
                 "orientation": "landscape" if width >= height else "portrait",
                 "safe_area": {"left": 0, "top": 0, "right": 0, "bottom": 0},
+                "safe_area_visible": False,
+                "layout_grid": {
+                    "mode": "none",
+                    "visible": False,
+                    "size": 8.0,
+                    "count": 12,
+                    "gutter": 20.0,
+                    "margin": 24.0,
+                    "color": "#4C9AFF32",
+                },
+                "guides": {
+                    "visible": True,
+                    "vertical": [],
+                    "horizontal": [],
+                },
             }
         ],
         "objects": [],
@@ -161,8 +176,9 @@ def create_ui_document(
 def _normalize_artboard(row: Mapping[str, Any], index: int) -> dict[str, Any]:
     width = _positive(row.get("width"), 1920.0)
     height = _positive(row.get("height"), 1080.0)
-    safe = row.get("safe_area")
-    safe = safe if isinstance(safe, Mapping) else {}
+    from app.painter_ui_artboard_layout import normalize_ui_artboard_layout
+
+    layout = normalize_ui_artboard_layout(row, width=width, height=height)
     return {
         "id": str(row.get("id") or f"artboard-{index + 1}"),
         "name": str(row.get("name") or f"Artboard {index + 1}"),
@@ -176,10 +192,7 @@ def _normalize_artboard(row: Mapping[str, Any], index: int) -> dict[str, Any]:
             row.get("orientation")
             or ("landscape" if width >= height else "portrait")
         ),
-        "safe_area": {
-            key: max(0, int(_number(safe.get(key))))
-            for key in ("left", "top", "right", "bottom")
-        },
+        **layout,
     }
 
 

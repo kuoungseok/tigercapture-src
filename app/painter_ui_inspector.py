@@ -73,6 +73,7 @@ class PainterUILayerList(QListWidget):
 class PainterUIInspector(QWidget):
     artboard_selected = Signal(str)
     artboard_add_requested = Signal(str, int, int, str)
+    artboard_layout_changed = Signal(str, object)
     object_selected = Signal(str)
     selection_changed = Signal(object, str)
     geometry_changed = Signal(str, object)
@@ -123,6 +124,97 @@ class PainterUIInspector(QWidget):
         artboard_add_row.addWidget(self.artboard_preset_combo, 1)
         artboard_add_row.addWidget(add_artboard)
         root.addLayout(artboard_add_row)
+
+        artboard_layout_frame = QFrame()
+        artboard_layout_frame.setObjectName("PainterUIArtboardLayout")
+        artboard_layout_form = QFormLayout(artboard_layout_frame)
+        artboard_layout_form.setContentsMargins(4, 4, 4, 4)
+        artboard_layout_form.setSpacing(3)
+        self.artboard_grid_mode_combo = QComboBox()
+        for label, mode in (
+            ("No layout grid", "none"),
+            ("Uniform grid", "grid"),
+            ("Columns", "columns"),
+        ):
+            self.artboard_grid_mode_combo.addItem(label, mode)
+        self.artboard_grid_mode_combo.currentIndexChanged.connect(
+            self._emit_artboard_layout
+        )
+        artboard_layout_form.addRow("Layout", self.artboard_grid_mode_combo)
+        grid_metrics = QFrame()
+        grid_metrics_layout = QHBoxLayout(grid_metrics)
+        grid_metrics_layout.setContentsMargins(0, 0, 0, 0)
+        grid_metrics_layout.setSpacing(3)
+        self.artboard_grid_count_spin = QSpinBox()
+        self.artboard_grid_count_spin.setRange(1, 64)
+        self.artboard_grid_count_spin.setPrefix("C ")
+        self.artboard_grid_size_spin = QDoubleSpinBox()
+        self.artboard_grid_size_spin.setRange(2.0, 512.0)
+        self.artboard_grid_size_spin.setPrefix("S ")
+        self.artboard_grid_size_spin.setSuffix(" px")
+        self.artboard_grid_gutter_spin = QDoubleSpinBox()
+        self.artboard_grid_gutter_spin.setRange(0.0, 10000.0)
+        self.artboard_grid_gutter_spin.setPrefix("G ")
+        self.artboard_grid_gutter_spin.setSuffix(" px")
+        self.artboard_grid_margin_spin = QDoubleSpinBox()
+        self.artboard_grid_margin_spin.setRange(0.0, 10000.0)
+        self.artboard_grid_margin_spin.setPrefix("M ")
+        self.artboard_grid_margin_spin.setSuffix(" px")
+        for control in (
+            self.artboard_grid_count_spin,
+            self.artboard_grid_size_spin,
+            self.artboard_grid_gutter_spin,
+            self.artboard_grid_margin_spin,
+        ):
+            control.editingFinished.connect(self._emit_artboard_layout)
+            grid_metrics_layout.addWidget(control)
+        artboard_layout_form.addRow("Metrics", grid_metrics)
+        safe_row = QFrame()
+        safe_layout = QHBoxLayout(safe_row)
+        safe_layout.setContentsMargins(0, 0, 0, 0)
+        safe_layout.setSpacing(3)
+        self.artboard_safe_visible_check = QCheckBox("Safe")
+        self.artboard_safe_visible_check.toggled.connect(
+            self._emit_artboard_layout
+        )
+        safe_layout.addWidget(self.artboard_safe_visible_check)
+        self.artboard_safe_controls: dict[str, QSpinBox] = {}
+        for prefix, edge in (
+            ("L ", "left"),
+            ("T ", "top"),
+            ("R ", "right"),
+            ("B ", "bottom"),
+        ):
+            spin = QSpinBox()
+            spin.setRange(0, 16384)
+            spin.setPrefix(prefix)
+            spin.editingFinished.connect(self._emit_artboard_layout)
+            self.artboard_safe_controls[edge] = spin
+            safe_layout.addWidget(spin)
+        artboard_layout_form.addRow("Safe Area", safe_row)
+        guide_row = QFrame()
+        guide_layout = QHBoxLayout(guide_row)
+        guide_layout.setContentsMargins(0, 0, 0, 0)
+        guide_layout.setSpacing(3)
+        self.artboard_guides_visible_check = QCheckBox("Guides")
+        self.artboard_guides_visible_check.toggled.connect(
+            self._emit_artboard_layout
+        )
+        self.artboard_vertical_guides_edit = QLineEdit()
+        self.artboard_vertical_guides_edit.setPlaceholderText("V: 120, 240")
+        self.artboard_horizontal_guides_edit = QLineEdit()
+        self.artboard_horizontal_guides_edit.setPlaceholderText("H: 80, 160")
+        self.artboard_vertical_guides_edit.editingFinished.connect(
+            self._emit_artboard_layout
+        )
+        self.artboard_horizontal_guides_edit.editingFinished.connect(
+            self._emit_artboard_layout
+        )
+        guide_layout.addWidget(self.artboard_guides_visible_check)
+        guide_layout.addWidget(self.artboard_vertical_guides_edit)
+        guide_layout.addWidget(self.artboard_horizontal_guides_edit)
+        artboard_layout_form.addRow("Guides", guide_row)
+        root.addWidget(artboard_layout_frame)
 
         tabs = QTabWidget()
         tabs.setDocumentMode(True)
@@ -649,6 +741,7 @@ class PainterUIInspector(QWidget):
                     self.artboard_combo.setCurrentIndex(
                         self.artboard_combo.count() - 1
                     )
+            self._sync_artboard_layout_fields()
             self.layer_list.clear()
             row_by_id = {row["id"]: row for row in rows}
             for row in rows:
@@ -903,6 +996,97 @@ class PainterUIInspector(QWidget):
         artboard_id = str(self.artboard_combo.currentData() or "")
         if artboard_id:
             self.artboard_selected.emit(artboard_id)
+
+    def _active_artboard(self) -> dict[str, Any]:
+        active = self._document["active_artboard_id"]
+        return next(
+            row for row in self._document["artboards"] if row["id"] == active
+        )
+
+    def _sync_artboard_layout_fields(self) -> None:
+        from app.painter_ui_artboard_layout import normalize_ui_artboard_layout
+
+        artboard = self._active_artboard()
+        layout = normalize_ui_artboard_layout(
+            artboard,
+            width=float(artboard["width"]),
+            height=float(artboard["height"]),
+        )
+        grid = layout["layout_grid"]
+        mode_index = self.artboard_grid_mode_combo.findData(grid["mode"])
+        self.artboard_grid_mode_combo.setCurrentIndex(max(0, mode_index))
+        self.artboard_grid_count_spin.setValue(int(grid["count"]))
+        self.artboard_grid_size_spin.setValue(float(grid["size"]))
+        self.artboard_grid_gutter_spin.setValue(float(grid["gutter"]))
+        self.artboard_grid_margin_spin.setValue(float(grid["margin"]))
+        self.artboard_safe_visible_check.setChecked(layout["safe_area_visible"])
+        for edge, spin in self.artboard_safe_controls.items():
+            spin.setValue(int(layout["safe_area"][edge]))
+        guides = layout["guides"]
+        self.artboard_guides_visible_check.setChecked(bool(guides["visible"]))
+        self.artboard_vertical_guides_edit.setText(
+            ", ".join(f"{value:g}" for value in guides["vertical"])
+        )
+        self.artboard_horizontal_guides_edit.setText(
+            ", ".join(f"{value:g}" for value in guides["horizontal"])
+        )
+        columns = grid["mode"] == "columns"
+        uniform = grid["mode"] == "grid"
+        self.artboard_grid_count_spin.setEnabled(columns)
+        self.artboard_grid_gutter_spin.setEnabled(columns)
+        self.artboard_grid_margin_spin.setEnabled(columns)
+        self.artboard_grid_size_spin.setEnabled(uniform)
+
+    @staticmethod
+    def _guide_values(value: str) -> list[float]:
+        result: list[float] = []
+        for token in str(value or "").replace(";", ",").split(","):
+            try:
+                result.append(float(token.strip()))
+            except ValueError:
+                continue
+        return result
+
+    def _emit_artboard_layout(self) -> None:
+        if self._syncing:
+            return
+        artboard = self._active_artboard()
+        mode = str(self.artboard_grid_mode_combo.currentData() or "none")
+        changes = {
+            "layout_grid": {
+                "mode": mode,
+                "visible": mode != "none",
+                "size": float(self.artboard_grid_size_spin.value()),
+                "count": int(self.artboard_grid_count_spin.value()),
+                "gutter": float(self.artboard_grid_gutter_spin.value()),
+                "margin": float(self.artboard_grid_margin_spin.value()),
+                "color": str(
+                    artboard.get("layout_grid", {}).get("color")
+                    or "#4C9AFF32"
+                ),
+            },
+            "safe_area": {
+                edge: int(spin.value())
+                for edge, spin in self.artboard_safe_controls.items()
+            },
+            "safe_area_visible": self.artboard_safe_visible_check.isChecked(),
+            "guides": {
+                "visible": self.artboard_guides_visible_check.isChecked(),
+                "vertical": self._guide_values(
+                    self.artboard_vertical_guides_edit.text()
+                ),
+                "horizontal": self._guide_values(
+                    self.artboard_horizontal_guides_edit.text()
+                ),
+            },
+        }
+        self.artboard_layout_changed.emit(str(artboard["id"]), changes)
+        columns = mode == "columns"
+        uniform = mode == "grid"
+        self.artboard_grid_count_spin.setEnabled(columns)
+        self.artboard_grid_gutter_spin.setEnabled(columns)
+        self.artboard_grid_margin_spin.setEnabled(columns)
+        self.artboard_grid_size_spin.setEnabled(uniform)
 
     def _emit_add_artboard(self) -> None:
         preset = self.artboard_preset_combo.currentData()

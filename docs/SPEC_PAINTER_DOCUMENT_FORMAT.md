@@ -81,7 +81,7 @@ preview. The format preserves:
   read-only per-target `Native`, `Material`, `Baked`, or `Blocked` status and
   the classifier reason for Asset Export, Design Handoff, Review Prototype,
   and Unreal UMG. Delivery preflight v2 uses these same four dispositions.
-- UI document version 4 normalizes each object's `layout` record. Containers
+- UI document version 5 normalizes each object's `layout` record. Containers
   support `none`, `horizontal`, or `vertical` mode; independent L/T/R/B
   padding; non-negative gap; main-axis `start/center/end/space_between`; and
   cross-axis `start/center/end/stretch`. Child `positioning=absolute` bypasses
@@ -93,6 +93,11 @@ preview. The format preserves:
   Undo/Redo path. Automation uses `paint.ui.layout.set`, which delegates to
   the same `paint.ui.object.update` service rather than storing private layout
   state.
+- Every artboard normalizes a provider-neutral `layout_grid` record with
+  `none`, `grid`, or `columns` mode, plus custom horizontal/vertical `guides`
+  and safe-area insets. `safe_area_visible` controls the authoring overlay only.
+  Painter renders these records clipped to the artboard, and automation edits
+  them through `paint.ui.artboard.layout.set`.
 
 Opening a `.tspaint` restores the editable 3D scene. Baking the blockout to 2D
 is optional and does not replace the saved scene.

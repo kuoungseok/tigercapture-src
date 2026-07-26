@@ -123,6 +123,40 @@ class PaintAdapterMixin:
         dialog._push_undo_state("Update UI artboard")
         return self._paint_ui_commit(dialog, "Update UI artboard", document)
 
+    def paint_ui_artboard_layout_set(
+        self,
+        *,
+        artboard_id: str,
+        layout_grid: dict[str, Any] | None = None,
+        safe_area: dict[str, Any] | None = None,
+        safe_area_visible: bool | None = None,
+        guides: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        row = next(
+            (
+                item
+                for item in dialog._painter_ui_document["artboards"]
+                if item["id"] == str(artboard_id)
+            ),
+            None,
+        )
+        if row is None:
+            raise ValueError(f"Painter UI artboard not found: {artboard_id}")
+        changes: dict[str, Any] = {}
+        if layout_grid is not None:
+            changes["layout_grid"] = dict(layout_grid)
+        if safe_area is not None:
+            changes["safe_area"] = dict(safe_area)
+        if safe_area_visible is not None:
+            changes["safe_area_visible"] = bool(safe_area_visible)
+        if guides is not None:
+            changes["guides"] = dict(guides)
+        return self.paint_ui_artboard_update(
+            artboard_id=str(artboard_id),
+            changes=changes,
+        )
+
     def paint_ui_artboard_activate(self, *, artboard_id: str) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         from app.painter_ui_document import set_active_ui_artboard

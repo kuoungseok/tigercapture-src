@@ -4,7 +4,7 @@ Status: canonical implementation backlog; P0 complete
 
 P0 implementation checkpoint (2026-07-26):
 
-- UI document version 4 defines typed component, token, interaction, and
+- UI document version 5 defines typed component, token, interaction, and
   deterministic Auto Layout records.
 - Stable IDs are preserved by update operations and assigned during v1 migration.
 - Parent, component, token, interaction, alias, and cycle references are validated.
@@ -182,10 +182,11 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
 - Hug의 안쪽부터 바깥쪽 측정과 Fill의 잔여 공간 결정적 분배
 - 중첩 컨테이너의 바깥쪽부터 안쪽 순서로 결정적 배치
 - Inspector, `.tspaint`, Undo/Redo, `paint.ui.layout.set` Action 공유 계약
+- 아트보드별 Uniform Grid/Columns, custom Guide, Safe Area 표시와 저장
+- `paint.ui.artboard.layout.set` Action 및 아트보드 mutation/Undo 공유
 
 남은 범위:
 
-- Grid, Column, Guide, Safe Area
 - layout cycle/impossible constraint 진단 강화
 - breakpoint, orientation, theme override
 

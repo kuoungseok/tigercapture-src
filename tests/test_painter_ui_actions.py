@@ -37,6 +37,7 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.artboard.add",
         "paint.ui.artboard.activate",
         "paint.ui.artboard.update",
+        "paint.ui.artboard.layout.set",
         "paint.ui.artboard.remove",
         "paint.ui.object.add",
         "paint.ui.object.update",
@@ -200,7 +201,7 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     with zipfile.ZipFile(document_path, "r") as archive:
         stored = json.loads(archive.read("document.json"))
     assert stored["ui_document"]["schema"] == "tigerstudio.painter.ui.v1"
-    assert stored["ui_document"]["version"] == 4
+    assert stored["ui_document"]["version"] == 5
     assert stored["ui_document"]["objects"][0]["name"] == "Continue"
     assert stored["ui_document"]["components"][0]["id"] == component_id
     assert stored["ui_document"]["tokens"][0]["id"] == token_id

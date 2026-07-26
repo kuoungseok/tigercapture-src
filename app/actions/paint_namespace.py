@@ -198,6 +198,25 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="the active UI artboard would change",
     )
     registry.register_adapter_action(
+        "paint.ui.artboard.layout.set",
+        "Set provider-neutral grid, columns, guides, and safe area on a Painter UI artboard.",
+        "paint",
+        "paint_ui_artboard_layout_set",
+        params_schema=schema_object(
+            {
+                "artboard_id": {"type": "string"},
+                "layout_grid": any_object,
+                "safe_area": any_object,
+                "safe_area_visible": {"type": "boolean"},
+                "guides": any_object,
+            },
+            required=("artboard_id",),
+        ),
+        required=("artboard_id",),
+        undo_label="Set UI artboard layout",
+        dry_summary="the artboard grid, guides, and safe area would be updated",
+    )
+    registry.register_adapter_action(
         "paint.ui.artboard.remove",
         "Remove a UI artboard and its owned objects while keeping at least one artboard.",
         "paint",

@@ -13,7 +13,7 @@ Unreal target engine: `D:\UE_5.8\Engine`
 
 Implementation checkpoint:
 
-- P0 document model is at UI document version 4: components, tokens,
+- P0 document model is at UI document version 5: components, tokens,
   interactions, and Auto Layout are typed records with stable-ID CRUD,
   reference/cycle validation, explicit referenced-delete handling, Action
   coverage, migration, and `.tspaint` save/open round-trip tests.
@@ -69,6 +69,10 @@ Implementation checkpoint:
   per-axis Fixed/Hug Content/Fill Container sizing. Constraint resolution feeds
   bottom-up Hug measurement and deterministic outer-to-inner placement shared
   by canvas, Inspector, persistence, Undo, and `paint.ui.layout.set`.
+- M2/P3 artboards now persist Uniform Grid or Columns, custom horizontal and
+  vertical guides, and visible safe-area insets. These authoring overlays are
+  clipped per artboard and share Inspector, Undo, save/open, and
+  `paint.ui.artboard.layout.set` Action contracts.
 - Image-resource embedding/hashing and adapter-output parity remain in M2/P8.
   M3-M6 remain milestone work.
 - Product-adoption work is now explicit in M2A/M2B: editable template gallery,

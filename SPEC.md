@@ -6668,7 +6668,7 @@ AI Script Edit MVP integration:
   UMG disposition plus reason. `painter_ui_delivery` is the single classifier:
   preflight v2 reports only `Native`, `Material`, `Baked`, or `Blocked`, so UI,
   Actions, and handoff cannot silently disagree about conversion support.
-- Painter UI document version 4 defines deterministic Auto Layout. A Frame,
+- Painter UI document version 5 defines deterministic Auto Layout. A Frame,
   Group, or Button may use Horizontal or Vertical flow with independent
   L/T/R/B padding, gap, main-axis Start/Center/End/Space Between, and
   cross-axis Start/Center/End/Stretch. Children are ordered by stable z/document
@@ -6679,8 +6679,14 @@ AI Script Edit MVP integration:
   distributes remaining line space after fixed children and gaps. Inspector
   edits and
   `paint.ui.layout.set` both delegate to the undoable object mutation path.
-  Grid, impossible-layout diagnostics, and breakpoint/theme overrides remain
+  impossible-layout diagnostics and breakpoint/theme overrides remain
   explicit P3 follow-up work.
+- Each Painter UI artboard stores provider-neutral `layout_grid`, `guides`,
+  `safe_area`, and `safe_area_visible` records. Uniform grids and multi-column
+  layouts are clipped to the owning artboard; custom horizontal/vertical guides
+  and safe-area bounds render as non-export authoring overlays. Inspector edits,
+  Undo/Redo, persistence, and `paint.ui.artboard.layout.set` use the shared
+  artboard mutation path.
 - Painter UI groups keep stable child IDs and remain editable: grouping,
   ungrouping, and layer-stack reordering are exposed through
   `paint.ui.object.group`, `paint.ui.object.ungroup`, and
