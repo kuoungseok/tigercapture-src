@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 
 
@@ -200,6 +201,9 @@ def test_component_actions_and_undo_share_document_mutation() -> None:
         "paint.ui.component.property.define",
         "paint.ui.component.state.override.set",
         "paint.ui.component.instance.property.set",
+        "paint.ui.component.variant.create",
+        "paint.ui.component.instance.variant.set",
+        "paint.ui.component.instance.detach",
     } <= action_ids
 
     created = registry.execute(
@@ -476,5 +480,269 @@ def test_inspector_instance_state_updates_instance_root() -> None:
         result["root_object_id"],
         {"component_properties": {"state": "pressed"}},
     )
+    inspector.deleteLater()
+    app.processEvents()
+
+
+def test_component_variant_switch_preserves_instance_ids_and_overrides() -> None:
+    from app.painter_ui_components import (
+        convert_ui_object_to_component,
+        create_ui_component_variant,
+        instantiate_ui_component,
+        switch_ui_component_instance_variant,
+    )
+    from app.painter_ui_document import (
+        normalize_ui_document,
+        update_ui_object,
+        validate_ui_document,
+    )
+
+    document, root, child = _component_document()
+    document, component = convert_ui_object_to_component(
+        document,
+        root_object_id=root["id"],
+    )
+    document, variant = create_ui_component_variant(
+        document,
+        component_id=component["id"],
+        name="Profile Card / Compact",
+        variant_key="compact",
+    )
+    variant_child = next(
+        row
+        for row in document["objects"]
+        if row["component_id"] == variant["id"]
+        and row["component_role"] == "definition"
+        and row["kind"] == "text"
+    )
+    document, _ = update_ui_object(
+        document,
+        variant_child["id"],
+        {"style": {"font_size": 14}},
+    )
+    document, result = instantiate_ui_component(
+        document,
+        component_id=component["id"],
+        x=320,
+        y=100,
+    )
+    instance_child = next(
+        row
+        for row in document["objects"]
+        if row["component_role"] == "instance"
+        and row["component_source_object_id"] == child["id"]
+    )
+    document, _ = update_ui_object(
+        document,
+        instance_child["id"],
+        {"content": {"text": "Local profile"}},
+    )
+    old_ids = set(result["object_ids"])
+
+    document, switched = switch_ui_component_instance_variant(
+        document,
+        instance_root_id=result["root_object_id"],
+        target_component_id=variant["id"],
+    )
+    assert switched["root_object_id"] == result["root_object_id"]
+    assert set(switched["object_ids"]) == old_ids
+    switched_child = next(
+        row
+        for row in document["objects"]
+        if row["component_role"] == "instance"
+        and row["id"] == instance_child["id"]
+    )
+    assert switched_child["component_id"] == variant["id"]
+    assert switched_child["content"]["text"] == "Local profile"
+    assert switched_child["style"]["font_size"] == 14
+    assert validate_ui_document(document)["ok"] is True
+    round_trip = normalize_ui_document(json.loads(json.dumps(document)))
+    stored_variant = next(
+        row for row in round_trip["components"] if row["id"] == variant["id"]
+    )
+    assert stored_variant["base_component_id"] == component["id"]
+    assert stored_variant["metadata"]["variant_key"] == "compact"
+
+
+def test_detach_instance_materializes_state_and_can_create_local_component() -> None:
+    from app.painter_ui_components import (
+        convert_ui_object_to_component,
+        detach_ui_component_instance,
+        instantiate_ui_component,
+        set_ui_component_state_override,
+        set_ui_instance_component_property,
+    )
+    from app.painter_ui_document import validate_ui_document
+
+    document, root, child = _component_document()
+    document, component = convert_ui_object_to_component(
+        document,
+        root_object_id=root["id"],
+    )
+    document, _ = set_ui_component_state_override(
+        document,
+        component_id=component["id"],
+        state="disabled",
+        source_object_id=child["id"],
+        changes={"opacity": 0.45},
+    )
+    document, result = instantiate_ui_component(
+        document,
+        component_id=component["id"],
+    )
+    document, _ = set_ui_instance_component_property(
+        document,
+        instance_root_id=result["root_object_id"],
+        property_name="state",
+        property_value="disabled",
+    )
+    document, detached = detach_ui_component_instance(
+        document,
+        instance_root_id=result["root_object_id"],
+        create_local_component=True,
+        name="Local Profile",
+    )
+    assert detached["root_object_id"] == result["root_object_id"]
+    assert detached["local_component_id"]
+    rows = [
+        row
+        for row in document["objects"]
+        if row["id"] in detached["object_ids"]
+    ]
+    assert all(row["component_role"] == "definition" for row in rows)
+    detached_child = next(row for row in rows if row["kind"] == "text")
+    assert detached_child["opacity"] == 0.45
+    assert validate_ui_document(document)["ok"] is True
+
+
+def test_component_variant_and_detach_actions_share_undo() -> None:
+    app = _app()
+    from app.actions.registry import ActionRegistry
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(390, 844, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    document, root, _child = _component_document()
+    dialog._painter_ui_document = document
+    registry = ActionRegistry(owner=dialog)
+    created = registry.execute(
+        "paint.ui.component.create",
+        {"root_object_id": root["id"], "name": "Profile Card"},
+    ).to_dict()
+    assert created["ok"] is True
+    component_id = dialog._painter_ui_document["components"][0]["id"]
+    variant_created = registry.execute(
+        "paint.ui.component.variant.create",
+        {
+            "component_id": component_id,
+            "name": "Profile Card / Compact",
+            "variant_key": "compact",
+        },
+    ).to_dict()
+    assert variant_created["ok"] is True
+    variant_id = next(
+        row["id"]
+        for row in dialog._painter_ui_document["components"]
+        if row["base_component_id"] == component_id
+    )
+    instantiated = registry.execute(
+        "paint.ui.component.instantiate",
+        {"component_id": component_id, "x": 320, "y": 100},
+    ).to_dict()
+    assert instantiated["ok"] is True
+    instance_root = next(
+        row
+        for row in dialog._painter_ui_document["objects"]
+        if row["component_role"] == "instance"
+        and row["component_source_object_id"] == root["id"]
+    )
+    switched = registry.execute(
+        "paint.ui.component.instance.variant.set",
+        {
+            "instance_root_id": instance_root["id"],
+            "component_id": variant_id,
+        },
+    ).to_dict()
+    assert switched["ok"] is True
+    detached = registry.execute(
+        "paint.ui.component.instance.detach",
+        {
+            "instance_root_id": instance_root["id"],
+            "create_local_component": False,
+        },
+    ).to_dict()
+    assert detached["ok"] is True
+    assert next(
+        row
+        for row in dialog._painter_ui_document["objects"]
+        if row["id"] == instance_root["id"]
+    )["component_role"] == "none"
+    dialog._undo()
+    assert next(
+        row
+        for row in dialog._painter_ui_document["objects"]
+        if row["id"] == instance_root["id"]
+    )["component_role"] == "instance"
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
+def test_inspector_exposes_variant_switch_and_detach_commands() -> None:
+    app = _app()
+    from app.painter_ui_components import (
+        convert_ui_object_to_component,
+        create_ui_component_variant,
+        instantiate_ui_component,
+    )
+    from app.painter_ui_inspector import PainterUIInspector
+
+    document, root, child = _component_document()
+    document, component = convert_ui_object_to_component(
+        document,
+        root_object_id=root["id"],
+    )
+    document, variant = create_ui_component_variant(
+        document,
+        component_id=component["id"],
+        name="Profile Card / Compact",
+    )
+    document, _result = instantiate_ui_component(
+        document,
+        component_id=component["id"],
+    )
+    instance_child = next(
+        row
+        for row in document["objects"]
+        if row["component_role"] == "instance"
+        and row["component_source_object_id"] == child["id"]
+    )
+    document["selection"] = {
+        "object_id": instance_child["id"],
+        "object_ids": [instance_child["id"]],
+    }
+    inspector = PainterUIInspector()
+    inspector.set_document(document)
+    switches: list[tuple[str, str]] = []
+    detaches: list[tuple[str, bool, str]] = []
+    inspector.component_variant_switch_requested.connect(
+        lambda *args: switches.append(args)
+    )
+    inspector.component_detach_requested.connect(
+        lambda *args: detaches.append(args)
+    )
+    assert inspector.component_variant_combo.count() == 2
+    inspector.component_variant_combo.setCurrentIndex(
+        inspector.component_variant_combo.findData(variant["id"])
+    )
+    assert switches[-1][1] == variant["id"]
+    inspector.component_detach_button.click()
+    assert detaches[-1][1] is False
+    inspector.component_localize_button.click()
+    assert detaches[-1][1] is True
     inspector.deleteLater()
     app.processEvents()

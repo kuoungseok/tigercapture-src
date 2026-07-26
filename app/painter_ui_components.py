@@ -118,6 +118,32 @@ def component_property_defaults(component: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+def _component_family_id(component: Mapping[str, Any]) -> str:
+    return str(component.get("base_component_id") or component.get("id") or "")
+
+
+def _component_source_map(
+    document: Mapping[str, Any],
+    component: Mapping[str, Any],
+) -> dict[str, str]:
+    metadata = component.get("metadata")
+    metadata = metadata if isinstance(metadata, Mapping) else {}
+    stored = metadata.get("variant_source_map")
+    if isinstance(stored, Mapping):
+        result = {
+            str(canonical_id): str(source_id)
+            for canonical_id, source_id in stored.items()
+            if str(canonical_id or "") and str(source_id or "")
+        }
+        if result:
+            return result
+    root_id = str(component.get("root_object_id") or "")
+    return {
+        source_id: source_id
+        for source_id in _subtree_ids(document, root_id)
+    }
+
+
 def _next_id(prefix: str, rows: list[Mapping[str, Any]]) -> str:
     used = {str(row.get("id") or "") for row in rows}
     serial = 1
@@ -449,6 +475,327 @@ def sync_ui_component_instances(
     return document
 
 
+def create_ui_component_variant(
+    value: Mapping[str, Any],
+    *,
+    component_id: str,
+    name: str = "",
+    offset_x: float | None = None,
+    variant_key: str = "",
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    from app.painter_ui_document import (
+        PainterUIDocumentError,
+        add_ui_component,
+        normalize_ui_document,
+        update_ui_component,
+        validate_ui_document,
+    )
+
+    document = normalize_ui_document(value)
+    components = {row["id"]: row for row in document["components"]}
+    source_component = components.get(str(component_id))
+    if source_component is None:
+        raise PainterUIDocumentError(f"UI component not found: {component_id}")
+    family_id = _component_family_id(source_component)
+    family = components.get(family_id)
+    if family is None:
+        raise PainterUIDocumentError(f"UI component family not found: {family_id}")
+    objects = {row["id"]: row for row in document["objects"]}
+    source_root = objects.get(source_component["root_object_id"])
+    if source_root is None:
+        raise PainterUIDocumentError(
+            f"UI component root not found: {source_component['root_object_id']}"
+        )
+    source_ids = _subtree_ids(document, source_root["id"])
+    id_map: dict[str, str] = {}
+    reserved = list(document["objects"])
+    for source_id in source_ids:
+        new_id = _next_id("ui-object", reserved)
+        id_map[source_id] = new_id
+        reserved.append({"id": new_id})
+    delta_x = (
+        float(offset_x)
+        if offset_x is not None
+        else float(source_root["width"]) + 48.0
+    )
+    created: list[dict[str, Any]] = []
+    for source_id in source_ids:
+        clone = copy.deepcopy(objects[source_id])
+        clone["id"] = id_map[source_id]
+        clone["parent_id"] = id_map.get(str(clone["parent_id"]), "")
+        clone["x"] = float(clone["x"]) + delta_x
+        clone["component_id"] = ""
+        clone["component_role"] = "none"
+        clone["component_source_object_id"] = ""
+        clone["instance_overrides"] = {}
+        clone["component_properties"] = {}
+        created.append(clone)
+    document["objects"].extend(created)
+
+    source_map = _component_source_map(document, source_component)
+    inverse_source_map = {
+        source_id: canonical_id
+        for canonical_id, source_id in source_map.items()
+    }
+    variant_source_map = {
+        inverse_source_map[source_id]: id_map[source_id]
+        for source_id in source_ids
+        if source_id in inverse_source_map
+    }
+    metadata = copy.deepcopy(dict(source_component.get("metadata") or {}))
+    metadata["variant_key"] = str(
+        variant_key or name or f"Variant {len(family['variant_ids']) + 1}"
+    )
+    metadata["variant_source_map"] = variant_source_map
+    state_overrides: dict[str, Any] = {}
+    for state, source_rows in normalize_ui_component_state_overrides(
+        source_component.get("state_overrides")
+    ).items():
+        state_overrides[state] = {
+            id_map[source_id]: copy.deepcopy(changes)
+            for source_id, changes in source_rows.items()
+            if source_id in id_map
+        }
+    document, variant = add_ui_component(
+        document,
+        name=name or f"{family['name']} Variant {len(family['variant_ids']) + 1}",
+        root_object_id=id_map[source_root["id"]],
+        base_component_id=family_id,
+        description=str(source_component.get("description") or ""),
+        property_definitions=source_component["property_definitions"],
+    )
+    created_ids = set(id_map.values())
+    for row in document["objects"]:
+        if row["id"] not in created_ids:
+            continue
+        row["component_id"] = variant["id"]
+        row["component_role"] = "definition"
+        row["component_source_object_id"] = row["id"]
+    document, variant = update_ui_component(
+        document,
+        variant["id"],
+        {
+            "metadata": metadata,
+            "state_overrides": state_overrides,
+        },
+    )
+    family_variants = list(family["variant_ids"])
+    if variant["id"] not in family_variants:
+        family_variants.append(variant["id"])
+    document, _family = update_ui_component(
+        document,
+        family_id,
+        {"variant_ids": family_variants},
+    )
+    document["selection"] = {
+        "object_id": variant["root_object_id"],
+        "object_ids": [variant["root_object_id"]],
+    }
+    validation = validate_ui_document(document)
+    if not validation["ok"]:
+        raise PainterUIDocumentError(
+            "Invalid component variant: " + ", ".join(validation["errors"])
+        )
+    return document, copy.deepcopy(variant)
+
+
+def switch_ui_component_instance_variant(
+    value: Mapping[str, Any],
+    *,
+    instance_root_id: str,
+    target_component_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    from app.painter_ui_document import (
+        PainterUIDocumentError,
+        normalize_ui_document,
+        validate_ui_document,
+    )
+
+    document = normalize_ui_document(value)
+    components = {row["id"]: row for row in document["components"]}
+    objects = {row["id"]: row for row in document["objects"]}
+    instance_root = objects.get(str(instance_root_id))
+    if instance_root is None or instance_root["component_role"] != "instance":
+        raise PainterUIDocumentError(
+            f"Component instance not found: {instance_root_id}"
+        )
+    current_component = components.get(instance_root["component_id"])
+    target_component = components.get(str(target_component_id))
+    if current_component is None or target_component is None:
+        raise PainterUIDocumentError("Component variant target is missing")
+    if _component_family_id(current_component) != _component_family_id(
+        target_component
+    ):
+        raise PainterUIDocumentError("Component variants belong to different families")
+    target_root = objects.get(target_component["root_object_id"])
+    if target_root is None:
+        raise PainterUIDocumentError("Target component root is missing")
+
+    current_map = _component_source_map(document, current_component)
+    current_inverse = {
+        source_id: canonical_id
+        for canonical_id, source_id in current_map.items()
+    }
+    target_map = _component_source_map(document, target_component)
+    target_inverse = {
+        source_id: canonical_id
+        for canonical_id, source_id in target_map.items()
+    }
+    member_ids = _subtree_ids(document, instance_root["id"])
+    members_by_canonical = {
+        current_inverse[row["component_source_object_id"]]: row
+        for object_id in member_ids
+        if (row := objects.get(object_id)) is not None
+        and row["component_source_object_id"] in current_inverse
+    }
+    target_source_ids = _subtree_ids(document, target_root["id"])
+    target_sources = {source_id: objects[source_id] for source_id in target_source_ids}
+    instance_id_by_canonical = {
+        canonical_id: row["id"]
+        for canonical_id, row in members_by_canonical.items()
+    }
+    for source_id in target_source_ids:
+        canonical_id = target_inverse.get(source_id)
+        if canonical_id and canonical_id not in instance_id_by_canonical:
+            instance_id_by_canonical[canonical_id] = _next_id(
+                "ui-object",
+                [
+                    *document["objects"],
+                    *({"id": value} for value in instance_id_by_canonical.values()),
+                ],
+            )
+
+    offset_x = float(instance_root["x"]) - float(target_root["x"])
+    offset_y = float(instance_root["y"]) - float(target_root["y"])
+    replacement: list[dict[str, Any]] = []
+    next_z = max(
+        [int(row["z_index"]) for row in document["objects"]] or [-1]
+    ) + 1
+    for source_id in target_source_ids:
+        canonical_id = target_inverse.get(source_id)
+        if not canonical_id:
+            continue
+        source = target_sources[source_id]
+        existing = members_by_canonical.get(canonical_id)
+        row = copy.deepcopy(source)
+        row["id"] = instance_id_by_canonical[canonical_id]
+        parent_source = str(source["parent_id"] or "")
+        parent_canonical = target_inverse.get(parent_source, "")
+        row["parent_id"] = instance_id_by_canonical.get(parent_canonical, "")
+        row["artboard_id"] = instance_root["artboard_id"]
+        row["z_index"] = int(existing["z_index"]) if existing else next_z
+        if existing is None:
+            next_z += 1
+        row["x"] = float(source["x"]) + offset_x
+        row["y"] = float(source["y"]) + offset_y
+        row["component_id"] = target_component["id"]
+        row["component_role"] = "instance"
+        row["component_source_object_id"] = source_id
+        row["instance_overrides"] = copy.deepcopy(
+            (existing or {}).get("instance_overrides") or {}
+        )
+        row["component_properties"] = {}
+        if source_id == target_root["id"]:
+            row["name"] = str(instance_root["name"])
+            properties = component_property_defaults(target_component)
+            properties.update(
+                {
+                    key: copy.deepcopy(item)
+                    for key, item in normalize_ui_component_properties(
+                        instance_root.get("component_properties")
+                    ).items()
+                    if key in target_component["property_definitions"]
+                }
+            )
+            row["component_properties"] = properties
+        replacement.append(apply_ui_instance_overrides(row))
+    old_member_ids = set(member_ids)
+    document["objects"] = [
+        row for row in document["objects"] if row["id"] not in old_member_ids
+    ]
+    document["objects"].extend(replacement)
+    document["selection"] = {
+        "object_id": str(instance_root_id),
+        "object_ids": [str(instance_root_id)],
+    }
+    document["revision"] += 1
+    document = normalize_ui_document(document)
+    validation = validate_ui_document(document)
+    if not validation["ok"]:
+        raise PainterUIDocumentError(
+            "Invalid component variant switch: " + ", ".join(validation["errors"])
+        )
+    return document, {
+        "root_object_id": str(instance_root_id),
+        "component_id": target_component["id"],
+        "object_ids": [row["id"] for row in replacement],
+    }
+
+
+def detach_ui_component_instance(
+    value: Mapping[str, Any],
+    *,
+    instance_root_id: str,
+    create_local_component: bool = False,
+    name: str = "",
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    from app.painter_ui_document import (
+        PainterUIDocumentError,
+        normalize_ui_document,
+        validate_ui_document,
+    )
+
+    document = normalize_ui_document(value)
+    objects = {row["id"]: row for row in document["objects"]}
+    root = objects.get(str(instance_root_id))
+    if root is None or root["component_role"] != "instance":
+        raise PainterUIDocumentError(
+            f"Component instance not found: {instance_root_id}"
+        )
+    member_ids = _subtree_ids(document, root["id"])
+    resolved = {
+        row["id"]: row
+        for row in resolve_ui_component_document(document)["objects"]
+    }
+    for index, row in enumerate(document["objects"]):
+        if row["id"] not in member_ids:
+            continue
+        local = copy.deepcopy(resolved[row["id"]])
+        local.pop("resolved_component_properties", None)
+        local.pop("resolved_component_state", None)
+        local["component_id"] = ""
+        local["component_role"] = "none"
+        local["component_source_object_id"] = ""
+        local["instance_overrides"] = {}
+        local["component_properties"] = {}
+        document["objects"][index] = local
+    document["selection"] = {
+        "object_id": str(instance_root_id),
+        "object_ids": [str(instance_root_id)],
+    }
+    document["revision"] += 1
+    local_component: dict[str, Any] | None = None
+    if create_local_component:
+        document, local_component = convert_ui_object_to_component(
+            document,
+            root_object_id=str(instance_root_id),
+            name=name or f"{root['name']} Local",
+        )
+    validation = validate_ui_document(document)
+    if not validation["ok"]:
+        raise PainterUIDocumentError(
+            "Invalid detached component instance: "
+            + ", ".join(validation["errors"])
+        )
+    return document, {
+        "root_object_id": str(instance_root_id),
+        "object_ids": member_ids,
+        "local_component_id": (
+            str(local_component["id"]) if local_component is not None else ""
+        ),
+    }
+
+
 def define_ui_component_property(
     value: Mapping[str, Any],
     *,
@@ -634,7 +981,9 @@ __all__ = [
     "apply_ui_instance_overrides",
     "component_property_defaults",
     "convert_ui_object_to_component",
+    "create_ui_component_variant",
     "default_ui_component_property_definitions",
+    "detach_ui_component_instance",
     "define_ui_component_property",
     "instantiate_ui_component",
     "merge_ui_instance_overrides",
@@ -646,5 +995,6 @@ __all__ = [
     "resolve_ui_component_document",
     "set_ui_component_state_override",
     "set_ui_instance_component_property",
+    "switch_ui_component_instance_variant",
     "sync_ui_component_instances",
 ]

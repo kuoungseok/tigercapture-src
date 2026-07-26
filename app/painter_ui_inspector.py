@@ -78,6 +78,9 @@ class PainterUIInspector(QWidget):
     responsive_override_remove_requested = Signal(str, str, str)
     component_create_requested = Signal(str, str)
     component_instantiate_requested = Signal(str, str, float, float)
+    component_variant_create_requested = Signal(str, str)
+    component_variant_switch_requested = Signal(str, str)
+    component_detach_requested = Signal(str, bool, str)
     object_selected = Signal(str)
     selection_changed = Signal(object, str)
     geometry_changed = Signal(str, object)
@@ -453,6 +456,48 @@ class PainterUIInspector(QWidget):
             self._emit_component_state
         )
         form.addRow("State", self.component_state_combo)
+        variant_row = QFrame()
+        variant_layout = QHBoxLayout(variant_row)
+        variant_layout.setContentsMargins(0, 0, 0, 0)
+        variant_layout.setSpacing(3)
+        self.component_variant_combo = QComboBox()
+        self.component_variant_combo.setToolTip(
+            "Choose another Variant from this component family"
+        )
+        self.component_variant_combo.currentIndexChanged.connect(
+            self._emit_component_variant_switch
+        )
+        self.component_variant_new_button = QPushButton("New")
+        self.component_variant_new_button.setToolTip(
+            "Duplicate this definition as a new Variant"
+        )
+        self.component_variant_new_button.clicked.connect(
+            self._emit_component_variant_create
+        )
+        variant_layout.addWidget(self.component_variant_combo, 1)
+        variant_layout.addWidget(self.component_variant_new_button)
+        form.addRow("Variant", variant_row)
+        detach_row = QFrame()
+        detach_layout = QHBoxLayout(detach_row)
+        detach_layout.setContentsMargins(0, 0, 0, 0)
+        detach_layout.setSpacing(3)
+        self.component_detach_button = QPushButton("Detach")
+        self.component_detach_button.setToolTip(
+            "Keep the current appearance as ordinary local objects"
+        )
+        self.component_detach_button.clicked.connect(
+            lambda: self._emit_component_detach(False)
+        )
+        self.component_localize_button = QPushButton("Local")
+        self.component_localize_button.setToolTip(
+            "Keep the current appearance as a new local component"
+        )
+        self.component_localize_button.clicked.connect(
+            lambda: self._emit_component_detach(True)
+        )
+        detach_layout.addWidget(self.component_detach_button)
+        detach_layout.addWidget(self.component_localize_button)
+        form.addRow("", detach_row)
         self.auto_layout_mode_combo = QComboBox()
         for label, mode in (
             ("None", "none"),
@@ -1000,6 +1045,10 @@ class PainterUIInspector(QWidget):
             self.component_create_button,
             self.component_instance_button,
             self.component_state_combo,
+            self.component_variant_combo,
+            self.component_variant_new_button,
+            self.component_detach_button,
+            self.component_localize_button,
             *self.size_limit_controls.values(),
             self.visible_check,
             self.locked_check,
@@ -1018,6 +1067,7 @@ class PainterUIInspector(QWidget):
             self.focus_order_spin.setValue(0)
             self.component_status_label.setText("Not a component")
             self.component_state_combo.setCurrentIndex(0)
+            self.component_variant_combo.clear()
             for target, label in self.delivery_status_labels.items():
                 label.setText(f"{self._delivery_title(target)}: -")
                 label.setToolTip("")
@@ -1049,6 +1099,37 @@ class PainterUIInspector(QWidget):
         )
         state_index = self.component_state_combo.findData(component_state)
         self.component_state_combo.setCurrentIndex(max(0, state_index))
+        components = {
+            item["id"]: item for item in self._document["components"]
+        }
+        component = components.get(component_id)
+        family_id = (
+            str(component.get("base_component_id") or component["id"])
+            if component is not None
+            else ""
+        )
+        family = components.get(family_id)
+        family_ids = (
+            [family_id, *family["variant_ids"]]
+            if family is not None
+            else []
+        )
+        self.component_variant_combo.clear()
+        for family_component_id in family_ids:
+            family_component = components.get(family_component_id)
+            if family_component is not None:
+                self.component_variant_combo.addItem(
+                    str(family_component["name"]),
+                    family_component_id,
+                )
+        variant_index = self.component_variant_combo.findData(component_id)
+        self.component_variant_combo.setCurrentIndex(max(0, variant_index))
+        self.component_variant_combo.setEnabled(
+            instance_root is not None and len(family_ids) > 1
+        )
+        self.component_variant_new_button.setEnabled(bool(component_id))
+        self.component_detach_button.setEnabled(instance_root is not None)
+        self.component_localize_button.setEnabled(instance_root is not None)
         if component_role == "definition":
             component_text = "Definition"
         elif component_role == "instance":
@@ -1250,6 +1331,58 @@ class PainterUIInspector(QWidget):
         self.properties_changed.emit(
             str(instance_root["id"]),
             {"component_properties": properties},
+        )
+
+    def _emit_component_variant_create(self) -> None:
+        row = self._selected_row()
+        if self._syncing or row is None or not row.get("component_id"):
+            return
+        component = next(
+            (
+                item
+                for item in self._document["components"]
+                if item["id"] == row["component_id"]
+            ),
+            None,
+        )
+        if component is None:
+            return
+        self.component_variant_create_requested.emit(
+            str(component["id"]),
+            f"{component['name']} Variant",
+        )
+
+    def _emit_component_variant_switch(self) -> None:
+        row = self._selected_row()
+        instance_root = self._component_instance_root(row)
+        target_component_id = str(
+            self.component_variant_combo.currentData() or ""
+        )
+        if (
+            self._syncing
+            or instance_root is None
+            or not target_component_id
+            or target_component_id == instance_root.get("component_id")
+        ):
+            return
+        self.component_variant_switch_requested.emit(
+            str(instance_root["id"]),
+            target_component_id,
+        )
+
+    def _emit_component_detach(self, create_local_component: bool) -> None:
+        row = self._selected_row()
+        instance_root = self._component_instance_root(row)
+        if self._syncing or instance_root is None:
+            return
+        self.component_detach_requested.emit(
+            str(instance_root["id"]),
+            bool(create_local_component),
+            (
+                f"{instance_root['name']} Local"
+                if create_local_component
+                else ""
+            ),
         )
 
     def _on_selection_changed(self) -> None:

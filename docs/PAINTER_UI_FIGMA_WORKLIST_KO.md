@@ -16,6 +16,9 @@ P0 implementation checkpoint (2026-07-26):
   Normal, Hover, Pressed, Focused, Disabled, and Selected. Instance state
   preview, Canvas resolution, Inspector editing, Actions, Undo, and validation
   share one stable-ID contract.
+- Linked Variant Definitions, stable-ID Instance switching, local override
+  preservation, and Detach/Localize are implemented through shared Inspector,
+  Action, Undo, validation, and persistence services.
 
 P1 implementation checkpoint (2026-07-26, navigation slice):
 

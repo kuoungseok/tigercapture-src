@@ -125,8 +125,15 @@ preview. The format preserves:
   `paint.ui.component.state.override.set`, and
   `paint.ui.component.instance.property.set` use the shared undoable mutation
   path.
-- Separate Variant component topology and detaching an Instance into a local
-  component remain subsequent P4 work.
+- Variants are separate Definition subtrees connected by
+  `base_component_id`/`variant_ids`. Their metadata stores deterministic
+  canonical-to-Variant source correspondence. Switching an Instance preserves
+  stable object IDs and compatible dotted-path overrides. Detach materializes
+  the effective component state as ordinary local objects; Localize converts
+  that result into a new independent component. Inspector and Actions
+  `paint.ui.component.variant.create`,
+  `paint.ui.component.instance.variant.set`, and
+  `paint.ui.component.instance.detach` use the shared Undo path.
 - Every artboard normalizes a provider-neutral `layout_grid` record with
   `none`, `grid`, or `columns` mode, plus custom horizontal/vertical `guides`
   and safe-area insets. `safe_area_visible` controls the authoring overlay only.

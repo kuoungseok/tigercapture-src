@@ -93,8 +93,11 @@ Implementation checkpoint:
   `paint.ui.component.create/instantiate/sync` share Undo and document services.
   Typed component properties and interactive Normal/Hover/Pressed/Focused/
   Disabled/Selected state overrides now resolve in Canvas and Inspector before
-  responsive/theme values. UI and Actions share Undo. Separate Variant
-  topology and detach/localize remain the next P4 slices.
+  responsive/theme values. Linked Variant Definitions preserve canonical
+  source correspondence; Instance switching retains stable IDs and compatible
+  overrides. Detach/Localize materializes the visible result without a visual
+  jump. Inspector, Actions, validation, persistence, and Undo share these
+  services. A dedicated Components library panel remains later P4/M2A work.
 - Image-resource embedding/hashing and adapter-output parity remain in M2/P8.
   M3-M6 remain milestone work.
 - Product-adoption work is now explicit in M2A/M2B: editable template gallery,

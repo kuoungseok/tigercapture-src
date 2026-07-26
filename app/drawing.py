@@ -8188,6 +8188,15 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.component_instantiate_requested.connect(
             self._instantiate_painter_ui_component
         )
+        self._paint_ui_inspector.component_variant_create_requested.connect(
+            self._create_painter_ui_component_variant
+        )
+        self._paint_ui_inspector.component_variant_switch_requested.connect(
+            self._switch_painter_ui_component_variant
+        )
+        self._paint_ui_inspector.component_detach_requested.connect(
+            self._detach_painter_ui_component
+        )
         self._paint_ui_inspector.duplicate_requested.connect(
             self._duplicate_painter_ui_object
         )
@@ -11007,6 +11016,76 @@ class PaintDialog(QDialog):
             y=float(y),
         )
         self._push_undo_state("Instantiate UI component")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _create_painter_ui_component_variant(
+        self,
+        component_id: str,
+        name: str,
+    ) -> None:
+        from app.painter_ui_components import create_ui_component_variant
+
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _variant = create_ui_component_variant(
+            current,
+            component_id=str(component_id),
+            name=str(name),
+        )
+        self._push_undo_state("Create UI component variant")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _switch_painter_ui_component_variant(
+        self,
+        instance_root_id: str,
+        component_id: str,
+    ) -> None:
+        from app.painter_ui_components import (
+            switch_ui_component_instance_variant,
+        )
+
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _result = switch_ui_component_instance_variant(
+            current,
+            instance_root_id=str(instance_root_id),
+            target_component_id=str(component_id),
+        )
+        self._push_undo_state("Switch UI component variant")
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _detach_painter_ui_component(
+        self,
+        instance_root_id: str,
+        create_local_component: bool,
+        name: str,
+    ) -> None:
+        from app.painter_ui_components import detach_ui_component_instance
+
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _result = detach_ui_component_instance(
+            current,
+            instance_root_id=str(instance_root_id),
+            create_local_component=bool(create_local_component),
+            name=str(name),
+        )
+        self._push_undo_state(
+            (
+                "Localize UI component instance"
+                if create_local_component
+                else "Detach UI component instance"
+            )
+        )
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()

@@ -712,6 +712,76 @@ class PaintAdapterMixin:
             document,
         )
 
+    def paint_ui_component_variant_create(
+        self,
+        *,
+        component_id: str,
+        name: str = "",
+        variant_key: str = "",
+        offset_x: float | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_components import create_ui_component_variant
+
+        document, _variant = create_ui_component_variant(
+            dialog._painter_ui_document,
+            component_id=str(component_id),
+            name=str(name or ""),
+            variant_key=str(variant_key or ""),
+            offset_x=offset_x,
+        )
+        dialog._push_undo_state("Create UI component variant")
+        return self._paint_ui_commit(
+            dialog,
+            "Create UI component variant",
+            document,
+        )
+
+    def paint_ui_component_instance_variant_set(
+        self,
+        *,
+        instance_root_id: str,
+        component_id: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_components import switch_ui_component_instance_variant
+
+        document, _result = switch_ui_component_instance_variant(
+            dialog._painter_ui_document,
+            instance_root_id=str(instance_root_id),
+            target_component_id=str(component_id),
+        )
+        dialog._push_undo_state("Switch UI component variant")
+        return self._paint_ui_commit(
+            dialog,
+            "Switch UI component variant",
+            document,
+        )
+
+    def paint_ui_component_instance_detach(
+        self,
+        *,
+        instance_root_id: str,
+        create_local_component: bool = False,
+        name: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_components import detach_ui_component_instance
+
+        document, _result = detach_ui_component_instance(
+            dialog._painter_ui_document,
+            instance_root_id=str(instance_root_id),
+            create_local_component=bool(create_local_component),
+            name=str(name or ""),
+        )
+        label = (
+            "Localize UI component instance"
+            if create_local_component
+            else "Detach UI component instance"
+        )
+        dialog._push_undo_state(label)
+        return self._paint_ui_commit(dialog, label, document)
+
     def paint_ui_component_update(
         self,
         *,

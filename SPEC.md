@@ -6721,7 +6721,14 @@ AI Script Edit MVP integration:
   State preview and `paint.ui.component.property.define`,
   `paint.ui.component.state.override.set`, and
   `paint.ui.component.instance.property.set` share the same undoable document
-  services. Separate Variant topology and detach/localize remain P4 follow-up.
+  services. Linked Variants duplicate Definition topology into the same
+  component family with deterministic source correspondence. Instance switching
+  preserves stable object IDs and compatible local overrides. Detach
+  materializes the current state as local objects; Localize immediately creates
+  a new independent component. Inspector and
+  `paint.ui.component.variant.create`,
+  `paint.ui.component.instance.variant.set`, and
+  `paint.ui.component.instance.detach` share Undo and validation.
 - Painter UI groups keep stable child IDs and remain editable: grouping,
   ungrouping, and layer-stack reordering are exposed through
   `paint.ui.object.group`, `paint.ui.object.ungroup`, and

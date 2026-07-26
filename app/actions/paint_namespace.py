@@ -704,6 +704,57 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a component instance property would be changed",
     )
     registry.register_adapter_action(
+        "paint.ui.component.variant.create",
+        "Duplicate a component definition as a linked family Variant.",
+        "paint",
+        "paint_ui_component_variant_create",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "name": {"type": "string"},
+                "variant_key": {"type": "string"},
+                "offset_x": {"type": "number"},
+            },
+            required=("component_id",),
+        ),
+        required=("component_id",),
+        undo_label="Create UI component variant",
+        dry_summary="a linked component Variant would be created",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.instance.variant.set",
+        "Switch an Instance to another Variant in the same component family.",
+        "paint",
+        "paint_ui_component_instance_variant_set",
+        params_schema=schema_object(
+            {
+                "instance_root_id": {"type": "string"},
+                "component_id": {"type": "string"},
+            },
+            required=("instance_root_id", "component_id"),
+        ),
+        required=("instance_root_id", "component_id"),
+        undo_label="Switch UI component variant",
+        dry_summary="a component Instance would switch Variant",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.instance.detach",
+        "Detach an Instance as local objects or convert it into a local component.",
+        "paint",
+        "paint_ui_component_instance_detach",
+        params_schema=schema_object(
+            {
+                "instance_root_id": {"type": "string"},
+                "create_local_component": {"type": "boolean"},
+                "name": {"type": "string"},
+            },
+            required=("instance_root_id",),
+        ),
+        required=("instance_root_id",),
+        undo_label="Detach UI component instance",
+        dry_summary="a component Instance would become local content",
+    )
+    registry.register_adapter_action(
         "paint.ui.component.add",
         "Create a typed reusable component definition rooted at a Painter UI object.",
         "paint",

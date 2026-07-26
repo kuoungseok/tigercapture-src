@@ -131,7 +131,9 @@ P4 component checkpoint:
 - typed component properties and Normal/Hover/Pressed/Focused/Disabled/Selected
   state override authoring implemented
 - Instance state preview and Action/Undo parity implemented
-- separate Variant topology, detach/localize, and a dedicated Components panel remain
+- linked Variant topology and stable-ID Instance switching implemented
+- Detach to local objects and Localize to an independent component implemented
+- a dedicated Components library panel remains
 
 완료 기준:
 
