@@ -273,6 +273,15 @@ def register_paint_actions(registry: Any) -> None:
                     "type": "string",
                     "enum": ["start", "center", "end", "stretch"],
                 },
+                "wrap": {"type": "boolean"},
+                "width_sizing": {
+                    "type": "string",
+                    "enum": ["fixed", "hug", "fill"],
+                },
+                "height_sizing": {
+                    "type": "string",
+                    "enum": ["fixed", "hug", "fill"],
+                },
             },
             required=("object_id", "mode"),
         ),

@@ -30,6 +30,9 @@ def test_auto_layout_normalizes_aliases_and_preserves_positioning() -> None:
         "main_alignment": "space_between",
         "cross_alignment": "center",
         "positioning": "absolute",
+        "wrap": False,
+        "width_sizing": "fixed",
+        "height_sizing": "fixed",
     }
 
 
@@ -149,6 +152,127 @@ def test_vertical_auto_layout_stretches_cross_axis_and_skips_absolute_child() ->
     }
 
 
+def test_auto_layout_wraps_children_into_stable_rows() -> None:
+    from app.painter_ui_constraints import resolve_ui_constraints
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    document = create_ui_document(400, 300)
+    document, parent = add_ui_object(
+        document,
+        kind="frame",
+        width=250,
+        height=120,
+    )
+    document["objects"][0]["layout"] = {
+        "mode": "horizontal",
+        "padding": 10,
+        "gap": 10,
+        "wrap": True,
+    }
+    child_ids: list[str] = []
+    for _index in range(3):
+        document, child = add_ui_object(
+            document,
+            kind="rectangle",
+            parent_id=parent["id"],
+            width=100,
+            height=20,
+        )
+        child_ids.append(child["id"])
+
+    geometry = resolve_ui_constraints(document)
+    assert (geometry[child_ids[0]]["x"], geometry[child_ids[0]]["y"]) == (
+        10.0,
+        10.0,
+    )
+    assert (geometry[child_ids[1]]["x"], geometry[child_ids[1]]["y"]) == (
+        120.0,
+        10.0,
+    )
+    assert (geometry[child_ids[2]]["x"], geometry[child_ids[2]]["y"]) == (
+        10.0,
+        40.0,
+    )
+
+
+def test_auto_layout_hugs_content_and_distributes_fill_children() -> None:
+    from app.painter_ui_constraints import resolve_ui_constraints
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    document = create_ui_document(800, 600)
+    document, hug_parent = add_ui_object(
+        document,
+        kind="frame",
+        x=20,
+        y=30,
+        width=500,
+        height=200,
+    )
+    document["objects"][0]["layout"] = {
+        "mode": "horizontal",
+        "padding": {"left": 5, "top": 4, "right": 5, "bottom": 6},
+        "gap": 10,
+        "width_sizing": "hug",
+        "height_sizing": "hug",
+    }
+    document, first = add_ui_object(
+        document,
+        kind="rectangle",
+        parent_id=hug_parent["id"],
+        width=50,
+        height=20,
+    )
+    document, second = add_ui_object(
+        document,
+        kind="rectangle",
+        parent_id=hug_parent["id"],
+        width=70,
+        height=40,
+    )
+    geometry = resolve_ui_constraints(document)
+    assert geometry[hug_parent["id"]]["width"] == 140.0
+    assert geometry[hug_parent["id"]]["height"] == 50.0
+    assert geometry[first["id"]]["x"] == 25.0
+    assert geometry[second["id"]]["x"] == 85.0
+
+    fill_document = create_ui_document(400, 200)
+    fill_document, fill_parent = add_ui_object(
+        fill_document,
+        kind="frame",
+        width=300,
+        height=80,
+    )
+    fill_document["objects"][0]["layout"] = {
+        "mode": "horizontal",
+        "padding": 10,
+        "gap": 10,
+    }
+    fill_document, fixed = add_ui_object(
+        fill_document,
+        kind="rectangle",
+        parent_id=fill_parent["id"],
+        width=50,
+        height=20,
+    )
+    fill_ids: list[str] = []
+    for _index in range(2):
+        fill_document, child = add_ui_object(
+            fill_document,
+            kind="rectangle",
+            parent_id=fill_parent["id"],
+            width=20,
+            height=20,
+        )
+        fill_document["objects"][-1]["layout"] = {"width_sizing": "fill"}
+        fill_ids.append(child["id"])
+    fill_geometry = resolve_ui_constraints(fill_document)
+    assert fill_geometry[fixed["id"]]["width"] == 50.0
+    assert fill_geometry[fill_ids[0]]["width"] == 105.0
+    assert fill_geometry[fill_ids[1]]["width"] == 105.0
+    assert fill_geometry[fill_ids[0]]["x"] == 70.0
+    assert fill_geometry[fill_ids[1]]["x"] == 185.0
+
+
 def test_inspector_emits_auto_layout_properties() -> None:
     app = _app()
     from app.painter_ui_document import add_ui_object, create_ui_document
@@ -179,6 +303,13 @@ def test_inspector_emits_auto_layout_properties() -> None:
     inspector.auto_layout_cross_combo.setCurrentIndex(
         inspector.auto_layout_cross_combo.findData("center")
     )
+    inspector.auto_layout_wrap_check.setChecked(True)
+    inspector.auto_layout_width_sizing_combo.setCurrentIndex(
+        inspector.auto_layout_width_sizing_combo.findData("hug")
+    )
+    inspector.auto_layout_height_sizing_combo.setCurrentIndex(
+        inspector.auto_layout_height_sizing_combo.findData("fixed")
+    )
     inspector._emit_properties()
 
     assert emitted[-1]["layout"] == {
@@ -188,6 +319,9 @@ def test_inspector_emits_auto_layout_properties() -> None:
         "main_alignment": "space_between",
         "cross_alignment": "center",
         "positioning": "auto",
+        "wrap": True,
+        "width_sizing": "hug",
+        "height_sizing": "fixed",
     }
     assert row["id"] == document["selection"]["object_id"]
     inspector.deleteLater()
@@ -221,6 +355,9 @@ def test_auto_layout_action_uses_object_update_and_undo() -> None:
             "gap": 10,
             "main_alignment": "center",
             "cross_alignment": "stretch",
+            "wrap": True,
+            "width_sizing": "hug",
+            "height_sizing": "fixed",
         },
     ).to_dict()
 
@@ -228,6 +365,8 @@ def test_auto_layout_action_uses_object_update_and_undo() -> None:
     changed = result["result"]["ui_design"]["document"]["objects"][-1]
     assert changed["layout"]["mode"] == "vertical"
     assert changed["layout"]["gap"] == 10.0
+    assert changed["layout"]["wrap"] is True
+    assert changed["layout"]["width_sizing"] == "hug"
     dialog._undo()
     assert dialog._painter_ui_document["objects"][-1]["layout"] == original
     dialog.close()

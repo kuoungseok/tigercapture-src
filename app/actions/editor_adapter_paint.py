@@ -206,6 +206,9 @@ class PaintAdapterMixin:
         gap: float | None = None,
         main_alignment: str = "",
         cross_alignment: str = "",
+        wrap: bool | None = None,
+        width_sizing: str = "",
+        height_sizing: str = "",
     ) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         from app.painter_ui_auto_layout import normalize_ui_auto_layout
@@ -235,6 +238,9 @@ class PaintAdapterMixin:
                 "cross_alignment": (
                     cross_alignment or existing["cross_alignment"]
                 ),
+                "wrap": existing["wrap"] if wrap is None else bool(wrap),
+                "width_sizing": width_sizing or existing["width_sizing"],
+                "height_sizing": height_sizing or existing["height_sizing"],
             }
         )
         return self.paint_ui_object_update(

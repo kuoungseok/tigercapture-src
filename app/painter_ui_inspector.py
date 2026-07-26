@@ -276,6 +276,28 @@ class PainterUIInspector(QWidget):
             self._emit_properties
         )
         form.addRow("Auto Layout", self.auto_layout_mode_combo)
+        auto_sizing = QFrame()
+        auto_sizing_layout = QHBoxLayout(auto_sizing)
+        auto_sizing_layout.setContentsMargins(0, 0, 0, 0)
+        auto_sizing_layout.setSpacing(3)
+        self.auto_layout_width_sizing_combo = QComboBox()
+        self.auto_layout_height_sizing_combo = QComboBox()
+        for prefix, combo in (
+            ("W ", self.auto_layout_width_sizing_combo),
+            ("H ", self.auto_layout_height_sizing_combo),
+        ):
+            for label, sizing in (
+                ("Fixed", "fixed"),
+                ("Hug", "hug"),
+                ("Fill", "fill"),
+            ):
+                combo.addItem(prefix + label, sizing)
+            combo.currentIndexChanged.connect(self._emit_properties)
+            auto_sizing_layout.addWidget(combo)
+        self.auto_layout_wrap_check = QCheckBox("Wrap")
+        self.auto_layout_wrap_check.toggled.connect(self._emit_properties)
+        auto_sizing_layout.addWidget(self.auto_layout_wrap_check)
+        form.addRow("Sizing", auto_sizing)
         auto_padding = QFrame()
         auto_padding_layout = QHBoxLayout(auto_padding)
         auto_padding_layout.setContentsMargins(0, 0, 0, 0)
@@ -696,6 +718,9 @@ class PainterUIInspector(QWidget):
             self.auto_layout_main_combo,
             self.auto_layout_cross_combo,
             self.auto_layout_positioning_combo,
+            self.auto_layout_width_sizing_combo,
+            self.auto_layout_height_sizing_combo,
+            self.auto_layout_wrap_check,
             *self.auto_layout_padding_controls.values(),
             self.pivot_x_spin,
             self.pivot_y_spin,
@@ -801,6 +826,19 @@ class PainterUIInspector(QWidget):
         self.auto_layout_positioning_combo.setCurrentIndex(
             max(0, positioning_index)
         )
+        width_sizing_index = self.auto_layout_width_sizing_combo.findData(
+            layout["width_sizing"]
+        )
+        self.auto_layout_width_sizing_combo.setCurrentIndex(
+            max(0, width_sizing_index)
+        )
+        height_sizing_index = self.auto_layout_height_sizing_combo.findData(
+            layout["height_sizing"]
+        )
+        self.auto_layout_height_sizing_combo.setCurrentIndex(
+            max(0, height_sizing_index)
+        )
+        self.auto_layout_wrap_check.setChecked(bool(layout["wrap"]))
         self._sync_auto_layout_control_states()
         accessibility = row["accessibility"]
         role_index = self.accessibility_role_combo.findData(
@@ -999,6 +1037,13 @@ class PainterUIInspector(QWidget):
                 "positioning": (
                     self.auto_layout_positioning_combo.currentData() or "auto"
                 ),
+                "width_sizing": (
+                    self.auto_layout_width_sizing_combo.currentData() or "fixed"
+                ),
+                "height_sizing": (
+                    self.auto_layout_height_sizing_combo.currentData() or "fixed"
+                ),
+                "wrap": self.auto_layout_wrap_check.isChecked(),
             }
         )
         self.properties_changed.emit(
@@ -1067,6 +1112,9 @@ class PainterUIInspector(QWidget):
             in {"horizontal", "vertical"}
         )
         self.auto_layout_mode_combo.setEnabled(is_container)
+        self.auto_layout_width_sizing_combo.setEnabled(row is not None)
+        self.auto_layout_height_sizing_combo.setEnabled(row is not None)
+        self.auto_layout_wrap_check.setEnabled(active)
         for widget in (
             self.auto_layout_gap_spin,
             self.auto_layout_main_combo,

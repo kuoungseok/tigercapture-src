@@ -13,7 +13,7 @@ Unreal target engine: `D:\UE_5.8\Engine`
 
 Implementation checkpoint:
 
-- P0 document model is at UI document version 3: components, tokens,
+- P0 document model is at UI document version 4: components, tokens,
   interactions, and Auto Layout are typed records with stable-ID CRUD,
   reference/cycle validation, explicit referenced-delete handling, Action
   coverage, migration, and `.tspaint` save/open round-trip tests.
@@ -65,8 +65,9 @@ Implementation checkpoint:
   reason from the shared delivery preflight classifier.
 - M2/P3 Auto Layout foundation supports Horizontal/Vertical flow, independent
   L/T/R/B padding, gap, main-axis Start/Center/End/Space Between, cross-axis
-  Start/Center/End/Stretch, and absolute-positioned child escape. Constraint
-  resolution feeds one deterministic outer-to-inner layout calculator shared
+  Start/Center/End/Stretch, absolute-positioned child escape, Wrap, and
+  per-axis Fixed/Hug Content/Fill Container sizing. Constraint resolution feeds
+  bottom-up Hug measurement and deterministic outer-to-inner placement shared
   by canvas, Inspector, persistence, Undo, and `paint.ui.layout.set`.
 - Image-resource embedding/hashing and adapter-output parity remain in M2/P8.
   M3-M6 remain milestone work.
