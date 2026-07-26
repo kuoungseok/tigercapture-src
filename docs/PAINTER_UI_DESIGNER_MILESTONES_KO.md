@@ -53,7 +53,7 @@ Action:
 
 ## M1: First Usable UI Design Workspace
 
-Status: interactive editing implemented, completion pending
+Status: core interactive editing implemented
 
 현재 구현:
 
@@ -67,7 +67,10 @@ Status: interactive editing implemented, completion pending
 - rotation-aware draw/hit test와 Inspect rotation 편집
 - 선택적으로 켜는 8 px 위치·크기 snap과 15도 회전 snap
 - 우측 UI 전용 `Layers | Inspect` panel
-- Inspect의 name/type/X/Y/W/H/opacity/fill/visible/locked 편집
+- Inspect의 name/type/X/Y/W/H/opacity/visible/locked 편집
+- Fill/Stroke/Stroke Width/Radius/Shadow 편집과 Undo
+- 텍스트 내용, 크기, 굵기, 정렬, 행간 편집
+- 캔버스의 배율 연동 스타일, 그림자, 줄바꿈, typography 렌더링
 - artboard 선택기와 `paint.ui.artboard.activate`
 - artboard 기준 left/hcenter/right/top/vcenter/bottom 정렬
 - Ctrl/Shift 캔버스 선택과 Layers 패널 다중 선택
@@ -82,13 +85,16 @@ Status: interactive editing implemented, completion pending
 - keyboard 1 px 이동, Shift+방향키 10 px 이동, Delete, Ctrl+D
 - UI 객체 duplicate/delete와 Undo/Redo
 - Action으로 만든 객체가 화면에 즉시 반영
+- 자유 배치형 multi-artboard overview, pan/zoom/Fit
+- marquee selection, Smart Guide, 비율/중심 resize
+- 아트보드 제목 드래그 이동과 mobile/desktop/console/broadcast 프리셋
 - phone Layers/Inspect 및 desktop 다중 선택 화면 캡처
 
-남은 완료 조건:
+후속 검증:
 
-- 자유 배치형 multi-artboard overview
-- Inspect의 text/typography/constraint/parent hierarchy 편집
-- 실제 mobile 및 여러 desktop 크기 screenshot QA
+- 실제 mobile 및 여러 desktop 크기의 지속적인 screenshot QA
+- target adapter 출력과 캔버스 스타일의 parity
+- constraint, image fit, 9-slice, 접근성은 P2/M2 후속 범위
 
 ## M2: Responsive Layout and Design System
 

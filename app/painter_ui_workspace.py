@@ -5,10 +5,15 @@ import math
 from typing import Any, Mapping
 
 from PySide6.QtCore import QPointF, QRectF, Signal, Qt
-from PySide6.QtGui import QColor, QFont, QPainter, QPen, QTransform
+from PySide6.QtGui import QColor, QPainter, QPen, QTransform
 from PySide6.QtWidgets import QWidget
 
 from app.painter_ui_document import normalize_ui_document
+from app.painter_ui_style_renderer import (
+    draw_ui_object_shadow,
+    draw_ui_text_block,
+    ui_color,
+)
 
 
 _CREATE_TOOLS = {
@@ -138,11 +143,11 @@ class PainterUIDesignOverlay(QWidget):
             float(row["height"]) * scale,
         ), scale
 
-    def fit_all(self) -> None:
     def _artboard_title_rect(self, artboard: Mapping[str, Any]) -> QRectF:
         viewport, _scale = self._artboard_viewport(artboard)
         return QRectF(viewport.left(), viewport.top() - 22.0, viewport.width(), 22.0)
 
+    def fit_all(self) -> None:
         self._view_scale, self._view_offset = self._fit_transform(
             self._scene_bounds()
         )
@@ -368,28 +373,46 @@ class PainterUIDesignOverlay(QWidget):
         kind = str(row["kind"])
         if kind == "group":
             return
-        fill = QColor(str(style.get("fill") or "#506884"))
-        fill.setAlphaF(max(0.06, min(1.0, float(row["opacity"]))))
-        stroke = QColor(str(style.get("stroke") or "#93A3B8"))
-        painter.setPen(QPen(stroke, max(1.0, float(style.get("stroke_width") or 1.0))))
+        painter.save()
+        painter.setOpacity(max(0.0, min(1.0, float(row["opacity"]))))
+        artboard = next(
+            item
+            for item in self._document["artboards"]
+            if item["id"] == row["artboard_id"]
+        )
+        _viewport, scale = self._artboard_viewport(artboard)
+        draw_ui_object_shadow(painter, rect, kind, style, scale=scale)
+        fill = ui_color(style.get("fill"), "#506884")
+        stroke = ui_color(style.get("stroke"), "#93A3B8")
+        painter.setPen(
+            QPen(
+                stroke,
+                max(1.0, float(style.get("stroke_width") or 1.0) * scale),
+            )
+        )
         painter.setBrush(fill)
 
         if kind == "ellipse":
             painter.drawEllipse(rect)
         elif kind == "line":
-            painter.setPen(QPen(fill, max(1.5, float(style.get("stroke_width") or 2.0))))
+            painter.setPen(
+                QPen(
+                    fill,
+                    max(1.5, float(style.get("stroke_width") or 2.0) * scale),
+                )
+            )
             painter.drawLine(rect.topLeft(), rect.bottomRight())
         elif kind == "progress":
-            painter.drawRoundedRect(rect, 3.0, 3.0)
+            painter.drawRoundedRect(rect, 3.0 * scale, 3.0 * scale)
             amount = max(0.0, min(1.0, float(row["content"].get("value", 0.64))))
             progress = QRectF(rect)
             progress.setWidth(rect.width() * amount)
-            painter.fillRect(progress, QColor(str(style.get("accent") or "#6FA0F5")))
+            painter.fillRect(progress, ui_color(style.get("accent"), "#6FA0F5"))
         elif kind == "text":
             painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.setPen(QColor(str(style.get("text_color") or "#F2F5F9")))
+            painter.setPen(ui_color(style.get("text_color"), "#F2F5F9"))
         else:
-            radius = max(0.0, float(style.get("radius") or 0.0))
+            radius = max(0.0, float(style.get("radius") or 0.0) * scale)
             painter.drawRoundedRect(rect, radius, radius)
             if kind == "image":
                 painter.drawLine(rect.topLeft(), rect.bottomRight())
@@ -399,15 +422,18 @@ class PainterUIDesignOverlay(QWidget):
         if kind in {"text", "button"} and not label:
             label = str(row["name"])
         if label and kind not in {"line", "image"}:
-            painter.setPen(QColor(str(style.get("text_color") or "#F2F5F9")))
-            font = QFont(self.font())
-            font.setPointSize(max(7, int(style.get("font_size") or 9)))
-            painter.setFont(font)
-            painter.drawText(
-                rect.adjusted(6, 3, -5, -3),
-                Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft,
+            text_style = style
+            if kind == "text" and "shadow" in style and "text_shadow" not in style:
+                text_style = {**style, "text_shadow": style["shadow"]}
+            draw_ui_text_block(
+                painter,
+                rect,
                 label,
+                text_style,
+                self.font(),
+                scale=scale,
             )
+        painter.restore()
 
     def paintEvent(self, _event) -> None:
         painter = QPainter(self)
@@ -496,9 +522,9 @@ class PainterUIDesignOverlay(QWidget):
         self._active_object_id = ""
         self._active_handle = ""
         self._preview_rect = QRectF()
-        self.update()
         self._guide_x = None
         self._guide_y = None
+        self.update()
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.MiddleButton:
@@ -516,8 +542,6 @@ class PainterUIDesignOverlay(QWidget):
         self._press_position = QPointF(event.position())
         viewport, _scale = self._artboard_viewport()
 
-        if self._tool in _CREATE_TOOLS:
-            if not viewport.contains(self._press_position):
         if self._tool == "select":
             for artboard in reversed(self._document["artboards"]):
                 if self._artboard_title_rect(artboard).contains(event.position()):
@@ -536,6 +560,8 @@ class PainterUIDesignOverlay(QWidget):
                     event.accept()
                     return
 
+        if self._tool in _CREATE_TOOLS:
+            if not viewport.contains(self._press_position):
                 event.ignore()
                 return
             self._interaction = "create"
@@ -669,10 +695,14 @@ class PainterUIDesignOverlay(QWidget):
             self.update()
             event.accept()
             return
-        if self._interaction == "move":
-            artboard = self._active_artboard()
         if self._interaction == "marquee":
             self._preview_rect = QRectF(
+                self._press_position,
+                event.position(),
+            ).normalized()
+            self.update()
+            event.accept()
+            return
         if self._interaction == "artboard_move":
             artboard = next(
                 row
@@ -692,13 +722,8 @@ class PainterUIDesignOverlay(QWidget):
             self.update()
             event.accept()
             return
-
-                self._press_position,
-                event.position(),
-            ).normalized()
-            self.update()
-            event.accept()
-            return
+        if self._interaction == "move":
+            artboard = self._active_artboard()
             doc = self._document_point(event.position() - self._drag_offset)
             row = next(
                 row
@@ -719,14 +744,14 @@ class PainterUIDesignOverlay(QWidget):
                     self._snap(doc.y()),
                 ),
             )
-            original_primary = self._move_original_positions.get(
-                row["id"],
-                (float(row["x"]), float(row["y"])),
             next_x, next_y = self._smart_snap_position(
                 row,
                 next_x,
                 next_y,
             )
+            original_primary = self._move_original_positions.get(
+                row["id"],
+                (float(row["x"]), float(row["y"])),
             )
             delta_x = next_x - original_primary[0]
             delta_y = next_y - original_primary[1]
@@ -817,10 +842,6 @@ class PainterUIDesignOverlay(QWidget):
                     max(1.0, self._snap(rect.width() / max(0.0001, scale))),
                     max(1.0, self._snap(rect.height() / max(0.0001, scale))),
                 )
-        elif interaction in {"move", "resize", "rotate"} and object_id:
-            row = next(
-                (row for row in self._document["objects"] if row["id"] == object_id),
-                None,
         elif interaction == "marquee":
             rect = self._preview_rect.normalized()
             active = self._document["active_artboard_id"]
@@ -843,11 +864,6 @@ class PainterUIDesignOverlay(QWidget):
                         selected_id,
                         self._marquee_mode,
                     )
-            )
-            if row is not None:
-                if interaction == "move" and len(self._move_original_positions) > 1:
-                    self.objects_changes_requested.emit(
-                        {
         elif interaction == "artboard_move" and self._active_artboard_drag_id:
             artboard = next(
                 row
@@ -859,6 +875,15 @@ class PainterUIDesignOverlay(QWidget):
                 float(artboard["x"]),
                 float(artboard["y"]),
             )
+        elif interaction in {"move", "resize", "rotate"} and object_id:
+            row = next(
+                (row for row in self._document["objects"] if row["id"] == object_id),
+                None,
+            )
+            if row is not None:
+                if interaction == "move" and len(self._move_original_positions) > 1:
+                    self.objects_changes_requested.emit(
+                        {
                             selected_id: {
                                 "x": float(selected_row["x"]),
                                 "y": float(selected_row["y"]),
@@ -882,6 +907,7 @@ class PainterUIDesignOverlay(QWidget):
                         float(row["height"]),
                     )
         self._cancel_interaction()
+        self._active_artboard_drag_id = ""
         if self._tool == "select":
             self.setCursor(Qt.CursorShape.ArrowCursor)
         self._move_original_positions = {}
@@ -892,7 +918,6 @@ class PainterUIDesignOverlay(QWidget):
         if not delta:
             event.ignore()
             return
-        self._active_artboard_drag_id = ""
         old_scale, old_offset = self._view_transform()
         anchor = QPointF(event.position())
         world = QPointF(

@@ -1,0 +1,237 @@
+"""Deterministic style rendering helpers for Painter UI objects."""
+from __future__ import annotations
+
+import math
+from typing import Any, Mapping
+
+from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QTextLayout,
+    QTextOption,
+)
+
+
+def ui_color(value: object, fallback: str = "#000000") -> QColor:
+    """Parse UI colors as CSS-style RGB/RGBA rather than Qt's ARGB shorthand."""
+    text = str(value or "").strip()
+    if text.startswith("#") and len(text) == 9:
+        try:
+            return QColor(
+                int(text[1:3], 16),
+                int(text[3:5], 16),
+                int(text[5:7], 16),
+                int(text[7:9], 16),
+            )
+        except ValueError:
+            pass
+    color = QColor(text)
+    return color if color.isValid() else QColor(fallback)
+
+
+def ui_font(base_font: QFont, style: Mapping[str, Any], scale: float = 1.0) -> QFont:
+    font = QFont(base_font)
+    pixel_size = max(1, int(round(float(style.get("font_size") or 14.0) * scale)))
+    weight = max(100, min(900, int(style.get("font_weight") or 400)))
+    font.setPixelSize(pixel_size)
+    font.setWeight(QFont.Weight(weight))
+    family = str(style.get("font_family") or "").strip()
+    if family:
+        font.setFamily(family)
+    return font
+
+
+def ui_text_alignment(style: Mapping[str, Any]) -> str:
+    alignment = str(style.get("text_align") or "left").strip().casefold()
+    return alignment if alignment in {"left", "center", "right"} else "left"
+
+
+def _shape_path(kind: str, rect: QRectF, radius: float) -> QPainterPath:
+    path = QPainterPath()
+    if kind == "ellipse":
+        path.addEllipse(rect)
+    else:
+        path.addRoundedRect(rect, radius, radius)
+    return path
+
+
+def draw_ui_object_shadow(
+    painter: QPainter,
+    rect: QRectF,
+    kind: str,
+    style: Mapping[str, Any],
+    *,
+    scale: float = 1.0,
+) -> bool:
+    shadow = style.get("shadow")
+    if not isinstance(shadow, Mapping) or kind in {"group", "text"}:
+        return False
+    color = ui_color(shadow.get("color"), "#00000066")
+    if color.alpha() <= 0:
+        return False
+    scale = max(0.001, float(scale))
+    offset_x = float(shadow.get("x") or 0.0) * scale
+    offset_y = float(shadow.get("y") or 0.0) * scale
+    blur = max(0.0, float(shadow.get("blur") or 0.0) * scale)
+    spread = float(shadow.get("spread") or 0.0) * scale
+    base_rect = rect.translated(offset_x, offset_y).adjusted(
+        -spread,
+        -spread,
+        spread,
+        spread,
+    )
+    radius = max(0.0, float(style.get("radius") or 0.0) * scale + spread)
+    bands = max(1, min(10, int(math.ceil(blur / 3.0))))
+
+    painter.save()
+    painter.setPen(Qt.PenStyle.NoPen)
+    if kind == "line":
+        width = max(
+            1.0,
+            float(style.get("stroke_width") or 2.0) * scale + spread * 2.0,
+        )
+        for index in range(bands, -1, -1):
+            amount = blur * index / max(1, bands)
+            band_color = QColor(color)
+            fade = (1.0 - index / (bands + 1.0)) ** 2
+            band_color.setAlpha(max(1, int(round(color.alpha() * fade))))
+            painter.setPen(QPen(band_color, width + amount * 2.0))
+            painter.drawLine(base_rect.topLeft(), base_rect.bottomRight())
+    else:
+        for index in range(bands, -1, -1):
+            amount = blur * index / max(1, bands)
+            band_color = QColor(color)
+            fade = (1.0 - index / (bands + 1.0)) ** 2
+            band_color.setAlpha(max(1, int(round(color.alpha() * fade))))
+            painter.setBrush(band_color)
+            expanded = base_rect.adjusted(-amount, -amount, amount, amount)
+            painter.drawPath(_shape_path(kind, expanded, radius + amount))
+    painter.restore()
+    return True
+
+
+def _layout_text(
+    text: str,
+    font: QFont,
+    rect: QRectF,
+    alignment: str,
+    line_height: float,
+) -> tuple[QTextLayout, list[Any], float]:
+    normalized_text = (
+        text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\u2028")
+    )
+    layout = QTextLayout(normalized_text, font)
+    option = QTextOption()
+    option.setWrapMode(QTextOption.WrapMode.WordWrap)
+    layout.setTextOption(option)
+    layout.beginLayout()
+    lines = []
+    while True:
+        line = layout.createLine()
+        if not line.isValid():
+            break
+        line.setLineWidth(max(1.0, rect.width()))
+        lines.append(line)
+
+    spacing = max(0.5, min(4.0, float(line_height)))
+    heights = [float(line.height()) for line in lines]
+    total_height = (
+        heights[-1] + sum(height * spacing for height in heights[:-1])
+        if heights
+        else 0.0
+    )
+    y = rect.top() + max(0.0, (rect.height() - total_height) * 0.5)
+    for line, height in zip(lines, heights):
+        if alignment == "right":
+            x = rect.right() - float(line.naturalTextWidth())
+        elif alignment == "center":
+            x = rect.center().x() - float(line.naturalTextWidth()) * 0.5
+        else:
+            x = rect.left()
+        line.setPosition(QPointF(x, y))
+        y += height * spacing
+    layout.endLayout()
+    return layout, lines, total_height
+
+
+def draw_ui_text_block(
+    painter: QPainter,
+    rect: QRectF,
+    text: str,
+    style: Mapping[str, Any],
+    base_font: QFont,
+    *,
+    scale: float = 1.0,
+) -> dict[str, Any]:
+    font = ui_font(base_font, style, scale)
+    alignment = ui_text_alignment(style)
+    line_height = max(0.5, min(4.0, float(style.get("line_height") or 1.2)))
+    padding = max(0.0, float(style.get("text_padding") or 6.0) * scale)
+    text_rect = rect.adjusted(padding, 0.0, -padding, 0.0)
+    layout, lines, total_height = _layout_text(
+        str(text),
+        font,
+        text_rect,
+        alignment,
+        line_height,
+    )
+
+    painter.save()
+    painter.setClipRect(rect)
+    shadow = style.get("text_shadow")
+    if isinstance(shadow, Mapping):
+        shadow_color = ui_color(shadow.get("color"), "#00000066")
+        if shadow_color.alpha() > 0:
+            offset = QPointF(
+                float(shadow.get("x") or 0.0) * scale,
+                float(shadow.get("y") or 0.0) * scale,
+            )
+            blur = max(0.0, float(shadow.get("blur") or 0.0) * scale)
+            bands = min(6, int(math.ceil(blur / 2.5)))
+            for index in range(bands, 0, -1):
+                radius = blur * index / max(1, bands)
+                band_color = QColor(shadow_color)
+                fade = (1.0 - index / (bands + 1.0)) ** 2
+                band_color.setAlpha(
+                    max(1, int(round(shadow_color.alpha() * fade * 0.35)))
+                )
+                painter.setPen(band_color)
+                for step in range(8):
+                    angle = math.tau * step / 8.0
+                    layout.draw(
+                        painter,
+                        offset
+                        + QPointF(
+                            math.cos(angle) * radius,
+                            math.sin(angle) * radius,
+                        ),
+                    )
+            painter.setPen(shadow_color)
+            layout.draw(
+                painter,
+                offset,
+            )
+    painter.setPen(ui_color(style.get("text_color"), "#F2F5F9"))
+    layout.draw(painter, QPointF())
+    painter.restore()
+    return {
+        "alignment": alignment,
+        "font_pixel_size": font.pixelSize(),
+        "font_weight": int(font.weight()),
+        "line_count": len(lines),
+        "line_height": line_height,
+        "layout_height": total_height,
+    }
+
+
+__all__ = [
+    "draw_ui_object_shadow",
+    "draw_ui_text_block",
+    "ui_color",
+    "ui_font",
+    "ui_text_alignment",
+]

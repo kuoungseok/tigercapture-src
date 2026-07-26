@@ -46,9 +46,12 @@ Implementation checkpoint:
 - M2/P2 Inspector work has started with editable Fill, Stroke, Stroke Width,
   Radius, structured Shadow, text content, font size/weight, alignment, and
   line height. These changes use the shared UI document mutation and Undo path.
+- The UI canvas renders those visual styles with document-space scaling,
+  feathered geometry shadows, CSS RGBA colors, font weight/alignment, explicit
+  line breaks, word wrapping, and line height. Box shadow and text shadow stay
+  separate so button labels do not inherit the button surface shadow.
 - Pivot/constraints, image fitting and 9-slice, accessibility, target delivery
-  status, and full preview rendering parity remain in M2. M3-M6 remain
-  milestone work.
+  status, and adapter-output parity remain in M2. M3-M6 remain milestone work.
 - Product-adoption work is now explicit in M2A/M2B: editable template gallery,
   reusable component/variant libraries, Auto Layout presets, design tokens,
   versioned library updates, comments, revision history, reviewer mode, and

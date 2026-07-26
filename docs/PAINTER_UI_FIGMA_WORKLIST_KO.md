@@ -39,8 +39,12 @@ P2 implementation checkpoint (2026-07-26, visual style slice):
   alignment, and line height; non-text selections disable these controls.
 - Inspector payloads preserve unrelated style/content fields and participate in
   the existing PaintDialog Undo path.
-- Stroke, width, radius, and font size already render in the canvas preview.
-  Shadow rendering and full typography parity remain follow-up work.
+- Canvas preview now renders scaled stroke/radius, feathered shape shadows,
+  CSS-style `#RRGGBBAA` colors, font family/size/weight, left/center/right
+  alignment, explicit line breaks, word wrapping, and line height.
+- General `shadow` applies to object geometry. Text uses explicit
+  `text_shadow`; text objects inherit their general shadow as a text shadow,
+  while button labels do not duplicate the button's box shadow.
 
 관련 구현 현황:
 
@@ -120,7 +124,7 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
 - 피벗, Constraint, 최소/권장/최대 크기, 비율 잠금
 - 이미지 Fit/Fill/Stretch/Tile, 9-slice
 - 접근성 메타데이터와 target별 전달 상태
-- Shadow와 전체 typography의 캔버스/출력 렌더링 parity
+- target adapter 출력과 캔버스 스타일 렌더링 parity 검증
 
 ## P3. Auto Layout와 반응형
 
