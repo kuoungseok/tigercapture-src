@@ -7571,18 +7571,32 @@ class PaintDialog(QDialog):
         ui_tool_bar.setContentsMargins(5, 0, 0, 0)
         ui_tool_bar.setSpacing(1)
         self._ui_design_tool_buttons: dict[str, QPushButton] = {}
-        for label, kind in (
-            ("Frame", "frame"),
-            ("Text", "text"),
-            ("Button", "button"),
+        for label, kind, icon_name in (
+            ("Select", "select", "cursor"),
+            ("Frame", "frame", "ui-frame"),
+            ("Rectangle", "rectangle", "rectangle"),
+            ("Ellipse", "ellipse", "ellipse"),
+            ("Line", "line", "line"),
+            ("Text", "text", "caption"),
+            ("Image", "image", "image"),
+            ("Button", "button", "button"),
+            ("Progress", "progress", "progress"),
         ):
-            button = QPushButton(label)
+            button = QPushButton("")
             button.setObjectName("PaintBlockoutModeButton")
-            button.setToolTip(f"Add {label}")
+            button.setCheckable(True)
+            button.setChecked(kind == "select")
+            button.setToolTip(
+                "Select and move UI objects"
+                if kind == "select"
+                else f"Draw {label}"
+            )
+            button.setAccessibleName(label)
+            button.setIcon(app_icon(icon_name, size=13, color="#E4E8EE"))
+            button.setIconSize(icon_size(13))
+            button.setFixedSize(28, 24)
             button.clicked.connect(
-                lambda _checked=False, value=kind: self._add_default_painter_ui_object(
-                    value
-                )
+                lambda _checked=False, value=kind: self._set_painter_ui_tool(value)
             )
             ui_tool_bar.addWidget(button)
             self._ui_design_tool_buttons[kind] = button
@@ -7639,8 +7653,14 @@ class PaintDialog(QDialog):
         self._painter_ui_overlay.object_selected.connect(
             self._select_painter_ui_object
         )
-        self._painter_ui_overlay.object_move_requested.connect(
-            self._move_painter_ui_object
+        self._painter_ui_overlay.object_geometry_requested.connect(
+            self._update_painter_ui_object_geometry
+        )
+        self._painter_ui_overlay.object_create_requested.connect(
+            self._create_painter_ui_object_from_rect
+        )
+        self._painter_ui_overlay.key_command.connect(
+            self._handle_painter_ui_key_command
         )
         self._painter_ui_overlay.hide()
 
@@ -8072,6 +8092,27 @@ class PaintDialog(QDialog):
         self._paint_3d_blockout_panel = self._build_3d_blockout_panel()
         inspector_controls_layout.addWidget(self._paint_3d_blockout_panel)
         self._paint_3d_blockout_panel.hide()
+
+        from app.painter_ui_inspector import PainterUIInspector
+
+        self._paint_ui_inspector = PainterUIInspector()
+        self._paint_ui_inspector.object_selected.connect(
+            self._select_painter_ui_object
+        )
+        self._paint_ui_inspector.geometry_changed.connect(
+            self._update_painter_ui_object_changes
+        )
+        self._paint_ui_inspector.properties_changed.connect(
+            self._update_painter_ui_object_changes
+        )
+        self._paint_ui_inspector.duplicate_requested.connect(
+            self._duplicate_painter_ui_object
+        )
+        self._paint_ui_inspector.delete_requested.connect(
+            self._delete_painter_ui_object
+        )
+        inspector_controls_layout.addWidget(self._paint_ui_inspector, stretch=1)
+        self._paint_ui_inspector.hide()
 
         self._layer_channel_path_tabs = QTabWidget()
         self._layer_channel_path_tabs.setObjectName("PaintLayerChannelPathTabs")
@@ -10330,6 +10371,15 @@ class PaintDialog(QDialog):
         ui_host = getattr(self, "_ui_design_tool_host", None)
         if ui_host is not None:
             ui_host.setVisible(ui_design)
+        ui_inspector = getattr(self, "_paint_ui_inspector", None)
+        if ui_inspector is not None:
+            ui_inspector.setVisible(ui_design)
+        color_panel = getattr(self, "_paint_color_panel", None)
+        if color_panel is not None:
+            color_panel.setVisible(not ui_design and not blockout)
+        layer_dock = getattr(self, "_paint_layer_dock_panel", None)
+        if layer_dock is not None:
+            layer_dock.setVisible(not ui_design)
         for shortcut in getattr(self, "_blockout_camera_shortcuts", []):
             shortcut.setEnabled(blockout)
         panel = getattr(self, "_paint_3d_blockout_panel", None)
@@ -10350,6 +10400,7 @@ class PaintDialog(QDialog):
             if ui_design:
                 self._refresh_painter_ui_overlay()
                 overlay.raise_()
+                overlay.setFocus(Qt.FocusReason.OtherFocusReason)
 
     def _select_painter_ui_object(self, object_id: str) -> None:
         from app.painter_ui_document import select_ui_object
@@ -10359,6 +10410,91 @@ class PaintDialog(QDialog):
             str(object_id or ""),
         )
         self._refresh_painter_ui_overlay()
+
+    def _set_painter_ui_tool(self, tool: str) -> str:
+        requested = str(tool or "select").strip().casefold()
+        selected = requested if requested in {
+            "frame",
+            "rectangle",
+            "ellipse",
+            "line",
+            "text",
+            "image",
+            "button",
+            "progress",
+        } else "select"
+        overlay = getattr(self, "_painter_ui_overlay", None)
+        if overlay is not None:
+            overlay.set_tool(selected)
+            overlay.setFocus(Qt.FocusReason.OtherFocusReason)
+        for key, button in getattr(self, "_ui_design_tool_buttons", {}).items():
+            button.blockSignals(True)
+            button.setChecked(key == selected)
+            button.blockSignals(False)
+        if hasattr(self, "_tool_status_label"):
+            self._tool_status_label.setText(f"UI Design: {selected.title()}")
+        return selected
+
+    @staticmethod
+    def _painter_ui_object_preset(kind: str) -> dict:
+        presets = {
+            "frame": {
+                "name": "Frame",
+                "width": 420.0,
+                "height": 280.0,
+                "style": {"fill": "#263344", "stroke": "#52657E"},
+            },
+            "rectangle": {
+                "name": "Rectangle",
+                "width": 240.0,
+                "height": 140.0,
+                "style": {"fill": "#40516A", "stroke": "#71839B"},
+            },
+            "ellipse": {
+                "name": "Ellipse",
+                "width": 160.0,
+                "height": 160.0,
+                "style": {"fill": "#40516A", "stroke": "#71839B"},
+            },
+            "line": {
+                "name": "Line",
+                "width": 240.0,
+                "height": 24.0,
+                "style": {"fill": "#8FA7C5", "stroke_width": 2},
+            },
+            "text": {
+                "name": "Heading",
+                "width": 360.0,
+                "height": 56.0,
+                "style": {"text_color": "#F4F7FC", "font_size": 16},
+                "content": {"text": "Heading"},
+            },
+            "image": {
+                "name": "Image",
+                "width": 320.0,
+                "height": 180.0,
+                "style": {"fill": "#202A37", "stroke": "#71839B"},
+            },
+            "button": {
+                "name": "Primary Button",
+                "width": 280.0,
+                "height": 56.0,
+                "style": {
+                    "fill": "#4C74DB",
+                    "stroke": "#7091E7",
+                    "radius": 6,
+                },
+                "content": {"text": "Continue"},
+            },
+            "progress": {
+                "name": "Progress",
+                "width": 300.0,
+                "height": 20.0,
+                "style": {"fill": "#263344", "accent": "#6FA0F5"},
+                "content": {"value": 0.64},
+            },
+        }
+        return dict(presets.get(str(kind), presets["rectangle"]))
 
     def _add_default_painter_ui_object(self, kind: str) -> None:
         from app.painter_ui_document import add_ui_object, normalize_ui_document
@@ -10375,31 +10511,9 @@ class PaintDialog(QDialog):
         index = sum(
             1 for row in document["objects"] if row["artboard_id"] == active_id
         )
-        presets = {
-            "frame": {
-                "name": "Frame",
-                "width": min(420.0, artboard["width"] * 0.62),
-                "height": min(280.0, artboard["height"] * 0.36),
-                "style": {"fill": "#263344"},
-            },
-            "text": {
-                "name": "Heading",
-                "width": min(360.0, artboard["width"] * 0.72),
-                "height": 56.0,
-                "style": {"fill": "#2B3645", "text_color": "#F4F7FC"},
-                "content": {"text": "Heading"},
-            },
-            "button": {
-                "name": "Primary Button",
-                "width": min(280.0, artboard["width"] * 0.7),
-                "height": 56.0,
-                "style": {"fill": "#4C74DB", "radius": 6},
-                "content": {"text": "Continue"},
-            },
-        }
-        preset = presets.get(str(kind), presets["frame"])
-        width = float(preset["width"])
-        height = float(preset["height"])
+        preset = self._painter_ui_object_preset(kind)
+        width = min(float(preset["width"]), float(artboard["width"]) * 0.72)
+        height = min(float(preset["height"]), float(artboard["height"]) * 0.42)
         x = max(0.0, (float(artboard["width"]) - width) * 0.5)
         y = max(
             0.0,
@@ -10425,14 +10539,64 @@ class PaintDialog(QDialog):
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
 
-    def _move_painter_ui_object(
+    def _create_painter_ui_object_from_rect(
+        self,
+        kind: str,
+        x: float,
+        y: float,
+        width: float,
+        height: float,
+    ) -> None:
+        from app.painter_ui_document import add_ui_object
+
+        preset = self._painter_ui_object_preset(kind)
+        self._push_undo_state(f"Draw UI {kind}")
+        updated, _row = add_ui_object(
+            getattr(self, "_painter_ui_document", None),
+            kind=str(kind),
+            name=str(preset["name"]),
+            x=max(0.0, float(x)),
+            y=max(0.0, float(y)),
+            width=max(1.0, float(width)),
+            height=max(1.0, float(height)),
+            style=dict(preset.get("style") or {}),
+            content=dict(preset.get("content") or {}),
+        )
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._set_painter_ui_tool("select")
+        self._refresh_painter_ui_overlay()
+
+    def _update_painter_ui_object_geometry(
         self,
         object_id: str,
         x: float,
         y: float,
+        width: float,
+        height: float,
+    ) -> None:
+        self._update_painter_ui_object_changes(
+            object_id,
+            {
+                "x": float(x),
+                "y": float(y),
+                "width": max(1.0, float(width)),
+                "height": max(1.0, float(height)),
+            },
+            label="Transform UI object",
+        )
+
+    def _update_painter_ui_object_changes(
+        self,
+        object_id: str,
+        changes: object,
+        *,
+        label: str = "Edit UI object",
     ) -> None:
         from app.painter_ui_document import update_ui_object
 
+        if not isinstance(changes, dict):
+            return
         current = getattr(self, "_painter_ui_document", None)
         original = next(
             (
@@ -10442,21 +10606,127 @@ class PaintDialog(QDialog):
             ),
             None,
         )
-        if original is None:
+        if original is None or all(original.get(key) == value for key, value in changes.items()):
             return
-        if abs(float(original.get("x", 0.0)) - float(x)) < 0.01 and abs(
-            float(original.get("y", 0.0)) - float(y)
-        ) < 0.01:
-            return
-        updated, _row = update_ui_object(
-            current,
-            object_id,
-            {"x": float(x), "y": float(y)},
-        )
-        self._push_undo_state("Move UI object")
+        self._push_undo_state(label)
+        updated, _row = update_ui_object(current, object_id, changes)
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
+
+    def _move_painter_ui_object(
+        self,
+        object_id: str,
+        x: float,
+        y: float,
+    ) -> None:
+        self._update_painter_ui_object_changes(
+            object_id,
+            {"x": float(x), "y": float(y)},
+            label="Move UI object",
+        )
+
+    def _delete_painter_ui_object(self, object_id: str = "") -> None:
+        from app.painter_ui_document import remove_ui_object
+
+        current = getattr(self, "_painter_ui_document", None)
+        target = str(
+            object_id
+            or ((current or {}).get("selection") or {}).get("object_id")
+            or ""
+        )
+        if not target:
+            return
+        self._push_undo_state("Delete UI object")
+        updated, _result = remove_ui_object(current, target)
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _duplicate_painter_ui_object(self, object_id: str = "") -> None:
+        from app.painter_ui_document import add_ui_object, update_ui_object
+
+        current = getattr(self, "_painter_ui_document", None)
+        target = str(
+            object_id
+            or ((current or {}).get("selection") or {}).get("object_id")
+            or ""
+        )
+        row = next(
+            (
+                item
+                for item in (current or {}).get("objects", [])
+                if item.get("id") == target
+            ),
+            None,
+        )
+        if row is None:
+            return
+        self._push_undo_state("Duplicate UI object")
+        updated, created = add_ui_object(
+            current,
+            kind=row["kind"],
+            name=f"{row['name']} Copy",
+            artboard_id=row["artboard_id"],
+            parent_id=row["parent_id"],
+            x=float(row["x"]) + 12.0,
+            y=float(row["y"]) + 12.0,
+            width=row["width"],
+            height=row["height"],
+            style=row["style"],
+            content=row["content"],
+        )
+        updated, _created = update_ui_object(
+            updated,
+            created["id"],
+            {
+                "rotation": row["rotation"],
+                "opacity": row["opacity"],
+                "visible": row["visible"],
+                "locked": row["locked"],
+                "constraints": row["constraints"],
+                "layout": row["layout"],
+                "accessibility": row["accessibility"],
+            },
+        )
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _handle_painter_ui_key_command(self, command: str, coarse: bool) -> None:
+        current = getattr(self, "_painter_ui_document", None)
+        selected = str(
+            ((current or {}).get("selection") or {}).get("object_id") or ""
+        )
+        if not selected:
+            return
+        if command == "delete":
+            self._delete_painter_ui_object(selected)
+            return
+        if command == "duplicate":
+            self._duplicate_painter_ui_object(selected)
+            return
+        row = next(
+            (
+                item
+                for item in (current or {}).get("objects", [])
+                if item.get("id") == selected
+            ),
+            None,
+        )
+        if row is None or row.get("locked"):
+            return
+        step = 10.0 if coarse else 1.0
+        dx = -step if command == "left" else step if command == "right" else 0.0
+        dy = -step if command == "up" else step if command == "down" else 0.0
+        self._update_painter_ui_object_changes(
+            selected,
+            {
+                "x": max(0.0, float(row["x"]) + dx),
+                "y": max(0.0, float(row["y"]) + dy),
+            },
+            label="Nudge UI object",
+        )
 
     def _refresh_painter_ui_overlay(self) -> None:
         overlay = getattr(self, "_painter_ui_overlay", None)
@@ -10466,6 +10736,9 @@ class PaintDialog(QDialog):
         if str(getattr(self, "_canvas_workspace_mode", "paint")) == "ui_design":
             overlay.show()
             overlay.raise_()
+        inspector = getattr(self, "_paint_ui_inspector", None)
+        if inspector is not None:
+            inspector.set_document(getattr(self, "_painter_ui_document", None))
 
     def _set_3d_blockout_transform_mode(self, mode: str) -> str:
         selected = str(mode or "").strip().casefold()

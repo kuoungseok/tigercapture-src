@@ -573,6 +573,36 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
             QPointF(s * .66, s * .46),
             QPointF(s * .80, s * .70),
         ]))
+    elif n in {"ui-frame", "ui_frame", "frame-tool"}:
+        painter.drawRect(QRectF(s * .18, s * .20, s * .64, s * .60))
+        tick = s * .12
+        for point, dx, dy in (
+            (QPointF(s * .18, s * .20), tick, tick),
+            (QPointF(s * .82, s * .20), -tick, tick),
+            (QPointF(s * .18, s * .80), tick, -tick),
+            (QPointF(s * .82, s * .80), -tick, -tick),
+        ):
+            painter.drawLine(point, QPointF(point.x() + dx, point.y()))
+            painter.drawLine(point, QPointF(point.x(), point.y() + dy))
+    elif n in {"rectangle", "rect-tool", "rect_tool"}:
+        painter.drawRoundedRect(QRectF(s * .17, s * .24, s * .66, s * .52), 2, 2)
+    elif n in {"ellipse", "oval", "ellipse-tool", "ellipse_tool"}:
+        painter.drawEllipse(QRectF(s * .17, s * .24, s * .66, s * .52))
+    elif n in {"line", "line-tool", "line_tool"}:
+        painter.drawLine(QPointF(s * .18, s * .76), QPointF(s * .82, s * .24))
+        painter.setBrush(_color(color))
+        painter.drawEllipse(QPointF(s * .18, s * .76), s * .045, s * .045)
+        painter.drawEllipse(QPointF(s * .82, s * .24), s * .045, s * .045)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+    elif n in {"button", "ui-button", "ui_button"}:
+        painter.drawRoundedRect(QRectF(s * .14, s * .28, s * .72, s * .44), s * .09, s * .09)
+        painter.drawLine(QPointF(s * .34, s * .50), QPointF(s * .66, s * .50))
+    elif n in {"progress", "progress-bar", "progress_bar"}:
+        painter.drawRoundedRect(QRectF(s * .14, s * .38, s * .72, s * .24), s * .07, s * .07)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(_color(color))
+        painter.drawRoundedRect(QRectF(s * .18, s * .42, s * .38, s * .16), s * .045, s * .045)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
     elif n in {"marquee-rect", "rect-select", "rect_select", "selection-rect"}:
         dash_pen = QPen(_color(color), max(1.2, s * .070))
         dash_pen.setDashPattern([3.0, 3.0])

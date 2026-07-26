@@ -50,29 +50,32 @@ Action:
 
 ## M1: First Usable UI Design Workspace
 
-Status: foundation implemented, completion pending
+Status: interactive editing implemented, completion pending
 
 현재 구현:
 
 - Canvas mode: `Paint | UI Design | 3D Place`
 - `paint.ui.workspace.set`
 - UI Design 전용 canvas overlay
-- Frame/Text/Button 직접 추가
+- Select/Frame/Rectangle/Ellipse/Line/Text/Image/Button/Progress 도구
+- canvas drag-to-create
 - 객체 선택과 드래그 이동
-- 선택 외곽선과 handle 표시
+- 선택 외곽선, 네 모서리 handle, 드래그 resize
+- 우측 UI 전용 `Layers | Inspect` panel
+- Inspect의 name/type/X/Y/W/H/opacity/fill/visible/locked 편집
+- keyboard 1 px 이동, Shift+방향키 10 px 이동, Delete, Ctrl+D
+- UI 객체 duplicate/delete와 Undo/Redo
 - Action으로 만든 객체가 화면에 즉시 반영
+- desktop QA의 Layers/Inspect 두 화면 캡처
 
 남은 완료 조건:
 
-- Rectangle/Ellipse/Line/Image/Progress 도구
-- canvas drag-to-create
-- resize/rotate handle
+- rotate handle과 rotation-aware hit test
 - align/distribute/snap
 - multi-artboard canvas 배치와 전환
-- 우측 Inspect panel의 X/Y/W/H, fill, text, constraint
-- Layers panel의 UI object hierarchy
-- keyboard move/delete/duplicate
-- 실제 desktop/mobile screenshot QA
+- Inspect의 text/typography/constraint/parent hierarchy 편집
+- Layers의 drag reorder, parent/group hierarchy 편집
+- 실제 mobile 및 여러 desktop 크기 screenshot QA
 
 ## M2: Responsive Layout and Design System
 

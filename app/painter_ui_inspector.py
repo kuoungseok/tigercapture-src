@@ -1,0 +1,221 @@
+"""Layers and Inspect panel for Painter's UI Design workspace."""
+from __future__ import annotations
+
+from typing import Any, Mapping
+
+from PySide6.QtCore import Signal, Qt
+from PySide6.QtWidgets import (
+    QCheckBox,
+    QDoubleSpinBox,
+    QFormLayout,
+    QFrame,
+    QHBoxLayout,
+    QLabel,
+    QLineEdit,
+    QListWidget,
+    QListWidgetItem,
+    QPushButton,
+    QSpinBox,
+    QTabWidget,
+    QVBoxLayout,
+    QWidget,
+)
+
+from app.painter_ui_document import normalize_ui_document
+
+
+class PainterUIInspector(QWidget):
+    object_selected = Signal(str)
+    geometry_changed = Signal(str, object)
+    properties_changed = Signal(str, object)
+    duplicate_requested = Signal(str)
+    delete_requested = Signal(str)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._document = normalize_ui_document(None)
+        self._syncing = False
+        self.setObjectName("PainterUIInspector")
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(0, 0, 0, 0)
+        root.setSpacing(4)
+        title = QLabel("UI DESIGN")
+        title.setObjectName("PaintSectionTitle")
+        root.addWidget(title)
+
+        tabs = QTabWidget()
+        tabs.setDocumentMode(True)
+        self._tabs = tabs
+        root.addWidget(tabs, 1)
+
+        layers_page = QWidget()
+        layers_layout = QVBoxLayout(layers_page)
+        layers_layout.setContentsMargins(4, 4, 4, 4)
+        self.layer_list = QListWidget()
+        self.layer_list.setObjectName("PaintLayerList")
+        self.layer_list.itemSelectionChanged.connect(self._on_selection_changed)
+        layers_layout.addWidget(self.layer_list, 1)
+        actions = QHBoxLayout()
+        duplicate = QPushButton("Duplicate")
+        delete = QPushButton("Delete")
+        duplicate.clicked.connect(self._emit_duplicate)
+        delete.clicked.connect(self._emit_delete)
+        actions.addWidget(duplicate)
+        actions.addWidget(delete)
+        layers_layout.addLayout(actions)
+        tabs.addTab(layers_page, "Layers")
+
+        inspect_page = QWidget()
+        inspect_layout = QVBoxLayout(inspect_page)
+        inspect_layout.setContentsMargins(6, 6, 6, 6)
+        form = QFormLayout()
+        form.setContentsMargins(0, 0, 0, 0)
+        self.name_edit = QLineEdit()
+        self.name_edit.editingFinished.connect(self._emit_properties)
+        form.addRow("Name", self.name_edit)
+        self.kind_label = QLabel("-")
+        form.addRow("Type", self.kind_label)
+        self.geometry_controls: dict[str, QDoubleSpinBox] = {}
+        for key in ("x", "y", "width", "height"):
+            spin = QDoubleSpinBox()
+            spin.setRange(0.0, 100000.0)
+            spin.setDecimals(1)
+            spin.editingFinished.connect(self._emit_geometry)
+            self.geometry_controls[key] = spin
+            form.addRow(key.upper(), spin)
+        self.opacity_spin = QSpinBox()
+        self.opacity_spin.setRange(0, 100)
+        self.opacity_spin.setSuffix("%")
+        self.opacity_spin.editingFinished.connect(self._emit_properties)
+        form.addRow("Opacity", self.opacity_spin)
+        self.fill_edit = QLineEdit()
+        self.fill_edit.setPlaceholderText("#RRGGBB")
+        self.fill_edit.editingFinished.connect(self._emit_properties)
+        form.addRow("Fill", self.fill_edit)
+        self.visible_check = QCheckBox("Visible")
+        self.visible_check.toggled.connect(self._emit_properties)
+        self.locked_check = QCheckBox("Locked")
+        self.locked_check.toggled.connect(self._emit_properties)
+        flags = QFrame()
+        flags_layout = QHBoxLayout(flags)
+        flags_layout.setContentsMargins(0, 0, 0, 0)
+        flags_layout.addWidget(self.visible_check)
+        flags_layout.addWidget(self.locked_check)
+        form.addRow("State", flags)
+        inspect_layout.addLayout(form)
+        inspect_layout.addStretch(1)
+        tabs.addTab(inspect_page, "Inspect")
+
+    def set_document(self, value: Mapping[str, Any] | None) -> None:
+        self._document = normalize_ui_document(value)
+        selected = self._document["selection"]["object_id"]
+        active = self._document["active_artboard_id"]
+        rows = sorted(
+            (
+                row
+                for row in self._document["objects"]
+                if row["artboard_id"] == active
+            ),
+            key=lambda row: row["z_index"],
+            reverse=True,
+        )
+        self._syncing = True
+        try:
+            self.layer_list.clear()
+            for row in rows:
+                prefix = "  " if row["parent_id"] else ""
+                state = "" if row["visible"] else "  [hidden]"
+                item = QListWidgetItem(f"{prefix}{row['name']}  [{row['kind']}]{state}")
+                item.setData(Qt.ItemDataRole.UserRole, row["id"])
+                self.layer_list.addItem(item)
+                if row["id"] == selected:
+                    item.setSelected(True)
+                    self.layer_list.setCurrentItem(item)
+            self._sync_selected_fields()
+        finally:
+            self._syncing = False
+
+    def _selected_id(self) -> str:
+        return str(self._document["selection"]["object_id"] or "")
+
+    def _selected_row(self) -> dict[str, Any] | None:
+        selected = self._selected_id()
+        return next(
+            (row for row in self._document["objects"] if row["id"] == selected),
+            None,
+        )
+
+    def _sync_selected_fields(self) -> None:
+        row = self._selected_row()
+        enabled = row is not None
+        for widget in (
+            self.name_edit,
+            self.opacity_spin,
+            self.fill_edit,
+            self.visible_check,
+            self.locked_check,
+            *self.geometry_controls.values(),
+        ):
+            widget.setEnabled(enabled)
+        if row is None:
+            self.name_edit.clear()
+            self.kind_label.setText("-")
+            return
+        self.name_edit.setText(str(row["name"]))
+        self.kind_label.setText(str(row["kind"]).title())
+        for key, spin in self.geometry_controls.items():
+            spin.setValue(float(row[key]))
+        self.opacity_spin.setValue(int(round(float(row["opacity"]) * 100.0)))
+        self.fill_edit.setText(str(row["style"].get("fill") or ""))
+        self.visible_check.setChecked(bool(row["visible"]))
+        self.locked_check.setChecked(bool(row["locked"]))
+
+    def _on_selection_changed(self) -> None:
+        if self._syncing:
+            return
+        item = self.layer_list.currentItem()
+        self.object_selected.emit(
+            str(item.data(Qt.ItemDataRole.UserRole) or "") if item else ""
+        )
+
+    def _emit_geometry(self) -> None:
+        if self._syncing or not self._selected_id():
+            return
+        self.geometry_changed.emit(
+            self._selected_id(),
+            {
+                key: float(spin.value())
+                for key, spin in self.geometry_controls.items()
+            },
+        )
+
+    def _emit_properties(self) -> None:
+        if self._syncing or not self._selected_id():
+            return
+        row = self._selected_row()
+        style = dict((row or {}).get("style") or {})
+        fill = self.fill_edit.text().strip()
+        if fill:
+            style["fill"] = fill
+        self.properties_changed.emit(
+            self._selected_id(),
+            {
+                "name": self.name_edit.text().strip() or str((row or {}).get("name") or "UI Object"),
+                "opacity": self.opacity_spin.value() / 100.0,
+                "visible": self.visible_check.isChecked(),
+                "locked": self.locked_check.isChecked(),
+                "style": style,
+            },
+        )
+
+    def _emit_duplicate(self) -> None:
+        if self._selected_id():
+            self.duplicate_requested.emit(self._selected_id())
+
+    def _emit_delete(self) -> None:
+        if self._selected_id():
+            self.delete_requested.emit(self._selected_id())
+
+
+__all__ = ["PainterUIInspector"]

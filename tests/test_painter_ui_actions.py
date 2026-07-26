@@ -131,7 +131,7 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     app.processEvents()
 
 
-def test_painter_ui_design_toolbar_adds_and_moves_visible_objects() -> None:
+def test_painter_ui_design_toolbar_creates_edits_and_lists_visible_objects() -> None:
     app = _app()
     from app.drawing import PaintDialog, create_blank_paint_pixmap
 
@@ -146,11 +146,17 @@ def test_painter_ui_design_toolbar_adds_and_moves_visible_objects() -> None:
     app.processEvents()
     assert dialog._ui_design_tool_host.isVisible()
     dialog._ui_design_tool_buttons["frame"].click()
+    assert dialog._painter_ui_overlay.tool() == "frame"
+    dialog._create_painter_ui_object_from_rect("frame", 40, 50, 420, 280)
     dialog._ui_design_tool_buttons["text"].click()
+    assert dialog._painter_ui_overlay.tool() == "text"
+    dialog._create_painter_ui_object_from_rect("text", 72, 92, 320, 54)
     app.processEvents()
     state = dialog.painter_action_state()
     assert state["ui_design"]["validation"]["object_count"] == 2
     assert dialog._painter_ui_overlay.isVisible()
+    assert dialog._paint_ui_inspector.isVisible()
+    assert dialog._paint_ui_inspector.layer_list.count() == 2
 
     object_id = state["ui_design"]["selected_object_id"]
     original = next(
@@ -167,12 +173,140 @@ def test_painter_ui_design_toolbar_adds_and_moves_visible_objects() -> None:
     moved_row = next(row for row in moved if row["id"] == object_id)
     assert moved_row["x"] == original["x"] + 40.0
     assert moved_row["y"] == original["y"] + 30.0
+    dialog._update_painter_ui_object_geometry(
+        object_id,
+        moved_row["x"],
+        moved_row["y"],
+        440.0,
+        88.0,
+    )
+    resized = next(
+        row
+        for row in dialog.painter_action_state()["ui_design"]["document"]["objects"]
+        if row["id"] == object_id
+    )
+    assert resized["width"] == 440.0
+    assert resized["height"] == 88.0
+    dialog._handle_painter_ui_key_command("right", True)
+    nudged = next(
+        row
+        for row in dialog.painter_action_state()["ui_design"]["document"]["objects"]
+        if row["id"] == object_id
+    )
+    assert nudged["x"] == moved_row["x"] + 10.0
+    dialog._duplicate_painter_ui_object(object_id)
+    assert (
+        dialog.painter_action_state()["ui_design"]["validation"]["object_count"]
+        == 3
+    )
+    duplicate_id = dialog.painter_action_state()["ui_design"]["selected_object_id"]
+    dialog._delete_painter_ui_object(duplicate_id)
+    assert (
+        dialog.painter_action_state()["ui_design"]["validation"]["object_count"]
+        == 2
+    )
     dialog._undo()
-    restored = dialog.painter_action_state()["ui_design"]["document"]["objects"]
-    restored_row = next(row for row in restored if row["id"] == object_id)
-    assert restored_row["x"] == original["x"]
-    assert restored_row["y"] == original["y"]
+    assert (
+        dialog.painter_action_state()["ui_design"]["validation"]["object_count"]
+        == 3
+    )
 
     dialog.close()
     dialog.deleteLater()
+    app.processEvents()
+
+
+def test_painter_ui_overlay_drag_create_move_and_resize_signals() -> None:
+    app = _app()
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(800, 600)
+    overlay.show()
+    app.processEvents()
+
+    created: list[tuple] = []
+    geometry: list[tuple] = []
+    overlay.object_create_requested.connect(lambda *args: created.append(args))
+    overlay.object_geometry_requested.connect(lambda *args: geometry.append(args))
+
+    overlay.set_tool("rectangle")
+    QTest.mousePress(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(80, 90),
+    )
+    QTest.mouseMove(overlay, QPoint(300, 240))
+    QTest.mouseRelease(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(300, 240),
+    )
+    assert created
+    assert created[0][0] == "rectangle"
+    assert created[0][3] > 100
+    assert created[0][4] > 100
+
+    document, row = add_ui_object(
+        create_ui_document(800, 600),
+        kind="rectangle",
+        x=100,
+        y=100,
+        width=200,
+        height=120,
+    )
+    overlay.set_document(document)
+    overlay.set_tool("select")
+    QTest.mousePress(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(180, 150),
+    )
+    QTest.mouseMove(overlay, QPoint(240, 190))
+    QTest.mouseRelease(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(240, 190),
+    )
+    assert geometry
+    assert geometry[-1][0] == row["id"]
+    moved_width = geometry[-1][3]
+    moved_height = geometry[-1][4]
+    assert moved_width == 200.0
+    assert moved_height == 120.0
+
+    moved_document = document
+    moved_document["objects"][0]["x"] = geometry[-1][1]
+    moved_document["objects"][0]["y"] = geometry[-1][2]
+    overlay.set_document(moved_document)
+    bottom_right = QPoint(
+        int(geometry[-1][1] + moved_width),
+        int(geometry[-1][2] + moved_height),
+    )
+    QTest.mousePress(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        bottom_right,
+    )
+    QTest.mouseMove(overlay, bottom_right + QPoint(40, 30))
+    QTest.mouseRelease(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        bottom_right + QPoint(40, 30),
+    )
+    assert geometry[-1][3] > moved_width
+    assert geometry[-1][4] > moved_height
+
+    overlay.close()
+    overlay.deleteLater()
     app.processEvents()

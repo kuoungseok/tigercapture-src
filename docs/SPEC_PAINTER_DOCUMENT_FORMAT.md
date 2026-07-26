@@ -56,6 +56,14 @@ preview. The format preserves:
   artboards, UI objects, hierarchy, style/content, constraints, selection,
   delivery profiles, and revision
 - current Paint/UI Design/3D Place workspace
+- UI workspace tool selection is transient, while every drag-created object,
+  move, resize, duplicate, delete, visibility, lock, style, and geometry edit
+  updates the provider-neutral UI document and participates in Painter
+  Undo/Redo
+- the UI workspace exposes Select, Frame, Rectangle, Ellipse, Line, Text,
+  Image, Button, and Progress tools plus a dedicated `Layers | Inspect` panel
+- Inspect edits name, type-readable geometry, opacity, fill, visibility, and
+  lock state without converting UI objects into Paint layers
 
 Opening a `.tspaint` restores the editable 3D scene. Baking the blockout to 2D
 is optional and does not replace the saved scene.

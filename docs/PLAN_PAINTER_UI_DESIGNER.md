@@ -12,9 +12,12 @@ Implementation checkpoint:
 
 - M0 general UI document, validation, `.tspaint` persistence, Action/MCP,
   delivery preflight, and Design Handoff package are implemented.
-- M1 workspace foundation is implemented with `Paint | UI Design | 3D Place`,
-  direct Frame/Text/Button creation, canvas selection, and drag movement.
-- M1 production editing controls and M2-M6 remain milestone work.
+- M1 interactive editing now includes `Paint | UI Design | 3D Place`,
+  nine select/draw tools, drag creation, move/resize handles, keyboard
+  move/duplicate/delete, and a dedicated UI `Layers | Inspect` panel.
+- M1 rotation, arrange/snap, multi-artboard canvas UX, hierarchy editing, and
+  broader responsive screenshot QA remain before M1 completion. M2-M6 remain
+  milestone work.
 - Product-adoption work is now explicit in M2A/M2B: editable template gallery,
   reusable component/variant libraries, Auto Layout presets, design tokens,
   versioned library updates, comments, revision history, reviewer mode, and
