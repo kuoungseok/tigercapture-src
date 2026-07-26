@@ -214,6 +214,10 @@ class PainterUIInspector(QWidget):
         guide_layout.addWidget(self.artboard_vertical_guides_edit)
         guide_layout.addWidget(self.artboard_horizontal_guides_edit)
         artboard_layout_form.addRow("Guides", guide_row)
+        self.artboard_layout_status_label = QLabel("Layout: Ready")
+        self.artboard_layout_status_label.setObjectName("PaintMuted")
+        self.artboard_layout_status_label.setWordWrap(True)
+        artboard_layout_form.addRow("Status", self.artboard_layout_status_label)
         root.addWidget(artboard_layout_frame)
 
         tabs = QTabWidget()
@@ -1036,6 +1040,31 @@ class PainterUIInspector(QWidget):
         self.artboard_grid_gutter_spin.setEnabled(columns)
         self.artboard_grid_margin_spin.setEnabled(columns)
         self.artboard_grid_size_spin.setEnabled(uniform)
+        from app.painter_ui_layout_diagnostics import diagnose_ui_layout
+
+        report = diagnose_ui_layout(self._document)
+        diagnostics = [
+            row
+            for row in report["diagnostics"]
+            if row["owner_id"] == str(artboard["id"])
+            or any(
+                item["id"] == row["owner_id"]
+                and item["artboard_id"] == artboard["id"]
+                for item in self._document["objects"]
+            )
+        ]
+        errors = sum(row["severity"] == "error" for row in diagnostics)
+        warnings = sum(row["severity"] == "warning" for row in diagnostics)
+        if errors:
+            text = f"Layout: {errors} error"
+        elif warnings:
+            text = f"Layout: {warnings} warning"
+        else:
+            text = "Layout: Ready"
+        self.artboard_layout_status_label.setText(text)
+        self.artboard_layout_status_label.setToolTip(
+            "\n".join(row["message"] for row in diagnostics)
+        )
 
     @staticmethod
     def _guide_values(value: str) -> list[float]:

@@ -106,7 +106,7 @@ Status: core interactive editing implemented
 
 ## M2: Responsive Layout and Design System
 
-Status: responsive Auto Layout and artboard layout guides implemented; breakpoints and tokens pending
+Status: responsive Auto Layout, artboard guides, and layout diagnostics implemented; breakpoints and tokens pending
 
 - anchors and constraints (implemented foundation)
 - horizontal/vertical auto layout (implemented)
@@ -114,6 +114,7 @@ Status: responsive Auto Layout and artboard layout guides implemented; breakpoin
 - absolute child positioning escape (implemented)
 - wrap, Hug/Fill sizing (implemented)
 - uniform grid, columns, custom guides, and safe area (implemented)
+- layout cycle/impossible constraint diagnostics (implemented)
 - compact/regular breakpoint
 - portrait/landscape preview
 - light/dark/high-contrast theme

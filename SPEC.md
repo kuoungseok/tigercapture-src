@@ -6679,14 +6679,19 @@ AI Script Edit MVP integration:
   distributes remaining line space after fixed children and gaps. Inspector
   edits and
   `paint.ui.layout.set` both delegate to the undoable object mutation path.
-  impossible-layout diagnostics and breakpoint/theme overrides remain
-  explicit P3 follow-up work.
+  Breakpoint/theme overrides remain explicit P3 follow-up work.
 - Each Painter UI artboard stores provider-neutral `layout_grid`, `guides`,
   `safe_area`, and `safe_area_visible` records. Uniform grids and multi-column
   layouts are clipped to the owning artboard; custom horizontal/vertical guides
   and safe-area bounds render as non-export authoring overlays. Inspector edits,
   Undo/Redo, persistence, and `paint.ui.artboard.layout.set` use the shared
   artboard mutation path.
+- Painter UI validation v2 includes deterministic layout diagnostics. It blocks
+  Hug-parent/Fill-child sizing cycles, inverted minimum/maximum constraints,
+  collapsed column grids, and collapsed safe areas. It warns when Wrap is
+  ignored on a Hug main axis, padding leaves no content space, or fixed children
+  overflow a non-wrapping container. Inspector status, document inspection,
+  delivery preflight, and `paint.ui.layout.diagnostics` share this report.
 - Painter UI groups keep stable child IDs and remain editable: grouping,
   ungrouping, and layer-stack reordering are exposed through
   `paint.ui.object.group`, `paint.ui.object.ungroup`, and

@@ -34,6 +34,7 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.document.inspect",
         "paint.ui.workspace.set",
         "paint.ui.view.fit",
+        "paint.ui.layout.diagnostics",
         "paint.ui.artboard.add",
         "paint.ui.artboard.activate",
         "paint.ui.artboard.update",

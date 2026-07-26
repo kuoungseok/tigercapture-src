@@ -98,6 +98,11 @@ preview. The format preserves:
   and safe-area insets. `safe_area_visible` controls the authoring overlay only.
   Painter renders these records clipped to the artboard, and automation edits
   them through `paint.ui.artboard.layout.set`.
+- Validation v2 embeds `layout_diagnostics.v1`. Hug/Fill sizing cycles,
+  inverted min/max bounds, collapsed column grids, and collapsed safe areas are
+  blocking errors. Ignored Wrap and fixed-content overflow are warnings.
+  `paint.ui.layout.diagnostics` exposes the same report used by delivery
+  preflight and Inspector status.
 
 Opening a `.tspaint` restores the editable 3D scene. Baking the blockout to 2D
 is optional and does not replace the saved scene.

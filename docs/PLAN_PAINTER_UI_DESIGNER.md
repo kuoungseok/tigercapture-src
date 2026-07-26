@@ -73,6 +73,9 @@ Implementation checkpoint:
   vertical guides, and visible safe-area insets. These authoring overlays are
   clipped per artboard and share Inspector, Undo, save/open, and
   `paint.ui.artboard.layout.set` Action contracts.
+- M2/P3 validation now reports layout cycles and impossible constraints through
+  one structured diagnostic contract. Inspector, Actions, document validation,
+  and delivery preflight agree on blocking errors and non-blocking warnings.
 - Image-resource embedding/hashing and adapter-output parity remain in M2/P8.
   M3-M6 remain milestone work.
 - Product-adoption work is now explicit in M2A/M2B: editable template gallery,

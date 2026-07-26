@@ -184,10 +184,12 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
 - Inspector, `.tspaint`, Undo/Redo, `paint.ui.layout.set` Action 공유 계약
 - 아트보드별 Uniform Grid/Columns, custom Guide, Safe Area 표시와 저장
 - `paint.ui.artboard.layout.set` Action 및 아트보드 mutation/Undo 공유
+- Hug/Fill cycle, min/max 역전, collapsed grid/safe area 차단 진단
+- Wrap 무시와 fixed-content overflow 경고
+- Inspector, validation, delivery preflight, `paint.ui.layout.diagnostics` 공유
 
 남은 범위:
 
-- layout cycle/impossible constraint 진단 강화
 - breakpoint, orientation, theme override
 
 ## P4. 컴포넌트 시스템

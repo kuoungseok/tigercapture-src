@@ -633,11 +633,17 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
             errors.append(
                 f"missing_interaction_component:{interaction_id}:{component_id}"
             )
+    from app.painter_ui_layout_diagnostics import diagnose_ui_layout
+
+    layout_diagnostics = diagnose_ui_layout(document)
+    errors.extend(layout_diagnostics["errors"])
+    warnings.extend(layout_diagnostics["warnings"])
     return {
-        "schema": "tigerstudio.painter.ui.validation.v1",
+        "schema": "tigerstudio.painter.ui.validation.v2",
         "ok": not errors,
         "errors": sorted(set(errors)),
         "warnings": sorted(set(warnings)),
+        "layout_diagnostics": layout_diagnostics,
         "artboard_count": len(artboard_ids),
         "object_count": len(object_ids),
         "component_count": len(document["components"]),

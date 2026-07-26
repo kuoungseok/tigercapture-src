@@ -153,6 +153,16 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="the Painter UI canvas camera would be fitted",
     )
     registry.register_adapter_action(
+        "paint.ui.layout.diagnostics",
+        "Inspect deterministic Auto Layout, constraint, grid, and safe-area conflicts.",
+        "paint",
+        "paint_ui_layout_diagnostics",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI layout diagnostics would be returned",
+    )
+    registry.register_adapter_action(
         "paint.ui.artboard.add",
         "Add a general UI artboard to the active Painter document.",
         "paint",
