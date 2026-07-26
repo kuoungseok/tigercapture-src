@@ -71,6 +71,14 @@ class PaintAdapterMixin:
 
         return inspect_ui_document(getattr(dialog, "_painter_ui_document", None))
 
+    def paint_ui_component_library_inspect(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_component_library import inspect_ui_component_library
+
+        return inspect_ui_component_library(
+            getattr(dialog, "_painter_ui_document", None)
+        )
+
     def paint_ui_workspace_set(self, *, mode: str = "ui_design") -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         selected = dialog._set_canvas_workspace_mode(str(mode or "ui_design"))

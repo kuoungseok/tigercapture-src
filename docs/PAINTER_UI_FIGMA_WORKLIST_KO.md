@@ -19,6 +19,9 @@ P0 implementation checkpoint (2026-07-26):
 - Linked Variant Definitions, stable-ID Instance switching, local override
   preservation, and Detach/Localize are implemented through shared Inspector,
   Action, Undo, validation, and persistence services.
+- The dedicated Components tab provides searchable family/Variant hierarchy,
+  Instance usage, Definition selection, Instance placement, Variant creation,
+  rename, and read-only Action inspection.
 
 P1 implementation checkpoint (2026-07-26, navigation slice):
 

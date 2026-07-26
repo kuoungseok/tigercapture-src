@@ -6729,6 +6729,12 @@ AI Script Edit MVP integration:
   `paint.ui.component.variant.create`,
   `paint.ui.component.instance.variant.set`, and
   `paint.ui.component.instance.detach` share Undo and validation.
+- Painter UI Design includes a dedicated `Components` library tab. It groups
+  base Definitions and Variants, reports Instance usage, filters by name,
+  selects the stable Definition root, places Instances, creates Variants, and
+  renames component records. The read-only
+  `paint.ui.component.library.inspect` Action exposes the same family and usage
+  report to AI automation.
 - Painter UI groups keep stable child IDs and remain editable: grouping,
   ungrouping, and layer-stack reordering are exposed through
   `paint.ui.object.group`, `paint.ui.object.ungroup`, and

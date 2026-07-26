@@ -97,7 +97,10 @@ Implementation checkpoint:
   source correspondence; Instance switching retains stable IDs and compatible
   overrides. Detach/Localize materializes the visible result without a visual
   jump. Inspector, Actions, validation, persistence, and Undo share these
-  services. A dedicated Components library panel remains later P4/M2A work.
+  services. The dedicated searchable Components tab groups families and
+  Variants, reports Instance usage, selects Definitions, places Instances,
+  creates Variants, and renames records. Automation reads the same report with
+  `paint.ui.component.library.inspect`.
 - Image-resource embedding/hashing and adapter-output parity remain in M2/P8.
   M3-M6 remain milestone work.
 - Product-adoption work is now explicit in M2A/M2B: editable template gallery,

@@ -81,6 +81,7 @@ class PainterUIInspector(QWidget):
     component_variant_create_requested = Signal(str, str)
     component_variant_switch_requested = Signal(str, str)
     component_detach_requested = Signal(str, bool, str)
+    component_update_requested = Signal(str, object)
     object_selected = Signal(str)
     selection_changed = Signal(object, str)
     geometry_changed = Signal(str, object)
@@ -309,6 +310,26 @@ class PainterUIInspector(QWidget):
         hierarchy_actions.addWidget(forward)
         layers_layout.addLayout(hierarchy_actions)
         tabs.addTab(layers_page, "Layers")
+
+        from app.painter_ui_component_library import PainterUIComponentLibrary
+
+        self.component_library = PainterUIComponentLibrary()
+        self.component_library.object_selected.connect(
+            lambda object_id: self.selection_changed.emit(
+                [str(object_id)],
+                str(object_id),
+            )
+        )
+        self.component_library.instantiate_requested.connect(
+            self.component_instantiate_requested
+        )
+        self.component_library.variant_create_requested.connect(
+            self.component_variant_create_requested
+        )
+        self.component_library.component_update_requested.connect(
+            self.component_update_requested
+        )
+        tabs.addTab(self.component_library, "Components")
 
         inspect_page = QWidget()
         inspect_layout = QVBoxLayout(inspect_page)
@@ -852,6 +873,7 @@ class PainterUIInspector(QWidget):
 
     def set_document(self, value: Mapping[str, Any] | None) -> None:
         self._document = normalize_ui_document(value)
+        self.component_library.set_document(self._document)
         selected = self._document["selection"]["object_id"]
         selected_ids = set(self._document["selection"]["object_ids"])
         active = self._document["active_artboard_id"]

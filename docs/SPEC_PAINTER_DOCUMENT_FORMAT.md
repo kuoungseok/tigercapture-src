@@ -134,6 +134,11 @@ preview. The format preserves:
   `paint.ui.component.variant.create`,
   `paint.ui.component.instance.variant.set`, and
   `paint.ui.component.instance.detach` use the shared Undo path.
+- The Inspector `Components` tab derives a searchable family/Variant tree and
+  Instance counts from the normalized document; it stores no private library
+  state. Definition selection, Instance placement, Variant creation, and
+  component rename use stable IDs and shared mutations.
+  `paint.ui.component.library.inspect` exposes the same read-only report.
 - Every artboard normalizes a provider-neutral `layout_grid` record with
   `none`, `grid`, or `columns` mode, plus custom horizontal/vertical `guides`
   and safe-area insets. `safe_area_visible` controls the authoring overlay only.

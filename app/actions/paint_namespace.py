@@ -119,6 +119,16 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="the Painter UI document would be inspected",
     )
     registry.register_adapter_action(
+        "paint.ui.component.library.inspect",
+        "Inspect component families, Variants, stable roots, and Instance usage.",
+        "paint",
+        "paint_ui_component_library_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter component library would be inspected",
+    )
+    registry.register_adapter_action(
         "paint.ui.workspace.set",
         "Switch Painter between Paint, UI Design, and 3D Place canvas workspaces.",
         "paint",

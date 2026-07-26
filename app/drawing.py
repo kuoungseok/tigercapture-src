@@ -8197,6 +8197,9 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.component_detach_requested.connect(
             self._detach_painter_ui_component
         )
+        self._paint_ui_inspector.component_update_requested.connect(
+            self._update_painter_ui_component
+        )
         self._paint_ui_inspector.duplicate_requested.connect(
             self._duplicate_painter_ui_object
         )
@@ -11086,6 +11089,28 @@ class PaintDialog(QDialog):
                 else "Detach UI component instance"
             )
         )
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _update_painter_ui_component(
+        self,
+        component_id: str,
+        changes: object,
+    ) -> None:
+        from app.painter_ui_document import update_ui_component
+
+        if not isinstance(changes, dict):
+            return
+        current = getattr(self, "_painter_ui_document", None)
+        if not current:
+            return
+        updated, _component = update_ui_component(
+            current,
+            str(component_id),
+            changes,
+        )
+        self._push_undo_state("Update UI component")
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()

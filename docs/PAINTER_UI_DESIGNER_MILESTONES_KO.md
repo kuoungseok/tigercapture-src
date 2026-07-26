@@ -133,7 +133,9 @@ P4 component checkpoint:
 - Instance state preview and Action/Undo parity implemented
 - linked Variant topology and stable-ID Instance switching implemented
 - Detach to local objects and Localize to an independent component implemented
-- a dedicated Components library panel remains
+- dedicated searchable Components library tab, usage counts, Definition
+  selection, Instance placement, Variant creation, rename, and Action inspect
+  implemented
 
 완료 기준:
 
