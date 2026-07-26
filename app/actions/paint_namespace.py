@@ -162,6 +162,19 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a UI artboard would be updated",
     )
     registry.register_adapter_action(
+        "paint.ui.artboard.activate",
+        "Set the active Painter UI artboard for editing and preview.",
+        "paint",
+        "paint_ui_artboard_activate",
+        params_schema=schema_object(
+            {"artboard_id": {"type": "string"}},
+            required=("artboard_id",),
+        ),
+        required=("artboard_id",),
+        undo_label="Activate UI artboard",
+        dry_summary="the active UI artboard would change",
+    )
+    registry.register_adapter_action(
         "paint.ui.artboard.remove",
         "Remove a UI artboard and its owned objects while keeping at least one artboard.",
         "paint",

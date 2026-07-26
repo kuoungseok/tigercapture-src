@@ -60,9 +60,13 @@ Status: interactive editing implemented, completion pending
 - Select/Frame/Rectangle/Ellipse/Line/Text/Image/Button/Progress 도구
 - canvas drag-to-create
 - 객체 선택과 드래그 이동
-- 선택 외곽선, 네 모서리 handle, 드래그 resize
+- 선택 외곽선, 네 모서리 resize handle, 회전 handle
+- rotation-aware draw/hit test와 Inspect rotation 편집
+- 선택적으로 켜는 8 px 위치·크기 snap과 15도 회전 snap
 - 우측 UI 전용 `Layers | Inspect` panel
 - Inspect의 name/type/X/Y/W/H/opacity/fill/visible/locked 편집
+- artboard 선택기와 `paint.ui.artboard.activate`
+- artboard 기준 left/hcenter/right/top/vcenter/bottom 정렬
 - keyboard 1 px 이동, Shift+방향키 10 px 이동, Delete, Ctrl+D
 - UI 객체 duplicate/delete와 Undo/Redo
 - Action으로 만든 객체가 화면에 즉시 반영
@@ -70,8 +74,7 @@ Status: interactive editing implemented, completion pending
 
 남은 완료 조건:
 
-- rotate handle과 rotation-aware hit test
-- align/distribute/snap
+- multi-selection align/distribute
 - multi-artboard canvas 배치와 전환
 - Inspect의 text/typography/constraint/parent hierarchy 편집
 - Layers의 drag reorder, parent/group hierarchy 편집

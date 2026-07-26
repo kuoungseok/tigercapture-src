@@ -116,6 +116,19 @@ class PaintAdapterMixin:
         dialog._push_undo_state("Update UI artboard")
         return self._paint_ui_commit(dialog, "Update UI artboard", document)
 
+    def paint_ui_artboard_activate(self, *, artboard_id: str) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import set_active_ui_artboard
+
+        document = set_active_ui_artboard(
+            dialog._painter_ui_document,
+            artboard_id,
+        )
+        if document == dialog._painter_ui_document:
+            return dialog.painter_action_state()
+        dialog._push_undo_state("Activate UI artboard")
+        return self._paint_ui_commit(dialog, "Activate UI artboard", document)
+
     def paint_ui_artboard_remove(self, *, artboard_id: str) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         from app.painter_ui_document import remove_ui_artboard

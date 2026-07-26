@@ -14,10 +14,12 @@ Implementation checkpoint:
   delivery preflight, and Design Handoff package are implemented.
 - M1 interactive editing now includes `Paint | UI Design | 3D Place`,
   nine select/draw tools, drag creation, move/resize handles, keyboard
-  move/duplicate/delete, and a dedicated UI `Layers | Inspect` panel.
-- M1 rotation, arrange/snap, multi-artboard canvas UX, hierarchy editing, and
-  broader responsive screenshot QA remain before M1 completion. M2-M6 remain
-  milestone work.
+  move/duplicate/delete, rotation-aware transforms, optional 8 px/15 degree
+  snapping, artboard activation, artboard alignment, and a dedicated UI
+  `Layers | Inspect` panel.
+- M1 multi-selection distribute, multi-artboard canvas layout, hierarchy
+  editing, and broader responsive screenshot QA remain before M1 completion.
+  M2-M6 remain milestone work.
 - Product-adoption work is now explicit in M2A/M2B: editable template gallery,
   reusable component/variant libraries, Auto Layout presets, design tokens,
   versioned library updates, comments, revision history, reviewer mode, and

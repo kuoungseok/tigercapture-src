@@ -7600,6 +7600,17 @@ class PaintDialog(QDialog):
             )
             ui_tool_bar.addWidget(button)
             self._ui_design_tool_buttons[kind] = button
+        self._ui_design_snap_btn = QPushButton("")
+        self._ui_design_snap_btn.setObjectName("PaintBlockoutModeButton")
+        self._ui_design_snap_btn.setCheckable(True)
+        self._ui_design_snap_btn.setChecked(False)
+        self._ui_design_snap_btn.setToolTip("Snap position and size to an 8 px grid; rotate to 15 degrees")
+        self._ui_design_snap_btn.setAccessibleName("Snap to grid")
+        self._ui_design_snap_btn.setIcon(app_icon("grid", size=13, color="#E4E8EE"))
+        self._ui_design_snap_btn.setIconSize(icon_size(13))
+        self._ui_design_snap_btn.setFixedSize(28, 24)
+        self._ui_design_snap_btn.toggled.connect(self._set_painter_ui_snap)
+        ui_tool_bar.addWidget(self._ui_design_snap_btn)
         self._ui_design_tool_host.hide()
         canvas_bar.addWidget(self._ui_design_tool_host)
         self._blockout_transform_buttons: dict[str, QPushButton] = {}
@@ -7655,6 +7666,9 @@ class PaintDialog(QDialog):
         )
         self._painter_ui_overlay.object_geometry_requested.connect(
             self._update_painter_ui_object_geometry
+        )
+        self._painter_ui_overlay.object_changes_requested.connect(
+            self._update_painter_ui_object_changes
         )
         self._painter_ui_overlay.object_create_requested.connect(
             self._create_painter_ui_object_from_rect
@@ -8099,6 +8113,9 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.object_selected.connect(
             self._select_painter_ui_object
         )
+        self._paint_ui_inspector.artboard_selected.connect(
+            self._set_painter_ui_artboard
+        )
         self._paint_ui_inspector.geometry_changed.connect(
             self._update_painter_ui_object_changes
         )
@@ -8110,6 +8127,9 @@ class PaintDialog(QDialog):
         )
         self._paint_ui_inspector.delete_requested.connect(
             self._delete_painter_ui_object
+        )
+        self._paint_ui_inspector.arrange_requested.connect(
+            self._align_painter_ui_object
         )
         inspector_controls_layout.addWidget(self._paint_ui_inspector, stretch=1)
         self._paint_ui_inspector.hide()
@@ -10411,6 +10431,17 @@ class PaintDialog(QDialog):
         )
         self._refresh_painter_ui_overlay()
 
+    def _set_painter_ui_artboard(self, artboard_id: str) -> None:
+        from app.painter_ui_document import set_active_ui_artboard
+
+        current = getattr(self, "_painter_ui_document", None)
+        if str((current or {}).get("active_artboard_id") or "") == str(artboard_id):
+            return
+        self._push_undo_state("Switch UI artboard")
+        self._painter_ui_document = set_active_ui_artboard(current, artboard_id)
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
     def _set_painter_ui_tool(self, tool: str) -> str:
         requested = str(tool or "select").strip().casefold()
         selected = requested if requested in {
@@ -10434,6 +10465,17 @@ class PaintDialog(QDialog):
         if hasattr(self, "_tool_status_label"):
             self._tool_status_label.setText(f"UI Design: {selected.title()}")
         return selected
+
+    def _set_painter_ui_snap(self, enabled: bool) -> None:
+        overlay = getattr(self, "_painter_ui_overlay", None)
+        if overlay is not None:
+            overlay.set_snap(bool(enabled), 8.0)
+        if hasattr(self, "_tool_status_label"):
+            self._tool_status_label.setText(
+                "UI Design: Snap 8 px / 15 deg"
+                if enabled
+                else "UI Design: Free transform"
+            )
 
     @staticmethod
     def _painter_ui_object_preset(kind: str) -> dict:
@@ -10642,6 +10684,60 @@ class PaintDialog(QDialog):
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
+
+    def _align_painter_ui_object(self, object_id: str, command: str) -> None:
+        current = getattr(self, "_painter_ui_document", None)
+        row = next(
+            (
+                item
+                for item in (current or {}).get("objects", [])
+                if item.get("id") == object_id
+            ),
+            None,
+        )
+        if row is None or row.get("locked"):
+            return
+        artboard = next(
+            (
+                item
+                for item in (current or {}).get("artboards", [])
+                if item.get("id") == row.get("artboard_id")
+            ),
+            None,
+        )
+        if artboard is None:
+            return
+        changes: dict[str, float] = {}
+        if command == "left":
+            changes["x"] = 0.0
+        elif command == "hcenter":
+            changes["x"] = max(
+                0.0,
+                (float(artboard["width"]) - float(row["width"])) * 0.5,
+            )
+        elif command == "right":
+            changes["x"] = max(
+                0.0,
+                float(artboard["width"]) - float(row["width"]),
+            )
+        elif command == "top":
+            changes["y"] = 0.0
+        elif command == "vcenter":
+            changes["y"] = max(
+                0.0,
+                (float(artboard["height"]) - float(row["height"])) * 0.5,
+            )
+        elif command == "bottom":
+            changes["y"] = max(
+                0.0,
+                float(artboard["height"]) - float(row["height"]),
+            )
+        if changes:
+            self._update_painter_ui_object_changes(
+                object_id,
+                changes,
+                label=f"Align UI object {command}",
+            )
 
     def _duplicate_painter_ui_object(self, object_id: str = "") -> None:
         from app.painter_ui_document import add_ui_object, update_ui_object

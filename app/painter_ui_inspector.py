@@ -6,6 +6,7 @@ from typing import Any, Mapping
 from PySide6.QtCore import Signal, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QDoubleSpinBox,
     QFormLayout,
     QFrame,
@@ -25,11 +26,13 @@ from app.painter_ui_document import normalize_ui_document
 
 
 class PainterUIInspector(QWidget):
+    artboard_selected = Signal(str)
     object_selected = Signal(str)
     geometry_changed = Signal(str, object)
     properties_changed = Signal(str, object)
     duplicate_requested = Signal(str)
     delete_requested = Signal(str)
+    arrange_requested = Signal(str, str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -43,6 +46,10 @@ class PainterUIInspector(QWidget):
         title = QLabel("UI DESIGN")
         title.setObjectName("PaintSectionTitle")
         root.addWidget(title)
+        self.artboard_combo = QComboBox()
+        self.artboard_combo.setToolTip("Active UI artboard")
+        self.artboard_combo.currentIndexChanged.connect(self._on_artboard_changed)
+        root.addWidget(self.artboard_combo)
 
         tabs = QTabWidget()
         tabs.setDocumentMode(True)
@@ -77,9 +84,12 @@ class PainterUIInspector(QWidget):
         self.kind_label = QLabel("-")
         form.addRow("Type", self.kind_label)
         self.geometry_controls: dict[str, QDoubleSpinBox] = {}
-        for key in ("x", "y", "width", "height"):
+        for key in ("x", "y", "width", "height", "rotation"):
             spin = QDoubleSpinBox()
-            spin.setRange(0.0, 100000.0)
+            spin.setRange(
+                -180.0 if key == "rotation" else 0.0,
+                180.0 if key == "rotation" else 100000.0,
+            )
             spin.setDecimals(1)
             spin.editingFinished.connect(self._emit_geometry)
             self.geometry_controls[key] = spin
@@ -103,6 +113,26 @@ class PainterUIInspector(QWidget):
         flags_layout.addWidget(self.visible_check)
         flags_layout.addWidget(self.locked_check)
         form.addRow("State", flags)
+        arrange = QFrame()
+        arrange_layout = QHBoxLayout(arrange)
+        arrange_layout.setContentsMargins(0, 0, 0, 0)
+        arrange_layout.setSpacing(2)
+        for label, command in (
+            ("L", "left"),
+            ("HC", "hcenter"),
+            ("R", "right"),
+            ("T", "top"),
+            ("VC", "vcenter"),
+            ("B", "bottom"),
+        ):
+            button = QPushButton(label)
+            button.setFixedHeight(24)
+            button.setToolTip(f"Align selected object {command} to artboard")
+            button.clicked.connect(
+                lambda _checked=False, value=command: self._emit_arrange(value)
+            )
+            arrange_layout.addWidget(button)
+        form.addRow("Align", arrange)
         inspect_layout.addLayout(form)
         inspect_layout.addStretch(1)
         tabs.addTab(inspect_page, "Inspect")
@@ -122,6 +152,16 @@ class PainterUIInspector(QWidget):
         )
         self._syncing = True
         try:
+            self.artboard_combo.clear()
+            for artboard in self._document["artboards"]:
+                self.artboard_combo.addItem(
+                    f"{artboard['name']}  {artboard['width']} x {artboard['height']}",
+                    artboard["id"],
+                )
+                if artboard["id"] == active:
+                    self.artboard_combo.setCurrentIndex(
+                        self.artboard_combo.count() - 1
+                    )
             self.layer_list.clear()
             for row in rows:
                 prefix = "  " if row["parent_id"] else ""
@@ -179,6 +219,13 @@ class PainterUIInspector(QWidget):
             str(item.data(Qt.ItemDataRole.UserRole) or "") if item else ""
         )
 
+    def _on_artboard_changed(self) -> None:
+        if self._syncing:
+            return
+        artboard_id = str(self.artboard_combo.currentData() or "")
+        if artboard_id:
+            self.artboard_selected.emit(artboard_id)
+
     def _emit_geometry(self) -> None:
         if self._syncing or not self._selected_id():
             return
@@ -216,6 +263,10 @@ class PainterUIInspector(QWidget):
     def _emit_delete(self) -> None:
         if self._selected_id():
             self.delete_requested.emit(self._selected_id())
+
+    def _emit_arrange(self, command: str) -> None:
+        if self._selected_id():
+            self.arrange_requested.emit(self._selected_id(), str(command))
 
 
 __all__ = ["PainterUIInspector"]

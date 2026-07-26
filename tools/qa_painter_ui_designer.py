@@ -42,6 +42,7 @@ def main() -> int:
     dialog.resize(1360, 900)
     registry = ActionRegistry(owner=dialog)
     registry.execute("paint.ui.workspace.set", {"mode": "ui_design"})
+    last_add = None
     for payload in (
         {
             "kind": "frame",
@@ -121,7 +122,23 @@ def main() -> int:
             "content": {"text": "Add to Cart"},
         },
     ):
-        registry.execute("paint.ui.object.add", payload)
+        last_add = registry.execute("paint.ui.object.add", payload).to_dict()
+    registry.execute(
+        "paint.ui.artboard.add",
+        {"name": "Desktop", "width": 1440, "height": 900, "breakpoint": "desktop"},
+    )
+    registry.execute("paint.ui.artboard.activate", {"artboard_id": "artboard-1"})
+    button_id = str(
+        (((last_add or {}).get("result") or {}).get("ui_design") or {}).get(
+            "selected_object_id"
+        )
+        or ""
+    )
+    if button_id:
+        registry.execute(
+            "paint.ui.object.update",
+            {"object_id": button_id, "changes": {"rotation": -4.0}},
+        )
     dialog.show()
     app.processEvents()
     output_dir = Path(args.output_dir).expanduser().resolve()

@@ -321,6 +321,7 @@ def add_ui_artboard(
     )
     document["artboards"].append(row)
     document["active_artboard_id"] = artboard_id
+    document["selection"]["object_id"] = ""
     return _revised(document), copy.deepcopy(row)
 
 
@@ -366,6 +367,27 @@ def remove_ui_artboard(
         "artboard_id": artboard_id,
         "removed_object_ids": removed_objects,
     }
+
+
+def set_active_ui_artboard(
+    value: Mapping[str, Any],
+    artboard_id: str,
+) -> dict[str, Any]:
+    document = normalize_ui_document(value)
+    target = str(artboard_id or "")
+    if target not in {row["id"] for row in document["artboards"]}:
+        raise PainterUIDocumentError(f"UI artboard not found: {target}")
+    if document["active_artboard_id"] == target:
+        return document
+    document["active_artboard_id"] = target
+    selected = document["selection"]["object_id"]
+    selected_row = next(
+        (row for row in document["objects"] if row["id"] == selected),
+        None,
+    )
+    if selected_row is not None and selected_row["artboard_id"] != target:
+        document["selection"]["object_id"] = ""
+    return _revised(document)
 
 
 def add_ui_object(
@@ -486,6 +508,7 @@ __all__ = [
     "remove_ui_artboard",
     "remove_ui_object",
     "select_ui_object",
+    "set_active_ui_artboard",
     "update_ui_artboard",
     "update_ui_object",
     "validate_ui_document",

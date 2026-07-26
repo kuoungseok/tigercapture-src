@@ -83,6 +83,7 @@ Actions:
 - `paint.document.open`
 - `paint.ui.document.inspect`
 - `paint.ui.artboard.add/update/remove`
+- `paint.ui.artboard.activate`
 - `paint.ui.object.add/update/remove`
 - `paint.ui.delivery.profiles/preflight`
 - `paint.ui.handoff.export`

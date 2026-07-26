@@ -119,6 +119,36 @@ def test_general_ui_document_rejects_invalid_parent_updates() -> None:
         update_ui_object(document, parent["id"], {"parent_id": child["id"]})
 
 
+def test_general_ui_document_switches_artboards_and_clears_foreign_selection() -> None:
+    from app.painter_ui_document import (
+        add_ui_artboard,
+        add_ui_object,
+        create_ui_document,
+        set_active_ui_artboard,
+    )
+
+    document = create_ui_document(390, 844, name="Phone")
+    phone_id = document["active_artboard_id"]
+    document, phone_button = add_ui_object(
+        document,
+        kind="button",
+        artboard_id=phone_id,
+    )
+    document, desktop = add_ui_artboard(
+        document,
+        name="Desktop",
+        width=1440,
+        height=900,
+    )
+    assert document["selection"]["object_id"] == ""
+    document = set_active_ui_artboard(document, phone_id)
+    assert document["active_artboard_id"] == phone_id
+    assert document["selection"]["object_id"] == ""
+    document = set_active_ui_artboard(document, desktop["id"])
+    assert document["active_artboard_id"] == desktop["id"]
+    assert phone_button["id"] in {row["id"] for row in document["objects"]}
+
+
 def test_general_ui_document_preserves_unknown_kinds_for_explicit_preflight() -> None:
     from app.painter_ui_delivery import preflight_ui_delivery
     from app.painter_ui_document import normalize_ui_document, validate_ui_document

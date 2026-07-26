@@ -34,6 +34,7 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.document.inspect",
         "paint.ui.workspace.set",
         "paint.ui.artboard.add",
+        "paint.ui.artboard.activate",
         "paint.ui.artboard.update",
         "paint.ui.artboard.remove",
         "paint.ui.object.add",
@@ -52,6 +53,20 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     assert workspace["result"]["workspace"]["mode"] == "ui_design"
     assert dialog._canvas_mode_ui_btn.isChecked()
     assert dialog._painter_ui_overlay.isVisible()
+
+    artboard_added = registry.execute(
+        "paint.ui.artboard.add",
+        {"name": "Desktop", "width": 1440, "height": 900},
+    ).to_dict()
+    assert artboard_added["ok"]
+    desktop_id = artboard_added["result"]["ui_design"]["active_artboard_id"]
+    assert desktop_id != "artboard-1"
+    activated = registry.execute(
+        "paint.ui.artboard.activate",
+        {"artboard_id": "artboard-1"},
+    ).to_dict()
+    assert activated["ok"]
+    assert activated["result"]["ui_design"]["active_artboard_id"] == "artboard-1"
 
     added = registry.execute(
         "paint.ui.object.add",
@@ -187,13 +202,20 @@ def test_painter_ui_design_toolbar_creates_edits_and_lists_visible_objects() -> 
     )
     assert resized["width"] == 440.0
     assert resized["height"] == 88.0
+    dialog._align_painter_ui_object(object_id, "hcenter")
+    aligned = next(
+        row
+        for row in dialog.painter_action_state()["ui_design"]["document"]["objects"]
+        if row["id"] == object_id
+    )
+    assert aligned["x"] == (800.0 - aligned["width"]) * 0.5
     dialog._handle_painter_ui_key_command("right", True)
     nudged = next(
         row
         for row in dialog.painter_action_state()["ui_design"]["document"]["objects"]
         if row["id"] == object_id
     )
-    assert nudged["x"] == moved_row["x"] + 10.0
+    assert nudged["x"] == aligned["x"] + 10.0
     dialog._duplicate_painter_ui_object(object_id)
     assert (
         dialog.painter_action_state()["ui_design"]["validation"]["object_count"]
@@ -231,10 +253,13 @@ def test_painter_ui_overlay_drag_create_move_and_resize_signals() -> None:
 
     created: list[tuple] = []
     geometry: list[tuple] = []
+    changes: list[tuple] = []
     overlay.object_create_requested.connect(lambda *args: created.append(args))
     overlay.object_geometry_requested.connect(lambda *args: geometry.append(args))
+    overlay.object_changes_requested.connect(lambda *args: changes.append(args))
 
     overlay.set_tool("rectangle")
+    overlay.set_snap(True, 8.0)
     QTest.mousePress(
         overlay,
         Qt.MouseButton.LeftButton,
@@ -252,6 +277,10 @@ def test_painter_ui_overlay_drag_create_move_and_resize_signals() -> None:
     assert created[0][0] == "rectangle"
     assert created[0][3] > 100
     assert created[0][4] > 100
+    assert created[0][1] % 8.0 == 0.0
+    assert created[0][2] % 8.0 == 0.0
+    assert created[0][3] % 8.0 == 0.0
+    assert created[0][4] % 8.0 == 0.0
 
     document, row = add_ui_object(
         create_ui_document(800, 600),
@@ -306,6 +335,33 @@ def test_painter_ui_overlay_drag_create_move_and_resize_signals() -> None:
     )
     assert geometry[-1][3] > moved_width
     assert geometry[-1][4] > moved_height
+
+    rotated_document, rotated_row = add_ui_object(
+        create_ui_document(800, 600),
+        kind="rectangle",
+        x=300,
+        y=200,
+        width=120,
+        height=80,
+    )
+    overlay.set_document(rotated_document)
+    rotation_handle = QPoint(360, 180)
+    QTest.mousePress(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        rotation_handle,
+    )
+    QTest.mouseMove(overlay, QPoint(430, 240))
+    QTest.mouseRelease(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        QPoint(430, 240),
+    )
+    assert changes
+    assert changes[-1][0] == rotated_row["id"]
+    assert abs(float(changes[-1][1]["rotation"])) >= 80.0
 
     overlay.close()
     overlay.deleteLater()
