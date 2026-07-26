@@ -46,6 +46,15 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.object.ungroup",
         "paint.ui.object.reorder",
         "paint.ui.object.reparent",
+        "paint.ui.component.add",
+        "paint.ui.component.update",
+        "paint.ui.component.remove",
+        "paint.ui.token.add",
+        "paint.ui.token.update",
+        "paint.ui.token.remove",
+        "paint.ui.interaction.add",
+        "paint.ui.interaction.update",
+        "paint.ui.interaction.remove",
         "paint.ui.delivery.profiles",
         "paint.ui.delivery.preflight",
         "paint.ui.handoff.export",
@@ -125,6 +134,44 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         arranged["result"]["ui_design"]["document"]["objects"][0]["x"]
         == 90.0
     )
+    component_result = registry.execute(
+        "paint.ui.component.add",
+        {"name": "Primary Button", "root_object_id": object_id},
+    ).to_dict()
+    assert component_result["ok"]
+    component_id = component_result["result"]["ui_design"]["document"][
+        "components"
+    ][0]["id"]
+    token_result = registry.execute(
+        "paint.ui.token.add",
+        {"name": "Brand Primary", "kind": "color", "value": "#4267E8"},
+    ).to_dict()
+    assert token_result["ok"]
+    token_id = token_result["result"]["ui_design"]["document"]["tokens"][0]["id"]
+    bound = registry.execute(
+        "paint.ui.object.update",
+        {
+            "object_id": object_id,
+            "changes": {
+                "component_id": component_id,
+                "token_bindings": {"style.fill": token_id},
+            },
+        },
+    ).to_dict()
+    assert bound["ok"]
+    interaction_result = registry.execute(
+        "paint.ui.interaction.add",
+        {
+            "name": "Continue",
+            "source_object_id": object_id,
+            "trigger": "click",
+            "action": "change_state",
+            "target_object_id": object_id,
+            "component_id": component_id,
+            "parameters": {"state": "pressed"},
+        },
+    ).to_dict()
+    assert interaction_result["ok"]
 
     handoff_dir = tmp_path / "handoff"
     handoff = registry.execute(
@@ -143,7 +190,11 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     with zipfile.ZipFile(document_path, "r") as archive:
         stored = json.loads(archive.read("document.json"))
     assert stored["ui_document"]["schema"] == "tigerstudio.painter.ui.v1"
+    assert stored["ui_document"]["version"] == 2
     assert stored["ui_document"]["objects"][0]["name"] == "Continue"
+    assert stored["ui_document"]["components"][0]["id"] == component_id
+    assert stored["ui_document"]["tokens"][0]["id"] == token_id
+    assert stored["ui_document"]["interactions"][0]["source_object_id"] == object_id
     assert stored["workspace"]["mode"] == "ui_design"
 
     restored = PaintDialog(
@@ -160,6 +211,9 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         restored_state["ui_design"]["document"]["objects"][0]["content"]["text"]
         == "Continue"
     )
+    assert restored_state["ui_design"]["validation"]["component_count"] == 1
+    assert restored_state["ui_design"]["validation"]["token_count"] == 1
+    assert restored_state["ui_design"]["validation"]["interaction_count"] == 1
 
     dialog.close()
     restored.close()

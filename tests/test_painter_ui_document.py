@@ -345,3 +345,175 @@ def test_general_ui_document_preserves_unknown_kinds_for_explicit_preflight() ->
     preflight = preflight_ui_delivery(document, "design_handoff")
     assert preflight["ok"] is False
     assert preflight["objects"][0]["disposition"] == "blocked"
+
+
+def test_ui_v1_migration_types_records_and_preserves_stable_ids() -> None:
+    from app.painter_ui_document import (
+        UI_DOCUMENT_VERSION,
+        migrate_ui_document,
+        normalize_ui_document,
+    )
+
+    legacy = {
+        "schema": "tigerstudio.painter.ui.v1",
+        "version": 1,
+        "artboards": [{"id": "phone", "width": 390, "height": 844}],
+        "objects": [
+            {
+                "id": "button-continue",
+                "kind": "button",
+                "artboard_id": "phone",
+                "width": 200,
+                "height": 48,
+            }
+        ],
+        "components": [{"name": "Primary Button", "root_object_id": "button-continue"}],
+        "tokens": [{"name": "Brand", "kind": "color", "value": "#4267E8"}],
+        "interactions": [
+            {
+                "source_object_id": "button-continue",
+                "trigger": "click",
+                "action": "back",
+            }
+        ],
+    }
+    document, report = migrate_ui_document(legacy)
+    assert document["version"] == UI_DOCUMENT_VERSION == 2
+    assert report == {
+        "schema": "tigerstudio.painter.ui.migration.v1",
+        "from_version": 1,
+        "to_version": 2,
+        "changed": True,
+    }
+    assert document["components"][0]["id"] == "ui-component-1"
+    assert document["tokens"][0]["id"] == "ui-token-1"
+    assert document["interactions"][0]["id"] == "ui-interaction-1"
+    assert normalize_ui_document(document) == document
+
+
+def test_ui_component_token_interaction_crud_and_reference_guards() -> None:
+    import pytest
+
+    from app.painter_ui_document import (
+        PainterUIDocumentError,
+        add_ui_component,
+        add_ui_interaction,
+        add_ui_object,
+        add_ui_token,
+        create_ui_document,
+        remove_ui_component,
+        remove_ui_interaction,
+        remove_ui_token,
+        update_ui_component,
+        update_ui_interaction,
+        update_ui_object,
+        update_ui_token,
+        validate_ui_document,
+    )
+
+    document = create_ui_document(390, 844)
+    document, button = add_ui_object(document, kind="button", name="Continue")
+    document, component = add_ui_component(
+        document,
+        name="Primary Button",
+        root_object_id=button["id"],
+        property_definitions={"label": {"type": "string"}},
+    )
+    document, token = add_ui_token(
+        document,
+        name="Brand Primary",
+        kind="color",
+        token_value="#4267E8",
+        theme_values={"dark": "#6D8CFF"},
+    )
+    document, button = update_ui_object(
+        document,
+        button["id"],
+        {
+            "component_id": component["id"],
+            "token_bindings": {"style.fill": token["id"]},
+        },
+    )
+    document, interaction = add_ui_interaction(
+        document,
+        name="Continue",
+        source_object_id=button["id"],
+        trigger="click",
+        action="change_state",
+        target_object_id=button["id"],
+        component_id=component["id"],
+        parameters={"state": "pressed"},
+    )
+    assert validate_ui_document(document)["ok"] is True
+
+    document, component = update_ui_component(
+        document, component["id"], {"id": "changed", "description": "CTA"}
+    )
+    document, token = update_ui_token(
+        document, token["id"], {"id": "changed", "value": "#3158D8"}
+    )
+    document, interaction = update_ui_interaction(
+        document, interaction["id"], {"id": "changed", "enabled": False}
+    )
+    assert component["id"] == "ui-component-1"
+    assert token["id"] == "ui-token-1"
+    assert interaction["id"] == "ui-interaction-1"
+    assert interaction["enabled"] is False
+
+    with pytest.raises(PainterUIDocumentError, match="component is referenced"):
+        remove_ui_component(document, component["id"])
+    with pytest.raises(PainterUIDocumentError, match="token is referenced"):
+        remove_ui_token(document, token["id"])
+    document, _ = remove_ui_interaction(document, interaction["id"])
+    document, _ = remove_ui_component(
+        document, component["id"], detach_references=True
+    )
+    document, _ = remove_ui_token(document, token["id"], detach_references=True)
+    assert document["objects"][0]["component_id"] == ""
+    assert document["objects"][0]["token_bindings"] == {}
+    assert validate_ui_document(document)["ok"] is True
+
+
+def test_ui_validation_reports_cross_record_references_and_cycles() -> None:
+    from app.painter_ui_document import normalize_ui_document, validate_ui_document
+
+    document = normalize_ui_document(
+        {
+            "version": 2,
+            "artboards": [{"id": "same-id", "width": 800, "height": 600}],
+            "objects": [
+                {
+                    "id": "same-id",
+                    "kind": "button",
+                    "artboard_id": "same-id",
+                    "component_id": "missing-component",
+                    "token_bindings": {"style.fill": "missing-token"},
+                }
+            ],
+            "components": [
+                {"id": "component-a", "base_component_id": "component-b"},
+                {"id": "component-b", "base_component_id": "component-a"},
+            ],
+            "tokens": [
+                {"id": "token-a", "alias_token_id": "token-b"},
+                {"id": "token-b", "alias_token_id": "token-a"},
+            ],
+            "interactions": [
+                {
+                    "id": "interaction-a",
+                    "source_object_id": "missing-source",
+                    "trigger": "click",
+                    "action": "navigate",
+                    "target_artboard_id": "missing-artboard",
+                }
+            ],
+        }
+    )
+    errors = validate_ui_document(document)["errors"]
+    assert "duplicate_stable_id" in errors
+    assert "component_cycle:component-a" in errors
+    assert "token_alias_cycle:token-a" in errors
+    assert "missing_component:same-id:missing-component" in errors
+    assert "missing_token:same-id:style.fill:missing-token" in errors
+    assert "missing_interaction_source:interaction-a:missing-source" in errors
+    assert "missing_interaction_artboard:interaction-a:missing-artboard" in errors

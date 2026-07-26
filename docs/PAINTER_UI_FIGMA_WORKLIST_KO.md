@@ -1,6 +1,16 @@
 # Painter UI 전용 모드 작업 목록
 
-Status: canonical implementation backlog
+Status: canonical implementation backlog; P0 complete
+
+P0 implementation checkpoint (2026-07-26):
+
+- UI document version 2 defines typed component, token, and interaction records.
+- Stable IDs are preserved by update operations and assigned during v1 migration.
+- Parent, component, token, interaction, alias, and cycle references are validated.
+- Referenced component/token deletion is blocked unless explicit detachment is requested.
+- Painter Actions expose CRUD for all three record types.
+- Legacy `.tspaint` documents migrate through the shared normalization path and
+  typed records survive save/open round trips.
 
 관련 구현 현황:
 

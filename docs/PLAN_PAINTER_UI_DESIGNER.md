@@ -13,6 +13,10 @@ Unreal target engine: `D:\UE_5.8\Engine`
 
 Implementation checkpoint:
 
+- P0 document model is complete at UI document version 2: components, tokens,
+  and interactions are typed records with stable-ID CRUD, reference/cycle
+  validation, explicit referenced-delete handling, Action coverage, v1
+  migration, and `.tspaint` save/open round-trip tests.
 - M0 general UI document, validation, `.tspaint` persistence, Action/MCP,
   delivery preflight, and Design Handoff package are implemented.
 - M1 interactive editing now includes `Paint | UI Design | 3D Place`,

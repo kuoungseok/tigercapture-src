@@ -294,6 +294,180 @@ class PaintAdapterMixin:
         dialog._push_undo_state("Move UI hierarchy")
         return self._paint_ui_commit(dialog, "Move UI hierarchy", document)
 
+    def paint_ui_component_add(
+        self,
+        *,
+        name: str = "",
+        root_object_id: str = "",
+        base_component_id: str = "",
+        description: str = "",
+        property_definitions: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import add_ui_component
+
+        document, _row = add_ui_component(
+            dialog._painter_ui_document,
+            name=name,
+            root_object_id=root_object_id,
+            base_component_id=base_component_id,
+            description=description,
+            property_definitions=property_definitions,
+        )
+        dialog._push_undo_state("Add UI component")
+        return self._paint_ui_commit(dialog, "Add UI component", document)
+
+    def paint_ui_component_update(
+        self,
+        *,
+        component_id: str,
+        changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import update_ui_component
+
+        document, _row = update_ui_component(
+            dialog._painter_ui_document, component_id, changes
+        )
+        dialog._push_undo_state("Update UI component")
+        return self._paint_ui_commit(dialog, "Update UI component", document)
+
+    def paint_ui_component_remove(
+        self,
+        *,
+        component_id: str,
+        detach_references: bool = False,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import remove_ui_component
+
+        document, _result = remove_ui_component(
+            dialog._painter_ui_document,
+            component_id,
+            detach_references=detach_references,
+        )
+        dialog._push_undo_state("Remove UI component")
+        return self._paint_ui_commit(dialog, "Remove UI component", document)
+
+    def paint_ui_token_add(
+        self,
+        *,
+        name: str = "",
+        kind: str = "color",
+        value: Any = None,
+        theme_values: dict[str, Any] | None = None,
+        alias_token_id: str = "",
+        description: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import add_ui_token
+
+        document, _row = add_ui_token(
+            dialog._painter_ui_document,
+            name=name,
+            kind=kind,
+            token_value=value,
+            theme_values=theme_values,
+            alias_token_id=alias_token_id,
+            description=description,
+        )
+        dialog._push_undo_state("Add UI token")
+        return self._paint_ui_commit(dialog, "Add UI token", document)
+
+    def paint_ui_token_update(
+        self,
+        *,
+        token_id: str,
+        changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import update_ui_token
+
+        document, _row = update_ui_token(
+            dialog._painter_ui_document, token_id, changes
+        )
+        dialog._push_undo_state("Update UI token")
+        return self._paint_ui_commit(dialog, "Update UI token", document)
+
+    def paint_ui_token_remove(
+        self,
+        *,
+        token_id: str,
+        detach_references: bool = False,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import remove_ui_token
+
+        document, _result = remove_ui_token(
+            dialog._painter_ui_document,
+            token_id,
+            detach_references=detach_references,
+        )
+        dialog._push_undo_state("Remove UI token")
+        return self._paint_ui_commit(dialog, "Remove UI token", document)
+
+    def paint_ui_interaction_add(
+        self,
+        *,
+        name: str = "",
+        source_object_id: str = "",
+        trigger: str = "click",
+        action: str = "navigate",
+        target_artboard_id: str = "",
+        target_object_id: str = "",
+        component_id: str = "",
+        motion_clip_id: str = "",
+        parameters: dict[str, Any] | None = None,
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import add_ui_interaction
+
+        document, _row = add_ui_interaction(
+            dialog._painter_ui_document,
+            name=name,
+            source_object_id=source_object_id,
+            trigger=trigger,
+            action=action,
+            target_artboard_id=target_artboard_id,
+            target_object_id=target_object_id,
+            component_id=component_id,
+            motion_clip_id=motion_clip_id,
+            parameters=parameters,
+            enabled=enabled,
+        )
+        dialog._push_undo_state("Add UI interaction")
+        return self._paint_ui_commit(dialog, "Add UI interaction", document)
+
+    def paint_ui_interaction_update(
+        self,
+        *,
+        interaction_id: str,
+        changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import update_ui_interaction
+
+        document, _row = update_ui_interaction(
+            dialog._painter_ui_document, interaction_id, changes
+        )
+        dialog._push_undo_state("Update UI interaction")
+        return self._paint_ui_commit(dialog, "Update UI interaction", document)
+
+    def paint_ui_interaction_remove(
+        self,
+        *,
+        interaction_id: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_document import remove_ui_interaction
+
+        document, _result = remove_ui_interaction(
+            dialog._painter_ui_document, interaction_id
+        )
+        dialog._push_undo_state("Remove UI interaction")
+        return self._paint_ui_commit(dialog, "Remove UI interaction", document)
+
     def paint_ui_delivery_profiles(self) -> dict[str, Any]:
         from app.painter_ui_delivery import list_ui_delivery_profiles
 

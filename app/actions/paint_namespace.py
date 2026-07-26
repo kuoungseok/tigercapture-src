@@ -5,7 +5,13 @@ from typing import Any
 
 from app.actions.schema import schema_object
 from app.painter_brush_catalog import DESIGNER_BRUSH_STYLE_IDS
-from app.painter_ui_document import UI_DELIVERY_TARGETS, UI_OBJECT_KINDS
+from app.painter_ui_document import (
+    UI_DELIVERY_TARGETS,
+    UI_INTERACTION_ACTIONS,
+    UI_INTERACTION_TRIGGERS,
+    UI_OBJECT_KINDS,
+    UI_TOKEN_KINDS,
+)
 
 
 PAINT_ACTION_BRUSH_STYLES = tuple(
@@ -369,6 +375,133 @@ def register_paint_actions(registry: Any) -> None:
         required=("object_ids", "placement"),
         undo_label="Move UI hierarchy",
         dry_summary="selected Painter UI objects would move in the hierarchy",
+    )
+    for suffix, method, summary in (
+        ("component.update", "paint_ui_component_update", "a UI component would be updated"),
+        ("token.update", "paint_ui_token_update", "a UI token would be updated"),
+        ("interaction.update", "paint_ui_interaction_update", "a UI interaction would be updated"),
+    ):
+        id_key = suffix.split(".", 1)[0] + "_id"
+        registry.register_adapter_action(
+            f"paint.ui.{suffix}",
+            f"Update a typed Painter UI {suffix.split('.', 1)[0]} while preserving its stable ID.",
+            "paint",
+            method,
+            params_schema=schema_object(
+                {id_key: {"type": "string"}, "changes": any_object},
+                required=(id_key, "changes"),
+            ),
+            required=(id_key, "changes"),
+            undo_label=f"Update UI {suffix.split('.', 1)[0]}",
+            dry_summary=summary,
+        )
+    registry.register_adapter_action(
+        "paint.ui.component.add",
+        "Create a typed reusable component definition rooted at a Painter UI object.",
+        "paint",
+        "paint_ui_component_add",
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "root_object_id": {"type": "string"},
+                "base_component_id": {"type": "string"},
+                "description": {"type": "string"},
+                "property_definitions": any_object,
+            }
+        ),
+        undo_label="Add UI component",
+        dry_summary="a typed UI component would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.component.remove",
+        "Remove a component, blocking referenced deletion unless detachment is explicit.",
+        "paint",
+        "paint_ui_component_remove",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "detach_references": {"type": "boolean"},
+            },
+            required=("component_id",),
+        ),
+        required=("component_id",),
+        undo_label="Remove UI component",
+        dry_summary="a UI component would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.token.add",
+        "Create a typed design token with optional theme values or alias reference.",
+        "paint",
+        "paint_ui_token_add",
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "kind": {"type": "string", "enum": sorted(UI_TOKEN_KINDS)},
+                "value": {},
+                "theme_values": any_object,
+                "alias_token_id": {"type": "string"},
+                "description": {"type": "string"},
+            }
+        ),
+        undo_label="Add UI token",
+        dry_summary="a typed UI token would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.token.remove",
+        "Remove a token, blocking referenced deletion unless detachment is explicit.",
+        "paint",
+        "paint_ui_token_remove",
+        params_schema=schema_object(
+            {
+                "token_id": {"type": "string"},
+                "detach_references": {"type": "boolean"},
+            },
+            required=("token_id",),
+        ),
+        required=("token_id",),
+        undo_label="Remove UI token",
+        dry_summary="a UI token would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.interaction.add",
+        "Create a typed prototype interaction with validated source and target references.",
+        "paint",
+        "paint_ui_interaction_add",
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "source_object_id": {"type": "string"},
+                "trigger": {
+                    "type": "string",
+                    "enum": sorted(UI_INTERACTION_TRIGGERS),
+                },
+                "action": {
+                    "type": "string",
+                    "enum": sorted(UI_INTERACTION_ACTIONS),
+                },
+                "target_artboard_id": {"type": "string"},
+                "target_object_id": {"type": "string"},
+                "component_id": {"type": "string"},
+                "motion_clip_id": {"type": "string"},
+                "parameters": any_object,
+                "enabled": {"type": "boolean"},
+            }
+        ),
+        undo_label="Add UI interaction",
+        dry_summary="a typed UI interaction would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.interaction.remove",
+        "Remove a Painter UI interaction by stable ID.",
+        "paint",
+        "paint_ui_interaction_remove",
+        params_schema=schema_object(
+            {"interaction_id": {"type": "string"}},
+            required=("interaction_id",),
+        ),
+        required=("interaction_id",),
+        undo_label="Remove UI interaction",
+        dry_summary="a UI interaction would be removed",
     )
     registry.register_adapter_action(
         "paint.ui.delivery.profiles",
