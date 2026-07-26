@@ -38,6 +38,9 @@ Implementation checkpoint:
 - M1 canvas manipulation now includes marquee selection with additive/toggle
   modifiers, Shift aspect-locked resize, Alt center-based resize, and visible
   edge/center Smart Guides integrated with the existing snap control.
+- M1 artboard authoring now includes title-drag freeform positioning with Undo
+  and Inspector creation presets for mobile, desktop, console, and broadcast
+  targets.
 - Freeform multi-artboard overview placement, expanded Inspect editing, and
   broader responsive screenshot QA remain before M1 completion.
   M2-M6 remain milestone work.

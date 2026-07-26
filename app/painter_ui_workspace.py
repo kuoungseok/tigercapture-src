@@ -33,6 +33,7 @@ class PainterUIDesignOverlay(QWidget):
     object_create_requested = Signal(str, float, float, float, float)
     key_command = Signal(str, bool)
     artboard_activation_requested = Signal(str)
+    artboard_geometry_requested = Signal(str, float, float)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -57,6 +58,8 @@ class PainterUIDesignOverlay(QWidget):
         self._marquee_mode = "replace"
         self._guide_x: float | None = None
         self._guide_y: float | None = None
+        self._active_artboard_drag_id = ""
+        self._artboard_drag_origin = QPointF()
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
@@ -136,6 +139,10 @@ class PainterUIDesignOverlay(QWidget):
         ), scale
 
     def fit_all(self) -> None:
+    def _artboard_title_rect(self, artboard: Mapping[str, Any]) -> QRectF:
+        viewport, _scale = self._artboard_viewport(artboard)
+        return QRectF(viewport.left(), viewport.top() - 22.0, viewport.width(), 22.0)
+
         self._view_scale, self._view_offset = self._fit_transform(
             self._scene_bounds()
         )
@@ -511,6 +518,24 @@ class PainterUIDesignOverlay(QWidget):
 
         if self._tool in _CREATE_TOOLS:
             if not viewport.contains(self._press_position):
+        if self._tool == "select":
+            for artboard in reversed(self._document["artboards"]):
+                if self._artboard_title_rect(artboard).contains(event.position()):
+                    if artboard["id"] != self._document["active_artboard_id"]:
+                        self.artboard_activation_requested.emit(artboard["id"])
+                    scale, offset = self._view_transform()
+                    self._view_scale = scale
+                    self._view_offset = offset
+                    self._interaction = "artboard_move"
+                    self._active_artboard_drag_id = str(artboard["id"])
+                    self._artboard_drag_origin = QPointF(
+                        float(artboard["x"]),
+                        float(artboard["y"]),
+                    )
+                    self.setCursor(Qt.CursorShape.SizeAllCursor)
+                    event.accept()
+                    return
+
                 event.ignore()
                 return
             self._interaction = "create"
@@ -648,6 +673,26 @@ class PainterUIDesignOverlay(QWidget):
             artboard = self._active_artboard()
         if self._interaction == "marquee":
             self._preview_rect = QRectF(
+        if self._interaction == "artboard_move":
+            artboard = next(
+                row
+                for row in self._document["artboards"]
+                if row["id"] == self._active_artboard_drag_id
+            )
+            scale, _offset = self._view_transform()
+            delta = event.position() - self._press_position
+            artboard["x"] = self._snap(
+                self._artboard_drag_origin.x()
+                + delta.x() / max(0.0001, scale)
+            )
+            artboard["y"] = self._snap(
+                self._artboard_drag_origin.y()
+                + delta.y() / max(0.0001, scale)
+            )
+            self.update()
+            event.accept()
+            return
+
                 self._press_position,
                 event.position(),
             ).normalized()
@@ -803,6 +848,17 @@ class PainterUIDesignOverlay(QWidget):
                 if interaction == "move" and len(self._move_original_positions) > 1:
                     self.objects_changes_requested.emit(
                         {
+        elif interaction == "artboard_move" and self._active_artboard_drag_id:
+            artboard = next(
+                row
+                for row in self._document["artboards"]
+                if row["id"] == self._active_artboard_drag_id
+            )
+            self.artboard_geometry_requested.emit(
+                self._active_artboard_drag_id,
+                float(artboard["x"]),
+                float(artboard["y"]),
+            )
                             selected_id: {
                                 "x": float(selected_row["x"]),
                                 "y": float(selected_row["y"]),
@@ -836,6 +892,7 @@ class PainterUIDesignOverlay(QWidget):
         if not delta:
             event.ignore()
             return
+        self._active_artboard_drag_id = ""
         old_scale, old_offset = self._view_transform()
         anchor = QPointF(event.position())
         world = QPointF(

@@ -64,6 +64,7 @@ class PainterUILayerList(QListWidget):
 
 class PainterUIInspector(QWidget):
     artboard_selected = Signal(str)
+    artboard_add_requested = Signal(str, int, int, str)
     object_selected = Signal(str)
     selection_changed = Signal(object, str)
     geometry_changed = Signal(str, object)
@@ -92,6 +93,28 @@ class PainterUIInspector(QWidget):
         self.artboard_combo.setToolTip("Active UI artboard")
         self.artboard_combo.currentIndexChanged.connect(self._on_artboard_changed)
         root.addWidget(self.artboard_combo)
+        artboard_add_row = QHBoxLayout()
+        self.artboard_preset_combo = QComboBox()
+        for name, width, height, breakpoint in (
+            ("iPhone 390 x 844", 390, 844, "mobile"),
+            ("Android 412 x 915", 412, 915, "mobile"),
+            ("Desktop 1440 x 900", 1440, 900, "desktop"),
+            ("Console 1920 x 1080", 1920, 1080, "console"),
+            ("Broadcast 1920 x 1080", 1920, 1080, "broadcast"),
+        ):
+            self.artboard_preset_combo.addItem(
+                name,
+                (name.split(" ", 1)[0], width, height, breakpoint),
+            )
+        self.artboard_preset_combo.setToolTip("New artboard size")
+        add_artboard = QPushButton("+")
+        add_artboard.setFixedWidth(30)
+        add_artboard.setToolTip("Add artboard from preset")
+        add_artboard.setAccessibleName("Add artboard")
+        add_artboard.clicked.connect(self._emit_add_artboard)
+        artboard_add_row.addWidget(self.artboard_preset_combo, 1)
+        artboard_add_row.addWidget(add_artboard)
+        root.addLayout(artboard_add_row)
 
         tabs = QTabWidget()
         tabs.setDocumentMode(True)
@@ -327,6 +350,18 @@ class PainterUIInspector(QWidget):
         artboard_id = str(self.artboard_combo.currentData() or "")
         if artboard_id:
             self.artboard_selected.emit(artboard_id)
+
+    def _emit_add_artboard(self) -> None:
+        preset = self.artboard_preset_combo.currentData()
+        if not isinstance(preset, tuple) or len(preset) != 4:
+            return
+        name, width, height, breakpoint = preset
+        self.artboard_add_requested.emit(
+            str(name),
+            int(width),
+            int(height),
+            str(breakpoint),
+        )
 
     def _emit_geometry(self) -> None:
         if self._syncing or not self._selected_id():

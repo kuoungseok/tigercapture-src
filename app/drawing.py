@@ -7721,6 +7721,9 @@ class PaintDialog(QDialog):
         self._painter_ui_overlay.artboard_activation_requested.connect(
             self._set_painter_ui_artboard
         )
+        self._painter_ui_overlay.artboard_geometry_requested.connect(
+            self._update_painter_ui_artboard_position
+        )
         self._painter_ui_overlay.hide()
 
         self._bg_label = QLabel(canvas_host)
@@ -8160,6 +8163,9 @@ class PaintDialog(QDialog):
         )
         self._paint_ui_inspector.artboard_selected.connect(
             self._set_painter_ui_artboard
+        )
+        self._paint_ui_inspector.artboard_add_requested.connect(
+            self._add_painter_ui_artboard_preset
         )
         self._paint_ui_inspector.geometry_changed.connect(
             self._update_painter_ui_object_changes
@@ -10522,6 +10528,59 @@ class PaintDialog(QDialog):
             return
         self._push_undo_state("Switch UI artboard")
         self._painter_ui_document = set_active_ui_artboard(current, artboard_id)
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _update_painter_ui_artboard_position(
+        self,
+        artboard_id: str,
+        x: float,
+        y: float,
+    ) -> None:
+        from app.painter_ui_document import update_ui_artboard
+
+        current = getattr(self, "_painter_ui_document", None)
+        row = next(
+            (
+                item
+                for item in (current or {}).get("artboards", [])
+                if item.get("id") == artboard_id
+            ),
+            None,
+        )
+        if row is None:
+            return
+        if (
+            abs(float(row.get("x", 0.0)) - float(x)) < 0.001
+            and abs(float(row.get("y", 0.0)) - float(y)) < 0.001
+        ):
+            return
+        self._push_undo_state("Move UI artboard")
+        self._painter_ui_document, _updated = update_ui_artboard(
+            current,
+            str(artboard_id),
+            {"x": float(x), "y": float(y)},
+        )
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _add_painter_ui_artboard_preset(
+        self,
+        name: str,
+        width: int,
+        height: int,
+        breakpoint: str,
+    ) -> None:
+        from app.painter_ui_document import add_ui_artboard
+
+        self._push_undo_state("Add UI artboard")
+        self._painter_ui_document, _row = add_ui_artboard(
+            getattr(self, "_painter_ui_document", None),
+            name=str(name),
+            width=int(width),
+            height=int(height),
+            breakpoint=str(breakpoint),
+        )
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
 

@@ -26,6 +26,10 @@ P1 implementation checkpoint (2026-07-26, navigation slice):
 - Corner resize supports Shift aspect lock and Alt center-based scaling.
 - Grid snapping also evaluates peer edges and centers, snaps within a
   screen-space tolerance, and paints visible Smart Guides while moving.
+- Artboard title dragging moves frames in document space and persists the new
+  position through the same undoable artboard mutation service.
+- Inspector presets add iPhone, Android, desktop, console, and broadcast
+  artboards with deterministic non-overlapping placement.
 
 관련 구현 현황:
 
