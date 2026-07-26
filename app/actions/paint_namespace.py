@@ -74,6 +74,34 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="active Painter canvas would be replaced",
     )
     registry.register_adapter_action(
+        "paint.document.save",
+        (
+            "Save the complete editable Painter document, including layers, "
+            "Wet Canvas, references, and 3D blockout scene, as .tspaint."
+        ),
+        "paint",
+        "paint_document_save",
+        params_schema=schema_object({"path": {"type": "string"}}),
+        mutating=False,
+        changed=False,
+        dry_summary="active Painter document would be saved as .tspaint",
+    )
+    registry.register_adapter_action(
+        "paint.document.open",
+        (
+            "Open a .tspaint document and restore editable 2D and 3D Painter "
+            "state."
+        ),
+        "paint",
+        "paint_document_open",
+        params_schema=schema_object(
+            {"path": {"type": "string"}},
+            required=("path",),
+        ),
+        undo_label="Open Painter document",
+        dry_summary="active Painter document would be replaced from .tspaint",
+    )
+    registry.register_adapter_action(
         "paint.document.export_png",
         "Export the active Painter document to PNG.",
         "paint",

@@ -1833,6 +1833,20 @@ class DrawingCanvas(QWidget):
             for point in self._path_points
         ]
 
+    def set_path_snapshot(self, points: list[tuple[float, float]] | None) -> None:
+        w = max(1, self.width())
+        h = max(1, self.height())
+        self._path_points = [
+            QPointF(
+                max(0.0, min(1.0, float(point[0]))) * w,
+                max(0.0, min(1.0, float(point[1]))) * h,
+            )
+            for point in list(points or [])
+            if isinstance(point, (list, tuple)) and len(point) >= 2
+        ]
+        self.repaint_requested.emit()
+        self.update()
+
     def has_active_selection(self) -> bool:
         return len(self._selection_points) >= 3
 
@@ -6345,6 +6359,9 @@ class PaintDialog(QDialog):
         self._move_refresh_paused = False
         self._move_refresh_pause_enabled = False
         self._paint_layer_serial = 1
+        self._painter_document_path = ""
+        self._painter_document_asset_root = ""
+        self._painter_document_dirty = False
         self._paint_layers: list[PaintLayer] = [
             PaintLayer("paint-layer-1", "Layer 1")
         ]
@@ -6558,6 +6575,15 @@ class PaintDialog(QDialog):
 
         file_menu = menu_bar.addMenu("File")
         self._add_painter_menu_action(file_menu, "New Canvas...", self._open_new_canvas_dialog, "Ctrl+N")
+        self._add_painter_menu_action(file_menu, "Open...", self._prompt_open_painter_document, "Ctrl+O")
+        self._add_painter_menu_action(file_menu, "Save", self._prompt_save_painter_document, "Ctrl+S")
+        self._add_painter_menu_action(
+            file_menu,
+            "Save As...",
+            lambda: self._prompt_save_painter_document(save_as=True),
+            "Ctrl+Shift+S",
+        )
+        file_menu.addSeparator()
         self._add_painter_menu_action(file_menu, "Export PNG...", lambda: self._export_png_to_file(include_background=True), "Ctrl+Shift+E")
         self._add_painter_menu_action(file_menu, "Export Transparent PNG...", lambda: self._export_png_to_file(include_background=False))
         file_menu.addSeparator()
@@ -13669,6 +13695,7 @@ class PaintDialog(QDialog):
             str(getattr(self, "_painter_reference_selected_id", "")),
             copy.deepcopy(getattr(self, "_painter_3d_blockout_scene", None)),
             str(getattr(self, "_painter_3d_blockout_selected_id", "")),
+            self.canvas.path_snapshot() if hasattr(self, "canvas") else [],
         )
 
     def _push_undo_state(self, label: str = "Edit") -> None:
@@ -13682,6 +13709,7 @@ class PaintDialog(QDialog):
                 self._undo_labels.pop(0)
         self._redo_stack.clear()
         self._redo_labels.clear()
+        self._painter_document_dirty = True
         self._update_history_buttons()
 
     def _undo(self) -> None:
@@ -13707,6 +13735,7 @@ class PaintDialog(QDialog):
         snapshot,
     ) -> None:
         self._restoring_state = True
+        restored_work_path = copy.deepcopy(snapshot[21]) if len(snapshot) >= 22 else None
         try:
             strokes, bubbles, stickers = snapshot[:3]
             if len(snapshot) >= 6:
@@ -13737,12 +13766,12 @@ class PaintDialog(QDialog):
                 self._set_mirror_enabled(x=bool(snapshot[15]), y=bool(snapshot[16]))
             if len(snapshot) >= 18:
                 extra = snapshot[17]
-                if isinstance(extra, dict) and str(extra.get("schema") or "").endswith("reference_board.v1"):
-                    self._painter_reference_board = copy.deepcopy(extra)
-                    if len(snapshot) >= 19:
-                        self._painter_reference_selected_id = str(snapshot[18] or "")
-                    if len(snapshot) >= 20:
-                        self._painter_3d_blockout_scene = copy.deepcopy(snapshot[19])
+                if len(snapshot) >= 20:
+                    self._painter_reference_board = (
+                        copy.deepcopy(extra) if isinstance(extra, dict) else None
+                    )
+                    self._painter_reference_selected_id = str(snapshot[18] or "")
+                    self._painter_3d_blockout_scene = copy.deepcopy(snapshot[19])
                     if len(snapshot) >= 21:
                         self._painter_3d_blockout_selected_id = str(snapshot[20] or "")
                 else:
@@ -13769,6 +13798,8 @@ class PaintDialog(QDialog):
             self._spawn_initial_bubbles()
             self._spawn_initial_stickers()
             self._update_canvas_geometry()
+            if restored_work_path is not None:
+                self.canvas.set_path_snapshot(restored_work_path)
             self._refresh_reference_board_panel()
             self._refresh_3d_blockout_panel()
         finally:
@@ -16770,6 +16801,340 @@ class PaintDialog(QDialog):
     def result_stickers(self) -> list["Sticker"]:
         return list(self._stickers)
 
+    def _painter_background_png_bytes(self) -> bytes | None:
+        pixmap = getattr(self, "_bg_pixmap_source", QPixmap())
+        if pixmap is None or pixmap.isNull():
+            return None
+        from PySide6.QtCore import QBuffer
+
+        data = QByteArray()
+        buffer = QBuffer(data)
+        if not buffer.open(QBuffer.OpenModeFlag.WriteOnly):
+            return None
+        try:
+            if not pixmap.save(buffer, "PNG"):
+                return None
+        finally:
+            buffer.close()
+        return bytes(data)
+
+    def _painter_document_payload(self) -> dict:
+        return {
+            "document": {
+                "width": int(self._canvas_document_size[0]),
+                "height": int(self._canvas_document_size[1]),
+                "time_ms": int(self._time_ms),
+                "paint_layer_serial": int(self._paint_layer_serial),
+                "active_layer_id": str(self._active_paint_layer_id),
+                "selected_layer_id": str(self._selected_layer_id or ""),
+            },
+            "background": {
+                "present": bool(self._background_layer_present),
+                "color": self._background_color.name(QColor.NameFormat.HexRgb),
+            },
+            "layers": [asdict(layer) for layer in self._paint_layers],
+            "strokes": [
+                asdict(stroke)
+                for stroke in (
+                    self.canvas.embedded_strokes() if hasattr(self, "canvas") else []
+                )
+            ],
+            "bubbles": [asdict(bubble) for bubble in self._bubbles],
+            "stickers": [asdict(sticker) for sticker in self._stickers],
+            "selection": {
+                "points": (
+                    self.canvas.selection_snapshot() if hasattr(self, "canvas") else []
+                ),
+                "inverted": bool(
+                    self.canvas.selection_inverted() if hasattr(self, "canvas") else False
+                ),
+                "aspect_mode": str(self._selection_aspect_mode),
+                "combine_mode": str(self._selection_combine_mode),
+                "quick_mask": bool(self._quick_mask_enabled),
+            },
+            "paths": {
+                "work_path": (
+                    self.canvas.path_snapshot() if hasattr(self, "canvas") else []
+                ),
+                "selected_path_id": str(self._selected_path_item_id),
+            },
+            "channels": {
+                "visibility": dict(self._channel_visibility),
+                "selected": str(self._selected_channel),
+            },
+            "view": {
+                "zoom": float(self._canvas_zoom),
+                "pan": [int(self._canvas_pan.x()), int(self._canvas_pan.y())],
+                "grid_visible": bool(self._grid_visible),
+                "snap_to_grid": bool(self._snap_to_grid),
+                "grid_size_px": int(self._grid_size_px),
+                "mirror_x": bool(self._mirror_x_enabled),
+                "mirror_y": bool(self._mirror_y_enabled),
+            },
+            "brush": {
+                "color": self._pen_color.name(QColor.NameFormat.HexRgb),
+                "width": float(self._pen_width),
+                "opacity": int(self._pen_opacity),
+                "style": str(self._pen_style),
+                "detail": dict(self._brush_detail_settings),
+                "active_preset_index": int(self._active_brush_preset_index),
+            },
+            "material_preview": {
+                "enabled": bool(self._material_preview_enabled),
+                "azimuth_deg": float(self._material_preview_light_azimuth_deg),
+                "elevation_deg": float(self._material_preview_light_elevation_deg),
+            },
+            "pbr": {
+                "settings": dict(self._pbr_texture_settings),
+                "source_path": str(self._pbr_source_path or ""),
+            },
+            "reference_board": copy.deepcopy(self._painter_reference_board),
+            "reference_selected_id": str(self._painter_reference_selected_id),
+            "blockout_3d": copy.deepcopy(self._painter_3d_blockout_scene),
+            "blockout_selected_id": str(self._painter_3d_blockout_selected_id),
+            "workspace": {
+                "mode": str(self._canvas_workspace_mode),
+                "transform_mode": str(self._blockout_transform_mode),
+                "active_axis": str(self._blockout_active_axis),
+            },
+        }
+
+    def save_document_to_path(self, path: str | Path) -> dict:
+        from app.painter_document_io import save_painter_document
+
+        report = save_painter_document(
+            path,
+            self._painter_document_payload(),
+            background_png=self._painter_background_png_bytes(),
+        )
+        self._painter_document_path = str(report["path"])
+        self._painter_document_dirty = False
+        report["layer_count"] = len(self._paint_layers)
+        report["stroke_count"] = len(self.canvas.embedded_strokes())
+        report["blockout_primitive_count"] = len(
+            (
+                self._painter_3d_blockout_scene
+                if isinstance(self._painter_3d_blockout_scene, dict)
+                else {}
+            ).get("primitives", [])
+        )
+        self.setWindowTitle(f"{Path(report['path']).name} - Tiger Studio Painter")
+        return report
+
+    def _prompt_save_painter_document(self, *, save_as: bool = False) -> dict | None:
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        path = "" if save_as else str(self._painter_document_path or "")
+        if not path:
+            try:
+                from app.paths import default_save_dir
+
+                initial = default_save_dir() / "Untitled.tspaint"
+            except Exception:
+                initial = Path.home() / "Untitled.tspaint"
+            path, _selected = QFileDialog.getSaveFileName(
+                self,
+                "Save Tiger Studio Painter Document",
+                str(initial),
+                "Tiger Studio Painter (*.tspaint)",
+            )
+        if not path:
+            return None
+        try:
+            report = self.save_document_to_path(path)
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Save Painter Document",
+                f"Save failed: {type(exc).__name__}: {exc}",
+            )
+            return None
+        return report
+
+    def _prompt_open_painter_document(self) -> dict | None:
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        path, _selected = QFileDialog.getOpenFileName(
+            self,
+            "Open Tiger Studio Painter Document",
+            str(Path(self._painter_document_path).parent)
+            if self._painter_document_path
+            else str(Path.home()),
+            "Tiger Studio Painter (*.tspaint)",
+        )
+        if not path:
+            return None
+        try:
+            return self.open_document_from_path(path)
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Open Painter Document",
+                f"Open failed: {type(exc).__name__}: {exc}",
+            )
+            return None
+
+    def open_document_from_path(self, path: str | Path) -> dict:
+        from app.painter_document_io import load_painter_document
+
+        payload, report = load_painter_document(path)
+        document = payload.get("document")
+        if not isinstance(document, dict):
+            raise ValueError("Painter document state is missing")
+        layers = [
+            self._paint_layer_from_clipboard_dict(row)
+            for row in payload.get("layers") or []
+            if isinstance(row, dict)
+        ]
+        if not layers:
+            layers = [PaintLayer("paint-layer-1", "Layer 1")]
+        strokes = self._strokes_from_clipboard_list(payload.get("strokes"))
+        bubbles = [
+            self._bubble_from_clipboard_dict(row)
+            for row in payload.get("bubbles") or []
+            if isinstance(row, dict)
+        ]
+        stickers = [
+            self._sticker_from_clipboard_dict(row)
+            for row in payload.get("stickers") or []
+            if isinstance(row, dict)
+        ]
+        width = max(1, int(document.get("width", 1920) or 1920))
+        height = max(1, int(document.get("height", 1080) or 1080))
+        background = payload.get("background")
+        background = background if isinstance(background, dict) else {}
+        background_pixmap = QPixmap(str(background.get("asset") or ""))
+        if background_pixmap.isNull():
+            background_pixmap = create_blank_paint_pixmap(
+                width,
+                height,
+                str(background.get("color") or "transparent"),
+            )
+        selection = payload.get("selection")
+        selection = selection if isinstance(selection, dict) else {}
+        channels = payload.get("channels")
+        channels = channels if isinstance(channels, dict) else {}
+        paths = payload.get("paths")
+        paths = paths if isinstance(paths, dict) else {}
+        active_layer_id = str(
+            document.get("active_layer_id")
+            or layers[-1].layer_id
+        )
+        if not any(layer.layer_id == active_layer_id for layer in layers):
+            active_layer_id = layers[-1].layer_id
+        snapshot = (
+            strokes,
+            bubbles,
+            stickers,
+            layers,
+            active_layer_id,
+            str(document.get("selected_layer_id") or active_layer_id),
+            self._normalise_path_points(selection.get("points") or []),
+            bool(background.get("present", False)),
+            bool(selection.get("inverted", False)),
+            dict(channels.get("visibility") or {}),
+            str(paths.get("selected_path_id") or "work-path"),
+            (width, height),
+            background_pixmap,
+            str(channels.get("selected") or "RGB"),
+            str(selection.get("aspect_mode") or "free"),
+            bool((payload.get("view") or {}).get("mirror_x", False)),
+            bool((payload.get("view") or {}).get("mirror_y", False)),
+            copy.deepcopy(payload.get("reference_board")),
+            str(payload.get("reference_selected_id") or ""),
+            copy.deepcopy(payload.get("blockout_3d")),
+            str(payload.get("blockout_selected_id") or ""),
+            self._normalise_path_points(paths.get("work_path") or []),
+        )
+        self._restore_state(snapshot)
+        self._time_ms = int(document.get("time_ms", 0) or 0)
+        self._paint_layer_serial = max(
+            1,
+            int(document.get("paint_layer_serial", len(layers)) or len(layers)),
+        )
+        self._background_color = QColor(str(background.get("color") or "#FFFFFF"))
+        self._selection_combine_mode = str(selection.get("combine_mode") or "new")
+        self._quick_mask_enabled = bool(selection.get("quick_mask", False))
+        view = payload.get("view")
+        view = view if isinstance(view, dict) else {}
+        self._grid_visible = bool(view.get("grid_visible", False))
+        self._snap_to_grid = bool(view.get("snap_to_grid", False))
+        self._grid_size_px = max(2, int(view.get("grid_size_px", 64) or 64))
+        self._canvas_zoom = max(0.25, min(8.0, float(view.get("zoom", 1.0) or 1.0)))
+        pan = list(view.get("pan") or [0, 0])
+        self._canvas_pan = QPoint(
+            int(pan[0]) if len(pan) > 0 else 0,
+            int(pan[1]) if len(pan) > 1 else 0,
+        )
+        brush = payload.get("brush")
+        brush = brush if isinstance(brush, dict) else {}
+        self._pen_color = QColor(str(brush.get("color") or "#EEF2F7"))
+        self._pen_width = max(1.0, float(brush.get("width", 6.0) or 6.0))
+        self._pen_opacity = max(0, min(255, int(brush.get("opacity", 255) or 255)))
+        self._pen_style = _normalize_paint_brush_style(
+            str(brush.get("style") or "round")
+        )
+        self._brush_detail_settings.update(dict(brush.get("detail") or {}))
+        self._active_brush_preset_index = max(
+            0,
+            min(
+                len(BRUSH_LIBRARY_PRESETS) - 1,
+                int(brush.get("active_preset_index", 0) or 0),
+            ),
+        )
+        material_preview = payload.get("material_preview")
+        material_preview = (
+            material_preview if isinstance(material_preview, dict) else {}
+        )
+        self._material_preview_enabled = bool(
+            material_preview.get("enabled", False)
+        )
+        self._material_preview_light_azimuth_deg = float(
+            material_preview.get("azimuth_deg", -38.0) or -38.0
+        )
+        self._material_preview_light_elevation_deg = float(
+            material_preview.get("elevation_deg", 48.0) or 48.0
+        )
+        pbr = payload.get("pbr")
+        pbr = pbr if isinstance(pbr, dict) else {}
+        self._pbr_texture_settings.update(dict(pbr.get("settings") or {}))
+        self._pbr_source_path = str(pbr.get("source_path") or "")
+        workspace = payload.get("workspace")
+        workspace = workspace if isinstance(workspace, dict) else {}
+        self._canvas_workspace_mode = str(workspace.get("mode") or "paint")
+        self._blockout_transform_mode = str(
+            workspace.get("transform_mode") or "move"
+        )
+        self._blockout_active_axis = str(workspace.get("active_axis") or "")
+        self._painter_document_path = str(Path(path).resolve())
+        self._painter_document_asset_root = str(report.get("asset_root") or "")
+        self._painter_document_dirty = False
+        self._undo_stack.clear()
+        self._redo_stack.clear()
+        self._undo_labels.clear()
+        self._redo_labels.clear()
+        self._sync_canvas_layer_view()
+        self._sync_material_controls()
+        self._update_canvas_geometry()
+        self.canvas.set_path_snapshot(
+            self._normalise_path_points(paths.get("work_path") or [])
+        )
+        self._update_inspector_counts()
+        self._update_history_buttons()
+        self.setWindowTitle(
+            f"{Path(self._painter_document_path).name} - Tiger Studio Painter"
+        )
+        report["layer_count"] = len(layers)
+        report["stroke_count"] = len(strokes)
+        report["blockout_primitive_count"] = len(
+            (
+                self._painter_3d_blockout_scene
+                if isinstance(self._painter_3d_blockout_scene, dict)
+                else {}
+            ).get("primitives", [])
+        )
+        return report
+
     def export_png_to_path(
         self,
         path: str | Path,
@@ -16843,6 +17208,11 @@ class PaintDialog(QDialog):
                 "width": int(self._canvas_document_size[0]),
                 "height": int(self._canvas_document_size[1]),
                 "background_layer_present": bool(self._background_layer_present),
+                "path": str(getattr(self, "_painter_document_path", "") or ""),
+                "dirty": bool(getattr(self, "_painter_document_dirty", False)),
+                "native_format": "tigerstudio.painter.document.v1",
+                "native_extension": ".tspaint",
+                "persists_3d_blockout": True,
             },
             "view": {
                 "zoom_percent": int(round(float(getattr(self, "_canvas_zoom", 1.0)) * 100)),

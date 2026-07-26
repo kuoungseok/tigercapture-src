@@ -6550,6 +6550,18 @@ AI Script Edit MVP integration:
   keeping native material relief channels intact. Device calibration curves,
   persistent GPU wet-canvas fluid simulation, and validated physical pigment
   mixing remain later engine work.
+- The 2026-07-26 standalone Painter persistence pass adds the versioned
+  `.tspaint` single-file format (`tigerstudio.painter.document.v1`). It stores
+  background pixels, ordered layers/masks, editable strokes and tablet
+  channels, Material Paint, Wet Canvas state, selections, channels, Work
+  Paths, references and linked bitmap assets, brush/PBR settings, and the full
+  underdrawing 3D Blockout scene. The 3D payload retains primitives and
+  transforms, Z-up camera/FOV, floor/grid, Lit/shadow/fog/depth/light/snap
+  settings, selection, and transform mode. Open/Save/Save As and
+  `paint.document.open/save` share the same serializer. PNG remains flattened
+  output; legacy `.tgp` overlay fields are not claimed as a replacement for a
+  native Painter document. The detailed contract is
+  `docs/SPEC_PAINTER_DOCUMENT_FORMAT.md`.
 - The 2026-07-25 brush workspace pass follows the current Painter 2023 Brush
   Selector information architecture without copying proprietary brush
   resources. The selector uses a compact icon header rather than large text

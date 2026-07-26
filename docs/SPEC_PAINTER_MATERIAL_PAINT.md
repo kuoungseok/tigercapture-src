@@ -176,6 +176,16 @@ not synthesized from the wet RGB result.
 
 All mutations use the existing Painter undo stack.
 
+## Native Document Persistence
+
+Standalone Painter work is saved as a versioned `.tspaint` document rather
+than relying on flattened PNG output. The native document retains layer and
+mask structure, editable strokes, tablet channels, Material Paint, Wet Canvas
+drying state, selections, Work Paths, references, embedded bitmap assets, and
+the complete underdrawing 3D Blockout scene. File-menu Open/Save/Save As and
+`paint.document.open/save` use the same contract. See
+`docs/SPEC_PAINTER_DOCUMENT_FORMAT.md`.
+
 ## Compatibility And Performance
 
 - Existing strokes and clipboard payloads default to standard color behavior.

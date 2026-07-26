@@ -44,6 +44,19 @@ class PaintAdapterMixin:
         dialog._replace_canvas_document(int(width or 1920), int(height or 1080), str(background or "#FFFFFF"))
         return dialog.painter_action_state()
 
+    def paint_document_save(self, *, path: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        target = str(path or getattr(dialog, "_painter_document_path", "") or "")
+        if not target:
+            raise ValueError("paint.document.save requires path for an unsaved document")
+        return dialog.save_document_to_path(target)
+
+    def paint_document_open(self, *, path: str = "") -> dict[str, Any]:
+        if not str(path or "").strip():
+            raise ValueError("paint.document.open requires path")
+        dialog = self._paint_dialog_owner()
+        return dialog.open_document_from_path(path)
+
     def paint_document_export_png(
         self,
         *,
