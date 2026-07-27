@@ -7,11 +7,15 @@ from typing import Any, Mapping
 
 from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt
 from PySide6.QtGui import (
+    QBrush,
     QColor,
     QFont,
+    QGradient,
+    QLinearGradient,
     QPainter,
     QPainterPath,
     QPen,
+    QRadialGradient,
     QTextLayout,
     QTextOption,
 )
@@ -33,6 +37,56 @@ def ui_color(value: object, fallback: str = "#000000") -> QColor:
             pass
     color = QColor(text)
     return color if color.isValid() else QColor(fallback)
+
+
+def _gradient_point(
+    value: object,
+    fallback: tuple[float, float],
+) -> QPointF:
+    value = value if isinstance(value, Mapping) else {}
+    return QPointF(
+        float(value.get("x", fallback[0])),
+        float(value.get("y", fallback[1])),
+    )
+
+
+def _gradient_stops(value: object) -> list[tuple[float, QColor]]:
+    if not isinstance(value, list):
+        return []
+    stops: list[tuple[float, QColor]] = []
+    for row in value:
+        if not isinstance(row, Mapping):
+            continue
+        try:
+            position = max(0.0, min(1.0, float(row.get("position", 0.0))))
+        except (TypeError, ValueError):
+            position = 0.0
+        stops.append((position, ui_color(row.get("color"), "#00000000")))
+    return sorted(stops, key=lambda item: item[0])
+
+
+def ui_fill_brush(
+    style: Mapping[str, Any],
+    rect: QRectF | None = None,
+) -> QBrush:
+    gradient_style = style.get("fill_gradient")
+    if not isinstance(gradient_style, Mapping):
+        return QBrush(ui_color(style.get("fill"), "#506884"))
+    stops = _gradient_stops(gradient_style.get("stops"))
+    if not stops:
+        return QBrush(ui_color(style.get("fill"), "#506884"))
+    start = _gradient_point(gradient_style.get("start"), (0.0, 0.5))
+    end = _gradient_point(gradient_style.get("end"), (1.0, 0.5))
+    gradient_type = str(gradient_style.get("type") or "linear").casefold()
+    if gradient_type == "radial":
+        radius = math.hypot(end.x() - start.x(), end.y() - start.y())
+        gradient: QGradient = QRadialGradient(start, max(0.0001, radius))
+    else:
+        gradient = QLinearGradient(start, end)
+    gradient.setCoordinateMode(QGradient.CoordinateMode.ObjectBoundingMode)
+    for position, color in stops:
+        gradient.setColorAt(position, color)
+    return QBrush(gradient)
 
 
 def _svg_geometry_rows(value: object) -> list[dict[str, str]]:
@@ -89,10 +143,47 @@ def draw_ui_vector_paths(
     fill = ui_color(style.get("fill"), "#506884")
     stroke = ui_color(style.get("stroke"), "#00000000")
     stroke_width = max(0.0, float(style.get("stroke_width") or 0.0))
+    gradient_style = style.get("fill_gradient")
+    gradient_markup = ""
+    fill_value = fill.name()
+    fill_opacity = fill.alphaF()
+    if isinstance(gradient_style, Mapping):
+        stops = _gradient_stops(gradient_style.get("stops"))
+        start = _gradient_point(gradient_style.get("start"), (0.0, 0.5))
+        end = _gradient_point(gradient_style.get("end"), (1.0, 0.5))
+        if stops:
+            stop_markup = "".join(
+                (
+                    f'<stop offset="{position:.6f}" '
+                    f'stop-color="{color.name()}" '
+                    f'stop-opacity="{color.alphaF():.6f}"/>'
+                )
+                for position, color in stops
+            )
+            if str(gradient_style.get("type") or "").casefold() == "radial":
+                radius = math.hypot(
+                    end.x() - start.x(),
+                    end.y() - start.y(),
+                )
+                gradient_markup = (
+                    '<radialGradient id="uiFill" '
+                    f'cx="{start.x():.6f}" cy="{start.y():.6f}" '
+                    f'r="{max(0.0001, radius):.6f}">'
+                    f"{stop_markup}</radialGradient>"
+                )
+            else:
+                gradient_markup = (
+                    '<linearGradient id="uiFill" '
+                    f'x1="{start.x():.6f}" y1="{start.y():.6f}" '
+                    f'x2="{end.x():.6f}" y2="{end.y():.6f}">'
+                    f"{stop_markup}</linearGradient>"
+                )
+            fill_value = "url(#uiFill)"
+            fill_opacity = 1.0
     fill_markup = "".join(
         (
             f'<path d="{html.escape(row["path"], quote=True)}" '
-            f'fill="{fill.name()}" fill-opacity="{fill.alphaF():.6f}" '
+            f'fill="{fill_value}" fill-opacity="{fill_opacity:.6f}" '
             f'fill-rule="{row["fill_rule"]}" stroke="none"/>'
         )
         for row in fill_rows
@@ -126,6 +217,7 @@ def draw_ui_vector_paths(
         '<svg xmlns="http://www.w3.org/2000/svg" '
         f'width="{rect.width():.6f}" height="{rect.height():.6f}" '
         f'viewBox="0 0 {rect.width():.6f} {rect.height():.6f}">'
+        f"<defs>{gradient_markup}</defs>"
         f"{fill_markup}{stroke_markup}</svg>"
     )
     renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
@@ -333,6 +425,7 @@ def draw_ui_text_block(
 __all__ = [
     "draw_ui_object_shadow",
     "draw_ui_text_block",
+    "ui_fill_brush",
     "ui_color",
     "ui_font",
     "ui_text_alignment",

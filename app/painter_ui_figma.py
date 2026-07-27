@@ -211,6 +211,82 @@ def _solid_paint(paints: object) -> Mapping[str, Any] | None:
     )
 
 
+def _gradient_paint(paints: object) -> Mapping[str, Any] | None:
+    if not isinstance(paints, list):
+        return None
+    return next(
+        (
+            row
+            for row in paints
+            if isinstance(row, Mapping)
+            and row.get("visible", True)
+            and str(row.get("type") or "").upper()
+            in {"GRADIENT_LINEAR", "GRADIENT_RADIAL"}
+        ),
+        None,
+    )
+
+
+def _color_with_opacity(value: object, opacity: object = 1.0) -> str:
+    color = _color(value)
+    alpha = int(color[7:9], 16)
+    alpha = round(alpha * max(0.0, min(1.0, _number(opacity, 1.0))))
+    return f"{color[:7]}{max(0, min(255, alpha)):02X}"
+
+
+def _map_gradient(paint: Mapping[str, Any]) -> dict[str, Any]:
+    handles = (
+        paint.get("gradientHandlePositions")
+        if isinstance(paint.get("gradientHandlePositions"), list)
+        else []
+    )
+
+    def point(index: int, fallback: tuple[float, float]) -> dict[str, float]:
+        value = handles[index] if index < len(handles) else {}
+        value = value if isinstance(value, Mapping) else {}
+        return {
+            "x": _number(value.get("x"), fallback[0]),
+            "y": _number(value.get("y"), fallback[1]),
+        }
+
+    opacity = max(0.0, min(1.0, _number(paint.get("opacity"), 1.0)))
+    raw_stops = (
+        paint.get("gradientStops")
+        if isinstance(paint.get("gradientStops"), list)
+        else []
+    )
+    stops = sorted(
+        (
+            {
+                "position": max(
+                    0.0,
+                    min(1.0, _number(stop.get("position"))),
+                ),
+                "color": _color_with_opacity(stop.get("color"), opacity),
+            }
+            for stop in raw_stops
+            if isinstance(stop, Mapping)
+        ),
+        key=lambda row: row["position"],
+    )
+    if not stops:
+        stops = [
+            {"position": 0.0, "color": "#000000FF"},
+            {"position": 1.0, "color": "#00000000"},
+        ]
+    return {
+        "type": (
+            "radial"
+            if str(paint.get("type") or "").upper() == "GRADIENT_RADIAL"
+            else "linear"
+        ),
+        "start": point(0, (0.0, 0.5)),
+        "end": point(1, (1.0, 0.5)),
+        "width": point(2, (0.0, 1.0)),
+        "stops": stops,
+    }
+
+
 def _image_paint(paints: object) -> Mapping[str, Any] | None:
     if not isinstance(paints, list):
         return None
@@ -431,6 +507,7 @@ def _map_token_bindings(node: Mapping[str, Any]) -> dict[str, str]:
 
 def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
     fill = _solid_paint(node.get("fills"))
+    gradient = _gradient_paint(node.get("fills"))
     stroke = _solid_paint(node.get("strokes"))
     effects = node.get("effects") if isinstance(node.get("effects"), list) else []
     shadow = next(
@@ -472,6 +549,8 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
             ),
         ),
     }
+    if gradient is not None:
+        result["fill_gradient"] = _map_gradient(gradient)
     if str(node.get("type") or "").upper() == "TEXT":
         text_style = node.get("style")
         text_style = text_style if isinstance(text_style, Mapping) else {}
@@ -1576,6 +1655,21 @@ function color(value) {{
     b: parseInt(full.slice(4,6),16)/255, a: parseInt(full.slice(6,8),16)/255 }};
 }}
 function paint(value) {{ const c=color(value); return {{type:'SOLID',color:{{r:c.r,g:c.g,b:c.b}},opacity:c.a}}; }}
+function fillPaint(style) {{
+  const g=style.fill_gradient;
+  if(!g || !Array.isArray(g.stops) || !g.stops.length) return paint(style.fill||'#00000000');
+  const point=(value,fallback)=>({{x:Number(value?.x ?? fallback.x),y:Number(value?.y ?? fallback.y)}});
+  const start=point(g.start,{{x:0,y:0.5}}), end=point(g.end,{{x:1,y:0.5}});
+  const width=point(g.width,{{x:0,y:1}});
+  return {{
+    type:String(g.type||'linear').toLowerCase()==='radial'?'GRADIENT_RADIAL':'GRADIENT_LINEAR',
+    gradientHandlePositions:[start,end,width],
+    gradientStops:g.stops.map(stop=>{{
+      const c=color(stop.color);
+      return {{position:Math.max(0,Math.min(1,Number(stop.position)||0)),color:{{r:c.r,g:c.g,b:c.b,a:c.a}}}};
+    }})
+  }};
+}}
 function decode64(text) {{
   const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   let buffer=0,bits=0,out=[];
@@ -1593,7 +1687,7 @@ function applyFrame(node,row) {{
   node.visible=row.visible !== false; node.locked=!!row.locked;
   node.setSharedPluginData('tigerstudio','stable_id',row.id);
   const s=row.style||{{}};
-  if('fills' in node) node.fills=[paint(s.fill||'#00000000')];
+  if('fills' in node) node.fills=[fillPaint(s)];
   if('strokes' in node && s.stroke && !String(s.stroke).endsWith('00')) node.strokes=[paint(s.stroke)];
   if('strokeWeight' in node) node.strokeWeight=Math.max(0,Number(s.stroke_width)||0);
   if('cornerRadius' in node && typeof node.cornerRadius==='number') node.cornerRadius=Math.max(0,Number(s.radius)||0);

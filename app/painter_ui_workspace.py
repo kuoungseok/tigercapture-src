@@ -22,6 +22,7 @@ from app.painter_ui_style_renderer import (
     draw_ui_vector_paths,
     has_ui_vector_geometry,
     ui_color,
+    ui_fill_brush,
 )
 
 
@@ -499,7 +500,7 @@ class PainterUIDesignOverlay(QWidget):
             painter.restore()
             return
         draw_ui_object_shadow(painter, rect, kind, style, scale=scale)
-        fill = ui_color(style.get("fill"), "#506884")
+        fill = ui_fill_brush(style, rect)
         stroke = ui_color(style.get("stroke"), "#93A3B8")
         painter.setPen(
             QPen(

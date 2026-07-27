@@ -6781,6 +6781,12 @@ AI Script Edit MVP integration:
   returned by `geometry=paths` renders as SVG paths; snapshots that omit both
   fill and stroke geometry report `blocked:...:missing_geometry_paths` and
   never substitute misleading filled bounding boxes.
+- Figma linear and radial gradient fills preserve normalized handle positions,
+  sorted color stops, per-stop alpha, and paint opacity. The shared Painter
+  canvas renders the same gradient contract on ordinary geometry and imported
+  SVG paths. Figma development-plugin export restores editable
+  `GRADIENT_LINEAR` or `GRADIENT_RADIAL` paints rather than flattening them to
+  a sampled solid color.
 - Figma image fills map downloaded durable assets to the shared Painter
   `source_path` and Fit/Fill/Stretch/Tile contract. Missing image references
   remain explicit crossed placeholders and are reported by object ID and image

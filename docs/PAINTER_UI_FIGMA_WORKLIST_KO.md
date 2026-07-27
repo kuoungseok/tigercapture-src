@@ -60,6 +60,9 @@ P2 implementation checkpoint (2026-07-26, visual style slice):
 - General `shadow` applies to object geometry. Text uses explicit
   `text_shadow`; text objects inherit their general shadow as a text shadow,
   while button labels do not duplicate the button's box shadow.
+- Figma linear/radial gradient fills preserve normalized handles, stop colors,
+  alpha, and paint opacity. Ordinary shapes and imported SVG paths render from
+  the same contract, and Figma plugin export restores editable gradient paints.
 
 P2 implementation checkpoint (2026-07-26, responsive constraint slice):
 

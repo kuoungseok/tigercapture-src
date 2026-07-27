@@ -694,6 +694,143 @@ def test_figma_stroke_geometry_renders_without_a_filled_bounding_box() -> None:
     assert image.pixelColor(4, 4).alpha() == 0
 
 
+def test_figma_linear_and_radial_gradients_preserve_handles_and_stops() -> None:
+    from app.painter_ui_figma import import_figma_payload
+
+    payload = _figma_payload()
+    frame = payload["document"]["children"][0]["children"][0]
+    frame["children"].extend(
+        [
+            {
+                "id": "9:31",
+                "type": "RECTANGLE",
+                "name": "Linear gradient",
+                "absoluteBoundingBox": {
+                    "x": 140,
+                    "y": 240,
+                    "width": 120,
+                    "height": 60,
+                },
+                "fills": [
+                    {
+                        "type": "GRADIENT_LINEAR",
+                        "opacity": 0.5,
+                        "gradientHandlePositions": [
+                            {"x": 0.1, "y": 0.5},
+                            {"x": 0.9, "y": 0.5},
+                            {"x": 0.1, "y": 1.0},
+                        ],
+                        "gradientStops": [
+                            {
+                                "position": 0,
+                                "color": {"r": 1, "g": 0, "b": 0, "a": 1},
+                            },
+                            {
+                                "position": 1,
+                                "color": {"r": 0, "g": 0, "b": 1, "a": 0.8},
+                            },
+                        ],
+                    }
+                ],
+            },
+            {
+                "id": "9:32",
+                "type": "ELLIPSE",
+                "name": "Radial gradient",
+                "absoluteBoundingBox": {
+                    "x": 280,
+                    "y": 240,
+                    "width": 60,
+                    "height": 60,
+                },
+                "fills": [
+                    {
+                        "type": "GRADIENT_RADIAL",
+                        "gradientHandlePositions": [
+                            {"x": 0.5, "y": 0.5},
+                            {"x": 1.0, "y": 0.5},
+                            {"x": 0.5, "y": 1.0},
+                        ],
+                        "gradientStops": [
+                            {
+                                "position": 0,
+                                "color": {"r": 1, "g": 1, "b": 1, "a": 1},
+                            },
+                            {
+                                "position": 1,
+                                "color": {"r": 0, "g": 0, "b": 0, "a": 0},
+                            },
+                        ],
+                    }
+                ],
+            },
+        ]
+    )
+
+    document, report = import_figma_payload(payload, source="AbCdEf123456")
+
+    assert report["ok"] is True
+    linear = next(row for row in document["objects"] if row["name"] == "Linear gradient")
+    radial = next(row for row in document["objects"] if row["name"] == "Radial gradient")
+    assert linear["style"]["fill"] == "#00000000"
+    assert linear["style"]["fill_gradient"] == {
+        "type": "linear",
+        "start": {"x": 0.1, "y": 0.5},
+        "end": {"x": 0.9, "y": 0.5},
+        "width": {"x": 0.1, "y": 1.0},
+        "stops": [
+            {"position": 0.0, "color": "#FF000080"},
+            {"position": 1.0, "color": "#0000FF66"},
+        ],
+    }
+    assert radial["style"]["fill_gradient"]["type"] == "radial"
+
+
+def test_painter_gradient_brush_and_vector_path_render_distinct_stop_colors() -> None:
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    from app.painter_ui_style_renderer import draw_ui_vector_paths, ui_fill_brush
+
+    _app()
+    style = {
+        "fill": "#00000000",
+        "fill_gradient": {
+            "type": "linear",
+            "start": {"x": 0.0, "y": 0.5},
+            "end": {"x": 1.0, "y": 0.5},
+            "width": {"x": 0.0, "y": 1.0},
+            "stops": [
+                {"position": 0.0, "color": "#FF0000FF"},
+                {"position": 1.0, "color": "#0000FFFF"},
+            ],
+        },
+    }
+    image = QImage(80, 40, QImage.Format.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    painter.fillRect(QRectF(0, 0, 40, 40), ui_fill_brush(style))
+    assert draw_ui_vector_paths(
+        painter,
+        QRectF(40, 0, 40, 40),
+        {
+            "vector_fill_geometry": [
+                {
+                    "path": "M 0 0 L 40 0 L 40 40 L 0 40 Z",
+                    "winding_rule": "nonzero",
+                }
+            ]
+        },
+        style,
+    )
+    painter.end()
+
+    assert image.pixelColor(3, 20).red() > image.pixelColor(3, 20).blue()
+    assert image.pixelColor(36, 20).blue() > image.pixelColor(36, 20).red()
+    assert image.pixelColor(43, 20).red() > image.pixelColor(43, 20).blue()
+    assert image.pixelColor(76, 20).blue() > image.pixelColor(76, 20).red()
+
+
 def test_figma_image_asset_maps_to_shared_renderer_contract(tmp_path: Path) -> None:
     from app.painter_ui_figma import import_figma_payload
 
@@ -891,6 +1028,8 @@ def test_figma_export_creates_editable_plugin_bundle_with_embedded_image(
     assert "figma.combineAsVariants" in code
     assert "node.setProperties(values)" in code
     assert "ordered.filter(isInstanceRoot)" in code
+    assert "GRADIENT_LINEAR" in code
+    assert "gradientHandlePositions" in code
 
 
 def test_figma_export_preserves_component_family_and_variant_properties(
