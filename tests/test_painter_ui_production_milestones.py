@@ -251,6 +251,9 @@ def test_production_milestone_actions_share_document_and_undo(
         "paint.ui.prototype.trigger",
         "paint.ui.prototype.export",
         "paint.ui.assets.export",
+        "paint.ui.figma.compatibility.inspect",
+        "paint.ui.figma.import",
+        "paint.ui.figma.export",
         "paint.ui.umg.preflight",
         "paint.ui.umg.package",
         "paint.ui.umg.generate",
@@ -293,6 +296,12 @@ def test_production_milestone_actions_share_document_and_undo(
         },
     ).to_dict()
     assert assets["ok"]
+    figma = registry.execute(
+        "paint.ui.figma.export",
+        {"output_dir": str(tmp_path / "figma-action")},
+    ).to_dict()
+    assert figma["ok"]
+    assert Path(figma["result"]["manifest_path"]).is_file()
     umg = registry.execute("paint.ui.umg.preflight", {}).to_dict()
     assert umg["ok"]
     plan = registry.execute(

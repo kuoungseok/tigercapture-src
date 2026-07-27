@@ -299,6 +299,34 @@ Implementation checkpoint:
 - unsupported SVG/Painter effect가 명시적으로 raster/baked 분류
 - output pixel and metadata QA
 
+## M4A: Figma Exchange
+
+Status: official REST import and Plugin API export foundation implemented
+
+구현 체크포인트:
+
+- `Publish > Figma` 전용 탭
+- Figma Design URL/file key와 `file_content:read` 토큰으로 비동기 가져오기
+- REST JSON snapshot 오프라인 가져오기
+- Replace와 Append 모드, stable ID 충돌 remap, 한 단계 Undo
+- Frame/Text/Image/Vector, Constraint, Auto Layout, Component/Instance,
+  local Variable/Token binding, 지원되는 Prototype reaction 변환
+- 만료되는 Figma 이미지 URL을
+  `~/TigerStudio/PainterFigmaAssets`의 영속 에셋으로 다운로드
+- 토큰은 일회성 입력이며 Painter 문서나 설정에 저장하지 않음
+- Tiger 문서를 `figma_exchange.json`과 Figma development plugin으로 출력
+- 플러그인이 editable node, component/instance, variable binding,
+  Auto Layout, image, prototype link를 공식 Plugin API로 재생성
+- `paint.ui.figma.compatibility.inspect/import/export`
+
+경계:
+
+- `.fig`는 공개된 안정적 교환 포맷이 아니므로 직접 읽거나 생성하지 않는다.
+- REST에서 제공하지 않는 외부 라이브러리 원본과 복잡한 Figma 전용 효과는
+  `converted`, `baked`, `blocked` 중 하나로 보고한다.
+- Action 호출은 비밀 토큰을 파라미터로 기록하지 않고
+  `FIGMA_ACCESS_TOKEN` 환경 변수를 사용한다.
+
 ## M5: Unreal UMG Adapter
 
 Status: Painter adapter implemented; real UE compile/generation verified

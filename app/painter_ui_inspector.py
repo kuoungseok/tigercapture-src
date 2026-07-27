@@ -80,6 +80,8 @@ class PainterUIInspector(QWidget):
     review_export_requested = Signal(str)
     prototype_export_requested = Signal(str)
     assets_export_requested = Signal(str, object, object, bool)
+    figma_document_imported = Signal(object, str, object)
+    figma_export_requested = Signal(str)
     umg_preflight_requested = Signal()
     umg_package_requested = Signal(str)
     umg_generate_requested = Signal(str, str)
@@ -393,6 +395,8 @@ class PainterUIInspector(QWidget):
             (self.production_panel.review_export_requested, self.review_export_requested),
             (self.production_panel.prototype_export_requested, self.prototype_export_requested),
             (self.production_panel.assets_export_requested, self.assets_export_requested),
+            (self.production_panel.figma_document_imported, self.figma_document_imported),
+            (self.production_panel.figma_export_requested, self.figma_export_requested),
             (self.production_panel.umg_preflight_requested, self.umg_preflight_requested),
             (self.production_panel.umg_package_requested, self.umg_package_requested),
             (self.production_panel.umg_generate_requested, self.umg_generate_requested),

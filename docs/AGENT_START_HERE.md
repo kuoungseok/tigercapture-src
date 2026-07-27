@@ -59,6 +59,11 @@ Focused entry points:
   Cloud multi-user sync and broader template content remain optional follow-up
   scope. UE 5.8 generated and loaded an eight-widget Painter sample; refresh
   visible Unreal capture evidence before making screenshot-based release claims.
+  Painter Figma exchange lives in `app/painter_ui_figma.py` and
+  `app/painter_ui_figma_panel.py`. It uses official REST JSON for import and
+  exports a Figma development-plugin bundle; it must never claim native `.fig`
+  compatibility. Tokens are ephemeral or read from `FIGMA_ACCESS_TOKEN`, and
+  imported images belong under durable `~/TigerStudio/PainterFigmaAssets`.
 
 If two areas overlap, keep the product boundary from the focused docs. Do not
 merge UI renewal, review automation, and VTuber sidecar setup into one unbounded

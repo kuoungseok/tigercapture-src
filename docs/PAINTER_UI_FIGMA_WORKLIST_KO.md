@@ -296,6 +296,8 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
    `interactions.json`
 7. 사람이 읽을 수 있는 inspection report
 8. revision diff와 재생성 기록
+9. Figma URL/REST JSON을 editable Painter UI로 가져오고, 공식 Plugin API용
+   로컬 개발 플러그인 번들로 내보내기. 네이티브 `.fig` 직접 생성은 범위 밖
 
 ## P9. Unreal UMG
 

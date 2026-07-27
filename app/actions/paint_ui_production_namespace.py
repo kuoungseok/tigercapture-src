@@ -240,6 +240,32 @@ def register_paint_ui_production_actions(registry: Any) -> None:
     )
 
     read_action(
+        "paint.ui.figma.compatibility.inspect",
+        "Classify Painter UI objects for editable Figma Plugin export",
+        "paint_ui_figma_compatibility_inspect",
+        {},
+    )
+    undo_action(
+        "paint.ui.figma.import",
+        "Import a Figma URL or REST JSON snapshot as editable Painter UI",
+        "paint_ui_figma_import",
+        {
+            "source": {"type": "string"},
+            "mode": {"type": "string", "enum": ["replace", "append"]},
+            "json_snapshot": {"type": "boolean"},
+        },
+        required=("source",),
+        undo_label="Import Figma UI",
+    )
+    read_action(
+        "paint.ui.figma.export",
+        "Export an editable Figma development-plugin exchange bundle",
+        "paint_ui_figma_export",
+        {"output_dir": {"type": "string"}},
+        required=("output_dir",),
+    )
+
+    read_action(
         "paint.ui.umg.preflight",
         "Classify Painter objects for the shared TigerStudioUMG backend",
         "paint_ui_umg_preflight",

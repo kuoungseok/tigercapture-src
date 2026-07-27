@@ -31,6 +31,8 @@ class PainterUIProductionPanel(QWidget):
     review_export_requested = Signal(str)
     prototype_export_requested = Signal(str)
     assets_export_requested = Signal(str, object, object, bool)
+    figma_document_imported = Signal(object, str, object)
+    figma_export_requested = Signal(str)
     umg_preflight_requested = Signal()
     umg_package_requested = Signal(str)
     umg_generate_requested = Signal(str, str)
@@ -135,6 +137,13 @@ class PainterUIProductionPanel(QWidget):
         deliver_layout.addStretch(1)
         tabs.addTab(deliver, "Deliver")
 
+        from app.painter_ui_figma_panel import PainterUIFigmaPanel
+
+        self.figma_panel = PainterUIFigmaPanel()
+        self.figma_panel.document_imported.connect(self.figma_document_imported)
+        self.figma_panel.export_requested.connect(self.figma_export_requested)
+        tabs.addTab(self.figma_panel, "Figma")
+
         unreal = QWidget()
         unreal_layout = QVBoxLayout(unreal)
         unreal_layout.setContentsMargins(4, 4, 4, 4)
@@ -186,6 +195,7 @@ class PainterUIProductionPanel(QWidget):
 
     def set_document(self, value: Mapping[str, Any] | None) -> None:
         self._document = normalize_ui_document(value)
+        self.figma_panel.set_document(self._document)
         review = inspect_ui_review(self._document)
         self.review_list.clear()
         for row in review["comments"]:

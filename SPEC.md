@@ -6767,6 +6767,25 @@ AI Script Edit MVP integration:
   animation, and sound actions. Production delivery exports PNG/WebP/SVG,
   density variants, object slices, trim/padding, 9-slice, texture atlas, and
   resource hashes without silently omitting unsupported vector appearance.
+- Painter UI `Publish > Figma` provides editable Figma exchange without
+  pretending to read or forge the proprietary `.fig` archive. Import accepts a
+  Figma Design URL/file key through the official REST API or an offline REST
+  JSON snapshot. It converts pages/frames, geometry, text, solid/image fills,
+  constraints, Auto Layout, local components/instances, variables, token
+  bindings, and supported prototype reactions to stable Tiger IDs. Signed
+  image URLs are downloaded to durable user assets under
+  `~/TigerStudio/PainterFigmaAssets`; API tokens are used once and are never
+  persisted in `.tspaint`.
+- Figma export writes `TigerStudioFigmaExport`, containing
+  `figma_exchange.json`, a compatibility report, and a local development
+  plugin (`manifest.json` and `code.js`). Running that plugin in Figma Design
+  recreates editable frames, nodes, text, images, components/instances,
+  variables and bindings, Auto Layout, and supported prototype links through
+  the official Plugin API. Unsupported content is classified as
+  `native/converted/baked/blocked`; Motion actors are baked instead of silently
+  represented as editable Figma motion. UI and AI share
+  `paint.ui.figma.compatibility.inspect/import/export`. Automation reads
+  `FIGMA_ACCESS_TOKEN` rather than placing secrets in Action payloads.
 - Painter Unreal output uses the shared `TigerStudioUMG` backend through
   `paint.ui.umg.preflight/package/generate`; no Painter-specific Unreal plugin
   exists. Win64 Development/Shipping builds and real UE 5.8 generation were

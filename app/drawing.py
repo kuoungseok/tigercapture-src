@@ -8188,6 +8188,12 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.assets_export_requested.connect(
             self._export_painter_ui_assets
         )
+        self._paint_ui_inspector.figma_document_imported.connect(
+            self._apply_painter_ui_figma_import
+        )
+        self._paint_ui_inspector.figma_export_requested.connect(
+            self._export_painter_ui_figma
+        )
         self._paint_ui_inspector.umg_preflight_requested.connect(
             self._preflight_painter_ui_umg
         )
@@ -11200,6 +11206,48 @@ class PaintDialog(QDialog):
         )
         self._painter_ui_production_status(
             f"Assets exported: {report['manifest_path']}"
+        )
+
+    def _apply_painter_ui_figma_import(
+        self,
+        imported_document: object,
+        mode: str,
+        report: object,
+    ) -> None:
+        from app.painter_ui_figma import merge_figma_document
+
+        try:
+            document = merge_figma_document(
+                self._painter_ui_document,
+                imported_document if isinstance(imported_document, dict) else {},
+                mode=mode,
+            )
+        except Exception as exc:
+            self._painter_ui_production_status(f"Figma import failed: {exc}")
+            return
+        self._push_undo_state("Import Figma UI")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+        details = dict(report or {})
+        self._painter_ui_production_status(
+            f"Figma imported: {details.get('artboard_count', 0)} artboards, "
+            f"{details.get('object_count', 0)} objects"
+        )
+
+    def _export_painter_ui_figma(self, output_dir: str) -> None:
+        from app.painter_ui_figma import export_figma_plugin_package
+
+        try:
+            report = export_figma_plugin_package(
+                self._painter_ui_document,
+                output_dir,
+            )
+        except Exception as exc:
+            self._painter_ui_production_status(f"Figma export failed: {exc}")
+            return
+        self._painter_ui_production_status(
+            f"Figma plugin bundle: {report['manifest_path']}"
         )
 
     def _preflight_painter_ui_umg(self) -> None:
