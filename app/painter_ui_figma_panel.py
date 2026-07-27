@@ -5,6 +5,7 @@ import os
 from typing import Any, Mapping
 
 from PySide6.QtCore import QThread, Signal
+from PySide6.QtGui import QFontDatabase
 from PySide6.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -20,6 +21,7 @@ from app.painter_ui_figma import (
     import_figma_file,
     import_figma_json,
     inspect_figma_compatibility,
+    inspect_figma_resources,
 )
 
 
@@ -120,7 +122,39 @@ class PainterUIFigmaPanel(QWidget):
         self.compatibility_label = QLabel("No UI document")
         self.compatibility_label.setWordWrap(True)
         root.addWidget(self.compatibility_label)
+
+        self.resource_label = QLabel("Images and fonts have not been inspected.")
+        self.resource_label.setWordWrap(True)
+        self.resource_label.setObjectName("painterMutedLabel")
+        root.addWidget(self.resource_label)
         root.addStretch(1)
+
+    def _set_resource_summary(self, document: Mapping[str, Any]) -> None:
+        resources = inspect_figma_resources(
+            document,
+            available_font_families=QFontDatabase.families(),
+        )
+        missing_images = resources["missing_images"]
+        missing_fonts = resources["missing_fonts"]
+        if not missing_images and not missing_fonts:
+            self.resource_label.setText(
+                f"Resources ready: {resources['image_count']} images, "
+                f"{len(resources['requested_fonts'])} font families."
+            )
+            return
+        details: list[str] = []
+        if missing_images:
+            names = ", ".join(row["name"] for row in missing_images[:3])
+            details.append(
+                f"{len(missing_images)} missing images ({names}). "
+                "Import by Figma URL to download signed assets."
+            )
+        if missing_fonts:
+            details.append(
+                f"{len(missing_fonts)} missing fonts "
+                f"({', '.join(missing_fonts[:4])}). Install or replace them."
+            )
+        self.resource_label.setText(" ".join(details))
 
     def set_document(self, value: Mapping[str, Any] | None) -> None:
         self._document = dict(value or {})
@@ -132,6 +166,7 @@ class PainterUIFigmaPanel(QWidget):
             f"{counts['baked']} baked | {counts['blocked']} blocked"
         )
         self.export_button.setEnabled(counts["blocked"] == 0)
+        self._set_resource_summary(self._document)
 
     def set_busy(self, busy: bool) -> None:
         self.import_button.setEnabled(not busy)
@@ -181,6 +216,8 @@ class PainterUIFigmaPanel(QWidget):
             f"Imported {row.get('artboard_count', 0)} artboards and "
             f"{row.get('object_count', 0)} editable objects."
         )
+        if isinstance(document, Mapping):
+            self._set_resource_summary(document)
 
     def _import_failed(self, message: str) -> None:
         self.compatibility_label.setText(f"Figma import failed: {message}")

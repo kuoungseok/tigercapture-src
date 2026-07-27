@@ -6781,6 +6781,12 @@ AI Script Edit MVP integration:
   returned by `geometry=paths` renders as SVG paths; snapshots that omit both
   fill and stroke geometry report `blocked:...:missing_geometry_paths` and
   never substitute misleading filled bounding boxes.
+- Figma image fills map downloaded durable assets to the shared Painter
+  `source_path` and Fit/Fill/Stretch/Tile contract. Missing image references
+  remain explicit crossed placeholders and are reported by object ID and image
+  reference. The Figma panel compares requested text families with locally
+  installed fonts and reports missing families instead of silently presenting
+  fallback typography as an exact import.
 - Figma export writes `TigerStudioFigmaExport`, containing
   `figma_exchange.json`, a compatibility report, and a local development
   plugin (`manifest.json` and `code.js`). Running that plugin in Figma Design

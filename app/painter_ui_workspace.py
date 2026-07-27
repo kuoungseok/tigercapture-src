@@ -534,6 +534,13 @@ class PainterUIDesignOverlay(QWidget):
             if not draw_ui_image(painter, rect, row.get("content")):
                 painter.drawLine(rect.topLeft(), rect.bottomRight())
                 painter.drawLine(rect.topRight(), rect.bottomLeft())
+                content = row.get("content", {})
+                if isinstance(content, Mapping) and content.get("image_ref"):
+                    painter.drawText(
+                        rect.adjusted(6.0, 6.0, -6.0, -6.0),
+                        Qt.AlignmentFlag.AlignCenter,
+                        "Missing Figma image",
+                    )
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(rect, radius, radius)
         elif kind == "path":

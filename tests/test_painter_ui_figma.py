@@ -407,6 +407,87 @@ def test_figma_stroke_geometry_renders_without_a_filled_bounding_box() -> None:
     assert image.pixelColor(4, 4).alpha() == 0
 
 
+def test_figma_image_asset_maps_to_shared_renderer_contract(tmp_path: Path) -> None:
+    from app.painter_ui_figma import import_figma_payload
+
+    image_path = tmp_path / "hero.png"
+    image_path.write_bytes(b"fixture")
+    payload = _figma_payload()
+    frame = payload["document"]["children"][0]["children"][0]
+    frame["children"].append(
+        {
+            "id": "9:4",
+            "type": "RECTANGLE",
+            "name": "Hero image",
+            "absoluteBoundingBox": {
+                "x": 140,
+                "y": 240,
+                "width": 240,
+                "height": 120,
+            },
+            "fills": [
+                {
+                    "type": "IMAGE",
+                    "imageRef": "hero-ref",
+                    "scaleMode": "FILL",
+                }
+            ],
+        }
+    )
+
+    document, report = import_figma_payload(
+        payload,
+        source="AbCdEf123456",
+        image_paths={"hero-ref": str(image_path)},
+    )
+
+    image = next(row for row in document["objects"] if row["name"] == "Hero image")
+    assert image["kind"] == "image"
+    assert image["content"]["source_path"] == str(image_path)
+    assert image["content"]["image_fit"] == "fill"
+    assert image["content"]["image_status"] == "ready"
+    assert report["resources"]["missing_image_count"] == 0
+
+
+def test_figma_missing_images_and_fonts_are_reported() -> None:
+    from app.painter_ui_figma import import_figma_payload, inspect_figma_resources
+
+    payload = _figma_payload()
+    frame = payload["document"]["children"][0]["children"][0]
+    frame["children"].append(
+        {
+            "id": "9:5",
+            "type": "RECTANGLE",
+            "name": "Missing hero",
+            "absoluteBoundingBox": {
+                "x": 140,
+                "y": 240,
+                "width": 240,
+                "height": 120,
+            },
+            "fills": [
+                {
+                    "type": "IMAGE",
+                    "imageRef": "missing-ref",
+                    "scaleMode": "FIT",
+                }
+            ],
+        }
+    )
+    frame["children"][0]["children"][0]["style"]["fontFamily"] = "Rare Figma Font"
+
+    document, report = import_figma_payload(payload, source="AbCdEf123456")
+    resources = inspect_figma_resources(
+        document,
+        available_font_families={"Arial", "Inter"},
+    )
+
+    assert "blocked:9:5:IMAGE:missing_asset:missing-ref" in report["warnings"]
+    assert resources["missing_image_count"] == 1
+    assert resources["missing_images"][0]["name"] == "Missing hero"
+    assert resources["missing_fonts"] == ["Rare Figma Font"]
+
+
 def test_figma_append_remaps_stable_ids_without_collisions() -> None:
     from app.painter_ui_figma import import_figma_payload, merge_figma_document
 
@@ -468,3 +549,4 @@ def test_painter_publish_panel_exposes_figma_tab() -> None:
     labels = [tabs.tabText(index) for index in range(tabs.count())]
     assert "Figma" in labels
     assert panel.figma_panel.token_edit.echoMode().name == "Password"
+    assert panel.figma_panel.resource_label.wordWrap() is True

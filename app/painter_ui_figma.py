@@ -327,12 +327,23 @@ def _map_content(
     image = _image_paint(node.get("fills"))
     if image is not None:
         image_ref = str(image.get("imageRef") or "")
+        local_path = str(image_paths.get(image_ref) or "")
+        scale_mode = str(image.get("scaleMode") or "FILL").upper()
+        image_fit = {
+            "FIT": "fit",
+            "FILL": "fill",
+            "STRETCH": "stretch",
+            "TILE": "tile",
+        }.get(scale_mode, "fill")
         result.update(
             {
                 "image_ref": image_ref,
                 "image_url": str(image_urls.get(image_ref) or ""),
-                "image_path": str(image_paths.get(image_ref) or ""),
-                "image_mode": str(image.get("scaleMode") or "FILL").casefold(),
+                "image_path": local_path,
+                "source_path": local_path,
+                "image_mode": scale_mode.casefold(),
+                "image_fit": image_fit,
+                "image_status": "ready" if local_path else "missing",
             }
         )
     fill_geometry = node.get("fillGeometry")
@@ -524,6 +535,15 @@ def import_figma_payload(
                         warnings.append(
                             f"blocked:{node.get('id')}:VECTOR:"
                             "missing_geometry_paths"
+                        )
+                    if (
+                        kind == "image"
+                        and content.get("image_ref")
+                        and not content.get("source_path")
+                    ):
+                        warnings.append(
+                            f"blocked:{node.get('id')}:IMAGE:missing_asset:"
+                            f"{content.get('image_ref')}"
                         )
                     role = "none"
                     component_id = ""
@@ -770,12 +790,78 @@ def import_figma_payload(
         "warnings": warnings + list(validation["warnings"]),
         "errors": list(validation["errors"]),
     }
+    report["resources"] = inspect_figma_resources(document)
     if report["errors"]:
         raise PainterUIFigmaError(
             "Figma conversion produced an invalid document: "
             + ", ".join(report["errors"][:5])
         )
     return document, report
+
+
+def inspect_figma_resources(
+    document: Mapping[str, Any],
+    *,
+    available_font_families: object = None,
+) -> dict[str, Any]:
+    normalized = normalize_ui_document(document)
+    available = (
+        {
+            str(name).strip().casefold()
+            for name in available_font_families
+            if str(name).strip()
+        }
+        if isinstance(available_font_families, (list, tuple, set, frozenset))
+        else None
+    )
+    missing_images: list[dict[str, str]] = []
+    image_count = 0
+    requested_fonts: set[str] = set()
+    for row in normalized.get("objects", []):
+        kind = str(row.get("kind") or "")
+        content = row.get("content")
+        content = content if isinstance(content, Mapping) else {}
+        if kind == "image":
+            image_count += 1
+            path_text = str(
+                content.get("source_path")
+                or content.get("image_path")
+                or content.get("path")
+                or ""
+            ).strip()
+            if not path_text or not Path(path_text).expanduser().is_file():
+                missing_images.append(
+                    {
+                        "object_id": str(row.get("id") or ""),
+                        "name": str(row.get("name") or "Image"),
+                        "image_ref": str(content.get("image_ref") or ""),
+                        "path": path_text,
+                    }
+                )
+        if kind == "text":
+            style = row.get("style")
+            style = style if isinstance(style, Mapping) else {}
+            family = str(
+                style.get("font_family")
+                or content.get("font_family")
+                or ""
+            ).strip()
+            if family:
+                requested_fonts.add(family)
+    missing_fonts = sorted(
+        family
+        for family in requested_fonts
+        if available is not None and family.casefold() not in available
+    )
+    return {
+        "schema": "tigerstudio.painter.ui.figma_resources.v1",
+        "image_count": image_count,
+        "missing_image_count": len(missing_images),
+        "missing_images": missing_images,
+        "requested_fonts": sorted(requested_fonts),
+        "missing_font_count": len(missing_fonts),
+        "missing_fonts": missing_fonts,
+    }
 
 
 def _request_json(
@@ -1256,6 +1342,7 @@ __all__ = [
     "import_figma_file",
     "import_figma_json",
     "import_figma_payload",
+    "inspect_figma_resources",
     "inspect_figma_compatibility",
     "merge_figma_document",
 ]
