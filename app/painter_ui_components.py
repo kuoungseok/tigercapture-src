@@ -25,6 +25,8 @@ _STRUCTURAL_FIELDS = {
     "instance_overrides",
     "component_properties",
     "component_property_bindings",
+    "component_scope_id",
+    "component_scope_source_object_id",
 }
 
 
@@ -149,10 +151,25 @@ def _component_source_map(
         if result:
             return result
     root_id = str(component.get("root_object_id") or "")
-    return {
-        source_id: source_id
-        for source_id in _subtree_ids(document, root_id)
-    }
+    objects = {row["id"]: row for row in document["objects"]}
+    result: dict[str, str] = {}
+
+    def visit(source_id: str, path: str) -> None:
+        result[path] = source_id
+        children = [
+            row
+            for row in document["objects"]
+            if str(row.get("parent_id") or "") == source_id
+        ]
+        children.sort(
+            key=lambda row: (int(row.get("z_index") or 0), str(row["id"]))
+        )
+        for index, child in enumerate(children):
+            visit(str(child["id"]), f"{path}/{index}")
+
+    if root_id in objects:
+        visit(root_id, "root")
+    return result
 
 
 def _next_id(prefix: str, rows: list[Mapping[str, Any]]) -> str:
@@ -178,6 +195,33 @@ def _subtree_ids(document: Mapping[str, Any], root_id: str) -> list[str]:
 
     visit(str(root_id))
     return ordered
+
+
+def _component_scope_source_id(
+    row: Mapping[str, Any],
+    component_id: str,
+) -> str:
+    if str(row.get("component_scope_id") or "") == str(component_id):
+        return str(row.get("component_scope_source_object_id") or "")
+    return str(row.get("component_source_object_id") or "")
+
+
+def _nested_instance_ancestor(
+    row: Mapping[str, Any],
+    objects: Mapping[str, Mapping[str, Any]],
+    *,
+    outer_component_id: str,
+    outer_root_id: str,
+) -> Mapping[str, Any] | None:
+    current: Mapping[str, Any] | None = row
+    while current is not None and str(current.get("id") or "") != outer_root_id:
+        if (
+            str(current.get("component_role") or "") == "instance"
+            and str(current.get("component_id") or "") != outer_component_id
+        ):
+            return current
+        current = objects.get(str(current.get("parent_id") or ""))
+    return None
 
 
 def _flatten_changes(
@@ -276,12 +320,27 @@ def convert_ui_object_to_component(
         property_definitions=default_ui_component_property_definitions(),
     )
     member_ids = set(_subtree_ids(document, str(root_object_id)))
+    original_objects = {
+        row["id"]: copy.deepcopy(row) for row in document["objects"]
+    }
     for row in document["objects"]:
         if row["id"] not in member_ids:
+            continue
+        nested = _nested_instance_ancestor(
+            original_objects[row["id"]],
+            original_objects,
+            outer_component_id=component["id"],
+            outer_root_id=str(root_object_id),
+        )
+        if nested is not None:
+            row["component_scope_id"] = component["id"]
+            row["component_scope_source_object_id"] = row["id"]
             continue
         row["component_id"] = component["id"]
         row["component_role"] = "definition"
         row["component_source_object_id"] = row["id"]
+        row["component_scope_id"] = ""
+        row["component_scope_source_object_id"] = ""
         row["instance_overrides"] = {}
         row["component_properties"] = {}
     validation = validate_ui_document(document)
@@ -353,9 +412,21 @@ def instantiate_ui_component(
         clone["y"] = float(source["y"]) + offset_y
         clone["z_index"] = next_z
         next_z += 1
-        clone["component_id"] = component_id
-        clone["component_role"] = "instance"
-        clone["component_source_object_id"] = source["id"]
+        nested = _nested_instance_ancestor(
+            source,
+            objects,
+            outer_component_id=component_id,
+            outer_root_id=source_root["id"],
+        )
+        if nested is not None:
+            clone["component_scope_id"] = component_id
+            clone["component_scope_source_object_id"] = source["id"]
+        else:
+            clone["component_id"] = component_id
+            clone["component_role"] = "instance"
+            clone["component_source_object_id"] = source["id"]
+            clone["component_scope_id"] = ""
+            clone["component_scope_source_object_id"] = ""
         clone["instance_overrides"] = {}
         clone["component_property_bindings"] = {}
         clone["component_properties"] = (
@@ -418,12 +489,14 @@ def sync_ui_component_instances(
     for instance_root in instance_roots:
         by_id = {row["id"]: index for index, row in enumerate(document["objects"])}
         member_ids = _subtree_ids(document, instance_root["id"])
-        members = {
-            document["objects"][by_id[object_id]]["component_source_object_id"]:
-            document["objects"][by_id[object_id]]
-            for object_id in member_ids
-            if object_id in by_id
-        }
+        members: dict[str, dict[str, Any]] = {}
+        for object_id in member_ids:
+            if object_id not in by_id:
+                continue
+            member = document["objects"][by_id[object_id]]
+            source_key = _component_scope_source_id(member, component_id)
+            if source_key:
+                members[source_key] = member
         stale_ids = {
             row["id"]
             for source_id, row in members.items()
@@ -464,6 +537,22 @@ def sync_ui_component_instances(
                 instance["component_id"] = component_id
                 instance["component_role"] = "instance"
                 instance["component_source_object_id"] = source_id
+                instance["component_scope_id"] = ""
+                instance["component_scope_source_object_id"] = ""
+                nested = _nested_instance_ancestor(
+                    source,
+                    sources,
+                    outer_component_id=component_id,
+                    outer_root_id=source_root["id"],
+                )
+                if nested is not None:
+                    instance["component_id"] = source["component_id"]
+                    instance["component_role"] = source["component_role"]
+                    instance["component_source_object_id"] = source[
+                        "component_source_object_id"
+                    ]
+                    instance["component_scope_id"] = component_id
+                    instance["component_scope_source_object_id"] = source_id
                 instance["instance_overrides"] = {}
                 instance["component_properties"] = {}
                 document["objects"].append(instance)
@@ -645,8 +734,12 @@ def switch_ui_component_instance_variant(
     target_component = components.get(str(target_component_id))
     if current_component is None or target_component is None:
         raise PainterUIDocumentError("Component variant target is missing")
-    if _component_family_id(current_component) != _component_family_id(
-        target_component
+    nested_scope_id = str(instance_root.get("component_scope_id") or "")
+    if (
+        not nested_scope_id
+        and _component_family_id(current_component) != _component_family_id(
+            target_component
+        )
     ):
         raise PainterUIDocumentError("Component variants belong to different families")
     target_root = objects.get(target_component["root_object_id"])
@@ -704,6 +797,8 @@ def switch_ui_component_instance_variant(
         parent_source = str(source["parent_id"] or "")
         parent_canonical = target_inverse.get(parent_source, "")
         row["parent_id"] = instance_id_by_canonical.get(parent_canonical, "")
+        if source_id == target_root["id"] and nested_scope_id:
+            row["parent_id"] = str(instance_root.get("parent_id") or "")
         row["artboard_id"] = instance_root["artboard_id"]
         row["z_index"] = int(existing["z_index"]) if existing else next_z
         if existing is None:
@@ -713,6 +808,12 @@ def switch_ui_component_instance_variant(
         row["component_id"] = target_component["id"]
         row["component_role"] = "instance"
         row["component_source_object_id"] = source_id
+        row["component_scope_id"] = nested_scope_id
+        row["component_scope_source_object_id"] = (
+            str((existing or {}).get("component_scope_source_object_id") or "")
+            if nested_scope_id
+            else ""
+        )
         row["instance_overrides"] = copy.deepcopy(
             (existing or {}).get("instance_overrides") or {}
         )
@@ -996,10 +1097,47 @@ def set_ui_instance_component_property(
             raise PainterUIDocumentError(
                 f"Invalid component property value: {property_name}={property_value}"
             )
+    if definition["type"] == "instance_swap" and str(property_value) not in {
+        row["id"] for row in document["components"]
+    }:
+        raise PainterUIDocumentError(
+            f"Invalid component swap target: {property_name}={property_value}"
+        )
     properties = component_property_defaults(component)
     properties.update(normalize_ui_component_properties(root.get("component_properties")))
     properties[str(property_name)] = copy.deepcopy(property_value)
     root["component_properties"] = properties
+    if definition["type"] == "instance_swap":
+        component_sources = set(
+            _subtree_ids(document, component["root_object_id"])
+        )
+        bound_source_ids = {
+            row["id"]
+            for row in document["objects"]
+            if row["id"] in component_sources
+            and normalize_ui_component_property_bindings(
+                row.get("component_property_bindings")
+            ).get("component_id")
+            == str(property_name)
+        }
+        nested_roots = [
+            row["id"]
+            for row in document["objects"]
+            if row["id"] in set(_subtree_ids(document, root["id"]))
+            and row["component_scope_id"] == component["id"]
+            and row["component_scope_source_object_id"] in bound_source_ids
+            and row["component_role"] == "instance"
+        ]
+        for nested_root_id in nested_roots:
+            document, _ = switch_ui_component_instance_variant(
+                document,
+                instance_root_id=nested_root_id,
+                target_component_id=str(property_value),
+            )
+        root = next(
+            row for row in document["objects"] if row["id"] == instance_root_id
+        )
+        root["component_properties"] = properties
     validation = validate_ui_document(document)
     if not validation["ok"]:
         raise PainterUIDocumentError(
@@ -1038,9 +1176,13 @@ def resolve_ui_component_document(value: Mapping[str, Any]) -> dict[str, Any]:
             row = objects.get(object_id)
             if row is None:
                 continue
-            changes = state_rows.get(row["component_source_object_id"])
+            scope_source_id = _component_scope_source_id(
+                row,
+                component["id"],
+            )
+            changes = state_rows.get(scope_source_id)
             resolved = copy.deepcopy(row)
-            source = objects.get(row["component_source_object_id"])
+            source = objects.get(scope_source_id)
             if source is not None:
                 for path, property_name in (
                     normalize_ui_component_property_bindings(

@@ -371,6 +371,120 @@ def test_figma_component_set_imports_variants_and_instance_properties() -> None:
     assert switched_label["component_source_object_id"] == "figma-node-10-3"
 
 
+def test_figma_nested_instance_swap_maps_scope_and_stable_component_ids() -> None:
+    from app.painter_ui_components import (
+        instantiate_ui_component,
+        set_ui_instance_component_property,
+    )
+    from app.painter_ui_figma import import_figma_payload
+
+    payload = _figma_payload()
+    frame = payload["document"]["children"][0]["children"][0]
+    frame["children"] = [
+        {
+            "id": "20:1",
+            "type": "COMPONENT",
+            "name": "Square Icon",
+            "absoluteBoundingBox": {
+                "x": 120,
+                "y": 260,
+                "width": 24,
+                "height": 24,
+            },
+            "children": [],
+        },
+        {
+            "id": "20:2",
+            "type": "COMPONENT",
+            "name": "Round Icon",
+            "absoluteBoundingBox": {
+                "x": 160,
+                "y": 260,
+                "width": 24,
+                "height": 24,
+            },
+            "children": [],
+        },
+        {
+            "id": "21:1",
+            "type": "COMPONENT",
+            "name": "Card",
+            "componentPropertyDefinitions": {
+                "Icon#21:9": {
+                    "type": "INSTANCE_SWAP",
+                    "defaultValue": "20:1",
+                }
+            },
+            "absoluteBoundingBox": {
+                "x": 120,
+                "y": 320,
+                "width": 240,
+                "height": 96,
+            },
+            "children": [
+                {
+                    "id": "21:2",
+                    "type": "INSTANCE",
+                    "name": "Icon",
+                    "componentId": "20:1",
+                    "componentPropertyReferences": {
+                        "mainComponent": "Icon#21:9"
+                    },
+                    "absoluteBoundingBox": {
+                        "x": 144,
+                        "y": 344,
+                        "width": 24,
+                        "height": 24,
+                    },
+                    "children": [],
+                }
+            ],
+        },
+    ]
+
+    document, report = import_figma_payload(payload, source="AbCdEf123456")
+
+    assert report["ok"] is True
+    card = next(row for row in document["components"] if row["name"] == "Card")
+    icon_a = next(
+        row for row in document["components"] if row["name"] == "Square Icon"
+    )
+    icon_b = next(
+        row for row in document["components"] if row["name"] == "Round Icon"
+    )
+    assert card["property_definitions"]["Icon"]["default"] == icon_a["id"]
+    nested_source = next(
+        row for row in document["objects"] if row["id"] == "figma-node-21-2"
+    )
+    assert nested_source["component_id"] == icon_a["id"]
+    assert nested_source["component_source_object_id"] == icon_a["root_object_id"]
+    assert nested_source["component_scope_id"] == card["id"]
+    assert nested_source["component_scope_source_object_id"] == nested_source["id"]
+    assert nested_source["component_property_bindings"] == {
+        "component_id": "Icon"
+    }
+
+    document, instance = instantiate_ui_component(
+        document,
+        component_id=card["id"],
+        x=420,
+        y=320,
+    )
+    document, _ = set_ui_instance_component_property(
+        document,
+        instance_root_id=instance["root_object_id"],
+        property_name="Icon",
+        property_value=icon_b["id"],
+    )
+    swapped = next(
+        row
+        for row in document["objects"]
+        if row["component_scope_id"] == card["id"]
+        and row["parent_id"] == instance["root_object_id"]
+    )
+    assert swapped["component_id"] == icon_b["id"]
+
+
 def test_figma_import_activates_the_richest_visible_artboard() -> None:
     from app.painter_ui_figma import import_figma_payload
 

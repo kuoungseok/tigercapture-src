@@ -6799,12 +6799,15 @@ AI Script Edit MVP integration:
   let an imported instance switch between local Figma variants while retaining
   compatible overrides; unresolved remote-library components remain explicit
   converted groups rather than false local component claims.
-- Painter UI document version 10 stores component sublayer property bindings
+- Painter UI document version 11 stores component sublayer property bindings
   explicitly. `content.text`, `visible`, and nested `component_id` targets map
   to Figma `characters`, `visible`, and `mainComponent` references. Text and
   Boolean bindings resolve in Painter instances, Variant cloning preserves
   definition bindings without leaking them onto instances, and UI/AI use the
-  shared `paint.ui.component.property.bind` mutation.
+  shared `paint.ui.component.property.bind` mutation. Nested instances keep
+  separate target-component and outer-scope IDs, so instance swaps preserve
+  the nested root ID, parent, local overrides, and subsequent outer-component
+  synchronization.
 - Figma export writes `TigerStudioFigmaExport`, containing
   `figma_exchange.json`, a compatibility report, and a local development
   plugin (`manifest.json` and `code.js`). Running that plugin in Figma Design

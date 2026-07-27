@@ -8,7 +8,7 @@ from app.painter_ui_auto_layout import normalize_ui_auto_layout
 
 
 UI_DOCUMENT_SCHEMA = "tigerstudio.painter.ui.v1"
-UI_DOCUMENT_VERSION = 10
+UI_DOCUMENT_VERSION = 11
 UI_OBJECT_KINDS = {
     "frame",
     "group",
@@ -257,6 +257,10 @@ def _normalize_object(
         ),
         "component_property_bindings": normalize_ui_component_property_bindings(
             row.get("component_property_bindings")
+        ),
+        "component_scope_id": str(row.get("component_scope_id") or ""),
+        "component_scope_source_object_id": str(
+            row.get("component_scope_source_object_id") or ""
         ),
         "variant": str(row.get("variant") or ""),
         "token_bindings": (
@@ -575,6 +579,34 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         component_id = row["component_id"]
         if component_id and component_id not in component_id_set:
             errors.append(f"missing_component:{row['id']}:{component_id}")
+        component_scope_id = row["component_scope_id"]
+        component_scope_source_id = row["component_scope_source_object_id"]
+        if component_scope_id and component_scope_id not in component_id_set:
+            errors.append(
+                f"missing_component_scope:{row['id']}:{component_scope_id}"
+            )
+        scope_parent = object_by_id.get(row["parent_id"])
+        if (
+            component_scope_id
+            and not component_scope_source_id
+            and (
+                scope_parent is None
+                or scope_parent["component_scope_id"] != component_scope_id
+            )
+        ):
+            errors.append(f"missing_component_scope_source:{row['id']}")
+        if (
+            component_scope_source_id
+            and component_scope_source_id not in object_by_id
+        ):
+            errors.append(
+                f"missing_component_scope_source:{row['id']}:"
+                f"{component_scope_source_id}"
+            )
+        if component_scope_source_id and not component_scope_id:
+            errors.append(f"missing_component_scope_owner:{row['id']}")
+        if component_scope_id and component_scope_id == component_id:
+            errors.append(f"redundant_component_scope:{row['id']}")
         component_role = row["component_role"]
         source_object_id = row["component_source_object_id"]
         if component_role != "none" and not component_id:
@@ -892,6 +924,9 @@ def _remove_dangling_records(
             row["component_source_object_id"] = ""
             row["instance_overrides"] = {}
             row["component_properties"] = {}
+        if row["component_scope_id"] in removed_components:
+            row["component_scope_id"] = ""
+            row["component_scope_source_object_id"] = ""
     removed_interactions = {
         row["id"]
         for row in document["interactions"]
@@ -1111,17 +1146,26 @@ def update_ui_object(
             document["active_artboard_id"],
         )
         document["objects"][index] = updated_row
+        sync_component_ids = set()
         if (
             updated_row["component_role"] == "definition"
             and updated_row["component_id"]
         ):
+            sync_component_ids.add(updated_row["component_id"])
+        if (
+            updated_row["component_scope_id"]
+            and updated_row["component_scope_source_object_id"] == object_id
+        ):
+            sync_component_ids.add(updated_row["component_scope_id"])
+        if sync_component_ids:
             from app.painter_ui_components import sync_ui_component_instances
 
-            document = sync_ui_component_instances(
-                document,
-                updated_row["component_id"],
-                normalize=False,
-            )
+            for component_id in sorted(sync_component_ids):
+                document = sync_ui_component_instances(
+                    document,
+                    component_id,
+                    normalize=False,
+                )
         validation = validate_ui_document(document)
         if not validation["ok"]:
             raise PainterUIDocumentError("Invalid UI object update: " + ", ".join(validation["errors"]))
@@ -1161,6 +1205,14 @@ def remove_ui_object(
         and row["component_id"]
         and component_roots.get(row["component_id"]) not in removed
     }
+    component_sync_ids.update(
+        row["component_scope_id"]
+        for row in document["objects"]
+        if row["id"] in removed
+        and row["component_scope_id"]
+        and row["component_scope_source_object_id"] == row["id"]
+        and component_roots.get(row["component_scope_id"]) not in removed
+    )
     document["objects"] = [
         row for row in document["objects"] if row["id"] not in removed
     ]
@@ -1580,7 +1632,10 @@ def remove_ui_component(
     if component_id not in {row["id"] for row in document["components"]}:
         raise PainterUIDocumentError(f"UI component not found: {component_id}")
     object_refs = [
-        row["id"] for row in document["objects"] if row["component_id"] == component_id
+        row["id"]
+        for row in document["objects"]
+        if row["component_id"] == component_id
+        or row["component_scope_id"] == component_id
     ]
     component_refs = [
         row["id"]
@@ -1608,6 +1663,9 @@ def remove_ui_component(
                 row["component_source_object_id"] = ""
                 row["instance_overrides"] = {}
                 row["component_properties"] = {}
+            if row["component_scope_id"] == component_id:
+                row["component_scope_id"] = ""
+                row["component_scope_source_object_id"] = ""
         for row in document["components"]:
             if row["base_component_id"] == component_id:
                 row["base_component_id"] = ""

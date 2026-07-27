@@ -545,6 +545,135 @@ def test_component_property_binding_resolves_text_and_visibility() -> None:
         )
 
 
+def test_nested_instance_swap_preserves_parent_id_and_local_override() -> None:
+    from app.painter_ui_components import (
+        bind_ui_component_property,
+        convert_ui_object_to_component,
+        define_ui_component_property,
+        instantiate_ui_component,
+        set_ui_instance_component_property,
+        sync_ui_component_instances,
+    )
+    from app.painter_ui_document import (
+        add_ui_object,
+        create_ui_document,
+        update_ui_object,
+        validate_ui_document,
+    )
+
+    document = create_ui_document(800, 600, name="Nested components")
+    document, icon_a_root = add_ui_object(
+        document,
+        kind="rectangle",
+        name="Square Icon",
+        x=40,
+        y=40,
+        width=24,
+        height=24,
+    )
+    document, icon_a = convert_ui_object_to_component(
+        document,
+        root_object_id=icon_a_root["id"],
+        name="Square Icon",
+    )
+    document, icon_b_root = add_ui_object(
+        document,
+        kind="ellipse",
+        name="Round Icon",
+        x=80,
+        y=40,
+        width=24,
+        height=24,
+    )
+    document, icon_b = convert_ui_object_to_component(
+        document,
+        root_object_id=icon_b_root["id"],
+        name="Round Icon",
+    )
+    document, card_root = add_ui_object(
+        document,
+        kind="frame",
+        name="Card",
+        x=40,
+        y=120,
+        width=240,
+        height=96,
+    )
+    document, nested_definition = instantiate_ui_component(
+        document,
+        component_id=icon_a["id"],
+        x=64,
+        y=144,
+    )
+    document, nested_source = update_ui_object(
+        document,
+        nested_definition["root_object_id"],
+        {"parent_id": card_root["id"]},
+    )
+    document, card = convert_ui_object_to_component(
+        document,
+        root_object_id=card_root["id"],
+        name="Card",
+    )
+    document, _ = define_ui_component_property(
+        document,
+        component_id=card["id"],
+        property_name="Icon",
+        definition={
+            "type": "instance_swap",
+            "default": icon_a["id"],
+        },
+    )
+    document, _ = bind_ui_component_property(
+        document,
+        component_id=card["id"],
+        source_object_id=nested_source["id"],
+        property_name="Icon",
+        target_path="component_id",
+    )
+    document, card_instance = instantiate_ui_component(
+        document,
+        component_id=card["id"],
+        x=360,
+        y=120,
+    )
+    nested_instance = next(
+        row
+        for row in document["objects"]
+        if row["component_scope_id"] == card["id"]
+        and row["component_scope_source_object_id"] == nested_source["id"]
+        and row["parent_id"] == card_instance["root_object_id"]
+    )
+    nested_id = nested_instance["id"]
+    nested_parent_id = nested_instance["parent_id"]
+    document, _ = update_ui_object(
+        document,
+        nested_id,
+        {"opacity": 0.4},
+    )
+
+    document, properties = set_ui_instance_component_property(
+        document,
+        instance_root_id=card_instance["root_object_id"],
+        property_name="Icon",
+        property_value=icon_b["id"],
+    )
+
+    swapped = next(row for row in document["objects"] if row["id"] == nested_id)
+    assert properties["Icon"] == icon_b["id"]
+    assert swapped["component_id"] == icon_b["id"]
+    assert swapped["component_source_object_id"] == icon_b["root_object_id"]
+    assert swapped["component_scope_id"] == card["id"]
+    assert swapped["component_scope_source_object_id"] == nested_source["id"]
+    assert swapped["parent_id"] == nested_parent_id
+    assert swapped["opacity"] == 0.4
+    document = sync_ui_component_instances(document, card["id"])
+    resynced = next(row for row in document["objects"] if row["id"] == nested_id)
+    assert resynced["component_id"] == icon_b["id"]
+    assert resynced["opacity"] == 0.4
+    assert validate_ui_document(document)["ok"] is True
+
+
 def test_inspector_instance_state_updates_instance_root() -> None:
     app = _app()
     from app.painter_ui_components import (
