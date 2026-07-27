@@ -1366,6 +1366,7 @@ def inspect_figma_compatibility(
 ) -> dict[str, Any]:
     normalized = normalize_ui_document(document)
     rows: list[dict[str, str]] = []
+    component_ids = {str(row["id"]) for row in normalized["components"]}
     for row in normalized["objects"]:
         kind = str(row["kind"])
         status = "native"
@@ -1388,6 +1389,33 @@ def inspect_figma_compatibility(
             status = "blocked"
             reason = f"Unsupported Painter UI kind: {kind}"
         rows.append({"id": row["id"], "status": status, "reason": reason})
+    supported_property_types = {"enum", "boolean", "text", "instance_swap"}
+    for component in normalized["components"]:
+        for property_name, definition in component[
+            "property_definitions"
+        ].items():
+            property_type = str(definition.get("type") or "")
+            status = "native"
+            reason = "Maps to a Figma component property"
+            if property_type not in supported_property_types:
+                status = "blocked"
+                reason = (
+                    "Unsupported Figma component property type: "
+                    f"{property_type or 'missing'}"
+                )
+            elif (
+                property_type == "instance_swap"
+                and str(definition.get("default") or "") not in component_ids
+            ):
+                status = "blocked"
+                reason = "Instance-swap default does not reference a local component"
+            rows.append(
+                {
+                    "id": f"{component['id']}:{property_name}",
+                    "status": status,
+                    "reason": reason,
+                }
+            )
     counts = {
         status: sum(1 for row in rows if row["status"] == status)
         for status in ("native", "converted", "baked", "blocked")
@@ -1435,6 +1463,9 @@ def _plugin_code(exchange: Mapping[str, Any]) -> str:
 const doc = exchange.document;
 const created = new Map();
 const components = new Map();
+const componentRecords = new Map(doc.components.map(row => [row.id,row]));
+const componentRootByObject = new Map(doc.components.map(row => [row.root_object_id,row]));
+const componentPropertyNames = new Map();
 const tokenVars = new Map();
 const objectById = new Map(doc.objects.map(row => [row.id, row]));
 function insideInstance(row) {{
@@ -1444,6 +1475,25 @@ function insideInstance(row) {{
     parent=objectById.get(parent.parent_id);
   }}
   return false;
+}}
+function isComponentRoot(row) {{ return componentRootByObject.has(row.id); }}
+function isInstanceRoot(row) {{
+  if(row.component_role!=='instance') return false;
+  const parent=objectById.get(row.parent_id);
+  return !parent || parent.component_role!=='instance';
+}}
+function componentFamilyId(componentId) {{
+  const row=componentRecords.get(componentId);
+  return row ? (row.base_component_id || row.id) : componentId;
+}}
+function cleanPropertyName(value) {{
+  return String(value||'').replace(/#\\d+:\\d+$/,'').trim();
+}}
+function defaultVariantKey(record) {{
+  return Object.entries(record.property_definitions||{{}})
+    .filter(([,definition])=>definition.type==='enum')
+    .map(([name,definition])=>`${{name}}=${{String(definition.default??'')}}`)
+    .join(', ');
 }}
 
 function color(value) {{
@@ -1510,7 +1560,7 @@ async function main() {{
   const ordered=[...doc.objects].sort((a,b)=>(a.z_index||0)-(b.z_index||0));
   for(const row of ordered.filter(x => x.component_role !== 'instance' && !insideInstance(x))) {{
     let node;
-    if(row.component_role==='definition') node=figma.createComponent();
+    if(isComponentRoot(row)) node=figma.createComponent();
     else if(row.kind==='ellipse') node=figma.createEllipse();
     else if(row.kind==='line') node=figma.createLine();
     else if(row.kind==='text') node=figma.createText();
@@ -1518,7 +1568,7 @@ async function main() {{
     else node=figma.createRectangle();
     const parent=created.get(row.parent_id)||created.get(row.artboard_id)||page;
     parent.appendChild(node); applyFrame(node,row); created.set(row.id,node);
-    if(row.component_role==='definition') components.set(row.component_id,node);
+    if(isComponentRoot(row)) components.set(row.component_id,node);
     if(row.kind==='text') {{
       const c=row.content||{{}}; const font={{family:c.font_family||'Inter',style:'Regular'}};
       try {{ await figma.loadFontAsync(font); node.fontName=font; }} catch (_) {{ await figma.loadFontAsync({{family:'Inter',style:'Regular'}}); }}
@@ -1542,10 +1592,70 @@ async function main() {{
       }} catch (_) {{}}
     }}
   }}
-  for(const row of ordered.filter(x => x.component_role === 'instance')) {{
+  for(const family of doc.components.filter(row => !row.base_component_id)) {{
+    const memberIds=[family.id,...(family.variant_ids||[])];
+    const memberNodes=memberIds.map(id=>components.get(id)).filter(node=>node && node.type==='COMPONENT');
+    if(!memberNodes.length) continue;
+    for(const componentId of memberIds) {{
+      const record=componentRecords.get(componentId), node=components.get(componentId);
+      if(!record || !node) continue;
+      const variantKey=String((record.metadata||{{}}).variant_key||defaultVariantKey(record)).trim();
+      if(variantKey) node.name=variantKey;
+    }}
+    let propertyOwner=memberNodes[0];
+    if(memberNodes.length>1) {{
+      const parent=memberNodes[0].parent;
+      if(parent && 'appendChild' in parent) {{
+        try {{
+          propertyOwner=figma.combineAsVariants(memberNodes,parent);
+          propertyOwner.name=family.name||'Component Set';
+          propertyOwner.setSharedPluginData('tigerstudio','component_family_id',family.id);
+        }} catch (error) {{
+          throw new Error(`Variant combine failed for ${{family.id}}: ${{error.message}}`);
+        }}
+      }}
+    }}
+    const names=new Map();
+    for(const propertyName of Object.keys(propertyOwner.componentPropertyDefinitions||{{}}))
+      names.set(cleanPropertyName(propertyName),propertyName);
+    for(const [propertyName,definition] of Object.entries(family.property_definitions||{{}})) {{
+      if(names.has(propertyName)) continue;
+      const type={{enum:'VARIANT',boolean:'BOOLEAN',text:'TEXT',instance_swap:'INSTANCE_SWAP'}}[definition.type];
+      if(!type) continue;
+      let defaultValue=definition.default;
+      if(type==='BOOLEAN') defaultValue=!!defaultValue;
+      else if(type==='INSTANCE_SWAP') {{
+        const target=components.get(String(defaultValue||''));
+        if(!target) throw new Error(`Instance-swap default is missing for ${{family.id}}:${{propertyName}}`);
+        defaultValue=target.id;
+      }} else defaultValue=String(defaultValue??'');
+      try {{
+        const actual=propertyOwner.addComponentProperty(propertyName,type,defaultValue);
+        names.set(propertyName,actual);
+      }} catch (error) {{
+        throw new Error(`Component property failed for ${{family.id}}:${{propertyName}}: ${{error.message}}`);
+      }}
+    }}
+    componentPropertyNames.set(family.id,names);
+  }}
+  for(const row of ordered.filter(isInstanceRoot)) {{
     const definition=components.get(row.component_id); let node=definition?definition.createInstance():figma.createFrame();
     const parent=created.get(row.parent_id)||created.get(row.artboard_id)||page;
     parent.appendChild(node); applyFrame(node,row); created.set(row.id,node);
+    if(definition && node.type==='INSTANCE') {{
+      const familyId=componentFamilyId(row.component_id);
+      const names=componentPropertyNames.get(familyId)||new Map();
+      const values={{}};
+      for(const [propertyName,value] of Object.entries(row.component_properties||{{}})) {{
+        const actual=names.get(propertyName)||propertyName;
+        const component=components.get(String(value||''));
+        values[actual]=component ? component.id : value;
+      }}
+      if(Object.keys(values).length) {{
+        try {{ node.setProperties(values); }}
+        catch (error) {{ throw new Error(`Instance properties failed for ${{row.id}}: ${{error.message}}`); }}
+      }}
+    }}
   }}
   for(const link of doc.interactions) {{
     const source=created.get(link.source_object_id), target=created.get(link.target_artboard_id||link.target_object_id);

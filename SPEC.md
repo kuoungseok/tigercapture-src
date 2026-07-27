@@ -6804,7 +6804,14 @@ AI Script Edit MVP integration:
   plugin (`manifest.json` and `code.js`). Running that plugin in Figma Design
   recreates editable frames, nodes, text, images, components/instances,
   variables and bindings, Auto Layout, and supported prototype links through
-  the official Plugin API. Unsupported content is classified as
+  the official Plugin API. Component families are emitted as real Figma
+  Component Sets through `combineAsVariants`; variant names and supported enum,
+  text, boolean, and instance-swap properties are restored before root
+  instances receive their property values. Definition and instance sublayers
+  remain children instead of being duplicated as standalone components or
+  instances. Unsupported property types and broken instance-swap defaults
+  block preflight, while Plugin API failures remain explicit. Unsupported
+  content is classified as
   `native/converted/baked/blocked`; Motion actors are baked instead of silently
   represented as editable Figma motion. UI and AI share
   `paint.ui.figma.compatibility.inspect/import/export`. Automation reads

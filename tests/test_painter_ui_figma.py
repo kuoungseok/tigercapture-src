@@ -760,6 +760,134 @@ def test_figma_export_creates_editable_plugin_bundle_with_embedded_image(
     assert "figma.variables.createVariableCollection" in code
     assert "setReactionsAsync" in code
     assert "createInstance" in code
+    assert "figma.combineAsVariants" in code
+    assert "node.setProperties(values)" in code
+    assert "ordered.filter(isInstanceRoot)" in code
+
+
+def test_figma_export_preserves_component_family_and_variant_properties(
+    tmp_path: Path,
+) -> None:
+    from app.painter_ui_components import (
+        convert_ui_object_to_component,
+        create_ui_component_variant,
+        instantiate_ui_component,
+        set_ui_instance_component_property,
+    )
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_figma import export_figma_plugin_package
+
+    document = create_ui_document(800, 600, name="Components")
+    artboard = document["artboards"][0]
+    document, root = add_ui_object(
+        document,
+        kind="button",
+        name="Button",
+        artboard_id=artboard["id"],
+        x=40,
+        y=40,
+        width=160,
+        height=48,
+    )
+    document, component = convert_ui_object_to_component(
+        document,
+        root_object_id=root["id"],
+        name="Button",
+    )
+    component["property_definitions"].update(
+        {
+            "Label": {
+                "type": "text",
+                "default": "Continue",
+                "values": [],
+                "description": "",
+            },
+            "Leading icon": {
+                "type": "boolean",
+                "default": True,
+                "values": [],
+                "description": "",
+            },
+        }
+    )
+    for index, row in enumerate(document["components"]):
+        if row["id"] == component["id"]:
+            document["components"][index] = component
+            break
+    document, variant = create_ui_component_variant(
+        document,
+        component_id=component["id"],
+        name="Button / Pressed",
+        variant_key="state=pressed",
+    )
+    document, instance = instantiate_ui_component(
+        document,
+        component_id=variant["id"],
+        x=280,
+        y=40,
+    )
+    document, _ = set_ui_instance_component_property(
+        document,
+        instance_root_id=instance["root_object_id"],
+        property_name="Label",
+        property_value="Buy now",
+    )
+
+    report = export_figma_plugin_package(document, tmp_path / "out")
+    target = Path(report["output_dir"])
+    exchange = json.loads((target / "figma_exchange.json").read_text("utf-8"))
+    family = next(
+        row for row in exchange["document"]["components"] if not row["base_component_id"]
+    )
+    exported_variant = next(
+        row for row in exchange["document"]["components"] if row["base_component_id"]
+    )
+    exported_instance = next(
+        row
+        for row in exchange["document"]["objects"]
+        if row["component_role"] == "instance"
+        and not row["parent_id"]
+    )
+    assert family["variant_ids"] == [exported_variant["id"]]
+    assert family["property_definitions"]["Label"]["type"] == "text"
+    assert family["property_definitions"]["Leading icon"]["type"] == "boolean"
+    assert exported_variant["metadata"]["variant_key"] == "state=pressed"
+    assert exported_instance["component_properties"]["Label"] == "Buy now"
+
+
+def test_figma_export_blocks_unsupported_component_property_type(
+    tmp_path: Path,
+) -> None:
+    import pytest
+
+    from app.painter_ui_components import convert_ui_object_to_component
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_figma import (
+        PainterUIFigmaError,
+        export_figma_plugin_package,
+        inspect_figma_compatibility,
+    )
+
+    document = create_ui_document(640, 480, name="Unsupported property")
+    document, root = add_ui_object(document, kind="button", name="Button")
+    document, component = convert_ui_object_to_component(
+        document,
+        root_object_id=root["id"],
+    )
+    component["property_definitions"]["Slot"] = {
+        "type": "slot",
+        "default": "",
+        "values": [],
+        "description": "",
+    }
+    document["components"][0] = component
+
+    compatibility = inspect_figma_compatibility(document)
+
+    assert compatibility["counts"]["blocked"] == 1
+    assert compatibility["objects"][-1]["id"] == f"{component['id']}:Slot"
+    with pytest.raises(PainterUIFigmaError, match="blocked"):
+        export_figma_plugin_package(document, tmp_path / "out")
 
 
 def test_painter_publish_panel_exposes_figma_tab() -> None:
