@@ -468,6 +468,116 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a UI object would be updated",
     )
     registry.register_adapter_action(
+        "paint.ui.appearance.inspect",
+        "Read the editable fill gradient and ordered effect stack for one UI object.",
+        "paint",
+        "paint_ui_appearance_inspect",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}},
+            required=("object_id",),
+        ),
+        required=("object_id",),
+        mutating=False,
+        changed=False,
+        dry_summary="a UI object's appearance would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.gradient.set",
+        "Set an editable linear or radial fill gradient on one UI object.",
+        "paint",
+        "paint_ui_appearance_gradient_set",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "gradient": any_object,
+            },
+            required=("object_id", "gradient"),
+        ),
+        required=("object_id", "gradient"),
+        undo_label="Set UI fill gradient",
+        dry_summary="an editable UI fill gradient would be set",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.gradient.remove",
+        "Remove the fill gradient while preserving the object's solid fill.",
+        "paint",
+        "paint_ui_appearance_gradient_remove",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}},
+            required=("object_id",),
+        ),
+        required=("object_id",),
+        undo_label="Remove UI fill gradient",
+        dry_summary="the UI fill gradient would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.effect.add",
+        "Add an editable Drop Shadow or Inner Shadow to an ordered UI effect stack.",
+        "paint",
+        "paint_ui_appearance_effect_add",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "effect": any_object,
+                "index": {"type": "integer", "minimum": 0},
+            },
+            required=("object_id", "effect"),
+        ),
+        required=("object_id", "effect"),
+        undo_label="Add UI appearance effect",
+        dry_summary="a UI appearance effect would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.effect.update",
+        "Update one entry in an ordered UI effect stack.",
+        "paint",
+        "paint_ui_appearance_effect_update",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "index": {"type": "integer", "minimum": 0},
+                "changes": any_object,
+            },
+            required=("object_id", "index", "changes"),
+        ),
+        required=("object_id", "index", "changes"),
+        undo_label="Update UI appearance effect",
+        dry_summary="a UI appearance effect would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.effect.remove",
+        "Remove one entry from an ordered UI effect stack.",
+        "paint",
+        "paint_ui_appearance_effect_remove",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "index": {"type": "integer", "minimum": 0},
+            },
+            required=("object_id", "index"),
+        ),
+        required=("object_id", "index"),
+        undo_label="Remove UI appearance effect",
+        dry_summary="a UI appearance effect would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.effect.reorder",
+        "Move one UI appearance effect to another stack index.",
+        "paint",
+        "paint_ui_appearance_effect_reorder",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "index": {"type": "integer", "minimum": 0},
+                "target_index": {"type": "integer", "minimum": 0},
+            },
+            required=("object_id", "index", "target_index"),
+        ),
+        required=("object_id", "index", "target_index"),
+        undo_label="Reorder UI appearance effects",
+        dry_summary="the UI appearance effect stack would be reordered",
+    )
+    registry.register_adapter_action(
         "paint.ui.layout.set",
         "Set deterministic Horizontal or Vertical Auto Layout on a Painter UI container.",
         "paint",

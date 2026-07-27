@@ -811,6 +811,145 @@ class PaintAdapterMixin(PaintUIFigmaAdapterMixin):
         dialog._push_undo_state("Update UI object")
         return self._paint_ui_commit(dialog, "Update UI object", document)
 
+    def paint_ui_appearance_inspect(
+        self,
+        *,
+        object_id: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_appearance import inspect_ui_appearance
+
+        return inspect_ui_appearance(
+            dialog._painter_ui_document,
+            str(object_id),
+        )
+
+    def paint_ui_appearance_gradient_set(
+        self,
+        *,
+        object_id: str,
+        gradient: dict[str, Any],
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_appearance import set_ui_fill_gradient
+
+        document, _row = set_ui_fill_gradient(
+            dialog._painter_ui_document,
+            str(object_id),
+            dict(gradient or {}),
+        )
+        dialog._push_undo_state("Set UI fill gradient")
+        return self._paint_ui_commit(dialog, "Set UI fill gradient", document)
+
+    def paint_ui_appearance_gradient_remove(
+        self,
+        *,
+        object_id: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_appearance import remove_ui_fill_gradient
+
+        document, _row = remove_ui_fill_gradient(
+            dialog._painter_ui_document,
+            str(object_id),
+        )
+        dialog._push_undo_state("Remove UI fill gradient")
+        return self._paint_ui_commit(
+            dialog,
+            "Remove UI fill gradient",
+            document,
+        )
+
+    def paint_ui_appearance_effect_add(
+        self,
+        *,
+        object_id: str,
+        effect: dict[str, Any],
+        index: int | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_appearance import add_ui_effect
+
+        document, _row = add_ui_effect(
+            dialog._painter_ui_document,
+            str(object_id),
+            dict(effect or {}),
+            index=index,
+        )
+        dialog._push_undo_state("Add UI appearance effect")
+        return self._paint_ui_commit(
+            dialog,
+            "Add UI appearance effect",
+            document,
+        )
+
+    def paint_ui_appearance_effect_update(
+        self,
+        *,
+        object_id: str,
+        index: int,
+        changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_appearance import update_ui_effect
+
+        document, _row = update_ui_effect(
+            dialog._painter_ui_document,
+            str(object_id),
+            int(index),
+            dict(changes or {}),
+        )
+        dialog._push_undo_state("Update UI appearance effect")
+        return self._paint_ui_commit(
+            dialog,
+            "Update UI appearance effect",
+            document,
+        )
+
+    def paint_ui_appearance_effect_remove(
+        self,
+        *,
+        object_id: str,
+        index: int,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_appearance import remove_ui_effect
+
+        document, _row = remove_ui_effect(
+            dialog._painter_ui_document,
+            str(object_id),
+            int(index),
+        )
+        dialog._push_undo_state("Remove UI appearance effect")
+        return self._paint_ui_commit(
+            dialog,
+            "Remove UI appearance effect",
+            document,
+        )
+
+    def paint_ui_appearance_effect_reorder(
+        self,
+        *,
+        object_id: str,
+        index: int,
+        target_index: int,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_appearance import reorder_ui_effect
+
+        document, _effects = reorder_ui_effect(
+            dialog._painter_ui_document,
+            str(object_id),
+            int(index),
+            int(target_index),
+        )
+        dialog._push_undo_state("Reorder UI appearance effects")
+        return self._paint_ui_commit(
+            dialog,
+            "Reorder UI appearance effects",
+            document,
+        )
+
     def paint_ui_layout_set(
         self,
         *,

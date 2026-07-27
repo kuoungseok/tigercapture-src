@@ -67,6 +67,12 @@ P2 implementation checkpoint (2026-07-26, visual style slice):
   offset, blur, signed spread, and blend mode. Painter renders outer and inner
   effects in separate geometry passes and Figma plugin export restores editable
   effect records.
+- Inspector `Appearance` now authors the same Gradient and Effect contracts:
+  ordered color stops, linear angle, radial center/radius, Drop/Inner add,
+  remove, reorder, offset, blur, spread, and blend. Dedicated
+  `paint.ui.appearance.*` Actions provide AI/MCP parity. The canonical
+  interface/action completion matrix is
+  `docs/PAINTER_UI_FIGMA_INTERFACE_ACTION_MATRIX_KO.md`.
 
 P2 implementation checkpoint (2026-07-26, responsive constraint slice):
 

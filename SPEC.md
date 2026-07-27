@@ -6820,6 +6820,19 @@ AI Script Edit MVP integration:
   `style.shadow` alias. Painter renders every outer shadow before object fill,
   clips Inner Shadows to supported object geometry, and restores editable
   Figma `node.effects` during development-plugin export.
+- UI Design Inspector exposes a compact `Appearance` editor for the same
+  provider-neutral gradient/effect contract. Linear and Radial fills provide
+  ordered stop editing plus angle or center/radius controls. Drop and Inner
+  Shadows provide add/remove/reorder, color, offset, blur, signed spread, and
+  blend controls. AI/MCP parity uses
+  `paint.ui.appearance.inspect`, `paint.ui.appearance.gradient.set/remove`, and
+  `paint.ui.appearance.effect.add/update/remove/reorder`; these Actions and the
+  Inspector ultimately use the validated UI object mutation path and normal
+  Painter Undo/Redo.
+- The required UI/Action parity matrix is
+  `docs/PAINTER_UI_FIGMA_INTERFACE_ACTION_MATRIX_KO.md`. A Figma feature is not
+  considered complete when it only survives import JSON; it must also expose
+  Painter authoring UI, a dedicated Action family, and round-trip tests.
 - Figma export writes `TigerStudioFigmaExport`, containing
   `figma_exchange.json`, a compatibility report, and a local development
   plugin (`manifest.json` and `code.js`). Running that plugin in Figma Design

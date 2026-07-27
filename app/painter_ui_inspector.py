@@ -1,6 +1,7 @@
 """Layers and Inspect panel for Painter's UI Design workspace."""
 from __future__ import annotations
 
+import copy
 from typing import Any, Mapping
 
 from PySide6.QtCore import Signal, Qt
@@ -121,6 +122,7 @@ class PainterUIInspector(QWidget):
         super().__init__(parent)
         self._document = normalize_ui_document(None)
         self._syncing = False
+        self._appearance_style: dict[str, Any] = {}
         self.setObjectName("PainterUIInspector")
 
         root = QVBoxLayout(self)
@@ -738,25 +740,12 @@ class PainterUIInspector(QWidget):
         self.radius_spin.setSuffix(" px")
         self.radius_spin.editingFinished.connect(self._emit_properties)
         form.addRow("Radius", self.radius_spin)
-        self.shadow_color_edit = QLineEdit()
-        self.shadow_color_edit.setPlaceholderText("#00000066")
-        self.shadow_color_edit.editingFinished.connect(self._emit_properties)
-        form.addRow("Shadow", self.shadow_color_edit)
-        shadow_metrics = QFrame()
-        shadow_metrics_layout = QHBoxLayout(shadow_metrics)
-        shadow_metrics_layout.setContentsMargins(0, 0, 0, 0)
-        shadow_metrics_layout.setSpacing(3)
-        self.shadow_y_spin = QDoubleSpinBox()
-        self.shadow_y_spin.setRange(-512.0, 512.0)
-        self.shadow_y_spin.setPrefix("Y ")
-        self.shadow_y_spin.editingFinished.connect(self._emit_properties)
-        self.shadow_blur_spin = QDoubleSpinBox()
-        self.shadow_blur_spin.setRange(0.0, 512.0)
-        self.shadow_blur_spin.setPrefix("Blur ")
-        self.shadow_blur_spin.editingFinished.connect(self._emit_properties)
-        shadow_metrics_layout.addWidget(self.shadow_y_spin)
-        shadow_metrics_layout.addWidget(self.shadow_blur_spin)
-        form.addRow("", shadow_metrics)
+        self.appearance_button = QPushButton("Solid")
+        self.appearance_button.setToolTip(
+            "Edit fill gradient and ordered Drop/Inner Shadow effects"
+        )
+        self.appearance_button.clicked.connect(self._edit_appearance)
+        form.addRow("Appearance", self.appearance_button)
         self.text_edit = QLineEdit()
         self.text_edit.setPlaceholderText("Text")
         self.text_edit.editingFinished.connect(self._emit_properties)
@@ -1121,9 +1110,7 @@ class PainterUIInspector(QWidget):
             self.stroke_edit,
             self.stroke_width_spin,
             self.radius_spin,
-            self.shadow_color_edit,
-            self.shadow_y_spin,
-            self.shadow_blur_spin,
+            self.appearance_button,
             self.text_edit,
             self.font_size_spin,
             self.font_weight_combo,
@@ -1173,7 +1160,8 @@ class PainterUIInspector(QWidget):
             self.kind_label.setText("-")
             self.fill_edit.clear()
             self.stroke_edit.clear()
-            self.shadow_color_edit.clear()
+            self._appearance_style = {}
+            self.appearance_button.setText("Solid")
             self.text_edit.clear()
             self.image_source_edit.clear()
             self.accessibility_label_edit.clear()
@@ -1264,11 +1252,10 @@ class PainterUIInspector(QWidget):
         self.stroke_edit.setText(str(style.get("stroke") or ""))
         self.stroke_width_spin.setValue(float(style.get("stroke_width") or 0.0))
         self.radius_spin.setValue(float(style.get("radius") or 0.0))
-        shadow = style.get("shadow")
-        shadow = shadow if isinstance(shadow, Mapping) else {}
-        self.shadow_color_edit.setText(str(shadow.get("color") or ""))
-        self.shadow_y_spin.setValue(float(shadow.get("y") or 0.0))
-        self.shadow_blur_spin.setValue(float(shadow.get("blur") or 0.0))
+        self._appearance_style = dict(style)
+        from app.painter_ui_appearance_editor import appearance_summary
+
+        self.appearance_button.setText(appearance_summary(style))
         is_text = row["kind"] in {"text", "button"}
         for widget in (
             self.text_edit,
@@ -1727,6 +1714,28 @@ class PainterUIInspector(QWidget):
         else:
             self.geometry_changed.emit(self._selected_id(), changes)
 
+    def _edit_appearance(self) -> None:
+        if self._syncing or not self._selected_id():
+            return
+        from PySide6.QtWidgets import QDialog
+
+        from app.painter_ui_appearance_editor import (
+            PainterUIAppearanceDialog,
+            appearance_summary,
+        )
+
+        dialog = PainterUIAppearanceDialog(
+            self._appearance_style,
+            self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        self._appearance_style = dialog.appearance_style()
+        self.appearance_button.setText(
+            appearance_summary(self._appearance_style)
+        )
+        self._emit_properties()
+
     def _emit_properties(self) -> None:
         if self._syncing or not self._selected_id():
             return
@@ -1746,18 +1755,11 @@ class PainterUIInspector(QWidget):
             style.pop("stroke", None)
         style["stroke_width"] = float(self.stroke_width_spin.value())
         style["radius"] = float(self.radius_spin.value())
-        shadow_color = self.shadow_color_edit.text().strip()
-        shadow_blur = float(self.shadow_blur_spin.value())
-        if shadow_color or shadow_blur > 0.0:
-            style["shadow"] = {
-                "x": 0.0,
-                "y": float(self.shadow_y_spin.value()),
-                "blur": shadow_blur,
-                "spread": 0.0,
-                "color": shadow_color or "#00000066",
-            }
-        else:
-            style.pop("shadow", None)
+        for key in ("fill_gradient", "effects", "shadow"):
+            if key in self._appearance_style:
+                style[key] = copy.deepcopy(self._appearance_style[key])
+            else:
+                style.pop(key, None)
         content = dict(row.get("content") or {})
         if row.get("kind") in {"text", "button"}:
             content["text"] = self.text_edit.text()
