@@ -1,10 +1,11 @@
 """Deterministic style rendering helpers for Painter UI objects."""
 from __future__ import annotations
 
+import html
 import math
 from typing import Any, Mapping
 
-from PySide6.QtCore import QPointF, QRectF, Qt
+from PySide6.QtCore import QByteArray, QPointF, QRectF, Qt
 from PySide6.QtGui import (
     QColor,
     QFont,
@@ -14,6 +15,7 @@ from PySide6.QtGui import (
     QTextLayout,
     QTextOption,
 )
+from PySide6.QtSvg import QSvgRenderer
 
 
 def ui_color(value: object, fallback: str = "#000000") -> QColor:
@@ -31,6 +33,44 @@ def ui_color(value: object, fallback: str = "#000000") -> QColor:
             pass
     color = QColor(text)
     return color if color.isValid() else QColor(fallback)
+
+
+def draw_ui_vector_paths(
+    painter: QPainter,
+    rect: QRectF,
+    paths: object,
+    style: Mapping[str, Any],
+) -> bool:
+    """Render Figma SVG path geometry without substituting a bounding box."""
+    if not isinstance(paths, list):
+        return False
+    path_rows = [str(path).strip() for path in paths if str(path).strip()]
+    if not path_rows or rect.width() <= 0.0 or rect.height() <= 0.0:
+        return False
+
+    fill = ui_color(style.get("fill"), "#506884")
+    stroke = ui_color(style.get("stroke"), "#00000000")
+    stroke_width = max(0.0, float(style.get("stroke_width") or 0.0))
+    path_markup = "".join(
+        (
+            f'<path d="{html.escape(path, quote=True)}" '
+            f'fill="{fill.name()}" fill-opacity="{fill.alphaF():.6f}" '
+            f'stroke="{stroke.name()}" stroke-opacity="{stroke.alphaF():.6f}" '
+            f'stroke-width="{stroke_width:.6f}"/>'
+        )
+        for path in path_rows
+    )
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg" '
+        f'width="{rect.width():.6f}" height="{rect.height():.6f}" '
+        f'viewBox="0 0 {rect.width():.6f} {rect.height():.6f}">'
+        f"{path_markup}</svg>"
+    )
+    renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
+    if not renderer.isValid():
+        return False
+    renderer.render(painter, rect)
+    return True
 
 
 def ui_font(base_font: QFont, style: Mapping[str, Any], scale: float = 1.0) -> QFont:

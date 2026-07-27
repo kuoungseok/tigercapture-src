@@ -484,6 +484,12 @@ def import_figma_payload(
                     node_box = _box(node)
                     object_id = _stable_id("node", node.get("id"))
                     kind = _map_kind(node)
+                    content = _map_content(node, images, local_images)
+                    if kind == "path" and not content.get("vector_paths"):
+                        warnings.append(
+                            f"blocked:{node.get('id')}:VECTOR:"
+                            "missing_geometry_paths"
+                        )
                     role = "none"
                     component_id = ""
                     source_object_id = ""
@@ -527,7 +533,7 @@ def import_figma_payload(
                             "locked": bool(node.get("locked", False)),
                             "z_index": len(objects),
                             "style": _map_style(node),
-                            "content": _map_content(node, images, local_images),
+                            "content": content,
                             "constraints": _map_constraints(node),
                             "layout": _map_layout(node),
                             "component_id": component_id,

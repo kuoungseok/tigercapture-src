@@ -261,6 +261,61 @@ def test_figma_nodes_response_imports_as_editable_artboards() -> None:
     assert document["active_artboard_id"] == "figma-artboard-1-1"
 
 
+def test_figma_vector_without_geometry_is_reported_instead_of_box_substituted() -> None:
+    from app.painter_ui_figma import import_figma_payload
+
+    payload = _figma_payload()
+    frame = payload["document"]["children"][0]["children"][0]
+    frame["children"].append(
+        {
+            "id": "9:1",
+            "type": "VECTOR",
+            "name": "Logo glyph",
+            "absoluteBoundingBox": {
+                "x": 140,
+                "y": 240,
+                "width": 24,
+                "height": 24,
+            },
+            "fills": [{"type": "SOLID", "color": {"r": 1, "g": 1, "b": 1}}],
+        }
+    )
+
+    document, report = import_figma_payload(payload, source="AbCdEf123456")
+
+    vector = next(row for row in document["objects"] if row["name"] == "Logo glyph")
+    assert vector["kind"] == "path"
+    assert vector["content"].get("vector_paths", []) == []
+    assert "blocked:9:1:VECTOR:missing_geometry_paths" in report["warnings"]
+
+
+def test_figma_vector_geometry_is_preserved_for_svg_rendering() -> None:
+    from app.painter_ui_figma import import_figma_payload
+
+    payload = _figma_payload()
+    frame = payload["document"]["children"][0]["children"][0]
+    frame["children"].append(
+        {
+            "id": "9:2",
+            "type": "VECTOR",
+            "name": "Triangle",
+            "absoluteBoundingBox": {
+                "x": 140,
+                "y": 240,
+                "width": 24,
+                "height": 24,
+            },
+            "fillGeometry": [{"path": "M 0 24 L 12 0 L 24 24 Z"}],
+        }
+    )
+
+    document, report = import_figma_payload(payload, source="AbCdEf123456")
+
+    vector = next(row for row in document["objects"] if row["name"] == "Triangle")
+    assert vector["content"]["vector_paths"] == ["M 0 24 L 12 0 L 24 24 Z"]
+    assert not any("9:2:VECTOR:missing_geometry_paths" in row for row in report["warnings"])
+
+
 def test_figma_append_remaps_stable_ids_without_collisions() -> None:
     from app.painter_ui_figma import import_figma_payload, merge_figma_document
 
