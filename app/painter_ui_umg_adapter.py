@@ -97,6 +97,7 @@ def painter_ui_to_umg_document(
             }
         payload = {
             "source_kind": row["kind"],
+            "clip_content": bool(row.get("clip_content", False)),
             "source_params": {
                 "shape": (
                     "ellipse" if row["kind"] == "ellipse" else "rectangle"

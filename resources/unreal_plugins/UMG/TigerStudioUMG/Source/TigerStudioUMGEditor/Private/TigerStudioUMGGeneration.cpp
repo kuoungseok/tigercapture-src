@@ -13,6 +13,7 @@
 #include "Components/Image.h"
 #include "Components/PanelWidget.h"
 #include "Components/TextBlock.h"
+#include "Components/Widget.h"
 #include "WidgetBlueprintFactory.h"
 #include "IAssetTools.h"
 #include "Dom/JsonObject.h"
@@ -294,6 +295,19 @@ UTigerStudioUMGImportSubsystem::GenerateDocumentFile(
                     UCanvasPanel::StaticClass(),
                     FName(*Layer.Id));
             ConfigureWidget(Group, Layer, Parent);
+            const TSharedPtr<FJsonObject> Payload =
+                ParsePayload(Layer.PayloadJson);
+            bool bClipContent = false;
+            if (Payload)
+            {
+                Payload->TryGetBoolField(
+                    TEXT("clip_content"),
+                    bClipContent);
+            }
+            Group->SetClipping(
+                bClipContent
+                    ? EWidgetClipping::ClipToBoundsAlways
+                    : EWidgetClipping::Inherit);
             ParentPanels.Add(Layer.Id, Group);
             ++Result.GeneratedWidgetCount;
         }

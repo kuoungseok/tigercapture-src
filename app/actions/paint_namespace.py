@@ -657,6 +657,36 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a UI blur effect would be reordered",
     )
     registry.register_adapter_action(
+        "paint.ui.clip.inspect",
+        "Inspect Frame Clip content support, state, and direct child IDs.",
+        "paint",
+        "paint_ui_clip_inspect",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}},
+            required=("object_id",),
+        ),
+        required=("object_id",),
+        mutating=False,
+        changed=False,
+        dry_summary="a UI frame clipping state would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.clip.set",
+        "Enable or disable Clip content on a Painter UI Frame.",
+        "paint",
+        "paint_ui_clip_set",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "clip_content": {"type": "boolean"},
+            },
+            required=("object_id", "clip_content"),
+        ),
+        required=("object_id", "clip_content"),
+        undo_label="Set frame clipping",
+        dry_summary="a UI frame clipping state would be changed",
+    )
+    registry.register_adapter_action(
         "paint.ui.layout.set",
         "Set deterministic Horizontal or Vertical Auto Layout on a Painter UI container.",
         "paint",

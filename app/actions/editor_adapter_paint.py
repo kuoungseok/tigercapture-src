@@ -1026,6 +1026,40 @@ class PaintAdapterMixin(PaintUIFigmaAdapterMixin):
         dialog._push_undo_state("Reorder UI blur")
         return self._paint_ui_commit(dialog, "Reorder UI blur", document)
 
+    def paint_ui_clip_inspect(
+        self,
+        *,
+        object_id: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_clipping import inspect_ui_clip
+
+        return inspect_ui_clip(
+            dialog._painter_ui_document,
+            str(object_id),
+        )
+
+    def paint_ui_clip_set(
+        self,
+        *,
+        object_id: str,
+        clip_content: bool,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_clipping import set_ui_clip
+
+        document, _row = set_ui_clip(
+            dialog._painter_ui_document,
+            str(object_id),
+            bool(clip_content),
+        )
+        dialog._push_undo_state("Set frame clipping")
+        return self._paint_ui_commit(
+            dialog,
+            "Set frame clipping",
+            document,
+        )
+
     def paint_ui_layout_set(
         self,
         *,

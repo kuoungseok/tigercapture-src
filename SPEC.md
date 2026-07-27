@@ -1,4 +1,4 @@
-﻿# TigerCapture Feature Spec for AI Agents
+# TigerCapture Feature Spec for AI Agents
 
 Last updated: 2026-07-14
 
@@ -6834,6 +6834,19 @@ AI Script Edit MVP integration:
   automation uses `paint.ui.appearance.blur.add/update/remove/reorder`. These
   Actions and the Inspector ultimately use the validated UI object mutation
   path and normal Painter Undo/Redo.
+- Painter UI Frame objects expose `clip_content` as an editable, persistent
+  hierarchy property. Canvas rendering intersects every child with all enabled
+  ancestor Frame paths, including rounded corners and rotated parent paths;
+  overflow pixels and overflow-only hit targets are both excluded. Selected
+  clipping Frames show a compact amber boundary indicator. Inspector and
+  automation share `app.painter_ui_clipping` through
+  `paint.ui.clip.inspect/set`, and normal Painter Undo/Redo records the change.
+  Figma `clipsContent` imports and exports as the same editable property.
+- Shared TigerStudioUMG delivery maps clipping Painter Frames to native
+  `UCanvasPanel` widgets using `EWidgetClipping::ClipToBoundsAlways`; unclipped
+  containers inherit the parent clipping policy. The provider payload includes
+  `clip_content`, so this behavior is never silently omitted during Unreal
+  generation.
 - The required UI/Action parity matrix is
   `docs/PAINTER_UI_FIGMA_INTERFACE_ACTION_MATRIX_KO.md`. A Figma feature is not
   considered complete when it only survives import JSON; it must also expose

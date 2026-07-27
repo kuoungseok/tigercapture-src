@@ -5,7 +5,7 @@ import math
 from typing import Any, Mapping
 
 from PySide6.QtCore import QPointF, QRectF, Signal, Qt
-from PySide6.QtGui import QColor, QImage, QPainter, QPen, QTransform
+from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QTransform
 from PySide6.QtWidgets import QWidget
 
 from app.painter_ui_constraints import (
@@ -485,6 +485,105 @@ class PainterUIDesignOverlay(QWidget):
             reverse=reverse,
         )
 
+    def _clipping_ancestors(
+        self,
+        row: Mapping[str, Any],
+    ) -> list[dict[str, Any]]:
+        objects = {
+            item["id"]: item for item in self._effective_document["objects"]
+        }
+        result: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        parent_id = str(row.get("parent_id") or "")
+        while parent_id and parent_id not in seen:
+            seen.add(parent_id)
+            parent = objects.get(parent_id)
+            if parent is None:
+                break
+            if parent["kind"] == "frame" and bool(
+                parent.get("clip_content", False)
+            ):
+                result.append(parent)
+            parent_id = str(parent.get("parent_id") or "")
+        result.reverse()
+        return result
+
+    def _clip_path(self, row: Mapping[str, Any]) -> QPainterPath:
+        rect = self._object_rect(row)
+        artboard = next(
+            item
+            for item in self._document["artboards"]
+            if item["id"] == row["artboard_id"]
+        )
+        _viewport, scale = self._artboard_viewport(artboard)
+        radius = max(
+            0.0,
+            float((row.get("style") or {}).get("radius") or 0.0) * scale,
+        )
+        path = QPainterPath()
+        path.addRoundedRect(rect, radius, radius)
+        rotation = float(row.get("rotation", 0.0))
+        if abs(rotation) >= 0.001:
+            pivot = ui_pivot_point(rect, row.get("constraints"))
+            transform = QTransform()
+            transform.translate(pivot.x(), pivot.y())
+            transform.rotate(rotation)
+            transform.translate(-pivot.x(), -pivot.y())
+            path = transform.map(path)
+        return path
+
+    def _apply_parent_clips(
+        self,
+        painter: QPainter,
+        row: Mapping[str, Any],
+    ) -> None:
+        for parent in self._clipping_ancestors(row):
+            painter.setClipPath(
+                self._clip_path(parent),
+                Qt.ClipOperation.IntersectClip,
+            )
+
+    def _point_visible_in_parent_clips(
+        self,
+        row: Mapping[str, Any],
+        point: QPointF,
+    ) -> bool:
+        return all(
+            self._clip_path(parent).contains(point)
+            for parent in self._clipping_ancestors(row)
+        )
+
+    def _paint_clip_indicator(
+        self,
+        painter: QPainter,
+        row: Mapping[str, Any],
+        rect: QRectF,
+    ) -> None:
+        if row["kind"] != "frame" or not bool(row.get("clip_content", False)):
+            return
+        size = max(8.0, min(16.0, min(rect.width(), rect.height()) * 0.08))
+        corner = rect.topRight() + QPointF(-5.0, 5.0)
+        painter.save()
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor("#F2B84B"), 2.0))
+        painter.drawLine(
+            QPointF(corner.x() - size, corner.y()),
+            corner,
+        )
+        painter.drawLine(
+            corner,
+            QPointF(corner.x(), corner.y() + size),
+        )
+        painter.setPen(
+            QPen(QColor("#F2B84B"), 1.0, Qt.PenStyle.DashLine)
+        )
+        painter.drawRoundedRect(
+            rect.adjusted(3.0, 3.0, -3.0, -3.0),
+            2.0,
+            2.0,
+        )
+        painter.restore()
+
     def _paint_object(
         self,
         painter: QPainter,
@@ -674,6 +773,7 @@ class PainterUIDesignOverlay(QWidget):
             )
         for row in self._visible_objects():
             scene_painter.save()
+            self._apply_parent_clips(scene_painter, row)
             rect = self._object_rect(row)
             rotation = float(row.get("rotation", 0.0))
             pivot = ui_pivot_point(rect, row.get("constraints"))
@@ -706,6 +806,7 @@ class PainterUIDesignOverlay(QWidget):
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.setPen(QPen(QColor("#72A7FF"), 2.0))
                 painter.drawRect(rect)
+                self._paint_clip_indicator(painter, row, rect)
             if row["id"] == selected and not row["locked"]:
                 painter.setBrush(QColor("#F4F7FC"))
                 painter.setPen(QPen(QColor("#356FC7"), 1.0))
@@ -837,6 +938,11 @@ class PainterUIDesignOverlay(QWidget):
         selected = ""
         selected_row = None
         for row in self._visible_objects(reverse=True):
+            if not self._point_visible_in_parent_clips(
+                row,
+                event.position(),
+            ):
+                continue
             rect = self._object_rect(row)
             local_position = self._unrotated_point(
                 event.position(),

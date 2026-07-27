@@ -63,7 +63,9 @@ class PainterUILayerList(QListWidget):
             placement = "before"
         elif relative_y > rect.height() * 0.75:
             placement = "after"
-        elif str(target.data(int(Qt.ItemDataRole.UserRole) + 1) or "") == "group":
+        elif str(
+            target.data(int(Qt.ItemDataRole.UserRole) + 1) or ""
+        ) in {"group", "frame"}:
             placement = "inside"
         else:
             placement = "after"
@@ -110,6 +112,7 @@ class PainterUIInspector(QWidget):
     selection_changed = Signal(object, str)
     geometry_changed = Signal(str, object)
     properties_changed = Signal(str, object)
+    clip_changed = Signal(str, bool)
     duplicate_requested = Signal(str)
     delete_requested = Signal(str)
     arrange_requested = Signal(str, str)
@@ -746,6 +749,12 @@ class PainterUIInspector(QWidget):
         )
         self.appearance_button.clicked.connect(self._edit_appearance)
         form.addRow("Appearance", self.appearance_button)
+        self.clip_content_check = QCheckBox("Clip child content")
+        self.clip_content_check.setToolTip(
+            "Hide child pixels and hit targets outside this frame"
+        )
+        self.clip_content_check.toggled.connect(self._emit_clip_content)
+        form.addRow("Frame", self.clip_content_check)
         self.text_edit = QLineEdit()
         self.text_edit.setPlaceholderText("Text")
         self.text_edit.editingFinished.connect(self._emit_properties)
@@ -1111,6 +1120,7 @@ class PainterUIInspector(QWidget):
             self.stroke_width_spin,
             self.radius_spin,
             self.appearance_button,
+            self.clip_content_check,
             self.text_edit,
             self.font_size_spin,
             self.font_weight_combo,
@@ -1162,6 +1172,7 @@ class PainterUIInspector(QWidget):
             self.stroke_edit.clear()
             self._appearance_style = {}
             self.appearance_button.setText("Solid")
+            self.clip_content_check.setChecked(False)
             self.text_edit.clear()
             self.image_source_edit.clear()
             self.accessibility_label_edit.clear()
@@ -1256,6 +1267,11 @@ class PainterUIInspector(QWidget):
         from app.painter_ui_appearance_editor import appearance_summary
 
         self.appearance_button.setText(appearance_summary(style))
+        is_frame = row["kind"] == "frame"
+        self.clip_content_check.setEnabled(is_frame)
+        self.clip_content_check.setChecked(
+            is_frame and bool(row.get("clip_content", False))
+        )
         is_text = row["kind"] in {"text", "button"}
         for widget in (
             self.text_edit,
@@ -1735,6 +1751,12 @@ class PainterUIInspector(QWidget):
             appearance_summary(self._appearance_style)
         )
         self._emit_properties()
+
+    def _emit_clip_content(self, checked: bool) -> None:
+        row = self._selected_row()
+        if self._syncing or row is None or row["kind"] != "frame":
+            return
+        self.clip_changed.emit(str(row["id"]), bool(checked))
 
     def _emit_properties(self) -> None:
         if self._syncing or not self._selected_id():

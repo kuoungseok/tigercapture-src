@@ -976,6 +976,9 @@ def import_figma_payload(
                             ),
                             "visible": bool(node.get("visible", True)),
                             "locked": bool(node.get("locked", False)),
+                            "clip_content": bool(
+                                node.get("clipsContent", False)
+                            ),
                             "z_index": len(objects),
                             "style": _map_style(node),
                             "content": content,
@@ -1748,6 +1751,7 @@ function applyFrame(node,row) {{
   node.resize(Math.max(1,Number(row.width)||1),Math.max(1,Number(row.height)||1));
   node.rotation=Number(row.rotation)||0; node.opacity=Math.max(0,Math.min(1,Number(row.opacity ?? 1)));
   node.visible=row.visible !== false; node.locked=!!row.locked;
+  if('clipsContent' in node) node.clipsContent=!!row.clip_content;
   node.setSharedPluginData('tigerstudio','stable_id',row.id);
   const s=row.style||{{}};
   if('fills' in node) node.fills=[fillPaint(s)];

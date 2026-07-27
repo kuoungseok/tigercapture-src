@@ -233,6 +233,7 @@ def _normalize_object(
         "opacity": max(0.0, min(1.0, _number(row.get("opacity"), 1.0))),
         "visible": bool(row.get("visible", True)),
         "locked": bool(row.get("locked", False)),
+        "clip_content": bool(row.get("clip_content", False)),
         "z_index": int(_number(row.get("z_index"), index)),
         "style": copy.deepcopy(dict(style)) if isinstance(style, Mapping) else {},
         "content": copy.deepcopy(dict(content)) if isinstance(content, Mapping) else {},

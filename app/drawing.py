@@ -8227,6 +8227,9 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.properties_changed.connect(
             self._update_painter_ui_object_changes
         )
+        self._paint_ui_inspector.clip_changed.connect(
+            self._update_painter_ui_clip
+        )
         self._paint_ui_inspector.responsive_override_changed.connect(
             self._update_painter_ui_responsive_override
         )
@@ -10979,6 +10982,36 @@ class PaintDialog(QDialog):
             current,
             object_id,
             effective_changes,
+        )
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _update_painter_ui_clip(
+        self,
+        object_id: str,
+        clip_content: bool,
+    ) -> None:
+        from app.painter_ui_clipping import set_ui_clip
+
+        current = getattr(self, "_painter_ui_document", None)
+        report = next(
+            (
+                row
+                for row in (current or {}).get("objects", [])
+                if row.get("id") == object_id
+            ),
+            None,
+        )
+        if report is None or bool(report.get("clip_content")) == bool(
+            clip_content
+        ):
+            return
+        self._push_undo_state("Set frame clipping")
+        updated, _row = set_ui_clip(
+            current,
+            object_id,
+            bool(clip_content),
         )
         self._painter_ui_document = updated
         self._painter_document_dirty = True

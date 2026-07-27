@@ -177,6 +177,8 @@ def test_painter_uses_shared_umg_document_and_package(tmp_path: Path) -> None:
     assert umg["SchemaVersion"] == TIGER_UMG_SCHEMA_VERSION
     assert umg["Provider"] == "painter"
     assert umg["Layers"]
+    first_payload = json.loads(umg["Layers"][0]["PayloadJson"])
+    assert "clip_content" in first_payload
     preflight = preflight_painter_umg(document)
     assert sum(preflight["counts"].values()) == len(umg["Layers"])
     package = package_painter_umg(document, tmp_path / "umg")

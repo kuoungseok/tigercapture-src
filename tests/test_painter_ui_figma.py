@@ -928,6 +928,32 @@ def test_figma_blur_effects_preserve_type_radius_and_export_code(
     assert "BACKGROUND_BLUR" in code
 
 
+def test_figma_frame_clip_content_round_trips_as_editable_property(
+    tmp_path: Path,
+) -> None:
+    from app.painter_ui_figma import (
+        export_figma_plugin_package,
+        import_figma_payload,
+    )
+
+    payload = _figma_payload()
+    component = payload["document"]["children"][0]["children"][0]["children"][0]
+    component["clipsContent"] = True
+    document, report = import_figma_payload(payload, source="AbCdEf123456")
+    assert report["ok"] is True
+    frame = next(
+        row for row in document["objects"] if row["name"] == "Primary Button"
+    )
+    assert frame["kind"] == "frame"
+    assert frame["clip_content"] is True
+
+    package = export_figma_plugin_package(document, tmp_path)
+    code = (
+        Path(package["output_dir"]) / "code.js"
+    ).read_text(encoding="utf-8")
+    assert "node.clipsContent=!!row.clip_content" in code
+
+
 def test_painter_renders_multiple_outer_and_inner_shadow_effects() -> None:
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QColor, QImage, QPainter
