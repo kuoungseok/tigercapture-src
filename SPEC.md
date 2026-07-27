@@ -6792,6 +6792,13 @@ AI Script Edit MVP integration:
   positioning, and minimum/preferred/maximum dimensions. `cross_gap` defaults
   to the historical `gap` when older Painter documents are normalized and is
   editable through both Inspector and `paint.ui.layout.set`.
+- Figma Component Set import preserves local component families and Variant
+  membership through `base_component_id` and `variant_ids`. Variant, text,
+  boolean, and instance-swap property definitions and per-instance property
+  values remain editable Painter component data. Stable path-based source maps
+  let an imported instance switch between local Figma variants while retaining
+  compatible overrides; unresolved remote-library components remain explicit
+  converted groups rather than false local component claims.
 - Figma export writes `TigerStudioFigmaExport`, containing
   `figma_exchange.json`, a compatibility report, and a local development
   plugin (`manifest.json` and `code.js`). Running that plugin in Figma Design

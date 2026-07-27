@@ -198,6 +198,165 @@ def test_figma_payload_imports_editable_layout_component_and_variables() -> None
     assert text["style"]["text_align"] == "center"
 
 
+def test_figma_component_set_imports_variants_and_instance_properties() -> None:
+    from app.painter_ui_components import switch_ui_component_instance_variant
+    from app.painter_ui_figma import import_figma_payload
+
+    payload = _figma_payload()
+    frame = payload["document"]["children"][0]["children"][0]
+    frame["children"] = [
+        {
+            "id": "10:1",
+            "type": "COMPONENT_SET",
+            "name": "Button",
+            "absoluteBoundingBox": {
+                "x": 124,
+                "y": 260,
+                "width": 342,
+                "height": 120,
+            },
+            "componentPropertyDefinitions": {
+                "State": {
+                    "type": "VARIANT",
+                    "defaultValue": "Default",
+                    "variantOptions": ["Default", "Pressed"],
+                },
+                "Label#10:8": {
+                    "type": "TEXT",
+                    "defaultValue": "Continue",
+                },
+                "Leading icon#10:9": {
+                    "type": "BOOLEAN",
+                    "defaultValue": True,
+                },
+            },
+            "children": [
+                {
+                    "id": "10:2",
+                    "type": "COMPONENT",
+                    "name": "State=Default",
+                    "variantProperties": {"State": "Default"},
+                    "absoluteBoundingBox": {
+                        "x": 124,
+                        "y": 260,
+                        "width": 342,
+                        "height": 52,
+                    },
+                    "children": [
+                        {
+                            "id": "10:3",
+                            "type": "TEXT",
+                            "name": "Label",
+                            "characters": "Continue",
+                            "absoluteBoundingBox": {
+                                "x": 240,
+                                "y": 276,
+                                "width": 100,
+                                "height": 20,
+                            },
+                        }
+                    ],
+                },
+                {
+                    "id": "10:4",
+                    "type": "COMPONENT",
+                    "name": "State=Pressed",
+                    "variantProperties": {"State": "Pressed"},
+                    "absoluteBoundingBox": {
+                        "x": 124,
+                        "y": 328,
+                        "width": 342,
+                        "height": 52,
+                    },
+                    "children": [
+                        {
+                            "id": "10:5",
+                            "type": "TEXT",
+                            "name": "Label",
+                            "characters": "Continue",
+                            "absoluteBoundingBox": {
+                                "x": 240,
+                                "y": 344,
+                                "width": 100,
+                                "height": 20,
+                            },
+                        }
+                    ],
+                },
+            ],
+        },
+        {
+            "id": "10:6",
+            "type": "INSTANCE",
+            "name": "Continue Button",
+            "componentId": "10:4",
+            "componentProperties": {
+                "State": {"type": "VARIANT", "value": "Pressed"},
+                "Label#10:8": {"type": "TEXT", "value": "Buy now"},
+                "Leading icon#10:9": {"type": "BOOLEAN", "value": False},
+            },
+            "absoluteBoundingBox": {
+                "x": 124,
+                "y": 420,
+                "width": 342,
+                "height": 52,
+            },
+            "children": [],
+        },
+    ]
+
+    document, report = import_figma_payload(payload, source="AbCdEf123456")
+
+    assert report["ok"] is True
+    assert report["component_count"] == 2
+    family = next(
+        row for row in document["components"] if not row["base_component_id"]
+    )
+    variant = next(
+        row for row in document["components"] if row["base_component_id"]
+    )
+    assert family["variant_ids"] == [variant["id"]]
+    assert variant["base_component_id"] == family["id"]
+    assert family["property_definitions"]["State"] == {
+        "type": "enum",
+        "default": "Default",
+        "values": ["Default", "Pressed"],
+        "description": "",
+    }
+    assert family["property_definitions"]["Label"]["type"] == "text"
+    assert family["property_definitions"]["Leading icon"]["type"] == "boolean"
+    assert family["metadata"]["variant_key"] == "State=Default"
+    assert variant["metadata"]["variant_key"] == "State=Pressed"
+    assert variant["metadata"]["variant_source_map"]["root/0"] == (
+        "figma-node-10-5"
+    )
+    instance = next(
+        row for row in document["objects"] if row["component_role"] == "instance"
+    )
+    assert instance["component_id"] == variant["id"]
+    assert instance["component_source_object_id"] == variant["root_object_id"]
+    assert instance["variant"] == "State=Pressed"
+    assert instance["component_properties"] == {
+        "State": "Pressed",
+        "Label": "Buy now",
+        "Leading icon": False,
+    }
+    document, switched = switch_ui_component_instance_variant(
+        document,
+        instance_root_id=instance["id"],
+        target_component_id=family["id"],
+    )
+    assert switched["component_id"] == family["id"]
+    switched_rows = [
+        row for row in document["objects"] if row["id"] in switched["object_ids"]
+    ]
+    assert len(switched_rows) == 2
+    switched_root = next(row for row in switched_rows if not row["parent_id"])
+    switched_label = next(row for row in switched_rows if row["kind"] == "text")
+    assert switched_root["component_properties"]["Label"] == "Buy now"
+    assert switched_label["component_source_object_id"] == "figma-node-10-3"
+
+
 def test_figma_import_activates_the_richest_visible_artboard() -> None:
     from app.painter_ui_figma import import_figma_payload
 

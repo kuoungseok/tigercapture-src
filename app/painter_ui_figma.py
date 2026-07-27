@@ -50,6 +50,118 @@ def _stable_id(prefix: str, value: object) -> str:
     return f"figma-{prefix}-{source or 'node'}"
 
 
+def _figma_property_name(value: object) -> str:
+    name = str(value or "").strip()
+    return re.sub(r"#\d+:\d+$", "", name).strip() or name
+
+
+def _figma_component_property_definitions(
+    *sources: object,
+) -> dict[str, dict[str, Any]]:
+    result: dict[str, dict[str, Any]] = {}
+    type_map = {
+        "BOOLEAN": "boolean",
+        "TEXT": "text",
+        "INSTANCE_SWAP": "instance_swap",
+        "VARIANT": "enum",
+    }
+    for source in sources:
+        if not isinstance(source, Mapping):
+            continue
+        for raw_name, raw_definition in source.items():
+            if not isinstance(raw_definition, Mapping):
+                continue
+            name = _figma_property_name(raw_name)
+            figma_type = str(raw_definition.get("type") or "TEXT").upper()
+            values = (
+                list(raw_definition.get("variantOptions") or [])
+                if figma_type == "VARIANT"
+                else []
+            )
+            result[name] = {
+                "type": type_map.get(figma_type, figma_type.casefold()),
+                "default": copy.deepcopy(raw_definition.get("defaultValue")),
+                "values": [str(value) for value in values],
+                "description": str(raw_definition.get("description") or ""),
+            }
+    return result
+
+
+def _figma_component_properties(value: object) -> dict[str, Any]:
+    if not isinstance(value, Mapping):
+        return {}
+    result: dict[str, Any] = {}
+    for raw_name, raw_property in value.items():
+        name = _figma_property_name(raw_name)
+        if isinstance(raw_property, Mapping):
+            result[name] = copy.deepcopy(raw_property.get("value"))
+        else:
+            result[name] = copy.deepcopy(raw_property)
+    return result
+
+
+def _figma_variant_key(node: Mapping[str, Any]) -> str:
+    properties = node.get("variantProperties")
+    if isinstance(properties, Mapping) and properties:
+        return ", ".join(
+            f"{_figma_property_name(name)}={value}"
+            for name, value in properties.items()
+        )
+    return str(node.get("name") or "")
+
+
+def _figma_variant_source_map(node: Mapping[str, Any]) -> dict[str, str]:
+    result: dict[str, str] = {}
+
+    def visit(current: Mapping[str, Any], path: str) -> None:
+        result[path] = _stable_id("node", current.get("id"))
+        child_index = 0
+        for child in current.get("children", []):
+            if not isinstance(child, Mapping):
+                continue
+            visit(child, f"{path}/{child_index}")
+            child_index += 1
+
+    visit(node, "root")
+    return result
+
+
+def _figma_component_set_index(
+    root: Mapping[str, Any],
+) -> dict[str, dict[str, Any]]:
+    index: dict[str, dict[str, Any]] = {}
+
+    def visit(node: Mapping[str, Any]) -> None:
+        if str(node.get("type") or "").upper() == "COMPONENT_SET":
+            children = [
+                child
+                for child in node.get("children", [])
+                if isinstance(child, Mapping)
+                and str(child.get("type") or "").upper() == "COMPONENT"
+            ]
+            component_ids = [
+                _stable_id("component", child.get("id")) for child in children
+            ]
+            family_id = component_ids[0] if component_ids else ""
+            set_row = {
+                "figma_node_id": str(node.get("id") or ""),
+                "name": str(node.get("name") or "Component Set"),
+                "family_id": family_id,
+                "component_ids": component_ids,
+                "property_definitions": _figma_component_property_definitions(
+                    node.get("componentPropertyDefinitions")
+                ),
+            }
+            for child in children:
+                index[str(child.get("id") or "")] = set_row
+        for child in node.get("children", []):
+            if isinstance(child, Mapping):
+                visit(child)
+
+    visit(root)
+    return index
+
+
 def _number(value: object, default: float = 0.0) -> float:
     try:
         return float(value)
@@ -557,6 +669,7 @@ def import_figma_payload(
     supported = 0
     skipped = 0
     artboard_x = 0.0
+    component_set_index = _figma_component_set_index(root)
 
     for page in pages:
         for frame in _top_level_frames(page):
@@ -593,6 +706,7 @@ def import_figma_payload(
                 *,
                 include_self: bool = True,
                 parent_layout_mode: str = "none",
+                definition_component_id: str = "",
             ) -> None:
                 nonlocal supported, skipped
                 node_type = str(node.get("type") or "").upper()
@@ -633,14 +747,67 @@ def import_figma_payload(
                         component_id = _stable_id("component", node.get("id"))
                         role = "definition"
                         source_object_id = object_id
+                        component_set = component_set_index.get(
+                            str(node.get("id") or "")
+                        )
+                        family_id = (
+                            str(component_set.get("family_id") or "")
+                            if component_set
+                            else ""
+                        )
+                        base_component_id = (
+                            family_id
+                            if family_id and family_id != component_id
+                            else ""
+                        )
+                        family_variants = (
+                            [
+                                str(value)
+                                for value in component_set.get(
+                                    "component_ids", []
+                                )
+                                if str(value) and str(value) != component_id
+                            ]
+                            if component_set and not base_component_id
+                            else []
+                        )
+                        property_definitions = (
+                            dict(component_set.get("property_definitions") or {})
+                            if component_set
+                            else {}
+                        )
+                        property_definitions.update(
+                            _figma_component_property_definitions(
+                                node.get("componentPropertyDefinitions")
+                            )
+                        )
+                        variant_properties = _figma_component_properties(
+                            node.get("variantProperties")
+                        )
                         components.append(
                             {
                                 "id": component_id,
                                 "name": str(node.get("name") or "Component"),
                                 "root_object_id": object_id,
+                                "base_component_id": base_component_id,
+                                "property_definitions": property_definitions,
+                                "variant_ids": family_variants,
                                 "metadata": {
                                     "figma_node_id": str(node.get("id") or ""),
                                     "figma_key": str(node.get("key") or ""),
+                                    "figma_component_set_id": (
+                                        str(
+                                            component_set.get("figma_node_id")
+                                            or ""
+                                        )
+                                        if component_set
+                                        else ""
+                                    ),
+                                    "variant_key": _figma_variant_key(node),
+                                    "variant_properties": variant_properties,
+                                    "variant_source_map": (
+                                        _figma_variant_source_map(node)
+                                    ),
                                 },
                             }
                         )
@@ -650,6 +817,10 @@ def import_figma_payload(
                             node.get("componentId") or node.get("mainComponent", ""),
                         )
                         role = "instance"
+                    elif definition_component_id:
+                        component_id = definition_component_id
+                        role = "definition"
+                        source_object_id = object_id
                     objects.append(
                         {
                             "id": object_id,
@@ -678,6 +849,9 @@ def import_figma_payload(
                             "component_id": component_id,
                             "component_role": role,
                             "component_source_object_id": source_object_id,
+                            "component_properties": _figma_component_properties(
+                                node.get("componentProperties")
+                            ),
                             "token_bindings": _map_token_bindings(node),
                         }
                     )
@@ -705,6 +879,9 @@ def import_figma_payload(
                             child,
                             current_parent,
                             parent_layout_mode=child_parent_layout_mode,
+                            definition_component_id=(
+                                component_id if role == "definition" else ""
+                            ),
                         )
 
             if str(frame.get("type") or "").upper() == "COMPONENT":
@@ -727,6 +904,7 @@ def import_figma_payload(
     component_roots = {
         str(row["id"]): str(row["root_object_id"]) for row in components
     }
+    component_by_id = {str(row["id"]): row for row in components}
     for row in objects:
         if row.get("component_role") != "instance":
             continue
@@ -734,6 +912,10 @@ def import_figma_payload(
         source_object_id = component_roots.get(component_id, "")
         if source_object_id:
             row["component_source_object_id"] = source_object_id
+            component = component_by_id[component_id]
+            row["variant"] = str(
+                (component.get("metadata") or {}).get("variant_key") or ""
+            )
             continue
         row["content"]["figma_component_id"] = component_id
         row["component_id"] = ""
