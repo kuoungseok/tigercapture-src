@@ -8,7 +8,7 @@ from app.painter_ui_auto_layout import normalize_ui_auto_layout
 
 
 UI_DOCUMENT_SCHEMA = "tigerstudio.painter.ui.v1"
-UI_DOCUMENT_VERSION = 9
+UI_DOCUMENT_VERSION = 10
 UI_OBJECT_KINDS = {
     "frame",
     "group",
@@ -213,6 +213,7 @@ def _normalize_object(
     token_bindings = row.get("token_bindings")
     from app.painter_ui_responsive import normalize_ui_responsive_overrides
     from app.painter_ui_components import (
+        normalize_ui_component_property_bindings,
         normalize_ui_component_properties,
         normalize_ui_component_role,
         normalize_ui_instance_overrides,
@@ -253,6 +254,9 @@ def _normalize_object(
         ),
         "component_properties": normalize_ui_component_properties(
             row.get("component_properties")
+        ),
+        "component_property_bindings": normalize_ui_component_property_bindings(
+            row.get("component_property_bindings")
         ),
         "variant": str(row.get("variant") or ""),
         "token_bindings": (
@@ -610,6 +614,65 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
                             f"invalid_component_property_value:{row['id']}:"
                             f"{property_name}:{property_value}"
                         )
+        for target_path, property_name in row[
+            "component_property_bindings"
+        ].items():
+            owner_component_id = (
+                component_id if component_role == "definition" else ""
+            )
+            parent = object_by_id.get(row["parent_id"])
+            while not owner_component_id and parent is not None:
+                if parent["component_role"] == "definition":
+                    owner_component_id = parent["component_id"]
+                    break
+                parent = object_by_id.get(parent["parent_id"])
+            owner_component = component_by_id.get(owner_component_id)
+            if owner_component is None:
+                errors.append(
+                    f"component_property_binding_outside_definition:"
+                    f"{row['id']}:{target_path}"
+                )
+                continue
+            if row["id"] == owner_component["root_object_id"]:
+                errors.append(
+                    f"component_property_binding_on_root:"
+                    f"{row['id']}:{target_path}"
+                )
+            definition = owner_component["property_definitions"].get(
+                property_name
+            )
+            if definition is None:
+                errors.append(
+                    f"missing_component_property_binding:"
+                    f"{row['id']}:{property_name}"
+                )
+                continue
+            expected_type = {
+                "content.text": "text",
+                "visible": "boolean",
+                "component_id": "instance_swap",
+            }.get(target_path)
+            if expected_type is None:
+                errors.append(
+                    f"unsupported_component_property_binding:"
+                    f"{row['id']}:{target_path}"
+                )
+            elif definition["type"] != expected_type:
+                errors.append(
+                    f"component_property_binding_type_mismatch:"
+                    f"{row['id']}:{target_path}:{definition['type']}"
+                )
+            elif target_path == "content.text" and row["kind"] != "text":
+                errors.append(
+                    f"component_text_binding_requires_text:{row['id']}"
+                )
+            elif (
+                target_path == "component_id"
+                and component_role != "instance"
+            ):
+                errors.append(
+                    f"component_swap_binding_requires_instance:{row['id']}"
+                )
         for property_name, token_id in row["token_bindings"].items():
             if token_id and token_id not in token_id_set:
                 errors.append(

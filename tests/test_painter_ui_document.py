@@ -378,16 +378,17 @@ def test_ui_v1_migration_types_records_and_preserves_stable_ids() -> None:
         ],
     }
     document, report = migrate_ui_document(legacy)
-    assert document["version"] == UI_DOCUMENT_VERSION == 9
+    assert document["version"] == UI_DOCUMENT_VERSION == 10
     assert report == {
         "schema": "tigerstudio.painter.ui.migration.v1",
         "from_version": 1,
-        "to_version": 9,
+        "to_version": 10,
         "changed": True,
     }
     assert document["components"][0]["id"] == "ui-component-1"
     assert document["tokens"][0]["id"] == "ui-token-1"
     assert document["interactions"][0]["id"] == "ui-interaction-1"
+    assert document["objects"][0]["component_property_bindings"] == {}
     assert normalize_ui_document(document) == document
 
 

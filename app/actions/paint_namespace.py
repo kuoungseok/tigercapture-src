@@ -731,6 +731,37 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a typed component property would be defined",
     )
     registry.register_adapter_action(
+        "paint.ui.component.property.bind",
+        "Bind a component property to a definition sublayer field.",
+        "paint",
+        "paint_ui_component_property_bind",
+        params_schema=schema_object(
+            {
+                "component_id": {"type": "string"},
+                "source_object_id": {"type": "string"},
+                "property_name": {"type": "string"},
+                "target_path": {
+                    "type": "string",
+                    "enum": ["content.text", "visible", "component_id"],
+                },
+            },
+            required=(
+                "component_id",
+                "source_object_id",
+                "property_name",
+                "target_path",
+            ),
+        ),
+        required=(
+            "component_id",
+            "source_object_id",
+            "property_name",
+            "target_path",
+        ),
+        undo_label="Bind UI component property",
+        dry_summary="a component property would control a definition sublayer",
+    )
+    registry.register_adapter_action(
         "paint.ui.component.state.override.set",
         "Set visual overrides for one interactive component state.",
         "paint",

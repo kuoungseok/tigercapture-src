@@ -248,6 +248,9 @@ def test_figma_component_set_imports_variants_and_instance_properties() -> None:
                             "type": "TEXT",
                             "name": "Label",
                             "characters": "Continue",
+                            "componentPropertyReferences": {
+                                "characters": "Label#10:8"
+                            },
                             "absoluteBoundingBox": {
                                 "x": 240,
                                 "y": 276,
@@ -274,6 +277,9 @@ def test_figma_component_set_imports_variants_and_instance_properties() -> None:
                             "type": "TEXT",
                             "name": "Label",
                             "characters": "Continue",
+                            "componentPropertyReferences": {
+                                "characters": "Label#10:8"
+                            },
                             "absoluteBoundingBox": {
                                 "x": 240,
                                 "y": 344,
@@ -330,6 +336,14 @@ def test_figma_component_set_imports_variants_and_instance_properties() -> None:
     assert variant["metadata"]["variant_source_map"]["root/0"] == (
         "figma-node-10-5"
     )
+    variant_label = next(
+        row
+        for row in document["objects"]
+        if row["id"] == "figma-node-10-5"
+    )
+    assert variant_label["component_property_bindings"] == {
+        "content.text": "Label"
+    }
     instance = next(
         row for row in document["objects"] if row["component_role"] == "instance"
     )
@@ -769,9 +783,11 @@ def test_figma_export_preserves_component_family_and_variant_properties(
     tmp_path: Path,
 ) -> None:
     from app.painter_ui_components import (
+        bind_ui_component_property,
         convert_ui_object_to_component,
         create_ui_component_variant,
         instantiate_ui_component,
+        resolve_ui_component_document,
         set_ui_instance_component_property,
     )
     from app.painter_ui_document import add_ui_object, create_ui_document
@@ -788,6 +804,18 @@ def test_figma_export_preserves_component_family_and_variant_properties(
         y=40,
         width=160,
         height=48,
+    )
+    document, label = add_ui_object(
+        document,
+        kind="text",
+        name="Label",
+        artboard_id=artboard["id"],
+        parent_id=root["id"],
+        x=72,
+        y=54,
+        width=96,
+        height=24,
+        content={"text": "Continue"},
     )
     document, component = convert_ui_object_to_component(
         document,
@@ -814,6 +842,13 @@ def test_figma_export_preserves_component_family_and_variant_properties(
         if row["id"] == component["id"]:
             document["components"][index] = component
             break
+    document, _ = bind_ui_component_property(
+        document,
+        component_id=component["id"],
+        source_object_id=label["id"],
+        property_name="Label",
+        target_path="content.text",
+    )
     document, variant = create_ui_component_variant(
         document,
         component_id=component["id"],
@@ -832,6 +867,14 @@ def test_figma_export_preserves_component_family_and_variant_properties(
         property_name="Label",
         property_value="Buy now",
     )
+    resolved = resolve_ui_component_document(document)
+    resolved_instance_label = next(
+        row
+        for row in resolved["objects"]
+        if row["component_role"] == "instance"
+        and row["kind"] == "text"
+    )
+    assert resolved_instance_label["content"]["text"] == "Buy now"
 
     report = export_figma_plugin_package(document, tmp_path / "out")
     target = Path(report["output_dir"])
@@ -853,6 +896,16 @@ def test_figma_export_preserves_component_family_and_variant_properties(
     assert family["property_definitions"]["Leading icon"]["type"] == "boolean"
     assert exported_variant["metadata"]["variant_key"] == "state=pressed"
     assert exported_instance["component_properties"]["Label"] == "Buy now"
+    exported_label = next(
+        row
+        for row in exchange["document"]["objects"]
+        if row["id"] == label["id"]
+    )
+    assert exported_label["component_property_bindings"] == {
+        "content.text": "Label"
+    }
+    code = (target / "code.js").read_text("utf-8")
+    assert "node.componentPropertyReferences=references" in code
 
 
 def test_figma_export_blocks_unsupported_component_property_type(

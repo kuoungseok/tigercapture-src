@@ -190,7 +190,7 @@ def test_component_actions_and_undo_share_document_mutation() -> None:
         time_ms=0,
         standalone=True,
     )
-    document, root, _child = _component_document()
+    document, root, child = _component_document()
     dialog._painter_ui_document = document
     registry = ActionRegistry(owner=dialog)
     action_ids = {row["id"] for row in registry.list_actions()}
@@ -199,6 +199,7 @@ def test_component_actions_and_undo_share_document_mutation() -> None:
         "paint.ui.component.instantiate",
         "paint.ui.component.sync",
         "paint.ui.component.property.define",
+        "paint.ui.component.property.bind",
         "paint.ui.component.state.override.set",
         "paint.ui.component.instance.property.set",
         "paint.ui.component.variant.create",
@@ -225,6 +226,25 @@ def test_component_actions_and_undo_share_document_mutation() -> None:
         },
     ).to_dict()
     assert defined["ok"] is True
+    label_defined = registry.execute(
+        "paint.ui.component.property.define",
+        {
+            "component_id": component_id,
+            "property_name": "Label",
+            "definition": {"type": "text", "default": "Profile"},
+        },
+    ).to_dict()
+    assert label_defined["ok"] is True
+    bound = registry.execute(
+        "paint.ui.component.property.bind",
+        {
+            "component_id": component_id,
+            "source_object_id": child["id"],
+            "property_name": "Label",
+            "target_path": "content.text",
+        },
+    ).to_dict()
+    assert bound["ok"] is True
     state_override = registry.execute(
         "paint.ui.component.state.override.set",
         {
@@ -437,6 +457,91 @@ def test_component_property_and_state_validation_rejects_invalid_values() -> Non
             state="unknown",
             source_object_id=child["id"],
             changes={"opacity": 0.5},
+        )
+
+
+def test_component_property_binding_resolves_text_and_visibility() -> None:
+    import pytest
+
+    from app.painter_ui_components import (
+        bind_ui_component_property,
+        convert_ui_object_to_component,
+        define_ui_component_property,
+        instantiate_ui_component,
+        resolve_ui_component_document,
+        set_ui_instance_component_property,
+    )
+    from app.painter_ui_document import PainterUIDocumentError
+
+    document, root, child = _component_document()
+    document, component = convert_ui_object_to_component(
+        document,
+        root_object_id=root["id"],
+    )
+    document, _ = define_ui_component_property(
+        document,
+        component_id=component["id"],
+        property_name="Label",
+        definition={"type": "text", "default": "Profile"},
+    )
+    document, _ = define_ui_component_property(
+        document,
+        component_id=component["id"],
+        property_name="Show label",
+        definition={"type": "boolean", "default": True},
+    )
+    document, _ = bind_ui_component_property(
+        document,
+        component_id=component["id"],
+        source_object_id=child["id"],
+        property_name="Label",
+        target_path="content.text",
+    )
+    document, bindings = bind_ui_component_property(
+        document,
+        component_id=component["id"],
+        source_object_id=child["id"],
+        property_name="Show label",
+        target_path="visible",
+    )
+    assert bindings == {
+        "content.text": "Label",
+        "visible": "Show label",
+    }
+    document, instance = instantiate_ui_component(
+        document,
+        component_id=component["id"],
+    )
+    document, _ = set_ui_instance_component_property(
+        document,
+        instance_root_id=instance["root_object_id"],
+        property_name="Label",
+        property_value="Local profile",
+    )
+    document, _ = set_ui_instance_component_property(
+        document,
+        instance_root_id=instance["root_object_id"],
+        property_name="Show label",
+        property_value=False,
+    )
+
+    resolved = resolve_ui_component_document(document)
+    resolved_child = next(
+        row
+        for row in resolved["objects"]
+        if row["component_role"] == "instance"
+        and row["component_source_object_id"] == child["id"]
+    )
+    assert resolved_child["content"]["text"] == "Local profile"
+    assert resolved_child["visible"] is False
+
+    with pytest.raises(PainterUIDocumentError, match="type_mismatch"):
+        bind_ui_component_property(
+            document,
+            component_id=component["id"],
+            source_object_id=child["id"],
+            property_name="Show label",
+            target_path="content.text",
         )
 
 

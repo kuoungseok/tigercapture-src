@@ -1076,6 +1076,31 @@ class PaintAdapterMixin(PaintUIFigmaAdapterMixin):
             document,
         )
 
+    def paint_ui_component_property_bind(
+        self,
+        *,
+        component_id: str,
+        source_object_id: str,
+        property_name: str,
+        target_path: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_components import bind_ui_component_property
+
+        document, _bindings = bind_ui_component_property(
+            dialog._painter_ui_document,
+            component_id=str(component_id),
+            source_object_id=str(source_object_id),
+            property_name=str(property_name),
+            target_path=str(target_path),
+        )
+        dialog._push_undo_state("Bind UI component property")
+        return self._paint_ui_commit(
+            dialog,
+            "Bind UI component property",
+            document,
+        )
+
     def paint_ui_component_state_override_set(
         self,
         *,

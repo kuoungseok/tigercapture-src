@@ -100,6 +100,21 @@ def _figma_component_properties(value: object) -> dict[str, Any]:
     return result
 
 
+def _figma_component_property_bindings(value: object) -> dict[str, str]:
+    if not isinstance(value, Mapping):
+        return {}
+    path_map = {
+        "characters": "content.text",
+        "visible": "visible",
+        "mainComponent": "component_id",
+    }
+    return {
+        path_map[field]: _figma_property_name(property_name)
+        for field, property_name in value.items()
+        if field in path_map and str(property_name or "").strip()
+    }
+
+
 def _figma_variant_key(node: Mapping[str, Any]) -> str:
     properties = node.get("variantProperties")
     if isinstance(properties, Mapping) and properties:
@@ -852,6 +867,11 @@ def import_figma_payload(
                             "component_properties": _figma_component_properties(
                                 node.get("componentProperties")
                             ),
+                            "component_property_bindings": (
+                                _figma_component_property_bindings(
+                                    node.get("componentPropertyReferences")
+                                )
+                            ),
                             "token_bindings": _map_token_bindings(node),
                         }
                     )
@@ -1486,6 +1506,14 @@ function componentFamilyId(componentId) {{
   const row=componentRecords.get(componentId);
   return row ? (row.base_component_id || row.id) : componentId;
 }}
+function containingDefinitionComponentId(row) {{
+  let current=row;
+  while(current) {{
+    if(current.component_role==='definition') return current.component_id;
+    current=objectById.get(current.parent_id);
+  }}
+  return '';
+}}
 function cleanPropertyName(value) {{
   return String(value||'').replace(/#\\d+:\\d+$/,'').trim();
 }}
@@ -1656,6 +1684,22 @@ async function main() {{
         catch (error) {{ throw new Error(`Instance properties failed for ${{row.id}}: ${{error.message}}`); }}
       }}
     }}
+  }}
+  for(const row of ordered.filter(row => Object.keys(row.component_property_bindings||{{}}).length)) {{
+    const node=created.get(row.id);
+    const ownerId=containingDefinitionComponentId(row);
+    const names=componentPropertyNames.get(componentFamilyId(ownerId))||new Map();
+    if(!node) throw new Error(`Component property target node is missing: ${{row.id}}`);
+    const references={{...(node.componentPropertyReferences||{{}})}};
+    for(const [targetPath,propertyName] of Object.entries(row.component_property_bindings||{{}})) {{
+      const field={{'content.text':'characters','visible':'visible','component_id':'mainComponent'}}[targetPath];
+      const actual=names.get(propertyName);
+      if(!field || !actual)
+        throw new Error(`Component property binding is unresolved: ${{row.id}}:${{targetPath}}:${{propertyName}}`);
+      references[field]=actual;
+    }}
+    try {{ node.componentPropertyReferences=references; }}
+    catch (error) {{ throw new Error(`Component property binding failed for ${{row.id}}: ${{error.message}}`); }}
   }}
   for(const link of doc.interactions) {{
     const source=created.get(link.source_object_id), target=created.get(link.target_artboard_id||link.target_object_id);
