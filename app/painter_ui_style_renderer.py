@@ -35,36 +35,98 @@ def ui_color(value: object, fallback: str = "#000000") -> QColor:
     return color if color.isValid() else QColor(fallback)
 
 
+def _svg_geometry_rows(value: object) -> list[dict[str, str]]:
+    if not isinstance(value, list):
+        return []
+    result: list[dict[str, str]] = []
+    for row in value:
+        if isinstance(row, Mapping):
+            path = str(row.get("path") or "").strip()
+            winding = str(row.get("winding_rule") or "nonzero").casefold()
+        else:
+            path = str(row).strip()
+            winding = "nonzero"
+        if path:
+            result.append(
+                {
+                    "path": path,
+                    "fill_rule": "evenodd" if winding == "evenodd" else "nonzero",
+                }
+            )
+    return result
+
+
+def has_ui_vector_geometry(content: object) -> bool:
+    if not isinstance(content, Mapping):
+        return False
+    return bool(
+        _svg_geometry_rows(content.get("vector_fill_geometry"))
+        or _svg_geometry_rows(content.get("vector_stroke_geometry"))
+        or _svg_geometry_rows(content.get("vector_paths"))
+    )
+
+
 def draw_ui_vector_paths(
     painter: QPainter,
     rect: QRectF,
-    paths: object,
+    content: object,
     style: Mapping[str, Any],
 ) -> bool:
     """Render Figma SVG path geometry without substituting a bounding box."""
-    if not isinstance(paths, list):
+    if not isinstance(content, Mapping):
         return False
-    path_rows = [str(path).strip() for path in paths if str(path).strip()]
-    if not path_rows or rect.width() <= 0.0 or rect.height() <= 0.0:
+    fill_rows = _svg_geometry_rows(content.get("vector_fill_geometry"))
+    stroke_rows = _svg_geometry_rows(content.get("vector_stroke_geometry"))
+    if not fill_rows:
+        fill_rows = _svg_geometry_rows(content.get("vector_paths"))
+    if (
+        not (fill_rows or stroke_rows)
+        or rect.width() <= 0.0
+        or rect.height() <= 0.0
+    ):
         return False
 
     fill = ui_color(style.get("fill"), "#506884")
     stroke = ui_color(style.get("stroke"), "#00000000")
     stroke_width = max(0.0, float(style.get("stroke_width") or 0.0))
-    path_markup = "".join(
+    fill_markup = "".join(
         (
-            f'<path d="{html.escape(path, quote=True)}" '
+            f'<path d="{html.escape(row["path"], quote=True)}" '
             f'fill="{fill.name()}" fill-opacity="{fill.alphaF():.6f}" '
-            f'stroke="{stroke.name()}" stroke-opacity="{stroke.alphaF():.6f}" '
-            f'stroke-width="{stroke_width:.6f}"/>'
+            f'fill-rule="{row["fill_rule"]}" stroke="none"/>'
         )
-        for path in path_rows
+        for row in fill_rows
+    )
+    cap = {
+        "round": "round",
+        "square": "square",
+    }.get(str(style.get("stroke_cap") or "").casefold(), "butt")
+    join = {
+        "round": "round",
+        "bevel": "bevel",
+    }.get(str(style.get("stroke_join") or "").casefold(), "miter")
+    dash_values = style.get("stroke_dash")
+    dash_values = dash_values if isinstance(dash_values, list) else []
+    dash = " ".join(str(max(0.0, float(value))) for value in dash_values)
+    dash_attribute = (
+        f' stroke-dasharray="{html.escape(dash, quote=True)}"' if dash else ""
+    )
+    stroke_markup = "".join(
+        (
+            f'<path d="{html.escape(row["path"], quote=True)}" fill="none" '
+            f'stroke="{stroke.name()}" stroke-opacity="{stroke.alphaF():.6f}" '
+            f'stroke-width="{stroke_width:.6f}" stroke-linecap="{cap}" '
+            f'stroke-linejoin="{join}" '
+            f'stroke-miterlimit="{max(0.0, float(style.get("stroke_miter_limit") or 4.0)):.6f}"'
+            f"{dash_attribute}/>"
+        )
+        for row in stroke_rows
     )
     svg = (
         '<svg xmlns="http://www.w3.org/2000/svg" '
         f'width="{rect.width():.6f}" height="{rect.height():.6f}" '
         f'viewBox="0 0 {rect.width():.6f} {rect.height():.6f}">'
-        f"{path_markup}</svg>"
+        f"{fill_markup}{stroke_markup}</svg>"
     )
     renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
     if not renderer.isValid():

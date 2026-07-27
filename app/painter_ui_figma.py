@@ -240,6 +240,20 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
         "fill": _color(fill.get("color"), "#00000000") if fill else "#00000000",
         "stroke": _color(stroke.get("color"), "#00000000") if stroke else "#00000000",
         "stroke_width": max(0.0, _number(node.get("strokeWeight"))),
+        "stroke_cap": str(node.get("strokeCap") or "NONE").casefold(),
+        "stroke_join": str(node.get("strokeJoin") or "MITER").casefold(),
+        "stroke_miter_limit": max(
+            0.0,
+            _number(node.get("strokeMiterAngle"), 4.0),
+        ),
+        "stroke_dash": [
+            max(0.0, _number(value))
+            for value in (
+                node.get("strokeDashes")
+                if isinstance(node.get("strokeDashes"), list)
+                else []
+            )
+        ],
         "radius": max(
             0.0,
             _number(
@@ -321,11 +335,27 @@ def _map_content(
                 "image_mode": str(image.get("scaleMode") or "FILL").casefold(),
             }
         )
-    paths = node.get("fillGeometry")
-    if isinstance(paths, list):
+    fill_geometry = node.get("fillGeometry")
+    if isinstance(fill_geometry, list):
+        result["vector_fill_geometry"] = [
+            {
+                "path": str(row.get("path") or ""),
+                "winding_rule": str(row.get("windingRule") or "NONZERO").casefold(),
+            }
+            for row in fill_geometry
+            if isinstance(row, Mapping) and str(row.get("path") or "")
+        ]
         result["vector_paths"] = [
-            str(row.get("path") or "")
-            for row in paths
+            row["path"] for row in result["vector_fill_geometry"]
+        ]
+    stroke_geometry = node.get("strokeGeometry")
+    if isinstance(stroke_geometry, list):
+        result["vector_stroke_geometry"] = [
+            {
+                "path": str(row.get("path") or ""),
+                "winding_rule": str(row.get("windingRule") or "NONZERO").casefold(),
+            }
+            for row in stroke_geometry
             if isinstance(row, Mapping) and str(row.get("path") or "")
         ]
     return result
@@ -485,7 +515,12 @@ def import_figma_payload(
                     object_id = _stable_id("node", node.get("id"))
                     kind = _map_kind(node)
                     content = _map_content(node, images, local_images)
-                    if kind == "path" and not content.get("vector_paths"):
+                    has_vector_geometry = bool(
+                        content.get("vector_fill_geometry")
+                        or content.get("vector_stroke_geometry")
+                        or content.get("vector_paths")
+                    )
+                    if kind == "path" and not has_vector_geometry:
                         warnings.append(
                             f"blocked:{node.get('id')}:VECTOR:"
                             "missing_geometry_paths"

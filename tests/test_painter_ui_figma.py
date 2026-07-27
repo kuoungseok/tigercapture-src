@@ -313,7 +313,98 @@ def test_figma_vector_geometry_is_preserved_for_svg_rendering() -> None:
 
     vector = next(row for row in document["objects"] if row["name"] == "Triangle")
     assert vector["content"]["vector_paths"] == ["M 0 24 L 12 0 L 24 24 Z"]
+    assert vector["content"]["vector_fill_geometry"] == [
+        {
+            "path": "M 0 24 L 12 0 L 24 24 Z",
+            "winding_rule": "nonzero",
+        }
+    ]
     assert not any("9:2:VECTOR:missing_geometry_paths" in row for row in report["warnings"])
+
+
+def test_figma_stroke_geometry_and_line_style_are_preserved() -> None:
+    from app.painter_ui_figma import import_figma_payload
+
+    payload = _figma_payload()
+    frame = payload["document"]["children"][0]["children"][0]
+    frame["children"].append(
+        {
+            "id": "9:3",
+            "type": "VECTOR",
+            "name": "Outlined icon",
+            "absoluteBoundingBox": {
+                "x": 140,
+                "y": 240,
+                "width": 24,
+                "height": 24,
+            },
+            "strokeGeometry": [
+                {
+                    "path": "M 2 12 L 22 12",
+                    "windingRule": "EVENODD",
+                }
+            ],
+            "strokes": [
+                {
+                    "type": "SOLID",
+                    "color": {"r": 0.25, "g": 0.5, "b": 0.75},
+                }
+            ],
+            "strokeWeight": 2,
+            "strokeCap": "ROUND",
+            "strokeJoin": "BEVEL",
+            "strokeDashes": [4, 2],
+        }
+    )
+
+    document, report = import_figma_payload(payload, source="AbCdEf123456")
+
+    vector = next(row for row in document["objects"] if row["name"] == "Outlined icon")
+    assert vector["content"]["vector_stroke_geometry"] == [
+        {
+            "path": "M 2 12 L 22 12",
+            "winding_rule": "evenodd",
+        }
+    ]
+    assert vector["style"]["stroke_width"] == 2
+    assert vector["style"]["stroke_cap"] == "round"
+    assert vector["style"]["stroke_join"] == "bevel"
+    assert vector["style"]["stroke_dash"] == [4, 2]
+    assert not any("9:3:VECTOR:missing_geometry_paths" in row for row in report["warnings"])
+
+
+def test_figma_stroke_geometry_renders_without_a_filled_bounding_box() -> None:
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QImage, QPainter
+
+    from app.painter_ui_style_renderer import draw_ui_vector_paths
+
+    _app()
+    image = QImage(32, 32, QImage.Format.Format_ARGB32)
+    image.fill(0)
+    painter = QPainter(image)
+    rendered = draw_ui_vector_paths(
+        painter,
+        QRectF(4, 4, 24, 24),
+        {
+            "vector_stroke_geometry": [
+                {
+                    "path": "M 2 12 L 22 12",
+                    "winding_rule": "nonzero",
+                }
+            ]
+        },
+        {
+            "stroke": "#40A0FFFF",
+            "stroke_width": 3,
+            "stroke_cap": "round",
+        },
+    )
+    painter.end()
+
+    assert rendered is True
+    assert image.pixelColor(16, 16).alpha() > 0
+    assert image.pixelColor(4, 4).alpha() == 0
 
 
 def test_figma_append_remaps_stable_ids_without_collisions() -> None:

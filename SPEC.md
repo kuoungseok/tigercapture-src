@@ -6776,6 +6776,11 @@ AI Script Edit MVP integration:
   image URLs are downloaded to durable user assets under
   `~/TigerStudio/PainterFigmaAssets`; API tokens are used once and are never
   persisted in `.tspaint`.
+- Figma vector import preserves separate fill and stroke geometry, nonzero or
+  even-odd winding, stroke width, cap, join, miter, and dash pattern. Geometry
+  returned by `geometry=paths` renders as SVG paths; snapshots that omit both
+  fill and stroke geometry report `blocked:...:missing_geometry_paths` and
+  never substitute misleading filled bounding boxes.
 - Figma export writes `TigerStudioFigmaExport`, containing
   `figma_exchange.json`, a compatibility report, and a local development
   plugin (`manifest.json` and `code.js`). Running that plugin in Figma Design

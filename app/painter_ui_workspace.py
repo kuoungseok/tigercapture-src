@@ -20,6 +20,7 @@ from app.painter_ui_style_renderer import (
     draw_ui_object_shadow,
     draw_ui_text_block,
     draw_ui_vector_paths,
+    has_ui_vector_geometry,
     ui_color,
 )
 
@@ -493,8 +494,8 @@ class PainterUIDesignOverlay(QWidget):
             if item["id"] == row["artboard_id"]
         )
         _viewport, scale = self._artboard_viewport(artboard)
-        vector_paths = row.get("content", {}).get("vector_paths", [])
-        if kind == "path" and not vector_paths:
+        content = row.get("content", {})
+        if kind == "path" and not has_ui_vector_geometry(content):
             painter.restore()
             return
         draw_ui_object_shadow(painter, rect, kind, style, scale=scale)
@@ -536,7 +537,7 @@ class PainterUIDesignOverlay(QWidget):
             painter.setBrush(Qt.BrushStyle.NoBrush)
             painter.drawRoundedRect(rect, radius, radius)
         elif kind == "path":
-            draw_ui_vector_paths(painter, rect, vector_paths, style)
+            draw_ui_vector_paths(painter, rect, content, style)
         else:
             radius = max(0.0, float(style.get("radius") or 0.0) * scale)
             painter.drawRoundedRect(rect, radius, radius)
