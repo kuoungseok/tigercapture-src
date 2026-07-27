@@ -11,6 +11,7 @@ from PySide6.QtGui import (
     QColor,
     QFont,
     QGradient,
+    QImage,
     QLinearGradient,
     QPainter,
     QPainterPath,
@@ -271,6 +272,86 @@ def _style_shadow_effects(
     if effect_type == "drop_shadow" and isinstance(shadow, Mapping):
         return [shadow]
     return []
+
+
+def ui_blur_radius(
+    style: Mapping[str, Any],
+    effect_type: str,
+    *,
+    scale: float = 1.0,
+) -> float:
+    effects = style.get("effects")
+    if not isinstance(effects, list):
+        return 0.0
+    radii = [
+        max(0.0, float(row.get("radius") or 0.0))
+        for row in effects
+        if isinstance(row, Mapping)
+        and str(row.get("type") or "").casefold() == effect_type
+    ]
+    return max(radii, default=0.0) * max(0.001, float(scale))
+
+
+def blur_ui_image(image: QImage, radius: float) -> QImage:
+    """Apply deterministic Gaussian blur while preserving straight RGBA."""
+    if image.isNull() or radius <= 0.0:
+        return image.copy()
+    import cv2
+    import numpy as np
+
+    source = image.convertToFormat(QImage.Format.Format_RGBA8888)
+    view = np.frombuffer(source.bits(), dtype=np.uint8).reshape(
+        source.height(),
+        source.bytesPerLine() // 4,
+        4,
+    )[:, : source.width(), :]
+    blurred = cv2.GaussianBlur(
+        view,
+        (0, 0),
+        sigmaX=max(0.01, float(radius)),
+        sigmaY=max(0.01, float(radius)),
+        borderType=cv2.BORDER_REPLICATE,
+    )
+    return QImage(
+        blurred.data,
+        source.width(),
+        source.height(),
+        int(blurred.strides[0]),
+        QImage.Format.Format_RGBA8888,
+    ).copy()
+
+
+def draw_ui_background_blur(
+    painter: QPainter,
+    surface: QImage,
+    rect: QRectF,
+    kind: str,
+    style: Mapping[str, Any],
+    *,
+    scale: float = 1.0,
+) -> bool:
+    radius = ui_blur_radius(
+        style,
+        "background_blur",
+        scale=scale,
+    )
+    if radius <= 0.0 or surface.isNull() or kind in {"group", "line", "path"}:
+        return False
+    crop = rect.adjusted(
+        -radius * 2.0,
+        -radius * 2.0,
+        radius * 2.0,
+        radius * 2.0,
+    ).toAlignedRect().intersected(surface.rect())
+    if crop.isEmpty():
+        return False
+    blurred = blur_ui_image(surface.copy(crop), radius)
+    shape_radius = max(0.0, float(style.get("radius") or 0.0) * scale)
+    painter.save()
+    painter.setClipPath(_shape_path(kind, rect, shape_radius))
+    painter.drawImage(QPointF(float(crop.x()), float(crop.y())), blurred)
+    painter.restore()
+    return True
 
 
 def _draw_outer_shadow(

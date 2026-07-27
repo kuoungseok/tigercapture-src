@@ -578,6 +578,85 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="the UI appearance effect stack would be reordered",
     )
     registry.register_adapter_action(
+        "paint.ui.appearance.blur.add",
+        "Add an editable Layer Blur or Background Blur to an ordered UI effect stack.",
+        "paint",
+        "paint_ui_appearance_blur_add",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "blur_type": {
+                    "type": "string",
+                    "enum": ["layer_blur", "background_blur"],
+                },
+                "radius": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 256,
+                },
+                "index": {"type": "integer", "minimum": 0},
+            },
+            required=("object_id", "blur_type"),
+        ),
+        required=("object_id", "blur_type"),
+        undo_label="Add UI blur",
+        dry_summary="a UI blur effect would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.blur.update",
+        "Update the radius of a Layer Blur or Background Blur stack entry.",
+        "paint",
+        "paint_ui_appearance_blur_update",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "index": {"type": "integer", "minimum": 0},
+                "radius": {
+                    "type": "number",
+                    "minimum": 0,
+                    "maximum": 256,
+                },
+            },
+            required=("object_id", "index", "radius"),
+        ),
+        required=("object_id", "index", "radius"),
+        undo_label="Update UI blur",
+        dry_summary="a UI blur radius would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.blur.remove",
+        "Remove a Layer Blur or Background Blur stack entry.",
+        "paint",
+        "paint_ui_appearance_blur_remove",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "index": {"type": "integer", "minimum": 0},
+            },
+            required=("object_id", "index"),
+        ),
+        required=("object_id", "index"),
+        undo_label="Remove UI blur",
+        dry_summary="a UI blur effect would be removed",
+    )
+    registry.register_adapter_action(
+        "paint.ui.appearance.blur.reorder",
+        "Move a UI blur effect to another stack index.",
+        "paint",
+        "paint_ui_appearance_blur_reorder",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "index": {"type": "integer", "minimum": 0},
+                "target_index": {"type": "integer", "minimum": 0},
+            },
+            required=("object_id", "index", "target_index"),
+        ),
+        required=("object_id", "index", "target_index"),
+        undo_label="Reorder UI blur",
+        dry_summary="a UI blur effect would be reordered",
+    )
+    registry.register_adapter_action(
         "paint.ui.layout.set",
         "Set deterministic Horizontal or Vertical Auto Layout on a Painter UI container.",
         "paint",

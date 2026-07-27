@@ -896,6 +896,38 @@ def test_figma_shadow_stack_preserves_drop_inner_order_and_legacy_alias() -> Non
     }
 
 
+def test_figma_blur_effects_preserve_type_radius_and_export_code(
+    tmp_path: Path,
+) -> None:
+    from app.painter_ui_figma import (
+        export_figma_plugin_package,
+        import_figma_payload,
+    )
+
+    payload = _figma_payload()
+    component = payload["document"]["children"][0]["children"][0]["children"][0]
+    component["effects"] = [
+        {"type": "LAYER_BLUR", "radius": 7, "visible": True},
+        {"type": "BACKGROUND_BLUR", "radius": 18, "visible": True},
+    ]
+    document, report = import_figma_payload(payload, source="AbCdEf123456")
+    assert report["ok"] is True
+    button = next(
+        row for row in document["objects"] if row["name"] == "Primary Button"
+    )
+    assert button["style"]["effects"] == [
+        {"type": "layer_blur", "radius": 7.0},
+        {"type": "background_blur", "radius": 18.0},
+    ]
+
+    package = export_figma_plugin_package(document, tmp_path)
+    code = (
+        Path(package["output_dir"]) / "code.js"
+    ).read_text(encoding="utf-8")
+    assert "LAYER_BLUR" in code
+    assert "BACKGROUND_BLUR" in code
+
+
 def test_painter_renders_multiple_outer_and_inner_shadow_effects() -> None:
     from PySide6.QtCore import QRectF
     from PySide6.QtGui import QColor, QImage, QPainter

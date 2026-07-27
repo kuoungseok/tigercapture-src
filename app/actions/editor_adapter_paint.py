@@ -950,6 +950,82 @@ class PaintAdapterMixin(PaintUIFigmaAdapterMixin):
             document,
         )
 
+    def paint_ui_appearance_blur_add(
+        self,
+        *,
+        object_id: str,
+        blur_type: str,
+        radius: float = 8.0,
+        index: int | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_appearance import add_ui_blur
+
+        document, _row = add_ui_blur(
+            dialog._painter_ui_document,
+            str(object_id),
+            str(blur_type),
+            float(radius),
+            index=index,
+        )
+        dialog._push_undo_state("Add UI blur")
+        return self._paint_ui_commit(dialog, "Add UI blur", document)
+
+    def paint_ui_appearance_blur_update(
+        self,
+        *,
+        object_id: str,
+        index: int,
+        radius: float,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_appearance import update_ui_blur
+
+        document, _row = update_ui_blur(
+            dialog._painter_ui_document,
+            str(object_id),
+            int(index),
+            float(radius),
+        )
+        dialog._push_undo_state("Update UI blur")
+        return self._paint_ui_commit(dialog, "Update UI blur", document)
+
+    def paint_ui_appearance_blur_remove(
+        self,
+        *,
+        object_id: str,
+        index: int,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_appearance import remove_ui_blur
+
+        document, _row = remove_ui_blur(
+            dialog._painter_ui_document,
+            str(object_id),
+            int(index),
+        )
+        dialog._push_undo_state("Remove UI blur")
+        return self._paint_ui_commit(dialog, "Remove UI blur", document)
+
+    def paint_ui_appearance_blur_reorder(
+        self,
+        *,
+        object_id: str,
+        index: int,
+        target_index: int,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_appearance import reorder_ui_blur
+
+        document, _effects = reorder_ui_blur(
+            dialog._painter_ui_document,
+            str(object_id),
+            int(index),
+            int(target_index),
+        )
+        dialog._push_undo_state("Reorder UI blur")
+        return self._paint_ui_commit(dialog, "Reorder UI blur", document)
+
     def paint_ui_layout_set(
         self,
         *,

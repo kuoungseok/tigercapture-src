@@ -174,3 +174,41 @@ def test_canvas_object_renderer_calls_shared_style_renderer(monkeypatch) -> None
     assert calls[1][1][1]["text_align"] == "center"
     overlay.deleteLater()
     app.processEvents()
+
+
+def test_layer_and_background_blur_render_real_pixel_blending() -> None:
+    _app()
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    from app.painter_ui_style_renderer import (
+        blur_ui_image,
+        draw_ui_background_blur,
+        ui_blur_radius,
+    )
+
+    source = QImage(80, 40, QImage.Format.Format_ARGB32_Premultiplied)
+    source.fill(QColor("#000000"))
+    painter = QPainter(source)
+    painter.fillRect(QRectF(40, 0, 40, 40), QColor("#FFFFFF"))
+    painter.end()
+    blurred = blur_ui_image(source, 6)
+    assert 0 < blurred.pixelColor(39, 20).red() < 255
+    assert 0 < blurred.pixelColor(40, 20).red() < 255
+
+    surface = source.copy()
+    painter = QPainter(surface)
+    style = {
+        "radius": 4,
+        "effects": [{"type": "background_blur", "radius": 6}],
+    }
+    assert draw_ui_background_blur(
+        painter,
+        surface,
+        QRectF(24, 4, 32, 32),
+        "rectangle",
+        style,
+    )
+    painter.end()
+    assert 0 < surface.pixelColor(39, 20).red() < 255
+    assert ui_blur_radius(style, "background_blur") == 6

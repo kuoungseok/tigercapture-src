@@ -6814,21 +6814,26 @@ AI Script Edit MVP integration:
   separate target-component and outer-scope IDs, so instance swaps preserve
   the nested root ID, parent, local overrides, and subsequent outer-component
   synchronization.
-- Painter UI v12 preserves ordered Figma Drop Shadow and Inner Shadow effects
-  in `style.effects`, including color alpha, offset, blur radius, signed spread,
-  and blend mode. The first Drop Shadow remains available through the legacy
+- Painter UI v12 preserves ordered Figma Drop Shadow, Inner Shadow, Layer Blur,
+  and Background Blur effects in `style.effects`. Shadows retain color alpha,
+  offset, blur radius, signed spread, and blend mode; blur effects retain their
+  editable radius. The first Drop Shadow remains available through the legacy
   `style.shadow` alias. Painter renders every outer shadow before object fill,
-  clips Inner Shadows to supported object geometry, and restores editable
-  Figma `node.effects` during development-plugin export.
+  clips Inner Shadows to supported object geometry, composites Layer Blur on
+  an isolated object surface, and samples Background Blur from the already
+  painted scene inside the object shape. Development-plugin export restores
+  all four as editable Figma `node.effects`.
 - UI Design Inspector exposes a compact `Appearance` editor for the same
   provider-neutral gradient/effect contract. Linear and Radial fills provide
   ordered stop editing plus angle or center/radius controls. Drop and Inner
   Shadows provide add/remove/reorder, color, offset, blur, signed spread, and
-  blend controls. AI/MCP parity uses
+  blend controls. Layer and Background Blur entries expose a focused radius
+  control and preserve stack order. AI/MCP parity uses
   `paint.ui.appearance.inspect`, `paint.ui.appearance.gradient.set/remove`, and
-  `paint.ui.appearance.effect.add/update/remove/reorder`; these Actions and the
-  Inspector ultimately use the validated UI object mutation path and normal
-  Painter Undo/Redo.
+  `paint.ui.appearance.effect.add/update/remove/reorder`; dedicated blur
+  automation uses `paint.ui.appearance.blur.add/update/remove/reorder`. These
+  Actions and the Inspector ultimately use the validated UI object mutation
+  path and normal Painter Undo/Redo.
 - The required UI/Action parity matrix is
   `docs/PAINTER_UI_FIGMA_INTERFACE_ACTION_MATRIX_KO.md`. A Figma feature is not
   considered complete when it only survives import JSON; it must also expose

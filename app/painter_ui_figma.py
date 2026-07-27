@@ -512,16 +512,31 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
     raw_effects = (
         node.get("effects") if isinstance(node.get("effects"), list) else []
     )
-    shadow_effects: list[dict[str, Any]] = []
+    appearance_effects: list[dict[str, Any]] = []
     for effect in raw_effects:
         if not isinstance(effect, Mapping) or not effect.get("visible", True):
             continue
         effect_type = str(effect.get("type") or "").upper()
+        if effect_type in {"LAYER_BLUR", "BACKGROUND_BLUR"}:
+            appearance_effects.append(
+                {
+                    "type": (
+                        "background_blur"
+                        if effect_type == "BACKGROUND_BLUR"
+                        else "layer_blur"
+                    ),
+                    "radius": max(
+                        0.0,
+                        _number(effect.get("radius"), 8.0),
+                    ),
+                }
+            )
+            continue
         if effect_type not in {"DROP_SHADOW", "INNER_SHADOW"}:
             continue
         offset = effect.get("offset")
         offset = offset if isinstance(offset, Mapping) else {}
-        shadow_effects.append(
+        appearance_effects.append(
             {
                 "type": (
                     "inner_shadow"
@@ -569,8 +584,8 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
     }
     if gradient is not None:
         result["fill_gradient"] = _map_gradient(gradient)
-    if shadow_effects:
-        result["effects"] = shadow_effects
+    if appearance_effects:
+        result["effects"] = appearance_effects
     if str(node.get("type") or "").upper() == "TEXT":
         text_style = node.get("style")
         text_style = text_style if isinstance(text_style, Mapping) else {}
@@ -597,7 +612,7 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
     shadow = next(
         (
             effect
-            for effect in shadow_effects
+            for effect in appearance_effects
             if effect["type"] == "drop_shadow"
         ),
         None,
@@ -1694,15 +1709,21 @@ function fillPaint(style) {{
     }})
   }};
 }}
-function effectRows(style) {{
-  let rows=Array.isArray(style.effects)?style.effects:[];
-  if(!rows.length && style.shadow) rows=[{{type:'drop_shadow',...style.shadow}}];
-  return rows
-    .filter(row=>['drop_shadow','inner_shadow'].includes(String(row.type||'').toLowerCase()))
-    .map(row=>{{
-      const c=color(row.color||'#00000040');
-      return {{
-        type:String(row.type).toLowerCase()==='inner_shadow'?'INNER_SHADOW':'DROP_SHADOW',
+  function effectRows(style) {{
+    let rows=Array.isArray(style.effects)?style.effects:[];
+    if(!rows.length && style.shadow) rows=[{{type:'drop_shadow',...style.shadow}}];
+    return rows
+      .filter(row=>['drop_shadow','inner_shadow','layer_blur','background_blur'].includes(String(row.type||'').toLowerCase()))
+      .map(row=>{{
+        const type=String(row.type||'').toLowerCase();
+        if(type==='layer_blur'||type==='background_blur') return {{
+          type:type==='background_blur'?'BACKGROUND_BLUR':'LAYER_BLUR',
+          radius:Math.max(0,Number(row.radius)||0),
+          visible:true
+        }};
+        const c=color(row.color||'#00000040');
+        return {{
+          type:type==='inner_shadow'?'INNER_SHADOW':'DROP_SHADOW',
         color:{{r:c.r,g:c.g,b:c.b,a:c.a}},
         offset:{{x:Number(row.x)||0,y:Number(row.y)||0}},
         radius:Math.max(0,Number(row.blur)||0),

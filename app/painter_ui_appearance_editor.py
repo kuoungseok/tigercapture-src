@@ -159,6 +159,8 @@ class PainterUIAppearanceDialog(QDialog):
         for label, callback, tooltip in (
             ("+ Drop", self._add_drop_shadow, "Add Drop Shadow"),
             ("+ Inner", self._add_inner_shadow, "Add Inner Shadow"),
+            ("+ Layer", self._add_layer_blur, "Add Layer Blur"),
+            ("+ Back", self._add_background_blur, "Add Background Blur"),
             ("-", self._remove_effect, "Remove selected effect"),
             ("Up", lambda: self._move_effect(-1), "Move effect up"),
             ("Down", lambda: self._move_effect(1), "Move effect down"),
@@ -172,6 +174,8 @@ class PainterUIAppearanceDialog(QDialog):
         self.effect_type_combo = QComboBox()
         self.effect_type_combo.addItem("Drop Shadow", "drop_shadow")
         self.effect_type_combo.addItem("Inner Shadow", "inner_shadow")
+        self.effect_type_combo.addItem("Layer Blur", "layer_blur")
+        self.effect_type_combo.addItem("Background Blur", "background_blur")
         self.effect_color_edit = QLineEdit()
         self.effect_color_edit.setPlaceholderText("#00000066")
         metrics = QFrame()
@@ -182,6 +186,7 @@ class PainterUIAppearanceDialog(QDialog):
         self.effect_y_spin = self._metric_spin("Y ")
         self.effect_blur_spin = self._metric_spin("Blur ", minimum=0.0)
         self.effect_spread_spin = self._metric_spin("Spread ")
+        self.effect_radius_spin = self._metric_spin("Radius ", minimum=0.0)
         for widget in (
             self.effect_x_spin,
             self.effect_y_spin,
@@ -198,6 +203,7 @@ class PainterUIAppearanceDialog(QDialog):
         form.addRow("Type", self.effect_type_combo)
         form.addRow("Color", self.effect_color_edit)
         form.addRow("Geometry", metrics)
+        form.addRow("Blur radius", self.effect_radius_spin)
         form.addRow("Blend", self.effect_blend_combo)
         layout.addLayout(form)
         for widget in (
@@ -211,6 +217,7 @@ class PainterUIAppearanceDialog(QDialog):
             self.effect_y_spin,
             self.effect_blur_spin,
             self.effect_spread_spin,
+            self.effect_radius_spin,
         ):
             widget.editingFinished.connect(self._commit_effect)
         return panel
@@ -364,15 +371,22 @@ class PainterUIAppearanceDialog(QDialog):
         self._syncing = True
         self.effect_list.clear()
         for effect in self._effects:
-            label = (
-                "Inner Shadow"
-                if effect["type"] == "inner_shadow"
-                else "Drop Shadow"
-            )
-            self.effect_list.addItem(
-                f"{label}  {effect['color']}  "
-                f"{effect['x']:.1f}, {effect['y']:.1f}"
-            )
+            effect_type = effect["type"]
+            label = {
+                "drop_shadow": "Drop Shadow",
+                "inner_shadow": "Inner Shadow",
+                "layer_blur": "Layer Blur",
+                "background_blur": "Background Blur",
+            }[effect_type]
+            if effect_type in {"layer_blur", "background_blur"}:
+                self.effect_list.addItem(
+                    f"{label}  {effect['radius']:.1f} px"
+                )
+            else:
+                self.effect_list.addItem(
+                    f"{label}  {effect['color']}  "
+                    f"{effect['x']:.1f}, {effect['y']:.1f}"
+                )
         self._syncing = False
         if self.effect_list.count():
             self.effect_list.setCurrentRow(
@@ -397,32 +411,56 @@ class PainterUIAppearanceDialog(QDialog):
             self.effect_y_spin,
             self.effect_blur_spin,
             self.effect_spread_spin,
+            self.effect_radius_spin,
             self.effect_blend_combo,
         ):
             widget.setEnabled(enabled)
         if not enabled:
             return
         effect = self._effects[self._effect_index]
+        is_blur = effect["type"] in {"layer_blur", "background_blur"}
         self._syncing = True
         self.effect_type_combo.setCurrentIndex(
             max(0, self.effect_type_combo.findData(effect["type"]))
         )
-        self.effect_color_edit.setText(effect["color"])
-        self.effect_x_spin.setValue(effect["x"])
-        self.effect_y_spin.setValue(effect["y"])
-        self.effect_blur_spin.setValue(effect["blur"])
-        self.effect_spread_spin.setValue(effect["spread"])
+        self.effect_color_edit.setText(str(effect.get("color") or ""))
+        self.effect_x_spin.setValue(float(effect.get("x") or 0.0))
+        self.effect_y_spin.setValue(float(effect.get("y") or 0.0))
+        self.effect_blur_spin.setValue(float(effect.get("blur") or 0.0))
+        self.effect_spread_spin.setValue(float(effect.get("spread") or 0.0))
+        self.effect_radius_spin.setValue(float(effect.get("radius") or 0.0))
         self.effect_blend_combo.setCurrentIndex(
-            max(0, self.effect_blend_combo.findData(effect["blend_mode"]))
+            max(
+                0,
+                self.effect_blend_combo.findData(
+                    effect.get("blend_mode") or "normal"
+                ),
+            )
         )
+        for widget in (
+            self.effect_color_edit,
+            self.effect_x_spin,
+            self.effect_y_spin,
+            self.effect_blur_spin,
+            self.effect_spread_spin,
+            self.effect_blend_combo,
+        ):
+            widget.setEnabled(not is_blur)
+        self.effect_radius_spin.setEnabled(is_blur)
         self._syncing = False
 
     def _commit_effect(self) -> None:
         if self._syncing or not 0 <= self._effect_index < len(self._effects):
             return
-        self._effects[self._effect_index] = normalize_ui_effect(
-            {
-                "type": self.effect_type_combo.currentData(),
+        effect_type = str(self.effect_type_combo.currentData())
+        if effect_type in {"layer_blur", "background_blur"}:
+            payload = {
+                "type": effect_type,
+                "radius": self.effect_radius_spin.value(),
+            }
+        else:
+            payload = {
+                "type": effect_type,
                 "color": self.effect_color_edit.text().strip(),
                 "x": self.effect_x_spin.value(),
                 "y": self.effect_y_spin.value(),
@@ -430,7 +468,7 @@ class PainterUIAppearanceDialog(QDialog):
                 "spread": self.effect_spread_spin.value(),
                 "blend_mode": self.effect_blend_combo.currentData(),
             }
-        )
+        self._effects[self._effect_index] = normalize_ui_effect(payload)
         self._refresh_effects()
 
     def _add_drop_shadow(self) -> None:
@@ -440,6 +478,20 @@ class PainterUIAppearanceDialog(QDialog):
 
     def _add_inner_shadow(self) -> None:
         self._effects.append(normalize_ui_effect({"type": "inner_shadow"}))
+        self._effect_index = len(self._effects) - 1
+        self._refresh_effects()
+
+    def _add_layer_blur(self) -> None:
+        self._effects.append(
+            normalize_ui_effect({"type": "layer_blur", "radius": 8.0})
+        )
+        self._effect_index = len(self._effects) - 1
+        self._refresh_effects()
+
+    def _add_background_blur(self) -> None:
+        self._effects.append(
+            normalize_ui_effect({"type": "background_blur", "radius": 8.0})
+        )
         self._effect_index = len(self._effects) - 1
         self._refresh_effects()
 

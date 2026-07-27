@@ -66,6 +66,11 @@ def test_ui_appearance_mutations_preserve_gradient_and_effect_order() -> None:
     document, _ = add_ui_effect(
         document,
         row["id"],
+        {"type": "background_blur", "radius": 14},
+    )
+    document, _ = add_ui_effect(
+        document,
+        row["id"],
         {
             "type": "inner_shadow",
             "color": "#FFFFFFFF",
@@ -77,19 +82,24 @@ def test_ui_appearance_mutations_preserve_gradient_and_effect_order() -> None:
     document, _ = update_ui_effect(
         document,
         row["id"],
-        1,
+        2,
         {"spread": -2, "blend_mode": "screen"},
     )
-    document, effects = reorder_ui_effect(document, row["id"], 1, 0)
+    document, effects = reorder_ui_effect(document, row["id"], 2, 0)
     assert [effect["type"] for effect in effects] == [
         "inner_shadow",
         "drop_shadow",
+        "background_blur",
     ]
 
     appearance = inspect_ui_appearance(document, row["id"])
     assert appearance["gradient"]["stops"][0]["color"] == "#FF0000FF"
     assert appearance["effects"][0]["spread"] == -2
     assert appearance["effects"][0]["blend_mode"] == "screen"
+    assert appearance["effects"][2] == {
+        "type": "background_blur",
+        "radius": 14.0,
+    }
     object_row = next(
         item for item in document["objects"] if item["id"] == row["id"]
     )
@@ -173,6 +183,10 @@ def test_ui_appearance_actions_are_registered_and_mutate_the_same_document() -> 
         "paint.ui.appearance.effect.update",
         "paint.ui.appearance.effect.remove",
         "paint.ui.appearance.effect.reorder",
+        "paint.ui.appearance.blur.add",
+        "paint.ui.appearance.blur.update",
+        "paint.ui.appearance.blur.remove",
+        "paint.ui.appearance.blur.reorder",
     } <= action_ids
 
     result = registry.execute(
@@ -209,4 +223,21 @@ def test_ui_appearance_actions_are_registered_and_mutate_the_same_document() -> 
     assert inspected["ok"]
     assert inspected["result"]["gradient"]["type"] == "linear"
     assert inspected["result"]["effects"][0]["blur"] == 12
+    result = registry.execute(
+        "paint.ui.appearance.blur.add",
+        {
+            "object_id": row["id"],
+            "blur_type": "layer_blur",
+            "radius": 9,
+        },
+    ).to_dict()
+    assert result["ok"]
+    inspected = registry.execute(
+        "paint.ui.appearance.inspect",
+        {"object_id": row["id"]},
+    ).to_dict()
+    assert inspected["result"]["effects"][1] == {
+        "type": "layer_blur",
+        "radius": 9.0,
+    }
     dialog.close()

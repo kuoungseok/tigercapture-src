@@ -13,7 +13,12 @@ from app.painter_ui_document import (
 
 
 UI_GRADIENT_TYPES = {"linear", "radial"}
-UI_EFFECT_TYPES = {"drop_shadow", "inner_shadow"}
+UI_EFFECT_TYPES = {
+    "drop_shadow",
+    "inner_shadow",
+    "layer_blur",
+    "background_blur",
+}
 UI_EFFECT_BLEND_MODES = {
     "normal",
     "darken",
@@ -88,6 +93,14 @@ def normalize_ui_effect(value: object) -> dict[str, Any]:
     effect_type = str(value.get("type") or "drop_shadow").strip().casefold()
     if effect_type not in UI_EFFECT_TYPES:
         effect_type = "drop_shadow"
+    if effect_type in {"layer_blur", "background_blur"}:
+        return {
+            "type": effect_type,
+            "radius": max(
+                0.0,
+                min(256.0, _number(value.get("radius"), 8.0)),
+            ),
+        }
     blend_mode = str(value.get("blend_mode") or "normal").strip().casefold()
     if blend_mode not in UI_EFFECT_BLEND_MODES:
         blend_mode = "normal"
@@ -307,19 +320,95 @@ def reorder_ui_effect(
     return document_out, copy.deepcopy(effects)
 
 
+def _require_blur_effect(
+    document: Mapping[str, Any] | None,
+    object_id: str,
+    index: int,
+) -> dict[str, Any]:
+    appearance = inspect_ui_appearance(document, object_id)
+    effects = appearance["effects"]
+    if index < 0 or index >= len(effects):
+        raise PainterUIDocumentError(f"UI effect index out of range: {index}")
+    row = effects[index]
+    if row["type"] not in {"layer_blur", "background_blur"}:
+        raise PainterUIDocumentError(
+            f"UI effect at index {index} is not a blur"
+        )
+    return row
+
+
+def add_ui_blur(
+    document: Mapping[str, Any] | None,
+    object_id: str,
+    blur_type: str,
+    radius: float,
+    *,
+    index: int | None = None,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    normalized_type = str(blur_type).strip().casefold()
+    if normalized_type not in {"layer_blur", "background_blur"}:
+        raise PainterUIDocumentError(
+            "blur_type must be layer_blur or background_blur"
+        )
+    return add_ui_effect(
+        document,
+        object_id,
+        {"type": normalized_type, "radius": radius},
+        index=index,
+    )
+
+
+def update_ui_blur(
+    document: Mapping[str, Any] | None,
+    object_id: str,
+    index: int,
+    radius: float,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    _require_blur_effect(document, object_id, index)
+    return update_ui_effect(
+        document,
+        object_id,
+        index,
+        {"radius": radius},
+    )
+
+
+def remove_ui_blur(
+    document: Mapping[str, Any] | None,
+    object_id: str,
+    index: int,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    _require_blur_effect(document, object_id, index)
+    return remove_ui_effect(document, object_id, index)
+
+
+def reorder_ui_blur(
+    document: Mapping[str, Any] | None,
+    object_id: str,
+    index: int,
+    target_index: int,
+) -> tuple[dict[str, Any], list[dict[str, Any]]]:
+    _require_blur_effect(document, object_id, index)
+    return reorder_ui_effect(document, object_id, index, target_index)
+
+
 __all__ = [
     "UI_EFFECT_BLEND_MODES",
     "UI_EFFECT_TYPES",
     "UI_GRADIENT_TYPES",
     "add_ui_effect",
+    "add_ui_blur",
     "inspect_ui_appearance",
     "merge_ui_appearance_style",
     "normalize_ui_effect",
     "normalize_ui_effects",
     "normalize_ui_gradient",
     "remove_ui_effect",
+    "remove_ui_blur",
     "remove_ui_fill_gradient",
     "reorder_ui_effect",
+    "reorder_ui_blur",
     "set_ui_fill_gradient",
     "update_ui_effect",
+    "update_ui_blur",
 ]

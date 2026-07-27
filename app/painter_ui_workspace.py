@@ -5,7 +5,7 @@ import math
 from typing import Any, Mapping
 
 from PySide6.QtCore import QPointF, QRectF, Signal, Qt
-from PySide6.QtGui import QColor, QPainter, QPen, QTransform
+from PySide6.QtGui import QColor, QImage, QPainter, QPen, QTransform
 from PySide6.QtWidgets import QWidget
 
 from app.painter_ui_constraints import (
@@ -19,9 +19,12 @@ from app.painter_ui_image_renderer import draw_ui_image
 from app.painter_ui_style_renderer import (
     draw_ui_object_inner_shadows,
     draw_ui_object_shadow,
+    draw_ui_background_blur,
     draw_ui_text_block,
     draw_ui_vector_paths,
+    blur_ui_image,
     has_ui_vector_geometry,
+    ui_blur_radius,
     ui_color,
     ui_fill_brush,
 )
@@ -482,7 +485,63 @@ class PainterUIDesignOverlay(QWidget):
             reverse=reverse,
         )
 
-    def _paint_object(self, painter: QPainter, row: Mapping[str, Any]) -> None:
+    def _paint_object(
+        self,
+        painter: QPainter,
+        row: Mapping[str, Any],
+        *,
+        surface: QImage | None = None,
+    ) -> None:
+        rect = self._object_rect(row)
+        style = row["style"]
+        kind = str(row["kind"])
+        artboard = next(
+            item
+            for item in self._document["artboards"]
+            if item["id"] == row["artboard_id"]
+        )
+        _viewport, scale = self._artboard_viewport(artboard)
+        if surface is not None:
+            draw_ui_background_blur(
+                painter,
+                surface,
+                rect,
+                kind,
+                style,
+                scale=scale,
+            )
+        radius = ui_blur_radius(style, "layer_blur", scale=scale)
+        if radius <= 0.0 or kind == "group":
+            self._paint_object_core(painter, row)
+            return
+        padding = max(2, int(math.ceil(radius * 3.0)))
+        bounds = rect.adjusted(
+            -padding,
+            -padding,
+            padding,
+            padding,
+        ).toAlignedRect()
+        layer = QImage(
+            max(1, bounds.width()),
+            max(1, bounds.height()),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        layer.fill(Qt.GlobalColor.transparent)
+        layer_painter = QPainter(layer)
+        layer_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        layer_painter.translate(-bounds.left(), -bounds.top())
+        self._paint_object_core(layer_painter, row)
+        layer_painter.end()
+        painter.drawImage(
+            QPointF(float(bounds.left()), float(bounds.top())),
+            blur_ui_image(layer, radius),
+        )
+
+    def _paint_object_core(
+        self,
+        painter: QPainter,
+        row: Mapping[str, Any],
+    ) -> None:
         rect = self._object_rect(row)
         style = row["style"]
         kind = str(row["kind"])
@@ -576,19 +635,30 @@ class PainterUIDesignOverlay(QWidget):
         painter.restore()
 
     def paintEvent(self, _event) -> None:
-        painter = QPainter(self)
-        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        painter.fillRect(self.rect(), QColor(18, 21, 27, 86))
+        surface = QImage(
+            max(1, self.width()),
+            max(1, self.height()),
+            QImage.Format.Format_ARGB32_Premultiplied,
+        )
+        surface.fill(Qt.GlobalColor.transparent)
+        scene_painter = QPainter(surface)
+        scene_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        scene_painter.fillRect(self.rect(), QColor(18, 21, 27, 86))
         active_id = self._document["active_artboard_id"]
         for artboard in self._document["artboards"]:
             viewport, scale = self._artboard_viewport(artboard)
-            painter.fillRect(
+            scene_painter.fillRect(
                 viewport,
                 QColor(str(artboard.get("background") or "#FFFFFF")),
             )
-            self._paint_artboard_layout(painter, artboard, viewport, scale)
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.setPen(
+            self._paint_artboard_layout(
+                scene_painter,
+                artboard,
+                viewport,
+                scale,
+            )
+            scene_painter.setBrush(Qt.BrushStyle.NoBrush)
+            scene_painter.setPen(
                 QPen(
                     QColor("#72A7FF")
                     if artboard["id"] == active_id
@@ -596,15 +666,34 @@ class PainterUIDesignOverlay(QWidget):
                     2.0 if artboard["id"] == active_id else 1.0,
                 )
             )
-            painter.drawRect(viewport)
-            painter.setPen(QColor("#B7C0CD"))
-            painter.drawText(
+            scene_painter.drawRect(viewport)
+            scene_painter.setPen(QColor("#B7C0CD"))
+            scene_painter.drawText(
                 QPointF(viewport.left(), viewport.top() - 7.0),
                 str(artboard["name"]),
             )
+        for row in self._visible_objects():
+            scene_painter.save()
+            rect = self._object_rect(row)
+            rotation = float(row.get("rotation", 0.0))
+            pivot = ui_pivot_point(rect, row.get("constraints"))
+            if abs(rotation) >= 0.001:
+                scene_painter.translate(pivot)
+                scene_painter.rotate(rotation)
+                scene_painter.translate(-pivot)
+            self._paint_object(scene_painter, row, surface=surface)
+            scene_painter.restore()
+        scene_painter.end()
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+        painter.drawImage(0, 0, surface)
         selected = self._document["selection"]["object_id"]
         selected_ids = set(self._document["selection"]["object_ids"])
         for row in self._visible_objects():
+            is_selected = row["id"] in selected_ids
+            if not is_selected:
+                continue
             painter.save()
             rect = self._object_rect(row)
             rotation = float(row.get("rotation", 0.0))
@@ -613,8 +702,6 @@ class PainterUIDesignOverlay(QWidget):
                 painter.translate(pivot)
                 painter.rotate(rotation)
                 painter.translate(-pivot)
-            self._paint_object(painter, row)
-            is_selected = row["id"] in selected_ids
             if is_selected:
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.setPen(QPen(QColor("#72A7FF"), 2.0))

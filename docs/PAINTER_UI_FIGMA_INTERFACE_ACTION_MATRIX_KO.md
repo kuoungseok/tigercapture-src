@@ -23,6 +23,7 @@ Import 후 보이기만 하거나 JSON에만 남는 기능은 `Data only`이며 
 | Solid Fill, Stroke, Radius, Opacity | Inspector fields | `paint.ui.object.update` |
 | Linear/Radial Gradient | Inspector `Appearance` dialog with type, angle/center/radius, ordered color stops | `paint.ui.appearance.inspect`, `paint.ui.appearance.gradient.set/remove` |
 | Drop/Inner Shadow stack | Inspector `Appearance > Effects` with add/remove/reorder and geometry/blend controls | `paint.ui.appearance.effect.add/update/remove/reorder` |
+| Layer/Background Blur | Inspector `Appearance > Effects` with isolated layer blur, backdrop sampling, radius, and stack order | `paint.ui.appearance.blur.add/update/remove/reorder` |
 | Components and Instances | Components library plus Inspector create/instance/Variant/switch/detach controls | `paint.ui.component.*` |
 | Component properties | Typed document contract, instance property editing, nested instance swap | `paint.ui.component.property.*`, `paint.ui.component.instance.property.set` |
 | Tokens and themes | Token library, bind/unbind, Light/Dark/High Contrast preview | `paint.ui.token.*`, `paint.ui.theme.*` |
@@ -37,7 +38,6 @@ family exist.
 
 | Priority | Feature | Required interface | Planned Action family |
 | --- | --- | --- | --- |
-| P0 | Layer Blur / Background Blur | Appearance Effects entries with radius, visibility, order, and fallback badge | `paint.ui.appearance.blur.add/update/remove/reorder` |
 | P0 | Frame clipping | Frame Inspector `Clip content` toggle and Canvas clipping indicator | `paint.ui.clip.set`, `paint.ui.clip.inspect` |
 | P0 | Masks | Layers mask row, Use as Mask, release mask, invert, outline | `paint.ui.mask.create/update/remove/reorder/inspect` |
 | P1 | Object blend mode | Appearance blend selector with compatibility badge | `paint.ui.appearance.blend.set` |
