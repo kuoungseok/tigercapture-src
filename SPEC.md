@@ -6787,6 +6787,11 @@ AI Script Edit MVP integration:
   reference. The Figma panel compares requested text families with locally
   installed fonts and reports missing families instead of silently presenting
   fallback typography as an exact import.
+- Figma Auto Layout import maps modern and legacy Hug/Fill/Fixed sizing,
+  child Grow and cross-axis Stretch, independent wrapped-row spacing, absolute
+  positioning, and minimum/preferred/maximum dimensions. `cross_gap` defaults
+  to the historical `gap` when older Painter documents are normalized and is
+  editable through both Inspector and `paint.ui.layout.set`.
 - Figma export writes `TigerStudioFigmaExport`, containing
   `figma_exchange.json`, a compatibility report, and a local development
   plugin (`manifest.json` and `code.js`). Running that plugin in Figma Design

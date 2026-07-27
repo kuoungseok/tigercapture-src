@@ -663,6 +663,17 @@ class PainterUIInspector(QWidget):
         self.auto_layout_gap_spin.editingFinished.connect(
             self._emit_properties
         )
+        self.auto_layout_cross_gap_spin = QDoubleSpinBox()
+        self.auto_layout_cross_gap_spin.setRange(0.0, 10000.0)
+        self.auto_layout_cross_gap_spin.setDecimals(1)
+        self.auto_layout_cross_gap_spin.setPrefix("Rows ")
+        self.auto_layout_cross_gap_spin.setSuffix(" px")
+        self.auto_layout_cross_gap_spin.setToolTip(
+            "Spacing between wrapped rows or columns"
+        )
+        self.auto_layout_cross_gap_spin.editingFinished.connect(
+            self._emit_properties
+        )
         self.auto_layout_main_combo = QComboBox()
         for label, alignment in (
             ("Start", "start"),
@@ -675,6 +686,7 @@ class PainterUIInspector(QWidget):
             self._emit_properties
         )
         auto_flow_layout.addWidget(self.auto_layout_gap_spin)
+        auto_flow_layout.addWidget(self.auto_layout_cross_gap_spin)
         auto_flow_layout.addWidget(self.auto_layout_main_combo)
         form.addRow("Flow", auto_flow)
         auto_cross = QFrame()
@@ -1128,6 +1140,7 @@ class PainterUIInspector(QWidget):
             self.focus_order_spin,
             self.auto_layout_mode_combo,
             self.auto_layout_gap_spin,
+            self.auto_layout_cross_gap_spin,
             self.auto_layout_main_combo,
             self.auto_layout_cross_combo,
             self.auto_layout_positioning_combo,
@@ -1306,6 +1319,7 @@ class PainterUIInspector(QWidget):
         for edge, spin in self.auto_layout_padding_controls.items():
             spin.setValue(float(layout["padding"][edge]))
         self.auto_layout_gap_spin.setValue(float(layout["gap"]))
+        self.auto_layout_cross_gap_spin.setValue(float(layout["cross_gap"]))
         main_index = self.auto_layout_main_combo.findData(
             layout["main_alignment"]
         )
@@ -1797,6 +1811,7 @@ class PainterUIInspector(QWidget):
                     for edge, spin in self.auto_layout_padding_controls.items()
                 },
                 "gap": float(self.auto_layout_gap_spin.value()),
+                "cross_gap": float(self.auto_layout_cross_gap_spin.value()),
                 "main_alignment": (
                     self.auto_layout_main_combo.currentData() or "start"
                 ),
@@ -1894,6 +1909,7 @@ class PainterUIInspector(QWidget):
         self.auto_layout_wrap_check.setEnabled(active)
         for widget in (
             self.auto_layout_gap_spin,
+            self.auto_layout_cross_gap_spin,
             self.auto_layout_main_combo,
             self.auto_layout_cross_combo,
             *self.auto_layout_padding_controls.values(),

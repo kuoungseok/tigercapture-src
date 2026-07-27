@@ -92,6 +92,13 @@ def normalize_ui_auto_layout(value: Mapping[str, Any] | None) -> dict[str, Any]:
             "mode": mode if mode in _MODES else "none",
             "padding": _padding(source.get("padding")),
             "gap": max(0.0, _number(source.get("gap"))),
+            "cross_gap": max(
+                0.0,
+                _number(
+                    source.get("cross_gap"),
+                    _number(source.get("gap")),
+                ),
+            ),
             "main_alignment": (
                 main_alignment
                 if main_alignment in _MAIN_ALIGNMENTS
@@ -304,7 +311,7 @@ def resolve_ui_auto_layout(
             ]
             desired_main = max((size[0] for size in line_sizes), default=0.0)
             desired_cross = sum(size[1] for size in line_sizes)
-            desired_cross += layout["gap"] * max(0, len(line_sizes) - 1)
+            desired_cross += layout["cross_gap"] * max(0, len(line_sizes) - 1)
             if layout[f"{main_axis}_sizing"] == "hug":
                 rect[main_axis] = _bounded_axis_size(
                     desired_main + main_padding,
@@ -433,7 +440,7 @@ def resolve_ui_auto_layout(
                         rect["y"] = main_cursor
                         rect["x"] = cross_cursor + cross_offset
                     main_cursor += rect[main_axis] + effective_gap
-                cross_cursor += line_cross + layout["gap"]
+                cross_cursor += line_cross + layout["cross_gap"]
         placed.add(parent_id)
         for child in children.get(parent_id, []):
             place(str(child["id"]), (*stack, parent_id))

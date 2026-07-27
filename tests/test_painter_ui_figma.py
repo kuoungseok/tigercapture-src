@@ -488,6 +488,72 @@ def test_figma_missing_images_and_fonts_are_reported() -> None:
     assert resources["missing_fonts"] == ["Rare Figma Font"]
 
 
+def test_figma_auto_layout_maps_wrap_sizing_grow_stretch_and_limits() -> None:
+    from app.painter_ui_figma import import_figma_payload
+
+    payload = _figma_payload()
+    frame = payload["document"]["children"][0]["children"][0]
+    frame.update(
+        {
+            "layoutMode": "HORIZONTAL",
+            "layoutWrap": "WRAP",
+            "itemSpacing": 12,
+            "counterAxisSpacing": 28,
+            "primaryAxisSizingMode": "AUTO",
+            "counterAxisSizingMode": "FIXED",
+        }
+    )
+    child = frame["children"][0]
+    child.update(
+        {
+            "layoutGrow": 1,
+            "layoutAlign": "STRETCH",
+            "minWidth": 120,
+            "minHeight": 40,
+            "maxWidth": 360,
+            "maxHeight": 80,
+        }
+    )
+
+    document, _report = import_figma_payload(payload, source="AbCdEf123456")
+
+    imported_child = next(
+        row for row in document["objects"] if row["name"] == "Primary Button"
+    )
+    assert imported_child["layout"]["width_sizing"] == "fill"
+    assert imported_child["layout"]["height_sizing"] == "fill"
+    assert imported_child["constraints"]["min_width"] == 120
+    assert imported_child["constraints"]["min_height"] == 40
+    assert imported_child["constraints"]["max_width"] == 360
+    assert imported_child["constraints"]["max_height"] == 80
+
+    component_payload = _figma_payload()
+    component = (
+        component_payload["document"]["children"][0]["children"][0]["children"][0]
+    )
+    component.update(
+        {
+            "layoutMode": "VERTICAL",
+            "itemSpacing": 10,
+            "counterAxisSpacing": 22,
+            "primaryAxisSizingMode": "AUTO",
+            "counterAxisSizingMode": "FIXED",
+        }
+    )
+    document, _report = import_figma_payload(
+        component_payload,
+        source="AbCdEf123456",
+    )
+    imported_component = next(
+        row for row in document["objects"] if row["name"] == "Primary Button"
+    )
+    assert imported_component["layout"]["mode"] == "vertical"
+    assert imported_component["layout"]["gap"] == 10
+    assert imported_component["layout"]["cross_gap"] == 22
+    assert imported_component["layout"]["height_sizing"] == "hug"
+    assert imported_component["layout"]["width_sizing"] == "fixed"
+
+
 def test_figma_append_remaps_stable_ids_without_collisions() -> None:
     from app.painter_ui_figma import import_figma_payload, merge_figma_document
 

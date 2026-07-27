@@ -134,8 +134,67 @@ def _map_kind(node: Mapping[str, Any]) -> str:
     return "rectangle"
 
 
-def _map_layout(node: Mapping[str, Any]) -> dict[str, Any]:
+def _figma_axis_sizing(
+    node: Mapping[str, Any],
+    *,
+    axis: str,
+    own_layout_mode: str,
+    parent_layout_mode: str,
+) -> str:
+    modern_key = (
+        "layoutSizingHorizontal"
+        if axis == "width"
+        else "layoutSizingVertical"
+    )
+    modern = str(node.get(modern_key) or "").upper()
+    if modern in {"FIXED", "HUG", "FILL"}:
+        return modern.casefold()
+
+    if own_layout_mode in {"horizontal", "vertical"}:
+        primary_axis = (
+            axis == "width" and own_layout_mode == "horizontal"
+        ) or (
+            axis == "height" and own_layout_mode == "vertical"
+        )
+        legacy_key = (
+            "primaryAxisSizingMode"
+            if primary_axis
+            else "counterAxisSizingMode"
+        )
+        legacy = str(node.get(legacy_key) or "").upper()
+        if legacy == "AUTO":
+            return "hug"
+        if legacy == "FIXED":
+            return "fixed"
+
+    main_axis = (
+        "width" if parent_layout_mode == "horizontal" else "height"
+    )
+    cross_axis = (
+        "height" if parent_layout_mode == "horizontal" else "width"
+    )
+    if (
+        parent_layout_mode in {"horizontal", "vertical"}
+        and axis == main_axis
+        and _number(node.get("layoutGrow")) > 0.0
+    ):
+        return "fill"
+    if (
+        parent_layout_mode in {"horizontal", "vertical"}
+        and axis == cross_axis
+        and str(node.get("layoutAlign") or "").upper() == "STRETCH"
+    ):
+        return "fill"
+    return "fixed"
+
+
+def _map_layout(
+    node: Mapping[str, Any],
+    *,
+    parent_layout_mode: str = "none",
+) -> dict[str, Any]:
     mode = str(node.get("layoutMode") or "NONE").casefold()
+    mode = mode if mode in {"horizontal", "vertical"} else "none"
     main = {
         "min": "start",
         "center": "center",
@@ -149,7 +208,7 @@ def _map_layout(node: Mapping[str, Any]) -> dict[str, Any]:
         "baseline": "start",
     }.get(str(node.get("counterAxisAlignItems") or "MIN").casefold(), "start")
     return {
-        "mode": mode if mode in {"horizontal", "vertical"} else "none",
+        "mode": mode,
         "padding": {
             "left": _number(node.get("paddingLeft")),
             "top": _number(node.get("paddingTop")),
@@ -157,17 +216,28 @@ def _map_layout(node: Mapping[str, Any]) -> dict[str, Any]:
             "bottom": _number(node.get("paddingBottom")),
         },
         "gap": max(0.0, _number(node.get("itemSpacing"))),
+        "cross_gap": max(
+            0.0,
+            _number(
+                node.get("counterAxisSpacing"),
+                _number(node.get("itemSpacing")),
+            ),
+        ),
         "main_alignment": main,
         "cross_alignment": cross,
         "wrap": str(node.get("layoutWrap") or "").upper() == "WRAP",
-        "width_sizing": {
-            "HUG": "hug",
-            "FILL": "fill",
-        }.get(str(node.get("layoutSizingHorizontal") or "").upper(), "fixed"),
-        "height_sizing": {
-            "HUG": "hug",
-            "FILL": "fill",
-        }.get(str(node.get("layoutSizingVertical") or "").upper(), "fixed"),
+        "width_sizing": _figma_axis_sizing(
+            node,
+            axis="width",
+            own_layout_mode=mode,
+            parent_layout_mode=parent_layout_mode,
+        ),
+        "height_sizing": _figma_axis_sizing(
+            node,
+            axis="height",
+            own_layout_mode=mode,
+            parent_layout_mode=parent_layout_mode,
+        ),
         "positioning": (
             "absolute"
             if str(node.get("layoutPositioning") or "").upper() == "ABSOLUTE"
@@ -193,7 +263,17 @@ def _map_constraints(node: Mapping[str, Any]) -> dict[str, Any]:
         "STRETCH": "stretch",
         "SCALE": "scale",
     }.get(str(source.get("vertical") or "MIN").upper(), "top")
-    return {"horizontal": horizontal, "vertical": vertical}
+    box = _box(node)
+    return {
+        "horizontal": horizontal,
+        "vertical": vertical,
+        "min_width": max(1.0, _number(node.get("minWidth"), 1.0)),
+        "min_height": max(1.0, _number(node.get("minHeight"), 1.0)),
+        "preferred_width": box["width"],
+        "preferred_height": box["height"],
+        "max_width": max(0.0, _number(node.get("maxWidth"))),
+        "max_height": max(0.0, _number(node.get("maxHeight"))),
+    }
 
 
 def _map_token_bindings(node: Mapping[str, Any]) -> dict[str, str]:
@@ -512,6 +592,7 @@ def import_figma_payload(
                 parent_id: str = "",
                 *,
                 include_self: bool = True,
+                parent_layout_mode: str = "none",
             ) -> None:
                 nonlocal supported, skipped
                 node_type = str(node.get("type") or "").upper()
@@ -590,7 +671,10 @@ def import_figma_payload(
                             "style": _map_style(node),
                             "content": content,
                             "constraints": _map_constraints(node),
-                            "layout": _map_layout(node),
+                            "layout": _map_layout(
+                                node,
+                                parent_layout_mode=parent_layout_mode,
+                            ),
                             "component_id": component_id,
                             "component_role": role,
                             "component_source_object_id": source_object_id,
@@ -610,16 +694,35 @@ def import_figma_payload(
                         pending_reactions.append((object_id, reactions))
                     supported += 1
                     current_parent = object_id
+                child_parent_layout_mode = str(
+                    node.get("layoutMode") or "NONE"
+                ).casefold()
+                if child_parent_layout_mode not in {"horizontal", "vertical"}:
+                    child_parent_layout_mode = "none"
                 for child in node.get("children", []):
                     if isinstance(child, Mapping):
-                        visit(child, current_parent)
+                        visit(
+                            child,
+                            current_parent,
+                            parent_layout_mode=child_parent_layout_mode,
+                        )
 
             if str(frame.get("type") or "").upper() == "COMPONENT":
                 visit(frame)
             else:
                 for child in frame.get("children", []):
                     if isinstance(child, Mapping):
-                        visit(child)
+                        frame_layout_mode = str(
+                            frame.get("layoutMode") or "NONE"
+                        ).casefold()
+                        visit(
+                            child,
+                            parent_layout_mode=(
+                                frame_layout_mode
+                                if frame_layout_mode in {"horizontal", "vertical"}
+                                else "none"
+                            ),
+                        )
 
     component_roots = {
         str(row["id"]): str(row["root_object_id"]) for row in components

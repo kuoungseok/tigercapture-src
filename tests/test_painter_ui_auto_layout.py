@@ -27,6 +27,7 @@ def test_auto_layout_normalizes_aliases_and_preserves_positioning() -> None:
         "mode": "horizontal",
         "padding": {"left": 12.0, "top": 8.0, "right": 12.0, "bottom": 8.0},
         "gap": 14.0,
+        "cross_gap": 14.0,
         "main_alignment": "space_between",
         "cross_alignment": "center",
         "positioning": "absolute",
@@ -167,6 +168,7 @@ def test_auto_layout_wraps_children_into_stable_rows() -> None:
         "mode": "horizontal",
         "padding": 10,
         "gap": 10,
+        "cross_gap": 24,
         "wrap": True,
     }
     child_ids: list[str] = []
@@ -191,7 +193,7 @@ def test_auto_layout_wraps_children_into_stable_rows() -> None:
     )
     assert (geometry[child_ids[2]]["x"], geometry[child_ids[2]]["y"]) == (
         10.0,
-        40.0,
+        54.0,
     )
 
 
@@ -297,6 +299,7 @@ def test_inspector_emits_auto_layout_properties() -> None:
     }.items():
         inspector.auto_layout_padding_controls[edge].setValue(value)
     inspector.auto_layout_gap_spin.setValue(12)
+    inspector.auto_layout_cross_gap_spin.setValue(18)
     inspector.auto_layout_main_combo.setCurrentIndex(
         inspector.auto_layout_main_combo.findData("space_between")
     )
@@ -316,6 +319,7 @@ def test_inspector_emits_auto_layout_properties() -> None:
         "mode": "horizontal",
         "padding": {"left": 16.0, "top": 8.0, "right": 16.0, "bottom": 8.0},
         "gap": 12.0,
+        "cross_gap": 18.0,
         "main_alignment": "space_between",
         "cross_alignment": "center",
         "positioning": "auto",
@@ -353,6 +357,7 @@ def test_auto_layout_action_uses_object_update_and_undo() -> None:
             "mode": "vertical",
             "padding": {"left": 20, "top": 12, "right": 20, "bottom": 12},
             "gap": 10,
+            "cross_gap": 16,
             "main_alignment": "center",
             "cross_alignment": "stretch",
             "wrap": True,
@@ -365,6 +370,7 @@ def test_auto_layout_action_uses_object_update_and_undo() -> None:
     changed = result["result"]["ui_design"]["document"]["objects"][-1]
     assert changed["layout"]["mode"] == "vertical"
     assert changed["layout"]["gap"] == 10.0
+    assert changed["layout"]["cross_gap"] == 16.0
     assert changed["layout"]["wrap"] is True
     assert changed["layout"]["width_sizing"] == "hug"
     dialog._undo()

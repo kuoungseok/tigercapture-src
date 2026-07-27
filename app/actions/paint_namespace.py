@@ -481,6 +481,7 @@ def register_paint_actions(registry: Any) -> None:
                 },
                 "padding": any_object,
                 "gap": {"type": "number", "minimum": 0},
+                "cross_gap": {"type": "number", "minimum": 0},
                 "main_alignment": {
                     "type": "string",
                     "enum": ["start", "center", "end", "space_between"],

@@ -818,6 +818,7 @@ class PaintAdapterMixin(PaintUIFigmaAdapterMixin):
         mode: str,
         padding: dict[str, Any] | None = None,
         gap: float | None = None,
+        cross_gap: float | None = None,
         main_alignment: str = "",
         cross_alignment: str = "",
         wrap: bool | None = None,
@@ -846,6 +847,9 @@ class PaintAdapterMixin(PaintUIFigmaAdapterMixin):
                     dict(padding) if padding is not None else existing["padding"]
                 ),
                 "gap": existing["gap"] if gap is None else gap,
+                "cross_gap": (
+                    existing["cross_gap"] if cross_gap is None else cross_gap
+                ),
                 "main_alignment": (
                     main_alignment or existing["main_alignment"]
                 ),
