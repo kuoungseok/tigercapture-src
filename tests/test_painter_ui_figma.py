@@ -831,6 +831,125 @@ def test_painter_gradient_brush_and_vector_path_render_distinct_stop_colors() ->
     assert image.pixelColor(76, 20).blue() > image.pixelColor(76, 20).red()
 
 
+def test_figma_shadow_stack_preserves_drop_inner_order_and_legacy_alias() -> None:
+    from app.painter_ui_figma import import_figma_payload
+
+    payload = _figma_payload()
+    component = payload["document"]["children"][0]["children"][0]["children"][0]
+    component["effects"] = [
+        {
+            "type": "DROP_SHADOW",
+            "color": {"r": 1, "g": 0, "b": 0, "a": 0.5},
+            "offset": {"x": -3, "y": 4},
+            "radius": 8,
+            "spread": 2,
+            "blendMode": "MULTIPLY",
+            "visible": True,
+        },
+        {
+            "type": "INNER_SHADOW",
+            "color": {"r": 0, "g": 0, "b": 1, "a": 0.25},
+            "offset": {"x": 1, "y": 2},
+            "radius": 3,
+            "spread": -1,
+            "visible": True,
+        },
+        {
+            "type": "DROP_SHADOW",
+            "color": {"r": 0, "g": 1, "b": 0, "a": 1},
+            "offset": {"x": 0, "y": 12},
+            "radius": 18,
+            "visible": False,
+        },
+    ]
+
+    document, report = import_figma_payload(payload, source="AbCdEf123456")
+
+    assert report["ok"] is True
+    button = next(row for row in document["objects"] if row["name"] == "Primary Button")
+    assert button["style"]["effects"] == [
+        {
+            "type": "drop_shadow",
+            "color": "#FF000080",
+            "x": -3.0,
+            "y": 4.0,
+            "blur": 8.0,
+            "spread": 2.0,
+            "blend_mode": "multiply",
+        },
+        {
+            "type": "inner_shadow",
+            "color": "#0000FF40",
+            "x": 1.0,
+            "y": 2.0,
+            "blur": 3.0,
+            "spread": -1.0,
+            "blend_mode": "normal",
+        },
+    ]
+    assert button["style"]["shadow"] == {
+        "color": "#FF000080",
+        "x": -3.0,
+        "y": 4.0,
+        "blur": 8.0,
+        "spread": 2.0,
+    }
+
+
+def test_painter_renders_multiple_outer_and_inner_shadow_effects() -> None:
+    from PySide6.QtCore import QRectF
+    from PySide6.QtGui import QColor, QImage, QPainter
+
+    from app.painter_ui_style_renderer import (
+        draw_ui_object_inner_shadows,
+        draw_ui_object_shadow,
+    )
+
+    _app()
+    image = QImage(80, 60, QImage.Format.Format_ARGB32)
+    image.fill(0)
+    rect = QRectF(20, 15, 40, 30)
+    style = {
+        "radius": 0,
+        "effects": [
+            {
+                "type": "drop_shadow",
+                "color": "#FF0000FF",
+                "x": -8,
+                "y": 0,
+                "blur": 0,
+                "spread": 2,
+            },
+            {
+                "type": "drop_shadow",
+                "color": "#0000FFFF",
+                "x": 8,
+                "y": 0,
+                "blur": 0,
+                "spread": 2,
+            },
+            {
+                "type": "inner_shadow",
+                "color": "#00FF00FF",
+                "x": 0,
+                "y": 0,
+                "blur": 6,
+                "spread": 0,
+            },
+        ],
+    }
+    painter = QPainter(image)
+    assert draw_ui_object_shadow(painter, rect, "rectangle", style)
+    painter.fillRect(rect, QColor("#FFFFFFFF"))
+    assert draw_ui_object_inner_shadows(painter, rect, "rectangle", style)
+    painter.end()
+
+    assert image.pixelColor(14, 30).red() > image.pixelColor(14, 30).blue()
+    assert image.pixelColor(66, 30).blue() > image.pixelColor(66, 30).red()
+    assert image.pixelColor(22, 30).green() > image.pixelColor(22, 30).red()
+    assert image.pixelColor(40, 30) == QColor("#FFFFFFFF")
+
+
 def test_figma_image_asset_maps_to_shared_renderer_contract(tmp_path: Path) -> None:
     from app.painter_ui_figma import import_figma_payload
 
@@ -1030,6 +1149,8 @@ def test_figma_export_creates_editable_plugin_bundle_with_embedded_image(
     assert "ordered.filter(isInstanceRoot)" in code
     assert "GRADIENT_LINEAR" in code
     assert "gradientHandlePositions" in code
+    assert "INNER_SHADOW" in code
+    assert "node.effects=effectRows(s)" in code
 
 
 def test_figma_export_preserves_component_family_and_variant_properties(

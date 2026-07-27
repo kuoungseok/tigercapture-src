@@ -17,6 +17,7 @@ from app.painter_ui_constraints import (
 from app.painter_ui_document import normalize_ui_document
 from app.painter_ui_image_renderer import draw_ui_image
 from app.painter_ui_style_renderer import (
+    draw_ui_object_inner_shadows,
     draw_ui_object_shadow,
     draw_ui_text_block,
     draw_ui_vector_paths,
@@ -550,6 +551,13 @@ class PainterUIDesignOverlay(QWidget):
             radius = max(0.0, float(style.get("radius") or 0.0) * scale)
             painter.drawRoundedRect(rect, radius, radius)
 
+        draw_ui_object_inner_shadows(
+            painter,
+            rect,
+            kind,
+            style,
+            scale=scale,
+        )
         label = str(row["content"].get("text") or "")
         if kind in {"text", "button"} and not label:
             label = str(row["name"])

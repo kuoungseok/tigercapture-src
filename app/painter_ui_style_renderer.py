@@ -253,21 +253,38 @@ def _shape_path(kind: str, rect: QRectF, radius: float) -> QPainterPath:
     return path
 
 
-def draw_ui_object_shadow(
+def _style_shadow_effects(
+    style: Mapping[str, Any],
+    effect_type: str,
+) -> list[Mapping[str, Any]]:
+    effects = style.get("effects")
+    if isinstance(effects, list):
+        rows = [
+            row
+            for row in effects
+            if isinstance(row, Mapping)
+            and str(row.get("type") or "").casefold() == effect_type
+        ]
+        if rows:
+            return rows
+    shadow = style.get("shadow")
+    if effect_type == "drop_shadow" and isinstance(shadow, Mapping):
+        return [shadow]
+    return []
+
+
+def _draw_outer_shadow(
     painter: QPainter,
     rect: QRectF,
     kind: str,
     style: Mapping[str, Any],
+    shadow: Mapping[str, Any],
     *,
-    scale: float = 1.0,
+    scale: float,
 ) -> bool:
-    shadow = style.get("shadow")
-    if not isinstance(shadow, Mapping) or kind in {"group", "text"}:
-        return False
     color = ui_color(shadow.get("color"), "#00000066")
     if color.alpha() <= 0:
         return False
-    scale = max(0.001, float(scale))
     offset_x = float(shadow.get("x") or 0.0) * scale
     offset_y = float(shadow.get("y") or 0.0) * scale
     blur = max(0.0, float(shadow.get("blur") or 0.0) * scale)
@@ -280,9 +297,6 @@ def draw_ui_object_shadow(
     )
     radius = max(0.0, float(style.get("radius") or 0.0) * scale + spread)
     bands = max(1, min(10, int(math.ceil(blur / 3.0))))
-
-    painter.save()
-    painter.setPen(Qt.PenStyle.NoPen)
     if kind == "line":
         width = max(
             1.0,
@@ -304,8 +318,83 @@ def draw_ui_object_shadow(
             painter.setBrush(band_color)
             expanded = base_rect.adjusted(-amount, -amount, amount, amount)
             painter.drawPath(_shape_path(kind, expanded, radius + amount))
-    painter.restore()
     return True
+
+
+def draw_ui_object_shadow(
+    painter: QPainter,
+    rect: QRectF,
+    kind: str,
+    style: Mapping[str, Any],
+    *,
+    scale: float = 1.0,
+) -> bool:
+    shadows = _style_shadow_effects(style, "drop_shadow")
+    if not shadows or kind in {"group", "text"}:
+        return False
+    scale = max(0.001, float(scale))
+    painter.save()
+    painter.setPen(Qt.PenStyle.NoPen)
+    rendered = False
+    for shadow in shadows:
+        rendered = (
+            _draw_outer_shadow(
+                painter,
+                rect,
+                kind,
+                style,
+                shadow,
+                scale=scale,
+            )
+            or rendered
+        )
+    painter.restore()
+    return rendered
+
+
+def draw_ui_object_inner_shadows(
+    painter: QPainter,
+    rect: QRectF,
+    kind: str,
+    style: Mapping[str, Any],
+    *,
+    scale: float = 1.0,
+) -> bool:
+    shadows = _style_shadow_effects(style, "inner_shadow")
+    if not shadows or kind in {"group", "text", "line", "path"}:
+        return False
+    scale = max(0.001, float(scale))
+    radius = max(0.0, float(style.get("radius") or 0.0) * scale)
+    clip_path = _shape_path(kind, rect, radius)
+    painter.save()
+    painter.setClipPath(clip_path)
+    painter.setBrush(Qt.BrushStyle.NoBrush)
+    rendered = False
+    for shadow in shadows:
+        color = ui_color(shadow.get("color"), "#00000066")
+        if color.alpha() <= 0:
+            continue
+        offset_x = float(shadow.get("x") or 0.0) * scale
+        offset_y = float(shadow.get("y") or 0.0) * scale
+        blur = max(0.0, float(shadow.get("blur") or 0.0) * scale)
+        spread = float(shadow.get("spread") or 0.0) * scale
+        bands = max(1, min(10, int(math.ceil(blur / 3.0))))
+        shifted = rect.translated(offset_x, offset_y).adjusted(
+            spread,
+            spread,
+            -spread,
+            -spread,
+        )
+        for index in range(bands, -1, -1):
+            amount = blur * (index + 1) / max(1, bands)
+            band_color = QColor(color)
+            fade = (1.0 - index / (bands + 1.0)) ** 2
+            band_color.setAlpha(max(1, int(round(color.alpha() * fade))))
+            painter.setPen(QPen(band_color, max(1.0, amount * 2.0)))
+            painter.drawPath(_shape_path(kind, shifted, radius))
+        rendered = True
+    painter.restore()
+    return rendered
 
 
 def _layout_text(
@@ -376,8 +465,11 @@ def draw_ui_text_block(
 
     painter.save()
     painter.setClipRect(rect)
-    shadow = style.get("text_shadow")
-    if isinstance(shadow, Mapping):
+    shadows = _style_shadow_effects(style, "drop_shadow")
+    if not shadows:
+        shadow = style.get("text_shadow")
+        shadows = [shadow] if isinstance(shadow, Mapping) else []
+    for shadow in shadows:
         shadow_color = ui_color(shadow.get("color"), "#00000066")
         if shadow_color.alpha() > 0:
             offset = QPointF(
@@ -423,6 +515,7 @@ def draw_ui_text_block(
 
 
 __all__ = [
+    "draw_ui_object_inner_shadows",
     "draw_ui_object_shadow",
     "draw_ui_text_block",
     "ui_fill_brush",

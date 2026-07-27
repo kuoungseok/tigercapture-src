@@ -6805,7 +6805,7 @@ AI Script Edit MVP integration:
   let an imported instance switch between local Figma variants while retaining
   compatible overrides; unresolved remote-library components remain explicit
   converted groups rather than false local component claims.
-- Painter UI document version 11 stores component sublayer property bindings
+- Painter UI document version 12 stores component sublayer property bindings
   explicitly. `content.text`, `visible`, and nested `component_id` targets map
   to Figma `characters`, `visible`, and `mainComponent` references. Text and
   Boolean bindings resolve in Painter instances, Variant cloning preserves
@@ -6814,6 +6814,12 @@ AI Script Edit MVP integration:
   separate target-component and outer-scope IDs, so instance swaps preserve
   the nested root ID, parent, local overrides, and subsequent outer-component
   synchronization.
+- Painter UI v12 preserves ordered Figma Drop Shadow and Inner Shadow effects
+  in `style.effects`, including color alpha, offset, blur radius, signed spread,
+  and blend mode. The first Drop Shadow remains available through the legacy
+  `style.shadow` alias. Painter renders every outer shadow before object fill,
+  clips Inner Shadows to supported object geometry, and restores editable
+  Figma `node.effects` during development-plugin export.
 - Figma export writes `TigerStudioFigmaExport`, containing
   `figma_exchange.json`, a compatibility report, and a local development
   plugin (`manifest.json` and `code.js`). Running that plugin in Figma Design

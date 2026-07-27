@@ -509,17 +509,35 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
     fill = _solid_paint(node.get("fills"))
     gradient = _gradient_paint(node.get("fills"))
     stroke = _solid_paint(node.get("strokes"))
-    effects = node.get("effects") if isinstance(node.get("effects"), list) else []
-    shadow = next(
-        (
-            effect
-            for effect in effects
-            if isinstance(effect, Mapping)
-            and effect.get("visible", True)
-            and str(effect.get("type") or "").upper() == "DROP_SHADOW"
-        ),
-        None,
+    raw_effects = (
+        node.get("effects") if isinstance(node.get("effects"), list) else []
     )
+    shadow_effects: list[dict[str, Any]] = []
+    for effect in raw_effects:
+        if not isinstance(effect, Mapping) or not effect.get("visible", True):
+            continue
+        effect_type = str(effect.get("type") or "").upper()
+        if effect_type not in {"DROP_SHADOW", "INNER_SHADOW"}:
+            continue
+        offset = effect.get("offset")
+        offset = offset if isinstance(offset, Mapping) else {}
+        shadow_effects.append(
+            {
+                "type": (
+                    "inner_shadow"
+                    if effect_type == "INNER_SHADOW"
+                    else "drop_shadow"
+                ),
+                "color": _color(effect.get("color"), "#00000040"),
+                "x": _number(offset.get("x")),
+                "y": _number(offset.get("y"), 4.0),
+                "blur": max(0.0, _number(effect.get("radius"), 8.0)),
+                "spread": _number(effect.get("spread")),
+                "blend_mode": str(
+                    effect.get("blendMode") or "NORMAL"
+                ).casefold(),
+            }
+        )
     result: dict[str, Any] = {
         "fill": _color(fill.get("color"), "#00000000") if fill else "#00000000",
         "stroke": _color(stroke.get("color"), "#00000000") if stroke else "#00000000",
@@ -551,6 +569,8 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
     }
     if gradient is not None:
         result["fill_gradient"] = _map_gradient(gradient)
+    if shadow_effects:
+        result["effects"] = shadow_effects
     if str(node.get("type") or "").upper() == "TEXT":
         text_style = node.get("style")
         text_style = text_style if isinstance(text_style, Mapping) else {}
@@ -574,15 +594,19 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
                 ),
             }
         )
-    if isinstance(shadow, Mapping):
-        offset = shadow.get("offset")
-        offset = offset if isinstance(offset, Mapping) else {}
+    shadow = next(
+        (
+            effect
+            for effect in shadow_effects
+            if effect["type"] == "drop_shadow"
+        ),
+        None,
+    )
+    if shadow is not None:
         result["shadow"] = {
-            "color": _color(shadow.get("color"), "#00000040"),
-            "x": _number(offset.get("x")),
-            "y": _number(offset.get("y"), 4.0),
-            "blur": max(0.0, _number(shadow.get("radius"), 8.0)),
-            "spread": max(0.0, _number(shadow.get("spread"))),
+            key: copy.deepcopy(value)
+            for key, value in shadow.items()
+            if key not in {"type", "blend_mode"}
         }
     return result
 
@@ -1670,6 +1694,24 @@ function fillPaint(style) {{
     }})
   }};
 }}
+function effectRows(style) {{
+  let rows=Array.isArray(style.effects)?style.effects:[];
+  if(!rows.length && style.shadow) rows=[{{type:'drop_shadow',...style.shadow}}];
+  return rows
+    .filter(row=>['drop_shadow','inner_shadow'].includes(String(row.type||'').toLowerCase()))
+    .map(row=>{{
+      const c=color(row.color||'#00000040');
+      return {{
+        type:String(row.type).toLowerCase()==='inner_shadow'?'INNER_SHADOW':'DROP_SHADOW',
+        color:{{r:c.r,g:c.g,b:c.b,a:c.a}},
+        offset:{{x:Number(row.x)||0,y:Number(row.y)||0}},
+        radius:Math.max(0,Number(row.blur)||0),
+        spread:Number(row.spread)||0,
+        blendMode:String(row.blend_mode||'NORMAL').toUpperCase(),
+        visible:true
+      }};
+    }});
+}}
 function decode64(text) {{
   const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   let buffer=0,bits=0,out=[];
@@ -1689,6 +1731,7 @@ function applyFrame(node,row) {{
   const s=row.style||{{}};
   if('fills' in node) node.fills=[fillPaint(s)];
   if('strokes' in node && s.stroke && !String(s.stroke).endsWith('00')) node.strokes=[paint(s.stroke)];
+  if('effects' in node) node.effects=effectRows(s);
   if('strokeWeight' in node) node.strokeWeight=Math.max(0,Number(s.stroke_width)||0);
   if('cornerRadius' in node && typeof node.cornerRadius==='number') node.cornerRadius=Math.max(0,Number(s.radius)||0);
   if(row.layout && 'layoutMode' in node) {{

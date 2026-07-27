@@ -63,6 +63,10 @@ P2 implementation checkpoint (2026-07-26, visual style slice):
 - Figma linear/radial gradient fills preserve normalized handles, stop colors,
   alpha, and paint opacity. Ordinary shapes and imported SVG paths render from
   the same contract, and Figma plugin export restores editable gradient paints.
+- Ordered Figma Drop Shadow and Inner Shadow stacks preserve color alpha,
+  offset, blur, signed spread, and blend mode. Painter renders outer and inner
+  effects in separate geometry passes and Figma plugin export restores editable
+  effect records.
 
 P2 implementation checkpoint (2026-07-26, responsive constraint slice):
 
