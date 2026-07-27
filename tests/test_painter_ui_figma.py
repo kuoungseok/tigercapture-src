@@ -191,6 +191,48 @@ def test_figma_payload_imports_editable_layout_component_and_variables() -> None
     text = next(row for row in document["objects"] if row["kind"] == "text")
     assert text["content"]["text"] == "Pay now"
     assert text["x"] == 150
+    assert text["style"]["text_color"] == "#FFFFFFFF"
+    assert text["style"]["font_family"] == "Inter"
+    assert text["style"]["font_size"] == 16
+    assert text["style"]["font_weight"] == 600
+    assert text["style"]["text_align"] == "center"
+
+
+def test_figma_import_activates_the_richest_visible_artboard() -> None:
+    from app.painter_ui_figma import import_figma_payload
+
+    payload = _figma_payload()
+    canvas = payload["document"]["children"][0]
+    token_frame = {
+        "id": "0:token",
+        "type": "FRAME",
+        "name": "Design Tokens",
+        "absoluteBoundingBox": {
+            "x": 0,
+            "y": 0,
+            "width": 240,
+            "height": 120,
+        },
+        "children": [
+            {
+                "id": "0:swatch",
+                "type": "RECTANGLE",
+                "name": "Swatch",
+                "absoluteBoundingBox": {
+                    "x": 10,
+                    "y": 10,
+                    "width": 40,
+                    "height": 40,
+                },
+            }
+        ],
+    }
+    canvas["children"].insert(0, token_frame)
+
+    document, report = import_figma_payload(payload, source="AbCdEf123456")
+
+    assert document["active_artboard_id"] == "figma-artboard-1-1"
+    assert report["active_artboard_id"] == document["active_artboard_id"]
 
 
 def test_figma_append_remaps_stable_ids_without_collisions() -> None:

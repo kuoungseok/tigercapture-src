@@ -251,6 +251,29 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
             ),
         ),
     }
+    if str(node.get("type") or "").upper() == "TEXT":
+        text_style = node.get("style")
+        text_style = text_style if isinstance(text_style, Mapping) else {}
+        result.update(
+            {
+                "text_color": result["fill"],
+                "font_family": str(text_style.get("fontFamily") or "Inter"),
+                "font_size": max(
+                    1.0,
+                    _number(text_style.get("fontSize"), 16.0),
+                ),
+                "font_weight": int(
+                    _number(text_style.get("fontWeight"), 400)
+                ),
+                "text_align": str(
+                    text_style.get("textAlignHorizontal") or "LEFT"
+                ).casefold(),
+                "line_height": max(
+                    0.0,
+                    _number(text_style.get("lineHeightPx")),
+                ),
+            }
+        )
     if isinstance(shadow, Mapping):
         offset = shadow.get("offset")
         offset = offset if isinstance(offset, Mapping) else {}
@@ -319,6 +342,31 @@ def _top_level_frames(page: Mapping[str, Any]) -> list[Mapping[str, Any]]:
         in {"FRAME", "COMPONENT", "COMPONENT_SET", "SECTION"}
     ]
     return frames or [page]
+
+
+def _preferred_artboard_id(
+    artboards: list[Mapping[str, Any]],
+    objects: list[Mapping[str, Any]],
+) -> str:
+    if not artboards:
+        return ""
+    visible_counts = {
+        str(artboard["id"]): sum(
+            1
+            for row in objects
+            if str(row.get("artboard_id") or "") == str(artboard["id"])
+            and bool(row.get("visible", True))
+        )
+        for artboard in artboards
+    }
+    preferred = max(
+        artboards,
+        key=lambda row: (
+            visible_counts[str(row["id"])],
+            float(row.get("width") or 0.0) * float(row.get("height") or 0.0),
+        ),
+    )
+    return str(preferred["id"])
 
 
 def import_figma_payload(
@@ -612,10 +660,11 @@ def import_figma_payload(
                     f"converted:{row['id']}:{path}:missing_figma_variable"
                 )
 
+    preferred_artboard_id = _preferred_artboard_id(artboards, objects)
     document = normalize_ui_document(
         {
             "document_id": _stable_id("document", file_key),
-            "active_artboard_id": artboards[0]["id"],
+            "active_artboard_id": preferred_artboard_id,
             "artboards": artboards,
             "objects": objects,
             "components": components,
@@ -644,6 +693,7 @@ def import_figma_payload(
         "component_count": len(document["components"]),
         "token_count": len(document["tokens"]),
         "interaction_count": len(document["interactions"]),
+        "active_artboard_id": document["active_artboard_id"],
         "supported_node_count": supported,
         "blocked_node_count": skipped,
         "warnings": warnings + list(validation["warnings"]),

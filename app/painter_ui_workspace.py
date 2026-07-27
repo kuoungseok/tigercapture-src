@@ -591,14 +591,10 @@ class PainterUIDesignOverlay(QWidget):
                 painter.translate(-pivot)
             self._paint_object(painter, row)
             is_selected = row["id"] in selected_ids
-            painter.setBrush(Qt.BrushStyle.NoBrush)
-            painter.setPen(
-                QPen(
-                    QColor("#72A7FF") if is_selected else QColor("#9AA9BC"),
-                    2.0 if is_selected else 1.0,
-                )
-            )
-            painter.drawRect(rect)
+            if is_selected:
+                painter.setBrush(Qt.BrushStyle.NoBrush)
+                painter.setPen(QPen(QColor("#72A7FF"), 2.0))
+                painter.drawRect(rect)
             if row["id"] == selected and not row["locked"]:
                 painter.setBrush(QColor("#F4F7FC"))
                 painter.setPen(QPen(QColor("#356FC7"), 1.0))
