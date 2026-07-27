@@ -369,6 +369,34 @@ def _preferred_artboard_id(
     return str(preferred["id"])
 
 
+def _figma_document_root(payload: Mapping[str, Any]) -> Mapping[str, Any] | None:
+    root = payload.get("document")
+    if isinstance(root, Mapping):
+        return root
+    nodes = payload.get("nodes")
+    nodes = nodes if isinstance(nodes, Mapping) else {}
+    children = [
+        row["document"]
+        for row in nodes.values()
+        if isinstance(row, Mapping) and isinstance(row.get("document"), Mapping)
+    ]
+    if not children:
+        return None
+    return {
+        "id": "figma:nodes-document",
+        "name": str(payload.get("name") or "Figma Nodes"),
+        "type": "DOCUMENT",
+        "children": [
+            {
+                "id": "figma:nodes-canvas",
+                "name": "Imported Nodes",
+                "type": "CANVAS",
+                "children": children,
+            }
+        ],
+    }
+
+
 def import_figma_payload(
     payload: Mapping[str, Any],
     *,
@@ -377,9 +405,11 @@ def import_figma_payload(
     image_paths: Mapping[str, str] | None = None,
     variables_payload: Mapping[str, Any] | None = None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    root = payload.get("document")
-    if not isinstance(root, Mapping):
-        raise PainterUIFigmaError("Figma JSON does not contain a document node")
+    root = _figma_document_root(payload)
+    if root is None:
+        raise PainterUIFigmaError(
+            "Figma JSON does not contain a file document or nodes response"
+        )
     pages = [
         row
         for row in root.get("children", [])

@@ -235,6 +235,32 @@ def test_figma_import_activates_the_richest_visible_artboard() -> None:
     assert report["active_artboard_id"] == document["active_artboard_id"]
 
 
+def test_figma_nodes_response_imports_as_editable_artboards() -> None:
+    from app.painter_ui_figma import import_figma_payload
+
+    frame = _figma_payload()["document"]["children"][0]["children"][0]
+    payload = {
+        "name": "Dashboard nodes",
+        "version": "7",
+        "nodes": {
+            "1:1": {
+                "document": frame,
+                "components": {},
+                "componentSets": {},
+                "styles": {},
+            }
+        },
+    }
+
+    document, report = import_figma_payload(payload, source="AbCdEf123456")
+
+    assert report["ok"] is True
+    assert report["artboard_count"] == 1
+    assert report["object_count"] == 3
+    assert document["artboards"][0]["name"] == "Mobile Checkout"
+    assert document["active_artboard_id"] == "figma-artboard-1-1"
+
+
 def test_figma_append_remaps_stable_ids_without_collisions() -> None:
     from app.painter_ui_figma import import_figma_payload, merge_figma_document
 
