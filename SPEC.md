@@ -6805,7 +6805,7 @@ AI Script Edit MVP integration:
   let an imported instance switch between local Figma variants while retaining
   compatible overrides; unresolved remote-library components remain explicit
   converted groups rather than false local component claims.
-- Painter UI document version 12 stores component sublayer property bindings
+- Painter UI document version 13 stores component sublayer property bindings
   explicitly. `content.text`, `visible`, and nested `component_id` targets map
   to Figma `characters`, `visible`, and `mainComponent` references. Text and
   Boolean bindings resolve in Painter instances, Variant cloning preserves
@@ -6814,6 +6814,22 @@ AI Script Edit MVP integration:
   separate target-component and outer-scope IDs, so instance swaps preserve
   the nested root ID, parent, local overrides, and subsequent outer-component
   synchronization.
+- Painter UI v13 also persists provider-neutral object masks, ordered
+  multi-paint Fill/Stroke stacks, object blend mode, independent corner radii,
+  stroke alignment, mixed text ranges, recoverable remote-component metadata,
+  editable Boolean operands, and stable Figma Sections. The Inspector and
+  dedicated `paint.ui.mask.*`, `paint.ui.appearance.*`,
+  `paint.ui.text.range.style.*`, `paint.ui.component.remote.*`,
+  `paint.ui.vector.boolean.*`, and `paint.ui.section.*` Actions share focused
+  mutation services and the normal Painter Undo/Redo path.
+- Figma import/export preserves those v13 features as editable nodes where the
+  official Plugin API permits it. Figma comments convert to the existing
+  object-anchored Painter Review contract because a local development plugin
+  cannot author file comments. Shared TigerStudioUMG preflight never silently
+  omits these expressions: mask, Boolean, mixed text, unresolved remote
+  components, multi-paint, non-normal blend, independent corners, and
+  non-center stroke alignment are explicitly `Blocked` until a real native,
+  material, or deterministic-bake generator is available.
 - Painter UI v12 preserves ordered Figma Drop Shadow, Inner Shadow, Layer Blur,
   and Background Blur effects in `style.effects`. Shadows retain color alpha,
   offset, blur radius, signed spread, and blend mode; blur effects retain their

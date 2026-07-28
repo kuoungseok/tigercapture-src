@@ -177,6 +177,15 @@ def _figma_component_set_index(
     return index
 
 
+def _walk_figma_nodes(
+    root: Mapping[str, Any],
+):
+    yield root
+    for child in root.get("children", []):
+        if isinstance(child, Mapping):
+            yield from _walk_figma_nodes(child)
+
+
 def _number(value: object, default: float = 0.0) -> float:
     try:
         return float(value)
@@ -300,6 +309,98 @@ def _image_paint(paints: object) -> Mapping[str, Any] | None:
         ),
         None,
     )
+
+
+def _map_paints(
+    paints: object,
+    *,
+    stroke: bool = False,
+    width: float = 1.0,
+    align: str = "center",
+) -> list[dict[str, Any]]:
+    if not isinstance(paints, list):
+        return []
+    rows: list[dict[str, Any]] = []
+    for raw in paints:
+        if not isinstance(raw, Mapping):
+            continue
+        paint_type = str(raw.get("type") or "").upper()
+        if paint_type == "SOLID":
+            row: dict[str, Any] = {
+                "type": "solid",
+                "visible": bool(raw.get("visible", True)),
+                "opacity": max(
+                    0.0, min(1.0, _number(raw.get("opacity"), 1.0))
+                ),
+                "color": _color_with_opacity(
+                    raw.get("color"),
+                    raw.get("opacity", 1.0),
+                ),
+            }
+        elif paint_type in {"GRADIENT_LINEAR", "GRADIENT_RADIAL"}:
+            gradient = _map_gradient(raw)
+            row = {
+                "type": gradient["type"],
+                "visible": bool(raw.get("visible", True)),
+                "opacity": max(
+                    0.0, min(1.0, _number(raw.get("opacity"), 1.0))
+                ),
+                "color": "#FFFFFFFF",
+                "gradient": gradient,
+            }
+        else:
+            continue
+        if stroke:
+            row["width"] = max(0.0, float(width))
+            row["align"] = str(align).casefold()
+        rows.append(row)
+    return rows
+
+
+def _map_text_ranges(node: Mapping[str, Any]) -> list[dict[str, Any]]:
+    text = str(node.get("characters") or "")
+    overrides = node.get("characterStyleOverrides")
+    table = node.get("styleOverrideTable")
+    if not text or not isinstance(overrides, list) or not isinstance(table, Mapping):
+        return []
+    rows: list[dict[str, Any]] = []
+    start = 0
+    while start < min(len(text), len(overrides)):
+        style_id = str(overrides[start])
+        end = start + 1
+        while end < min(len(text), len(overrides)) and str(
+            overrides[end]
+        ) == style_id:
+            end += 1
+        raw = table.get(style_id)
+        if style_id not in {"0", ""} and isinstance(raw, Mapping):
+            style: dict[str, Any] = {}
+            field_map = {
+                "fontFamily": "font_family",
+                "fontSize": "font_size",
+                "fontWeight": "font_weight",
+                "italic": "italic",
+                "textDecoration": "underline",
+                "letterSpacing": "letter_spacing",
+                "lineHeightPx": "line_height",
+            }
+            for figma_key, target_key in field_map.items():
+                if figma_key not in raw:
+                    continue
+                value = raw[figma_key]
+                if figma_key == "textDecoration":
+                    value = str(value).upper() == "UNDERLINE"
+                style[target_key] = copy.deepcopy(value)
+            fill = _solid_paint(raw.get("fills"))
+            if fill is not None:
+                style["color"] = _color_with_opacity(
+                    fill.get("color"),
+                    fill.get("opacity", 1.0),
+                )
+            if style:
+                rows.append({"start": start, "end": end, "style": style})
+        start = end
+    return rows
 
 
 def _box(node: Mapping[str, Any]) -> dict[str, float]:
@@ -553,6 +654,20 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
                 ).casefold(),
             }
         )
+    corner_values = node.get("rectangleCornerRadii")
+    corner_values = (
+        list(corner_values)
+        if isinstance(corner_values, list) and len(corner_values) >= 4
+        else []
+    )
+    fallback_radius = max(
+        0.0,
+        _number(
+            node.get("cornerRadius"),
+            corner_values[0] if corner_values else 0.0,
+        ),
+    )
+    stroke_align = str(node.get("strokeAlign") or "CENTER").casefold()
     result: dict[str, Any] = {
         "fill": _color(fill.get("color"), "#00000000") if fill else "#00000000",
         "stroke": _color(stroke.get("color"), "#00000000") if stroke else "#00000000",
@@ -571,16 +686,36 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
                 else []
             )
         ],
-        "radius": max(
-            0.0,
-            _number(
-                node.get("cornerRadius"),
-                (node.get("rectangleCornerRadii") or [0])[0]
-                if isinstance(node.get("rectangleCornerRadii"), list)
-                and node.get("rectangleCornerRadii")
-                else 0.0,
-            ),
+        "radius": fallback_radius,
+        "blend_mode": str(
+            node.get("blendMode") or "NORMAL"
+        ).casefold(),
+        "stroke_align": stroke_align,
+        "fills": _map_paints(node.get("fills")),
+        "strokes": _map_paints(
+            node.get("strokes"),
+            stroke=True,
+            width=max(0.0, _number(node.get("strokeWeight"))),
+            align=stroke_align,
         ),
+        "corner_radii": {
+            "top_left": max(
+                0.0,
+                _number(corner_values[0], fallback_radius),
+            ) if corner_values else fallback_radius,
+            "top_right": max(
+                0.0,
+                _number(corner_values[1], fallback_radius),
+            ) if corner_values else fallback_radius,
+            "bottom_right": max(
+                0.0,
+                _number(corner_values[2], fallback_radius),
+            ) if corner_values else fallback_radius,
+            "bottom_left": max(
+                0.0,
+                _number(corner_values[3], fallback_radius),
+            ) if corner_values else fallback_radius,
+        },
     }
     if gradient is not None:
         result["fill_gradient"] = _map_gradient(gradient)
@@ -647,8 +782,42 @@ def _map_content(
                 "font_weight": int(_number(style.get("fontWeight"), 400)),
                 "text_align": str(style.get("textAlignHorizontal") or "LEFT").casefold(),
                 "line_height": max(0.0, _number(style.get("lineHeightPx"))),
+                "text_ranges": _map_text_ranges(node),
             }
         )
+    if node_type == "INSTANCE":
+        component_key = str(
+            node.get("componentId")
+            or node.get("mainComponent")
+            or node.get("key")
+            or ""
+        )
+        if component_key:
+            result["remote_component"] = {
+                "component_key": component_key,
+                "component_name": str(node.get("name") or "Remote Component"),
+                "source_file_key": str(node.get("sourceFileKey") or ""),
+                "source_node_id": str(node.get("id") or ""),
+                "status": "linked",
+            }
+    if node_type == "BOOLEAN_OPERATION":
+        result["boolean"] = {
+            "enabled": True,
+            "operation": {
+                "UNION": "union",
+                "SUBTRACT": "subtract",
+                "INTERSECT": "intersect",
+                "EXCLUDE": "exclude",
+            }.get(
+                str(node.get("booleanOperation") or "UNION").upper(),
+                "union",
+            ),
+            "operand_ids": [
+                _stable_id("node", child.get("id"))
+                for child in node.get("children", [])
+                if isinstance(child, Mapping)
+            ],
+        }
     image = _image_paint(node.get("fills"))
     if image is not None:
         image_ref = str(image.get("imageRef") or "")
@@ -796,6 +965,7 @@ def import_figma_payload(
     objects: list[dict[str, Any]] = []
     components: list[dict[str, Any]] = []
     interactions: list[dict[str, Any]] = []
+    sections: list[dict[str, Any]] = []
     pending_reactions: list[tuple[str, list[Mapping[str, Any]]]] = []
     figma_targets: dict[str, tuple[str, str]] = {}
     warnings: list[str] = []
@@ -806,6 +976,7 @@ def import_figma_payload(
 
     for page in pages:
         for frame in _top_level_frames(page):
+            frame_object_start = len(objects)
             frame_box = _box(frame)
             frame_id = _stable_id("artboard", frame.get("id"))
             background = _solid_paint(frame.get("backgrounds") or frame.get("fills"))
@@ -1037,6 +1208,24 @@ def import_figma_payload(
                                 else definition_component_id
                             ),
                         )
+            if str(frame.get("type") or "").upper() == "SECTION":
+                section_objects = objects[frame_object_start:]
+                sections.append(
+                    {
+                        "id": _stable_id("section", frame.get("id")),
+                        "name": str(frame.get("name") or "Section"),
+                        "page_name": str(page.get("name") or ""),
+                        "x": float(frame_box["x"]),
+                        "y": float(frame_box["y"]),
+                        "width": float(frame_box["width"]),
+                        "height": float(frame_box["height"]),
+                        "object_ids": [
+                            str(row["id"]) for row in section_objects
+                        ],
+                        "collapsed": bool(frame.get("devStatus") == "READY_FOR_DEV"),
+                        "figma_node_id": str(frame.get("id") or ""),
+                    }
+                )
 
             if str(frame.get("type") or "").upper() == "COMPONENT":
                 visit(frame)
@@ -1101,11 +1290,55 @@ def import_figma_payload(
             )
             continue
         row["content"]["figma_component_id"] = component_id
+        remote = dict(row["content"].get("remote_component") or {})
+        remote["status"] = "missing"
+        row["content"]["remote_component"] = remote
         row["component_id"] = ""
         row["component_role"] = "none"
         warnings.append(
             f"converted:{row['id']}:remote_component_instance_to_group"
         )
+
+    figma_node_index = {
+        str(node.get("id") or ""): node
+        for node in _walk_figma_nodes(root)
+        if str(node.get("id") or "")
+    }
+    siblings: dict[tuple[str, str], list[dict[str, Any]]] = {}
+    for row in objects:
+        siblings.setdefault(
+            (str(row["artboard_id"]), str(row["parent_id"])),
+            [],
+        ).append(row)
+    for rows in siblings.values():
+        rows.sort(key=lambda item: int(item.get("z_index") or 0))
+        for index, row in enumerate(rows):
+            figma_type = str((row.get("content") or {}).get("figma_type") or "")
+            source_id = str((row.get("content") or {}).get("figma_node_id") or "")
+            source_node = figma_node_index.get(source_id, {})
+            raw_mask = bool(source_node.get("isMask", False))
+            if not raw_mask and figma_type != "MASK":
+                continue
+            targets: list[str] = []
+            for candidate in rows[index + 1 :]:
+                candidate_source = figma_node_index.get(
+                    str(
+                        (candidate.get("content") or {}).get(
+                            "figma_node_id"
+                        )
+                        or ""
+                    ),
+                    {},
+                )
+                if bool(candidate_source.get("isMask", False)):
+                    break
+                targets.append(str(candidate["id"]))
+            row["mask"] = {
+                "enabled": True,
+                "inverted": False,
+                "outline": bool(source_node.get("isMaskOutline", False)),
+                "target_ids": targets,
+            }
 
     trigger_map = {
         "ON_CLICK": "click",
@@ -1226,6 +1459,7 @@ def import_figma_payload(
             "active_artboard_id": preferred_artboard_id,
             "artboards": artboards,
             "objects": objects,
+            "sections": sections,
             "components": components,
             "tokens": tokens,
             "interactions": interactions,
@@ -1241,6 +1475,47 @@ def import_figma_payload(
             },
         }
     )
+    raw_comments = payload.get("comments")
+    raw_comments = raw_comments if isinstance(raw_comments, list) else []
+    if raw_comments:
+        from app.painter_ui_review import add_ui_review_comment
+
+        for raw_comment in raw_comments:
+            if not isinstance(raw_comment, Mapping):
+                continue
+            message = str(raw_comment.get("message") or "").strip()
+            if not message:
+                continue
+            client_meta = raw_comment.get("client_meta")
+            client_meta = (
+                client_meta if isinstance(client_meta, Mapping) else {}
+            )
+            node_id = str(
+                client_meta.get("node_id")
+                or client_meta.get("nodeId")
+                or ""
+            )
+            target_kind, target_id = figma_targets.get(node_id, ("", ""))
+            try:
+                document, _comment = add_ui_review_comment(
+                    document,
+                    text=message,
+                    object_id=target_id if target_kind == "object" else "",
+                    artboard_id=(
+                        target_id
+                        if target_kind == "artboard"
+                        else ""
+                    ),
+                    author=str(
+                        (raw_comment.get("user") or {}).get("handle")
+                        if isinstance(raw_comment.get("user"), Mapping)
+                        else ""
+                    ),
+                    x=_number(client_meta.get("x"), 0.5),
+                    y=_number(client_meta.get("y"), 0.5),
+                )
+            except ValueError as exc:
+                warnings.append(f"converted:comment:{exc}")
     validation = validate_ui_document(document)
     report = {
         "schema": FIGMA_IMPORT_SCHEMA,
@@ -1252,6 +1527,14 @@ def import_figma_payload(
         "component_count": len(document["components"]),
         "token_count": len(document["tokens"]),
         "interaction_count": len(document["interactions"]),
+        "section_count": len(document.get("sections", [])),
+        "comment_count": len(
+            (
+                document.get("linked_targets", {})
+                .get("review", {})
+                .get("comments", [])
+            )
+        ),
         "active_artboard_id": document["active_artboard_id"],
         "supported_node_count": supported,
         "blocked_node_count": skipped,
@@ -1489,11 +1772,25 @@ def merge_figma_document(
     result = normalize_ui_document(current)
     used = {
         str(row.get("id") or "")
-        for key in ("artboards", "objects", "components", "tokens", "interactions")
+        for key in (
+            "artboards",
+            "objects",
+            "sections",
+            "components",
+            "tokens",
+            "interactions",
+        )
         for row in result[key]
     }
     mapping: dict[str, str] = {}
-    for key in ("artboards", "objects", "components", "tokens", "interactions"):
+    for key in (
+        "artboards",
+        "objects",
+        "sections",
+        "components",
+        "tokens",
+        "interactions",
+    ):
         for row in normalized[key]:
             source_id = str(row["id"])
             candidate = source_id
@@ -1517,6 +1814,7 @@ def merge_figma_document(
                 "component_scope_source_object_id",
             ),
             "components": ("root_object_id", "base_component_id"),
+            "sections": (),
             "tokens": ("alias_token_id",),
             "interactions": (
                 "source_object_id",
@@ -1534,9 +1832,36 @@ def merge_figma_document(
                 path: mapping.get(str(token_id), str(token_id))
                 for path, token_id in value.get("token_bindings", {}).items()
             }
+            mask = dict(value.get("mask") or {})
+            mask["target_ids"] = [
+                mapping.get(str(item), str(item))
+                for item in mask.get("target_ids", [])
+            ]
+            value["mask"] = mask
+            content = dict(value.get("content") or {})
+            boolean = dict(content.get("boolean") or {})
+            boolean["operand_ids"] = [
+                mapping.get(str(item), str(item))
+                for item in boolean.get("operand_ids", [])
+            ]
+            if boolean:
+                content["boolean"] = boolean
+            value["content"] = content
+        if key == "sections":
+            value["object_ids"] = [
+                mapping.get(str(item), str(item))
+                for item in value.get("object_ids", [])
+            ]
         return value
 
-    for key in ("artboards", "objects", "components", "tokens", "interactions"):
+    for key in (
+        "artboards",
+        "objects",
+        "sections",
+        "components",
+        "tokens",
+        "interactions",
+    ):
         result[key].extend(remap_row(key, row) for row in normalized[key])
     result["active_artboard_id"] = mapping[normalized["active_artboard_id"]]
     result["linked_targets"]["figma"] = copy.deepcopy(
@@ -1574,6 +1899,44 @@ def inspect_figma_compatibility(
             status = "blocked"
             reason = f"Unsupported Painter UI kind: {kind}"
         rows.append({"id": row["id"], "status": status, "reason": reason})
+        mask = dict(row.get("mask") or {})
+        if mask.get("enabled"):
+            rows.append(
+                {
+                    "id": f"{row['id']}:mask",
+                    "status": "native",
+                    "reason": "Maps to an editable Figma mask node",
+                }
+            )
+        content = dict(row.get("content") or {})
+        if (content.get("boolean") or {}).get("enabled"):
+            rows.append(
+                {
+                    "id": f"{row['id']}:boolean",
+                    "status": "native",
+                    "reason": "Maps to an editable Figma Boolean operation",
+                }
+            )
+        if content.get("text_ranges"):
+            rows.append(
+                {
+                    "id": f"{row['id']}:text-ranges",
+                    "status": "native",
+                    "reason": "Maps to Figma character-range text styles",
+                }
+            )
+        remote = dict(content.get("remote_component") or {})
+        if remote.get("status") == "missing":
+            rows.append(
+                {
+                    "id": f"{row['id']}:remote-component",
+                    "status": "converted",
+                    "reason": (
+                        "Missing remote component is exported as an editable "
+                        "frame with recovery metadata"
+                    ),
+                }
+            )
     supported_property_types = {"enum", "boolean", "text", "instance_swap"}
     for component in normalized["components"]:
         for property_name, definition in component[
@@ -1605,6 +1968,34 @@ def inspect_figma_compatibility(
         status: sum(1 for row in rows if row["status"] == status)
         for status in ("native", "converted", "baked", "blocked")
     }
+    review_comments = (
+        normalized.get("linked_targets", {})
+        .get("review", {})
+        .get("comments", [])
+    )
+    for section in normalized.get("sections", []):
+        rows.append(
+            {
+                "id": section["id"],
+                "status": "native",
+                "reason": "Maps to a Figma Section node",
+            }
+        )
+    for comment in review_comments:
+        rows.append(
+            {
+                "id": str(comment.get("id") or "comment"),
+                "status": "converted",
+                "reason": (
+                    "Figma plugins cannot create file comments; review data "
+                    "is preserved in plugin metadata"
+                ),
+            }
+        )
+    counts = {
+        status: sum(1 for row in rows if row["status"] == status)
+        for status in ("native", "converted", "baked", "blocked")
+    }
     return {
         "schema": FIGMA_EXCHANGE_SCHEMA,
         "ok": counts["blocked"] == 0,
@@ -1614,6 +2005,8 @@ def inspect_figma_compatibility(
         "component_count": len(normalized["components"]),
         "token_count": len(normalized["tokens"]),
         "interaction_count": len(normalized["interactions"]),
+        "section_count": len(normalized.get("sections", [])),
+        "comment_count": len(review_comments),
     }
 
 
@@ -1697,6 +2090,21 @@ function color(value) {{
     b: parseInt(full.slice(4,6),16)/255, a: parseInt(full.slice(6,8),16)/255 }};
 }}
 function paint(value) {{ const c=color(value); return {{type:'SOLID',color:{{r:c.r,g:c.g,b:c.b}},opacity:c.a}}; }}
+function stackPaint(row) {{
+  if(String(row?.type||'solid')==='solid') {{
+    const p=paint(row.color||'#FFFFFFFF');
+    p.visible=row.visible!==false; p.opacity=Math.max(0,Math.min(1,Number(row.opacity??p.opacity)));
+    return p;
+  }}
+  const g=row.gradient||{{}}, point=(value,fallback)=>({{x:Number(value?.x??fallback.x),y:Number(value?.y??fallback.y)}});
+  return {{
+    type:String(row.type||'linear')==='radial'?'GRADIENT_RADIAL':'GRADIENT_LINEAR',
+    visible:row.visible!==false,
+    opacity:Math.max(0,Math.min(1,Number(row.opacity??1))),
+    gradientHandlePositions:[point(g.start,{{x:0,y:.5}}),point(g.end,{{x:1,y:.5}}),point(g.width,{{x:0,y:1}})],
+    gradientStops:(g.stops||[]).map(stop=>{{const c=color(stop.color);return {{position:Number(stop.position)||0,color:c}};}})
+  }};
+}}
 function fillPaint(style) {{
   const g=style.fill_gradient;
   if(!g || !Array.isArray(g.stops) || !g.stops.length) return paint(style.fill||'#00000000');
@@ -1754,11 +2162,23 @@ function applyFrame(node,row) {{
   if('clipsContent' in node) node.clipsContent=!!row.clip_content;
   node.setSharedPluginData('tigerstudio','stable_id',row.id);
   const s=row.style||{{}};
-  if('fills' in node) node.fills=[fillPaint(s)];
-  if('strokes' in node && s.stroke && !String(s.stroke).endsWith('00')) node.strokes=[paint(s.stroke)];
+  if('fills' in node) node.fills=Array.isArray(s.fills)&&s.fills.length?s.fills.map(stackPaint):[fillPaint(s)];
+  if('strokes' in node) node.strokes=Array.isArray(s.strokes)&&s.strokes.length?s.strokes.map(stackPaint):(s.stroke&&!String(s.stroke).endsWith('00')?[paint(s.stroke)]:[]);
   if('effects' in node) node.effects=effectRows(s);
   if('strokeWeight' in node) node.strokeWeight=Math.max(0,Number(s.stroke_width)||0);
+  if('strokeAlign' in node) node.strokeAlign=String(s.stroke_align||'CENTER').toUpperCase();
+  if('blendMode' in node) node.blendMode=String(s.blend_mode||'NORMAL').toUpperCase();
   if('cornerRadius' in node && typeof node.cornerRadius==='number') node.cornerRadius=Math.max(0,Number(s.radius)||0);
+  const radii=s.corner_radii||{{}};
+  if('topLeftRadius' in node) {{
+    node.topLeftRadius=Math.max(0,Number(radii.top_left??s.radius)||0);
+    node.topRightRadius=Math.max(0,Number(radii.top_right??s.radius)||0);
+    node.bottomRightRadius=Math.max(0,Number(radii.bottom_right??s.radius)||0);
+    node.bottomLeftRadius=Math.max(0,Number(radii.bottom_left??s.radius)||0);
+  }}
+  if('isMask' in node) node.isMask=!!row.mask?.enabled;
+  node.setSharedPluginData('tigerstudio','mask',JSON.stringify(row.mask||{{}}));
+  node.setSharedPluginData('tigerstudio','remote_component',JSON.stringify((row.content||{{}}).remote_component||{{}}));
   if(row.layout && 'layoutMode' in node) {{
     node.layoutMode=String(row.layout.mode||'NONE').toUpperCase();
     if(node.layoutMode!=='NONE') {{
@@ -1808,6 +2228,15 @@ async function main() {{
       try {{ await figma.loadFontAsync(font); node.fontName=font; }} catch (_) {{ await figma.loadFontAsync({{family:'Inter',style:'Regular'}}); }}
       node.characters=String(c.text||''); node.fontSize=Math.max(1,Number(c.font_size)||16);
       node.textAlignHorizontal=String(c.text_align||'LEFT').toUpperCase();
+      for(const range of c.text_ranges||[]) {{
+        const start=Math.max(0,Math.min(node.characters.length,Number(range.start)||0));
+        const end=Math.max(start,Math.min(node.characters.length,Number(range.end)||start));
+        const rs=range.style||{{}};
+        if(end<=start) continue;
+        if(rs.font_size) node.setRangeFontSize(start,end,Math.max(1,Number(rs.font_size)));
+        if(rs.color) node.setRangeFills(start,end,[paint(rs.color)]);
+        if(rs.underline) node.setRangeTextDecoration(start,end,'UNDERLINE');
+      }}
     }}
     const asset=exchange.assets[row.id];
     if(asset && 'fills' in node) {{
@@ -1826,6 +2255,28 @@ async function main() {{
       }} catch (_) {{}}
     }}
   }}
+  for(const row of ordered.filter(row => (row.content||{{}}).boolean?.enabled)) {{
+    const spec=row.content.boolean, nodes=(spec.operand_ids||[]).map(id=>created.get(id)).filter(Boolean);
+    const placeholder=created.get(row.id), parent=placeholder?.parent||created.get(row.parent_id)||created.get(row.artboard_id)||page;
+    if(nodes.length<2) throw new Error(`Boolean operands are missing for ${{row.id}}`);
+    let result;
+    if(spec.operation==='subtract') result=figma.subtract(nodes,parent);
+    else if(spec.operation==='intersect') result=figma.intersect(nodes,parent);
+    else if(spec.operation==='exclude') result=figma.exclude(nodes,parent);
+    else result=figma.union(nodes,parent);
+    if(placeholder && placeholder!==result) placeholder.remove();
+    applyFrame(result,row); created.set(row.id,result);
+  }}
+  for(const section of doc.sections||[]) {{
+    if(!figma.createSection) continue;
+    const node=figma.createSection();
+    node.name=section.name||section.id; node.x=Number(section.x)||0; node.y=Number(section.y)||0;
+    node.resizeWithoutConstraints(Math.max(1,Number(section.width)||1),Math.max(1,Number(section.height)||1));
+    node.setSharedPluginData('tigerstudio','stable_id',section.id);
+    node.setSharedPluginData('tigerstudio','object_ids',JSON.stringify(section.object_ids||[]));
+    page.appendChild(node); created.set(section.id,node);
+  }}
+  page.setSharedPluginData('tigerstudio','review',JSON.stringify(doc.linked_targets?.review||{{}}));
   for(const family of doc.components.filter(row => !row.base_component_id)) {{
     const memberIds=[family.id,...(family.variant_ids||[])];
     const memberNodes=memberIds.map(id=>components.get(id)).filter(node=>node && node.type==='COMPONENT');

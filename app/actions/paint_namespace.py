@@ -2835,6 +2835,11 @@ def register_paint_actions(registry: Any) -> None:
     )
 
     register_paint_ui_production_actions(registry)
+    from app.actions.paint_ui_advanced_namespace import (
+        register_paint_ui_advanced_actions,
+    )
+
+    register_paint_ui_advanced_actions(registry)
 
 
 __all__ = ["register_paint_actions"]

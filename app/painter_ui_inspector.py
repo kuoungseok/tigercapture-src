@@ -120,6 +120,10 @@ class PainterUIInspector(QWidget):
     ungroup_requested = Signal(str)
     reorder_requested = Signal(object, str)
     hierarchy_drop_requested = Signal(object, str, str)
+    text_range_requested = Signal(str, int, int, object, bool)
+    remote_component_requested = Signal(str, str, object)
+    boolean_requested = Signal(str, str, object)
+    section_requested = Signal(str, str, object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -345,7 +349,51 @@ class PainterUIInspector(QWidget):
         hierarchy_actions.addWidget(backward)
         hierarchy_actions.addWidget(forward)
         layers_layout.addLayout(hierarchy_actions)
+        mask_actions = QHBoxLayout()
+        self.use_as_mask_check = QCheckBox("Use as Mask")
+        self.mask_invert_check = QCheckBox("Invert")
+        self.mask_outline_check = QCheckBox("Outline")
+        for control in (
+            self.use_as_mask_check,
+            self.mask_invert_check,
+            self.mask_outline_check,
+        ):
+            control.toggled.connect(self._emit_properties)
+            mask_actions.addWidget(control)
+        layers_layout.addLayout(mask_actions)
         tabs.addTab(layers_page, "Layers")
+
+        sections_page = QWidget()
+        sections_layout = QVBoxLayout(sections_page)
+        sections_layout.setContentsMargins(4, 4, 4, 4)
+        self.section_list = QListWidget()
+        self.section_list.currentRowChanged.connect(
+            self._sync_section_fields
+        )
+        sections_layout.addWidget(self.section_list, 1)
+        self.section_name_edit = QLineEdit()
+        self.section_name_edit.setPlaceholderText("Section name")
+        sections_layout.addWidget(self.section_name_edit)
+        self.section_object_ids_edit = QLineEdit()
+        self.section_object_ids_edit.setPlaceholderText(
+            "Object IDs, comma separated"
+        )
+        sections_layout.addWidget(self.section_object_ids_edit)
+        section_buttons = QHBoxLayout()
+        for label, operation in (
+            ("New", "create"),
+            ("Update", "update"),
+            ("Delete", "remove"),
+        ):
+            button = QPushButton(label)
+            button.clicked.connect(
+                lambda _checked=False, action=operation: self._emit_section(
+                    action
+                )
+            )
+            section_buttons.addWidget(button)
+        sections_layout.addLayout(section_buttons)
+        tabs.addTab(sections_page, "Sections")
 
         from app.painter_ui_component_library import PainterUIComponentLibrary
 
@@ -759,6 +807,82 @@ class PainterUIInspector(QWidget):
         self.text_edit.setPlaceholderText("Text")
         self.text_edit.editingFinished.connect(self._emit_properties)
         form.addRow("Text", self.text_edit)
+        text_range_row = QFrame()
+        text_range_layout = QHBoxLayout(text_range_row)
+        text_range_layout.setContentsMargins(0, 0, 0, 0)
+        text_range_layout.setSpacing(3)
+        self.text_range_start_spin = QSpinBox()
+        self.text_range_end_spin = QSpinBox()
+        self.text_range_start_spin.setPrefix("From ")
+        self.text_range_end_spin.setPrefix("To ")
+        self.text_range_weight_spin = QSpinBox()
+        self.text_range_weight_spin.setRange(100, 900)
+        self.text_range_weight_spin.setSingleStep(100)
+        self.text_range_weight_spin.setValue(700)
+        self.text_range_color_edit = QLineEdit("#FFFFFFFF")
+        text_range_layout.addWidget(self.text_range_start_spin)
+        text_range_layout.addWidget(self.text_range_end_spin)
+        text_range_layout.addWidget(self.text_range_weight_spin)
+        text_range_layout.addWidget(self.text_range_color_edit)
+        form.addRow("Text Range", text_range_row)
+        text_range_actions = QFrame()
+        text_range_actions_layout = QHBoxLayout(text_range_actions)
+        text_range_actions_layout.setContentsMargins(0, 0, 0, 0)
+        apply_text_range = QPushButton("Apply Range")
+        remove_text_range = QPushButton("Clear Range")
+        apply_text_range.clicked.connect(
+            lambda: self._emit_text_range(False)
+        )
+        remove_text_range.clicked.connect(
+            lambda: self._emit_text_range(True)
+        )
+        text_range_actions_layout.addWidget(apply_text_range)
+        text_range_actions_layout.addWidget(remove_text_range)
+        self.text_range_apply_button = apply_text_range
+        self.text_range_remove_button = remove_text_range
+        form.addRow("", text_range_actions)
+        boolean_row = QFrame()
+        boolean_layout = QHBoxLayout(boolean_row)
+        boolean_layout.setContentsMargins(0, 0, 0, 0)
+        boolean_layout.setSpacing(3)
+        self.boolean_operation_combo = QComboBox()
+        for value in ("union", "subtract", "intersect", "exclude"):
+            self.boolean_operation_combo.addItem(value.title(), value)
+        self.boolean_operand_ids_edit = QLineEdit()
+        self.boolean_operand_ids_edit.setPlaceholderText("Operand IDs")
+        boolean_set = QPushButton("Set")
+        boolean_release = QPushButton("Release")
+        boolean_set.clicked.connect(
+            lambda: self._emit_boolean("set")
+        )
+        boolean_release.clicked.connect(
+            lambda: self._emit_boolean("release")
+        )
+        boolean_layout.addWidget(self.boolean_operation_combo)
+        boolean_layout.addWidget(self.boolean_operand_ids_edit, 1)
+        boolean_layout.addWidget(boolean_set)
+        boolean_layout.addWidget(boolean_release)
+        form.addRow("Boolean", boolean_row)
+        remote_row = QFrame()
+        remote_layout = QHBoxLayout(remote_row)
+        remote_layout.setContentsMargins(0, 0, 0, 0)
+        remote_layout.setSpacing(3)
+        self.remote_component_key_edit = QLineEdit()
+        self.remote_component_key_edit.setPlaceholderText("Component key / local ID")
+        for label, operation in (
+            ("Relink", "relink"),
+            ("Local", "localize"),
+            ("Replace", "replace"),
+        ):
+            button = QPushButton(label)
+            button.clicked.connect(
+                lambda _checked=False, action=operation: self._emit_remote(
+                    action
+                )
+            )
+            remote_layout.addWidget(button)
+        remote_layout.insertWidget(0, self.remote_component_key_edit, 1)
+        form.addRow("Remote Component", remote_row)
         image_source_row = QFrame()
         image_source_layout = QHBoxLayout(image_source_row)
         image_source_layout.setContentsMargins(0, 0, 0, 0)
@@ -1011,6 +1135,11 @@ class PainterUIInspector(QWidget):
                     parent_id = parent["parent_id"]
                 prefix = "  " * depth
                 state = "" if row["visible"] else "  [hidden]"
+                mask_state = (
+                    "  [mask]"
+                    if bool((row.get("mask") or {}).get("enabled", False))
+                    else ""
+                )
                 component_role = str(row.get("component_role") or "none")
                 component_state = (
                     "  [component]"
@@ -1021,7 +1150,7 @@ class PainterUIInspector(QWidget):
                 )
                 item = QListWidgetItem(
                     f"{prefix}{row['name']}  [{row['kind']}]"
-                    f"{component_state}{state}"
+                    f"{component_state}{mask_state}{state}"
                 )
                 item.setData(Qt.ItemDataRole.UserRole, row["id"])
                 item.setData(int(Qt.ItemDataRole.UserRole) + 1, row["kind"])
@@ -1030,6 +1159,13 @@ class PainterUIInspector(QWidget):
                     item.setSelected(True)
                 if row["id"] == selected:
                     self.layer_list.setCurrentItem(item)
+            self.section_list.clear()
+            for section in self._document.get("sections", []):
+                item = QListWidgetItem(
+                    f"{section['name']}  ({len(section['object_ids'])})"
+                )
+                item.setData(Qt.ItemDataRole.UserRole, section["id"])
+                self.section_list.addItem(item)
             self._sync_selected_fields()
         finally:
             self._syncing = False
@@ -1121,7 +1257,19 @@ class PainterUIInspector(QWidget):
             self.radius_spin,
             self.appearance_button,
             self.clip_content_check,
+            self.use_as_mask_check,
+            self.mask_invert_check,
+            self.mask_outline_check,
             self.text_edit,
+            self.text_range_start_spin,
+            self.text_range_end_spin,
+            self.text_range_weight_spin,
+            self.text_range_color_edit,
+            self.text_range_apply_button,
+            self.text_range_remove_button,
+            self.boolean_operation_combo,
+            self.boolean_operand_ids_edit,
+            self.remote_component_key_edit,
             self.font_size_spin,
             self.font_weight_combo,
             self.text_align_combo,
@@ -1173,7 +1321,12 @@ class PainterUIInspector(QWidget):
             self._appearance_style = {}
             self.appearance_button.setText("Solid")
             self.clip_content_check.setChecked(False)
+            self.use_as_mask_check.setChecked(False)
+            self.mask_invert_check.setChecked(False)
+            self.mask_outline_check.setChecked(False)
             self.text_edit.clear()
+            self.boolean_operand_ids_edit.clear()
+            self.remote_component_key_edit.clear()
             self.image_source_edit.clear()
             self.accessibility_label_edit.clear()
             self.focus_order_spin.setValue(0)
@@ -1272,6 +1425,10 @@ class PainterUIInspector(QWidget):
         self.clip_content_check.setChecked(
             is_frame and bool(row.get("clip_content", False))
         )
+        mask = dict(base_row.get("mask") or {})
+        self.use_as_mask_check.setChecked(bool(mask.get("enabled", False)))
+        self.mask_invert_check.setChecked(bool(mask.get("inverted", False)))
+        self.mask_outline_check.setChecked(bool(mask.get("outline", False)))
         is_text = row["kind"] in {"text", "button"}
         for widget in (
             self.text_edit,
@@ -1282,6 +1439,36 @@ class PainterUIInspector(QWidget):
         ):
             widget.setEnabled(is_text)
         self.text_edit.setText(str(row["content"].get("text") or ""))
+        text_length = len(self.text_edit.text())
+        self.text_range_start_spin.setRange(0, text_length)
+        self.text_range_end_spin.setRange(0, text_length)
+        self.text_range_start_spin.setValue(0)
+        self.text_range_end_spin.setValue(text_length)
+        for widget in (
+            self.text_range_start_spin,
+            self.text_range_end_spin,
+            self.text_range_weight_spin,
+            self.text_range_color_edit,
+            self.text_range_apply_button,
+            self.text_range_remove_button,
+        ):
+            widget.setEnabled(is_text)
+        boolean = dict(row["content"].get("boolean") or {})
+        boolean_index = self.boolean_operation_combo.findData(
+            str(boolean.get("operation") or "union")
+        )
+        self.boolean_operation_combo.setCurrentIndex(max(0, boolean_index))
+        self.boolean_operand_ids_edit.setText(
+            ", ".join(str(item) for item in boolean.get("operand_ids", []))
+        )
+        remote = dict(row["content"].get("remote_component") or {})
+        self.remote_component_key_edit.setText(
+            str(
+                remote.get("replacement_component_id")
+                or remote.get("component_key")
+                or ""
+            )
+        )
         self.font_size_spin.setValue(float(style.get("font_size") or 14.0))
         weight = int(style.get("font_weight") or 400)
         weight_index = self.font_weight_combo.findData(weight)
@@ -1695,6 +1882,64 @@ class PainterUIInspector(QWidget):
             str(breakpoint),
         )
 
+    def _sync_section_fields(self, index: int) -> None:
+        if index < 0 or index >= len(self._document.get("sections", [])):
+            self.section_name_edit.clear()
+            self.section_object_ids_edit.clear()
+            return
+        section = self._document["sections"][index]
+        self.section_name_edit.setText(str(section["name"]))
+        self.section_object_ids_edit.setText(
+            ", ".join(str(item) for item in section["object_ids"])
+        )
+
+    def _emit_section(self, operation: str) -> None:
+        if self._syncing:
+            return
+        item = self.section_list.currentItem()
+        section_id = (
+            str(item.data(Qt.ItemDataRole.UserRole) or "")
+            if item is not None
+            else ""
+        )
+        if operation in {"update", "remove"} and not section_id:
+            return
+        object_ids = [
+            item.strip()
+            for item in self.section_object_ids_edit.text().split(",")
+            if item.strip()
+        ]
+        selected_rows = [
+            row
+            for row in self._document["objects"]
+            if row["id"] in object_ids
+        ]
+        if selected_rows:
+            x = min(float(row["x"]) for row in selected_rows)
+            y = min(float(row["y"]) for row in selected_rows)
+            right = max(
+                float(row["x"]) + float(row["width"])
+                for row in selected_rows
+            )
+            bottom = max(
+                float(row["y"]) + float(row["height"])
+                for row in selected_rows
+            )
+        else:
+            x, y, right, bottom = 0.0, 0.0, 640.0, 480.0
+        self.section_requested.emit(
+            str(operation),
+            section_id,
+            {
+                "name": self.section_name_edit.text().strip() or "Section",
+                "object_ids": object_ids,
+                "x": x,
+                "y": y,
+                "width": max(1.0, right - x),
+                "height": max(1.0, bottom - y),
+            },
+        )
+
     def _emit_geometry(self) -> None:
         if self._syncing or not self._selected_id():
             return
@@ -1777,7 +2022,16 @@ class PainterUIInspector(QWidget):
             style.pop("stroke", None)
         style["stroke_width"] = float(self.stroke_width_spin.value())
         style["radius"] = float(self.radius_spin.value())
-        for key in ("fill_gradient", "effects", "shadow"):
+        for key in (
+            "fill_gradient",
+            "effects",
+            "shadow",
+            "fills",
+            "strokes",
+            "blend_mode",
+            "corner_radii",
+            "stroke_align",
+        ):
             if key in self._appearance_style:
                 style[key] = copy.deepcopy(self._appearance_style[key])
             else:
@@ -1864,6 +2118,12 @@ class PainterUIInspector(QWidget):
             "content": content,
             "constraints": constraints,
             "layout": layout,
+            "mask": {
+                **dict(row.get("mask") or {}),
+                "enabled": self.use_as_mask_check.isChecked(),
+                "inverted": self.mask_invert_check.isChecked(),
+                "outline": self.mask_outline_check.isChecked(),
+            },
             "accessibility": {
                 "role": str(
                     self.accessibility_role_combo.currentData() or "auto"
@@ -1882,6 +2142,60 @@ class PainterUIInspector(QWidget):
             )
         else:
             self.properties_changed.emit(self._selected_id(), changes)
+
+    def _emit_text_range(self, remove: bool) -> None:
+        row = self._selected_row()
+        if self._syncing or row is None or row["kind"] not in {"text", "button"}:
+            return
+        self.text_range_requested.emit(
+            str(row["id"]),
+            int(self.text_range_start_spin.value()),
+            int(self.text_range_end_spin.value()),
+            {
+                "font_weight": int(self.text_range_weight_spin.value()),
+                "color": self.text_range_color_edit.text().strip()
+                or "#FFFFFFFF",
+            },
+            bool(remove),
+        )
+
+    def _emit_boolean(self, operation: str) -> None:
+        row = self._selected_row()
+        if self._syncing or row is None:
+            return
+        operand_ids = [
+            item.strip()
+            for item in self.boolean_operand_ids_edit.text().split(",")
+            if item.strip()
+        ]
+        self.boolean_requested.emit(
+            str(row["id"]),
+            str(operation),
+            {
+                "operation": str(
+                    self.boolean_operation_combo.currentData() or "union"
+                ),
+                "operand_ids": operand_ids,
+            },
+        )
+
+    def _emit_remote(self, operation: str) -> None:
+        row = self._selected_row()
+        if self._syncing or row is None:
+            return
+        key = self.remote_component_key_edit.text().strip()
+        payload: dict[str, Any]
+        if operation == "replace":
+            payload = {"component_id": key}
+        elif operation == "localize":
+            payload = {"name": str(row["name"])}
+        else:
+            payload = {"component_key": key}
+        self.remote_component_requested.emit(
+            str(row["id"]),
+            str(operation),
+            payload,
+        )
 
     @staticmethod
     def _delivery_title(target: str) -> str:

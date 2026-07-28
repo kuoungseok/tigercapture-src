@@ -43,9 +43,13 @@ def test_inspector_emits_visual_and_typography_properties() -> None:
     inspector.stroke_edit.setText("#D9E1EA")
     inspector.stroke_width_spin.setValue(2.5)
     inspector.radius_spin.setValue(12)
-    inspector.shadow_color_edit.setText("#00000055")
-    inspector.shadow_y_spin.setValue(6)
-    inspector.shadow_blur_spin.setValue(18)
+    inspector._appearance_style["shadow"] = {
+        "x": 0.0,
+        "y": 6.0,
+        "blur": 18.0,
+        "spread": 0.0,
+        "color": "#00000055",
+    }
     inspector.text_edit.setText("Design system")
     inspector.font_size_spin.setValue(28)
     inspector.font_weight_combo.setCurrentIndex(
@@ -61,23 +65,21 @@ def test_inspector_emits_visual_and_typography_properties() -> None:
     object_id, changes = emitted[-1]
     assert object_id == row["id"]
     assert changes["content"]["text"] == "Design system"
-    assert changes["style"] == {
-        "fill": "#102030",
-        "font_size": 28.0,
-        "stroke": "#D9E1EA",
-        "stroke_width": 2.5,
-        "radius": 12.0,
-        "shadow": {
-            "x": 0.0,
-            "y": 6.0,
-            "blur": 18.0,
-            "spread": 0.0,
-            "color": "#00000055",
-        },
-        "font_weight": 600,
-        "text_align": "center",
-        "line_height": 1.45,
+    assert changes["style"]["fill"] == "#102030"
+    assert changes["style"]["font_size"] == 28.0
+    assert changes["style"]["stroke"] == "#D9E1EA"
+    assert changes["style"]["stroke_width"] == 2.5
+    assert changes["style"]["radius"] == 12.0
+    assert changes["style"]["shadow"] == {
+        "x": 0.0,
+        "y": 6.0,
+        "blur": 18.0,
+        "spread": 0.0,
+        "color": "#00000055",
     }
+    assert changes["style"]["font_weight"] == 600
+    assert changes["style"]["text_align"] == "center"
+    assert changes["style"]["line_height"] == 1.45
     inspector.deleteLater()
     app.processEvents()
 

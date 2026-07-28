@@ -7,10 +7,16 @@ from typing import Any
 from PySide6.QtCore import Qt
 
 from app.actions.editor_adapter_object_helpers import _int
+from app.actions.editor_adapter_paint_ui_advanced import (
+    PaintUIAdvancedAdapterMixin,
+)
 from app.actions.editor_adapter_paint_ui_figma import PaintUIFigmaAdapterMixin
 
 
-class PaintAdapterMixin(PaintUIFigmaAdapterMixin):
+class PaintAdapterMixin(
+    PaintUIAdvancedAdapterMixin,
+    PaintUIFigmaAdapterMixin,
+):
     """Registered action surface for paint dialog object import workflows."""
 
     def paint_state(self) -> dict[str, Any]:

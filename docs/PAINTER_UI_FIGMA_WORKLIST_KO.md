@@ -2,6 +2,21 @@
 
 Status: canonical implementation backlog; P0-P10 local production foundation complete
 
+P0-P2 completion checkpoint (2026-07-28):
+
+- Painter UI document schema is version 13.
+- Masks, object blend modes, ordered Fill/Stroke stacks, independent corner
+  radii, and stroke alignment have persistent contracts, Inspector controls,
+  canvas behavior, Actions, and Figma round-trip coverage.
+- Mixed text ranges render on the Painter canvas and preserve Figma character
+  style overrides.
+- Missing remote components remain recoverable through relink, localize, and
+  replace operations instead of being silently discarded.
+- Editable Boolean operands and Figma Sections are persisted with stable IDs.
+- Figma comments map to the existing object-anchored Painter Review contract.
+- Shared TigerStudioUMG preflight explicitly blocks advanced Painter
+  appearance that has no real native/material/bake generation path yet.
+
 P0 implementation checkpoint (2026-07-26):
 
 - UI document version 9 defines typed component, token, interaction, and

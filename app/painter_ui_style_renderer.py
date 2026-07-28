@@ -17,6 +17,7 @@ from PySide6.QtGui import (
     QPainterPath,
     QPen,
     QRadialGradient,
+    QTextCharFormat,
     QTextLayout,
     QTextOption,
 )
@@ -70,6 +71,34 @@ def ui_fill_brush(
     style: Mapping[str, Any],
     rect: QRectF | None = None,
 ) -> QBrush:
+    paints = style.get("fills")
+    if isinstance(paints, list):
+        visible = next(
+            (
+                row
+                for row in paints
+                if isinstance(row, Mapping) and row.get("visible", True)
+            ),
+            None,
+        )
+        if visible is not None:
+            paint_type = str(visible.get("type") or "solid").casefold()
+            opacity = max(
+                0.0,
+                min(1.0, float(visible.get("opacity", 1.0) or 0.0)),
+            )
+            if paint_type in {"linear", "radial"} and isinstance(
+                visible.get("gradient"),
+                Mapping,
+            ):
+                style = {
+                    **dict(style),
+                    "fill_gradient": visible["gradient"],
+                }
+            else:
+                color = ui_color(visible.get("color"), "#00000000")
+                color.setAlphaF(color.alphaF() * opacity)
+                return QBrush(color)
     gradient_style = style.get("fill_gradient")
     if not isinstance(gradient_style, Mapping):
         return QBrush(ui_color(style.get("fill"), "#506884"))
@@ -484,11 +513,45 @@ def _layout_text(
     rect: QRectF,
     alignment: str,
     line_height: float,
+    text_ranges: object = None,
 ) -> tuple[QTextLayout, list[Any], float]:
     normalized_text = (
         text.replace("\r\n", "\n").replace("\r", "\n").replace("\n", "\u2028")
     )
     layout = QTextLayout(normalized_text, font)
+    formats: list[QTextLayout.FormatRange] = []
+    if isinstance(text_ranges, list):
+        for row in text_ranges:
+            if not isinstance(row, Mapping):
+                continue
+            start = max(0, int(row.get("start") or 0))
+            end = max(start, int(row.get("end") or start))
+            values = row.get("style")
+            values = values if isinstance(values, Mapping) else {}
+            if end <= start or not values:
+                continue
+            char_format = QTextCharFormat()
+            if values.get("font_family"):
+                char_format.setFontFamily(str(values["font_family"]))
+            if values.get("font_size") is not None:
+                char_format.setFontPixelSize(
+                    max(1.0, float(values["font_size"]))
+                )
+            if values.get("font_weight") is not None:
+                char_format.setFontWeight(int(values["font_weight"]))
+            char_format.setFontItalic(bool(values.get("italic", False)))
+            char_format.setFontUnderline(bool(values.get("underline", False)))
+            if values.get("color"):
+                char_format.setForeground(
+                    ui_color(values["color"], "#F2F5F9")
+                )
+            format_range = QTextLayout.FormatRange()
+            format_range.start = start
+            format_range.length = end - start
+            format_range.format = char_format
+            formats.append(format_range)
+    if formats:
+        layout.setFormats(formats)
     option = QTextOption()
     option.setWrapMode(QTextOption.WrapMode.WordWrap)
     layout.setTextOption(option)
@@ -530,6 +593,7 @@ def draw_ui_text_block(
     base_font: QFont,
     *,
     scale: float = 1.0,
+    text_ranges: object = None,
 ) -> dict[str, Any]:
     font = ui_font(base_font, style, scale)
     alignment = ui_text_alignment(style)
@@ -542,6 +606,7 @@ def draw_ui_text_block(
         text_rect,
         alignment,
         line_height,
+        text_ranges,
     )
 
     painter.save()

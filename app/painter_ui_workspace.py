@@ -5,7 +5,14 @@ import math
 from typing import Any, Mapping
 
 from PySide6.QtCore import QPointF, QRectF, Signal, Qt
-from PySide6.QtGui import QColor, QImage, QPainter, QPainterPath, QPen, QTransform
+from PySide6.QtGui import (
+    QColor,
+    QImage,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QTransform,
+)
 from PySide6.QtWidgets import QWidget
 
 from app.painter_ui_constraints import (
@@ -16,6 +23,7 @@ from app.painter_ui_constraints import (
 )
 from app.painter_ui_document import normalize_ui_document
 from app.painter_ui_image_renderer import draw_ui_image
+from app.painter_ui_motion_bridge import resolved_ui_geometry
 from app.painter_ui_style_renderer import (
     draw_ui_object_inner_shadows,
     draw_ui_object_shadow,
@@ -74,6 +82,11 @@ class PainterUIDesignOverlay(QWidget):
         self._view_scale: float | None = None
         self._view_offset = QPointF()
         self._resolved_geometry: dict[str, dict[str, float]] = {}
+        self._motion_preview: dict[str, dict[str, Any]] = {}
+        self._motion_actor_compositions: dict[str, Any] = {}
+        self._motion_actor_time_ms = 0
+        self._motion_actor_renderer = None
+        self._motion_actor_frame_cache: dict[tuple[Any, ...], Any] = {}
         self._pan_start = QPointF()
         self._pan_origin = QPointF()
         self._marquee_mode = "replace"
@@ -90,7 +103,10 @@ class PainterUIDesignOverlay(QWidget):
         from app.painter_ui_themes import resolve_ui_theme_document
 
         self._effective_document = resolve_ui_theme_document(self._document)
-        self._resolved_geometry = resolve_ui_constraints(self._effective_document)
+        self._resolved_geometry = resolve_ui_constraints(
+            self._effective_document,
+            resolved_ui_geometry(self._effective_document),
+        )
         self.update()
 
     @staticmethod
@@ -168,6 +184,29 @@ class PainterUIDesignOverlay(QWidget):
                 )
                 painter.drawRect(safe_rect)
         painter.restore()
+
+    def set_motion_preview(
+        self,
+        states: Mapping[str, Mapping[str, Any]] | None,
+    ) -> None:
+        self._motion_preview = {
+            str(object_id): dict(state)
+            for object_id, state in (states or {}).items()
+            if isinstance(state, Mapping)
+        }
+        self.update()
+
+    def set_motion_actor_sources(
+        self,
+        compositions: Mapping[str, Any] | None,
+    ) -> None:
+        self._motion_actor_compositions = dict(compositions or {})
+        self._motion_actor_frame_cache.clear()
+        self.update()
+
+    def set_motion_actor_time(self, time_ms: int) -> None:
+        self._motion_actor_time_ms = max(0, int(time_ms))
+        self.update()
 
     def set_tool(self, tool: str) -> str:
         requested = str(tool or "select").strip().casefold()
@@ -313,12 +352,49 @@ class PainterUIDesignOverlay(QWidget):
         )
         viewport, scale = self._artboard_viewport(artboard)
         geometry = self._resolved_geometry.get(str(row["id"]), row)
+        x = float(geometry["x"])
+        y = float(geometry["y"])
+        width = float(geometry["width"])
+        height = float(geometry["height"])
+        preview = self._motion_preview.get(str(row["id"]))
+        if preview is not None:
+            preview_scale = list(preview.get("scale") or [1.0, 1.0])
+            width *= float(preview_scale[0]) if preview_scale else 1.0
+            height *= (
+                float(preview_scale[1])
+                if len(preview_scale) > 1
+                else float(preview_scale[0]) if preview_scale else 1.0
+            )
+            position = list(
+                preview.get("position")
+                or [x + width * 0.5, y + height * 0.5]
+            )
+            center_x = float(position[0]) if position else x + width * 0.5
+            center_y = (
+                float(position[1])
+                if len(position) > 1
+                else y + height * 0.5
+            )
+            x = center_x - width * 0.5
+            y = center_y - height * 0.5
         return QRectF(
-            viewport.x() + float(geometry["x"]) * scale,
-            viewport.y() + float(geometry["y"]) * scale,
-            float(geometry["width"]) * scale,
-            float(geometry["height"]) * scale,
+            viewport.x() + x * scale,
+            viewport.y() + y * scale,
+            width * scale,
+            height * scale,
         )
+
+    def _display_rotation(self, row: Mapping[str, Any]) -> float:
+        preview = self._motion_preview.get(str(row["id"]))
+        if preview is not None:
+            return float(preview.get("rotation", row.get("rotation", 0.0)))
+        return float(row.get("rotation", 0.0))
+
+    def _display_opacity(self, row: Mapping[str, Any]) -> float:
+        preview = self._motion_preview.get(str(row["id"]))
+        if preview is not None:
+            return max(0.0, min(1.0, float(preview.get("opacity", 1.0))))
+        return max(0.0, min(1.0, float(row.get("opacity", 1.0))))
 
     @staticmethod
     def _handle_rects(rect: QRectF) -> dict[str, QRectF]:
@@ -475,15 +551,25 @@ class PainterUIDesignOverlay(QWidget):
         )
 
     def _visible_objects(self, *, reverse: bool = False) -> list[dict[str, Any]]:
+        boolean_operands = self._boolean_operand_ids()
         return sorted(
             (
                 row
                 for row in self._effective_document["objects"]
-                if row["visible"]
+                if row["visible"] and row["id"] not in boolean_operands
             ),
             key=lambda row: row["z_index"],
             reverse=reverse,
         )
+
+    def _boolean_operand_ids(self) -> set[str]:
+        result: set[str] = set()
+        for row in self._effective_document["objects"]:
+            boolean = (row.get("content") or {}).get("boolean")
+            if not isinstance(boolean, Mapping) or not boolean.get("enabled"):
+                continue
+            result.update(str(item) for item in boolean.get("operand_ids", []))
+        return result
 
     def _clipping_ancestors(
         self,
@@ -522,7 +608,7 @@ class PainterUIDesignOverlay(QWidget):
         )
         path = QPainterPath()
         path.addRoundedRect(rect, radius, radius)
-        rotation = float(row.get("rotation", 0.0))
+        rotation = self._display_rotation(row)
         if abs(rotation) >= 0.001:
             pivot = ui_pivot_point(rect, row.get("constraints"))
             transform = QTransform()
@@ -583,6 +669,151 @@ class PainterUIDesignOverlay(QWidget):
             2.0,
         )
         painter.restore()
+
+    def _object_shape_path(self, row: Mapping[str, Any]) -> QPainterPath:
+        rect = self._object_rect(row)
+        path = QPainterPath()
+        if row["kind"] == "ellipse":
+            path.addEllipse(rect)
+            return path
+        style = row.get("style") or {}
+        artboard = next(
+            item
+            for item in self._document["artboards"]
+            if item["id"] == row["artboard_id"]
+        )
+        _viewport, scale = self._artboard_viewport(artboard)
+        radii = style.get("corner_radii")
+        radii = radii if isinstance(radii, Mapping) else {}
+        fallback = max(0.0, float(style.get("radius") or 0.0))
+        tl = max(0.0, float(radii.get("top_left", fallback) or 0.0) * scale)
+        tr = max(0.0, float(radii.get("top_right", fallback) or 0.0) * scale)
+        br = max(0.0, float(radii.get("bottom_right", fallback) or 0.0) * scale)
+        bl = max(0.0, float(radii.get("bottom_left", fallback) or 0.0) * scale)
+        maximum = min(rect.width(), rect.height()) * 0.5
+        tl, tr, br, bl = (min(maximum, item) for item in (tl, tr, br, bl))
+        path.moveTo(rect.left() + tl, rect.top())
+        path.lineTo(rect.right() - tr, rect.top())
+        path.quadTo(rect.topRight(), QPointF(rect.right(), rect.top() + tr))
+        path.lineTo(rect.right(), rect.bottom() - br)
+        path.quadTo(rect.bottomRight(), QPointF(rect.right() - br, rect.bottom()))
+        path.lineTo(rect.left() + bl, rect.bottom())
+        path.quadTo(rect.bottomLeft(), QPointF(rect.left(), rect.bottom() - bl))
+        path.lineTo(rect.left(), rect.top() + tl)
+        path.quadTo(rect.topLeft(), QPointF(rect.left() + tl, rect.top()))
+        path.closeSubpath()
+        return path
+
+    def _mask_source_for_target(
+        self,
+        target_id: str,
+    ) -> tuple[dict[str, Any], dict[str, Any]] | None:
+        for row in self._effective_document["objects"]:
+            mask = row.get("mask")
+            if (
+                isinstance(mask, Mapping)
+                and mask.get("enabled")
+                and str(target_id) in {
+                    str(item) for item in mask.get("target_ids", [])
+                }
+            ):
+                return row, dict(mask)
+        return None
+
+    def _apply_object_mask(
+        self,
+        painter: QPainter,
+        row: Mapping[str, Any],
+    ) -> None:
+        source = self._mask_source_for_target(str(row["id"]))
+        if source is None:
+            return
+        mask_row, mask = source
+        path = self._object_shape_path(mask_row)
+        if mask.get("inverted"):
+            artboard = next(
+                item
+                for item in self._document["artboards"]
+                if item["id"] == row["artboard_id"]
+            )
+            viewport, _scale = self._artboard_viewport(artboard)
+            outer = QPainterPath()
+            outer.addRect(viewport)
+            path = outer.subtracted(path)
+        painter.setClipPath(path, Qt.ClipOperation.IntersectClip)
+
+    def _point_visible_in_object_mask(
+        self,
+        row: Mapping[str, Any],
+        point: QPointF,
+    ) -> bool:
+        source = self._mask_source_for_target(str(row["id"]))
+        if source is None:
+            return True
+        mask_row, mask = source
+        contains = self._object_shape_path(mask_row).contains(point)
+        return not contains if mask.get("inverted") else contains
+
+    def _paint_mask_indicator(
+        self,
+        painter: QPainter,
+        row: Mapping[str, Any],
+    ) -> None:
+        mask = row.get("mask")
+        if not isinstance(mask, Mapping) or not mask.get("enabled"):
+            return
+        painter.save()
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.setPen(QPen(QColor("#4ED6C3"), 2.0, Qt.PenStyle.DashLine))
+        painter.drawPath(self._object_shape_path(row))
+        painter.restore()
+
+    def _boolean_path(self, row: Mapping[str, Any]) -> QPainterPath | None:
+        boolean = (row.get("content") or {}).get("boolean")
+        if not isinstance(boolean, Mapping) or not boolean.get("enabled"):
+            return None
+        by_id = {
+            item["id"]: item for item in self._effective_document["objects"]
+        }
+        operands = [
+            by_id[item]
+            for item in boolean.get("operand_ids", [])
+            if item in by_id
+        ]
+        if len(operands) < 2:
+            return None
+        result = self._object_shape_path(operands[0])
+        operation = str(boolean.get("operation") or "union")
+        for operand in operands[1:]:
+            path = self._object_shape_path(operand)
+            if operation == "subtract":
+                result = result.subtracted(path)
+            elif operation == "intersect":
+                result = result.intersected(path)
+            elif operation == "exclude":
+                result = result.xored(path)
+            else:
+                result = result.united(path)
+        return result
+
+    @staticmethod
+    def _composition_mode(blend_mode: object):
+        return {
+            "multiply": QPainter.CompositionMode.CompositionMode_Multiply,
+            "screen": QPainter.CompositionMode.CompositionMode_Screen,
+            "overlay": QPainter.CompositionMode.CompositionMode_Overlay,
+            "darken": QPainter.CompositionMode.CompositionMode_Darken,
+            "lighten": QPainter.CompositionMode.CompositionMode_Lighten,
+            "difference": QPainter.CompositionMode.CompositionMode_Difference,
+            "exclusion": QPainter.CompositionMode.CompositionMode_Exclusion,
+            "color_dodge": QPainter.CompositionMode.CompositionMode_ColorDodge,
+            "color_burn": QPainter.CompositionMode.CompositionMode_ColorBurn,
+            "hard_light": QPainter.CompositionMode.CompositionMode_HardLight,
+            "soft_light": QPainter.CompositionMode.CompositionMode_SoftLight,
+        }.get(
+            str(blend_mode or "normal").casefold(),
+            QPainter.CompositionMode.CompositionMode_SourceOver,
+        )
 
     def _paint_object(
         self,
@@ -648,6 +879,25 @@ class PainterUIDesignOverlay(QWidget):
             return
         painter.save()
         painter.setOpacity(max(0.0, min(1.0, float(row["opacity"]))))
+        painter.setCompositionMode(
+            self._composition_mode(style.get("blend_mode"))
+        )
+        if kind == "motion_actor":
+            image = self._motion_actor_frame(row, rect)
+            if image is not None and not image.isNull():
+                painter.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform, True)
+                painter.drawImage(rect, image)
+            else:
+                painter.fillRect(rect, QColor("#151A22"))
+                painter.setPen(QPen(QColor("#6FA0F5"), 1.0))
+                painter.drawRect(rect)
+                painter.drawText(
+                    rect,
+                    Qt.AlignmentFlag.AlignCenter,
+                    "Motion Actor",
+                )
+            painter.restore()
+            return
         artboard = next(
             item
             for item in self._document["artboards"]
@@ -669,7 +919,10 @@ class PainterUIDesignOverlay(QWidget):
         )
         painter.setBrush(fill)
 
-        if kind == "ellipse":
+        boolean_path = self._boolean_path(row)
+        if boolean_path is not None:
+            painter.drawPath(boolean_path)
+        elif kind == "ellipse":
             painter.drawEllipse(rect)
         elif kind == "line":
             painter.setPen(
@@ -730,8 +983,55 @@ class PainterUIDesignOverlay(QWidget):
                 text_style,
                 self.font(),
                 scale=scale,
+                text_ranges=row["content"].get("text_ranges"),
             )
         painter.restore()
+
+    def _motion_actor_frame(self, row: Mapping[str, Any], rect: QRectF):
+        from app.motion_designer.schema import MotionComposition
+        from app.painter_ui_motion_actor import motion_actor_composition_id
+
+        composition_id = motion_actor_composition_id(row)
+        value = self._motion_actor_compositions.get(composition_id)
+        if isinstance(value, dict):
+            value = MotionComposition.from_dict(value)
+        if not isinstance(value, MotionComposition):
+            return None
+        content = row.get("content")
+        content = content if isinstance(content, Mapping) else {}
+        if bool(content.get("loop", True)):
+            time_ms = self._motion_actor_time_ms % max(1, value.duration_ms)
+        else:
+            time_ms = min(self._motion_actor_time_ms, max(0, value.duration_ms - 1))
+        frame_duration = 1000.0 / max(1.0, float(value.fps))
+        frame_index = int(time_ms / frame_duration)
+        width = max(32, min(960, int(round(rect.width()))))
+        height = max(32, min(540, int(round(rect.height()))))
+        key = (
+            value.id,
+            value.revision,
+            frame_index,
+            width,
+            height,
+        )
+        cached = self._motion_actor_frame_cache.get(key)
+        if cached is not None:
+            return cached
+        if self._motion_actor_renderer is None:
+            from app.motion_designer.export_renderer import MotionExportRenderer
+
+            self._motion_actor_renderer = MotionExportRenderer(cache_capacity=48)
+        image = self._motion_actor_renderer.render_frame(
+            value,
+            frame_index * frame_duration,
+            width=width,
+            height=height,
+        )
+        self._motion_actor_frame_cache[key] = image
+        if len(self._motion_actor_frame_cache) > 72:
+            oldest = next(iter(self._motion_actor_frame_cache))
+            self._motion_actor_frame_cache.pop(oldest, None)
+        return image
 
     def paintEvent(self, _event) -> None:
         surface = QImage(
@@ -771,17 +1071,42 @@ class PainterUIDesignOverlay(QWidget):
                 QPointF(viewport.left(), viewport.top() - 7.0),
                 str(artboard["name"]),
             )
+        scale, offset = self._view_transform()
+        for section in self._document.get("sections", []):
+            section_rect = QRectF(
+                offset.x() + float(section["x"]) * scale,
+                offset.y() + float(section["y"]) * scale,
+                float(section["width"]) * scale,
+                float(section["height"]) * scale,
+            )
+            scene_painter.setBrush(Qt.BrushStyle.NoBrush)
+            scene_painter.setPen(
+                QPen(QColor("#8B93A7"), 1.0, Qt.PenStyle.DashLine)
+            )
+            scene_painter.drawRoundedRect(section_rect, 6.0, 6.0)
+            scene_painter.setPen(QColor("#C3CAD6"))
+            scene_painter.drawText(
+                section_rect.topLeft() + QPointF(4.0, -5.0),
+                str(section["name"]),
+            )
         for row in self._visible_objects():
             scene_painter.save()
             self._apply_parent_clips(scene_painter, row)
+            self._apply_object_mask(scene_painter, row)
             rect = self._object_rect(row)
-            rotation = float(row.get("rotation", 0.0))
+            rotation = self._display_rotation(row)
             pivot = ui_pivot_point(rect, row.get("constraints"))
             if abs(rotation) >= 0.001:
                 scene_painter.translate(pivot)
                 scene_painter.rotate(rotation)
                 scene_painter.translate(-pivot)
-            self._paint_object(scene_painter, row, surface=surface)
+            display_row = dict(row)
+            display_row["opacity"] = self._display_opacity(row)
+            self._paint_object(
+                scene_painter,
+                display_row,
+                surface=surface,
+            )
             scene_painter.restore()
         scene_painter.end()
 
@@ -796,17 +1121,19 @@ class PainterUIDesignOverlay(QWidget):
                 continue
             painter.save()
             rect = self._object_rect(row)
-            rotation = float(row.get("rotation", 0.0))
+            rotation = self._display_rotation(row)
             pivot = ui_pivot_point(rect, row.get("constraints"))
             if abs(rotation) >= 0.001:
                 painter.translate(pivot)
                 painter.rotate(rotation)
                 painter.translate(-pivot)
+            is_selected = row["id"] in selected_ids
             if is_selected:
                 painter.setBrush(Qt.BrushStyle.NoBrush)
                 painter.setPen(QPen(QColor("#72A7FF"), 2.0))
                 painter.drawRect(rect)
                 self._paint_clip_indicator(painter, row, rect)
+                self._paint_mask_indicator(painter, row)
             if row["id"] == selected and not row["locked"]:
                 painter.setBrush(QColor("#F4F7FC"))
                 painter.setPen(QPen(QColor("#356FC7"), 1.0))
@@ -942,6 +1269,8 @@ class PainterUIDesignOverlay(QWidget):
                 row,
                 event.position(),
             ):
+                continue
+            if not self._point_visible_in_object_mask(row, event.position()):
                 continue
             rect = self._object_rect(row)
             local_position = self._unrotated_point(

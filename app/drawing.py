@@ -8711,6 +8711,18 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.clip_changed.connect(
             self._update_painter_ui_clip
         )
+        self._paint_ui_inspector.text_range_requested.connect(
+            self._update_painter_ui_text_range
+        )
+        self._paint_ui_inspector.remote_component_requested.connect(
+            self._update_painter_ui_remote_component
+        )
+        self._paint_ui_inspector.boolean_requested.connect(
+            self._update_painter_ui_boolean
+        )
+        self._paint_ui_inspector.section_requested.connect(
+            self._update_painter_ui_section
+        )
         self._paint_ui_inspector.responsive_override_changed.connect(
             self._update_painter_ui_responsive_override
         )
@@ -11509,6 +11521,158 @@ class PaintDialog(QDialog):
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
+
+    def _commit_painter_ui_service_document(
+        self,
+        document: dict,
+        label: str,
+    ) -> None:
+        self._push_undo_state(str(label))
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _update_painter_ui_text_range(
+        self,
+        object_id: str,
+        start: int,
+        end: int,
+        style: object,
+        remove: bool,
+    ) -> None:
+        if remove:
+            from app.painter_ui_text_ranges import remove_ui_text_range_style
+
+            document = remove_ui_text_range_style(
+                self._painter_ui_document,
+                object_id,
+                start,
+                end,
+            )
+            label = "Remove mixed text style"
+        else:
+            if not isinstance(style, dict):
+                return
+            from app.painter_ui_text_ranges import set_ui_text_range_style
+
+            document, _row = set_ui_text_range_style(
+                self._painter_ui_document,
+                object_id,
+                start,
+                end,
+                style,
+            )
+            label = "Set mixed text style"
+        self._commit_painter_ui_service_document(document, label)
+
+    def _update_painter_ui_remote_component(
+        self,
+        object_id: str,
+        operation: str,
+        payload: object,
+    ) -> None:
+        if not isinstance(payload, dict):
+            return
+        if operation == "relink":
+            from app.painter_ui_remote_components import (
+                relink_remote_component,
+            )
+
+            document, _row = relink_remote_component(
+                self._painter_ui_document,
+                object_id,
+                **payload,
+            )
+        elif operation == "localize":
+            from app.painter_ui_remote_components import (
+                localize_remote_component,
+            )
+
+            document, _row = localize_remote_component(
+                self._painter_ui_document,
+                object_id,
+                **payload,
+            )
+        elif operation == "replace":
+            from app.painter_ui_remote_components import (
+                replace_remote_component,
+            )
+
+            document, _row = replace_remote_component(
+                self._painter_ui_document,
+                object_id,
+                **payload,
+            )
+        else:
+            return
+        self._commit_painter_ui_service_document(
+            document,
+            f"{operation.title()} remote UI component",
+        )
+
+    def _update_painter_ui_boolean(
+        self,
+        object_id: str,
+        action: str,
+        payload: object,
+    ) -> None:
+        if action == "release":
+            from app.painter_ui_boolean import release_ui_boolean
+
+            document = release_ui_boolean(
+                self._painter_ui_document,
+                object_id,
+            )
+        elif action == "set" and isinstance(payload, dict):
+            from app.painter_ui_boolean import set_ui_boolean
+
+            document, _row = set_ui_boolean(
+                self._painter_ui_document,
+                object_id,
+                str(payload.get("operation") or "union"),
+                list(payload.get("operand_ids") or []),
+            )
+        else:
+            return
+        self._commit_painter_ui_service_document(
+            document,
+            f"{action.title()} UI Boolean",
+        )
+
+    def _update_painter_ui_section(
+        self,
+        operation: str,
+        section_id: str,
+        payload: object,
+    ) -> None:
+        if operation == "create" and isinstance(payload, dict):
+            from app.painter_ui_sections import create_ui_section
+
+            document, _row = create_ui_section(
+                self._painter_ui_document,
+                payload,
+            )
+        elif operation == "update" and isinstance(payload, dict):
+            from app.painter_ui_sections import update_ui_section
+
+            document, _row = update_ui_section(
+                self._painter_ui_document,
+                section_id,
+                payload,
+            )
+        elif operation == "remove":
+            from app.painter_ui_sections import remove_ui_section
+
+            document = remove_ui_section(
+                self._painter_ui_document,
+                section_id,
+            )
+        else:
+            return
+        self._commit_painter_ui_service_document(
+            document,
+            f"{operation.title()} UI section",
+        )
 
     def _update_painter_ui_responsive_override(
         self,

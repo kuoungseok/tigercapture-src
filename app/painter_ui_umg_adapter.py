@@ -43,6 +43,44 @@ def _umg_kind(kind: str) -> str:
     }.get(kind, "Unsupported")
 
 
+def _umg_disposition(
+    row: Mapping[str, Any],
+    style: Mapping[str, Any],
+    content: Mapping[str, Any],
+    kind: str,
+) -> tuple[str, list[str]]:
+    reasons: list[str] = []
+    if kind == "Unsupported":
+        reasons.append("unsupported_object_kind")
+    mask = dict(row.get("mask") or {})
+    if mask.get("enabled"):
+        reasons.append("painter_ui_mask_requires_umg_material_or_bake")
+    boolean = dict(content.get("boolean") or {})
+    if boolean.get("enabled"):
+        reasons.append("painter_ui_boolean_requires_deterministic_bake")
+    if content.get("text_ranges"):
+        reasons.append("mixed_text_ranges_require_rich_text_conversion")
+    remote = dict(content.get("remote_component") or {})
+    if remote.get("status") == "missing":
+        reasons.append("remote_component_must_be_relinked_or_localized")
+    if len(style.get("fills") or []) > 1:
+        reasons.append("multiple_fills_require_umg_material_or_bake")
+    if len(style.get("strokes") or []) > 1:
+        reasons.append("multiple_strokes_require_umg_material_or_bake")
+    if str(style.get("blend_mode") or "normal") not in {
+        "normal",
+        "pass_through",
+    }:
+        reasons.append("blend_mode_requires_umg_material")
+    corner_radii = dict(style.get("corner_radii") or {})
+    values = {round(float(value), 4) for value in corner_radii.values()}
+    if len(values) > 1:
+        reasons.append("independent_corner_radii_require_umg_material")
+    if str(style.get("stroke_align") or "center") != "center":
+        reasons.append("stroke_alignment_requires_umg_material")
+    return ("Blocked", reasons) if reasons else ("Native", [])
+
+
 def painter_ui_to_umg_document(
     value: Mapping[str, Any],
     *,
@@ -79,7 +117,12 @@ def painter_ui_to_umg_document(
         style = dict(row.get("style") or {})
         content = dict(row.get("content") or {})
         kind = _umg_kind(str(row["kind"]))
-        disposition = "Native" if kind != "Unsupported" else "Blocked"
+        disposition, block_reasons = _umg_disposition(
+            row,
+            style,
+            content,
+            kind,
+        )
         asset_id = ""
         source_path = str(
             content.get("source_path") or content.get("path") or ""
@@ -107,6 +150,13 @@ def painter_ui_to_umg_document(
                 "stroke_width": float(
                     style.get("stroke_width", 0.0) or 0.0
                 ),
+                "fills": list(style.get("fills") or []),
+                "strokes": list(style.get("strokes") or []),
+                "blend_mode": str(style.get("blend_mode") or "normal"),
+                "corner_radii": dict(style.get("corner_radii") or {}),
+                "stroke_align": str(
+                    style.get("stroke_align") or "center"
+                ),
             },
             "text": str(content.get("text") or row["name"]),
             "fill": str(
@@ -124,12 +174,18 @@ def painter_ui_to_umg_document(
             ),
             "token_bindings": dict(row.get("token_bindings") or {}),
             "accessibility": dict(row.get("accessibility") or {}),
+            "mask": dict(row.get("mask") or {}),
+            "boolean": dict(content.get("boolean") or {}),
+            "text_ranges": list(content.get("text_ranges") or []),
+            "remote_component": dict(
+                content.get("remote_component") or {}
+            ),
             "umg_mapping": (
                 "native_or_converted" if disposition == "Native"
                 else "blocked_preflight"
             ),
             "umg_block_reasons": (
-                [] if disposition == "Native" else ["unsupported_object_kind"]
+                block_reasons
             ),
         }
         layers.append(
@@ -219,6 +275,17 @@ def painter_ui_to_umg_document(
             "DocumentId": document["document_id"],
             "ArtboardId": selected_artboard_id,
             "Revision": document["revision"],
+            "Sections": [
+                row
+                for row in document.get("sections", [])
+                if any(
+                    object_id in included_ids
+                    for object_id in row.get("object_ids", [])
+                )
+            ],
+            "Review": dict(
+                document.get("linked_targets", {}).get("review", {})
+            ),
         },
     }
 

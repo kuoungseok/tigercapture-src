@@ -8,6 +8,7 @@ from typing import Any, Mapping
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QComboBox,
+    QCheckBox,
     QDialog,
     QDialogButtonBox,
     QDoubleSpinBox,
@@ -30,6 +31,11 @@ from app.painter_ui_appearance import (
     normalize_ui_effects,
     normalize_ui_gradient,
 )
+from app.painter_ui_advanced_appearance import (
+    UI_OBJECT_BLEND_MODES,
+    normalize_ui_advanced_style,
+    normalize_ui_paint,
+)
 
 
 class PainterUIAppearanceDialog(QDialog):
@@ -44,6 +50,7 @@ class PainterUIAppearanceDialog(QDialog):
         self.setWindowTitle("Appearance")
         self.resize(520, 520)
         self._source_style = copy.deepcopy(dict(style or {}))
+        self._advanced_style = normalize_ui_advanced_style(style)
         self._syncing = False
         self._stop_index = -1
         self._effect_index = -1
@@ -70,6 +77,7 @@ class PainterUIAppearanceDialog(QDialog):
         tabs = QTabWidget()
         tabs.addTab(self._build_gradient_tab(), "Fill Gradient")
         tabs.addTab(self._build_effects_tab(), "Effects")
+        tabs.addTab(self._build_advanced_tab(), "Paints & Geometry")
         root.addWidget(tabs, 1)
         buttons = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save
@@ -80,6 +88,186 @@ class PainterUIAppearanceDialog(QDialog):
         root.addWidget(buttons)
         self._load_gradient()
         self._refresh_effects()
+        self._refresh_advanced()
+
+    def _build_advanced_tab(self) -> QWidget:
+        panel = QWidget()
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setSpacing(6)
+        form = QFormLayout()
+        self.object_blend_combo = QComboBox()
+        for mode in sorted(UI_OBJECT_BLEND_MODES):
+            self.object_blend_combo.addItem(
+                mode.replace("_", " ").title(),
+                mode,
+            )
+        form.addRow("Blend mode", self.object_blend_combo)
+        self.stroke_align_combo = QComboBox()
+        for value in ("inside", "center", "outside"):
+            self.stroke_align_combo.addItem(value.title(), value)
+        form.addRow("Stroke align", self.stroke_align_combo)
+        corner_row = QFrame()
+        corner_layout = QHBoxLayout(corner_row)
+        corner_layout.setContentsMargins(0, 0, 0, 0)
+        corner_layout.setSpacing(3)
+        self.corner_spins: dict[str, QDoubleSpinBox] = {}
+        for prefix, key in (
+            ("TL ", "top_left"),
+            ("TR ", "top_right"),
+            ("BR ", "bottom_right"),
+            ("BL ", "bottom_left"),
+        ):
+            spin = self._metric_spin(prefix, minimum=0.0)
+            self.corner_spins[key] = spin
+            corner_layout.addWidget(spin)
+        form.addRow("Corners", corner_row)
+        layout.addLayout(form)
+
+        stacks = QFrame()
+        stacks_layout = QHBoxLayout(stacks)
+        stacks_layout.setContentsMargins(0, 0, 0, 0)
+        stacks_layout.setSpacing(6)
+        for title, key in (("Fills", "fills"), ("Strokes", "strokes")):
+            column = QFrame()
+            column_layout = QVBoxLayout(column)
+            column_layout.setContentsMargins(0, 0, 0, 0)
+            column_layout.setSpacing(3)
+            column_layout.addWidget(QLabel(title))
+            widget = QListWidget()
+            setattr(self, f"{key}_list", widget)
+            column_layout.addWidget(widget, 1)
+            buttons = QHBoxLayout()
+            for label, callback in (
+                ("+", lambda _checked=False, stack=key: self._add_paint(stack)),
+                ("-", lambda _checked=False, stack=key: self._remove_paint(stack)),
+                ("Up", lambda _checked=False, stack=key: self._move_paint(stack, -1)),
+                ("Down", lambda _checked=False, stack=key: self._move_paint(stack, 1)),
+            ):
+                button = QPushButton(label)
+                button.clicked.connect(callback)
+                buttons.addWidget(button)
+            column_layout.addLayout(buttons)
+            stacks_layout.addWidget(column, 1)
+        layout.addWidget(stacks, 1)
+        self.paint_color_edit = QLineEdit()
+        self.paint_color_edit.setPlaceholderText("#RRGGBBAA")
+        self.paint_color_edit.editingFinished.connect(self._commit_paint_color)
+        self.paint_visible_check = QCheckBox("Visible")
+        self.paint_visible_check.toggled.connect(self._commit_paint_color)
+        paint_row = QFrame()
+        paint_layout = QHBoxLayout(paint_row)
+        paint_layout.setContentsMargins(0, 0, 0, 0)
+        paint_layout.addWidget(self.paint_color_edit, 1)
+        paint_layout.addWidget(self.paint_visible_check)
+        layout.addWidget(paint_row)
+        self.fills_list.currentRowChanged.connect(
+            lambda index: self._paint_selected("fills", index)
+        )
+        self.strokes_list.currentRowChanged.connect(
+            lambda index: self._paint_selected("strokes", index)
+        )
+        self._active_paint_stack = "fills"
+        self._active_paint_index = -1
+        return panel
+
+    def _refresh_advanced(self) -> None:
+        self._syncing = True
+        self.object_blend_combo.setCurrentIndex(
+            max(
+                0,
+                self.object_blend_combo.findData(
+                    self._advanced_style["blend_mode"]
+                ),
+            )
+        )
+        self.stroke_align_combo.setCurrentIndex(
+            max(
+                0,
+                self.stroke_align_combo.findData(
+                    self._advanced_style["stroke_align"]
+                ),
+            )
+        )
+        for key, spin in self.corner_spins.items():
+            spin.setValue(float(self._advanced_style["corner_radii"][key]))
+        for key in ("fills", "strokes"):
+            widget = getattr(self, f"{key}_list")
+            widget.clear()
+            for row in self._advanced_style[key]:
+                label = (
+                    str(row.get("color") or row.get("type") or "Paint")
+                    + ("" if row.get("visible", True) else "  [hidden]")
+                )
+                widget.addItem(label)
+        self._syncing = False
+        if self.fills_list.count():
+            self.fills_list.setCurrentRow(0)
+
+    def _paint_selected(self, stack: str, index: int) -> None:
+        if self._syncing:
+            return
+        self._active_paint_stack = stack
+        self._active_paint_index = index
+        rows = self._advanced_style[stack]
+        self._syncing = True
+        if 0 <= index < len(rows):
+            self.paint_color_edit.setText(str(rows[index].get("color") or ""))
+            self.paint_visible_check.setChecked(
+                bool(rows[index].get("visible", True))
+            )
+        else:
+            self.paint_color_edit.clear()
+            self.paint_visible_check.setChecked(False)
+        self._syncing = False
+
+    def _add_paint(self, stack: str) -> None:
+        stroke = stack == "strokes"
+        self._advanced_style[stack].append(
+            normalize_ui_paint(
+                {
+                    "color": "#FFFFFFFF",
+                    "width": 1.0,
+                    "align": self.stroke_align_combo.currentData() or "center",
+                },
+                stroke=stroke,
+            )
+        )
+        self._refresh_advanced()
+        getattr(self, f"{stack}_list").setCurrentRow(
+            len(self._advanced_style[stack]) - 1
+        )
+
+    def _remove_paint(self, stack: str) -> None:
+        widget = getattr(self, f"{stack}_list")
+        index = widget.currentRow()
+        if 0 <= index < len(self._advanced_style[stack]):
+            self._advanced_style[stack].pop(index)
+            self._refresh_advanced()
+
+    def _move_paint(self, stack: str, delta: int) -> None:
+        widget = getattr(self, f"{stack}_list")
+        index = widget.currentRow()
+        target = max(0, min(len(self._advanced_style[stack]) - 1, index + delta))
+        if not 0 <= index < len(self._advanced_style[stack]) or target == index:
+            return
+        row = self._advanced_style[stack].pop(index)
+        self._advanced_style[stack].insert(target, row)
+        self._refresh_advanced()
+        getattr(self, f"{stack}_list").setCurrentRow(target)
+
+    def _commit_paint_color(self) -> None:
+        if self._syncing:
+            return
+        stack = self._active_paint_stack
+        index = self._active_paint_index
+        if not 0 <= index < len(self._advanced_style[stack]):
+            return
+        row = self._advanced_style[stack][index]
+        row["color"] = self.paint_color_edit.text().strip() or "#FFFFFFFF"
+        row["visible"] = self.paint_visible_check.isChecked()
+        self._refresh_advanced()
+        getattr(self, f"{stack}_list").setCurrentRow(index)
 
     def _build_gradient_tab(self) -> QWidget:
         panel = QWidget()
@@ -547,11 +735,26 @@ class PainterUIAppearanceDialog(QDialog):
                         "width": {"x": 0.5 - dy, "y": 0.5 + dx},
                     }
                 )
-        return merge_ui_appearance_style(
+        result = merge_ui_appearance_style(
             self._source_style,
             gradient=self._gradient,
             effects=self._effects,
         )
+        result["blend_mode"] = str(
+            self.object_blend_combo.currentData() or "normal"
+        )
+        result["stroke_align"] = str(
+            self.stroke_align_combo.currentData() or "center"
+        )
+        result["corner_radii"] = {
+            key: float(spin.value())
+            for key, spin in self.corner_spins.items()
+        }
+        result["fills"] = copy.deepcopy(self._advanced_style["fills"])
+        result["strokes"] = copy.deepcopy(self._advanced_style["strokes"])
+        for row in result["strokes"]:
+            row["align"] = result["stroke_align"]
+        return result
 
 
 def appearance_summary(style: Mapping[str, Any] | None) -> str:
@@ -566,7 +769,18 @@ def appearance_summary(style: Mapping[str, Any] | None) -> str:
     if not effects and isinstance(style.get("shadow"), Mapping):
         effects = [normalize_ui_effect(style["shadow"])]
     suffix = f" · {len(effects)} FX" if effects else ""
-    return gradient_name + suffix
+    advanced = normalize_ui_advanced_style(style)
+    stacks = (
+        f" · {len(advanced['fills'])}F/{len(advanced['strokes'])}S"
+        if "fills" in style or "strokes" in style
+        else ""
+    )
+    blend = (
+        f" · {advanced['blend_mode'].replace('_', ' ').title()}"
+        if advanced["blend_mode"] != "normal"
+        else ""
+    )
+    return gradient_name + suffix + stacks + blend
 
 
 __all__ = ["PainterUIAppearanceDialog", "appearance_summary"]

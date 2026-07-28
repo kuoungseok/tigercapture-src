@@ -8,7 +8,7 @@ from app.painter_ui_auto_layout import normalize_ui_auto_layout
 
 
 UI_DOCUMENT_SCHEMA = "tigerstudio.painter.ui.v1"
-UI_DOCUMENT_VERSION = 12
+UI_DOCUMENT_VERSION = 13
 UI_OBJECT_KINDS = {
     "frame",
     "group",
@@ -18,6 +18,7 @@ UI_OBJECT_KINDS = {
     "path",
     "text",
     "image",
+    "motion_actor",
     "button",
     "progress",
 }
@@ -169,6 +170,7 @@ def create_ui_document(
         "components": [],
         "tokens": [],
         "interactions": [],
+        "sections": [],
         "delivery_profiles": _default_delivery_profiles(),
         "linked_targets": {},
     }
@@ -218,6 +220,27 @@ def _normalize_object(
         normalize_ui_component_role,
         normalize_ui_instance_overrides,
     )
+    from app.painter_ui_advanced_appearance import normalize_ui_advanced_style
+    from app.painter_ui_boolean import normalize_ui_boolean
+    from app.painter_ui_masks import normalize_ui_mask
+    from app.painter_ui_remote_components import normalize_remote_component
+    from app.painter_ui_text_ranges import normalize_ui_text_ranges
+
+    normalized_style = normalize_ui_advanced_style(style)
+    normalized_content = (
+        copy.deepcopy(dict(content)) if isinstance(content, Mapping) else {}
+    )
+    normalized_content["text_ranges"] = normalize_ui_text_ranges(
+        normalized_content.get("text_ranges"),
+        str(normalized_content.get("text") or ""),
+    )
+    normalized_content["boolean"] = normalize_ui_boolean(
+        normalized_content.get("boolean")
+    )
+    if isinstance(normalized_content.get("remote_component"), Mapping):
+        normalized_content["remote_component"] = normalize_remote_component(
+            normalized_content["remote_component"]
+        )
 
     return {
         "id": object_id,
@@ -235,8 +258,9 @@ def _normalize_object(
         "locked": bool(row.get("locked", False)),
         "clip_content": bool(row.get("clip_content", False)),
         "z_index": int(_number(row.get("z_index"), index)),
-        "style": copy.deepcopy(dict(style)) if isinstance(style, Mapping) else {},
-        "content": copy.deepcopy(dict(content)) if isinstance(content, Mapping) else {},
+        "style": normalized_style,
+        "content": normalized_content,
+        "mask": normalize_ui_mask(row.get("mask")),
         "constraints": (
             copy.deepcopy(dict(constraints))
             if isinstance(constraints, Mapping)
@@ -414,6 +438,13 @@ def normalize_ui_document(
         prefix="ui-interaction",
         normalizer=_normalize_interaction,
     )
+    from app.painter_ui_sections import normalize_ui_section
+
+    sections = _normalize_typed_rows(
+        raw.get("sections"),
+        prefix="ui-section",
+        normalizer=normalize_ui_section,
+    )
     selection = raw.get("selection")
     selection = selection if isinstance(selection, Mapping) else {}
     selected_id = str(selection.get("object_id") or "")
@@ -468,6 +499,7 @@ def normalize_ui_document(
         "components": components,
         "tokens": tokens,
         "interactions": interactions,
+        "sections": sections,
         "delivery_profiles": profiles,
         "linked_targets": copy.deepcopy(dict(raw.get("linked_targets") or {})),
     }
@@ -528,6 +560,7 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
     component_ids = [row["id"] for row in document["components"]]
     token_ids = [row["id"] for row in document["tokens"]]
     interaction_ids = [row["id"] for row in document["interactions"]]
+    section_ids = [row["id"] for row in document["sections"]]
     responsive_override_ids = [
         override["id"]
         for row in document["objects"]
@@ -543,6 +576,8 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         errors.append("duplicate_token_id")
     if len(set(interaction_ids)) != len(interaction_ids):
         errors.append("duplicate_interaction_id")
+    if len(set(section_ids)) != len(section_ids):
+        errors.append("duplicate_section_id")
     if len(set(responsive_override_ids)) != len(responsive_override_ids):
         errors.append("duplicate_responsive_override_id")
     all_ids = (
@@ -551,6 +586,7 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         + component_ids
         + token_ids
         + interaction_ids
+        + section_ids
         + responsive_override_ids
     )
     if len(set(all_ids)) != len(all_ids):
@@ -577,6 +613,19 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
             errors.append(f"parent_artboard_mismatch:{row['id']}:{parent_id}")
         if parent_id == row["id"]:
             errors.append(f"self_parent:{row['id']}")
+        mask = row["mask"]
+        for target_id in mask["target_ids"]:
+            target = object_by_id.get(target_id)
+            if target is None:
+                errors.append(f"missing_mask_target:{row['id']}:{target_id}")
+            elif target["artboard_id"] != row["artboard_id"]:
+                errors.append(
+                    f"mask_target_artboard_mismatch:{row['id']}:{target_id}"
+                )
+            elif target["parent_id"] != row["parent_id"]:
+                errors.append(
+                    f"mask_target_parent_mismatch:{row['id']}:{target_id}"
+                )
         component_id = row["component_id"]
         if component_id and component_id not in component_id_set:
             errors.append(f"missing_component:{row['id']}:{component_id}")
@@ -795,7 +844,9 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
                 and state_definition["values"]
                 and state not in state_definition["values"]
             ):
-                errors.append(f"invalid_component_state:{row['id']}:{state}")
+                errors.append(
+                    f"invalid_component_state:{row['id']}:{state}"
+                )
             for source_id in source_rows:
                 source = object_by_id.get(source_id)
                 if (
@@ -813,6 +864,12 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         error_prefix="component_cycle",
         errors=errors,
     )
+    for section in document["sections"]:
+        for object_id in section["object_ids"]:
+            if object_id not in object_by_id:
+                errors.append(
+                    f"missing_section_object:{section['id']}:{object_id}"
+                )
     for row in document["tokens"]:
         if row["kind"] not in UI_TOKEN_KINDS:
             errors.append(f"unsupported_token_kind:{row['id']}:{row['kind']}")
@@ -928,6 +985,32 @@ def _remove_dangling_records(
         if row["component_scope_id"] in removed_components:
             row["component_scope_id"] = ""
             row["component_scope_source_object_id"] = ""
+        mask = dict(row.get("mask") or {})
+        mask["target_ids"] = [
+            object_id
+            for object_id in mask.get("target_ids", [])
+            if object_id not in removed_objects
+        ]
+        row["mask"] = mask
+        content = dict(row.get("content") or {})
+        boolean = dict(content.get("boolean") or {})
+        operands = [
+            object_id
+            for object_id in boolean.get("operand_ids", [])
+            if object_id not in removed_objects
+        ]
+        boolean["operand_ids"] = operands
+        if len(operands) < 2:
+            boolean["enabled"] = False
+        if boolean:
+            content["boolean"] = boolean
+        row["content"] = content
+    for section in document.get("sections", []):
+        section["object_ids"] = [
+            object_id
+            for object_id in section.get("object_ids", [])
+            if object_id not in removed_objects
+        ]
     removed_interactions = {
         row["id"]
         for row in document["interactions"]

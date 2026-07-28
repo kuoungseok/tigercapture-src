@@ -25,6 +25,12 @@ Import 후 보이기만 하거나 JSON에만 남는 기능은 `Data only`이며 
 | Drop/Inner Shadow stack | Inspector `Appearance > Effects` with add/remove/reorder and geometry/blend controls | `paint.ui.appearance.effect.add/update/remove/reorder` |
 | Layer/Background Blur | Inspector `Appearance > Effects` with isolated layer blur, backdrop sampling, radius, and stack order | `paint.ui.appearance.blur.add/update/remove/reorder` |
 | Frame clipping | Frame Inspector `Clip child content`, rounded Canvas clipping and selected-frame boundary indicator | `paint.ui.clip.inspect`, `paint.ui.clip.set` |
+| Masks | Layers `Use as Mask`, invert/outline controls, editable target order, canvas clipping and hit testing | `paint.ui.mask.create/update/remove/reorder/inspect` |
+| Advanced appearance | Appearance blend selector, ordered Fill/Stroke stacks, per-corner radii, Inside/Center/Outside stroke | `paint.ui.appearance.blend.set`, `paint.ui.appearance.paint.*`, `paint.ui.appearance.corner.set`, `paint.ui.appearance.stroke.set` |
+| Mixed text styles | Text-range Inspector controls and range-aware canvas rendering | `paint.ui.text.range.style.inspect/set/remove` |
+| Remote component recovery | Relink, localize, replace controls with explicit missing-library state | `paint.ui.component.remote.inspect/relink/localize/replace` |
+| Boolean vector editing | Union/Subtract/Intersect/Exclude operands with editable canvas result | `paint.ui.vector.boolean.inspect/set/release` |
+| Figma sections and comments | Sections tab and object-anchored Painter Review mapping | `paint.ui.section.inspect/create/update/remove`, `paint.ui.review.*` |
 | Components and Instances | Components library plus Inspector create/instance/Variant/switch/detach controls | `paint.ui.component.*` |
 | Component properties | Typed document contract, instance property editing, nested instance swap | `paint.ui.component.property.*`, `paint.ui.component.instance.property.set` |
 | Tokens and themes | Token library, bind/unbind, Light/Dark/High Contrast preview | `paint.ui.token.*`, `paint.ui.theme.*` |
@@ -34,19 +40,9 @@ Import 후 보이기만 하거나 JSON에만 남는 기능은 `Data only`이며 
 
 ## Required Next
 
-These items are not complete until both the interface and the listed Action
-family exist.
-
-| Priority | Feature | Required interface | Planned Action family |
-| --- | --- | --- | --- |
-| P0 | Masks | Layers mask row, Use as Mask, release mask, invert, outline | `paint.ui.mask.create/update/remove/reorder/inspect` |
-| P1 | Object blend mode | Appearance blend selector with compatibility badge | `paint.ui.appearance.blend.set` |
-| P1 | Multiple fill/stroke paints | Ordered Fill and Stroke stacks with visibility and reorder | `paint.ui.appearance.paint.add/update/remove/reorder` |
-| P1 | Per-corner radius and stroke align | Four-corner radius linkage and Inside/Center/Outside stroke control | `paint.ui.appearance.corner.set`, `paint.ui.appearance.stroke.set` |
-| P1 | Mixed text styles | Text range selection and span style Inspector | `paint.ui.text.range.style.set/remove` |
-| P1 | Remote component recovery | Missing-library panel with relink/localize/replace commands | `paint.ui.component.remote.inspect/relink/localize` |
-| P2 | Boolean vector editing | Union/Subtract/Intersect/Exclude toolbar and editable operands | `paint.ui.vector.boolean.set/release` |
-| P2 | Figma sections and comments | Section Inspector and review-comment mapping | `paint.ui.section.*`, existing `paint.ui.review.*` bridge |
+No item from the 2026-07-28 P0-P2 completion list remains in this section.
+New gaps must satisfy the same interface, Action, persistence, round-trip, and
+Undo/Redo completion rule before moving to Implemented.
 
 ## Implementation Rule
 
