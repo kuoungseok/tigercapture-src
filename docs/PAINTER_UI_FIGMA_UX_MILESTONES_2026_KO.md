@@ -321,6 +321,20 @@ Implemented checkpoint (2026-07-29, inline text editing slice):
 - `paint.ui.text.content.set` uses the same stable object/content contract for
   automation and rejects non-text objects explicitly.
 
+Implemented checkpoint (2026-07-29, multi-selection resize slice):
+
+- Two or more visible, unlocked objects on one artboard use one common
+  selection boundary with four corner handles.
+- Dragging a common handle preserves each object's position and size relative
+  to the original group bounds instead of collapsing objects onto one edge.
+- Shift preserves the common selection aspect ratio and Alt resizes from its
+  center, matching the single-object canvas modifiers.
+- Cross-artboard or locked selections remain visibly selected but do not expose
+  a misleading common resize handle.
+- Canvas resize commits one batch mutation and one Undo step.
+  `paint.ui.property.batch_set` uses the same constraint-aware mutation service
+  for automation.
+
 Exit criteria:
 
 - Common object editing is possible without repeatedly moving to Inspector.

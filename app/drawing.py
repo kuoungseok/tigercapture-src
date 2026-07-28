@@ -14449,32 +14449,18 @@ class PaintDialog(QDialog):
         *,
         label: str = "Transform UI objects",
     ) -> None:
-        from app.painter_ui_document import update_ui_object
-
         if not isinstance(changes_by_id, dict) or not changes_by_id:
             return
         current = getattr(self, "_painter_ui_document", None)
-        original_by_id = {
-            str(row.get("id") or ""): row
-            for row in (current or {}).get("objects", [])
-        }
-        effective: dict[str, dict[str, object]] = {}
-        for raw_object_id, raw_changes in changes_by_id.items():
-            object_id = str(raw_object_id or "")
-            if not isinstance(raw_changes, dict) or object_id not in original_by_id:
-                continue
-            changes = dict(raw_changes)
-            if any(
-                original_by_id[object_id].get(key) != value
-                for key, value in changes.items()
-            ):
-                effective[object_id] = changes
-        if not effective:
+        from app.painter_ui_batch_mutation import apply_ui_object_batch
+
+        updated, changed_ids = apply_ui_object_batch(
+            current,
+            changes_by_id,
+        )
+        if not changed_ids:
             return
         self._push_undo_state(label)
-        updated = current
-        for object_id, changes in effective.items():
-            updated, _row = update_ui_object(updated, object_id, changes)
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()

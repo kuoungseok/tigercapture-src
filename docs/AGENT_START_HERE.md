@@ -90,6 +90,11 @@ Focused entry points:
   Double-clicking an unlocked UI text object opens the canvas inline editor;
   `paint.ui.text.content.set` is its stable-ID Action equivalent and both paths
   preserve one-step Undo semantics.
+  Multi-selection on one artboard uses a common resize boundary and preserves
+  each object's relative geometry; Shift/Alt modifiers and
+  `paint.ui.property.batch_set` share one constraint-aware batch mutation and
+  one-step Undo. Locked or cross-artboard selections intentionally expose no
+  common resize handles.
   As of 2026-07-27 the local M2A-M6 production foundation is implemented:
   `.tstemplate` packages and local library state, review comments/checkpoints,
   revision diff, self-contained prototype, production asset export, shared

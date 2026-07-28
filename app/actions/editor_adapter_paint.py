@@ -1121,6 +1121,33 @@ class PaintAdapterMixin(
         }
         return result
 
+    def paint_ui_property_batch_set(
+        self,
+        *,
+        changes_by_id: dict[str, Any],
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_batch_mutation import apply_ui_object_batch
+
+        document, changed_ids = apply_ui_object_batch(
+            dialog._painter_ui_document,
+            changes_by_id,
+        )
+        if not changed_ids:
+            return {
+                "changed": False,
+                "updated_object_ids": [],
+                "ui_design": dialog.painter_action_state()["ui_design"],
+            }
+        dialog._push_undo_state("Edit UI objects")
+        result = self._paint_ui_commit(
+            dialog,
+            "Edit UI objects",
+            document,
+        )
+        result["updated_object_ids"] = changed_ids
+        return result
+
     def paint_ui_appearance_inspect(
         self,
         *,

@@ -87,6 +87,10 @@ class PainterUIDesignOverlay(QWidget):
         self._preview_rect = QRectF()
         self._drag_offset = QPointF()
         self._move_original_positions: dict[str, tuple[float, float]] = {}
+        self._resize_original_geometries: dict[
+            str,
+            tuple[float, float, float, float],
+        ] = {}
         self._original_rotation = 0.0
         self._rotation_start_angle = 0.0
         self._snap_enabled = False
@@ -1006,13 +1010,17 @@ class PainterUIDesignOverlay(QWidget):
         original = QRectF(self._original_rect)
         center_based = bool(modifiers & Qt.KeyboardModifier.AltModifier)
         force_ratio = bool(modifiers & Qt.KeyboardModifier.ShiftModifier)
-        row = next(
-            (
-                item
-                for item in self._document["objects"]
-                if item["id"] == self._active_object_id
-            ),
-            None,
+        row = (
+            None
+            if self._interaction == "resize_multi"
+            else next(
+                (
+                    item
+                    for item in self._document["objects"]
+                    if item["id"] == self._active_object_id
+                ),
+                None,
+            )
         )
         constraints = row.get("constraints") if row is not None else None
         if center_based:
@@ -1057,6 +1065,35 @@ class PainterUIDesignOverlay(QWidget):
             (row for row in self._document["objects"] if row["id"] == selected),
             None,
         )
+
+    def _selected_rows(self) -> list[dict[str, Any]]:
+        selected_ids = set(self._document["selection"]["object_ids"])
+        return [
+            row
+            for row in self._document["objects"]
+            if row["id"] in selected_ids and row["visible"]
+        ]
+
+    def _multi_transform_rows(self) -> list[dict[str, Any]]:
+        rows = self._selected_rows()
+        if (
+            len(rows) < 2
+            or any(bool(row["locked"]) for row in rows)
+            or len({str(row["artboard_id"]) for row in rows}) != 1
+        ):
+            return []
+        return rows
+
+    def _selection_bounds(
+        self,
+        rows: list[Mapping[str, Any]] | None = None,
+    ) -> QRectF:
+        targets = list(rows if rows is not None else self._selected_rows())
+        bounds = QRectF()
+        for row in targets:
+            rect = self._object_rect(row)
+            bounds = rect if bounds.isNull() else bounds.united(rect)
+        return bounds
 
     def _visible_objects(self, *, reverse: bool = False) -> list[dict[str, Any]]:
         boolean_operands = self._boolean_operand_ids()
@@ -1650,6 +1687,13 @@ class PainterUIDesignOverlay(QWidget):
                 painter.restore()
         selected = self._document["selection"]["object_id"]
         selected_ids = set(self._document["selection"]["object_ids"])
+        selected_rows = self._selected_rows()
+        multi_rows = self._multi_transform_rows()
+        multi_bounds = (
+            self._selection_bounds(selected_rows)
+            if len(selected_rows) > 1
+            else QRectF()
+        )
         for row in self._visible_objects():
             if not self._row_in_edit_scope(row):
                 continue
@@ -1671,7 +1715,11 @@ class PainterUIDesignOverlay(QWidget):
                 painter.drawRect(rect)
                 self._paint_clip_indicator(painter, row, rect)
                 self._paint_mask_indicator(painter, row)
-            if row["id"] == selected and not row["locked"]:
+            if (
+                len(selected_ids) == 1
+                and row["id"] == selected
+                and not row["locked"]
+            ):
                 painter.setBrush(QColor("#F4F7FC"))
                 painter.setPen(QPen(QColor("#356FC7"), 1.0))
                 for handle in self._handle_rects(rect).values():
@@ -1688,6 +1736,17 @@ class PainterUIDesignOverlay(QWidget):
                 painter.drawEllipse(rotate_handle)
                 painter.setBrush(QColor("#72A7FF"))
                 painter.drawEllipse(pivot, 3.0, 3.0)
+            painter.restore()
+        if not multi_bounds.isNull():
+            painter.save()
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.setPen(QPen(QColor("#72A7FF"), 2.0))
+            painter.drawRect(multi_bounds)
+            if multi_rows:
+                painter.setBrush(QColor("#F4F7FC"))
+                painter.setPen(QPen(QColor("#356FC7"), 1.0))
+                for handle in self._handle_rects(multi_bounds).values():
+                    painter.drawRect(handle)
             painter.restore()
 
         if self._interaction == "create" and not self._preview_rect.isNull():
@@ -1820,6 +1879,32 @@ class PainterUIDesignOverlay(QWidget):
                         float(artboard["y"]),
                     )
                     self.setCursor(Qt.CursorShape.SizeAllCursor)
+                    event.accept()
+                    return
+
+        multi_rows = self._multi_transform_rows()
+        multi_bounds = self._selection_bounds(multi_rows)
+        if not multi_bounds.isNull():
+            for name in _HANDLE_NAMES:
+                if self._handle_rects(multi_bounds)[name].contains(
+                    event.position()
+                ):
+                    self._interaction = "resize_multi"
+                    self._active_object_id = str(
+                        self._document["selection"]["object_id"]
+                        or multi_rows[0]["id"]
+                    )
+                    self._active_handle = name
+                    self._original_rect = QRectF(multi_bounds)
+                    self._resize_original_geometries = {
+                        str(row["id"]): (
+                            float(row["x"]),
+                            float(row["y"]),
+                            float(row["width"]),
+                            float(row["height"]),
+                        )
+                        for row in multi_rows
+                    }
                     event.accept()
                     return
 
@@ -2117,6 +2202,54 @@ class PainterUIDesignOverlay(QWidget):
                 self.update()
             event.accept()
             return
+        if self._interaction == "resize_multi":
+            rect = self._resize_rect(
+                QPointF(event.position()),
+                event.modifiers(),
+            )
+            if rect.width() >= 8.0 and rect.height() >= 8.0:
+                viewport, scale = self._artboard_viewport()
+                original = self._original_rect
+                old_x = (
+                    original.x() - viewport.x()
+                ) / max(0.0001, scale)
+                old_y = (
+                    original.y() - viewport.y()
+                ) / max(0.0001, scale)
+                old_width = original.width() / max(0.0001, scale)
+                old_height = original.height() / max(0.0001, scale)
+                new_x = (
+                    rect.x() - viewport.x()
+                ) / max(0.0001, scale)
+                new_y = (
+                    rect.y() - viewport.y()
+                ) / max(0.0001, scale)
+                new_width = rect.width() / max(0.0001, scale)
+                new_height = rect.height() / max(0.0001, scale)
+                scale_x = new_width / max(0.0001, old_width)
+                scale_y = new_height / max(0.0001, old_height)
+                by_id = {
+                    str(row["id"]): row
+                    for row in self._document["objects"]
+                }
+                for object_id, geometry in (
+                    self._resize_original_geometries.items()
+                ):
+                    row = by_id.get(object_id)
+                    if row is None:
+                        continue
+                    x, y, width, height = geometry
+                    row["x"] = self._snap(
+                        new_x + (x - old_x) * scale_x
+                    )
+                    row["y"] = self._snap(
+                        new_y + (y - old_y) * scale_y
+                    )
+                    row["width"] = max(1.0, self._snap(width * scale_x))
+                    row["height"] = max(1.0, self._snap(height * scale_y))
+                self.update()
+            event.accept()
+            return
         if self._interaction == "rotate":
             row = next(
                 row
@@ -2271,6 +2404,20 @@ class PainterUIDesignOverlay(QWidget):
                 float(artboard["x"]),
                 float(artboard["y"]),
             )
+        elif interaction == "resize_multi":
+            self.objects_changes_requested.emit(
+                {
+                    object_id: {
+                        "x": float(row["x"]),
+                        "y": float(row["y"]),
+                        "width": float(row["width"]),
+                        "height": float(row["height"]),
+                    }
+                    for object_id in self._resize_original_geometries
+                    for row in self._document["objects"]
+                    if row["id"] == object_id
+                }
+            )
         elif interaction in {"move", "resize", "rotate"} and object_id:
             row = next(
                 (row for row in self._document["objects"] if row["id"] == object_id),
@@ -2307,6 +2454,7 @@ class PainterUIDesignOverlay(QWidget):
         if self._tool == "select":
             self.setCursor(Qt.CursorShape.ArrowCursor)
         self._move_original_positions = {}
+        self._resize_original_geometries = {}
         event.accept()
 
     def mouseDoubleClickEvent(self, event) -> None:

@@ -456,6 +456,18 @@ def main() -> int:
         == ("design", "inspect")
         and dialog._paint_ui_inspector.artboard_bar.isHidden()
     )
+    multi_rows = dialog._painter_ui_overlay._multi_transform_rows()
+    multi_bounds = dialog._painter_ui_overlay._selection_bounds(
+        multi_rows
+    )
+    multi_resize_ok = bool(
+        len(multi_rows) == 2
+        and not multi_bounds.isNull()
+        and len(
+            dialog._painter_ui_overlay._handle_rects(multi_bounds)
+        )
+        == 4
+    )
     multi_inspector_screenshot_path = (
         output_dir / "painter_ui_designer_m1_multi_inspector.png"
     )
@@ -592,6 +604,7 @@ def main() -> int:
             and inline_text_ok
             and image_context_ok
             and multi_context_ok
+            and multi_resize_ok
             and adaptive_context_ok
             and quick_properties_ok
             and zoom_popover_ok
@@ -640,6 +653,7 @@ def main() -> int:
             "adaptive": adaptive_context_ok,
         },
         "inline_text_ok": inline_text_ok,
+        "multi_resize_ok": multi_resize_ok,
         "guide_state": guide_state,
         "workspace": state["workspace"],
         "ui_design": state["ui_design"],

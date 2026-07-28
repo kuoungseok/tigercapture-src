@@ -385,6 +385,9 @@ Canvas:
 
 표시:
 
+- 하나의 공통 selection bounds와 corner resize handle
+- 공통 bounds 기준의 객체별 위치/크기 비례 변환
+- `Shift` 비율 잠금, `Alt` 중심 기준 resize
 - mixed value 표시 `—`
 - Align / Distribute
 - Tidy Up / gap
@@ -394,6 +397,10 @@ Canvas:
 - select matching
 
 서로 호환되지 않는 속성은 숨기고 비활성 필드를 줄 세우지 않는다.
+잠긴 객체가 포함되거나 서로 다른 Artboard의 객체가 섞인 선택은 공통 경계만
+보여주고 resize handle을 노출하지 않는다. 다중 resize는 객체별 변경을 하나의
+batch mutation과 Undo로 커밋하며 UI와 `paint.ui.property.batch_set` Action이
+같은 constraint 갱신 서비스를 사용한다.
 
 ## 6. Prototype UI
 

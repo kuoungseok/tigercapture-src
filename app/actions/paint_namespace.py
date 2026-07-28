@@ -717,6 +717,19 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a UI text object's content would be updated",
     )
     registry.register_adapter_action(
+        "paint.ui.property.batch_set",
+        "Apply one undoable property mutation to multiple Painter UI objects.",
+        "paint",
+        "paint_ui_property_batch_set",
+        params_schema=schema_object(
+            {"changes_by_id": any_object},
+            required=("changes_by_id",),
+        ),
+        required=("changes_by_id",),
+        undo_label="Edit UI objects",
+        dry_summary="multiple UI object properties would be updated",
+    )
+    registry.register_adapter_action(
         "paint.ui.appearance.inspect",
         "Read the editable fill gradient and ordered effect stack for one UI object.",
         "paint",
