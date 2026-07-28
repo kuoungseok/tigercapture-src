@@ -77,15 +77,26 @@ class MotionStyleDirectorAdapterMixin:
         references: list[Mapping[str, Any]] | None = None,
         layer_ids: list[str] | None = None,
         seed: int = 20260729,
+        provider: str = "",
     ) -> dict[str, Any]:
         composition = self._motion_store()[composition_id]
-        return plan_style_direction(
+        plan = plan_style_direction(
             composition,
             prompt,
             references or (),
             layer_ids=layer_ids or (),
             seed=seed,
         )
+        from app.motion_designer.semantic_style_direction import (
+            generate_semantic_style_direction,
+        )
+
+        plan["semantic_direction"] = generate_semantic_style_direction(
+            composition,
+            plan,
+            provider_id=provider or None,
+        )
+        return plan
 
     def motion_ai_style_candidates_generate(
         self,
@@ -95,6 +106,7 @@ class MotionStyleDirectorAdapterMixin:
         references: list[Mapping[str, Any]] | None = None,
         layer_ids: list[str] | None = None,
         seed: int = 20260729,
+        provider: str = "",
     ) -> dict[str, Any]:
         plan = self.motion_ai_style_plan(
             composition_id=composition_id,
@@ -102,6 +114,7 @@ class MotionStyleDirectorAdapterMixin:
             references=references,
             layer_ids=layer_ids,
             seed=seed,
+            provider=provider,
         )
         return {
             "plan": plan,

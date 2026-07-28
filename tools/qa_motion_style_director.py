@@ -25,6 +25,9 @@ from app.motion_designer.schema import (  # noqa: E402
     MotionLayer,
     SourceRef,
 )
+from app.motion_designer.semantic_style_direction import (  # noqa: E402
+    generate_semantic_style_direction,
+)
 from app.motion_designer.style_director import (  # noqa: E402
     apply_story_direction,
     apply_style_candidate,
@@ -152,6 +155,11 @@ def run(output_dir: Path) -> dict:
         },
         seed=20260729,
     )
+    plan["semantic_direction"] = generate_semantic_style_direction(
+        source,
+        plan,
+        provider_id="rule_based",
+    )
     renderer = MotionExportRenderer(cache_capacity=2)
     frames = []
     reports = []
@@ -193,6 +201,7 @@ def run(output_dir: Path) -> dict:
                 for row in reports
             )
             and story_report["beat_count"] == 8
+            and plan["semantic_direction"]["recommended_style_id"] == "craft"
         ),
         "contract": "tigerstudio.motion.ai_style_plan.v1",
         "candidate_count": len(reports),
@@ -205,6 +214,7 @@ def run(output_dir: Path) -> dict:
         "story_beat_count": len(
             story_result.metadata["story_direction"]["beats"],
         ),
+        "semantic_direction": plan["semantic_direction"],
         "preflight": trend_preflight(source, plan),
         "candidates": reports,
     }

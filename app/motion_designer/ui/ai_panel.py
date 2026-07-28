@@ -363,6 +363,7 @@ class MotionAIPanel(QWidget):
             "prompt": self.prompt.toPlainText().strip(),
             "references": self.reference_dicts(),
             "seed": 20260729,
+            "provider": "",
         })
 
     def request_platform_copy(self) -> None:
@@ -501,6 +502,20 @@ class MotionAIPanel(QWidget):
         if len(candidates) != 5:
             self.set_error("Style Director requires five review candidates.")
             return
+        direction = dict(plan.get("semantic_direction") or {})
+        ranking = [
+            str(value)
+            for value in direction.get("ranking", [])
+            if str(value)
+        ]
+        if ranking:
+            order = {style_id: index for index, style_id in enumerate(ranking)}
+            candidates.sort(
+                key=lambda row: order.get(
+                    str(row.get("style_id") or ""),
+                    len(order),
+                )
+            )
         previews = {
             str(row.get("candidate_id") or ""): dict(row)
             for row in payload.get("previews", [])
@@ -514,8 +529,15 @@ class MotionAIPanel(QWidget):
         self.candidate_selector.clear()
         for index, candidate in enumerate(candidates):
             title = str(candidate.get("title") or f"Style {index + 1}")
-            self.candidate_selector.addItem(title, index)
-            item = QListWidgetItem(title)
+            recommended = (
+                str(candidate.get("style_id") or "")
+                == str(direction.get("recommended_style_id") or "")
+            )
+            display_title = (
+                f"{title} (Recommended)" if recommended else title
+            )
+            self.candidate_selector.addItem(display_title, index)
+            item = QListWidgetItem(display_title)
             item.setTextAlignment(Qt.AlignHCenter)
             item.setData(Qt.UserRole, index)
             preview = previews.get(str(candidate.get("id") or ""), {})
@@ -538,6 +560,7 @@ class MotionAIPanel(QWidget):
 
     def _display_style_candidate(self, candidate: dict) -> None:
         plan = self._style_plan or {}
+        direction = dict(plan.get("semantic_direction") or {})
         backend = dict(plan.get("backend") or {})
         cost = dict(backend.get("estimated_cost") or {})
         lines = [
@@ -557,6 +580,28 @@ class MotionAIPanel(QWidget):
             f"Estimated cost: {float(cost.get('amount', 0.0)):.2f} {cost.get('currency', 'USD')}",
         ]
         warnings = [str(item) for item in candidate.get("warnings", [])]
+        if (
+            str(candidate.get("style_id") or "")
+            == str(direction.get("recommended_style_id") or "")
+        ):
+            guidance = dict(direction.get("story_guidance") or {})
+            lines.extend([
+                "",
+                "AI recommendation:",
+                f"- {direction.get('rationale', '')}",
+                f"- Hook: {guidance.get('hook', '')}",
+                f"- Pace: {guidance.get('pace', '')}",
+                f"- Payoff: {guidance.get('payoff', '')}",
+            ])
+            provider = dict(direction.get("provider") or {})
+            if provider.get("fallback_used"):
+                warnings.insert(
+                    0,
+                    str(
+                        provider.get("reason")
+                        or "Semantic direction used the deterministic fallback."
+                    ),
+                )
         if backend.get("fallback_used"):
             warnings.insert(0, str(backend.get("fallback_reason") or "Provider fallback"))
         if warnings:

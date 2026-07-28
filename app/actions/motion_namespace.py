@@ -2919,6 +2919,7 @@ def register_motion_actions(registry: Any) -> None:
         "references": {"type": "array", "items": {"type": "object"}},
         "layer_ids": {"type": "array", "items": {"type": "string"}},
         "seed": {"type": "integer", "minimum": 0},
+        "provider": {"type": "string"},
     }
     registry.register_adapter_action(
         "motion.ai.style.plan",

@@ -495,6 +495,9 @@ def apply_style_candidate(
         "prompt": str(normalized.get("prompt") or ""),
         "references": deepcopy(normalized.get("references") or []),
         "backend": deepcopy(normalized.get("backend") or {}),
+        "semantic_direction": deepcopy(
+            normalized.get("semantic_direction") or {}
+        ),
         "provenance": "generated",
     }
     result.revision += 1
@@ -596,6 +599,23 @@ def trend_preflight(
         except (KeyError, TypeError, ValueError) as exc:
             issues.append({"code": "invalid_style_plan", "message": str(exc)})
             normalized = {}
+        semantic = normalized.get("semantic_direction")
+        if isinstance(semantic, Mapping):
+            try:
+                from .semantic_style_direction import (
+                    validate_semantic_style_direction,
+                )
+
+                validate_semantic_style_direction(
+                    semantic,
+                    composition=composition,
+                    style_plan=normalized,
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                issues.append({
+                    "code": "invalid_semantic_style_direction",
+                    "message": str(exc),
+                })
         backend = dict(normalized.get("backend") or {})
         capabilities = dict(backend.get("capabilities") or {})
         if not capabilities.get("glass_gpu_realtime", False):
@@ -640,6 +660,12 @@ def trend_preflight(
             "issue_count": len(issues),
             "warning_count": len(warnings),
             "candidate_count": len(normalized.get("candidates") or []),
+            "recommended_style_id": str(
+                dict(normalized.get("semantic_direction") or {}).get(
+                    "recommended_style_id"
+                )
+                or ""
+            ),
         },
     }
 

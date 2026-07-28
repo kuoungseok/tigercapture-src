@@ -782,6 +782,8 @@ def test_motion_ai_style_director_actions_plan_review_apply_and_preflight() -> N
     })
     assert planned.ok
     plan = planned.result["plan"]
+    assert plan["semantic_direction"]["recommended_style_id"] == "craft"
+    assert plan["semantic_direction"]["review_required"] is True
     assert {row["style_id"] for row in planned.result["candidates"]} == {
         "clean", "craft", "collage", "glass", "stop_motion",
     }
@@ -799,6 +801,12 @@ def test_motion_ai_style_director_actions_plan_review_apply_and_preflight() -> N
     assert any(
         effect.metadata.get("style_director")
         for effect in owner._motion_compositions[composition_id].layers[0].effects
+    )
+    assert (
+        owner._motion_compositions[composition_id]
+        .metadata["ai_style_director"]["semantic_direction"]
+        ["recommended_style_id"]
+        == "craft"
     )
 
     current = owner._motion_compositions[composition_id]

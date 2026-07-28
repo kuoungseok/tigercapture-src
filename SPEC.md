@@ -6737,6 +6737,15 @@ AI Script Edit MVP integration:
   Craft, Collage, Glass, and Stop Motion. The shared Claude provider context
   may inform planning when available, while the v1 style compiler remains a
   deterministic local path that can run without AI.
+- `tigerstudio.motion.ai_semantic_style_direction.v1` adds provider-backed
+  candidate recommendation without granting mutation access. It may return
+  only one recommended style, a complete ranking of the existing five style
+  IDs, concise per-candidate notes, and Hook/Pace/Payoff guidance. Validation
+  rejects unknown, missing, or duplicate candidates and stale revisions.
+  Provider failure is disclosed and falls back to deterministic prompt-intent
+  ranking. The AI workspace places the recommendation first, labels it, shows
+  its rationale and story guidance, and records the reviewed direction with
+  the applied style provenance.
 - The Motion AI workspace applies every candidate to a cloned composition and
   renders a real 384x216 preview through `MotionExportRenderer`. It displays
   operations, preserved data, backend, cost, and warnings before the user can

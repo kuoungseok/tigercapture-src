@@ -158,6 +158,15 @@ class MotionAIStylePreviewWorker(QObject):
                 layer_ids=self._request.get("layer_ids") or (),
                 seed=int(self._request.get("seed", 20260729)),
             )
+            from app.motion_designer.semantic_style_direction import (
+                generate_semantic_style_direction,
+            )
+
+            plan["semantic_direction"] = generate_semantic_style_direction(
+                self._composition,
+                plan,
+                provider_id=str(self._request.get("provider") or "") or None,
+            )
             directory = self._cache_root / str(plan["id"])
             directory.mkdir(parents=True, exist_ok=True)
             renderer = MotionExportRenderer(cache_capacity=2)

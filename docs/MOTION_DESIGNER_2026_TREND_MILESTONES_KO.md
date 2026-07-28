@@ -660,6 +660,12 @@ Action/MCP:
   Style Director가 생성한 데이터만 다음 후보에서 정리한다.
 - `tigerstudio.motion.ai_story_plan.v1`은 Hook부터 CTA까지 8개 beat의 안정 ID를
   계획하고 승인 후 기존 story 데이터 계약으로 적용한다.
+- `tigerstudio.motion.ai_semantic_style_direction.v1`은 기존 5개 후보 안에서만
+  추천 style, 전체 순위, 후보별 짧은 이유, Hook/Pace/Payoff 지침을
+  provider에 요청한다. 후보 추가·삭제·중복과 stale revision은 거부하고
+  실패 시 fallback을 공개한 결정적 prompt-intent 순위를 사용한다.
+  AI Workspace는 추천 후보를 첫 번째로 표시하고 승인 결과 metadata에
+  추천과 provider provenance를 보존한다.
 - `tigerstudio.motion.ai_platform_copy_plan.v1`은 16:9, 9:16, 1:1별
   Hook/Headline/Subtitle/Body/CTA 글자 제한과 현재 story audience/message를
   shared AI provider 경계에 전달한다. provider는 안정 target ID, 역할,
