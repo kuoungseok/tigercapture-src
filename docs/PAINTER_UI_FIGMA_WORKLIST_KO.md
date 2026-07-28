@@ -83,6 +83,10 @@ P1 implementation checkpoint (2026-07-26, navigation slice):
   Auto Layout container expose Flow/Absolute positioning. These controls reuse
   the normalized object `layout`, Undo, persistence, Inspector, and
   `paint.ui.layout.set` paths rather than creating canvas-only state.
+- Inspector sizing now uses compact per-axis Fixed/Hug/Fill segments and shows
+  selection-local layout diagnostics with recovery guidance. Automation reads
+  and resets the same normalized property through
+  `paint.ui.property.inspect/reset`.
 - Artboard title dragging moves frames in document space and persists the new
   position through the same undoable artboard mutation service.
 - Inspector presets add iPhone, Android, desktop, console, and broadcast

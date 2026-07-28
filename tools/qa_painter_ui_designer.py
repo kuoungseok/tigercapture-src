@@ -289,6 +289,72 @@ def main() -> int:
     )
     dialog.grab().save(str(auto_layout_screenshot_path), "PNG")
     registry.execute(
+        "paint.ui.object.update",
+        {
+            "object_id": group_id,
+            "changes": {"width": 400},
+        },
+    )
+    registry.execute(
+        "paint.ui.selection.set",
+        {
+            "object_ids": [group_id],
+            "primary_object_id": group_id,
+        },
+    )
+    registry.execute(
+        "paint.ui.inspector.presentation",
+        {"mode": "pinned"},
+    )
+    select_inspector_tab("Design")
+    app.processEvents()
+    property_report = registry.execute(
+        "paint.ui.property.inspect",
+        {
+            "object_id": group_id,
+            "property_path": "layout.width_sizing",
+        },
+    ).to_dict()
+    property_contract_ok = (
+        property_report.get("ok") is True
+        and property_report["result"]["value"] == "fixed"
+        and any(
+            row["code"] == "auto_layout_fixed_overflow"
+            for row in property_report["result"]["diagnostics"]
+        )
+        and dialog._paint_ui_inspector.auto_layout_width_sizing_control.value()
+        == "fixed"
+        and "layout warning"
+        in dialog._paint_ui_inspector.auto_layout_status_label.text()
+    )
+    sizing_screenshot_path = (
+        output_dir / "painter_ui_designer_m2_sizing_diagnostics.png"
+    )
+    dialog.grab().save(str(sizing_screenshot_path), "PNG")
+    property_reset = registry.execute(
+        "paint.ui.property.reset",
+        {
+            "object_id": group_id,
+            "property_path": "layout.gap",
+        },
+    ).to_dict()
+    property_contract_ok = (
+        property_contract_ok
+        and property_reset.get("ok") is True
+        and property_reset["result"]["property"]["value"] == 0.0
+    )
+    registry.execute(
+        "paint.ui.object.update",
+        {
+            "object_id": group_id,
+            "changes": {"width": 1060},
+        },
+    )
+    registry.execute(
+        "paint.ui.layout.set",
+        {"object_id": group_id, "mode": "horizontal", "gap": 24},
+    )
+    registry.execute(
         "paint.ui.object.reparent",
         {
             "object_ids": [desktop_object_ids[1]],
@@ -667,6 +733,7 @@ def main() -> int:
             and inspect_screenshot_path.is_file()
             and desktop_screenshot_path.is_file()
             and auto_layout_screenshot_path.is_file()
+            and sizing_screenshot_path.is_file()
             and hierarchy_screenshot_path.is_file()
             and breadcrumb_screenshot_path.is_file()
             and scope_screenshot_path.is_file()
@@ -683,6 +750,7 @@ def main() -> int:
             and detached_round_trip
             and flexible_workspace_ok
             and auto_layout_ok
+            and property_contract_ok
             and text_context_ok
             and inline_text_ok
             and image_context_ok
@@ -705,6 +773,7 @@ def main() -> int:
         "inspect_screenshot": str(inspect_screenshot_path),
         "desktop_screenshot": str(desktop_screenshot_path),
         "auto_layout_screenshot": str(auto_layout_screenshot_path),
+        "sizing_diagnostics_screenshot": str(sizing_screenshot_path),
         "hierarchy_screenshot": str(hierarchy_screenshot_path),
         "breadcrumb_screenshot": str(breadcrumb_screenshot_path),
         "group_scope_screenshot": str(scope_screenshot_path),
@@ -729,6 +798,7 @@ def main() -> int:
         "inspector_detached_round_trip": detached_round_trip,
         "flexible_workspace_ok": flexible_workspace_ok,
         "auto_layout_canvas_ok": auto_layout_ok,
+        "property_contract_ok": property_contract_ok,
         "quick_properties_ok": quick_properties_ok,
         "zoom_popover_ok": zoom_popover_ok,
         "compact_zoom_ok": compact_zoom_ok,

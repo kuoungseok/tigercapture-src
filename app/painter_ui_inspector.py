@@ -40,6 +40,7 @@ from app.painter_ui_auto_layout import normalize_ui_auto_layout
 from app.painter_ui_document import normalize_ui_document
 from app.icons import app_icon, icon_size
 from app.painter_i18n import painter_text
+from app.painter_ui_sizing_control import PainterUISizingControl
 
 
 class PainterUILayerList(QListWidget):
@@ -1026,27 +1027,69 @@ class PainterUIInspector(QWidget):
         )
         form.addRow("Auto Layout", self.auto_layout_mode_combo)
         auto_sizing = QFrame()
-        auto_sizing_layout = QHBoxLayout(auto_sizing)
+        auto_sizing_layout = QVBoxLayout(auto_sizing)
         auto_sizing_layout.setContentsMargins(0, 0, 0, 0)
         auto_sizing_layout.setSpacing(3)
-        self.auto_layout_width_sizing_combo = QComboBox()
-        self.auto_layout_height_sizing_combo = QComboBox()
-        for prefix, combo in (
-            ("W ", self.auto_layout_width_sizing_combo),
-            ("H ", self.auto_layout_height_sizing_combo),
+        self.auto_layout_width_sizing_combo = QComboBox(auto_sizing)
+        self.auto_layout_height_sizing_combo = QComboBox(auto_sizing)
+        for combo in (
+            self.auto_layout_width_sizing_combo,
+            self.auto_layout_height_sizing_combo,
         ):
             for label, sizing in (
                 ("Fixed", "fixed"),
                 ("Hug", "hug"),
                 ("Fill", "fill"),
             ):
-                combo.addItem(prefix + label, sizing)
+                combo.addItem(label, sizing)
             combo.currentIndexChanged.connect(self._emit_properties)
-            auto_sizing_layout.addWidget(combo)
+            combo.hide()
+        self.auto_layout_width_sizing_control = PainterUISizingControl(
+            "W",
+            auto_sizing,
+        )
+        self.auto_layout_height_sizing_control = PainterUISizingControl(
+            "H",
+            auto_sizing,
+        )
+        self.auto_layout_width_sizing_control.value_changed.connect(
+            lambda value: self._set_auto_layout_sizing(
+                self.auto_layout_width_sizing_combo,
+                value,
+            )
+        )
+        self.auto_layout_height_sizing_control.value_changed.connect(
+            lambda value: self._set_auto_layout_sizing(
+                self.auto_layout_height_sizing_combo,
+                value,
+            )
+        )
+        self.auto_layout_width_sizing_combo.currentIndexChanged.connect(
+            lambda _index: self.auto_layout_width_sizing_control.set_value(
+                str(
+                    self.auto_layout_width_sizing_combo.currentData()
+                    or "fixed"
+                )
+            )
+        )
+        self.auto_layout_height_sizing_combo.currentIndexChanged.connect(
+            lambda _index: self.auto_layout_height_sizing_control.set_value(
+                str(
+                    self.auto_layout_height_sizing_combo.currentData()
+                    or "fixed"
+                )
+            )
+        )
+        auto_sizing_layout.addWidget(self.auto_layout_width_sizing_control)
+        auto_sizing_layout.addWidget(self.auto_layout_height_sizing_control)
         self.auto_layout_wrap_check = QCheckBox("Wrap")
         self.auto_layout_wrap_check.toggled.connect(self._emit_properties)
         auto_sizing_layout.addWidget(self.auto_layout_wrap_check)
         form.addRow("Sizing", auto_sizing)
+        self.auto_layout_status_label = QLabel("Layout ready")
+        self.auto_layout_status_label.setObjectName("PaintMuted")
+        self.auto_layout_status_label.setWordWrap(True)
+        form.addRow("", self.auto_layout_status_label)
         auto_padding = QFrame()
         auto_padding_layout = QHBoxLayout(auto_padding)
         auto_padding_layout.setContentsMargins(0, 0, 0, 0)
@@ -2088,6 +2131,8 @@ class PainterUIInspector(QWidget):
             self.accessibility_label_edit.clear()
             self.focus_order_spin.setValue(0)
             self.component_status_label.setText("Not a component")
+            self.auto_layout_status_label.setText("Select an object")
+            self.auto_layout_status_label.setToolTip("")
             self.component_state_combo.setCurrentIndex(0)
             self.component_variant_combo.clear()
             for target, label in self.delivery_status_labels.items():
@@ -2295,6 +2340,7 @@ class PainterUIInspector(QWidget):
         )
         self.auto_layout_wrap_check.setChecked(bool(layout["wrap"]))
         self._sync_auto_layout_control_states()
+        self._sync_object_layout_status(base_row)
         accessibility = row["accessibility"]
         role_index = self.accessibility_role_combo.findData(
             accessibility["role"]
@@ -3390,6 +3436,8 @@ class PainterUIInspector(QWidget):
         self.auto_layout_mode_combo.setEnabled(is_container)
         self.auto_layout_width_sizing_combo.setEnabled(row is not None)
         self.auto_layout_height_sizing_combo.setEnabled(row is not None)
+        self.auto_layout_width_sizing_control.setEnabled(row is not None)
+        self.auto_layout_height_sizing_control.setEnabled(row is not None)
         self.auto_layout_wrap_check.setEnabled(active)
         for widget in (
             self.auto_layout_gap_spin,
@@ -3402,6 +3450,71 @@ class PainterUIInspector(QWidget):
         self.auto_layout_positioning_combo.setEnabled(
             row is not None and bool(row.get("parent_id"))
         )
+
+    def _set_auto_layout_sizing(
+        self,
+        combo: QComboBox,
+        value: str,
+    ) -> None:
+        index = combo.findData(str(value))
+        if index >= 0 and combo.currentIndex() != index:
+            combo.setCurrentIndex(index)
+
+    def _sync_object_layout_status(
+        self,
+        row: Mapping[str, Any] | None,
+    ) -> None:
+        if row is None:
+            self.auto_layout_status_label.setText("Select an object")
+            self.auto_layout_status_label.setToolTip("")
+            return
+        from app.painter_ui_layout_diagnostics import diagnose_ui_layout
+
+        object_id = str(row["id"])
+        diagnostics = [
+            item
+            for item in diagnose_ui_layout(self._document)["diagnostics"]
+            if item["owner_id"] == object_id
+            or item["related_id"] == object_id
+        ]
+        errors = sum(item["severity"] == "error" for item in diagnostics)
+        warnings = sum(item["severity"] == "warning" for item in diagnostics)
+        if errors:
+            text = f"{errors} layout error"
+            color = "#F0A0A0"
+        elif warnings:
+            text = f"{warnings} layout warning"
+            color = "#E8C47A"
+        else:
+            text = "Layout ready"
+            color = "#8ECAA9"
+        recovery = {
+            "layout_hug_fill_cycle": (
+                "Use Fixed on the parent axis, or Hug/Fixed on the Fill child."
+            ),
+            "constraint_min_exceeds_max": (
+                "Raise Max or lower Min so the range is valid."
+            ),
+            "wrap_ignored_on_hug_axis": (
+                "Use Fixed sizing on the wrapped main axis."
+            ),
+            "auto_layout_no_content_space": (
+                "Reduce padding or increase the container size."
+            ),
+            "auto_layout_fixed_overflow": (
+                "Enable Wrap, reduce Gap, or use Fill/Hug sizing."
+            ),
+        }
+        tooltip_rows = []
+        for item in diagnostics:
+            fix = recovery.get(item["code"], "")
+            suffix = f" Recovery: {fix}" if fix else ""
+            tooltip_rows.append(
+                f"{item['owner_id']}: {item['message']}{suffix}"
+            )
+        self.auto_layout_status_label.setText(text)
+        self.auto_layout_status_label.setToolTip("\n".join(tooltip_rows))
+        self.auto_layout_status_label.setStyleSheet(f"color: {color};")
 
     def _emit_duplicate(self) -> None:
         if self._selected_id():

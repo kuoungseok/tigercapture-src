@@ -717,6 +717,39 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a UI text object's content would be updated",
     )
     registry.register_adapter_action(
+        "paint.ui.property.inspect",
+        "Inspect one normalized Painter UI property, its default, token binding, and layout diagnostics.",
+        "paint",
+        "paint_ui_property_inspect",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "property_path": {"type": "string"},
+            },
+            required=("object_id", "property_path"),
+        ),
+        required=("object_id", "property_path"),
+        mutating=False,
+        changed=False,
+        dry_summary="one normalized UI property would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.property.reset",
+        "Reset one supported Painter UI property through the normal object mutation and Undo path.",
+        "paint",
+        "paint_ui_property_reset",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "property_path": {"type": "string"},
+            },
+            required=("object_id", "property_path"),
+        ),
+        required=("object_id", "property_path"),
+        undo_label="Reset UI property",
+        dry_summary="one UI property would be reset to its normalized default",
+    )
+    registry.register_adapter_action(
         "paint.ui.property.batch_set",
         "Apply one undoable property mutation to multiple Painter UI objects.",
         "paint",

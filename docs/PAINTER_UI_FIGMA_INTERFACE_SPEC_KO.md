@@ -262,6 +262,13 @@ Canvas interaction checkpoint (2026-07-29):
 - Canvas commits use the same normalized `layout` record, object update,
   one-intention Undo, save path, and `paint.ui.layout.set` contract as the
   Inspector and automation.
+- Width and height sizing use compact `Fixed / Hug / Fill` segmented controls,
+  while the legacy combo state remains internal for compatibility.
+- The selected object's exact layout errors and warnings appear beside sizing;
+  tooltips include the owning object and a concrete recovery direction.
+- `paint.ui.property.inspect/reset` exposes the same normalized value, default,
+  token binding, diagnostics, object mutation, and one-step Undo contract to AI
+  and automation.
 
 ### 5.4 Shape 선택
 

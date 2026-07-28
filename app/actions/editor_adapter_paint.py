@@ -1148,6 +1148,50 @@ class PaintAdapterMixin(
         result["updated_object_ids"] = changed_ids
         return result
 
+    def paint_ui_property_inspect(
+        self,
+        *,
+        object_id: str,
+        property_path: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_property_contract import inspect_ui_property
+
+        return inspect_ui_property(
+            dialog._painter_ui_document,
+            str(object_id),
+            str(property_path),
+        )
+
+    def paint_ui_property_reset(
+        self,
+        *,
+        object_id: str,
+        property_path: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_property_contract import reset_ui_property
+
+        document, report = reset_ui_property(
+            dialog._painter_ui_document,
+            str(object_id),
+            str(property_path),
+        )
+        if report["is_default"] and document == dialog._painter_ui_document:
+            return {
+                "changed": False,
+                "property": report,
+                "ui_design": dialog.painter_action_state()["ui_design"],
+            }
+        dialog._push_undo_state("Reset UI property")
+        result = self._paint_ui_commit(
+            dialog,
+            "Reset UI property",
+            document,
+        )
+        result["property"] = report
+        return result
+
     def paint_ui_appearance_inspect(
         self,
         *,

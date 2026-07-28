@@ -141,6 +141,11 @@ Focused entry points:
   `app/painter_ui_auto_layout_overlay.py`, emits the existing object layout
   mutation, and is covered by `tests/test_painter_ui_auto_layout.py` plus the
   M2 screenshot in `tools/qa_painter_ui_designer.py`.
+  The same M2 surface now uses `app/painter_ui_sizing_control.py` for visual
+  Fixed/Hug/Fill selection and `app/painter_ui_property_contract.py` for
+  `paint.ui.property.inspect/reset`. Layout warnings are selection-local and
+  include recovery guidance; do not replace them with a second validation
+  model or a canvas-only reset path.
 
 If two areas overlap, keep the product boundary from the focused docs. Do not
 merge UI renewal, review automation, and VTuber sidecar setup into one unbounded
