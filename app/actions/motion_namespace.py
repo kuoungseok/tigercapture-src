@@ -3048,10 +3048,23 @@ def register_motion_actions(registry: Any) -> None:
             changed=False,
         )
 
-    registry.register(
-        trend_spec,
-        _trend_capabilities_handler,
-    )
+    direct_register = getattr(registry, "register", None)
+    if callable(direct_register):
+        direct_register(
+            trend_spec,
+            _trend_capabilities_handler,
+        )
+    else:
+        # Lightweight namespace-test registries expose declarations only.
+        registry.register_adapter_action(
+            trend_action_id,
+            trend_spec.title,
+            trend_spec.namespace,
+            "motion_trend_capabilities_inspect",
+            params_schema=trend_spec.params_schema,
+            mutating=False,
+            changed=False,
+        )
     platform_copy_fields = {
         **cid,
         "platform": {
