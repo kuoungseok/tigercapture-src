@@ -1552,6 +1552,44 @@ class PaintAdapterMixin(
         dialog._align_painter_ui_object(selected, str(command or ""))
         return dialog.painter_action_state()
 
+    def paint_ui_selection_tidy(
+        self,
+        *,
+        axis: str = "auto",
+        gap: float | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_batch_mutation import apply_ui_object_batch
+        from app.painter_ui_smart_selection import plan_ui_selection_tidy
+
+        report = plan_ui_selection_tidy(
+            dialog._painter_ui_document,
+            axis=str(axis or "auto"),
+            gap=gap,
+        )
+        if not report["eligible"]:
+            raise ValueError(str(report["reason"]))
+        document, changed_ids = apply_ui_object_batch(
+            dialog._painter_ui_document,
+            report["changes_by_id"],
+        )
+        if changed_ids:
+            dialog._push_undo_state("Tidy UI selection")
+            result = self._paint_ui_commit(
+                dialog,
+                "Tidy UI selection",
+                document,
+            )
+        else:
+            result = dialog.painter_action_state()
+        result["tidy"] = {
+            key: value
+            for key, value in report.items()
+            if key != "changes_by_id"
+        }
+        result["updated_object_ids"] = changed_ids
+        return result
+
     def paint_ui_object_group(
         self,
         *,

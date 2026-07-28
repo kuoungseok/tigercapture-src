@@ -21,6 +21,7 @@ Import 후 보이기만 하거나 JSON에만 남는 기능은 `Data only`이며 
 | Inspector presentation | Auto-hide selection overlay, pinned resizable panel, detachable floating window | `paint.ui.inspector.presentation` |
 | Object geometry and hierarchy | Canvas selection/marquee/resize, Layers reorder/reparent/group, ancestor breadcrumb, Alt-click overlap cycle, nested frame/group edit scope | `paint.ui.object.*`, `paint.ui.selection.set/parent/deep_select`, `paint.ui.selection.scope.inspect/enter/exit` |
 | Multi-selection editing | Common bounds, proportional resize, mixed-value Common properties, partial state checks, one-step Undo | `paint.ui.property.batch_set` |
+| Smart Selection spacing | Auto/H/V spacing analysis, mixed gap, explicit px Tidy Up, eligibility reason | `paint.ui.selection.tidy` |
 | Inline text | Double-click canvas editing, Escape cancel, focus-out or Ctrl/Cmd+Enter commit, one-step Undo | `paint.ui.text.content.set` |
 | Constraints and Auto Layout | Inspector constraints, Horizontal/Vertical flow, padding/gap/wrap/Hug/Fill | `paint.ui.layout.set`, `paint.ui.layout.diagnostics`, `paint.ui.responsive.override.*` |
 | Solid Fill, Stroke, Radius, Opacity | Inspector fields | `paint.ui.object.update` |

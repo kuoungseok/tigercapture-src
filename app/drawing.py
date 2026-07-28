@@ -10341,6 +10341,9 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.batch_properties_changed.connect(
             self._update_painter_ui_batch_properties
         )
+        self._paint_ui_inspector.selection_tidy_requested.connect(
+            self._tidy_painter_ui_selection
+        )
         self._paint_ui_inspector.clip_changed.connect(
             self._update_painter_ui_clip
         )
@@ -14475,6 +14478,25 @@ class PaintDialog(QDialog):
         self._update_painter_ui_objects_batch(
             changes_by_id,
             label="Edit UI objects",
+        )
+
+    def _tidy_painter_ui_selection(
+        self,
+        axis: str = "auto",
+        gap: object = None,
+    ) -> None:
+        from app.painter_ui_smart_selection import plan_ui_selection_tidy
+
+        report = plan_ui_selection_tidy(
+            getattr(self, "_painter_ui_document", None),
+            axis=str(axis or "auto"),
+            gap=None if gap is None else float(gap),
+        )
+        if not report["eligible"]:
+            return
+        self._update_painter_ui_objects_batch(
+            report["changes_by_id"],
+            label="Tidy UI selection",
         )
 
     def _move_painter_ui_object(

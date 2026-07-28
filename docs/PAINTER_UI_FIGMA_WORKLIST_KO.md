@@ -206,6 +206,9 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
 - 선택할 때만 나타나는 다중 선택 Common Inspector와 `—` mixed-value 표시
 - 공통 Opacity/Fill/Stroke/Width/Radius/Visible/Locked 일괄 편집
 - 변경한 속성 외의 객체별 style/content 보존
+- Auto/Horizontal/Vertical Smart Selection 간격 분석과 mixed gap `—`
+- 명시적 px 또는 현재 범위 평균 간격을 쓰는 `paint.ui.selection.tidy`
+- 잠금, cross-Artboard, cross-parent 선택의 명시적 Tidy Up 차단
 - Group/Ungroup과 자식 보존 이동
 - Layers 순서 변경, 그룹 nesting, root 이동
 - 전체 아트보드 자유 배치, 화면 이동과 줌, Fit 명령

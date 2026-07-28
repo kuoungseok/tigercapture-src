@@ -392,7 +392,7 @@ Canvas:
 - 공통 `Opacity / Fill / Stroke / Stroke Width / Radius`
 - `Visible / Locked`의 부분 체크 상태와 일괄 변경
 - Align / Distribute
-- Tidy Up / gap
+- Tidy Up / gap: `Auto / Horizontal / Vertical`, mixed gap `—`, explicit px
 - group / frame selection
 - common Fill/Stroke/Text/Effects
 - copy/paste properties
@@ -405,6 +405,9 @@ batch mutation과 Undo로 커밋하며 UI와 `paint.ui.property.batch_set` Actio
 같은 constraint 갱신 서비스를 사용한다.
 공통 속성 변경은 해당 속성만 각 객체에 적용해야 하며, 객체마다 다른 나머지
 style/content 값을 첫 번째 객체의 값으로 덮어쓰면 안 된다.
+Tidy Up은 동일 Artboard와 동일 부모의 잠금 해제 객체에만 적용한다. 자동
+방향은 선택 중심의 주축을 사용하고, 명시적 gap이 없으면 현재 선택 범위의 평균
+간격을 사용한다. UI와 `paint.ui.selection.tidy`는 같은 spacing plan을 사용한다.
 
 ## 6. Prototype UI
 

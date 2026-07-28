@@ -465,6 +465,12 @@ def main() -> int:
         and dialog._paint_ui_inspector.multi_fill_edit.placeholderText()
         == "—"
     )
+    tidy_up_ok = (
+        dialog._paint_ui_inspector.multi_tidy_button.isEnabled()
+        and dialog._paint_ui_inspector.multi_tidy_axis_combo.currentData()
+        == "auto"
+        and dialog._paint_ui_inspector.multi_gap_spin.value() >= 0.0
+    )
     multi_rows = dialog._painter_ui_overlay._multi_transform_rows()
     multi_bounds = dialog._painter_ui_overlay._selection_bounds(
         multi_rows
@@ -614,6 +620,7 @@ def main() -> int:
             and image_context_ok
             and multi_context_ok
             and multi_properties_ok
+            and tidy_up_ok
             and multi_resize_ok
             and adaptive_context_ok
             and quick_properties_ok
@@ -664,6 +671,7 @@ def main() -> int:
         },
         "inline_text_ok": inline_text_ok,
         "multi_properties_ok": multi_properties_ok,
+        "tidy_up_ok": tidy_up_ok,
         "multi_resize_ok": multi_resize_ok,
         "guide_state": guide_state,
         "workspace": state["workspace"],

@@ -72,6 +72,7 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.selection.scope.enter",
         "paint.ui.selection.scope.exit",
         "paint.ui.object.arrange",
+        "paint.ui.selection.tidy",
         "paint.ui.object.group",
         "paint.ui.object.ungroup",
         "paint.ui.object.reorder",

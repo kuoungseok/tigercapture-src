@@ -175,6 +175,7 @@ class PainterUIInspector(QWidget):
     geometry_changed = Signal(str, object)
     properties_changed = Signal(str, object)
     batch_properties_changed = Signal(object)
+    selection_tidy_requested = Signal(str, object)
     clip_changed = Signal(str, bool)
     duplicate_requested = Signal(str)
     delete_requested = Signal(str)
@@ -1142,6 +1143,31 @@ class PainterUIInspector(QWidget):
                 force=True,
             )
         )
+        self.multi_tidy_axis_combo = QComboBox()
+        self.multi_tidy_axis_combo.addItem("Auto", "auto")
+        self.multi_tidy_axis_combo.addItem("Horizontal", "horizontal")
+        self.multi_tidy_axis_combo.addItem("Vertical", "vertical")
+        self.multi_tidy_axis_combo.currentIndexChanged.connect(
+            self._sync_multi_spacing
+        )
+        self.multi_gap_spin = PainterUIDragDoubleSpinBox()
+        self.multi_gap_spin.setRange(-1.0, 4096.0)
+        self.multi_gap_spin.setDecimals(1)
+        self.multi_gap_spin.setSpecialValueText("—")
+        self.multi_gap_spin.setSuffix(" px")
+        self.multi_tidy_button = QPushButton("Tidy Up")
+        self.multi_tidy_button.setToolTip(
+            "Make the selected object spacing uniform"
+        )
+        self.multi_tidy_button.clicked.connect(self._emit_tidy_selection)
+        tidy_row = QFrame()
+        tidy_layout = QHBoxLayout(tidy_row)
+        tidy_layout.setContentsMargins(0, 0, 0, 0)
+        tidy_layout.setSpacing(3)
+        tidy_layout.addWidget(self.multi_tidy_axis_combo)
+        tidy_layout.addWidget(self.multi_gap_spin)
+        tidy_layout.addWidget(self.multi_tidy_button)
+        multi_layout.addWidget(tidy_row, 4, 0, 1, 4)
         form.addRow("Common", multi_properties)
         self.clip_content_check = QCheckBox("Clip child content")
         self.clip_content_check.setToolTip(
@@ -2923,6 +2949,43 @@ class PainterUIInspector(QWidget):
         self._set_multi_check_value(
             self.multi_locked_check,
             value_sets["locked"],
+        )
+        self._sync_multi_spacing()
+
+    def _sync_multi_spacing(self, _index: int = -1) -> None:
+        from app.painter_ui_smart_selection import (
+            inspect_ui_selection_spacing,
+        )
+
+        report = inspect_ui_selection_spacing(
+            self._document,
+            axis=str(self.multi_tidy_axis_combo.currentData() or "auto"),
+        )
+        eligible = bool(report["eligible"])
+        self.multi_tidy_axis_combo.setEnabled(eligible)
+        self.multi_gap_spin.setEnabled(eligible)
+        self.multi_tidy_button.setEnabled(eligible)
+        self.multi_tidy_button.setToolTip(
+            (
+                "Make the selected object spacing uniform"
+                if eligible
+                else str(report["reason"])
+            )
+        )
+        self.multi_gap_spin.setMinimum(-1.0)
+        self.multi_gap_spin.setSpecialValueText("—")
+        if eligible and report["uniform"]:
+            self.multi_gap_spin.setValue(float(report["gap"] or 0.0))
+        else:
+            self.multi_gap_spin.setValue(-1.0)
+
+    def _emit_tidy_selection(self) -> None:
+        if self._syncing or self._design_context != "multi":
+            return
+        raw_gap = float(self.multi_gap_spin.value())
+        self.selection_tidy_requested.emit(
+            str(self.multi_tidy_axis_combo.currentData() or "auto"),
+            None if raw_gap < 0.0 else raw_gap,
         )
 
     def _mark_multi_dirty(self, key: str) -> None:

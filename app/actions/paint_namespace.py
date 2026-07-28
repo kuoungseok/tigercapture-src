@@ -1106,6 +1106,23 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="selected Painter UI objects would be aligned or distributed",
     )
     registry.register_adapter_action(
+        "paint.ui.selection.tidy",
+        "Make selected Painter UI object spacing uniform.",
+        "paint",
+        "paint_ui_selection_tidy",
+        params_schema=schema_object(
+            {
+                "axis": {
+                    "type": "string",
+                    "enum": ["auto", "horizontal", "vertical"],
+                },
+                "gap": {"type": "number", "minimum": 0},
+            }
+        ),
+        undo_label="Tidy UI selection",
+        dry_summary="selected UI object spacing would be made uniform",
+    )
+    registry.register_adapter_action(
         "paint.ui.object.group",
         "Create an editable group from two or more Painter UI objects.",
         "paint",

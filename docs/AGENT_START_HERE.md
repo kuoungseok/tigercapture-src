@@ -100,6 +100,10 @@ Focused entry points:
   normally, mixed values render as `—` or a partial check, and editing one
   property preserves every unrelated per-object style/content value while
   committing through the same `paint.ui.property.batch_set` mutation contract.
+  Smart Selection spacing lives in `app/painter_ui_smart_selection.py`.
+  The Common Inspector exposes Auto/Horizontal/Vertical spacing, mixed `—`,
+  explicit px gap, and Tidy Up. `paint.ui.selection.tidy` uses the same planner
+  and rejects locked, cross-artboard, or cross-parent selections explicitly.
   As of 2026-07-27 the local M2A-M6 production foundation is implemented:
   `.tstemplate` packages and local library state, review comments/checkpoints,
   revision diff, self-contained prototype, production asset export, shared

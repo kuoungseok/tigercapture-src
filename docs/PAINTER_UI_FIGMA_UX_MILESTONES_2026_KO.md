@@ -348,6 +348,19 @@ Implemented checkpoint (2026-07-29, multi-selection Inspector slice):
 - The compact Korean surface and mixed-value states are covered by offscreen
   screenshot QA instead of relying only on widget tests.
 
+Implemented checkpoint (2026-07-29, Smart Selection spacing slice):
+
+- Multi-selection Common properties include a compact Auto/Horizontal/Vertical
+  spacing selector, numeric gap field, and Tidy Up command.
+- Auto chooses the dominant center-axis; a uniform gap shows its px value and
+  mixed spacing shows `—`.
+- Tidy Up preserves stable visual order and the first object's position while
+  applying an explicit gap or an average gap that preserves the selected span.
+- Locked, cross-artboard, and cross-parent selections are disabled with an
+  explicit reason instead of partially moving objects.
+- UI and `paint.ui.selection.tidy` share the same spacing planner,
+  constraint-aware batch mutation, and one-step Undo.
+
 Exit criteria:
 
 - Common object editing is possible without repeatedly moving to Inspector.
