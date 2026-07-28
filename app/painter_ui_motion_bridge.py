@@ -442,7 +442,11 @@ def create_or_sync_ui_motion_composition(
             to_state="hover" if root["kind"] == "button" else "",
             animation_name=f"UI_{root['id']}_Motion",
             autoplay=root["kind"] != "button",
-            delivery_policy="native_preferred",
+            delivery_request={
+                "web": "native_preferred",
+                "app": "native_preferred",
+                "umg": "native_preferred",
+            },
         ).to_dict(),
     )
     return composition

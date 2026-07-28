@@ -59,6 +59,12 @@ def test_ui_motion_binding_round_trip_and_composition_validation() -> None:
     bindings = ui_motion_bindings(restored)
     assert len(bindings) == 1
     assert bindings[0].source_object_id == "button-primary"
+    assert bindings[0].delivery_request == {
+        "web": "native_preferred",
+        "app": "native_preferred",
+        "umg": "native_preferred",
+    }
+    assert "delivery_policy" not in bindings[0].to_dict()
     assert ui_animation_name(restored, layer.id, "position") == "PrimaryButtonHover"
     assert validate_ui_motion_bindings(restored)["ok"] is True
     assert validate_composition(restored).ok is True
@@ -72,7 +78,11 @@ def test_ui_motion_binding_rejects_missing_layer_and_native_material_track() -> 
             layer,
             layer_ids=["missing-layer"],
             property_names=["fill"],
-            delivery_policy="native_only",
+            delivery_request={
+                "web": "native_preferred",
+                "app": "bake_allowed",
+                "umg": "native_only",
+            },
         ),
     )
     report = validate_ui_motion_bindings(composition)
@@ -81,6 +91,31 @@ def test_ui_motion_binding_rejects_missing_layer_and_native_material_track() -> 
     assert "ui_motion_requires_material" in codes
     validation_codes = {issue.code for issue in validate_composition(composition).issues}
     assert codes <= validation_codes
+
+
+def test_ui_motion_binding_migrates_legacy_delivery_policies_to_target_map() -> None:
+    composition, layer = _composition()
+    legacy = _binding(layer)
+    legacy.pop("delivery_request")
+    legacy["delivery_policy"] = "bake_allowed"
+    legacy["metadata"] = {
+        "target_policies": {
+            "web": "native_preferred",
+            "umg": "native_only",
+        }
+    }
+
+    binding = upsert_ui_motion_binding(composition, legacy)
+
+    assert binding.delivery_request == {
+        "web": "native_preferred",
+        "app": "bake_allowed",
+        "umg": "native_only",
+    }
+    saved = binding.to_dict()
+    assert saved["version"] == 2
+    assert "delivery_policy" not in saved
+    assert "target_policies" not in saved["metadata"]
 
 
 def test_ui_motion_binding_names_native_umg_tracks() -> None:

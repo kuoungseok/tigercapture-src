@@ -9,8 +9,8 @@ from .schema import MotionComposition, new_motion_id
 
 
 UI_MOTION_BINDINGS_KEY = "ui_motion_bindings"
-UI_MOTION_BINDING_SCHEMA = "tigerstudio.motion.ui_binding.v1"
-UI_MOTION_BINDING_VERSION = 1
+UI_MOTION_BINDING_SCHEMA = "tigerstudio.motion.ui_binding.v2"
+UI_MOTION_BINDING_VERSION = 2
 
 UI_MOTION_SCOPES = (
     "component_state",
@@ -32,6 +32,7 @@ UI_MOTION_DELIVERY_POLICIES = (
     "native_preferred",
     "bake_allowed",
 )
+UI_MOTION_DELIVERY_TARGETS = ("web", "app", "umg")
 UI_MOTION_NATIVE_UMG_PROPERTIES = {
     "position",
     "scale",
@@ -73,6 +74,27 @@ def _string_list(value: Any) -> list[str]:
     return rows
 
 
+def _delivery_request(value: Mapping[str, Any]) -> dict[str, str]:
+    legacy = str(
+        value.get("delivery_policy") or "native_preferred"
+    ).strip().casefold()
+    if legacy not in UI_MOTION_DELIVERY_POLICIES:
+        legacy = "native_preferred"
+    raw = value.get("delivery_request")
+    raw = dict(raw) if isinstance(raw, Mapping) else {}
+    metadata = value.get("metadata")
+    metadata = dict(metadata) if isinstance(metadata, Mapping) else {}
+    old_targets = metadata.get("target_policies")
+    old_targets = dict(old_targets) if isinstance(old_targets, Mapping) else {}
+    result: dict[str, str] = {}
+    for target in UI_MOTION_DELIVERY_TARGETS:
+        policy = str(
+            raw.get(target) or old_targets.get(target) or legacy
+        ).strip().casefold()
+        result[target] = policy
+    return result
+
+
 @dataclass(slots=True)
 class UIMotionBinding:
     id: str = field(default_factory=lambda: new_motion_id("ui_binding"))
@@ -89,8 +111,19 @@ class UIMotionBinding:
     animation_name: str = "TigerUITransition"
     autoplay: bool = False
     loop: bool = False
-    delivery_policy: str = "native_preferred"
+    delivery_request: dict[str, str] = field(
+        default_factory=lambda: {
+            target: "native_preferred"
+            for target in UI_MOTION_DELIVERY_TARGETS
+        }
+    )
     metadata: dict[str, Any] = field(default_factory=dict)
+
+    def requested_delivery(self, target: str) -> str:
+        return str(
+            self.delivery_request.get(str(target).strip().casefold())
+            or "native_preferred"
+        )
 
     def to_dict(self) -> dict[str, Any]:
         return {
@@ -110,16 +143,20 @@ class UIMotionBinding:
             "animation_name": self.animation_name,
             "autoplay": bool(self.autoplay),
             "loop": bool(self.loop),
-            "delivery_policy": self.delivery_policy,
+            "delivery_request": deepcopy(self.delivery_request),
             "metadata": deepcopy(self.metadata),
         }
 
     @classmethod
     def from_dict(cls, value: Mapping[str, Any]) -> "UIMotionBinding":
         scope = str(value.get("scope") or "transition").strip().casefold()
-        policy = str(
-            value.get("delivery_policy") or "native_preferred"
-        ).strip().casefold()
+        delivery_request = _delivery_request(value)
+        metadata = deepcopy(
+            dict(value.get("metadata"))
+            if isinstance(value.get("metadata"), Mapping)
+            else {}
+        )
+        metadata.pop("target_policies", None)
         return cls(
             id=str(value.get("id") or new_motion_id("ui_binding")),
             source_document_id=str(value.get("source_document_id") or ""),
@@ -139,12 +176,8 @@ class UIMotionBinding:
             ).strip(),
             autoplay=bool(value.get("autoplay", False)),
             loop=bool(value.get("loop", False)),
-            delivery_policy=policy,
-            metadata=deepcopy(
-                dict(value.get("metadata"))
-                if isinstance(value.get("metadata"), Mapping)
-                else {}
-            ),
+            delivery_request=delivery_request,
+            metadata=metadata,
         )
 
 
@@ -252,13 +285,15 @@ def validate_ui_motion_bindings(
                 f"Unsupported UI motion scope: {binding.scope}",
                 f"{path}.scope",
             )
-        if binding.delivery_policy not in UI_MOTION_DELIVERY_POLICIES:
-            issue(
-                errors,
-                "invalid_ui_motion_delivery_policy",
-                f"Unsupported delivery policy: {binding.delivery_policy}",
-                f"{path}.delivery_policy",
-            )
+        for target in UI_MOTION_DELIVERY_TARGETS:
+            policy = binding.requested_delivery(target)
+            if policy not in UI_MOTION_DELIVERY_POLICIES:
+                issue(
+                    errors,
+                    "invalid_ui_motion_delivery_policy",
+                    f"Unsupported {target} delivery policy: {policy}",
+                    f"{path}.delivery_request.{target}",
+                )
         if not binding.layer_ids:
             issue(
                 errors,
@@ -300,7 +335,11 @@ def validate_ui_motion_bindings(
             and button_component(host_layer) is None
         ):
             issue(
-                errors if binding.delivery_policy == "native_only" else warnings,
+                (
+                    errors
+                    if binding.requested_delivery("umg") == "native_only"
+                    else warnings
+                ),
                 "ui_motion_host_requires_interactive_component",
                 "Triggered UMG motion requires an interactive host component.",
                 f"{path}.host_layer_id",
@@ -337,7 +376,11 @@ def validate_ui_motion_bindings(
             )
         if binding.trigger and binding.trigger not in UI_MOTION_UMG_TRIGGERS:
             issue(
-                errors if binding.delivery_policy == "native_only" else warnings,
+                (
+                    errors
+                    if binding.requested_delivery("umg") == "native_only"
+                    else warnings
+                ),
                 "ui_motion_trigger_adapter_required",
                 f"Trigger requires a non-UMG or custom adapter: {binding.trigger}",
                 f"{path}.trigger",
@@ -345,14 +388,20 @@ def validate_ui_motion_bindings(
 
         properties = _binding_properties(composition, binding)
         material = properties & UI_MOTION_MATERIAL_PROPERTIES
-        if material and binding.delivery_policy == "native_only":
-            issue(
-                errors,
-                "ui_motion_requires_material",
-                "Native-only delivery cannot represent: "
-                + ", ".join(sorted(material)),
-                f"{path}.property_names",
-            )
+        native_only_targets = [
+            target
+            for target in UI_MOTION_DELIVERY_TARGETS
+            if binding.requested_delivery(target) == "native_only"
+        ]
+        if material and native_only_targets:
+            for target in native_only_targets:
+                issue(
+                    errors,
+                    "ui_motion_requires_material",
+                    f"{target} native-only delivery cannot represent: "
+                    + ", ".join(sorted(material)),
+                    f"{path}.delivery_request.{target}",
+                )
         elif material:
             issue(
                 warnings,
@@ -406,6 +455,7 @@ __all__ = [
     "UI_MOTION_BINDING_SCHEMA",
     "UI_MOTION_BINDING_VERSION",
     "UI_MOTION_DELIVERY_POLICIES",
+    "UI_MOTION_DELIVERY_TARGETS",
     "UI_MOTION_MATERIAL_PROPERTIES",
     "UI_MOTION_NATIVE_UMG_PROPERTIES",
     "UI_MOTION_PROPERTIES",

@@ -368,7 +368,7 @@ composition을 하나의 객체로 배치한다는 의미다.
 
 ## P0. 계약 통합
 
-- [ ] `UIMotionBinding`을 Painter/Motion 공용 canonical 계약으로 확정
+- [x] `UIMotionBinding`을 Painter/Motion 공용 canonical 계약으로 확정
 - [ ] `motion_clip_id`와 `linked_targets`를 binding ID 기반으로 마이그레이션
 - [ ] Painter state/interaction과 Motion binding의 양방향 참조 검증
 - [ ] composition revision/hash, missing/relink, orphan cleanup

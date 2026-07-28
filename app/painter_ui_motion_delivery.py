@@ -113,12 +113,7 @@ def _binding_features(
 
 
 def _requested_mode(binding: UIMotionBinding, target: str) -> str:
-    overrides = binding.metadata.get("target_policies")
-    if isinstance(overrides, Mapping):
-        value = str(overrides.get(target) or "").strip()
-        if value:
-            return value
-    return binding.delivery_policy
+    return binding.requested_delivery(target)
 
 
 def _resolve_feature(
