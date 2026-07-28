@@ -147,6 +147,23 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Select a brush", "브러시를 선택하세요", "ブラシを選択", "选择画笔", "Sélectionnez un pinceau", "Pinsel auswählen"),
     ("QUICK PALETTE", "퀵 팔레트", "クイックパレット", "快速调色板", "PALETTE RAPIDE", "SCHNELLPALETTE"),
     ("UI DESIGN", "UI 디자인", "UIデザイン", "UI 设计", "DESIGN UI", "UI-DESIGN"),
+    ("File", "파일", "ファイル", "文件", "Fichier", "Datei"),
+    ("Edit", "편집", "編集", "编辑", "Edition", "Bearbeiten"),
+    ("Image", "이미지", "画像", "图像", "Image", "Bild"),
+    ("Layer", "레이어", "レイヤー", "图层", "Calque", "Ebene"),
+    ("Select", "선택", "選択", "选择", "Selection", "Auswahl"),
+    ("View", "보기", "表示", "视图", "Affichage", "Ansicht"),
+    ("Window", "창", "ウィンドウ", "窗口", "Fenetre", "Fenster"),
+    ("UI", "UI", "UI", "UI", "UI", "UI"),
+    ("Undo", "실행 취소", "元に戻す", "撤销", "Annuler", "Ruckgangig"),
+    ("Redo", "다시 실행", "やり直す", "重做", "Retablir", "Wiederholen"),
+    ("Duplicate UI Object", "UI 객체 복제", "UIオブジェクトを複製", "复制 UI 对象", "Dupliquer l'objet UI", "UI-Objekt duplizieren"),
+    ("Delete UI Object", "UI 객체 삭제", "UIオブジェクトを削除", "删除 UI 对象", "Supprimer l'objet UI", "UI-Objekt loschen"),
+    ("Delete Active Artboard", "활성 아트보드 삭제", "アクティブなアートボードを削除", "删除活动画板", "Supprimer le plan de travail actif", "Aktive Zeichenflache loschen"),
+    ("Delete active artboard", "활성 아트보드 삭제", "アクティブなアートボードを削除", "删除活动画板", "Supprimer le plan de travail actif", "Aktive Zeichenflache loschen"),
+    ("Fit All Artboards", "모든 아트보드 맞춤", "すべてのアートボードを表示", "适合所有画板", "Ajuster tous les plans de travail", "Alle Zeichenflachen einpassen"),
+    ("Fit Active Artboard", "활성 아트보드 맞춤", "アクティブなアートボードを表示", "适合活动画板", "Ajuster le plan de travail actif", "Aktive Zeichenflache einpassen"),
+    ("Fit Selection", "선택 영역 맞춤", "選択範囲を表示", "适合所选内容", "Ajuster la selection", "Auswahl einpassen"),
     ("Portrait", "세로", "縦", "竖屏", "Portrait", "Hochformat"),
     ("Landscape", "가로", "横", "横屏", "Paysage", "Querformat"),
     ("Light", "라이트", "ライト", "浅色", "Clair", "Hell"),
@@ -525,6 +542,9 @@ class PainterWidgetLocalizer(QObject):
                         item.setText(column, value)
                 stack.extend(item.child(i) for i in range(item.childCount()))
         if isinstance(obj, QMenu):
+            title = self._translated_property(obj, "title", obj.title())
+            if obj.title() != title:
+                obj.setTitle(title)
             for action in obj.actions():
                 value = painter_text(action.text(), self._language)
                 if value != action.text():

@@ -96,7 +96,7 @@ class PainterUIDesignOverlay(QWidget):
         self._artboard_drag_origin = QPointF()
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+        self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
 
     def set_document(self, value: Mapping[str, Any] | None) -> None:
         self._document = normalize_ui_document(value)
@@ -1039,10 +1039,10 @@ class PainterUIDesignOverlay(QWidget):
             max(1, self.height()),
             QImage.Format.Format_ARGB32_Premultiplied,
         )
-        surface.fill(Qt.GlobalColor.transparent)
+        surface.fill(QColor("#3F4145"))
         scene_painter = QPainter(surface)
         scene_painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
-        scene_painter.fillRect(self.rect(), QColor(18, 21, 27, 86))
+        scene_painter.fillRect(self.rect(), QColor("#3F4145"))
         active_id = self._document["active_artboard_id"]
         for artboard in self._document["artboards"]:
             viewport, scale = self._artboard_viewport(artboard)

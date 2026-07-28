@@ -269,7 +269,7 @@ def test_standalone_painter_uses_vector_icons_and_full_brush_selector() -> None:
     ]
     assert dialog._paint_inspector_controls.parentWidget() is not None
     assert dialog._paint_inspector_controls_scroll.maximumHeight() <= 330
-    assert dialog._paint_inspector_controls_scroll.width() <= 300
+    assert 320 <= dialog._paint_inspector_controls_scroll.width() <= 360
     assert dialog._tool_rail.width() == 40
     assert dialog.tool_collapse_btn.toolTip() == "Collapse toolbar"
     assert dialog.tool_close_btn.toolTip() == "Close toolbar"
@@ -583,7 +583,16 @@ def test_standalone_painter_uses_vector_icons_and_full_brush_selector() -> None:
         action.text().replace("&", "")
         for action in dialog._painter_menu_bar.actions()
     ]
-    assert menu_labels == ["File", "Edit", "Image", "Layer", "Select", "View", "Window"]
+    assert menu_labels == [
+        "File",
+        "Edit",
+        "UI",
+        "Image",
+        "Layer",
+        "Select",
+        "View",
+        "Window",
+    ]
     brush_menu_labels = [
         action.text().replace("&", "")
         for action in dialog._painter_brush_menu.actions()

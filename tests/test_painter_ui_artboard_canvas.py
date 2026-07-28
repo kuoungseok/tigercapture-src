@@ -6,8 +6,11 @@ import os
 def _app():
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
     from PySide6.QtWidgets import QApplication
+    from app.i18n import set_language
 
-    return QApplication.instance() or QApplication([])
+    app = QApplication.instance() or QApplication([])
+    set_language("en")
+    return app
 
 
 def test_ui_artboard_title_drag_emits_document_position() -> None:
@@ -57,6 +60,60 @@ def test_ui_artboard_title_drag_emits_document_position() -> None:
     app.processEvents()
 
 
+def test_ui_design_workspace_is_opaque_and_uses_editor_canvas_gray() -> None:
+    app = _app()
+    from PySide6.QtGui import QColor
+
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(640, 420)
+    overlay.show()
+    app.processEvents()
+
+    pixel = overlay.grab().toImage().pixelColor(2, 2)
+    assert pixel.alpha() == 255
+    assert pixel == QColor("#3F4145")
+    overlay.close()
+    overlay.deleteLater()
+    app.processEvents()
+
+
+def test_ui_design_mode_expands_inspector_and_has_one_fit_tool_set() -> None:
+    app = _app()
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(390, 844, "#F5F7FA"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.resize(1500, 900)
+    dialog._set_canvas_workspace_mode("ui_design")
+    dialog.show()
+    app.processEvents()
+
+    assert len(dialog._ui_design_view_buttons) == 3
+    assert dialog._paint_inspector_controls_scroll.maximumHeight() == 16777215
+    assert dialog._paint_ui_inspector.isVisible()
+    assert not dialog._paint_layer_dock_panel.isVisible()
+    assert dialog._painter_ui_overlay.geometry() == dialog._canvas_host.rect()
+    assert dialog._paint_inspector_controls_scroll.parentWidget().width() >= 320
+    assert dialog._painter_file_menu.menuAction().isVisible()
+    assert dialog._painter_ui_menu.menuAction().isVisible()
+    assert not dialog._painter_edit_menu.menuAction().isVisible()
+    assert not dialog._painter_image_menu.menuAction().isVisible()
+    assert not dialog._painter_layer_menu.menuAction().isVisible()
+    assert not dialog._painter_select_menu.menuAction().isVisible()
+    assert not dialog._painter_view_menu.menuAction().isVisible()
+    assert not dialog._painter_window_menu.menuAction().isVisible()
+
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
 def test_ui_artboard_presets_cover_product_targets() -> None:
     app = _app()
     from app.painter_ui_inspector import PainterUIInspector
@@ -81,6 +138,33 @@ def test_ui_artboard_presets_cover_product_targets() -> None:
     inspector.artboard_preset_combo.setCurrentIndex(2)
     inspector._emit_add_artboard()
     assert emitted == [("Desktop", 1440, 900, "desktop")]
+    assert not inspector.delete_artboard_button.isEnabled()
+    inspector.deleteLater()
+    app.processEvents()
+
+
+def test_ui_artboard_delete_button_is_safe_and_emits_active_artboard() -> None:
+    app = _app()
+    from app.painter_ui_document import add_ui_artboard, create_ui_document
+    from app.painter_ui_inspector import PainterUIInspector
+
+    document = create_ui_document(390, 844, name="Phone")
+    inspector = PainterUIInspector()
+    inspector.set_document(document)
+    assert not inspector.delete_artboard_button.isEnabled()
+
+    document, desktop = add_ui_artboard(
+        document,
+        name="Desktop",
+        width=1440,
+        height=900,
+    )
+    inspector.set_document(document)
+    deleted: list[str] = []
+    inspector.artboard_delete_requested.connect(deleted.append)
+    assert inspector.delete_artboard_button.isEnabled()
+    inspector.delete_artboard_button.click()
+    assert deleted == [desktop["id"]]
     inspector.deleteLater()
     app.processEvents()
 
@@ -111,6 +195,11 @@ def test_ui_artboard_move_and_preset_add_are_undoable() -> None:
     )
     assert len(dialog._painter_ui_document["artboards"]) == 2
     assert dialog._painter_ui_document["artboards"][1]["breakpoint"] == "broadcast"
+    added_id = dialog._painter_ui_document["active_artboard_id"]
+    dialog._delete_painter_ui_artboard(added_id)
+    assert len(dialog._painter_ui_document["artboards"]) == 1
+    dialog._undo()
+    assert len(dialog._painter_ui_document["artboards"]) == 2
     dialog._undo()
     assert len(dialog._painter_ui_document["artboards"]) == 1
     dialog.close()

@@ -153,3 +153,32 @@ def test_full_painter_chrome_and_ui_designer_follow_language_setting() -> None:
     assert dialog._canvas_mode_ui_btn.text() == "UIデザイン"
     assert dialog._brush_preset_button.text() == "ブラシセレクター"
     dialog.deleteLater()
+
+
+def test_ui_design_menu_and_artboard_delete_follow_korean_setting() -> None:
+    app = _app()
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+    from app.i18n import set_language
+
+    set_language("ko")
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(390, 844),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog._set_canvas_workspace_mode("ui_design")
+    dialog._painter_localizer.refresh()
+    app.processEvents()
+
+    visible_menus = {
+        action.text().replace("&", "")
+        for action in dialog._painter_menu_bar.actions()
+        if action.isVisible()
+    }
+    assert visible_menus == {"파일", "UI"}
+    assert (
+        dialog._paint_ui_inspector.delete_artboard_button.toolTip()
+        == "활성 아트보드 삭제"
+    )
+    dialog.deleteLater()

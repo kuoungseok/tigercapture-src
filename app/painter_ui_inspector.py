@@ -34,6 +34,7 @@ from app.painter_ui_constraints import (
 )
 from app.painter_ui_auto_layout import normalize_ui_auto_layout
 from app.painter_ui_document import normalize_ui_document
+from app.icons import app_icon, icon_size
 
 
 class PainterUILayerList(QListWidget):
@@ -94,6 +95,7 @@ class PainterUIInspector(QWidget):
     ai_audit_requested = Signal()
     artboard_selected = Signal(str)
     artboard_add_requested = Signal(str, int, int, str)
+    artboard_delete_requested = Signal(str)
     artboard_layout_changed = Signal(str, object)
     responsive_override_changed = Signal(str, str, str, object)
     responsive_override_remove_requested = Signal(str, str, str)
@@ -167,8 +169,19 @@ class PainterUIInspector(QWidget):
         add_artboard.setToolTip("Add artboard from preset")
         add_artboard.setAccessibleName("Add artboard")
         add_artboard.clicked.connect(self._emit_add_artboard)
+        self.delete_artboard_button = QPushButton("")
+        self.delete_artboard_button.setFixedSize(30, 28)
+        self.delete_artboard_button.setIcon(
+            app_icon("trash", size=13, color="#D9DEE6")
+        )
+        self.delete_artboard_button.setIconSize(icon_size(13))
+        self.delete_artboard_button.setToolTip("Delete active artboard")
+        self.delete_artboard_button.setAccessibleName("Delete active artboard")
+        self.delete_artboard_button.setEnabled(False)
+        self.delete_artboard_button.clicked.connect(self._emit_delete_artboard)
         artboard_add_row.addWidget(self.artboard_preset_combo, 1)
         artboard_add_row.addWidget(add_artboard)
+        artboard_add_row.addWidget(self.delete_artboard_button)
         root.addLayout(artboard_add_row)
 
         artboard_layout_frame = QFrame()
@@ -1162,6 +1175,9 @@ class PainterUIInspector(QWidget):
                     self.artboard_combo.setCurrentIndex(
                         self.artboard_combo.count() - 1
                     )
+            self.delete_artboard_button.setEnabled(
+                len(self._document["artboards"]) > 1
+            )
             self._sync_artboard_layout_fields()
             self.layer_list.clear()
             row_by_id = {row["id"]: row for row in rows}
@@ -1936,6 +1952,13 @@ class PainterUIInspector(QWidget):
             int(height),
             str(breakpoint),
         )
+
+    def _emit_delete_artboard(self) -> None:
+        if len(self._document.get("artboards", [])) <= 1:
+            return
+        artboard_id = str(self.artboard_combo.currentData() or "")
+        if artboard_id:
+            self.artboard_delete_requested.emit(artboard_id)
 
     def _sync_section_fields(self, index: int) -> None:
         if index < 0 or index >= len(self._document.get("sections", [])):

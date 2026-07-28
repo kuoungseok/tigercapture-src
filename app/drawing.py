@@ -7798,6 +7798,7 @@ class PaintDialog(QDialog):
         menu_bar.setObjectName("PaintMenuBar")
 
         file_menu = menu_bar.addMenu("File")
+        self._painter_file_menu = file_menu
         self._add_painter_menu_action(file_menu, "New Canvas...", self._open_new_canvas_dialog, "Ctrl+N")
         self._add_painter_menu_action(file_menu, "Open...", self._prompt_open_painter_document, "Ctrl+O")
         self._add_painter_menu_action(file_menu, "Save", self._prompt_save_painter_document, "Ctrl+S")
@@ -7814,6 +7815,7 @@ class PaintDialog(QDialog):
         self._add_painter_menu_action(file_menu, "Close", self.reject, "Esc")
 
         edit_menu = menu_bar.addMenu("Edit")
+        self._painter_edit_menu = edit_menu
         self._add_painter_menu_action(edit_menu, "Undo", self._undo, "Ctrl+Z")
         self._add_painter_menu_action(edit_menu, "Redo", self._redo, "Ctrl+Y")
         edit_menu.addSeparator()
@@ -7919,6 +7921,7 @@ class PaintDialog(QDialog):
         self._add_painter_menu_action(image_menu, "Hide Alpha", lambda: self._set_channel_visibility("Alpha", False))
 
         layer_menu = menu_bar.addMenu("Layer")
+        self._painter_layer_menu = layer_menu
         self._add_painter_menu_action(layer_menu, "New Layer", self._new_paint_layer, "Ctrl+Shift+N")
         self._add_painter_menu_action(
             layer_menu,
@@ -7939,6 +7942,7 @@ class PaintDialog(QDialog):
         self._add_painter_menu_action(layer_menu, "Add Mask From Alpha", lambda: self._create_layer_mask("layer_alpha"))
 
         select_menu = menu_bar.addMenu("Select")
+        self._painter_select_menu = select_menu
         self._add_painter_menu_action(select_menu, "All", self._select_all, "Ctrl+A")
         self._add_painter_menu_action(select_menu, "Deselect", self._deselect, "Ctrl+D")
         self._add_painter_menu_action(select_menu, "Inverse", self._invert_selection, "Ctrl+Shift+I")
@@ -7958,6 +7962,7 @@ class PaintDialog(QDialog):
         self._add_painter_menu_action(select_menu, "Path To Selection", self._make_selection_from_selected_path)
 
         path_menu = menu_bar.addMenu("Path")
+        self._painter_path_menu = path_menu
         self._add_painter_menu_action(path_menu, "Commit Work Path", lambda: self._commit_path(False))
         self._add_painter_menu_action(path_menu, "Close Work Path", lambda: self._commit_path(True))
         self._add_painter_menu_action(path_menu, "Clear Work Path", self._clear_path_preview)
@@ -7977,6 +7982,45 @@ class PaintDialog(QDialog):
         window_menu.addSeparator()
         self._add_painter_menu_action(window_menu, "PBR Texture Lab...", self._open_pbr_texture_lab_window)
 
+        ui_menu = menu_bar.addMenu("UI")
+        self._painter_ui_menu = ui_menu
+        self._add_painter_menu_action(ui_menu, "Undo", self._undo, "Ctrl+Z")
+        self._add_painter_menu_action(ui_menu, "Redo", self._redo, "Ctrl+Y")
+        ui_menu.addSeparator()
+        self._add_painter_menu_action(
+            ui_menu,
+            "Duplicate UI Object",
+            self._duplicate_painter_ui_object,
+            "Ctrl+D",
+        )
+        self._add_painter_menu_action(
+            ui_menu,
+            "Delete UI Object",
+            self._delete_painter_ui_object,
+            "Del",
+        )
+        self._add_painter_menu_action(
+            ui_menu,
+            "Delete Active Artboard",
+            self._delete_active_painter_ui_artboard,
+        )
+        ui_menu.addSeparator()
+        self._add_painter_menu_action(
+            ui_menu,
+            "Fit All Artboards",
+            lambda: self._fit_painter_ui_view("all"),
+        )
+        self._add_painter_menu_action(
+            ui_menu,
+            "Fit Active Artboard",
+            lambda: self._fit_painter_ui_view("artboard"),
+        )
+        self._add_painter_menu_action(
+            ui_menu,
+            "Fit Selection",
+            lambda: self._fit_painter_ui_view("selection"),
+        )
+
         # Match Photoshop's high-frequency menu order. Brush presets and path
         # commands stay available from the options bar and their dock panels
         # instead of occupying custom top-level menus.
@@ -7985,6 +8029,7 @@ class PaintDialog(QDialog):
         for menu in (
             file_menu,
             edit_menu,
+            ui_menu,
             image_menu,
             layer_menu,
             select_menu,
@@ -7992,6 +8037,7 @@ class PaintDialog(QDialog):
             window_menu,
         ):
             menu_bar.addAction(menu.menuAction())
+        ui_menu.menuAction().setVisible(False)
         return menu_bar
 
     def _add_painter_menu_action(
@@ -8929,24 +8975,6 @@ class PaintDialog(QDialog):
             )
             ui_tool_bar.addWidget(button)
             self._ui_design_view_buttons[mode] = button
-        self._ui_design_view_buttons: dict[str, QPushButton] = {}
-        for label, mode, icon_name in (
-            ("Fit all artboards", "all", "zoom-fit"),
-            ("Fit active artboard", "artboard", "fit"),
-            ("Fit selection", "selection", "ui-frame"),
-        ):
-            button = QPushButton("")
-            button.setObjectName("PaintBlockoutModeButton")
-            button.setToolTip(label)
-            button.setAccessibleName(label)
-            button.setIcon(app_icon(icon_name, size=13, color="#E4E8EE"))
-            button.setIconSize(icon_size(13))
-            button.setFixedSize(28, 24)
-            button.clicked.connect(
-                lambda _checked=False, value=mode: self._fit_painter_ui_view(value)
-            )
-            ui_tool_bar.addWidget(button)
-            self._ui_design_view_buttons[mode] = button
         self._ui_design_motion_actor_btn = QPushButton("Motion Actor")
         self._ui_design_motion_actor_btn.setObjectName("PaintBlockoutModeButton")
         self._ui_design_motion_actor_btn.setToolTip(
@@ -9122,8 +9150,8 @@ class PaintDialog(QDialog):
 
         inspector = QFrame()
         inspector.setObjectName("PaintInspector")
-        inspector.setMinimumWidth(248)
-        inspector.setMaximumWidth(300 if self._standalone else 330)
+        inspector.setMinimumWidth(320)
+        inspector.setMaximumWidth(360 if self._standalone else 380)
         inspector.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         inspector_layout = QVBoxLayout(inspector)
         inspector_layout.setContentsMargins(0, 0, 0, 0)
@@ -9158,6 +9186,9 @@ class PaintDialog(QDialog):
         )
         inspector_controls_scroll.setWidget(inspector_controls)
         self._paint_inspector_controls_scroll = inspector_controls_scroll
+        self._paint_inspector_compact_max_height = (
+            330 if self._standalone else 360
+        )
 
         tool_options_title = QLabel("TOOL OPTIONS")
         tool_options_title.setObjectName("PaintSectionTitle")
@@ -9663,6 +9694,9 @@ class PaintDialog(QDialog):
         )
         self._paint_ui_inspector.artboard_add_requested.connect(
             self._add_painter_ui_artboard_preset
+        )
+        self._paint_ui_inspector.artboard_delete_requested.connect(
+            self._delete_painter_ui_artboard
         )
         self._paint_ui_inspector.artboard_layout_changed.connect(
             self._update_painter_ui_artboard_changes
@@ -12013,6 +12047,7 @@ class PaintDialog(QDialog):
         workspace_mode = str(getattr(self, "_canvas_workspace_mode", "paint"))
         blockout = workspace_mode == "3d_place"
         ui_design = workspace_mode == "ui_design"
+        self._sync_painter_menu_mode(workspace_mode)
         for button_name, checked in (
             ("_canvas_mode_paint_btn", not blockout and not ui_design),
             ("_canvas_mode_ui_btn", ui_design),
@@ -12033,6 +12068,25 @@ class PaintDialog(QDialog):
         ui_inspector = getattr(self, "_paint_ui_inspector", None)
         if ui_inspector is not None:
             ui_inspector.setVisible(ui_design)
+        inspector_scroll = getattr(self, "_paint_inspector_controls_scroll", None)
+        if inspector_scroll is not None:
+            inspector_scroll.setMaximumHeight(
+                16777215
+                if ui_design
+                else int(
+                    getattr(
+                        self,
+                        "_paint_inspector_compact_max_height",
+                        330 if self._standalone else 360,
+                    )
+                )
+            )
+            inspector_scroll.setSizePolicy(
+                QSizePolicy.Policy.Expanding,
+                QSizePolicy.Policy.Expanding
+                if ui_design
+                else QSizePolicy.Policy.Preferred,
+            )
         color_panel = getattr(self, "_paint_color_panel", None)
         if color_panel is not None:
             color_panel.setVisible(not ui_design and not blockout)
@@ -12060,6 +12114,29 @@ class PaintDialog(QDialog):
                 self._refresh_painter_ui_overlay()
                 overlay.raise_()
                 overlay.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _sync_painter_menu_mode(self, workspace_mode: str) -> None:
+        ui_design = str(workspace_mode or "") == "ui_design"
+        paint_mode = str(workspace_mode or "") == "paint"
+        menus = (
+            getattr(self, "_painter_edit_menu", None),
+            getattr(self, "_painter_image_menu", None),
+            getattr(self, "_painter_layer_menu", None),
+            getattr(self, "_painter_select_menu", None),
+            getattr(self, "_painter_view_menu", None),
+            getattr(self, "_painter_window_menu", None),
+        )
+        for menu in menus:
+            if menu is None:
+                continue
+            menu.menuAction().setVisible(paint_mode)
+            for action in menu.actions():
+                action.setEnabled(paint_mode)
+        ui_menu = getattr(self, "_painter_ui_menu", None)
+        if ui_menu is not None:
+            ui_menu.menuAction().setVisible(ui_design)
+            for action in ui_menu.actions():
+                action.setEnabled(ui_design)
 
     def _select_painter_ui_object(
         self,
@@ -12173,6 +12250,29 @@ class PaintDialog(QDialog):
             width=int(width),
             height=int(height),
             breakpoint=str(breakpoint),
+        )
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _delete_active_painter_ui_artboard(self) -> None:
+        document = getattr(self, "_painter_ui_document", None) or {}
+        self._delete_painter_ui_artboard(
+            str(document.get("active_artboard_id") or "")
+        )
+
+    def _delete_painter_ui_artboard(self, artboard_id: str) -> None:
+        from app.painter_ui_document import remove_ui_artboard
+
+        document = getattr(self, "_painter_ui_document", None) or {}
+        if len(document.get("artboards", [])) <= 1:
+            return
+        target = str(artboard_id or document.get("active_artboard_id") or "")
+        if not target:
+            return
+        self._push_undo_state("Delete UI artboard")
+        self._painter_ui_document, _result = remove_ui_artboard(
+            document,
+            target,
         )
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
