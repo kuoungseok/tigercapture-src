@@ -4,7 +4,11 @@ Status: canonical implementation backlog; P0-P10 local production foundation com
 
 P0-P2 completion checkpoint (2026-07-28):
 
-- Painter UI document schema is version 13.
+- Painter UI document schema is version 14.
+- Schema 14 introduces ordered per-artboard `layout_grids[]` with legacy
+  `layout_grid` compatibility. Uniform, Columns, and Rows can render together;
+  Columns/Rows support Stretch and Center alignment. Reusable grid-style
+  library CRUD is still pending.
 - Masks, object blend modes, ordered Fill/Stroke stacks, independent corner
   radii, and stroke alignment have persistent contracts, Inspector controls,
   canvas behavior, Actions, and Figma round-trip coverage.

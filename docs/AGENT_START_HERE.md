@@ -158,6 +158,10 @@ Focused entry points:
   applies axes in Qt canvas/export paths, preserves them in Figma shared plugin
   metadata, and explicitly blocks Unreal UMG output until a real deterministic
   text-bake path exists.
+  Schema 14 also adds ordered artboard `layout_grids[]`, simultaneous
+  Uniform/Columns/Rows canvas rendering, Stretch/Center alignment, and Action
+  parity through `paint.ui.artboard.layout.set`. Reusable named grid-style CRUD
+  is still an explicit M2 gap.
   `paint.ui.token.suggest` and the contextual Inspector row share that pure
   planner. Suggestions require exact type-compatible values after active-theme
   and alias resolution, never mutate the document, and must apply through the

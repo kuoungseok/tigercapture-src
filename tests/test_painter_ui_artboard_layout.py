@@ -45,6 +45,42 @@ def test_artboard_layout_normalizes_grid_guides_and_safe_area() -> None:
     assert layout["guides"]["horizontal"] == [0.0, 40.0]
 
 
+def test_artboard_layout_preserves_multiple_columns_and_rows() -> None:
+    from app.painter_ui_artboard_layout import normalize_ui_artboard_layout
+
+    layout = normalize_ui_artboard_layout(
+        {
+            "layout_grids": [
+                {
+                    "id": "desktop-columns",
+                    "mode": "columns",
+                    "count": 12,
+                    "gutter": 20,
+                    "margin": 32,
+                },
+                {
+                    "id": "baseline-rows",
+                    "mode": "rows",
+                    "alignment": "center",
+                    "count": 6,
+                    "size": 48,
+                    "gutter": 12,
+                },
+            ]
+        },
+        width=1440,
+        height=900,
+    )
+
+    assert [row["id"] for row in layout["layout_grids"]] == [
+        "desktop-columns",
+        "baseline-rows",
+    ]
+    assert layout["layout_grid"] == layout["layout_grids"][0]
+    assert layout["layout_grids"][1]["mode"] == "rows"
+    assert layout["layout_grids"][1]["alignment"] == "center"
+
+
 def test_artboard_layout_inspector_emits_provider_neutral_changes() -> None:
     app = _app()
     from app.painter_ui_document import create_ui_document
@@ -116,6 +152,40 @@ def test_artboard_layout_action_updates_and_undoes_document() -> None:
     assert artboard["guides"]["vertical"] == [100.0]
     dialog._undo()
     assert dialog._painter_ui_document["artboards"][0] == original
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
+def test_artboard_layout_action_sets_multiple_grid_definitions() -> None:
+    app = _app()
+    from app.actions.registry import ActionRegistry
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(800, 600, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    registry = ActionRegistry(owner=dialog)
+    result = registry.execute(
+        "paint.ui.artboard.layout.set",
+        {
+            "artboard_id": "artboard-1",
+            "layout_grids": [
+                {"id": "columns", "mode": "columns", "count": 4},
+                {"id": "rows", "mode": "rows", "count": 5},
+            ],
+        },
+    ).to_dict()
+
+    assert result["ok"] is True
+    artboard = result["result"]["ui_design"]["document"]["artboards"][0]
+    assert [grid["mode"] for grid in artboard["layout_grids"]] == [
+        "columns",
+        "rows",
+    ]
     dialog.close()
     dialog.deleteLater()
     app.processEvents()

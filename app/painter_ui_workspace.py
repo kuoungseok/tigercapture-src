@@ -355,41 +355,61 @@ class PainterUIDesignOverlay(QWidget):
             width=float(artboard["width"]),
             height=float(artboard["height"]),
         )
-        grid = layout["layout_grid"]
         painter.save()
         painter.setClipRect(viewport)
-        color = QColor(str(grid["color"]))
-        line_color = QColor(color)
-        line_color.setAlpha(max(48, line_color.alpha()))
-        mode = grid["mode"] if grid["visible"] else "none"
-        if mode == "grid":
-            step = float(grid["size"]) * scale
-            if step >= 3.0:
-                painter.setPen(QPen(line_color, 1.0))
-                x = viewport.left() + step
-                while x < viewport.right() and x <= viewport.left() + step * 1024:
-                    painter.drawLine(QPointF(x, viewport.top()), QPointF(x, viewport.bottom()))
-                    x += step
-                y = viewport.top() + step
-                while y < viewport.bottom() and y <= viewport.top() + step * 1024:
-                    painter.drawLine(QPointF(viewport.left(), y), QPointF(viewport.right(), y))
-                    y += step
-        elif mode == "columns":
-            count = int(grid["count"])
-            margin = float(grid["margin"]) * scale
-            gutter = float(grid["gutter"]) * scale
-            available = viewport.width() - margin * 2.0 - gutter * max(0, count - 1)
-            column_width = available / count if count > 0 else 0.0
-            if column_width > 0.0:
-                fill = QColor(color)
-                fill.setAlpha(max(18, min(72, fill.alpha())))
-                painter.setPen(QPen(line_color, 1.0))
-                painter.setBrush(fill)
-                x = viewport.left() + margin
-                for _index in range(count):
-                    column = QRectF(x, viewport.top(), column_width, viewport.height())
-                    painter.drawRect(column)
-                    x += column_width + gutter
+        for grid in layout["layout_grids"]:
+            color = QColor(str(grid["color"]))
+            line_color = QColor(color)
+            line_color.setAlpha(max(48, line_color.alpha()))
+            mode = grid["mode"] if grid["visible"] else "none"
+            if mode == "grid":
+                step = float(grid["size"]) * scale
+                if step >= 3.0:
+                    painter.setPen(QPen(line_color, 1.0))
+                    x = viewport.left() + step
+                    while x < viewport.right() and x <= viewport.left() + step * 1024:
+                        painter.drawLine(QPointF(x, viewport.top()), QPointF(x, viewport.bottom()))
+                        x += step
+                    y = viewport.top() + step
+                    while y < viewport.bottom() and y <= viewport.top() + step * 1024:
+                        painter.drawLine(QPointF(viewport.left(), y), QPointF(viewport.right(), y))
+                        y += step
+            elif mode in {"columns", "rows"}:
+                count = int(grid["count"])
+                margin = float(grid["margin"]) * scale
+                gutter = float(grid["gutter"]) * scale
+                extent = viewport.width() if mode == "columns" else viewport.height()
+                if grid["alignment"] == "center":
+                    cell_size = float(grid["size"]) * scale
+                    band = cell_size * count + gutter * max(0, count - 1)
+                    start = (extent - band) * 0.5
+                else:
+                    available = extent - margin * 2.0 - gutter * max(0, count - 1)
+                    cell_size = available / count if count > 0 else 0.0
+                    start = margin
+                if cell_size > 0.0:
+                    fill = QColor(color)
+                    fill.setAlpha(max(18, min(72, fill.alpha())))
+                    painter.setPen(QPen(line_color, 1.0))
+                    painter.setBrush(fill)
+                    position = start
+                    for _index in range(count):
+                        if mode == "columns":
+                            rect = QRectF(
+                                viewport.left() + position,
+                                viewport.top(),
+                                cell_size,
+                                viewport.height(),
+                            )
+                        else:
+                            rect = QRectF(
+                                viewport.left(),
+                                viewport.top() + position,
+                                viewport.width(),
+                                cell_size,
+                            )
+                        painter.drawRect(rect)
+                        position += cell_size + gutter
         guides = layout["guides"]
         if guides["visible"]:
             guide_pen = QPen(QColor("#35B9FFB8"), 1.0, Qt.PenStyle.DashLine)

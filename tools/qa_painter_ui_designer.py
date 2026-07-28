@@ -923,7 +923,55 @@ def main() -> int:
     )
     app.processEvents()
     dialog.resize(1360, 900)
+    registry.execute("paint.ui.artboard.activate", {"artboard_id": desktop_id})
+    multi_grid_result = registry.execute(
+        "paint.ui.artboard.layout.set",
+        {
+            "artboard_id": desktop_id,
+            "layout_grids": [
+                {
+                    "id": "qa-columns",
+                    "name": "Desktop Columns",
+                    "mode": "columns",
+                    "count": 6,
+                    "gutter": 24,
+                    "margin": 48,
+                    "color": "#4C9AFF32",
+                },
+                {
+                    "id": "qa-rows",
+                    "name": "Baseline Rows",
+                    "mode": "rows",
+                    "alignment": "center",
+                    "count": 5,
+                    "size": 72,
+                    "gutter": 18,
+                    "color": "#F2A65A28",
+                },
+            ],
+        },
+    ).to_dict()
+    registry.execute(
+        "paint.ui.selection.set",
+        {"object_ids": [], "primary_object_id": ""},
+    )
+    dialog._painter_ui_overlay.fit_artboard(desktop_id)
     app.processEvents()
+    multi_grid_screenshot_path = (
+        output_dir / "painter_ui_designer_m2_multiple_layout_grids.png"
+    )
+    dialog.grab().save(str(multi_grid_screenshot_path), "PNG")
+    multi_grid_artboard = next(
+        row
+        for row in dialog._painter_ui_document["artboards"]
+        if row["id"] == desktop_id
+    )
+    multi_grid_ok = bool(
+        multi_grid_result.get("ok") is True
+        and [row["mode"] for row in multi_grid_artboard["layout_grids"]]
+        == ["columns", "rows"]
+        and multi_grid_screenshot_path.is_file()
+    )
     state = dialog.painter_action_state()
     group_row = next(
         (
@@ -974,6 +1022,7 @@ def main() -> int:
             and token_suggestion_compact_screenshot_path.is_file()
             and variable_font_screenshot_path.is_file()
             and variable_font_compact_screenshot_path.is_file()
+            and multi_grid_screenshot_path.is_file()
             and hierarchy_screenshot_path.is_file()
             and breadcrumb_screenshot_path.is_file()
             and scope_screenshot_path.is_file()
@@ -997,6 +1046,7 @@ def main() -> int:
             and token_suggestion_compact_ok
             and variable_font_ok
             and variable_font_compact_ok
+            and multi_grid_ok
             and text_context_ok
             and inline_text_ok
             and image_context_ok
@@ -1036,6 +1086,7 @@ def main() -> int:
         "variable_font_compact_screenshot": str(
             variable_font_compact_screenshot_path
         ),
+        "multiple_layout_grids_screenshot": str(multi_grid_screenshot_path),
         "hierarchy_screenshot": str(hierarchy_screenshot_path),
         "breadcrumb_screenshot": str(breadcrumb_screenshot_path),
         "group_scope_screenshot": str(scope_screenshot_path),
@@ -1067,6 +1118,7 @@ def main() -> int:
         "token_suggestion_compact_ok": token_suggestion_compact_ok,
         "variable_font_ok": variable_font_ok,
         "variable_font_compact_ok": variable_font_compact_ok,
+        "multiple_layout_grids_ok": multi_grid_ok,
         "quick_properties_ok": quick_properties_ok,
         "zoom_popover_ok": zoom_popover_ok,
         "compact_zoom_ok": compact_zoom_ok,

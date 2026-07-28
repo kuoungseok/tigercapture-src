@@ -419,12 +419,23 @@ class PainterUIInspector(QWidget):
             ("No layout grid", "none"),
             ("Uniform grid", "grid"),
             ("Columns", "columns"),
+            ("Rows", "rows"),
         ):
             self.artboard_grid_mode_combo.addItem(label, mode)
         self.artboard_grid_mode_combo.currentIndexChanged.connect(
             self._emit_artboard_layout
         )
         artboard_layout_form.addRow("Layout", self.artboard_grid_mode_combo)
+        self.artboard_grid_alignment_combo = QComboBox()
+        self.artboard_grid_alignment_combo.addItem("Stretch", "stretch")
+        self.artboard_grid_alignment_combo.addItem("Center", "center")
+        self.artboard_grid_alignment_combo.currentIndexChanged.connect(
+            self._emit_artboard_layout
+        )
+        artboard_layout_form.addRow(
+            "Grid Alignment",
+            self.artboard_grid_alignment_combo,
+        )
         grid_metrics = QFrame()
         grid_metrics.setObjectName("PainterUICompactGrid")
         grid_metrics_layout = QGridLayout(grid_metrics)
@@ -2846,6 +2857,10 @@ class PainterUIInspector(QWidget):
         self.artboard_grid_size_spin.setValue(float(grid["size"]))
         self.artboard_grid_gutter_spin.setValue(float(grid["gutter"]))
         self.artboard_grid_margin_spin.setValue(float(grid["margin"]))
+        alignment_index = self.artboard_grid_alignment_combo.findData(
+            str(grid.get("alignment") or "stretch")
+        )
+        self.artboard_grid_alignment_combo.setCurrentIndex(max(0, alignment_index))
         self.artboard_safe_visible_check.setChecked(layout["safe_area_visible"])
         for edge, spin in self.artboard_safe_controls.items():
             spin.setValue(int(layout["safe_area"][edge]))
@@ -2857,12 +2872,13 @@ class PainterUIInspector(QWidget):
         self.artboard_horizontal_guides_edit.setText(
             ", ".join(f"{value:g}" for value in guides["horizontal"])
         )
-        columns = grid["mode"] == "columns"
+        columns = grid["mode"] in {"columns", "rows"}
         uniform = grid["mode"] == "grid"
+        centered = columns and grid.get("alignment") == "center"
         self.artboard_grid_count_spin.setEnabled(columns)
         self.artboard_grid_gutter_spin.setEnabled(columns)
-        self.artboard_grid_margin_spin.setEnabled(columns)
-        self.artboard_grid_size_spin.setEnabled(uniform)
+        self.artboard_grid_margin_spin.setEnabled(columns and not centered)
+        self.artboard_grid_size_spin.setEnabled(uniform or centered)
         from app.painter_ui_layout_diagnostics import diagnose_ui_layout
 
         report = diagnose_ui_layout(self._document)
@@ -2912,6 +2928,10 @@ class PainterUIInspector(QWidget):
                 "count": int(self.artboard_grid_count_spin.value()),
                 "gutter": float(self.artboard_grid_gutter_spin.value()),
                 "margin": float(self.artboard_grid_margin_spin.value()),
+                "alignment": str(
+                    self.artboard_grid_alignment_combo.currentData()
+                    or "stretch"
+                ),
                 "color": str(
                     artboard.get("layout_grid", {}).get("color")
                     or "#4C9AFF32"
@@ -2933,12 +2953,16 @@ class PainterUIInspector(QWidget):
             },
         }
         self.artboard_layout_changed.emit(str(artboard["id"]), changes)
-        columns = mode == "columns"
+        columns = mode in {"columns", "rows"}
         uniform = mode == "grid"
+        centered = (
+            columns
+            and self.artboard_grid_alignment_combo.currentData() == "center"
+        )
         self.artboard_grid_count_spin.setEnabled(columns)
         self.artboard_grid_gutter_spin.setEnabled(columns)
-        self.artboard_grid_margin_spin.setEnabled(columns)
-        self.artboard_grid_size_spin.setEnabled(uniform)
+        self.artboard_grid_margin_spin.setEnabled(columns and not centered)
+        self.artboard_grid_size_spin.setEnabled(uniform or centered)
 
     def _emit_artboard_context(self) -> None:
         if self._syncing:

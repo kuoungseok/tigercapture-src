@@ -500,13 +500,17 @@ def register_paint_actions(registry: Any) -> None:
     )
     registry.register_adapter_action(
         "paint.ui.artboard.layout.set",
-        "Set provider-neutral grid, columns, guides, and safe area on a Painter UI artboard.",
+        "Set provider-neutral grids, columns, rows, guides, and safe area on a Painter UI artboard.",
         "paint",
         "paint_ui_artboard_layout_set",
         params_schema=schema_object(
             {
                 "artboard_id": {"type": "string"},
                 "layout_grid": any_object,
+                "layout_grids": {
+                    "type": "array",
+                    "items": any_object,
+                },
                 "safe_area": any_object,
                 "safe_area_visible": {"type": "boolean"},
                 "guides": any_object,

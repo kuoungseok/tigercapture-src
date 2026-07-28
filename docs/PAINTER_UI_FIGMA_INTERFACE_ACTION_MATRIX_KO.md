@@ -25,6 +25,7 @@ Import 후 보이기만 하거나 JSON에만 남는 기능은 `Data only`이며 
 | Smart Selection spacing | Auto/H/V spacing analysis, mixed gap, explicit px Tidy Up, eligibility reason | `paint.ui.selection.tidy` |
 | Inline text | Double-click canvas editing, Escape cancel, focus-out or Ctrl/Cmd+Enter commit, one-step Undo | `paint.ui.text.content.set` |
 | Constraints and Auto Layout | Inspector constraints, Horizontal/Vertical flow, padding/gap/wrap/Hug/Fill, non-destructive content stress preview | `paint.ui.layout.set`, `paint.ui.layout.diagnostics`, `paint.ui.layout.stress_preview`, `paint.ui.responsive.override.*` |
+| Artboard layout grids | Uniform/Columns/Rows, ordered simultaneous definitions, Stretch/Center alignment | `paint.ui.artboard.layout.set` |
 | Solid Fill, Stroke, Radius, Opacity | Inspector fields | `paint.ui.object.update` |
 | Linear/Radial Gradient | Inspector `Appearance` dialog with type, angle/center/radius, ordered color stops | `paint.ui.appearance.inspect`, `paint.ui.appearance.gradient.set/remove` |
 | Drop/Inner Shadow stack | Inspector `Appearance > Effects` with add/remove/reorder and geometry/blend controls | `paint.ui.appearance.effect.add/update/remove/reorder` |

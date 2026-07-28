@@ -425,6 +425,10 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Padding top", "위쪽 패딩", "上パディング", "上内边距", "Marge interne supérieure", "Innenabstand oben"),
     ("Padding right", "오른쪽 패딩", "右パディング", "右内边距", "Marge interne droite", "Innenabstand rechts"),
     ("Padding bottom", "아래쪽 패딩", "下パディング", "下内边距", "Marge interne inférieure", "Innenabstand unten"),
+    ("Rows", "행", "行", "行", "Lignes", "Zeilen"),
+    ("Grid Alignment", "그리드 정렬", "グリッド配置", "网格对齐", "Alignement de la grille", "Rasterausrichtung"),
+    ("Stretch", "늘이기", "ストレッチ", "拉伸", "Étirer", "Strecken"),
+    ("Center", "가운데", "中央", "居中", "Centrer", "Zentrieren"),
 )
 
 _TABLE = {

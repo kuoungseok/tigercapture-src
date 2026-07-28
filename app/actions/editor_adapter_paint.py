@@ -821,6 +821,7 @@ class PaintAdapterMixin(
         *,
         artboard_id: str,
         layout_grid: dict[str, Any] | None = None,
+        layout_grids: list[dict[str, Any]] | None = None,
         safe_area: dict[str, Any] | None = None,
         safe_area_visible: bool | None = None,
         guides: dict[str, Any] | None = None,
@@ -839,6 +840,10 @@ class PaintAdapterMixin(
         changes: dict[str, Any] = {}
         if layout_grid is not None:
             changes["layout_grid"] = dict(layout_grid)
+        if layout_grids is not None:
+            changes["layout_grids"] = [
+                dict(item) for item in layout_grids if isinstance(item, dict)
+            ]
         if safe_area is not None:
             changes["safe_area"] = dict(safe_area)
         if safe_area_visible is not None:

@@ -5,7 +5,7 @@ from collections.abc import Mapping
 from typing import Any
 
 
-_GRID_MODES = {"none", "grid", "columns"}
+_GRID_MODES = {"none", "grid", "columns", "rows"}
 _EDGES = ("left", "top", "right", "bottom")
 
 
@@ -35,30 +35,54 @@ def normalize_ui_artboard_layout(
     source = row if isinstance(row, Mapping) else {}
     raw_grid = source.get("layout_grid")
     raw_grid = raw_grid if isinstance(raw_grid, Mapping) else {}
-    mode = str(raw_grid.get("mode") or "none").strip().casefold()
+    raw_grids = source.get("layout_grids")
+    raw_grids = (
+        [item for item in raw_grids if isinstance(item, Mapping)]
+        if isinstance(raw_grids, list)
+        else []
+    )
+    if not raw_grids:
+        raw_grids = [raw_grid]
+    elif raw_grid:
+        # Mutation services synchronize both views. Keeping the legacy first
+        # entry authoritative also preserves older direct-edit callers.
+        raw_grids[0] = raw_grid
+
+    def normalize_grid(item: Mapping[str, Any], index: int) -> dict[str, Any]:
+        mode = str(item.get("mode") or "none").strip().casefold()
+        mode = mode if mode in _GRID_MODES else "none"
+        axis_extent = float(height if mode == "rows" else width)
+        alignment = str(item.get("alignment") or "stretch").strip().casefold()
+        return {
+            "id": str(item.get("id") or f"layout-grid-{index + 1}"),
+            "name": str(item.get("name") or mode.title() or f"Grid {index + 1}"),
+            "mode": mode,
+            "visible": bool(item.get("visible", mode != "none")),
+            "size": max(2.0, min(512.0, _number(item.get("size"), 8.0))),
+            "count": max(1, min(64, int(_number(item.get("count"), 12)))),
+            "gutter": max(
+                0.0,
+                min(max(0.0, axis_extent), _number(item.get("gutter"), 20.0)),
+            ),
+            "margin": max(
+                0.0,
+                min(
+                    max(0.0, axis_extent * 0.5),
+                    _number(item.get("margin"), 24.0),
+                ),
+            ),
+            "alignment": alignment if alignment in {"stretch", "center"} else "stretch",
+            "color": str(item.get("color") or "#4C9AFF32"),
+        }
+
+    grids = [normalize_grid(item, index) for index, item in enumerate(raw_grids)]
     raw_safe = source.get("safe_area")
     raw_safe = raw_safe if isinstance(raw_safe, Mapping) else {}
     raw_guides = source.get("guides")
     raw_guides = raw_guides if isinstance(raw_guides, Mapping) else {}
     return {
-        "layout_grid": {
-            "mode": mode if mode in _GRID_MODES else "none",
-            "visible": bool(raw_grid.get("visible", mode != "none")),
-            "size": max(2.0, min(512.0, _number(raw_grid.get("size"), 8.0))),
-            "count": max(1, min(64, int(_number(raw_grid.get("count"), 12)))),
-            "gutter": max(
-                0.0,
-                min(max(0.0, float(width)), _number(raw_grid.get("gutter"), 20.0)),
-            ),
-            "margin": max(
-                0.0,
-                min(
-                    max(0.0, float(width) * 0.5),
-                    _number(raw_grid.get("margin"), 24.0),
-                ),
-            ),
-            "color": str(raw_grid.get("color") or "#4C9AFF32"),
-        },
+        "layout_grid": dict(grids[0]),
+        "layout_grids": grids,
         "safe_area": {
             edge: max(
                 0,

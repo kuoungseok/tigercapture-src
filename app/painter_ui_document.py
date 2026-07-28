@@ -8,7 +8,7 @@ from app.painter_ui_auto_layout import normalize_ui_auto_layout
 
 
 UI_DOCUMENT_SCHEMA = "tigerstudio.painter.ui.v1"
-UI_DOCUMENT_VERSION = 13
+UI_DOCUMENT_VERSION = 14
 UI_OBJECT_KINDS = {
     "frame",
     "group",
@@ -151,14 +151,31 @@ def create_ui_document(
                 "safe_area": {"left": 0, "top": 0, "right": 0, "bottom": 0},
                 "safe_area_visible": False,
                 "layout_grid": {
+                    "id": "layout-grid-1",
+                    "name": "None",
                     "mode": "none",
                     "visible": False,
                     "size": 8.0,
                     "count": 12,
                     "gutter": 20.0,
                     "margin": 24.0,
+                    "alignment": "stretch",
                     "color": "#4C9AFF32",
                 },
+                "layout_grids": [
+                    {
+                        "id": "layout-grid-1",
+                        "name": "None",
+                        "mode": "none",
+                        "visible": False,
+                        "size": 8.0,
+                        "count": 12,
+                        "gutter": 20.0,
+                        "margin": 24.0,
+                        "alignment": "stretch",
+                        "color": "#4C9AFF32",
+                    }
+                ],
                 "guides": {
                     "visible": True,
                     "locked": False,
@@ -1097,7 +1114,20 @@ def update_ui_artboard(
     for index, row in enumerate(document["artboards"]):
         if row["id"] != artboard_id:
             continue
-        merged = {**row, **dict(changes), "id": row["id"]}
+        normalized_changes = dict(changes)
+        if "layout_grid" in normalized_changes and "layout_grids" not in normalized_changes:
+            grids = [dict(item) for item in row.get("layout_grids", [])]
+            replacement = dict(normalized_changes["layout_grid"])
+            if grids:
+                grids[0] = {**grids[0], **replacement}
+            else:
+                grids = [replacement]
+            normalized_changes["layout_grids"] = grids
+        elif "layout_grids" in normalized_changes:
+            grids = normalized_changes.get("layout_grids")
+            if isinstance(grids, list) and grids:
+                normalized_changes["layout_grid"] = dict(grids[0])
+        merged = {**row, **normalized_changes, "id": row["id"]}
         updated_row = _normalize_artboard(merged, index)
         document["artboards"][index] = updated_row
         return _revised(document), copy.deepcopy(updated_row)
