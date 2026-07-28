@@ -246,6 +246,11 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
 - marquee 선택, Smart Guide, 비율/중심 기준 resize
 - 모바일, 데스크톱, 콘솔, 방송 아트보드 프리셋
 
+- UI context-menu Copy/Paste Properties and Paste to Replace preserve stable
+  IDs, hierarchy, position, and z-order and share
+  `paint.ui.object.properties.copy/paste` /
+  `paint.ui.object.paste_replace` mutation contracts.
+
 ## P2. 인스펙터 확장
 
 1. X/Y/W/H, 회전, 피벗, 불투명도

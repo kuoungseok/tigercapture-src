@@ -436,6 +436,10 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Remove grid style", "그리드 스타일 삭제", "グリッドスタイルを削除", "删除网格样式", "Supprimer le style de grille", "Rasterstil entfernen"),
     ("Save Grid Style", "그리드 스타일 저장", "グリッドスタイルを保存", "保存网格样式", "Enregistrer le style de grille", "Rasterstil speichern"),
     ("Style name:", "스타일 이름:", "スタイル名:", "样式名称：", "Nom du style :", "Stilname:"),
+    ("Copy object", "객체 복사", "オブジェクトをコピー", "复制对象", "Copier l'objet", "Objekt kopieren"),
+    ("Copy properties", "속성 복사", "プロパティをコピー", "复制属性", "Copier les propriétés", "Eigenschaften kopieren"),
+    ("Paste properties", "속성 붙여넣기", "プロパティを貼り付け", "粘贴属性", "Coller les propriétés", "Eigenschaften einfügen"),
+    ("Paste to replace", "대체하여 붙여넣기", "置き換えて貼り付け", "粘贴并替换", "Coller pour remplacer", "Zum Ersetzen einfügen"),
 )
 
 _TABLE = {

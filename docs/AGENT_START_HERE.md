@@ -167,6 +167,9 @@ Focused entry points:
   planner. Suggestions require exact type-compatible values after active-theme
   and alias resolution, never mutate the document, and must apply through the
   existing stable-ID token bind/Undo path.
+  `app/painter_ui_property_clipboard.py` owns UI-object Copy/Paste Properties
+  and Paste to Replace. It preserves target stable IDs, hierarchy, position,
+  and z-order; UI and `paint.ui.object.properties.*` Actions must share it.
 
 If two areas overlap, keep the product boundary from the focused docs. Do not
 merge UI renewal, review automation, and VTuber sidecar setup into one unbounded

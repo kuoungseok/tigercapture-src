@@ -381,6 +381,21 @@ Implemented checkpoint (2026-07-29, arithmetic numeric fields slice):
   existing UI property mutation, Action parity, and one-step Undo remain the
   only document-changing path.
 
+Implemented checkpoint (2026-07-29, object property clipboard slice):
+
+- The UI Design canvas context menu exposes Copy Object, Copy Properties,
+  Paste Properties, and Paste to Replace only when the current selection and
+  clipboard make each command valid.
+- Property paste copies normalized Appearance, Auto Layout, opacity, clipping,
+  and kind-compatible image layout options without replacing stable ID,
+  geometry, hierarchy, text, or source assets.
+- Paste to Replace may change kind, size, presentation, and content while
+  preserving the target stable ID, artboard, parent, position, name, and
+  z-order so prototype and Motion references remain valid.
+- UI and `paint.ui.object.properties.copy/paste` /
+  `paint.ui.object.paste_replace` use `app/painter_ui_property_clipboard.py`,
+  one-step Undo, and the same normalized batch mutation service.
+
 Exit criteria:
 
 - Common object editing is possible without repeatedly moving to Inspector.

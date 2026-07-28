@@ -1197,6 +1197,116 @@ class PaintAdapterMixin(
         dialog._push_undo_state("Update UI object")
         return self._paint_ui_commit(dialog, "Update UI object", document)
 
+    def paint_ui_object_properties_copy(
+        self,
+        *,
+        object_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_property_clipboard import copy_ui_object_payload
+
+        selected = str(
+            object_id
+            or dialog._painter_ui_document["selection"]["object_id"]
+            or ""
+        )
+        if not selected:
+            raise ValueError("Select a Painter UI object to copy properties")
+        payload = copy_ui_object_payload(
+            dialog._painter_ui_document,
+            selected,
+        )
+        dialog._painter_ui_property_clipboard = payload
+        return {
+            "schema": "tigerstudio.painter.ui.property_copy.v1",
+            "object_id": selected,
+            "clipboard": payload,
+        }
+
+    def paint_ui_object_properties_paste(
+        self,
+        *,
+        target_object_ids: list[str] | None = None,
+        clipboard: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_property_clipboard import paste_ui_object_properties
+
+        targets = list(
+            target_object_ids
+            or dialog._painter_ui_document["selection"]["object_ids"]
+        )
+        if not targets:
+            raise ValueError("Select Painter UI objects to paste properties")
+        payload = clipboard or getattr(
+            dialog,
+            "_painter_ui_property_clipboard",
+            None,
+        )
+        if not isinstance(payload, dict):
+            raise ValueError("Painter UI property clipboard is empty")
+        document, report = paste_ui_object_properties(
+            dialog._painter_ui_document,
+            targets,
+            payload,
+        )
+        if not report["target_object_ids"]:
+            return {
+                "changed": False,
+                "clipboard_result": report,
+                "ui_design": dialog.painter_action_state()["ui_design"],
+            }
+        dialog._push_undo_state("Paste UI object properties")
+        result = self._paint_ui_commit(
+            dialog,
+            "Paste UI object properties",
+            document,
+        )
+        result["clipboard_result"] = report
+        return result
+
+    def paint_ui_object_paste_replace(
+        self,
+        *,
+        target_object_ids: list[str] | None = None,
+        clipboard: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_property_clipboard import paste_replace_ui_objects
+
+        targets = list(
+            target_object_ids
+            or dialog._painter_ui_document["selection"]["object_ids"]
+        )
+        if not targets:
+            raise ValueError("Select Painter UI objects to replace")
+        payload = clipboard or getattr(
+            dialog,
+            "_painter_ui_property_clipboard",
+            None,
+        )
+        if not isinstance(payload, dict):
+            raise ValueError("Painter UI object clipboard is empty")
+        document, report = paste_replace_ui_objects(
+            dialog._painter_ui_document,
+            targets,
+            payload,
+        )
+        if not report["target_object_ids"]:
+            return {
+                "changed": False,
+                "clipboard_result": report,
+                "ui_design": dialog.painter_action_state()["ui_design"],
+            }
+        dialog._push_undo_state("Paste replace UI objects")
+        result = self._paint_ui_commit(
+            dialog,
+            "Paste replace UI objects",
+            document,
+        )
+        result["clipboard_result"] = report
+        return result
+
     def paint_ui_text_content_set(
         self,
         *,

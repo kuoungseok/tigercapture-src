@@ -999,6 +999,50 @@ def main() -> int:
         )
         >= 0
     )
+    property_source_id = desktop_object_ids[0]
+    property_target_id = desktop_object_ids[1]
+    property_target_before = next(
+        row
+        for row in dialog._painter_ui_document["objects"]
+        if row["id"] == property_target_id
+    )
+    property_style_before = json.dumps(
+        property_target_before["style"],
+        sort_keys=True,
+    )
+    property_copy_result = registry.execute(
+        "paint.ui.object.properties.copy",
+        {"object_id": property_source_id},
+    ).to_dict()
+    property_paste_result = registry.execute(
+        "paint.ui.object.properties.paste",
+        {"target_object_ids": [property_target_id]},
+    ).to_dict()
+    property_target_after = next(
+        row
+        for row in dialog._painter_ui_document["objects"]
+        if row["id"] == property_target_id
+    )
+    property_style_after = json.dumps(
+        property_target_after["style"],
+        sort_keys=True,
+    )
+    dialog._undo()
+    property_target_undone = next(
+        row
+        for row in dialog._painter_ui_document["objects"]
+        if row["id"] == property_target_id
+    )
+    property_clipboard_ok = bool(
+        property_copy_result.get("ok") is True
+        and property_paste_result.get("ok") is True
+        and property_style_after != property_style_before
+        and json.dumps(
+            property_target_undone["style"],
+            sort_keys=True,
+        )
+        == property_style_before
+    )
     state = dialog.painter_action_state()
     group_row = next(
         (
@@ -1075,6 +1119,7 @@ def main() -> int:
             and variable_font_compact_ok
             and multi_grid_ok
             and grid_style_ok
+            and property_clipboard_ok
             and text_context_ok
             and inline_text_ok
             and image_context_ok
@@ -1148,6 +1193,7 @@ def main() -> int:
         "variable_font_compact_ok": variable_font_compact_ok,
         "multiple_layout_grids_ok": multi_grid_ok,
         "layout_grid_style_ok": grid_style_ok,
+        "property_clipboard_ok": property_clipboard_ok,
         "quick_properties_ok": quick_properties_ok,
         "zoom_popover_ok": zoom_popover_ok,
         "compact_zoom_ok": compact_zoom_ok,

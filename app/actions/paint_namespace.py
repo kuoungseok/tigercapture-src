@@ -800,6 +800,45 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a UI object would be updated",
     )
     registry.register_adapter_action(
+        "paint.ui.object.properties.copy",
+        "Copy stable-ID-safe appearance and layout properties from one UI object.",
+        "paint",
+        "paint_ui_object_properties_copy",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}},
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="UI object properties would be copied",
+    )
+    property_paste_schema = schema_object(
+        {
+            "target_object_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+            },
+            "clipboard": any_object,
+        }
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.properties.paste",
+        "Paste copied appearance and layout properties without replacing identity or content.",
+        "paint",
+        "paint_ui_object_properties_paste",
+        params_schema=property_paste_schema,
+        undo_label="Paste UI object properties",
+        dry_summary="copied UI properties would be applied to selected objects",
+    )
+    registry.register_adapter_action(
+        "paint.ui.object.paste_replace",
+        "Replace selected UI object presentation while preserving stable IDs, hierarchy, position, and z-order.",
+        "paint",
+        "paint_ui_object_paste_replace",
+        params_schema=property_paste_schema,
+        undo_label="Paste replace UI objects",
+        dry_summary="selected UI objects would be replaced without breaking references",
+    )
+    registry.register_adapter_action(
         "paint.ui.text.content.set",
         "Set the editable plain-text content of one Painter UI text object.",
         "paint",

@@ -8121,6 +8121,7 @@ class PaintDialog(QDialog):
         }
         self._selected_layer_id: str | None = None
         self._paint_clipboard: dict | None = None
+        self._painter_ui_property_clipboard: dict | None = None
         self._paint_initial_color_scroll_pending = True
         self._tool_rail_collapsed = False
         self._tool_rail_full_width = 40
@@ -22941,6 +22942,44 @@ class PaintDialog(QDialog):
             selected = str(
                 (current.get("selection") or {}).get("object_id") or ""
             )
+            selected_ids = list(
+                (current.get("selection") or {}).get("object_ids") or []
+            )
+            has_clipboard = isinstance(
+                getattr(self, "_painter_ui_property_clipboard", None),
+                dict,
+            )
+            copy_action = menu.addAction(painter_text("Copy object"))
+            copy_properties_action = menu.addAction(
+                painter_text("Copy properties")
+            )
+            paste_properties_action = menu.addAction(
+                painter_text("Paste properties")
+            )
+            paste_replace_action = menu.addAction(
+                painter_text("Paste to replace")
+            )
+            copy_action.setEnabled(bool(selected))
+            copy_properties_action.setEnabled(bool(selected))
+            paste_properties_action.setEnabled(
+                bool(selected_ids and has_clipboard)
+            )
+            paste_replace_action.setEnabled(
+                bool(selected_ids and has_clipboard)
+            )
+            copy_action.triggered.connect(
+                lambda _checked=False: self._copy_painter_ui_object_payload()
+            )
+            copy_properties_action.triggered.connect(
+                lambda _checked=False: self._copy_painter_ui_object_payload()
+            )
+            paste_properties_action.triggered.connect(
+                lambda _checked=False: self._paste_painter_ui_object_properties()
+            )
+            paste_replace_action.triggered.connect(
+                lambda _checked=False: self._paste_replace_painter_ui_objects()
+            )
+            menu.addSeparator()
             parent_action = menu.addAction(painter_text("Select parent"))
             deep_action = menu.addAction(painter_text("Deep select"))
             parent_action.setEnabled(bool(selected))
@@ -22998,6 +23037,62 @@ class PaintDialog(QDialog):
             return
         menu = self._build_canvas_context_menu()
         menu.exec(global_pos)
+
+    def _copy_painter_ui_object_payload(self) -> None:
+        from app.painter_ui_property_clipboard import copy_ui_object_payload
+
+        current = getattr(self, "_painter_ui_document", None) or {}
+        object_id = str((current.get("selection") or {}).get("object_id") or "")
+        if not object_id:
+            return
+        self._painter_ui_property_clipboard = copy_ui_object_payload(
+            current,
+            object_id,
+        )
+
+    def _paste_painter_ui_object_properties(self) -> None:
+        from app.painter_ui_property_clipboard import paste_ui_object_properties
+
+        current = getattr(self, "_painter_ui_document", None) or {}
+        target_ids = list(
+            (current.get("selection") or {}).get("object_ids") or []
+        )
+        payload = getattr(self, "_painter_ui_property_clipboard", None)
+        if not target_ids or not isinstance(payload, dict):
+            return
+        document, report = paste_ui_object_properties(
+            current,
+            target_ids,
+            payload,
+        )
+        if not report["target_object_ids"]:
+            return
+        self._push_undo_state("Paste UI object properties")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _paste_replace_painter_ui_objects(self) -> None:
+        from app.painter_ui_property_clipboard import paste_replace_ui_objects
+
+        current = getattr(self, "_painter_ui_document", None) or {}
+        target_ids = list(
+            (current.get("selection") or {}).get("object_ids") or []
+        )
+        payload = getattr(self, "_painter_ui_property_clipboard", None)
+        if not target_ids or not isinstance(payload, dict):
+            return
+        document, report = paste_replace_ui_objects(
+            current,
+            target_ids,
+            payload,
+        )
+        if not report["target_object_ids"]:
+            return
+        self._push_undo_state("Paste replace UI objects")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
 
     # ---------- layout sync ----------
 
