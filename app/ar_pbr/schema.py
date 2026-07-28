@@ -359,6 +359,7 @@ DEFAULT_RENDER = {
         "light_elevation": 45.0,
         "light_color": [1.0, 1.0, 1.0],
         "direct_strength": 0.42,
+        "additional_lights": [],
         "shadow_strength": DEFAULT_SHADOW_STRENGTH,
         "shadow_light_type": DEFAULT_SHADOW_LIGHT_TYPE,
         "shadow_filter": DEFAULT_SHADOW_FILTER,
@@ -765,6 +766,46 @@ def normalize_lighting_settings(value: Any) -> dict[str, Any]:
             for value in _coerce_vector(data.get("light_color"), 3, defaults["light_color"])
         ],
         "direct_strength": _clamp(_coerce_float(data.get("direct_strength"), defaults["direct_strength"]), 0.0, 4.0),
+        "additional_lights": [
+            {
+                "light_type": (
+                    str(row.get("light_type") or "directional").strip().lower()
+                    if str(row.get("light_type") or "directional").strip().lower()
+                    in {"directional", "point", "spot"}
+                    else "directional"
+                ),
+                "direction": _coerce_vector(
+                    row.get("direction"), 3, [-0.35, -0.65, -0.72]
+                ),
+                "position": _coerce_vector(
+                    row.get("position"), 3, [0.0, 1.5, 2.0]
+                ),
+                "color": [
+                    _clamp(channel, 0.0, 8.0)
+                    for channel in _coerce_vector(
+                        row.get("color"), 3, [1.0, 1.0, 1.0]
+                    )
+                ],
+                "intensity": _clamp(
+                    _coerce_float(row.get("intensity"), 0.0), 0.0, 4.0
+                ),
+                "range": _clamp(
+                    _coerce_float(row.get("range"), 6.0), 0.05, 100.0
+                ),
+                "spot_inner_angle": _clamp(
+                    _coerce_float(row.get("spot_inner_angle"), 24.0),
+                    0.0,
+                    88.0,
+                ),
+                "spot_outer_angle": _clamp(
+                    _coerce_float(row.get("spot_outer_angle"), 36.0),
+                    1.0,
+                    89.0,
+                ),
+            }
+            for row in list(data.get("additional_lights") or [])[:2]
+            if isinstance(row, Mapping)
+        ],
         "shadow_strength": _clamp(_coerce_float(data.get("shadow_strength"), defaults["shadow_strength"]), 0.0, 1.0),
         "shadow_light_type": normalize_shadow_light_type(
             data.get("shadow_light_type", data.get("light_type", defaults["shadow_light_type"]))

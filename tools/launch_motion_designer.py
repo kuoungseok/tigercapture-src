@@ -22,7 +22,12 @@ from tools.qa_motion_ui import build_demo_composition
 def main() -> int:
     app = QApplication.instance() or QApplication(sys.argv)
     install_global_window_placement(app)
-    window = MotionDesignerWindow(build_demo_composition())
+    project_path = sys.argv[1] if len(sys.argv) > 1 else None
+    window = MotionDesignerWindow(
+        None if project_path else build_demo_composition(),
+        project_path=project_path,
+        standalone_document=True,
+    )
     window.show()
     window.raise_()
     window.activateWindow()

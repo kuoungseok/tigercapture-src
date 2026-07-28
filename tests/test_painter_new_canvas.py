@@ -656,7 +656,7 @@ def test_standalone_painter_uses_vector_icons_and_full_brush_selector() -> None:
     assert dialog.saturation_slider.isHidden()
     assert dialog.hue_slider.isHidden()
     assert dialog.value_slider.isHidden()
-    assert dialog._recent_color_btns[0].width() <= 32
+    assert dialog._recent_color_btns[0].width() >= 36
     assert dialog._paint_harmony_label.isHidden()
     assert len(dialog._palette_btns) == 8
     assert dialog._palette_btns[0].width() <= 48

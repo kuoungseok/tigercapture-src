@@ -63,6 +63,14 @@ def render_source(
             layer, time_ms, composition=composition, composition_time_ms=composition_time_ms,
             quality=quality, viewport_size=viewport_size,
         )
+    elif layer.layer_type == "generator" or layer.source.kind == "generator":
+        from .generator import render_generator
+
+        image = render_generator(
+            layer, time_ms, composition=composition,
+            composition_time_ms=composition_time_ms,
+            quality=quality, viewport_size=viewport_size,
+        )
     else:
         image = render_shape(layer, time_ms)
     return apply_effects(apply_masks(image, layer, time_ms), layer.effects, time_ms)

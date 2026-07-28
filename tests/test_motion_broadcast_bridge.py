@@ -76,7 +76,10 @@ def test_live_controls_only_change_the_latest_template_instance() -> None:
     composition = instantiate_template("clean_lower_third", controls={"headline": "FIRST"})
     previous_instance = composition.metadata["last_applied_template"]["template_instance_id"]
     composition = apply_template_to_composition(
-        composition, "clean_lower_third", controls={"headline": "SECOND"},
+        composition,
+        "clean_lower_third",
+        controls={"headline": "SECOND"},
+        replace_existing=False,
     )
     current_instance = composition.metadata["last_applied_template"]["template_instance_id"]
     assert current_instance != previous_instance

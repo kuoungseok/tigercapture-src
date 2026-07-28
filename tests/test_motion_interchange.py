@@ -67,6 +67,33 @@ def test_lottie_preflight_blocks_silent_effect_loss_and_requires_bake() -> None:
     assert any(row["layer_id"] == composition.layers[1].id for row in report["bake_required"])
 
 
+def test_svg_preflight_reports_advanced_vector_and_text_bake_requirements() -> None:
+    composition = _shape_text_composition()
+    composition.layers[0].source.params["offset_path"] = {
+        "amount": 12.0,
+        "join": "round",
+    }
+    composition.layers[0].source.params["stroke_taper"] = {
+        "start": 0.2,
+        "end": 0.8,
+    }
+    composition.layers[1].source.params["text_animators"] = {
+        "animators": [{
+            "id": "reveal",
+            "selector": {"unit": "character", "start": 0.0, "end": 1.0},
+            "properties": {"opacity": 0.0, "tracking": 8.0},
+        }],
+    }
+
+    report = preflight_interchange(composition, "svg", time_ms=500)
+
+    assert report["ok"] is False
+    reasons = {row["reason"] for row in report["bake_required"]}
+    assert "Feature 'Offset Paths' is outside the editable SVG still subset." in reasons
+    assert "Feature 'Variable-width/tapered strokes' is outside the editable SVG still subset." in reasons
+    assert "Feature 'Text Animator stacks' is outside the editable SVG still subset." in reasons
+
+
 def test_otio_exports_only_explicit_media_timing_references(tmp_path: Path) -> None:
     media = tmp_path / "clip.mp4"
     media.write_bytes(b"media-reference")

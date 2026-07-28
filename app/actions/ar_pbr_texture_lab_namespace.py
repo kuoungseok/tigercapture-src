@@ -58,6 +58,10 @@ def texture_lab_settings_schema() -> dict[str, Any]:
             "preview_light_elevation": {"type": "number", "minimum": 3.0, "maximum": 89.0},
             "preview_environment": {"type": "number", "minimum": 0.0, "maximum": 1.5},
             "preview_animate_light": {"type": "boolean"},
+            "preview_parallax_enabled": {"type": "boolean"},
+            "preview_parallax_strength": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+            "preview_parallax_depth": {"type": "number", "minimum": 0.0, "maximum": 0.25},
+            "preview_parallax_steps": {"type": "integer", "minimum": 4, "maximum": 64},
         },
     }
 

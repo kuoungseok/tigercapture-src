@@ -91,11 +91,15 @@ class MotionTypographyGpuRenderer:
 
     @staticmethod
     def can_draw(graph: RenderGraph) -> tuple[bool, str]:
+        if graph.effect_groups:
+            return False, "effect_group_requires_raster"
         for node in graph.nodes:
             if node.layer_type == "adjustment":
                 return False, "adjustment_layer"
             if node.matte_layer_id:
                 return False, "track_matte"
+            if node.effects:
+                return False, "effects_require_raster"
             if node.typography_gpu_packet is None:
                 return False, node.typography_gpu_reason or "non_typography_node"
             if node.blend_mode not in {"normal", "add"}:

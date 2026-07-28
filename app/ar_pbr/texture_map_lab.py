@@ -83,6 +83,10 @@ PREVIEW_ONLY_SETTING_KEYS = frozenset(
         "preview_light_elevation",
         "preview_environment",
         "preview_animate_light",
+        "preview_parallax_enabled",
+        "preview_parallax_strength",
+        "preview_parallax_depth",
+        "preview_parallax_steps",
     }
 )
 
@@ -165,6 +169,10 @@ class TextureMapLabSettings:
     preview_light_elevation: float = 45.0
     preview_environment: float = 0.32
     preview_animate_light: bool = False
+    preview_parallax_enabled: bool = True
+    preview_parallax_strength: float = 0.55
+    preview_parallax_depth: float = 0.045
+    preview_parallax_steps: int = 24
 
 
 def clamp_float(value: Any, minimum: float, maximum: float, default: float) -> float:
@@ -530,6 +538,32 @@ def normalize_texture_map_settings(settings: Mapping[str, Any] | None = None) ->
         "preview_animate_light": bool_setting(
             raw.get("preview_animate_light"),
             defaults.preview_animate_light,
+        ),
+        "preview_parallax_enabled": bool_setting(
+            raw.get("preview_parallax_enabled"),
+            defaults.preview_parallax_enabled,
+        ),
+        "preview_parallax_strength": clamp_float(
+            raw.get("preview_parallax_strength"),
+            0.0,
+            1.0,
+            defaults.preview_parallax_strength,
+        ),
+        "preview_parallax_depth": clamp_float(
+            raw.get("preview_parallax_depth"),
+            0.0,
+            0.25,
+            defaults.preview_parallax_depth,
+        ),
+        "preview_parallax_steps": int(
+            round(
+                clamp_float(
+                    raw.get("preview_parallax_steps"),
+                    4.0,
+                    64.0,
+                    float(defaults.preview_parallax_steps),
+                )
+            )
         ),
     }
 
@@ -2073,6 +2107,22 @@ def export_texture_maps(
             name: UNREAL_TEXTURE_IMPORT_SETTINGS[name] for name in files if name in UNREAL_TEXTURE_IMPORT_SETTINGS
         },
         "substrate": substrate_export_plan(generated["settings"]),
+        "material_usage": {
+            "height_map": files.get("height", ""),
+            "height_semantics": "black_low_white_high",
+            "recommended_rendering": {
+                "parallax_mode": "pom",
+                "parallax_enabled": bool(files.get("height")),
+                "parallax_strength": float(generated["settings"].get("preview_parallax_strength", 0.55)),
+                "parallax_depth": float(generated["settings"].get("preview_parallax_depth", 0.045)),
+                "parallax_center": 0.5,
+                "parallax_steps": int(generated["settings"].get("preview_parallax_steps", 24)),
+            },
+            "tessellation": {
+                "supported_by_texture": bool(files.get("height")),
+                "renderer_status": "height_input_ready_geometry_tessellation_not_enabled",
+            },
+        },
         "diagnostics": generated["diagnostics"],
     }
     manifest_path = out_dir / f"{path.stem}_pbr_manifest.json"
@@ -2088,6 +2138,7 @@ def export_texture_maps(
         "settings": generated["settings"],
         "algorithms": generated["algorithms"],
         "substrate": manifest["substrate"],
+        "material_usage": manifest["material_usage"],
         "diagnostics": generated["diagnostics"],
     }
 

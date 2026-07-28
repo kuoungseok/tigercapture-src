@@ -73,6 +73,45 @@ If existing code still points at `debugCapture` for important dependencies,
 move the dependency to the proper durable location and leave only regenerated
 reports or screenshots in `debugCapture`.
 
+## Unreal Engine Source Path
+
+The canonical Unreal Engine source and installation root for this project is:
+
+```text
+D:\UE_5.8\Engine
+```
+
+- Use this path for Unreal Engine source inspection, headers, binaries, build
+  scripts, commandlets, and integration work.
+- Resolve engine source files under `D:\UE_5.8\Engine\Source`.
+- Do not infer, auto-select, or substitute another Unreal Engine installation
+  unless the user explicitly changes this project rule.
+
+## Tiger Studio UMG Synchronization Rule
+
+`resources/unreal_plugins/UMG/TigerStudioUMG` is the single shared Unreal UMG
+backend for Motion Designer, Painter, and future Tiger authoring providers.
+Do not create provider-specific Unreal plugins for those tools.
+
+When adding or changing an authoring feature that can affect Unreal UI output:
+
+- update the provider-neutral Tiger UMG document contract and its schema
+  version when the serialized meaning changes
+- update the `TigerStudioUMG` runtime/editor conversion path in the same change
+- map the feature to native UMG, UI Material, deterministic bake, or an explicit
+  blocked preflight result; never silently omit it
+- keep Motion Designer and Painter provider adapters behaviorally aligned where
+  they expose the same feature
+- update Python/plugin tests, rebuild with
+  `tools/build_unreal_umg_plugin.py`, and verify with `D:\UE_5.8\Engine`
+- do not claim support until the generated Widget Blueprint compiles and a real
+  Unreal capture proves the result
+
+Unrelated editor features that cannot enter a UMG document do not require a
+plugin change. The public installer must contain only the source-free bundle
+under `bundled/unreal_plugins/UMG/TigerStudioUMG`, never the private plugin
+`Source` tree.
+
 ## VTuber / VSeeFace Fallback Boundary
 
 Assume VSeeFace is absent unless the user explicitly asks to install, launch, or

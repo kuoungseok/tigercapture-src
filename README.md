@@ -1,29 +1,45 @@
-# TigerCapture
+# Tiger Studio
 
-**TigerCapture is a local-first Windows creator studio for polished screen recordings, reviewable AI editing, actor overlays, AR/PBR compositing, optional local Voice Lab TTS, and alpha VTuber/Broadcast workflows.**
+**Tiger Studio is a local-first Windows creator studio for polished screen
+recordings, timeline editing, reviewable AI editing, Motion Designer, Painter,
+anime/game actor workflows, AR/PBR material helpers, and supported Unreal UMG
+handoff.**
 
-TigerCapture records screenshots, GIFs, and MP4 screen captures, then opens them in a full editor with Screen Studio-style polish, CapCut-style creator assistance, professional color/audio foundations, node-based effects, subtitles, render queue delivery, Live2D/Spine/MMD actor tracks, AR/PBR 3D object compositing, optional local subtitle-to-voice generation, and VTuber/Broadcast Program Output foundations.
+Tiger Studio records screenshots, GIFs, and MP4 screen captures, then continues
+into a full local editor with Screen Studio-style polish, CapCut-style creator
+assistance, professional color/audio foundations, node-based effects,
+subtitles, render queue delivery, Live2D/Spine/MMD/VRM-oriented actor tracks,
+production drawing, Texture Lab/PBR support, and optional local Voice Lab
+workflows.
 
-Korean: TigerCapture는 화면 녹화와 가져온 영상을 로컬 편집 세션으로 이어서, 화면 녹화 보정, 검토 가능한 AI 편집, 배우/캐릭터 오버레이, AR/PBR 합성, 로컬 음성 생성, 렌더 큐까지 한 흐름에서 다루는 Windows 크리에이터 스튜디오입니다.
+Korean: Tiger Studio는 화면 녹화, 영상 편집, AI 보조 편집, 모션 그래픽,
+캐릭터 액터, Painter, PBR 텍스처 보조, Unreal UMG 전달 흐름을 하나의 로컬
+Windows 제작 환경으로 묶는 크리에이터 스튜디오입니다.
 
 **Made by** [artmouse (KyoungSeok Ko)](https://github.com/kuoungseok)
+
+TigerCapture may still appear in repository paths, build files, and historical
+release metadata while the product surface is being renamed to Tiger Studio.
 
 ---
 
 ## Current Product Focus
 
-TigerCapture is designed for creators who need more than a recorder, but do not want a heavy broadcast/post-production suite for every screen video.
+Tiger Studio is built for creators who need more than a recorder, but do not
+want to jump between a heavy NLE, drawing app, actor preview tool, texture
+utility, and game UI pipeline for every project.
 
 | Focus | What it means |
 |---|---|
 | **Polished screen recordings** | Record or import a screen video, apply Auto Polish, add cursor/click/hotkey emphasis, trim, and export. |
+| **Timeline studio** | Edit clips, subtitles, effects, zooms, color, audio, masks, transitions, and render jobs in one local project. |
 | **Reviewable AI editing** | Use Creator Assist and Script Edit to plan captions, cleanup edits, short ranges, vertical reframes, render jobs, publish copy, and platform variants before safe apply. |
-| **Local-first workflow** | Local OpenCV/Pillow analysis is enabled by default; optional Whisper, SAM, Demucs, ONNX Runtime, and Ultralytics are detected locally. No cloud API is required by the core workflow and models are not auto-downloaded. |
-| **Actor and VTuber overlays** | Add Live2D, Spine/NIKKE, MMD, and VRM/VSeeFace-oriented actor workflows as timeline tracks or Program Output sources, then preview and bake supported outputs. |
-| **Voice Lab and creator audio** | Optional local Style-Bert-VITS2 sidecar support can turn subtitle rows into aligned dialogue audio, prefer the user's `zoe` model when present, and expose a Model Maker bridge for additional local voice models without bundling the AGPL engine into TigerCapture. |
-| **AR/PBR compositing** | Place 3D object tracks with material, HDR environment, shadow/reflection, and preview/export parity diagnostics without claiming to replace a full 3D DCC or game engine. |
-| **Creator-grade post tools** | Color management, LUTs, advanced color payloads, audio routing/loudness helpers, masks, rotoscope, keying, and render diagnostics are exposed without hiding the fast screen-recording path. |
-| **Measured performance path** | Preview/cache bottlenecks are profiled first, then moved selectively into OpenCV, OpenGL, FFmpeg, proxy, or the optional Rust worker path. |
+| **Motion Designer** | Build 2.5D editorial motion, typography, paper/collage effects, particles, templates, and reusable interactive button components. |
+| **Painter** | Create game concept art, character/prop/background art, texture paint-over, video paint-over, and AI study passes with editable strokes. |
+| **Actor workflows** | Add Live2D, Spine/NIKKE, MMD, and VRM/VSeeFace-oriented actor workflows as timeline tracks or Program Output sources, then preview and bake supported outputs. |
+| **AR/PBR and Texture Lab** | Generate and preview supported PBR maps, place 3D object tracks, inspect material/environment payloads, and keep preview/export diagnostics visible. |
+| **Unreal UMG handoff** | Package supported Motion Designer/Painter content through a provider-neutral Tiger UMG document and generate supported Widget Blueprint output. |
+| **Local-first workflow** | Local OpenCV/Pillow analysis is enabled by default; optional Whisper, SAM, Demucs, ONNX Runtime, Ultralytics, Style-Bert-VITS2, and other tools are detected locally when installed. |
 
 ---
 
@@ -34,66 +50,145 @@ TigerCapture is designed for creators who need more than a recorder, but do not 
 - Screenshot, GIF, and MP4 capture modes.
 - Windows Graphics Capture support for GPU-composited windows.
 - Clean screen video plates with separate cursor sidecar metadata.
-- Auto Polish for cursor smoothing, scaling, static-cursor hiding, click rings, release feedback, drag trails, hotkey badges, wallpaper padding, rounded screen corners, and shadow framing.
-- Auto Zoom generation from cursor samples, clicks, dwell points, and long-recording rhythm.
-- Editable zoom candidates with crop overrides, easing styles, motion blur intent, and timeline `ZoomActor` output.
-- Simple Mode for the record/import -> polish -> trim -> export workflow while keeping Media Pool and Workbench available.
-- Screen Studio-style export handoff with readiness summaries and local share manifests.
+- Auto Polish for cursor smoothing, scaling, static-cursor hiding, click rings,
+  release feedback, drag trails, hotkey badges, wallpaper padding, rounded
+  screen corners, and shadow framing.
+- Auto Zoom generation from cursor samples, clicks, dwell points, and
+  long-recording rhythm.
+- Editable zoom candidates with crop overrides, easing styles, motion blur
+  intent, and timeline `ZoomActor` output.
+- Simple Mode for the record/import -> polish -> trim -> export workflow while
+  keeping Media Pool and Workbench available.
+- Screen Studio-style export handoff with readiness summaries and local share
+  manifests.
 
 ### Creator Assist
 
 - Right-dock Creator Assist panel inside the main editor.
-- Bottom `AI Command` dock for prompt-first edit planning, with a full Script Edit
-  review panel when the user wants to inspect and selectively apply operations.
-- Local media analysis for subject detection, scene ranges, tags, and smart media summaries.
+- Bottom `AI Command` dock for prompt-first edit planning, with a full Script
+  Edit review panel when the user wants to inspect and selectively apply
+  operations.
+- Local media analysis for subject detection, scene ranges, tags, and smart
+  media summaries.
 - Auto-caption styling and Subtitle-compatible caption rows.
 - Long-video-to-Shorts candidate planning.
 - Subject-aware vertical reframe keyframes.
-- Hook score plan, caption beat plan, title suggestions, hashtags, thumbnail-frame choices, and publish checklist rows.
+- Hook score plan, caption beat plan, title suggestions, hashtags,
+  thumbnail-frame choices, and publish checklist rows.
 - Multi-platform publish variants for Shorts, TikTok, and Reels style outputs.
-- Partial apply toggles for subtitles, short markers, export/reframe settings, and render-queue staging.
-- Render Queue handoff without opening the batch-export folder dialog.
+- Partial apply toggles for subtitles, short markers, export/reframe settings,
+  and render-queue staging.
 - Safe AI edit-plan boundary: deterministic local rule planning by default,
   optional local/agent provider readiness, validation before mutation, and
-  registered-command automation/MCP surfaces instead of arbitrary code execution.
-
-### Voice Lab and Subtitle TTS
-
-- Voice Lab is an optional local TTS workflow, not a bundled cloud voice service.
-- The current local provider target is a connected Style-Bert-VITS2 sidecar.
-- `Subtitles -> Track` can synthesize project subtitle rows into WAV clips and place them on an aligned dialogue audio track.
-- If the connected sidecar install is valid but the FastAPI server is offline, the generation path and QA preflight can start `server_fastapi.py` and wait for readiness before synthesis.
-- When multiple local models are detected, TigerCapture currently prefers the user's trained `zoe` model by default.
-- Model Maker prepares `Data/<model>/raw`, opens the upstream Dataset and Train UIs, and validates completed `model_assets/<model>` folders without importing the AGPL training engine into the closed editor process.
-- Generated TTS media is written under `external/assets/tts/generated`; the optional TTS engine and user-trained models stay outside the source tree.
+  registered-command automation/MCP surfaces instead of arbitrary code
+  execution.
 
 ### Timeline and Editing
 
 | Feature | Details |
 |---|---|
-| **Timeline editing** | Cut, split, duplicate, ripple/roll/slip/slide style operations, fades, markers, speed segments, and zoom actors. |
-| **Media Pool** | Import, thumbnailing, proxy/health state, relink support, actor QA badges, preset/template browsing. |
+| **Timeline editing** | Cut, split, duplicate, ripple/roll/slip/slide style operations, fades, markers, speed segments, zoom actors, and nested/multitrack project state. |
+| **Media Pool** | Import, thumbnailing, proxy/health state, relink support, actor QA badges, preset/template browsing, and actor/resource classification. |
 | **Workbench** | Node graph effects, masks, clip FX stack, metadata, and contextual inspector workflows. |
-| **Presets/Templates** | Effect, title, transition, caption, sticker, motion, color, audio, actor, Screen Studio-style, and CapCut-style workflow presets. |
+| **Presets/Templates** | Effect, title, transition, caption, sticker, motion, color, audio, actor, Screen Studio-style, CapCut-style, and Motion template workflows. |
 | **Render Queue** | Persistent queue, retry/cancel/history, diagnostics, render failure assistant, delivery presets, and export readiness checks. |
 | **Project format** | `.tgp` project save/load with timeline, subtitles, markers, project settings, actor tracks, and workflow sidecars. |
 
+### Motion Designer
+
+- 2.5D camera controls for depth, FOV, camera position, roll, and parallax.
+- Renderer-neutral Replicator metadata for count, offset, rotation, scale,
+  opacity falloff, deterministic jitter, and seed.
+- Track mattes, per-layer motion blur, typography animator automation,
+  directional blur, displacement, corner pin, mesh warp, paper fold, and paper
+  paste composites.
+- Direction presets such as headline slam, paper reveal, cutout collage,
+  editorial camera push, and beat-synced montage.
+- Interactive button components with Normal, Hover, Pressed, Disabled, and
+  Focused states, pointer/focus triggers, hit padding, transition duration, and
+  deterministic preview/export behavior.
+- Template gallery with production-rendered thumbnails, search/category
+  filters, aspect-ratio variants, and learning templates.
+
+### Painter
+
+- Standalone production drawing workspace for game concept art, character art,
+  props, backgrounds, texture paint-over, and video paint-over.
+- Photoshop-style document workflow with layers, channels, paths, selections,
+  masks, tool options, brush library, reference board, and 3D blockout guides.
+- Native `.tspaint` document format for background pixels, ordered layers/masks,
+  editable strokes, tablet channels, Material Paint, Wet Canvas state,
+  selections, channels, Work Paths, references, brush/PBR settings, and 3D
+  blockout scene data.
+- Brush catalog with basic, drawing, ink, water media, airbrush, concept,
+  texture, FX, and Pro Oils presets.
+- Tablet pressure, X/Y tilt, barrel rotation, and tangential pressure channels
+  preserved through live preview, editable strokes, undo/redo, clipboard,
+  save/load, actions, GPU cache signatures, and PNG/PBR rendering.
+- Wet Canvas v1 with editable layer-owned RGB exchange, Mix/Bleed/Pickup
+  controls, deterministic drying state, Dry Now, Undo/Redo, and PNG parity.
+- 3D Place modes for Cube, Sphere, Cylinder, Cone, Plane, and Arch with an
+  Unreal-style XYZ gizmo, Z-up floor, lighting, shadows, fog, and depth
+  diagnostics.
+- Provider-neutral AI study workflow for reference analysis, region
+  segmentation, underpaint, editable stroke generation, render comparison,
+  refinement, quality reporting, and real Painter-window timelapse capture.
+
 ### Actor, VTuber, and AR/PBR Tracks
 
-- Live2D and Spine clips live on dedicated actor tracks instead of normal video clips.
+- Live2D and Spine clips live on dedicated actor tracks instead of normal video
+  clips.
 - Drag/click actions can add actor clips to the timeline.
 - Double-clicking an actor clip opens the bound actor editor.
-- Spine/NIKKE support covers JSON and binary `.skel` parsing, atlas dependencies, weighted/linked mesh risks, clipping, constraints, multi-page atlases, skins, slots, and animation sweeps.
-- Live2D support covers `.model3.json`, moc/texture dependency checks, non-ASCII runtime path handling, expressions, motions, physics/pose/display metadata, and render QA.
-- MMD support covers PMX/PMD actor tracks, VMD motion workflow, toon preview/export paths, and local corpus QA; it does not claim native MMD/Bullet parity or universal PMX compatibility.
-- AR/PBR object workflows cover GLB/FBX-style intake, material/environment payloads, GPU/packet/software preview-export paths, and HDR/shadow/reflection diagnostics.
-- VTuber/Broadcast workflows expose Program Output recording/RTMP foundations, an optional OBS bridge, and VRM/VSeeFace bridge diagnostics as alpha/beta capabilities.
+- Spine/NIKKE support covers JSON and binary `.skel` parsing, atlas
+  dependencies, weighted/linked mesh risks, clipping, constraints, multi-page
+  atlases, skins, slots, and animation sweeps.
+- Live2D support covers `.model3.json`, moc/texture dependency checks,
+  non-ASCII runtime path handling, expressions, motions, physics/pose/display
+  metadata, and render QA.
+- MMD support covers PMX/PMD actor tracks, VMD motion workflow, toon
+  preview/export paths, and local corpus QA.
+- VRM/VSeeFace-oriented workflows expose internal fallback paths for Program
+  Output and optional external-sidecar diagnostics.
+- AR/PBR object workflows cover GLB/FBX-style intake, material/environment
+  payloads, GPU/packet/software preview-export paths, and HDR/shadow/reflection
+  diagnostics.
 - Actor overlays are baked into final videos as transparent overlays.
-- Local corpus QA validates actor sample sets and top-risk golden baselines on the development workstation, but public copy must stay tied to current QA evidence.
+
+### Texture Lab, PBR, and Unreal UMG
+
+- Texture Lab generates supported BaseColor, Normal, AO, Roughness, Metallic,
+  Height, Cavity, Curvature, packed ORM/ARM, Unreal ORM, glTF MR, and optional
+  Substrate-oriented F0/F90 mask plans.
+- GPU material preview includes Height-driven parallax occlusion mapping with
+  adjustable strength/depth/step controls.
+- Painter can use the shared Texture Lab map cache for in-memory PBR preview
+  and export without forcing repeated 4K PNG round trips.
+- Motion Designer and Painter can package supported content through a
+  provider-neutral Tiger UMG document.
+- The TigerStudioUMG workflow installs or updates the project plugin, generates
+  supported Widget Blueprint content, compiles it, validates the generated
+  asset, and reports the result.
+- Unsupported UMG content must be reported as native, UI Material,
+  deterministic bake, or blocked preflight; it must not be silently omitted.
+
+### Voice Lab and Subtitle TTS
+
+- Voice Lab is an optional local TTS workflow, not a bundled cloud voice
+  service.
+- The current local provider target is a connected Style-Bert-VITS2 sidecar.
+- `Subtitles -> Track` can synthesize project subtitle rows into WAV clips and
+  place them on an aligned dialogue audio track when the sidecar is ready.
+- Model Maker prepares local model folders and validates completed assets
+  without importing the AGPL training engine into the closed editor process.
+- Generated TTS media is written under `external/assets/tts/generated`; the
+  optional TTS engine and user-trained models stay outside the source tree.
 
 ### Color, Audio, and VFX/Post Foundations
 
-TigerCapture is not a full Resolve/Fairlight/Fusion replacement, but it now tracks partial professional post-production coverage through Health and Professional Readiness diagnostics.
+Tiger Studio is not a full Resolve/Fairlight/Fusion replacement, but it tracks
+partial professional post-production coverage through Health and Professional
+Readiness diagnostics.
 
 | Area | Current capability |
 |---|---|
@@ -101,38 +196,39 @@ TigerCapture is not a full Resolve/Fairlight/Fusion replacement, but it now trac
 | **Advanced color** | HDR-zone controls, log-wheel offsets, Hue vs Hue/Sat/Luma curves, Color Warper payloads, qualifier/window masks, grade-local LUTs, and preview/export RGB bake path. |
 | **Scopes and QA** | Waveform, vectorscope, parade, histogram, luma IRE, HDR nits estimate, clipping, gamut risk, skin-tone diagnostics, and ffprobe color metadata comparison. |
 | **Audio workflow** | Timeline audio lanes, Sound Editor, AI Master presets, vocal/music separation with Demucs or FFmpeg mid/side fallback, LUFS display, true-peak/stereo warnings, routing payloads, sends, and loudness delivery checks. |
-| **Voice Lab** | Optional local subtitle-to-voice generation, Voice Lab sidecar readiness checks, `zoe` default-model preference when available, Model Maker bridge, and actor lip-sync timing from subtitle/TTS clips. |
 | **Masks/VFX repair** | SAM click-to-mask, GrabCut, arbitrary-region CSRT tracking, HSL qualifier, power windows, B-spline roto payloads, clean-plate bounds, planar-tracker intent, chroma key, stabilization, and background removal. |
 | **Professional readiness** | Health and export preflight report long-project stability, GPU preview/export consistency, timeline integrity, color workflow depth, audio mix readiness, preset/template health, and Resolve/Fairlight/Fusion parity gaps. |
 
-### Export and QA
+### Export, QA, and Performance
 
 - MP4, WebM, and MOV export paths.
 - 1080p, 4K, vertical, square, and roundtrip-style delivery presets.
 - HDR10 passthrough path for supported exports.
-- Raw pre-render fallback for preview-only effects that cannot be expressed safely in FFmpeg.
-- Preview/export parity coverage for node graphs, masks, tracked masks, clip effects, nested sequences, typography, Spine, Live2D, chroma key, background removal, stabilizer, audio tracks, and color metadata.
-- Color/Audio accuracy QA for LUT metadata, scopes, LUFS, true peak, stereo correlation, and dialogue cleanup.
+- Raw pre-render fallback for preview-only effects that cannot be expressed
+  safely in FFmpeg.
+- Preview/export parity coverage for node graphs, masks, tracked masks, clip
+  effects, nested sequences, typography, Spine, Live2D, chroma key, background
+  removal, stabilizer, audio tracks, and color metadata.
+- Color/Audio accuracy QA for LUT metadata, scopes, LUFS, true peak, stereo
+  correlation, and dialogue cleanup.
 - Actor compatibility/render QA for Live2D and Spine resources.
-- Crash recovery, autosave, relink, startup trace, and product QA dashboard support.
-
-### Performance, Health, and Native Worker
-
-- Health Center summarizes crash status, QA failures, render queue failures/cancellations, current project media/proxy issues, and actor QA risk rows.
-- Project QA / Professional Readiness reports long-project stability, GPU preview/export consistency, timeline integrity, color workflow depth, audio mix readiness, preset/template health, and advisory Resolve/Fairlight/Fusion parity scores.
-- High-resolution proxy management is visible in the editor toolbar, with Original/Building/Ready/Stale/Active states and Media Pool proxy badges.
-- Preview performance uses measured fast paths: OpenCV-native chroma key operations, optimized video filters, frame-cache decoding, GL/native Spine rendering, preview downsample paths, and optional FFmpeg frame-server comparison.
-- Current preview evidence is split intentionally: `debugCapture/preview_perf_report.json` supports measured steady playback/performance work, and `debugCapture/preview_scrub_readiness_qa.json` now supports current-corpus scrub readiness under strict clean-cache measurement. Universal no-latency claims across every codec, machine, and project remain out of scope.
-- The optional Rust worker in `native/tigercapture_worker` uses a JSON-lines protocol and can handle media probing, timeline thumbnails, audio waveform, and audio spectrum generation.
-- Python/OpenCV/FFmpeg paths remain the fallback when the native worker is missing, incompatible, or disabled.
+- Crash recovery, autosave, relink, startup trace, product QA dashboard, and
+  public positioning QA support.
+- Preview performance uses measured fast paths: OpenCV-native chroma key
+  operations, optimized video filters, frame-cache decoding, GL/native Spine
+  rendering, preview downsample paths, optional FFmpeg frame-server comparison,
+  and optional native worker probes.
 
 ---
 
 ## Competitive Position
 
-TigerCapture is not trying to replace every professional editor. Its strongest position is the intersection of polished screen recording, local creator assistance, and actor overlays.
+Tiger Studio is not trying to replace every professional editor. Its strongest
+position is the intersection of polished screen recordings, local creator
+assistance, anime/game actor workflows, production drawing, Motion Designer,
+PBR helpers, and Unreal UI handoff.
 
-Current local QA snapshot as of 2026-07-11:
+Current local QA snapshot as of 2026-07-26:
 
 - Final Product Readiness: 99/100, with release still blocked by real broadcast
   platform evidence.
@@ -143,21 +239,23 @@ Current local QA snapshot as of 2026-07-11:
   until the real long-project corpus gate clears.
 - CapCut Parity Next: 89.38/100, with cloud/mobile/collaboration still the
   largest gap.
-- Voice Lab Sidecar QA: ready on the local reference install with 7 detected
-  models including `zoe`; the QA Dashboard runs the sidecar preflight with
-  auto-start for project evaluation sessions.
 - Broadcast Readiness: 95/100 alpha-ready, not commercial broadcast-ready.
+- Latest documentation slice: Painter actions/new canvas, Unreal UMG
+  document/plugin, and Motion advanced direction tests passed locally.
 
-| Compared with | TigerCapture position |
+| Compared with | Tiger Studio position |
 |---|---|
-| **Screen Studio** | Screen Studio-style recording polish is now the closest competitive claim: cursor sidecars, click/drag/hotkey metadata, Auto Polish, zoom planning, and export handoff are evidence-backed for the measured corpus. Screen Studio remains simpler and more product-finished. |
+| **Screen Studio** | Screen Studio-style recording polish is a close scoped claim: cursor sidecars, click/drag/hotkey metadata, Auto Polish, zoom planning, and export handoff are evidence-backed for the measured corpus. Screen Studio remains simpler and more product-finished. |
 | **CapCut** | Creator Assist covers captions, Shorts planning, vertical reframe, publish packages, render handoff, mobile-safe templates, and local asset packs. CapCut still wins on mobile/cloud collaboration, huge social/template scale, and trend ecosystem depth. |
-| **Camtasia** | Strong overlap for tutorials and product demos. TigerCapture adds local ML planning and Live2D/Spine overlays; Camtasia still has mature education/business trust. |
-| **Descript** | Descript-lite positioning is now evidence-backed for transcript planning, reviewed safe apply, cleanup, speech-enhance contracts, and sentence-level voice replacement contracts. Descript still wins on hosted collaboration, provider-direct coediting, share links, comments, version history, and team workspaces. |
-| **Local TTS / voice tools** | Voice Lab can connect to a local Style-Bert-VITS2 sidecar for subtitle-to-voice generation and local model registration. It should be described as an optional local sidecar workflow, not a hosted TTS platform or universal voice-cloning product. |
+| **Camtasia** | Strong overlap for tutorials and product demos. Tiger Studio adds local ML planning, actor overlays, Painter, and Motion Designer; Camtasia still has mature education/business trust. |
+| **Descript** | Descript-lite positioning is evidence-backed for transcript planning, reviewed safe apply, cleanup, speech-enhance contracts, and sentence-level voice replacement contracts. Descript still wins on hosted collaboration, provider-direct coediting, share links, comments, version history, and team workspaces. |
+| **Live2D / Spine tools** | Tiger Studio treats supported Live2D, Spine, MMD, and VRM-style assets as timeline actors and exportable overlays. It is not a Cubism, Spine Editor, or MMD authoring replacement. |
+| **Clip Studio / Photoshop / Krita / Corel Painter** | Painter is now a scoped production drawing workspace with native documents, editable brushes, pressure/tilt, Wet Canvas v1, 3D blockout, and AI study automation. It is not a full replacement for mature dedicated paint packages. |
+| **Substance / Marmoset / Blender** | Texture Lab and PBR workflows help generate maps, preview materials, and hand off supported data. They are not full mesh texturing, baking, lookdev, or DCC replacements. |
 | **OBS** | Program Output recording/RTMP foundations and an optional OBS bridge exist, but OBS is still stronger for live streaming, scenes, plugins, and production broadcast ecosystems. |
-| **Premiere / Resolve / Final Cut Pro** | TigerCapture now has a stronger NLE foundation with Source/Record, 3-point edit, Final Cut-style storyline, multicam, proxy, conform, and project-bin action surfaces. It is still not a Premiere/Resolve/Final Cut-class professional NLE until real long-project evidence clears. |
-| **PowerPoint / presentation tools** | TigerCapture can author timeline-native decks and export PPTX, PDF, or MP4 presentation videos. It should not be positioned as a full PowerPoint replacement or enterprise presentation collaboration tool. |
+| **Premiere / Resolve / Final Cut Pro** | Tiger Studio has a stronger NLE foundation with Source/Record, 3-point edit, Final Cut-style storyline, multicam, proxy, conform, and project-bin action surfaces. It is still not a Premiere/Resolve/Final Cut-class professional NLE until real long-project evidence clears. |
+| **PowerPoint / presentation tools** | Tiger Studio can author timeline-native decks and export PPTX, PDF, or MP4 presentation videos. It should not be positioned as a full PowerPoint replacement or enterprise presentation collaboration tool. |
+| **Unreal UI workflows** | Tiger Studio can generate supported UMG output through its project plugin path. Unreal remains the runtime/editor authority; Tiger is the local authoring and handoff tool for supported UI content. |
 
 ---
 
@@ -166,14 +264,18 @@ Current local QA snapshot as of 2026-07-11:
 | Layer | Technology |
 |---|---|
 | UI | PySide6 / Qt 6, Fusion style, OpenGL preview |
-| Capture | Windows Graphics Capture, ffmpeg pipe encoding |
+| Capture | Windows Graphics Capture, FFmpeg pipe encoding |
 | Preview | OpenCV, NumPy, PySide6, OpenGL paths, prefetch/proxy/frame-server options |
 | Export | FFmpeg subprocess, raw pre-render fallback for parity-sensitive effects |
 | Color | CPU RGB pipeline, LUTs, optional PyOpenColorIO bridge, FFmpeg color metadata |
 | Audio | Qt playback, FFmpeg audio graph, LUFS/true-peak helpers, Demucs optional |
+| Painter | Qt canvas, editable stroke model, `.tspaint`, tablet channels, Wet Canvas v1, optional OpenGL-backed previews |
+| Motion | Motion Designer render graph, 2.5D metadata, templates, interactive button components |
+| Texture/PBR | Texture Lab map generation, GPU material preview, Height/POM preview, shared Painter PBR actions |
+| Unreal UMG | Provider-neutral Tiger UMG document, TigerStudioUMG project plugin, Widget Blueprint generation for supported content |
 | Voice Lab | Optional external Style-Bert-VITS2 sidecar, FastAPI `/voice` endpoint, generated WAV media |
 | Local ML | OpenCV/Pillow baseline analysis, optional Whisper/SAM/Demucs/ONNX/Ultralytics |
-| Actors | In-app Live2D runtime path, Spine parser/renderers, OpenGL/software fallback |
+| Actors | In-app Live2D runtime path, Spine parser/renderers, MMD/VRM-oriented workflows, OpenGL/software fallback |
 | Native worker | Optional Rust JSON-lines subprocess for probing, thumbnails, waveform, and spectrum generation |
 | Packaging | PyInstaller, Windows installer scripts |
 
@@ -184,22 +286,28 @@ Current local QA snapshot as of 2026-07-11:
 - Windows 10 / 11, 64-bit.
 - Python 3.11+ when running from source.
 - FFmpeg available through the packaged app or development environment.
-- GPU recommended for smoother preview, OpenGL actor rendering, and larger projects.
-- Optional local tools/models for advanced AI workflows: Whisper, SAM, Demucs, ONNX Runtime, Ultralytics, MediaPipe/rembg depending on feature use.
-- Optional local Voice Lab workflow: connect an existing Style-Bert-VITS2 sidecar and local voice models when subtitle-to-voice generation is needed. TigerCapture does not bundle that AGPL engine into the closed editor build.
+- GPU recommended for smoother preview, OpenGL actor rendering, Painter 3D
+  blockout, Texture Lab preview, and larger projects.
+- Optional local tools/models for advanced AI workflows: Whisper, SAM, Demucs,
+  ONNX Runtime, Ultralytics, MediaPipe/rembg depending on feature use.
+- Optional local Voice Lab workflow: connect an existing Style-Bert-VITS2
+  sidecar and local voice models when subtitle-to-voice generation is needed.
+  Tiger Studio does not bundle that AGPL engine into the closed editor build.
+- Optional Unreal UMG workflow: Unreal Engine 5.8 project access is required
+  when generating supported Widget Blueprint output.
 
 ---
 
 ## AI Editing Process Demo
 
-The current demo shows Tiger Studio building a multi-track edit: importing media,
-cutting on the timeline, layering inserts, opening the node graph, adjusting
-color and blur parameters, using split compare, and playing the finished edit to
-the closing shot.
+The current demo shows Tiger Studio building a multi-track edit: importing
+media, cutting on the timeline, layering inserts, opening the node graph,
+adjusting color and blur parameters, using split compare, and playing the
+finished edit to the closing shot.
 
-Korean: AI가 여러 영상 클립을 불러와 타임라인에 배치하고, 컷/전환/속도/노드
-이펙트/컬러 그레이딩/블러/스플릿 비교를 거쳐 완성 장면까지 재생하는 과정을
-보여주는 데모입니다.
+Korean: 현재 데모는 Tiger Studio가 여러 미디어를 가져와 타임라인에 배치하고,
+컷 편집, 인서트 레이어, 노드 그래프, 컬러/블러 조정, 분할 비교, 최종 재생까지
+이어가는 과정을 보여줍니다.
 
 <video src="resources/branding/captures/tigerstudio_ai_full_process_demo.mp4" controls poster="resources/branding/captures/tigerstudio_ai_full_process_demo_poster.png" width="100%"></video>
 
@@ -210,7 +318,8 @@ Korean: AI가 여러 영상 클립을 불러와 타임라인에 배치하고, �
 ## Download
 
 **Not yet.** Public Windows downloads are temporarily paused while the current
-build is being validated for packaging, signing, and release-readiness gates.
+build is being validated for packaging, signing, source-free distribution, and
+release-readiness gates.
 
 ## Installation
 
@@ -218,15 +327,18 @@ Public installer downloads are not open yet. When the public build is ready,
 this page will point to a packaged Windows executable or installer instead of
 source archives.
 
-Source code is private. Public release pages should provide binaries/installers and documentation, not source archives.
+Source code is private. Public release pages should provide binaries,
+installers, release notes, and documentation, not source archives.
 
 ---
 
 ## Development Notes
 
-The source tree is private. Public users should install TigerCapture from the released Windows installer or packaged executable.
+The source tree is private. Public users should install Tiger Studio from the
+released Windows installer or packaged executable.
 
-For private development builds, the project can be run with the local Python environment and helper batch files in the repository root.
+For private development builds, the project can be run with the local Python
+environment and helper batch files in the repository root.
 
 Studio-wide AI/MCP automation is planned around a registered Python Action
 System, not arbitrary Python execution. The design target and action catalog are
@@ -236,10 +348,16 @@ tracked in `docs/SPEC_PYTHON_ACTION_SYSTEM.md`.
 
 ## Building
 
-Private release builds use PyInstaller plus the Windows installer scripts in this repository, including the optional native worker when available. Release builds should be validated with project QA, professional readiness, export parity, actor corpus, Screen Studio polish, and color/audio checks before publishing.
+Private release builds use PyInstaller plus the Windows installer scripts in
+this repository, including the optional native worker and source-free bundled
+Unreal plugin artifacts when available. Release builds should be validated with
+project QA, professional readiness, export parity, actor corpus, Screen
+Studio-style polish, color/audio checks, public positioning QA, packaging QA,
+and the relevant Unreal UMG evidence before publishing.
 
 ---
 
 ## License
 
-All rights reserved. Source code is private. Binaries are provided for personal use unless a separate license says otherwise.
+All rights reserved. Source code is private. Binaries are provided for personal
+use unless a separate license says otherwise.

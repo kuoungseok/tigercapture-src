@@ -401,7 +401,8 @@ def test_workbench_video_clip_with_embedded_audio_exposes_sound_editor(
 ) -> None:
     app = _app()
     import app.audio_tracks as audio_tracks
-    from app.timeline_model import VideoClip
+    from app.timeline_model import FadeSegment, VideoClip, ZoomActor
+    from app.typography import TextClip
     from app.video_track_legacy import VideoTrack
     from app.workbench_panel import WorkbenchPanel
 
@@ -416,6 +417,13 @@ def test_workbench_video_clip_with_embedded_audio_exposes_sound_editor(
         source_in_ms=2000,
         source_out_ms=7000,
     )
+    clip.transition_out_type = "dissolve"
+    clip.transition_out_ms = 500
+    clip.fades = [FadeSegment(start_ms=2500, end_ms=3000, kind="in")]
+    clip.zoom_actors = [ZoomActor(id=9, start_ms=3200, end_ms=3900)]
+    title = TextClip(start_ms=3600, end_ms=4400, text="Title")
+    setattr(title, "keyframes", {"opacity": [{"time_ms": 250, "value": 1.0}]})
+    clip.typography_actors = [title]
     track = VideoTrack(id=7, source_path=None, duration_ms=10000, clips=[clip])
     panel = WorkbenchPanel()
     panel.resize(744, 620)
@@ -437,6 +445,13 @@ def test_workbench_video_clip_with_embedded_audio_exposes_sound_editor(
     assert proxy.trim_start_ms == 2000
     assert proxy.trim_end_ms == 7000
     assert getattr(proxy, "workbench_embedded_video_audio") is True
+    markers = getattr(proxy, "_picture_sync_markers")
+    marker_kinds = {row["kind"] for row in markers}
+    marker_labels = {row["label"] for row in markers}
+    assert {"clip", "transition", "fade", "motion", "title"} <= marker_kinds
+    assert {"Clip In", "Clip Out", "dissolve start", "Zoom start", "Title in"} <= marker_labels
+    assert any(row["source_ms"] == 3850 and row["label"] == "opacity key" for row in markers)
+    assert sound._waveform_strip.picture_sync_marker_count() == len(markers)
 
     proxy.gain = 0.42
     panel.set_video_track(track, selected_clip=clip)
@@ -445,6 +460,7 @@ def test_workbench_video_clip_with_embedded_audio_exposes_sound_editor(
 
     assert sound.current_clip() is proxy
     assert sound.current_clip().gain == 0.42
+    assert sound._waveform_strip.picture_sync_marker_count() == len(getattr(proxy, "_picture_sync_markers"))
 
     panel.close()
 

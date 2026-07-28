@@ -346,8 +346,21 @@ def validate_color_management(
         warnings.append("PQ/HLG transfer implies HDR output.")
     if s.working_space in {"acescg", "acescct"} and not s.ocio_config_path:
         warnings.append("ACES working space is selected without an OCIO config path.")
-    if s.ocio_config_path and not Path(s.ocio_config_path).is_file():
-        warnings.append("OCIO config path does not exist.")
+    if s.ocio_config_path:
+        try:
+            from app.color_ocio import build_ocio_plan, ocio_config_exists
+
+            if not ocio_config_exists(s.ocio_config_path):
+                warnings.append("OCIO config is unavailable.")
+            else:
+                ocio_plan = build_ocio_plan(s)
+                if not ocio_plan.enabled:
+                    warnings.extend(
+                        f"OCIO runtime: {warning}"
+                        for warning in ocio_plan.warnings
+                    )
+        except Exception as exc:
+            warnings.append(f"OCIO runtime validation failed: {exc}")
 
     for name, slot in s.active_luts():
         if not slot.path.lower().endswith((".cube", ".3dl")):

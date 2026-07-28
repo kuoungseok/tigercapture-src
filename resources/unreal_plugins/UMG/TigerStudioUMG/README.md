@@ -32,6 +32,9 @@ silently omitted from generated Widget Blueprints. Motion effect stacks,
 keyers, and animated masks currently require that deterministic bake and are
 reported as `effect_requires_bake:*` or `mask_requires_bake:*` during
 preflight.
+Motion scoped effect groups are likewise reported as
+`motion_feature_requires_bake:effect_group`; their target scope is never
+silently flattened or omitted.
 
 The current source tree establishes the plugin and document boundary. Native
 WidgetTree/UWidgetAnimation generation must not be claimed until an actual

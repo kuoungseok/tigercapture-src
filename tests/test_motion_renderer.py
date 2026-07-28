@@ -5,11 +5,18 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+import numpy as np
 from PySide6.QtWidgets import QApplication
 from PySide6.QtCore import QCoreApplication
+from PySide6.QtGui import QColor, QImage, QPainter
 import pytest
 
+from app.motion_designer.effect_adapter import apply_effects
 from app.motion_designer.export_renderer import MotionExportRenderer
+from app.motion_designer.effect_group import set_effect_group_scope
+from app.motion_designer.render_graph import build_render_graph
+from app.motion_designer.typography_gpu_renderer import MotionTypographyGpuRenderer
+from app.motion_designer.vector_gpu_renderer import MotionVectorGpuRenderer
 from app.motion_designer.schema import AnimatedProperty, MotionComposition, MotionEffectRef, MotionLayer, MotionMaskRef, SourceRef
 
 
@@ -136,6 +143,228 @@ def test_adjustment_layer_and_track_matte_are_composited_in_layer_order() -> Non
     assert abs(int(visible[1]) - int(visible[2])) <= 2
     assert clipped[3] == 0
     app.processEvents()
+
+
+def test_adjustment_layer_can_target_selected_lower_layers_only() -> None:
+    app = _app()
+    selected = MotionLayer(
+        id="selected",
+        layer_type="shape",
+        source=SourceRef(kind="shape", params={
+            "width": 30, "height": 30, "fill": "#ff2000", "stroke_width": 0,
+        }),
+        out_ms=1000,
+    )
+    selected.transform.position.default = [20, 20]
+    untouched = MotionLayer(
+        id="untouched",
+        layer_type="shape",
+        source=SourceRef(kind="shape", params={
+            "width": 30, "height": 30, "fill": "#0040ff", "stroke_width": 0,
+        }),
+        out_ms=1000,
+    )
+    untouched.transform.position.default = [60, 20]
+    adjustment = MotionLayer(
+        id="grade",
+        layer_type="adjustment",
+        effects=[MotionEffectRef(kind="saturation", params={
+            "amount": AnimatedProperty(default=0.0),
+        })],
+        metadata={
+            "adjustment_scope": {
+                "mode": "selected_layers_below",
+                "layer_ids": [selected.id, "missing", "grade"],
+            },
+        },
+        out_ms=1000,
+    )
+    composition = MotionComposition(
+        width=80,
+        height=40,
+        duration_ms=1000,
+        layers=[selected, untouched, adjustment],
+    )
+    rgba = MotionExportRenderer().render_rgba_array(composition, 0)
+    left = rgba[20, 20]
+    right = rgba[20, 60]
+    assert max(int(left[0]), int(left[1]), int(left[2])) - min(
+        int(left[0]), int(left[1]), int(left[2])
+    ) <= 2
+    assert int(right[2]) > int(right[0]) + 100
+    app.processEvents()
+
+
+def test_effect_group_applies_stack_only_to_selected_descendants() -> None:
+    app = _app()
+    group = MotionLayer(id="group", name="Effect Group", layer_type="group", out_ms=1000)
+    group.effects = [MotionEffectRef(kind="saturation", params={
+        "amount": AnimatedProperty(default=0.0),
+    })]
+    selected = MotionLayer(
+        id="selected_child",
+        parent_id=group.id,
+        layer_type="shape",
+        source=SourceRef(kind="shape", params={
+            "width": 24, "height": 24, "fill": "#ff2000", "stroke_width": 0,
+        }),
+        out_ms=1000,
+    )
+    selected.transform.position.default = [16, 16]
+    other_child = MotionLayer(
+        id="other_child",
+        parent_id=group.id,
+        layer_type="shape",
+        source=SourceRef(kind="shape", params={
+            "width": 24, "height": 24, "fill": "#20ff00", "stroke_width": 0,
+        }),
+        out_ms=1000,
+    )
+    other_child.transform.position.default = [48, 16]
+    outside = MotionLayer(
+        id="outside",
+        layer_type="shape",
+        source=SourceRef(kind="shape", params={
+            "width": 24, "height": 24, "fill": "#2040ff", "stroke_width": 0,
+        }),
+        out_ms=1000,
+    )
+    outside.transform.position.default = [80, 16]
+    composition = MotionComposition(
+        width=96,
+        height=32,
+        duration_ms=1000,
+        layers=[selected, other_child, outside, group],
+    )
+    scope = set_effect_group_scope(
+        composition,
+        group,
+        mode="selected_descendants",
+        layer_ids=[selected.id, outside.id, "missing"],
+    )
+    assert scope["layer_ids"] == [selected.id]
+    rgba = MotionExportRenderer().render_rgba_array(composition, 0)
+    selected_pixel = rgba[16, 16]
+    other_pixel = rgba[16, 48]
+    outside_pixel = rgba[16, 80]
+    assert max(map(int, selected_pixel[:3])) - min(map(int, selected_pixel[:3])) <= 2
+    assert int(other_pixel[1]) > int(other_pixel[0]) + 100
+    assert int(outside_pixel[2]) > int(outside_pixel[0]) + 100
+    app.processEvents()
+
+
+def test_light_noise_shadow_and_stylize_effects_are_deterministic() -> None:
+    _app()
+    source = QImage(64, 64, QImage.Format_RGBA8888_Premultiplied)
+    source.fill(QColor(0, 0, 0, 0))
+    painter = QPainter(source)
+    painter.fillRect(16, 16, 32, 32, QColor("#506070"))
+    painter.end()
+
+    def pixels(image: QImage) -> np.ndarray:
+        straight = image.convertToFormat(QImage.Format_RGBA8888)
+        rows = np.frombuffer(straight.constBits(), dtype=np.uint8).reshape(
+            straight.height(), straight.bytesPerLine(),
+        )
+        return rows[:, : straight.width() * 4].reshape(
+            straight.height(), straight.width(), 4,
+        ).copy()
+
+    shadow = apply_effects(source, [MotionEffectRef(kind="drop_shadow", params={
+        "offset_x": AnimatedProperty(default=8.0),
+        "offset_y": AnimatedProperty(default=8.0),
+        "radius": AnimatedProperty(default=3.0),
+        "opacity": AnimatedProperty(default=1.0),
+        "color": AnimatedProperty(default="#101820"),
+    })], 0)
+    assert pixels(shadow)[52, 52, 3] > 0
+
+    sweep = apply_effects(source, [MotionEffectRef(kind="light_sweep", params={
+        "center_x": AnimatedProperty(default=0.5),
+        "center_y": AnimatedProperty(default=0.5),
+        "angle": AnimatedProperty(default=0.0),
+        "width": AnimatedProperty(default=0.2),
+        "softness": AnimatedProperty(default=0.5),
+        "intensity": AnimatedProperty(default=1.0),
+        "color": AnimatedProperty(default="#ffffff"),
+    })], 0)
+    assert int(pixels(sweep)[32, 32, :3].max()) > int(pixels(source)[32, 32, :3].max())
+
+    noise_effect = MotionEffectRef(kind="fractal_noise", params={
+        "amount": AnimatedProperty(default=0.8),
+        "scale": AnimatedProperty(default=16.0),
+        "octaves": AnimatedProperty(default=3.0),
+        "contrast": AnimatedProperty(default=1.2),
+        "evolution": AnimatedProperty(default=0.0),
+        "speed": AnimatedProperty(default=1.0),
+        "seed": AnimatedProperty(default=42.0),
+    })
+    noise_a = pixels(apply_effects(source, [noise_effect], 250))
+    noise_b = pixels(apply_effects(source, [noise_effect], 250))
+    noise_c = pixels(apply_effects(source, [noise_effect], 750))
+    assert np.array_equal(noise_a, noise_b)
+    assert not np.array_equal(noise_a, noise_c)
+
+    gradient = QImage(64, 8, QImage.Format_RGBA8888_Premultiplied)
+    gradient_pixels = np.zeros((8, 64, 4), dtype=np.uint8)
+    gradient_pixels[..., :3] = np.arange(64, dtype=np.uint8)[None, :, None] * 4
+    gradient_pixels[..., 3] = 255
+    gradient = QImage(
+        gradient_pixels.data,
+        64,
+        8,
+        gradient_pixels.strides[0],
+        QImage.Format_RGBA8888,
+    ).copy()
+    posterized = pixels(apply_effects(
+        gradient,
+        [MotionEffectRef(kind="posterize", params={
+            "levels": AnimatedProperty(default=4.0),
+            "amount": AnimatedProperty(default=1.0),
+        })],
+        0,
+    ))
+    assert len(np.unique(posterized[..., 0])) <= 4
+
+
+def test_gpu_only_preview_backends_fall_back_when_effects_are_active() -> None:
+    shape = MotionLayer(
+        id="shape_effect",
+        layer_type="shape",
+        source=SourceRef(kind="shape", params={
+            "width": 64, "height": 64, "fill": "#ffffff",
+        }),
+        effects=[MotionEffectRef(kind="light_sweep")],
+        out_ms=1000,
+    )
+    shape_graph = build_render_graph(
+        MotionComposition(width=64, height=64, duration_ms=1000, layers=[shape]),
+        0,
+        include_vector_gpu=True,
+    )
+    assert MotionVectorGpuRenderer.can_draw(shape_graph) == (
+        False,
+        "effects_require_raster",
+    )
+
+    text = MotionLayer(
+        id="text_effect",
+        layer_type="text",
+        source=SourceRef(kind="typography", params={
+            "text": "FX", "width": 128, "height": 64,
+        }),
+        effects=[MotionEffectRef(kind="posterize")],
+        out_ms=1000,
+    )
+    text_graph = build_render_graph(
+        MotionComposition(width=128, height=64, duration_ms=1000, layers=[text]),
+        0,
+        include_vector_gpu=True,
+    )
+    assert MotionTypographyGpuRenderer.can_draw(text_graph) == (
+        False,
+        "effects_require_raster",
+    )
 
 
 def test_normal_layers_do_not_allocate_full_composition_surfaces(monkeypatch) -> None:

@@ -8,6 +8,7 @@ premultiply in linear light, composite, and encode for display/output.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Mapping
 
 from app.color_management import ColorManagementSettings, validate_color_management
@@ -132,17 +133,35 @@ def validate_motion_color_settings(settings: MotionColorSettings | Mapping[str, 
         )
     if current.blend_space == "display-srgb":
         warnings.append("Legacy display-space blending can darken translucent edges")
-    if current.tone_map != "none":
-        errors.append("Motion tone mapping is not yet connected to both preview and export")
-    if current.project.is_hdr():
-        errors.append("Motion HDR output is blocked until the preview/export HDR transform has parity evidence")
     if current.project.ocio_config_path:
-        errors.append("Motion OCIO is blocked until the same transform is applied in preview and export")
-    if current.project.active_luts():
-        errors.append("Motion project LUTs are blocked until the same LUT chain is applied in preview and export")
-    project_report = validate_color_management(current.project)
+        from app.color_ocio import build_ocio_plan
+
+        ocio_plan = build_ocio_plan(current.project)
+        if not ocio_plan.enabled:
+            errors.extend(
+                f"Motion OCIO: {warning}"
+                for warning in (
+                    ocio_plan.warnings
+                    or ("configuration is unavailable",)
+                )
+            )
+    elif current.project.working_space in {"acescg", "acescct"}:
+        warnings.append(
+            "Motion uses the deterministic ACES-fitted fallback until an OCIO config is selected"
+        )
+    project_report = validate_color_management(current.project, require_existing_luts=True)
     errors.extend(str(item) for item in project_report.get("errors", []))
     warnings.extend(str(item) for item in project_report.get("warnings", []))
+    for name, slot in current.project.active_luts():
+        if Path(slot.path).suffix.lower() != ".cube":
+            errors.append(f"Motion {name} LUT must be a 3D .cube file: {slot.path}")
+        elif Path(slot.path).is_file():
+            try:
+                from .color_runtime import load_cube_lut
+
+                load_cube_lut(slot.path)
+            except Exception as exc:
+                errors.append(f"Motion {name} LUT is invalid: {exc}")
     return {
         "ok": not errors,
         "schema": current.schema,
@@ -151,6 +170,18 @@ def validate_motion_color_settings(settings: MotionColorSettings | Mapping[str, 
         "warnings": warnings,
         "internal_layer_blend": "qt-display-space",
         "final_video_composite": current.blend_space,
+        "delivery_pipeline": {
+            "order": [
+                "input_lut",
+                "tone_map",
+                "creative_lut",
+                "display_transform",
+                "output_lut",
+            ],
+            "tone_maps": sorted(SUPPORTED_TONE_MAPS),
+            "lut_format": "3d_cube",
+            "openexr_bypass": True,
+        },
     }
 
 

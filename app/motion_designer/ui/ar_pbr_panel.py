@@ -5,8 +5,8 @@ from typing import Any, Mapping
 from PySide6.QtCore import Signal
 from PySide6.QtGui import QColor
 from PySide6.QtWidgets import (
-    QCheckBox, QColorDialog, QDoubleSpinBox, QFormLayout, QLabel, QPushButton,
-    QScrollArea, QVBoxLayout, QWidget,
+    QCheckBox, QColorDialog, QComboBox, QDoubleSpinBox, QFormLayout, QLabel,
+    QPushButton, QScrollArea, QVBoxLayout, QWidget,
 )
 
 from app.motion_designer.keyframes import evaluate_property
@@ -75,6 +75,21 @@ class ArPbrPanel(QWidget):
         apply_2d_label = QLabel("2.5D Camera", content)
         self.form.addRow(apply_2d_label, self.apply_to_2d)
         self._rows["camera_apply_to_2d"] = (apply_2d_label, self.apply_to_2d)
+        self.camera_projection = QComboBox(content)
+        self.camera_projection.addItem("Perspective", "perspective")
+        self.camera_projection.addItem("Orthographic", "orthographic")
+        self.camera_projection.currentIndexChanged.connect(
+            lambda _index: self._emit_values()
+        )
+        projection_label = QLabel("Projection", content)
+        self.form.addRow(projection_label, self.camera_projection)
+        self._rows["camera_projection"] = (
+            projection_label,
+            self.camera_projection,
+        )
+        self.orthographic_size = self._spin(
+            "camera_orthographic_size", "Orthographic Size", 0.05, 100.0, 0.05,
+        )
         self.parallax_strength = self._spin(
             "camera_parallax_strength", "Parallax", 0.0, 4.0, 0.05,
         )
@@ -92,10 +107,26 @@ class ArPbrPanel(QWidget):
             self._camera_controls[name] = self._spin(f"camera_{name}", label, minimum, maximum, step)
 
         self._section("Light")
+        self.light_type = QComboBox(content)
+        self.light_type.addItem("Directional", "directional")
+        self.light_type.addItem("Point", "point")
+        self.light_type.addItem("Spot", "spot")
+        self.light_type.currentIndexChanged.connect(
+            lambda _index: self._emit_values()
+        )
+        light_type_label = QLabel("Type", content)
+        self.form.addRow(light_type_label, self.light_type)
+        self._rows["light_type"] = (light_type_label, self.light_type)
         for name, label, minimum, maximum, step in (
             ("azimuth", "Azimuth", -180, 180, .5),
             ("elevation", "Elevation", -20, 89, .5),
+            ("position_x", "Position X", -100, 100, .05),
+            ("position_y", "Position Y", -100, 100, .05),
+            ("position_z", "Position Z", -100, 100, .05),
             ("intensity", "Intensity", 0, 4, .02),
+            ("range", "Range", .05, 100, .05),
+            ("spot_inner_angle", "Spot Inner", 0, 88, .5),
+            ("spot_outer_angle", "Spot Outer", 1, 89, .5),
         ):
             self._light_controls[name] = self._spin(f"light_{name}", label, minimum, maximum, step)
         self.light_color = QPushButton("#ffffff", content)
@@ -184,10 +215,30 @@ class ArPbrPanel(QWidget):
             }
             for name, value in values.items():
                 self._camera_controls[name].setValue(float(value))
+            projection = str(_default(params, "projection", "perspective"))
+            index = self.camera_projection.findData(projection)
+            self.camera_projection.setCurrentIndex(max(0, index))
+            self.orthographic_size.setValue(
+                float(_default(params, "orthographic_size", 3.25))
+            )
             self.apply_to_2d.setChecked(bool(params.get("apply_to_2d", False)))
             self.parallax_strength.setValue(float(params.get("parallax_strength", 1.0) or 0.0))
         elif self._layer_type == "light":
-            for name, fallback in (("azimuth", 45), ("elevation", 45), ("intensity", .42)):
+            light_type = str(params.get("light_type") or "directional")
+            index = self.light_type.findData(light_type)
+            self.light_type.setCurrentIndex(max(0, index))
+            position = list(_default(params, "position", [0, 1.5, 2]))
+            for name, fallback in (
+                ("azimuth", 45),
+                ("elevation", 45),
+                ("position_x", position[0]),
+                ("position_y", position[1]),
+                ("position_z", position[2]),
+                ("intensity", .42),
+                ("range", 6.0),
+                ("spot_inner_angle", 24.0),
+                ("spot_outer_angle", 36.0),
+            ):
                 self._light_controls[name].setValue(float(_default(params, name, fallback)))
             color = list(_default(params, "color", [1, 1, 1]))
             self._set_color_button(color)
@@ -229,6 +280,10 @@ class ArPbrPanel(QWidget):
                 "rotation": [c["rotation_x"].value(), c["rotation_y"].value(), c["rotation_z"].value()],
                 "fov": c["fov"].value(), "focus_distance": c["focus_distance"].value(),
                 "focus_range": c["focus_range"].value(),
+                "projection": str(
+                    self.camera_projection.currentData() or "perspective"
+                ),
+                "orthographic_size": self.orthographic_size.value(),
                 "apply_to_2d": self.apply_to_2d.isChecked(),
                 "parallax_strength": self.parallax_strength.value(),
             })
@@ -236,8 +291,17 @@ class ArPbrPanel(QWidget):
             color = QColor(self.light_color.text())
             c = self._light_controls
             self.source_changed.emit({
+                "light_type": str(self.light_type.currentData() or "directional"),
                 "azimuth": c["azimuth"].value(), "elevation": c["elevation"].value(),
+                "position": [
+                    c["position_x"].value(),
+                    c["position_y"].value(),
+                    c["position_z"].value(),
+                ],
                 "intensity": c["intensity"].value(), "color": [color.redF(), color.greenF(), color.blueF()],
+                "range": c["range"].value(),
+                "spot_inner_angle": c["spot_inner_angle"].value(),
+                "spot_outer_angle": c["spot_outer_angle"].value(),
             })
 
 

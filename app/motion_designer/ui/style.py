@@ -1,6 +1,55 @@
 MOTION_DESIGNER_QSS = """
 * { font-family: "Segoe UI"; font-size: 11px; letter-spacing: 0; }
 QMainWindow#MotionDesignerWindow { background: #111317; color: #e4e7eb; }
+QDialog#MotionUnrealLinkDialog,
+QDialog#MotionTemplateGalleryDialog {
+  background: #111317; color: #e4e7eb;
+}
+QDialog#MotionUnrealLinkDialog QWidget,
+QDialog#MotionTemplateGalleryDialog QWidget {
+  color: #d7dbe1;
+}
+QMessageBox {
+  background: #1a1d22; color: #e4e7eb;
+}
+QMessageBox QLabel {
+  background: transparent; color: #d7dbe1;
+}
+QMessageBox QPushButton {
+  min-width: 72px; background: #232830; color: #edf0f4;
+  border: 1px solid #3b434e;
+}
+QMessageBox QPushButton:hover {
+  background: #2c333d; border-color: #5a6675;
+}
+QLabel#MotionGalleryTitle {
+  color: #f2f4f7; font-size: 18px; font-weight: 700; padding: 2px 0;
+}
+QLabel#MotionGalleryCaption { color: #9099a5; font-size: 11px; }
+QLabel#MotionPanelTitle {
+  color: #f2f4f7; font-size: 16px; font-weight: 700; padding: 1px 0 3px 0;
+}
+QLabel#MotionPanelEyebrow {
+  color: #77818d; font-size: 9px; font-weight: 600; padding-top: 7px;
+}
+QLabel#MotionPanelHint { color: #8d97a3; font-size: 10px; padding: 0 1px 2px 1px; }
+QListWidget#MotionTemplateGallery {
+  background: #101217; border: 1px solid #30353d; border-radius: 3px;
+  selection-background-color: #2d5368; selection-color: #ffffff;
+}
+QListWidget#MotionTemplateGallery::item {
+  background: #15191f; border: 1px solid #2c323a; border-radius: 3px;
+  margin: 4px; padding: 7px;
+}
+QListWidget#MotionTemplateGallery::item:hover { border-color: #4a5967; }
+QListWidget#MotionTemplateGallery::item:selected {
+  background: #213744; border-color: #5fa6c2;
+}
+QScrollArea#MotionTemplateGuide,
+QScrollArea#MotionTemplateGuide > QWidget > QWidget,
+QWidget#MotionTemplateGuideBody {
+  background: #121419; color: #d7dbe1; border: 0;
+}
 QDockWidget#MotionAIDock {
   background: #121419; color: #e4e7eb; border-left: 1px solid #30353d;
 }
@@ -152,6 +201,10 @@ QTabWidget::pane { border: 0; border-top: 1px solid #30353d; background: #121419
 QWidget#MotionParticlePanel, QScrollArea#MotionParticleScroll, QWidget#MotionParticleContent {
   background: #121419;
 }
+QWidget#ButtonComponentPanel {
+  background: #121419; color: #d7dbe1; border: 0;
+}
+QLabel#MotionHint { color: #7e8792; font-size: 10px; }
 QWidget#MotionOutputPanel { background: #121419; color: #d7dbe1; }
 QLabel#MotionOutputStatus { color: #76b4cb; font-size: 10px; }
 QLabel#MotionOutputDetail { color: #8d96a2; font-size: 10px; }
@@ -165,7 +218,21 @@ QWidget#MotionViewerHeader { background: #171a1f; border-bottom: 1px solid #3035
 QLabel#MotionTimecode { color: #d8dde3; font-size: 13px; min-width: 76px; padding: 0 5px; }
 QLabel#MotionInspectorSection { color: #f0f2f5; font-weight: 600; padding-top: 8px; }
 QListWidget#MotionGraphProperties { background: #15181d; border-right: 1px solid #30353d; }
-QWidget#MotionLibraryPanel QListWidget::item { padding: 4px; }
+QWidget#MotionLibraryPanel { background: #121419; }
+QListWidget#MotionAddList {
+  background: #101217; border: 1px solid #2e343c; border-radius: 3px;
+  outline: 0; padding: 3px;
+}
+QListWidget#MotionAddList::item {
+  color: #c8ced6; background: #15191e; border: 1px solid transparent;
+  border-radius: 3px; padding: 5px 7px; margin: 1px;
+}
+QListWidget#MotionAddList::item:hover {
+  color: #f2f4f7; background: #1d232a; border-color: #343d47;
+}
+QListWidget#MotionAddList::item:selected {
+  color: #ffffff; background: #243b47; border-color: #4f8197;
+}
 QScrollBar:vertical { background: #171a1f; width: 10px; margin: 0; }
 QScrollBar::handle:vertical { background: #424954; min-height: 24px; border-radius: 3px; }
 QScrollBar:horizontal { background: #171a1f; height: 10px; margin: 0; }

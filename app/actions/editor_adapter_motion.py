@@ -113,6 +113,35 @@ class MotionAdapterMixin:
             raise ValueError(f"motion composition not found: {composition_id}")
         return validate_composition(composition).to_dict()
 
+    def motion_project_save(self, *, composition_id: str, path: str) -> dict[str, Any]:
+        from app.motion_designer.project_io import save_motion_project
+
+        composition = self._motion_store().get(str(composition_id))
+        if composition is None:
+            raise ValueError(f"motion composition not found: {composition_id}")
+        target = save_motion_project(composition, path)
+        return {
+            "saved": True,
+            "path": str(target),
+            "composition_id": composition.id,
+            "revision": composition.revision,
+        }
+
+    def motion_project_load(self, *, path: str, replace_existing: bool = True) -> dict[str, Any]:
+        from app.motion_designer.project_io import load_motion_project
+
+        composition = load_motion_project(path)
+        store = self._motion_store()
+        if composition.id in store and not bool(replace_existing):
+            raise ValueError(f"motion composition already exists: {composition.id}")
+        store[composition.id] = composition
+        self._motion_sync_owner()
+        return {
+            "loaded": True,
+            "path": str(Path(path).expanduser().resolve(strict=False)),
+            "composition": composition.to_dict(),
+        }
+
     def motion_layer_list(self, *, composition_id: str) -> dict[str, Any]:
         composition = self._motion_service().get(composition_id)
         return {"composition_id": composition.id, "count": len(composition.layers),
@@ -147,6 +176,207 @@ class MotionAdapterMixin:
         result = service.parent_layer(composition_id, layer_id, parent_id)
         self._motion_commit(service)
         return result.to_dict()
+
+    def motion_button_inspect(self, *, composition_id: str, layer_id: str) -> dict[str, Any]:
+        from app.motion_designer.interactive_button import button_component
+
+        composition = self._motion_store().get(str(composition_id))
+        if composition is None:
+            raise ValueError(f"motion composition not found: {composition_id}")
+        layer = find_layer(composition, str(layer_id))
+        component = button_component(layer)
+        return {
+            "composition_id": composition.id,
+            "layer_id": layer.id,
+            "is_button": component is not None,
+            "component": component.to_dict() if component is not None else None,
+        }
+
+    def motion_button_create(
+        self,
+        *,
+        composition_id: str,
+        layer_id: str,
+        transition_duration_ms: int = 120,
+        easing: str = "ease_out",
+        hit_padding: float = 12.0,
+    ) -> dict[str, Any]:
+        from app.motion_designer.interactive_button import (
+            button_component,
+            create_button_component,
+        )
+
+        composition = self._motion_store().get(str(composition_id))
+        if composition is None:
+            raise ValueError(f"motion composition not found: {composition_id}")
+        layer = find_layer(composition, str(layer_id))
+        if button_component(layer) is not None:
+            raise ValueError("layer is already a button component")
+        component = create_button_component(layer, **{
+            "transition_duration_ms": transition_duration_ms,
+            "easing": easing,
+            "hit_padding": hit_padding,
+        })
+        composition.revision += 1
+        self._motion_sync_owner()
+        return {
+            "changed": True,
+            "undo_label": "Create Motion Button",
+            "composition_id": composition.id,
+            "layer_id": layer.id,
+            "component": component.to_dict(),
+            "revision": composition.revision,
+        }
+
+    def motion_button_update(
+        self,
+        *,
+        composition_id: str,
+        layer_id: str,
+        changes: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        from app.motion_designer.interactive_button import (
+            button_component,
+            set_button_component,
+            update_button_component_data,
+        )
+
+        composition = self._motion_store().get(str(composition_id))
+        if composition is None:
+            raise ValueError(f"motion composition not found: {composition_id}")
+        layer = find_layer(composition, str(layer_id))
+        component = button_component(layer)
+        if component is None:
+            raise ValueError("layer is not a button component")
+        update_button_component_data(component, changes)
+        set_button_component(layer, component)
+        composition.revision += 1
+        self._motion_sync_owner()
+        return {
+            "changed": True,
+            "undo_label": "Update Motion Button",
+            "composition_id": composition.id,
+            "layer_id": layer.id,
+            "component": component.to_dict(),
+            "revision": composition.revision,
+        }
+
+    def motion_button_state_set(
+        self,
+        *,
+        composition_id: str,
+        layer_id: str,
+        state: str,
+    ) -> dict[str, Any]:
+        return self.motion_button_update(
+            composition_id=composition_id,
+            layer_id=layer_id,
+            changes={"active_state": state},
+        )
+
+    def motion_button_remove(self, *, composition_id: str, layer_id: str) -> dict[str, Any]:
+        from app.motion_designer.interactive_button import remove_button_component
+
+        composition = self._motion_store().get(str(composition_id))
+        if composition is None:
+            raise ValueError(f"motion composition not found: {composition_id}")
+        layer = find_layer(composition, str(layer_id))
+        if not remove_button_component(layer):
+            raise ValueError("layer is not a button component")
+        composition.revision += 1
+        self._motion_sync_owner()
+        return {
+            "changed": True,
+            "undo_label": "Remove Motion Button",
+            "composition_id": composition.id,
+            "layer_id": layer.id,
+            "revision": composition.revision,
+        }
+
+    def motion_ui_binding_list(self, *, composition_id: str) -> dict[str, Any]:
+        from app.motion_designer.ui_motion_binding import ui_motion_bindings
+
+        composition = self._motion_store().get(str(composition_id))
+        if composition is None:
+            raise ValueError(f"motion composition not found: {composition_id}")
+        bindings = [row.to_dict() for row in ui_motion_bindings(composition)]
+        return {
+            "composition_id": composition.id,
+            "revision": composition.revision,
+            "count": len(bindings),
+            "bindings": bindings,
+        }
+
+    def motion_ui_binding_set(
+        self,
+        *,
+        composition_id: str,
+        binding: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        from app.motion_designer.ui_motion_binding import (
+            upsert_ui_motion_binding,
+            validate_ui_motion_bindings,
+        )
+
+        composition = self._motion_store().get(str(composition_id))
+        if composition is None:
+            raise ValueError(f"motion composition not found: {composition_id}")
+        candidate = MotionComposition.from_dict(composition.to_dict())
+        updated = upsert_ui_motion_binding(candidate, binding)
+        preflight = validate_ui_motion_bindings(candidate)
+        if not preflight["ok"]:
+            messages = "; ".join(
+                str(row["message"]) for row in preflight["errors"]
+            )
+            raise ValueError(f"invalid UI motion binding: {messages}")
+        upsert_ui_motion_binding(composition, updated.to_dict())
+        composition.revision += 1
+        self._motion_sync_owner()
+        return {
+            "changed": True,
+            "undo_label": "Set UI Motion Binding",
+            "composition_id": composition.id,
+            "binding": updated.to_dict(),
+            "preflight": validate_ui_motion_bindings(composition),
+            "revision": composition.revision,
+        }
+
+    def motion_ui_binding_remove(
+        self,
+        *,
+        composition_id: str,
+        binding_id: str,
+    ) -> dict[str, Any]:
+        from app.motion_designer.ui_motion_binding import remove_ui_motion_binding
+
+        composition = self._motion_store().get(str(composition_id))
+        if composition is None:
+            raise ValueError(f"motion composition not found: {composition_id}")
+        if not remove_ui_motion_binding(composition, str(binding_id)):
+            raise ValueError(f"UI motion binding not found: {binding_id}")
+        composition.revision += 1
+        self._motion_sync_owner()
+        return {
+            "changed": True,
+            "undo_label": "Remove UI Motion Binding",
+            "composition_id": composition.id,
+            "binding_id": str(binding_id),
+            "revision": composition.revision,
+        }
+
+    def motion_ui_binding_preflight(
+        self,
+        *,
+        composition_id: str,
+    ) -> dict[str, Any]:
+        from app.motion_designer.ui_motion_binding import (
+            validate_ui_motion_bindings,
+        )
+
+        composition = self._motion_store().get(str(composition_id))
+        if composition is None:
+            raise ValueError(f"motion composition not found: {composition_id}")
+        return validate_ui_motion_bindings(composition)
 
     def motion_cut_paper_create(
         self,
@@ -557,6 +787,108 @@ class MotionAdapterMixin:
         rows = [item.to_dict() for item in layer.effects]
         return {"count": len(rows), "effects": rows}
 
+    def motion_adjustment_scope_get(
+        self,
+        *,
+        composition_id: str,
+        layer_id: str,
+    ) -> dict[str, Any]:
+        from app.motion_designer.adjustment_scope import (
+            adjustment_scope,
+            eligible_adjustment_target_ids,
+        )
+
+        composition = self._motion_store()[composition_id]
+        layer = find_layer(composition, layer_id)
+        if layer.layer_type != "adjustment":
+            raise ValueError("Adjustment scope requires an adjustment layer")
+        return {
+            "scope": adjustment_scope(layer),
+            "eligible_layer_ids": eligible_adjustment_target_ids(
+                composition,
+                layer.id,
+            ),
+        }
+
+    def motion_adjustment_scope_set(
+        self,
+        *,
+        composition_id: str,
+        layer_id: str,
+        mode: str,
+        layer_ids: list[str] | None = None,
+    ) -> dict[str, Any]:
+        from app.motion_designer.adjustment_scope import set_adjustment_scope
+
+        composition = self._motion_store()[composition_id]
+        layer = find_layer(composition, layer_id)
+        scope = set_adjustment_scope(
+            composition,
+            layer,
+            mode=mode,
+            layer_ids=layer_ids or (),
+        )
+        composition.revision += 1
+        return {
+            "changed": True,
+            "undo_label": "Set Adjustment Layer Scope",
+            "scope": scope,
+            "revision": composition.revision,
+        }
+
+    def motion_effect_group_scope_get(
+        self,
+        *,
+        composition_id: str,
+        layer_id: str,
+    ) -> dict[str, Any]:
+        from app.motion_designer.effect_group import (
+            descendant_layer_ids,
+            effect_group_scope,
+            resolved_effect_group_target_ids,
+        )
+
+        composition = self._motion_store()[composition_id]
+        layer = find_layer(composition, layer_id)
+        if layer.layer_type != "group":
+            raise ValueError("Effect-group scope requires a group layer")
+        return {
+            "scope": effect_group_scope(layer),
+            "eligible_layer_ids": descendant_layer_ids(composition, layer.id),
+            "resolved_layer_ids": resolved_effect_group_target_ids(
+                composition,
+                layer,
+            ),
+        }
+
+    def motion_effect_group_scope_set(
+        self,
+        *,
+        composition_id: str,
+        layer_id: str,
+        mode: str,
+        layer_ids: list[str] | None = None,
+        enabled: bool = True,
+    ) -> dict[str, Any]:
+        from app.motion_designer.effect_group import set_effect_group_scope
+
+        composition = self._motion_store()[composition_id]
+        layer = find_layer(composition, layer_id)
+        scope = set_effect_group_scope(
+            composition,
+            layer,
+            enabled=enabled,
+            mode=mode,
+            layer_ids=layer_ids or (),
+        )
+        composition.revision += 1
+        return {
+            "changed": True,
+            "undo_label": "Set Effect Group Scope",
+            "scope": scope,
+            "revision": composition.revision,
+        }
+
     def motion_effect_add(self, *, composition_id: str, layer_id: str, effect: Mapping[str, Any]) -> dict[str, Any]:
         composition = self._motion_store()[composition_id]
         item = MotionEffectRef.from_dict(effect)
@@ -614,6 +946,45 @@ class MotionAdapterMixin:
         prop.keyframes.sort(key=lambda row: (row.time_ms, row.id))
         composition.revision += 1
         return {"changed": True, "undo_label": "Set Motion Effect Keyframe", "keyframe": frame.to_dict()}
+
+    def motion_effect_keyframe_delete(
+        self,
+        *,
+        composition_id: str,
+        layer_id: str,
+        effect_id: str,
+        key: str,
+        time_ms: int,
+    ) -> dict[str, Any]:
+        composition = self._motion_store()[composition_id]
+        item = next(
+            (
+                row for row in find_layer(composition, layer_id).effects
+                if row.id == effect_id
+            ),
+            None,
+        )
+        if item is None:
+            raise ValueError(f"motion effect not found: {effect_id}")
+        prop = item.params.get(str(key))
+        if prop is None:
+            raise ValueError(f"motion effect parameter not found: {key}")
+        target_time = max(0, int(time_ms))
+        remaining = [
+            row for row in prop.keyframes
+            if int(row.time_ms) != target_time
+        ]
+        if len(remaining) == len(prop.keyframes):
+            raise ValueError(f"motion effect keyframe not found at {target_time}ms")
+        prop.keyframes = remaining
+        composition.revision += 1
+        return {
+            "changed": True,
+            "undo_label": "Delete Motion Effect Keyframe",
+            "effect_id": item.id,
+            "key": str(key),
+            "time_ms": target_time,
+        }
 
     def motion_mask_list(self, *, composition_id: str, layer_id: str) -> dict[str, Any]:
         layer = find_layer(self._motion_store()[composition_id], layer_id)
@@ -679,6 +1050,45 @@ class MotionAdapterMixin:
         composition.revision += 1
         return {"changed": True, "undo_label": "Set Motion Mask Keyframe", "keyframe": frame.to_dict()}
 
+    def motion_mask_keyframe_delete(
+        self,
+        *,
+        composition_id: str,
+        layer_id: str,
+        mask_id: str,
+        key: str,
+        time_ms: int,
+    ) -> dict[str, Any]:
+        composition = self._motion_store()[composition_id]
+        item = next(
+            (
+                row for row in find_layer(composition, layer_id).masks
+                if row.id == mask_id
+            ),
+            None,
+        )
+        if item is None:
+            raise ValueError(f"motion mask not found: {mask_id}")
+        prop = item.params.get(str(key))
+        if prop is None:
+            raise ValueError(f"motion mask parameter not found: {key}")
+        target_time = max(0, int(time_ms))
+        remaining = [
+            row for row in prop.keyframes
+            if int(row.time_ms) != target_time
+        ]
+        if len(remaining) == len(prop.keyframes):
+            raise ValueError(f"motion mask keyframe not found at {target_time}ms")
+        prop.keyframes = remaining
+        composition.revision += 1
+        return {
+            "changed": True,
+            "undo_label": "Delete Motion Mask Keyframe",
+            "mask_id": item.id,
+            "key": str(key),
+            "time_ms": target_time,
+        }
+
     def motion_mask_path_set(self, *, composition_id: str, layer_id: str, mask_id: str,
                              path: Mapping[str, Any]) -> dict[str, Any]:
         composition = self._motion_store()[composition_id]
@@ -735,6 +1145,15 @@ class MotionAdapterMixin:
         item = next((row for row in layer.masks if row.id == mask_id), None)
         if item is None:
             raise ValueError(f"motion mask not found: {mask_id}")
+        from app.motion_designer.mask_tracking import MotionTrackingCache
+
+        existing_cache = MotionTrackingCache.from_dict(
+            item.metadata.get(TRACKING_METADATA_KEY),
+        )
+        if existing_cache.frozen:
+            raise ValueError(
+                "motion mask tracking cache is frozen; unfreeze it before propagation"
+            )
         request = tracking_request_for_mask(
             composition,
             layer,
@@ -873,6 +1292,107 @@ class MotionAdapterMixin:
         return self._motion_vector_update(composition_id, layer_id, {
             "trim": {"start": float(start), "end": float(end), "offset": float(offset)},
         }, "Set Vector Trim")
+
+    def motion_vector_offset_path_set(
+        self,
+        *,
+        composition_id: str,
+        layer_id: str,
+        amount: float,
+        join: str = "round",
+    ) -> dict[str, Any]:
+        normalized_join = str(join or "round").lower()
+        if normalized_join not in {"round", "miter", "bevel"}:
+            raise ValueError(f"unsupported Offset Paths join: {join}")
+        return self._motion_vector_update(
+            composition_id,
+            layer_id,
+            {"offset_path": {
+                "amount": float(amount),
+                "join": normalized_join,
+            }},
+            "Set Vector Offset Paths",
+        )
+
+    def motion_vector_path_morph_set(
+        self,
+        *,
+        composition_id: str,
+        layer_id: str,
+        keyframes: list[Mapping[str, Any]],
+        auto_correspond: bool = True,
+        target_count: int = 0,
+    ) -> dict[str, Any]:
+        from app.motion_designer.path_morph import set_layer_path_morph
+
+        from app.motion_designer.schema import MotionLayer
+
+        service = self._motion_service()
+        composition = service.get(composition_id)
+        source_layer = find_layer(composition, layer_id)
+        layer = MotionLayer.from_dict(source_layer.to_dict())
+        report = set_layer_path_morph(
+            layer,
+            keyframes,
+            auto_correspond=auto_correspond,
+            target_count=target_count,
+        )
+        result = service.update_layer(
+            composition_id,
+            layer_id,
+            {
+                "source": layer.source.to_dict(),
+                "metadata": layer.metadata,
+            },
+        )
+        if not result.validation.ok:
+            raise ValueError(result.validation.issues[0].message)
+        self._motion_commit(service)
+        return {
+            "changed": True,
+            "undo_label": "Set Vector Path Morph",
+            "revision": self._motion_store()[composition_id].revision,
+            "layer_id": layer.id,
+            "path_morph": report,
+        }
+
+    def motion_vector_stroke_set(
+        self,
+        *,
+        composition_id: str,
+        layer_id: str,
+        color: str = "#20242b",
+        width: float = 2.0,
+        gradient: Mapping[str, Any] | None = None,
+        dash: list[float] | None = None,
+        dash_offset: float = 0.0,
+        taper_start: float = 1.0,
+        taper_end: float = 1.0,
+        width_profile: list[float] | None = None,
+    ) -> dict[str, Any]:
+        if width < 0.0:
+            raise ValueError("stroke width cannot be negative")
+        if min(float(taper_start), float(taper_end)) < 0.0:
+            raise ValueError("stroke taper cannot be negative")
+        if width_profile and min(float(value) for value in width_profile) < 0.0:
+            raise ValueError("stroke width profile cannot contain negative values")
+        return self._motion_vector_update(
+            composition_id,
+            layer_id,
+            {
+                "stroke": str(color),
+                "stroke_width": float(width),
+                "stroke_gradient": dict(gradient) if gradient else None,
+                "dash": [max(0.01, float(value)) for value in (dash or [])],
+                "dash_offset": float(dash_offset),
+                "stroke_taper": {
+                    "start": float(taper_start),
+                    "end": float(taper_end),
+                    "profile": [float(value) for value in (width_profile or [])],
+                },
+            },
+            "Set Vector Stroke",
+        )
 
     def motion_vector_repeater_set(self, *, composition_id: str, layer_id: str, count: int,
                                    offset: list[float] | None = None, rotation: float = 0.0,

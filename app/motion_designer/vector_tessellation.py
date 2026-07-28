@@ -6,7 +6,7 @@ import json
 from typing import Any, Mapping
 
 from PySide6.QtCore import QPointF, Qt
-from PySide6.QtGui import QPainterPath
+from PySide6.QtGui import QPainterPath, QPainterPathStroker
 
 from .vector_shapes import VectorPath, evaluate_source_param, flatten_path, path_from_params, trim_polylines
 
@@ -54,6 +54,28 @@ def combine_painter_paths(paths: list[QPainterPath], operation: str) -> QPainter
         else:
             result = result.united(path)
     return result
+
+
+def offset_painter_path(
+    path: QPainterPath,
+    amount: float,
+    join: str = "round",
+) -> QPainterPath:
+    distance = float(amount)
+    if path.isEmpty() or abs(distance) <= 1e-6:
+        return QPainterPath(path)
+    stroker = QPainterPathStroker()
+    stroker.setWidth(abs(distance) * 2.0)
+    stroker.setJoinStyle({
+        "miter": Qt.MiterJoin,
+        "bevel": Qt.BevelJoin,
+    }.get(str(join).lower(), Qt.RoundJoin))
+    outline = stroker.createStroke(path)
+    return (
+        path.united(outline)
+        if distance > 0.0
+        else path.subtracted(outline)
+    ).simplified()
 
 
 def _trimmed_path(path: VectorPath, start: float, end: float, offset: float, tolerance: float) -> QPainterPath:
@@ -112,17 +134,27 @@ def build_vector_painter_path(params: Mapping[str, Any], time_ms: float = 0.0,
     start = float(trim.get("start", 0.0) or 0.0)
     end = float(trim.get("end", 1.0) if trim.get("end", 1.0) is not None else 1.0)
     offset = float(trim.get("offset", 0.0) or 0.0)
+    offset_data = evaluate_source_param(params, "offset_path", time_ms, {})
+    offset_data = offset_data if isinstance(offset_data, Mapping) else {}
+    offset_amount = float(offset_data.get("amount", 0.0) or 0.0)
+    offset_join = str(offset_data.get("join") or "round").lower()
     key_data = {
         "paths": [path.to_dict() for path in paths],
         "operation": operation,
         "trim": [start, end, offset],
+        "offset_path": [offset_amount, offset_join],
         "tolerance": float(tolerance),
     }
 
     def build() -> QPainterPath:
-        if len(paths) == 1 and (start > 0.0 or end < 1.0 or offset != 0.0):
+        if (
+            len(paths) == 1
+            and abs(offset_amount) <= 1e-6
+            and (start > 0.0 or end < 1.0 or offset != 0.0)
+        ):
             return _trimmed_path(paths[0], start, end, offset, tolerance)
         combined = combine_painter_paths([painter_path_from_vector(path) for path in paths], operation)
+        combined = offset_painter_path(combined, offset_amount, offset_join)
         if start <= 0.0 and end >= 1.0 and offset == 0.0:
             return combined
         result = QPainterPath()

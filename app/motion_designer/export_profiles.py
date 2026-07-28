@@ -139,6 +139,8 @@ def preflight_motion_export(composition: Any, profile_id: str, *, output_path: s
     color_report = validate_motion_color_settings(color_settings)
     errors.extend(color_report["errors"])
     warnings.extend(color_report["warnings"])
+    if color_settings.project.is_hdr() and profile.id != "h265_mp4":
+        errors.append("Motion HDR output currently requires the H.265 MP4 profile")
     if color_report["internal_layer_blend"] != "linear-srgb":
         warnings.append("Internal Motion layer blend modes still use the Qt display-space render graph")
     if profile.scene_linear and color_settings.blend_space != "linear-srgb":

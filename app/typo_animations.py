@@ -56,6 +56,8 @@ class GlyphTransform:
     offset_x: float = 0.0
     offset_y: float = 0.0
     rotation_deg: float = 0.0
+    tracking: float = 0.0
+    blur_px: float = 0.0
     pivot_x: float = 0.5            # 0=left, 1=right
     pivot_y: float = 0.5            # 0=top, 1=bottom
     color_override: str | None = None

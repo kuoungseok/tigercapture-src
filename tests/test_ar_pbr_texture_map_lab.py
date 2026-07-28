@@ -109,6 +109,43 @@ def test_texture_lab_gpu_preview_status_is_cpu_free() -> None:
     assert status["cpu_preview"] is False
     assert "material" in status["supported_modes"]
     assert "unreal_orm" in status["supported_packed_layouts"]
+    assert status["height_map_preview"] is True
+    assert status["parallax_occlusion_mapping"] is True
+    assert status["parallax_max_steps"] == 64
+
+
+def test_texture_lab_defaults_expose_height_driven_pom_preview() -> None:
+    from app.ar_pbr.texture_map_lab import normalize_texture_map_settings
+
+    settings = normalize_texture_map_settings({})
+
+    assert settings["preview_parallax_enabled"] is True
+    assert settings["preview_parallax_strength"] > 0.0
+    assert settings["preview_parallax_depth"] > 0.0
+    assert settings["preview_parallax_steps"] >= 16
+
+    from app.actions.ar_pbr_texture_lab_namespace import texture_lab_settings_schema
+
+    action_properties = texture_lab_settings_schema()["properties"]
+    assert action_properties["preview_parallax_enabled"]["type"] == "boolean"
+    assert action_properties["preview_parallax_steps"]["maximum"] == 64
+
+
+def test_texture_lab_export_manifest_connects_height_to_renderer(tmp_path) -> None:
+    from app.ar_pbr.texture_map_lab import export_texture_maps
+
+    image_path = tmp_path / "source.png"
+    _sample_image(image_path)
+    result = export_texture_maps(image_path, tmp_path / "maps")
+
+    assert Path(result["files"]["height"]).exists()
+    usage = result["material_usage"]
+    assert usage["height_map"] == result["files"]["height"]
+    assert usage["height_semantics"] == "black_low_white_high"
+    assert usage["recommended_rendering"]["parallax_mode"] == "pom"
+    assert usage["recommended_rendering"]["parallax_enabled"] is True
+    assert usage["recommended_rendering"]["parallax_steps"] >= 16
+    assert usage["tessellation"]["supported_by_texture"] is True
 
 
 def test_texture_lab_gpu_preview_smoke_when_context_available(tmp_path) -> None:

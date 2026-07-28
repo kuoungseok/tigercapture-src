@@ -24,7 +24,12 @@ from app.actions.editor_adapter_ppt import PptAdapterMixin
 from app.actions.editor_adapter_tts import TtsAdapterMixin
 from app.actions.editor_adapter_paint import PaintAdapterMixin
 from app.actions.editor_adapter_motion import MotionAdapterMixin
+from app.actions.editor_adapter_motion_rig import MotionRigAdapterMixin
+from app.actions.editor_adapter_motion_puppet import MotionPuppetAdapterMixin
+from app.actions.editor_adapter_motion_precomp import MotionPrecompAdapterMixin
+from app.actions.editor_adapter_motion_time import MotionTimeAdapterMixin
 from app.actions.editor_adapter_motion_advanced import MotionAdvancedAdapterMixin
+from app.actions.editor_adapter_motion_tracking import MotionTrackingAdapterMixin
 from app.actions.editor_adapter_motion_audio import MotionAudioAdapterMixin
 from app.actions.editor_adapter_motion_ar_pbr import MotionArPbrAdapterMixin
 from app.actions.editor_adapter_motion_actor import MotionActorAdapterMixin
@@ -35,15 +40,19 @@ from app.actions.editor_adapter_motion_particle import MotionParticleAdapterMixi
 from app.actions.editor_adapter_motion_template import MotionTemplateAdapterMixin
 from app.actions.editor_adapter_motion_broadcast import MotionBroadcastAdapterMixin
 from app.actions.editor_adapter_motion_export import MotionExportAdapterMixin
+from app.actions.editor_adapter_motion_umg import MotionUMGAdapterMixin
 from app.actions.editor_adapter_motion_interchange import MotionInterchangeAdapterMixin
 from app.actions.editor_adapter_motion_release import MotionReleaseAdapterMixin
 from app.actions.editor_adapter_motion_relink import MotionRelinkAdapterMixin
 from app.actions.editor_adapter_motion_recovery import MotionRecoveryAdapterMixin
 from app.actions.editor_adapter_motion_plugin import MotionPluginAdapterMixin
 from app.actions.editor_adapter_motion_ai_generation import MotionAIGenerationAdapterMixin
+from app.actions.editor_adapter_color import ColorManagementAdapterMixin
 
 
 class EditorAdapter(
+    ColorManagementAdapterMixin,
+    MotionUMGAdapterMixin,
     MotionAIGenerationAdapterMixin,
     MotionPluginAdapterMixin,
     MotionRecoveryAdapterMixin,
@@ -60,7 +69,12 @@ class EditorAdapter(
     MotionActorAdapterMixin,
     MotionArPbrAdapterMixin,
     MotionAudioAdapterMixin,
+    MotionTrackingAdapterMixin,
     MotionAdvancedAdapterMixin,
+    MotionTimeAdapterMixin,
+    MotionPrecompAdapterMixin,
+    MotionPuppetAdapterMixin,
+    MotionRigAdapterMixin,
     MotionAdapterMixin,
     EditingAdapterMixin,
     TimelineAdapterMixin,

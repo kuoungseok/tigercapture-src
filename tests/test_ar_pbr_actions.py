@@ -221,7 +221,11 @@ def test_ar_pbr_gizmo_actions_are_registered_for_automation() -> None:
         "clearcoat_ior",
         "surface",
         "clearcoat",
+        "parallax",
     } <= set(settings_schema)
+    assert {"off", "parallax", "pom"} <= set(
+        settings_schema["parallax"]["properties"]["mode"]["enum"]
+    )
     surface_schema = action_specs["ar_pbr.preview.surface.set"]["params_schema"]["properties"]
     assert {
         "ibl_exposure",
@@ -453,6 +457,14 @@ def test_ar_pbr_preview_settings_set_applies_scene_settings() -> None:
             "clearcoat_strength": 0.52,
             "clearcoat_roughness": 0.08,
             "clearcoat_ior": 1.57,
+            "parallax": {
+                "mode": "pom",
+                "enabled": True,
+                "strength": 0.58,
+                "depth": 0.045,
+                "center": 0.5,
+                "steps": 32,
+            },
             "light_azimuth": None,
         },
     ).to_dict()
@@ -470,6 +482,7 @@ def test_ar_pbr_preview_settings_set_applies_scene_settings() -> None:
         "denoise_strength",
         "diffuse_gi_strength",
         "hybrid_sample_count",
+        "parallax",
         "render_profile",
         "shadow_strength",
         "specular_gi_strength",
@@ -498,6 +511,8 @@ def test_ar_pbr_preview_settings_set_applies_scene_settings() -> None:
     assert payload["after"]["clearcoat_strength"] == 0.52
     assert payload["after"]["clearcoat_roughness"] == 0.08
     assert payload["after"]["clearcoat_ior"] == 1.57
+    assert payload["after"]["parallax"]["mode"] == "pom"
+    assert payload["after"]["parallax"]["steps"] == 32
     assert preview.apply_count == 1
     assert preview.last_apply_emit is True
     assert preview.show_count == 1

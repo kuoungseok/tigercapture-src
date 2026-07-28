@@ -1209,6 +1209,7 @@ class WorkbenchPanel(QWidget):
             initial_stickers=[],
             editor_object_provider=None,
             standalone=True,
+            output_settings=request.get("output"),
         )
         painter.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose, True)
         windows = [w for w in getattr(self, "_painter_windows", []) if w is not None]
@@ -1428,6 +1429,152 @@ class WorkbenchPanel(QWidget):
         if widget is not None:
             widget.hide()
 
+    def _video_picture_sync_markers(self, track, selected_clip=None) -> list[dict[str, Any]]:
+        anchor = selected_clip if selected_clip is not None else track
+        timeline_start = int(
+            getattr(anchor, "timeline_in_ms", getattr(track, "offset_ms", 0))
+            or getattr(track, "offset_ms", 0)
+            or 0
+        )
+        source_start = max(0, int(getattr(anchor, "source_in_ms", 0) or 0))
+        source_end = int(
+            getattr(anchor, "effective_source_out_ms", getattr(anchor, "source_out_ms", 0))
+            or 0
+        )
+        if source_end <= source_start:
+            source_end = int(
+                getattr(anchor, "source_duration_ms", getattr(track, "duration_ms", 0))
+                or getattr(track, "duration_ms", 0)
+                or source_start
+            )
+        if source_end <= source_start:
+            return []
+
+        markers: list[dict[str, Any]] = []
+        seen: set[tuple[int, str, str]] = set()
+
+        def _add_source(source_ms: int, kind: str, label: str, *, priority: int = 0) -> None:
+            ms = max(source_start, min(source_end, int(source_ms)))
+            if not (source_start <= ms <= source_end):
+                return
+            label_text = str(label or kind).strip()[:32]
+            key = (ms, str(kind or "clip"), label_text)
+            if key in seen:
+                return
+            seen.add(key)
+            markers.append(
+                {
+                    "source_ms": ms,
+                    "local_ms": max(0, ms - source_start),
+                    "project_ms": timeline_start + max(0, ms - source_start),
+                    "kind": str(kind or "clip"),
+                    "label": label_text,
+                    "priority": int(priority),
+                }
+            )
+
+        def _add_project(project_ms: int, kind: str, label: str, *, priority: int = 0) -> None:
+            source_ms = source_start + (int(project_ms) - timeline_start)
+            _add_source(source_ms, kind, label, priority=priority)
+
+        _add_source(source_start, "clip", "Clip In", priority=100)
+        _add_source(source_end, "clip", "Clip Out", priority=96)
+
+        transition_type = str(getattr(anchor, "transition_out_type", "") or "")
+        if transition_type:
+            transition_ms = max(1, int(getattr(anchor, "transition_out_ms", 0) or 0))
+            _add_source(source_end - transition_ms, "transition", f"{transition_type} start", priority=88)
+            _add_source(source_end, "transition", f"{transition_type} end", priority=87)
+
+        for owner in (track, anchor):
+            for fade in getattr(owner, "fades", []) or []:
+                try:
+                    start = int(getattr(fade, "start_ms", 0) or 0)
+                    end = int(getattr(fade, "end_ms", start) or start)
+                    kind = str(getattr(fade, "kind", "fade") or "fade")
+                except Exception:
+                    continue
+                if end <= start:
+                    continue
+                _add_source(start, "fade", f"Fade {kind} start", priority=72)
+                _add_source(end, "fade", f"Fade {kind} end", priority=71)
+
+            for speed in getattr(owner, "speed_segments", []) or []:
+                try:
+                    start = int(getattr(speed, "start_ms", 0) or 0)
+                    end = int(getattr(speed, "end_ms", start) or start)
+                    value = float(getattr(speed, "speed", 1.0) or 1.0)
+                except Exception:
+                    continue
+                if end <= start:
+                    continue
+                _add_source(start, "speed", f"Speed {value:.2f}x start", priority=66)
+                _add_source(end, "speed", f"Speed {value:.2f}x end", priority=65)
+
+            for actor in getattr(owner, "zoom_actors", []) or []:
+                try:
+                    start = int(getattr(actor, "start_ms", 0) or 0)
+                    end = int(getattr(actor, "end_ms", start) or start)
+                except Exception:
+                    continue
+                if end <= start:
+                    continue
+                _add_source(start, "motion", "Zoom start", priority=82)
+                _add_source(end, "motion", "Zoom end", priority=81)
+
+            for repair in getattr(owner, "frame_repairs", []) or []:
+                if not isinstance(repair, dict):
+                    continue
+                start = int(repair.get("start_ms", 0) or 0)
+                end = int(repair.get("end_ms", start) or start)
+                if end <= start:
+                    continue
+                _add_source(start, "repair", "Frame fix start", priority=62)
+                _add_source(end, "repair", "Frame fix end", priority=61)
+
+        for actor in getattr(anchor, "typography_actors", []) or []:
+            try:
+                start = int(getattr(actor, "start_ms", 0) or 0)
+                end = int(getattr(actor, "end_ms", start) or start)
+            except Exception:
+                continue
+            if end <= start:
+                continue
+            title = str(getattr(actor, "text", "") or "Title").strip()[:18]
+            _add_source(start, "title", f"{title} in", priority=76)
+            _add_source(end, "title", f"{title} out", priority=75)
+            raw_keys = getattr(actor, "keyframes", None)
+            if not isinstance(raw_keys, dict):
+                animation = getattr(actor, "animation", None)
+                custom = getattr(animation, "custom_params", {}) if animation is not None else {}
+                raw_keys = custom.get("action_keyframes") if isinstance(custom, dict) else {}
+            if isinstance(raw_keys, dict):
+                for key_name, rows in raw_keys.items():
+                    for row in rows if isinstance(rows, list) else []:
+                        if isinstance(row, dict) and "time_ms" in row:
+                            _add_source(
+                                start + int(row.get("time_ms", 0) or 0),
+                                "title",
+                                f"{str(key_name)[:12]} key",
+                                priority=74,
+                            )
+
+        if selected_clip is None:
+            for actor in getattr(track, "typography_actors", []) or []:
+                try:
+                    start = int(getattr(actor, "start_ms", 0) or 0)
+                    end = int(getattr(actor, "end_ms", start) or start)
+                except Exception:
+                    continue
+                if end <= start:
+                    continue
+                title = str(getattr(actor, "text", "") or "Title").strip()[:18]
+                _add_project(start, "title", f"{title} in", priority=76)
+                _add_project(end, "title", f"{title} out", priority=75)
+
+        markers.sort(key=lambda row: (int(row["source_ms"]), -int(row.get("priority", 0))))
+        return markers[:96]
+
     def _video_embedded_audio_proxy_clip(self, track, selected_clip=None):
         """Return a transient AudioClip for a video's embedded audio stream."""
         anchor = selected_clip if selected_clip is not None else track
@@ -1507,6 +1654,7 @@ class WorkbenchPanel(QWidget):
             "_embedded_video_audio_signature",
             (cache_key, int(timeline_in), int(trim_start), int(trim_end)),
         )
+        setattr(proxy, "_picture_sync_markers", self._video_picture_sync_markers(track, selected_clip))
         return proxy
 
     def _prepare_video_embedded_audio_panel(self, track, selected_clip=None) -> bool:

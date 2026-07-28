@@ -1238,6 +1238,84 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a UI interaction would be removed",
     )
     registry.register_adapter_action(
+        "paint.ui.motion.attach",
+        "Create or synchronize a Motion Designer composition for a Painter UI object without opening a window.",
+        "paint",
+        "paint_ui_motion_attach",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "duration_ms": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 3600000,
+                },
+            }
+        ),
+        undo_label="Attach UI motion",
+        dry_summary="a Painter UI object would be mapped to a Motion composition",
+    )
+    registry.register_adapter_action(
+        "paint.ui.motion.open",
+        "Open the selected Painter UI object and its mapped layers in Motion Designer.",
+        "paint",
+        "paint_ui_motion_open",
+        params_schema=schema_object({"object_id": {"type": "string"}}),
+        changed=False,
+        dry_summary="Motion Designer would open for the selected Painter UI object",
+    )
+    registry.register_adapter_action(
+        "paint.ui.motion.preview",
+        "Start or stop the linked Motion composition directly on the Painter UI canvas.",
+        "paint",
+        "paint_ui_motion_preview",
+        params_schema=schema_object({"playing": {"type": "boolean"}}),
+        changed=False,
+        dry_summary="Painter UI motion preview playback would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.motion.inspect",
+        "Inspect the stable Painter object to Motion composition mapping and editable composition payload.",
+        "paint",
+        "paint_ui_motion_inspect",
+        params_schema=schema_object({"object_id": {"type": "string"}}),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter UI motion mapping would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.motion_actor.import",
+        "Import a .tgmotion project as a selectable, transformable, playable Painter UI animation actor.",
+        "paint",
+        "paint_ui_motion_actor_import",
+        params_schema=schema_object(
+            {
+                "path": {"type": "string"},
+                "name": {"type": "string"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+                "width": {"type": "number", "minimum": 0},
+                "height": {"type": "number", "minimum": 0},
+                "autoplay": {"type": "boolean"},
+                "loop": {"type": "boolean"},
+            },
+            required=("path",),
+        ),
+        required=("path",),
+        undo_label="Import Motion Actor",
+        dry_summary="a Motion project would be placed as a Painter UI actor",
+    )
+    registry.register_adapter_action(
+        "paint.ui.motion_actor.list",
+        "List Motion animation actors placed in the Painter UI document.",
+        "paint",
+        "paint_ui_motion_actor_list",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter Motion Actors would be listed",
+    )
+    registry.register_adapter_action(
         "paint.ui.delivery.profiles",
         "List general Painter UI delivery adapters and artifact capabilities.",
         "paint",

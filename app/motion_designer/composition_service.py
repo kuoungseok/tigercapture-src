@@ -113,6 +113,9 @@ class CompositionService:
         for layer in candidate.layers:
             if layer.parent_id == layer_id:
                 layer.parent_id = ""
+        from .rigging import remove_layer_bindings
+
+        remove_layer_bindings(candidate, layer_id)
         candidate.revision += 1
         return self._commit_candidate(current, candidate, "Delete Motion Layer", dry_run)
 
@@ -143,6 +146,22 @@ class CompositionService:
 
     def parent_layer(self, composition_id: str, layer_id: str, parent_id: str = "", *, dry_run: bool = False) -> MutationResult:
         return self.update_layer(composition_id, layer_id, {"parent_id": parent_id}, dry_run=dry_run)
+
+    def mutate_rig(
+        self,
+        composition_id: str,
+        operation,
+        *,
+        undo_label: str,
+        dry_run: bool = False,
+    ) -> MutationResult:
+        current = self.get(composition_id)
+        candidate = MotionComposition.from_dict(current.to_dict())
+        payload = operation(candidate)
+        candidate.revision += 1
+        result = self._commit_candidate(current, candidate, undo_label, dry_run)
+        result.payload.update(dict(payload or {}))
+        return result
 
     def _commit_candidate(self, current: MotionComposition, candidate: MotionComposition, label: str,
                           dry_run: bool) -> MutationResult:

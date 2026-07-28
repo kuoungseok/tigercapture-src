@@ -54,9 +54,10 @@ def test_responsive_overrides_normalize_and_resolve_by_specificity() -> None:
     assert "responsive_override_id" in resolved
 
 
-def test_responsive_geometry_flows_into_canvas_resolution() -> None:
+def test_responsive_geometry_flows_into_motion_and_canvas_resolution() -> None:
     _app()
     from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_motion_bridge import resolved_ui_geometry
     from app.painter_ui_workspace import PainterUIDesignOverlay
 
     document = create_ui_document(390, 844)
@@ -76,6 +77,10 @@ def test_responsive_geometry_flows_into_canvas_resolution() -> None:
             "changes": {"x": 80, "y": 90, "width": 220},
         }
     ]
+    geometry = resolved_ui_geometry(document)
+    assert geometry[row["id"]]["x"] == 80.0
+    assert geometry[row["id"]]["width"] == 220.0
+
     overlay = PainterUIDesignOverlay()
     overlay.resize(600, 700)
     overlay.set_document(document)

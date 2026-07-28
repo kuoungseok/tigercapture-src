@@ -75,6 +75,65 @@ def _write_tracking_video(path, *, planar: bool = False, shot_cut: bool = False)
     writer.release()
 
 
+def _write_featureless_intro_tracking_video(path) -> None:
+    import cv2
+
+    width, height = 320, 240
+    writer = cv2.VideoWriter(
+        str(path), cv2.VideoWriter_fourcc(*"MJPG"), 30.0, (width, height),
+    )
+    assert writer.isOpened()
+    rng = np.random.default_rng(9127)
+    patch = rng.integers(24, 236, size=(100, 120, 3), dtype=np.uint8)
+    for index in range(42):
+        frame = np.zeros((height, width, 3), dtype=np.uint8)
+        if index >= 12:
+            offset = index - 12
+            x = 90 + offset
+            y = 70 + offset // 2
+            frame[y:y + 100, x:x + 120] = patch
+        writer.write(frame)
+    writer.release()
+
+
+def _write_occluded_tracking_video(path) -> None:
+    import cv2
+
+    width, height = 320, 240
+    writer = cv2.VideoWriter(
+        str(path), cv2.VideoWriter_fourcc(*"MJPG"), 30.0, (width, height),
+    )
+    assert writer.isOpened()
+    rng = np.random.default_rng(613)
+    patch = rng.integers(24, 236, size=(100, 120, 3), dtype=np.uint8)
+    for index in range(42):
+        frame = np.zeros((height, width, 3), dtype=np.uint8)
+        if not 14 <= index <= 19:
+            x = 90 + index
+            y = 70 + index // 2
+            frame[y:y + 100, x:x + 120] = patch
+        writer.write(frame)
+    writer.release()
+
+
+def _write_teleport_tracking_video(path) -> None:
+    import cv2
+
+    width, height = 320, 240
+    writer = cv2.VideoWriter(
+        str(path), cv2.VideoWriter_fourcc(*"MJPG"), 30.0, (width, height),
+    )
+    assert writer.isOpened()
+    rng = np.random.default_rng(317)
+    patch = rng.integers(24, 236, size=(80, 80, 3), dtype=np.uint8)
+    for index in range(31):
+        frame = np.zeros((height, width, 3), dtype=np.uint8)
+        x = 30 + (index % 8) * 20
+        frame[80:160, x:x + 80] = patch
+        writer.write(frame)
+    writer.release()
+
+
 def test_point_and_planar_tracking_cache_interpolate_deterministically() -> None:
     rows = [
         {"time_ms": 0, "translate": [0, 0], "scale": [1, 1], "rotation": 0},
@@ -88,6 +147,24 @@ def test_point_and_planar_tracking_cache_interpolate_deterministically() -> None
     assert planar.translate == pytest.approx((50, 20))
     assert planar.scale == pytest.approx((1.5, .75))
     assert planar.rotation == pytest.approx(45)
+
+
+def test_tracking_correction_keyframes_are_interpolated_over_cached_motion() -> None:
+    cache = MotionTrackingCache.from_dict({
+        "mode": "planar",
+        "samples": [
+            {"time_ms": 0, "translate": [0, 0], "scale": [1, 1], "rotation": 0},
+            {"time_ms": 1000, "translate": [100, 40], "scale": [2, 2], "rotation": 20},
+        ],
+        "corrections": [
+            {"time_ms": 0, "translate": [0, 0], "scale": [1, 1], "rotation": 0},
+            {"time_ms": 1000, "translate": [20, -10], "scale": [0.5, 1.5], "rotation": 10},
+        ],
+    })
+    result = evaluate_tracking_cache(cache, 500)
+    assert result.translate == pytest.approx((60, 15))
+    assert result.scale == pytest.approx((1.125, 1.875))
+    assert result.rotation == pytest.approx(15)
 
 
 def test_animated_path_and_tracking_cache_match_seeked_render_positions() -> None:
@@ -268,6 +345,80 @@ def test_tracking_generate_action_persists_provider_cache(tmp_path) -> None:
     assert cache["samples"][-1]["translate"] == pytest.approx([48.0, 21.0], abs=2.5)
 
 
+def test_matte_correction_freeze_and_diagnostics_actions() -> None:
+    class Owner:
+        def __init__(self) -> None:
+            self._motion_compositions = {}
+
+    owner = Owner()
+    registry = ActionRegistry(owner)
+    created = registry.execute("motion.composition.create", {
+        "name": "Matte", "width": 100, "height": 100, "duration_ms": 1000,
+    })
+    composition_id = created.result["payload"]["composition"]["id"]
+    added = registry.execute("motion.layer.add", {
+        "composition_id": composition_id,
+        "layer": {
+            "id": "footage",
+            "name": "Footage",
+            "layer_type": "image",
+            "out_ms": 1000,
+            "source": {"kind": "image", "uri": "missing.mp4"},
+        },
+    })
+    layer_id = added.result["payload"]["composition"]["layers"][0]["id"]
+    mask_result = registry.execute("motion.mask.add", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "mask": {"id": "subject", "kind": "rectangle"},
+    })
+    mask_id = mask_result.result["mask"]["id"]
+    assert registry.execute("motion.mask.tracking.set", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "mask_id": mask_id,
+        "tracking": {
+            "mode": "point",
+            "samples": [
+                {"time_ms": 0, "translate": [0, 0], "confidence": 0.9},
+                {"time_ms": 1000, "translate": [10, 4], "confidence": 0.8},
+            ],
+        },
+    }).ok
+    corrected = registry.execute("motion.matte.correction.set", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "mask_id": mask_id,
+        "time_ms": 500,
+        "translate": [3, -2],
+        "rotation": 4,
+    })
+    assert corrected.ok and corrected.result["correction_count"] == 1
+    frozen = registry.execute("motion.matte.freeze", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "mask_id": mask_id,
+        "frozen": True,
+    })
+    assert frozen.ok and frozen.result["frozen"] is True
+    diagnostics = registry.execute("motion.matte.diagnostics", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "mask_id": mask_id,
+    })
+    assert diagnostics.ok
+    assert diagnostics.result["masks"][0]["sample_count"] == 2
+    assert diagnostics.result["masks"][0]["correction_count"] == 1
+    assert diagnostics.result["masks"][0]["frozen"] is True
+    blocked = registry.execute("motion.matte.propagate", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "mask_id": mask_id,
+    })
+    assert not blocked.ok
+    assert "frozen" in blocked.error.lower()
+
+
 def test_tracking_provider_stops_at_shot_cut_instead_of_carrying_transform(tmp_path) -> None:
     video = tmp_path / "shot-cut.avi"
     _write_tracking_video(video, shot_cut=True)
@@ -284,3 +435,68 @@ def test_tracking_provider_stops_at_shot_cut_instead_of_carrying_transform(tmp_p
     assert cache.metadata["shot_cut_frames"] == 1
     assert 400 <= cache.metadata["actual_end_ms"] <= 550
     assert cache.samples[-1].confidence == 0.0
+
+
+def test_tracking_provider_acquires_after_featureless_opening(tmp_path) -> None:
+    video = tmp_path / "featureless-intro.avi"
+    _write_featureless_intro_tracking_video(video)
+    cache = generate_tracking_cache(MotionTrackingRequest(
+        video_path=str(video),
+        mode="point",
+        end_ms=1350,
+        sample_interval_ms=100,
+        target_size=(320, 240),
+        roi=(80, 60, 170, 140),
+        max_analysis_dimension=320,
+    ))
+    assert cache.metadata["acquisition_frames_skipped"] >= 12
+    assert len(cache.samples) >= 7
+    assert cache.samples[0].translate == (0.0, 0.0)
+    assert cache.samples[-1].translate[0] == pytest.approx(29.0, abs=3.0)
+    assert cache.samples[-1].translate[1] == pytest.approx(14.0, abs=3.0)
+    assert cache.metadata["mean_confidence"] > 0.4
+
+
+def test_tracking_provider_reacquires_after_full_occlusion(tmp_path) -> None:
+    video = tmp_path / "occluded.avi"
+    _write_occluded_tracking_video(video)
+    cache = generate_tracking_cache(MotionTrackingRequest(
+        video_path=str(video),
+        mode="point",
+        end_ms=1350,
+        sample_interval_ms=100,
+        target_size=(320, 240),
+        roi=(80, 60, 180, 150),
+        max_analysis_dimension=320,
+        analysis_fps=30,
+    ))
+    assert cache.metadata["failed_frames"] >= 1
+    assert cache.metadata["reacquired_frames"] >= 1
+    assert 1 <= cache.metadata["predicted_frames"] <= 15
+    assert cache.samples[-1].translate[0] == pytest.approx(41.0, abs=5.0)
+    assert cache.samples[-1].translate[1] == pytest.approx(20.0, abs=4.0)
+
+
+def test_tracking_provider_rejects_implausible_point_teleport(tmp_path) -> None:
+    video = tmp_path / "teleport.avi"
+    _write_teleport_tracking_video(video)
+    cache = generate_tracking_cache(MotionTrackingRequest(
+        video_path=str(video),
+        mode="point",
+        end_ms=1000,
+        sample_interval_ms=100,
+        target_size=(320, 240),
+        roi=(20, 60, 290, 130),
+        max_analysis_dimension=320,
+        analysis_fps=30,
+    ))
+    steps = [
+        (
+            (current.translate[0] - previous.translate[0]) ** 2
+            + (current.translate[1] - previous.translate[1]) ** 2
+        ) ** 0.5
+        for previous, current in zip(cache.samples, cache.samples[1:])
+    ]
+    assert cache.metadata["failed_frames"] >= 1
+    assert cache.metadata["motion_outlier_frames"] >= 1
+    assert max(steps, default=0.0) < 50.0

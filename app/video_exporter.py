@@ -107,7 +107,12 @@ class ExportFormat:
     feature_id: str          # tier-gating key
 
     def build_video_args(
-        self, q: QualityPreset, *, hdr_passthrough: bool = False,
+        self,
+        q: QualityPreset,
+        *,
+        hdr_passthrough: bool = False,
+        hdr_output: bool = False,
+        hdr_transfer: str = "pq",
     ) -> list[str]:
         """ffmpeg ``-c:v ...`` segment for this format paired with the
         given quality preset.
@@ -120,15 +125,21 @@ class ExportFormat:
         format codec choice and forces libx265 (the export dialog
         offers passthrough only for HEVC-friendly containers).
         """
-        if hdr_passthrough:
+        if hdr_passthrough or hdr_output:
             # ``-tag:v hvc1`` is what Apple Quicktime / iOS need to
             # play HEVC out of an .mp4 / .mov container; any other
             # tag (e.g. hev1) won't open on macOS Preview.
             # ``hdr-opt=1:repeat-headers=1`` makes every IDR carry
             # the colorimetry so any cut later still plays as HDR.
+            transfer = (
+                "arib-std-b67"
+                if str(hdr_transfer).strip().lower() == "hlg"
+                else "smpte2084"
+            )
             x265_params = (
-                "colorprim=bt2020:transfer=smpte2084:colormatrix=bt2020nc:"
-                "hdr-opt=1:repeat-headers=1"
+                f"colorprim=bt2020:transfer={transfer}:colormatrix=bt2020nc:"
+                + ("hdr-opt=1:" if transfer == "smpte2084" else "")
+                + "repeat-headers=1"
             )
             return [
                 "-c:v", "libx265",
@@ -141,7 +152,7 @@ class ExportFormat:
                 # doesn't parse x265-params (e.g. some browsers) still
                 # honours HDR.
                 "-color_primaries", "bt2020",
-                "-color_trc", "smpte2084",
+                "-color_trc", transfer,
                 "-colorspace", "bt2020nc",
                 "-color_range", "tv",
             ]
@@ -791,6 +802,23 @@ class VideoExportThread(QThread):
                 i += 2
         return filtered
 
+    def _project_hdr_output(self) -> tuple[bool, str]:
+        if self._hdr_passthrough:
+            transfer = str(getattr(self._hdr_info, "transfer", "") or "").lower()
+            return True, "hlg" if transfer == "arib-std-b67" else "pq"
+        try:
+            from app.color_management import ColorManagementSettings
+
+            cm = ColorManagementSettings.from_dict(
+                (self._project_settings or {}).get("color_management")
+            )
+            return (
+                cm.output_space == "rec2020" and cm.output_transfer in {"pq", "hlg"},
+                cm.output_transfer,
+            )
+        except Exception:
+            return False, "pq"
+
     def _append_project_lut_filters(self, graph: str, input_label: str) -> tuple[str, str]:
         try:
             from app.color_management import append_lut_filter_graph
@@ -798,6 +826,47 @@ class VideoExportThread(QThread):
             cm = (self._project_settings or {}).get("color_management")
             return append_lut_filter_graph(graph, input_label, cm)
         except Exception:
+            return graph, input_label
+
+    def _append_project_color_transform_filters(
+        self,
+        graph: str,
+        input_label: str,
+    ) -> tuple[str, str]:
+        if self._hdr_passthrough:
+            return graph, input_label
+        try:
+            from app.color_management import ColorManagementSettings
+
+            cm_settings = ColorManagementSettings.from_dict(
+                (self._project_settings or {}).get("color_management")
+            )
+            if (
+                cm_settings.is_hdr()
+                and self._format.extension not in {".mp4", ".mov"}
+            ):
+                raise RuntimeError(
+                    "Project HDR output requires an MP4 or MOV H.265 target"
+                )
+        except RuntimeError:
+            raise
+        except Exception:
+            cm_settings = None
+        try:
+            from app.color_runtime import append_project_output_transform_graph
+
+            graph, output_label, diagnostics = append_project_output_transform_graph(
+                graph,
+                input_label,
+                cm_settings
+                or (self._project_settings or {}).get("color_management"),
+            )
+            self._project_color_transform_diagnostics = diagnostics
+            return graph, output_label
+        except Exception as exc:
+            self._project_color_transform_diagnostics = {
+                "warnings": [str(exc)],
+            }
             return graph, input_label
 
     def _raise_if_canceled(self) -> None:
@@ -2592,6 +2661,10 @@ class VideoExportThread(QThread):
             )
             video_out_label = "outv"
             graph, video_out_label = self._append_project_lut_filters(graph, video_out_label)
+            graph, video_out_label = self._append_project_color_transform_filters(
+                graph,
+                video_out_label,
+            )
             if self._target_width and self._target_height:
                 tw, th = self._target_width, self._target_height
                 scaled_label = "outv_scaled"
@@ -2670,8 +2743,12 @@ class VideoExportThread(QThread):
                 "-filter_complex", graph,
                 "-map", f"[{video_out_label}]",
             ])
+            project_hdr, project_transfer = self._project_hdr_output()
             video_args = self._format.build_video_args(
-                self._quality, hdr_passthrough=self._hdr_passthrough,
+                self._quality,
+                hdr_passthrough=self._hdr_passthrough,
+                hdr_output=project_hdr,
+                hdr_transfer=project_transfer,
             )
             video_args.extend(self._project_color_metadata_args())
             cmd.extend(video_args)

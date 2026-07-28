@@ -688,7 +688,11 @@ def build_gpu_preview_items(
                 },
                 "pbr_lighting": {
                     "light_dir": [float(light_dir[0]), float(light_dir[1]), float(light_dir[2])],
+                    "light_color": list(lighting.get("light_color") or [1.0, 1.0, 1.0])[:3],
                     "direct_strength": float(direct_strength),
+                    "additional_lights": list(
+                        lighting.get("additional_lights") or []
+                    )[:2],
                     "ibl_exposure": float(ibl_exposure),
                     "ibl_rotation": float(ibl_rotation),
                     "hdri_path": str(hdri_path),

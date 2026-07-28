@@ -369,8 +369,9 @@ class VideoFaceMotionExtractor:
             diagnostics["errors"].append("mediapipe_unavailable")
             return VideoFaceMotionResult(False, (), diagnostics)
         if selected_backend == "opencv" and face_cascade is None:
-            diagnostics["errors"].append("opencv_face_cascade_missing")
-            return VideoFaceMotionResult(False, (), diagnostics)
+            diagnostics["warnings"].append(
+                "opencv_face_cascade_missing_using_foreground_fallback"
+            )
 
         cap = cv2.VideoCapture(str(p))
         if not cap.isOpened():

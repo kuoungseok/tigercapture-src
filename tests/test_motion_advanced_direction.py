@@ -12,8 +12,10 @@ import pytest
 from app.actions.registry import ActionRegistry
 from app.motion_designer.advanced_presets import apply_advanced_preset
 from app.motion_designer.ar_pbr_source import create_camera_layer
+from app.motion_designer.ar_pbr_source import create_light_layer
 from app.motion_designer.evaluator import evaluate_composition
 from app.motion_designer.export_renderer import MotionExportRenderer
+from app.motion_designer.render_graph import build_render_graph
 from app.motion_designer.schema import (
     AnimatedProperty,
     Keyframe,
@@ -60,6 +62,93 @@ def test_2_5d_camera_projects_opted_in_layers_without_changing_default_camera() 
     projected = evaluate_composition(composition, 500)[0].matrix
     assert projected != baseline
     assert projected[4] < baseline[4]
+
+
+def test_orthographic_camera_keeps_depth_scale_and_projects_3d_card_tilt() -> None:
+    near = _box(x=80)
+    far = _box(x=80)
+    near.metadata.update({
+        "depth_z": 2.0,
+        "three_d": {
+            "enabled": True,
+            "rotation_x": 60.0,
+            "rotation_y": 45.0,
+            "projection_model": "affine_card_2_5d",
+        },
+    })
+    far.metadata.update({
+        "depth_z": -2.0,
+        "three_d": {
+            "enabled": True,
+            "rotation_x": 60.0,
+            "rotation_y": 45.0,
+            "projection_model": "affine_card_2_5d",
+        },
+    })
+    camera = create_camera_layer(duration_ms=2000, params={
+        "apply_to_2d": True,
+        "projection": "orthographic",
+        "orthographic_size": 3.25,
+    })
+    composition = MotionComposition(
+        width=200,
+        height=120,
+        duration_ms=2000,
+        layers=[near, far, camera],
+    )
+
+    matrices = evaluate_composition(composition, 500)
+
+    assert matrices[0].matrix[:4] == pytest.approx(matrices[1].matrix[:4])
+    assert abs(matrices[0].matrix[0]) == pytest.approx(2 ** -0.5)
+    assert abs(matrices[0].matrix[3]) == pytest.approx(0.5)
+    assert validate_composition(composition).ok
+
+
+def test_2_5d_card_shadow_is_clipped_to_lower_receiving_layer() -> None:
+    app = _app()
+    receiver = _box(x=100, color="#ffffff")
+    receiver.source.params.update({"width": 140, "height": 80})
+    receiver.metadata["three_d"] = {
+        "enabled": True,
+        "receive_shadows": True,
+        "projection_model": "affine_card_2_5d",
+    }
+    caster = _box(x=100, color="#ff2020")
+    caster.source.params.update({"width": 20, "height": 20})
+    caster.metadata.update({
+        "depth_z": 1.0,
+        "three_d": {
+            "enabled": True,
+            "cast_shadows": True,
+            "shadow_strength": 0.8,
+            "shadow_softness": 1.0,
+            "projection_model": "affine_card_2_5d",
+        },
+    })
+    light = create_light_layer(duration_ms=2000, params={
+        "azimuth": 180.0,
+        "elevation": 45.0,
+        "intensity": 0.42,
+    })
+    composition = MotionComposition(
+        width=200,
+        height=120,
+        duration_ms=2000,
+        layers=[receiver, caster, light],
+    )
+
+    renderer = MotionExportRenderer()
+    rgba = renderer.render_rgba_array(composition, 0)
+    graph = build_render_graph(composition, 0).diagnostics
+
+    assert rgba[60, 136, 0] < 100
+    assert rgba[60, 136, 3] == 255
+    assert rgba[10, 136, 3] == 0
+    assert graph["card_shadow_caster_count"] == 1
+    assert graph["card_shadow_receiver_count"] == 1
+    assert graph["card_shadow_light_ready"] is True
+    app.processEvents()
 
 
 def test_generic_replicator_draws_any_renderable_layer_and_motion_blur_spreads_fast_motion() -> None:
@@ -173,6 +262,16 @@ def test_advanced_motion_actions_are_registered_and_mutate_shared_composition() 
     assert registry.execute("motion.layer.depth.set", {
         "composition_id": composition_id, "layer_id": content_id, "depth_z": 1.25,
     }).ok
+    configured = registry.execute("motion.3d.layer.enable", {
+        "composition_id": composition_id,
+        "layer_id": content_id,
+        "enabled": True,
+        "depth_z": 1.5,
+        "rotation_x": 12.0,
+        "rotation_y": -28.0,
+        "cast_shadows": True,
+    })
+    assert configured.ok
     assert registry.execute("motion.blur.set", {
         "composition_id": composition_id, "layer_id": content_id,
         "enabled": True, "samples": 8, "shutter": 0.7,
@@ -183,10 +282,13 @@ def test_advanced_motion_actions_are_registered_and_mutate_shared_composition() 
     }).ok
     layer = owner._motion_compositions[composition_id].layers[0]
     assert layer.metadata["matte_layer_id"] == matte_id
+    assert layer.metadata["three_d"]["rotation_y"] == -28.0
+    assert layer.metadata["three_d"]["cast_shadows"] is True
     assert layer.metadata["replicator"]["count"] == 4
     specs = {item["id"] for item in registry.list_actions()}
     assert {
-        "motion.matte.set", "motion.layer.depth.set", "motion.blur.set",
+        "motion.matte.set", "motion.layer.depth.set", "motion.3d.layer.enable",
+        "motion.blur.set",
         "motion.replicator.set", "motion.text.animator.set",
         "motion.camera.2_5d.set", "motion.paper_paste.create",
         "motion.advanced_preset.apply",

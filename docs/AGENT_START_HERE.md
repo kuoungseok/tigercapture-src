@@ -37,13 +37,29 @@ Focused entry points:
   `docs/SPEC_VSEEFACE_BRIDGE.md`.
 - MMD player: `docs/mmd_player_handoff.md`.
 - Motion Designer: `docs/MOTION_DESIGNER_ARCHITECTURE.md`, then
-  `docs/MOTION_DESIGNER_MILESTONES_KO.md`. Prompt/reference-driven editable
+  `docs/MOTION_DESIGNER_MILESTONES_KO.md`. The professional motion-graphics
+  expansion after M12 is tracked in
+  `docs/MOTION_DESIGNER_AE_GAP_MILESTONES_KO.md`; use that file's per-feature
+  evidence instead of treating all M13-M20 work as either complete or absent.
+  This is not an After Effects parity claim. Prompt/reference-driven editable
   generation planning is in `docs/MOTION_AI_GENERATION_PRODUCT_PLAN_KO.md`.
-  Current implementation is M0-M11 plus the M12 declarative plugin/template
-  management foundation; runtime plugin contribution hosting remains pending.
+  Current implementation includes M0-M12 plus recorded portions of M13-M20;
+  runtime plugin contribution hosting remains pending.
   Use `debugCapture/motion_designer/release_acceptance/report.json` as the
-  regenerable M11 release-evidence index. M11 is SDR sRGB product scope:
-  HDR/OCIO/LUT output remains explicitly blocked until Preview/Export parity exists.
+  regenerable release-evidence index. M20 shares the main-editor ACES/OCIO
+  display runtime and supports Motion H.265 10-bit Rec.2020 PQ/HLG output.
+  OpenColorIO 2.5.2 and the versioned built-in Studio ACES 1.3 config are the
+  shipping source defaults. `tools/qa_color_ocio_parity.py` proves zero-byte
+  Preview/export-LUT error at 4,913 grid samples. The frozen EXE probe and
+  `tools/qa_color_encoded_export.py` additionally prove packaged OCIO execution
+  and a real H.265 Main 10 Rec.2020 PQ round trip with mean Delta E 76 1.05,
+  maximum 1.93, and matching stream tags. Motion standalone Preview/Export also
+  shares a 3D `.cube` Input/Creative/Output LUT chain with Reinhard or
+  ACES-fitted tone mapping; `tools/qa_motion_color_pipeline.py` records
+  zero-byte PNG parity and zero alpha error. OpenEXR bypasses this delivery
+  chain, and main-timeline Motion compositing defers to the main project color
+  transform to avoid double processing. Do not turn this parity evidence into
+  a full ACES product-certification claim.
   Do not reopen completed milestone work without a failing test, reproducible
   defect, or explicit user request.
 - Painter UI Designer: read `docs/PAINTER_UI_FIGMA_WORKLIST_KO.md` first,
@@ -52,6 +68,9 @@ Focused entry points:
   priority and product boundaries; the milestone document records implemented
   evidence. Painter owns static UI structure/layout/components/tokens, Motion
   Designer owns animation, and Unreal output must use shared `TigerStudioUMG`.
+  Painter/Motion placement polish is intentionally deferred in
+  `docs/MOTION_PAINTER_INTEGRATION_TODO_KO.md`; prioritize production-quality
+  Motion templates before reopening that integration work.
   As of 2026-07-27 the local M2A-M6 production foundation is implemented:
   `.tstemplate` packages and local library state, review comments/checkpoints,
   revision diff, self-contained prototype, production asset export, shared

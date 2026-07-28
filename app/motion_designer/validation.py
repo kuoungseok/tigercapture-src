@@ -11,12 +11,13 @@ from .schema import AnimatedProperty, MotionComposition
 VECTOR_BOOLEAN_OPERATIONS = {"union", "subtract", "intersect", "exclude", "xor"}
 VECTOR_ANIMATED_PARAMS = {
     "path", "width", "height", "radius", "sides", "inner_ratio", "shape_rotation",
-    "fill", "stroke", "stroke_width", "gradient", "trim", "repeater",
+    "fill", "stroke", "stroke_width", "gradient", "stroke_gradient", "dash",
+    "dash_offset", "stroke_taper", "trim", "offset_path", "repeater",
 }
 TYPOGRAPHY_ANIMATED_PARAMS = {
     "text", "font_family", "font_size", "font_weight", "font_axes", "fill",
     "stroke", "stroke_width", "letter_spacing", "line_height", "text_animation",
-    "text_path", "text_path_offset",
+    "text_animators", "text_path", "text_path_offset",
 }
 AR_PBR_ANIMATED_GROUPS = {
     "object": {"position", "rotation", "scale"},
@@ -113,6 +114,42 @@ def _validate_vector_layer(layer, path: str, issues: list[ValidationIssue]) -> N
         issues.append(ValidationIssue("invalid_vector_primitive", f"Unsupported vector primitive: {shape}", f"{path}.source.params.shape"))
     if "path" in params:
         _validate_vector_path(_default_value(params.get("path")), f"{path}.source.params.path", issues)
+        animated_path = params.get("path")
+        if isinstance(animated_path, Mapping) and "keyframes" in animated_path:
+            from .path_morph import path_topology_signature
+
+            morph_paths = [animated_path.get("default")]
+            morph_paths.extend(
+                keyframe.get("value")
+                for keyframe in animated_path.get("keyframes", [])
+                if isinstance(keyframe, Mapping)
+            )
+            signatures = [
+                path_topology_signature(value)
+                for value in morph_paths
+                if isinstance(value, Mapping)
+            ]
+            if signatures and any(
+                signature != signatures[0] for signature in signatures[1:]
+            ):
+                issues.append(ValidationIssue(
+                    "path_morph_topology_mismatch",
+                    "Path Morph keyframes must share point count, closure, and fill rule.",
+                    f"{path}.source.params.path.keyframes",
+                ))
+    path_morph = layer.metadata.get("path_morph")
+    if path_morph is not None:
+        from .path_morph import PATH_MORPH_CONTRACT
+
+        if (
+            not isinstance(path_morph, Mapping)
+            or path_morph.get("contract") != PATH_MORPH_CONTRACT
+        ):
+            issues.append(ValidationIssue(
+                "invalid_path_morph_contract",
+                "Path Morph metadata uses an unsupported contract.",
+                f"{path}.metadata.path_morph",
+            ))
     if shape in {"polygon", "star"}:
         sides = _default_value(params.get("sides", 5))
         if not isinstance(sides, (int, float)) or not 3 <= int(sides) <= 128:
@@ -136,6 +173,63 @@ def _validate_vector_layer(layer, path: str, issues: list[ValidationIssue]) -> N
                 value = trim.get(key, default)
                 if not isinstance(value, (int, float)) or not 0.0 <= float(value) <= 1.0:
                     issues.append(ValidationIssue("invalid_vector_trim", f"Trim {key} must be between 0 and 1.", f"{path}.source.params.trim.{key}"))
+    offset_path = _default_value(params.get("offset_path"))
+    if offset_path is not None:
+        if not isinstance(offset_path, Mapping):
+            issues.append(ValidationIssue(
+                "invalid_offset_path",
+                "Offset Paths settings must be an object.",
+                f"{path}.source.params.offset_path",
+            ))
+        else:
+            amount = offset_path.get("amount", 0.0)
+            join = str(offset_path.get("join") or "round")
+            if not isinstance(amount, (int, float)) or not isfinite(float(amount)):
+                issues.append(ValidationIssue(
+                    "invalid_offset_path",
+                    "Offset Paths amount must be finite.",
+                    f"{path}.source.params.offset_path.amount",
+                ))
+            if join not in {"round", "miter", "bevel"}:
+                issues.append(ValidationIssue(
+                    "invalid_offset_path",
+                    "Offset Paths join must be round, miter, or bevel.",
+                    f"{path}.source.params.offset_path.join",
+                ))
+    taper = _default_value(params.get("stroke_taper"))
+    if taper is not None:
+        if not isinstance(taper, Mapping):
+            issues.append(ValidationIssue(
+                "invalid_stroke_taper",
+                "Stroke taper must be an object.",
+                f"{path}.source.params.stroke_taper",
+            ))
+        else:
+            for name in ("start", "end"):
+                value = taper.get(name, 1.0)
+                if (
+                    not isinstance(value, (int, float))
+                    or not isfinite(float(value))
+                    or float(value) < 0.0
+                ):
+                    issues.append(ValidationIssue(
+                        "invalid_stroke_taper",
+                        "Stroke taper factors must be finite and non-negative.",
+                        f"{path}.source.params.stroke_taper.{name}",
+                    ))
+            profile = taper.get("profile")
+            if profile is not None and (
+                not isinstance(profile, list)
+                or any(
+                    not isinstance(value, (int, float)) or float(value) < 0.0
+                    for value in profile
+                )
+            ):
+                issues.append(ValidationIssue(
+                    "invalid_stroke_taper",
+                    "Variable-width stroke profile must contain non-negative numbers.",
+                    f"{path}.source.params.stroke_taper.profile",
+                ))
     repeater = _default_value(params.get("repeater"))
     if repeater is not None:
         count = repeater.get("count", 1) if isinstance(repeater, Mapping) else None
@@ -216,6 +310,73 @@ def _validate_typography_layer(layer, path: str, issues: list[ValidationIssue]) 
                 issues.append(ValidationIssue(
                     "invalid_typography_timing", f"Typography {name} must be non-negative.",
                     f"{path}.source.params.text_animation.{name}",
+                ))
+    animators = _default_value(params.get("text_animators"))
+    animator_path = f"{path}.source.params.text_animators"
+    if animators is not None and not isinstance(animators, list):
+        issues.append(ValidationIssue(
+            "invalid_text_animator_stack",
+            "Text Animator stack must be an array.",
+            animator_path,
+        ))
+    elif isinstance(animators, list):
+        if len(animators) > 32:
+            issues.append(ValidationIssue(
+                "invalid_text_animator_stack",
+                "Text Animator stack is limited to 32 entries.",
+                animator_path,
+            ))
+        ids: set[str] = set()
+        for index, animator in enumerate(animators):
+            item_path = f"{animator_path}[{index}]"
+            if not isinstance(animator, Mapping):
+                issues.append(ValidationIssue(
+                    "invalid_text_animator",
+                    "Each Text Animator must be an object.",
+                    item_path,
+                ))
+                continue
+            animator_id = str(animator.get("id") or "")
+            if animator_id and animator_id in ids:
+                issues.append(ValidationIssue(
+                    "duplicate_text_animator_id",
+                    "Text Animator ids must be unique.",
+                    f"{item_path}.id",
+                ))
+            ids.add(animator_id)
+            unit = str(animator.get("unit") or "character")
+            if unit not in {"character", "word", "line"}:
+                issues.append(ValidationIssue(
+                    "invalid_typography_selector",
+                    f"Unsupported typography selector unit: {unit}",
+                    f"{item_path}.unit",
+                ))
+            start = animator.get("selector_start", 0.0)
+            end = animator.get("selector_end", 1.0)
+            if not all(
+                isinstance(value, (int, float)) and 0.0 <= float(value) <= 1.0
+                for value in (start, end)
+            ) or float(start) > float(end):
+                issues.append(ValidationIssue(
+                    "invalid_typography_selector",
+                    "Text Animator range must satisfy 0 <= start <= end <= 1.",
+                    item_path,
+                ))
+            smoothness = animator.get("smoothness", 0.0)
+            if not isinstance(smoothness, (int, float)) or not 0.0 <= float(smoothness) <= 1.0:
+                issues.append(ValidationIssue(
+                    "invalid_typography_selector",
+                    "Text Animator smoothness must be between 0 and 1.",
+                    f"{item_path}.smoothness",
+                ))
+            selector_shape = str(animator.get("selector_shape") or "square")
+            if selector_shape not in {
+                "square", "ramp_up", "ramp_down", "triangle", "round",
+            }:
+                issues.append(ValidationIssue(
+                    "invalid_typography_selector",
+                    f"Unsupported Text Animator selector shape: {selector_shape}",
+                    f"{item_path}.selector_shape",
                 ))
     for name in TYPOGRAPHY_ANIMATED_PARAMS:
         value = params.get(name)
@@ -476,6 +637,491 @@ def _validate_particle_layer(layer, path: str, issues: list[ValidationIssue]) ->
         issues.append(ValidationIssue("invalid_particle_blend", "Particle blend mode must be normal, add, or screen.", f"{path}.blend_mode"))
 
 
+def _validate_button_component(layer, path: str, issues: list[ValidationIssue]) -> None:
+    raw = layer.metadata.get("interactive_component")
+    if raw is None:
+        return
+    if not isinstance(raw, Mapping) or str(raw.get("type") or "") != "button":
+        issues.append(ValidationIssue(
+            "invalid_interactive_component",
+            "Interactive component must be a button object.",
+            f"{path}.metadata.interactive_component",
+        ))
+        return
+    from .interactive_button import BUTTON_EASINGS, BUTTON_STATES
+
+    active_state = str(raw.get("active_state") or "normal")
+    if active_state not in BUTTON_STATES:
+        issues.append(ValidationIssue(
+            "invalid_button_state",
+            "Button active state is unsupported.",
+            f"{path}.metadata.interactive_component.active_state",
+        ))
+    transition = raw.get("transition")
+    if isinstance(transition, Mapping):
+        easing = str(transition.get("easing") or "ease_out")
+        if easing not in BUTTON_EASINGS:
+            issues.append(ValidationIssue(
+                "invalid_button_easing",
+                "Button transition easing is unsupported.",
+                f"{path}.metadata.interactive_component.transition.easing",
+            ))
+    states = raw.get("states")
+    if not isinstance(states, Mapping) or any(state not in states for state in BUTTON_STATES):
+        issues.append(ValidationIssue(
+            "invalid_button_states",
+            "Button component must define every standard state.",
+            f"{path}.metadata.interactive_component.states",
+        ))
+
+
+def _validate_generator_layer(layer, path: str, issues: list[ValidationIssue]) -> None:
+    if layer.layer_type != "generator":
+        return
+    from .generators import GENERATOR_KINDS
+
+    params = layer.source.params
+    kind = str(params.get("kind") or "")
+    if layer.source.kind != "generator" or kind not in GENERATOR_KINDS:
+        issues.append(ValidationIssue(
+            "invalid_generator_kind",
+            f"Unsupported Motion generator: {kind or layer.source.kind}",
+            f"{path}.source.params.kind",
+        ))
+    for key in ("width", "height"):
+        try:
+            value = int(params.get(key, 0) or 0)
+        except (TypeError, ValueError):
+            value = 0
+        if not 1 <= value <= 16384:
+            issues.append(ValidationIssue(
+                "invalid_generator_size",
+                "Generator dimensions must be between 1 and 16384.",
+                f"{path}.source.params.{key}",
+            ))
+    try:
+        scale = float(params.get("scale", 96.0) or 0.0)
+    except (TypeError, ValueError):
+        scale = 0.0
+    if not 2.0 <= scale <= 4096.0:
+        issues.append(ValidationIssue(
+            "invalid_generator_scale",
+            "Generator scale must be between 2 and 4096.",
+            f"{path}.source.params.scale",
+        ))
+
+
+def _validate_rigs(composition: MotionComposition, issues: list[ValidationIssue]) -> None:
+    from .rigging import (
+        RIG_CONSTRAINT_TWO_BONE_IK,
+        RIG_KIND_CUTOUT_2D,
+        composition_rigs,
+    )
+    from .schema import AnimatedProperty
+
+    rigs = composition_rigs(composition)
+    rig_ids = [rig.id for rig in rigs]
+    for rig_id in sorted({value for value in rig_ids if rig_ids.count(value) > 1}):
+        issues.append(ValidationIssue(
+            "duplicate_rig_id", f"Duplicate rig id: {rig_id}", "metadata.rigs",
+        ))
+    layer_ids = {layer.id for layer in composition.layers}
+    for rig_index, rig in enumerate(rigs):
+        path = f"metadata.rigs[{rig_index}]"
+        if rig.kind != RIG_KIND_CUTOUT_2D:
+            issues.append(ValidationIssue(
+                "unsupported_rig_kind", f"Unsupported rig kind: {rig.kind}", f"{path}.kind",
+            ))
+        bone_ids = [bone.id for bone in rig.bones]
+        bone_id_set = set(bone_ids)
+        for bone_id in sorted({value for value in bone_ids if bone_ids.count(value) > 1}):
+            issues.append(ValidationIssue(
+                "duplicate_rig_bone_id", f"Duplicate rig bone id: {bone_id}", f"{path}.bones",
+            ))
+        if not rig.bones:
+            issues.append(ValidationIssue(
+                "empty_rig", "A motion rig requires at least one bone.", f"{path}.bones",
+            ))
+        if rig.root_bone_id not in bone_id_set:
+            issues.append(ValidationIssue(
+                "missing_rig_root", "Rig root_bone_id must reference a bone.", f"{path}.root_bone_id",
+            ))
+        parent_by_id = {bone.id: bone.parent_id for bone in rig.bones}
+        for bone_index, bone in enumerate(rig.bones):
+            bone_path = f"{path}.bones[{bone_index}]"
+            if bone.side not in {"left", "right", "center"}:
+                issues.append(ValidationIssue(
+                    "invalid_rig_bone_side",
+                    "Rig bone side must be left, right, or center.",
+                    f"{bone_path}.side",
+                ))
+            if bone.parent_id and bone.parent_id not in bone_id_set:
+                issues.append(ValidationIssue(
+                    "missing_rig_bone_parent",
+                    f"Unknown rig bone parent: {bone.parent_id}",
+                    f"{bone_path}.parent_id",
+                ))
+            if not all(isfinite(float(value)) for value in bone.rest_position):
+                issues.append(ValidationIssue(
+                    "invalid_rig_bone_position",
+                    "Rig bone rest position must contain finite x/y values.",
+                    f"{bone_path}.rest_position",
+                ))
+            if not all(isfinite(float(value)) for value in (
+                bone.rest_rotation, bone.rotation_min, bone.rotation_max,
+            )):
+                issues.append(ValidationIssue(
+                    "invalid_rig_bone_rotation",
+                    "Rig bone rotation values must be finite.",
+                    bone_path,
+                ))
+            elif bone.rotation_min > bone.rotation_max:
+                issues.append(ValidationIssue(
+                    "invalid_rig_bone_limit",
+                    "Rig bone rotation_min must not exceed rotation_max.",
+                    bone_path,
+                ))
+            for property_name, prop in (
+                ("rotation", bone.rotation),
+                ("translation", bone.translation),
+            ):
+                property_path = f"{bone_path}.{property_name}"
+                times = [key.time_ms for key in prop.keyframes]
+                if times != sorted(times):
+                    issues.append(ValidationIssue(
+                        "unsorted_rig_keyframes",
+                        "Rig bone keyframes must be time sorted.",
+                        property_path,
+                    ))
+                key_ids = [key.id for key in prop.keyframes]
+                if len(key_ids) != len(set(key_ids)):
+                    issues.append(ValidationIssue(
+                        "duplicate_rig_keyframe_id",
+                        "Rig bone keyframe ids must be unique.",
+                        property_path,
+                    ))
+            seen: set[str] = set()
+            node = bone.id
+            while node:
+                if node in seen:
+                    issues.append(ValidationIssue(
+                        "rig_bone_cycle",
+                        f"Rig bone parent cycle includes: {node}",
+                        f"{bone_path}.parent_id",
+                    ))
+                    break
+                seen.add(node)
+                node = parent_by_id.get(node, "")
+        bound_layers: set[str] = set()
+        for binding_index, binding in enumerate(rig.bindings):
+            binding_path = f"{path}.bindings[{binding_index}]"
+            if binding.layer_id not in layer_ids:
+                issues.append(ValidationIssue(
+                    "missing_rig_binding_layer",
+                    f"Unknown rig binding layer: {binding.layer_id}",
+                    f"{binding_path}.layer_id",
+                ))
+            if binding.bone_id not in bone_id_set:
+                issues.append(ValidationIssue(
+                    "missing_rig_binding_bone",
+                    f"Unknown rig binding bone: {binding.bone_id}",
+                    f"{binding_path}.bone_id",
+                ))
+            if binding.layer_id in bound_layers:
+                issues.append(ValidationIssue(
+                    "duplicate_rig_layer_binding",
+                    f"Layer is bound more than once in this rig: {binding.layer_id}",
+                    f"{binding_path}.layer_id",
+                ))
+            bound_layers.add(binding.layer_id)
+        constraint_ids: set[str] = set()
+        for constraint_index, constraint in enumerate(rig.constraints):
+            constraint_path = f"{path}.constraints[{constraint_index}]"
+            constraint_id = str(constraint.get("id") or "")
+            if not constraint_id or constraint_id in constraint_ids:
+                issues.append(ValidationIssue(
+                    "invalid_rig_constraint_id",
+                    "Rig constraint ids must be non-empty and unique.",
+                    f"{constraint_path}.id",
+                ))
+            constraint_ids.add(constraint_id)
+            if str(constraint.get("kind") or "") != RIG_CONSTRAINT_TWO_BONE_IK:
+                issues.append(ValidationIssue(
+                    "unsupported_rig_constraint",
+                    f"Unsupported rig constraint: {constraint.get('kind')}",
+                    f"{constraint_path}.kind",
+                ))
+                continue
+            root_id = str(constraint.get("root_bone_id") or "")
+            mid_id = str(constraint.get("mid_bone_id") or "")
+            end_id = str(constraint.get("end_bone_id") or "")
+            if any(value not in bone_id_set for value in (root_id, mid_id, end_id)):
+                issues.append(ValidationIssue(
+                    "missing_rig_constraint_bone",
+                    "IK constraint root, mid, and end must reference rig bones.",
+                    constraint_path,
+                ))
+            elif (
+                parent_by_id.get(mid_id) != root_id
+                or parent_by_id.get(end_id) != mid_id
+            ):
+                issues.append(ValidationIssue(
+                    "invalid_rig_constraint_chain",
+                    "IK constraint bones must form a direct root -> mid -> end chain.",
+                    constraint_path,
+                ))
+            for property_name, value_type in (
+                ("target", "vector2"),
+                ("pole", "vector2"),
+                ("weight", "scalar"),
+            ):
+                try:
+                    prop = AnimatedProperty.from_dict(
+                        constraint.get(property_name), value_type=value_type,
+                    )
+                    samples = [prop.default, *(row.value for row in prop.keyframes)]
+                    if value_type == "vector2":
+                        valid = all(_valid_point(sample) for sample in samples)
+                    else:
+                        valid = all(isfinite(float(sample)) for sample in samples)
+                    if not valid:
+                        raise ValueError
+                except (TypeError, ValueError):
+                    issues.append(ValidationIssue(
+                        "invalid_rig_constraint_property",
+                        f"IK constraint {property_name} contains invalid values.",
+                        f"{constraint_path}.{property_name}",
+                    ))
+
+
+def _validate_puppet_mesh(
+    layer,
+    path: str,
+    issues: list[ValidationIssue],
+    composition: MotionComposition,
+) -> None:
+    from .puppet_mesh import (
+        PUPPET_PIN_KINDS,
+        layer_puppet_mesh,
+        puppet_mesh_diagnostics,
+    )
+
+    mesh = layer_puppet_mesh(layer)
+    if mesh is None:
+        return
+    if layer.layer_type != "image":
+        issues.append(ValidationIssue(
+            "invalid_puppet_layer_type",
+            "Puppet meshes currently require an image layer.",
+            f"{path}.metadata.puppet_mesh",
+        ))
+    vertex_ids = [vertex.id for vertex in mesh.vertices]
+    if len(mesh.vertices) < 4 or len(vertex_ids) != len(set(vertex_ids)):
+        issues.append(ValidationIssue(
+            "invalid_puppet_vertices",
+            "Puppet mesh requires at least four uniquely identified vertices.",
+            f"{path}.metadata.puppet_mesh.vertices",
+        ))
+    if not mesh.triangles:
+        issues.append(ValidationIssue(
+            "empty_puppet_mesh",
+            "Puppet mesh requires at least one visible triangle.",
+            f"{path}.metadata.puppet_mesh.triangles",
+        ))
+    if any(
+        not 0.0 <= coordinate <= 1.0
+        for vertex in mesh.vertices
+        for coordinate in vertex.uv
+    ):
+        issues.append(ValidationIssue(
+            "invalid_puppet_uv",
+            "Puppet mesh UV coordinates must be normalized.",
+            f"{path}.metadata.puppet_mesh.vertices",
+        ))
+    pin_ids: set[str] = set()
+    for index, pin in enumerate(mesh.pins):
+        pin_path = f"{path}.metadata.puppet_mesh.pins[{index}]"
+        if not pin.id or pin.id in pin_ids:
+            issues.append(ValidationIssue(
+                "invalid_puppet_pin_id",
+                "Puppet pin ids must be non-empty and unique.",
+                f"{pin_path}.id",
+            ))
+        pin_ids.add(pin.id)
+        if pin.kind not in PUPPET_PIN_KINDS:
+            issues.append(ValidationIssue(
+                "invalid_puppet_pin_kind",
+                f"Unsupported puppet pin kind: {pin.kind}",
+                f"{pin_path}.kind",
+            ))
+        if not 0.001 <= pin.radius <= 2.0 or not 0.0 <= pin.strength <= 2.0:
+            issues.append(ValidationIssue(
+                "invalid_puppet_pin_influence",
+                "Puppet pin radius and strength are outside supported bounds.",
+                pin_path,
+            ))
+        driver = pin.metadata.get("rig_driver")
+        if isinstance(driver, Mapping):
+            from .rigging import composition_rigs
+
+            rig = next(
+                (
+                    row
+                    for row in composition_rigs(composition)
+                    if row.id == str(driver.get("rig_id") or "")
+                ),
+                None,
+            )
+            if rig is None or not any(
+                bone.id == str(driver.get("bone_id") or "")
+                for bone in rig.bones
+            ):
+                issues.append(ValidationIssue(
+                    "missing_puppet_rig_driver",
+                    "Puppet pin rig driver must reference an existing rig bone.",
+                    f"{pin_path}.metadata.rig_driver",
+                ))
+    diagnostics = puppet_mesh_diagnostics(mesh)
+    if diagnostics["degenerate_triangle_count"]:
+        issues.append(ValidationIssue(
+            "invalid_puppet_triangles",
+            "Puppet mesh contains invalid or degenerate triangles.",
+            f"{path}.metadata.puppet_mesh.triangles",
+        ))
+
+
+def _validate_precomposition(
+    layer,
+    path: str,
+    issues: list[ValidationIssue],
+    composition: MotionComposition,
+) -> None:
+    if layer.layer_type != "precomp":
+        return
+    from .precomposition import (
+        PRECOMP_CONTRACT,
+        PRECOMP_SOURCE_KIND,
+        embedded_composition,
+    )
+
+    source_path = f"{path}.source"
+    if layer.source.kind != PRECOMP_SOURCE_KIND:
+        issues.append(ValidationIssue(
+            "invalid_precomp_source",
+            "Pre-composition layers require a motion_composition source.",
+            f"{source_path}.kind",
+        ))
+        return
+    if layer.source.params.get("contract") != PRECOMP_CONTRACT:
+        issues.append(ValidationIssue(
+            "invalid_precomp_contract",
+            "Pre-composition source contract is missing or unsupported.",
+            f"{source_path}.params.contract",
+        ))
+    child = embedded_composition(layer)
+    if child is None:
+        issues.append(ValidationIssue(
+            "missing_precomp_document",
+            "Pre-composition layer requires an embedded composition snapshot.",
+            f"{source_path}.params.composition",
+        ))
+        return
+    if child.id == composition.id:
+        issues.append(ValidationIssue(
+            "precomp_cycle",
+            "A composition cannot directly contain itself.",
+            f"{source_path}.params.composition.id",
+        ))
+        return
+    child_report = validate_composition(child)
+    for issue in child_report.issues:
+        issues.append(ValidationIssue(
+            issue.code,
+            f"Nested composition: {issue.message}",
+            f"{source_path}.params.composition.{issue.path}",
+            severity=issue.severity,
+        ))
+
+
+def _validate_time_remap(
+    layer,
+    path: str,
+    issues: list[ValidationIssue],
+) -> None:
+    raw = layer.metadata.get("time_remap")
+    if raw is None:
+        return
+    if not isinstance(raw, Mapping):
+        issues.append(ValidationIssue(
+            "invalid_time_remap",
+            "Time Remap metadata must be an object.",
+            f"{path}.metadata.time_remap",
+        ))
+        return
+    if not raw.get("enabled", True):
+        return
+    from .time_remap import TIME_REMAP_CONTRACT, layer_time_remap
+
+    prop = layer_time_remap(layer)
+    if raw.get("contract") != TIME_REMAP_CONTRACT or prop is None:
+        issues.append(ValidationIssue(
+            "invalid_time_remap",
+            "Time Remap requires the supported contract and animated property.",
+            f"{path}.metadata.time_remap",
+        ))
+        return
+    if not prop.keyframes:
+        issues.append(ValidationIssue(
+            "empty_time_remap",
+            "Time Remap requires at least one source-time keyframe.",
+            f"{path}.metadata.time_remap.property.keyframes",
+        ))
+    if any(float(row.value) < 0.0 for row in prop.keyframes):
+        issues.append(ValidationIssue(
+            "negative_time_remap",
+            "Time Remap source-time values cannot be negative.",
+            f"{path}.metadata.time_remap.property.keyframes",
+        ))
+
+
+def _validate_frame_blending(
+    layer,
+    path: str,
+    issues: list[ValidationIssue],
+) -> None:
+    raw = layer.metadata.get("frame_blending")
+    if raw is None:
+        return
+    from .frame_blending import FRAME_BLENDING_CONTRACT, FRAME_BLEND_MODES
+
+    if not isinstance(raw, Mapping):
+        issues.append(ValidationIssue(
+            "invalid_frame_blending",
+            "Frame Blending metadata must be an object.",
+            f"{path}.metadata.frame_blending",
+        ))
+        return
+    if (
+        raw.get("contract") != FRAME_BLENDING_CONTRACT
+        or str(raw.get("mode") or "off") not in FRAME_BLEND_MODES
+    ):
+        issues.append(ValidationIssue(
+            "invalid_frame_blending",
+            "Frame Blending requires a supported contract and mode.",
+            f"{path}.metadata.frame_blending",
+        ))
+    try:
+        source_fps = float(raw.get("source_fps", 0.0) or 0.0)
+    except (TypeError, ValueError):
+        source_fps = -1.0
+    if source_fps < 0.0:
+        issues.append(ValidationIssue(
+            "invalid_frame_blending_fps",
+            "Frame Blending source FPS cannot be negative.",
+            f"{path}.metadata.frame_blending.source_fps",
+        ))
+
+
 def validate_composition(composition: MotionComposition) -> ValidationReport:
     issues: list[ValidationIssue] = []
     if composition.width <= 0 or composition.height <= 0:
@@ -484,6 +1130,33 @@ def validate_composition(composition: MotionComposition) -> ValidationReport:
         issues.append(ValidationIssue("invalid_fps", "Composition fps must be positive.", "fps"))
     if composition.duration_ms <= 0:
         issues.append(ValidationIssue("invalid_duration", "Composition duration must be positive.", "duration_ms"))
+    tracking_assets = [
+        item
+        for item in composition.metadata.get("tracking_assets", [])
+        if isinstance(item, Mapping)
+    ]
+    tracking_ids = [str(item.get("id") or "") for item in tracking_assets]
+    for duplicate_id in sorted({
+        track_id for track_id in tracking_ids
+        if track_id and tracking_ids.count(track_id) > 1
+    }):
+        issues.append(ValidationIssue(
+            "duplicate_tracking_asset_id",
+            f"Duplicate Motion tracking asset id: {duplicate_id}",
+            "metadata.tracking_assets",
+        ))
+    from .tracking_workflow import normalize_track_asset
+
+    for track_index, asset in enumerate(tracking_assets):
+        try:
+            normalize_track_asset(asset)
+        except (TypeError, ValueError) as exc:
+            issues.append(ValidationIssue(
+                "invalid_tracking_asset",
+                str(exc),
+                f"metadata.tracking_assets[{track_index}]",
+            ))
+    _validate_rigs(composition, issues)
 
     ids = [layer.id for layer in composition.layers]
     duplicate_ids = {layer_id for layer_id in ids if ids.count(layer_id) > 1}
@@ -535,10 +1208,23 @@ def validate_composition(composition: MotionComposition) -> ValidationReport:
         parent_by_id.setdefault(layer.id, layer.parent_id)
     for index, layer in enumerate(composition.layers):
         path = f"layers[{index}]"
+        _validate_puppet_mesh(layer, path, issues, composition)
+        _validate_precomposition(layer, path, issues, composition)
+        _validate_time_remap(layer, path, issues)
+        _validate_frame_blending(layer, path, issues)
         if layer.out_ms <= layer.in_ms:
             issues.append(ValidationIssue("invalid_layer_range", "Layer out_ms must be after in_ms.", path))
         if layer.parent_id and layer.parent_id not in id_set:
             issues.append(ValidationIssue("missing_parent", f"Unknown parent: {layer.parent_id}", f"{path}.parent_id"))
+        applied_track = layer.transform.metadata.get("tracking")
+        if isinstance(applied_track, Mapping):
+            applied_track_id = str(applied_track.get("track_id") or "")
+            if applied_track_id and applied_track_id not in set(tracking_ids):
+                issues.append(ValidationIssue(
+                    "missing_applied_tracking_asset",
+                    f"Unknown applied Motion track: {applied_track_id}",
+                    f"{path}.transform.metadata.tracking.track_id",
+                ))
         matte_id = str(layer.metadata.get("matte_layer_id") or "")
         if matte_id == layer.id:
             issues.append(ValidationIssue(
@@ -569,17 +1255,67 @@ def validate_composition(composition: MotionComposition) -> ValidationReport:
                 "2.5D layer depth must be between -8 and 8.",
                 f"{path}.metadata.depth_z",
             ))
+        three_d = layer.metadata.get("three_d")
+        if isinstance(three_d, Mapping):
+            projection_model = str(
+                three_d.get("projection_model") or "affine_card_2_5d"
+            )
+            if projection_model != "affine_card_2_5d":
+                issues.append(ValidationIssue(
+                    "invalid_3d_layer_projection_model",
+                    "2.5D layers currently require affine_card_2_5d projection.",
+                    f"{path}.metadata.three_d.projection_model",
+                ))
+            for key in ("rotation_x", "rotation_y"):
+                try:
+                    angle = float(_default_value(three_d.get(key, 0.0)) or 0.0)
+                except (TypeError, ValueError):
+                    angle = 999.0
+                if not -180.0 <= angle <= 180.0:
+                    issues.append(ValidationIssue(
+                        "invalid_3d_layer_rotation",
+                        "2.5D card rotations must be between -180 and 180 degrees.",
+                        f"{path}.metadata.three_d.{key}",
+                    ))
+            for key, minimum, maximum in (
+                ("shadow_strength", 0.0, 1.0),
+                ("shadow_softness", 0.0, 32.0),
+            ):
+                try:
+                    value = float(_default_value(three_d.get(key, minimum)) or 0.0)
+                except (TypeError, ValueError):
+                    value = maximum + 1.0
+                if not minimum <= value <= maximum:
+                    issues.append(ValidationIssue(
+                        "invalid_3d_layer_shadow",
+                        f"2.5D card {key} must be between {minimum:g} and {maximum:g}.",
+                        f"{path}.metadata.three_d.{key}",
+                    ))
         replicator = layer.metadata.get("replicator")
         if isinstance(replicator, Mapping):
+            arrangement = str(replicator.get("arrangement") or "line").lower()
+            if arrangement not in {"line", "grid", "radial"}:
+                issues.append(ValidationIssue(
+                    "invalid_layer_replicator_arrangement",
+                    "Replicator arrangement must be line, grid, or radial.",
+                    f"{path}.metadata.replicator.arrangement",
+                ))
             try:
                 repeat_count = int(_default_value(replicator.get("count", 1)) or 1)
+                columns = int(_default_value(replicator.get("columns", 1)) or 1)
             except (TypeError, ValueError):
-                repeat_count = 0
+                repeat_count, columns = 0, 0
             if not 1 <= repeat_count <= 256:
                 issues.append(ValidationIssue(
                     "invalid_layer_replicator",
                     "Generic layer Replicator count must be between 1 and 256.",
                     f"{path}.metadata.replicator.count",
+                ))
+            if not 1 <= columns <= 256:
+                issues.append(ValidationIssue(
+                    "invalid_layer_replicator_columns",
+                    "Replicator columns must be between 1 and 256.",
+                    f"{path}.metadata.replicator.columns",
                 ))
         blur = layer.metadata.get("motion_blur")
         if isinstance(blur, Mapping):
@@ -618,6 +1354,23 @@ def validate_composition(composition: MotionComposition) -> ValidationReport:
                     f"{path}.{collection_name}",
                 ))
             for item_index, item in enumerate(items):
+                if collection_name == "effects" and item.kind in {
+                    "chroma_key", "luma_key", "difference_key",
+                }:
+                    key_path = f"{path}.effects[{item_index}]"
+                    if item.kind == "difference_key":
+                        reference = item.params.get("reference_uri")
+                        reference_uri = (
+                            str(reference.default or "")
+                            if reference is not None
+                            else ""
+                        )
+                        if not reference_uri:
+                            issues.append(ValidationIssue(
+                                "difference_key_reference_missing",
+                                "Difference Key requires a reference frame URI.",
+                                f"{key_path}.params.reference_uri",
+                            ))
                 for param_name, prop in item.params.items():
                     key_path = f"{path}.{collection_name}[{item_index}].params.{param_name}"
                     times = [key.time_ms for key in prop.keyframes]
@@ -652,6 +1405,26 @@ def validate_composition(composition: MotionComposition) -> ValidationReport:
                                 f"{track_path}.samples",
                                 severity="warning",
                             ))
+                        corrections = [
+                            row for row in tracking.get("corrections", [])
+                            if isinstance(row, Mapping)
+                        ]
+                        correction_times = [
+                            int(row.get("time_ms", 0) or 0)
+                            for row in corrections
+                        ]
+                        if correction_times != sorted(correction_times):
+                            issues.append(ValidationIssue(
+                                "unsorted_matte_corrections",
+                                "Matte correction keyframes must be time sorted.",
+                                f"{track_path}.corrections",
+                            ))
+                        if tracking.get("frozen", False) and not samples:
+                            issues.append(ValidationIssue(
+                                "empty_frozen_matte_cache",
+                                "A frozen matte cache must contain propagation samples.",
+                                f"{track_path}.samples",
+                            ))
         _validate_vector_layer(layer, path, issues)
         _validate_typography_layer(layer, path, issues)
         _validate_ar_pbr_layer(layer, path, issues)
@@ -659,6 +1432,8 @@ def validate_composition(composition: MotionComposition) -> ValidationReport:
         _validate_mmd_layer(layer, path, issues)
         _validate_vrm_layer(layer, path, issues)
         _validate_particle_layer(layer, path, issues)
+        _validate_button_component(layer, path, issues)
+        _validate_generator_layer(layer, path, issues)
     from .expressions import expression_issues
 
     layer_index = {layer.id: index for index, layer in enumerate(composition.layers)}
@@ -668,6 +1443,20 @@ def validate_composition(composition: MotionComposition) -> ValidationReport:
             issue.code, issue.message,
             f"layers[{index}].metadata.expressions.{issue.property_name}".rstrip("."),
         ))
+    from .ui_motion_binding import validate_ui_motion_bindings
+
+    ui_motion_report = validate_ui_motion_bindings(composition)
+    for severity, rows in (
+        ("error", ui_motion_report["errors"]),
+        ("warning", ui_motion_report["warnings"]),
+    ):
+        for row in rows:
+            issues.append(ValidationIssue(
+                str(row["code"]),
+                str(row["message"]),
+                str(row["path"]),
+                severity=severity,
+            ))
     return ValidationReport(issues)
 
 

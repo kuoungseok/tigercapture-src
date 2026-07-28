@@ -185,6 +185,17 @@ def register_ar_pbr_preview_actions(registry: Any) -> None:
                     "ior": {"type": "number", "minimum": 1.0, "maximum": 2.5},
                 },
             },
+            "parallax": {
+                "type": "object",
+                "properties": {
+                    "mode": {"type": "string", "enum": ["off", "parallax", "pom"]},
+                    "enabled": {"type": "boolean"},
+                    "strength": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    "depth": {"type": "number", "minimum": 0.0, "maximum": 0.25},
+                    "center": {"type": "number", "minimum": 0.0, "maximum": 1.0},
+                    "steps": {"type": "integer", "minimum": 1, "maximum": 64},
+                },
+            },
             "surface": {
                 "type": "object",
                 "properties": {

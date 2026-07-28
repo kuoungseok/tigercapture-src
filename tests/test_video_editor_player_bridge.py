@@ -252,6 +252,15 @@ def test_video_embedded_audio_preview_follows_timeline_with_editor_state() -> No
         gain=0.42,
     )
     proxy.effects["eq"]["low"]["gain"] = 4.5
+    setattr(proxy, "_picture_sync_markers", [
+        {
+            "source_ms": 1800,
+            "local_ms": 300,
+            "project_ms": 1300,
+            "kind": "motion",
+            "label": "Zoom start",
+        }
+    ])
     setattr(proxy, "_se_speed", 1.2)
     setattr(clip, "_embedded_audio_proxy_clip", proxy)
     owner = SimpleNamespace(
@@ -269,10 +278,21 @@ def test_video_embedded_audio_preview_follows_timeline_with_editor_state() -> No
     assert audio_clip.fade_out_ms == 240
     assert audio_clip.effects["eq"]["low"]["gain"] == 4.5
     assert getattr(audio_clip, "_se_speed") == 1.2
+    assert getattr(audio_clip, "_picture_sync_markers")[0]["local_ms"] == 300
+    assert getattr(audio_clip, "_picture_sync_markers")[0]["project_ms"] == 1300
 
     clip.timeline_in_ms = 4200
     clip.source_in_ms = 2300
     clip.source_out_ms = 5200
+    proxy._picture_sync_markers = [
+        {
+            "source_ms": 2500,
+            "local_ms": 200,
+            "project_ms": 4400,
+            "kind": "motion",
+            "label": "Zoom start",
+        }
+    ]
     [moved_audio_clip] = bridge.collect_video_embedded_audio_preview_clips(owner)
 
     assert moved_audio_clip.offset_ms == 4200
@@ -280,6 +300,9 @@ def test_video_embedded_audio_preview_follows_timeline_with_editor_state() -> No
     assert moved_audio_clip.trim_end_ms == 5200
     assert moved_audio_clip.gain == 0.42
     assert moved_audio_clip.effects["eq"]["low"]["gain"] == 4.5
+    moved_markers = getattr(moved_audio_clip, "_picture_sync_markers")
+    assert moved_markers[0]["local_ms"] == 200
+    assert moved_markers[0]["project_ms"] == 4400
 
 
 class _RefreshPlayer:

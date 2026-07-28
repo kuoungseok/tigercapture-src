@@ -88,6 +88,10 @@ uniform int u_mode;
 uniform int u_shape;
 uniform vec3 u_light;
 uniform float u_environment;
+uniform int u_parallax_enabled;
+uniform float u_parallax_strength;
+uniform float u_parallax_depth;
+uniform int u_parallax_steps;
 
 vec3 srgb_to_linear(vec3 c) {
     return pow(max(c, vec3(0.0)), vec3(2.2));
@@ -127,6 +131,57 @@ vec3 sphere_tangent_normal(vec3 sphere_n, vec3 tangent_normal) {
         + bitangent * tangent_normal.y
         + sphere_n * tangent_normal.z
     );
+}
+
+void surface_basis(vec3 surface_n, out vec3 tangent, out vec3 bitangent) {
+    tangent = vec3(surface_n.z, 0.0, -surface_n.x);
+    if (dot(tangent, tangent) < 0.0001) {
+        tangent = vec3(1.0, 0.0, 0.0);
+    } else {
+        tangent = normalize(tangent);
+    }
+    bitangent = normalize(cross(surface_n, tangent));
+}
+
+vec2 parallax_occlusion_uv(
+    vec2 uv,
+    vec3 surface_n,
+    vec3 tangent,
+    vec3 bitangent,
+    vec3 view_dir
+) {
+    if (u_parallax_enabled != 1 || u_parallax_strength <= 0.0001 || u_parallax_depth <= 0.0001) {
+        return uv;
+    }
+    vec3 view_ts = vec3(
+        dot(view_dir, tangent),
+        dot(view_dir, bitangent),
+        max(abs(dot(view_dir, surface_n)), 0.08)
+    );
+    float step_count = clamp(float(u_parallax_steps), 4.0, 64.0);
+    float layer_step = 1.0 / step_count;
+    vec2 ray = vec2(view_ts.x, -view_ts.y) / view_ts.z * u_parallax_depth * u_parallax_strength;
+    vec2 delta = ray / step_count;
+    vec2 current_uv = uv;
+    vec2 previous_uv = uv;
+    float current_layer = 0.0;
+    float previous_layer = 0.0;
+    float surface_depth = 1.0 - scalar_sample(u_height, current_uv);
+    for (int i = 0; i < 64; ++i) {
+        if (float(i) >= step_count || current_layer >= surface_depth) {
+            break;
+        }
+        previous_uv = current_uv;
+        previous_layer = current_layer;
+        current_uv -= delta;
+        current_layer += layer_step;
+        surface_depth = 1.0 - scalar_sample(u_height, current_uv);
+    }
+    float current_error = current_layer - surface_depth;
+    float previous_depth = 1.0 - scalar_sample(u_height, previous_uv);
+    float previous_error = previous_depth - previous_layer;
+    float blend = clamp(previous_error / max(previous_error + current_error, 0.000001), 0.0, 1.0);
+    return clamp(mix(previous_uv, current_uv, blend), vec2(0.0), vec2(1.0));
 }
 
 vec3 packed_sample(vec2 uv, int code) {
@@ -235,6 +290,24 @@ void main() {
     if (u_mode == 16) { gl_FragColor = vec4(texture2D(u_irradiance, material_uv).rgb, 1.0); return; }
     if (u_mode == 17) { gl_FragColor = vec4(texture2D(u_delight_shading, material_uv).rgb, 1.0); return; }
 
+    vec3 surface_n = sphere_n;
+    vec3 tangent = vec3(1.0, 0.0, 0.0);
+    vec3 bitangent = vec3(0.0, 1.0, 0.0);
+    if (u_shape == 1) {
+        surface_basis(surface_n, tangent, bitangent);
+    }
+    vec3 preview_view = normalize(
+        u_shape == 1
+            ? vec3(0.0, 0.0, 1.0)
+            : vec3(0.30, -0.16, 1.0)
+    );
+    material_uv = parallax_occlusion_uv(
+        material_uv,
+        surface_n,
+        tangent,
+        bitangent,
+        preview_view
+    );
     vec3 n = normal_sample(material_uv);
     if (u_shape == 1) {
         n = sphere_tangent_normal(sphere_n, normal_sample(material_uv));
@@ -445,6 +518,22 @@ def render_texture_lab_gpu_preview_from_generated(
         GL.glUniform1i(_uniform(GL, program, "u_shape"), 1 if effective_shape == "sphere" else 0)
         GL.glUniform3f(_uniform(GL, program, "u_light"), float(light[0]), float(light[1]), float(light[2]))
         GL.glUniform1f(_uniform(GL, program, "u_environment"), float(preview_settings.get("preview_environment", 0.35)))
+        GL.glUniform1i(
+            _uniform(GL, program, "u_parallax_enabled"),
+            1 if bool(preview_settings.get("preview_parallax_enabled", True)) else 0,
+        )
+        GL.glUniform1f(
+            _uniform(GL, program, "u_parallax_strength"),
+            float(preview_settings.get("preview_parallax_strength", 0.55)),
+        )
+        GL.glUniform1f(
+            _uniform(GL, program, "u_parallax_depth"),
+            float(preview_settings.get("preview_parallax_depth", 0.045)),
+        )
+        GL.glUniform1i(
+            _uniform(GL, program, "u_parallax_steps"),
+            int(preview_settings.get("preview_parallax_steps", 24)),
+        )
 
         GL.glClearColor(0.02, 0.022, 0.028, 1.0)
         GL.glClear(GL.GL_COLOR_BUFFER_BIT)
@@ -496,6 +585,13 @@ def render_texture_lab_gpu_preview_from_generated(
         "shape": effective_shape,
         "readback": "rgba8_png",
         "cpu_preview": False,
+        "height_map": "bound",
+        "parallax": {
+            "mode": "pom" if bool(preview_settings.get("preview_parallax_enabled", True)) else "off",
+            "strength": float(preview_settings.get("preview_parallax_strength", 0.55)),
+            "depth": float(preview_settings.get("preview_parallax_depth", 0.045)),
+            "steps": int(preview_settings.get("preview_parallax_steps", 24)),
+        },
     }
     return {
         "schema_id": SCHEMA_ID,
@@ -534,5 +630,8 @@ def texture_lab_gpu_preview_status() -> dict[str, Any]:
         "pyopengl_error": pyopengl_error,
         "supported_modes": sorted(_MODE_CODES),
         "supported_packed_layouts": sorted(PACKED_LAYOUTS),
+        "height_map_preview": True,
+        "parallax_occlusion_mapping": True,
+        "parallax_max_steps": 64,
         "cpu_preview": False,
     }

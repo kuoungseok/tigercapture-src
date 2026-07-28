@@ -1349,6 +1349,11 @@ class _MiniWaveformStrip(QWidget):
         self._playback_drop_marks = []
         self.update()
 
+    def picture_sync_marker_count(self) -> int:
+        clip = self._clip
+        markers = getattr(clip, "_picture_sync_markers", None) if clip is not None else None
+        return len(markers or [])
+
     def refresh(self) -> None:
         self.update()
 
@@ -1582,6 +1587,41 @@ class _MiniWaveformStrip(QWidget):
             p.drawPolyline(pts_top)
             p.setPen(QPen(QColor(105, 181, 218, 190), 0.85))
             p.drawPolyline(pts_bot)
+
+            picture_markers = [
+                row for row in list(getattr(clip, "_picture_sync_markers", []) or [])
+                if view_start <= int(row.get("source_ms", -1) or -1) <= view_end
+            ][:24]
+            marker_colors = {
+                "clip": QColor(232, 238, 246, 174),
+                "transition": QColor(191, 159, 255, 196),
+                "fade": QColor(157, 214, 154, 188),
+                "motion": QColor(111, 188, 224, 190),
+                "title": QColor(236, 196, 114, 188),
+                "speed": QColor(212, 159, 114, 184),
+                "repair": QColor(236, 128, 124, 190),
+            }
+            for marker in picture_markers:
+                source_ms = int(marker.get("source_ms", 0) or 0)
+                ratio = (source_ms - view_start) / max(1, view_end - view_start)
+                x = plot.left() + max(0.0, min(1.0, ratio)) * plot.width()
+                kind = str(marker.get("kind") or "clip")
+                color = marker_colors.get(kind, QColor(232, 238, 246, 168))
+                p.setPen(QPen(QColor(color.red(), color.green(), color.blue(), 88), 3.0))
+                p.drawLine(QPointF(x, plot.top() + 3.0), QPointF(x, plot.bottom() - 3.0))
+                p.setPen(QPen(color, 1.05))
+                p.drawLine(QPointF(x, plot.top() - 3.0), QPointF(x, plot.bottom() + 2.0))
+                p.setBrush(color)
+                p.setPen(Qt.PenStyle.NoPen)
+                p.drawEllipse(QPointF(x, plot.top() - 5.0), 2.3, 2.3)
+            if picture_markers:
+                p.setPen(QColor(190, 206, 224, 212))
+                first_label = str(picture_markers[0].get("label") or "sync")[:18]
+                p.drawText(
+                    QRectF(plot.left() + 4.0, root.top() + 3.0, 176.0, 12.0),
+                    Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter,
+                    f"picture sync {len(getattr(clip, '_picture_sync_markers', []) or [])}: {first_label}",
+                )
 
             fade_in = int(getattr(clip, "fade_in_ms", 0) or 0)
             fade_out = int(getattr(clip, "fade_out_ms", 0) or 0)

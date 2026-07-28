@@ -8,6 +8,7 @@ from app.motion_designer.schema import MotionComposition
 
 class LayerPanel(QTreeWidget):
     layer_selected = Signal(str)
+    layer_activated = Signal(str)
     layer_flags_changed = Signal(str, dict)
     layer_structure_changed = Signal(list)
 
@@ -16,11 +17,17 @@ class LayerPanel(QTreeWidget):
         self.setHeaderLabels(["Layer", "V", "L", "S"])
         self.setColumnWidth(0, 170)
         self.setDragDropMode(QAbstractItemView.InternalMove)
+        self.setSelectionMode(QAbstractItemView.ExtendedSelection)
         self.setDefaultDropAction(Qt.MoveAction)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
         self.itemSelectionChanged.connect(self._emit_selection)
+        self.itemDoubleClicked.connect(
+            lambda item, _column: self.layer_activated.emit(
+                str(item.data(0, Qt.UserRole) or ""),
+            ),
+        )
         self.itemChanged.connect(self._emit_flags)
         self._loading = False
 
@@ -49,6 +56,13 @@ class LayerPanel(QTreeWidget):
             if item.data(0, Qt.UserRole) == layer_id:
                 self.setCurrentItem(item)
                 break
+
+    def selected_layer_ids(self) -> list[str]:
+        return [
+            str(item.data(0, Qt.UserRole) or "")
+            for item in self.selectedItems()
+            if str(item.data(0, Qt.UserRole) or "")
+        ]
 
     def _emit_selection(self) -> None:
         if self._loading:

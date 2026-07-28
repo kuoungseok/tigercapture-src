@@ -42,6 +42,317 @@ def register_motion_actions(registry: Any) -> None:
         required=("composition_id",), mutating=False, changed=False,
     )
     registry.register_adapter_action(
+        "motion.precomp.create",
+        "Pre-compose selected Motion Designer layers.",
+        "motion",
+        "motion_precomp_create",
+        params_schema=schema_object({
+            **cid,
+            "layer_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+            },
+            "name": {"type": "string"},
+        }, required=("composition_id", "layer_ids")),
+        required=("composition_id", "layer_ids"),
+        undo_label="Pre-compose Layers",
+        dry_summary="Selected layers would become a nested composition",
+    )
+    registry.register_adapter_action(
+        "motion.precomp.inspect",
+        "Inspect a nested Motion Designer composition.",
+        "motion",
+        "motion_precomp_inspect",
+        params_schema=schema_object({
+            **cid,
+            "layer_id": {"type": "string"},
+        }, required=("composition_id", "layer_id")),
+        required=("composition_id", "layer_id"),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.precomp.override.set",
+        "Set a per-instance nested layer override.",
+        "motion",
+        "motion_precomp_override_set",
+        params_schema=schema_object({
+            **cid,
+            "layer_id": {"type": "string"},
+            "child_layer_id": {"type": "string"},
+            "changes": {"type": "object"},
+        }, required=(
+            "composition_id", "layer_id", "child_layer_id", "changes",
+        )),
+        required=(
+            "composition_id", "layer_id", "child_layer_id", "changes",
+        ),
+        undo_label="Set Pre-compose Override",
+        dry_summary="Nested layer overrides would be updated",
+    )
+    registry.register_adapter_action(
+        "motion.precomp.refresh",
+        "Refresh a pre-compose instance from its editable child composition.",
+        "motion",
+        "motion_precomp_refresh",
+        params_schema=schema_object({
+            **cid,
+            "layer_id": {"type": "string"},
+            "nested_composition_id": {"type": "string"},
+        }, required=(
+            "composition_id", "layer_id", "nested_composition_id",
+        )),
+        required=(
+            "composition_id", "layer_id", "nested_composition_id",
+        ),
+        undo_label="Refresh Pre-compose",
+        dry_summary="The embedded nested composition would be refreshed",
+    )
+    registry.register_adapter_action(
+        "motion.property.publish",
+        "Publish a child composition property for instance overrides.",
+        "motion",
+        "motion_property_publish",
+        params_schema=schema_object({
+            **cid,
+            "layer_id": {"type": "string"},
+            "property_name": {"type": "string"},
+            "name": {"type": "string"},
+        }, required=("composition_id", "layer_id", "property_name")),
+        required=("composition_id", "layer_id", "property_name"),
+        undo_label="Publish Motion Property",
+        dry_summary="The property would be exposed to pre-compose instances",
+    )
+    registry.register_adapter_action(
+        "motion.precomp.published_value.set",
+        "Set a published property on one pre-compose instance.",
+        "motion",
+        "motion_precomp_published_value_set",
+        params_schema=schema_object({
+            **cid,
+            "layer_id": {"type": "string"},
+            "publication_id": {"type": "string"},
+            "value": {},
+        }, required=(
+            "composition_id", "layer_id", "publication_id", "value",
+        )),
+        required=(
+            "composition_id", "layer_id", "publication_id", "value",
+        ),
+        undo_label="Set Published Property",
+        dry_summary="The pre-compose instance value would be updated",
+    )
+    registry.register_adapter_action(
+        "motion.controller.create",
+        "Create a non-rendering Controller Null.",
+        "motion",
+        "motion_controller_create",
+        params_schema=schema_object({
+            **cid,
+            "name": {"type": "string"},
+            "position": {
+                "type": "array",
+                "items": {"type": "number"},
+                "minItems": 2,
+                "maxItems": 2,
+            },
+        }, required=("composition_id",)),
+        required=("composition_id",),
+        undo_label="Create Motion Controller",
+        dry_summary="A Controller Null would be added",
+    )
+    registry.register_adapter_action(
+        "motion.controller.link",
+        "Link a target transform property to a Controller Null.",
+        "motion",
+        "motion_controller_link",
+        params_schema=schema_object({
+            **cid,
+            "target_layer_id": {"type": "string"},
+            "target_property": {"type": "string"},
+            "controller_layer_id": {"type": "string"},
+            "controller_property": {"type": "string"},
+        }, required=(
+            "composition_id", "target_layer_id", "target_property",
+            "controller_layer_id", "controller_property",
+        )),
+        required=(
+            "composition_id", "target_layer_id", "target_property",
+            "controller_layer_id", "controller_property",
+        ),
+        undo_label="Link Motion Controller",
+        dry_summary="The target property would follow the Controller Null",
+    )
+    registry.register_adapter_action(
+        "motion.time_remap.set",
+        "Set keyframed source time for a Motion layer.",
+        "motion",
+        "motion_time_remap_set",
+        params_schema=schema_object({
+            **cid,
+            "layer_id": {"type": "string"},
+            "keyframes": {
+                "type": "array",
+                "items": {"type": "object"},
+                "minItems": 1,
+            },
+            "default": {"type": "number"},
+        }, required=("composition_id", "layer_id", "keyframes")),
+        required=("composition_id", "layer_id", "keyframes"),
+        undo_label="Set Time Remap",
+        dry_summary="Source-time keyframes would be replaced",
+    )
+    registry.register_adapter_action(
+        "motion.time_remap.preset",
+        "Apply a linear, reverse, freeze, or speed-ramp source-time preset.",
+        "motion",
+        "motion_time_remap_preset",
+        params_schema=schema_object({
+            **cid,
+            "layer_id": {"type": "string"},
+            "preset": {
+                "type": "string",
+                "enum": ["linear", "reverse", "freeze", "speed_ramp"],
+            },
+        }, required=("composition_id", "layer_id", "preset")),
+        required=("composition_id", "layer_id", "preset"),
+        undo_label="Apply Time Remap Preset",
+        dry_summary="A source-time preset would be applied",
+    )
+    registry.register_adapter_action(
+        "motion.time_remap.clear",
+        "Clear source-time remapping from a Motion layer.",
+        "motion",
+        "motion_time_remap_clear",
+        params_schema=schema_object({
+            **cid, "layer_id": {"type": "string"},
+        }, required=("composition_id", "layer_id")),
+        required=("composition_id", "layer_id"),
+        undo_label="Clear Time Remap",
+        dry_summary="Source-time remapping would be removed",
+    )
+    registry.register_adapter_action(
+        "motion.time_remap.inspect",
+        "Inspect source-time remap speed, reverse, and freeze segments.",
+        "motion",
+        "motion_time_remap_inspect",
+        params_schema=schema_object({
+            **cid, "layer_id": {"type": "string"},
+        }, required=("composition_id", "layer_id")),
+        required=("composition_id", "layer_id"),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.frame_blending.set",
+        "Set off, Frame Mix, or Optical Flow mode for a Motion layer.",
+        "motion",
+        "motion_frame_blending_set",
+        params_schema=schema_object({
+            **cid,
+            "layer_id": {"type": "string"},
+            "mode": {
+                "type": "string",
+                "enum": ["off", "frame_mix", "optical_flow"],
+            },
+            "source_fps": {"type": "number", "minimum": 0.0},
+        }, required=("composition_id", "layer_id", "mode")),
+        required=("composition_id", "layer_id", "mode"),
+        undo_label="Set Frame Blending",
+        dry_summary="Frame sampling mode would be updated",
+    )
+    registry.register_adapter_action(
+        "motion.frame_blending.preflight",
+        "Inspect Frame Mix and Optical Flow backend availability and fallback.",
+        "motion",
+        "motion_frame_blending_preflight",
+        params_schema=schema_object({
+            **cid, "layer_id": {"type": "string"},
+        }, required=("composition_id", "layer_id")),
+        required=("composition_id", "layer_id"),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.graph.tangent.update",
+        "Update keyframe interpolation and Bezier tangents.",
+        "motion",
+        "motion_graph_tangent_update",
+        params_schema=schema_object({
+            **cid,
+            "layer_id": {"type": "string"},
+            "property_name": {"type": "string"},
+            "keyframe_id": {"type": "string"},
+            "mode": {
+                "type": "string",
+                "enum": ["auto", "continuous", "broken", "linear", "hold"],
+            },
+            "in_tangent": {
+                "type": "array",
+                "items": {"type": "number"},
+                "minItems": 2,
+                "maxItems": 2,
+            },
+            "out_tangent": {
+                "type": "array",
+                "items": {"type": "number"},
+                "minItems": 2,
+                "maxItems": 2,
+            },
+        }, required=(
+            "composition_id", "layer_id", "property_name", "keyframe_id",
+        )),
+        required=(
+            "composition_id", "layer_id", "property_name", "keyframe_id",
+        ),
+        undo_label="Update Graph Tangent",
+        dry_summary="Keyframe tangent interpolation would be updated",
+    )
+    registry.register_adapter_action(
+        "motion.graph.roving.set",
+        "Enable or disable automatic temporal spacing for keyframes.",
+        "motion",
+        "motion_graph_roving_set",
+        params_schema=schema_object({
+            **cid,
+            "layer_id": {"type": "string"},
+            "property_name": {"type": "string"},
+            "keyframe_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+            },
+            "enabled": {"type": "boolean"},
+        }, required=(
+            "composition_id", "layer_id", "property_name", "keyframe_ids",
+        )),
+        required=(
+            "composition_id", "layer_id", "property_name", "keyframe_ids",
+        ),
+        undo_label="Set Roving Keyframes",
+        dry_summary="Selected keyframes would be redistributed in time",
+    )
+    registry.register_adapter_action(
+        "motion.project.save", "Save a composition as an independent .tgmotion project.",
+        "motion", "motion_project_save",
+        params_schema=schema_object({
+            **cid, "path": {"type": "string"},
+        }, required=("composition_id", "path")),
+        required=("composition_id", "path"), mutating=False, changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.project.load", "Load an independent .tgmotion project into Tiger Studio.",
+        "motion", "motion_project_load",
+        params_schema=schema_object({
+            "path": {"type": "string"},
+            "replace_existing": {"type": "boolean"},
+        }, required=("path",)),
+        required=("path",), mutating=True, changed=True,
+        undo_label="Load Motion Project",
+        dry_summary="The Motion project would be validated and loaded",
+    )
+    registry.register_adapter_action(
         "motion.layer.list", "List layers in a Motion Designer composition.", "motion", "motion_layer_list",
         params_schema=schema_object(cid, required=("composition_id",)), required=("composition_id",),
         mutating=False, changed=False,
@@ -58,6 +369,432 @@ def register_motion_actions(registry: Any) -> None:
         registry.register_adapter_action(action_id, title, "motion", method,
             params_schema=schema_object(props, required=required), required=required,
             destructive=action_id.endswith("delete"), undo_label=title, dry_summary=f"{title} would run")
+    rid = {**cid, "rig_id": {"type": "string"}}
+    bid = {**rid, "bone_id": {"type": "string"}}
+    rig_ops = (
+        (
+            "motion.rig.list", "motion_rig_list", cid,
+            ("composition_id",), False, False,
+        ),
+        (
+            "motion.rig.inspect", "motion_rig_inspect", rid,
+            ("composition_id", "rig_id"), False, False,
+        ),
+        (
+            "motion.rig.create", "motion_rig_create",
+            {
+                **cid,
+                "name": {"type": "string"},
+                "kind": {"type": "string", "enum": ["cutout_2d"]},
+                "bones": {"type": "array", "items": {"type": "object"}},
+                "bindings": {"type": "array", "items": {"type": "object"}},
+            },
+            ("composition_id",), True, False,
+        ),
+        (
+            "motion.rig.humanoid.create", "motion_rig_humanoid_create",
+            {
+                **cid,
+                "name": {"type": "string"},
+                "layer_slots": {"type": "object"},
+            },
+            ("composition_id",), True, False,
+        ),
+        (
+            "motion.rig.delete", "motion_rig_delete", rid,
+            ("composition_id", "rig_id"), True, True,
+        ),
+        (
+            "motion.rig.bone.add", "motion_rig_bone_add",
+            {**rid, "bone": {"type": "object"}},
+            ("composition_id", "rig_id", "bone"), True, False,
+        ),
+        (
+            "motion.rig.bone.update", "motion_rig_bone_update",
+            {**bid, "changes": {"type": "object"}},
+            ("composition_id", "rig_id", "bone_id", "changes"), True, False,
+        ),
+        (
+            "motion.rig.bone.delete", "motion_rig_bone_delete", bid,
+            ("composition_id", "rig_id", "bone_id"), True, True,
+        ),
+        (
+            "motion.rig.bone.mirror", "motion_rig_bone_mirror",
+            {
+                **rid,
+                "bone_ids": {"type": "array", "items": {"type": "string"}},
+                "axis_x": {"type": "number"},
+                "create_missing": {"type": "boolean"},
+            },
+            ("composition_id", "rig_id"), True, False,
+        ),
+        (
+            "motion.rig.layer.bind", "motion_rig_layer_bind",
+            {
+                **bid,
+                "layer_id": {"type": "string"},
+                "inherit_rotation": {"type": "boolean"},
+                "inherit_scale": {"type": "boolean"},
+            },
+            ("composition_id", "rig_id", "bone_id", "layer_id"), True, False,
+        ),
+        (
+            "motion.rig.layer.unbind", "motion_rig_layer_unbind",
+            {**rid, "layer_id": {"type": "string"}},
+            ("composition_id", "rig_id", "layer_id"), True, False,
+        ),
+        (
+            "motion.rig.ik.solve", "motion_rig_ik_solve",
+            {
+                **rid,
+                "root_bone_id": {"type": "string"},
+                "mid_bone_id": {"type": "string"},
+                "end_bone_id": {"type": "string"},
+                "target": {
+                    "type": "array", "items": {"type": "number"},
+                    "minItems": 2, "maxItems": 2,
+                },
+                "pole": {
+                    "type": "array", "items": {"type": "number"},
+                    "minItems": 2, "maxItems": 2,
+                },
+                "time_ms": {"type": "integer", "minimum": 0},
+            },
+            (
+                "composition_id", "rig_id", "root_bone_id",
+                "mid_bone_id", "end_bone_id", "target",
+            ),
+            True,
+            False,
+        ),
+        (
+            "motion.rig.constraint.set", "motion_rig_constraint_set",
+            {
+                **rid,
+                "constraint_id": {"type": "string"},
+                "root_bone_id": {"type": "string"},
+                "mid_bone_id": {"type": "string"},
+                "end_bone_id": {"type": "string"},
+                "target": {
+                    "oneOf": [
+                        {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+                        {"type": "object"},
+                    ],
+                },
+                "pole": {
+                    "oneOf": [
+                        {"type": "array", "items": {"type": "number"}, "minItems": 2, "maxItems": 2},
+                        {"type": "object"},
+                    ],
+                },
+                "weight": {"oneOf": [{"type": "number"}, {"type": "object"}]},
+                "enabled": {"type": "boolean"},
+                "lock_end": {"type": "boolean"},
+            },
+            (
+                "composition_id", "rig_id", "root_bone_id",
+                "mid_bone_id", "end_bone_id", "target",
+            ),
+            True,
+            False,
+        ),
+        (
+            "motion.rig.constraint.remove", "motion_rig_constraint_remove",
+            {**rid, "constraint_id": {"type": "string"}},
+            ("composition_id", "rig_id", "constraint_id"), True, True,
+        ),
+        (
+            "motion.rig.constraint.enable", "motion_rig_constraint_enable",
+            {
+                **rid,
+                "constraint_id": {"type": "string"},
+                "enabled": {"type": "boolean"},
+            },
+            ("composition_id", "rig_id", "constraint_id", "enabled"), True, False,
+        ),
+        (
+            "motion.rig.ik.bake", "motion_rig_ik_bake",
+            {
+                **rid,
+                "constraint_id": {"type": "string"},
+                "start_ms": {"type": "integer", "minimum": 0},
+                "end_ms": {"type": "integer", "minimum": 0},
+                "sample_fps": {"type": "number", "minimum": 1, "maximum": 120},
+                "disable_after": {"type": "boolean"},
+            },
+            ("composition_id", "rig_id", "constraint_id"), True, False,
+        ),
+        (
+            "motion.rig.pose.save", "motion_rig_pose_save",
+            {
+                **rid,
+                "name": {"type": "string"},
+                "time_ms": {"type": "integer", "minimum": 0},
+            },
+            ("composition_id", "rig_id", "name"), True, False,
+        ),
+        (
+            "motion.rig.pose.apply", "motion_rig_pose_apply",
+            {
+                **rid,
+                "pose_id": {"type": "string"},
+                "time_ms": {"type": "integer", "minimum": 0},
+                "mirrored": {"type": "boolean"},
+            },
+            ("composition_id", "rig_id", "pose_id"), True, False,
+        ),
+        (
+            "motion.rig.motion.apply", "motion_rig_motion_apply",
+            {
+                **rid,
+                "preset_id": {
+                    "type": "string",
+                    "enum": ["arm_wave", "head_nod", "walk_contact"],
+                },
+                "start_ms": {"type": "integer", "minimum": 0},
+                "end_ms": {"type": "integer", "minimum": 1},
+                "side": {"type": "string", "enum": ["left", "right"]},
+            },
+            ("composition_id", "rig_id", "preset_id"), True, False,
+        ),
+    )
+    for action_id, method, props, required, mutating, destructive in rig_ops:
+        title = action_id.replace("motion.", "").replace(".", " ").title()
+        registry.register_adapter_action(
+            action_id,
+            title,
+            "motion",
+            method,
+            params_schema=schema_object(props, required=required),
+            required=required,
+            mutating=mutating,
+            changed=mutating,
+            destructive=destructive,
+            undo_label=title if mutating else "",
+            dry_summary=f"{title} would run",
+        )
+    puppet_ops = (
+        (
+            "motion.puppet.inspect", "motion_puppet_inspect",
+            {**lid, "time_ms": {"type": "integer", "minimum": 0}},
+            ("composition_id", "layer_id"), False, False,
+        ),
+        (
+            "motion.puppet.mesh.create", "motion_puppet_mesh_create",
+            {
+                **lid,
+                "columns": {"type": "integer", "minimum": 2, "maximum": 128},
+                "rows": {"type": "integer", "minimum": 2, "maximum": 128},
+                "adaptive": {"type": "boolean"},
+                "alpha_threshold": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 255,
+                },
+            },
+            ("composition_id", "layer_id"), True, False,
+        ),
+        (
+            "motion.puppet.mesh.remove", "motion_puppet_mesh_remove",
+            lid, ("composition_id", "layer_id"), True, True,
+        ),
+        (
+            "motion.puppet.repair.configure", "motion_puppet_repair_configure",
+            {
+                **lid,
+                "enabled": {"type": "boolean"},
+                "max_edge_stretch": {
+                    "type": "number",
+                    "minimum": 1.01,
+                    "maximum": 100.0,
+                },
+            },
+            ("composition_id", "layer_id"), True, False,
+        ),
+        (
+            "motion.puppet.pin.add", "motion_puppet_pin_add",
+            {
+                **lid,
+                "kind": {
+                    "type": "string",
+                    "enum": ["position", "bend", "starch", "overlap"],
+                },
+                "position": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "minItems": 2,
+                    "maxItems": 2,
+                },
+                "name": {"type": "string"},
+                "radius": {"type": "number", "minimum": 0.001, "maximum": 2},
+                "strength": {"type": "number", "minimum": 0, "maximum": 2},
+            },
+            ("composition_id", "layer_id", "kind", "position"), True, False,
+        ),
+        (
+            "motion.puppet.pin.update", "motion_puppet_pin_update",
+            {
+                **lid,
+                "pin_id": {"type": "string"},
+                "changes": {"type": "object"},
+            },
+            ("composition_id", "layer_id", "pin_id", "changes"), True, False,
+        ),
+        (
+            "motion.puppet.bind.rig", "motion_puppet_pin_bind_rig",
+            {
+                **lid,
+                "pin_id": {"type": "string"},
+                "rig_id": {"type": "string"},
+                "bone_id": {"type": "string"},
+            },
+            (
+                "composition_id", "layer_id", "pin_id", "rig_id", "bone_id",
+            ),
+            True,
+            False,
+        ),
+        (
+            "motion.puppet.pin.delete", "motion_puppet_pin_delete",
+            {**lid, "pin_id": {"type": "string"}},
+            ("composition_id", "layer_id", "pin_id"), True, True,
+        ),
+    )
+    for action_id, method, props, required, mutating, destructive in puppet_ops:
+        title = action_id.replace("motion.", "").replace(".", " ").title()
+        registry.register_adapter_action(
+            action_id,
+            title,
+            "motion",
+            method,
+            params_schema=schema_object(props, required=required),
+            required=required,
+            mutating=mutating,
+            changed=mutating,
+            destructive=destructive,
+            undo_label=title if mutating else "",
+            dry_summary=f"{title} would run",
+        )
+    button_ops = (
+        (
+            "motion.button.inspect",
+            "motion_button_inspect",
+            lid,
+            ("composition_id", "layer_id"),
+            False,
+            False,
+        ),
+        (
+            "motion.button.create",
+            "motion_button_create",
+            {
+                **lid,
+                "transition_duration_ms": {"type": "integer", "minimum": 0, "maximum": 5000},
+                "easing": {
+                    "type": "string",
+                    "enum": ["linear", "ease_out", "ease_in_out", "spring"],
+                },
+                "hit_padding": {"type": "number", "minimum": 0, "maximum": 500},
+            },
+            ("composition_id", "layer_id"),
+            True,
+            False,
+        ),
+        (
+            "motion.button.update",
+            "motion_button_update",
+            {**lid, "changes": {"type": "object"}},
+            ("composition_id", "layer_id", "changes"),
+            True,
+            False,
+        ),
+        (
+            "motion.button.state.set",
+            "motion_button_state_set",
+            {
+                **lid,
+                "state": {
+                    "type": "string",
+                    "enum": ["normal", "hover", "pressed", "disabled", "focused"],
+                },
+            },
+            ("composition_id", "layer_id", "state"),
+            True,
+            False,
+        ),
+        (
+            "motion.button.remove",
+            "motion_button_remove",
+            lid,
+            ("composition_id", "layer_id"),
+            True,
+            True,
+        ),
+    )
+    for action_id, method, props, required, mutating, destructive in button_ops:
+        title = action_id.replace("motion.", "").replace(".", " ").title()
+        registry.register_adapter_action(
+            action_id,
+            title,
+            "motion",
+            method,
+            params_schema=schema_object(props, required=required),
+            required=required,
+            mutating=mutating,
+            changed=mutating,
+            destructive=destructive,
+            undo_label=title if mutating else "",
+            dry_summary=f"{title} would run",
+        )
+    ui_binding_ops = (
+        (
+            "motion.ui_binding.list",
+            "motion_ui_binding_list",
+            cid,
+            ("composition_id",),
+            False,
+            False,
+        ),
+        (
+            "motion.ui_binding.set",
+            "motion_ui_binding_set",
+            {**cid, "binding": {"type": "object"}},
+            ("composition_id", "binding"),
+            True,
+            False,
+        ),
+        (
+            "motion.ui_binding.remove",
+            "motion_ui_binding_remove",
+            {**cid, "binding_id": {"type": "string"}},
+            ("composition_id", "binding_id"),
+            True,
+            True,
+        ),
+        (
+            "motion.ui_binding.preflight",
+            "motion_ui_binding_preflight",
+            cid,
+            ("composition_id",),
+            False,
+            False,
+        ),
+    )
+    for action_id, method, props, required, mutating, destructive in ui_binding_ops:
+        title = action_id.replace("motion.", "").replace(".", " ").title()
+        registry.register_adapter_action(
+            action_id,
+            title,
+            "motion",
+            method,
+            params_schema=schema_object(props, required=required),
+            required=required,
+            mutating=mutating,
+            changed=mutating,
+            destructive=destructive,
+            undo_label=title if mutating else "",
+            dry_summary=f"{title} would run",
+        )
     registry.register_adapter_action(
         "motion.cut_paper.create",
         "Create an editable cut-paper rig with a hole matte, released paper piece, "
@@ -113,10 +850,60 @@ def register_motion_actions(registry: Any) -> None:
             ("composition_id", "layer_id"),
         ),
         (
+            "motion.key.create", "motion_key_create",
+            {**lid,
+             "kind": {"type": "string", "enum": [
+                 "chroma_key", "luma_key", "difference_key",
+             ]},
+             "params": {"type": "object"}},
+            ("composition_id", "layer_id", "kind"),
+        ),
+        (
+            "motion.key.update", "motion_key_update",
+            {**lid, "effect_id": {"type": "string"},
+             "params": {"type": "object"}},
+            ("composition_id", "layer_id", "effect_id", "params"),
+        ),
+        (
+            "motion.matte.correction.set", "motion_matte_correction_set",
+            {**lid, "mask_id": {"type": "string"},
+             "time_ms": {"type": "integer", "minimum": 0},
+             "translate": {"type": "array", "minItems": 2, "maxItems": 2},
+             "scale": {"type": "array", "minItems": 2, "maxItems": 2},
+             "rotation": {"type": "number"}},
+            ("composition_id", "layer_id", "mask_id", "time_ms"),
+        ),
+        (
+            "motion.matte.freeze", "motion_matte_freeze",
+            {**lid, "mask_id": {"type": "string"},
+             "frozen": {"type": "boolean"}},
+            ("composition_id", "layer_id", "mask_id"),
+        ),
+        (
             "motion.layer.depth.set", "motion_layer_depth_set",
             {**lid, "depth_z": {"type": "number", "minimum": -8, "maximum": 8},
              "camera_excluded": {"type": "boolean"}},
             ("composition_id", "layer_id", "depth_z"),
+        ),
+        (
+            "motion.3d.layer.enable", "motion_3d_layer_enable",
+            {
+                **lid,
+                "enabled": {"type": "boolean"},
+                "depth_z": {"type": "number", "minimum": -8, "maximum": 8},
+                "rotation_x": {"type": "number", "minimum": -180, "maximum": 180},
+                "rotation_y": {"type": "number", "minimum": -180, "maximum": 180},
+                "camera_excluded": {"type": "boolean"},
+                "cast_shadows": {"type": "boolean"},
+                "receive_shadows": {"type": "boolean"},
+                "shadow_strength": {
+                    "type": "number", "minimum": 0, "maximum": 1,
+                },
+                "shadow_softness": {
+                    "type": "number", "minimum": 0, "maximum": 32,
+                },
+            },
+            ("composition_id", "layer_id"),
         ),
         (
             "motion.blur.set", "motion_blur_set",
@@ -128,7 +915,9 @@ def register_motion_actions(registry: Any) -> None:
         (
             "motion.replicator.set", "motion_replicator_set",
             {**lid, "enabled": {"type": "boolean"},
+             "arrangement": {"type": "string", "enum": ["line", "grid", "radial"]},
              "count": {"type": "integer", "minimum": 1, "maximum": 256},
+             "columns": {"type": "integer", "minimum": 1, "maximum": 256},
              "offset": {"type": "array"}, "rotation": {"type": "number"},
              "scale": {"type": "array"}, "opacity_start": {"type": "number"},
              "opacity_end": {"type": "number"}, "jitter": {"type": "array"},
@@ -136,9 +925,49 @@ def register_motion_actions(registry: Any) -> None:
             ("composition_id", "layer_id", "count"),
         ),
         (
+            "motion.generator.create", "motion_generator_create",
+            {**cid,
+             "kind": {"type": "string", "enum": [
+                 "solid", "gradient", "checkerboard", "grid", "noise", "rays",
+             ]},
+             "name": {"type": "string"},
+             "width": {"type": "integer", "minimum": 0, "maximum": 16384},
+             "height": {"type": "integer", "minimum": 0, "maximum": 16384},
+             "duration_ms": {"type": "integer", "minimum": 0}},
+            ("composition_id", "kind"),
+        ),
+        (
+            "motion.generator.update", "motion_generator_update",
+            {**lid, "changes": {"type": "object"}},
+            ("composition_id", "layer_id", "changes"),
+        ),
+        (
             "motion.text.animator.set", "motion_text_animator_set",
             {**lid, "config": {"type": "object"}},
             ("composition_id", "layer_id", "config"),
+        ),
+        (
+            "motion.text.animator.stack.set", "motion_text_animator_stack_set",
+            {**lid, "animators": {
+                "type": "array", "items": {"type": "object"}, "maxItems": 32,
+            }},
+            ("composition_id", "layer_id", "animators"),
+        ),
+        (
+            "motion.text.animator.add", "motion_text_animator_add",
+            {**lid, "animator": {"type": "object"}},
+            ("composition_id", "layer_id", "animator"),
+        ),
+        (
+            "motion.text.animator.update", "motion_text_animator_update",
+            {**lid, "animator_id": {"type": "string"},
+             "changes": {"type": "object"}},
+            ("composition_id", "layer_id", "animator_id", "changes"),
+        ),
+        (
+            "motion.text.animator.remove", "motion_text_animator_remove",
+            {**lid, "animator_id": {"type": "string"}},
+            ("composition_id", "layer_id", "animator_id"),
         ),
         (
             "motion.camera.2_5d.set", "motion_camera_2_5d_set",
@@ -173,6 +1002,84 @@ def register_motion_actions(registry: Any) -> None:
             mutating=True, changed=True, undo_label=title,
             dry_summary=f"{title} would run",
         )
+    registry.register_adapter_action(
+        "motion.key.diagnostics",
+        "Measure the current Motion keyer alpha result.",
+        "motion",
+        "motion_key_diagnostics",
+        params_schema=schema_object(
+            {
+                **lid,
+                "effect_id": {"type": "string"},
+                "time_ms": {"type": "number", "minimum": 0},
+            },
+            required=("composition_id", "layer_id", "effect_id"),
+        ),
+        required=("composition_id", "layer_id", "effect_id"),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.matte.propagate",
+        "Propagate a Motion matte through source video frames.",
+        "motion",
+        "motion_mask_tracking_generate",
+        params_schema=schema_object(
+            {
+                **lid,
+                "mask_id": {"type": "string"},
+                "video_path": {"type": "string"},
+                "mode": {"type": "string", "enum": ["point", "planar"]},
+                "start_ms": {"type": "integer", "minimum": 0},
+                "end_ms": {"type": "integer", "minimum": 1},
+                "timeline_start_ms": {"type": "integer", "minimum": 0},
+                "sample_interval_ms": {
+                    "type": "integer", "minimum": 1, "maximum": 5000,
+                },
+                "target_size": {"type": "array", "minItems": 2, "maxItems": 2},
+                "roi": {"type": "array", "minItems": 4, "maxItems": 4},
+            },
+            required=("composition_id", "layer_id", "mask_id"),
+        ),
+        required=("composition_id", "layer_id", "mask_id"),
+        mutating=True,
+        changed=True,
+        undo_label="Propagate Motion Matte",
+        dry_summary="The selected matte would be propagated and cached",
+    )
+    registry.register_adapter_action(
+        "motion.matte.diagnostics",
+        "Report Motion matte propagation confidence and cache state.",
+        "motion",
+        "motion_matte_diagnostics",
+        params_schema=schema_object(
+            {**lid, "mask_id": {"type": "string"}},
+            required=("composition_id", "layer_id"),
+        ),
+        required=("composition_id", "layer_id"),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.matte.assign",
+        "Assign an alpha or luma layer matte to a Motion layer.",
+        "motion",
+        "motion_matte_set",
+        params_schema=schema_object(
+            {
+                **lid,
+                "matte_layer_id": {"type": "string"},
+                "mode": {"type": "string", "enum": ["alpha", "luma"]},
+                "inverted": {"type": "boolean"},
+            },
+            required=("composition_id", "layer_id", "matte_layer_id"),
+        ),
+        required=("composition_id", "layer_id", "matte_layer_id"),
+        mutating=True,
+        changed=True,
+        undo_label="Assign Motion Matte",
+        dry_summary="The selected alpha or luma matte would be assigned",
+    )
     registry.register_adapter_action(
         "motion.cutout_rig.arm_wave.create",
         "Connect torso, upper-arm, forearm, and hand layers at editable joints "
@@ -319,12 +1226,14 @@ def register_motion_actions(registry: Any) -> None:
         ("motion.effect.delete", "motion_effect_delete", {**lid, "effect_id": {"type": "string"}}, ("composition_id", "layer_id", "effect_id"), True),
         ("motion.effect.set_param", "motion_effect_set_param", {**lid, "effect_id": {"type": "string"}, "key": {"type": "string"}, "value": {}}, ("composition_id", "layer_id", "effect_id", "key", "value"), True),
         ("motion.effect.keyframe.set", "motion_effect_keyframe_set", {**lid, "effect_id": {"type": "string"}, "key": {"type": "string"}, "keyframe": {"type": "object"}}, ("composition_id", "layer_id", "effect_id", "key", "keyframe"), True),
+        ("motion.effect.keyframe.delete", "motion_effect_keyframe_delete", {**lid, "effect_id": {"type": "string"}, "key": {"type": "string"}, "time_ms": {"type": "integer", "minimum": 0}}, ("composition_id", "layer_id", "effect_id", "key", "time_ms"), True),
         ("motion.mask.list", "motion_mask_list", lid, ("composition_id", "layer_id"), False),
         ("motion.mask.add", "motion_mask_add", {**lid, "mask": {"type": "object"}}, ("composition_id", "layer_id", "mask"), True),
         ("motion.mask.update", "motion_mask_update", {**lid, "mask_id": {"type": "string"}, "changes": {"type": "object"}}, ("composition_id", "layer_id", "mask_id", "changes"), True),
         ("motion.mask.delete", "motion_mask_delete", {**lid, "mask_id": {"type": "string"}}, ("composition_id", "layer_id", "mask_id"), True),
         ("motion.mask.set_param", "motion_mask_set_param", {**lid, "mask_id": {"type": "string"}, "key": {"type": "string"}, "value": {}}, ("composition_id", "layer_id", "mask_id", "key", "value"), True),
         ("motion.mask.keyframe.set", "motion_mask_keyframe_set", {**lid, "mask_id": {"type": "string"}, "key": {"type": "string"}, "keyframe": {"type": "object"}}, ("composition_id", "layer_id", "mask_id", "key", "keyframe"), True),
+        ("motion.mask.keyframe.delete", "motion_mask_keyframe_delete", {**lid, "mask_id": {"type": "string"}, "key": {"type": "string"}, "time_ms": {"type": "integer", "minimum": 0}}, ("composition_id", "layer_id", "mask_id", "key", "time_ms"), True),
         ("motion.mask.path.set", "motion_mask_path_set", {**lid, "mask_id": {"type": "string"}, "path": {"type": "object"}}, ("composition_id", "layer_id", "mask_id", "path"), True),
         ("motion.mask.tracking.set", "motion_mask_tracking_set", {**lid, "mask_id": {"type": "string"}, "tracking": {"type": "object"}}, ("composition_id", "layer_id", "mask_id", "tracking"), True),
         ("motion.mask.tracking.generate", "motion_mask_tracking_generate", {
@@ -340,6 +1249,79 @@ def register_motion_actions(registry: Any) -> None:
             "roi": {"type": "array", "minItems": 4, "maxItems": 4},
         }, ("composition_id", "layer_id", "mask_id"), True),
         ("motion.mask.tracking.clear", "motion_mask_tracking_clear", {**lid, "mask_id": {"type": "string"}}, ("composition_id", "layer_id", "mask_id"), True),
+    )
+    registry.register_adapter_action(
+        "motion.adjustment.scope.get",
+        "Get the target scope of a Motion adjustment layer.",
+        "motion",
+        "motion_adjustment_scope_get",
+        params_schema=schema_object(
+            lid,
+            required=("composition_id", "layer_id"),
+        ),
+        required=("composition_id", "layer_id"),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.adjustment.scope.set",
+        "Set an adjustment layer to affect all or selected lower layers.",
+        "motion",
+        "motion_adjustment_scope_set",
+        params_schema=schema_object(
+            {
+                **lid,
+                "mode": {
+                    "type": "string",
+                    "enum": ["all_below", "selected_layers_below"],
+                },
+                "layer_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            required=("composition_id", "layer_id", "mode"),
+        ),
+        required=("composition_id", "layer_id", "mode"),
+        undo_label="Set Adjustment Layer Scope",
+        dry_summary="Adjustment layer scope would be updated",
+    )
+    registry.register_adapter_action(
+        "motion.effect_group.scope.get",
+        "Get the enabled state and descendant target scope of a Motion effect group.",
+        "motion",
+        "motion_effect_group_scope_get",
+        params_schema=schema_object(
+            lid,
+            required=("composition_id", "layer_id"),
+        ),
+        required=("composition_id", "layer_id"),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.effect_group.scope.set",
+        "Enable a group effect stack for all or selected renderable descendants.",
+        "motion",
+        "motion_effect_group_scope_set",
+        params_schema=schema_object(
+            {
+                **lid,
+                "enabled": {"type": "boolean"},
+                "mode": {
+                    "type": "string",
+                    "enum": ["descendants", "selected_descendants"],
+                },
+                "layer_ids": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                },
+            },
+            required=("composition_id", "layer_id", "mode"),
+        ),
+        required=("composition_id", "layer_id", "mode"),
+        undo_label="Set Effect Group Scope",
+        dry_summary="Effect group scope would be updated",
     )
     for action_id, method, props, required, mutating in effect_mask_ops:
         title = action_id.replace("motion.", "").replace(".", " ").title()
@@ -362,10 +1344,38 @@ def register_motion_actions(registry: Any) -> None:
          {**lid, "operation": {"type": "string"}, "operand_layer_ids": {"type": "array"},
           "hide_operands": {"type": "boolean"}},
          ("composition_id", "layer_id", "operation", "operand_layer_ids")),
+        ("motion.shape.operator.merge_paths.set", "motion_vector_boolean_layers_set",
+         {**lid, "operation": {
+             "type": "string",
+             "enum": ["union", "subtract", "intersect", "exclude", "xor"],
+          }, "operand_layer_ids": {"type": "array"},
+          "hide_operands": {"type": "boolean"}},
+         ("composition_id", "layer_id", "operation", "operand_layer_ids")),
         ("motion.vector.trim.set", "motion_vector_trim_set",
          {**lid, "start": {"type": "number"}, "end": {"type": "number"},
           "offset": {"type": "number"}},
          ("composition_id", "layer_id", "start", "end")),
+        ("motion.vector.offset_path.set", "motion_vector_offset_path_set",
+         {**lid, "amount": {"type": "number"},
+          "join": {"type": "string", "enum": ["round", "miter", "bevel"]}},
+         ("composition_id", "layer_id", "amount")),
+        ("motion.vector.path_morph.set", "motion_vector_path_morph_set",
+         {**lid,
+          "keyframes": {"type": "array", "items": {"type": "object"}, "minItems": 2},
+          "auto_correspond": {"type": "boolean"},
+          "target_count": {"type": "integer", "minimum": 0, "maximum": 4096}},
+         ("composition_id", "layer_id", "keyframes")),
+        ("motion.vector.stroke.set", "motion_vector_stroke_set",
+         {**lid,
+          "color": {"type": "string"},
+          "width": {"type": "number", "minimum": 0},
+          "gradient": {"type": "object"},
+          "dash": {"type": "array", "items": {"type": "number"}},
+          "dash_offset": {"type": "number"},
+          "taper_start": {"type": "number", "minimum": 0},
+          "taper_end": {"type": "number", "minimum": 0},
+          "width_profile": {"type": "array", "items": {"type": "number"}}},
+         ("composition_id", "layer_id")),
         ("motion.vector.repeater.set", "motion_vector_repeater_set",
          {**lid, "count": {"type": "integer", "minimum": 1, "maximum": 512},
           "offset": {"type": "array"}, "rotation": {"type": "number"},
@@ -403,6 +1413,14 @@ def register_motion_actions(registry: Any) -> None:
          ("composition_id", "layer_id", "parameter_name", "keyframe"), True),
         ("motion.typography.preflight", "motion_typography_preflight", lid,
          ("composition_id", "layer_id"), False),
+        ("motion.typography.character_3d.prepare",
+         "motion_typography_character_3d_prepare",
+         {**lid,
+          "depth": {"type": "number", "minimum": 0},
+          "bevel": {"type": "number", "minimum": 0},
+          "z_spacing": {"type": "number"},
+          "overrides": {"type": "object"}},
+         ("composition_id", "layer_id"), True),
     )
     for action_id, method, props, required, mutating in typography_ops:
         title = action_id.replace("motion.", "").replace(".", " ").title()
@@ -531,6 +1549,7 @@ def register_motion_actions(registry: Any) -> None:
         params_schema=schema_object({
             **cid, "template_id": {"type": "string"}, "variant": {"type": "string"},
             "controls": {"type": "object"},
+            "replace_existing": {"type": "boolean"},
         }, required=("composition_id", "template_id")),
         required=("composition_id", "template_id"), mutating=True, changed=True,
         undo_label="Apply Motion Template", dry_summary="A Motion template would be applied as one edit",
@@ -631,6 +1650,78 @@ def register_motion_actions(registry: Any) -> None:
         }, required=("composition_id", "profile_id", "output_path")),
         required=("composition_id", "profile_id", "output_path"),
         mutating=False, changed=False,
+    )
+    umg_project = {
+        "project_path": {"type": "string"},
+    }
+    registry.register_adapter_action(
+        "motion.umg.plugin.status",
+        "Inspect the project-local Tiger Studio UMG plugin.",
+        "motion",
+        "motion_umg_plugin_status",
+        params_schema=schema_object(umg_project, required=("project_path",)),
+        required=("project_path",),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.umg.plugin.install",
+        "Install or update and enable Tiger Studio UMG in an Unreal project.",
+        "motion",
+        "motion_umg_plugin_install",
+        params_schema=schema_object(umg_project, required=("project_path",)),
+        required=("project_path",),
+        mutating=True,
+        changed=True,
+        undo_label="Install Tiger Studio UMG Plugin",
+        dry_summary="The project-local Tiger Studio UMG plugin would be installed and enabled",
+    )
+    registry.register_adapter_action(
+        "motion.umg.preflight",
+        "Validate Motion and Unreal project readiness for native UMG generation.",
+        "motion",
+        "motion_umg_preflight",
+        params_schema=schema_object(
+            {**cid, **umg_project},
+            required=("composition_id", "project_path"),
+        ),
+        required=("composition_id", "project_path"),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.umg.package",
+        "Package a Motion composition and its resources as a Tiger UMG document.",
+        "motion",
+        "motion_umg_package",
+        params_schema=schema_object(
+            {**cid, "output_dir": {"type": "string"}},
+            required=("composition_id", "output_dir"),
+        ),
+        required=("composition_id", "output_dir"),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.umg.generate",
+        "Package Motion, install the plugin, generate and compile native Unreal UMG assets.",
+        "motion",
+        "motion_umg_generate",
+        params_schema=schema_object(
+            {
+                **cid,
+                **umg_project,
+                "output_dir": {"type": "string"},
+                "destination_root": {"type": "string"},
+                "timeout_seconds": {"type": "integer", "minimum": 30, "maximum": 1800},
+            },
+            required=("composition_id", "project_path"),
+        ),
+        required=("composition_id", "project_path"),
+        mutating=True,
+        changed=True,
+        undo_label="Generate Unreal UMG",
+        dry_summary="Motion resources and a native Unreal Widget Blueprint would be generated",
     )
     relink_params = {
         **cid, "old_root": {"type": "string"}, "new_root": {"type": "string"},

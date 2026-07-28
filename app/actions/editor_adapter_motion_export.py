@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from typing import Any, Mapping
 
+from app.color_ocio import preferred_aces_ocio_uri
 from app.motion_designer.color_management import (
     MOTION_COLOR_METADATA_KEY,
     MotionColorSettings,
@@ -36,7 +37,18 @@ class MotionExportAdapterMixin:
         composition = store.get(composition_id)
         if composition is None:
             raise ValueError(f"motion composition not found: {composition_id}")
-        color = MotionColorSettings.from_dict(settings)
+        payload = dict(settings)
+        project = dict(payload.get("project") or {})
+        if (
+            not str(project.get("ocio_config_path", "") or "")
+            and (
+                str(project.get("working_space", "")) in {"acescg", "acescct"}
+                or str(project.get("view_transform", "")) in {"aces", "aces-1.3"}
+            )
+        ):
+            project["ocio_config_path"] = preferred_aces_ocio_uri()
+            payload["project"] = project
+        color = MotionColorSettings.from_dict(payload)
         report = validate_motion_color_settings(color)
         if not report["ok"]:
             raise ValueError("invalid Motion color settings: " + "; ".join(report["errors"]))

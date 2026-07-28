@@ -1,6 +1,6 @@
 # -*- mode: python ; coding: utf-8 -*-
 from pathlib import Path
-from PyInstaller.utils.hooks import copy_metadata
+from PyInstaller.utils.hooks import collect_all, copy_metadata
 
 project_root = Path(".").resolve()
 worker_exe_name = "tigercapture-worker.exe"
@@ -29,18 +29,19 @@ if umg_plugin_bundle.exists():
 # to land in the bundle. Without copy_metadata, MP4 export crashes with
 # 'No package metadata was found for imageio'.
 extra_datas = copy_metadata('imageio_ffmpeg')
+ocio_datas, ocio_binaries, ocio_hiddenimports = collect_all('PyOpenColorIO')
 
 a = Analysis(
     ['main.py', 'studio_main.py', 'tools/tigercapture_updater.py'],
     pathex=[str(project_root)],
-    binaries=native_binaries,
+    binaries=native_binaries + ocio_binaries,
     datas=[
         ('app/locales/*.py', 'app/locales'),
         ('resources/tigercapture.ico', 'resources'),
         ('resources/branding/*.png', 'resources/branding'),
         ('resources/luts/*.cube', 'resources/luts'),
         ('resources/ui/sound_editor/*.png', 'resources/ui/sound_editor'),
-    ] + umg_plugin_datas + extra_datas,
+    ] + umg_plugin_datas + extra_datas + ocio_datas,
     hiddenimports=[
         # Locales are loaded dynamically from a string lookup, so each
         # one needs to be declared here for PyInstaller to bundle it.
@@ -63,6 +64,9 @@ a = Analysis(
         'app.batch_export_dialog',
         'app.clip_effects_dialog',
         'app.color_page_window',
+        # Imported defensively by app.color_ocio so frozen builds need an
+        # explicit entry for the compiled OCIO extension.
+        'PyOpenColorIO',
         'app.new_project_dialog',
         'app.video_filters',
         'app.chroma_key',
@@ -90,7 +94,7 @@ a = Analysis(
         'app.workbench.node_graph.items.port_item',
         'app.workbench.node_graph.items.io_node',
         'app.workbench.node_graph.items.parallel_mixer',
-    ],
+    ] + ocio_hiddenimports,
     hookspath=[],
     hooksconfig={},
     runtime_hooks=[],

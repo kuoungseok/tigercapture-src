@@ -43,6 +43,28 @@ def test_tessellation_cache_and_boolean_operations() -> None:
     assert not first.contains(QPointF(125, 50))
 
 
+def test_offset_paths_expand_and_contract_closed_vector_geometry() -> None:
+    QApplication.instance() or QApplication([])
+    base = {
+        "width": 120,
+        "height": 120,
+        "shape": "path",
+        "path": _rect(30, 30, 90, 90),
+    }
+    expanded = build_vector_painter_path({
+        **base,
+        "offset_path": {"amount": 12, "join": "round"},
+    })
+    contracted = build_vector_painter_path({
+        **base,
+        "offset_path": {"amount": -10, "join": "miter"},
+    })
+    assert expanded.contains(QPointF(22, 60))
+    assert not build_vector_painter_path(base).contains(QPointF(22, 60))
+    assert contracted.contains(QPointF(60, 60))
+    assert not contracted.contains(QPointF(34, 60))
+
+
 def test_trim_and_repeater_render_on_shared_shape_source() -> None:
     QApplication.instance() or QApplication([])
     line_path = {"closed": False, "points": [
@@ -61,6 +83,51 @@ def test_trim_and_repeater_render_on_shared_shape_source() -> None:
     trimmed = render_shape(layer, 0).convertToFormat(QImage.Format_RGBA8888)
     assert trimmed.pixelColor(10, 20).alpha() > 200
     assert trimmed.pixelColor(28, 20).alpha() == 0
+
+
+def test_gradient_dash_and_tapered_stroke_render_with_explicit_gpu_fallback() -> None:
+    QApplication.instance() or QApplication([])
+    line_path = {"closed": False, "points": [
+        {"position": [10, 30]}, {"position": [110, 30]},
+    ]}
+    layer = MotionLayer(
+        layer_type="shape",
+        source=SourceRef(kind="shape", params={
+            "width": 120,
+            "height": 60,
+            "shape": "path",
+            "path": line_path,
+            "fill": "#00000000",
+            "stroke": "#ffffff",
+            "stroke_width": 12,
+            "stroke_gradient": {
+                "type": "linear",
+                "start": [0, 0.5],
+                "end": [1, 0.5],
+                "stops": [
+                    {"position": 0, "color": "#ff0000"},
+                    {"position": 1, "color": "#0000ff"},
+                ],
+            },
+            "dash": [8, 4],
+            "dash_offset": 2,
+            "stroke_taper": {"start": 1.0, "end": 0.1},
+        }),
+        out_ms=1000,
+    )
+    image = render_shape(layer, 0)
+    assert image.pixelColor(14, 30).red() > image.pixelColor(14, 30).blue()
+    right_colors = [
+        image.pixelColor(x, 30)
+        for x in range(80, 111)
+        if image.pixelColor(x, 30).alpha() > 0
+    ]
+    assert right_colors
+    assert max(color.blue() - color.red() for color in right_colors) > 0
+    assert image.pixelColor(14, 34).alpha() > image.pixelColor(105, 34).alpha()
+    packet, reason = build_vector_gpu_packet(layer)
+    assert packet is None
+    assert reason == "variable_width_stroke"
 
 
 def test_star_gradient_and_rounded_rectangle_preserve_existing_shape_rendering() -> None:

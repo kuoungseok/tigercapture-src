@@ -1227,6 +1227,7 @@ Motion Designer를 개발 환경이 아니라 배포 가능한 제품 기능으�
 - `app/motion_designer/export_profiles.py`
 - `app/motion_designer/export_pipeline.py`
 - `app/motion_designer/color_management.py`
+- `app/motion_designer/color_runtime.py`
 - `app/motion_designer/interchange.py`
 - `app/motion_designer/relink.py`
 - `app/motion_designer/recovery.py`
@@ -1259,9 +1260,13 @@ Motion Designer를 개발 환경이 아니라 배포 가능한 제품 기능으�
 - 영상 위 Motion 최종 합성은 encoded sRGB를 unpremultiply한 뒤 linear decode,
   linear premultiply/composite, sRGB encode 순서를 사용한다. 현재 Qt render graph 내부의
   복수 Motion layer blend는 display-space이므로 Output preflight에 경고를 남긴다.
-- HDR project output, tone mapping, OCIO config, project LUT는 Preview/Export parity가
-  구현되기 전까지 조용히 무시하지 않고 preflight에서 차단한다. 현재 제품 출력 범위는
-  명시적 SDR sRGB다.
+- Motion standalone Preview/Export는 `Input LUT -> Tone Map -> Creative LUT ->
+  Display/OCIO -> Output LUT` 순서를 같은 runtime으로 실행한다. Reinhard와 ACES-fitted,
+  strength가 있는 3D `.cube` 세 슬롯을 지원하고 missing/malformed/1D/non-cube LUT는
+  preflight에서 차단한다. alpha는 color 처리 전에 unpremultiply하고 원래 alpha로 다시
+  premultiply한다. OpenEXR은 scene-linear이므로 이 delivery chain을 의도적으로 우회한다.
+- Rec.2020 PQ/HLG는 H.265 Main10 경로로 출력하며 built-in Studio/CG ACES 1.3 또는
+  외부 OCIO config를 Preview/Export 공통 display transform으로 사용한다.
 - H.264, H.265, ProRes 4444, PNG RGBA sequence, OpenEXR scene-linear sequence,
   PNG/JPEG/WebP still을 실제 FFmpeg/Qt renderer로 출력한다. PNG sequence는 정상 완료
   프레임만 재사용해 취소 후 재개하고, 완료 전에는 manifest를 쓰지 않는다. 비디오
@@ -1281,6 +1286,9 @@ Motion Designer를 개발 환경이 아니라 배포 가능한 제품 기능으�
 ### 실제 완료 증거
 
 - 표준 출력 8종과 Lottie/SVG 2종, 총 10개 실제 산출물을 생성했다.
+- `tools/qa_motion_color_pipeline.py`는 3개 LUT 슬롯과 ACES-fitted tone map을 적용한
+  premultiplied RGBA chart에서 공통 Preview runtime과 실제 PNG Export의 최대 byte
+  오차 0, 평균 오차 0, alpha 최대 오차 0을 기록한다.
 - 1,000 layer와 10,000 keyframe stress, 500회 edit/undo/redo 및 checksum recovery,
   PNG cancel/resume와 H.264 cancel/retry, moved-project relink가 통과했다.
 - Windows desktop OpenGL에서 vector, typography, particle Preview를 출력 reference와
@@ -1468,3 +1476,11 @@ M0-M1의 첫 작업 순서는 다음과 같다.
 이 목록을 완료한 뒤에만 캔버스나 Graph Editor UI 작업을 시작한다. UI부터 만들면
 PPT animation, Typography keyframe, 메인 timeline이 서로 다른 데이터 모델을 갖게
 되어 다시 분리해야 한다.
+
+## 22. M13-M20 후속 전문 확장
+
+M12 이후의 캐릭터 리깅, Puppet 변형, 중첩 컴포지션, 전문 텍스트·벡터,
+로토·키잉, 트래킹, 통합 3D, 효과·색관리·대형 렌더 계획은
+`docs/MOTION_DESIGNER_AE_GAP_MILESTONES_KO.md`에서 이어서 관리한다.
+해당 항목은 계획 상태이며 각 마일스톤의 완료 증거를 통과하기 전에는 현재
+기능이나 After Effects 호환으로 표기하지 않는다.

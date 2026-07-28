@@ -2,6 +2,106 @@
 
 ## Remaining Product Gaps
 
+- [ ] Motion Designer professional motion-graphics expansion (M13-M20):
+  follow `docs/MOTION_DESIGNER_AE_GAP_MILESTONES_KO.md` in dependency order.
+  M13 is complete: full-body 2D rig schema, 17-bone setup UI, Canvas overlay,
+  editable limits, persistent pole-based two-bone IK/end locking, FK/IK switch
+  and bake, symmetric bone editing, Timeline bone channels, pose storage,
+  arm/head/walk presets, three real character-part fixtures, and bounded
+  ten-minute cache QA. Start M14 Puppet deformation next. Do not claim After
+  Effects parity or `.aep` compatibility; M13 is rigid cutout rigging, not
+  deformable skin or cloth.
+  M14 is in progress with a versioned triangular mesh/pin contract,
+  alpha-aware boundary culling, Position/Bend/Starch/Overlap deformation,
+  inversion stabilization, Canvas and Timeline pin editing, rig-bone drivers,
+  Action/MCP, and shared Preview/Export piecewise-affine rendering. Real
+  bundled character-part rendering and the 100-pin/20,000-triangle contract
+  are covered by tests. Finish true local boundary refinement, explicit tear
+  repair, GPU Preview deformation, and long playback evidence before marking
+  M14 complete. M15 Composition and Animation Core is complete: embedded Pre-compose documents,
+  open-in-place parent navigation, per-instance overrides, recursive
+  Preview/Export, source Time Remap presets/channels, Value/Speed graph display,
+  tangent mode editing, and corresponding Action/MCP surfaces are implemented.
+  Published properties, per-instance published values, Controller Null links,
+  roving key distribution, and draggable broken Bezier tangent handles are
+  also implemented. Expression pick-whip UI, deterministic Frame Mix rendering,
+  and explicit optical-flow backend preflight/fallback are implemented.
+  Three-level nesting, 100 instances, and 500 undo steps now have automated QA.
+
+- [x] M16 Typography and Vector Motion is complete. Text layers support
+  a 32-entry Animator stack with character/word/line range selection,
+  offset/random/reverse/ping-pong ordering, selector shapes, smoothness, and
+  composited per-glyph position/scale/rotation/opacity/fill/tracking/blur.
+  Shape layers expose
+  Offset Paths, topology-corresponded Path Morph, linear gradient strokes,
+  dash offset, taper, and variable-width profiles through Inspector and
+  Action/MCP surfaces. Ordered Merge Paths, explicit SVG bake preflight, and a
+  non-rendering per-character 3D handoff contract are included. Acceptance QA
+  renders five kinetic typography samples, five logo reveals, three animated
+  infographic paths, and a 3840x2160 vector-edge frame under
+  `debugCapture/motion_designer/m16_typography_vector`.
+
+- [x] M17 Matte, Roto and Keying is complete. Local/optional semantic object
+  selection and refinement, point/planar matte propagation, correction keys,
+  frozen tracking caches, Chroma/Luma/Difference Key, Garbage/Holdout masks,
+  despill, and Alpha/Luma/Inverse track mattes share Preview/Export contracts.
+  Edge-aware refinement preserves incoming soft semantic alpha instead of
+  binarizing hair, translucency, and motion blur. The 10-case green/blue-screen
+  acceptance corpus and temporal/halo metrics are generated under
+  `debugCapture/motion_designer/m17_matte_keying`. Moving-object removal remains
+  explicitly experimental rather than a general product claim.
+
+- [ ] M18 Tracking and Stabilization is in progress. A provider-neutral
+  composition track asset, Point/Multi-point/Planar/Mask/Face action contracts,
+  layer transform attachment, inverse stabilization, confidence/occlusion/
+  reacquisition diagnostics, source-revision validation, Tracking inspector,
+  effect-point/Puppet-pin targets, planar-affine Corner Pin baking,
+  featureless-opening acquisition, background Point/Planar/Face inspector
+  analysis, drift review states, bounded point-track occlusion prediction and
+  reacquisition, direct face-video extraction, and
+  manual-assisted depth-plane camera solve are implemented. Remaining:
+  facial-region targets, perspective
+  homography, long/nonlinear-occlusion recovery, 20 real-video drift
+  evidence, and a non-manual 3D camera solve. Do not call the current assisted
+  plane solver full matchmove. Current `tools/qa_motion_m18_real_tracking.py`
+  evidence finds 11 local real clips, 10 generated tracks, and 9 quality
+  passes; the 20-clip gate remains intentionally failed.
+
+- [ ] M19 Unified 2.5D/3D Composition is in progress. Normal Motion layers can
+  opt into a 3D-card contract with Depth Z and X/Y affine foreshortening;
+  Perspective/Orthographic camera modes and orthographic size share the same
+  Preview/Export evaluator and AR/PBR framing bridge. Directional-light card
+  shadows now project caster alpha onto explicitly enabled lower receiver
+  cards with depth-aware offset, strength, and softness, but remain a shared
+  Qt raster path. AR/PBR preview and packet export now share one primary
+  shadowed Directional Light plus up to two unshadowed Directional/Point/Spot
+  lights, including range and spot-cone attenuation. Remaining: true
+  perspective mesh/homography for cards, camera rigs and focus targets,
+  secondary-light shadow maps, GPU card shadow maps and contact shadows, model
+  animation clips and camera/light extraction, 3D text/shape extrusion,
+  camera-solve binding, and the software-renderer-zero acceptance scene.
+
+- [ ] M20 Effects, Color, Templates and Render Scale is in progress. The first
+  2D authoring slice is implemented: Effects and Masks inspector numeric
+  parameters have current-time keyframe diamonds, layer-local time mapping,
+  animated-value refresh while scrubbing, and non-destructive current-key
+  updates. Adjustment layers now retain the compatible all-below mode or target
+  checked lower render layers without affecting unselected layers. Actions/MCP
+  provide matching effect/mask keyframe set/delete and adjustment scope get/set
+  operations. Remaining: effect-group scoping, broader effect library, GPU
+  effect contribution/failure isolation, HDR/OCIO/ACES parity, published
+  template controls and replaceable slots, package/relink metadata, profiler,
+  bounded cache controls, and resumable/background render preparation.
+
+- [ ] Painter / Motion Actor product integration polish:
+  keep Motion Designer template quality as the current priority. Resume the
+  Painter bridge only from
+  `docs/MOTION_PAINTER_INTEGRATION_TODO_KO.md`; remaining work includes visual
+  asset browsing, drag/drop, independent playback offsets, coordinate
+  composition, GPU frame sharing, relink/reload/conflict UX, export parity,
+  orphan cleanup, Action/MCP coverage, and real long-template QA. Do not treat
+  the existing placement foundation as finished product integration.
+
 - [ ] Painter production art workspace:
   Painter must be treated as a primary drawing app for game concept artists,
   not as a video-annotation helper. Use

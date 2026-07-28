@@ -6,13 +6,14 @@ from typing import Callable
 
 from PySide6.QtCore import QElapsedTimer, QThread, QTimer, Qt, Signal
 from PySide6.QtWidgets import (
-    QDialog, QDockWidget, QFileDialog, QListWidget, QMainWindow, QSplitter, QTabWidget,
-    QVBoxLayout, QWidget,
+    QDialog, QDockWidget, QFileDialog, QListWidget, QMainWindow, QMessageBox,
+    QSplitter, QTabWidget, QVBoxLayout, QWidget,
 )
 
 from app.motion_designer.ai_workspace import apply_motion_ai_proposal
 from app.motion_designer.commands import find_layer, set_keyframe
 from app.motion_designer.composition_service import CompositionService
+from app.motion_designer.evaluator import remap_layer_time
 from app.motion_designer.schema import (
     AnimatedProperty, Keyframe, MotionBehaviorRef, MotionComposition,
     MotionEffectRef, MotionLayer, MotionMaskRef, SourceRef,
@@ -20,6 +21,7 @@ from app.motion_designer.schema import (
 from app.motion_designer.vector_shapes import default_pen_path
 
 from .behavior_panel import BehaviorPanel
+from .button_panel import ButtonComponentPanel
 from .audio_panel import AudioReactivePanel
 from .audio_worker import MotionAudioAnalysisWorker
 from .ai_panel import MotionAIPanel
@@ -33,21 +35,30 @@ from .actor_panel import ActorPanel
 from .advanced_panel import AdvancedMotionPanel
 from .canvas import MotionCanvas
 from .cutout_rig_dialog import CutoutArmRigDialog
+from .full_body_rig_dialog import FullBodyRigDialog
 from .effect_mask_panel import EffectMaskPanel
 from .export_panel import MotionOutputPanel
 from .export_worker import MotionExportWorker
+from .generator_panel import GeneratorPanel
 from .inspector import InspectorPanel
 from .image_panel import ImagePanel
 from .layer_panel import LayerPanel
 from .library_panel import MotionLibraryPanel
 from .mmd_panel import MMDPanel
 from .particle_panel import ParticlePanel
+from .puppet_panel import PuppetPanel
+from .replicator_panel import ReplicatorPanel
+from .rig_panel import RigPanel
 from .vrm_panel import VRMPanel
 from .style import MOTION_DESIGNER_QSS
 from .timeline import MotionTimeline
 from .toolbar import MotionToolbar
-from .tracking_worker import MotionTrackingWorker
+from .template_gallery import MotionTemplateGalleryDialog
+from .tracking_worker import MotionFaceTrackingWorker, MotionTrackingWorker
+from .tracking_panel import TrackingPanel
 from .typography_panel import TypographyPanel
+from .umg_panel import MotionUnrealLinkDialog
+from .umg_worker import MotionUMGGenerationWorker
 from .viewer_header import ViewerHeader
 from .vector_panel import VectorPanel
 from app.motion_designer.preview_renderer import MotionPreviewWidget
@@ -82,6 +93,331 @@ class MotionDocumentController:
         if not result.validation.ok:
             raise ValueError(result.validation.issues[0].message)
         self._commit(service.get(self.composition.id))
+
+    def set_adjustment_scope(
+        self,
+        layer_id: str,
+        mode: str,
+        layer_ids: list[str],
+    ) -> None:
+        from app.motion_designer.adjustment_scope import set_adjustment_scope
+
+        candidate = MotionComposition.from_dict(self.composition.to_dict())
+        layer = find_layer(candidate, layer_id)
+        set_adjustment_scope(
+            candidate,
+            layer,
+            mode=mode,
+            layer_ids=layer_ids,
+        )
+        candidate.revision += 1
+        self._commit(candidate)
+
+    def set_effect_group_scope(
+        self,
+        layer_id: str,
+        mode: str,
+        layer_ids: list[str],
+    ) -> None:
+        from app.motion_designer.effect_group import set_effect_group_scope
+
+        candidate = MotionComposition.from_dict(self.composition.to_dict())
+        layer = find_layer(candidate, layer_id)
+        set_effect_group_scope(
+            candidate,
+            layer,
+            enabled=True,
+            mode=mode,
+            layer_ids=layer_ids,
+        )
+        candidate.revision += 1
+        self._commit(candidate)
+
+    def update_composition_metadata(self, changes: dict) -> None:
+        candidate = MotionComposition.from_dict(self.composition.to_dict())
+        candidate.metadata.update(deepcopy(changes))
+        candidate.revision += 1
+        self._commit(candidate)
+
+    def update_rig_bone(
+        self,
+        rig_id: str,
+        bone_id: str,
+        changes: dict,
+    ) -> None:
+        from app.motion_designer.rigging import update_bone
+
+        service = CompositionService([self.composition])
+        result = service.mutate_rig(
+            self.composition.id,
+            lambda candidate: {
+                "rig_id": str(rig_id),
+                "bone": update_bone(
+                    candidate, str(rig_id), str(bone_id), changes,
+                ).to_dict(),
+            },
+            undo_label="Update Rig Bone",
+        )
+        if not result.validation.ok:
+            raise ValueError(result.validation.issues[0].message)
+        self._commit(service.get(self.composition.id))
+
+    def mirror_rig_bone(self, rig_id: str, bone_id: str) -> None:
+        from app.motion_designer.rigging import mirror_rig_bones
+
+        service = CompositionService([self.composition])
+        result = service.mutate_rig(
+            self.composition.id,
+            lambda candidate: {
+                "mirror": mirror_rig_bones(
+                    candidate,
+                    str(rig_id),
+                    bone_ids=[str(bone_id)],
+                    create_missing=True,
+                ),
+            },
+            undo_label="Mirror Rig Bone",
+        )
+        if not result.validation.ok:
+            raise ValueError(result.validation.issues[0].message)
+        self._commit(service.get(self.composition.id))
+
+    def create_rig_ik_lock(self, rig_id: str, end_bone_id: str) -> None:
+        from app.motion_designer.rigging import (
+            find_rig,
+            set_two_bone_ik_constraint,
+        )
+
+        service = CompositionService([self.composition])
+
+        def operation(candidate):
+            rig = find_rig(candidate, rig_id)
+            by_id = {bone.id: bone for bone in rig.bones}
+            end = by_id.get(end_bone_id)
+            mid = by_id.get(end.parent_id) if end is not None else None
+            root = by_id.get(mid.parent_id) if mid is not None else None
+            if end is None or mid is None or root is None:
+                raise ValueError(
+                    "IK Lock requires a selected end bone with two parents",
+                )
+            dx = end.rest_position[0] - root.rest_position[0]
+            dy = end.rest_position[1] - root.rest_position[1]
+            pole = [
+                mid.rest_position[0] - dy * 0.35,
+                mid.rest_position[1] + dx * 0.35,
+            ]
+            return {
+                "constraint": set_two_bone_ik_constraint(
+                    candidate,
+                    rig_id,
+                    root_bone_id=root.id,
+                    mid_bone_id=mid.id,
+                    end_bone_id=end.id,
+                    target=list(end.rest_position),
+                    pole=pole,
+                    lock_end=True,
+                ),
+            }
+
+        result = service.mutate_rig(
+            self.composition.id,
+            operation,
+            undo_label="Create Rig IK Lock",
+        )
+        if not result.validation.ok:
+            raise ValueError(result.validation.issues[0].message)
+        self._commit(service.get(self.composition.id))
+
+    def set_rig_constraint_enabled(
+        self,
+        rig_id: str,
+        constraint_id: str,
+        enabled: bool,
+    ) -> None:
+        from app.motion_designer.rigging import set_rig_constraint_enabled
+
+        service = CompositionService([self.composition])
+        result = service.mutate_rig(
+            self.composition.id,
+            lambda candidate: {
+                "constraint": set_rig_constraint_enabled(
+                    candidate, rig_id, constraint_id, enabled,
+                ),
+            },
+            undo_label="Switch Rig FK IK",
+        )
+        if not result.validation.ok:
+            raise ValueError(result.validation.issues[0].message)
+        self._commit(service.get(self.composition.id))
+
+    def bake_rig_constraint(self, rig_id: str, constraint_id: str) -> None:
+        from app.motion_designer.rigging import bake_two_bone_ik_constraint
+
+        service = CompositionService([self.composition])
+        result = service.mutate_rig(
+            self.composition.id,
+            lambda candidate: {
+                "bake": bake_two_bone_ik_constraint(
+                    candidate,
+                    rig_id,
+                    constraint_id,
+                    start_ms=0,
+                    end_ms=candidate.duration_ms,
+                    sample_fps=candidate.fps,
+                    disable_after=True,
+                ),
+            },
+            undo_label="Bake Rig IK to FK",
+        )
+        if not result.validation.ok:
+            raise ValueError(result.validation.issues[0].message)
+        self._commit(service.get(self.composition.id))
+
+    def move_puppet_pin(
+        self,
+        layer_id: str,
+        pin_id: str,
+        x: float,
+        y: float,
+    ) -> None:
+        from app.motion_designer.puppet_mesh import update_puppet_pin
+
+        candidate = MotionComposition.from_dict(self.composition.to_dict())
+        layer = find_layer(candidate, layer_id)
+        pin = update_puppet_pin(
+            layer,
+            pin_id,
+            {
+                "rest_position": [float(x), float(y)],
+                "position": [float(x), float(y)],
+            },
+        )
+        if not pin.id:
+            raise ValueError(f"Unknown puppet pin: {pin_id}")
+        candidate.revision += 1
+        service = CompositionService([candidate])
+        self._commit(service.get(candidate.id))
+
+    def create_puppet_mesh(
+        self,
+        layer_id: str,
+        columns: int,
+        rows: int,
+        adaptive: bool = True,
+    ) -> None:
+        from app.motion_designer.puppet_mesh import (
+            create_alpha_adaptive_puppet_mesh,
+            create_grid_puppet_mesh,
+        )
+
+        candidate = MotionComposition.from_dict(self.composition.to_dict())
+        layer = find_layer(candidate, layer_id)
+        creator = (
+            create_alpha_adaptive_puppet_mesh
+            if adaptive
+            else create_grid_puppet_mesh
+        )
+        creator(layer, columns=columns, rows=rows)
+        candidate.revision += 1
+        service = CompositionService([candidate])
+        self._commit(service.get(candidate.id))
+
+    def configure_puppet_tear_repair(
+        self,
+        layer_id: str,
+        settings: dict,
+    ) -> None:
+        from app.motion_designer.puppet_mesh import configure_puppet_tear_repair
+
+        candidate = MotionComposition.from_dict(self.composition.to_dict())
+        layer = find_layer(candidate, layer_id)
+        configure_puppet_tear_repair(
+            layer,
+            enabled=bool(settings.get("enabled", True)),
+            max_edge_stretch=float(
+                settings.get("max_edge_stretch", 6.0) or 6.0
+            ),
+        )
+        candidate.revision += 1
+        self._commit(candidate)
+
+    def add_puppet_pin(self, layer_id: str, kind: str) -> None:
+        from app.motion_designer.puppet_mesh import add_puppet_pin
+
+        candidate = MotionComposition.from_dict(self.composition.to_dict())
+        layer = find_layer(candidate, layer_id)
+        add_puppet_pin(
+            layer,
+            kind=kind,
+            position=[0.5, 0.5],
+            name=str(kind).title(),
+        )
+        candidate.revision += 1
+        service = CompositionService([candidate])
+        self._commit(service.get(candidate.id))
+
+    def update_puppet_pin(
+        self,
+        layer_id: str,
+        pin_id: str,
+        changes: dict,
+    ) -> None:
+        from app.motion_designer.puppet_mesh import update_puppet_pin
+
+        candidate = MotionComposition.from_dict(self.composition.to_dict())
+        layer = find_layer(candidate, layer_id)
+        update_puppet_pin(layer, pin_id, changes)
+        candidate.revision += 1
+        service = CompositionService([candidate])
+        self._commit(service.get(candidate.id))
+
+    def update_puppet_keyframe(
+        self,
+        layer_id: str,
+        pin_id: str,
+        property_name: str,
+        keyframe_id: str,
+        time_ms: int,
+        value,
+    ) -> None:
+        from app.motion_designer.puppet_mesh import (
+            layer_puppet_mesh,
+            set_layer_puppet_mesh,
+        )
+
+        candidate = MotionComposition.from_dict(self.composition.to_dict())
+        layer = find_layer(candidate, layer_id)
+        mesh = layer_puppet_mesh(layer)
+        if mesh is None:
+            raise ValueError("Layer has no puppet mesh")
+        pin = next((row for row in mesh.pins if row.id == pin_id), None)
+        if pin is None:
+            raise ValueError(f"Unknown puppet pin: {pin_id}")
+        prop = {
+            "position": pin.position,
+            "rotation": pin.rotation,
+        }.get(str(property_name))
+        if prop is None:
+            raise ValueError(f"Unknown puppet pin property: {property_name}")
+        keyframe = next(
+            (row for row in prop.keyframes if row.id == keyframe_id),
+            None,
+        )
+        if keyframe is None:
+            raise ValueError(f"Unknown puppet keyframe: {keyframe_id}")
+        target_time = max(0, min(candidate.duration_ms, int(time_ms)))
+        prop.keyframes = [
+            row
+            for row in prop.keyframes
+            if row.id == keyframe_id or row.time_ms != target_time
+        ]
+        keyframe.time_ms = target_time
+        keyframe.value = value
+        prop.keyframes.sort(key=lambda row: (row.time_ms, row.id))
+        set_layer_puppet_mesh(layer, mesh)
+        candidate.revision += 1
+        service = CompositionService([candidate])
+        self._commit(service.get(candidate.id))
 
     def delete_layer(self, layer_id: str) -> None:
         service = CompositionService([self.composition])
@@ -149,6 +485,126 @@ class MotionDocumentController:
         candidate.revision += 1
         self._commit(candidate)
 
+    def set_effect_parameter(
+        self,
+        layer_id: str,
+        effect_id: str,
+        parameter_name: str,
+        value,
+        time_ms: int | None = None,
+    ) -> None:
+        self._set_effect_mask_parameter(
+            layer_id,
+            "effects",
+            effect_id,
+            parameter_name,
+            value,
+            time_ms=time_ms,
+        )
+
+    def set_mask_parameter(
+        self,
+        layer_id: str,
+        mask_id: str,
+        parameter_name: str,
+        value,
+        time_ms: int | None = None,
+    ) -> None:
+        self._set_effect_mask_parameter(
+            layer_id,
+            "masks",
+            mask_id,
+            parameter_name,
+            value,
+            time_ms=time_ms,
+        )
+
+    def remove_effect_keyframe(
+        self,
+        layer_id: str,
+        effect_id: str,
+        parameter_name: str,
+        time_ms: int,
+    ) -> None:
+        self._remove_effect_mask_keyframe(
+            layer_id, "effects", effect_id, parameter_name, time_ms,
+        )
+
+    def remove_mask_keyframe(
+        self,
+        layer_id: str,
+        mask_id: str,
+        parameter_name: str,
+        time_ms: int,
+    ) -> None:
+        self._remove_effect_mask_keyframe(
+            layer_id, "masks", mask_id, parameter_name, time_ms,
+        )
+
+    def _set_effect_mask_parameter(
+        self,
+        layer_id: str,
+        collection_name: str,
+        item_id: str,
+        parameter_name: str,
+        value,
+        *,
+        time_ms: int | None,
+    ) -> None:
+        candidate = MotionComposition.from_dict(self.composition.to_dict())
+        layer = find_layer(candidate, layer_id)
+        collection = getattr(layer, collection_name)
+        item = next((row for row in collection if row.id == item_id), None)
+        if item is None:
+            raise ValueError(f"Unknown Motion {collection_name[:-1]}: {item_id}")
+        prop = item.params.setdefault(
+            str(parameter_name),
+            AnimatedProperty(default=value),
+        )
+        if time_ms is None:
+            prop.default = value
+        else:
+            target_time = max(0, int(round(time_ms)))
+            existing = next(
+                (row for row in prop.keyframes if int(row.time_ms) == target_time),
+                None,
+            )
+            if existing is None:
+                prop.keyframes.append(Keyframe(time_ms=target_time, value=value))
+            else:
+                existing.value = value
+            prop.keyframes.sort(key=lambda row: (row.time_ms, row.id))
+        candidate.revision += 1
+        self._commit(candidate)
+
+    def _remove_effect_mask_keyframe(
+        self,
+        layer_id: str,
+        collection_name: str,
+        item_id: str,
+        parameter_name: str,
+        time_ms: int,
+    ) -> None:
+        candidate = MotionComposition.from_dict(self.composition.to_dict())
+        layer = find_layer(candidate, layer_id)
+        collection = getattr(layer, collection_name)
+        item = next((row for row in collection if row.id == item_id), None)
+        if item is None:
+            raise ValueError(f"Unknown Motion {collection_name[:-1]}: {item_id}")
+        prop = item.params.get(str(parameter_name))
+        if prop is None:
+            return
+        target_time = max(0, int(round(time_ms)))
+        remaining = [
+            row for row in prop.keyframes
+            if int(row.time_ms) != target_time
+        ]
+        if len(remaining) == len(prop.keyframes):
+            return
+        prop.keyframes = remaining
+        candidate.revision += 1
+        self._commit(candidate)
+
     def update_keyframe(
         self, layer_id: str, property_name: str, keyframe_id: str, time_ms: int, value,
     ) -> None:
@@ -163,6 +619,11 @@ class MotionDocumentController:
                 and ("default" in current or "keyframes" in current)
                 else None
             )
+        elif str(property_name) == "time_remap":
+            from app.motion_designer.time_remap import layer_time_remap
+
+            parameter_name = "time_remap"
+            prop = layer_time_remap(layer)
         else:
             parameter_name = ""
             prop = layer.transform.properties().get(property_name)
@@ -179,8 +640,119 @@ class MotionDocumentController:
         keyframe.time_ms = target_time_ms
         keyframe.value = value
         prop.keyframes.sort(key=lambda item: (item.time_ms, item.id))
-        if parameter_name:
+        if parameter_name == "time_remap":
+            from app.motion_designer.time_remap import TIME_REMAP_CONTRACT
+
+            layer.metadata["time_remap"] = {
+                "contract": TIME_REMAP_CONTRACT,
+                "enabled": True,
+                "property": prop.to_dict(),
+            }
+        elif parameter_name:
             layer.source.params[parameter_name] = prop.to_dict()
+        candidate.revision += 1
+        self._commit(candidate)
+
+    def update_keyframe_tangent(
+        self,
+        layer_id: str,
+        property_name: str,
+        keyframe_id: str,
+        mode: str,
+    ) -> None:
+        from app.motion_designer.graph_editing import update_keyframe_tangent
+
+        candidate = MotionComposition.from_dict(self.composition.to_dict())
+        layer = find_layer(candidate, layer_id)
+        update_keyframe_tangent(
+            layer,
+            property_name,
+            keyframe_id,
+            mode=mode,
+        )
+        candidate.revision += 1
+        self._commit(candidate)
+
+    def set_keyframe_roving(
+        self,
+        layer_id: str,
+        property_name: str,
+        keyframe_id: str,
+    ) -> None:
+        from app.motion_designer.graph_editing import set_roving_keyframes
+
+        candidate = MotionComposition.from_dict(self.composition.to_dict())
+        layer = find_layer(candidate, layer_id)
+        set_roving_keyframes(
+            layer,
+            property_name,
+            [keyframe_id],
+            enabled=True,
+        )
+        candidate.revision += 1
+        self._commit(candidate)
+
+    def update_keyframe_tangent_value(
+        self,
+        layer_id: str,
+        property_name: str,
+        keyframe_id: str,
+        side: str,
+        value,
+    ) -> None:
+        from app.motion_designer.graph_editing import update_keyframe_tangent
+
+        candidate = MotionComposition.from_dict(self.composition.to_dict())
+        layer = find_layer(candidate, layer_id)
+        update_keyframe_tangent(
+            layer,
+            property_name,
+            keyframe_id,
+            mode="broken",
+            in_tangent=value if str(side) == "in" else None,
+            out_tangent=value if str(side) == "out" else None,
+        )
+        candidate.revision += 1
+        self._commit(candidate)
+
+    def update_rig_keyframe(
+        self,
+        rig_id: str,
+        bone_id: str,
+        property_name: str,
+        keyframe_id: str,
+        time_ms: int,
+        value,
+    ) -> None:
+        from app.motion_designer.rigging import find_rig, upsert_rig
+
+        candidate = MotionComposition.from_dict(self.composition.to_dict())
+        rig = find_rig(candidate, rig_id)
+        bone = next((row for row in rig.bones if row.id == bone_id), None)
+        if bone is None:
+            raise ValueError(f"Unknown rig bone: {bone_id}")
+        prop = {
+            "rotation": bone.rotation,
+            "translation": bone.translation,
+        }.get(str(property_name))
+        if prop is None:
+            raise ValueError(f"Unknown rig animated property: {property_name}")
+        keyframe = next(
+            (item for item in prop.keyframes if item.id == keyframe_id),
+            None,
+        )
+        if keyframe is None:
+            raise ValueError(f"Unknown rig keyframe: {keyframe_id}")
+        target_time_ms = max(0, min(candidate.duration_ms, int(time_ms)))
+        prop.keyframes = [
+            item
+            for item in prop.keyframes
+            if item.id == keyframe_id or item.time_ms != target_time_ms
+        ]
+        keyframe.time_ms = target_time_ms
+        keyframe.value = value
+        prop.keyframes.sort(key=lambda item: (item.time_ms, item.id))
+        upsert_rig(candidate, rig)
         candidate.revision += 1
         self._commit(candidate)
 
@@ -203,14 +775,43 @@ class MotionDocumentController:
         CompositionService([candidate])
         self._commit(candidate)
 
+    def load(self, composition: MotionComposition) -> None:
+        candidate = MotionComposition.from_dict(composition.to_dict())
+        CompositionService([candidate])
+        self.composition = candidate
+        self._snapshots = [candidate.to_dict()]
+        self._history_index = 0
+        self._changed(candidate)
+
 
 class MotionDesignerWindow(QMainWindow):
     composition_changed = Signal(object)
     autosave_requested = Signal(object)
 
-    def __init__(self, composition: MotionComposition | None = None, parent=None) -> None:
+    def __init__(
+        self,
+        composition: MotionComposition | None = None,
+        parent=None,
+        *,
+        project_path: str | Path | None = None,
+        standalone_document: bool = False,
+    ) -> None:
         super().__init__(parent)
         self.setObjectName("MotionDesignerWindow")
+        self._document_path = (
+            Path(project_path).expanduser().resolve(strict=False)
+            if project_path else None
+        )
+        self._managed_document = bool(standalone_document or project_path)
+        self._document_dirty = False
+        self._document_initializing = True
+        self._composition_navigation: list[
+            tuple[MotionComposition, str]
+        ] = []
+        if composition is None and self._document_path is not None:
+            from app.motion_designer.project_io import load_motion_project
+
+            composition = load_motion_project(self._document_path)
         self.setWindowTitle("Motion Designer")
         self.resize(1520, 900)
         self.setStyleSheet(MOTION_DESIGNER_QSS)
@@ -221,8 +822,15 @@ class MotionDesignerWindow(QMainWindow):
         self._play_clock = QElapsedTimer()
         self._playback_fractional_ms = 0.0
         self._tracking_jobs: dict[str, tuple[QThread, MotionTrackingWorker, str]] = {}
+        self._composition_tracking_job: tuple[
+            QThread,
+            MotionTrackingWorker | MotionFaceTrackingWorker,
+            str,
+            str,
+        ] | None = None
         self._audio_analysis_job: tuple[QThread, MotionAudioAnalysisWorker] | None = None
         self._motion_export_job: tuple[QThread, MotionExportWorker] | None = None
+        self._umg_generation_job: tuple[QThread, MotionUMGGenerationWorker] | None = None
         self._ai_generation_job: tuple[QThread, MotionAIGenerationWorker] | None = None
         self._ai_preview_job: tuple[QThread, MotionAICandidatePreviewWorker] | None = None
         self._ai_preview_pending: dict | None = None
@@ -237,6 +845,10 @@ class MotionDesignerWindow(QMainWindow):
         self.audio = AudioReactivePanel(self)
         self.inspector = InspectorPanel(self)
         self.advanced = AdvancedMotionPanel(self)
+        self.generator = GeneratorPanel(self)
+        self.replicator = ReplicatorPanel(self)
+        self.rig = RigPanel(self)
+        self.puppet = PuppetPanel(self)
         self.image = ImagePanel(self)
         self.ar_pbr = ArPbrPanel(self)
         self.actor = ActorPanel(self)
@@ -246,11 +858,15 @@ class MotionDesignerWindow(QMainWindow):
         self.vector = VectorPanel(self)
         self.typography = TypographyPanel(self)
         self.behaviors = BehaviorPanel(self)
+        self.button = ButtonComponentPanel(self)
         self.effects = EffectMaskPanel("effect", self)
         self.masks = EffectMaskPanel("mask", self)
+        self.tracking = TrackingPanel(self)
         self.inspector_tabs = QTabWidget(self)
         self.inspector_tabs.addTab(self.inspector, "Properties")
         self.inspector_tabs.addTab(self.advanced, "Motion")
+        self.inspector_tabs.addTab(self.generator, "Generator")
+        self.inspector_tabs.addTab(self.replicator, "Replicator")
         self.inspector_tabs.addTab(self.image, "Image")
         self.inspector_tabs.addTab(self.vector, "Shape")
         self.inspector_tabs.addTab(self.typography, "Text")
@@ -262,8 +878,12 @@ class MotionDesignerWindow(QMainWindow):
         self.inspector_tabs.addTab(self.mmd, "MMD")
         self.inspector_tabs.addTab(self.vrm, "VRM")
         self.inspector_tabs.addTab(self.particle, "Particles")
+        self.inspector_tabs.addTab(self.button, "Button")
+        self.inspector_tabs.addTab(self.rig, "Rig")
+        self.inspector_tabs.addTab(self.puppet, "Puppet")
+        self.inspector_tabs.addTab(self.tracking, "Tracking")
         self.left_tabs = QTabWidget(self)
-        self.left_tabs.addTab(self.library, "Library")
+        self.left_tabs.addTab(self.library, "Add")
         self.left_tabs.addTab(self.inspector_tabs, "Inspector")
         self.project_tabs = QTabWidget(self)
         self.project_tabs.addTab(self.layers, "Layers")
@@ -271,6 +891,8 @@ class MotionDesignerWindow(QMainWindow):
         self.project_tabs.addTab(self.audio, "Audio")
         self.output = MotionOutputPanel(self)
         self.left_tabs.addTab(self.output, "Output")
+        self.unreal_link_dialog = MotionUnrealLinkDialog(self)
+        self.umg = self.unreal_link_dialog.panel
 
         self.canvas = MotionCanvas(self)
         self.preview = MotionPreviewWidget(self)
@@ -285,18 +907,26 @@ class MotionDesignerWindow(QMainWindow):
         viewer_layout.addWidget(self.viewer_header)
         viewer_layout.addWidget(self.viewer_tabs, 1)
         self.timeline = MotionTimeline(self)
+        self.project_and_viewer = QSplitter(Qt.Horizontal, self)
+        self.project_and_viewer.setObjectName("MotionProjectAndViewer")
+        self.project_and_viewer.addWidget(self.project_tabs)
+        self.project_and_viewer.addWidget(viewer)
+        self.project_and_viewer.setSizes([250, 1040])
+        self.project_and_viewer.setStretchFactor(1, 1)
+        self.project_and_viewer.setCollapsible(1, False)
+
         production = QSplitter(Qt.Vertical, self)
-        production.addWidget(viewer)
+        production.setObjectName("MotionProductionStack")
+        production.addWidget(self.project_and_viewer)
         production.addWidget(self.timeline)
         production.setSizes([560, 300])
         production.setCollapsible(0, False)
         workspace = QSplitter(Qt.Horizontal, self)
         workspace.setObjectName("MotionWorkspace")
         workspace.addWidget(self.left_tabs)
-        workspace.addWidget(self.project_tabs)
         workspace.addWidget(production)
-        workspace.setSizes([280, 250, 990])
-        workspace.setStretchFactor(2, 1)
+        workspace.setSizes([310, 1290])
+        workspace.setStretchFactor(1, 1)
         self.setCentralWidget(workspace)
 
         self.ai = MotionAIPanel(self)
@@ -308,46 +938,115 @@ class MotionDesignerWindow(QMainWindow):
         )
         self.ai_dock.setWidget(self.ai)
         self.addDockWidget(Qt.RightDockWidgetArea, self.ai_dock)
+        self.ai_dock.hide()
 
+        self.toolbar.open_project_requested.connect(self._open_motion_project)
+        self.toolbar.save_project_requested.connect(self._save_motion_project)
+        self.toolbar.save_project_as_requested.connect(self._save_motion_project_as)
         self.toolbar.add_layer_requested.connect(self._add_layer)
         self.toolbar.behavior_requested.connect(self._add_behavior)
         self.toolbar.effect_requested.connect(self._add_effect)
+        self.toolbar.replicator_requested.connect(self._create_replicator)
         self.toolbar.rig_requested.connect(self._open_rig)
+        self.toolbar.component_requested.connect(
+            lambda kind: (
+                self._create_button_component()
+                if kind == "button"
+                else self._create_controller_null()
+                if kind == "controller"
+                else None
+            )
+        )
         self.toolbar.delete_requested.connect(self._delete_selected)
         self.toolbar.duplicate_requested.connect(self._duplicate_selected)
         self.toolbar.undo_requested.connect(self.controller.undo)
         self.toolbar.redo_requested.connect(self.controller.redo)
         self.toolbar.ai_toggled.connect(self.ai_dock.setVisible)
         self.toolbar.output_requested.connect(lambda: self.left_tabs.setCurrentWidget(self.output))
+        self.toolbar.template_gallery_requested.connect(self._open_template_gallery)
+        self.toolbar.unreal_link_requested.connect(self._open_unreal_link)
+        self.toolbar.workspace_panel_requested.connect(self._show_workspace_panel)
+        self.toolbar.precompose_requested.connect(self._precompose_selected)
+        self.toolbar.time_remap_requested.connect(self._apply_time_remap_preset)
+        self.toolbar.navigate_parent_requested.connect(
+            self._navigate_to_parent_composition,
+        )
         self.ai_dock.visibilityChanged.connect(self.toolbar.set_ai_visible)
         self.layers.layer_selected.connect(self._select_layer)
+        self.layers.layer_activated.connect(self._open_layer_in_place)
         self.layers.layer_flags_changed.connect(self._update_layer_flags)
         self.layers.layer_structure_changed.connect(self.controller.apply_layer_structure)
         self.canvas.layer_selected.connect(self._select_layer)
         self.canvas.layer_moved.connect(self._move_layer)
+        self.canvas.rig_bone_moved.connect(self._move_rig_bone)
+        self.canvas.rig_bone_selected.connect(self._select_rig_bone)
+        self.canvas.puppet_pin_moved.connect(self.controller.move_puppet_pin)
+        self.canvas.puppet_pin_selected.connect(self._select_puppet_pin)
         self.canvas.vector_path_changed.connect(self._set_vector_path)
         self.canvas.typography_path_changed.connect(self._set_typography_path)
         self.canvas.typography_path_offset_changed.connect(self._set_typography_path_offset)
         self.inspector.property_changed.connect(self._set_inspector_property)
         self.inspector.keyframe_requested.connect(self._set_keyframe)
         self.advanced.metadata_changed.connect(self._set_advanced_metadata)
+        self.generator.source_changed.connect(self._set_generator_params)
+        self.replicator.settings_changed.connect(self._set_replicator_params)
+        self.rig.bone_changed.connect(self.controller.update_rig_bone)
+        self.rig.bone_selected.connect(self.timeline.set_selected_rig_bone)
+        self.rig.mirror_requested.connect(self.controller.mirror_rig_bone)
+        self.rig.ik_lock_requested.connect(self.controller.create_rig_ik_lock)
+        self.rig.constraint_enabled.connect(
+            self.controller.set_rig_constraint_enabled,
+        )
+        self.rig.constraint_bake_requested.connect(
+            self.controller.bake_rig_constraint,
+        )
+        self.puppet.mesh_create_requested.connect(
+            self.controller.create_puppet_mesh,
+        )
+        self.puppet.mesh_settings_changed.connect(
+            self.controller.configure_puppet_tear_repair,
+        )
+        self.puppet.pin_add_requested.connect(self.controller.add_puppet_pin)
+        self.puppet.pin_changed.connect(self.controller.update_puppet_pin)
         self.image.source_changed.connect(self._set_image_params)
         self.image.keyframe_requested.connect(self._set_image_keyframe)
         self.vector.source_changed.connect(self._set_vector_params)
         self.typography.source_changed.connect(self._set_typography_params)
         self.library.apply_requested.connect(self._apply_library_item)
+        self.library.templates_requested.connect(self._open_template_gallery)
+        self.library.ai_requested.connect(self._show_ai_workspace)
         self.behaviors.add_requested.connect(self._add_behavior)
         self.behaviors.delete_requested.connect(self._delete_behavior)
         self.behaviors.parameter_changed.connect(self._set_behavior_param)
+        self.button.create_requested.connect(self._create_button_component)
+        self.button.remove_requested.connect(self._remove_button_component)
+        self.button.state_changed.connect(self._set_button_state)
+        self.button.settings_changed.connect(self._update_button_component)
         self.effects.add_requested.connect(self._add_effect)
         self.effects.delete_requested.connect(self._delete_effect)
         self.effects.parameter_changed.connect(self._set_effect_param)
+        self.effects.keyframe_toggled.connect(self._toggle_effect_keyframe)
+        self.effects.adjustment_scope_changed.connect(
+            self._set_adjustment_scope
+        )
+        self.effects.effect_group_scope_changed.connect(
+            self._set_effect_group_scope
+        )
         self.masks.add_requested.connect(self._add_mask)
         self.masks.delete_requested.connect(self._delete_mask)
         self.masks.parameter_changed.connect(self._set_mask_param)
+        self.masks.keyframe_toggled.connect(self._toggle_mask_keyframe)
         self.masks.item_changed.connect(self._set_mask_item)
         self.masks.tracking_requested.connect(self._start_mask_tracking)
         self.masks.tracking_cancel_requested.connect(self._cancel_mask_tracking)
+        self.tracking.apply_requested.connect(self._apply_composition_track)
+        self.tracking.analyze_requested.connect(
+            self._start_composition_tracking
+        )
+        self.tracking.corner_pin_requested.connect(
+            self._apply_composition_track_to_corner_pin
+        )
+        self.tracking.relink_requested.connect(self._relink_composition_track)
         self.ar_pbr.source_changed.connect(self._set_ar_pbr_params)
         self.actor.source_changed.connect(self._set_actor_params)
         self.mmd.source_changed.connect(self._set_mmd_params)
@@ -359,6 +1058,24 @@ class MotionDesignerWindow(QMainWindow):
         self.timeline.layer_selected.connect(self._select_layer)
         self.timeline.layer_timing_changed.connect(self._set_layer_timing)
         self.timeline.keyframe_changed.connect(self.controller.update_keyframe)
+        self.timeline.rig_keyframe_changed.connect(
+            self.controller.update_rig_keyframe,
+        )
+        self.timeline.puppet_keyframe_changed.connect(
+            self.controller.update_puppet_keyframe,
+        )
+        self.timeline.keyframe_tangent_requested.connect(
+            self.controller.update_keyframe_tangent,
+        )
+        self.timeline.keyframe_roving_requested.connect(
+            self.controller.set_keyframe_roving,
+        )
+        self.timeline.keyframe_tangent_value_requested.connect(
+            self.controller.update_keyframe_tangent_value,
+        )
+        self.timeline.expression_link_requested.connect(
+            self._open_expression_link,
+        )
         self.viewer_header.zoom_changed.connect(self.canvas.set_zoom_mode)
         self.viewer_header.grid_changed.connect(self.canvas.set_grid_visible)
         self.viewer_header.safe_changed.connect(self.canvas.set_safe_guides_visible)
@@ -373,15 +1090,19 @@ class MotionDesignerWindow(QMainWindow):
         self.output.color_settings_changed.connect(self._set_motion_color_settings)
         self.output.export_requested.connect(self._start_motion_export)
         self.output.cancel_requested.connect(self._cancel_motion_export)
-
+        self.umg.generate_requested.connect(self._start_umg_generation)
+        self.umg.cancel_requested.connect(self._cancel_umg_generation)
         self._play_timer = QTimer(self)
         self._play_timer.setInterval(16)
         self._play_timer.timeout.connect(self._tick)
         self._autosave_timer = QTimer(self)
         self._autosave_timer.setInterval(30000)
-        self._autosave_timer.timeout.connect(lambda: self.autosave_requested.emit(self.controller.composition))
+        self._autosave_timer.timeout.connect(self._autosave_document)
         self._autosave_timer.start()
         self._on_model_changed(self.controller.composition)
+        self._document_initializing = False
+        self._document_dirty = False
+        self._update_document_title()
 
     def _on_model_changed(self, composition: MotionComposition) -> None:
         self.canvas.set_composition(composition, self._time_ms)
@@ -392,12 +1113,190 @@ class MotionDesignerWindow(QMainWindow):
         self._update_media_panel(composition)
         self.audio.set_composition(composition)
         self.output.set_composition(composition)
+        self.umg.set_composition(composition)
+        selected = next(
+            (layer for layer in composition.layers if layer.id == self._selected_layer_id),
+            None,
+        )
+        self.rig.set_layer(selected, composition)
+        self.tracking.set_context(composition, selected)
         self.composition_changed.emit(composition)
+        if not self._document_initializing:
+            self._document_dirty = True
+            self._update_document_title()
         if self._selected_layer_id:
             self._select_layer(self._selected_layer_id)
 
+    def _update_document_title(self) -> None:
+        name = (
+            self._document_path.name
+            if self._document_path is not None
+            else self.controller.composition.name or "Untitled"
+        )
+        breadcrumb = " / ".join(
+            [
+                *(parent.name for parent, _layer_id in self._composition_navigation),
+                self.controller.composition.name,
+            ],
+        )
+        dirty = " *" if self._document_dirty else ""
+        self.setWindowTitle(
+            f"Motion Designer - {name} - {breadcrumb}{dirty}",
+        )
+
+    def _root_composition_snapshot(self) -> MotionComposition:
+        from app.motion_designer.precomposition import set_embedded_composition
+
+        child = MotionComposition.from_dict(
+            self.controller.composition.to_dict(),
+        )
+        for parent_source, layer_id in reversed(self._composition_navigation):
+            parent = MotionComposition.from_dict(parent_source.to_dict())
+            layer = next(
+                (row for row in parent.layers if row.id == layer_id),
+                None,
+            )
+            if layer is None:
+                raise ValueError(
+                    f"Missing parent pre-compose layer: {layer_id}",
+                )
+            set_embedded_composition(layer, child)
+            parent.revision += 1
+            child = parent
+        return child
+
+    def _confirm_discard_document_changes(self) -> bool:
+        if not self._managed_document or not self._document_dirty:
+            return True
+        answer = QMessageBox.question(
+            self,
+            "Unsaved Motion Project",
+            "Save changes to the current Motion project?",
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+        if answer == QMessageBox.StandardButton.Cancel:
+            return False
+        if answer == QMessageBox.StandardButton.Save:
+            return self._save_motion_project()
+        return True
+
+    def _open_motion_project(self) -> bool:
+        if not self._confirm_discard_document_changes():
+            return False
+        from app.motion_designer.project_io import (
+            MOTION_PROJECT_FILTER,
+            load_motion_project,
+        )
+
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open Motion Project", "", MOTION_PROJECT_FILTER,
+        )
+        if not path:
+            return False
+        try:
+            composition = load_motion_project(path)
+        except Exception as exc:
+            QMessageBox.critical(self, "Open Motion Project", str(exc))
+            return False
+        self._managed_document = True
+        self._document_path = Path(path).expanduser().resolve(strict=False)
+        self._selected_layer_id = ""
+        self._time_ms = 0
+        self._composition_navigation.clear()
+        self.toolbar.set_parent_navigation_enabled(False)
+        self.controller.load(composition)
+        self._document_dirty = False
+        self._update_document_title()
+        self.statusBar().showMessage(f"Opened {self._document_path.name}", 5000)
+        return True
+
+    def _save_motion_project(self) -> bool:
+        if self._document_path is None:
+            return self._save_motion_project_as()
+        from app.motion_designer.project_io import save_motion_project
+
+        try:
+            self._document_path = save_motion_project(
+                self._root_composition_snapshot(),
+                self._document_path,
+            )
+        except Exception as exc:
+            QMessageBox.critical(self, "Save Motion Project", str(exc))
+            return False
+        self._managed_document = True
+        self._document_dirty = False
+        self._remove_document_recovery()
+        self._update_document_title()
+        self.statusBar().showMessage(f"Saved {self._document_path.name}", 5000)
+        return True
+
+    def _save_motion_project_as(self) -> bool:
+        from app.motion_designer.project_io import MOTION_PROJECT_FILTER
+
+        initial = str(self._document_path or Path(
+            f"{self.controller.composition.name or 'motion_project'}.tgmotion"
+        ))
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Motion Project", initial, MOTION_PROJECT_FILTER,
+        )
+        if not path:
+            return False
+        self._document_path = Path(path).expanduser().resolve(strict=False)
+        return self._save_motion_project()
+
+    def _document_recovery_path(self) -> Path:
+        from app.motion_designer.recovery import (
+            default_motion_recovery_root,
+            motion_recovery_path,
+        )
+
+        root = default_motion_recovery_root(self._document_path)
+        return motion_recovery_path(root, self.controller.composition.id)
+
+    def _remove_document_recovery(self) -> None:
+        try:
+            self._document_recovery_path().unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def _autosave_document(self) -> None:
+        composition = self._root_composition_snapshot()
+        self.autosave_requested.emit(composition)
+        if not self._managed_document or not self._document_dirty:
+            return
+        from app.motion_designer.recovery import write_motion_recovery
+
+        try:
+            write_motion_recovery(
+                composition,
+                self._document_recovery_path(),
+                project_path=self._document_path,
+            )
+        except Exception as exc:
+            self.statusBar().showMessage(f"Motion autosave failed: {exc}", 5000)
+
     def _open_rig(self, rig_kind: str) -> None:
-        if str(rig_kind) != "arm_wave":
+        kind = str(rig_kind)
+        if kind == "full_body":
+            dialog = FullBodyRigDialog(
+                self.controller.composition,
+                selected_layer_id=self._selected_layer_id,
+                parent=self,
+            )
+            if dialog.exec() == QDialog.Accepted:
+                candidate = MotionComposition.from_dict(
+                    self.controller.composition.to_dict()
+                )
+                rig = dialog.create(candidate)
+                self.controller.replace(candidate)
+                if rig.bindings:
+                    self._select_layer(rig.bindings[0].layer_id)
+                    self.inspector_tabs.setCurrentWidget(self.rig)
+            return
+        if kind != "arm_wave":
             return
         if len(self.controller.composition.layers) < 4:
             return
@@ -405,9 +1304,232 @@ class MotionDesignerWindow(QMainWindow):
         if dialog.exec() == QDialog.Accepted:
             self.controller.replace(dialog.result_composition())
 
+    def _open_unreal_link(self) -> None:
+        self.umg.set_composition(self.controller.composition)
+        self.unreal_link_dialog.show()
+        self.unreal_link_dialog.raise_()
+        self.unreal_link_dialog.activateWindow()
+
+    def _precompose_selected(self) -> None:
+        layer_ids = self.layers.selected_layer_ids()
+        if not layer_ids and self._selected_layer_id:
+            layer_ids = [self._selected_layer_id]
+        if not layer_ids:
+            return
+        from app.motion_designer.precomposition import create_precomposition
+
+        candidate = MotionComposition.from_dict(
+            self.controller.composition.to_dict(),
+        )
+        _child, layer = create_precomposition(
+            candidate,
+            layer_ids,
+            name="Pre-compose",
+        )
+        self.controller.replace(candidate)
+        self._select_layer(layer.id)
+
+    def _apply_time_remap_preset(self, preset: str) -> None:
+        if not self._selected_layer_id:
+            return
+        if str(preset).startswith("blend:"):
+            from app.motion_designer.frame_blending import (
+                frame_blending_preflight,
+                set_layer_frame_blending,
+            )
+
+            candidate = MotionComposition.from_dict(
+                self.controller.composition.to_dict(),
+            )
+            layer = find_layer(candidate, self._selected_layer_id)
+            set_layer_frame_blending(layer, str(preset).split(":", 1)[1])
+            candidate.revision += 1
+            self.controller.replace(candidate)
+            report = frame_blending_preflight(layer)
+            if str(report.get("fallback_reason") or ""):
+                self.statusBar().showMessage(
+                    "Optical Flow is not active; using deterministic Frame Mix.",
+                    5000,
+                )
+            return
+        from app.motion_designer.time_remap import (
+            apply_time_remap_preset,
+            clear_layer_time_remap,
+        )
+
+        candidate = MotionComposition.from_dict(
+            self.controller.composition.to_dict(),
+        )
+        layer = find_layer(candidate, self._selected_layer_id)
+        if str(preset) == "clear":
+            if not clear_layer_time_remap(layer):
+                return
+        else:
+            apply_time_remap_preset(layer, str(preset))
+        candidate.revision += 1
+        self.controller.replace(candidate)
+        self.timeline.set_selected_layer(layer.id)
+        for index in range(self.timeline.graph_properties.count()):
+            item = self.timeline.graph_properties.item(index)
+            if str(item.data(Qt.UserRole) or "") == "time_remap":
+                self.timeline.graph_properties.setCurrentItem(item)
+                break
+
+    def _open_expression_link(
+        self,
+        target_layer_id: str,
+        target_property: str,
+    ) -> None:
+        from app.motion_designer.expressions import set_layer_expression
+        from app.motion_designer.ui.expression_link_dialog import (
+            ExpressionLinkDialog,
+        )
+
+        dialog = ExpressionLinkDialog(
+            self.controller.composition,
+            target_layer_id,
+            target_property,
+            self,
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        if not dialog.source_layer_id or not dialog.source_property_name:
+            return
+        candidate = MotionComposition.from_dict(
+            self.controller.composition.to_dict(),
+        )
+        target = find_layer(candidate, target_layer_id)
+        set_layer_expression(
+            target,
+            target_property,
+            {
+                "op": "property",
+                "layer_id": dialog.source_layer_id,
+                "property": dialog.source_property_name,
+            },
+        )
+        candidate.revision += 1
+        self.controller.replace(candidate)
+
+    def _open_layer_in_place(self, layer_id: str) -> None:
+        from app.motion_designer.precomposition import embedded_composition
+
+        parent = self.controller.composition
+        layer = next(
+            (row for row in parent.layers if row.id == str(layer_id)),
+            None,
+        )
+        child = embedded_composition(layer) if layer is not None else None
+        if child is None:
+            return
+        self._composition_navigation.append((
+            MotionComposition.from_dict(parent.to_dict()),
+            layer.id,
+        ))
+        self.controller.load(child)
+        self.toolbar.set_parent_navigation_enabled(True)
+        self._selected_layer_id = ""
+        self._set_time(0)
+        self.timeline.set_time(0)
+        self._update_document_title()
+
+    def _navigate_to_parent_composition(self) -> None:
+        if not self._composition_navigation:
+            return
+        from app.motion_designer.precomposition import set_embedded_composition
+
+        child = MotionComposition.from_dict(
+            self.controller.composition.to_dict(),
+        )
+        parent, layer_id = self._composition_navigation.pop()
+        layer = next(
+            (row for row in parent.layers if row.id == layer_id),
+            None,
+        )
+        if layer is None:
+            raise ValueError(f"Missing parent pre-compose layer: {layer_id}")
+        set_embedded_composition(layer, child)
+        parent.revision += 1
+        self.controller.load(parent)
+        self.toolbar.set_parent_navigation_enabled(
+            bool(self._composition_navigation),
+        )
+        self._select_layer(layer.id)
+        self._update_document_title()
+
+    def _open_template_gallery(self) -> None:
+        from app.motion_designer.templates import (
+            apply_template_to_composition,
+            recommended_variant,
+        )
+
+        composition = self.controller.composition
+        dialog = MotionTemplateGalleryDialog(
+            self,
+            variant=recommended_variant(composition.width, composition.height),
+        )
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        template_id = dialog.selected_template_id
+        if not template_id:
+            return
+        candidate = apply_template_to_composition(
+            composition,
+            template_id,
+            variant=dialog.selected_variant,
+            replace_existing=True,
+        )
+        instance_id = str(
+            candidate.metadata["last_applied_template"]["template_instance_id"]
+        )
+        added = [
+            layer
+            for layer in candidate.layers
+            if layer.metadata.get("template_instance_id") == instance_id
+        ]
+        self.controller.replace(candidate)
+        self._restart_template_playback()
+        if added:
+            self._select_layer(added[-1].id)
+
+    def _show_ai_workspace(self) -> None:
+        self.ai_dock.show()
+        self.ai_dock.raise_()
+        self.toolbar.set_ai_visible(True)
+        self.ai.prompt.setFocus(Qt.FocusReason.ShortcutFocusReason)
+
+    def _show_workspace_panel(self, panel: str) -> None:
+        requested = str(panel or "").lower()
+        if requested == "library":
+            self.left_tabs.setCurrentWidget(self.library)
+            return
+        if requested == "inspector":
+            self.left_tabs.setCurrentWidget(self.inspector_tabs)
+            return
+        if requested == "project":
+            visible = self.project_tabs.isVisible()
+            self.project_tabs.setVisible(not visible)
+            if not visible:
+                self.project_and_viewer.setSizes([250, max(1, self.width() - 560)])
+
     def _add_layer(self, layer_type: str) -> None:
         composition = self.controller.composition
-        requested_type = str(layer_type or "shape")
+        requested_type = str(layer_type or "shape").lower()
+        if requested_type == "generator" or requested_type.startswith("generator:"):
+            from app.motion_designer.generators import create_generator_layer
+
+            kind = requested_type.partition(":")[2] or "gradient"
+            layer = create_generator_layer(
+                kind,
+                width=composition.width,
+                height=composition.height,
+                duration_ms=composition.duration_ms,
+            )
+            self.controller.add_layer(layer)
+            self._select_layer(layer.id)
+            self.left_tabs.setCurrentWidget(self.inspector_tabs)
+            self.inspector_tabs.setCurrentWidget(self.generator)
+            return
         if requested_type == "ar_pbr":
             uri, _ = QFileDialog.getOpenFileName(
                 self, "Open 3D object", "", "3D Objects (*.gltf *.glb *.fbx *.obj *.vrm *.usd *.usdz *.arpbr)",
@@ -546,10 +1668,15 @@ class MotionDesignerWindow(QMainWindow):
         self._select_layer(layer.id)
 
     def _select_layer(self, layer_id: str) -> None:
+        previous_layer_id = self._selected_layer_id
         self._selected_layer_id = str(layer_id or "")
         layer = next((item for item in self.controller.composition.layers if item.id == self._selected_layer_id), None)
         self.inspector.set_layer(layer)
         self.advanced.set_layer(layer, self.controller.composition)
+        self.generator.set_layer(layer)
+        self.replicator.set_layer(layer)
+        self.rig.set_layer(layer, self.controller.composition)
+        self.puppet.set_layer(layer)
         self.image.set_layer(
             layer,
             max(0, self._time_ms - layer.in_ms) if layer is not None else 0,
@@ -557,18 +1684,131 @@ class MotionDesignerWindow(QMainWindow):
         self.vector.set_layer(layer, self.controller.composition)
         self.typography.set_layer(layer)
         self.behaviors.set_layer(layer)
-        self.effects.set_layer(layer)
+        self.effects.set_context(layer, self.controller.composition)
         self.masks.set_layer(layer)
+        local_time = self._layer_local_time(layer)
+        self.effects.set_time(local_time)
+        self.masks.set_time(local_time)
+        self.tracking.set_context(self.controller.composition, layer)
         self.audio.set_layer(layer)
         self.ar_pbr.set_layer(layer)
         self.actor.set_layer(layer)
         self.mmd.set_layer(layer)
         self.vrm.set_layer(layer)
         self.particle.set_layer(layer)
+        self.button.set_layer(layer)
         self.timeline.set_selected_layer(self._selected_layer_id)
         self.canvas.set_selected_layer(self._selected_layer_id)
         if layer is not None:
             self.layers.select_layer(layer.id)
+            if (
+                previous_layer_id != layer.id
+                or self.left_tabs.currentWidget() is self.library
+            ):
+                self.left_tabs.setCurrentWidget(self.inspector_tabs)
+                self.inspector_tabs.setCurrentWidget(
+                    self._preferred_inspector_for_layer(layer)
+                )
+        elif self.left_tabs.currentWidget() is self.inspector_tabs:
+            self.left_tabs.setCurrentWidget(self.library)
+
+    def _preferred_inspector_for_layer(self, layer: MotionLayer) -> QWidget:
+        layer_type = str(layer.layer_type or "").lower()
+        if layer_type == "text":
+            return self.typography
+        if layer_type == "generator":
+            return self.generator
+        if layer_type == "image":
+            return self.image
+        if layer_type in {"shape", "polygon", "star", "path", "line"}:
+            return self.vector
+        if layer_type in {"live2d_actor", "spine_actor"}:
+            return self.actor
+        if layer_type == "mmd_actor":
+            return self.mmd
+        if layer_type == "vrm_actor":
+            return self.vrm
+        if layer_type in {"ar_pbr", "camera", "light"}:
+            return self.ar_pbr
+        if layer_type == "particle":
+            return self.particle
+        return self.inspector
+
+    def _create_replicator(self) -> None:
+        if not self._selected_layer_id:
+            return
+        self._set_replicator_params({
+            "enabled": True,
+            "arrangement": "line",
+            "count": 5,
+            "columns": 5,
+            "offset": [80.0, 0.0],
+            "rotation": 0.0,
+            "scale": [1.0, 1.0],
+            "opacity_start": 1.0,
+            "opacity_end": 1.0,
+            "jitter": [0.0, 0.0],
+            "seed": 0,
+        })
+        self.left_tabs.setCurrentWidget(self.inspector_tabs)
+        self.inspector_tabs.setCurrentWidget(self.replicator)
+
+    def _create_button_component(self) -> None:
+        if not self._selected_layer_id:
+            return
+        from app.motion_designer.interactive_button import create_button_component
+
+        candidate = MotionComposition.from_dict(self.controller.composition.to_dict())
+        layer = find_layer(candidate, self._selected_layer_id)
+        create_button_component(layer)
+        candidate.revision += 1
+        self.controller.replace(candidate)
+        self.left_tabs.setCurrentWidget(self.inspector_tabs)
+        self.inspector_tabs.setCurrentWidget(self.button)
+
+    def _create_controller_null(self) -> None:
+        from app.motion_designer.controllers import create_controller_layer
+
+        candidate = MotionComposition.from_dict(
+            self.controller.composition.to_dict(),
+        )
+        layer = create_controller_layer(candidate)
+        self.controller.replace(candidate)
+        self._select_layer(layer.id)
+
+    def _remove_button_component(self) -> None:
+        if not self._selected_layer_id:
+            return
+        from app.motion_designer.interactive_button import remove_button_component
+
+        candidate = MotionComposition.from_dict(self.controller.composition.to_dict())
+        layer = find_layer(candidate, self._selected_layer_id)
+        if not remove_button_component(layer):
+            return
+        candidate.revision += 1
+        self.controller.replace(candidate)
+
+    def _set_button_state(self, state: str) -> None:
+        self._update_button_component({"active_state": str(state)})
+
+    def _update_button_component(self, changes: object) -> None:
+        if not self._selected_layer_id or not isinstance(changes, dict):
+            return
+        from app.motion_designer.interactive_button import (
+            button_component,
+            set_button_component,
+            update_button_component_data,
+        )
+
+        candidate = MotionComposition.from_dict(self.controller.composition.to_dict())
+        layer = find_layer(candidate, self._selected_layer_id)
+        component = button_component(layer)
+        if component is None:
+            return
+        update_button_component_data(component, changes)
+        set_button_component(layer, component)
+        candidate.revision += 1
+        self.controller.replace(candidate)
 
     def _set_ar_pbr_params(self, changes: object) -> None:
         if not self._selected_layer_id or not isinstance(changes, dict):
@@ -647,9 +1887,50 @@ class MotionDesignerWindow(QMainWindow):
         candidate.revision += 1
         self.controller.replace(candidate)
 
+    def _set_generator_params(self, changes: object) -> None:
+        if not self._selected_layer_id or not isinstance(changes, dict):
+            return
+        from app.motion_designer.generators import (
+            GENERATOR_SOURCE_KIND,
+            update_generator_params,
+        )
+
+        candidate = MotionComposition.from_dict(self.controller.composition.to_dict())
+        layer = find_layer(candidate, self._selected_layer_id)
+        if layer.layer_type != GENERATOR_SOURCE_KIND:
+            return
+        update_generator_params(layer, changes)
+        candidate.revision += 1
+        self.controller.replace(candidate)
+
+    def _set_replicator_params(self, changes: object) -> None:
+        if not self._selected_layer_id or not isinstance(changes, dict):
+            return
+        candidate = MotionComposition.from_dict(self.controller.composition.to_dict())
+        layer = find_layer(candidate, self._selected_layer_id)
+        if layer.layer_type in {"group", "null", "camera", "light", "adjustment"}:
+            return
+        layer.metadata["replicator"] = deepcopy(changes)
+        candidate.revision += 1
+        self.controller.replace(candidate)
+
     def _apply_library_item(self, domain: str, kind: str) -> None:
         if domain == "object":
             self._add_layer(kind)
+        elif domain == "generator":
+            self._add_layer(f"generator:{kind}")
+        elif domain == "replicator":
+            if not self._selected_layer_id:
+                return
+            self._create_replicator()
+            layer = find_layer(self.controller.composition, self._selected_layer_id)
+            current = layer.metadata.get("replicator")
+            current = dict(current) if isinstance(current, dict) else {}
+            self._set_replicator_params({
+                **current,
+                "enabled": True,
+                "arrangement": kind,
+            })
         elif domain == "behavior":
             self._add_behavior(kind)
             self.left_tabs.setCurrentWidget(self.inspector_tabs)
@@ -661,10 +1942,23 @@ class MotionDesignerWindow(QMainWindow):
         elif domain == "template":
             from app.motion_designer.templates import apply_template_to_composition
 
-            before = len(self.controller.composition.layers)
-            candidate = apply_template_to_composition(self.controller.composition, kind)
-            added = candidate.layers[before:]
+            candidate = apply_template_to_composition(
+                self.controller.composition,
+                kind,
+                replace_existing=True,
+            )
+            instance_id = str(
+                candidate.metadata["last_applied_template"][
+                    "template_instance_id"
+                ]
+            )
+            added = [
+                layer
+                for layer in candidate.layers
+                if layer.metadata.get("template_instance_id") == instance_id
+            ]
             self.controller.replace(candidate)
+            self._restart_template_playback()
             if added:
                 self._select_layer(added[-1].id)
         elif domain == "advanced_preset":
@@ -718,6 +2012,31 @@ class MotionDesignerWindow(QMainWindow):
         self.controller.update_layer(layer_id, {"transform": {
             **layer.transform.to_dict(), "position": {**layer.transform.position.to_dict(),
             "default": [float(position[0]) + dx, float(position[1]) + dy]}}})
+
+    def _move_rig_bone(
+        self,
+        rig_id: str,
+        bone_id: str,
+        x: float,
+        y: float,
+    ) -> None:
+        self.controller.update_rig_bone(
+            rig_id,
+            bone_id,
+            {"rest_position": [float(x), float(y)]},
+        )
+
+    def _select_rig_bone(self, rig_id: str, bone_id: str) -> None:
+        self.rig.select_bone(rig_id, bone_id)
+        self.timeline.set_selected_rig_bone(rig_id, bone_id)
+        self.left_tabs.setCurrentWidget(self.inspector_tabs)
+        self.inspector_tabs.setCurrentWidget(self.rig)
+
+    def _select_puppet_pin(self, layer_id: str, pin_id: str) -> None:
+        self.puppet.select_pin(layer_id, pin_id)
+        self.timeline.set_selected_puppet_pin(layer_id, pin_id)
+        self.left_tabs.setCurrentWidget(self.inspector_tabs)
+        self.inspector_tabs.setCurrentWidget(self.puppet)
 
     def _set_vector_path(self, layer_id: str, path_data: object) -> None:
         layer = find_layer(self.controller.composition, layer_id)
@@ -1217,11 +2536,53 @@ class MotionDesignerWindow(QMainWindow):
             "glow": {"threshold": .7, "radius": 8.0, "intensity": .7},
             "unsharp_mask": {"radius": 2.0, "amount": .75},
             "vignette": {"amount": .35, "softness": .65},
+            "drop_shadow": {
+                "offset_x": 12.0, "offset_y": 12.0, "radius": 10.0,
+                "opacity": .65, "color": "#000000",
+            },
+            "light_sweep": {
+                "center_x": .5, "center_y": .5, "angle": -24.0,
+                "width": .16, "softness": .45, "intensity": 1.2,
+                "color": "#ffffff",
+            },
+            "fractal_noise": {
+                "amount": .35, "scale": 120.0, "octaves": 4.0,
+                "contrast": 1.4, "evolution": 0.0, "speed": 0.0, "seed": 1.0,
+            },
+            "posterize": {"levels": 8.0, "amount": 1.0},
         }
         effect = MotionEffectRef(kind=kind, params={
             key: AnimatedProperty(default=value) for key, value in defaults.get(kind, {}).items()
         })
         self.controller.update_layer(layer.id, {"effects": [*[item.to_dict() for item in layer.effects], effect.to_dict()]})
+
+    def _set_adjustment_scope(self, mode: str, layer_ids: object) -> None:
+        if not self._selected_layer_id:
+            return
+        values = (
+            [str(item) for item in layer_ids]
+            if isinstance(layer_ids, (list, tuple))
+            else []
+        )
+        self.controller.set_adjustment_scope(
+            self._selected_layer_id,
+            str(mode),
+            values,
+        )
+
+    def _set_effect_group_scope(self, mode: str, layer_ids: object) -> None:
+        if not self._selected_layer_id:
+            return
+        values = (
+            [str(item) for item in layer_ids]
+            if isinstance(layer_ids, (list, tuple))
+            else []
+        )
+        self.controller.set_effect_group_scope(
+            self._selected_layer_id,
+            str(mode),
+            values,
+        )
 
     def _delete_effect(self, effect_id: str) -> None:
         layer = find_layer(self.controller.composition, self._selected_layer_id)
@@ -1229,11 +2590,35 @@ class MotionDesignerWindow(QMainWindow):
 
     def _set_effect_param(self, effect_id: str, key: str, value: float) -> None:
         layer = find_layer(self.controller.composition, self._selected_layer_id)
-        effects = [item.to_dict() for item in layer.effects]
-        for item in effects:
-            if item["id"] == effect_id:
-                item.setdefault("params", {})[key] = AnimatedProperty(default=value).to_dict()
-        self.controller.update_layer(layer.id, {"effects": effects})
+        effect = next((item for item in layer.effects if item.id == effect_id), None)
+        if effect is None:
+            return
+        prop = effect.params.get(key)
+        self.controller.set_effect_parameter(
+            layer.id,
+            effect_id,
+            key,
+            value,
+            time_ms=self._layer_local_time(layer) if prop is not None and prop.keyframes else None,
+        )
+
+    def _toggle_effect_keyframe(
+        self,
+        effect_id: str,
+        key: str,
+        value,
+        add: bool,
+    ) -> None:
+        layer = find_layer(self.controller.composition, self._selected_layer_id)
+        local_time = self._layer_local_time(layer)
+        if add:
+            self.controller.set_effect_parameter(
+                layer.id, effect_id, key, value, time_ms=local_time,
+            )
+        else:
+            self.controller.remove_effect_keyframe(
+                layer.id, effect_id, key, local_time,
+            )
 
     def _add_mask(self, kind: str) -> None:
         if not self._selected_layer_id:
@@ -1262,11 +2647,35 @@ class MotionDesignerWindow(QMainWindow):
 
     def _set_mask_param(self, mask_id: str, key: str, value: float) -> None:
         layer = find_layer(self.controller.composition, self._selected_layer_id)
-        masks = [item.to_dict() for item in layer.masks]
-        for item in masks:
-            if item["id"] == mask_id:
-                item.setdefault("params", {})[key] = AnimatedProperty(default=value).to_dict()
-        self.controller.update_layer(layer.id, {"masks": masks})
+        mask = next((item for item in layer.masks if item.id == mask_id), None)
+        if mask is None:
+            return
+        prop = mask.params.get(key)
+        self.controller.set_mask_parameter(
+            layer.id,
+            mask_id,
+            key,
+            value,
+            time_ms=self._layer_local_time(layer) if prop is not None and prop.keyframes else None,
+        )
+
+    def _toggle_mask_keyframe(
+        self,
+        mask_id: str,
+        key: str,
+        value,
+        add: bool,
+    ) -> None:
+        layer = find_layer(self.controller.composition, self._selected_layer_id)
+        local_time = self._layer_local_time(layer)
+        if add:
+            self.controller.set_mask_parameter(
+                layer.id, mask_id, key, value, time_ms=local_time,
+            )
+        else:
+            self.controller.remove_mask_keyframe(
+                layer.id, mask_id, key, local_time,
+            )
 
     def _set_mask_item(self, mask_id: str, key: str, value: object) -> None:
         layer = find_layer(self.controller.composition, self._selected_layer_id)
@@ -1286,7 +2695,238 @@ class MotionDesignerWindow(QMainWindow):
                     tracking.setdefault("origin", [0.0, 0.0])
                     tracking.setdefault("samples", [])
                     metadata["tracking_cache"] = tracking
+            elif key == "tracking_frozen":
+                metadata = item.setdefault("metadata", {})
+                tracking = dict(metadata.get("tracking_cache") or {})
+                if value and not tracking.get("samples"):
+                    continue
+                tracking["frozen"] = bool(value)
+                metadata["tracking_cache"] = tracking
         self.controller.update_layer(layer.id, {"masks": masks})
+
+    def _apply_composition_track(self, track_id: str, stabilize: bool) -> None:
+        if not self._selected_layer_id:
+            return
+        from app.motion_designer.tracking_workflow import apply_track_to_layer
+
+        composition = self.controller.composition
+        asset = next(
+            (
+                item
+                for item in composition.metadata.get("tracking_assets", [])
+                if isinstance(item, dict)
+                and str(item.get("id") or "") == str(track_id)
+            ),
+            None,
+        )
+        if asset is None:
+            return
+        source = find_layer(composition, self._selected_layer_id)
+        candidate = MotionLayer.from_dict(source.to_dict())
+        apply_track_to_layer(candidate, asset, stabilize=bool(stabilize))
+        self.controller.update_layer(
+            source.id,
+            {"transform": candidate.transform.to_dict()},
+        )
+
+    def _start_composition_tracking(self, mode: str) -> None:
+        if self._composition_tracking_job is not None or not self._selected_layer_id:
+            return
+        from app.motion_designer.tracking_provider import MotionTrackingRequest
+
+        composition = self.controller.composition
+        layer = find_layer(composition, self._selected_layer_id)
+        source_path = str(layer.source.uri or "")
+        if not source_path:
+            self.tracking.set_analysis_status("Selected layer has no video source.")
+            return
+        tracking_mode = str(mode or "point")
+        job_id = f"composition:{layer.id}"
+        thread = QThread(self)
+        if tracking_mode == "face":
+            worker = MotionFaceTrackingWorker(job_id, source_path)
+        else:
+            request = MotionTrackingRequest(
+                video_path=source_path,
+                mode=tracking_mode,
+                start_ms=max(0, int(layer.source_in_ms)),
+                end_ms=max(
+                    int(layer.source_in_ms) + 1,
+                    int(layer.source_in_ms + (layer.out_ms - layer.in_ms) * layer.time_scale),
+                ),
+                timeline_start_ms=int(layer.in_ms),
+                timeline_time_scale=float(layer.time_scale),
+                target_size=(int(composition.width), int(composition.height)),
+            )
+            worker = MotionTrackingWorker(job_id, request)
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.progress.connect(self._progress_composition_tracking)
+        worker.completed.connect(self._finish_composition_tracking)
+        worker.failed.connect(self._fail_composition_tracking)
+        worker.completed.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._clear_composition_tracking_job)
+        self._composition_tracking_job = (
+            thread,
+            worker,
+            tracking_mode,
+            layer.id,
+        )
+        self.tracking.set_analysis_status("Analyzing video... 0%", busy=True)
+        thread.start()
+
+    def _progress_composition_tracking(
+        self,
+        _job_id: str,
+        done: int,
+        total: int,
+    ) -> None:
+        percent = int(round(done * 100.0 / max(1, total)))
+        self.tracking.set_analysis_status(
+            f"Analyzing video... {percent}%",
+            busy=True,
+        )
+
+    def _finish_composition_tracking(self, _job_id: str, cache: object) -> None:
+        if self._composition_tracking_job is None or not isinstance(cache, dict):
+            return
+        from app.motion_designer.tracking_workflow import normalize_track_asset
+
+        _thread, _worker, mode, layer_id = self._composition_tracking_job
+        samples = list(cache.get("samples", []))
+        if mode == "face":
+            from app.motion_designer.tracking_workflow import (
+                retime_tracking_samples,
+            )
+
+            layer = next(
+                (
+                    item
+                    for item in self.controller.composition.layers
+                    if item.id == layer_id
+                ),
+                None,
+            )
+            if layer is None:
+                self.tracking.set_analysis_status("Tracked layer no longer exists.")
+                return
+            samples = retime_tracking_samples(
+                samples,
+                source_in_ms=int(layer.source_in_ms),
+                timeline_in_ms=int(layer.in_ms),
+                timeline_out_ms=int(layer.out_ms),
+                time_scale=float(layer.time_scale),
+            )
+            if not samples:
+                self.tracking.set_analysis_status(
+                    "No face samples fall inside the selected layer range."
+                )
+                return
+        asset = normalize_track_asset({
+            "kind": mode,
+            "name": f"{mode.title()} Track",
+            "source_uri": str(cache.get("metadata", {}).get("source_uri") or ""),
+            "source_revision": str(cache.get("source_revision") or ""),
+            "origin": cache.get("origin", [0.0, 0.0]),
+            "samples": samples,
+            "metadata": cache.get("metadata", {}),
+        })
+        assets = [
+            dict(item)
+            for item in self.controller.composition.metadata.get("tracking_assets", [])
+            if isinstance(item, dict)
+        ]
+        assets.append(asset)
+        self.controller.update_composition_metadata({"tracking_assets": assets})
+        count = len(asset["cache"]["samples"])
+        self.tracking.set_analysis_status(f"Created {mode} track with {count} samples.")
+
+    def _fail_composition_tracking(self, _job_id: str, message: str) -> None:
+        self.tracking.set_analysis_status(str(message))
+
+    def _clear_composition_tracking_job(self) -> None:
+        self._composition_tracking_job = None
+        self.tracking.set_analysis_status(self.tracking.status.text())
+
+    def _apply_composition_track_to_corner_pin(
+        self,
+        track_id: str,
+        effect_id: str,
+    ) -> None:
+        if not self._selected_layer_id:
+            return
+        from app.motion_designer.tracking_workflow import (
+            apply_planar_track_to_corner_pin,
+        )
+
+        composition = self.controller.composition
+        asset = next(
+            (
+                item
+                for item in composition.metadata.get("tracking_assets", [])
+                if isinstance(item, dict)
+                and str(item.get("id") or "") == str(track_id)
+            ),
+            None,
+        )
+        if asset is None:
+            return
+        source = find_layer(composition, self._selected_layer_id)
+        candidate = MotionLayer.from_dict(source.to_dict())
+        apply_planar_track_to_corner_pin(
+            candidate,
+            asset,
+            effect_id=effect_id,
+            target_size=(
+                float(source.source.params.get("width", composition.width)),
+                float(source.source.params.get("height", composition.height)),
+            ),
+        )
+        self.controller.update_layer(
+            source.id,
+            {"effects": [item.to_dict() for item in candidate.effects]},
+        )
+
+    def _relink_composition_track(self, track_id: str) -> None:
+        from app.motion_designer.tracking_workflow import (
+            normalize_track_asset,
+            source_revision_for_path,
+        )
+
+        source_path, _selected_filter = QFileDialog.getOpenFileName(
+            self,
+            "Relink Motion Track Source",
+            "",
+            "Video (*.mp4 *.mov *.mkv *.avi *.webm *.m4v);;All files (*)",
+        )
+        if not source_path:
+            return
+        revision = source_revision_for_path(source_path)
+        if not revision:
+            QMessageBox.warning(self, "Relink Motion Track", "The selected source is unreadable.")
+            return
+        assets = []
+        changed = False
+        for value in self.controller.composition.metadata.get("tracking_assets", []):
+            if not isinstance(value, dict):
+                continue
+            item = dict(value)
+            if str(item.get("id") or "") == str(track_id):
+                item["source_uri"] = source_path
+                item["source_revision"] = revision
+                metadata = dict(item.get("metadata") or {})
+                metadata["relinked"] = True
+                item["metadata"] = metadata
+                item = normalize_track_asset(item)
+                changed = True
+            assets.append(item)
+        if changed:
+            self.controller.update_composition_metadata({
+                "tracking_assets": assets,
+            })
 
     def _start_mask_tracking(self, mask_id: str, payload: object) -> None:
         if mask_id in self._tracking_jobs or not self._selected_layer_id:
@@ -1483,6 +3123,53 @@ class MotionDesignerWindow(QMainWindow):
     def _fail_motion_export(self, message: str) -> None:
         self.output.set_busy(False, str(message))
 
+    def _start_umg_generation(
+        self,
+        project_path: str,
+        destination_root: str,
+    ) -> None:
+        if self._umg_generation_job is not None:
+            return
+        thread = QThread(self)
+        worker = MotionUMGGenerationWorker(
+            self.controller.composition,
+            project_path,
+            destination_root,
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.finished.connect(self._finish_umg_generation)
+        worker.finished.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(thread.deleteLater)
+        thread.finished.connect(self._clear_umg_generation_job)
+        self._umg_generation_job = (thread, worker)
+        self.umg.set_busy(
+            True,
+            "Installing or updating the project plugin, then generating in Unreal...",
+        )
+        thread.start()
+
+    def _finish_umg_generation(self, result: object) -> None:
+        self.umg.show_result(result if isinstance(result, dict) else {})
+
+    def _cancel_umg_generation(self) -> None:
+        if self._umg_generation_job is None:
+            return
+        self._umg_generation_job[1].cancel()
+        self.umg.set_busy(True, "Cancelling Unreal generation...")
+
+    def _clear_umg_generation_job(self) -> None:
+        self._umg_generation_job = None
+
+    def _layer_local_time(self, layer: MotionLayer | None) -> int:
+        if layer is None:
+            return 0
+        return max(
+            0,
+            int(round(remap_layer_time(layer, self._time_ms))),
+        )
+
     def _set_time(self, time_ms: int) -> None:
         self._time_ms = int(time_ms)
         self.canvas.set_time(self._time_ms)
@@ -1503,9 +3190,20 @@ class MotionDesignerWindow(QMainWindow):
                 if layer is not None
                 else 0,
             )
+            local_time = self._layer_local_time(layer)
+            self.effects.set_time(local_time)
+            self.masks.set_time(local_time)
 
     def _set_playing(self, playing: bool) -> None:
         self._set_playback_direction(1 if playing else 0)
+
+    def _restart_template_playback(self) -> None:
+        self._set_time(0)
+        self.timeline.set_time(0)
+        self._playback_fractional_ms = 0.0
+        if self._play_direction:
+            self._play_clock.restart()
+            self._play_timer.start()
 
     def _set_playback_direction(self, direction: int) -> None:
         direction = -1 if int(direction) < 0 else (1 if int(direction) > 0 else 0)
@@ -1562,10 +3260,18 @@ class MotionDesignerWindow(QMainWindow):
         self.timeline.set_time(int(next_time))
 
     def closeEvent(self, event) -> None:
+        if not self._confirm_discard_document_changes():
+            event.ignore()
+            return
         for thread, worker, _layer_id in list(self._tracking_jobs.values()):
             worker.cancel()
             thread.quit()
         for thread, _worker, _layer_id in list(self._tracking_jobs.values()):
+            thread.wait(5000)
+        if self._composition_tracking_job is not None:
+            thread, worker, _mode, _layer_id = self._composition_tracking_job
+            worker.cancel()
+            thread.quit()
             thread.wait(5000)
         if self._audio_analysis_job is not None:
             thread, worker = self._audio_analysis_job
@@ -1577,6 +3283,10 @@ class MotionDesignerWindow(QMainWindow):
             worker.cancel()
             thread.quit()
             thread.wait(5000)
+        if self._umg_generation_job is not None:
+            thread, worker = self._umg_generation_job
+            worker.cancel()
+            thread.wait(10000)
         if self._ai_generation_job is not None:
             thread, _worker = self._ai_generation_job
             thread.quit()

@@ -18,7 +18,7 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFrame,
-    QHBoxLayout, QLabel, QPushButton, QScrollArea, QSizePolicy, QSlider, QSplitter,
+    QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea, QSizePolicy, QSlider, QSplitter,
     QVBoxLayout, QWidget,
 )
 
@@ -1071,6 +1071,13 @@ class ColorPageWindow(QWidget):
             btn.clicked.connect(lambda _checked=False, s=slot: self._pick_project_lut(s))
             row.addWidget(btn)
 
+        self._cm_ocio_button = QPushButton("OCIO")
+        self._cm_ocio_button.setFixedHeight(30)
+        self._cm_ocio_button.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._cm_ocio_button.setStyleSheet(self._cm_button_qss())
+        self._cm_ocio_button.clicked.connect(self._show_ocio_menu)
+        row.addWidget(self._cm_ocio_button)
+
         clear = QPushButton("Clear LUTs")
         clear.setFixedHeight(30)
         clear.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -1117,6 +1124,9 @@ class ColorPageWindow(QWidget):
             self._set_combo_data(self._cm_view_transform, cm.view_transform)
             self._cm_hdr.setChecked(bool(cm.hdr_mode))
             self._cm_look_strength.set_value(int(round(cm.creative_lut.strength * 100.0)))
+            self._cm_ocio_button.setToolTip(
+                cm.ocio_config_path or "Choose an OpenColorIO config"
+            )
             from app.color_management import validate_color_management
 
             apply_state_to_label(
@@ -1152,6 +1162,14 @@ class ColorPageWindow(QWidget):
             self._editor._project_settings = settings
         settings["color_management"] = cm.to_dict()
         try:
+            player = getattr(self._editor, "_player", None)
+            if player is not None and hasattr(player, "set_project_settings"):
+                player.set_project_settings(settings)
+            if player is not None and hasattr(player, "refresh_current_frame"):
+                player.refresh_current_frame()
+        except Exception:
+            pass
+        try:
             register = getattr(self._editor, "_register_change", None)
             if callable(register):
                 register("project color management")
@@ -1180,6 +1198,16 @@ class ColorPageWindow(QWidget):
                 "view_transform": self._cm_view_transform.currentData(),
                 "hdr_mode": self._cm_hdr.isChecked(),
             })
+            if (
+                not str(data.get("ocio_config_path", "") or "")
+                and (
+                    data["working_space"] in {"acescg", "acescct"}
+                    or data["view_transform"] == "aces-1.3"
+                )
+            ):
+                from app.color_ocio import preferred_aces_ocio_uri
+
+                data["ocio_config_path"] = preferred_aces_ocio_uri()
             creative = dict(data.get("creative_lut") or {})
             creative["strength"] = max(0.0, min(1.0, self._cm_look_strength._sl.value() / 100.0))
             data["creative_lut"] = creative
@@ -1221,6 +1249,67 @@ class ColorPageWindow(QWidget):
             self._sync_color_management_ui()
         except Exception:
             pass
+
+    def _pick_ocio_config(self) -> None:
+        try:
+            cm = self._project_color_management()
+            path, _ = QFileDialog.getOpenFileName(
+                self,
+                "Select OpenColorIO Config",
+                cm.ocio_config_path,
+                "OpenColorIO Config (*.ocio *.yaml *.yml);;All Files (*)",
+            )
+            if not path:
+                return
+            data = cm.to_dict()
+            data["ocio_config_path"] = path
+            from app.color_management import ColorManagementSettings
+
+            self._commit_color_management(ColorManagementSettings.from_dict(data))
+            self._sync_color_management_ui()
+        except Exception:
+            pass
+
+    def _set_ocio_config(self, config_spec: str) -> None:
+        try:
+            cm = self._project_color_management()
+            data = cm.to_dict()
+            data["ocio_config_path"] = str(config_spec or "")
+            from app.color_management import ColorManagementSettings
+
+            self._commit_color_management(ColorManagementSettings.from_dict(data))
+            self._sync_color_management_ui()
+        except Exception:
+            pass
+
+    def _show_ocio_menu(self) -> None:
+        menu = QMenu(self)
+        try:
+            from app.color_ocio import list_builtin_ocio_configs
+
+            for row in list_builtin_ocio_configs():
+                name = str(row["name"])
+                if "v2.2.0_aces-v1.3" not in name:
+                    continue
+                family = "Studio" if row["studio"] else "CG"
+                action = menu.addAction(f"{family} ACES 1.3")
+                action.setToolTip(str(row["description"]))
+                action.triggered.connect(
+                    lambda _checked=False, uri=str(row["uri"]): self._set_ocio_config(uri)
+                )
+        except Exception:
+            unavailable = menu.addAction("OpenColorIO runtime unavailable")
+            unavailable.setEnabled(False)
+        if not menu.isEmpty():
+            menu.addSeparator()
+        menu.addAction("Choose config file...", self._pick_ocio_config)
+        clear = menu.addAction("Clear OCIO config")
+        clear.triggered.connect(lambda _checked=False: self._set_ocio_config(""))
+        menu.exec(
+            self._cm_ocio_button.mapToGlobal(
+                QPoint(0, self._cm_ocio_button.height())
+            )
+        )
 
     def _clear_project_luts(self) -> None:
         try:

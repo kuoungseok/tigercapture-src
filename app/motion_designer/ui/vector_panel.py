@@ -60,6 +60,14 @@ class VectorPanel(QWidget):
         self.fill.setToolTip("Fill color")
         self.stroke = QPushButton(self)
         self.stroke.setToolTip("Stroke color")
+        self.stroke_gradient_enabled = QCheckBox("Gradient stroke", self)
+        self.stroke_gradient_start = QPushButton(self)
+        self.stroke_gradient_end = QPushButton(self)
+        self.dash_length = self._spin(0, 10000, .5)
+        self.dash_gap = self._spin(0, 10000, .5)
+        self.dash_offset = self._spin(-10000, 10000, .5)
+        self.taper_start = self._spin(0, 10, .05)
+        self.taper_end = self._spin(0, 10, .05)
         form.addRow("Primitive", self.shape)
         form.addRow("Sides", self.sides)
         form.addRow("Inner Ratio", self.inner_ratio)
@@ -67,6 +75,14 @@ class VectorPanel(QWidget):
         form.addRow("Fill", self.fill)
         form.addRow("Stroke", self.stroke)
         form.addRow("Stroke Width", self.stroke_width)
+        form.addRow(self.stroke_gradient_enabled)
+        form.addRow("Gradient Start", self.stroke_gradient_start)
+        form.addRow("Gradient End", self.stroke_gradient_end)
+        form.addRow("Dash", self.dash_length)
+        form.addRow("Gap", self.dash_gap)
+        form.addRow("Dash Offset", self.dash_offset)
+        form.addRow("Taper Start", self.taper_start)
+        form.addRow("Taper End", self.taper_end)
 
         trim_label = QLabel("Trim Path", self)
         trim_label.setObjectName("MotionInspectorSection")
@@ -77,6 +93,15 @@ class VectorPanel(QWidget):
         form.addRow("Start", self.trim_start)
         form.addRow("End", self.trim_end)
         form.addRow("Offset", self.trim_offset)
+
+        offset_label = QLabel("Offset Paths", self)
+        offset_label.setObjectName("MotionInspectorSection")
+        form.addRow(offset_label)
+        self.path_offset_amount = self._spin(-10000, 10000, 1)
+        self.path_offset_join = QComboBox(self)
+        self.path_offset_join.addItems(["round", "miter", "bevel"])
+        form.addRow("Amount", self.path_offset_amount)
+        form.addRow("Join", self.path_offset_join)
 
         repeater_label = QLabel("Repeater", self)
         repeater_label.setObjectName("MotionInspectorSection")
@@ -97,7 +122,7 @@ class VectorPanel(QWidget):
         form.addRow("Scale Y", self.repeat_scale_y)
         form.addRow("End Opacity", self.repeat_opacity)
 
-        boolean_label = QLabel("Boolean", self)
+        boolean_label = QLabel("Merge Paths", self)
         boolean_label.setObjectName("MotionInspectorSection")
         form.addRow(boolean_label)
         self.boolean_operation = QComboBox(self)
@@ -119,8 +144,30 @@ class VectorPanel(QWidget):
         self.stroke_width.valueChanged.connect(lambda value: self._emit_simple("stroke_width", value))
         self.fill.clicked.connect(lambda: self._choose_color("fill", self.fill))
         self.stroke.clicked.connect(lambda: self._choose_color("stroke", self.stroke))
+        self.stroke_gradient_start.clicked.connect(
+            lambda: self._choose_stroke_gradient_color(0),
+        )
+        self.stroke_gradient_end.clicked.connect(
+            lambda: self._choose_stroke_gradient_color(1),
+        )
+        self.stroke_gradient_enabled.toggled.connect(
+            lambda _checked: self._emit_stroke_treatment(),
+        )
+        for control in (
+            self.dash_length, self.dash_gap, self.dash_offset,
+            self.taper_start, self.taper_end,
+        ):
+            control.valueChanged.connect(
+                lambda _value: self._emit_stroke_treatment(),
+            )
         for control in (self.trim_start, self.trim_end, self.trim_offset):
             control.valueChanged.connect(lambda _value: self._emit_trim())
+        self.path_offset_amount.valueChanged.connect(
+            lambda _value: self._emit_offset_path(),
+        )
+        self.path_offset_join.currentTextChanged.connect(
+            lambda _value: self._emit_offset_path(),
+        )
         for control in (
             self.repeat_count, self.repeat_x, self.repeat_y, self.repeat_rotation,
             self.repeat_scale_x, self.repeat_scale_y, self.repeat_opacity,
@@ -151,11 +198,38 @@ class VectorPanel(QWidget):
         self.stroke_width.setValue(float(_default(self._params.get("stroke_width"), 2.0)))
         self._set_color_button(self.fill, str(_default(self._params.get("fill"), "#3f8fba")))
         self._set_color_button(self.stroke, str(_default(self._params.get("stroke"), "#20242b")))
+        stroke_gradient = _default(self._params.get("stroke_gradient"), None)
+        stroke_gradient = stroke_gradient if isinstance(stroke_gradient, Mapping) else {}
+        stops = list(stroke_gradient.get("stops") or [])
+        colors = []
+        for fallback, index in (("#ffffff", 0), ("#20242b", 1)):
+            stop = stops[index] if index < len(stops) else {}
+            colors.append(str(stop.get("color") or fallback) if isinstance(stop, Mapping) else fallback)
+        self._set_color_button(self.stroke_gradient_start, colors[0])
+        self._set_color_button(self.stroke_gradient_end, colors[1])
+        self.stroke_gradient_enabled.setChecked(bool(stroke_gradient))
+        dash = _default(self._params.get("dash"), [])
+        dash = list(dash) if isinstance(dash, list) else []
+        self.dash_length.setValue(float(dash[0] if dash else 0.0))
+        self.dash_gap.setValue(float(dash[1] if len(dash) > 1 else 0.0))
+        self.dash_offset.setValue(float(_default(self._params.get("dash_offset"), 0.0)))
+        taper = _default(self._params.get("stroke_taper"), {})
+        taper = taper if isinstance(taper, Mapping) else {}
+        self.taper_start.setValue(float(taper.get("start", 1.0) or 0.0))
+        self.taper_end.setValue(float(taper.get("end", 1.0) or 0.0))
         trim = _default(self._params.get("trim"), {})
         trim = trim if isinstance(trim, Mapping) else {}
         self.trim_start.setValue(float(trim.get("start", 0.0) or 0.0))
         self.trim_end.setValue(float(trim.get("end", 1.0) if trim.get("end", 1.0) is not None else 1.0))
         self.trim_offset.setValue(float(trim.get("offset", 0.0) or 0.0))
+        offset_path = _default(self._params.get("offset_path"), {})
+        offset_path = offset_path if isinstance(offset_path, Mapping) else {}
+        self.path_offset_amount.setValue(
+            float(offset_path.get("amount", 0.0) or 0.0),
+        )
+        self.path_offset_join.setCurrentText(
+            str(offset_path.get("join") or "round"),
+        )
         repeater = _default(self._params.get("repeater"), {})
         repeater = repeater if isinstance(repeater, Mapping) else {}
         offset = list(repeater.get("offset") or [0.0, 0.0])
@@ -205,6 +279,70 @@ class VectorPanel(QWidget):
                      "offset": self.trim_offset.value()}
             self._params["trim"] = value
             self.source_changed.emit({"trim": value})
+
+    def _emit_offset_path(self) -> None:
+        if self._loading:
+            return
+        value = {
+            "amount": self.path_offset_amount.value(),
+            "join": self.path_offset_join.currentText(),
+        }
+        self._params["offset_path"] = value
+        self.source_changed.emit({"offset_path": value})
+
+    def _emit_stroke_treatment(self) -> None:
+        if self._loading:
+            return
+        dash = (
+            [self.dash_length.value(), self.dash_gap.value()]
+            if self.dash_length.value() > 0 and self.dash_gap.value() > 0
+            else []
+        )
+        gradient = None
+        if self.stroke_gradient_enabled.isChecked():
+            gradient = {
+                "type": "linear",
+                "start": [0.0, 0.5],
+                "end": [1.0, 0.5],
+                "stops": [
+                    {"position": 0.0, "color": self.stroke_gradient_start.text()},
+                    {"position": 1.0, "color": self.stroke_gradient_end.text()},
+                ],
+            }
+        taper = {
+            "start": self.taper_start.value(),
+            "end": self.taper_end.value(),
+        }
+        self._params.update({
+            "stroke_gradient": gradient,
+            "dash": dash,
+            "dash_offset": self.dash_offset.value(),
+            "stroke_taper": taper,
+        })
+        self.source_changed.emit({
+            "stroke_gradient": gradient,
+            "dash": dash,
+            "dash_offset": self.dash_offset.value(),
+            "stroke_taper": taper,
+        })
+
+    def _choose_stroke_gradient_color(self, index: int) -> None:
+        button = (
+            self.stroke_gradient_start
+            if index == 0
+            else self.stroke_gradient_end
+        )
+        current = QColor(button.text() or "#ffffff")
+        color = QColorDialog.getColor(
+            current,
+            self,
+            "Choose gradient color",
+            QColorDialog.ShowAlphaChannel,
+        )
+        if color.isValid():
+            self._set_color_button(button, color.name(QColor.HexArgb))
+            self.stroke_gradient_enabled.setChecked(True)
+            self._emit_stroke_treatment()
 
     def _emit_repeater(self) -> None:
         if not self._loading:

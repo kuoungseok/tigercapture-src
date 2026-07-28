@@ -521,6 +521,7 @@ uniform vec3 u_clearcoat_tint;
 uniform float u_parallax_strength;
 uniform float u_parallax_depth;
 uniform float u_parallax_center;
+uniform int u_parallax_steps;
 uniform float u_bevel_strength;
 uniform float u_bevel_radius;
 uniform float u_bevel_edge_width;
@@ -723,6 +724,49 @@ vec2 apply_parallax_uv(vec2 uv, vec3 view_dir, vec3 tangent, vec3 bitangent, vec
     vec3 v = normalize(view_dir);
     float view_z = max(abs(dot(v, n)), 0.18);
     vec2 view_xy = vec2(dot(v, t), dot(v, b)) / view_z;
+    int steps = clamp(u_parallax_steps, 1, 64);
+    if (steps > 1) {
+        float layer_step = 1.0 / float(steps);
+        vec2 ray = vec2(view_xy.x, -view_xy.y) * u_parallax_depth * u_parallax_strength;
+        vec2 delta = ray / float(steps);
+        vec2 current_uv = uv;
+        vec2 previous_uv = uv;
+        float current_layer = 0.0;
+        float previous_layer = 0.0;
+        float center_bias = clamp(u_parallax_center, 0.0, 1.0) - 0.5;
+        float surface_depth = clamp(
+            1.0 - sample_material_rgba(u_height_map, current_uv, world_pos, n).r + center_bias,
+            0.0,
+            1.0
+        );
+        for (int i = 0; i < 64; ++i) {
+            if (i >= steps || current_layer >= surface_depth) {
+                break;
+            }
+            previous_uv = current_uv;
+            previous_layer = current_layer;
+            current_uv -= delta;
+            current_layer += layer_step;
+            surface_depth = clamp(
+                1.0 - sample_material_rgba(u_height_map, current_uv, world_pos, n).r + center_bias,
+                0.0,
+                1.0
+            );
+        }
+        float current_error = current_layer - surface_depth;
+        float previous_depth = clamp(
+            1.0 - sample_material_rgba(u_height_map, previous_uv, world_pos, n).r + center_bias,
+            0.0,
+            1.0
+        );
+        float previous_error = previous_depth - previous_layer;
+        float blend = clamp(
+            previous_error / max(previous_error + current_error, 0.000001),
+            0.0,
+            1.0
+        );
+        return clamp(mix(previous_uv, current_uv, blend), vec2(-0.25), vec2(1.25));
+    }
     float height = sample_material_rgba(u_height_map, uv, world_pos, n).r;
     float amount = (height - clamp(u_parallax_center, 0.0, 1.0)) * u_parallax_depth * u_parallax_strength;
     return clamp(uv + view_xy * amount, vec2(-0.25), vec2(1.25));
@@ -5025,6 +5069,12 @@ class GpuMeshWidget(QOpenGLWidget):
         GL.glUniform1f(self._uniform_location(self.program, "u_parallax_strength"), float(parallax.get("strength", 0.0) or 0.0))
         GL.glUniform1f(self._uniform_location(self.program, "u_parallax_depth"), float(parallax.get("depth", DEFAULT_PARALLAX_DEPTH) or DEFAULT_PARALLAX_DEPTH))
         GL.glUniform1f(self._uniform_location(self.program, "u_parallax_center"), float(parallax.get("center", DEFAULT_PARALLAX_CENTER) or DEFAULT_PARALLAX_CENTER))
+        GL.glUniform1i(
+            self._uniform_location(self.program, "u_parallax_steps"),
+            int(parallax.get("steps", 24) or 24)
+            if str(parallax.get("mode") or "") == "pom"
+            else 1,
+        )
         GL.glUniform1f(self._uniform_location(self.program, "u_bevel_strength"), float(bevel.get("strength", 0.0) or 0.0))
         GL.glUniform1f(self._uniform_location(self.program, "u_bevel_radius"), float(bevel.get("radius", DEFAULT_BEVEL_RADIUS) or DEFAULT_BEVEL_RADIUS))
         GL.glUniform1f(self._uniform_location(self.program, "u_bevel_edge_width"), float(bevel.get("edge_width", DEFAULT_BEVEL_EDGE_WIDTH) or DEFAULT_BEVEL_EDGE_WIDTH))

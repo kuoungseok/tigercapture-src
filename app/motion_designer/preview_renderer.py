@@ -1,12 +1,19 @@
 """Persistent OpenGL presenter for the shared Motion Designer render graph."""
 from __future__ import annotations
 
+import numpy as np
 from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QPainter, QSurfaceFormat
+from PySide6.QtGui import QColor, QImage, QPainter, QSurfaceFormat
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
-from .render_graph import build_render_graph, paint_render_graph
+from .color_management import settings_from_composition_metadata
+from .color_runtime import (
+    apply_motion_color_pipeline_premultiplied_rgba,
+    motion_color_transform_required,
+)
+from .render_graph import build_render_graph, paint_render_graph, render_graph_image
 from .schema import MotionComposition
+from .puppet_gpu_renderer import MotionPuppetGpuRenderer
 from .typography_gpu_renderer import MotionTypographyGpuRenderer
 from .vector_gpu_renderer import MotionVectorGpuRenderer
 
@@ -18,6 +25,7 @@ class MotionPreviewWidget(QOpenGLWidget):
         self._time_ms = 0.0
         self._vector_gpu = MotionVectorGpuRenderer(self)
         self._typography_gpu = MotionTypographyGpuRenderer(self)
+        self._puppet_gpu = MotionPuppetGpuRenderer(self)
         self._last_gpu_backend = "vector"
         self._cleanup_connected = False
         surface_format = QSurfaceFormat(self.format())
@@ -48,11 +56,20 @@ class MotionPreviewWidget(QOpenGLWidget):
         self.makeCurrent()
         self._vector_gpu.clear()
         self._typography_gpu.clear()
+        self._puppet_gpu.clear()
         self.doneCurrent()
         self._cleanup_connected = False
 
     def paintGL(self) -> None:
         composition = self._composition
+        color_settings = (
+            settings_from_composition_metadata(composition.metadata)
+            if composition is not None else None
+        )
+        needs_color_transform = bool(
+            color_settings is not None
+            and motion_color_transform_required(color_settings)
+        )
         graph = (
             build_render_graph(
                 composition, self._time_ms, include_vector_gpu=True,
@@ -65,7 +82,12 @@ class MotionPreviewWidget(QOpenGLWidget):
             width, height = composition.width * scale, composition.height * scale
             target = QRectF((self.width() - width) * .5, (self.height() - height) * .5, width, height)
             context = self.context()
-            if context is not None and context.isValid() and graph is not None:
+            if (
+                context is not None
+                and context.isValid()
+                and graph is not None
+                and not needs_color_transform
+            ):
                 ratio = float(self.devicePixelRatioF())
                 physical_target = QRectF(
                     target.x() * ratio, target.y() * ratio,
@@ -88,6 +110,14 @@ class MotionPreviewWidget(QOpenGLWidget):
                     ):
                         self._last_gpu_backend = "typography"
                         return
+                    if self._puppet_gpu.draw(
+                        context.functions(), graph,
+                        widget_width=max(1, int(round(self.width() * ratio))),
+                        widget_height=max(1, int(round(self.height() * ratio))),
+                        target=physical_target,
+                    ):
+                        self._last_gpu_backend = "puppet"
+                        return
                 except Exception as exc:
                     self._typography_gpu.last_diagnostics = {
                         "backend": "qt_painter_fallback",
@@ -100,23 +130,55 @@ class MotionPreviewWidget(QOpenGLWidget):
             scale = min(self.width() / composition.width, self.height() / composition.height)
             width, height = composition.width * scale, composition.height * scale
             target = QRectF((self.width() - width) * .5, (self.height() - height) * .5, width, height)
-            paint_render_graph(painter, graph, target)
+            if needs_color_transform and color_settings is not None:
+                image = render_graph_image(graph).convertToFormat(
+                    QImage.Format_RGBA8888_Premultiplied
+                )
+                rows = np.frombuffer(image.bits(), dtype=np.uint8).reshape(
+                    image.height(),
+                    image.bytesPerLine(),
+                )
+                rgba = rows[:, : image.width() * 4].reshape(
+                    image.height(),
+                    image.width(),
+                    4,
+                ).copy()
+                transformed, _report = (
+                    apply_motion_color_pipeline_premultiplied_rgba(
+                        rgba,
+                        color_settings,
+                    )
+                )
+                display_image = QImage(
+                    transformed.data,
+                    image.width(),
+                    image.height(),
+                    transformed.strides[0],
+                    QImage.Format_RGBA8888_Premultiplied,
+                ).copy()
+                painter.drawImage(target, display_image)
+            else:
+                paint_render_graph(painter, graph, target)
         painter.end()
 
     def diagnostics(self) -> dict[str, object]:
         context = self.context()
         if self._last_gpu_backend == "typography":
             backend_diagnostics = self._typography_gpu.last_diagnostics
+        elif self._last_gpu_backend == "puppet":
+            backend_diagnostics = self._puppet_gpu.last_diagnostics
         elif self._last_gpu_backend == "vector":
             backend_diagnostics = self._vector_gpu.last_diagnostics
         else:
             typography_reason = self._typography_gpu.last_diagnostics.get("reason", "")
             vector_reason = self._vector_gpu.last_diagnostics.get("reason", "")
+            puppet_reason = self._puppet_gpu.last_diagnostics.get("reason", "")
             backend_diagnostics = {
                 "backend": "qt_painter_fallback",
-                "reason": typography_reason or vector_reason or "unsupported_graph",
+                "reason": puppet_reason or typography_reason or vector_reason or "unsupported_graph",
                 "vector_gpu_reason": vector_reason,
                 "typography_gpu_reason": typography_reason,
+                "puppet_gpu_reason": puppet_reason,
             }
         return {
             "presenter": "QOpenGLWidget",

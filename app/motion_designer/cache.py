@@ -27,3 +27,12 @@ class MotionFrameCache:
 
     def clear(self) -> None:
         self._items.clear()
+
+    def __len__(self) -> int:
+        return len(self._items)
+
+    def diagnostics(self) -> dict[str, int]:
+        return {
+            "size": len(self._items),
+            "capacity": self.capacity,
+        }

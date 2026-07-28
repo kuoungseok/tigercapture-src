@@ -115,8 +115,8 @@ def apply_masks(image: QImage, layer: MotionLayer, time_ms: float) -> QImage:
         alpha = render_mask_alpha(mask, width, height, time_ms).astype(np.float32) / 255.0
         mode = str(mask.mode or "add").lower()
         if combined is None:
-            combined = 1.0 - alpha if mode in {"subtract", "exclude"} else alpha
-        elif mode in {"subtract"}:
+            combined = 1.0 - alpha if mode in {"subtract", "exclude", "garbage", "holdout"} else alpha
+        elif mode in {"subtract", "garbage", "holdout"}:
             combined *= 1.0 - alpha
         elif mode in {"exclude", "xor"}:
             combined = np.abs(combined - alpha)

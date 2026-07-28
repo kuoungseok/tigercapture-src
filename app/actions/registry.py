@@ -232,6 +232,9 @@ class ActionRegistry:
         from app.actions.creative_namespace import register_creative_clip_actions
 
         register_creative_clip_actions(self)
+        from app.actions.color_namespace import register_color_management_actions
+
+        register_color_management_actions(self)
         from app.actions.actor_namespace import register_actor_actions
 
         register_actor_actions(self)
@@ -256,6 +259,11 @@ class ActionRegistry:
         from app.actions.motion_namespace import register_motion_actions
 
         register_motion_actions(self)
+        from app.actions.motion_tracking_namespace import (
+            register_motion_tracking_actions,
+        )
+
+        register_motion_tracking_actions(self)
         from app.actions.motion_plugin_namespace import register_motion_plugin_actions
 
         register_motion_plugin_actions(self)

@@ -86,6 +86,17 @@ def _consume_source_arg(argv: list[str]) -> Path | None:
     return None
 
 
+def _consume_option_path(argv: list[str], option: str) -> Path | None:
+    try:
+        index = argv.index(option)
+    except ValueError:
+        return None
+    if index + 1 >= len(argv):
+        return None
+    value = str(argv[index + 1] or "").strip()
+    return Path(value) if value else None
+
+
 def _load_project_after_show(editor, project_path: Path) -> None:
     try:
         from app.project_io import load_project, remember_last_project
@@ -107,6 +118,12 @@ def _load_project_after_show(editor, project_path: Path) -> None:
 
 
 def main() -> int:
+    color_probe_path = _consume_option_path(sys.argv, "--color-runtime-probe")
+    if color_probe_path is not None:
+        from app.color_runtime_probe import write_color_runtime_probe_report
+
+        report = write_color_runtime_probe_report(color_probe_path)
+        return 0 if report.get("ok") else 1
     os.environ["TIGERCAPTURE_CAPTURE_TO_STUDIO"] = "1"
     _install_logging()
     try:

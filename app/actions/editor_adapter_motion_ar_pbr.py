@@ -20,6 +20,8 @@ def _set_animated(container: dict[str, Any], key: str, value: Any, *, time_ms: i
     inferred = "vector3" if isinstance(value, (list, tuple)) and len(value) >= 3 else "scalar"
     if isinstance(value, bool):
         inferred = "bool"
+    elif isinstance(value, str):
+        inferred = "string"
     prop = AnimatedProperty.from_dict(current if current is not None else value, value_type=inferred)
     if time_ms is None:
         prop.default = value

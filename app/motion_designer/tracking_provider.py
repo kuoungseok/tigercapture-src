@@ -335,6 +335,39 @@ def generate_tracking_cache(
         original_polygon = _roi_polygon(roi_source, analysis_scale)
         points = _detect_features(cv2, previous_gray, original_polygon, request.max_features)
         minimum_features = 4 if mode == "point" else 6
+        acquired_frame_index = start_frame
+        acquisition_frames_skipped = 0
+        acquisition_limit = min(
+            end_frame,
+            start_frame + max(1, int(round(source_fps * 1.5))),
+        )
+        while (
+            (points is None or len(points) < minimum_features)
+            and acquired_frame_index < acquisition_limit
+        ):
+            ok, candidate_frame = capture.read()
+            if not ok or candidate_frame is None:
+                break
+            acquired_frame_index += 1
+            acquisition_frames_skipped += 1
+            candidate_gray, candidate_scale = _resize_gray(
+                cv2,
+                candidate_frame,
+                request.max_analysis_dimension,
+            )
+            if abs(candidate_scale - analysis_scale) > 1e-6:
+                break
+            candidate_points = _detect_features(
+                cv2,
+                candidate_gray,
+                original_polygon,
+                request.max_features,
+            )
+            if candidate_points is not None and len(candidate_points) >= minimum_features:
+                first_frame = candidate_frame
+                previous_gray = candidate_gray
+                points = candidate_points
+                break
         if points is None or len(points) < minimum_features:
             raise ValueError(
                 f"tracking source has too few features in the selected region ({0 if points is None else len(points)})"
@@ -353,12 +386,24 @@ def generate_tracking_cache(
         next_sample_source_ms = start_ms + max(1, int(request.sample_interval_ms))
         analyzed_frames = 1
         failed_frames = 0
+        motion_outlier_frames = 0
         shot_cut_frames = 0
         terminated_reason = ""
         actual_end_ms = start_ms
         confidence_total = 1.0
         confidence_count = 1
-        current_frame_index = start_frame
+        awaiting_reacquire = False
+        reacquired_frames = 0
+        predicted_frames = 0
+        consecutive_failed_frames = 0
+        last_point_delta_analysis = np.zeros(2, dtype=np.float64)
+        last_point_delta_target = np.zeros(2, dtype=np.float64)
+        target_diagonal = float(target_width * target_width + target_height * target_height) ** 0.5
+        maximum_prediction_steps = max(
+            1,
+            int(round(source_fps * 0.5 / frame_stride)),
+        )
+        current_frame_index = acquired_frame_index
 
         if progress is not None:
             progress(0, total_steps)
@@ -419,13 +464,29 @@ def generate_tracking_cache(
             inlier_ratio = 0.0
             if transform_valid and mode == "point":
                 delta_analysis = np.median(current_good - previous_good, axis=0)
-                cumulative_translation_target += np.asarray([
+                delta_target = np.asarray([
                     delta_analysis[0] / analysis_scale / target_to_source_x,
                     delta_analysis[1] / analysis_scale / target_to_source_y,
                 ])
-                cumulative_analysis[0, 2] += float(delta_analysis[0])
-                cumulative_analysis[1, 2] += float(delta_analysis[1])
-                inlier_ratio = min(1.0, len(current_good) / max(1.0, float(initial_feature_count)))
+                transform_valid = (
+                    np.linalg.norm(delta_target)
+                    <= target_diagonal * 0.04
+                )
+                if not transform_valid:
+                    motion_outlier_frames += 1
+                if transform_valid:
+                    last_point_delta_analysis = np.asarray(
+                        delta_analysis,
+                        dtype=np.float64,
+                    )
+                    last_point_delta_target = delta_target
+                    cumulative_translation_target += delta_target
+                    cumulative_analysis[0, 2] += float(delta_analysis[0])
+                    cumulative_analysis[1, 2] += float(delta_analysis[1])
+                    inlier_ratio = min(
+                        1.0,
+                        len(current_good) / max(1.0, float(initial_feature_count)),
+                    )
             elif transform_valid:
                 step_matrix, inliers = cv2.estimateAffinePartial2D(
                     previous_good,
@@ -445,12 +506,29 @@ def generate_tracking_cache(
                         step_homogeneous[:2] = np.asarray(step_matrix, dtype=np.float64)
                         cumulative_analysis = step_homogeneous @ cumulative_analysis
             if transform_valid:
+                if awaiting_reacquire:
+                    reacquired_frames += 1
+                    awaiting_reacquire = False
+                consecutive_failed_frames = 0
                 feature_ratio = min(1.0, len(current_good) / max(12.0, float(initial_feature_count)))
                 confidence = feature_ratio * max(0.0, min(1.0, inlier_ratio)) * exp(-median_fb_error / 2.5)
                 points = current_good.reshape(-1, 1, 2).astype(np.float32)
             else:
                 failed_frames += 1
                 points = None
+                awaiting_reacquire = True
+                consecutive_failed_frames += 1
+                if (
+                    mode == "point"
+                    and consecutive_failed_frames <= maximum_prediction_steps
+                    and np.linalg.norm(last_point_delta_target) > 1e-6
+                    and np.linalg.norm(last_point_delta_target)
+                    <= target_diagonal * 0.025
+                ):
+                    cumulative_analysis[0, 2] += last_point_delta_analysis[0]
+                    cumulative_analysis[1, 2] += last_point_delta_analysis[1]
+                    cumulative_translation_target += last_point_delta_target
+                    predicted_frames += 1
 
             analyzed_frames += 1
             step_index += 1
@@ -510,6 +588,10 @@ def generate_tracking_cache(
             "roi": [float(value) for value in roi_target],
             "analyzed_frames": int(analyzed_frames),
             "failed_frames": int(failed_frames),
+            "motion_outlier_frames": int(motion_outlier_frames),
+            "acquisition_frames_skipped": int(acquisition_frames_skipped),
+            "reacquired_frames": int(reacquired_frames),
+            "predicted_frames": int(predicted_frames),
             "shot_cut_frames": int(shot_cut_frames),
             "actual_end_ms": int(actual_end_ms),
             "terminated_reason": terminated_reason,

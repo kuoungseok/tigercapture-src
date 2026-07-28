@@ -79,6 +79,53 @@ def test_real_h264_prores_and_openexr_exports(tmp_path: Path) -> None:
     app.processEvents()
 
 
+def test_real_motion_hdr_h265_export_has_pq_metadata(tmp_path: Path) -> None:
+    import subprocess
+
+    from app.color_management import parse_ffmpeg_color_stream_text
+    from app.motion_designer.export_profiles import find_ffmpeg_executable
+
+    app = _app()
+    composition = _composition()
+    composition.width = 64
+    composition.height = 64
+    color = composition.metadata["color_management"]
+    color["project"].update({
+        "output_space": "rec2020",
+        "output_transfer": "pq",
+        "view_transform": "hdr-pq",
+        "hdr_mode": True,
+    })
+    blocked = preflight_motion_export(
+        composition,
+        "h264_mp4",
+        output_path=tmp_path / "blocked.mp4",
+    )
+    assert blocked["ok"] is False
+    assert any("H.265" in error for error in blocked["errors"])
+
+    output = tmp_path / "motion_hdr.mp4"
+    result = MotionProfileExporter().export(
+        composition,
+        "h265_mp4",
+        output,
+    )
+    assert result["frame_count"] == 1
+    assert output.stat().st_size > 0
+    inspected = subprocess.run(
+        [find_ffmpeg_executable(), "-hide_banner", "-i", str(output)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    actual = parse_ffmpeg_color_stream_text(inspected.stderr)
+    assert actual["color_primaries"] == "bt2020"
+    assert actual["color_transfer"] == "smpte2084"
+    app.processEvents()
+
+
 def test_openexr_retry_removes_stale_sequence_frames(tmp_path: Path) -> None:
     app = _app()
     composition = _composition()

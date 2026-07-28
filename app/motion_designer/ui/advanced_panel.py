@@ -18,6 +18,7 @@ class AdvancedMotionPanel(QWidget):
         super().__init__(parent)
         self._loading = False
         self._layer_id = ""
+        self._replicator_extra: dict = {}
         root = QVBoxLayout(self)
         root.setContentsMargins(7, 7, 7, 7)
         form = QFormLayout()
@@ -26,10 +27,24 @@ class AdvancedMotionPanel(QWidget):
         depth_title = QLabel("2.5D Layer", self)
         depth_title.setObjectName("MotionInspectorSection")
         form.addRow(depth_title)
+        self.three_d_enabled = QCheckBox("Enable 3D card", self)
         self.depth = self._double(-8.0, 8.0, 0.05)
+        self.rotation_x = self._double(-180.0, 180.0, 0.5)
+        self.rotation_y = self._double(-180.0, 180.0, 0.5)
         self.camera_excluded = QCheckBox("Exclude from 2.5D camera", self)
+        self.cast_shadows = QCheckBox("Cast shadows", self)
+        self.receive_shadows = QCheckBox("Receive shadows", self)
+        self.shadow_strength = self._double(0.0, 1.0, 0.05)
+        self.shadow_softness = self._double(0.0, 32.0, 0.5)
+        form.addRow(self.three_d_enabled)
         form.addRow("Depth Z", self.depth)
+        form.addRow("Rotation X", self.rotation_x)
+        form.addRow("Rotation Y", self.rotation_y)
         form.addRow(self.camera_excluded)
+        form.addRow(self.cast_shadows)
+        form.addRow(self.receive_shadows)
+        form.addRow("Shadow Strength", self.shadow_strength)
+        form.addRow("Shadow Softness", self.shadow_softness)
 
         blur_title = QLabel("Motion Blur", self)
         blur_title.setObjectName("MotionInspectorSection")
@@ -76,13 +91,17 @@ class AdvancedMotionPanel(QWidget):
         root.addStretch(1)
 
         for control in (
-            self.depth, self.blur_samples, self.blur_shutter,
+            self.depth, self.rotation_x, self.rotation_y,
+            self.shadow_strength, self.shadow_softness,
+            self.blur_samples, self.blur_shutter,
             self.repeat_count, self.repeat_x, self.repeat_y, self.repeat_rotation,
             self.repeat_scale, self.repeat_opacity, self.repeat_jitter,
         ):
             control.valueChanged.connect(lambda _value: self._emit())
         for control in (
-            self.camera_excluded, self.blur_enabled, self.repeat_enabled, self.matte_inverted,
+            self.three_d_enabled, self.camera_excluded, self.cast_shadows,
+            self.receive_shadows, self.blur_enabled, self.repeat_enabled,
+            self.matte_inverted,
         ):
             control.toggled.connect(lambda _value: self._emit())
         self.matte_layer.currentIndexChanged.connect(lambda _index: self._emit())
@@ -98,6 +117,7 @@ class AdvancedMotionPanel(QWidget):
     def set_layer(self, layer: MotionLayer | None, composition: MotionComposition) -> None:
         self._loading = True
         self._layer_id = layer.id if layer is not None else ""
+        self._replicator_extra = {}
         self.setEnabled(layer is not None)
         self.matte_layer.clear()
         self.matte_layer.addItem("None", "")
@@ -106,8 +126,21 @@ class AdvancedMotionPanel(QWidget):
                 self.matte_layer.addItem(candidate.name, candidate.id)
         if layer is not None:
             metadata = layer.metadata
+            three_d = metadata.get("three_d")
+            three_d = three_d if isinstance(three_d, Mapping) else {}
+            self.three_d_enabled.setChecked(bool(three_d.get("enabled", False)))
             self.depth.setValue(float(metadata.get("depth_z", 0.0) or 0.0))
+            self.rotation_x.setValue(float(three_d.get("rotation_x", 0.0) or 0.0))
+            self.rotation_y.setValue(float(three_d.get("rotation_y", 0.0) or 0.0))
             self.camera_excluded.setChecked(bool(metadata.get("camera_2_5d_excluded", False)))
+            self.cast_shadows.setChecked(bool(three_d.get("cast_shadows", False)))
+            self.receive_shadows.setChecked(bool(three_d.get("receive_shadows", False)))
+            self.shadow_strength.setValue(
+                float(three_d.get("shadow_strength", 0.45) or 0.0)
+            )
+            self.shadow_softness.setValue(
+                float(three_d.get("shadow_softness", 6.0) or 0.0)
+            )
             blur = metadata.get("motion_blur")
             blur = blur if isinstance(blur, Mapping) else {}
             self.blur_enabled.setChecked(bool(blur.get("enabled", False)))
@@ -115,6 +148,7 @@ class AdvancedMotionPanel(QWidget):
             self.blur_shutter.setValue(float(blur.get("shutter", 0.65) or 0.0))
             repeat = metadata.get("replicator")
             repeat = repeat if isinstance(repeat, Mapping) else {}
+            self._replicator_extra = dict(repeat)
             offset = list(repeat.get("offset") or [0.0, 0.0])
             scale = list(repeat.get("scale") or [1.0, 1.0])
             jitter = list(repeat.get("jitter") or [0.0, 0.0])
@@ -139,12 +173,23 @@ class AdvancedMotionPanel(QWidget):
         self.metadata_changed.emit({
             "depth_z": self.depth.value(),
             "camera_2_5d_excluded": self.camera_excluded.isChecked(),
+            "three_d": {
+                "enabled": self.three_d_enabled.isChecked(),
+                "rotation_x": self.rotation_x.value(),
+                "rotation_y": self.rotation_y.value(),
+                "cast_shadows": self.cast_shadows.isChecked(),
+                "receive_shadows": self.receive_shadows.isChecked(),
+                "shadow_strength": self.shadow_strength.value(),
+                "shadow_softness": self.shadow_softness.value(),
+                "projection_model": "affine_card_2_5d",
+            },
             "motion_blur": {
                 "enabled": self.blur_enabled.isChecked(),
                 "samples": self.blur_samples.value(),
                 "shutter": self.blur_shutter.value(),
             },
             "replicator": {
+                **self._replicator_extra,
                 "enabled": self.repeat_enabled.isChecked(),
                 "count": self.repeat_count.value(),
                 "offset": [self.repeat_x.value(), self.repeat_y.value()],

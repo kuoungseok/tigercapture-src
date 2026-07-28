@@ -65,12 +65,13 @@ _WM_EXITSIZEMOVE = 0x0232
 _TEXTURE_THUMBNAILS: tuple[tuple[str, str], ...] = (
     ("Raw", "base_color_source"),
     ("Base", "base_color"),
+    ("Height", "height"),
     ("Normal", "normal"),
     ("AO", "ao"),
     ("Rough", "roughness"),
+    ("Metal", "metallic"),
     ("Irrad", "irradiance"),
     ("Shade", "delight_shading"),
-    ("Height", "height"),
     ("Cavity", "cavity"),
     ("Curv", "curvature"),
     ("F0", "f0"),
@@ -563,6 +564,8 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._substrate_mode_check: QCheckBox | None = None
         self._animate_light_check: QCheckBox | None = None
         self._delight_check: QCheckBox | None = None
+        self._height_invert_check: QCheckBox | None = None
+        self._parallax_check: QCheckBox | None = None
         self._animated_light_azimuth = float(self._settings["preview_light_azimuth"])
         self._generated_maps_cache: dict[str, Any] | None = None
         self._backend_selection = select_texture_map_backend(allow_cpu=self._allow_cpu_fallback)
@@ -592,6 +595,16 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         if animate_light_checked:
             values["preview_light_azimuth"] = self._animated_light_azimuth
         values["preview_animate_light"] = animate_light_checked
+        values["height_invert"] = bool(
+            self._height_invert_check.isChecked()
+            if self._height_invert_check is not None
+            else self._settings.get("height_invert", False)
+        )
+        values["preview_parallax_enabled"] = bool(
+            self._parallax_check.isChecked()
+            if self._parallax_check is not None
+            else self._settings.get("preview_parallax_enabled", True)
+        )
         values["substrate_enabled"] = bool(
             self._substrate_mode_check.isChecked()
             if self._substrate_mode_check is not None
@@ -854,7 +867,9 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._preview_shape_combo.setObjectName("TextureLabShapeCombo")
         for shape in PREVIEW_SHAPES:
             self._preview_shape_combo.addItem(shape.title(), shape)
-        self._preview_shape_combo.setToolTip("Material preview shape. Texture-map channels still display as flat maps.")
+        self._preview_shape_combo.setToolTip(
+            "Preview generated maps on a plane or UV-mapped sphere. Multi-panel diagnostics remain flat."
+        )
         self._preview_shape_combo.currentIndexChanged.connect(self.queue_preview)
         show_intrinsic = QPushButton("Intrinsic", central)
         show_intrinsic.setObjectName("TextureLabModeButton")
@@ -961,8 +976,25 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._add_slider(controls_layout, "Strength", "normal_strength", 0.0, 12.0, 0.1)
         self._add_slider(controls_layout, "Radius", "normal_radius_px", 0.0, 24.0, 0.1)
         controls_layout.addWidget(_section_label("Height / AO", controls))
+        self._height_invert_check = QCheckBox("Invert Height", controls)
+        self._height_invert_check.setObjectName("TextureLabCheck")
+        self._height_invert_check.setChecked(bool(self._settings.get("height_invert", False)))
+        self._height_invert_check.setToolTip("Swap raised and recessed regions in the exported Height map.")
+        self._height_invert_check.toggled.connect(self.queue_preview)
+        controls_layout.addWidget(self._height_invert_check)
         self._add_slider(controls_layout, "Height Contrast", "height_contrast", 0.1, 4.0, 0.01)
         self._add_slider(controls_layout, "Height Blur", "height_blur_px", 0.0, 8.0, 0.05)
+        self._parallax_check = QCheckBox("POM Material Preview", controls)
+        self._parallax_check.setObjectName("TextureLabCheck")
+        self._parallax_check.setChecked(bool(self._settings.get("preview_parallax_enabled", True)))
+        self._parallax_check.setToolTip(
+            "Use the generated Height map for Parallax Occlusion Mapping in Material preview."
+        )
+        self._parallax_check.toggled.connect(self._on_parallax_toggled)
+        controls_layout.addWidget(self._parallax_check)
+        self._add_slider(controls_layout, "POM Strength", "preview_parallax_strength", 0.0, 1.0, 0.01)
+        self._add_slider(controls_layout, "POM Depth", "preview_parallax_depth", 0.0, 0.25, 0.001)
+        self._add_slider(controls_layout, "POM Steps", "preview_parallax_steps", 4.0, 64.0, 1.0)
         self._add_slider(controls_layout, "AO Strength", "ao_strength", 0.0, 3.0, 0.01)
         self._add_slider(controls_layout, "AO Radius", "ao_radius_px", 0.0, 64.0, 0.5)
         self._add_slider(controls_layout, "AO Height Scale", "ao_height_scale", 0.1, 64.0, 0.1)
@@ -997,6 +1029,7 @@ class ArPbrTextureMapLabWindow(QMainWindow):
         self._add_slider(controls_layout, "Azimuth", "preview_light_azimuth", -180.0, 180.0, 1.0)
         self._add_slider(controls_layout, "Elevation", "preview_light_elevation", 3.0, 89.0, 1.0)
         self._add_slider(controls_layout, "Environment", "preview_environment", 0.0, 1.5, 0.01)
+        self._sync_parallax_controls()
         controls_layout.addStretch(1)
         scroll.setWidget(controls)
         content.addWidget(scroll, 0)
@@ -1030,6 +1063,10 @@ class ArPbrTextureMapLabWindow(QMainWindow):
 
     def _on_substrate_mode_toggled(self, _checked: bool) -> None:
         self._sync_substrate_controls()
+        self.queue_preview()
+
+    def _on_parallax_toggled(self, _checked: bool) -> None:
+        self._sync_parallax_controls()
         self.queue_preview()
 
     def _on_delight_toggled(self, checked: bool) -> None:
@@ -1090,6 +1127,18 @@ class ArPbrTextureMapLabWindow(QMainWindow):
                     "Controls estimated illumination removal for de-lighted BaseColor."
                     if enabled
                     else "Enable De-light Albedo to edit this value."
+                )
+
+    def _sync_parallax_controls(self) -> None:
+        enabled = bool(self._parallax_check.isChecked()) if self._parallax_check else True
+        for key in ("preview_parallax_strength", "preview_parallax_depth", "preview_parallax_steps"):
+            slider = self._sliders.get(key)
+            if slider is not None:
+                slider.setEnabled(enabled)
+                slider.setToolTip(
+                    "Controls Height-map Parallax Occlusion Mapping in Material preview."
+                    if enabled
+                    else "Enable POM Material Preview to edit this value."
                 )
 
     def queue_preview(self) -> None:

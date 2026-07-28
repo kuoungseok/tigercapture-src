@@ -3,11 +3,12 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import math
-from typing import Any
+from typing import Any, Mapping
 
 from .audio_reactive import evaluate_layer_transform
 from .advanced_motion import project_layer_matrix
 from .constraints import apply_look_at, point_on_path
+from .interactive_button import apply_button_state
 from .schema import MotionComposition, MotionLayer
 
 
@@ -33,6 +34,11 @@ class EvaluatedLayer:
 
 
 def remap_layer_time(layer: MotionLayer, composition_time_ms: float) -> float:
+    from .time_remap import evaluate_layer_source_time
+
+    remapped = evaluate_layer_source_time(layer, composition_time_ms)
+    if remapped is not None:
+        return remapped
     duration = max(1.0, float(layer.out_ms - layer.in_ms))
     elapsed = (float(composition_time_ms) - layer.in_ms) * layer.time_scale
     mode = str(layer.metadata.get("time_mode", "clamp"))
@@ -63,13 +69,22 @@ def multiply_affine(parent, child):
             pa * ctx + pc * cty + ptx, pb * ctx + pd * cty + pty)
 
 
-def evaluate_composition(composition: MotionComposition, time_ms: float) -> list[EvaluatedLayer]:
+def evaluate_composition(
+    composition: MotionComposition,
+    time_ms: float,
+    *,
+    interaction_states: Mapping[str, str | Mapping[str, Any]] | None = None,
+) -> list[EvaluatedLayer]:
     solo_ids = {layer.id for layer in composition.layers if layer.solo}
     values_by_id: dict[str, dict[str, Any]] = {}
     layers_by_id = {layer.id: layer for layer in composition.layers}
     for layer in composition.layers:
         values = evaluate_layer_transform(layer, time_ms)
-        values_by_id[layer.id] = values
+        values_by_id[layer.id] = apply_button_state(
+            layer,
+            values,
+            (interaction_states or {}).get(layer.id),
+        )
     from .expressions import apply_composition_expressions
 
     apply_composition_expressions(composition, time_ms, values_by_id)
@@ -81,6 +96,9 @@ def evaluate_composition(composition: MotionComposition, time_ms: float) -> list
                 apply_look_at(values_by_id[layer.id], target, offset_degrees=float(constraint.get("offset", 0.0)))
             elif constraint.get("kind") == "follow_path":
                 values_by_id[layer.id]["position"] = point_on_path(list(constraint.get("points") or []), float(constraint.get("progress", 0.0)))
+    from .rigging import evaluate_rig_layer_deltas
+
+    rig_deltas = evaluate_rig_layer_deltas(composition, time_ms)
 
     matrix_cache: dict[str, tuple[float, float, float, float, float, float]] = {}
     def world_matrix(layer: MotionLayer, stack: set[str] | None = None):
@@ -104,7 +122,10 @@ def evaluate_composition(composition: MotionComposition, time_ms: float) -> list
             position=list(values["position"]), scale=list(values["scale"]), rotation=float(values["rotation"]),
             opacity=max(0.0, min(1.0, float(values["opacity"]))), anchor=list(values["anchor"]),
             matrix=project_layer_matrix(
-                world_matrix(layer),
+                multiply_affine(
+                    rig_deltas.get(layer.id, (1.0, 0.0, 0.0, 1.0, 0.0, 0.0)),
+                    world_matrix(layer),
+                ),
                 composition=composition,
                 layer=layer,
                 time_ms=time_ms,

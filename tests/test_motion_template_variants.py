@@ -10,7 +10,7 @@ def test_template_variants_use_declared_dimensions_and_roles() -> None:
             assert (composition.width, composition.height) == TEMPLATE_VARIANTS[variant]
             roles = {str(layer.metadata.get("template_role") or "") for layer in composition.layers}
             assert "headline" in roles
-            assert roles & {"accent", "surface", "particles"}
+            assert roles - {"headline", "subtitle", "tutorial_hint"}
 
 
 def test_vertical_only_template_rejects_landscape() -> None:

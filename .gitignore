@@ -26,8 +26,15 @@ release/
 # IDE / editor
 .vscode/
 .idea/
+.vs/
 *.swp
 *.swo
+
+# Local publication/reference workspaces
+.codex-gh-pages/
+external/assets/figma/
+external/tools/scroll-world/
+docs/motion-user-guide.pdf
 
 # Claude Code local state
 .claude/

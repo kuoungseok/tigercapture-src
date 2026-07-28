@@ -219,6 +219,24 @@ def _copy_embedded_audio_edit_state(audio_clip: Any, video_clip: Any) -> None:
     for attr in ("waveform", "spectrum_bins"):
         if hasattr(proxy, attr):
             setattr(audio_clip, attr, getattr(proxy, attr))
+    raw_markers = getattr(proxy, "_picture_sync_markers", None)
+    if raw_markers:
+        markers: list[dict[str, Any]] = []
+        trim_start = _int(getattr(audio_clip, "trim_start_ms", 0))
+        offset_ms = _int(getattr(audio_clip, "offset_ms", 0))
+        trim_end = _int(getattr(audio_clip, "effective_trim_end_ms", getattr(audio_clip, "trim_end_ms", 0)))
+        for marker in list(raw_markers or []):
+            if not isinstance(marker, dict):
+                continue
+            copied = copy.deepcopy(marker)
+            source_ms = _int(copied.get("source_ms", 0))
+            if trim_end > trim_start and not (trim_start <= source_ms <= trim_end):
+                continue
+            local_ms = max(0, source_ms - trim_start)
+            copied["local_ms"] = local_ms
+            copied["project_ms"] = offset_ms + local_ms
+            markers.append(copied)
+        setattr(audio_clip, "_picture_sync_markers", markers)
 
 
 def collect_video_embedded_audio_preview_clips(owner: Any) -> list[Any]:

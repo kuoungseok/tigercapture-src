@@ -1692,6 +1692,185 @@ class PaintAdapterMixin(
         dialog._push_undo_state("Remove UI interaction")
         return self._paint_ui_commit(dialog, "Remove UI interaction", document)
 
+    def paint_ui_motion_attach(
+        self,
+        *,
+        object_id: str = "",
+        duration_ms: int = 600,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.motion_designer.schema import MotionComposition
+        from app.painter_ui_motion_bridge import (
+            attach_motion_composition,
+            create_or_sync_ui_motion_composition,
+            linked_motion_composition_id,
+        )
+
+        document = dialog._painter_ui_document
+        selected = str(
+            object_id
+            or ((document.get("selection") or {}).get("object_id"))
+            or ""
+        )
+        if not selected:
+            raise ValueError("paint.ui.motion.attach requires a UI object")
+        linked_id = linked_motion_composition_id(document, selected)
+        if not linked_id:
+            linked_id = str(dialog._painter_ui_linked_motion_id(selected) or "")
+        existing = getattr(dialog, "_painter_ui_motion_compositions", {}).get(
+            linked_id
+        )
+        if isinstance(existing, dict):
+            existing = MotionComposition.from_dict(existing)
+        source = (
+            (existing.metadata.get("painter_ui_source") or {})
+            if isinstance(existing, MotionComposition)
+            else {}
+        )
+        root_object_id = str(source.get("object_id") or selected)
+        composition = create_or_sync_ui_motion_composition(
+            document,
+            root_object_id,
+            existing,
+            duration_ms=max(1, int(duration_ms or 600)),
+        )
+        dialog._push_undo_state("Attach UI motion")
+        dialog._painter_ui_motion_compositions[composition.id] = composition
+        updated = attach_motion_composition(
+            document,
+            root_object_id,
+            composition.id,
+        )
+        self._paint_ui_commit(dialog, "Attach UI motion", updated)
+        return {
+            "attached": True,
+            "object_id": selected,
+            "root_object_id": root_object_id,
+            "composition_id": composition.id,
+            "composition": composition.to_dict(),
+        }
+
+    def paint_ui_motion_open(self, *, object_id: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        target = str(object_id or "")
+        if target:
+            from app.painter_ui_document import select_ui_object
+
+            dialog._painter_ui_document = select_ui_object(
+                dialog._painter_ui_document,
+                target,
+            )
+            dialog._refresh_painter_ui_overlay()
+        return dialog._animate_selected_painter_ui_object()
+
+    def paint_ui_motion_preview(self, *, playing: bool = True) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        active = dialog._set_painter_ui_motion_preview(bool(playing))
+        return {
+            "playing": active,
+            "composition_id": str(
+                getattr(dialog, "_painter_ui_motion_active_id", "") or ""
+            ),
+            "time_ms": int(
+                getattr(dialog, "_painter_ui_motion_time_ms", 0) or 0
+            ),
+        }
+
+    def paint_ui_motion_inspect(self, *, object_id: str = "") -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.motion_designer.schema import MotionComposition
+        from app.painter_ui_motion_bridge import linked_motion_composition_id
+
+        document = dialog._painter_ui_document
+        selected = str(
+            object_id
+            or ((document.get("selection") or {}).get("object_id"))
+            or ""
+        )
+        composition_id = linked_motion_composition_id(document, selected)
+        if not composition_id and selected:
+            composition_id = str(
+                dialog._painter_ui_linked_motion_id(selected) or ""
+            )
+        composition = getattr(
+            dialog, "_painter_ui_motion_compositions", {}
+        ).get(composition_id)
+        if isinstance(composition, dict):
+            composition = MotionComposition.from_dict(composition)
+        return {
+            "object_id": selected,
+            "attached": isinstance(composition, MotionComposition),
+            "composition_id": composition_id,
+            "composition": (
+                composition.to_dict()
+                if isinstance(composition, MotionComposition)
+                else None
+            ),
+        }
+
+    def paint_ui_motion_actor_import(
+        self,
+        *,
+        path: str,
+        name: str = "",
+        x: float | None = None,
+        y: float | None = None,
+        width: float = 0.0,
+        height: float = 0.0,
+        autoplay: bool = True,
+        loop: bool = True,
+    ) -> dict[str, Any]:
+        source = Path(path).expanduser().resolve()
+        if not source.is_file():
+            raise FileNotFoundError(f"Motion project not found: {source}")
+        from app.motion_designer.project_io import load_motion_project
+
+        dialog = self._paint_dialog_owner()
+        dialog._set_canvas_workspace_mode("ui_design")
+        composition = load_motion_project(source)
+        return dialog._place_painter_ui_motion_actor(
+            composition,
+            source_path=str(source),
+            name=name,
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            autoplay=autoplay,
+            loop=loop,
+        )
+
+    def paint_ui_motion_actor_list(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_motion_actor import (
+            motion_actor_composition_id,
+            motion_actor_rows,
+        )
+
+        rows = motion_actor_rows(dialog._painter_ui_document)
+        compositions = getattr(dialog, "_painter_ui_motion_compositions", {})
+        return {
+            "count": len(rows),
+            "actors": [
+                {
+                    "object_id": row["id"],
+                    "name": row["name"],
+                    "composition_id": motion_actor_composition_id(row),
+                    "composition_available": (
+                        motion_actor_composition_id(row) in compositions
+                    ),
+                    "rect": {
+                        key: float(row[key])
+                        for key in ("x", "y", "width", "height")
+                    },
+                    "source_path": str(
+                        (row.get("content") or {}).get("source_path") or ""
+                    ),
+                }
+                for row in rows
+            ],
+        }
+
     def paint_ui_delivery_profiles(self) -> dict[str, Any]:
         from app.painter_ui_delivery import list_ui_delivery_profiles
 

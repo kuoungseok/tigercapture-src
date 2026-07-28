@@ -1,5 +1,18 @@
 # Tiger Studio Motion Designer Architecture
 
+## Standalone Motion Document Boundary
+
+- Standalone Motion authoring uses the versioned `.tgmotion` JSON document.
+  The window owns Open, Save, Save As, dirty-state prompts, and recoverable
+  autosave for this mode. Atomic save validates the composition before
+  replacing the destination file.
+- Main-editor integration continues to embed `motion_compositions[]` and
+  `motion_clips[]` in `.tgp`. Embedded Motion windows do not create a competing
+  standalone autosave because the host editor owns project persistence.
+- `.tgmotion` stores the editable composition but references external media by
+  URI/path. It is not an asset bundle. Portable exchange requires a later
+  package/relink layer rather than silently copying resources into the JSON.
+
 상태: M0-M11 통합 구현 및 제품 출시 검증 완료  
 기준 문서: `docs/MOTION_DESIGNER_PRODUCT_PLAN_KO.md`  
 구현 순서: `docs/MOTION_DESIGNER_MILESTONES_KO.md`
@@ -237,11 +250,18 @@ mutation은 향후 composition service의 validation과 undo transaction을 반�
   공유한다. circle/square/triangle은 `particle_gpu.py`를 거쳐 기존 vector OpenGL
   renderer가 그린다. sprite는 현재 canonical premultiplied-alpha source surface이며
   GPU shape packet으로 오인하지 않고 diagnostics와 broadcast bake 요구에 표시한다.
-- `templates.py`는 10종 built-in template, 지원 aspect variant, stable published
-  control ID와 적용별 `template_instance_id`를 소유한다. UI와
+- `templates.py`는 10종 quick starter, 5종 multi-feature `Learn` template,
+  그리고 UI/Product·Advertising·Education용 9종 다중 장면 production
+  template을 소유한다. 15초부터 60초까지의 실제 장면 경계, 지원 aspect
+  variant, stable published control ID, 기능/난이도/예상 시간, 교체 대상,
+  workflow, tutorial metadata와 적용별 `template_instance_id`를 보존한다. UI와
   `motion.template.*` action은 같은 builder를 사용하고
-  `tools/qa_motion_template_catalog.py`는 production export renderer로 실제 preview를
-  생성한다.
+  `tools/qa_motion_template_catalog.py`는 production export renderer로 24종
+  전체 preview와 다중 장면 storyboard strip을 실제로 생성한다.
+- 실사용 템플릿의 범위와 확장 순서는
+  `docs/MOTION_TEMPLATE_CATALOG_STRATEGY_KO.md`를 따른다. Apple 공식
+  디자인 리소스를 포함한다고 주장하지 않으며 iOS 템플릿은 Tiger Studio의
+  system-inspired 구성이다.
 - `broadcast_bridge.py`는 layer/type/particle/effect 비용으로 `realtime`, `cached`,
   `offline_only`를 계산한다. cached Program Output은 현재 composition revision,
   frame count, path, premultiplied alpha를 검증한 cache manifest가 필수다. live control
@@ -272,6 +292,70 @@ mutation은 향후 composition service의 validation과 undo transaction을 반�
 - source/effect/behavior/exporter contribution을 renderer에 실제 등록하는 runtime host,
   sandbox/failure isolation, uninstall/safe mode는 이 관리 기반 위에 추가할 M12 후속
   범위다.
+
+### Interactive button components
+
+- `interactive_button.py` owns a Qt-free, serializable layer metadata contract
+  for `normal`, `hover`, `pressed`, `disabled`, and `focused` states.
+- Each state applies position offset, scale multiplier, rotation offset, and
+  opacity multiplier before parent/world matrix evaluation. A button attached
+  to a group therefore transforms its child artwork as one component.
+- Hit padding, pointer/focus trigger mappings, transition duration, and easing
+  are stored with the layer. They remain editable data even when the current
+  output target is video rather than an interactive runtime.
+- Canvas hover, press, release, and leave use a transient 16 ms transition
+  timer plus evaluator overrides. These previews do not mutate the project or
+  add undo history; a state selected in the Inspector is the persisted Preview
+  and export state.
+- The `Button` Inspector and `Component > Button` toolbar command mutate through
+  `MotionDocumentController`. Canvas, Preview, export, and main-timeline Motion
+  clips share the evaluator result.
+- Action/MCP parity is provided by `motion.button.inspect/create/update/state.set/remove`.
+  Native HTML/Lottie runtime event export remains a separate exporter task.
+
+### Tiger-controlled Unreal UMG delivery
+
+- Unreal UMG export is owned and initiated by Tiger Studio. The Unreal Editor
+  plugin is an internal, non-interactive backend and must not become a second
+  authoring workflow that the user has to operate.
+- The shared plugin source is
+  `resources/unreal_plugins/UMG/TigerStudioUMG`. It is provider-neutral:
+  Motion Designer uses `motion_designer`, Painter uses `painter`, and later
+  authoring tools may add providers without creating another Unreal plugin.
+- The runtime and editor modules compile with `D:\UE_5.8\Engine`.
+  `app.unreal_umg_plugin` performs project-local install and `.uproject`
+  enablement. `tools/build_unreal_umg_plugin.py` creates the source-free public
+  bundle consumed by `TigerCapture.spec`.
+- The user operation is:
+  `select Unreal project -> preflight -> generate/regenerate -> inspect result`.
+  Tiger performs package creation, plugin install/update, Unreal launch,
+  Widget Blueprint generation and compilation, validation, and capture.
+- The pipeline boundary is:
+  `MotionComposition -> versioned Tiger UMG request + durable assets ->
+  Tiger Unreal Editor backend -> UWidgetBlueprint/UWidgetAnimation -> report
+  + real capture`.
+- Shape, text, image, and button layers are native candidates. Button state
+  triggers and transform/opacity state transitions map to UMG button events and
+  widget animation tracks. Position, rotation, scale, and opacity keyframes map
+  to `UWidgetAnimation`/MovieScene channels.
+- Textures and sounds are imported into a generated Tiger content root and keep
+  stable source IDs for deterministic reimport. Font assignment, masks, effects, unsupported
+  blend operations, and non-UMG actor surfaces must be classified before
+  launch as native UI material, raster/video bake, or blocked.
+- Action/MCP parity is provided by `motion.umg.plugin.status`,
+  `motion.umg.plugin.install`, `motion.umg.preflight`, `motion.umg.package`, and
+  the complete `motion.umg.generate` orchestration action. Visible Unreal
+  capture is delegated to the shared external-window capture actions.
+- The Unreal backend is entered through the standalone Unreal-logo
+  `Unreal Link` toolbar action and `MotionUnrealLinkDialog`. It must not be
+  embedded as an Inspector, Library, or Output tab. Its `MotionUMGPanel`
+  performs the complete operation without blocking the Qt UI.
+- `MotionTemplateGalleryDialog` is the beginner-facing start surface for
+  built-in templates. It renders real template compositions for its thumbnails
+  and applies the chosen aspect-ratio variant through the document controller.
+- `tools/qa_unreal_umg_generation.py` is the real-engine regression probe. UE
+  5.8 has generated, compiled, saved, reloaded, and regenerated the same native
+  button Widget Blueprint with its texture, sound, and animation assets.
 
 ## 6. 자산과 QA 경계
 

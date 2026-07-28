@@ -248,6 +248,12 @@ def _stroke_path(path: QPainterPath, params: Mapping[str, Any], time_ms: float) 
     dash = evaluate_source_param(params, "dash", time_ms, [])
     if isinstance(dash, Sequence) and not isinstance(dash, (str, bytes)) and dash:
         stroker.setDashPattern([max(0.01, float(value)) for value in dash])
+        stroker.setDashOffset(float(evaluate_source_param(
+            params,
+            "dash_offset",
+            time_ms,
+            0.0,
+        )))
     return stroker.createStroke(path)
 
 
@@ -266,6 +272,13 @@ def _mesh_key(path: QPainterPath, params: Mapping[str, Any], time_ms: float) -> 
         "cap": evaluate_source_param(params, "cap", time_ms, "square"),
         "join": evaluate_source_param(params, "join", time_ms, "miter"),
         "dash": evaluate_source_param(params, "dash", time_ms, []),
+        "dash_offset": evaluate_source_param(params, "dash_offset", time_ms, 0.0),
+        "stroke_gradient": evaluate_source_param(
+            params,
+            "stroke_gradient",
+            time_ms,
+            None,
+        ),
     }
     encoded = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True, default=str)
     return sha256(encoded.encode("ascii")).hexdigest()
@@ -299,9 +312,27 @@ def build_vector_gpu_packet(layer: MotionLayer, time_ms: float = 0.0) -> tuple[V
     if layer.effects or layer.masks:
         return None, "layer_effect_or_mask"
     params = layer.source.params
+    taper = evaluate_source_param(params, "stroke_taper", time_ms, None)
+    if isinstance(taper, Mapping) and taper and (
+        abs(float(taper.get("start", 1.0) or 0.0) - 1.0) > 1e-6
+        or abs(float(taper.get("end", 1.0) or 0.0) - 1.0) > 1e-6
+        or bool(taper.get("profile"))
+    ):
+        return None, "variable_width_stroke"
     gradient = evaluate_source_param(params, "gradient", time_ms, None)
     if isinstance(gradient, Mapping) and str(gradient.get("type") or "linear").lower() == "radial":
         return None, "radial_gradient"
+    stroke_gradient = evaluate_source_param(
+        params,
+        "stroke_gradient",
+        time_ms,
+        None,
+    )
+    if (
+        isinstance(stroke_gradient, Mapping)
+        and str(stroke_gradient.get("type") or "linear").lower() == "radial"
+    ):
+        return None, "radial_stroke_gradient"
     path = build_vector_painter_path(params, time_ms)
     if path.isEmpty():
         return None, "empty_path"
@@ -331,8 +362,24 @@ def build_vector_gpu_packet(layer: MotionLayer, time_ms: float = 0.0) -> tuple[V
         if stroke.alpha() > 0:
             stroke_triangles = _tessellate(_stroke_path(path, params, time_ms))
             if stroke_triangles:
-                stroke_color = _premultiplied(stroke)
-                _append_colored_triangles(vertices, stroke_triangles, lambda _x, _y: stroke_color)
+                stroke_gradient = evaluate_source_param(
+                    params,
+                    "stroke_gradient",
+                    time_ms,
+                    None,
+                )
+                _append_colored_triangles(
+                    vertices,
+                    stroke_triangles,
+                    lambda x, y: _gradient_color(
+                        stroke_gradient,
+                        stroke,
+                        x,
+                        y,
+                        width,
+                        height,
+                    ),
+                )
         if not vertices:
             return None, "empty_mesh"
         mesh = VECTOR_GPU_MESH_CACHE.put(VectorGpuMesh(key, tuple(vertices), len(vertices) // 18))

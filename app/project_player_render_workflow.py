@@ -69,6 +69,24 @@ def _emit_rgb_frame(
     rgb_out = np.ascontiguousarray(rgb)
     if getattr(self, "_motion_clips", None):
         rgb_out = np.ascontiguousarray(self._apply_motion_clips(rgb_out, int(getattr(self, "_position_ms", 0))))
+    try:
+        from app.color_runtime import apply_project_display_transform_rgb
+
+        project_settings = getattr(self, "_project_settings", {}) or {}
+        rgb_out, color_report = apply_project_display_transform_rgb(
+            rgb_out,
+            project_settings.get("color_management"),
+        )
+        if color_report.get("applied") or color_report.get("warnings"):
+            gpu_meta = dict(gpu_meta or {})
+            gpu_meta["project_color_transform"] = color_report
+    except Exception as exc:
+        gpu_meta = dict(gpu_meta or {})
+        gpu_meta["project_color_transform"] = {
+            "applied": False,
+            "engine": "error",
+            "warnings": [str(exc)],
+        }
     h, w = rgb_out.shape[:2]
     gpu_payload = grade
     if gpu_meta:

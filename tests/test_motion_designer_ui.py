@@ -5,13 +5,15 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QLabel, QMessageBox
 from PySide6.QtCore import QCoreApplication, QEventLoop, QTimer, Qt
 import pytest
 
 from app.motion_designer.schema import (
-    AnimatedProperty, MotionComposition, MotionLayer, MotionMaskRef, SourceRef,
+    AnimatedProperty, MotionComposition, MotionEffectRef, MotionLayer,
+    MotionMaskRef, SourceRef,
 )
+from app.motion_designer.tracking_workflow import normalize_track_asset
 from app.motion_designer.ui.window import MotionDesignerWindow
 from app.motion_designer.audio_analysis import AudioAnalysisCache, AudioEnvelopeSample
 from app.motion_designer.evaluator import evaluate_composition
@@ -25,23 +27,45 @@ def test_motion_designer_window_uses_controller_for_layer_and_undo() -> None:
     window = MotionDesignerWindow(MotionComposition(width=1280, height=720, duration_ms=3000))
     window._add_layer("shape")
     assert len(window.controller.composition.layers) == 1
+    assert window.left_tabs.currentWidget() is window.inspector_tabs
+    assert window.inspector_tabs.currentWidget() is window.vector
     assert window.timeline.slider.maximum() == 3000
     assert window.canvas.scene() is not None
     assert window.left_tabs.count() == 3
+    assert window.umg.generate_button.text() == "Generate Widget Blueprint"
+    assert window.unreal_link_dialog.windowTitle() == "Unreal Link"
+    assert window.toolbar.unreal_link_button.text() == "Unreal Link"
+    assert not window.toolbar.unreal_link_button.icon().isNull()
+    assert window.toolbar.templates_button.text() == "Templates"
     assert window.project_tabs.count() == 3
-    assert window.inspector_tabs.count() == 13
+    assert window.inspector_tabs.count() == 19
+    assert window.inspector_tabs.indexOf(window.tracking) >= 0
+    assert window.inspector_tabs.indexOf(window.puppet) >= 0
+    assert window.inspector_tabs.indexOf(window.rig) >= 0
     assert window.inspector_tabs.tabText(1) == "Motion"
-    assert window.inspector_tabs.tabText(2) == "Image"
-    assert window.inspector_tabs.tabText(11) == "VRM"
-    assert window.inspector_tabs.tabText(12) == "Particles"
+    assert window.inspector_tabs.tabText(2) == "Generator"
+    assert window.inspector_tabs.tabText(3) == "Replicator"
+    assert window.inspector_tabs.tabText(4) == "Image"
+    assert window.inspector_tabs.tabText(13) == "VRM"
+    assert window.inspector_tabs.tabText(14) == "Particles"
+    assert window.inspector_tabs.tabText(15) == "Button"
     assert window.inspector_tabs.indexOf(window.ar_pbr) >= 0
     assert window.inspector_tabs.indexOf(window.actor) >= 0
     assert window.inspector_tabs.indexOf(window.mmd) >= 0
-    assert window.ai_dock.isVisibleTo(window)
-    assert window.toolbar.ai_action.isChecked()
+    assert not window.ai_dock.isVisibleTo(window)
+    assert not window.toolbar.ai_action.isChecked()
+    assert window.left_tabs.tabText(window.left_tabs.indexOf(window.library)) == "Add"
+    assert window.library.templates_button.text() == "Templates"
+    assert window.library.ai_button.text() == "Create with AI"
+    assert window.library.apply_button.text() == "Add Text"
+    assert "Animated titles" in window.library.items.item(0).text()
     assert window.timeline.graph_editor.isVisibleTo(window.timeline)
     source_id = window.controller.composition.layers[0].id
     window._select_layer(source_id)
+    window.left_tabs.setCurrentWidget(window.library)
+    window._select_layer(source_id)
+    assert window.left_tabs.currentWidget() is window.inspector_tabs
+    assert window.inspector_tabs.currentWidget() is window.vector
     window._add_behavior("spring")
     window._add_effect("glow")
     window._add_mask("ellipse")
@@ -68,6 +92,308 @@ def test_motion_designer_window_uses_controller_for_layer_and_undo() -> None:
     window.controller.undo()
     assert window.controller.composition.layers == []
     window.close()
+    app.processEvents()
+
+
+def test_filter_and_mask_parameter_diamonds_edit_current_local_keyframe() -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    app = QApplication.instance() or QApplication([])
+    layer = MotionLayer(
+        id="animated-layer",
+        layer_type="shape",
+        source=SourceRef(
+            kind="shape",
+            params={"width": 320, "height": 180},
+        ),
+        in_ms=200,
+        out_ms=2000,
+        effects=[
+            MotionEffectRef(
+                id="glow",
+                kind="glow",
+                params={"intensity": AnimatedProperty(default=0.7)},
+            ),
+        ],
+        masks=[
+            MotionMaskRef(
+                id="mask",
+                kind="ellipse",
+                params={"feather": AnimatedProperty(default=0.0)},
+            ),
+        ],
+    )
+    window = MotionDesignerWindow(MotionComposition(
+        width=640,
+        height=360,
+        duration_ms=2200,
+        layers=[layer],
+    ))
+    window._select_layer(layer.id)
+    window._set_time(700)
+
+    effect_button = window.effects.keyframe_button("glow", "intensity")
+    mask_button = window.masks.keyframe_button("mask", "feather")
+    assert effect_button is not None
+    assert mask_button is not None
+    assert effect_button.isChecked() is False
+    effect_button.click()
+    mask_button = window.masks.keyframe_button("mask", "feather")
+    assert mask_button is not None
+    mask_button.click()
+    app.processEvents()
+
+    stored = window.controller.composition.layers[0]
+    assert stored.effects[0].params["intensity"].keyframes[0].time_ms == 500
+    assert stored.masks[0].params["feather"].keyframes[0].time_ms == 500
+    assert window.effects.keyframe_button("glow", "intensity").isChecked()
+
+    effect_control = window.effects.parameter_control("glow", "intensity")
+    assert effect_control is not None
+    effect_control.setValue(1.25)
+    app.processEvents()
+    stored = window.controller.composition.layers[0]
+    assert stored.effects[0].params["intensity"].keyframes[0].value == 1.25
+    assert len(stored.effects[0].params["intensity"].keyframes) == 1
+
+    window.effects.keyframe_button("glow", "intensity").click()
+    app.processEvents()
+    assert (
+        window.controller.composition.layers[0]
+        .effects[0].params["intensity"].keyframes
+        == []
+    )
+    window.close()
+    app.processEvents()
+
+
+def test_motion_effect_library_exposes_light_noise_and_stylize_controls() -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    app = QApplication.instance() or QApplication([])
+    window = MotionDesignerWindow(MotionComposition(
+        width=640,
+        height=360,
+        duration_ms=1000,
+    ))
+    window._add_layer("shape")
+    layer_id = window.controller.composition.layers[0].id
+    window._select_layer(layer_id)
+
+    kinds = {
+        window.effects.kind.itemText(index)
+        for index in range(window.effects.kind.count())
+    }
+    assert {"drop_shadow", "light_sweep", "fractal_noise", "posterize"} <= kinds
+
+    window._add_effect("fractal_noise")
+    app.processEvents()
+    effect = window.controller.composition.layers[0].effects[0]
+    assert effect.kind == "fractal_noise"
+    assert effect.params["octaves"].default == 4.0
+    assert window.effects.parameter_control(effect.id, "amount") is not None
+    assert window.effects.parameter_control(effect.id, "evolution") is not None
+
+    window.close()
+    app.processEvents()
+
+
+def test_adjustment_layer_scope_controls_persist_selected_lower_layer() -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    app = QApplication.instance() or QApplication([])
+    background = MotionLayer(
+        id="background",
+        name="Background",
+        layer_type="shape",
+        out_ms=1000,
+    )
+    adjustment = MotionLayer(
+        id="grade",
+        name="Grade",
+        layer_type="adjustment",
+        out_ms=1000,
+    )
+    window = MotionDesignerWindow(MotionComposition(
+        duration_ms=1000,
+        layers=[background, adjustment],
+    ))
+    window._select_layer(adjustment.id)
+    assert not window.effects.scope_host.isHidden()
+    mode_index = window.effects.scope_mode.findData("selected_layers_below")
+    window.effects.scope_mode.setCurrentIndex(mode_index)
+    app.processEvents()
+    assert window.effects.scope_layers.count() == 1
+    window.effects.scope_layers.item(0).setCheckState(Qt.Checked)
+    app.processEvents()
+    scope = window.controller.composition.layers[1].metadata["adjustment_scope"]
+    assert scope == {
+        "mode": "selected_layers_below",
+        "layer_ids": ["background"],
+    }
+    window.close()
+    app.processEvents()
+
+
+def test_effect_group_scope_controls_persist_selected_descendant() -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    app = QApplication.instance() or QApplication([])
+    child = MotionLayer(
+        id="child",
+        name="Child",
+        layer_type="shape",
+        parent_id="group",
+        out_ms=1000,
+    )
+    outside = MotionLayer(
+        id="outside",
+        name="Outside",
+        layer_type="shape",
+        out_ms=1000,
+    )
+    group = MotionLayer(
+        id="group",
+        name="Effect Group",
+        layer_type="group",
+        out_ms=1000,
+    )
+    window = MotionDesignerWindow(MotionComposition(
+        duration_ms=1000,
+        layers=[child, outside, group],
+    ))
+    window._select_layer(group.id)
+    assert not window.effects.scope_host.isHidden()
+    mode_index = window.effects.scope_mode.findData("selected_descendants")
+    window.effects.scope_mode.setCurrentIndex(mode_index)
+    app.processEvents()
+    assert window.effects.scope_layers.count() == 1
+    window.effects.scope_layers.item(0).setCheckState(Qt.Checked)
+    app.processEvents()
+    scope = window.controller.composition.layers[2].metadata["effect_group"]
+    assert scope == {
+        "enabled": True,
+        "mode": "selected_descendants",
+        "layer_ids": ["child"],
+    }
+    window.close()
+    app.processEvents()
+
+
+def test_tracking_panel_applies_planar_track_to_corner_pin() -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    app = QApplication.instance() or QApplication([])
+    layer = MotionLayer(
+        id="screen",
+        layer_type="image",
+        source=SourceRef(
+            kind="image",
+            uri="screen.png",
+            params={"width": 201, "height": 101},
+        ),
+        effects=[MotionEffectRef(id="pin", kind="corner_pin")],
+        out_ms=1000,
+    )
+    track = normalize_track_asset({
+        "id": "planar",
+        "kind": "planar",
+        "origin": [100, 50],
+        "samples": [
+            {"time_ms": 0},
+            {"time_ms": 1000, "translate": [10, 5], "scale": [1.1, 1.1]},
+        ],
+        "metadata": {"motion_outlier_frames": 2},
+    })
+    composition = MotionComposition(
+        width=201,
+        height=101,
+        duration_ms=1000,
+        layers=[layer],
+        metadata={"tracking_assets": [track]},
+    )
+    window = MotionDesignerWindow(composition)
+    window._select_layer(layer.id)
+    window.tracking.set_context(window.controller.composition, layer)
+    assert window.tracking.corner_pin.isEnabled()
+    assert window.tracking.outliers.text() == "2"
+    window.tracking.corner_pin.click()
+    app.processEvents()
+    stored_effect = window.controller.composition.layers[0].effects[0]
+    assert stored_effect.params["bottom_right"].keyframes[-1].value == pytest.approx(
+        [20, 10],
+    )
+    window.close()
+    app.processEvents()
+
+
+def test_motion_designer_independent_project_save_and_recovery(tmp_path) -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    from app.motion_designer.project_io import load_motion_project
+
+    app = QApplication.instance() or QApplication([])
+    project = tmp_path / "tutorial.tgmotion"
+    window = MotionDesignerWindow(
+        MotionComposition(name="Tutorial", width=960, height=540, duration_ms=2000),
+        project_path=project,
+        standalone_document=True,
+    )
+    assert window.toolbar.open_action.shortcut().toString() == "Ctrl+O"
+    assert window.toolbar.save_action.shortcut().toString() == "Ctrl+S"
+    window._add_layer("shape")
+    assert window._document_dirty is True
+    assert window.windowTitle().endswith("*")
+    assert window._save_motion_project() is True
+    assert project.is_file()
+    assert load_motion_project(project).layers[0].layer_type == "shape"
+    assert window._document_dirty is False
+
+    window._add_layer("text")
+    window._autosave_document()
+    recovery = window._document_recovery_path()
+    assert recovery.is_file()
+    assert window._save_motion_project() is True
+    assert not recovery.exists()
+    window.close()
+    app.processEvents()
+
+
+def test_motion_template_gallery_renders_cards_and_normalizes_variant() -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    from app.motion_designer.ui.template_gallery import MotionTemplateGalleryDialog
+
+    app = QApplication.instance() or QApplication([])
+    dialog = MotionTemplateGalleryDialog(variant="16:9")
+    assert dialog.items.count() >= 14
+    assert not dialog.items.item(0).icon().isNull()
+    tutorial = next(
+        dialog.items.item(index)
+        for index in range(dialog.items.count())
+        if dialog.items.item(index).data(Qt.ItemDataRole.UserRole)
+        == "learn_keyframes_graph"
+    )
+    dialog.items.setCurrentItem(tutorial)
+    assert "Keyframes" in dialog.guide_title.text()
+    assert "Graph Editor" in dialog.guide_features.text()
+    assert "Select Focus Card" in dialog.guide_steps.text()
+    vertical = next(
+        dialog.items.item(index)
+        for index in range(dialog.items.count())
+        if dialog.items.item(index).data(Qt.ItemDataRole.UserRole)
+        == "vertical_shorts_hook"
+    )
+    dialog.items.setCurrentItem(vertical)
+    assert dialog.selected_variant in {"9:16", "1:1"}
+    dialog.close()
     app.processEvents()
 
 
@@ -222,6 +548,73 @@ def test_motion_mask_inspector_tracks_video_without_blocking_ui(tmp_path) -> Non
     stored = window.controller.composition.layers[0].masks[0].metadata["tracking_cache"]
     assert stored["metadata"]["provider"] == "opencv_lk_ransac_v1"
     assert len(stored["samples"]) >= 5
+    window.close()
+    app.processEvents()
+
+
+def test_tracking_panel_analyzes_selected_video_without_blocking_ui(tmp_path) -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    import cv2
+    import numpy as np
+
+    app = QApplication.instance() or QApplication([])
+    video = tmp_path / "composition-track.avi"
+    writer = cv2.VideoWriter(
+        str(video),
+        cv2.VideoWriter_fourcc(*"MJPG"),
+        20.0,
+        (160, 120),
+    )
+    assert writer.isOpened()
+    rng = np.random.default_rng(701)
+    patch = rng.integers(0, 255, size=(55, 65, 3), dtype=np.uint8)
+    for index in range(21):
+        frame = np.zeros((120, 160, 3), dtype=np.uint8)
+        frame[30:85, 35 + index:100 + index] = patch
+        writer.write(frame)
+    writer.release()
+    layer = MotionLayer(
+        name="Tracked Video",
+        layer_type="video",
+        source=SourceRef(
+            kind="video",
+            uri=str(video),
+            params={"width": 160, "height": 120},
+        ),
+        out_ms=1000,
+    )
+    window = MotionDesignerWindow(MotionComposition(
+        width=160,
+        height=120,
+        duration_ms=1000,
+        layers=[layer],
+    ))
+    window._select_layer(layer.id)
+    window._start_composition_tracking("point")
+    assert window._composition_tracking_job is not None
+    assert not window.tracking.analyze.isEnabled()
+    loop = QEventLoop()
+    poll = QTimer()
+    poll.setInterval(10)
+    poll.timeout.connect(
+        lambda: loop.quit()
+        if window._composition_tracking_job is None else None
+    )
+    timeout = QTimer()
+    timeout.setSingleShot(True)
+    timeout.timeout.connect(loop.quit)
+    poll.start()
+    timeout.start(5000)
+    loop.exec()
+    poll.stop()
+    assert window._composition_tracking_job is None
+    assets = window.controller.composition.metadata["tracking_assets"]
+    assert len(assets) == 1
+    assert assets[0]["kind"] == "point"
+    assert len(assets[0]["cache"]["samples"]) >= 5
+    assert window.tracking.analyze.isEnabled()
     window.close()
     app.processEvents()
 
@@ -434,6 +827,64 @@ def test_motion_playback_preserves_fractional_timer_elapsed_time() -> None:
     window._set_playback_direction(0)
     assert abs(window._time_ms - 10000) <= 1
     assert 0.0 <= window._playback_fractional_ms < 1.0
+    window.close()
+    app.processEvents()
+
+
+def test_template_change_restarts_active_playback_from_zero() -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    app = QApplication.instance() or QApplication([])
+    window = MotionDesignerWindow(
+        MotionComposition(width=960, height=540, duration_ms=20000)
+    )
+    window._set_time(8750)
+    window.timeline.set_time(8750)
+    window._set_playback_direction(1)
+    window._playback_fractional_ms = .75
+
+    window._apply_library_item("template", "clean_lower_third")
+
+    assert window._time_ms == 0
+    assert window.timeline.slider.value() == 0
+    assert window._play_direction == 1
+    assert window._play_timer.isActive()
+    assert window._playback_fractional_ms == 0.0
+    assert window.timeline.play_button.isChecked()
+    window._set_playback_direction(0)
+    window.close()
+    app.processEvents()
+
+
+def test_motion_message_box_uses_readable_dark_surface() -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    app = QApplication.instance() or QApplication([])
+    window = MotionDesignerWindow(
+        MotionComposition(width=960, height=540, duration_ms=1000)
+    )
+    dialog = QMessageBox(
+        QMessageBox.Icon.Question,
+        "Unsaved Motion Project",
+        "Save changes to the current Motion project?",
+        QMessageBox.StandardButton.Save
+        | QMessageBox.StandardButton.Discard
+        | QMessageBox.StandardButton.Cancel,
+        window,
+    )
+    dialog.show()
+    app.processEvents()
+    message = next(
+        label
+        for label in dialog.findChildren(QLabel)
+        if "Save changes" in label.text()
+    )
+    assert message.palette().color(message.foregroundRole()).lightness() > 150
+    surface = dialog.grab().toImage()
+    assert surface.pixelColor(12, min(45, surface.height() - 1)).lightness() < 90
+    dialog.close()
     window.close()
     app.processEvents()
 

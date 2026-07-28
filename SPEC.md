@@ -1,6 +1,6 @@
-# TigerCapture Feature Spec for AI Agents
+﻿# TigerCapture Feature Spec for AI Agents
 
-Last updated: 2026-07-14
+Last updated: 2026-07-28
 
 This file is an AI-readable map of features discovered while working with the
 user. Keep it current when behavior changes, especially for features that span
@@ -766,9 +766,27 @@ Start here when changing a feature:
     Normal, AO, Roughness, Metallic, Height, Cavity, or a packed-map view must
     preserve the selected sphere shape. Only explicitly multi-panel diagnostic
     views such as Intrinsic Channels and Delight Compare may force a plane.
-  - Height is not geometric displacement in this version. It contributes to
-    generated Normal/AO workflows and can be inspected as a channel without
-    claiming tessellation or parallax displacement.
+  - Height is a first-class grayscale output (`black=low`, `white=high`) and
+    must remain visible among the first Texture Lab thumbnails even in compact
+    layouts. Separate-map export writes the Height PNG and records it in the
+    material manifest instead of treating it as an internal Normal/AO
+    intermediate.
+  - Texture Lab Material preview binds Height to GPU Parallax Occlusion Mapping
+    (POM). The user can enable/invert Height and adjust POM strength, depth,
+    and 4-64 ray-march steps; the default preview uses 24 steps. Plane and
+    Sphere both use the generated Height map, with Sphere retaining its
+    longitude/latitude UV and tangent basis.
+  - The shared AR/PBR renderer supports both legacy single-offset parallax and
+    explicit `parallax_mode=pom`. Live OpenGL preview performs iterative
+    Height sampling with linear intersection refinement; packet export mirrors
+    POM for ordinary Height textures and reports a single-offset fallback for
+    unsupported UDIM/triplanar combinations. Preview and export consume the
+    same `parallax_strength`, `parallax_depth`, `parallax_center`, and
+    `parallax_steps` contract.
+  - POM changes texture lookup coordinates only. The exported Height map is
+    ready for a future tessellation/displacement path, but this release does
+    not claim mesh subdivision, silhouette displacement, or displaced shadow
+    geometry.
   - The default studio light uses an upper-left key at approximately 45
     degrees, a softer right fill, a rim contribution, and restrained ambient
     light. The vertical light convention must keep the key above the material;
@@ -3495,6 +3513,12 @@ Regenerated on load:
 
 Important caveat:
 
+- A `.tgp` project is an integrated editor document, not a universal Tiger
+  Studio workspace package. It restores the supported timeline-owned state,
+  but does not imply that every standalone tool document, transient lab
+  session, external service state, or referenced source asset is embedded.
+  PPT Maker uses `.tgppt`; Motion Designer uses `.tgmotion` for independent
+  authoring and can also embed compositions in `.tgp`.
 - The `project_io.py` header says node-level `ColorGrade` is not persisted, but
   newer node graph serialization may save some grade-like state through graph
   data. `app/color_workflow.py` presets return color-node workflow payloads for
@@ -3750,10 +3774,41 @@ Node graph behavior:
   metadata generation, pipeline summaries, and project/export consistency
   validation. It also compares parsed ffprobe video stream color metadata
   against the expected project output metadata for render diagnostics.
-- `app/color_ocio.py` is the optional PyOpenColorIO bridge. It builds an OCIO
-  transform plan from project color settings, applies RGB transforms only when
-  PyOpenColorIO and a valid config are available, and otherwise returns the
-  original frame with explicit diagnostics.
+- `app/color_ocio.py` is the PyOpenColorIO bridge. Source and packaged
+  dependencies include OpenColorIO 2.5.2 or newer. It accepts external config
+  files and versioned built-in config URIs such as
+  `ocio://studio-config-v2.2.0_aces-v1.3_ocio-v2.4`; the latter is the default
+  selected when a user first chooses ACEScg/ACEScct or the ACES view. It uses
+  separate input and display-output color-space resolution and returns the
+  original frame with explicit diagnostics if the runtime or config is
+  unavailable.
+- `app/color_runtime.py` is the shared main-editor/Motion runtime boundary.
+  Default Rec.709/sRGB projects remain byte-identical. ACEScg/ACEScct projects
+  use the configured OCIO processor when available and otherwise use an
+  explicitly diagnosed deterministic ACES-fitted display fallback. Main
+  preview applies the transform once after Motion/video compositing and before
+  both OpenGL and QImage emission. Main export bakes the same display transform
+  to a cached 3D LUT and converts HDR delivery to real 10-bit Rec.2020 PQ/HLG
+  with FFmpeg `zscale`, matching primaries/transfer metadata.
+- `tools/qa_color_ocio_parity.py` generates a real Studio ACES 1.3 color-chart
+  preview and its 17-cube export LUT evidence under
+  `debugCapture/color_ocio_parity`. The 2026-07-28 run compared all 4,913 LUT
+  grid samples and measured `max_abs_byte_delta=0` between the shared preview
+  processor and export LUT. This proves Tiger's current Preview/LUT parity; it
+  is not an ACES product-certification claim.
+- `TigerStudio.exe --color-runtime-probe <report.json>` is a headless frozen
+  build smoke path. It does not create a Qt window; it verifies the packaged
+  PyOpenColorIO extension, built-in ACES registry, Studio ACES 1.3 processor,
+  real pixel transform, and cached LUT generation. The 2026-07-28 frozen build
+  reported OpenColorIO 2.5.2, eight built-in configs, `engine=ocio`, and exit
+  code zero in `debugCapture/color_frozen_runtime_probe.json`.
+- `tools/qa_color_encoded_export.py` writes an actual 24-frame H.265 Main 10
+  Rec.2020 PQ chart, decodes it back through the inverse display conversion,
+  and measures patch-center RGB and CIE76 error. The 2026-07-28 run reported
+  mean byte error `2.18`, mean Delta E 76 `1.05`, maximum Delta E 76 `1.93`,
+  and matching `bt2020nc/bt2020/smpte2084` stream metadata. Regenerable
+  artifacts and the report live under
+  `debugCapture/color_encoded_export_qa`.
 - `app/color_scopes.py` includes `scope_quality_diagnostics()` for color-page
   badges and QA: luma IRE percentiles, HDR nits estimate, channel clipping,
   saturation/gamut risk, skin-tone angle, and warning strings.
@@ -3770,9 +3825,12 @@ Node graph behavior:
   with OK/FAIL, check count, failure count, and real sample count.
 - `ColorPageWindow` exposes a compact project color-management strip above the
   scopes/wheels area. It edits input, working, output, transfer, view transform,
-  HDR flag, project LUT slots, and creative LUT intensity directly against
+  HDR flag, OCIO config, project LUT slots, and creative LUT intensity directly against
   `_project_settings["color_management"]`. The creative LUT slot also syncs to
   the existing global preview LUT path so the viewer reflects the selected look.
+  Changing pipeline settings invalidates the player frame cache and refreshes
+  the current preview immediately. Actions/MCP expose the same project boundary
+  through `color.management.get/set`.
   Color-management validation and scope warnings are displayed through shared
   UX tone states so valid, warning, and failure states are visually distinct.
 - The Color Page chrome is intentionally less programmatic than the underlying
@@ -5680,6 +5738,19 @@ AI Script Edit MVP integration:
   Invalid motion compositions are isolated during load instead of preventing
   the rest of the project from opening. Composition revisions invalidate the
   shared frame cache.
+- Motion Designer also owns the independent `.tgmotion` document format for
+  authoring work that is not yet placed in the main video timeline. The
+  standalone window provides Open, Save, Save As, dirty-close confirmation,
+  and a 30-second recovery copy. Saves are atomic and validated before replace.
+  `motion.project.save` and `motion.project.load` expose the same document
+  boundary to Actions/MCP.
+- `.tgp` remains the integrated video-editor project, not a portable archive of
+  every Tiger Studio tool. It embeds Motion compositions and placements plus
+  the supported Music, Spine, Live2D, MMD, and AR/PBR timeline state, while
+  independent PPT documents use `.tgppt` and Motion documents may use
+  `.tgmotion`. Referenced media and model resources normally remain external
+  paths; a future workspace/package format must bundle or relink those assets
+  before one file can guarantee reopening every standalone tool document.
 - The Qt-free evaluator supports hierarchy, hold/linear/cubic-Bezier
   keyframes, trim/source-in/time-scale/reverse, loop/ping-pong, constraints,
   and fade/slide/scale/pop/spring/wiggle behaviors. Behavior output can be
@@ -5689,6 +5760,27 @@ AI Script Edit MVP integration:
   `Layer Timeline + Graph`. This layout is intentionally compatible with the
   dense layer-first workflow used by dedicated motion-graphics tools; the
   timeline and graph are not mutually exclusive tabs.
+- `docs/motion-user-guide.pdf` is the durable interaction and workspace
+  reference for Motion Designer. The desktop shell follows its Classic layout:
+  Library/Inspector occupies the full-height left column; Layers/Media/Audio
+  and Canvas share the upper production area; Timeline/Keyframe Editor spans
+  the full width below both. The top toolbar exposes Library, Inspector,
+  Project Pane, and File on the left, with Add Object, Behaviors, and Filters
+  as primary authoring commands. Tiger Studio retains its own branding,
+  icons, Windows conventions, AI workspace, character actors, and Unreal Link.
+- Selecting a layer changes the left side from Add/Library to the contextual
+  Inspector and chooses the relevant Text, Image, Shape, Generator, Actor,
+  MMD, VRM, 3D, or Particle page. Replicator has its own Inspector page and
+  toolbar command because it is a layer pattern system, not a Transform
+  property. Re-selecting the same layer preserves the user's current inspector
+  subpage. Clearing selection returns to Add.
+- The former ambiguous `Library / Apply` surface is presented as an action-led
+  `Add` panel. `Templates` and `Create with AI` are the primary starting
+  choices; object, animation, effect, template, and motion-preset categories
+  show a concise purpose for every item and use contextual commands such as
+  `Add Text`, `Animate with Fade`, and `Apply Glow`. The AI workspace is closed
+  by default to preserve canvas width and opens from either `Create with AI` or
+  the toolbar AI toggle.
 - The authoring UI provides a searchable object/behavior/filter library, layer
   tree, canvas, Transform/Behaviors/Effects/Masks inspector, playback,
   undo/redo, layer duplicate/delete, drag-based layer reorder/parenting, and
@@ -5712,9 +5804,41 @@ AI Script Edit MVP integration:
   persistent `QOpenGLWidget`; file export renders the same graph to RGBA.
 - Supported shared-render features currently include normal/add/screen/
   multiply blends; rectangle/ellipse masks; alpha/luma track matte;
-  per-layer brightness/contrast, saturation, Gaussian blur, glow, unsharp,
-  and vignette effects; and adjustment layers. Effect and mask parameters are
-  serializable animated properties.
+  per-layer brightness/contrast, saturation, Gaussian and directional blur,
+  glow, unsharp, vignette, drop shadow, light sweep, deterministic animated
+  fractal noise, posterize, displacement, corner pin, mesh warp, paper fold,
+  and keying effects; and adjustment layers. Effect and mask parameters are
+  serializable animated properties. Vector and typography GPU renderers must
+  reject an active effect stack and use the shared raster graph rather than
+  drawing an unfiltered layer. Unreal UMG preflight reports these raster
+  effects as explicit deterministic-bake requirements; it never silently
+  removes them from generated output.
+- Adjustment layers default to the backward-compatible `all_below` scope.
+  Their Effects inspector can switch to `selected_layers_below` and check
+  specific renderable layers below the adjustment. Selected scope effects are
+  evaluated on each chosen layer surface before it is composited, leaving
+  unselected layers unchanged; invalid, non-rendering, self, and above-layer
+  IDs are removed by the shared scope contract. Preview and export use the
+  same render graph, while Actions/MCP use
+  `motion.adjustment.scope.get/set`.
+- Group layers may own a reusable effect stack scoped to all renderable
+  descendants or an explicit subset of descendants. Group effects are applied
+  to each target layer surface after that layer's own effects and before
+  scoped adjustment effects; outside and invalid IDs are filtered. The Effects
+  inspector exposes `All Descendants` and `Selected Descendants`, and
+  Actions/MCP expose `motion.effect_group.scope.get/set`. Preview and export
+  use the same scoped stack. OpenGL-only preview backends explicitly fall back
+  to the shared raster graph when an effect group is active.
+- Numeric rows in the Effects and Masks inspectors expose keyframe diamonds.
+  The diamond adds, updates, or removes a keyframe at the selected layer's
+  local time after in-point, source-time, reverse, and time-remap conversion.
+  Moving the playhead evaluates animated values back into the controls without
+  replacing their keyframe curves. Editing a parameter that is already
+  animated updates the current local-time keyframe instead of flattening it.
+  Actions/MCP expose the same boundary through
+  `motion.effect.keyframe.set/delete` and
+  `motion.mask.keyframe.set/delete`; keyframe deletion requires destructive
+  confirmation.
 - Motion masks support rectangle, ellipse, and animated Bezier paths with
   animated feather, expansion, and opacity. Point/planar tracking caches are
   interpolated by the Qt-free `mask_tracking.py` core and applied by the same
@@ -6143,15 +6267,32 @@ AI Script Edit MVP integration:
   `motion_vector_gpu` backend with zero GL errors, verifies stable VBO upload
   count across repeated paints, and compares the framebuffer against the
   Painter reference with mean RGB absolute error at or below `2/255`.
-- Motion Designer M11 defines the shipping color/output scope as SDR sRGB.
+- Motion Designer M11 originally defined the shipping color/output scope as SDR sRGB.
   New compositions carry a `linear-srgb` final-composite contract with straight
   alpha at the file boundary and premultiplied alpha internally; legacy
   compositions without color metadata retain display-sRGB behavior. Final
   Motion-over-video compositing decodes encoded sRGB, composites premultiplied
   values in linear space, and encodes sRGB again. The current Qt render graph's
   internal multi-layer blend remains display-space and is reported by output
-  preflight. HDR output, tone mapping, OCIO configuration, and project LUTs are
-  blocked until Preview/Export parity exists rather than being silently ignored.
+  preflight. M20 now shares the main-editor ACES/OCIO display transform,
+  supports Rec.2020 PQ/HLG through the H.265 10-bit profile, and applies the
+  same alpha-safe transform to standalone Preview and Export. The Delivery
+  control offers the validated built-in Studio/CG ACES 1.3 configs plus
+  external `.ocio` files; missing or invalid runtimes remain blocked with
+  explicit diagnostics. Motion standalone Preview and Export now share the
+  ordered `Input LUT -> Tone Map -> Creative LUT -> Display/OCIO -> Output LUT`
+  runtime in `app.motion_designer.color_runtime`. Delivery exposes Reinhard and
+  ACES-fitted tone maps plus three strength-controlled 3D `.cube` slots.
+  Missing, malformed, 1D, or non-`.cube` Motion LUTs fail preflight instead of
+  being silently omitted. The alpha-safe pipeline unpremultiplies before color
+  processing and restores the original alpha afterward; OpenEXR remains
+  scene-linear and intentionally bypasses the display/creative delivery chain.
+  `tools/qa_motion_color_pipeline.py` proves zero-byte Preview/runtime versus
+  actual PNG Export error and zero alpha error. Main-editor Motion-over-video
+  compositing remains raw linear-alpha composition followed by the main project
+  color transform, avoiding a second Motion delivery transform. Unreal UMG
+  output reports non-default
+  Motion color management as deterministic-bake-required instead of omitting it.
 - `export_profiles.py` and `export_pipeline.py` provide H.264, H.265, ProRes
   4444 alpha, PNG RGBA sequence, OpenEXR scene-linear sequence, and PNG/JPEG/
   WebP still output. PNG sequences resume only already-valid frames and publish
@@ -6208,17 +6349,28 @@ AI Script Edit MVP integration:
   `depth_z`, FOV, camera position, roll, and parallax strength. AR/PBR camera
   behavior is unchanged because `apply_to_2d` is off by default.
 - Any renderable image, text, vector, actor, or particle layer may use the
-  renderer-neutral metadata `replicator` contract for count, offset, rotation,
-  scale, opacity falloff, deterministic jitter, and seed. This is separate from
-  the existing vector-path Repeater and is composited before track matte output.
-  Per-layer movement-derived motion blur uses bounded temporal samples and
-  shutter values in the same shared render graph.
+  renderer-neutral metadata `replicator` contract. The independent Replicator
+  Inspector and Library presets expose line, grid, and radial arrangements,
+  count, grid columns, offset/radius, per-copy rotation and scale, opacity
+  falloff, deterministic jitter, and seed. This is separate from the existing
+  vector-path Repeater and is composited before track matte output. Canvas,
+  OpenGL Preview, file export, and main-timeline Motion Clip rendering consume
+  the same evaluated instance list. Per-layer movement-derived motion blur uses
+  bounded temporal samples and shutter values in the same shared render graph.
+- Motion Designer supports independent procedural Generator layers for solid
+  color, two-color linear gradient, checkerboard, grid, deterministic noise,
+  and radial rays. Generator dimensions, colors, scale, angle, offset, seed,
+  detail, and contrast are serialized in `.tgmotion`, validated, and rendered
+  through the common source adapter in Canvas, Preview, and export. Library and
+  Add Object can create Generator layers; Actions/MCP uses
+  `motion.generator.create` and `motion.generator.update`.
 - Alpha and luma track mattes remain stable layer-ID references and now have
   dedicated `motion.matte.set/clear` actions and `Motion` Inspector controls.
-  The same Inspector exposes 2.5D depth, motion blur, and the generic
-  Replicator. Text character/word/line animation continues to use the existing
-  typography selector/stagger renderer and is exposed to automation through
-  `motion.text.animator.set`.
+  The Motion Inspector exposes 2.5D depth and motion blur; Replicator is a
+  dedicated page while the former compact controls remain compatibility
+  aliases that preserve new arrangement fields. Text character/word/line
+  animation continues to use the existing typography selector/stagger renderer
+  and is exposed to automation through `motion.text.animator.set`.
 - The common effect path now includes `directional_blur`, `displacement`,
   `corner_pin`, `mesh_warp`, and `paper_fold` in addition to the existing
   grading, blur, glow, sharpen, and vignette effects. These effects use the same
@@ -6235,10 +6387,377 @@ AI Script Edit MVP integration:
   `Beat-Synced Montage`. Equivalent automation is available through
   `motion.advanced_preset.apply`, `motion.paper_paste.create`,
   `motion.camera.2_5d.set`, `motion.layer.depth.set`, `motion.blur.set`, and
-  `motion.replicator.set`.
+  `motion.replicator.set`. `Learn 05 - Generators and Replicators` is a
+  complete editable tutorial template for the two independent feature paths.
+- Motion Designer layers and groups may be converted into reusable interactive
+  button components through `app/motion_designer/interactive_button.py`.
+  Components persist `Normal`, `Hover`, `Pressed`, `Disabled`, and `Focused`
+  transform/opacity states, pointer/focus trigger mappings, bounds-based hit
+  padding, transition duration, and easing. The selected preview state is
+  evaluated by the same composition evaluator used by Canvas, Preview, export,
+  and Motion Clip compositing. Canvas pointer enter/down/up/leave previews use
+  a transient 16 ms transition timer that does not add undo entries; committed
+  state selection remains deterministic for Preview and export. The dedicated
+  `Button` Inspector and toolbar
+  `Component > Button` command use the document controller, so creation,
+  editing, removal, and undo remain project mutations rather than UI-only
+  state.
+- Automation uses `motion.button.inspect`, `motion.button.create`,
+  `motion.button.update`, `motion.button.state.set`, and
+  `motion.button.remove`. The component contract is suitable for authored
+  video overlays and downstream interactive exporters; Tiger Studio does not
+  yet claim native HTML/Lottie application-runtime export or event execution
+  inside a rendered MP4.
+- Painter-owned UI objects and Motion-owned animation now meet through the
+  versioned `tigerstudio.motion.ui_binding.v1` contract in
+  `app/motion_designer/ui_motion_binding.py`. A binding keeps the Painter
+  document/object/component stable IDs, Motion target layers and properties,
+  component state or transition scope, trigger, animation name, and delivery
+  policy without copying the Painter layout or style source of truth into the
+  Motion document. Bindings persist under composition metadata and are
+  validated with the normal Motion document.
+- Automation uses `motion.ui_binding.list`, `motion.ui_binding.set`,
+  `motion.ui_binding.remove`, and `motion.ui_binding.preflight`. UMG-native
+  transform and opacity tracks are assigned the binding's animation name.
+  Supported button pointer triggers generate a `play_animation` interaction;
+  material properties, unsupported triggers, missing stable references, and
+  conflicting track ownership are reported explicitly by preflight.
+- Unreal UMG delivery is a Tiger Studio-owned workflow, not a manual Unreal
+  plugin workflow. The shared, provider-neutral plugin source lives at
+  `resources/unreal_plugins/UMG/TigerStudioUMG`; it accepts `motion_designer`,
+  `painter`, and future providers through one versioned document contract.
+  The plugin contains separate `TigerStudioUMG` runtime and
+  `TigerStudioUMGEditor` editor modules, and both compile against the canonical
+  UE 5.8 installation.
+- `app.unreal_umg_plugin` discovers the internal plugin, installs it only into
+  `<Project>/Plugins/TigerStudioUMG`, enables it in the selected `.uproject`,
+  preserves unrelated plugin entries, and reports whether an Unreal restart is
+  required. It must never install into `Engine/Plugins`.
+- Private plugin source is not part of the public installer.
+  `tools/build_unreal_umg_plugin.py` creates a source-free Win64 bundle under
+  `bundled/unreal_plugins/UMG/TigerStudioUMG`, and `TigerCapture.spec` packages
+  only that bundle.
+- The user-facing entry point must live in Motion
+  Designer and expose project selection, compatibility/preflight status,
+  `Generate`/`Regenerate`, progress, generated-asset navigation, and real result
+  capture. Tiger Studio must internally package the composition, install or
+  update its project plugin when required, launch the configured Unreal Editor,
+  generate and compile the Widget Blueprint, validate the generated asset, and
+  return the report and capture to the same Tiger operation.
+- The Unreal plugin is a non-interactive execution backend controlled by Tiger
+  Studio. Users must not be required to enable JSON utilities, construct
+  structs, run Blueprint parsing nodes, copy files into a project, invoke a
+  commandlet, compile a Widget Blueprint, or capture evidence manually.
+- Native conversion currently creates Group/Text/Image/Button widget trees,
+  imports referenced textures and sounds, normalizes textures for the UI LOD
+  group, and converts position/rotation/scale/opacity tracks to
+  `UWidgetAnimation`. `UTigerStudioButton` executes clicked/hovered/
+  unhovered/pressed/released action records for named event emission,
+  animation playback, sound playback, visibility, opacity, and material-scalar
+  changes. Font assignment, complete per-state button styling, arbitrary UI
+  Material construction, and deterministic mask/effect baking remain explicit
+  follow-up scope; unsupported content must fail preflight or be reported as
+  baked and must never be silently omitted.
+- UMG generation follows one deterministic UE 5.8 pipeline:
+  1. validate the Tiger UMG document and resolve stable source IDs;
+  2. create or load the destination package and create a `UWidgetBlueprint`
+     through `UWidgetBlueprintFactory`;
+  3. replace or reconcile the generated `WidgetTree`, using a root
+     `UCanvasPanel` and stable widget names derived from layer IDs;
+  4. create native `UTextBlock`, `UImage`, `UButton`, panel, and provider
+     fallback widgets, then apply anchors, offsets, alignment, z-order, render
+     transform, opacity, brushes, fonts, and button styles;
+  5. import or reimport textures, fonts, and generated UI Materials into the
+     Tiger-generated content root before assigning object references;
+  6. create `UWidgetAnimation` and its `UMovieScene`, bind each stable widget,
+     and write position/rotation/scale and render-opacity channels using the
+     source frame rate and interpolation;
+  7. generate button state behavior and named interaction events without
+     replacing user-owned Blueprint graphs;
+  8. compile through Kismet/Widget Blueprint compiler APIs, save the package,
+     reopen and validate the generated class, then capture the actual Unreal
+     result.
+- Regeneration owns only assets and graph regions marked with Tiger source
+  metadata. Stable layer IDs preserve compatible widgets and animation
+  bindings; removed Tiger layers are deleted, but user-owned additions outside
+  the generated boundary survive regeneration.
+- Every future Motion Designer or Painter feature that can be serialized into a
+  Tiger UMG document must update the shared plugin conversion in the same
+  implementation. A feature must be classified as native UMG, UI Material,
+  deterministic bake, or blocked preflight. Silent omission is prohibited.
+- The Action/MCP surface provides `motion.umg.plugin.status`,
+  `motion.umg.plugin.install`, `motion.umg.preflight`, `motion.umg.package`, and
+  `motion.umg.generate`. `motion.umg.generate` performs the complete package,
+  project-plugin install/update, Unreal commandlet generation, Kismet compile,
+  package save, and generated-asset load validation sequence. Motion Designer
+  exposes the same operation through a separate top-toolbar `Unreal Link`
+  action using the Unreal Engine logo. It opens `MotionUnrealLinkDialog`;
+  Unreal project connection and UMG generation must not occupy an Inspector,
+  Library, or Output tab. Dedicated
+  visible Unreal capture/navigation remains follow-up scope and uses the shared
+  external-window capture actions rather than a second capture implementation.
+- UE 5.8 product QA generated
+  `/Game/TigerStudio/Generated/qa_interactive_button/Widgets/`
+  `WBP_TS_qa_interactive_button` twice consecutively from the same source
+  document. Both runs loaded the resulting `WidgetBlueprint`, generated one
+  widget and one animation, imported texture and sound assets, and reported no
+  compiler or generation errors. The reproducible command is
+  `tools/qa_unreal_umg_generation.py`; disposable evidence is written below
+  `debugCapture/unreal_umg_generation_qa`.
+- Motion Designer exposes a top-level `Templates` action beside its authoring
+  tools. `MotionTemplateGalleryDialog` presents production-rendered thumbnails,
+  category/search filters, and 16:9, 9:16, and 1:1 variants before applying a
+  complete editable template to the current composition. Templates that do not
+  support the requested aspect ratio automatically select a supported variant.
+  The compact Library template list remains a secondary quick-apply surface,
+  not the beginner-facing gallery.
+- The built-in catalog contains 24 templates: ten quick production starters,
+  five `Learn` templates, and nine multi-scene production packages for
+  UI/Product, Advertising, and Education. The production packages cover
+  15-, 20-, 24-, 30-, 45-, and 60-second workflows with four to eight
+  contiguous scenes. They include explicit media replacement slots, workflow,
+  tags, scene count, duration, and replacement checklists. `iOS App UI Motion
+  Kit` is a Tiger Studio system-inspired mobile UI package, not an Apple
+  official UI kit or bundled Apple design resource.
+- The UI/Product package provides app chrome, cards, quick actions, search,
+  lists, progress, toggles, notification, bottom-sheet, tab-bar, and CTA
+  examples. Advertising templates separate hook, reveal, benefits, proof,
+  offer, and CTA beats. Education templates separate module/objective,
+  numbered demo, comparison/check, recap, and next-lesson beats. Each scene is
+  composed of normal editable Motion layers rather than a flattened preview.
+- Selecting a card shows its included features, intended workflow, duration,
+  scene count, difficulty, estimated edit time, and replacement checklist.
+  Learning cards additionally show ordered hands-on steps. Applying a learning
+  template stores the same guide in
+  `composition.metadata.motion_tutorial`, marks example layers with tutorial
+  roles/steps, and exposes the metadata through the existing
+  `motion.template.list/inspect/apply` Action/MCP contract.
+- Applying another template from the gallery or compact Library replaces only
+  the previous template instance. User-authored layers remain intact, so
+  repeated selection does not accumulate hidden template layers or degrade
+  playback. `motion.template.apply` follows the same default and reports added
+  and removed layer IDs; automation may explicitly pass
+  `replace_existing=false` when stacked template instances are intentional.
+- A template change always resets the Motion Designer playhead to zero. If
+  forward playback is active, playback remains active and the elapsed-time
+  clock restarts from the first frame of the new template rather than
+  continuing from the previous template time.
+- `tools/qa_motion_template_catalog.py` renders every catalog entry plus a
+  representative frame from every scene through `MotionExportRenderer`.
+  Catalog QA fails on invalid compositions, non-animated templates, unstable
+  published controls, or missing catalog entries. Expansion priorities and
+  acceptance criteria are recorded in
+  `docs/MOTION_TEMPLATE_CATALOG_STRATEGY_KO.md`.
 - These tools provide editable 2.5D editorial motion and deterministic
   distortion; they do not claim a full 3D scene graph, arbitrary user-authored
   displacement video maps, cloth simulation, or After Effects plugin parity.
+- The post-M12 professional motion-graphics roadmap is recorded in
+  `docs/MOTION_DESIGNER_AE_GAP_MILESTONES_KO.md`. M13-M20 cover full-body
+  cutout rigging, Puppet mesh deformation, nested compositions and advanced
+  animation curves, typography/vector motion, video matte/roto/keying,
+  tracking/stabilization, unified 2.5D/3D composition, and product-scale
+  effects/color/templates/rendering. These are planned milestones and must not
+  be described as current features until their schema, Action/MCP,
+  Preview/Export parity, stress test, and real artifact gates pass.
+- M13 character-rigging foundation is complete. Motion compositions persist
+  provider-neutral `tigerstudio.motion.rig.v1` cutout rigs with stable rig and
+  bone IDs, a validated parent hierarchy, rest positions, animated rotation
+  and translation channels, joint limits and lock flags, layer bindings,
+  poses, constraints, and metadata. Invalid roots, parent cycles, duplicate
+  IDs, missing layers/bones, and duplicate bindings fail composition
+  validation.
+- Motion Designer can create a symmetric 17-bone humanoid cutout rig from the
+  `Rig > Full Body Rig` mapping dialog. Selecting a bound layer displays the
+  bone hierarchy over the Canvas; joints can be moved directly and the Rig
+  Inspector edits rest position, rotation limits, and lock state through the
+  normal undoable document controller.
+- The Qt-free evaluator applies animated bone deltas to bound layers, so Canvas,
+  Preview, Motion Clip, and export share the same transform result. Current
+  automation includes `motion.rig.create`, `motion.rig.humanoid.create`,
+  list/inspect/delete, bone add/update/delete, layer bind/unbind,
+  `motion.rig.ik.solve`, persistent `motion.rig.constraint.set/remove/enable`,
+  `motion.rig.ik.bake`, `motion.rig.bone.mirror`, pose save/apply with
+  mirroring, and `motion.rig.motion.apply` for arm-wave, head-nod, and
+  walk-contact presets. Persistent two-bone IK targets and poles are animated
+  properties; evaluation blends FK and IK by animated weight without mutating
+  the document. Disabling a constraint switches the chain to FK, while baking
+  samples IK into ordinary rotation keyframes and then disables the constraint.
+- The Rig Inspector exposes end locking, FK/IK switching, IK bake, and selected
+  bone mirroring. Selecting a rig bone exposes Bone Rotation and Bone
+  Translation in the Timeline graph editor, using the same keyframe mutation
+  and undo path as layer channels.
+- M13 evidence uses three durable real character-part sets from the bundled
+  Spine samples (girl, Erikari, and Celestial Circus). A ten-minute composition
+  QA samples persistent leg IK and arm motion through Preview/Export evaluation
+  and verifies the renderer frame cache remains at its configured capacity.
+  This completes the rigid cutout-rig milestone; deformable skin and cloth
+  remain M14 work rather than an M13 claim.
+- M14 Puppet Mesh Deformation is complete. Image layers may store a validated
+  `tigerstudio.motion.puppet_mesh.v1` triangular mesh with stable
+  vertex/pin IDs and Position, Bend, Starch, or Overlap pin roles. Position and
+  rotation are ordinary animated properties. The shared render graph applies a
+  premultiplied-alpha piecewise affine warp for both Preview and Export.
+- Mesh creation locally subdivides mixed-alpha boundary cells with Delaunay
+  triangulation while discarding fully transparent source regions; its alpha
+  threshold is available in Action/MCP. Overlap pin depth uses spatial falloff
+  to order triangles. Flip, degenerate, and excessive edge-stretch problems
+  are repaired around affected triangles, with a deterministic safe fallback.
+- The Puppet Inspector creates the mesh, adds pins, and edits radius, strength,
+  and bend. Selected pins are draggable on the Canvas and expose Pin Position
+  and Pin Bend in the Timeline graph editor. Pins may reference an M13 rig bone
+  as a translation/rotation driver. Action/MCP coverage includes
+  `motion.puppet.inspect`, `motion.puppet.mesh.create/remove`,
+  `motion.puppet.pin.add/update/delete`, and `motion.puppet.bind.rig`.
+- M14 QA includes a bundled Celestial Circus transparent character part at
+  three deformation times and a 100-pin, 20,000-triangle stress contract.
+  Preview evaluates pins and rig drivers on CPU, updates dynamic position/UV
+  VBO data, and rasterizes the textured mesh in OpenGL while caching the source
+  texture. Unsupported effects and mattes use the shared Painter fallback;
+  deterministic Export retains the CPU piecewise-affine path. Real OpenGL QA
+  covers 476 triangles with GL error 0 and one texture upload, while 10-minute
+  30fps solver QA covers 18,001 frames with no unsafe/non-finite/drift frames
+  and a 52KB working-set increase.
+- M15 Composition and Animation Core is complete. `precomp` layers embed a
+  validated `tigerstudio.motion.precomp.v1` child composition snapshot so a
+  `.tgmotion` document remains self-contained. Layers can be multi-selected
+  and pre-composed, opened in place by double-click, edited, and committed back
+  through Parent navigation. Saving or autosaving while inside a child rebuilds
+  the root snapshot instead of losing the parent document.
+- Pre-compose Preview and Export use the same recursive render graph.
+  Per-instance child-layer overrides are non-destructive and Action/MCP exposes
+  create, inspect, override, and refresh operations.
+- Layer source time can use `tigerstudio.motion.time_remap.v1` keyframes with
+  linear, reverse, freeze/hold, or speed-ramp presets. Source Time appears in
+  the Graph Editor. The Graph Editor has Value and Speed displays plus
+  Auto/Linear/Hold tangent modes, and `motion.graph.tangent.update` exposes
+  exact tangent/interpolation mutation to automation.
+- Child transform/source properties can be published and animated separately
+  on each pre-compose instance without changing the child snapshot. Controller
+  Nulls are non-rendering layers whose matching transform channels can drive
+  target layers through the existing validated expression dependency graph.
+  Graph keys can be marked roving and are redistributed by value/vector
+  distance between fixed neighbors. These operations are available through
+  `motion.property.publish`, `motion.precomp.published_value.set`,
+  `motion.controller.create/link`, and `motion.graph.roving.set`.
+- M15 stress QA renders three nested composition levels and 100 embedded
+  instances, and verifies 500 document edits can be undone to the exact
+  starting state.
+- M15 direct Graph editing includes draggable incoming/outgoing Bezier handles;
+  dragging persists a broken tangent through the same controller and undo path.
+- M15 Frame Blending uses adjacent source-frame sampling in the shared
+  Preview/Export render graph, including nested compositions. Optical Flow
+  requests report OpenCV backend availability but currently use an explicit
+  deterministic Frame Mix fallback until vector warping is enabled. The UI and
+  Action/MCP surface never silently claim optical interpolation.
+- M16 Typography and Vector Motion is complete. `text_animators` is an
+  ordered, 32-entry stack evaluated per grapheme, word, or line. Each entry can
+  select a normalized range, apply square/ramp/triangle/round influence,
+  offset or reorder it deterministically, and composite per-glyph position,
+  scale, rotation, opacity, fill, tracking, and blur over legacy typography
+  presets. The Typography Inspector and
+  `motion.text.animator.stack.set/add/update/remove` edit the same contract.
+- Shape rendering now supports `offset_path`, topology-safe animated Path
+  Morph correspondence, linear gradient/dashed strokes, dash offset, taper,
+  and variable-width profiles. Action coverage includes
+  `motion.vector.offset_path.set`, `motion.vector.path_morph.set`, and
+  `motion.vector.stroke.set`. Variable-width strokes explicitly fall back from
+  the vector GPU packet to the shared painter render path.
+- Tiger UMG schema v3 blocks advanced Text/Shape features that do not yet have
+  native UMG or deterministic bake output and serializes exact block reasons.
+  The UE 5.8 plugin was rebuilt successfully; the public bundle remains
+  source-free. No Motion feature is silently omitted from Widget Blueprint
+  generation.
+- `motion.typography.character_3d.prepare` stores versioned, non-rendering
+  per-grapheme source spans, extrusion depth, bevel, material slot, and 3-axis
+  transform intent for the M19 renderer. Its payload explicitly reports
+  `prepared_for_m19_not_rendered_in_m16`.
+- M16 acceptance evidence is generated by
+  `tools/qa_motion_m16_typography_vector.py`: five kinetic typography samples,
+  five logo reveals, three animated infographic paths, a PNG contact sheet,
+  and a 3840x2160 partial-alpha vector-edge check. Editable SVG still export
+  reports advanced Text/Shape features as explicit bake requirements instead
+  of silently dropping them.
+- M17 Matte, Roto and Keying is complete. Motion exposes
+  `motion.matte.object.select/refine/propagate/correction.set/freeze/assign`
+  and `motion.key.create/update/diagnostics`. Point and planar propagation
+  caches interpolate correction keys, can be frozen against accidental
+  retracking, and are shared by Preview and Export.
+- Chroma, Luma, and Difference Key effects run in the common effect adapter
+  with choke, feather, and despill controls. Garbage and Holdout mask modes
+  remove marked regions through the common mask adapter. Alpha/Luma and their
+  inverse track-matte modes can reuse one matte layer across multiple targets.
+- Edge-aware matte refinement preserves soft alpha delivered by semantic
+  segmentation instead of binarizing hair strands, translucent material, or
+  motion-blurred boundaries. `tools/qa_motion_m17_matte_keying.py` generates a
+  10-case green/blue-screen corpus and measures minimum IoU, maximum edge spill,
+  temporal flicker, and soft-alpha error. General moving-object removal remains
+  experimental and is not claimed as completed video cleanup.
+- M18 Tracking and Stabilization is in progress. Composition metadata can store
+  provider-neutral `tigerstudio.motion.track_asset.v1` Point, Multi-point,
+  Planar, Mask, and Face tracks. `motion.track.*` actions can create, analyze,
+  inspect, and bake them to layer Position/Scale/Rotation; inverse baking is
+  exposed by `motion.stabilize.create`.
+- The Motion Tracking inspector reports mean confidence, occluded samples,
+  reacquisition count, maximum step, drift review state, and source-revision
+  status. It runs Point, Planar, or Face analysis in a background worker, then
+  applies Attach, Stabilize, or affine Corner Pin baking to the selected layer,
+  or Relinks to a newly hashed source.
+  Composition validation rejects malformed, duplicate, and dangling tracking
+  assets.
+- Tracks can also bake translation into effect-point parameters and normalized
+  Puppet-pin position/rotation. Planar tracks can bake their affine result into
+  all four parameters of an existing Corner Pin effect. AR/PBR layers use the
+  same layer transform path.
+  `motion.track.face` reuses the VTuber face-video extractor and converts
+  MediaPipe/OpenCV face center, scale, and roll into a reusable track. UI
+  analysis preserves the selected layer context while it runs and retimes face
+  samples from trimmed source time into layer in/out and time-scale; the same
+  mapping is available through optional `motion.track.face` action parameters.
+- Video tracking skips up to 1.5 seconds of featureless opening frames while
+  retaining an identity hold at the requested start. Real-video QA is provided
+  by `tools/qa_motion_m18_real_tracking.py`; current local evidence has 11
+  clips, 10 generated tracks, and 9 quality passes, so the 20-clip M18 gate is
+  not complete.
+- During a full Point-track occlusion, the provider may extrapolate the last
+  valid optical-flow velocity for at most 0.5 seconds, then returns to measured
+  motion after feature reacquisition. The predicted-frame count is preserved
+  in diagnostics; this is not claimed as general nonlinear occlusion recovery.
+- Point-track observations larger than 4% of the target-frame diagonal per
+  analysis step are rejected as implausible correspondence outliers. Rejected
+  clips remain visible as low-confidence Review results rather than receiving
+  a fabricated motion path.
+- `motion.camera_solve.create` currently stores only a manual-assisted
+  `manual_depth_plane_v1` ground-plane and camera-intrinsics contract. Full
+  automatic 3D matchmove, perspective homography, facial-region tracks, and
+  20-real-video drift evidence remain M18 work and are not product claims.
+- M19 Unified 2.5D/3D Composition is in progress. A normal Motion renderable
+  layer can opt into the versioned 3D-card metadata through
+  `motion.3d.layer.enable`; the Advanced inspector edits Depth Z, X/Y card
+  rotation, camera exclusion, and cast/receive-shadow intent. Preview and
+  Export share `advanced_motion.project_layer_matrix`, including affine
+  axis-foreshortening for card tilt.
+- Motion camera layers now expose Perspective and Orthographic projection plus
+  `orthographic_size`. Orthographic 2.5D projection keeps layer scale
+  independent of Depth Z, while the existing AR/PBR bridge uses the same
+  camera contract for distance-independent model framing. The current 3D-card
+  tilt is an affine approximation.
+- Enabled 3D cards can cast a receiver-clipped silhouette onto lower cards
+  that explicitly enable `receive_shadows`. The shared Render Graph derives
+  offset from card depth difference and the active Directional Light azimuth
+  and elevation, then applies authored strength and softness before both
+  Preview and Export. This is currently a Qt raster compositing path, not a GPU
+  shadow map.
+- Motion AR/PBR lighting supports at most three active direct lights in the
+  shared preview/export contract. One Directional Light is selected as the
+  primary shadowed key; up to two remaining Directional, Point, or Spot lights
+  are evaluated as unshadowed Cook-Torrance direct contributions. Point lights
+  use position/range attenuation and Spot lights additionally use inner/outer
+  cone attenuation. `app.ar_pbr.schema.normalize_lighting_settings`,
+  `app.motion_designer.ar_pbr_source.evaluate_ar_pbr_frame`,
+  `app.opengl_preview`, and `app.ar_pbr.export_packet_pbr` share the normalized
+  payload. This is not an unlimited light stack: secondary-light shadow maps,
+  continuous 3D surfaces, mesh perspective deformation, model animation clips,
+  and text/shape extrusion remain M19 work and are not product claims.
 - Current limits: the render graph uses QImage source surfaces presented by
   OpenGL rather than a shader-only layer compositor. Fully GPU-native Bezier
   path tessellation remains pending. Audio analysis is
@@ -6456,6 +6975,111 @@ AI Script Edit MVP integration:
   and limits GL readback to stroke-signature changes; the next canvas GPU
   target is retained GL texture display plus textured-brush stamp/noise shader
   parity.
+- The 2026-07-28 Painter stroke-latency pass makes uninterrupted brush input a
+  release gate rather than a best-effort optimization. Live rendering must do
+  work proportional to only the newest input segment (at most two stroke points
+  per sample), committed strokes must be served from a retained raster/OpenGL
+  cache, and appending a new top-layer stroke must update that cache without
+  replaying the full document. Stroke add/remove Undo uses delta commands instead
+  of copying the whole document; broader structural edits may still use document
+  snapshots. View-only changes such as pan, zoom, Canvas Pose rotation, guides,
+  and selection chrome must not invalidate or rebuild committed brush content.
+  The OpenGL brush path may reuse a precomputed stroke signature instead of
+  hashing the same stroke twice. Wet Canvas exact refinement runs asynchronously
+  behind a stale/fallback frame and is capped to a 768-pixel preview dimension;
+  Material/PBR preview uses revision-based cache keys and capped preview
+  dimensions. These preview limits never reduce `.tspaint` source data or final
+  export fidelity. This is a bounded-work interaction contract, not a claim of
+  absolute hardware-independent hard real time; supported tablet/GPU combinations
+  still require latency QA before release.
+- Canvas Pose v1 is a non-destructive document-view transform for artists who
+  rotate the working surface while drawing. It applies one shared
+  rotation/zoom/pan transform to the raster background, editable strokes,
+  paths/selections, guides, and in-canvas material preview, while mouse and
+  tablet coordinates are inverse-transformed back into document space before
+  sampling. `R` + drag rotates freely, `Shift+R` + drag snaps to 15-degree
+  increments, `Alt+R` + drag is temporary and restores the prior angle on
+  release, tapping `R` toggles the previous/current angle, and double-tapping
+  `R` resets to 0 degrees. The status-bar angle field supports direct numeric
+  entry. View-menu slots 1-4 save and recall rotation, zoom, and pan together,
+  and those slots plus the active angle persist in the `.tspaint` view payload.
+  Rotation must reuse the retained committed canvas instead of re-rendering
+  strokes, and drawing is accepted only inside the transformed document bounds.
+  Export remains in unrotated document coordinates. Widget-based speech-bubble
+  or sticker editing chrome, UI Design, 3D Place, trackpad twist gestures, and
+  automatic edge/handedness alignment are outside v1 and must not be advertised
+  as supported until they use the same transform contract.
+- The 2026-07-28 Painter Quick Palette is the primary tablet-first brush/color
+  switching surface. `F6`, a right-click, or a pen-barrel right-click opens it
+  at the pointer with the current/previous color comparison, RGB/HSV/HEX values,
+  pinned/recent/OKLCH colors, up to eight recent/favorite brushes, and direct
+  size/opacity/hardness fields. A right-button/barrel movement beyond the
+  six-pixel click threshold becomes a HUD adjustment instead of opening the
+  menu: horizontal movement changes brush size exponentially and vertical
+  movement changes hardness. The gesture is consumed before normal paint input,
+  so opening or adjusting the HUD must never create a stroke. `Alt` + canvas
+  click samples the displayed merged canvas color and records it in color
+  history. Quick Palette controls and palette persistence must remain outside
+  the per-tablet-sample render path.
+- Painter brush size supports `1..2048` document pixels consistently in the
+  canvas, top-bar spin box, Brush Selector, Quick Palette, document restore, and
+  user presets. Brush pressure response is a saved `25..250%` curve applied to
+  normalized tablet pressure before the stroke is committed; `100%` is linear.
+  The global brush library persists favorites, the last 16 brush keys, custom
+  brushes, tags/groups, pressure response, and touch-target preference under
+  `~/TigerStudio/Painter/palette_library.json`. Custom brushes support create
+  from current settings, update, duplicate, rename/tag/regroup, reorder, delete,
+  and `.tsbrushes` JSON bundle import/export. Built-in brushes remain immutable.
+  Brush thumbnails use a preset-signature icon cache so search/filter/open does
+  not repaint identical previews repeatedly.
+- Painter color history stores up to 32 global recent colors and 32 colors in
+  the active `.tspaint` document palette. Global pinned colors survive across
+  documents; document colors serialize as
+  `tigerstudio.painter.document-palette.v1`. The selected color is added at
+  stroke completion as well as explicit palette/picker selection, and palette
+  disk writes are debounced after input. Reference-board palette extraction
+  prepends colors to the document palette without replacing recent history.
+  Default tablet targets are at least 36 pixels wide for recent/document colors,
+  with a compact-target preference available.
+- Derived shade/tint/analogous/complement colors use
+  `oklch_srgb_gamut_mapped_v1`: operations happen in OKLCH and reduce chroma
+  until the result fits display sRGB, producing more stable perceived-lightness
+  steps than the previous HSV scaling. Full, monochrome, analogous,
+  complementary, split-complementary, and triadic modes are selectable, and the
+  selected harmony mode persists with the global palette library. The current
+  stroke/document color payload remains 8-bit sRGB; this is not a claim of
+  native wide-gamut or ACES/OCIO Painter stroke storage. A future schema revision
+  is required before preserving out-of-sRGB paint values through edit and export.
+- Painter Output v1 removes the need for users to calculate print pixels
+  manually. New Canvas begins with a `Screen / Web / Video` versus `Print`
+  purpose selector. Print presets include A4, A5, B5 manga, postcard, A3/A2
+  poster, and square formats; the user may work in millimetres or inches and
+  selects color/general print, line art/manga, or large-poster intent. The UI
+  shows trim size, PPI, bleed, and the resulting pixel dimensions together.
+  Pixel dimensions include bleed while the displayed physical size is the final
+  trimmed page. For example, A4 at 300 PPI is 2480x3508 pixels without bleed and
+  2551x3579 pixels with the default 3 mm bleed on every edge.
+- `Image > Image & Output Size` exposes Photoshop-style resampling semantics in
+  plain language. With `Resample pixel data` off, the pixel dimensions are
+  locked and changing PPI changes only the physical print size/metadata; it
+  cannot create detail. With resampling on, physical size or PPI changes
+  recalculate and resize pixels. The existing document stores normalized
+  `tigerstudio.painter.output.v1` output intent including trim millimetres, PPI,
+  bleed, safe margin, artwork kind, color-space intent, and resampling
+  preference in `.tspaint`.
+- Print canvases display non-exporting output guides inside the same Canvas Pose
+  transform: a dashed magenta trim line and a dotted cyan safe-area line. The
+  default print safe margin is 5 mm. Output preflight reports effective PPI and
+  compares it with intent targets (300 PPI color/general, 600 PPI line art/manga,
+  150 PPI large format), warns when bleed is absent or an sRGB printer profile
+  must be confirmed, blocks dimensions beyond Painter's 16384-pixel canvas
+  limit, and is available before export from `Image > Output Preflight`.
+- PNG print export writes PPI metadata and returns the same output-preflight
+  report without changing document pixels. Screen exports remain pixel-only.
+  Output guides are never rasterized into export. Native CMYK editing,
+  printer-profile conversion, TIFF, and print-ready PDF are not part of Output
+  v1 and must not be claimed until their color/profile and bleed-box contracts
+  are implemented and verified.
 - Painter reference-board support is non-destructive by default. The 2026-07-24
   first slice adds a right-inspector `REFERENCE` panel, image import from file
   or clipboard, selected reference position/size/opacity/visibility controls,
@@ -6672,12 +7296,12 @@ AI Script Edit MVP integration:
   Group, or Button may use Horizontal or Vertical flow with independent
   L/T/R/B padding, gap, main-axis Start/Center/End/Space Between, and
   cross-axis Start/Center/End/Stretch. Children are ordered by stable z/document
-  order; `positioning=absolute` opts out; nested containers resolve bottom-up
-  for Hug measurement and outer-to-inner for placement after constraints. Each
-  axis supports Fixed, Hug Content, or Fill Container, and fixed-size
-  containers may wrap children into deterministic rows or columns. Fill
-  distributes remaining line space after fixed children and gaps. Inspector
-  edits and
+  order; `positioning=absolute` opts out; nested containers resolve
+  bottom-up for Hug measurement and outer-to-inner for placement after
+  constraints. Each axis supports Fixed, Hug Content, or Fill Container, and
+  fixed-size containers may wrap children into deterministic rows or columns.
+  Fill distributes remaining line space after fixed children and gaps.
+  Inspector edits and
   `paint.ui.layout.set` both delegate to the undoable object mutation path.
   Localization overrides remain explicit follow-up work.
 - Each Painter UI artboard stores provider-neutral `layout_grid`, `guides`,
@@ -6695,9 +7319,9 @@ AI Script Edit MVP integration:
 - Painter UI objects store stable-ID `responsive_overrides` keyed by breakpoint
   and orientation. Wildcard overrides apply first and exact context overrides
   refine them without changing the base object ID. The active artboard context
-  drives Canvas, Constraint, and Auto Layout resolution. Inspector can edit or
-  clear the current context override, while automation uses
-  `paint.ui.responsive.override.set/remove`; both use normal Undo/Redo.
+  drives Canvas, Constraint, Auto Layout, and Motion geometry resolution.
+  Inspector can edit or clear the current context override, while automation
+  uses `paint.ui.responsive.override.set/remove`; both use normal Undo/Redo.
 - Painter UI artboards persist `light`, `dark`, or `high_contrast` preview
   themes. Typed tokens resolve default values, per-theme `theme_values`, and
   stable alias chains into provider-neutral object paths after responsive
@@ -6892,6 +7516,34 @@ AI Script Edit MVP integration:
   diff, requires explicit apply, supports selected operations, rejects stale
   plans, and audits accessibility, localization, resource budgets, and target
   delivery.
+- Painter UI Design exposes `Animate` beside the canvas tools. It opens the
+  selected object or group in Motion Designer, maps the selected subtree with
+  the original Painter object IDs as Motion layer IDs, and keeps Painter as the
+  layout/style source of truth. Linked compositions and keyframes persist
+  inside the native `.tspaint` payload and participate in Painter Undo/Redo.
+  The adjacent playback control evaluates the linked composition directly on
+  the Painter canvas for position, scale, rotation, and opacity preview.
+- Basic horizontal/vertical Auto Layout is resolved before Motion mapping.
+  Parent padding, gap, cross-axis alignment, stretch, and absolute-positioned
+  child opt-out are supported. When Auto Layout changes, the bridge rebases
+  existing position keyframes by the layout delta so authored Motion offsets
+  remain intact instead of snapping back to stale absolute coordinates.
+  Automation uses `paint.ui.motion.attach`, `paint.ui.motion.open`,
+  `paint.ui.motion.preview`, and `paint.ui.motion.inspect`.
+- Motion-to-Painter placement is a separate actor workflow. The UI Design
+  toolbar's `Motion Actor` command imports a `.tgmotion` project as a
+  `motion_actor` object instead of flattening it to a poster. The actor keeps
+  its Motion composition ID and source path, is selected, moved, resized,
+  rotated, reordered, grouped, and deleted through the normal Painter UI
+  object contract, and renders its current transparent Motion frame inside its
+  object bounds. The shared playback control advances all placed Motion Actors
+  while continuing to preview selected Painter-to-Motion bindings.
+- Motion Actor compositions are embedded in `.tspaint` alongside the UI
+  document and survive save/load and Undo/Redo. Selecting a Motion Actor and
+  pressing `Animate` opens its original editable composition rather than
+  generating a second wrapper composition. Automation uses
+  `paint.ui.motion_actor.import` and `paint.ui.motion_actor.list`; import accepts
+  explicit placement and size for deterministic AI/MCP layout.
 - Painter UI groups keep stable child IDs and remain editable: grouping,
   ungrouping, and layer-stack reordering are exposed through
   `paint.ui.object.group`, `paint.ui.object.ungroup`, and

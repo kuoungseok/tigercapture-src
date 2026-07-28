@@ -60,9 +60,9 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.component.add",
         "paint.ui.component.create",
         "paint.ui.component.instantiate",
-        "paint.ui.component.sync",
-        "paint.ui.component.property.define",
-        "paint.ui.component.property.bind",
+            "paint.ui.component.sync",
+            "paint.ui.component.property.define",
+            "paint.ui.component.property.bind",
         "paint.ui.component.state.override.set",
         "paint.ui.component.instance.property.set",
         "paint.ui.component.variant.create",
@@ -82,6 +82,12 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.interaction.add",
         "paint.ui.interaction.update",
         "paint.ui.interaction.remove",
+        "paint.ui.motion.attach",
+        "paint.ui.motion.open",
+        "paint.ui.motion.preview",
+        "paint.ui.motion.inspect",
+        "paint.ui.motion_actor.import",
+        "paint.ui.motion_actor.list",
         "paint.ui.delivery.profiles",
         "paint.ui.delivery.preflight",
         "paint.ui.handoff.export",
@@ -209,6 +215,20 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     ).to_dict()
     assert interaction_result["ok"]
 
+    motion_result = registry.execute(
+        "paint.ui.motion.attach",
+        {"object_id": object_id, "duration_ms": 800},
+    ).to_dict()
+    assert motion_result["ok"]
+    composition_id = motion_result["result"]["composition_id"]
+    assert motion_result["result"]["composition"]["duration_ms"] == 800
+    inspected_motion = registry.execute(
+        "paint.ui.motion.inspect",
+        {"object_id": object_id},
+    ).to_dict()
+    assert inspected_motion["ok"]
+    assert inspected_motion["result"]["composition_id"] == composition_id
+
     handoff_dir = tmp_path / "handoff"
     handoff = registry.execute(
         "paint.ui.handoff.export",
@@ -231,6 +251,13 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     assert stored["ui_document"]["components"][0]["id"] == component_id
     assert stored["ui_document"]["tokens"][0]["id"] == token_id
     assert stored["ui_document"]["interactions"][0]["source_object_id"] == object_id
+    assert (
+        stored["ui_document"]["linked_targets"]["motion_designer"][
+            "object_bindings"
+        ][object_id]
+        == composition_id
+    )
+    assert stored["ui_motion_compositions"][composition_id]["duration_ms"] == 800
     assert stored["workspace"]["mode"] == "ui_design"
 
     restored = PaintDialog(
@@ -250,6 +277,11 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     assert restored_state["ui_design"]["validation"]["component_count"] == 1
     assert restored_state["ui_design"]["validation"]["token_count"] == 1
     assert restored_state["ui_design"]["validation"]["interaction_count"] == 1
+    assert composition_id in restored._painter_ui_motion_compositions
+    assert (
+        restored._painter_ui_motion_compositions[composition_id].duration_ms
+        == 800
+    )
 
     dialog.close()
     restored.close()

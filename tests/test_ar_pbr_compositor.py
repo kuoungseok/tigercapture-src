@@ -1323,6 +1323,7 @@ def test_gpu_packet_export_renderer_surfaces_texture_plan(tmp_path):
                     "clearcoat_roughness": 0.09,
                     "clearcoat_ior": 1.53,
                     "clearcoat_tint": [1.0, 0.95, 0.9],
+                    "parallax_mode": "pom",
                     "parallax_strength": 0.48,
                     "parallax_depth": 0.04,
                     "parallax_center": 0.5,
@@ -1485,9 +1486,11 @@ def test_gpu_packet_export_renderer_surfaces_texture_plan(tmp_path):
     assert diag["pbr_clearcoat_pixels"] > 0
     assert diag["pbr_parallax_rendering"]["schema"] == "tigerstudio.ar_pbr.parallax.v1"
     assert diag["pbr_parallax_rendering"]["enabled"] is True
+    assert diag["pbr_parallax_rendering"]["mode"] == "pom"
     assert diag["pbr_parallax_rendering"]["strength"] == 0.48
     assert diag["pbr_parallax_applied"] is True
     assert diag["pbr_parallax_pixels"] > 0
+    assert diag["pbr_parallax_sampling"] == "single_offset_fallback"
     assert diag["pbr_displacement_rendering"]["schema"] == "tigerstudio.ar_pbr.displacement.v1"
     assert diag["pbr_displacement_rendering"]["enabled"] is True
     assert diag["pbr_displacement_rendering"]["height_strength"] == 0.54

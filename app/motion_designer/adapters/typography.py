@@ -71,9 +71,29 @@ def _paint_glyph(
         shifted.translate(shadow_offset[0], shadow_offset[1])
         painter.fillPath(shifted, shadow)
     if stroke_width > 0 and stroke.isValid():
-        painter.strokePath(path, QPen(stroke, stroke_width * 2.0))
+        if motion.blur_px <= 1e-6:
+            painter.strokePath(path, QPen(stroke, stroke_width * 2.0))
     color = QColor(motion.color_override) if motion.color_override else fill
-    painter.fillPath(path, color if color.isValid() else fill)
+    color = color if color.isValid() else fill
+    if motion.blur_px > 1e-6:
+        radius = min(32.0, float(motion.blur_px))
+        offsets = (
+            (-radius, 0.0), (radius, 0.0), (0.0, -radius), (0.0, radius),
+            (-radius * .7, -radius * .7), (radius * .7, -radius * .7),
+            (-radius * .7, radius * .7), (radius * .7, radius * .7),
+            (0.0, 0.0),
+        )
+        painter.setOpacity(
+            max(0.0, min(1.0, motion.opacity)) / len(offsets),
+        )
+        for x, y in offsets:
+            shifted = QPainterPath(path)
+            shifted.translate(x, y)
+            if stroke_width > 0 and stroke.isValid():
+                painter.strokePath(shifted, QPen(stroke, stroke_width * 2.0))
+            painter.fillPath(shifted, color)
+    else:
+        painter.fillPath(path, color)
     painter.restore()
 
 
@@ -136,6 +156,9 @@ def render_typography(layer: MotionLayer, time_ms: float = 0.0):
     )
     animation = evaluate_source_param(params, "text_animation", time_ms, {})
     animation = animation if isinstance(animation, Mapping) else {}
+    animator_stack = evaluate_source_param(params, "text_animators", time_ms, None)
+    if isinstance(animator_stack, list):
+        animation = {"animators": animator_stack}
     motions = evaluate_glyph_motion(text, animation, time_ms, max(1, layer.out_ms - layer.in_ms))
     text_path = evaluate_source_param(params, "text_path", time_ms, None)
     text_path = text_path if isinstance(text_path, Mapping) else None
@@ -172,13 +195,14 @@ def render_typography(layer: MotionLayer, time_ms: float = 0.0):
         offset = float(evaluate_source_param(params, "text_path_offset", time_ms, .5) or 0.0)
         cursor = max(0.0, min(path_length, offset * path_length - total_advance * .5))
         for glyph in glyphs:
+            motion = motions.get(glyph.source_index, GlyphTransform.identity())
             point, angle = _point_on_polyline(points, cursor + glyph.advance * .5)
             path = QPainterPath(glyph.path)
             path.translate(-glyph.advance * .5, -glyph.baseline)
             _paint_glyph(painter, path, point, (glyph.advance, metrics.height()),
-                         motions.get(glyph.source_index, GlyphTransform.identity()), fill, stroke,
+                         motion, fill, stroke,
                          stroke_width, shadow, shadow_offset, angle=angle, baseline_path=True)
-            cursor += glyph.advance
+            cursor += glyph.advance + motion.tracking
         painter.end()
         return image
 
@@ -188,13 +212,19 @@ def render_typography(layer: MotionLayer, time_ms: float = 0.0):
     top = padding + max(0.0, (height - padding * 2.0 - block_height) * .5)
     for line_index, line in enumerate(layout.lines):
         x = line_origin_x(line, width, padding, align)
+        tracking_offset = 0.0
         for glyph in line.glyphs:
+            motion = motions.get(glyph.source_index, GlyphTransform.identity())
             _paint_glyph(
                 painter, glyph.path,
-                QPointF(x + glyph.position.x(), top + line_index * line_height),
+                QPointF(
+                    x + glyph.position.x() + tracking_offset,
+                    top + line_index * line_height,
+                ),
                 (glyph.advance, line.height),
-                motions.get(glyph.source_index, GlyphTransform.identity()),
+                motion,
                 fill, stroke, stroke_width, shadow, shadow_offset,
             )
+            tracking_offset += motion.tracking
     painter.end()
     return image

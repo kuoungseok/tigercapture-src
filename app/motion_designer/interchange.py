@@ -100,6 +100,27 @@ def preflight_interchange(composition: MotionComposition, format_id: str, *, tim
                 for key in ("path", "fill", "stroke", "stroke_width", "text", "font_size"):
                     if _animated_source(params.get(key)):
                         bake_required.append({"layer_id": layer.id, "reason": f"animated source parameter {key}"})
+            else:
+                params = layer.source.params
+                unsupported_params = (
+                    ("trim", "Trim Paths"),
+                    ("offset_path", "Offset Paths"),
+                    ("repeater", "Repeater"),
+                    ("boolean", "Merge Paths"),
+                    ("gradient", "gradient fill"),
+                    ("stroke_gradient", "gradient stroke"),
+                    ("stroke_taper", "Variable-width/tapered strokes"),
+                    ("text_path", "text on path"),
+                    ("text_animation", "legacy typography animation"),
+                    ("text_animators", "Text Animator stacks"),
+                    ("font_axes", "variable font axes"),
+                )
+                for key, label in unsupported_params:
+                    if params.get(key):
+                        bake_required.append({
+                            "layer_id": layer.id,
+                            "reason": f"Feature '{label}' is outside the editable SVG still subset.",
+                        })
             supported.append(layer.id)
     elif identifier == "gltf_subscene":
         sources = [layer for layer in active if layer.layer_type == "ar_pbr" and layer.source.uri]

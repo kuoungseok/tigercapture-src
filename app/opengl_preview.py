@@ -1097,6 +1097,25 @@ uniform int u_has_shadow_map;
 uniform int u_flip_uv_v;
 uniform float u_depth_enabled;
 uniform vec3 u_light_dir;
+uniform vec3 u_light_color;
+uniform int u_extra_light0_enabled;
+uniform int u_extra_light0_type;
+uniform vec3 u_extra_light0_direction;
+uniform vec3 u_extra_light0_position;
+uniform vec3 u_extra_light0_color;
+uniform float u_extra_light0_intensity;
+uniform float u_extra_light0_range;
+uniform float u_extra_light0_spot_inner_cos;
+uniform float u_extra_light0_spot_outer_cos;
+uniform int u_extra_light1_enabled;
+uniform int u_extra_light1_type;
+uniform vec3 u_extra_light1_direction;
+uniform vec3 u_extra_light1_position;
+uniform vec3 u_extra_light1_color;
+uniform float u_extra_light1_intensity;
+uniform float u_extra_light1_range;
+uniform float u_extra_light1_spot_inner_cos;
+uniform float u_extra_light1_spot_outer_cos;
 uniform vec3 u_shadow_center;
 uniform float u_direct_strength;
 uniform float u_ibl_exposure;
@@ -1149,6 +1168,7 @@ uniform vec3 u_clearcoat_tint;
 uniform float u_parallax_strength;
 uniform float u_parallax_depth;
 uniform float u_parallax_center;
+uniform int u_parallax_steps;
 uniform float u_bevel_strength;
 uniform float u_bevel_radius;
 uniform float u_bevel_edge_width;
@@ -1353,6 +1373,52 @@ vec2 apply_parallax_uv(vec2 uv, vec3 view_dir, vec3 tangent, vec3 bitangent, vec
     vec3 b = normalize(bitangent);
     vec3 n = normalize(normal);
     vec3 view_ts = vec3(dot(v, t), dot(v, b), max(abs(dot(v, n)), 0.08));
+    float step_count = clamp(float(u_parallax_steps), 1.0, 64.0);
+    if (step_count > 1.5) {
+        float layer_step = 1.0 / step_count;
+        vec2 ray = vec2(view_ts.x, -view_ts.y) / view_ts.z * u_parallax_depth * u_parallax_strength;
+        vec2 delta = ray / step_count;
+        vec2 current_uv = uv;
+        vec2 previous_uv = uv;
+        float current_layer = 0.0;
+        float previous_layer = 0.0;
+        float center_bias = clamp(u_parallax_center, 0.0, 1.0) - 0.5;
+        float surface_depth = clamp(
+            1.0 - dot(sample_material_rgba(u_height_tex, current_uv, world_pos, n), u_height_channel)
+                + center_bias,
+            0.0,
+            1.0
+        );
+        for (int i = 0; i < 64; ++i) {
+            if (float(i) >= step_count || current_layer >= surface_depth) {
+                break;
+            }
+            previous_uv = current_uv;
+            previous_layer = current_layer;
+            current_uv -= delta;
+            current_layer += layer_step;
+            surface_depth = clamp(
+                1.0 - dot(sample_material_rgba(u_height_tex, current_uv, world_pos, n), u_height_channel)
+                    + center_bias,
+                0.0,
+                1.0
+            );
+        }
+        float current_error = current_layer - surface_depth;
+        float previous_depth = clamp(
+            1.0 - dot(sample_material_rgba(u_height_tex, previous_uv, world_pos, n), u_height_channel)
+                + center_bias,
+            0.0,
+            1.0
+        );
+        float previous_error = previous_depth - previous_layer;
+        float blend = clamp(
+            previous_error / max(previous_error + current_error, 0.000001),
+            0.0,
+            1.0
+        );
+        return mix(previous_uv, current_uv, blend);
+    }
     float height = dot(sample_material_rgba(u_height_tex, uv, world_pos, n), u_height_channel);
     float amount = (height - clamp(u_parallax_center, 0.0, 1.0)) * u_parallax_depth * u_parallax_strength;
     return uv + view_ts.xy * amount;
@@ -1686,6 +1752,66 @@ float pbr_shadow_visibility(vec3 world_pos, vec3 normal, vec3 light_dir) {
     return mix(1.0 - clamp(u_shadow_strength, 0.0, 1.0), 1.0, lit);
 }
 
+vec3 additional_light_direct(
+    int enabled,
+    int light_type,
+    vec3 direction,
+    vec3 position,
+    vec3 color,
+    float intensity,
+    float light_range,
+    float spot_inner_cos,
+    float spot_outer_cos,
+    vec3 world_pos,
+    vec3 normal,
+    vec3 view,
+    vec3 albedo,
+    vec3 f0,
+    float roughness,
+    float metallic,
+    float ndotv,
+    float ao
+) {
+    if (enabled != 1 || intensity <= 0.0001) {
+        return vec3(0.0);
+    }
+    vec3 to_light = normalize(-direction);
+    float attenuation = 1.0;
+    if (light_type != 0) {
+        vec3 delta = position - world_pos;
+        float distance_to_light = length(delta);
+        if (distance_to_light <= 0.0001 || distance_to_light >= light_range) {
+            return vec3(0.0);
+        }
+        to_light = delta / distance_to_light;
+        float range_factor = clamp(1.0 - distance_to_light / max(0.05, light_range), 0.0, 1.0);
+        attenuation = range_factor * range_factor;
+        if (light_type == 2) {
+            float cone_cos = dot(normalize(world_pos - position), normalize(direction));
+            attenuation *= smoothstep(spot_outer_cos, spot_inner_cos, cone_cos);
+        }
+    }
+    float ndotl = max(dot(normal, to_light), 0.0);
+    if (ndotl <= 0.0001 || attenuation <= 0.0001) {
+        return vec3(0.0);
+    }
+    vec3 half_vec = normalize(to_light + view);
+    float ndoth = max(dot(normal, half_vec), 0.0);
+    float vdoth = max(dot(view, half_vec), 0.0);
+    return cook_torrance_direct(
+        albedo,
+        f0,
+        roughness,
+        metallic,
+        ndotl,
+        ndotv,
+        ndoth,
+        vdoth,
+        intensity * attenuation,
+        ao
+    ) * max(color, vec3(0.0));
+}
+
 void main() {
     vec2 uv = maybe_flip_uv(v_uv);
     vec3 parallax_n = normalize(v_normal);
@@ -1819,7 +1945,48 @@ void main() {
     float vdoth = max(dot(view, half_vec), 0.0);
     float preview_direct_lambert = max(lambert, wrapped_lambert * 0.62);
     vec3 direct = cook_torrance_direct(albedo, f0, roughness, metallic, preview_direct_lambert, ndotv, ndoth, vdoth, direct_power, diffuse_ao);
+    direct *= max(u_light_color, vec3(0.0));
     direct *= shadow_visibility;
+    direct += additional_light_direct(
+        u_extra_light0_enabled,
+        u_extra_light0_type,
+        u_extra_light0_direction,
+        u_extra_light0_position,
+        u_extra_light0_color,
+        u_extra_light0_intensity,
+        u_extra_light0_range,
+        u_extra_light0_spot_inner_cos,
+        u_extra_light0_spot_outer_cos,
+        v_world_pos,
+        n,
+        view,
+        albedo,
+        f0,
+        roughness,
+        metallic,
+        ndotv,
+        diffuse_ao
+    );
+    direct += additional_light_direct(
+        u_extra_light1_enabled,
+        u_extra_light1_type,
+        u_extra_light1_direction,
+        u_extra_light1_position,
+        u_extra_light1_color,
+        u_extra_light1_intensity,
+        u_extra_light1_range,
+        u_extra_light1_spot_inner_cos,
+        u_extra_light1_spot_outer_cos,
+        v_world_pos,
+        n,
+        view,
+        albedo,
+        f0,
+        roughness,
+        metallic,
+        ndotv,
+        diffuse_ao
+    );
 
     vec3 fill = albedo * (0.045 + roughness * 0.03) * kd * mix(0.48, 1.0, ambient_ao);
     fill *= mix(1.0, self_shadow, 0.65);
@@ -4326,6 +4493,17 @@ class _ARPBRDirectGLPainter:
             direct = max(0.0, min(4.0, float(lighting.get("direct_strength", 0.85))))
         except Exception:
             direct = 0.85
+        raw_color = list(lighting.get("light_color") or [1.0, 1.0, 1.0])[:3]
+        while len(raw_color) < 3:
+            raw_color.append(1.0)
+        try:
+            light_color = QVector3D(
+                max(0.0, min(8.0, float(raw_color[0]))),
+                max(0.0, min(8.0, float(raw_color[1]))),
+                max(0.0, min(8.0, float(raw_color[2]))),
+            )
+        except Exception:
+            light_color = QVector3D(1.0, 1.0, 1.0)
         try:
             ibl = max(0.0, min(8.0, float(lighting.get("ibl_exposure", 1.0))))
         except Exception:
@@ -4350,8 +4528,52 @@ class _ARPBRDirectGLPainter:
         depth_of_field_rendering = normalize_depth_of_field_settings(lighting)
         post_effects_rendering = normalize_post_effects_settings(lighting)
         triplanar_rendering = normalize_triplanar_settings(lighting)
+        additional_lights = []
+        for raw in list(lighting.get("additional_lights") or [])[:2]:
+            if not isinstance(raw, dict):
+                continue
+            light_type = str(raw.get("light_type") or "directional").lower()
+            type_code = {
+                "directional": 0,
+                "point": 1,
+                "spot": 2,
+            }.get(light_type, 0)
+
+            def vector(key: str, fallback: tuple[float, float, float]) -> QVector3D:
+                values = raw.get(key)
+                try:
+                    return QVector3D(
+                        float(values[0]),
+                        float(values[1]),
+                        float(values[2]),
+                    )
+                except Exception:
+                    return QVector3D(*fallback)
+
+            direction = vector("direction", (-0.35, -0.65, -0.72))
+            if direction.length() <= 0.001:
+                direction = QVector3D(-0.35, -0.65, -0.72)
+            direction.normalize()
+            try:
+                inner = max(0.0, min(88.0, float(raw.get("spot_inner_angle", 24.0))))
+                outer = max(inner + 0.1, min(89.0, float(raw.get("spot_outer_angle", 36.0))))
+                extra_intensity = max(0.0, min(4.0, float(raw.get("intensity", 0.0))))
+                extra_range = max(0.05, min(100.0, float(raw.get("range", 6.0))))
+            except Exception:
+                inner, outer, extra_intensity, extra_range = 24.0, 36.0, 0.0, 6.0
+            additional_lights.append({
+                "type": type_code,
+                "direction": direction,
+                "position": vector("position", (0.0, 1.5, 2.0)),
+                "color": vector("color", (1.0, 1.0, 1.0)),
+                "intensity": extra_intensity,
+                "range": extra_range,
+                "spot_inner_cos": math.cos(math.radians(inner)),
+                "spot_outer_cos": math.cos(math.radians(outer)),
+            })
         return {
             "light": light,
+            "light_color": light_color,
             "direct": direct,
             "ibl": ibl,
             "rotation": rotation,
@@ -4372,6 +4594,7 @@ class _ARPBRDirectGLPainter:
             "depth_of_field_rendering": depth_of_field_rendering,
             "post_effects_rendering": post_effects_rendering,
             "triplanar_rendering": triplanar_rendering,
+            "additional_lights": additional_lights,
         }
 
     @staticmethod
@@ -4601,9 +4824,55 @@ class _ARPBRDirectGLPainter:
             self._pbr_program.bind()
             lighting = self._lighting_for_item(item)
             self._set_pbr_uniform("u_light_dir", lighting["light"])
+            self._set_pbr_uniform("u_light_color", lighting["light_color"])
             self._set_pbr_uniform("u_direct_strength", float(lighting["direct"]))
             self._set_pbr_uniform("u_ibl_exposure", float(lighting["ibl"]))
             self._set_pbr_uniform("u_ibl_rotation", float(lighting["rotation"]))
+            additional_lights = list(lighting.get("additional_lights") or [])[:2]
+            for extra_index in range(2):
+                prefix = f"u_extra_light{extra_index}"
+                extra = (
+                    additional_lights[extra_index]
+                    if extra_index < len(additional_lights)
+                    else {}
+                )
+                enabled = bool(extra) and float(extra.get("intensity", 0.0)) > 0.0
+                self._set_pbr_uniform(
+                    f"{prefix}_enabled",
+                    1 if enabled else 0,
+                )
+                self._set_pbr_uniform(
+                    f"{prefix}_type",
+                    int(extra.get("type", 0) or 0),
+                )
+                self._set_pbr_uniform(
+                    f"{prefix}_direction",
+                    extra.get("direction", QVector3D(-0.35, -0.65, -0.72)),
+                )
+                self._set_pbr_uniform(
+                    f"{prefix}_position",
+                    extra.get("position", QVector3D(0.0, 1.5, 2.0)),
+                )
+                self._set_pbr_uniform(
+                    f"{prefix}_color",
+                    extra.get("color", QVector3D(1.0, 1.0, 1.0)),
+                )
+                self._set_pbr_uniform(
+                    f"{prefix}_intensity",
+                    float(extra.get("intensity", 0.0) or 0.0),
+                )
+                self._set_pbr_uniform(
+                    f"{prefix}_range",
+                    float(extra.get("range", 6.0) or 6.0),
+                )
+                self._set_pbr_uniform(
+                    f"{prefix}_spot_inner_cos",
+                    float(extra.get("spot_inner_cos", 0.9135) or 0.9135),
+                )
+                self._set_pbr_uniform(
+                    f"{prefix}_spot_outer_cos",
+                    float(extra.get("spot_outer_cos", 0.8090) or 0.8090),
+                )
             color_management = lighting.get("color_management") if isinstance(lighting.get("color_management"), dict) else {}
             tone_wb = list(color_management.get("tone_white_balance_rgb") or [1.0, 1.0, 1.0])
             self._set_pbr_uniform("u_tone_mapping_mode", int(color_management.get("tone_mapping_mode", 0) or 0))
@@ -4632,6 +4901,12 @@ class _ARPBRDirectGLPainter:
             self._set_pbr_uniform("u_parallax_strength", float(parallax_rendering.get("strength", 0.0) or 0.0))
             self._set_pbr_uniform("u_parallax_depth", float(parallax_rendering.get("depth", 0.0) or 0.0))
             self._set_pbr_uniform("u_parallax_center", float(parallax_rendering.get("center", 0.5) or 0.5))
+            self._set_pbr_uniform(
+                "u_parallax_steps",
+                int(parallax_rendering.get("steps", 24) or 24)
+                if str(parallax_rendering.get("mode") or "") == "pom"
+                else 1,
+            )
             bevel_rendering = lighting.get("bevel_rendering") if isinstance(lighting.get("bevel_rendering"), dict) else {}
             self._set_pbr_uniform("u_bevel_strength", float(bevel_rendering.get("strength", 0.0) or 0.0))
             self._set_pbr_uniform("u_bevel_radius", float(bevel_rendering.get("radius", 0.0) or 0.0))
@@ -4793,6 +5068,13 @@ class _ARPBRDirectGLPainter:
             self._set_pbr_uniform1f_gl(gl, "u_parallax_strength", float(parallax_rendering.get("strength", 0.0) or 0.0))
             self._set_pbr_uniform1f_gl(gl, "u_parallax_depth", float(parallax_rendering.get("depth", 0.0) or 0.0))
             self._set_pbr_uniform1f_gl(gl, "u_parallax_center", float(parallax_rendering.get("center", 0.5) or 0.5))
+            self._set_pbr_uniform1i_gl(
+                gl,
+                "u_parallax_steps",
+                int(parallax_rendering.get("steps", 24) or 24)
+                if str(parallax_rendering.get("mode") or "") == "pom"
+                else 1,
+            )
             self._set_pbr_uniform1f_gl(gl, "u_bevel_strength", float(bevel_rendering.get("strength", 0.0) or 0.0))
             self._set_pbr_uniform1f_gl(gl, "u_bevel_radius", float(bevel_rendering.get("radius", 0.0) or 0.0))
             self._set_pbr_uniform1f_gl(gl, "u_bevel_edge_width", float(bevel_rendering.get("edge_width", 0.075) or 0.075))

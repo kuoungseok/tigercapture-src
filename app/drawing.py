@@ -55,6 +55,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QDoubleSpinBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -86,6 +87,23 @@ from app.painter_brush_catalog import (
     DESIGNER_BRUSH_PRESETS,
     DESIGNER_BRUSH_RENDER_PROFILES,
     DESIGNER_BRUSH_STYLE_IDS,
+)
+from app.painter_palette import (
+    MAX_DOCUMENT_COLORS,
+    MAX_RECENT_BRUSHES,
+    MAX_RECENT_COLORS,
+    export_brush_bundle,
+    import_brush_bundle,
+    load_palette_library,
+    normalize_brush_preset,
+    oklch_harmony_colors,
+    save_palette_library,
+)
+from app.painter_output import (
+    PRINT_PRESETS,
+    normalize_output_settings,
+    output_preflight,
+    pixels_for_print,
 )
 from app.window_placement import available_geometry_for_window
 
@@ -1460,6 +1478,15 @@ class NewCanvasDialog(QDialog):
         grid.setHorizontalSpacing(10)
         grid.setVerticalSpacing(9)
 
+        mode_label = QLabel("Purpose")
+        mode_label.setObjectName("PaintMeta")
+        self.mode_combo = QComboBox(form)
+        self.mode_combo.addItem("Screen / Web / Video", "screen")
+        self.mode_combo.addItem("Print", "print")
+        self.mode_combo.currentIndexChanged.connect(self._on_mode_changed)
+        grid.addWidget(mode_label, 0, 0)
+        grid.addWidget(self.mode_combo, 0, 1, 1, 3)
+
         preset_label = QLabel("Template")
         preset_label.setObjectName("PaintMeta")
         self.preset_combo = QComboBox(form)
@@ -1467,8 +1494,8 @@ class NewCanvasDialog(QDialog):
             self.preset_combo.addItem(name, (width, height))
         self.preset_combo.addItem("Custom", "custom")
         self.preset_combo.currentIndexChanged.connect(self._on_preset_changed)
-        grid.addWidget(preset_label, 0, 0)
-        grid.addWidget(self.preset_combo, 0, 1, 1, 3)
+        grid.addWidget(preset_label, 1, 0)
+        grid.addWidget(self.preset_combo, 1, 1, 1, 3)
 
         width_label = QLabel("Width")
         width_label.setObjectName("PaintMeta")
@@ -1482,18 +1509,99 @@ class NewCanvasDialog(QDialog):
         self.height_spin.setSuffix(" px")
         self.width_spin.valueChanged.connect(self._on_custom_size_changed)
         self.height_spin.valueChanged.connect(self._on_custom_size_changed)
-        grid.addWidget(width_label, 1, 0)
-        grid.addWidget(self.width_spin, 1, 1)
-        grid.addWidget(height_label, 1, 2)
-        grid.addWidget(self.height_spin, 1, 3)
+        grid.addWidget(width_label, 2, 0)
+        grid.addWidget(self.width_spin, 2, 1)
+        grid.addWidget(height_label, 2, 2)
+        grid.addWidget(self.height_spin, 2, 3)
+
+        self._print_widgets: list[QWidget] = []
+        physical_label = QLabel("Trim Size")
+        physical_label.setObjectName("PaintMeta")
+        self.physical_width_spin = QDoubleSpinBox(form)
+        self.physical_width_spin.setRange(1.0, 5000.0)
+        self.physical_width_spin.setDecimals(4)
+        self.physical_width_spin.setValue(210.0)
+        self.physical_width_spin.setSuffix(" mm")
+        self.physical_height_spin = QDoubleSpinBox(form)
+        self.physical_height_spin.setRange(1.0, 5000.0)
+        self.physical_height_spin.setDecimals(4)
+        self.physical_height_spin.setValue(297.0)
+        self.physical_height_spin.setSuffix(" mm")
+        self.unit_combo = QComboBox(form)
+        self.unit_combo.addItem("mm", "mm")
+        self.unit_combo.addItem("inch", "in")
+        self._physical_unit = "mm"
+        grid.addWidget(physical_label, 3, 0)
+        physical_row = QHBoxLayout()
+        physical_row.setContentsMargins(0, 0, 0, 0)
+        physical_row.addWidget(self.physical_width_spin)
+        physical_times_label = QLabel("×")
+        physical_row.addWidget(physical_times_label)
+        physical_row.addWidget(self.physical_height_spin)
+        physical_row.addWidget(self.unit_combo)
+        grid.addLayout(physical_row, 3, 1, 1, 3)
+
+        ppi_label = QLabel("Resolution")
+        ppi_label.setObjectName("PaintMeta")
+        self.ppi_spin = QSpinBox(form)
+        self.ppi_spin.setRange(36, 1200)
+        self.ppi_spin.setValue(300)
+        self.ppi_spin.setSuffix(" PPI")
+        bleed_label = QLabel("Bleed")
+        bleed_label.setObjectName("PaintMeta")
+        self.bleed_spin = QDoubleSpinBox(form)
+        self.bleed_spin.setRange(0.0, 50.0)
+        self.bleed_spin.setDecimals(2)
+        self.bleed_spin.setValue(3.0)
+        self.bleed_spin.setSuffix(" mm")
+        grid.addWidget(ppi_label, 4, 0)
+        grid.addWidget(self.ppi_spin, 4, 1)
+        grid.addWidget(bleed_label, 4, 2)
+        grid.addWidget(self.bleed_spin, 4, 3)
+
+        output_kind_label = QLabel("Artwork")
+        output_kind_label.setObjectName("PaintMeta")
+        self.output_kind_combo = QComboBox(form)
+        self.output_kind_combo.addItem("Color / General Print · 300 PPI", "color")
+        self.output_kind_combo.addItem("Line Art / Manga · 600 PPI", "line_art")
+        self.output_kind_combo.addItem("Large Poster · 150 PPI", "large_format")
+        self.output_kind_combo.currentIndexChanged.connect(self._on_output_kind_changed)
+        grid.addWidget(output_kind_label, 5, 0)
+        grid.addWidget(self.output_kind_combo, 5, 1, 1, 3)
+
+        self.output_summary_label = QLabel()
+        self.output_summary_label.setObjectName("PaintSubtitle")
+        self.output_summary_label.setWordWrap(True)
+        grid.addWidget(self.output_summary_label, 6, 0, 1, 4)
+        self._print_widgets.extend(
+            [
+                physical_label,
+                self.physical_width_spin,
+                physical_times_label,
+                self.physical_height_spin,
+                self.unit_combo,
+                ppi_label,
+                self.ppi_spin,
+                bleed_label,
+                self.bleed_spin,
+                output_kind_label,
+                self.output_kind_combo,
+                self.output_summary_label,
+            ]
+        )
+        self.physical_width_spin.valueChanged.connect(self._on_print_value_changed)
+        self.physical_height_spin.valueChanged.connect(self._on_print_value_changed)
+        self.ppi_spin.valueChanged.connect(self._on_print_value_changed)
+        self.bleed_spin.valueChanged.connect(self._on_print_value_changed)
+        self.unit_combo.currentIndexChanged.connect(self._on_unit_changed)
 
         background_label = QLabel("Background")
         background_label.setObjectName("PaintMeta")
         self.background_combo = QComboBox(form)
         for label, value in CANVAS_BACKGROUND_PRESETS:
             self.background_combo.addItem(label, value)
-        grid.addWidget(background_label, 2, 0)
-        grid.addWidget(self.background_combo, 2, 1, 1, 3)
+        grid.addWidget(background_label, 7, 0)
+        grid.addWidget(self.background_combo, 7, 1, 1, 3)
         root.addWidget(form)
 
         buttons = QDialogButtonBox(
@@ -1504,10 +1612,12 @@ class NewCanvasDialog(QDialog):
         buttons.button(QDialogButtonBox.StandardButton.Cancel).setText("Cancel")
         buttons.accepted.connect(self.accept)
         buttons.rejected.connect(self.reject)
+        self._create_button = buttons.button(QDialogButtonBox.StandardButton.Ok)
         root.addWidget(buttons)
 
-        self.resize(420, 240)
+        self.resize(500, 390)
         self._set_initial_values(default_size, default_background)
+        self._set_print_widgets_visible(False)
 
     def _set_initial_values(self, size: tuple[int, int], background: str) -> None:
         width = max(64, min(16384, int(size[0] or 1920)))
@@ -1522,6 +1632,7 @@ class NewCanvasDialog(QDialog):
         try:
             self.width_spin.setValue(width)
             self.height_spin.setValue(height)
+            self.mode_combo.setCurrentIndex(0)
             self.preset_combo.setCurrentIndex(match_index if match_index >= 0 else self.preset_combo.count() - 1)
             bg = str(background or "transparent").lower()
             for idx in range(self.background_combo.count()):
@@ -1531,10 +1642,73 @@ class NewCanvasDialog(QDialog):
         finally:
             self._syncing = False
 
+    def _set_print_widgets_visible(self, visible: bool) -> None:
+        for widget in self._print_widgets:
+            widget.setVisible(bool(visible))
+        self.width_spin.setReadOnly(bool(visible))
+        self.height_spin.setReadOnly(bool(visible))
+        if not visible and hasattr(self, "_create_button"):
+            self._create_button.setEnabled(True)
+
+    def _populate_canvas_presets(self, mode: str) -> None:
+        self.preset_combo.blockSignals(True)
+        try:
+            self.preset_combo.clear()
+            if mode == "print":
+                for preset in PRINT_PRESETS:
+                    self.preset_combo.addItem(preset.name, preset)
+            else:
+                for name, width, height in CANVAS_SIZE_PRESETS:
+                    self.preset_combo.addItem(name, (width, height))
+            self.preset_combo.addItem("Custom", "custom")
+            self.preset_combo.setCurrentIndex(0)
+        finally:
+            self.preset_combo.blockSignals(False)
+
+    def _on_mode_changed(self) -> None:
+        if self._syncing:
+            return
+        mode = str(self.mode_combo.currentData() or "screen")
+        self._syncing = True
+        try:
+            self._populate_canvas_presets(mode)
+            self._set_print_widgets_visible(mode == "print")
+            if mode == "print":
+                self.background_combo.setCurrentIndex(
+                    max(0, self.background_combo.findData("#FFFFFF"))
+                )
+        finally:
+            self._syncing = False
+        self._on_preset_changed()
+
     def _on_preset_changed(self) -> None:
         if self._syncing:
             return
         preset = self.preset_combo.currentData()
+        if str(self.mode_combo.currentData() or "screen") == "print":
+            if preset == "custom":
+                self.physical_width_spin.setReadOnly(False)
+                self.physical_height_spin.setReadOnly(False)
+                self._sync_print_pixels()
+                return
+            if not hasattr(preset, "width_mm"):
+                return
+            self._syncing = True
+            try:
+                self.unit_combo.setCurrentIndex(0)
+                self._physical_unit = "mm"
+                self.physical_width_spin.setValue(float(preset.width_mm))
+                self.physical_height_spin.setValue(float(preset.height_mm))
+                self.ppi_spin.setValue(int(preset.ppi))
+                self.bleed_spin.setValue(float(preset.bleed_mm))
+                kind_index = self.output_kind_combo.findData(preset.output_kind)
+                self.output_kind_combo.setCurrentIndex(max(0, kind_index))
+                self.physical_width_spin.setReadOnly(False)
+                self.physical_height_spin.setReadOnly(False)
+            finally:
+                self._syncing = False
+            self._sync_print_pixels()
+            return
         if not isinstance(preset, tuple):
             return
         width, height = preset
@@ -1545,8 +1719,78 @@ class NewCanvasDialog(QDialog):
         finally:
             self._syncing = False
 
+    def _on_output_kind_changed(self) -> None:
+        if self._syncing:
+            return
+        target_ppi = {
+            "color": 300,
+            "line_art": 600,
+            "large_format": 150,
+        }.get(str(self.output_kind_combo.currentData() or "color"), 300)
+        self.ppi_spin.setValue(target_ppi)
+
+    def _on_unit_changed(self) -> None:
+        if self._syncing:
+            return
+        new_unit = str(self.unit_combo.currentData() or "mm")
+        if new_unit == self._physical_unit:
+            return
+        from app.painter_output import from_millimetres, to_millimetres
+
+        width_mm = to_millimetres(self.physical_width_spin.value(), self._physical_unit)
+        height_mm = to_millimetres(self.physical_height_spin.value(), self._physical_unit)
+        self._syncing = True
+        try:
+            self.physical_width_spin.setValue(from_millimetres(width_mm, new_unit))
+            self.physical_height_spin.setValue(from_millimetres(height_mm, new_unit))
+            self.physical_width_spin.setSuffix(" in" if new_unit == "in" else " mm")
+            self.physical_height_spin.setSuffix(" in" if new_unit == "in" else " mm")
+            self._physical_unit = new_unit
+        finally:
+            self._syncing = False
+        self._sync_print_pixels()
+
+    def _on_print_value_changed(self) -> None:
+        if self._syncing:
+            return
+        self._sync_print_pixels()
+
+    def _sync_print_pixels(self) -> None:
+        if str(self.mode_combo.currentData() or "screen") != "print":
+            return
+        width, height = pixels_for_print(
+            self.physical_width_spin.value(),
+            self.physical_height_spin.value(),
+            unit=str(self.unit_combo.currentData() or "mm"),
+            ppi=self.ppi_spin.value(),
+            bleed_mm=self.bleed_spin.value(),
+            include_bleed=True,
+        )
+        self._syncing = True
+        try:
+            self.width_spin.setValue(min(16384, width))
+            self.height_spin.setValue(min(16384, height))
+        finally:
+            self._syncing = False
+        request = self._print_output_settings()
+        preflight = output_preflight(
+            request,
+            pixel_width=width,
+            pixel_height=height,
+        )
+        limit_note = " · exceeds 16384 px limit" if width > 16384 or height > 16384 else ""
+        self.output_summary_label.setText(
+            f"{preflight['summary']}{limit_note}\n"
+            "Trim size excludes bleed; exported pixels include bleed."
+        )
+        create_button = getattr(self, "_create_button", None)
+        if create_button is not None:
+            create_button.setEnabled(width <= 16384 and height <= 16384)
+
     def _on_custom_size_changed(self) -> None:
         if self._syncing:
+            return
+        if str(self.mode_combo.currentData() or "screen") == "print":
             return
         current = (self.width_spin.value(), self.height_spin.value())
         for idx in range(self.preset_combo.count() - 1):
@@ -1565,12 +1809,303 @@ class NewCanvasDialog(QDialog):
             finally:
                 self._syncing = False
 
+    def _print_output_settings(self) -> dict:
+        unit = str(self.unit_combo.currentData() or "mm")
+        from app.painter_output import to_millimetres
+
+        return {
+            "mode": "print",
+            "width_mm": to_millimetres(self.physical_width_spin.value(), unit),
+            "height_mm": to_millimetres(self.physical_height_spin.value(), unit),
+            "ppi": int(self.ppi_spin.value()),
+            "bleed_mm": float(self.bleed_spin.value()),
+            "include_bleed": True,
+            "safe_margin_mm": 5.0,
+            "output_kind": str(self.output_kind_combo.currentData() or "color"),
+            "color_space": "srgb",
+            "resample": True,
+        }
+
     def canvas_request(self) -> dict:
+        mode = str(self.mode_combo.currentData() or "screen")
+        output = (
+            self._print_output_settings()
+            if mode == "print"
+            else {
+                "mode": "screen",
+                "ppi": 96,
+                "bleed_mm": 0.0,
+                "include_bleed": False,
+                "safe_margin_mm": 0.0,
+                "output_kind": "color",
+                "color_space": "srgb",
+                "resample": True,
+            }
+        )
+        output = normalize_output_settings(
+            output,
+            pixel_width=self.width_spin.value(),
+            pixel_height=self.height_spin.value(),
+        )
         return {
             "width": int(self.width_spin.value()),
             "height": int(self.height_spin.value()),
             "background": str(self.background_combo.currentData() or "transparent"),
             "template": str(self.preset_combo.currentText() or "Custom"),
+            "purpose": mode,
+            "output": output,
+            "preflight": output_preflight(
+                output,
+                pixel_width=self.width_spin.value(),
+                pixel_height=self.height_spin.value(),
+            ),
+        }
+
+
+class PainterOutputSettingsDialog(QDialog):
+    """Image-size and print-output settings with explicit resampling semantics."""
+
+    def __init__(
+        self,
+        parent: QWidget | None,
+        *,
+        pixel_size: tuple[int, int],
+        output_settings: dict | None,
+    ) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Image & Output Size")
+        self.setModal(True)
+        self.setStyleSheet(self.styleSheet() + _PAINT_DIALOG_QSS)
+        self._syncing = True
+        normalized = normalize_output_settings(
+            output_settings,
+            pixel_width=pixel_size[0],
+            pixel_height=pixel_size[1],
+        )
+
+        root = QVBoxLayout(self)
+        root.setContentsMargins(14, 14, 14, 14)
+        root.setSpacing(9)
+        title = QLabel("Image & Output Size")
+        title.setObjectName("PaintTitle")
+        root.addWidget(title)
+        note = QLabel(
+            "Resampling changes pixel data. With resampling off, PPI only changes "
+            "the physical print size and does not invent detail."
+        )
+        note.setObjectName("PaintSubtitle")
+        note.setWordWrap(True)
+        root.addWidget(note)
+
+        frame = QFrame(self)
+        frame.setObjectName("PaintCanvasFrame")
+        grid = QGridLayout(frame)
+        grid.setContentsMargins(12, 12, 12, 12)
+        grid.setSpacing(8)
+        self.mode_combo = QComboBox(frame)
+        self.mode_combo.addItem("Screen / Web / Video", "screen")
+        self.mode_combo.addItem("Print", "print")
+        grid.addWidget(QLabel("Purpose"), 0, 0)
+        grid.addWidget(self.mode_combo, 0, 1, 1, 3)
+
+        self.pixel_width_spin = QSpinBox(frame)
+        self.pixel_width_spin.setRange(64, 16384)
+        self.pixel_width_spin.setSuffix(" px")
+        self.pixel_height_spin = QSpinBox(frame)
+        self.pixel_height_spin.setRange(64, 16384)
+        self.pixel_height_spin.setSuffix(" px")
+        grid.addWidget(QLabel("Pixels"), 1, 0)
+        grid.addWidget(self.pixel_width_spin, 1, 1)
+        grid.addWidget(QLabel("×"), 1, 2)
+        grid.addWidget(self.pixel_height_spin, 1, 3)
+
+        self.physical_width_spin = QDoubleSpinBox(frame)
+        self.physical_width_spin.setRange(1.0, 5000.0)
+        self.physical_width_spin.setDecimals(2)
+        self.physical_width_spin.setSuffix(" mm")
+        self.physical_height_spin = QDoubleSpinBox(frame)
+        self.physical_height_spin.setRange(1.0, 5000.0)
+        self.physical_height_spin.setDecimals(2)
+        self.physical_height_spin.setSuffix(" mm")
+        grid.addWidget(QLabel("Trim Size"), 2, 0)
+        grid.addWidget(self.physical_width_spin, 2, 1)
+        grid.addWidget(QLabel("×"), 2, 2)
+        grid.addWidget(self.physical_height_spin, 2, 3)
+
+        self.ppi_spin = QSpinBox(frame)
+        self.ppi_spin.setRange(36, 1200)
+        self.ppi_spin.setSuffix(" PPI")
+        self.bleed_spin = QDoubleSpinBox(frame)
+        self.bleed_spin.setRange(0.0, 50.0)
+        self.bleed_spin.setDecimals(2)
+        self.bleed_spin.setSuffix(" mm")
+        grid.addWidget(QLabel("Resolution"), 3, 0)
+        grid.addWidget(self.ppi_spin, 3, 1)
+        grid.addWidget(QLabel("Bleed"), 3, 2)
+        grid.addWidget(self.bleed_spin, 3, 3)
+
+        self.output_kind_combo = QComboBox(frame)
+        self.output_kind_combo.addItem("Color / General Print", "color")
+        self.output_kind_combo.addItem("Line Art / Manga", "line_art")
+        self.output_kind_combo.addItem("Large Poster", "large_format")
+        grid.addWidget(QLabel("Artwork"), 4, 0)
+        grid.addWidget(self.output_kind_combo, 4, 1, 1, 3)
+
+        self.resample_check = QCheckBox("Resample pixel data")
+        self.resample_check.setToolTip(
+            "On: physical size/PPI may change pixel dimensions. Off: pixels stay unchanged."
+        )
+        grid.addWidget(self.resample_check, 5, 0, 1, 4)
+        self.preflight_label = QLabel()
+        self.preflight_label.setObjectName("PaintSubtitle")
+        self.preflight_label.setWordWrap(True)
+        grid.addWidget(self.preflight_label, 6, 0, 1, 4)
+        root.addWidget(frame)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel,
+            parent=self,
+        )
+        buttons.button(QDialogButtonBox.StandardButton.Ok).setText("Apply")
+        buttons.accepted.connect(self.accept)
+        buttons.rejected.connect(self.reject)
+        root.addWidget(buttons)
+
+        self.mode_combo.setCurrentIndex(
+            max(0, self.mode_combo.findData(normalized["mode"]))
+        )
+        self.pixel_width_spin.setValue(int(pixel_size[0]))
+        self.pixel_height_spin.setValue(int(pixel_size[1]))
+        self.physical_width_spin.setValue(float(normalized["width_mm"]))
+        self.physical_height_spin.setValue(float(normalized["height_mm"]))
+        self.ppi_spin.setValue(int(normalized["ppi"]))
+        self.bleed_spin.setValue(float(normalized["bleed_mm"]))
+        self.output_kind_combo.setCurrentIndex(
+            max(0, self.output_kind_combo.findData(normalized["output_kind"]))
+        )
+        self.resample_check.setChecked(bool(normalized["resample"]))
+        self._fixed_pixel_size = (int(pixel_size[0]), int(pixel_size[1]))
+        self._syncing = False
+
+        self.mode_combo.currentIndexChanged.connect(self._refresh)
+        self.pixel_width_spin.valueChanged.connect(self._pixels_changed)
+        self.pixel_height_spin.valueChanged.connect(self._pixels_changed)
+        self.physical_width_spin.valueChanged.connect(self._print_changed)
+        self.physical_height_spin.valueChanged.connect(self._print_changed)
+        self.ppi_spin.valueChanged.connect(self._print_changed)
+        self.bleed_spin.valueChanged.connect(self._print_changed)
+        self.output_kind_combo.currentIndexChanged.connect(self._refresh)
+        self.resample_check.toggled.connect(self._resample_changed)
+        self._refresh()
+        self.resize(500, 370)
+
+    def _pixels_changed(self) -> None:
+        if self._syncing:
+            return
+        self._fixed_pixel_size = (
+            self.pixel_width_spin.value(),
+            self.pixel_height_spin.value(),
+        )
+        from app.painter_output import print_size_from_pixels
+
+        width_mm, height_mm = print_size_from_pixels(
+            self.pixel_width_spin.value(),
+            self.pixel_height_spin.value(),
+            ppi=self.ppi_spin.value(),
+            unit="mm",
+            bleed_mm=self.bleed_spin.value(),
+        )
+        self._syncing = True
+        try:
+            self.physical_width_spin.setValue(width_mm)
+            self.physical_height_spin.setValue(height_mm)
+        finally:
+            self._syncing = False
+        self._refresh()
+
+    def _print_changed(self) -> None:
+        if self._syncing:
+            return
+        if self.resample_check.isChecked():
+            width, height = pixels_for_print(
+                self.physical_width_spin.value(),
+                self.physical_height_spin.value(),
+                ppi=self.ppi_spin.value(),
+                bleed_mm=self.bleed_spin.value(),
+                include_bleed=True,
+            )
+            self._syncing = True
+            try:
+                self.pixel_width_spin.setValue(min(16384, width))
+                self.pixel_height_spin.setValue(min(16384, height))
+            finally:
+                self._syncing = False
+        else:
+            self._syncing = True
+            try:
+                self.pixel_width_spin.setValue(self._fixed_pixel_size[0])
+                self.pixel_height_spin.setValue(self._fixed_pixel_size[1])
+            finally:
+                self._syncing = False
+            self._pixels_changed()
+        self._refresh()
+
+    def _resample_changed(self, enabled: bool) -> None:
+        self.pixel_width_spin.setReadOnly(not bool(enabled))
+        self.pixel_height_spin.setReadOnly(not bool(enabled))
+        if not enabled:
+            self._fixed_pixel_size = (
+                self.pixel_width_spin.value(),
+                self.pixel_height_spin.value(),
+            )
+            self._pixels_changed()
+        self._refresh()
+
+    def _settings(self) -> dict:
+        return normalize_output_settings(
+            {
+                "mode": str(self.mode_combo.currentData() or "screen"),
+                "width_mm": self.physical_width_spin.value(),
+                "height_mm": self.physical_height_spin.value(),
+                "ppi": self.ppi_spin.value(),
+                "bleed_mm": self.bleed_spin.value(),
+                "include_bleed": (
+                    str(self.mode_combo.currentData() or "screen") == "print"
+                ),
+                "safe_margin_mm": 5.0,
+                "output_kind": str(self.output_kind_combo.currentData() or "color"),
+                "color_space": "srgb",
+                "resample": self.resample_check.isChecked(),
+            },
+            pixel_width=self.pixel_width_spin.value(),
+            pixel_height=self.pixel_height_spin.value(),
+        )
+
+    def _refresh(self) -> None:
+        print_mode = str(self.mode_combo.currentData() or "screen") == "print"
+        for widget in (
+            self.physical_width_spin,
+            self.physical_height_spin,
+            self.ppi_spin,
+            self.bleed_spin,
+            self.output_kind_combo,
+        ):
+            widget.setEnabled(print_mode)
+        self.pixel_width_spin.setReadOnly(not self.resample_check.isChecked())
+        self.pixel_height_spin.setReadOnly(not self.resample_check.isChecked())
+        report = output_preflight(
+            self._settings(),
+            pixel_width=self.pixel_width_spin.value(),
+            pixel_height=self.pixel_height_spin.value(),
+        )
+        details = [report["summary"], *report["errors"], *report["warnings"]]
+        self.preflight_label.setText("\n".join(details))
+
+    def output_request(self) -> dict:
+        return {
+            "width": int(self.pixel_width_spin.value()),
+            "height": int(self.pixel_height_spin.value()),
+            "settings": self._settings(),
         }
 
 
@@ -1593,6 +2128,9 @@ class DrawingCanvas(QWidget):
     repaint_requested = Signal()
     selection_probe_requested = Signal(str, float, float)
     zoom_requested = Signal(str, float, float, float, float)
+    quick_palette_requested = Signal(object)
+    brush_hud_adjust_requested = Signal(float, float, bool)
+    color_sample_requested = Signal(object)
 
     ERASE_RADIUS_PX = 18
     WET_CANVAS_PREVIEW_MAX_DIMENSION = 768
@@ -1616,6 +2154,7 @@ class DrawingCanvas(QWidget):
         self._brush_spacing: int = 25
         self._brush_angle: int = 0
         self._brush_roundness: int = 100
+        self._brush_pressure_response: int = 100
         self._brush_flip_x: bool = False
         self._brush_flip_y: bool = False
         self._active_layer_id: str = "paint-layer-1"
@@ -1624,6 +2163,7 @@ class DrawingCanvas(QWidget):
         self._layer_masks: dict[str, list[tuple[float, float]]] = {}
         self._layer_order: list[str] = []
         self._layer_wet_canvas_settings: dict[str, dict[str, object]] = {}
+        self._output_guide_settings: dict[str, object] = {}
         self._wet_canvas_render_cache: dict[str, tuple[str, QImage]] = {}
         self._wet_canvas_reports: dict[str, dict[str, object]] = {}
         self._wet_canvas_cached_stroke_count: dict[str, int] = {}
@@ -1639,6 +2179,9 @@ class DrawingCanvas(QWidget):
         self._live_stroke_cache_image: QImage | None = None
         self._live_stroke_cache_size: tuple[int, int] = (0, 0)
         self._current_points: list[QPointF] = []  # while drawing (widget px)
+        self._brush_hud_press_global: QPointF | None = None
+        self._brush_hud_last_global: QPointF | None = None
+        self._brush_hud_dragged = False
         self._current_pressure: list[float] = []
         self._current_tilt: list[float] = []
         self._current_tilt_x: list[float] = []
@@ -1764,7 +2307,10 @@ class DrawingCanvas(QWidget):
         self._pen_opacity = max(1, min(255, int(opacity)))
 
     def set_pen_width(self, width: float) -> None:
-        self._pen_width = max(1.0, min(80.0, float(width)))
+        self._pen_width = max(
+            1.0,
+            min(float(PAINT_MAX_BRUSH_SIZE_PX), float(width)),
+        )
 
     def set_pen_style(self, style: str) -> None:
         self._pen_style = _normalize_paint_brush_style(style)
@@ -1777,6 +2323,7 @@ class DrawingCanvas(QWidget):
         spacing: int | None = None,
         angle: int | None = None,
         roundness: int | None = None,
+        pressure_response: int | None = None,
         flip_x: bool | None = None,
         flip_y: bool | None = None,
     ) -> None:
@@ -1788,6 +2335,11 @@ class DrawingCanvas(QWidget):
             self._brush_angle = max(-180, min(180, int(angle)))
         if roundness is not None:
             self._brush_roundness = max(10, min(100, int(roundness)))
+        if pressure_response is not None:
+            self._brush_pressure_response = max(
+                25,
+                min(250, int(pressure_response)),
+            )
         if flip_x is not None:
             self._brush_flip_x = bool(flip_x)
         if flip_y is not None:
@@ -1840,6 +2392,44 @@ class DrawingCanvas(QWidget):
         self._layer_view_revision += 1
         self._invalidate_stroke_raster_cache()
         self.update()
+
+    def set_output_guides(self, settings: dict | None) -> None:
+        self._output_guide_settings = dict(settings or {})
+        self.update()
+
+    def _paint_output_guides(self, painter: QPainter, w: int, h: int) -> None:
+        settings = self._output_guide_settings
+        if str(settings.get("mode") or "screen") != "print":
+            return
+        width_mm = max(0.1, float(settings.get("width_mm") or 0.1))
+        height_mm = max(0.1, float(settings.get("height_mm") or 0.1))
+        bleed_mm = max(0.0, float(settings.get("bleed_mm") or 0.0))
+        safe_mm = max(0.0, float(settings.get("safe_margin_mm") or 0.0))
+        full_width_mm = width_mm + bleed_mm * 2.0
+        full_height_mm = height_mm + bleed_mm * 2.0
+        bleed_x = w * bleed_mm / full_width_mm
+        bleed_y = h * bleed_mm / full_height_mm
+        trim_rect = QRectF(
+            bleed_x,
+            bleed_y,
+            max(0.0, w - bleed_x * 2.0),
+            max(0.0, h - bleed_y * 2.0),
+        )
+        painter.save()
+        trim_pen = QPen(QColor(255, 76, 150, 190), 1.25)
+        trim_pen.setStyle(Qt.PenStyle.DashLine)
+        painter.setPen(trim_pen)
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRect(trim_rect)
+        if safe_mm > 0.0:
+            safe_x = w * safe_mm / full_width_mm
+            safe_y = h * safe_mm / full_height_mm
+            safe_rect = trim_rect.adjusted(safe_x, safe_y, -safe_x, -safe_y)
+            safe_pen = QPen(QColor(74, 210, 208, 160), 1.0)
+            safe_pen.setStyle(Qt.PenStyle.DotLine)
+            painter.setPen(safe_pen)
+            painter.drawRect(safe_rect)
+        painter.restore()
 
     def path_point_count(self) -> int:
         return len(self._path_points)
@@ -2665,6 +3255,7 @@ class DrawingCanvas(QWidget):
 
         self._paint_perspective_guides(painter, w, h)
         self._paint_symmetry_guide(painter, w, h)
+        self._paint_output_guides(painter, w, h)
         self._paint_pixel_grid_overlay(painter, w, h)
         self._paint_selection_drag_preview(painter, w, h)
         self._paint_quick_mask_overlay(painter, w, h)
@@ -4168,7 +4759,13 @@ class DrawingCanvas(QWidget):
                 return False
         previous = self._current_points[-1] if self._current_points else None
         self._current_points.append(QPointF(point))
-        self._current_pressure.append(float(sample.pressure))
+        pressure_gamma = 100.0 / max(
+            25.0,
+            float(self._brush_pressure_response),
+        )
+        self._current_pressure.append(
+            max(0.0, min(1.0, float(sample.pressure))) ** pressure_gamma
+        )
         self._current_tilt.append(float(sample.tilt))
         self._current_tilt_x.append(float(sample.tilt_x))
         self._current_tilt_y.append(float(sample.tilt_y))
@@ -4216,6 +4813,37 @@ class DrawingCanvas(QWidget):
         self.stroke_added.emit(stroke)
         self.update()
 
+    def _begin_brush_hud_gesture(self, global_position: QPointF) -> None:
+        self._brush_hud_press_global = QPointF(global_position)
+        self._brush_hud_last_global = QPointF(global_position)
+        self._brush_hud_dragged = False
+
+    def _update_brush_hud_gesture(self, global_position: QPointF) -> bool:
+        if self._brush_hud_last_global is None or self._brush_hud_press_global is None:
+            return False
+        current = QPointF(global_position)
+        total = current - self._brush_hud_press_global
+        if not self._brush_hud_dragged and math.hypot(total.x(), total.y()) < 6.0:
+            return True
+        self._brush_hud_dragged = True
+        delta = current - self._brush_hud_last_global
+        self._brush_hud_last_global = current
+        if delta.x() or delta.y():
+            self.brush_hud_adjust_requested.emit(float(delta.x()), float(delta.y()), False)
+        return True
+
+    def _finish_brush_hud_gesture(self, global_position: QPointF) -> bool:
+        if self._brush_hud_press_global is None:
+            return False
+        if self._brush_hud_dragged:
+            self.brush_hud_adjust_requested.emit(0.0, 0.0, True)
+        else:
+            self.quick_palette_requested.emit(QPointF(global_position))
+        self._brush_hud_press_global = None
+        self._brush_hud_last_global = None
+        self._brush_hud_dragged = False
+        return True
+
     def tabletEvent(self, event: QTabletEvent) -> None:
         if self._tool not in {"pen", "eraser"}:
             event.ignore()
@@ -4223,6 +4851,34 @@ class DrawingCanvas(QWidget):
         from app.painter_stylus import tablet_stylus_sample
 
         event_type = event.type()
+        if event_type == QEvent.Type.TabletPress and (
+            event.button() == Qt.MouseButton.RightButton
+            or bool(event.buttons() & Qt.MouseButton.RightButton)
+        ):
+            self._begin_brush_hud_gesture(event.globalPosition())
+            event.accept()
+            return
+        if (
+            event_type == QEvent.Type.TabletPress
+            and bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
+        ):
+            image = self.grab().toImage()
+            position = event.position()
+            x = max(0, min(image.width() - 1, int(round(position.x()))))
+            y = max(0, min(image.height() - 1, int(round(position.y()))))
+            if not image.isNull():
+                self.color_sample_requested.emit(image.pixelColor(x, y))
+            event.accept()
+            return
+        if self._brush_hud_press_global is not None:
+            if event_type == QEvent.Type.TabletMove:
+                self._update_brush_hud_gesture(event.globalPosition())
+                event.accept()
+                return
+            if event_type == QEvent.Type.TabletRelease:
+                self._finish_brush_hud_gesture(event.globalPosition())
+                event.accept()
+                return
         view_point = QPointF(event.position())
         if (
             event_type == QEvent.Type.TabletPress
@@ -4261,7 +4917,26 @@ class DrawingCanvas(QWidget):
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if self._tablet_stroke_active:
             return
+        if (
+            event.button() == Qt.MouseButton.RightButton
+            and self._tool in {"pen", "eraser"}
+        ):
+            self._begin_brush_hud_gesture(event.globalPosition())
+            event.accept()
+            return
         if event.button() != Qt.MouseButton.LeftButton:
+            return
+        if (
+            self._tool in {"pen", "eraser"}
+            and bool(event.modifiers() & Qt.KeyboardModifier.AltModifier)
+        ):
+            image = self.grab().toImage()
+            position = event.position()
+            x = max(0, min(image.width() - 1, int(round(position.x()))))
+            y = max(0, min(image.height() - 1, int(round(position.y()))))
+            if not image.isNull():
+                self.color_sample_requested.emit(image.pixelColor(x, y))
+            event.accept()
             return
         view_pos = QPointF(event.position())
         if not self.canvas_contains_view_point(view_pos):
@@ -4409,6 +5084,10 @@ class DrawingCanvas(QWidget):
     def mouseMoveEvent(self, event: QMouseEvent) -> None:
         if self._tablet_stroke_active:
             return
+        if self._brush_hud_press_global is not None:
+            self._update_brush_hud_gesture(event.globalPosition())
+            event.accept()
+            return
         pos = self._clamp_canvas_point(
             self.map_view_to_canvas(event.position())
         )
@@ -4452,6 +5131,12 @@ class DrawingCanvas(QWidget):
 
     def mouseReleaseEvent(self, event: QMouseEvent) -> None:
         if self._tablet_stroke_active:
+            return
+        if (
+            event.button() == Qt.MouseButton.RightButton
+            and self._finish_brush_hud_gesture(event.globalPosition())
+        ):
+            event.accept()
             return
         if event.button() != Qt.MouseButton.LeftButton:
             return
@@ -5825,6 +6510,7 @@ def export_paint_png(
     include_background: bool = True,
     stroke_width_scale: float = 1.0,
     paint_layers: list["PaintLayer"] | None = None,
+    output_settings: dict | None = None,
 ) -> dict:
     """Write a Paint-window PNG export and return a small report.
 
@@ -5857,13 +6543,36 @@ def export_paint_png(
         paint_layers=paint_layers,
     )
     out = Image.alpha_composite(base.convert("RGBA"), overlay)
-    out.save(path, "PNG")
+    normalized_output = normalize_output_settings(
+        output_settings,
+        pixel_width=width,
+        pixel_height=height,
+    )
+    save_kwargs = {}
+    if normalized_output["mode"] == "print":
+        save_kwargs["dpi"] = (
+            int(normalized_output["ppi"]),
+            int(normalized_output["ppi"]),
+        )
+    out.save(path, "PNG", **save_kwargs)
+    preflight = output_preflight(
+        normalized_output,
+        pixel_width=width,
+        pixel_height=height,
+    )
     return {
         "schema": "tigerstudio.paint.png_export.v1",
         "path": str(path.resolve()),
         "mode": "composited" if include_background else "overlay",
         "width": width,
         "height": height,
+        "output": normalized_output,
+        "preflight": preflight,
+        "resolution_ppi": (
+            int(normalized_output["ppi"])
+            if normalized_output["mode"] == "print"
+            else None
+        ),
         "stroke_count": len(list(strokes or [])),
         "bubble_count": len(list(bubbles or [])),
         "sticker_count": len(list(stickers or [])),
@@ -5953,7 +6662,8 @@ PALETTE_COLORS: list[tuple[int, int, int]] = [
     (181, 139, 94),
 ]
 
-RECENT_COLOR_LIMIT = 5
+RECENT_COLOR_LIMIT = MAX_RECENT_COLORS
+PAINT_MAX_BRUSH_SIZE_PX = 2048
 
 PAINT_TEXTURED_BRUSH_STYLES = frozenset(
     {
@@ -6001,6 +6711,7 @@ BRUSH_DETAIL_DEFAULTS: dict[str, int | bool] = {
     "spacing": 25,
     "angle": 0,
     "roundness": 100,
+    "pressure_response": 100,
     "flip_x": False,
     "flip_y": False,
 }
@@ -6702,6 +7413,7 @@ class PaintDialog(QDialog):
         initial_stickers: list["Sticker"] | None = None,
         editor_object_provider: Callable[[], list] | None = None,
         standalone: bool = False,
+        output_settings: dict | None = None,
     ) -> None:
         super().__init__(parent)
         self._standalone = bool(standalone)
@@ -6819,9 +7531,24 @@ class PaintDialog(QDialog):
             max(1, int(background_pixmap.width())) if background_pixmap and not background_pixmap.isNull() else 1920,
             max(1, int(background_pixmap.height())) if background_pixmap and not background_pixmap.isNull() else 1080,
         )
+        self._output_settings = normalize_output_settings(
+            output_settings,
+            pixel_width=self._canvas_document_size[0],
+            pixel_height=self._canvas_document_size[1],
+        )
         from app.painter_ui_document import create_ui_document
 
         self._painter_ui_document = create_ui_document(*self._canvas_document_size)
+        self._painter_ui_motion_compositions: dict[str, object] = {}
+        self._painter_ui_motion_windows: dict[str, object] = {}
+        self._painter_ui_motion_active_id = ""
+        self._painter_ui_motion_time_ms = 0
+        self._painter_ui_motion_preview_playing = False
+        self._painter_ui_motion_timer = QTimer(self)
+        self._painter_ui_motion_timer.setInterval(33)
+        self._painter_ui_motion_timer.timeout.connect(
+            self._tick_painter_ui_motion_preview
+        )
 
         self._configure_initial_painter_window_size(parent)
 
@@ -6832,19 +7559,57 @@ class PaintDialog(QDialog):
         self._pen_style = "round"
         self._brush_detail_settings: dict[str, int | bool] = dict(BRUSH_DETAIL_DEFAULTS)
         self._brush_detail_syncing = False
-        self._brush_favorites: set[str] = set()
+        self._palette_library_state = load_palette_library()
+        self._brush_user_presets: list[dict[str, object]] = [
+            dict(row)
+            for row in self._palette_library_state.get("custom_brushes", [])
+            if isinstance(row, dict)
+        ]
+        self._brush_favorites: set[str] = set(
+            str(value)
+            for value in self._palette_library_state.get("favorites", [])
+            if str(value)
+        )
+        self._brush_recent_keys: list[str] = [
+            str(value)
+            for value in self._palette_library_state.get("recent_brushes", [])
+            if str(value)
+        ][:MAX_RECENT_BRUSHES]
         self._brush_recent_indices: list[int] = []
         self._brush_active_filters: set[str] = set()
         self._brush_selector_compact = False
+        self._palette_touch_targets = bool(
+            self._palette_library_state.get("touch_targets", True)
+        )
+        self._palette_harmony_mode = str(
+            self._palette_library_state.get("harmony_mode") or "full"
+        )
         self._active_brush_preset_index = 0
+        self._brush_icon_cache: dict[str, QIcon] = {}
+        self._brush_hud_width_accumulator = 0.0
+        self._brush_hud_hardness_accumulator = 0.0
+        self._palette_save_pending = False
         self._palette_syncing = False
-        self._recent_colors: list[tuple[int, int, int]] = [
+        loaded_recent_colors = [
+            self._normalise_rgb(tuple(value))
+            for value in self._palette_library_state.get("recent_colors", [])
+            if isinstance(value, (list, tuple)) and len(value) >= 3
+        ]
+        self._recent_colors: list[tuple[int, int, int]] = loaded_recent_colors or [
             PALETTE_COLORS[0],
             PALETTE_COLORS[4],
             PALETTE_COLORS[6],
             PALETTE_COLORS[14],
             PALETTE_COLORS[15],
         ]
+        self._pinned_colors: list[tuple[int, int, int]] = [
+            self._normalise_rgb(tuple(value))
+            for value in self._palette_library_state.get("pinned_colors", [])
+            if isinstance(value, (list, tuple)) and len(value) >= 3
+        ]
+        self._document_palette_colors: list[tuple[int, int, int]] = []
+        self._previous_pen_color = QColor(self._pen_color)
+        self._sync_brush_recent_indices_from_keys()
 
         self._prepare_paint_layers(initial_strokes)
         self._build_ui(background_pixmap, initial_strokes)
@@ -7104,9 +7869,15 @@ class PaintDialog(QDialog):
         brush_menu = menu_bar.addMenu("Brush")
         self._painter_brush_menu = brush_menu
         self._add_painter_menu_action(brush_menu, "Brush Selector", self._focus_brush_selector, "F5")
+        self._add_painter_menu_action(
+            brush_menu,
+            "Quick Palette",
+            lambda: self._show_quick_palette(QCursor.pos()),
+            "F6",
+        )
         self._add_painter_menu_action(brush_menu, "Advanced Brush Controls", self._focus_brush_panel)
         brush_menu.addSeparator()
-        for preset in BRUSH_LIBRARY_PRESETS:
+        for preset in self._brush_presets_catalog():
             name = str(preset.get("name") or "Brush")
             self._add_painter_menu_action(
                 brush_menu,
@@ -7116,7 +7887,16 @@ class PaintDialog(QDialog):
 
         image_menu = menu_bar.addMenu("Image")
         self._painter_image_menu = image_menu
-        self._add_painter_menu_action(image_menu, "Image Size...", self._prompt_image_size)
+        self._add_painter_menu_action(
+            image_menu,
+            "Image & Output Size...",
+            self._prompt_image_size,
+        )
+        self._add_painter_menu_action(
+            image_menu,
+            "Output Preflight...",
+            self._show_output_preflight,
+        )
         self._add_painter_menu_action(image_menu, "Canvas Size...", self._prompt_canvas_size)
         self._add_painter_menu_action(image_menu, "Crop To Selection", self._crop_to_selection)
         image_menu.addSeparator()
@@ -7322,6 +8102,13 @@ class PaintDialog(QDialog):
                 == "material"
             },
         )
+        self.canvas.set_output_guides(
+            normalize_output_settings(
+                getattr(self, "_output_settings", None),
+                pixel_width=self._canvas_document_size[0],
+                pixel_height=self._canvas_document_size[1],
+            )
+        )
 
     def _open_new_canvas_dialog(self) -> None:
         setup = NewCanvasDialog(
@@ -7336,17 +8123,36 @@ class PaintDialog(QDialog):
             int(request.get("width") or 1920),
             int(request.get("height") or 1080),
             str(request.get("background") or "transparent"),
+            output_settings=request.get("output"),
         )
 
-    def _replace_canvas_document(self, width: int, height: int, background: str = "transparent") -> None:
+    def _replace_canvas_document(
+        self,
+        width: int,
+        height: int,
+        background: str = "transparent",
+        *,
+        output_settings: dict | None = None,
+    ) -> None:
         self._push_undo_state("New canvas")
         width = max(64, min(16384, int(width or 1920)))
         height = max(64, min(16384, int(height or 1080)))
         background_text = str(background or "transparent")
         self._canvas_document_size = (width, height)
+        self._output_settings = normalize_output_settings(
+            output_settings,
+            pixel_width=width,
+            pixel_height=height,
+        )
         from app.painter_ui_document import create_ui_document
 
         self._painter_ui_document = create_ui_document(width, height)
+        self._painter_ui_motion_timer.stop()
+        self._painter_ui_motion_preview_playing = False
+        self._painter_ui_motion_active_id = ""
+        self._painter_ui_motion_time_ms = 0
+        self._painter_ui_motion_compositions = {}
+        self._painter_ui_motion_windows = {}
         self._bg_pixmap_source = create_blank_paint_pixmap(width, height, background_text)
         self._background_layer_present = background_text.strip().lower() not in {
             "transparent",
@@ -7476,7 +8282,7 @@ class PaintDialog(QDialog):
         # Width + opacity sliders
         toolbar.addWidget(QLabel(tr("paint.label.width")))
         self.width_slider = StudioSlider("accent")
-        self.width_slider.setRange(1, 60)
+        self.width_slider.setRange(1, PAINT_MAX_BRUSH_SIZE_PX)
         self.width_slider.setValue(int(self._pen_width))
         self.width_slider.setFixedWidth(120)
         self.width_slider.valueChanged.connect(self._on_width_changed)
@@ -7554,6 +8360,11 @@ class PaintDialog(QDialog):
         self.canvas.set_pen_opacity(self._pen_opacity)
         self.canvas.set_brush_detail(**self._canvas_brush_detail_payload())
         self.canvas.stroke_added.connect(self._on_stroke_added)
+        self.canvas.quick_palette_requested.connect(self._show_quick_palette)
+        self.canvas.brush_hud_adjust_requested.connect(self._adjust_brush_from_hud)
+        self.canvas.color_sample_requested.connect(
+            lambda color: self._apply_pen_color(QColor(color), remember=True)
+        )
         self.canvas.set_extra_paint_hook(self._paint_material_preview_overlay)
         self.canvas.zoom_requested.connect(self._handle_canvas_zoom_request)
         self.canvas.stroke_erased_at.connect(
@@ -8128,6 +8939,54 @@ class PaintDialog(QDialog):
             )
             ui_tool_bar.addWidget(button)
             self._ui_design_view_buttons[mode] = button
+        self._ui_design_motion_actor_btn = QPushButton("Motion Actor")
+        self._ui_design_motion_actor_btn.setObjectName("PaintBlockoutModeButton")
+        self._ui_design_motion_actor_btn.setToolTip(
+            "Import and place a .tgmotion animation actor"
+        )
+        self._ui_design_motion_actor_btn.setIcon(
+            app_icon("import", size=13, color="#E4E8EE")
+        )
+        self._ui_design_motion_actor_btn.setIconSize(icon_size(13))
+        self._ui_design_motion_actor_btn.setFixedHeight(24)
+        self._ui_design_motion_actor_btn.clicked.connect(
+            self._import_painter_ui_motion_actor
+        )
+        ui_tool_bar.addWidget(self._ui_design_motion_actor_btn)
+        self._ui_design_animate_btn = QPushButton("Animate")
+        self._ui_design_animate_btn.setObjectName("PaintBlockoutModeButton")
+        self._ui_design_animate_btn.setToolTip(
+            "Open the selected UI object in Motion Designer"
+        )
+        self._ui_design_animate_btn.setIcon(
+            app_icon("motion", size=13, color="#E4E8EE")
+        )
+        self._ui_design_animate_btn.setIconSize(icon_size(13))
+        self._ui_design_animate_btn.setFixedHeight(24)
+        self._ui_design_animate_btn.clicked.connect(
+            self._animate_selected_painter_ui_object
+        )
+        ui_tool_bar.addWidget(self._ui_design_animate_btn)
+        self._ui_design_motion_preview_btn = QPushButton("")
+        self._ui_design_motion_preview_btn.setObjectName(
+            "PaintBlockoutModeButton"
+        )
+        self._ui_design_motion_preview_btn.setCheckable(True)
+        self._ui_design_motion_preview_btn.setToolTip(
+            "Play or stop the selected UI motion"
+        )
+        self._ui_design_motion_preview_btn.setAccessibleName(
+            "Play UI motion preview"
+        )
+        self._ui_design_motion_preview_btn.setIcon(
+            app_icon("play", size=13, color="#E4E8EE")
+        )
+        self._ui_design_motion_preview_btn.setIconSize(icon_size(13))
+        self._ui_design_motion_preview_btn.setFixedSize(28, 24)
+        self._ui_design_motion_preview_btn.toggled.connect(
+            self._set_painter_ui_motion_preview
+        )
+        ui_tool_bar.addWidget(self._ui_design_motion_preview_btn)
         self._ui_design_tool_host.hide()
         canvas_bar.addWidget(self._ui_design_tool_host)
         self._blockout_transform_buttons: dict[str, QPushButton] = {}
@@ -8199,9 +9058,6 @@ class PaintDialog(QDialog):
         self._painter_ui_overlay.artboard_activation_requested.connect(
             self._set_painter_ui_artboard
         )
-        self._painter_ui_overlay.artboard_activation_requested.connect(
-            self._set_painter_ui_artboard
-        )
         self._painter_ui_overlay.artboard_geometry_requested.connect(
             self._update_painter_ui_artboard_position
         )
@@ -8239,6 +9095,11 @@ class PaintDialog(QDialog):
         self.canvas.set_pen_opacity(self._pen_opacity)
         self.canvas.set_brush_detail(**self._canvas_brush_detail_payload())
         self.canvas.stroke_added.connect(self._on_stroke_added)
+        self.canvas.quick_palette_requested.connect(self._show_quick_palette)
+        self.canvas.brush_hud_adjust_requested.connect(self._adjust_brush_from_hud)
+        self.canvas.color_sample_requested.connect(
+            lambda color: self._apply_pen_color(QColor(color), remember=True)
+        )
         self.canvas.set_extra_paint_hook(self._paint_material_preview_overlay)
         self.canvas.zoom_requested.connect(self._handle_canvas_zoom_request)
         self.canvas.stroke_erased_at.connect(self._erase_stroke_direct)
@@ -8443,7 +9304,7 @@ class PaintDialog(QDialog):
         size_label.setObjectName("PaintMeta")
         brush_options_row.addWidget(size_label)
         self._top_brush_size_spin = QSpinBox()
-        self._top_brush_size_spin.setRange(1, 60)
+        self._top_brush_size_spin.setRange(1, PAINT_MAX_BRUSH_SIZE_PX)
         self._top_brush_size_spin.setSuffix(" px")
         self._top_brush_size_spin.setValue(int(round(self._pen_width)))
         self._top_brush_size_spin.setFixedWidth(72)
@@ -8557,8 +9418,9 @@ class PaintDialog(QDialog):
         matrix_grid.setHorizontalSpacing(3)
         matrix_grid.setVerticalSpacing(3)
         self._palette_btns: list[QPushButton] = []
+        harmony_height = 30 if self._palette_touch_targets else 18
         for idx, (rgb, label) in enumerate(self._derived_palette_colors()):
-            btn = self._make_palette_button(rgb, width=44, height=18)
+            btn = self._make_palette_button(rgb, width=44, height=harmony_height)
             btn.setToolTip(label)
             matrix_grid.addWidget(btn, idx // 4, idx % 4)
             self._palette_btns.append(btn)
@@ -8586,16 +9448,96 @@ class PaintDialog(QDialog):
         recent_label = QLabel("Recent Colors")
         recent_label.setObjectName("PaintColorSectionLabel")
         swatches_layout.addWidget(recent_label)
-        recent_row = QHBoxLayout()
+        recent_host = QWidget()
+        recent_row = QHBoxLayout(recent_host)
         recent_row.setContentsMargins(0, 0, 0, 0)
         recent_row.setSpacing(3)
         self._recent_color_btns: list[QPushButton] = []
-        for rgb in self._recent_colors:
-            btn = self._make_palette_button(rgb, width=24, height=14)
+        recent_width = 36 if self._palette_touch_targets else 28
+        recent_height = 30 if self._palette_touch_targets else 18
+        for index in range(MAX_RECENT_COLORS):
+            rgb = (
+                self._recent_colors[index]
+                if index < len(self._recent_colors)
+                else (0, 0, 0)
+            )
+            btn = self._make_palette_button(
+                rgb,
+                width=recent_width,
+                height=recent_height,
+            )
+            btn.setVisible(index < len(self._recent_colors))
             recent_row.addWidget(btn)
             self._recent_color_btns.append(btn)
         recent_row.addStretch(1)
-        swatches_layout.addLayout(recent_row)
+        recent_scroll = QScrollArea()
+        recent_scroll.setWidgetResizable(True)
+        recent_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        recent_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        recent_scroll.setFixedHeight(recent_height + 12)
+        recent_scroll.setWidget(recent_host)
+        swatches_layout.addWidget(recent_scroll)
+
+        pinned_label = QLabel("Pinned / Document")
+        pinned_label.setObjectName("PaintColorSectionLabel")
+        swatches_layout.addWidget(pinned_label)
+        pinned_host = QWidget()
+        pinned_row = QHBoxLayout(pinned_host)
+        pinned_row.setContentsMargins(0, 0, 0, 0)
+        pinned_row.setSpacing(3)
+        self._document_color_btns: list[QPushButton] = []
+        for _index in range(MAX_DOCUMENT_COLORS):
+            btn = self._make_palette_button(
+                (0, 0, 0),
+                width=recent_width,
+                height=recent_height,
+            )
+            btn.hide()
+            pinned_row.addWidget(btn)
+            self._document_color_btns.append(btn)
+        pinned_row.addStretch(1)
+        pinned_scroll = QScrollArea()
+        pinned_scroll.setWidgetResizable(True)
+        pinned_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        pinned_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        pinned_scroll.setFixedHeight(recent_height + 12)
+        pinned_scroll.setWidget(pinned_host)
+        swatches_layout.addWidget(pinned_scroll)
+
+        palette_tools = QHBoxLayout()
+        pin_current_btn = QPushButton("Pin Current")
+        pin_current_btn.setObjectName("PaintFlatPresetButton")
+        pin_current_btn.clicked.connect(self._toggle_pin_current_color)
+        palette_tools.addWidget(pin_current_btn)
+        touch_targets_btn = QPushButton("Touch Targets")
+        touch_targets_btn.setObjectName("PaintFlatPresetButton")
+        touch_targets_btn.setCheckable(True)
+        touch_targets_btn.setChecked(self._palette_touch_targets)
+        touch_targets_btn.toggled.connect(self._set_palette_touch_targets)
+        palette_tools.addWidget(touch_targets_btn)
+        swatches_layout.addLayout(palette_tools)
+        harmony_row = QHBoxLayout()
+        harmony_row.addWidget(QLabel("Harmony"))
+        self._palette_harmony_combo = QComboBox()
+        for label, mode in (
+            ("Full", "full"),
+            ("Monochrome", "monochrome"),
+            ("Analogous", "analogous"),
+            ("Complementary", "complementary"),
+            ("Split Complementary", "split_complementary"),
+            ("Triadic", "triadic"),
+        ):
+            self._palette_harmony_combo.addItem(label, mode)
+        harmony_index = self._palette_harmony_combo.findData(
+            self._palette_harmony_mode
+        )
+        self._palette_harmony_combo.setCurrentIndex(max(0, harmony_index))
+        self._palette_harmony_combo.currentIndexChanged.connect(
+            self._on_palette_harmony_mode_changed
+        )
+        harmony_row.addWidget(self._palette_harmony_combo, stretch=1)
+        swatches_layout.addLayout(harmony_row)
+        self._refresh_document_color_buttons()
         color_tabs.addTab(swatches_page, "Swatches")
 
         gradients_page = QWidget()
@@ -9479,10 +10421,15 @@ class PaintDialog(QDialog):
             for row in payload.get("colors", []) or []:
                 rgb = row.get("rgb")
                 if isinstance(rgb, list) and len(rgb) >= 3:
-                    colors.append((int(rgb[0]), int(rgb[1]), int(rgb[2])))
+                    colors.append(
+                        self._normalise_rgb((int(rgb[0]), int(rgb[1]), int(rgb[2])))
+                    )
             if colors:
-                self._recent_colors = colors[:RECENT_COLOR_LIMIT]
+                self._document_palette_colors = list(
+                    dict.fromkeys([*colors, *self._document_palette_colors])
+                )[:MAX_DOCUMENT_COLORS]
                 self._apply_pen_color(QColor(*colors[0]), remember=False)
+                self._refresh_document_color_buttons()
             if hasattr(self, "_tool_status_label"):
                 self._tool_status_label.setText(f"Reference palette {len(colors)} colors")
         except Exception as exc:
@@ -12594,12 +13541,347 @@ class PaintDialog(QDialog):
         if overlay is None:
             return
         overlay.set_document(getattr(self, "_painter_ui_document", None))
+        overlay.set_motion_actor_sources(
+            getattr(self, "_painter_ui_motion_compositions", {})
+        )
+        overlay.set_motion_actor_time(
+            int(getattr(self, "_painter_ui_motion_time_ms", 0) or 0)
+        )
         if str(getattr(self, "_canvas_workspace_mode", "paint")) == "ui_design":
             overlay.show()
             overlay.raise_()
         inspector = getattr(self, "_paint_ui_inspector", None)
         if inspector is not None:
             inspector.set_document(getattr(self, "_painter_ui_document", None))
+        selected = str(
+            (
+                (getattr(self, "_painter_ui_document", {}) or {}).get(
+                    "selection"
+                )
+                or {}
+            ).get("object_id")
+            or ""
+        )
+        linked = self._painter_ui_linked_motion_id(selected) if selected else ""
+        from app.painter_ui_motion_actor import motion_actor_rows
+
+        has_motion_actors = bool(
+            motion_actor_rows(getattr(self, "_painter_ui_document", {}))
+        )
+        animate_button = getattr(self, "_ui_design_animate_btn", None)
+        if animate_button is not None:
+            animate_button.setEnabled(bool(selected))
+        preview_button = getattr(
+            self, "_ui_design_motion_preview_btn", None
+        )
+        if preview_button is not None:
+            preview_button.setEnabled(bool(linked or has_motion_actors))
+
+    def _place_painter_ui_motion_actor(
+        self,
+        composition,
+        *,
+        source_path: str = "",
+        name: str = "",
+        x: float | None = None,
+        y: float | None = None,
+        width: float = 0.0,
+        height: float = 0.0,
+        autoplay: bool = True,
+        loop: bool = True,
+    ) -> dict:
+        from app.motion_designer.schema import MotionComposition
+        from app.painter_ui_motion_actor import add_motion_actor
+
+        if not isinstance(composition, MotionComposition):
+            raise TypeError("Painter Motion Actor requires MotionComposition")
+        self._push_undo_state("Import Motion Actor")
+        document, row = add_motion_actor(
+            getattr(self, "_painter_ui_document", {}),
+            composition,
+            source_path=source_path,
+            name=name,
+            x=x,
+            y=y,
+            width=width,
+            height=height,
+            autoplay=autoplay,
+            loop=loop,
+        )
+        self._painter_ui_motion_compositions[composition.id] = composition
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+        return {
+            "placed": True,
+            "object_id": row["id"],
+            "composition_id": composition.id,
+            "source_path": str(source_path or ""),
+            "rect": {
+                key: float(row[key])
+                for key in ("x", "y", "width", "height")
+            },
+        }
+
+    def _import_painter_ui_motion_actor(self) -> dict:
+        from app.motion_designer.project_io import (
+            MOTION_PROJECT_FILTER,
+            load_motion_project,
+        )
+
+        path, _selected = QFileDialog.getOpenFileName(
+            self,
+            "Import Motion Actor",
+            str(Path.home()),
+            MOTION_PROJECT_FILTER,
+        )
+        if not path:
+            return {"placed": False, "reason": "cancelled"}
+        try:
+            composition = load_motion_project(path)
+            return self._place_painter_ui_motion_actor(
+                composition,
+                source_path=path,
+            )
+        except Exception as exc:
+            QMessageBox.warning(
+                self,
+                "Motion Actor",
+                f"Could not import Motion project: {exc}",
+            )
+            return {
+                "placed": False,
+                "reason": f"{type(exc).__name__}:{exc}",
+            }
+
+    def _painter_ui_linked_motion_id(self, object_id: str = "") -> str:
+        from app.painter_ui_motion_bridge import linked_motion_composition_id
+
+        target = str(object_id or "")
+        if not target:
+            target = str(
+                (
+                    (getattr(self, "_painter_ui_document", {}) or {}).get(
+                        "selection"
+                    )
+                    or {}
+                ).get("object_id")
+                or ""
+            )
+        if not target:
+            return ""
+        linked = linked_motion_composition_id(
+            getattr(self, "_painter_ui_document", {}),
+            target,
+        )
+        if linked:
+            return linked
+        from app.motion_designer.schema import MotionComposition
+
+        for composition_id, value in getattr(
+            self, "_painter_ui_motion_compositions", {}
+        ).items():
+            composition = (
+                MotionComposition.from_dict(value)
+                if isinstance(value, dict)
+                else value
+            )
+            if isinstance(composition, MotionComposition) and any(
+                layer.id == target for layer in composition.layers
+            ):
+                return str(composition_id)
+        return ""
+
+    def _animate_selected_painter_ui_object(self) -> dict:
+        from app.motion_designer.schema import MotionComposition
+        from app.motion_designer.ui import MotionDesignerWindow
+        from app.painter_ui_motion_bridge import (
+            attach_motion_composition,
+            create_or_sync_ui_motion_composition,
+        )
+
+        document = getattr(self, "_painter_ui_document", {})
+        selected = str(
+            ((document or {}).get("selection") or {}).get("object_id") or ""
+        )
+        if not selected:
+            return {"opened": False, "reason": "no_ui_object_selected"}
+        selected_row = next(
+            (
+                row
+                for row in document.get("objects", [])
+                if row.get("id") == selected
+            ),
+            None,
+        )
+        if (
+            isinstance(selected_row, dict)
+            and selected_row.get("kind") == "motion_actor"
+        ):
+            from app.painter_ui_motion_actor import motion_actor_composition_id
+
+            actor_composition_id = motion_actor_composition_id(selected_row)
+            actor_composition = getattr(
+                self, "_painter_ui_motion_compositions", {}
+            ).get(actor_composition_id)
+            if isinstance(actor_composition, dict):
+                actor_composition = MotionComposition.from_dict(
+                    actor_composition
+                )
+            if not isinstance(actor_composition, MotionComposition):
+                return {
+                    "opened": False,
+                    "reason": "motion_actor_composition_missing",
+                    "object_id": selected,
+                }
+            composition = actor_composition
+            root_object_id = selected
+        else:
+            composition = None
+            root_object_id = selected
+        linked_id = self._painter_ui_linked_motion_id(selected)
+        existing = getattr(
+            self, "_painter_ui_motion_compositions", {}
+        ).get(linked_id)
+        if isinstance(existing, dict):
+            existing = MotionComposition.from_dict(existing)
+        if composition is None:
+            source = (
+                (existing.metadata.get("painter_ui_source") or {})
+                if isinstance(existing, MotionComposition)
+                else {}
+            )
+            root_object_id = str(source.get("object_id") or selected)
+            composition = create_or_sync_ui_motion_composition(
+                document,
+                root_object_id,
+                existing,
+            )
+        self._painter_ui_motion_compositions[composition.id] = composition
+        if selected_row is None or selected_row.get("kind") != "motion_actor":
+            self._painter_ui_document = attach_motion_composition(
+                document,
+                selected,
+                composition.id,
+            )
+        self._painter_ui_motion_active_id = composition.id
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+        window = self._painter_ui_motion_windows.get(composition.id)
+        if window is None:
+            window = MotionDesignerWindow(composition, self)
+            window.composition_changed.connect(
+                self._on_painter_ui_motion_changed
+            )
+            self._painter_ui_motion_windows[composition.id] = window
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        return {
+            "opened": True,
+            "object_id": selected,
+            "root_object_id": root_object_id,
+            "composition_id": composition.id,
+            "layer_ids": [layer.id for layer in composition.layers],
+        }
+
+    def _on_painter_ui_motion_changed(self, composition: object) -> None:
+        from app.motion_designer.schema import MotionComposition
+
+        if not isinstance(composition, MotionComposition):
+            return
+        self._painter_ui_motion_compositions[composition.id] = composition
+        self._painter_ui_motion_active_id = composition.id
+        self._painter_document_dirty = True
+        if self._painter_ui_motion_preview_playing:
+            self._render_painter_ui_motion_preview()
+
+    def _selected_painter_ui_motion_composition(self):
+        from app.motion_designer.schema import MotionComposition
+        from app.painter_ui_motion_bridge import (
+            create_or_sync_ui_motion_composition,
+        )
+
+        document = getattr(self, "_painter_ui_document", {})
+        selected = str(
+            ((document or {}).get("selection") or {}).get("object_id") or ""
+        )
+        composition_id = self._painter_ui_linked_motion_id(selected)
+        value = getattr(
+            self, "_painter_ui_motion_compositions", {}
+        ).get(composition_id)
+        if isinstance(value, dict):
+            value = MotionComposition.from_dict(value)
+        if not isinstance(value, MotionComposition) or not selected:
+            return None
+        source = value.metadata.get("painter_ui_source")
+        source = source if isinstance(source, dict) else {}
+        root_object_id = str(source.get("object_id") or selected)
+        value = create_or_sync_ui_motion_composition(
+            document,
+            root_object_id,
+            value,
+        )
+        self._painter_ui_motion_compositions[value.id] = value
+        return value
+
+    def _set_painter_ui_motion_preview(self, playing: bool) -> bool:
+        from app.painter_ui_motion_actor import motion_actor_rows
+
+        enabled = bool(playing)
+        composition = self._selected_painter_ui_motion_composition()
+        has_motion_actors = bool(
+            motion_actor_rows(getattr(self, "_painter_ui_document", {}))
+        )
+        if enabled and composition is None and not has_motion_actors:
+            enabled = False
+        self._painter_ui_motion_preview_playing = enabled
+        button = getattr(self, "_ui_design_motion_preview_btn", None)
+        if button is not None and button.isChecked() != enabled:
+            button.blockSignals(True)
+            button.setChecked(enabled)
+            button.blockSignals(False)
+        if enabled:
+            self._painter_ui_motion_active_id = (
+                composition.id if composition is not None else ""
+            )
+            self._painter_ui_motion_time_ms = 0
+            self._render_painter_ui_motion_preview()
+            self._painter_ui_motion_timer.start()
+        else:
+            self._painter_ui_motion_timer.stop()
+            overlay = getattr(self, "_painter_ui_overlay", None)
+            if overlay is not None:
+                overlay.set_motion_preview({})
+        return enabled
+
+    def _render_painter_ui_motion_preview(self) -> dict:
+        from app.painter_ui_motion_bridge import motion_preview_states
+
+        overlay = getattr(self, "_painter_ui_overlay", None)
+        if overlay is not None:
+            overlay.set_motion_actor_time(self._painter_ui_motion_time_ms)
+        composition = self._selected_painter_ui_motion_composition()
+        if composition is None:
+            if overlay is not None:
+                overlay.set_motion_preview({})
+            return {}
+        states = motion_preview_states(
+            composition,
+            self._painter_ui_motion_time_ms,
+        )
+        if overlay is not None:
+            overlay.set_motion_preview(states)
+        return states
+
+    def _tick_painter_ui_motion_preview(self) -> None:
+        if not self._painter_ui_motion_preview_playing:
+            return
+        self._painter_ui_motion_time_ms += max(
+            1, int(self._painter_ui_motion_timer.interval())
+        )
+        self._render_painter_ui_motion_preview()
 
     def _set_3d_blockout_transform_mode(self, mode: str) -> str:
         selected = str(mode or "").strip().casefold()
@@ -13301,7 +14583,14 @@ class PaintDialog(QDialog):
             self._brush_detail_sliders[key] = slider
             return slider
 
-        self.width_slider = add_slider("Size", "size", 1, 60, int(self._pen_width), " px")
+        self.width_slider = add_slider(
+            "Size",
+            "size",
+            1,
+            PAINT_MAX_BRUSH_SIZE_PX,
+            int(self._pen_width),
+            " px",
+        )
         self.width_slider.valueChanged.connect(self._on_width_changed)
         self.opacity_slider = add_slider(
             "Opacity",
@@ -13344,11 +14633,20 @@ class PaintDialog(QDialog):
             int(self._brush_detail_settings["roundness"]),
             "%",
         )
+        self.brush_pressure_response_slider = add_slider(
+            "Pressure",
+            "pressure_response",
+            25,
+            250,
+            int(self._brush_detail_settings["pressure_response"]),
+            "%",
+        )
         for key, slider in (
             ("hardness", self.brush_hardness_slider),
             ("spacing", self.brush_spacing_slider),
             ("angle", self.brush_angle_slider),
             ("roundness", self.brush_roundness_slider),
+            ("pressure_response", self.brush_pressure_response_slider),
         ):
             slider.valueChanged.connect(
                 lambda value, setting=key: self._set_brush_detail_value(setting, int(value))
@@ -13438,6 +14736,26 @@ class PaintDialog(QDialog):
         self._brush_compact_btn.setToolTip("Compact Brush Selector")
         self._brush_compact_btn.toggled.connect(self._set_brush_selector_compact)
         library_header.addWidget(self._brush_compact_btn)
+        self._brush_manage_btn = QPushButton()
+        self._brush_manage_btn.setObjectName("PaintBrushLibraryTool")
+        self._brush_manage_btn.setIcon(app_icon("settings", size=13, color="#D9D9D9"))
+        self._brush_manage_btn.setIconSize(QSize(13, 13))
+        self._brush_manage_btn.setFixedSize(24, 22)
+        self._brush_manage_btn.setToolTip("Manage custom brushes")
+        brush_manage_menu = QMenu(self._brush_manage_btn)
+        brush_manage_menu.addAction("Save Current as New…", self._prompt_save_current_brush)
+        brush_manage_menu.addAction("Update Selected Custom Brush", self._update_selected_custom_brush)
+        brush_manage_menu.addAction("Duplicate Selected", self._duplicate_selected_brush)
+        brush_manage_menu.addAction("Rename / Tags…", self._prompt_edit_selected_brush_metadata)
+        brush_manage_menu.addSeparator()
+        brush_manage_menu.addAction("Move Custom Brush Up", lambda: self._move_selected_custom_brush(-1))
+        brush_manage_menu.addAction("Move Custom Brush Down", lambda: self._move_selected_custom_brush(1))
+        brush_manage_menu.addAction("Delete Selected Custom Brush", self._delete_selected_custom_brush)
+        brush_manage_menu.addSeparator()
+        brush_manage_menu.addAction("Import Brush Bundle…", self._import_custom_brush_bundle)
+        brush_manage_menu.addAction("Export My Brushes…", self._export_custom_brush_bundle)
+        self._brush_manage_btn.setMenu(brush_manage_menu)
+        library_header.addWidget(self._brush_manage_btn)
         library_layout.addLayout(library_header)
 
         self._brush_search_edit = QLineEdit(library_page)
@@ -13478,7 +14796,7 @@ class PaintDialog(QDialog):
         all_item.setData(Qt.ItemDataRole.UserRole, "")
         self._brush_category_list.addItem(all_item)
         for category in sorted(
-            {str(row.get("category") or "Brushes") for row in BRUSH_LIBRARY_PRESETS}
+            {str(row.get("category") or "Brushes") for row in self._brush_presets_catalog()}
         ):
             item = QListWidgetItem(category)
             item.setData(Qt.ItemDataRole.UserRole, category)
@@ -13562,7 +14880,7 @@ class PaintDialog(QDialog):
             return f"{int(value)} px"
         if key == "opacity":
             return f"{int(value)}%"
-        if key in {"hardness", "spacing", "roundness"}:
+        if key in {"hardness", "spacing", "roundness", "pressure_response"}:
             return f"{int(value)}%"
         return str(value)
 
@@ -13572,6 +14890,9 @@ class PaintDialog(QDialog):
             "spacing": int(self._brush_detail_settings.get("spacing", 25)),
             "angle": int(self._brush_detail_settings.get("angle", 0)),
             "roundness": int(self._brush_detail_settings.get("roundness", 100)),
+            "pressure_response": int(
+                self._brush_detail_settings.get("pressure_response", 100)
+            ),
             "flip_x": bool(self._brush_detail_settings.get("flip_x", False)),
             "flip_y": bool(self._brush_detail_settings.get("flip_y", False)),
         }
@@ -13582,6 +14903,7 @@ class PaintDialog(QDialog):
             "spacing": (1, 200),
             "angle": (-180, 180),
             "roundness": (10, 100),
+            "pressure_response": (25, 250),
         }
         if key not in ranges:
             return
@@ -13617,7 +14939,9 @@ class PaintDialog(QDialog):
         try:
             if hasattr(self, "width_slider"):
                 self.width_slider.blockSignals(True)
-                self.width_slider.setValue(max(1, min(60, int(round(self._pen_width)))))
+                self.width_slider.setValue(
+                    max(1, min(PAINT_MAX_BRUSH_SIZE_PX, int(round(self._pen_width))))
+                )
                 self.width_slider.blockSignals(False)
             if hasattr(self, "opacity_slider"):
                 self.opacity_slider.blockSignals(True)
@@ -13629,7 +14953,13 @@ class PaintDialog(QDialog):
                 if index >= 0:
                     self.brush_style_combo.setCurrentIndex(index)
                 self.brush_style_combo.blockSignals(False)
-            for key in ("hardness", "spacing", "angle", "roundness"):
+            for key in (
+                "hardness",
+                "spacing",
+                "angle",
+                "roundness",
+                "pressure_response",
+            ):
                 slider = getattr(self, "_brush_detail_sliders", {}).get(key)
                 value = int(self._brush_detail_settings.get(key, BRUSH_DETAIL_DEFAULTS[key]))
                 if slider is not None:
@@ -13706,12 +15036,65 @@ class PaintDialog(QDialog):
     def _brush_preset_key(preset: dict[str, object]) -> str:
         return f"{preset.get('category', '')}::{preset.get('name', '')}::{preset.get('style', '')}"
 
+    def _brush_presets_catalog(self) -> list[dict[str, object]]:
+        return [*BRUSH_LIBRARY_PRESETS, *self._brush_user_presets]
+
+    def _sync_brush_recent_indices_from_keys(self) -> None:
+        catalog = self._brush_presets_catalog()
+        key_to_index = {
+            self._brush_preset_key(preset): index
+            for index, preset in enumerate(catalog)
+        }
+        self._brush_recent_indices = [
+            key_to_index[key]
+            for key in self._brush_recent_keys
+            if key in key_to_index
+        ][:MAX_RECENT_BRUSHES]
+
+    def _save_palette_library_state(self) -> None:
+        self._sync_brush_recent_indices_from_keys()
+        payload = {
+            "favorites": sorted(self._brush_favorites),
+            "recent_brushes": list(self._brush_recent_keys[:MAX_RECENT_BRUSHES]),
+            "recent_colors": [list(rgb) for rgb in self._recent_colors[:MAX_RECENT_COLORS]],
+            "pinned_colors": [list(rgb) for rgb in self._pinned_colors[:MAX_RECENT_COLORS]],
+            "custom_brushes": [dict(row) for row in self._brush_user_presets],
+            "touch_targets": bool(self._palette_touch_targets),
+            "harmony_mode": str(self._palette_harmony_mode),
+        }
+        self._palette_library_state = payload
+        try:
+            save_palette_library(payload)
+        except OSError:
+            pass
+
+    def _schedule_palette_library_save(self) -> None:
+        if self._palette_save_pending:
+            return
+        self._palette_save_pending = True
+
+        def _flush() -> None:
+            self._palette_save_pending = False
+            self._save_palette_library_state()
+
+        QTimer.singleShot(180, _flush)
+
     def _brush_preset_icon(
         self,
         preset: dict[str, object],
         *,
         favorite: bool = False,
     ) -> QIcon:
+        cache_key = hashlib.sha1(
+            json.dumps(
+                {"preset": preset, "favorite": bool(favorite)},
+                sort_keys=True,
+                default=str,
+            ).encode("utf-8")
+        ).hexdigest()
+        cached = self._brush_icon_cache.get(cache_key)
+        if cached is not None:
+            return QIcon(cached)
         pixmap = QPixmap(76, 36)
         pixmap.fill(Qt.GlobalColor.transparent)
         painter = QPainter(pixmap)
@@ -13767,7 +15150,9 @@ class PaintDialog(QDialog):
                 painter.drawEllipse(QPointF(69, 7), 3.0, 3.0)
         finally:
             painter.end()
-        return QIcon(pixmap)
+        icon = QIcon(pixmap)
+        self._brush_icon_cache[cache_key] = icon
+        return QIcon(icon)
 
     def _brush_preset_matches_filter(
         self,
@@ -13891,7 +15276,7 @@ class PaintDialog(QDialog):
         active_filters = set(getattr(self, "_brush_active_filters", set()))
         previous_index = self._active_brush_preset_index
         self.brush_library_list.clear()
-        for idx, preset in enumerate(BRUSH_LIBRARY_PRESETS):
+        for idx, preset in enumerate(self._brush_presets_catalog()):
             category = str(preset["category"])
             if selected_category and category != selected_category:
                 continue
@@ -13901,6 +15286,7 @@ class PaintDialog(QDialog):
                         category,
                         str(preset.get("name") or ""),
                         str(preset.get("style") or ""),
+                        " ".join(str(tag) for tag in preset.get("tags") or []),
                     )
                 ).casefold()
                 if search_text not in haystack:
@@ -13943,9 +15329,10 @@ class PaintDialog(QDialog):
             return
         recent_list.clear()
         for idx in self._brush_recent_indices[:8]:
-            if not (0 <= idx < len(BRUSH_LIBRARY_PRESETS)):
+            catalog = self._brush_presets_catalog()
+            if not (0 <= idx < len(catalog)):
                 continue
-            preset = BRUSH_LIBRARY_PRESETS[idx]
+            preset = catalog[idx]
             favorite = self._brush_preset_key(preset) in self._brush_favorites
             item = QListWidgetItem(
                 self._brush_preset_icon(preset, favorite=favorite),
@@ -13973,7 +15360,7 @@ class PaintDialog(QDialog):
             return
         try:
             idx = int(item.data(Qt.ItemDataRole.UserRole))
-            preset = BRUSH_LIBRARY_PRESETS[idx]
+            preset = self._brush_presets_catalog()[idx]
         except Exception:
             self._update_brush_library_preview(None)
             return
@@ -13986,7 +15373,7 @@ class PaintDialog(QDialog):
         if button is None:
             return
         try:
-            preset = BRUSH_LIBRARY_PRESETS[self._active_brush_preset_index]
+            preset = self._brush_presets_catalog()[self._active_brush_preset_index]
         except Exception:
             button.setChecked(False)
             return
@@ -14008,7 +15395,7 @@ class PaintDialog(QDialog):
 
     def _toggle_active_brush_favorite(self) -> None:
         try:
-            preset = BRUSH_LIBRARY_PRESETS[self._active_brush_preset_index]
+            preset = self._brush_presets_catalog()[self._active_brush_preset_index]
         except Exception:
             return
         key = self._brush_preset_key(preset)
@@ -14016,9 +15403,238 @@ class PaintDialog(QDialog):
             self._brush_favorites.remove(key)
         else:
             self._brush_favorites.add(key)
+        self._save_palette_library_state()
         self._update_brush_favorite_button()
         self._populate_brush_library()
         self._populate_brush_recent_list()
+
+    def _current_brush_preset_payload(
+        self,
+        name: str,
+        tags=(),
+        category: str = "My Brushes",
+    ) -> dict[str, object]:
+        return normalize_brush_preset(
+            {
+                "name": str(name or "Custom Brush"),
+                "category": str(category or "My Brushes"),
+                "style": str(self._pen_style),
+                "width": int(round(self._pen_width)),
+                "opacity": int(round(self._pen_opacity * 100.0 / 255.0)),
+                **dict(self._brush_detail_settings),
+                "tags": list(tags or []),
+            }
+        )
+
+    def _rebuild_brush_categories(self, preferred: str = "") -> None:
+        category_list = getattr(self, "_brush_category_list", None)
+        if category_list is None:
+            return
+        selected = preferred
+        if not selected and category_list.currentItem() is not None:
+            selected = str(
+                category_list.currentItem().data(Qt.ItemDataRole.UserRole) or ""
+            )
+        category_list.blockSignals(True)
+        try:
+            category_list.clear()
+            all_item = QListWidgetItem("All Brushes")
+            all_item.setData(Qt.ItemDataRole.UserRole, "")
+            category_list.addItem(all_item)
+            target_row = 0
+            for category in sorted(
+                {
+                    str(row.get("category") or "Brushes")
+                    for row in self._brush_presets_catalog()
+                }
+            ):
+                item = QListWidgetItem(category)
+                item.setData(Qt.ItemDataRole.UserRole, category)
+                category_list.addItem(item)
+                if category == selected:
+                    target_row = category_list.count() - 1
+            category_list.setCurrentRow(target_row)
+        finally:
+            category_list.blockSignals(False)
+
+    def _refresh_custom_brush_library(self, *, preferred_category: str = "My Brushes") -> None:
+        self._brush_icon_cache.clear()
+        self._sync_brush_recent_indices_from_keys()
+        self._rebuild_brush_categories(preferred_category)
+        self._save_palette_library_state()
+        self._populate_brush_library()
+        self._populate_brush_recent_list()
+
+    def _create_custom_brush_preset(
+        self,
+        name: str,
+        tags=(),
+        *,
+        category: str = "My Brushes",
+        source: dict[str, object] | None = None,
+    ) -> dict[str, object]:
+        preset = (
+            normalize_brush_preset({**dict(source), "name": name, "tags": list(tags or [])})
+            if source is not None
+            else self._current_brush_preset_payload(name, tags, category)
+        )
+        preset["category"] = str(preset.get("category") or "My Brushes")
+        preset["custom"] = True
+        self._brush_user_presets.append(preset)
+        self._active_brush_preset_index = len(self._brush_presets_catalog()) - 1
+        self._refresh_custom_brush_library(preferred_category=str(preset["category"]))
+        return preset
+
+    def _prompt_save_current_brush(self) -> None:
+        name, accepted = QInputDialog.getText(self, "New Brush", "Brush name:")
+        if not accepted or not str(name).strip():
+            return
+        tags, accepted = QInputDialog.getText(
+            self,
+            "Brush Tags",
+            "Comma-separated tags:",
+        )
+        if not accepted:
+            tags = ""
+        category, accepted = QInputDialog.getText(
+            self,
+            "Brush Group",
+            "Group / category:",
+            text="My Brushes",
+        )
+        if not accepted or not str(category).strip():
+            category = "My Brushes"
+        self._create_custom_brush_preset(
+            str(name).strip(),
+            [part.strip() for part in str(tags).split(",") if part.strip()],
+            category=str(category).strip(),
+        )
+
+    def _selected_custom_brush_offset(self) -> int | None:
+        offset = int(self._active_brush_preset_index) - len(BRUSH_LIBRARY_PRESETS)
+        return offset if 0 <= offset < len(self._brush_user_presets) else None
+
+    def _update_selected_custom_brush(self) -> None:
+        offset = self._selected_custom_brush_offset()
+        if offset is None:
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText("Select a custom brush to update")
+            return
+        previous = self._brush_user_presets[offset]
+        self._brush_user_presets[offset] = self._current_brush_preset_payload(
+            str(previous.get("name") or "Custom Brush"),
+            previous.get("tags") or [],
+            str(previous.get("category") or "My Brushes"),
+        )
+        self._refresh_custom_brush_library()
+
+    def _duplicate_selected_brush(self) -> None:
+        catalog = self._brush_presets_catalog()
+        if not (0 <= self._active_brush_preset_index < len(catalog)):
+            return
+        source = catalog[self._active_brush_preset_index]
+        self._create_custom_brush_preset(
+            f"{source.get('name', 'Brush')} Copy",
+            source.get("tags") or [],
+            source=source,
+        )
+
+    def _prompt_edit_selected_brush_metadata(self) -> None:
+        offset = self._selected_custom_brush_offset()
+        if offset is None:
+            return
+        preset = self._brush_user_presets[offset]
+        name, accepted = QInputDialog.getText(
+            self,
+            "Brush Metadata",
+            "Brush name:",
+            text=str(preset.get("name") or "Custom Brush"),
+        )
+        if not accepted or not str(name).strip():
+            return
+        tags, accepted = QInputDialog.getText(
+            self,
+            "Brush Metadata",
+            "Comma-separated tags:",
+            text=", ".join(str(value) for value in preset.get("tags") or []),
+        )
+        if not accepted:
+            return
+        category, accepted = QInputDialog.getText(
+            self,
+            "Brush Metadata",
+            "Group / category:",
+            text=str(preset.get("category") or "My Brushes"),
+        )
+        if not accepted or not str(category).strip():
+            return
+        preset["name"] = str(name).strip()
+        preset["tags"] = [part.strip() for part in str(tags).split(",") if part.strip()]
+        preset["category"] = str(category).strip()
+        self._refresh_custom_brush_library(
+            preferred_category=str(preset["category"])
+        )
+
+    def _delete_selected_custom_brush(self) -> None:
+        offset = self._selected_custom_brush_offset()
+        if offset is None:
+            return
+        removed = self._brush_user_presets.pop(offset)
+        key = self._brush_preset_key(removed)
+        self._brush_favorites.discard(key)
+        self._brush_recent_keys = [value for value in self._brush_recent_keys if value != key]
+        self._active_brush_preset_index = max(
+            0,
+            min(len(self._brush_presets_catalog()) - 1, self._active_brush_preset_index - 1),
+        )
+        self._refresh_custom_brush_library(preferred_category="")
+
+    def _move_selected_custom_brush(self, direction: int) -> None:
+        offset = self._selected_custom_brush_offset()
+        if offset is None:
+            return
+        target = max(0, min(len(self._brush_user_presets) - 1, offset + int(direction)))
+        if target == offset:
+            return
+        row = self._brush_user_presets.pop(offset)
+        self._brush_user_presets.insert(target, row)
+        self._active_brush_preset_index = len(BRUSH_LIBRARY_PRESETS) + target
+        self._refresh_custom_brush_library()
+
+    def _import_custom_brush_bundle(self) -> None:
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        path, _selected = QFileDialog.getOpenFileName(
+            self,
+            "Import Painter Brushes",
+            str(Path.home()),
+            "Tiger Studio Brush Bundle (*.tsbrushes *.json)",
+        )
+        if not path:
+            return
+        try:
+            self._brush_user_presets.extend(import_brush_bundle(Path(path)))
+            self._refresh_custom_brush_library()
+        except Exception as exc:
+            QMessageBox.warning(self, "Import Painter Brushes", str(exc))
+
+    def _export_custom_brush_bundle(self) -> None:
+        from PySide6.QtWidgets import QFileDialog, QMessageBox
+
+        path, _selected = QFileDialog.getSaveFileName(
+            self,
+            "Export My Brushes",
+            str(Path.home() / "My Brushes.tsbrushes"),
+            "Tiger Studio Brush Bundle (*.tsbrushes)",
+        )
+        if not path:
+            return
+        if not str(path).lower().endswith(".tsbrushes"):
+            path += ".tsbrushes"
+        try:
+            export_brush_bundle(self._brush_user_presets, Path(path))
+        except Exception as exc:
+            QMessageBox.warning(self, "Export My Brushes", str(exc))
 
     def _update_brush_library_preview(
         self,
@@ -14082,7 +15698,7 @@ class PaintDialog(QDialog):
     def _on_brush_library_item(self, item: QListWidgetItem) -> None:
         idx = item.data(Qt.ItemDataRole.UserRole)
         try:
-            preset = BRUSH_LIBRARY_PRESETS[int(idx)]
+            preset = self._brush_presets_catalog()[int(idx)]
         except Exception:
             return
         self._active_brush_preset_index = int(idx)
@@ -14090,23 +15706,35 @@ class PaintDialog(QDialog):
 
     def _apply_brush_library_preset(self, preset: dict[str, object]) -> None:
         try:
-            preset_index = BRUSH_LIBRARY_PRESETS.index(preset)
+            preset_index = self._brush_presets_catalog().index(preset)
         except ValueError:
             preset_index = self._active_brush_preset_index
         self._active_brush_preset_index = preset_index
+        preset_key = self._brush_preset_key(preset)
+        self._brush_recent_keys = [
+            key for key in self._brush_recent_keys if key != preset_key
+        ]
+        self._brush_recent_keys.insert(0, preset_key)
+        del self._brush_recent_keys[MAX_RECENT_BRUSHES:]
         if preset_index in self._brush_recent_indices:
             self._brush_recent_indices.remove(preset_index)
         self._brush_recent_indices.insert(0, preset_index)
-        del self._brush_recent_indices[8:]
+        del self._brush_recent_indices[MAX_RECENT_BRUSHES:]
         style = _normalize_paint_brush_style(str(preset.get("style") or "round"))
         width = int(preset.get("width") or self._pen_width)
         opacity = int(preset.get("opacity") or 100)
-        clamped_width = max(1, min(60, width))
+        clamped_width = max(1, min(PAINT_MAX_BRUSH_SIZE_PX, width))
         clamped_opacity = max(10, min(100, opacity))
         self._pen_width = float(clamped_width)
         self._pen_opacity = int(clamped_opacity * 255 / 100)
         self._pen_style = style
-        for key in ("hardness", "spacing", "angle", "roundness"):
+        for key in (
+            "hardness",
+            "spacing",
+            "angle",
+            "roundness",
+            "pressure_response",
+        ):
             if key in preset:
                 self._brush_detail_settings[key] = int(preset[key])
         for key in ("flip_x", "flip_y"):
@@ -14130,6 +15758,7 @@ class PaintDialog(QDialog):
         if hasattr(self, "_opacity_value_label"):
             self._opacity_value_label.setText(f"{clamped_opacity}%")
         self._sync_brush_detail_controls()
+        self._save_palette_library_state()
         self._populate_brush_recent_list()
         self._update_brush_favorite_button()
         self._update_brush_library_preview(preset)
@@ -14606,7 +16235,7 @@ class PaintDialog(QDialog):
         recent_item.setData(Qt.ItemDataRole.UserRole, "__recent__")
         category_list.addItem(recent_item)
         for category in sorted(
-            {str(row.get("category") or "Brushes") for row in BRUSH_LIBRARY_PRESETS}
+            {str(row.get("category") or "Brushes") for row in self._brush_presets_catalog()}
         ):
             item = QListWidgetItem(app_icon("brush", size=14, color="#C7CDD7"), category)
             item.setData(Qt.ItemDataRole.UserRole, category)
@@ -14697,13 +16326,13 @@ class PaintDialog(QDialog):
                 candidates = [
                     index
                     for index in self._brush_recent_indices
-                    if 0 <= index < len(BRUSH_LIBRARY_PRESETS)
+                    if 0 <= index < len(self._brush_presets_catalog())
                 ]
             else:
-                candidates = list(range(len(BRUSH_LIBRARY_PRESETS)))
+                candidates = list(range(len(self._brush_presets_catalog())))
             result: list[int] = []
             for index in candidates:
-                preset = BRUSH_LIBRARY_PRESETS[index]
+                preset = self._brush_presets_catalog()[index]
                 preset_category = str(preset.get("category") or "Brushes")
                 if category and category != "__recent__" and preset_category != category:
                     continue
@@ -14735,7 +16364,7 @@ class PaintDialog(QDialog):
                 return
             try:
                 index = int(item.data(Qt.ItemDataRole.UserRole))
-                preset = BRUSH_LIBRARY_PRESETS[index]
+                preset = self._brush_presets_catalog()[index]
             except Exception:
                 return
             current_popup_index["value"] = index
@@ -14767,7 +16396,7 @@ class PaintDialog(QDialog):
             wanted_index = current_popup_index["value"]
             selected_row = -1
             for row, idx in enumerate(_matching_indices()):
-                preset = BRUSH_LIBRARY_PRESETS[idx]
+                preset = self._brush_presets_catalog()[idx]
                 category = str(preset.get("category") or "Brushes")
                 name = str(preset.get("name") or f"Brush {idx + 1}")
                 width = int(preset.get("width") or 1)
@@ -14832,15 +16461,16 @@ class PaintDialog(QDialog):
 
         def _toggle_popup_favorite(checked: bool) -> None:
             index = int(current_popup_index["value"])
-            if not (0 <= index < len(BRUSH_LIBRARY_PRESETS)):
+            if not (0 <= index < len(self._brush_presets_catalog())):
                 return
-            preset = BRUSH_LIBRARY_PRESETS[index]
+            preset = self._brush_presets_catalog()[index]
             key = self._brush_preset_key(preset)
             if checked:
                 self._brush_favorites.add(key)
             else:
                 self._brush_favorites.discard(key)
             self._active_brush_preset_index = index
+            self._save_palette_library_state()
             self._update_brush_favorite_button()
             _populate_popup_presets()
 
@@ -14854,7 +16484,7 @@ class PaintDialog(QDialog):
 
     def _apply_brush_preset_by_index(self, index: int) -> None:
         try:
-            preset = BRUSH_LIBRARY_PRESETS[int(index)]
+            preset = self._brush_presets_catalog()[int(index)]
         except Exception:
             return
         self._apply_brush_library_preset(preset)
@@ -14911,22 +16541,235 @@ class PaintDialog(QDialog):
         menu.aboutToHide.connect(lambda b=button: b.setChecked(False))
         menu.popup(button.mapToGlobal(QPoint(0, button.height() + 4)))
 
+    def _adjust_brush_from_hud(self, delta_x: float, delta_y: float, finished: bool) -> None:
+        if finished:
+            if hasattr(self, "_tool_status_label"):
+                self._tool_status_label.setText(
+                    f"Brush {int(round(self._pen_width))} px  |  "
+                    f"{int(self._brush_detail_settings.get('hardness', 100))}% hardness"
+                )
+            return
+        width = max(
+            1,
+            min(
+                PAINT_MAX_BRUSH_SIZE_PX,
+                int(round(self._pen_width * (2.0 ** (float(delta_x) / 150.0)))),
+            ),
+        )
+        hardness = max(
+            1,
+            min(
+                100,
+                int(round(float(self._brush_detail_settings.get("hardness", 100)) - delta_y * 0.55)),
+            ),
+        )
+        if width != int(round(self._pen_width)):
+            self._on_width_changed(width)
+        if hardness != int(self._brush_detail_settings.get("hardness", 100)):
+            self._set_brush_detail_value("hardness", hardness)
+
+    def _show_quick_palette(self, global_position=None) -> None:
+        menu = QMenu(self)
+        menu.setObjectName("PaintBrushPopup")
+        panel = QFrame(menu)
+        panel.setObjectName("PaintBrushPopupPanel")
+        panel.setMinimumWidth(356)
+        layout = QVBoxLayout(panel)
+        layout.setContentsMargins(10, 9, 10, 10)
+        layout.setSpacing(7)
+
+        current_rgb = (
+            self._pen_color.red(),
+            self._pen_color.green(),
+            self._pen_color.blue(),
+        )
+        title_row = QHBoxLayout()
+        title = QLabel("QUICK PALETTE")
+        title.setObjectName("PaintBrushPanelTitle")
+        title_row.addWidget(title)
+        title_row.addStretch(1)
+        hue = max(0, int(self._pen_color.hue()))
+        saturation = int(round(self._pen_color.saturation() * 100.0 / 255.0))
+        value = int(round(self._pen_color.value() * 100.0 / 255.0))
+        current_label = QLabel(
+            f"{self._rgb_to_hex(current_rgb)}  "
+            f"RGB {current_rgb[0]} {current_rgb[1]} {current_rgb[2]}  "
+            f"HSV {hue}° {saturation}% {value}%"
+        )
+        current_label.setObjectName("PaintBrushMeta")
+        title_row.addWidget(current_label)
+        layout.addLayout(title_row)
+
+        compare_row = QHBoxLayout()
+        compare_row.addWidget(QLabel("Previous"))
+        previous = QColor(getattr(self, "_previous_pen_color", self._pen_color))
+        previous_rgb = (previous.red(), previous.green(), previous.blue())
+        previous_button = self._make_palette_button(
+            previous_rgb,
+            width=54,
+            height=34,
+            pick_on_click=False,
+        )
+        previous_button.setToolTip(
+            f"Restore previous color | {self._rgb_to_hex(previous_rgb)}"
+        )
+
+        def _restore_previous() -> None:
+            self._apply_pen_color(previous, remember=True)
+            menu.close()
+
+        previous_button.clicked.connect(_restore_previous)
+        compare_row.addWidget(previous_button)
+        compare_row.addWidget(QLabel("Current"))
+        current_button = self._make_palette_button(current_rgb, width=54, height=34)
+        current_button.setToolTip(f"Current color | {self._rgb_to_hex(current_rgb)}")
+        compare_row.addWidget(current_button)
+        pin_button = QPushButton(
+            "Unpin" if current_rgb in self._pinned_colors else "Pin"
+        )
+        pin_button.setObjectName("PaintFlatPresetButton")
+        pin_button.clicked.connect(self._toggle_pin_current_color)
+        compare_row.addWidget(pin_button)
+        compare_row.addStretch(1)
+        layout.addLayout(compare_row)
+
+        brush_label = QLabel("RECENT / FAVORITE BRUSHES")
+        brush_label.setObjectName("PaintColorSectionLabel")
+        layout.addWidget(brush_label)
+        brush_grid = QGridLayout()
+        brush_grid.setSpacing(4)
+        catalog = self._brush_presets_catalog()
+        candidates: list[int] = []
+        for index in self._brush_recent_indices:
+            if index not in candidates and 0 <= index < len(catalog):
+                candidates.append(index)
+        for index, preset in enumerate(catalog):
+            if (
+                self._brush_preset_key(preset) in self._brush_favorites
+                and index not in candidates
+            ):
+                candidates.append(index)
+        if self._active_brush_preset_index not in candidates:
+            candidates.insert(0, self._active_brush_preset_index)
+
+        def _apply_quick_brush(index: int) -> None:
+            self._apply_brush_preset_by_index(index)
+            menu.close()
+
+        for grid_index, preset_index in enumerate(candidates[:8]):
+            if not (0 <= preset_index < len(catalog)):
+                continue
+            preset = catalog[preset_index]
+            button = QPushButton(str(preset.get("name") or "Brush"))
+            button.setObjectName("PaintFlatPresetButton")
+            button.setIcon(
+                self._brush_preset_icon(
+                    preset,
+                    favorite=self._brush_preset_key(preset) in self._brush_favorites,
+                )
+            )
+            button.setIconSize(QSize(60, 28))
+            button.setMinimumSize(80, 48)
+            button.setToolTip(
+                f"{preset.get('category', '')} | {preset.get('width', 0)} px"
+            )
+            button.clicked.connect(
+                lambda _checked=False, index=preset_index: _apply_quick_brush(index)
+            )
+            brush_grid.addWidget(button, grid_index // 4, grid_index % 4)
+        layout.addLayout(brush_grid)
+
+        color_label = QLabel("PINNED / RECENT / OKLCH HARMONY")
+        color_label.setObjectName("PaintColorSectionLabel")
+        layout.addWidget(color_label)
+        color_grid = QGridLayout()
+        color_grid.setSpacing(4)
+        quick_colors = list(
+            dict.fromkeys(
+                [
+                    *self._pinned_colors,
+                    *self._recent_colors,
+                    *(rgb for rgb, _label in self._derived_palette_colors()),
+                ]
+            )
+        )[:16]
+
+        def _apply_quick_color(rgb: tuple[int, int, int]) -> None:
+            self._pick_palette_color(rgb)
+            menu.close()
+
+        for index, rgb in enumerate(quick_colors):
+            button = self._make_palette_button(
+                rgb,
+                width=76,
+                height=34,
+                pick_on_click=False,
+            )
+            button.setToolTip(self._rgb_to_hex(rgb))
+            button.clicked.connect(
+                lambda _checked=False, color=rgb: _apply_quick_color(color)
+            )
+            color_grid.addWidget(button, index // 4, index % 4)
+        layout.addLayout(color_grid)
+
+        control_grid = QGridLayout()
+        size_spin = QSpinBox()
+        size_spin.setRange(1, PAINT_MAX_BRUSH_SIZE_PX)
+        size_spin.setValue(int(round(self._pen_width)))
+        size_spin.setSuffix(" px")
+        size_spin.valueChanged.connect(self._on_width_changed)
+        control_grid.addWidget(QLabel("Size"), 0, 0)
+        control_grid.addWidget(size_spin, 0, 1)
+        opacity_spin = QSpinBox()
+        opacity_spin.setRange(1, 100)
+        opacity_spin.setValue(int(round(self._pen_opacity * 100.0 / 255.0)))
+        opacity_spin.setSuffix("%")
+        opacity_spin.valueChanged.connect(self._on_opacity_changed)
+        control_grid.addWidget(QLabel("Opacity"), 0, 2)
+        control_grid.addWidget(opacity_spin, 0, 3)
+        hardness_spin = QSpinBox()
+        hardness_spin.setRange(1, 100)
+        hardness_spin.setValue(int(self._brush_detail_settings.get("hardness", 100)))
+        hardness_spin.setSuffix("%")
+        hardness_spin.valueChanged.connect(
+            lambda value: self._set_brush_detail_value("hardness", int(value))
+        )
+        control_grid.addWidget(QLabel("Hardness"), 1, 0)
+        control_grid.addWidget(hardness_spin, 1, 1)
+        hint = QLabel("Right-click/barrel: open  •  drag ↔ size  •  drag ↕ hardness")
+        hint.setObjectName("PaintBrushMeta")
+        control_grid.addWidget(hint, 1, 2, 1, 2)
+        layout.addLayout(control_grid)
+
+        widget_action = QWidgetAction(menu)
+        widget_action.setDefaultWidget(panel)
+        menu.addAction(widget_action)
+        point = global_position
+        if isinstance(point, QPointF):
+            point = point.toPoint()
+        if not isinstance(point, QPoint):
+            point = QCursor.pos()
+        menu.popup(point)
+        self._quick_palette_menu = menu
+
     def _make_palette_button(
         self,
         rgb: tuple[int, int, int],
         *,
         width: int = 38,
         height: int = 16,
+        pick_on_click: bool = True,
     ) -> QPushButton:
         btn = QPushButton()
         btn.setFixedSize(width, height)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         self._style_palette_button(btn, rgb, selected=False, width=width, height=height)
-        btn.clicked.connect(
-            lambda _checked=False, b=btn: self._pick_palette_color(
-                getattr(b, "_paint_rgb", rgb)
+        if pick_on_click:
+            btn.clicked.connect(
+                lambda _checked=False, b=btn: self._pick_palette_color(
+                    getattr(b, "_paint_rgb", rgb)
+                )
             )
-        )
         return btn
 
     def _highlight_selected_palette(self) -> None:
@@ -14948,6 +16791,8 @@ class PaintDialog(QDialog):
             self._refresh_derived_palette_buttons(sel)
         if hasattr(self, "_recent_color_btns"):
             self._refresh_recent_color_buttons(sel)
+        if hasattr(self, "_document_color_btns"):
+            self._refresh_document_color_buttons()
         if hasattr(self, "foreground_swatch_btn"):
             self._refresh_toolbar_color_swatches()
         self._update_saturation_slider_style()
@@ -15031,36 +16876,14 @@ class PaintDialog(QDialog):
         )
 
     def _derived_palette_colors(self) -> list[tuple[tuple[int, int, int], str]]:
-        color = QColor(self._pen_color)
-        hue = color.hue()
-        if hue < 0:
-            hue = 0
-        saturation = max(24, int(color.saturation()))
-        value = max(28, int(color.value()))
-
-        def _hsv_rgb(
-            hue_shift: int,
-            saturation_scale: float,
-            value_scale: float,
-            label: str,
-        ) -> tuple[tuple[int, int, int], str]:
-            c = QColor.fromHsv(
-                int((hue + hue_shift) % 360),
-                max(0, min(255, int(round(saturation * saturation_scale)))),
-                max(0, min(255, int(round(value * value_scale)))),
-            )
-            return (c.red(), c.green(), c.blue()), label
-
-        return [
-            _hsv_rgb(0, 0.92, 0.42, "Deep shade"),
-            _hsv_rgb(0, 0.96, 0.66, "Shadow"),
-            _hsv_rgb(0, 1.00, 1.00, "Current color"),
-            _hsv_rgb(0, 0.72, 1.18, "Tint"),
-            _hsv_rgb(0, 0.42, 1.34, "Pale highlight"),
-            _hsv_rgb(-18, 1.03, 1.05, "Cool shift"),
-            _hsv_rgb(20, 1.05, 1.06, "Warm shift"),
-            _hsv_rgb(180, 0.72, 0.92, "Complement"),
-        ]
+        return oklch_harmony_colors(
+            (
+                self._pen_color.red(),
+                self._pen_color.green(),
+                self._pen_color.blue(),
+            ),
+            self._palette_harmony_mode,
+        )
 
     def _style_palette_button(
         self,
@@ -15182,28 +17005,115 @@ class PaintDialog(QDialog):
         self._set_tool_rail_collapsed(False)
 
     def _refresh_recent_color_buttons(self, selected: tuple[int, int, int]) -> None:
+        width = 36 if self._palette_touch_targets else 28
+        height = 30 if self._palette_touch_targets else 18
         for idx, btn in enumerate(self._recent_color_btns):
             if idx >= len(self._recent_colors):
                 btn.hide()
                 continue
             rgb = self._recent_colors[idx]
             btn.show()
-            self._style_palette_button(btn, rgb, selected=(rgb == selected), width=32, height=16)
+            btn.setFixedSize(width, height)
+            self._style_palette_button(
+                btn,
+                rgb,
+                selected=(rgb == selected),
+                width=width,
+                height=height,
+            )
 
     def _refresh_derived_palette_buttons(self, selected: tuple[int, int, int]) -> None:
         buttons = getattr(self, "_palette_btns", [])
+        height = 30 if self._palette_touch_targets else 18
         for btn, (rgb, label) in zip(buttons, self._derived_palette_colors()):
             btn.show()
-            self._style_palette_button(btn, rgb, selected=(rgb == selected), width=44, height=18)
+            btn.setFixedSize(44, height)
+            self._style_palette_button(
+                btn,
+                rgb,
+                selected=(rgb == selected),
+                width=44,
+                height=height,
+            )
             btn.setToolTip(f"{label} | {self._rgb_to_hex(rgb)}")
+
+    def _palette_document_display_colors(self) -> list[tuple[int, int, int]]:
+        return list(
+            dict.fromkeys([*self._pinned_colors, *self._document_palette_colors])
+        )[:MAX_DOCUMENT_COLORS]
+
+    def _refresh_document_color_buttons(self) -> None:
+        buttons = getattr(self, "_document_color_btns", [])
+        colors = self._palette_document_display_colors()
+        selected = (
+            self._pen_color.red(),
+            self._pen_color.green(),
+            self._pen_color.blue(),
+        )
+        width = 36 if self._palette_touch_targets else 28
+        height = 30 if self._palette_touch_targets else 18
+        for index, button in enumerate(buttons):
+            if index >= len(colors):
+                button.hide()
+                continue
+            rgb = colors[index]
+            button.show()
+            button.setFixedSize(width, height)
+            self._style_palette_button(
+                button,
+                rgb,
+                selected=(rgb == selected),
+                width=width,
+                height=height,
+            )
+            status = "Pinned" if rgb in self._pinned_colors else "Document"
+            button.setToolTip(f"{status} | {self._rgb_to_hex(rgb)}")
+
+    def _toggle_pin_current_color(self) -> None:
+        rgb = (
+            self._pen_color.red(),
+            self._pen_color.green(),
+            self._pen_color.blue(),
+        )
+        if rgb in self._pinned_colors:
+            self._pinned_colors.remove(rgb)
+        else:
+            self._pinned_colors.insert(0, rgb)
+            del self._pinned_colors[MAX_RECENT_COLORS:]
+        self._schedule_palette_library_save()
+        self._refresh_document_color_buttons()
+
+    def _set_palette_touch_targets(self, enabled: bool) -> None:
+        self._palette_touch_targets = bool(enabled)
+        self._save_palette_library_state()
+        self._highlight_selected_palette()
+        self._refresh_document_color_buttons()
+
+    def _on_palette_harmony_mode_changed(self, _index: int = -1) -> None:
+        combo = getattr(self, "_palette_harmony_combo", None)
+        if combo is None:
+            return
+        self._palette_harmony_mode = str(combo.currentData() or "full")
+        self._schedule_palette_library_save()
+        self._highlight_selected_palette()
 
     def _remember_recent_color(self, rgb: tuple[int, int, int]) -> None:
         rgb = self._normalise_rgb(rgb)
         self._recent_colors = [item for item in self._recent_colors if item != rgb]
         self._recent_colors.insert(0, rgb)
         del self._recent_colors[RECENT_COLOR_LIMIT:]
+        self._document_palette_colors = [
+            item for item in self._document_palette_colors if item != rgb
+        ]
+        self._document_palette_colors.insert(0, rgb)
+        del self._document_palette_colors[MAX_DOCUMENT_COLORS:]
+        self._painter_document_dirty = True
+        self._schedule_palette_library_save()
+        self._refresh_document_color_buttons()
 
     def _apply_pen_color(self, color: QColor, *, remember: bool) -> None:
+        if QColor(color) != self._pen_color:
+            self._previous_pen_color = QColor(self._pen_color)
         self._pen_color = QColor(color)
         self.canvas.set_pen_color(self._pen_color)
         if remember:
@@ -15819,6 +17729,8 @@ class PaintDialog(QDialog):
         )
         for added_stroke in strokes_to_add:
             self.canvas.add_stroke_direct(added_stroke)
+        if str(getattr(stroke, "source_tool", "") or "") == "pen":
+            self._remember_recent_color(tuple(stroke.color))
         self._update_inspector_counts()
 
     def _mirrored_strokes_for(self, stroke: Stroke) -> list[Stroke]:
@@ -15868,7 +17780,7 @@ class PaintDialog(QDialog):
         self._update_inspector_counts()
 
     def _apply_brush_preset(self, width: int, opacity: int) -> None:
-        width = max(1, min(60, int(width)))
+        width = max(1, min(PAINT_MAX_BRUSH_SIZE_PX, int(width)))
         opacity = max(10, min(100, int(opacity)))
         self._pen_width = float(width)
         self._pen_opacity = int(opacity * 255 / 100)
@@ -15960,6 +17872,27 @@ class PaintDialog(QDialog):
     def _export_png_to_file(self, *, include_background: bool) -> None:
         from PySide6.QtWidgets import QFileDialog, QMessageBox
 
+        preflight = output_preflight(
+            self._output_settings,
+            pixel_width=self._canvas_document_size[0],
+            pixel_height=self._canvas_document_size[1],
+        )
+        if preflight["mode"] == "print" and (
+            preflight["errors"] or preflight["warnings"]
+        ):
+            issues = [*preflight["errors"], *preflight["warnings"]]
+            answer = QMessageBox.question(
+                self,
+                "Output Preflight",
+                preflight["summary"]
+                + "\n\n"
+                + "\n".join(f"• {issue}" for issue in issues)
+                + "\n\nExport anyway?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
         try:
             from app.paths import default_save_dir
 
@@ -15998,6 +17931,7 @@ class PaintDialog(QDialog):
                 include_background=include_background,
                 stroke_width_scale=width_scale,
                 paint_layers=self._paint_layers,
+                output_settings=self._output_settings,
             )
         except Exception as exc:
             QMessageBox.warning(
@@ -16009,7 +17943,8 @@ class PaintDialog(QDialog):
         QMessageBox.information(
             self,
             "Export Paint PNG",
-            f"Wrote {report.get('mode')} PNG:\n{report.get('path')}",
+            f"Wrote {report.get('mode')} PNG:\n{report.get('path')}\n\n"
+            f"{report.get('preflight', {}).get('summary', '')}",
         )
 
     def _visible_strokes_for_export(self) -> list[Stroke]:
@@ -16065,6 +18000,16 @@ class PaintDialog(QDialog):
             self.canvas.path_snapshot() if hasattr(self, "canvas") else [],
             copy.deepcopy(getattr(self, "_painter_ui_document", None)),
             str(getattr(self, "_canvas_workspace_mode", "paint") or "paint"),
+            {
+                str(composition_id): (
+                    composition.to_dict()
+                    if hasattr(composition, "to_dict")
+                    else copy.deepcopy(composition)
+                )
+                for composition_id, composition in getattr(
+                    self, "_painter_ui_motion_compositions", {}
+                ).items()
+            },
         )
 
     def _push_undo_state(self, label: str = "Edit") -> None:
@@ -16169,6 +18114,7 @@ class PaintDialog(QDialog):
         restored_work_path = copy.deepcopy(snapshot[21]) if len(snapshot) >= 22 else None
         restored_ui_document = copy.deepcopy(snapshot[22]) if len(snapshot) >= 23 else None
         restored_workspace_mode = str(snapshot[23]) if len(snapshot) >= 24 else ""
+        restored_ui_motion = copy.deepcopy(snapshot[24]) if len(snapshot) >= 25 else None
         try:
             strokes, bubbles, stickers = snapshot[:3]
             if len(snapshot) >= 6:
@@ -16243,6 +18189,17 @@ class PaintDialog(QDialog):
                     fallback_width=self._canvas_document_size[0],
                     fallback_height=self._canvas_document_size[1],
                 )
+            if restored_ui_motion is not None:
+                from app.motion_designer.schema import MotionComposition
+
+                self._painter_ui_motion_compositions = {
+                    str(composition_id): (
+                        MotionComposition.from_dict(composition)
+                        if isinstance(composition, dict)
+                        else composition
+                    )
+                    for composition_id, composition in restored_ui_motion.items()
+                }
             if restored_workspace_mode:
                 self._canvas_workspace_mode = restored_workspace_mode
             self._sync_canvas_workspace_mode_controls()
@@ -16309,8 +18266,19 @@ class PaintDialog(QDialog):
         self._update_path_list()
         self._update_history_buttons()
         if hasattr(self, "_status_document_label"):
+            output = normalize_output_settings(
+                getattr(self, "_output_settings", None),
+                pixel_width=self._canvas_document_size[0],
+                pixel_height=self._canvas_document_size[1],
+            )
+            suffix = (
+                f" · {output['width_mm']:g} × {output['height_mm']:g} mm"
+                f" · {output['ppi']} PPI"
+                if output["mode"] == "print"
+                else ""
+            )
             self._status_document_label.setText(
-                f"{self._canvas_document_size[0]} x {self._canvas_document_size[1]} px"
+                f"{self._canvas_document_size[0]} x {self._canvas_document_size[1]} px{suffix}"
             )
         if hasattr(self, "_status_layer_label"):
             layer = self._paint_layer_by_id(self._active_paint_layer_id)
@@ -17946,26 +19914,47 @@ class PaintDialog(QDialog):
         return True
 
     def _prompt_image_size(self) -> None:
-        width, ok = QInputDialog.getInt(
+        dialog = PainterOutputSettingsDialog(
             self,
-            "Image Size",
-            "Width",
-            int(self._canvas_document_size[0]),
-            64,
-            16384,
+            pixel_size=self._canvas_document_size,
+            output_settings=self._output_settings,
         )
-        if not ok:
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        height, ok = QInputDialog.getInt(
-            self,
-            "Image Size",
-            "Height",
-            int(self._canvas_document_size[1]),
-            64,
-            16384,
-        )
-        if ok:
+        request = dialog.output_request()
+        width = int(request["width"])
+        height = int(request["height"])
+        if (width, height) != self._canvas_document_size:
             self._resize_image_document(width, height)
+        self._output_settings = normalize_output_settings(
+            request.get("settings"),
+            pixel_width=width,
+            pixel_height=height,
+        )
+        self._painter_document_dirty = True
+        self._update_inspector_counts()
+
+    def _show_output_preflight(self) -> dict:
+        from PySide6.QtWidgets import QMessageBox
+
+        report = output_preflight(
+            self._output_settings,
+            pixel_width=self._canvas_document_size[0],
+            pixel_height=self._canvas_document_size[1],
+        )
+        sections = [report["summary"]]
+        if report["errors"]:
+            sections.append("Errors:\n• " + "\n• ".join(report["errors"]))
+        if report["warnings"]:
+            sections.append("Check:\n• " + "\n• ".join(report["warnings"]))
+        if not report["errors"] and not report["warnings"]:
+            sections.append("Ready for the selected output purpose.")
+        QMessageBox.information(
+            self,
+            "Painter Output Preflight",
+            "\n\n".join(sections),
+        )
+        return report
 
     def _prompt_canvas_size(self) -> None:
         width, ok = QInputDialog.getInt(
@@ -19573,6 +21562,11 @@ class PaintDialog(QDialog):
                 "active_layer_id": str(self._active_paint_layer_id),
                 "selected_layer_id": str(self._selected_layer_id or ""),
             },
+            "output": normalize_output_settings(
+                self._output_settings,
+                pixel_width=self._canvas_document_size[0],
+                pixel_height=self._canvas_document_size[1],
+            ),
             "background": {
                 "present": bool(self._background_layer_present),
                 "color": self._background_color.name(QColor.NameFormat.HexRgb),
@@ -19625,6 +21619,20 @@ class PaintDialog(QDialog):
                 "style": str(self._pen_style),
                 "detail": dict(self._brush_detail_settings),
                 "active_preset_index": int(self._active_brush_preset_index),
+                "active_preset_key": (
+                    self._brush_preset_key(
+                        self._brush_presets_catalog()[self._active_brush_preset_index]
+                    )
+                    if 0 <= self._active_brush_preset_index < len(self._brush_presets_catalog())
+                    else ""
+                ),
+            },
+            "palette": {
+                "schema": "tigerstudio.painter.document-palette.v1",
+                "colors": [
+                    list(rgb)
+                    for rgb in self._document_palette_colors[:MAX_DOCUMENT_COLORS]
+                ],
             },
             "material_preview": {
                 "enabled": bool(self._material_preview_enabled),
@@ -19640,6 +21648,16 @@ class PaintDialog(QDialog):
             "blockout_3d": copy.deepcopy(self._painter_3d_blockout_scene),
             "blockout_selected_id": str(self._painter_3d_blockout_selected_id),
             "ui_document": copy.deepcopy(self._painter_ui_document),
+            "ui_motion_compositions": {
+                str(composition_id): (
+                    composition.to_dict()
+                    if hasattr(composition, "to_dict")
+                    else copy.deepcopy(composition)
+                )
+                for composition_id, composition in getattr(
+                    self, "_painter_ui_motion_compositions", {}
+                ).items()
+            },
             "workspace": {
                 "mode": str(self._canvas_workspace_mode),
                 "transform_mode": str(self._blockout_transform_mode),
@@ -19749,6 +21767,11 @@ class PaintDialog(QDialog):
         ]
         width = max(1, int(document.get("width", 1920) or 1920))
         height = max(1, int(document.get("height", 1080) or 1080))
+        self._output_settings = normalize_output_settings(
+            payload.get("output"),
+            pixel_width=width,
+            pixel_height=height,
+        )
         background = payload.get("background")
         background = background if isinstance(background, dict) else {}
         background_pixmap = QPixmap(str(background.get("asset") or ""))
@@ -19836,10 +21859,23 @@ class PaintDialog(QDialog):
         self._active_brush_preset_index = max(
             0,
             min(
-                len(BRUSH_LIBRARY_PRESETS) - 1,
+                len(self._brush_presets_catalog()) - 1,
                 int(brush.get("active_preset_index", 0) or 0),
             ),
         )
+        active_preset_key = str(brush.get("active_preset_key") or "")
+        if active_preset_key:
+            for index, preset in enumerate(self._brush_presets_catalog()):
+                if self._brush_preset_key(preset) == active_preset_key:
+                    self._active_brush_preset_index = index
+                    break
+        palette = payload.get("palette")
+        palette = palette if isinstance(palette, dict) else {}
+        self._document_palette_colors = [
+            self._normalise_rgb(tuple(value))
+            for value in palette.get("colors", [])
+            if isinstance(value, (list, tuple)) and len(value) >= 3
+        ][:MAX_DOCUMENT_COLORS]
         material_preview = payload.get("material_preview")
         material_preview = (
             material_preview if isinstance(material_preview, dict) else {}
@@ -19864,6 +21900,20 @@ class PaintDialog(QDialog):
             fallback_width=width,
             fallback_height=height,
         )
+        from app.motion_designer.schema import MotionComposition
+
+        raw_ui_motion = payload.get("ui_motion_compositions")
+        raw_ui_motion = raw_ui_motion if isinstance(raw_ui_motion, dict) else {}
+        self._painter_ui_motion_timer.stop()
+        self._painter_ui_motion_preview_playing = False
+        self._painter_ui_motion_active_id = ""
+        self._painter_ui_motion_time_ms = 0
+        self._painter_ui_motion_compositions = {
+            str(composition_id): MotionComposition.from_dict(composition)
+            for composition_id, composition in raw_ui_motion.items()
+            if isinstance(composition, dict)
+        }
+        self._painter_ui_motion_windows = {}
         workspace = payload.get("workspace")
         workspace = workspace if isinstance(workspace, dict) else {}
         self._canvas_workspace_mode = str(workspace.get("mode") or "paint")
@@ -19885,6 +21935,16 @@ class PaintDialog(QDialog):
         self.canvas.set_path_snapshot(
             self._normalise_path_points(paths.get("work_path") or [])
         )
+        self.canvas.set_pen_color(self._pen_color)
+        self.canvas.set_pen_width(self._pen_width)
+        self.canvas.set_pen_opacity(self._pen_opacity)
+        self.canvas.set_pen_style(self._pen_style)
+        self.canvas.set_brush_detail(**self._canvas_brush_detail_payload())
+        self._sync_palette_controls_from_color()
+        self._highlight_selected_palette()
+        self._sync_brush_detail_controls()
+        self._populate_brush_library()
+        self._populate_brush_recent_list()
         self._update_inspector_counts()
         self._update_history_buttons()
         self.setWindowTitle(
@@ -19927,6 +21987,7 @@ class PaintDialog(QDialog):
             include_background=include_background,
             stroke_width_scale=width_scale,
             paint_layers=self._paint_layers,
+            output_settings=self._output_settings,
         )
 
     def painter_action_state(self) -> dict:
@@ -19985,6 +22046,11 @@ class PaintDialog(QDialog):
                 "native_extension": ".tspaint",
                 "persists_3d_blockout": True,
             },
+            "output": output_preflight(
+                self._output_settings,
+                pixel_width=self._canvas_document_size[0],
+                pixel_height=self._canvas_document_size[1],
+            ),
             "view": {
                 "zoom_percent": int(round(float(getattr(self, "_canvas_zoom", 1.0)) * 100)),
                 "pan_x": int(getattr(self, "_canvas_pan", QPoint(0, 0)).x()),
@@ -20056,12 +22122,15 @@ class PaintDialog(QDialog):
                 "library": {
                     "id": "tiger_studio",
                     "name": "Tiger Studio Brushes",
-                    "preset_count": len(BRUSH_LIBRARY_PRESETS),
+                    "preset_count": len(self._brush_presets_catalog()),
+                    "custom_preset_count": len(self._brush_user_presets),
+                    "max_brush_size_px": PAINT_MAX_BRUSH_SIZE_PX,
                     "active_preset_index": int(
                         getattr(self, "_active_brush_preset_index", 0)
                     ),
                     "favorite_count": len(getattr(self, "_brush_favorites", set())),
                     "recent_indices": list(getattr(self, "_brush_recent_indices", [])),
+                    "recent_keys": list(getattr(self, "_brush_recent_keys", [])),
                     "filter": next(
                         iter(sorted(getattr(self, "_brush_active_filters", set()))),
                         "",
@@ -20079,6 +22148,15 @@ class PaintDialog(QDialog):
                     "preset_thumbnail_mode": "actual_stroke_preview",
                     "active_sections": sorted(BRUSH_DETAIL_ACTIVE_SECTIONS),
                     "pressure_curve": "per_point_normalized_v2",
+                    "pressure_response_percent": int(
+                        self._brush_detail_settings.get("pressure_response", 100)
+                    ),
+                    "quick_palette": {
+                        "shortcut": "F6",
+                        "pointer_gesture": "right_click_or_barrel",
+                        "drag_size_axis": "horizontal",
+                        "drag_hardness_axis": "vertical",
+                    },
                     "dynamic_channels": [
                         "pressure",
                         "tilt",
@@ -20108,6 +22186,18 @@ class PaintDialog(QDialog):
                         or {}
                     ),
                 },
+            },
+            "palette": {
+                "engine": "oklch_srgb_gamut_mapped_v1",
+                "recent_color_limit": MAX_RECENT_COLORS,
+                "recent_colors": [list(rgb) for rgb in self._recent_colors],
+                "pinned_colors": [list(rgb) for rgb in self._pinned_colors],
+                "document_colors": [
+                    list(rgb) for rgb in self._document_palette_colors
+                ],
+                "touch_targets": bool(self._palette_touch_targets),
+                "harmony_mode": str(self._palette_harmony_mode),
+                "alt_canvas_sampling": True,
             },
             "material_preview": {
                 "enabled": bool(getattr(self, "_material_preview_enabled", False)),

@@ -4,11 +4,25 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
-    QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QHBoxLayout, QListWidget,
-    QListWidgetItem, QLabel, QStyle, QToolButton, QVBoxLayout, QWidget,
+    QCheckBox, QComboBox, QDoubleSpinBox, QFileDialog, QFormLayout, QHBoxLayout, QListWidget,
+    QListWidgetItem, QLabel, QLineEdit, QStyle, QToolButton, QVBoxLayout, QWidget,
 )
 
-from app.motion_designer.schema import MotionLayer
+from app.icons import app_icon
+from app.motion_designer.keyframes import evaluate_property
+from app.motion_designer.adjustment_scope import (
+    ADJUSTMENT_SCOPE_ALL_BELOW,
+    ADJUSTMENT_SCOPE_SELECTED_BELOW,
+    adjustment_scope,
+    eligible_adjustment_target_ids,
+)
+from app.motion_designer.effect_group import (
+    EFFECT_GROUP_DESCENDANTS,
+    EFFECT_GROUP_SELECTED,
+    descendant_layer_ids,
+    effect_group_scope,
+)
+from app.motion_designer.schema import MotionComposition, MotionLayer
 
 
 EFFECT_PARAMS = {
@@ -19,6 +33,24 @@ EFFECT_PARAMS = {
              ("intensity", 0.0, 5.0, 0.05)),
     "unsharp_mask": (("radius", 0.0, 30.0, 0.25), ("amount", 0.0, 5.0, 0.05)),
     "vignette": (("amount", 0.0, 1.0, 0.01), ("softness", 0.05, 1.0, 0.01)),
+    "drop_shadow": (
+        ("offset_x", -500.0, 500.0, 1.0), ("offset_y", -500.0, 500.0, 1.0),
+        ("radius", 0.0, 100.0, 0.25), ("opacity", 0.0, 1.0, 0.01),
+    ),
+    "light_sweep": (
+        ("center_x", -1.0, 2.0, 0.01), ("center_y", -1.0, 2.0, 0.01),
+        ("angle", -360.0, 360.0, 1.0), ("width", 0.005, 1.0, 0.01),
+        ("softness", 0.01, 1.0, 0.01), ("intensity", 0.0, 8.0, 0.05),
+    ),
+    "fractal_noise": (
+        ("amount", 0.0, 1.0, 0.01), ("scale", 2.0, 1000.0, 1.0),
+        ("octaves", 1.0, 8.0, 1.0), ("contrast", 0.0, 8.0, 0.05),
+        ("evolution", -10000.0, 10000.0, 0.05), ("speed", -20.0, 20.0, 0.05),
+        ("seed", 0.0, 100000.0, 1.0),
+    ),
+    "posterize": (
+        ("levels", 2.0, 64.0, 1.0), ("amount", 0.0, 1.0, 0.01),
+    ),
     "directional_blur": (
         ("length", 0.0, 200.0, 0.5), ("angle", -360.0, 360.0, 1.0),
         ("samples", 2.0, 32.0, 1.0),
@@ -37,6 +69,26 @@ EFFECT_PARAMS = {
         ("strength", 0.0, 1.0, 0.01), ("angle", -180.0, 180.0, 1.0),
         ("width", 2.0, 500.0, 1.0),
     ),
+    "chroma_key": (
+        ("similarity", 0.0, 1.0, 0.01), ("softness", 0.001, 1.0, 0.01),
+        ("choke", -100.0, 100.0, 0.5), ("feather", 0.0, 100.0, 0.25),
+        ("despill", 0.0, 1.0, 0.01),
+    ),
+    "luma_key": (
+        ("threshold", 0.0, 1.0, 0.01), ("softness", 0.001, 1.0, 0.01),
+        ("choke", -100.0, 100.0, 0.5), ("feather", 0.0, 100.0, 0.25),
+    ),
+    "difference_key": (
+        ("threshold", 0.0, 1.0, 0.01), ("softness", 0.001, 1.0, 0.01),
+        ("choke", -100.0, 100.0, 0.5), ("feather", 0.0, 100.0, 0.25),
+    ),
+}
+
+EFFECT_STRING_PARAMS = {
+    "chroma_key": (("key_color", "#00ff00"),),
+    "difference_key": (("reference_uri", ""),),
+    "drop_shadow": (("color", "#000000"),),
+    "light_sweep": (("color", "#ffffff"),),
 }
 
 MASK_PARAMS = (
@@ -52,9 +104,12 @@ class EffectMaskPanel(QWidget):
     add_requested = Signal(str)
     delete_requested = Signal(str)
     parameter_changed = Signal(str, str, object)
+    keyframe_toggled = Signal(str, str, object, bool)
     item_changed = Signal(str, str, object)
     tracking_requested = Signal(str, object)
     tracking_cancel_requested = Signal(str)
+    adjustment_scope_changed = Signal(str, object)
+    effect_group_scope_changed = Signal(str, object)
 
     def __init__(self, mode: str, parent=None) -> None:
         super().__init__(parent)
@@ -62,6 +117,10 @@ class EffectMaskPanel(QWidget):
         self._loading = False
         self._items_by_id: dict[str, object] = {}
         self._layer: MotionLayer | None = None
+        self._composition: MotionComposition | None = None
+        self._time_ms = 0
+        self._parameter_controls: dict[tuple[str, str], QDoubleSpinBox] = {}
+        self._keyframe_buttons: dict[tuple[str, str], QToolButton] = {}
         self._tracking_states: dict[str, dict[str, object]] = {}
         self._tracking_status_labels: dict[str, QLabel] = {}
         self._tracking_buttons: dict[str, QToolButton] = {}
@@ -83,6 +142,21 @@ class EffectMaskPanel(QWidget):
         tools.addWidget(add)
         tools.addWidget(remove)
         root.addLayout(tools)
+        self.scope_host = QWidget(self)
+        scope_layout = QFormLayout(self.scope_host)
+        scope_layout.setContentsMargins(0, 0, 0, 0)
+        self.scope_mode = QComboBox(self.scope_host)
+        self.scope_mode.addItem("All Layers Below", ADJUSTMENT_SCOPE_ALL_BELOW)
+        self.scope_mode.addItem(
+            "Selected Layers Below",
+            ADJUSTMENT_SCOPE_SELECTED_BELOW,
+        )
+        self.scope_layers = QListWidget(self.scope_host)
+        self.scope_layers.setMaximumHeight(112)
+        scope_layout.addRow("Scope", self.scope_mode)
+        scope_layout.addRow("Targets", self.scope_layers)
+        self.scope_host.setVisible(False)
+        root.addWidget(self.scope_host)
         self.items = QListWidget(self)
         self.items.setMinimumHeight(80)
         root.addWidget(self.items)
@@ -93,9 +167,21 @@ class EffectMaskPanel(QWidget):
         add.clicked.connect(lambda: self.add_requested.emit(self.kind.currentText()))
         remove.clicked.connect(self._delete_current)
         self.items.currentItemChanged.connect(lambda _current, _previous: self._rebuild_parameters())
+        self.scope_mode.currentIndexChanged.connect(self._emit_adjustment_scope)
+        self.scope_layers.itemChanged.connect(
+            lambda _item: self._emit_adjustment_scope()
+        )
 
     def set_layer(self, layer: MotionLayer | None) -> None:
+        self.set_context(layer, self._composition)
+
+    def set_context(
+        self,
+        layer: MotionLayer | None,
+        composition: MotionComposition | None,
+    ) -> None:
         self._layer = layer
+        self._composition = composition
         selected_id = self.current_id()
         self._loading = True
         self.items.clear()
@@ -110,8 +196,81 @@ class EffectMaskPanel(QWidget):
         if self.items.currentItem() is None and self.items.count():
             self.items.setCurrentRow(0)
         self.setEnabled(layer is not None)
+        self._refresh_effect_scope()
         self._loading = False
         self._rebuild_parameters()
+
+    def _refresh_effect_scope(self) -> None:
+        visible = bool(
+            self.mode == "effect"
+            and self._layer is not None
+            and self._layer.layer_type in {"adjustment", "group"}
+            and self._composition is not None
+        )
+        self.scope_host.setVisible(visible)
+        self.scope_layers.clear()
+        if not visible or self._layer is None or self._composition is None:
+            return
+        is_group = self._layer.layer_type == "group"
+        self.scope_mode.blockSignals(True)
+        self.scope_mode.clear()
+        if is_group:
+            self.scope_mode.addItem("All Descendants", EFFECT_GROUP_DESCENDANTS)
+            self.scope_mode.addItem("Selected Descendants", EFFECT_GROUP_SELECTED)
+            value = effect_group_scope(self._layer)
+            eligible_ids = descendant_layer_ids(
+                self._composition,
+                self._layer.id,
+            )
+            selected_mode = EFFECT_GROUP_SELECTED
+        else:
+            self.scope_mode.addItem("All Layers Below", ADJUSTMENT_SCOPE_ALL_BELOW)
+            self.scope_mode.addItem(
+                "Selected Layers Below",
+                ADJUSTMENT_SCOPE_SELECTED_BELOW,
+            )
+            value = adjustment_scope(self._layer)
+            eligible_ids = eligible_adjustment_target_ids(
+                self._composition,
+                self._layer.id,
+            )
+            selected_mode = ADJUSTMENT_SCOPE_SELECTED_BELOW
+        index = self.scope_mode.findData(value["mode"])
+        self.scope_mode.setCurrentIndex(max(0, index))
+        self.scope_mode.blockSignals(False)
+        selected = set(value["layer_ids"])
+        by_id = {layer.id: layer for layer in self._composition.layers}
+        for layer_id in eligible_ids:
+            layer = by_id[layer_id]
+            row = QListWidgetItem(layer.name)
+            row.setData(Qt.UserRole, layer.id)
+            row.setFlags(row.flags() | Qt.ItemIsUserCheckable)
+            row.setCheckState(
+                Qt.Checked if layer.id in selected else Qt.Unchecked
+            )
+            self.scope_layers.addItem(row)
+        self.scope_layers.setVisible(
+            value["mode"] == selected_mode
+        )
+
+    def _emit_adjustment_scope(self, *_args) -> None:
+        if self._loading or self.scope_host.isHidden():
+            return
+        is_group = bool(self._layer and self._layer.layer_type == "group")
+        fallback = EFFECT_GROUP_DESCENDANTS if is_group else ADJUSTMENT_SCOPE_ALL_BELOW
+        selected_mode = EFFECT_GROUP_SELECTED if is_group else ADJUSTMENT_SCOPE_SELECTED_BELOW
+        mode = str(self.scope_mode.currentData() or fallback)
+        self.scope_layers.setVisible(mode == selected_mode)
+        layer_ids = [
+            str(row.data(Qt.UserRole) or "")
+            for index in range(self.scope_layers.count())
+            for row in [self.scope_layers.item(index)]
+            if row.checkState() == Qt.Checked
+        ]
+        if is_group:
+            self.effect_group_scope_changed.emit(mode, layer_ids)
+        else:
+            self.adjustment_scope_changed.emit(mode, layer_ids)
 
     def current_id(self) -> str:
         item = self.items.currentItem()
@@ -120,6 +279,8 @@ class EffectMaskPanel(QWidget):
     def _clear_form(self) -> None:
         self._tracking_status_labels.clear()
         self._tracking_buttons.clear()
+        self._parameter_controls.clear()
+        self._keyframe_buttons.clear()
         while self.parameter_form.rowCount():
             self.parameter_form.removeRow(0)
 
@@ -131,7 +292,7 @@ class EffectMaskPanel(QWidget):
             return
         if self.mode == "mask":
             mode = QComboBox(self.parameter_host)
-            mode.addItems(["add", "subtract", "intersect", "exclude"])
+            mode.addItems(["add", "subtract", "intersect", "exclude", "garbage", "holdout"])
             mode.setCurrentText("add" if item.mode == "alpha" else item.mode)
             mode.currentTextChanged.connect(
                 lambda value, row_id=item_id: self._emit_item(row_id, "mode", value)
@@ -167,13 +328,24 @@ class EffectMaskPanel(QWidget):
             )
             self.parameter_form.addRow("Track Cache", sample_status)
             self._tracking_status_labels[item_id] = sample_status
+            frozen = bool(tracking.get("frozen", False)) if isinstance(tracking, dict) else False
+            freeze_box = QCheckBox("Freeze propagated matte", self.parameter_host)
+            freeze_box.setChecked(frozen)
+            freeze_box.setEnabled(sample_count > 0)
+            freeze_box.setToolTip(
+                "Locks the current propagation cache so tracking cannot overwrite approved matte samples."
+            )
+            freeze_box.toggled.connect(
+                lambda value, row_id=item_id: self._emit_item(row_id, "tracking_frozen", value)
+            )
+            self.parameter_form.addRow("Propagation", freeze_box)
             track_button = QToolButton(self.parameter_host)
             track_button.setObjectName("MotionTrackingButton")
             track_button.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
             track_button.setIcon(self.style().standardIcon(QStyle.SP_MediaPlay))
             busy = bool(state.get("busy"))
-            track_button.setText("Cancel" if busy else "Track Video...")
-            track_button.setEnabled(busy or tracking_box.currentText() in {"point", "planar"})
+            track_button.setText("Cancel" if busy else ("Frozen" if frozen else "Track Video..."))
+            track_button.setEnabled(busy or (not frozen and tracking_box.currentText() in {"point", "planar"}))
             track_button.clicked.connect(
                 lambda _checked=False, row_id=item_id: self._request_tracking(row_id)
             )
@@ -191,7 +363,94 @@ class EffectMaskPanel(QWidget):
             spin.valueChanged.connect(
                 lambda value, row_id=item_id, name=key: self._emit_parameter(row_id, name, value)
             )
-            self.parameter_form.addRow(key.replace("_", " ").title(), spin)
+            keyframe = QToolButton(self.parameter_host)
+            keyframe.setObjectName("MotionParameterKeyframeButton")
+            keyframe.setAutoRaise(True)
+            keyframe.setCheckable(True)
+            keyframe.setFixedSize(24, 24)
+            keyframe.clicked.connect(
+                lambda _checked=False, row_id=item_id, name=key:
+                self._toggle_keyframe(row_id, name)
+            )
+            row = QWidget(self.parameter_host)
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.setSpacing(4)
+            row_layout.addWidget(spin, 1)
+            row_layout.addWidget(keyframe)
+            self._parameter_controls[(item_id, key)] = spin
+            self._keyframe_buttons[(item_id, key)] = keyframe
+            self.parameter_form.addRow(key.replace("_", " ").title(), row)
+        if self.mode == "effect":
+            for key, default in EFFECT_STRING_PARAMS.get(item.kind, ()):
+                editor = QLineEdit(self.parameter_host)
+                prop = item.params.get(key)
+                value = prop.default if prop is not None else default
+                editor.setText(str(value or default))
+                editor.editingFinished.connect(
+                    lambda row_id=item_id, name=key, field=editor:
+                    self._emit_parameter(row_id, name, field.text())
+                )
+                self.parameter_form.addRow(
+                    key.replace("_", " ").title(),
+                    editor,
+                )
+        self._refresh_animated_values()
+
+    def set_time(self, time_ms: int | float) -> None:
+        self._time_ms = max(0, int(round(float(time_ms))))
+        self._refresh_animated_values()
+
+    def keyframe_button(self, item_id: str, key: str) -> QToolButton | None:
+        return self._keyframe_buttons.get((str(item_id), str(key)))
+
+    def parameter_control(self, item_id: str, key: str) -> QDoubleSpinBox | None:
+        return self._parameter_controls.get((str(item_id), str(key)))
+
+    def _refresh_animated_values(self) -> None:
+        for (item_id, key), control in self._parameter_controls.items():
+            item = self._items_by_id.get(item_id)
+            prop = item.params.get(key) if item is not None else None
+            if prop is None:
+                continue
+            value = evaluate_property(prop, self._time_ms)
+            if isinstance(value, (int, float)):
+                control.blockSignals(True)
+                control.setValue(float(value))
+                control.blockSignals(False)
+            button = self._keyframe_buttons.get((item_id, key))
+            if button is None:
+                continue
+            at_keyframe = any(
+                int(frame.time_ms) == self._time_ms
+                for frame in prop.keyframes
+            )
+            animated = bool(prop.keyframes)
+            button.blockSignals(True)
+            button.setChecked(at_keyframe)
+            button.blockSignals(False)
+            color = "#F0B65A" if at_keyframe else ("#78A8D8" if animated else "#707985")
+            button.setIcon(app_icon("keyframe", size=13, color=color))
+            button.setToolTip(
+                "Remove keyframe at current time"
+                if at_keyframe
+                else "Add keyframe at current time"
+            )
+
+    def _toggle_keyframe(self, item_id: str, key: str) -> None:
+        item = self._items_by_id.get(item_id)
+        prop = item.params.get(key) if item is not None else None
+        control = self._parameter_controls.get((item_id, key))
+        if prop is None or control is None:
+            return
+        at_keyframe = any(
+            int(frame.time_ms) == self._time_ms
+            for frame in prop.keyframes
+        )
+        value = evaluate_property(prop, self._time_ms)
+        if isinstance(value, (int, float)):
+            value = float(control.value())
+        self.keyframe_toggled.emit(item_id, key, value, not at_keyframe)
 
     def _emit_parameter(self, item_id: str, key: str, value: float) -> None:
         if not self._loading:

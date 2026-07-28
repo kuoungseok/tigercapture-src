@@ -31,6 +31,62 @@ def _qimage(array) -> QImage:
     return straight.convertToFormat(QImage.Format_RGBA8888_Premultiplied)
 
 
+def _color(value: Any, default: str = "#ffffff"):
+    import numpy as np
+
+    text = str(value or default).strip().lstrip("#")
+    if len(text) == 3:
+        text = "".join(character * 2 for character in text)
+    try:
+        values = [int(text[index:index + 2], 16) for index in (0, 2, 4)]
+    except (TypeError, ValueError):
+        values = [255, 255, 255]
+    return np.asarray(values, dtype=np.float32)
+
+
+def _fractal_noise(
+    height: int,
+    width: int,
+    *,
+    scale: float,
+    octaves: int,
+    seed: int,
+    phase: float,
+):
+    import cv2
+    import numpy as np
+
+    left_seed = int(seed) + int(np.floor(phase)) * 7919
+    blend = float(phase - np.floor(phase))
+
+    def sample(sample_seed: int):
+        total = np.zeros((height, width), dtype=np.float32)
+        weight_total = 0.0
+        frequency = 1.0
+        amplitude = 1.0
+        for octave in range(max(1, min(8, int(octaves)))):
+            cell = max(2.0, float(scale) / frequency)
+            rows = max(2, int(np.ceil(height / cell)) + 2)
+            columns = max(2, int(np.ceil(width / cell)) + 2)
+            rng = np.random.default_rng(sample_seed + octave * 104729)
+            coarse = rng.random((rows, columns), dtype=np.float32)
+            total += cv2.resize(
+                coarse,
+                (width, height),
+                interpolation=cv2.INTER_CUBIC,
+            ) * amplitude
+            weight_total += amplitude
+            frequency *= 2.0
+            amplitude *= 0.5
+        return total / max(1e-6, weight_total)
+
+    left = sample(left_seed)
+    if blend <= 1e-6:
+        return left
+    right = sample(left_seed + 7919)
+    return left * (1.0 - blend) + right * blend
+
+
 def apply_effects(image: QImage, effects: list[MotionEffectRef], time_ms: float) -> QImage:
     if not effects:
         return image
@@ -84,6 +140,90 @@ def apply_effects(image: QImage, effects: list[MotionEffectRef], time_ms: float)
             radius = np.sqrt(xx * xx + yy * yy)
             shade = 1.0 - amount * np.clip((radius - (1.0 - softness)) / softness, 0.0, 1.0)
             rgba[..., :3] = rgb * shade[..., None]
+        elif kind == "drop_shadow":
+            offset_x = float(_value(effect, "offset_x", time_ms, 12.0))
+            offset_y = float(_value(effect, "offset_y", time_ms, 12.0))
+            radius = max(0.0, min(100.0, float(_value(effect, "radius", time_ms, 10.0))))
+            opacity = max(0.0, min(1.0, float(_value(effect, "opacity", time_ms, 0.65))))
+            shadow_color = _color(_value(effect, "color", time_ms, "#000000"), "#000000")
+            source_alpha = rgba[..., 3] / 255.0
+            shadow_alpha = source_alpha
+            if radius > 0.01:
+                shadow_alpha = cv2.GaussianBlur(
+                    shadow_alpha,
+                    (0, 0),
+                    sigmaX=radius,
+                    sigmaY=radius,
+                )
+            height, width = rgba.shape[:2]
+            shadow_alpha = cv2.warpAffine(
+                shadow_alpha,
+                np.asarray(
+                    [[1.0, 0.0, offset_x], [0.0, 1.0, offset_y]],
+                    dtype=np.float32,
+                ),
+                (width, height),
+                flags=cv2.INTER_LINEAR,
+                borderMode=cv2.BORDER_CONSTANT,
+                borderValue=0,
+            ) * opacity
+            output_alpha = source_alpha + shadow_alpha * (1.0 - source_alpha)
+            premultiplied = (
+                rgb * source_alpha[..., None]
+                + shadow_color * shadow_alpha[..., None] * (1.0 - source_alpha[..., None])
+            )
+            rgba[..., :3] = np.divide(
+                premultiplied,
+                output_alpha[..., None],
+                out=np.zeros_like(premultiplied),
+                where=output_alpha[..., None] > 1e-6,
+            )
+            rgba[..., 3] = output_alpha * 255.0
+        elif kind == "light_sweep":
+            center_x = float(_value(effect, "center_x", time_ms, 0.5))
+            center_y = float(_value(effect, "center_y", time_ms, 0.5))
+            angle = np.deg2rad(float(_value(effect, "angle", time_ms, -24.0)))
+            band_width = max(0.005, min(1.0, float(_value(effect, "width", time_ms, 0.16))))
+            softness = max(0.01, min(1.0, float(_value(effect, "softness", time_ms, 0.45))))
+            intensity = max(0.0, min(8.0, float(_value(effect, "intensity", time_ms, 1.2))))
+            sweep_color = _color(_value(effect, "color", time_ms, "#ffffff"))
+            height, width = rgba.shape[:2]
+            yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
+            nx = xx / max(1, width - 1) - center_x
+            ny = yy / max(1, height - 1) - center_y
+            distance = np.abs(nx * np.cos(angle) + ny * np.sin(angle))
+            inner = band_width * max(0.0, 1.0 - softness)
+            sweep = 1.0 - np.clip(
+                (distance - inner) / max(1e-6, band_width - inner),
+                0.0,
+                1.0,
+            )
+            sweep *= rgba[..., 3] / 255.0
+            rgba[..., :3] = rgb + sweep[..., None] * sweep_color * intensity
+        elif kind == "fractal_noise":
+            amount = max(0.0, min(1.0, float(_value(effect, "amount", time_ms, 0.35))))
+            scale = max(2.0, min(1000.0, float(_value(effect, "scale", time_ms, 120.0))))
+            octaves = max(1, min(8, int(_value(effect, "octaves", time_ms, 4))))
+            contrast = max(0.0, min(8.0, float(_value(effect, "contrast", time_ms, 1.4))))
+            evolution = float(_value(effect, "evolution", time_ms, 0.0))
+            speed = float(_value(effect, "speed", time_ms, 0.0))
+            seed = int(_value(effect, "seed", time_ms, 1))
+            height, width = rgba.shape[:2]
+            noise = _fractal_noise(
+                height,
+                width,
+                scale=scale,
+                octaves=octaves,
+                seed=seed,
+                phase=evolution + float(time_ms) * 0.001 * speed,
+            )
+            noise = np.clip((noise - 0.5) * contrast + 0.5, 0.0, 1.0) * 255.0
+            rgba[..., :3] = rgb * (1.0 - amount) + noise[..., None] * amount
+        elif kind == "posterize":
+            levels = max(2, min(64, int(round(float(_value(effect, "levels", time_ms, 8))))))
+            amount = max(0.0, min(1.0, float(_value(effect, "amount", time_ms, 1.0))))
+            quantized = np.rint(rgb / 255.0 * (levels - 1)) / (levels - 1) * 255.0
+            rgba[..., :3] = rgb * (1.0 - amount) + quantized * amount
         elif kind == "directional_blur":
             length = max(0.0, min(200.0, float(_value(effect, "length", time_ms, 12.0))))
             angle = float(_value(effect, "angle", time_ms, 0.0))
@@ -158,5 +298,41 @@ def apply_effects(image: QImage, effects: list[MotionEffectRef], time_ms: float)
             highlight = np.clip(centered / width_px, -1.0, 1.0) * ridge
             shade = 1.0 + highlight * strength
             rgba[..., :3] = rgb * shade[..., None]
+        elif kind in {"chroma_key", "luma_key", "difference_key"}:
+            from .keying import apply_keyer_rgba
+
+            params = {
+                key: _value(effect, key, time_ms, default)
+                for key, default in {
+                    "key_color": "#00ff00",
+                    "similarity": 0.35,
+                    "threshold": 0.5 if kind == "luma_key" else 0.12,
+                    "softness": 0.1,
+                    "choke": 0.0,
+                    "feather": 0.0,
+                    "despill": 0.5,
+                    "key_bright": False,
+                    "inverted": False,
+                }.items()
+            }
+            reference_rgb = None
+            if kind == "difference_key":
+                reference_uri = str(_value(
+                    effect,
+                    "reference_uri",
+                    time_ms,
+                    "",
+                ) or "")
+                reference = QImage(reference_uri)
+                if not reference.isNull():
+                    reference_rgb = _rgba_array(reference)[..., :3]
+                if reference_rgb is None:
+                    continue
+            rgba = apply_keyer_rgba(
+                rgba,
+                kind,
+                params,
+                reference_rgb=reference_rgb,
+            ).rgba
         rgba = np.clip(rgba, 0, 255)
     return _qimage(rgba)

@@ -20,24 +20,47 @@ class MotionTemplateAdapterMixin:
     def motion_template_inspect(self, *, template_id: str) -> dict[str, Any]:
         return get_template(template_id).to_dict()
 
-    def motion_template_apply(self, *, composition_id: str, template_id: str,
-                              variant: str = "", controls: Mapping[str, Any] | None = None) -> dict[str, Any]:
+    def motion_template_apply(
+        self,
+        *,
+        composition_id: str,
+        template_id: str,
+        variant: str = "",
+        controls: Mapping[str, Any] | None = None,
+        replace_existing: bool = True,
+    ) -> dict[str, Any]:
         store = self._motion_store()
         composition = store.get(composition_id)
         if composition is None:
             raise ValueError(f"motion composition not found: {composition_id}")
         candidate = apply_template_to_composition(
-            composition, template_id, variant=variant, controls=controls,
+            composition,
+            template_id,
+            variant=variant,
+            controls=controls,
+            replace_existing=replace_existing,
         )
-        added = candidate.layers[len(composition.layers):]
+        template_state = candidate.metadata["last_applied_template"]
+        instance_id = str(template_state["template_instance_id"])
+        added = [
+            layer
+            for layer in candidate.layers
+            if layer.metadata.get("template_instance_id") == instance_id
+        ]
+        removed_layer_ids = list(
+            template_state.get("replaced_layer_ids") or []
+        )
         store[composition_id] = candidate
         self._motion_sync_owner()
         return {
-            "changed": bool(added), "undo_label": "Apply Motion Template",
+            "changed": bool(added or removed_layer_ids),
+            "undo_label": "Apply Motion Template",
             "template_id": template_id,
-            "variant": candidate.metadata["last_applied_template"]["variant"],
+            "variant": template_state["variant"],
             "added_layer_ids": [item.id for item in added],
-            "published_controls": candidate.metadata["last_applied_template"]["published_controls"],
+            "removed_layer_ids": removed_layer_ids,
+            "replace_existing": bool(replace_existing),
+            "published_controls": template_state["published_controls"],
             "revision": candidate.revision,
         }
 

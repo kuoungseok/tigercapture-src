@@ -19,6 +19,7 @@ from .color_management import (
     premultiplied_srgb_to_straight_rgba_u8,
     settings_from_composition_metadata,
 )
+from .color_runtime import apply_motion_color_pipeline_premultiplied_rgba
 from .export_profiles import get_motion_export_profile, preflight_motion_export
 from .schema import MotionComposition
 
@@ -27,6 +28,18 @@ def _qimage_from_rgb(rgb: np.ndarray) -> QImage:
     data = np.ascontiguousarray(rgb, dtype=np.uint8)
     height, width = data.shape[:2]
     return QImage(data.data, width, height, data.strides[0], QImage.Format_RGB888).copy()
+
+
+def _qimage_from_premultiplied_rgba(rgba: np.ndarray) -> QImage:
+    data = np.ascontiguousarray(rgba, dtype=np.uint8)
+    height, width = data.shape[:2]
+    return QImage(
+        data.data,
+        width,
+        height,
+        data.strides[0],
+        QImage.Format_RGBA8888_Premultiplied,
+    ).copy()
 
 
 def _without_pixel_format(args: list[str]) -> list[str]:
@@ -93,12 +106,20 @@ class MotionProfileExporter:
                 frames.append(path)
                 resumed_count += 1
                 continue
-            saved = self.renderer.save_png(
-                composition, index * 1000.0 / float(report["fps"]), path,
+            rgba = self.renderer.render_rgba_array(
+                composition,
+                index * 1000.0 / float(report["fps"]),
             )
-            if not self._is_valid_png(saved):
-                raise RuntimeError(f"Motion PNG sequence frame is invalid: {saved}")
-            frames.append(saved)
+            color = settings_from_composition_metadata(composition.metadata)
+            rgba, _color_report = apply_motion_color_pipeline_premultiplied_rgba(
+                rgba,
+                color,
+            )
+            if not _qimage_from_premultiplied_rgba(rgba).save(str(path), "PNG"):
+                raise RuntimeError(f"Failed to save Motion PNG sequence frame: {path}")
+            if not self._is_valid_png(path):
+                raise RuntimeError(f"Motion PNG sequence frame is invalid: {path}")
+            frames.append(path)
             rendered_count += 1
         result = self._finish_result(report, output, len(frames), [str(path) for path in frames])
         result.update({
@@ -122,10 +143,15 @@ class MotionProfileExporter:
     def _export_still(self, composition: MotionComposition, profile_id: str, output: Path,
                       time_ms: float, report: dict[str, Any]) -> dict[str, Any]:
         output.parent.mkdir(parents=True, exist_ok=True)
+        color = settings_from_composition_metadata(composition.metadata)
+        rgba = self.renderer.render_rgba_array(composition, time_ms)
+        rgba, _color_report = apply_motion_color_pipeline_premultiplied_rgba(
+            rgba,
+            color,
+        )
         if profile_id in {"png_still", "webp_still"}:
-            image = self.renderer.render_frame(composition, time_ms, use_cache=False)
+            image = _qimage_from_premultiplied_rgba(rgba)
         else:
-            rgba = self.renderer.render_rgba_array(composition, time_ms)
             black = np.zeros(rgba.shape[:2] + (3,), dtype=np.uint8)
             image = _qimage_from_rgb(composite_premultiplied_srgb_over_srgb(black, rgba))
         image_format = {"png_still": "PNG", "jpeg_still": "JPEG", "webp_still": "WEBP"}[profile_id]
@@ -167,11 +193,17 @@ class MotionProfileExporter:
                 rgba = self.renderer.render_rgba_array(composition, time_ms)
                 if profile_id == "openexr_sequence":
                     payload = premultiplied_srgb_to_linear_gbrap_f32_bytes(rgba)
-                elif profile.alpha:
-                    payload = premultiplied_srgb_to_straight_rgba_u8(rgba).tobytes()
                 else:
-                    black = np.zeros(rgba.shape[:2] + (3,), dtype=np.uint8)
-                    payload = composite_premultiplied_srgb_over_srgb(black, rgba).tobytes()
+                    color = settings_from_composition_metadata(composition.metadata)
+                    rgba, _color_report = apply_motion_color_pipeline_premultiplied_rgba(
+                        rgba,
+                        color,
+                    )
+                    if profile.alpha:
+                        payload = premultiplied_srgb_to_straight_rgba_u8(rgba).tobytes()
+                    else:
+                        black = np.zeros(rgba.shape[:2] + (3,), dtype=np.uint8)
+                        payload = composite_premultiplied_srgb_over_srgb(black, rgba).tobytes()
                 process.stdin.write(payload)
             process.stdin.close()
             stderr = process.stderr.read().decode("utf-8", errors="replace") if process.stderr else ""
@@ -218,12 +250,30 @@ class MotionProfileExporter:
         ]
         project_color = settings_from_composition_metadata(composition.metadata).project
         color_args = _without_pixel_format(ffmpeg_color_args(project_color))
+        hdr_output = (
+            project_color.output_space == "rec2020"
+            and project_color.output_transfer in {"pq", "hlg"}
+        )
         if profile_id == "h264_mp4":
+            if hdr_output:
+                raise ValueError("Motion HDR output requires the H.265 profile")
             command += ["-c:v", "libx264", "-preset", "medium", "-crf", "18", *color_args,
                         "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-f", "mp4"]
         elif profile_id == "h265_mp4":
+            if hdr_output:
+                transfer = (
+                    "smpte2084"
+                    if project_color.output_transfer == "pq"
+                    else "arib-std-b67"
+                )
+                command += [
+                    "-vf",
+                    "zscale=pin=bt709:tin=bt709:min=bt709:"
+                    f"p=bt2020:t={transfer}:m=bt2020nc,format=yuv420p10le",
+                ]
             command += ["-c:v", "libx265", "-preset", "medium", "-crf", "20", "-tag:v", "hvc1",
-                        *color_args, "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-f", "mp4"]
+                        *color_args, "-pix_fmt", "yuv420p10le" if hdr_output else "yuv420p",
+                        "-movflags", "+faststart", "-f", "mp4"]
         elif profile_id == "prores_4444_mov":
             command += ["-c:v", "prores_ks", "-profile:v", "4", "-pix_fmt", "yuva444p10le",
                         "-bits_per_mb", "8000", *color_args, "-f", "mov"]

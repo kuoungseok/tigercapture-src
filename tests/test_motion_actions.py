@@ -31,6 +31,45 @@ def test_motion_actions_share_service_and_support_dry_run() -> None:
     assert specs["motion.layer.add"]["undo_label"]
 
 
+def test_motion_effect_actions_preserve_light_noise_and_stylize_parameters() -> None:
+    owner = Owner()
+    registry = ActionRegistry(owner)
+    created = registry.execute("motion.composition.create", {
+        "name": "Effect Automation",
+        "duration_ms": 1000,
+    })
+    composition_id = created.result["payload"]["composition"]["id"]
+    added = registry.execute("motion.layer.add", {
+        "composition_id": composition_id,
+        "layer": {"name": "Card", "layer_type": "shape", "out_ms": 1000},
+    })
+    layer_id = added.result["payload"]["composition"]["layers"][0]["id"]
+
+    for kind, params in (
+        ("drop_shadow", {"offset_x": 18.0, "opacity": 0.7}),
+        ("light_sweep", {"center_x": 0.35, "intensity": 1.6}),
+        ("fractal_noise", {"amount": 0.4, "seed": 37.0}),
+        ("posterize", {"levels": 7.0, "amount": 0.8}),
+    ):
+        result = registry.execute("motion.effect.add", {
+            "composition_id": composition_id,
+            "layer_id": layer_id,
+            "effect": {"kind": kind, "params": params},
+        })
+        assert result.ok
+        assert result.result["effect"]["kind"] == kind
+
+    effects = owner._motion_compositions[composition_id].layers[0].effects
+    assert [effect.kind for effect in effects] == [
+        "drop_shadow",
+        "light_sweep",
+        "fractal_noise",
+        "posterize",
+    ]
+    assert effects[2].params["seed"].default == 37.0
+    assert effects[3].params["levels"].default == 7.0
+
+
 def test_advanced_keyframe_and_behavior_actions_are_automation_ready() -> None:
     owner = Owner()
     registry = ActionRegistry(owner)
@@ -96,6 +135,15 @@ def test_advanced_keyframe_and_behavior_actions_are_automation_ready() -> None:
     assert registry.execute("motion.effect.list", {
         "composition_id": composition_id, "layer_id": layer_id,
     }).result["count"] == 1
+    assert registry.execute("motion.effect.keyframe.delete", {
+        "composition_id": composition_id, "layer_id": layer_id,
+        "effect_id": effect_id, "key": "brightness", "time_ms": 500,
+    }, confirm_destructive=True).ok
+    assert (
+        owner._motion_compositions[composition_id]
+        .layers[0].effects[0].params["brightness"].keyframes
+        == []
+    )
 
     mask = registry.execute("motion.mask.add", {
         "composition_id": composition_id, "layer_id": layer_id,
@@ -118,6 +166,15 @@ def test_advanced_keyframe_and_behavior_actions_are_automation_ready() -> None:
         "composition_id": composition_id, "layer_id": layer_id, "mask_id": mask_id,
         "key": "feather", "keyframe": {"time_ms": 500, "value": 8},
     }).ok
+    assert registry.execute("motion.mask.keyframe.delete", {
+        "composition_id": composition_id, "layer_id": layer_id,
+        "mask_id": mask_id, "key": "feather", "time_ms": 500,
+    }, confirm_destructive=True).ok
+    assert (
+        owner._motion_compositions[composition_id]
+        .layers[0].masks[0].params["feather"].keyframes
+        == []
+    )
     tracking = registry.execute("motion.mask.tracking.set", {
         "composition_id": composition_id, "layer_id": layer_id, "mask_id": mask_id,
         "tracking": {"mode": "planar", "origin": [50, 50], "samples": [
@@ -138,6 +195,89 @@ def test_advanced_keyframe_and_behavior_actions_are_automation_ready() -> None:
     assert registry.execute("motion.mask.delete", {
         "composition_id": composition_id, "layer_id": layer_id, "mask_id": mask_id,
     }, confirm_destructive=True).ok
+
+
+def test_adjustment_scope_actions_filter_targets_to_lower_render_layers() -> None:
+    owner = Owner()
+    registry = ActionRegistry(owner)
+    created = registry.execute(
+        "motion.composition.create",
+        {"name": "Scoped Grade", "duration_ms": 1000},
+    )
+    composition_id = created.result["payload"]["composition"]["id"]
+    for layer in (
+        {"id": "background", "name": "Background", "layer_type": "shape"},
+        {"id": "controller", "name": "Controller", "layer_type": "null"},
+        {"id": "grade", "name": "Grade", "layer_type": "adjustment"},
+        {"id": "foreground", "name": "Foreground", "layer_type": "shape"},
+    ):
+        assert registry.execute(
+            "motion.layer.add",
+            {"composition_id": composition_id, "layer": layer},
+        ).ok
+    result = registry.execute(
+        "motion.adjustment.scope.set",
+        {
+            "composition_id": composition_id,
+            "layer_id": "grade",
+            "mode": "selected_layers_below",
+            "layer_ids": ["background", "controller", "foreground", "missing"],
+        },
+    )
+    assert result.ok
+    assert result.result["scope"] == {
+        "mode": "selected_layers_below",
+        "layer_ids": ["background"],
+    }
+    inspected = registry.execute(
+        "motion.adjustment.scope.get",
+        {"composition_id": composition_id, "layer_id": "grade"},
+    )
+    assert inspected.ok
+    assert inspected.result["eligible_layer_ids"] == ["background"]
+
+
+def test_effect_group_scope_actions_filter_targets_to_descendants() -> None:
+    owner = Owner()
+    registry = ActionRegistry(owner)
+    created = registry.execute(
+        "motion.composition.create",
+        {"name": "Effect Group", "duration_ms": 1000},
+    )
+    composition_id = created.result["payload"]["composition"]["id"]
+    for layer in (
+        {"id": "group", "name": "Group", "layer_type": "group"},
+        {"id": "child", "name": "Child", "layer_type": "shape", "parent_id": "group"},
+        {"id": "nested", "name": "Nested", "layer_type": "group", "parent_id": "group"},
+        {"id": "grandchild", "name": "Grandchild", "layer_type": "shape", "parent_id": "nested"},
+        {"id": "outside", "name": "Outside", "layer_type": "shape"},
+    ):
+        assert registry.execute(
+            "motion.layer.add",
+            {"composition_id": composition_id, "layer": layer},
+        ).ok
+    result = registry.execute(
+        "motion.effect_group.scope.set",
+        {
+            "composition_id": composition_id,
+            "layer_id": "group",
+            "mode": "selected_descendants",
+            "layer_ids": ["grandchild", "outside", "child", "missing"],
+        },
+    )
+    assert result.ok
+    assert result.result["scope"] == {
+        "enabled": True,
+        "mode": "selected_descendants",
+        "layer_ids": ["grandchild", "child"],
+    }
+    inspected = registry.execute(
+        "motion.effect_group.scope.get",
+        {"composition_id": composition_id, "layer_id": "group"},
+    )
+    assert inspected.ok
+    assert inspected.result["eligible_layer_ids"] == ["child", "grandchild"]
+    assert inspected.result["resolved_layer_ids"] == ["child", "grandchild"]
 
 
 def test_vector_shape_actions_update_shared_source_and_animated_params() -> None:
@@ -175,6 +315,26 @@ def test_vector_shape_actions_update_shared_source_and_animated_params() -> None
         "composition_id": composition_id, "layer_id": layer_id,
         "start": 0.1, "end": 0.8, "offset": 0.05,
     }).ok
+    assert registry.execute("motion.vector.offset_path.set", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "amount": 12,
+        "join": "round",
+    }).ok
+    assert registry.execute("motion.vector.stroke.set", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "color": "#ffffff",
+        "width": 6,
+        "gradient": {
+            "type": "linear",
+            "stops": [[0, "#ff0000"], [1, "#0000ff"]],
+        },
+        "dash": [8, 4],
+        "dash_offset": 2,
+        "taper_start": 1,
+        "taper_end": 0.25,
+    }).ok
     assert registry.execute("motion.vector.repeater.set", {
         "composition_id": composition_id, "layer_id": layer_id, "count": 4,
         "offset": [18, 0], "rotation": 5, "scale": [.95, .95],
@@ -189,6 +349,8 @@ def test_vector_shape_actions_update_shared_source_and_animated_params() -> None
     layer = owner._motion_compositions[composition_id].layers[0]
     assert layer.source.params["shape"] == "path"
     assert layer.source.params["repeater"]["count"] == 4
+    assert layer.source.params["offset_path"]["amount"] == 12
+    assert layer.source.params["stroke_taper"]["end"] == 0.25
     assert layer.source.params["trim"]["value_type"] == "scalar"
     assert layer.source.params["trim"]["keyframes"][0]["time_ms"] == 1000
     assert layer.source.params["boolean"]["operand_layer_ids"] == [operand_id]
@@ -196,7 +358,8 @@ def test_vector_shape_actions_update_shared_source_and_animated_params() -> None
     assert {
         "motion.vector.path.set", "motion.vector.primitive.set",
         "motion.vector.boolean.set", "motion.vector.boolean.layers.set", "motion.vector.trim.set",
-        "motion.vector.repeater.set", "motion.vector.param.keyframe.set",
+        "motion.vector.offset_path.set", "motion.vector.repeater.set",
+        "motion.vector.stroke.set", "motion.vector.param.keyframe.set",
     } <= specs
 
 
@@ -382,11 +545,28 @@ def test_motion_ar_pbr_camera_light_material_and_depth_actions() -> None:
     model_id = model.result["layer"]["id"]
     camera = registry.execute("motion.camera.add", {"composition_id": composition_id})
     light = registry.execute("motion.light.add", {"composition_id": composition_id})
-    assert camera.ok and light.ok
+    point = registry.execute("motion.light.add", {
+        "composition_id": composition_id,
+        "name": "Point Light",
+        "params": {
+            "light_type": "point",
+            "position": [1.0, 2.0, 3.0],
+            "range": 7.0,
+            "intensity": 1.25,
+        },
+    })
+    assert camera.ok and light.ok and point.ok
     assert registry.execute("motion.camera.update", {
         "composition_id": composition_id, "layer_id": camera.result["layer"]["id"],
-        "changes": {"fov": 62.0}, "time_ms": 500,
+        "changes": {
+            "fov": 62.0,
+            "projection": "orthographic",
+            "orthographic_size": 4.5,
+        },
+        "time_ms": 500,
     }).ok
+    camera_layer = owner._motion_compositions[composition_id].layers[1]
+    assert camera_layer.source.params["projection"]["value_type"] == "string"
     assert registry.execute("motion.light.update", {
         "composition_id": composition_id, "layer_id": light.result["layer"]["id"],
         "changes": {"color": [1.0, .6, .3], "intensity": 1.1},

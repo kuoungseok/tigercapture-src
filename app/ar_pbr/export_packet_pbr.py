@@ -1,6 +1,7 @@
 """PBR triangle rasterization path for AR/PBR export packets."""
 from __future__ import annotations
 
+import math
 from typing import Any, Mapping
 
 from app.ar_pbr.anisotropy import (
@@ -43,7 +44,11 @@ from app.ar_pbr.microsurface import (
     apply_microsurface_roughness,
     normalize_microsurface_settings,
 )
-from app.ar_pbr.parallax import apply_parallax_uv, normalize_parallax_settings
+from app.ar_pbr.parallax import (
+    apply_parallax_occlusion_uv,
+    apply_parallax_uv,
+    normalize_parallax_settings,
+)
 from app.ar_pbr.subsurface import apply_subsurface_scattering, normalize_subsurface_settings
 from app.ar_pbr.substrate import normalize_substrate_settings
 from app.ar_pbr.surface import normalize_surface_settings
@@ -145,6 +150,23 @@ def _draw_pbr_triangles(
         direct_strength = max(0.0, min(4.0, float(lighting.get("direct_strength", 0.85))))
     except Exception:
         direct_strength = 0.85
+    primary_light_color = np.asarray(
+        list(lighting.get("light_color") or [1.0, 1.0, 1.0])[:3],
+        dtype=np.float32,
+    )
+    if primary_light_color.size < 3:
+        primary_light_color = np.pad(
+            primary_light_color,
+            (0, 3 - primary_light_color.size),
+            constant_values=1.0,
+        )
+    primary_light_color = np.clip(primary_light_color[:3], 0.0, 8.0)
+    additional_lights = [
+        dict(row)
+        for row in list(lighting.get("additional_lights") or [])[:2]
+        if isinstance(row, Mapping)
+    ]
+    diagnostics["pbr_additional_light_count"] = len(additional_lights)
     try:
         ibl_exposure = max(0.0, min(8.0, float(lighting.get("ibl_exposure", 1.0))))
     except Exception:
@@ -404,13 +426,36 @@ def _draw_pbr_triangles(
             if height_channel is not None and bool(parallax_rendering.get("enabled")):
                 view_tx = geom_tx * view[0] + geom_ty * view[1] + geom_tz * view[2]
                 view_ty = geom_bx * view[0] + geom_by * view[1] + geom_bz * view[2]
-                u, v = apply_parallax_uv(
-                    u,
-                    v,
-                    height=height_channel,
-                    tangent_view_xy=(view_tx, view_ty),
-                    settings=parallax_rendering,
+                view_tz = geom_nx * view[0] + geom_ny * view[1] + geom_nz * view[2]
+                pom_supported = (
+                    str(parallax_rendering.get("mode") or "") == "pom"
+                    and height_arr is not None
+                    and not height_udim
+                    and not bool(triplanar_rendering.get("enabled"))
                 )
+                if pom_supported:
+                    u, v = apply_parallax_occlusion_uv(
+                        u,
+                        v,
+                        height_texture=height_arr,
+                        tangent_view=(view_tx, view_ty, view_tz),
+                        settings=parallax_rendering,
+                        channel=_map_channel(maps or {}, "height", 0),
+                    )
+                    diagnostics["pbr_parallax_sampling"] = "parallax_occlusion_mapping"
+                else:
+                    u, v = apply_parallax_uv(
+                        u,
+                        v,
+                        height=height_channel,
+                        tangent_view_xy=(view_tx, view_ty),
+                        settings=parallax_rendering,
+                    )
+                    diagnostics["pbr_parallax_sampling"] = (
+                        "single_offset_fallback"
+                        if str(parallax_rendering.get("mode") or "") == "pom"
+                        else "single_offset"
+                    )
                 diagnostics["pbr_parallax_applied"] = True
                 diagnostics["pbr_parallax_pixels"] = int(
                     diagnostics.get("pbr_parallax_pixels", 0) or 0
@@ -941,6 +986,177 @@ def _draw_pbr_triangles(
                     vdoth=np.full_like(roughness, float(vdoth), dtype=np.float32),
                     light_strength=direct_strength,
                     ao=ao,
+                )
+            direct *= primary_light_color[None, None, :]
+            for extra_light in additional_lights:
+                light_type = str(
+                    extra_light.get("light_type") or "directional"
+                ).lower()
+                try:
+                    extra_color = np.asarray(
+                        list(extra_light.get("color") or [1.0, 1.0, 1.0])[:3],
+                        dtype=np.float32,
+                    )
+                    extra_intensity = max(
+                        0.0,
+                        min(4.0, float(extra_light.get("intensity", 0.0))),
+                    )
+                    extra_range = max(
+                        0.05,
+                        min(100.0, float(extra_light.get("range", 6.0))),
+                    )
+                except Exception:
+                    continue
+                if extra_intensity <= 0.0:
+                    continue
+                attenuation = np.ones_like(roughness, dtype=np.float32)
+                if light_type == "directional":
+                    raw_direction = np.asarray(
+                        list(
+                            extra_light.get("direction")
+                            or [-0.35, -0.65, -0.72]
+                        )[:3],
+                        dtype=np.float32,
+                    )
+                    raw_direction /= max(
+                        1.0e-6,
+                        float(np.linalg.norm(raw_direction)),
+                    )
+                    extra_lx = np.full_like(roughness, -raw_direction[0])
+                    extra_ly = np.full_like(roughness, -raw_direction[1])
+                    extra_lz = np.full_like(roughness, -raw_direction[2])
+                else:
+                    position = np.asarray(
+                        list(
+                            extra_light.get("position") or [0.0, 1.5, 2.0]
+                        )[:3],
+                        dtype=np.float32,
+                    )
+                    delta_x = position[0] - world_x
+                    delta_y = position[1] - world_y
+                    delta_z = position[2] - world_z
+                    distance_to_light = np.sqrt(
+                        delta_x * delta_x
+                        + delta_y * delta_y
+                        + delta_z * delta_z
+                    )
+                    safe_distance = np.maximum(distance_to_light, 1.0e-6)
+                    extra_lx = delta_x / safe_distance
+                    extra_ly = delta_y / safe_distance
+                    extra_lz = delta_z / safe_distance
+                    attenuation = np.square(
+                        np.clip(
+                            1.0 - distance_to_light / extra_range,
+                            0.0,
+                            1.0,
+                        )
+                    )
+                    if light_type == "spot":
+                        spot_direction = np.asarray(
+                            list(
+                                extra_light.get("direction")
+                                or [-0.35, -0.65, -0.72]
+                            )[:3],
+                            dtype=np.float32,
+                        )
+                        spot_direction /= max(
+                            1.0e-6,
+                            float(np.linalg.norm(spot_direction)),
+                        )
+                        cone_cos = (
+                            -extra_lx * spot_direction[0]
+                            - extra_ly * spot_direction[1]
+                            - extra_lz * spot_direction[2]
+                        )
+                        inner_cos = math.cos(math.radians(max(
+                            0.0,
+                            min(
+                                88.0,
+                                float(
+                                    extra_light.get(
+                                        "spot_inner_angle",
+                                        24.0,
+                                    )
+                                ),
+                            ),
+                        )))
+                        outer_cos = math.cos(math.radians(max(
+                            1.0,
+                            min(
+                                89.0,
+                                float(
+                                    extra_light.get(
+                                        "spot_outer_angle",
+                                        36.0,
+                                    )
+                                ),
+                            ),
+                        )))
+                        cone_width = max(1.0e-5, inner_cos - outer_cos)
+                        cone = np.clip(
+                            (cone_cos - outer_cos) / cone_width,
+                            0.0,
+                            1.0,
+                        )
+                        attenuation *= cone * cone * (3.0 - 2.0 * cone)
+                extra_ndotl = np.maximum(
+                    nx * extra_lx + ny * extra_ly + nz * extra_lz,
+                    0.0,
+                )
+                half_x = extra_lx + view[0]
+                half_y = extra_ly + view[1]
+                half_z = extra_lz + view[2]
+                half_length = np.maximum(
+                    np.sqrt(
+                        half_x * half_x
+                        + half_y * half_y
+                        + half_z * half_z
+                    ),
+                    1.0e-6,
+                )
+                half_x /= half_length
+                half_y /= half_length
+                half_z /= half_length
+                extra_ndoth = np.maximum(
+                    nx * half_x + ny * half_y + nz * half_z,
+                    0.0,
+                )
+                extra_vdoth = np.maximum(
+                    view[0] * half_x
+                    + view[1] * half_y
+                    + view[2] * half_z,
+                    0.0,
+                )
+                if substrate_enabled:
+                    extra_direct = cook_torrance_substrate_slab_direct(
+                        diffuse_albedo=diffuse_albedo,
+                        f0=f0,
+                        f90=f90,
+                        roughness=roughness,
+                        ndotl=extra_ndotl,
+                        ndotv=ndotv,
+                        ndoth=extra_ndoth,
+                        vdoth=extra_vdoth,
+                        light_strength=extra_intensity,
+                        ao=ao,
+                    )
+                else:
+                    extra_direct = cook_torrance_direct(
+                        albedo=albedo,
+                        f0=f0,
+                        roughness=roughness,
+                        metallic=metallic,
+                        ndotl=extra_ndotl,
+                        ndotv=ndotv,
+                        ndoth=extra_ndoth,
+                        vdoth=extra_vdoth,
+                        light_strength=extra_intensity,
+                        ao=ao,
+                    )
+                direct += (
+                    extra_direct
+                    * attenuation[:, :, None]
+                    * np.clip(extra_color, 0.0, 8.0)[None, None, :]
                 )
             fill = diffuse_albedo * (0.045 + roughness[:, :, None] * 0.03) * diffuse_weight * (0.48 + 0.52 * ao[:, :, None])
             direct_clamp = float(ray_gi_detail.get("direct_radiance_clamp", 0.0) or 0.0)

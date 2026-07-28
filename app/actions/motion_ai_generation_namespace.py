@@ -238,6 +238,34 @@ def register_motion_ai_generation_actions(registry: Any) -> None:
         requires_owner=False,
     )
     registry.register_adapter_action(
+        "motion.matte.object.select",
+        "Select editable foreground objects from an image with local or optional semantic segmentation.",
+        "motion",
+        "motion_ai_layer_segment",
+        params_schema=schema_object(
+            _decomposition_params(),
+            required=("source_path", "width", "height"),
+        ),
+        required=("source_path", "width", "height"),
+        mutating=False,
+        changed=False,
+        requires_owner=False,
+    )
+    registry.register_adapter_action(
+        "motion.matte.object.refine",
+        "Refine an object matte from foreground point hints while preserving soft alpha edges.",
+        "motion",
+        "motion_ai_layer_mask_refine",
+        params_schema=schema_object(
+            _decomposition_params(),
+            required=("source_path", "width", "height", "point_hints"),
+        ),
+        required=("source_path", "width", "height", "point_hints"),
+        mutating=False,
+        changed=False,
+        requires_owner=False,
+    )
+    registry.register_adapter_action(
         "motion.ai.layer.merge",
         "Merge visual elements into a new non-destructive decomposition revision.",
         "motion",

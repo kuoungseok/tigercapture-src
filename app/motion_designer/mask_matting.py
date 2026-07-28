@@ -28,7 +28,8 @@ def refine_alpha_matte(rgb, mask, *, mode: str = "edge_aware") -> MatteResult:
     normalized = str(mode or "edge_aware").strip().casefold()
     if normalized not in MATTING_MODES:
         raise ValueError(f"unsupported matting mode: {mode}")
-    binary = np.where(mask > 0, 255, 0).astype(np.uint8)
+    source_alpha = np.clip(np.asarray(mask), 0, 255).astype(np.uint8)
+    binary = np.where(source_alpha >= 128, 255, 0).astype(np.uint8)
     if normalized == "binary":
         return MatteResult(binary, "binary_mask", 0.0)
 
@@ -41,9 +42,15 @@ def refine_alpha_matte(rgb, mask, *, mode: str = "edge_aware") -> MatteResult:
     )
     core = cv2.erode(binary, kernel, iterations=1)
     possible = cv2.dilate(binary, kernel, iterations=1)
+    possible = np.maximum(
+        possible,
+        np.where(source_alpha > 0, 255, 0).astype(np.uint8),
+    )
     sigma = max(0.8, radius * 0.8)
+    # Preserve soft semantic alpha from BiRefNet/SAM-style providers. Turning it
+    # into a binary mask here destroys hair strands and motion-blurred edges.
     smooth = cv2.GaussianBlur(
-        binary.astype(np.float32),
+        source_alpha.astype(np.float32),
         (0, 0),
         sigma,
     )
@@ -51,8 +58,12 @@ def refine_alpha_matte(rgb, mask, *, mode: str = "edge_aware") -> MatteResult:
     gray = cv2.cvtColor(rgb, cv2.COLOR_RGB2GRAY)
     edge = cv2.Laplacian(gray, cv2.CV_32F, ksize=3)
     edge = np.clip(np.abs(edge) / 64.0, 0.0, 1.0)
-    guided = smooth * (1.0 - edge * 0.28) + binary.astype(np.float32) * edge * 0.28
-    alpha = np.where(core > 0, 255.0, guided)
+    guided = smooth * (1.0 - edge * 0.28) + source_alpha.astype(np.float32) * edge * 0.28
+    alpha = np.where(
+        core > 0,
+        np.maximum(source_alpha.astype(np.float32), guided),
+        guided,
+    )
     alpha = np.where(possible > 0, alpha, 0.0)
     alpha = np.clip(alpha, 0, 255).astype(np.uint8)
     soft = np.count_nonzero((alpha > 0) & (alpha < 255))

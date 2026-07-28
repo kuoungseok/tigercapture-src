@@ -92,6 +92,8 @@ def default_ar_pbr_params(*, width: int = 1920, height: int = 1080) -> dict[str,
 
 def default_camera_params() -> dict[str, Any]:
     return {
+        "projection": "perspective",
+        "orthographic_size": _animated(3.25, "scalar"),
         "position": _animated([0.0, 0.0, 3.25], "vector3"),
         "rotation": _animated([0.0, 0.0, 0.0], "vector3"),
         "target": _animated([0.0, 0.0, 0.0], "vector3"),
@@ -107,10 +109,14 @@ def default_camera_params() -> dict[str, Any]:
 def default_light_params() -> dict[str, Any]:
     return {
         "light_type": "directional",
+        "position": _animated([0.0, 1.5, 2.0], "vector3"),
         "azimuth": _animated(45.0, "scalar"),
         "elevation": _animated(45.0, "scalar"),
         "color": _animated([1.0, 1.0, 1.0], "color3"),
         "intensity": _animated(0.42, "scalar"),
+        "range": _animated(6.0, "scalar"),
+        "spot_inner_angle": _animated(24.0, "scalar"),
+        "spot_outer_angle": _animated(36.0, "scalar"),
         "enabled": _animated(True, "bool"),
     }
 
@@ -199,6 +205,97 @@ def _active_layer(composition: MotionComposition | None, layer_type: str, time_m
     ), None)
 
 
+def _active_layers(
+    composition: MotionComposition | None,
+    layer_type: str,
+    time_ms: float,
+) -> list[MotionLayer]:
+    if composition is None:
+        return []
+    return [
+        layer for layer in reversed(composition.layers)
+        if layer.layer_type == layer_type
+        and layer.visible
+        and layer.in_ms <= time_ms < layer.out_ms
+    ]
+
+
+def _evaluated_light(
+    layer: MotionLayer,
+    time_ms: float,
+) -> dict[str, Any] | None:
+    params = layer.source.params
+    if not bool(_evaluate(params.get("enabled"), time_ms, True, "bool")):
+        return None
+    light_type = str(params.get("light_type") or "directional").strip().lower()
+    if light_type not in {"directional", "point", "spot"}:
+        light_type = "directional"
+    azimuth = _scalar(
+        _evaluate(params.get("azimuth"), time_ms, 45.0),
+        45.0,
+        -180.0,
+        180.0,
+    )
+    elevation = _scalar(
+        _evaluate(params.get("elevation"), time_ms, 45.0),
+        45.0,
+        -20.0,
+        89.0,
+    )
+    azimuth_radians = math.radians(azimuth)
+    elevation_radians = math.radians(elevation)
+    cosine = math.cos(elevation_radians)
+    direction = [
+        -math.cos(azimuth_radians) * cosine,
+        -math.sin(elevation_radians),
+        -math.sin(azimuth_radians) * cosine,
+    ]
+    color = _vector(
+        _evaluate(params.get("color"), time_ms, [1.0, 1.0, 1.0], "color3"),
+        3,
+        [1.0, 1.0, 1.0],
+    )
+    return {
+        "layer_id": layer.id,
+        "light_type": light_type,
+        "azimuth": azimuth,
+        "elevation": elevation,
+        "direction": direction,
+        "position": _vector(
+            _evaluate(
+                params.get("position"), time_ms, [0.0, 1.5, 2.0], "vector3"
+            ),
+            3,
+            [0.0, 1.5, 2.0],
+        ),
+        "color": [max(0.0, min(8.0, value)) for value in color],
+        "intensity": _scalar(
+            _evaluate(params.get("intensity"), time_ms, 0.42),
+            0.42,
+            0.0,
+            4.0,
+        ),
+        "range": _scalar(
+            _evaluate(params.get("range"), time_ms, 6.0),
+            6.0,
+            0.05,
+            100.0,
+        ),
+        "spot_inner_angle": _scalar(
+            _evaluate(params.get("spot_inner_angle"), time_ms, 24.0),
+            24.0,
+            0.0,
+            88.0,
+        ),
+        "spot_outer_angle": _scalar(
+            _evaluate(params.get("spot_outer_angle"), time_ms, 36.0),
+            36.0,
+            1.0,
+            89.0,
+        ),
+    }
+
+
 def _depth_group(composition: MotionComposition | None, group_id: str) -> dict[str, Any]:
     if composition is None or not group_id:
         return {}
@@ -241,6 +338,15 @@ def evaluate_ar_pbr_frame(
     camera_position = _vector(_evaluate(camera.get("position"), global_time, [0.0, 0.0, 3.25], "vector3"), 3, [0.0, 0.0, 3.25])
     camera_rotation = _vector(_evaluate(camera.get("rotation"), global_time, [0.0, 0.0, 0.0], "vector3"), 3, [0.0, 0.0, 0.0])
     camera_target = _vector(_evaluate(camera.get("target"), global_time, [0.0, 0.0, 0.0], "vector3"), 3, [0.0, 0.0, 0.0])
+    projection = str(_evaluate(camera.get("projection"), global_time, "perspective", "string") or "perspective").lower()
+    if projection not in {"perspective", "orthographic"}:
+        projection = "perspective"
+    orthographic_size = _scalar(
+        _evaluate(camera.get("orthographic_size"), global_time, 3.25),
+        3.25,
+        0.05,
+        100.0,
+    )
     fov = _scalar(_evaluate(camera.get("fov"), global_time, 45.0), 45.0, 10.0, 120.0)
     focus_distance = _scalar(_evaluate(camera.get("focus_distance"), global_time, 3.25), 3.25, 0.01, 100.0)
     focus_range = _scalar(_evaluate(camera.get("focus_range"), global_time, 0.28), 0.28, 0.001, 10.0)
@@ -248,14 +354,39 @@ def evaluate_ar_pbr_frame(
     camera_z = max(0.2, min(20.0, distance or 3.25))
     relative_rotation = [object_rotation[index] - camera_rotation[index] for index in range(3)]
 
-    light_layer = _active_layer(composition, "light", global_time)
-    light = light_layer.source.params if light_layer is not None else default_light_params()
-    light_enabled = bool(_evaluate(light.get("enabled"), global_time, True, "bool"))
-    light_color = _vector(_evaluate(light.get("color"), global_time, [1.0, 1.0, 1.0], "color3"), 3, [1.0, 1.0, 1.0])
-    light_color = [max(0.0, min(8.0, value)) for value in light_color]
-    light_intensity = _scalar(_evaluate(light.get("intensity"), global_time, 0.42), 0.42, 0.0, 4.0) if light_enabled else 0.0
-    light_azimuth = _scalar(_evaluate(light.get("azimuth"), global_time, 45.0), 45.0, -180.0, 180.0)
-    light_elevation = _scalar(_evaluate(light.get("elevation"), global_time, 45.0), 45.0, -20.0, 89.0)
+    evaluated_lights = [
+        value for value in (
+            _evaluated_light(row, global_time)
+            for row in _active_layers(composition, "light", global_time)
+        )
+        if value is not None
+    ]
+    primary_light = next(
+        (
+            value for value in evaluated_lights
+            if value["light_type"] == "directional"
+        ),
+        None,
+    )
+    light_layer = next(
+        (
+            row for row in _active_layers(composition, "light", global_time)
+            if primary_light is not None and row.id == primary_light["layer_id"]
+        ),
+        None,
+    )
+    if primary_light is None:
+        fallback = create_light_layer(duration_ms=1)
+        primary_light = _evaluated_light(fallback, global_time)
+    assert primary_light is not None
+    additional_lights = [
+        value for value in evaluated_lights
+        if value["layer_id"] != primary_light["layer_id"]
+    ][:2]
+    light_color = list(primary_light["color"])
+    light_intensity = float(primary_light["intensity"])
+    light_azimuth = float(primary_light["azimuth"])
+    light_elevation = float(primary_light["elevation"])
 
     override = _scalar(_evaluate(material_params.get("override_strength"), time_ms, 0.0), 0.0, 0.0, 1.0)
     roughness = _scalar(_evaluate(material_params.get("roughness"), time_ms, 0.45), 0.45, 0.04, 1.0)
@@ -273,6 +404,14 @@ def evaluate_ar_pbr_frame(
         "light_elevation": light_elevation,
         "light_color": light_color,
         "direct_strength": light_intensity,
+        "additional_lights": [
+            {
+                key: value
+                for key, value in row.items()
+                if key != "layer_id"
+            }
+            for row in additional_lights
+        ],
         "shadow_strength": _scalar(_evaluate(render_params.get("shadow_strength"), time_ms, 0.72), 0.72, 0.0, 1.0),
         "self_shadow_strength": _scalar(_evaluate(render_params.get("self_shadow_strength"), time_ms, 0.45), 0.45, 0.0, 1.0),
         "shadow_filter": str(render_params.get("shadow_filter") or "pcf"),
@@ -317,9 +456,21 @@ def evaluate_ar_pbr_frame(
         "enable_shadow_map": True,
         "model_view": {
             "auto_fit": bool(render_params.get("auto_fit", True)),
-            "zoom": max(0.03, min(40.0, 1.75 * 45.0 / fov)),
+            "zoom": max(
+                0.03,
+                min(
+                    40.0,
+                    1.75 * (
+                        camera_z / orthographic_size
+                        if projection == "orthographic"
+                        else 45.0 / fov
+                    ),
+                ),
+            ),
             "camera_z": camera_z,
             "fov_deg": fov,
+            "projection": projection,
+            "orthographic_size": orthographic_size,
             "pan_x": max(-20.0, min(20.0, camera_target[0] - camera_position[0])),
             "pan_y": max(-20.0, min(20.0, camera_target[1] - camera_position[1])),
             "pan_z": max(-20.0, min(20.0, camera_target[2])),
@@ -337,7 +488,17 @@ def evaluate_ar_pbr_frame(
         "depth_occlusion_ready": occlusion,
         "renderer": "full_gpu",
         "camera_equivalence": "camera_rotation_is_applied_as_inverse_model_orbit",
-        "light_limit": "single_key_light_plus_hdri",
+        "camera_projection": projection,
+        "orthographic_3d_policy": (
+            "camera_distance_independent_framing"
+            if projection == "orthographic"
+            else "perspective_fov_framing"
+        ),
+        "active_light_count": 1 + len(additional_lights),
+        "additional_light_layer_ids": [
+            str(row["layer_id"]) for row in additional_lights
+        ],
+        "light_limit": "one_shadowed_directional_plus_two_unshadowed_lights",
     }
     depth_frame: Any = depth_path if occlusion else None
     return MotionArPbrFrame(track=track, settings=settings, depth_frame=depth_frame, diagnostics=diagnostics)

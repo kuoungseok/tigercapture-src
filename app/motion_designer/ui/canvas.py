@@ -3,12 +3,14 @@ from __future__ import annotations
 from copy import deepcopy
 from math import hypot
 from pathlib import Path
+from time import monotonic
 
-from PySide6.QtCore import QPointF, QRectF, Qt, Signal
+from PySide6.QtCore import QPointF, QRectF, QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QBrush, QPainter, QPen, QPixmap, QTransform
 from PySide6.QtWidgets import (
     QGraphicsEllipseItem, QGraphicsItem, QGraphicsLineItem, QGraphicsPathItem,
-    QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsScene, QGraphicsView,
+    QGraphicsItemGroup, QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsScene,
+    QGraphicsView,
 )
 
 from app.motion_designer.evaluator import evaluate_composition
@@ -42,9 +44,81 @@ class _VectorHandleItem(QGraphicsEllipseItem):
         self._callback(self.pos())
 
 
+class _RigBoneHandleItem(QGraphicsEllipseItem):
+    def __init__(
+        self,
+        rig_id: str,
+        bone_id: str,
+        position: tuple[float, float],
+        callback,
+    ) -> None:
+        super().__init__(-8, -8, 16, 16)
+        self._callback = callback
+        self._rig_id = str(rig_id)
+        self._bone_id = str(bone_id)
+        self.setPos(float(position[0]), float(position[1]))
+        self.setPen(QPen(QColor("#101419"), 2))
+        self.setBrush(QBrush(QColor("#56d7c4")))
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setZValue(9300)
+        self.setData(1, "rig_bone_handle")
+        self.setData(2, self._rig_id)
+        self.setData(3, self._bone_id)
+
+    def mouseReleaseEvent(self, event) -> None:
+        super().mouseReleaseEvent(event)
+        self._callback(
+            self._rig_id,
+            self._bone_id,
+            float(self.pos().x()),
+            float(self.pos().y()),
+        )
+
+
+class _PuppetPinHandleItem(QGraphicsEllipseItem):
+    def __init__(
+        self,
+        layer_id: str,
+        pin_id: str,
+        position: QPointF,
+        size: tuple[float, float],
+        callback,
+        parent: QGraphicsItem,
+    ) -> None:
+        super().__init__(-7, -7, 14, 14, parent)
+        self._layer_id = str(layer_id)
+        self._pin_id = str(pin_id)
+        self._size = size
+        self._callback = callback
+        self.setPos(position)
+        self.setPen(QPen(QColor("#101419"), 2))
+        self.setBrush(QBrush(QColor("#d97cd8")))
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setZValue(9400)
+        self.setData(0, self._layer_id)
+        self.setData(1, "puppet_pin_handle")
+        self.setData(2, self._pin_id)
+
+    def mouseReleaseEvent(self, event) -> None:
+        super().mouseReleaseEvent(event)
+        width, height = self._size
+        self._callback(
+            self._layer_id,
+            self._pin_id,
+            max(0.0, min(1.0, (self.pos().x() + width * 0.5) / width)),
+            max(0.0, min(1.0, (self.pos().y() + height * 0.5) / height)),
+        )
+
+
 class MotionCanvas(QGraphicsView):
     layer_selected = Signal(str)
     layer_moved = Signal(str, float, float)
+    rig_bone_selected = Signal(str, str)
+    rig_bone_moved = Signal(str, str, float, float)
+    puppet_pin_selected = Signal(str, str)
+    puppet_pin_moved = Signal(str, str, float, float)
     vector_path_changed = Signal(str, object)
     typography_path_changed = Signal(str, object)
     typography_path_offset_changed = Signal(str, float)
@@ -54,6 +128,7 @@ class MotionCanvas(QGraphicsView):
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
         self.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
+        self.setMouseTracking(True)
         self.setDragMode(QGraphicsView.RubberBandDrag)
         self.setBackgroundBrush(QColor("#0b0d11"))
         self._composition: MotionComposition | None = None
@@ -64,10 +139,29 @@ class MotionCanvas(QGraphicsView):
         self._fit_mode = True
         self._selected_layer_id = ""
         self._loading_scene = False
+        self._button_preview_states: dict[str, object] = {}
+        self._button_transition_targets: dict[str, tuple[str, str, float, int, str]] = {}
+        self._button_layer_ids: set[str] = set()
+        self._hover_button_layer_id = ""
+        self._button_transition_timer = QTimer(self)
+        self._button_transition_timer.setInterval(16)
+        self._button_transition_timer.timeout.connect(self._update_button_transitions)
         self._scene.selectionChanged.connect(self._selection_changed)
 
     def set_composition(self, composition: MotionComposition, time_ms: int = 0) -> None:
+        if composition is not self._composition:
+            self._button_preview_states.clear()
+            self._button_transition_targets.clear()
+            self._button_transition_timer.stop()
+            self._hover_button_layer_id = ""
         self._composition = composition
+        from app.motion_designer.interactive_button import button_component
+
+        self._button_layer_ids = {
+            layer.id for layer in composition.layers
+            if button_component(layer) is not None
+        }
+        self.setMouseTracking(bool(self._button_layer_ids))
         self._time_ms = int(time_ms)
         self.refresh()
 
@@ -95,14 +189,31 @@ class MotionCanvas(QGraphicsView):
         margin_x, margin_y = composition.width * .05, composition.height * .05
         if self._show_safe_guides:
             self._scene.addRect(stage_rect.adjusted(margin_x, margin_y, -margin_x, -margin_y), safe_pen).setZValue(9000)
-        states = {state.id: state for state in evaluate_composition(composition, self._time_ms)}
+        states = {
+            state.id: state
+            for state in evaluate_composition(
+                composition,
+                self._time_ms,
+                interaction_states=self._button_preview_states,
+            )
+        }
         from app.motion_designer.boolean_layers import consumed_boolean_operand_ids, resolve_boolean_layer
         consumed_operand_ids = consumed_boolean_operand_ids(composition, states)
         for z_index, layer in enumerate(composition.layers):
             state = states[layer.id]
             if not state.active or layer.layer_type in {"group", "adjustment"} or layer.id in consumed_operand_ids:
                 continue
-            item = self._make_item(resolve_boolean_layer(composition, layer, states))
+            render_layer = resolve_boolean_layer(composition, layer, states)
+            from app.motion_designer.advanced_motion import evaluate_replicator
+
+            instances = evaluate_replicator(
+                layer.metadata.get("replicator"), state.local_time_ms,
+            )
+            item = (
+                self._make_replicated_item(render_layer, state.local_time_ms, instances)
+                if len(instances) > 1
+                else self._make_item(render_layer)
+            )
             item.setData(0, layer.id)
             item.setFlag(QGraphicsItem.ItemIsSelectable, not layer.locked)
             item.setFlag(QGraphicsItem.ItemIsMovable, not layer.locked)
@@ -115,6 +226,8 @@ class MotionCanvas(QGraphicsView):
                 item.setSelected(True)
                 self._add_vector_handles(layer, item)
                 self._add_typography_path_handles(layer, item)
+                self._add_puppet_handles(layer, item)
+        self._add_rig_overlay()
         scene_rect = stage_rect if self._fit_mode else stage_rect.adjusted(-100, -100, 100, 100)
         self._scene.setSceneRect(scene_rect)
         if preserve_view and not self._fit_mode:
@@ -130,13 +243,83 @@ class MotionCanvas(QGraphicsView):
         self._selected_layer_id = layer_id
         self.refresh(preserve_view=True)
 
+    def _add_rig_overlay(self) -> None:
+        composition = self._composition
+        if composition is None or not self._selected_layer_id:
+            return
+        from app.motion_designer.rigging import rig_for_layer
+
+        rig = rig_for_layer(composition, self._selected_layer_id)
+        if rig is None or not rig.enabled:
+            return
+        bones_by_id = {bone.id: bone for bone in rig.bones}
+        line_pen = QPen(QColor("#f0a44b"), 5, Qt.SolidLine, Qt.RoundCap)
+        for bone in rig.bones:
+            parent = bones_by_id.get(bone.parent_id)
+            if parent is None:
+                continue
+            line = QGraphicsLineItem(
+                float(parent.rest_position[0]),
+                float(parent.rest_position[1]),
+                float(bone.rest_position[0]),
+                float(bone.rest_position[1]),
+            )
+            line.setPen(line_pen)
+            line.setAcceptedMouseButtons(Qt.NoButton)
+            line.setZValue(9250)
+            line.setData(1, "rig_bone_line")
+            line.setData(2, rig.id)
+            line.setData(3, bone.id)
+            self._scene.addItem(line)
+        for bone in rig.bones:
+            handle = _RigBoneHandleItem(
+                rig.id,
+                bone.id,
+                bone.rest_position,
+                self.rig_bone_moved.emit,
+            )
+            handle.setToolTip(f"{bone.name} ({bone.role or 'bone'})")
+            if bone.id == rig.root_bone_id:
+                handle.setRect(-10, -10, 20, 20)
+                handle.setBrush(QBrush(QColor("#f5de72")))
+            self._scene.addItem(handle)
+
+    def _add_puppet_handles(
+        self,
+        layer: MotionLayer,
+        item: QGraphicsItem,
+    ) -> None:
+        from app.motion_designer.puppet_mesh import layer_puppet_mesh
+
+        mesh = layer_puppet_mesh(layer)
+        if mesh is None or not mesh.enabled:
+            return
+        width = float(layer.source.params.get("width", 400.0) or 400.0)
+        height = float(layer.source.params.get("height", 220.0) or 220.0)
+        for pin in mesh.pins:
+            x = pin.rest_position[0] * width - width * 0.5
+            y = pin.rest_position[1] * height - height * 0.5
+            handle = _PuppetPinHandleItem(
+                layer.id,
+                pin.id,
+                QPointF(x, y),
+                (width, height),
+                self.puppet_pin_moved.emit,
+                item,
+            )
+            handle.setToolTip(f"{pin.name} ({pin.kind})")
+            if pin.kind == "bend":
+                handle.setBrush(QBrush(QColor("#f0a44b")))
+            elif pin.kind == "starch":
+                handle.setBrush(QBrush(QColor("#69a7e8")))
+
     def _make_item(self, layer: MotionLayer) -> QGraphicsItem:
         params = layer.source.params
         width = float(evaluate_source_param(params, "width", self._time_ms, 400.0))
         height = float(evaluate_source_param(params, "height", self._time_ms, 220.0))
         rect = QRectF(-width * .5, -height * .5, width, height)
         fill = QColor(str(evaluate_source_param(params, "fill", self._time_ms, "#3f8fba")))
-        if layer.layer_type in {"live2d_actor", "spine_actor"}:
+        if layer.layer_type in {"generator", "live2d_actor", "spine_actor"}:
             from app.motion_designer.adapters import render_source
 
             composition = self._composition
@@ -202,6 +385,50 @@ class MotionCanvas(QGraphicsView):
         item.setPen(pen)
         item.setBrush(QBrush(fill))
         return item
+
+    def _make_replicated_item(
+        self,
+        layer: MotionLayer,
+        local_time_ms: float,
+        instances: list[dict[str, float]],
+    ) -> QGraphicsItemGroup:
+        from app.motion_designer.adapters import render_source
+
+        composition = self._composition
+        viewport = (
+            (composition.width, composition.height)
+            if composition is not None
+            else None
+        )
+        image = render_source(
+            layer,
+            local_time_ms,
+            composition=composition,
+            composition_time_ms=self._time_ms,
+            quality="preview",
+            viewport_size=viewport,
+        )
+        group = QGraphicsItemGroup()
+        if image.isNull():
+            return group
+        pixmap = QPixmap.fromImage(image)
+        for instance in instances:
+            child = QGraphicsPixmapItem(pixmap, group)
+            child.setOffset(-pixmap.width() * .5, -pixmap.height() * .5)
+            child.setAcceptedMouseButtons(Qt.NoButton)
+            child.setOpacity(float(instance.get("opacity", 1.0)))
+            child.setPos(
+                float(instance.get("x", 0.0)),
+                float(instance.get("y", 0.0)),
+            )
+            transform = QTransform()
+            transform.rotate(float(instance.get("rotation", 0.0)))
+            transform.scale(
+                float(instance.get("scale_x", 1.0)),
+                float(instance.get("scale_y", 1.0)),
+            )
+            child.setTransform(transform)
+        return group
 
     def _add_vector_handles(self, layer: MotionLayer, item: QGraphicsItem) -> None:
         params = layer.source.params
@@ -576,6 +803,30 @@ class MotionCanvas(QGraphicsView):
                 return
         super().mouseDoubleClickEvent(event)
 
+    def mouseMoveEvent(self, event) -> None:
+        if not self._button_layer_ids:
+            super().mouseMoveEvent(event)
+            return
+        viewport_position = event.position().toPoint()
+        layer_id = self._button_layer_at(viewport_position)
+        super().mouseMoveEvent(event)
+        if layer_id == self._hover_button_layer_id:
+            return
+        previous = self._hover_button_layer_id
+        self._hover_button_layer_id = layer_id
+        if previous:
+            self._set_button_preview_state(previous, "normal")
+        if layer_id:
+            self._set_button_preview_state(layer_id, "hover")
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.LeftButton:
+            layer_id = self._button_layer_at(event.position().toPoint())
+            if layer_id:
+                self._hover_button_layer_id = layer_id
+                self._set_button_preview_state(layer_id, "pressed")
+        super().mousePressEvent(event)
+
     def keyPressEvent(self, event) -> None:
         if event.key() in {Qt.Key_Delete, Qt.Key_Backspace}:
             handle = next((
@@ -637,16 +888,40 @@ class MotionCanvas(QGraphicsView):
         self.refresh(preserve_view=True)
 
     def mouseReleaseEvent(self, event) -> None:
+        is_button_release = (
+            event.button() == Qt.LeftButton
+            and bool(self._hover_button_layer_id)
+        )
+        layer_id = (
+            self._button_layer_at(event.position().toPoint())
+            if is_button_release
+            else ""
+        )
         super().mouseReleaseEvent(event)
         for item in self._scene.selectedItems():
+            if item.data(1) == "rig_bone_handle":
+                continue
             if item.data(1) in {
                 "vector_handle", "typography_path_handle", "typography_path_offset",
+                "puppet_pin_handle",
             }:
                 continue
             layer_id = str(item.data(0) or "")
             if layer_id and not item.pos().isNull():
                 self.layer_moved.emit(layer_id, item.pos().x(), item.pos().y())
                 item.setPos(0, 0)
+        if is_button_release:
+            self._set_button_preview_state(
+                self._hover_button_layer_id,
+                "hover" if layer_id == self._hover_button_layer_id else "normal",
+            )
+
+    def leaveEvent(self, event) -> None:
+        previous = self._hover_button_layer_id
+        self._hover_button_layer_id = ""
+        if previous:
+            self._set_button_preview_state(previous, "normal")
+        super().leaveEvent(event)
 
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
@@ -658,4 +933,106 @@ class MotionCanvas(QGraphicsView):
         if self._loading_scene:
             return
         items = self._scene.selectedItems()
+        if items and items[0].data(1) == "rig_bone_handle":
+            self.rig_bone_selected.emit(
+                str(items[0].data(2) or ""),
+                str(items[0].data(3) or ""),
+            )
+            return
+        if items and items[0].data(1) == "puppet_pin_handle":
+            self.puppet_pin_selected.emit(
+                str(items[0].data(0) or ""),
+                str(items[0].data(2) or ""),
+            )
+            return
         self.layer_selected.emit(str(items[0].data(0) or "") if items else "")
+
+    def _button_layer_at(self, viewport_position) -> str:
+        composition = self._composition
+        if composition is None:
+            return ""
+        item = self.itemAt(viewport_position)
+        while item is not None:
+            layer_id = str(item.data(0) or "")
+            if layer_id:
+                by_id = {candidate.id: candidate for candidate in composition.layers}
+                layer = by_id.get(layer_id)
+                while layer is not None:
+                    if layer.id in self._button_layer_ids:
+                        from app.motion_designer.interactive_button import button_component
+
+                        component = button_component(layer)
+                        if component is not None and component.active_state != "disabled":
+                            return layer.id
+                    if layer.parent_id == layer.id:
+                        break
+                    if not layer.parent_id:
+                        break
+                    layer = by_id.get(layer.parent_id)
+            item = item.parentItem()
+        return ""
+
+    def _set_button_preview_state(self, layer_id: str, state: str) -> None:
+        if not layer_id:
+            return
+        composition = self._composition
+        layer = next(
+            (item for item in composition.layers if item.id == layer_id),
+            None,
+        ) if composition is not None else None
+        from app.motion_designer.interactive_button import button_component
+
+        component = button_component(layer) if layer is not None else None
+        if component is None:
+            return
+        current = self._button_preview_states.get(layer_id)
+        current_state = (
+            str(current.get("state") or component.active_state)
+            if isinstance(current, dict)
+            else str(current or component.active_state)
+        )
+        if current_state == state and layer_id not in self._button_transition_targets:
+            return
+        duration = int(component.transition_duration_ms)
+        if duration <= 0:
+            self._button_preview_states[layer_id] = str(state)
+            self._button_transition_targets.pop(layer_id, None)
+            self.refresh(preserve_view=True)
+            return
+        self._button_transition_targets[layer_id] = (
+            current_state,
+            str(state),
+            monotonic(),
+            duration,
+            component.easing,
+        )
+        self._button_preview_states[layer_id] = {
+            "from_state": current_state,
+            "state": str(state),
+            "progress": 0.0,
+            "easing": component.easing,
+        }
+        self._button_transition_timer.start()
+        self.refresh(preserve_view=True)
+
+    def _update_button_transitions(self) -> None:
+        now = monotonic()
+        finished: list[str] = []
+        for layer_id, (from_state, state, started, duration, easing) in list(
+            self._button_transition_targets.items()
+        ):
+            progress = max(0.0, min(1.0, (now - started) * 1000.0 / max(1, duration)))
+            self._button_preview_states[layer_id] = {
+                "from_state": from_state,
+                "state": state,
+                "progress": progress,
+                "easing": easing,
+            }
+            if progress >= 1.0:
+                self._button_preview_states[layer_id] = state
+                finished.append(layer_id)
+        for layer_id in finished:
+            self._button_transition_targets.pop(layer_id, None)
+        if not self._button_transition_targets:
+            self._button_transition_timer.stop()
+        self.refresh(preserve_view=True)

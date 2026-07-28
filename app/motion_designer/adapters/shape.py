@@ -58,10 +58,26 @@ def _brush(params: Mapping[str, object], time_ms: float, width: int, height: int
     return gradient if stops else fill
 
 
-def _pen(params: Mapping[str, object], time_ms: float) -> QPen:
+def _pen(
+    params: Mapping[str, object],
+    time_ms: float,
+    width_px: int,
+    height_px: int,
+) -> QPen:
     stroke = _color(evaluate_source_param(params, "stroke", time_ms, "#20242b"), "#20242b")
     width = float(evaluate_source_param(params, "stroke_width", time_ms, 2.0))
     pen = QPen(stroke, max(0.0, width))
+    stroke_gradient = evaluate_source_param(
+        params,
+        "stroke_gradient",
+        time_ms,
+        None,
+    )
+    if stroke_gradient:
+        gradient_params = dict(params)
+        gradient_params["gradient"] = stroke_gradient
+        gradient_params["fill"] = stroke.name(QColor.HexArgb)
+        pen.setBrush(_brush(gradient_params, time_ms, width_px, height_px))
     cap = str(evaluate_source_param(params, "cap", time_ms, "square")).lower()
     join = str(evaluate_source_param(params, "join", time_ms, "miter")).lower()
     pen.setCapStyle({"round": Qt.RoundCap, "flat": Qt.FlatCap}.get(cap, Qt.SquareCap))
@@ -69,7 +85,51 @@ def _pen(params: Mapping[str, object], time_ms: float) -> QPen:
     dash = evaluate_source_param(params, "dash", time_ms, [])
     if isinstance(dash, Sequence) and not isinstance(dash, (str, bytes)) and dash:
         pen.setDashPattern([max(.01, float(value)) for value in dash])
+        pen.setDashOffset(float(evaluate_source_param(
+            params,
+            "dash_offset",
+            time_ms,
+            0.0,
+        )))
     return pen
+
+
+def _stroke_variable_path(
+    painter: QPainter,
+    path,
+    base_pen: QPen,
+    taper: Mapping[str, object],
+) -> None:
+    polygons = [list(polygon) for polygon in path.toSubpathPolygons()]
+    segments = [
+        (left, right)
+        for polygon in polygons
+        for left, right in zip(polygon, polygon[1:])
+    ]
+    if not segments:
+        return
+    start = max(0.0, float(taper.get("start", 1.0) or 0.0))
+    end = max(0.0, float(taper.get("end", 1.0) or 0.0))
+    profile = taper.get("profile")
+    profile = (
+        [max(0.0, float(value)) for value in profile]
+        if isinstance(profile, Sequence) and not isinstance(profile, (str, bytes))
+        else []
+    )
+    for index, (left, right) in enumerate(segments):
+        amount = index / max(1, len(segments) - 1)
+        if profile:
+            slot = amount * max(0, len(profile) - 1)
+            lower = min(len(profile) - 1, int(slot))
+            upper = min(len(profile) - 1, lower + 1)
+            blend = slot - lower
+            factor = profile[lower] + (profile[upper] - profile[lower]) * blend
+        else:
+            factor = start + (end - start) * amount
+        pen = QPen(base_pen)
+        pen.setWidthF(base_pen.widthF() * factor)
+        painter.setPen(pen)
+        painter.drawLine(left, right)
 
 
 def render_shape(layer: MotionLayer, time_ms: float = 0.0):
@@ -80,7 +140,7 @@ def render_shape(layer: MotionLayer, time_ms: float = 0.0):
     painter = QPainter(image)
     painter.setRenderHint(QPainter.Antialiasing)
     if layer.layer_type == "line":
-        painter.setPen(_pen(params, time_ms))
+        painter.setPen(_pen(params, time_ms, width, height))
         painter.drawLine(0, height // 2, width, height // 2)
     else:
         path = build_vector_painter_path(params, time_ms)
@@ -90,8 +150,16 @@ def render_shape(layer: MotionLayer, time_ms: float = 0.0):
             or float(trim.get("end", 1.0) if trim.get("end", 1.0) is not None else 1.0) < 1.0
             or float(trim.get("offset", 0.0) or 0.0) != 0.0
         )
-        painter.setPen(_pen(params, time_ms))
+        pen = _pen(params, time_ms, width, height)
+        painter.setPen(pen)
         painter.setBrush(Qt.NoBrush if partial_trim else _brush(params, time_ms, width, height))
+        taper = evaluate_source_param(params, "stroke_taper", time_ms, {})
+        taper = taper if isinstance(taper, Mapping) else {}
+        taper_active = bool(taper) and (
+            abs(float(taper.get("start", 1.0) or 0.0) - 1.0) > 1e-6
+            or abs(float(taper.get("end", 1.0) or 0.0) - 1.0) > 1e-6
+            or bool(taper.get("profile"))
+        )
         repeater = evaluate_source_param(params, "repeater", time_ms, {})
         for instance in repeater_instances(repeater if isinstance(repeater, Mapping) else {}):
             painter.save()
@@ -101,7 +169,12 @@ def render_shape(layer: MotionLayer, time_ms: float = 0.0):
             painter.rotate(float(instance["rotation"]))
             painter.scale(*instance["scale"])
             painter.translate(-width * .5, -height * .5)
-            painter.drawPath(path)
+            if taper_active:
+                if painter.brush().style() != Qt.NoBrush:
+                    painter.fillPath(path, painter.brush())
+                _stroke_variable_path(painter, path, pen, taper)
+            else:
+                painter.drawPath(path)
             painter.restore()
     painter.end()
     return image
