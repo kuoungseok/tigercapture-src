@@ -178,6 +178,60 @@ def test_motion_craft_actions_apply_replace_and_clear_one_style(tmp_path) -> Non
     assert cleared.ok and cleared.result["changed"]
 
 
+def test_motion_glass_actions_create_bind_preflight_and_remove() -> None:
+    owner = Owner()
+    registry = ActionRegistry(owner)
+    created = registry.execute("motion.composition.create", {"name": "Glass"})
+    composition_id = created.result["payload"]["composition"]["id"]
+    added = registry.execute("motion.layer.add", {
+        "composition_id": composition_id,
+        "layer": {"name": "CTA", "layer_type": "shape"},
+    })
+    layer_id = added.result["payload"]["composition"]["layers"][0]["id"]
+    presets = registry.execute("motion.material.glass.preset.list", {})
+    assert presets.ok
+    assert {row["id"] for row in presets.result["presets"]} == {
+        "clear", "frosted", "tinted", "glossy", "liquid_cta",
+    }
+    applied = registry.execute("motion.material.glass.create", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "preset": "liquid_cta",
+        "settings": {"refraction": 7.5},
+    })
+    assert applied.ok
+    effect_id = applied.result["effect"]["id"]
+    bound = registry.execute("motion.material.glass.driver.bind", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "source": "pointer",
+        "strength": 2.0,
+        "x": 0.5,
+        "y": -0.25,
+    })
+    assert bound.ok
+    assert bound.result["driver_value"] == [1.0, -0.5]
+    updated = registry.execute("motion.material.glass.set", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "preset": "frosted",
+    })
+    assert updated.ok and updated.result["effect"]["id"] == effect_id
+    assert updated.result["effect"]["metadata"]["driver"]["source"] == "pointer"
+    preflight = registry.execute("motion.material.glass.preflight", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+    })
+    assert preflight.ok
+    assert preflight.result["preview_backend"] == "shared_backdrop_raster"
+    assert preflight.result["umg_disposition"] == "deterministic_bake"
+    removed = registry.execute("motion.material.glass.remove", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+    })
+    assert removed.ok and removed.result["changed"]
+
+
 def test_advanced_keyframe_and_behavior_actions_are_automation_ready() -> None:
     owner = Owner()
     registry = ActionRegistry(owner)

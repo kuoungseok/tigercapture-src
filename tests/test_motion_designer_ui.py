@@ -49,6 +49,9 @@ def test_motion_designer_window_uses_controller_for_layer_and_undo() -> None:
     assert window.toolbar.templates_button.text() == "Templates"
     assert window.project_tabs.count() == 3
     assert window.inspector_tabs.count() == 20
+    assert window.looks.count() == 2
+    assert window.looks.tabText(0) == "Craft"
+    assert window.looks.tabText(1) == "Glass"
     assert window.inspector_tabs.indexOf(window.tracking) >= 0
     assert window.inspector_tabs.indexOf(window.puppet) >= 0
     assert window.inspector_tabs.indexOf(window.rig) >= 0

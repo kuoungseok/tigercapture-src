@@ -2262,3 +2262,81 @@ def register_motion_actions(registry: Any) -> None:
         mutating=False,
         changed=False,
     )
+    glass_presets = ["clear", "frosted", "tinted", "glossy", "liquid_cta"]
+    registry.register_adapter_action(
+        "motion.material.glass.preset.list",
+        "List Tiger Glass material presets.",
+        "motion",
+        "motion_glass_presets",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.material.glass.get",
+        "Inspect the Tiger Glass material on a Motion layer.",
+        "motion",
+        "motion_glass_get",
+        params_schema=schema_object(lid, required=("composition_id", "layer_id")),
+        required=("composition_id", "layer_id"),
+        mutating=False,
+        changed=False,
+    )
+    glass_set_props = {
+        **lid,
+        "preset": {"type": "string", "enum": glass_presets},
+        "settings": {"type": "object"},
+    }
+    for action_id in ("motion.material.glass.create", "motion.material.glass.set"):
+        registry.register_adapter_action(
+            action_id,
+            "Create or update backdrop-aware Tiger Glass.",
+            "motion",
+            "motion_glass_set",
+            params_schema=schema_object(
+                glass_set_props,
+                required=("composition_id", "layer_id"),
+            ),
+            required=("composition_id", "layer_id"),
+            undo_label="Set Tiger Glass",
+            dry_summary="Backdrop-aware Tiger Glass would be set",
+        )
+    registry.register_adapter_action(
+        "motion.material.glass.remove",
+        "Remove Tiger Glass from a Motion layer.",
+        "motion",
+        "motion_glass_remove",
+        params_schema=schema_object(lid, required=("composition_id", "layer_id")),
+        required=("composition_id", "layer_id"),
+        undo_label="Remove Tiger Glass",
+        dry_summary="Tiger Glass would be removed",
+    )
+    registry.register_adapter_action(
+        "motion.material.glass.driver.bind",
+        "Bind pointer, velocity, scroll, or manual input to Tiger Glass.",
+        "motion",
+        "motion_glass_driver_bind",
+        params_schema=schema_object({
+            **lid,
+            "source": {
+                "type": "string",
+                "enum": ["pointer", "velocity", "scroll", "manual"],
+            },
+            "strength": {"type": "number", "minimum": 0, "maximum": 10},
+            "x": {"type": "number"},
+            "y": {"type": "number"},
+        }, required=("composition_id", "layer_id", "source")),
+        required=("composition_id", "layer_id", "source"),
+        undo_label="Bind Tiger Glass Driver",
+        dry_summary="A Tiger Glass response driver would be bound",
+    )
+    registry.register_adapter_action(
+        "motion.material.glass.preflight",
+        "Report Tiger Glass renderer and Unreal output disposition.",
+        "motion",
+        "motion_glass_preflight",
+        params_schema=schema_object(lid, required=("composition_id", "layer_id")),
+        required=("composition_id", "layer_id"),
+        mutating=False,
+        changed=False,
+    )

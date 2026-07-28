@@ -6588,6 +6588,18 @@ AI Script Edit MVP integration:
   boundary jump, deterministic seed, and Preview/Export pixel parity. Advanced
   RGB-grain separation, dust lifetime/direction, and a fibrous-edge authoring
   UI remain post-v1 quality extensions rather than shipped v1 claims.
+- M22 Dynamic Glass core is implemented as
+  `tigerstudio.motion.glass.v1`. A `tiger_glass` effect samples the already
+  composed layers behind its transformed shape mask and applies deterministic
+  backdrop blur, procedural refraction, tint/absorption, thickness,
+  edge/specular response, dispersion, and glossy bloom. Clear, Frosted,
+  Tinted, Glossy, and Liquid CTA presets are editable in `Look > Glass` and
+  through `motion.material.glass.*` actions. Glass vector nodes explicitly
+  report `backdrop_glass_requires_raster`; the shared raster result has
+  Preview/Export pixel parity. Complex Glass remains a deterministic UMG bake
+  candidate and reports `effect_requires_bake:tiger_glass`. Multi-resolution
+  blur, live pointer/scroll feeds, nested/HDR/1080p evidence, native UI
+  Material conversion, and tiled-export proof remain M22 work.
 - M13 character-rigging foundation is complete. Motion compositions persist
   provider-neutral `tigerstudio.motion.rig.v1` cutout rigs with stable rig and
   bone IDs, a validated parent hierarchy, rest positions, animated rotation

@@ -87,7 +87,7 @@ M21-M28은 다음 조건을 모두 만족해야 완료다.
 | 순서 | 마일스톤 | 목적 | 상태 |
 | --- | --- | --- | --- |
 | M21 | Craft and Imperfection Style Stack | 아날로그 손맛을 재사용 가능한 효과 체계로 구현 | Complete v1 |
-| M22 | Dynamic Glass Material | 실시간 backdrop glass와 glossy motion 구현 | Planned |
+| M22 | Dynamic Glass Material | 실시간 backdrop glass와 glossy motion 구현 | In progress: core backdrop |
 | M23 | Mixed Media Craft Workspace | 종이·스캔·손그림·콜라주 제작 흐름 완성 | Planned |
 | M24 | Painterly 2D/3D Look Development | PBR 위에 2D line/brush/toon 스타일 결합 | Planned |
 | M25 | Stop-motion Timing and CGI | stepped timing, clay, miniature motion 구현 | Planned |
@@ -171,6 +171,27 @@ Action/MCP:
 
 목표: blur 사각형이 아니라 뒤 콘텐츠를 읽고 움직임에 반응하는 Tiger
 Glass material을 구현한다.
+
+### 2026-07-29 구현 상태
+
+- `tigerstudio.motion.glass.v1` 계약과 `tiger_glass` 효과를 추가했다.
+- Clear, Frosted, Tinted, Glossy, Liquid CTA 프리셋을 제공한다.
+- 레이어 합성 직전의 실제 canvas를 backdrop으로 샘플링하고 transformed
+  layer alpha를 glass shape mask로 사용한다.
+- blur, procedural normal refraction, thickness/absorption/tint, edge
+  highlight/specular, chromatic dispersion, glossy bloom을 결정론적으로
+  합성한다.
+- `Look > Glass` Inspector와
+  `motion.material.glass.create/get/set/remove`, preset list,
+  driver bind, preflight Action/MCP를 제공한다.
+- Glass가 있는 vector node는 GPU에서 잘못 그리지 않고
+  `backdrop_glass_requires_raster` 진단과 shared backdrop raster로
+  fallback한다. Preview/Export 픽셀 parity가 자동 검증된다.
+- Unreal UMG는 현재 복합 Glass를
+  `effect_requires_bake:tiger_glass`로 명시한다.
+- 남은 M22 범위는 multi-resolution blur pyramid, 실시간 pointer/scroll
+  driver feed, 중첩 glass/HDR/1080p 성능 QA, UI Material native 후보 변환,
+  결정적 tiled export 증거다.
 
 렌더 구조:
 

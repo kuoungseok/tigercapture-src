@@ -44,6 +44,7 @@ from .export_worker import MotionExportWorker
 from .generator_panel import GeneratorPanel
 from .inspector import InspectorPanel
 from .craft_panel import CraftStylePanel
+from .glass_panel import GlassMaterialPanel
 from .image_panel import ImagePanel
 from .layer_panel import LayerPanel
 from .library_panel import MotionLibraryPanel
@@ -864,6 +865,10 @@ class MotionDesignerWindow(QMainWindow):
         self.button = ButtonComponentPanel(self)
         self.effects = EffectMaskPanel("effect", self)
         self.craft = CraftStylePanel(self)
+        self.glass = GlassMaterialPanel(self)
+        self.looks = QTabWidget(self)
+        self.looks.addTab(self.craft, "Craft")
+        self.looks.addTab(self.glass, "Glass")
         self.masks = EffectMaskPanel("mask", self)
         self.tracking = TrackingPanel(self)
         self.inspector_tabs = QTabWidget(self)
@@ -886,7 +891,7 @@ class MotionDesignerWindow(QMainWindow):
         self.inspector_tabs.addTab(self.rig, "Rig")
         self.inspector_tabs.addTab(self.puppet, "Puppet")
         self.inspector_tabs.addTab(self.tracking, "Tracking")
-        self.inspector_tabs.addTab(self.craft, "Craft")
+        self.inspector_tabs.addTab(self.looks, "Look")
         self.left_tabs = QTabWidget(self)
         self.left_tabs.addTab(self.library, "Add")
         self.left_tabs.addTab(self.inspector_tabs, "Inspector")
@@ -1041,6 +1046,8 @@ class MotionDesignerWindow(QMainWindow):
         self.craft.apply_requested.connect(self._apply_craft_style)
         self.craft.clear_requested.connect(self._clear_craft_style)
         self.craft.texture_requested.connect(self._attach_craft_texture)
+        self.glass.apply_requested.connect(self._apply_glass_material)
+        self.glass.remove_requested.connect(self._remove_glass_material)
         self.masks.add_requested.connect(self._add_mask)
         self.masks.delete_requested.connect(self._delete_mask)
         self.masks.parameter_changed.connect(self._set_mask_param)
@@ -1721,6 +1728,7 @@ class MotionDesignerWindow(QMainWindow):
         self.behaviors.set_layer(layer)
         self.effects.set_context(layer, self.controller.composition)
         self.craft.set_layer(layer)
+        self.glass.set_layer(layer)
         self.masks.set_layer(layer)
         local_time = self._layer_local_time(layer)
         self.effects.set_time(local_time)
@@ -2671,6 +2679,47 @@ class MotionDesignerWindow(QMainWindow):
         }
         rows[effect_index] = effect.to_dict()
         self.controller.update_layer(layer.id, {"effects": rows})
+
+    def _apply_glass_material(self, preset: str, settings: object) -> None:
+        if not self._selected_layer_id:
+            return
+        from app.motion_designer.glass_material import (
+            glass_effect,
+            make_glass_effect,
+        )
+
+        layer = find_layer(self.controller.composition, self._selected_layer_id)
+        previous = glass_effect(layer.effects)
+        effect = make_glass_effect(
+            settings if isinstance(settings, dict) else {},
+            preset=preset,
+        )
+        rows = [item.to_dict() for item in layer.effects]
+        if previous is None:
+            rows.append(effect.to_dict())
+        else:
+            effect.id = previous.id
+            if "driver" in previous.metadata:
+                effect.metadata["driver"] = dict(previous.metadata["driver"])
+            rows[layer.effects.index(previous)] = effect.to_dict()
+        self.controller.update_layer(layer.id, {"effects": rows})
+
+    def _remove_glass_material(self) -> None:
+        if not self._selected_layer_id:
+            return
+        from app.motion_designer.glass_material import glass_effect
+
+        layer = find_layer(self.controller.composition, self._selected_layer_id)
+        previous = glass_effect(layer.effects)
+        if previous is None:
+            return
+        self.controller.update_layer(layer.id, {
+            "effects": [
+                item.to_dict()
+                for item in layer.effects
+                if item.id != previous.id
+            ],
+        })
 
     def _set_adjustment_scope(self, mode: str, layer_ids: object) -> None:
         if not self._selected_layer_id:

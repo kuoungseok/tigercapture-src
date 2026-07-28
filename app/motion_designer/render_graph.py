@@ -24,6 +24,7 @@ from .puppet_gpu import PuppetGpuPacket, build_puppet_gpu_packet
 from .puppet_mesh import layer_puppet_mesh
 from .typography_gpu import TypographyGpuPacket, build_typography_gpu_packet
 from .vector_gpu import VectorGpuPacket, build_vector_gpu_packet
+from .glass_material import glass_effect
 
 
 @dataclass(slots=True)
@@ -181,7 +182,13 @@ def build_render_graph(
         frame_mix_enabled = frame_blending["effective_mode"] == "frame_mix"
         if frame_blending["requested_mode"] == "optical_flow":
             optical_flow_fallback_count += 1
-        if include_vector_gpu and render_layer.layer_type == "shape" and not frame_mix_enabled:
+        has_glass = glass_effect(render_layer.effects) is not None
+        if (
+            include_vector_gpu
+            and render_layer.layer_type == "shape"
+            and not frame_mix_enabled
+            and not has_glass
+        ):
             vector_gpu_packet, vector_gpu_reason = build_vector_gpu_packet(render_layer, state.local_time_ms)
         elif include_vector_gpu and render_layer.layer_type == "particle" and not frame_mix_enabled:
             from .particle_gpu import build_particle_gpu_packet
@@ -190,7 +197,9 @@ def build_render_graph(
         else:
             vector_gpu_packet = None
             vector_gpu_reason = (
-                "frame_blending_requires_raster"
+                "backdrop_glass_requires_raster"
+                if include_vector_gpu and has_glass
+                else "frame_blending_requires_raster"
                 if include_vector_gpu and frame_mix_enabled
                 else "not_requested" if not include_vector_gpu else "non_vector_node"
             )
@@ -706,6 +715,16 @@ def render_graph_image(graph: RenderGraph) -> QImage:
             canvas_painter.end()
             continue
         layer_surface = surface(node)
+        glass = glass_effect(node.effects)
+        if glass is not None:
+            from .glass_renderer import render_glass_surface
+
+            layer_surface = render_glass_surface(
+                canvas,
+                layer_surface,
+                glass,
+                node.local_time_ms,
+            )
         if matte_node is not None:
             matte = surface(matte_node)
             if node.matte_mode.lower().startswith("luma"):
