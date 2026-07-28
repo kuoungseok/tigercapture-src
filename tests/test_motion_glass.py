@@ -4,8 +4,8 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication
-from PySide6.QtGui import QColor, QImage, QPainter
+from PySide6.QtCore import QCoreApplication, QEvent, QPointF, Qt
+from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter
 from PySide6.QtWidgets import QApplication
 import pytest
 
@@ -15,8 +15,10 @@ from app.motion_designer.glass_material import (
     glass_effect,
     make_glass_effect,
 )
+from app.motion_designer.glass_runtime import resolve_glass_driver
 from app.motion_designer.render_graph import build_render_graph, render_graph_image
-from app.motion_designer.schema import MotionComposition, MotionLayer, SourceRef
+from app.motion_designer.preview_renderer import MotionPreviewWidget
+from app.motion_designer.schema import Keyframe, MotionComposition, MotionLayer, SourceRef
 
 
 def _app() -> QApplication:
@@ -166,3 +168,96 @@ def test_overlapping_glass_layers_composite_in_order() -> None:
     two = renderer.render_frame(composition, 900, use_cache=False)
     assert one != two
     assert two.pixelColor(96, 48).alpha() > 0
+
+
+def test_glass_runtime_driver_is_ephemeral_and_clamped() -> None:
+    effect = make_glass_effect(
+        {"driver_x": 0.5, "driver_y": -0.25},
+        preset="glossy",
+    )
+    effect.metadata["driver"] = {"source": "pointer", "strength": 2.0}
+    before = (
+        effect.params["driver_x"].default,
+        effect.params["driver_y"].default,
+        dict(effect.metadata["driver"]),
+    )
+
+    assert resolve_glass_driver(effect, {"pointer": (0.75, -0.5)}) == (
+        2.0,
+        -1.25,
+    )
+    assert resolve_glass_driver(effect, {"pointer": (99.0, -99.0)}) == (
+        10.0,
+        -10.0,
+    )
+    assert (
+        effect.params["driver_x"].default,
+        effect.params["driver_y"].default,
+        dict(effect.metadata["driver"]),
+    ) == before
+    effect.params["driver_x"].keyframes = [
+        Keyframe(time_ms=0, value=0.0),
+        Keyframe(time_ms=1000, value=2.0),
+    ]
+    assert resolve_glass_driver(
+        effect,
+        {"pointer": (0.5, 0.0)},
+        time_ms=500,
+    )[0] == pytest.approx(2.0)
+    effect.metadata["driver"]["source"] = "manual"
+    assert resolve_glass_driver(
+        effect,
+        {"pointer": (10.0, 10.0)},
+        time_ms=500,
+    ) == pytest.approx((1.0, -0.25))
+
+
+def test_render_graph_applies_runtime_driver_without_changing_document() -> None:
+    _app()
+    composition = _composition()
+    effect = glass_effect(composition.layers[-1].effects)
+    assert effect is not None
+    effect.metadata["driver"] = {"source": "pointer", "strength": 2.0}
+    revision = composition.revision
+    default_x = effect.params["driver_x"].default
+
+    still_graph = build_render_graph(
+        composition,
+        825,
+        render_quality="preview",
+        runtime_inputs={"pointer": (0.0, 0.0)},
+    )
+    moved_graph = build_render_graph(
+        composition,
+        825,
+        render_quality="preview",
+        runtime_inputs={"pointer": (1.0, -1.0)},
+    )
+
+    assert still_graph.nodes[-1].glass_driver_override == (1.5, 0.0)
+    assert moved_graph.nodes[-1].glass_driver_override == (3.5, -2.0)
+    assert render_graph_image(still_graph) != render_graph_image(moved_graph)
+    assert composition.revision == revision
+    assert effect.params["driver_x"].default == default_x
+
+
+def test_preview_pointer_driver_uses_composition_viewport_coordinates() -> None:
+    _app()
+    preview = MotionPreviewWidget()
+    preview.resize(400, 200)
+    preview.set_composition(_composition())
+    preview.mouseMoveEvent(
+        QMouseEvent(
+            QEvent.Type.MouseMove,
+            QPointF(378.0, 100.0),
+            QPointF(378.0, 100.0),
+            QPointF(378.0, 100.0),
+            Qt.MouseButton.NoButton,
+            Qt.MouseButton.NoButton,
+            Qt.KeyboardModifier.NoModifier,
+        )
+    )
+    pointer = preview.runtime_glass_inputs()["pointer"]
+    assert pointer[0] == pytest.approx(1.0, abs=0.02)
+    assert pointer[1] == pytest.approx(0.0, abs=0.02)
+    preview.deleteLater()

@@ -1,6 +1,7 @@
 """Shared painter render graph for GPU preview and file export."""
 from __future__ import annotations
 
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 import math
 from typing import Any
@@ -25,6 +26,7 @@ from .puppet_mesh import layer_puppet_mesh
 from .typography_gpu import TypographyGpuPacket, build_typography_gpu_packet
 from .vector_gpu import VectorGpuPacket, build_vector_gpu_packet
 from .glass_material import glass_effect
+from .glass_runtime import resolve_glass_driver
 
 
 @dataclass(slots=True)
@@ -66,6 +68,7 @@ class RenderNode:
     shadow_light_intensity: float = 0.0
     adjustment_scope_mode: str = "all_below"
     adjustment_target_layer_ids: tuple[str, ...] = ()
+    glass_driver_override: tuple[float, float] | None = None
 
 
 @dataclass(slots=True)
@@ -102,6 +105,7 @@ def _render_raster_source(
     include_vector_gpu: bool,
     render_quality: str,
     output_size: tuple[int, int] | None,
+    runtime_inputs: Mapping[str, tuple[float, float]] | None,
     composition_stack: tuple[str, ...],
 ) -> tuple[QImage | None, int, int]:
     if render_layer.layer_type != "precomp":
@@ -130,6 +134,7 @@ def _render_raster_source(
         include_vector_gpu=include_vector_gpu,
         render_quality=render_quality,
         output_size=(child.width, child.height),
+        runtime_inputs=runtime_inputs,
         _composition_stack=(*composition_stack, composition.id),
     )
     return render_graph_image(child_graph), 1, 0
@@ -142,6 +147,7 @@ def build_render_graph(
     include_vector_gpu: bool = False,
     render_quality: str = "preview",
     output_size: tuple[int, int] | None = None,
+    runtime_inputs: Mapping[str, tuple[float, float]] | None = None,
     _composition_stack: tuple[str, ...] = (),
 ) -> RenderGraph:
     states = {state.id: state for state in evaluate_composition(composition, time_ms)}
@@ -189,7 +195,8 @@ def build_render_graph(
         frame_mix_enabled = frame_blending["effective_mode"] == "frame_mix"
         if frame_blending["requested_mode"] == "optical_flow":
             optical_flow_fallback_count += 1
-        has_glass = glass_effect(render_layer.effects) is not None
+        active_glass_effect = glass_effect(render_layer.effects)
+        has_glass = active_glass_effect is not None
         if (
             include_vector_gpu
             and render_layer.layer_type == "shape"
@@ -265,6 +272,7 @@ def build_render_graph(
                     include_vector_gpu=include_vector_gpu,
                     render_quality=render_quality,
                     output_size=output_size,
+                    runtime_inputs=runtime_inputs,
                     composition_stack=_composition_stack,
                 )
                 right, right_nested, right_cycles = _render_raster_source(
@@ -275,6 +283,7 @@ def build_render_graph(
                     include_vector_gpu=include_vector_gpu,
                     render_quality=render_quality,
                     output_size=output_size,
+                    runtime_inputs=runtime_inputs,
                     composition_stack=_composition_stack,
                 )
                 nested_composition_count += left_nested + right_nested
@@ -293,6 +302,7 @@ def build_render_graph(
                     include_vector_gpu=include_vector_gpu,
                     render_quality=render_quality,
                     output_size=output_size,
+                    runtime_inputs=runtime_inputs,
                     composition_stack=_composition_stack,
                 )
                 nested_composition_count += nested_count
@@ -393,6 +403,15 @@ def build_render_graph(
             shadow_light_intensity=float(shadow_light.get("intensity", 0.0)),
             adjustment_scope_mode=scope["mode"],
             adjustment_target_layer_ids=tuple(scope["layer_ids"]),
+            glass_driver_override=(
+                resolve_glass_driver(
+                    active_glass_effect,
+                    runtime_inputs,
+                    time_ms=state.local_time_ms,
+                )
+                if active_glass_effect is not None
+                else None
+            ),
         ))
     effect_groups = [
         EffectGroupApplication(
@@ -731,6 +750,7 @@ def render_graph_image(graph: RenderGraph) -> QImage:
                 layer_surface,
                 glass,
                 node.local_time_ms,
+                driver_override=node.glass_driver_override,
             )
         if matte_node is not None:
             matte = surface(matte_node)

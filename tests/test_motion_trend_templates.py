@@ -97,6 +97,12 @@ def test_trend_styles_use_real_feature_contracts_and_umg_never_silently_omits():
 
     glass = instantiate_template("liquid_glass_app_promo")
     assert sum(effect.kind == "tiger_glass" for layer in glass.layers for effect in layer.effects) == 3
+    assert all(
+        effect.metadata.get("driver", {}).get("source") == "pointer"
+        for layer in glass.layers
+        for effect in layer.effects
+        if effect.kind == "tiger_glass"
+    )
 
     stop = instantiate_template("clay_stop_motion_mascot")
     assert any("stop_motion" in layer.metadata for layer in stop.layers)

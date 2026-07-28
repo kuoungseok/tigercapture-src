@@ -334,7 +334,14 @@ def build_trend_template_layers(
             )
         )
         if spec["style"] == "glass":
-            media.effects.append(make_glass_effect(preset="liquid_cta" if index == len(scenes) - 1 else "frosted"))
+            glass = make_glass_effect(
+                preset="liquid_cta" if index == len(scenes) - 1 else "frosted",
+            )
+            glass.metadata["driver"] = {
+                "source": "pointer",
+                "strength": 1.15 if index < len(scenes) - 1 else 1.5,
+            }
+            media.effects.append(glass)
         elif spec["style"] in {"craft", "collage", "vhs", "stop_motion"}:
             preset = {
                 "craft": "luxury_paper",

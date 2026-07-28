@@ -206,8 +206,7 @@ Glass material을 구현한다.
 - Unreal UMG는 현재 복합 Glass를
   `effect_requires_bake:tiger_glass`로 명시한다.
 - 남은 M22 범위는 GPU backdrop shader 또는 viewport-resolution preview,
-  실시간 pointer/scroll driver feed, HDR QA, UI Material native 후보 변환,
-  결정적 tiled export 증거다.
+  HDR QA, UI Material native 후보 변환, 결정적 tiled export 증거다.
 
 렌더 구조:
 
@@ -246,6 +245,19 @@ UMG:
 - 이동 중 refraction과 specular 반응
 - 투명 배경, 중첩 glass, HDR source 회귀
 - 1080p Preview 목표 프레임 시간과 Final export parity 기록
+
+### 2026-07-29 상호작용 Glass 드라이버 갱신
+
+- Preview 전용 pointer, pointer velocity, wheel scroll 입력을 문서를
+  변경하지 않고 shared Glass render graph에 전달한다. 포인터 좌표는 실제
+  컴포지션 표시 영역 기준이며 velocity와 scroll은 자연스럽게 감쇠한다.
+  Export에는 이 일시 입력을 전달하지 않으므로 결과는 결정적이다.
+  Liquid Glass App Promo의 Glass 3개는 기본적으로 pointer에 반응한다.
+- `tools/qa_motion_glass.py`는 `tiger_glass_pointer_driver.png`를 생성하고
+  1920x1080에서 중앙과 우하단 포인터가 서로 다른 픽셀을 렌더링했는지
+  보고한다.
+- 남은 M22 차단 항목은 non-raster GPU backdrop 경로, 24fps 제품 기준,
+  HDR/tiled-export 증거, UMG UI Material native 또는 bake 최종 결정이다.
 
 ## 7. M23 - Mixed Media Craft Workspace
 

@@ -17,6 +17,7 @@ if str(ROOT) not in sys.path:
 
 from app.motion_designer.export_renderer import MotionExportRenderer
 from app.motion_designer.glass_material import GLASS_PRESETS, make_glass_effect
+from app.motion_designer.render_graph import build_render_graph, render_graph_image
 from app.motion_designer.schema import MotionComposition, MotionLayer, SourceRef
 
 
@@ -106,12 +107,48 @@ def run(output_dir: Path) -> dict:
     painter.end()
     sheet_path = output_dir / "tiger_glass_contact_sheet.png"
     sheet.save(str(sheet_path), "PNG")
+
+    interactive = _composition("liquid_cta")
+    interactive_effect = interactive.layers[-1].effects[0]
+    interactive_effect.metadata["driver"] = {
+        "source": "pointer",
+        "strength": 1.5,
+    }
+    center = render_graph_image(build_render_graph(
+        interactive,
+        750.0,
+        render_quality="preview",
+        runtime_inputs={"pointer": (0.0, 0.0)},
+    ))
+    lower_right = render_graph_image(build_render_graph(
+        interactive,
+        750.0,
+        render_quality="preview",
+        runtime_inputs={"pointer": (1.0, 1.0)},
+    ))
+    driver_sheet = QImage(960, 270, QImage.Format_RGBA8888)
+    driver_sheet.fill(QColor("#101319"))
+    driver_painter = QPainter(driver_sheet)
+    driver_painter.drawImage(QRect(0, 0, 480, 270), center.scaled(480, 270))
+    driver_painter.drawImage(
+        QRect(480, 0, 480, 270),
+        lower_right.scaled(480, 270),
+    )
+    driver_painter.end()
+    driver_path = output_dir / "tiger_glass_pointer_driver.png"
+    driver_sheet.save(str(driver_path), "PNG")
     report = {
         "ok": True,
         "contract": "tigerstudio.motion.glass.v1",
         "resolution": [1920, 1080],
         "quality": "preview",
         "contact_sheet": str(sheet_path),
+        "interactive_driver": {
+            "source": "pointer",
+            "strength": 1.5,
+            "center_and_lower_right_differ": center != lower_right,
+            "comparison": str(driver_path),
+        },
         "rows": rows,
     }
     (output_dir / "tiger_glass_report.json").write_text(

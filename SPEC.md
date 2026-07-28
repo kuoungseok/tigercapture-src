@@ -6597,9 +6597,9 @@ AI Script Edit MVP integration:
   through `motion.material.glass.*` actions. Glass vector nodes explicitly
   report `backdrop_glass_requires_raster`; the shared raster result has
   Preview/Export pixel parity. Complex Glass remains a deterministic UMG bake
-  candidate and reports `effect_requires_bake:tiger_glass`. Multi-resolution
-  blur, live pointer/scroll feeds, nested/HDR/1080p evidence, native UI
-  Material conversion, and tiled-export proof remain M22 work. Draft/Preview
+  candidate and reports `effect_requires_bake:tiger_glass`. The non-raster GPU
+  backdrop path, HDR/tiled-export evidence, and the native-versus-bake UI
+  Material decision remain M22 work. Draft/Preview
   blur now uses a multi-resolution pyramid and glass-mask ROI. The real 1080p
   QA tool records 138-172 ms/frame on the current shared CPU fallback after
   ROI optimization, down from 278-374 ms/frame. This is an accuracy baseline,
@@ -6805,6 +6805,16 @@ AI Script Edit MVP integration:
   A real visible five-second Liquid Glass workspace probe reaches 7.16 fps,
   versus the earlier 3.63 fps source baseline. This is a material CPU fallback
   improvement, not completion: the 24 fps and non-raster GPU gates still fail.
+- Tiger Glass drivers now consume real Preview-only pointer, pointer-velocity,
+  and wheel-scroll vectors. Pointer coordinates are normalized against the
+  visible composition viewport; velocity and scroll decay without changing the
+  document, revision, or `.tgmotion` payload. The runtime vector is added to
+  the animated static driver and clamped before the shared render graph passes
+  it to the Glass renderer. Export remains deterministic because it supplies
+  no ephemeral runtime input. Liquid Glass App Promo binds its three managed
+  Glass surfaces to pointer input by default. The 1080p Glass QA records and
+  saves a center-versus-lower-right driver comparison with distinct rendered
+  pixels.
 - M13 character-rigging foundation is complete. Motion compositions persist
   provider-neutral `tigerstudio.motion.rig.v1` cutout rigs with stable rig and
   bone IDs, a validated parent hierarchy, rest positions, animated rotation

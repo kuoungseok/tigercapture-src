@@ -1,9 +1,18 @@
 """Persistent OpenGL presenter for the shared Motion Designer render graph."""
 from __future__ import annotations
 
+import time
+
 import numpy as np
-from PySide6.QtCore import QRectF, Qt
-from PySide6.QtGui import QColor, QImage, QPainter, QSurfaceFormat
+from PySide6.QtCore import QRectF, QTimer, Qt
+from PySide6.QtGui import (
+    QColor,
+    QImage,
+    QMouseEvent,
+    QPainter,
+    QSurfaceFormat,
+    QWheelEvent,
+)
 from PySide6.QtOpenGLWidgets import QOpenGLWidget
 
 from .color_management import settings_from_composition_metadata
@@ -28,10 +37,18 @@ class MotionPreviewWidget(QOpenGLWidget):
         self._puppet_gpu = MotionPuppetGpuRenderer(self)
         self._last_gpu_backend = "vector"
         self._cleanup_connected = False
+        self._glass_pointer = (0.0, 0.0)
+        self._glass_velocity = (0.0, 0.0)
+        self._glass_scroll = (0.0, 0.0)
+        self._last_pointer_sample: tuple[float, float, float] | None = None
+        self._driver_decay = QTimer(self)
+        self._driver_decay.setInterval(32)
+        self._driver_decay.timeout.connect(self._decay_glass_drivers)
         surface_format = QSurfaceFormat(self.format())
         surface_format.setSamples(max(4, surface_format.samples()))
         self.setFormat(surface_format)
         self.setMinimumSize(320, 180)
+        self.setMouseTracking(True)
 
     def set_composition(self, composition: MotionComposition, time_ms: float = 0.0) -> None:
         self._composition = composition
@@ -74,6 +91,7 @@ class MotionPreviewWidget(QOpenGLWidget):
             build_render_graph(
                 composition, self._time_ms, include_vector_gpu=True,
                 render_quality="preview", output_size=(composition.width, composition.height),
+                runtime_inputs=self.runtime_glass_inputs(),
             )
             if composition is not None else None
         )
@@ -161,6 +179,71 @@ class MotionPreviewWidget(QOpenGLWidget):
                 paint_render_graph(painter, graph, target)
         painter.end()
 
+    def _composition_target(self) -> QRectF:
+        composition = self._composition
+        if composition is None or composition.width <= 0 or composition.height <= 0:
+            return QRectF()
+        scale = min(self.width() / composition.width, self.height() / composition.height)
+        width, height = composition.width * scale, composition.height * scale
+        return QRectF(
+            (self.width() - width) * 0.5,
+            (self.height() - height) * 0.5,
+            width,
+            height,
+        )
+
+    def runtime_glass_inputs(self) -> dict[str, tuple[float, float]]:
+        return {
+            "pointer": self._glass_pointer,
+            "velocity": self._glass_velocity,
+            "scroll": self._glass_scroll,
+        }
+
+    def mouseMoveEvent(self, event: QMouseEvent) -> None:
+        target = self._composition_target()
+        if not target.isEmpty():
+            point = event.position()
+            x = max(-1.0, min(
+                1.0,
+                (point.x() - target.center().x()) / max(1.0, target.width() * 0.5),
+            ))
+            y = max(-1.0, min(
+                1.0,
+                (point.y() - target.center().y()) / max(1.0, target.height() * 0.5),
+            ))
+            now = time.monotonic()
+            previous = self._last_pointer_sample
+            if previous is not None:
+                elapsed = max(1.0 / 240.0, min(0.25, now - previous[2]))
+                self._glass_velocity = (
+                    max(-1.0, min(1.0, (x - previous[0]) / elapsed / 12.0)),
+                    max(-1.0, min(1.0, (y - previous[1]) / elapsed / 12.0)),
+                )
+                self._driver_decay.start()
+            self._glass_pointer = (x, y)
+            self._last_pointer_sample = (x, y, now)
+            self.update()
+        super().mouseMoveEvent(event)
+
+    def wheelEvent(self, event: QWheelEvent) -> None:
+        delta = event.angleDelta()
+        self._glass_scroll = (
+            max(-1.0, min(1.0, self._glass_scroll[0] + delta.x() / 1200.0)),
+            max(-1.0, min(1.0, self._glass_scroll[1] + delta.y() / 1200.0)),
+        )
+        self._driver_decay.start()
+        self.update()
+        event.accept()
+
+    def _decay_glass_drivers(self) -> None:
+        self._glass_velocity = tuple(value * 0.72 for value in self._glass_velocity)
+        self._glass_scroll = tuple(value * 0.84 for value in self._glass_scroll)
+        if max((*map(abs, self._glass_velocity), *map(abs, self._glass_scroll))) < 0.005:
+            self._glass_velocity = (0.0, 0.0)
+            self._glass_scroll = (0.0, 0.0)
+            self._driver_decay.stop()
+        self.update()
+
     def diagnostics(self) -> dict[str, object]:
         context = self.context()
         if self._last_gpu_backend == "typography":
@@ -185,5 +268,6 @@ class MotionPreviewWidget(QOpenGLWidget):
             "context_valid": bool(context and context.isValid()),
             "premultiplied_alpha": True,
             "shared_render_graph": True,
+            "glass_runtime_inputs": self.runtime_glass_inputs(),
             **backend_diagnostics,
         }

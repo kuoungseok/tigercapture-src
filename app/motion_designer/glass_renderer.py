@@ -61,6 +61,8 @@ def render_glass_surface(
     mask_surface: QImage,
     effect: MotionEffectRef,
     time_ms: float,
+    *,
+    driver_override: tuple[float, float] | None = None,
 ) -> QImage:
     import cv2
     import numpy as np
@@ -133,8 +135,11 @@ def render_glass_surface(
         )
 
     normal_scale = max(0.1, _value(effect, "normal_scale", time_ms, 1.4))
-    driver_x = _value(effect, "driver_x", time_ms, 0.0)
-    driver_y = _value(effect, "driver_y", time_ms, 0.0)
+    if driver_override is None:
+        driver_x = _value(effect, "driver_x", time_ms, 0.0)
+        driver_y = _value(effect, "driver_y", time_ms, 0.0)
+    else:
+        driver_x, driver_y = map(float, driver_override)
     yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
     phase = float(time_ms) * 0.001
     wave_x = np.sin(
