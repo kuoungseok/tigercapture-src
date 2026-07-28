@@ -264,6 +264,32 @@ class PainterUINavigatorPanel(QFrame):
         self.width_changed.emit(value)
         return value
 
+    def reveal_asset(self, label: str, asset_id: str = "") -> bool:
+        target_label = str(label or "")
+        target_index = next(
+            (
+                index
+                for index in range(self.asset_tabs.count())
+                if self.asset_tabs.tabText(index) == target_label
+            ),
+            -1,
+        )
+        if target_index < 0:
+            return False
+        if self._collapsed:
+            self.set_collapsed(False, user_initiated=True)
+        self.mode_tabs.setCurrentWidget(self.assets_host)
+        self.asset_tabs.setCurrentIndex(target_index)
+        widget = self.asset_tabs.widget(target_index)
+        if target_label == "Tokens" and hasattr(widget, "select_token"):
+            widget.select_token(str(asset_id or ""))
+        elif target_label == "Components" and hasattr(
+            widget,
+            "select_component",
+        ):
+            widget.select_component(str(asset_id or ""))
+        return True
+
     def adopt_expanded_width(
         self,
         width: int,

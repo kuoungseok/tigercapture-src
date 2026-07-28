@@ -307,6 +307,25 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="the Painter UI canvas view would pan",
     )
     registry.register_adapter_action(
+        "paint.ui.quick_action.search",
+        "Search context-aware Painter UI commands, layers, pages, components, and variables.",
+        "paint",
+        "paint_ui_quick_action_search",
+        params_schema=schema_object(
+            {
+                "query": {"type": "string"},
+                "limit": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 100,
+                },
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI Quick Actions would be searched",
+    )
+    registry.register_adapter_action(
         "paint.ui.layout.diagnostics",
         "Inspect deterministic Auto Layout, constraint, grid, and safe-area conflicts.",
         "paint",

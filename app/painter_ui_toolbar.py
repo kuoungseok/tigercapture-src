@@ -35,6 +35,7 @@ class PainterUIFloatingToolbar(QFrame):
     motion_actor_requested = Signal()
     animate_requested = Signal()
     motion_preview_changed = Signal(bool)
+    quick_actions_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -167,6 +168,15 @@ class PainterUIFloatingToolbar(QFrame):
         self._zoom_indicator_timer.setSingleShot(True)
         self._zoom_indicator_timer.setInterval(900)
         self._zoom_indicator_timer.timeout.connect(self.zoom_indicator.hide)
+
+        self.quick_actions_button = self._icon_button(
+            "Quick Actions (Ctrl+/)",
+            "search",
+        )
+        self.quick_actions_button.clicked.connect(
+            self.quick_actions_requested
+        )
+        layout.addWidget(self.quick_actions_button)
 
         layout.addWidget(self._separator())
         self.motion_actor_button = self._icon_button(

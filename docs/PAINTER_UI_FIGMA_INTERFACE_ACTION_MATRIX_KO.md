@@ -25,6 +25,7 @@ Import 후 보이기만 하거나 JSON에만 남는 기능은 `Data only`이며 
 | Smart Selection spacing | Auto/H/V spacing analysis, mixed gap, explicit px Tidy Up, eligibility reason | `paint.ui.selection.tidy` |
 | Object property clipboard | Context-menu Copy/Paste Properties and Paste to Replace; stable IDs, hierarchy, position, and z-order preserved | `paint.ui.object.properties.copy/paste`, `paint.ui.object.paste_replace` |
 | Figma-style Scale | Selection-only context command; shared-pivot geometry plus typography, corner, stroke, shadow, blur, and 9-slice scaling; mixed parent spaces blocked | `paint.ui.object.scale` |
+| Quick Actions | Transient bottom-toolbar / `Ctrl+/` search over contextual commands, active-page layers, artboards, components, and variables; compact overlay does not reserve canvas space | `paint.ui.quick_action.search` plus existing focused mutation Actions |
 | Inline text | Double-click canvas editing, Escape cancel, focus-out or Ctrl/Cmd+Enter commit, one-step Undo | `paint.ui.text.content.set` |
 | Constraints and Auto Layout | Inspector constraints, Horizontal/Vertical flow, padding/gap/wrap/Hug/Fill, non-destructive content stress preview | `paint.ui.layout.set`, `paint.ui.layout.diagnostics`, `paint.ui.layout.stress_preview`, `paint.ui.responsive.override.*` |
 | Artboard layout grids | Uniform/Columns/Rows, ordered simultaneous definitions, Stretch/Center alignment | `paint.ui.artboard.layout.set` |

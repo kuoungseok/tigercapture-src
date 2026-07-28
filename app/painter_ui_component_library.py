@@ -143,6 +143,11 @@ class PainterUIComponentLibrary(QWidget):
         self._document = normalize_ui_document(value)
         self._rebuild(selected_component_id)
 
+    def select_component(self, component_id: str) -> bool:
+        target = str(component_id or "")
+        self._rebuild(target)
+        return self._selected_component_id() == target
+
     def _selected_component_id(self) -> str:
         item = self.tree.currentItem()
         return (

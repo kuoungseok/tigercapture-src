@@ -410,6 +410,24 @@ Implemented checkpoint (2026-07-29, Figma-style Scale slice):
   `app/painter_ui_object_scale.py`, constraint-aware batch mutation, and one
   `Scale UI objects` Undo step.
 
+Implemented checkpoint (2026-07-29, Quick Actions slice):
+
+- The bottom floating toolbar exposes one search icon and `Ctrl+/` opens the
+  same transient canvas overlay; no fixed command panel reduces canvas width.
+- One ranked search combines contextual commands, active-artboard layers,
+  pages/artboards, component assets, and design-token variables.
+- Selection-only commands remain visible but disabled when invalid, making the
+  current context explicit without allowing partial mutations.
+- Layer and page results navigate directly, component results insert through
+  the existing stable-ID component service, and token results reveal the
+  existing Assets library rather than duplicating another token UI.
+- Static labels and search terms use Painter localization. Desktop and compact
+  overlays clamp to canvas bounds, elide long rows, and avoid horizontal
+  scrolling.
+- UI search and `paint.ui.quick_action.search` share
+  `app/painter_ui_quick_actions.py`; mutating results call their existing
+  focused services and retain their established Undo contracts.
+
 Exit criteria:
 
 - Common object editing is possible without repeatedly moving to Inspector.

@@ -1073,6 +1073,52 @@ def main() -> int:
         and float(scale_target_after["width"]) > scale_width_before
         and float(scale_target_undone["width"]) == scale_width_before
     )
+    quick_action_query = str(property_target_before.get("name") or "")
+    quick_action_search_result = registry.execute(
+        "paint.ui.quick_action.search",
+        {"query": quick_action_query, "limit": 10},
+    ).to_dict()
+    quick_actions = dialog._painter_ui_quick_actions
+    quick_actions.open_for_document(
+        dialog._painter_ui_document,
+        query=quick_action_query,
+    )
+    app.processEvents()
+    quick_action_screenshot_path = (
+        output_dir / "painter_ui_designer_m1_quick_actions.png"
+    )
+    dialog.grab().save(str(quick_action_screenshot_path), "PNG")
+    quick_action_desktop_ok = bool(
+        quick_action_search_result.get("ok") is True
+        and quick_action_search_result["result"]["result_count"] >= 1
+        and quick_actions.isVisible()
+        and quick_actions.result_list.count() >= 1
+        and quick_actions.geometry().left() >= 0
+        and quick_actions.geometry().right()
+        <= dialog._canvas_host.width()
+    )
+    quick_actions.hide()
+    dialog.resize(900, 650)
+    app.processEvents()
+    dialog._sync_ui_design_toolbar_density()
+    quick_actions.open_for_document(dialog._painter_ui_document)
+    app.processEvents()
+    quick_action_compact_screenshot_path = (
+        output_dir / "painter_ui_designer_m1_quick_actions_compact.png"
+    )
+    dialog.grab().save(str(quick_action_compact_screenshot_path), "PNG")
+    quick_action_compact_ok = bool(
+        quick_actions.isVisible()
+        and quick_actions.geometry().left() >= 0
+        and quick_actions.geometry().right()
+        <= dialog._canvas_host.width()
+        and quick_actions.geometry().top() >= 0
+        and quick_actions.geometry().bottom()
+        <= dialog._canvas_host.height()
+    )
+    quick_actions.hide()
+    dialog.resize(1360, 900)
+    app.processEvents()
     state = dialog.painter_action_state()
     group_row = next(
         (
@@ -1137,6 +1183,8 @@ def main() -> int:
             and quick_properties_screenshot_path.is_file()
             and zoom_popover_screenshot_path.is_file()
             and compact_screenshot_path.is_file()
+            and quick_action_screenshot_path.is_file()
+            and quick_action_compact_screenshot_path.is_file()
             and detached_round_trip
             and flexible_workspace_ok
             and auto_layout_ok
@@ -1151,6 +1199,8 @@ def main() -> int:
             and grid_style_ok
             and property_clipboard_ok
             and object_scale_ok
+            and quick_action_desktop_ok
+            and quick_action_compact_ok
             and text_context_ok
             and inline_text_ok
             and image_context_ok
@@ -1210,6 +1260,10 @@ def main() -> int:
         ),
         "zoom_popover_screenshot": str(zoom_popover_screenshot_path),
         "compact_zoom_screenshot": str(compact_screenshot_path),
+        "quick_actions_screenshot": str(quick_action_screenshot_path),
+        "quick_actions_compact_screenshot": str(
+            quick_action_compact_screenshot_path
+        ),
         "navigator_width": navigator.expanded_width(),
         "inspector_width": dialog._paint_inspector_expanded_width,
         "inspector_detached_round_trip": detached_round_trip,
@@ -1226,6 +1280,8 @@ def main() -> int:
         "layout_grid_style_ok": grid_style_ok,
         "property_clipboard_ok": property_clipboard_ok,
         "object_scale_ok": object_scale_ok,
+        "quick_actions_ok": quick_action_desktop_ok,
+        "quick_actions_compact_ok": quick_action_compact_ok,
         "quick_properties_ok": quick_properties_ok,
         "zoom_popover_ok": zoom_popover_ok,
         "compact_zoom_ok": compact_zoom_ok,

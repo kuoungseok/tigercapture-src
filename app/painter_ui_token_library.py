@@ -216,6 +216,11 @@ class PainterUITokenLibrary(QWidget):
         self._document = normalize_ui_document(value)
         self._rebuild(selected_token_id)
 
+    def select_token(self, token_id: str) -> bool:
+        target = str(token_id or "")
+        self._rebuild(target)
+        return self._selected_token_id() == target
+
     def _selected_token_id(self) -> str:
         item = self.tree.currentItem()
         return (

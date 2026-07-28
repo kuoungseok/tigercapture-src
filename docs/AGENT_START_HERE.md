@@ -173,6 +173,10 @@ Focused entry points:
   `app/painter_ui_object_scale.py` owns Figma-style selection scaling. Keep its
   UI contextual rather than adding a fixed panel, scale visual metrics with
   bounds, and reject selections spanning different parent coordinate spaces.
+  `app/painter_ui_quick_actions.py` is the canonical contextual command and
+  document-asset search catalog. The Painter UI opens it only as a transient
+  `Ctrl+/` / bottom-toolbar popover; mutating results must continue to call
+  existing focused services instead of growing a parallel mutation layer.
 
 If two areas overlap, keep the product boundary from the focused docs. Do not
 merge UI renewal, review automation, and VTuber sidecar setup into one unbounded

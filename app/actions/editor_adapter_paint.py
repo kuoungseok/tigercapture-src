@@ -586,6 +586,23 @@ class PaintAdapterMixin(
         state["ui_view"] = view
         return state
 
+    def paint_ui_quick_action_search(
+        self,
+        *,
+        query: str = "",
+        limit: int = 30,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_quick_actions import (
+            search_painter_ui_quick_actions,
+        )
+
+        return search_painter_ui_quick_actions(
+            dialog._painter_ui_document,
+            query,
+            limit=limit,
+        )
+
     def paint_ui_layout_diagnostics(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         from app.painter_ui_layout_diagnostics import diagnose_ui_layout

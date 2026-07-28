@@ -9614,6 +9614,9 @@ class PaintDialog(QDialog):
         self._ui_design_tool_host.motion_preview_changed.connect(
             self._set_painter_ui_motion_preview
         )
+        self._ui_design_tool_host.quick_actions_requested.connect(
+            self._toggle_painter_ui_quick_actions
+        )
         self._ui_design_tool_buttons = (
             self._ui_design_tool_host.tool_buttons
         )
@@ -9631,6 +9634,20 @@ class PaintDialog(QDialog):
             self._ui_design_tool_host.motion_preview_button
         )
         self._ui_design_tool_host.hide()
+        from app.painter_ui_quick_action_popover import (
+            PainterUIQuickActionPopover,
+        )
+
+        self._painter_ui_quick_actions = PainterUIQuickActionPopover(
+            canvas_host
+        )
+        self._painter_ui_quick_actions.action_requested.connect(
+            self._execute_painter_ui_quick_action
+        )
+        self._register_painter_tool_shortcut(
+            "Ctrl+/",
+            self._toggle_painter_ui_quick_actions,
+        )
         from app.painter_ui_workspace import PainterUIDesignOverlay
 
         self._painter_ui_overlay = PainterUIDesignOverlay(canvas_host)
@@ -12818,6 +12835,13 @@ class PaintDialog(QDialog):
             self._dock_painter_ui_inspector()
         if not ui_design:
             self._hide_painter_ui_quick_properties()
+            quick_actions = getattr(
+                self,
+                "_painter_ui_quick_actions",
+                None,
+            )
+            if quick_actions is not None:
+                quick_actions.hide()
         if ui_inspector is not None:
             ui_inspector.setVisible(ui_design)
         inspector_frame = getattr(self, "_paint_inspector_frame", None)
@@ -13612,6 +13636,121 @@ class PaintDialog(QDialog):
             toolbar.set_zoom_percent(
                 float(payload.get("zoom_percent") or 100.0),
                 transient=True,
+            )
+
+    def _toggle_painter_ui_quick_actions(self) -> None:
+        if str(getattr(self, "_canvas_workspace_mode", "")) != "ui_design":
+            return
+        popover = getattr(self, "_painter_ui_quick_actions", None)
+        if popover is None:
+            return
+        popover.toggle_for_document(
+            getattr(self, "_painter_ui_document", {}) or {}
+        )
+
+    def _delete_painter_ui_selection(self) -> None:
+        from app.painter_ui_document import remove_ui_object
+
+        current = getattr(self, "_painter_ui_document", {}) or {}
+        selected_ids = list(
+            (current.get("selection") or {}).get("object_ids") or []
+        )
+        if not selected_ids:
+            return
+        selected = set(selected_ids)
+        rows = {
+            str(row["id"]): row
+            for row in current.get("objects", [])
+        }
+        roots: list[str] = []
+        for object_id in selected_ids:
+            parent_id = str((rows.get(object_id) or {}).get("parent_id") or "")
+            seen: set[str] = set()
+            while parent_id and parent_id not in seen:
+                seen.add(parent_id)
+                if parent_id in selected:
+                    break
+                parent_id = str(
+                    (rows.get(parent_id) or {}).get("parent_id") or ""
+                )
+            else:
+                roots.append(object_id)
+        if not roots:
+            return
+        self._push_undo_state("Delete UI selection")
+        updated = current
+        for object_id in roots:
+            if any(
+                row["id"] == object_id
+                for row in updated.get("objects", [])
+            ):
+                updated, _report = remove_ui_object(updated, object_id)
+        self._painter_ui_document = updated
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _reveal_painter_ui_token(self, token_id: str) -> None:
+        navigator = getattr(self, "_painter_ui_navigator", None)
+        if navigator is None:
+            return
+        navigator.reveal_asset("Tokens", str(token_id))
+
+    def _execute_painter_ui_quick_action(self, payload: object) -> None:
+        row = dict(payload) if isinstance(payload, dict) else {}
+        operation = dict(row.get("operation") or {})
+        operation_type = str(operation.get("type") or "")
+        current = getattr(self, "_painter_ui_document", {}) or {}
+        selection = current.get("selection") or {}
+        selected_ids = list(selection.get("object_ids") or [])
+        primary_id = str(selection.get("object_id") or "")
+        if operation_type == "tool":
+            self._set_painter_ui_tool(str(operation.get("tool") or "select"))
+        elif operation_type == "create":
+            self._add_default_painter_ui_object(
+                str(operation.get("kind") or "rectangle")
+            )
+        elif operation_type == "fit":
+            self._fit_painter_ui_view(str(operation.get("mode") or "all"))
+        elif operation_type == "scale_selection":
+            self._scale_painter_ui_selection()
+        elif operation_type == "duplicate_selection":
+            self._duplicate_painter_ui_object(primary_id)
+        elif operation_type == "delete_selection":
+            self._delete_painter_ui_selection()
+        elif operation_type == "group_selection":
+            self._group_painter_ui_objects(selected_ids)
+        elif operation_type == "ungroup_selection":
+            self._ungroup_painter_ui_object(primary_id)
+        elif operation_type == "animate_selection":
+            self._animate_selected_painter_ui_object()
+        elif operation_type == "select_object":
+            object_id = str(operation.get("object_id") or "")
+            self._set_painter_ui_selection([object_id], object_id)
+        elif operation_type == "activate_artboard":
+            self._set_painter_ui_artboard(
+                str(operation.get("artboard_id") or "")
+            )
+        elif operation_type == "instantiate_component":
+            component_id = str(operation.get("component_id") or "")
+            artboard_id = str(current.get("active_artboard_id") or "")
+            artboard = next(
+                (
+                    item
+                    for item in current.get("artboards", [])
+                    if item["id"] == artboard_id
+                ),
+                None,
+            )
+            if component_id and artboard is not None:
+                self._instantiate_painter_ui_component(
+                    component_id,
+                    artboard_id,
+                    float(artboard["width"]) * 0.5,
+                    float(artboard["height"]) * 0.5,
+                )
+        elif operation_type == "reveal_token":
+            self._reveal_painter_ui_token(
+                str(operation.get("token_id") or "")
             )
 
     @staticmethod
@@ -15035,6 +15174,11 @@ class PaintDialog(QDialog):
         if navigator is not None:
             navigator.set_document(
                 getattr(self, "_painter_ui_document", None)
+            )
+        quick_actions = getattr(self, "_painter_ui_quick_actions", None)
+        if quick_actions is not None:
+            quick_actions.set_document(
+                getattr(self, "_painter_ui_document", None) or {}
             )
         breadcrumb = getattr(
             self,
@@ -23167,6 +23311,9 @@ class PaintDialog(QDialog):
         if toolbar is not None and hasattr(toolbar, "sync_density"):
             toolbar.sync_density(int(host.width()))
             toolbar.place_in_parent()
+        quick_actions = getattr(self, "_painter_ui_quick_actions", None)
+        if quick_actions is not None and quick_actions.isVisible():
+            quick_actions._place()
         breadcrumb = getattr(
             self,
             "_painter_ui_selection_breadcrumb",
