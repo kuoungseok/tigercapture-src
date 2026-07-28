@@ -346,6 +346,19 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Value or JSON", "값 또는 JSON", "値またはJSON", "值或 JSON", "Valeur ou JSON", "Wert oder JSON"),
     ("Bind", "연결", "バインド", "绑定", "Lier", "Binden"),
     ("Unbind", "연결 해제", "バインド解除", "解除绑定", "Délier", "Lösen"),
+    ("Assets", "에셋", "アセット", "资源", "Ressources", "Assets"),
+    ("Design", "디자인", "デザイン", "设计", "Design", "Design"),
+    ("Prototype", "프로토타입", "プロトタイプ", "原型", "Prototype", "Prototyp"),
+    ("Document", "문서", "ドキュメント", "文档", "Document", "Dokument"),
+    ("PAGES", "페이지", "ページ", "页面", "PAGES", "SEITEN"),
+    (
+        "Search pages and layers",
+        "페이지와 레이어 검색",
+        "ページとレイヤーを検索",
+        "搜索页面和图层",
+        "Rechercher pages et calques",
+        "Seiten und Ebenen suchen",
+    ),
 )
 
 _TABLE = {

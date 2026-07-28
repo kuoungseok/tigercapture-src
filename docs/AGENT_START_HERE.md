@@ -85,6 +85,13 @@ Focused entry points:
   exports a Figma development-plugin bundle; it must never claim native `.fig`
   compatibility. Tokens are ephemeral or read from `FIGMA_ACCESS_TOKEN`, and
   imported images belong under durable `~/TigerStudio/PainterFigmaAssets`.
+  The Figma-class interaction shell and its current implementation status are
+  tracked in `docs/PAINTER_UI_FIGMA_INTERFACE_SPEC_KO.md` and
+  `docs/PAINTER_UI_FIGMA_UX_MILESTONES_2026_KO.md`. As of 2026-07-28 the first
+  M0 slice has a bottom floating toolbar, left Layers/Assets navigation, right
+  Design/Prototype/Inspect modes, and collapsible compact panels. Do not mark
+  M0 complete until grouped flyouts, rulers/guides, contextual Inspector
+  disclosure, and persisted panel state are implemented and verified.
 
 If two areas overlap, keep the product boundary from the focused docs. Do not
 merge UI renewal, review automation, and VTuber sidecar setup into one unbounded

@@ -212,7 +212,7 @@ def main() -> int:
     output_dir.mkdir(parents=True, exist_ok=True)
     screenshot_path = output_dir / "painter_ui_designer_m1.png"
     dialog.grab().save(str(screenshot_path), "PNG")
-    select_inspector_tab("Inspect")
+    select_inspector_tab("Design")
     app.processEvents()
     inspect_screenshot_path = output_dir / "painter_ui_designer_m1_inspect.png"
     dialog.grab().save(str(inspect_screenshot_path), "PNG")
@@ -224,7 +224,7 @@ def main() -> int:
             "primary_object_id": desktop_object_ids[-1],
         },
     )
-    select_inspector_tab("Inspect")
+    select_inspector_tab("Design")
     app.processEvents()
     desktop_screenshot_path = output_dir / "painter_ui_designer_m1_desktop.png"
     dialog.grab().save(str(desktop_screenshot_path), "PNG")

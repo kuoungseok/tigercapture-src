@@ -237,7 +237,50 @@ QWidget#PaintCanvasModeBar {
 }
 
 QWidget#PaintUIDesignToolHost {
+    background-color: #171c23;
+    border: 1px solid #3a4553;
+    border-radius: 7px;
+}
+
+QPushButton#PainterUIFloatingToolButton {
+    background-color: transparent;
+    color: #dce5f0;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    padding: 0;
+}
+
+QPushButton#PainterUIFloatingToolButton:hover {
+    background-color: #29323e;
+    border-color: #3f4c5d;
+}
+
+QPushButton#PainterUIFloatingToolButton:checked {
+    background-color: #315f9b;
+    border-color: #6b9ddd;
+}
+
+QFrame#PainterUIToolbarSeparator {
+    background-color: #3a4350;
+    border: none;
+    margin: 2px 3px;
+}
+
+QPushButton#PainterUIPanelCollapse {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    padding: 0;
+}
+
+QPushButton#PainterUIPanelCollapse:hover {
+    background-color: #2b333e;
+    border-color: #414d5c;
+}
+
+QFrame#PainterUIInspectorTitleBar {
     background-color: #20242a;
+    border: none;
     border-bottom: 1px solid #303741;
 }
 
@@ -595,10 +638,9 @@ QTabWidget#PainterUIInspectorTabs QTabBar::tab {
     border: none;
     border-right: 1px solid #2b333f;
     border-bottom: 1px solid #29313c;
-    min-width: 36px;
-    max-width: 48px;
+    min-width: 74px;
     min-height: 26px;
-    padding: 2px 4px;
+    padding: 2px 8px;
 }
 
 QTabWidget#PainterUIInspectorTabs QTabBar::tab:hover {
@@ -655,6 +697,29 @@ QFrame#PainterUINavigatorHeader {
     background-color: #20242a;
     border: none;
     border-bottom: 1px solid #303741;
+}
+
+QTabWidget#PainterUINavigatorTabs::pane,
+QTabWidget#PainterUIAssetTabs::pane {
+    background-color: #1e2228;
+    border: none;
+    border-top: 1px solid #303741;
+}
+
+QTabWidget#PainterUINavigatorTabs QTabBar::tab,
+QTabWidget#PainterUIAssetTabs QTabBar::tab {
+    background-color: #1e2228;
+    color: #98a4b3;
+    border: none;
+    border-bottom: 2px solid transparent;
+    min-height: 25px;
+    padding: 2px 6px;
+}
+
+QTabWidget#PainterUINavigatorTabs QTabBar::tab:selected,
+QTabWidget#PainterUIAssetTabs QTabBar::tab:selected {
+    color: #f0f4f9;
+    border-bottom-color: #6d91bd;
 }
 
 QLabel#PainterUINavigatorTitle {
@@ -9296,123 +9361,6 @@ class PaintDialog(QDialog):
         canvas_bar.addWidget(self._canvas_mode_paint_btn)
         canvas_bar.addWidget(self._canvas_mode_ui_btn)
         canvas_bar.addWidget(self._canvas_mode_3d_btn)
-        self._ui_design_tool_host = QWidget(canvas_frame)
-        self._ui_design_tool_host.setObjectName("PaintUIDesignToolHost")
-        self._ui_design_tool_host.setFixedHeight(28)
-        ui_tool_bar = QHBoxLayout(self._ui_design_tool_host)
-        ui_tool_bar.setContentsMargins(4, 2, 4, 2)
-        ui_tool_bar.setSpacing(1)
-        self._ui_design_tool_buttons: dict[str, QPushButton] = {}
-        for label, kind, icon_name in (
-            ("Select", "select", "cursor"),
-            ("Frame", "frame", "ui-frame"),
-            ("Rectangle", "rectangle", "rectangle"),
-            ("Ellipse", "ellipse", "ellipse"),
-            ("Line", "line", "line"),
-            ("Text", "text", "caption"),
-            ("Image", "image", "image"),
-            ("Button", "button", "button"),
-            ("Progress", "progress", "progress"),
-        ):
-            button = QPushButton("")
-            button.setObjectName("PaintBlockoutModeButton")
-            button.setCheckable(True)
-            button.setChecked(kind == "select")
-            button.setToolTip(
-                "Select and move UI objects"
-                if kind == "select"
-                else f"Draw {label}"
-            )
-            button.setAccessibleName(label)
-            button.setIcon(app_icon(icon_name, size=13, color="#E4E8EE"))
-            button.setIconSize(icon_size(13))
-            button.setFixedSize(28, 24)
-            button.clicked.connect(
-                lambda _checked=False, value=kind: self._set_painter_ui_tool(value)
-            )
-            ui_tool_bar.addWidget(button)
-            self._ui_design_tool_buttons[kind] = button
-        self._ui_design_snap_btn = QPushButton("")
-        self._ui_design_snap_btn.setObjectName("PaintBlockoutModeButton")
-        self._ui_design_snap_btn.setCheckable(True)
-        self._ui_design_snap_btn.setChecked(False)
-        self._ui_design_snap_btn.setToolTip("Snap position and size to an 8 px grid; rotate to 15 degrees")
-        self._ui_design_snap_btn.setAccessibleName("Snap to grid")
-        self._ui_design_snap_btn.setIcon(app_icon("grid", size=13, color="#E4E8EE"))
-        self._ui_design_snap_btn.setIconSize(icon_size(13))
-        self._ui_design_snap_btn.setFixedSize(28, 24)
-        self._ui_design_snap_btn.toggled.connect(self._set_painter_ui_snap)
-        ui_tool_bar.addWidget(self._ui_design_snap_btn)
-        self._ui_design_view_buttons: dict[str, QPushButton] = {}
-        for label, mode, icon_name in (
-            ("Fit all artboards", "all", "zoom-fit"),
-            ("Fit active artboard", "artboard", "fit"),
-            ("Fit selection", "selection", "ui-frame"),
-        ):
-            button = QPushButton("")
-            button.setObjectName("PaintBlockoutModeButton")
-            button.setToolTip(label)
-            button.setAccessibleName(label)
-            button.setIcon(app_icon(icon_name, size=13, color="#E4E8EE"))
-            button.setIconSize(icon_size(13))
-            button.setFixedSize(28, 24)
-            button.clicked.connect(
-                lambda _checked=False, value=mode: self._fit_painter_ui_view(value)
-            )
-            ui_tool_bar.addWidget(button)
-            self._ui_design_view_buttons[mode] = button
-        self._ui_design_motion_actor_btn = QPushButton("")
-        self._ui_design_motion_actor_btn.setObjectName("PaintBlockoutModeButton")
-        self._ui_design_motion_actor_btn.setToolTip(
-            "Import and place a .tgmotion animation actor"
-        )
-        self._ui_design_motion_actor_btn.setIcon(
-            app_icon("import", size=13, color="#E4E8EE")
-        )
-        self._ui_design_motion_actor_btn.setIconSize(icon_size(13))
-        self._ui_design_motion_actor_btn.setAccessibleName("Motion Actor")
-        self._ui_design_motion_actor_btn.setFixedSize(28, 24)
-        self._ui_design_motion_actor_btn.clicked.connect(
-            self._import_painter_ui_motion_actor
-        )
-        ui_tool_bar.addWidget(self._ui_design_motion_actor_btn)
-        self._ui_design_animate_btn = QPushButton("")
-        self._ui_design_animate_btn.setObjectName("PaintBlockoutModeButton")
-        self._ui_design_animate_btn.setToolTip(
-            "Open the selected UI object in Motion Designer"
-        )
-        self._ui_design_animate_btn.setIcon(
-            app_icon("motion", size=13, color="#E4E8EE")
-        )
-        self._ui_design_animate_btn.setIconSize(icon_size(13))
-        self._ui_design_animate_btn.setAccessibleName("Animate")
-        self._ui_design_animate_btn.setFixedSize(28, 24)
-        self._ui_design_animate_btn.clicked.connect(
-            self._animate_selected_painter_ui_object
-        )
-        ui_tool_bar.addWidget(self._ui_design_animate_btn)
-        self._ui_design_motion_preview_btn = QPushButton("")
-        self._ui_design_motion_preview_btn.setObjectName(
-            "PaintBlockoutModeButton"
-        )
-        self._ui_design_motion_preview_btn.setCheckable(True)
-        self._ui_design_motion_preview_btn.setToolTip(
-            "Play or stop the selected UI motion"
-        )
-        self._ui_design_motion_preview_btn.setAccessibleName(
-            "Play UI motion preview"
-        )
-        self._ui_design_motion_preview_btn.setIcon(
-            app_icon("play", size=13, color="#E4E8EE")
-        )
-        self._ui_design_motion_preview_btn.setIconSize(icon_size(13))
-        self._ui_design_motion_preview_btn.setFixedSize(28, 24)
-        self._ui_design_motion_preview_btn.toggled.connect(
-            self._set_painter_ui_motion_preview
-        )
-        ui_tool_bar.addWidget(self._ui_design_motion_preview_btn)
-        ui_tool_bar.addStretch(1)
-        self._ui_design_tool_host.hide()
         self._blockout_transform_buttons: dict[str, QPushButton] = {}
         self._blockout_transform_host = QWidget(canvas_mode_bar)
         self._blockout_transform_host.setObjectName("PaintBlockoutTransformHost")
@@ -9458,6 +9406,44 @@ class PaintDialog(QDialog):
         canvas_host.setMouseTracking(True)
         canvas_host.installEventFilter(self)
         self._canvas_host = canvas_host
+        from app.painter_ui_toolbar import PainterUIFloatingToolbar
+
+        self._ui_design_tool_host = PainterUIFloatingToolbar(canvas_host)
+        self._ui_design_tool_host.tool_requested.connect(
+            self._set_painter_ui_tool
+        )
+        self._ui_design_tool_host.snap_changed.connect(
+            self._set_painter_ui_snap
+        )
+        self._ui_design_tool_host.fit_requested.connect(
+            self._fit_painter_ui_view
+        )
+        self._ui_design_tool_host.motion_actor_requested.connect(
+            self._import_painter_ui_motion_actor
+        )
+        self._ui_design_tool_host.animate_requested.connect(
+            self._animate_selected_painter_ui_object
+        )
+        self._ui_design_tool_host.motion_preview_changed.connect(
+            self._set_painter_ui_motion_preview
+        )
+        self._ui_design_tool_buttons = (
+            self._ui_design_tool_host.tool_buttons
+        )
+        self._ui_design_snap_btn = self._ui_design_tool_host.snap_button
+        self._ui_design_view_buttons = (
+            self._ui_design_tool_host.view_buttons
+        )
+        self._ui_design_motion_actor_btn = (
+            self._ui_design_tool_host.motion_actor_button
+        )
+        self._ui_design_animate_btn = (
+            self._ui_design_tool_host.animate_button
+        )
+        self._ui_design_motion_preview_btn = (
+            self._ui_design_tool_host.motion_preview_button
+        )
+        self._ui_design_tool_host.hide()
         from app.painter_ui_workspace import PainterUIDesignOverlay
 
         self._painter_ui_overlay = PainterUIDesignOverlay(canvas_host)
@@ -9533,7 +9519,6 @@ class PaintDialog(QDialog):
         self.canvas.setAcceptDrops(True)
 
         canvas_layout.addWidget(canvas_mode_bar)
-        canvas_layout.addWidget(self._ui_design_tool_host)
         canvas_layout.addWidget(canvas_host, stretch=1)
         workspace.addWidget(canvas_frame, stretch=1)
 
@@ -9542,6 +9527,7 @@ class PaintDialog(QDialog):
         inspector.setMinimumWidth(320)
         inspector.setMaximumWidth(336 if self._standalone else 348)
         inspector.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+        self._paint_inspector_frame = inspector
         inspector_layout = QVBoxLayout(inspector)
         inspector_layout.setContentsMargins(0, 0, 0, 0)
         inspector_layout.setSpacing(1)
@@ -10009,6 +9995,9 @@ class PaintDialog(QDialog):
         from app.painter_ui_inspector import PainterUIInspector
 
         self._paint_ui_inspector = PainterUIInspector()
+        self._paint_ui_inspector.collapsed_changed.connect(
+            self._set_painter_ui_inspector_collapsed
+        )
         self._paint_ui_inspector.selection_changed.connect(
             self._set_painter_ui_selection
         )
@@ -10176,6 +10165,7 @@ class PaintDialog(QDialog):
         self._painter_ui_navigator = PainterUINavigatorPanel(
             self._paint_ui_inspector.take_layers_page(),
             self._paint_ui_inspector.layer_list,
+            self._paint_ui_inspector.take_asset_pages(),
         )
         self._painter_ui_navigator.artboard_selected.connect(
             self._set_painter_ui_artboard
@@ -14143,6 +14133,13 @@ class PaintDialog(QDialog):
         )
         if preview_button is not None:
             preview_button.setEnabled(bool(linked or has_motion_actors))
+        toolbar = getattr(self, "_ui_design_tool_host", None)
+        if (
+            toolbar is not None
+            and toolbar.isVisible()
+            and hasattr(toolbar, "place_in_parent")
+        ):
+            toolbar.place_in_parent()
 
     def _place_painter_ui_motion_actor(
         self,
@@ -21975,23 +21972,34 @@ class PaintDialog(QDialog):
         host = getattr(self, "_canvas_host", None)
         if host is None:
             return
-        width = int(host.width())
-        compact = width < 620
-        very_compact = width < 430
-        for name in ("ellipse", "line", "button", "progress"):
-            button = getattr(self, "_ui_design_tool_buttons", {}).get(name)
-            if button is not None:
-                button.setVisible(not compact)
-        image_button = getattr(self, "_ui_design_tool_buttons", {}).get("image")
-        if image_button is not None:
-            image_button.setVisible(not very_compact)
-        for mode in ("artboard", "selection"):
-            button = getattr(self, "_ui_design_view_buttons", {}).get(mode)
-            if button is not None:
-                button.setVisible(not compact)
-        actor_button = getattr(self, "_ui_design_motion_actor_btn", None)
-        if actor_button is not None:
-            actor_button.setVisible(not compact)
+        toolbar = getattr(self, "_ui_design_tool_host", None)
+        if toolbar is not None and hasattr(toolbar, "sync_density"):
+            toolbar.sync_density(int(host.width()))
+            toolbar.place_in_parent()
+        navigator = getattr(self, "_painter_ui_navigator", None)
+        if (
+            str(getattr(self, "_canvas_workspace_mode", "paint"))
+            == "ui_design"
+            and int(host.width()) < 360
+            and navigator is not None
+            and not bool(
+                getattr(navigator, "_collapse_user_override", False)
+            )
+            and hasattr(navigator, "set_collapsed")
+        ):
+            navigator.set_collapsed(True)
+
+    def _set_painter_ui_inspector_collapsed(self, collapsed: bool) -> None:
+        frame = getattr(self, "_paint_inspector_frame", None)
+        if frame is None:
+            return
+        if bool(collapsed):
+            frame.setMinimumWidth(36)
+            frame.setMaximumWidth(36)
+        else:
+            frame.setMinimumWidth(320)
+            frame.setMaximumWidth(336 if self._standalone else 348)
+        self._update_canvas_geometry()
 
     def _restore_3d_workspace_after_resize(
         self,
@@ -22153,6 +22161,12 @@ class PaintDialog(QDialog):
             and str(getattr(self, "_canvas_workspace_mode", "paint")) == "ui_design"
         ):
             ui_overlay.raise_()
+        ui_toolbar = getattr(self, "_ui_design_tool_host", None)
+        if (
+            ui_toolbar is not None
+            and str(getattr(self, "_canvas_workspace_mode", "paint")) == "ui_design"
+        ):
+            ui_toolbar.place_in_parent()
         # Re-lay out any speech bubble items so their normalized coords map
         # onto the current canvas rect.
         for item in getattr(self, "_bubble_items", []):

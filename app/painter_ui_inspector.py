@@ -190,20 +190,37 @@ class PainterUIInspector(QWidget):
     motion_binding_migrate_requested = Signal(str)
     motion_binding_relink_requested = Signal(str, str, str)
     motion_binding_detach_requested = Signal(str)
+    collapsed_changed = Signal(bool)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._document = normalize_ui_document(None)
         self._syncing = False
         self._appearance_style: dict[str, Any] = {}
+        self._collapsed = False
         self.setObjectName("PainterUIInspector")
 
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(4)
+        title_bar = QFrame()
+        title_bar.setObjectName("PainterUIInspectorTitleBar")
+        title_layout = QHBoxLayout(title_bar)
+        title_layout.setContentsMargins(7, 3, 5, 3)
+        title_layout.setSpacing(4)
         title = QLabel("UI DESIGN")
         title.setObjectName("PaintSectionTitle")
-        root.addWidget(title)
+        self.title_label = title
+        title_layout.addWidget(title)
+        title_layout.addStretch(1)
+        self.collapse_button = QPushButton("")
+        self.collapse_button.setObjectName("PainterUIPanelCollapse")
+        self.collapse_button.setFixedSize(22, 22)
+        self.collapse_button.clicked.connect(
+            lambda: self.set_collapsed(not self._collapsed)
+        )
+        title_layout.addWidget(self.collapse_button)
+        root.addWidget(title_bar)
         self.artboard_combo = QComboBox()
         self.artboard_combo.setToolTip("Active UI artboard")
         self.artboard_combo.currentIndexChanged.connect(self._on_artboard_changed)
@@ -419,6 +436,13 @@ class PainterUIInspector(QWidget):
         tabs.tabBar().setUsesScrollButtons(False)
         self._tabs = tabs
         root.addWidget(tabs, 1)
+        self._collapsible_widgets = (
+            artboard_bar,
+            self.artboard_settings_toggle,
+            self.artboard_layout_frame,
+            tabs,
+        )
+        self._sync_collapse_button()
 
         def add_inspector_tab(widget: QWidget, label: str, icon_name: str) -> int:
             index = tabs.addTab(
@@ -518,6 +542,7 @@ class PainterUIInspector(QWidget):
         )
 
         sections_page = QWidget()
+        self.sections_page = sections_page
         sections_layout = QVBoxLayout(sections_page)
         sections_layout.setContentsMargins(4, 4, 4, 4)
         self.section_list = QListWidget()
@@ -1279,6 +1304,63 @@ class PainterUIInspector(QWidget):
         inspect_layout.addLayout(form)
         inspect_layout.addStretch(1)
         add_inspector_tab(inspect_page, "Inspect", "settings")
+        self._configure_context_tabs(
+            design_page=inspect_page,
+            prototype_page=motion_scroll,
+            inspect_page=self.production_panel,
+        )
+
+    def _configure_context_tabs(
+        self,
+        *,
+        design_page: QWidget,
+        prototype_page: QWidget,
+        inspect_page: QWidget,
+    ) -> None:
+        ordered = (
+            (design_page, "Design"),
+            (prototype_page, "Prototype"),
+            (inspect_page, "Inspect"),
+        )
+        for widget, _label in ordered:
+            index = self._tabs.indexOf(widget)
+            if index >= 0:
+                self._tabs.removeTab(index)
+        for widget, label in ordered:
+            index = self._tabs.addTab(widget, label)
+            self._tabs.setTabToolTip(index, label)
+            self._tabs.setTabWhatsThis(index, label)
+        self._tabs.setCurrentWidget(design_page)
+
+    def set_collapsed(self, collapsed: bool) -> None:
+        value = bool(collapsed)
+        if self._collapsed == value:
+            return
+        self._collapsed = value
+        for widget in self._collapsible_widgets:
+            if widget is self.artboard_layout_frame and not value:
+                widget.setVisible(self.artboard_settings_toggle.isChecked())
+            else:
+                widget.setVisible(not value)
+        self.title_label.setVisible(not value)
+        self._sync_collapse_button()
+        self.collapsed_changed.emit(value)
+
+    def is_collapsed(self) -> bool:
+        return self._collapsed
+
+    def _sync_collapse_button(self) -> None:
+        self.collapse_button.setIcon(
+            app_icon(
+                "chevron-left" if self._collapsed else "chevron-right",
+                size=12,
+                color="#B8C4D3",
+            )
+        )
+        self.collapse_button.setIconSize(icon_size(12))
+        self.collapse_button.setToolTip(
+            "Expand properties" if self._collapsed else "Collapse properties"
+        )
 
     def take_layers_page(self) -> QWidget:
         """Detach the Layers page for the left UI Design navigator."""
@@ -1286,10 +1368,26 @@ class PainterUIInspector(QWidget):
         if index >= 0:
             self._tabs.removeTab(index)
         for tab_index in range(self._tabs.count()):
-            if self._tabs.tabWhatsThis(tab_index) == "Inspect":
+            if self._tabs.tabWhatsThis(tab_index) == "Design":
                 self._tabs.setCurrentIndex(tab_index)
                 break
         return self.layers_page
+
+    def take_asset_pages(self) -> dict[str, QWidget]:
+        """Detach reusable document assets for the left navigator."""
+        pages: dict[str, QWidget] = {}
+        for label, widget in (
+            ("Sections", getattr(self, "sections_page", None)),
+            ("Components", getattr(self, "component_library", None)),
+            ("Tokens", getattr(self, "token_library", None)),
+        ):
+            if widget is None:
+                continue
+            index = self._tabs.indexOf(widget)
+            if index >= 0:
+                self._tabs.removeTab(index)
+            pages[label] = widget
+        return pages
 
     def set_document(self, value: Mapping[str, Any] | None) -> None:
         self._document = normalize_ui_document(value)

@@ -46,6 +46,15 @@ def test_ui_navigator_lists_pages_filters_layers_and_emits_selection() -> None:
         panel.page_list.item(index).isHidden()
         for index in range(panel.page_list.count())
     )
+    assert panel.mode_tabs.count() == 2
+    assert panel.mode_tabs.tabText(0) == "Layers"
+    assert panel.mode_tabs.tabText(1) == "Assets"
+    panel.set_collapsed(True)
+    assert panel.is_collapsed()
+    assert panel.maximumWidth() == 34
+    panel.collapse_button.click()
+    assert not panel.is_collapsed()
+    assert panel.minimumWidth() == 196
     panel.deleteLater()
 
 
@@ -59,7 +68,19 @@ def test_inspector_can_move_layers_page_to_split_workspace() -> None:
     assert page is inspector.layers_page
     assert inspector._tabs.count() == 6
     assert inspector._tabs.indexOf(page) == -1
-    assert inspector._tabs.tabWhatsThis(inspector._tabs.currentIndex()) == "Inspect"
+    assert inspector._tabs.tabWhatsThis(inspector._tabs.currentIndex()) == "Design"
+    assets = inspector.take_asset_pages()
+    assert list(assets) == ["Sections", "Components", "Tokens"]
+    assert inspector._tabs.count() == 3
+    assert [
+        inspector._tabs.tabText(index)
+        for index in range(inspector._tabs.count())
+    ] == ["Design", "Prototype", "Inspect"]
+    inspector.set_collapsed(True)
+    assert inspector.is_collapsed()
+    assert inspector._tabs.isHidden()
+    inspector.collapse_button.click()
+    assert not inspector.is_collapsed()
     inspector.deleteLater()
 
 

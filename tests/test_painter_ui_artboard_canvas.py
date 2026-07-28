@@ -127,32 +127,23 @@ def test_ui_design_mode_expands_inspector_and_has_one_fit_tool_set() -> None:
     assert not dialog._painter_window_menu.menuAction().isVisible()
     tabs = dialog._paint_ui_inspector._tabs
     assert tabs.objectName() == "PainterUIInspectorTabs"
-    assert tabs.count() == 6
+    assert tabs.count() == 3
     assert tabs.tabBar().usesScrollButtons() is False
-    assert all(tabs.tabText(index) == "" for index in range(tabs.count()))
-    assert {
-        tabs.tabToolTip(index)
+    assert [
+        tabs.tabText(index)
         for index in range(tabs.count())
-    } == {
-        painter_text(label, current_language())
-        for label in (
-            "Sections",
-            "Components",
-            "Tokens",
-            "Motion",
-            "Publish",
-            "Inspect",
-        )
-    }
+    ] == ["Design", "Prototype", "Inspect"]
     assert dialog._painter_ui_navigator.isVisible()
     assert dialog._painter_ui_navigator.page_list.count() == 1
     assert (
         dialog._painter_ui_navigator._layer_list
         is dialog._paint_ui_inspector.layer_list
     )
+    assert dialog._ui_design_tool_host.parentWidget() is dialog._canvas_host
     assert (
-        dialog._ui_design_tool_host.parentWidget().objectName()
-        == "PaintCanvasFrame"
+        dialog._ui_design_tool_host.y()
+        + dialog._ui_design_tool_host.height()
+        <= dialog._canvas_host.height()
     )
     dialog._canvas_host.resize(400, 500)
     dialog._sync_ui_design_toolbar_density()
