@@ -5,6 +5,7 @@ import colorsys
 import hashlib
 import json
 import math
+import os
 import tempfile
 import time
 from datetime import datetime
@@ -9632,9 +9633,29 @@ class PaintDialog(QDialog):
 
         inspector = QFrame()
         inspector.setObjectName("PaintInspector")
-        self._paint_inspector_expanded_width = (
-            268 if self._standalone else 280
+        from app.painter_ui_panel_state import (
+            DEFAULT_PANEL_STATE,
+            load_painter_ui_panel_state,
         )
+
+        self._persist_painter_ui_panel_state = (
+            not bool(os.environ.get("PYTEST_CURRENT_TEST"))
+            and os.environ.get(
+                "TIGERSTUDIO_PAINTER_PANEL_SETTINGS",
+                "1",
+            ).strip()
+            != "0"
+        )
+        self._painter_ui_panel_state = (
+            load_painter_ui_panel_state()
+            if self._persist_painter_ui_panel_state
+            else dict(DEFAULT_PANEL_STATE)
+        )
+        self._paint_inspector_expanded_width = int(
+            self._painter_ui_panel_state["inspector_width"]
+        )
+        if not self._standalone and not self._persist_painter_ui_panel_state:
+            self._paint_inspector_expanded_width = 280
         inspector.setMinimumWidth(self._paint_inspector_expanded_width)
         inspector.setMaximumWidth(self._paint_inspector_expanded_width)
         inspector.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
@@ -10298,6 +10319,30 @@ class PaintDialog(QDialog):
         )
         self._painter_ui_navigator.artboard_selected.connect(
             self._set_painter_ui_artboard
+        )
+        self._painter_ui_navigator.restore_state(
+            int(self._painter_ui_panel_state["navigator_width"]),
+            bool(self._painter_ui_panel_state["navigator_collapsed"]),
+            user_override=bool(
+                self._painter_ui_panel_state["navigator_user_override"]
+            ),
+        )
+        self._painter_ui_navigator.width_changed.connect(
+            lambda width: self._save_painter_ui_panel_presentation(
+                navigator_width=int(width),
+                navigator_user_override=True,
+            )
+        )
+        self._painter_ui_navigator.collapsed_changed.connect(
+            lambda collapsed: self._save_painter_ui_panel_presentation(
+                navigator_collapsed=bool(collapsed),
+                navigator_user_override=(
+                    self._painter_ui_navigator.has_user_collapse_override()
+                ),
+            )
+        )
+        self._paint_ui_inspector.set_collapsed(
+            bool(self._painter_ui_panel_state["inspector_collapsed"])
         )
         self._painter_ui_navigator.hide()
         workspace.insertWidget(1, self._painter_ui_navigator)
@@ -22307,6 +22352,9 @@ class PaintDialog(QDialog):
             frame.setMaximumWidth(width)
             if handle is not None:
                 handle.show()
+        self._save_painter_ui_panel_presentation(
+            inspector_collapsed=bool(collapsed)
+        )
         self._update_canvas_geometry()
 
     def _set_painter_ui_inspector_width(
@@ -22335,8 +22383,30 @@ class PaintDialog(QDialog):
                 frame.setMaximumWidth(value)
                 frame.updateGeometry()
         if user_initiated:
+            self._save_painter_ui_panel_presentation(
+                inspector_width=value
+            )
             self._update_canvas_geometry()
         return value
+
+    def _save_painter_ui_panel_presentation(
+        self,
+        **changes: int | bool,
+    ) -> None:
+        state = dict(
+            getattr(self, "_painter_ui_panel_state", {}) or {}
+        )
+        state.update(changes)
+        self._painter_ui_panel_state = state
+        if not bool(
+            getattr(self, "_persist_painter_ui_panel_state", False)
+        ):
+            return
+        from app.painter_ui_panel_state import save_painter_ui_panel_state
+
+        self._painter_ui_panel_state = save_painter_ui_panel_state(
+            changes
+        )
 
     def _toggle_painter_ui_inspector_dock(self) -> None:
         if bool(getattr(self, "_painter_ui_inspector_detached", False)):

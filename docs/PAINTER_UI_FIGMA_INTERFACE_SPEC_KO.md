@@ -737,6 +737,9 @@ overlay mode로 전환한다.
 - The standalone right inspector starts at 268 px and can be resized from
   240-420 px. It can detach into a floating window and must re-dock
   automatically when UI Design mode is left.
+- User-adjusted navigator/inspector widths and collapsed states persist through
+  `QSettings`. Responsive auto-collapse must not overwrite an explicit user
+  preference.
 - Inspector typography and controls use compact density while preserving
   readable Korean and English labels, keyboard focus, and tooltips.
 - Shape and content creation commands are grouped under icon-first flyouts so

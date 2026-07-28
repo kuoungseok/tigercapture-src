@@ -257,6 +257,20 @@ class PainterUINavigatorPanel(QFrame):
     def is_collapsed(self) -> bool:
         return self._collapsed
 
+    def restore_state(
+        self,
+        width: int,
+        collapsed: bool,
+        *,
+        user_override: bool = False,
+    ) -> None:
+        self.set_expanded_width(width)
+        self.set_collapsed(bool(collapsed))
+        self._collapse_user_override = bool(user_override)
+
+    def has_user_collapse_override(self) -> bool:
+        return bool(self._collapse_user_override)
+
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self.resize_handle.setGeometry(

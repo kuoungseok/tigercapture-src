@@ -23,6 +23,7 @@ def main() -> int:
     args = parser.parse_args()
     if not args.show:
         os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    os.environ.setdefault("TIGERSTUDIO_PAINTER_PANEL_SETTINGS", "0")
 
     from PySide6.QtCore import QTimer
     from PySide6.QtWidgets import QApplication

@@ -87,6 +87,10 @@ def test_ui_navigator_resizes_and_restores_last_expanded_width() -> None:
     assert panel.set_expanded_width(20) == panel.MIN_EXPANDED_WIDTH
     assert panel.set_expanded_width(999) == panel.MAX_EXPANDED_WIDTH
     assert changed == [300, panel.MIN_EXPANDED_WIDTH, panel.MAX_EXPANDED_WIDTH]
+    panel.restore_state(176, True, user_override=True)
+    assert panel.expanded_width() == 176
+    assert panel.is_collapsed()
+    assert panel.has_user_collapse_override()
     panel.deleteLater()
 
 

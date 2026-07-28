@@ -18,6 +18,9 @@ Completed in the first shell slice:
   persistent thin vertical scrollbar
 - resizable 240-420 px right inspector with detachable floating-window and
   automatic re-dock when leaving UI Design
+- restart-safe persistence for user-adjusted navigator/inspector width and
+  collapsed state; automatic compact-mode collapse is not persisted as a user
+  preference
 - zoom-adaptive top/left rulers and ruler-drag guide creation
 - shared `paint.ui.guide.create/remove/clear` and
   `paint.ui.ruler.visibility.set` automation
@@ -38,7 +41,7 @@ Not complete yet:
 - mode-specific Paint/3D floating-toolbar variants
 - transient zoom popover
 - prototype interaction authoring surface and on-canvas connection editing
-- persisted panel widths/minimized state and temporary properties popover
+- temporary properties popover while side panels are minimized
 - M1 through M8 implementation
 
 Related documents:

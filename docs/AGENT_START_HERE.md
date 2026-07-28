@@ -77,6 +77,8 @@ Focused entry points:
   resizable/detachable right inspector. The Design tab progressively discloses
   rows for artboard, text, image, frame/group/button, component, and multiple
   selection; advanced rows stay behind the shared Advanced properties toggle.
+  User-adjusted side-panel widths and collapsed states persist independently
+  from responsive automatic collapse.
   As of 2026-07-27 the local M2A-M6 production foundation is implemented:
   `.tstemplate` packages and local library state, review comments/checkpoints,
   revision diff, self-contained prototype, production asset export, shared
