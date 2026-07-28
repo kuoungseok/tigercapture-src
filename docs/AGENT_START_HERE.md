@@ -95,6 +95,11 @@ Focused entry points:
   `paint.ui.property.batch_set` share one constraint-aware batch mutation and
   one-step Undo. Locked or cross-artboard selections intentionally expose no
   common resize handles.
+  Multi-selection also exposes a context-only Common Inspector for
+  Opacity/Fill/Stroke/Stroke Width/Radius/Visible/Locked. Shared values render
+  normally, mixed values render as `—` or a partial check, and editing one
+  property preserves every unrelated per-object style/content value while
+  committing through the same `paint.ui.property.batch_set` mutation contract.
   As of 2026-07-27 the local M2A-M6 production foundation is implemented:
   `.tstemplate` packages and local library state, review comments/checkpoints,
   revision diff, self-contained prototype, production asset export, shared

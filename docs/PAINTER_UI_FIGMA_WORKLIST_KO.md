@@ -203,6 +203,9 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
 - 동일 Artboard의 잠금 해제 객체를 위한 공통 selection bounds와 비례 resize
 - 다중 resize의 Shift 비율 잠금, Alt 중심 기준 조절, 단일 batch Undo
 - UI와 `paint.ui.property.batch_set` Action의 constraint-aware mutation 공유
+- 선택할 때만 나타나는 다중 선택 Common Inspector와 `—` mixed-value 표시
+- 공통 Opacity/Fill/Stroke/Width/Radius/Visible/Locked 일괄 편집
+- 변경한 속성 외의 객체별 style/content 보존
 - Group/Ungroup과 자식 보존 이동
 - Layers 순서 변경, 그룹 nesting, root 이동
 - 전체 아트보드 자유 배치, 화면 이동과 줌, Fit 명령

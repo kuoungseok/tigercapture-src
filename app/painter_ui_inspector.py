@@ -174,6 +174,7 @@ class PainterUIInspector(QWidget):
     selection_changed = Signal(object, str)
     geometry_changed = Signal(str, object)
     properties_changed = Signal(str, object)
+    batch_properties_changed = Signal(object)
     clip_changed = Signal(str, bool)
     duplicate_requested = Signal(str)
     delete_requested = Signal(str)
@@ -1071,6 +1072,77 @@ class PainterUIInspector(QWidget):
         )
         self.appearance_button.clicked.connect(self._edit_appearance)
         form.addRow("Appearance", self.appearance_button)
+        multi_properties = QFrame()
+        multi_properties.setObjectName("PainterUIMultiProperties")
+        multi_layout = QGridLayout(multi_properties)
+        multi_layout.setContentsMargins(0, 0, 0, 0)
+        multi_layout.setHorizontalSpacing(4)
+        multi_layout.setVerticalSpacing(3)
+        self.multi_opacity_spin = PainterUIDragSpinBox()
+        self.multi_opacity_spin.setRange(0, 100)
+        self.multi_opacity_spin.setSuffix("%")
+        self.multi_fill_edit = QLineEdit()
+        self.multi_fill_edit.setPlaceholderText("#RRGGBB")
+        self.multi_stroke_edit = QLineEdit()
+        self.multi_stroke_edit.setPlaceholderText("#RRGGBB")
+        self.multi_stroke_width_spin = PainterUIDragDoubleSpinBox()
+        self.multi_stroke_width_spin.setRange(0.0, 64.0)
+        self.multi_stroke_width_spin.setDecimals(1)
+        self.multi_stroke_width_spin.setSuffix(" px")
+        self.multi_radius_spin = PainterUIDragDoubleSpinBox()
+        self.multi_radius_spin.setRange(0.0, 4096.0)
+        self.multi_radius_spin.setDecimals(1)
+        self.multi_radius_spin.setSuffix(" px")
+        self.multi_visible_check = QCheckBox("Visible")
+        self.multi_locked_check = QCheckBox("Locked")
+        self._multi_mixed_keys: set[str] = set()
+        self._multi_dirty_keys: set[str] = set()
+        multi_controls = (
+            ("Opacity", self.multi_opacity_spin, "opacity"),
+            ("Fill", self.multi_fill_edit, "fill"),
+            ("Stroke", self.multi_stroke_edit, "stroke"),
+            ("Width", self.multi_stroke_width_spin, "stroke_width"),
+            ("Radius", self.multi_radius_spin, "radius"),
+        )
+        for index, (label, control, key) in enumerate(multi_controls):
+            row_index = index // 2
+            column = (index % 2) * 2
+            multi_layout.addWidget(QLabel(label), row_index, column)
+            multi_layout.addWidget(control, row_index, column + 1)
+            if isinstance(control, QLineEdit):
+                control.textEdited.connect(
+                    lambda _text, value=key: self._mark_multi_dirty(value)
+                )
+                control.editingFinished.connect(
+                    lambda value=key: self._emit_multi_property(value)
+                )
+            else:
+                control.lineEdit().textEdited.connect(
+                    lambda _text, value=key: self._mark_multi_dirty(value)
+                )
+                control.editingFinished.connect(
+                    lambda value=key: self._emit_multi_property(value)
+                )
+        multi_flags = QFrame()
+        multi_flags_layout = QHBoxLayout(multi_flags)
+        multi_flags_layout.setContentsMargins(0, 0, 0, 0)
+        multi_flags_layout.setSpacing(8)
+        multi_flags_layout.addWidget(self.multi_visible_check)
+        multi_flags_layout.addWidget(self.multi_locked_check)
+        multi_layout.addWidget(multi_flags, 3, 0, 1, 4)
+        self.multi_visible_check.stateChanged.connect(
+            lambda _state: self._emit_multi_property(
+                "visible",
+                force=True,
+            )
+        )
+        self.multi_locked_check.stateChanged.connect(
+            lambda _state: self._emit_multi_property(
+                "locked",
+                force=True,
+            )
+        )
+        form.addRow("Common", multi_properties)
         self.clip_content_check = QCheckBox("Clip child content")
         self.clip_content_check.setToolTip(
             "Hide child pixels and hit targets outside this frame"
@@ -1387,6 +1459,7 @@ class PainterUIInspector(QWidget):
                 self.radius_spin,
                 self.appearance_button,
             ),
+            "multi_properties": (multi_properties,),
             "frame": (self.clip_content_check,),
             "text": (
                 self.text_edit,
@@ -2140,6 +2213,7 @@ class PainterUIInspector(QWidget):
         self.aspect_lock_check.setChecked(bool(constraints["lock_aspect"]))
         self.visible_check.setChecked(bool(row["visible"]))
         self.locked_check.setChecked(bool(row["locked"]))
+        self._sync_multi_properties()
 
     def _sync_design_context_visibility(
         self,
@@ -2162,8 +2236,8 @@ class PainterUIInspector(QWidget):
         elif count > 1:
             context = "multi"
             title = f"{count} objects selected"
-            hint = "Align or distribute the current selection."
-            visible_groups = {"arrange"}
+            hint = "Edit common properties, align, or distribute."
+            visible_groups = {"multi_properties", "arrange"}
         else:
             kind = str(row.get("kind") or "object").casefold()
             component_role = str(
@@ -2725,6 +2799,196 @@ class PainterUIInspector(QWidget):
         if self._syncing or row is None or row["kind"] != "frame":
             return
         self.clip_changed.emit(str(row["id"]), bool(checked))
+
+    def _selected_rows(self) -> list[dict[str, Any]]:
+        selected_ids = {
+            str(value)
+            for value in self._document.get("selection", {}).get(
+                "object_ids",
+                [],
+            )
+            if str(value)
+        }
+        return [
+            row
+            for row in self._document.get("objects", [])
+            if str(row.get("id") or "") in selected_ids
+        ]
+
+    @staticmethod
+    def _common_value(values: list[Any]) -> tuple[bool, Any]:
+        if not values:
+            return False, None
+        first = values[0]
+        return all(value == first for value in values[1:]), first
+
+    def _set_multi_spin_value(
+        self,
+        spin: QSpinBox | QDoubleSpinBox,
+        values: list[float],
+    ) -> None:
+        common, value = self._common_value(values)
+        spin.setMinimum(0)
+        spin.setSpecialValueText("")
+        if common:
+            spin.setValue(value)
+            spin.setProperty("mixedValue", False)
+            return
+        spin.setMinimum(-1)
+        spin.setSpecialValueText("—")
+        spin.setValue(-1)
+        spin.setProperty("mixedValue", True)
+
+    def _set_multi_text_value(
+        self,
+        edit: QLineEdit,
+        values: list[str],
+    ) -> None:
+        common, value = self._common_value(values)
+        edit.setProperty("mixedValue", not common)
+        if common:
+            edit.setPlaceholderText("#RRGGBB")
+            edit.setText(str(value or ""))
+        else:
+            edit.clear()
+            edit.setPlaceholderText("—")
+
+    def _set_multi_check_value(
+        self,
+        check: QCheckBox,
+        values: list[bool],
+    ) -> None:
+        common, value = self._common_value(values)
+        check.setTristate(not common)
+        check.setCheckState(
+            (
+                Qt.CheckState.Checked
+                if bool(value)
+                else Qt.CheckState.Unchecked
+            )
+            if common
+            else Qt.CheckState.PartiallyChecked
+        )
+        check.setProperty("mixedValue", not common)
+
+    def _sync_multi_properties(self) -> None:
+        rows = self._selected_rows()
+        if len(rows) < 2:
+            self._multi_mixed_keys.clear()
+            self._multi_dirty_keys.clear()
+            return
+        style_rows = [dict(row.get("style") or {}) for row in rows]
+        value_sets: dict[str, list[Any]] = {
+            "opacity": [round(float(row.get("opacity", 1.0)) * 100) for row in rows],
+            "fill": [str(style.get("fill") or "") for style in style_rows],
+            "stroke": [str(style.get("stroke") or "") for style in style_rows],
+            "stroke_width": [
+                float(style.get("stroke_width") or 0.0)
+                for style in style_rows
+            ],
+            "radius": [
+                float(style.get("radius") or 0.0)
+                for style in style_rows
+            ],
+            "visible": [bool(row.get("visible", True)) for row in rows],
+            "locked": [bool(row.get("locked", False)) for row in rows],
+        }
+        self._multi_mixed_keys = {
+            key
+            for key, values in value_sets.items()
+            if not self._common_value(values)[0]
+        }
+        self._multi_dirty_keys.clear()
+        self._set_multi_spin_value(
+            self.multi_opacity_spin,
+            value_sets["opacity"],
+        )
+        self._set_multi_text_value(self.multi_fill_edit, value_sets["fill"])
+        self._set_multi_text_value(
+            self.multi_stroke_edit,
+            value_sets["stroke"],
+        )
+        self._set_multi_spin_value(
+            self.multi_stroke_width_spin,
+            value_sets["stroke_width"],
+        )
+        self._set_multi_spin_value(
+            self.multi_radius_spin,
+            value_sets["radius"],
+        )
+        self._set_multi_check_value(
+            self.multi_visible_check,
+            value_sets["visible"],
+        )
+        self._set_multi_check_value(
+            self.multi_locked_check,
+            value_sets["locked"],
+        )
+
+    def _mark_multi_dirty(self, key: str) -> None:
+        if not self._syncing:
+            self._multi_dirty_keys.add(str(key))
+
+    def _emit_multi_property(self, key: str, *, force: bool = False) -> None:
+        if self._syncing or self._design_context != "multi":
+            return
+        rows = self._selected_rows()
+        if len(rows) < 2:
+            return
+        key = str(key)
+        if key in {"visible", "locked"}:
+            check = (
+                self.multi_visible_check
+                if key == "visible"
+                else self.multi_locked_check
+            )
+            state = check.checkState()
+            if state == Qt.CheckState.PartiallyChecked:
+                return
+            value: Any = state == Qt.CheckState.Checked
+        elif key == "opacity":
+            value = int(self.multi_opacity_spin.value())
+            if value < 0:
+                return
+            value = value / 100.0
+        elif key in {"stroke_width", "radius"}:
+            spin = (
+                self.multi_stroke_width_spin
+                if key == "stroke_width"
+                else self.multi_radius_spin
+            )
+            value = float(spin.value())
+            if value < 0.0:
+                return
+        elif key in {"fill", "stroke"}:
+            edit = (
+                self.multi_fill_edit
+                if key == "fill"
+                else self.multi_stroke_edit
+            )
+            value = edit.text().strip()
+            if (
+                key in self._multi_mixed_keys
+                and key not in self._multi_dirty_keys
+                and not value
+            ):
+                return
+        else:
+            return
+        changes_by_id: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            object_id = str(row["id"])
+            if key in {"opacity", "visible", "locked"}:
+                changes_by_id[object_id] = {key: value}
+                continue
+            style = copy.deepcopy(dict(row.get("style") or {}))
+            if key in {"fill", "stroke"} and not value:
+                style.pop(key, None)
+            else:
+                style[key] = value
+            changes_by_id[object_id] = {"style": style}
+        self._multi_dirty_keys.discard(key)
+        self.batch_properties_changed.emit(changes_by_id)
 
     def _emit_properties(self) -> None:
         if self._syncing or not self._selected_id():

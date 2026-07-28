@@ -335,6 +335,19 @@ Implemented checkpoint (2026-07-29, multi-selection resize slice):
   `paint.ui.property.batch_set` uses the same constraint-aware mutation service
   for automation.
 
+Implemented checkpoint (2026-07-29, multi-selection Inspector slice):
+
+- The Inspector remains selection-driven: its compact Common section exists
+  only when two or more objects are selected.
+- Opacity, Fill, Stroke, Stroke Width, Radius, Visible, and Locked show their
+  shared value or a `—`/partial-check mixed state.
+- Editing one common property updates only that property on every selected
+  object, preserving each object's unrelated style and content.
+- UI batch edits and `paint.ui.property.batch_set` use the same mutation
+  service, constraint recapture, and one-step `Edit UI objects` Undo contract.
+- The compact Korean surface and mixed-value states are covered by offscreen
+  screenshot QA instead of relying only on widget tests.
+
 Exit criteria:
 
 - Common object editing is possible without repeatedly moving to Inspector.

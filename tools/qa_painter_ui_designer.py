@@ -450,11 +450,20 @@ def main() -> int:
     app.processEvents()
     multi_context_ok = (
         dialog._paint_ui_inspector.design_context() == "multi"
+        and dialog._paint_ui_inspector.design_group_visible(
+            "multi_properties"
+        )
         and dialog._paint_ui_inspector.design_group_visible("arrange")
         and not dialog._paint_ui_inspector.design_group_visible("geometry")
         and dialog._paint_ui_inspector.visible_context_tabs()
         == ("design", "inspect")
         and dialog._paint_ui_inspector.artboard_bar.isHidden()
+    )
+    multi_properties_ok = (
+        dialog._paint_ui_inspector.multi_opacity_spin.value() == 100
+        and dialog._paint_ui_inspector.multi_fill_edit.text() == ""
+        and dialog._paint_ui_inspector.multi_fill_edit.placeholderText()
+        == "—"
     )
     multi_rows = dialog._painter_ui_overlay._multi_transform_rows()
     multi_bounds = dialog._painter_ui_overlay._selection_bounds(
@@ -604,6 +613,7 @@ def main() -> int:
             and inline_text_ok
             and image_context_ok
             and multi_context_ok
+            and multi_properties_ok
             and multi_resize_ok
             and adaptive_context_ok
             and quick_properties_ok
@@ -653,6 +663,7 @@ def main() -> int:
             "adaptive": adaptive_context_ok,
         },
         "inline_text_ok": inline_text_ok,
+        "multi_properties_ok": multi_properties_ok,
         "multi_resize_ok": multi_resize_ok,
         "guide_state": guide_state,
         "workspace": state["workspace"],

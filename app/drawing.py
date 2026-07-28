@@ -10338,6 +10338,9 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.properties_changed.connect(
             self._update_painter_ui_object_changes
         )
+        self._paint_ui_inspector.batch_properties_changed.connect(
+            self._update_painter_ui_batch_properties
+        )
         self._paint_ui_inspector.clip_changed.connect(
             self._update_painter_ui_clip
         )
@@ -14464,6 +14467,15 @@ class PaintDialog(QDialog):
         self._painter_ui_document = updated
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
+
+    def _update_painter_ui_batch_properties(
+        self,
+        changes_by_id: object,
+    ) -> None:
+        self._update_painter_ui_objects_batch(
+            changes_by_id,
+            label="Edit UI objects",
+        )
 
     def _move_painter_ui_object(
         self,

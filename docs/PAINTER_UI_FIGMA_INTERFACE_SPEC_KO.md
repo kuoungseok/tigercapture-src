@@ -389,6 +389,8 @@ Canvas:
 - 공통 bounds 기준의 객체별 위치/크기 비례 변환
 - `Shift` 비율 잠금, `Alt` 중심 기준 resize
 - mixed value 표시 `—`
+- 공통 `Opacity / Fill / Stroke / Stroke Width / Radius`
+- `Visible / Locked`의 부분 체크 상태와 일괄 변경
 - Align / Distribute
 - Tidy Up / gap
 - group / frame selection
@@ -401,6 +403,8 @@ Canvas:
 보여주고 resize handle을 노출하지 않는다. 다중 resize는 객체별 변경을 하나의
 batch mutation과 Undo로 커밋하며 UI와 `paint.ui.property.batch_set` Action이
 같은 constraint 갱신 서비스를 사용한다.
+공통 속성 변경은 해당 속성만 각 객체에 적용해야 하며, 객체마다 다른 나머지
+style/content 값을 첫 번째 객체의 값으로 덮어쓰면 안 된다.
 
 ## 6. Prototype UI
 
