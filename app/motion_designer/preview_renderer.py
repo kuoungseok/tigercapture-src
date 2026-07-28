@@ -36,6 +36,7 @@ class MotionPreviewWidget(QOpenGLWidget):
         self._typography_gpu = MotionTypographyGpuRenderer(self)
         self._puppet_gpu = MotionPuppetGpuRenderer(self)
         self._last_gpu_backend = "vector"
+        self._last_raster_size: tuple[int, int] | None = None
         self._cleanup_connected = False
         self._glass_pointer = (0.0, 0.0)
         self._glass_velocity = (0.0, 0.0)
@@ -99,6 +100,7 @@ class MotionPreviewWidget(QOpenGLWidget):
             scale = min(self.width() / composition.width, self.height() / composition.height)
             width, height = composition.width * scale, composition.height * scale
             target = QRectF((self.width() - width) * .5, (self.height() - height) * .5, width, height)
+            preview_raster_size = self._preview_raster_size(graph, target)
             context = self.context()
             if (
                 context is not None
@@ -149,7 +151,10 @@ class MotionPreviewWidget(QOpenGLWidget):
             width, height = composition.width * scale, composition.height * scale
             target = QRectF((self.width() - width) * .5, (self.height() - height) * .5, width, height)
             if needs_color_transform and color_settings is not None:
-                image = render_graph_image(graph).convertToFormat(
+                image = render_graph_image(
+                    graph,
+                    output_size=preview_raster_size,
+                ).convertToFormat(
                     QImage.Format_RGBA8888_Premultiplied
                 )
                 rows = np.frombuffer(image.bits(), dtype=np.uint8).reshape(
@@ -176,8 +181,35 @@ class MotionPreviewWidget(QOpenGLWidget):
                 ).copy()
                 painter.drawImage(target, display_image)
             else:
-                paint_render_graph(painter, graph, target)
+                paint_render_graph(
+                    painter,
+                    graph,
+                    target,
+                    raster_size=preview_raster_size,
+                )
         painter.end()
+
+    def _preview_raster_size(
+        self,
+        graph,
+        target: QRectF,
+    ) -> tuple[int, int] | None:
+        effects = [
+            effect.kind.lower().strip()
+            for node in graph.nodes
+            for effect in (node.effects or ())
+            if effect.enabled
+        ] if graph is not None else []
+        if "tiger_glass" not in effects or any(
+            kind != "tiger_glass" for kind in effects
+        ):
+            self._last_raster_size = None
+            return None
+        self._last_raster_size = (
+            max(1, int(round(target.width()))),
+            max(1, int(round(target.height()))),
+        )
+        return self._last_raster_size
 
     def _composition_target(self) -> QRectF:
         composition = self._composition
@@ -269,5 +301,6 @@ class MotionPreviewWidget(QOpenGLWidget):
             "premultiplied_alpha": True,
             "shared_render_graph": True,
             "glass_runtime_inputs": self.runtime_glass_inputs(),
+            "viewport_raster_size": list(self._last_raster_size or ()),
             **backend_diagnostics,
         }

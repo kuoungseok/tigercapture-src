@@ -6603,8 +6603,9 @@ AI Script Edit MVP integration:
   blur now uses a multi-resolution pyramid and glass-mask ROI. The real 1080p
   QA tool records 138-172 ms/frame on the current shared CPU fallback after
   ROI optimization, down from 278-374 ms/frame. This is an accuracy baseline,
-  not a realtime-performance claim; M22 remains incomplete until a GPU
-  backdrop path or viewport-resolution preview meets the interactive target.
+  not a realtime-performance claim; M22 remains incomplete until the
+  non-raster GPU backdrop path and sustained interactive performance meet the
+  product target.
 - M23 Mixed Media Craft Workspace v1 is implemented around the provider-neutral
   `tigerstudio.motion.collage.v1` contract. A collage board binds existing
   Motion layers to stable item IDs, deterministic layout seed and z-order,
@@ -6815,6 +6816,18 @@ AI Script Edit MVP integration:
   Glass surfaces to pointer input by default. The 1080p Glass QA records and
   saves a center-versus-lower-right driver comparison with distinct rendered
   pixels.
+- Glass-only effect graphs now use a viewport-resolution shared raster in
+  Preview instead of always composing at 1920x1080 and scaling the finished
+  image down. Layer transforms are applied after the global raster scale, and
+  Glass blur, refraction, dispersion, edge, bloom, motion blur, and card-shadow
+  pixel distances scale with the viewport. Export and mixed-effect graphs keep
+  the full-resolution path. A 1920x1080-to-960x540 parity sample records mean
+  absolute differences of 0.25 RGB and 0.18 alpha with a 2.4x isolated render
+  speedup. A real 15.20-second visible workspace run at a 716x403 viewport
+  completed one loop and 296 frame swaps (19.48 fps), with RSS decreasing by
+  2.3 MB. A shorter five-second scene reached 28.82 fps. The variable
+  end-to-end rate is a substantial improvement over 7.16 fps, but the backend
+  remains `qt_painter_fallback`; the non-raster GPU product gate remains open.
 - M13 character-rigging foundation is complete. Motion compositions persist
   provider-neutral `tigerstudio.motion.rig.v1` cutout rigs with stable rig and
   bone IDs, a validated parent hierarchy, rest positions, animated rotation

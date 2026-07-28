@@ -4,7 +4,7 @@ import os
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PySide6.QtCore import QCoreApplication, QEvent, QPointF, Qt
+from PySide6.QtCore import QCoreApplication, QEvent, QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QImage, QMouseEvent, QPainter
 from PySide6.QtWidgets import QApplication
 import pytest
@@ -18,7 +18,13 @@ from app.motion_designer.glass_material import (
 from app.motion_designer.glass_runtime import resolve_glass_driver
 from app.motion_designer.render_graph import build_render_graph, render_graph_image
 from app.motion_designer.preview_renderer import MotionPreviewWidget
-from app.motion_designer.schema import Keyframe, MotionComposition, MotionLayer, SourceRef
+from app.motion_designer.schema import (
+    Keyframe,
+    MotionComposition,
+    MotionEffectRef,
+    MotionLayer,
+    SourceRef,
+)
 
 
 def _app() -> QApplication:
@@ -260,4 +266,64 @@ def test_preview_pointer_driver_uses_composition_viewport_coordinates() -> None:
     pointer = preview.runtime_glass_inputs()["pointer"]
     assert pointer[0] == pytest.approx(1.0, abs=0.02)
     assert pointer[1] == pytest.approx(0.0, abs=0.02)
+    preview.deleteLater()
+
+
+def test_glass_viewport_raster_preserves_scaled_visual_contract() -> None:
+    import numpy as np
+
+    _app()
+    graph = build_render_graph(
+        _composition(),
+        825,
+        render_quality="preview",
+    )
+    full = render_graph_image(graph)
+    reduced = render_graph_image(graph, output_size=(80, 45))
+    reference = full.scaled(
+        80,
+        45,
+        Qt.AspectRatioMode.IgnoreAspectRatio,
+        Qt.TransformationMode.SmoothTransformation,
+    ).convertToFormat(QImage.Format_RGBA8888)
+    actual = reduced.convertToFormat(QImage.Format_RGBA8888)
+
+    def rgba(image: QImage) -> np.ndarray:
+        rows = np.frombuffer(image.constBits(), dtype=np.uint8).reshape(
+            image.height(),
+            image.bytesPerLine(),
+        )
+        return rows[:, : image.width() * 4].reshape(
+            image.height(),
+            image.width(),
+            4,
+        )
+
+    difference = np.abs(
+        rgba(reference).astype(np.int16) - rgba(actual).astype(np.int16)
+    )
+    interior = difference[2:-2, 2:-2]
+    assert reduced.size().toTuple() == (80, 45)
+    assert float(interior[..., :3].mean()) < 5.0
+    assert float(interior[..., 3].mean()) < 1.0
+
+
+def test_preview_viewport_raster_is_limited_to_glass_only_effect_graphs() -> None:
+    _app()
+    preview = MotionPreviewWidget()
+    composition = _composition()
+    graph = build_render_graph(composition, 500)
+    assert preview._preview_raster_size(
+        graph,
+        QRectF(0.0, 0.0, 716.0, 403.0),
+    ) == (716, 403)
+
+    composition.layers[0].effects.append(
+        MotionEffectRef(kind="brightness_contrast")
+    )
+    mixed_graph = build_render_graph(composition, 500)
+    assert preview._preview_raster_size(
+        mixed_graph,
+        QRectF(0.0, 0.0, 716.0, 403.0),
+    ) is None
     preview.deleteLater()

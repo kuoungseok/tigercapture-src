@@ -500,8 +500,15 @@ def _instance_transform(node: RenderNode, instance: dict[str, float]) -> QTransf
     return local * base
 
 
-def _apply_motion_blur(surface: QImage, node: RenderNode) -> QImage:
+def _apply_motion_blur(
+    surface: QImage,
+    node: RenderNode,
+    *,
+    pixel_scale: tuple[float, float] = (1.0, 1.0),
+) -> QImage:
     dx, dy = node.motion_blur_vector
+    dx *= float(pixel_scale[0])
+    dy *= float(pixel_scale[1])
     samples = max(1, int(node.motion_blur_samples))
     if samples <= 1 or (abs(dx) <= 0.05 and abs(dy) <= 0.05):
         return surface
@@ -543,18 +550,30 @@ def _apply_motion_blur(surface: QImage, node: RenderNode) -> QImage:
     return image.convertToFormat(QImage.Format_RGBA8888_Premultiplied)
 
 
-def _node_surface(graph: RenderGraph, node: RenderNode) -> QImage:
-    surface = transparent_image(graph.width, graph.height)
+def _node_surface(
+    graph: RenderGraph,
+    node: RenderNode,
+    *,
+    output_size: tuple[int, int] | None = None,
+) -> QImage:
+    width, height = output_size or (graph.width, graph.height)
+    scale_x = width / max(1.0, float(graph.width))
+    scale_y = height / max(1.0, float(graph.height))
+    surface = transparent_image(width, height)
     image = _node_image(node)
     if image is None:
         return surface
     layer_painter = QPainter(surface)
     layer_painter.setRenderHint(QPainter.Antialiasing)
     layer_painter.setRenderHint(QPainter.SmoothPixmapTransform)
+    layer_painter.scale(scale_x, scale_y)
     for instance in node.replicator_instances or [{"opacity": 1.0}]:
         layer_painter.save()
         layer_painter.setOpacity(node.opacity * float(instance.get("opacity", 1.0)))
-        layer_painter.setTransform(_instance_transform(node, instance))
+        layer_painter.setTransform(
+            _instance_transform(node, instance),
+            combine=True,
+        )
         layer_painter.drawImage(
             -image.width() * node.anchor[0],
             -image.height() * node.anchor[1],
@@ -562,7 +581,11 @@ def _node_surface(graph: RenderGraph, node: RenderNode) -> QImage:
         )
         layer_painter.restore()
     layer_painter.end()
-    return _apply_motion_blur(surface, node)
+    return _apply_motion_blur(
+        surface,
+        node,
+        pixel_scale=(scale_x, scale_y),
+    )
 
 
 def _paint_node(painter: QPainter, node: RenderNode) -> None:
@@ -605,6 +628,7 @@ def _card_shadow_surface(
     intensity: float,
     strength: float,
     softness: float,
+    pixel_scale: float = 1.0,
 ) -> QImage | None:
     if depth_delta <= 0.0 or intensity <= 0.0 or strength <= 0.0:
         return None
@@ -633,14 +657,15 @@ def _card_shadow_surface(
         caster_alpha = cv2.GaussianBlur(
             caster_alpha,
             (0, 0),
-            sigmaX=max(0.01, float(softness)),
-            sigmaY=max(0.01, float(softness)),
+            sigmaX=max(0.01, float(softness) * pixel_scale),
+            sigmaY=max(0.01, float(softness) * pixel_scale),
             borderType=cv2.BORDER_CONSTANT,
         )
     elevation_radians = math.radians(max(5.0, min(89.0, elevation)))
     distance = min(
         float(max(width, height)),
-        max(0.0, float(depth_delta)) * 36.0 / max(0.087, math.tan(elevation_radians)),
+        max(0.0, float(depth_delta)) * 36.0 * pixel_scale
+        / max(0.087, math.tan(elevation_radians)),
     )
     azimuth_radians = math.radians(float(azimuth))
     offset_x = -math.cos(azimuth_radians) * distance
@@ -676,8 +701,17 @@ def _card_shadow_surface(
     ).copy().convertToFormat(QImage.Format_RGBA8888_Premultiplied)
 
 
-def render_graph_image(graph: RenderGraph) -> QImage:
-    canvas = transparent_image(graph.width, graph.height)
+def render_graph_image(
+    graph: RenderGraph,
+    *,
+    output_size: tuple[int, int] | None = None,
+) -> QImage:
+    width, height = output_size or (graph.width, graph.height)
+    width, height = max(1, int(width)), max(1, int(height))
+    scale_x = width / max(1.0, float(graph.width))
+    scale_y = height / max(1.0, float(graph.height))
+    pixel_scale = min(scale_x, scale_y)
+    canvas = transparent_image(width, height)
     node_by_id = {node.layer_id: node for node in graph.nodes}
     matte_ids = {node.matte_layer_id for node in graph.nodes if node.matte_layer_id}
     surface_cache: dict[str, QImage] = {}
@@ -700,7 +734,11 @@ def render_graph_image(graph: RenderGraph) -> QImage:
     def surface(node: RenderNode) -> QImage:
         cached = surface_cache.get(node.layer_id)
         if cached is None:
-            cached = _node_surface(graph, node)
+            cached = _node_surface(
+                graph,
+                node,
+                output_size=(width, height),
+            )
             cached = apply_effects(cached, node.effects or [], node.local_time_ms)
             for group in scoped_effect_groups.get(node.layer_id, ()):
                 cached = apply_effects(
@@ -737,6 +775,7 @@ def render_graph_image(graph: RenderGraph) -> QImage:
         )
         if not requires_surface:
             canvas_painter = QPainter(canvas)
+            canvas_painter.scale(scale_x, scale_y)
             _paint_node(canvas_painter, node)
             canvas_painter.end()
             continue
@@ -751,6 +790,7 @@ def render_graph_image(graph: RenderGraph) -> QImage:
                 glass,
                 node.local_time_ms,
                 driver_override=node.glass_driver_override,
+                pixel_scale=pixel_scale,
             )
         if matte_node is not None:
             matte = surface(matte_node)
@@ -774,6 +814,7 @@ def render_graph_image(graph: RenderGraph) -> QImage:
                     intensity=node.shadow_light_intensity,
                     strength=node.shadow_strength,
                     softness=node.shadow_softness,
+                    pixel_scale=pixel_scale,
                 )
                 if shadow is not None:
                     shadow_painter = QPainter(canvas)
@@ -791,9 +832,18 @@ def render_graph_image(graph: RenderGraph) -> QImage:
     return canvas
 
 
-def paint_render_graph(painter: QPainter, graph: RenderGraph, target: QRectF) -> None:
+def paint_render_graph(
+    painter: QPainter,
+    graph: RenderGraph,
+    target: QRectF,
+    *,
+    raster_size: tuple[int, int] | None = None,
+) -> None:
     painter.save()
     painter.setRenderHint(QPainter.Antialiasing)
     painter.setRenderHint(QPainter.SmoothPixmapTransform)
-    painter.drawImage(target, render_graph_image(graph))
+    painter.drawImage(
+        target,
+        render_graph_image(graph, output_size=raster_size),
+    )
     painter.restore()

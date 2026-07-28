@@ -63,6 +63,7 @@ def render_glass_surface(
     time_ms: float,
     *,
     driver_override: tuple[float, float] | None = None,
+    pixel_scale: float = 1.0,
 ) -> QImage:
     import cv2
     import numpy as np
@@ -82,9 +83,19 @@ def render_glass_surface(
     if mask_alpha.max(initial=0) == 0:
         return mask_surface
 
-    blur_radius = max(0.0, _value(effect, "blur_radius", time_ms, 4.0))
-    refraction = max(0.0, _value(effect, "refraction", time_ms, 3.0))
-    dispersion = max(0.0, _value(effect, "dispersion", time_ms, 0.35))
+    effect_scale = max(0.01, min(8.0, float(pixel_scale)))
+    blur_radius = max(
+        0.0,
+        _value(effect, "blur_radius", time_ms, 4.0) * effect_scale,
+    )
+    refraction = max(
+        0.0,
+        _value(effect, "refraction", time_ms, 3.0) * effect_scale,
+    )
+    dispersion = max(
+        0.0,
+        _value(effect, "dispersion", time_ms, 0.35) * effect_scale,
+    )
     active_y, active_x = np.nonzero(mask_alpha)
     padding = int(math.ceil(blur_radius * 3.0 + refraction + dispersion + 4.0))
     left = max(0, int(active_x.min()) - padding)
@@ -192,7 +203,14 @@ def render_glass_surface(
     thickness = max(0.0, min(2.0, _value(effect, "thickness", time_ms, 0.45)))
     edge_strength = max(0.0, _value(effect, "edge_highlight", time_ms, 0.35))
     specular = max(0.0, _value(effect, "specular", time_ms, 0.4))
-    edge = cv2.morphologyEx(mask, cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
+    edge_kernel_size = max(1, int(round(3.0 * effect_scale)))
+    if edge_kernel_size % 2 == 0:
+        edge_kernel_size += 1
+    edge = cv2.morphologyEx(
+        mask,
+        cv2.MORPH_GRADIENT,
+        np.ones((edge_kernel_size, edge_kernel_size), np.uint8),
+    )
     light = np.clip(
         0.5 + 0.5 * np.sin(
             xx / max(1.0, width) * math.pi + yy / max(1.0, height) * 0.7
@@ -207,7 +225,7 @@ def render_glass_surface(
         highlight += cv2.GaussianBlur(
             highlight,
             (0, 0),
-            sigmaX=max(1.0, 3.0 * bloom),
+            sigmaX=max(0.25, 3.0 * bloom * effect_scale),
         ) * bloom
     sampled[..., :3] += highlight[..., None] * 255.0
     sampled[..., 3] = mask * 255.0

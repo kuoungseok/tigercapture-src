@@ -205,8 +205,8 @@ Glass material을 구현한다.
   기준과 non-raster GPU 기준에는 여전히 미달한다.
 - Unreal UMG는 현재 복합 Glass를
   `effect_requires_bake:tiger_glass`로 명시한다.
-- 남은 M22 범위는 GPU backdrop shader 또는 viewport-resolution preview,
-  HDR QA, UI Material native 후보 변환, 결정적 tiled export 증거다.
+- 남은 M22 범위는 GPU backdrop shader, 장시간 24fps 기준, HDR QA,
+  UI Material native 후보 변환, 결정적 tiled export 증거다.
 
 렌더 구조:
 
@@ -258,6 +258,22 @@ UMG:
   보고한다.
 - 남은 M22 차단 항목은 non-raster GPU backdrop 경로, 24fps 제품 기준,
   HDR/tiled-export 증거, UMG UI Material native 또는 bake 최종 결정이다.
+
+### 2026-07-29 viewport-resolution Preview 갱신
+
+- Glass만 raster effect로 사용하는 그래프는 Preview에서 더 이상
+  1920x1080 전체를 합성한 뒤 축소하지 않고 실제 표시 영역 해상도로
+  합성한다. Export와 다른 effect가 함께 있는 그래프는 전해상도 경로를
+  그대로 유지한다.
+- 전역 raster scale 뒤에 layer transform을 결합하고 Glass blur,
+  refraction, dispersion, edge, bloom과 motion blur/card shadow의 픽셀
+  거리도 표시 해상도에 맞춰 조절한다.
+- 1920x1080 결과를 축소한 기준과 960x540 직접 합성 결과의 평균 절대
+  차이는 RGB 0.25, alpha 0.18이고, 단일 프레임 측정은 약 2.4배 빨라졌다.
+- 실제 표시 창의 716x403 Preview를 15.20초 재생해 296 frame swap,
+  1회 loop, 19.48fps를 기록했고 RSS는 약 2.3MB 감소했다. 짧은 5초
+  구간은 28.82fps였다. 이전 7.16fps보다 크게 개선됐지만 장시간
+  24fps와 non-raster GPU 기준은 아직 통과하지 못했다.
 
 ## 7. M23 - Mixed Media Craft Workspace
 
