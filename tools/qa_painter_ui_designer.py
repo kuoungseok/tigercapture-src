@@ -951,6 +951,24 @@ def main() -> int:
             ],
         },
     ).to_dict()
+    grid_style_result = registry.execute(
+        "paint.ui.layout_grid.style.add",
+        {
+            "name": "Desktop Editorial Grid",
+            "layout_grids": multi_grid_result["result"]["ui_design"]["document"][
+                "artboards"
+            ][1]["layout_grids"],
+        },
+    ).to_dict()
+    grid_style_id = str(
+        grid_style_result.get("result", {})
+        .get("layout_grid_style", {})
+        .get("id", "")
+    )
+    grid_style_apply_result = registry.execute(
+        "paint.ui.layout_grid.style.apply",
+        {"artboard_id": desktop_id, "style_id": grid_style_id},
+    ).to_dict()
     registry.execute(
         "paint.ui.selection.set",
         {"object_ids": [], "primary_object_id": ""},
@@ -971,6 +989,15 @@ def main() -> int:
         and [row["mode"] for row in multi_grid_artboard["layout_grids"]]
         == ["columns", "rows"]
         and multi_grid_screenshot_path.is_file()
+    )
+    grid_style_ok = bool(
+        grid_style_result.get("ok") is True
+        and grid_style_apply_result.get("ok") is True
+        and multi_grid_artboard.get("layout_grid_style_id") == grid_style_id
+        and dialog._paint_ui_inspector.artboard_grid_style_combo.findData(
+            grid_style_id
+        )
+        >= 0
     )
     state = dialog.painter_action_state()
     group_row = next(
@@ -1047,6 +1074,7 @@ def main() -> int:
             and variable_font_ok
             and variable_font_compact_ok
             and multi_grid_ok
+            and grid_style_ok
             and text_context_ok
             and inline_text_ok
             and image_context_ok
@@ -1119,6 +1147,7 @@ def main() -> int:
         "variable_font_ok": variable_font_ok,
         "variable_font_compact_ok": variable_font_compact_ok,
         "multiple_layout_grids_ok": multi_grid_ok,
+        "layout_grid_style_ok": grid_style_ok,
         "quick_properties_ok": quick_properties_ok,
         "zoom_popover_ok": zoom_popover_ok,
         "compact_zoom_ok": compact_zoom_ok,

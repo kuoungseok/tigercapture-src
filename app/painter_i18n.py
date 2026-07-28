@@ -429,6 +429,13 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Grid Alignment", "그리드 정렬", "グリッド配置", "网格对齐", "Alignement de la grille", "Rasterausrichtung"),
     ("Stretch", "늘이기", "ストレッチ", "拉伸", "Étirer", "Strecken"),
     ("Center", "가운데", "中央", "居中", "Centrer", "Zentrieren"),
+    ("Grid Style", "그리드 스타일", "グリッドスタイル", "网格样式", "Style de grille", "Rasterstil"),
+    ("Local", "로컬", "ローカル", "本地", "Local", "Lokal"),
+    ("Save as grid style", "그리드 스타일로 저장", "グリッドスタイルとして保存", "另存为网格样式", "Enregistrer comme style de grille", "Als Rasterstil speichern"),
+    ("Update linked grid style", "연결된 그리드 스타일 업데이트", "リンクしたグリッドスタイルを更新", "更新链接的网格样式", "Mettre à jour le style lié", "Verknüpften Rasterstil aktualisieren"),
+    ("Remove grid style", "그리드 스타일 삭제", "グリッドスタイルを削除", "删除网格样式", "Supprimer le style de grille", "Rasterstil entfernen"),
+    ("Save Grid Style", "그리드 스타일 저장", "グリッドスタイルを保存", "保存网格样式", "Enregistrer le style de grille", "Rasterstil speichern"),
+    ("Style name:", "스타일 이름:", "スタイル名:", "样式名称：", "Nom du style :", "Stilname:"),
 )
 
 _TABLE = {

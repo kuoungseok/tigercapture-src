@@ -8,7 +8,7 @@ from app.painter_ui_auto_layout import normalize_ui_auto_layout
 
 
 UI_DOCUMENT_SCHEMA = "tigerstudio.painter.ui.v1"
-UI_DOCUMENT_VERSION = 14
+UI_DOCUMENT_VERSION = 15
 UI_OBJECT_KINDS = {
     "frame",
     "group",
@@ -148,6 +148,7 @@ def create_ui_document(
                 "breakpoint": "custom",
                 "orientation": "landscape" if width >= height else "portrait",
                 "theme": "light",
+                "layout_grid_style_id": "",
                 "safe_area": {"left": 0, "top": 0, "right": 0, "bottom": 0},
                 "safe_area_visible": False,
                 "layout_grid": {
@@ -190,6 +191,7 @@ def create_ui_document(
         "tokens": [],
         "interactions": [],
         "sections": [],
+        "layout_grid_styles": [],
         "delivery_profiles": _default_delivery_profiles(),
         "linked_targets": {},
     }
@@ -216,6 +218,7 @@ def _normalize_artboard(row: Mapping[str, Any], index: int) -> dict[str, Any]:
             or ("landscape" if width >= height else "portrait")
         ),
         "theme": normalize_ui_theme(row.get("theme"), "light"),
+        "layout_grid_style_id": str(row.get("layout_grid_style_id") or ""),
         **layout,
     }
 
@@ -464,6 +467,13 @@ def normalize_ui_document(
         prefix="ui-section",
         normalizer=normalize_ui_section,
     )
+    from app.painter_ui_layout_grid_styles import normalize_ui_layout_grid_style
+
+    layout_grid_styles = _normalize_typed_rows(
+        raw.get("layout_grid_styles"),
+        prefix="ui-layout-grid-style",
+        normalizer=normalize_ui_layout_grid_style,
+    )
     selection = raw.get("selection")
     selection = selection if isinstance(selection, Mapping) else {}
     selected_id = str(selection.get("object_id") or "")
@@ -519,6 +529,7 @@ def normalize_ui_document(
         "tokens": tokens,
         "interactions": interactions,
         "sections": sections,
+        "layout_grid_styles": layout_grid_styles,
         "delivery_profiles": profiles,
         "linked_targets": copy.deepcopy(dict(raw.get("linked_targets") or {})),
     }
@@ -580,6 +591,9 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
     token_ids = [row["id"] for row in document["tokens"]]
     interaction_ids = [row["id"] for row in document["interactions"]]
     section_ids = [row["id"] for row in document["sections"]]
+    layout_grid_style_ids = [
+        row["id"] for row in document["layout_grid_styles"]
+    ]
     responsive_override_ids = [
         override["id"]
         for row in document["objects"]
@@ -597,6 +611,8 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         errors.append("duplicate_interaction_id")
     if len(set(section_ids)) != len(section_ids):
         errors.append("duplicate_section_id")
+    if len(set(layout_grid_style_ids)) != len(layout_grid_style_ids):
+        errors.append("duplicate_layout_grid_style_id")
     if len(set(responsive_override_ids)) != len(responsive_override_ids):
         errors.append("duplicate_responsive_override_id")
     all_ids = (
@@ -606,6 +622,7 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         + token_ids
         + interaction_ids
         + section_ids
+        + layout_grid_style_ids
         + responsive_override_ids
     )
     if len(set(all_ids)) != len(all_ids):
@@ -615,6 +632,13 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
     component_id_set = set(component_ids)
     component_by_id = {row["id"]: row for row in document["components"]}
     token_id_set = set(token_ids)
+    layout_grid_style_id_set = set(layout_grid_style_ids)
+    for artboard in document["artboards"]:
+        style_id = artboard.get("layout_grid_style_id")
+        if style_id and style_id not in layout_grid_style_id_set:
+            errors.append(
+                f"missing_layout_grid_style:{artboard['id']}:{style_id}"
+            )
     focus_orders: dict[tuple[str, int], str] = {}
     for row in document["objects"]:
         if row["kind"] not in UI_OBJECT_KINDS:
@@ -945,6 +969,7 @@ def validate_ui_document(value: Mapping[str, Any]) -> dict[str, Any]:
         "component_count": len(document["components"]),
         "token_count": len(document["tokens"]),
         "interaction_count": len(document["interactions"]),
+        "layout_grid_style_count": len(layout_grid_style_ids),
         "revision": document["revision"],
     }
 

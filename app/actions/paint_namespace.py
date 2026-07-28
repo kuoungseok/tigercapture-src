@@ -522,6 +522,74 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="the artboard grid, guides, and safe area would be updated",
     )
     registry.register_adapter_action(
+        "paint.ui.layout_grid.style.add",
+        "Create a reusable named ordered layout-grid style.",
+        "paint",
+        "paint_ui_layout_grid_style_add",
+        params_schema=schema_object(
+            {
+                "name": {"type": "string"},
+                "layout_grids": {
+                    "type": "array",
+                    "items": any_object,
+                },
+                "description": {"type": "string"},
+            },
+            required=("name", "layout_grids"),
+        ),
+        required=("name", "layout_grids"),
+        undo_label="Add UI layout-grid style",
+        dry_summary="a reusable layout-grid style would be added",
+    )
+    registry.register_adapter_action(
+        "paint.ui.layout_grid.style.update",
+        "Update a named layout-grid style and every linked artboard.",
+        "paint",
+        "paint_ui_layout_grid_style_update",
+        params_schema=schema_object(
+            {
+                "style_id": {"type": "string"},
+                "changes": any_object,
+            },
+            required=("style_id", "changes"),
+        ),
+        required=("style_id", "changes"),
+        undo_label="Update UI layout-grid style",
+        dry_summary="a layout-grid style and linked artboards would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.layout_grid.style.apply",
+        "Apply a reusable layout-grid style to an artboard by stable ID.",
+        "paint",
+        "paint_ui_layout_grid_style_apply",
+        params_schema=schema_object(
+            {
+                "artboard_id": {"type": "string"},
+                "style_id": {"type": "string"},
+            },
+            required=("artboard_id", "style_id"),
+        ),
+        required=("artboard_id", "style_id"),
+        undo_label="Apply UI layout-grid style",
+        dry_summary="the selected artboard would link to a layout-grid style",
+    )
+    registry.register_adapter_action(
+        "paint.ui.layout_grid.style.remove",
+        "Remove a layout-grid style, blocking references unless detachment is explicit.",
+        "paint",
+        "paint_ui_layout_grid_style_remove",
+        params_schema=schema_object(
+            {
+                "style_id": {"type": "string"},
+                "detach_references": {"type": "boolean"},
+            },
+            required=("style_id",),
+        ),
+        required=("style_id",),
+        undo_label="Remove UI layout-grid style",
+        dry_summary="a reusable layout-grid style would be removed",
+    )
+    registry.register_adapter_action(
         "paint.ui.artboard.remove",
         "Remove a UI artboard and its owned objects while keeping at least one artboard.",
         "paint",

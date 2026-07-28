@@ -10360,6 +10360,18 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.artboard_layout_changed.connect(
             self._update_painter_ui_artboard_changes
         )
+        self._paint_ui_inspector.layout_grid_style_add_requested.connect(
+            self._add_painter_ui_layout_grid_style
+        )
+        self._paint_ui_inspector.layout_grid_style_update_requested.connect(
+            self._update_painter_ui_layout_grid_style
+        )
+        self._paint_ui_inspector.layout_grid_style_apply_requested.connect(
+            self._apply_painter_ui_layout_grid_style
+        )
+        self._paint_ui_inspector.layout_grid_style_remove_requested.connect(
+            self._remove_painter_ui_layout_grid_style
+        )
         self._paint_ui_inspector.geometry_changed.connect(
             self._update_painter_ui_object_changes
         )
@@ -13167,6 +13179,103 @@ class PaintDialog(QDialog):
             str(artboard_id),
             changes,
         )
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _add_painter_ui_layout_grid_style(self, artboard_id: str) -> None:
+        from app.painter_ui_layout_grid_styles import add_ui_layout_grid_style
+
+        current = getattr(self, "_painter_ui_document", None) or {}
+        artboard = next(
+            (
+                row
+                for row in current.get("artboards", [])
+                if row.get("id") == str(artboard_id)
+            ),
+            None,
+        )
+        if artboard is None:
+            return
+        name, accepted = QInputDialog.getText(
+            self,
+            "Save Grid Style",
+            "Style name:",
+            text=f"{artboard['name']} Grid",
+        )
+        if not accepted or not str(name).strip():
+            return
+        document, style = add_ui_layout_grid_style(
+            current,
+            name=str(name).strip(),
+            layout_grids=artboard.get("layout_grids", []),
+        )
+        from app.painter_ui_layout_grid_styles import apply_ui_layout_grid_style
+
+        document, _artboard = apply_ui_layout_grid_style(
+            document,
+            artboard_id=str(artboard_id),
+            style_id=style["id"],
+        )
+        self._push_undo_state("Add UI layout-grid style")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _update_painter_ui_layout_grid_style(
+        self,
+        style_id: str,
+        artboard_id: str,
+    ) -> None:
+        from app.painter_ui_layout_grid_styles import update_ui_layout_grid_style
+
+        current = getattr(self, "_painter_ui_document", None) or {}
+        artboard = next(
+            (
+                row
+                for row in current.get("artboards", [])
+                if row.get("id") == str(artboard_id)
+            ),
+            None,
+        )
+        if artboard is None:
+            return
+        document, _style = update_ui_layout_grid_style(
+            current,
+            str(style_id),
+            {"layout_grids": artboard.get("layout_grids", [])},
+        )
+        self._push_undo_state("Update UI layout-grid style")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _apply_painter_ui_layout_grid_style(
+        self,
+        artboard_id: str,
+        style_id: str,
+    ) -> None:
+        from app.painter_ui_layout_grid_styles import apply_ui_layout_grid_style
+
+        document, _artboard = apply_ui_layout_grid_style(
+            getattr(self, "_painter_ui_document", None) or {},
+            artboard_id=str(artboard_id),
+            style_id=str(style_id),
+        )
+        self._push_undo_state("Apply UI layout-grid style")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _remove_painter_ui_layout_grid_style(self, style_id: str) -> None:
+        from app.painter_ui_layout_grid_styles import remove_ui_layout_grid_style
+
+        document, _result = remove_ui_layout_grid_style(
+            getattr(self, "_painter_ui_document", None) or {},
+            str(style_id),
+            detach_references=True,
+        )
+        self._push_undo_state("Remove UI layout-grid style")
+        self._painter_ui_document = document
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
 

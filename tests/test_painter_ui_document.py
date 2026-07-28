@@ -378,11 +378,11 @@ def test_ui_v1_migration_types_records_and_preserves_stable_ids() -> None:
         ],
     }
     document, report = migrate_ui_document(legacy)
-    assert document["version"] == UI_DOCUMENT_VERSION == 14
+    assert document["version"] == UI_DOCUMENT_VERSION == 15
     assert report == {
         "schema": "tigerstudio.painter.ui.migration.v1",
         "from_version": 1,
-        "to_version": 14,
+        "to_version": 15,
         "changed": True,
     }
     assert document["components"][0]["id"] == "ui-component-1"

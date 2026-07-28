@@ -855,6 +855,96 @@ class PaintAdapterMixin(
             changes=changes,
         )
 
+    def paint_ui_layout_grid_style_add(
+        self,
+        *,
+        name: str,
+        layout_grids: list[dict[str, Any]],
+        description: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_layout_grid_styles import add_ui_layout_grid_style
+
+        document, style = add_ui_layout_grid_style(
+            dialog._painter_ui_document,
+            name=name,
+            layout_grids=layout_grids,
+            description=description,
+        )
+        dialog._push_undo_state("Add UI layout-grid style")
+        result = self._paint_ui_commit(dialog, "Add UI layout-grid style", document)
+        result["layout_grid_style"] = style
+        return result
+
+    def paint_ui_layout_grid_style_update(
+        self,
+        *,
+        style_id: str,
+        changes: dict[str, Any],
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_layout_grid_styles import update_ui_layout_grid_style
+
+        document, style = update_ui_layout_grid_style(
+            dialog._painter_ui_document,
+            style_id,
+            changes,
+        )
+        dialog._push_undo_state("Update UI layout-grid style")
+        result = self._paint_ui_commit(
+            dialog,
+            "Update UI layout-grid style",
+            document,
+        )
+        result["layout_grid_style"] = style
+        return result
+
+    def paint_ui_layout_grid_style_apply(
+        self,
+        *,
+        artboard_id: str,
+        style_id: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_layout_grid_styles import apply_ui_layout_grid_style
+
+        document, artboard = apply_ui_layout_grid_style(
+            dialog._painter_ui_document,
+            artboard_id=artboard_id,
+            style_id=style_id,
+        )
+        dialog._push_undo_state("Apply UI layout-grid style")
+        result = self._paint_ui_commit(
+            dialog,
+            "Apply UI layout-grid style",
+            document,
+        )
+        result["artboard"] = artboard
+        return result
+
+    def paint_ui_layout_grid_style_remove(
+        self,
+        *,
+        style_id: str,
+        detach_references: bool = False,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_layout_grid_styles import remove_ui_layout_grid_style
+
+        document, removed = remove_ui_layout_grid_style(
+            dialog._painter_ui_document,
+            style_id,
+            detach_references=detach_references,
+        )
+        dialog._push_undo_state("Remove UI layout-grid style")
+        result = self._paint_ui_commit(
+            dialog,
+            "Remove UI layout-grid style",
+            document,
+        )
+        result["removed_layout_grid_style"] = removed
+        return result
+
     def paint_ui_guide_create(
         self,
         *,

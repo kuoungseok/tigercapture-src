@@ -234,6 +234,10 @@ class PainterUIInspector(QWidget):
     artboard_add_requested = Signal(str, int, int, str)
     artboard_delete_requested = Signal(str)
     artboard_layout_changed = Signal(str, object)
+    layout_grid_style_add_requested = Signal(str)
+    layout_grid_style_update_requested = Signal(str, str)
+    layout_grid_style_apply_requested = Signal(str, str)
+    layout_grid_style_remove_requested = Signal(str)
     responsive_override_changed = Signal(str, str, str, object)
     responsive_override_remove_requested = Signal(str, str, str)
     component_create_requested = Signal(str, str)
@@ -414,6 +418,46 @@ class PainterUIInspector(QWidget):
             self._emit_artboard_context
         )
         artboard_layout_form.addRow("Theme", self.artboard_theme_combo)
+        grid_style_row = QFrame()
+        grid_style_layout = QHBoxLayout(grid_style_row)
+        grid_style_layout.setContentsMargins(0, 0, 0, 0)
+        grid_style_layout.setSpacing(3)
+        self.artboard_grid_style_combo = QComboBox()
+        self.artboard_grid_style_combo.addItem("Local", "")
+        self.artboard_grid_style_combo.currentIndexChanged.connect(
+            self._emit_layout_grid_style_apply
+        )
+        grid_style_layout.addWidget(self.artboard_grid_style_combo, 1)
+        self.artboard_grid_style_add_button = QPushButton()
+        self.artboard_grid_style_add_button.setIcon(
+            app_icon("plus", size=12, color="#CBD5E2")
+        )
+        self.artboard_grid_style_add_button.setToolTip("Save as grid style")
+        self.artboard_grid_style_add_button.clicked.connect(
+            self._emit_layout_grid_style_add
+        )
+        grid_style_layout.addWidget(self.artboard_grid_style_add_button)
+        self.artboard_grid_style_update_button = QPushButton()
+        self.artboard_grid_style_update_button.setIcon(
+            app_icon("save", size=12, color="#CBD5E2")
+        )
+        self.artboard_grid_style_update_button.setToolTip(
+            "Update linked grid style"
+        )
+        self.artboard_grid_style_update_button.clicked.connect(
+            self._emit_layout_grid_style_update
+        )
+        grid_style_layout.addWidget(self.artboard_grid_style_update_button)
+        self.artboard_grid_style_remove_button = QPushButton()
+        self.artboard_grid_style_remove_button.setIcon(
+            app_icon("trash", size=12, color="#CBD5E2")
+        )
+        self.artboard_grid_style_remove_button.setToolTip("Remove grid style")
+        self.artboard_grid_style_remove_button.clicked.connect(
+            self._emit_layout_grid_style_remove
+        )
+        grid_style_layout.addWidget(self.artboard_grid_style_remove_button)
+        artboard_layout_form.addRow("Grid Style", grid_style_row)
         self.artboard_grid_mode_combo = QComboBox()
         for label, mode in (
             ("No layout grid", "none"),
@@ -2845,6 +2889,19 @@ class PainterUIInspector(QWidget):
             str(artboard.get("theme") or "light")
         )
         self.artboard_theme_combo.setCurrentIndex(max(0, theme_index))
+        selected_style_id = str(artboard.get("layout_grid_style_id") or "")
+        self.artboard_grid_style_combo.clear()
+        self.artboard_grid_style_combo.addItem("Local", "")
+        for style in self._document.get("layout_grid_styles", []):
+            self.artboard_grid_style_combo.addItem(
+                str(style["name"]),
+                str(style["id"]),
+            )
+        style_index = self.artboard_grid_style_combo.findData(selected_style_id)
+        self.artboard_grid_style_combo.setCurrentIndex(max(0, style_index))
+        has_style = bool(selected_style_id)
+        self.artboard_grid_style_update_button.setEnabled(has_style)
+        self.artboard_grid_style_remove_button.setEnabled(has_style)
         layout = normalize_ui_artboard_layout(
             artboard,
             width=float(artboard["width"]),
@@ -2963,6 +3020,47 @@ class PainterUIInspector(QWidget):
         self.artboard_grid_gutter_spin.setEnabled(columns)
         self.artboard_grid_margin_spin.setEnabled(columns and not centered)
         self.artboard_grid_size_spin.setEnabled(uniform or centered)
+
+    def _emit_layout_grid_style_add(self) -> None:
+        if self._syncing:
+            return
+        self.layout_grid_style_add_requested.emit(
+            str(self._active_artboard()["id"])
+        )
+
+    def _emit_layout_grid_style_update(self) -> None:
+        if self._syncing:
+            return
+        style_id = str(self.artboard_grid_style_combo.currentData() or "")
+        if style_id:
+            self.layout_grid_style_update_requested.emit(
+                style_id,
+                str(self._active_artboard()["id"]),
+            )
+
+    def _emit_layout_grid_style_apply(self) -> None:
+        if self._syncing:
+            return
+        style_id = str(self.artboard_grid_style_combo.currentData() or "")
+        self.artboard_grid_style_update_button.setEnabled(bool(style_id))
+        self.artboard_grid_style_remove_button.setEnabled(bool(style_id))
+        if style_id:
+            self.layout_grid_style_apply_requested.emit(
+                str(self._active_artboard()["id"]),
+                style_id,
+            )
+        else:
+            self.artboard_layout_changed.emit(
+                str(self._active_artboard()["id"]),
+                {"layout_grid_style_id": ""},
+            )
+
+    def _emit_layout_grid_style_remove(self) -> None:
+        if self._syncing:
+            return
+        style_id = str(self.artboard_grid_style_combo.currentData() or "")
+        if style_id:
+            self.layout_grid_style_remove_requested.emit(style_id)
 
     def _emit_artboard_context(self) -> None:
         if self._syncing:

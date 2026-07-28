@@ -473,15 +473,16 @@ Implementation checkpoint (2026-07-29):
 - Desktop and compact proof are generated as
   `painter_ui_designer_m2_variable_font_axes.png` and
   `painter_ui_designer_m2_variable_font_axes_compact.png`.
-- Document schema 14 adds ordered `layout_grids[]` while retaining
+- Document schema 15 adds ordered `layout_grids[]` while retaining
   `layout_grid` as the first-definition compatibility view. Uniform, Columns,
   and Rows definitions can coexist on one artboard.
 - Columns and Rows support Stretch or Center alignment; centered definitions
   use explicit cell size and the canvas renders every visible definition.
 - `paint.ui.artboard.layout.set` accepts the same ordered definitions. Proof is
   generated as `painter_ui_designer_m2_multiple_layout_grids.png`.
-- Reusable named grid-style library CRUD remains open; do not mark
-  `paint.ui.layout_grid.style.*` complete yet.
+- Reusable named grid styles now have stable IDs, Inspector
+  save/apply/update/remove controls, linked-artboard propagation, reference-safe
+  removal, Undo/Redo, and `paint.ui.layout_grid.style.*` Action parity.
 
 Required Actions:
 
