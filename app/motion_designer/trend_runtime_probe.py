@@ -32,6 +32,7 @@ def evaluate_runtime_probe(
     loop_count: int,
     diagnostics: dict[str, Any],
     screenshot_path: Path,
+    preview_framebuffer_path: Path | None = None,
 ) -> dict[str, Any]:
     backend = str(diagnostics.get("backend") or "")
     context_valid = bool(diagnostics.get("context_valid"))
@@ -50,6 +51,11 @@ def evaluate_runtime_probe(
         "opengl_context": context_valid,
         "renderer_reported": bool(backend),
         "screenshot": screenshot_path.is_file() and screenshot_path.stat().st_size > 0,
+        "preview_framebuffer": bool(
+            preview_framebuffer_path is not None
+            and preview_framebuffer_path.is_file()
+            and preview_framebuffer_path.stat().st_size > 0
+        ),
     }
     measurement_ok = all(checks.values())
     realtime_checks = {
@@ -89,6 +95,9 @@ def run_trend_runtime_probe(
     app.processEvents()
 
     screenshot_path = report_path.with_name("trend_runtime_workspace.png")
+    preview_framebuffer_path = report_path.with_name(
+        "trend_runtime_preview_framebuffer.png"
+    )
     frame_swaps = 0
     loop_count = 0
     previous_time = 0
@@ -110,7 +119,16 @@ def run_trend_runtime_probe(
             return
         window._set_playback_direction(0)
         app.processEvents()
-        window.grab().save(str(screenshot_path), "PNG")
+        window.preview.grabFramebuffer().save(
+            str(preview_framebuffer_path),
+            "PNG",
+        )
+        screen = window.screen()
+        if screen is not None:
+            screen.grabWindow(int(window.winId())).save(
+                str(screenshot_path),
+                "PNG",
+            )
         elapsed = time.monotonic() - started
         diagnostics = dict(window.preview.diagnostics())
         evaluation = evaluate_runtime_probe(
@@ -120,6 +138,7 @@ def run_trend_runtime_probe(
             loop_count=loop_count,
             diagnostics=diagnostics,
             screenshot_path=screenshot_path,
+            preview_framebuffer_path=preview_framebuffer_path,
         )
         state.update({
             "schema": RUNTIME_PROBE_SCHEMA,
@@ -139,6 +158,7 @@ def run_trend_runtime_probe(
             "memory_after_bytes": _memory_bytes(),
             "backend": diagnostics,
             "screenshot_path": str(screenshot_path),
+            "preview_framebuffer_path": str(preview_framebuffer_path),
             **evaluation,
         })
         report_path.write_text(

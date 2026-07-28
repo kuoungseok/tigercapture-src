@@ -8,6 +8,8 @@ def test_runtime_probe_requires_wall_clock_loops_gpu_and_screenshot(
 ) -> None:
     screenshot = tmp_path / "workspace.png"
     screenshot.write_bytes(b"png")
+    preview = tmp_path / "preview.png"
+    preview.write_bytes(b"png")
     report = evaluate_runtime_probe(
         target_seconds=60.0,
         elapsed_seconds=60.1,
@@ -15,6 +17,7 @@ def test_runtime_probe_requires_wall_clock_loops_gpu_and_screenshot(
         loop_count=5,
         diagnostics={"context_valid": True, "backend": "motion_vector_gpu"},
         screenshot_path=screenshot,
+        preview_framebuffer_path=preview,
     )
     assert report["ok"] is True
     assert all(report["checks"].values())
