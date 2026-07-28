@@ -190,6 +190,7 @@ def test_umg_preflight_marks_new_motion_effects_for_deterministic_bake() -> None
             MotionEffectRef(kind="light_sweep"),
             MotionEffectRef(kind="fractal_noise"),
             MotionEffectRef(kind="posterize"),
+            MotionEffectRef(kind="craft_style"),
         ],
     )
     document = motion_composition_to_umg_document(
@@ -202,6 +203,7 @@ def test_umg_preflight_marks_new_motion_effects_for_deterministic_bake() -> None
         "effect_requires_bake:light_sweep",
         "effect_requires_bake:fractal_noise",
         "effect_requires_bake:posterize",
+        "effect_requires_bake:craft_style",
     } <= set(payload["umg_block_reasons"])
 
 

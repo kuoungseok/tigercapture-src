@@ -2101,3 +2101,50 @@ def register_motion_actions(registry: Any) -> None:
             params_schema=schema_object(props, required=required), required=required, mutating=mutating,
             changed=mutating, destructive=action_id.endswith("remove"), undo_label=title if mutating else "",
             async_kind="motion_cache" if action_id.endswith("cache") else "", dry_summary=f"{title} would run")
+
+    registry.register_adapter_action(
+        "motion.craft.presets",
+        "List deterministic Motion craft-style presets.",
+        "motion",
+        "motion_craft_presets",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.craft.get",
+        "Inspect the craft style applied to a Motion layer.",
+        "motion",
+        "motion_craft_get",
+        params_schema=schema_object(lid, required=("composition_id", "layer_id")),
+        required=("composition_id", "layer_id"),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.craft.apply",
+        "Apply or replace a deterministic craft style on a Motion layer.",
+        "motion",
+        "motion_craft_apply",
+        params_schema=schema_object({
+            **lid,
+            "preset": {
+                "type": "string",
+                "enum": ["subtle_film", "handmade", "archive_print"],
+            },
+            "settings": {"type": "object"},
+        }, required=("composition_id", "layer_id")),
+        required=("composition_id", "layer_id"),
+        undo_label="Apply Craft Style",
+        dry_summary="A deterministic craft style would be applied",
+    )
+    registry.register_adapter_action(
+        "motion.craft.clear",
+        "Remove the craft style from a Motion layer.",
+        "motion",
+        "motion_craft_clear",
+        params_schema=schema_object(lid, required=("composition_id", "layer_id")),
+        required=("composition_id", "layer_id"),
+        undo_label="Clear Craft Style",
+        dry_summary="The craft style would be removed",
+    )

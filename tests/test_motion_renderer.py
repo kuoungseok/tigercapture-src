@@ -327,6 +327,34 @@ def test_light_noise_shadow_and_stylize_effects_are_deterministic() -> None:
     assert len(np.unique(posterized[..., 0])) <= 4
 
 
+def test_craft_style_is_deterministic_and_changes_over_time() -> None:
+    from app.motion_designer.craft_style import make_craft_style_effect
+
+    _app()
+    source = QImage(96, 64, QImage.Format_RGBA8888_Premultiplied)
+    source.fill(QColor("#78899a"))
+
+    def pixels(image: QImage) -> np.ndarray:
+        straight = image.convertToFormat(QImage.Format_RGBA8888)
+        rows = np.frombuffer(straight.constBits(), dtype=np.uint8).reshape(
+            straight.height(), straight.bytesPerLine(),
+        )
+        return rows[:, : straight.width() * 4].reshape(
+            straight.height(), straight.width(), 4,
+        ).copy()
+
+    effect = make_craft_style_effect(
+        {"seed": 83, "grain_amount": 0.4, "weave_x": 3.0},
+        preset="handmade",
+    )
+    first = pixels(apply_effects(source, [effect], 250))
+    repeated = pixels(apply_effects(source, [effect], 250))
+    later = pixels(apply_effects(source, [effect], 750))
+    assert np.array_equal(first, repeated)
+    assert not np.array_equal(first, later)
+    assert np.all(first[..., 3] == 255)
+
+
 def test_gpu_only_preview_backends_fall_back_when_effects_are_active() -> None:
     shape = MotionLayer(
         id="shape_effect",

@@ -86,7 +86,7 @@ M21-M28은 다음 조건을 모두 만족해야 완료다.
 
 | 순서 | 마일스톤 | 목적 | 상태 |
 | --- | --- | --- | --- |
-| M21 | Craft and Imperfection Style Stack | 아날로그 손맛을 재사용 가능한 효과 체계로 구현 | Planned |
+| M21 | Craft and Imperfection Style Stack | 아날로그 손맛을 재사용 가능한 효과 체계로 구현 | In progress: core stack |
 | M22 | Dynamic Glass Material | 실시간 backdrop glass와 glossy motion 구현 | Planned |
 | M23 | Mixed Media Craft Workspace | 종이·스캔·손그림·콜라주 제작 흐름 완성 | Planned |
 | M24 | Painterly 2D/3D Look Development | PBR 위에 2D line/brush/toon 스타일 결합 | Planned |
@@ -112,6 +112,20 @@ M22는 서로 다른 effect backend 작업으로 병렬 진행할 수 있다.
 
 목표: 사용자가 여러 효과를 수동으로 겹치지 않아도 통제 가능한 손맛을
 레이어, 그룹, adjustment layer, composition에 적용한다.
+
+### 2026-07-29 구현 상태
+
+- `tigerstudio.motion.craft_style.v1` 계약과 `craft_style` 효과를 추가했다.
+- Subtle Film, Handmade, Archive Print 프리셋을 제공한다.
+- 결정론적 Film Grain, Gate Weave, Light Flicker/Warmth가 Preview와
+  Export의 공통 `effect_adapter` 경로를 사용한다.
+- `Craft` Inspector에서 프리셋, 강도, grain, weave, flicker, locked seed를
+  편집하고 기존 Craft 스택을 중복 없이 교체하거나 제거할 수 있다.
+- `motion.craft.presets/get/apply/clear` Action/MCP를 제공한다.
+- Unreal UMG 변환은 효과를 묵살하지 않고
+  `effect_requires_bake:craft_style`로 명시한다.
+- 남은 M21 범위는 Dust/Scratch, print misregistration, halation/VHS,
+  durable texture attach/relink, loop-boundary QA와 실제 비교 샘플이다.
 
 구현:
 
@@ -390,4 +404,3 @@ QA:
 - Painter의 브러시 엔진과 프레임 드로잉 UI를 Motion Designer에 복제하지
   않는다.
 - Unreal UMG에서 표현할 수 없는 효과를 조용히 누락하지 않는다.
-

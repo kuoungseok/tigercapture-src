@@ -44,6 +44,7 @@ FILTER_ITEMS = (
     ("Corner Pin", "corner_pin"),
     ("Mesh Warp", "mesh_warp"),
     ("Paper Fold", "paper_fold"),
+    ("Craft / Imperfection", "craft_style"),
 )
 
 CATALOG = {
@@ -158,4 +159,5 @@ ITEM_DESCRIPTIONS = {
     "corner_pin": "Fit a layer to four points",
     "mesh_warp": "Deform a layer with a mesh",
     "paper_fold": "Simulate a folding paper surface",
+    "craft_style": "Deterministic film grain, gate weave, and light flicker",
 }

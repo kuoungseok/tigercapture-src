@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from typing import Any
+import math
 
 from PySide6.QtGui import QImage
 
@@ -85,6 +86,79 @@ def _fractal_noise(
         return left
     right = sample(left_seed + 7919)
     return left * (1.0 - blend) + right * blend
+
+
+def _temporal_noise(seed: int, sample: int) -> float:
+    value = math.sin((int(seed) * 12.9898 + int(sample) * 78.233) * 0.017453292519943295)
+    return (value * 43758.5453) % 1.0
+
+
+def _apply_craft_style(rgba, effect: MotionEffectRef, time_ms: float):
+    import cv2
+    import numpy as np
+
+    amount = max(0.0, min(1.0, float(_value(effect, "amount", time_ms, 1.0))))
+    seed = max(0, int(_value(effect, "seed", time_ms, 1)))
+    height, width = rgba.shape[:2]
+
+    weave_frequency = max(0.0, float(_value(effect, "weave_frequency", time_ms, 0.8)))
+    phase = float(time_ms) * 0.001 * weave_frequency
+    drift_x = float(_value(effect, "weave_x", time_ms, 0.8))
+    drift_y = float(_value(effect, "weave_y", time_ms, 0.55))
+    rotation = float(_value(effect, "weave_rotation", time_ms, 0.05))
+    seed_phase = _temporal_noise(seed, 0) * math.tau
+    offset_x = math.sin(phase * math.tau + seed_phase) * drift_x * amount
+    offset_y = math.sin(phase * math.tau * 0.73 + seed_phase * 1.7) * drift_y * amount
+    angle = math.sin(phase * math.tau * 0.41 + seed_phase * 0.6) * rotation * amount
+    if abs(offset_x) > 1e-4 or abs(offset_y) > 1e-4 or abs(angle) > 1e-5:
+        matrix = cv2.getRotationMatrix2D((width * 0.5, height * 0.5), angle, 1.0)
+        matrix[0, 2] += offset_x
+        matrix[1, 2] += offset_y
+        rgba = cv2.warpAffine(
+            rgba,
+            matrix,
+            (width, height),
+            flags=cv2.INTER_LINEAR,
+            borderMode=cv2.BORDER_REFLECT_101,
+        )
+
+    flicker_amount = max(0.0, min(1.0, float(
+        _value(effect, "flicker_amount", time_ms, 0.018)
+    ))) * amount
+    flicker_frequency = max(0.0, float(
+        _value(effect, "flicker_frequency", time_ms, 7.0)
+    ))
+    flicker_sample = int(math.floor(float(time_ms) * 0.001 * flicker_frequency))
+    flicker = (_temporal_noise(seed + 19, flicker_sample) * 2.0 - 1.0) * flicker_amount
+    warmth = max(-1.0, min(1.0, float(
+        _value(effect, "flicker_warmth", time_ms, 0.08)
+    )))
+    gains = np.asarray(
+        [1.0 + flicker * (1.0 + warmth), 1.0 + flicker, 1.0 + flicker * (1.0 - warmth)],
+        dtype=np.float32,
+    )
+    rgba[..., :3] *= gains
+
+    grain_amount = max(0.0, min(1.0, float(
+        _value(effect, "grain_amount", time_ms, 0.10)
+    ))) * amount
+    if grain_amount > 1e-6:
+        cadence = max(0.1, float(_value(effect, "grain_cadence", time_ms, 12.0)))
+        grain_sample = int(math.floor(float(time_ms) * 0.001 * cadence))
+        grain_size = max(1.0, min(12.0, float(
+            _value(effect, "grain_size", time_ms, 1.4)
+        )))
+        grain_height = max(2, int(round(height / grain_size)))
+        grain_width = max(2, int(round(width / grain_size)))
+        rng = np.random.default_rng(seed + grain_sample * 104729)
+        grain = rng.normal(0.0, 1.0, (grain_height, grain_width)).astype(np.float32)
+        grain = cv2.resize(grain, (width, height), interpolation=cv2.INTER_LINEAR)
+        luminance = (
+            rgba[..., 0] * 0.2126 + rgba[..., 1] * 0.7152 + rgba[..., 2] * 0.0722
+        ) / 255.0
+        response = np.clip(1.0 - np.abs(luminance - 0.5) * 1.4, 0.25, 1.0)
+        rgba[..., :3] += grain[..., None] * response[..., None] * grain_amount * 42.0
+    return rgba
 
 
 def apply_effects(image: QImage, effects: list[MotionEffectRef], time_ms: float) -> QImage:
@@ -219,6 +293,8 @@ def apply_effects(image: QImage, effects: list[MotionEffectRef], time_ms: float)
             )
             noise = np.clip((noise - 0.5) * contrast + 0.5, 0.0, 1.0) * 255.0
             rgba[..., :3] = rgb * (1.0 - amount) + noise[..., None] * amount
+        elif kind == "craft_style":
+            rgba = _apply_craft_style(rgba, effect, time_ms)
         elif kind == "posterize":
             levels = max(2, min(64, int(round(float(_value(effect, "levels", time_ms, 8))))))
             amount = max(0.0, min(1.0, float(_value(effect, "amount", time_ms, 1.0))))

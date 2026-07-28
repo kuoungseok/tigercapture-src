@@ -6569,9 +6569,18 @@ AI Script Edit MVP integration:
   add a craft/imperfection style stack, dynamic backdrop glass, mixed-media
   authoring, painterly 2D/3D look development, stop-motion timing, story and
   platform direction, editable AI style direction, and trend-template QA.
-  M21-M28 are planned milestones and must not be described as current features
-  until their schema, Action/MCP,
-  Preview/Export parity, stress test, and real artifact gates pass.
+  M21-M28 remain product milestones and must not be described as fully
+  complete until their schema, Action/MCP, Preview/Export parity, stress test,
+  and real artifact gates pass. The first M21 core slice is implemented:
+  `tigerstudio.motion.craft_style.v1` stores deterministic Film Grain, Gate
+  Weave, Light Flicker/Warmth, locked seed, and preset metadata in an ordinary
+  Motion effect. Subtle Film, Handmade, and Archive Print are available from
+  the dedicated Craft Inspector and through
+  `motion.craft.presets/get/apply/clear`. Preview and export share
+  `effect_adapter`; UMG preflight reports
+  `effect_requires_bake:craft_style` instead of silently dropping the look.
+  Dust/scratch, print misregistration, halation/VHS, durable texture relinking,
+  loop-boundary evidence, and product comparison captures remain M21 work.
 - M13 character-rigging foundation is complete. Motion compositions persist
   provider-neutral `tigerstudio.motion.rig.v1` cutout rigs with stable rig and
   bone IDs, a validated parent hierarchy, rest positions, animated rotation

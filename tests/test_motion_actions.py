@@ -97,6 +97,51 @@ def test_motion_effect_actions_preserve_light_noise_and_stylize_parameters() -> 
     assert effects[3].params["levels"].default == 7.0
 
 
+def test_motion_craft_actions_apply_replace_and_clear_one_style() -> None:
+    owner = Owner()
+    registry = ActionRegistry(owner)
+    created = registry.execute("motion.composition.create", {"name": "Craft"})
+    composition_id = created.result["payload"]["composition"]["id"]
+    added = registry.execute("motion.layer.add", {
+        "composition_id": composition_id,
+        "layer": {"name": "Plate", "layer_type": "shape"},
+    })
+    layer_id = added.result["payload"]["composition"]["layers"][0]["id"]
+
+    presets = registry.execute("motion.craft.presets", {})
+    assert presets.ok
+    assert {row["id"] for row in presets.result["presets"]} == {
+        "subtle_film", "handmade", "archive_print",
+    }
+    first = registry.execute("motion.craft.apply", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "preset": "handmade",
+        "settings": {"seed": 77, "grain_amount": 0.31},
+    })
+    assert first.ok
+    effect_id = first.result["effect"]["id"]
+    second = registry.execute("motion.craft.apply", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "preset": "archive_print",
+    })
+    assert second.ok
+    assert second.result["effect"]["id"] == effect_id
+    inspected = registry.execute("motion.craft.get", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+    })
+    assert inspected.ok and inspected.result["enabled"]
+    assert inspected.result["effect"]["metadata"]["preset"] == "archive_print"
+    assert len(owner._motion_compositions[composition_id].layers[0].effects) == 1
+    cleared = registry.execute("motion.craft.clear", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+    })
+    assert cleared.ok and cleared.result["changed"]
+
+
 def test_advanced_keyframe_and_behavior_actions_are_automation_ready() -> None:
     owner = Owner()
     registry = ActionRegistry(owner)

@@ -48,7 +48,7 @@ def test_motion_designer_window_uses_controller_for_layer_and_undo() -> None:
     assert not window.toolbar.unreal_link_button.icon().isNull()
     assert window.toolbar.templates_button.text() == "Templates"
     assert window.project_tabs.count() == 3
-    assert window.inspector_tabs.count() == 19
+    assert window.inspector_tabs.count() == 20
     assert window.inspector_tabs.indexOf(window.tracking) >= 0
     assert window.inspector_tabs.indexOf(window.puppet) >= 0
     assert window.inspector_tabs.indexOf(window.rig) >= 0
@@ -225,7 +225,7 @@ def test_motion_effect_library_exposes_light_noise_and_stylize_controls() -> Non
         window.effects.kind.itemText(index)
         for index in range(window.effects.kind.count())
     }
-    assert {"drop_shadow", "light_sweep", "fractal_noise", "posterize"} <= kinds
+    assert {"drop_shadow", "light_sweep", "fractal_noise", "posterize", "craft_style"} <= kinds
 
     window._add_effect("fractal_noise")
     app.processEvents()
