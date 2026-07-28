@@ -1083,6 +1083,7 @@ class MotionDesignerWindow(QMainWindow):
         self.stop_motion.onion_requested.connect(self._inspect_stop_motion_onion)
         self.story.story_update_requested.connect(self._update_story_direction)
         self.story.beat_add_requested.connect(self._add_story_beat)
+        self.story.audio_bind_requested.connect(self._bind_story_audio)
         self.story.platform_preview_requested.connect(self._preview_platform_variant)
         self.story.platform_apply_requested.connect(self._apply_platform_variant)
         self.masks.add_requested.connect(self._add_mask)
@@ -3173,6 +3174,26 @@ class MotionDesignerWindow(QMainWindow):
             self.controller.composition.to_dict(),
         )
         update_story(candidate, changes)
+        candidate.revision += 1
+        self.controller.replace(candidate)
+
+    def _bind_story_audio(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        from app.motion_designer.story_direction import bind_story_audio
+
+        candidate = MotionComposition.from_dict(
+            self.controller.composition.to_dict(),
+        )
+        bind_story_audio(
+            candidate,
+            beat_id=str(payload.get("beat_id") or ""),
+            source_kind=str(payload.get("source_kind") or ""),
+            source_id=str(payload.get("source_id") or ""),
+            cue_ms=int(payload.get("cue_ms") or 0),
+            label=str(payload.get("label") or ""),
+            tempo_bpm=payload.get("tempo_bpm"),
+        )
         candidate.revision += 1
         self.controller.replace(candidate)
 

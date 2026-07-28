@@ -584,8 +584,11 @@ Action/MCP:
   audio cue, scene/layer 연결을 composition metadata에 저장한다.
 - Story workspace에서 제목, 메시지, 대상과 beat를 작성할 수 있다.
   Voice Lab 및 Music Lab 결과는 안정 ID, cue 시각, label, 선택적 BPM을
-  beat에 연결한다. 세부 beat 수정·재정렬과 audio binding은 동일 문서
-  계약을 사용하는 Action/MCP에서도 제공된다.
+  beat에 연결한다. Story 패널은 문서에 실제 import된 Voice timing과
+  Composer timing/audio path를 `Voice / Music` 목록으로 보여주고 선택한
+  beat 시작점에 바인딩하며, beat 목록에 Voice/Music 상태를 표시한다.
+  세부 beat 수정·재정렬과 audio binding은 동일 문서 계약을 사용하는
+  Action/MCP에서도 제공된다.
 - `tigerstudio.motion.platform_variant_plan.v1`은 원본을 변경하지 않고
   16:9, 9:16, 1:1 reflow diff를 만든다. Background, Headline, Subtitle,
   CTA, Character/Mascot, 일반 content 역할과 명시적 priority를 기준으로
@@ -607,9 +610,8 @@ Action/MCP:
   story issue 0, protected character/headline/subtitle/CTA 잘림 0,
   stable ID loss 0, source mutation 0이다.
 - v1은 role/priority 기반의 결정적 constraint reflow다. 장면의 의미를
-  새로 해석하는 생성형 art direction, 플랫폼별 copy rewrite,
-  실제 Voice/Music asset browser 선택 UI는 M27 AI Style Director와
-  후속 제품 폴리싱 범위다.
+  새로 해석하는 생성형 art direction과 플랫폼별 copy rewrite는 M27 AI
+  Style Director와 후속 제품 폴리싱 범위다.
 
 ## 11. M27 - AI Style Director
 

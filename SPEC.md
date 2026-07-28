@@ -6700,10 +6700,14 @@ AI Script Edit MVP integration:
   audience/message direction, character continuity, and Voice Lab or Music Lab
   bindings with stable source IDs, cue time, and optional tempo.
 - The Motion Designer `Story` workspace exposes the core story brief, beat
-  creation, and platform preview/apply workflow. Automation exposes
+  creation, imported Voice/Composer timing source selection, selected-beat
+  audio binding, visible Voice/Music binding status, and platform preview/apply
+  workflow. Automation exposes
   `motion.story.inspect/update`, `motion.story.beat.add/update/reorder`,
   `motion.story.audio.bind`, `motion.platform.variant.plan/preview/apply`, and
   `motion.platform.preflight`.
+  `tools/qa_motion_story_audio_ui.py` captures a real Qt Story workspace with
+  imported Voice and Composer sources and verifies selected-beat binding state.
 - Platform conversion uses the reviewable
   `tigerstudio.motion.platform_variant_plan.v1` contract. The plan is
   non-destructive and records every composition resize, role-aware layer

@@ -354,6 +354,64 @@ def test_collage_starter_material_can_begin_from_an_empty_project() -> None:
     app.processEvents()
 
 
+def test_story_panel_binds_imported_voice_and_music_to_selected_beat() -> None:
+    from app.motion_designer.story_direction import (
+        add_story_beat,
+        inspect_story,
+    )
+
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    app = QApplication.instance() or QApplication([])
+    composition = MotionComposition(
+        width=640,
+        height=360,
+        duration_ms=4000,
+    )
+    beat = add_story_beat(
+        composition,
+        role="hook",
+        start_ms=250,
+        end_ms=1400,
+        purpose="Open",
+    )
+    composition.metadata["audio_timing_sources"] = {
+        "voice-1": {
+            "id": "voice-1",
+            "kind": "voice",
+            "sentences": [{"text": "Start your morning"}],
+        },
+        "music-1": {
+            "id": "music-1",
+            "kind": "composer",
+            "bpm": 126,
+            "audio_path": "C:/renders/morning-theme.wav",
+            "metadata": {"genre": "electronic"},
+        },
+    }
+    window = MotionDesignerWindow(composition)
+    assert window.story.audio_source.count() == 2
+    window.story.beats.setCurrentRow(0)
+    music_index = next(
+        index
+        for index in range(window.story.audio_source.count())
+        if window.story.audio_source.itemText(index).startswith("Music")
+    )
+    window.story.audio_source.setCurrentIndex(music_index)
+    window.story.bind_audio.click()
+    app.processEvents()
+    binding = inspect_story(window.controller.composition)["audio_bindings"][0]
+    assert binding["beat_id"] == beat["id"]
+    assert binding["source_kind"] == "music"
+    assert binding["source_id"] == "music-1"
+    assert binding["cue_ms"] == 250
+    assert binding["tempo_bpm"] == 126.0
+    assert "[Music]" in window.story.beats.item(0).text()
+    window.close()
+    app.processEvents()
+
+
 def test_painterly_inspector_edits_colors_and_texture_blend(tmp_path) -> None:
     existing = QCoreApplication.instance()
     if existing is not None and not isinstance(existing, QApplication):
