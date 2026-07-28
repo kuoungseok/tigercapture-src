@@ -261,6 +261,33 @@ def main() -> int:
         },
     ).to_dict()
     group_id = str(grouped["result"]["ui_design"]["selected_object_id"])
+    layout_set = registry.execute(
+        "paint.ui.layout.set",
+        {
+            "object_id": group_id,
+            "mode": "horizontal",
+            "padding": {"left": 18, "top": 14, "right": 18, "bottom": 14},
+            "gap": 24,
+            "main_alignment": "center",
+            "cross_alignment": "center",
+        },
+    ).to_dict()
+    app.processEvents()
+    auto_layout_controls = (
+        dialog._painter_ui_overlay._auto_layout_canvas_controls()
+    )
+    auto_layout_ok = (
+        layout_set.get("ok") is True
+        and auto_layout_controls is not None
+        and auto_layout_controls.control("gap") is not None
+        and len(auto_layout_controls.padding_handles) == 4
+    )
+    dialog._hide_painter_ui_quick_properties()
+    app.processEvents()
+    auto_layout_screenshot_path = (
+        output_dir / "painter_ui_designer_m2_auto_layout_canvas.png"
+    )
+    dialog.grab().save(str(auto_layout_screenshot_path), "PNG")
     registry.execute(
         "paint.ui.object.reparent",
         {
@@ -639,6 +666,7 @@ def main() -> int:
             and screenshot_path.is_file()
             and inspect_screenshot_path.is_file()
             and desktop_screenshot_path.is_file()
+            and auto_layout_screenshot_path.is_file()
             and hierarchy_screenshot_path.is_file()
             and breadcrumb_screenshot_path.is_file()
             and scope_screenshot_path.is_file()
@@ -654,6 +682,7 @@ def main() -> int:
             and compact_screenshot_path.is_file()
             and detached_round_trip
             and flexible_workspace_ok
+            and auto_layout_ok
             and text_context_ok
             and inline_text_ok
             and image_context_ok
@@ -675,6 +704,7 @@ def main() -> int:
         "screenshot": str(screenshot_path),
         "inspect_screenshot": str(inspect_screenshot_path),
         "desktop_screenshot": str(desktop_screenshot_path),
+        "auto_layout_screenshot": str(auto_layout_screenshot_path),
         "hierarchy_screenshot": str(hierarchy_screenshot_path),
         "breadcrumb_screenshot": str(breadcrumb_screenshot_path),
         "group_scope_screenshot": str(scope_screenshot_path),
@@ -698,6 +728,7 @@ def main() -> int:
         "inspector_width": dialog._paint_inspector_expanded_width,
         "inspector_detached_round_trip": detached_round_trip,
         "flexible_workspace_ok": flexible_workspace_ok,
+        "auto_layout_canvas_ok": auto_layout_ok,
         "quick_properties_ok": quick_properties_ok,
         "zoom_popover_ok": zoom_popover_ok,
         "compact_zoom_ok": compact_zoom_ok,

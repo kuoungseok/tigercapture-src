@@ -250,6 +250,19 @@ Canvas 직접 조작:
 Auto Layout를 켜면 일반 Layout 섹션이 `Auto Layout`로 바뀌며 direction,
 padding, gap, alignment, wrap, Hug/Fill/Fixed를 표시한다.
 
+Canvas interaction checkpoint (2026-07-29):
+
+- A single unlocked Frame/Group exposes a transient canvas toolbar instead of
+  requiring a fixed Inspector panel.
+- `H`/`V` changes direction, `M` and `C` cycle main/cross alignment, and the
+  `G` field scrubs item gap.
+- Four amber edge handles scrub left/top/right/bottom padding at the resolved
+  canvas scale.
+- A child of an active Auto Layout container exposes `FLOW`/`ABS` positioning.
+- Canvas commits use the same normalized `layout` record, object update,
+  one-intention Undo, save path, and `paint.ui.layout.set` contract as the
+  Inspector and automation.
+
 ### 5.4 Shape 선택
 
 표시 순서:

@@ -378,3 +378,150 @@ def test_auto_layout_action_uses_object_update_and_undo() -> None:
     dialog.close()
     dialog.deleteLater()
     app.processEvents()
+
+
+def test_canvas_auto_layout_controls_enable_and_drag_gap() -> None:
+    app = _app()
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    document, row = add_ui_object(
+        create_ui_document(800, 600),
+        kind="frame",
+        x=120,
+        y=120,
+        width=360,
+        height=180,
+    )
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(900, 700)
+    overlay.set_document(document)
+    overlay.set_tool("select")
+    overlay.show()
+    app.processEvents()
+    changes: list[tuple[str, dict]] = []
+    overlay.object_changes_requested.connect(
+        lambda object_id, payload: changes.append((object_id, payload))
+    )
+
+    controls = overlay._auto_layout_canvas_controls()
+    assert controls is not None
+    horizontal = controls.control("mode_horizontal")
+    assert horizontal is not None
+    QTest.mouseClick(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        horizontal.rect.center().toPoint(),
+    )
+    assert changes[-1][0] == row["id"]
+    assert changes[-1][1]["layout"]["mode"] == "horizontal"
+
+    controls = overlay._auto_layout_canvas_controls()
+    assert controls is not None
+    gap = controls.control("gap")
+    assert gap is not None
+    start = gap.rect.center().toPoint()
+    QTest.mousePress(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        start,
+    )
+    QTest.mouseMove(overlay, start + QPoint(30, 0))
+    QTest.mouseRelease(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        start + QPoint(30, 0),
+    )
+    assert changes[-1][1]["layout"]["gap"] > 0.0
+    overlay.deleteLater()
+    app.processEvents()
+
+
+def test_canvas_auto_layout_controls_adjust_padding_and_child_positioning() -> None:
+    app = _app()
+    from PySide6.QtCore import QPoint, Qt
+    from PySide6.QtTest import QTest
+
+    from app.painter_ui_document import (
+        add_ui_object,
+        create_ui_document,
+        select_ui_object,
+    )
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    document, parent = add_ui_object(
+        create_ui_document(800, 600),
+        kind="group",
+        x=100,
+        y=100,
+        width=420,
+        height=220,
+    )
+    document["objects"][-1]["layout"] = {
+        "mode": "horizontal",
+        "padding": 12,
+        "gap": 10,
+    }
+    document, child = add_ui_object(
+        document,
+        kind="rectangle",
+        parent_id=parent["id"],
+        x=0,
+        y=0,
+        width=100,
+        height=80,
+    )
+    document = select_ui_object(document, parent["id"])
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(900, 700)
+    overlay.set_document(document)
+    overlay.set_tool("select")
+    overlay.show()
+    app.processEvents()
+    changes: list[tuple[str, dict]] = []
+    overlay.object_changes_requested.connect(
+        lambda object_id, payload: changes.append((object_id, payload))
+    )
+
+    controls = overlay._auto_layout_canvas_controls()
+    assert controls is not None
+    left = controls.control("padding_left")
+    assert left is not None
+    start = left.rect.center().toPoint()
+    QTest.mousePress(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        start,
+    )
+    QTest.mouseMove(overlay, start + QPoint(24, 0))
+    QTest.mouseRelease(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        start + QPoint(24, 0),
+    )
+    assert changes[-1][1]["layout"]["padding"]["left"] > 12.0
+
+    child_document = select_ui_object(overlay._document, child["id"])
+    overlay.set_document(child_document)
+    controls = overlay._auto_layout_canvas_controls()
+    assert controls is not None
+    positioning = controls.control("positioning")
+    assert positioning is not None
+    QTest.mouseClick(
+        overlay,
+        Qt.MouseButton.LeftButton,
+        Qt.KeyboardModifier.NoModifier,
+        positioning.rect.center().toPoint(),
+    )
+    assert changes[-1][0] == child["id"]
+    assert changes[-1][1]["layout"]["positioning"] == "absolute"
+    overlay.deleteLater()
+    app.processEvents()

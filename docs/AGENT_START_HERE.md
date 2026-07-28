@@ -135,6 +135,12 @@ Focused entry points:
   canvas-first wheel/Space navigation are implemented and verified. View
   automation uses `paint.ui.view.focus/pan/zoom/fit`; remaining milestone work
   continues in the focused roadmap.
+  As of 2026-07-29 the M2 canvas also exposes transient Auto Layout direction,
+  main/cross alignment, gap, four-edge padding, and child Flow/Absolute
+  controls. The implementation lives in
+  `app/painter_ui_auto_layout_overlay.py`, emits the existing object layout
+  mutation, and is covered by `tests/test_painter_ui_auto_layout.py` plus the
+  M2 screenshot in `tools/qa_painter_ui_designer.py`.
 
 If two areas overlap, keep the product boundary from the focused docs. Do not
 merge UI renewal, review automation, and VTuber sidecar setup into one unbounded

@@ -1,6 +1,7 @@
 """Interactive canvas overlay for Painter's UI Design workspace."""
 from __future__ import annotations
 
+import copy
 import math
 from typing import Any, Mapping
 
@@ -119,6 +120,8 @@ class PainterUIDesignOverlay(QWidget):
         self._edit_scope_id = ""
         self._text_editor = None
         self._text_edit_object_id = ""
+        self._auto_layout_active_target = ""
+        self._auto_layout_drag_original: dict[str, Any] | None = None
         self.setMouseTracking(True)
         self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setAttribute(Qt.WidgetAttribute.WA_OpaquePaintEvent, True)
@@ -1074,6 +1077,56 @@ class PainterUIDesignOverlay(QWidget):
             if row["id"] in selected_ids and row["visible"]
         ]
 
+    def _auto_layout_canvas_controls(self):
+        if self._tool != "select":
+            return None
+        from app.painter_ui_auto_layout_overlay import (
+            build_auto_layout_canvas_controls,
+        )
+
+        row = self._selected_row()
+        if row is None or len(self._selected_rows()) != 1:
+            return None
+        _viewport, scale = self._artboard_viewport(
+            next(
+                artboard
+                for artboard in self._document["artboards"]
+                if artboard["id"] == row["artboard_id"]
+            )
+        )
+        return build_auto_layout_canvas_controls(
+            row,
+            self._object_rect(row),
+            self._document,
+            QRectF(self.rect()),
+            scale=scale,
+        )
+
+    def _preview_auto_layout(
+        self,
+        object_id: str,
+        layout: Mapping[str, Any],
+    ) -> None:
+        from app.painter_ui_auto_layout import normalize_ui_auto_layout
+
+        normalized = normalize_ui_auto_layout(layout)
+        for document in (self._document, self._effective_document):
+            row = next(
+                (
+                    item
+                    for item in document["objects"]
+                    if item["id"] == object_id
+                ),
+                None,
+            )
+            if row is not None:
+                row["layout"] = copy.deepcopy(normalized)
+        self._resolved_geometry = resolve_ui_constraints(
+            self._effective_document,
+            resolved_ui_geometry(self._effective_document),
+        )
+        self.update()
+
     def _multi_transform_rows(self) -> list[dict[str, Any]]:
         rows = self._selected_rows()
         if (
@@ -1737,6 +1790,15 @@ class PainterUIDesignOverlay(QWidget):
                 painter.setBrush(QColor("#72A7FF"))
                 painter.drawEllipse(pivot, 3.0, 3.0)
             painter.restore()
+        from app.painter_ui_auto_layout_overlay import (
+            paint_auto_layout_canvas_controls,
+        )
+
+        paint_auto_layout_canvas_controls(
+            painter,
+            self._auto_layout_canvas_controls(),
+            active_target=self._auto_layout_active_target,
+        )
         if not multi_bounds.isNull():
             painter.save()
             painter.setBrush(Qt.BrushStyle.NoBrush)
@@ -1782,6 +1844,8 @@ class PainterUIDesignOverlay(QWidget):
         self._ruler_guide_preview = None
         self._ruler_origin_preview = None
         self._active_guide_position = 0.0
+        self._auto_layout_active_target = ""
+        self._auto_layout_drag_original = None
         self.update()
 
     def mousePressEvent(self, event) -> None:
@@ -1861,6 +1925,47 @@ class PainterUIDesignOverlay(QWidget):
                 if orientation == "horizontal"
                 else Qt.CursorShape.SplitHCursor
             )
+            event.accept()
+            return
+
+        controls = self._auto_layout_canvas_controls()
+        auto_layout_target = (
+            controls.hit_test(QPointF(event.position()))
+            if controls is not None
+            else ""
+        )
+        if auto_layout_target:
+            from app.painter_ui_auto_layout_overlay import (
+                apply_auto_layout_canvas_click,
+            )
+
+            self._active_object_id = controls.object_id
+            self._auto_layout_active_target = auto_layout_target
+            self._auto_layout_drag_original = copy.deepcopy(controls.layout)
+            if auto_layout_target == "gap" or auto_layout_target.startswith(
+                "padding_"
+            ):
+                self._interaction = "auto_layout_drag"
+                self.setCursor(
+                    Qt.CursorShape.SizeHorCursor
+                    if auto_layout_target in {
+                        "gap",
+                        "padding_left",
+                        "padding_right",
+                    }
+                    else Qt.CursorShape.SizeVerCursor
+                )
+            else:
+                layout = apply_auto_layout_canvas_click(
+                    controls.layout,
+                    auto_layout_target,
+                )
+                self._preview_auto_layout(controls.object_id, layout)
+                self.object_changes_requested.emit(
+                    controls.object_id,
+                    {"layout": layout},
+                )
+                self._cancel_interaction()
             event.accept()
             return
 
@@ -2067,6 +2172,24 @@ class PainterUIDesignOverlay(QWidget):
             self.update()
             event.accept()
             return
+        if (
+            self._interaction == "auto_layout_drag"
+            and self._auto_layout_drag_original is not None
+        ):
+            from app.painter_ui_auto_layout_overlay import (
+                apply_auto_layout_canvas_drag,
+            )
+
+            _viewport, scale = self._artboard_viewport()
+            layout = apply_auto_layout_canvas_drag(
+                self._auto_layout_drag_original,
+                self._auto_layout_active_target,
+                event.position() - self._press_position,
+                scale=scale,
+            )
+            self._preview_auto_layout(self._active_object_id, layout)
+            event.accept()
+            return
         if self._interaction == "create":
             viewport, _scale = self._artboard_viewport()
             position = QPointF(
@@ -2268,6 +2391,30 @@ class PainterUIDesignOverlay(QWidget):
             self.update()
             event.accept()
             return
+        controls = self._auto_layout_canvas_controls()
+        target = (
+            controls.hit_test(QPointF(event.position()))
+            if controls is not None
+            else ""
+        )
+        if target:
+            from app.painter_ui_auto_layout_overlay import (
+                auto_layout_canvas_tooltip,
+            )
+
+            self.setToolTip(auto_layout_canvas_tooltip(target))
+            self.setCursor(
+                Qt.CursorShape.SizeHorCursor
+                if target in {"gap", "padding_left", "padding_right"}
+                else Qt.CursorShape.SizeVerCursor
+                if target in {"padding_top", "padding_bottom"}
+                else Qt.CursorShape.PointingHandCursor
+            )
+            event.accept()
+            return
+        self.setToolTip("")
+        if self._tool == "select":
+            self.setCursor(Qt.CursorShape.ArrowCursor)
         event.ignore()
 
     def mouseReleaseEvent(self, event) -> None:
@@ -2355,6 +2502,20 @@ class PainterUIDesignOverlay(QWidget):
                     orientation,
                     self._active_guide_position,
                     next_position,
+                )
+        elif interaction == "auto_layout_drag" and object_id:
+            row = next(
+                (
+                    item
+                    for item in self._document["objects"]
+                    if item["id"] == object_id
+                ),
+                None,
+            )
+            if row is not None:
+                self.object_changes_requested.emit(
+                    object_id,
+                    {"layout": copy.deepcopy(row["layout"])},
                 )
         elif interaction == "create":
             rect = self._preview_rect.normalized()

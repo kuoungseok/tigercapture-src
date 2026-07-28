@@ -78,6 +78,11 @@ P1 implementation checkpoint (2026-07-26, navigation slice):
 - Corner resize supports Shift aspect lock and Alt center-based scaling.
 - Grid snapping also evaluates peer edges and centers, snaps within a
   screen-space tolerance, and paints visible Smart Guides while moving.
+- A selected Frame/Group now exposes transient H/V, main/cross alignment, gap,
+  and four-edge padding controls directly on the canvas. Children of an active
+  Auto Layout container expose Flow/Absolute positioning. These controls reuse
+  the normalized object `layout`, Undo, persistence, Inspector, and
+  `paint.ui.layout.set` paths rather than creating canvas-only state.
 - Artboard title dragging moves frames in document space and persists the new
   position through the same undoable artboard mutation service.
 - Inspector presets add iPhone, Android, desktop, console, and broadcast
