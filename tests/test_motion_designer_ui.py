@@ -296,6 +296,41 @@ def test_motion_effect_library_exposes_light_noise_and_stylize_controls() -> Non
     app.processEvents()
 
 
+def test_craft_inspector_exposes_advanced_imperfection_controls() -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    app = QApplication.instance() or QApplication([])
+    window = MotionDesignerWindow(MotionComposition(
+        width=640,
+        height=360,
+        duration_ms=1000,
+    ))
+    window._add_layer("shape")
+    layer = window.controller.composition.layers[0]
+    window._select_layer(layer.id)
+    values = {
+        "grain_chroma": 0.7,
+        "grain_shadow_response": 0.2,
+        "grain_midtone_response": 1.4,
+        "grain_highlight_response": 0.3,
+        "dust_lifetime": 0.75,
+        "scratch_direction": 32.0,
+        "edge_fiber_amount": 0.55,
+        "edge_fiber_length": 17.0,
+    }
+    for key, value in values.items():
+        window.craft.controls[key].setValue(value)
+    window.craft._emit_apply()
+    app.processEvents()
+    effect = window.controller.composition.layers[0].effects[0]
+    assert effect.kind == "craft_style"
+    for key, value in values.items():
+        assert effect.params[key].default == value
+    window.close()
+    app.processEvents()
+
+
 def test_painterly_inspector_edits_colors_and_texture_blend(tmp_path) -> None:
     existing = QCoreApplication.instance()
     if existing is not None and not isinstance(existing, QApplication):

@@ -121,9 +121,20 @@ def test_motion_craft_actions_apply_replace_and_clear_one_style(tmp_path) -> Non
         "composition_id": composition_id,
         "layer_id": layer_id,
         "preset": "handmade",
-        "settings": {"seed": 77, "grain_amount": 0.31},
+        "settings": {
+            "seed": 77,
+            "grain_amount": 0.31,
+            "grain_chroma": 0.65,
+            "dust_lifetime": 0.8,
+            "scratch_direction": -28.0,
+            "edge_fiber_amount": 0.4,
+        },
     })
     assert first.ok
+    assert first.result["effect"]["params"]["grain_chroma"]["default"] == 0.65
+    assert first.result["effect"]["params"]["dust_lifetime"]["default"] == 0.8
+    assert first.result["effect"]["params"]["scratch_direction"]["default"] == -28.0
+    assert first.result["effect"]["params"]["edge_fiber_amount"]["default"] == 0.4
     effect_id = first.result["effect"]["id"]
     second = registry.execute("motion.craft.apply", {
         "composition_id": composition_id,

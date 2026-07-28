@@ -167,15 +167,54 @@ def _apply_craft_style(rgba, effect: MotionEffectRef, time_ms: float):
         rng = np.random.default_rng(seed + grain_sample * 104729)
         grain = rng.normal(0.0, 1.0, (grain_height, grain_width)).astype(np.float32)
         grain = cv2.resize(grain, (width, height), interpolation=cv2.INTER_LINEAR)
+        grain_chroma = max(0.0, min(1.0, float(
+            _value(effect, "grain_chroma", time_ms, 0.0)
+        )))
+        if grain_chroma > 1e-6:
+            color_grain = rng.normal(
+                0.0,
+                1.0,
+                (grain_height, grain_width, 3),
+            ).astype(np.float32)
+            color_grain = cv2.resize(
+                color_grain,
+                (width, height),
+                interpolation=cv2.INTER_LINEAR,
+            )
+            grain_rgb = (
+                grain[..., None] * (1.0 - grain_chroma)
+                + color_grain * grain_chroma
+            )
+        else:
+            grain_rgb = grain[..., None]
         luminance = (
             rgba[..., 0] * 0.2126 + rgba[..., 1] * 0.7152 + rgba[..., 2] * 0.0722
         ) / 255.0
-        response = np.clip(1.0 - np.abs(luminance - 0.5) * 1.4, 0.25, 1.0)
-        rgba[..., :3] += grain[..., None] * response[..., None] * grain_amount * 42.0
+        shadow_weight = np.clip(1.0 - luminance * 2.0, 0.0, 1.0)
+        highlight_weight = np.clip((luminance - 0.5) * 2.0, 0.0, 1.0)
+        midtone_weight = np.clip(
+            1.0 - shadow_weight - highlight_weight,
+            0.0,
+            1.0,
+        )
+        response = (
+            shadow_weight * max(0.0, float(_value(
+                effect, "grain_shadow_response", time_ms, 0.45
+            )))
+            + midtone_weight * max(0.0, float(_value(
+                effect, "grain_midtone_response", time_ms, 1.0
+            )))
+            + highlight_weight * max(0.0, float(_value(
+                effect, "grain_highlight_response", time_ms, 0.4
+            )))
+        )
+        rgba[..., :3] += grain_rgb * response[..., None] * grain_amount * 42.0
 
     source_alpha = rgba[..., 3] / 255.0
-    artifact_cadence = max(1, int(round(loop_period * 12.0)))
-    artifact_sample = int(math.floor(loop_time / loop_period * artifact_cadence))
+    dust_lifetime = max(0.04, min(10.0, float(
+        _value(effect, "dust_lifetime", time_ms, 0.35)
+    )))
+    artifact_sample = int(math.floor(loop_time / dust_lifetime))
     artifact_rng = np.random.default_rng(seed + artifact_sample * 130363)
 
     dust_amount = max(0.0, min(1.0, float(
@@ -193,14 +232,25 @@ def _apply_craft_style(rgba, effect: MotionEffectRef, time_ms: float):
             radius = int(artifact_rng.integers(1, max(2, int(min(width, height) * 0.012))))
             cv2.circle(artifacts, (x, y), radius, float(artifact_rng.uniform(0.25, 1.0)), -1)
         scratch_count = int(round(scratch_amount * width / 3.0))
+        scratch_direction = math.radians(max(-180.0, min(180.0, float(
+            _value(effect, "scratch_direction", time_ms, 0.0)
+        ))))
         for _ in range(min(80, scratch_count)):
             x = int(artifact_rng.integers(0, max(1, width)))
             y = int(artifact_rng.integers(0, max(1, height)))
             length = int(artifact_rng.integers(max(2, height // 12), max(3, height // 2)))
+            angle = scratch_direction + math.radians(float(
+                artifact_rng.uniform(-6.0, 6.0)
+            ))
+            end_x = int(round(x + math.sin(angle) * length))
+            end_y = int(round(y + math.cos(angle) * length))
             cv2.line(
                 artifacts,
                 (x, y),
-                (x + int(artifact_rng.integers(-2, 3)), min(height - 1, y + length)),
+                (
+                    max(0, min(width - 1, end_x)),
+                    max(0, min(height - 1, end_y)),
+                ),
                 float(artifact_rng.uniform(0.3, 0.85)),
                 1,
             )
@@ -283,6 +333,41 @@ def _apply_craft_style(rgba, effect: MotionEffectRef, time_ms: float):
         edge = cv2.morphologyEx(alpha, cv2.MORPH_GRADIENT, np.ones((3, 3), np.uint8))
         rgba[..., 3] = np.clip(
             alpha - edge * np.clip((rough - 0.42) * 3.0, 0.0, 1.0) * edge_roughness,
+            0.0,
+            1.0,
+        ) * 255.0
+
+    edge_fiber_amount = max(0.0, min(1.0, float(
+        _value(effect, "edge_fiber_amount", time_ms, 0.0)
+    ))) * amount
+    if edge_fiber_amount > 1e-6:
+        alpha = rgba[..., 3] / 255.0
+        fiber_length = max(1, min(64, int(round(float(
+            _value(effect, "edge_fiber_length", time_ms, 8.0)
+        )))))
+        kernel_size = max(3, fiber_length | 1)
+        edge_kernel_size = max(3, min(5, (fiber_length // 6 * 2 + 1)))
+        edge_band = cv2.morphologyEx(
+            alpha,
+            cv2.MORPH_GRADIENT,
+            np.ones((edge_kernel_size, edge_kernel_size), np.uint8),
+        )
+        fibers = _fractal_noise(
+            height,
+            width,
+            scale=max(1.5, fiber_length * 0.28),
+            octaves=4,
+            seed=seed + 1237,
+            phase=0.0,
+        )
+        fibers = cv2.GaussianBlur(
+            fibers,
+            (kernel_size, 1),
+            sigmaX=max(0.5, fiber_length * 0.3),
+        )
+        fiber_cut = np.clip((fibers - 0.5) * 5.0, 0.0, 1.0)
+        rgba[..., 3] = np.clip(
+            alpha - edge_band * fiber_cut * edge_fiber_amount * 0.8,
             0.0,
             1.0,
         ) * 255.0

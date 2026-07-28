@@ -6581,13 +6581,15 @@ AI Script Edit MVP integration:
   attach/relink, seed randomize/lock, and preflight actions. The shared effect
   additionally implements Dust/Scratch, print misregistration, halation,
   warmth, VHS scan wobble, edge roughness, and multiply/screen/overlay texture
-  blending. Preview and export share `effect_adapter`; UMG preflight reports
+  blending. The advanced Craft controls add RGB/mono grain mixing,
+  shadow/midtone/highlight response, dust/scratch lifetime, scratch direction,
+  and deterministic fibrous-edge strength/length to the same effect and
+  Inspector. Preview and export share `effect_adapter`; UMG preflight reports
   `effect_requires_bake:craft_style` instead of silently dropping the look.
   Nine designed presets plus Clean are rendered by
-  `tools/qa_motion_craft_style.py`; automated QA covers 300 frames, zero loop
-  boundary jump, deterministic seed, and Preview/Export pixel parity. Advanced
-  RGB-grain separation, dust lifetime/direction, and a fibrous-edge authoring
-  UI remain post-v1 quality extensions rather than shipped v1 claims.
+  `tools/qa_motion_craft_style.py`, together with explicit RGB Grain, Angled
+  Scratches, and Fibrous Edge samples; automated QA covers 300 frames, zero
+  loop boundary jump, deterministic seed, and Preview/Export pixel parity.
 - M22 Dynamic Glass core is implemented as
   `tigerstudio.motion.glass.v1`. A `tiger_glass` effect samples the already
   composed layers behind its transformed shape mask and applies deterministic

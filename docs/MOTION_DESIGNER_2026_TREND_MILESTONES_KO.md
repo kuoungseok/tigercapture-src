@@ -134,9 +134,11 @@ M22는 서로 다른 effect backend 작업으로 병렬 진행할 수 있다.
   비교 PNG와 SHA-256 보고서를 생성한다.
 - 300프레임 반복 렌더, loop boundary jump 0, Preview/Export 픽셀 parity를
   자동 테스트한다.
-- v1 이후 고급 확장 범위는 RGB grain 분리 제어, dust 수명/방향,
-  fibrous edge texture 제작 UI다. 이는 M21 v1 완료 주장을 막지 않지만
-  별도 후속 품질 항목으로 유지한다.
+- 고급 Craft 품질 확장으로 RGB/mono grain 혼합, shadow/midtone/highlight
+  grain response, dust/scratch 유지시간, scratch 방향, 결정론적 fibrous
+  edge 강도·길이 조절을 공통 렌더 계약과 `Craft` Inspector에 추가했다.
+  `tools/qa_motion_craft_style.py`는 RGB Grain, Angled Scratches, Fibrous
+  Edge를 별도 비교 샘플로 렌더한다.
 
 구현:
 
