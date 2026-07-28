@@ -61,6 +61,32 @@ def _small_trend_composition(duration_ms: int) -> MotionComposition:
     return result
 
 
+def _small_glass_composition(duration_ms: int) -> MotionComposition:
+    base = MotionComposition(
+        id="trend_glass_hdr_gate",
+        name="Trend Glass HDR Gate",
+        width=320,
+        height=180,
+        fps=30,
+        duration_ms=max(1000, int(duration_ms)),
+    )
+    result = apply_template_to_composition(
+        base,
+        "liquid_glass_app_promo",
+        variant="16:9",
+        controls={
+            "headline": "GLASS IN MOTION",
+            "subtitle": "Color-managed backdrop refraction",
+            "accent_color": "#dce85a",
+            "surface_color": "#0d1217",
+            "cta": "SHIP THE FRAME",
+            "duration_ms": max(1000, int(duration_ms)),
+        },
+    )
+    result.id = base.id
+    return result
+
+
 def run_trend_product_gate(
     output_root: str | Path,
     *,
@@ -158,7 +184,7 @@ def run_trend_product_gate(
         output_path=root / "hdr.mp4",
         fps=sequence_fps,
     )
-    hdr_artifact = _small_trend_composition(1000)
+    hdr_artifact = _small_glass_composition(1000)
     hdr_artifact.metadata["color_management"]["project"].update({
         "output_space": "rec2020",
         "output_transfer": "pq",
@@ -181,6 +207,27 @@ def run_trend_product_gate(
         check=False,
     )
     hdr_stream = parse_ffmpeg_color_stream_text(hdr_probe.stderr)
+    glass_effect_count = sum(
+        effect.kind == "tiger_glass"
+        for layer in hdr_artifact.layers
+        for effect in layer.effects
+    )
+    glass_renderer = MotionExportRenderer(cache_capacity=2)
+    glass_frame = glass_renderer.render_rgba_array(hdr_artifact, 500.0)
+    no_glass = MotionComposition.from_dict(hdr_artifact.to_dict())
+    for layer in no_glass.layers:
+        layer.effects = [
+            effect for effect in layer.effects
+            if effect.kind != "tiger_glass"
+        ]
+    no_glass.revision += 1
+    no_glass_frame = glass_renderer.render_rgba_array(no_glass, 500.0)
+    glass_pixel_difference = np.abs(
+        glass_frame.astype(np.int16) - no_glass_frame.astype(np.int16)
+    )
+    glass_changed_pixel_count = int(
+        np.count_nonzero(np.any(glass_pixel_difference[..., :3] > 0, axis=2))
+    )
     mp4_composition = _small_trend_composition(1000)
     mp4_path = root / "trend_preview.mp4"
     mp4_result = MotionProfileExporter().export(
@@ -211,6 +258,8 @@ def run_trend_product_gate(
             and hdr_path.stat().st_size > 0
             and hdr_stream.get("color_primaries") == "bt2020"
             and hdr_stream.get("color_transfer") == "smpte2084"
+            and glass_effect_count == 3
+            and glass_changed_pixel_count > 0
             and mp4_path.is_file()
             and mp4_path.stat().st_size > 0
         ),
@@ -249,6 +298,11 @@ def run_trend_product_gate(
             "bytes": hdr_path.stat().st_size if hdr_path.is_file() else 0,
             "color_primaries": str(hdr_stream.get("color_primaries") or ""),
             "color_transfer": str(hdr_stream.get("color_transfer") or ""),
+            "glass_effect_count": int(glass_effect_count),
+            "glass_changed_pixel_count": int(glass_changed_pixel_count),
+            "glass_mean_rgb_abs_difference": float(
+                glass_pixel_difference[..., :3].mean()
+            ),
         },
         "mp4": {
             "path": str(mp4_path),

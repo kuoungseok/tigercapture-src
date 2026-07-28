@@ -126,6 +126,29 @@ def test_real_motion_hdr_h265_export_has_pq_metadata(tmp_path: Path) -> None:
     app.processEvents()
 
 
+def test_two_frame_h265_command_disables_b_frames_for_mp4_mux_stability(
+    tmp_path: Path,
+) -> None:
+    composition = _composition()
+    composition.width = 64
+    composition.height = 64
+    composition.duration_ms = 1000
+    report = preflight_motion_export(
+        composition,
+        "h265_mp4",
+        output_path=tmp_path / "two_frames.mp4",
+        fps=2,
+    )
+    command = MotionProfileExporter._ffmpeg_command(
+        str(report["ffmpeg"]["path"]),
+        composition,
+        "h265_mp4",
+        tmp_path / "two_frames.mp4.partial",
+        report,
+    )
+    assert command[command.index("-bf") + 1] == "0"
+
+
 def test_openexr_retry_removes_stale_sequence_frames(tmp_path: Path) -> None:
     app = _app()
     composition = _composition()

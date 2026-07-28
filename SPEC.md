@@ -6598,8 +6598,8 @@ AI Script Edit MVP integration:
   report `backdrop_glass_requires_raster`; the shared raster result has
   Preview/Export pixel parity. Complex Glass remains a deterministic UMG bake
   candidate and reports `effect_requires_bake:tiger_glass`. The non-raster GPU
-  backdrop path, HDR/tiled-export evidence, and the native-versus-bake UI
-  Material decision remain M22 work. Draft/Preview
+  backdrop path, tiled-export evidence, and the native-versus-bake UI Material
+  decision remain M22 work. Draft/Preview
   blur now uses a multi-resolution pyramid and glass-mask ROI. The real 1080p
   QA tool records 138-172 ms/frame on the current shared CPU fallback after
   ROI optimization, down from 278-374 ms/frame. This is an accuracy baseline,
@@ -6828,6 +6828,15 @@ AI Script Edit MVP integration:
   2.3 MB. A shorter five-second scene reached 28.82 fps. The variable
   end-to-end rate is a substantial improvement over 7.16 fps, but the backend
   remains `qt_painter_fallback`; the non-raster GPU product gate remains open.
+- The integrated 60-second product gate now encodes its HDR artifact from a
+  real Liquid Glass composition rather than a non-Glass placeholder. The
+  artifact contains three `tiger_glass` effects, differs from a no-Glass
+  reference at 14,734 pixels with mean RGB absolute difference 23.62, and its
+  actual H.265 stream reports BT.2020 primaries and SMPTE ST 2084 transfer.
+  Two-frame H.265 MP4 exports disable B-frames to avoid the FFmpeg MP4 muxer's
+  short-clip DTS failure; longer exports retain the normal x265 compression
+  structure. HDR Glass evidence is complete, while deterministic tiled Glass
+  export remains open.
 - M13 character-rigging foundation is complete. Motion compositions persist
   provider-neutral `tigerstudio.motion.rig.v1` cutout rigs with stable rig and
   bone IDs, a validated parent hierarchy, rest positions, animated rotation

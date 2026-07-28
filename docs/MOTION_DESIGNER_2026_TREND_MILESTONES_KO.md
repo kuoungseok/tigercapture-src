@@ -205,7 +205,7 @@ Glass material을 구현한다.
   기준과 non-raster GPU 기준에는 여전히 미달한다.
 - Unreal UMG는 현재 복합 Glass를
   `effect_requires_bake:tiger_glass`로 명시한다.
-- 남은 M22 범위는 GPU backdrop shader, 장시간 24fps 기준, HDR QA,
+- 남은 M22 범위는 GPU backdrop shader, 장시간 24fps 기준,
   UI Material native 후보 변환, 결정적 tiled export 증거다.
 
 렌더 구조:
@@ -274,6 +274,18 @@ UMG:
   1회 loop, 19.48fps를 기록했고 RSS는 약 2.3MB 감소했다. 짧은 5초
   구간은 28.82fps였다. 이전 7.16fps보다 크게 개선됐지만 장시간
   24fps와 non-raster GPU 기준은 아직 통과하지 못했다.
+
+### 2026-07-29 HDR Glass 제품 증거 갱신
+
+- 60초 통합 제품 게이트의 HDR artifact를 일반 Craft 대체 장면이 아니라
+  `tiger_glass` 3개를 포함한 실제 Liquid Glass 장면으로 교체했다.
+- Glass 제거 기준과 비교해 14,734 pixel, 평균 RGB 절대 차이 23.62를
+  확인했고 실제 H.265 stream은 BT.2020 primaries와 SMPTE ST 2084
+  transfer를 보고한다.
+- 2 frame 이하의 짧은 H.265 MP4는 x265 B-frame DTS를 FFmpeg MP4
+  muxer가 간헐적으로 거부하는 문제가 있어 이 조건에서만 B-frame을
+  끈다. 긴 출력의 x265 압축 구조는 유지한다.
+- HDR Glass 증거는 완료됐고 결정적 tiled Glass export는 아직 남아 있다.
 
 ## 7. M23 - Mixed Media Craft Workspace
 

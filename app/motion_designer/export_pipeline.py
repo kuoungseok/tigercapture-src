@@ -260,6 +260,11 @@ class MotionProfileExporter:
             command += ["-c:v", "libx264", "-preset", "medium", "-crf", "18", *color_args,
                         "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-f", "mp4"]
         elif profile_id == "h265_mp4":
+            short_clip_args = (
+                ["-bf", "0"]
+                if int(report.get("frame_count", 0) or 0) <= 2
+                else []
+            )
             if hdr_output:
                 transfer = (
                     "smpte2084"
@@ -271,7 +276,8 @@ class MotionProfileExporter:
                     "zscale=pin=bt709:tin=bt709:min=bt709:"
                     f"p=bt2020:t={transfer}:m=bt2020nc,format=yuv420p10le",
                 ]
-            command += ["-c:v", "libx265", "-preset", "medium", "-crf", "20", "-tag:v", "hvc1",
+            command += ["-c:v", "libx265", "-preset", "medium", "-crf", "20",
+                        *short_clip_args, "-tag:v", "hvc1",
                         *color_args, "-pix_fmt", "yuv420p10le" if hdr_output else "yuv420p",
                         "-movflags", "+faststart", "-f", "mp4"]
         elif profile_id == "prores_4444_mov":
