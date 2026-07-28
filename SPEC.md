@@ -6858,6 +6858,18 @@ AI Script Edit MVP integration:
   Motion workspace side panels now have bounded working widths and long
   Library descriptions elide instead of forcing the Canvas into a narrow
   column.
+- The complete 2026 trend claim surface is machine-auditable through
+  `tigerstudio.motion.trend_capability_audit.v1` and the non-mutating
+  `motion.trend.capabilities.inspect` action. The audit maps all ten trend
+  categories to concrete contracts, registered actions, QA tools, and explicit
+  limitations. `tools/qa_motion_trend_capabilities.py` verifies the mapping
+  against the live ActionRegistry and repository evidence files. The current
+  result is eight `supported_v1`, two `limited_v1`, zero unavailable, zero
+  missing actions, and zero missing evidence files. `limited_v1` remains
+  mandatory for M24 per-material painterly overrides until a material-ID pass
+  exists and for M25 physical clay deformation, miniature volumetric lighting,
+  and automatic frame sculpting. This audit does not create replacement
+  milestones or convert those limitations into completed claims.
 - `TigerStudio.exe --motion-runtime-probe <report.json>
   --motion-runtime-seconds 60` opens the real Liquid Glass template in the
   `QOpenGLWidget` Preview, runs loop playback against wall-clock time, and

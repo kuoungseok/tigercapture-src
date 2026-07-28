@@ -15,6 +15,13 @@ from app.motion_designer.style_director import (
 
 
 class MotionStyleDirectorAdapterMixin:
+    def motion_trend_capabilities_inspect(self) -> dict[str, Any]:
+        from app.motion_designer.trend_capability_audit import (
+            audit_trend_capabilities,
+        )
+
+        return audit_trend_capabilities()
+
     def motion_ai_platform_copy_plan(
         self,
         *,

@@ -1,5 +1,20 @@
 # Motion Designer 2026 Trend Gap and Implementation Milestones
 
+## Machine-readable capability audit
+
+`tigerstudio.motion.trend_capability_audit.v1` and the read-only
+`motion.trend.capabilities.inspect` action bind all ten 2026 trend categories
+to concrete contracts, registered Action/MCP IDs, QA tools, and explicit claim
+limitations. `tools/qa_motion_trend_capabilities.py` verifies the declaration
+against the live `ActionRegistry` and repository evidence paths.
+
+Current verified result: 10 categories, 8 `supported_v1`, 2 `limited_v1`,
+0 unavailable, 0 missing actions, and 0 missing QA files. The limited scopes
+remain existing roadmap follow-ups rather than new milestones: M24 material-ID
+painterly overrides and M25 physical clay deformation, miniature volumetric
+lighting, and automatic frame sculpting. These limits must remain visible
+until implementation and visual evidence exist.
+
 작성일: 2026-07-29  
 상태: M21-M28 Complete v1; M24 재질-ID 세분화는 후속 범위
 대상: Tiger Studio Motion Designer

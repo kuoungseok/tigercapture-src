@@ -3015,6 +3015,15 @@ def register_motion_actions(registry: Any) -> None:
         mutating=False,
         changed=False,
     )
+    registry.register_adapter_action(
+        "motion.trend.capabilities.inspect",
+        "Audit all ten 2026 Motion trend capabilities and disclose limited scopes.",
+        "motion",
+        "motion_trend_capabilities_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+    )
     platform_copy_fields = {
         **cid,
         "platform": {
