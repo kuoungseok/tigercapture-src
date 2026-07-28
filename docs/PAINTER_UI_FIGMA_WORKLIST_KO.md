@@ -47,9 +47,11 @@ P1 implementation checkpoint (2026-07-26, navigation slice):
 - New artboards receive deterministic freeform document positions instead of
   overlapping the active artboard.
 - The UI canvas renders all artboards in one document-space overview.
-- Middle-button pan and cursor-anchored wheel zoom use a persistent view camera.
-- Toolbar commands and `paint.ui.view.fit` provide all-artboards, active
-  artboard, and selection fitting.
+- Space/left-drag or middle-button drag pans; wheel pans vertically,
+  Shift+wheel pans horizontally, and Ctrl+wheel zooms around the pointer.
+- A transient Zoom popover and `paint.ui.view.focus/pan/zoom/fit` provide
+  percentage zoom and all-artboards, active-artboard, selection, or object
+  framing without permanent Fit buttons.
 - Clicking another artboard or one of its objects activates that artboard.
 - Dragging empty canvas space creates a marquee selection; Shift adds and Ctrl
   toggles intersecting objects on the active artboard.

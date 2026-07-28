@@ -371,6 +371,10 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Detach inspector", "인스펙터 분리", "インスペクターを分離", "分离检查器", "Détacher l'inspecteur", "Inspektor abdocken"),
     ("Dock inspector", "인스펙터 도킹", "インスペクターをドッキング", "停靠检查器", "Ancrer l'inspecteur", "Inspektor andocken"),
     ("Close temporary properties", "임시 속성 닫기", "一時プロパティを閉じる", "关闭临时属性", "Fermer les propriétés temporaires", "Temporäre Eigenschaften schließen"),
+    ("Zoom and fit", "확대/축소 및 맞춤", "ズームとフィット", "缩放和适配", "Zoom et ajustement", "Zoom und Einpassen"),
+    ("Fit all artboards", "모든 아트보드 맞춤", "すべてのアートボードに合わせる", "适配所有画板", "Ajuster tous les plans de travail", "Alle Zeichenflächen einpassen"),
+    ("Fit active artboard", "현재 아트보드 맞춤", "現在のアートボードに合わせる", "适配当前画板", "Ajuster le plan de travail actif", "Aktive Zeichenfläche einpassen"),
+    ("Fit selection", "선택 영역 맞춤", "選択範囲に合わせる", "适配所选内容", "Ajuster à la sélection", "Auswahl einpassen"),
     ("Advanced properties", "고급 속성", "詳細プロパティ", "高级属性", "Propriétés avancées", "Erweiterte Eigenschaften"),
 )
 

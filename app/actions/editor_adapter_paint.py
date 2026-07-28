@@ -499,6 +499,59 @@ class PaintAdapterMixin(
         state["ui_view"] = view
         return state
 
+    def paint_ui_view_focus(
+        self,
+        *,
+        target: str = "selection",
+        object_id: str = "",
+        artboard_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        view = dialog._focus_painter_ui_view(
+            target=str(target or "selection"),
+            object_id=str(object_id or ""),
+            artboard_id=str(artboard_id or ""),
+        )
+        state = dialog.painter_action_state()
+        state["ui_view"] = view
+        return state
+
+    def paint_ui_view_zoom(
+        self,
+        *,
+        percent: float,
+        anchor_x: float | None = None,
+        anchor_y: float | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        view = dialog._set_painter_ui_zoom(
+            float(percent),
+            anchor_x=anchor_x,
+            anchor_y=anchor_y,
+        )
+        state = dialog.painter_action_state()
+        state["ui_view"] = view
+        return state
+
+    def paint_ui_view_pan(
+        self,
+        *,
+        dx: float = 0.0,
+        dy: float = 0.0,
+        x: float | None = None,
+        y: float | None = None,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        view = dialog._pan_painter_ui_view(
+            dx=float(dx or 0.0),
+            dy=float(dy or 0.0),
+            x=x,
+            y=y,
+        )
+        state = dialog.painter_action_state()
+        state["ui_view"] = view
+        return state
+
     def paint_ui_layout_diagnostics(self) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         from app.painter_ui_layout_diagnostics import diagnose_ui_layout

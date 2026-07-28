@@ -153,11 +153,15 @@ def test_ui_design_mode_expands_inspector_and_has_one_fit_tool_set() -> None:
     dialog._canvas_host.resize(400, 500)
     dialog._sync_ui_design_toolbar_density()
     assert not dialog._ui_design_tool_buttons["ellipse"].isHidden()
-    assert dialog._ui_design_view_buttons["selection"].isHidden()
+    assert not dialog._ui_design_tool_host.zoom_button.isHidden()
+    assert (
+        dialog._ui_design_view_buttons["selection"].parentWidget()
+        is dialog._ui_design_tool_host.zoom_popover
+    )
     dialog._canvas_host.resize(900, 500)
     dialog._sync_ui_design_toolbar_density()
     assert not dialog._ui_design_tool_buttons["ellipse"].isHidden()
-    assert not dialog._ui_design_view_buttons["selection"].isHidden()
+    assert not dialog._ui_design_tool_host.zoom_button.isHidden()
 
     compact_grids = dialog._paint_ui_inspector.findChildren(
         QFrame,

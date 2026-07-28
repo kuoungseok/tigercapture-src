@@ -66,6 +66,7 @@ class PainterUIDesignOverlay(QWidget):
     guide_remove_requested = Signal(str, float)
     ruler_origin_requested = Signal(float, float)
     ruler_origin_reset_requested = Signal()
+    view_changed = Signal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -94,6 +95,7 @@ class PainterUIDesignOverlay(QWidget):
         self._motion_actor_frame_cache: dict[tuple[Any, ...], Any] = {}
         self._pan_start = QPointF()
         self._pan_origin = QPointF()
+        self._space_pan_active = False
         self._marquee_mode = "replace"
         self._guide_x: float | None = None
         self._guide_y: float | None = None
@@ -456,6 +458,7 @@ class PainterUIDesignOverlay(QWidget):
             self._scene_bounds()
         )
         self.update()
+        self._emit_view_changed()
 
     def fit_artboard(self, artboard_id: str = "") -> None:
         target = str(artboard_id or self._document["active_artboard_id"])
@@ -470,6 +473,7 @@ class PainterUIDesignOverlay(QWidget):
         )
         self._view_scale, self._view_offset = self._fit_transform(bounds)
         self.update()
+        self._emit_view_changed()
 
     def fit_selection(self) -> bool:
         selected_ids = set(self._document["selection"]["object_ids"])
@@ -491,7 +495,109 @@ class PainterUIDesignOverlay(QWidget):
             bounds = rect if bounds.isNull() else bounds.united(rect)
         self._view_scale, self._view_offset = self._fit_transform(bounds)
         self.update()
+        self._emit_view_changed()
         return True
+
+    def fit_object(self, object_id: str) -> bool:
+        target = str(object_id or "")
+        row = next(
+            (
+                item
+                for item in self._document["objects"]
+                if item["id"] == target
+            ),
+            None,
+        )
+        if row is None:
+            return False
+        artboard = next(
+            item
+            for item in self._document["artboards"]
+            if item["id"] == row["artboard_id"]
+        )
+        bounds = QRectF(
+            float(artboard["x"]) + float(row["x"]),
+            float(artboard["y"]) + float(row["y"]),
+            float(row["width"]),
+            float(row["height"]),
+        )
+        self._view_scale, self._view_offset = self._fit_transform(bounds)
+        self.update()
+        self._emit_view_changed()
+        return True
+
+    def fit_object(self, object_id: str) -> bool:
+        target = str(object_id or "")
+        row = next(
+            (
+                item
+                for item in self._document["objects"]
+                if item["id"] == target
+            ),
+            None,
+        )
+        if row is None:
+            return False
+        artboard = next(
+            item
+            for item in self._document["artboards"]
+            if item["id"] == row["artboard_id"]
+        )
+        bounds = QRectF(
+            float(artboard["x"]) + float(row["x"]),
+            float(artboard["y"]) + float(row["y"]),
+            float(row["width"]),
+            float(row["height"]),
+        )
+        self._view_scale, self._view_offset = self._fit_transform(bounds)
+        self.update()
+        self._emit_view_changed()
+        return True
+
+    def set_zoom_percent(
+        self,
+        percent: float,
+        *,
+        anchor: QPointF | None = None,
+    ) -> dict[str, Any]:
+        old_scale, old_offset = self._view_transform()
+        point = QPointF(anchor) if anchor is not None else QPointF(
+            float(self.width()) * 0.5,
+            float(self.height()) * 0.5,
+        )
+        world = QPointF(
+            (point.x() - old_offset.x()) / max(0.0001, old_scale),
+            (point.y() - old_offset.y()) / max(0.0001, old_scale),
+        )
+        self._view_scale = max(0.03, min(8.0, float(percent) / 100.0))
+        self._view_offset = QPointF(
+            point.x() - world.x() * self._view_scale,
+            point.y() - world.y() * self._view_scale,
+        )
+        self.update()
+        self._emit_view_changed()
+        return self.view_state()
+
+    def pan_view(
+        self,
+        *,
+        dx: float = 0.0,
+        dy: float = 0.0,
+        x: float | None = None,
+        y: float | None = None,
+    ) -> dict[str, Any]:
+        scale, offset = self._view_transform()
+        self._view_scale = scale
+        self._view_offset = QPointF(
+            float(offset.x() + dx) if x is None else float(x),
+            float(offset.y() + dy) if y is None else float(y),
+        )
+        self.update()
+        self._emit_view_changed()
+        return self.view_state()
+
+    def _emit_view_changed(self) -> None:
+        self.view_changed.emit(self.view_state())
 
     def view_state(self) -> dict[str, Any]:
         scale, offset = self._view_transform()
@@ -1358,7 +1464,10 @@ class PainterUIDesignOverlay(QWidget):
         self.update()
 
     def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.MiddleButton:
+        if event.button() == Qt.MouseButton.MiddleButton or (
+            event.button() == Qt.MouseButton.LeftButton
+            and self._space_pan_active
+        ):
             self._interaction = "pan"
             self._pan_start = QPointF(event.position())
             _scale, offset = self._view_transform()
@@ -1620,6 +1729,7 @@ class PainterUIDesignOverlay(QWidget):
                 event.position() - self._pan_start
             )
             self.update()
+            self._emit_view_changed()
             event.accept()
             return
         if self._interaction == "marquee":
@@ -1940,27 +2050,42 @@ class PainterUIDesignOverlay(QWidget):
         super().mouseDoubleClickEvent(event)
 
     def wheelEvent(self, event) -> None:
-        delta = event.angleDelta().y()
-        if not delta:
+        pixel_delta = event.pixelDelta()
+        angle_delta = event.angleDelta()
+        delta_y = pixel_delta.y() if not pixel_delta.isNull() else angle_delta.y()
+        if not delta_y and not pixel_delta.x():
             event.ignore()
             return
-        old_scale, old_offset = self._view_transform()
-        anchor = QPointF(event.position())
-        world = QPointF(
-            (anchor.x() - old_offset.x()) / max(0.0001, old_scale),
-            (anchor.y() - old_offset.y()) / max(0.0001, old_scale),
-        )
-        factor = 1.15 if delta > 0 else 1.0 / 1.15
-        self._view_scale = max(0.03, min(8.0, old_scale * factor))
-        self._view_offset = QPointF(
-            anchor.x() - world.x() * self._view_scale,
-            anchor.y() - world.y() * self._view_scale,
-        )
-        self.update()
+        modifiers = event.modifiers()
+        if modifiers & Qt.KeyboardModifier.ControlModifier:
+            old_scale, _offset = self._view_transform()
+            factor = (
+                math.pow(1.0015, float(delta_y))
+                if not pixel_delta.isNull()
+                else 1.15 if delta_y > 0 else 1.0 / 1.15
+            )
+            self.set_zoom_percent(
+                old_scale * factor * 100.0,
+                anchor=QPointF(event.position()),
+            )
+        else:
+            unit = 1.0 if not pixel_delta.isNull() else 0.5
+            if modifiers & Qt.KeyboardModifier.ShiftModifier:
+                self.pan_view(dx=float(delta_y) * unit)
+            else:
+                self.pan_view(
+                    dx=float(pixel_delta.x()) if not pixel_delta.isNull() else 0.0,
+                    dy=float(delta_y) * unit,
+                )
         event.accept()
 
     def keyPressEvent(self, event) -> None:
         key = event.key()
+        if key == Qt.Key.Key_Space and not event.isAutoRepeat():
+            self._space_pan_active = True
+            self.setCursor(Qt.CursorShape.OpenHandCursor)
+            event.accept()
+            return
         if key == Qt.Key.Key_Delete:
             self.key_command.emit("delete", False)
             event.accept()
@@ -1986,6 +2111,19 @@ class PainterUIDesignOverlay(QWidget):
             event.accept()
             return
         super().keyPressEvent(event)
+
+    def keyReleaseEvent(self, event) -> None:
+        if event.key() == Qt.Key.Key_Space and not event.isAutoRepeat():
+            self._space_pan_active = False
+            if self._interaction != "pan":
+                self.setCursor(
+                    Qt.CursorShape.CrossCursor
+                    if self._tool in _CREATE_TOOLS
+                    else Qt.CursorShape.ArrowCursor
+                )
+            event.accept()
+            return
+        super().keyReleaseEvent(event)
 
 
 __all__ = ["PainterUIDesignOverlay"]

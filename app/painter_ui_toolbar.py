@@ -1,11 +1,12 @@
 """Compact floating toolbar for Painter's UI Design canvas."""
 from __future__ import annotations
 
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import QTimer, Qt, Signal
 from PySide6.QtGui import QAction
 from PySide6.QtWidgets import (
     QFrame,
     QHBoxLayout,
+    QLabel,
     QMenu,
     QPushButton,
     QSizePolicy,
@@ -13,6 +14,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.icons import app_icon, icon_size
+from app.painter_i18n import painter_text
 
 
 class PainterUIFloatingToolbar(QFrame):
@@ -29,6 +31,7 @@ class PainterUIFloatingToolbar(QFrame):
     guide_clear_requested = Signal()
     ruler_origin_reset_requested = Signal()
     fit_requested = Signal(str)
+    zoom_requested = Signal(float)
     motion_actor_requested = Signal()
     animate_requested = Signal()
     motion_preview_changed = Signal(bool)
@@ -143,20 +146,27 @@ class PainterUIFloatingToolbar(QFrame):
         self.guide_button.setMenu(guide_menu)
         layout.addWidget(self.guide_button)
 
-        self.view_buttons: dict[str, QPushButton] = {}
-        for label, mode, icon_name in (
-            ("Fit all artboards", "all", "zoom-fit"),
-            ("Fit active artboard", "artboard", "fit"),
-            ("Fit selection", "selection", "ui-frame"),
-        ):
-            button = self._icon_button(label, icon_name)
-            button.clicked.connect(
-                lambda _checked=False, value=mode: self.fit_requested.emit(
-                    value
-                )
-            )
-            layout.addWidget(button)
-            self.view_buttons[mode] = button
+        self.zoom_button = self._icon_button("Zoom and fit", "zoom")
+        self.zoom_button.clicked.connect(self._toggle_zoom_popover)
+        layout.addWidget(self.zoom_button)
+
+        from app.painter_ui_zoom_popover import PainterUIZoomPopover
+
+        self.zoom_popover = PainterUIZoomPopover(self.parentWidget())
+        self.zoom_popover.zoom_requested.connect(self._request_zoom)
+        self.zoom_popover.fit_requested.connect(self._request_fit)
+        self.view_buttons = self.zoom_popover.fit_buttons
+        self._zoom_percent = 100.0
+
+        self.zoom_indicator = QLabel("100%", self.parentWidget())
+        self.zoom_indicator.setObjectName("PainterUIZoomIndicator")
+        self.zoom_indicator.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.zoom_indicator.setFixedSize(54, 24)
+        self.zoom_indicator.hide()
+        self._zoom_indicator_timer = QTimer(self)
+        self._zoom_indicator_timer.setSingleShot(True)
+        self._zoom_indicator_timer.setInterval(900)
+        self._zoom_indicator_timer.timeout.connect(self.zoom_indicator.hide)
 
         layout.addWidget(self._separator())
         self.motion_actor_button = self._icon_button(
@@ -209,10 +219,28 @@ class PainterUIFloatingToolbar(QFrame):
     def sync_density(self, available_width: int) -> None:
         width = max(0, int(available_width))
         compact = width < 620
-        for mode in ("artboard", "selection"):
-            self.view_buttons[mode].setVisible(not compact)
         self.motion_actor_button.setVisible(not compact)
         self.adjustSize()
+
+    def set_zoom_percent(
+        self,
+        percent: float,
+        *,
+        transient: bool = True,
+    ) -> None:
+        self._zoom_percent = max(3.0, min(800.0, float(percent)))
+        rounded = int(round(self._zoom_percent))
+        self.zoom_button.setToolTip(
+            f"{painter_text('Zoom and fit')} · {rounded}%"
+        )
+        self.zoom_button.setAccessibleName(self.zoom_button.toolTip())
+        self.zoom_popover.set_zoom_percent(self._zoom_percent)
+        self.zoom_indicator.setText(f"{rounded}%")
+        if transient and not self.zoom_popover.isVisible() and self.isVisible():
+            self._place_zoom_indicator()
+            self.zoom_indicator.show()
+            self.zoom_indicator.raise_()
+            self._zoom_indicator_timer.start()
 
     def set_guide_state(self, *, visible: bool, locked: bool) -> None:
         for action, checked in (
@@ -232,6 +260,41 @@ class PainterUIFloatingToolbar(QFrame):
         y = max(8, parent.height() - self.height() - int(bottom_margin))
         self.move(x, y)
         self.raise_()
+        if self.zoom_popover.isVisible():
+            self.zoom_popover.open_above(self.zoom_button)
+        if self.zoom_indicator.isVisible():
+            self._place_zoom_indicator()
+
+    def _toggle_zoom_popover(self) -> None:
+        if self.zoom_popover.isVisible():
+            self.zoom_popover.hide()
+            return
+        self.zoom_indicator.hide()
+        self._zoom_indicator_timer.stop()
+        self.zoom_popover.set_zoom_percent(self._zoom_percent)
+        self.zoom_popover.open_above(self.zoom_button)
+
+    def _request_zoom(self, percent: float) -> None:
+        self.zoom_requested.emit(float(percent))
+
+    def _request_fit(self, mode: str) -> None:
+        self.fit_requested.emit(str(mode))
+        self.zoom_popover.hide()
+
+    def _place_zoom_indicator(self) -> None:
+        parent = self.parentWidget()
+        if parent is None:
+            return
+        point = self.zoom_button.mapTo(parent, self.zoom_button.rect().topLeft())
+        x = point.x() + (self.zoom_button.width() - self.zoom_indicator.width()) // 2
+        x = max(8, min(x, parent.width() - self.zoom_indicator.width() - 8))
+        y = max(8, point.y() - self.zoom_indicator.height() - 6)
+        self.zoom_indicator.move(x, y)
+
+    def hideEvent(self, event) -> None:
+        self.zoom_popover.hide()
+        self.zoom_indicator.hide()
+        super().hideEvent(event)
 
     @staticmethod
     def _separator() -> QFrame:

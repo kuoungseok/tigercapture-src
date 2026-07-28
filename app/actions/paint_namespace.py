@@ -229,6 +229,64 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="the Painter UI canvas camera would be fitted",
     )
     registry.register_adapter_action(
+        "paint.ui.view.focus",
+        "Focus an object, artboard, selection, or all artboards without changing the UI document.",
+        "paint",
+        "paint_ui_view_focus",
+        params_schema=schema_object(
+            {
+                "target": {
+                    "type": "string",
+                    "enum": ["all", "artboard", "selection"],
+                },
+                "object_id": {"type": "string"},
+                "artboard_id": {"type": "string"},
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter UI canvas would focus the requested target",
+    )
+    registry.register_adapter_action(
+        "paint.ui.view.zoom",
+        "Zoom the Painter UI canvas around an optional canvas-space anchor.",
+        "paint",
+        "paint_ui_view_zoom",
+        params_schema=schema_object(
+            {
+                "percent": {
+                    "type": "number",
+                    "minimum": 3,
+                    "maximum": 800,
+                },
+                "anchor_x": {"type": "number"},
+                "anchor_y": {"type": "number"},
+            },
+            required=("percent",),
+        ),
+        required=("percent",),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter UI canvas zoom would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.view.pan",
+        "Pan the Painter UI canvas by a delta or set its absolute view offset.",
+        "paint",
+        "paint_ui_view_pan",
+        params_schema=schema_object(
+            {
+                "dx": {"type": "number"},
+                "dy": {"type": "number"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="the Painter UI canvas view would pan",
+    )
+    registry.register_adapter_action(
         "paint.ui.layout.diagnostics",
         "Inspect deterministic Auto Layout, constraint, grid, and safe-area conflicts.",
         "paint",

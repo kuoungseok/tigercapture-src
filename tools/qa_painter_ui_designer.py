@@ -397,6 +397,45 @@ def main() -> int:
     dialog.grab().save(str(quick_properties_screenshot_path), "PNG")
     dialog._paint_ui_inspector.set_collapsed(False)
     app.processEvents()
+    toolbar = dialog._ui_design_tool_host
+    toolbar.zoom_button.click()
+    app.processEvents()
+    zoom_popover_ok = (
+        toolbar.zoom_popover.isVisible()
+        and len(toolbar.view_buttons) == 3
+        and all(
+            button.parentWidget() is toolbar.zoom_popover
+            for button in toolbar.view_buttons.values()
+        )
+        and toolbar.zoom_popover.geometry().bottom()
+        < toolbar.geometry().top()
+    )
+    zoom_popover_screenshot_path = (
+        output_dir / "painter_ui_designer_m1_zoom_popover.png"
+    )
+    dialog.grab().save(str(zoom_popover_screenshot_path), "PNG")
+    toolbar.zoom_popover.hide()
+
+    dialog.resize(1100, 720)
+    app.processEvents()
+    dialog._sync_ui_design_toolbar_density()
+    toolbar.zoom_button.click()
+    app.processEvents()
+    compact_zoom_ok = (
+        toolbar.zoom_popover.isVisible()
+        and toolbar.zoom_popover.geometry().left() >= 0
+        and toolbar.zoom_popover.geometry().right()
+        <= dialog._canvas_host.width()
+        and toolbar.zoom_popover.geometry().bottom()
+        < toolbar.geometry().top()
+    )
+    compact_screenshot_path = (
+        output_dir / "painter_ui_designer_m1_compact_zoom.png"
+    )
+    dialog.grab().save(str(compact_screenshot_path), "PNG")
+    toolbar.zoom_popover.hide()
+    dialog.resize(1360, 900)
+    app.processEvents()
     state = dialog.painter_action_state()
     group_row = next(
         (
@@ -447,11 +486,15 @@ def main() -> int:
             and image_inspector_screenshot_path.is_file()
             and multi_inspector_screenshot_path.is_file()
             and quick_properties_screenshot_path.is_file()
+            and zoom_popover_screenshot_path.is_file()
+            and compact_screenshot_path.is_file()
             and detached_round_trip
             and text_context_ok
             and image_context_ok
             and multi_context_ok
             and quick_properties_ok
+            and zoom_popover_ok
+            and compact_zoom_ok
             and navigator.expanded_width()
             == navigator.DEFAULT_EXPANDED_WIDTH
         ),
@@ -472,10 +515,14 @@ def main() -> int:
         "quick_properties_screenshot": str(
             quick_properties_screenshot_path
         ),
+        "zoom_popover_screenshot": str(zoom_popover_screenshot_path),
+        "compact_zoom_screenshot": str(compact_screenshot_path),
         "navigator_width": navigator.expanded_width(),
         "inspector_width": dialog._paint_inspector_expanded_width,
         "inspector_detached_round_trip": detached_round_trip,
         "quick_properties_ok": quick_properties_ok,
+        "zoom_popover_ok": zoom_popover_ok,
+        "compact_zoom_ok": compact_zoom_ok,
         "context_visibility": {
             "text": text_context_ok,
             "image": image_context_ok,

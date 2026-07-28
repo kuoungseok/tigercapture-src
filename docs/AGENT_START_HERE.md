@@ -98,8 +98,10 @@ Focused entry points:
   Design/Prototype/Inspect modes, resizable/detachable panels, persisted panel
   state, and a selection-triggered temporary Properties overlay that reparents
   the canonical Inspector while its 36 px rail is collapsed. Grouped flyouts,
-  rulers/guides, and contextual Inspector disclosure are implemented and
-  verified; remaining milestone work continues in the focused roadmap.
+  rulers/guides, contextual Inspector disclosure, transient Zoom popover, and
+  canvas-first wheel/Space navigation are implemented and verified. View
+  automation uses `paint.ui.view.focus/pan/zoom/fit`; remaining milestone work
+  continues in the focused roadmap.
 
 If two areas overlap, keep the product boundary from the focused docs. Do not
 merge UI renewal, review automation, and VTuber sidecar setup into one unbounded

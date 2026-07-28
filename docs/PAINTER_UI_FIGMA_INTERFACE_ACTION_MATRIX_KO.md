@@ -17,7 +17,7 @@ Import 후 보이기만 하거나 JSON에만 남는 기능은 `Data only`이며 
 | Feature | Painter interface | Action surface |
 | --- | --- | --- |
 | Figma REST import/export | `Publish > Figma` URL/token, JSON import, compatibility report, plugin bundle export | `paint.ui.figma.compatibility.inspect`, `paint.ui.figma.import`, `paint.ui.figma.export` |
-| Artboards and viewport | Artboard preset/add/activate, free placement, pan/zoom, fit all/artboard/selection | `paint.ui.artboard.*`, `paint.ui.view.fit`, `paint.ui.workspace.set` |
+| Artboards and viewport | Artboard preset/add/activate, free placement, pointer-centered zoom, wheel/Space pan, fit all/artboard/selection | `paint.ui.artboard.*`, `paint.ui.view.focus/pan/zoom/fit`, `paint.ui.workspace.set` |
 | Object geometry and hierarchy | Canvas selection/marquee/resize, Layers reorder/reparent/group | `paint.ui.object.*`, `paint.ui.selection.set` |
 | Constraints and Auto Layout | Inspector constraints, Horizontal/Vertical flow, padding/gap/wrap/Hug/Fill | `paint.ui.layout.set`, `paint.ui.layout.diagnostics`, `paint.ui.responsive.override.*` |
 | Solid Fill, Stroke, Radius, Opacity | Inspector fields | `paint.ui.object.update` |

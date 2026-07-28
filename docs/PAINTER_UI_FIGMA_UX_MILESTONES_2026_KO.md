@@ -24,6 +24,11 @@ Completed in the first shell slice:
 - selection-triggered temporary Properties overlay when the right inspector is
   collapsed; it reuses the canonical inspector widget and returns it to the
   dock on close, expand, detach, or workspace change
+- transient Zoom popover replaces three permanently visible Fit buttons and
+  provides percentage input, Fit All, Fit Artboard, and Fit Selection
+- canvas-first navigation: Space/left-drag or middle-drag pan, wheel vertical
+  pan, Shift+wheel horizontal pan, and Ctrl+wheel pointer-centered zoom
+- shared non-document-mutating `paint.ui.view.focus/pan/zoom/fit` Actions
 - zoom-adaptive top/left rulers and ruler-drag guide creation
 - shared `paint.ui.guide.create/remove/clear` and
   `paint.ui.ruler.visibility.set` automation
@@ -42,7 +47,6 @@ Completed in the first shell slice:
 Not complete yet:
 
 - mode-specific Paint/3D floating-toolbar variants
-- transient zoom popover
 - prototype interaction authoring surface and on-canvas connection editing
 - M1 through M8 implementation
 
@@ -624,6 +628,9 @@ workflow is production-ready.
   selection may open it again.
 - Rulers and persistent artboard guides remain visible without consuming
   inspector space.
+- Zoom controls are temporary rather than fixed chrome. A single toolbar icon
+  opens percentage and fit commands, while wheel zoom shows a short-lived
+  percentage indicator. UI and automation use the same view methods.
 - Compactness is covered by widget geometry tests and real offscreen screenshot
   QA; controls may not overlap or silently disappear at the compact width.
 

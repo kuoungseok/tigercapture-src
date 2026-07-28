@@ -243,6 +243,40 @@ QWidget#PaintUIDesignToolHost {
     border-radius: 7px;
 }
 
+QFrame#PainterUIZoomPopover {
+    background-color: #171c23;
+    border: 1px solid #46566a;
+    border-radius: 6px;
+}
+
+QSpinBox#PainterUIZoomPercent {
+    background-color: #10151b;
+    color: #eef3f8;
+    border: 1px solid #3a4655;
+    border-radius: 4px;
+    min-height: 26px;
+}
+
+QPushButton#PainterUIZoomFitButton {
+    background-color: #202832;
+    border: 1px solid #34404e;
+    border-radius: 4px;
+}
+
+QPushButton#PainterUIZoomFitButton:hover {
+    background-color: #2a3542;
+    border-color: #6387ad;
+}
+
+QLabel#PainterUIZoomIndicator {
+    background-color: #171c23;
+    color: #edf3f9;
+    border: 1px solid #53657a;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+}
+
 QPushButton#PainterUIFloatingToolButton,
 QToolButton#PainterUIFloatingToolButton {
     background-color: transparent;
@@ -9523,6 +9557,9 @@ class PaintDialog(QDialog):
         self._ui_design_tool_host.fit_requested.connect(
             self._fit_painter_ui_view
         )
+        self._ui_design_tool_host.zoom_requested.connect(
+            self._set_painter_ui_zoom
+        )
         self._ui_design_tool_host.motion_actor_requested.connect(
             self._import_painter_ui_motion_actor
         )
@@ -9552,6 +9589,9 @@ class PaintDialog(QDialog):
         from app.painter_ui_workspace import PainterUIDesignOverlay
 
         self._painter_ui_overlay = PainterUIDesignOverlay(canvas_host)
+        self._painter_ui_overlay.view_changed.connect(
+            self._on_painter_ui_view_changed
+        )
         self._painter_ui_overlay.object_selection_requested.connect(
             self._select_painter_ui_object
         )
@@ -13076,30 +13116,112 @@ class PaintDialog(QDialog):
             )
         return {"mode": requested, **overlay.view_state()}
 
-    def _fit_painter_ui_view(self, mode: str = "all") -> dict:
+    def _set_painter_ui_zoom(
+        self,
+        percent: float,
+        anchor_x: float | None = None,
+        anchor_y: float | None = None,
+    ) -> dict:
         overlay = getattr(self, "_painter_ui_overlay", None)
         if overlay is None:
             return {}
-        requested = str(mode or "all").strip().casefold()
-        if requested == "selection":
-            if not overlay.fit_selection():
-                overlay.fit_artboard()
-                requested = "artboard"
-        elif requested == "artboard":
-            overlay.fit_artboard()
-        else:
-            requested = "all"
-            overlay.fit_all()
+        anchor = None
+        if anchor_x is not None or anchor_y is not None:
+            from PySide6.QtCore import QPointF
+
+            anchor = QPointF(
+                float(overlay.width()) * 0.5
+                if anchor_x is None
+                else float(anchor_x),
+                float(overlay.height()) * 0.5
+                if anchor_y is None
+                else float(anchor_y),
+            )
+        view = overlay.set_zoom_percent(float(percent), anchor=anchor)
         overlay.setFocus(Qt.FocusReason.OtherFocusReason)
         if hasattr(self, "_tool_status_label"):
             self._tool_status_label.setText(
-                {
-                    "all": "UI Design: All artboards",
-                    "artboard": "UI Design: Active artboard",
-                    "selection": "UI Design: Selection",
-                }[requested]
+                f"UI Design: {int(round(float(view['zoom_percent'])))}%"
             )
-        return {"mode": requested, **overlay.view_state()}
+        return view
+
+    def _focus_painter_ui_view(
+        self,
+        *,
+        target: str = "selection",
+        object_id: str = "",
+        artboard_id: str = "",
+    ) -> dict:
+        overlay = getattr(self, "_painter_ui_overlay", None)
+        if overlay is None:
+            return {}
+        if str(object_id or ""):
+            if not overlay.fit_object(str(object_id)):
+                raise ValueError(f"Painter UI object not found: {object_id}")
+            mode = "object"
+        elif str(artboard_id or ""):
+            try:
+                overlay.fit_artboard(str(artboard_id))
+            except StopIteration as exc:
+                raise ValueError(
+                    f"Painter UI artboard not found: {artboard_id}"
+                ) from exc
+            mode = "artboard"
+        else:
+            return self._fit_painter_ui_view(str(target or "selection"))
+        overlay.setFocus(Qt.FocusReason.OtherFocusReason)
+        return {"mode": mode, **overlay.view_state()}
+
+    def _focus_painter_ui_view(
+        self,
+        *,
+        target: str = "selection",
+        object_id: str = "",
+        artboard_id: str = "",
+    ) -> dict:
+        overlay = getattr(self, "_painter_ui_overlay", None)
+        if overlay is None:
+            return {}
+        if str(object_id or ""):
+            if not overlay.fit_object(str(object_id)):
+                raise ValueError(f"Painter UI object not found: {object_id}")
+            mode = "object"
+        elif str(artboard_id or ""):
+            try:
+                overlay.fit_artboard(str(artboard_id))
+            except StopIteration as exc:
+                raise ValueError(
+                    f"Painter UI artboard not found: {artboard_id}"
+                ) from exc
+            mode = "artboard"
+        else:
+            return self._fit_painter_ui_view(str(target or "selection"))
+        overlay.setFocus(Qt.FocusReason.OtherFocusReason)
+        return {"mode": mode, **overlay.view_state()}
+
+    def _pan_painter_ui_view(
+        self,
+        *,
+        dx: float = 0.0,
+        dy: float = 0.0,
+        x: float | None = None,
+        y: float | None = None,
+    ) -> dict:
+        overlay = getattr(self, "_painter_ui_overlay", None)
+        if overlay is None:
+            return {}
+        view = overlay.pan_view(dx=dx, dy=dy, x=x, y=y)
+        overlay.setFocus(Qt.FocusReason.OtherFocusReason)
+        return view
+
+    def _on_painter_ui_view_changed(self, view: object) -> None:
+        payload = dict(view) if isinstance(view, dict) else {}
+        toolbar = getattr(self, "_ui_design_tool_host", None)
+        if toolbar is not None and hasattr(toolbar, "set_zoom_percent"):
+            toolbar.set_zoom_percent(
+                float(payload.get("zoom_percent") or 100.0),
+                transient=True,
+            )
 
     @staticmethod
     def _painter_ui_object_preset(kind: str) -> dict:
@@ -14491,6 +14613,15 @@ class PaintDialog(QDialog):
                 toolbar.set_guide_state(
                     visible=bool(guide_state["visible"]),
                     locked=bool(guide_state["locked"]),
+                )
+                toolbar.set_zoom_percent(
+                    float(
+                        self._painter_ui_overlay.view_state().get(
+                            "zoom_percent",
+                            100.0,
+                        )
+                    ),
+                    transient=False,
                 )
         if (
             toolbar is not None

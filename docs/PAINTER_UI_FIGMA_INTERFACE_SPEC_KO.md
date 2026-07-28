@@ -758,3 +758,10 @@ overlay mode로 전환한다.
   detached, or collapsed to a 36 px rail. With the rail collapsed, selecting a
   new object temporarily reparents the canonical Inspector into a compact
   canvas overlay; no duplicate property editor or mutation service is created.
+- Zoom is not a permanent three-button group. One toolbar icon opens a
+  temporary percentage/Fit All/Fit Artboard/Fit Selection popover, and a
+  short-lived percentage chip appears during navigation.
+- UI Design navigation follows canvas conventions: Space+left drag or middle
+  drag pans, wheel pans vertically, Shift+wheel pans horizontally, and
+  Ctrl+wheel zooms around the pointer. `paint.ui.view.focus/pan/zoom/fit`
+  invoke the same overlay view service without changing document history.

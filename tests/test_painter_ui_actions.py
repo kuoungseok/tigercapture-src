@@ -36,6 +36,9 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.template.apply",
         "paint.ui.workspace.set",
         "paint.ui.view.fit",
+        "paint.ui.view.focus",
+        "paint.ui.view.zoom",
+        "paint.ui.view.pan",
         "paint.ui.layout.diagnostics",
         "paint.ui.responsive.override.set",
         "paint.ui.responsive.override.remove",
@@ -190,6 +193,32 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     assert fit_selection["ok"]
     assert fit_selection["result"]["ui_view"]["mode"] == "selection"
     assert fit_selection["result"]["ui_view"]["zoom_percent"] > 0
+    focused = registry.execute(
+        "paint.ui.view.focus",
+        {"object_id": object_id},
+    ).to_dict()
+    assert focused["ok"]
+    assert focused["result"]["ui_view"]["mode"] == "object"
+    zoomed = registry.execute(
+        "paint.ui.view.zoom",
+        {"percent": 175, "anchor_x": 200, "anchor_y": 180},
+    ).to_dict()
+    assert zoomed["ok"]
+    assert zoomed["result"]["ui_view"]["zoom_percent"] == 175.0
+    before_pan = zoomed["result"]["ui_view"]
+    panned = registry.execute(
+        "paint.ui.view.pan",
+        {"dx": 24, "dy": -18},
+    ).to_dict()
+    assert panned["ok"]
+    assert (
+        panned["result"]["ui_view"]["offset_x"]
+        == before_pan["offset_x"] + 24
+    )
+    assert (
+        panned["result"]["ui_view"]["offset_y"]
+        == before_pan["offset_y"] - 18
+    )
     component_result = registry.execute(
         "paint.ui.component.add",
         {"name": "Primary Button", "root_object_id": object_id},
@@ -893,6 +922,82 @@ def test_painter_ui_overlay_multi_artboard_fit_pan_and_activation() -> None:
         desktop_viewport.center().toPoint(),
     )
     assert activated == [desktop["id"]]
+
+    overlay.close()
+    overlay.deleteLater()
+    app.processEvents()
+
+
+def test_painter_ui_overlay_uses_canvas_first_wheel_navigation() -> None:
+    app = _app()
+    from PySide6.QtCore import QPoint, QPointF, Qt
+    from PySide6.QtGui import QWheelEvent
+
+    from app.painter_ui_document import create_ui_document
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(900, 640)
+    overlay.set_document(create_ui_document(390, 844))
+    overlay.fit_artboard()
+    overlay.show()
+    app.processEvents()
+
+    anchor = QPointF(340.0, 260.0)
+    before = overlay.view_state()
+    world_before = (
+        (anchor.x() - before["offset_x"]) / before["scale"],
+        (anchor.y() - before["offset_y"]) / before["scale"],
+    )
+    zoom_event = QWheelEvent(
+        anchor,
+        overlay.mapToGlobal(anchor.toPoint()),
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.ControlModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+    overlay.wheelEvent(zoom_event)
+    zoomed = overlay.view_state()
+    world_after = (
+        (anchor.x() - zoomed["offset_x"]) / zoomed["scale"],
+        (anchor.y() - zoomed["offset_y"]) / zoomed["scale"],
+    )
+    assert zoomed["scale"] > before["scale"]
+    assert abs(world_after[0] - world_before[0]) < 0.001
+    assert abs(world_after[1] - world_before[1]) < 0.001
+
+    vertical_event = QWheelEvent(
+        anchor,
+        overlay.mapToGlobal(anchor.toPoint()),
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.NoModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+    overlay.wheelEvent(vertical_event)
+    vertical = overlay.view_state()
+    assert vertical["scale"] == zoomed["scale"]
+    assert vertical["offset_y"] > zoomed["offset_y"]
+
+    horizontal_event = QWheelEvent(
+        anchor,
+        overlay.mapToGlobal(anchor.toPoint()),
+        QPoint(0, 0),
+        QPoint(0, 120),
+        Qt.MouseButton.NoButton,
+        Qt.KeyboardModifier.ShiftModifier,
+        Qt.ScrollPhase.ScrollUpdate,
+        False,
+    )
+    overlay.wheelEvent(horizontal_event)
+    horizontal = overlay.view_state()
+    assert horizontal["offset_x"] > vertical["offset_x"]
+    assert horizontal["offset_y"] == vertical["offset_y"]
 
     overlay.close()
     overlay.deleteLater()

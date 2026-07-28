@@ -23,8 +23,12 @@ def test_floating_toolbar_emits_intents_and_reflows() -> None:
     fits: list[str] = []
     toolbar.tool_requested.connect(tools.append)
     toolbar.fit_requested.connect(fits.append)
+    parent.show()
     toolbar.show()
     toolbar.tool_buttons["frame"].click()
+    toolbar.zoom_button.click()
+    app.processEvents()
+    assert toolbar.zoom_popover.isVisible()
     toolbar.view_buttons["selection"].click()
     toolbar.place_in_parent()
     app.processEvents()
@@ -39,14 +43,50 @@ def test_floating_toolbar_emits_intents_and_reflows() -> None:
     toolbar.sync_density(400)
     assert not toolbar.tool_buttons["ellipse"].isHidden()
     assert not toolbar.tool_buttons["image"].isHidden()
-    assert toolbar.view_buttons["selection"].isHidden()
+    assert not toolbar.zoom_button.isHidden()
+    assert toolbar.view_buttons["selection"].parentWidget() is toolbar.zoom_popover
 
     toolbar.sync_density(900)
     assert not toolbar.tool_buttons["ellipse"].isHidden()
     assert not toolbar.tool_buttons["image"].isHidden()
-    assert not toolbar.view_buttons["selection"].isHidden()
+    assert not toolbar.zoom_button.isHidden()
     toolbar.deleteLater()
     parent.deleteLater()
+
+
+def test_zoom_popover_emits_percent_and_transient_indicator() -> None:
+    app = _app()
+    from PySide6.QtWidgets import QWidget
+
+    from app.painter_ui_toolbar import PainterUIFloatingToolbar
+
+    parent = QWidget()
+    parent.resize(720, 480)
+    toolbar = PainterUIFloatingToolbar(parent)
+    zooms: list[float] = []
+    toolbar.zoom_requested.connect(zooms.append)
+    parent.show()
+    toolbar.show()
+    toolbar.place_in_parent()
+    toolbar.zoom_button.click()
+    app.processEvents()
+
+    toolbar.zoom_popover.percent_spin.setValue(175)
+    toolbar.zoom_popover.percent_spin.editingFinished.emit()
+    assert zooms == [175.0]
+
+    toolbar.zoom_popover.hide()
+    toolbar.set_zoom_percent(212.4)
+    app.processEvents()
+    assert toolbar.zoom_indicator.text() == "212%"
+    assert toolbar.zoom_indicator.isVisible()
+    assert (
+        toolbar.zoom_indicator.geometry().bottom()
+        < toolbar.geometry().top()
+    )
+
+    parent.deleteLater()
+    app.processEvents()
 
 
 def test_floating_toolbar_tracks_active_tool_without_emitting() -> None:
