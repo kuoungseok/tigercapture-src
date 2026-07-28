@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSpinBox,
@@ -206,9 +207,13 @@ class PainterUIInspector(QWidget):
         self.artboard_combo = QComboBox()
         self.artboard_combo.setToolTip("Active UI artboard")
         self.artboard_combo.currentIndexChanged.connect(self._on_artboard_changed)
-        root.addWidget(self.artboard_combo)
+        artboard_bar = QFrame()
+        artboard_bar.setObjectName("PainterUIArtboardBar")
         artboard_add_row = QHBoxLayout()
-        self.artboard_preset_combo = QComboBox()
+        artboard_add_row.setContentsMargins(5, 3, 5, 4)
+        artboard_add_row.setSpacing(3)
+        artboard_bar.setLayout(artboard_add_row)
+        self.artboard_preset_combo = QComboBox(self)
         for name, width, height, breakpoint in (
             ("iPhone 390 x 844", 390, 844, "mobile"),
             ("Android 412 x 915", 412, 915, "mobile"),
@@ -221,13 +226,28 @@ class PainterUIInspector(QWidget):
                 (name.split(" ", 1)[0], width, height, breakpoint),
             )
         self.artboard_preset_combo.setToolTip("New artboard size")
-        add_artboard = QPushButton("+")
-        add_artboard.setFixedWidth(30)
+        self.artboard_preset_combo.hide()
+        add_artboard = QPushButton("")
+        add_artboard.setObjectName("PainterUIIconButton")
+        add_artboard.setFixedSize(28, 26)
+        add_artboard.setIcon(app_icon("plus", size=13, color="#D9E2ED"))
+        add_artboard.setIconSize(icon_size(13))
         add_artboard.setToolTip("Add artboard from preset")
         add_artboard.setAccessibleName("Add artboard")
-        add_artboard.clicked.connect(self._emit_add_artboard)
+        preset_menu = QMenu(add_artboard)
+        preset_menu.setObjectName("PainterUIArtboardPresetMenu")
+        for index in range(self.artboard_preset_combo.count()):
+            action = preset_menu.addAction(self.artboard_preset_combo.itemText(index))
+            action.triggered.connect(
+                lambda _checked=False, preset_index=index: (
+                    self._emit_add_artboard_preset(preset_index)
+                )
+            )
+        add_artboard.setMenu(preset_menu)
+        self.add_artboard_button = add_artboard
         self.delete_artboard_button = QPushButton("")
-        self.delete_artboard_button.setFixedSize(30, 28)
+        self.delete_artboard_button.setObjectName("PainterUIIconButton")
+        self.delete_artboard_button.setFixedSize(28, 26)
         self.delete_artboard_button.setIcon(
             app_icon("trash", size=13, color="#D9DEE6")
         )
@@ -236,10 +256,10 @@ class PainterUIInspector(QWidget):
         self.delete_artboard_button.setAccessibleName("Delete active artboard")
         self.delete_artboard_button.setEnabled(False)
         self.delete_artboard_button.clicked.connect(self._emit_delete_artboard)
-        artboard_add_row.addWidget(self.artboard_preset_combo, 1)
+        artboard_add_row.addWidget(self.artboard_combo, 1)
         artboard_add_row.addWidget(add_artboard)
         artboard_add_row.addWidget(self.delete_artboard_button)
-        root.addLayout(artboard_add_row)
+        root.addWidget(artboard_bar)
 
         artboard_layout_frame = QFrame()
         artboard_layout_frame.setObjectName("PainterUIArtboardLayout")
@@ -2044,6 +2064,12 @@ class PainterUIInspector(QWidget):
             int(height),
             str(breakpoint),
         )
+
+    def _emit_add_artboard_preset(self, index: int) -> None:
+        if not 0 <= int(index) < self.artboard_preset_combo.count():
+            return
+        self.artboard_preset_combo.setCurrentIndex(int(index))
+        self._emit_add_artboard()
 
     def _emit_delete_artboard(self) -> None:
         if len(self._document.get("artboards", [])) <= 1:

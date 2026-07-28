@@ -187,6 +187,11 @@ def test_ui_artboard_presets_cover_product_targets() -> None:
     inspector.artboard_preset_combo.setCurrentIndex(2)
     inspector._emit_add_artboard()
     assert emitted == [("Desktop", 1440, 900, "desktop")]
+    assert inspector.artboard_preset_combo.isHidden()
+    assert inspector.add_artboard_button.menu() is not None
+    assert len(inspector.add_artboard_button.menu().actions()) == len(presets)
+    inspector._emit_add_artboard_preset(0)
+    assert emitted[-1] == ("iPhone", 390, 844, "mobile")
     assert not inspector.delete_artboard_button.isEnabled()
     inspector.deleteLater()
     app.processEvents()

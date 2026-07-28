@@ -431,7 +431,7 @@ QPushButton#PainterUITemplateQuick:pressed {
 }
 
 QWidget#PainterUIInspector {
-    background-color: #171b22;
+    background-color: #1e2228;
     color: #dfe6f0;
 }
 
@@ -442,7 +442,9 @@ QWidget#PainterUIInspector QLabel {
 
 QWidget#PainterUIInspector QLabel#PaintSectionTitle {
     color: #edf3fb;
-    padding: 4px 7px 2px 7px;
+    font-size: 10px;
+    letter-spacing: 0;
+    padding: 5px 7px 2px 7px;
 }
 
 QWidget#PainterUIInspector QLabel#PaintMuted {
@@ -450,9 +452,34 @@ QWidget#PainterUIInspector QLabel#PaintMuted {
 }
 
 QFrame#PainterUIArtboardLayout {
-    background-color: #1b2028;
-    border: 1px solid #2a323e;
-    border-radius: 4px;
+    background-color: #20252c;
+    border: none;
+    border-top: 1px solid #303741;
+    border-bottom: 1px solid #303741;
+    border-radius: 0;
+}
+
+QFrame#PainterUIArtboardBar {
+    background-color: #1e2228;
+    border: none;
+    border-bottom: 1px solid #303741;
+}
+
+QWidget#PainterUIInspector QPushButton#PainterUIIconButton {
+    background-color: transparent;
+    border: 1px solid transparent;
+    border-radius: 3px;
+    padding: 0;
+}
+
+QWidget#PainterUIInspector QPushButton#PainterUIIconButton:hover {
+    background-color: #2b3139;
+    border-color: #3b4653;
+}
+
+QWidget#PainterUIInspector QPushButton#PainterUIIconButton:disabled {
+    background-color: transparent;
+    border-color: transparent;
 }
 
 QFrame#PainterUICompactGrid {
@@ -467,9 +494,9 @@ QWidget#PainterUIInspector QDoubleSpinBox {
     background-color: #11151b;
     color: #e4eaf2;
     border: 1px solid #303946;
-    border-radius: 4px;
-    min-height: 24px;
-    padding: 1px 6px;
+    border-radius: 3px;
+    min-height: 22px;
+    padding: 0 6px;
     selection-background-color: #4b6483;
 }
 
@@ -531,9 +558,9 @@ QWidget#PainterUIInspector QPushButton {
     background-color: #222933;
     color: #dce5f0;
     border: 1px solid #343e4b;
-    border-radius: 4px;
-    min-height: 24px;
-    padding: 2px 7px;
+    border-radius: 3px;
+    min-height: 22px;
+    padding: 1px 7px;
 }
 
 QWidget#PainterUIInspector QPushButton:hover {
@@ -553,18 +580,19 @@ QTabWidget#PainterUIInspectorTabs {
 
 QTabWidget#PainterUIInspectorTabs::pane {
     background-color: #15191f;
-    border: 1px solid #29313c;
+    border: none;
+    border-top: 1px solid #303741;
     top: -1px;
 }
 
 QTabWidget#PainterUIInspectorTabs QTabBar::tab {
-    background-color: #1b2028;
+    background-color: #20242a;
     border: none;
     border-right: 1px solid #2b333f;
     border-bottom: 1px solid #29313c;
     min-width: 36px;
     max-width: 48px;
-    min-height: 28px;
+    min-height: 26px;
     padding: 2px 4px;
 }
 
@@ -573,7 +601,7 @@ QTabWidget#PainterUIInspectorTabs QTabBar::tab:hover {
 }
 
 QTabWidget#PainterUIInspectorTabs QTabBar::tab:selected {
-    background-color: #2b3542;
+    background-color: #303741;
     border-bottom: 2px solid #7895b8;
 }
 
@@ -9421,7 +9449,7 @@ class PaintDialog(QDialog):
         inspector = QFrame()
         inspector.setObjectName("PaintInspector")
         inspector.setMinimumWidth(320)
-        inspector.setMaximumWidth(360 if self._standalone else 380)
+        inspector.setMaximumWidth(336 if self._standalone else 348)
         inspector.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
         inspector_layout = QVBoxLayout(inspector)
         inspector_layout.setContentsMargins(0, 0, 0, 0)
