@@ -17,7 +17,7 @@ from app.painter_ui_document import normalize_ui_document
 
 
 PAINTER_MOTION_TARGET = "motion_designer"
-PAINTER_MOTION_LINK_VERSION = 1
+PAINTER_MOTION_LINK_VERSION = 2
 
 
 def _number(value: Any, default: float = 0.0) -> float:
@@ -165,22 +165,52 @@ def resolved_ui_geometry(value: Mapping[str, Any]) -> dict[str, dict[str, float]
     return geometry
 
 
-def linked_motion_composition_id(
+def linked_motion_binding_ref(
     value: Mapping[str, Any],
     object_id: str,
-) -> str:
+) -> dict[str, Any]:
     document = normalize_ui_document(value)
     target = document["linked_targets"].get(PAINTER_MOTION_TARGET)
     target = target if isinstance(target, Mapping) else {}
     bindings = target.get("object_bindings")
     bindings = bindings if isinstance(bindings, Mapping) else {}
-    return str(bindings.get(str(object_id)) or "")
+    raw = bindings.get(str(object_id))
+    if isinstance(raw, Mapping):
+        return {
+            "composition_id": str(raw.get("composition_id") or ""),
+            "binding_id": str(raw.get("binding_id") or ""),
+            "composition_revision": max(
+                0, int(raw.get("composition_revision", 0) or 0)
+            ),
+        }
+    return {
+        "composition_id": str(raw or ""),
+        "binding_id": "",
+        "composition_revision": 0,
+    }
+
+
+def linked_motion_composition_id(
+    value: Mapping[str, Any],
+    object_id: str,
+) -> str:
+    return linked_motion_binding_ref(value, object_id)["composition_id"]
+
+
+def linked_motion_binding_id(
+    value: Mapping[str, Any],
+    object_id: str,
+) -> str:
+    return linked_motion_binding_ref(value, object_id)["binding_id"]
 
 
 def attach_motion_composition(
     value: Mapping[str, Any],
     object_id: str,
     composition_id: str,
+    *,
+    binding_id: str = "",
+    composition_revision: int = 0,
 ) -> dict[str, Any]:
     document = normalize_ui_document(value)
     linked_targets = copy.deepcopy(document["linked_targets"])
@@ -188,7 +218,11 @@ def attach_motion_composition(
     target = copy.deepcopy(dict(target)) if isinstance(target, Mapping) else {}
     bindings = target.get("object_bindings")
     bindings = copy.deepcopy(dict(bindings)) if isinstance(bindings, Mapping) else {}
-    bindings[str(object_id)] = str(composition_id)
+    bindings[str(object_id)] = {
+        "composition_id": str(composition_id),
+        "binding_id": str(binding_id),
+        "composition_revision": max(0, int(composition_revision or 0)),
+    }
     target.update(
         {
             "version": PAINTER_MOTION_LINK_VERSION,
@@ -199,6 +233,289 @@ def attach_motion_composition(
     document["linked_targets"] = linked_targets
     document["revision"] = int(document["revision"]) + 1
     return document
+
+
+def _composition_value(
+    compositions: Mapping[str, MotionComposition | Mapping[str, Any]],
+    composition_id: str,
+) -> MotionComposition | None:
+    value = compositions.get(str(composition_id))
+    if isinstance(value, MotionComposition):
+        return value
+    if isinstance(value, Mapping):
+        return MotionComposition.from_dict(value)
+    return None
+
+
+def _binding_for_object(
+    composition: MotionComposition,
+    object_id: str,
+    binding_id: str = "",
+) -> UIMotionBinding | None:
+    from app.motion_designer.ui_motion_binding import ui_motion_bindings
+
+    rows = ui_motion_bindings(composition)
+    if binding_id:
+        return next((row for row in rows if row.id == binding_id), None)
+    return next(
+        (row for row in rows if row.source_object_id == str(object_id)),
+        None,
+    )
+
+
+def inspect_motion_binding_links(
+    value: Mapping[str, Any],
+    compositions: Mapping[str, MotionComposition | Mapping[str, Any]],
+) -> dict[str, Any]:
+    document = normalize_ui_document(value)
+    objects_by_id = {row["id"]: row for row in document["objects"]}
+    object_ids = set(objects_by_id)
+    target = document["linked_targets"].get(PAINTER_MOTION_TARGET)
+    target = target if isinstance(target, Mapping) else {}
+    raw_bindings = target.get("object_bindings")
+    raw_bindings = raw_bindings if isinstance(raw_bindings, Mapping) else {}
+    rows: list[dict[str, Any]] = []
+    errors: list[str] = []
+    warnings: list[str] = []
+    resolved_binding_ids: set[str] = set()
+    composition_to_binding: dict[str, str] = {}
+    for object_id in sorted(str(key) for key in raw_bindings):
+        ref = linked_motion_binding_ref(document, object_id)
+        composition = _composition_value(
+            compositions, ref["composition_id"]
+        )
+        binding = (
+            _binding_for_object(
+                composition,
+                object_id,
+                ref["binding_id"],
+            )
+            if composition is not None
+            else None
+        )
+        status = "ok"
+        if object_id not in object_ids:
+            status = "orphan_object"
+            errors.append(f"orphan_motion_object:{object_id}")
+        elif composition is None:
+            status = "missing_composition"
+            errors.append(
+                f"missing_motion_composition:{object_id}:{ref['composition_id']}"
+            )
+        elif binding is None:
+            status = "missing_binding"
+            errors.append(
+                f"missing_motion_binding:{object_id}:{ref['binding_id']}"
+            )
+        elif not ref["binding_id"]:
+            status = "legacy_link"
+            warnings.append(f"legacy_motion_link:{object_id}")
+        elif (
+            ref["composition_revision"]
+            and ref["composition_revision"] != composition.revision
+        ):
+            status = "stale_revision"
+            warnings.append(
+                f"stale_motion_revision:{object_id}:"
+                f"{ref['composition_revision']}:{composition.revision}"
+            )
+        rows.append(
+            {
+                "object_id": object_id,
+                "object_name": str(
+                    (objects_by_id.get(object_id) or {}).get("name")
+                    or object_id
+                ),
+                **ref,
+                "resolved_binding_id": binding.id if binding else "",
+                "current_composition_revision": (
+                    int(composition.revision) if composition else 0
+                ),
+                "status": status,
+            }
+        )
+        if binding is not None:
+            resolved_binding_ids.add(binding.id)
+            composition_to_binding[composition.id] = binding.id
+    for interaction in document["interactions"]:
+        if interaction["action"] != "play_animation":
+            continue
+        interaction_id = interaction["id"]
+        motion_ref = str(interaction.get("motion_clip_id") or "")
+        if not motion_ref:
+            errors.append(
+                f"missing_interaction_motion_binding:{interaction_id}"
+            )
+            continue
+        if motion_ref in composition_to_binding:
+            warnings.append(
+                f"legacy_interaction_motion_link:{interaction_id}:{motion_ref}"
+            )
+            continue
+        if motion_ref not in resolved_binding_ids:
+            errors.append(
+                f"missing_interaction_motion_binding:"
+                f"{interaction_id}:{motion_ref}"
+            )
+            continue
+        source_ref = linked_motion_binding_ref(
+            document, interaction["source_object_id"]
+        )
+        if source_ref["binding_id"] and source_ref["binding_id"] != motion_ref:
+            errors.append(
+                f"interaction_motion_binding_mismatch:"
+                f"{interaction_id}:{source_ref['binding_id']}:{motion_ref}"
+            )
+    return {
+        "schema": "tigerstudio.painter.ui.motion_links.v2",
+        "ok": not errors,
+        "document_id": document["document_id"],
+        "document_revision": int(document["revision"]),
+        "selected_object_id": str(
+            document["selection"].get("object_id") or ""
+        ),
+        "link_version": int(target.get("version", 1) or 1),
+        "links": rows,
+        "errors": errors,
+        "warnings": warnings,
+    }
+
+
+def migrate_motion_binding_links(
+    value: Mapping[str, Any],
+    compositions: Mapping[str, MotionComposition | Mapping[str, Any]],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    document = normalize_ui_document(value)
+    target = document["linked_targets"].get(PAINTER_MOTION_TARGET)
+    target = copy.deepcopy(dict(target)) if isinstance(target, Mapping) else {}
+    raw_bindings = target.get("object_bindings")
+    raw_bindings = (
+        copy.deepcopy(dict(raw_bindings))
+        if isinstance(raw_bindings, Mapping)
+        else {}
+    )
+    migrated = 0
+    unresolved: list[str] = []
+    binding_refs_by_object: dict[str, tuple[str, str]] = {}
+    for object_id, raw in list(raw_bindings.items()):
+        ref = linked_motion_binding_ref(document, str(object_id))
+        composition = _composition_value(
+            compositions, ref["composition_id"]
+        )
+        binding = (
+            _binding_for_object(
+                composition,
+                str(object_id),
+                ref["binding_id"],
+            )
+            if composition is not None
+            else None
+        )
+        if composition is None or binding is None:
+            unresolved.append(str(object_id))
+            continue
+        normalized = {
+            "composition_id": composition.id,
+            "binding_id": binding.id,
+            "composition_revision": int(composition.revision),
+        }
+        if raw != normalized:
+            migrated += 1
+        raw_bindings[str(object_id)] = normalized
+        binding_refs_by_object[str(object_id)] = (
+            composition.id,
+            binding.id,
+        )
+    target.update(
+        {
+            "version": PAINTER_MOTION_LINK_VERSION,
+            "object_bindings": raw_bindings,
+        }
+    )
+    document["linked_targets"][PAINTER_MOTION_TARGET] = target
+    interaction_migrations = 0
+    for interaction in document["interactions"]:
+        legacy = str(interaction.get("motion_clip_id") or "")
+        source_composition_id, source_binding_id = (
+            binding_refs_by_object.get(
+                str(interaction.get("source_object_id") or ""),
+                ("", ""),
+            )
+        )
+        if legacy and legacy == source_composition_id and source_binding_id:
+            interaction["motion_clip_id"] = source_binding_id
+            interaction_migrations += 1
+    if migrated or interaction_migrations:
+        document["revision"] = int(document["revision"]) + 1
+    report = inspect_motion_binding_links(document, compositions)
+    report.update(
+        {
+            "migrated_link_count": migrated,
+            "migrated_interaction_count": interaction_migrations,
+            "unresolved_object_ids": sorted(unresolved),
+        }
+    )
+    return document, report
+
+
+def relink_motion_binding(
+    value: Mapping[str, Any],
+    object_id: str,
+    composition_id: str,
+    binding_id: str,
+    compositions: Mapping[str, MotionComposition | Mapping[str, Any]],
+) -> dict[str, Any]:
+    document = normalize_ui_document(value)
+    if str(object_id) not in {row["id"] for row in document["objects"]}:
+        raise ValueError(f"Painter UI object not found: {object_id}")
+    composition = _composition_value(compositions, composition_id)
+    if composition is None:
+        raise ValueError(f"Motion composition not found: {composition_id}")
+    binding = _binding_for_object(composition, object_id, binding_id)
+    if binding is None or binding.source_object_id != str(object_id):
+        raise ValueError(
+            f"Motion binding does not belong to object: {binding_id}"
+        )
+    return attach_motion_composition(
+        document,
+        object_id,
+        composition.id,
+        binding_id=binding.id,
+        composition_revision=composition.revision,
+    )
+
+
+def detach_motion_binding(
+    value: Mapping[str, Any],
+    object_id: str,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    document = normalize_ui_document(value)
+    target = document["linked_targets"].get(PAINTER_MOTION_TARGET)
+    target = copy.deepcopy(dict(target)) if isinstance(target, Mapping) else {}
+    bindings = target.get("object_bindings")
+    bindings = (
+        copy.deepcopy(dict(bindings)) if isinstance(bindings, Mapping) else {}
+    )
+    ref = linked_motion_binding_ref(document, object_id)
+    removed = bindings.pop(str(object_id), None)
+    if removed is None:
+        return document, {"detached": False, "object_id": str(object_id)}
+    target["version"] = PAINTER_MOTION_LINK_VERSION
+    target["object_bindings"] = bindings
+    document["linked_targets"][PAINTER_MOTION_TARGET] = target
+    cleared_interactions: list[str] = []
+    if ref["binding_id"]:
+        for interaction in document["interactions"]:
+            if interaction.get("motion_clip_id") == ref["binding_id"]:
+                interaction["motion_clip_id"] = ""
+                cleared_interactions.append(interaction["id"])
+    document["revision"] = int(document["revision"]) + 1
+    return document, {
+        "detached": True,
+        "object_id": str(object_id),
+        **ref,
+        "cleared_interaction_ids": cleared_interactions,
+    }
 
 
 def _object_subtree(
@@ -477,7 +794,13 @@ __all__ = [
     "PAINTER_MOTION_TARGET",
     "attach_motion_composition",
     "create_or_sync_ui_motion_composition",
+    "detach_motion_binding",
+    "inspect_motion_binding_links",
+    "linked_motion_binding_id",
+    "linked_motion_binding_ref",
     "linked_motion_composition_id",
+    "migrate_motion_binding_links",
     "motion_preview_states",
+    "relink_motion_binding",
     "resolved_ui_geometry",
 ]

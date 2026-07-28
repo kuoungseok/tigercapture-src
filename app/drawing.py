@@ -9590,6 +9590,15 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.motion_preview_hover_requested.connect(
             lambda _binding_id: self._set_painter_ui_motion_preview(True)
         )
+        self._paint_ui_inspector.motion_binding_migrate_requested.connect(
+            self._migrate_painter_ui_motion_bindings
+        )
+        self._paint_ui_inspector.motion_binding_relink_requested.connect(
+            self._relink_painter_ui_motion_binding
+        )
+        self._paint_ui_inspector.motion_binding_detach_requested.connect(
+            self._detach_painter_ui_motion_binding
+        )
         self._paint_ui_inspector.template_apply_requested.connect(
             self._apply_painter_ui_template
         )
@@ -13582,6 +13591,16 @@ class PaintDialog(QDialog):
                     getattr(self, "_painter_ui_motion_compositions", {}),
                 )
             inspector.set_motion_delivery_report(report)
+            from app.painter_ui_motion_bridge import (
+                inspect_motion_binding_links,
+            )
+
+            inspector.set_motion_binding_report(
+                inspect_motion_binding_links(
+                    getattr(self, "_painter_ui_document", {}),
+                    getattr(self, "_painter_ui_motion_compositions", {}),
+                )
+            )
         from app.painter_ui_motion_actor import motion_actor_rows
 
         has_motion_actors = bool(
@@ -13711,6 +13730,79 @@ class PaintDialog(QDialog):
                 return str(composition_id)
         return ""
 
+    def _migrate_painter_ui_motion_bindings(
+        self,
+        _object_id: str = "",
+    ) -> None:
+        from app.painter_ui_motion_bridge import (
+            migrate_motion_binding_links,
+        )
+
+        document, report = migrate_motion_binding_links(
+            getattr(self, "_painter_ui_document", {}),
+            getattr(self, "_painter_ui_motion_compositions", {}),
+        )
+        if document != self._painter_ui_document:
+            self._push_undo_state("Migrate UI motion bindings")
+            self._painter_ui_document = document
+            self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+        if report["unresolved_object_ids"]:
+            QMessageBox.warning(
+                self,
+                "Motion Link Migration",
+                "Some Motion links could not be resolved:\n"
+                + "\n".join(report["unresolved_object_ids"]),
+            )
+
+    def _relink_painter_ui_motion_binding(
+        self,
+        object_id: str,
+        composition_id: str,
+        binding_id: str,
+    ) -> None:
+        from app.painter_ui_motion_bridge import relink_motion_binding
+
+        try:
+            document = relink_motion_binding(
+                getattr(self, "_painter_ui_document", {}),
+                object_id,
+                composition_id,
+                binding_id,
+                getattr(self, "_painter_ui_motion_compositions", {}),
+            )
+        except ValueError as exc:
+            QMessageBox.warning(self, "Relink Motion", str(exc))
+            return
+        self._push_undo_state("Relink UI motion")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _detach_painter_ui_motion_binding(self, object_id: str) -> None:
+        answer = QMessageBox.question(
+            self,
+            "Detach Motion Link",
+            "Detach this Painter-to-Motion link?\n\n"
+            "The editable Motion composition will be preserved.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        from app.painter_ui_motion_bridge import detach_motion_binding
+
+        document, result = detach_motion_binding(
+            getattr(self, "_painter_ui_document", {}),
+            object_id,
+        )
+        if not result["detached"]:
+            return
+        self._push_undo_state("Detach UI motion")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
     def _animate_selected_painter_ui_object(self) -> dict:
         from app.motion_designer.schema import MotionComposition
         from app.motion_designer.ui import MotionDesignerWindow
@@ -13778,10 +13870,24 @@ class PaintDialog(QDialog):
             )
         self._painter_ui_motion_compositions[composition.id] = composition
         if selected_row is None or selected_row.get("kind") != "motion_actor":
+            from app.motion_designer.ui_motion_binding import (
+                ui_motion_bindings,
+            )
+
+            binding = next(
+                (
+                    row
+                    for row in ui_motion_bindings(composition)
+                    if row.source_object_id == root_object_id
+                ),
+                None,
+            )
             self._painter_ui_document = attach_motion_composition(
                 document,
-                selected,
+                root_object_id,
                 composition.id,
+                binding_id=binding.id if binding else "",
+                composition_revision=composition.revision,
             )
         self._painter_ui_motion_active_id = composition.id
         self._painter_document_dirty = True

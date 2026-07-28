@@ -1024,9 +1024,32 @@ def _remove_dangling_records(
         for row in document["interactions"]
         if row["id"] not in removed_interactions
     ]
+    removed_motion_links: list[str] = []
+    linked_targets = document.get("linked_targets")
+    linked_targets = linked_targets if isinstance(linked_targets, dict) else {}
+    motion_target = linked_targets.get("motion_designer")
+    if isinstance(motion_target, Mapping):
+        motion_target = copy.deepcopy(dict(motion_target))
+        object_bindings = motion_target.get("object_bindings")
+        object_bindings = (
+            copy.deepcopy(dict(object_bindings))
+            if isinstance(object_bindings, Mapping)
+            else {}
+        )
+        removed_motion_links = sorted(
+            object_id
+            for object_id in removed_objects
+            if object_id in object_bindings
+        )
+        for object_id in removed_motion_links:
+            object_bindings.pop(object_id, None)
+        motion_target["object_bindings"] = object_bindings
+        linked_targets["motion_designer"] = motion_target
+        document["linked_targets"] = linked_targets
     return {
         "removed_component_ids": sorted(removed_components),
         "removed_interaction_ids": sorted(removed_interactions),
+        "removed_motion_link_object_ids": removed_motion_links,
     }
 
 

@@ -87,6 +87,10 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.motion.preview",
         "paint.ui.motion.inspect",
         "paint.ui.motion.delivery.inspect",
+        "paint.ui.motion.binding.inspect",
+        "paint.ui.motion.binding.migrate",
+        "paint.ui.motion.binding.relink",
+        "paint.ui.motion.binding.detach",
         "paint.ui.motion_actor.import",
         "paint.ui.motion_actor.list",
         "paint.ui.delivery.profiles",
@@ -238,6 +242,35 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     assert {
         row["target"] for row in delivery["result"]["targets"]
     } == {"web", "app", "umg"}
+    binding_id = f"ui-binding-{object_id}"
+    binding_report = registry.execute(
+        "paint.ui.motion.binding.inspect",
+        {},
+    ).to_dict()
+    assert binding_report["ok"]
+    assert binding_report["result"]["links"][0]["binding_id"] == binding_id
+    migrated = registry.execute(
+        "paint.ui.motion.binding.migrate",
+        {},
+    ).to_dict()
+    assert migrated["ok"]
+    assert migrated["result"]["migrated_link_count"] == 0
+    detached = registry.execute(
+        "paint.ui.motion.binding.detach",
+        {"object_id": object_id},
+        confirm_destructive=True,
+    ).to_dict()
+    assert detached["ok"]
+    assert detached["result"]["detached"] is True
+    relinked = registry.execute(
+        "paint.ui.motion.binding.relink",
+        {
+            "object_id": object_id,
+            "composition_id": composition_id,
+            "binding_id": binding_id,
+        },
+    ).to_dict()
+    assert relinked["ok"]
 
     handoff_dir = tmp_path / "handoff"
     handoff = registry.execute(
@@ -261,12 +294,11 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     assert stored["ui_document"]["components"][0]["id"] == component_id
     assert stored["ui_document"]["tokens"][0]["id"] == token_id
     assert stored["ui_document"]["interactions"][0]["source_object_id"] == object_id
-    assert (
-        stored["ui_document"]["linked_targets"]["motion_designer"][
-            "object_bindings"
-        ][object_id]
-        == composition_id
-    )
+    stored_link = stored["ui_document"]["linked_targets"]["motion_designer"][
+        "object_bindings"
+    ][object_id]
+    assert stored_link["composition_id"] == composition_id
+    assert stored_link["binding_id"] == f"ui-binding-{object_id}"
     assert stored["ui_motion_compositions"][composition_id]["duration_ms"] == 800
     assert stored["workspace"]["mode"] == "ui_design"
 
@@ -291,6 +323,13 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
     assert (
         restored._painter_ui_motion_compositions[composition_id].duration_ms
         == 800
+    )
+    restored_link = restored._painter_ui_document["linked_targets"][
+        "motion_designer"
+    ]["object_bindings"][object_id]
+    assert restored_link["binding_id"] == f"ui-binding-{object_id}"
+    assert restored_link["composition_revision"] == (
+        restored._painter_ui_motion_compositions[composition_id].revision
     )
 
     dialog.close()

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QScrollArea,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -126,6 +127,9 @@ class PainterUIInspector(QWidget):
     section_requested = Signal(str, str, object)
     motion_open_requested = Signal(str)
     motion_preview_hover_requested = Signal(str)
+    motion_binding_migrate_requested = Signal(str)
+    motion_binding_relink_requested = Signal(str, str, str)
+    motion_binding_detach_requested = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -441,7 +445,24 @@ class PainterUIInspector(QWidget):
         from app.painter_ui_motion_delivery_panel import (
             PainterUIMotionDeliveryPanel,
         )
+        from app.painter_ui_motion_binding_panel import (
+            PainterUIMotionBindingPanel,
+        )
 
+        motion_page = QWidget()
+        motion_layout = QVBoxLayout(motion_page)
+        motion_layout.setContentsMargins(0, 0, 0, 0)
+        motion_layout.setSpacing(4)
+        self.motion_binding_panel = PainterUIMotionBindingPanel()
+        self.motion_binding_panel.migrate_requested.connect(
+            self.motion_binding_migrate_requested
+        )
+        self.motion_binding_panel.relink_requested.connect(
+            self.motion_binding_relink_requested
+        )
+        self.motion_binding_panel.detach_requested.connect(
+            self.motion_binding_detach_requested
+        )
         self.motion_delivery_panel = PainterUIMotionDeliveryPanel()
         self.motion_delivery_panel.open_motion_requested.connect(
             self.motion_open_requested
@@ -449,7 +470,14 @@ class PainterUIInspector(QWidget):
         self.motion_delivery_panel.preview_hover_requested.connect(
             self.motion_preview_hover_requested
         )
-        tabs.addTab(self.motion_delivery_panel, "Motion")
+        motion_layout.addWidget(self.motion_binding_panel)
+        motion_layout.addWidget(self.motion_delivery_panel)
+        motion_layout.addStretch(1)
+        motion_scroll = QScrollArea()
+        motion_scroll.setWidgetResizable(True)
+        motion_scroll.setFrameShape(QFrame.Shape.NoFrame)
+        motion_scroll.setWidget(motion_page)
+        tabs.addTab(motion_scroll, "Motion")
 
         from app.painter_ui_production_panel import PainterUIProductionPanel
 
@@ -1190,6 +1218,12 @@ class PainterUIInspector(QWidget):
         value: Mapping[str, Any] | None,
     ) -> None:
         self.motion_delivery_panel.set_report(value)
+
+    def set_motion_binding_report(
+        self,
+        value: Mapping[str, Any] | None,
+    ) -> None:
+        self.motion_binding_panel.set_report(value)
 
     def _selected_id(self) -> str:
         return str(self._document["selection"]["object_id"] or "")

@@ -1294,6 +1294,56 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="Painter UI motion delivery would be inspected by target",
     )
     registry.register_adapter_action(
+        "paint.ui.motion.binding.inspect",
+        "Inspect Painter object, Motion composition, binding ID, revision, and orphan link consistency.",
+        "paint",
+        "paint_ui_motion_binding_inspect",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+        dry_summary="Painter UI motion binding links would be inspected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.motion.binding.migrate",
+        "Migrate legacy composition-only Painter motion links to canonical binding-ID references.",
+        "paint",
+        "paint_ui_motion_binding_migrate",
+        params_schema=schema_object({}),
+        undo_label="Migrate UI motion bindings",
+        dry_summary="legacy Painter UI motion links would be migrated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.motion.binding.relink",
+        "Relink a Painter UI object to a validated Motion composition and binding.",
+        "paint",
+        "paint_ui_motion_binding_relink",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "composition_id": {"type": "string"},
+                "binding_id": {"type": "string"},
+            },
+            required=("object_id", "composition_id", "binding_id"),
+        ),
+        required=("object_id", "composition_id", "binding_id"),
+        undo_label="Relink UI motion",
+        dry_summary="a Painter UI motion binding would be relinked",
+    )
+    registry.register_adapter_action(
+        "paint.ui.motion.binding.detach",
+        "Detach a Painter UI motion binding while preserving its Motion composition for recovery.",
+        "paint",
+        "paint_ui_motion_binding_detach",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}},
+            required=("object_id",),
+        ),
+        required=("object_id",),
+        destructive=True,
+        undo_label="Detach UI motion",
+        dry_summary="a Painter UI motion link would be detached",
+    )
+    registry.register_adapter_action(
         "paint.ui.motion_actor.import",
         "Import a .tgmotion project as a selectable, transformable, playable Painter UI animation actor.",
         "paint",

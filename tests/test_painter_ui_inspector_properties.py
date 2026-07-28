@@ -106,6 +106,37 @@ def test_inspector_disables_text_controls_for_non_text_and_empty_selection() -> 
     app.processEvents()
 
 
+def test_inspector_motion_tab_forwards_binding_repair_requests() -> None:
+    app = _app()
+    from app.painter_ui_inspector import PainterUIInspector
+
+    inspector = PainterUIInspector()
+    report = {
+        "schema": "tigerstudio.painter.ui.motion_links.v2",
+        "selected_object_id": "button-1",
+        "links": [
+            {
+                "object_id": "button-1",
+                "composition_id": "composition-1",
+                "binding_id": "binding-1",
+                "composition_revision": 2,
+                "current_composition_revision": 2,
+                "status": "ok",
+            }
+        ],
+    }
+    inspector.set_motion_binding_report(report)
+    detached: list[str] = []
+    inspector.motion_binding_detach_requested.connect(detached.append)
+    inspector.motion_binding_panel.detach_button.click()
+    app.processEvents()
+
+    assert detached == ["button-1"]
+    assert inspector.motion_binding_panel.status_badge.text() == "Ready"
+    inspector.deleteLater()
+    app.processEvents()
+
+
 def test_inspector_payload_round_trips_through_document_update() -> None:
     app = _app()
     from app.painter_ui_document import update_ui_object

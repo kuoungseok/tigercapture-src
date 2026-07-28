@@ -1736,10 +1736,22 @@ class PaintAdapterMixin(
         )
         dialog._push_undo_state("Attach UI motion")
         dialog._painter_ui_motion_compositions[composition.id] = composition
+        from app.motion_designer.ui_motion_binding import ui_motion_bindings
+
+        binding = next(
+            (
+                row
+                for row in ui_motion_bindings(composition)
+                if row.source_object_id == root_object_id
+            ),
+            None,
+        )
         updated = attach_motion_composition(
             document,
             root_object_id,
             composition.id,
+            binding_id=binding.id if binding else "",
+            composition_revision=composition.revision,
         )
         self._paint_ui_commit(dialog, "Attach UI motion", updated)
         return {
@@ -1831,6 +1843,77 @@ class PaintAdapterMixin(
             selected,
             getattr(dialog, "_painter_ui_motion_compositions", {}),
         )
+
+    def paint_ui_motion_binding_inspect(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_motion_bridge import (
+            inspect_motion_binding_links,
+        )
+
+        return inspect_motion_binding_links(
+            dialog._painter_ui_document,
+            getattr(dialog, "_painter_ui_motion_compositions", {}),
+        )
+
+    def paint_ui_motion_binding_migrate(self) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_motion_bridge import (
+            migrate_motion_binding_links,
+        )
+
+        document, report = migrate_motion_binding_links(
+            dialog._painter_ui_document,
+            getattr(dialog, "_painter_ui_motion_compositions", {}),
+        )
+        if document != dialog._painter_ui_document:
+            dialog._push_undo_state("Migrate UI motion bindings")
+            self._paint_ui_commit(
+                dialog, "Migrate UI motion bindings", document
+            )
+        return report
+
+    def paint_ui_motion_binding_relink(
+        self,
+        *,
+        object_id: str,
+        composition_id: str,
+        binding_id: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_motion_bridge import relink_motion_binding
+
+        document = relink_motion_binding(
+            dialog._painter_ui_document,
+            object_id,
+            composition_id,
+            binding_id,
+            getattr(dialog, "_painter_ui_motion_compositions", {}),
+        )
+        dialog._push_undo_state("Relink UI motion")
+        self._paint_ui_commit(dialog, "Relink UI motion", document)
+        return {
+            "relinked": True,
+            "object_id": str(object_id),
+            "composition_id": str(composition_id),
+            "binding_id": str(binding_id),
+        }
+
+    def paint_ui_motion_binding_detach(
+        self,
+        *,
+        object_id: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_motion_bridge import detach_motion_binding
+
+        document, result = detach_motion_binding(
+            dialog._painter_ui_document,
+            object_id,
+        )
+        if result["detached"]:
+            dialog._push_undo_state("Detach UI motion")
+            self._paint_ui_commit(dialog, "Detach UI motion", document)
+        return result
 
     def paint_ui_motion_actor_import(
         self,

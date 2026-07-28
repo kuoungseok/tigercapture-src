@@ -149,3 +149,184 @@ def test_motion_preview_states_evaluate_painter_layers() -> None:
     states = motion_preview_states(composition, 500)
     assert states[first["id"]]["position"][0] == pytest.approx(start[0] + 50.0)
     assert states[first["id"]]["position"][1] == pytest.approx(start[1])
+
+
+def test_legacy_motion_link_migrates_to_binding_id_and_interaction() -> None:
+    from app.painter_ui_motion_bridge import (
+        create_or_sync_ui_motion_composition,
+        inspect_motion_binding_links,
+        migrate_motion_binding_links,
+    )
+
+    document, group, _first, _second = _auto_layout_document()
+    composition = create_or_sync_ui_motion_composition(document, group["id"])
+    document["linked_targets"]["motion_designer"] = {
+        "version": 1,
+        "object_bindings": {group["id"]: composition.id},
+    }
+    document["interactions"].append(
+        {
+            "id": "ui-interaction-motion",
+            "name": "Play",
+            "source_object_id": group["id"],
+            "trigger": "click",
+            "action": "play_animation",
+            "target_artboard_id": "",
+            "target_object_id": group["id"],
+            "component_id": "",
+            "motion_clip_id": composition.id,
+            "parameters": {},
+            "enabled": True,
+        }
+    )
+
+    before = inspect_motion_binding_links(
+        document, {composition.id: composition}
+    )
+    assert before["links"][0]["status"] == "legacy_link"
+
+    migrated, report = migrate_motion_binding_links(
+        document, {composition.id: composition}
+    )
+    ref = migrated["linked_targets"]["motion_designer"][
+        "object_bindings"
+    ][group["id"]]
+    assert ref == {
+        "composition_id": composition.id,
+        "binding_id": f"ui-binding-{group['id']}",
+        "composition_revision": composition.revision,
+    }
+    assert migrated["interactions"][0]["motion_clip_id"] == ref["binding_id"]
+    assert report["migrated_link_count"] == 1
+    assert report["migrated_interaction_count"] == 1
+    assert report["links"][0]["status"] == "ok"
+
+
+def test_motion_link_relink_and_detach_preserve_composition() -> None:
+    from app.painter_ui_motion_bridge import (
+        create_or_sync_ui_motion_composition,
+        detach_motion_binding,
+        linked_motion_binding_id,
+        relink_motion_binding,
+    )
+
+    document, group, _first, _second = _auto_layout_document()
+    composition = create_or_sync_ui_motion_composition(document, group["id"])
+    binding_id = f"ui-binding-{group['id']}"
+    linked = relink_motion_binding(
+        document,
+        group["id"],
+        composition.id,
+        binding_id,
+        {composition.id: composition},
+    )
+    assert linked_motion_binding_id(linked, group["id"]) == binding_id
+
+    detached, result = detach_motion_binding(linked, group["id"])
+    assert result["detached"] is True
+    assert result["composition_id"] == composition.id
+    assert linked_motion_binding_id(detached, group["id"]) == ""
+    assert composition.id in {composition.id: composition}
+
+
+def test_motion_link_inspection_reports_stale_and_orphan_links() -> None:
+    from app.painter_ui_motion_bridge import (
+        attach_motion_composition,
+        create_or_sync_ui_motion_composition,
+        inspect_motion_binding_links,
+    )
+
+    document, group, _first, _second = _auto_layout_document()
+    composition = create_or_sync_ui_motion_composition(document, group["id"])
+    document = attach_motion_composition(
+        document,
+        group["id"],
+        composition.id,
+        binding_id=f"ui-binding-{group['id']}",
+        composition_revision=composition.revision + 2,
+    )
+    report = inspect_motion_binding_links(
+        document, {composition.id: composition}
+    )
+    assert report["links"][0]["status"] == "stale_revision"
+    assert report["ok"] is True
+
+    document["linked_targets"]["motion_designer"]["object_bindings"][
+        "removed-object"
+    ] = composition.id
+    report = inspect_motion_binding_links(
+        document, {composition.id: composition}
+    )
+    assert report["ok"] is False
+    assert any(
+        row["status"] == "orphan_object" for row in report["links"]
+    )
+
+
+def test_object_delete_removes_motion_link_without_deleting_composition() -> None:
+    from app.motion_designer.ui_motion_binding import ui_motion_bindings
+    from app.painter_ui_document import remove_ui_object
+    from app.painter_ui_motion_bridge import (
+        attach_motion_composition,
+        create_or_sync_ui_motion_composition,
+        linked_motion_composition_id,
+    )
+
+    document, group, _first, _second = _auto_layout_document()
+    composition = create_or_sync_ui_motion_composition(document, group["id"])
+    binding = ui_motion_bindings(composition)[0]
+    document = attach_motion_composition(
+        document,
+        group["id"],
+        composition.id,
+        binding_id=binding.id,
+        composition_revision=composition.revision,
+    )
+
+    removed_document, result = remove_ui_object(document, group["id"])
+    assert result["removed_motion_link_object_ids"] == [group["id"]]
+    assert linked_motion_composition_id(removed_document, group["id"]) == ""
+    assert composition.id
+
+
+def test_motion_link_inspection_validates_play_animation_binding() -> None:
+    from app.motion_designer.ui_motion_binding import ui_motion_bindings
+    from app.painter_ui_motion_bridge import (
+        attach_motion_composition,
+        create_or_sync_ui_motion_composition,
+        inspect_motion_binding_links,
+    )
+
+    document, group, _first, _second = _auto_layout_document()
+    composition = create_or_sync_ui_motion_composition(document, group["id"])
+    binding = ui_motion_bindings(composition)[0]
+    document = attach_motion_composition(
+        document,
+        group["id"],
+        composition.id,
+        binding_id=binding.id,
+        composition_revision=composition.revision,
+    )
+    document["interactions"].append(
+        {
+            "id": "ui-interaction-motion",
+            "name": "Play",
+            "source_object_id": group["id"],
+            "trigger": "click",
+            "action": "play_animation",
+            "target_artboard_id": "",
+            "target_object_id": group["id"],
+            "component_id": "",
+            "motion_clip_id": "missing-binding",
+            "parameters": {},
+            "enabled": True,
+        }
+    )
+    report = inspect_motion_binding_links(
+        document, {composition.id: composition}
+    )
+    assert report["ok"] is False
+    assert any(
+        error.startswith("missing_interaction_motion_binding")
+        for error in report["errors"]
+    )

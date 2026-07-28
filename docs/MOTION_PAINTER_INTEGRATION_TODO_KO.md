@@ -10,6 +10,14 @@
 - 실제 adapter나 bake 산출물이 없으면 Native/Baked로 주장하지 않고
   `Blocked`로 유지한다.
 - `paint.ui.motion.delivery.inspect` Action/MCP 경로가 같은 보고서를 사용한다.
+- Painter motion link v2는 `composition_id`, canonical `binding_id`,
+  `composition_revision`을 함께 저장한다.
+- 구형 composition-only 링크와 interaction의 `motion_clip_id`는
+  `paint.ui.motion.binding.migrate`로 명시적으로 마이그레이션한다.
+- inspect/relink/detach Action은 missing, stale revision, orphan object,
+  interaction mismatch를 보고하며 detach는 composition을 보존한다.
+- Painter Motion 탭은 같은 inspect report로 링크 상태와 revision을 표시하고
+  Migrate/Relink/Detach 복구 요청을 제공한다. Detach는 확인 후 실행한다.
 
 협의 기준:
 
@@ -369,15 +377,15 @@ composition을 하나의 객체로 배치한다는 의미다.
 ## P0. 계약 통합
 
 - [x] `UIMotionBinding`을 Painter/Motion 공용 canonical 계약으로 확정
-- [ ] `motion_clip_id`와 `linked_targets`를 binding ID 기반으로 마이그레이션
-- [ ] Painter state/interaction과 Motion binding의 양방향 참조 검증
+- [x] `motion_clip_id`와 `linked_targets`를 binding ID 기반으로 마이그레이션
+- [x] Painter state/interaction과 Motion binding의 양방향 참조 검증
 - [ ] composition revision/hash, missing/relink, orphan cleanup
 - [ ] `resolved layout + motion offset` 합성 규칙 테스트 고정
 - [ ] 삭제, 복제, Detach, Localize, Variant 변경 시 binding 정책
 - [ ] 양쪽 Undo 경계와 동시 수정 충돌 보고
 - [ ] Painter/Motion/Tiger UMG 공통 preflight
 - [x] Web/App/UMG target별 delivery capability와 fallback 결과 분리
-- [ ] Action/MCP inspect/migrate/relink/detach 제공
+- [x] Action/MCP inspect/migrate/relink/detach 제공
 
 완료 기준:
 

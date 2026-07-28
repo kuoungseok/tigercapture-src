@@ -7530,6 +7530,19 @@ AI Script Edit MVP integration:
   remain intact instead of snapping back to stale absolute coordinates.
   Automation uses `paint.ui.motion.attach`, `paint.ui.motion.open`,
   `paint.ui.motion.preview`, and `paint.ui.motion.inspect`.
+- Painter-to-Motion links use the versioned canonical binding reference
+  `{composition_id, binding_id, composition_revision}`. Legacy object-to-
+  composition strings remain readable and are upgraded explicitly through
+  `paint.ui.motion.binding.migrate`; migration also replaces legacy
+  interaction composition references with binding IDs when resolvable.
+  `paint.ui.motion.binding.inspect` reports missing compositions/bindings,
+  stale revisions, orphan objects, and `play_animation` mismatches.
+  `paint.ui.motion.binding.relink` validates ownership before changing a link,
+  while destructive `paint.ui.motion.binding.detach` removes only the Painter
+  reference and preserves the editable Motion composition for recovery.
+- Object or artboard deletion removes affected Painter motion links together
+  with other dangling records. Motion composition cleanup remains a separate
+  explicit policy; document deletion never silently destroys reusable motion.
 - Motion-to-Painter placement is a separate actor workflow. The UI Design
   toolbar's `Motion Actor` command imports a `.tgmotion` project as a
   `motion_actor` object instead of flattening it to a poster. The actor keeps
