@@ -216,6 +216,9 @@ class PainterUIDesignOverlay(QWidget):
                 )
             )
         )
+        from app.painter_ui_typography import apply_ui_font_axes
+
+        apply_ui_font_axes(font, row["style"].get("font_axes"))
         editor.setFont(font)
         color = ui_color(
             row["style"].get("text_color")

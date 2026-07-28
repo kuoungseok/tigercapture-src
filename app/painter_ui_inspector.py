@@ -1543,6 +1543,39 @@ class PainterUIInspector(QWidget):
         text_metrics_layout.addWidget(self.font_size_spin)
         text_metrics_layout.addWidget(self.font_weight_combo)
         form.addRow("Typography", text_metrics)
+        font_axes = QFrame()
+        self.font_axes_frame = font_axes
+        font_axes_layout = QHBoxLayout(font_axes)
+        font_axes_layout.setContentsMargins(0, 0, 0, 0)
+        font_axes_layout.setSpacing(3)
+        self.font_axis_checks: dict[str, QCheckBox] = {}
+        self.font_axis_controls: dict[str, PainterUIDragDoubleSpinBox] = {}
+        for tag, minimum, maximum, default in (
+            ("wght", 1.0, 1000.0, 400.0),
+            ("wdth", 25.0, 200.0, 100.0),
+            ("opsz", 1.0, 144.0, 14.0),
+        ):
+            cell = QFrame()
+            cell_layout = QVBoxLayout(cell)
+            cell_layout.setContentsMargins(0, 0, 0, 0)
+            cell_layout.setSpacing(1)
+            check = QCheckBox(tag)
+            check.setToolTip(f"Enable OpenType {tag} axis")
+            spin = PainterUIDragDoubleSpinBox()
+            spin.setRange(minimum, maximum)
+            spin.setDecimals(1)
+            spin.setSingleStep(1.0)
+            spin.setResetValue(default)
+            spin.setEnabled(False)
+            check.toggled.connect(spin.setEnabled)
+            check.toggled.connect(self._emit_properties)
+            spin.editingFinished.connect(self._emit_properties)
+            cell_layout.addWidget(check)
+            cell_layout.addWidget(spin)
+            font_axes_layout.addWidget(cell, 1)
+            self.font_axis_checks[tag] = check
+            self.font_axis_controls[tag] = spin
+        form.addRow("Variable Axes", font_axes)
         text_layout = QFrame()
         text_layout_row = QHBoxLayout(text_layout)
         text_layout_row.setContentsMargins(0, 0, 0, 0)
@@ -1693,6 +1726,7 @@ class PainterUIInspector(QWidget):
             "text": (
                 self.text_edit,
                 text_metrics,
+                font_axes,
                 text_layout,
             ),
             "text_advanced": (
@@ -2151,6 +2185,8 @@ class PainterUIInspector(QWidget):
             self.remote_component_key_edit,
             self.font_size_spin,
             self.font_weight_combo,
+            *self.font_axis_checks.values(),
+            *self.font_axis_controls.values(),
             self.text_align_combo,
             self.line_height_spin,
             self.image_source_edit,
@@ -2317,6 +2353,8 @@ class PainterUIInspector(QWidget):
             self.text_edit,
             self.font_size_spin,
             self.font_weight_combo,
+            *self.font_axis_checks.values(),
+            *self.font_axis_controls.values(),
             self.text_align_combo,
             self.line_height_spin,
         ):
@@ -2356,6 +2394,19 @@ class PainterUIInspector(QWidget):
         weight = int(style.get("font_weight") or 400)
         weight_index = self.font_weight_combo.findData(weight)
         self.font_weight_combo.setCurrentIndex(max(0, weight_index))
+        from app.painter_ui_typography import (
+            UI_VARIABLE_FONT_AXIS_DEFAULTS,
+            normalize_ui_font_axes,
+        )
+
+        font_axes = normalize_ui_font_axes(style.get("font_axes"))
+        for tag, check in self.font_axis_checks.items():
+            enabled = tag in font_axes
+            check.setChecked(enabled)
+            self.font_axis_controls[tag].setEnabled(is_text and enabled)
+            self.font_axis_controls[tag].setValue(
+                font_axes.get(tag, UI_VARIABLE_FONT_AXIS_DEFAULTS[tag])
+            )
         align_index = self.text_align_combo.findData(
             str(style.get("text_align") or "left")
         )
@@ -3328,6 +3379,19 @@ class PainterUIInspector(QWidget):
             style["font_weight"] = int(
                 self.font_weight_combo.currentData() or 400
             )
+            from app.painter_ui_typography import normalize_ui_font_axes
+
+            font_axes = normalize_ui_font_axes(
+                {
+                    tag: self.font_axis_controls[tag].value()
+                    for tag, check in self.font_axis_checks.items()
+                    if check.isChecked()
+                }
+            )
+            if font_axes:
+                style["font_axes"] = font_axes
+            else:
+                style.pop("font_axes", None)
             style["text_align"] = str(
                 self.text_align_combo.currentData() or "left"
             )

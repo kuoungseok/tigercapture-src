@@ -80,7 +80,13 @@ def classify_ui_object_delivery(
     style = obj.get("style")
     style = style if isinstance(style, Mapping) else {}
     capabilities = _TARGET_CAPABILITIES[target_id]
-    if style.get("paint_layer_id"):
+    if target_id == "unreal_umg" and style.get("font_axes"):
+        disposition = "blocked"
+        reason = (
+            "variable-font axes require an Unreal text bake path that is not "
+            "available yet"
+        )
+    elif style.get("paint_layer_id"):
         disposition = "baked"
         reason = "Painter layer appearance requires a deterministic asset bake"
     elif (

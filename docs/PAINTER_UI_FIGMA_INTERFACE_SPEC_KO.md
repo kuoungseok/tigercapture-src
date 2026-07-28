@@ -521,6 +521,11 @@ Motion 편집 원칙:
 - geometry와 spacing
 - layout와 constraints
 - typography
+  - optional named variable-font axes use `style.font_axes`
+  - axis tags must be four ASCII alphanumeric characters with finite numeric
+    values
+  - Painter preview/export applies supported axes; target adapters must report
+    converted, baked, or blocked behavior instead of dropping axes
 - colors/styles/variables
 - component properties
 - prototype interactions

@@ -258,6 +258,8 @@ def draw_ui_vector_paths(
 
 
 def ui_font(base_font: QFont, style: Mapping[str, Any], scale: float = 1.0) -> QFont:
+    from app.painter_ui_typography import apply_ui_font_axes
+
     font = QFont(base_font)
     pixel_size = max(1, int(round(float(style.get("font_size") or 14.0) * scale)))
     weight = max(100, min(900, int(style.get("font_weight") or 400)))
@@ -266,6 +268,7 @@ def ui_font(base_font: QFont, style: Mapping[str, Any], scale: float = 1.0) -> Q
     family = str(style.get("font_family") or "").strip()
     if family:
         font.setFamily(family)
+    apply_ui_font_axes(font, style.get("font_axes"))
     return font
 
 

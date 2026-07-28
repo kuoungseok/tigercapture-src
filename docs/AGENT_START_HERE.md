@@ -152,6 +152,12 @@ Focused entry points:
   entry point; only the canvas Overlay receives the ephemeral preview document.
   Canonical revision, persistence, and Undo must remain unchanged.
   M2 token suggestions live in `app/painter_ui_token_suggestion.py`.
+  M2 variable-font support lives in `app/painter_ui_typography.py`. Painter
+  persists named OpenType axes in `style.font_axes`, exposes contextual
+  `wght/wdth/opsz` controls and `paint.ui.typography.variable_axis.set/reset`,
+  applies axes in Qt canvas/export paths, preserves them in Figma shared plugin
+  metadata, and explicitly blocks Unreal UMG output until a real deterministic
+  text-bake path exists.
   `paint.ui.token.suggest` and the contextual Inspector row share that pure
   planner. Suggestions require exact type-compatible values after active-theme
   and alias resolution, never mutate the document, and must apply through the

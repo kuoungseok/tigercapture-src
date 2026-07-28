@@ -458,6 +458,21 @@ Implementation checkpoint (2026-07-29):
 - Desktop and compact proof are generated as
   `painter_ui_designer_m2_token_suggestions.png` and
   `painter_ui_designer_m2_token_suggestions_compact.png`.
+- Text and Button contexts now expose opt-in `wght`, `wdth`, and `opsz`
+  controls. Only enabled four-character OpenType tags are persisted in
+  `style.font_axes`; normalization rejects malformed or non-finite values.
+- `paint.ui.typography.variable_axis.set/reset` and the Inspector use the same
+  focused mutation service, stable object IDs, persistence, and one-step Undo.
+- Canvas, inline text editing, and deterministic asset rendering apply axes
+  through the local Qt variable-font API. Figma plugin exchange preserves axes
+  in Tiger Studio shared plugin metadata.
+- Shared UMG delivery does not silently flatten variable axes: affected text is
+  classified `Blocked` with
+  `variable_font_axes_require_unavailable_text_bake` until a real
+  deterministic text-bake generator exists.
+- Desktop and compact proof are generated as
+  `painter_ui_designer_m2_variable_font_axes.png` and
+  `painter_ui_designer_m2_variable_font_axes_compact.png`.
 
 Required Actions:
 

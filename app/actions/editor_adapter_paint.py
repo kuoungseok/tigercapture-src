@@ -1141,6 +1141,54 @@ class PaintAdapterMixin(
         }
         return result
 
+    def paint_ui_typography_variable_axis_set(
+        self,
+        *,
+        object_id: str,
+        axis: str,
+        value: float,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_typography import set_ui_variable_font_axis
+
+        document, updated = set_ui_variable_font_axis(
+            dialog._painter_ui_document,
+            object_id,
+            axis,
+            value,
+        )
+        dialog._push_undo_state("Set variable-font axis")
+        result = self._paint_ui_commit(
+            dialog,
+            "Set variable-font axis",
+            document,
+        )
+        result["font_axes"] = dict(updated["style"].get("font_axes") or {})
+        return result
+
+    def paint_ui_typography_variable_axis_reset(
+        self,
+        *,
+        object_id: str,
+        axis: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_typography import reset_ui_variable_font_axis
+
+        document, updated = reset_ui_variable_font_axis(
+            dialog._painter_ui_document,
+            object_id,
+            axis,
+        )
+        dialog._push_undo_state("Reset variable-font axis")
+        result = self._paint_ui_commit(
+            dialog,
+            "Reset variable-font axis",
+            document,
+        )
+        result["font_axes"] = dict(updated["style"].get("font_axes") or {})
+        return result
+
     def paint_ui_property_batch_set(
         self,
         *,

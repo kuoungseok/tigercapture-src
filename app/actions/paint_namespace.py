@@ -744,6 +744,48 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="a UI text object's content would be updated",
     )
     registry.register_adapter_action(
+        "paint.ui.typography.variable_axis.set",
+        "Set one named four-character OpenType axis on a Painter UI text object.",
+        "paint",
+        "paint_ui_typography_variable_axis_set",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "axis": {
+                    "type": "string",
+                    "minLength": 4,
+                    "maxLength": 4,
+                    "pattern": "^[A-Za-z0-9]{4}$",
+                },
+                "value": {"type": "number"},
+            },
+            required=("object_id", "axis", "value"),
+        ),
+        required=("object_id", "axis", "value"),
+        undo_label="Set variable-font axis",
+        dry_summary="one Painter UI variable-font axis would be updated",
+    )
+    registry.register_adapter_action(
+        "paint.ui.typography.variable_axis.reset",
+        "Reset one named OpenType axis, or all axes when axis is omitted.",
+        "paint",
+        "paint_ui_typography_variable_axis_reset",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "axis": {
+                    "type": "string",
+                    "maxLength": 4,
+                    "pattern": "^$|^[A-Za-z0-9]{4}$",
+                },
+            },
+            required=("object_id",),
+        ),
+        required=("object_id",),
+        undo_label="Reset variable-font axis",
+        dry_summary="Painter UI variable-font axes would be reset",
+    )
+    registry.register_adapter_action(
         "paint.ui.property.inspect",
         "Inspect one normalized Painter UI property, its default, token binding, and layout diagnostics.",
         "paint",

@@ -26,7 +26,7 @@ def main() -> int:
     os.environ.setdefault("TIGERSTUDIO_PAINTER_PANEL_SETTINGS", "0")
 
     from PySide6.QtCore import QTimer
-    from PySide6.QtWidgets import QApplication
+    from PySide6.QtWidgets import QApplication, QScrollArea
 
     from app.actions.registry import ActionRegistry
     from app.drawing import PaintDialog, create_blank_paint_pixmap
@@ -522,6 +522,45 @@ def main() -> int:
         == ("design", "prototype", "inspect")
         and dialog._paint_ui_inspector.artboard_bar.isHidden()
     )
+    variable_font_result = registry.execute(
+        "paint.ui.typography.variable_axis.set",
+        {
+            "object_id": phone_object_ids["text"],
+            "axis": "wght",
+            "value": 625,
+        },
+    ).to_dict()
+    registry.execute(
+        "paint.ui.typography.variable_axis.set",
+        {
+            "object_id": phone_object_ids["text"],
+            "axis": "wdth",
+            "value": 92,
+        },
+    )
+    app.processEvents()
+    variable_font_row = next(
+        row
+        for row in dialog._painter_ui_document["objects"]
+        if row["id"] == phone_object_ids["text"]
+    )
+    variable_font_ok = bool(
+        variable_font_result.get("ok") is True
+        and variable_font_row["style"].get("font_axes")
+        == {"wdth": 92.0, "wght": 625.0}
+        and dialog._paint_ui_inspector.font_axis_checks["wght"].isChecked()
+        and dialog._paint_ui_inspector.font_axis_checks["wdth"].isChecked()
+    )
+    parent = dialog._paint_ui_inspector.font_axes_frame.parentWidget()
+    while parent is not None and not isinstance(parent, QScrollArea):
+        parent = parent.parentWidget()
+    if isinstance(parent, QScrollArea):
+        parent.ensureWidgetVisible(dialog._paint_ui_inspector.font_axes_frame, 0, 20)
+        app.processEvents()
+    variable_font_screenshot_path = (
+        output_dir / "painter_ui_designer_m2_variable_font_axes.png"
+    )
+    dialog.grab().save(str(variable_font_screenshot_path), "PNG")
     text_inspector_screenshot_path = (
         output_dir / "painter_ui_designer_m1_text_inspector.png"
     )
@@ -822,6 +861,30 @@ def main() -> int:
         )
         and dialog._canvas_frame.width() >= 280
     )
+    registry.execute(
+        "paint.ui.selection.set",
+        {
+            "object_ids": [phone_object_ids["text"]],
+            "primary_object_id": phone_object_ids["text"],
+        },
+    )
+    app.processEvents()
+    parent = dialog._paint_ui_inspector.font_axes_frame.parentWidget()
+    while parent is not None and not isinstance(parent, QScrollArea):
+        parent = parent.parentWidget()
+    if isinstance(parent, QScrollArea):
+        parent.ensureWidgetVisible(dialog._paint_ui_inspector.font_axes_frame, 0, 20)
+        app.processEvents()
+    variable_font_compact_screenshot_path = (
+        output_dir / "painter_ui_designer_m2_variable_font_axes_compact.png"
+    )
+    dialog.grab().save(str(variable_font_compact_screenshot_path), "PNG")
+    variable_font_compact_ok = bool(
+        variable_font_compact_screenshot_path.is_file()
+        and dialog._paint_ui_inspector.design_group_visible("text")
+        and dialog._paint_ui_inspector.font_axis_checks["wght"].isChecked()
+        and dialog._canvas_frame.width() >= 280
+    )
     compact_stress_canonical_before = json.dumps(
         dialog._painter_ui_document,
         sort_keys=True,
@@ -909,6 +972,8 @@ def main() -> int:
             and compact_stress_screenshot_path.is_file()
             and token_suggestion_screenshot_path.is_file()
             and token_suggestion_compact_screenshot_path.is_file()
+            and variable_font_screenshot_path.is_file()
+            and variable_font_compact_screenshot_path.is_file()
             and hierarchy_screenshot_path.is_file()
             and breadcrumb_screenshot_path.is_file()
             and scope_screenshot_path.is_file()
@@ -930,6 +995,8 @@ def main() -> int:
             and compact_stress_ok
             and token_suggestion_ok
             and token_suggestion_compact_ok
+            and variable_font_ok
+            and variable_font_compact_ok
             and text_context_ok
             and inline_text_ok
             and image_context_ok
@@ -965,6 +1032,10 @@ def main() -> int:
         "token_suggestion_compact_screenshot": str(
             token_suggestion_compact_screenshot_path
         ),
+        "variable_font_screenshot": str(variable_font_screenshot_path),
+        "variable_font_compact_screenshot": str(
+            variable_font_compact_screenshot_path
+        ),
         "hierarchy_screenshot": str(hierarchy_screenshot_path),
         "breadcrumb_screenshot": str(breadcrumb_screenshot_path),
         "group_scope_screenshot": str(scope_screenshot_path),
@@ -994,6 +1065,8 @@ def main() -> int:
         "content_stress_compact_ok": compact_stress_ok,
         "token_suggestion_ok": token_suggestion_ok,
         "token_suggestion_compact_ok": token_suggestion_compact_ok,
+        "variable_font_ok": variable_font_ok,
+        "variable_font_compact_ok": variable_font_compact_ok,
         "quick_properties_ok": quick_properties_ok,
         "zoom_popover_ok": zoom_popover_ok,
         "compact_zoom_ok": compact_zoom_ok,

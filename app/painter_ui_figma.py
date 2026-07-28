@@ -55,6 +55,24 @@ def _figma_property_name(value: object) -> str:
     return re.sub(r"#\d+:\d+$", "", name).strip() or name
 
 
+def _tigerstudio_plugin_json(
+    node: Mapping[str, Any],
+    key: str,
+) -> object:
+    """Read shared plugin data from REST fixtures without requiring it."""
+    shared = node.get("sharedPluginData")
+    shared = shared if isinstance(shared, Mapping) else {}
+    namespace = shared.get("tigerstudio")
+    namespace = namespace if isinstance(namespace, Mapping) else {}
+    raw = namespace.get(str(key))
+    if not isinstance(raw, str) or not raw.strip():
+        return None
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+
+
 def _figma_component_property_definitions(
     *sources: object,
 ) -> dict[str, dict[str, Any]]:
@@ -744,6 +762,13 @@ def _map_style(node: Mapping[str, Any]) -> dict[str, Any]:
                 ),
             }
         )
+        from app.painter_ui_typography import normalize_ui_font_axes
+
+        axes = normalize_ui_font_axes(
+            _tigerstudio_plugin_json(node, "font_axes")
+        )
+        if axes:
+            result["font_axes"] = axes
     shadow = next(
         (
             effect
@@ -1925,6 +1950,18 @@ def inspect_figma_compatibility(
                     "reason": "Maps to Figma character-range text styles",
                 }
             )
+        style = dict(row.get("style") or {})
+        if style.get("font_axes"):
+            rows.append(
+                {
+                    "id": f"{row['id']}:font-axes",
+                    "status": "converted",
+                    "reason": (
+                        "Variable-font axes are preserved as Tiger Studio "
+                        "shared plugin data"
+                    ),
+                }
+            )
         remote = dict(content.get("remote_component") or {})
         if remote.get("status") == "missing":
             rows.append(
@@ -2162,6 +2199,7 @@ function applyFrame(node,row) {{
   if('clipsContent' in node) node.clipsContent=!!row.clip_content;
   node.setSharedPluginData('tigerstudio','stable_id',row.id);
   const s=row.style||{{}};
+  node.setSharedPluginData('tigerstudio','font_axes',JSON.stringify(s.font_axes||{{}}));
   if('fills' in node) node.fills=Array.isArray(s.fills)&&s.fills.length?s.fills.map(stackPaint):[fillPaint(s)];
   if('strokes' in node) node.strokes=Array.isArray(s.strokes)&&s.strokes.length?s.strokes.map(stackPaint):(s.stroke&&!String(s.stroke).endsWith('00')?[paint(s.stroke)]:[]);
   if('effects' in node) node.effects=effectRows(s);
@@ -2224,10 +2262,10 @@ async function main() {{
     parent.appendChild(node); applyFrame(node,row); created.set(row.id,node);
     if(isComponentRoot(row)) components.set(row.component_id,node);
     if(row.kind==='text') {{
-      const c=row.content||{{}}; const font={{family:c.font_family||'Inter',style:'Regular'}};
+      const c=row.content||{{}}, s=row.style||{{}}; const font={{family:s.font_family||'Inter',style:'Regular'}};
       try {{ await figma.loadFontAsync(font); node.fontName=font; }} catch (_) {{ await figma.loadFontAsync({{family:'Inter',style:'Regular'}}); }}
-      node.characters=String(c.text||''); node.fontSize=Math.max(1,Number(c.font_size)||16);
-      node.textAlignHorizontal=String(c.text_align||'LEFT').toUpperCase();
+      node.characters=String(c.text||''); node.fontSize=Math.max(1,Number(s.font_size)||16);
+      node.textAlignHorizontal=String(s.text_align||'LEFT').toUpperCase();
       for(const range of c.text_ranges||[]) {{
         const start=Math.max(0,Math.min(node.characters.length,Number(range.start)||0));
         const end=Math.max(start,Math.min(node.characters.length,Number(range.end)||start));

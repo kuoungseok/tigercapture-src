@@ -75,6 +75,13 @@ def normalize_ui_corner_radii(value: object, fallback: float = 0.0) -> dict[str,
 
 def normalize_ui_advanced_style(value: object) -> dict[str, Any]:
     style = copy.deepcopy(dict(value)) if isinstance(value, Mapping) else {}
+    from app.painter_ui_typography import normalize_ui_font_axes
+
+    axes = normalize_ui_font_axes(style.get("font_axes"))
+    if axes:
+        style["font_axes"] = axes
+    else:
+        style.pop("font_axes", None)
     blend = str(style.get("blend_mode") or "normal").strip().casefold()
     style["blend_mode"] = blend if blend in UI_OBJECT_BLEND_MODES else "normal"
     legacy_fill = str(style.get("fill") or "#00000000")

@@ -566,6 +566,7 @@ def _source_ref(row: Mapping[str, Any], geometry: Mapping[str, float]) -> Source
                 "text": str(content.get("text") or row["name"]),
                 "text_color": str(style.get("text_color") or "#F2F5F9"),
                 "font_size": float(style.get("font_size", 16.0) or 16.0),
+                "font_axes": dict(style.get("font_axes") or {}),
             }
         )
     uri = str(content.get("source_path") or content.get("path") or "")

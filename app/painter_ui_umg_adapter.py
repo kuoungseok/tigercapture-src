@@ -60,6 +60,8 @@ def _umg_disposition(
         reasons.append("painter_ui_boolean_requires_deterministic_bake")
     if content.get("text_ranges"):
         reasons.append("mixed_text_ranges_require_rich_text_conversion")
+    if style.get("font_axes"):
+        reasons.append("variable_font_axes_require_unavailable_text_bake")
     remote = dict(content.get("remote_component") or {})
     if remote.get("status") == "missing":
         reasons.append("remote_component_must_be_relinked_or_localized")
@@ -78,7 +80,9 @@ def _umg_disposition(
         reasons.append("independent_corner_radii_require_umg_material")
     if str(style.get("stroke_align") or "center") != "center":
         reasons.append("stroke_alignment_requires_umg_material")
-    return ("Blocked", reasons) if reasons else ("Native", [])
+    if not reasons:
+        return "Native", []
+    return "Blocked", reasons
 
 
 def painter_ui_to_umg_document(
@@ -166,6 +170,7 @@ def painter_ui_to_umg_document(
                 or "#FFFFFFFF"
             ),
             "font_size": float(style.get("font_size", 16.0) or 16.0),
+            "font_axes": dict(style.get("font_axes") or {}),
             "painter_conversion": (
                 "native"
                 if row["kind"]

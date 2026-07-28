@@ -96,6 +96,10 @@ P1 implementation checkpoint (2026-07-26, navigation slice):
   `paint.ui.token.suggest` shares the pure planner without mutation; accepting
   a suggestion reuses the existing token bind, persistence, and one-step Undo
   path.
+- Text and Button Inspector contexts expose opt-in `wght`, `wdth`, and `opsz`
+  variable-font axes. The same normalized `style.font_axes` contract is used
+  by Actions, canvas/asset rendering, Figma shared plugin metadata, save/load,
+  and explicit UMG blocked-until-bake preflight.
 - Artboard title dragging moves frames in document space and persists the new
   position through the same undoable artboard mutation service.
 - Inspector presets add iPhone, Android, desktop, console, and broadcast

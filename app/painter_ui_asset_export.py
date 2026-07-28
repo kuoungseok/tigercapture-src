@@ -130,6 +130,9 @@ def render_ui_artboard(
                     ),
                 )
             )
+            from app.painter_ui_typography import apply_ui_font_axes
+
+            apply_ui_font_axes(font, style.get("font_axes"))
             painter.setFont(font)
             painter.setPen(_color(style.get("text_color"), "#111111"))
             alignment = {

@@ -33,6 +33,7 @@ Import 후 보이기만 하거나 JSON에만 남는 기능은 `Data only`이며 
 | Masks | Layers `Use as Mask`, invert/outline controls, editable target order, canvas clipping and hit testing | `paint.ui.mask.create/update/remove/reorder/inspect` |
 | Advanced appearance | Appearance blend selector, ordered Fill/Stroke stacks, per-corner radii, Inside/Center/Outside stroke | `paint.ui.appearance.blend.set`, `paint.ui.appearance.paint.*`, `paint.ui.appearance.corner.set`, `paint.ui.appearance.stroke.set` |
 | Mixed text styles | Text-range Inspector controls and range-aware canvas rendering | `paint.ui.text.range.style.inspect/set/remove` |
+| Variable fonts | Contextual `wght/wdth/opsz` controls, QFont canvas/export application, Figma metadata preservation, explicit UMG blocked-until-bake status | `paint.ui.typography.variable_axis.set/reset` |
 | Remote component recovery | Relink, localize, replace controls with explicit missing-library state | `paint.ui.component.remote.inspect/relink/localize/replace` |
 | Boolean vector editing | Union/Subtract/Intersect/Exclude operands with editable canvas result | `paint.ui.vector.boolean.inspect/set/release` |
 | Figma sections and comments | Sections tab and object-anchored Painter Review mapping | `paint.ui.section.inspect/create/update/remove`, `paint.ui.review.*` |
