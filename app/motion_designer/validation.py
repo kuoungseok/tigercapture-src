@@ -1457,6 +1457,23 @@ def validate_composition(composition: MotionComposition) -> ValidationReport:
                 str(row["path"]),
                 severity=severity,
             ))
+    from .collage import collage_boards, preflight_collage
+
+    for board_index, board in enumerate(collage_boards(composition)):
+        board_id = str(board.get("id") or "")
+        if not board_id:
+            issues.append(ValidationIssue(
+                "collage_board_missing_id",
+                "Collage board requires a stable ID.",
+                f"metadata.collage_boards[{board_index}].id",
+            ))
+            continue
+        for code in preflight_collage(composition, board_id)["issues"]:
+            issues.append(ValidationIssue(
+                str(code).split(":", 1)[0],
+                str(code),
+                f"metadata.collage_boards[{board_index}]",
+            ))
     return ValidationReport(issues)
 
 

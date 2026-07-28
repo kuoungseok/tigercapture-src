@@ -69,6 +69,12 @@ EFFECT_PARAMS = {
         ("strength", 0.0, 1.0, 0.01), ("angle", -180.0, 180.0, 1.0),
         ("width", 2.0, 500.0, 1.0),
     ),
+    "scan_cleanup": (
+        ("white_balance", 0.0, 1.0, 0.01),
+        ("paper_remove", 0.0, 1.0, 0.01),
+        ("ink_preserve", 0.0, 1.0, 0.01),
+        ("threshold", 0.05, 0.98, 0.01),
+    ),
     "craft_style": (
         ("amount", 0.0, 1.0, 0.01),
         ("grain_amount", 0.0, 1.0, 0.01),

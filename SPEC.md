@@ -6605,6 +6605,35 @@ AI Script Edit MVP integration:
   ROI optimization, down from 278-374 ms/frame. This is an accuracy baseline,
   not a realtime-performance claim; M22 remains incomplete until a GPU
   backdrop path or viewport-resolution preview meets the interactive target.
+- M23 Mixed Media Craft Workspace v1 is implemented around the provider-neutral
+  `tigerstudio.motion.collage.v1` contract. A collage board binds existing
+  Motion layers to stable item IDs, deterministic layout seed and z-order,
+  editable edge treatment, attachment treatment, source revision, and an
+  optional Painter link. `Look > Collage` and the `Mixed Media` library expose
+  Editorial, Luxury Paper, Education, and Scatter workflows without replacing
+  the underlying layers.
+- Smart, Polygon, Torn, Feather, and Fiber edges are persisted on each item;
+  non-smart edges render through editable path masks. Glue, Tape, Staple, Pin,
+  and Fold treatments remain native child layers or an editable `paper_fold`
+  effect. The shared `scan_cleanup` effect white-balances scanned paper,
+  optionally removes the paper alpha, and preserves dark ink through the same
+  Preview/Export effect adapter.
+- Motion automation includes `motion.collage.create`, item add/update/reorder,
+  edge/attachment/scan set, source replace, Painter send/refresh, and
+  preflight. Replacing or refreshing a source preserves the collage item ID,
+  Motion layer ID, parent, pivot, timing, source offset, rate, and reverse
+  state. Painter exchange uses
+  `tigerstudio.motion.collage.painter_handoff.v1`; v1 provides the stable
+  handoff contract, while direct live Painter-object creation remains a later
+  transport extension.
+- Unreal conversion never silently omits collage semantics:
+  `motion_feature_requires_bake:collage_item` requests deterministic bake.
+  `tools/qa_motion_collage.py` renders 10-second Editorial Collage, Luxury
+  Paper Title, and Education Cutaway scenes through the shared exporter,
+  generates a 12-frame contact sheet and timing report, and verifies zero
+  stable-ID loss across source replacement and Painter linking. A curated
+  distributable paper/tape/ink asset pack and frame-drawing exposure/onion-skin
+  UI remain post-v1 extensions.
 - M13 character-rigging foundation is complete. Motion compositions persist
   provider-neutral `tigerstudio.motion.rig.v1` cutout rigs with stable rig and
   bone IDs, a validated parent hierarchy, rest positions, animated rotation

@@ -49,11 +49,13 @@ from app.actions.editor_adapter_motion_plugin import MotionPluginAdapterMixin
 from app.actions.editor_adapter_motion_ai_generation import MotionAIGenerationAdapterMixin
 from app.actions.editor_adapter_motion_craft import MotionCraftAdapterMixin
 from app.actions.editor_adapter_motion_glass import MotionGlassAdapterMixin
+from app.actions.editor_adapter_motion_collage import MotionCollageAdapterMixin
 from app.actions.editor_adapter_color import ColorManagementAdapterMixin
 
 
 class EditorAdapter(
     ColorManagementAdapterMixin,
+    MotionCollageAdapterMixin,
     MotionGlassAdapterMixin,
     MotionCraftAdapterMixin,
     MotionUMGAdapterMixin,

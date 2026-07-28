@@ -530,6 +530,72 @@ def apply_effects(image: QImage, effects: list[MotionEffectRef], time_ms: float)
             highlight = np.clip(centered / width_px, -1.0, 1.0) * ridge
             shade = 1.0 + highlight * strength
             rgba[..., :3] = rgb * shade[..., None]
+        elif kind == "scan_cleanup":
+            white_balance = max(0.0, min(1.0, float(
+                _value(effect, "white_balance", time_ms, 0.8)
+            )))
+            paper_remove = max(0.0, min(1.0, float(
+                _value(effect, "paper_remove", time_ms, 0.0)
+            )))
+            ink_preserve = max(0.0, min(1.0, float(
+                _value(effect, "ink_preserve", time_ms, 0.75)
+            )))
+            threshold = max(0.05, min(0.98, float(
+                _value(effect, "threshold", time_ms, 0.72)
+            )))
+            luminance = (
+                rgb[..., 0] * 0.2126
+                + rgb[..., 1] * 0.7152
+                + rgb[..., 2] * 0.0722
+            )
+            bright = luminance >= np.percentile(luminance, 78.0)
+            if np.any(bright):
+                paper_color = np.maximum(
+                    np.median(rgb[bright], axis=0),
+                    24.0,
+                )
+                balanced = np.clip(
+                    rgb * (245.0 / paper_color)[None, None, :],
+                    0.0,
+                    255.0,
+                )
+                rgba[..., :3] = (
+                    rgb * (1.0 - white_balance)
+                    + balanced * white_balance
+                )
+            cleaned_rgb = rgba[..., :3]
+            cleaned_luma = (
+                cleaned_rgb[..., 0] * 0.2126
+                + cleaned_rgb[..., 1] * 0.7152
+                + cleaned_rgb[..., 2] * 0.0722
+            ) / 255.0
+            ink = np.clip(
+                (threshold - cleaned_luma) / max(0.02, threshold * 0.55),
+                0.0,
+                1.0,
+            )
+            if ink_preserve > 0.0:
+                rgba[..., :3] *= (
+                    1.0 - ink[..., None] * ink_preserve * 0.18
+                )
+            if paper_remove > 0.0:
+                source_alpha = rgba[..., 3] / 255.0
+                retained = np.clip(
+                    ink * (1.0 + ink_preserve * 0.7),
+                    0.0,
+                    1.0,
+                )
+                retained = cv2.GaussianBlur(
+                    retained,
+                    (0, 0),
+                    sigmaX=0.55,
+                    sigmaY=0.55,
+                )
+                rgba[..., 3] = (
+                    source_alpha
+                    * ((1.0 - paper_remove) + retained * paper_remove)
+                    * 255.0
+                )
         elif kind in {"chroma_key", "luma_key", "difference_key"}:
             from .keying import apply_keyer_rgba
 

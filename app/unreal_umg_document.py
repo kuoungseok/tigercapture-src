@@ -147,7 +147,13 @@ def _umg_block_reasons(layer: MotionLayer) -> list[str]:
     reasons.extend(
         f"animated_source_requires_bake:{key}" for key in animated_source
     )
-    for metadata_key in ("path_morph", "time_remap", "effect_group"):
+    for metadata_key in (
+        "path_morph",
+        "time_remap",
+        "effect_group",
+        "collage_item",
+        "collage_attachment",
+    ):
         value = layer.metadata.get(metadata_key)
         if value not in (None, {}, [], False):
             reasons.append(f"motion_feature_requires_bake:{metadata_key}")

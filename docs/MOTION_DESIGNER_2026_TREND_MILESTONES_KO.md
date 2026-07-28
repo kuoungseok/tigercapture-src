@@ -88,7 +88,7 @@ M21-M28은 다음 조건을 모두 만족해야 완료다.
 | --- | --- | --- | --- |
 | M21 | Craft and Imperfection Style Stack | 아날로그 손맛을 재사용 가능한 효과 체계로 구현 | Complete v1 |
 | M22 | Dynamic Glass Material | 실시간 backdrop glass와 glossy motion 구현 | In progress: core backdrop |
-| M23 | Mixed Media Craft Workspace | 종이·스캔·손그림·콜라주 제작 흐름 완성 | Planned |
+| M23 | Mixed Media Craft Workspace | 종이·스캔·손그림·콜라주 제작 흐름 완성 | Complete v1 |
 | M24 | Painterly 2D/3D Look Development | PBR 위에 2D line/brush/toon 스타일 결합 | Planned |
 | M25 | Stop-motion Timing and CGI | stepped timing, clay, miniature motion 구현 | Planned |
 | M26 | Story and Platform Direction | 감정 arc와 플랫폼별 장면 구조 구현 | Planned |
@@ -239,6 +239,38 @@ UMG:
 - 1080p Preview 목표 프레임 시간과 Final export parity 기록
 
 ## 7. M23 - Mixed Media Craft Workspace
+
+### 2026-07-29 구현 상태
+
+- `tigerstudio.motion.collage.v1` 보드 계약이 기존 Motion layer를 stable
+  item ID, z-stack, layout seed, edge, attachment, source revision, Painter
+  link로 묶는다. `.tgmotion` 저장/로드 시 이 계약과 ID가 그대로
+  round-trip 된다.
+- `Look > Collage` Inspector와 `Mixed Media` Library category에서
+  Editorial, Luxury Paper, Education, Scatter 보드를 만들고 Smart,
+  Polygon, Torn, Feather, Fiber edge를 편집할 수 있다.
+- Torn/Fiber/Feather edge는 실제 editable path mask로 렌더되며, Glue,
+  Tape, Staple, Pin, Fold attachment는 native child layer 또는
+  `paper_fold` effect로 남는다.
+- `scan_cleanup` effect는 스캔 종이의 밝은 영역을 기준으로 white
+  balance하고, 선택적으로 paper alpha를 제거하면서 dark ink를
+  보존한다. Preview와 Export는 동일한 `effect_adapter` 경로를 쓴다.
+- `motion.collage.create`, item add/update/reorder, edge/attachment/scan set,
+  source replace, Painter send/refresh, preflight Action/MCP가 등록됐다.
+- source replace는 Motion layer ID, collage item ID, parent, pivot, in/out,
+  source-in, time scale, reverse를 보존한다. Painter handoff는
+  `tigerstudio.motion.collage.painter_handoff.v1`로 같은 Motion layer ID를
+  다시 돌려준다.
+- UMG 변환은 collage semantics를 조용히 버리지 않고
+  `motion_feature_requires_bake:collage_item`으로 deterministic bake를
+  요구한다.
+- `tools/qa_motion_collage.py`가 공용 export renderer로 10초 Editorial
+  Collage, Luxury Paper Title, Education Cutaway 3종을 12프레임 렌더하고
+  contact sheet, timing JSON, stable ID loss 0 증거를 생성한다.
+- v1 이후 확장 범위는 실제 배포용 종이/테이프/잉크 durable asset pack,
+  Painter 창에 직접 객체를 생성하는 양방향 transport, frame drawing
+  exposure/onion-skin UI다. 이 후속 범위는 v1의 보드·렌더·Action 계약
+  완료 주장을 막지 않는다.
 
 목표: AI가 잘라준 레이어를 단순 이동하는 수준에서 벗어나, 종이와 손그림을
 직접 조합하는 작업 흐름을 제공한다.

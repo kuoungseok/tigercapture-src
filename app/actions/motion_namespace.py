@@ -2340,3 +2340,207 @@ def register_motion_actions(registry: Any) -> None:
         mutating=False,
         changed=False,
     )
+    collage_ref = {
+        **cid,
+        "board_id": {"type": "string"},
+    }
+    collage_item_ref = {
+        **collage_ref,
+        "item_id": {"type": "string"},
+    }
+    registry.register_adapter_action(
+        "motion.collage.list",
+        "List editable collage boards in a Motion composition.",
+        "motion",
+        "motion_collage_list",
+        params_schema=schema_object(cid, required=("composition_id",)),
+        required=("composition_id",),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.collage.create",
+        "Create an editable collage board from existing Motion layers.",
+        "motion",
+        "motion_collage_create",
+        params_schema=schema_object({
+            **cid,
+            "layer_ids": {
+                "type": "array",
+                "items": {"type": "string"},
+                "minItems": 1,
+            },
+            "name": {"type": "string"},
+            "layout": {
+                "type": "string",
+                "enum": ["manual", "editorial", "scatter", "education", "luxury"],
+            },
+            "seed": {"type": "integer", "minimum": 0},
+        }, required=("composition_id", "layer_ids")),
+        required=("composition_id", "layer_ids"),
+        undo_label="Create Collage Board",
+        dry_summary="An editable collage board would be created",
+    )
+    registry.register_adapter_action(
+        "motion.collage.item.add",
+        "Add an existing Motion layer to a collage board.",
+        "motion",
+        "motion_collage_item_add",
+        params_schema=schema_object({
+            **collage_ref,
+            "layer_id": {"type": "string"},
+        }, required=("composition_id", "board_id", "layer_id")),
+        required=("composition_id", "board_id", "layer_id"),
+        undo_label="Add Collage Item",
+        dry_summary="A layer would join the collage board",
+    )
+    registry.register_adapter_action(
+        "motion.collage.item.update",
+        "Update editable collage item metadata or rebind its source layer.",
+        "motion",
+        "motion_collage_item_update",
+        params_schema=schema_object({
+            **collage_item_ref,
+            "changes": {"type": "object"},
+        }, required=("composition_id", "board_id", "item_id", "changes")),
+        required=("composition_id", "board_id", "item_id", "changes"),
+        undo_label="Update Collage Item",
+        dry_summary="Collage item metadata would change",
+    )
+    registry.register_adapter_action(
+        "motion.collage.item.reorder",
+        "Move a collage item through the board z-stack.",
+        "motion",
+        "motion_collage_item_reorder",
+        params_schema=schema_object({
+            **collage_item_ref,
+            "z_index": {"type": "integer", "minimum": 0},
+        }, required=("composition_id", "board_id", "item_id", "z_index")),
+        required=("composition_id", "board_id", "item_id", "z_index"),
+        undo_label="Reorder Collage Item",
+        dry_summary="The collage z-stack would change",
+    )
+    registry.register_adapter_action(
+        "motion.collage.edge.set",
+        "Set polygon, smart, torn, feathered, or fibrous collage edges.",
+        "motion",
+        "motion_collage_edge_set",
+        params_schema=schema_object({
+            **collage_item_ref,
+            "mode": {
+                "type": "string",
+                "enum": ["smart", "polygon", "torn", "feather", "fiber"],
+            },
+            "roughness": {"type": "number", "minimum": 0, "maximum": 1},
+            "feather": {"type": "number", "minimum": 0, "maximum": 64},
+            "seed": {"type": "integer", "minimum": 0},
+            "points": {
+                "type": "array",
+                "items": {
+                    "type": "array",
+                    "items": {"type": "number"},
+                    "minItems": 2,
+                    "maxItems": 2,
+                },
+            },
+        }, required=("composition_id", "board_id", "item_id", "mode")),
+        required=("composition_id", "board_id", "item_id", "mode"),
+        undo_label="Set Collage Edge",
+        dry_summary="The collage edge treatment would change",
+    )
+    registry.register_adapter_action(
+        "motion.collage.attachment.set",
+        "Set glue, tape, staple, pin, or fold treatment on a collage item.",
+        "motion",
+        "motion_collage_attachment_set",
+        params_schema=schema_object({
+            **collage_item_ref,
+            "kind": {
+                "type": "string",
+                "enum": ["none", "glue", "tape", "staple", "pin", "fold"],
+            },
+            "color": {"type": "string"},
+            "strength": {"type": "number", "minimum": 0, "maximum": 1},
+            "angle": {"type": "number", "minimum": -180, "maximum": 180},
+        }, required=("composition_id", "board_id", "item_id", "kind")),
+        required=("composition_id", "board_id", "item_id", "kind"),
+        undo_label="Set Collage Attachment",
+        dry_summary="The collage attachment treatment would change",
+    )
+    registry.register_adapter_action(
+        "motion.collage.source.replace",
+        "Replace collage media while preserving item, layer, pivot, parent, and timing.",
+        "motion",
+        "motion_collage_source_replace",
+        params_schema=schema_object({
+            **collage_item_ref,
+            "source": {"type": "object"},
+        }, required=("composition_id", "board_id", "item_id", "source")),
+        required=("composition_id", "board_id", "item_id", "source"),
+        undo_label="Replace Collage Source",
+        dry_summary="Collage source media would be replaced without changing IDs",
+    )
+    registry.register_adapter_action(
+        "motion.collage.scan.set",
+        "Clean a scanned collage source while preserving ink and optional transparency.",
+        "motion",
+        "motion_collage_scan_set",
+        params_schema=schema_object({
+            **collage_item_ref,
+            "white_balance": {"type": "number", "minimum": 0, "maximum": 1},
+            "paper_remove": {"type": "number", "minimum": 0, "maximum": 1},
+            "ink_preserve": {"type": "number", "minimum": 0, "maximum": 1},
+            "threshold": {"type": "number", "minimum": 0.05, "maximum": 0.98},
+        }, required=("composition_id", "board_id", "item_id")),
+        required=("composition_id", "board_id", "item_id"),
+        undo_label="Set Collage Scan Cleanup",
+        dry_summary="Scanned paper would be balanced and its ink preserved",
+    )
+    registry.register_adapter_action(
+        "motion.collage.paint.send",
+        "Create a stable-ID collage handoff for Painter.",
+        "motion",
+        "motion_collage_paint_send",
+        params_schema=schema_object({
+            **collage_item_ref,
+            "document_id": {"type": "string"},
+            "object_id": {"type": "string"},
+            "revision": {"type": "integer", "minimum": 1},
+        }, required=(
+            "composition_id", "board_id", "item_id",
+            "document_id", "object_id",
+        )),
+        required=(
+            "composition_id", "board_id", "item_id",
+            "document_id", "object_id",
+        ),
+        undo_label="Send Collage Item To Painter",
+        dry_summary="A stable Painter handoff would be stored",
+    )
+    registry.register_adapter_action(
+        "motion.collage.paint.refresh",
+        "Refresh collage source data from Painter without changing stable IDs.",
+        "motion",
+        "motion_collage_paint_refresh",
+        params_schema=schema_object({
+            **collage_item_ref,
+            "revision": {"type": "integer", "minimum": 1},
+            "source": {"type": "object"},
+        }, required=("composition_id", "board_id", "item_id", "revision")),
+        required=("composition_id", "board_id", "item_id", "revision"),
+        undo_label="Refresh Collage Item From Painter",
+        dry_summary="Painter changes would refresh the linked collage item",
+    )
+    registry.register_adapter_action(
+        "motion.collage.preflight",
+        "Validate collage IDs, layers, Painter links, and delivery disposition.",
+        "motion",
+        "motion_collage_preflight",
+        params_schema=schema_object(
+            collage_ref,
+            required=("composition_id", "board_id"),
+        ),
+        required=("composition_id", "board_id"),
+        mutating=False,
+        changed=False,
+    )

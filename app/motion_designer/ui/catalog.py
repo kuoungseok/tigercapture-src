@@ -44,6 +44,7 @@ FILTER_ITEMS = (
     ("Corner Pin", "corner_pin"),
     ("Mesh Warp", "mesh_warp"),
     ("Paper Fold", "paper_fold"),
+    ("Scan Cleanup", "scan_cleanup"),
     ("Craft / Imperfection", "craft_style"),
 )
 
@@ -93,6 +94,12 @@ CATALOG = {
         ("Editorial Camera Push", "advanced_preset", "editorial_camera_push"),
         ("Beat-Synced Montage", "advanced_preset", "beat_synced_montage"),
     ),
+    "Mixed Media": (
+        ("Editorial Collage", "collage", "editorial:torn:tape"),
+        ("Luxury Paper", "collage", "luxury:feather:fold"),
+        ("Education Cutaway", "collage", "education:fiber:staple"),
+        ("Loose Scatter", "collage", "scatter:torn:pin"),
+    ),
 }
 
 CATEGORY_LABELS = {
@@ -103,6 +110,7 @@ CATEGORY_LABELS = {
     "Filters": "Effects",
     "Templates": "Templates",
     "Direction Presets": "Motion Presets",
+    "Mixed Media": "Mixed Media",
 }
 
 CATEGORY_HINTS = {
@@ -113,6 +121,7 @@ CATEGORY_HINTS = {
     "Filters": "Style the selected layer",
     "Templates": "Replace the current composition",
     "Direction Presets": "Apply a designed motion treatment",
+    "Mixed Media": "Build an editable paper, scan, and collage treatment",
 }
 
 ITEM_DESCRIPTIONS = {
@@ -159,5 +168,6 @@ ITEM_DESCRIPTIONS = {
     "corner_pin": "Fit a layer to four points",
     "mesh_warp": "Deform a layer with a mesh",
     "paper_fold": "Simulate a folding paper surface",
+    "scan_cleanup": "Balance scanned paper, preserve ink, and remove paper",
     "craft_style": "Deterministic film grain, gate weave, and light flicker",
 }

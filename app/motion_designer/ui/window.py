@@ -45,6 +45,7 @@ from .generator_panel import GeneratorPanel
 from .inspector import InspectorPanel
 from .craft_panel import CraftStylePanel
 from .glass_panel import GlassMaterialPanel
+from .collage_panel import CollagePanel
 from .image_panel import ImagePanel
 from .layer_panel import LayerPanel
 from .library_panel import MotionLibraryPanel
@@ -866,9 +867,11 @@ class MotionDesignerWindow(QMainWindow):
         self.effects = EffectMaskPanel("effect", self)
         self.craft = CraftStylePanel(self)
         self.glass = GlassMaterialPanel(self)
+        self.collage = CollagePanel(self)
         self.looks = QTabWidget(self)
         self.looks.addTab(self.craft, "Craft")
         self.looks.addTab(self.glass, "Glass")
+        self.looks.addTab(self.collage, "Collage")
         self.masks = EffectMaskPanel("mask", self)
         self.tracking = TrackingPanel(self)
         self.inspector_tabs = QTabWidget(self)
@@ -1048,6 +1051,12 @@ class MotionDesignerWindow(QMainWindow):
         self.craft.texture_requested.connect(self._attach_craft_texture)
         self.glass.apply_requested.connect(self._apply_glass_material)
         self.glass.remove_requested.connect(self._remove_glass_material)
+        self.collage.create_requested.connect(self._create_collage_board)
+        self.collage.edge_requested.connect(self._set_collage_edge)
+        self.collage.attachment_requested.connect(
+            self._set_collage_attachment,
+        )
+        self.collage.scan_requested.connect(self._set_collage_scan_cleanup)
         self.masks.add_requested.connect(self._add_mask)
         self.masks.delete_requested.connect(self._delete_mask)
         self.masks.parameter_changed.connect(self._set_mask_param)
@@ -1729,6 +1738,7 @@ class MotionDesignerWindow(QMainWindow):
         self.effects.set_context(layer, self.controller.composition)
         self.craft.set_layer(layer)
         self.glass.set_layer(layer)
+        self.collage.set_context(self.controller.composition, layer)
         self.masks.set_layer(layer)
         local_time = self._layer_local_time(layer)
         self.effects.set_time(local_time)
@@ -2020,6 +2030,45 @@ class MotionDesignerWindow(QMainWindow):
             added = list(result.get("added_layer_ids") or [])
             if added:
                 self._select_layer(added[-1])
+        elif domain == "collage":
+            if not self._selected_layer_id:
+                return
+            from app.motion_designer.collage import (
+                create_collage_board,
+                set_collage_attachment,
+                set_collage_edge,
+            )
+
+            layout, edge, attachment = (
+                [*str(kind).split(":"), "smart", "none"][:3]
+            )
+            candidate = MotionComposition.from_dict(
+                self.controller.composition.to_dict(),
+            )
+            board = create_collage_board(
+                candidate,
+                [self._selected_layer_id],
+                layout=layout,
+                seed=17,
+            )
+            item_id = str(board["items"][0]["id"])
+            set_collage_edge(
+                candidate,
+                str(board["id"]),
+                item_id,
+                mode=edge,
+                roughness=0.7 if edge in {"torn", "fiber"} else 0.25,
+                feather=4.0 if edge == "feather" else 0.0,
+                seed=17,
+            )
+            set_collage_attachment(
+                candidate,
+                str(board["id"]),
+                item_id,
+                kind=attachment,
+            )
+            candidate.revision += 1
+            self.controller.replace(candidate)
 
     def _update_media_panel(self, composition: MotionComposition) -> None:
         self.media.clear()
@@ -2602,6 +2651,12 @@ class MotionDesignerWindow(QMainWindow):
                 "contrast": 1.4, "evolution": 0.0, "speed": 0.0, "seed": 1.0,
             },
             "posterize": {"levels": 8.0, "amount": 1.0},
+            "scan_cleanup": {
+                "white_balance": 0.8,
+                "paper_remove": 0.0,
+                "ink_preserve": 0.75,
+                "threshold": 0.72,
+            },
         }
         effect = MotionEffectRef(kind=kind, params={
             key: AnimatedProperty(default=value) for key, value in defaults.get(kind, {}).items()
@@ -2720,6 +2775,101 @@ class MotionDesignerWindow(QMainWindow):
                 if item.id != previous.id
             ],
         })
+
+    def _create_collage_board(self, layout: str, seed: int) -> None:
+        if not self._selected_layer_id:
+            return
+        from app.motion_designer.collage import create_collage_board
+
+        candidate = MotionComposition.from_dict(
+            self.controller.composition.to_dict(),
+        )
+        create_collage_board(
+            candidate,
+            [self._selected_layer_id],
+            layout=str(layout),
+            seed=int(seed),
+        )
+        candidate.revision += 1
+        self.controller.replace(candidate)
+
+    def _set_collage_edge(
+        self,
+        mode: str,
+        roughness: float,
+        feather: float,
+        seed: int,
+    ) -> None:
+        if not self.collage.board_id or not self.collage.item_id:
+            return
+        from app.motion_designer.collage import set_collage_edge
+
+        candidate = MotionComposition.from_dict(
+            self.controller.composition.to_dict(),
+        )
+        set_collage_edge(
+            candidate,
+            self.collage.board_id,
+            self.collage.item_id,
+            mode=str(mode),
+            roughness=float(roughness),
+            feather=float(feather),
+            seed=int(seed),
+        )
+        candidate.revision += 1
+        self.controller.replace(candidate)
+
+    def _set_collage_attachment(
+        self,
+        kind: str,
+        color: str,
+        strength: float,
+        angle: float,
+    ) -> None:
+        if not self.collage.board_id or not self.collage.item_id:
+            return
+        from app.motion_designer.collage import set_collage_attachment
+
+        candidate = MotionComposition.from_dict(
+            self.controller.composition.to_dict(),
+        )
+        set_collage_attachment(
+            candidate,
+            self.collage.board_id,
+            self.collage.item_id,
+            kind=str(kind),
+            color=str(color),
+            strength=float(strength),
+            angle=float(angle),
+        )
+        candidate.revision += 1
+        self.controller.replace(candidate)
+
+    def _set_collage_scan_cleanup(
+        self,
+        white_balance: float,
+        paper_remove: float,
+        ink_preserve: float,
+        threshold: float,
+    ) -> None:
+        if not self.collage.board_id or not self.collage.item_id:
+            return
+        from app.motion_designer.collage import set_collage_scan_cleanup
+
+        candidate = MotionComposition.from_dict(
+            self.controller.composition.to_dict(),
+        )
+        set_collage_scan_cleanup(
+            candidate,
+            self.collage.board_id,
+            self.collage.item_id,
+            white_balance=float(white_balance),
+            paper_remove=float(paper_remove),
+            ink_preserve=float(ink_preserve),
+            threshold=float(threshold),
+        )
+        candidate.revision += 1
+        self.controller.replace(candidate)
 
     def _set_adjustment_scope(self, mode: str, layer_ids: object) -> None:
         if not self._selected_layer_id:
