@@ -9420,6 +9420,18 @@ class PaintDialog(QDialog):
         self._ui_design_tool_host.snap_changed.connect(
             self._set_painter_ui_snap
         )
+        self._ui_design_tool_host.guide_visibility_changed.connect(
+            self._set_painter_ui_guides_visible
+        )
+        self._ui_design_tool_host.guide_lock_changed.connect(
+            self._set_painter_ui_guides_locked
+        )
+        self._ui_design_tool_host.guide_clear_requested.connect(
+            self._clear_painter_ui_guides
+        )
+        self._ui_design_tool_host.ruler_origin_reset_requested.connect(
+            self._reset_painter_ui_ruler_origin
+        )
         self._ui_design_tool_host.fit_requested.connect(
             self._fit_painter_ui_view
         )
@@ -9478,6 +9490,18 @@ class PaintDialog(QDialog):
         )
         self._painter_ui_overlay.guide_create_requested.connect(
             self._create_painter_ui_guide
+        )
+        self._painter_ui_overlay.guide_update_requested.connect(
+            self._update_painter_ui_guide
+        )
+        self._painter_ui_overlay.guide_remove_requested.connect(
+            self._remove_painter_ui_guide
+        )
+        self._painter_ui_overlay.ruler_origin_requested.connect(
+            self._set_painter_ui_ruler_origin
+        )
+        self._painter_ui_overlay.ruler_origin_reset_requested.connect(
+            self._reset_painter_ui_ruler_origin
         )
         self._painter_ui_overlay.hide()
 
@@ -12664,6 +12688,115 @@ class PaintDialog(QDialog):
         self._painter_document_dirty = True
         self._refresh_painter_ui_overlay()
 
+    def _update_painter_ui_guide(
+        self,
+        orientation: str,
+        position: float,
+        next_position: float,
+    ) -> None:
+        from app.painter_ui_guides import update_ui_guide
+
+        current = getattr(self, "_painter_ui_document", None) or {}
+        document = update_ui_guide(
+            current,
+            orientation=orientation,
+            position=position,
+            next_position=next_position,
+        )
+        if document == current:
+            return
+        self._push_undo_state("Move UI guide")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _remove_painter_ui_guide(
+        self,
+        orientation: str,
+        position: float,
+    ) -> None:
+        from app.painter_ui_guides import remove_ui_guide
+
+        current = getattr(self, "_painter_ui_document", None) or {}
+        document = remove_ui_guide(
+            current,
+            orientation=orientation,
+            position=position,
+        )
+        if document == current:
+            return
+        self._push_undo_state("Remove UI guide")
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
+    def _set_painter_ui_guides_visible(self, visible: bool) -> None:
+        from app.painter_ui_guides import set_ui_guides_visibility
+
+        self._apply_painter_ui_guide_document(
+            "Show UI guides" if visible else "Hide UI guides",
+            set_ui_guides_visibility(
+                getattr(self, "_painter_ui_document", None) or {},
+                visible=visible,
+            ),
+        )
+
+    def _set_painter_ui_guides_locked(self, locked: bool) -> None:
+        from app.painter_ui_guides import set_ui_guides_locked
+
+        self._apply_painter_ui_guide_document(
+            "Lock UI guides" if locked else "Unlock UI guides",
+            set_ui_guides_locked(
+                getattr(self, "_painter_ui_document", None) or {},
+                locked=locked,
+            ),
+        )
+
+    def _clear_painter_ui_guides(self) -> None:
+        from app.painter_ui_guides import clear_ui_guides
+
+        self._apply_painter_ui_guide_document(
+            "Clear UI guides",
+            clear_ui_guides(
+                getattr(self, "_painter_ui_document", None) or {},
+            ),
+        )
+
+    def _reset_painter_ui_ruler_origin(self) -> None:
+        from app.painter_ui_guides import reset_ui_ruler_origin
+
+        self._apply_painter_ui_guide_document(
+            "Reset UI ruler origin",
+            reset_ui_ruler_origin(
+                getattr(self, "_painter_ui_document", None) or {},
+            ),
+        )
+
+    def _set_painter_ui_ruler_origin(self, x: float, y: float) -> None:
+        from app.painter_ui_guides import set_ui_ruler_origin
+
+        self._apply_painter_ui_guide_document(
+            "Set UI ruler origin",
+            set_ui_ruler_origin(
+                getattr(self, "_painter_ui_document", None) or {},
+                x=x,
+                y=y,
+            ),
+        )
+
+    def _apply_painter_ui_guide_document(
+        self,
+        label: str,
+        document: dict,
+    ) -> None:
+        current = getattr(self, "_painter_ui_document", None) or {}
+        if document == current:
+            return
+        self._push_undo_state(label)
+        self._painter_ui_document = document
+        self._painter_document_dirty = True
+        self._refresh_painter_ui_overlay()
+
     def _add_painter_ui_artboard_preset(
         self,
         name: str,
@@ -14157,6 +14290,30 @@ class PaintDialog(QDialog):
         if preview_button is not None:
             preview_button.setEnabled(bool(linked or has_motion_actors))
         toolbar = getattr(self, "_ui_design_tool_host", None)
+        if toolbar is not None and hasattr(toolbar, "set_guide_state"):
+            from app.painter_ui_artboard_layout import (
+                normalize_ui_artboard_layout,
+            )
+
+            document = getattr(self, "_painter_ui_document", {}) or {}
+            artboard = next(
+                (
+                    row
+                    for row in document.get("artboards", [])
+                    if row.get("id") == document.get("active_artboard_id")
+                ),
+                None,
+            )
+            if artboard is not None:
+                guide_state = normalize_ui_artboard_layout(
+                    artboard,
+                    width=float(artboard["width"]),
+                    height=float(artboard["height"]),
+                )["guides"]
+                toolbar.set_guide_state(
+                    visible=bool(guide_state["visible"]),
+                    locked=bool(guide_state["locked"]),
+                )
         if (
             toolbar is not None
             and toolbar.isVisible()

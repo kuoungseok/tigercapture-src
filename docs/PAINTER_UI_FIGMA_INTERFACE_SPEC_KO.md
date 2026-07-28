@@ -1,8 +1,8 @@
 # Painter UI Figma-Class Interface Specification
 
-Status: active UX contract; UI-P0 shell foundation implemented
+Status: active UX contract; UI-P0 shell and M1 ruler-guide lifecycle implemented
 
-Date: 2026-07-28
+Date: 2026-07-29
 
 ## Implementation Checkpoint (2026-07-28)
 
@@ -17,13 +17,16 @@ Implemented:
 - zoom-adaptive horizontal and vertical canvas rulers
 - ruler drag to create persistent, undoable artboard guides
 - shared UI/Action guide mutations with create/remove/clear automation
+- grouped Shape/Content flyouts in the compact bottom toolbar
+- direct guide move and drag-back-to-ruler deletion
+- persistent guide visibility, lock state, and per-artboard ruler origin
+- ruler-corner drag to set origin and double-click/menu reset
 - localized shell labels through the Painter i18n surface
 - focused UI tests and reproducible screenshot QA
 
 Still required by this contract:
 
-- grouped-tool flyouts and the complete creation set
-- guide drag-to-move/delete, ruler origin controls, and guide locking
+- the complete Polygon/Star/Arc creation set and vector-network editing
 - selection-kind-specific Inspector sections
 - temporary compact properties popover when both panels are minimized
 - persisted panel widths and minimized state

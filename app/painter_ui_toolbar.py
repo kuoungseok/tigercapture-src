@@ -24,6 +24,10 @@ class PainterUIFloatingToolbar(QFrame):
 
     tool_requested = Signal(str)
     snap_changed = Signal(bool)
+    guide_visibility_changed = Signal(bool)
+    guide_lock_changed = Signal(bool)
+    guide_clear_requested = Signal()
+    ruler_origin_reset_requested = Signal()
     fit_requested = Signal(str)
     motion_actor_requested = Signal()
     animate_requested = Signal()
@@ -104,6 +108,41 @@ class PainterUIFloatingToolbar(QFrame):
         self.snap_button.toggled.connect(self.snap_changed)
         layout.addWidget(self.snap_button)
 
+        self.guide_button = QToolButton()
+        self.guide_button.setObjectName("PainterUIFloatingToolButton")
+        self.guide_button.setPopupMode(
+            QToolButton.ToolButtonPopupMode.InstantPopup
+        )
+        self.guide_button.setFixedSize(32, 30)
+        self.guide_button.setIcon(
+            app_icon("ruler", size=15, color="#E4E8EE")
+        )
+        self.guide_button.setIconSize(icon_size(15))
+        self.guide_button.setToolTip("Rulers and guides")
+        self.guide_button.setAccessibleName("Rulers and guides")
+        guide_menu = QMenu(self.guide_button)
+        guide_menu.setObjectName("PainterUIGuideMenu")
+        self.guide_visibility_action = guide_menu.addAction("Show guides")
+        self.guide_visibility_action.setCheckable(True)
+        self.guide_visibility_action.setChecked(True)
+        self.guide_visibility_action.toggled.connect(
+            self.guide_visibility_changed
+        )
+        self.guide_lock_action = guide_menu.addAction("Lock guides")
+        self.guide_lock_action.setCheckable(True)
+        self.guide_lock_action.toggled.connect(self.guide_lock_changed)
+        guide_menu.addSeparator()
+        self.guide_clear_action = guide_menu.addAction("Clear guides")
+        self.guide_clear_action.triggered.connect(self.guide_clear_requested)
+        self.ruler_origin_reset_action = guide_menu.addAction(
+            "Reset ruler origin"
+        )
+        self.ruler_origin_reset_action.triggered.connect(
+            self.ruler_origin_reset_requested
+        )
+        self.guide_button.setMenu(guide_menu)
+        layout.addWidget(self.guide_button)
+
         self.view_buttons: dict[str, QPushButton] = {}
         for label, mode, icon_name in (
             ("Fit all artboards", "all", "zoom-fit"),
@@ -174,6 +213,15 @@ class PainterUIFloatingToolbar(QFrame):
             self.view_buttons[mode].setVisible(not compact)
         self.motion_actor_button.setVisible(not compact)
         self.adjustSize()
+
+    def set_guide_state(self, *, visible: bool, locked: bool) -> None:
+        for action, checked in (
+            (self.guide_visibility_action, visible),
+            (self.guide_lock_action, locked),
+        ):
+            action.blockSignals(True)
+            action.setChecked(bool(checked))
+            action.blockSignals(False)
 
     def place_in_parent(self, *, bottom_margin: int = 16) -> None:
         parent = self.parentWidget()

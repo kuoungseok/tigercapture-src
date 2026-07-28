@@ -509,6 +509,19 @@ def app_icon(name: str, *, size: int = 18, color: str = "#D7DAE7") -> QIcon:
         for y in (.22, .54):
             for x in (.22, .54):
                 painter.drawRoundedRect(QRectF(s * x, s * y, s * .22, s * .22), 2, 2)
+    elif n in {"ruler", "guides"}:
+        painter.drawLine(QPointF(s * .18, s * .72), QPointF(s * .82, s * .72))
+        painter.drawLine(QPointF(s * .18, s * .72), QPointF(s * .18, s * .28))
+        for x, height in ((.32, .12), (.46, .20), (.60, .12), (.74, .20)):
+            painter.drawLine(
+                QPointF(s * x, s * .72),
+                QPointF(s * x, s * (.72 - height)),
+            )
+        for y, width in ((.58, .12), (.44, .20), (.30, .12)):
+            painter.drawLine(
+                QPointF(s * .18, s * y),
+                QPointF(s * (.18 + width), s * y),
+            )
     elif n in {"list"}:
         painter.setBrush(_color(color))
         for y in (.28, .50, .72):

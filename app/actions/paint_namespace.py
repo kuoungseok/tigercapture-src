@@ -468,6 +468,32 @@ def register_paint_actions(registry: Any) -> None:
             dry_summary=description,
         )
     registry.register_adapter_action(
+        "paint.ui.guide.update",
+        "Move an existing Painter UI guide to a new artboard coordinate.",
+        "paint",
+        "paint_ui_guide_update",
+        params_schema=schema_object(
+            {
+                "artboard_id": {"type": "string"},
+                "orientation": {
+                    "type": "string",
+                    "enum": ["horizontal", "vertical"],
+                },
+                "position": {"type": "number", "minimum": 0},
+                "next_position": {"type": "number", "minimum": 0},
+                "tolerance": {
+                    "type": "number",
+                    "minimum": 0.01,
+                    "maximum": 100,
+                },
+            },
+            required=("orientation", "position", "next_position"),
+        ),
+        required=("orientation", "position", "next_position"),
+        undo_label="Move UI guide",
+        dry_summary="an existing Painter UI guide would move",
+    )
+    registry.register_adapter_action(
         "paint.ui.guide.clear",
         "Clear horizontal, vertical, or all guides on a Painter UI artboard.",
         "paint",
@@ -495,6 +521,66 @@ def register_paint_actions(registry: Any) -> None:
         ),
         required=("visible",),
         dry_summary="the Painter UI ruler visibility would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.guide.visibility.set",
+        "Show or hide persistent guides on a Painter UI artboard.",
+        "paint",
+        "paint_ui_guide_visibility_set",
+        params_schema=schema_object(
+            {
+                "artboard_id": {"type": "string"},
+                "visible": {"type": "boolean"},
+            },
+            required=("visible",),
+        ),
+        required=("visible",),
+        undo_label="Set UI guide visibility",
+        dry_summary="the persistent Painter UI guides would show or hide",
+    )
+    registry.register_adapter_action(
+        "paint.ui.guide.lock.set",
+        "Lock or unlock persistent guides on a Painter UI artboard.",
+        "paint",
+        "paint_ui_guide_lock_set",
+        params_schema=schema_object(
+            {
+                "artboard_id": {"type": "string"},
+                "locked": {"type": "boolean"},
+            },
+            required=("locked",),
+        ),
+        required=("locked",),
+        undo_label="Set UI guide lock",
+        dry_summary="the persistent Painter UI guides would lock or unlock",
+    )
+    registry.register_adapter_action(
+        "paint.ui.ruler.origin.set",
+        "Set the ruler label origin for a Painter UI artboard.",
+        "paint",
+        "paint_ui_ruler_origin_set",
+        params_schema=schema_object(
+            {
+                "artboard_id": {"type": "string"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+            },
+            required=("x", "y"),
+        ),
+        required=("x", "y"),
+        undo_label="Set UI ruler origin",
+        dry_summary="the Painter UI ruler label origin would change",
+    )
+    registry.register_adapter_action(
+        "paint.ui.ruler.origin.reset",
+        "Reset the Painter UI ruler label origin to the artboard origin.",
+        "paint",
+        "paint_ui_ruler_origin_reset",
+        params_schema=schema_object(
+            {"artboard_id": {"type": "string"}},
+        ),
+        undo_label="Reset UI ruler origin",
+        dry_summary="the Painter UI ruler label origin would reset",
     )
     registry.register_adapter_action(
         "paint.ui.object.add",

@@ -79,3 +79,34 @@ def test_floating_toolbar_group_flyouts_switch_tools() -> None:
     assert toolbar.tool_buttons["ellipse"] is toolbar.tool_buttons["rectangle"]
     assert toolbar.tool_buttons["image"] is toolbar.tool_buttons["text"]
     toolbar.deleteLater()
+
+
+def test_floating_toolbar_guide_menu_emits_intents_and_syncs_state() -> None:
+    _app()
+    from app.painter_ui_toolbar import PainterUIFloatingToolbar
+
+    toolbar = PainterUIFloatingToolbar()
+    visibility: list[bool] = []
+    locked: list[bool] = []
+    cleared: list[bool] = []
+    reset: list[bool] = []
+    toolbar.guide_visibility_changed.connect(visibility.append)
+    toolbar.guide_lock_changed.connect(locked.append)
+    toolbar.guide_clear_requested.connect(lambda: cleared.append(True))
+    toolbar.ruler_origin_reset_requested.connect(lambda: reset.append(True))
+
+    toolbar.guide_visibility_action.setChecked(False)
+    toolbar.guide_lock_action.setChecked(True)
+    toolbar.guide_clear_action.trigger()
+    toolbar.ruler_origin_reset_action.trigger()
+    assert visibility == [False]
+    assert locked == [True]
+    assert cleared == [True]
+    assert reset == [True]
+
+    toolbar.set_guide_state(visible=True, locked=False)
+    assert toolbar.guide_visibility_action.isChecked()
+    assert not toolbar.guide_lock_action.isChecked()
+    assert visibility == [False]
+    assert locked == [True]
+    toolbar.deleteLater()

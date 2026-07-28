@@ -161,6 +161,8 @@ def create_ui_document(
                 },
                 "guides": {
                     "visible": True,
+                    "locked": False,
+                    "origin": {"x": 0.0, "y": 0.0},
                     "vertical": [],
                     "horizontal": [],
                 },

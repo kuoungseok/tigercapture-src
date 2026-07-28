@@ -99,6 +99,129 @@ def remove_ui_guide(
     return updated
 
 
+def update_ui_guide(
+    document: Mapping[str, Any],
+    *,
+    orientation: str,
+    position: float,
+    next_position: float,
+    artboard_id: str = "",
+    tolerance: float = 0.5,
+) -> dict[str, Any]:
+    normalized, row = _target_artboard(document, artboard_id)
+    layout = normalize_ui_artboard_layout(
+        row,
+        width=float(row["width"]),
+        height=float(row["height"]),
+    )
+    guides = dict(layout["guides"])
+    key = (
+        "horizontal"
+        if str(orientation).strip().casefold() == "horizontal"
+        else "vertical"
+    )
+    target = float(position)
+    threshold = max(0.01, float(tolerance))
+    nearest = min(
+        guides[key],
+        key=lambda value: abs(float(value) - target),
+        default=None,
+    )
+    if nearest is None or abs(float(nearest) - target) > threshold:
+        return normalized
+    maximum = float(row["height"] if key == "horizontal" else row["width"])
+    replacement = max(0.0, min(maximum, float(next_position)))
+    values = [
+        float(value)
+        for value in guides[key]
+        if value != nearest
+    ]
+    if all(abs(replacement - value) >= 0.5 for value in values):
+        values.append(replacement)
+    guides[key] = sorted(values)
+    updated, _row = update_ui_artboard(
+        normalized,
+        row["id"],
+        {"guides": guides},
+    )
+    return updated
+
+
+def set_ui_guides_visibility(
+    document: Mapping[str, Any],
+    *,
+    visible: bool,
+    artboard_id: str = "",
+) -> dict[str, Any]:
+    return _set_ui_guide_options(
+        document,
+        artboard_id=artboard_id,
+        changes={"visible": bool(visible)},
+    )
+
+
+def set_ui_guides_locked(
+    document: Mapping[str, Any],
+    *,
+    locked: bool,
+    artboard_id: str = "",
+) -> dict[str, Any]:
+    return _set_ui_guide_options(
+        document,
+        artboard_id=artboard_id,
+        changes={"locked": bool(locked)},
+    )
+
+
+def set_ui_ruler_origin(
+    document: Mapping[str, Any],
+    *,
+    x: float,
+    y: float,
+    artboard_id: str = "",
+) -> dict[str, Any]:
+    return _set_ui_guide_options(
+        document,
+        artboard_id=artboard_id,
+        changes={"origin": {"x": float(x), "y": float(y)}},
+    )
+
+
+def reset_ui_ruler_origin(
+    document: Mapping[str, Any],
+    *,
+    artboard_id: str = "",
+) -> dict[str, Any]:
+    return set_ui_ruler_origin(
+        document,
+        artboard_id=artboard_id,
+        x=0.0,
+        y=0.0,
+    )
+
+
+def _set_ui_guide_options(
+    document: Mapping[str, Any],
+    *,
+    artboard_id: str,
+    changes: Mapping[str, Any],
+) -> dict[str, Any]:
+    normalized, row = _target_artboard(document, artboard_id)
+    layout = normalize_ui_artboard_layout(
+        row,
+        width=float(row["width"]),
+        height=float(row["height"]),
+    )
+    guides = dict(layout["guides"])
+    guides.update(dict(changes))
+    updated, _row = update_ui_artboard(
+        normalized,
+        row["id"],
+        {"guides": guides},
+    )
+    return updated
+
+
 def clear_ui_guides(
     document: Mapping[str, Any],
     *,
@@ -130,4 +253,9 @@ __all__ = [
     "add_ui_guide",
     "clear_ui_guides",
     "remove_ui_guide",
+    "reset_ui_ruler_origin",
+    "set_ui_guides_locked",
+    "set_ui_guides_visibility",
+    "set_ui_ruler_origin",
+    "update_ui_guide",
 ]

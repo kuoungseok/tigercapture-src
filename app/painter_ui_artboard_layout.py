@@ -72,6 +72,23 @@ def normalize_ui_artboard_layout(
         "safe_area_visible": bool(source.get("safe_area_visible", False)),
         "guides": {
             "visible": bool(raw_guides.get("visible", True)),
+            "locked": bool(raw_guides.get("locked", False)),
+            "origin": {
+                "x": _number(
+                    (
+                        raw_guides.get("origin")
+                        if isinstance(raw_guides.get("origin"), Mapping)
+                        else {}
+                    ).get("x")
+                ),
+                "y": _number(
+                    (
+                        raw_guides.get("origin")
+                        if isinstance(raw_guides.get("origin"), Mapping)
+                        else {}
+                    ).get("y")
+                ),
+            },
             "vertical": _positions(raw_guides.get("vertical"), float(width)),
             "horizontal": _positions(raw_guides.get("horizontal"), float(height)),
         },

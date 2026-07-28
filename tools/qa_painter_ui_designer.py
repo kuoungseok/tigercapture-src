@@ -218,6 +218,26 @@ def main() -> int:
     dialog.grab().save(str(inspect_screenshot_path), "PNG")
     registry.execute("paint.ui.artboard.activate", {"artboard_id": desktop_id})
     registry.execute(
+        "paint.ui.guide.create",
+        {
+            "artboard_id": desktop_id,
+            "orientation": "vertical",
+            "position": 720,
+        },
+    )
+    registry.execute(
+        "paint.ui.guide.create",
+        {
+            "artboard_id": desktop_id,
+            "orientation": "horizontal",
+            "position": 450,
+        },
+    )
+    registry.execute(
+        "paint.ui.ruler.origin.set",
+        {"artboard_id": desktop_id, "x": 120, "y": 130},
+    )
+    registry.execute(
         "paint.ui.selection.set",
         {
             "object_ids": desktop_object_ids[1:],
@@ -270,6 +290,15 @@ def main() -> int:
         ),
         {},
     )
+    active_artboard = next(
+        (
+            row
+            for row in state["ui_design"]["document"]["artboards"]
+            if row["id"] == desktop_id
+        ),
+        {},
+    )
+    guide_state = dict(active_artboard.get("guides") or {})
     report = {
         "schema": "tigerstudio.painter.ui.qa.v1",
         "ok": (
@@ -280,6 +309,9 @@ def main() -> int:
             and group_row.get("kind") == "group"
             and grouped.get("ok") is True
             and hierarchy_child.get("parent_id") == group_id
+            and guide_state.get("vertical") == [720.0]
+            and guide_state.get("horizontal") == [450.0]
+            and guide_state.get("origin") == {"x": 120.0, "y": 130.0}
             and screenshot_path.is_file()
             and inspect_screenshot_path.is_file()
             and desktop_screenshot_path.is_file()
@@ -289,6 +321,7 @@ def main() -> int:
         "inspect_screenshot": str(inspect_screenshot_path),
         "desktop_screenshot": str(desktop_screenshot_path),
         "hierarchy_screenshot": str(hierarchy_screenshot_path),
+        "guide_state": guide_state,
         "workspace": state["workspace"],
         "ui_design": state["ui_design"],
     }

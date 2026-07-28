@@ -783,6 +783,31 @@ class PaintAdapterMixin(
         dialog._push_undo_state("Remove UI guide")
         return self._paint_ui_commit(dialog, "Remove UI guide", document)
 
+    def paint_ui_guide_update(
+        self,
+        *,
+        orientation: str,
+        position: float,
+        next_position: float,
+        artboard_id: str = "",
+        tolerance: float = 0.5,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_guides import update_ui_guide
+
+        document = update_ui_guide(
+            dialog._painter_ui_document,
+            artboard_id=artboard_id,
+            orientation=orientation,
+            position=position,
+            next_position=next_position,
+            tolerance=tolerance,
+        )
+        if document == dialog._painter_ui_document:
+            return dialog.painter_action_state()
+        dialog._push_undo_state("Move UI guide")
+        return self._paint_ui_commit(dialog, "Move UI guide", document)
+
     def paint_ui_guide_clear(
         self,
         *,
@@ -811,6 +836,90 @@ class PaintAdapterMixin(
             raise ValueError("Painter UI canvas is unavailable")
         overlay.set_rulers_visible(bool(visible))
         return dialog.painter_action_state()
+
+    def paint_ui_guide_visibility_set(
+        self,
+        *,
+        visible: bool,
+        artboard_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_guides import set_ui_guides_visibility
+
+        document = set_ui_guides_visibility(
+            dialog._painter_ui_document,
+            artboard_id=artboard_id,
+            visible=visible,
+        )
+        if document == dialog._painter_ui_document:
+            return dialog.painter_action_state()
+        dialog._push_undo_state("Set UI guide visibility")
+        return self._paint_ui_commit(
+            dialog,
+            "Set UI guide visibility",
+            document,
+        )
+
+    def paint_ui_guide_lock_set(
+        self,
+        *,
+        locked: bool,
+        artboard_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_guides import set_ui_guides_locked
+
+        document = set_ui_guides_locked(
+            dialog._painter_ui_document,
+            artboard_id=artboard_id,
+            locked=locked,
+        )
+        if document == dialog._painter_ui_document:
+            return dialog.painter_action_state()
+        dialog._push_undo_state("Set UI guide lock")
+        return self._paint_ui_commit(dialog, "Set UI guide lock", document)
+
+    def paint_ui_ruler_origin_set(
+        self,
+        *,
+        x: float,
+        y: float,
+        artboard_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_guides import set_ui_ruler_origin
+
+        document = set_ui_ruler_origin(
+            dialog._painter_ui_document,
+            artboard_id=artboard_id,
+            x=x,
+            y=y,
+        )
+        if document == dialog._painter_ui_document:
+            return dialog.painter_action_state()
+        dialog._push_undo_state("Set UI ruler origin")
+        return self._paint_ui_commit(dialog, "Set UI ruler origin", document)
+
+    def paint_ui_ruler_origin_reset(
+        self,
+        *,
+        artboard_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        from app.painter_ui_guides import reset_ui_ruler_origin
+
+        document = reset_ui_ruler_origin(
+            dialog._painter_ui_document,
+            artboard_id=artboard_id,
+        )
+        if document == dialog._painter_ui_document:
+            return dialog.painter_action_state()
+        dialog._push_undo_state("Reset UI ruler origin")
+        return self._paint_ui_commit(
+            dialog,
+            "Reset UI ruler origin",
+            document,
+        )
 
     def paint_ui_artboard_activate(self, *, artboard_id: str) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()

@@ -62,6 +62,12 @@ Undo/Redo completion rule before moving to Implemented.
 | --- | --- | --- | --- |
 | Drag horizontal ruler | `paint.ui.guide.create` (`horizontal`) | artboard `guides.horizontal` | yes |
 | Drag vertical ruler | `paint.ui.guide.create` (`vertical`) | artboard `guides.vertical` | yes |
+| Drag existing guide | `paint.ui.guide.update` | artboard guides | yes |
+| Drag guide back to ruler | `paint.ui.guide.remove` | artboard guides | yes |
 | Remove guide | `paint.ui.guide.remove` | artboard guides | yes |
 | Clear guides | `paint.ui.guide.clear` | artboard guides | yes |
+| Show/hide guides | `paint.ui.guide.visibility.set` | artboard `guides.visible` | yes |
+| Lock/unlock guides | `paint.ui.guide.lock.set` | artboard `guides.locked` | yes |
+| Drag ruler corner | `paint.ui.ruler.origin.set` | artboard `guides.origin` | yes |
+| Double-click ruler corner | `paint.ui.ruler.origin.reset` | artboard `guides.origin` | yes |
 | Show/hide rulers | `paint.ui.ruler.visibility.set` | workspace session | no |

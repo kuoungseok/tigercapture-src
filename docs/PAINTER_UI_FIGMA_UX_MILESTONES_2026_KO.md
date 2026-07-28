@@ -1,8 +1,8 @@
 # Painter UI Figma UX Development Milestones
 
-Status: active roadmap; M0 shell foundation in progress
+Status: active roadmap; M0 shell foundation and M1 ruler-guide lifecycle implemented
 
-Date: 2026-07-28
+Date: 2026-07-29
 
 ## 2026-07-28 M0 Checkpoint
 
@@ -17,13 +17,18 @@ Completed in the first shell slice:
 - zoom-adaptive top/left rulers and ruler-drag guide creation
 - shared `paint.ui.guide.create/remove/clear` and
   `paint.ui.ruler.visibility.set` automation
+- grouped Shape/Content tool flyouts
+- direct guide move and drag-back-to-ruler delete
+- persistent guide visibility/locking and per-artboard ruler origins
+- shared `paint.ui.guide.update/visibility.set/lock.set` and
+  `paint.ui.ruler.origin.set/reset` automation
 - Korean and supported-language shell label coverage
 - focused tests, architecture guard, and screenshot QA
 
 Not complete yet:
 
-- toolbar flyout groups and mode-specific Paint/3D variants
-- guide move/delete/lock, ruler origin controls, and transient zoom popover
+- mode-specific Paint/3D floating-toolbar variants
+- transient zoom popover
 - selection-type progressive disclosure in Design
 - prototype interaction authoring surface and on-canvas connection editing
 - persisted panel widths/minimized state and temporary properties popover

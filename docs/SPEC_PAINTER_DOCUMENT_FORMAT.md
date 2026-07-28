@@ -161,7 +161,8 @@ preview. The format preserves:
   `paint.ui.template.catalog.inspect/apply` use the same instantiate service as
   the visual Template Gallery.
 - Every artboard normalizes a provider-neutral `layout_grid` record with
-  `none`, `grid`, or `columns` mode, plus custom horizontal/vertical `guides`
+  `none`, `grid`, or `columns` mode, plus custom horizontal/vertical `guides`,
+  guide visibility/locking, and a per-artboard ruler origin
   and safe-area insets. `safe_area_visible` controls the authoring overlay only.
   Painter renders these records clipped to the artboard, and automation edits
   them through `paint.ui.artboard.layout.set`.
