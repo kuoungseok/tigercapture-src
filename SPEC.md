@@ -6751,10 +6751,16 @@ AI Script Edit MVP integration:
   frames, corrupts one partial frame, then resumes by reusing seven valid
   frames and rendering the remaining 113. The same gate verifies atomic
   recovery checksum roundtrip, straight-storage/premultiplied-composite alpha,
-  nested-composition Preview/Export pixel parity, HDR PQ H.265 preflight, and
-  an actual H.264 MP4 artifact. M28 still requires a packaged-build 60-second
-  realtime playback run, an actual HDR H.265 artifact inspection, real Motion
-  Designer window captures, and distribution regression evidence.
+  nested-composition Preview/Export pixel parity, HDR PQ H.265 preflight, an
+  actual H.264 MP4 artifact, and an actual HDR H.265 artifact whose stream
+  reports Rec.2020 primaries and SMPTE ST 2084 transfer.
+- `tools/qa_motion_2026_trend_ui.py` captures the real Qt Motion Designer
+  workspace and the 2026 Trends gallery, verifies that all seven templates are
+  present, and records the active UI language and template control label.
+  Motion workspace side panels now have bounded working widths and long
+  Library descriptions elide instead of forcing the Canvas into a narrow
+  column. M28 still requires a packaged-build 60-second realtime playback run
+  and distribution regression evidence.
 - M13 character-rigging foundation is complete. Motion compositions persist
   provider-neutral `tigerstudio.motion.rig.v1` cutout rigs with stable rig and
   bone IDs, a validated parent hierarchy, rest positions, animated rotation

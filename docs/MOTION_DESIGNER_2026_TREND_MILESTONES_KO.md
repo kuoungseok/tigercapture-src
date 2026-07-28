@@ -562,13 +562,17 @@ QA:
   재생성하고 유효한 7프레임을 재사용해 120프레임을 완성한다. 같은 실행에서
   recovery checksum roundtrip, straight-storage/premultiplied-composite alpha,
   nested composition Preview/Export pixel parity, HDR PQ H.265 preflight,
-  실제 H.264 MP4 생성을 함께 검증한다.
+  실제 H.264 MP4 생성을 함께 검증한다. 실제 HDR H.265 파일도 생성하고
+  스트림을 다시 읽어 Rec.2020 primaries와 SMPTE ST 2084 transfer를 확인한다.
+- `tools/qa_motion_2026_trend_ui.py`는 실제 Qt Motion Designer 작업창과
+  `2026 Trends` 템플릿 갤러리를 캡처하고 7개 템플릿 노출을 검사한다.
+  긴 Library 설명이 패널 최소 폭을 밀어내지 않도록 말줄임 처리했으며,
+  Library/Project 패널 폭을 제한해 Canvas가 주 작업 영역을 유지한다.
 
 M28은 아직 완료가 아니다. `Painterly 3D Character Spot`은 M24가 없으므로
 갤러리에 가짜 템플릿을 넣지 않고 명시적 blocked capability와 2D Craft
-대체안을 반환한다. 설치본에서의 60초 실시간 반복 재생, HDR 실제 H.265
-artifact 검사, 실제 Motion Designer 창 캡처와 배포본 회귀 게이트는 후속
-M28 작업으로 남는다.
+대체안을 반환한다. 설치본에서의 60초 실시간 반복 재생과 배포본 회귀
+게이트는 후속 M28 작업으로 남는다.
 
 ## 13. 착수 결정
 

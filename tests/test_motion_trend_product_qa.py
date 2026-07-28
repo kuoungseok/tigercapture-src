@@ -32,4 +32,7 @@ def test_trend_product_gate_cancel_resume_recovery_alpha_nested_hdr_and_mp4(
     assert report["alpha"]["maximum"] > 0
     assert report["nested_preview_export_parity"] is True
     assert report["hdr_h265_preflight"]["ok"] is True
+    assert report["hdr_h265_artifact"]["color_primaries"] == "bt2020"
+    assert report["hdr_h265_artifact"]["color_transfer"] == "smpte2084"
+    assert report["hdr_h265_artifact"]["bytes"] > 0
     assert report["mp4"]["bytes"] > 0

@@ -75,6 +75,13 @@ def test_motion_designer_window_uses_controller_for_layer_and_undo() -> None:
     assert window.library.ai_button.text() == "Create with AI"
     assert window.library.apply_button.text() == "Add Text"
     assert "Animated titles" in window.library.items.item(0).text()
+    assert window.left_tabs.maximumWidth() == 420
+    assert window.project_tabs.maximumWidth() == 360
+    assert window.library.items.textElideMode() == Qt.ElideRight
+    assert (
+        window.library.items.horizontalScrollBarPolicy()
+        == Qt.ScrollBarAlwaysOff
+    )
     assert window.timeline.graph_editor.isVisibleTo(window.timeline)
     source_id = window.controller.composition.layers[0].id
     window._select_layer(source_id)

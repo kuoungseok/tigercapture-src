@@ -2,14 +2,17 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 from typing import Any
 
 import numpy as np
 from PySide6.QtGui import QImage
 
+from app.color_management import parse_ffmpeg_color_stream_text
+
 from .export_pipeline import MotionExportCancelled, MotionProfileExporter
-from .export_profiles import preflight_motion_export
+from .export_profiles import find_ffmpeg_executable, preflight_motion_export
 from .export_renderer import MotionExportRenderer
 from .precomposition import create_precomposition
 from .recovery import read_motion_recovery, write_motion_recovery
@@ -155,6 +158,29 @@ def run_trend_product_gate(
         output_path=root / "hdr.mp4",
         fps=sequence_fps,
     )
+    hdr_artifact = _small_trend_composition(1000)
+    hdr_artifact.metadata["color_management"]["project"].update({
+        "output_space": "rec2020",
+        "output_transfer": "pq",
+        "view_transform": "hdr-pq",
+        "hdr_mode": True,
+    })
+    hdr_path = root / "trend_hdr.mp4"
+    hdr_result = MotionProfileExporter().export(
+        hdr_artifact,
+        "h265_mp4",
+        hdr_path,
+        fps=sequence_fps,
+    )
+    hdr_probe = subprocess.run(
+        [find_ffmpeg_executable(), "-hide_banner", "-i", str(hdr_path)],
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        check=False,
+    )
+    hdr_stream = parse_ffmpeg_color_stream_text(hdr_probe.stderr)
     mp4_composition = _small_trend_composition(1000)
     mp4_path = root / "trend_preview.mp4"
     mp4_result = MotionProfileExporter().export(
@@ -181,6 +207,10 @@ def run_trend_product_gate(
             and int(alpha_values.max()) > 0
             and np.array_equal(flat_frame, nested_frame)
             and hdr_report["ok"]
+            and hdr_path.is_file()
+            and hdr_path.stat().st_size > 0
+            and hdr_stream.get("color_primaries") == "bt2020"
+            and hdr_stream.get("color_transfer") == "smpte2084"
             and mp4_path.is_file()
             and mp4_path.stat().st_size > 0
         ),
@@ -212,6 +242,13 @@ def run_trend_product_gate(
             "ok": bool(hdr_report["ok"]),
             "errors": list(hdr_report["errors"]),
             "warnings": list(hdr_report["warnings"]),
+        },
+        "hdr_h265_artifact": {
+            "path": str(hdr_path),
+            "frame_count": int(hdr_result["frame_count"]),
+            "bytes": hdr_path.stat().st_size if hdr_path.is_file() else 0,
+            "color_primaries": str(hdr_stream.get("color_primaries") or ""),
+            "color_transfer": str(hdr_stream.get("color_transfer") or ""),
         },
         "mp4": {
             "path": str(mp4_path),

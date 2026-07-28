@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QSizePolicy,
     QStyle,
     QVBoxLayout,
     QWidget,
@@ -63,11 +64,16 @@ class MotionLibraryPanel(QWidget):
             self.category.addItem(CATEGORY_LABELS.get(key, key), key)
         self.category_hint = QLabel(self)
         self.category_hint.setObjectName("MotionPanelHint")
+        self.category_hint.setWordWrap(True)
         self.items = QListWidget(self)
         self.items.setObjectName("MotionAddList")
         self.items.setViewMode(QListView.ListMode)
         self.items.setResizeMode(QListView.Adjust)
         self.items.setMovement(QListView.Static)
+        self.items.setTextElideMode(Qt.ElideRight)
+        self.items.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.items.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Expanding)
+        self.items.setMinimumWidth(0)
         self.items.setSpacing(2)
         self.items.setUniformItemSizes(True)
         self.apply_button = QPushButton("Add Object", self)
