@@ -6759,16 +6759,38 @@ AI Script Edit MVP integration:
   present, and records the active UI language and template control label.
   Motion workspace side panels now have bounded working widths and long
   Library descriptions elide instead of forcing the Canvas into a narrow
-  column. M28 still requires a packaged-build 60-second realtime playback run
-  and distribution regression evidence.
+  column.
 - `TigerStudio.exe --motion-runtime-probe <report.json>
   --motion-runtime-seconds 60` opens the real Liquid Glass template in the
   `QOpenGLWidget` Preview, runs loop playback against wall-clock time, and
-  records frame swaps, loop count, memory, renderer diagnostics, and a real
-  workspace screenshot. Probe execution validity is separate from the product
-  realtime gate (`>=24 fps` and a non-raster-fallback backend). A source-build
-  three-second run measured 3.63 fps with `qt_painter_fallback`, so M28 remains
-  blocked by the known M22 mixed Glass/effect GPU-path gap.
+  records frame swaps, loop count, memory, renderer diagnostics, a real
+  workspace screenshot, and an exact OpenGL framebuffer capture. Probe
+  execution validity is separate from the product realtime gate (`>=24 fps`
+  and a non-raster-fallback backend).
+- A final visible PyInstaller build ran for 60.45 seconds, produced 230 frame
+  swaps and four full timeline loops, and retained a valid OpenGL context.
+  Process RSS decreased from 457.7 MB to 444.4 MB during the run. Both captures
+  are non-empty and visually free of the diagonal tearing caused by the former
+  whole-window Qt grab path. The measured rate is 3.81 fps and the mixed graph
+  reports `qt_painter_fallback`.
+- `tools/qa_motion_2026_frozen_distribution.py` evaluates this evidence without
+  conflating packaging with render performance. It verifies all three frozen
+  launchers, the 60-second report, wall-clock duration, measurement validity,
+  OpenGL context, non-zero memory samples, bounded RSS growth, workspace PNG,
+  and framebuffer PNG. Current evidence returns `frozen_bundle_smoke_ok=true`
+  but `product_realtime_ready=false`, with explicit `minimum_24_fps` and
+  `gpu_render_path` blockers. M28 therefore remains blocked by the known M22
+  mixed Glass/effect GPU path.
+- Inno Setup 1.4.2 was rebuilt from the current 4.59 GiB frozen bundle. The
+  2,108,818,576-byte installer has SHA-256
+  `febff440973091ffc681b293379388daea23078aa1899d0982c734f28b4c90a2`.
+  `tools/qa_motion_installer_smoke.py` installed it to a temporary user path,
+  verified 2,968 installed files, both Capture and Studio executables, and a
+  live titled `Tiger Studio` window, then uninstalled successfully and proved
+  temporary-root removal. Installer regression is therefore proven for this
+  source state. The 2.11 GB installer remains too large for a polished public
+  distribution; PyTorch/CUDA dependency splitting or optional AI packs are a
+  separate packaging optimization requirement.
 - Motion playback now catches up by as much as one second after a slow rendered
   frame instead of discarding all elapsed time above 100 ms. This keeps the
   playhead near wall-clock time while the performance gate still reports

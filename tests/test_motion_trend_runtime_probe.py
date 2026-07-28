@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from app.motion_designer.trend_runtime_probe import evaluate_runtime_probe
+import sys
+
+from app.motion_designer.trend_runtime_probe import _memory_bytes, evaluate_runtime_probe
 
 
 def test_runtime_probe_requires_wall_clock_loops_gpu_and_screenshot(
@@ -41,3 +43,8 @@ def test_runtime_probe_rejects_painter_fallback_and_short_run(tmp_path) -> None:
     assert report["software_renderer_used"] is True
     assert report["checks"]["wall_clock_duration"] is False
     assert report["realtime_checks"]["gpu_render_path"] is False
+
+
+def test_runtime_probe_reads_process_memory_without_optional_psutil() -> None:
+    if sys.platform == "win32":
+        assert _memory_bytes() > 0

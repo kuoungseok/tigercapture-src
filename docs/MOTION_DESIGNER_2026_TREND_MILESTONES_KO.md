@@ -571,18 +571,35 @@ QA:
 - `TigerStudio.exe --motion-runtime-probe <report.json>
   --motion-runtime-seconds 60`은 실제 Liquid Glass 템플릿과
   `QOpenGLWidget` Preview를 열어 벽시계 기준 반복 재생, frame swap, loop,
-  memory, renderer diagnostics, 실제 작업창 캡처를 기록한다. 프로브 실행
-  유효성과 제품 실시간 기준(24fps 이상, raster fallback 아님)을 분리한다.
-  현재 소스 빌드 3초 측정은 3.63fps와 `qt_painter_fallback`이므로 M22의
+  memory, renderer diagnostics, 실제 작업창 캡처와 정확한 OpenGL
+  framebuffer 캡처를 기록한다. 프로브 실행 유효성과 제품 실시간 기준
+  (24fps 이상, raster fallback 아님)을 분리한다.
+- 최종 PyInstaller 배포본의 표시 상태 60초 측정은 60.45초 동안 230회
+  frame swap, 4회 전체 루프, 3.81fps를 기록했다. RSS는 457.7MB에서
+  444.4MB로 13.3MB 감소했다. OpenGL context, 작업창 PNG, framebuffer
+  PNG는 모두 유효하며 캡처 찢김도 없다.
+  `tools/qa_motion_2026_frozen_distribution.py`는 세 배포 실행 파일,
+  런타임 보고서, 최소 실행 시간, 측정 유효성, OpenGL, 메모리 샘플과 증가
+  한도, 두 캡처를 검사하고 `frozen_bundle_smoke_ok=true`를 반환한다.
+- 같은 배포 QA는 `product_realtime_ready=false`를 별도로 유지한다.
+  현재 renderer가 `qt_painter_fallback`이며 24fps에 미달하므로 M22의
   혼합 Glass/effect GPU 경로가 M28 실시간 게이트를 계속 막는다.
+- 현재 PyInstaller 번들로 Inno Setup 1.4.2 설치본을 다시 생성했다.
+  설치본은 2,108,818,576바이트이고 SHA-256은
+  `febff440973091ffc681b293379388daea23078aa1899d0982c734f28b4c90a2`다.
+  임시 사용자 경로에 무인 설치한 뒤 2,968개 파일, `TigerCapture.exe`,
+  `TigerStudio.exe`, 실제 `Tiger Studio` 창을 확인하고 정상 제거했다.
+  설치본은 현재 소스보다 새 버전이며 임시 설치 경로도 제거됐다.
 - 무거운 프레임에서 100ms를 초과한 경과 시간을 버리던 재생 시계를
   최대 1초까지 따라잡도록 수정했다. 따라서 프레임 드롭이 있어도 playhead가
   슬로 모션처럼 뒤처지지 않으며, 낮은 frame rate 자체는 QA에서 그대로 실패한다.
 
 M28은 아직 완료가 아니다. `Painterly 3D Character Spot`은 M24가 없으므로
 갤러리에 가짜 템플릿을 넣지 않고 명시적 blocked capability와 2D Craft
-대체안을 반환한다. 설치본에서의 60초 실시간 반복 재생과 배포본 회귀
-게이트는 후속 M28 작업으로 남는다.
+대체안을 반환한다. 배포 번들의 60초 지속 실행과 설치·실행·제거 회귀는
+통과했지만, 24fps GPU 실시간 기준은 후속 M22/M28 작업으로 남는다.
+4.59GB 번들과 2.11GB 설치본의 PyTorch/CUDA 중복 런타임 축소도 공개
+배포 전 패키징 최적화 항목이다.
 
 ## 13. 착수 결정
 
