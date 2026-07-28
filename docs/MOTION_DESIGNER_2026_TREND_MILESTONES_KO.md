@@ -711,6 +711,33 @@ QA:
   이 결과는 새 `motion_glass_gpu` 소스를 포함하지 않은 이전 PyInstaller
   배포본의 역사적 기준선이다. 소스 제품 게이트에서 M22는 통과했지만
   M28은 새 frozen bundle로 동일한 60초 게이트를 다시 통과해야 한다.
+- revision `14a36b98`의 새 PyInstaller 번들은 2,966개 파일,
+  4,928,930,533바이트이며 `TigerStudio.exe`는 51,174,799바이트,
+  SHA-256
+  `187ff15e4a7aae3079555c88ffeba76324f105f08c068fc228dea4efc9b3e006`이다.
+  이 frozen 실행 파일 자체의 60.34초 실창 프로브는 1,742 frame swap,
+  28.87fps, 5회 loop, `motion_glass_gpu`, GL error 0, 메모리 증가
+  16,887,808바이트를 기록했다. GPU/CPU parity는 평균 3.98/255,
+  p95 8/255다.
+- `tigerstudio.motion.trend_distribution_qa.v2`는 이 실행 파일의 경로,
+  크기, SHA-256과 runtime report를 대조했고 모든 bundle/realtime/visual
+  증거를 통과해 `blockers=[]`, `frozen_bundle_smoke_ok=true`,
+  `product_realtime_ready=true`를 반환했다. 따라서 M28의 frozen 실시간
+  배포 게이트는 완료됐다.
+- 같은 frozen bundle로 Inno Setup 6.7.3 설치본을 생성했다. 설치본은
+  2,109,158,225바이트이고 SHA-256은
+  `8496a476cc58071af1c28587d6f5e0af654831abd2beeb3fa1d74d594e0fd594`다.
+  설치 smoke는 임시 사용자 경로에 2,968개 파일을 설치하고 실제
+  `Tiger Studio` 창을 확인했다. 설치된 `TigerStudio.exe`의 크기와
+  SHA-256은 frozen runtime report와 정확히 일치했으며, 정상 제거 후
+  임시 설치 경로도 남지 않았다.
+- 설치 smoke의 freshness 기준은 더 이상 동시에 수정되는 소스 mtime이
+  아니다. `--frozen-runtime-report`로 지정한 검증 완료 실행 파일의
+  size/SHA-256을 설치 결과와 직접 비교하므로 다른 세션의 후속 소스
+  편집이 거짓 실패나 거짓 통과를 만들지 않는다. 최종 보고서는 동시
+  Painter 편집 때문에 `installer_current_for_source=false`지만
+  `installer_current_for_frozen_report=true`,
+  `frozen_provenance_matches=true`, `installer_freshness_ok=true`다.
 - 현재 PyInstaller 번들로 Inno Setup 1.4.2 설치본을 다시 생성했다.
   설치본은 2,108,818,576바이트이고 SHA-256은
   `febff440973091ffc681b293379388daea23078aa1899d0982c734f28b4c90a2`다.
@@ -724,12 +751,12 @@ QA:
   최대 1초까지 따라잡도록 수정했다. 따라서 프레임 드롭이 있어도 playhead가
   슬로 모션처럼 뒤처지지 않으며, 낮은 frame rate 자체는 QA에서 그대로 실패한다.
 
-M28은 아직 완료가 아니다. 소스 runtime과 배포 판정기의 backend,
-시각 parity, provenance 계약은 완료됐다. `Painterly 3D Character Spot`은 M24가 없으므로
+M28은 아직 완료가 아니다. 소스와 frozen runtime의 backend, 시각 parity,
+provenance 계약은 완료됐다. `Painterly 3D Character Spot`은 M24가 없으므로
 갤러리에 가짜 템플릿을 넣지 않고 명시적 blocked capability와 2D Craft
 대체안을 반환한다. 배포 번들의 60초 지속 실행과 설치·실행·제거 회귀는
 통과했으며 소스의 24fps GPU 실시간 기준도 M22에서 통과했다. 남은 제품
-게이트는 새 GPU 소스를 포함한 frozen 재빌드·60초 재검증과 M24 의존성이다.
+게이트는 M24 의존성뿐이다.
 4.59GB 번들과 2.11GB 설치본의 PyTorch/CUDA 중복 런타임 축소도 공개
 배포 전 패키징 최적화 항목이다.
 

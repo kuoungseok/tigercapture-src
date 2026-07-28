@@ -6817,6 +6817,32 @@ AI Script Edit MVP integration:
   but `product_realtime_ready=false`, with explicit `minimum_24_fps` and
   `gpu_render_path` blockers. M22 now passes those gates in the source build;
   M28 still requires a newly frozen bundle and the same sustained validation.
+- Revision `14a36b98` was subsequently frozen into a 2,966-file,
+  4,928,930,533-byte bundle. Its 51,174,799-byte `TigerStudio.exe` has SHA-256
+  `187ff15e4a7aae3079555c88ffeba76324f105f08c068fc228dea4efc9b3e006`.
+  The frozen executable itself ran the visible probe for 60.34 seconds,
+  produced 1,742 swaps at 28.87 fps and five loops, used
+  `motion_glass_gpu`, reported GL error 0, and increased RSS by 16,887,808
+  bytes. Same-time visual parity passed at mean 3.98/255 and p95 8/255.
+  Distribution QA v2 matched the runtime path, size, and SHA-256 to the
+  evaluated binary and returned `blockers=[]`,
+  `frozen_bundle_smoke_ok=true`, and `product_realtime_ready=true`.
+  M28's frozen realtime gate is complete.
+- Inno Setup 6.7.3 then packaged that exact frozen bundle into a
+  2,109,158,225-byte installer with SHA-256
+  `8496a476cc58071af1c28587d6f5e0af654831abd2beeb3fa1d74d594e0fd594`.
+  Installer smoke installed 2,968 files to a temporary user path, launched a
+  visible titled `Tiger Studio` window, matched the installed
+  `TigerStudio.exe` size and SHA-256 to the frozen runtime report, uninstalled
+  successfully, and removed the temporary root. The smoke tool's
+  `--frozen-runtime-report` contract uses binary provenance rather than live
+  source mtimes, so concurrent source edits cannot cause a false result.
+  The final report honestly records `installer_current_for_source=false`
+  because Painter changed afterward, while
+  `installer_current_for_frozen_report=true`,
+  `frozen_provenance_matches=true`, and `installer_freshness_ok=true`.
+  M28 now remains open only for its intentionally blocked M24-dependent
+  template.
 - Inno Setup 1.4.2 was rebuilt from the current 4.59 GiB frozen bundle. The
   2,108,818,576-byte installer has SHA-256
   `febff440973091ffc681b293379388daea23078aa1899d0982c734f28b4c90a2`.

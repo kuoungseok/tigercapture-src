@@ -100,14 +100,61 @@ def _latest_packaging_input() -> tuple[float, str]:
     return latest.stat().st_mtime, str(latest.resolve())
 
 
-def run(installer: Path, output_dir: Path) -> dict:
+def _load_frozen_runtime_identity(
+    report_path: Path | None,
+) -> tuple[dict[str, object], float]:
+    if report_path is None:
+        return {}, 0.0
+    resolved = report_path.expanduser().resolve(strict=False)
+    if not resolved.is_file():
+        return {}, 0.0
+    payload = json.loads(resolved.read_text(encoding="utf-8"))
+    identity = payload.get("runtime_identity")
+    if not isinstance(identity, dict):
+        return {}, resolved.stat().st_mtime
+    return identity, resolved.stat().st_mtime
+
+
+def run(
+    installer: Path,
+    output_dir: Path,
+    *,
+    frozen_runtime_report: Path | None = None,
+) -> dict:
     if os.name != "nt":
         raise RuntimeError("Motion installer smoke requires Windows")
     output_dir.mkdir(parents=True, exist_ok=True)
     generated_at = datetime.now(timezone.utc).isoformat()
     latest_source_mtime, latest_source_path = _latest_packaging_input()
     installer_mtime = installer.stat().st_mtime
-    installer_current = installer_mtime >= latest_source_mtime
+    frozen_identity, frozen_report_mtime = _load_frozen_runtime_identity(
+        frozen_runtime_report
+    )
+    expected_studio_size = int(
+        frozen_identity.get("executable_size_bytes") or 0
+    )
+    expected_studio_sha256 = str(
+        frozen_identity.get("executable_sha256") or ""
+    ).lower()
+    provenance_requested = frozen_runtime_report is not None
+    provenance_available = bool(
+        frozen_identity.get("frozen")
+        and expected_studio_size > 0
+        and len(expected_studio_sha256) == 64
+    )
+    freshness_reference_mtime = (
+        frozen_report_mtime if provenance_requested else latest_source_mtime
+    )
+    installer_current_for_source = installer_mtime >= latest_source_mtime
+    installer_current_for_frozen_report = (
+        provenance_requested
+        and freshness_reference_mtime > 0.0
+        and installer_mtime >= freshness_reference_mtime
+    )
+    installer_current = (
+        freshness_reference_mtime > 0.0
+        and installer_mtime >= freshness_reference_mtime
+    )
     with tempfile.TemporaryDirectory(prefix="TigerStudioInstallerSmoke-") as temporary:
         install_dir = Path(temporary) / "TigerCapture"
         install = subprocess.run(
@@ -151,6 +198,18 @@ def run(installer: Path, output_dir: Path) -> dict:
         titled_windows = [row for row in windows if str(row.get("title") or "").strip()]
         capture_present = capture.is_file()
         studio_present = studio.is_file()
+        installed_studio_size = studio.stat().st_size if studio_present else 0
+        installed_studio_sha256 = _sha256(studio) if studio_present else ""
+        frozen_provenance_matches = bool(
+            provenance_available
+            and installed_studio_size == expected_studio_size
+            and installed_studio_sha256 == expected_studio_sha256
+        )
+        provenance_ok = (
+            frozen_provenance_matches
+            if provenance_requested
+            else True
+        )
         if process is not None:
             _close_windows(windows)
             try:
@@ -174,7 +233,7 @@ def run(installer: Path, output_dir: Path) -> dict:
         ok = bool(
             installer_current and install.returncode == 0 and studio_present and capture_present
             and installed_files and live_process and titled_windows and not launch_error
-            and uninstall_returncode in {0, None}
+            and uninstall_returncode in {0, None} and provenance_ok
         )
         report = {
             "ok": ok,
@@ -187,13 +246,29 @@ def run(installer: Path, output_dir: Path) -> dict:
             "latest_packaging_input_mtime_utc": datetime.fromtimestamp(
                 latest_source_mtime, timezone.utc,
             ).isoformat(),
-            "installer_current_for_source": installer_current,
+            "installer_current_for_source": installer_current_for_source,
+            "installer_current_for_frozen_report": (
+                installer_current_for_frozen_report
+            ),
+            "installer_freshness_ok": installer_current,
+            "freshness_reference": (
+                str(frozen_runtime_report.resolve(strict=False))
+                if frozen_runtime_report is not None
+                else latest_source_path
+            ),
             "install_returncode": install.returncode,
             "install_output_tail": install.stdout[-4000:],
             "temporary_install_root": str(install_dir),
             "installed_file_count": len(installed_files),
             "capture_executable_present": capture_present,
             "studio_executable_present": studio_present,
+            "installed_studio_size_bytes": installed_studio_size,
+            "installed_studio_sha256": installed_studio_sha256,
+            "expected_studio_size_bytes": expected_studio_size,
+            "expected_studio_sha256": expected_studio_sha256,
+            "frozen_provenance_requested": provenance_requested,
+            "frozen_provenance_available": provenance_available,
+            "frozen_provenance_matches": frozen_provenance_matches,
             "studio_process_live_at_probe": live_process,
             "studio_windows": titled_windows,
             "launch_error": launch_error,
@@ -210,9 +285,14 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Install and launch-smoke the current Tiger Studio installer")
     parser.add_argument("--installer", type=Path, default=None)
     parser.add_argument("--output", type=Path, default=DEFAULT_OUTPUT)
+    parser.add_argument("--frozen-runtime-report", type=Path, default=None)
     args = parser.parse_args()
     installer = args.installer.resolve() if args.installer else _latest_installer()
-    report = run(installer, args.output.resolve())
+    report = run(
+        installer,
+        args.output.resolve(),
+        frozen_runtime_report=args.frozen_runtime_report,
+    )
     print(json.dumps(report, ensure_ascii=False, indent=2))
     return 0 if report["ok"] else 1
 
