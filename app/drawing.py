@@ -82,6 +82,7 @@ from PySide6.QtWidgets import (
 
 from app.icons import app_icon, icon_size
 from app.i18n import tr
+from app.painter_i18n import PainterWidgetLocalizer, painter_text
 from app.studio_slider import StudioSlider
 from app.painter_brush_catalog import (
     DESIGNER_BRUSH_PRESETS,
@@ -1618,6 +1619,7 @@ class NewCanvasDialog(QDialog):
         self.resize(500, 390)
         self._set_initial_values(default_size, default_background)
         self._set_print_widgets_visible(False)
+        self._painter_localizer = PainterWidgetLocalizer(self)
 
     def _set_initial_values(self, size: tuple[int, int], background: str) -> None:
         width = max(64, min(16384, int(size[0] or 1920)))
@@ -1851,7 +1853,11 @@ class NewCanvasDialog(QDialog):
             "width": int(self.width_spin.value()),
             "height": int(self.height_spin.value()),
             "background": str(self.background_combo.currentData() or "transparent"),
-            "template": str(self.preset_combo.currentText() or "Custom"),
+            # Display labels are localized; project metadata remains canonical.
+            "template": painter_text(
+                str(self.preset_combo.currentText() or "Custom"),
+                "en",
+            ),
             "purpose": mode,
             "output": output,
             "preflight": output_preflight(
@@ -1998,6 +2004,7 @@ class PainterOutputSettingsDialog(QDialog):
         self.resample_check.toggled.connect(self._resample_changed)
         self._refresh()
         self.resize(500, 370)
+        self._painter_localizer = PainterWidgetLocalizer(self)
 
     def _pixels_changed(self) -> None:
         if self._syncing:
@@ -7613,6 +7620,7 @@ class PaintDialog(QDialog):
 
         self._prepare_paint_layers(initial_strokes)
         self._build_ui(background_pixmap, initial_strokes)
+        self._painter_localizer = PainterWidgetLocalizer(self)
 
     # ---------- ui ----------
 
