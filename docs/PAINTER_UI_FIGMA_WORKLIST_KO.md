@@ -306,12 +306,16 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
 
 1. 선택 객체 또는 컴포넌트에 `Animate` 명령 제공
 2. stable object ID를 유지한 채 Motion Designer 실행
-3. Painter 객체를 Motion 문서에 복제하지 않고 `motion_clip_id`로 연결
+3. Painter 객체를 Motion 문서에 복제하지 않고 canonical
+   `UIMotionBinding.binding_id`와 composition revision으로 연결
 4. Painter Preview에서 Motion 클립 재생
 5. 상태별 전환 애니메이션 선택
 6. Auto Layout 계산 후 Motion transform을 오프셋으로 적용
 7. Motion 클립 누락, 깨진 참조, 지원하지 않는 속성을 preflight에서 검출
 8. 애니메이션 변경 시 Painter에 즉시 반영
+
+구현 순서와 소유권, 최소 왕복 계약, Painter UX, UMG 전달 분류는
+`docs/MOTION_PAINTER_INTEGRATION_TODO_KO.md`를 canonical 기준으로 사용한다.
 
 ## P8. 에셋 및 전달
 

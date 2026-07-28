@@ -68,9 +68,11 @@ Focused entry points:
   priority and product boundaries; the milestone document records implemented
   evidence. Painter owns static UI structure/layout/components/tokens, Motion
   Designer owns animation, and Unreal output must use shared `TigerStudioUMG`.
-  Painter/Motion placement polish is intentionally deferred in
-  `docs/MOTION_PAINTER_INTEGRATION_TODO_KO.md`; prioritize production-quality
-  Motion templates before reopening that integration work.
+  Painter/Motion integration ownership and execution order were agreed with
+  Painter authoring session `019f1c1c-039f-71a3-a776-b8334175150f` and are
+  canonical in `docs/MOTION_PAINTER_INTEGRATION_TODO_KO.md`. Start with its P0
+  binding-contract consolidation, then complete the `Normal -> Hover`
+  component-state vertical slice before broader Motion Actor polish.
   As of 2026-07-27 the local M2A-M6 production foundation is implemented:
   `.tstemplate` packages and local library state, review comments/checkpoints,
   revision diff, self-contained prototype, production asset export, shared
