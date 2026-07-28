@@ -692,6 +692,18 @@ QWidget#PainterUIInspector QTreeWidget::item:selected {
     color: #ffffff;
 }
 
+QFrame#PainterUISelectionContext {
+    background-color: #20262e;
+    border: 1px solid #34404d;
+    border-radius: 4px;
+}
+
+QLabel#PainterUISelectionContextTitle {
+    color: #eef3f8;
+    font-size: 11px;
+    font-weight: 600;
+}
+
 QFrame#PainterUINavigator {
     background-color: #1e2228;
     border: none;

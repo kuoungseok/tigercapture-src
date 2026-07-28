@@ -1,6 +1,6 @@
 # Painter UI Figma UX Development Milestones
 
-Status: active roadmap; M0 shell foundation and M1 ruler-guide lifecycle implemented
+Status: active roadmap; M0 shell, contextual inspector, and M1 ruler-guide lifecycle implemented
 
 Date: 2026-07-29
 
@@ -27,13 +27,16 @@ Completed in the first shell slice:
 - shared `paint.ui.guide.update/visibility.set/lock.set` and
   `paint.ui.ruler.origin.set/reset` automation
 - Korean and supported-language shell label coverage
+- selection-driven Design inspector for artboard, single object type, and
+  multiple selection
+- advanced disclosure for constraints, accessibility, delivery, text ranges,
+  9-slice, boolean, and remote-component controls
 - focused tests, architecture guard, and screenshot QA
 
 Not complete yet:
 
 - mode-specific Paint/3D floating-toolbar variants
 - transient zoom popover
-- selection-type progressive disclosure in Design
 - prototype interaction authoring surface and on-canvas connection editing
 - persisted panel widths/minimized state and temporary properties popover
 - M1 through M8 implementation
@@ -604,6 +607,12 @@ workflow is production-ready.
   keeps Pages/Layers/Assets reachable through a thin vertical scrollbar.
 - The right inspector can be resized from 240-420 px or detached into a
   floating window; leaving UI Design re-docks the canonical inspector widget.
+- Design contents are not a fixed property dump. Artboard settings appear only
+  without object selection; text, image, frame/group/button, component, and
+  multiple-selection contexts expose only relevant rows.
+- Advanced properties keep constraints, responsive limits, accessibility,
+  delivery, text-range, 9-slice, boolean, and remote-link controls available
+  without occupying the default authoring surface.
 - Rulers and persistent artboard guides remain visible without consuming
   inspector space.
 - Compactness is covered by widget geometry tests and real offscreen screenshot

@@ -743,3 +743,11 @@ overlay mode로 전환한다.
   secondary tools do not permanently reduce canvas space.
 - Compact mode must preserve the same document mutations and Actions as the
   expanded UI. Density changes are presentation-only.
+- The Design inspector is selection-driven rather than fixed. No selection
+  shows artboard controls; a single selection routes by object kind; multiple
+  selection shows only operations that mutate the full selection.
+- Text-only, image-only, frame/auto-layout, and component controls must not
+  remain visible for unrelated object kinds.
+- Advanced disclosure owns constraints and responsive limits, accessibility,
+  delivery, text-range, 9-slice, boolean, and remote-component controls. It is
+  collapsed by default and does not create a parallel mutation path.

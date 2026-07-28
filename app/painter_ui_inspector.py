@@ -699,6 +699,37 @@ class PainterUIInspector(QWidget):
         inspect_page = QWidget()
         inspect_layout = QVBoxLayout(inspect_page)
         inspect_layout.setContentsMargins(6, 6, 6, 6)
+        self.selection_context = QFrame()
+        self.selection_context.setObjectName("PainterUISelectionContext")
+        context_summary_layout = QVBoxLayout(self.selection_context)
+        context_summary_layout.setContentsMargins(7, 5, 7, 5)
+        context_summary_layout.setSpacing(1)
+        self.selection_context_title = QLabel("No selection")
+        self.selection_context_title.setObjectName(
+            "PainterUISelectionContextTitle"
+        )
+        self.selection_context_hint = QLabel(
+            "Select an object to edit its properties."
+        )
+        self.selection_context_hint.setObjectName("PaintMuted")
+        self.selection_context_hint.setWordWrap(True)
+        context_summary_layout.addWidget(self.selection_context_title)
+        context_summary_layout.addWidget(self.selection_context_hint)
+        inspect_layout.addWidget(self.selection_context)
+        self.advanced_properties_toggle = QPushButton("Advanced properties")
+        self.advanced_properties_toggle.setObjectName(
+            "PainterUISectionHeader"
+        )
+        self.advanced_properties_toggle.setCheckable(True)
+        self.advanced_properties_toggle.setChecked(False)
+        self.advanced_properties_toggle.setIcon(
+            app_icon("chevron-right", size=11, color="#AEBACA")
+        )
+        self.advanced_properties_toggle.setIconSize(icon_size(11))
+        self.advanced_properties_toggle.toggled.connect(
+            self._on_advanced_properties_toggled
+        )
+        inspect_layout.addWidget(self.advanced_properties_toggle)
         form = QFormLayout()
         form.setContentsMargins(0, 0, 0, 0)
         self.name_edit = QLineEdit()
@@ -763,6 +794,7 @@ class PainterUIInspector(QWidget):
         constraint_layout.addWidget(self.vertical_constraint_combo)
         form.addRow("Constraints", constraint_row)
         self.size_limit_controls: dict[str, QDoubleSpinBox] = {}
+        size_limit_rows: list[QWidget] = []
         for label, width_key, height_key in (
             ("Minimum", "min_width", "min_height"),
             ("Preferred", "preferred_width", "preferred_height"),
@@ -782,6 +814,7 @@ class PainterUIInspector(QWidget):
                 self.size_limit_controls[key] = spin
                 row_layout.addWidget(spin)
             form.addRow(label, row_widget)
+            size_limit_rows.append(row_widget)
         self.aspect_lock_check = QCheckBox("Lock aspect ratio")
         self.aspect_lock_check.toggled.connect(self._emit_properties)
         form.addRow("Ratio", self.aspect_lock_check)
@@ -1313,6 +1346,78 @@ class PainterUIInspector(QWidget):
             )
             arrange_layout.addWidget(button)
         form.addRow("Align", arrange)
+        self._design_form = form
+        self._design_context_rows = {
+            "identity": (self.name_edit, self.kind_label),
+            "geometry": (
+                *self.geometry_controls.values(),
+            ),
+            "constraints": (
+                pivot_row,
+                constraint_row,
+                *size_limit_rows,
+                self.aspect_lock_check,
+                responsive_row,
+                self.responsive_status_label,
+            ),
+            "component": (
+                component_row,
+                self.component_status_label,
+                self.component_state_combo,
+                variant_row,
+                detach_row,
+            ),
+            "auto_layout": (
+                self.auto_layout_mode_combo,
+                auto_sizing,
+                auto_padding,
+                auto_flow,
+                auto_cross,
+            ),
+            "appearance": (
+                self.opacity_spin,
+                self.fill_edit,
+                self.stroke_edit,
+                self.stroke_width_spin,
+                self.radius_spin,
+                self.appearance_button,
+            ),
+            "frame": (self.clip_content_check,),
+            "text": (
+                self.text_edit,
+                text_metrics,
+                text_layout,
+            ),
+            "text_advanced": (
+                text_range_row,
+                text_range_actions,
+            ),
+            "boolean": (boolean_row,),
+            "remote": (remote_row,),
+            "image": (
+                image_source_row,
+                image_layout_row,
+            ),
+            "image_advanced": (
+                self.nine_slice_check,
+                slice_margin_row,
+            ),
+            "accessibility": (
+                self.accessibility_role_combo,
+                self.accessibility_label_edit,
+                self.focus_order_spin,
+            ),
+            "delivery": (delivery_status,),
+            "state": (flags,),
+            "arrange": (arrange,),
+        }
+        self._design_all_rows = tuple(
+            dict.fromkeys(
+                widget
+                for widgets in self._design_context_rows.values()
+                for widget in widgets
+            )
+        )
         inspect_layout.addLayout(form)
         inspect_layout.addStretch(1)
         add_inspector_tab(inspect_page, "Inspect", "settings")
@@ -1576,6 +1681,7 @@ class PainterUIInspector(QWidget):
         base_row = self._selected_row()
         row = base_row
         enabled = base_row is not None
+        self._sync_design_context_visibility(base_row)
         breakpoint, orientation = self._responsive_context()
         if row is not None and row.get("component_role") == "instance":
             from app.painter_ui_components import resolve_ui_component_document
@@ -1941,6 +2047,146 @@ class PainterUIInspector(QWidget):
         self.aspect_lock_check.setChecked(bool(constraints["lock_aspect"]))
         self.visible_check.setChecked(bool(row["visible"]))
         self.locked_check.setChecked(bool(row["locked"]))
+
+    def _sync_design_context_visibility(
+        self,
+        row: Mapping[str, Any] | None,
+    ) -> None:
+        selected_ids = [
+            str(value)
+            for value in self._document.get("selection", {}).get(
+                "object_ids",
+                [],
+            )
+            if str(value)
+        ]
+        count = len(selected_ids)
+        if count == 0 or row is None:
+            context = "artboard"
+            title = "Artboard"
+            hint = "Select an object to edit its properties."
+            visible_groups: set[str] = set()
+        elif count > 1:
+            context = "multi"
+            title = f"{count} objects selected"
+            hint = "Align or distribute the current selection."
+            visible_groups = {"arrange"}
+        else:
+            kind = str(row.get("kind") or "object").casefold()
+            component_role = str(
+                row.get("component_role") or "none"
+            ).casefold()
+            content = dict(row.get("content") or {})
+            context = kind
+            title = {
+                "frame": "Frame",
+                "group": "Group",
+                "text": "Text",
+                "button": "Button",
+                "image": "Image",
+                "ellipse": "Ellipse",
+                "line": "Line",
+                "progress": "Progress",
+            }.get(kind, kind.replace("_", " ").title() or "Object")
+            hint = {
+                "frame": "Layout, clipping, appearance, and constraints",
+                "group": "Layout, appearance, and constraints",
+                "text": "Typography, appearance, and accessibility",
+                "button": "Component state, typography, and interaction",
+                "image": "Source, crop behavior, and export",
+            }.get(kind, "Geometry, appearance, and delivery")
+            visible_groups = {
+                "identity",
+                "geometry",
+                "appearance",
+                "state",
+                "arrange",
+            }
+            if kind in {"frame", "group", "button"}:
+                visible_groups.add("auto_layout")
+            if kind == "frame":
+                visible_groups.add("frame")
+            if kind in {"text", "button"}:
+                visible_groups.add("text")
+            if kind == "image":
+                visible_groups.add("image")
+            if (
+                self.advanced_properties_toggle.isChecked()
+                and kind in {
+                "rectangle",
+                "ellipse",
+                "line",
+                "path",
+                "polygon",
+                "star",
+                }
+            ):
+                visible_groups.add("boolean")
+            if component_role != "none":
+                visible_groups.add("component")
+            if (
+                self.advanced_properties_toggle.isChecked()
+                and (
+                component_role != "none"
+                or bool(content.get("remote_component"))
+                )
+            ):
+                visible_groups.add("remote")
+            if self.advanced_properties_toggle.isChecked():
+                visible_groups.update(
+                    {"constraints", "accessibility", "delivery"}
+                )
+                if kind in {"text", "button"}:
+                    visible_groups.add("text_advanced")
+                if kind == "image":
+                    visible_groups.add("image_advanced")
+        self._design_context = context
+        self.selection_context_title.setText(title)
+        self.selection_context_hint.setText(hint)
+        self.advanced_properties_toggle.setVisible(count == 1)
+        self.artboard_settings_toggle.setVisible(count == 0)
+        self.artboard_layout_frame.setVisible(
+            count == 0 and self.artboard_settings_toggle.isChecked()
+        )
+        visible_rows = {
+            widget
+            for group in visible_groups
+            for widget in self._design_context_rows.get(group, ())
+        }
+        for widget in self._design_all_rows:
+            visible = widget in visible_rows
+            if hasattr(self._design_form, "setRowVisible"):
+                self._design_form.setRowVisible(widget, visible)
+            else:
+                label = self._design_form.labelForField(widget)
+                if label is not None:
+                    label.setVisible(visible)
+                widget.setVisible(visible)
+
+    def design_context(self) -> str:
+        return str(getattr(self, "_design_context", "artboard"))
+
+    def design_group_visible(self, group: str) -> bool:
+        widgets = self._design_context_rows.get(str(group), ())
+        if not widgets:
+            return False
+        if hasattr(self._design_form, "isRowVisible"):
+            return any(
+                self._design_form.isRowVisible(widget)
+                for widget in widgets
+            )
+        return any(not widget.isHidden() for widget in widgets)
+
+    def _on_advanced_properties_toggled(self, checked: bool) -> None:
+        self.advanced_properties_toggle.setIcon(
+            app_icon(
+                "chevron-down" if checked else "chevron-right",
+                size=11,
+                color="#AEBACA",
+            )
+        )
+        if not self._syncing:
+            self._sync_design_context_visibility(self._selected_row())
 
     def _responsive_context(self) -> tuple[str, str]:
         from app.painter_ui_responsive import responsive_context

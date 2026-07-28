@@ -45,6 +45,18 @@ def test_painter_text_supports_every_studio_language(
     assert painter_text("Motion Link", language) == motion_link
 
 
+def test_painter_context_inspector_labels_are_localized() -> None:
+    from app.painter_i18n import painter_text
+
+    assert painter_text("Artboard", "ko") == "아트보드"
+    assert (
+        painter_text("Select an object to edit its properties.", "ko")
+        == "속성을 편집할 객체를 선택하세요."
+    )
+    assert painter_text("3 objects selected", "ko") == "3개 객체 선택됨"
+    assert painter_text("Dock inspector", "ja") == "インスペクターをドッキング"
+
+
 def test_painter_localizer_translates_existing_dynamic_and_switched_widgets() -> None:
     app = _app()
     from PySide6.QtWidgets import QLabel, QPushButton, QVBoxLayout, QWidget

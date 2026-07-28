@@ -80,7 +80,13 @@ def test_ui_inspector_resizes_detaches_and_restores_on_mode_change() -> None:
     )
     assert window.isVisible()
     assert not dialog._paint_inspector_frame.isVisible()
-    assert dialog._paint_ui_inspector.dock_button.toolTip() == "Dock inspector"
+    from app.i18n import current_language
+    from app.painter_i18n import painter_text
+
+    assert dialog._paint_ui_inspector.dock_button.toolTip() == painter_text(
+        "Dock inspector",
+        current_language(),
+    )
 
     dialog._dock_painter_ui_inspector()
     app.processEvents()

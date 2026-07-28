@@ -43,6 +43,7 @@ def main() -> int:
     registry = ActionRegistry(owner=dialog)
     registry.execute("paint.ui.workspace.set", {"mode": "ui_design"})
     last_add = None
+    phone_object_ids: dict[str, str] = {}
     for payload in (
         {
             "kind": "frame",
@@ -123,6 +124,9 @@ def main() -> int:
         },
     ):
         last_add = registry.execute("paint.ui.object.add", payload).to_dict()
+        phone_object_ids[str(payload["kind"])] = str(
+            last_add["result"]["ui_design"]["selected_object_id"]
+        )
     desktop_added = registry.execute(
         "paint.ui.artboard.add",
         {"name": "Desktop", "width": 1440, "height": 900, "breakpoint": "desktop"},
@@ -307,6 +311,64 @@ def main() -> int:
         and not dialog._painter_ui_inspector_detached
         and dialog._paint_inspector_frame.isVisible()
     )
+    registry.execute(
+        "paint.ui.artboard.activate",
+        {"artboard_id": "artboard-1"},
+    )
+    registry.execute(
+        "paint.ui.selection.set",
+        {
+            "object_ids": [phone_object_ids["text"]],
+            "primary_object_id": phone_object_ids["text"],
+        },
+    )
+    app.processEvents()
+    text_context_ok = (
+        dialog._paint_ui_inspector.design_context() == "text"
+        and dialog._paint_ui_inspector.design_group_visible("text")
+        and not dialog._paint_ui_inspector.design_group_visible("image")
+    )
+    text_inspector_screenshot_path = (
+        output_dir / "painter_ui_designer_m1_text_inspector.png"
+    )
+    dialog.grab().save(str(text_inspector_screenshot_path), "PNG")
+    registry.execute(
+        "paint.ui.selection.set",
+        {
+            "object_ids": [phone_object_ids["image"]],
+            "primary_object_id": phone_object_ids["image"],
+        },
+    )
+    app.processEvents()
+    image_context_ok = (
+        dialog._paint_ui_inspector.design_context() == "image"
+        and dialog._paint_ui_inspector.design_group_visible("image")
+        and not dialog._paint_ui_inspector.design_group_visible("text")
+    )
+    image_inspector_screenshot_path = (
+        output_dir / "painter_ui_designer_m1_image_inspector.png"
+    )
+    dialog.grab().save(str(image_inspector_screenshot_path), "PNG")
+    registry.execute(
+        "paint.ui.selection.set",
+        {
+            "object_ids": [
+                phone_object_ids["text"],
+                phone_object_ids["image"],
+            ],
+            "primary_object_id": phone_object_ids["text"],
+        },
+    )
+    app.processEvents()
+    multi_context_ok = (
+        dialog._paint_ui_inspector.design_context() == "multi"
+        and dialog._paint_ui_inspector.design_group_visible("arrange")
+        and not dialog._paint_ui_inspector.design_group_visible("geometry")
+    )
+    multi_inspector_screenshot_path = (
+        output_dir / "painter_ui_designer_m1_multi_inspector.png"
+    )
+    dialog.grab().save(str(multi_inspector_screenshot_path), "PNG")
     state = dialog.painter_action_state()
     group_row = next(
         (
@@ -353,7 +415,13 @@ def main() -> int:
             and navigator_screenshot_path.is_file()
             and inspector_resized_screenshot_path.is_file()
             and inspector_detached_screenshot_path.is_file()
+            and text_inspector_screenshot_path.is_file()
+            and image_inspector_screenshot_path.is_file()
+            and multi_inspector_screenshot_path.is_file()
             and detached_round_trip
+            and text_context_ok
+            and image_context_ok
+            and multi_context_ok
             and navigator.expanded_width()
             == navigator.DEFAULT_EXPANDED_WIDTH
         ),
@@ -368,9 +436,17 @@ def main() -> int:
         "inspector_detached_screenshot": str(
             inspector_detached_screenshot_path
         ),
+        "text_inspector_screenshot": str(text_inspector_screenshot_path),
+        "image_inspector_screenshot": str(image_inspector_screenshot_path),
+        "multi_inspector_screenshot": str(multi_inspector_screenshot_path),
         "navigator_width": navigator.expanded_width(),
         "inspector_width": dialog._paint_inspector_expanded_width,
         "inspector_detached_round_trip": detached_round_trip,
+        "context_visibility": {
+            "text": text_context_ok,
+            "image": image_context_ok,
+            "multi": multi_context_ok,
+        },
         "guide_state": guide_state,
         "workspace": state["workspace"],
         "ui_design": state["ui_design"],

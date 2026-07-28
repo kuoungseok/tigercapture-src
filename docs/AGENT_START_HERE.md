@@ -73,6 +73,10 @@ Focused entry points:
   canonical in `docs/MOTION_PAINTER_INTEGRATION_TODO_KO.md`. Start with its P0
   binding-contract consolidation, then complete the `Normal -> Hover`
   component-state vertical slice before broader Motion Actor polish.
+- Painter UI Design now has a compact resizable left navigator and a
+  resizable/detachable right inspector. The Design tab progressively discloses
+  rows for artboard, text, image, frame/group/button, component, and multiple
+  selection; advanced rows stay behind the shared Advanced properties toggle.
   As of 2026-07-27 the local M2A-M6 production foundation is implemented:
   `.tstemplate` packages and local library state, review comments/checkpoints,
   revision diff, self-contained prototype, production asset export, shared

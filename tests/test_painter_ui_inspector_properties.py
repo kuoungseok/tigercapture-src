@@ -106,6 +106,91 @@ def test_inspector_disables_text_controls_for_non_text_and_empty_selection() -> 
     app.processEvents()
 
 
+def test_inspector_progressively_discloses_selection_specific_groups() -> None:
+    app = _app()
+    from app.painter_ui_document import add_ui_object, create_ui_document
+    from app.painter_ui_inspector import PainterUIInspector
+
+    document = create_ui_document(390, 844, name="Phone")
+    document, frame = add_ui_object(
+        document,
+        kind="frame",
+        name="Card",
+    )
+    document, text = add_ui_object(
+        document,
+        kind="text",
+        name="Title",
+        content={"text": "Tiger Studio"},
+    )
+    document, image = add_ui_object(
+        document,
+        kind="image",
+        name="Poster",
+    )
+    inspector = PainterUIInspector()
+
+    document["selection"] = {
+        "object_id": text["id"],
+        "object_ids": [text["id"]],
+    }
+    inspector.set_document(document)
+    assert inspector.design_context() == "text"
+    assert inspector.design_group_visible("text")
+    assert inspector.design_group_visible("appearance")
+    assert not inspector.design_group_visible("image")
+    assert not inspector.design_group_visible("auto_layout")
+    assert not inspector.artboard_settings_toggle.isVisibleTo(inspector)
+    assert not inspector.design_group_visible("text_advanced")
+    assert not inspector.design_group_visible("constraints")
+    assert not inspector.design_group_visible("accessibility")
+    inspector.advanced_properties_toggle.setChecked(True)
+    assert inspector.design_group_visible("constraints")
+    assert inspector.design_group_visible("accessibility")
+    assert inspector.design_group_visible("text_advanced")
+    inspector.advanced_properties_toggle.setChecked(False)
+
+    document["selection"] = {
+        "object_id": image["id"],
+        "object_ids": [image["id"]],
+    }
+    inspector.set_document(document)
+    assert inspector.design_context() == "image"
+    assert inspector.design_group_visible("image")
+    assert not inspector.design_group_visible("text")
+
+    document["selection"] = {
+        "object_id": frame["id"],
+        "object_ids": [frame["id"]],
+    }
+    inspector.set_document(document)
+    assert inspector.design_context() == "frame"
+    assert inspector.design_group_visible("auto_layout")
+    assert inspector.design_group_visible("frame")
+    assert not inspector.design_group_visible("text")
+
+    document["selection"] = {
+        "object_id": text["id"],
+        "object_ids": [frame["id"], text["id"]],
+    }
+    inspector.set_document(document)
+    assert inspector.design_context() == "multi"
+    assert inspector.design_group_visible("arrange")
+    assert not inspector.design_group_visible("geometry")
+    assert not inspector.design_group_visible("appearance")
+
+    document["selection"] = {"object_id": "", "object_ids": []}
+    inspector.set_document(document)
+    assert inspector.design_context() == "artboard"
+    assert not inspector.artboard_settings_toggle.isHidden()
+    assert not any(
+        inspector.design_group_visible(group)
+        for group in inspector._design_context_rows
+    )
+    inspector.deleteLater()
+    app.processEvents()
+
+
 def test_inspector_motion_tab_forwards_binding_repair_requests() -> None:
     app = _app()
     from app.painter_ui_inspector import PainterUIInspector

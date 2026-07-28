@@ -359,6 +359,18 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
         "Rechercher pages et calques",
         "Seiten und Ebenen suchen",
     ),
+    ("Artboard", "아트보드", "アートボード", "画板", "Plan de travail", "Zeichenfläche"),
+    ("Select an object to edit its properties.", "속성을 편집할 객체를 선택하세요.", "プロパティを編集するオブジェクトを選択してください。", "选择一个对象以编辑其属性。", "Sélectionnez un objet pour modifier ses propriétés.", "Wählen Sie ein Objekt aus, um seine Eigenschaften zu bearbeiten."),
+    ("Align or distribute the current selection.", "현재 선택 항목을 정렬하거나 균등 분배합니다.", "現在の選択範囲を整列または均等配置します。", "对当前选择进行对齐或均匀分布。", "Alignez ou répartissez la sélection actuelle.", "Richten Sie die aktuelle Auswahl aus oder verteilen Sie sie."),
+    ("Layout, clipping, appearance, and constraints", "레이아웃, 클리핑, 모양 및 제약 조건", "レイアウト、クリッピング、外観、制約", "布局、裁剪、外观和约束", "Disposition, découpage, apparence et contraintes", "Layout, Beschneidung, Darstellung und Einschränkungen"),
+    ("Layout, appearance, and constraints", "레이아웃, 모양 및 제약 조건", "レイアウト、外観、制約", "布局、外观和约束", "Disposition, apparence et contraintes", "Layout, Darstellung und Einschränkungen"),
+    ("Typography, appearance, and accessibility", "타이포그래피, 모양 및 접근성", "タイポグラフィ、外観、アクセシビリティ", "排版、外观和无障碍", "Typographie, apparence et accessibilité", "Typografie, Darstellung und Barrierefreiheit"),
+    ("Component state, typography, and interaction", "컴포넌트 상태, 타이포그래피 및 인터랙션", "コンポーネント状態、タイポグラフィ、インタラクション", "组件状态、排版和交互", "État du composant, typographie et interaction", "Komponentenstatus, Typografie und Interaktion"),
+    ("Source, crop behavior, and export", "소스, 자르기 방식 및 내보내기", "ソース、クロップ動作、書き出し", "源、裁剪行为和导出", "Source, recadrage et export", "Quelle, Zuschneiden und Export"),
+    ("Geometry, appearance, and delivery", "지오메트리, 모양 및 전달", "ジオメトリ、外観、配信", "几何、外观和交付", "Géométrie, apparence et livraison", "Geometrie, Darstellung und Ausgabe"),
+    ("Detach inspector", "인스펙터 분리", "インスペクターを分離", "分离检查器", "Détacher l'inspecteur", "Inspektor abdocken"),
+    ("Dock inspector", "인스펙터 도킹", "インスペクターをドッキング", "停靠检查器", "Ancrer l'inspecteur", "Inspektor andocken"),
+    ("Advanced properties", "고급 속성", "詳細プロパティ", "高级属性", "Propriétés avancées", "Erweiterte Eigenschaften"),
 )
 
 _TABLE = {
@@ -418,6 +430,18 @@ def painter_text(text: str, language: str | None = None) -> str:
         templates = {
             "en": "{n} pinned", "ko": "{n}개 고정", "ja": "{n}件固定",
             "zh": "已固定 {n} 项", "fr": "{n} épinglé(s)", "de": "{n} angeheftet",
+        }
+        return templates[lang].format(n=count)
+    match = re.fullmatch(r"(\d+)\s+objects selected", english)
+    if match:
+        count = match.group(1)
+        templates = {
+            "en": "{n} objects selected",
+            "ko": "{n}개 객체 선택됨",
+            "ja": "{n}個のオブジェクトを選択",
+            "zh": "已选择 {n} 个对象",
+            "fr": "{n} objets sélectionnés",
+            "de": "{n} Objekte ausgewählt",
         }
         return templates[lang].format(n=count)
     if " · " in english:
