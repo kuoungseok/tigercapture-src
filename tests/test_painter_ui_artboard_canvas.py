@@ -81,7 +81,11 @@ def test_ui_design_workspace_is_opaque_and_uses_editor_canvas_gray() -> None:
 
 def test_ui_design_mode_expands_inspector_and_has_one_fit_tool_set() -> None:
     app = _app()
+    from PySide6.QtWidgets import QFrame
+
     from app.drawing import PaintDialog, create_blank_paint_pixmap
+    from app.i18n import current_language
+    from app.painter_i18n import painter_text
 
     dialog = PaintDialog(
         background_pixmap=create_blank_paint_pixmap(390, 844, "#F5F7FA"),
@@ -97,6 +101,9 @@ def test_ui_design_mode_expands_inspector_and_has_one_fit_tool_set() -> None:
     assert len(dialog._ui_design_view_buttons) == 3
     assert dialog._paint_inspector_controls_scroll.maximumHeight() == 16777215
     assert dialog._paint_ui_inspector.isVisible()
+    assert dialog._painter_ui_template_strip.isVisible()
+    assert dialog._painter_ui_template_strip.y() >= dialog._painter_menu_bar.height()
+    assert dialog.property("canvasWorkspaceMode") == "ui_design"
     assert not dialog._paint_layer_dock_panel.isVisible()
     assert dialog._painter_ui_overlay.geometry() == dialog._canvas_host.rect()
     assert dialog._paint_inspector_controls_scroll.parentWidget().width() >= 320
@@ -108,6 +115,32 @@ def test_ui_design_mode_expands_inspector_and_has_one_fit_tool_set() -> None:
     assert not dialog._painter_select_menu.menuAction().isVisible()
     assert not dialog._painter_view_menu.menuAction().isVisible()
     assert not dialog._painter_window_menu.menuAction().isVisible()
+    tabs = dialog._paint_ui_inspector._tabs
+    assert tabs.objectName() == "PainterUIInspectorTabs"
+    assert tabs.count() == 7
+    assert tabs.tabBar().usesScrollButtons() is False
+    assert all(tabs.tabText(index) == "" for index in range(tabs.count()))
+    assert {
+        tabs.tabToolTip(index)
+        for index in range(tabs.count())
+    } == {
+        painter_text(label, current_language())
+        for label in (
+            "Layers",
+            "Sections",
+            "Components",
+            "Tokens",
+            "Motion",
+            "Publish",
+            "Inspect",
+        )
+    }
+
+    compact_grids = dialog._paint_ui_inspector.findChildren(
+        QFrame,
+        "PainterUICompactGrid",
+    )
+    assert [grid.layout().count() for grid in compact_grids] == [4, 5, 3]
 
     dialog.close()
     dialog.deleteLater()

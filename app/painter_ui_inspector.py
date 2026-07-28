@@ -4,7 +4,7 @@ from __future__ import annotations
 import copy
 from typing import Any, Mapping
 
-from PySide6.QtCore import Signal, Qt
+from PySide6.QtCore import QSize, Signal, Qt
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QFormLayout,
     QFrame,
+    QGridLayout,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -235,7 +236,8 @@ class PainterUIInspector(QWidget):
         )
         artboard_layout_form.addRow("Layout", self.artboard_grid_mode_combo)
         grid_metrics = QFrame()
-        grid_metrics_layout = QHBoxLayout(grid_metrics)
+        grid_metrics.setObjectName("PainterUICompactGrid")
+        grid_metrics_layout = QGridLayout(grid_metrics)
         grid_metrics_layout.setContentsMargins(0, 0, 0, 0)
         grid_metrics_layout.setSpacing(3)
         self.artboard_grid_count_spin = QSpinBox()
@@ -253,40 +255,43 @@ class PainterUIInspector(QWidget):
         self.artboard_grid_margin_spin.setRange(0.0, 10000.0)
         self.artboard_grid_margin_spin.setPrefix("M ")
         self.artboard_grid_margin_spin.setSuffix(" px")
-        for control in (
+        metric_controls = (
             self.artboard_grid_count_spin,
             self.artboard_grid_size_spin,
             self.artboard_grid_gutter_spin,
             self.artboard_grid_margin_spin,
-        ):
+        )
+        for index, control in enumerate(metric_controls):
             control.editingFinished.connect(self._emit_artboard_layout)
-            grid_metrics_layout.addWidget(control)
+            grid_metrics_layout.addWidget(control, index // 2, index % 2)
         artboard_layout_form.addRow("Metrics", grid_metrics)
         safe_row = QFrame()
-        safe_layout = QHBoxLayout(safe_row)
+        safe_row.setObjectName("PainterUICompactGrid")
+        safe_layout = QGridLayout(safe_row)
         safe_layout.setContentsMargins(0, 0, 0, 0)
         safe_layout.setSpacing(3)
         self.artboard_safe_visible_check = QCheckBox("Safe")
         self.artboard_safe_visible_check.toggled.connect(
             self._emit_artboard_layout
         )
-        safe_layout.addWidget(self.artboard_safe_visible_check)
+        safe_layout.addWidget(self.artboard_safe_visible_check, 0, 0, 1, 2)
         self.artboard_safe_controls: dict[str, QSpinBox] = {}
-        for prefix, edge in (
+        for index, (prefix, edge) in enumerate((
             ("L ", "left"),
             ("T ", "top"),
             ("R ", "right"),
             ("B ", "bottom"),
-        ):
+        )):
             spin = QSpinBox()
             spin.setRange(0, 16384)
             spin.setPrefix(prefix)
             spin.editingFinished.connect(self._emit_artboard_layout)
             self.artboard_safe_controls[edge] = spin
-            safe_layout.addWidget(spin)
+            safe_layout.addWidget(spin, 1 + index // 2, index % 2)
         artboard_layout_form.addRow("Safe Area", safe_row)
         guide_row = QFrame()
-        guide_layout = QHBoxLayout(guide_row)
+        guide_row.setObjectName("PainterUICompactGrid")
+        guide_layout = QGridLayout(guide_row)
         guide_layout.setContentsMargins(0, 0, 0, 0)
         guide_layout.setSpacing(3)
         self.artboard_guides_visible_check = QCheckBox("Guides")
@@ -303,9 +308,9 @@ class PainterUIInspector(QWidget):
         self.artboard_horizontal_guides_edit.editingFinished.connect(
             self._emit_artboard_layout
         )
-        guide_layout.addWidget(self.artboard_guides_visible_check)
-        guide_layout.addWidget(self.artboard_vertical_guides_edit)
-        guide_layout.addWidget(self.artboard_horizontal_guides_edit)
+        guide_layout.addWidget(self.artboard_guides_visible_check, 0, 0, 1, 2)
+        guide_layout.addWidget(self.artboard_vertical_guides_edit, 1, 0)
+        guide_layout.addWidget(self.artboard_horizontal_guides_edit, 1, 1)
         artboard_layout_form.addRow("Guides", guide_row)
         self.artboard_layout_status_label = QLabel("Layout: Ready")
         self.artboard_layout_status_label.setObjectName("PaintMuted")
@@ -314,17 +319,23 @@ class PainterUIInspector(QWidget):
         root.addWidget(artboard_layout_frame)
 
         tabs = QTabWidget()
+        tabs.setObjectName("PainterUIInspectorTabs")
         tabs.setDocumentMode(True)
+        tabs.setIconSize(QSize(15, 15))
+        tabs.tabBar().setExpanding(True)
+        tabs.tabBar().setUsesScrollButtons(False)
         self._tabs = tabs
         root.addWidget(tabs, 1)
 
-        from app.painter_ui_template_gallery import PainterUITemplateLibrary
-
-        self.template_library = PainterUITemplateLibrary()
-        self.template_library.template_apply_requested.connect(
-            self.template_apply_requested
-        )
-        tabs.addTab(self.template_library, "Templates")
+        def add_inspector_tab(widget: QWidget, label: str, icon_name: str) -> int:
+            index = tabs.addTab(
+                widget,
+                app_icon(icon_name, size=15, color="#B9C4D5"),
+                "",
+            )
+            tabs.setTabToolTip(index, label)
+            tabs.setTabWhatsThis(index, label)
+            return index
 
         layers_page = QWidget()
         layers_layout = QVBoxLayout(layers_page)
@@ -380,7 +391,7 @@ class PainterUIInspector(QWidget):
             control.toggled.connect(self._emit_properties)
             mask_actions.addWidget(control)
         layers_layout.addLayout(mask_actions)
-        tabs.addTab(layers_page, "Layers")
+        add_inspector_tab(layers_page, "Layers", "layers")
 
         sections_page = QWidget()
         sections_layout = QVBoxLayout(sections_page)
@@ -412,7 +423,7 @@ class PainterUIInspector(QWidget):
             )
             section_buttons.addWidget(button)
         sections_layout.addLayout(section_buttons)
-        tabs.addTab(sections_page, "Sections")
+        add_inspector_tab(sections_page, "Sections", "ui-frame")
 
         from app.painter_ui_component_library import PainterUIComponentLibrary
 
@@ -432,7 +443,7 @@ class PainterUIInspector(QWidget):
         self.component_library.component_update_requested.connect(
             self.component_update_requested
         )
-        tabs.addTab(self.component_library, "Components")
+        add_inspector_tab(self.component_library, "Components", "grid")
 
         from app.painter_ui_token_library import PainterUITokenLibrary
 
@@ -453,7 +464,7 @@ class PainterUIInspector(QWidget):
         self.token_library.token_export_requested.connect(
             self.token_export_requested
         )
-        tabs.addTab(self.token_library, "Tokens")
+        add_inspector_tab(self.token_library, "Tokens", "sliders")
 
         from app.painter_ui_motion_delivery_panel import (
             PainterUIMotionDeliveryPanel,
@@ -490,7 +501,7 @@ class PainterUIInspector(QWidget):
         motion_scroll.setWidgetResizable(True)
         motion_scroll.setFrameShape(QFrame.Shape.NoFrame)
         motion_scroll.setWidget(motion_page)
-        tabs.addTab(motion_scroll, "Motion")
+        add_inspector_tab(motion_scroll, "Motion", "motion")
 
         from app.painter_ui_production_panel import PainterUIProductionPanel
 
@@ -514,7 +525,7 @@ class PainterUIInspector(QWidget):
             (self.production_panel.ai_audit_requested, self.ai_audit_requested),
         ):
             source.connect(target)
-        tabs.addTab(self.production_panel, "Publish")
+        add_inspector_tab(self.production_panel, "Publish", "export")
 
         inspect_page = QWidget()
         inspect_layout = QVBoxLayout(inspect_page)
@@ -1135,7 +1146,7 @@ class PainterUIInspector(QWidget):
         form.addRow("Align", arrange)
         inspect_layout.addLayout(form)
         inspect_layout.addStretch(1)
-        tabs.addTab(inspect_page, "Inspect")
+        add_inspector_tab(inspect_page, "Inspect", "settings")
 
     def set_document(self, value: Mapping[str, Any] | None) -> None:
         self._document = normalize_ui_document(value)

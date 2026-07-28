@@ -352,6 +352,235 @@ QMenuBar#PaintMenuBar::item:selected {
     background-color: #5b5b5b;
 }
 
+QFrame#PainterUITemplateStrip {
+    background-color: #171b22;
+    border: none;
+    border-bottom: 1px solid #2b323e;
+    min-height: 40px;
+    max-height: 40px;
+}
+
+QDialog[canvasWorkspaceMode="ui_design"] QMenuBar#PaintMenuBar {
+    background-color: #171b22;
+    border-bottom: 1px solid #2b323e;
+}
+
+QDialog[canvasWorkspaceMode="ui_design"] QMenuBar#PaintMenuBar::item:selected {
+    background-color: #293342;
+}
+
+QDialog[canvasWorkspaceMode="ui_design"] QFrame#PaintTopBar,
+QDialog[canvasWorkspaceMode="ui_design"] QWidget#PaintCanvasModeBar,
+QDialog[canvasWorkspaceMode="ui_design"] QFrame#PaintInspector,
+QDialog[canvasWorkspaceMode="ui_design"] QFrame#PaintToolRail {
+    background-color: #1b2028;
+    border-color: #2b323e;
+}
+
+QDialog[canvasWorkspaceMode="ui_design"] QFrame#PaintStatusBar {
+    background-color: #171b22;
+    border-top-color: #2b323e;
+}
+
+QFrame#PainterUITemplateDivider {
+    background-color: #343d4b;
+    border: none;
+}
+
+QPushButton#PainterUITemplateBrowse,
+QPushButton#PainterUITemplateQuick {
+    background-color: #202630;
+    color: #dce6f7;
+    border: 1px solid #343d4b;
+    border-radius: 4px;
+    padding: 1px;
+}
+
+QPushButton#PainterUITemplateBrowse:hover,
+QPushButton#PainterUITemplateQuick:hover {
+    background-color: #293342;
+    border-color: #607795;
+}
+
+QPushButton#PainterUITemplateQuick:pressed {
+    background-color: #1b2430;
+    border-color: #7894b8;
+}
+
+QWidget#PainterUIInspector {
+    background-color: #171b22;
+    color: #dfe6f0;
+}
+
+QWidget#PainterUIInspector QLabel {
+    background-color: transparent;
+    color: #c7d0dd;
+}
+
+QWidget#PainterUIInspector QLabel#PaintSectionTitle {
+    color: #edf3fb;
+    padding: 4px 7px 2px 7px;
+}
+
+QWidget#PainterUIInspector QLabel#PaintMuted {
+    color: #8f9bad;
+}
+
+QFrame#PainterUIArtboardLayout {
+    background-color: #1b2028;
+    border: 1px solid #2a323e;
+    border-radius: 4px;
+}
+
+QFrame#PainterUICompactGrid {
+    background-color: transparent;
+    border: none;
+}
+
+QWidget#PainterUIInspector QComboBox,
+QWidget#PainterUIInspector QLineEdit,
+QWidget#PainterUIInspector QSpinBox,
+QWidget#PainterUIInspector QDoubleSpinBox {
+    background-color: #11151b;
+    color: #e4eaf2;
+    border: 1px solid #303946;
+    border-radius: 4px;
+    min-height: 24px;
+    padding: 1px 6px;
+    selection-background-color: #4b6483;
+}
+
+QWidget#PainterUIInspector QComboBox:hover,
+QWidget#PainterUIInspector QLineEdit:hover,
+QWidget#PainterUIInspector QSpinBox:hover,
+QWidget#PainterUIInspector QDoubleSpinBox:hover {
+    border-color: #52677f;
+}
+
+QWidget#PainterUIInspector QComboBox:focus,
+QWidget#PainterUIInspector QLineEdit:focus,
+QWidget#PainterUIInspector QSpinBox:focus,
+QWidget#PainterUIInspector QDoubleSpinBox:focus {
+    border-color: #7594ba;
+}
+
+QWidget#PainterUIInspector QComboBox:disabled,
+QWidget#PainterUIInspector QLineEdit:disabled,
+QWidget#PainterUIInspector QSpinBox:disabled,
+QWidget#PainterUIInspector QDoubleSpinBox:disabled {
+    background-color: #181c23;
+    color: #667181;
+    border-color: #242b35;
+}
+
+QWidget#PainterUIInspector QComboBox::drop-down {
+    border: none;
+    width: 22px;
+}
+
+QWidget#PainterUIInspector QComboBox QAbstractItemView {
+    background-color: #151a21;
+    color: #e4eaf2;
+    border: 1px solid #364252;
+    selection-background-color: #405574;
+    selection-color: #ffffff;
+}
+
+QWidget#PainterUIInspector QCheckBox {
+    color: #c7d0dd;
+    spacing: 5px;
+}
+
+QWidget#PainterUIInspector QCheckBox::indicator {
+    width: 13px;
+    height: 13px;
+    background-color: #101419;
+    border: 1px solid #455263;
+    border-radius: 3px;
+}
+
+QWidget#PainterUIInspector QCheckBox::indicator:checked {
+    background-color: #5e789a;
+    border-color: #87a4c8;
+}
+
+QWidget#PainterUIInspector QPushButton {
+    background-color: #222933;
+    color: #dce5f0;
+    border: 1px solid #343e4b;
+    border-radius: 4px;
+    min-height: 24px;
+    padding: 2px 7px;
+}
+
+QWidget#PainterUIInspector QPushButton:hover {
+    background-color: #2c3542;
+    border-color: #5f7591;
+}
+
+QWidget#PainterUIInspector QPushButton:disabled {
+    background-color: #1a1f26;
+    color: #606a78;
+    border-color: #262d36;
+}
+
+QTabWidget#PainterUIInspectorTabs {
+    background-color: #15191f;
+}
+
+QTabWidget#PainterUIInspectorTabs::pane {
+    background-color: #15191f;
+    border: 1px solid #29313c;
+    top: -1px;
+}
+
+QTabWidget#PainterUIInspectorTabs QTabBar::tab {
+    background-color: #1b2028;
+    border: none;
+    border-right: 1px solid #2b333f;
+    border-bottom: 1px solid #29313c;
+    min-width: 36px;
+    max-width: 48px;
+    min-height: 28px;
+    padding: 2px 4px;
+}
+
+QTabWidget#PainterUIInspectorTabs QTabBar::tab:hover {
+    background-color: #252d38;
+}
+
+QTabWidget#PainterUIInspectorTabs QTabBar::tab:selected {
+    background-color: #2b3542;
+    border-bottom: 2px solid #7895b8;
+}
+
+QWidget#PainterUIInspector QListWidget,
+QWidget#PainterUIInspector QTreeWidget,
+QWidget#PainterUIInspector QScrollArea {
+    background-color: #11151b;
+    color: #dce5f0;
+    border: 1px solid #29323e;
+    outline: none;
+}
+
+QWidget#PainterUIInspector QListWidget::item,
+QWidget#PainterUIInspector QTreeWidget::item {
+    color: #dce5f0;
+    padding: 4px 5px;
+    border-radius: 3px;
+}
+
+QWidget#PainterUIInspector QListWidget::item:hover,
+QWidget#PainterUIInspector QTreeWidget::item:hover {
+    background-color: #222b37;
+}
+
+QWidget#PainterUIInspector QListWidget::item:selected,
+QWidget#PainterUIInspector QTreeWidget::item:selected {
+    background-color: #33465f;
+    color: #ffffff;
+}
+
 QMenu {
     background-color: #15181d;
     color: #eef3fb;
@@ -8459,6 +8688,15 @@ class PaintDialog(QDialog):
         self._painter_menu_bar = self._build_painter_menu_bar()
         root.addWidget(self._painter_menu_bar)
 
+        from app.painter_ui_template_gallery import PainterUITemplateStrip
+
+        self._painter_ui_template_strip = PainterUITemplateStrip(self)
+        self._painter_ui_template_strip.template_apply_requested.connect(
+            self._apply_painter_ui_template
+        )
+        self._painter_ui_template_strip.hide()
+        root.addWidget(self._painter_ui_template_strip)
+
         top_bar = QFrame()
         top_bar.setObjectName("PaintTopBar")
         top_layout = QHBoxLayout(top_bar)
@@ -9637,9 +9875,6 @@ class PaintDialog(QDialog):
         )
         self._paint_ui_inspector.motion_binding_detach_requested.connect(
             self._detach_painter_ui_motion_binding
-        )
-        self._paint_ui_inspector.template_apply_requested.connect(
-            self._apply_painter_ui_template
         )
         self._paint_ui_inspector.template_save_requested.connect(
             self._save_painter_ui_template
@@ -12047,6 +12282,11 @@ class PaintDialog(QDialog):
         workspace_mode = str(getattr(self, "_canvas_workspace_mode", "paint"))
         blockout = workspace_mode == "3d_place"
         ui_design = workspace_mode == "ui_design"
+        if self.property("canvasWorkspaceMode") != workspace_mode:
+            self.setProperty("canvasWorkspaceMode", workspace_mode)
+            self.style().unpolish(self)
+            self.style().polish(self)
+            self.update()
         self._sync_painter_menu_mode(workspace_mode)
         for button_name, checked in (
             ("_canvas_mode_paint_btn", not blockout and not ui_design),
@@ -12068,6 +12308,9 @@ class PaintDialog(QDialog):
         ui_inspector = getattr(self, "_paint_ui_inspector", None)
         if ui_inspector is not None:
             ui_inspector.setVisible(ui_design)
+        template_strip = getattr(self, "_painter_ui_template_strip", None)
+        if template_strip is not None:
+            template_strip.setVisible(ui_design)
         inspector_scroll = getattr(self, "_paint_inspector_controls_scroll", None)
         if inspector_scroll is not None:
             inspector_scroll.setMaximumHeight(

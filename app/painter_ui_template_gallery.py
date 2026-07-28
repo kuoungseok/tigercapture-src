@@ -10,6 +10,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFrame,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -21,6 +22,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from app.icons import app_icon, icon_size
 from app.painter_ui_template_store import (
     inspect_ui_template_store,
     instantiate_stored_ui_template,
@@ -341,9 +343,68 @@ class PainterUITemplateLibrary(QWidget):
                 self.template_apply_requested.emit(dialog.selected_template_id)
 
 
+class PainterUITemplateStrip(QFrame):
+    """Compact icon-first template access below the Painter menu bar."""
+
+    template_apply_requested = Signal(str)
+
+    def __init__(self, parent=None, *, quick_count: int = 6) -> None:
+        super().__init__(parent)
+        self.setObjectName("PainterUITemplateStrip")
+        self._quick_count = max(1, int(quick_count))
+
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(7, 4, 8, 4)
+        layout.setSpacing(4)
+
+        browse = QPushButton("")
+        browse.setObjectName("PainterUITemplateBrowse")
+        browse.setToolTip("Open UI template gallery")
+        browse.setAccessibleName("UI template gallery")
+        browse.setIcon(app_icon("grid", size=15, color="#DCE6F7"))
+        browse.setIconSize(icon_size(15))
+        browse.setFixedSize(30, 30)
+        browse.clicked.connect(self._browse)
+        self.browse_button = browse
+        layout.addWidget(browse)
+
+        divider = QFrame()
+        divider.setObjectName("PainterUITemplateDivider")
+        divider.setFixedSize(1, 24)
+        layout.addWidget(divider)
+
+        self.quick_buttons: list[QPushButton] = []
+        for row in _gallery_templates()[: self._quick_count]:
+            template_id = str(row["id"])
+            button = QPushButton("")
+            button.setObjectName("PainterUITemplateQuick")
+            button.setToolTip(f"{row['name']}\n{row['category']}")
+            button.setAccessibleName(str(row["name"]))
+            button.setIcon(QIcon(ui_template_thumbnail(template_id)))
+            button.setIconSize(QSize(46, 27))
+            button.setFixedSize(54, 32)
+            button.clicked.connect(
+                lambda _checked=False, value=template_id: (
+                    self.template_apply_requested.emit(value)
+                )
+            )
+            layout.addWidget(button)
+            self.quick_buttons.append(button)
+        layout.addStretch(1)
+
+    def _browse(self) -> None:
+        dialog = PainterUITemplateGalleryDialog(self)
+        if (
+            dialog.exec() == QDialog.DialogCode.Accepted
+            and dialog.selected_template_id
+        ):
+            self.template_apply_requested.emit(dialog.selected_template_id)
+
+
 __all__ = [
     "PainterUITemplateGalleryDialog",
     "PainterUITemplateLibrary",
+    "PainterUITemplateStrip",
     "TEMPLATE_THUMBNAIL_SIZE",
     "ui_template_thumbnail",
 ]

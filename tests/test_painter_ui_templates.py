@@ -61,6 +61,7 @@ def test_template_gallery_filters_renders_and_emits_stable_id() -> None:
     from app.painter_ui_template_gallery import (
         PainterUITemplateGalleryDialog,
         PainterUITemplateLibrary,
+        PainterUITemplateStrip,
         ui_template_thumbnail,
     )
 
@@ -91,8 +92,21 @@ def test_template_gallery_filters_renders_and_emits_stable_id() -> None:
     )
     library.quick_list.itemDoubleClicked.emit(target)
     assert applied == ["saas_dashboard"]
+
+    strip = PainterUITemplateStrip(quick_count=5)
+    strip_applied: list[str] = []
+    strip.template_apply_requested.connect(strip_applied.append)
+    assert strip.objectName() == "PainterUITemplateStrip"
+    assert len(strip.quick_buttons) == 5
+    assert all(button.text() == "" for button in strip.quick_buttons)
+    assert all(not button.icon().isNull() for button in strip.quick_buttons)
+    assert not strip.browse_button.icon().isNull()
+    strip.quick_buttons[0].click()
+    assert len(strip_applied) == 1
+    assert strip_applied[0]
     gallery.deleteLater()
     library.deleteLater()
+    strip.deleteLater()
     app.processEvents()
 
 

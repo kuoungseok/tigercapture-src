@@ -164,6 +164,27 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Fit All Artboards", "모든 아트보드 맞춤", "すべてのアートボードを表示", "适合所有画板", "Ajuster tous les plans de travail", "Alle Zeichenflachen einpassen"),
     ("Fit Active Artboard", "활성 아트보드 맞춤", "アクティブなアートボードを表示", "适合活动画板", "Ajuster le plan de travail actif", "Aktive Zeichenflache einpassen"),
     ("Fit Selection", "선택 영역 맞춤", "選択範囲を表示", "适合所选内容", "Ajuster la selection", "Auswahl einpassen"),
+    ("Layers", "레이어", "レイヤー", "图层", "Calques", "Ebenen"),
+    ("Sections", "섹션", "セクション", "分区", "Sections", "Abschnitte"),
+    ("Components", "컴포넌트", "コンポーネント", "组件", "Composants", "Komponenten"),
+    ("Tokens", "토큰", "トークン", "令牌", "Jetons", "Token"),
+    ("Motion", "모션", "モーション", "动效", "Animation", "Motion"),
+    ("Publish", "배포", "公開", "发布", "Publier", "Veroffentlichen"),
+    ("Inspect", "속성", "検査", "检查", "Inspecter", "Prufen"),
+    ("Open UI template gallery", "UI 템플릿 갤러리 열기", "UIテンプレートギャラリーを開く", "打开 UI 模板库", "Ouvrir la galerie de modeles UI", "UI-Vorlagengalerie offnen"),
+    ("Context", "대상", "コンテキスト", "上下文", "Contexte", "Kontext"),
+    ("Theme", "테마", "テーマ", "主题", "Theme", "Thema"),
+    ("Layout", "레이아웃", "レイアウト", "布局", "Disposition", "Layout"),
+    ("Metrics", "그리드", "メトリクス", "网格参数", "Mesures", "Metrik"),
+    ("Safe Area", "안전 영역", "セーフエリア", "安全区域", "Zone sure", "Sicherheitsbereich"),
+    ("Status", "상태", "状態", "状态", "Etat", "Status"),
+    ("No layout grid", "레이아웃 그리드 없음", "レイアウトグリッドなし", "无布局网格", "Aucune grille", "Kein Layoutraster"),
+    ("Uniform grid", "균일 그리드", "均等グリッド", "均匀网格", "Grille uniforme", "Gleichmassiges Raster"),
+    ("Columns", "열", "カラム", "列", "Colonnes", "Spalten"),
+    ("Desktop", "데스크톱", "デスクトップ", "桌面", "Bureau", "Desktop"),
+    ("Mobile", "모바일", "モバイル", "移动端", "Mobile", "Mobil"),
+    ("Console", "콘솔", "コンソール", "主机", "Console", "Konsole"),
+    ("Broadcast", "방송", "放送", "播出", "Diffusion", "Broadcast"),
     ("Portrait", "세로", "縦", "竖屏", "Portrait", "Hochformat"),
     ("Landscape", "가로", "横", "横屏", "Paysage", "Querformat"),
     ("Light", "라이트", "ライト", "浅色", "Clair", "Hell"),
@@ -526,6 +547,9 @@ class PainterWidgetLocalizer(QObject):
                 value = painter_text(obj.tabText(index), self._language)
                 if value != obj.tabText(index):
                     obj.setTabText(index, value)
+                tooltip = painter_text(obj.tabToolTip(index), self._language)
+                if tooltip != obj.tabToolTip(index):
+                    obj.setTabToolTip(index, tooltip)
         if isinstance(obj, QListWidget):
             for index in range(obj.count()):
                 item = obj.item(index)
