@@ -770,6 +770,17 @@ QDialog#PainterUIInspectorDockWindow {
     border: 1px solid #394654;
 }
 
+QFrame#PainterUIQuickPropertiesPopover {
+    background-color: #1e2228;
+    border: 1px solid #46566a;
+    border-radius: 5px;
+}
+
+QScrollArea#PainterUIQuickPropertiesScroll {
+    background-color: #1e2228;
+    border: none;
+}
+
 QScrollArea#PainterUIInspectorDockScroll {
     background-color: #1e2228;
     border: none;
@@ -10148,6 +10159,9 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.dock_toggle_requested.connect(
             self._toggle_painter_ui_inspector_dock
         )
+        self._paint_ui_inspector.temporary_close_requested.connect(
+            self._close_painter_ui_quick_properties
+        )
         self._paint_ui_inspector.selection_changed.connect(
             self._set_painter_ui_selection
         )
@@ -12645,6 +12659,8 @@ class PaintDialog(QDialog):
             and bool(getattr(self, "_painter_ui_inspector_detached", False))
         ):
             self._dock_painter_ui_inspector()
+        if not ui_design:
+            self._hide_painter_ui_quick_properties()
         if ui_inspector is not None:
             ui_inspector.setVisible(ui_design)
         inspector_frame = getattr(self, "_paint_inspector_frame", None)
@@ -14437,6 +14453,7 @@ class PaintDialog(QDialog):
                     getattr(self, "_painter_ui_motion_compositions", {}),
                 )
             )
+        self._sync_painter_ui_quick_properties(selected)
         from app.painter_ui_motion_actor import motion_actor_rows
 
         has_motion_actors = bool(
@@ -22336,11 +22353,24 @@ class PaintDialog(QDialog):
             return
         handle = getattr(self, "_paint_inspector_resize_handle", None)
         if bool(collapsed):
+            selected = str(
+                (
+                    (
+                        getattr(self, "_painter_ui_document", {}) or {}
+                    ).get("selection")
+                    or {}
+                ).get("object_id")
+                or ""
+            )
+            if selected:
+                self._painter_ui_quick_properties_suppressed_id = selected
+            self._hide_painter_ui_quick_properties()
             frame.setMinimumWidth(36)
             frame.setMaximumWidth(36)
             if handle is not None:
                 handle.hide()
         else:
+            self._hide_painter_ui_quick_properties()
             width = int(
                 getattr(
                     self,
@@ -22420,6 +22450,7 @@ class PaintDialog(QDialog):
         inspector = getattr(self, "_paint_ui_inspector", None)
         if inspector is None:
             return
+        self._hide_painter_ui_quick_properties()
         window = getattr(self, "_painter_ui_inspector_dock_window", None)
         if window is None:
             from app.painter_ui_inspector_dock import (
@@ -22439,6 +22470,72 @@ class PaintDialog(QDialog):
         window.raise_()
         window.activateWindow()
         self._update_canvas_geometry()
+
+    def _sync_painter_ui_quick_properties(self, selected_id: str) -> None:
+        selected = str(selected_id or "")
+        inspector = getattr(self, "_paint_ui_inspector", None)
+        if inspector is None:
+            return
+        if not selected:
+            self._painter_ui_quick_properties_suppressed_id = ""
+            self._hide_painter_ui_quick_properties()
+            return
+        if (
+            str(getattr(self, "_canvas_workspace_mode", "")) != "ui_design"
+            or not inspector.is_collapsed()
+            or bool(getattr(self, "_painter_ui_inspector_detached", False))
+            or selected
+            == str(
+                getattr(
+                    self,
+                    "_painter_ui_quick_properties_suppressed_id",
+                    "",
+                )
+            )
+        ):
+            self._hide_painter_ui_quick_properties()
+            return
+        popover = getattr(self, "_painter_ui_quick_properties", None)
+        if popover is None:
+            from app.painter_ui_quick_properties import (
+                PainterUIQuickPropertiesPopover,
+            )
+
+            popover = PainterUIQuickPropertiesPopover(self._canvas_host)
+            self._painter_ui_quick_properties = popover
+        inspector.set_temporary_expanded(True)
+        popover.attach(inspector)
+
+    def _close_painter_ui_quick_properties(self) -> None:
+        selected = str(
+            (
+                (
+                    getattr(self, "_painter_ui_document", {}) or {}
+                ).get("selection")
+                or {}
+            ).get("object_id")
+            or ""
+        )
+        self._painter_ui_quick_properties_suppressed_id = selected
+        self._hide_painter_ui_quick_properties()
+
+    def _hide_painter_ui_quick_properties(self) -> None:
+        popover = getattr(self, "_painter_ui_quick_properties", None)
+        inspector = getattr(self, "_paint_ui_inspector", None)
+        if popover is None or inspector is None:
+            return
+        widget = popover.take() if popover.contains(inspector) else None
+        if widget is None:
+            return
+        inspector.set_temporary_expanded(False)
+        controls = getattr(self, "_paint_inspector_controls", None)
+        layout = controls.layout() if controls is not None else None
+        if layout is not None:
+            inspector.setParent(controls)
+            layout.insertWidget(max(0, layout.count() - 1), inspector, 1)
+        inspector.setVisible(
+            str(getattr(self, "_canvas_workspace_mode", "")) == "ui_design"
+        )
 
     def _dock_painter_ui_inspector(self) -> None:
         if not bool(getattr(self, "_painter_ui_inspector_detached", False)):

@@ -95,9 +95,11 @@ Focused entry points:
   tracked in `docs/PAINTER_UI_FIGMA_INTERFACE_SPEC_KO.md` and
   `docs/PAINTER_UI_FIGMA_UX_MILESTONES_2026_KO.md`. As of 2026-07-28 the first
   M0 slice has a bottom floating toolbar, left Layers/Assets navigation, right
-  Design/Prototype/Inspect modes, and collapsible compact panels. Do not mark
-  M0 complete until grouped flyouts, rulers/guides, contextual Inspector
-  disclosure, and persisted panel state are implemented and verified.
+  Design/Prototype/Inspect modes, resizable/detachable panels, persisted panel
+  state, and a selection-triggered temporary Properties overlay that reparents
+  the canonical Inspector while its 36 px rail is collapsed. Grouped flyouts,
+  rulers/guides, and contextual Inspector disclosure are implemented and
+  verified; remaining milestone work continues in the focused roadmap.
 
 If two areas overlap, keep the product boundary from the focused docs. Do not
 merge UI renewal, review automation, and VTuber sidecar setup into one unbounded

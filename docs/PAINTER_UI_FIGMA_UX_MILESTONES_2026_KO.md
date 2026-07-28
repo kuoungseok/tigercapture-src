@@ -21,6 +21,9 @@ Completed in the first shell slice:
 - restart-safe persistence for user-adjusted navigator/inspector width and
   collapsed state; automatic compact-mode collapse is not persisted as a user
   preference
+- selection-triggered temporary Properties overlay when the right inspector is
+  collapsed; it reuses the canonical inspector widget and returns it to the
+  dock on close, expand, detach, or workspace change
 - zoom-adaptive top/left rulers and ruler-drag guide creation
 - shared `paint.ui.guide.create/remove/clear` and
   `paint.ui.ruler.visibility.set` automation
@@ -41,7 +44,6 @@ Not complete yet:
 - mode-specific Paint/3D floating-toolbar variants
 - transient zoom popover
 - prototype interaction authoring surface and on-canvas connection editing
-- temporary properties popover while side panels are minimized
 - M1 through M8 implementation
 
 Related documents:
@@ -616,6 +618,10 @@ workflow is production-ready.
 - Advanced properties keep constraints, responsive limits, accessibility,
   delivery, text-range, 9-slice, boolean, and remote-link controls available
   without occupying the default authoring surface.
+- Collapsing the right inspector leaves only a 36 px rail. Selecting a new
+  object opens the same canonical Design inspector as a temporary canvas
+  overlay; closing it suppresses repeat opening for that selection and a new
+  selection may open it again.
 - Rulers and persistent artboard guides remain visible without consuming
   inspector space.
 - Compactness is covered by widget geometry tests and real offscreen screenshot

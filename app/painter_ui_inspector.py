@@ -38,6 +38,7 @@ from app.painter_ui_constraints import (
 from app.painter_ui_auto_layout import normalize_ui_auto_layout
 from app.painter_ui_document import normalize_ui_document
 from app.icons import app_icon, icon_size
+from app.painter_i18n import painter_text
 
 
 class PainterUILayerList(QListWidget):
@@ -192,6 +193,7 @@ class PainterUIInspector(QWidget):
     motion_binding_detach_requested = Signal(str)
     collapsed_changed = Signal(bool)
     dock_toggle_requested = Signal()
+    temporary_close_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -199,6 +201,7 @@ class PainterUIInspector(QWidget):
         self._syncing = False
         self._appearance_style: dict[str, Any] = {}
         self._collapsed = False
+        self._temporary_expanded = False
         self.setObjectName("PainterUIInspector")
 
         root = QVBoxLayout(self)
@@ -228,9 +231,7 @@ class PainterUIInspector(QWidget):
         self.collapse_button = QPushButton("")
         self.collapse_button.setObjectName("PainterUIPanelCollapse")
         self.collapse_button.setFixedSize(22, 22)
-        self.collapse_button.clicked.connect(
-            lambda: self.set_collapsed(not self._collapsed)
-        )
+        self.collapse_button.clicked.connect(self._on_collapse_clicked)
         title_layout.addWidget(self.collapse_button)
         root.addWidget(title_bar)
         self.artboard_combo = QComboBox()
@@ -1463,6 +1464,33 @@ class PainterUIInspector(QWidget):
         self._sync_collapse_button()
         self.collapsed_changed.emit(value)
 
+    def set_temporary_expanded(self, expanded: bool) -> None:
+        value = bool(expanded)
+        if self._temporary_expanded == value:
+            return
+        self._temporary_expanded = value
+        for widget in self._collapsible_widgets:
+            if widget is self.artboard_layout_frame:
+                widget.setVisible(
+                    value
+                    and self.artboard_settings_toggle.isVisible()
+                    and self.artboard_settings_toggle.isChecked()
+                )
+            else:
+                widget.setVisible(value or not self._collapsed)
+        self.title_label.setVisible(value or not self._collapsed)
+        self.dock_button.setVisible(not value)
+        self._sync_collapse_button()
+
+    def is_temporary_expanded(self) -> bool:
+        return self._temporary_expanded
+
+    def _on_collapse_clicked(self) -> None:
+        if self._temporary_expanded:
+            self.temporary_close_requested.emit()
+            return
+        self.set_collapsed(not self._collapsed)
+
     def set_detached(self, detached: bool) -> None:
         value = bool(detached)
         self.dock_button.setToolTip(
@@ -1483,15 +1511,27 @@ class PainterUIInspector(QWidget):
     def _sync_collapse_button(self) -> None:
         self.collapse_button.setIcon(
             app_icon(
-                "chevron-left" if self._collapsed else "chevron-right",
+                (
+                    "x"
+                    if self._temporary_expanded
+                    else "chevron-left"
+                    if self._collapsed
+                    else "chevron-right"
+                ),
                 size=12,
                 color="#B8C4D3",
             )
         )
         self.collapse_button.setIconSize(icon_size(12))
-        self.collapse_button.setToolTip(
-            "Expand properties" if self._collapsed else "Collapse properties"
+        tooltip = painter_text(
+            "Close temporary properties"
+            if self._temporary_expanded
+            else "Expand properties"
+            if self._collapsed
+            else "Collapse properties"
         )
+        self.collapse_button.setToolTip(tooltip)
+        self.collapse_button.setAccessibleName(tooltip)
 
     def take_layers_page(self) -> QWidget:
         """Detach the Layers page for the left UI Design navigator."""

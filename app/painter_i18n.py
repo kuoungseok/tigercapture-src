@@ -370,6 +370,7 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Geometry, appearance, and delivery", "지오메트리, 모양 및 전달", "ジオメトリ、外観、配信", "几何、外观和交付", "Géométrie, apparence et livraison", "Geometrie, Darstellung und Ausgabe"),
     ("Detach inspector", "인스펙터 분리", "インスペクターを分離", "分离检查器", "Détacher l'inspecteur", "Inspektor abdocken"),
     ("Dock inspector", "인스펙터 도킹", "インスペクターをドッキング", "停靠检查器", "Ancrer l'inspecteur", "Inspektor andocken"),
+    ("Close temporary properties", "임시 속성 닫기", "一時プロパティを閉じる", "关闭临时属性", "Fermer les propriétés temporaires", "Temporäre Eigenschaften schließen"),
     ("Advanced properties", "고급 속성", "詳細プロパティ", "高级属性", "Propriétés avancées", "Erweiterte Eigenschaften"),
 )
 

@@ -370,6 +370,33 @@ def main() -> int:
         output_dir / "painter_ui_designer_m1_multi_inspector.png"
     )
     dialog.grab().save(str(multi_inspector_screenshot_path), "PNG")
+    registry.execute(
+        "paint.ui.selection.set",
+        {"object_ids": [], "primary_object_id": ""},
+    )
+    app.processEvents()
+    dialog._paint_ui_inspector.set_collapsed(True)
+    registry.execute(
+        "paint.ui.selection.set",
+        {
+            "object_ids": [phone_object_ids["text"]],
+            "primary_object_id": phone_object_ids["text"],
+        },
+    )
+    app.processEvents()
+    quick_properties = dialog._painter_ui_quick_properties
+    quick_properties_ok = (
+        quick_properties.isVisible()
+        and quick_properties.contains(dialog._paint_ui_inspector)
+        and dialog._paint_ui_inspector.is_temporary_expanded()
+        and dialog._paint_inspector_frame.maximumWidth() == 36
+    )
+    quick_properties_screenshot_path = (
+        output_dir / "painter_ui_designer_m1_quick_properties.png"
+    )
+    dialog.grab().save(str(quick_properties_screenshot_path), "PNG")
+    dialog._paint_ui_inspector.set_collapsed(False)
+    app.processEvents()
     state = dialog.painter_action_state()
     group_row = next(
         (
@@ -419,10 +446,12 @@ def main() -> int:
             and text_inspector_screenshot_path.is_file()
             and image_inspector_screenshot_path.is_file()
             and multi_inspector_screenshot_path.is_file()
+            and quick_properties_screenshot_path.is_file()
             and detached_round_trip
             and text_context_ok
             and image_context_ok
             and multi_context_ok
+            and quick_properties_ok
             and navigator.expanded_width()
             == navigator.DEFAULT_EXPANDED_WIDTH
         ),
@@ -440,9 +469,13 @@ def main() -> int:
         "text_inspector_screenshot": str(text_inspector_screenshot_path),
         "image_inspector_screenshot": str(image_inspector_screenshot_path),
         "multi_inspector_screenshot": str(multi_inspector_screenshot_path),
+        "quick_properties_screenshot": str(
+            quick_properties_screenshot_path
+        ),
         "navigator_width": navigator.expanded_width(),
         "inspector_width": dialog._paint_inspector_expanded_width,
         "inspector_detached_round_trip": detached_round_trip,
+        "quick_properties_ok": quick_properties_ok,
         "context_visibility": {
             "text": text_context_ok,
             "image": image_context_ok,

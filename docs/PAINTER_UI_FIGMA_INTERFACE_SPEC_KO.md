@@ -754,3 +754,7 @@ overlay mode로 전환한다.
 - Advanced disclosure owns constraints and responsive limits, accessibility,
   delivery, text-range, 9-slice, boolean, and remote-component controls. It is
   collapsed by default and does not create a parallel mutation path.
+- The Inspector is not a permanently fixed canvas tax. It may be resized,
+  detached, or collapsed to a 36 px rail. With the rail collapsed, selecting a
+  new object temporarily reparents the canonical Inspector into a compact
+  canvas overlay; no duplicate property editor or mutation service is created.
