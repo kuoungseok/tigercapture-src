@@ -122,7 +122,11 @@ Painter는 다음 연결 정보만 저장한다.
   "animation_name": "ButtonHover",
   "property_names": ["position", "scale", "opacity"],
   "layout_policy": "resolved_layout_plus_motion_offset",
-  "delivery_policy": "native_preferred"
+  "delivery_request": {
+    "web": "native_preferred",
+    "app": "native_preferred",
+    "umg": "native_preferred"
+  }
 }
 ```
 
@@ -136,6 +140,35 @@ Motion에서 Painter로 돌아오는 값:
 - 누락 리소스와 relink 진단
 
 키프레임, 그래프, 마스크, 이펙트 본문은 `.tgmotion`이 소유한다.
+
+Binding에는 target별 요청 정책만 저장한다. 실제 preflight 판정은 다음처럼
+property/feature 단위 결과를 별도로 반환한다.
+
+```json
+{
+  "target": "umg",
+  "binding_id": "ui-motion-binding-42",
+  "requested": "native_preferred",
+  "adapter_version": 3,
+  "artifact_revision": 12,
+  "features": [
+    {
+      "feature": "transform.scale",
+      "resolved": "native",
+      "reasons": []
+    },
+    {
+      "feature": "effect.blur",
+      "resolved": "baked",
+      "reasons": ["UMG native blur animation is unavailable"]
+    }
+  ]
+}
+```
+
+이 결과에는 Painter 정적 UI나 Motion 키프레임을 복제하지 않는다.
+`adapter_version`과 `artifact_revision`이 현재 값과 다르면 stale 판정으로 보고
+다시 preflight한다.
 
 ## 5. Painter UI/UX 목록
 
@@ -170,27 +203,114 @@ Motion에서 Painter로 돌아오는 값:
 - 여러 Motion Actor의 독립 playhead/offset/loop는 P2
 - 전체 Timeline/Graph Editor는 Painter에 넣지 않는다.
 
-## 6. Unreal UMG 전달 분류
+## 6. 대상별 전달 분류
 
-### Native
+같은 Motion 기능이라도 Web, 일반 App, Unreal UMG에서 구현 방식과 비용이
+다르다. 하나의 공통 `supported` 값으로 처리하지 않고 target별로
+`Native / Vector·Material / Baked / Actor Only / Blocked`를 판정한다.
+
+### 6.1 Web UI
+
+#### Native
+
+- CSS transform 기반 Position, Scale, Rotation
+- Opacity와 단순 Fill/Stroke/Color 전환
+- Hover, Active, Focus, Disabled 상태 전환
+- Fade, Slide, Scale, Pop, Pulse
+- CSS transition/keyframes 기반 Entrance, Exit, Loop
+- DOM/SVG 기반 Progress와 간단한 Trim Path
+
+#### Vector/Canvas
+
+- SVG Path Morph
+- 복잡한 Trim Path와 Stroke animation
+- 글자 단위 Reveal
+- 단순 Repeater와 Particle
+- Canvas/WebGL 기반 gradient, mask, displacement
+
+#### Baked
+
+- 복잡한 blur/glow 조합
+- Puppet/Rigging
+- 2.5D Camera와 다중 합성
+- 고비용 Particle와 영상 기반 효과
+
+#### Actor Only
+
+- 독립 광고/교육 Motion composition
+- Live2D, Spine, MMD, VRM, AR/PBR 장면
+
+Web 출력은 CSS/DOM/SVG/Canvas 중 어느 backend를 사용하는지 manifest에
+명시한다. Canvas/WebGL만 가능한 기능을 일반 DOM Native로 주장하지 않는다.
+
+### 6.2 일반 App UI
+
+일반 App은 Windows/macOS/iOS/Android의 native widget 또는 Qt/Flutter 같은
+cross-platform widget UI를 의미한다.
+
+#### Native
+
+- Position, Scale, Rotation, Opacity
+- 상태별 Color와 기본 Shadow 변화
+- Hover/Pressed/Selected/Disabled 전환
+- Fade, Slide, Scale, Pop
+- 페이지/패널 전환
+- Progress 값 애니메이션
+
+#### Vector/Platform Effect
+
+- 지원 renderer의 gradient와 mask
+- 간단한 vector path/trim
+- 플랫폼 blur/material
+- 짧은 text reveal
+
+#### Baked
+
+- 복잡한 Path Morph
+- 글리프 단위 타이포그래피
+- Replicator, Particle
+- 복합 blur/glow/displacement
+- 2.5D Camera
+
+#### Actor Only
+
+- 독립 Motion composition
+- 캐릭터, 영상, 3D, 오디오 반응형 장면
+
+App 출력은 target framework의 실제 capability adapter가 있을 때만 Native로
+판정한다. 공통 문서에 특정 Qt/Flutter/Swift/Kotlin runtime class를 저장하지 않는다.
+
+### 6.3 Unreal UMG
+
+#### Native
 
 - Position, Scale, Rotation, Opacity
 - 기본 버튼 이벤트
 - 단순 Text/Image
+- Hover/Pressed/Released 상태 전환
+- UWidgetAnimation으로 표현 가능한 Entrance, Exit, Loop
 
-### Material
+#### Material
 
 - Fill, Stroke, Corner Radius, Progress 애니메이션
 - 지원 범위의 gradient/mask
 
-### Baked
+#### Baked
 
 - Path Morph
 - 복잡한 mask, blur, effect
 - 글리프 애니메이션
-- Particle, 3D, Motion Actor
+- 복잡한 Trim Path와 Repeater
+- UI 전용 Particle
 
-### Blocked
+#### Actor Only
+
+- 일반 UI 계층과 독립된 Motion Actor
+- Live2D, Spine, MMD, VRM
+- AR/PBR 3D 장면
+- 영상 Tracking과 오디오 반응형 장면
+
+#### Blocked
 
 - 누락 리소스
 - 깨진 stable ID 또는 revision 충돌
@@ -198,8 +318,42 @@ Motion에서 Painter로 돌아오는 값:
 - `native_only` 정책과 Material/Bake 요구의 충돌
 - bake가 금지된 고급 효과
 
-`Material`과 `Baked`는 실제 생성 경로와 Unreal 캡처 증거가 생기기 전까지
-지원 완료로 표시하지 않고 shared preflight에서 `Blocked`로 유지한다.
+UMG의 `Material`과 `Baked`는 실제 생성 경로와 Unreal 캡처 증거가 생기기
+전까지 지원 완료로 표시하지 않고 shared preflight에서 `Blocked`로 유지한다.
+
+### 6.4 기능별 target 요약
+
+| Motion 기능 | Web | 일반 App | Unreal UMG |
+|---|---|---|---|
+| Position/Scale/Rotation/Opacity | Native | Native | Native |
+| Hover/Pressed 상태 전환 | Native | Native | Native |
+| Fade/Slide/Pop/Pulse | Native | Native | Native |
+| Fill/Stroke/Progress | Native 또는 SVG | Native/Effect | Material |
+| Gradient/Mask | CSS/SVG/Canvas | Platform Effect | Material |
+| Trim Path | SVG | 조건부 Vector | Baked |
+| Path Morph | SVG/Canvas | Baked | Baked |
+| 글자 단위 Reveal | DOM/SVG/Canvas | 조건부 또는 Baked | Baked |
+| Blur/Glow | CSS/Canvas | Platform Effect/Baked | Material 또는 Baked |
+| Repeater/Particle | Canvas/WebGL | Baked | Baked |
+| 2.5D Camera | Canvas/WebGL/Baked | Baked | Actor Only |
+| Puppet/Rigging | Canvas/WebGL/Baked | Actor Only | Actor Only |
+| Live2D/Spine/MMD/VRM | Actor Only | Actor Only | Actor Only |
+| AR/PBR 3D | Actor Only | Actor Only | Actor Only |
+| Tracking/오디오 반응 | Actor Only | Actor Only | Actor Only |
+
+`Actor Only`는 기능을 Painter Inspector에 직접 펼치지 않고 완성된 Motion
+composition을 하나의 객체로 배치한다는 의미다.
+
+추가 target 규칙:
+
+- 판정 단위는 Motion Clip 전체가 아니라 property/feature다.
+- 하나의 binding에서 Transform은 Native이고 Blur는 Baked일 수 있다.
+- `Actor Only`는 `motion_actor` 객체에만 허용한다. 일반 Component binding에
+  Actor-only 기능이 있으면 preflight에서 차단한다.
+- App의 Native 판정은 framework-neutral capability다. 실제 Qt, WinUI,
+  SwiftUI, Android 또는 Flutter adapter가 없으면 `Blocked`나 `Baked`로 내린다.
+- 시각 요소를 Bake해도 접근성 role/label, focus order, hit-test 영역,
+  Interaction과 localization 가능한 텍스트 구조는 Native로 유지한다.
 
 ## 7. 실행 우선순위
 
@@ -213,6 +367,7 @@ Motion에서 Painter로 돌아오는 값:
 - [ ] 삭제, 복제, Detach, Localize, Variant 변경 시 binding 정책
 - [ ] 양쪽 Undo 경계와 동시 수정 충돌 보고
 - [ ] Painter/Motion/Tiger UMG 공통 preflight
+- [ ] Web/App/UMG target별 delivery capability와 fallback 결과 분리
 - [ ] Action/MCP inspect/migrate/relink/detach 제공
 
 완료 기준:
@@ -244,6 +399,8 @@ Motion에서 Painter로 돌아오는 값:
 ## P2. 전달과 고급 기능
 
 - [ ] Painter 구조와 Motion animation을 하나의 Tiger UMG 문서로 병합
+- [ ] Web CSS/DOM/SVG/Canvas delivery adapter와 manifest
+- [ ] App framework-neutral delivery 문서와 target adapter capability 계약
 - [ ] Fill/Stroke/Corner/Progress용 실제 UI Material 생성
 - [ ] deterministic raster/flipbook/video bake
 - [ ] Motion Actor GPU 프레임 공유
