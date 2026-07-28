@@ -81,7 +81,7 @@ def test_ui_design_workspace_is_opaque_and_uses_editor_canvas_gray() -> None:
 
 def test_ui_design_mode_expands_inspector_and_has_one_fit_tool_set() -> None:
     app = _app()
-    from PySide6.QtWidgets import QFrame
+    from PySide6.QtWidgets import QAbstractSpinBox, QFrame
 
     from app.drawing import PaintDialog, create_blank_paint_pixmap
     from app.i18n import current_language
@@ -104,6 +104,16 @@ def test_ui_design_mode_expands_inspector_and_has_one_fit_tool_set() -> None:
     assert dialog._painter_ui_template_strip.isVisible()
     assert dialog._painter_ui_template_strip.y() >= dialog._painter_menu_bar.height()
     assert dialog.property("canvasWorkspaceMode") == "ui_design"
+    assert not dialog._paint_top_bar.isVisible()
+    assert not dialog._tool_rail.isVisible()
+    assert not dialog._paint_ui_inspector.artboard_layout_frame.isVisible()
+    dialog._paint_ui_inspector.artboard_settings_toggle.click()
+    app.processEvents()
+    assert dialog._paint_ui_inspector.artboard_layout_frame.isVisible()
+    assert (
+        dialog._paint_ui_inspector.artboard_grid_count_spin.buttonSymbols()
+        == QAbstractSpinBox.ButtonSymbols.NoButtons
+    )
     assert not dialog._paint_layer_dock_panel.isVisible()
     assert dialog._painter_ui_overlay.geometry() == dialog._canvas_host.rect()
     assert dialog._paint_inspector_controls_scroll.parentWidget().width() >= 320
@@ -141,6 +151,12 @@ def test_ui_design_mode_expands_inspector_and_has_one_fit_tool_set() -> None:
         "PainterUICompactGrid",
     )
     assert [grid.layout().count() for grid in compact_grids] == [4, 5, 3]
+
+    dialog._set_canvas_workspace_mode("paint")
+    app.processEvents()
+    assert dialog._paint_top_bar.isVisible()
+    assert dialog._tool_rail.isVisible()
+    assert not dialog._painter_ui_template_strip.isVisible()
 
     dialog.close()
     dialog.deleteLater()

@@ -185,6 +185,8 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Mobile", "모바일", "モバイル", "移动端", "Mobile", "Mobil"),
     ("Console", "콘솔", "コンソール", "主机", "Console", "Konsole"),
     ("Broadcast", "방송", "放送", "播出", "Diffusion", "Broadcast"),
+    ("Artboard Settings", "아트보드 설정", "アートボード設定", "画板设置", "Reglages du plan de travail", "Zeichenflachen-Einstellungen"),
+    ("Show artboard context, layout grid, safe area, and guides", "아트보드 대상, 레이아웃 그리드, 안전 영역과 가이드를 표시합니다", "アートボードのコンテキスト、レイアウトグリッド、セーフエリア、ガイドを表示", "显示画板上下文、布局网格、安全区域和参考线", "Afficher le contexte, la grille, la zone sure et les reperes", "Kontext, Layoutraster, Sicherheitsbereich und Hilfslinien anzeigen"),
     ("Portrait", "세로", "縦", "竖屏", "Portrait", "Hochformat"),
     ("Landscape", "가로", "横", "横屏", "Paysage", "Querformat"),
     ("Light", "라이트", "ライト", "浅色", "Clair", "Hell"),

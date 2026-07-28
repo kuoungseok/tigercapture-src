@@ -6,6 +6,7 @@ from typing import Any, Mapping
 
 from PySide6.QtCore import QSize, Signal, Qt
 from PySide6.QtWidgets import (
+    QAbstractSpinBox,
     QAbstractItemView,
     QCheckBox,
     QComboBox,
@@ -74,6 +75,61 @@ class PainterUILayerList(QListWidget):
             placement = "after"
         self.hierarchy_drop_requested.emit(selected_ids, target_id, placement)
         event.acceptProposedAction()
+
+
+class _PainterUIDragValueMixin:
+    """Studio-style numeric field: type a value or drag horizontally."""
+
+    def __init__(self, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._drag_origin_x: float | None = None
+        self._drag_origin_value = 0.0
+        self._dragging_value = False
+        self.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
+        self.setCursor(Qt.CursorShape.SizeHorCursor)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_origin_x = float(event.globalPosition().x())
+            self._drag_origin_value = float(self.value())
+            self._dragging_value = False
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event) -> None:
+        if (
+            self._drag_origin_x is not None
+            and event.buttons() & Qt.MouseButton.LeftButton
+        ):
+            delta = float(event.globalPosition().x()) - self._drag_origin_x
+            if abs(delta) >= 3.0:
+                self._dragging_value = True
+                scale = 0.1 if event.modifiers() & Qt.KeyboardModifier.ShiftModifier else 1.0
+                if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
+                    scale = 10.0
+                self.setValue(
+                    self._drag_origin_value
+                    + delta * max(0.01, float(self.singleStep())) * scale
+                )
+                event.accept()
+                return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event) -> None:
+        dragged = self._dragging_value
+        self._drag_origin_x = None
+        self._dragging_value = False
+        if dragged and event.button() == Qt.MouseButton.LeftButton:
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
+
+
+class PainterUIDragSpinBox(_PainterUIDragValueMixin, QSpinBox):
+    pass
+
+
+class PainterUIDragDoubleSpinBox(_PainterUIDragValueMixin, QDoubleSpinBox):
+    pass
 
 
 class PainterUIInspector(QWidget):
@@ -240,18 +296,18 @@ class PainterUIInspector(QWidget):
         grid_metrics_layout = QGridLayout(grid_metrics)
         grid_metrics_layout.setContentsMargins(0, 0, 0, 0)
         grid_metrics_layout.setSpacing(3)
-        self.artboard_grid_count_spin = QSpinBox()
+        self.artboard_grid_count_spin = PainterUIDragSpinBox()
         self.artboard_grid_count_spin.setRange(1, 64)
         self.artboard_grid_count_spin.setPrefix("C ")
-        self.artboard_grid_size_spin = QDoubleSpinBox()
+        self.artboard_grid_size_spin = PainterUIDragDoubleSpinBox()
         self.artboard_grid_size_spin.setRange(2.0, 512.0)
         self.artboard_grid_size_spin.setPrefix("S ")
         self.artboard_grid_size_spin.setSuffix(" px")
-        self.artboard_grid_gutter_spin = QDoubleSpinBox()
+        self.artboard_grid_gutter_spin = PainterUIDragDoubleSpinBox()
         self.artboard_grid_gutter_spin.setRange(0.0, 10000.0)
         self.artboard_grid_gutter_spin.setPrefix("G ")
         self.artboard_grid_gutter_spin.setSuffix(" px")
-        self.artboard_grid_margin_spin = QDoubleSpinBox()
+        self.artboard_grid_margin_spin = PainterUIDragDoubleSpinBox()
         self.artboard_grid_margin_spin.setRange(0.0, 10000.0)
         self.artboard_grid_margin_spin.setPrefix("M ")
         self.artboard_grid_margin_spin.setSuffix(" px")
@@ -282,7 +338,7 @@ class PainterUIInspector(QWidget):
             ("R ", "right"),
             ("B ", "bottom"),
         )):
-            spin = QSpinBox()
+            spin = PainterUIDragSpinBox()
             spin.setRange(0, 16384)
             spin.setPrefix(prefix)
             spin.editingFinished.connect(self._emit_artboard_layout)
@@ -316,6 +372,23 @@ class PainterUIInspector(QWidget):
         self.artboard_layout_status_label.setObjectName("PaintMuted")
         self.artboard_layout_status_label.setWordWrap(True)
         artboard_layout_form.addRow("Status", self.artboard_layout_status_label)
+        self.artboard_settings_toggle = QPushButton("Artboard Settings")
+        self.artboard_settings_toggle.setObjectName("PainterUISectionHeader")
+        self.artboard_settings_toggle.setCheckable(True)
+        self.artboard_settings_toggle.setChecked(False)
+        self.artboard_settings_toggle.setIcon(
+            app_icon("sliders", size=13, color="#BFCADC")
+        )
+        self.artboard_settings_toggle.setIconSize(icon_size(13))
+        self.artboard_settings_toggle.setToolTip(
+            "Show artboard context, layout grid, safe area, and guides"
+        )
+        self.artboard_settings_toggle.toggled.connect(
+            artboard_layout_frame.setVisible
+        )
+        root.addWidget(self.artboard_settings_toggle)
+        self.artboard_layout_frame = artboard_layout_frame
+        artboard_layout_frame.setVisible(False)
         root.addWidget(artboard_layout_frame)
 
         tabs = QTabWidget()
@@ -539,7 +612,7 @@ class PainterUIInspector(QWidget):
         form.addRow("Type", self.kind_label)
         self.geometry_controls: dict[str, QDoubleSpinBox] = {}
         for key in ("x", "y", "width", "height", "rotation"):
-            spin = QDoubleSpinBox()
+            spin = PainterUIDragDoubleSpinBox()
             spin.setRange(
                 -180.0 if key == "rotation" else 0.0,
                 180.0 if key == "rotation" else 100000.0,
@@ -552,8 +625,8 @@ class PainterUIInspector(QWidget):
         pivot_layout = QHBoxLayout(pivot_row)
         pivot_layout.setContentsMargins(0, 0, 0, 0)
         pivot_layout.setSpacing(3)
-        self.pivot_x_spin = QDoubleSpinBox()
-        self.pivot_y_spin = QDoubleSpinBox()
+        self.pivot_x_spin = PainterUIDragDoubleSpinBox()
+        self.pivot_y_spin = PainterUIDragDoubleSpinBox()
         for label, spin in (("X ", self.pivot_x_spin), ("Y ", self.pivot_y_spin)):
             spin.setRange(0.0, 1.0)
             spin.setDecimals(2)
@@ -604,7 +677,7 @@ class PainterUIInspector(QWidget):
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.setSpacing(3)
             for prefix, key in (("W ", width_key), ("H ", height_key)):
-                spin = QDoubleSpinBox()
+                spin = PainterUIDragDoubleSpinBox()
                 spin.setRange(0.0, 100000.0)
                 spin.setDecimals(1)
                 spin.setPrefix(prefix)
@@ -762,7 +835,7 @@ class PainterUIInspector(QWidget):
             ("R ", "right"),
             ("B ", "bottom"),
         ):
-            spin = QDoubleSpinBox()
+            spin = PainterUIDragDoubleSpinBox()
             spin.setRange(0.0, 10000.0)
             spin.setDecimals(1)
             spin.setPrefix(prefix)
@@ -775,7 +848,7 @@ class PainterUIInspector(QWidget):
         auto_flow_layout = QHBoxLayout(auto_flow)
         auto_flow_layout.setContentsMargins(0, 0, 0, 0)
         auto_flow_layout.setSpacing(3)
-        self.auto_layout_gap_spin = QDoubleSpinBox()
+        self.auto_layout_gap_spin = PainterUIDragDoubleSpinBox()
         self.auto_layout_gap_spin.setRange(0.0, 10000.0)
         self.auto_layout_gap_spin.setDecimals(1)
         self.auto_layout_gap_spin.setPrefix("Gap ")
@@ -783,7 +856,7 @@ class PainterUIInspector(QWidget):
         self.auto_layout_gap_spin.editingFinished.connect(
             self._emit_properties
         )
-        self.auto_layout_cross_gap_spin = QDoubleSpinBox()
+        self.auto_layout_cross_gap_spin = PainterUIDragDoubleSpinBox()
         self.auto_layout_cross_gap_spin.setRange(0.0, 10000.0)
         self.auto_layout_cross_gap_spin.setDecimals(1)
         self.auto_layout_cross_gap_spin.setPrefix("Rows ")
@@ -833,7 +906,7 @@ class PainterUIInspector(QWidget):
         auto_cross_layout.addWidget(self.auto_layout_cross_combo)
         auto_cross_layout.addWidget(self.auto_layout_positioning_combo)
         form.addRow("Align / Position", auto_cross)
-        self.opacity_spin = QSpinBox()
+        self.opacity_spin = PainterUIDragSpinBox()
         self.opacity_spin.setRange(0, 100)
         self.opacity_spin.setSuffix("%")
         self.opacity_spin.editingFinished.connect(self._emit_properties)
@@ -846,13 +919,13 @@ class PainterUIInspector(QWidget):
         self.stroke_edit.setPlaceholderText("#RRGGBB")
         self.stroke_edit.editingFinished.connect(self._emit_properties)
         form.addRow("Stroke", self.stroke_edit)
-        self.stroke_width_spin = QDoubleSpinBox()
+        self.stroke_width_spin = PainterUIDragDoubleSpinBox()
         self.stroke_width_spin.setRange(0.0, 64.0)
         self.stroke_width_spin.setDecimals(1)
         self.stroke_width_spin.setSuffix(" px")
         self.stroke_width_spin.editingFinished.connect(self._emit_properties)
         form.addRow("Stroke Width", self.stroke_width_spin)
-        self.radius_spin = QDoubleSpinBox()
+        self.radius_spin = PainterUIDragDoubleSpinBox()
         self.radius_spin.setRange(0.0, 4096.0)
         self.radius_spin.setDecimals(1)
         self.radius_spin.setSuffix(" px")
@@ -878,11 +951,11 @@ class PainterUIInspector(QWidget):
         text_range_layout = QHBoxLayout(text_range_row)
         text_range_layout.setContentsMargins(0, 0, 0, 0)
         text_range_layout.setSpacing(3)
-        self.text_range_start_spin = QSpinBox()
-        self.text_range_end_spin = QSpinBox()
+        self.text_range_start_spin = PainterUIDragSpinBox()
+        self.text_range_end_spin = PainterUIDragSpinBox()
         self.text_range_start_spin.setPrefix("From ")
         self.text_range_end_spin.setPrefix("To ")
-        self.text_range_weight_spin = QSpinBox()
+        self.text_range_weight_spin = PainterUIDragSpinBox()
         self.text_range_weight_spin.setRange(100, 900)
         self.text_range_weight_spin.setSingleStep(100)
         self.text_range_weight_spin.setValue(700)
@@ -981,7 +1054,7 @@ class PainterUIInspector(QWidget):
         self.image_fit_combo.currentIndexChanged.connect(
             self._sync_image_control_states
         )
-        self.image_tile_scale_spin = QDoubleSpinBox()
+        self.image_tile_scale_spin = PainterUIDragDoubleSpinBox()
         self.image_tile_scale_spin.setRange(0.05, 16.0)
         self.image_tile_scale_spin.setDecimals(2)
         self.image_tile_scale_spin.setSingleStep(0.1)
@@ -1009,7 +1082,7 @@ class PainterUIInspector(QWidget):
             ("R ", "right"),
             ("B ", "bottom"),
         ):
-            spin = QDoubleSpinBox()
+            spin = PainterUIDragDoubleSpinBox()
             spin.setRange(0.0, 16384.0)
             spin.setDecimals(1)
             spin.setPrefix(prefix)
@@ -1022,7 +1095,7 @@ class PainterUIInspector(QWidget):
         text_metrics_layout = QHBoxLayout(text_metrics)
         text_metrics_layout.setContentsMargins(0, 0, 0, 0)
         text_metrics_layout.setSpacing(3)
-        self.font_size_spin = QDoubleSpinBox()
+        self.font_size_spin = PainterUIDragDoubleSpinBox()
         self.font_size_spin.setRange(1.0, 512.0)
         self.font_size_spin.setSuffix(" px")
         self.font_size_spin.editingFinished.connect(self._emit_properties)
@@ -1050,7 +1123,7 @@ class PainterUIInspector(QWidget):
         ):
             self.text_align_combo.addItem(label, alignment)
         self.text_align_combo.currentIndexChanged.connect(self._emit_properties)
-        self.line_height_spin = QDoubleSpinBox()
+        self.line_height_spin = PainterUIDragDoubleSpinBox()
         self.line_height_spin.setRange(0.5, 4.0)
         self.line_height_spin.setDecimals(2)
         self.line_height_spin.setSingleStep(0.05)
@@ -1085,7 +1158,7 @@ class PainterUIInspector(QWidget):
             self._emit_properties
         )
         form.addRow("A11y Label", self.accessibility_label_edit)
-        self.focus_order_spin = QSpinBox()
+        self.focus_order_spin = PainterUIDragSpinBox()
         self.focus_order_spin.setRange(0, 9999)
         self.focus_order_spin.setSpecialValueText("Auto")
         self.focus_order_spin.setToolTip(

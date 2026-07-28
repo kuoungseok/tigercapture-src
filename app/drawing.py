@@ -356,8 +356,8 @@ QFrame#PainterUITemplateStrip {
     background-color: #171b22;
     border: none;
     border-bottom: 1px solid #2b323e;
-    min-height: 40px;
-    max-height: 40px;
+    min-height: 50px;
+    max-height: 50px;
 }
 
 QDialog[canvasWorkspaceMode="ui_design"] QMenuBar#PaintMenuBar {
@@ -389,7 +389,7 @@ QFrame#PainterUITemplateDivider {
 
 QPushButton#PainterUITemplateBrowse,
 QPushButton#PainterUITemplateQuick {
-    background-color: #202630;
+    background-color: transparent;
     color: #dce6f7;
     border: 1px solid #343d4b;
     border-radius: 4px;
@@ -400,6 +400,29 @@ QPushButton#PainterUITemplateBrowse:hover,
 QPushButton#PainterUITemplateQuick:hover {
     background-color: #293342;
     border-color: #607795;
+}
+
+QPushButton#PainterUISectionHeader {
+    background-color: transparent;
+    color: #cbd5e3;
+    border: none;
+    border-top: 1px solid #2a323e;
+    border-bottom: 1px solid #2a323e;
+    border-radius: 0;
+    min-height: 28px;
+    padding: 2px 7px;
+    text-align: left;
+    font-weight: 700;
+}
+
+QPushButton#PainterUISectionHeader:hover {
+    background-color: #202833;
+}
+
+QPushButton#PainterUISectionHeader:checked {
+    background-color: #252f3c;
+    color: #ffffff;
+    border-bottom-color: #5d7898;
 }
 
 QPushButton#PainterUITemplateQuick:pressed {
@@ -8699,6 +8722,7 @@ class PaintDialog(QDialog):
 
         top_bar = QFrame()
         top_bar.setObjectName("PaintTopBar")
+        self._paint_top_bar = top_bar
         top_layout = QHBoxLayout(top_bar)
         top_layout.setContentsMargins(6, 4, 8, 4)
         top_layout.setSpacing(5)
@@ -12299,6 +12323,12 @@ class PaintDialog(QDialog):
                 button.blockSignals(True)
                 button.setChecked(checked)
                 button.blockSignals(False)
+        top_bar = getattr(self, "_paint_top_bar", None)
+        if top_bar is not None:
+            top_bar.setVisible(not ui_design)
+        tool_rail = getattr(self, "_tool_rail", None)
+        if tool_rail is not None:
+            tool_rail.setVisible(not ui_design)
         host = getattr(self, "_blockout_transform_host", None)
         if host is not None:
             host.setVisible(blockout)
