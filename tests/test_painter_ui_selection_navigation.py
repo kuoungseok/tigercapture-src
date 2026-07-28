@@ -1,0 +1,206 @@
+from __future__ import annotations
+
+import os
+
+
+def _app():
+    os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
+    os.environ.setdefault("TIGERSTUDIO_PAINTER_PANEL_SETTINGS", "0")
+    from PySide6.QtWidgets import QApplication
+
+    return QApplication.instance() or QApplication([])
+
+
+def _nested_document():
+    from app.painter_ui_document import add_ui_object, create_ui_document
+
+    document = create_ui_document(800, 600, name="Desktop")
+    document, root = add_ui_object(
+        document,
+        kind="frame",
+        name="Card",
+        x=80,
+        y=60,
+        width=420,
+        height=320,
+    )
+    document, group = add_ui_object(
+        document,
+        kind="group",
+        name="Header",
+        parent_id=root["id"],
+        x=100,
+        y=90,
+        width=360,
+        height=120,
+    )
+    document, text = add_ui_object(
+        document,
+        kind="text",
+        name="Title",
+        parent_id=group["id"],
+        x=120,
+        y=110,
+        width=220,
+        height=52,
+        content={"text": "Tiger Studio"},
+    )
+    document, badge = add_ui_object(
+        document,
+        kind="ellipse",
+        name="Badge",
+        parent_id=group["id"],
+        x=120,
+        y=110,
+        width=80,
+        height=52,
+    )
+    return document, root, group, text, badge
+
+
+def test_selection_navigation_walks_parent_and_topmost_deep_child() -> None:
+    from app.painter_ui_document import select_ui_object
+    from app.painter_ui_selection_navigation import (
+        select_deep_ui_object,
+        select_parent_ui_object,
+        ui_selection_path,
+    )
+
+    document, root, group, text, badge = _nested_document()
+    document = select_ui_object(document, text["id"])
+    assert [row["id"] for row in ui_selection_path(document)] == [
+        root["id"],
+        group["id"],
+        text["id"],
+    ]
+
+    document, parent_report = select_parent_ui_object(document)
+    assert parent_report["selected_object_id"] == group["id"]
+    assert document["selection"]["object_id"] == group["id"]
+
+    document, deep_report = select_deep_ui_object(document, root["id"])
+    assert deep_report["selected_object_id"] == badge["id"]
+    assert document["selection"]["object_id"] == badge["id"]
+
+    document = select_ui_object(document, root["id"])
+    document, root_report = select_parent_ui_object(document)
+    assert root_report["selected_object_id"] == root["id"]
+    assert document["selection"]["object_id"] == root["id"]
+
+
+def test_breadcrumb_emits_requested_ancestor_and_hides_for_root() -> None:
+    app = _app()
+    from PySide6.QtWidgets import QPushButton, QWidget
+
+    from app.painter_ui_document import select_ui_object
+    from app.painter_ui_selection_breadcrumb import (
+        PainterUISelectionBreadcrumb,
+    )
+
+    document, root, group, text, _badge = _nested_document()
+    document = select_ui_object(document, text["id"])
+    host = QWidget()
+    host.resize(900, 700)
+    breadcrumb = PainterUISelectionBreadcrumb(host)
+    requested: list[str] = []
+    breadcrumb.object_requested.connect(requested.append)
+    breadcrumb.set_document(document)
+    host.show()
+    app.processEvents()
+
+    buttons = breadcrumb.findChildren(
+        QPushButton,
+        "PainterUIBreadcrumbItem",
+    )
+    assert [button.text() for button in buttons] == [
+        "Card",
+        "Header",
+        "Title",
+    ]
+    buttons[1].click()
+    assert requested == [group["id"]]
+    assert breadcrumb.isVisible()
+    assert breadcrumb.width() > 140
+    assert breadcrumb.height() == 30
+
+    breadcrumb.set_document(select_ui_object(document, root["id"]))
+    app.processEvents()
+    assert not breadcrumb.isVisible()
+    host.close()
+    host.deleteLater()
+    app.processEvents()
+
+
+def test_overlay_hit_stack_returns_topmost_then_ancestors() -> None:
+    app = _app()
+    from PySide6.QtCore import QPointF
+
+    from app.painter_ui_workspace import PainterUIDesignOverlay
+
+    document, root, group, text, badge = _nested_document()
+    overlay = PainterUIDesignOverlay()
+    overlay.resize(1000, 760)
+    overlay.set_document(document)
+    overlay.show()
+    app.processEvents()
+
+    rect = overlay._object_rect(badge)
+    point = QPointF(rect.center())
+    hits = overlay.object_ids_at(point.x(), point.y())
+    assert hits[:4] == [
+        badge["id"],
+        text["id"],
+        group["id"],
+        root["id"],
+    ]
+    overlay.close()
+    overlay.deleteLater()
+    app.processEvents()
+
+
+def test_selection_navigation_actions_share_dialog_selection_state() -> None:
+    app = _app()
+    from app.actions.registry import ActionRegistry
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    document, root, group, _text, badge = _nested_document()
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(800, 600, "#FFFFFF"),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog._painter_ui_document = document
+    dialog._set_canvas_workspace_mode("ui_design")
+    dialog._refresh_painter_ui_overlay()
+    registry = ActionRegistry(owner=dialog)
+
+    parent = registry.execute(
+        "paint.ui.selection.parent",
+        {"object_id": badge["id"]},
+    ).to_dict()
+    assert parent["ok"]
+    assert parent["result"]["selection_navigation"][
+        "selected_object_id"
+    ] == group["id"]
+
+    deep = registry.execute(
+        "paint.ui.selection.deep_select",
+        {"object_id": root["id"]},
+    ).to_dict()
+    assert deep["ok"]
+    assert deep["result"]["selection_navigation"][
+        "selected_object_id"
+    ] == badge["id"]
+    assert deep["result"]["ui_design"]["selected_object_id"] == badge["id"]
+
+    invalid = registry.execute(
+        "paint.ui.selection.deep_select",
+        {"x": 100},
+    ).to_dict()
+    assert not invalid["ok"]
+    assert "requires both x and y" in invalid["error"]
+
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()

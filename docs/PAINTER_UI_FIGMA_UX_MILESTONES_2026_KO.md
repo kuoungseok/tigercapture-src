@@ -281,6 +281,18 @@ Required Actions:
 - `paint.ui.image.fill.set`
 - `paint.ui.quick_action.search`
 
+Implemented checkpoint (2026-07-29, hierarchy navigation slice):
+
+- `paint.ui.selection.parent` selects the immediate stable-ID parent and keeps
+  a root selection unchanged when no parent exists.
+- `paint.ui.selection.deep_select` selects the deepest topmost child or cycles
+  the deterministic hit stack when canvas coordinates are supplied.
+- Alt-click cycles overlapping objects through the same canvas hit-test stack.
+- A compact canvas breadcrumb appears only for nested selections and lets the
+  user jump to any visible ancestor without mutating document history.
+- The UI context menu, breadcrumb, and Actions share the same selection service.
+- Enter/exit group editing remains a separate follow-up.
+
 Exit criteria:
 
 - Common object editing is possible without repeatedly moving to Inspector.

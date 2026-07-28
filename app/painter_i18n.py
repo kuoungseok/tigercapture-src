@@ -377,6 +377,8 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("Fit all artboards", "모든 아트보드 맞춤", "すべてのアートボードに合わせる", "适配所有画板", "Ajuster tous les plans de travail", "Alle Zeichenflächen einpassen"),
     ("Fit active artboard", "현재 아트보드 맞춤", "現在のアートボードに合わせる", "适配当前画板", "Ajuster le plan de travail actif", "Aktive Zeichenfläche einpassen"),
     ("Fit selection", "선택 영역 맞춤", "選択範囲に合わせる", "适配所选内容", "Ajuster à la sélection", "Auswahl einpassen"),
+    ("Select parent", "상위 객체 선택", "親オブジェクトを選択", "选择父对象", "Sélectionner le parent", "Übergeordnetes Objekt auswählen"),
+    ("Deep select", "깊은 객체 선택", "深いオブジェクトを選択", "深层选择", "Sélection profonde", "Tiefenauswahl"),
     ("Advanced properties", "고급 속성", "詳細プロパティ", "高级属性", "Propriétés avancées", "Erweiterte Eigenschaften"),
 )
 

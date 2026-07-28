@@ -659,6 +659,25 @@ class PainterUIDesignOverlay(QWidget):
             height * scale,
         )
 
+    def object_ids_at(self, x: float, y: float) -> list[str]:
+        position = QPointF(float(x), float(y))
+        hits: list[str] = []
+        for row in self._visible_objects(reverse=True):
+            if not self._point_visible_in_parent_clips(row, position):
+                continue
+            if not self._point_visible_in_object_mask(row, position):
+                continue
+            rect = self._object_rect(row)
+            local_position = self._unrotated_point(
+                position,
+                rect,
+                float(row.get("rotation", 0.0)),
+                row.get("constraints"),
+            )
+            if rect.contains(local_position):
+                hits.append(str(row["id"]))
+        return hits
+
     def _display_rotation(self, row: Mapping[str, Any]) -> float:
         preview = self._motion_preview.get(str(row["id"]))
         if preview is not None:
@@ -1597,27 +1616,29 @@ class PainterUIDesignOverlay(QWidget):
                     event.accept()
                     return
 
-        selected = ""
-        selected_row = None
-        for row in self._visible_objects(reverse=True):
-            if not self._point_visible_in_parent_clips(
-                row,
-                event.position(),
-            ):
-                continue
-            if not self._point_visible_in_object_mask(row, event.position()):
-                continue
-            rect = self._object_rect(row)
-            local_position = self._unrotated_point(
-                event.position(),
-                rect,
-                float(row.get("rotation", 0.0)),
-                row.get("constraints"),
+        hit_ids = self.object_ids_at(
+            float(event.position().x()),
+            float(event.position().y()),
+        )
+        selected = hit_ids[0] if hit_ids else ""
+        if (
+            hit_ids
+            and event.modifiers() & Qt.KeyboardModifier.AltModifier
+        ):
+            current = str(self._document["selection"]["object_id"] or "")
+            selected = (
+                hit_ids[(hit_ids.index(current) + 1) % len(hit_ids)]
+                if current in hit_ids
+                else hit_ids[0]
             )
-            if rect.contains(local_position):
-                selected = row["id"]
-                selected_row = row
-                break
+        selected_row = next(
+            (
+                row
+                for row in self._document["objects"]
+                if row["id"] == selected
+            ),
+            None,
+        )
         if selected_row is None:
             for artboard in reversed(self._document["artboards"]):
                 viewport, _scale = self._artboard_viewport(artboard)

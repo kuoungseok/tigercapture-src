@@ -751,6 +751,10 @@ overlay mode로 전환한다.
   selection shows only operations that mutate the full selection.
 - Text-only, image-only, frame/auto-layout, and component controls must not
   remain visible for unrelated object kinds.
+- Nested selection is canvas-first: Alt-click cycles a deterministic overlap
+  stack, while a compact stable-ID breadcrumb exposes visible ancestors.
+  `paint.ui.selection.parent/deep_select` use the same selection service and
+  never add document history.
 - Advanced disclosure owns constraints and responsive limits, accessibility,
   delivery, text-range, 9-slice, boolean, and remote-component controls. It is
   collapsed by default and does not create a parallel mutation path.

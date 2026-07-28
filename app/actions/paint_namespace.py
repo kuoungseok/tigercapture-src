@@ -990,6 +990,34 @@ def register_paint_actions(registry: Any) -> None:
         dry_summary="the active Painter UI selection would change",
     )
     registry.register_adapter_action(
+        "paint.ui.selection.parent",
+        "Select the immediate parent of a Painter UI object without changing the document.",
+        "paint",
+        "paint_ui_selection_parent",
+        params_schema=schema_object(
+            {"object_id": {"type": "string"}}
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="the parent UI object would be selected",
+    )
+    registry.register_adapter_action(
+        "paint.ui.selection.deep_select",
+        "Select the deepest topmost child, or cycle overlapping objects at a canvas point.",
+        "paint",
+        "paint_ui_selection_deep_select",
+        params_schema=schema_object(
+            {
+                "object_id": {"type": "string"},
+                "x": {"type": "number"},
+                "y": {"type": "number"},
+            }
+        ),
+        mutating=False,
+        changed=False,
+        dry_summary="the deepest or next overlapping UI object would be selected",
+    )
+    registry.register_adapter_action(
         "paint.ui.object.arrange",
         "Align or distribute the selected Painter UI objects.",
         "paint",

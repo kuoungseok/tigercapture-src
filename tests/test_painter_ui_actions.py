@@ -64,6 +64,8 @@ def test_painter_ui_actions_workspace_undo_and_native_round_trip(
         "paint.ui.object.update",
         "paint.ui.object.remove",
         "paint.ui.selection.set",
+        "paint.ui.selection.parent",
+        "paint.ui.selection.deep_select",
         "paint.ui.object.arrange",
         "paint.ui.object.group",
         "paint.ui.object.ungroup",

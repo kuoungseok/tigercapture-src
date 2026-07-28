@@ -1410,6 +1410,40 @@ class PaintAdapterMixin(
         )
         return dialog.painter_action_state()
 
+    def paint_ui_selection_parent(
+        self,
+        *,
+        object_id: str = "",
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        report = dialog._select_parent_painter_ui_object(
+            str(object_id or "")
+        )
+        state = dialog.painter_action_state()
+        state["selection_navigation"] = report
+        return state
+
+    def paint_ui_selection_deep_select(
+        self,
+        *,
+        object_id: str = "",
+        x: float | None = None,
+        y: float | None = None,
+    ) -> dict[str, Any]:
+        if (x is None) != (y is None):
+            raise ValueError(
+                "paint.ui.selection.deep_select requires both x and y"
+            )
+        dialog = self._paint_dialog_owner()
+        report = dialog._deep_select_painter_ui_object(
+            str(object_id or ""),
+            x=x,
+            y=y,
+        )
+        state = dialog.painter_action_state()
+        state["selection_navigation"] = report
+        return state
+
     def paint_ui_object_arrange(self, *, command: str) -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         selected = str(

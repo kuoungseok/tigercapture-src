@@ -277,6 +277,33 @@ QLabel#PainterUIZoomIndicator {
     font-weight: 600;
 }
 
+QFrame#PainterUISelectionBreadcrumb {
+    background-color: #171c23;
+    border: 1px solid #3b4755;
+    border-radius: 5px;
+}
+
+QPushButton#PainterUIBreadcrumbItem {
+    background-color: transparent;
+    color: #cbd5e1;
+    border: none;
+    border-radius: 3px;
+    min-height: 22px;
+    padding: 0 6px;
+    font-size: 10px;
+}
+
+QPushButton#PainterUIBreadcrumbItem:hover {
+    background-color: #2a3542;
+    color: #ffffff;
+}
+
+QPushButton#PainterUIBreadcrumbSeparator {
+    background-color: transparent;
+    border: none;
+    padding: 0;
+}
+
 QPushButton#PainterUIFloatingToolButton,
 QToolButton#PainterUIFloatingToolButton {
     background-color: transparent;
@@ -9632,6 +9659,16 @@ class PaintDialog(QDialog):
             self._reset_painter_ui_ruler_origin
         )
         self._painter_ui_overlay.hide()
+        from app.painter_ui_selection_breadcrumb import (
+            PainterUISelectionBreadcrumb,
+        )
+
+        self._painter_ui_selection_breadcrumb = (
+            PainterUISelectionBreadcrumb(canvas_host)
+        )
+        self._painter_ui_selection_breadcrumb.object_requested.connect(
+            self._select_painter_ui_object
+        )
 
         self._bg_label = QLabel(canvas_host)
         self._bg_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -12779,6 +12816,17 @@ class PaintDialog(QDialog):
                 self._refresh_painter_ui_overlay()
                 overlay.raise_()
                 overlay.setFocus(Qt.FocusReason.OtherFocusReason)
+        breadcrumb = getattr(
+            self,
+            "_painter_ui_selection_breadcrumb",
+            None,
+        )
+        if breadcrumb is not None:
+            breadcrumb.setVisible(
+                ui_design and breadcrumb.layout().count() > 0
+            )
+            if ui_design:
+                breadcrumb.place()
 
     def _sync_painter_menu_mode(self, workspace_mode: str) -> None:
         ui_design = str(workspace_mode or "") == "ui_design"
@@ -12835,6 +12883,74 @@ class PaintDialog(QDialog):
             primary_object_id=str(primary_object_id or ""),
         )
         self._refresh_painter_ui_overlay()
+
+    def _select_parent_painter_ui_object(
+        self,
+        object_id: str = "",
+    ) -> dict:
+        from app.painter_ui_selection_navigation import (
+            select_parent_ui_object,
+        )
+
+        document, report = select_parent_ui_object(
+            getattr(self, "_painter_ui_document", None),
+            str(object_id or ""),
+        )
+        self._painter_ui_document = document
+        self._refresh_painter_ui_overlay()
+        return report
+
+    def _deep_select_painter_ui_object(
+        self,
+        object_id: str = "",
+        *,
+        x: float | None = None,
+        y: float | None = None,
+    ) -> dict:
+        document = getattr(self, "_painter_ui_document", None)
+        if x is not None and y is not None:
+            overlay = getattr(self, "_painter_ui_overlay", None)
+            hit_ids = (
+                overlay.object_ids_at(float(x), float(y))
+                if overlay is not None
+                else []
+            )
+            current = str(
+                ((document or {}).get("selection") or {}).get("object_id")
+                or ""
+            )
+            selected = (
+                hit_ids[(hit_ids.index(current) + 1) % len(hit_ids)]
+                if current in hit_ids
+                else hit_ids[0] if hit_ids else ""
+            )
+            if selected:
+                self._select_painter_ui_object(selected)
+            from app.painter_ui_selection_navigation import ui_selection_path
+
+            return {
+                "selected_object_id": selected,
+                "hit_object_ids": hit_ids,
+                "path": [
+                    {
+                        "id": row["id"],
+                        "name": row["name"],
+                        "kind": row["kind"],
+                    }
+                    for row in ui_selection_path(
+                        getattr(self, "_painter_ui_document", None)
+                    )
+                ],
+            }
+        from app.painter_ui_selection_navigation import select_deep_ui_object
+
+        updated, report = select_deep_ui_object(
+            document,
+            str(object_id or ""),
+        )
+        self._painter_ui_document = updated
+        self._refresh_painter_ui_overlay()
+        return report
 
     def _set_painter_ui_artboard(self, artboard_id: str) -> None:
         from app.painter_ui_document import set_active_ui_artboard
@@ -14552,6 +14668,15 @@ class PaintDialog(QDialog):
             navigator.set_document(
                 getattr(self, "_painter_ui_document", None)
             )
+        breadcrumb = getattr(
+            self,
+            "_painter_ui_selection_breadcrumb",
+            None,
+        )
+        if breadcrumb is not None:
+            breadcrumb.set_document(
+                getattr(self, "_painter_ui_document", None)
+            )
         selected = str(
             (
                 (getattr(self, "_painter_ui_document", {}) or {}).get(
@@ -14639,6 +14764,8 @@ class PaintDialog(QDialog):
             and hasattr(toolbar, "place_in_parent")
         ):
             toolbar.place_in_parent()
+        if breadcrumb is not None:
+            breadcrumb.place()
 
     def _place_painter_ui_motion_actor(
         self,
@@ -22439,6 +22566,36 @@ class PaintDialog(QDialog):
         return menu
 
     def _show_canvas_context_menu(self, global_pos: QPoint) -> None:
+        if str(getattr(self, "_canvas_workspace_mode", "")) == "ui_design":
+            from app.painter_i18n import painter_text
+
+            menu = QMenu(self)
+            current = getattr(self, "_painter_ui_document", {}) or {}
+            selected = str(
+                (current.get("selection") or {}).get("object_id") or ""
+            )
+            parent_action = menu.addAction(painter_text("Select parent"))
+            deep_action = menu.addAction(painter_text("Deep select"))
+            parent_action.setEnabled(bool(selected))
+            deep_action.setEnabled(bool(selected))
+            parent_action.triggered.connect(
+                lambda _checked=False: (
+                    self._select_parent_painter_ui_object()
+                )
+            )
+            deep_action.triggered.connect(
+                lambda _checked=False: (
+                    self._deep_select_painter_ui_object()
+                )
+            )
+            menu.addSeparator()
+            fit_action = menu.addAction(painter_text("Fit selection"))
+            fit_action.setEnabled(bool(selected))
+            fit_action.triggered.connect(
+                lambda: self._fit_painter_ui_view("selection")
+            )
+            menu.exec(global_pos)
+            return
         menu = self._build_canvas_context_menu()
         menu.exec(global_pos)
 
@@ -22475,6 +22632,13 @@ class PaintDialog(QDialog):
         if toolbar is not None and hasattr(toolbar, "sync_density"):
             toolbar.sync_density(int(host.width()))
             toolbar.place_in_parent()
+        breadcrumb = getattr(
+            self,
+            "_painter_ui_selection_breadcrumb",
+            None,
+        )
+        if breadcrumb is not None:
+            breadcrumb.place()
         navigator = getattr(self, "_painter_ui_navigator", None)
         if (
             str(getattr(self, "_canvas_workspace_mode", "paint"))
@@ -22883,6 +23047,17 @@ class PaintDialog(QDialog):
             and str(getattr(self, "_canvas_workspace_mode", "paint")) == "ui_design"
         ):
             ui_toolbar.place_in_parent()
+        breadcrumb = getattr(
+            self,
+            "_painter_ui_selection_breadcrumb",
+            None,
+        )
+        if (
+            breadcrumb is not None
+            and str(getattr(self, "_canvas_workspace_mode", "paint"))
+            == "ui_design"
+        ):
+            breadcrumb.place()
         # Re-lay out any speech bubble items so their normalized coords map
         # onto the current canvas rect.
         for item in getattr(self, "_bubble_items", []):

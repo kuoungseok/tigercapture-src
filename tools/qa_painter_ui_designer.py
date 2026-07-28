@@ -278,6 +278,44 @@ def main() -> int:
         output_dir / "painter_ui_designer_m1_hierarchy.png"
     )
     dialog.grab().save(str(hierarchy_screenshot_path), "PNG")
+    dialog._paint_ui_inspector.set_auto_hide(False)
+    registry.execute(
+        "paint.ui.selection.set",
+        {
+            "object_ids": [desktop_object_ids[1]],
+            "primary_object_id": desktop_object_ids[1],
+        },
+    )
+    app.processEvents()
+    breadcrumb = dialog._painter_ui_selection_breadcrumb
+    breadcrumb_ok = (
+        breadcrumb.isVisible()
+        and breadcrumb.layout().count() >= 3
+    )
+    breadcrumb_screenshot_path = (
+        output_dir / "painter_ui_designer_m1_breadcrumb.png"
+    )
+    dialog.grab().save(str(breadcrumb_screenshot_path), "PNG")
+    parent_selected = registry.execute(
+        "paint.ui.selection.parent",
+        {"object_id": desktop_object_ids[1]},
+    ).to_dict()
+    deep_selected = registry.execute(
+        "paint.ui.selection.deep_select",
+        {"object_id": group_id},
+    ).to_dict()
+    hierarchy_navigation_ok = (
+        parent_selected.get("ok") is True
+        and parent_selected["result"]["selection_navigation"][
+            "selected_object_id"
+        ] == group_id
+        and deep_selected.get("ok") is True
+        and bool(
+            deep_selected["result"]["selection_navigation"][
+                "selected_object_id"
+            ]
+        )
+    )
     navigator = dialog._painter_ui_navigator
     navigator.set_collapsed(False, user_initiated=True)
     navigator.set_expanded_width(
@@ -479,6 +517,7 @@ def main() -> int:
             and inspect_screenshot_path.is_file()
             and desktop_screenshot_path.is_file()
             and hierarchy_screenshot_path.is_file()
+            and breadcrumb_screenshot_path.is_file()
             and navigator_screenshot_path.is_file()
             and inspector_resized_screenshot_path.is_file()
             and inspector_detached_screenshot_path.is_file()
@@ -495,6 +534,8 @@ def main() -> int:
             and quick_properties_ok
             and zoom_popover_ok
             and compact_zoom_ok
+            and breadcrumb_ok
+            and hierarchy_navigation_ok
             and navigator.expanded_width()
             == navigator.DEFAULT_EXPANDED_WIDTH
         ),
@@ -502,6 +543,7 @@ def main() -> int:
         "inspect_screenshot": str(inspect_screenshot_path),
         "desktop_screenshot": str(desktop_screenshot_path),
         "hierarchy_screenshot": str(hierarchy_screenshot_path),
+        "breadcrumb_screenshot": str(breadcrumb_screenshot_path),
         "navigator_screenshot": str(navigator_screenshot_path),
         "inspector_resized_screenshot": str(
             inspector_resized_screenshot_path
@@ -523,6 +565,8 @@ def main() -> int:
         "quick_properties_ok": quick_properties_ok,
         "zoom_popover_ok": zoom_popover_ok,
         "compact_zoom_ok": compact_zoom_ok,
+        "breadcrumb_ok": breadcrumb_ok,
+        "hierarchy_navigation_ok": hierarchy_navigation_ok,
         "context_visibility": {
             "text": text_context_ok,
             "image": image_context_ok,

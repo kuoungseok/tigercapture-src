@@ -81,6 +81,8 @@ Focused entry points:
   selection; advanced rows stay behind the shared Advanced properties toggle.
   User-adjusted side-panel widths and collapsed states persist independently
   from responsive automatic collapse.
+  Nested UI selections expose a canvas breadcrumb; parent/deep selection and
+  Alt-click overlap cycling share `paint.ui.selection.parent/deep_select`.
   As of 2026-07-27 the local M2A-M6 production foundation is implemented:
   `.tstemplate` packages and local library state, review comments/checkpoints,
   revision diff, self-contained prototype, production asset export, shared

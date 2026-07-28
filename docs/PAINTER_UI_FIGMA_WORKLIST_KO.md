@@ -56,6 +56,9 @@ P1 implementation checkpoint (2026-07-26, navigation slice):
   selection overlay, pinned, and floating presentations. UI and automation
   share `paint.ui.inspector.presentation`.
 - Clicking another artboard or one of its objects activates that artboard.
+- Nested selections expose a compact ancestor breadcrumb. Alt-click cycles the
+  deterministic overlap stack, while `paint.ui.selection.parent/deep_select`
+  provide the same navigation to automation without document mutation.
 - Dragging empty canvas space creates a marquee selection; Shift adds and Ctrl
   toggles intersecting objects on the active artboard.
 - Corner resize supports Shift aspect lock and Alt center-based scaling.
