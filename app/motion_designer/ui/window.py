@@ -1070,6 +1070,7 @@ class MotionDesignerWindow(QMainWindow):
         self.glass.apply_requested.connect(self._apply_glass_material)
         self.glass.remove_requested.connect(self._remove_glass_material)
         self.collage.create_requested.connect(self._create_collage_board)
+        self.collage.asset_requested.connect(self._add_collage_asset)
         self.collage.edge_requested.connect(self._set_collage_edge)
         self.collage.attachment_requested.connect(
             self._set_collage_attachment,
@@ -3073,6 +3074,17 @@ class MotionDesignerWindow(QMainWindow):
         )
         candidate.revision += 1
         self.controller.replace(candidate)
+
+    def _add_collage_asset(self, asset_id: str, seed: int) -> None:
+        from app.motion_designer.collage_assets import create_collage_asset_layer
+
+        layer = create_collage_asset_layer(
+            self.controller.composition,
+            str(asset_id),
+            seed=int(seed),
+        )
+        self.controller.add_layer(layer)
+        self._select_layer(layer.id)
 
     def _set_collage_edge(
         self,

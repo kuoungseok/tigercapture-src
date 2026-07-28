@@ -19,6 +19,10 @@ from app.motion_designer.collage import (
     set_collage_scan_cleanup,
     update_collage_item,
 )
+from app.motion_designer.collage_assets import (
+    collage_asset_catalog,
+    create_collage_asset_layer,
+)
 
 
 class MotionCollageAdapterMixin:
@@ -42,6 +46,30 @@ class MotionCollageAdapterMixin:
         composition = self._motion_store()[composition_id]
         boards = collage_boards(composition)
         return {"count": len(boards), "boards": boards}
+
+    def motion_collage_asset_catalog(self) -> dict[str, Any]:
+        assets = collage_asset_catalog()
+        return {"count": len(assets), "assets": assets}
+
+    def motion_collage_asset_add(
+        self,
+        *,
+        composition_id: str,
+        asset_id: str,
+        seed: int = 17,
+    ) -> dict[str, Any]:
+        composition = self._motion_store()[composition_id]
+        layer = create_collage_asset_layer(
+            composition,
+            asset_id,
+            seed=seed,
+        )
+        composition.layers.append(layer)
+        return self._motion_collage_changed(
+            composition,
+            "Add Collage Material",
+            layer=layer.to_dict(),
+        )
 
     def motion_collage_create(
         self,

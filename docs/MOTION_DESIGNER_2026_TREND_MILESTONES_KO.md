@@ -388,10 +388,16 @@ UMG:
 - `tools/qa_motion_collage.py`가 공용 export renderer로 10초 Editorial
   Collage, Luxury Paper Title, Education Cutaway 3종을 12프레임 렌더하고
   contact sheet, timing JSON, stable ID loss 0 증거를 생성한다.
-- v1 이후 확장 범위는 실제 배포용 종이/테이프/잉크 durable asset pack,
-  Painter 창에 직접 객체를 생성하는 양방향 transport, frame drawing
-  exposure/onion-skin UI다. 이 후속 범위는 v1의 보드·렌더·Action 계약
-  완료 주장을 막지 않는다.
+- `tigerstudio.motion.collage_asset_pack.v1`은 Cotton Paper, Kraft
+  Cardboard, Newsprint, Masking Tape, Black Ink Card, Graphite Sheet를
+  외부 바이너리 없이 결정론적 shape와 Craft 효과로 생성한다. 빈
+  프로젝트에서도 `Look > Collage`의 Starter Material로 바로 추가할 수
+  있고 `motion.collage.asset.catalog/add` Action/MCP가 같은 editable
+  layer 계약을 사용한다. `tools/qa_motion_collage_asset_pack.py`는 6개
+  재료를 공용 renderer로 비교한다.
+- v1 이후 확장 범위는 Painter 창에 직접 객체를 생성하는 양방향
+  transport와 frame drawing exposure/onion-skin UI다. 이 후속 범위는
+  v1의 보드·렌더·Action 계약 완료 주장을 막지 않는다.
 
 목표: AI가 잘라준 레이어를 단순 이동하는 수준에서 벗어나, 종이와 손그림을
 직접 조합하는 작업 흐름을 제공한다.

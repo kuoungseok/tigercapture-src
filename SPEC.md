@@ -6656,14 +6656,19 @@ AI Script Edit MVP integration:
   `tigerstudio.motion.collage.painter_handoff.v1`; v1 provides the stable
   handoff contract, while direct live Painter-object creation remains a later
   transport extension.
+- The built-in `tigerstudio.motion.collage_asset_pack.v1` adds Cotton Paper,
+  Kraft Cardboard, Newsprint, Masking Tape, Black Ink Card, and Graphite Sheet
+  as deterministic editable shape/Craft layers with no external binary
+  dependency. Beginners can add one from `Look > Collage` before a board
+  exists; automation uses `motion.collage.asset.catalog/add`.
 - Unreal conversion never silently omits collage semantics:
   `motion_feature_requires_bake:collage_item` requests deterministic bake.
   `tools/qa_motion_collage.py` renders 10-second Editorial Collage, Luxury
   Paper Title, and Education Cutaway scenes through the shared exporter,
   generates a 12-frame contact sheet and timing report, and verifies zero
-  stable-ID loss across source replacement and Painter linking. A curated
-  distributable paper/tape/ink asset pack and frame-drawing exposure/onion-skin
-  UI remain post-v1 extensions.
+  stable-ID loss across source replacement and Painter linking.
+  `tools/qa_motion_collage_asset_pack.py` renders all six starter materials.
+  Frame-drawing exposure/onion-skin UI remains a post-v1 extension.
 - M25 Stop-motion Timing and CGI v1 is implemented through
   `tigerstudio.motion.stop_motion.v1`. Composition and layer overrides support
   ones, twos, and threes exposure, locked deterministic pose jitter,

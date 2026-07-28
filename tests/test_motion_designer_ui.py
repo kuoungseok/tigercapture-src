@@ -331,6 +331,29 @@ def test_craft_inspector_exposes_advanced_imperfection_controls() -> None:
     app.processEvents()
 
 
+def test_collage_starter_material_can_begin_from_an_empty_project() -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    app = QApplication.instance() or QApplication([])
+    window = MotionDesignerWindow(MotionComposition(
+        width=640,
+        height=360,
+        duration_ms=1000,
+    ))
+    assert window.collage.asset_button.isEnabled()
+    window.collage.asset_requested.emit("newsprint", 81)
+    app.processEvents()
+    layer = window.controller.composition.layers[0]
+    assert layer.name == "Newsprint"
+    assert layer.metadata["collage_asset"]["asset_id"] == "newsprint"
+    assert layer.metadata["collage_asset"]["seed"] == 81
+    assert layer.effects[0].kind == "craft_style"
+    assert window._selected_layer_id == layer.id
+    window.close()
+    app.processEvents()
+
+
 def test_painterly_inspector_edits_colors_and_texture_blend(tmp_path) -> None:
     existing = QCoreApplication.instance()
     if existing is not None and not isinstance(existing, QApplication):

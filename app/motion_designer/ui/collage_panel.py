@@ -22,10 +22,12 @@ from app.motion_designer.collage import (
     COLLAGE_LAYOUTS,
     collage_boards,
 )
+from app.motion_designer.collage_assets import collage_asset_catalog
 from app.motion_designer.schema import MotionComposition, MotionLayer
 
 
 class CollagePanel(QWidget):
+    asset_requested = Signal(str, int)
     create_requested = Signal(str, int)
     edge_requested = Signal(str, float, float, int)
     attachment_requested = Signal(str, str, float, float)
@@ -48,6 +50,15 @@ class CollagePanel(QWidget):
         root.addWidget(self.status)
 
         form = QFormLayout()
+        self.asset = QComboBox(self)
+        for row in collage_asset_catalog():
+            self.asset.addItem(str(row["name"]), str(row["id"]))
+            self.asset.setItemData(
+                self.asset.count() - 1,
+                str(row["description"]),
+                3,
+            )
+        form.addRow("Starter Material", self.asset)
         self.layout_mode = QComboBox(self)
         for value in COLLAGE_LAYOUTS:
             self.layout_mode.addItem(value.replace("_", " ").title(), value)
@@ -102,10 +113,12 @@ class CollagePanel(QWidget):
         root.addLayout(form)
 
         buttons = QHBoxLayout()
+        self.asset_button = QPushButton("Add Material", self)
         self.create_button = QPushButton("Create Board", self)
         self.edge_button = QPushButton("Apply Edge", self)
         self.attachment_button = QPushButton("Attach", self)
         self.scan_button = QPushButton("Clean Scan", self)
+        root.addWidget(self.asset_button)
         buttons.addWidget(self.create_button)
         buttons.addWidget(self.edge_button)
         buttons.addWidget(self.attachment_button)
@@ -113,6 +126,12 @@ class CollagePanel(QWidget):
         root.addLayout(buttons)
         root.addStretch(1)
 
+        self.asset_button.clicked.connect(
+            lambda: self.asset_requested.emit(
+                str(self.asset.currentData()),
+                self.seed.value(),
+            ),
+        )
         self.create_button.clicked.connect(
             lambda: self.create_requested.emit(
                 str(self.layout_mode.currentData()),
@@ -194,6 +213,7 @@ class CollagePanel(QWidget):
                     break
         selected = layer is not None
         linked = bool(self._board_id and self._item_id)
+        self.asset_button.setEnabled(True)
         self.create_button.setEnabled(selected and not linked)
         self.edge_button.setEnabled(linked)
         self.attachment_button.setEnabled(linked)

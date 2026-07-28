@@ -2410,6 +2410,39 @@ def register_motion_actions(registry: Any) -> None:
         changed=False,
     )
     registry.register_adapter_action(
+        "motion.collage.asset.catalog",
+        "List deterministic built-in paper, tape, ink, and board materials.",
+        "motion",
+        "motion_collage_asset_catalog",
+        params_schema=schema_object({}),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.collage.asset.add",
+        "Add an editable built-in mixed-media material layer.",
+        "motion",
+        "motion_collage_asset_add",
+        params_schema=schema_object({
+            **cid,
+            "asset_id": {
+                "type": "string",
+                "enum": [
+                    "cotton_paper",
+                    "kraft_cardboard",
+                    "newsprint",
+                    "masking_tape",
+                    "black_ink",
+                    "graphite",
+                ],
+            },
+            "seed": {"type": "integer", "minimum": 0},
+        }, required=("composition_id", "asset_id")),
+        required=("composition_id", "asset_id"),
+        undo_label="Add Collage Material",
+        dry_summary="An editable built-in collage material would be added",
+    )
+    registry.register_adapter_action(
         "motion.collage.create",
         "Create an editable collage board from existing Motion layers.",
         "motion",
