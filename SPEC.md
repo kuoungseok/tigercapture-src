@@ -6634,6 +6634,40 @@ AI Script Edit MVP integration:
   stable-ID loss across source replacement and Painter linking. A curated
   distributable paper/tape/ink asset pack and frame-drawing exposure/onion-skin
   UI remain post-v1 extensions.
+- M26 Story and Platform Direction v1 is implemented through
+  `tigerstudio.motion.story_direction.v1`. A composition can persist ordered
+  Hook, Setup, Desire, Conflict, Reveal, Proof, Payoff, and CTA beats with
+  stable IDs, time ranges, purpose, emotion, character, copy, visual intent,
+  audio cue, scene ID, and linked Motion layer IDs. Story metadata also stores
+  audience/message direction, character continuity, and Voice Lab or Music Lab
+  bindings with stable source IDs, cue time, and optional tempo.
+- The Motion Designer `Story` workspace exposes the core story brief, beat
+  creation, and platform preview/apply workflow. Automation exposes
+  `motion.story.inspect/update`, `motion.story.beat.add/update/reorder`,
+  `motion.story.audio.bind`, `motion.platform.variant.plan/preview/apply`, and
+  `motion.platform.preflight`.
+- Platform conversion uses the reviewable
+  `tigerstudio.motion.platform_variant_plan.v1` contract. The plan is
+  non-destructive and records every composition resize, role-aware layer
+  position/scale change, animated position/scale keyframe conversion, and
+  minimum font-size adjustment. Applying a plan requires explicit human
+  approval, rejects stale source revisions, creates a new composition ID,
+  preserves layer/keyframe stable IDs, and stores the accepted diff.
+- Landscape 16:9, vertical 9:16, and square 1:1 profiles define separate
+  content and subtitle safe areas, minimum text size, and CTA hold. Preflight
+  checks protected headline/subtitle/CTA/character bounds, text density,
+  minimum text size, CTA duration, story ranges, missing layers, beat overlap,
+  Hook/CTA presence, and unmotivated character screen-direction changes.
+  Platform variants consist of ordinary Motion layers and therefore continue
+  through the existing Preview/Export and UMG conversion paths; story metadata
+  is authoring direction rather than a visual effect that may be silently lost.
+- `tools/qa_motion_story_platform.py` renders one 15-second, eight-beat ad at
+  four times in all three aspect ratios through `MotionExportRenderer`.
+  Current evidence reports 12 real frames, zero protected-layer clipping, zero
+  story issues, zero stable-ID loss, and no mutation of the source composition.
+  M26 v1 is a deterministic role/priority constraint reflow, not a claim of
+  semantic generative art direction or automatic platform copy rewriting;
+  those remain M27 work.
 - M13 character-rigging foundation is complete. Motion compositions persist
   provider-neutral `tigerstudio.motion.rig.v1` cutout rigs with stable rig and
   bone IDs, a validated parent hierarchy, rest positions, animated rotation

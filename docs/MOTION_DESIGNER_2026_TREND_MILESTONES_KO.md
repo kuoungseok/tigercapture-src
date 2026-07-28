@@ -91,7 +91,7 @@ M21-M28은 다음 조건을 모두 만족해야 완료다.
 | M23 | Mixed Media Craft Workspace | 종이·스캔·손그림·콜라주 제작 흐름 완성 | Complete v1 |
 | M24 | Painterly 2D/3D Look Development | PBR 위에 2D line/brush/toon 스타일 결합 | Planned |
 | M25 | Stop-motion Timing and CGI | stepped timing, clay, miniature motion 구현 | Planned |
-| M26 | Story and Platform Direction | 감정 arc와 플랫폼별 장면 구조 구현 | Planned |
+| M26 | Story and Platform Direction | 감정 arc와 플랫폼별 장면 구조 구현 | Complete v1 |
 | M27 | AI Style Director | 새 기능을 편집 가능한 AI 작업으로 통합 | Planned |
 | M28 | Trend Template and Product QA | 실제 템플릿, 성능, 배포 증거 완성 | Planned |
 
@@ -391,6 +391,40 @@ Action/MCP:
 - 같은 15초 광고의 16:9, 9:16, 1:1 세 버전
 - 캐릭터, CTA, 자막 잘림 0
 - 자동 변경 내용을 사람이 검토 가능한 diff로 제시
+
+### 10.1 구현 상태 - Complete v1
+
+- `tigerstudio.motion.story_direction.v1`은 Hook, Setup, Desire, Conflict,
+  Reveal, Proof, Payoff, CTA beat와 목적, 감정, 캐릭터, copy, visual,
+  audio cue, scene/layer 연결을 composition metadata에 저장한다.
+- Story workspace에서 제목, 메시지, 대상과 beat를 작성할 수 있다.
+  Voice Lab 및 Music Lab 결과는 안정 ID, cue 시각, label, 선택적 BPM을
+  beat에 연결한다. 세부 beat 수정·재정렬과 audio binding은 동일 문서
+  계약을 사용하는 Action/MCP에서도 제공된다.
+- `tigerstudio.motion.platform_variant_plan.v1`은 원본을 변경하지 않고
+  16:9, 9:16, 1:1 reflow diff를 만든다. Background, Headline, Subtitle,
+  CTA, Character/Mascot, 일반 content 역할과 명시적 priority를 기준으로
+  위치, scale, position/scale keyframe, font size를 변환한다.
+- variant 적용은 source composition ID와 revision을 검증하며
+  `approved=true`가 없으면 거부한다. 적용 결과는 새 composition ID를
+  가지되 layer/keyframe stable ID를 유지하고, 전체 변경 diff와 원본
+  revision을 metadata에 보존한다.
+- platform preflight는 protected layer safe-area, subtitle safe-area,
+  최소 text size, text density, CTA hold를 검사한다. Story preflight는
+  range, overlap, 누락 layer, Hook/CTA, character screen-direction
+  continuity를 검사한다.
+- Action/MCP는 `motion.story.inspect/update`,
+  `motion.story.beat.add/update/reorder`, `motion.story.audio.bind`,
+  `motion.platform.variant.plan/preview/apply`,
+  `motion.platform.preflight`를 제공한다.
+- `tools/qa_motion_story_platform.py`는 15초 8-beat 광고를 shared Motion
+  renderer로 16:9, 9:16, 1:1에 각각 4프레임씩 렌더한다. 현재 증거는
+  story issue 0, protected character/headline/subtitle/CTA 잘림 0,
+  stable ID loss 0, source mutation 0이다.
+- v1은 role/priority 기반의 결정적 constraint reflow다. 장면의 의미를
+  새로 해석하는 생성형 art direction, 플랫폼별 copy rewrite,
+  실제 Voice/Music asset browser 선택 UI는 M27 AI Style Director와
+  후속 제품 폴리싱 범위다.
 
 ## 11. M27 - AI Style Director
 

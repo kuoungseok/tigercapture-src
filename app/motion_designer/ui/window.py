@@ -46,6 +46,7 @@ from .inspector import InspectorPanel
 from .craft_panel import CraftStylePanel
 from .glass_panel import GlassMaterialPanel
 from .collage_panel import CollagePanel
+from .story_panel import StoryDirectionPanel
 from .image_panel import ImagePanel
 from .layer_panel import LayerPanel
 from .library_panel import MotionLibraryPanel
@@ -868,6 +869,7 @@ class MotionDesignerWindow(QMainWindow):
         self.craft = CraftStylePanel(self)
         self.glass = GlassMaterialPanel(self)
         self.collage = CollagePanel(self)
+        self.story = StoryDirectionPanel(self)
         self.looks = QTabWidget(self)
         self.looks.addTab(self.craft, "Craft")
         self.looks.addTab(self.glass, "Glass")
@@ -898,6 +900,7 @@ class MotionDesignerWindow(QMainWindow):
         self.left_tabs = QTabWidget(self)
         self.left_tabs.addTab(self.library, "Add")
         self.left_tabs.addTab(self.inspector_tabs, "Inspector")
+        self.left_tabs.addTab(self.story, "Story")
         self.project_tabs = QTabWidget(self)
         self.project_tabs.addTab(self.layers, "Layers")
         self.project_tabs.addTab(self.media, "Media")
@@ -1057,6 +1060,10 @@ class MotionDesignerWindow(QMainWindow):
             self._set_collage_attachment,
         )
         self.collage.scan_requested.connect(self._set_collage_scan_cleanup)
+        self.story.story_update_requested.connect(self._update_story_direction)
+        self.story.beat_add_requested.connect(self._add_story_beat)
+        self.story.platform_preview_requested.connect(self._preview_platform_variant)
+        self.story.platform_apply_requested.connect(self._apply_platform_variant)
         self.masks.add_requested.connect(self._add_mask)
         self.masks.delete_requested.connect(self._delete_mask)
         self.masks.parameter_changed.connect(self._set_mask_param)
@@ -1153,6 +1160,7 @@ class MotionDesignerWindow(QMainWindow):
         self._update_media_panel(composition)
         self.audio.set_composition(composition)
         self.output.set_composition(composition)
+        self.story.set_composition(composition)
         self.umg.set_composition(composition)
         selected = next(
             (layer for layer in composition.layers if layer.id == self._selected_layer_id),
@@ -2869,6 +2877,67 @@ class MotionDesignerWindow(QMainWindow):
             threshold=float(threshold),
         )
         candidate.revision += 1
+        self.controller.replace(candidate)
+
+    def _update_story_direction(self, changes: object) -> None:
+        if not isinstance(changes, dict):
+            return
+        from app.motion_designer.story_direction import update_story
+
+        candidate = MotionComposition.from_dict(
+            self.controller.composition.to_dict(),
+        )
+        update_story(candidate, changes)
+        candidate.revision += 1
+        self.controller.replace(candidate)
+
+    def _add_story_beat(self, values: object) -> None:
+        if not isinstance(values, dict):
+            return
+        from app.motion_designer.story_direction import add_story_beat
+
+        candidate = MotionComposition.from_dict(
+            self.controller.composition.to_dict(),
+        )
+        add_story_beat(candidate, **values)
+        candidate.revision += 1
+        self.controller.replace(candidate)
+
+    def _preview_platform_variant(self, platform: str) -> None:
+        from app.motion_designer.story_direction import preview_platform_variant
+
+        payload = preview_platform_variant(
+            self.controller.composition,
+            str(platform),
+        )
+        self.story.show_variant_result(payload)
+
+    def _apply_platform_variant(self, platform: str) -> None:
+        from app.motion_designer.story_direction import (
+            apply_platform_variant,
+            plan_platform_variant,
+            preflight_platform,
+        )
+
+        source = self.controller.composition
+        plan = plan_platform_variant(source, str(platform))
+        operation_count = int(plan["diff_summary"]["operation_count"])
+        answer = QMessageBox.question(
+            self,
+            "Create Platform Variant",
+            (
+                f"Review complete: create {plan['profile']['label']} as a new "
+                f"composition with {operation_count} documented changes?\n\n"
+                "The current composition remains available through Undo."
+            ),
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        candidate = apply_platform_variant(source, plan, approved=True)
+        report = preflight_platform(candidate, platform=str(platform))
+        self.story.show_variant_result({"plan": plan, "preflight": report})
         self.controller.replace(candidate)
 
     def _set_adjustment_scope(self, mode: str, layer_ids: object) -> None:

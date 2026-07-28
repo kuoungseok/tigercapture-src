@@ -2544,3 +2544,169 @@ def register_motion_actions(registry: Any) -> None:
         mutating=False,
         changed=False,
     )
+    registry.register_adapter_action(
+        "motion.story.inspect",
+        "Inspect editable story beats, intent, continuity, and story preflight.",
+        "motion",
+        "motion_story_inspect",
+        params_schema=schema_object(cid, required=("composition_id",)),
+        required=("composition_id",),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.story.update",
+        "Update story title, message, audience, or character continuity rules.",
+        "motion",
+        "motion_story_update",
+        params_schema=schema_object({
+            **cid,
+            "changes": {"type": "object"},
+        }, required=("composition_id", "changes")),
+        required=("composition_id", "changes"),
+        undo_label="Update Story Direction",
+        dry_summary="Story direction would be updated",
+    )
+    registry.register_adapter_action(
+        "motion.story.beat.add",
+        "Add a Hook-to-CTA story beat linked to scene layers and time.",
+        "motion",
+        "motion_story_beat_add",
+        params_schema=schema_object({
+            **cid,
+            "role": {
+                "type": "string",
+                "enum": [
+                    "hook", "setup", "desire", "conflict",
+                    "reveal", "proof", "payoff", "cta",
+                ],
+            },
+            "start_ms": {"type": "integer", "minimum": 0},
+            "end_ms": {"type": "integer", "minimum": 1},
+            "purpose": {"type": "string"},
+            "emotion": {"type": "string"},
+            "character": {"type": "string"},
+            "copy": {"type": "string"},
+            "visual": {"type": "string"},
+            "audio_cue": {"type": "string"},
+            "scene_id": {"type": "string"},
+            "layer_ids": {"type": "array", "items": {"type": "string"}},
+        }, required=("composition_id", "role", "start_ms", "end_ms")),
+        required=("composition_id", "role", "start_ms", "end_ms"),
+        undo_label="Add Story Beat",
+        dry_summary="A timed story beat would be added",
+    )
+    registry.register_adapter_action(
+        "motion.story.beat.update",
+        "Update the purpose, emotion, copy, visual, timing, or layer links of a story beat.",
+        "motion",
+        "motion_story_beat_update",
+        params_schema=schema_object({
+            **cid,
+            "beat_id": {"type": "string"},
+            "changes": {"type": "object"},
+        }, required=("composition_id", "beat_id", "changes")),
+        required=("composition_id", "beat_id", "changes"),
+        undo_label="Update Story Beat",
+        dry_summary="The story beat would be updated",
+    )
+    registry.register_adapter_action(
+        "motion.story.beat.reorder",
+        "Reorder a story beat without changing its stable ID or timing.",
+        "motion",
+        "motion_story_beat_reorder",
+        params_schema=schema_object({
+            **cid,
+            "beat_id": {"type": "string"},
+            "order": {"type": "integer", "minimum": 0},
+        }, required=("composition_id", "beat_id", "order")),
+        required=("composition_id", "beat_id", "order"),
+        undo_label="Reorder Story Beat",
+        dry_summary="The story beat order would change",
+    )
+    registry.register_adapter_action(
+        "motion.story.audio.bind",
+        "Bind a Voice Lab line or Music Lab cue and tempo marker to a story beat.",
+        "motion",
+        "motion_story_audio_bind",
+        params_schema=schema_object({
+            **cid,
+            "beat_id": {"type": "string"},
+            "source_kind": {"type": "string", "enum": ["voice", "music"]},
+            "source_id": {"type": "string"},
+            "cue_ms": {"type": "integer", "minimum": 0},
+            "label": {"type": "string"},
+            "tempo_bpm": {"type": "number", "minimum": 20, "maximum": 320},
+        }, required=(
+            "composition_id", "beat_id", "source_kind", "source_id", "cue_ms",
+        )),
+        required=(
+            "composition_id", "beat_id", "source_kind", "source_id", "cue_ms",
+        ),
+        undo_label="Bind Story Audio",
+        dry_summary="A Voice or Music cue would be linked to the story beat",
+    )
+    platform_ref = {
+        **cid,
+        "platform": {
+            "type": "string",
+            "enum": [
+                "landscape_16_9", "vertical_9_16", "square_1_1",
+                "16:9", "9:16", "1:1", "youtube", "shorts",
+                "reels", "tiktok", "feed",
+            ],
+        },
+    }
+    registry.register_adapter_action(
+        "motion.platform.variant.plan",
+        "Plan priority-based platform reflow and return a reviewable diff.",
+        "motion",
+        "motion_platform_variant_plan",
+        params_schema=schema_object(
+            platform_ref,
+            required=("composition_id", "platform"),
+        ),
+        required=("composition_id", "platform"),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.platform.variant.preview",
+        "Preview a platform variant, its complete diff, and safe-area preflight.",
+        "motion",
+        "motion_platform_variant_preview",
+        params_schema=schema_object(
+            platform_ref,
+            required=("composition_id", "platform"),
+        ),
+        required=("composition_id", "platform"),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.platform.variant.apply",
+        "Create a new platform composition from a reviewed reflow plan.",
+        "motion",
+        "motion_platform_variant_apply",
+        params_schema=schema_object({
+            **cid,
+            "plan": {"type": "object"},
+            "approved": {"type": "boolean"},
+        }, required=("composition_id", "plan", "approved")),
+        required=("composition_id", "plan", "approved"),
+        undo_label="Create Platform Variant",
+        dry_summary="An approved platform variant would be created",
+    )
+    registry.register_adapter_action(
+        "motion.platform.preflight",
+        "Check story continuity, safe areas, text density, and CTA hold for a platform.",
+        "motion",
+        "motion_platform_preflight",
+        params_schema=schema_object(
+            platform_ref,
+            required=("composition_id", "platform"),
+        ),
+        required=("composition_id", "platform"),
+        mutating=False,
+        changed=False,
+    )

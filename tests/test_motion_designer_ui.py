@@ -41,7 +41,8 @@ def test_motion_designer_window_uses_controller_for_layer_and_undo() -> None:
     assert window.inspector_tabs.currentWidget() is window.vector
     assert window.timeline.slider.maximum() == 3000
     assert window.canvas.scene() is not None
-    assert window.left_tabs.count() == 3
+    assert window.left_tabs.count() == 4
+    assert window.left_tabs.indexOf(window.story) >= 0
     assert window.umg.generate_button.text() == "Generate Widget Blueprint"
     assert window.unreal_link_dialog.windowTitle() == "Unreal Link"
     assert window.toolbar.unreal_link_button.text() == "Unreal Link"
