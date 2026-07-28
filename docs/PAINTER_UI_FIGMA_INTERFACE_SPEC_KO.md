@@ -25,6 +25,10 @@ Implemented:
 - focused UI tests and reproducible screenshot QA
 - right Inspector presentation modes: zero-width Auto-hide, explicit Pin, and
   detachable Floating window
+- left Layers/Assets navigator presentation modes: zero-width Auto-hide,
+  explicit Pin, and detachable Floating window
+- bottom-toolbar Layers/Assets and Properties commands that open the canonical
+  panels as canvas overlays without reserving workspace width
 - selection-triggered temporary Properties popover that reuses the canonical
   Inspector without permanently shrinking the canvas
 - real image Place/Fill through file chooser, drag/drop, context menu, Quick
@@ -37,12 +41,12 @@ Still required by this contract:
 - the complete Polygon/Star/Arc creation set and vector-network editing
 - full M1+ interaction and delivery work tracked by the milestone document
 
-The left navigator and right Inspector use preferred defaults rather than fixed
-expanded widths. Their splitter positions are user-controlled and persisted.
-The navigator may use a compact rail, but Inspector Auto-hide occupies zero
-canvas width and appears as a temporary contextual popover only when a
-selection needs properties. The center canvas keeps its minimum usable width
-and receives all remaining workspace space.
+The left navigator and right Inspector are not permanently fixed sidebars.
+Both default to zero-width Auto-hide, reuse their canonical widgets in
+temporary canvas overlays, and become splitter-managed only after an explicit
+Pin command. Either panel can be detached into a floating window. User-chosen
+pinned widths and presentation modes persist, while the center canvas receives
+all remaining workspace space.
 
 Related roadmap:
 
@@ -845,9 +849,10 @@ overlay mode로 전환한다.
 - Advanced disclosure owns constraints and responsive limits, accessibility,
   delivery, text-range, 9-slice, boolean, and remote-component controls. It is
   collapsed by default and does not create a parallel mutation path.
-- The Inspector is not a permanently fixed canvas tax. Auto-hide is the
-  default presentation, leaving a 36 px rail; it may be pinned at a remembered
-  user-resized width or detached into a floating window. With the rail collapsed, selecting a
+- Neither side panel is a permanently fixed canvas tax. Auto-hide is the
+  default presentation and occupies zero workspace width; either panel may be
+  pinned at a remembered user-resized width or detached into a floating
+  window. With the panel auto-hidden, selecting a
   new object temporarily reparents the canonical Inspector into a compact
   canvas overlay; no duplicate property editor or mutation service is created.
 - The navigator, canvas, and pinned Inspector live in one horizontal workspace

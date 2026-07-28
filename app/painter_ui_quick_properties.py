@@ -6,11 +6,18 @@ from PySide6.QtWidgets import QFrame, QScrollArea, QVBoxLayout, QWidget
 
 
 class PainterUIQuickPropertiesPopover(QFrame):
-    """Hosts the canonical inspector without creating another mutation UI."""
+    """Hosts one canonical side panel without creating another mutation UI."""
 
-    def __init__(self, parent: QWidget) -> None:
+    def __init__(
+        self,
+        parent: QWidget,
+        *,
+        side: str = "right",
+        object_name: str = "PainterUIQuickPropertiesPopover",
+    ) -> None:
         super().__init__(parent)
-        self.setObjectName("PainterUIQuickPropertiesPopover")
+        self._side = "left" if str(side).casefold() == "left" else "right"
+        self.setObjectName(object_name)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setMinimumWidth(260)
         self.setMaximumWidth(340)
@@ -70,12 +77,11 @@ class PainterUIQuickPropertiesPopover(QFrame):
         width = min(320, max(260, parent.width() - 24))
         # Keep the canvas-local floating toolbar and status edge unobstructed.
         height = min(620, max(240, parent.height() - 140))
-        self.setGeometry(
-            max(8, parent.width() - width - 12),
-            12,
-            width,
-            height,
+        x = 12 if self._side == "left" else max(
+            8,
+            parent.width() - width - 12,
         )
+        self.setGeometry(x, 12, width, height)
         if self._widget is not None:
             viewport_width = max(0, self.scroll_area.viewport().width())
             if viewport_width:

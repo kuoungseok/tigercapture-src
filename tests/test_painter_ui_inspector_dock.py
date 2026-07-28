@@ -172,6 +172,63 @@ def test_ui_inspector_presentation_action_switches_all_three_modes() -> None:
     app.processEvents()
 
 
+def test_ui_navigator_presentation_action_switches_all_three_modes() -> None:
+    app = _app()
+    from app.actions.registry import ActionRegistry
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(
+            390,
+            844,
+            "#F5F7FA",
+        ),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.resize(1400, 900)
+    registry = ActionRegistry(owner=dialog)
+
+    auto = registry.execute(
+        "paint.ui.navigator.presentation",
+        {"mode": "auto_hide"},
+    )
+    assert auto.ok
+    assert auto.result["navigator_presentation"] == {
+        "mode": "auto_hide",
+        "auto_hide": True,
+        "detached": False,
+    }
+    assert dialog._painter_ui_navigator.maximumWidth() == 0
+
+    pinned = registry.execute(
+        "paint.ui.navigator.presentation",
+        {"mode": "pinned"},
+    )
+    assert pinned.ok
+    assert pinned.result["navigator_presentation"]["mode"] == "pinned"
+    assert not dialog._painter_ui_navigator.is_collapsed()
+
+    floating = registry.execute(
+        "paint.ui.navigator.presentation",
+        {"mode": "floating"},
+    )
+    app.processEvents()
+    assert floating.ok
+    assert floating.result["navigator_presentation"] == {
+        "mode": "floating",
+        "auto_hide": False,
+        "detached": True,
+    }
+    assert dialog._painter_ui_navigator_dock_window.isVisible()
+
+    dialog._dock_painter_ui_navigator()
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
 def test_ui_workspace_splitter_freely_resizes_both_side_panels() -> None:
     app = _app()
     from PySide6.QtWidgets import QSplitter
@@ -240,6 +297,56 @@ def test_ui_workspace_splitter_freely_resizes_both_side_panels() -> None:
     assert dialog._painter_ui_navigator.expanded_width() == 480
     assert dialog._paint_inspector_expanded_width == 620
     assert dialog._paint_inspector_frame.width() >= 180
+
+    dialog.close()
+    dialog.deleteLater()
+    app.processEvents()
+
+
+def test_ui_workspace_defaults_to_zero_width_fluid_side_panels() -> None:
+    app = _app()
+    from app.drawing import PaintDialog, create_blank_paint_pixmap
+
+    dialog = PaintDialog(
+        background_pixmap=create_blank_paint_pixmap(
+            390,
+            844,
+            "#F5F7FA",
+        ),
+        initial_strokes=[],
+        time_ms=0,
+        standalone=True,
+    )
+    dialog.resize(1400, 900)
+    dialog._set_canvas_workspace_mode("ui_design")
+    dialog.show()
+    app.processEvents()
+
+    assert dialog._painter_ui_navigator.is_auto_hide()
+    assert dialog._painter_ui_navigator.maximumWidth() == 0
+    assert dialog._paint_ui_inspector.is_auto_hide()
+    assert dialog._paint_inspector_frame.maximumWidth() == 0
+
+    dialog._toggle_painter_ui_navigator()
+    app.processEvents()
+    navigator_popover = dialog._painter_ui_navigator_popover
+    assert navigator_popover.isVisible()
+    assert navigator_popover.contains(dialog._painter_ui_navigator)
+    assert dialog._painter_ui_navigator.is_collapsed()
+
+    dialog._pin_painter_ui_navigator()
+    app.processEvents()
+    assert not dialog._painter_ui_navigator.is_collapsed()
+    assert dialog._paint_workspace_layout.indexOf(
+        dialog._painter_ui_navigator
+    ) == 1
+
+    dialog._toggle_painter_ui_inspector()
+    app.processEvents()
+    assert dialog._painter_ui_quick_properties.isVisible()
+    assert dialog._painter_ui_quick_properties.contains(
+        dialog._paint_ui_inspector
+    )
 
     dialog.close()
     dialog.deleteLater()

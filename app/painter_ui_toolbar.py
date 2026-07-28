@@ -36,6 +36,8 @@ class PainterUIFloatingToolbar(QFrame):
     animate_requested = Signal()
     motion_preview_changed = Signal(bool)
     quick_actions_requested = Signal()
+    navigator_requested = Signal()
+    inspector_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -179,6 +181,20 @@ class PainterUIFloatingToolbar(QFrame):
         layout.addWidget(self.quick_actions_button)
 
         layout.addWidget(self._separator())
+        self.navigator_button = self._icon_button(
+            painter_text("Layers and assets"),
+            "layers",
+        )
+        self.navigator_button.clicked.connect(self.navigator_requested)
+        layout.addWidget(self.navigator_button)
+        self.inspector_button = self._icon_button(
+            painter_text("Properties"),
+            "sliders",
+        )
+        self.inspector_button.clicked.connect(self.inspector_requested)
+        layout.addWidget(self.inspector_button)
+
+        layout.addWidget(self._separator())
         self.motion_actor_button = self._icon_button(
             "Motion Actor",
             "import",
@@ -230,6 +246,7 @@ class PainterUIFloatingToolbar(QFrame):
         width = max(0, int(available_width))
         compact = width < 620
         self.motion_actor_button.setVisible(not compact)
+        self.inspector_button.setVisible(not compact)
         self.adjustSize()
 
     def set_zoom_percent(

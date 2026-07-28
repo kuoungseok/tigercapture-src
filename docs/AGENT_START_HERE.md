@@ -73,8 +73,8 @@ Focused entry points:
   canonical in `docs/MOTION_PAINTER_INTEGRATION_TODO_KO.md`. Start with its P0
   binding-contract consolidation, then complete the `Normal -> Hover`
   component-state vertical slice before broader Motion Actor polish.
-- Painter UI Design now has a compact resizable left navigator and a right
-  inspector that defaults to Auto-hide and can be pinned, resized, or detached.
+- Painter UI Design has a left navigator and right inspector that both default
+  to zero-width Auto-hide and can be pinned, resized, or detached.
   Navigator/canvas/Inspector are hosted by one horizontal splitter; do not
   reintroduce equal minimum/maximum width locks for expanded panels. Expanded
   panels have usable minimums but no arbitrary maximum; only their collapsed

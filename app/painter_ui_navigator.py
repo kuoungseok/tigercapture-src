@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from app.icons import app_icon, icon_size
+from app.painter_i18n import painter_text
 from app.painter_ui_panel_state import PERSISTED_PANEL_MAX_WIDTH
 
 
@@ -67,6 +68,10 @@ class PainterUINavigatorPanel(QFrame):
     artboard_selected = Signal(str)
     collapsed_changed = Signal(bool)
     width_changed = Signal(int)
+    auto_hide_changed = Signal(bool)
+    dock_toggle_requested = Signal()
+    pin_requested = Signal()
+    temporary_close_requested = Signal()
 
     MIN_EXPANDED_WIDTH = 112
     DEFAULT_EXPANDED_WIDTH = 168
@@ -90,6 +95,8 @@ class PainterUINavigatorPanel(QFrame):
         )
         self._syncing = False
         self._collapsed = False
+        self._auto_hide = False
+        self._temporary_expanded = False
         self._collapse_user_override = False
         self._layer_list = layer_list
 
@@ -111,13 +118,27 @@ class PainterUINavigatorPanel(QFrame):
         self.collapse_button.setObjectName("PainterUIPanelCollapse")
         self.collapse_button.setFixedSize(20, 20)
         self.collapse_button.setToolTip("Collapse navigator")
-        self.collapse_button.clicked.connect(
-            lambda: self.set_collapsed(
-                not self._collapsed,
-                user_initiated=True,
-            )
-        )
+        self.collapse_button.clicked.connect(self._on_collapse_clicked)
         header_layout.addWidget(self.collapse_button)
+        self.pin_button = QPushButton("")
+        self.pin_button.setObjectName("PainterUIPanelCollapse")
+        self.pin_button.setFixedSize(20, 20)
+        self.pin_button.setIcon(app_icon("pin", size=12, color="#B8C4D3"))
+        self.pin_button.setIconSize(icon_size(12))
+        self.pin_button.setToolTip(painter_text("Pin navigator"))
+        self.pin_button.clicked.connect(self.pin_requested)
+        self.pin_button.hide()
+        header_layout.addWidget(self.pin_button)
+        self.dock_button = QPushButton("")
+        self.dock_button.setObjectName("PainterUIPanelCollapse")
+        self.dock_button.setFixedSize(20, 20)
+        self.dock_button.setIcon(
+            app_icon("popout", size=12, color="#B8C4D3")
+        )
+        self.dock_button.setIconSize(icon_size(12))
+        self.dock_button.setToolTip(painter_text("Detach navigator"))
+        self.dock_button.clicked.connect(self.dock_toggle_requested)
+        header_layout.addWidget(self.dock_button)
         root.addWidget(header)
 
         self.content_scroll = QScrollArea()
@@ -224,9 +245,11 @@ class PainterUINavigatorPanel(QFrame):
         for widget in self._collapsible_widgets:
             widget.setVisible(not value)
         self.title_label.setVisible(not value)
+        self.pin_button.hide()
+        self.dock_button.setVisible(not value)
         if value:
-            self.setMinimumWidth(34)
-            self.setMaximumWidth(34)
+            self.setMinimumWidth(0)
+            self.setMaximumWidth(0)
             self.resize_handle.hide()
         else:
             if self._splitter_managed:
@@ -240,6 +263,55 @@ class PainterUINavigatorPanel(QFrame):
             )
         self._sync_collapse_button()
         self.collapsed_changed.emit(value)
+
+    def set_auto_hide(self, auto_hide: bool) -> None:
+        value = bool(auto_hide)
+        changed = self._auto_hide != value
+        if not changed and self._collapsed == value:
+            return
+        self._auto_hide = value
+        self.set_collapsed(value)
+        if changed:
+            self.auto_hide_changed.emit(value)
+
+    def is_auto_hide(self) -> bool:
+        return bool(self._auto_hide)
+
+    def set_temporary_expanded(self, expanded: bool) -> None:
+        value = bool(expanded)
+        if self._temporary_expanded == value:
+            return
+        self._temporary_expanded = value
+        for widget in self._collapsible_widgets:
+            widget.setVisible(value or not self._collapsed)
+        self.title_label.setVisible(value or not self._collapsed)
+        self.pin_button.setVisible(value)
+        self.dock_button.setVisible(not value and not self._collapsed)
+        if value:
+            self.setMinimumWidth(self.MIN_EXPANDED_WIDTH)
+            self.setMaximumWidth(PERSISTED_PANEL_MAX_WIDTH)
+        elif self._collapsed:
+            self.setMinimumWidth(0)
+            self.setMaximumWidth(0)
+        self._sync_collapse_button()
+
+    def is_temporary_expanded(self) -> bool:
+        return bool(self._temporary_expanded)
+
+    def set_detached(self, detached: bool) -> None:
+        value = bool(detached)
+        self.dock_button.setToolTip(
+            painter_text(
+                "Dock navigator" if value else "Detach navigator"
+            )
+        )
+        self.dock_button.setIcon(
+            app_icon(
+                "relink" if value else "popout",
+                size=12,
+                color="#B8C4D3",
+            )
+        )
 
     def set_expanded_width(
         self,
@@ -276,7 +348,7 @@ class PainterUINavigatorPanel(QFrame):
         )
         if target_index < 0:
             return False
-        if self._collapsed:
+        if self._collapsed and not self._temporary_expanded:
             self.set_collapsed(False, user_initiated=True)
         self.mode_tabs.setCurrentWidget(self.assets_host)
         self.asset_tabs.setCurrentIndex(target_index)
@@ -311,8 +383,8 @@ class PainterUINavigatorPanel(QFrame):
     def set_splitter_managed(self, managed: bool) -> None:
         self._splitter_managed = bool(managed)
         if self._collapsed:
-            self.setMinimumWidth(34)
-            self.setMaximumWidth(34)
+            self.setMinimumWidth(0)
+            self.setMaximumWidth(0)
         elif self._splitter_managed:
             self.setMinimumWidth(self.MIN_EXPANDED_WIDTH)
             self.setMaximumWidth(PERSISTED_PANEL_MAX_WIDTH)
@@ -357,15 +429,33 @@ class PainterUINavigatorPanel(QFrame):
     def _sync_collapse_button(self) -> None:
         self.collapse_button.setIcon(
             app_icon(
-                "chevron-right" if self._collapsed else "chevron-left",
+                (
+                    "x"
+                    if self._temporary_expanded
+                    else "chevron-right"
+                    if self._collapsed
+                    else "chevron-left"
+                ),
                 size=12,
                 color="#B8C4D3",
             )
         )
         self.collapse_button.setIconSize(icon_size(12))
         self.collapse_button.setToolTip(
-            "Expand navigator" if self._collapsed else "Collapse navigator"
+            painter_text(
+                "Close navigator"
+                if self._temporary_expanded
+                else "Show navigator"
+                if self._collapsed
+                else "Auto-hide navigator"
+            )
         )
+
+    def _on_collapse_clicked(self) -> None:
+        if self._temporary_expanded:
+            self.temporary_close_requested.emit()
+            return
+        self.set_auto_hide(not self._collapsed)
 
     def set_document(self, document: Mapping[str, Any] | None) -> None:
         value = dict(document) if isinstance(document, Mapping) else {}

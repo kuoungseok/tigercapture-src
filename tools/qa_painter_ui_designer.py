@@ -778,6 +778,23 @@ def main() -> int:
     dialog._paint_ui_inspector.set_collapsed(False)
     app.processEvents()
     toolbar = dialog._ui_design_tool_host
+    navigator.set_auto_hide(True)
+    toolbar.navigator_button.click()
+    app.processEvents()
+    navigator_popover = dialog._painter_ui_navigator_popover
+    navigator_popover_ok = (
+        navigator_popover.isVisible()
+        and navigator_popover.contains(navigator)
+        and navigator.is_temporary_expanded()
+        and navigator.is_collapsed()
+        and dialog._paint_workspace_layout.indexOf(navigator) == -1
+    )
+    navigator_popover_screenshot_path = (
+        output_dir / "painter_ui_designer_m1_navigator_popover.png"
+    )
+    dialog.grab().save(str(navigator_popover_screenshot_path), "PNG")
+    dialog._pin_painter_ui_navigator()
+    app.processEvents()
     toolbar.zoom_button.click()
     app.processEvents()
     zoom_popover_ok = (
@@ -1225,6 +1242,7 @@ def main() -> int:
             and image_inspector_screenshot_path.is_file()
             and multi_inspector_screenshot_path.is_file()
             and quick_properties_screenshot_path.is_file()
+            and navigator_popover_screenshot_path.is_file()
             and zoom_popover_screenshot_path.is_file()
             and compact_screenshot_path.is_file()
             and quick_action_screenshot_path.is_file()
@@ -1256,6 +1274,7 @@ def main() -> int:
             and numeric_input_ok
             and adaptive_context_ok
             and quick_properties_ok
+            and navigator_popover_ok
             and zoom_popover_ok
             and compact_zoom_ok
             and breadcrumb_ok
@@ -1304,6 +1323,9 @@ def main() -> int:
         "quick_properties_screenshot": str(
             quick_properties_screenshot_path
         ),
+        "navigator_popover_screenshot": str(
+            navigator_popover_screenshot_path
+        ),
         "zoom_popover_screenshot": str(zoom_popover_screenshot_path),
         "compact_zoom_screenshot": str(compact_screenshot_path),
         "quick_actions_screenshot": str(quick_action_screenshot_path),
@@ -1330,6 +1352,7 @@ def main() -> int:
         "quick_actions_compact_ok": quick_action_compact_ok,
         "real_image_fill_ok": real_image_fill_ok,
         "quick_properties_ok": quick_properties_ok,
+        "navigator_popover_ok": navigator_popover_ok,
         "zoom_popover_ok": zoom_popover_ok,
         "compact_zoom_ok": compact_zoom_ok,
         "breadcrumb_ok": breadcrumb_ok,

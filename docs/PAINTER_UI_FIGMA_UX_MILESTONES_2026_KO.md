@@ -10,10 +10,12 @@ Completed in the first shell slice:
 
 - bottom floating UI Design toolbar; it no longer reserves a full-width row
 - responsive toolbar density for compact and remote displays
-- left `Layers / Assets` navigation
+- left `Layers / Assets` navigation with zero-width Auto-hide, explicit Pin,
+  and detachable Floating presentation
 - Sections, Components, and Tokens moved into Assets
 - right `Design / Prototype / Inspect` modes
-- manual side-panel collapse and automatic narrow-canvas navigator collapse
+- both side panels default to zero-width Auto-hide rather than permanently
+  reserving canvas width
 - fluid left navigator with a compact 168 px default, a usable 112 px minimum,
   no fixed expanded-width ceiling, and a persistent thin vertical scrollbar
 - fluid right inspector with a compact 268 px default, a usable 180 px minimum,
@@ -25,8 +27,8 @@ Completed in the first shell slice:
 - debounced persistence of splitter-selected navigator/inspector widths with
   correct restoration after collapse, Auto-hide, floating, and mode changes
 - restart-safe persistence for user-adjusted navigator/inspector width and
-  presentation; the right inspector now defaults to Auto-hide instead of
-  permanently taxing canvas width
+  presentation; both panels now default to Auto-hide instead of permanently
+  taxing canvas width
 - Auto-hide now consumes zero fixed width; selecting an object opens the
   canonical Inspector as a temporary canvas popover, while Pin and Floating
   remain explicit user choices
@@ -35,6 +37,10 @@ Completed in the first shell slice:
   dock on close, expand, detach, or workspace change
 - shared `paint.ui.inspector.presentation` Action selects `auto_hide`,
   `pinned`, or `floating` using the same canonical inspector widget
+- shared `paint.ui.navigator.presentation` Action selects `auto_hide`,
+  `pinned`, or `floating` using the same canonical Layers/Assets widget
+- bottom-toolbar Layers/Assets and Properties buttons open temporary,
+  canvas-local overlays; only explicit Pin makes a panel part of the splitter
 - transient Zoom popover replaces three permanently visible Fit buttons and
   provides percentage input, Fit All, Fit Artboard, and Fit Selection
 - canvas-first navigation: Space/left-drag or middle-drag pan, wheel vertical

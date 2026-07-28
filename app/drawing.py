@@ -840,12 +840,14 @@ QFrame#PainterUIInspectorResizeHandle[dragging="true"] {
     background-color: #6d91bd;
 }
 
-QDialog#PainterUIInspectorDockWindow {
+QDialog#PainterUIInspectorDockWindow,
+QDialog#PainterUINavigatorDockWindow {
     background-color: #1e2228;
     border: 1px solid #394654;
 }
 
-QFrame#PainterUIQuickPropertiesPopover {
+QFrame#PainterUIQuickPropertiesPopover,
+QFrame#PainterUINavigatorPopover {
     background-color: #1e2228;
     border: 1px solid #46566a;
     border-radius: 5px;
@@ -9617,6 +9619,12 @@ class PaintDialog(QDialog):
         self._ui_design_tool_host.quick_actions_requested.connect(
             self._toggle_painter_ui_quick_actions
         )
+        self._ui_design_tool_host.navigator_requested.connect(
+            self._toggle_painter_ui_navigator
+        )
+        self._ui_design_tool_host.inspector_requested.connect(
+            self._toggle_painter_ui_inspector
+        )
         self._ui_design_tool_buttons = (
             self._ui_design_tool_host.tool_buttons
         )
@@ -10492,12 +10500,35 @@ class PaintDialog(QDialog):
         self._painter_ui_navigator.artboard_selected.connect(
             self._set_painter_ui_artboard
         )
+        self._painter_ui_navigator.auto_hide_changed.connect(
+            lambda auto_hide: self._save_painter_ui_panel_presentation(
+                navigator_auto_hide=bool(auto_hide),
+                navigator_collapsed=bool(auto_hide),
+            )
+        )
+        self._painter_ui_navigator.dock_toggle_requested.connect(
+            self._toggle_painter_ui_navigator_dock
+        )
+        self._painter_ui_navigator.pin_requested.connect(
+            self._pin_painter_ui_navigator
+        )
+        self._painter_ui_navigator.temporary_close_requested.connect(
+            self._hide_painter_ui_navigator_popover
+        )
         self._painter_ui_navigator.restore_state(
             int(self._painter_ui_panel_state["navigator_width"]),
             bool(self._painter_ui_panel_state["navigator_collapsed"]),
             user_override=bool(
                 self._painter_ui_panel_state["navigator_user_override"]
             ),
+        )
+        self._painter_ui_navigator.set_auto_hide(
+            bool(
+                self._painter_ui_panel_state.get(
+                    "navigator_auto_hide",
+                    True,
+                )
+            )
         )
         self._painter_ui_navigator.width_changed.connect(
             lambda width: self._save_painter_ui_panel_presentation(
@@ -10516,6 +10547,8 @@ class PaintDialog(QDialog):
         self._painter_ui_navigator.collapsed_changed.connect(
             self._on_painter_ui_navigator_collapsed
         )
+        self._painter_ui_navigator_detached = False
+        self._painter_ui_navigator_dock_window = None
         self._paint_ui_inspector.set_auto_hide(
             bool(
                 self._painter_ui_panel_state.get(
@@ -12835,8 +12868,14 @@ class PaintDialog(QDialog):
             and bool(getattr(self, "_painter_ui_inspector_detached", False))
         ):
             self._dock_painter_ui_inspector()
+        if (
+            not ui_design
+            and bool(getattr(self, "_painter_ui_navigator_detached", False))
+        ):
+            self._dock_painter_ui_navigator()
         if not ui_design:
             self._hide_painter_ui_quick_properties()
+            self._hide_painter_ui_navigator_popover()
             quick_actions = getattr(
                 self,
                 "_painter_ui_quick_actions",
@@ -12862,7 +12901,12 @@ class PaintDialog(QDialog):
             )
         ui_navigator = getattr(self, "_painter_ui_navigator", None)
         if ui_navigator is not None:
-            ui_navigator.setVisible(ui_design)
+            ui_navigator.setVisible(
+                ui_design
+                and not bool(
+                    getattr(self, "_painter_ui_navigator_detached", False)
+                )
+            )
         template_strip = getattr(self, "_painter_ui_template_strip", None)
         if template_strip is not None:
             template_strip.setVisible(ui_design)
@@ -13695,6 +13739,8 @@ class PaintDialog(QDialog):
         navigator = getattr(self, "_painter_ui_navigator", None)
         if navigator is None:
             return
+        if navigator.is_collapsed():
+            self._show_painter_ui_navigator_popover()
         navigator.reveal_asset("Tokens", str(token_id))
 
     def _execute_painter_ui_quick_action(self, payload: object) -> None:
@@ -23597,7 +23643,7 @@ class PaintDialog(QDialog):
         if navigator is None:
             return
         target = (
-            34
+            0
             if bool(collapsed)
             else int(navigator.expanded_width())
         )
@@ -23644,8 +23690,13 @@ class PaintDialog(QDialog):
             for widget in (navigator, inspector, canvas, tool_rail)
         ):
             return
+        if any(
+            splitter.indexOf(widget) < 0
+            for widget in (navigator, inspector, canvas, tool_rail)
+        ):
+            return
         navigator_width = (
-            34
+            0
             if navigator.is_collapsed()
             else int(navigator.expanded_width())
         )
@@ -23870,6 +23921,208 @@ class PaintDialog(QDialog):
         window.show()
         window.raise_()
         window.activateWindow()
+        self._update_canvas_geometry()
+
+    def _toggle_painter_ui_inspector(self) -> None:
+        inspector = getattr(self, "_paint_ui_inspector", None)
+        if inspector is None:
+            return
+        if bool(getattr(self, "_painter_ui_inspector_detached", False)):
+            window = getattr(
+                self,
+                "_painter_ui_inspector_dock_window",
+                None,
+            )
+            if window is not None:
+                window.show()
+                window.raise_()
+                window.activateWindow()
+            return
+        popover = getattr(self, "_painter_ui_quick_properties", None)
+        if popover is not None and popover.contains(inspector):
+            self._hide_painter_ui_quick_properties()
+            return
+        if not inspector.is_collapsed():
+            inspector.set_auto_hide(True)
+            return
+        if popover is None:
+            from app.painter_ui_quick_properties import (
+                PainterUIQuickPropertiesPopover,
+            )
+
+            popover = PainterUIQuickPropertiesPopover(self._canvas_host)
+            self._painter_ui_quick_properties = popover
+        inspector.set_temporary_expanded(True)
+        popover.attach(inspector)
+
+    def _toggle_painter_ui_navigator(self) -> None:
+        navigator = getattr(self, "_painter_ui_navigator", None)
+        if navigator is None:
+            return
+        if bool(getattr(self, "_painter_ui_navigator_detached", False)):
+            window = getattr(
+                self,
+                "_painter_ui_navigator_dock_window",
+                None,
+            )
+            if window is not None:
+                window.show()
+                window.raise_()
+                window.activateWindow()
+            return
+        popover = getattr(self, "_painter_ui_navigator_popover", None)
+        if popover is not None and popover.contains(navigator):
+            self._hide_painter_ui_navigator_popover()
+            return
+        if not navigator.is_collapsed():
+            navigator.set_auto_hide(True)
+            return
+        self._show_painter_ui_navigator_popover()
+
+    def _show_painter_ui_navigator_popover(self) -> None:
+        if str(getattr(self, "_canvas_workspace_mode", "")) != "ui_design":
+            return
+        navigator = getattr(self, "_painter_ui_navigator", None)
+        if navigator is None:
+            return
+        self._hide_painter_ui_quick_properties()
+        popover = getattr(self, "_painter_ui_navigator_popover", None)
+        if popover is None:
+            from app.painter_ui_quick_properties import (
+                PainterUIQuickPropertiesPopover,
+            )
+
+            popover = PainterUIQuickPropertiesPopover(
+                self._canvas_host,
+                side="left",
+                object_name="PainterUINavigatorPopover",
+            )
+            self._painter_ui_navigator_popover = popover
+        navigator.set_temporary_expanded(True)
+        popover.attach(navigator)
+
+    def _hide_painter_ui_navigator_popover(self) -> None:
+        popover = getattr(self, "_painter_ui_navigator_popover", None)
+        navigator = getattr(self, "_painter_ui_navigator", None)
+        if popover is None or navigator is None:
+            return
+        widget = popover.take() if popover.contains(navigator) else None
+        if widget is None:
+            return
+        navigator.set_temporary_expanded(False)
+        splitter = getattr(self, "_paint_workspace_layout", None)
+        if isinstance(splitter, QSplitter):
+            splitter.insertWidget(1, navigator)
+            navigator.set_splitter_managed(True)
+        navigator.setVisible(
+            str(getattr(self, "_canvas_workspace_mode", "")) == "ui_design"
+        )
+        self._restore_painter_workspace_splitter()
+        self._update_canvas_geometry()
+
+    def _pin_painter_ui_navigator(self) -> None:
+        self._hide_painter_ui_navigator_popover()
+        navigator = getattr(self, "_painter_ui_navigator", None)
+        if navigator is None:
+            return
+        navigator.set_auto_hide(False)
+        self._save_painter_ui_panel_presentation(
+            navigator_auto_hide=False,
+            navigator_collapsed=False,
+            navigator_user_override=True,
+        )
+
+    def _toggle_painter_ui_navigator_dock(self) -> None:
+        if bool(getattr(self, "_painter_ui_navigator_detached", False)):
+            self._dock_painter_ui_navigator()
+        else:
+            self._detach_painter_ui_navigator()
+
+    def _set_painter_ui_navigator_presentation(
+        self,
+        mode: str,
+    ) -> dict[str, bool | str]:
+        value = str(mode or "").strip().casefold()
+        if value not in {"auto_hide", "pinned", "floating"}:
+            raise ValueError(
+                "Painter UI navigator mode must be "
+                "auto_hide, pinned, or floating"
+            )
+        self._set_canvas_workspace_mode("ui_design")
+        navigator = self._painter_ui_navigator
+        self._hide_painter_ui_navigator_popover()
+        if value == "floating":
+            navigator.set_auto_hide(False)
+            self._detach_painter_ui_navigator()
+        else:
+            if bool(
+                getattr(self, "_painter_ui_navigator_detached", False)
+            ):
+                self._dock_painter_ui_navigator()
+            navigator.set_auto_hide(value == "auto_hide")
+        return {
+            "mode": value,
+            "auto_hide": navigator.is_auto_hide(),
+            "detached": bool(
+                getattr(self, "_painter_ui_navigator_detached", False)
+            ),
+        }
+
+    def _detach_painter_ui_navigator(self) -> None:
+        if str(getattr(self, "_canvas_workspace_mode", "")) != "ui_design":
+            return
+        navigator = getattr(self, "_painter_ui_navigator", None)
+        if navigator is None:
+            return
+        self._hide_painter_ui_navigator_popover()
+        window = getattr(self, "_painter_ui_navigator_dock_window", None)
+        if window is None:
+            from app.painter_ui_inspector_dock import (
+                PainterUIInspectorDockWindow,
+            )
+            from app.painter_i18n import painter_text
+
+            window = PainterUIInspectorDockWindow(
+                self,
+                title=painter_text("UI Layers and Assets"),
+                object_name="PainterUINavigatorDockWindow",
+            )
+            window.dock_requested.connect(self._dock_painter_ui_navigator)
+            self._painter_ui_navigator_dock_window = window
+        navigator.set_auto_hide(False)
+        window.attach(navigator)
+        navigator.set_detached(True)
+        self._painter_ui_navigator_detached = True
+        window.show()
+        window.raise_()
+        window.activateWindow()
+        self._restore_painter_workspace_splitter()
+        self._update_canvas_geometry()
+
+    def _dock_painter_ui_navigator(self) -> None:
+        if not bool(getattr(self, "_painter_ui_navigator_detached", False)):
+            return
+        window = getattr(self, "_painter_ui_navigator_dock_window", None)
+        navigator = (
+            window.take()
+            if window is not None
+            else getattr(self, "_painter_ui_navigator", None)
+        )
+        if navigator is None:
+            return
+        splitter = getattr(self, "_paint_workspace_layout", None)
+        if isinstance(splitter, QSplitter):
+            splitter.insertWidget(1, navigator)
+            navigator.set_splitter_managed(True)
+        navigator.set_detached(False)
+        navigator.set_auto_hide(False)
+        self._painter_ui_navigator_detached = False
+        if window is not None:
+            window.hide()
+        navigator.setVisible(
+            str(getattr(self, "_canvas_workspace_mode", "")) == "ui_design"
+        )
+        self._restore_painter_workspace_splitter()
         self._update_canvas_geometry()
 
     def _sync_painter_ui_quick_properties(self, selected_id: str) -> None:

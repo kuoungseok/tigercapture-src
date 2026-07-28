@@ -12,7 +12,8 @@ SETTINGS_GROUP = "painter/ui_design/panels"
 
 DEFAULT_PANEL_STATE = {
     "navigator_width": 168,
-    "navigator_collapsed": False,
+    "navigator_collapsed": True,
+    "navigator_auto_hide": True,
     "navigator_user_override": False,
     "inspector_width": 268,
     "inspector_collapsed": True,
@@ -68,6 +69,10 @@ def load_painter_ui_panel_state(
                 store.value("navigator_collapsed", None),
                 bool(DEFAULT_PANEL_STATE["navigator_collapsed"]),
             ),
+            "navigator_auto_hide": _bool_value(
+                store.value("navigator_auto_hide", None),
+                bool(DEFAULT_PANEL_STATE["navigator_auto_hide"]),
+            ),
             "navigator_user_override": _bool_value(
                 store.value("navigator_user_override", None),
                 bool(DEFAULT_PANEL_STATE["navigator_user_override"]),
@@ -105,6 +110,9 @@ def save_painter_ui_panel_state(
     )
     current["navigator_collapsed"] = bool(
         current["navigator_collapsed"]
+    )
+    current["navigator_auto_hide"] = bool(
+        current["navigator_auto_hide"]
     )
     current["navigator_user_override"] = bool(
         current["navigator_user_override"]

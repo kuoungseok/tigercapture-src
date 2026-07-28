@@ -503,6 +503,17 @@ class PaintAdapterMixin(
         state["inspector_presentation"] = presentation
         return state
 
+    def paint_ui_navigator_presentation(
+        self,
+        *,
+        mode: str,
+    ) -> dict[str, Any]:
+        dialog = self._paint_dialog_owner()
+        presentation = dialog._set_painter_ui_navigator_presentation(mode)
+        state = dialog.painter_action_state()
+        state["navigator_presentation"] = presentation
+        return state
+
     def paint_ui_view_fit(self, *, mode: str = "all") -> dict[str, Any]:
         dialog = self._paint_dialog_owner()
         view = dialog._fit_painter_ui_view(str(mode or "all"))

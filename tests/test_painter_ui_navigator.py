@@ -52,7 +52,7 @@ def test_ui_navigator_lists_pages_filters_layers_and_emits_selection() -> None:
     assert panel.mode_tabs.tabText(1) == "Assets"
     panel.set_collapsed(True)
     assert panel.is_collapsed()
-    assert panel.maximumWidth() == 34
+    assert panel.maximumWidth() == 0
     panel.collapse_button.click()
     assert not panel.is_collapsed()
     assert panel.minimumWidth() == panel.DEFAULT_EXPANDED_WIDTH
@@ -78,7 +78,7 @@ def test_ui_navigator_resizes_and_restores_last_expanded_width() -> None:
     assert panel.maximumWidth() == 300
     assert panel._collapse_user_override is True
     panel.set_collapsed(True)
-    assert panel.width() <= 34
+    assert panel.width() == 0
     panel.set_collapsed(False)
     assert panel.minimumWidth() == 300
     assert panel.maximumWidth() == 300
@@ -91,6 +91,38 @@ def test_ui_navigator_resizes_and_restores_last_expanded_width() -> None:
     assert panel.expanded_width() == 176
     assert panel.is_collapsed()
     assert panel.has_user_collapse_override()
+    panel.deleteLater()
+
+
+def test_ui_navigator_auto_hide_temporarily_expands_without_pinning() -> None:
+    _app()
+    from PySide6.QtWidgets import QListWidget, QWidget
+
+    from app.painter_ui_navigator import PainterUINavigatorPanel
+
+    panel = PainterUINavigatorPanel(QWidget(), QListWidget())
+    closed: list[bool] = []
+    pinned: list[bool] = []
+    panel.temporary_close_requested.connect(lambda: closed.append(True))
+    panel.pin_requested.connect(lambda: pinned.append(True))
+
+    panel.set_auto_hide(True)
+    assert panel.is_auto_hide()
+    assert panel.is_collapsed()
+    assert panel.maximumWidth() == 0
+
+    panel.set_temporary_expanded(True)
+    assert panel.is_temporary_expanded()
+    assert panel.is_collapsed()
+    assert panel.minimumWidth() == panel.MIN_EXPANDED_WIDTH
+    assert not panel.pin_button.isHidden()
+    panel.pin_button.click()
+    panel.collapse_button.click()
+    assert pinned == [True]
+    assert closed == [True]
+
+    panel.set_temporary_expanded(False)
+    assert panel.maximumWidth() == 0
     panel.deleteLater()
 
 

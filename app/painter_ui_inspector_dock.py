@@ -73,10 +73,16 @@ class PainterUIInspectorDockWindow(QDialog):
 
     dock_requested = Signal()
 
-    def __init__(self, parent=None) -> None:
+    def __init__(
+        self,
+        parent=None,
+        *,
+        title: str = "UI Inspector",
+        object_name: str = "PainterUIInspectorDockWindow",
+    ) -> None:
         super().__init__(parent, Qt.WindowType.Window)
-        self.setObjectName("PainterUIInspectorDockWindow")
-        self.setWindowTitle("UI Inspector")
+        self.setObjectName(object_name)
+        self.setWindowTitle(str(title))
         self.setMinimumSize(340, 420)
         self.resize(380, 720)
         self._content_layout = QVBoxLayout(self)
