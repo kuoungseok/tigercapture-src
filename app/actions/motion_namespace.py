@@ -3014,3 +3014,52 @@ def register_motion_actions(registry: Any) -> None:
         mutating=False,
         changed=False,
     )
+    platform_copy_fields = {
+        **cid,
+        "platform": {
+            "type": "string",
+            "enum": ["landscape_16_9", "vertical_9_16", "square_1_1"],
+        },
+        "prompt": {"type": "string"},
+        "provider": {"type": "string"},
+    }
+    registry.register_adapter_action(
+        "motion.ai.platform_copy.plan",
+        "Create a reviewable platform-aware rewrite plan without changing the composition.",
+        "motion",
+        "motion_ai_platform_copy_plan",
+        params_schema=schema_object(
+            platform_copy_fields,
+            required=("composition_id", "platform"),
+        ),
+        required=("composition_id", "platform"),
+        mutating=False,
+        changed=False,
+    )
+    registry.register_adapter_action(
+        "motion.ai.platform_copy.apply",
+        "Apply an approved platform copy plan while preserving transforms and media.",
+        "motion",
+        "motion_ai_platform_copy_apply",
+        params_schema=schema_object({
+            **cid,
+            "plan": {"type": "object"},
+            "approved": {"type": "boolean"},
+        }, required=("composition_id", "plan", "approved")),
+        required=("composition_id", "plan", "approved"),
+        undo_label="Apply Platform Copy Direction",
+        dry_summary="The approved platform-specific copy would be applied",
+    )
+    registry.register_adapter_action(
+        "motion.ai.platform_copy.preflight",
+        "Validate platform copy targets, limits, protection, and document revision.",
+        "motion",
+        "motion_ai_platform_copy_preflight",
+        params_schema=schema_object({
+            **cid,
+            "plan": {"type": "object"},
+        }, required=("composition_id", "plan")),
+        required=("composition_id", "plan"),
+        mutating=False,
+        changed=False,
+    )

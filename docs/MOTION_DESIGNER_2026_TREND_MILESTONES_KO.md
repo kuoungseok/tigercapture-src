@@ -660,6 +660,16 @@ Action/MCP:
   Style Director가 생성한 데이터만 다음 후보에서 정리한다.
 - `tigerstudio.motion.ai_story_plan.v1`은 Hook부터 CTA까지 8개 beat의 안정 ID를
   계획하고 승인 후 기존 story 데이터 계약으로 적용한다.
+- `tigerstudio.motion.ai_platform_copy_plan.v1`은 16:9, 9:16, 1:1별
+  Hook/Headline/Subtitle/Body/CTA 글자 제한과 현재 story audience/message를
+  shared AI provider 경계에 전달한다. provider는 안정 target ID, 역할,
+  원문, 제한값을 추가·삭제·변경할 수 없고 제안 문구와 이유만 바꿀 수 있다.
+  provider가 없거나 실패하면 fallback 사실을 노출하고 결정적 길이 맞춤
+  계획을 반환한다.
+- `motion.ai.platform_copy.plan/apply/preflight`는 계획, 검사, 승인 적용을
+  Action/MCP로 제공한다. protected text layer, 다른 composition, stale
+  revision, 제한 초과, target set 변경은 거부한다. 승인 결과는 일반 story
+  beat copy와 text source parameter로 남고 transform/media는 보존된다.
 - Glass 후보는 현재 shared raster CPU fallback을 명시한다. Painterly는
   M24의 provider-neutral post-render 효과와 5개 preset을 사용한다. 기능을
   조용히 생략하거나 GPU/3D 지원을 주장하지 않는다.
@@ -667,7 +677,7 @@ Action/MCP:
   렌더한다. 현재 QA는 원본 source mutation 0, transform/keyframe loss 0,
   story beat 8개를 기록한다.
 
-M27 v1은 편집 가능한 deterministic style compiler와 review workflow다.
+M27 v1은 편집 가능한 deterministic style/copy compiler와 review workflow다.
 생성형 모델이 완성된 art direction을 스스로 설계하거나 이미지 내용을 새로
 그리는 기능이라고 주장하지 않는다.
 

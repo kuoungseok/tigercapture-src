@@ -15,6 +15,60 @@ from app.motion_designer.style_director import (
 
 
 class MotionStyleDirectorAdapterMixin:
+    def motion_ai_platform_copy_plan(
+        self,
+        *,
+        composition_id: str,
+        platform: str,
+        prompt: str = "",
+        provider: str = "",
+    ) -> dict[str, Any]:
+        from app.motion_designer.platform_copy import generate_platform_copy_plan
+
+        return generate_platform_copy_plan(
+            self._motion_store()[composition_id],
+            platform=platform,
+            prompt=prompt,
+            provider_id=provider or None,
+        )
+
+    def motion_ai_platform_copy_apply(
+        self,
+        *,
+        composition_id: str,
+        plan: Mapping[str, Any],
+        approved: bool,
+    ) -> dict[str, Any]:
+        from app.motion_designer.platform_copy import apply_platform_copy_plan
+
+        candidate, report = apply_platform_copy_plan(
+            self._motion_store()[composition_id],
+            plan,
+            approved=approved,
+        )
+        self._motion_store()[composition_id] = candidate
+        self._motion_sync_owner()
+        return {
+            "changed": True,
+            "undo_label": "Apply Platform Copy Direction",
+            "composition_id": composition_id,
+            "revision": candidate.revision,
+            "report": report,
+        }
+
+    def motion_ai_platform_copy_preflight(
+        self,
+        *,
+        composition_id: str,
+        plan: Mapping[str, Any],
+    ) -> dict[str, Any]:
+        from app.motion_designer.platform_copy import preflight_platform_copy_plan
+
+        return preflight_platform_copy_plan(
+            self._motion_store()[composition_id],
+            plan,
+        )
+
     def motion_ai_style_plan(
         self,
         *,

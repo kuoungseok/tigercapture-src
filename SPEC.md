@@ -6727,9 +6727,9 @@ AI Script Edit MVP integration:
   four times in all three aspect ratios through `MotionExportRenderer`.
   Current evidence reports 12 real frames, zero protected-layer clipping, zero
   story issues, zero stable-ID loss, and no mutation of the source composition.
-  M26 v1 is a deterministic role/priority constraint reflow, not a claim of
-  semantic generative art direction or automatic platform copy rewriting;
-  those remain M27 work.
+  M26 v1 is a deterministic role/priority constraint reflow. Semantic
+  generative art direction remains M27 work; platform copy rewriting now uses
+  the separate reviewable M27 contract described below.
 - M27 AI Style Director v1 is implemented through the reviewable
   `tigerstudio.motion.ai_style_plan.v1` contract. It separates style intent
   from story intent, records reference provenance, backend availability,
@@ -6755,6 +6755,21 @@ AI Script Edit MVP integration:
   `motion.ai.style.candidates.generate`, `motion.ai.style.apply`,
   `motion.ai.style.lock.set`, `motion.ai.story.plan/apply`, and
   `motion.ai.trend.preflight`.
+- M27 platform-aware copy direction is implemented through
+  `tigerstudio.motion.ai_platform_copy_plan.v1`. It sends only bounded story
+  context and stable-ID copy targets through the shared AI provider boundary;
+  providers cannot access or mutate the project. Landscape 16:9, vertical
+  9:16, and square 1:1 profiles define role-specific character limits for
+  Hook, Headline, Subtitle, Body, and CTA copy.
+- `motion.ai.platform_copy.plan/apply/preflight` expose the workflow to
+  Action/MCP clients. Plans preserve target kind, stable ID, role, original
+  text, and limit; provider output may change only proposed text and reason.
+  Validation rejects target additions/removals, protected layers, character
+  limit overflow, stale revisions, and plans for another composition. Apply
+  requires explicit approval, changes ordinary story/text fields, preserves
+  media and transforms, and records provider provenance and the accepted diff.
+  If the selected provider is unavailable, the shared provider boundary
+  discloses the fallback and returns a deterministic length-fit plan.
 - Glass candidates disclose the current shared-raster CPU fallback. Painterly
   candidates use the M24 provider-neutral post-render effect and its editable
   Realistic, Toon, Painted, Ink, and Paper presets.
@@ -6764,7 +6779,7 @@ AI Script Edit MVP integration:
 - `tools/qa_motion_style_director.py` renders all five candidates through the
   shared renderer. Current evidence records five distinct candidates, zero
   source mutation, zero transform/keyframe loss, and an eight-beat story plan.
-  M27 v1 is a reviewable editable style compiler, not a claim that a
+  M27 v1 is a reviewable editable style and copy compiler, not a claim that a
   generative model autonomously produces finished art direction or replaces
   the underlying Motion tools.
 - M24 Painterly 2D/3D Look Development is complete v1 through the

@@ -822,8 +822,70 @@ def test_motion_ai_style_director_actions_plan_review_apply_and_preflight() -> N
         "motion.ai.style.lock.set",
         "motion.ai.story.plan",
         "motion.ai.story.apply",
+        "motion.ai.platform_copy.plan",
+        "motion.ai.platform_copy.apply",
+        "motion.ai.platform_copy.preflight",
         "motion.ai.trend.preflight",
     } <= specs
+
+
+def test_motion_ai_platform_copy_actions_plan_preflight_and_apply() -> None:
+    owner = Owner()
+    registry = ActionRegistry(owner)
+    created = registry.execute("motion.composition.create", {
+        "name": "Platform Copy Actions",
+        "duration_ms": 3000,
+    })
+    composition_id = created.result["payload"]["composition"]["id"]
+    added = registry.execute("motion.layer.add", {
+        "composition_id": composition_id,
+        "layer": {
+            "id": "headline",
+            "name": "Main Headline",
+            "layer_type": "text",
+            "out_ms": 3000,
+            "source": {
+                "kind": "text",
+                "params": {
+                    "role": "headline",
+                    "text": (
+                        "A deliberately oversized headline that needs a much "
+                        "shorter vertical advertising treatment"
+                    ),
+                },
+            },
+        },
+    })
+    assert added.ok
+    planned = registry.execute("motion.ai.platform_copy.plan", {
+        "composition_id": composition_id,
+        "platform": "vertical_9_16",
+        "prompt": "Make the headline concise.",
+        "provider": "rule_based",
+    })
+    assert planned.ok
+    plan = planned.result
+    assert plan["review_required"] is True
+    assert plan["operations"][0]["target_id"] == "headline"
+
+    preflight = registry.execute("motion.ai.platform_copy.preflight", {
+        "composition_id": composition_id,
+        "plan": plan,
+    })
+    assert preflight.ok
+    assert preflight.result["ok"] is True
+
+    before_revision = owner._motion_compositions[composition_id].revision
+    applied = registry.execute("motion.ai.platform_copy.apply", {
+        "composition_id": composition_id,
+        "plan": plan,
+        "approved": True,
+    })
+    assert applied.ok
+    assert applied.result["revision"] == before_revision + 1
+    assert len(
+        owner._motion_compositions[composition_id].layers[0].source.params["text"]
+    ) <= 48
 
 
 def test_motion_audio_reactive_actions_share_analysis_preview_and_bake(tmp_path) -> None:
