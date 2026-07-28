@@ -31,6 +31,7 @@ from .ai_worker import (
     MotionAICandidatePreviewWorker,
     MotionAIGenerationWorker,
     MotionAIPatchWorker,
+    MotionAIPlatformCopyWorker,
     MotionAIStylePreviewWorker,
 )
 from .ar_pbr_panel import ArPbrPanel
@@ -842,6 +843,10 @@ class MotionDesignerWindow(QMainWindow):
         self._umg_generation_job: tuple[QThread, MotionUMGGenerationWorker] | None = None
         self._ai_generation_job: tuple[QThread, MotionAIGenerationWorker] | None = None
         self._ai_style_job: tuple[QThread, MotionAIStylePreviewWorker] | None = None
+        self._ai_platform_copy_job: tuple[
+            QThread,
+            MotionAIPlatformCopyWorker,
+        ] | None = None
         self._ai_preview_job: tuple[QThread, MotionAICandidatePreviewWorker] | None = None
         self._ai_preview_pending: dict | None = None
         self._ai_patch_job: tuple[QThread, MotionAIPatchWorker] | None = None
@@ -1136,6 +1141,10 @@ class MotionDesignerWindow(QMainWindow):
         self.ai.plan_requested.connect(self._plan_ai_request)
         self.ai.style_requested.connect(self._plan_ai_style)
         self.ai.style_apply_requested.connect(self._apply_ai_style)
+        self.ai.platform_copy_requested.connect(self._plan_ai_platform_copy)
+        self.ai.platform_copy_apply_requested.connect(
+            self._apply_ai_platform_copy
+        )
         self.ai.apply_requested.connect(self._apply_ai_proposal)
         self.ai.patch_requested.connect(self._plan_ai_patch)
         self.ai.patch_apply_requested.connect(self._apply_ai_patch)
@@ -2375,6 +2384,66 @@ class MotionDesignerWindow(QMainWindow):
             return
         self.controller.replace(candidate)
         self.ai.set_applied(len(report.get("applied_layer_ids") or []))
+
+    def _plan_ai_platform_copy(self, payload: object) -> None:
+        if (
+            self._ai_platform_copy_job is not None
+            or not isinstance(payload, dict)
+        ):
+            return
+        thread = QThread(self)
+        worker = MotionAIPlatformCopyWorker(
+            self.controller.composition,
+            dict(payload),
+        )
+        worker.moveToThread(thread)
+        thread.started.connect(worker.run)
+        worker.completed.connect(self._finish_ai_platform_copy)
+        worker.failed.connect(self._fail_ai_platform_copy)
+        worker.completed.connect(thread.quit)
+        worker.failed.connect(thread.quit)
+        thread.finished.connect(worker.deleteLater)
+        thread.finished.connect(
+            lambda: self._clear_ai_platform_copy_job(thread)
+        )
+        self._ai_platform_copy_job = (thread, worker)
+        self.ai.set_generating(True)
+        self.ai.status.setText("Planning platform copy...")
+        thread.start()
+
+    def _finish_ai_platform_copy(self, payload: object) -> None:
+        self.ai.set_generating(False)
+        if isinstance(payload, dict):
+            self.ai.set_platform_copy_plan(payload)
+        else:
+            self.ai.set_error("Platform Copy returned an invalid result.")
+
+    def _fail_ai_platform_copy(self, message: str) -> None:
+        self.ai.set_error(message)
+
+    def _clear_ai_platform_copy_job(self, thread: QThread) -> None:
+        if (
+            self._ai_platform_copy_job is not None
+            and self._ai_platform_copy_job[0] is thread
+        ):
+            self._ai_platform_copy_job = None
+
+    def _apply_ai_platform_copy(self, payload: object) -> None:
+        if not isinstance(payload, dict):
+            return
+        from app.motion_designer.platform_copy import apply_platform_copy_plan
+
+        try:
+            candidate, report = apply_platform_copy_plan(
+                self.controller.composition,
+                payload.get("plan") or {},
+                approved=bool(payload.get("approved", False)),
+            )
+        except Exception as exc:
+            self.ai.set_error(str(exc))
+            return
+        self.controller.replace(candidate)
+        self.ai.set_applied(int(report.get("changed_count", 0)))
 
     def _finish_ai_generation(self, proposal: object) -> None:
         self.ai.set_generating(False)

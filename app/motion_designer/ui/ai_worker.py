@@ -203,6 +203,41 @@ class MotionAIStylePreviewWorker(QObject):
             })
 
 
+class MotionAIPlatformCopyWorker(QObject):
+    completed = Signal(object)
+    failed = Signal(str)
+
+    def __init__(self, composition: MotionComposition, request: dict) -> None:
+        super().__init__()
+        self._composition = MotionComposition.from_dict(composition.to_dict())
+        self._request = dict(request)
+
+    @Slot()
+    def run(self) -> None:
+        try:
+            from app.motion_designer.platform_copy import (
+                generate_platform_copy_plan,
+                preflight_platform_copy_plan,
+            )
+
+            plan = generate_platform_copy_plan(
+                self._composition,
+                platform=str(
+                    self._request.get("platform") or "landscape_16_9"
+                ),
+                prompt=str(self._request.get("prompt") or ""),
+                provider_id=str(self._request.get("provider") or "") or None,
+            )
+            preflight = preflight_platform_copy_plan(
+                self._composition,
+                plan,
+            )
+        except Exception as exc:
+            self.failed.emit(str(exc))
+        else:
+            self.completed.emit({"plan": plan, "preflight": preflight})
+
+
 class MotionAIPatchWorker(QObject):
     completed = Signal(object)
     failed = Signal(str)
@@ -243,5 +278,6 @@ __all__ = [
     "MotionAICandidatePreviewWorker",
     "MotionAIGenerationWorker",
     "MotionAIPatchWorker",
+    "MotionAIPlatformCopyWorker",
     "MotionAIStylePreviewWorker",
 ]

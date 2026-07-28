@@ -670,6 +670,11 @@ Action/MCP:
   Action/MCP로 제공한다. protected text layer, 다른 composition, stale
   revision, 제한 초과, target set 변경은 거부한다. 승인 결과는 일반 story
   beat copy와 text source parameter로 남고 transform/media는 보존된다.
+- AI Workspace에는 16:9/9:16/1:1 선택과 `Copy` 명령이 있으며 계획은 UI
+  thread 밖에서 실행된다. 결과 창은 원문/제안, 현재/최대 글자 수,
+  provider fallback과 preflight를 보여준 뒤 기존 `Apply` 승인으로
+  적용한다. `tools/qa_motion_platform_copy_ui.py`가 실제 Qt 창 증거를
+  캡처한다.
 - Glass 후보는 현재 shared raster CPU fallback을 명시한다. Painterly는
   M24의 provider-neutral post-render 효과와 5개 preset을 사용한다. 기능을
   조용히 생략하거나 GPU/3D 지원을 주장하지 않는다.

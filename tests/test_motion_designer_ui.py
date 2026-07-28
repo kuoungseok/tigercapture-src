@@ -1013,6 +1013,80 @@ def test_motion_ai_workspace_reviews_and_applies_five_style_candidates() -> None
     app.processEvents()
 
 
+def test_motion_ai_workspace_reviews_applies_and_undoes_platform_copy() -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    app = QApplication.instance() or QApplication([])
+    original = (
+        "A deliberately oversized headline that needs a much shorter "
+        "vertical advertising treatment"
+    )
+    composition = MotionComposition(
+        width=1920,
+        height=1080,
+        duration_ms=3000,
+        layers=[
+            MotionLayer(
+                id="copy_headline",
+                name="Main Headline",
+                layer_type="text",
+                source=SourceRef(
+                    kind="text",
+                    params={
+                        "role": "headline",
+                        "text": original,
+                        "font_size": 72,
+                    },
+                ),
+                out_ms=3000,
+            ),
+        ],
+    )
+    window = MotionDesignerWindow(composition)
+    index = window.ai.platform.findData("vertical_9_16")
+    window.ai.platform.setCurrentIndex(index)
+    assert window.ai.platform.currentText() == "Vertical 9:16"
+
+    window._plan_ai_platform_copy({
+        "platform": "vertical_9_16",
+        "prompt": "Make the headline concise.",
+        "provider": "rule_based",
+    })
+    loop = QEventLoop()
+    poll = QTimer()
+    poll.setInterval(10)
+    poll.timeout.connect(
+        lambda: loop.quit()
+        if window.ai._platform_copy_plan is not None
+        else None
+    )
+    timeout = QTimer()
+    timeout.setSingleShot(True)
+    timeout.timeout.connect(loop.quit)
+    poll.start()
+    timeout.start(5000)
+    loop.exec()
+    poll.stop()
+
+    assert window.ai._platform_copy_plan is not None
+    assert window.ai.apply_button.isEnabled()
+    assert "Review changes:" in window.ai.result.toPlainText()
+    assert "copy_headline" in window.ai.result.toPlainText()
+    window.ai.apply_proposal()
+    assert len(
+        window.controller.composition.layers[0].source.params["text"]
+    ) <= 48
+    assert window.ai.status.text() == "Applied 1"
+    window.controller.undo()
+    assert (
+        window.controller.composition.layers[0].source.params["text"]
+        == original
+    )
+    window.close()
+    app.processEvents()
+
+
 def test_motion_mask_refine_canvas_adds_and_removes_brush_strokes() -> None:
     existing = QCoreApplication.instance()
     if existing is not None and not isinstance(existing, QApplication):

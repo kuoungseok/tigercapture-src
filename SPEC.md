@@ -6770,6 +6770,12 @@ AI Script Edit MVP integration:
   media and transforms, and records provider provenance and the accepted diff.
   If the selected provider is unavailable, the shared provider boundary
   discloses the fallback and returns a deterministic length-fit plan.
+- The Motion AI workspace exposes a compact 16:9/9:16/1:1 selector and `Copy`
+  command. Planning runs off the UI thread, presents original and proposed
+  copy with live character counts, provider/fallback disclosure, and
+  preflight issues, then reuses the explicit `Apply` approval control.
+  `tools/qa_motion_platform_copy_ui.py` captures this flow from a real Qt
+  Motion Designer window.
 - Glass candidates disclose the current shared-raster CPU fallback. Painterly
   candidates use the M24 provider-neutral post-render effect and its editable
   Realistic, Toon, Painted, Ink, and Paper presets.

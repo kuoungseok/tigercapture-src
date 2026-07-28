@@ -91,6 +91,8 @@ class MotionAIPanel(QWidget):
     plan_requested = Signal(object)
     style_requested = Signal(object)
     style_apply_requested = Signal(object)
+    platform_copy_requested = Signal(object)
+    platform_copy_apply_requested = Signal(object)
     apply_requested = Signal(object)
     patch_requested = Signal(object)
     patch_apply_requested = Signal(object)
@@ -106,6 +108,7 @@ class MotionAIPanel(QWidget):
         self._proposal: dict | None = None
         self._candidates: list[dict] = []
         self._style_plan: dict | None = None
+        self._platform_copy_plan: dict | None = None
         self._patch: dict | None = None
         self._applied_layer_ids: list[str] = []
         self._provider_status = self._read_provider_status()
@@ -200,6 +203,23 @@ class MotionAIPanel(QWidget):
         self.apply_button.clicked.connect(self.apply_proposal)
         tools.addWidget(self.apply_button)
         root.addLayout(tools)
+
+        platform_tools = QHBoxLayout()
+        platform_tools.addWidget(QLabel("Platform Copy", self))
+        self.platform = QComboBox(self)
+        self.platform.setToolTip("Target layout and copy-density profile")
+        self.platform.addItem("Landscape 16:9", "landscape_16_9")
+        self.platform.addItem("Vertical 9:16", "vertical_9_16")
+        self.platform.addItem("Square 1:1", "square_1_1")
+        self.platform.currentIndexChanged.connect(self._invalidate_proposal)
+        platform_tools.addWidget(self.platform, 1)
+        self.copy_button = QPushButton("Propose", self)
+        self.copy_button.setToolTip(
+            "Propose platform-aware Story and text copy for review"
+        )
+        self.copy_button.clicked.connect(self.request_platform_copy)
+        platform_tools.addWidget(self.copy_button)
+        root.addLayout(platform_tools)
 
         self.extraction = LayerExtractionPanel(self)
         self.extraction.setVisible(False)
@@ -345,6 +365,15 @@ class MotionAIPanel(QWidget):
             "seed": 20260729,
         })
 
+    def request_platform_copy(self) -> None:
+        self.platform_copy_requested.emit({
+            "prompt": self.prompt.toPlainText().strip(),
+            "platform": str(
+                self.platform.currentData() or "landscape_16_9"
+            ),
+            "provider": "",
+        })
+
     def request_patch(self) -> None:
         prompt = self.prompt.toPlainText().strip()
         if not prompt or not self._applied_layer_ids:
@@ -385,6 +414,7 @@ class MotionAIPanel(QWidget):
 
     def set_generating(self, active: bool) -> None:
         self.plan_button.setEnabled(not active)
+        self.copy_button.setEnabled(not active)
         self.style_button.setEnabled(not active)
         self.attach_button.setEnabled(not active)
         self.clear_button.setEnabled(not active)
@@ -406,6 +436,7 @@ class MotionAIPanel(QWidget):
     def set_error(self, message: str) -> None:
         self._proposal = None
         self._style_plan = None
+        self._platform_copy_plan = None
         self.set_generating(False)
         self.status.setText("Plan failed")
         self.result.setPlainText(str(message or "Motion AI generation failed."))
@@ -536,6 +567,65 @@ class MotionAIPanel(QWidget):
             f"Style Director / {candidate.get('title', 'Candidate')}",
         )
 
+    def set_platform_copy_plan(self, payload: dict) -> None:
+        plan = payload.get("plan")
+        preflight = payload.get("preflight")
+        if not isinstance(plan, dict) or not isinstance(preflight, dict):
+            self.set_error("Platform Copy returned an invalid result.")
+            return
+        self._proposal = None
+        self._style_plan = None
+        self._platform_copy_plan = dict(plan)
+        self._candidates.clear()
+        self.candidate_selector.clear()
+        self.candidate_selector.setVisible(False)
+        self.candidate_strip.clear()
+        self.candidate_strip.setVisible(False)
+        provider = dict(plan.get("provider") or {})
+        lines = [
+            f"Platform Copy / {plan.get('profile', {}).get('label', plan.get('platform', ''))}",
+            "",
+            "Review changes:",
+        ]
+        for operation in plan.get("operations", []):
+            if not isinstance(operation, dict):
+                continue
+            lines.extend([
+                f"[{str(operation.get('role') or 'copy').upper()}] "
+                f"{operation.get('target_id', '')}",
+                f"- {operation.get('before', '')}",
+                f"+ {operation.get('after', '')}",
+                f"  {len(str(operation.get('after') or ''))}/"
+                f"{int(operation.get('max_characters', 0) or 0)} characters",
+                "",
+            ])
+        if provider.get("fallback_used"):
+            lines.extend([
+                "Provider:",
+                f"- {provider.get('selected_provider', 'AI')} -> "
+                f"{provider.get('provider', 'rule_based')}",
+                f"- {provider.get('reason', 'Deterministic fallback used.')}",
+            ])
+        issues = list(preflight.get("issues") or [])
+        warnings = list(preflight.get("warnings") or [])
+        if issues or warnings:
+            lines.extend([
+                "",
+                "Preflight:",
+                *[
+                    f"- {row.get('message') or row.get('code')}"
+                    for row in [*issues, *warnings]
+                    if isinstance(row, dict)
+                ],
+            ])
+        self.result.setPlainText("\n".join(lines).strip())
+        self.apply_button.setEnabled(
+            bool(plan.get("operations")) and bool(preflight.get("ok"))
+        )
+        self.status.setText(
+            f"Copy ready / {len(plan.get('operations') or [])} targets"
+        )
+
     def _select_candidate(self, index: int) -> None:
         if 0 <= int(index) < len(self._candidates):
             self.candidate_selector.blockSignals(True)
@@ -634,6 +724,12 @@ class MotionAIPanel(QWidget):
         self.status.setText(f"{provider} / {len(layers)} layers")
 
     def apply_proposal(self) -> None:
+        if self._platform_copy_plan is not None:
+            self.platform_copy_apply_requested.emit({
+                "plan": dict(self._platform_copy_plan),
+                "approved": True,
+            })
+            return
         if self._style_plan is not None:
             index = self.candidate_strip.currentRow()
             if 0 <= index < len(self._candidates):
@@ -709,6 +805,7 @@ class MotionAIPanel(QWidget):
     def _invalidate_proposal(self) -> None:
         self._proposal = None
         self._style_plan = None
+        self._platform_copy_plan = None
         self._patch = None
         self._candidates.clear()
         self.candidate_selector.clear()
