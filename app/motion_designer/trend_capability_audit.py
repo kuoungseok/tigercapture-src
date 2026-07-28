@@ -5,8 +5,21 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
+from .collage import COLLAGE_CONTRACT
+from .craft_style import CRAFT_STYLE_CONTRACT
+from .glass_material import GLASS_CONTRACT
+from .painterly_look import PAINTERLY_LOOK_CONTRACT
+from .platform_copy import PLATFORM_COPY_PLAN_SCHEMA
+from .schema import MOTION_SCHEMA_VERSION
+from .semantic_style_direction import SEMANTIC_STYLE_SCHEMA
+from .stop_motion import STOP_MOTION_SCHEMA
+from .story_direction import PLATFORM_PLAN_SCHEMA, STORY_SCHEMA
+
 
 TREND_CAPABILITY_AUDIT_SCHEMA = "tigerstudio.motion.trend_capability_audit.v1"
+MOTION_TEXT_LAYER_CONTRACT = (
+    f"app.motion_designer.schema.MotionComposition@{MOTION_SCHEMA_VERSION}"
+)
 
 _ROWS: tuple[dict[str, Any], ...] = (
     {
@@ -14,8 +27,8 @@ _ROWS: tuple[dict[str, Any], ...] = (
         "name": "AI hybrid workflow",
         "status": "supported_v1",
         "contracts": [
-            "tigerstudio.motion.ai_semantic_style_direction.v1",
-            "tigerstudio.motion.ai_platform_copy_plan.v1",
+            SEMANTIC_STYLE_SCHEMA,
+            PLATFORM_COPY_PLAN_SCHEMA,
         ],
         "actions": [
             "motion.ai.style.plan",
@@ -34,7 +47,7 @@ _ROWS: tuple[dict[str, Any], ...] = (
         "id": "authentic_imperfection",
         "name": "Authentic imperfection",
         "status": "supported_v1",
-        "contracts": ["tigerstudio.motion.craft_style.v1"],
+        "contracts": [CRAFT_STYLE_CONTRACT],
         "actions": [
             "motion.craft.apply",
             "motion.craft.seed.lock",
@@ -48,8 +61,8 @@ _ROWS: tuple[dict[str, Any], ...] = (
         "name": "Craft as luxury",
         "status": "supported_v1",
         "contracts": [
-            "tigerstudio.motion.craft_style.v1",
-            "tigerstudio.motion.collage.v1",
+            CRAFT_STYLE_CONTRACT,
+            COLLAGE_CONTRACT,
         ],
         "actions": [
             "motion.craft.texture.attach",
@@ -66,7 +79,7 @@ _ROWS: tuple[dict[str, Any], ...] = (
         "id": "hybrid_2d_3d_painterly",
         "name": "Hybrid 2D and painterly 3D",
         "status": "limited_v1",
-        "contracts": ["tigerstudio.motion.painterly_look.v1"],
+        "contracts": [PAINTERLY_LOOK_CONTRACT],
         "actions": [
             "motion.lookdev.set",
             "motion.lookdev.texture.project",
@@ -84,7 +97,7 @@ _ROWS: tuple[dict[str, Any], ...] = (
         "id": "liquid_glass",
         "name": "Liquid glass and glossy motion",
         "status": "supported_v1",
-        "contracts": ["tigerstudio.motion.glass_material.v1"],
+        "contracts": [GLASS_CONTRACT],
         "actions": [
             "motion.material.glass.create",
             "motion.material.glass.driver.bind",
@@ -99,7 +112,7 @@ _ROWS: tuple[dict[str, Any], ...] = (
         "id": "kinetic_typography",
         "name": "Expressive kinetic typography",
         "status": "supported_v1",
-        "contracts": ["tigerstudio.motion.typography.v1"],
+        "contracts": [MOTION_TEXT_LAYER_CONTRACT],
         "actions": [
             "motion.typography.style.set",
             "motion.typography.animation.set",
@@ -112,7 +125,7 @@ _ROWS: tuple[dict[str, Any], ...] = (
         "id": "mixed_media_collage",
         "name": "Mixed media and collage",
         "status": "supported_v1",
-        "contracts": ["tigerstudio.motion.collage.v1"],
+        "contracts": [COLLAGE_CONTRACT],
         "actions": [
             "motion.collage.item.add",
             "motion.collage.edge.set",
@@ -125,7 +138,7 @@ _ROWS: tuple[dict[str, Any], ...] = (
         "id": "stop_motion_cgi",
         "name": "Stop-motion inspired CGI",
         "status": "limited_v1",
-        "contracts": ["tigerstudio.motion.stop_motion.v1"],
+        "contracts": [STOP_MOTION_SCHEMA],
         "actions": [
             "motion.stop_motion.set",
             "motion.stop_motion.pose.capture",
@@ -141,8 +154,8 @@ _ROWS: tuple[dict[str, Any], ...] = (
         "name": "Story-led brand film",
         "status": "supported_v1",
         "contracts": [
-            "tigerstudio.motion.story.v1",
-            "tigerstudio.motion.ai_platform_copy_plan.v1",
+            STORY_SCHEMA,
+            PLATFORM_COPY_PLAN_SCHEMA,
         ],
         "actions": [
             "motion.story.beat.add",
@@ -159,7 +172,7 @@ _ROWS: tuple[dict[str, Any], ...] = (
         "id": "platform_character_realtime",
         "name": "Character, platform-aware, and realtime graphics",
         "status": "supported_v1",
-        "contracts": ["tigerstudio.motion.platform_variant_plan.v1"],
+        "contracts": [PLATFORM_PLAN_SCHEMA],
         "actions": [
             "motion.actor.update",
             "motion.platform.variant.plan",
@@ -246,4 +259,8 @@ def audit_trend_capabilities(
     }
 
 
-__all__ = ["TREND_CAPABILITY_AUDIT_SCHEMA", "audit_trend_capabilities"]
+__all__ = [
+    "MOTION_TEXT_LAYER_CONTRACT",
+    "TREND_CAPABILITY_AUDIT_SCHEMA",
+    "audit_trend_capabilities",
+]

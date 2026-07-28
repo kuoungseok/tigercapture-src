@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from app.actions.registry import ActionRegistry
 from app.motion_designer.trend_capability_audit import (
+    MOTION_TEXT_LAYER_CONTRACT,
     TREND_CAPABILITY_AUDIT_SCHEMA,
     audit_trend_capabilities,
 )
@@ -35,6 +36,15 @@ def test_trend_capability_audit_verifies_registered_actions_and_evidence() -> No
         and row["evidence_files"] == "verified"
         for row in report["trends"]
     )
+    contracts = {
+        row["id"]: row["contracts"]
+        for row in report["trends"]
+    }
+    assert contracts["liquid_glass"] == ["tigerstudio.motion.glass.v1"]
+    assert contracts["story_led_brand_film"][0] == (
+        "tigerstudio.motion.story_direction.v1"
+    )
+    assert contracts["kinetic_typography"] == [MOTION_TEXT_LAYER_CONTRACT]
 
 
 def test_trend_capability_action_is_non_mutating_and_discloses_limits() -> None:
