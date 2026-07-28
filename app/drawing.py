@@ -236,6 +236,11 @@ QWidget#PaintCanvasModeBar {
     border-bottom: 1px solid #222427;
 }
 
+QWidget#PaintUIDesignToolHost {
+    background-color: #20242a;
+    border-bottom: 1px solid #303741;
+}
+
 QPushButton#PaintCanvasModeButton,
 QPushButton#PaintBlockoutModeButton {
     background-color: transparent;
@@ -638,6 +643,87 @@ QWidget#PainterUIInspector QListWidget::item:selected,
 QWidget#PainterUIInspector QTreeWidget::item:selected {
     background-color: #33465f;
     color: #ffffff;
+}
+
+QFrame#PainterUINavigator {
+    background-color: #1e2228;
+    border: none;
+    border-right: 1px solid #303741;
+}
+
+QFrame#PainterUINavigatorHeader {
+    background-color: #20242a;
+    border: none;
+    border-bottom: 1px solid #303741;
+}
+
+QLabel#PainterUINavigatorTitle {
+    color: #eef3f8;
+    font-size: 11px;
+    font-weight: 600;
+}
+
+QLabel#PainterUINavigatorSection {
+    color: #8f9baa;
+    background-color: #1e2228;
+    border: none;
+    padding: 7px 8px 3px 8px;
+    font-size: 9px;
+    font-weight: 700;
+}
+
+QLineEdit#PainterUINavigatorSearch {
+    margin: 6px 7px 3px 7px;
+    min-height: 23px;
+    background-color: #15191e;
+    color: #dfe6ef;
+    border: 1px solid #303842;
+    border-radius: 4px;
+    padding: 0 5px;
+}
+
+QListWidget#PainterUIPageList,
+QWidget#PainterUILayersPage QListWidget {
+    background-color: #1e2228;
+    color: #cbd4df;
+    border: none;
+    outline: none;
+}
+
+QListWidget#PainterUIPageList::item,
+QWidget#PainterUILayersPage QListWidget::item {
+    min-height: 24px;
+    padding: 1px 7px;
+}
+
+QListWidget#PainterUIPageList::item:hover,
+QWidget#PainterUILayersPage QListWidget::item:hover {
+    background-color: #292f37;
+}
+
+QListWidget#PainterUIPageList::item:selected,
+QWidget#PainterUILayersPage QListWidget::item:selected {
+    background-color: #34465e;
+    color: #ffffff;
+}
+
+QWidget#PainterUILayersPage {
+    background-color: #1e2228;
+}
+
+QWidget#PainterUILayersPage QPushButton#PainterUILayerAction {
+    min-width: 25px;
+    max-width: 25px;
+    min-height: 23px;
+    max-height: 23px;
+    padding: 0;
+    background-color: transparent;
+    border: 1px solid transparent;
+}
+
+QWidget#PainterUILayersPage QPushButton#PainterUILayerAction:hover {
+    background-color: #2b323b;
+    border-color: #3c4754;
 }
 
 QMenu {
@@ -8858,6 +8944,7 @@ class PaintDialog(QDialog):
         workspace.setContentsMargins(0, 0, 0, 0)
         workspace.setSpacing(0)
         root.addLayout(workspace, stretch=1)
+        self._paint_workspace_layout = workspace
 
         tool_rail = QFrame()
         tool_rail.setObjectName("PaintToolRail")
@@ -9209,10 +9296,11 @@ class PaintDialog(QDialog):
         canvas_bar.addWidget(self._canvas_mode_paint_btn)
         canvas_bar.addWidget(self._canvas_mode_ui_btn)
         canvas_bar.addWidget(self._canvas_mode_3d_btn)
-        self._ui_design_tool_host = QWidget(canvas_mode_bar)
+        self._ui_design_tool_host = QWidget(canvas_frame)
         self._ui_design_tool_host.setObjectName("PaintUIDesignToolHost")
+        self._ui_design_tool_host.setFixedHeight(28)
         ui_tool_bar = QHBoxLayout(self._ui_design_tool_host)
-        ui_tool_bar.setContentsMargins(5, 0, 0, 0)
+        ui_tool_bar.setContentsMargins(4, 2, 4, 2)
         ui_tool_bar.setSpacing(1)
         self._ui_design_tool_buttons: dict[str, QPushButton] = {}
         for label, kind, icon_name in (
@@ -9273,7 +9361,7 @@ class PaintDialog(QDialog):
             )
             ui_tool_bar.addWidget(button)
             self._ui_design_view_buttons[mode] = button
-        self._ui_design_motion_actor_btn = QPushButton("Motion Actor")
+        self._ui_design_motion_actor_btn = QPushButton("")
         self._ui_design_motion_actor_btn.setObjectName("PaintBlockoutModeButton")
         self._ui_design_motion_actor_btn.setToolTip(
             "Import and place a .tgmotion animation actor"
@@ -9282,12 +9370,13 @@ class PaintDialog(QDialog):
             app_icon("import", size=13, color="#E4E8EE")
         )
         self._ui_design_motion_actor_btn.setIconSize(icon_size(13))
-        self._ui_design_motion_actor_btn.setFixedHeight(24)
+        self._ui_design_motion_actor_btn.setAccessibleName("Motion Actor")
+        self._ui_design_motion_actor_btn.setFixedSize(28, 24)
         self._ui_design_motion_actor_btn.clicked.connect(
             self._import_painter_ui_motion_actor
         )
         ui_tool_bar.addWidget(self._ui_design_motion_actor_btn)
-        self._ui_design_animate_btn = QPushButton("Animate")
+        self._ui_design_animate_btn = QPushButton("")
         self._ui_design_animate_btn.setObjectName("PaintBlockoutModeButton")
         self._ui_design_animate_btn.setToolTip(
             "Open the selected UI object in Motion Designer"
@@ -9296,7 +9385,8 @@ class PaintDialog(QDialog):
             app_icon("motion", size=13, color="#E4E8EE")
         )
         self._ui_design_animate_btn.setIconSize(icon_size(13))
-        self._ui_design_animate_btn.setFixedHeight(24)
+        self._ui_design_animate_btn.setAccessibleName("Animate")
+        self._ui_design_animate_btn.setFixedSize(28, 24)
         self._ui_design_animate_btn.clicked.connect(
             self._animate_selected_painter_ui_object
         )
@@ -9321,8 +9411,8 @@ class PaintDialog(QDialog):
             self._set_painter_ui_motion_preview
         )
         ui_tool_bar.addWidget(self._ui_design_motion_preview_btn)
+        ui_tool_bar.addStretch(1)
         self._ui_design_tool_host.hide()
-        canvas_bar.addWidget(self._ui_design_tool_host)
         self._blockout_transform_buttons: dict[str, QPushButton] = {}
         self._blockout_transform_host = QWidget(canvas_mode_bar)
         self._blockout_transform_host.setObjectName("PaintBlockoutTransformHost")
@@ -9443,6 +9533,7 @@ class PaintDialog(QDialog):
         self.canvas.setAcceptDrops(True)
 
         canvas_layout.addWidget(canvas_mode_bar)
+        canvas_layout.addWidget(self._ui_design_tool_host)
         canvas_layout.addWidget(canvas_host, stretch=1)
         workspace.addWidget(canvas_frame, stretch=1)
 
@@ -10080,6 +10171,17 @@ class PaintDialog(QDialog):
         self._paint_ui_inspector.hierarchy_drop_requested.connect(
             self._move_painter_ui_hierarchy
         )
+        from app.painter_ui_navigator import PainterUINavigatorPanel
+
+        self._painter_ui_navigator = PainterUINavigatorPanel(
+            self._paint_ui_inspector.take_layers_page(),
+            self._paint_ui_inspector.layer_list,
+        )
+        self._painter_ui_navigator.artboard_selected.connect(
+            self._set_painter_ui_artboard
+        )
+        self._painter_ui_navigator.hide()
+        workspace.insertWidget(1, self._painter_ui_navigator)
         inspector_controls_layout.addWidget(self._paint_ui_inspector, stretch=1)
         self._paint_ui_inspector.hide()
 
@@ -12371,9 +12473,14 @@ class PaintDialog(QDialog):
         ui_host = getattr(self, "_ui_design_tool_host", None)
         if ui_host is not None:
             ui_host.setVisible(ui_design)
+            if ui_design:
+                self._sync_ui_design_toolbar_density()
         ui_inspector = getattr(self, "_paint_ui_inspector", None)
         if ui_inspector is not None:
             ui_inspector.setVisible(ui_design)
+        ui_navigator = getattr(self, "_painter_ui_navigator", None)
+        if ui_navigator is not None:
+            ui_navigator.setVisible(ui_design)
         template_strip = getattr(self, "_painter_ui_template_strip", None)
         if template_strip is not None:
             template_strip.setVisible(ui_design)
@@ -13985,6 +14092,11 @@ class PaintDialog(QDialog):
         inspector = getattr(self, "_paint_ui_inspector", None)
         if inspector is not None:
             inspector.set_document(getattr(self, "_painter_ui_document", None))
+        navigator = getattr(self, "_painter_ui_navigator", None)
+        if navigator is not None:
+            navigator.set_document(
+                getattr(self, "_painter_ui_document", None)
+            )
         selected = str(
             (
                 (getattr(self, "_painter_ui_document", {}) or {}).get(
@@ -21845,6 +21957,7 @@ class PaintDialog(QDialog):
         )
         super().resizeEvent(event)
         self._sync_color_panel_layout()
+        self._sync_ui_design_toolbar_density()
         self._update_canvas_geometry()
         if preserved_workspace == "3d_place":
             self._restore_3d_workspace_after_resize(
@@ -21857,6 +21970,28 @@ class PaintDialog(QDialog):
                     self._restore_3d_workspace_after_resize(mode, generation)
                 ),
             )
+
+    def _sync_ui_design_toolbar_density(self) -> None:
+        host = getattr(self, "_canvas_host", None)
+        if host is None:
+            return
+        width = int(host.width())
+        compact = width < 620
+        very_compact = width < 430
+        for name in ("ellipse", "line", "button", "progress"):
+            button = getattr(self, "_ui_design_tool_buttons", {}).get(name)
+            if button is not None:
+                button.setVisible(not compact)
+        image_button = getattr(self, "_ui_design_tool_buttons", {}).get("image")
+        if image_button is not None:
+            image_button.setVisible(not very_compact)
+        for mode in ("artboard", "selection"):
+            button = getattr(self, "_ui_design_view_buttons", {}).get(mode)
+            if button is not None:
+                button.setVisible(not compact)
+        actor_button = getattr(self, "_ui_design_motion_actor_btn", None)
+        if actor_button is not None:
+            actor_button.setVisible(not compact)
 
     def _restore_3d_workspace_after_resize(
         self,

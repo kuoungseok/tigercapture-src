@@ -7273,6 +7273,15 @@ AI Script Edit MVP integration:
   object exposes resize/rotation handles. Phone and desktop artboards preserve
   their document aspect ratio while fitting the available UI Design workspace
   rather than stretching to the underlying paint-canvas dimensions.
+- Painter UI Design uses a three-column desktop authoring workspace:
+  provider-neutral `Pages` and the canonical draggable `Layers` hierarchy live
+  in the left navigator, artboards own the center canvas, and static
+  properties, Components, Tokens, Motion delivery, Publish, and inspection
+  live in the right inspector. The Layers navigator reuses the same selection,
+  hierarchy, group, mask, reorder, and delete mutations as Actions rather than
+  maintaining a second document model. Creation, fit, and Motion commands use
+  a separate icon toolbar below the workspace-mode row; nonessential commands
+  collapse at narrow canvas widths so controls never overlap.
 - Painter UI object constraints use normalized pivot X/Y; horizontal
   left/center/right/stretch/scale; vertical
   top/center/bottom/stretch/scale; minimum, preferred, and maximum dimensions;

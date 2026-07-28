@@ -431,6 +431,7 @@ class PainterUIInspector(QWidget):
             return index
 
         layers_page = QWidget()
+        self.layers_page = layers_page
         layers_layout = QVBoxLayout(layers_page)
         layers_layout.setContentsMargins(4, 4, 4, 4)
         self.layer_list = PainterUILayerList()
@@ -451,27 +452,53 @@ class PainterUIInspector(QWidget):
         )
         layers_layout.addWidget(self.layer_list, 1)
         actions = QHBoxLayout()
-        duplicate = QPushButton("Duplicate")
-        delete = QPushButton("Delete")
+        duplicate = QPushButton("")
+        duplicate.setObjectName("PainterUILayerAction")
+        duplicate.setIcon(app_icon("duplicate", size=13, color="#CBD5E2"))
+        duplicate.setIconSize(icon_size(13))
+        duplicate.setToolTip("Duplicate")
+        delete = QPushButton("")
+        delete.setObjectName("PainterUILayerAction")
+        delete.setIcon(app_icon("trash", size=13, color="#CBD5E2"))
+        delete.setIconSize(icon_size(13))
+        delete.setToolTip("Delete")
         duplicate.clicked.connect(self._emit_duplicate)
         delete.clicked.connect(self._emit_delete)
-        actions.addWidget(duplicate)
-        actions.addWidget(delete)
-        layers_layout.addLayout(actions)
-        hierarchy_actions = QHBoxLayout()
-        group = QPushButton("Group")
-        ungroup = QPushButton("Ungroup")
-        backward = QPushButton("Down")
-        forward = QPushButton("Up")
+        group = QPushButton("")
+        group.setObjectName("PainterUILayerAction")
+        group.setIcon(app_icon("group", size=13, color="#CBD5E2"))
+        group.setIconSize(icon_size(13))
+        group.setToolTip("Group")
+        ungroup = QPushButton("")
+        ungroup.setObjectName("PainterUILayerAction")
+        ungroup.setIcon(app_icon("ungroup", size=13, color="#CBD5E2"))
+        ungroup.setIconSize(icon_size(13))
+        ungroup.setToolTip("Ungroup")
+        backward = QPushButton("")
+        backward.setObjectName("PainterUILayerAction")
+        backward.setIcon(app_icon("chevron-down", size=13, color="#CBD5E2"))
+        backward.setIconSize(icon_size(13))
+        backward.setToolTip("Move layer down")
+        forward = QPushButton("")
+        forward.setObjectName("PainterUILayerAction")
+        forward.setIcon(app_icon("chevron-up", size=13, color="#CBD5E2"))
+        forward.setIconSize(icon_size(13))
+        forward.setToolTip("Move layer up")
         group.clicked.connect(self._emit_group)
         ungroup.clicked.connect(self._emit_ungroup)
         backward.clicked.connect(lambda: self._emit_reorder("backward"))
         forward.clicked.connect(lambda: self._emit_reorder("forward"))
-        hierarchy_actions.addWidget(group)
-        hierarchy_actions.addWidget(ungroup)
-        hierarchy_actions.addWidget(backward)
-        hierarchy_actions.addWidget(forward)
-        layers_layout.addLayout(hierarchy_actions)
+        for button in (
+            duplicate,
+            group,
+            ungroup,
+            backward,
+            forward,
+            delete,
+        ):
+            actions.addWidget(button)
+        actions.addStretch(1)
+        layers_layout.addLayout(actions)
         mask_actions = QHBoxLayout()
         self.use_as_mask_check = QCheckBox("Use as Mask")
         self.mask_invert_check = QCheckBox("Invert")
@@ -484,7 +511,11 @@ class PainterUIInspector(QWidget):
             control.toggled.connect(self._emit_properties)
             mask_actions.addWidget(control)
         layers_layout.addLayout(mask_actions)
-        add_inspector_tab(layers_page, "Layers", "layers")
+        self._layers_tab_index = add_inspector_tab(
+            layers_page,
+            "Layers",
+            "layers",
+        )
 
         sections_page = QWidget()
         sections_layout = QVBoxLayout(sections_page)
@@ -1249,6 +1280,17 @@ class PainterUIInspector(QWidget):
         inspect_layout.addStretch(1)
         add_inspector_tab(inspect_page, "Inspect", "settings")
 
+    def take_layers_page(self) -> QWidget:
+        """Detach the Layers page for the left UI Design navigator."""
+        index = self._tabs.indexOf(self.layers_page)
+        if index >= 0:
+            self._tabs.removeTab(index)
+        for tab_index in range(self._tabs.count()):
+            if self._tabs.tabWhatsThis(tab_index) == "Inspect":
+                self._tabs.setCurrentIndex(tab_index)
+                break
+        return self.layers_page
+
     def set_document(self, value: Mapping[str, Any] | None) -> None:
         self._document = normalize_ui_document(value)
         self.component_library.set_document(self._document)
@@ -1305,24 +1347,38 @@ class PainterUIInspector(QWidget):
                     depth += 1
                     parent_id = parent["parent_id"]
                 prefix = "  " * depth
-                state = "" if row["visible"] else "  [hidden]"
+                state = "" if row["visible"] else "hidden"
                 mask_state = (
-                    "  [mask]"
+                    "mask"
                     if bool((row.get("mask") or {}).get("enabled", False))
                     else ""
                 )
                 component_role = str(row.get("component_role") or "none")
-                component_state = (
-                    "  [component]"
-                    if component_role == "definition"
-                    else "  [instance]"
-                    if component_role == "instance"
-                    else ""
-                )
+                icon_name = {
+                    "frame": "ui-frame",
+                    "group": "group",
+                    "text": "caption",
+                    "image": "image",
+                    "ellipse": "ellipse",
+                    "line": "line",
+                    "button": "button",
+                    "progress": "progress",
+                }.get(str(row["kind"]), "rectangle")
                 item = QListWidgetItem(
-                    f"{prefix}{row['name']}  [{row['kind']}]"
-                    f"{component_state}{mask_state}{state}"
+                    app_icon(icon_name, size=12, color="#AAB7C6"),
+                    f"{prefix}{row['name']}",
                 )
+                detail = " | ".join(
+                    value
+                    for value in (
+                        str(row["kind"]),
+                        component_role if component_role != "none" else "",
+                        mask_state,
+                        state,
+                    )
+                    if value
+                )
+                item.setToolTip(detail)
                 item.setData(Qt.ItemDataRole.UserRole, row["id"])
                 item.setData(int(Qt.ItemDataRole.UserRole) + 1, row["kind"])
                 self.layer_list.addItem(item)
