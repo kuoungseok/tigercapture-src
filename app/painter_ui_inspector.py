@@ -5,6 +5,7 @@ import copy
 from typing import Any, Mapping
 
 from PySide6.QtCore import QSize, Signal, Qt
+from PySide6.QtGui import QValidator
 from PySide6.QtWidgets import (
     QAbstractSpinBox,
     QAbstractItemView,
@@ -87,13 +88,35 @@ class _PainterUIDragValueMixin:
         self._drag_origin_x: float | None = None
         self._drag_origin_value = 0.0
         self._dragging_value = False
+        self._edit_origin_value = float(self.value())
+        self._reset_value: float | None = None
         self.setButtonSymbols(QAbstractSpinBox.ButtonSymbols.NoButtons)
         self.setCursor(Qt.CursorShape.SizeHorCursor)
+
+    def setResetValue(self, value: float | None) -> None:
+        self._reset_value = None if value is None else float(value)
+
+    def resetToDefault(self) -> bool:
+        if self._reset_value is None:
+            return False
+        value = (
+            int(round(self._reset_value))
+            if isinstance(self, QSpinBox)
+            else float(self._reset_value)
+        )
+        self.setValue(value)
+        self.editingFinished.emit()
+        return True
+
+    def focusInEvent(self, event) -> None:
+        self._edit_origin_value = float(self.value())
+        super().focusInEvent(event)
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_origin_x = float(event.globalPosition().x())
             self._drag_origin_value = float(self.value())
+            self._edit_origin_value = float(self.value())
             self._dragging_value = False
         super().mousePressEvent(event)
 
@@ -124,6 +147,60 @@ class _PainterUIDragValueMixin:
             event.accept()
             return
         super().mouseReleaseEvent(event)
+
+    def _numeric_expression(self, text: str) -> str:
+        expression = str(text or "").strip()
+        prefix = str(self.prefix() or "")
+        suffix = str(self.suffix() or "")
+        if prefix and expression.startswith(prefix):
+            expression = expression[len(prefix):].strip()
+        if suffix and expression.endswith(suffix):
+            expression = expression[:-len(suffix)].strip()
+        return expression
+
+    def validate(self, text: str, pos: int):
+        expression = self._numeric_expression(text)
+        allowed = set("0123456789.+-*/()% ×÷")
+        if expression and all(char in allowed for char in expression):
+            from app.painter_ui_numeric_input import (
+                evaluate_painter_numeric_input,
+            )
+
+            try:
+                evaluate_painter_numeric_input(
+                    expression,
+                    origin=self._edit_origin_value,
+                )
+            except ValueError:
+                return QValidator.State.Intermediate, text, pos
+            return QValidator.State.Acceptable, text, pos
+        return super().validate(text, pos)
+
+    def valueFromText(self, text: str):
+        from app.painter_ui_numeric_input import evaluate_painter_numeric_input
+
+        expression = self._numeric_expression(text)
+        try:
+            value = evaluate_painter_numeric_input(
+                expression,
+                origin=self._edit_origin_value,
+            )
+        except ValueError:
+            return super().valueFromText(text)
+        if isinstance(self, QSpinBox):
+            return int(round(value))
+        return float(value)
+
+    def contextMenuEvent(self, event) -> None:
+        menu = self.lineEdit().createStandardContextMenu()
+        reset_action = None
+        if self._reset_value is not None:
+            menu.addSeparator()
+            reset_action = menu.addAction(painter_text("Reset"))
+        chosen = menu.exec(event.globalPos())
+        if chosen is reset_action and self._reset_value is not None:
+            self.resetToDefault()
+        menu.deleteLater()
 
 
 class PainterUIDragSpinBox(_PainterUIDragValueMixin, QSpinBox):
@@ -752,6 +829,15 @@ class PainterUIInspector(QWidget):
                 180.0 if key == "rotation" else 100000.0,
             )
             spin.setDecimals(1)
+            spin.setResetValue(
+                {
+                    "x": 0.0,
+                    "y": 0.0,
+                    "width": 160.0,
+                    "height": 64.0,
+                    "rotation": 0.0,
+                }[key]
+            )
             spin.editingFinished.connect(self._emit_geometry)
             self.geometry_controls[key] = spin
             form.addRow(key.upper(), spin)
@@ -766,6 +852,7 @@ class PainterUIInspector(QWidget):
             spin.setDecimals(2)
             spin.setSingleStep(0.05)
             spin.setPrefix(label)
+            spin.setResetValue(0.5)
             spin.editingFinished.connect(self._emit_properties)
             pivot_layout.addWidget(spin)
         form.addRow("Pivot", pivot_row)
@@ -976,6 +1063,7 @@ class PainterUIInspector(QWidget):
             spin.setDecimals(1)
             spin.setPrefix(prefix)
             spin.setSuffix(" px")
+            spin.setResetValue(0.0)
             spin.editingFinished.connect(self._emit_properties)
             self.auto_layout_padding_controls[edge] = spin
             auto_padding_layout.addWidget(spin)
@@ -989,6 +1077,7 @@ class PainterUIInspector(QWidget):
         self.auto_layout_gap_spin.setDecimals(1)
         self.auto_layout_gap_spin.setPrefix("Gap ")
         self.auto_layout_gap_spin.setSuffix(" px")
+        self.auto_layout_gap_spin.setResetValue(0.0)
         self.auto_layout_gap_spin.editingFinished.connect(
             self._emit_properties
         )
@@ -997,6 +1086,7 @@ class PainterUIInspector(QWidget):
         self.auto_layout_cross_gap_spin.setDecimals(1)
         self.auto_layout_cross_gap_spin.setPrefix("Rows ")
         self.auto_layout_cross_gap_spin.setSuffix(" px")
+        self.auto_layout_cross_gap_spin.setResetValue(0.0)
         self.auto_layout_cross_gap_spin.setToolTip(
             "Spacing between wrapped rows or columns"
         )
@@ -1045,6 +1135,7 @@ class PainterUIInspector(QWidget):
         self.opacity_spin = PainterUIDragSpinBox()
         self.opacity_spin.setRange(0, 100)
         self.opacity_spin.setSuffix("%")
+        self.opacity_spin.setResetValue(100.0)
         self.opacity_spin.editingFinished.connect(self._emit_properties)
         form.addRow("Opacity", self.opacity_spin)
         self.fill_edit = QLineEdit()
@@ -1059,12 +1150,14 @@ class PainterUIInspector(QWidget):
         self.stroke_width_spin.setRange(0.0, 64.0)
         self.stroke_width_spin.setDecimals(1)
         self.stroke_width_spin.setSuffix(" px")
+        self.stroke_width_spin.setResetValue(0.0)
         self.stroke_width_spin.editingFinished.connect(self._emit_properties)
         form.addRow("Stroke Width", self.stroke_width_spin)
         self.radius_spin = PainterUIDragDoubleSpinBox()
         self.radius_spin.setRange(0.0, 4096.0)
         self.radius_spin.setDecimals(1)
         self.radius_spin.setSuffix(" px")
+        self.radius_spin.setResetValue(0.0)
         self.radius_spin.editingFinished.connect(self._emit_properties)
         form.addRow("Radius", self.radius_spin)
         self.appearance_button = QPushButton("Solid")
@@ -1291,6 +1384,7 @@ class PainterUIInspector(QWidget):
         self.image_tile_scale_spin.setDecimals(2)
         self.image_tile_scale_spin.setSingleStep(0.1)
         self.image_tile_scale_spin.setPrefix("Tile ")
+        self.image_tile_scale_spin.setResetValue(1.0)
         self.image_tile_scale_spin.editingFinished.connect(
             self._emit_properties
         )
@@ -1330,6 +1424,7 @@ class PainterUIInspector(QWidget):
         self.font_size_spin = PainterUIDragDoubleSpinBox()
         self.font_size_spin.setRange(1.0, 512.0)
         self.font_size_spin.setSuffix(" px")
+        self.font_size_spin.setResetValue(14.0)
         self.font_size_spin.editingFinished.connect(self._emit_properties)
         self.font_weight_combo = QComboBox()
         for label, weight in (
@@ -1360,6 +1455,7 @@ class PainterUIInspector(QWidget):
         self.line_height_spin.setDecimals(2)
         self.line_height_spin.setSingleStep(0.05)
         self.line_height_spin.setPrefix("Line ")
+        self.line_height_spin.setResetValue(1.2)
         self.line_height_spin.editingFinished.connect(self._emit_properties)
         text_layout_row.addWidget(self.text_align_combo)
         text_layout_row.addWidget(self.line_height_spin)

@@ -483,6 +483,16 @@ def main() -> int:
         )
         == 4
     )
+    from app.painter_ui_numeric_input import evaluate_painter_numeric_input
+
+    numeric_input_ok = (
+        evaluate_painter_numeric_input("*1.5", origin=100.0) == 150.0
+        and dialog._paint_ui_inspector.geometry_controls[
+            "width"
+        ]._reset_value
+        == 160.0
+        and dialog._paint_ui_inspector.opacity_spin._reset_value == 100.0
+    )
     multi_inspector_screenshot_path = (
         output_dir / "painter_ui_designer_m1_multi_inspector.png"
     )
@@ -622,6 +632,7 @@ def main() -> int:
             and multi_properties_ok
             and tidy_up_ok
             and multi_resize_ok
+            and numeric_input_ok
             and adaptive_context_ok
             and quick_properties_ok
             and zoom_popover_ok
@@ -673,6 +684,7 @@ def main() -> int:
         "multi_properties_ok": multi_properties_ok,
         "tidy_up_ok": tidy_up_ok,
         "multi_resize_ok": multi_resize_ok,
+        "numeric_input_ok": numeric_input_ok,
         "guide_state": guide_state,
         "workspace": state["workspace"],
         "ui_design": state["ui_design"],

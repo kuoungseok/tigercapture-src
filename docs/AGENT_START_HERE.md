@@ -104,6 +104,10 @@ Focused entry points:
   The Common Inspector exposes Auto/Horizontal/Vertical spacing, mixed `—`,
   explicit px gap, and Tidy Up. `paint.ui.selection.tidy` uses the same planner
   and rejects locked, cross-artboard, or cross-parent selections explicitly.
+  Painter UI numeric fields share `app/painter_ui_numeric_input.py`: absolute
+  and safe arithmetic input, leading relative operations, percentage scaling,
+  and localized Reset all commit through the field's existing mutation/Undo
+  path. Do not replace this with `eval` or a parallel property editor.
   As of 2026-07-27 the local M2A-M6 production foundation is implemented:
   `.tstemplate` packages and local library state, review comments/checkpoints,
   revision diff, self-contained prototype, production asset export, shared

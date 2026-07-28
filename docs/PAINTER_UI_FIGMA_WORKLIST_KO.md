@@ -227,6 +227,12 @@ P5, P6, P8, P10은 위 기능의 기반과 전달 품질을 따라 병행한다.
 8. 접근성 role, label, focus order
 9. 선택 객체의 target별 `Native/Material/Baked/Blocked` 표시
 
+현재 구현된 숫자 입력 기반:
+
+- 모든 Painter UI drag-spin field의 안전한 `+ - * /`, 괄호, 상대 계산
+- px 필드의 percentage scaling과 의미 있는 필드의 우클릭 Reset
+- 일반 속성 commit 신호를 재사용하는 Undo/Action mutation parity
+
 현재 구현된 기반:
 
 - X/Y/W/H, 회전, 불투명도, 표시, 잠금

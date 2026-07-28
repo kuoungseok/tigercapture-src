@@ -165,6 +165,7 @@ _ROWS: tuple[tuple[str, str, str, str, str, str], ...] = (
     ("UI", "UI", "UI", "UI", "UI", "UI"),
     ("Undo", "실행 취소", "元に戻す", "撤销", "Annuler", "Ruckgangig"),
     ("Redo", "다시 실행", "やり直す", "重做", "Retablir", "Wiederholen"),
+    ("Reset", "초기화", "リセット", "重置", "Réinitialiser", "Zurücksetzen"),
     ("Duplicate UI Object", "UI 객체 복제", "UIオブジェクトを複製", "复制 UI 对象", "Dupliquer l'objet UI", "UI-Objekt duplizieren"),
     ("Delete UI Object", "UI 객체 삭제", "UIオブジェクトを削除", "删除 UI 对象", "Supprimer l'objet UI", "UI-Objekt loschen"),
     ("Delete Active Artboard", "활성 아트보드 삭제", "アクティブなアートボードを削除", "删除活动画板", "Supprimer le plan de travail actif", "Aktive Zeichenflache loschen"),

@@ -361,6 +361,20 @@ Implemented checkpoint (2026-07-29, Smart Selection spacing slice):
 - UI and `paint.ui.selection.tidy` share the same spacing planner,
   constraint-aware batch mutation, and one-step Undo.
 
+Implemented checkpoint (2026-07-29, arithmetic numeric fields slice):
+
+- Every Painter UI drag-spin field accepts absolute numbers, safe `+ - * /`
+  arithmetic, leading `+/*` relative operations, parentheses, and percentage
+  scaling without evaluating arbitrary code.
+- The edit-start value is retained while typing, so `*1.5` and `/2` are
+  deterministic even before the property is committed.
+- Geometry, pivot, Auto Layout spacing/padding, opacity, stroke width, radius,
+  image tile scale, typography, and line height expose a localized Reset
+  command where a meaningful default exists.
+- Arithmetic entry and Reset emit the field's normal commit signal, so the
+  existing UI property mutation, Action parity, and one-step Undo remain the
+  only document-changing path.
+
 Exit criteria:
 
 - Common object editing is possible without repeatedly moving to Inspector.
