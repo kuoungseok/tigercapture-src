@@ -61,7 +61,7 @@ def test_studio_entrypoint_arg_parser_distinguishes_projects_from_media():
 def test_pyinstaller_spec_builds_capture_and_studio_executables():
     text = (ROOT / "TigerCapture.spec").read_text(encoding="utf-8")
 
-    assert "['main.py', 'studio_main.py']" in text
+    assert "['main.py', 'studio_main.py', 'tools/tigercapture_updater.py']" in text
     assert "name='TigerCapture'" in text
     assert "studio_exe = EXE(" in text
     assert "name='TigerStudio'" in text

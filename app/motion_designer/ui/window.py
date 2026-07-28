@@ -3774,7 +3774,10 @@ class MotionDesignerWindow(QMainWindow):
         self._advance_playback_elapsed(elapsed_ms)
 
     def _advance_playback_elapsed(self, elapsed_ms: float) -> None:
-        bounded = max(0.0, min(100.0, float(elapsed_ms)))
+        # Keep the playhead tied to wall-clock time when a heavy frame misses
+        # its budget. A one-second cap still avoids an extreme jump after the
+        # process was suspended or stopped in a debugger.
+        bounded = max(0.0, min(1000.0, float(elapsed_ms)))
         total = bounded + self._playback_fractional_ms
         whole_ms = int(total)
         self._playback_fractional_ms = total - whole_ms

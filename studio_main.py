@@ -97,6 +97,23 @@ def _consume_option_path(argv: list[str], option: str) -> Path | None:
     return Path(value) if value else None
 
 
+def _consume_option_float(
+    argv: list[str],
+    option: str,
+    default: float,
+) -> float:
+    try:
+        index = argv.index(option)
+    except ValueError:
+        return float(default)
+    if index + 1 >= len(argv):
+        return float(default)
+    try:
+        return float(argv[index + 1])
+    except (TypeError, ValueError):
+        return float(default)
+
+
 def _load_project_after_show(editor, project_path: Path) -> None:
     try:
         from app.project_io import load_project, remember_last_project
@@ -118,6 +135,25 @@ def _load_project_after_show(editor, project_path: Path) -> None:
 
 
 def main() -> int:
+    motion_probe_path = _consume_option_path(sys.argv, "--motion-runtime-probe")
+    if motion_probe_path is not None:
+        try:
+            from app.qt_opengl_policy import configure_qt_opengl_application_attributes
+
+            configure_qt_opengl_application_attributes()
+        except Exception:
+            pass
+        from app.motion_designer.trend_runtime_probe import run_trend_runtime_probe
+
+        report = run_trend_runtime_probe(
+            motion_probe_path,
+            target_seconds=_consume_option_float(
+                sys.argv,
+                "--motion-runtime-seconds",
+                60.0,
+            ),
+        )
+        return 0 if report.get("ok") else 1
     color_probe_path = _consume_option_path(sys.argv, "--color-runtime-probe")
     if color_probe_path is not None:
         from app.color_runtime_probe import write_color_runtime_probe_report

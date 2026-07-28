@@ -975,6 +975,23 @@ def test_motion_playback_preserves_fractional_timer_elapsed_time() -> None:
     app.processEvents()
 
 
+def test_motion_playback_catches_up_after_a_slow_rendered_frame() -> None:
+    existing = QCoreApplication.instance()
+    if existing is not None and not isinstance(existing, QApplication):
+        pytest.skip("A non-GUI Qt application already owns this test process")
+    app = QApplication.instance() or QApplication([])
+    window = MotionDesignerWindow(
+        MotionComposition(width=960, height=540, duration_ms=20000)
+    )
+    window._set_playback_direction(1)
+    window._advance_playback_elapsed(347.5)
+    assert window._time_ms == 347
+    assert window._playback_fractional_ms == pytest.approx(0.5)
+    window._set_playback_direction(0)
+    window.close()
+    app.processEvents()
+
+
 def test_template_change_restarts_active_playback_from_zero() -> None:
     existing = QCoreApplication.instance()
     if existing is not None and not isinstance(existing, QApplication):

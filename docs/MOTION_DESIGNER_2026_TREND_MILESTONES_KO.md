@@ -568,6 +568,16 @@ QA:
   `2026 Trends` 템플릿 갤러리를 캡처하고 7개 템플릿 노출을 검사한다.
   긴 Library 설명이 패널 최소 폭을 밀어내지 않도록 말줄임 처리했으며,
   Library/Project 패널 폭을 제한해 Canvas가 주 작업 영역을 유지한다.
+- `TigerStudio.exe --motion-runtime-probe <report.json>
+  --motion-runtime-seconds 60`은 실제 Liquid Glass 템플릿과
+  `QOpenGLWidget` Preview를 열어 벽시계 기준 반복 재생, frame swap, loop,
+  memory, renderer diagnostics, 실제 작업창 캡처를 기록한다. 프로브 실행
+  유효성과 제품 실시간 기준(24fps 이상, raster fallback 아님)을 분리한다.
+  현재 소스 빌드 3초 측정은 3.63fps와 `qt_painter_fallback`이므로 M22의
+  혼합 Glass/effect GPU 경로가 M28 실시간 게이트를 계속 막는다.
+- 무거운 프레임에서 100ms를 초과한 경과 시간을 버리던 재생 시계를
+  최대 1초까지 따라잡도록 수정했다. 따라서 프레임 드롭이 있어도 playhead가
+  슬로 모션처럼 뒤처지지 않으며, 낮은 frame rate 자체는 QA에서 그대로 실패한다.
 
 M28은 아직 완료가 아니다. `Painterly 3D Character Spot`은 M24가 없으므로
 갤러리에 가짜 템플릿을 넣지 않고 명시적 blocked capability와 2D Craft

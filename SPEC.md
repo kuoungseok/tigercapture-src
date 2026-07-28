@@ -6761,6 +6761,18 @@ AI Script Edit MVP integration:
   Library descriptions elide instead of forcing the Canvas into a narrow
   column. M28 still requires a packaged-build 60-second realtime playback run
   and distribution regression evidence.
+- `TigerStudio.exe --motion-runtime-probe <report.json>
+  --motion-runtime-seconds 60` opens the real Liquid Glass template in the
+  `QOpenGLWidget` Preview, runs loop playback against wall-clock time, and
+  records frame swaps, loop count, memory, renderer diagnostics, and a real
+  workspace screenshot. Probe execution validity is separate from the product
+  realtime gate (`>=24 fps` and a non-raster-fallback backend). A source-build
+  three-second run measured 3.63 fps with `qt_painter_fallback`, so M28 remains
+  blocked by the known M22 mixed Glass/effect GPU-path gap.
+- Motion playback now catches up by as much as one second after a slow rendered
+  frame instead of discarding all elapsed time above 100 ms. This keeps the
+  playhead near wall-clock time while the performance gate still reports
+  dropped-frame quality honestly.
 - M13 character-rigging foundation is complete. Motion compositions persist
   provider-neutral `tigerstudio.motion.rig.v1` cutout rigs with stable rig and
   bone IDs, a validated parent hierarchy, rest positions, animated rotation
