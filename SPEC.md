@@ -6862,8 +6862,10 @@ AI Script Edit MVP integration:
   `tigerstudio.motion.trend_capability_audit.v1` and the non-mutating
   `motion.trend.capabilities.inspect` action. The audit maps all ten trend
   categories to concrete contracts, registered actions, QA tools, and explicit
-  limitations. `tools/qa_motion_trend_capabilities.py` verifies the mapping
-  against the live ActionRegistry and repository evidence files. The current
+  limitations. The action verifies the mapping against its live
+  `ActionRegistry` and repository evidence files at call time;
+  `tools/qa_motion_trend_capabilities.py` writes the same check as durable QA
+  evidence. The current
   result is eight `supported_v1`, two `limited_v1`, zero unavailable, zero
   missing actions, and zero missing evidence files. `limited_v1` remains
   mandatory for M24 per-material painterly overrides until a material-ID pass

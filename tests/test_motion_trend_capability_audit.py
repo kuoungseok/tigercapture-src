@@ -38,13 +38,19 @@ def test_trend_capability_audit_verifies_registered_actions_and_evidence() -> No
 
 
 def test_trend_capability_action_is_non_mutating_and_discloses_limits() -> None:
-    registry = ActionRegistry(Owner())
+    registry = ActionRegistry()
 
     result = registry.execute("motion.trend.capabilities.inspect", {})
 
     assert result.ok
     assert result.changed is False
+    assert result.result["ok"] is True
     assert result.result["summary"]["trend_count"] == 10
+    assert all(
+        row["action_registration"] == "verified"
+        and row["evidence_files"] == "verified"
+        for row in result.result["trends"]
+    )
     limited = {
         row["id"]: row["limitations"]
         for row in result.result["trends"]

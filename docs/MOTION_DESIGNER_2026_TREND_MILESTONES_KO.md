@@ -5,8 +5,10 @@
 `tigerstudio.motion.trend_capability_audit.v1` and the read-only
 `motion.trend.capabilities.inspect` action bind all ten 2026 trend categories
 to concrete contracts, registered Action/MCP IDs, QA tools, and explicit claim
-limitations. `tools/qa_motion_trend_capabilities.py` verifies the declaration
-against the live `ActionRegistry` and repository evidence paths.
+limitations. The action verifies the declaration against its live
+`ActionRegistry` and repository evidence paths at call time.
+`tools/qa_motion_trend_capabilities.py` writes the same check as durable QA
+evidence.
 
 Current verified result: 10 categories, 8 `supported_v1`, 2 `limited_v1`,
 0 unavailable, 0 missing actions, and 0 missing QA files. The limited scopes

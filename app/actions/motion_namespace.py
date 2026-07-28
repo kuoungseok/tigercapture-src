@@ -1,9 +1,11 @@
 """Registered Motion Designer composition and layer actions."""
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Any
 
-from app.actions.schema import schema_object
+from app.actions.result import ok_result
+from app.actions.schema import ActionSpec, schema_object
 
 
 def register_motion_actions(registry: Any) -> None:
@@ -3015,14 +3017,40 @@ def register_motion_actions(registry: Any) -> None:
         mutating=False,
         changed=False,
     )
-    registry.register_adapter_action(
-        "motion.trend.capabilities.inspect",
+    trend_action_id = "motion.trend.capabilities.inspect"
+    trend_spec = ActionSpec(
+        trend_action_id,
         "Audit all ten 2026 Motion trend capabilities and disclose limited scopes.",
         "motion",
-        "motion_trend_capabilities_inspect",
         params_schema=schema_object({}),
         mutating=False,
-        changed=False,
+        requires_owner=False,
+    )
+
+    def _trend_capabilities_handler(
+        _params: Any,
+        dry_run: bool,
+    ) -> Any:
+        from app.motion_designer.trend_capability_audit import (
+            audit_trend_capabilities,
+        )
+
+        report = audit_trend_capabilities(
+            registered_action_ids={
+                row["id"] for row in registry.list_actions()
+            },
+            repository_root=Path(__file__).resolve().parents[2],
+        )
+        return ok_result(
+            trend_action_id,
+            report,
+            dry_run=dry_run,
+            changed=False,
+        )
+
+    registry.register(
+        trend_spec,
+        _trend_capabilities_handler,
     )
     platform_copy_fields = {
         **cid,
