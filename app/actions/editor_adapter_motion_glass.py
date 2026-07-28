@@ -132,5 +132,57 @@ class MotionGlassAdapterMixin:
             "umg_reason": "effect_requires_bake:tiger_glass" if advanced else "",
         }
 
+    def motion_glass_tiled_export_set(
+        self,
+        *,
+        composition_id: str,
+        enabled: bool,
+        tile_size: int = 512,
+    ) -> dict[str, Any]:
+        from app.motion_designer.tiled_renderer import TILED_EXPORT_CONTRACT
+
+        composition = self._motion_store()[composition_id]
+        size = max(64, min(4096, int(tile_size)))
+        composition.metadata["tiled_export"] = {
+            "contract": TILED_EXPORT_CONTRACT,
+            "enabled": bool(enabled),
+            "tile_size": size,
+        }
+        composition.revision += 1
+        self._motion_sync_owner()
+        return {
+            "changed": True,
+            "undo_label": "Set Tiled Glass Export",
+            "tiled_export": dict(composition.metadata["tiled_export"]),
+            "revision": composition.revision,
+        }
+
+    def motion_glass_tiled_export_preflight(
+        self,
+        *,
+        composition_id: str,
+        time_ms: float = 0.0,
+    ) -> dict[str, Any]:
+        from app.motion_designer.render_graph import build_render_graph
+        from app.motion_designer.tiled_renderer import (
+            glass_tile_padding,
+            tiled_render_preflight,
+        )
+
+        composition = self._motion_store()[composition_id]
+        graph = build_render_graph(
+            composition,
+            float(time_ms),
+            render_quality="export",
+            output_size=(composition.width, composition.height),
+        )
+        report = tiled_render_preflight(graph)
+        report.update({
+            "composition_id": composition_id,
+            "time_ms": float(time_ms),
+            "padding": glass_tile_padding(graph) if report["glass_effect_count"] else 0,
+        })
+        return report
+
 
 __all__ = ["MotionGlassAdapterMixin"]

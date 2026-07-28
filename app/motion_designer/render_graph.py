@@ -555,10 +555,20 @@ def _node_surface(
     node: RenderNode,
     *,
     output_size: tuple[int, int] | None = None,
+    source_rect: QRectF | None = None,
 ) -> QImage:
-    width, height = output_size or (graph.width, graph.height)
-    scale_x = width / max(1.0, float(graph.width))
-    scale_y = height / max(1.0, float(graph.height))
+    region = source_rect or QRectF(
+        0.0,
+        0.0,
+        float(graph.width),
+        float(graph.height),
+    )
+    width, height = output_size or (
+        max(1, int(round(region.width()))),
+        max(1, int(round(region.height()))),
+    )
+    scale_x = width / max(1.0, float(region.width()))
+    scale_y = height / max(1.0, float(region.height()))
     surface = transparent_image(width, height)
     image = _node_image(node)
     if image is None:
@@ -567,6 +577,7 @@ def _node_surface(
     layer_painter.setRenderHint(QPainter.Antialiasing)
     layer_painter.setRenderHint(QPainter.SmoothPixmapTransform)
     layer_painter.scale(scale_x, scale_y)
+    layer_painter.translate(-region.x(), -region.y())
     for instance in node.replicator_instances or [{"opacity": 1.0}]:
         layer_painter.save()
         layer_painter.setOpacity(node.opacity * float(instance.get("opacity", 1.0)))
@@ -705,11 +716,21 @@ def render_graph_image(
     graph: RenderGraph,
     *,
     output_size: tuple[int, int] | None = None,
+    source_rect: QRectF | None = None,
 ) -> QImage:
-    width, height = output_size or (graph.width, graph.height)
+    region = source_rect or QRectF(
+        0.0,
+        0.0,
+        float(graph.width),
+        float(graph.height),
+    )
+    width, height = output_size or (
+        max(1, int(round(region.width()))),
+        max(1, int(round(region.height()))),
+    )
     width, height = max(1, int(width)), max(1, int(height))
-    scale_x = width / max(1.0, float(graph.width))
-    scale_y = height / max(1.0, float(graph.height))
+    scale_x = width / max(1.0, float(region.width()))
+    scale_y = height / max(1.0, float(region.height()))
     pixel_scale = min(scale_x, scale_y)
     canvas = transparent_image(width, height)
     node_by_id = {node.layer_id: node for node in graph.nodes}
@@ -738,6 +759,7 @@ def render_graph_image(
                 graph,
                 node,
                 output_size=(width, height),
+                source_rect=region,
             )
             cached = apply_effects(cached, node.effects or [], node.local_time_ms)
             for group in scoped_effect_groups.get(node.layer_id, ()):
@@ -776,6 +798,7 @@ def render_graph_image(
         if not requires_surface:
             canvas_painter = QPainter(canvas)
             canvas_painter.scale(scale_x, scale_y)
+            canvas_painter.translate(-region.x(), -region.y())
             _paint_node(canvas_painter, node)
             canvas_painter.end()
             continue
@@ -791,6 +814,8 @@ def render_graph_image(
                 node.local_time_ms,
                 driver_override=node.glass_driver_override,
                 pixel_scale=pixel_scale,
+                canvas_origin=(region.x(), region.y()),
+                composition_size=(float(graph.width), float(graph.height)),
             )
         if matte_node is not None:
             matte = surface(matte_node)

@@ -6598,8 +6598,9 @@ AI Script Edit MVP integration:
   report `backdrop_glass_requires_raster`; the shared raster result has
   Preview/Export pixel parity. Complex Glass remains a deterministic UMG bake
   candidate and reports `effect_requires_bake:tiger_glass`. The non-raster GPU
-  backdrop path, tiled-export evidence, and the native-versus-bake UI Material
-  decision remain M22 work. Draft/Preview
+  backdrop path and the native-versus-bake UI Material decision remain M22
+  work; deterministic Glass-only tiled export evidence is complete.
+  Draft/Preview
   blur now uses a multi-resolution pyramid and glass-mask ROI. The real 1080p
   QA tool records 138-172 ms/frame on the current shared CPU fallback after
   ROI optimization, down from 278-374 ms/frame. This is an accuracy baseline,
@@ -6835,8 +6836,18 @@ AI Script Edit MVP integration:
   actual H.265 stream reports BT.2020 primaries and SMPTE ST 2084 transfer.
   Two-frame H.265 MP4 exports disable B-frames to avoid the FFmpeg MP4 muxer's
   short-clip DTS failure; longer exports retain the normal x265 compression
-  structure. HDR Glass evidence is complete, while deterministic tiled Glass
-  export remains open.
+  structure. Deterministic Glass-only tiled export is implemented under
+  `tigerstudio.motion.tiled_export.v1`: it renders independently padded source
+  regions, uses composition-global Glass coordinates to prevent seams, and
+  rejects adjustment layers, precomps, mattes, card shadows, motion blur, and
+  non-Glass effects instead of silently changing output. The same HDR product
+  artifact now renders through eight 96-pixel tiles with 65-pixel padding,
+  avoids full-frame intermediate surfaces, and matches the full-frame
+  reference with zero pixel difference. AI control is available through
+  `motion.export.tiled.set` and `motion.export.tiled.preflight`. The final
+  assembled output image is still full resolution; this v1 claim concerns
+  intermediate memory, seam safety, and deterministic parity, not arbitrary
+  infinite-canvas rendering.
 - M13 character-rigging foundation is complete. Motion compositions persist
   provider-neutral `tigerstudio.motion.rig.v1` cutout rigs with stable rig and
   bone IDs, a validated parent hierarchy, rest positions, animated rotation

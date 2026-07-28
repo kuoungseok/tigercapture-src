@@ -232,6 +232,53 @@ def test_motion_glass_actions_create_bind_preflight_and_remove() -> None:
     assert removed.ok and removed.result["changed"]
 
 
+def test_motion_glass_tiled_export_actions_set_and_preflight() -> None:
+    owner = Owner()
+    registry = ActionRegistry(owner)
+    created = registry.execute("motion.composition.create", {
+        "name": "Tiled Glass",
+        "width": 320,
+        "height": 180,
+    })
+    composition_id = created.result["payload"]["composition"]["id"]
+    background = registry.execute("motion.layer.add", {
+        "composition_id": composition_id,
+        "layer": {"name": "Background", "layer_type": "shape"},
+    })
+    assert background.ok
+    glass = registry.execute("motion.layer.add", {
+        "composition_id": composition_id,
+        "layer": {"name": "Glass", "layer_type": "shape"},
+    })
+    layer_id = glass.result["payload"]["composition"]["layers"][-1]["id"]
+    assert registry.execute("motion.material.glass.create", {
+        "composition_id": composition_id,
+        "layer_id": layer_id,
+        "preset": "frosted",
+    }).ok
+
+    preflight = registry.execute("motion.export.tiled.preflight", {
+        "composition_id": composition_id,
+        "time_ms": 100,
+    })
+    assert preflight.ok
+    assert preflight.result["ok"] is True
+    assert preflight.result["glass_effect_count"] == 1
+    assert preflight.result["padding"] >= 8
+
+    enabled = registry.execute("motion.export.tiled.set", {
+        "composition_id": composition_id,
+        "enabled": True,
+        "tile_size": 96,
+    })
+    assert enabled.ok
+    assert enabled.result["tiled_export"]["enabled"] is True
+    assert enabled.result["tiled_export"]["tile_size"] == 96
+    assert enabled.result["tiled_export"]["contract"] == (
+        "tigerstudio.motion.tiled_export.v1"
+    )
+
+
 def test_advanced_keyframe_and_behavior_actions_are_automation_ready() -> None:
     owner = Owner()
     registry = ActionRegistry(owner)

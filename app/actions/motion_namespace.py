@@ -2360,6 +2360,37 @@ def register_motion_actions(registry: Any) -> None:
         mutating=False,
         changed=False,
     )
+    registry.register_adapter_action(
+        "motion.export.tiled.set",
+        "Enable or disable deterministic padded-tile export for a Glass-only composition.",
+        "motion",
+        "motion_glass_tiled_export_set",
+        params_schema=schema_object({
+            **cid,
+            "enabled": {"type": "boolean"},
+            "tile_size": {
+                "type": "integer",
+                "minimum": 64,
+                "maximum": 4096,
+            },
+        }, required=("composition_id", "enabled")),
+        required=("composition_id", "enabled"),
+        undo_label="Set Tiled Glass Export",
+        dry_summary="The deterministic tiled Glass export setting would change",
+    )
+    registry.register_adapter_action(
+        "motion.export.tiled.preflight",
+        "Validate whether a Motion composition can use deterministic padded-tile export.",
+        "motion",
+        "motion_glass_tiled_export_preflight",
+        params_schema=schema_object({
+            **cid,
+            "time_ms": {"type": "number", "minimum": 0},
+        }, required=("composition_id",)),
+        required=("composition_id",),
+        mutating=False,
+        changed=False,
+    )
     collage_ref = {
         **cid,
         "board_id": {"type": "string"},

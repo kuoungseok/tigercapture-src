@@ -25,6 +25,10 @@ from app.motion_designer.schema import (
     MotionLayer,
     SourceRef,
 )
+from app.motion_designer.tiled_renderer import (
+    render_graph_tiled,
+    tiled_render_preflight,
+)
 
 
 def _app() -> QApplication:
@@ -327,3 +331,77 @@ def test_preview_viewport_raster_is_limited_to_glass_only_effect_graphs() -> Non
         QRectF(0.0, 0.0, 716.0, 403.0),
     ) is None
     preview.deleteLater()
+
+
+def test_glass_tiled_render_is_seam_safe_and_deterministic() -> None:
+    import numpy as np
+
+    _app()
+    composition = _composition()
+    graph = build_render_graph(
+        composition,
+        825,
+        render_quality="export",
+    )
+    full = render_graph_image(graph).convertToFormat(QImage.Format_RGBA8888)
+    tiled, report = render_graph_tiled(
+        graph,
+        tile_size=64,
+    )
+    tiled = tiled.convertToFormat(QImage.Format_RGBA8888)
+    repeated, repeated_report = render_graph_tiled(
+        graph,
+        tile_size=64,
+    )
+    repeated = repeated.convertToFormat(QImage.Format_RGBA8888)
+
+    def rgba(image: QImage) -> np.ndarray:
+        rows = np.frombuffer(image.constBits(), dtype=np.uint8).reshape(
+            image.height(),
+            image.bytesPerLine(),
+        )
+        return rows[:, : image.width() * 4].reshape(
+            image.height(),
+            image.width(),
+            4,
+        )
+
+    difference = np.abs(
+        rgba(full).astype(np.int16) - rgba(tiled).astype(np.int16)
+    )
+    assert report["ok"] is True
+    assert report["tile_count"] == 6
+    assert report["full_frame_intermediate_avoided"] is True
+    assert float(difference.mean()) < 0.2
+    assert tiled == repeated
+    assert report == repeated_report
+
+
+def test_export_renderer_honors_explicit_tiled_glass_policy() -> None:
+    _app()
+    composition = _composition()
+    composition.metadata["tiled_export"] = {
+        "contract": "tigerstudio.motion.tiled_export.v1",
+        "enabled": True,
+        "tile_size": 64,
+    }
+    composition.revision += 1
+    renderer = MotionExportRenderer()
+    image = renderer.render_frame(
+        composition,
+        825,
+        use_cache=False,
+    )
+    assert not image.isNull()
+    assert renderer.last_tiled_report["ok"] is True
+    assert renderer.last_tiled_report["tile_size"] == 64
+
+
+def test_tiled_glass_preflight_rejects_unbounded_full_frame_effects() -> None:
+    composition = _composition()
+    composition.layers[0].effects.append(
+        MotionEffectRef(kind="brightness_contrast")
+    )
+    report = tiled_render_preflight(build_render_graph(composition, 500))
+    assert report["ok"] is False
+    assert "effect_requires_full_frame:brightness_contrast" in report["issues"]

@@ -64,6 +64,8 @@ def render_glass_surface(
     *,
     driver_override: tuple[float, float] | None = None,
     pixel_scale: float = 1.0,
+    canvas_origin: tuple[float, float] = (0.0, 0.0),
+    composition_size: tuple[float, float] | None = None,
 ) -> QImage:
     import cv2
     import numpy as np
@@ -153,11 +155,25 @@ def render_glass_surface(
         driver_x, driver_y = map(float, driver_override)
     yy, xx = np.mgrid[0:height, 0:width].astype(np.float32)
     phase = float(time_ms) * 0.001
+    composition_width, composition_height = composition_size or (
+        full_width / effect_scale,
+        full_height / effect_scale,
+    )
+    composition_x = (
+        float(canvas_origin[0])
+        + (float(left) + xx / max(process_scale, 1e-6)) / effect_scale
+    )
+    composition_y = (
+        float(canvas_origin[1])
+        + (float(top) + yy / max(process_scale, 1e-6)) / effect_scale
+    )
+    normalized_x = composition_x / max(1.0, float(composition_width))
+    normalized_y = composition_y / max(1.0, float(composition_height))
     wave_x = np.sin(
-        yy / max(1.0, height) * math.tau * normal_scale + phase * 1.7
+        normalized_y * math.tau * normal_scale + phase * 1.7
     )
     wave_y = np.cos(
-        xx / max(1.0, width) * math.tau * normal_scale - phase * 1.3
+        normalized_x * math.tau * normal_scale - phase * 1.3
     )
     scaled_refraction = refraction * process_scale
     scaled_dispersion = dispersion * process_scale
@@ -213,7 +229,7 @@ def render_glass_surface(
     )
     light = np.clip(
         0.5 + 0.5 * np.sin(
-            xx / max(1.0, width) * math.pi + yy / max(1.0, height) * 0.7
+            normalized_x * math.pi + normalized_y * 0.7
             + phase * 1.2 + driver_x * 0.08 - driver_y * 0.06
         ),
         0.0,

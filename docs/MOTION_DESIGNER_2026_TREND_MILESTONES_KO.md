@@ -256,8 +256,9 @@ UMG:
 - `tools/qa_motion_glass.py`는 `tiger_glass_pointer_driver.png`를 생성하고
   1920x1080에서 중앙과 우하단 포인터가 서로 다른 픽셀을 렌더링했는지
   보고한다.
-- 남은 M22 차단 항목은 non-raster GPU backdrop 경로, 24fps 제품 기준,
-  HDR/tiled-export 증거, UMG UI Material native 또는 bake 최종 결정이다.
+- 남은 M22 차단 항목은 non-raster GPU backdrop 경로, 안정적인 24fps
+  제품 기준, UMG UI Material native 또는 bake 최종 결정이다. HDR 및
+  Glass-only tiled export 증거는 완료됐다.
 
 ### 2026-07-29 viewport-resolution Preview 갱신
 
@@ -285,7 +286,27 @@ UMG:
 - 2 frame 이하의 짧은 H.265 MP4는 x265 B-frame DTS를 FFmpeg MP4
   muxer가 간헐적으로 거부하는 문제가 있어 이 조건에서만 B-frame을
   끈다. 긴 출력의 x265 압축 구조는 유지한다.
-- HDR Glass 증거는 완료됐고 결정적 tiled Glass export는 아직 남아 있다.
+- HDR Glass 증거와 Glass 전용 결정적 tiled export가 완료됐다.
+
+### 2026-07-29 결정적 Glass 타일 출력 갱신
+
+- `tigerstudio.motion.tiled_export.v1`은 전체 프레임을 먼저 렌더한 뒤
+  자르는 방식이 아니라, blur/refraction/dispersion/bloom 범위만큼
+  padding한 composition source region을 타일별로 독립 렌더하고 중앙
+  영역만 조립한다.
+- Glass 좌표 계산은 타일의 로컬 크기가 아니라 composition 전역 좌표를
+  사용하므로 타일 경계에서 굴절과 하이라이트 위상이 끊기지 않는다.
+- v1은 Glass-only bounded graph만 허용한다. adjustment, precomp, matte,
+  card shadow, motion blur, non-Glass effect가 있으면 full-frame fallback으로
+  숨기지 않고 preflight 오류를 반환한다.
+- 실제 60초 제품 게이트의 HDR H.265 artifact가 96px 타일 8개와 65px
+  padding을 사용했다. 가장 큰 중간 surface는 36,386 pixel로 전체
+  57,600 pixel보다 작았고, full-frame 기준과 평균/최대 pixel 차이는
+  모두 0이었다.
+- `motion.export.tiled.set`, `motion.export.tiled.preflight` Action/MCP로
+  AI가 활성화와 호환성 검사를 수행할 수 있다. 최종 조립 image 자체는
+  여전히 출력 해상도 크기이며, v1의 제품 주장은 중간 메모리 절감,
+  seam 안전성, 결정적 parity에 한정한다.
 
 ## 7. M23 - Mixed Media Craft Workspace
 

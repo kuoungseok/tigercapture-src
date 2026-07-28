@@ -38,4 +38,8 @@ def test_trend_product_gate_cancel_resume_recovery_alpha_nested_hdr_and_mp4(
     assert report["hdr_h265_artifact"]["glass_effect_count"] == 3
     assert report["hdr_h265_artifact"]["glass_changed_pixel_count"] > 0
     assert report["hdr_h265_artifact"]["glass_mean_rgb_abs_difference"] > 0.0
+    tiled = report["hdr_h265_artifact"]["tiled_export"]
+    assert tiled["tile_count"] > 1
+    assert tiled["full_frame_intermediate_avoided"] is True
+    assert report["hdr_h265_artifact"]["tiled_full_mean_abs_difference"] < 0.5
     assert report["mp4"]["bytes"] > 0

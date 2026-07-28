@@ -28,15 +28,44 @@ class MotionExportRenderer:
 
             load_application_ui_fonts()
         self.cache = MotionFrameCache(cache_capacity)
+        self.last_tiled_report: dict[str, object] = {}
 
     def render_frame(self, composition: MotionComposition, time_ms: float, *, width: int | None = None,
                      height: int | None = None, use_cache: bool = True) -> QImage:
         output_width = max(1, int(width or composition.width))
         output_height = max(1, int(height or composition.height))
-        key = (composition.id, composition.revision, round(float(time_ms), 3), output_width, output_height)
+        tiled_settings = composition.metadata.get("tiled_export")
+        tiled_settings = tiled_settings if isinstance(tiled_settings, dict) else {}
+        tiled_enabled = bool(tiled_settings.get("enabled", False))
+        tile_size = max(64, int(tiled_settings.get("tile_size", 512) or 512))
+        key = (
+            composition.id,
+            composition.revision,
+            round(float(time_ms), 3),
+            output_width,
+            output_height,
+            tiled_enabled,
+            tile_size if tiled_enabled else 0,
+        )
         cached = self.cache.get(key) if use_cache else None
         if isinstance(cached, QImage):
             return cached.copy()
+        if tiled_enabled:
+            if (
+                output_width != composition.width
+                or output_height != composition.height
+            ):
+                raise ValueError(
+                    "Motion tiled export currently requires native composition resolution"
+                )
+            image = self.render_frame_tiled(
+                composition,
+                time_ms,
+                tile_size=tile_size,
+            )
+            if use_cache:
+                self.cache.put(key, image.copy())
+            return image
         image = transparent_image(output_width, output_height)
         painter = QPainter(image)
         paint_render_graph(
@@ -50,6 +79,25 @@ class MotionExportRenderer:
         painter.end()
         if use_cache:
             self.cache.put(key, image.copy())
+        return image
+
+    def render_frame_tiled(
+        self,
+        composition: MotionComposition,
+        time_ms: float,
+        *,
+        tile_size: int = 512,
+    ) -> QImage:
+        from .tiled_renderer import render_graph_tiled
+
+        graph = build_render_graph(
+            composition,
+            time_ms,
+            render_quality="export",
+            output_size=(composition.width, composition.height),
+        )
+        image, report = render_graph_tiled(graph, tile_size=tile_size)
+        self.last_tiled_report = report
         return image
 
     def render_rgba_array(self, composition: MotionComposition, time_ms: float, *, width: int | None = None,

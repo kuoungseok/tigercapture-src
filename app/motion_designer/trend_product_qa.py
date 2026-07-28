@@ -191,13 +191,21 @@ def run_trend_product_gate(
         "view_transform": "hdr-pq",
         "hdr_mode": True,
     })
+    hdr_artifact.metadata["tiled_export"] = {
+        "contract": "tigerstudio.motion.tiled_export.v1",
+        "enabled": True,
+        "tile_size": 96,
+    }
+    hdr_artifact.revision += 1
     hdr_path = root / "trend_hdr.mp4"
-    hdr_result = MotionProfileExporter().export(
+    hdr_renderer = MotionExportRenderer(cache_capacity=2)
+    hdr_result = MotionProfileExporter(hdr_renderer).export(
         hdr_artifact,
         "h265_mp4",
         hdr_path,
         fps=sequence_fps,
     )
+    tiled_report = dict(hdr_renderer.last_tiled_report)
     hdr_probe = subprocess.run(
         [find_ffmpeg_executable(), "-hide_banner", "-i", str(hdr_path)],
         capture_output=True,
@@ -214,7 +222,14 @@ def run_trend_product_gate(
     )
     glass_renderer = MotionExportRenderer(cache_capacity=2)
     glass_frame = glass_renderer.render_rgba_array(hdr_artifact, 500.0)
-    no_glass = MotionComposition.from_dict(hdr_artifact.to_dict())
+    full_glass = MotionComposition.from_dict(hdr_artifact.to_dict())
+    full_glass.metadata.pop("tiled_export", None)
+    full_glass.revision += 1
+    full_glass_frame = glass_renderer.render_rgba_array(full_glass, 500.0)
+    tiled_pixel_difference = np.abs(
+        glass_frame.astype(np.int16) - full_glass_frame.astype(np.int16)
+    )
+    no_glass = MotionComposition.from_dict(full_glass.to_dict())
     for layer in no_glass.layers:
         layer.effects = [
             effect for effect in layer.effects
@@ -260,6 +275,9 @@ def run_trend_product_gate(
             and hdr_stream.get("color_transfer") == "smpte2084"
             and glass_effect_count == 3
             and glass_changed_pixel_count > 0
+            and int(tiled_report.get("tile_count", 0)) > 1
+            and bool(tiled_report.get("full_frame_intermediate_avoided", False))
+            and float(tiled_pixel_difference.mean()) < 0.5
             and mp4_path.is_file()
             and mp4_path.stat().st_size > 0
         ),
@@ -302,6 +320,13 @@ def run_trend_product_gate(
             "glass_changed_pixel_count": int(glass_changed_pixel_count),
             "glass_mean_rgb_abs_difference": float(
                 glass_pixel_difference[..., :3].mean()
+            ),
+            "tiled_export": tiled_report,
+            "tiled_full_mean_abs_difference": float(
+                tiled_pixel_difference.mean()
+            ),
+            "tiled_full_max_abs_difference": int(
+                tiled_pixel_difference.max()
             ),
         },
         "mp4": {
