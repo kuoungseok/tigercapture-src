@@ -7,6 +7,7 @@ from PySide6.QtGui import QImage
 
 from app.motion_designer.trend_runtime_probe import (
     _memory_bytes,
+    _runtime_identity,
     evaluate_runtime_probe,
     evaluate_visual_parity,
 )
@@ -55,6 +56,13 @@ def test_runtime_probe_rejects_painter_fallback_and_short_run(tmp_path) -> None:
 def test_runtime_probe_reads_process_memory_without_optional_psutil() -> None:
     if sys.platform == "win32":
         assert _memory_bytes() > 0
+
+
+def test_source_runtime_identity_is_not_frozen() -> None:
+    identity = _runtime_identity()
+    assert identity["frozen"] is False
+    assert identity["executable_size_bytes"] > 0
+    assert identity["executable_sha256"] == ""
 
 
 def test_glass_runtime_probe_requires_exact_backend_and_visual_parity(

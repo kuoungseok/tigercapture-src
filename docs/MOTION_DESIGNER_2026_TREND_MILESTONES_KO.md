@@ -693,6 +693,13 @@ QA:
   memory, renderer diagnostics, 실제 작업창 캡처와 정확한 OpenGL
   framebuffer 캡처를 기록한다. 프로브 실행 유효성과 제품 실시간 기준
   (24fps 이상, raster fallback 아님)을 분리한다.
+- runtime report는 frozen 여부, 실제 실행 파일 절대 경로·크기·SHA-256,
+  정확한 `motion_glass_gpu` backend, GL feedback/error, GPU composition
+  crop, 같은 시점 CPU reference와 parity 수치를 기록한다.
+  `tigerstudio.motion.trend_distribution_qa.v2`는 검사 대상
+  `TigerStudio.exe`와 이 provenance가 일치해야만 배포 증거로 인정한다.
+  따라서 소스 프로브 결과를 오래된 설치본에 붙이거나
+  `product_realtime_ready=true`만 조작해서 통과할 수 없다.
 - 최종 PyInstaller 배포본의 표시 상태 60초 측정은 60.45초 동안 230회
   frame swap, 4회 전체 루프, 3.81fps를 기록했다. RSS는 457.7MB에서
   444.4MB로 13.3MB 감소했다. OpenGL context, 작업창 PNG, framebuffer
@@ -717,7 +724,8 @@ QA:
   최대 1초까지 따라잡도록 수정했다. 따라서 프레임 드롭이 있어도 playhead가
   슬로 모션처럼 뒤처지지 않으며, 낮은 frame rate 자체는 QA에서 그대로 실패한다.
 
-M28은 아직 완료가 아니다. `Painterly 3D Character Spot`은 M24가 없으므로
+M28은 아직 완료가 아니다. 소스 runtime과 배포 판정기의 backend,
+시각 parity, provenance 계약은 완료됐다. `Painterly 3D Character Spot`은 M24가 없으므로
 갤러리에 가짜 템플릿을 넣지 않고 명시적 blocked capability와 2D Craft
 대체안을 반환한다. 배포 번들의 60초 지속 실행과 설치·실행·제거 회귀는
 통과했으며 소스의 24fps GPU 실시간 기준도 M22에서 통과했다. 남은 제품

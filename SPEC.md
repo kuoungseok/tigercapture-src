@@ -6795,6 +6795,13 @@ AI Script Edit MVP integration:
   workspace screenshot, and an exact OpenGL framebuffer capture. Probe
   execution validity is separate from the product realtime gate (`>=24 fps`
   and a non-raster-fallback backend).
+- The runtime probe also records whether the process is frozen, the exact
+  executable path, size, and SHA-256, the `motion_glass_gpu` backend and GL
+  feedback state, a cropped GPU composition, a same-time CPU reference, and
+  visual parity metrics. `tigerstudio.motion.trend_distribution_qa.v2`
+  independently requires that provenance to match the evaluated
+  `TigerStudio.exe`; a source report, stale binary, alternate GPU backend, or
+  forged `product_realtime_ready` boolean cannot satisfy the frozen gate.
 - A previous visible PyInstaller build ran for 60.45 seconds, produced 230 frame
   swaps and four full timeline loops, and retained a valid OpenGL context.
   Process RSS decreased from 457.7 MB to 444.4 MB during the run. Both captures

@@ -57,8 +57,7 @@ def main(argv: list[str] | None = None) -> int:
         encoding="utf-8",
     )
     print(json.dumps(result, ensure_ascii=False))
-    # A stable frozen bundle is useful evidence even while M22 blocks realtime.
-    return 0 if result["frozen_bundle_smoke_ok"] else 1
+    return 0 if result["ok"] else 1
 
 
 if __name__ == "__main__":

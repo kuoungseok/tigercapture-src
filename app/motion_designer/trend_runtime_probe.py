@@ -1,6 +1,7 @@
 """Real-time Motion Designer trend playback probe for source and frozen builds."""
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import sys
@@ -68,6 +69,26 @@ def _memory_bytes() -> int:
         return int(counters.WorkingSetSize) if ok else 0
     except Exception:
         return 0
+
+
+def _runtime_identity() -> dict[str, Any]:
+    executable = Path(sys.executable).expanduser().resolve(strict=False)
+    frozen = bool(getattr(sys, "frozen", False))
+    digest = ""
+    if frozen and executable.is_file():
+        hasher = hashlib.sha256()
+        with executable.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                hasher.update(chunk)
+        digest = hasher.hexdigest()
+    return {
+        "frozen": frozen,
+        "executable": str(executable),
+        "executable_size_bytes": (
+            executable.stat().st_size if executable.is_file() else 0
+        ),
+        "executable_sha256": digest,
+    }
 
 
 def evaluate_runtime_probe(
@@ -294,6 +315,7 @@ def run_trend_runtime_probe(
             "timeline_time_ms": int(window._time_ms),
             "memory_before_bytes": memory_before,
             "memory_after_bytes": _memory_bytes(),
+            "runtime_identity": _runtime_identity(),
             "backend": diagnostics,
             "screenshot_path": str(screenshot_path),
             "preview_framebuffer_path": str(preview_framebuffer_path),
